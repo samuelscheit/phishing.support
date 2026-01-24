@@ -260,5 +260,5 @@ export async function getBrowserPage(p?: Page, proxy_country_code?: string) {
 		return await handleResponse(response, (options?.waitUntil as PuppeteerLifeCycleEvent) || "load", options?.timeout || 30000);
 	};
 
-	return { page, context };
+	return { page, context, browser };
 }

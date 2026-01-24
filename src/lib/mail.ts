@@ -80,10 +80,10 @@ export async function getMailImage(result: MailData) {
 			captureBeyondViewport: true,
 			type: "png",
 		});
-		await page.close();
+		await browser.close();
 		return Buffer.from(screenshot);
 	} catch (error) {
-		await page.close();
+		await browser.close();
 
 		console.error("Error processing HTML content:", error);
 		throw error;

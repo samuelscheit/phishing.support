@@ -118,7 +118,7 @@ async function archiveWebsiteInternal({ url, mhtmlSnapshot, country_code }: Arch
 				type: "png",
 			});
 
-			await context.close();
+			await browser.close();
 
 			reject(err);
 		}
@@ -149,7 +149,7 @@ async function archiveWebsiteInternal({ url, mhtmlSnapshot, country_code }: Arch
 					format: "mhtml",
 				})
 			).data,
-			"utf-8"
+			"utf-8",
 		);
 
 		// without js/css/style/svg
@@ -197,7 +197,7 @@ async function archiveWebsiteInternal({ url, mhtmlSnapshot, country_code }: Arch
 		var rawHtml = dom.outerHTML;
 	}
 
-	await context.close();
+	await browser.close();
 
 	return {
 		url: url,
@@ -214,7 +214,7 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions): Promise<We
 		return await archiveWebsiteInternal(options);
 	} catch (err) {
 		console.warn(
-			`First archive attempt failed for ${options?.url} using country code ${options?.country_code}: ${(err as Error).message}`
+			`First archive attempt failed for ${options?.url} using country code ${options?.country_code}: ${(err as Error).message}`,
 		);
 		return await archiveWebsiteInternal({ ...options, country_code: undefined });
 	}

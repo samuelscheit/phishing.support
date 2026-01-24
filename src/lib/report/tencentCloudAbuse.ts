@@ -188,7 +188,7 @@ async function reportToTencentCloudAbuseBrowser(params: {
 	infringedUrl?: string;
 	websiteScreenshot: Buffer;
 }) {
-	const { context, page } = await getBrowserPage();
+	const { context, page, browser } = await getBrowserPage();
 
 	const domain = parse(params.url);
 	if (!domain.domain) throw new Error("Invalid domain parsed from URL");
@@ -264,9 +264,9 @@ async function reportToTencentCloudAbuseBrowser(params: {
 		// 	body: params.explanation,
 		// });
 
-		// await context.close();
+		await browser.close();
 	} catch (err) {
-		// await context.close();
+		await browser.close();
 		throw err;
 	}
 }

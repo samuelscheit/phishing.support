@@ -1,7 +1,7 @@
 import { getBrowserPage } from "./page";
 
 export async function solveCloudflareTurnstile(params: { url: string; proxy_country_code?: string; timeout?: number; noClose?: boolean }) {
-	const { context, page } = await getBrowserPage(undefined, params.proxy_country_code);
+	const { context, page, browser } = await getBrowserPage(undefined, params.proxy_country_code);
 
 	try {
 		await page.goto(params.url, { waitUntil: "domcontentloaded" });
@@ -20,13 +20,13 @@ export async function solveCloudflareTurnstile(params: { url: string; proxy_coun
 							resolve(value);
 						}
 					}, 50);
-				})
+				}),
 		);
 
 		const cookies = await context.cookies();
 
 		if (params.noClose !== true) {
-			await context.close();
+			await browser.close();
 		}
 
 		const uri = new URL(params.url);
@@ -39,9 +39,10 @@ export async function solveCloudflareTurnstile(params: { url: string; proxy_coun
 				.join("; "),
 			page,
 			context,
+			browser,
 		};
 	} catch (error) {
-		await context.close();
+		await browser.close();
 		throw error;
 	}
 }

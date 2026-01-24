@@ -22,7 +22,7 @@ export async function reportToGoogleSafeBrowsing(params: {
 		});
 	}
 
-	const { page, context } = await getBrowserPage(undefined, "de");
+	const { page, context, browser } = await getBrowserPage(undefined, "de");
 
 	try {
 		const report_url = `https://safebrowsing.google.com/safebrowsing/report_phish/?hl=de&url=${encodeURIComponent(params.url)}`;
@@ -42,7 +42,7 @@ export async function reportToGoogleSafeBrowsing(params: {
 				report_url,
 				"6LdyJYcqAAAAAIkFpjuB7uz9WgDXmMECefi-8X-d",
 				0.9, //minimum score required: 0.3, 0.7 or 0.9
-				"submitUrl"
+				"submitUrl",
 			);
 			console.log("solved token:", token);
 
@@ -144,7 +144,7 @@ export async function reportToGoogleSafeBrowsing(params: {
 			body: params.explanation,
 		});
 
-		await context.close();
+		await browser.close();
 
 		return {
 			success: true,
@@ -152,7 +152,7 @@ export async function reportToGoogleSafeBrowsing(params: {
 			info: text,
 		};
 	} catch (err) {
-		await context.close();
+		await browser.close();
 		throw err;
 	}
 }
