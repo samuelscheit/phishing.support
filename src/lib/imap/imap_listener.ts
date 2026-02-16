@@ -33,6 +33,51 @@ function normalizeAddress(address: string): string {
 	return address.trim().toLowerCase();
 }
 
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type ListenerConfig = {
+	listenAddress: string;
+	host: string;
+	port: number;
+	secure: boolean;
+	user: string;
+	pass: string;
+	mailbox: string;
+	processSeen: boolean;
+};
+
+function getListenerConfig(): ListenerConfig {
+	return {
+		listenAddress: requiredEnv("IMAP_LISTEN_ADDRESS"),
+		host: requiredEnv("IMAP_HOST"),
+		port: envInt("IMAP_PORT", 993),
+		secure: envBool("IMAP_SECURE", true),
+		user: requiredEnv("IMAP_USER"),
+		pass: requiredEnv("IMAP_PASS"),
+		mailbox: requiredEnv("IMAP_MAILBOX"),
+		processSeen: envBool("IMAP_PROCESS_SEEN", false),
+	};
+}
+
+function createImapClient(config: ListenerConfig): ImapFlow {
+	return new ImapFlow({
+		host: config.host,
+		port: config.port,
+		secure: config.secure,
+		auth: {
+			user: config.user,
+			pass: config.pass,
+		},
+	});
+}
+
+function isNoConnectionError(err: unknown): boolean {
+	if (!err || typeof err !== "object") return false;
+	return "code" in err && (err as { code?: string }).code === "NoConnection";
+}
+
 function addressObjectIncludes(obj: AddressObject | AddressObject[] | undefined, address: string): boolean {
 	if (!obj) return false;
 	const needle = normalizeAddress(address);
@@ -55,160 +100,171 @@ export async function startImapListener() {
 		quiet: true,
 	});
 
-	const listenAddress = requiredEnv("IMAP_LISTEN_ADDRESS");
-
-	const host = requiredEnv("IMAP_HOST");
-	const port = envInt("IMAP_PORT", 993);
-	const secure = envBool("IMAP_SECURE", true);
-	const user = requiredEnv("IMAP_USER");
-	const pass = requiredEnv("IMAP_PASS");
-	const mailbox = requiredEnv("IMAP_MAILBOX");
-	const processSeen = envBool("IMAP_PROCESS_SEEN", false);
-
-	const client = new ImapFlow({
-		host,
-		port,
-		secure,
-		auth: {
-			user,
-			pass,
-		},
-	});
+	const config = getListenerConfig();
 
 	let stopped = false;
+	let activeClient: ImapFlow | null = null;
 
-	const stop = async () => {
+	const stop = () => {
 		if (stopped) return;
 		stopped = true;
-		console.log("Stopping IMAP client...");
+		console.log("Stopping IMAP listener...");
 		try {
-			await client.logout();
+			activeClient?.close();
 		} catch {
 			// ignore
 		}
-		console.log("IMAP client stopped.");
-
-		startImapListener();
 	};
 
-	// process.on("SIGINT", () => void stop());
-	// process.on("SIGTERM", () => void stop());
-
-	console.log("Connecting to IMAP server...");
-
-	await retry(() => client.connect());
-
-	let lock = await client.getMailboxLock(mailbox);
 	try {
-		const mailboxExists = () => (client.mailbox && typeof client.mailbox === "object" ? (client.mailbox.exists ?? 0) : 0);
-		const mailboxUidValidity = () => (client.mailbox && typeof client.mailbox === "object" ? (client.mailbox.uidValidity ?? 0) : 0);
-
-		const mailboxKey = encodeURIComponent(mailbox);
-		const makeImapSourcePrefix = (uid: number) => `imap:${mailboxKey}:${mailboxUidValidity()}:${uid}`;
-
-		const processFetchedMessage = async (msg: FetchMessageObject) => {
-			try {
-				if (!msg?.uid) return;
-				console.log(`Processing IMAP message UID ${msg.uid}...`, msg.flags);
-				if (!processSeen && msg.flags?.has("\\Seen")) return;
-
-				const sourcePrefix = makeImapSourcePrefix(msg.uid);
-				const existingSubmissionId = await SubmissionsEntity.findIdBySourcePrefix(sourcePrefix);
-				if (existingSubmissionId) {
-					console.log(
-						`Skipping IMAP UID ${msg.uid} (${sourcePrefix}): already has submission ${existingSubmissionId.toString()}`
-					);
-					try {
-						await client.messageFlagsAdd(msg.uid, ["\\Seen"], { uid: true });
-					} catch (e) {
-						console.error("Failed to mark IMAP message as seen (skip):", e);
-					}
-					return;
-				}
-
-				const raw = msg.source?.toString("utf-8") ?? "";
-				if (!raw.trim()) return;
-
-				let parsed: ParsedMail;
-				try {
-					parsed = await simpleParser(raw, { skipTextToHtml: true });
-				} catch (err) {
-					await SubmissionsEntity.create({
-						kind: "email",
-						data: { kind: "email" },
-						dedupeKey: sourcePrefix,
-						id: generateId(),
-						source: sourcePrefix,
-						status: "failed",
-						info: `Failed to parse incoming IMAP message: ${String(err)}`,
-					});
-					console.error("Error parsing IMAP message:", err);
-					return;
-				}
-
-				const isToListen =
-					addressObjectIncludes(parsed.to, listenAddress) ||
-					addressObjectIncludes(parsed.cc, listenAddress) ||
-					addressObjectIncludes(parsed.bcc, listenAddress);
-
-				if (!isToListen) return;
-
-				const emls = await extractEmlsFromIncomingMessage(parsed, listenAddress);
-				for (let i = 0; i < emls.length; i++) {
-					await createEmailSubmissionFromEml(emls[i], `${sourcePrefix}${emls.length > 1 ? `:att${i + 1}` : ""}`);
-				}
-
-				try {
-					await client.messageFlagsAdd(msg.uid, ["\\Seen"], { uid: true });
-				} catch (e) {
-					console.error("Failed to mark IMAP message as seen:", e);
-				}
-			} catch (err) {
-				console.error("Error processing IMAP message:", err);
-			}
-		};
-
-		const processRange = async (range: string, reason: string) => {
-			console.log(`Processing ${reason} IMAP messages in range ${range}...`);
-			for await (const msg of client.fetch(range, { uid: true, source: true, flags: true, envelope: true })) {
-				await processFetchedMessage(msg);
-			}
-		};
-
-		const initialExists = mailboxExists();
-		if (initialExists > 0) {
-			await processRange(`1:${initialExists}`, "existing");
-		}
-
-		let lastExists = mailboxExists();
+		process.on("SIGINT", stop);
+		process.on("SIGTERM", stop);
 
 		while (!stopped) {
-			// Wait for new events from server
+			const client = createImapClient(config);
+			activeClient = client;
 			try {
-				await client.idle();
-				console.log("IMAP idle resumed.");
+				console.log("Connecting to IMAP server...");
+				await retry(() => client.connect());
+
+				const lock = await client.getMailboxLock(config.mailbox);
+				try {
+					const mailboxExists = () => (client.mailbox && typeof client.mailbox === "object" ? (client.mailbox.exists ?? 0) : 0);
+					const mailboxUidValidity = () =>
+						client.mailbox && typeof client.mailbox === "object" ? (client.mailbox.uidValidity ?? 0) : 0;
+
+					const mailboxKey = encodeURIComponent(config.mailbox);
+					const makeImapSourcePrefix = (uid: number) => `imap:${mailboxKey}:${mailboxUidValidity()}:${uid}`;
+
+					const processFetchedMessage = async (msg: FetchMessageObject) => {
+						try {
+							if (!msg?.uid) return;
+							console.log(`Processing IMAP message UID ${msg.uid}...`, msg.flags);
+							if (!config.processSeen && msg.flags?.has("\\Seen")) return;
+
+							const sourcePrefix = makeImapSourcePrefix(msg.uid);
+							const existingSubmissionId = await SubmissionsEntity.findIdBySourcePrefix(sourcePrefix);
+							if (existingSubmissionId) {
+								console.log(
+									`Skipping IMAP UID ${msg.uid} (${sourcePrefix}): already has submission ${existingSubmissionId.toString()}`
+								);
+								try {
+									await client.messageFlagsAdd(msg.uid, ["\\Seen"], { uid: true });
+								} catch (e) {
+									console.error("Failed to mark IMAP message as seen (skip):", e);
+								}
+								return;
+							}
+
+							const raw = msg.source?.toString("utf-8") ?? "";
+							if (!raw.trim()) return;
+
+							let parsed: ParsedMail;
+							try {
+								parsed = await simpleParser(raw, { skipTextToHtml: true });
+							} catch (err) {
+								await SubmissionsEntity.create({
+									kind: "email",
+									data: { kind: "email" },
+									dedupeKey: sourcePrefix,
+									id: generateId(),
+									source: sourcePrefix,
+									status: "failed",
+									info: `Failed to parse incoming IMAP message: ${String(err)}`,
+								});
+								console.error("Error parsing IMAP message:", err);
+								return;
+							}
+
+							const isToListen =
+								addressObjectIncludes(parsed.to, config.listenAddress) ||
+								addressObjectIncludes(parsed.cc, config.listenAddress) ||
+								addressObjectIncludes(parsed.bcc, config.listenAddress);
+
+							if (!isToListen) return;
+
+							const emls = await extractEmlsFromIncomingMessage(parsed, config.listenAddress);
+							for (let i = 0; i < emls.length; i++) {
+								await createEmailSubmissionFromEml(
+									emls[i],
+									`${sourcePrefix}${emls.length > 1 ? `:att${i + 1}` : ""}`
+								);
+							}
+
+							try {
+								await client.messageFlagsAdd(msg.uid, ["\\Seen"], { uid: true });
+							} catch (e) {
+								console.error("Failed to mark IMAP message as seen:", e);
+							}
+						} catch (err) {
+							console.error("Error processing IMAP message:", err);
+						}
+					};
+
+					const processRange = async (range: string, reason: string) => {
+						console.log(`Processing ${reason} IMAP messages in range ${range}...`);
+						for await (const msg of client.fetch(range, { uid: true, source: true, flags: true, envelope: true })) {
+							await processFetchedMessage(msg);
+						}
+					};
+
+					const initialExists = mailboxExists();
+					if (initialExists > 0) {
+						await processRange(`1:${initialExists}`, "existing");
+					}
+
+					let lastExists = mailboxExists();
+
+					while (!stopped) {
+						try {
+							await client.idle();
+						} catch (err) {
+							if (stopped) break;
+							if (isNoConnectionError(err)) {
+								console.warn("IMAP connection lost during IDLE, reconnecting...");
+							} else {
+								console.error("IMAP idle error, reconnecting session:", err);
+							}
+							throw err;
+						}
+
+						const currentExists = mailboxExists();
+						if (currentExists < lastExists) {
+							lastExists = currentExists;
+							continue;
+						}
+						if (currentExists === lastExists) continue;
+
+						const range = `${lastExists + 1}:${currentExists}`;
+						lastExists = currentExists;
+
+						await processRange(range, "new");
+					}
+				} finally {
+					try {
+						lock.release();
+					} catch {
+						// ignore
+					}
+				}
 			} catch (err) {
-				// Connection might have been interrupted; try to continue unless stopping
 				if (stopped) break;
-				console.error("IMAP idle error:", err);
-				await new Promise((r) => setTimeout(r, 2_000));
-				continue;
+				if (!isNoConnectionError(err)) {
+					console.error("IMAP listener session error:", err);
+				}
+				await sleep(2_000);
+			} finally {
+				activeClient = null;
+				try {
+					client.close();
+				} catch {
+					// ignore
+				}
 			}
-
-			const currentExists = mailboxExists();
-			if (currentExists < lastExists) {
-				lastExists = currentExists;
-				continue;
-			}
-			if (currentExists === lastExists) continue;
-
-			const range = `${lastExists + 1}:${currentExists}`;
-			lastExists = currentExists;
-
-			await processRange(range, "new");
 		}
 	} finally {
-		lock.release();
-		await stop();
+		process.off("SIGINT", stop);
+		process.off("SIGTERM", stop);
+		console.log("IMAP listener stopped.");
 	}
 }
