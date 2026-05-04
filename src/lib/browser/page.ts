@@ -1,4 +1,6 @@
-import {
+import type {
+	Browser,
+	BrowserContext,
 	CDPSession,
 	ElementHandle,
 	Frame,
@@ -90,11 +92,14 @@ const isCloudflareChallengeUrl = (url: string) =>
 	url.includes("challenges.cloudflare.com") || url.includes("/cdn-cgi/challenge-platform/") || url.includes("cf-challenge");
 
 export async function getBrowserPage(p?: Page, proxy_country_code?: string) {
-	const browser = await getBrowser();
-
-	const context = await browser.createBrowserContext({
-		proxyServer: proxy_country_code ? process.env.PROXY_URL_NO_AUTH : undefined,
-	});
+	const browser = (p ? p.browser() : await getBrowser()) as Browser;
+	const context = (
+		p
+			? p.browserContext()
+			: await browser.createBrowserContext({
+					proxyServer: proxy_country_code ? process.env.PROXY_URL_NO_AUTH : undefined,
+				})
+	) as BrowserContext;
 
 	const page = p || (await context.newPage());
 
@@ -159,8 +164,7 @@ export async function getBrowserPage(p?: Page, proxy_country_code?: string) {
 				pierce: true,
 			});
 
-			// @ts-ignore
-			const handle = (await frame.mainRealm().adoptBackendNode(node.backendNodeId)) as ElementHandle<Element>;
+			const handle = (await (frame as any).mainRealm().adoptBackendNode(node.backendNodeId)) as ElementHandle<Element>;
 
 			await handle.scrollIntoView();
 			await sleep(300);
@@ -197,7 +201,10 @@ export async function getBrowserPage(p?: Page, proxy_country_code?: string) {
 		if (response?.status() === 403 && response.headers()["cf-mitigated"] === "challenge") {
 			console.log("[Cloudflare] challenge (403), waiting...");
 			// await waitForCloudflare("response 403");
-			response = await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 });
+			response = await page.waitForNavigation({
+				waitUntil: "domcontentloaded",
+				timeout: 30000,
+			});
 
 			cloudflareWait = new DeferredPromise<void>();
 

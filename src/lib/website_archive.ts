@@ -1,8 +1,8 @@
-import { pathSafeFilename, sleep } from "./utils";
-import path from "node:path";
 import fs from "node:fs";
-import { getBrowser, getBrowserPage } from "./browser";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { getBrowser, getBrowserPage } from "./browser";
+import { pathSafeFilename, sleep } from "./utils";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
 import parse from "node-html-parser";
@@ -54,50 +54,49 @@ async function archiveWebsiteInternal({ url, mhtmlSnapshot, country_code }: Arch
 	console.log(`Archiving website ${url} using country code ${country_code || "none"}`);
 
 	const browser = await getBrowser(mhtmlSnapshot !== undefined);
+	try {
+		const context = await browser.createBrowserContext({
+			proxyServer: country_code ? process.env.PROXY_URL_NO_AUTH : undefined,
+		});
+		const newPage = await context.newPage();
 
-	const context = await browser.createBrowserContext({
-		proxyServer: country_code ? process.env.PROXY_URL_NO_AUTH : undefined,
-	});
-	const newPage = await context.newPage();
+		const { page } = await getBrowserPage(newPage, country_code);
 
-	const { page } = await getBrowserPage(newPage, country_code);
+		const uri = new URL(url);
+		const { hostname } = uri;
 
-	const uri = new URL(url);
-	const { hostname } = uri;
+		const dataDir = resolveDataDir();
 
-	const dataDir = resolveDataDir();
+		let linkToLoad = url;
+		if (mhtmlSnapshot && mhtmlSnapshot.byteLength > 0) {
+			const safeHost = pathSafeFilename(hostname, { fallback: "website" });
+			const fileName = `snapshot_${safeHost}_${Date.now()}.mhtml`;
+			const filePath = path.join(dataDir, fileName);
+			fs.writeFileSync(filePath, mhtmlSnapshot);
+			linkToLoad = pathToFileURL(filePath).toString();
+		}
 
-	let linkToLoad = url;
-	if (mhtmlSnapshot && mhtmlSnapshot.byteLength > 0) {
-		const safeHost = pathSafeFilename(hostname, { fallback: "website" });
-		const fileName = `snapshot_${safeHost}_${Date.now()}.mhtml`;
-		const filePath = path.join(dataDir, fileName);
-		fs.writeFileSync(filePath, mhtmlSnapshot);
-		linkToLoad = pathToFileURL(filePath).toString();
-	}
+		await page.setRequestInterception(true);
 
-	await page.setRequestInterception(true);
-
-	await new Promise<void>(async (resolve, reject) => {
-		try {
-			page.on("response", (response) => {
-				if (!response.request().isNavigationRequest()) return;
-				if (uri.protocol === "file:") return;
-				try {
-					const uri = new URL(response.url());
-					if (hostname !== uri.hostname) {
-						// reject(new Error("Redirected to different hostname"));
-					}
-				} catch {
-					// ignore
+		page.on("response", (response) => {
+			if (!response.request().isNavigationRequest()) return;
+			if (uri.protocol === "file:") return;
+			try {
+				const uri = new URL(response.url());
+				if (hostname !== uri.hostname) {
+					// reject(new Error("Redirected to different hostname"));
 				}
-			});
+			} catch {
+				// ignore
+			}
+		});
 
-			page.on("request", (request) => {
-				console.log(`Request: ${request.method()} ${request.url()}`);
-				return request.continue();
-			});
+		page.on("request", (request) => {
+			console.log(`Request: ${request.method()} ${request.url()}`);
+			return request.continue();
+		});
 
+		try {
 			const response = await page.goto(linkToLoad, {
 				waitUntil: "load",
 				timeout: 1000 * 120,
@@ -106,107 +105,110 @@ async function archiveWebsiteInternal({ url, mhtmlSnapshot, country_code }: Arch
 			if (response && !response.ok()) {
 				throw new Error(`Failed to load page, status code: ${response.status()}`);
 			}
-
-			resolve();
 		} catch (err) {
 			const imagePath = path.join(dataDir, `error_${pathSafeFilename(hostname)}.png`);
 
-			await page.screenshot({
-				path: imagePath,
-				fullPage: true,
-				captureBeyondViewport: true,
-				type: "png",
+			await page
+				.screenshot({
+					path: imagePath,
+					fullPage: true,
+					captureBeyondViewport: true,
+					type: "png",
+				})
+				.catch((screenshotError) => {
+					console.warn(`Failed to capture archive error screenshot:`, screenshotError);
+				});
+
+			throw err;
+		}
+
+		await sleep(1000 * 5); // wait for additional content to load
+
+		const screenshotPng = await page.screenshot({
+			fullPage: true,
+			captureBeyondViewport: true,
+			type: "png",
+		});
+		const mhtml = (() => {
+			if (mhtmlSnapshot && mhtmlSnapshot.byteLength > 0) return mhtmlSnapshot;
+			return undefined;
+		})();
+
+		let resolvedMhtml = mhtml!;
+
+		try {
+			if (mhtml) throw new Error("Using provided MHTML, skipping HTML extraction");
+
+			const cdp = await page.target().createCDPSession();
+
+			resolvedMhtml = Buffer.from(
+				(
+					await cdp.send("Page.captureSnapshot", {
+						format: "mhtml",
+					})
+				).data,
+				"utf-8",
+			);
+
+			// without js/css/style/svg
+			var rawHtml = await page.evaluate(() => {
+				// @ts-ignore
+				const doc = globalThis.document.cloneNode(true) as Document;
+				const elements = doc.querySelectorAll("script, style, link, svg, noscript, img");
+				elements.forEach((el) => el.remove());
+				doc.querySelectorAll("*").forEach((el) => {
+					el.removeAttribute("style");
+				});
+
+				return doc.documentElement.outerHTML;
 			});
 
-			await browser.close();
+			var innerText = await page.evaluate(() => {
+				// @ts-ignore
+				return globalThis.document.body.innerText;
+			});
 
-			reject(err);
-		}
-	});
+			const description = await page.evaluate(() => {
+				// @ts-ignore
+				return (
+					globalThis.document
+						.querySelector("meta[name='description'], meta[property='og:description'], meta[property='twitter:description']")
+						?.getAttribute("content") || ""
+				);
+			});
 
-	await sleep(1000 * 5); // wait for additional content to load
+			innerText = ((await page.title()) + "\n\n" + description + "\n\n" + innerText)
+				.replaceAll(/ +/g, " ")
+				.replaceAll(/\n+/g, "\n")
+				.trim();
+		} catch (err) {
+			const { data } = await convert(resolvedMhtml, {
+				enableScripts: false,
+				fetchMissingResources: false,
+			});
+			const dom = parse(data);
 
-	const screenshotPng = await page.screenshot({
-		fullPage: true,
-		captureBeyondViewport: true,
-		type: "png",
-	});
-	const mhtml = (() => {
-		if (mhtmlSnapshot && mhtmlSnapshot.byteLength > 0) return mhtmlSnapshot;
-		return undefined;
-	})();
+			var innerText = dom.structuredText;
 
-	let resolvedMhtml = mhtml!;
-
-	try {
-		if (mhtml) throw new Error("Using provided MHTML, skipping HTML extraction");
-
-		const cdp = await page.target().createCDPSession();
-
-		resolvedMhtml = Buffer.from(
-			(
-				await cdp.send("Page.captureSnapshot", {
-					format: "mhtml",
-				})
-			).data,
-			"utf-8",
-		);
-
-		// without js/css/style/svg
-		var rawHtml = await page.evaluate(() => {
-			// @ts-ignore
-			const doc = globalThis.document.cloneNode(true) as Document;
-			const elements = doc.querySelectorAll("script, style, link, svg, noscript, img");
-			elements.forEach((el) => el.remove());
-			doc.querySelectorAll("*").forEach((el) => {
+			dom.querySelectorAll("script, style, link, svg, noscript, img").forEach((el) => el.remove());
+			dom.querySelectorAll("*").forEach((el) => {
 				el.removeAttribute("style");
 			});
 
-			return doc.documentElement.outerHTML;
-		});
+			var rawHtml = dom.outerHTML;
+		}
 
-		var innerText = await page.evaluate(() => {
-			// @ts-ignore
-			return globalThis.document.body.innerText;
-		});
-
-		const description = await page.evaluate(() => {
-			// @ts-ignore
-			return (
-				globalThis.document
-					.querySelector("meta[name='description'], meta[property='og:description'], meta[property='twitter:description']")
-					?.getAttribute("content") || ""
-			);
-		});
-
-		innerText = ((await page.title()) + "\n\n" + description + "\n\n" + innerText)
-			.replaceAll(/ +/g, " ")
-			.replaceAll(/\n+/g, "\n")
-			.trim();
-	} catch (err) {
-		const { data } = await convert(resolvedMhtml, { enableScripts: false, fetchMissingResources: false });
-		const dom = parse(data);
-
-		var innerText = dom.structuredText;
-
-		dom.querySelectorAll("script, style, link, svg, noscript, img").forEach((el) => el.remove());
-		dom.querySelectorAll("*").forEach((el) => {
-			el.removeAttribute("style");
-		});
-
-		var rawHtml = dom.outerHTML;
+		return {
+			url: url,
+			hostname,
+			screenshotPng: Buffer.from(screenshotPng),
+			mhtml: resolvedMhtml,
+			html: Buffer.from(rawHtml, "utf-8"),
+			text: Buffer.from(innerText, "utf-8"),
+		};
+	} finally {
+		await browser.close();
 	}
-
-	await browser.close();
-
-	return {
-		url: url,
-		hostname,
-		screenshotPng: Buffer.from(screenshotPng),
-		mhtml: resolvedMhtml,
-		html: Buffer.from(rawHtml, "utf-8"),
-		text: Buffer.from(innerText, "utf-8"),
-	};
 }
 
 export async function archiveWebsite(options: ArchiveWebsiteOptions): Promise<WebsiteArchiveResult> {
@@ -216,6 +218,9 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions): Promise<We
 		console.warn(
 			`First archive attempt failed for ${options?.url} using country code ${options?.country_code}: ${(err as Error).message}`,
 		);
-		return await archiveWebsiteInternal({ ...options, country_code: undefined });
+		return await archiveWebsiteInternal({
+			...options,
+			country_code: undefined,
+		});
 	}
 }

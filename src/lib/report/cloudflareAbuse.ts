@@ -1,10 +1,7 @@
 import { runStreamedAnalysisRun } from "../analysis_run";
-import { getBrowserPage } from "../browser";
 import { solveCloudflareTurnstile } from "../browser/solveCloudflareTurnstile";
 import { abuseReplyMail, abuseReplyName, abuseReplyUrl, userAgent } from "../constants";
 import { ReportsEntity } from "../db/entities";
-import { sleep } from "../utils";
-import { retry } from "../website_ai";
 
 export async function reportCloudflareAbuse(params: {
 	url: string;
@@ -14,7 +11,7 @@ export async function reportCloudflareAbuse(params: {
 	infringedBrand?: string;
 	countryCode?: string;
 }) {
-	const { page, context } = await solveCloudflareTurnstile({
+	const { page, browser } = await solveCloudflareTurnstile({
 		url: "https://abuse.cloudflare.com/phishing",
 		noClose: true,
 		proxy_country_code: params.countryCode,
@@ -79,7 +76,7 @@ ${params.url}`,
 		await page.type(
 			`[name="justification"]`,
 			`The URL ${params.url} is considered to be a phishing website.
-More information can be found here: https://phishing.support/submissions/${params.submissionId}`
+More information can be found here: https://phishing.support/submissions/${params.submissionId}`,
 		);
 		await page.type(`[name="original_work"]`, params.infringedBrand || "");
 		await page.evaluate((countryCode: string) => {
@@ -94,7 +91,7 @@ More information can be found here: https://phishing.support/submissions/${param
 		const checkbox = await page.$(
 			`xpath=//span[starts-with(normalize-space(.),"DSA certification")]` +
 				`/ancestor::*[self::div][1]` +
-				`//following::input[@type="checkbox"][1]`
+				`//following::input[@type="checkbox"][1]`,
 		);
 		if (!checkbox) throw new Error("Failed to find DSA certification checkbox");
 
@@ -122,12 +119,9 @@ More information can be found here: https://phishing.support/submissions/${param
 		Infringed Brand: ${params.infringedBrand!}`,
 		});
 
-		await context.close();
-
 		return json;
-	} catch (error) {
-		await context.close();
-		throw error;
+	} finally {
+		await browser.close();
 	}
 }
 
