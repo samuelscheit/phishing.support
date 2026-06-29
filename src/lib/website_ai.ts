@@ -22,6 +22,66 @@ export function retry(fn: () => Promise<any>, retries: number = 3, delayMs: numb
 	});
 }
 
+type WebsiteEvidenceArchive = {
+	url: string;
+	hostname: string;
+	html: Buffer;
+	text: Buffer;
+	screenshotPng?: Buffer;
+};
+
+export function buildWebsiteEvidence(params: { url: string; whois: unknown; archive: WebsiteEvidenceArchive; analysisText?: string }) {
+	const analysis = params.analysisText?.trim();
+	return toon.encode({
+		url: params.url,
+		archive_url: params.archive.url,
+		hostname: params.archive.hostname,
+		website_text: params.archive.text.toString("utf-8").slice(0, 12000),
+		html_excerpt: params.archive.html.toString("utf-8").slice(0, 12000),
+		whois: params.whois,
+		...(analysis ? { analysis } : {}),
+	});
+}
+
+function reportEvidenceText(params: { url: string; whois: unknown; archive: WebsiteEvidenceArchive; analysisText?: string }) {
+	const analysis = params.analysisText?.trim();
+	if (analysis) return analysis;
+
+	return `The detailed analysis run did not produce a separate prose summary. Use the original captured website evidence below.
+
+Evidence:
+${buildWebsiteEvidence(params)}`;
+}
+
+export function buildWebsiteClassificationInput(params: { url: string; whois: unknown; archive: WebsiteEvidenceArchive; analysisText?: string }) {
+	return [
+		{
+			role: "system" as const,
+			content: `Classify the website from the supplied evidence. Answer {"phishing":true} if the captured website is phishing, credential theft, payment fraud, delivery-scam abuse, malicious, or strongly impersonates a trusted brand. Answer {"phishing":false} only when the captured evidence supports a legitimate/benign website.
+
+Important: classify the captured archive/screenshot evidence, not the result of a later live visit. Some phishing sites redirect scanners or repeat visits to benign brands. Do not treat a benign redirect as proof of legitimacy when the archive evidence shows impersonation or credential/payment collection. Provide no other text.`,
+		},
+		{
+			role: "user" as const,
+			content: [
+				{
+					type: "input_text" as const,
+					text: `Evidence:\n${buildWebsiteEvidence(params)}`,
+				},
+				...(params.archive.screenshotPng
+					? [
+							{
+								type: "input_image" as const,
+								detail: "high" as const,
+								image_url: `data:image/png;base64,${params.archive.screenshotPng.toString("base64")}`,
+							},
+						]
+					: []),
+			],
+		},
+	];
+}
+
 export async function analyzeWebsite(options: {
 	mhtmlSnapshot?: Buffer;
 	url: string;
@@ -99,16 +159,7 @@ Use web search if necessary to gather more information about the content/brand. 
 			submissionId,
 			options: {
 				model: defaultResponseModel,
-				input: [
-					{
-						role: "system",
-						content: `Answer {"phishing":true} if the analysis concludes with a 95% certainty or more that the website is phishing. Otherwise answer {"phishing":false}. Provide no other text.`,
-					},
-					{
-						role: "user",
-						content: analysis.output_text,
-					},
-				],
+				input: buildWebsiteClassificationInput({ url, whois, archive, analysisText: analysis.output_text }),
 				text: {
 					format: {
 						type: "json_schema",
@@ -136,11 +187,12 @@ Use web search if necessary to gather more information about the content/brand. 
 
 		if (phishing) {
 			await emitStep(submissionId, "reporting", 90);
+			const analysisText = reportEvidenceText({ url, whois, archive, analysisText: analysis.output_text });
 			await reportWebsitePhishing({
 				submissionId,
 				url,
 				whois,
-				analysisText: analysis.output_text,
+				analysisText,
 				archive: {
 					screenshotPng: archive.screenshotPng,
 					mhtml: archive.mhtml,
@@ -154,7 +206,7 @@ Use web search if necessary to gather more information about the content/brand. 
 				await reportToGoogleSafeBrowsing({
 					url,
 					submissionId,
-					analysisText: analysis.output_text,
+					analysisText,
 				});
 			} catch (err) {
 				console.error("Failed to report to Google Safe Browsing:", err);

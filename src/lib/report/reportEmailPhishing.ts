@@ -8,8 +8,12 @@ import { createWebsiteSubmission } from "../../app/api/submissions/website/route
 export async function reportEmailPhishing(params: { submissionId: bigint; mail: MailData; analysisText: string }) {
 	try {
 		getMailLinks(params.mail).forEach((link) => {
+			if (!URL.canParse(link.href)) return;
+			const url = new URL(link.href);
+			if (url.protocol !== "http:" && url.protocol !== "https:") return;
+
 			createWebsiteSubmission({
-				url: link.href,
+				url: url.toString(),
 				source: `email:${params.submissionId.toString()}`,
 			}).catch(console.error);
 		});
