@@ -1,7 +1,7 @@
 import fs, { writeFileSync } from "fs";
 import path from "path";
 import { config } from "dotenv";
-import { model, sleep } from "./utils";
+import { defaultReasoning, defaultResponseModel, model, sleep } from "./utils";
 import type { ResponseCreateParamsNonStreaming, ResponseInput } from "openai/resources/responses/responses.mjs";
 import type { ElementHandle, Page } from "rebrowser-puppeteer-core";
 import { getBrowserPage } from "./browser";
@@ -180,7 +180,7 @@ ${previous_summary.map((s, i) => `Step ${i + 1}: ${s}`).join("\n")}
 			: undefined;
 
 		const options: ResponseCreateParamsNonStreaming = {
-			model: "gpt-5.2",
+			model: defaultResponseModel,
 			tools: [
 				{
 					type: "web_search",
@@ -301,10 +301,7 @@ ${(input_elements as any[]).map((el) => `LABEL: "${el.label}" (${el.description}
 			],
 			parallel_tool_calls: false,
 			tool_choice: "required",
-			reasoning: {
-				effort: "medium",
-				summary: "detailed",
-			},
+			reasoning: defaultReasoning,
 			truncation: "auto",
 			service_tier: "flex",
 		};

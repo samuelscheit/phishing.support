@@ -6,7 +6,7 @@ import { analyzeHeaders, getAddressesText, getMailImage } from "./mail";
 import { getInfo } from "./website_info";
 import * as toon from "@toon-format/toon";
 import { markSubmissionInvalid, reportEmailPhishing } from "./report";
-import { mailer } from "./utils";
+import { defaultReasoning, defaultResponseModel, mailer } from "./utils";
 import { abuseReplyMail, abuseReplyName, abuseReplyUrl } from "./constants";
 
 async function emitStep(streamId: bigint | string | undefined, step: string, progress: number) {
@@ -120,7 +120,7 @@ export async function analyzeMail(emlContent: string, stream_id: bigint) {
 		const { result: analysis } = await runStreamedAnalysisRun({
 			submissionId: stream_id,
 			options: {
-				model: "gpt-5.2",
+				model: defaultResponseModel,
 				input: [
 					{
 						role: "system",
@@ -148,10 +148,7 @@ Your analysis must include:
 ${toon.encode({ ...mail, eml: undefined })}`,
 					},
 				],
-				reasoning: {
-					effort: "medium",
-					summary: "detailed",
-				},
+				reasoning: defaultReasoning,
 				tools: [{ type: "web_search" }],
 				stream: true,
 			},
@@ -163,7 +160,7 @@ ${toon.encode({ ...mail, eml: undefined })}`,
 			submissionId: stream_id,
 			options: {
 				stream: true,
-				model: "gpt-5.2",
+				model: defaultResponseModel,
 				input: [
 					{
 						role: "system",

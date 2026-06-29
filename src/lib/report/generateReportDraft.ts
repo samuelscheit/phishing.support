@@ -1,4 +1,5 @@
 import { runStreamedAnalysisRun } from "../analysis_run";
+import { defaultResponseModel } from "../utils";
 
 export type ReportDraft = {
 	to: string;
@@ -15,7 +16,7 @@ export async function generateReportDraft(params: {
 	const { result } = await runStreamedAnalysisRun({
 		submissionId: params.submissionId,
 		options: {
-			model: "gpt-5.2",
+			model: defaultResponseModel,
 			input: [
 				{ role: "system", content: params.system },
 				{ role: "user", content: params.user },

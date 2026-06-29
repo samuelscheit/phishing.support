@@ -7,6 +7,7 @@ import { tmpdir } from "os";
 import { HttpProxyAgent } from "http-proxy-agent";
 import { HttpClient } from "./deathbycaptcha";
 import { getBrowserPage } from "../browser";
+import { defaultResponseModel } from "../utils";
 
 // const dbc = require("./deathbycaptcha");
 
@@ -24,7 +25,7 @@ export async function reportTencentCloudAbuse(params: {
 		const { result } = await runStreamedAnalysisRun({
 			submissionId: params.submissionId,
 			options: {
-				model: "gpt-5.2",
+				model: defaultResponseModel,
 				input: [
 					{
 						role: "system",

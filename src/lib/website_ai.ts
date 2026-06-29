@@ -5,6 +5,7 @@ import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
 import { markSubmissionInvalid, reportToGoogleSafeBrowsing, reportWebsitePhishing } from "./report";
+import { defaultReasoning, defaultResponseModel } from "./utils";
 
 export async function emitStep(streamId: bigint | string | undefined, step: string, progress: number) {
 	if (!streamId) return;
@@ -55,7 +56,7 @@ export async function analyzeWebsite(options: {
 		const { result: analysis } = await runStreamedAnalysisRun({
 			submissionId,
 			options: {
-				model: "gpt-5.2",
+				model: defaultResponseModel,
 				input: [
 					{
 						role: "user" as const,
@@ -87,10 +88,7 @@ Use web search if necessary to gather more information about the content/brand. 
 						],
 					},
 				],
-				reasoning: {
-					effort: "medium",
-					summary: "detailed",
-				},
+				reasoning: defaultReasoning,
 				tools: [{ type: "web_search" }],
 				stream: true,
 			},
@@ -100,7 +98,7 @@ Use web search if necessary to gather more information about the content/brand. 
 		const { result: structuredResponse } = await runStreamedAnalysisRun({
 			submissionId,
 			options: {
-				model: "gpt-5-nano",
+				model: defaultResponseModel,
 				input: [
 					{
 						role: "system",

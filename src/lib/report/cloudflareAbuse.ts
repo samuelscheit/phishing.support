@@ -2,6 +2,7 @@ import { runStreamedAnalysisRun } from "../analysis_run";
 import { solveCloudflareTurnstile } from "../browser/solveCloudflareTurnstile";
 import { abuseReplyMail, abuseReplyName, abuseReplyUrl, userAgent } from "../constants";
 import { ReportsEntity } from "../db/entities";
+import { defaultResponseModel } from "../utils";
 
 export async function reportCloudflareAbuse(params: {
 	url: string;
@@ -22,7 +23,7 @@ export async function reportCloudflareAbuse(params: {
 			const { result } = await runStreamedAnalysisRun({
 				submissionId: params.submissionId,
 				options: {
-					model: "gpt-5.2",
+					model: defaultResponseModel,
 					input: [
 						{
 							role: "system",

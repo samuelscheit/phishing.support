@@ -1,10 +1,10 @@
 import { dirname, join } from "node:path";
 import fs from "node:fs";
-import { model } from "./utils";
+import { defaultResponseModel, model } from "./utils";
 
-const response = await model.completions.create({
-	model: "gpt-5.2",
-	prompt: "Generate a 1 page shorty story about a robot learning to love in the style of Edgar Allan Poe.",
+const response = await model.responses.create({
+	model: defaultResponseModel,
+	input: "Generate a 1 page short story about a robot learning to love in the style of Edgar Allan Poe.",
 	stream: true,
 });
 

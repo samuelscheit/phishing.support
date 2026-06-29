@@ -152,6 +152,11 @@ export const mailer =
 		: undefined;
 
 export const max_output_tokens = 30000;
+export const defaultResponseModel = process.env.OPENAI_MODEL || "gpt-5.5";
+export const defaultReasoning = {
+	effort: "xhigh",
+	summary: "detailed",
+} as const;
 
 const { PROXY_URL } = process.env;
 
@@ -161,7 +166,7 @@ export const model = new OpenAI({
 	// fetch,
 	fetchOptions: {
 		// ...getProxyOptions(),
-		verbose: true,
+		verbose: process.env.OPENAI_VERBOSE === "true",
 	},
 });
 
