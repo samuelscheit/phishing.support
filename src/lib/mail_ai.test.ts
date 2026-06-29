@@ -1,13 +1,37 @@
-import fs from "fs";
-import path from "path";
-import { analyzeMail, parseMail } from "./mail_ai";
-import { getMailImage } from "./mail";
+import { expect, test } from "bun:test";
+import fs from "node:fs";
 
-const input = fs.readFileSync(path.join(__dirname, "..", "..", "data", "mail.eml"), "utf-8");
-// const input = fs.readFileSync(path.join(__dirname, "..", "..", "data", "teable.eml"), "utf-8");
+import { cleanPrivateInformation, parseMail } from "./mail_ai";
 
-// analyzeMail(input, 1);
-const parsed = await parseMail(input);
-console.log("Parsed mail:", parsed.html);
-const image = await getMailImage(parsed);
-fs.writeFileSync(path.join(__dirname, "..", "..", "data", "mail.png"), image);
+test("cleanPrivateInformation redacts recipient address everywhere in attached email", async () => {
+	const eml = fs.readFileSync("/Users/user/Downloads/mail (3).eml", "utf-8");
+	const cleaned = cleanPrivateInformation(await parseMail(eml));
+	const serialized = JSON.stringify(cleaned);
+
+	expect(cleaned.to).toBe('"[redacted]" <[redacted]>');
+	expect(cleaned.to_object?.address).toBe("[redacted]");
+	expect(cleaned.to_object?.name).toBe("[redacted]");
+	expect(serialized).not.toContain("samuel.scheit@me.com");
+	expect(serialized).not.toContain("c2FtdWVsLnNjaGVpdEBtZS5jb20=");
+	expect(serialized).toContain("[redacted]");
+});
+
+test("cleanPrivateInformation redacts MIME encoded recipient headers", async () => {
+	const address = "private.person@example.test";
+	const encoded = Buffer.from(address, "utf-8").toString("base64");
+	const eml = [
+		"From: Sender <sender@example.test>",
+		"To: =?utf-8?B?" + encoded + "?= <" + address + ">",
+		"Subject: test",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"Hello " + address,
+	].join("\r\n");
+
+	const cleaned = cleanPrivateInformation(await parseMail(eml));
+	const serialized = JSON.stringify(cleaned);
+
+	expect(cleaned.to).toBe('"[redacted]" <[redacted]>');
+	expect(serialized).not.toContain(address);
+	expect(serialized).not.toContain(encoded);
+});

@@ -33,6 +33,73 @@ async function emitStep(streamId: bigint | string | undefined, step: string, pro
 	await publishEvent(`run:${streamId}`, { type: "analysis.step", step, progress });
 }
 
+function escapeRegExp(value: string) {
+	return value.replaceAll(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
+}
+
+function quotedPrintableEncodedWord(value: string) {
+	return Array.from(Buffer.from(value, "utf-8"))
+		.map((byte) => {
+			const char = String.fromCharCode(byte);
+			if (/^[A-Za-z0-9!*+\-/]$/.test(char)) return char;
+			if (char === " ") return "_";
+			return `=${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+		})
+		.join("");
+}
+
+function mimeEncodedWordVariants(value: string) {
+	const base64 = Buffer.from(value, "utf-8").toString("base64");
+	const quotedPrintable = quotedPrintableEncodedWord(value);
+	return [
+		`=?utf-8?B?${base64}?=`,
+		`=?UTF-8?B?${base64}?=`,
+		`=?utf-8?b?${base64}?=`,
+		`=?UTF-8?b?${base64}?=`,
+		`=?utf-8?Q?${quotedPrintable}?=`,
+		`=?UTF-8?Q?${quotedPrintable}?=`,
+		`=?utf-8?q?${quotedPrintable}?=`,
+		`=?UTF-8?q?${quotedPrintable}?=`,
+	];
+}
+
+function extractEmails(value: string | undefined) {
+	return value?.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
+}
+
+function redactionTerms(mail: MailData) {
+	return Array.from(
+		new Set(
+			[
+				mail.to_object?.address,
+				mail.to_object?.name,
+				...extractEmails(mail.to),
+				...extractEmails(mail.cc),
+				...extractEmails(mail.bcc),
+			]
+				.map((x) => x?.trim())
+				.filter((x): x is string => x !== undefined && x.length > 3),
+		),
+	);
+}
+
+function redactString(value: string, terms: string[]) {
+	let cleaned = value;
+	for (const term of terms) {
+		const variants = term.includes("@") ? [term, ...mimeEncodedWordVariants(term)] : [term];
+		for (const variant of variants) {
+			if (!variant) continue;
+			const escaped = escapeRegExp(variant);
+			if (term.includes("@")) {
+				cleaned = cleaned.replace(new RegExp(escaped, "gi"), "[redacted]");
+			} else {
+				cleaned = cleaned.replace(new RegExp(`(^|[^\\p{L}\\p{N}_])(${escaped})(?=$|[^\\p{L}\\p{N}_])`, "giu"), "$1[redacted]");
+			}
+		}
+	}
+	return cleaned;
+}
+
 function recursiveClean(node: any, info: string[]): any {
 	if (Array.isArray(node)) {
 		return node.map((x) => recursiveClean(x, info));
@@ -45,23 +112,14 @@ function recursiveClean(node: any, info: string[]): any {
 		}
 		return cleaned;
 	} else if (typeof node === "string") {
-		let cleaned = node;
-		for (const inf of info) {
-			const regex = inf.replaceAll(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
-			cleaned = cleaned.replace(new RegExp(`(\\s${regex})|(${regex}\\s)`, "gi"), "[redacted]");
-		}
-		return cleaned;
+		return redactString(node, info);
 	} else {
 		return node;
 	}
 }
 
 export function cleanPrivateInformation(mail: MailData) {
-	const infos = [mail.to_object?.address, mail.to_object?.name].filter((x) => x !== undefined && x?.length > 3);
-
-	// TODO: extract name from greetings
-
-	return recursiveClean(mail, infos as string[]) as MailData;
+	return recursiveClean(mail, redactionTerms(mail)) as MailData;
 }
 
 export async function parseMail(eml: string) {
