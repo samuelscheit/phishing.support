@@ -26,6 +26,7 @@ import { fetch } from "netbun";
 import axios from "axios";
 import { HttpProxyAgent } from "http-proxy-agent";
 import { userAgent } from "./constants";
+import { extractResponseOutputText, parseResponseJson } from "./openai_response";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -93,25 +94,14 @@ export async function logStream(response: Stream<ResponseStreamEvent>) {
 				console.dir(chunk.annotation, { depth: null });
 			}
 		} else if (chunk.type === "response.completed") {
-			const output = chunk.response.output.at(-1);
-			let output_text = chunk.response.output_text || "";
+			const output_text = extractResponseOutputText(chunk.response);
 			let output_parsed = null;
 
-			if (output?.type === "message") {
-				output_text = output.content
-					.map((c) => {
-						if (c.type === "output_text") return c.text;
-						if (c.type === "refusal") throw new Error(`Model refused to answer: ${c.refusal}`);
-						throw new Error(`Unknown output content type: ${JSON.stringify(c)}`);
-					})
-					.join("");
-
-				if (chunk.response.text) {
-					try {
-						output_parsed = JSON.parse(output_text);
-					} catch (error) {
-						throw new Error(`Failed to parse output text as JSON: ${error}\n\nOutput Text:\n${output_text}`);
-					}
+			if (chunk.response.status === "completed") {
+				try {
+					output_parsed = parseResponseJson(chunk.response, output_text);
+				} catch (error) {
+					throw new Error(`Failed to parse output text as JSON: ${error}\n\nOutput Text:\n${output_text}`);
 				}
 			}
 

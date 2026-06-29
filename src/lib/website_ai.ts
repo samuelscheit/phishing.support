@@ -130,6 +130,9 @@ Use web search if necessary to gather more information about the content/brand. 
 		});
 
 		const { phishing } = structuredResponse.output_parsed || ({} as { phishing: boolean });
+		if (typeof phishing !== "boolean") {
+			throw new Error(`Failed to classify website phishing result: ${structuredResponse.output_text}`);
+		}
 
 		if (phishing) {
 			await emitStep(submissionId, "reporting", 90);

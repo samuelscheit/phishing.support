@@ -2,6 +2,7 @@ import { Stream } from "openai/streaming";
 import { ResponseStreamEvent } from "openai/resources/responses/responses.mjs";
 import { AnalysisRunsEntity } from "./db/entities";
 import { publishEvent } from "./event/event_transport";
+import { extractResponseOutputText, parseResponseJson } from "./openai_response";
 
 /**
  * Consumes an OpenAI stream, logs it to stdout, publishes it to ZeroMQ,
@@ -31,25 +32,14 @@ export async function logAndPersistStream(response: Stream<ResponseStreamEvent>,
 			} else if (chunk.type === "response.reasoning_summary_text.delta") {
 				process.stdout.write(chunk.delta);
 			} else if (chunk.type === "response.completed") {
-				const output = chunk.response.output.at(-1);
-				let output_text = chunk.response.output_text || "";
+				const output_text = extractResponseOutputText(chunk.response);
 				let output_parsed = null;
 
-				if (output?.type === "message") {
-					output_text = output.content
-						.map((c) => {
-							if (c.type === "output_text") return c.text;
-							if (c.type === "refusal") throw new Error(`Model refused to answer: ${c.refusal}`);
-							throw new Error(`Unknown output content type: ${JSON.stringify(c)}`);
-						})
-						.join("");
-
-					if (chunk.response.status === "completed" && chunk.response.text) {
-						try {
-							output_parsed = JSON.parse(output_text);
-						} catch (error) {
-							// For non-JSON expected outputs, this is fine
-						}
+				if (chunk.response.status === "completed") {
+					try {
+						output_parsed = parseResponseJson(chunk.response, output_text);
+					} catch (error) {
+						// For non-JSON expected outputs, this is fine
 					}
 				}
 

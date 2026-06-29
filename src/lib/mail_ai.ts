@@ -9,6 +9,25 @@ import { markSubmissionInvalid, reportEmailPhishing } from "./report";
 import { defaultReasoning, defaultResponseModel, mailer } from "./utils";
 import { abuseReplyMail, abuseReplyName, abuseReplyUrl } from "./constants";
 
+const URL_RE = /https?:\/\/[^\s"'<>]+/gi;
+
+export function extractEmailUrls(mail: MailData) {
+	return Array.from(new Set([...(mail.text.match(URL_RE) ?? []), ...(mail.html.match(URL_RE) ?? [])]));
+}
+
+export function buildMailEvidence(mail: MailData, analysisText?: string) {
+	return toon.encode({
+		from: mail.from,
+		subject: mail.subject,
+		text: mail.text,
+		html_excerpt: mail.html.slice(0, 12000),
+		urls: extractEmailUrls(mail),
+		headers: mail.headers,
+		whois: mail.whois,
+		analysis: analysisText || undefined,
+	});
+}
+
 async function emitStep(streamId: bigint | string | undefined, step: string, progress: number) {
 	if (!streamId) return;
 	await publishEvent(`run:${streamId}`, { type: "analysis.step", step, progress });
@@ -164,11 +183,12 @@ ${toon.encode({ ...mail, eml: undefined })}`,
 				input: [
 					{
 						role: "system",
-						content: `Answer {"phishing":true} if the analysis concludes that the email is phishing or malicious. Otherwise answer {"phishing":false}. Provide no other text.`,
+						content: `Classify the email from the supplied evidence. Answer {"phishing":true} if the email is phishing, credential theft, payment fraud, delivery-scam abuse, malicious, or strongly impersonates a trusted brand. Answer {"phishing":false} only when the evidence supports a legitimate/benign email. Do not treat SPF/DKIM/DMARC pass as proof of legitimacy when the authenticated domain itself is unrelated to the impersonated brand. Provide no other text.`,
 					},
 					{
 						role: "user",
-						content: `Analysis Text: ${analysis.output_text}`,
+						content: `Evidence:
+${buildMailEvidence(mail, analysis.output_text)}`,
 					},
 				],
 				text: {
@@ -190,6 +210,9 @@ ${toon.encode({ ...mail, eml: undefined })}`,
 			},
 		});
 		const { phishing } = structuredResponse.output_parsed || ({} as { phishing: boolean });
+		if (typeof phishing !== "boolean") {
+			throw new Error(`Failed to classify email phishing result: ${structuredResponse.output_text}`);
+		}
 
 		const from = process.env.SMTP_FROM || `${abuseReplyName} <${abuseReplyMail}>`;
 		const date = mail.date ? new Date(mail.date).toLocaleString("en-US", { timeZone: "UTC" }) : undefined;
