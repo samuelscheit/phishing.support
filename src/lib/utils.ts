@@ -55,6 +55,15 @@ export async function sleep(ms: number) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export function retry<T>(fn: () => Promise<T>, retries: number = 3, delayMs: number = 5000): Promise<T> {
+	return fn().catch((err) => {
+		if (retries > 0) {
+			return sleep(delayMs).then(() => retry(fn, retries - 1, delayMs));
+		}
+		return Promise.reject(err);
+	});
+}
+
 export async function logStream(response: Stream<ResponseStreamEvent>) {
 	for await (const chunk of response) {
 		if (chunk.type === "response.output_text.delta") {

@@ -2,9 +2,8 @@ import type { ResponseCreateParamsStreaming, ResponseInputItem } from "openai/re
 
 import { AnalysisRunsEntity } from "./db/entities";
 import { logAndPersistStream } from "./artifact";
-import { model } from "./utils";
+import { model, retry } from "./utils";
 import { publishEvent } from "./event/event_transport";
-import { retry } from "./website_ai";
 
 export async function runStreamedAnalysisRun(params: { submissionId: bigint; options: ResponseCreateParamsStreaming }) {
 	if (params.options.stream !== true) {

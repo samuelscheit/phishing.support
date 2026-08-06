@@ -7,7 +7,7 @@ import { generateId } from "@/lib/db/ids";
 import { join } from "node:path";
 import { createEmailSubmissionFromEml } from "../../app/api/submissions/email/route";
 import { extractEmlsFromIncomingMessage } from "../mail_forwarded";
-import { retry } from "../website_ai";
+import { retry } from "../utils";
 
 function requiredEnv(name: string): string {
 	const value = process.env[name];

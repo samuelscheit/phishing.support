@@ -5,21 +5,11 @@ import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
 import { markSubmissionInvalid, reportToGoogleSafeBrowsing, reportWebsitePhishing } from "./report";
-import { defaultReasoning, defaultResponseModel } from "./utils";
+import { defaultReasoning, defaultResponseModel, retry } from "./utils";
 
 export async function emitStep(streamId: bigint | string | undefined, step: string, progress: number) {
 	if (!streamId) return;
 	await publishEvent(`run:${streamId}`, { type: "analysis.step", step, progress });
-}
-
-export function retry(fn: () => Promise<any>, retries: number = 3, delayMs: number = 5000): Promise<any> {
-	return fn().catch((err) => {
-		if (retries > 0) {
-			return new Promise((resolve) => setTimeout(resolve, delayMs)).then(() => retry(fn, retries - 1, delayMs));
-		} else {
-			return Promise.reject(err);
-		}
-	});
 }
 
 type WebsiteEvidenceArchive = {

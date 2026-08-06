@@ -3,8 +3,7 @@ import uniqBy from "lodash/uniqBy";
 import uniq from "lodash/uniq";
 import { parse } from "tldts";
 import { recursiveAbuseContact } from "../web_lib/util";
-import { getProxyOptions } from "./utils";
-import { retry } from "./website_ai";
+import { getProxyOptions, retry } from "./utils";
 
 export async function queryDns(domain: string) {
 	const [a, aaaa, ns, mx, cname, txt] = await Promise.allSettled([
@@ -85,7 +84,7 @@ type RDAPIPInfo = RDAPEntity & {
 	abuse: RDAPAbuseContact | null;
 };
 
-type RDAPDomainInfo = {
+export type RDAPDomainInfo = {
 	domain: string;
 	status: string[];
 	events: RDAPEventMap;
@@ -96,6 +95,13 @@ type RDAPDomainInfo = {
 		  })
 		| null;
 };
+
+const rdapDomainResolverUrl = "https://rdap.org/domain/";
+type RDAPFetch = (input: string, init?: RequestInit) => Promise<Response>;
+
+export function getDomainRdapUrl(domain: string) {
+	return `${rdapDomainResolverUrl}${encodeURIComponent(domain)}`;
+}
 
 function parseVCard(vcardArray?: VCardArray): RDAPVCard | null {
 	if (!vcardArray || vcardArray[0] !== "vcard") return null;
@@ -145,15 +151,18 @@ function simplifyEntity(entity: any): RDAPEntity {
 	};
 }
 
-async function queryRDAPDomain(domain: string): Promise<RDAPDomainInfo | undefined> {
+export async function queryRDAPDomain(
+	domain: string,
+	fetchImplementation: RDAPFetch = fetch,
+): Promise<RDAPDomainInfo | undefined> {
 	try {
 		const response = await retry(() =>
-			fetch(`https://rdap.verisign.com/com/v1/domain/${domain}`, {
+			fetchImplementation(getDomainRdapUrl(domain), {
 				method: "GET",
+				redirect: "follow",
 				headers: {
 					Accept: "application/rdap+json",
 				},
-				verbose: true,
 				...getProxyOptions(),
 			})
 		);
@@ -178,7 +187,6 @@ async function queryIP(ip: string): Promise<RDAPIPInfo | undefined> {
 				headers: {
 					Accept: "application/rdap+json",
 				},
-				verbose: true,
 				...getProxyOptions(),
 			})
 		);
@@ -278,7 +286,7 @@ export async function getInfo(domain_or_ip: string): Promise<WhoISInfo> {
 	let nameserver_info = undefined as RDAPDomainInfo[] | undefined;
 
 	if (nameservers.length) {
-		nameserver_info = (await Promise.allSettled(nameservers.map(queryRDAPDomain)))
+		nameserver_info = (await Promise.allSettled(nameservers.map((nameserver) => queryRDAPDomain(nameserver))))
 			.filter((info) => info.status === "fulfilled" && info.value !== null)
 			.map((info) => (info as PromiseFulfilledResult<RDAPDomainInfo>).value);
 	}
