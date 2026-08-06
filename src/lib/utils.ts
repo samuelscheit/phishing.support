@@ -21,11 +21,7 @@ import type { Stream } from "openai/streaming";
 import type { ResponseStreamEvent } from "openai/resources/responses/responses.mjs";
 import nodemailer from "nodemailer";
 import { fileURLToPath } from "url";
-import { SocksProxyAgent } from "socks-proxy-agent";
-import { fetch } from "netbun";
 import axios from "axios";
-import { HttpProxyAgent } from "http-proxy-agent";
-import { userAgent } from "./constants";
 import { extractResponseOutputText, parseResponseJson } from "./openai_response";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -157,29 +153,13 @@ export const defaultReasoning = {
 	summary: "detailed",
 } as const;
 
-const { PROXY_URL } = process.env;
-
 export const model = new OpenAI({
 	apiKey: process.env.OPENAI_API_KEY ?? "",
 	baseURL: process.env.OPENAI_API_BASE_URL || "https://api.openai.com/v1",
-	// fetch,
 	fetchOptions: {
-		// ...getProxyOptions(),
 		verbose: process.env.OPENAI_VERBOSE === "true",
 	},
 });
-
-export function getProxyOptions() {
-	if (!PROXY_URL) return {};
-
-	if (PROXY_URL.startsWith("http://") || PROXY_URL.startsWith("https://")) {
-		const agent = new HttpProxyAgent(PROXY_URL);
-		return { agent, proxy: PROXY_URL };
-	}
-
-	const agent = new SocksProxyAgent(PROXY_URL);
-	return { agent, proxy: PROXY_URL };
-}
 
 export async function getUserCC(req: Request) {
 	try {

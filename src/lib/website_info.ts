@@ -3,7 +3,7 @@ import uniqBy from "lodash/uniqBy";
 import uniq from "lodash/uniq";
 import { parse } from "tldts";
 import { recursiveAbuseContact } from "../web_lib/util";
-import { getProxyOptions, retry } from "./utils";
+import { retry } from "./utils";
 
 export async function queryDns(domain: string) {
 	const [a, aaaa, ns, mx, cname, txt] = await Promise.allSettled([
@@ -163,7 +163,6 @@ export async function queryRDAPDomain(
 				headers: {
 					Accept: "application/rdap+json",
 				},
-				...getProxyOptions(),
 			})
 		);
 
@@ -187,7 +186,6 @@ async function queryIP(ip: string): Promise<RDAPIPInfo | undefined> {
 				headers: {
 					Accept: "application/rdap+json",
 				},
-				...getProxyOptions(),
 			})
 		);
 

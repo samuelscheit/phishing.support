@@ -34,7 +34,6 @@ export type ArchiveWebsiteOptions = {
 	mhtmlSnapshot?: Buffer;
 	/** Original remote URL (used for hostname/labeling when loading a local MHTML snapshot). */
 	url: string;
-	country_code?: string;
 };
 
 function resolveDataDir() {
@@ -50,17 +49,15 @@ function resolveDataDir() {
 	return path.join(process.cwd(), "data");
 }
 
-async function archiveWebsiteInternal({ url, mhtmlSnapshot, country_code }: ArchiveWebsiteOptions): Promise<WebsiteArchiveResult> {
-	console.log(`Archiving website ${url} using country code ${country_code || "none"}`);
+async function archiveWebsiteInternal({ url, mhtmlSnapshot }: ArchiveWebsiteOptions): Promise<WebsiteArchiveResult> {
+	console.log(`Archiving website ${url}`);
 
 	const browser = await getBrowser(mhtmlSnapshot !== undefined);
 	try {
-		const context = await browser.createBrowserContext({
-			proxyServer: country_code ? process.env.PROXY_URL_NO_AUTH : undefined,
-		});
+		const context = await browser.createBrowserContext();
 		const newPage = await context.newPage();
 
-		const { page } = await getBrowserPage(newPage, country_code);
+		const { page } = await getBrowserPage(newPage);
 
 		const uri = new URL(url);
 		const { hostname } = uri;
@@ -212,15 +209,5 @@ async function archiveWebsiteInternal({ url, mhtmlSnapshot, country_code }: Arch
 }
 
 export async function archiveWebsite(options: ArchiveWebsiteOptions): Promise<WebsiteArchiveResult> {
-	try {
-		return await archiveWebsiteInternal(options);
-	} catch (err) {
-		console.warn(
-			`First archive attempt failed for ${options?.url} using country code ${options?.country_code}: ${(err as Error).message}`,
-		);
-		return await archiveWebsiteInternal({
-			...options,
-			country_code: undefined,
-		});
-	}
+	return archiveWebsiteInternal(options);
 }

@@ -8,16 +8,9 @@ process.env["DEBUG_MAX_STRING_LENGTH"] = "null";
 
 const browser = await getBrowser();
 
-const context = await browser.createBrowserContext({
-	proxyServer: process.env.PROXY_URL_NO_AUTH,
-});
+const context = await browser.createBrowserContext();
 
 const p = await context.newPage();
-
-await p.authenticate({
-	username: "de",
-	password: "any",
-});
 
 const { page } = await getBrowserPage(p);
 

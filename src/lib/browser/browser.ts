@@ -1,19 +1,26 @@
-import fs from "fs";
-import { tmpdir } from "os";
-import path from "path";
-import { Browser, launch } from "rebrowser-puppeteer-core";
-import { userAgent } from "../constants";
+import { existsSync } from "node:fs";
+import { launch, type Browser } from "rebrowser-puppeteer-core";
+
+const chromeExecutableCandidates = [
+	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+	"/usr/bin/google-chrome-stable",
+	"/usr/bin/google-chrome",
+	"/usr/bin/chromium",
+	"/usr/bin/chromium-browser",
+];
+
+export function getChromeExecutablePath() {
+	if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+	return chromeExecutableCandidates.find((candidate) => existsSync(candidate));
+}
+
+export function getChromiumSandboxArgs() {
+	const requiresNoSandbox = process.env.DOCKER === "true" || process.env.PUPPETEER_NO_SANDBOX === "true";
+	return requiresNoSandbox ? ["--no-sandbox", "--disable-setuid-sandbox"] : [];
+}
 
 export async function getBrowser(use_puppeteer_core = false): Promise<Browser> {
-	// TODO: harden puppeteer/browser for security
-
-	const isDocker = process.env.DOCKER === "true" || process.env.PUPPETEER_NO_SANDBOX === "true";
-	const chromePath = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-	// const chromePath = process.env.CHROME_PATH || "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
-
-	const userDataDir = path.join(tmpdir(), "puppeteer-user-data");
-	fs.mkdirSync(userDataDir, { recursive: true });
-	console.log(`Created temporary user data directory at: ${userDataDir}`);
+	const executablePath = getChromeExecutablePath();
 
 	const args: string[] = [
 		`--screen-size=1920,1080`,
@@ -24,26 +31,16 @@ export async function getBrowser(use_puppeteer_core = false): Promise<Browser> {
 		"--disable-features=site-per-process",
 		"--disable-advertisements",
 		"--enable-javascript",
-		"--disable-blink-features=AutomationControlled",
 		"--disable-gpu",
 		"--enable-webgl",
-		`--user-agent=${userAgent}`,
+		...getChromiumSandboxArgs(),
 	];
 
-	// Chromium inside containers commonly requires disabling sandbox.
-	if (isDocker) {
-		args.push("--no-sandbox", "--disable-setuid-sandbox");
-	}
-
 	const options = {
-		executablePath: chromePath,
+		...(executablePath ? { executablePath } : {}),
 		headless: false,
-		// userDataDir,
 		ignoreDefaultArgs: ["--enable-automation"],
 		args,
-		downloadBehavior: {
-			policy: "deny",
-		},
 		acceptInsecureCerts: true,
 		dumpio: true,
 	} as const;

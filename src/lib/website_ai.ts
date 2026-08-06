@@ -95,7 +95,7 @@ export async function analyzeWebsite(options: {
 		});
 
 		await emitStep(submissionId, "archive_website", 10);
-		const archive = await retry(() => archiveWebsite(options), 2, 3000);
+		const archive = await retry(() => archiveWebsite({ url, mhtmlSnapshot: options.mhtmlSnapshot }), 2, 3000);
 		await emitStep(submissionId, "save_artifacts", 40);
 
 		// await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive });

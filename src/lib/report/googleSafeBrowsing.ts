@@ -22,7 +22,7 @@ export async function reportToGoogleSafeBrowsing(params: {
 		});
 	}
 
-	const { page, context, browser } = await getBrowserPage(undefined, "de");
+	const { page, context, browser } = await getBrowserPage();
 
 	try {
 		const report_url = `https://safebrowsing.google.com/safebrowsing/report_phish/?hl=de&url=${encodeURIComponent(params.url)}`;

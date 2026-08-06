@@ -45,7 +45,7 @@ export default function Donate() {
 			</div>
 
 			<p className="text-xs text-muted-foreground">
-				Thank you — every bit helps. Donations fund hosting, monitoring, and model/API costs.
+				Thank you, every bit helps! Donations fund hosting, monitoring, and model/API costs.
 			</p>
 		</div>
 	);
