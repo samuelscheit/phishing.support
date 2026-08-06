@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 import { eq, or, sql, desc } from "drizzle-orm";
 
-import { db } from "./index";
+import { getDb } from "./index";
 import {
     analysisRuns,
     artifacts,
@@ -30,6 +30,7 @@ export class SubmissionsEntity {
         info?: string;
         id?: bigint;
     }) {
+        const db = await getDb();
         const id = params.id ?? generateId();
 
         const exists = await db
@@ -68,10 +69,12 @@ export class SubmissionsEntity {
     }
 
     static async setStatus(id: bigint, status: SubmissionStatus, info?: string) {
+        const db = await getDb();
         await db.update(submissions).set({ status, info, updatedAt: nowDate() }).where(eq(submissions.id, id));
     }
 
     static async failAllRunning(params?: { info?: string }) {
+        const db = await getDb();
         const info = params?.info ?? "Marked as failed (previous run did not complete).";
         const rows = await db
             .update(submissions)
@@ -82,6 +85,7 @@ export class SubmissionsEntity {
     }
 
     static async update(id: bigint, values: Partial<typeof submissions.$inferInsert>) {
+        const db = await getDb();
         await db
             .update(submissions)
             .set({ ...values, updatedAt: nowDate() })
@@ -89,10 +93,12 @@ export class SubmissionsEntity {
     }
 
     static async list(limit: number = 50) {
+        const db = await getDb();
         return await db.select().from(submissions).orderBy(desc(submissions.createdAt)).limit(limit);
     }
 
     static async get(id: bigint) {
+        const db = await getDb();
         const [row] = await db.select().from(submissions).where(eq(submissions.id, id));
         return row;
     }
@@ -103,6 +109,7 @@ export class SubmissionsEntity {
      * `imap:<account>:<mailbox>:<uidValidity>:<uid>:att1`.
      */
     static async findIdBySourcePrefix(sourcePrefix: string): Promise<bigint | undefined> {
+        const db = await getDb();
         const [row] = await db
             .select({ id: submissions.id })
             .from(submissions)
@@ -114,6 +121,7 @@ export class SubmissionsEntity {
 
 export class AnalysisRunsEntity {
     static async create(submissionId: bigint, input?: Array<ResponseInputItem>) {
+        const db = await getDb();
         const id = generateId();
         await db.insert(analysisRuns).values([
             {
@@ -129,10 +137,12 @@ export class AnalysisRunsEntity {
     }
 
     static async update(id: bigint, values: Partial<typeof analysisRuns.$inferInsert>) {
+        const db = await getDb();
         await db.update(analysisRuns).set(values).where(eq(analysisRuns.id, id));
     }
 
     static async listForSubmission(submissionId: bigint) {
+        const db = await getDb();
         const result = await db
             .select()
             .from(analysisRuns)
@@ -153,6 +163,7 @@ export class AnalysisRunsEntity {
     }
 
     static async complete(runId: bigint, output?: Array<ResponseOutputItem>, tokensUsed?: number) {
+        const db = await getDb();
         const result = await db
             .update(analysisRuns)
             .set({
@@ -167,6 +178,7 @@ export class AnalysisRunsEntity {
     }
 
     static async fail(runId: bigint) {
+        const db = await getDb();
         await db.update(analysisRuns).set({ status: "failed" }).where(eq(analysisRuns.id, runId));
     }
 }
@@ -177,6 +189,7 @@ export class ArtifactsEntity {
     }
 
     static async saveBuffer(params: { submissionId?: bigint; name?: string; kind: string; mimeType?: string; buffer: Buffer }) {
+        const db = await getDb();
         const id = generateId();
         const [row] = await db
             .insert(artifacts)
@@ -209,6 +222,7 @@ export class ArtifactsEntity {
     }
 
     static async listForSubmission(submissionId: bigint) {
+        const db = await getDb();
         return await db
             .select({
                 id: artifacts.id,
@@ -224,6 +238,7 @@ export class ArtifactsEntity {
     }
 
     static async get(id: bigint) {
+        const db = await getDb();
         const [row] = await db.select().from(artifacts).where(eq(artifacts.id, id));
         return row;
     }
@@ -285,6 +300,7 @@ export class ArtifactsEntity {
 
 export class ReportsEntity {
     static async listForSubmission(submissionId: bigint) {
+        const db = await getDb();
         return await db.select().from(reports).where(eq(reports.submissionId, submissionId));
     }
 
@@ -299,6 +315,7 @@ export class ReportsEntity {
         providerMessageId?: string;
         data?: any;
     }) {
+        const db = await getDb();
         const id = generateId();
         const [row] = await db
             .insert(reports)

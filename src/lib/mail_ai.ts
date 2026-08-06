@@ -5,7 +5,8 @@ import { simpleParser } from "mailparser";
 import { analyzeHeaders, getAddressesText, getMailImage } from "./mail";
 import { getInfo } from "./website_info";
 import * as toon from "@toon-format/toon";
-import { markSubmissionInvalid, reportEmailPhishing } from "./report";
+import { reportEmailPhishing } from "./report/reportEmailPhishing";
+import { markSubmissionInvalid } from "./report/util";
 import { defaultReasoning, defaultResponseModel, mailer } from "./utils";
 import { abuseReplyMail, abuseReplyName, abuseReplyUrl } from "./constants";
 

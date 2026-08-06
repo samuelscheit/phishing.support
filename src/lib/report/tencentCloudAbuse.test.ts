@@ -1,6 +1,4 @@
-import { db } from "../db";
 import { ArtifactsEntity } from "../db/entities";
-import { artifacts } from "../db/schema";
 import { reportTencentCloudAbuse } from "./tencentCloudAbuse";
 
 const artifact = await ArtifactsEntity.get(268771696171814913n);

@@ -3,8 +3,6 @@ import { uniqBy } from "lodash";
 import { WhoISInfo } from "../website_info";
 import { generateReportDraft } from "./generateReportDraft";
 import { sendReportEmail } from "./sendReportEmail";
-import { reportTencentCloudAbuse } from "./tencentCloudAbuse";
-import { reportCloudflareAbuse } from "./cloudflareAbuse";
 
 export async function reportWebsitePhishing(params: {
 	submissionId: bigint;
@@ -91,6 +89,7 @@ ${toon.encode(x.registrar)}
 		(x) => x.email
 	).map(async ({ email, system, user }) => {
 		if (email === "dnsabuse_complaint@tencent.com") {
+			const { reportTencentCloudAbuse } = await import("./tencentCloudAbuse");
 			return await reportTencentCloudAbuse({
 				url: params.url,
 				submissionId: params.submissionId,
@@ -98,6 +97,7 @@ ${toon.encode(x.registrar)}
 				websiteScreenshot: params.archive.screenshotPng,
 			});
 		} else if (email === "abuse@cloudflare.com") {
+			const { reportCloudflareAbuse } = await import("./cloudflareAbuse");
 			return await reportCloudflareAbuse({
 				url: params.url,
 				submissionId: params.submissionId,

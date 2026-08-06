@@ -3,10 +3,7 @@ import { parse } from "tldts";
 import { runStreamedAnalysisRun } from "../analysis_run";
 import { ReportsEntity } from "../db/entities";
 import { defaultResponseModel } from "../utils";
-import { HttpClient } from "./deathbycaptcha";
 import { getReportProxy } from "./proxy";
-
-const dbcClient = new HttpClient(process.env.DEATHBYCAPTCHA_USERNAME!, process.env.DEATHBYCAPTCHA_PASSWORD!);
 
 type TencentCaptcha = {
 	ret: number;
@@ -22,6 +19,8 @@ export async function reportTencentCloudAbuse(params: {
 	websiteScreenshot: Buffer;
 	infringedUrl?: string;
 }) {
+	const { HttpClient } = await import("./deathbycaptcha");
+	const dbcClient = new HttpClient(process.env.DEATHBYCAPTCHA_USERNAME!, process.env.DEATHBYCAPTCHA_PASSWORD!);
 	const proxy = getReportProxy("Tencent Cloud abuse reporting");
 
 	if (!params.explanation || !params.infringedUrl) {

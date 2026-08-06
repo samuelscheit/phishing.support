@@ -5,7 +5,7 @@ import { simpleParser, type AddressObject, type ParsedMail } from "mailparser";
 import { SubmissionsEntity } from "@/lib/db/entities";
 import { generateId } from "@/lib/db/ids";
 import { join } from "node:path";
-import { createEmailSubmissionFromEml } from "../../app/api/submissions/email/route";
+import { createEmailSubmissionFromEml } from "../submissions/email";
 import { extractEmlsFromIncomingMessage } from "../mail_forwarded";
 import { retry } from "../utils";
 

@@ -1,14 +1,11 @@
 import type { Metadata, ResolvingMetadata } from "next";
-import { AnalysisRunsEntity, ArtifactsEntity, ReportsEntity, SubmissionsEntity } from "@/lib/db/entities";
+import { SubmissionsEntity } from "@/lib/db/entities";
+import { getSubmissionDetails } from "@/lib/submissions/details";
+import { notFound } from "next/navigation";
 import { SubmissionPageClient } from "./SubmissionPageClient";
-import { AnalysisRun, Artifact, Report, Submission } from "@/lib/db/schema";
-import { fetchSubmission } from "../../api/submissions/[id]/route";
+import { Submission } from "@/lib/db/schema";
 
-type SubmissionDetail = Submission & {
-	analysisRuns: AnalysisRun[];
-	reports: Report[];
-	artifacts: Artifact[];
-};
+export const dynamic = "force-dynamic";
 
 function safeHostname(rawUrl?: string): string | null {
 	if (!rawUrl) return null;
@@ -52,8 +49,8 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function SubmissionPage({ params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
-
-	const initialSubmission = await fetchSubmission(id);
+	const initialSubmission = await getSubmissionDetails(id);
+	if (!initialSubmission) notFound();
 
 	return <SubmissionPageClient id={id} initialSubmission={initialSubmission} />;
 }

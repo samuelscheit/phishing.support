@@ -4,7 +4,9 @@ import { SubmissionsEntity, ArtifactsEntity, ReportsEntity } from "./db/entities
 import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
-import { markSubmissionInvalid, reportToGoogleSafeBrowsing, reportWebsitePhishing } from "./report";
+import { reportToGoogleSafeBrowsing } from "./report/googleSafeBrowsing";
+import { reportWebsitePhishing } from "./report/reportWebsitePhishing";
+import { markSubmissionInvalid } from "./report/util";
 import { defaultReasoning, defaultResponseModel, retry } from "./utils";
 
 export async function emitStep(streamId: bigint | string | undefined, step: string, progress: number) {

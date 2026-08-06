@@ -3,7 +3,7 @@ import { MailData } from "../mail_ai";
 import { generateReportDraft } from "./generateReportDraft";
 import { sendReportEmail } from "./sendReportEmail";
 import { getMailLinks } from "../mail";
-import { createWebsiteSubmission } from "../../app/api/submissions/website/route";
+import { createWebsiteSubmission } from "../submissions/website";
 
 export async function reportEmailPhishing(params: { submissionId: bigint; mail: MailData; analysisText: string }) {
 	try {

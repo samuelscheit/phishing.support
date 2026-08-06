@@ -28,19 +28,22 @@ RUN bun run build
 FROM oven/bun:1.3.5-debian AS runner
 WORKDIR /app
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates wget gnupg
-
 RUN set -euxo pipefail; \
-  wget -qO- https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-linux-signing-keyring.gpg; \
-  echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list; \
   apt-get update; \
-  apt-get install -y --no-install-recommends ca-certificates bash xvfb xauth fonts-liberation libasound2 libnss3 libxss1 libgtk-3-0 google-chrome-stable; \
+  apt-get install -y --no-install-recommends ca-certificates bash xvfb xauth fonts-liberation libasound2 libnss3 libxss1 libgtk-3-0; \
+  if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+    apt-get install -y --no-install-recommends wget gnupg; \
+    wget -qO- https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-linux-signing-keyring.gpg; \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends google-chrome-stable; \
+  else \
+    apt-get install -y --no-install-recommends chromium; \
+  fi; \
   rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 ENV DOCKER=true
-ENV CHROME_PATH=/usr/bin/google-chrome-stable
 
 RUN mkdir -p /app/data
 
