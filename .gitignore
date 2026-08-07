@@ -41,6 +41,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.local
 
 # caches
+.firecrawl/
 .eslintcache
 .cache
 *.tsbuildinfo
