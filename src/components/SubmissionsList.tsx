@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { SubmissionStatus } from "@/components/SubmissionStatus";
+import { ReporterMeta } from "@/components/ReporterMeta";
 import { Submission } from "../lib/db/schema";
 
 export function SubmissionsList() {
@@ -56,6 +56,7 @@ export function SubmissionsList() {
 							<CardTitle className="text-lg truncate min-w-0">
 								{s.data?.kind === "email" ? s.data.email?.subject || s.dedupeKey : s.data.website.url}
 							</CardTitle>
+							<ReporterMeta reporterCountry={s.reporterCountry} reporterHeaders={s.reporterHeaders} />
 						</CardContent>
 					</Card>
 				</Link>

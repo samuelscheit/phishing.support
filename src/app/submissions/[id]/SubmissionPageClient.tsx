@@ -8,6 +8,7 @@ import { SubmissionStatus } from "@/components/SubmissionStatus";
 import { ExternalLinkConfirm } from "@/components/ExternalLinkConfirm";
 import { UrlParts } from "@/components/UrlParts";
 import { WhoisTab } from "@/components/WhoisTab";
+import { ReporterMeta } from "@/components/ReporterMeta";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -223,6 +224,11 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 								<SubmissionStatus status={submission.status} />
 							</div>
 						</div>
+						<ReporterMeta
+							reporterCountry={submission.reporterCountry}
+							reporterHeaders={submission.reporterHeaders}
+							className="mt-2"
+						/>
 					</div>
 					<div className="space-y-5 flex-1 justify-between flex-col flex">
 						{isReported && submission.data.kind === "website" ? (
