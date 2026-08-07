@@ -187,7 +187,7 @@ export async function startImapListener() {
 							for (let i = 0; i < emls.length; i++) {
 								await createEmailSubmissionFromEml(
 									emls[i],
-									`${sourcePrefix}${emls.length > 1 ? `:att${i + 1}` : ""}`
+									{ source: `${sourcePrefix}${emls.length > 1 ? `:att${i + 1}` : ""}` }
 								);
 							}
 

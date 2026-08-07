@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createEmailSubmissionFromEml } from "@/lib/submissions/email";
+import { getReporterMetadata } from "@/lib/request_metadata";
 
 export async function POST(req: NextRequest) {
 	try {
@@ -16,7 +17,8 @@ export async function POST(req: NextRequest) {
 
 		console.log("Email submission received, size:", buffer.length);
 
-		const stream_id = await createEmailSubmissionFromEml(emlContent, "web-upload");
+		const reporter = await getReporterMetadata(req);
+		const stream_id = await createEmailSubmissionFromEml(emlContent, { source: "web-upload", ...reporter });
 		return NextResponse.json({ stream_id });
 	} catch (err) {
 		console.error("Submission error:", err);

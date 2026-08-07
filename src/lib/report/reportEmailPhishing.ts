@@ -4,8 +4,24 @@ import { generateReportDraft } from "./generateReportDraft";
 import { sendReportEmail } from "./sendReportEmail";
 import { getMailLinks } from "../mail";
 import { createWebsiteSubmission } from "../submissions/website";
+import { SubmissionsEntity } from "../db/entities";
+import type { ReporterMetadata } from "../request_metadata";
 
 export async function reportEmailPhishing(params: { submissionId: bigint; mail: MailData; analysisText: string }) {
+	let reporter: ReporterMetadata | undefined;
+	try {
+		const submission = await SubmissionsEntity.get(params.submissionId);
+		reporter = submission
+			? {
+					reporterIp: submission.reporterIp ?? undefined,
+					reporterCountry: submission.reporterCountry ?? undefined,
+					reporterHeaders: submission.reporterHeaders ?? undefined,
+				}
+			: undefined;
+	} catch (error) {
+		console.error("Failed to load reporter metadata for linked website submissions:", error);
+	}
+
 	try {
 		getMailLinks(params.mail).forEach((link) => {
 			if (!URL.canParse(link.href)) return;
@@ -15,6 +31,7 @@ export async function reportEmailPhishing(params: { submissionId: bigint; mail: 
 			createWebsiteSubmission({
 				url: url.toString(),
 				source: `email:${params.submissionId.toString()}`,
+				...reporter,
 			}).catch(console.error);
 		});
 	} catch (error) {

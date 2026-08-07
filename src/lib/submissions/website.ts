@@ -1,11 +1,11 @@
 import { SubmissionsEntity } from "@/lib/db/entities";
 import { generateId } from "@/lib/db/ids";
 import { analyzeWebsite } from "@/lib/website_ai";
+import type { ReporterMetadata } from "@/lib/request_metadata";
 
-export type WebsiteSubmissionOptions = {
+export type WebsiteSubmissionOptions = ReporterMetadata & {
 	mhtmlSnapshot?: Buffer;
 	url: string;
-	country_code?: string;
 	source?: string;
 };
 
@@ -19,6 +19,9 @@ export async function createWebsiteSubmission(options: WebsiteSubmissionOptions)
 		dedupeKey: `website-${new URL(url).hostname}`,
 		status: "new",
 		source: source || url,
+		reporterIp: options.reporterIp,
+		reporterCountry: options.reporterCountry,
+		reporterHeaders: options.reporterHeaders,
 		id: streamId,
 	});
 

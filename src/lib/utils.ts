@@ -21,7 +21,6 @@ import type { Stream } from "openai/streaming";
 import type { ResponseStreamEvent } from "openai/resources/responses/responses.mjs";
 import nodemailer from "nodemailer";
 import { fileURLToPath } from "url";
-import axios from "axios";
 import { extractResponseOutputText, parseResponseJson } from "./openai_response";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -160,18 +159,3 @@ export const model = new OpenAI({
 		verbose: process.env.OPENAI_VERBOSE === "true",
 	},
 });
-
-export async function getUserCC(req: Request) {
-	try {
-		const ip = req.headers.get("CF-Connecting-IP") || req.headers.get("x-forwarded-for");
-		if (!ip) throw new Error("No IP found");
-
-		console.log("Fetching country code for IP:", ip);
-
-		const response = await axios(`https://api.country.is/${ip}`);
-
-		console.log("Country code response:", response.data);
-		return response.data.country as string;
-	} catch (error) {}
-	return "de";
-}

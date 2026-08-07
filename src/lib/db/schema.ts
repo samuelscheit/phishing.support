@@ -50,6 +50,10 @@ export const submissions = sqliteTable(
 		dedupeKey: text("dedupe_key").notNull(),
 		status: text("status", { enum: submissionStatus }).notNull().default("new"),
 		info: text("info"),
+		/** Network and client metadata captured when the submission was made via HTTP. */
+		reporterIp: text("reporter_ip"),
+		reporterCountry: text("reporter_country"),
+		reporterHeaders: text("reporter_headers", { mode: "json" }).$type<Record<string, string>>(),
 		createdAt: timestamp("created_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),

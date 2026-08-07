@@ -78,9 +78,9 @@ export async function analyzeWebsite(options: {
 	mhtmlSnapshot?: Buffer;
 	url: string;
 	submissionId: bigint;
-	country_code?: string;
+	reporterCountry?: string;
 }): Promise<bigint> {
-	const { url, submissionId, country_code } = options!;
+	const { url, submissionId, reporterCountry } = options!;
 	try {
 		await emitStep(submissionId, "whois_lookup", 5);
 		const whois = await getInfo(url);
@@ -189,7 +189,7 @@ Use web search if necessary to gather more information about the content/brand. 
 					screenshotPng: archive.screenshotPng,
 					mhtml: archive.mhtml,
 				},
-				countryCode: country_code,
+				countryCode: reporterCountry,
 			});
 
 			await emitStep(submissionId, "reporting to Google Safe Browsing", 90);

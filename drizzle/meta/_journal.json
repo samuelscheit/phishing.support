@@ -15,6 +15,13 @@
       "when": 1768283636749,
       "tag": "0001_workable_shen",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786106028818,
+      "tag": "0002_add_reporter_metadata",
+      "breakpoints": true
     }
   ]
 }

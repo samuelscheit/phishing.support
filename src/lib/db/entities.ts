@@ -15,6 +15,7 @@ import {
 } from "./schema";
 import { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
 import { generateId } from "./ids";
+import type { ReporterMetadata } from "../request_metadata";
 
 function nowDate(): Date {
     return new Date();
@@ -29,7 +30,7 @@ export class SubmissionsEntity {
         status?: SubmissionStatus;
         info?: string;
         id?: bigint;
-    }) {
+    } & ReporterMetadata) {
         const db = await getDb();
         const id = params.id ?? generateId();
 
@@ -37,6 +38,9 @@ export class SubmissionsEntity {
             .select({
                 id: submissions.id,
                 status: submissions.status,
+                reporterIp: submissions.reporterIp,
+                reporterCountry: submissions.reporterCountry,
+                reporterHeaders: submissions.reporterHeaders,
             })
             .from(submissions)
             .where(eq(submissions.dedupeKey, params.dedupeKey))
@@ -46,6 +50,17 @@ export class SubmissionsEntity {
             if (exists[0].status === "failed") {
                 await db.delete(submissions).where(eq(submissions.id, exists[0].id));
             } else {
+                // A submission may first be created by an internal source and later
+                // encountered through the HTTP endpoint. Fill only missing metadata so
+                // the original reporter remains authoritative for deduplicated rows.
+                const existing = exists[0];
+                const metadata: Partial<typeof submissions.$inferInsert> = {};
+                if (!existing.reporterIp && params.reporterIp) metadata.reporterIp = params.reporterIp;
+                if (!existing.reporterCountry && params.reporterCountry) metadata.reporterCountry = params.reporterCountry;
+                if (!existing.reporterHeaders && params.reporterHeaders) metadata.reporterHeaders = params.reporterHeaders;
+                if (Object.keys(metadata).length > 0) {
+                    await db.update(submissions).set({ ...metadata, updatedAt: nowDate() }).where(eq(submissions.id, existing.id));
+                }
                 return exists[0].id;
             }
         }
@@ -61,6 +76,9 @@ export class SubmissionsEntity {
                     dedupeKey: params.dedupeKey,
                     status: params.status ?? "new",
                     info: params.info,
+                    reporterIp: params.reporterIp,
+                    reporterCountry: params.reporterCountry,
+                    reporterHeaders: params.reporterHeaders,
                     updatedAt: nowDate(),
                 },
             ])

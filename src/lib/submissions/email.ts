@@ -3,8 +3,13 @@ import { generateId } from "@/lib/db/ids";
 import { getAddressesText } from "@/lib/mail";
 import { analyzeMail } from "@/lib/mail_ai";
 import { simpleParser } from "mailparser";
+import type { ReporterMetadata } from "@/lib/request_metadata";
 
-export async function createEmailSubmissionFromEml(emlContent: string, source?: string): Promise<bigint> {
+export type EmailSubmissionOptions = ReporterMetadata & {
+	source?: string;
+};
+
+export async function createEmailSubmissionFromEml(emlContent: string, options: EmailSubmissionOptions = {}): Promise<bigint> {
 	const streamId = generateId();
 	const parsedMail = await simpleParser(emlContent, { skipTextToHtml: true });
 	const from = getAddressesText(parsedMail.from);
@@ -14,7 +19,10 @@ export async function createEmailSubmissionFromEml(emlContent: string, source?: 
 		data: { kind: "email" },
 		dedupeKey: `email-${from}`,
 		id: streamId,
-		source,
+		source: options.source,
+		reporterIp: options.reporterIp,
+		reporterCountry: options.reporterCountry,
+		reporterHeaders: options.reporterHeaders,
 	});
 
 	if (existingId !== streamId) return existingId;

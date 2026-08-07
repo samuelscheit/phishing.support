@@ -32,6 +32,14 @@ describe("request reporter metadata", () => {
 		expect(getClientIp(withIpv6)).toBe("2001:db8::9");
 	});
 
+	test("skips malformed forwarded hops before selecting a valid client IP", () => {
+		const request = new Request("https://phishing.support", {
+			headers: { "x-forwarded-for": "unknown, 198.51.100.9, 192.0.2.4" },
+		});
+
+		expect(getClientIp(request)).toBe("198.51.100.9");
+	});
+
 	test("captures all request headers and trusts the Cloudflare country header", async () => {
 		let fetchCalls = 0;
 		globalThis.fetch = (async () => {
