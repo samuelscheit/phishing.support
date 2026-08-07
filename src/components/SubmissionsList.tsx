@@ -39,6 +39,37 @@ function useGridColumnCount() {
 	return columnCount;
 }
 
+function SubmissionCard({ submission, obscured = false }: { submission: Submission; obscured?: boolean }) {
+	return (
+		<Link
+			href={`/submissions/${submission.id}`}
+			aria-hidden={obscured || undefined}
+			tabIndex={obscured ? -1 : undefined}
+			className={cn(
+				"block h-full min-w-0 transition-[filter,opacity] duration-500 ease-out",
+				obscured && "pointer-events-none select-none opacity-35 blur-sm"
+			)}
+		>
+			<Card className="hover:bg-accent transition-colors cursor-pointer h-full w-full">
+				<CardContent className="py-4 space-y-2 min-w-0">
+					<div className="flex justify-between items-start gap-2">
+						<SubmissionStatus status={submission.status} />
+
+						<span className="text-xs text-muted-foreground whitespace-nowrap">
+							{formatDistanceToNow(new Date(submission.createdAt), { addSuffix: true })}
+						</span>
+					</div>
+					<CardTitle className="text-lg truncate min-w-0">
+						{submission.data?.kind === "email"
+							? submission.data.email?.subject || submission.dedupeKey
+							: submission.data.website.url}
+					</CardTitle>
+				</CardContent>
+			</Card>
+		</Link>
+	);
+}
+
 export function SubmissionsList() {
 	const [submissions, setSubmissions] = useState<Submission[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -47,6 +78,8 @@ export function SubmissionsList() {
 	const previewSubmissionCount = columnCount * PREVIEW_ROWS;
 	const hasMoreSubmissions = submissions.length > previewSubmissionCount;
 	const isCollapsed = hasMoreSubmissions && !expanded;
+	const visibleSubmissions = isCollapsed ? submissions.slice(0, previewSubmissionCount) : submissions;
+	const obscuredSubmissions = isCollapsed ? submissions.slice(previewSubmissionCount) : [];
 
 	useEffect(() => {
 		const fetchSubmissions = async () => {
@@ -77,61 +110,40 @@ export function SubmissionsList() {
 	}
 
 	return (
-		<div className="relative">
-			<div
-				id="recent-submissions-list"
-				className={cn("grid gap-4 md:grid-cols-2 lg:grid-cols-3", isCollapsed && "max-h-[26rem] overflow-hidden")}
-			>
-				{submissions.map((s, index) => {
-					const isObscured = isCollapsed && index >= previewSubmissionCount;
-
-					return (
-						<Link
-							key={s.id}
-							href={`/submissions/${s.id}`}
-							aria-hidden={isObscured || undefined}
-							tabIndex={isObscured ? -1 : undefined}
-							className={cn(
-								"block h-full min-w-0 transition-[filter,opacity] duration-500 ease-out",
-								isObscured && "pointer-events-none select-none opacity-35 blur-sm"
-							)}
-						>
-							<Card className="hover:bg-accent transition-colors cursor-pointer h-full w-full">
-								<CardContent className="py-4 space-y-2 min-w-0">
-									<div className="flex justify-between items-start gap-2">
-										<SubmissionStatus status={s.status} />
-
-										<span className="text-xs text-muted-foreground whitespace-nowrap">
-											{formatDistanceToNow(new Date(s.createdAt), { addSuffix: true })}
-										</span>
-									</div>
-									<CardTitle className="text-lg truncate min-w-0">
-										{s.data?.kind === "email" ? s.data.email?.subject || s.dedupeKey : s.data.website.url}
-									</CardTitle>
-								</CardContent>
-							</Card>
-						</Link>
-					);
-				})}
-			</div>
-
-			{isCollapsed && (
-				<div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex h-24 items-end justify-center bg-gradient-to-t from-background via-background/90 to-transparent pb-4">
-					<Button
-						type="button"
-						variant="outline"
-						size="icon"
-						className="pointer-events-auto rounded-full shadow-md"
-						aria-label="Show all recent submissions"
-						aria-controls="recent-submissions-list"
-						aria-expanded={false}
-						title="Show all recent submissions"
-						onClick={() => setExpanded(true)}
-					>
-						<ChevronDown />
-					</Button>
+		<div>
+			<div id="recent-submissions-list">
+				<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+					{visibleSubmissions.map((submission) => (
+						<SubmissionCard key={submission.id} submission={submission} />
+					))}
 				</div>
-			)}
+
+				{isCollapsed && (
+					<div className="relative mt-4 h-24 overflow-hidden">
+						<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+							{obscuredSubmissions.map((submission) => (
+								<SubmissionCard key={submission.id} submission={submission} obscured />
+							))}
+						</div>
+
+						<div className="pointer-events-none absolute inset-0 z-10 flex items-end justify-center bg-gradient-to-t from-background via-background/90 to-transparent pb-4">
+							<Button
+								type="button"
+								variant="outline"
+								size="icon"
+								className="pointer-events-auto rounded-full shadow-md"
+								aria-label="Show all recent submissions"
+								aria-controls="recent-submissions-list"
+								aria-expanded={false}
+								title="Show all recent submissions"
+								onClick={() => setExpanded(true)}
+							>
+								<ChevronDown />
+							</Button>
+						</div>
+					</div>
+				)}
+			</div>
 
 			{hasMoreSubmissions && expanded && (
 				<div className="mt-4 flex justify-center">
