@@ -133,7 +133,12 @@ export function readableUserAgent(headersOrUserAgent: ReporterHeaders | string |
 
 	if (/iPhone/i.test(userAgent)) {
 		const model = userAgent.match(/iPhone\s*([0-9][\w,.-]*)?/i)?.[1];
-		return model ? `iPhone ${model.trim()}` : "iPhone";
+		if (model) return `iPhone ${model.trim()}`;
+
+		// Apple deliberately omits the retail device model from most Safari UAs.
+		// The iOS major version is still a useful, stable human-readable fallback.
+		const iosMajor = userAgent.match(/(?:CPU )?iPhone OS\s+(\d+)/i)?.[1];
+		return iosMajor ? `iPhone ${iosMajor}` : "iPhone";
 	}
 	if (/iPad/i.test(userAgent)) return "iPad";
 

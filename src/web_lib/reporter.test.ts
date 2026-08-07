@@ -14,7 +14,11 @@ describe("reporter metadata formatting", () => {
 
 		expect(getReporterHeader(headers, "user-agent")).toContain("iPhone");
 		expect(getReporterUserAgent(headers)).toContain("iPhone");
-		expect(readableUserAgent(headers)).toBe("iPhone");
+		expect(readableUserAgent(headers)).toBe("iPhone 18");
+	});
+
+	test("uses the iOS major version as the standard iPhone fallback", () => {
+		expect(readableUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) Safari/605.1.15")).toBe("iPhone 17");
 	});
 
 	test("prefers the client-hint model when available", () => {
