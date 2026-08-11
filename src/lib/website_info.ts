@@ -1,4 +1,5 @@
 import dns from "node:dns/promises";
+import { isIP as isIPAddress } from "node:net";
 import uniqBy from "lodash/uniqBy";
 import uniq from "lodash/uniq";
 import { parse } from "tldts";
@@ -68,7 +69,25 @@ type RDAPCIDR = {
 	length?: number;
 };
 
-type RDAPIPInfo = RDAPEntity & {
+export type RDAPAutnumInfo = RDAPEntity & {
+	asn: number;
+	name?: string;
+	startAutnum?: number;
+	endAutnum?: number;
+	status: string[];
+	events: RDAPEventMap;
+	abuse: RDAPAbuseContact | null;
+};
+
+/** A BGP origin observed for an IP address, enriched with the ASN's RDAP record. */
+export type OriginASNInfo = {
+	asn: number;
+	prefix?: string;
+	source: "ripe-stat";
+	rdap?: RDAPAutnumInfo;
+};
+
+export type RDAPIPInfo = RDAPEntity & {
 	startAddress?: string;
 	endAddress?: string;
 	ipVersion?: string;
@@ -82,6 +101,7 @@ type RDAPIPInfo = RDAPEntity & {
 	port43?: string;
 	ip: string;
 	abuse: RDAPAbuseContact | null;
+	origin_asns: OriginASNInfo[];
 };
 
 export type RDAPDomainInfo = {
@@ -97,10 +117,25 @@ export type RDAPDomainInfo = {
 };
 
 const rdapDomainResolverUrl = "https://rdap.org/domain/";
+const rdapIpResolverUrl = "https://rdap.org/ip/";
+const rdapAutnumResolverUrl = "https://rdap.org/autnum/";
+const ripeStatNetworkInfoUrl = "https://stat.ripe.net/data/network-info/data.json?resource=";
 type RDAPFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 export function getDomainRdapUrl(domain: string) {
 	return `${rdapDomainResolverUrl}${encodeURIComponent(domain)}`;
+}
+
+export function getIPRdapUrl(ip: string) {
+	return `${rdapIpResolverUrl}${encodeURIComponent(ip)}`;
+}
+
+export function getAutnumRdapUrl(asn: number) {
+	return `${rdapAutnumResolverUrl}${asn}`;
+}
+
+export function getRipeStatNetworkInfoUrl(ip: string) {
+	return `${ripeStatNetworkInfoUrl}${encodeURIComponent(ip)}`;
 }
 
 function parseVCard(vcardArray?: VCardArray): RDAPVCard | null {
@@ -178,20 +213,95 @@ export async function queryRDAPDomain(
 	}
 }
 
-async function queryIP(ip: string): Promise<RDAPIPInfo | undefined> {
+function simplifyEvents(events: any): RDAPEventMap {
+	return (events ?? []).reduce((acc: Record<string, string>, event: any) => {
+		if (event?.eventAction && event?.eventDate) {
+			acc[event.eventAction] = event.eventDate;
+		}
+		return acc;
+	}, {});
+}
+
+function parseAsn(value: unknown): number | undefined {
+	const normalized = String(value).trim().replace(/^AS/i, "");
+	if (!/^\d+$/.test(normalized)) return;
+
+	const asn = Number(normalized);
+	return Number.isSafeInteger(asn) && asn >= 0 && asn <= 4_294_967_295 ? asn : undefined;
+}
+
+export async function queryOriginASNs(ip: string, fetchImplementation: RDAPFetch = fetch): Promise<OriginASNInfo[]> {
 	try {
 		const response = await retry(() =>
-			fetch(`https://rdap.arin.net/registry/ip/${ip}`, {
+			fetchImplementation(getRipeStatNetworkInfoUrl(ip), {
 				method: "GET",
+				headers: {
+					Accept: "application/json",
+				},
+			})
+		);
+
+		if (!response.ok) return [];
+
+		const json = (await response.json()) as { data?: { asns?: unknown[]; prefix?: unknown } };
+		const prefix = typeof json.data?.prefix === "string" ? json.data.prefix : undefined;
+		const asns = uniq((json.data?.asns ?? []).map(parseAsn).filter((asn): asn is number => asn !== undefined));
+
+		return asns.map((asn) => ({ asn, prefix, source: "ripe-stat" }));
+	} catch (error) {
+		console.error("Error querying BGP origin ASN for IP:", ip, error);
+		return [];
+	}
+}
+
+export async function queryRDAPAutnum(asn: number, fetchImplementation: RDAPFetch = fetch): Promise<RDAPAutnumInfo | undefined> {
+	try {
+		const response = await retry(() =>
+			fetchImplementation(getAutnumRdapUrl(asn), {
+				method: "GET",
+				redirect: "follow",
 				headers: {
 					Accept: "application/rdap+json",
 				},
 			})
 		);
 
-		const json = await response.json();
+		if (!response.ok) return;
 
-		return simplifyIP(json, ip);
+		const json = await response.json();
+		return simplifyAutnum(json, asn);
+	} catch (error) {
+		console.error("Error querying RDAP for ASN:", asn, error);
+		return undefined;
+	}
+}
+
+export async function queryRDAPIP(ip: string, fetchImplementation: RDAPFetch = fetch): Promise<RDAPIPInfo | undefined> {
+	try {
+		const [response, origins] = await Promise.all([
+			retry(() =>
+				fetchImplementation(getIPRdapUrl(ip), {
+					method: "GET",
+					redirect: "follow",
+					headers: {
+						Accept: "application/rdap+json",
+					},
+				})
+			),
+			queryOriginASNs(ip, fetchImplementation),
+		]);
+
+		if (!response.ok) return;
+
+		const json = await response.json();
+		const origin_asns = await Promise.all(
+			origins.map(async (origin) => ({
+				...origin,
+				rdap: await queryRDAPAutnum(origin.asn, fetchImplementation),
+			}))
+		);
+
+		return { ...simplifyIP(json, ip), origin_asns };
 	} catch (error) {
 		console.error("Error querying RDAP for IP:", ip, error);
 		return undefined;
@@ -200,17 +310,11 @@ async function queryIP(ip: string): Promise<RDAPIPInfo | undefined> {
 
 function simplifyDomainRDAP(json: any, domain: string): RDAPDomainInfo {
 	const registrarEntity = simplifyEntity((json.entities ?? []).find((entity: any) => entity.roles?.includes("registrar")));
-	const events = (json.events ?? []).reduce((acc: Record<string, string>, event: any) => {
-		if (event?.eventAction && event?.eventDate) {
-			acc[event.eventAction] = event.eventDate;
-		}
-		return acc;
-	}, {});
 
 	return {
 		domain: json.ldhName ?? domain,
 		status: json.status ?? [],
-		events,
+		events: simplifyEvents(json.events),
 		nameservers: (json.nameservers ?? []).map((nameserver: any) => nameserver.ldhName).filter(Boolean),
 		registrar: registrarEntity
 			? {
@@ -222,13 +326,6 @@ function simplifyDomainRDAP(json: any, domain: string): RDAPDomainInfo {
 }
 
 function simplifyIP(json: any, ip: string): RDAPIPInfo {
-	const events = (json.events ?? []).reduce((acc: Record<string, string>, event: any) => {
-		if (event?.eventAction && event?.eventDate) {
-			acc[event.eventAction] = event.eventDate;
-		}
-		return acc;
-	}, {});
-
 	const simplified = simplifyEntity(json);
 
 	return {
@@ -241,16 +338,33 @@ function simplifyIP(json: any, ip: string): RDAPIPInfo {
 		parentHandle: json.parentHandle,
 		cidr0_cidrs: json.cidr0_cidrs ?? [],
 		status: json.status ?? [],
-		events,
+		events: simplifyEvents(json.events),
 		port43: json.port43,
 		ip,
 		...simplified,
+		abuse: recursiveAbuseContact(simplified),
+		origin_asns: [],
+	};
+}
+
+function simplifyAutnum(json: any, asn: number): RDAPAutnumInfo {
+	const simplified = simplifyEntity(json);
+
+	return {
+		...simplified,
+		asn,
+		handle: json.handle ?? simplified.handle,
+		name: json.name,
+		startAutnum: json.startAutnum,
+		endAutnum: json.endAutnum,
+		status: json.status ?? [],
+		events: simplifyEvents(json.events),
 		abuse: recursiveAbuseContact(simplified),
 	};
 }
 
 function isIP(input: string) {
-	return /^\d{1,3}(\.\d{1,3}){3}$/.test(input);
+	return isIPAddress(input) !== 0;
 }
 
 export type WhoISInfo = {
@@ -265,15 +379,15 @@ export async function getInfo(domain_or_ip: string): Promise<WhoISInfo> {
 	const target = domain_or_ip.startsWith("http") ? new URL(domain_or_ip).hostname : domain_or_ip;
 
 	if (isIP(target)) {
-		const rdap = await queryIP(target);
+		const rdap = await queryRDAPIP(target);
 
 		return { ip_rdaps: rdap ? [rdap] : [] };
 	}
 
-	const { domain } = parse(domain_or_ip);
+	const { domain } = parse(target);
 	var root_info = undefined as Awaited<ReturnType<typeof getInfo>> | undefined;
 
-	if (domain !== domain_or_ip && domain) {
+	if (domain !== target && domain) {
 		// also query root subdomain
 		root_info = await getInfo(domain);
 	}
@@ -292,7 +406,7 @@ export async function getInfo(domain_or_ip: string): Promise<WhoISInfo> {
 	const ip_addresses = [...dns_info.A, ...dns_info.AAAA];
 
 	const ip_rdaps = uniqBy(
-		(await Promise.all(ip_addresses.map((ip) => queryIP(ip)))).filter((x) => x !== undefined) as RDAPIPInfo[],
+		(await Promise.all(ip_addresses.map((ip) => queryRDAPIP(ip)))).filter((x) => x !== undefined) as RDAPIPInfo[],
 		(item) => item.abuse?.email || item.handle
 	);
 

@@ -83,8 +83,6 @@ export function WhoisTab({ url, whois }: { url?: string | null; whois?: WhoISInf
 
 	const registrarAbuseEmail = rdap?.registrar ? recursiveAbuseContact(rdap.registrar)?.email : undefined;
 
-	console.log(ipRdaps);
-
 	return (
 		<div className="space-y-4">
 			<Card>
@@ -185,6 +183,33 @@ export function WhoisTab({ url, whois }: { url?: string | null; whois?: WhoISInf
 												{ k: "Remarks", v: ip.remarks || ip.abuse?.remarks },
 											]}
 										/>
+										{(ip.origin_asns ?? []).length ? (
+											<div className="mt-4 space-y-3">
+												<div className="text-sm font-medium">BGP Origin ASN</div>
+												{ip.origin_asns.map((origin) => (
+													<Card key={`${ip.ip}-AS${origin.asn}`}>
+														<CardHeader className="space-y-1">
+															<CardTitle className="font-mono text-sm">AS{origin.asn}</CardTitle>
+															<div className="text-[11px] text-muted-foreground break-all">
+																{origin.rdap?.name || origin.rdap?.handle || "RDAP details unavailable"}
+															</div>
+														</CardHeader>
+														<CardContent>
+															<KeyValueTable
+																rows={[
+																	{ k: "BGP prefix", v: origin.prefix },
+																	{ k: "Origin source", v: "RIPEstat" },
+																	{ k: "RDAP handle", v: origin.rdap?.handle },
+																	{ k: "Abuse contact", v: origin.rdap?.abuse?.email || origin.rdap?.abuse?.tel },
+																	{ k: "Registered", v: safeFormatDate(origin.rdap?.events?.registration) },
+																	{ k: "Last changed", v: safeFormatDate(origin.rdap?.events?.["last changed"]) },
+																]}
+															/>
+														</CardContent>
+													</Card>
+												))}
+											</div>
+										) : null}
 									</CardContent>
 								</Card>
 							))}
