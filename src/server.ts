@@ -3,6 +3,8 @@ import { createServer } from "node:http";
 
 import { startImapListener } from "./lib/imap/imap_listener";
 import { SubmissionsEntity } from "./lib/db/entities";
+import { startAbuseWorker, stopAbuseWorker } from "./lib/abuse/worker";
+import { startAbuseImapListener, stopAbuseImapListener } from "./lib/abuse/imap";
 
 function envInt(name: string, defaultValue: number): number {
 	const raw = process.env[name];
@@ -36,6 +38,18 @@ startImapListener().catch((err) => {
 	console.error("IMAP listener crashed:", err);
 });
 
+// Standalone abuse reporting has its own durable worker and optional mailbox
+// bridge. Neither path touches the legacy submission/analysis tables.
+try {
+	await startAbuseWorker();
+	await startAbuseImapListener();
+	console.log("Standalone abuse worker started.");
+} catch (err) {
+	// A misconfigured optional mailbox must not prevent the HTTP service from
+	// booting, but a worker startup failure is retained in logs for operations.
+	console.error("Standalone abuse worker failed to start:", err);
+}
+
 const server = createServer((req, res) => {
 	try {
 		handler(req, res);
@@ -48,6 +62,8 @@ const server = createServer((req, res) => {
 
 const shutdown = async (signal: string) => {
 	console.log(`Received ${signal}, shutting down...`);
+	await stopAbuseImapListener();
+	await stopAbuseWorker();
 	server.close(() => {
 		// no-op
 	});

@@ -43,6 +43,13 @@
       "when": 1786598906042,
       "tag": "0005_correspondence_integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1786598957759,
+      "tag": "0006_standalone_abuse_reporting",
+      "breakpoints": true
     }
   ]
 }

@@ -295,3 +295,8 @@ export const mailIngest = sqliteTable(
 );
 
 export type MailIngest = InferSelectModel<typeof mailIngest>;
+
+// The standalone abuse-reporting service owns a completely separate schema.
+// Re-exporting it here makes the migration generator include both schemas
+// without introducing any application-level relationship to legacy submissions.
+export * from "../abuse/schema";

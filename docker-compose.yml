@@ -1,42 +1,168 @@
+name: phishing-reporter
+
 services:
-    app:
-        build:
-            context: .
-            dockerfile: Dockerfile
-        ports:
-            - "8014:3000"
-        environment:
-            # SQLite database file inside the container
-            DB_FILE_NAME: /app/data/phishing_reporter.sqlite
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8014:3000"
+    environment:
+      DB_FILE_NAME: /app/data/phishing_reporter.sqlite
+      DOCKER: "true"
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://phishing.support}
+      REPORT_REPLY_DOMAIN: ${REPORT_REPLY_DOMAIN:-phishing.support}
+      ABUSE_REPLY_DOMAIN: ${ABUSE_REPLY_DOMAIN:-phishing.support}
+      ABUSE_SMTP_HOST: ${ABUSE_SMTP_HOST:-${SMTP_HOST:-}}
+      ABUSE_SMTP_PORT: ${ABUSE_SMTP_PORT:-${SMTP_PORT:-587}}
+      ABUSE_SMTP_SECURE: ${ABUSE_SMTP_SECURE:-${SMTP_SECURE:-false}}
+      ABUSE_SMTP_USER: ${ABUSE_SMTP_USER:-${SMTP_USER:-}}
+      ABUSE_SMTP_PASS: ${ABUSE_SMTP_PASS:-${SMTP_PASS:-}}
+      ABUSE_SMTP_FROM: ${ABUSE_SMTP_FROM:-${SMTP_FROM:-support@phishing.support}}
+      ABUSE_IMAP_HOST: ${ABUSE_IMAP_HOST:-${IMAP_HOST:-}}
+      ABUSE_IMAP_PORT: ${ABUSE_IMAP_PORT:-${IMAP_PORT:-993}}
+      ABUSE_IMAP_SECURE: ${ABUSE_IMAP_SECURE:-${IMAP_SECURE:-true}}
+      ABUSE_IMAP_USER: ${ABUSE_IMAP_USER:-${IMAP_USER:-}}
+      ABUSE_IMAP_PASS: ${ABUSE_IMAP_PASS:-${IMAP_PASS:-}}
+      ABUSE_IMAP_MAILBOX: ${ABUSE_IMAP_MAILBOX:-${IMAP_MAILBOX:-phishing.report}}
+      SKYVERN_BASE_URL: http://skyvern:8000
+      SKYVERN_API_KEY_FILE: /run/skyvern/api-key
+      SKYVERN_INTERNAL_S3_ORIGIN: http://skyvern-minio:9000
+      ABUSE_SKYVERN_WEBHOOK_URL: http://app:3000/api/skyvern/webhook
+      ABUSE_GNAME_ENABLED: ${ABUSE_GNAME_ENABLED:-false}
+      ABUSE_GENERIC_EMAIL_ENABLED: ${ABUSE_GENERIC_EMAIL_ENABLED:-false}
+      ABUSE_GENERIC_FORM_ESCALATION_ENABLED: ${ABUSE_GENERIC_FORM_ESCALATION_ENABLED:-false}
+      # These are required even while provider routes are rollout-gated: they
+      # protect idempotency responses and bearer-authorized artifact reads.
+      ABUSE_TRACKING_TOKEN_SECRET: ${ABUSE_TRACKING_TOKEN_SECRET:?Set ABUSE_TRACKING_TOKEN_SECRET to at least 32 random bytes}
+      ABUSE_ARTIFACT_TOKEN_SECRET: ${ABUSE_ARTIFACT_TOKEN_SECRET:?Set ABUSE_ARTIFACT_TOKEN_SECRET to at least 32 random bytes}
+    volumes:
+      - phishing_reporter_data:/app/data
+      - skyvern_api_key:/run/skyvern:ro
+    depends_on:
+      skyvern:
+        condition: service_started
+      skyvern-minio:
+        condition: service_healthy
 
-            DOCKER: "true"
-            NEXT_PUBLIC_SITE_URL: https://phishing.support
+  skyvern-postgres:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: skyvern
+      # Required rather than defaulted: these services hold Skyvern run data
+      # and permanent artifacts, so development-style credentials are never a
+      # safe implicit production configuration.
+      POSTGRES_PASSWORD: ${SKYVERN_POSTGRES_PASSWORD:?Set SKYVERN_POSTGRES_PASSWORD to a deployment secret}
+      POSTGRES_DB: skyvern
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - skyvern_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skyvern -d skyvern"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
-            # Set these via your deployment environment / secrets manager
-            # OPENAI_API_KEY: ""
-            # OPENAI_API_BASE_URL: "https://api.openai.com/v1"
-            # SMTP_HOST: ""
-            # SMTP_PORT: "587"
-            # SMTP_USER: ""
-            # SMTP_PASS: ""
-            # SMTP_FROM: "support@phishing.support"
+  skyvern-minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${SKYVERN_MINIO_ROOT_USER:?Set SKYVERN_MINIO_ROOT_USER to a deployment secret}
+      MINIO_ROOT_PASSWORD: ${SKYVERN_MINIO_ROOT_PASSWORD:?Set SKYVERN_MINIO_ROOT_PASSWORD to a deployment secret}
+    volumes:
+      - skyvern_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
-            # Correspondence-enabled abuse reports use a random Reply-To local
-            # part under this domain. Enable iCloud Custom Email Domain's
-            # “Allow All Incoming Emails” catch-all and make sure it lands in
-            # the mailbox selected by the IMAP settings below.
-            REPORT_REPLY_DOMAIN: phishing.support
-            # IMAP_HOST: "imap.mail.me.com"
-            # IMAP_PORT: "993"
-            # IMAP_SECURE: "true"
-            # IMAP_USER: ""
-            # IMAP_PASS: ""
-            # IMAP_MAILBOX: "phishing.report"
-            # IMAP_LISTEN_ADDRESS: "report@phishing.support"
+  skyvern-minio-init:
+    image: minio/mc:latest
+    restart: "no"
+    environment:
+      MINIO_ROOT_USER: ${SKYVERN_MINIO_ROOT_USER:?Set SKYVERN_MINIO_ROOT_USER to a deployment secret}
+      MINIO_ROOT_PASSWORD: ${SKYVERN_MINIO_ROOT_PASSWORD:?Set SKYVERN_MINIO_ROOT_PASSWORD to a deployment secret}
+    entrypoint: ["/bin/sh", "/opt/minio-init.sh"]
+    volumes:
+      - ./docker/skyvern/minio-init.sh:/opt/minio-init.sh:ro
+    depends_on:
+      skyvern-minio:
+        condition: service_healthy
 
-        volumes:
-            - phishing_reporter_data:/app/data
-        restart: unless-stopped
+  abuse-browser:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: docker/abuse-browser/Dockerfile
+    restart: unless-stopped
+    environment:
+      DBC_USERNAME_FILE: /run/secrets/dbc_username
+      DBC_PASSWORD_FILE: /run/secrets/dbc_password
+    secrets:
+      - dbc_username
+      - dbc_password
+    volumes:
+      - abuse_browser_profile:/data/profile
+
+  skyvern:
+    image: public.ecr.aws/skyvern/skyvern@sha256:f0c56aa4e19deb14c72d535ddb08a37c14efcf1ef1f32bd124eebb1d7e0b788f
+    restart: unless-stopped
+    environment:
+      ENV: local
+      DATABASE_STRING: postgresql+psycopg://skyvern:${SKYVERN_POSTGRES_PASSWORD:?Set SKYVERN_POSTGRES_PASSWORD to a deployment secret}@skyvern-postgres:5432/skyvern
+      BROWSER_TYPE: cdp-connect
+      BROWSER_REMOTE_DEBUGGING_URL: http://abuse-browser:9222/
+      SKYVERN_STORAGE_TYPE: s3
+      AWS_ENDPOINT_URL: http://skyvern-minio:9000
+      AWS_CONFIG_FILE: /etc/aws/config
+      AWS_ACCESS_KEY_ID: ${SKYVERN_MINIO_ROOT_USER:?Set SKYVERN_MINIO_ROOT_USER to a deployment secret}
+      AWS_SECRET_ACCESS_KEY: ${SKYVERN_MINIO_ROOT_PASSWORD:?Set SKYVERN_MINIO_ROOT_PASSWORD to a deployment secret}
+      AWS_S3_BUCKET_ARTIFACTS: skyvern-artifacts
+      AWS_S3_BUCKET_SCREENSHOTS: skyvern-screenshots
+      AWS_S3_BUCKET_BROWSER_SESSIONS: skyvern-browser-sessions
+      AWS_S3_BUCKET_UPLOADS: skyvern-uploads
+      AWS_EC2_METADATA_DISABLED: "true"
+      PORT: "8000"
+      MAX_STEPS_PER_RUN: ${SKYVERN_MAX_STEPS_PER_RUN:-120}
+      MAX_STEPS_PER_TASK_V2: ${SKYVERN_MAX_STEPS_PER_TASK_V2:-120}
+      OPENAI_API_KEY: ${SKYVERN_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}
+      OPENAI_API_BASE: ${SKYVERN_OPENAI_API_BASE:-${OPENAI_API_BASE_URL:-https://api.openai.com/v1}}
+      LLM_KEY: ${SKYVERN_LLM_KEY:-OPENAI_GPT4O}
+      ENABLE_OPENAI: ${SKYVERN_ENABLE_OPENAI:-false}
+    volumes:
+      - ./docker/skyvern/aws-config:/etc/aws/config:ro
+    depends_on:
+      skyvern-postgres:
+        condition: service_healthy
+      skyvern-minio-init:
+        condition: service_completed_successfully
+      abuse-browser:
+        condition: service_started
+
+  skyvern-api-key-bootstrap:
+    image: curlimages/curl:latest
+    restart: "no"
+    entrypoint: ["/bin/sh", "/opt/bootstrap-api-key.sh"]
+    volumes:
+      - ./docker/skyvern/bootstrap-api-key.sh:/opt/bootstrap-api-key.sh:ro
+      - skyvern_api_key:/run/skyvern
+    depends_on:
+      skyvern:
+        condition: service_started
 
 volumes:
-    phishing_reporter_data:
+  phishing_reporter_data:
+  skyvern_postgres_data:
+  skyvern_minio_data:
+  abuse_browser_profile:
+  skyvern_api_key:
+
+secrets:
+  dbc_username:
+    environment: DBC_USERNAME
+  dbc_password:
+    environment: DBC_PASSWORD
