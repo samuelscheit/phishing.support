@@ -19,6 +19,20 @@ services:
             # SMTP_PORT: "587"
             # SMTP_USER: ""
             # SMTP_PASS: ""
+            # SMTP_FROM: "support@phishing.support"
+
+            # Correspondence-enabled abuse reports use a random Reply-To local
+            # part under this domain. Enable iCloud Custom Email Domain's
+            # “Allow All Incoming Emails” catch-all and make sure it lands in
+            # the mailbox selected by the IMAP settings below.
+            REPORT_REPLY_DOMAIN: phishing.support
+            # IMAP_HOST: "imap.mail.me.com"
+            # IMAP_PORT: "993"
+            # IMAP_SECURE: "true"
+            # IMAP_USER: ""
+            # IMAP_PASS: ""
+            # IMAP_MAILBOX: "phishing.report"
+            # IMAP_LISTEN_ADDRESS: "report@phishing.support"
 
         volumes:
             - phishing_reporter_data:/app/data

@@ -13,8 +13,23 @@ export type SubmissionStatus = (typeof submissionStatus)[number];
 export const analysisRunStatus = ["running", "completed", "failed"] as const;
 export type AnalysisRunStatus = (typeof analysisRunStatus)[number];
 
-export const reportStatus = ["sent", "failed"] as const;
-export type ReportStatus = (typeof reportStatus)[number];
+export const providerReportStatus = ["sent", "failed"] as const;
+export type ProviderReportStatus = (typeof providerReportStatus)[number];
+
+export const reportThreadStatus = ["pending", "sent", "replied", "delivery_failed", "failed", "closed"] as const;
+export type ReportThreadStatus = (typeof reportThreadStatus)[number];
+
+export const reportMessageDirection = ["outbound", "inbound"] as const;
+export type ReportMessageDirection = (typeof reportMessageDirection)[number];
+
+export const reportMessageKind = ["report", "reply", "auto_reply", "bounce"] as const;
+export type ReportMessageKind = (typeof reportMessageKind)[number];
+
+export const reportMessageStatus = ["pending", "sent", "received", "failed"] as const;
+export type ReportMessageStatus = (typeof reportMessageStatus)[number];
+
+export const mailIngestRoute = ["reply", "intake", "ignored", "failed"] as const;
+export type MailIngestRoute = (typeof mailIngestRoute)[number];
 
 export type EmailSubmissionData = MailData;
 
@@ -114,15 +129,14 @@ export const artifacts = sqliteTable(
 	},
 	(table) => [
 		index("artifacts_submission_kind_created_idx").on(table.submissionId, table.kind, table.createdAt),
-		uniqueIndex("artifacts_sha256_size_unique").on(table.sha256, table.size),
 	]
 );
 
 export type Artifact = InferSelectModel<typeof artifacts>;
 
-/** Outbound reports (draft/sent/failed). */
-export const reports = sqliteTable(
-	"reports",
+/** Non-email provider submissions and imported legacy report records. */
+export const providerReports = sqliteTable(
+	"provider_reports",
 	{
 		id: bignum("id").primaryKey(),
 		submissionId: bignum("submission_id")
@@ -131,15 +145,52 @@ export const reports = sqliteTable(
 		analysisRunId: bignum("analysis_run_id").references(() => analysisRuns.id, {
 			onDelete: "set null",
 		}),
-		channel: text("channel").notNull().default("email"),
+		channel: text("channel").notNull().default("provider"),
 		to: text("to").notNull(),
 		subject: text("subject"),
 		body: text("body").notNull(),
-		status: text("status", { enum: reportStatus }).notNull().default("sent"),
-		sentAt: int("sent_at"),
+		status: text("status", { enum: providerReportStatus }).notNull().default("sent"),
+		sentAt: timestamp("sent_at"),
 		providerMessageId: text("provider_message_id"),
-		// refereence to artifacts table for attachments
+		/** References to rows in the artifacts table. */
 		attachmentsArtifactIds: text("attachments_artifact_ids", { mode: "json" }).$type<string[]>(),
+		data: text("data", { mode: "json" }),
+		/** Imported rows predate correspondence threads and are retained for auditability. */
+		legacy: int("legacy", { mode: "boolean" }).notNull().default(false),
+		createdAt: timestamp("created_at")
+			.notNull()
+			.default(sql`(unixepoch() * 1000)`),
+		updatedAt: timestamp("updated_at")
+			.notNull()
+			.default(sql`(unixepoch() * 1000)`),
+	},
+	(table) => [
+		index("provider_reports_submission_created_idx").on(table.submissionId, table.createdAt),
+		index("provider_reports_to_created_idx").on(table.to, table.createdAt),
+		index("provider_reports_status_created_idx").on(table.status, table.createdAt),
+	]
+);
+
+export type ProviderReport = InferSelectModel<typeof providerReports>;
+
+/** One correspondence thread for every SMTP abuse report. */
+export const reportThreads = sqliteTable(
+	"report_threads",
+	{
+		id: bignum("id").primaryKey(),
+		submissionId: bignum("submission_id")
+			.notNull()
+			.references(() => submissions.id, { onDelete: "cascade" }),
+		analysisRunId: bignum("analysis_run_id").references(() => analysisRuns.id, {
+			onDelete: "set null",
+		}),
+		/** Normalized abuse-recipient addresses. */
+		to: text("to", { mode: "json" }).$type<string[]>().notNull(),
+		subject: text("subject"),
+		replyAddress: text("reply_address").notNull(),
+		/** Opaque token used only as a diagnostic mail header. */
+		replyToken: text("reply_token").notNull(),
+		status: text("status", { enum: reportThreadStatus }).notNull().default("pending"),
 		data: text("data", { mode: "json" }),
 		createdAt: timestamp("created_at")
 			.notNull()
@@ -149,10 +200,98 @@ export const reports = sqliteTable(
 			.default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
-		index("reports_submission_created_idx").on(table.submissionId, table.createdAt),
-		index("reports_to_created_idx").on(table.to, table.createdAt),
-		index("reports_status_created_idx").on(table.status, table.createdAt),
+		uniqueIndex("report_threads_reply_address_unique").on(table.replyAddress),
+		uniqueIndex("report_threads_reply_token_unique").on(table.replyToken),
+		index("report_threads_submission_created_idx").on(table.submissionId, table.createdAt),
+		index("report_threads_status_updated_idx").on(table.status, table.updatedAt),
 	]
 );
 
-export type Report = InferSelectModel<typeof reports>;
+export type ReportThread = InferSelectModel<typeof reportThreads>;
+
+/** Individual inbound and outbound RFC 5322 messages in an abuse-report thread. */
+export const reportMessages = sqliteTable(
+	"report_messages",
+	{
+		id: bignum("id").primaryKey(),
+		threadId: bignum("thread_id")
+			.notNull()
+			.references(() => reportThreads.id, { onDelete: "cascade" }),
+		direction: text("direction", { enum: reportMessageDirection }).notNull(),
+		kind: text("kind", { enum: reportMessageKind }).notNull(),
+		status: text("status", { enum: reportMessageStatus }).notNull(),
+		from: text("from"),
+		to: text("to", { mode: "json" }).$type<string[]>().notNull(),
+		cc: text("cc", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+		subject: text("subject"),
+		textBody: text("text_body"),
+		htmlBody: text("html_body"),
+		messageId: text("message_id"),
+		inReplyTo: text("in_reply_to"),
+		references: text("references", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+		providerMessageId: text("provider_message_id"),
+		rawArtifactId: bignum("raw_artifact_id").references(() => artifacts.id, { onDelete: "set null" }),
+		attachmentArtifactIds: text("attachment_artifact_ids", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+		occurredAt: timestamp("occurred_at").notNull(),
+		/** SMTP acceptance time for outbound reports; timeline ordering stays on occurredAt. */
+		sentAt: timestamp("sent_at"),
+		error: text("error"),
+		createdAt: timestamp("created_at")
+			.notNull()
+			.default(sql`(unixepoch() * 1000)`),
+		updatedAt: timestamp("updated_at")
+			.notNull()
+			.default(sql`(unixepoch() * 1000)`),
+	},
+	(table) => [
+		index("report_messages_thread_occurred_idx").on(table.threadId, table.occurredAt),
+		// Outbound IDs are ours and must never identify two report threads.
+		uniqueIndex("report_messages_outbound_message_id_unique")
+			.on(table.messageId)
+			.where(sql`${table.direction} = 'outbound' and ${table.messageId} is not null`),
+		// The same inbound RFC message can be copied into another IMAP UID or
+		// mailbox. It is one correspondence event, regardless of the delivery
+		// copy, while outbound IDs remain independently indexed for routing.
+		uniqueIndex("report_messages_inbound_message_id_unique")
+			.on(table.messageId)
+			.where(sql`${table.direction} = 'inbound' and ${table.messageId} is not null`),
+		index("report_messages_message_id_idx").on(table.messageId),
+		index("report_messages_in_reply_to_idx").on(table.inReplyTo),
+	]
+);
+
+export type ReportMessage = InferSelectModel<typeof reportMessages>;
+
+/** Idempotency and disposition ledger for messages observed through IMAP. */
+export const mailIngest = sqliteTable(
+	"mail_ingest",
+	{
+		id: bignum("id").primaryKey(),
+		mailbox: text("mailbox").notNull(),
+		uidValidity: int("uid_validity").notNull(),
+		uid: int("uid").notNull(),
+		messageId: text("message_id"),
+		route: text("route", { enum: mailIngestRoute }).notNull(),
+		reportMessageId: bignum("report_message_id").references(() => reportMessages.id, {
+			onDelete: "set null",
+		}),
+		reason: text("reason"),
+		attempts: int("attempts").notNull().default(1),
+		/** Failed parsing/storage attempts are retained but are retried on a later listener pass. */
+		terminal: int("terminal", { mode: "boolean" }).notNull().default(true),
+		processedAt: timestamp("processed_at").notNull(),
+		createdAt: timestamp("created_at")
+			.notNull()
+			.default(sql`(unixepoch() * 1000)`),
+		updatedAt: timestamp("updated_at")
+			.notNull()
+			.default(sql`(unixepoch() * 1000)`),
+	},
+	(table) => [
+		uniqueIndex("mail_ingest_mailbox_uid_unique").on(table.mailbox, table.uidValidity, table.uid),
+		index("mail_ingest_message_id_idx").on(table.messageId),
+		index("mail_ingest_route_processed_idx").on(table.route, table.processedAt),
+	]
+);
+
+export type MailIngest = InferSelectModel<typeof mailIngest>;

@@ -1,7 +1,7 @@
 import { runStreamedAnalysisRun } from "../analysis_run";
 import { solveCloudflareTurnstile } from "../browser/solveCloudflareTurnstile";
 import { abuseReplyMail, abuseReplyName, abuseReplyUrl, userAgent } from "../constants";
-import { ReportsEntity } from "../db/entities";
+import { ProviderReportsEntity } from "../db/entities";
 import { defaultResponseModel } from "../utils";
 
 export async function reportCloudflareAbuse(params: {
@@ -104,8 +104,9 @@ More information can be found here: https://phishing.support/submissions/${param
 		const json = await response.json();
 		console.log("Cloudflare Abuse Report successfully submitted:", json);
 
-		await ReportsEntity.create({
+		await ProviderReportsEntity.create({
 			submissionId: params.submissionId,
+			channel: "cloudflare_abuse",
 			to: "Cloudflare Abuse",
 			body: `${params.explanation}\nInfringed Brand: ${params.infringedBrand!}`,
 		});

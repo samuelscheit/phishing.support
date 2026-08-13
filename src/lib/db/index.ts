@@ -47,3 +47,20 @@ export function getDb() {
 	databasePromise ??= initializeDatabase();
 	return databasePromise;
 }
+
+/**
+ * Closes the lazy SQLite connection so an isolated test can point DB_FILE_NAME
+ * at a temporary database before the next getDb() call. Production code never
+ * needs to reset this singleton.
+ */
+export async function resetDatabaseForTesting(): Promise<void> {
+	const activeDatabase = databasePromise;
+	databasePromise = undefined;
+	if (!activeDatabase) return;
+
+	try {
+		(await activeDatabase).$client.close();
+	} catch {
+		// Tests may reset after a failed database initialization.
+	}
+}

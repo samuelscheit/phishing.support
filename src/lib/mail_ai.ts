@@ -1,4 +1,4 @@
-import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
+import { ArtifactsEntity, ReportingSummaryEntity, SubmissionsEntity } from "./db/entities";
 import { runStreamedAnalysisRun } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
 import { simpleParser } from "mailparser";
@@ -290,18 +290,37 @@ ${buildMailEvidence(mail, analysis.output_text)}`,
 				analysisText: analysis.output_text,
 			});
 
-			var subject = `Phishing Reported - ${submissionSubject}`;
-			var body = [
-				`Thank you very much for your report!`,
-				"",
-				`We have analyzed the email you provided and determined that it is indeed a phishing attempt.`,
-				"",
-				`Your submission has been reported to the relevant email providers and hosting services involved.`,
-				`You can view details at: ${abuseReplyUrl}/submissions/${stream_id}`,
-				"",
-				`Thank you for helping to combat phishing!`,
-				`Your ${abuseReplyName} Team`,
-			].join("\n");
+			const hasSuccessfulReport = await ReportingSummaryEntity.hasSuccessfulReport(stream_id);
+			if (hasSuccessfulReport) {
+				await SubmissionsEntity.update(stream_id, { status: "reported", info: undefined });
+				var subject = `Phishing Reported - ${submissionSubject}`;
+				var body = [
+					`Thank you very much for your report!`,
+					"",
+					`We have analyzed the email you provided and determined that it is indeed a phishing attempt.`,
+					"",
+					`Your submission has been reported to the relevant email providers and hosting services involved.`,
+					`You can view details at: ${abuseReplyUrl}/submissions/${stream_id}`,
+					"",
+					`Thank you for helping to combat phishing!`,
+					`Your ${abuseReplyName} Team`,
+				].join("\n");
+			} else {
+				await SubmissionsEntity.update(stream_id, {
+					status: "failed",
+					info: "Phishing confirmed, but no reports were successfully submitted.",
+				});
+				var subject = `Phishing Report Could Not Be Reported - ${submissionSubject}`;
+				var body = [
+					`Thank you for your report.`,
+					"",
+					`We analyzed the email you provided and confirmed that it is a phishing attempt, but the abuse report could not be delivered successfully.`,
+					`We have kept the failed delivery details for review at: ${abuseReplyUrl}/submissions/${stream_id}`,
+					"",
+					`Thank you for helping to combat phishing.`,
+					`Your ${abuseReplyName} Team`,
+				].join("\n");
+			}
 		} else {
 			await markSubmissionInvalid(stream_id);
 

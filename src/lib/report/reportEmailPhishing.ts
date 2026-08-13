@@ -64,8 +64,9 @@ ${toon.encode({ ...params.mail, eml: undefined })}
 		user,
 	});
 
-	await sendReportEmail({
+	return await sendReportEmail({
 		submissionId: params.submissionId,
+		analysisRunId: draft.analysisRunId,
 		draft,
 		attachments: [
 			{

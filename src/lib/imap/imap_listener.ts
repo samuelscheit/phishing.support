@@ -1,12 +1,9 @@
-import { FetchMessageObject, ImapFlow } from "imapflow";
+import { type FetchMessageObject, ImapFlow } from "imapflow";
 import { config as loadDotenv } from "dotenv";
-import { simpleParser, type AddressObject, type ParsedMail } from "mailparser";
-
-import { SubmissionsEntity } from "@/lib/db/entities";
-import { generateId } from "@/lib/db/ids";
 import { join } from "node:path";
-import { createEmailSubmissionFromEml } from "../submissions/email";
-import { extractEmlsFromIncomingMessage } from "../mail_forwarded";
+
+import { ingestFetchedIncomingMail } from "@/lib/imap/ingest";
+import { getReportReplyDomain, normalizeEmailAddress, validateReplyDomainForIntake } from "@/lib/report/correspondence";
 import { retry } from "../utils";
 
 function requiredEnv(name: string): string {
@@ -25,12 +22,7 @@ function envInt(name: string, defaultValue: number): number {
 	const raw = process.env[name];
 	if (!raw) return defaultValue;
 	const value = Number.parseInt(raw, 10);
-	if (!Number.isFinite(value)) return defaultValue;
-	return value;
-}
-
-function normalizeAddress(address: string): string {
-	return address.trim().toLowerCase();
+	return Number.isFinite(value) ? value : defaultValue;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -49,8 +41,12 @@ type ListenerConfig = {
 };
 
 function getListenerConfig(): ListenerConfig {
+	const listenAddress = normalizeEmailAddress(requiredEnv("IMAP_LISTEN_ADDRESS"));
+	if (!listenAddress) throw new Error("IMAP_LISTEN_ADDRESS must be a valid mailbox address.");
+	validateReplyDomainForIntake(getReportReplyDomain(), listenAddress);
+
 	return {
-		listenAddress: requiredEnv("IMAP_LISTEN_ADDRESS"),
+		listenAddress,
 		host: requiredEnv("IMAP_HOST"),
 		port: envInt("IMAP_PORT", 993),
 		secure: envBool("IMAP_SECURE", true),
@@ -66,45 +62,29 @@ function createImapClient(config: ListenerConfig): ImapFlow {
 		host: config.host,
 		port: config.port,
 		secure: config.secure,
-		auth: {
-			user: config.user,
-			pass: config.pass,
-		},
+		auth: { user: config.user, pass: config.pass },
+		// The listener owns the explicit idle()/fetch loop below. Leaving
+		// IMAPFlow auto-IDLE enabled can make idle() return immediately when an
+		// automatic IDLE is already active, resulting in a busy loop.
+		disableAutoIdle: true,
 	});
 }
 
-function isNoConnectionError(err: unknown): boolean {
-	if (!err || typeof err !== "object") return false;
-	return "code" in err && (err as { code?: string }).code === "NoConnection";
+function isNoConnectionError(error: unknown): boolean {
+	return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "NoConnection");
 }
 
-function addressObjectIncludes(obj: AddressObject | AddressObject[] | undefined, address: string): boolean {
-	if (!obj) return false;
-	const needle = normalizeAddress(address);
-	const list = Array.isArray(obj) ? obj : [obj];
-
-	for (const entry of list) {
-		for (const v of entry.value ?? []) {
-			if (!v.address) continue;
-			if (normalizeAddress(v.address) === needle) return true;
-		}
-	}
-
-	return false;
-}
-
+/**
+ * The IMAP client is intentionally limited to fetching and marking messages.
+ * All routing, parsing, persistence, and idempotency lives in ingest.ts so it
+ * can be exercised with deterministic RFC 5322 fixtures without a mailbox.
+ */
 export async function startImapListener() {
-	// Load .env for standalone execution (Next.js loads env differently depending on runtime)
-	loadDotenv({
-		path: join(process.cwd(), ".env"),
-		quiet: true,
-	});
-
+	loadDotenv({ path: join(process.cwd(), ".env"), quiet: true });
 	const config = getListenerConfig();
 
 	let stopped = false;
 	let activeClient: ImapFlow | null = null;
-
 	const stop = () => {
 		if (stopped) return;
 		stopped = true;
@@ -112,7 +92,7 @@ export async function startImapListener() {
 		try {
 			activeClient?.close();
 		} catch {
-			// ignore
+			// The connection may already be closed during shutdown.
 		}
 	};
 
@@ -126,139 +106,117 @@ export async function startImapListener() {
 			try {
 				console.log("Connecting to IMAP server...");
 				await retry(() => client.connect());
-
 				const lock = await client.getMailboxLock(config.mailbox);
+
 				try {
 					const mailboxExists = () => (client.mailbox && typeof client.mailbox === "object" ? (client.mailbox.exists ?? 0) : 0);
-					const mailboxUidValidity = () =>
-						client.mailbox && typeof client.mailbox === "object" ? (client.mailbox.uidValidity ?? 0) : 0;
-
-					const mailboxKey = encodeURIComponent(config.mailbox);
-					const makeImapSourcePrefix = (uid: number) => `imap:${mailboxKey}:${mailboxUidValidity()}:${uid}`;
-
-					const processFetchedMessage = async (msg: FetchMessageObject) => {
+					const mailboxUidValidity = () => Number(client.mailbox && typeof client.mailbox === "object" ? (client.mailbox.uidValidity ?? 0) : 0);
+					const markSeen = async (uid: number, reason: string) => {
 						try {
-							if (!msg?.uid) return;
-							console.log(`Processing IMAP message UID ${msg.uid}...`, msg.flags);
-							if (!config.processSeen && msg.flags?.has("\\Seen")) return;
-
-							const sourcePrefix = makeImapSourcePrefix(msg.uid);
-							const existingSubmissionId = await SubmissionsEntity.findIdBySourcePrefix(sourcePrefix);
-							if (existingSubmissionId) {
-								console.log(
-									`Skipping IMAP UID ${msg.uid} (${sourcePrefix}): already has submission ${existingSubmissionId.toString()}`
-								);
-								try {
-									await client.messageFlagsAdd(msg.uid, ["\\Seen"], { uid: true });
-								} catch (e) {
-									console.error("Failed to mark IMAP message as seen (skip):", e);
-								}
-								return;
-							}
-
-							const raw = msg.source?.toString("utf-8") ?? "";
-							if (!raw.trim()) return;
-
-							let parsed: ParsedMail;
-							try {
-								parsed = await simpleParser(raw, { skipTextToHtml: true });
-							} catch (err) {
-								await SubmissionsEntity.create({
-									kind: "email",
-									data: { kind: "email" },
-									dedupeKey: sourcePrefix,
-									id: generateId(),
-									source: sourcePrefix,
-									status: "failed",
-									info: `Failed to parse incoming IMAP message: ${String(err)}`,
-								});
-								console.error("Error parsing IMAP message:", err);
-								return;
-							}
-
-							const isToListen =
-								addressObjectIncludes(parsed.to, config.listenAddress) ||
-								addressObjectIncludes(parsed.cc, config.listenAddress) ||
-								addressObjectIncludes(parsed.bcc, config.listenAddress);
-
-							if (!isToListen) return;
-
-							const emls = await extractEmlsFromIncomingMessage(parsed, config.listenAddress);
-							for (let i = 0; i < emls.length; i++) {
-								await createEmailSubmissionFromEml(
-									emls[i],
-									{ source: `${sourcePrefix}${emls.length > 1 ? `:att${i + 1}` : ""}` }
-								);
-							}
-
-							try {
-								await client.messageFlagsAdd(msg.uid, ["\\Seen"], { uid: true });
-							} catch (e) {
-								console.error("Failed to mark IMAP message as seen:", e);
-							}
-						} catch (err) {
-							console.error("Error processing IMAP message:", err);
+							await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
+						} catch (error) {
+							console.error(`Failed to mark IMAP message ${uid} as seen (${reason}):`, error);
 						}
 					};
 
-					const processRange = async (range: string, reason: string) => {
-						console.log(`Processing ${reason} IMAP messages in range ${range}...`);
-						for await (const msg of client.fetch(range, { uid: true, source: true, flags: true, envelope: true })) {
-							await processFetchedMessage(msg);
+					const processMailbox = async (reason: string) => {
+						console.log(`Processing ${reason} IMAP messages in ${config.mailbox}...`);
+						// UID 1:* is deliberate: providers or users may mark a reply read
+						// before us. The terminal ledger makes the scan idempotent. IMAPFlow
+						// forbids commands inside its fetch iterator, so Seen changes wait.
+						const seenAfterFetch = new Map<number, string>();
+						for await (const message of client.fetch("1:*", {
+							uid: true,
+							source: true,
+							flags: true,
+							envelope: true,
+							internalDate: true,
+						})) {
+							const fetched = message as FetchMessageObject;
+							if (!fetched.uid) continue;
+							const result = await ingestFetchedIncomingMail(fetched, {
+								mailbox: config.mailbox,
+								uidValidity: mailboxUidValidity(),
+								intakeAddress: config.listenAddress,
+								processSeen: config.processSeen,
+							});
+							if (result.disposition === "terminal") seenAfterFetch.set(fetched.uid, result.reason);
 						}
+						for (const [uid, seenReason] of seenAfterFetch) await markSeen(uid, seenReason);
 					};
 
-					const initialExists = mailboxExists();
-					if (initialExists > 0) {
-						await processRange(`1:${initialExists}`, "existing");
-					}
+					let processingMailbox: Promise<void> | undefined;
+					let processingRequested = false;
+					let processingReason = "new";
+					const requestMailboxProcessing = (reason: string) => {
+						processingRequested = true;
+						processingReason = reason;
+						if (processingMailbox) return processingMailbox;
 
-					let lastExists = mailboxExists();
-
-					while (!stopped) {
-						try {
-							await client.idle();
-						} catch (err) {
-							if (stopped) break;
-							if (isNoConnectionError(err)) {
-								console.warn("IMAP connection lost during IDLE, reconnecting...");
-							} else {
-								console.error("IMAP idle error, reconnecting session:", err);
+						processingMailbox = (async () => {
+							while (processingRequested && !stopped) {
+								processingRequested = false;
+								await processMailbox(processingReason);
 							}
-							throw err;
-						}
+						})().finally(() => {
+							processingMailbox = undefined;
+						});
+						return processingMailbox;
+					};
 
-						const currentExists = mailboxExists();
-						if (currentExists < lastExists) {
+					const onExists = () => {
+						// IMAP IDLE delivers EXISTS as an event but does not end the idle
+						// promise. Starting FETCH breaks IDLE through IMAPFlow's pre-check,
+						// so this handler gives new replies prompt, serialized processing.
+						requestMailboxProcessing("new").catch((error) => {
+							if (!stopped) console.error("Failed to process newly arrived IMAP mail:", error);
+						});
+					};
+					client.on("exists", onExists);
+					try {
+						// Subscribe before the initial all-message scan. If a reply arrives
+						// while it is running, the queued follow-up scan cannot miss it.
+						await requestMailboxProcessing("existing");
+						let lastExists = mailboxExists();
+						while (!stopped) {
+							// FETCH breaks the current IDLE session. Do not start another IDLE
+							// until the serialized fetch/ingest pass has completed, otherwise
+							// concurrent IMAP commands can race on the single connection.
+							if (processingMailbox) await processingMailbox;
+							try {
+								await client.idle();
+							} catch (error) {
+								if (stopped) break;
+								if (isNoConnectionError(error)) console.warn("IMAP connection lost during IDLE, reconnecting...");
+								else console.error("IMAP idle error, reconnecting session:", error);
+								throw error;
+							}
+
+							const currentExists = mailboxExists();
+							if (currentExists !== lastExists) requestMailboxProcessing("idle wakeup");
 							lastExists = currentExists;
-							continue;
 						}
-						if (currentExists === lastExists) continue;
-
-						const range = `${lastExists + 1}:${currentExists}`;
-						lastExists = currentExists;
-
-						await processRange(range, "new");
+					} finally {
+						client.off("exists", onExists);
+						await processingMailbox;
 					}
 				} finally {
 					try {
 						lock.release();
 					} catch {
-						// ignore
+						// Ignore lock cleanup after an interrupted connection.
 					}
 				}
-			} catch (err) {
+			} catch (error) {
 				if (stopped) break;
-				if (!isNoConnectionError(err)) {
-					console.error("IMAP listener session error:", err);
-				}
+				if (!isNoConnectionError(error)) console.error("IMAP listener session error:", error);
 				await sleep(2_000);
 			} finally {
 				activeClient = null;
 				try {
 					client.close();
 				} catch {
-					// ignore
+					// Connection may already be closed.
 				}
 			}
 		}

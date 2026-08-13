@@ -1,13 +1,19 @@
 import crypto from "node:crypto";
 
-import { eq, or, sql, desc } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { getDb } from "./index";
 import {
     analysisRuns,
     artifacts,
-    reports,
-    ReportStatus,
+    mailIngest,
+    providerReports,
+    reportMessages,
+    reportThreads,
+    type MailIngestRoute,
+    type ProviderReportStatus,
+    type ReportMessageKind,
+    type ReportThreadStatus,
     submissions,
     type SubmissionData,
     type SubmissionKind,
@@ -216,8 +222,8 @@ export class ArtifactsEntity {
     }) {
         const db = await getDb();
         const id = generateId();
-        const [row] = await db
-            .insert(artifacts)
+		const [row] = await db
+			.insert(artifacts)
             .values([
                 {
                     id,
@@ -232,18 +238,7 @@ export class ArtifactsEntity {
                     createdAt: nowDate(),
                 },
             ])
-            .returning({ id: artifacts.id })
-            .onConflictDoUpdate({
-                target: [artifacts.sha256, artifacts.size],
-                set: {
-                    name: sql.raw(`excluded.${artifacts.name.name}`),
-                    kind: sql.raw(`excluded.${artifacts.kind.name}`),
-                    mimeType: sql.raw(`excluded.${artifacts.mimeType.name}`),
-                    submissionId: sql.raw(`excluded.${artifacts.submissionId.name}`),
-                    createdAt: sql.raw(`excluded.${artifacts.createdAt.name}`),
-                    archivedAt: sql.raw(`excluded.${artifacts.archivedAt.name}`),
-                },
-            });
+			.returning({ id: artifacts.id });
 
         return row!.id;
     }
@@ -308,45 +303,542 @@ export class ArtifactsEntity {
     }
 }
 
-export class ReportsEntity {
+/** Standalone reports submitted through web/API abuse providers. */
+export class ProviderReportsEntity {
     static async listForSubmission(submissionId: bigint) {
         const db = await getDb();
-        return await db.select().from(reports).where(eq(reports.submissionId, submissionId));
+        return await db
+            .select()
+            .from(providerReports)
+            .where(eq(providerReports.submissionId, submissionId))
+            .orderBy(desc(providerReports.createdAt));
     }
 
     static async create(params: {
         submissionId: bigint;
         analysisRunId?: bigint;
+        channel?: string;
         to: string;
         subject?: string;
         body: string;
         attachmentsArtifactIds?: Array<bigint | string>;
-        status?: ReportStatus;
+        status?: ProviderReportStatus;
+        sentAt?: Date;
         providerMessageId?: string;
-        data?: any;
+        data?: unknown;
+        legacy?: boolean;
     }) {
         const db = await getDb();
         const id = generateId();
         const [row] = await db
-            .insert(reports)
+            .insert(providerReports)
             .values([
                 {
                     id,
                     submissionId: params.submissionId,
                     analysisRunId: params.analysisRunId,
-                    channel: "email",
+                    channel: params.channel ?? "provider",
                     to: params.to,
                     subject: params.subject,
                     body: params.body,
                     status: params.status ?? "sent",
+                    sentAt: params.sentAt ?? (params.status === "failed" ? undefined : nowDate()),
                     attachmentsArtifactIds: params.attachmentsArtifactIds?.map((value) => value.toString()),
                     createdAt: nowDate(),
                     updatedAt: nowDate(),
                     providerMessageId: params.providerMessageId,
                     data: params.data,
+                    legacy: params.legacy ?? false,
                 },
             ])
-            .returning({ id: reports.id });
+            .returning({ id: providerReports.id });
         return row!.id;
+    }
+}
+
+/** Per-SMTP-report correspondence thread records. */
+export class ReportThreadsEntity {
+    /**
+     * Creates both durable outbound records in one transaction before any MIME
+     * work or SMTP call. This makes a reply routable immediately and prevents
+     * orphaned pending threads if the message insert fails.
+     */
+    static async createWithPendingOutbound(params: {
+        submissionId: bigint;
+        analysisRunId?: bigint;
+        to: string[];
+        subject?: string;
+        replyAddress: string;
+        replyToken: string;
+        data?: unknown;
+        from: string;
+        textBody: string;
+        rfcMessageId: string;
+    }) {
+        const db = await getDb();
+        const threadId = generateId();
+        const messageId = generateId();
+        const timestamp = nowDate();
+
+        db.transaction((tx) => {
+            tx.insert(reportThreads)
+                .values({
+                    id: threadId,
+                    submissionId: params.submissionId,
+                    analysisRunId: params.analysisRunId,
+                    to: params.to,
+                    subject: params.subject,
+                    replyAddress: params.replyAddress,
+                    replyToken: params.replyToken,
+                    status: "pending",
+                    data: params.data,
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                })
+                .run();
+            tx.insert(reportMessages)
+                .values({
+                    id: messageId,
+                    threadId,
+                    direction: "outbound",
+                    kind: "report",
+                    status: "pending",
+                    from: params.from,
+                    to: params.to,
+                    cc: [],
+                    subject: params.subject,
+                    textBody: params.textBody,
+                    messageId: params.rfcMessageId,
+                    references: [],
+                    attachmentArtifactIds: [],
+                    occurredAt: timestamp,
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                })
+                .run();
+        });
+
+        return { threadId, messageId };
+    }
+
+    static async listForSubmission(submissionId: bigint) {
+        const db = await getDb();
+        return await db
+            .select()
+            .from(reportThreads)
+            .where(eq(reportThreads.submissionId, submissionId))
+            .orderBy(desc(reportThreads.createdAt));
+    }
+
+    static async findByReplyAddresses(replyAddresses: readonly string[]) {
+        if (replyAddresses.length === 0) return [];
+        const db = await getDb();
+        return await db.select().from(reportThreads).where(inArray(reportThreads.replyAddress, [...replyAddresses]));
+    }
+
+    static async findByReplyTokens(replyTokens: readonly string[]) {
+		if (replyTokens.length === 0) return [];
+        const db = await getDb();
+        return await db.select().from(reportThreads).where(inArray(reportThreads.replyToken, [...replyTokens]));
+    }
+
+    static async get(threadId: bigint) {
+        const db = await getDb();
+        const [thread] = await db.select().from(reportThreads).where(eq(reportThreads.id, threadId));
+        return thread;
+    }
+
+}
+
+export class ReportMessagesEntity {
+    static async setOutboundArtifacts(messageId: bigint, params: { rawArtifactId: bigint; attachmentArtifactIds: Array<bigint | string> }) {
+        const db = await getDb();
+        await db
+            .update(reportMessages)
+            .set({
+                rawArtifactId: params.rawArtifactId,
+                attachmentArtifactIds: params.attachmentArtifactIds.map((value) => value.toString()),
+                updatedAt: nowDate(),
+            })
+            .where(eq(reportMessages.id, messageId));
+    }
+
+    /** Atomically settles the message transport result without clobbering a received reply. */
+    static async settleOutbound(params: {
+        threadId: bigint;
+        messageId: bigint;
+        result: "sent" | "failed";
+        providerMessageId?: string;
+        error?: string;
+    }) {
+        const db = await getDb();
+        const timestamp = nowDate();
+
+        db.transaction((tx) => {
+            if (params.result === "sent") {
+                tx.update(reportMessages)
+                    // occurredAt is the report's original creation/send position in
+                    // the conversation. Settlement can happen after an immediate
+                    // reply has already been ingested, so changing it here would
+                    // reorder the outbound report after that reply in the timeline.
+                    .set({ status: "sent", sentAt: timestamp, providerMessageId: params.providerMessageId, error: null, updatedAt: timestamp })
+                    .where(and(eq(reportMessages.id, params.messageId), eq(reportMessages.status, "pending")))
+                    .run();
+                tx.update(reportThreads)
+                    .set({ status: "sent", updatedAt: timestamp })
+                    .where(and(eq(reportThreads.id, params.threadId), eq(reportThreads.status, "pending")))
+                    .run();
+                return;
+            }
+
+            tx.update(reportMessages)
+                .set({ status: "failed", error: params.error ?? "SMTP transport failed.", updatedAt: timestamp })
+                .where(and(eq(reportMessages.id, params.messageId), eq(reportMessages.status, "pending")))
+                .run();
+            tx.update(reportThreads)
+                .set({ status: "failed", updatedAt: timestamp })
+                .where(and(eq(reportThreads.id, params.threadId), eq(reportThreads.status, "pending")))
+                .run();
+        });
+    }
+
+    static async findThreadsByOutboundMessageIds(messageIds: readonly string[]) {
+        if (messageIds.length === 0) return [];
+        const db = await getDb();
+        return await db
+            .select({ threadId: reportMessages.threadId, messageId: reportMessages.messageId })
+            .from(reportMessages)
+            .where(and(eq(reportMessages.direction, "outbound"), inArray(reportMessages.messageId, [...messageIds])));
+    }
+
+    static async listForThread(threadId: bigint) {
+        const db = await getDb();
+        return await db
+            .select()
+            .from(reportMessages)
+            .where(eq(reportMessages.threadId, threadId))
+            .orderBy(reportMessages.occurredAt, reportMessages.createdAt);
+    }
+
+    static async listForThreads(threadIds: readonly bigint[]) {
+        if (threadIds.length === 0) return [];
+        const db = await getDb();
+        return await db
+            .select()
+            .from(reportMessages)
+            .where(inArray(reportMessages.threadId, [...threadIds]))
+            .orderBy(reportMessages.occurredAt, reportMessages.createdAt);
+    }
+
+	/**
+	 * Returns an existing inbound message with this RFC Message-ID regardless of
+	 * thread. Mail transfer agents occasionally duplicate a delivery into a
+	 * different folder/UID; a single RFC message must never create two pieces of
+	 * correspondence just because it reached IMAP twice.
+	 */
+	static async findInboundByMessageId(messageId: string | undefined) {
+		if (!messageId) return undefined;
+		const db = await getDb();
+		const [message] = await db
+			.select({ id: reportMessages.id, threadId: reportMessages.threadId })
+			.from(reportMessages)
+			.where(and(eq(reportMessages.direction, "inbound"), eq(reportMessages.messageId, messageId)))
+			.limit(1);
+		return message;
+	}
+
+    /**
+     * Commits the correspondence message, its thread status, and the IMAP UID
+     * disposition in one SQLite transaction. Artifact bytes are saved first and
+     * linked by ID here, so a listener retry cannot create a second message.
+     */
+    static async persistInboundWithIngest(params: {
+        threadId: bigint;
+        kind: Exclude<ReportMessageKind, "report">;
+        from?: string;
+        to: string[];
+        cc?: string[];
+        subject?: string;
+        textBody?: string;
+        htmlBody?: string | null;
+        messageId?: string;
+        inReplyTo?: string;
+        references?: string[];
+        rawArtifactId?: bigint;
+        attachmentArtifactIds?: Array<bigint | string>;
+        occurredAt?: Date;
+        mailbox: string;
+        uidValidity: number;
+        uid: number;
+        rawMessageId?: string;
+        ingestReason?: string;
+    }) {
+        const db = await getDb();
+        const id = generateId();
+		const timestamp = nowDate();
+		const threadStatus: ReportThreadStatus = params.kind === "bounce" ? "delivery_failed" : "replied";
+		const allowedThreadStatuses: ReportThreadStatus[] =
+			params.kind === "bounce" ? ["pending", "sent", "failed"] : ["pending", "sent", "failed", "delivery_failed"];
+
+		const persisted = db.transaction((tx) => {
+            const existingIngest = tx
+                .select({ id: mailIngest.id, terminal: mailIngest.terminal })
+                .from(mailIngest)
+                .where(and(eq(mailIngest.mailbox, params.mailbox), eq(mailIngest.uidValidity, params.uidValidity), eq(mailIngest.uid, params.uid)))
+                .get();
+            if (existingIngest?.terminal) return false;
+
+            const ingestId = existingIngest?.id ?? generateId();
+			if (existingIngest) {
+                // A prior parsing/storage failure is retryable. Its terminal
+                // disposition is only set after the correspondence write below.
+                tx.update(mailIngest)
+					.set({
+						messageId: params.rawMessageId,
+						route: "reply",
+						reason: params.ingestReason,
+						attempts: sql`${mailIngest.attempts} + 1`,
+						terminal: false,
+                        processedAt: timestamp,
+                        updatedAt: timestamp,
+                    })
+                    .where(eq(mailIngest.id, ingestId))
+                    .run();
+            } else {
+                tx.insert(mailIngest)
+                    .values({
+                        id: ingestId,
+                        mailbox: params.mailbox,
+                        uidValidity: params.uidValidity,
+                        uid: params.uid,
+                        messageId: params.rawMessageId,
+                        route: "reply",
+                        reason: params.ingestReason,
+                        attempts: 1,
+                        terminal: false,
+                        processedAt: timestamp,
+                        createdAt: timestamp,
+                        updatedAt: timestamp,
+                    })
+                    .onConflictDoNothing()
+                    .run();
+
+                const concurrentlyStoredIngest = tx
+                    .select({ id: mailIngest.id, terminal: mailIngest.terminal })
+                    .from(mailIngest)
+                    .where(
+                        and(
+                            eq(mailIngest.mailbox, params.mailbox),
+                            eq(mailIngest.uidValidity, params.uidValidity),
+                            eq(mailIngest.uid, params.uid),
+                        ),
+                    )
+                    .get();
+                if (!concurrentlyStoredIngest || concurrentlyStoredIngest.id !== ingestId) return false;
+            }
+
+			const existingMessage = params.messageId
+				? tx
+						.select({ id: reportMessages.id, threadId: reportMessages.threadId })
+						.from(reportMessages)
+						.where(and(eq(reportMessages.direction, "inbound"), eq(reportMessages.messageId, params.messageId)))
+						.limit(1)
+						.get()
+				: undefined;
+			if (existingMessage) {
+					tx.update(mailIngest)
+					.set({
+						reportMessageId: existingMessage.id,
+						reason: "duplicate_message_id",
+						terminal: true,
+						processedAt: timestamp,
+						updatedAt: timestamp,
+					})
+					.where(eq(mailIngest.id, ingestId))
+					.run();
+				return false;
+			}
+
+			const [storedMessage] = tx
+				.insert(reportMessages)
+                .values({
+                    id,
+                    threadId: params.threadId,
+                    direction: "inbound",
+                    kind: params.kind,
+                    status: "received",
+                    from: params.from,
+                    to: params.to,
+                    cc: params.cc ?? [],
+                    subject: params.subject,
+                    textBody: params.textBody,
+                    htmlBody: params.htmlBody ?? undefined,
+                    messageId: params.messageId,
+                    inReplyTo: params.inReplyTo,
+                    references: params.references ?? [],
+                    rawArtifactId: params.rawArtifactId,
+                    attachmentArtifactIds: params.attachmentArtifactIds?.map((value) => value.toString()) ?? [],
+                    occurredAt: params.occurredAt ?? timestamp,
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                })
+				.onConflictDoNothing()
+				.returning({ id: reportMessages.id })
+				.all();
+			if (!storedMessage) {
+				const duplicate = params.messageId
+					? tx
+							.select({ id: reportMessages.id })
+							.from(reportMessages)
+							.where(and(eq(reportMessages.direction, "inbound"), eq(reportMessages.messageId, params.messageId)))
+							.limit(1)
+							.get()
+					: undefined;
+				if (!duplicate) throw new Error("Failed to persist inbound report message.");
+					tx.update(mailIngest)
+					.set({
+						reportMessageId: duplicate.id,
+						reason: "duplicate_message_id",
+						terminal: true,
+						processedAt: timestamp,
+						updatedAt: timestamp,
+					})
+					.where(eq(mailIngest.id, ingestId))
+					.run();
+				return false;
+			}
+            tx.update(reportThreads)
+                .set({ status: threadStatus, updatedAt: timestamp })
+                .where(and(eq(reportThreads.id, params.threadId), inArray(reportThreads.status, allowedThreadStatuses)))
+                .run();
+			tx.update(mailIngest)
+				.set({ reportMessageId: storedMessage.id, terminal: true, processedAt: timestamp, updatedAt: timestamp })
+                .where(eq(mailIngest.id, ingestId))
+                .run();
+            return true;
+        });
+        return persisted ? id : undefined;
+    }
+}
+
+/** IMAP UID ledger: terminal rows are idempotency records; failed rows are retryable. */
+export class MailIngestEntity {
+    static async get(params: { mailbox: string; uidValidity: number; uid: number }) {
+        const db = await getDb();
+        const [row] = await db
+            .select()
+            .from(mailIngest)
+            .where(and(eq(mailIngest.mailbox, params.mailbox), eq(mailIngest.uidValidity, params.uidValidity), eq(mailIngest.uid, params.uid)));
+        return row;
+    }
+
+    static async recordTerminal(params: {
+        mailbox: string;
+        uidValidity: number;
+        uid: number;
+        messageId?: string;
+        route: Exclude<MailIngestRoute, "failed">;
+        reportMessageId?: bigint;
+        reason?: string;
+    }) {
+        const db = await getDb();
+        const timestamp = nowDate();
+        await db
+            .insert(mailIngest)
+            .values([
+                {
+                    id: generateId(),
+                    mailbox: params.mailbox,
+                    uidValidity: params.uidValidity,
+                    uid: params.uid,
+                    messageId: params.messageId,
+                    route: params.route,
+                    reportMessageId: params.reportMessageId,
+                    reason: params.reason,
+                    attempts: 1,
+                    terminal: true,
+                    processedAt: timestamp,
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                },
+            ])
+			.onConflictDoUpdate({
+				target: [mailIngest.mailbox, mailIngest.uidValidity, mailIngest.uid],
+				where: eq(mailIngest.terminal, false),
+				set: {
+					messageId: params.messageId,
+					route: params.route,
+					reportMessageId: params.reportMessageId,
+					reason: params.reason,
+					attempts: sql`${mailIngest.attempts} + 1`,
+					terminal: true,
+                    processedAt: timestamp,
+                    updatedAt: timestamp,
+                },
+            });
+    }
+
+    static async recordFailure(params: { mailbox: string; uidValidity: number; uid: number; messageId?: string; reason: string }) {
+        const db = await getDb();
+        const timestamp = nowDate();
+        await db
+            .insert(mailIngest)
+            .values([
+                {
+                    id: generateId(),
+                    mailbox: params.mailbox,
+                    uidValidity: params.uidValidity,
+                    uid: params.uid,
+                    messageId: params.messageId,
+                    route: "failed",
+                    reason: params.reason,
+                    attempts: 1,
+                    terminal: false,
+                    processedAt: timestamp,
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                },
+            ])
+			.onConflictDoUpdate({
+				target: [mailIngest.mailbox, mailIngest.uidValidity, mailIngest.uid],
+				where: eq(mailIngest.terminal, false),
+				set: {
+                    messageId: params.messageId,
+                    route: "failed",
+                    reason: params.reason,
+                    attempts: sql`${mailIngest.attempts} + 1`,
+                    terminal: false,
+                    processedAt: timestamp,
+                    updatedAt: timestamp,
+                },
+            });
+    }
+}
+
+/** Read model used by analysis workflows to avoid treating pending or failed mail as reported. */
+export class ReportingSummaryEntity {
+    static async hasSuccessfulReport(submissionId: bigint): Promise<boolean> {
+        const db = await getDb();
+        const [provider] = await db
+            .select({ id: providerReports.id })
+            .from(providerReports)
+            .where(and(eq(providerReports.submissionId, submissionId), eq(providerReports.status, "sent")))
+            .limit(1);
+        if (provider) return true;
+
+        const [thread] = await db
+            .select({ id: reportMessages.id })
+            .from(reportMessages)
+            .innerJoin(reportThreads, eq(reportMessages.threadId, reportThreads.id))
+            .where(
+                and(
+                    eq(reportThreads.submissionId, submissionId),
+                    eq(reportMessages.direction, "outbound"),
+                    eq(reportMessages.kind, "report"),
+                    eq(reportMessages.status, "sent"),
+                ),
+            )
+            .limit(1);
+        return Boolean(thread);
     }
 }

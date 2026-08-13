@@ -1,6 +1,6 @@
 import * as toon from "@toon-format/toon";
 import { archiveWebsite } from "./website_archive";
-import { SubmissionsEntity, ArtifactsEntity, ReportsEntity } from "./db/entities";
+import { SubmissionsEntity, ArtifactsEntity, ReportingSummaryEntity } from "./db/entities";
 import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
@@ -203,8 +203,8 @@ Use web search if necessary to gather more information about the content/brand. 
 				console.error("Failed to report to Google Safe Browsing:", err);
 			}
 
-			const reports = await ReportsEntity.listForSubmission(submissionId);
-			if (reports.length > 0) {
+			const hasSuccessfulReport = await ReportingSummaryEntity.hasSuccessfulReport(submissionId);
+			if (hasSuccessfulReport) {
 				await SubmissionsEntity.update(submissionId, { status: "reported" });
 			} else {
 				await SubmissionsEntity.update(submissionId, {

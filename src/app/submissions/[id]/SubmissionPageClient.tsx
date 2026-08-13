@@ -9,19 +9,17 @@ import { ExternalLinkConfirm } from "@/components/ExternalLinkConfirm";
 import { UrlParts } from "@/components/UrlParts";
 import { WhoisTab } from "@/components/WhoisTab";
 import { ReporterMeta } from "@/components/ReporterMeta";
+import { ReportThreadTimeline } from "@/components/ReportThreadTimeline";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExternalLink, Mail, Globe, ShieldAlert } from "lucide-react";
 import Link from "next/link";
-import { AnalysisRun, Artifact, Report, Submission } from "@/lib/db/schema";
+import type { Artifact } from "@/lib/db/schema";
+import type { SubmissionDetail as ApiSubmissionDetail } from "@/lib/submissions/details";
 import { cn } from "../../../web_lib/util";
 
-type SubmissionDetail = Submission & {
-	analysisRuns: AnalysisRun[];
-	reports: Report[];
-	artifacts: Omit<Artifact, "blob" | "submissionId">[];
-};
+type SubmissionDetail = ApiSubmissionDetail;
 
 function formatArtifactDate(value: Date | string | number | null | undefined) {
 	if (value === null || value === undefined) return null;
@@ -30,6 +28,7 @@ function formatArtifactDate(value: Date | string | number | null | undefined) {
 }
 
 function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "name" | "kind" | "mimeType">) {
+	if (artifact.kind?.toLowerCase().startsWith("report_")) return false;
 	const name = artifact.name?.toLowerCase();
 	const kind = artifact.kind?.toLowerCase();
 	const mimeType = artifact.mimeType?.toLowerCase();
@@ -38,6 +37,10 @@ function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "name" | "kind" | "mi
 		kind?.startsWith("website_") ||
 		mimeType === "text/mhtml"
 	);
+}
+
+function isCorrespondenceArtifact(artifact: Pick<Artifact, "kind">) {
+	return artifact.kind?.toLowerCase().startsWith("report_") ?? false;
 }
 
 export function SubmissionPageClient({ id, initialSubmission }: { id: string; initialSubmission?: SubmissionDetail | null }) {
@@ -54,6 +57,9 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 
 	const isRunning = ["new", "queued", "running"].includes(statusKey);
 	const runsToShow = submission?.analysisRuns.slice(0, 1) || [];
+	const reportThreads = submission?.reportThreads ?? [];
+	const providerReports = submission?.providerReports ?? [];
+	const reportCount = reportThreads.length + providerReports.length;
 
 	const defaultTab = "runs";
 
@@ -73,16 +79,19 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 
 	const screenshot = submission?.artifacts?.find(
 		(a) =>
-			((a.name?.toLowerCase() === "website.png" || a.name?.toLowerCase() === "mail.png") && a.mimeType?.startsWith("image/")) ||
-			a.kind?.toLowerCase() === "website_png"
+			!isCorrespondenceArtifact(a) &&
+			(((a.name?.toLowerCase() === "website.png" || a.name?.toLowerCase() === "mail.png") && a.mimeType?.startsWith("image/")) ||
+				a.kind?.toLowerCase() === "website_png")
 	);
 	const websiteMhtml = submission?.artifacts?.find(
 		(a) =>
-			a.name?.toLowerCase() === "website.mhtml" ||
-			a.mimeType?.toLowerCase() === "text/mhtml" ||
-			a.kind?.toLowerCase() === "website_mhtml"
+			!isCorrespondenceArtifact(a) &&
+			(a.name?.toLowerCase() === "website.mhtml" ||
+				a.mimeType?.toLowerCase() === "text/mhtml" ||
+				a.kind?.toLowerCase() === "website_mhtml")
 	);
 	const emailEml = submission?.artifacts?.find((a) => {
+		if (isCorrespondenceArtifact(a)) return false;
 		const name = a.name?.toLowerCase();
 		const mime = a.mimeType?.toLowerCase();
 		const kind = a.kind?.toLowerCase();
@@ -357,7 +366,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 				<TabsList className="overflow-x-auto max-w-full no-scrollbar">
 					{submission.kind === "website" ? <TabsTrigger value="website">Website</TabsTrigger> : null}
 					{submission.kind === "email" ? <TabsTrigger value="email">Email</TabsTrigger> : null}
-					<TabsTrigger value="reports">Reports ({submission.reports.length})</TabsTrigger>
+					<TabsTrigger value="reports">Reports ({reportCount})</TabsTrigger>
 					<TabsTrigger value="artifacts">Files ({artifacts.length})</TabsTrigger>
 					<TabsTrigger value="runs">Analysis</TabsTrigger>
 					{submission.kind === "website" ? <TabsTrigger value="whois">WhoIS</TabsTrigger> : null}
@@ -434,26 +443,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 					</TabsContent>
 				) : null}
 				<TabsContent value="reports" className="space-y-4 mt-4">
-					{submission.reports.length > 0 ? (
-						submission.reports.map((r: any) => (
-							<Card key={r.id} className="overflow-hidden">
-								<CardContent className="p-4 space-y-3">
-									<div className="flex justify-between items-center">
-										<CardTitle className="text-lg">{r.to}</CardTitle>
-										<Badge variant="outline">{r.type || "report"}</Badge>
-									</div>
-									{r.subject && (
-										<div className="text-sm">
-											<span className="text-muted-foreground">Subject:</span> {r.subject}
-										</div>
-									)}
-									<div className="text-sm whitespace-pre-wrap">{r.body || "No body"}</div>
-								</CardContent>
-							</Card>
-						))
-					) : (
-						<div className="text-center py-10 text-muted-foreground">No reports yet.</div>
-					)}
+					<ReportThreadTimeline threads={reportThreads} providerReports={providerReports} artifacts={submission.artifacts} />
 				</TabsContent>
 				<TabsContent value="runs" className="space-y-4 mt-4">
 					<AnalysisProgress streamId={submission.id} status={submission.status} />

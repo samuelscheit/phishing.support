@@ -161,6 +161,7 @@ ${toon.encode(x.registrar)}
 
 		await sendReportEmail({
 			submissionId: params.submissionId,
+			analysisRunId: draft.analysisRunId,
 			draft,
 			attachments: [
 				{

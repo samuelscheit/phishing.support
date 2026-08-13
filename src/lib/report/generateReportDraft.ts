@@ -5,6 +5,8 @@ export type ReportDraft = {
 	to: string;
 	subject: string;
 	body: string;
+	/** The analysis run that generated this report draft, when persisted. */
+	analysisRunId?: bigint;
 };
 
 export async function generateReportDraft(params: {
@@ -13,7 +15,7 @@ export async function generateReportDraft(params: {
 	user: string;
 	withoutHeader?: boolean;
 }): Promise<ReportDraft> {
-	const { result } = await runStreamedAnalysisRun({
+	const { runId, result } = await runStreamedAnalysisRun({
 		submissionId: params.submissionId,
 		options: {
 			model: defaultResponseModel,
@@ -48,5 +50,8 @@ export async function generateReportDraft(params: {
 	});
 	if (!result.output_parsed) throw new Error("Failed to parse report draft response: " + result.output_text);
 
-	return result.output_parsed as ReportDraft;
+	return {
+		...(result.output_parsed as ReportDraft),
+		analysisRunId: runId,
+	};
 }

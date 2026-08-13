@@ -29,6 +29,20 @@
       "when": 1786586194977,
       "tag": "0003_add_artifact_archive_date",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786590182597,
+      "tag": "0004_per_report_reply_identities",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1786598906042,
+      "tag": "0005_correspondence_integrity",
+      "breakpoints": true
     }
   ]
 }

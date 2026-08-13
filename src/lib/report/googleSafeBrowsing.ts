@@ -2,7 +2,7 @@
 import anticaptcha from "@antiadmin/anticaptchaofficial";
 import { generateReportDraft } from "./generateReportDraft";
 import { sleep } from "../utils";
-import { ReportsEntity } from "../db/entities";
+import { ProviderReportsEntity } from "../db/entities";
 import { generateAbuseExplanation } from "./util";
 import { getBrowserPage } from "../browser";
 
@@ -138,8 +138,9 @@ export async function reportToGoogleSafeBrowsing(params: {
 
 		if (!hasSuccess) throw new Error("Google Safe Browsing report submission status unknown: " + card.evaluate((el) => el.outerHTML));
 
-		const reportId = await ReportsEntity.create({
+		const reportId = await ProviderReportsEntity.create({
 			submissionId: params.submissionId,
+			channel: "google_safe_browsing",
 			to: `Google Safe Browsing`,
 			body: params.explanation,
 		});

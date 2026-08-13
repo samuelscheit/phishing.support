@@ -1,7 +1,7 @@
 import { fetch as proxyFetch } from "netbun";
 import { parse } from "tldts";
 import { runStreamedAnalysisRun } from "../analysis_run";
-import { ReportsEntity } from "../db/entities";
+import { ProviderReportsEntity } from "../db/entities";
 import { defaultResponseModel } from "../utils";
 import { getReportProxy } from "./proxy";
 
@@ -150,8 +150,9 @@ ${params.url}`,
 		throw new Error(`Failed to submit Tencent Cloud Abuse report: ${json.msg} / ${json.data?.error} / ${json.data?.message}`);
 	}
 
-	await ReportsEntity.create({
+	await ProviderReportsEntity.create({
 		submissionId: params.submissionId,
+		channel: "tencent_cloud_abuse",
 		to: "Tencent Cloud Domain Abuse",
 		body: `${params.explanation}\nInfringed URL: ${params.infringedUrl}`,
 	});

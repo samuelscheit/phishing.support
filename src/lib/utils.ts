@@ -122,18 +122,18 @@ export async function logStream(response: Stream<ResponseStreamEvent>) {
 	throw new Error("Stream ended without completion");
 }
 
-const smtpHost = process.env.SMTP_HOST || "smtp.ethereal.email";
-const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 587;
+const smtpHost = process.env.SMTP_HOST;
+const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587;
 const smtpSecure = process.env.SMTP_SECURE !== undefined ? process.env.SMTP_SECURE === "true" : smtpPort === 465;
-const smtpUser = process.env.SMTP_USER || "maddison53@ethereal.email";
-const smtpPass = process.env.SMTP_PASS || "jn7jnAPss4f63QBp6D";
+const smtpUser = process.env.SMTP_USER;
+const smtpPass = process.env.SMTP_PASS;
 
 if (smtpSecure && smtpPort === 587) {
 	console.warn("SMTP_SECURE=true with port 587 can cause TLS errors; use SMTP_SECURE=false for STARTTLS.");
 }
 
 export const mailer =
-	smtpHost && smtpPort && smtpUser && smtpPass
+	smtpHost && Number.isFinite(smtpPort) && smtpPort > 0 && smtpUser && smtpPass
 		? nodemailer.createTransport({
 				host: smtpHost,
 				port: smtpPort,
