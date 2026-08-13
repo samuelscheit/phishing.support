@@ -22,6 +22,13 @@
       "when": 1786106028818,
       "tag": "0002_add_reporter_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1786586194977,
+      "tag": "0003_add_artifact_archive_date",
+      "breakpoints": true
     }
   ]
 }

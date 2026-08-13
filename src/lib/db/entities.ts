@@ -206,7 +206,14 @@ export class ArtifactsEntity {
         return crypto.createHash("sha256").update(buffer).digest("hex");
     }
 
-    static async saveBuffer(params: { submissionId?: bigint; name?: string; kind: string; mimeType?: string; buffer: Buffer }) {
+    static async saveBuffer(params: {
+        submissionId?: bigint;
+        name?: string;
+        kind: string;
+        mimeType?: string;
+        archivedAt?: Date;
+        buffer: Buffer;
+    }) {
         const db = await getDb();
         const id = generateId();
         const [row] = await db
@@ -217,6 +224,7 @@ export class ArtifactsEntity {
                     submissionId: params.submissionId,
                     name: params.name,
                     kind: params.kind,
+                    archivedAt: params.archivedAt,
                     mimeType: params.mimeType,
                     sha256: this.sha256Hex(params.buffer),
                     size: params.buffer.byteLength,
@@ -233,6 +241,7 @@ export class ArtifactsEntity {
                     mimeType: sql.raw(`excluded.${artifacts.mimeType.name}`),
                     submissionId: sql.raw(`excluded.${artifacts.submissionId.name}`),
                     createdAt: sql.raw(`excluded.${artifacts.createdAt.name}`),
+                    archivedAt: sql.raw(`excluded.${artifacts.archivedAt.name}`),
                 },
             });
 
@@ -249,6 +258,7 @@ export class ArtifactsEntity {
                 mimeType: artifacts.mimeType,
                 size: artifacts.size,
                 createdAt: artifacts.createdAt,
+                archivedAt: artifacts.archivedAt,
                 sha256: artifacts.sha256,
             })
             .from(artifacts)
@@ -267,22 +277,18 @@ export class ArtifactsEntity {
     }: {
         submissionId: bigint;
         archive: {
+            archivedAt: Date;
             screenshotPng: Buffer;
             mhtml: Buffer;
-            html: Buffer;
-            text: Buffer;
         };
     }) {
-        const [
-            screenshotId,
-            mhtmlId,
-            // htmlId, textId
-        ] = await Promise.all([
+        const [screenshotId, mhtmlId] = await Promise.all([
             this.saveBuffer({
                 submissionId: submissionId,
                 name: `website.png`,
                 kind: "website_png",
                 mimeType: "image/png",
+                archivedAt: archive.archivedAt,
                 buffer: archive.screenshotPng,
             }),
             this.saveBuffer({
@@ -290,28 +296,14 @@ export class ArtifactsEntity {
                 name: `website.mhtml`,
                 kind: "website_mhtml",
                 mimeType: "text/mhtml",
+                archivedAt: archive.archivedAt,
                 buffer: archive.mhtml,
             }),
-            // this.saveBuffer({
-            // 	submissionId: submissionId,
-            // 	name: `website.html`,
-            // 	kind: "website_html",
-            // 	mimeType: "text/html",
-            // 	buffer: archive.html,
-            // }),
-            // this.saveBuffer({
-            // 	submissionId: submissionId,
-            // 	name: `website.txt`,
-            // 	kind: "website_text",
-            // 	mimeType: "text/plain",
-            // 	buffer: archive.text,
-            // }),
         ]);
 
         return {
             screenshotId,
             mhtmlId,
-            // htmlId, textId
         };
     }
 }

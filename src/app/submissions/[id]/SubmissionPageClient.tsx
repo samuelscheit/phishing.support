@@ -23,6 +23,23 @@ type SubmissionDetail = Submission & {
 	artifacts: Omit<Artifact, "blob" | "submissionId">[];
 };
 
+function formatArtifactDate(value: Date | string | number | null | undefined) {
+	if (value === null || value === undefined) return null;
+	const date = new Date(value);
+	return Number.isNaN(date.getTime()) ? null : format(date, "PPP p");
+}
+
+function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "name" | "kind" | "mimeType">) {
+	const name = artifact.name?.toLowerCase();
+	const kind = artifact.kind?.toLowerCase();
+	const mimeType = artifact.mimeType?.toLowerCase();
+	return (
+		name?.startsWith("website.") ||
+		kind?.startsWith("website_") ||
+		mimeType === "text/mhtml"
+	);
+}
+
 export function SubmissionPageClient({ id, initialSubmission }: { id: string; initialSubmission?: SubmissionDetail | null }) {
 	const [submission, setSubmission] = useState<SubmissionDetail | null>(initialSubmission ?? null);
 	const [loading, setLoading] = useState(initialSubmission ? false : true);
@@ -55,10 +72,15 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 			: (submission?.data.email?.subject as string | undefined) || "Untitled Submission";
 
 	const screenshot = submission?.artifacts?.find(
-		(a) => (a.name?.toLowerCase() === "website.png" || a.name?.toLowerCase() === "mail.png") && a.mimeType?.startsWith("image/")
+		(a) =>
+			((a.name?.toLowerCase() === "website.png" || a.name?.toLowerCase() === "mail.png") && a.mimeType?.startsWith("image/")) ||
+			a.kind?.toLowerCase() === "website_png"
 	);
 	const websiteMhtml = submission?.artifacts?.find(
-		(a) => a.name?.toLowerCase() === "website.mhtml" || a.mimeType?.toLowerCase() === "text/mhtml"
+		(a) =>
+			a.name?.toLowerCase() === "website.mhtml" ||
+			a.mimeType?.toLowerCase() === "text/mhtml" ||
+			a.kind?.toLowerCase() === "website_mhtml"
 	);
 	const emailEml = submission?.artifacts?.find((a) => {
 		const name = a.name?.toLowerCase();
@@ -67,6 +89,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 		return name?.endsWith(".eml") || name === "mail.eml" || mime === "message/rfc822" || kind === "eml";
 	});
 	const artifacts = submission?.artifacts.filter((x) => x !== screenshot) || [];
+	const websiteArchiveDate = formatArtifactDate(websiteMhtml?.archivedAt ?? websiteMhtml?.createdAt);
 
 	const sanitizeHtmlForIframe = (rawHtml: string): string => {
 		try {
@@ -346,7 +369,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 								<CardTitle className="text-sm flex flex-row items-center gap-2">
 									Archived Website
 									<div className="text-xs text-muted-foreground font-normal">
-										(from {format(new Date(websiteMhtml.createdAt), "PPP p")})
+										(from {websiteArchiveDate ?? "unknown date"})
 									</div>
 								</CardTitle>
 								<CardDescription className="text-xs flex flex-row gap-8">
@@ -470,6 +493,9 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 									<CardTitle className="text-xs truncate">{a.name || a.kind}</CardTitle>
 									<CardDescription className="text-[10px]">
 										{a.mimeType} • {((a.size || 0) / 1024).toFixed(1)} KB
+										{isWebsiteArchiveArtifact(a) ? (
+											<div>Archived {formatArtifactDate(a.archivedAt ?? a.createdAt) ?? "unknown date"}</div>
+										) : null}
 									</CardDescription>
 								</CardHeader>
 								<CardContent className="p-3 pt-0">

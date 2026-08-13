@@ -105,6 +105,8 @@ export const artifacts = sqliteTable(
 		createdAt: timestamp("created_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
+		/** When the captured website archive itself was made, if known. */
+		archivedAt: timestamp("archived_at"),
 		mimeType: text("mime_type"),
 		sha256: text("sha256"),
 		size: int("size"),

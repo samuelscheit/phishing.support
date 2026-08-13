@@ -23,6 +23,8 @@ export type ArchivedWebsiteResponse = {
 export type WebsiteArchiveResult = {
 	url: string;
 	hostname: string;
+	/** Timestamp embedded in the MHTML capture, or the capture time when it is not available. */
+	archivedAt: Date;
 	screenshotPng: Buffer;
 	mhtml: Buffer;
 	html: Buffer;
@@ -35,6 +37,25 @@ export type ArchiveWebsiteOptions = {
 	/** Original remote URL (used for hostname/labeling when loading a local MHTML snapshot). */
 	url: string;
 };
+
+/**
+ * Reads the top-level MHTML Date header emitted by Chromium's snapshot writer.
+ * MIME parts can contain their own headers, so only inspect the message preamble.
+ */
+export function getMhtmlArchiveDate(snapshot: Buffer): Date | undefined {
+	const crlfHeaderEnd = snapshot.indexOf("\r\n\r\n");
+	const lfHeaderEnd = snapshot.indexOf("\n\n");
+	const headerEnd = crlfHeaderEnd >= 0 ? crlfHeaderEnd : lfHeaderEnd;
+	const preamble = snapshot
+		.subarray(0, headerEnd < 0 ? snapshot.byteLength : headerEnd)
+		.toString("latin1")
+		.replace(/\r?\n[\t ]+/g, " ");
+	const value = preamble.match(/^Date:\s*(.+)$/im)?.[1]?.trim();
+	if (!value) return undefined;
+
+	const timestamp = Date.parse(value);
+	return Number.isNaN(timestamp) ? undefined : new Date(timestamp);
+}
 
 function resolveDataDir() {
 	const candidates = [path.join(__dirname, "..", "..", "data"), "/app/data", path.join(process.cwd(), "data")];
@@ -195,9 +216,12 @@ async function archiveWebsiteInternal({ url, mhtmlSnapshot }: ArchiveWebsiteOpti
 			var rawHtml = dom.outerHTML;
 		}
 
+		const archivedAt = getMhtmlArchiveDate(resolvedMhtml) ?? new Date();
+
 		return {
 			url: url,
 			hostname,
+			archivedAt,
 			screenshotPng: Buffer.from(screenshotPng),
 			mhtml: resolvedMhtml,
 			html: Buffer.from(rawHtml, "utf-8"),
