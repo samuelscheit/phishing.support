@@ -1,20 +1,22 @@
-import { verifyProviderEvidence, type CapturedEvidence } from "../evidence";
-import { gnameServiceIdentity, getProviderDefinition, providerDefinitionHasValidHash } from "../registry";
-import { assertPublicDnsHost, domainMatchesOrIsSubdomain, normalizeDomain } from "../security";
-import { captureFreshAbuseEvidence } from "./capture";
-import { classifyConfiguredServiceEvidence } from "./service_verifier";
-import type { GnameVerificationInput, GnameVerificationOutput, ServiceVerifier } from "./types";
-import { publicEvidenceHost } from "./url_policy";
+import { assertPublicDnsHost, domainMatchesOrIsSubdomain, normalizeDomain } from "../../security";
+import { captureFreshGnameEvidence } from "./capture";
+import { gnameServiceIdentity } from "./config";
+import { GNAME_PROVIDER } from "./definition";
+import { gnameDefinitionHasValidHash } from "./definition_integrity";
+import { verifyGnameEvidence, type CapturedGnameEvidence } from "./evidence";
+import { classifyGnameServiceEvidence } from "./service_verifier";
+import type { GnameServiceVerifier, GnameVerificationInput, GnameVerificationOutput } from "./types";
+import { publicGnameEvidenceHost } from "./url_policy";
 
 /** Enforces every GNAME verification precondition before a portal job is queued. */
 export async function verifyGnameRoute(input: GnameVerificationInput): Promise<GnameVerificationOutput> {
-	const definition = getProviderDefinition("gname");
-	if (!definition || !providerDefinitionHasValidHash(definition)) throw new Error("GNAME provider definition is invalid.");
+	const definition = GNAME_PROVIDER;
+	if (!gnameDefinitionHasValidHash(definition)) throw new Error("GNAME provider definition is invalid.");
 	const identity = gnameServiceIdentity();
-	const capture = input.capture ?? captureFreshAbuseEvidence;
-	const captures: CapturedEvidence[] = [];
+	const capture = input.capture ?? captureFreshGnameEvidence;
+	const captures: CapturedGnameEvidence[] = [];
 	const captureReasons: string[] = [];
-	const verifier: ServiceVerifier = input.serviceVerifier ?? classifyConfiguredServiceEvidence;
+	const verifier: GnameServiceVerifier = input.serviceVerifier ?? classifyGnameServiceEvidence;
 	const classificationResults: Array<Record<string, unknown>> = [];
 	const contractReasons: string[] = [];
 	if (input.legalBrandUrl) {
@@ -31,7 +33,7 @@ export async function verifyGnameRoute(input: GnameVerificationInput): Promise<G
 	}
 
 	for (const url of input.observedUrls) {
-		let captured: CapturedEvidence;
+		let captured: CapturedGnameEvidence;
 		try {
 			captured = await capture(url);
 		} catch {
@@ -41,7 +43,7 @@ export async function verifyGnameRoute(input: GnameVerificationInput): Promise<G
 		captures.push(captured);
 		let finalHost: string | undefined;
 		try {
-			finalHost = publicEvidenceHost(captured.url);
+			finalHost = publicGnameEvidenceHost(captured.url);
 		} catch {
 			captureReasons.push("capture_final_url_invalid");
 		}
@@ -62,8 +64,7 @@ export async function verifyGnameRoute(input: GnameVerificationInput): Promise<G
 		(best, current) => (Number(current.confidence ?? 0) > Number(best.confidence ?? 0) ? current : best),
 		{ phishing: false, confidence: 0 },
 	);
-	const evidence = await verifyProviderEvidence({
-		definition,
+	const evidence = await verifyGnameEvidence({
 		target: input.target,
 		observedUrls: input.observedUrls,
 		legalBrandUrl: input.legalBrandUrl,

@@ -1,9 +1,12 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { eq } from "drizzle-orm";
 
+import { getDb } from "../db";
 import { validateAbuseReportRequest } from "./contracts";
 import { ingestFetchedAbuseMail } from "./imap";
 import { sendAbuseEmailRoute } from "./mail";
 import { AbuseRepository } from "./repository";
+import { abuseJobs } from "./schema";
 import { useTemporaryDatabase } from "../db/test_helpers";
 
 useTemporaryDatabase();
@@ -11,18 +14,12 @@ useTemporaryDatabase();
 const environmentNames = [
 	"ABUSE_SMTP_FROM",
 	"ABUSE_REPLY_DOMAIN",
-	"ABUSE_GNAME_SERVICE_MAILBOX",
-	"ABUSE_GNAME_IDENTITY_VERIFIED",
-	"ABUSE_GNAME_CODE_SENDER_DOMAINS",
 ] as const;
 const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [name, process.env[name]]));
 
 beforeEach(() => {
 	process.env.ABUSE_SMTP_FROM = "Phishing Support <support@phishing.support>";
 	process.env.ABUSE_REPLY_DOMAIN = "phishing.support";
-	process.env.ABUSE_GNAME_SERVICE_MAILBOX = "gname-reports@phishing.support";
-	process.env.ABUSE_GNAME_IDENTITY_VERIFIED = "true";
-	process.env.ABUSE_GNAME_CODE_SENDER_DOMAINS = "gname.com";
 });
 
 afterAll(() => {
@@ -98,6 +95,19 @@ describe("standalone abuse IMAP intake", () => {
 			{ mailbox: "INBOX", uidValidity: 77, processSeen: true },
 		);
 		expect(first).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_abuse_reply" });
+		if (first.disposition !== "terminal" || !first.messageId) throw new Error("Expected the first inbound reply to be stored.");
+		const classifierJobs = (await getDb())
+			.select()
+			.from(abuseJobs)
+			.where(eq(abuseJobs.dedupeKey, `classify-abuse-mail:${first.messageId.toString()}`))
+			.all();
+		expect(classifierJobs).toHaveLength(1);
+		expect(classifierJobs[0]).toMatchObject({
+			jobType: "classify_provider_reply",
+			reportId: context.report.reportId,
+			routeId: context.route.id,
+			status: "queued",
+		});
 		const duplicateByUid = await ingestFetchedAbuseMail(
 			{ uid: 10, source: Buffer.from(raw), envelope: { to: [{ address: context.outbound.replyAddress }] } },
 			{ mailbox: "INBOX", uidValidity: 77, processSeen: true },
@@ -108,6 +118,79 @@ describe("standalone abuse IMAP intake", () => {
 			{ mailbox: "INBOX", uidValidity: 77, processSeen: true },
 		);
 		expect(duplicateByMessageId).toMatchObject({ disposition: "terminal", route: "reply", reason: "duplicate_message_id" });
+	});
+
+	test("repairs a duplicate inbound message left without a classifier by an interrupted older delivery", async () => {
+		const context = await createReportAndEmailRoute();
+		const replyAddress = context.outbound.replyAddress;
+		const outboundMessageId = context.outbound.messageId;
+		if (!replyAddress || !outboundMessageId) throw new Error("Test outbound message lost its reply correlation.");
+		const messageId = "<provider-reply-recovery@provider.example.com>";
+		const raw = [
+			"From: abuse@provider.example.com",
+			`To: ${replyAddress}`,
+			"Subject: Recovery reply",
+			`Message-ID: ${messageId}`,
+			`In-Reply-To: ${outboundMessageId}`,
+			"Content-Type: text/plain; charset=utf-8",
+			"",
+			"Your report has been received.",
+		].join("\r\n");
+		const persisted = await AbuseRepository.persistInboundMailWithArtifacts({
+			reportId: context.report.reportId,
+			routeId: context.route.id,
+			kind: "reply",
+			fromAddress: "abuse@provider.example.com",
+			toAddresses: [replyAddress],
+			subject: "Recovery reply",
+			textBody: "Your report has been received.",
+			messageId,
+			inReplyTo: outboundMessageId,
+			mailbox: "INBOX",
+			uidValidity: 77,
+			uid: 19,
+			rawMime: { name: "recovery-reply.eml", buffer: Buffer.from(raw) },
+			attachments: [],
+		});
+		expect(persisted.created).toBeTrue();
+		const db = await getDb();
+		const classifierDedupeKey = `classify-abuse-mail:${persisted.id.toString()}`;
+		expect(db.select().from(abuseJobs).where(eq(abuseJobs.dedupeKey, classifierDedupeKey)).all()).toHaveLength(1);
+		// Simulate a database left by an older interrupted deployment, where the
+		// message survived but its separate classifier enqueue did not.
+		db.delete(abuseJobs).where(eq(abuseJobs.dedupeKey, classifierDedupeKey)).run();
+
+		const replay = await ingestFetchedAbuseMail(
+			{ uid: 20, source: Buffer.from(raw), envelope: { to: [{ address: replyAddress }] } },
+			{ mailbox: "INBOX", uidValidity: 77, processSeen: true },
+		);
+		expect(replay).toMatchObject({ disposition: "terminal", route: "reply", reason: "duplicate_message_id", messageId: persisted.id });
+		const recoveredJobs = (await getDb())
+			.select()
+			.from(abuseJobs)
+			.where(eq(abuseJobs.dedupeKey, classifierDedupeKey))
+			.all();
+		expect(recoveredJobs).toHaveLength(1);
+		expect(recoveredJobs[0]).toMatchObject({ jobType: "classify_provider_reply", status: "queued" });
+	});
+
+	test("rejects inbound persistence when a route is paired with another report", async () => {
+		const first = await createReportAndEmailRoute();
+		const second = await createReportAndEmailRoute();
+		await expect(AbuseRepository.persistInboundMailWithArtifacts({
+			reportId: second.report.reportId,
+			routeId: first.route.id,
+			kind: "reply",
+			fromAddress: "abuse@provider.example.com",
+			toAddresses: [first.outbound.replyAddress!],
+			messageId: "<cross-report-inbound@provider.example.com>",
+			mailbox: "INBOX",
+			uidValidity: 77,
+			uid: 90,
+			rawMime: { name: "cross-report-inbound.eml", buffer: Buffer.from("inbound") },
+			attachments: [],
+		})).rejects.toThrow("route does not belong to the supplied report");
+		expect(await AbuseRepository.getInboundMailByImap({ mailbox: "INBOX", uidValidity: 77, uid: 90 })).toBeUndefined();
 	});
 
 	test("fails closed when reply headers do not identify exactly one route", async () => {
@@ -127,45 +210,4 @@ describe("standalone abuse IMAP intake", () => {
 		)).resolves.toEqual({ disposition: "terminal", route: "ignored", reason: "no_exact_abuse_reply_match" });
 	});
 
-	test("accepts one GNAME code only from the configured shared mailbox and sender domain", async () => {
-		const request = await validateAbuseReportRequest({ targets: ["example.com"], allegationCategory: "phishing", description: "Test" });
-		const report = await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } });
-		const [target] = await AbuseRepository.listTargets(report.reportId);
-		if (!target) throw new Error("Test target was not persisted.");
-		const route = await AbuseRepository.upsertResolvedRoute(target.id, {
-			routeKey: "gname",
-			providerRegistryKey: "gname",
-			providerDisplayName: "GNAME",
-			routeType: "skyvern_portal",
-			resolverProvenance: { registrarId: 1923 },
-			resolutionSnapshot: { source: "test" },
-			serviceIdentity: { mailbox: "gname-reports@phishing.support", verified: true },
-			status: "waiting_code",
-		});
-		const raw = [
-			"From: security@gname.com",
-			"To: gname-reports@phishing.support",
-			"Subject: Verification code",
-			"Message-ID: <gname-code-1@gname.com>",
-			"Content-Type: text/plain; charset=utf-8",
-			"",
-			"Your verification code is 123456.",
-		].join("\r\n");
-		const result = await ingestFetchedAbuseMail(
-			{ uid: 20, source: Buffer.from(raw) },
-			{ mailbox: "INBOX", uidValidity: 88, processSeen: true },
-		);
-		expect(result).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_abuse_reply" });
-		const wrongSender = raw.replace("security@gname.com", "security@evil.example.net").replace("gname-code-1", "gname-code-2");
-		await expect(ingestFetchedAbuseMail(
-			{ uid: 21, source: Buffer.from(wrongSender) },
-			{ mailbox: "INBOX", uidValidity: 88, processSeen: true },
-		)).resolves.toEqual({ disposition: "terminal", route: "ignored", reason: "no_exact_abuse_reply_match" });
-		const ambiguous = raw.replace("Your verification code is 123456.", "Codes 123456 and 654321 are present.").replace("gname-code-1", "gname-code-3");
-		await expect(ingestFetchedAbuseMail(
-			{ uid: 22, source: Buffer.from(ambiguous) },
-			{ mailbox: "INBOX", uidValidity: 88, processSeen: true },
-		)).resolves.toEqual({ disposition: "terminal", route: "ignored", reason: "no_exact_abuse_reply_match" });
-		void route;
-	});
 });

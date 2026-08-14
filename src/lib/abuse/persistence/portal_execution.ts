@@ -89,10 +89,3 @@ export async function beginPortalExecution(params: {
 		{ behavior: "immediate" },
 	);
 }
-
-/**
- * The first GNAME pilot shares one verification mailbox. Acquiring its lease
- * and claiming the queued route must therefore be a single transaction: two
- * replayed jobs for the same route otherwise share the deterministic lock
- * owner and one can accidentally release the other job's reservation.
- */

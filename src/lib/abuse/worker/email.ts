@@ -1,5 +1,5 @@
 import { sendAbuseEmailRoute, isSafeEmailDeliveryFailure } from "../mail";
-import { isGenericEmailRouteEnabled } from "../registry";
+import { isGenericEmailRouteEnabled } from "../providers/email";
 import { AbuseRepository } from "../repository";
 import { errorText, RetryableDeliveryError, routeContext, UnknownExternalStateError, type WorkerServices } from "./shared";
 

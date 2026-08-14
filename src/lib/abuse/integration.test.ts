@@ -10,12 +10,9 @@ import { getDb, resetDatabaseForTesting } from "../db";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "./contracts";
 import { sendAbuseEmailRoute } from "./mail";
-import { GNAME_PROVIDER } from "./registry";
 import { AbuseRepository, aggregateReportStatus } from "./repository";
 import { abuseArtifacts, abuseJobs, abuseMailMessages } from "./schema";
 import { createArtifactAccessToken, sha256Hex } from "./security";
-import { AbuseWorker } from "./worker";
-import type { AbuseSkyvernAdapter } from "./skyvern";
 
 useTemporaryDatabase();
 
@@ -24,13 +21,6 @@ const environmentNames = [
 	"ABUSE_ARTIFACT_TOKEN_SECRET",
 	"ABUSE_SMTP_FROM",
 	"ABUSE_REPLY_DOMAIN",
-	"ABUSE_GNAME_ENABLED",
-	"ABUSE_GNAME_IDENTITY_VERIFIED",
-	"ABUSE_GNAME_SERVICE_NAME",
-	"ABUSE_GNAME_SERVICE_MAILBOX",
-	"ABUSE_GNAME_UPLOAD_URL_MAX_AGE_MS",
-	"ABUSE_GNAME_UPLOAD_URL_MIN_REMAINING_MS",
-	"SKYVERN_INTERNAL_S3_ORIGIN",
 ] as const;
 const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [name, process.env[name]]));
 
@@ -39,13 +29,6 @@ beforeEach(() => {
 	process.env.ABUSE_ARTIFACT_TOKEN_SECRET = "abcdefghijklmnopqrstuvwxyz123456";
 	process.env.ABUSE_SMTP_FROM = "Phishing Support <support@phishing.support>";
 	process.env.ABUSE_REPLY_DOMAIN = "phishing.support";
-	process.env.ABUSE_GNAME_ENABLED = "true";
-	process.env.ABUSE_GNAME_IDENTITY_VERIFIED = "true";
-	process.env.ABUSE_GNAME_SERVICE_NAME = "Phishing Support";
-	process.env.ABUSE_GNAME_SERVICE_MAILBOX = "gname-reports@phishing.support";
-	process.env.ABUSE_GNAME_UPLOAD_URL_MAX_AGE_MS = "600000";
-	process.env.ABUSE_GNAME_UPLOAD_URL_MIN_REMAINING_MS = "1000";
-	delete process.env.SKYVERN_INTERNAL_S3_ORIGIN;
 });
 
 afterAll(() => {
@@ -98,75 +81,6 @@ async function beginEmailDelivery() {
 	});
 	if (!execution) throw new Error("Test email route could not be claimed.");
 	return { ...context, run: execution.run };
-}
-
-async function createGnameRoute() {
-	const created = await createStandaloneReport();
-	const [target] = await AbuseRepository.listTargets(created.reportId);
-	if (!target) throw new Error("Test report did not create its target.");
-	const route = await AbuseRepository.upsertResolvedRoute(target.id, {
-		routeKey: "gname",
-		providerRegistryKey: "gname",
-		providerDisplayName: "GNAME",
-		routeType: "skyvern_portal",
-		providerDefinitionVersion: GNAME_PROVIDER.version,
-		providerDefinitionHash: GNAME_PROVIDER.contentHash,
-		resolverProvenance: { registrarId: 1923, match: "exact_iana_registrar_id" },
-		resolutionSnapshot: { source: "test" },
-		serviceIdentity: { name: "Phishing Support", mailbox: "gname-reports@phishing.support", verified: true },
-		status: "queued",
-	});
-	const evidence = Buffer.from("durable provider screenshot bytes");
-	const artifactId = await AbuseRepository.saveArtifact({
-		reportId: created.reportId,
-		targetId: target.id,
-		routeId: route.id,
-		name: "evidence-1.jpg",
-		kind: "provider_evidence_derivative",
-		mimeType: "image/jpeg",
-		buffer: evidence,
-	});
-	const artifact = await AbuseRepository.getArtifact(created.reportId, artifactId);
-	if (!artifact) throw new Error("Test evidence artifact was not retained.");
-	return { ...created, target, route, artifact };
-}
-
-function gnameUploadDraft(params: { target: string; observedUrls: string[]; artifact: { id: bigint; name: string; mimeType: string; sha256: string; size: number } }) {
-	return {
-		adapter: "gname_category_2_v1",
-		stage: "evidence_upload_pending",
-		taskInput: {
-			entryUrl: GNAME_PROVIDER.entryUrl,
-			description: "Phishing report for example.com.",
-			domains: [params.target],
-			observedUrls: params.observedUrls,
-			serviceName: "Phishing Support",
-			legalBrandUrl: "https://brand.example.com/",
-			serviceMailbox: "gname-reports@phishing.support",
-			totpIdentifier: "gname-reports@phishing.support",
-		},
-		contract: {
-			entryUrl: GNAME_PROVIDER.entryUrl,
-			providerDefinitionVersion: GNAME_PROVIDER.version,
-			providerDefinitionHash: GNAME_PROVIDER.contentHash,
-			domains: [params.target],
-			observedUrls: params.observedUrls,
-			allowedFinalDomains: GNAME_PROVIDER.verifiedDomains,
-			declarationContract: "gname_service_declaration_v1",
-		},
-		sourceArtifacts: [{
-			id: params.artifact.id.toString(),
-			name: params.artifact.name,
-			mimeType: params.artifact.mimeType,
-			sha256: params.artifact.sha256,
-			size: params.artifact.size,
-		}],
-		evidenceUploads: [{
-			artifactId: params.artifact.id.toString(),
-			sha256: params.artifact.sha256,
-			state: "pending",
-		}],
-	};
 }
 
 describe("standalone abuse persistence boundary", () => {
@@ -436,79 +350,6 @@ describe("standalone abuse email lifecycle", () => {
 		expect(retryJobs).toHaveLength(1);
 		const outbound = await AbuseRepository.getOutboundMailForRun(context.run.id);
 		expect(outbound).toMatchObject({ status: "failed" });
-	});
-});
-
-describe("GNAME pre-task durability", () => {
-	test("checkpoints each SDK evidence upload before task creation and does not replay an interrupted upload", async () => {
-		const context = await createGnameRoute();
-		const draft = gnameUploadDraft({ target: context.target.normalizedTarget, observedUrls: context.target.observedUrls, artifact: context.artifact });
-		const execution = await AbuseRepository.beginGnamePortalExecution({
-			routeId: context.route.id,
-			correlationKey: `portal-run:${context.route.id.toString()}`,
-			providerPayload: draft,
-			lockKey: "abuse:gname:shared-mailbox:gname-reports@phishing.support",
-			lockOwner: `abuse:gname:route:${context.route.id.toString()}`,
-			lockLeaseMs: 60_000,
-		});
-		expect(execution.acquired).toBeTrue();
-		if (!execution.acquired) throw new Error("GNAME route did not acquire its mailbox lock.");
-		expect(await AbuseRepository.beginGnameEvidenceUpload({
-			runId: execution.run.id,
-			artifactId: context.artifact.id.toString(),
-			sha256: context.artifact.sha256,
-		})).toBe("started");
-		expect(await AbuseRepository.beginGnameEvidenceUpload({
-			runId: execution.run.id,
-			artifactId: context.artifact.id.toString(),
-			sha256: context.artifact.sha256,
-		})).toBe("already_started");
-		expect(await AbuseRepository.requeueGnamePortalPreparation({ runId: execution.run.id, error: "simulated restart" })).toBeFalse();
-
-		let uploads = 0;
-		const worker = new AbuseWorker({
-			adapter: {
-				uploadFile: async () => {
-					uploads += 1;
-					return { presignedUrl: "https://storage.example.com/upload", sha256: context.artifact.sha256 };
-				},
-				createTask: async () => ({ runId: "should-not-be-created" }),
-			} as unknown as AbuseSkyvernAdapter,
-		});
-		await expect((worker as unknown as { runGnamePortal(routeId: bigint): Promise<void> }).runGnamePortal(context.route.id)).rejects.toThrow("interrupted after its durable pre-call marker");
-		expect(uploads).toBe(0);
-		expect(await AbuseRepository.getProviderRun(execution.run.id)).toMatchObject({ executionStatus: "unknown_external_state" });
-		expect(await AbuseRepository.getRoute(context.route.id)).toMatchObject({ status: "unknown_external_state" });
-	});
-
-	test("uses each checkpointed upload exactly once before creating the pinned GNAME task", async () => {
-		const context = await createGnameRoute();
-		let uploads = 0;
-		let taskCreations = 0;
-		const worker = new AbuseWorker({
-			adapter: {
-				uploadFile: async ({ buffer }: { buffer: Buffer }) => {
-					uploads += 1;
-					return { presignedUrl: "https://storage.example.com/gname-evidence-1", sha256: sha256Hex(buffer) };
-				},
-				createTask: async () => {
-					taskCreations += 1;
-					return { runId: "gname-task-1" };
-				},
-			} as unknown as AbuseSkyvernAdapter,
-		});
-		await (worker as unknown as { runGnamePortal(routeId: bigint): Promise<void> }).runGnamePortal(context.route.id);
-		expect({ uploads, taskCreations }).toEqual({ uploads: 1, taskCreations: 1 });
-		const run = await AbuseRepository.getLatestProviderRunForRoute(context.route.id);
-		expect(run).toMatchObject({ skyvernRunId: "gname-task-1", executionStatus: "waiting_code" });
-		const payload = run?.providerPayload as Record<string, unknown>;
-		expect(payload.stage).toBe("task_payload_prepared");
-		expect(payload.evidenceUploads).toEqual([
-			expect.objectContaining({ artifactId: context.artifact.id.toString(), state: "uploaded", presignedUrl: "https://storage.example.com/gname-evidence-1" }),
-		]);
-		expect(await AbuseRepository.getRoute(context.route.id)).toMatchObject({ status: "waiting_code" });
-		await (worker as unknown as { runGnamePortal(routeId: bigint): Promise<void> }).runGnamePortal(context.route.id);
-		expect({ uploads, taskCreations }).toEqual({ uploads: 1, taskCreations: 1 });
 	});
 });
 

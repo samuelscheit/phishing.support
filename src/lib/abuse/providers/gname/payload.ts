@@ -1,5 +1,5 @@
 import { isSafeSkyvernStorageUrl } from "../../skyvern/storage";
-import { recordValue } from "../shared";
+import { recordValue } from "../../worker/shared";
 
 export type GnameEvidenceSource = {
 	id: string;

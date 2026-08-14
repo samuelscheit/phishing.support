@@ -7,27 +7,30 @@ import { attachmentFilename, inboundBodyText, isRfcMessageId } from "./shared";
 export async function persistInboundAbuseMail(params: {
 	routeId: bigint;
 	reportId: bigint;
+	/** Canonical delivery recipients from IMAP headers and envelope metadata. */
+	recipientAddresses: string[];
 	rawMime: Buffer;
 	mailbox: string;
 	uidValidity: number;
 	uid: number;
 }): Promise<{ messageId: bigint; created: boolean }> {
 	const parsed = await simpleParser(params.rawMime);
-	const route = await AbuseRepository.getRoute(params.routeId);
-	if (!route) throw new Error("Inbound abuse mail route no longer exists.");
 	const addressList = (value: ParsedMail["to"]): string[] => {
 		if (!value) return [];
 		const entries = Array.isArray(value) ? value.flatMap((item) => item.value) : value.value;
 		return entries.map((entry) => entry.address).filter((entry): entry is string => Boolean(entry));
 	};
 	const from = addressList(parsed.from).join(", ") || undefined;
-	const to = addressList(parsed.to);
 	const stored = await AbuseRepository.persistInboundMailWithArtifacts({
 		reportId: params.reportId,
 		routeId: params.routeId,
 		kind: "reply",
 		fromAddress: from,
-		toAddresses: to ?? [],
+		// IMAP ingestion selected the route from this complete canonical set,
+		// including envelope and delivery-recipient fields that may not occur in
+		// the visible RFC To header. Retain the same evidence for a provider's
+		// post-storage authorization check.
+		toAddresses: [...new Set(params.recipientAddresses)],
 		subject: parsed.subject,
 		textBody: inboundBodyText(parsed),
 		messageId: isRfcMessageId(parsed.messageId) ? parsed.messageId : undefined,

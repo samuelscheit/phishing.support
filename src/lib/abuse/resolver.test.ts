@@ -1,21 +1,16 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 
-import { getProviderForRegistrarId } from "./registry";
-import { extractRegistrarIdFromRdap, parseExplicitWhoisAbuseMailboxes, resolveAbuseTarget, type ResolverDependencies } from "./resolver";
+import { parseExplicitWhoisAbuseMailboxes, resolveAbuseTarget, type ResolverDependencies } from "./resolver";
 
 const originalGenericEmail = process.env.ABUSE_GENERIC_EMAIL_ENABLED;
-const originalGname = process.env.ABUSE_GNAME_ENABLED;
 
 beforeEach(() => {
 	process.env.ABUSE_GENERIC_EMAIL_ENABLED = "true";
-	delete process.env.ABUSE_GNAME_ENABLED;
 });
 
 afterAll(() => {
 	if (originalGenericEmail === undefined) delete process.env.ABUSE_GENERIC_EMAIL_ENABLED;
 	else process.env.ABUSE_GENERIC_EMAIL_ENABLED = originalGenericEmail;
-	if (originalGname === undefined) delete process.env.ABUSE_GNAME_ENABLED;
-	else process.env.ABUSE_GNAME_ENABLED = originalGname;
 });
 
 function rdapResponse(payload: Record<string, unknown>): Response {
@@ -184,25 +179,4 @@ describe("standalone abuse resolver", () => {
 		expect(requestedUrls).toEqual(["https://rdap.org/ip/154.201.78.249"]);
 	});
 
-	test("matches GNAME only through exact IANA registrar identifiers, never display text", async () => {
-		expect(getProviderForRegistrarId(1923)?.key).toBe("gname");
-		expect(getProviderForRegistrarId(3941)?.key).toBe("gname");
-		expect(getProviderForRegistrarId(4542)?.key).toBe("gname");
-		expect(getProviderForRegistrarId(4543)).toBeUndefined();
-		expect(extractRegistrarIdFromRdap({ handle: "IANA-1923" })).toBe(1923);
-		expect(extractRegistrarIdFromRdap({ publicIds: [{ type: "iAnA  ReGiStRaR\tID", identifier: "1923" }] })).toBe(1923);
-		expect(extractRegistrarIdFromRdap({ name: "Gname.com Pte. Ltd.", publicIds: [{ type: "other", identifier: "1923" }] })).toBeUndefined();
-		expect(extractRegistrarIdFromRdap({ publicIds: [{ type: "Not IANA Registrar ID", identifier: "1923" }] })).toBeUndefined();
-		expect(extractRegistrarIdFromRdap({ publicIds: [{ type: "IANA Registrar ID (claimed)", identifier: "1923" }] })).toBeUndefined();
-
-		const result = await resolveAbuseTarget(
-			{ normalizedTarget: "example.com", targetType: "domain", observedUrls: [] },
-			resolverWith({
-				"https://rdap.org/domain/example.com": {
-					entities: [{ roles: ["registrar"], handle: "NOT-GNAME", name: "Gname.com Pte. Ltd.", publicIds: [{ type: "IANA Registrar ID", identifier: "999" }] }],
-				},
-			}),
-		);
-		expect(result.routes[0]).toMatchObject({ providerRegistryKey: "manual_unroutable", routeType: "manual_unroutable" });
-	});
 });

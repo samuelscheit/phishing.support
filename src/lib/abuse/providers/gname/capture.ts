@@ -5,17 +5,17 @@ import path from "node:path";
 import { chromium } from "patchright";
 import sharp from "sharp";
 
-import type { CapturedEvidence } from "../evidence";
-import { assertPublicDnsHost, domainMatchesOrIsSubdomain } from "../security";
-import { publicEvidenceHost } from "./url_policy";
+import type { CapturedGnameEvidence } from "./evidence";
+import { assertPublicDnsHost, domainMatchesOrIsSubdomain } from "../../security";
+import { publicGnameEvidenceHost } from "./url_policy";
 
 /**
  * Capture a target in a fresh, throw-away Patchright profile. Every requested
  * hostname is DNS-checked before navigation; redirects to a different target
  * domain are recorded but never treated as evidence for the submitted domain.
  */
-export async function captureFreshAbuseEvidence(url: string): Promise<CapturedEvidence> {
-	const targetHost = publicEvidenceHost(url);
+export async function captureFreshGnameEvidence(url: string): Promise<CapturedGnameEvidence> {
+	const targetHost = publicGnameEvidenceHost(url);
 	await assertPublicDnsHost(targetHost);
 	const profile = await fs.mkdtemp(path.join(os.tmpdir(), "abuse-browser-"));
 	const executablePath = process.env.CHROME_PATH;
@@ -42,7 +42,7 @@ export async function captureFreshAbuseEvidence(url: string): Promise<CapturedEv
 		});
 		await page.goto(url, { waitUntil: "networkidle", timeout: 120_000 });
 		const finalUrl = page.url();
-		const finalHost = publicEvidenceHost(finalUrl);
+		const finalHost = publicGnameEvidenceHost(finalUrl);
 		const screenshot = Buffer.from(await page.screenshot({ type: "png", fullPage: true }));
 		const jpeg = await sharp(screenshot).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
 		const pageTitle = (await page.title()).slice(0, 1_000);

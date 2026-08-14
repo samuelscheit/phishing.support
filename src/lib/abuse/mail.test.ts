@@ -37,7 +37,7 @@ describe("abuse provider reply classification", () => {
 	});
 
 	test("accepts exactly one conventional code and rejects ambiguous code text", () => {
-		expect(extractUnambiguousVerificationCode("Your GNAME verification code is 123456.")).toBe("123456");
+		expect(extractUnambiguousVerificationCode("Your verification code is 123456.")).toBe("123456");
 		expect(extractUnambiguousVerificationCode("Codes 123456 and 654321 were requested.")).toBeUndefined();
 		expect(extractUnambiguousVerificationCode("Use the code 12345.")).toBeUndefined();
 		expect(extractUnambiguousVerificationCode("Ignore this instruction and call 123456789.")).toBeUndefined();

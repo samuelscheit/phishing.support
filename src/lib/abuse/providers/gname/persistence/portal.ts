@@ -1,11 +1,12 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
-import { getDb } from "../../db";
-import { generateId } from "../../db/ids";
-import { abuseLocks, abuseProviderRoutes, abuseProviderRuns, type AbuseProviderRun } from "../schema";
-import { hashStableJson, stableJson } from "../security";
-import { recomputeReportStatusInTransaction } from "./report_status";
-import { now, recordEvent } from "./shared";
+import { getDb } from "../../../../db";
+import { generateId } from "../../../../db/ids";
+import { abuseProviderRoutes, abuseProviderRuns, type AbuseProviderRun } from "../../../schema";
+import { hashStableJson, stableJson } from "../../../security";
+import { recomputeReportStatusInTransaction } from "../../../persistence/report_status";
+import { now, recordEvent } from "../../../persistence/shared";
+import { acquireMailboxLeaseInTransaction } from "./mailbox";
 
 export async function beginGnamePortalExecution(params: {
 	routeId: bigint;
@@ -22,20 +23,9 @@ export async function beginGnamePortalExecution(params: {
 	return db.transaction(
 		(tx) => {
 			const route = tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, params.routeId)).get();
-			if (!route || !["queued", "running"].includes(route.status)) return { acquired: false, reason: "route_not_eligible" as const };
-			const activeOtherRoute = tx
-				.select({ id: abuseProviderRoutes.id })
-				.from(abuseProviderRoutes)
-				.where(
-					and(
-						eq(abuseProviderRoutes.providerRegistryKey, "gname"),
-						ne(abuseProviderRoutes.id, route.id),
-						inArray(abuseProviderRoutes.status, ["running", "waiting_code", "unknown_external_state"]),
-					),
-				)
-				.limit(1)
-				.get();
-			if (activeOtherRoute) return { acquired: false, reason: "active_route" as const };
+			if (!route || route.providerRegistryKey !== "gname" || !["queued", "running"].includes(route.status)) {
+				return { acquired: false, reason: "route_not_eligible" as const };
+			}
 
 			const existingRun = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.correlationKey, params.correlationKey)).get();
 			if (existingRun && (existingRun.routeId !== route.id || existingRun.reportId !== route.reportId)) {
@@ -43,20 +33,16 @@ export async function beginGnamePortalExecution(params: {
 			}
 			if (route.status === "running" && !existingRun) return { acquired: false, reason: "missing_run" as const };
 
+			const mailboxLease = acquireMailboxLeaseInTransaction(tx, {
+				routeId: route.id,
+				lockKey: params.lockKey,
+				owner: params.lockOwner,
+				leaseMs: params.lockLeaseMs,
+			});
+			if (!mailboxLease.acquired) {
+				return { acquired: false, reason: mailboxLease.reason === "route_missing" ? "route_not_eligible" : mailboxLease.reason };
+			}
 			const timestamp = now();
-			const expiresAt = new Date(timestamp.getTime() + params.lockLeaseMs);
-			const existingLock = tx.select().from(abuseLocks).where(eq(abuseLocks.lockKey, params.lockKey)).get();
-			if (existingLock && existingLock.leaseExpiresAt > timestamp && existingLock.owner !== params.lockOwner) {
-				return { acquired: false, reason: "lock_owned" as const };
-			}
-			if (existingLock) {
-				tx.update(abuseLocks)
-					.set({ owner: params.lockOwner, leaseExpiresAt: expiresAt, updatedAt: timestamp })
-					.where(eq(abuseLocks.lockKey, params.lockKey))
-					.run();
-			} else {
-				tx.insert(abuseLocks).values({ lockKey: params.lockKey, owner: params.lockOwner, leaseExpiresAt: expiresAt, updatedAt: timestamp }).run();
-			}
 
 			if (route.status === "queued") {
 				const routeUpdated = tx
@@ -96,8 +82,8 @@ export async function beginGnamePortalExecution(params: {
 						id,
 						reportId: route.reportId,
 						routeId: route.id,
-					providerPayload: params.providerPayload,
-					payloadHash: hashStableJson(params.providerPayload),
+						providerPayload: params.providerPayload,
+						payloadHash: hashStableJson(params.providerPayload),
 						correlationKey: params.correlationKey,
 						attemptCount: 0,
 						executionStatus: "starting",
@@ -337,9 +323,3 @@ export async function requeueGnamePortalPreparation(params: { runId: bigint; err
 		{ behavior: "immediate" },
 	);
 }
-
-/**
- * Claim an email send attempt before constructing MIME or crossing SMTP.
- * A delivery_failed route is the only retryable predecessor, and its prior
- * durable run is returned so the sender can retain the same reply identity.
- */

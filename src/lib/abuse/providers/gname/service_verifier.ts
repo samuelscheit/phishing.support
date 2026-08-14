@@ -1,11 +1,11 @@
 import { isIP } from "node:net";
 
-import { assertPublicDnsHost, isPublicIp, normalizeDomain } from "../security";
-import type { ServiceVerifierDependencies } from "./types";
+import { assertPublicDnsHost, isPublicIp, normalizeDomain } from "../../security";
+import type { GnameServiceVerifierDependencies } from "./types";
 
 const MAX_SERVICE_VERIFIER_RESPONSE_BYTES = 64 * 1024;
 
-function configuredServiceVerifierEndpoint(value: string): URL {
+function configuredGnameServiceVerifierEndpoint(value: string): URL {
 	let endpoint: URL;
 	try {
 		endpoint = new URL(value);
@@ -26,7 +26,7 @@ function configuredServiceVerifierEndpoint(value: string): URL {
 	return endpoint;
 }
 
-async function parseBoundedVerifierResponse(response: Response): Promise<Record<string, unknown>> {
+async function parseBoundedGnameVerifierResponse(response: Response): Promise<Record<string, unknown>> {
 	const declaredLength = Number(response.headers.get("content-length"));
 	if (Number.isFinite(declaredLength) && declaredLength > MAX_SERVICE_VERIFIER_RESPONSE_BYTES) {
 		throw new Error("Service verifier response exceeded its size limit.");
@@ -52,18 +52,18 @@ async function parseBoundedVerifierResponse(response: Response): Promise<Record<
  * endpoint is still a network boundary: validate the URL and DNS result,
  * forbid redirects, and bound the response before parsing it. This keeps a
  * deployment setting from becoming an exception to the service-wide SSRF
- * policy when the GNAME rollout gate is eventually enabled.
+ * policy when GNAME is enabled.
  */
-export async function classifyConfiguredServiceEvidence(
+export async function classifyGnameServiceEvidence(
 	params: { url: string; screenshot: Buffer; pageText: string; pageTitle: string },
-	dependencies: ServiceVerifierDependencies = {},
+	dependencies: GnameServiceVerifierDependencies = {},
 ): Promise<{ phishing: boolean; confidence: number; rationale?: string }> {
 	// Public enablement must be explicit. A missing verifier is a safe negative,
 	// never an implicit approval based on the submitter's allegation.
 	if (process.env.ABUSE_VERIFIER_ENABLED !== "true") return { phishing: false, confidence: 0, rationale: "Service verifier is not enabled." };
 	const configuredEndpoint = process.env.ABUSE_VERIFIER_ENDPOINT?.trim();
 	if (!configuredEndpoint) return { phishing: false, confidence: 0, rationale: "Service verifier endpoint is not configured." };
-	const endpoint = configuredServiceVerifierEndpoint(configuredEndpoint);
+	const endpoint = configuredGnameServiceVerifierEndpoint(configuredEndpoint);
 	const hostname = endpoint.hostname.replace(/^\[|\]$/g, "");
 	await (dependencies.assertPublicHost ?? assertPublicDnsHost)(hostname);
 	const response = await (dependencies.fetch ?? fetch)(endpoint, {
@@ -76,7 +76,7 @@ export async function classifyConfiguredServiceEvidence(
 		throw new Error("Service verifier response redirected to an unapproved destination.");
 	}
 	if (!response.ok) throw new Error(`Service verifier returned HTTP ${response.status}.`);
-	const payload = await parseBoundedVerifierResponse(response);
+	const payload = await parseBoundedGnameVerifierResponse(response);
 	const confidence = typeof payload.confidence === "number" && Number.isFinite(payload.confidence) && payload.confidence >= 0 && payload.confidence <= 1
 		? payload.confidence
 		: 0;

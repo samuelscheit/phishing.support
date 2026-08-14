@@ -1,18 +1,18 @@
-import type { DecodedEvidence } from "../contracts";
-import type { CapturedEvidence, EvidenceCapture, EvidenceDerivative } from "../evidence";
+import type { DecodedEvidence } from "../../contracts";
+import type { CapturedGnameEvidence, GnameEvidenceCapture, GnameEvidenceDerivative } from "./evidence";
 
-export type ServiceVerifier = (params: {
+export type GnameServiceVerifier = (params: {
 	url: string;
 	screenshot: Buffer;
 	pageText: string;
 	pageTitle: string;
 }) => Promise<{ phishing: boolean; confidence: number; rationale?: string }>;
 
-type ServiceVerifierFetch = (input: URL, init?: RequestInit) => Promise<Response>;
+type GnameServiceVerifierFetch = (input: URL, init?: RequestInit) => Promise<Response>;
 
-export type ServiceVerifierDependencies = {
+export type GnameServiceVerifierDependencies = {
 	/** Injectable only for deterministic endpoint-safety tests. */
-	fetch?: ServiceVerifierFetch;
+	fetch?: GnameServiceVerifierFetch;
 	/** Injectable only for deterministic endpoint-safety tests. */
 	assertPublicHost?: (hostname: string) => Promise<void>;
 };
@@ -23,13 +23,13 @@ export type GnameVerificationInput = {
 	legalBrandUrl?: string;
 	description: string;
 	userEvidence: DecodedEvidence[];
-	serviceVerifier?: ServiceVerifier;
-	capture?: EvidenceCapture;
+	serviceVerifier?: GnameServiceVerifier;
+	capture?: GnameEvidenceCapture;
 };
 
 export type GnameVerificationOutput = {
 	passed: boolean;
 	result: Record<string, unknown>;
-	derivatives: EvidenceDerivative[];
-	captures: CapturedEvidence[];
+	derivatives: GnameEvidenceDerivative[];
+	captures: CapturedGnameEvidence[];
 };

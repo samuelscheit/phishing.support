@@ -2,7 +2,9 @@ import { isIP } from "node:net";
 
 import OpenAI from "openai";
 
-import { getProviderDefinition, isProviderReplyLinkAllowed, isVerifiedEmailRouteOriginAllowed } from "../registry";
+import { isProviderReplyLinkAllowed } from "../providers/definition";
+import { isVerifiedEmailRouteOriginAllowed } from "../providers/email";
+import { getProviderDefinition } from "../providers/registry";
 import { assertPublicDnsHost, normalizeDomain, registrableDomain } from "../security";
 import { abuseReplyClassifications, abuseReplyClassificationSchema, type AbuseReplyClassification } from "./types";
 

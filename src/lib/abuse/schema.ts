@@ -70,12 +70,12 @@ export type AbuseJobStatus = (typeof abuseJobStatuses)[number];
 
 export const abuseJobTypes = [
 	"resolve_report",
-	"verify_gname",
+	"verify_provider",
 	"send_email",
 	"monitor_provider_reply",
 	"run_portal",
 	"reconcile_skyvern_run",
-	"send_totp_code",
+	"deliver_provider_verification_code",
 	"classify_provider_reply",
 ] as const;
 export type AbuseJobType = (typeof abuseJobTypes)[number];
@@ -420,7 +420,7 @@ export const abuseWebhookEvents = sqliteTable(
 	]
 );
 
-/** Lease-backed singleton locks, currently used for the shared GNAME code mailbox. */
+/** Lease-backed singleton locks for provider-owned external resources. */
 export const abuseLocks = sqliteTable(
 	"abuse_locks",
 	{

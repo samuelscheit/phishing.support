@@ -1,5 +1,6 @@
 import { classifyProviderReply, extractVerifiedProviderLinks } from "../mail";
-import { isGenericFormEscalationEnabled, verifiedDomainsForEmailRoute } from "../registry";
+import { isGenericFormEscalationEnabled } from "../providers/generic_form";
+import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { AbuseRepository } from "../repository";
 
 export async function classifyReply(messageId: bigint): Promise<void> {
@@ -10,7 +11,7 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 	if (!route) return;
 	const links = result.classification === "not_monitored"
 		? await extractVerifiedProviderLinks({
-			providerKey: route.providerRegistryKey === "gname" ? route.providerRegistryKey : undefined,
+			providerKey: route.providerRegistryKey,
 			verifiedDomains: route.verifiedEmail ? verifiedDomainsForEmailRoute(route.verifiedEmail) : undefined,
 			text: message.textBody ?? "",
 		})

@@ -1,14 +1,8 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { generateId } from "../../db/ids";
-import {
-	abuseProviderRoutes,
-	abuseProviderRuns,
-	abuseTargets,
-	type AbuseProviderRoute,
-	type AbuseRouteStatus,
-} from "../schema";
+import { abuseProviderRoutes, abuseProviderRuns, abuseTargets, type AbuseProviderRoute, type AbuseRouteStatus } from "../schema";
 import type { ResolvedRouteInput } from "../route_contracts";
 import { now, recordEvent } from "./shared";
 import { recomputeReportStatusInTransaction } from "./report_status";
@@ -288,14 +282,4 @@ export async function setRouteVerification(
 		},
 		{ behavior: "immediate" },
 	);
-}
-
-export async function listActiveGnameRoutes(): Promise<AbuseProviderRoute[]> {
-	const db = await getDb();
-	return db
-		.select()
-		.from(abuseProviderRoutes)
-		.where(and(eq(abuseProviderRoutes.providerRegistryKey, "gname"), inArray(abuseProviderRoutes.status, ["running", "waiting_code", "unknown_external_state"])))
-		.orderBy(asc(abuseProviderRoutes.updatedAt))
-		.all();
 }

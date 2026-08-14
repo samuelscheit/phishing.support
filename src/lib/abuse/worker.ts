@@ -3,11 +3,12 @@ import { resolveAbuseTarget } from "./resolver";
 import { AbuseSkyvernAdapter } from "./skyvern";
 import { skyvernApiKeySourceIsConfigured } from "./skyvern_config";
 import type { AbuseJob } from "./schema";
+import { getPortalProvider, listPortalProviders } from "./providers";
 import { sendEmail } from "./worker/email";
-import { maintainUnknownGnameLocks, runGnamePortal as runGnamePortalTask, sendTotpCode } from "./worker/gname";
 import { classifyReply, monitorProviderReply } from "./worker/mail";
-import { reconcileSkyvern, runGenericProviderPortal } from "./worker/portal";
-import { resolveReport, verifyGname } from "./worker/resolution";
+import { runGenericProviderPortal } from "./worker/portal";
+import { reconcileGenericSkyvern } from "./worker/reconcile";
+import { resolveReport, verifyProviderRoute } from "./worker/resolution";
 import { errorText, envInt, idFrom, parseJobBigInt, randomOwner, type WorkerServices } from "./worker/shared";
 
 const DEFAULT_LEASE_MS = 90_000;
@@ -95,7 +96,7 @@ export class AbuseWorker {
 	}
 
 	async processOne(): Promise<boolean> {
-		await maintainUnknownGnameLocks();
+		for (const provider of listPortalProviders()) await provider.maintain?.();
 		const job = await AbuseRepository.claimNextJob(this.owner, this.leaseMs);
 		if (!job) return false;
 		const heartbeat = setInterval(() => {
@@ -121,10 +122,24 @@ export class AbuseWorker {
 	}
 
 	private async failRetryExhaustedJob(job: AbuseJob, error: string): Promise<void> {
-		// A known Skyvern task can still be executing even if local reads/code
-		// delivery remain unavailable. Do not downgrade that route to ordinary
-		// failure and accidentally free the shared GNAME mailbox for another run.
-		if ((job.jobType === "reconcile_skyvern_run" || job.jobType === "send_totp_code") && job.routeId) {
+		// Provider-owned external actions get one chance to fence an active task
+		// before generic retry exhaustion changes the route to ordinary failure.
+		if (job.routeId) {
+			const route = await AbuseRepository.getRoute(job.routeId);
+			const provider = route ? getPortalProvider(route.providerRegistryKey) : undefined;
+			if (provider?.onRetryExhausted && await provider.onRetryExhausted({
+				routeId: job.routeId,
+				runId: job.runId ?? undefined,
+				jobType: job.jobType,
+				error,
+			}, this.services)) {
+				await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
+				return;
+			}
+		}
+		// Reconciliation itself is generic transport work. A known external run
+		// must never be downgraded simply because polling exhausted its retries.
+		if (job.jobType === "reconcile_skyvern_run" && job.routeId) {
 			const run = job.runId ? await AbuseRepository.getProviderRun(job.runId) : await AbuseRepository.getLatestActiveProviderRunForRoute(job.routeId);
 			if (run?.skyvernRunId) {
 				await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
@@ -165,8 +180,8 @@ export class AbuseWorker {
 			case "resolve_report":
 				await resolveReport(idFrom(job.reportId, "reportId"), this.resolveTarget);
 				return;
-			case "verify_gname":
-				await verifyGname(idFrom(job.routeId, "routeId"));
+			case "verify_provider":
+				await verifyProviderRoute(idFrom(job.routeId, "routeId"));
 				return;
 			case "send_email":
 				await sendEmail(idFrom(job.routeId, "routeId"), this.services);
@@ -175,7 +190,7 @@ export class AbuseWorker {
 				await this.runPortal(job);
 				return;
 			case "reconcile_skyvern_run":
-				await reconcileSkyvern(idFrom(job.runId, "runId"), this.services);
+				await this.reconcilePortalRun(idFrom(job.runId, "runId"));
 				return;
 			case "classify_provider_reply":
 				await classifyReply(parseJobBigInt(job.payload?.messageId, "payload.messageId"));
@@ -183,8 +198,8 @@ export class AbuseWorker {
 			case "monitor_provider_reply":
 				await monitorProviderReply(idFrom(job.routeId, "routeId"));
 				return;
-			case "send_totp_code":
-				await sendTotpCode(job, this.services);
+			case "deliver_provider_verification_code":
+				await this.deliverProviderVerificationCode(job);
 				return;
 			default:
 				throw new Error(`Unsupported abuse job type ${job.jobType}.`);
@@ -195,8 +210,10 @@ export class AbuseWorker {
 		const routeId = idFrom(job.routeId, "routeId");
 		const route = await AbuseRepository.getRoute(routeId);
 		if (!route) throw new Error("Abuse route no longer exists.");
-		if (route.routeType === "skyvern_portal" && route.providerRegistryKey === "gname") {
-			await this.runGnamePortal(routeId);
+		if (route.routeType === "skyvern_portal") {
+			const provider = getPortalProvider(route.providerRegistryKey);
+			if (!provider) throw new Error(`No registered portal provider is available for abuse route ${route.id.toString()}.`);
+			await provider.runPortal(routeId, this.services);
 			return;
 		}
 		if (route.routeType === "email") {
@@ -206,9 +223,30 @@ export class AbuseWorker {
 		throw new Error(`No code-owned portal adapter is available for abuse route ${route.id.toString()}.`);
 	}
 
-	// Retained as a narrow forwarding seam for the existing focused durability tests.
-	private async runGnamePortal(routeId: bigint): Promise<void> {
-		await runGnamePortalTask(routeId, this.services);
+	private async reconcilePortalRun(runId: bigint): Promise<void> {
+		const run = await AbuseRepository.getProviderRun(runId);
+		if (!run) return;
+		const route = await AbuseRepository.getRoute(run.routeId);
+		if (!route) return;
+		const provider = getPortalProvider(route.providerRegistryKey);
+		if (provider) {
+			await provider.reconcileRun(runId, this.services);
+			return;
+		}
+		if (route.routeType === "email") {
+			await reconcileGenericSkyvern(runId, this.services);
+			return;
+		}
+		throw new Error(`No registered portal provider can reconcile abuse route ${route.id.toString()}.`);
+	}
+
+	private async deliverProviderVerificationCode(job: AbuseJob): Promise<void> {
+		const routeId = idFrom(job.routeId, "routeId");
+		const route = await AbuseRepository.getRoute(routeId);
+		if (!route) return;
+		const provider = getPortalProvider(route.providerRegistryKey);
+		if (!provider?.deliverVerificationCode) throw new Error(`No registered provider can deliver a verification code for abuse route ${route.id.toString()}.`);
+		await provider.deliverVerificationCode({ routeId, runId: job.runId ?? undefined, payload: job.payload ?? {} }, this.services);
 	}
 }
 

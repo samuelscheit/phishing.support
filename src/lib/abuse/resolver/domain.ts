@@ -1,4 +1,4 @@
-import { getProviderForRegistrarId } from "../registry";
+import { getPortalProviderForRegistrarId } from "../providers";
 import { sha256Hex } from "../security";
 import { safeJsonFetch } from "./http";
 import {
@@ -9,7 +9,7 @@ import {
 	explicitAbuseMailboxes,
 	firstEntityWithRole,
 } from "./rdap";
-import { emailRoute, gnameRoute, unroutableRoute } from "./routes";
+import { emailRoute, unroutableRoute } from "./routes";
 import { queryPort43 } from "./port43";
 import { parseExplicitWhoisAbuseMailboxes, parseWhoisNetworkMetadata } from "./whois";
 import type { JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
@@ -62,9 +62,9 @@ export async function resolveDomainTarget(target: ResolverTarget, dependencies: 
 		},
 	};
 
-	const provider = getProviderForRegistrarId(registrarId);
-	if (provider?.key === "gname") {
-		const route = gnameRoute(registrarId!, snapshot);
+	const provider = getPortalProviderForRegistrarId(registrarId);
+	if (provider) {
+		const route = provider.createRegistrarRoute({ registrarId: registrarId!, resolutionSnapshot: snapshot });
 		return {
 			status: route.status === "no_route" ? "no_route" : "resolved",
 			disposition: route.status === "no_route" ? "provider_route_disabled_or_unproven" : undefined,

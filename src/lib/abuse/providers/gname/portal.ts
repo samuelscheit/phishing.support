@@ -1,19 +1,34 @@
-import { makeProviderDescription } from "../../evidence";
-import { getProviderDefinition, gnameServiceIdentity, isProviderRouteEnabled, providerDefinitionMatchesPin } from "../../registry";
-import { AbuseRepository } from "../../repository";
-import { buildGnameTaskPayload, type AbuseSkyvernAdapter } from "../../skyvern";
+import { listArtifacts } from "../../persistence/artifacts";
+import { enqueueJob } from "../../persistence/jobs";
+import { releaseLock, renewLock, tryAcquireLock } from "../../persistence/locks";
+import { getProviderRun, prepareSkyvernTaskCreation } from "../../persistence/provider_runs";
+import { transitionRouteStatus } from "../../persistence/routes";
 import { stableJson } from "../../security";
+import type { AbuseSkyvernAdapter } from "../../skyvern";
 import {
 	errorText,
-	envInt,
 	recordValue,
 	routeContext,
 	storedSkyvernTaskPayload,
 	UnknownExternalStateError,
 	type WorkerServices,
-} from "../shared";
+} from "../../worker/shared";
+import { gnamePositiveInt, isGnameEnabled } from "./config";
+import { GNAME_PROVIDER } from "./definition";
+import { gnameDefinitionMatchesPin } from "./definition_integrity";
+import { makeGnameProviderDescription } from "./evidence";
+import { activeGnameRouteIdentity } from "./identity";
 import { gnameCodeLockKey, gnameCodeLockOwner } from "./mailbox";
 import { gnameEvidenceUploadDeadline, storedGnameEvidenceSources, storedGnameEvidenceUploads, storedGnameTaskInput } from "./payload";
+import {
+	beginGnameEvidenceUpload,
+	beginGnamePortalExecution,
+	prepareGnamePortalTaskPayload,
+	recordGnameEvidenceUpload,
+	requeueGnamePortalPreparation,
+} from "./persistence/portal";
+import { recordGnameSkyvernTaskStarted } from "./persistence/runs";
+import { buildGnameTaskPayload } from "./task";
 
 /** Short-lived per-route lease prevents stale workers from replaying uploads. */
 function gnamePreparationLockKey(routeId: bigint): string {
@@ -26,7 +41,7 @@ async function enqueueGnameReconciliation(params: {
 	runId: bigint;
 	skyvernRunId: string;
 }): Promise<void> {
-	await AbuseRepository.enqueueJob({
+	await enqueueJob({
 		jobType: "reconcile_skyvern_run",
 		reportId: params.reportId,
 		routeId: params.routeId,
@@ -42,37 +57,36 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 	// draft; a running route may only resume that exact draft after a safe
 	// pre-task interruption. Completed/blocked routes are deliberate no-ops.
 	if (route.routeType !== "skyvern_portal" || route.providerRegistryKey !== "gname" || !["queued", "running"].includes(route.status)) return;
-	const definition = getProviderDefinition("gname");
-	if (!definition) throw new Error("GNAME provider definition is missing.");
-	if (!providerDefinitionMatchesPin(definition, route.providerDefinitionVersion, route.providerDefinitionHash)) {
-		await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: ["queued", "running"], to: "needs_human", data: { reason: "provider_definition_pin_mismatch" } });
+	const definition = GNAME_PROVIDER;
+	if (!gnameDefinitionMatchesPin(definition, route.providerDefinitionVersion, route.providerDefinitionHash)) {
+		await transitionRouteStatus({ routeId: route.id, from: ["queued", "running"], to: "needs_human", data: { reason: "provider_definition_pin_mismatch" } });
 		return;
 	}
 	// Re-check the emergency kill switch immediately before any browser or
 	// upload work. A queued job must honor a disable flag set after resolve.
-	if (!isProviderRouteEnabled(definition)) {
-		await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: ["queued", "running"], to: "no_route", data: { reason: "provider_route_disabled" } });
+	if (!isGnameEnabled()) {
+		await transitionRouteStatus({ routeId: route.id, from: ["queued", "running"], to: "no_route", data: { reason: "provider_route_disabled" } });
 		return;
 	}
-	const identity = gnameServiceIdentity();
-	if (!identity.verified) {
-		await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: ["queued", "running"], to: "insufficient_evidence", data: { reason: "verified_service_identity_required" } });
+	const identity = activeGnameRouteIdentity(route);
+	if (!identity) {
+		await transitionRouteStatus({ routeId: route.id, from: ["queued", "running"], to: "insufficient_evidence", data: { reason: "active_route_identity_required" } });
 		return;
 	}
 	const codeLockKey = gnameCodeLockKey(identity.mailbox);
 	const codeLockOwner = gnameCodeLockOwner(route.id);
-	const codeLockLeaseMs = envInt("ABUSE_GNAME_CODE_LOCK_MS", 75 * 60_000);
+	const codeLockLeaseMs = gnamePositiveInt("ABUSE_GNAME_CODE_LOCK_MS", 75 * 60_000);
 	const correlationKey = `portal-run:${route.id.toString()}`;
-	const derivativeArtifacts = (await AbuseRepository.listArtifacts(report.id, ["provider_evidence_derivative"]))
+	const derivativeArtifacts = (await listArtifacts(report.id, ["provider_evidence_derivative"]))
 		.filter((artifact) => artifact.routeId === route.id)
 		.slice(0, definition.evidence.maximumImages);
 	if (derivativeArtifacts.length === 0) {
-		await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: ["queued", "running"], to: "insufficient_evidence", data: { reason: "provider_compatible_evidence_missing" } });
+		await transitionRouteStatus({ routeId: route.id, from: ["queued", "running"], to: "insufficient_evidence", data: { reason: "provider_compatible_evidence_missing" } });
 		return;
 	}
 	const taskInput = {
 		entryUrl: definition.entryUrl,
-		description: makeProviderDescription(report.description, target.normalizedTarget, target.observedUrls),
+		description: makeGnameProviderDescription(report.description, target.normalizedTarget, target.observedUrls),
 		domains: [target.normalizedTarget],
 		observedUrls: target.observedUrls,
 		serviceName: identity.name,
@@ -107,7 +121,7 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 			state: "pending",
 		})),
 	};
-	const execution = await AbuseRepository.beginGnamePortalExecution({
+	const execution = await beginGnamePortalExecution({
 		routeId: route.id,
 		correlationKey,
 		providerPayload: route.status === "queued" ? providerPayload : undefined,
@@ -122,17 +136,17 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 	let retainCodeLock = false;
 	const preparationLockKey = gnamePreparationLockKey(route.id);
 	const preparationLockOwner = `${worker.owner}:gname-preparation:${route.id.toString()}`;
-	const preparationLockLeaseMs = envInt("ABUSE_GNAME_PREPARATION_LOCK_MS", 2 * 60_000);
+	const preparationLockLeaseMs = gnamePositiveInt("ABUSE_GNAME_PREPARATION_LOCK_MS", 2 * 60_000);
 	let holdsPreparationLock = false;
 	const lockHeartbeat = setInterval(() => {
-		void AbuseRepository.renewLock(codeLockKey, codeLockOwner, codeLockLeaseMs);
+		void renewLock(codeLockKey, codeLockOwner, codeLockLeaseMs);
 	}, Math.max(1_000, Math.floor(codeLockLeaseMs / 3)));
 	let preparationHeartbeat: ReturnType<typeof setInterval> | undefined;
 	try {
 		// The route-owned mailbox lock intentionally has a deterministic owner so
 		// it survives worker restarts. That means it cannot distinguish two stale
 		// workers for the same route; this short-lived unique-owner lease does.
-		if (!(await AbuseRepository.tryAcquireLock(preparationLockKey, preparationLockOwner, preparationLockLeaseMs))) {
+		if (!(await tryAcquireLock(preparationLockKey, preparationLockOwner, preparationLockLeaseMs))) {
 			// Another worker owns the pre-task work. Never release the shared code
 			// lock here: its deterministic route owner may belong to that worker.
 			retainCodeLock = true;
@@ -140,7 +154,7 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 		}
 		holdsPreparationLock = true;
 		preparationHeartbeat = setInterval(() => {
-			void AbuseRepository.renewLock(preparationLockKey, preparationLockOwner, preparationLockLeaseMs);
+			void renewLock(preparationLockKey, preparationLockOwner, preparationLockLeaseMs);
 		}, Math.max(1_000, Math.floor(preparationLockLeaseMs / 3)));
 
 		const run = execution.run;
@@ -223,7 +237,7 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 					adapter ??= worker.getAdapter();
 				} catch (error) {
 					const message = errorText(error);
-					if (await AbuseRepository.requeueGnamePortalPreparation({ runId: run.id, error: message })) {
+					if (await requeueGnamePortalPreparation({ runId: run.id, error: message })) {
 						throw new Error(`GNAME evidence upload setup failed before an SDK call: ${message}`);
 					}
 					const unknown = `GNAME evidence-upload setup could not be safely reconciled: ${message}`;
@@ -231,7 +245,7 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 					retainCodeLock = true;
 					throw new UnknownExternalStateError(unknown);
 				}
-				const preparation = await AbuseRepository.beginGnameEvidenceUpload({ runId: run.id, artifactId: source.id, sha256: source.sha256 });
+				const preparation = await beginGnameEvidenceUpload({ runId: run.id, artifactId: source.id, sha256: source.sha256 });
 				if (preparation !== "started") {
 					const message = preparation === "already_started"
 						? `GNAME evidence upload for artifact ${source.id} entered an ambiguous external state.`
@@ -258,9 +272,9 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 				const expiresAt = gnameEvidenceUploadDeadline(
 					uploadedFile.presignedUrl,
 					new Date(),
-					envInt("ABUSE_GNAME_UPLOAD_URL_MAX_AGE_MS", 10 * 60_000),
+					gnamePositiveInt("ABUSE_GNAME_UPLOAD_URL_MAX_AGE_MS", 10 * 60_000),
 				);
-				if (!(await AbuseRepository.recordGnameEvidenceUpload({
+				if (!(await recordGnameEvidenceUpload({
 					runId: run.id,
 					artifactId: source.id,
 					sha256: source.sha256,
@@ -283,7 +297,7 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 			}
 		}
 
-		const minimumRemainingMs = envInt("ABUSE_GNAME_UPLOAD_URL_MIN_REMAINING_MS", 60_000);
+		const minimumRemainingMs = gnamePositiveInt("ABUSE_GNAME_UPLOAD_URL_MIN_REMAINING_MS", 60_000);
 		if (uploads.some((upload) => upload.state !== "uploaded" || !upload.presignedUrl || !upload.expiresAt || Date.parse(upload.expiresAt) - Date.now() <= minimumRemainingMs)) {
 			const message = "A persisted GNAME evidence-upload URL is missing or too close to expiry; automatic task creation will not re-upload evidence.";
 			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "gname_evidence_upload_url_expired" });
@@ -309,8 +323,8 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 				task: taskPayload,
 				uploadedEvidence: uploads.map((upload) => ({ url: upload.presignedUrl, sha256: upload.sha256, artifactId: upload.artifactId })),
 			};
-			if (!(await AbuseRepository.prepareGnamePortalTaskPayload({ runId: run.id, providerPayload: completedPayload }))) {
-				const latest = await AbuseRepository.getProviderRun(run.id);
+			if (!(await prepareGnamePortalTaskPayload({ runId: run.id, providerPayload: completedPayload }))) {
+				const latest = await getProviderRun(run.id);
 				if (latest?.skyvernRunId) {
 					retainCodeLock = true;
 					await enqueueGnameReconciliation({ reportId: report.id, routeId: route.id, runId: latest.id, skyvernRunId: latest.skyvernRunId });
@@ -328,8 +342,8 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 		// the durable pre-call marker so a missing key/base URL remains a normal
 		// retryable setup failure rather than an apparent external ambiguity.
 		const adapter = worker.getAdapter();
-		if (!(await AbuseRepository.prepareSkyvernTaskCreation(run.id))) {
-			const latest = await AbuseRepository.getProviderRun(run.id);
+		if (!(await prepareSkyvernTaskCreation(run.id))) {
+			const latest = await getProviderRun(run.id);
 			if (latest?.skyvernRunId) {
 				retainCodeLock = true;
 				await enqueueGnameReconciliation({ reportId: report.id, routeId: route.id, runId: latest.id, skyvernRunId: latest.skyvernRunId });
@@ -350,7 +364,7 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 			retainCodeLock = true;
 			throw new UnknownExternalStateError(`Skyvern task creation was ambiguous: ${message}`);
 		}
-		if (!(await AbuseRepository.recordSkyvernTaskStarted({ runId: run.id, skyvernRunId: created.runId, routeStatus: "waiting_code" }))) {
+		if (!(await recordGnameSkyvernTaskStarted({ runId: run.id, skyvernRunId: created.runId }))) {
 			const message = "Skyvern task creation completed after the route left its expected state; operational reconciliation is required.";
 			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "task_creation_state_changed" });
 			retainCodeLock = true;
@@ -360,7 +374,7 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 	} finally {
 		clearInterval(lockHeartbeat);
 		if (preparationHeartbeat) clearInterval(preparationHeartbeat);
-		if (holdsPreparationLock) await AbuseRepository.releaseLock(preparationLockKey, preparationLockOwner);
-		if (!retainCodeLock && holdsPreparationLock) await AbuseRepository.releaseLock(codeLockKey, codeLockOwner);
+		if (holdsPreparationLock) await releaseLock(preparationLockKey, preparationLockOwner);
+		if (!retainCodeLock && holdsPreparationLock) await releaseLock(codeLockKey, codeLockOwner);
 	}
 }

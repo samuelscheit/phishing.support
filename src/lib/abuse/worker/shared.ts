@@ -45,16 +45,6 @@ export function parseJobBigInt(value: unknown, name: string): bigint {
 	}
 }
 
-export function parseOptionalBigInt(value: unknown): bigint | undefined {
-	if (value === undefined || value === null || value === "") return undefined;
-	try {
-		const parsed = BigInt(value as string | number | bigint);
-		return parsed >= 0n ? parsed : undefined;
-	} catch {
-		return undefined;
-	}
-}
-
 export function randomOwner(): string {
 	return `${process.pid}-${crypto.randomBytes(10).toString("hex")}`;
 }

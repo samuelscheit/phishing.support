@@ -9,6 +9,7 @@ import {
 	abuseProviderRoutes,
 	abuseProviderRuns,
 	type AbuseProviderRun,
+	type AbuseRouteStatus,
 	type AbuseRunStatus,
 } from "../schema";
 import { hashStableJson } from "../security";
@@ -101,7 +102,7 @@ export async function getLatestActiveProviderRunForRoute(routeId: bigint): Promi
 		.where(
 			and(
 				eq(abuseProviderRuns.routeId, routeId),
-					inArray(abuseProviderRuns.executionStatus, ["pending", "starting", "task_creation_started", "running", "waiting_code", "sending_code"]),
+				inArray(abuseProviderRuns.executionStatus, ["pending", "starting", "task_creation_started", "running", "unknown_external_state"]),
 			),
 		)
 		.orderBy(desc(abuseProviderRuns.createdAt))
@@ -243,10 +244,23 @@ export async function prepareSkyvernTaskCreation(runId: bigint): Promise<boolean
  * second task.
  */
 
-export async function recordSkyvernTaskStarted(params: {
+export type SkyvernTaskStartedTransition = {
+	executionStatus: AbuseRunStatus;
+	routeStatus: AbuseRouteStatus;
+};
+
+/**
+ * Apply the shared, atomic Skyvern response boundary with a provider-owned
+ * lifecycle transition. The generic worker uses the public wrapper below,
+ * which always settles a run and route into `running`; providers with an
+ * additional durable phase supply that phase from their own persistence
+ * module without putting its vocabulary in this generic core.
+ */
+export async function recordSkyvernTaskStartedWithTransition(params: {
 	runId: bigint;
 	skyvernRunId: string;
-	routeStatus: "running" | "waiting_code";
+	expectedProviderKey?: string;
+	transition: SkyvernTaskStartedTransition;
 }): Promise<boolean> {
 	if (!/^[A-Za-z0-9._:-]{1,256}$/.test(params.skyvernRunId)) throw new Error("Skyvern returned an invalid run ID.");
 	const db = await getDb();
@@ -255,13 +269,13 @@ export async function recordSkyvernTaskStarted(params: {
 			const run = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, params.runId)).get();
 			if (!run || run.executionStatus !== "task_creation_started") return false;
 			const route = tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, run.routeId)).get();
-			if (!route || route.status !== "running") return false;
+			if (!route || route.status !== "running" || (params.expectedProviderKey && route.providerRegistryKey !== params.expectedProviderKey)) return false;
 			const timestamp = now();
 			const runUpdated = tx
 				.update(abuseProviderRuns)
 				.set({
 					skyvernRunId: params.skyvernRunId,
-					executionStatus: params.routeStatus === "waiting_code" ? "waiting_code" : "running",
+					executionStatus: params.transition.executionStatus,
 					attemptCount: run.attemptCount + 1,
 					updatedAt: timestamp,
 				})
@@ -274,12 +288,12 @@ export async function recordSkyvernTaskStarted(params: {
 				routeId: route.id,
 				runId: run.id,
 				eventType: "provider_run.skyvern_task_started",
-				data: { skyvernRunId: params.skyvernRunId, executionStatus: params.routeStatus === "waiting_code" ? "waiting_code" : "running" },
+				data: { skyvernRunId: params.skyvernRunId, executionStatus: params.transition.executionStatus },
 			});
-			if (params.routeStatus === "waiting_code") {
+			if (params.transition.routeStatus !== route.status) {
 				const routeUpdated = tx
 					.update(abuseProviderRoutes)
-					.set({ status: "waiting_code", updatedAt: timestamp })
+					.set({ status: params.transition.routeStatus, updatedAt: timestamp })
 					.where(and(eq(abuseProviderRoutes.id, route.id), eq(abuseProviderRoutes.status, "running")))
 					.returning({ id: abuseProviderRoutes.id })
 					.get();
@@ -290,7 +304,7 @@ export async function recordSkyvernTaskStarted(params: {
 					routeId: route.id,
 					runId: run.id,
 					eventType: "route.status_changed",
-					data: { from: "running", to: "waiting_code", reason: "skyvern_task_started" },
+					data: { from: route.status, to: params.transition.routeStatus, reason: "skyvern_task_started" },
 				});
 			}
 			const reconciliationDedupeKey = `reconcile:${run.id.toString()}:${params.skyvernRunId}`;
@@ -340,6 +354,14 @@ export async function recordSkyvernTaskStarted(params: {
 		},
 		{ behavior: "immediate" },
 	);
+}
+
+/** Persist a generic Skyvern task response without assuming provider phases. */
+export async function recordSkyvernTaskStarted(params: { runId: bigint; skyvernRunId: string }): Promise<boolean> {
+	return recordSkyvernTaskStartedWithTransition({
+		...params,
+		transition: { executionStatus: "running", routeStatus: "running" },
+	});
 }
 
 /**

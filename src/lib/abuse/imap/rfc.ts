@@ -1,15 +1,9 @@
 import { simpleParser, type AddressObject, type EmailAddress, type ParsedMail } from "mailparser";
 
 import type { FetchedAbuseMail } from "./types";
+import { normalizeMailbox } from "../mail/shared";
 
-export function normalizeMailbox(value: unknown): string | undefined {
-	if (typeof value !== "string") return undefined;
-	const candidate = value.trim().replace(/^<|>$/g, "").toLowerCase();
-	if (candidate.length > 320 || /[\r\n\0]/.test(candidate)) return undefined;
-	return /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(candidate)
-		? candidate
-		: undefined;
-}
+export { normalizeMailbox } from "../mail/shared";
 
 export function normalizeMessageId(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;

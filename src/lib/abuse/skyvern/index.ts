@@ -5,13 +5,11 @@ export type {
 	SkyvernRunStatus,
 	SkyvernTaskPayload,
 } from "./contracts";
-export {
-	buildGenericProviderFormTaskPayload,
-	buildGnameTaskPayload,
-} from "./task_payloads";
+export { buildGenericProviderFormTaskPayload } from "./task_payloads";
 export {
 	isTerminalSkyvernStatus,
+	validateGenericProviderFormOutput,
 	validateSkyvernOutputContract,
 } from "./output_validation";
-export type { SkyvernOutputContract } from "./output_validation";
+export type { SkyvernOutputContract, SkyvernOutputValidationPolicy } from "./output_validation";
 export { isSafeSkyvernStorageUrl } from "./storage";

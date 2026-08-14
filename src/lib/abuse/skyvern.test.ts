@@ -1,10 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { GNAME_PROVIDER } from "./registry";
 import {
 	AbuseSkyvernAdapter,
 	isSafeSkyvernStorageUrl,
-	validateSkyvernOutputContract,
+	validateGenericProviderFormOutput,
 	type SkyvernClientPort,
 	type SkyvernTaskPayload,
 } from "./skyvern";
@@ -95,30 +94,6 @@ function genericOutput(overrides: Record<string, unknown> = {}): Record<string, 
 	};
 }
 
-function gnameProviderPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-	return {
-		contract: {
-			entryUrl: GNAME_PROVIDER.entryUrl,
-			providerDefinitionVersion: GNAME_PROVIDER.version,
-			providerDefinitionHash: GNAME_PROVIDER.contentHash,
-			domains: ["example.com"],
-			observedUrls: ["https://login.example.com/collect"],
-			allowedFinalDomains: GNAME_PROVIDER.verifiedDomains,
-			declarationContract: "gname_service_declaration_v1",
-		},
-		...overrides,
-	};
-}
-
-function gnameOutput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-	return {
-		...genericOutput({ final_url: "https://www.gname.com/abuse/confirmation" }),
-		declaration_checked: true,
-		declaration_contract: "gname_service_declaration_v1",
-		...overrides,
-	};
-}
-
 describe("Skyvern SDK adapter boundary", () => {
 	test("uses SDK-derived request shapes, no retries, and supported Buffer upload metadata", async () => {
 		const calls: RecordedCall[] = [];
@@ -137,7 +112,7 @@ describe("Skyvern SDK adapter boundary", () => {
 		});
 		await expect(adapter.createTask(taskPayload())).resolves.toMatchObject({ runId: "tsk_created" });
 		await expect(adapter.getRun("tsk_created")).resolves.toMatchObject({ run_id: "tsk_created", status: "running" });
-		await adapter.sendTotpCode({ identifier: "gname-reports@phishing.support", content: "123456", taskId: "tsk_created" });
+		await adapter.sendTotpCode({ identifier: "provider-verification@example.com", content: "123456", taskId: "tsk_created" });
 		await adapter.retryWebhook("tsk_created");
 		await adapter.cancelRun("tsk_created");
 		await expect(adapter.runSdkUpload({
@@ -162,7 +137,7 @@ describe("Skyvern SDK adapter boundary", () => {
 		expect(byName.get("runTask")?.args).toEqual([{ body: taskPayload() }, { maxRetries: 0 }]);
 		expect(byName.get("sendTotpCode")?.args).toEqual([
 			{
-				totp_identifier: "gname-reports@phishing.support",
+				totp_identifier: "provider-verification@example.com",
 				content: "123456",
 				task_id: "tsk_created",
 				source: "email",
@@ -232,10 +207,9 @@ describe("Skyvern SDK adapter boundary", () => {
 });
 
 describe("Skyvern output contracts", () => {
-	test("accepts complete, pinned generic and GNAME submission contracts", () => {
-		expect(validateSkyvernOutputContract({
+	test("accepts a complete generic verified-provider submission contract", () => {
+		expect(validateGenericProviderFormOutput({
 			output: genericOutput(),
-			providerKey: "generic_verified_provider_form",
 			providerPayload: genericProviderPayload(),
 		})).toMatchObject({
 			passed: true,
@@ -243,19 +217,23 @@ describe("Skyvern output contracts", () => {
 			finalUrl: "https://abuse.provider.example.com/confirmation",
 			submittedTargets: ["example.com"],
 		});
-		expect(validateSkyvernOutputContract({
-			output: gnameOutput(),
-			providerKey: "gname",
-			providerPayload: gnameProviderPayload(),
-		})).toMatchObject({
-			passed: true,
-			finalUrl: "https://www.gname.com/abuse/confirmation",
-		});
+	});
+
+	test("preserves the generic form adapter's public-IP target support", () => {
+		expect(validateGenericProviderFormOutput({
+			output: genericOutput({ submitted_domains: ["1.1.1.1"] }),
+			providerPayload: genericProviderPayload({
+				contract: {
+					...genericProviderPayload().contract as Record<string, unknown>,
+					target: "1.1.1.1",
+				},
+			}),
+		})).toMatchObject({ passed: true, submittedTargets: ["1.1.1.1"] });
 	});
 
 	test("fails closed for generic provider output drift and provider-declared errors", () => {
 		const validate = (output: Record<string, unknown>, providerPayload = genericProviderPayload()) =>
-			validateSkyvernOutputContract({ output, providerKey: "generic_verified_provider_form", providerPayload });
+			validateGenericProviderFormOutput({ output, providerPayload });
 
 		expect(validate(genericOutput({ attacker_selected_url: "https://evil.example.com" }))).toMatchObject({ passed: false, reason: "unexpected_extraction_output" });
 		expect(validate(genericOutput({ final_url: "https://evil.example.com/confirmation" }))).toMatchObject({ passed: false, reason: "final_url_origin_drift" });
@@ -275,28 +253,15 @@ describe("Skyvern output contracts", () => {
 				allowedFinalDomains: ["provider.example.com"],
 			},
 		}))).toMatchObject({ passed: false, reason: "immutable_entry_url_invalid" });
+		expect(validate(genericOutput({ submitted_urls: [] }), genericProviderPayload({
+			contract: {
+				...genericProviderPayload().contract as Record<string, unknown>,
+				observedUrls: ["https://login.example.com/collect", 42],
+			},
+		}))).toMatchObject({ passed: false, reason: "immutable_output_contract_invalid" });
 		expect(validate(genericOutput({ form_drift: true, form_drift_reason: "The mandatory complaint field was renamed." }))).toMatchObject({
 			passed: false,
 			reason: "The mandatory complaint field was renamed.",
-		});
-	});
-
-	test("fails closed for GNAME declaration and registry-pin drift", () => {
-		const validate = (output: Record<string, unknown>, providerPayload = gnameProviderPayload()) =>
-			validateSkyvernOutputContract({ output, providerKey: "gname", providerPayload });
-
-		expect(validate(gnameOutput({ declaration_checked: false }))).toMatchObject({ passed: false, reason: "gname_declaration_contract_mismatch" });
-		expect(validate(gnameOutput({ declaration_contract: "gname_service_declaration_v2" }))).toMatchObject({ passed: false, reason: "gname_declaration_contract_mismatch" });
-		expect(validate(gnameOutput({ declaration_checked: undefined }))).toMatchObject({ passed: false, reason: "gname_declaration_contract_mismatch" });
-		expect(validate(gnameOutput(), gnameProviderPayload({
-			contract: {
-				...gnameProviderPayload().contract as Record<string, unknown>,
-				providerDefinitionVersion: "unreviewed-version",
-			},
-		}))).toMatchObject({ passed: false, reason: "provider_definition_pin_mismatch" });
-		expect(validate(gnameOutput({ form_drift: true, form_drift_reason: "The declaration wording changed materially." }))).toMatchObject({
-			passed: false,
-			reason: "The declaration wording changed materially.",
 		});
 	});
 });

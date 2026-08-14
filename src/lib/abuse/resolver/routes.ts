@@ -1,10 +1,4 @@
-import {
-	getProviderForRegistrarId,
-	gnameServiceIdentity,
-	isGenericEmailRouteEnabled,
-	isProviderRouteEnabled,
-	verifiedDomainsForEmailRoute,
-} from "../registry";
+import { isGenericEmailRouteEnabled, verifiedDomainsForEmailRoute } from "../providers/email";
 import type { ResolvedRouteInput } from "../route_contracts";
 import type { JsonRecord } from "./types";
 
@@ -42,24 +36,5 @@ export function unroutableRoute(reason: string, snapshot: JsonRecord, status: "n
 		resolverProvenance: { reason },
 		resolutionSnapshot: snapshot,
 		status,
-	};
-}
-
-export function gnameRoute(registrarId: number, snapshot: JsonRecord): ResolvedRouteInput {
-	const definition = getProviderForRegistrarId(registrarId)!;
-	const enabled = isProviderRouteEnabled(definition);
-	const identity = gnameServiceIdentity();
-	return {
-		routeKey: definition.key,
-		providerRegistryKey: definition.key,
-		providerDisplayName: definition.displayName,
-		routeType: "skyvern_portal",
-		providerDefinitionVersion: definition.version,
-		providerDefinitionHash: definition.contentHash,
-		resolverProvenance: { registrarId, match: "exact_iana_registrar_id" },
-		resolutionSnapshot: snapshot,
-		serviceIdentity: { name: identity.name, mailbox: identity.mailbox, verified: identity.verified },
-		status: enabled ? "resolving" : "no_route",
-		verificationResult: enabled ? undefined : { verified: false, reason: "provider_route_disabled_or_unproven" },
 	};
 }

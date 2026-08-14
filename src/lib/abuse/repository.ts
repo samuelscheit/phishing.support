@@ -20,13 +20,6 @@ import {
 } from "./persistence/email_delivery";
 import { listEvents } from "./persistence/events";
 import {
-	beginGnameEvidenceUpload,
-	beginGnamePortalExecution,
-	prepareGnamePortalTaskPayload,
-	recordGnameEvidenceUpload,
-	requeueGnamePortalPreparation,
-} from "./persistence/gname_preparation";
-import {
 	claimNextJob,
 	completeJob,
 	enqueueJob,
@@ -36,27 +29,18 @@ import {
 	renewJobLease,
 	retryJob,
 } from "./persistence/jobs";
+import { releaseLock, renewLock, tryAcquireLock } from "./persistence/locks";
 import {
-	acquireOrRenewGnameMailboxLock,
-	releaseLock,
-	renewLock,
-	tryAcquireLock,
-} from "./persistence/locks";
-import {
-	createMailCode,
 	createOutboundMail,
-	findInboundRoute,
+	ensureInboundReplyClassification,
+	findCorrelatedInboundRoute,
 	getInboundMailByImap,
 	getInboundMailByMessageId,
 	getMailMessage,
 	getOutboundMailForRun,
-	getWaitingCodeRoute,
-	markMailCodeUsed,
 	persistInboundMailWithArtifacts,
-	prepareTotpDelivery,
 	setMailClassification,
 	settleOutboundMail,
-	settleTotpDelivery,
 } from "./persistence/mail";
 import { beginPortalExecution } from "./persistence/portal_execution";
 import {
@@ -89,7 +73,6 @@ import {
 } from "./persistence/reports";
 import { recomputeReportStatus } from "./persistence/report_status";
 import {
-	listActiveGnameRoutes,
 	markUnknownExternalState,
 	setRouteStatus,
 	setRouteVerification,
@@ -135,11 +118,6 @@ export const AbuseRepository = {
 	updateProviderRun,
 	settleSkyvernRun,
 	beginPortalExecution,
-	beginGnamePortalExecution,
-	prepareGnamePortalTaskPayload,
-	beginGnameEvidenceUpload,
-	recordGnameEvidenceUpload,
-	requeueGnamePortalPreparation,
 	beginEmailDelivery,
 	prepareSkyvernTaskCreation,
 	recordSkyvernTaskStarted,
@@ -161,22 +139,16 @@ export const AbuseRepository = {
 	tryAcquireLock,
 	releaseLock,
 	renewLock,
-	acquireOrRenewGnameMailboxLock,
 	createOutboundMail,
+	ensureInboundReplyClassification,
 	settleOutboundMail,
-	listActiveGnameRoutes,
 	getOutboundMailForRun,
-	findInboundRoute,
-	getWaitingCodeRoute,
+	findCorrelatedInboundRoute,
 	persistInboundMailWithArtifacts,
 	getMailMessage,
 	getInboundMailByImap,
 	getInboundMailByMessageId,
 	setMailClassification,
-	createMailCode,
-	prepareTotpDelivery,
-	settleTotpDelivery,
-	markMailCodeUsed,
 	persistWebhook,
 	enqueueReconciliationForSkyvernRun,
 	listEvents,

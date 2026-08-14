@@ -30,7 +30,6 @@ services:
       SKYVERN_API_KEY_FILE: /run/skyvern/api-key
       SKYVERN_INTERNAL_S3_ORIGIN: http://skyvern-minio:9000
       ABUSE_SKYVERN_WEBHOOK_URL: http://app:3000/api/skyvern/webhook
-      ABUSE_GNAME_ENABLED: ${ABUSE_GNAME_ENABLED:-false}
       ABUSE_GENERIC_EMAIL_ENABLED: ${ABUSE_GENERIC_EMAIL_ENABLED:-false}
       ABUSE_GENERIC_FORM_ESCALATION_ENABLED: ${ABUSE_GENERIC_FORM_ESCALATION_ENABLED:-false}
       # These are required even while provider routes are rollout-gated: they
