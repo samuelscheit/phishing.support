@@ -5,6 +5,12 @@ export {
 	getProviderDefinition,
 	listPortalProviders,
 } from "./registry";
+export { createProviderSubmissionRegistry } from "./submission_registry";
+export {
+	executeProviderSubmission,
+	ProviderSubmissionUnknownExternalStateError,
+} from "./submission_execution";
+export type { ProviderSubmissionExecutionResult } from "./submission_execution";
 export {
 	isProviderReplyLinkAllowed,
 	providerDefinitionHasValidHash,
@@ -20,3 +26,12 @@ export type {
 	ProviderRetryExhaustion,
 	StoredProviderInboxMessage,
 } from "./contracts";
+export type {
+	ProviderSubmissionContext,
+	ProviderSubmissionDefinition,
+	ProviderSubmissionPreparation,
+	ProviderSubmissionProvider,
+	ProviderSubmissionSuccess,
+} from "./submission_contracts";
+export { ProviderSubmissionRejectedError } from "./submission_contracts";
+export type { ProviderSubmissionRegistry } from "./submission_registry";
