@@ -37,6 +37,12 @@ Incoming mail is assigned only by an exact generated recipient address, an exact
 
 Do not substitute plus-addressing if catch-all routing is unavailable. Use a dedicated reply subdomain backed by a catch-all-capable inbound provider while retaining the authenticated SMTP sender.
 
+## Supplemental URL reporting
+
+Every standalone abuse report with one or more validated observed URLs now creates an independent Netcraft Reporting API v3 submission route. This happens alongside normal resolver-selected provider routes and the existing eligible Google Safe Browsing supplemental route. Netcraft receives every observed URL associated with a target in one API submission; the returned submission UUID is retained with the report for auditability.
+
+Netcraft's API requires a reporter email. The service uses `ABUSE_NETCRAFT_REPORTER_EMAIL`, which defaults to `support@phishing.support` in Docker deployments. It deliberately does not disclose an optional public reporter contact email. URL-only providers are not given invented URLs: a target without a validated observed URL remains eligible for its resolver-derived abuse routes, but has no Netcraft or Google Safe Browsing supplemental submission to make.
+
 ## Privacy note
 
 Only submit emails or links that you are allowed to share publicly. The project is intended to help protect users and organizations - do not use it to probe private systems or to impersonate abuse inquiries.

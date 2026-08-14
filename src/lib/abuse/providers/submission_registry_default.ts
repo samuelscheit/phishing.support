@@ -1,5 +1,6 @@
 import { cloudflareProvider } from "./cloudflare";
 import { googleSafeBrowsingProvider } from "./google_safe_browsing";
+import { netcraftProvider } from "./netcraft";
 import { createProviderSubmissionRegistry } from "./submission_registry";
 import type { ProviderSubmissionProvider } from "./submission_contracts";
 import { tencentProvider } from "./tencent";
@@ -13,6 +14,7 @@ const registry = createProviderSubmissionRegistry([
 	cloudflareProvider,
 	tencentProvider,
 	googleSafeBrowsingProvider,
+	netcraftProvider,
 ]);
 
 export function listProviderSubmissionProviders(): readonly ProviderSubmissionProvider[] {

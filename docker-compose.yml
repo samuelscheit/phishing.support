@@ -32,6 +32,7 @@ services:
       ABUSE_SKYVERN_WEBHOOK_URL: http://app:3000/api/skyvern/webhook
       ABUSE_GENERIC_EMAIL_ENABLED: ${ABUSE_GENERIC_EMAIL_ENABLED:-false}
       ABUSE_GENERIC_FORM_ESCALATION_ENABLED: ${ABUSE_GENERIC_FORM_ESCALATION_ENABLED:-false}
+      ABUSE_NETCRAFT_REPORTER_EMAIL: ${ABUSE_NETCRAFT_REPORTER_EMAIL:-support@phishing.support}
       # These are required even while provider routes are rollout-gated: they
       # protect idempotency responses and bearer-authorized artifact reads.
       ABUSE_TRACKING_TOKEN_SECRET: ${ABUSE_TRACKING_TOKEN_SECRET:?Set ABUSE_TRACKING_TOKEN_SECRET to at least 32 random bytes}
