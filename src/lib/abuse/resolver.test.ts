@@ -134,13 +134,66 @@ describe("standalone abuse resolver", () => {
 		expect(snapshot.asnRdap[0]).toMatchObject({ asn: 402506 });
 	});
 
+	test("keeps the allocation's explicit abuse contact ahead of WHOIS and BGP fallbacks", async () => {
+		const target = "154.201.78.249";
+		const requestedUrls: string[] = [];
+		let port43Calls = 0;
+		const result = await resolveAbuseTarget(
+			{ normalizedTarget: target, targetType: "ip", observedUrls: [] },
+			{
+				assertPublicHost: async () => undefined,
+				port43Query: async () => {
+					port43Calls++;
+					return "abuse-mailbox: whois@example.net";
+				},
+				fetch: async (input) => {
+					const url = String(input);
+					requestedUrls.push(url);
+					if (url === `https://rdap.org/ip/${target}`) return rdapResponse({ entities: [abuseEntity("allocation@example.net")] });
+					if (url === `https://stat.ripe.net/data/network-info/data.json?resource=${target}`) return rdapResponse({ data: { asns: [402506] } });
+					if (url === "https://rdap.org/autnum/402506") return rdapResponse({ entities: [abuseEntity("asn@example.net")] });
+					return new Response(null, { status: 404 });
+				},
+			},
+		);
+
+		expect(result.routes.map((route) => route.verifiedEmail)).toEqual(["allocation@example.net"]);
+		expect(port43Calls).toBe(0);
+		expect(requestedUrls).toEqual([
+			`https://rdap.org/ip/${target}`,
+			`https://stat.ripe.net/data/network-info/data.json?resource=${target}`,
+			"https://rdap.org/autnum/402506",
+		]);
+	});
+
+	test("does not fall through to BGP when the initial IP RDAP lookup is absent", async () => {
+		const requestedUrls: string[] = [];
+		const result = await resolveAbuseTarget(
+			{ normalizedTarget: "154.201.78.249", targetType: "ip", observedUrls: [] },
+			{
+				assertPublicHost: async () => undefined,
+				fetch: async (input) => {
+					requestedUrls.push(String(input));
+					return new Response(null, { status: 404 });
+				},
+			},
+		);
+
+		expect(result).toMatchObject({ status: "no_route", disposition: "no_verified_abuse_contact" });
+		expect(result.routes[0]).toMatchObject({ routeType: "manual_unroutable", status: "no_route" });
+		expect(requestedUrls).toEqual(["https://rdap.org/ip/154.201.78.249"]);
+	});
+
 	test("matches GNAME only through exact IANA registrar identifiers, never display text", async () => {
 		expect(getProviderForRegistrarId(1923)?.key).toBe("gname");
 		expect(getProviderForRegistrarId(3941)?.key).toBe("gname");
 		expect(getProviderForRegistrarId(4542)?.key).toBe("gname");
 		expect(getProviderForRegistrarId(4543)).toBeUndefined();
 		expect(extractRegistrarIdFromRdap({ handle: "IANA-1923" })).toBe(1923);
+		expect(extractRegistrarIdFromRdap({ publicIds: [{ type: "iAnA  ReGiStRaR\tID", identifier: "1923" }] })).toBe(1923);
 		expect(extractRegistrarIdFromRdap({ name: "Gname.com Pte. Ltd.", publicIds: [{ type: "other", identifier: "1923" }] })).toBeUndefined();
+		expect(extractRegistrarIdFromRdap({ publicIds: [{ type: "Not IANA Registrar ID", identifier: "1923" }] })).toBeUndefined();
+		expect(extractRegistrarIdFromRdap({ publicIds: [{ type: "IANA Registrar ID (claimed)", identifier: "1923" }] })).toBeUndefined();
 
 		const result = await resolveAbuseTarget(
 			{ normalizedTarget: "example.com", targetType: "domain", observedUrls: [] },
