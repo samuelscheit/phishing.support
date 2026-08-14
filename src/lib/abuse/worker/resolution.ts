@@ -34,6 +34,14 @@ export async function resolveReport(reportId: bigint, resolveTarget: AbuseTarget
 					payload: {},
 					dedupeKey: `verify:${route.id.toString()}`,
 				});
+			} else if (route.status === "verified" && route.routeType === "provider_submission") {
+				await AbuseRepository.enqueueJob({
+					jobType: "submit_provider",
+					reportId,
+					routeId: route.id,
+					payload: {},
+					dedupeKey: `provider-submit:${route.id.toString()}`,
+				});
 			} else if (route.status === "verified" && route.routeType === "email") {
 				await AbuseRepository.enqueueJob({
 					jobType: "send_email",

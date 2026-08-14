@@ -8,7 +8,7 @@ import {
 	extractPort43,
 	explicitAbuseMailboxes,
 } from "./rdap";
-import { emailRoute, unroutableRoute } from "./routes";
+import { contactRoute, unroutableRoute } from "./routes";
 import { queryPort43 } from "./port43";
 import { parseExplicitWhoisAbuseMailboxes, parseWhoisNetworkMetadata } from "./whois";
 import type { AbuseMailbox, JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
@@ -112,7 +112,7 @@ export async function resolveIpTarget(target: ResolverTarget, dependencies: Reso
 		status: "resolved",
 		resolverSnapshot: snapshot,
 		routes: contacts.map((contact) =>
-			emailRoute({
+			contactRoute({
 				email: contact.email,
 				providerName: contact.entityName ?? `Abuse contact for ${target.normalizedTarget}`,
 				provenance: contact,

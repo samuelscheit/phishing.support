@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
+import { hashStableJson } from "../security";
 import {
 	executeProviderSubmission,
 	ProviderSubmissionUnknownExternalStateError,
@@ -23,14 +24,17 @@ const reportPayload = {
 };
 
 function testProvider(overrides: Partial<ProviderSubmissionProvider> = {}): ProviderSubmissionProvider {
+	const definitionWithoutHash = {
+		key: "test-provider",
+		displayName: "Test Provider",
+		version: "test-v1",
+		exactMailboxes: ["abuse@test-provider.example"],
+		supplemental: false,
+	};
 	return {
 		definition: {
-			key: "test-provider",
-			displayName: "Test Provider",
-			version: "test-v1",
-			contentHash: "test-provider-definition-hash",
-			exactMailboxes: ["abuse@test-provider.example"],
-			supplemental: false,
+			...definitionWithoutHash,
+			contentHash: hashStableJson(definitionWithoutHash),
 		},
 		prepareSubmission: async () => ({ outcome: "ready", payload: { adapter: "test_provider", target: "example.com" } }),
 		submit: async () => ({ submittedTargets: ["example.com"] }),

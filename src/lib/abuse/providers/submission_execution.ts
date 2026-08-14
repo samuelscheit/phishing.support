@@ -1,5 +1,7 @@
 import { AbuseRepository } from "../repository";
 
+import { providerDefinitionMatchesPin } from "./definition";
+
 import {
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionContext,
@@ -140,10 +142,11 @@ export async function executeProviderSubmission(params: {
 
 	// A route pins the reviewed provider implementation. Never execute a new
 	// provider definition against a route created under a different one.
-	if (
-		route.providerDefinitionVersion !== params.provider.definition.version ||
-		route.providerDefinitionHash !== params.provider.definition.contentHash
-	) {
+	if (!providerDefinitionMatchesPin(
+		params.provider.definition,
+		route.providerDefinitionVersion,
+		route.providerDefinitionHash,
+	)) {
 		await AbuseRepository.transitionRouteStatus({
 			routeId: route.id,
 			from: ["queued", "verified", "running"],

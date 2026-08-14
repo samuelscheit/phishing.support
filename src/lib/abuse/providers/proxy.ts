@@ -4,13 +4,14 @@ export type BrowserProxy = {
 	password?: string;
 };
 
-export type ReportProxy = {
+/** One parsed outbound proxy configuration shared by direct report providers. */
+export type ProviderProxy = {
 	url: string;
 	browser: BrowserProxy;
 	captchaType: "HTTP" | "SOCKS4" | "SOCKS5";
 };
 
-function decodeCredential(value: string) {
+function decodeCredential(value: string): string {
 	try {
 		return decodeURIComponent(value);
 	} catch {
@@ -18,7 +19,12 @@ function decodeCredential(value: string) {
 	}
 }
 
-export function parseReportProxy(value: string): ReportProxy {
+/**
+ * Parse the one outbound proxy setting used by browser, HTTP, and CAPTCHA
+ * clients. Credentials remain in memory only and are never written into a
+ * durable provider payload.
+ */
+export function parseProviderProxy(value: string): ProviderProxy {
 	const url = value.trim().replace(/^socks5h:/i, "socks5:");
 
 	let proxy: URL;
@@ -33,10 +39,7 @@ export function parseReportProxy(value: string): ReportProxy {
 		throw new Error("PROXY_URL must use HTTP, HTTPS, SOCKS4, or SOCKS5 and include a proxy host.");
 	}
 
-	const browser: BrowserProxy = {
-		server: `${protocol}//${proxy.host}`,
-	};
-
+	const browser: BrowserProxy = { server: `${protocol}//${proxy.host}` };
 	if (proxy.username || proxy.password) {
 		browser.username = decodeCredential(proxy.username);
 		browser.password = decodeCredential(proxy.password);
@@ -49,11 +52,9 @@ export function parseReportProxy(value: string): ReportProxy {
 	};
 }
 
-export function getReportProxy(integration: string) {
+/** Read the shared outbound proxy setting before crossing a provider boundary. */
+export function getProviderProxy(integration: string): ProviderProxy {
 	const value = process.env.PROXY_URL;
-	if (!value?.trim()) {
-		throw new Error(`${integration} requires PROXY_URL to be configured.`);
-	}
-
-	return parseReportProxy(value);
+	if (!value?.trim()) throw new Error(`${integration} requires PROXY_URL to be configured.`);
+	return parseProviderProxy(value);
 }

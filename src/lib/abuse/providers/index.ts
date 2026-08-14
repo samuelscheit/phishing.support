@@ -6,6 +6,14 @@ export {
 	listPortalProviders,
 } from "./registry";
 export { createProviderSubmissionRegistry } from "./submission_registry";
+export { providerContactRoute, providerSupplementalRoute } from "./submission_routes";
+export {
+	getProviderSubmissionProvider,
+	getProviderSubmissionProviderForMailbox,
+	listProviderSubmissionProviders,
+	listSupplementalProviderSubmissionProviders,
+	listSupplementalProviderSubmissionProvidersForTarget,
+} from "./submission_registry_default";
 export {
 	executeProviderSubmission,
 	ProviderSubmissionUnknownExternalStateError,

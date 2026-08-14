@@ -1,12 +1,12 @@
 import * as toon from "@toon-format/toon";
 import { archiveWebsite } from "./website_archive";
-import { SubmissionsEntity, ArtifactsEntity, ReportingSummaryEntity } from "./db/entities";
+import { SubmissionsEntity, ArtifactsEntity } from "./db/entities";
 import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
-import { reportToGoogleSafeBrowsing } from "./report/googleSafeBrowsing";
-import { reportWebsitePhishing } from "./report/reportWebsitePhishing";
-import { markSubmissionInvalid } from "./report/util";
+import { handoffConfirmedWebsitePhishing } from "./abuse/legacy_website";
+import type { ReporterMetadata } from "./request_metadata";
+import { markSubmissionInvalid } from "./submissions/state";
 import { defaultReasoning, defaultResponseModel, retry } from "./utils";
 
 export async function emitStep(streamId: bigint | string | undefined, step: string, progress: number) {
@@ -78,9 +78,8 @@ export async function analyzeWebsite(options: {
 	mhtmlSnapshot?: Buffer;
 	url: string;
 	submissionId: bigint;
-	reporterCountry?: string;
-}): Promise<bigint> {
-	const { url, submissionId, reporterCountry } = options!;
+} & ReporterMetadata): Promise<bigint> {
+	const { url, submissionId, reporterIp, reporterCountry, reporterHeaders } = options!;
 	try {
 		await emitStep(submissionId, "whois_lookup", 5);
 		const whois = await getInfo(url);
@@ -179,39 +178,21 @@ Use web search if necessary to gather more information about the content/brand. 
 		if (phishing) {
 			await emitStep(submissionId, "reporting", 90);
 			const analysisText = reportEvidenceText({ url, whois, archive, analysisText: analysis.output_text });
-			await reportWebsitePhishing({
+			await handoffConfirmedWebsitePhishing({
 				submissionId,
 				url,
-				whois,
 				analysisText,
-				archive: {
-					screenshotPng: archive.screenshotPng,
-					mhtml: archive.mhtml,
-				},
-				countryCode: reporterCountry,
+				screenshotPng: archive.screenshotPng,
+				reporter: { reporterIp, reporterCountry, reporterHeaders },
 			});
 
-			await emitStep(submissionId, "reporting to Google Safe Browsing", 90);
-
-			try {
-				await reportToGoogleSafeBrowsing({
-					url,
-					submissionId,
-					analysisText,
-				});
-			} catch (err) {
-				console.error("Failed to report to Google Safe Browsing:", err);
-			}
-
-			const hasSuccessfulReport = await ReportingSummaryEntity.hasSuccessfulReport(submissionId);
-			if (hasSuccessfulReport) {
-				await SubmissionsEntity.update(submissionId, { status: "reported" });
-			} else {
-				await SubmissionsEntity.update(submissionId, {
-					status: "failed",
-					info: "Phishing confirmed, but no reports were successfully submitted.",
-				});
-			}
+			// Legacy `reported` is a phishing-classification/handoff state. The
+			// standalone report is only queued here; provider delivery remains
+			// independently observable through its durable lifecycle.
+			await SubmissionsEntity.update(submissionId, {
+				status: "reported",
+				info: "Phishing confirmed; standalone abuse report accepted and queued for routing.",
+			});
 		} else {
 			await markSubmissionInvalid(submissionId);
 		}

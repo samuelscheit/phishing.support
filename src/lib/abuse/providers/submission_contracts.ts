@@ -4,16 +4,25 @@
  * remain owned by each concrete provider implementation.
  */
 export type ProviderSubmissionDefinition = {
-	key: string;
-	displayName: string;
+	readonly key: string;
+	readonly displayName: string;
 	/** Immutable provider-definition pin stored with each durable route. */
-	version: string;
+	readonly version: string;
 	/** Hash of the reviewed provider definition for later pin verification. */
-	contentHash: string;
+	readonly contentHash: string;
 	/** Explicit abuse mailboxes that select this provider, never a domain rule. */
-	exactMailboxes: readonly string[];
+	readonly exactMailboxes: readonly string[];
 	/** Whether this provider should run in addition to the mailbox-selected one. */
-	supplemental: boolean;
+	readonly supplemental: boolean;
+	/**
+	 * Code-owned target rules for an independent supplemental submission. This
+	 * keeps provider-specific eligibility in provider definitions rather than
+	 * branching on a provider name in resolver code.
+	 */
+	readonly supplementalTargets?: readonly {
+		readonly targetType: "domain" | "ip";
+		readonly requiresObservedUrl?: boolean;
+	}[];
 };
 
 /** The durable route/run context passed to one provider-owned submission. */

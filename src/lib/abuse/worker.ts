@@ -3,7 +3,12 @@ import { resolveAbuseTarget } from "./resolver";
 import { AbuseSkyvernAdapter } from "./skyvern";
 import { skyvernApiKeySourceIsConfigured } from "./skyvern_config";
 import type { AbuseJob } from "./schema";
-import { getPortalProvider, listPortalProviders } from "./providers";
+import {
+	executeProviderSubmission,
+	getPortalProvider,
+	getProviderSubmissionProvider,
+	listPortalProviders,
+} from "./providers";
 import { sendEmail } from "./worker/email";
 import { classifyReply, monitorProviderReply } from "./worker/mail";
 import { runGenericProviderPortal } from "./worker/portal";
@@ -189,6 +194,9 @@ export class AbuseWorker {
 			case "run_portal":
 				await this.runPortal(job);
 				return;
+			case "submit_provider":
+				await this.submitProvider(idFrom(job.routeId, "routeId"));
+				return;
 			case "reconcile_skyvern_run":
 				await this.reconcilePortalRun(idFrom(job.runId, "runId"));
 				return;
@@ -221,6 +229,23 @@ export class AbuseWorker {
 			return;
 		}
 		throw new Error(`No code-owned portal adapter is available for abuse route ${route.id.toString()}.`);
+	}
+
+	/** Dispatch a direct submission exclusively through the provider registry. */
+	private async submitProvider(routeId: bigint): Promise<void> {
+		const route = await AbuseRepository.getRoute(routeId);
+		if (!route || route.routeType !== "provider_submission") return;
+		const provider = getProviderSubmissionProvider(route.providerRegistryKey);
+		if (!provider) {
+			await AbuseRepository.transitionRouteStatus({
+				routeId: route.id,
+				from: ["verified", "queued", "running"],
+				to: "needs_human",
+				data: { reason: "provider_submission_implementation_missing" },
+			});
+			return;
+		}
+		await executeProviderSubmission({ routeId: route.id, provider });
 	}
 
 	private async reconcilePortalRun(runId: bigint): Promise<void> {

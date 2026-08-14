@@ -1,11 +1,18 @@
 import { describe, expect, test } from "bun:test";
 
+import { hashStableJson } from "../security";
 import type { ProviderSubmissionProvider } from "./submission_contracts";
 import { createProviderSubmissionRegistry } from "./submission_registry";
 
-function testProvider(key: string, exactMailboxes: readonly string[], supplemental = false): ProviderSubmissionProvider {
+function testProvider(
+	key: string,
+	exactMailboxes: readonly string[],
+	supplemental = false,
+	supplementalTargets: ProviderSubmissionProvider["definition"]["supplementalTargets"] = supplemental ? [{ targetType: "domain" }] : undefined,
+): ProviderSubmissionProvider {
+	const definitionWithoutHash = { key, displayName: key, version: "test", exactMailboxes, supplemental, supplementalTargets };
 	return {
-		definition: { key, displayName: key, version: "test", contentHash: "test", exactMailboxes, supplemental },
+		definition: { ...definitionWithoutHash, contentHash: hashStableJson(definitionWithoutHash) },
 		submit: async () => ({ submittedTargets: ["example.com"] }),
 	};
 }
@@ -34,6 +41,7 @@ describe("provider submission registry", () => {
 		expect(registry.list()).toEqual([selected, supplementalOnly, selectedAndSupplemental]);
 		expect(registry.listSupplemental()).toEqual([supplementalOnly, selectedAndSupplemental]);
 		expect(registry.getForMailbox("abuse@both.example")).toBe(selectedAndSupplemental);
+		expect(registry.listSupplementalForTarget({ targetType: "domain", observedUrls: ["https://example.com/"] })).toEqual([supplementalOnly, selectedAndSupplemental]);
 	});
 
 	test("rejects duplicate provider keys", () => {
@@ -64,5 +72,30 @@ describe("provider submission registry", () => {
 		const supplementalOnly = testProvider("supplemental-only", [], true);
 		const registry = createProviderSubmissionRegistry([supplementalOnly]);
 		expect(registry.listSupplemental()).toEqual([supplementalOnly]);
+	});
+
+	test("uses provider-owned supplemental target rules without a provider-name branch", () => {
+		const domainWithUrl = testProvider("domain-url", [], true, [{ targetType: "domain", requiresObservedUrl: true }]);
+		const ip = testProvider("ip", [], true, [{ targetType: "ip" }]);
+		const registry = createProviderSubmissionRegistry([domainWithUrl, ip]);
+
+		expect(registry.listSupplementalForTarget({ targetType: "domain", observedUrls: [] })).toEqual([]);
+		expect(registry.listSupplementalForTarget({ targetType: "domain", observedUrls: ["https://example.com/"] })).toEqual([domainWithUrl]);
+		expect(registry.listSupplementalForTarget({ targetType: "ip", observedUrls: [] })).toEqual([ip]);
+	});
+
+	test("rejects a supplemental provider without explicit target eligibility", () => {
+		expect(() => createProviderSubmissionRegistry([
+			testProvider("missing-rules", [], true, []),
+		])).toThrow("Supplemental provider submission missing-rules must declare at least one target rule");
+	});
+
+	test("rejects a definition whose reviewed content does not match its pin", () => {
+		const provider = testProvider("tampered", ["abuse@tampered.example"]);
+		const tamperedProvider: ProviderSubmissionProvider = {
+			...provider,
+			definition: { ...provider.definition, contentHash: "not-a-valid-hash" },
+		};
+		expect(() => createProviderSubmissionRegistry([tamperedProvider])).toThrow("Provider submission tampered has an invalid content hash");
 	});
 });

@@ -13,6 +13,8 @@ export type ResolverDependencies = {
 	port43Query?: (server: string, query: string) => Promise<string>;
 	/** Injectable SSRF guard for deterministic tests. Production resolves every host. */
 	assertPublicHost?: (hostname: string) => Promise<void>;
+	/** Injectable A/AAAA lookup used to discover hosting-network abuse routes for a domain. */
+	resolveDomainAddresses?: (domain: string) => Promise<string[]>;
 };
 
 export type ResolverTarget = {
