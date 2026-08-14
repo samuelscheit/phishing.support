@@ -104,7 +104,7 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 		// creating a run marker so missing credentials or a booting sidecar are
 		// ordinary retryable failures, not external-state ambiguities.
 		const adapter = worker.getAdapter();
-		const execution = await AbuseRepository.beginPortalExecution({
+		const execution = await AbuseRepository.beginProviderExecution({
 			routeId: route.id,
 			correlationKey,
 			providerPayload,

@@ -7,11 +7,11 @@ import { hashStableJson } from "../security";
 import { recomputeReportStatusInTransaction } from "./report_status";
 import { now, recordEvent } from "./shared";
 
-export async function beginPortalExecution(params: {
+export async function beginProviderExecution(params: {
 	routeId: bigint;
 	providerPayload: Record<string, unknown>;
 	correlationKey: string;
-	expectedStatus: "queued" | "escalating_to_portal";
+	expectedStatus: "queued" | "verified" | "escalating_to_portal";
 }): Promise<{ run: AbuseProviderRun; created: boolean; resumed: boolean } | undefined> {
 	const db = await getDb();
 	return db.transaction(
@@ -20,7 +20,7 @@ export async function beginPortalExecution(params: {
 			if (!route || ![params.expectedStatus, "running"].includes(route.status)) return undefined;
 			const existing = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.correlationKey, params.correlationKey)).get();
 			if (existing && (existing.routeId !== route.id || existing.reportId !== route.reportId)) {
-				throw new Error("Portal correlation key belongs to a different route.");
+				throw new Error("Provider correlation key belongs to a different route.");
 			}
 			if (route.status === "running") {
 				if (!existing) return undefined;
@@ -29,7 +29,7 @@ export async function beginPortalExecution(params: {
 					targetId: route.targetId,
 					routeId: route.id,
 					runId: existing.id,
-					eventType: "provider_run.portal_execution_resumed",
+					eventType: "provider_run.provider_execution_resumed",
 					data: { correlationKey: params.correlationKey },
 				});
 				return { run: existing, created: false, resumed: true };
@@ -47,7 +47,7 @@ export async function beginPortalExecution(params: {
 				targetId: route.targetId,
 				routeId: route.id,
 				eventType: "route.status_changed",
-				data: { from: route.status, to: "running", reason: "portal_execution_started" },
+				data: { from: route.status, to: "running", reason: "provider_execution_started" },
 			});
 			let run: AbuseProviderRun;
 			let created = false;
@@ -81,7 +81,7 @@ export async function beginPortalExecution(params: {
 				created = true;
 			}
 			recomputeReportStatusInTransaction(tx, route.reportId, {
-				reason: "portal_execution_started",
+				reason: "provider_execution_started",
 				routeId: route.id.toString(),
 			});
 			return { run, created, resumed: false };

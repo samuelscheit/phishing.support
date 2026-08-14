@@ -42,7 +42,7 @@ import {
 	setMailClassification,
 	settleOutboundMail,
 } from "./persistence/mail";
-import { beginPortalExecution } from "./persistence/portal_execution";
+import { beginProviderExecution } from "./persistence/provider_execution";
 import {
 	createProviderRun,
 	getLatestActiveProviderRunForRoute,
@@ -51,9 +51,10 @@ import {
 	getProviderRunByCorrelationKey,
 	getProviderRunBySkyvernRunId,
 	listProviderRunsForReport,
+	prepareProviderSubmission,
 	prepareSkyvernTaskCreation,
 	recordSkyvernTaskStarted,
-	settleSkyvernRun,
+	settleProviderRun,
 	updateProviderRun,
 } from "./persistence/provider_runs";
 import { getPublicStatus } from "./persistence/public_status";
@@ -116,9 +117,10 @@ export const AbuseRepository = {
 	getLatestProviderRunForRoute,
 	getLatestActiveProviderRunForRoute,
 	updateProviderRun,
-	settleSkyvernRun,
-	beginPortalExecution,
+	settleProviderRun,
+	beginProviderExecution,
 	beginEmailDelivery,
+	prepareProviderSubmission,
 	prepareSkyvernTaskCreation,
 	recordSkyvernTaskStarted,
 	settleEmailDelivery,

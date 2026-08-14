@@ -102,7 +102,7 @@ export async function getLatestActiveProviderRunForRoute(routeId: bigint): Promi
 		.where(
 			and(
 				eq(abuseProviderRuns.routeId, routeId),
-				inArray(abuseProviderRuns.executionStatus, ["pending", "starting", "task_creation_started", "running", "unknown_external_state"]),
+				inArray(abuseProviderRuns.executionStatus, ["pending", "starting", "task_creation_started", "submission_started", "running", "unknown_external_state"]),
 			),
 		)
 		.orderBy(desc(abuseProviderRuns.createdAt))
@@ -130,15 +130,16 @@ export async function updateProviderRun(runId: bigint, values: Partial<typeof ab
 }
 
 /**
- * Finish a known Skyvern run and its provider route in one transaction.
- * Repeated webhooks and stale reconciliation jobs cannot downgrade an
- * already-settled route when Skyvern later omits old output/artifacts.
+ * Finish a known provider run and its provider route in one transaction.
+ * Repeated callbacks and stale reconciliation jobs cannot downgrade an
+ * already-settled route when an external provider later omits old output or
+ * artifacts.
  */
 
-export async function settleSkyvernRun(params: {
+export async function settleProviderRun(params: {
 	runId: bigint;
 	executionStatus: "completed" | "failed" | "canceled";
-	routeStatus: "submitted" | "needs_human" | "failed";
+	routeStatus: "submitted" | "provider_rejected" | "insufficient_evidence" | "needs_human" | "failed";
 	confirmationId?: string;
 	confirmationText?: string;
 	finalUrl?: string;
@@ -193,8 +194,45 @@ export async function settleSkyvernRun(params: {
 			});
 
 			recomputeReportStatusInTransaction(tx, route.reportId, {
-				reason: "skyvern_run_settled",
+				reason: "provider_run_settled",
 				routeId: route.id.toString(),
+			});
+			return true;
+		},
+		{ behavior: "immediate" },
+	);
+}
+
+/**
+ * Persist the durable pre-call marker for a direct provider submission. The
+ * immutable provider payload is already stored on the run; once this marker
+ * succeeds, a restart must treat a missing provider response as ambiguous
+ * rather than retrying the submission and risking a duplicate complaint.
+ */
+
+export async function prepareProviderSubmission(runId: bigint): Promise<boolean> {
+	const db = await getDb();
+	return db.transaction(
+		(tx) => {
+			const run = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, runId)).get();
+			if (!run || run.executionStatus !== "starting") return false;
+			const route = tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, run.routeId)).get();
+			if (!route || route.routeType !== "provider_submission" || route.status !== "running") return false;
+			const timestamp = now();
+			const updated = tx
+				.update(abuseProviderRuns)
+				.set({ executionStatus: "submission_started", updatedAt: timestamp })
+				.where(and(eq(abuseProviderRuns.id, run.id), eq(abuseProviderRuns.executionStatus, "starting")))
+				.returning({ id: abuseProviderRuns.id })
+				.get();
+			if (!updated) return false;
+			recordEvent(tx, {
+				reportId: run.reportId,
+				targetId: route.targetId,
+				routeId: route.id,
+				runId: run.id,
+				eventType: "provider_run.provider_submission_started",
+				data: { from: "starting", to: "submission_started" },
 			});
 			return true;
 		},

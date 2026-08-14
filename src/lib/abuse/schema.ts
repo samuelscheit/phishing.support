@@ -24,7 +24,7 @@ export type AbuseTargetType = (typeof abuseTargetTypes)[number];
 export const abuseTargetStatuses = ["pending", "resolved", "no_route", "failed"] as const;
 export type AbuseTargetStatus = (typeof abuseTargetStatuses)[number];
 
-export const abuseRouteTypes = ["email", "skyvern_portal", "manual_unroutable"] as const;
+export const abuseRouteTypes = ["email", "skyvern_portal", "provider_submission", "manual_unroutable"] as const;
 export type AbuseRouteType = (typeof abuseRouteTypes)[number];
 
 export const abuseRouteStatuses = [
@@ -54,6 +54,10 @@ export const abuseRunStatuses = [
 	// request may have crossed the provider boundary. A restart in this state
 	// must fail closed rather than issue another task creation call.
 	"task_creation_started",
+	// A direct provider submission may have crossed its provider boundary. A
+	// restart in this state must be reconciled rather than automatically submit
+	// the same complaint again.
+	"submission_started",
 	"running",
 	"waiting_code",
 	"sending_code",
@@ -74,6 +78,7 @@ export const abuseJobTypes = [
 	"send_email",
 	"monitor_provider_reply",
 	"run_portal",
+	"submit_provider",
 	"reconcile_skyvern_run",
 	"deliver_provider_verification_code",
 	"classify_provider_reply",

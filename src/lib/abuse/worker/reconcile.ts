@@ -74,7 +74,7 @@ export async function reconcileSkyvernRun(
 		: completed
 			? "needs_human"
 			: "failed";
-	await AbuseRepository.settleSkyvernRun({
+	await AbuseRepository.settleProviderRun({
 		runId: run.id,
 		executionStatus: completed ? "completed" : result.status === "canceled" ? "canceled" : "failed",
 		routeStatus,
