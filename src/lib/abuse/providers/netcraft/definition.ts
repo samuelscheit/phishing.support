@@ -1,4 +1,5 @@
 import { hashStableJson } from "../../security";
+import { NETCRAFT_REPORT_URLS_URL, NETCRAFT_SUBMISSION_URL_PREFIX } from "../../../netcraft/api";
 import type { ProviderSubmissionDefinition } from "../submission_contracts";
 
 /** Code-owned contract for Netcraft Reporting API v3 URL submissions. */
@@ -16,8 +17,8 @@ const definitionWithoutHash = {
 	exactMailboxes: [],
 	supplemental: true,
 	supplementalTargets: [{ targetType: "domain" as const, requiresObservedUrl: true as const }],
-	reportUrlsUrl: "https://report.netcraft.com/api/v3/report/urls",
-	submissionUrlPrefix: "https://report.netcraft.com/api/v3/submission/",
+	reportUrlsUrl: NETCRAFT_REPORT_URLS_URL,
+	submissionUrlPrefix: NETCRAFT_SUBMISSION_URL_PREFIX,
 	maximumUrlsPerSubmission: 1_000,
 	maximumReasonLength: 10_000,
 };

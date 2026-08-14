@@ -1,4 +1,4 @@
-import { normalizeMailbox } from "../../mail/shared";
+import { normalizeMailbox } from "../abuse/mail/shared";
 
 const DEFAULT_REPORTER_EMAIL = "support@phishing.support";
 

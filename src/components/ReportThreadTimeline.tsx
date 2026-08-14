@@ -30,7 +30,7 @@ function formatAddresses(addresses: string[] | null | undefined): string {
 
 function statusClass(status: string) {
 	if (status === "replied") return "border-emerald-200 bg-emerald-50 text-emerald-800";
-	if (status === "delivery_failed" || status === "failed") return "border-red-200 bg-red-50 text-red-800";
+	if (status === "delivery_failed" || status === "failed" || status === "unknown_external_state") return "border-red-200 bg-red-50 text-red-800";
 	if (status === "pending") return "border-amber-200 bg-amber-50 text-amber-800";
 	return "border-blue-200 bg-blue-50 text-blue-800";
 }
@@ -204,11 +204,12 @@ export function ReportThreadTimeline({ threads, providerReports, artifacts }: {
 					<CardContent className="space-y-3 p-4">
 						<div className="flex flex-wrap items-center justify-between gap-2">
 							<CardTitle className="text-base">{report.to}</CardTitle>
-							<div className="flex gap-2"><Badge variant="outline">{report.legacy ? "Legacy/provider report" : "Provider report"}</Badge><Badge variant={report.status === "failed" ? "destructive" : "secondary"}>{report.status}</Badge></div>
+							<div className="flex gap-2"><Badge variant="outline">{report.legacy ? "Legacy/provider report" : "Provider report"}</Badge><Badge variant={report.status === "failed" || report.status === "unknown_external_state" ? "destructive" : report.status === "pending" || report.status === "submission_started" ? "outline" : "secondary"}>{report.status.replaceAll("_", " ")}</Badge></div>
 						</div>
 						<div className="text-xs text-muted-foreground">{report.channel} • {formatDate(report.sentAt ?? report.createdAt)}</div>
 						{report.subject ? <div className="text-sm"><span className="text-muted-foreground">Subject:</span> {report.subject}</div> : null}
 						<pre className="whitespace-pre-wrap break-words text-sm font-sans">{report.body || "No body recorded."}</pre>
+						{report.providerSubmissionUrl ? <a href={report.providerSubmissionUrl} target="_blank" rel="noreferrer" className="inline-flex text-sm text-primary hover:underline">View provider submission status</a> : null}
 						<AttachmentLinks ids={report.attachmentsArtifactIds} artifacts={artifactMap} />
 					</CardContent>
 				</Card>

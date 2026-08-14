@@ -40,7 +40,7 @@ function getAddressText(obj: AddressObject | undefined): string {
 
 export function getMailLinks(result: MailData) {
 	try {
-		if (!result.html) throw new Error("No HTML content found");
+		if (!result.html) return [];
 
 		const doc = parse(result.html);
 

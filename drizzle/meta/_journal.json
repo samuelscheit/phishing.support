@@ -50,6 +50,13 @@
       "when": 1786598957759,
       "tag": "0006_standalone_abuse_reporting",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1786742163238,
+      "tag": "0007_netcraft_mail_reporting",
+      "breakpoints": true
     }
   ]
 }

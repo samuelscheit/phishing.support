@@ -1,23 +1,26 @@
+import { createHash } from "node:crypto";
+
 import { SubmissionsEntity } from "@/lib/db/entities";
 import { generateId } from "@/lib/db/ids";
-import { getAddressesText } from "@/lib/mail";
 import { analyzeMail } from "@/lib/mail_ai";
-import { simpleParser } from "mailparser";
 import type { ReporterMetadata } from "@/lib/request_metadata";
 
 export type EmailSubmissionOptions = ReporterMetadata & {
 	source?: string;
 };
 
+/** One exact source message is idempotent; unrelated mail from the same sender is not. */
+export function emailSubmissionDedupeKey(emlContent: string): string {
+	return `email:${createHash("sha256").update(emlContent, "utf-8").digest("hex")}`;
+}
+
 export async function createEmailSubmissionFromEml(emlContent: string, options: EmailSubmissionOptions = {}): Promise<bigint> {
 	const streamId = generateId();
-	const parsedMail = await simpleParser(emlContent, { skipTextToHtml: true });
-	const from = getAddressesText(parsedMail.from);
 
 	const existingId = await SubmissionsEntity.create({
 		kind: "email",
 		data: { kind: "email" },
-		dedupeKey: `email-${from}`,
+		dedupeKey: emailSubmissionDedupeKey(emlContent),
 		id: streamId,
 		source: options.source,
 		reporterIp: options.reporterIp,

@@ -51,6 +51,7 @@ export type SubmissionProviderReport = Pick<
 	| "status"
 	| "sentAt"
 	| "providerMessageId"
+	| "providerSubmissionUrl"
 	| "attachmentsArtifactIds"
 	| "legacy"
 	| "createdAt"
@@ -128,6 +129,7 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 			status: report.status,
 			sentAt: report.sentAt,
 			providerMessageId: report.providerMessageId,
+			providerSubmissionUrl: report.providerSubmissionUrl,
 			attachmentsArtifactIds: report.attachmentsArtifactIds,
 			legacy: report.legacy,
 			createdAt: report.createdAt,

@@ -6,8 +6,22 @@ import { getMailLinks } from "../mail";
 import { createWebsiteSubmission } from "../submissions/website";
 import { SubmissionsEntity } from "../db/entities";
 import type { ReporterMetadata } from "../request_metadata";
+import { reportNetcraftMail } from "./netcraft_mail";
 
-export async function reportEmailPhishing(params: { submissionId: bigint; mail: MailData; analysisText: string }) {
+type EmailPhishingReportingDependencies = {
+	generateReportDraft?: typeof generateReportDraft;
+	sendReportEmail?: typeof sendReportEmail;
+	reportNetcraftMail?: typeof reportNetcraftMail;
+};
+
+function logReportFailure(channel: string, reason: unknown) {
+	console.error(`${channel} report failed:`, reason);
+}
+
+async function reportSendingInfrastructure(
+	params: { submissionId: bigint; mail: MailData; analysisText: string; originalEmlArtifactId?: bigint },
+	dependencies: Pick<EmailPhishingReportingDependencies, "generateReportDraft" | "sendReportEmail">,
+) {
 	let reporter: ReporterMetadata | undefined;
 	try {
 		const submission = await SubmissionsEntity.get(params.submissionId);
@@ -58,13 +72,13 @@ Email:
 ${toon.encode({ ...params.mail, eml: undefined })}
 }`;
 
-	const draft = await generateReportDraft({
+	const draft = await (dependencies.generateReportDraft ?? generateReportDraft)({
 		submissionId: params.submissionId,
 		system,
 		user,
 	});
 
-	return await sendReportEmail({
+	return await (dependencies.sendReportEmail ?? sendReportEmail)({
 		submissionId: params.submissionId,
 		analysisRunId: draft.analysisRunId,
 		draft,
@@ -76,4 +90,28 @@ ${toon.encode({ ...params.mail, eml: undefined })}
 			},
 		],
 	});
+}
+
+/**
+ * File every confirmed phishing email with Netcraft independently of the
+ * sender-infrastructure SMTP report. A draft-generation or SMTP failure must
+ * never suppress the direct Netcraft submission.
+ */
+export async function reportEmailPhishing(
+	params: { submissionId: bigint; mail: MailData; analysisText: string; originalEmlArtifactId?: bigint },
+	dependencies: EmailPhishingReportingDependencies = {},
+) {
+	const netcraft = dependencies.reportNetcraftMail ?? reportNetcraftMail;
+	const [netcraftResult, smtpResult] = await Promise.allSettled([
+		netcraft({
+			submissionId: params.submissionId,
+			rawMime: params.mail.eml,
+			originalEmlArtifactId: params.originalEmlArtifactId,
+		}),
+		reportSendingInfrastructure(params, dependencies),
+	]);
+
+	if (netcraftResult.status === "rejected") logReportFailure("Netcraft mail", netcraftResult.reason);
+	if (smtpResult.status === "rejected") logReportFailure("SMTP sender-infrastructure", smtpResult.reason);
+	return { netcraft: netcraftResult, smtp: smtpResult };
 }

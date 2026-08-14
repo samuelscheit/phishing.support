@@ -1,0 +1,2822 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "f15e5f96-b898-475b-97f3-62f9947fa767",
+  "prevId": "5ea1a105-8bde-40e3-a5be-7c75b2238e2a",
+  "tables": {
+    "analysis_runs": {
+      "name": "analysis_runs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "submission_id": {
+          "name": "submission_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'running'"
+        },
+        "input": {
+          "name": "input",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "output": {
+          "name": "output",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "tokens_used": {
+          "name": "tokens_used",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "data": {
+          "name": "data",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "analysis_runs_submission_id_submissions_id_fk": {
+          "name": "analysis_runs_submission_id_submissions_id_fk",
+          "tableFrom": "analysis_runs",
+          "tableTo": "submissions",
+          "columnsFrom": [
+            "submission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "artifacts": {
+      "name": "artifacts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "submission_id": {
+          "name": "submission_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "size": {
+          "name": "size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "blob": {
+          "name": "blob",
+          "type": "blob",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "artifacts_submission_kind_created_idx": {
+          "name": "artifacts_submission_kind_created_idx",
+          "columns": [
+            "submission_id",
+            "kind",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "artifacts_submission_id_submissions_id_fk": {
+          "name": "artifacts_submission_id_submissions_id_fk",
+          "tableFrom": "artifacts",
+          "tableTo": "submissions",
+          "columnsFrom": [
+            "submission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "mail_ingest": {
+      "name": "mail_ingest",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mailbox": {
+          "name": "mailbox",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "uid_validity": {
+          "name": "uid_validity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "uid": {
+          "name": "uid",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "route": {
+          "name": "route",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "report_message_id": {
+          "name": "report_message_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "terminal": {
+          "name": "terminal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "processed_at": {
+          "name": "processed_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "mail_ingest_mailbox_uid_unique": {
+          "name": "mail_ingest_mailbox_uid_unique",
+          "columns": [
+            "mailbox",
+            "uid_validity",
+            "uid"
+          ],
+          "isUnique": true
+        },
+        "mail_ingest_message_id_idx": {
+          "name": "mail_ingest_message_id_idx",
+          "columns": [
+            "message_id"
+          ],
+          "isUnique": false
+        },
+        "mail_ingest_route_processed_idx": {
+          "name": "mail_ingest_route_processed_idx",
+          "columns": [
+            "route",
+            "processed_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "mail_ingest_report_message_id_report_messages_id_fk": {
+          "name": "mail_ingest_report_message_id_report_messages_id_fk",
+          "tableFrom": "mail_ingest",
+          "tableTo": "report_messages",
+          "columnsFrom": [
+            "report_message_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "provider_reports": {
+      "name": "provider_reports",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "submission_id": {
+          "name": "submission_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "analysis_run_id": {
+          "name": "analysis_run_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'provider'"
+        },
+        "operation_key": {
+          "name": "operation_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "to": {
+          "name": "to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'sent'"
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provider_message_id": {
+          "name": "provider_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provider_submission_url": {
+          "name": "provider_submission_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attachments_artifact_ids": {
+          "name": "attachments_artifact_ids",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "data": {
+          "name": "data",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "legacy": {
+          "name": "legacy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "provider_reports_submission_created_idx": {
+          "name": "provider_reports_submission_created_idx",
+          "columns": [
+            "submission_id",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "provider_reports_to_created_idx": {
+          "name": "provider_reports_to_created_idx",
+          "columns": [
+            "to",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "provider_reports_status_created_idx": {
+          "name": "provider_reports_status_created_idx",
+          "columns": [
+            "status",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "provider_reports_operation_key_unique": {
+          "name": "provider_reports_operation_key_unique",
+          "columns": [
+            "operation_key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "provider_reports_submission_id_submissions_id_fk": {
+          "name": "provider_reports_submission_id_submissions_id_fk",
+          "tableFrom": "provider_reports",
+          "tableTo": "submissions",
+          "columnsFrom": [
+            "submission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "provider_reports_analysis_run_id_analysis_runs_id_fk": {
+          "name": "provider_reports_analysis_run_id_analysis_runs_id_fk",
+          "tableFrom": "provider_reports",
+          "tableTo": "analysis_runs",
+          "columnsFrom": [
+            "analysis_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "report_messages": {
+      "name": "report_messages",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "direction": {
+          "name": "direction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "from": {
+          "name": "from",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "to": {
+          "name": "to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cc": {
+          "name": "cc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "text_body": {
+          "name": "text_body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "html_body": {
+          "name": "html_body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "in_reply_to": {
+          "name": "in_reply_to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "references": {
+          "name": "references",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "provider_message_id": {
+          "name": "provider_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "raw_artifact_id": {
+          "name": "raw_artifact_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attachment_artifact_ids": {
+          "name": "attachment_artifact_ids",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "report_messages_thread_occurred_idx": {
+          "name": "report_messages_thread_occurred_idx",
+          "columns": [
+            "thread_id",
+            "occurred_at"
+          ],
+          "isUnique": false
+        },
+        "report_messages_outbound_message_id_unique": {
+          "name": "report_messages_outbound_message_id_unique",
+          "columns": [
+            "message_id"
+          ],
+          "isUnique": true,
+          "where": "\"report_messages\".\"direction\" = 'outbound' and \"report_messages\".\"message_id\" is not null"
+        },
+        "report_messages_inbound_message_id_unique": {
+          "name": "report_messages_inbound_message_id_unique",
+          "columns": [
+            "message_id"
+          ],
+          "isUnique": true,
+          "where": "\"report_messages\".\"direction\" = 'inbound' and \"report_messages\".\"message_id\" is not null"
+        },
+        "report_messages_message_id_idx": {
+          "name": "report_messages_message_id_idx",
+          "columns": [
+            "message_id"
+          ],
+          "isUnique": false
+        },
+        "report_messages_in_reply_to_idx": {
+          "name": "report_messages_in_reply_to_idx",
+          "columns": [
+            "in_reply_to"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "report_messages_thread_id_report_threads_id_fk": {
+          "name": "report_messages_thread_id_report_threads_id_fk",
+          "tableFrom": "report_messages",
+          "tableTo": "report_threads",
+          "columnsFrom": [
+            "thread_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "report_messages_raw_artifact_id_artifacts_id_fk": {
+          "name": "report_messages_raw_artifact_id_artifacts_id_fk",
+          "tableFrom": "report_messages",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "raw_artifact_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "report_threads": {
+      "name": "report_threads",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "submission_id": {
+          "name": "submission_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "analysis_run_id": {
+          "name": "analysis_run_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "to": {
+          "name": "to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reply_address": {
+          "name": "reply_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reply_token": {
+          "name": "reply_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "data": {
+          "name": "data",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "report_threads_reply_address_unique": {
+          "name": "report_threads_reply_address_unique",
+          "columns": [
+            "reply_address"
+          ],
+          "isUnique": true
+        },
+        "report_threads_reply_token_unique": {
+          "name": "report_threads_reply_token_unique",
+          "columns": [
+            "reply_token"
+          ],
+          "isUnique": true
+        },
+        "report_threads_submission_created_idx": {
+          "name": "report_threads_submission_created_idx",
+          "columns": [
+            "submission_id",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "report_threads_status_updated_idx": {
+          "name": "report_threads_status_updated_idx",
+          "columns": [
+            "status",
+            "updated_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "report_threads_submission_id_submissions_id_fk": {
+          "name": "report_threads_submission_id_submissions_id_fk",
+          "tableFrom": "report_threads",
+          "tableTo": "submissions",
+          "columnsFrom": [
+            "submission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "report_threads_analysis_run_id_analysis_runs_id_fk": {
+          "name": "report_threads_analysis_run_id_analysis_runs_id_fk",
+          "tableFrom": "report_threads",
+          "tableTo": "analysis_runs",
+          "columnsFrom": [
+            "analysis_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "submissions": {
+      "name": "submissions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "data": {
+          "name": "data",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "dedupe_key": {
+          "name": "dedupe_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'new'"
+        },
+        "info": {
+          "name": "info",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reporter_ip": {
+          "name": "reporter_ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reporter_country": {
+          "name": "reporter_country",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reporter_headers": {
+          "name": "reporter_headers",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "submissions_dedupe_key_unique": {
+          "name": "submissions_dedupe_key_unique",
+          "columns": [
+            "dedupe_key"
+          ],
+          "isUnique": true
+        },
+        "submissions_kind_received_at_idx": {
+          "name": "submissions_kind_received_at_idx",
+          "columns": [
+            "kind"
+          ],
+          "isUnique": false
+        },
+        "submissions_status_received_at_idx": {
+          "name": "submissions_status_received_at_idx",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        },
+        "submissions_source_idx": {
+          "name": "submissions_source_idx",
+          "columns": [
+            "source"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "abuse_artifacts": {
+      "name": "abuse_artifacts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "report_id": {
+          "name": "report_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_id": {
+          "name": "target_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "route_id": {
+          "name": "route_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "size": {
+          "name": "size",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "blob": {
+          "name": "blob",
+          "type": "blob",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "abuse_artifacts_report_sha_size_idx": {
+          "name": "abuse_artifacts_report_sha_size_idx",
+          "columns": [
+            "report_id",
+            "sha256",
+            "size"
+          ],
+          "isUnique": false
+        },
+        "abuse_artifacts_report_kind_created_idx": {
+          "name": "abuse_artifacts_report_kind_created_idx",
+          "columns": [
+            "report_id",
+            "kind",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "abuse_artifacts_run_idx": {
+          "name": "abuse_artifacts_run_idx",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "abuse_artifacts_report_id_abuse_reports_id_fk": {
+          "name": "abuse_artifacts_report_id_abuse_reports_id_fk",
+          "tableFrom": "abuse_artifacts",
+          "tableTo": "abuse_reports",
+          "columnsFrom": [
+            "report_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "abuse_artifacts_target_id_abuse_targets_id_fk": {
+          "name": "abuse_artifacts_target_id_abuse_targets_id_fk",
+          "tableFrom": "abuse_artifacts",
+          "tableTo": "abuse_targets",
+          "columnsFrom": [
+            "target_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "abuse_artifacts_route_id_abuse_provider_routes_id_fk": {
+          "name": "abuse_artifacts_route_id_abuse_provider_routes_id_fk",
+          "tableFrom": "abuse_artifacts",
+          "tableTo": "abuse_provider_routes",
+          "columnsFrom": [
+            "route_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "abuse_artifacts_run_id_abuse_provider_runs_id_fk": {
+          "name": "abuse_artifacts_run_id_abuse_provider_runs_id_fk",
+          "tableFrom": "abuse_artifacts",
+          "tableTo": "abuse_provider_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "abuse_events": {
+      "name": "abuse_events",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "report_id": {
+          "name": "report_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_id": {
+          "name": "target_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "route_id": {
+          "name": "route_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "data": {
+          "name": "data",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "abuse_events_report_created_idx": {
+          "name": "abuse_events_report_created_idx",
+          "columns": [
+            "report_id",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "abuse_events_route_created_idx": {
+          "name": "abuse_events_route_created_idx",
+          "columns": [
+            "route_id",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "abuse_events_report_id_abuse_reports_id_fk": {
+          "name": "abuse_events_report_id_abuse_reports_id_fk",
+          "tableFrom": "abuse_events",
+          "tableTo": "abuse_reports",
+          "columnsFrom": [
+            "report_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "abuse_events_target_id_abuse_targets_id_fk": {
+          "name": "abuse_events_target_id_abuse_targets_id_fk",
+          "tableFrom": "abuse_events",
+          "tableTo": "abuse_targets",
+          "columnsFrom": [
+            "target_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "abuse_events_route_id_abuse_provider_routes_id_fk": {
+          "name": "abuse_events_route_id_abuse_provider_routes_id_fk",
+          "tableFrom": "abuse_events",
+          "tableTo": "abuse_provider_routes",
+          "columnsFrom": [
+            "route_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "abuse_events_run_id_abuse_provider_runs_id_fk": {
+          "name": "abuse_events_run_id_abuse_provider_runs_id_fk",
+          "tableFrom": "abuse_events",
+          "tableTo": "abuse_provider_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "abuse_events_job_id_abuse_jobs_id_fk": {
+          "name": "abuse_events_job_id_abuse_jobs_id_fk",
+          "tableFrom": "abuse_events",
+          "tableTo": "abuse_jobs",
+          "columnsFrom": [
+            "job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "abuse_jobs": {
+      "name": "abuse_jobs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "job_type": {
+          "name": "job_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "report_id": {
+          "name": "report_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "route_id": {
+          "name": "route_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dedupe_key": {
+          "name": "dedupe_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'queued'"
+        },
+        "lease_owner": {
+          "name": "lease_owner",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "retry_count": {
+          "name": "retry_count",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "unknown_external_state": {
+          "name": "unknown_external_state",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "abuse_jobs_claim_idx": {
+          "name": "abuse_jobs_claim_idx",
+          "columns": [
+            "status",
+            "next_attempt_at",
+            "lease_expires_at"
+          ],
+          "isUnique": false
+        },
+        "abuse_jobs_route_status_idx": {
+          "name": "abuse_jobs_route_status_idx",
+          "columns": [
+            "route_id",
+            "status"
+          ],
+          "isUnique": false
+        },
+        "abuse_jobs_dedupe_idx": {
+          "name": "abuse_jobs_dedupe_idx",
+          "columns": [
+            "dedupe_key",
+            "status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "abuse_jobs_report_id_abuse_reports_id_fk": {
+          "name": "abuse_jobs_report_id_abuse_reports_id_fk",
+          "tableFrom": "abuse_jobs",
+          "tableTo": "abuse_reports",
+          "columnsFrom": [
+            "report_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "abuse_jobs_route_id_abuse_provider_routes_id_fk": {
+          "name": "abuse_jobs_route_id_abuse_provider_routes_id_fk",
+          "tableFrom": "abuse_jobs",
+          "tableTo": "abuse_provider_routes",
+          "columnsFrom": [
+            "route_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "abuse_jobs_run_id_abuse_provider_runs_id_fk": {
+          "name": "abuse_jobs_run_id_abuse_provider_runs_id_fk",
+          "tableFrom": "abuse_jobs",
+          "tableTo": "abuse_provider_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "abuse_locks": {
+      "name": "abuse_locks",
+      "columns": {
+        "lock_key": {
+          "name": "lock_key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner": {
+          "name": "owner",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "abuse_locks_lease_idx": {
+          "name": "abuse_locks_lease_idx",
+          "columns": [
+            "lease_expires_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "abuse_mail_codes": {
+      "name": "abuse_mail_codes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "report_id": {
+          "name": "report_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "route_id": {
+          "name": "route_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "mail_message_id": {
+          "name": "mail_message_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "correlation_key": {
+          "name": "correlation_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'received'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "used_at": {
+          "name": "used_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "abuse_mail_codes_route_status_idx": {
+          "name": "abuse_mail_codes_route_status_idx",
+          "columns": [
+            "route_id",
+            "status",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "abuse_mail_codes_report_id_abuse_reports_id_fk": {
+          "name": "abuse_mail_codes_report_id_abuse_reports_id_fk",
+          "tableFrom": "abuse_mail_codes",
+          "tableTo": "abuse_reports",
+          "columnsFrom": [
+            "report_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "abuse_mail_codes_route_id_abuse_provider_routes_id_fk": {
+          "name": "abuse_mail_codes_route_id_abuse_provider_routes_id_fk",
+          "tableFrom": "abuse_mail_codes",
+          "tableTo": "abuse_provider_routes",
+          "columnsFrom": [
+            "route_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "abuse_mail_codes_run_id_abuse_provider_runs_id_fk": {
+          "name": "abuse_mail_codes_run_id_abuse_provider_runs_id_fk",
+          "tableFrom": "abuse_mail_codes",
+          "tableTo": "abuse_provider_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "abuse_mail_codes_mail_message_id_abuse_mail_messages_id_fk": {
+          "name": "abuse_mail_codes_mail_message_id_abuse_mail_messages_id_fk",
+          "tableFrom": "abuse_mail_codes",
+          "tableTo": "abuse_mail_messages",
+          "columnsFrom": [
+            "mail_message_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "abuse_mail_messages": {
+      "name": "abuse_mail_messages",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "report_id": {
+          "name": "report_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "route_id": {
+          "name": "route_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "direction": {
+          "name": "direction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "from_address": {
+          "name": "from_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "to_addresses": {
+          "name": "to_addresses",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "text_body": {
+          "name": "text_body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "in_reply_to": {
+          "name": "in_reply_to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "references": {
+          "name": "references",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "reply_address": {
+          "name": "reply_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "correlation_key": {
+          "name": "correlation_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "classification": {
+          "name": "classification",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "extracted_links": {
+          "name": "extracted_links",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "raw_artifact_id": {
+          "name": "raw_artifact_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attachment_artifact_ids": {
+          "name": "attachment_artifact_ids",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "imap_mailbox": {
+          "name": "imap_mailbox",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "imap_uidvalidity": {
+          "name": "imap_uidvalidity",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "imap_uid": {
+          "name": "imap_uid",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "processing_attempts": {
+          "name": "processing_attempts",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "disposition": {
+          "name": "disposition",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "abuse_mail_messages_imap_uid_unique": {
+          "name": "abuse_mail_messages_imap_uid_unique",
+          "columns": [
+            "imap_mailbox",
+            "imap_uidvalidity",
+            "imap_uid"
+          ],
+          "isUnique": true
+        },
+        "abuse_mail_messages_route_occurred_idx": {
+          "name": "abuse_mail_messages_route_occurred_idx",
+          "columns": [
+            "route_id",
+            "occurred_at"
+          ],
+          "isUnique": false
+        },
+        "abuse_mail_messages_message_id_idx": {
+          "name": "abuse_mail_messages_message_id_idx",
+          "columns": [
+            "message_id"
+          ],
+          "isUnique": false
+        },
+        "abuse_mail_messages_reply_address_idx": {
+          "name": "abuse_mail_messages_reply_address_idx",
+          "columns": [
+            "reply_address"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "abuse_mail_messages_report_id_abuse_reports_id_fk": {
+          "name": "abuse_mail_messages_report_id_abuse_reports_id_fk",
+          "tableFrom": "abuse_mail_messages",
+          "tableTo": "abuse_reports",
+          "columnsFrom": [
+            "report_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "abuse_mail_messages_route_id_abuse_provider_routes_id_fk": {
+          "name": "abuse_mail_messages_route_id_abuse_provider_routes_id_fk",
+          "tableFrom": "abuse_mail_messages",
+          "tableTo": "abuse_provider_routes",
+          "columnsFrom": [
+            "route_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "abuse_mail_messages_run_id_abuse_provider_runs_id_fk": {
+          "name": "abuse_mail_messages_run_id_abuse_provider_runs_id_fk",
+          "tableFrom": "abuse_mail_messages",
+          "tableTo": "abuse_provider_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "abuse_mail_messages_raw_artifact_id_abuse_artifacts_id_fk": {
+          "name": "abuse_mail_messages_raw_artifact_id_abuse_artifacts_id_fk",
+          "tableFrom": "abuse_mail_messages",
+          "tableTo": "abuse_artifacts",
+          "columnsFrom": [
+            "raw_artifact_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "abuse_provider_routes": {
+      "name": "abuse_provider_routes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "report_id": {
+          "name": "report_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_id": {
+          "name": "target_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "route_key": {
+          "name": "route_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_registry_key": {
+          "name": "provider_registry_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_display_name": {
+          "name": "provider_display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "route_type": {
+          "name": "route_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "verified_email": {
+          "name": "verified_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provider_definition_version": {
+          "name": "provider_definition_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provider_definition_hash": {
+          "name": "provider_definition_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resolver_provenance": {
+          "name": "resolver_provenance",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resolution_snapshot": {
+          "name": "resolution_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "verification_result": {
+          "name": "verification_result",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "service_identity": {
+          "name": "service_identity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'resolving'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "abuse_provider_routes_target_route_key_unique": {
+          "name": "abuse_provider_routes_target_route_key_unique",
+          "columns": [
+            "target_id",
+            "route_key"
+          ],
+          "isUnique": true
+        },
+        "abuse_provider_routes_report_status_idx": {
+          "name": "abuse_provider_routes_report_status_idx",
+          "columns": [
+            "report_id",
+            "status"
+          ],
+          "isUnique": false
+        },
+        "abuse_provider_routes_target_idx": {
+          "name": "abuse_provider_routes_target_idx",
+          "columns": [
+            "target_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "abuse_provider_routes_report_id_abuse_reports_id_fk": {
+          "name": "abuse_provider_routes_report_id_abuse_reports_id_fk",
+          "tableFrom": "abuse_provider_routes",
+          "tableTo": "abuse_reports",
+          "columnsFrom": [
+            "report_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "abuse_provider_routes_target_id_abuse_targets_id_fk": {
+          "name": "abuse_provider_routes_target_id_abuse_targets_id_fk",
+          "tableFrom": "abuse_provider_routes",
+          "tableTo": "abuse_targets",
+          "columnsFrom": [
+            "target_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "abuse_provider_runs": {
+      "name": "abuse_provider_runs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "report_id": {
+          "name": "report_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "route_id": {
+          "name": "route_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_payload": {
+          "name": "provider_payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload_hash": {
+          "name": "payload_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "correlation_key": {
+          "name": "correlation_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "skyvern_run_id": {
+          "name": "skyvern_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "execution_status": {
+          "name": "execution_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "confirmation_id": {
+          "name": "confirmation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "confirmation_text": {
+          "name": "confirmation_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "final_url": {
+          "name": "final_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "submitted_targets": {
+          "name": "submitted_targets",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "failure_reason": {
+          "name": "failure_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "abuse_provider_runs_correlation_key_unique": {
+          "name": "abuse_provider_runs_correlation_key_unique",
+          "columns": [
+            "correlation_key"
+          ],
+          "isUnique": true
+        },
+        "abuse_provider_runs_skyvern_run_unique": {
+          "name": "abuse_provider_runs_skyvern_run_unique",
+          "columns": [
+            "skyvern_run_id"
+          ],
+          "isUnique": true
+        },
+        "abuse_provider_runs_route_created_idx": {
+          "name": "abuse_provider_runs_route_created_idx",
+          "columns": [
+            "route_id",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "abuse_provider_runs_status_updated_idx": {
+          "name": "abuse_provider_runs_status_updated_idx",
+          "columns": [
+            "execution_status",
+            "updated_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "abuse_provider_runs_report_id_abuse_reports_id_fk": {
+          "name": "abuse_provider_runs_report_id_abuse_reports_id_fk",
+          "tableFrom": "abuse_provider_runs",
+          "tableTo": "abuse_reports",
+          "columnsFrom": [
+            "report_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "abuse_provider_runs_route_id_abuse_provider_routes_id_fk": {
+          "name": "abuse_provider_runs_route_id_abuse_provider_routes_id_fk",
+          "tableFrom": "abuse_provider_runs",
+          "tableTo": "abuse_provider_routes",
+          "columnsFrom": [
+            "route_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "abuse_reports": {
+      "name": "abuse_reports",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tracking_token_hash": {
+          "name": "tracking_token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "request_payload_hash": {
+          "name": "request_payload_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "allegation_category": {
+          "name": "allegation_category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "legal_brand_url": {
+          "name": "legal_brand_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reporter_contact_email": {
+          "name": "reporter_contact_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reporter_identity": {
+          "name": "reporter_identity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'service'"
+        },
+        "service_identity": {
+          "name": "service_identity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verification_outcome": {
+          "name": "verification_outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'accepted'"
+        },
+        "requester_ip": {
+          "name": "requester_ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "requester_country": {
+          "name": "requester_country",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "requester_headers": {
+          "name": "requester_headers",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "abuse_reports_tracking_token_hash_unique": {
+          "name": "abuse_reports_tracking_token_hash_unique",
+          "columns": [
+            "tracking_token_hash"
+          ],
+          "isUnique": true
+        },
+        "abuse_reports_idempotency_key_unique": {
+          "name": "abuse_reports_idempotency_key_unique",
+          "columns": [
+            "idempotency_key"
+          ],
+          "isUnique": true
+        },
+        "abuse_reports_status_updated_idx": {
+          "name": "abuse_reports_status_updated_idx",
+          "columns": [
+            "status",
+            "updated_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "abuse_targets": {
+      "name": "abuse_targets",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "report_id": {
+          "name": "report_id",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ordinal": {
+          "name": "ordinal",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "original_input": {
+          "name": "original_input",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "original_inputs": {
+          "name": "original_inputs",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "normalized_target": {
+          "name": "normalized_target",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_type": {
+          "name": "target_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "observed_urls": {
+          "name": "observed_urls",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "resolution_status": {
+          "name": "resolution_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "resolver_snapshot": {
+          "name": "resolver_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "disposition": {
+          "name": "disposition",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "abuse_targets_report_normalized_unique": {
+          "name": "abuse_targets_report_normalized_unique",
+          "columns": [
+            "report_id",
+            "normalized_target"
+          ],
+          "isUnique": true
+        },
+        "abuse_targets_report_ordinal_idx": {
+          "name": "abuse_targets_report_ordinal_idx",
+          "columns": [
+            "report_id",
+            "ordinal"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "abuse_targets_report_id_abuse_reports_id_fk": {
+          "name": "abuse_targets_report_id_abuse_reports_id_fk",
+          "tableFrom": "abuse_targets",
+          "tableTo": "abuse_reports",
+          "columnsFrom": [
+            "report_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "abuse_webhook_events": {
+      "name": "abuse_webhook_events",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "INTEGER",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "skyvern_run_id": {
+          "name": "skyvern_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "timestamp": {
+          "name": "timestamp",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload_hash": {
+          "name": "payload_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "abuse_webhook_events_event_id_unique": {
+          "name": "abuse_webhook_events_event_id_unique",
+          "columns": [
+            "event_id"
+          ],
+          "isUnique": true
+        },
+        "abuse_webhook_events_run_idx": {
+          "name": "abuse_webhook_events_run_idx",
+          "columns": [
+            "skyvern_run_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

@@ -11,6 +11,7 @@ import {
     reportMessages,
     reportThreads,
     type MailIngestRoute,
+    type ProviderReport,
     type ProviderReportStatus,
     type ReportMessageKind,
     type ReportThreadStatus,
@@ -25,6 +26,14 @@ import type { ReporterMetadata } from "../request_metadata";
 
 function nowDate(): Date {
     return new Date();
+}
+
+function normalizeProviderOperationKey(value: string): string {
+	const operationKey = value.trim();
+	if (!operationKey || operationKey.length > 512 || /[\u0000\r\n]/.test(operationKey)) {
+		throw new Error("Provider operation key must be a non-empty single-line value of at most 512 characters.");
+	}
+	return operationKey;
 }
 
 export class SubmissionsEntity {
@@ -303,7 +312,9 @@ export class ArtifactsEntity {
     }
 }
 
-/** Standalone reports submitted through web/API abuse providers. */
+type ExternalProviderReportTerminalStatus = Extract<ProviderReportStatus, "sent" | "failed" | "unknown_external_state">;
+
+/** Direct provider reports, including durable no-replay submission boundaries. */
 export class ProviderReportsEntity {
     static async listForSubmission(submissionId: bigint) {
         const db = await getDb();
@@ -318,6 +329,7 @@ export class ProviderReportsEntity {
         submissionId: bigint;
         analysisRunId?: bigint;
         channel?: string;
+		operationKey?: string;
         to: string;
         subject?: string;
         body: string;
@@ -325,11 +337,15 @@ export class ProviderReportsEntity {
         status?: ProviderReportStatus;
         sentAt?: Date;
         providerMessageId?: string;
+		providerSubmissionUrl?: string;
+		error?: string;
         data?: unknown;
         legacy?: boolean;
     }) {
         const db = await getDb();
         const id = generateId();
+		const status = params.status ?? "sent";
+		const timestamp = nowDate();
         const [row] = await db
             .insert(providerReports)
             .values([
@@ -338,15 +354,18 @@ export class ProviderReportsEntity {
                     submissionId: params.submissionId,
                     analysisRunId: params.analysisRunId,
                     channel: params.channel ?? "provider",
+					operationKey: params.operationKey,
                     to: params.to,
                     subject: params.subject,
                     body: params.body,
-                    status: params.status ?? "sent",
-                    sentAt: params.sentAt ?? (params.status === "failed" ? undefined : nowDate()),
+                    status,
+                    sentAt: params.sentAt ?? (status === "sent" ? timestamp : undefined),
                     attachmentsArtifactIds: params.attachmentsArtifactIds?.map((value) => value.toString()),
-                    createdAt: nowDate(),
-                    updatedAt: nowDate(),
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
                     providerMessageId: params.providerMessageId,
+					providerSubmissionUrl: params.providerSubmissionUrl,
+					error: params.error,
                     data: params.data,
                     legacy: params.legacy ?? false,
                 },
@@ -354,6 +373,152 @@ export class ProviderReportsEntity {
             .returning({ id: providerReports.id });
         return row!.id;
     }
+
+	/**
+	 * Atomically create and mark an external provider operation immediately
+	 * before its irreversible network call. A repeated invocation can observe
+	 * a terminal or ambiguous row, but can never acquire a second send right.
+	 */
+	static async beginExternalSubmission(params: {
+		submissionId: bigint;
+		analysisRunId?: bigint;
+		operationKey: string;
+		channel: string;
+		to: string;
+		subject?: string;
+		body: string;
+		attachmentsArtifactIds?: Array<bigint | string>;
+		data?: unknown;
+	}): Promise<{ report: ProviderReport; started: boolean }> {
+		const operationKey = normalizeProviderOperationKey(params.operationKey);
+
+		const db = await getDb();
+		return db.transaction(
+			(tx) => {
+				let report = tx.select().from(providerReports).where(eq(providerReports.operationKey, operationKey)).get();
+				if (report && (report.submissionId !== params.submissionId || report.channel !== params.channel)) {
+					throw new Error("Provider operation key belongs to a different report operation.");
+				}
+
+				if (!report) {
+					const timestamp = nowDate();
+					const id = generateId();
+					tx.insert(providerReports)
+						.values({
+							id,
+							submissionId: params.submissionId,
+							analysisRunId: params.analysisRunId,
+							channel: params.channel,
+							operationKey,
+							to: params.to,
+							subject: params.subject,
+							body: params.body,
+							status: "pending",
+							attachmentsArtifactIds: params.attachmentsArtifactIds?.map((value) => value.toString()),
+							data: params.data,
+							legacy: false,
+							createdAt: timestamp,
+							updatedAt: timestamp,
+						})
+						.run();
+					report = tx.select().from(providerReports).where(eq(providerReports.id, id)).get();
+				}
+
+				if (!report) throw new Error("Failed to persist the provider submission boundary.");
+				if (report.status !== "pending") return { report, started: false };
+
+				const [started] = tx
+					.update(providerReports)
+					.set({ status: "submission_started", updatedAt: nowDate() })
+					.where(and(eq(providerReports.id, report.id), eq(providerReports.status, "pending")))
+					.returning()
+					.all();
+				return started ? { report: started, started: true } : { report, started: false };
+			},
+			{ behavior: "immediate" },
+		);
+	}
+
+	/** Record a local preflight failure without crossing an external boundary. */
+	static async recordExternalSubmissionFailure(params: {
+		submissionId: bigint;
+		analysisRunId?: bigint;
+		operationKey: string;
+		channel: string;
+		to: string;
+		subject?: string;
+		body: string;
+		attachmentsArtifactIds?: Array<bigint | string>;
+		data?: unknown;
+		error: string;
+	}): Promise<ProviderReport> {
+		const operationKey = normalizeProviderOperationKey(params.operationKey);
+
+		const db = await getDb();
+		return db.transaction(
+			(tx) => {
+				const existing = tx.select().from(providerReports).where(eq(providerReports.operationKey, operationKey)).get();
+				if (existing) {
+					if (existing.submissionId !== params.submissionId || existing.channel !== params.channel) {
+						throw new Error("Provider operation key belongs to a different report operation.");
+					}
+					return existing;
+				}
+
+				const timestamp = nowDate();
+				const id = generateId();
+				tx.insert(providerReports)
+					.values({
+						id,
+						submissionId: params.submissionId,
+						analysisRunId: params.analysisRunId,
+						channel: params.channel,
+						operationKey,
+						to: params.to,
+						subject: params.subject,
+						body: params.body,
+						status: "failed",
+						attachmentsArtifactIds: params.attachmentsArtifactIds?.map((value) => value.toString()),
+						data: params.data,
+						error: params.error,
+						legacy: false,
+						createdAt: timestamp,
+						updatedAt: timestamp,
+					})
+					.run();
+				const report = tx.select().from(providerReports).where(eq(providerReports.id, id)).get();
+				if (!report) throw new Error("Failed to persist provider preflight failure.");
+				return report;
+			},
+			{ behavior: "immediate" },
+		);
+	}
+
+	/** Settle a call only while it still owns the durable pre-call marker. */
+	static async settleExternalSubmission(params: {
+		reportId: bigint;
+		status: ExternalProviderReportTerminalStatus;
+		providerMessageId?: string;
+		providerSubmissionUrl?: string;
+		error?: string;
+	}): Promise<boolean> {
+		const db = await getDb();
+		const timestamp = nowDate();
+		const [settled] = await db
+			.update(providerReports)
+			.set({
+				status: params.status,
+				sentAt: params.status === "sent" ? timestamp : null,
+				providerMessageId: params.providerMessageId ?? null,
+				providerSubmissionUrl: params.providerSubmissionUrl ?? null,
+				error: params.error ?? null,
+				updatedAt: timestamp,
+			})
+			.where(and(eq(providerReports.id, params.reportId), eq(providerReports.status, "submission_started")))
+			.returning({ id: providerReports.id })
+			.all();
+		return Boolean(settled);
+	}
 }
 
 /** Per-SMTP-report correspondence thread records. */

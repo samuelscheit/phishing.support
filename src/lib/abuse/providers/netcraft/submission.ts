@@ -5,9 +5,15 @@ import type {
 	ProviderSubmissionSuccess,
 } from "../submission_contracts";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
-import { recordValue, routeContext } from "../../worker/shared";
+import { routeContext } from "../../worker/shared";
+import {
+	NetcraftSubmissionRejectedError,
+	netcraftSubmissionUrl,
+	type NetcraftFetch,
+	parseNetcraftSubmissionResponse as parseNetcraftApiSubmissionResponse,
+} from "../../../netcraft/api";
+import { netcraftReporterEmail } from "../../../netcraft/identity";
 import { NETCRAFT_PROVIDER } from "./definition";
-import { netcraftReporterEmail } from "./identity";
 import {
 	buildNetcraftReportUrlsBody,
 	buildNetcraftSubmissionPayload,
@@ -15,40 +21,11 @@ import {
 	type NetcraftSubmissionPayload,
 } from "./payload";
 
-const NETCRAFT_SUBMISSION_ID = /^[a-f0-9]{32}$/i;
-
-type NetcraftReportedResponse = {
-	uuid: string;
-	message?: string;
-};
-
-type NetcraftFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
 export type NetcraftSubmissionDependencies = {
 	fetch?: NetcraftFetch;
 };
 
-function parsedReportedResponse(value: unknown): NetcraftReportedResponse | undefined {
-	const record = recordValue(value);
-	if (!record || typeof record.uuid !== "string" || !NETCRAFT_SUBMISSION_ID.test(record.uuid)
-		|| (record.message !== undefined && typeof record.message !== "string")) {
-		return undefined;
-	}
-	return {
-		uuid: record.uuid.toLowerCase(),
-		...(typeof record.message === "string" && record.message.trim() ? { message: record.message.trim() } : {}),
-	};
-}
-
-function responseDetail(body: string): string {
-	return body.replace(/\s+/g, " ").trim().slice(0, 1_000) || "No further detail was returned.";
-}
-
-/** Construct the exact Netcraft v3 status endpoint from a confirmed UUID. */
-export function netcraftSubmissionUrl(uuid: string): string {
-	if (!NETCRAFT_SUBMISSION_ID.test(uuid)) throw new Error("Netcraft returned an invalid submission UUID.");
-	return new URL(uuid.toLowerCase(), NETCRAFT_PROVIDER.submissionUrlPrefix).toString();
-}
+export { netcraftSubmissionUrl };
 
 /**
  * Interpret the documented API response. A malformed success response remains
@@ -59,31 +36,20 @@ export async function parseNetcraftSubmissionResponse(
 	response: Pick<Response, "ok" | "status" | "text">,
 	payload: NetcraftSubmissionPayload,
 ): Promise<ProviderSubmissionSuccess> {
-	const body = await response.text();
-	if (!response.ok) {
-		if (response.status >= 400 && response.status < 500) {
-			throw new ProviderSubmissionRejectedError(
-				"Netcraft report was rejected with HTTP " + response.status + ": " + responseDetail(body),
-			);
-		}
-		throw new Error("Netcraft report submission failed with HTTP " + response.status + ": " + responseDetail(body));
-	}
-
-	let parsed: unknown;
 	try {
-		parsed = JSON.parse(body);
-	} catch {
-		throw new Error("Netcraft report returned a successful HTTP status without a valid JSON confirmation.");
+		const accepted = await parseNetcraftApiSubmissionResponse(response);
+		return {
+			confirmationId: accepted.uuid,
+			confirmationText: accepted.message ?? "Netcraft accepted the URL report.",
+			finalUrl: accepted.submissionUrl,
+			submittedTargets: [payload.target.normalizedTarget],
+		};
+	} catch (error) {
+		if (error instanceof NetcraftSubmissionRejectedError) {
+			throw new ProviderSubmissionRejectedError(error.message);
+		}
+		throw error;
 	}
-	const accepted = parsedReportedResponse(parsed);
-	if (!accepted) throw new Error("Netcraft report did not include a valid submission UUID.");
-
-	return {
-		confirmationId: accepted.uuid,
-		confirmationText: accepted.message ?? "Netcraft accepted the URL report.",
-		finalUrl: netcraftSubmissionUrl(accepted.uuid),
-		submittedTargets: [payload.target.normalizedTarget],
-	};
 }
 
 /** Validate target evidence and service identity before the irreversible request. */

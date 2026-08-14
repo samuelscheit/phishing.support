@@ -167,8 +167,8 @@ export type MailData = Awaited<ReturnType<typeof parseMail>>;
 
 export async function analyzeMail(emlContent: string, stream_id: bigint) {
 	try {
-		const privateMail = await parseMail(emlContent);
-		const mail = cleanPrivateInformation(privateMail);
+		const originalMail = await parseMail(emlContent);
+		const mail = cleanPrivateInformation(originalMail);
 
 		await emitStep(stream_id, "start", 0);
 		await SubmissionsEntity.update(stream_id, { status: "running", data: { kind: "email", email: mail } });
@@ -184,13 +184,13 @@ export async function analyzeMail(emlContent: string, stream_id: bigint) {
 			});
 		} catch (error) {}
 
-		// Save EML artifact
-		await ArtifactsEntity.saveBuffer({
+		// Keep the source artifact unmodified for authorized downstream reporting.
+		const originalEmlArtifactId = await ArtifactsEntity.saveBuffer({
 			submissionId: stream_id,
 			name: "mail.eml",
 			kind: "eml",
 			mimeType: "message/rfc822",
-			buffer: Buffer.from(mail.eml, "utf-8"),
+			buffer: Buffer.from(originalMail.eml, "utf-8"),
 		});
 
 		await emitStep(stream_id, "analysis_run", 30);
@@ -276,7 +276,7 @@ ${buildMailEvidence(mail, analysis.output_text)}`,
 		const from = process.env.SMTP_FROM || `${abuseReplyName} <${abuseReplyMail}>`;
 		const date = mail.date ? new Date(mail.date).toLocaleString("en-US", { timeZone: "UTC" }) : undefined;
 		const submissionSubject = `"${mail.from_object?.name || mail.from_object?.address}" ${date ? "from " + date : ""}`;
-		let to = privateMail.to_object?.address;
+		let to = originalMail.to_object?.address;
 
 		if (to?.endsWith("@phishing.support")) {
 			to = undefined;
@@ -286,8 +286,9 @@ ${buildMailEvidence(mail, analysis.output_text)}`,
 			await emitStep(stream_id, "reporting", 90);
 			await reportEmailPhishing({
 				submissionId: stream_id,
-				mail,
+				mail: originalMail,
 				analysisText: analysis.output_text,
+				originalEmlArtifactId,
 			});
 
 			const hasSuccessfulReport = await ReportingSummaryEntity.hasSuccessfulReport(stream_id);

@@ -13,7 +13,7 @@ export type SubmissionStatus = (typeof submissionStatus)[number];
 export const analysisRunStatus = ["running", "completed", "failed"] as const;
 export type AnalysisRunStatus = (typeof analysisRunStatus)[number];
 
-export const providerReportStatus = ["sent", "failed"] as const;
+export const providerReportStatus = ["pending", "submission_started", "sent", "failed", "unknown_external_state"] as const;
 export type ProviderReportStatus = (typeof providerReportStatus)[number];
 
 export const reportThreadStatus = ["pending", "sent", "replied", "delivery_failed", "failed", "closed"] as const;
@@ -134,7 +134,7 @@ export const artifacts = sqliteTable(
 
 export type Artifact = InferSelectModel<typeof artifacts>;
 
-/** Non-email provider submissions and imported legacy report records. */
+/** Direct provider submissions and imported legacy report records. */
 export const providerReports = sqliteTable(
 	"provider_reports",
 	{
@@ -146,12 +146,16 @@ export const providerReports = sqliteTable(
 			onDelete: "set null",
 		}),
 		channel: text("channel").notNull().default("provider"),
+		/** Globally unique operation identity for a provider call that must never replay. */
+		operationKey: text("operation_key"),
 		to: text("to").notNull(),
 		subject: text("subject"),
 		body: text("body").notNull(),
 		status: text("status", { enum: providerReportStatus }).notNull().default("sent"),
 		sentAt: timestamp("sent_at"),
 		providerMessageId: text("provider_message_id"),
+		providerSubmissionUrl: text("provider_submission_url"),
+		error: text("error"),
 		/** References to rows in the artifacts table. */
 		attachmentsArtifactIds: text("attachments_artifact_ids", { mode: "json" }).$type<string[]>(),
 		data: text("data", { mode: "json" }),
@@ -168,6 +172,7 @@ export const providerReports = sqliteTable(
 		index("provider_reports_submission_created_idx").on(table.submissionId, table.createdAt),
 		index("provider_reports_to_created_idx").on(table.to, table.createdAt),
 		index("provider_reports_status_created_idx").on(table.status, table.createdAt),
+		uniqueIndex("provider_reports_operation_key_unique").on(table.operationKey),
 	]
 );
 
