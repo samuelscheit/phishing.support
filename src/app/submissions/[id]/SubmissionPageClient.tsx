@@ -116,6 +116,16 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 		const kind = a.kind?.toLowerCase();
 		return name?.endsWith(".eml") || name === "mail.eml" || mime === "message/rfc822" || kind === "eml";
 	});
+	const canRetryAnalysis =
+		Boolean(
+			isFailed &&
+			submission &&
+			(submission.kind === "website"
+				? !submission.analysisRuns.length || submission.analysisRuns.at(-1)?.status === "failed"
+				: submission.analysisRuns.every((run) => run.status === "failed")) &&
+			reportCount === 0 &&
+			(submission.data.kind === "website" ? Boolean(submission.data.website?.url) : Boolean(emailEml?.id)),
+		);
 	const artifacts = submission?.artifacts.filter((x) => x !== screenshot) || [];
 	const websiteArchiveDate = formatArtifactDate(websiteMhtml?.archivedAt ?? websiteMhtml?.createdAt);
 
@@ -299,16 +309,20 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 							</div>
 						) : null}
 
-						{isFailed && submission.info ? (
+						{isFailed ? (
 							<div className="rounded-md border bg-muted/30 p-3">
 								<div className="text-xs font-semibold text-muted-foreground">Failure reason</div>
-								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info}</div>
-								{submission.kind === "email" && emailEml?.id && submission.analysisRuns.every((run) => run.status === "failed") && reportCount === 0 ? (
+								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info || "The analysis did not complete."}</div>
+								{canRetryAnalysis ? (
 									<div className="mt-3 flex flex-wrap items-center gap-3">
 										<Button type="button" variant="outline" size="sm" disabled={retrying} onClick={retryAnalysis}>
 											{retrying ? "Retrying analysis…" : "Retry analysis"}
 										</Button>
-										<span className="text-xs text-muted-foreground">Reuses the original email; it will not create a duplicate report.</span>
+										<span className="text-xs text-muted-foreground">
+											{submission.kind === "website"
+												? "Reuses the captured website archive when available; it will not create a duplicate report."
+												: "Reuses the original email; it will not create a duplicate report."}
+										</span>
 									</div>
 								) : null}
 								{retryError ? <div className="mt-2 text-sm text-destructive">{retryError}</div> : null}

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { SubmissionRetryError, retryFailedEmailAnalysis } from "@/lib/submissions/email";
+import { retryFailedWebsiteAnalysis } from "@/lib/submissions/website";
+import { SubmissionsEntity } from "@/lib/db/entities";
 
 export const runtime = "nodejs";
 
@@ -14,7 +16,12 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 			return NextResponse.json({ error: "Invalid submission id" }, { status: 400 });
 		}
 
-		await retryFailedEmailAnalysis(submissionId);
+		const submission = await SubmissionsEntity.get(submissionId);
+		if (submission?.kind === "website") {
+			await retryFailedWebsiteAnalysis(submissionId);
+		} else {
+			await retryFailedEmailAnalysis(submissionId);
+		}
 		return NextResponse.json({ ok: true, status: "queued" });
 	} catch (error) {
 		if (error instanceof SubmissionRetryError) return NextResponse.json({ error: error.message }, { status: 409 });

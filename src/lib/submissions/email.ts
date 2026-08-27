@@ -1,20 +1,17 @@
 import { createHash } from "node:crypto";
 
-import { AnalysisRunsEntity, ArtifactsEntity, ProviderReportsEntity, ReportThreadsEntity, SubmissionsEntity } from "@/lib/db/entities";
+import { ArtifactsEntity, SubmissionsEntity } from "@/lib/db/entities";
 import { generateId } from "@/lib/db/ids";
 import { analyzeMail } from "@/lib/mail_ai";
 import type { ReporterMetadata } from "@/lib/request_metadata";
 
+import { getRetryableSubmission, SubmissionRetryError } from "./retry";
+
+export { SubmissionRetryError } from "./retry";
+
 export type EmailSubmissionOptions = ReporterMetadata & {
 	source?: string;
 };
-
-export class SubmissionRetryError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "SubmissionRetryError";
-	}
-}
 
 /** One exact source message is idempotent; unrelated mail from the same sender is not. */
 export function emailSubmissionDedupeKey(emlContent: string): string {
@@ -43,24 +40,13 @@ export async function createEmailSubmissionFromEml(emlContent: string, options: 
 }
 
 /**
- * Re-run only an analysis that failed before classification/reporting. The
+ * Re-run a failed analysis that has not crossed the reporting boundary. The
  * original MIME artifact and submission identity are retained; retrying never
  * creates a second submission or duplicates an already-created abuse report.
  */
 export async function retryFailedEmailAnalysis(submissionId: bigint): Promise<void> {
-	const submission = await SubmissionsEntity.get(submissionId);
-	if (!submission || submission.kind !== "email") throw new SubmissionRetryError("Only email submissions can be retried.");
-	if (submission.status !== "failed") throw new SubmissionRetryError("Only failed submissions can be retried.");
-
-	const [runs, reportThreads, providerReports, artifactList] = await Promise.all([
-		AnalysisRunsEntity.listForSubmission(submissionId),
-		ReportThreadsEntity.listForSubmission(submissionId),
-		ProviderReportsEntity.listForSubmission(submissionId),
-		ArtifactsEntity.listForSubmission(submissionId),
-	]);
-	if (runs.some((run) => run.status === "completed") || reportThreads.length > 0 || providerReports.length > 0) {
-		throw new SubmissionRetryError("This submission already completed analysis or reporting and cannot be retried.");
-	}
+	await getRetryableSubmission(submissionId, "email");
+	const artifactList = await ArtifactsEntity.listForSubmission(submissionId);
 
 	const original = artifactList.find(
 		(artifact) => artifact.kind === "eml" || artifact.mimeType?.toLowerCase() === "message/rfc822" || artifact.name?.toLowerCase() === "mail.eml"

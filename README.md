@@ -51,10 +51,11 @@ stored in the analysis-run diagnostics.
 Set `OPENAI_ANALYSIS_MAX_ATTEMPTS` to tune the complete-attempt limit. The deployed
 Open-WebUI adapter routes the `gpt-5.5` alias to its `codex_ws` provider; make sure
 the alias is enabled and that at least one account has usable quota before retrying.
-Failed email analyses with no completed run or report can also be retried from the
-submission page. That action reuses the retained `.eml` artifact and atomically
-claims the submission, so concurrent clicks cannot create duplicate analysis/report
-work.
+Failed email and website analyses that have not crossed the reporting boundary can
+also be retried from the submission page. Email retries reuse the retained `.eml` artifact; website
+retries reuse a retained MHTML capture when one exists and recapture the URL only
+when the original attempt did not produce an archive. Both actions atomically claim
+the submission, so concurrent clicks cannot create duplicate analysis/report work.
 
 ## Supplemental Netcraft reporting
 

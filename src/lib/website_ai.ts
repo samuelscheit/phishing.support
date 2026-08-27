@@ -76,10 +76,12 @@ Important: classify the captured archive/screenshot evidence, not the result of 
 
 export async function analyzeWebsite(options: {
 	mhtmlSnapshot?: Buffer;
+	/** Reuse the existing website archive artifacts instead of writing duplicates. */
+	reuseEvidenceArtifacts?: boolean;
 	url: string;
 	submissionId: bigint;
 } & ReporterMetadata): Promise<bigint> {
-	const { url, submissionId, reporterIp, reporterCountry, reporterHeaders } = options!;
+	const { url, submissionId, reporterIp, reporterCountry, reporterHeaders, reuseEvidenceArtifacts = false } = options!;
 	try {
 		await emitStep(submissionId, "whois_lookup", 5);
 		const whois = await getInfo(url);
@@ -99,7 +101,9 @@ export async function analyzeWebsite(options: {
 		const archive = await retry(() => archiveWebsite({ url, mhtmlSnapshot: options.mhtmlSnapshot }), 2, 3000);
 		await emitStep(submissionId, "save_artifacts", 40);
 
-		await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive });
+		if (!reuseEvidenceArtifacts) {
+			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive });
+		}
 
 		await emitStep(submissionId, "analysis_run", 45);
 
