@@ -18,7 +18,9 @@ export default async function AbuseReportStatusPage({ params }: { params: Promis
 					<p className="mt-2 text-sm text-muted-foreground">This page is protected by your private tracking token.</p>
 				</div>
 			</header>
-			<main className="container mx-auto max-w-5xl px-4 py-10"><AbuseStatusClient trackingToken={trackingToken} /></main>
+			<main className="container mx-auto max-w-5xl px-4 py-10">
+				<AbuseStatusClient trackingToken={trackingToken} />
+			</main>
 			<SiteFooter />
 		</div>
 	);
