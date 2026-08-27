@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { generateId } from "../../db/ids";
@@ -143,6 +143,17 @@ export async function getOutboundMailForRun(runId: bigint) {
 		.orderBy(desc(abuseMailMessages.createdAt))
 		.limit(1)
 		.get();
+}
+
+/** List all correspondence for one standalone abuse report in timeline order. */
+export async function listMailForReport(reportId: bigint) {
+	const db = await getDb();
+	return db
+		.select()
+		.from(abuseMailMessages)
+		.where(eq(abuseMailMessages.reportId, reportId))
+		.orderBy(asc(abuseMailMessages.occurredAt), asc(abuseMailMessages.createdAt))
+		.all();
 }
 
 export async function findCorrelatedInboundRoute(params: { recipients: string[]; inReplyTo?: string; references?: string[] }): Promise<{

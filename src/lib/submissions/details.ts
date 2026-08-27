@@ -7,6 +7,9 @@ import {
 	SubmissionsEntity,
 } from "@/lib/db/entities";
 import type { AnalysisRun, Artifact, ProviderReport, ReportMessage, ReportThread, Submission } from "@/lib/db/schema";
+import { listStandaloneAbuseMailForSubmission } from "./abuse_details";
+export type { SubmissionAbuseMailReport } from "./abuse_details";
+import type { SubmissionAbuseMailReport } from "./abuse_details";
 
 export type SubmissionArtifact = Omit<Artifact, "blob" | "submissionId">;
 
@@ -61,6 +64,8 @@ export type SubmissionDetail = Submission & {
 	analysisRuns: AnalysisRun[];
 	reportThreads: SubmissionReportThread[];
 	providerReports: SubmissionProviderReport[];
+	/** Outbound emails persisted by the standalone abuse-reporting worker. */
+	abuseMailReports: SubmissionAbuseMailReport[];
 	artifacts: SubmissionArtifact[];
 };
 
@@ -75,10 +80,11 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 	const submission = await SubmissionsEntity.get(submissionId);
 	if (!submission) return undefined;
 
-	const [analysisRuns, reportThreads, providerReports, artifacts] = await Promise.all([
+	const [analysisRuns, reportThreads, providerReports, abuseMailReports, artifacts] = await Promise.all([
 		AnalysisRunsEntity.listForSubmission(submissionId),
 		ReportThreadsEntity.listForSubmission(submissionId),
 		ProviderReportsEntity.listForSubmission(submissionId),
+		listStandaloneAbuseMailForSubmission(submissionId),
 		ArtifactsEntity.listForSubmission(submissionId),
 	]);
 	const messages = await ReportMessagesEntity.listForThreads(reportThreads.map((thread) => thread.id));
@@ -134,6 +140,7 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 			legacy: report.legacy,
 			createdAt: report.createdAt,
 		})),
+		abuseMailReports,
 		artifacts,
 	};
 }

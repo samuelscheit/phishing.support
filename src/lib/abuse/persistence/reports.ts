@@ -165,6 +165,17 @@ export async function getReportByTrackingTokenHash(trackingTokenHash: string): P
 	return db.select().from(abuseReports).where(eq(abuseReports.trackingTokenHash, trackingTokenHash)).get();
 }
 
+/**
+ * Find a report created by an internal handoff. The idempotency key is the
+ * durable cross-aggregate link for those reports; unlike the private tracking
+ * token it is safe for server-side read models to use and does not need to be
+ * exposed to the browser.
+ */
+export async function getReportByIdempotencyKey(idempotencyKey: string): Promise<AbuseReport | undefined> {
+	const db = await getDb();
+	return db.select().from(abuseReports).where(eq(abuseReports.idempotencyKey, idempotencyKey)).get();
+}
+
 export async function getReportByTrackingToken(token: string): Promise<AbuseReport | undefined> {
 	return getReportByTrackingTokenHash(hashTrackingToken(token));
 }

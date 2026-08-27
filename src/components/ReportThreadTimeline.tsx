@@ -6,7 +6,7 @@ import { Check, Copy, Download, Mail, MessageSquareReply, OctagonAlert, Send, Un
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { SubmissionArtifact, SubmissionProviderReport, SubmissionReportMessage, SubmissionReportThread } from "@/lib/submissions/details";
+import type { SubmissionAbuseMailReport, SubmissionArtifact, SubmissionProviderReport, SubmissionReportMessage, SubmissionReportThread } from "@/lib/submissions/details";
 import { cn } from "@/web_lib/util";
 
 type DateValue = Date | string | number | null | undefined;
@@ -157,14 +157,44 @@ function MessageTimelineItem({ message, artifacts }: { message: SubmissionReport
 	);
 }
 
-export function ReportThreadTimeline({ threads, providerReports, artifacts }: {
+function StandaloneAbuseMailCard({ report }: { report: SubmissionAbuseMailReport }) {
+	return (
+		<Card className="overflow-hidden">
+			<CardContent className="space-y-3 p-4">
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<CardTitle className="flex items-center gap-2 text-base">
+						<Mail className="h-4 w-4 shrink-0" />
+						{report.provider}
+					</CardTitle>
+					<Badge variant={report.status === "failed" ? "destructive" : report.status === "pending" ? "outline" : "secondary"}>
+						{report.status.replaceAll("_", " ")}
+					</Badge>
+				</div>
+				<div className="text-xs text-muted-foreground">
+					Standalone abuse email • {report.routeType.replaceAll("_", " ")} • target: {report.target} • {formatDate(report.occurredAt)}
+				</div>
+				<div className="grid gap-2 text-xs sm:grid-cols-2">
+					<div><span className="text-muted-foreground">From:</span> <span className="break-all">{report.fromAddress || "—"}</span></div>
+					<div><span className="text-muted-foreground">To:</span> <span className="break-all">{formatAddresses(report.toAddresses)}</span></div>
+					{report.messageId ? <div className="sm:col-span-2"><span className="text-muted-foreground">Message-ID:</span> <span className="break-all font-mono">{report.messageId}</span></div> : null}
+				</div>
+				{report.subject ? <div className="text-sm"><span className="text-muted-foreground">Subject:</span> {report.subject}</div> : null}
+				{report.textBody ? <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border bg-background p-3 font-sans text-sm">{report.textBody}</pre> : <div className="text-sm text-muted-foreground">No body recorded.</div>}
+				{report.replyAddress ? <div className="space-y-1 text-xs"><div className="text-muted-foreground">Generated Reply-To</div><CopyReplyAddress replyAddress={report.replyAddress} /></div> : null}
+			</CardContent>
+		</Card>
+	);
+}
+
+export function ReportThreadTimeline({ threads, providerReports, abuseMailReports, artifacts }: {
 	threads: ReportThreadWithMessages[];
 	providerReports: SubmissionProviderReport[];
+	abuseMailReports: SubmissionAbuseMailReport[];
 	artifacts: SubmissionArtifact[];
 }) {
 	const artifactMap = useMemo(() => new Map(artifacts.map((artifact) => [String(artifact.id), artifact])), [artifacts]);
 
-	if (threads.length === 0 && providerReports.length === 0) {
+	if (threads.length === 0 && providerReports.length === 0 && abuseMailReports.length === 0) {
 		return <div className="py-10 text-center text-muted-foreground">No reports yet.</div>;
 	}
 
@@ -214,6 +244,8 @@ export function ReportThreadTimeline({ threads, providerReports, artifacts }: {
 					</CardContent>
 				</Card>
 			))}
+
+			{abuseMailReports.map((report) => <StandaloneAbuseMailCard key={`abuse-mail-${String(report.id)}`} report={report} />)}
 		</div>
 	);
 }
