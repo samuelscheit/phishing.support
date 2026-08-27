@@ -207,6 +207,7 @@ export async function analyzeMail(
 
 		const { result: analysis } = await runStreamedAnalysisRun({
 			submissionId: stream_id,
+			analysisKind: "analysis",
 			options: {
 				model: defaultResponseModel,
 				input: [
@@ -246,6 +247,7 @@ ${toon.encode({ ...mail, eml: undefined })}`,
 
 		const { result: structuredResponse } = await runStreamedAnalysisRun({
 			submissionId: stream_id,
+			analysisKind: "classification",
 			options: {
 				stream: true,
 				model: defaultResponseModel,

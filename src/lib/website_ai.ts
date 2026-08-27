@@ -109,6 +109,7 @@ export async function analyzeWebsite(options: {
 
 		const { result: analysis } = await runStreamedAnalysisRun({
 			submissionId,
+			analysisKind: "analysis",
 			options: {
 				model: defaultResponseModel,
 				input: [
@@ -151,6 +152,7 @@ Use web search if necessary to gather more information about the content/brand. 
 		await emitStep(submissionId, "structured_response", 75);
 		const { result: structuredResponse } = await runStreamedAnalysisRun({
 			submissionId,
+			analysisKind: "classification",
 			options: {
 				model: defaultResponseModel,
 				input: buildWebsiteClassificationInput({ url, whois, archive, analysisText: analysis.output_text }),

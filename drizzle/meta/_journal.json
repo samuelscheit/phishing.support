@@ -57,6 +57,13 @@
       "when": 1786742163238,
       "tag": "0007_netcraft_mail_reporting",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1787867599056,
+      "tag": "0008_light_ikaris",
+      "breakpoints": true
     }
   ]
 }

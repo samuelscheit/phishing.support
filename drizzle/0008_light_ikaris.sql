@@ -1,0 +1,1 @@
+ALTER TABLE `analysis_runs` ADD `analysis_kind` text DEFAULT 'unknown' NOT NULL;

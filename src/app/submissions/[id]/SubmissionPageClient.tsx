@@ -19,6 +19,7 @@ import Link from "next/link";
 import type { Artifact } from "@/lib/db/schema";
 import type { SubmissionDetail as ApiSubmissionDetail } from "@/lib/submissions/details";
 import { cn } from "../../../web_lib/util";
+import { selectDisplayAnalysisRuns } from "@/lib/analysis_run_view";
 
 type SubmissionDetail = ApiSubmissionDetail;
 
@@ -59,7 +60,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const isReported = statusKey === "reported";
 
 	const isRunning = ["new", "queued", "running"].includes(statusKey);
-	const runsToShow = submission?.analysisRuns.slice(-1) || [];
+	const runsToShow = submission ? selectDisplayAnalysisRuns(submission.analysisRuns) : [];
 	const reportThreads = submission?.reportThreads ?? [];
 	const providerReports = submission?.providerReports ?? [];
 	const abuseMailReports = submission?.abuseMailReports ?? [];

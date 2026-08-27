@@ -19,6 +19,7 @@ import {
     type SubmissionData,
     type SubmissionKind,
     type SubmissionStatus,
+    type AnalysisRunKind,
 } from "./schema";
 import { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
 import { generateId } from "./ids";
@@ -164,7 +165,7 @@ export class SubmissionsEntity {
 }
 
 export class AnalysisRunsEntity {
-    static async create(submissionId: bigint, input?: Array<ResponseInputItem>) {
+    static async create(submissionId: bigint, input?: Array<ResponseInputItem>, analysisKind: AnalysisRunKind = "unknown") {
         const db = await getDb();
         const id = generateId();
         await db.insert(analysisRuns).values([
@@ -172,6 +173,7 @@ export class AnalysisRunsEntity {
                 id,
                 submissionId,
                 status: "running" as const,
+                analysisKind,
                 input: input,
                 createdAt: nowDate(),
             },

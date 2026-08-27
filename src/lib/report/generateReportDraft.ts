@@ -17,6 +17,7 @@ export async function generateReportDraft(params: {
 }): Promise<ReportDraft> {
 	const { runId, result } = await runStreamedAnalysisRun({
 		submissionId: params.submissionId,
+		analysisKind: "report_draft",
 		options: {
 			model: defaultResponseModel,
 			input: [

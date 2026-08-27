@@ -42,11 +42,13 @@ describe("streamed analysis retry boundary", () => {
 		try {
 			const result = await runStreamedAnalysisRun({
 				submissionId,
+				analysisKind: "analysis",
 				options: { stream: true, model: "gpt-5.5", input: "retry this" },
 			});
 			expect(calls).toBe(2);
 			expect(result.result.output_text).toBe("analysis recovered");
-			expect((await AnalysisRunsEntity.listForSubmission(submissionId))[0]).toMatchObject({ status: "completed", tokensUsed: 11n });
+			const persistedRun = (await AnalysisRunsEntity.listForSubmission(submissionId))[0];
+			expect(persistedRun).toMatchObject({ status: "completed", tokensUsed: 11n, analysisKind: "analysis" });
 		} finally {
 			(model.responses as any).create = originalCreate;
 		}

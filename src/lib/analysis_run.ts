@@ -3,6 +3,7 @@ import type { ResponseCreateParamsStreaming, ResponseInputItem } from "openai/re
 import { analysisRetryDelayMs, describeAnalysisError, isRetryableAnalysisError } from "./analysis_retry";
 import { AnalysisStreamAttemptError, logAndPersistStream } from "./artifact";
 import { AnalysisRunsEntity } from "./db/entities";
+import type { AnalysisRunKind } from "./db/schema";
 import { model, sleep } from "./utils";
 import { publishEvent } from "./event/event_transport";
 
@@ -17,7 +18,7 @@ function retryDiagnostic(error: unknown, attempts: number, emittedOutput: boolea
 	};
 }
 
-export async function runStreamedAnalysisRun(params: { submissionId: bigint; options: ResponseCreateParamsStreaming }) {
+export async function runStreamedAnalysisRun(params: { submissionId: bigint; options: ResponseCreateParamsStreaming; analysisKind?: AnalysisRunKind }) {
 	if (params.options.stream !== true) {
 		throw new Error("runStreamedAnalysisRun requires options.stream === true");
 	}
@@ -26,7 +27,7 @@ export async function runStreamedAnalysisRun(params: { submissionId: bigint; opt
 		? (params.options.input as Array<ResponseInputItem>)
 		: undefined;
 
-	const runId = await AnalysisRunsEntity.create(params.submissionId, inputForDb);
+	const runId = await AnalysisRunsEntity.create(params.submissionId, inputForDb, params.analysisKind);
 
 	const topics = [runId, params.submissionId];
 	const emit = (event: Record<string, unknown>) =>
