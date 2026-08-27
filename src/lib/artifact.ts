@@ -4,6 +4,16 @@ import { AnalysisRunsEntity } from "./db/entities";
 import { publishEvent } from "./event/event_transport";
 import { extractResponseOutputText, parseResponseJson } from "./openai_response";
 
+export class AnalysisStreamAttemptError extends Error {
+	readonly emittedOutput: boolean;
+
+	constructor(message: string, options: { cause: unknown; emittedOutput: boolean }) {
+		super(message, { cause: options.cause });
+		this.name = "AnalysisStreamAttemptError";
+		this.emittedOutput = options.emittedOutput;
+	}
+}
+
 /**
  * Consumes an OpenAI stream, logs it to stdout, publishes it to ZeroMQ,
  * and persists the final result to the analysis_runs table.
@@ -19,10 +29,13 @@ export async function logAndPersistStream(response: Stream<ResponseStreamEvent>,
 			})
 		);
 
+	let emittedOutput = false;
 	try {
-		await emitEvent({ type: "run.started" });
-
 		for await (const chunk of response) {
+			if (chunk.type === "response.output_text.delta" || chunk.type === "response.output_text.done") {
+				emittedOutput = true;
+			}
+
 			// Fan out everything to ZeroMQ
 			await emitEvent(chunk);
 
@@ -32,15 +45,20 @@ export async function logAndPersistStream(response: Stream<ResponseStreamEvent>,
 			} else if (chunk.type === "response.reasoning_summary_text.delta") {
 				process.stdout.write(chunk.delta);
 			} else if (chunk.type === "response.completed") {
+				// Do not retry a locally failed post-processing step after the
+				// provider has delivered generated output.
+				emittedOutput = true;
 				const output_text = extractResponseOutputText(chunk.response);
 				let output_parsed = null;
 
-				if (chunk.response.status === "completed") {
-					try {
-						output_parsed = parseResponseJson(chunk.response, output_text);
-					} catch (error) {
-						// For non-JSON expected outputs, this is fine
-					}
+				if (chunk.response.status !== "completed") {
+					throw new Error(`Model response completed with status ${chunk.response.status}.`);
+				}
+
+				try {
+					output_parsed = parseResponseJson(chunk.response, output_text);
+				} catch {
+					// For non-JSON expected outputs, this is fine.
 				}
 
 				const result = {
@@ -60,9 +78,10 @@ export async function logAndPersistStream(response: Stream<ResponseStreamEvent>,
 
 		throw new Error("Stream ended without completion");
 	} catch (error) {
-		console.error(`Error in logAndPersistStream`, error);
-		await AnalysisRunsEntity.fail(runId);
-		await emitEvent({ type: "run.failed", runId, error: String(error) });
-		throw error;
+		if (error instanceof AnalysisStreamAttemptError) throw error;
+		throw new AnalysisStreamAttemptError(`Analysis stream failed: ${error instanceof Error ? error.message : String(error)}`, {
+			cause: error,
+			emittedOutput,
+		});
 	}
 }

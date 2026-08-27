@@ -37,6 +37,25 @@ Incoming mail is assigned only by an exact generated recipient address, an exact
 
 Do not substitute plus-addressing if catch-all routing is unavailable. Use a dedicated reply subdomain backed by a catch-all-capable inbound provider while retaining the authenticated SMTP sender.
 
+## Analysis stream recovery
+
+Model analysis requests are streamed through `OPENAI_API_BASE_URL`. A provider can
+accept the HTTP request with `200 OK` and still send a `server_error`, timeout, or
+connection failure later in the SSE stream. The analyzer treats the complete stream
+(not just `responses.create`) as the retry boundary: transient failures are retried
+with bounded exponential backoff (up to three complete attempts by default), but a
+partial model answer is never replayed into the same run. Permanent, authentication,
+and schema failures remain failed immediately, with the last error and attempt count
+stored in the analysis-run diagnostics.
+
+Set `OPENAI_ANALYSIS_MAX_ATTEMPTS` to tune the complete-attempt limit. The deployed
+Open-WebUI adapter routes the `gpt-5.5` alias to its `codex_ws` provider; make sure
+the alias is enabled and that at least one account has usable quota before retrying.
+Failed email analyses with no completed run or report can also be retried from the
+submission page. That action reuses the retained `.eml` artifact and atomically
+claims the submission, so concurrent clicks cannot create duplicate analysis/report
+work.
+
 ## Supplemental Netcraft reporting
 
 Every standalone abuse report with one or more validated observed URLs creates an independent Netcraft Reporting API v3 submission route. This happens alongside normal resolver-selected provider routes and the existing eligible Google Safe Browsing supplemental route. Netcraft receives every observed URL associated with a target in one API submission; the returned submission UUID is retained with the report for auditability.

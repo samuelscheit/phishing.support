@@ -106,6 +106,17 @@ export class SubmissionsEntity {
         await db.update(submissions).set({ status, info, updatedAt: nowDate() }).where(eq(submissions.id, id));
     }
 
+    /** Atomically claim a submission for a state transition. */
+    static async transitionStatus(id: bigint, from: SubmissionStatus, to: SubmissionStatus, info?: string): Promise<boolean> {
+        const db = await getDb();
+        const rows = await db
+            .update(submissions)
+            .set({ status: to, info, updatedAt: nowDate() })
+            .where(and(eq(submissions.id, id), eq(submissions.status, from)))
+            .returning({ id: submissions.id });
+        return rows.length === 1;
+    }
+
     static async failAllRunning(params?: { info?: string }) {
         const db = await getDb();
         const info = params?.info ?? "Marked as failed (previous run did not complete).";
@@ -210,9 +221,9 @@ export class AnalysisRunsEntity {
         console.log("Analysis run completed:", result);
     }
 
-    static async fail(runId: bigint) {
+    static async fail(runId: bigint, data?: unknown) {
         const db = await getDb();
-        await db.update(analysisRuns).set({ status: "failed" }).where(eq(analysisRuns.id, runId));
+        await db.update(analysisRuns).set({ status: "failed", ...(data === undefined ? {} : { data }) }).where(eq(analysisRuns.id, runId));
     }
 }
 

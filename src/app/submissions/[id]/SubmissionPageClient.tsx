@@ -12,6 +12,7 @@ import { ReporterMeta } from "@/components/ReporterMeta";
 import { ReportThreadTimeline } from "@/components/ReportThreadTimeline";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExternalLink, Mail, Globe, ShieldAlert } from "lucide-react";
 import Link from "next/link";
@@ -50,18 +51,36 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const [websiteHtmlError, setWebsiteHtmlError] = useState<string | null>(null);
 	const [emailHtml, setEmailHtml] = useState<string | null>(null);
 	const [emailHtmlError, setEmailHtmlError] = useState<string | null>(null);
+	const [retrying, setRetrying] = useState(false);
+	const [retryError, setRetryError] = useState<string | null>(null);
 
 	const statusKey = (submission?.status || "").toLowerCase();
 	const isFailed = statusKey === "failed";
 	const isReported = statusKey === "reported";
 
 	const isRunning = ["new", "queued", "running"].includes(statusKey);
-	const runsToShow = submission?.analysisRuns.slice(0, 1) || [];
+	const runsToShow = submission?.analysisRuns.slice(-1) || [];
 	const reportThreads = submission?.reportThreads ?? [];
 	const providerReports = submission?.providerReports ?? [];
 	const reportCount = reportThreads.length + providerReports.length;
 
 	const defaultTab = "runs";
+
+	const retryAnalysis = async () => {
+		setRetrying(true);
+		setRetryError(null);
+		try {
+			const response = await fetch(`/api/submissions/${id}/retry`, { method: "POST" });
+			const body = await response.json().catch(() => ({}));
+			if (!response.ok) throw new Error(body.error || `Retry failed (${response.status})`);
+			const refreshed = await fetch(`/api/submissions/${id}`);
+			if (refreshed.ok) setSubmission(await refreshed.json());
+		} catch (error) {
+			setRetryError(error instanceof Error ? error.message : "Unable to queue retry.");
+		} finally {
+			setRetrying(false);
+		}
+	};
 
 	const safeHostname = (rawUrl?: string) => {
 		if (!rawUrl) return null;
@@ -284,6 +303,15 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 							<div className="rounded-md border bg-muted/30 p-3">
 								<div className="text-xs font-semibold text-muted-foreground">Failure reason</div>
 								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info}</div>
+								{submission.kind === "email" && emailEml?.id && submission.analysisRuns.every((run) => run.status === "failed") && reportCount === 0 ? (
+									<div className="mt-3 flex flex-wrap items-center gap-3">
+										<Button type="button" variant="outline" size="sm" disabled={retrying} onClick={retryAnalysis}>
+											{retrying ? "Retrying analysis…" : "Retry analysis"}
+										</Button>
+										<span className="text-xs text-muted-foreground">Reuses the original email; it will not create a duplicate report.</span>
+									</div>
+								) : null}
+								{retryError ? <div className="mt-2 text-sm text-destructive">{retryError}</div> : null}
 							</div>
 						) : null}
 

@@ -165,7 +165,11 @@ export async function parseMail(eml: string) {
 
 export type MailData = Awaited<ReturnType<typeof parseMail>>;
 
-export async function analyzeMail(emlContent: string, stream_id: bigint) {
+export async function analyzeMail(
+	emlContent: string,
+	stream_id: bigint,
+	options: { existingOriginalEmlArtifactId?: bigint; reuseEvidenceArtifacts?: boolean } = {}
+) {
 	try {
 		const originalMail = await parseMail(emlContent);
 		const mail = cleanPrivateInformation(originalMail);
@@ -173,25 +177,31 @@ export async function analyzeMail(emlContent: string, stream_id: bigint) {
 		await emitStep(stream_id, "start", 0);
 		await SubmissionsEntity.update(stream_id, { status: "running", data: { kind: "email", email: mail } });
 
-		try {
-			const image = await getMailImage(mail);
-			await ArtifactsEntity.saveBuffer({
-				submissionId: stream_id,
-				name: "mail.png",
-				kind: "screenshot",
-				mimeType: "image/png",
-				buffer: image,
-			});
-		} catch (error) {}
+		if (!options.reuseEvidenceArtifacts) {
+			try {
+				const image = await getMailImage(mail);
+				await ArtifactsEntity.saveBuffer({
+					submissionId: stream_id,
+					name: "mail.png",
+					kind: "screenshot",
+					mimeType: "image/png",
+					buffer: image,
+				});
+			} catch {
+				// Screenshot generation is supplementary evidence and must not block analysis.
+			}
+		}
 
 		// Keep the source artifact unmodified for authorized downstream reporting.
-		const originalEmlArtifactId = await ArtifactsEntity.saveBuffer({
-			submissionId: stream_id,
-			name: "mail.eml",
-			kind: "eml",
-			mimeType: "message/rfc822",
-			buffer: Buffer.from(originalMail.eml, "utf-8"),
-		});
+		const originalEmlArtifactId =
+			options.existingOriginalEmlArtifactId ??
+			(await ArtifactsEntity.saveBuffer({
+				submissionId: stream_id,
+				name: "mail.eml",
+				kind: "eml",
+				mimeType: "message/rfc822",
+				buffer: Buffer.from(originalMail.eml, "utf-8"),
+			}));
 
 		await emitStep(stream_id, "analysis_run", 30);
 

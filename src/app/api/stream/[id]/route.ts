@@ -18,9 +18,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 					const payload = typeof msgData === "string" ? msgData : JSON.stringify(msgData);
 					controller.enqueue(`data: ${payload}\n\n`);
 
-					if (typeof msgData === "object" && msgData && "status" in msgData) {
-						const status = (msgData as { status?: string }).status;
-						if (status === "completed" || status === "error") {
+					if (typeof msgData === "object" && msgData) {
+						const message = msgData as { status?: string; type?: string };
+						if (message.status === "completed" || message.status === "error" || message.type === "run.completed" || message.type === "run.failed") {
 							break;
 						}
 					}

@@ -106,6 +106,13 @@ export function AnalysisLogs({ streamId, output, className }: { streamId: string
 					return;
 				}
 
+				if (data.type === "run.retrying") {
+					finalizeStreaming();
+					const delay = typeof data.delayMs === "number" ? `; waiting ${Math.ceil(data.delayMs / 1000)}s` : "";
+					setLogs((prev) => [...prev, `Transient provider error; retrying attempt ${data.attempt || "next"}${delay}`]);
+					return;
+				}
+
 				if (data.type === "response.output_text.done") {
 					finalizeStreaming();
 					return;
