@@ -12,6 +12,46 @@ export type WebsiteSubmissionOptions = ReporterMetadata & {
 	source?: string;
 };
 
+type WebsiteAnalysisRecoveryOptions = ReporterMetadata & {
+	submissionId: bigint;
+	url: string;
+};
+
+/**
+ * Resume the small legacy window where a website submission was inserted as
+ * `new` before its detached analyzer actually began.  This is intentionally
+ * recovery-only: active/running rows are still failed on restart, preserving
+ * the explicit retry boundary for work that could have reached a later stage.
+ */
+export async function resumePendingWebsiteAnalyses(params: {
+	limit?: number;
+	startAnalysis?: (options: WebsiteAnalysisRecoveryOptions) => Promise<unknown>;
+} = {}): Promise<number> {
+	const pending = await SubmissionsEntity.listPendingWebsiteAnalyses(params.limit);
+	const startAnalysis = params.startAnalysis ?? analyzeWebsite;
+	let resumed = 0;
+
+	for (const submission of pending) {
+		const url = submission.data.kind === "website" ? submission.data.website?.url : undefined;
+		const claimed = await SubmissionsEntity.claimPendingWebsiteAnalysis(submission.id);
+		if (!claimed) continue;
+		if (!url) {
+			await SubmissionsEntity.update(submission.id, { status: "failed", info: "Website analysis could not resume because the original URL is unavailable." });
+			continue;
+		}
+		resumed++;
+		void startAnalysis({
+			submissionId: submission.id,
+			url,
+			reporterIp: submission.reporterIp ?? undefined,
+			reporterCountry: submission.reporterCountry ?? undefined,
+			reporterHeaders: submission.reporterHeaders ?? undefined,
+		}).catch((error) => console.error(`Resumed website analysis ${submission.id.toString()} failed:`, error));
+	}
+
+	return resumed;
+}
+
 export async function createWebsiteSubmission(options: WebsiteSubmissionOptions): Promise<bigint> {
 	const streamId = generateId();
 	const { url, source } = options;
@@ -20,7 +60,10 @@ export async function createWebsiteSubmission(options: WebsiteSubmissionOptions)
 		kind: "website",
 		data: { kind: "website", website: { url } },
 		dedupeKey: `website-${new URL(url).hostname}`,
-		status: "new",
+		// The worker starts immediately after insertion. Mark it running at the
+		// durable boundary so a process restart cannot leave a submission looking
+		// perpetually new while its first WHOIS lookup is in flight.
+		status: "running",
 		source: source || url,
 		reporterIp: options.reporterIp,
 		reporterCountry: options.reporterCountry,

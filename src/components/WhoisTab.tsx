@@ -3,8 +3,9 @@
 import * as React from "react";
 import { format } from "date-fns";
 import { parse as parseDomain } from "tldts";
-import { Network, Server } from "lucide-react";
+import { Globe2, Network, Server } from "lucide-react";
 
+import type { RegionalDnsResolution } from "@/lib/network/regional_dns";
 import type { WhoISInfo } from "@/lib/website_info";
 
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +66,42 @@ function ListBadges({ items }: { items: string[] }) {
 	);
 }
 
+function RegionalDnsRecords({ title, resolution }: { title: string; resolution?: RegionalDnsResolution }) {
+	if (!resolution) return null;
+	const failed = resolution.error;
+	const answeredCountries = resolution.results.filter((result) => result.answers.length > 0).map((result) => result.country);
+	return (
+		<div className="space-y-2">
+			<div className="flex flex-wrap items-center gap-2">
+				<div className="text-sm font-medium">{title}</div>
+				{resolution.geographicallyScoped ? <Badge variant="destructive">Geographically scoped</Badge> : null}
+				{failed ? <Badge variant="outline">Measurement unavailable</Badge> : null}
+			</div>
+			{failed ? (
+				<div className="text-xs text-muted-foreground break-all">{failed}</div>
+			) : (
+				<KeyValueTable
+					rows={[
+						{ k: "Probe countries", v: <ListBadges items={resolution.countries} /> },
+						{ k: "Resolved in", v: answeredCountries.length ? <ListBadges items={answeredCountries} /> : undefined },
+						{ k: "Observed addresses", v: resolution.resolvedAddresses.length ? <ListBadges items={resolution.resolvedAddresses} /> : undefined },
+						{
+							k: "Per-region results",
+							v: resolution.results.length
+								? resolution.results.map((result) => {
+									const location = [result.country, result.city, result.network].filter(Boolean).join(" · ");
+									const answers = result.answers.map((answer) => answer.value).join(", ") || "—";
+									return `${location}: ${result.status}${result.durationMs === undefined ? "" : ` (${result.durationMs}ms)`} — ${answers}`;
+								}).join("\n")
+								: undefined,
+						},
+					]}
+				/>
+			)}
+		</div>
+	);
+}
+
 export function WhoisTab({ url, whois }: { url?: string | null; whois?: WhoISInfo | null }) {
 	let hostname: string | null = null;
 	try {
@@ -109,6 +146,24 @@ export function WhoisTab({ url, whois }: { url?: string | null; whois?: WhoISInf
 				</CardContent>
 			</Card>
 
+			{dns?.regional ? (
+				<Card>
+					<CardHeader>
+						<CardTitle className="flex items-center gap-2 text-base">
+							<Globe2 className="h-4 w-4" />
+							Regional DNS Resolution
+						</CardTitle>
+					</CardHeader>
+					<CardContent className="space-y-6">
+						<div className="text-sm text-muted-foreground">
+							Independent probes detect DNS answers that are visible only from particular countries. This is captured evidence; a service outage does not stop analysis.
+						</div>
+						<RegionalDnsRecords title="A records" resolution={dns.regional.A} />
+						<RegionalDnsRecords title="AAAA records" resolution={dns.regional.AAAA} />
+					</CardContent>
+				</Card>
+			) : null}
+
 			<Card>
 				<CardHeader>
 					<CardTitle className="flex items-center gap-2 text-base">
@@ -130,6 +185,10 @@ export function WhoisTab({ url, whois }: { url?: string | null; whois?: WhoISInf
 								) : undefined,
 							},
 							{ k: "TXT", v: (dns?.TXT ?? []).length ? <ListBadges items={dns?.TXT ?? []} /> : undefined },
+							{
+								k: "Lookup errors",
+								v: dns?.errors ? Object.entries(dns.errors).map(([recordType, error]) => `${recordType}: ${error}`).join("\n") : undefined,
+							},
 						]}
 					/>
 				</CardContent>

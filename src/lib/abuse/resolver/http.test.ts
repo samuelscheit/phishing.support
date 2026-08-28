@@ -76,4 +76,20 @@ describe("resolver HTTP client", () => {
 		).rejects.toThrow("timed out");
 		expect(receivedAbortSignal).toBeTrue();
 	});
+
+	test("retries a transient RDAP failure after a bounded attempt", async () => {
+		let calls = 0;
+		const result = await safeJsonFetch("https://rdap.example.test/domain/example.test", {
+			assertPublicHost: async () => undefined,
+			httpTimeoutMs: 100,
+			httpRetryAttempts: 2,
+			fetch: async () => {
+				calls++;
+				if (calls === 1) return new Response(null, { status: 503 });
+				return new Response(JSON.stringify({ objectClassName: "domain" }), { status: 200 });
+			},
+		});
+		expect(result).toEqual({ objectClassName: "domain" });
+		expect(calls).toBe(2);
+	});
 });

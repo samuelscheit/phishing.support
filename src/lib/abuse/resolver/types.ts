@@ -9,6 +9,12 @@ export type ResolverDependencies = {
 	fetch?: FetchImplementation;
 	/** Bounds each HTTP response, including body reads. Production defaults to 12 seconds. */
 	httpTimeoutMs?: number;
+	/** Number of bounded RDAP/RIPE HTTP attempts. Defaults to two. */
+	httpRetryAttempts?: number;
+	/** Bounds each authoritative port-43 WHOIS attempt. Production defaults to 12 seconds. */
+	port43TimeoutMs?: number;
+	/** Number of bounded authoritative port-43 WHOIS attempts. Production defaults to two. */
+	port43Attempts?: number;
 	/** Injectable because authoritative port-43 services cannot be used in unit tests. */
 	port43Query?: (server: string, query: string) => Promise<string>;
 	/** Injectable SSRF guard for deterministic tests. Production resolves every host. */

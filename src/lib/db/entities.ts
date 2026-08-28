@@ -148,6 +148,35 @@ export class SubmissionsEntity {
         return row;
     }
 
+	/**
+	 * Atomically claim legacy website rows that were persisted before the
+	 * analysis worker started.  Current submissions are created as `running`,
+	 * so `new` here is recovery state rather than a normal work queue.
+	 */
+	static async claimPendingWebsiteAnalysis(id: bigint): Promise<boolean> {
+		const db = await getDb();
+		const rows = await db
+			.update(submissions)
+			.set({ status: "running", info: "Resuming interrupted website analysis.", updatedAt: nowDate() })
+			.where(and(
+				eq(submissions.id, id),
+				eq(submissions.kind, "website"),
+				inArray(submissions.status, ["new", "queued"]),
+			))
+			.returning({ id: submissions.id });
+		return rows.length === 1;
+	}
+
+	static async listPendingWebsiteAnalyses(limit = 10) {
+		const db = await getDb();
+		return db
+			.select()
+			.from(submissions)
+			.where(and(eq(submissions.kind, "website"), inArray(submissions.status, ["new", "queued"])))
+			.orderBy(submissions.createdAt)
+			.limit(limit);
+	}
+
     /**
      * Finds a submission created from a given source.
      * Useful for sources like `imap:<account>:<mailbox>:<uidValidity>:<uid>` that may also create derived submissions like

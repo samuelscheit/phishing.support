@@ -83,11 +83,16 @@ export async function analyzeWebsite(options: {
 } & ReporterMetadata): Promise<bigint> {
 	const { url, submissionId, reporterIp, reporterCountry, reporterHeaders, reuseEvidenceArtifacts = false } = options!;
 	try {
+		// Claim the submission before any network work. Previously the first
+		// unbounded WHOIS lookup ran while the row still said `new`, so a process
+		// restart could leave it looking queued forever with no retry path.
+		await SubmissionsEntity.update(submissionId, { status: "running", info: "Collecting bounded WHOIS, RDAP, and regional DNS evidence." });
 		await emitStep(submissionId, "whois_lookup", 5);
 		const whois = await getInfo(url);
 
 		await SubmissionsEntity.update(submissionId, {
 			status: "running",
+			info: undefined,
 			data: {
 				kind: "website",
 				website: {

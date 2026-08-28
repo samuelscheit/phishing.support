@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 
 import { startImapListener } from "./lib/imap/imap_listener";
 import { SubmissionsEntity } from "./lib/db/entities";
+import { resumePendingWebsiteAnalyses } from "./lib/submissions/website";
 import { startAbuseWorker, stopAbuseWorker } from "./lib/abuse/worker";
 import { startAbuseImapListener, stopAbuseImapListener } from "./lib/abuse/imap";
 
@@ -32,6 +33,14 @@ try {
 } catch (err) {
 	console.error("Failed to mark running submissions as failed on startup:", err);
 }
+
+// Versions before the bounded lookup worker left a short `new`-state crash
+// window before they marked a website analysis running. Claim and resume only
+// those legacy/new or retry-queued website rows; regular active work remains
+// behind the explicit failed-analysis retry boundary above.
+void resumePendingWebsiteAnalyses().then((resumed) => {
+	if (resumed > 0) console.warn(`Resumed ${resumed} pending website analyses on startup.`);
+}).catch((err) => console.error("Failed to resume pending website analyses on startup:", err));
 
 // Start IMAP listener in the same process
 startImapListener().catch((err) => {

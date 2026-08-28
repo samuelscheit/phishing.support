@@ -1,10 +1,12 @@
 import { AbuseInputError, assertPublicDnsHost } from "../security";
+import { retryWithTimeout } from "../../network/bounded_fetch";
 import { asRecord } from "./records";
 import type { JsonRecord, ResolverDependencies } from "./types";
 
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const DEFAULT_HTTP_TIMEOUT_MS = 12_000;
+const DEFAULT_HTTP_RETRY_ATTEMPTS = 2;
 
 type JsonRequestResult =
 	| { kind: "redirect"; location: string }
@@ -98,7 +100,16 @@ export async function safeJsonFetch(urlValue: string, dependencies: ResolverDepe
 			throw new AbuseInputError("Resolver attempted an unsafe RDAP endpoint.");
 		}
 		await assertHost(url.hostname);
-		const result = await requestJson(url, dependencies);
+		const result = await retryWithTimeout(
+			() => requestJson(url, dependencies),
+			{
+				label: `Resolver request to ${url.hostname}`,
+				timeoutMs: timeoutMs(dependencies),
+				attempts: dependencies.httpRetryAttempts ?? DEFAULT_HTTP_RETRY_ATTEMPTS,
+				retryDelayMs: 250,
+				shouldRetry: (error) => !(error instanceof Error && /size limit|valid JSON|redirect without a location/i.test(error.message)),
+			},
+		);
 		if (result.kind === "redirect") {
 			url = new URL(result.location, url);
 			continue;

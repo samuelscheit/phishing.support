@@ -3,10 +3,12 @@ import net from "node:net";
 import { isIP } from "node:net";
 
 import { AbuseInputError, assertPublicDnsHost, isPublicIp } from "../security";
+import { retryWithTimeout } from "../../network/bounded_fetch";
 import type { ResolverDependencies } from "./types";
 
 const MAX_WHOIS_BYTES = 1024 * 1024;
 const WHOIS_TIMEOUT_MS = 12_000;
+const WHOIS_ATTEMPTS = 2;
 
 async function defaultPort43Query(server: string, query: string): Promise<string> {
 	if (!/^[a-z0-9.-]+$/i.test(server) || !/^[a-z0-9:.\-]+$/i.test(query)) {
@@ -15,7 +17,10 @@ async function defaultPort43Query(server: string, query: string): Promise<string
 
 	const addresses = isIP(server)
 		? [{ address: server, family: isIP(server) }]
-		: await dns.lookup(server, { all: true, verbatim: true });
+		: await retryWithTimeout(
+			() => dns.lookup(server, { all: true, verbatim: true }),
+			{ label: "WHOIS server DNS lookup", timeoutMs: WHOIS_TIMEOUT_MS, attempts: WHOIS_ATTEMPTS, retryDelayMs: 250 },
+		);
 	const publicAddresses = addresses.filter((address) => isPublicIp(address.address));
 	if (publicAddresses.length === 0) throw new AbuseInputError("WHOIS server resolves to a non-public address.");
 
@@ -26,12 +31,18 @@ async function defaultPort43Query(server: string, query: string): Promise<string
 				const socket = net.createConnection({ host: address.address, port: 43, family: address.family });
 				const chunks: Buffer[] = [];
 				let size = 0;
+				let settled = false;
+				const finish = (operation: () => void) => {
+					if (settled) return;
+					settled = true;
+					operation();
+				};
 				const fail = (error: Error) => {
 					socket.destroy();
-					reject(error);
+					finish(() => reject(error));
 				};
 				socket.setTimeout(WHOIS_TIMEOUT_MS, () => fail(new Error("WHOIS query timed out.")));
-				socket.once("error", reject);
+				socket.once("error", (error) => fail(error));
 				socket.once("connect", () => socket.write(`${query}\r\n`, "utf8"));
 				socket.on("data", (chunk: Buffer) => {
 					size += chunk.byteLength;
@@ -41,7 +52,8 @@ async function defaultPort43Query(server: string, query: string): Promise<string
 					}
 					chunks.push(Buffer.from(chunk));
 				});
-				socket.once("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+				socket.once("end", () => finish(() => resolve(Buffer.concat(chunks).toString("utf8"))));
+				socket.once("close", () => finish(() => resolve(Buffer.concat(chunks).toString("utf8"))));
 			});
 		} catch (error) {
 			lastError = error;
@@ -56,7 +68,15 @@ export async function queryPort43(server: string | undefined, query: string, dep
 	try {
 		const assertHost = dependencies.assertPublicHost ?? assertPublicDnsHost;
 		await assertHost(server);
-		const raw = await (dependencies.port43Query ?? defaultPort43Query)(server, query);
+		const raw = await retryWithTimeout(
+			() => (dependencies.port43Query ?? defaultPort43Query)(server, query),
+			{
+				label: "WHOIS port-43 query",
+				timeoutMs: dependencies.port43TimeoutMs ?? WHOIS_TIMEOUT_MS,
+				attempts: dependencies.port43Attempts ?? WHOIS_ATTEMPTS,
+				retryDelayMs: 250,
+			},
+		);
 		if (Buffer.byteLength(raw) > MAX_WHOIS_BYTES) throw new Error("WHOIS response exceeded its size limit.");
 		return { raw };
 	} catch (error) {

@@ -96,7 +96,7 @@ describe("queryRDAPDomain", () => {
 			return new Response(JSON.stringify(xyzRdapResponse), { status: 200 });
 		};
 
-		const result = await queryRDAPDomain("kinder2026.xyz", fetchImplementation);
+		const result = await queryRDAPDomain("kinder2026.xyz", { fetch: fetchImplementation, retryAttempts: 1 });
 
 		expect(requests).toHaveLength(1);
 		expect(String(requests[0].input)).toBe("https://rdap.org/domain/kinder2026.xyz");
@@ -109,7 +109,7 @@ describe("queryRDAPDomain", () => {
 	test("does not fabricate a registrar report target when the registry returns an error", async () => {
 		const fetchImplementation = async () => new Response(null, { status: 404 });
 
-		await expect(queryRDAPDomain("missing.xyz", fetchImplementation)).resolves.toBeUndefined();
+		await expect(queryRDAPDomain("missing.xyz", { fetch: fetchImplementation, retryAttempts: 1 })).resolves.toBeUndefined();
 	});
 });
 
@@ -131,7 +131,7 @@ describe("queryRDAPIP", () => {
 			}
 		};
 
-		const result = await queryRDAPIP(ip, fetchImplementation);
+		const result = await queryRDAPIP(ip, { fetch: fetchImplementation, retryAttempts: 1 });
 
 		expect(requests.map((request) => request.input).sort()).toEqual(
 			[getIPRdapUrl(ip), getRipeStatNetworkInfoUrl(ip), getAutnumRdapUrl(402506)].sort()
@@ -159,7 +159,7 @@ describe("queryRDAPIP", () => {
 			throw new Error(`Unexpected request: ${input}`);
 		};
 
-		const result = await queryRDAPIP(ip, fetchImplementation);
+		const result = await queryRDAPIP(ip, { fetch: fetchImplementation, retryAttempts: 1 });
 
 		expect(result?.ip).toBe(ip);
 		expect(result?.origin_asns).toEqual([]);
