@@ -17,6 +17,7 @@ The authoritative requirements are in the specification attached to this task. T
 - Strict public-input validation and security controls: IDNA/lowercase/trailing-dot normalization, original-input provenance and deterministic deduplication, public IPv4/IPv6 enforcement, bounded decoded image evidence validation, hashed tracking tokens, deterministic idempotency tokens, SSRF/DNS checks (including the configured service-verifier endpoint), signed artifact authorization, and rejection of client-controlled browser/CDP/Skyvern/provider/redirect/proxy/selector/credential fields.
 - Resolver fallback chain and provenance snapshots for RDAP, authoritative port-43 WHOIS, and BGP/ASN RDAP, with abuse-contact-only extraction.
 - Durable worker lifecycle integrated with the custom server, including restart-safe leases, retry handling, ambiguous external state, SMTP/IMAP intake, strict reply classification, bounce settlement, explicit-link escalation, serialized shared-mailbox code handling, and permanent correspondence/artifact retention.
+- Generic verified-email delivery builds a provider-facing, recipient-specific draft instead of copying the stored analysis: the first versioned draft is durably pinned, bounded AI evidence summaries are optional and fail closed, and safe retries reuse the exact draft.
 - Code-owned provider registry with exact GNAME registrar-ID matching, pinned provider-definition hashes, fail-closed output contracts, final-origin/target checks, declaration checks, and provider-specific evidence derivatives.
 - Skyvern adapter with SDK-derived request types, no retries on side-effectful calls, bounded in-memory uploads with metadata, exact `ai_upload_file` payloads, response-envelope normalization, storage URL hardening, webhook verification, immutable task snapshots, reconciliation, and permanent artifact import.
 - Dedicated abuse-browser/Skyvern/Postgres/MinIO/DBC-extension Compose topology and configuration, kept separate from the normal application browser.
@@ -43,7 +44,7 @@ The authoritative requirements are in the specification attached to this task. T
 The final validation results are recorded here after the last rerun:
 
 ```text
-`bun test --timeout 30000`: 105 pass, 0 fail, 562 expect() calls, 22 test files
+`bun test --timeout 30000`: 241 pass, 0 fail, 1034 expect() calls, 60 test files
 `bunx --bun tsc --noEmit --pretty false`: passed
 `bun run build`: passed
 `git diff --check`: passed

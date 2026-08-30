@@ -1,7 +1,6 @@
 import { isIP } from "node:net";
 
-import OpenAI from "openai";
-
+import { configuredAbuseOpenAI, responseOutputText } from "../ai";
 import { isProviderReplyLinkAllowed } from "../providers/definition";
 import { isVerifiedEmailRouteOriginAllowed } from "../providers/email";
 import { getProviderDefinition } from "../providers/registry";
@@ -26,33 +25,6 @@ function ambiguousReplyClassification(rationale: string): AbuseReplyClassificati
 	return { classification: "ambiguous", confidence: 0, rationale: rationale.slice(0, 2_000) };
 }
 
-function configuredReplyClassifier(): OpenAI | undefined {
-	const apiKey = process.env.ABUSE_OPENAI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim();
-	if (!apiKey) return undefined;
-	return new OpenAI({
-		apiKey,
-		baseURL: process.env.ABUSE_OPENAI_API_BASE_URL?.trim() || process.env.OPENAI_API_BASE_URL?.trim() || "https://api.openai.com/v1",
-	});
-}
-
-function responseOutputText(response: unknown): string | undefined {
-	if (!response || typeof response !== "object") return undefined;
-	const direct = (response as { output_text?: unknown }).output_text;
-	if (typeof direct === "string" && direct.trim()) return direct;
-	const output = (response as { output?: unknown }).output;
-	if (!Array.isArray(output)) return undefined;
-	const chunks: string[] = [];
-	for (const item of output) {
-		if (!item || typeof item !== "object") continue;
-		const content = (item as { content?: unknown }).content;
-		if (!Array.isArray(content)) continue;
-		for (const part of content) {
-			if (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string") chunks.push((part as { text: string }).text);
-		}
-	}
-	return chunks.join("\n").trim() || undefined;
-}
-
 function parseClassifierJson(text: string): unknown {
 	try {
 		return JSON.parse(text);
@@ -74,11 +46,11 @@ function parseClassifierJson(text: string): unknown {
  * errors, refusals, and schema violations all fail closed to `ambiguous`.
  */
 export async function classifyProviderReplyWithAI(params: { text: string; from?: string }): Promise<AbuseReplyClassification> {
-	const client = configuredReplyClassifier();
-	if (!client) return ambiguousReplyClassification("AI reply classifier is not configured.");
 	const body = params.text.slice(0, MAX_REPLY_CLASSIFICATION_INPUT);
 	const sender = (params.from ?? "").slice(0, 320);
 	try {
+		const client = configuredAbuseOpenAI();
+		if (!client) return ambiguousReplyClassification("AI reply classifier is not configured.");
 		const response = await client.responses.create({
 			model: process.env.ABUSE_REPLY_CLASSIFIER_MODEL?.trim() || DEFAULT_REPLY_CLASSIFIER_MODEL,
 			store: false,

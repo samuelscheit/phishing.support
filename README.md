@@ -31,11 +31,36 @@ Before enabling SMTP report delivery, configure inbound mail for the reply domai
 - Keep `SMTP_FROM` as a real, authenticated mailbox in the SMTP provider. Generated identities are only `Reply-To` addresses; they are never used as `From` or as the SMTP envelope sender.
 - For iCloud Custom Email Domain, enable **Allow All Incoming Emails** for `phishing.support`. This catch-all must deliver to the mailbox configured by `IMAP_MAILBOX`; confirm the mailbox/rules before rollout. See Apple’s [catch-all configuration guide](https://support.apple.com/guide/icloud/allow-all-incoming-emails-mm9e3ee0680f/icloud).
 - Configure `IMAP_HOST`, `IMAP_PORT`, `IMAP_SECURE`, `IMAP_USER`, `IMAP_PASS`, `IMAP_MAILBOX`, and `IMAP_LISTEN_ADDRESS` for that monitored mailbox.
+- Configure `ABUSE_SMTP_HOST`, `ABUSE_SMTP_PORT`, `ABUSE_SMTP_SECURE`, `ABUSE_SMTP_USER`, `ABUSE_SMTP_PASS`, and `ABUSE_SMTP_FROM` for outbound abuse mail (each falls back to its corresponding `SMTP_*` setting when the abuse-specific key is absent).
 - Perform a controlled preflight: send one report to a test recipient, reply to its generated `Reply-To`, and verify both messages and attachments appear in the submission’s Reports tab.
 
 Incoming mail is assigned only by an exact generated recipient address, an exact outbound RFC `Message-ID` in `In-Reply-To`/`References`, or a unique diagnostic thread header. The listener never guesses from sender, subject, or quoted content. Forwarded messages to `report@phishing.support` continue through the normal submission intake path. Other messages are recorded as ignored in the IMAP ledger, marked read, and left in the mailbox.
 
 Do not substitute plus-addressing if catch-all routing is unavailable. Use a dedicated reply subdomain backed by a catch-all-capable inbound provider while retaining the authenticated SMTP sender.
+
+### Provider-facing email drafts
+
+The generic verified-email route does **not** send the stored AI analysis as the
+message body. Before SMTP, the abuse worker creates a separate provider-facing
+draft for each resolved recipient. The draft has a recipient-specific greeting
+(for example, the Hostinger organization from RDAP), the exact normalized target
+and observed URLs, a bounded evidence summary, the available evidence filenames,
+and an explicit request to investigate and mitigate. When configured, a separate
+OpenAI Responses call writes only the short evidence summary; the surrounding
+email remains a code-owned template. If the model is unavailable, the worker
+sends a factual deterministic summary rather than failing or copying the
+analysis. Model output is schema-validated, bounded, checked for long verbatim
+passages and unapproved URLs, and treated as untrusted data.
+
+The first draft is persisted in the provider run before SMTP and is reused
+unchanged only for a retry that is durably known to have failed before provider
+acceptance. Legacy/unverifiable drafts are stopped rather than resent, avoiding
+an accidental replay of an old analysis-only message. Configure
+`ABUSE_OPENAI_API_KEY`, `ABUSE_OPENAI_API_BASE_URL`, and optionally
+`ABUSE_EMAIL_DRAFT_MODEL` in the runtime environment when AI-written summaries
+are desired; `ABUSE_OPENAI_TIMEOUT_MS` bounds the drafting/classification call
+(5 seconds to 5 minutes, default 45 seconds). The deterministic template works
+without an AI configuration.
 
 ## Analysis stream recovery
 

@@ -17,6 +17,16 @@ export { extractUnambiguousVerificationCode } from "./mail/shared";
 export { buildCanonicalAbuseMail, sendAbuseEmailRoute } from "./mail/send";
 
 export {
+	abuseEmailCaseUrl,
+	abuseEmailRecipientLabel,
+	createAbuseEmailDraft,
+	hasSubstantialCopiedPassage,
+	readVerifiedEmailDraft,
+	verifiedEmailProviderPayload,
+} from "./mail/draft";
+export type { AbuseEmailDraft, AbuseEmailDraftDependencies, AbuseEmailSummaryInput, VerifiedEmailProviderPayload } from "./mail/draft";
+
+export {
 	classifyProviderReply,
 	classifyProviderReplyWithAI,
 	extractVerifiedProviderLinks,

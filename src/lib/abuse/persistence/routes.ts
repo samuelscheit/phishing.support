@@ -220,7 +220,12 @@ export async function markUnknownExternalState(params: {
 			// error: an explicit SMTP rejection or correlated bounce is safe to
 			// retry, whereas turning it into unknown_external_state would lose
 			// that retry path.
-			if (IMMUTABLE_ROUTE_STATUSES.has(route.status) || route.status === "delivery_failed") return;
+			// An explicit SMTP rejection normally leaves the route reusable. The
+			// one exception is a missing or altered immutable outbound draft: a
+			// retry could no longer prove it is resending the same provider-facing
+			// allegation, so stop it for operator review instead of regenerating
+			// prose and silently changing the message.
+			if (IMMUTABLE_ROUTE_STATUSES.has(route.status) || (route.status === "delivery_failed" && params.reason !== "email_draft_integrity_failure")) return;
 			const timestamp = now();
 			const error = params.error.slice(0, 2_000);
 			if (params.runId !== undefined) {

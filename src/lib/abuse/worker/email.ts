@@ -1,11 +1,36 @@
-import { sendAbuseEmailRoute, isSafeEmailDeliveryFailure } from "../mail";
+import {
+	abuseEmailCaseUrl,
+	createAbuseEmailDraft,
+	isSafeEmailDeliveryFailure,
+	readVerifiedEmailDraft,
+	sendAbuseEmailRoute,
+	type AbuseEmailDraft,
+	verifiedEmailProviderPayload,
+} from "../mail";
 import { isGenericEmailRouteEnabled } from "../providers/email";
 import { AbuseRepository } from "../repository";
 import { errorText, RetryableDeliveryError, routeContext, UnknownExternalStateError, type WorkerServices } from "./shared";
 
-export async function sendEmail(routeId: bigint, worker: Pick<WorkerServices, "markUnknownExternal">): Promise<void> {
+type EmailWorkerServices = Pick<WorkerServices, "markUnknownExternal"> & {
+	/** Injectable for deterministic worker tests; production uses the canonical draft builder. */
+	createDraft?: typeof createAbuseEmailDraft;
+	/** Injectable for deterministic worker tests; production uses the canonical SMTP boundary. */
+	send?: typeof sendAbuseEmailRoute;
+};
+
+export async function sendEmail(routeId: bigint, worker: EmailWorkerServices): Promise<void> {
 	const { route, report, target, evidenceArtifacts } = await routeContext(routeId);
 	if (route.routeType !== "email" || !route.verifiedEmail) return;
+	if (route.status === "running") {
+		// A stale/replayed job can observe the route after the durable email run
+		// was claimed but before SMTP settlement. There is no safe way to infer
+		// whether DATA crossed the provider boundary, so fail closed instead of
+		// silently completing the job and leaving the route stranded in `running`.
+		const activeRun = await AbuseRepository.getLatestActiveProviderRunForRoute(route.id);
+		const message = "Email delivery was interrupted after its durable run record was created; delivery reconciliation is required before retrying.";
+		await worker.markUnknownExternal({ routeId: route.id, runId: activeRun?.id, error: message, reason: "outbound_delivery_interrupted" });
+		throw new UnknownExternalStateError(message);
+	}
 	if (!["verified", "delivery_failed"].includes(route.status)) return;
 	if (!isGenericEmailRouteEnabled()) {
 		await AbuseRepository.transitionRouteStatus({
@@ -17,19 +42,68 @@ export async function sendEmail(routeId: bigint, worker: Pick<WorkerServices, "m
 		return;
 	}
 	const correlationKey = `email-run:${route.id.toString()}`;
+	const caseUrl = abuseEmailCaseUrl(report.idempotencyKey);
+	const allowedDraftUrls = [
+		...target.observedUrls,
+		...(report.legalBrandUrl ? [report.legalBrandUrl] : []),
+		...(caseUrl ? [caseUrl] : []),
+	];
+	const attachments = evidenceArtifacts.slice(0, 15).map((artifact) => ({ filename: artifact.name, mimeType: artifact.mimeType, content: artifact.blob }));
+	let draft: AbuseEmailDraft | undefined;
+	let providerPayload: Record<string, unknown>;
+	if (route.status === "delivery_failed") {
+		const existing = await AbuseRepository.getProviderRunByCorrelationKey(correlationKey);
+		const persisted = existing && readVerifiedEmailDraft(existing.providerPayload, {
+			recipient: route.verifiedEmail,
+			description: report.description,
+			target: target.normalizedTarget,
+			observedUrls: target.observedUrls,
+			allowedUrls: allowedDraftUrls,
+		});
+		if (!existing || !persisted) {
+			const message = "The durable email draft is missing or unsafe to resend; automatic SMTP delivery was stopped.";
+			await worker.markUnknownExternal({ routeId: route.id, runId: existing?.id, error: message, reason: "email_draft_integrity_failure" });
+			throw new UnknownExternalStateError(message);
+		}
+		draft = persisted;
+		providerPayload = existing.providerPayload;
+	} else {
+		draft = await (worker.createDraft ?? createAbuseEmailDraft)({
+			report,
+			target,
+			route,
+			recipient: route.verifiedEmail,
+			attachmentNames: attachments.map((attachment) => attachment.filename),
+		});
+		providerPayload = verifiedEmailProviderPayload({
+			target: target.normalizedTarget,
+			observedUrls: target.observedUrls,
+			recipient: route.verifiedEmail,
+			email: draft,
+		});
+	}
 	const delivery = await AbuseRepository.beginEmailDelivery({
 		routeId: route.id,
 		correlationKey,
-		providerPayload: {
-			kind: "verified_email_report",
-			target: target.normalizedTarget,
-			description: report.description,
-			observedUrls: target.observedUrls,
-			recipient: route.verifiedEmail,
-		},
+		providerPayload,
 	});
 	if (!delivery) return;
 	const run = delivery.run;
+	// A delivery retry uses the immutable first-attempt draft, including its
+	// model-produced summary. Never regenerate recipient-facing prose after a
+	// durable report attempt has begun.
+	const persistedDraft = readVerifiedEmailDraft(run.providerPayload, {
+		recipient: route.verifiedEmail,
+		description: report.description,
+		target: target.normalizedTarget,
+		observedUrls: target.observedUrls,
+		allowedUrls: allowedDraftUrls,
+	});
+	if (!persistedDraft) {
+		const message = "The durable email draft is missing or unsafe to resend; automatic SMTP delivery was stopped.";
+		await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "email_draft_integrity_failure" });
+		throw new UnknownExternalStateError(message);
+	}
 	let retryReplyAddress: string | undefined;
 	if (!delivery.created) {
 		const outbound = await AbuseRepository.getOutboundMailForRun(run.id);
@@ -43,16 +117,15 @@ export async function sendEmail(routeId: bigint, worker: Pick<WorkerServices, "m
 			throw new UnknownExternalStateError(message);
 		}
 	}
-	const attachments = evidenceArtifacts.slice(0, 15).map((artifact) => ({ filename: artifact.name, mimeType: artifact.mimeType, content: artifact.blob }));
 	let result: Awaited<ReturnType<typeof sendAbuseEmailRoute>>;
 	try {
-		result = await sendAbuseEmailRoute({
+		result = await (worker.send ?? sendAbuseEmailRoute)({
 			routeId: route.id,
 			runId: run.id,
 			reportId: report.id,
 			recipient: route.verifiedEmail,
-			subject: `[Phishing Support] Abuse report for ${target.normalizedTarget}`,
-			body: `Target: ${target.normalizedTarget}\nObserved URLs: ${target.observedUrls.join("\n")}\n\n${report.description}`,
+			subject: persistedDraft.subject,
+			body: persistedDraft.body,
 			attachments,
 			correlationKey,
 			replyAddress: retryReplyAddress,
@@ -82,26 +155,47 @@ export async function sendEmail(routeId: bigint, worker: Pick<WorkerServices, "m
 		throw new UnknownExternalStateError(message);
 	}
 	if (result.status === "sent") {
-		if (await AbuseRepository.settleEmailDelivery({
+		const settled = await AbuseRepository.settleEmailDelivery({
 			runId: run.id,
 			expectedRunStatus: "starting",
 			expectedRouteStatus: "running",
 			outcome: "sent",
-		})) {
+		});
+		if (settled) {
 			await AbuseRepository.enqueueJob({ jobType: "monitor_provider_reply", reportId: report.id, routeId: route.id, runId: run.id, payload: {}, dedupeKey: `monitor:${run.id.toString()}`, nextAttemptAt: new Date(Date.now() + 24 * 60 * 60_000) });
+		} else {
+			const [currentRun, currentRoute] = await Promise.all([
+				AbuseRepository.getProviderRun(run.id),
+				AbuseRepository.getRoute(route.id),
+			]);
+			if (currentRun?.executionStatus === "delivered" && ["awaiting_provider_reply", "acknowledged"].includes(currentRoute?.status ?? "")) return;
+			if (currentRun?.executionStatus === "failed" && currentRoute?.status === "delivery_failed") return;
+			const message = "SMTP accepted the abuse report, but its durable delivery settlement could not be verified.";
+			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "email_delivery_settlement_conflict" });
+			throw new UnknownExternalStateError(message);
 		}
 	} else if (result.status === "unknown_external_state") {
 		const message = `SMTP delivery may have crossed the provider boundary: ${result.error ?? "transport response was lost"}`;
 		await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "smtp_delivery_ambiguous" });
 		throw new UnknownExternalStateError(message);
 	} else {
-		await AbuseRepository.settleEmailDelivery({
+		const settled = await AbuseRepository.settleEmailDelivery({
 			runId: run.id,
 			expectedRunStatus: "starting",
 			expectedRouteStatus: "running",
 			outcome: "failed",
 			failureReason: result.error,
 		});
+		if (!settled) {
+			const [currentRun, currentRoute] = await Promise.all([
+				AbuseRepository.getProviderRun(run.id),
+				AbuseRepository.getRoute(route.id),
+			]);
+			if (currentRun?.executionStatus === "failed" && currentRoute?.status === "delivery_failed") return;
+			const message = "SMTP rejected the abuse report, but its durable failure settlement could not be verified.";
+			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "email_delivery_settlement_conflict" });
+			throw new UnknownExternalStateError(message);
+		}
 		throw new RetryableDeliveryError(result.error ?? "SMTP delivery was rejected before provider acceptance.");
 	}
 }

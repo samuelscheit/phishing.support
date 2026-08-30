@@ -32,6 +32,13 @@ services:
       ABUSE_SKYVERN_WEBHOOK_URL: http://app:3000/api/skyvern/webhook
       ABUSE_GENERIC_EMAIL_ENABLED: ${ABUSE_GENERIC_EMAIL_ENABLED:-false}
       ABUSE_GENERIC_FORM_ESCALATION_ENABLED: ${ABUSE_GENERIC_FORM_ESCALATION_ENABLED:-false}
+      # The abuse worker uses a separate, bounded drafting call. Keep its
+      # credentials/runtime endpoint explicit; .env is intentionally excluded
+      # from the image and these values are injected only at container start.
+      ABUSE_OPENAI_API_KEY: ${ABUSE_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}
+      ABUSE_OPENAI_API_BASE_URL: ${ABUSE_OPENAI_API_BASE_URL:-${OPENAI_API_BASE_URL:-https://api.openai.com/v1}}
+      ABUSE_OPENAI_TIMEOUT_MS: ${ABUSE_OPENAI_TIMEOUT_MS:-45000}
+      ABUSE_EMAIL_DRAFT_MODEL: ${ABUSE_EMAIL_DRAFT_MODEL:-${OPENAI_MODEL:-gpt-5.5}}
       ABUSE_NETCRAFT_REPORTER_EMAIL: ${ABUSE_NETCRAFT_REPORTER_EMAIL:-support@phishing.support}
       # These are required even while provider routes are rollout-gated: they
       # protect idempotency responses and bearer-authorized artifact reads.
