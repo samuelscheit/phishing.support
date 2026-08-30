@@ -27,13 +27,12 @@ afterAll(() => {
 });
 
 describe("legacy submission abuse-report read model", () => {
-	test("includes standalone worker emails in the legacy submission Reports tab", async () => {
-		const submissionId = 351387190816673794n;
+	async function createLegacyWebsiteReport(submissionId: bigint) {
 		await SubmissionsEntity.create({
 			id: submissionId,
 			kind: "website",
 			data: { kind: "website", website: { url: "https://shop.example.com/" } },
-			dedupeKey: "legacy-website-abuse-details-test",
+			dedupeKey: `legacy-website-abuse-details-test:${submissionId.toString()}`,
 			status: "reported",
 		});
 		const request = await validateAbuseReportRequest({
@@ -43,9 +42,15 @@ describe("legacy submission abuse-report read model", () => {
 			observedUrls: [{ target: "shop.example.com", urls: ["https://shop.example.com/"] }],
 			idempotencyKey: `legacy-website:${submissionId.toString()}`,
 		});
-		const abuseReport = await AbuseRepository.createReport({ request, reporter: {} });
-		const [target] = await AbuseRepository.listTargets(abuseReport.reportId);
+		const report = await AbuseRepository.createReport({ request, reporter: {} });
+		const [target] = await AbuseRepository.listTargets(report.reportId);
 		if (!target) throw new Error("The test target was not persisted.");
+		return { report, target };
+	}
+
+	test("includes standalone worker emails in the legacy submission Reports tab", async () => {
+		const submissionId = 351387190816673794n;
+		const { report: abuseReport, target } = await createLegacyWebsiteReport(submissionId);
 		const route = await AbuseRepository.upsertResolvedRoute(target.id, {
 			routeKey: "email:abuse@provider.example.test",
 			providerRegistryKey: "email:provider.example.test",
@@ -85,5 +90,87 @@ describe("legacy submission abuse-report read model", () => {
 			textBody: "The captured page impersonates a trusted service and collects credentials.",
 		});
 		expect(details?.abuseMailReports[0]?.messageId).toMatch(/^<abuse-[a-f0-9]+@phishing\.support>$/);
+	});
+
+	test("includes direct provider outcomes and the pinned report text without exposing provider payloads", async () => {
+		const submissionId = 352342673387950094n;
+		const { report, target } = await createLegacyWebsiteReport(submissionId);
+		const submittedRoute = await AbuseRepository.upsertResolvedRoute(target.id, {
+			routeKey: "provider_submission:google_safe_browsing:test",
+			providerRegistryKey: "google_safe_browsing",
+			providerDisplayName: "Google Safe Browsing",
+			routeType: "provider_submission",
+			providerDefinitionVersion: "test-v1",
+			providerDefinitionHash: "a".repeat(64),
+			resolverProvenance: { source: "test" },
+			resolutionSnapshot: { source: "test" },
+			status: "verified",
+		});
+		const submitted = await AbuseRepository.beginProviderExecution({
+			routeId: submittedRoute.id,
+			providerPayload: { report: { explanation: "The submitted Google report explains the credential-harvesting evidence.", privateToken: "do-not-expose" } },
+			correlationKey: `google-safe-browsing:${submissionId.toString()}`,
+			expectedStatus: "verified",
+		});
+		if (!submitted) throw new Error("The submitted provider run was not created.");
+		expect(await AbuseRepository.prepareProviderSubmission(submitted.run.id)).toBeTrue();
+		expect(await AbuseRepository.settleProviderRun({
+			runId: submitted.run.id,
+			executionStatus: "completed",
+			routeStatus: "submitted",
+			confirmationId: "google-confirmation-123",
+			confirmationText: "The URL was submitted.",
+			finalUrl: "https://safebrowsing.google.com/safebrowsing/report_phish/?url=https%3A%2F%2Fshop.example.com%2F",
+			submittedTargets: [target.normalizedTarget],
+		})).toBeTrue();
+
+		const unresolvedRoute = await AbuseRepository.upsertResolvedRoute(target.id, {
+			routeKey: "provider_submission:cloudflare:test",
+			providerRegistryKey: "cloudflare",
+			providerDisplayName: "Cloudflare Abuse",
+			routeType: "provider_submission",
+			providerDefinitionVersion: "test-v1",
+			providerDefinitionHash: "b".repeat(64),
+			resolverProvenance: { source: "test" },
+			resolutionSnapshot: { source: "test" },
+			status: "verified",
+		});
+		const unresolved = await AbuseRepository.beginProviderExecution({
+			routeId: unresolvedRoute.id,
+			providerPayload: { form: { justification: "The Cloudflare report explains the TikTok impersonation evidence.", privateCookie: "do-not-expose" } },
+			correlationKey: `cloudflare:${submissionId.toString()}`,
+			expectedStatus: "verified",
+		});
+		if (!unresolved) throw new Error("The unresolved provider run was not created.");
+		expect(await AbuseRepository.prepareProviderSubmission(unresolved.run.id)).toBeTrue();
+		await AbuseRepository.markUnknownExternalState({
+			routeId: unresolvedRoute.id,
+			runId: unresolved.run.id,
+			error: "The provider response could not be verified.",
+			reason: "test_unknown_external_state",
+		});
+
+		const details = await getSubmissionDetails(submissionId.toString());
+		expect(details?.abuseProviderReports).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				provider: "Google Safe Browsing",
+				status: "submitted",
+				body: "The submitted Google report explains the credential-harvesting evidence.",
+				observedUrls: ["https://shop.example.com/"],
+				submittedTargets: ["shop.example.com"],
+				confirmationId: "google-confirmation-123",
+				confirmationText: "The URL was submitted.",
+			}),
+			expect.objectContaining({
+				provider: "Cloudflare Abuse",
+				status: "unknown_external_state",
+				body: "The Cloudflare report explains the TikTok impersonation evidence.",
+				error: "The provider route did not complete safely.",
+			}),
+		]));
+		expect(JSON.stringify(details)).not.toContain("do-not-expose");
+		expect(details?.abuseMailReports).toEqual([]);
+		expect(details?.providerReports).toEqual([]);
+		expect(report.created).toBeTrue();
 	});
 });

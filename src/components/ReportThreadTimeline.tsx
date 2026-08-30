@@ -2,11 +2,18 @@
 
 import { useMemo, useState } from "react";
 import { format } from "date-fns";
-import { Check, Copy, Download, Mail, MessageSquareReply, OctagonAlert, Send, Undo2 } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, Mail, MessageSquareReply, OctagonAlert, Send, Undo2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { SubmissionAbuseMailReport, SubmissionArtifact, SubmissionProviderReport, SubmissionReportMessage, SubmissionReportThread } from "@/lib/submissions/details";
+import type {
+	SubmissionAbuseMailReport,
+	SubmissionAbuseProviderReport,
+	SubmissionArtifact,
+	SubmissionProviderReport,
+	SubmissionReportMessage,
+	SubmissionReportThread,
+} from "@/lib/submissions/details";
 import { cn } from "@/web_lib/util";
 
 type DateValue = Date | string | number | null | undefined;
@@ -29,9 +36,9 @@ function formatAddresses(addresses: string[] | null | undefined): string {
 }
 
 function statusClass(status: string) {
-	if (status === "replied") return "border-emerald-200 bg-emerald-50 text-emerald-800";
-	if (status === "delivery_failed" || status === "failed" || status === "unknown_external_state") return "border-red-200 bg-red-50 text-red-800";
-	if (status === "pending") return "border-amber-200 bg-amber-50 text-amber-800";
+	if (["replied", "sent", "submitted", "acknowledged"].includes(status)) return "border-emerald-200 bg-emerald-50 text-emerald-800";
+	if (["delivery_failed", "failed", "provider_rejected", "unknown_external_state", "needs_human"].includes(status)) return "border-red-200 bg-red-50 text-red-800";
+	if (["pending", "queued", "running", "verified", "submission_started"].includes(status)) return "border-amber-200 bg-amber-50 text-amber-800";
 	return "border-blue-200 bg-blue-50 text-blue-800";
 }
 
@@ -186,15 +193,61 @@ function StandaloneAbuseMailCard({ report }: { report: SubmissionAbuseMailReport
 	);
 }
 
-export function ReportThreadTimeline({ threads, providerReports, abuseMailReports, artifacts }: {
+function StandaloneAbuseProviderCard({ report }: { report: SubmissionAbuseProviderReport }) {
+	const submitted = report.status === "submitted" || report.status === "acknowledged";
+	const unresolved = report.status === "unknown_external_state";
+	const rejected = report.status === "provider_rejected";
+	const statusDescription = submitted
+		? "The provider confirmed it received this report."
+		: unresolved
+			? "The request reached a provider boundary, but the provider result could not be verified safely. It was not retried automatically to avoid a duplicate report."
+			: rejected
+				? "The provider rejected this report."
+				: report.error || "This provider report has not completed yet.";
+
+	return (
+		<Card className="overflow-hidden">
+			<CardHeader className="border-b bg-muted/20 py-4">
+				<div className="flex flex-wrap items-start justify-between gap-3">
+					<div className="min-w-0 space-y-1">
+						<CardTitle className="flex items-center gap-2 text-base"><Send className="h-4 w-4 shrink-0" /> {report.provider}</CardTitle>
+						<CardDescription>Direct provider submission • target: {report.target}</CardDescription>
+					</div>
+					<Badge variant="outline" className={cn("capitalize", statusClass(report.status))}>{report.status.replaceAll("_", " ")}</Badge>
+				</div>
+				<div className="grid gap-3 pt-2 text-xs sm:grid-cols-2">
+					<div><span className="text-muted-foreground">Prepared:</span> {formatDate(report.createdAt)}</div>
+					<div><span className="text-muted-foreground">Last update:</span> {formatDate(report.updatedAt)}</div>
+				</div>
+			</CardHeader>
+			<CardContent className="space-y-3 p-4">
+				<div className={cn("rounded-md border p-3 text-sm", submitted ? "border-emerald-200 bg-emerald-50 text-emerald-900" : unresolved || rejected ? "border-red-200 bg-red-50 text-red-900" : "border-amber-200 bg-amber-50 text-amber-900")}>
+					{statusDescription}
+				</div>
+				{report.observedUrls.length ? <div className="text-xs"><div className="mb-1 text-muted-foreground">Reported URL{report.observedUrls.length === 1 ? "" : "s"}</div><div className="space-y-1 font-mono break-all">{report.observedUrls.map((url) => <div key={url}>{url}</div>)}</div></div> : null}
+				{report.submittedTargets.length ? <div className="text-xs"><span className="text-muted-foreground">Provider-confirmed target{report.submittedTargets.length === 1 ? "" : "s"}:</span> <span className="break-all">{report.submittedTargets.join(", ")}</span></div> : null}
+				{report.confirmationId ? <div className="text-xs"><span className="text-muted-foreground">Confirmation:</span> <span className="break-all font-mono">{report.confirmationId}</span></div> : null}
+				{report.confirmationText ? <div className="text-sm"><span className="text-muted-foreground">Provider response:</span> {report.confirmationText}</div> : null}
+				<details className="rounded border bg-muted/10 p-3">
+					<summary className="cursor-pointer text-sm font-medium">View provider report</summary>
+					<pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words font-sans text-sm">{report.body}</pre>
+				</details>
+				{report.finalUrl ? <a href={report.finalUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><ExternalLink className="h-3.5 w-3.5" /> Open provider confirmation</a> : null}
+			</CardContent>
+		</Card>
+	);
+}
+
+export function ReportThreadTimeline({ threads, providerReports, abuseMailReports, abuseProviderReports, artifacts }: {
 	threads: ReportThreadWithMessages[];
 	providerReports: SubmissionProviderReport[];
 	abuseMailReports: SubmissionAbuseMailReport[];
+	abuseProviderReports: SubmissionAbuseProviderReport[];
 	artifacts: SubmissionArtifact[];
 }) {
 	const artifactMap = useMemo(() => new Map(artifacts.map((artifact) => [String(artifact.id), artifact])), [artifacts]);
 
-	if (threads.length === 0 && providerReports.length === 0 && abuseMailReports.length === 0) {
+	if (threads.length === 0 && providerReports.length === 0 && abuseMailReports.length === 0 && abuseProviderReports.length === 0) {
 		return <div className="py-10 text-center text-muted-foreground">No reports yet.</div>;
 	}
 
@@ -246,6 +299,7 @@ export function ReportThreadTimeline({ threads, providerReports, abuseMailReport
 			))}
 
 			{abuseMailReports.map((report) => <StandaloneAbuseMailCard key={`abuse-mail-${String(report.id)}`} report={report} />)}
+			{abuseProviderReports.map((report) => <StandaloneAbuseProviderCard key={`abuse-provider-${String(report.id)}`} report={report} />)}
 		</div>
 	);
 }

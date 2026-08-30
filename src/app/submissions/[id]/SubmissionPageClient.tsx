@@ -64,7 +64,8 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const reportThreads = submission?.reportThreads ?? [];
 	const providerReports = submission?.providerReports ?? [];
 	const abuseMailReports = submission?.abuseMailReports ?? [];
-	const reportCount = reportThreads.length + providerReports.length + abuseMailReports.length;
+	const abuseProviderReports = submission?.abuseProviderReports ?? [];
+	const reportCount = reportThreads.length + providerReports.length + abuseMailReports.length + abuseProviderReports.length;
 
 	const defaultTab = "runs";
 
@@ -487,7 +488,13 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 					</TabsContent>
 				) : null}
 				<TabsContent value="reports" className="space-y-4 mt-4">
-					<ReportThreadTimeline threads={reportThreads} providerReports={providerReports} abuseMailReports={abuseMailReports} artifacts={submission.artifacts} />
+					<ReportThreadTimeline
+						threads={reportThreads}
+						providerReports={providerReports}
+						abuseMailReports={abuseMailReports}
+						abuseProviderReports={abuseProviderReports}
+						artifacts={submission.artifacts}
+					/>
 				</TabsContent>
 				<TabsContent value="runs" className="space-y-4 mt-4">
 					<AnalysisProgress streamId={submission.id} status={submission.status} />
