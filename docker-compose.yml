@@ -39,6 +39,11 @@ services:
       ABUSE_OPENAI_API_BASE_URL: ${ABUSE_OPENAI_API_BASE_URL:-${OPENAI_API_BASE_URL:-https://api.openai.com/v1}}
       ABUSE_OPENAI_TIMEOUT_MS: ${ABUSE_OPENAI_TIMEOUT_MS:-45000}
       ABUSE_EMAIL_DRAFT_MODEL: ${ABUSE_EMAIL_DRAFT_MODEL:-${OPENAI_MODEL:-gpt-5.5}}
+      # Cloudflare Turnstile solving uses the documented Death by Captcha API
+      # and the same outbound proxy as the browser session.
+      DEATHBYCAPTCHA_USERNAME: ${DEATHBYCAPTCHA_USERNAME:-}
+      DEATHBYCAPTCHA_PASSWORD: ${DEATHBYCAPTCHA_PASSWORD:-}
+      PROXY_URL: ${PROXY_URL:-}
       ABUSE_NETCRAFT_REPORTER_EMAIL: ${ABUSE_NETCRAFT_REPORTER_EMAIL:-support@phishing.support}
       # These are required even while provider routes are rollout-gated: they
       # protect idempotency responses and bearer-authorized artifact reads.

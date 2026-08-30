@@ -1,8 +1,10 @@
 import type {
 	ProviderSubmissionContext,
+	ProviderSubmissionPreflight,
 	ProviderSubmissionPreparation,
 	ProviderSubmissionSuccess,
 } from "../submission_contracts";
+import { solveDeathByCaptchaToken } from "../../captcha/death_by_captcha";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { getProviderProxy } from "../proxy";
 import { recordValue, routeContext } from "../../worker/shared";
@@ -10,9 +12,16 @@ import { recordValue, routeContext } from "../../worker/shared";
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import { buildCloudflareFormPayload, type CloudflareFormPayload } from "./form";
 import { cloudflareServiceIdentity } from "./identity";
-import { solveCloudflareAbuseTurnstile } from "./turnstile";
+import {
+	dismissCloudflareConsentBanner,
+	isCloudflareManagedChallenge,
+	makeCloudflareClearanceCookieUsable,
+	resolveCloudflareEdgeChallenge,
+	solveCloudflareAbuseTurnstile,
+	type CloudflareTurnstileSession,
+} from "./turnstile";
 
-const cloudflareUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
+const fallbackCloudflareUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
 
 type CloudflareSubmissionPayload = {
 	adapter: "cloudflare_abuse_phishing_v1";
@@ -24,10 +33,16 @@ type CloudflareResponse = {
 	ok(): boolean;
 	status(): number;
 	text(): Promise<string>;
+	headers?(): Record<string, string>;
 };
 
 function stringField(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim() : typeof value === "number" && Number.isFinite(value) ? String(value) : undefined;
+}
+
+function firstReportId(value: unknown): string | undefined {
+	if (Array.isArray(value)) return value.map(stringField).find(Boolean);
+	return stringField(value);
 }
 
 function parseStoredPayload(value: Record<string, unknown>): CloudflareSubmissionPayload | undefined {
@@ -89,6 +104,13 @@ export async function prepareCloudflareSubmission(context: ProviderSubmissionCon
 /** Interpret an explicit Cloudflare endpoint response after the form click. */
 export async function parseCloudflareSubmissionResponse(response: CloudflareResponse, finalUrl: string, target: string): Promise<ProviderSubmissionSuccess> {
 	const body = await response.text();
+	const headers = response.headers?.() ?? {};
+	const challengeResponse = headers["cf-mitigated"]?.toLowerCase() === "challenge"
+		|| (response.status() === 403 && /<title>\s*(?:just a moment|sorry, you have been blocked)/i.test(body));
+	if (challengeResponse) {
+		const ray = headers["cf-ray"] ? ` (Ray ID ${headers["cf-ray"]})` : "";
+		throw new Error(`Cloudflare challenged the abuse-form request${ray}; no provider confirmation was received.`);
+	}
 	if (!response.ok()) {
 		if (response.status() >= 400 && response.status() < 500) {
 			throw new ProviderSubmissionRejectedError(`Cloudflare abuse report was rejected with HTTP ${response.status()}: ${body.slice(0, 500)}`);
@@ -107,62 +129,176 @@ export async function parseCloudflareSubmissionResponse(response: CloudflareResp
 	if (json.success === false || (Array.isArray(json.errors) && json.errors.length > 0)) {
 		throw new ProviderSubmissionRejectedError(`Cloudflare abuse report was rejected: ${body.slice(0, 1_000)}`);
 	}
-	if (json.success !== true) {
+	if (json.result === "failure") {
+		throw new ProviderSubmissionRejectedError(`Cloudflare abuse report was rejected: ${body.slice(0, 1_000)}`);
+	}
+	if (json.success !== true && json.result !== "success") {
 		throw new Error("Cloudflare abuse report did not include an explicit success confirmation.");
 	}
 
 	return {
-		confirmationId: stringField(json.id) ?? stringField(json.report_id) ?? stringField(json.case_id),
-		confirmationText: stringField(json.message) ?? body.slice(0, 2_000),
+		confirmationId: stringField(json.id) ?? stringField(json.report_id) ?? stringField(json.case_id) ?? firstReportId(json.report_ids),
+		confirmationText: stringField(json.message) ?? stringField(json.msg) ?? body.slice(0, 2_000),
 		finalUrl,
 		submittedTargets: [target],
 	};
 }
 
-/** Submit one already-persisted Cloudflare form payload. */
-export async function submitCloudflareSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionSuccess> {
+type CloudflareApiForm = {
+	name: string;
+	email: string;
+	email2: string;
+	title: string;
+	company: string;
+	tele: string;
+	urls: string;
+	justification: string;
+	original_work: string;
+	reported_country: string;
+	reported_user_agent: string;
+	comments: string;
+	host_notification: "send-anon";
+	owner_notification: "send-anon";
+	dsa_attestation: true;
+	act: "abuse_phishing";
+	"cf-turnstile-response": string;
+};
+
+/** Match the exact request shape sent by Cloudflare's current form client. */
+export function buildCloudflareApiForm(
+	form: CloudflareFormPayload,
+	token: string,
+	reportedUserAgent = fallbackCloudflareUserAgent,
+): CloudflareApiForm {
+	if (!token.trim()) throw new Error("Cloudflare Turnstile token must not be empty.");
+	if (!reportedUserAgent.trim()) throw new Error("Cloudflare browser user agent must not be empty.");
+	return {
+		name: form.name,
+		email: form.email,
+		email2: form.emailConfirmation,
+		title: "",
+		company: form.company,
+		tele: "",
+		urls: form.urls,
+		justification: form.justification,
+		original_work: form.originalWork,
+		reported_country: form.reportedCountry,
+		reported_user_agent: reportedUserAgent,
+		comments: "",
+		host_notification: "send-anon",
+		owner_notification: "send-anon",
+		dsa_attestation: true,
+		act: "abuse_phishing",
+		"cf-turnstile-response": token,
+	};
+}
+
+type CloudflareApiResponse = {
+	ok: boolean;
+	status: number;
+	body: string;
+	cfMitigated: string | null;
+	cfRay: string | null;
+};
+
+export function isCloudflareEdgeChallenge(response: Pick<CloudflareApiResponse, "status" | "cfMitigated" | "body">): boolean {
+	return isCloudflareManagedChallenge({
+		status: response.status,
+		headers: response.cfMitigated ? { "cf-mitigated": response.cfMitigated } : {},
+		body: response.body,
+	});
+}
+
+async function postCloudflareApiOnce(page: CloudflareTurnstileSession["page"], form: CloudflareApiForm, token: string): Promise<CloudflareApiResponse> {
+	return page.evaluate(async ({ body, turnstileToken }) => {
+		const response = await fetch("/api/v2/form/abuse_phishing", {
+			method: "POST",
+			credentials: "include",
+			signal: AbortSignal.timeout(15_000),
+			headers: {
+				"Content-Type": "application/json",
+				"X-Turnstile-Token": turnstileToken,
+			},
+			body: JSON.stringify(body),
+		});
+		return {
+			ok: response.ok,
+			status: response.status,
+			body: (await response.text()).slice(0, 100_000),
+			cfMitigated: response.headers.get("cf-mitigated"),
+			cfRay: response.headers.get("cf-ray"),
+		};
+	}, { body: form, turnstileToken: token });
+}
+
+async function refreshCloudflareTurnstileToken(session: CloudflareTurnstileSession): Promise<string> {
+	return solveDeathByCaptchaToken({
+		type: 12,
+		parametersField: "turnstile_params",
+		parameters: {
+			proxy: session.proxy.url,
+			proxytype: "HTTP",
+			sitekey: session.siteKey,
+			pageurl: CLOUDFLARE_PROVIDER.formUrl,
+		},
+	});
+}
+
+/**
+ * The API endpoint is protected by a separate managed edge challenge. It is
+ * safe to retry exactly once when Cloudflare explicitly identifies the first
+ * response as a challenge: that response was generated at the edge and was
+ * not forwarded to the abuse-form handler.
+ */
+async function postCloudflareApi(session: CloudflareTurnstileSession, form: CloudflareApiForm): Promise<CloudflareApiResponse> {
+	let token = session.token;
+	let response = await postCloudflareApiOnce(session.page, form, token);
+	if (!isCloudflareEdgeChallenge(response)) return response;
+
+	await resolveCloudflareEdgeChallenge(session.page, response.body);
+	await dismissCloudflareConsentBanner(session.page).catch(() => undefined);
+	await makeCloudflareClearanceCookieUsable(session.context, CLOUDFLARE_PROVIDER.formUrl).catch(() => undefined);
+	// Cloudflare may consume the first token while issuing the edge challenge;
+	// obtain a fresh token after clearance rather than retrying a stale one.
+	token = await refreshCloudflareTurnstileToken(session);
+	session.token = token;
+	response = await postCloudflareApiOnce(session.page, { ...form, "cf-turnstile-response": token }, token);
+	return response;
+}
+
+/**
+ * Obtain ephemeral browser/Turnstile state before the irreversible provider
+ * marker. The token is deliberately kept out of the durable provider run.
+ */
+export async function prepareCloudflareExternalSubmission(_context: ProviderSubmissionContext): Promise<ProviderSubmissionPreflight> {
+	const session = await solveCloudflareAbuseTurnstile();
+	return {
+		state: session,
+		dispose: async () => {
+			await session.browser.close();
+		},
+	};
+}
+
+/** Submit one already-persisted Cloudflare form payload with an ephemeral token. */
+export async function submitCloudflareSubmission(
+	context: ProviderSubmissionContext,
+	preflight?: ProviderSubmissionPreflight,
+): Promise<ProviderSubmissionSuccess> {
 	const payload = parseStoredPayload(context.payload);
 	if (!payload) throw new Error("The persisted Cloudflare provider payload is malformed.");
-
-	const { page, browser } = await solveCloudflareAbuseTurnstile();
-	try {
-		const { form } = payload;
-		await page.locator('[name="name"]').fill(form.name);
-		await page.locator('[name="email"]').fill(form.email);
-		await page.locator('[name="email2"]').fill(form.emailConfirmation);
-		await page.locator('[name="company"]').fill(form.company);
-		await page.locator('[name="urls"]').fill(form.urls);
-		await page.locator('[name="justification"]').fill(form.justification);
-		await page.locator('[name="original_work"]').fill(form.originalWork);
-		await page.locator('[name="reported_country"]').evaluate((input, country) => {
-			const field = input as HTMLInputElement;
-			field.value = country;
-			field.dispatchEvent(new Event("input", { bubbles: true }));
-			field.dispatchEvent(new Event("change", { bubbles: true }));
-		}, form.reportedCountry);
-		await page.locator('[name="reported_user_agent"]').fill(cloudflareUserAgent);
-		await page.locator('[name="dsa_attestation"]').check();
-
-		const dsaCertification = page.locator(
-			`xpath=//span[starts-with(normalize-space(.),"DSA certification")]` +
-				`/ancestor::*[self::div][1]` +
-				`//following::input[@type="checkbox"][1]`,
-		);
-		if ((await dsaCertification.count()) === 0) throw new Error("Failed to find Cloudflare DSA certification checkbox.");
-		await dsaCertification.first().check();
-
-		const responsePromise = page.waitForResponse((response) => response.url().includes(CLOUDFLARE_PROVIDER.responsePath));
-		await page.locator('button[type="submit"]').click();
-		const response = await responsePromise;
-		return parseCloudflareSubmissionResponse(response, page.url(), payload.target);
-	} finally {
-		try {
-			await browser.close();
-		} catch (error) {
-			// Browser cleanup does not change a known provider response. Do not
-			// turn a confirmed submission into a duplicate-risk retry merely
-			// because the local browser process exited noisily.
-			console.warn("Cloudflare abuse browser cleanup failed:", error);
-		}
+	const session = preflight?.state as CloudflareTurnstileSession | undefined;
+	if (!session?.page || !session.token) {
+		throw new Error("Cloudflare submission requires a preflight Turnstile session.");
 	}
+	const response = await postCloudflareApi(session, buildCloudflareApiForm(payload.form, session.token, session.userAgent));
+	return parseCloudflareSubmissionResponse({
+		ok: () => response.ok,
+		status: () => response.status,
+		text: async () => response.body,
+		headers: () => ({
+			...(response.cfMitigated ? { "cf-mitigated": response.cfMitigated } : {}),
+			...(response.cfRay ? { "cf-ray": response.cfRay } : {}),
+		}),
+	}, session.page.url(), payload.target);
 }

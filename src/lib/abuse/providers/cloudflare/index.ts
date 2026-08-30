@@ -1,13 +1,19 @@
 import type { ProviderSubmissionProvider } from "../submission_contracts";
 
 import { CLOUDFLARE_PROVIDER } from "./definition";
-import { prepareCloudflareSubmission, submitCloudflareSubmission } from "./submission";
+import {
+	prepareCloudflareExternalSubmission,
+	prepareCloudflareSubmission,
+	submitCloudflareSubmission,
+} from "./submission";
 
 /** The sole executable owner of Cloudflare's abuse-form contract. */
 export const cloudflareProvider: ProviderSubmissionProvider = {
 	definition: CLOUDFLARE_PROVIDER,
 	prepareSubmission: prepareCloudflareSubmission,
+	prepareExternalSubmission: prepareCloudflareExternalSubmission,
 	submit: submitCloudflareSubmission,
+	submitPrepared: submitCloudflareSubmission,
 };
 
 export { CLOUDFLARE_PROVIDER } from "./definition";

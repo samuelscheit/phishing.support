@@ -32,6 +32,18 @@ export type ProviderSubmissionContext = {
 	payload: Record<string, unknown>;
 };
 
+/**
+ * Ephemeral state prepared immediately before the durable provider-call
+ * marker. It is intentionally not persisted: short-lived browser sessions,
+ * CAPTCHA tokens, and similar secrets must never become part of a provider
+ * run's immutable payload. The optional disposer is best-effort cleanup and
+ * must never turn a provider-confirmed result into a failure.
+ */
+export type ProviderSubmissionPreflight = {
+	readonly state: unknown;
+	readonly dispose?: () => Promise<void>;
+};
+
 /** A provider can decline a report before submission without leaving external state ambiguous. */
 export class ProviderSubmissionRejectedError extends Error {
 	constructor(message: string) {
@@ -71,8 +83,17 @@ export type ProviderSubmissionProvider = {
 	/**
 	 * Optional pre-marker validation and payload construction. It must not make
 	 * an irreversible provider request; generic execution writes the durable
-	 * marker immediately before calling `submit`.
+	 * marker immediately before calling the provider's irreversible submit
+	 * handler.
 	 */
 	prepareSubmission?(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation>;
+	/**
+	 * Prepare ephemeral state without crossing the provider's complaint
+	 * boundary. This runs after the durable run exists but before its
+	 * `submission_started` marker. Failures remain safely retryable.
+	 */
+	prepareExternalSubmission?(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreflight>;
 	submit(context: ProviderSubmissionContext): Promise<ProviderSubmissionSuccess>;
+	/** Provider entry point that consumes the ephemeral preflight state, when needed. */
+	submitPrepared?(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess>;
 };

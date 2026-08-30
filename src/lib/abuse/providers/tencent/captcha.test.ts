@@ -40,8 +40,8 @@ describe("Tencent CAPTCHA solver", () => {
 
 		expect(result).toMatchObject({ ticket: "solved", randstr: "rand" });
 		expect(requests.map((entry) => entry.url)).toEqual([
-			"http://api.dbcapi.me/api/captcha",
-			"http://api.dbcapi.me/api/captcha/42",
+			"https://api.dbcapi.me/api/captcha",
+			"https://api.dbcapi.me/api/captcha/42",
 		]);
 		expect(requests[0]?.init?.method).toBe("POST");
 		expect(pauses).toEqual([1_000]);

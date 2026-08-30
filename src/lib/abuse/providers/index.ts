@@ -37,6 +37,7 @@ export type {
 export type {
 	ProviderSubmissionContext,
 	ProviderSubmissionDefinition,
+	ProviderSubmissionPreflight,
 	ProviderSubmissionPreparation,
 	ProviderSubmissionProvider,
 	ProviderSubmissionSuccess,

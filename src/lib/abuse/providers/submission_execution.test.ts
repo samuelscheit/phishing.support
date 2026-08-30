@@ -108,6 +108,58 @@ describe("provider submission execution boundary", () => {
 		expect(submitCalls).toBe(1);
 	});
 
+	test("keeps ephemeral preflight state out of the durable payload and disposes it after settlement", async () => {
+		let preflightCalls = 0;
+		let submitPreparedCalls = 0;
+		let disposed = 0;
+		const provider = testProvider({
+			prepareExternalSubmission: async (context) => {
+				preflightCalls += 1;
+				expect(await AbuseRepository.getProviderRun(context.runId!)).toMatchObject({ executionStatus: "starting" });
+				return {
+					state: { token: "short-lived-token" },
+					dispose: async () => { disposed += 1; },
+				};
+			},
+			submitPrepared: async (context, preflight) => {
+				submitPreparedCalls += 1;
+				expect(await AbuseRepository.getProviderRun(context.runId!)).toMatchObject({ executionStatus: "submission_started" });
+				expect(preflight.state).toEqual({ token: "short-lived-token" });
+				return { submittedTargets: ["example.com"] };
+			},
+		});
+		const { route } = await createProviderRoute(provider);
+
+		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toMatchObject({ outcome: "submitted" });
+		expect(preflightCalls).toBe(1);
+		expect(submitPreparedCalls).toBe(1);
+		expect(disposed).toBe(1);
+		const [run] = await AbuseRepository.listProviderRunsForReport(route.reportId);
+		expect(run?.providerPayload).not.toHaveProperty("token");
+	});
+
+	test("leaves a failed preflight retryable before the durable submission marker", async () => {
+		let submitCalls = 0;
+		const provider = testProvider({
+			prepareExternalSubmission: async () => { throw new Error("Turnstile solver temporarily unavailable."); },
+			submit: async () => { submitCalls += 1; return { submittedTargets: ["example.com"] }; },
+		});
+		const { route } = await createProviderRoute(provider);
+
+		await expect(executeProviderSubmission({ routeId: route.id, provider })).rejects.toThrow("Turnstile solver temporarily unavailable");
+		expect(submitCalls).toBe(0);
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "running" });
+		const [run] = await AbuseRepository.listProviderRunsForReport(route.reportId);
+		expect(run).toMatchObject({ executionStatus: "starting" });
+
+		const recoveredProvider = testProvider({
+			prepareExternalSubmission: async () => ({ state: { ready: true }, dispose: async () => {} }),
+			submitPrepared: async () => ({ submittedTargets: ["example.com"] }),
+		});
+		await expect(executeProviderSubmission({ routeId: route.id, provider: recoveredProvider })).resolves.toMatchObject({ outcome: "submitted" });
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "submitted" });
+	});
+
 	test("settles insufficient evidence before creating a run or crossing the provider boundary", async () => {
 		let submitted = false;
 		const provider = testProvider({

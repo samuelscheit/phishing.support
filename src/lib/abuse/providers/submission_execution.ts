@@ -5,6 +5,7 @@ import { providerDefinitionMatchesPin } from "./definition";
 import {
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionContext,
+	type ProviderSubmissionPreflight,
 	type ProviderSubmissionPreparation,
 	type ProviderSubmissionProvider,
 	type ProviderSubmissionSuccess,
@@ -56,6 +57,16 @@ function isSubmissionSuccess(value: unknown): value is ProviderSubmissionSuccess
 
 function correlationKey(provider: ProviderSubmissionProvider, routeId: bigint): string {
 	return `provider-submission:${provider.definition.key}:${routeId.toString()}`;
+}
+
+/** Cleanup must never rewrite the provider outcome after an external call. */
+async function disposePreflight(preflight: ProviderSubmissionPreflight | undefined): Promise<void> {
+	if (!preflight?.dispose) return;
+	try {
+		await preflight.dispose();
+	} catch (error) {
+		console.warn("Provider submission preflight cleanup failed:", error);
+	}
 }
 
 async function markUnknownExternal(params: { routeId: bigint; runId?: bigint; error: string; reason: string }): Promise<never> {
@@ -126,10 +137,12 @@ async function settleInsufficientEvidence(routeId: bigint, reason: string): Prom
  * Execute a direct provider complaint behind one durable, no-replay boundary.
  *
  * A provider prepares an immutable payload while the route is still queued or
- * verified. Only then does this helper create the run, transition the route to
- * `running`, write `submission_started`, and invoke the irreversible
- * provider-owned `submit` implementation. Any unexpected result after that
- * marker is treated as ambiguous and is never retried automatically.
+ * verified. The durable run is then created before any ephemeral provider
+ * preflight work (for example, obtaining a short-lived CAPTCHA token). Only
+ * after that preflight succeeds does this helper write `submission_started`
+ * and invoke the irreversible provider-owned `submit` implementation. Any
+ * unexpected result after that marker is treated as ambiguous and is never
+ * retried automatically.
  */
 export async function executeProviderSubmission(params: {
 	routeId: bigint;
@@ -222,7 +235,30 @@ export async function executeProviderSubmission(params: {
 		});
 	}
 
-	if (!(await AbuseRepository.prepareProviderSubmission(run.id))) {
+	const context: ProviderSubmissionContext = { routeId: route.id, runId: run.id, payload: run.providerPayload };
+	let preflight: ProviderSubmissionPreflight | undefined;
+	if (params.provider.prepareExternalSubmission) {
+		// This hook is deliberately before the durable provider-call marker. A
+		// solver/browser failure cannot have filed the complaint, so the worker
+		// may retry the same durable run instead of incorrectly fencing it as an
+		// ambiguous provider submission. Providers must clean up partially-created
+		// ephemeral state if their hook itself rejects.
+		preflight = await params.provider.prepareExternalSubmission(context);
+	}
+	if (preflight && !params.provider.submitPrepared) {
+		await disposePreflight(preflight);
+		throw new Error(`Provider ${params.provider.definition.key} returned preflight state without a prepared submit handler.`);
+	}
+
+	let markerAcquired: boolean;
+	try {
+		markerAcquired = await AbuseRepository.prepareProviderSubmission(run.id);
+	} catch (error) {
+		await disposePreflight(preflight);
+		throw error;
+	}
+	if (!markerAcquired) {
+		await disposePreflight(preflight);
 		return markUnknownExternal({
 			routeId: route.id,
 			runId: run.id,
@@ -231,11 +267,13 @@ export async function executeProviderSubmission(params: {
 		});
 	}
 
-	const context: ProviderSubmissionContext = { routeId: route.id, runId: run.id, payload: run.providerPayload };
 	let success: ProviderSubmissionSuccess;
 	try {
-		success = await params.provider.submit(context);
+		success = preflight
+			? await params.provider.submitPrepared!(context, preflight)
+			: await params.provider.submit(context);
 	} catch (error) {
+		await disposePreflight(preflight);
 		if (error instanceof ProviderSubmissionRejectedError) {
 			return settleKnownRejection({ routeId: route.id, runId: run.id, reason: errorText(error) });
 		}
@@ -246,6 +284,7 @@ export async function executeProviderSubmission(params: {
 			reason: "provider_submission_ambiguous",
 		});
 	}
+	await disposePreflight(preflight);
 	if (!isSubmissionSuccess(success)) {
 		return markUnknownExternal({
 			routeId: route.id,
