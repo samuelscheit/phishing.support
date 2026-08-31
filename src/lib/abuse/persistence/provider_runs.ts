@@ -204,6 +204,140 @@ export async function settleProviderRun(params: {
 }
 
 /**
+ * Settle a direct-provider run after a read-only external reconciliation.
+ *
+ * Normal settlement intentionally refuses `unknown_external_state` because a
+ * late callback must never overwrite an unresolved side effect. Reconciliation
+ * is a separate, explicit compare-and-set path: the caller must first verify a
+ * provider receipt (and, where possible, its submitted target) without making
+ * another provider submission. This lets an operator repair a parser/schema
+ * drift incident without weakening the no-replay boundary.
+ */
+export async function reconcileProviderRun(params: {
+	runId: bigint;
+	providerRegistryKey: string;
+	confirmationId: string;
+	confirmationText?: string;
+	finalUrl?: string;
+	submittedTargets: string[];
+	reconciliationReason?: string;
+}): Promise<boolean> {
+	if (!params.confirmationId.trim()) throw new Error("A reconciled provider run requires a confirmation identifier.");
+	if (params.submittedTargets.length === 0 || params.submittedTargets.some((target) => !target.trim())) {
+		throw new Error("A reconciled provider run requires at least one submitted target.");
+	}
+	const db = await getDb();
+	return db.transaction(
+		(tx) => {
+			const run = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, params.runId)).get();
+			if (!run) return false;
+			const route = tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, run.routeId)).get();
+			if (!route || route.providerRegistryKey !== params.providerRegistryKey) return false;
+			if (route.status !== "unknown_external_state" || run.executionStatus !== "unknown_external_state") return false;
+			// A route can only be repaired from its current unresolved run. If an
+			// older run somehow remains alongside a newer attempt, accepting the
+			// older receipt could settle the route with evidence for the wrong
+			// provider request.
+			const latestRun = tx
+				.select({ id: abuseProviderRuns.id })
+				.from(abuseProviderRuns)
+				.where(eq(abuseProviderRuns.routeId, route.id))
+				.orderBy(desc(abuseProviderRuns.createdAt), desc(abuseProviderRuns.id))
+				.limit(1)
+				.get();
+			if (!latestRun || latestRun.id !== run.id) return false;
+
+			const timestamp = now();
+			tx.update(abuseProviderRuns)
+				.set({
+					executionStatus: "completed",
+					confirmationId: params.confirmationId,
+					confirmationText: params.confirmationText,
+					finalUrl: params.finalUrl,
+					submittedTargets: [...params.submittedTargets],
+					failureReason: null,
+					updatedAt: timestamp,
+				})
+				.where(and(eq(abuseProviderRuns.id, run.id), eq(abuseProviderRuns.executionStatus, "unknown_external_state")))
+				.run();
+			recordEvent(tx, {
+				reportId: run.reportId,
+				targetId: route.targetId,
+				routeId: route.id,
+				runId: run.id,
+				eventType: "provider_run.reconciled",
+				data: {
+					providerRegistryKey: params.providerRegistryKey,
+					confirmationId: params.confirmationId,
+					reconciliationReason: params.reconciliationReason ?? "verified_external_receipt",
+				},
+			});
+
+			// The original `submit_provider` job has no run ID because the run is
+			// created while the job is executing. Close only unresolved jobs for
+			// this exact route; a later/manual job must not be rewritten.
+			const unresolvedJobs = tx
+				.select()
+				.from(abuseJobs)
+				.where(and(
+					eq(abuseJobs.routeId, route.id),
+					eq(abuseJobs.jobType, "submit_provider"),
+					eq(abuseJobs.status, "unknown_external_state"),
+				))
+				.all();
+			for (const job of unresolvedJobs) {
+				tx.update(abuseJobs)
+					.set({
+						status: "completed",
+						leaseOwner: null,
+						leaseExpiresAt: null,
+						unknownExternalState: false,
+						lastError: null,
+						updatedAt: timestamp,
+					})
+					.where(and(eq(abuseJobs.id, job.id), eq(abuseJobs.status, "unknown_external_state")))
+					.run();
+				recordEvent(tx, {
+					reportId: route.reportId,
+					targetId: route.targetId,
+					routeId: route.id,
+					runId: run.id,
+					jobId: job.id,
+					eventType: "job.reconciled",
+					data: { from: "unknown_external_state", to: "completed", reason: params.reconciliationReason ?? "verified_external_receipt" },
+				});
+			}
+
+			const routeUpdated = tx
+				.update(abuseProviderRoutes)
+				.set({ status: "submitted", updatedAt: timestamp })
+				.where(and(eq(abuseProviderRoutes.id, route.id), eq(abuseProviderRoutes.status, "unknown_external_state")))
+				.returning({ id: abuseProviderRoutes.id })
+				.get();
+			if (!routeUpdated) throw new Error("Provider reconciliation could not update the unresolved route.");
+			recordEvent(tx, {
+				reportId: route.reportId,
+				targetId: route.targetId,
+				routeId: route.id,
+				runId: run.id,
+				eventType: "route.status_changed",
+				data: {
+					from: route.status,
+					to: "submitted",
+					reason: params.reconciliationReason ?? "verified_external_receipt",
+				},
+			});
+			recomputeReportStatusInTransaction(tx, route.reportId, {
+				reason: "provider_run_reconciled",
+				routeId: route.id.toString(),
+			});
+			return true;
+		},
+		{ behavior: "immediate" },
+	);
+}
+
+/**
  * Persist the durable pre-call marker for a direct provider submission. The
  * immutable provider payload is already stored on the run; once this marker
  * succeeds, a restart must treat a missing provider response as ambiguous

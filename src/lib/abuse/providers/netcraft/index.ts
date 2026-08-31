@@ -2,6 +2,7 @@ import type { ProviderReportPreviewContext, ProviderSubmissionProvider } from ".
 import { NETCRAFT_PROVIDER } from "./definition";
 import { prepareNetcraftSubmission, submitNetcraftSubmission } from "./submission";
 import { makeNetcraftReason } from "./payload";
+import { reconcileNetcraftProviderRun } from "./reconcile";
 
 /** Supplemental Netcraft route for every report with one or more observed URLs. */
 export const netcraftProvider: ProviderSubmissionProvider = {
@@ -18,3 +19,4 @@ export const netcraftProvider: ProviderSubmissionProvider = {
 };
 
 export { NETCRAFT_PROVIDER } from "./definition";
+export { reconcileNetcraftProviderRun } from "./reconcile";
