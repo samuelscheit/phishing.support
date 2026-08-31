@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { AnalysisLogs } from "@/components/AnalysisLogs";
-import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { SubmissionStatus } from "@/components/SubmissionStatus";
 import { ExternalLinkConfirm } from "@/components/ExternalLinkConfirm";
 import { UrlParts } from "@/components/UrlParts";
@@ -497,22 +496,22 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 					/>
 				</TabsContent>
 				<TabsContent value="runs" className="space-y-4 mt-4">
-					<AnalysisProgress streamId={submission.id} status={submission.status} />
-
 					{runsToShow.length > 0 ? (
 						runsToShow.map((run: any) => (
 							<div key={run.id} className={isRunning ? "overflow-hidden" : "overflow-hidden flex flex-col h-[90vh]"}>
-								<div className="py-3 shrink-0">
-									<div className="flex justify-between items-center">
-										<CardTitle className="text-sm font-mono uppercase">AI Analysis</CardTitle>
-										<Badge variant={run.status === "completed" ? "default" : "outline"}>{run.status}</Badge>
-									</div>
-								</div>
 								<div className={cn(isRunning ? "p-0" : "p-0 flex-1 min-h-0", "pt-2")}>
-									<AnalysisLogs streamId={run.id} output={run.output} className={isRunning ? undefined : "h-full"} />
+									<AnalysisLogs
+										streamId={run.id}
+										progressStreamId={isRunning ? submission.id : undefined}
+										status={run.status}
+										output={run.output}
+										className={isRunning ? undefined : "h-full"}
+									/>
 								</div>
 							</div>
 						))
+					) : isRunning ? (
+						<AnalysisLogs streamId={submission.id} status={submission.status} progressOnly />
 					) : (
 						<div className="text-center py-10 text-muted-foreground">No analysis runs yet.</div>
 					)}
