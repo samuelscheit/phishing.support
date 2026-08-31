@@ -70,7 +70,7 @@ async function createUnresolvedCase(options: { diagnosticId?: string; job?: bool
 	return { ...created, target, route, run, job };
 }
 
-function mockedReceiptFetch(expectedUrl: string, options: { mismatch?: boolean } = {}): { fetch: NetcraftFetch; calls: string[] } {
+function mockedReceiptFetch(expectedUrl: string, options: { mismatch?: boolean; extra?: boolean } = {}): { fetch: NetcraftFetch; calls: string[] } {
 	const calls: string[] = [];
 	return {
 		calls,
@@ -86,7 +86,10 @@ function mockedReceiptFetch(expectedUrl: string, options: { mismatch?: boolean }
 				return new Response(JSON.stringify({
 					filtered_count: 1,
 					total_count: 1,
-					urls: [{ url: options.mismatch ? "https://other.example/" : "https://shop.hd-media.space/", url_state: "malicious" }],
+					urls: [
+						{ url: options.mismatch ? "https://other.example/" : "https://shop.hd-media.space/", url_state: "malicious" },
+						...(options.extra ? [{ url: "https://login.shop.hd-media.space/extra", url_state: "malicious" }] : []),
+					],
 				}));
 			}
 			return new Response("unexpected URL", { status: 500 });
@@ -167,5 +170,15 @@ describe("Netcraft unknown-external-state reconciliation", () => {
 		expect(mocked.calls).toHaveLength(2);
 		expect(await AbuseRepository.getRoute(context.route.id)).toMatchObject({ status: "unknown_external_state" });
 		expect(await AbuseRepository.getProviderRun(context.run.id)).toMatchObject({ executionStatus: "unknown_external_state" });
+	});
+
+	test("does not associate a receipt that contains an extra in-scope URL", async () => {
+		const context = await createUnresolvedCase({ diagnosticId: submissionId });
+		const mocked = mockedReceiptFetch(submissionId, { extra: true });
+		await expect(reconcileNetcraftProviderRun({ runId: context.run.id, submissionId, fetch: mocked.fetch })).resolves.toEqual({
+			outcome: "not_eligible",
+			reason: "netcraft_receipt_target_mismatch",
+		});
+		expect(await AbuseRepository.getRoute(context.route.id)).toMatchObject({ status: "unknown_external_state" });
 	});
 });

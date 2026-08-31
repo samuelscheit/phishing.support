@@ -91,7 +91,10 @@ export async function reconcileNetcraftProviderRun(params: {
 			.map((entry) => normalizeObservedUrlForDomain(entry.url, target.normalizedTarget))
 			.filter((url): url is string => Boolean(url)),
 	);
-	if (expectedUrls.some((url) => !receivedUrls.has(url))) {
+	// A receipt for another submission could contain this target alongside
+	// unrelated URLs. Require the canonical sets to be identical, not merely a
+	// subset, before associating the external receipt with this local run.
+	if (receivedUrls.size !== expectedUrls.length || expectedUrls.some((url) => !receivedUrls.has(url))) {
 		return { outcome: "not_eligible", reason: "netcraft_receipt_target_mismatch" };
 	}
 

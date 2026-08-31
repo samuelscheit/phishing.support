@@ -1,3 +1,5 @@
+import { fetchJson, RequestTimeoutError, type FetchImplementation } from "../network/bounded_fetch";
+
 export const NETCRAFT_REPORT_URLS_URL = "https://report.netcraft.com/api/v3/report/urls";
 export const NETCRAFT_REPORT_MAIL_URL = "https://report.netcraft.com/api/v3/report/mail";
 export const NETCRAFT_SUBMISSION_URL_PREFIX = "https://report.netcraft.com/api/v3/submission/";
@@ -154,45 +156,29 @@ async function fetchNetcraftJson(
 	url: string,
 	label: string,
 ): Promise<unknown> {
-	const controller = new AbortController();
-	const timeoutError = new Error(`Netcraft ${label} request timed out.`);
-	let timeout: ReturnType<typeof setTimeout> | undefined;
-	const deadline = new Promise<never>((_, reject) => {
-		timeout = setTimeout(() => {
-			controller.abort();
-			reject(timeoutError);
-		}, NETCRAFT_STATUS_REQUEST_TIMEOUT_MS);
-	});
 	try {
-		const response = await Promise.race([
-			request(url, {
-				method: "GET",
-				redirect: "error",
-				headers: { accept: "application/json" },
-				signal: controller.signal,
-			}),
-			deadline,
-		]);
-		const body = await Promise.race([
-			response.text(),
-			deadline,
-		]);
-		if (new TextEncoder().encode(body).byteLength > NETCRAFT_STATUS_MAX_BODY_BYTES) {
-			throw new Error(`Netcraft ${label} response exceeded the ${NETCRAFT_STATUS_MAX_BODY_BYTES}-byte safety limit.`);
-		}
-		if (!response.ok) throw new Error(`Netcraft ${label} request failed with HTTP ${response.status}: ${responseDetail(body)}`);
-		try {
-			return JSON.parse(body);
-		} catch {
-			throw new Error(`Netcraft ${label} request returned malformed JSON.`);
-		}
+		// Reuse the shared streaming reader/deadline so a provider response cannot
+		// consume unbounded memory while `response.text()` waits for EOF. GETs are
+		// intentionally not retried here: reconciliation is an operator action and
+		// should make one auditable read per endpoint.
+		return await fetchJson<unknown>(url, {
+			method: "GET",
+			redirect: "error",
+			headers: { accept: "application/json" },
+		}, {
+			fetch: request as FetchImplementation,
+			timeoutMs: NETCRAFT_STATUS_REQUEST_TIMEOUT_MS,
+			attempts: 1,
+			retryDelayMs: 0,
+			maxResponseBytes: NETCRAFT_STATUS_MAX_BODY_BYTES,
+		});
 	} catch (error) {
-		if (error === timeoutError || controller.signal.aborted) {
+		if (error instanceof RequestTimeoutError) {
 			throw new Error(`Netcraft ${label} request timed out.`);
 		}
-		throw error;
-	} finally {
-		if (timeout) clearTimeout(timeout);
+		const message = error instanceof Error ? error.message : String(error);
+		if (/not valid JSON/i.test(message)) throw new Error(`Netcraft ${label} request returned malformed JSON.`);
+		throw new Error(`Netcraft ${label} request failed: ${message}`);
 	}
 }
 
