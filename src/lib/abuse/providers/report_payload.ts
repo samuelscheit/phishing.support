@@ -84,8 +84,10 @@ const EVIDENCE_INDICATORS: readonly EvidenceIndicator[] = [
 
 const BRAND_PATTERNS: readonly RegExp[] = [
 	/\b(?:likely\s+)?impersonated\s+brand\s*:\s*(?:\*\*)?([^*\n|]{1,100})/i,
+	/\b(?:brand|impersonated\s+service|service)\s*:\s*(?:\*\*)?([^*\n|]{1,100})/i,
 	/\btarget\s+brand\s*:\s*(?:\*\*)?([^*\n|]{1,100})/i,
 	/\bbrand\s+impersonated\s*:\s*(?:\*\*)?([^*\n|]{1,100})/i,
+	/\bimpersonat(?:e|es|ing|ed)\s+(?:the\s+)?(?:\*\*)?([^*\n|.!?]{2,100})/i,
 	/\b(?:appears?|seems?)\s+to\s+impersonat(?:e|es|ing|ed)\s+(?:the\s+)?(?:\*\*)?([^*\n|.!?]{2,100})/i,
 	/\b([\p{L}][\p{L}\p{N}&.'’+-]{1,80})\s+impersonation\b/iu,
 ];
@@ -100,6 +102,7 @@ function safeNarrativeTarget(value: string | undefined, maximumCharacters = 255)
 
 /** Extract only a short display label; never forward a model-generated URL or instruction. */
 function extractedBrandName(description: string): string | undefined {
+	const genericLabels = new Set(["brand", "content", "page", "site", "text", "visual", "service", "website"]);
 	for (const pattern of BRAND_PATTERNS) {
 		const match = description.match(pattern);
 		if (!match?.[1]) continue;
@@ -113,7 +116,7 @@ function extractedBrandName(description: string): string | undefined {
 			.replace(/[,:;.!?]+$/, "")
 			.slice(0, 80)
 			.trim();
-		if (!candidate || /\b(?:ignore|previous\s+instructions|send|reveal|secret|password)\b/i.test(candidate)) continue;
+		if (!candidate || genericLabels.has(candidate.toLowerCase()) || /\b(?:ignore|previous\s+instructions|send|reveal|secret|password)\b/i.test(candidate)) continue;
 		return candidate;
 	}
 	return undefined;
@@ -215,6 +218,15 @@ export function buildProviderReportNarrative(params: ProviderReportNarrativeInpu
 	if (!Number.isSafeInteger(params.maximumLength) || params.maximumLength < 1) return undefined;
 	const description = compactProviderText(params.description);
 	if (!description) return undefined;
+	// Preserve line boundaries while extracting a short brand label. Running
+	// the regexes over the compacted analysis would merge Markdown list items
+	// (for example `Brand: TikTok` followed by the next bullet) and turn the
+	// following heading into part of the alleged brand name.
+	const extractionDescription = params.description
+		.normalize("NFKC")
+		// Keep LF/CR boundaries because the extractor uses them to terminate a
+		// Markdown field; remove the remaining control characters only.
+		.replace(/[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F]/g, " ");
 
 	const legalBrandUrl = params.legalBrandUrl === undefined
 		? undefined
@@ -224,7 +236,7 @@ export function buildProviderReportNarrative(params: ProviderReportNarrativeInpu
 	const provider = params.provider ?? "generic";
 	const target = safeNarrativeTarget(params.target, params.maximumLength <= 500 ? 240 : 255);
 	const copy = profileCopy(provider, target, params.observedUrls?.length ?? 0);
-	const brand = extractedBrandName(description);
+	const brand = extractedBrandName(extractionDescription);
 	// Small provider fields should never end halfway through an allegation.
 	// Keep the two strongest evidence categories rather than truncating a
 	// longer, grammatically incomplete analysis sentence.

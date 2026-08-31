@@ -71,6 +71,25 @@ The page uses TikTok branding, a fake login popup, discounted Coin packages, and
 		expect(tencent).not.toContain("Impersonated brand: Please");
 	});
 
+	test("extracts the labeled brand without swallowing adjacent Markdown fields", () => {
+		const narrative = buildProviderReportNarrative({
+			provider: "netcraft",
+			target: "shop.hd-media.space",
+			observedUrls: ["https://shop.hd-media.space/"],
+			description: [
+				"The page impersonates **TikTok's Coin Recharge service**.",
+				"",
+				"### Impersonated brand/service",
+				"- **Brand:** TikTok",
+				"- **Impersonated service:** TikTok Coins",
+			].join("\\n"),
+			maximumLength: 1_000,
+		});
+		expect(narrative).toContain("impersonate TikTok");
+		expect(narrative).not.toContain("TikTok -");
+		expect(narrative).not.toContain("Impersonated service");
+	});
+
 	test("fails closed for an invalid explicit brand URL rather than forwarding it", () => {
 		expect(buildProviderReportNarrative({
 			provider: "netcraft",
