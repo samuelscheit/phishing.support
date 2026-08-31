@@ -16,19 +16,19 @@ describe("buildCloudflareFormPayload", () => {
 			target: "example.com",
 			observedUrl: "https://login.example.com/collect",
 			description: "The page impersonates the protected brand and captures login credentials.",
-			legalBrandUrl: "https://brand.example/",
+			legalBrandUrl: "https://brand.example.com/",
 		});
 
 		expect(payload).toMatchObject({
 			email: "support@phishing.support",
 			emailConfirmation: "support@phishing.support",
 			urls: "https://login.example.com/collect",
-			originalWork: "https://brand.example/",
+			originalWork: "https://brand.example.com/",
 			dsaAttestation: true,
 			dsaCertification: true,
 		});
 		expect(payload.justification).toContain("Observed URL: https://login.example.com/collect");
-		expect(payload.justification).toContain("Legitimate brand URL: https://brand.example/");
+		expect(payload.justification).toContain("Legitimate brand URL: https://brand.example.com/");
 		expect(payload.justification).toContain("captures login credentials");
 	});
 

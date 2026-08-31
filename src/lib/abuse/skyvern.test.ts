@@ -4,6 +4,7 @@ import {
 	AbuseSkyvernAdapter,
 	isSafeSkyvernStorageUrl,
 	validateGenericProviderFormOutput,
+	buildGenericProviderFormTaskPayload,
 	type SkyvernClientPort,
 	type SkyvernTaskPayload,
 } from "./skyvern";
@@ -95,6 +96,25 @@ function genericOutput(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 describe("Skyvern SDK adapter boundary", () => {
+	test("gives the generic verified-provider portal a bounded provider-specific draft", () => {
+		const analysis = "## Verdict: phishing\nThe page impersonates TikTok, captures credentials, and asks for payment. Do not copy this entire analysis into the provider form.";
+		const payload = buildGenericProviderFormTaskPayload({
+			entryUrl: "https://abuse.provider.example.com/report",
+			allowedDomains: ["provider.example.com"],
+			target: "example.com",
+			allegationCategory: "phishing",
+			description: analysis,
+			observedUrls: ["https://login.example.com/collect"],
+			legalBrandUrl: "https://www.tiktok.com/coin",
+		});
+
+		expect(payload.prompt).toContain("Suspected phishing activity involving example.com");
+		expect(payload.prompt).toContain("Please investigate the reported activity");
+		expect(payload.prompt).not.toContain("## Verdict");
+		expect(payload.prompt).not.toContain("Do not copy this entire analysis");
+		expect(payload.prompt).toContain("https://www.tiktok.com/coin");
+	});
+
 	test("uses SDK-derived request shapes, no retries, and supported Buffer upload metadata", async () => {
 		const calls: RecordedCall[] = [];
 		const assertedHosts: string[] = [];

@@ -25,6 +25,7 @@ const fallbackCloudflareUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_1
 
 type CloudflareSubmissionPayload = {
 	adapter: "cloudflare_abuse_phishing_v1";
+	providerNarrativeVersion: 1;
 	target: string;
 	form: CloudflareFormPayload;
 };
@@ -46,7 +47,7 @@ function firstReportId(value: unknown): string | undefined {
 }
 
 function parseStoredPayload(value: Record<string, unknown>): CloudflareSubmissionPayload | undefined {
-	if (value.adapter !== "cloudflare_abuse_phishing_v1" || typeof value.target !== "string" || !value.target) return undefined;
+	if (value.adapter !== "cloudflare_abuse_phishing_v1" || value.providerNarrativeVersion !== 1 || typeof value.target !== "string" || !value.target) return undefined;
 	const form = recordValue(value.form);
 	if (!form
 		|| typeof form.name !== "string"
@@ -65,7 +66,7 @@ function parseStoredPayload(value: Record<string, unknown>): CloudflareSubmissio
 	} catch {
 		return undefined;
 	}
-	return { adapter: "cloudflare_abuse_phishing_v1", target: value.target, form: form as unknown as CloudflareFormPayload };
+	return { adapter: "cloudflare_abuse_phishing_v1", providerNarrativeVersion: 1, target: value.target, form: form as unknown as CloudflareFormPayload };
 }
 
 /** Build Cloudflare's immutable submission payload before its browser boundary. */
@@ -95,6 +96,7 @@ export async function prepareCloudflareSubmission(context: ProviderSubmissionCon
 		outcome: "ready",
 		payload: {
 			adapter: "cloudflare_abuse_phishing_v1",
+			providerNarrativeVersion: 1,
 			target: target.normalizedTarget,
 			form,
 		},

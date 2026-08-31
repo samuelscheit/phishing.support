@@ -32,6 +32,14 @@ export type ProviderSubmissionContext = {
 	payload: Record<string, unknown>;
 };
 
+/** Safe, provider-neutral input for a read-only draft preview. */
+export type ProviderReportPreviewContext = {
+	target: string;
+	observedUrls: readonly string[];
+	description: string;
+	legalBrandUrl?: string | null;
+};
+
 /**
  * Ephemeral state prepared immediately before the durable provider-call
  * marker. It is intentionally not persisted: short-lived browser sessions,
@@ -87,6 +95,15 @@ export type ProviderSubmissionProvider = {
 	 * handler.
 	 */
 	prepareSubmission?(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation>;
+	/**
+	 * Return true only when a `running/starting` durable payload predates the
+	 * provider's current, safe draft format. The executor may refresh only this
+	 * pre-marker state; it never rewrites a current draft or a request that has
+	 * reached `submission_started`.
+	 */
+	shouldRefreshStartingPayload?(context: ProviderSubmissionContext): boolean;
+	/** Build the provider-owned preview shown before a durable run exists. */
+	buildReportPreview?(context: ProviderReportPreviewContext): string | undefined;
 	/**
 	 * Prepare ephemeral state without crossing the provider's complaint
 	 * boundary. This runs after the durable run exists but before its

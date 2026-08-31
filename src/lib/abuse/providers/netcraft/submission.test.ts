@@ -111,6 +111,7 @@ describe("Netcraft v3 submission response", () => {
 			const provider: ProviderSubmissionProvider = {
 				definition: NETCRAFT_PROVIDER,
 				prepareSubmission: prepareNetcraftSubmission,
+				shouldRefreshStartingPayload: (context) => context.payload.providerNarrativeVersion !== 1,
 				submit: async (context) => submitNetcraftSubmission(context, {
 					fetch: async (input, init) => {
 						requestUrl = String(input);
@@ -136,14 +137,16 @@ describe("Netcraft v3 submission response", () => {
 			expect(requestInit?.redirect).toBe("error");
 			expect(new Headers(requestInit?.headers).get("content-type")).toBe("application/json");
 			expect(new Headers(requestInit?.headers).get("accept")).toBe("application/json");
-			expect(requestBody).toEqual({
+			expect(requestBody).toMatchObject({
 				email: "netcraft-test@phishing.support",
-				reason: "The URLs host credential-harvesting pages.",
 				urls: [
 					{ url: "https://login.phishing.example.com/collect" },
 					{ url: "https://phishing.example.com/alternate" },
 				],
 			});
+			expect(requestBody?.reason).toContain("Netcraft");
+			expect(requestBody?.reason).toContain("credential");
+			expect(requestBody?.reason).not.toContain("The URLs host credential-harvesting pages.");
 			const [run] = await AbuseRepository.listProviderRunsForReport(created.reportId);
 			expect(run).toMatchObject({
 				executionStatus: "completed",

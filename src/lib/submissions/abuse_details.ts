@@ -1,5 +1,7 @@
 import { AbuseRepository } from "@/lib/abuse/repository";
 import { safePublicError } from "@/lib/abuse/security";
+import { getProviderSubmissionProvider } from "@/lib/abuse/providers/submission_registry_default";
+import { buildProviderReportNarrative } from "@/lib/abuse/providers/report_payload";
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
 	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -39,6 +41,7 @@ export type SubmissionAbuseProviderReport = {
 	status: string;
 	executionStatus: string | null;
 	body: string;
+	bodySource: "prepared" | "preview" | "legacy_preview" | "historical_legacy";
 	observedUrls: string[];
 	submittedTargets: string[];
 	confirmationId: string | null;
@@ -55,24 +58,55 @@ export type SubmissionStandaloneAbuseDetails = {
 };
 
 /**
- * Read the text that was pinned for a provider request without exposing the
- * rest of its provider-specific payload. Every current direct provider keeps
- * its report text under one of these reviewed fields; the aggregate
- * description is the safe fallback for a route that has not prepared a run.
+ * Read a pinned provider-specific draft without exposing its complete payload.
+ * Old payloads deliberately do not qualify: historic direct-report rows used
+ * an analysis excerpt as their text, which must not keep appearing as if it
+ * were a provider-tailored report. Those routes receive a safe preview until
+ * the worker can prepare the new draft.
  */
-function providerReportBody(providerPayload: unknown, fallback: string): string {
-	const payload = recordValue(providerPayload);
-	const report = recordValue(payload?.report);
-	const form = recordValue(payload?.form);
-	const candidate = [
-		report?.reason,
-		report?.explanation,
-		report?.description,
-		form?.justification,
-		payload?.reason,
-		payload?.description,
-	].map(nonEmptyString).find(Boolean);
-	return candidate ?? fallback;
+function providerReportBody(params: {
+	providerRegistryKey: string;
+	providerPayload: unknown;
+	status: string;
+	executionStatus?: string | null;
+	target: string;
+	observedUrls: string[];
+	description: string;
+	legalBrandUrl?: string | null;
+}): { body: string; bodySource: "prepared" | "preview" | "legacy_preview" | "historical_legacy" } {
+	const payload = recordValue(params.providerPayload);
+	const isCurrentNarrative = payload?.providerNarrativeVersion === 1;
+	if (isCurrentNarrative) {
+		const report = recordValue(payload?.report);
+		const form = recordValue(payload?.form);
+		const candidate = [
+			report?.reason,
+			report?.explanation,
+			form?.justification,
+		].map(nonEmptyString).find(Boolean);
+		if (candidate) return { body: candidate, bodySource: "prepared" };
+	}
+
+	const provider = getProviderSubmissionProvider(params.providerRegistryKey);
+	const preview = provider?.buildReportPreview?.({
+		target: params.target,
+		observedUrls: params.observedUrls,
+		description: params.description,
+		legalBrandUrl: params.legalBrandUrl,
+	}) ?? buildProviderReportNarrative({
+		provider: "generic",
+		target: params.target,
+		observedUrls: params.observedUrls,
+		description: params.description,
+		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
+		maximumLength: 1_000,
+	});
+	return {
+		body: preview ?? "A provider-specific report draft will be shown when this route is prepared.",
+		bodySource: payload
+			? params.status === "running" && params.executionStatus === "starting" ? "legacy_preview" : "historical_legacy"
+			: "preview",
+	};
 }
 
 /**
@@ -123,6 +157,16 @@ export async function getStandaloneAbuseDetailsForSubmission(
 		.map((route) => {
 			const target = targetsById.get(route.targetId);
 			const run = latestRunByRoute.get(route.id);
+			const draft = providerReportBody({
+				providerRegistryKey: route.providerRegistryKey,
+				providerPayload: run?.providerPayload,
+				status: route.status,
+				executionStatus: run?.executionStatus,
+				target: target?.normalizedTarget ?? "Unknown target",
+				observedUrls: target?.observedUrls ?? [],
+				description: report.description,
+				legalBrandUrl: report.legalBrandUrl,
+			});
 			return {
 				id: route.id,
 				provider: route.providerDisplayName,
@@ -130,7 +174,8 @@ export async function getStandaloneAbuseDetailsForSubmission(
 				target: target?.normalizedTarget ?? "Unknown target",
 				status: route.status,
 				executionStatus: run?.executionStatus ?? null,
-				body: providerReportBody(run?.providerPayload, report.description),
+				body: draft.body,
+				bodySource: draft.bodySource,
 				observedUrls: target?.observedUrls ?? [],
 				submittedTargets: run?.submittedTargets ?? [],
 				confirmationId: run?.confirmationId ?? null,

@@ -2,6 +2,7 @@ import {
 	GENERIC_PROVIDER_FORM_ADAPTER,
 	genericProviderFormAdapterHasValidHash,
 } from "../providers/generic_form";
+import { buildProviderReportNarrative } from "../providers/report_payload";
 import type { SkyvernTaskPayload } from "./contracts";
 import { exactAllowedHttpsUrl, normalizeAllowedDomains } from "./provider_contract";
 
@@ -32,13 +33,19 @@ export function buildGenericProviderFormTaskPayload(params: {
 	if (!params.target || !params.allegationCategory || !params.description.trim()) {
 		throw new Error("Generic provider-form payload is incomplete.");
 	}
-	if (params.description.length > definition.maxDescriptionLength) {
-		throw new Error("Generic provider-form description exceeds the adapter limit.");
-	}
+	const providerDescription = buildProviderReportNarrative({
+		provider: "generic",
+		target: params.target,
+		observedUrls: params.observedUrls,
+		description: params.description,
+		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
+		maximumLength: definition.maxDescriptionLength,
+	});
+	if (!providerDescription) throw new Error("Generic provider-form description is invalid or exceeds the adapter limit.");
 	const immutablePayload = {
 		target: params.target,
 		allegationCategory: params.allegationCategory,
-		description: params.description,
+		description: providerDescription,
 		observedUrls: params.observedUrls,
 		legalBrandUrl: params.legalBrandUrl,
 		reporterContactEmail: params.reporterContactEmail,

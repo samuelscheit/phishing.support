@@ -160,6 +160,54 @@ describe("provider submission execution boundary", () => {
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "submitted" });
 	});
 
+	test("refreshes an interrupted pre-marker draft before retrying, but never refreshes after the provider marker", async () => {
+		let initialSubmitCalls = 0;
+		const provider = testProvider({
+			prepareSubmission: async () => ({ outcome: "ready", payload: { adapter: "test_provider", narrativeVersion: 2, body: "provider-specific report" } }),
+			shouldRefreshStartingPayload: () => true,
+			prepareExternalSubmission: async () => { throw new Error("temporary provider preflight outage"); },
+			submit: async () => { initialSubmitCalls += 1; return { submittedTargets: ["example.com"] }; },
+		});
+		const { route } = await createProviderRoute(provider);
+
+		await expect(executeProviderSubmission({ routeId: route.id, provider })).rejects.toThrow("temporary provider preflight outage");
+		const [interrupted] = await AbuseRepository.listProviderRunsForReport(route.reportId);
+		expect(interrupted).toMatchObject({ executionStatus: "starting", providerPayload: { narrativeVersion: 2 } });
+
+		let refreshCalls = 0;
+		const recovered = testProvider({
+			prepareSubmission: async (context) => {
+				refreshCalls += 1;
+				expect(context.runId).toBe(interrupted!.id);
+				return { outcome: "ready", payload: { adapter: "test_provider", narrativeVersion: 3, body: "refreshed provider-specific report" } };
+			},
+			shouldRefreshStartingPayload: () => true,
+			submit: async (context) => {
+				expect(context.payload).toEqual({ adapter: "test_provider", narrativeVersion: 3, body: "refreshed provider-specific report" });
+				return { submittedTargets: ["example.com"] };
+			},
+		});
+		await expect(executeProviderSubmission({ routeId: route.id, provider: recovered })).resolves.toMatchObject({ outcome: "submitted" });
+		expect(refreshCalls).toBe(1);
+		expect(initialSubmitCalls).toBe(0);
+		expect(await AbuseRepository.getProviderRun(interrupted!.id)).toMatchObject({
+			executionStatus: "completed",
+			providerPayload: { adapter: "test_provider", narrativeVersion: 3, body: "refreshed provider-specific report" },
+		});
+
+		const marked = await createProviderRoute(provider);
+		const markedExecution = await AbuseRepository.beginProviderExecution({
+			routeId: marked.route.id,
+			providerPayload: { adapter: "test_provider", narrativeVersion: 2 },
+			correlationKey: `provider-submission:${provider.definition.key}:${marked.route.id.toString()}`,
+			expectedStatus: "verified",
+		});
+		if (!markedExecution) throw new Error("Marked execution was not created.");
+		expect(await AbuseRepository.prepareProviderSubmission(markedExecution.run.id)).toBeTrue();
+		await expect(executeProviderSubmission({ routeId: marked.route.id, provider: recovered })).rejects.toBeInstanceOf(ProviderSubmissionUnknownExternalStateError);
+		expect(refreshCalls).toBe(1);
+	});
+
 	test("settles insufficient evidence before creating a run or crossing the provider boundary", async () => {
 		let submitted = false;
 		const provider = testProvider({

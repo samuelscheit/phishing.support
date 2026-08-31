@@ -2,6 +2,7 @@ import sharp from "sharp";
 
 import type { DecodedEvidence } from "../../contracts";
 import { domainMatchesOrIsSubdomain, isPublicIp, normalizeDomain } from "../../security";
+import { buildProviderReportNarrative } from "../report_payload";
 import { GNAME_PROVIDER } from "./definition";
 
 export type CapturedGnameEvidence = {
@@ -39,15 +40,15 @@ type GnameEvidenceVerificationResult = {
 
 const GNAME_MAX_DESCRIPTION = 1_000;
 
-function cleanText(value: string): string {
-	return value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
-}
-
 /** Keep GNAME's submitted description short without losing the report narrative. */
 export function makeGnameProviderDescription(description: string, target: string, observedUrls: string[]): string {
-	const prefix = `Phishing/fraud report for ${target}. Observed URL(s): ${observedUrls.join(", ")}. `;
-	const available = Math.max(0, GNAME_MAX_DESCRIPTION - prefix.length);
-	return `${prefix}${cleanText(description).slice(0, available)}`.slice(0, GNAME_MAX_DESCRIPTION);
+	return buildProviderReportNarrative({
+		provider: "gname",
+		target,
+		observedUrls,
+		description,
+		maximumLength: GNAME_MAX_DESCRIPTION,
+	}) ?? `Suspected phishing or fraud activity involving ${target}.`;
 }
 
 function gnameImageMime(mimeType: string): mimeType is "image/jpeg" | "image/png" {

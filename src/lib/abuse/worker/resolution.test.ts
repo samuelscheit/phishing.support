@@ -18,10 +18,23 @@ const reportPayload = {
 	observedUrls: [{ target: "example.com", urls: ["https://login.example.com/collect"] }],
 };
 
-async function createReport() {
+async function createReport(target = "example.com") {
 	process.env.ABUSE_TRACKING_TOKEN_SECRET = "01234567890123456789012345678901";
-	const request = await validateAbuseReportRequest(reportPayload);
+	const request = await validateAbuseReportRequest({
+		...reportPayload,
+		targets: [target],
+		observedUrls: [{ target, urls: [`https://login.${target}/collect`] }],
+	});
 	return AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } });
+}
+
+async function waitFor(check: () => Promise<boolean>, timeoutMs = 2_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (await check()) return;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	throw new Error("Timed out waiting for the worker state.");
 }
 
 describe("direct provider resolution and dispatch", () => {
@@ -92,5 +105,50 @@ describe("direct provider resolution and dispatch", () => {
 
 		const [job] = db.select().from(abuseJobs).where(eq(abuseJobs.routeId, route.id)).all();
 		expect(job).toMatchObject({ jobType: "submit_provider", status: "completed" });
+	});
+
+	test("does not let a slow provider operation block unrelated durable jobs", async () => {
+		const slow = await createReport("slow-provider.example.com");
+		const fast = await createReport("fast-provider.example.com");
+		let releaseSlow!: () => void;
+		const slowGate = new Promise<void>((resolve) => { releaseSlow = resolve; });
+		let slowStarted = false;
+
+		const worker = new AbuseWorker({
+			owner: "concurrent-worker-test",
+			concurrency: 2,
+			pollMs: 5,
+			resolveTarget: async (target) => {
+				if (target.normalizedTarget === "slow-provider.example.com") {
+					slowStarted = true;
+					await slowGate;
+				}
+				return {
+					status: "no_route",
+					disposition: "no_verified_abuse_contact",
+					resolverSnapshot: { source: "concurrent-worker-test" },
+					routes: [{
+						routeKey: "manual_unroutable",
+						providerRegistryKey: "manual_unroutable",
+						providerDisplayName: "No verified abuse route",
+						routeType: "manual_unroutable",
+						resolverProvenance: { reason: "test_no_route" },
+						resolutionSnapshot: { source: "concurrent-worker-test" },
+						status: "no_route",
+					}],
+				};
+			},
+		});
+
+		await worker.start();
+		try {
+			await waitFor(async () => slowStarted);
+			await waitFor(async () => (await AbuseRepository.getReport(fast.reportId))?.status === "no_route");
+			expect((await AbuseRepository.getReport(slow.reportId))?.status).not.toBe("no_route");
+		} finally {
+			releaseSlow();
+			await worker.stop();
+		}
+		expect((await AbuseRepository.getReport(slow.reportId))?.status).toBe("no_route");
 	});
 });

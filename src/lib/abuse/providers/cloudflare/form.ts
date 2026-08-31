@@ -1,5 +1,7 @@
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import type { CloudflareServiceIdentity } from "./identity";
+import { buildProviderReportNarrative, normalizeObservedUrlForDomain, normalizePublicDomainHttpUrl } from "../report_payload";
+import type { ProviderReportPreviewContext } from "../submission_contracts";
 
 export type CloudflareFormInput = {
 	serviceIdentity: CloudflareServiceIdentity;
@@ -22,8 +24,16 @@ export type CloudflareFormPayload = {
 	dsaCertification: true;
 };
 
-function compact(value: string): string {
-	return value.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim();
+/** Render Cloudflare's read-only report preview without touching its form. */
+export function buildCloudflareReportPreview(input: ProviderReportPreviewContext): string | undefined {
+	return buildProviderReportNarrative({
+		provider: "cloudflare",
+		target: input.target,
+		observedUrls: input.observedUrls,
+		description: input.description,
+		...(input.legalBrandUrl ? { legalBrandUrl: input.legalBrandUrl } : {}),
+		maximumLength: CLOUDFLARE_PROVIDER.maximumJustificationLength,
+	});
 }
 
 /**
@@ -32,10 +42,16 @@ function compact(value: string): string {
  * website reporter generated this evidence but discarded it before submit.
  */
 export function buildCloudflareFormPayload(input: CloudflareFormInput): CloudflareFormPayload {
-	const description = compact(input.description);
+	const observedUrl = normalizeObservedUrlForDomain(input.observedUrl, input.target);
+	if (!observedUrl) throw new Error("Cloudflare abuse reporting requires a valid observed URL for the target.");
+	const legalBrandUrl = input.legalBrandUrl === undefined ? undefined : normalizePublicDomainHttpUrl(input.legalBrandUrl);
+	if (input.legalBrandUrl !== undefined && !legalBrandUrl) throw new Error("Cloudflare abuse reporting requires a valid legal brand URL.");
+	const description = buildCloudflareReportPreview({
+		target: input.target,
+		observedUrls: [observedUrl],
+		description: input.description,
+	});
 	if (!description) throw new Error("Cloudflare abuse reporting requires a non-empty report description.");
-	const observedUrl = new URL(input.observedUrl).toString();
-	const legalBrandUrl = input.legalBrandUrl ? new URL(input.legalBrandUrl).toString() : undefined;
 	const prefix = [
 		`Phishing report for ${input.target}.`,
 		`Observed URL: ${observedUrl}`,

@@ -1,4 +1,5 @@
 import { AbuseRepository } from "../repository";
+import { hashStableJson } from "../security";
 
 import { providerDefinitionMatchesPin } from "./definition";
 
@@ -210,7 +211,64 @@ export async function executeProviderSubmission(params: {
 	if (!execution) return { outcome: "not_eligible" };
 
 	const run = execution.run;
-	if (!isRecord(run.providerPayload)) {
+	let durablePayload = run.providerPayload;
+	if (execution.resumed
+		&& run.executionStatus === "starting"
+		&& params.provider.prepareSubmission
+		&& params.provider.shouldRefreshStartingPayload?.({ routeId: route.id, runId: run.id, payload: isRecord(durablePayload) ? durablePayload : {} })) {
+		// A route can be left in `running/starting` when a previous worker dies
+		// during preflight. No provider request has crossed the durable marker in
+		// this state, so refresh an older draft before retrying. This is what
+		// lets deployments replace legacy analysis-only drafts without ever
+		// mutating a request that may already have reached a provider.
+		let refreshed: ProviderSubmissionPreparation;
+		try {
+			refreshed = await params.provider.prepareSubmission({ routeId: route.id, runId: run.id, payload: isRecord(durablePayload) ? durablePayload : {} });
+		} catch (error) {
+			if (error instanceof ProviderSubmissionRejectedError) {
+				return settleKnownRejection({ routeId: route.id, runId: run.id, reason: errorText(error) });
+			}
+			throw error;
+		}
+		if (!isPreparation(refreshed)) {
+			await AbuseRepository.settleProviderRun({
+				runId: run.id,
+				executionStatus: "failed",
+				routeStatus: "needs_human",
+				failureReason: "provider_submission_preparation_invalid",
+				routeData: { reason: "provider_submission_preparation_invalid" },
+			});
+			return { outcome: "not_eligible" };
+		}
+		if (refreshed.outcome === "insufficient_evidence") {
+			const settled = await AbuseRepository.settleProviderRun({
+				runId: run.id,
+				executionStatus: "failed",
+				routeStatus: "insufficient_evidence",
+				failureReason: refreshed.reason,
+				routeData: { reason: refreshed.reason },
+			});
+			if (settled || (await AbuseRepository.getRoute(route.id))?.status === "insufficient_evidence") {
+				return { outcome: "insufficient_evidence", reason: refreshed.reason };
+			}
+			return markUnknownExternal({
+				routeId: route.id,
+				runId: run.id,
+				error: "Provider draft refresh found insufficient evidence after the route left its expected state.",
+				reason: "provider_submission_refresh_state_conflict",
+			});
+		}
+
+		durablePayload = refreshed.payload;
+		if (!isRecord(run.providerPayload) || hashStableJson(run.providerPayload) !== hashStableJson(durablePayload)) {
+			await AbuseRepository.updateProviderRun(
+				run.id,
+				{ providerPayload: durablePayload, payloadHash: hashStableJson(durablePayload) },
+				"provider_run.draft_refreshed",
+			);
+		}
+	}
+	if (!isRecord(durablePayload)) {
 		return markUnknownExternal({
 			routeId: route.id,
 			runId: run.id,
@@ -235,7 +293,7 @@ export async function executeProviderSubmission(params: {
 		});
 	}
 
-	const context: ProviderSubmissionContext = { routeId: route.id, runId: run.id, payload: run.providerPayload };
+	const context: ProviderSubmissionContext = { routeId: route.id, runId: run.id, payload: durablePayload };
 	let preflight: ProviderSubmissionPreflight | undefined;
 	if (params.provider.prepareExternalSubmission) {
 		// This hook is deliberately before the durable provider-call marker. A

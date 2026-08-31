@@ -7,8 +7,10 @@ type RouteStatus = {
 	provider: string;
 	routeType: string;
 	status: string;
+	executionStatus?: string;
 	confirmationId?: string;
 	error?: string;
+	statusDescription?: string;
 };
 
 type ReportStatus = {
@@ -127,8 +129,10 @@ export function AbuseStatusClient({ trackingToken }: { trackingToken: string }) 
 												<span className="text-sm text-muted-foreground">{displayStatus(route.status, routeText)}</span>
 											</div>
 											<p className="mt-1 text-xs text-muted-foreground">{route.routeType}</p>
+											{route.statusDescription && <p className="mt-2 text-sm">{route.statusDescription}</p>}
+											{route.executionStatus && <p className="mt-1 text-xs text-muted-foreground">Execution phase: {displayStatus(route.executionStatus, routeText)}</p>}
 											{route.confirmationId && <p className="mt-2 text-sm">Confirmation: <span className="font-mono">{route.confirmationId}</span></p>}
-											{route.error && <p className="mt-2 text-sm text-muted-foreground">{route.error}</p>}
+											{route.error && route.error !== route.statusDescription && <p className="mt-2 text-sm text-muted-foreground">{route.error}</p>}
 										</li>
 									))}
 								</ul>

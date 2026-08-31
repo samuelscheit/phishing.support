@@ -108,7 +108,7 @@ describe("legacy submission abuse-report read model", () => {
 		});
 		const submitted = await AbuseRepository.beginProviderExecution({
 			routeId: submittedRoute.id,
-			providerPayload: { report: { explanation: "The submitted Google report explains the credential-harvesting evidence.", privateToken: "do-not-expose" } },
+			providerPayload: { providerNarrativeVersion: 1, report: { explanation: "The submitted Google report explains the credential-harvesting evidence.", privateToken: "do-not-expose" } },
 			correlationKey: `google-safe-browsing:${submissionId.toString()}`,
 			expectedStatus: "verified",
 		});
@@ -137,7 +137,7 @@ describe("legacy submission abuse-report read model", () => {
 		});
 		const unresolved = await AbuseRepository.beginProviderExecution({
 			routeId: unresolvedRoute.id,
-			providerPayload: { form: { justification: "The Cloudflare report explains the TikTok impersonation evidence.", privateCookie: "do-not-expose" } },
+			providerPayload: { providerNarrativeVersion: 1, form: { justification: "The Cloudflare report explains the TikTok impersonation evidence.", privateCookie: "do-not-expose" } },
 			correlationKey: `cloudflare:${submissionId.toString()}`,
 			expectedStatus: "verified",
 		});
@@ -172,5 +172,56 @@ describe("legacy submission abuse-report read model", () => {
 		expect(details?.abuseMailReports).toEqual([]);
 		expect(details?.providerReports).toEqual([]);
 		expect(report.created).toBeTrue();
+	});
+
+	test("shows a provider-specific preview instead of exposing an unprepared or legacy analysis draft", async () => {
+		const submissionId = 352342673387950095n;
+		const { report, target } = await createLegacyWebsiteReport(submissionId);
+		const persistedReport = await AbuseRepository.getReport(report.reportId);
+		if (!persistedReport) throw new Error("The test abuse report was not persisted.");
+		const route = await AbuseRepository.upsertResolvedRoute(target.id, {
+			routeKey: "provider_submission:netcraft:preview",
+			providerRegistryKey: "netcraft",
+			providerDisplayName: "Netcraft",
+			routeType: "provider_submission",
+			providerDefinitionVersion: "test-v1",
+			providerDefinitionHash: "c".repeat(64),
+			resolverProvenance: { source: "test" },
+			resolutionSnapshot: { source: "test" },
+			status: "verified",
+		});
+
+		const unprepared = await getSubmissionDetails(submissionId.toString());
+		const preview = unprepared?.abuseProviderReports.find((item) => item.provider === "Netcraft");
+		expect(preview).toMatchObject({ status: "verified", bodySource: "preview" });
+		expect(preview?.body).toContain("Netcraft");
+		expect(preview?.body).not.toContain(persistedReport.description);
+
+		const execution = await AbuseRepository.beginProviderExecution({
+			routeId: route.id,
+			providerPayload: { report: { reason: persistedReport.description }, legacyPrivateField: "must-not-be-rendered" },
+			correlationKey: `legacy-analysis-preview:${submissionId.toString()}`,
+			expectedStatus: "verified",
+		});
+		expect(execution).toBeDefined();
+		const legacy = await getSubmissionDetails(submissionId.toString());
+		const legacyPreview = legacy?.abuseProviderReports.find((item) => item.provider === "Netcraft");
+		expect(legacyPreview).toMatchObject({ status: "running", bodySource: "legacy_preview" });
+		expect(legacyPreview?.body).toContain("Netcraft");
+		expect(legacyPreview?.body).not.toContain(persistedReport.description);
+		expect(JSON.stringify(legacy)).not.toContain("must-not-be-rendered");
+		expect(await AbuseRepository.prepareProviderSubmission(execution!.run.id)).toBeTrue();
+		expect(await AbuseRepository.settleProviderRun({
+			runId: execution!.run.id,
+			executionStatus: "completed",
+			routeStatus: "submitted",
+			confirmationId: "historical-preview-test",
+			submittedTargets: [target.normalizedTarget],
+		})).toBeTrue();
+		const historical = await getSubmissionDetails(submissionId.toString());
+		expect(historical?.abuseProviderReports.find((item) => item.provider === "Netcraft")).toMatchObject({
+			status: "submitted",
+			bodySource: "historical_legacy",
+		});
 	});
 });

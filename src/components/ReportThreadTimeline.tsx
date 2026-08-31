@@ -14,6 +14,7 @@ import type {
 	SubmissionReportMessage,
 	SubmissionReportThread,
 } from "@/lib/submissions/details";
+import { describeProviderReportStatus } from "@/lib/abuse/provider_status";
 import { cn } from "@/web_lib/util";
 
 type DateValue = Date | string | number | null | undefined;
@@ -197,13 +198,7 @@ function StandaloneAbuseProviderCard({ report }: { report: SubmissionAbuseProvid
 	const submitted = report.status === "submitted" || report.status === "acknowledged";
 	const unresolved = report.status === "unknown_external_state";
 	const rejected = report.status === "provider_rejected";
-	const statusDescription = submitted
-		? "The provider confirmed it received this report."
-		: unresolved
-			? "The request reached a provider boundary, but the provider result could not be verified safely. It was not retried automatically to avoid a duplicate report."
-			: rejected
-				? "The provider rejected this report."
-				: report.error || "This provider report has not completed yet.";
+	const statusDescription = describeProviderReportStatus(report);
 
 	return (
 		<Card className="overflow-hidden">
@@ -224,12 +219,16 @@ function StandaloneAbuseProviderCard({ report }: { report: SubmissionAbuseProvid
 				<div className={cn("rounded-md border p-3 text-sm", submitted ? "border-emerald-200 bg-emerald-50 text-emerald-900" : unresolved || rejected ? "border-red-200 bg-red-50 text-red-900" : "border-amber-200 bg-amber-50 text-amber-900")}>
 					{statusDescription}
 				</div>
+				{report.executionStatus ? <div className="text-xs text-muted-foreground">Execution phase: <span className="font-medium capitalize">{report.executionStatus.replaceAll("_", " ")}</span></div> : null}
 				{report.observedUrls.length ? <div className="text-xs"><div className="mb-1 text-muted-foreground">Reported URL{report.observedUrls.length === 1 ? "" : "s"}</div><div className="space-y-1 font-mono break-all">{report.observedUrls.map((url) => <div key={url}>{url}</div>)}</div></div> : null}
 				{report.submittedTargets.length ? <div className="text-xs"><span className="text-muted-foreground">Provider-confirmed target{report.submittedTargets.length === 1 ? "" : "s"}:</span> <span className="break-all">{report.submittedTargets.join(", ")}</span></div> : null}
 				{report.confirmationId ? <div className="text-xs"><span className="text-muted-foreground">Confirmation:</span> <span className="break-all font-mono">{report.confirmationId}</span></div> : null}
 				{report.confirmationText ? <div className="text-sm"><span className="text-muted-foreground">Provider response:</span> {report.confirmationText}</div> : null}
 				<details className="rounded border bg-muted/10 p-3">
-					<summary className="cursor-pointer text-sm font-medium">View provider report</summary>
+					<summary className="cursor-pointer text-sm font-medium">{report.bodySource === "prepared" ? "View provider-specific report" : report.bodySource === "historical_legacy" ? "View provider-specific reference preview" : "View provider-specific draft preview"}</summary>
+					{report.bodySource === "preview" ? <div className="mt-2 text-xs text-muted-foreground">This draft is generated for this provider and will be pinned when submission starts.</div> : null}
+					{report.bodySource === "legacy_preview" ? <div className="mt-2 text-xs text-muted-foreground">An outdated analysis-derived draft was retained before submission. This provider-specific preview replaces it before the provider request can start.</div> : null}
+					{report.bodySource === "historical_legacy" ? <div className="mt-2 text-xs text-muted-foreground">This historical provider run used an older analysis-derived payload. The provider-specific text shown here is a reference preview; the historical request cannot be rewritten without filing a new report.</div> : null}
 					<pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words font-sans text-sm">{report.body}</pre>
 				</details>
 				{report.finalUrl ? <a href={report.finalUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><ExternalLink className="h-3.5 w-3.5" /> Open provider confirmation</a> : null}

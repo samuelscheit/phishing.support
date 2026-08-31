@@ -1,6 +1,7 @@
 import type { AbuseArtifact } from "../../schema";
 import { normalizeDomain, registrableDomain, sha256Hex } from "../../security";
 import { recordValue } from "../../worker/shared";
+import { buildProviderReportNarrative } from "../report_payload";
 import { TENCENT_PROVIDER } from "./definition";
 
 const maximumExplanationLength = 400;
@@ -21,6 +22,7 @@ export type TencentScreenshotReference = {
 
 export type TencentSubmissionPayload = {
 	adapter: "tencent_cloud_dns_abuse_v1";
+	providerNarrativeVersion: 1;
 	definition: {
 		version: string;
 		contentHash: string;
@@ -37,18 +39,21 @@ export type TencentSubmissionPayload = {
 	screenshot: TencentScreenshotReference;
 };
 
-function normalizedText(value: string): string {
-	return value.replace(/\s+/g, " ").trim();
-}
-
-/** Keep the Tencent description deterministic and within its small form limit. */
-export function makeTencentExplanation(description: string): string | undefined {
-	const text = normalizedText(description);
-	if (!text) return undefined;
-	if (text.length <= maximumExplanationLength) return text;
-	const bounded = text.slice(0, maximumExplanationLength);
-	const lastSpace = bounded.lastIndexOf(" ");
-	return (lastSpace >= Math.floor(maximumExplanationLength * 0.6) ? bounded.slice(0, lastSpace) : bounded).trim();
+/** Keep Tencent's small description field provider-specific and deterministic. */
+export function makeTencentExplanation(params: {
+	target?: string;
+	observedUrl?: string;
+	description: string;
+	legalBrandUrl?: string;
+}): string | undefined {
+	return buildProviderReportNarrative({
+		provider: "tencent",
+		target: params.target,
+		observedUrls: params.observedUrl ? [params.observedUrl] : [],
+		description: params.description,
+		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
+		maximumLength: maximumExplanationLength,
+	});
 }
 
 function isPng(bytes: Buffer): boolean {
@@ -131,13 +136,19 @@ export function buildTencentSubmissionPayload(params: {
 }): TencentSubmissionPayload | undefined {
 	const normalizedTarget = normalizeDomain(params.target);
 	const observed = normalizedTarget ? observedUrlForTarget(params.observedUrl, normalizedTarget) : undefined;
-	const explanation = makeTencentExplanation(params.description);
+	const explanation = makeTencentExplanation({
+		target: normalizedTarget,
+		observedUrl: observed?.observedUrl,
+		description: params.description,
+		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
+	});
 	if (!normalizedTarget || !observed || !explanation || !validTencentScreenshotReference(params.screenshot)) return undefined;
 	const legalBrandUrl = validLegalBrandUrl(params.legalBrandUrl);
 	if (params.legalBrandUrl !== undefined && !legalBrandUrl) return undefined;
 
 	return {
 		adapter: "tencent_cloud_dns_abuse_v1",
+		providerNarrativeVersion: 1,
 		definition: { version: TENCENT_PROVIDER.version, contentHash: TENCENT_PROVIDER.contentHash },
 		target: {
 			normalizedTarget,
@@ -168,19 +179,28 @@ export function storedTencentSubmissionPayload(value: unknown): TencentSubmissio
 	const definition = payload && recordValue(payload.definition);
 	const target = payload && recordValue(payload.target);
 	const report = payload && recordValue(payload.report);
-	if (!payload || payload.adapter !== "tencent_cloud_dns_abuse_v1"
+	if (!payload || payload.adapter !== "tencent_cloud_dns_abuse_v1" || payload.providerNarrativeVersion !== 1
 		|| !definition || definition.version !== TENCENT_PROVIDER.version || definition.contentHash !== TENCENT_PROVIDER.contentHash
 		|| !target || typeof target.normalizedTarget !== "string" || typeof target.observedUrl !== "string" || typeof target.registrableDomain !== "string"
-		|| !report || typeof report.explanation !== "string" || !validTencentScreenshotReference(payload.screenshot)) {
+		|| !report || typeof report.explanation !== "string" || report.explanation.trim().length === 0
+		|| report.explanation.length > maximumExplanationLength
+		|| (report.legalBrandUrl !== undefined && !validLegalBrandUrl(report.legalBrandUrl))
+		|| !validTencentScreenshotReference(payload.screenshot)) {
 		return undefined;
 	}
-	const rebuilt = buildTencentSubmissionPayload({
-		target: target.normalizedTarget,
-		observedUrl: target.observedUrl,
-		description: report.explanation,
-		...(report.legalBrandUrl === undefined ? {} : { legalBrandUrl: report.legalBrandUrl as string }),
+	const normalizedTarget = normalizeDomain(target.normalizedTarget);
+	const observed = normalizedTarget ? observedUrlForTarget(target.observedUrl, normalizedTarget) : undefined;
+	if (!normalizedTarget || normalizedTarget !== target.normalizedTarget || !observed
+		|| observed.observedUrl !== target.observedUrl || observed.registrableDomain !== target.registrableDomain) return undefined;
+	return {
+		adapter: "tencent_cloud_dns_abuse_v1",
+		providerNarrativeVersion: 1,
+		definition: { version: TENCENT_PROVIDER.version, contentHash: TENCENT_PROVIDER.contentHash },
+		target: { normalizedTarget, observedUrl: observed.observedUrl, registrableDomain: observed.registrableDomain },
+		report: {
+			explanation: report.explanation,
+			...(report.legalBrandUrl === undefined ? {} : { legalBrandUrl: report.legalBrandUrl as string }),
+		},
 		screenshot: payload.screenshot,
-	});
-	if (!rebuilt || rebuilt.report.explanation !== report.explanation || rebuilt.target.registrableDomain !== target.registrableDomain) return undefined;
-	return rebuilt;
+	};
 }

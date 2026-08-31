@@ -35,6 +35,7 @@ export type {
 	StoredProviderInboxMessage,
 } from "./contracts";
 export type {
+	ProviderReportPreviewContext,
 	ProviderSubmissionContext,
 	ProviderSubmissionDefinition,
 	ProviderSubmissionPreflight,

@@ -4,7 +4,13 @@ import type { AbuseArtifact } from "../../schema";
 import { providerDefinitionHasValidHash } from "../definition";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { TENCENT_PROVIDER } from "./definition";
-import { isIntactTencentScreenshotArtifact, makeTencentExplanation, selectTencentScreenshotArtifact } from "./payload";
+import {
+	buildTencentSubmissionPayload,
+	isIntactTencentScreenshotArtifact,
+	makeTencentExplanation,
+	selectTencentScreenshotArtifact,
+	storedTencentSubmissionPayload,
+} from "./payload";
 import { buildTencentCloudHttpPayload, parseTencentCloudSubmissionResponse } from "./submission";
 
 const screenshotBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9JH1EAAAAASUVORK5CYII=", "base64");
@@ -47,6 +53,7 @@ describe("Tencent Cloud abuse submission", () => {
 		const payload = buildTencentCloudHttpPayload({
 			payload: {
 				adapter: "tencent_cloud_dns_abuse_v1",
+				providerNarrativeVersion: 1,
 				definition: { version: TENCENT_PROVIDER.version, contentHash: TENCENT_PROVIDER.contentHash },
 				target: {
 					normalizedTarget: "login.phishing.example",
@@ -72,10 +79,28 @@ describe("Tencent Cloud abuse submission", () => {
 	});
 
 	test("keeps the standalone report explanation concise without invoking a legacy draft generator", () => {
-		const explanation = makeTencentExplanation(`  ${"credential theft ".repeat(80)} `);
+		const explanation = makeTencentExplanation({
+			target: "phishing.example",
+			observedUrl: "https://login.phishing.example/collect",
+			description: `  ${"credential theft ".repeat(80)} `,
+		});
 		expect(explanation).toBeDefined();
 		expect(explanation!.length).toBeLessThanOrEqual(400);
 		expect(explanation).not.toContain("  ");
+	});
+
+	test("round-trips the pinned provider-specific narrative without regenerating it from its own output", () => {
+		const screenshot = selectTencentScreenshotArtifact([screenshotArtifact()]);
+		if (!screenshot) throw new Error("Expected an intact Tencent screenshot reference.");
+		const payload = buildTencentSubmissionPayload({
+			target: "phishing.example.com",
+			observedUrl: "https://login.phishing.example.com/collect",
+			description: "The captured page impersonates TikTok, captures login credentials, and requests payment details.",
+			legalBrandUrl: "https://brand.example.com/",
+			screenshot,
+		});
+		expect(payload).toBeDefined();
+		expect(storedTencentSubmissionPayload(payload)).toEqual(payload);
 	});
 
 	test("treats only an explicit Tencent API rejection as provider-rejected", async () => {

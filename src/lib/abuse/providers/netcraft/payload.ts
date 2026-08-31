@@ -1,11 +1,12 @@
 import { normalizeMailbox } from "../../mail/shared";
 import { normalizeDomain } from "../../security";
 import { recordValue } from "../../worker/shared";
-import { makeProviderExplanation, normalizeObservedUrlForDomain } from "../report_payload";
+import { buildProviderReportNarrative, normalizeObservedUrlForDomain } from "../report_payload";
 import { NETCRAFT_PROVIDER } from "./definition";
 
 export type NetcraftSubmissionPayload = {
 	adapter: "netcraft_report_urls_v3";
+	providerNarrativeVersion: 1;
 	definition: {
 		version: string;
 		contentHash: string;
@@ -43,9 +44,18 @@ function normalizeObservedUrls(values: unknown, target: string): string[] | unde
 }
 
 /** Build the concise report narrative accepted by Netcraft's v3 URL endpoint. */
-export function makeNetcraftReason(params: { description: string; legalBrandUrl?: string }): string | undefined {
-	return makeProviderExplanation({
-		...params,
+export function makeNetcraftReason(params: {
+	target?: string;
+	observedUrls?: readonly string[];
+	description: string;
+	legalBrandUrl?: string;
+}): string | undefined {
+	return buildProviderReportNarrative({
+		provider: "netcraft",
+		target: params.target,
+		observedUrls: params.observedUrls,
+		description: params.description,
+		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
 		maximumLength: NETCRAFT_PROVIDER.maximumReasonLength,
 	});
 }
@@ -62,6 +72,8 @@ export function buildNetcraftSubmissionPayload(params: {
 	const observedUrls = normalizedTarget ? normalizeObservedUrls(params.observedUrls, normalizedTarget) : undefined;
 	const reporterEmail = normalizeMailbox(params.reporterEmail);
 	const reason = makeNetcraftReason({
+		target: normalizedTarget,
+		observedUrls,
 		description: params.description,
 		...(params.legalBrandUrl === undefined ? {} : { legalBrandUrl: params.legalBrandUrl }),
 	});
@@ -69,6 +81,7 @@ export function buildNetcraftSubmissionPayload(params: {
 
 	return {
 		adapter: "netcraft_report_urls_v3",
+		providerNarrativeVersion: 1,
 		definition: { version: NETCRAFT_PROVIDER.version, contentHash: NETCRAFT_PROVIDER.contentHash },
 		target: { normalizedTarget, observedUrls },
 		report: { reporterEmail, reason },
@@ -81,7 +94,7 @@ export function storedNetcraftSubmissionPayload(value: unknown): NetcraftSubmiss
 	const definition = payload && recordValue(payload.definition);
 	const target = payload && recordValue(payload.target);
 	const report = payload && recordValue(payload.report);
-	if (!payload || payload.adapter !== "netcraft_report_urls_v3"
+	if (!payload || payload.adapter !== "netcraft_report_urls_v3" || payload.providerNarrativeVersion !== 1
 		|| !definition || definition.version !== NETCRAFT_PROVIDER.version || definition.contentHash !== NETCRAFT_PROVIDER.contentHash
 		|| !target || typeof target.normalizedTarget !== "string"
 		|| !report || typeof report.reporterEmail !== "string" || typeof report.reason !== "string"
@@ -97,6 +110,7 @@ export function storedNetcraftSubmissionPayload(value: unknown): NetcraftSubmiss
 	}
 	return {
 		adapter: "netcraft_report_urls_v3",
+		providerNarrativeVersion: 1,
 		definition: { version: NETCRAFT_PROVIDER.version, contentHash: NETCRAFT_PROVIDER.contentHash },
 		target: { normalizedTarget, observedUrls },
 		report: { reporterEmail, reason: report.reason },

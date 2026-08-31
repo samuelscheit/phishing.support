@@ -97,4 +97,18 @@ describe("Death by Captcha token transport", () => {
 		expect(polls).toBeGreaterThan(1);
 		expect(polls).toBeLessThan(10);
 	});
+
+	test("does not let a hung solver HTTP request keep a provider run in starting forever", async () => {
+		await expect(solveDeathByCaptchaToken({
+			type: 12,
+			parametersField: "turnstile_params",
+			parameters: {},
+			credentials: { username: "solver", password: "secret" },
+			requestTimeoutMs: 5,
+			timeoutMs: 100,
+			fetch: async (_url, init) => await new Promise<Response>((_resolve, reject) => {
+				init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+			}),
+		})).rejects.toThrow("request timed out after 5 ms");
+	});
 });

@@ -18,12 +18,16 @@ import { errorText, envInt, idFrom, parseJobBigInt, randomOwner, type WorkerServ
 
 const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;
+const DEFAULT_CONCURRENCY = 4;
+const MAX_CONCURRENCY = 32;
 const MAX_RETRIES = 8;
 
 export type AbuseWorkerOptions = {
 	owner?: string;
 	leaseMs?: number;
 	pollMs?: number;
+	/** Number of independent durable jobs that may run at once. */
+	concurrency?: number;
 	adapter?: AbuseSkyvernAdapter;
 	/** Test hook; production uses the resolver implementation above. */
 	resolveTarget?: typeof resolveAbuseTarget;
@@ -37,16 +41,19 @@ export class AbuseWorker {
 	private readonly owner: string;
 	private readonly leaseMs: number;
 	private readonly pollMs: number;
+	private readonly concurrency: number;
 	private adapter: AbuseSkyvernAdapter | undefined;
 	private readonly resolveTarget: typeof resolveAbuseTarget;
 	private readonly services: WorkerServices;
 	private stopped = true;
-	private loopPromise: Promise<void> | undefined;
+	private loopPromises: Promise<void>[] = [];
 
 	constructor(options: AbuseWorkerOptions = {}) {
 		this.owner = options.owner ?? randomOwner();
 		this.leaseMs = options.leaseMs ?? envInt("ABUSE_WORKER_LEASE_MS", DEFAULT_LEASE_MS);
 		this.pollMs = options.pollMs ?? envInt("ABUSE_WORKER_POLL_MS", DEFAULT_POLL_MS);
+		const configuredConcurrency = options.concurrency ?? envInt("ABUSE_WORKER_CONCURRENCY", DEFAULT_CONCURRENCY);
+		this.concurrency = Math.min(MAX_CONCURRENCY, Math.max(1, Number.isSafeInteger(configuredConcurrency) ? configuredConcurrency : DEFAULT_CONCURRENCY));
 		this.adapter = options.adapter;
 		this.resolveTarget = options.resolveTarget ?? resolveAbuseTarget;
 		this.services = {
@@ -79,19 +86,28 @@ export class AbuseWorker {
 		if (!this.stopped) return;
 		this.stopped = false;
 		await AbuseRepository.recoverStaleJobs();
-		this.loopPromise = this.runLoop();
+		// A provider job can legitimately spend minutes obtaining a CAPTCHA,
+		// opening a browser, or waiting for a portal. Keep that slow operation in
+		// one slot instead of blocking every unrelated route in the database.
+		// Durable route/job claims still provide per-route exclusion, so slots can
+		// safely process independent reports concurrently.
+		this.loopPromises = Array.from({ length: this.concurrency }, (_, slot) => this.runLoop(slot === 0));
 	}
 
 	async stop(): Promise<void> {
 		this.stopped = true;
-		await this.loopPromise;
-		this.loopPromise = undefined;
+		await Promise.all(this.loopPromises);
+		this.loopPromises = [];
 	}
 
-	private async runLoop(): Promise<void> {
+	private async maintainProviders(): Promise<void> {
+		for (const provider of listPortalProviders()) await provider.maintain?.();
+	}
+
+	private async runLoop(maintainProviders: boolean): Promise<void> {
 		while (!this.stopped) {
 			try {
-				const processed = await this.processOne();
+				const processed = await this.processOne(maintainProviders);
 				if (!processed) await new Promise((resolve) => setTimeout(resolve, this.pollMs));
 			} catch (error) {
 				console.error("Abuse worker loop error:", error);
@@ -100,8 +116,8 @@ export class AbuseWorker {
 		}
 	}
 
-	async processOne(): Promise<boolean> {
-		for (const provider of listPortalProviders()) await provider.maintain?.();
+	async processOne(runProviderMaintenance = true): Promise<boolean> {
+		if (runProviderMaintenance) await this.maintainProviders();
 		const job = await AbuseRepository.claimNextJob(this.owner, this.leaseMs);
 		if (!job) return false;
 		const heartbeat = setInterval(() => {

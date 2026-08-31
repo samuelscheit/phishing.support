@@ -1,5 +1,6 @@
 const DEATH_BY_CAPTCHA_ENDPOINT = "https://api.dbcapi.me/api";
 const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const POLL_INTERVALS_MS = [1_000, 1_000, 2_000, 3_000, 2_000, 2_000, 3_000, 2_000, 2_000] as const;
 const DEFAULT_POLL_INTERVAL_MS = 3_000;
 
@@ -18,6 +19,8 @@ export type DeathByCaptchaSolverDependencies = {
 	sleep?: (milliseconds: number) => Promise<void>;
 	now?: () => number;
 	credentials?: Partial<DeathByCaptchaCredentials>;
+	/** Per-request network deadline; the overall solver timeout remains separate. */
+	requestTimeoutMs?: number;
 };
 
 type DeathByCaptchaResponse = {
@@ -64,20 +67,41 @@ async function request(
 		fetch: DeathByCaptchaFetch;
 		path: string;
 		init?: RequestInit;
+		requestTimeoutMs: number;
 	},
 ): Promise<DeathByCaptchaResponse> {
-	const response = await params.fetch(`${DEATH_BY_CAPTCHA_ENDPOINT}${params.path}`, {
-		headers: { Accept: "application/json" },
-		...params.init,
+	const controller = new AbortController();
+	let timedOut = false;
+	let timeout: ReturnType<typeof setTimeout> | undefined;
+	const timeoutPromise = new Promise<never>((_, reject) => {
+		timeout = setTimeout(() => {
+			timedOut = true;
+			controller.abort();
+			reject(new Error(`Death by Captcha request timed out after ${params.requestTimeoutMs} ms.`));
+		}, params.requestTimeoutMs);
 	});
-	const body = await response.text();
-	if (!response.ok) {
-		throw new Error(`Death by Captcha request failed with HTTP ${response.status}: ${body.slice(0, 500)}`);
+	try {
+		const { response, body } = await Promise.race([
+			params.fetch(`${DEATH_BY_CAPTCHA_ENDPOINT}${params.path}`, {
+				headers: { Accept: "application/json" },
+				...params.init,
+				signal: controller.signal,
+			}).then(async (response) => ({ response, body: await response.text() })),
+			timeoutPromise,
+		]);
+		if (!response.ok) {
+			throw new Error(`Death by Captcha request failed with HTTP ${response.status}: ${body.slice(0, 500)}`);
+		}
+		const parsed = parseResponse(body);
+		const error = responseError(parsed);
+		if (error) throw new Error(`Death by Captcha rejected the request: ${error.slice(0, 500)}`);
+		return parsed;
+	} catch (error) {
+		if (timedOut || controller.signal.aborted) throw new Error(`Death by Captcha request timed out after ${params.requestTimeoutMs} ms.`);
+		throw error;
+	} finally {
+		if (timeout) clearTimeout(timeout);
 	}
-	const parsed = parseResponse(body);
-	const error = responseError(parsed);
-	if (error) throw new Error(`Death by Captcha rejected the request: ${error.slice(0, 500)}`);
-	return parsed;
 }
 
 function captchaId(value: unknown): string | undefined {
@@ -107,6 +131,10 @@ export async function solveDeathByCaptchaToken(params: {
 	const now = params.now ?? Date.now;
 	const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("Death by Captcha timeout must be positive.");
+	const requestTimeoutMs = Math.min(params.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, timeoutMs);
+	if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
+		throw new Error("Death by Captcha request timeout must be positive.");
+	}
 
 	const form = new FormData();
 	form.set("username", credentials.username);
@@ -117,6 +145,7 @@ export async function solveDeathByCaptchaToken(params: {
 	let captcha = await request({
 		fetch: fetcher,
 		path: "/captcha",
+		requestTimeoutMs,
 		init: { method: "POST", body: form },
 	});
 	const id = captchaId(captcha.captcha);
@@ -137,6 +166,7 @@ export async function solveDeathByCaptchaToken(params: {
 		captcha = await request({
 			fetch: fetcher,
 			path: `/captcha/${encodeURIComponent(id)}`,
+			requestTimeoutMs,
 		});
 	}
 

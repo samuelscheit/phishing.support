@@ -32,6 +32,8 @@ services:
       ABUSE_SKYVERN_WEBHOOK_URL: http://app:3000/api/skyvern/webhook
       ABUSE_GENERIC_EMAIL_ENABLED: ${ABUSE_GENERIC_EMAIL_ENABLED:-false}
       ABUSE_GENERIC_FORM_ESCALATION_ENABLED: ${ABUSE_GENERIC_FORM_ESCALATION_ENABLED:-false}
+      # Keep slow CAPTCHA/browser work from blocking independent provider jobs.
+      ABUSE_WORKER_CONCURRENCY: ${ABUSE_WORKER_CONCURRENCY:-4}
       # The abuse worker uses a separate, bounded drafting call. Keep its
       # credentials/runtime endpoint explicit; .env is intentionally excluded
       # from the image and these values are injected only at container start.

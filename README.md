@@ -38,6 +38,26 @@ Incoming mail is assigned only by an exact generated recipient address, an exact
 
 Do not substitute plus-addressing if catch-all routing is unavailable. Use a dedicated reply subdomain backed by a catch-all-capable inbound provider while retaining the authenticated SMTP sender.
 
+### Provider-facing reports
+
+Provider-facing reports are not copies of the AI analysis shown in the
+submission's Analysis tab. The detailed analysis is retained as audit evidence,
+while every direct provider adapter builds its own bounded report from the
+normalized target, observed URL(s), allegation category, and detected evidence
+indicators. Cloudflare receives a hosted-content/abuse-policy narrative, Google
+Safe Browsing receives a URL-focused explanation, Netcraft receives a concise
+infrastructure-investigation reason, and Tencent receives a domain-abuse
+narrative that fits its short form field. A provider-specific draft is pinned
+before its external request and is what the provider receives.
+
+The submission detail page distinguishes a verified/queued route, local draft
+preparation, an in-flight provider request, a provider-confirmed submission,
+and an ambiguous external outcome. “Provider receipt has not been confirmed
+yet” means the last of those lifecycle boundaries has not produced a verified
+provider response; it is not by itself a delivery failure. A slow provider
+preflight (for example, CAPTCHA solving) runs in its own worker slot and does
+not hold unrelated provider routes behind it.
+
 ### Provider-facing email drafts
 
 The generic verified-email route does **not** send the stored AI analysis as the
