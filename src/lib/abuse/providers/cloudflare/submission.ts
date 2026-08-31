@@ -111,7 +111,7 @@ export async function parseCloudflareSubmissionResponse(response: CloudflareResp
 		|| (response.status() === 403 && /<title>\s*(?:just a moment|sorry, you have been blocked)/i.test(body));
 	if (challengeResponse) {
 		const ray = headers["cf-ray"] ? ` (Ray ID ${headers["cf-ray"]})` : "";
-		throw new Error(`Cloudflare challenged the abuse-form request${ray}; no provider confirmation was received.`);
+		throw new ProviderSubmissionRejectedError(`Cloudflare rejected the abuse-form request with a managed security challenge${ray}; no provider confirmation was received.`);
 	}
 	if (!response.ok()) {
 		if (response.status() >= 400 && response.status() < 500) {
@@ -257,13 +257,20 @@ async function postCloudflareApi(session: CloudflareTurnstileSession, form: Clou
 	let response = await postCloudflareApiOnce(session.page, form, token);
 	if (!isCloudflareEdgeChallenge(response)) return response;
 
-	await resolveCloudflareEdgeChallenge(session.page, response.body);
-	await dismissCloudflareConsentBanner(session.page).catch(() => undefined);
-	await makeCloudflareClearanceCookieUsable(session.context, CLOUDFLARE_PROVIDER.formUrl).catch(() => undefined);
-	// Cloudflare may consume the first token while issuing the edge challenge;
-	// obtain a fresh token after clearance rather than retrying a stale one.
-	token = await refreshCloudflareTurnstileToken(session);
-	session.token = token;
+	try {
+		await resolveCloudflareEdgeChallenge(session.page, response.body);
+		await dismissCloudflareConsentBanner(session.page).catch(() => undefined);
+		await makeCloudflareClearanceCookieUsable(session.context, CLOUDFLARE_PROVIDER.formUrl).catch(() => undefined);
+		// Cloudflare may consume the first token while issuing the edge challenge;
+		// obtain a fresh token after clearance rather than retrying a stale one.
+		token = await refreshCloudflareTurnstileToken(session);
+		session.token = token;
+	} catch (error) {
+		throw new ProviderSubmissionRejectedError(`Cloudflare's managed security challenge could not be automated: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	// Keep transport errors from the second request ambiguous: unlike the
+	// first edge response, they do not prove that Cloudflare never received the
+	// complaint and therefore must not be settled as a safe rejection.
 	response = await postCloudflareApiOnce(session.page, { ...form, "cf-turnstile-response": token }, token);
 	return response;
 }

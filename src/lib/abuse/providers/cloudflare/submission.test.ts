@@ -80,7 +80,7 @@ describe("Cloudflare abuse submission response", () => {
 		}, "https://abuse.cloudflare.com/phishing", "example.com")).rejects.toThrow("submission failed with HTTP 502");
 	});
 
-	test("does not misclassify a Cloudflare edge challenge as a provider rejection", async () => {
+	test("rejects a Cloudflare edge challenge instead of leaving the route ambiguous", async () => {
 		await expect(parseCloudflareSubmissionResponse({
 			ok: () => false,
 			status: () => 403,
@@ -92,7 +92,7 @@ describe("Cloudflare abuse submission response", () => {
 			status: () => 403,
 			headers: () => ({ "cf-mitigated": "challenge" }),
 			text: async () => "<title>Just a moment...</title>",
-		}, "https://abuse.cloudflare.com/phishing", "example.com")).rejects.not.toBeInstanceOf(ProviderSubmissionRejectedError);
+		}, "https://abuse.cloudflare.com/phishing", "example.com")).rejects.toBeInstanceOf(ProviderSubmissionRejectedError);
 	});
 
 	test("recognizes only an explicit managed edge challenge", () => {
