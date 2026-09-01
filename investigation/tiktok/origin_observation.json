@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "origin_ip": "103.149.86.246",
   "network_observation": {
     "prefix": "103.149.86.0/23",
@@ -8,7 +8,8 @@
     "organization": "4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED",
     "country": "VN",
     "apnic_capture_utc": "2026-09-01T03:44:24Z",
-    "ripe_network_info_capture_utc": "2026-09-01T04:38:27Z"
+    "ripe_network_info_capture_utc": "2026-09-01T04:38:27Z",
+    "allocation_holder_role": "RIR allocation/route registrant; actual commercial hoster, subscriber, and operator not established"
   },
   "direct_http_observation": {
     "capture_utc": "2026-09-01T04:18:16Z",
@@ -55,5 +56,46 @@
     },
     "interpretation": "Registry/delegation removal was visible to the public resolver while the origin/vhost remained reachable by direct IP and Host header."
   },
-  "attribution_boundary": "This establishes a serving origin and its network registrant, not the person who operated the campaign."
+  "attribution_boundary": "This establishes a current serving endpoint and a historical adjacent serving endpoint plus their RIR allocation holder, not the person who operated the campaign. An upstream backend may remain undiscovered.",
+  "generated_at_utc": "2026-09-01T11:11:52Z",
+  "origin_status": "confirmed_direct_serving_endpoint",
+  "network_contacts": {
+    "formal_abuse": {
+      "organization": "IRT-VNNIC-AP",
+      "handle": "IRT-VNNIC-AP",
+      "email": "hm-changed@vnnic.vn",
+      "phone": "+84-24-35564944",
+      "contact_type": "RIR inetnum abuse mailbox",
+      "is_formal_abuse_contact": true,
+      "provenance": "APNIC WHOIS explicitly identifies hm-changed@vnnic.vn as the abuse contact and abuse-mailbox for 103.149.86.0/23."
+    },
+    "technical_administrative": {
+      "name": "Tran Duc Quan",
+      "handle": "TDQ9-AP",
+      "email": "info@congnghe4s.com",
+      "phone": "+84-986648126",
+      "roles": [
+        "technical",
+        "administrative"
+      ],
+      "contact_type": "RIR technical/administrative contact",
+      "is_formal_abuse_contact": false,
+      "provenance": "APNIC person record for TDQ9-AP; the record does not label this address as an abuse mailbox."
+    }
+  },
+  "historical_adjacent_origin": {
+    "ip": "103.149.87.34",
+    "host": "naptiktok.net",
+    "observed_at_utc": "2025-06-09T12:18:28.430Z",
+    "server": "nginx",
+    "urlscan_id": "019754a0-9b7a-7781-8c6a-ad887d26a2e6",
+    "status": "historical partial-kit origin; not current campaign proof",
+    "network_holder": "same AS149125 / 103.149.86.0/23 allocation"
+  },
+  "server_hoster_assessment": {
+    "identified_network_holder": "4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED",
+    "role": "RIR allocation/route registrant for 103.149.86.0/23 / AS149125",
+    "commercial_hoster_confirmed": false,
+    "status": "commercial server hoster, subscriber, and operator not established from public evidence"
+  }
 }

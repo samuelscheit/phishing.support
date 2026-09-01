@@ -1,0 +1,1097 @@
+{
+  "schema_version": 1,
+  "case": "tiktok-recharge-campaign",
+  "generated_at_utc": "2026-09-01T11:11:52Z",
+  "evidence_cutoff_utc": "2026-09-01T11:11:52Z",
+  "scope": {
+    "verified_campaign_members": 20,
+    "server_records": 2,
+    "confirmed_current_direct_serving_endpoints": 1,
+    "historical_related_origin_records": 1,
+    "current_campaign_hosts_with_apex_only_association": 10,
+    "current_campaign_hosts_without_confirmed_origin": 9,
+    "definition": "An origin record requires a direct serving observation or a clearly identified historical serving endpoint. Root/apex DNS association is retained separately and is never represented as direct vhost proof.",
+    "edge_exclusion": "Cloudflare A/AAAA values are CDN/proxy observations, not origin servers. They are retained per host as edge_addresses_seen_not_origins and excluded from server_records.",
+    "hoster_boundary": "RIR allocation holders and registrars are reporting/attribution leads. They are not asserted to be the campaign author, subscriber, or knowing operator without provider-side records.",
+    "confirmed_ipv6_origin_records": 0
+  },
+  "server_records": [
+    {
+      "server_id": "origin-103-149-86-246",
+      "ip": "103.149.86.246",
+      "role": "confirmed_current_campaign_serving_endpoint",
+      "status": "directly_proven_for_one_campaign_vhost; ten additional campaign roots had authoritative apex A records to this address at the snapshot",
+      "service_observations": [
+        {
+          "transport": "HTTP",
+          "port": 80,
+          "product": "Apache",
+          "observation_type": "direct Host-header request",
+          "observed_at_utc": "2026-09-01T04:18:16Z",
+          "host_header": "napxu.hungdungmedia.fun",
+          "http_status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "body_bytes": 186877,
+          "body_sha256": "a0e74fe2c82e1c9dd46d9ec89428f9253a8d8671ec909272d5b50289f46f1be7",
+          "title": "Nạp xu TikTok"
+        },
+        {
+          "transport": "TCP",
+          "port": 22,
+          "product": "OpenSSH 8.9p1 Ubuntu 3",
+          "observation_type": "passive Shodan service record",
+          "observed_at_utc": "2026-08-29T15:35:55Z"
+        },
+        {
+          "transport": "TCP",
+          "port": 80,
+          "product": "Apache httpd",
+          "observation_type": "passive Shodan service record",
+          "observed_at_utc": "2026-08-29T15:35:55Z"
+        }
+      ],
+      "network_or_allocation_holder": {
+        "name": "4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED",
+        "role": "RIR allocation/route registrant; commercial server tenancy and subscriber identity not independently established",
+        "netname": "DV4S-VN",
+        "asn": "AS149125",
+        "prefix": "103.149.86.0/23",
+        "country": "VN",
+        "address": "Thanh Cong Village, Tien Phong Commune, Yen Dung District, Bac Giang Province, Vietnam"
+      },
+      "abuse_contacts": [
+        {
+          "organization": "IRT-VNNIC-AP",
+          "handle": "IRT-VNNIC-AP",
+          "email": "hm-changed@vnnic.vn",
+          "phone": "+84-24-35564944",
+          "contact_type": "RIR inetnum abuse mailbox",
+          "is_formal_abuse_contact": true,
+          "provenance": "APNIC WHOIS explicitly identifies hm-changed@vnnic.vn as the abuse contact and abuse-mailbox for 103.149.86.0/23."
+        },
+        {
+          "name": "Tran Duc Quan",
+          "handle": "TDQ9-AP",
+          "email": "info@congnghe4s.com",
+          "phone": "+84-986648126",
+          "roles": [
+            "technical",
+            "administrative"
+          ],
+          "contact_type": "RIR technical/administrative contact",
+          "is_formal_abuse_contact": false,
+          "provenance": "APNIC person record for TDQ9-AP; the record does not label this address as an abuse mailbox."
+        }
+      ],
+      "campaign_association": {
+        "direct_host_header_vhosts": [
+          "napxu.hungdungmedia.fun"
+        ],
+        "authoritative_apex_dns_associations": [
+          "napxu.thuytongstore.fun",
+          "shop-xu.kimsonmedia.sbs",
+          "shop.huuhanstudio.space",
+          "shop.sonhaimedia.sbs",
+          "shop.dainammedia.space",
+          "napxu.hoanghaimedia.shop",
+          "napxu.ko-media.art",
+          "shop.hd-media.space",
+          "napxu.quangthaimedia.shop",
+          "napxu.hoanganhmedia.sbs"
+        ],
+        "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483Z",
+        "association_caveat": "The ten records are root/apex A records. They support an address association for the zones, but do not independently prove that each named campaign subdomain was serving the phishing body at that exact time. The direct Host-header proof applies only to napxu.hungdungmedia.fun."
+      },
+      "confidence": "high for the direct serving endpoint; medium for the ten apex associations",
+      "evidence_refs": [
+        "investigation/tiktok/origin_observation.json#/direct_http_observation",
+        "investigation/tiktok/live-direct-ip.txt",
+        "investigation/tiktok/vhost_checks.jsonl",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/apnic_whois.txt",
+        "investigation/tiktok/origin_sources/103.149.86.246_apnic_rdap.json",
+        "investigation/tiktok/shodan_host_10314986246.html"
+      ],
+      "caveats": [
+        "The public records establish a serving endpoint and RIR allocation holder, not the subscriber, account holder, or person who deployed the application.",
+        "An upstream backend or reverse proxy behind this address cannot be excluded from the HTTP evidence.",
+        "No SSH authentication or intrusive scan was performed.",
+        "The technical/admin email info@congnghe4s.com is not labeled as a formal abuse mailbox in APNIC data; route abuse reports to hm-changed@vnnic.vn."
+      ],
+      "server_hoster_assessment": {
+        "identified_name": "4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED",
+        "identified_role": "RIR allocation/route registrant",
+        "commercial_hoster_confirmed": false,
+        "status": "commercial server hoster/subscriber not established from public evidence",
+        "next_record_needed": "subscriber/VPS assignment or hosting account records from the network provider"
+      }
+    },
+    {
+      "server_id": "historical-103-149-87-34",
+      "ip": "103.149.87.34",
+      "role": "historical_adjacent_partial_kit_origin",
+      "status": "historical related deployment; not confirmed as a current origin for the 20-member 2026 campaign",
+      "service_observations": [
+        {
+          "transport": "HTTPS",
+          "port": 443,
+          "product": "nginx",
+          "observation_type": "URLScan primary document request (default HTTPS port)",
+          "observed_at_utc": "2025-06-09T12:18:28.430Z",
+          "host": "naptiktok.net",
+          "http_status": 200,
+          "asn_as_observed": "AS149125"
+        }
+      ],
+      "network_or_allocation_holder": {
+        "name": "4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED",
+        "role": "RIR allocation/route registrant; commercial server tenancy and subscriber identity not independently established",
+        "netname": "DV4S-VN",
+        "asn": "AS149125",
+        "prefix": "103.149.86.0/23",
+        "country": "VN",
+        "address": "Thanh Cong Village, Tien Phong Commune, Yen Dung District, Bac Giang Province, Vietnam"
+      },
+      "abuse_contacts": [
+        {
+          "organization": "IRT-VNNIC-AP",
+          "handle": "IRT-VNNIC-AP",
+          "email": "hm-changed@vnnic.vn",
+          "phone": "+84-24-35564944",
+          "contact_type": "RIR inetnum abuse mailbox",
+          "is_formal_abuse_contact": true,
+          "provenance": "APNIC WHOIS explicitly identifies hm-changed@vnnic.vn as the abuse contact and abuse-mailbox for 103.149.86.0/23."
+        },
+        {
+          "name": "Tran Duc Quan",
+          "handle": "TDQ9-AP",
+          "email": "info@congnghe4s.com",
+          "phone": "+84-986648126",
+          "roles": [
+            "technical",
+            "administrative"
+          ],
+          "contact_type": "RIR technical/administrative contact",
+          "is_formal_abuse_contact": false,
+          "provenance": "APNIC person record for TDQ9-AP; the record does not label this address as an abuse mailbox."
+        }
+      ],
+      "historical_association": {
+        "host": "naptiktok.net",
+        "urlscan_id": "019754a0-9b7a-7781-8c6a-ad887d26a2e6",
+        "observed_at_utc": "2025-06-09T12:18:28.430Z",
+        "exact_campaign_asset_match_count": 10,
+        "shared_resource_hash": "584dc8fb5b08ecf0a40d2fd4bd106422050ee02a60ebeede1e7bfecfd78f8c53",
+        "relationship": "same older Vietnamese TikTok ID-only/no-password front-end family and ten exact campaign payment/avatar assets"
+      },
+      "confidence": "medium for historical infrastructure/partial-kit correlation",
+      "evidence_refs": [
+        "investigation/tiktok/source_correlation.json#/legacy_kit_lineage/2",
+        "investigation/tiktok/related_sites/urlscan_result_pages/019754a0-9b7a-7781-8c6a-ad887d26a2e6.html",
+        "investigation/tiktok/related_sites/exact_kit/naptiktok.net_rdap.json",
+        "investigation/tiktok/origin_sources/103.149.87.34_apnic_rdap.json"
+      ],
+      "caveats": [
+        "This observation predates the current campaign and is not one of the 20 submitted campaign members.",
+        "The current naptiktok.net RDAP record reflects a later 2026 Dynadot registration; do not infer that registration account controlled the 2025 deployment.",
+        "The same IP also served the unrelated napgarena.vn portal in 2024, so the /23 is not an exclusive campaign network and 4S Technology is not thereby the operator."
+      ],
+      "server_hoster_assessment": {
+        "identified_name": "4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED",
+        "identified_role": "RIR allocation/route registrant",
+        "commercial_hoster_confirmed": false,
+        "status": "commercial server hoster/subscriber not established from public evidence",
+        "next_record_needed": "subscriber/VPS assignment or hosting account records from the network provider"
+      }
+    }
+  ],
+  "campaign_host_status": [
+    {
+      "host": "napxu.gnshop.fun",
+      "root_domain": "gnshop.fun",
+      "origin_status": "origin_unknown_cloudflare_or_removed",
+      "origin_ip": null,
+      "server_id": null,
+      "evidence_type": "no_confirmed_origin",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "104.21.59.107",
+        "172.67.223.92"
+      ],
+      "authoritative_apex_a_at_snapshot": [],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:52.089399+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "not established",
+      "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "nap-xu-247.vntik.shop",
+      "root_domain": "vntik.shop",
+      "origin_status": "origin_unknown_cloudflare_or_removed",
+      "origin_ip": null,
+      "server_id": null,
+      "evidence_type": "no_confirmed_origin",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "188.114.96.3",
+        "188.114.97.3"
+      ],
+      "authoritative_apex_a_at_snapshot": [],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:52.567062+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "not established",
+      "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "napxu247.muanhanh.shop",
+      "root_domain": "muanhanh.shop",
+      "origin_status": "origin_unknown_cloudflare_or_removed",
+      "origin_ip": null,
+      "server_id": null,
+      "evidence_type": "no_confirmed_origin",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "188.114.96.3",
+        "188.114.97.3",
+        "172.67.145.71",
+        "104.21.39.124"
+      ],
+      "authoritative_apex_a_at_snapshot": [
+        "104.21.39.124",
+        "172.67.145.71"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:53.028845+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "not established",
+      "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "napxu.dltiktik.shop",
+      "root_domain": "dltiktik.shop",
+      "origin_status": "origin_unknown_cloudflare_or_removed",
+      "origin_ip": null,
+      "server_id": null,
+      "evidence_type": "no_confirmed_origin",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "104.21.40.4",
+        "172.67.172.217"
+      ],
+      "authoritative_apex_a_at_snapshot": [],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:53.483087+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "not established",
+      "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "napxunhanhre.khuyenmai2026.site",
+      "root_domain": "khuyenmai2026.site",
+      "origin_status": "origin_unknown_cloudflare_or_removed",
+      "origin_ip": null,
+      "server_id": null,
+      "evidence_type": "no_confirmed_origin",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "104.21.6.217",
+        "172.67.135.79"
+      ],
+      "authoritative_apex_a_at_snapshot": [
+        "104.21.6.217",
+        "172.67.135.79"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:53.939352+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "not established",
+      "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "napxu.takimedia.shop",
+      "root_domain": "takimedia.shop",
+      "origin_status": "origin_unknown_cloudflare_or_removed",
+      "origin_ip": null,
+      "server_id": null,
+      "evidence_type": "no_confirmed_origin",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "188.114.96.3",
+        "188.114.97.3"
+      ],
+      "authoritative_apex_a_at_snapshot": [],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:54.397266+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "not established",
+      "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "nap-xu.sky1media.shop",
+      "root_domain": "sky1media.shop",
+      "origin_status": "origin_unknown_cloudflare_or_removed",
+      "origin_ip": null,
+      "server_id": null,
+      "evidence_type": "no_confirmed_origin",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "188.114.97.3",
+        "188.114.96.3"
+      ],
+      "authoritative_apex_a_at_snapshot": [],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:54.855251+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "not established",
+      "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "nap-xu.thuynmedia.shop",
+      "root_domain": "thuynmedia.shop",
+      "origin_status": "origin_unknown_cloudflare_or_removed",
+      "origin_ip": null,
+      "server_id": null,
+      "evidence_type": "no_confirmed_origin",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "188.114.97.2",
+        "188.114.96.2"
+      ],
+      "authoritative_apex_a_at_snapshot": [],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:55.325909+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "not established",
+      "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "napxu.thuytongstore.fun",
+      "root_domain": "thuytongstore.fun",
+      "origin_status": "authoritative_apex_association_only",
+      "origin_ip": "103.149.86.246",
+      "server_id": "origin-103-149-86-246",
+      "evidence_type": "authoritative_root_apex_A_record",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "188.114.97.3",
+        "188.114.96.3"
+      ],
+      "authoritative_apex_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:55.785918+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "medium",
+      "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "shop-xu.kimsonmedia.sbs",
+      "root_domain": "kimsonmedia.sbs",
+      "origin_status": "authoritative_apex_association_only",
+      "origin_ip": "103.149.86.246",
+      "server_id": "origin-103-149-86-246",
+      "evidence_type": "authoritative_root_apex_A_record",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "104.21.43.40",
+        "172.67.218.225"
+      ],
+      "authoritative_apex_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:56.251824+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "medium",
+      "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "shop.huuhanstudio.space",
+      "root_domain": "huuhanstudio.space",
+      "origin_status": "authoritative_apex_association_only",
+      "origin_ip": "103.149.86.246",
+      "server_id": "origin-103-149-86-246",
+      "evidence_type": "authoritative_root_apex_A_record",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "104.21.20.135",
+        "172.67.192.238"
+      ],
+      "authoritative_apex_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:56.711752+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "medium",
+      "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "shop.sonhaimedia.sbs",
+      "root_domain": "sonhaimedia.sbs",
+      "origin_status": "authoritative_apex_association_only",
+      "origin_ip": "103.149.86.246",
+      "server_id": "origin-103-149-86-246",
+      "evidence_type": "authoritative_root_apex_A_record",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [],
+      "authoritative_apex_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:57.170665+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "medium",
+      "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "shop.dainammedia.space",
+      "root_domain": "dainammedia.space",
+      "origin_status": "authoritative_apex_association_only",
+      "origin_ip": "103.149.86.246",
+      "server_id": "origin-103-149-86-246",
+      "evidence_type": "authoritative_root_apex_A_record",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "104.21.73.31",
+        "172.67.157.55"
+      ],
+      "authoritative_apex_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:57.656244+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "medium",
+      "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "napxu.hoanghaimedia.shop",
+      "root_domain": "hoanghaimedia.shop",
+      "origin_status": "authoritative_apex_association_only",
+      "origin_ip": "103.149.86.246",
+      "server_id": "origin-103-149-86-246",
+      "evidence_type": "authoritative_root_apex_A_record",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "104.21.16.200",
+        "172.67.215.152"
+      ],
+      "authoritative_apex_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:58.118227+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "medium",
+      "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "napxu.ko-media.art",
+      "root_domain": "ko-media.art",
+      "origin_status": "authoritative_apex_association_only",
+      "origin_ip": "103.149.86.246",
+      "server_id": "origin-103-149-86-246",
+      "evidence_type": "authoritative_root_apex_A_record",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "104.21.95.230",
+        "172.67.149.11"
+      ],
+      "authoritative_apex_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:58.582235+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "medium",
+      "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "shop.hd-media.space",
+      "root_domain": "hd-media.space",
+      "origin_status": "authoritative_apex_association_only",
+      "origin_ip": "103.149.86.246",
+      "server_id": "origin-103-149-86-246",
+      "evidence_type": "authoritative_root_apex_A_record",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "104.21.57.218",
+        "172.67.167.13"
+      ],
+      "authoritative_apex_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:59.044629+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "medium",
+      "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "napxu.quangthaimedia.shop",
+      "root_domain": "quangthaimedia.shop",
+      "origin_status": "authoritative_apex_association_only",
+      "origin_ip": "103.149.86.246",
+      "server_id": "origin-103-149-86-246",
+      "evidence_type": "authoritative_root_apex_A_record",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "172.67.173.115",
+        "104.21.55.220"
+      ],
+      "authoritative_apex_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:46:59.549281+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "medium",
+      "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "napxu.quanghung-media.site",
+      "root_domain": "quanghung-media.site",
+      "origin_status": "origin_unknown_cloudflare_or_removed",
+      "origin_ip": null,
+      "server_id": null,
+      "evidence_type": "no_confirmed_origin",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "172.67.129.180",
+        "104.21.2.212"
+      ],
+      "authoritative_apex_a_at_snapshot": [
+        "104.21.2.212",
+        "172.67.129.180"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:47:00.014483+00:00",
+        "status": null,
+        "title": null,
+        "disposition": "HTTP/service error or suspension response"
+      },
+      "confidence": "not established",
+      "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "napxu.hoanganhmedia.sbs",
+      "root_domain": "hoanganhmedia.sbs",
+      "origin_status": "authoritative_apex_association_only",
+      "origin_ip": "103.149.86.246",
+      "server_id": "origin-103-149-86-246",
+      "evidence_type": "authoritative_root_apex_A_record",
+      "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+      "edge_addresses_seen_not_origins": [
+        "188.114.97.3",
+        "188.114.96.3"
+      ],
+      "authoritative_apex_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:47:00.479854+00:00",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page"
+      },
+      "confidence": "medium",
+      "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    },
+    {
+      "host": "napxu.hungdungmedia.fun",
+      "root_domain": "hungdungmedia.fun",
+      "origin_status": "confirmed_direct_vhost",
+      "origin_ip": "103.149.86.246",
+      "server_id": "origin-103-149-86-246",
+      "evidence_type": "direct_http_host_header",
+      "evidence_time_utc": "2026-09-01T04:18:16Z",
+      "edge_addresses_seen_not_origins": [
+        "188.114.96.3",
+        "188.114.97.3",
+        "104.21.80.154",
+        "172.67.151.86"
+      ],
+      "authoritative_apex_a_at_snapshot": [],
+      "vhost_check": {
+        "time_utc": "2026-09-01T03:47:00.985706+00:00",
+        "status": 200,
+        "title": "Nạp xu TikTok",
+        "disposition": "fake TikTok page still served"
+      },
+      "confidence": "high",
+      "caveat": "Direct HTTP request to 103.149.86.246:80 with this Host header returned the fake recharge page (HTTP 200).",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_iocs.json",
+        "investigation/tiktok/dns_snapshot_rdap_ns.json",
+        "investigation/tiktok/vhost_checks.jsonl"
+      ]
+    }
+  ],
+  "provider_contacts_not_origin_servers": [
+    {
+      "provider": "4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED / AS149125 allocation",
+      "scope": [
+        "103.149.86.246",
+        "103.149.87.34",
+        "103.149.86.0/23"
+      ],
+      "service_role": "network/allocation holder; actual customer tenancy unknown",
+      "formal_abuse_contact": "hm-changed@vnnic.vn",
+      "contact_type": "APNIC/VNNIC IRT abuse mailbox",
+      "additional_technical_admin_contact": "info@congnghe4s.com",
+      "additional_contact_note": "APNIC technical/administrative contact only; do not label as abuse mailbox.",
+      "evidence_ref": "investigation/tiktok/apnic_whois.txt"
+    },
+    {
+      "provider": "Cloudflare, Inc. / AS13335",
+      "scope": [
+        "Cloudflare edge addresses observed for current and related domains"
+      ],
+      "service_role": "reverse proxy/CDN and authoritative DNS; not an identified origin server for this case",
+      "formal_abuse_contact": "https://www.cloudflare.com/abuse/form",
+      "contact_type": "official Trust & Safety abuse web form",
+      "additional_technical_admin_contact": null,
+      "additional_contact_note": "Cloudflare edge IPs must not be substituted for the hidden origin.",
+      "evidence_ref": "investigation/tiktok/origin_sources/cloudflare_report_abuse.md"
+    },
+    {
+      "provider": "HOSTINGER operations, UAB / IANA 1636",
+      "scope": [
+        "registrar for the 20 current campaign roots",
+        "orvantis.online source-page lead"
+      ],
+      "service_role": "domain registrar; hosting not established for the current campaign origin",
+      "formal_abuse_contact": "abuse@hostinger.com",
+      "contact_type": "registrar RDAP abuse contact / Hostinger Abuse & Fraud Prevention Team",
+      "additional_technical_admin_contact": null,
+      "additional_contact_note": "Hostinger reported huuhanstudio.space already suspended but shop.huuhanstudio.space not hosted on its network; registrar and hosting roles must be separated.",
+      "evidence_ref": "investigation/tiktok/hostinger_rdap_hungdung.json; investigation/tiktok/all_inbound_replies.json"
+    },
+    {
+      "provider": "Spaceship, Inc. / IANA 3862",
+      "scope": [
+        "napxutiktok.sbs historical exact-kit domain",
+        "napthetiktok.online unverified lead"
+      ],
+      "service_role": "registrar for related domains; no origin recovered",
+      "formal_abuse_contact": "abuse@spaceship.com",
+      "contact_type": "registrar RDAP abuse contact",
+      "additional_technical_admin_contact": null,
+      "additional_contact_note": "The related domains were observed behind Cloudflare; this is not a server-hosting attribution.",
+      "evidence_ref": "investigation/tiktok/related_sites/rdap_direct/spaceship_napxutiktok.sbs.json"
+    },
+    {
+      "provider": "NameCheap, Inc. / IANA 1068",
+      "scope": [
+        "napthegarena.online historical exact-kit domain"
+      ],
+      "service_role": "registrar for a related domain; no origin recovered",
+      "formal_abuse_contact": "abuse@namecheap.com",
+      "contact_type": "registrar RDAP abuse contact",
+      "additional_technical_admin_contact": null,
+      "additional_contact_note": "The domain was observed behind Cloudflare; this is not a server-hosting attribution.",
+      "evidence_ref": "investigation/tiktok/related_sites/rdap_direct/namecheap_napthegarena.online.json"
+    },
+    {
+      "provider": "Dynadot, Inc. / IANA 472",
+      "scope": [
+        "current naptiktok.net registration record"
+      ],
+      "service_role": "later registrar record for a historical related deployment; no origin recovered for current deployment",
+      "formal_abuse_contact": "abuse@dynadot.com",
+      "contact_type": "registrar RDAP abuse contact",
+      "additional_technical_admin_contact": null,
+      "additional_contact_note": "The historical .87.34 URLScan observation predates this 2026 registration; do not connect the registrar account to the historical server without provider records.",
+      "evidence_ref": "investigation/tiktok/related_sites/exact_kit/naptiktok.net_rdap.json"
+    }
+  ],
+  "edge_exclusion_examples": {
+    "provider": "Cloudflare / AS13335",
+    "examples": [
+      "104.21.16.200",
+      "104.21.2.212",
+      "104.21.20.135",
+      "104.21.39.124",
+      "104.21.40.4",
+      "104.21.43.40",
+      "104.21.55.220",
+      "104.21.57.218",
+      "104.21.59.107",
+      "104.21.6.217",
+      "104.21.73.31",
+      "104.21.80.154",
+      "104.21.95.230",
+      "172.67.129.180",
+      "172.67.135.79",
+      "172.67.145.71",
+      "172.67.149.11",
+      "172.67.151.86",
+      "172.67.157.55",
+      "172.67.167.13",
+      "172.67.172.217",
+      "172.67.173.115",
+      "172.67.192.238",
+      "172.67.215.152",
+      "172.67.218.225",
+      "172.67.223.92",
+      "188.114.96.2",
+      "188.114.96.3",
+      "188.114.97.2",
+      "188.114.97.3"
+    ],
+    "note": "These examples, and all per-host edge addresses in campaign_host_status, are intentionally excluded from origin attribution."
+  },
+  "evidence_sources": [
+    {
+      "path": "investigation/tiktok/all_inbound_replies.json",
+      "role": "Hostinger abuse response distinguishing registrar from hosting",
+      "sha256": "a3c6428937fc920bfe1f81808dd0a1cf09f2e0431b35711a2200c53db1231454"
+    },
+    {
+      "path": "investigation/tiktok/apnic_rdap.json",
+      "role": "APNIC RDAP allocation and contacts",
+      "sha256": "1f8e146fc2354eed521837d478476e3945060212bc2852ee50a1fb979cb702ce"
+    },
+    {
+      "path": "investigation/tiktok/apnic_whois.txt",
+      "role": "APNIC WHOIS text with explicit abuse-mailbox",
+      "sha256": "d224b450db76796981a8eb6e1e114df7cb876d8275f5d234ddcbf612899148e8"
+    },
+    {
+      "path": "investigation/tiktok/campaign_iocs.json",
+      "role": "canonical campaign host inventory with explicit origin assessment",
+      "sha256": "e7c3ef984bf4fb195a9bae5217bd90dd5f6bba5e7d84dc75f130a17f4c4b2246"
+    },
+    {
+      "path": "investigation/tiktok/dns_snapshot.json",
+      "role": "public DNS snapshot",
+      "sha256": "eae2a46cd11f3477c69be213e6cb09928c8ddaeb0537171405c847d7cf8e5e32"
+    },
+    {
+      "path": "investigation/tiktok/dns_snapshot_rdap_ns.json",
+      "role": "authoritative/RDAP nameserver DNS snapshot",
+      "sha256": "9888049d695bac72047ff6e4ff5ffacf8048724e77e41524a8fb60b95d0da123"
+    },
+    {
+      "path": "investigation/tiktok/hostinger_rdap_hungdung.json",
+      "role": "registrar RDAP abuse contact",
+      "sha256": "993a46b80574fbde13160a59606f80ced5d2fd3d74d823aecdf8acef5e21e8d3"
+    },
+    {
+      "path": "investigation/tiktok/live-direct-ip.txt",
+      "role": "direct HTTP response to the serving IP",
+      "sha256": "58ba8c5ea0b18c0a5950076e1e2f692aa21b61e8e98dab85c898acd911b439b4"
+    },
+    {
+      "path": "investigation/tiktok/live_final_direct.headers",
+      "role": "final direct-origin response headers",
+      "sha256": "a2b6b3d91816e6d5d590fa0a0f3ae1359b5b96e4540776d8b70e0f35a07263fc"
+    },
+    {
+      "path": "investigation/tiktok/live_final_direct.html",
+      "role": "final direct-origin response body",
+      "sha256": "a0e74fe2c82e1c9dd46d9ec89428f9253a8d8671ec909272d5b50289f46f1be7"
+    },
+    {
+      "path": "investigation/tiktok/origin_observation.json",
+      "role": "sanitized direct-origin and network summary",
+      "sha256": "8217ba7472a5be50a7fd1fcffde91f5ef03cfc72f686605968f7128491314ad9"
+    },
+    {
+      "path": "investigation/tiktok/origin_sources/103.149.86.246_apnic_rdap.json",
+      "role": "fresh APNIC RDAP contact verification for .246",
+      "sha256": "1f8e146fc2354eed521837d478476e3945060212bc2852ee50a1fb979cb702ce"
+    },
+    {
+      "path": "investigation/tiktok/origin_sources/103.149.86.246_ripe_network_info.json",
+      "role": "fresh RIPEstat ASN/prefix verification for .246",
+      "sha256": "36685383251242dd8dae771cb5e546430d54d379dc4322a3fae51769c7a6985a"
+    },
+    {
+      "path": "investigation/tiktok/origin_sources/103.149.86.246_ripe_whois.json",
+      "role": "fresh RIPEstat WHOIS verification for .246",
+      "sha256": "386def90a80c36c6121d6777f781f48240647c9d79165f927c7bfe6daf89cab5"
+    },
+    {
+      "path": "investigation/tiktok/origin_sources/103.149.87.34_apnic_rdap.json",
+      "role": "fresh APNIC RDAP contact verification for .34",
+      "sha256": "8bc2895436a2a17d7910c5063d0b3082b9942252ebcafda9730a790285a31b2d"
+    },
+    {
+      "path": "investigation/tiktok/origin_sources/103.149.87.34_ripe_network_info.json",
+      "role": "fresh RIPEstat ASN/prefix verification for .34",
+      "sha256": "1e22c008fe9464bcf3b43d749876874bf9b299680ba22ff68acdfe4a82becb60"
+    },
+    {
+      "path": "investigation/tiktok/origin_sources/103.149.87.34_ripe_whois.json",
+      "role": "fresh RIPEstat WHOIS verification for .34",
+      "sha256": "c0225bc351a8e32c54a86169c972854f380e8e5f2511d20dbdbf021006de2f41"
+    },
+    {
+      "path": "investigation/tiktok/origin_sources/cloudflare_report_abuse.md",
+      "role": "Cloudflare official abuse-reporting reference",
+      "sha256": "c8f3b4cb49cb9496e18538d4dead30caa836930344272ac5a49d2ce92ded78e6"
+    },
+    {
+      "path": "investigation/tiktok/origin_sources/urlscan_distinctive_hash_search.json",
+      "role": "public URLScan distinctive-asset and legacy-resource hash search coverage",
+      "sha256": "198167a2008fdc6f7654e5d99f3711a6b81f1b7fc8e09a2e9fc767228c634234"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/exact_kit/napthegarena.online_rdap.json",
+      "role": "historical exact-kit registrar RDAP",
+      "sha256": "cc8fb0347feab8f068a8c018a249c7147cf65b5272e1abfd3151a7acb68376be"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/exact_kit/naptiktok.net_rdap.json",
+      "role": "historical naptiktok.net current registrar RDAP",
+      "sha256": "938797103500b1fb432c4e0d3b6444d9cf87124f53d4931c557aee6748f15227"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/exact_kit/napxutiktok.sbs_rdap.json",
+      "role": "historical exact-kit registrar RDAP",
+      "sha256": "d78ceaf100d6b185cc65889b9069b88754283869c48e6a66b0caa0d0b03e0c07"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019754a0-9b7a-7781-8c6a-ad887d26a2e6.html",
+      "role": "historical naptiktok.net URLScan primary request",
+      "sha256": "c49f3b328b28ab0ae4f85a023d6ac9551557a20962d615b99057920245c99c39"
+    },
+    {
+      "path": "investigation/tiktok/ripestat_network_info.json",
+      "role": "RIPEstat ASN/prefix observation",
+      "sha256": "f60e974297d4c861d806a29e00ffefeb65c3ea52328b0043945a374f3b808a0a"
+    },
+    {
+      "path": "investigation/tiktok/ripestat_whois.json",
+      "role": "RIPEstat/APNIC WHOIS mirror",
+      "sha256": "d7c4f17cea3d99bbc9ca37533887e6bd3766aea2c7dd48bf713162034118a3a4"
+    },
+    {
+      "path": "investigation/tiktok/shodan_host_10314986246.html",
+      "role": "passive service observation for 103.149.86.246",
+      "sha256": "dbfa422f79cba70a9375a2a359bf700919174302b613879032a9afbf6f43dc1e"
+    },
+    {
+      "path": "investigation/tiktok/source_correlation.json",
+      "role": "sanitized historical kit/network correlation",
+      "sha256": "456606480cc68d10827bd2a8da16b9d626249834630a60aa33cd83493adb53d3"
+    },
+    {
+      "path": "investigation/tiktok/vhost_checks.jsonl",
+      "role": "point-in-time campaign virtual-host checks",
+      "sha256": "db88e55c5e75803c503e1fc998e40873a8982605c70f1d2a760925835c363c93"
+    }
+  ],
+  "method_and_limits": [
+    "Direct proof is based on a read-only HTTP GET to 103.149.86.246:80 with Host: napxu.hungdungmedia.fun returning the fake page.",
+    "The ten .246 associations come from authoritative root-domain A records at 2026-09-01T04:17:17.767483Z; they do not prove every subdomain vhost was active at that instant.",
+    "The .87.34 record is a historical partial-kit deployment from URLScan, not a current 2026 campaign member.",
+    "The network organization is the APNIC allocation/route registrant. Subscriber, VPS, reverse-proxy, and backend tenancy remain unresolved.",
+    "No IPv6 origin was confirmed; the observed campaign AAAA values are Cloudflare edge/proxy addresses or absent.",
+    "Formal abuse contact means a source explicitly labels the address as an abuse contact/mailbox. Technical/admin and registrar contacts are labeled separately.",
+    "No SSH authentication, brute force, Cloudflare bypass, payment, or state-changing request was performed."
+  ],
+  "search_coverage": {
+    "source": "public URLScan hash searches",
+    "source_artifact": "investigation/tiktok/origin_sources/urlscan_distinctive_hash_search.json",
+    "queries": [
+      {
+        "asset_label": "coin.svg",
+        "sha256": "28609f1a92cbfe1cd73a74ed21177db4991bd9cb522ac54dba22a05b32e0a328",
+        "total_results": 15,
+        "non_edge_or_non_github_primary_results": []
+      },
+      {
+        "asset_label": "the-cao.svg",
+        "sha256": "1bd5739129611aa7f57e373666a1d679f9b6614e0740a3f2f304d99ad180a335",
+        "total_results": 3,
+        "non_edge_or_non_github_primary_results": []
+      },
+      {
+        "asset_label": "bank-qr.svg",
+        "sha256": "23e7ba91d2253d914a17ef73fcfc847125ceec9c918c1dac942c2ca0a7c39dec",
+        "total_results": 3,
+        "non_edge_or_non_github_primary_results": []
+      },
+      {
+        "asset_label": "logo.svg",
+        "sha256": "66ff8524c34494cabd309e6d9b27c39670563ee036d74e2cd56a07566f662ae2",
+        "total_results": 19,
+        "non_edge_or_non_github_primary_results": []
+      },
+      {
+        "asset_label": "security-tiktok.svg",
+        "sha256": "bb4ae0be7662804ab90f6d840e8bf03d632b781fc66015d54e89d88d358969de",
+        "total_results": 19,
+        "non_edge_or_non_github_primary_results": []
+      },
+      {
+        "asset_label": "legacy s.js",
+        "sha256": "584dc8fb5b08ecf0a40d2fd4bd106422050ee02a60ebeede1e7bfecfd78f8c53",
+        "total_results": 13,
+        "non_edge_or_non_github_primary_results": [
+          {
+            "url": "https://www.naptiktok.net/",
+            "ip": "103.149.87.34",
+            "asn": "AS149125",
+            "server": "nginx",
+            "observed_at_utc": "2025-06-09T12:18:28.430Z"
+          }
+        ]
+      }
+    ],
+    "negative_finding": "The distinctive current-kit coin.svg, the-cao.svg, and bank-qr.svg searches returned only Cloudflare AS13335 primary results. logo.svg and security-tiktok.svg additionally returned GitHub Pages AS54113. The older s.js hash returned one non-Cloudflare primary result, the already-recorded historical 103.149.87.34 naptiktok.net observation. No additional direct origin for the current 20-member campaign was identified by these searches.",
+    "interpretation_limit": "URLScan search is historical/public and not exhaustive of private scans, deleted records, or origins hidden behind a proxy; this negative result does not prove that no other server ever existed."
+  }
+}

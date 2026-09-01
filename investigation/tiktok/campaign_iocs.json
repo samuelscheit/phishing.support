@@ -1,12 +1,19 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "case": "tiktok-recharge-campaign",
-  "generated_at_utc": "2026-09-01T09:25:00Z",
+  "generated_at_utc": "2026-09-01T11:11:52Z",
   "scope": {
     "verified_campaign_members": 20,
     "related_unverified_leads": 5,
     "note": "The 20 campaign members are the submissions listed in domain_timeline.csv; one member (shop.sonhaimedia.sbs) lacks a captured MHTML page.",
-    "related_lead_policy": "Related leads are retained outside the 20 verified campaign members. Historical-only entries must not be treated as current blocklist indicators without revalidation."
+    "related_lead_policy": "Related leads are retained outside the 20 verified campaign members. Historical-only entries must not be treated as current blocklist indicators without revalidation.",
+    "origin_inventory": "origin_inventory.json is the source of truth for origin/server attribution; origin_ip_observed was removed because it conflated direct vhost proof with root-apex DNS association.",
+    "origin_status_values": [
+      "confirmed_direct_vhost",
+      "authoritative_apex_association_only",
+      "origin_unknown_cloudflare_or_removed"
+    ],
+    "related_lead_origin_assessment": "Related leads also carry explicit origin assessments; edge-only and source-comment records are not promoted to current campaign origins."
   },
   "iocs": [
     {
@@ -36,7 +43,6 @@
       ],
       "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
       "authoritative_a_at_snapshot": [],
-      "origin_ip_observed": null,
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [],
       "public_dns_nameservers_at_snapshot": [],
@@ -48,7 +54,16 @@
         "client hold",
         "client transfer prohibited"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:17.317Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:17.317Z",
+      "origin_assessment": {
+        "status": "origin_unknown_cloudflare_or_removed",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "no_confirmed_origin",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/0"
+      }
     },
     {
       "indicator_type": "domain",
@@ -77,7 +92,6 @@
       ],
       "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
       "authoritative_a_at_snapshot": [],
-      "origin_ip_observed": null,
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [],
       "public_dns_nameservers_at_snapshot": [],
@@ -89,7 +103,16 @@
         "client hold",
         "client transfer prohibited"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:19.0Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:19.0Z",
+      "origin_assessment": {
+        "status": "origin_unknown_cloudflare_or_removed",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "no_confirmed_origin",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/1"
+      }
     },
     {
       "indicator_type": "domain",
@@ -121,7 +144,6 @@
         "104.21.39.124",
         "172.67.145.71"
       ],
-      "origin_ip_observed": null,
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "172.67.145.71",
@@ -139,7 +161,16 @@
         "client hold",
         "client transfer prohibited"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:20.0Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:20.0Z",
+      "origin_assessment": {
+        "status": "origin_unknown_cloudflare_or_removed",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "no_confirmed_origin",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/2"
+      }
     },
     {
       "indicator_type": "domain",
@@ -168,7 +199,6 @@
       ],
       "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
       "authoritative_a_at_snapshot": [],
-      "origin_ip_observed": null,
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [],
       "public_dns_nameservers_at_snapshot": [],
@@ -180,7 +210,16 @@
         "client hold",
         "client transfer prohibited"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:22.0Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:22.0Z",
+      "origin_assessment": {
+        "status": "origin_unknown_cloudflare_or_removed",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "no_confirmed_origin",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/3"
+      }
     },
     {
       "indicator_type": "domain",
@@ -212,7 +251,6 @@
         "104.21.6.217",
         "172.67.135.79"
       ],
-      "origin_ip_observed": null,
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "104.21.6.217",
@@ -230,7 +268,16 @@
         "client transfer prohibited",
         "client hold"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:23.731Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:23.731Z",
+      "origin_assessment": {
+        "status": "origin_unknown_cloudflare_or_removed",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "no_confirmed_origin",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/4"
+      }
     },
     {
       "indicator_type": "domain",
@@ -259,7 +306,6 @@
       ],
       "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
       "authoritative_a_at_snapshot": [],
-      "origin_ip_observed": null,
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [],
       "public_dns_nameservers_at_snapshot": [],
@@ -271,7 +317,16 @@
         "client hold",
         "client transfer prohibited"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:25.0Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:25.0Z",
+      "origin_assessment": {
+        "status": "origin_unknown_cloudflare_or_removed",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "no_confirmed_origin",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/5"
+      }
     },
     {
       "indicator_type": "domain",
@@ -300,7 +355,6 @@
       ],
       "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
       "authoritative_a_at_snapshot": [],
-      "origin_ip_observed": null,
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [],
       "public_dns_nameservers_at_snapshot": [],
@@ -312,7 +366,16 @@
         "client hold",
         "client transfer prohibited"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:27.0Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:27.0Z",
+      "origin_assessment": {
+        "status": "origin_unknown_cloudflare_or_removed",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "no_confirmed_origin",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/6"
+      }
     },
     {
       "indicator_type": "domain",
@@ -341,7 +404,6 @@
       ],
       "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
       "authoritative_a_at_snapshot": [],
-      "origin_ip_observed": null,
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [],
       "public_dns_nameservers_at_snapshot": [],
@@ -353,7 +415,16 @@
         "client hold",
         "client transfer prohibited"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:28.0Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:28.0Z",
+      "origin_assessment": {
+        "status": "origin_unknown_cloudflare_or_removed",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "no_confirmed_origin",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/7"
+      }
     },
     {
       "indicator_type": "domain",
@@ -384,7 +455,6 @@
       "authoritative_a_at_snapshot": [
         "103.149.86.246"
       ],
-      "origin_ip_observed": "103.149.86.246",
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "103.149.86.246"
@@ -401,7 +471,16 @@
         "client transfer prohibited",
         "client hold"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:29.769Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:29.769Z",
+      "origin_assessment": {
+        "status": "authoritative_apex_association_only",
+        "origin_ip": "103.149.86.246",
+        "server_id": "origin-103-149-86-246",
+        "evidence_type": "authoritative_root_apex_A_record",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/8"
+      }
     },
     {
       "indicator_type": "domain",
@@ -432,7 +511,6 @@
       "authoritative_a_at_snapshot": [
         "103.149.86.246"
       ],
-      "origin_ip_observed": "103.149.86.246",
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "103.149.86.246"
@@ -450,7 +528,16 @@
         "client hold",
         "client transfer prohibited"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:30.0Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:30.0Z",
+      "origin_assessment": {
+        "status": "authoritative_apex_association_only",
+        "origin_ip": "103.149.86.246",
+        "server_id": "origin-103-149-86-246",
+        "evidence_type": "authoritative_root_apex_A_record",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/9"
+      }
     },
     {
       "indicator_type": "domain",
@@ -481,7 +568,6 @@
       "authoritative_a_at_snapshot": [
         "103.149.86.246"
       ],
-      "origin_ip_observed": "103.149.86.246",
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "103.149.86.246"
@@ -500,7 +586,16 @@
         "client hold",
         "add period"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:31.383Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:31.383Z",
+      "origin_assessment": {
+        "status": "authoritative_apex_association_only",
+        "origin_ip": "103.149.86.246",
+        "server_id": "origin-103-149-86-246",
+        "evidence_type": "authoritative_root_apex_A_record",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/10"
+      }
     },
     {
       "indicator_type": "domain",
@@ -525,7 +620,6 @@
       "authoritative_a_at_snapshot": [
         "103.149.86.246"
       ],
-      "origin_ip_observed": "103.149.86.246",
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "103.149.86.246"
@@ -543,7 +637,16 @@
         "client hold",
         "client transfer prohibited"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:32.0Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:32.0Z",
+      "origin_assessment": {
+        "status": "authoritative_apex_association_only",
+        "origin_ip": "103.149.86.246",
+        "server_id": "origin-103-149-86-246",
+        "evidence_type": "authoritative_root_apex_A_record",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/11"
+      }
     },
     {
       "indicator_type": "domain",
@@ -574,7 +677,6 @@
       "authoritative_a_at_snapshot": [
         "103.149.86.246"
       ],
-      "origin_ip_observed": "103.149.86.246",
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "103.149.86.246"
@@ -593,7 +695,16 @@
         "client transfer prohibited",
         "add period"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:32.882Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:32.882Z",
+      "origin_assessment": {
+        "status": "authoritative_apex_association_only",
+        "origin_ip": "103.149.86.246",
+        "server_id": "origin-103-149-86-246",
+        "evidence_type": "authoritative_root_apex_A_record",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/12"
+      }
     },
     {
       "indicator_type": "domain",
@@ -624,7 +735,6 @@
       "authoritative_a_at_snapshot": [
         "103.149.86.246"
       ],
-      "origin_ip_observed": "103.149.86.246",
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "103.149.86.246"
@@ -642,7 +752,16 @@
         "client transfer prohibited",
         "add period"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:34.0Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:34.0Z",
+      "origin_assessment": {
+        "status": "authoritative_apex_association_only",
+        "origin_ip": "103.149.86.246",
+        "server_id": "origin-103-149-86-246",
+        "evidence_type": "authoritative_root_apex_A_record",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/13"
+      }
     },
     {
       "indicator_type": "domain",
@@ -673,7 +792,6 @@
       "authoritative_a_at_snapshot": [
         "103.149.86.246"
       ],
-      "origin_ip_observed": "103.149.86.246",
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "103.149.86.246"
@@ -692,7 +810,16 @@
         "client transfer prohibited",
         "add period"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:35.0Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:35.0Z",
+      "origin_assessment": {
+        "status": "authoritative_apex_association_only",
+        "origin_ip": "103.149.86.246",
+        "server_id": "origin-103-149-86-246",
+        "evidence_type": "authoritative_root_apex_A_record",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/14"
+      }
     },
     {
       "indicator_type": "domain",
@@ -723,7 +850,6 @@
       "authoritative_a_at_snapshot": [
         "103.149.86.246"
       ],
-      "origin_ip_observed": "103.149.86.246",
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "103.149.86.246"
@@ -741,7 +867,16 @@
         "server hold",
         "add period"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:36.090Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:36.090Z",
+      "origin_assessment": {
+        "status": "authoritative_apex_association_only",
+        "origin_ip": "103.149.86.246",
+        "server_id": "origin-103-149-86-246",
+        "evidence_type": "authoritative_root_apex_A_record",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/15"
+      }
     },
     {
       "indicator_type": "domain",
@@ -772,7 +907,6 @@
       "authoritative_a_at_snapshot": [
         "103.149.86.246"
       ],
-      "origin_ip_observed": "103.149.86.246",
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "103.149.86.246"
@@ -789,7 +923,16 @@
         "client transfer prohibited",
         "add period"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:37.0Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:37.0Z",
+      "origin_assessment": {
+        "status": "authoritative_apex_association_only",
+        "origin_ip": "103.149.86.246",
+        "server_id": "origin-103-149-86-246",
+        "evidence_type": "authoritative_root_apex_A_record",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/16"
+      }
     },
     {
       "indicator_type": "domain",
@@ -821,7 +964,6 @@
         "104.21.2.212",
         "172.67.129.180"
       ],
-      "origin_ip_observed": null,
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "104.21.2.212",
@@ -840,7 +982,16 @@
         "client transfer prohibited",
         "add period"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:38.773Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:38.773Z",
+      "origin_assessment": {
+        "status": "origin_unknown_cloudflare_or_removed",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "no_confirmed_origin",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "Observed addresses are Cloudflare edge/proxy values or no answer; they are deliberately not listed as origins. No direct origin evidence was recovered for this host.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/17"
+      }
     },
     {
       "indicator_type": "domain",
@@ -871,7 +1022,6 @@
       "authoritative_a_at_snapshot": [
         "103.149.86.246"
       ],
-      "origin_ip_observed": "103.149.86.246",
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "103.149.86.246"
@@ -889,7 +1039,16 @@
         "client transfer prohibited",
         "add period"
       ],
-      "rdap_snapshot_utc": "2026-09-01T03:43:39.0Z"
+      "rdap_snapshot_utc": "2026-09-01T03:43:39.0Z",
+      "origin_assessment": {
+        "status": "authoritative_apex_association_only",
+        "origin_ip": "103.149.86.246",
+        "server_id": "origin-103-149-86-246",
+        "evidence_type": "authoritative_root_apex_A_record",
+        "evidence_time_utc": "2026-09-01T04:17:17.767483Z",
+        "caveat": "The root domain apex A record returned 103.149.86.246. This is an address association, not a direct request proving the named subdomain served the phishing body at that moment.",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/18"
+      }
     },
     {
       "indicator_type": "domain",
@@ -918,7 +1077,6 @@
       ],
       "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
       "authoritative_a_at_snapshot": [],
-      "origin_ip_observed": "103.149.86.246",
       "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
       "public_dns_a_at_snapshot": [
         "104.21.80.154",
@@ -938,7 +1096,16 @@
         "server hold",
         "add period"
       ],
-      "rdap_snapshot_utc": "2026-09-01T04:19:03.616Z"
+      "rdap_snapshot_utc": "2026-09-01T04:19:03.616Z",
+      "origin_assessment": {
+        "status": "confirmed_direct_vhost",
+        "origin_ip": "103.149.86.246",
+        "server_id": "origin-103-149-86-246",
+        "evidence_type": "direct_http_host_header",
+        "evidence_time_utc": "2026-09-01T04:18:16Z",
+        "caveat": "Direct HTTP request to 103.149.86.246:80 with this Host header returned the fake recharge page (HTTP 200).",
+        "inventory_ref": "origin_inventory.json#/campaign_host_status/19"
+      }
     }
   ],
   "related_leads": [
@@ -967,7 +1134,16 @@
       "public_dns_disposition": "NXDOMAIN at time of passive checks (historical HTML not independently recovered)",
       "confidence": "low",
       "historical_only": true,
-      "blocklist_disposition": "do not add without current validation"
+      "blocklist_disposition": "do not add without current validation",
+      "origin_assessment": {
+        "status": "related_origin_unknown",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "no_independent_capture",
+        "evidence_time_utc": "2026-09-01T04:48:58.555Z",
+        "caveat": "Only a passive/RDAP lead was recovered; no independent HTML, server, or origin IP was recovered.",
+        "inventory_ref": null
+      }
     },
     {
       "indicator_type": "domain",
@@ -1003,7 +1179,16 @@
       ],
       "rdap_snapshot_utc": "2026-09-01T09:19:56Z",
       "blocklist_disposition": "historical lead; revalidate before blocking",
-      "evidence_ref": "source_correlation.json#/exact_kit_deployments/0"
+      "evidence_ref": "source_correlation.json#/exact_kit_deployments/0",
+      "origin_assessment": {
+        "status": "related_edge_only_no_origin",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "urlscan_cloudflare_edge_only",
+        "evidence_time_utc": "2026-07-17T08:38:14.556Z",
+        "caveat": "Exact full-kit URLScan deployment was observed at Cloudflare edge 172.67.132.229; the actual origin remains unknown.",
+        "inventory_ref": null
+      }
     },
     {
       "indicator_type": "domain",
@@ -1038,7 +1223,16 @@
       ],
       "rdap_snapshot_utc": "2026-09-01T06:38:04Z",
       "blocklist_disposition": "historical lead; revalidate before blocking",
-      "evidence_ref": "source_correlation.json#/exact_kit_deployments/1"
+      "evidence_ref": "source_correlation.json#/exact_kit_deployments/1",
+      "origin_assessment": {
+        "status": "related_edge_only_no_origin",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "urlscan_cloudflare_edge_only",
+        "evidence_time_utc": "2026-07-31T23:38:58.092Z",
+        "caveat": "Exact full-kit URLScan deployments were observed at Cloudflare edges 188.114.97.3 and 188.114.96.3; the actual origin remains unknown.",
+        "inventory_ref": null
+      }
     },
     {
       "indicator_type": "domain",
@@ -1063,7 +1257,16 @@
       ],
       "rdap_snapshot_utc": "2026-09-01T09:19:56Z",
       "blocklist_disposition": "do not block from this source-comment evidence alone",
-      "evidence_ref": "source_correlation.json#/orvantis_source_page_lead"
+      "evidence_ref": "source_correlation.json#/orvantis_source_page_lead",
+      "origin_assessment": {
+        "status": "related_origin_unknown",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "saved_from_comment_only",
+        "evidence_time_utc": "2026-09-01T09:19:56Z",
+        "caveat": "The URL appears only in a public repository saved-from comment; no independent live capture, server, or origin IP was recovered.",
+        "inventory_ref": null
+      }
     },
     {
       "indicator_type": "domain",
@@ -1097,7 +1300,16 @@
       "rdap_snapshot_utc": "2026-09-01T08:48:08Z",
       "blocklist_disposition": "historical lead; current 2026 deployment differed and requires validation",
       "evidence_ref": "source_correlation.json#/legacy_kit_lineage/2",
-      "registration_context": "Current RDAP registration follows the 2025 historical scan; do not interpret the 2026 registration date as the age of the historical deployment."
+      "registration_context": "Current RDAP registration follows the 2025 historical scan; do not interpret the 2026 registration date as the age of the historical deployment.",
+      "origin_assessment": {
+        "status": "historical_related_direct_origin",
+        "origin_ip": "103.149.87.34",
+        "server_id": "historical-103-149-87-34",
+        "evidence_type": "historical_urlscan_direct",
+        "evidence_time_utc": "2025-06-09T12:18:28.430Z",
+        "caveat": "Historical partial-kit URLScan observation only; current 2026 deployment is different and must not be treated as the current campaign origin.",
+        "inventory_ref": "origin_inventory.json#/server_records/1"
+      }
     }
   ]
 }

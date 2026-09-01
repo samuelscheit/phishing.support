@@ -1,8 +1,8 @@
 # TikTok recharge campaign — attribution and evidence report
 
 > **Assessment status:** follow-up investigative synthesis; not a legal finding and not an identification of a perpetrator.
-> **Prepared (UTC):** 2026-09-01T09:25:00Z
-> **Evidence cutoff (UTC):** 2026-09-01T09:19:56Z
+> **Prepared (UTC):** 2026-09-01T11:11:52Z
+> **Evidence cutoff (UTC):** 2026-09-01T11:11:52Z
 > **Case label:** `tiktok-recharge-campaign`
 > **Repository scope:** investigation documentation only; no production application code was changed.
 
@@ -10,7 +10,7 @@
 
 This investigation identifies a **coordinated Vietnamese-language fake TikTok Coins recharge campaign** comprising **20 verified domains/subdomains** reported between **2026-08-19T08:55:17Z and 2026-08-31T18:22:24Z**. Nineteen of the twenty campaign pages have preserved MHTML captures; `shop.sonhaimedia.sbs` is retained as an IOC but has no MHTML artifact. The captured pages have one normalized HTML fingerprint and 32 byte-identical TikTok image/SVG assets across all 19 captures. The pages present TikTok branding, coin bundles, a fake login gate, prepaid-card fields, and bank-transfer QR payment.
 
-The strongest technical lead is the serving origin **`103.149.86.246`**. On 2026-09-01, an HTTP request sent directly to that address with `Host: napxu.hungdungmedia.fun` returned the 186,877-byte fake recharge page (`Apache`, HTTP 200). APNIC/RIR data place the address in **103.149.86.0/23, AS149125 (`DV4S-VN`)**, registered to **4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED** in Vietnam. This is a **network/hosting attribution**, not proof that 4S Technology or its listed contacts operated the fraud. A historical control also matters: `napgarena.vn` served a different Vietnamese game portal from the adjacent `103.149.87.34` address in the same /23 and ASN. The network registrant therefore cannot be treated as the campaign operator without subscriber and server records.
+The strongest confirmed serving endpoint is **`103.149.86.246:80`**. On 2026-09-01, an HTTP request sent directly to that address with `Host: napxu.hungdungmedia.fun` returned the 186,877-byte fake recharge page (`Apache`, HTTP 200). A separate historical URLScan observation places a related partial kit on **`103.149.87.34`** (`naptiktok.net`, HTTPS/nginx, 2025-06-09), but that is not proof of a current campaign deployment. APNIC/RIR data place both addresses in **103.149.86.0/23, AS149125 (`DV4S-VN`)**, registered to **4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED** in Vietnam. This is a **network/allocation attribution**, not proof of a commercial hoster subscriber, operator, or knowing involvement. The inventory finds **one current direct serving endpoint, one historical adjacent endpoint, ten current root-apex associations, and nine current campaign hosts whose origin remains unknown**. A historical control also matters: `napgarena.vn` served a different Vietnamese game portal from `.87.34` in the same /23 and ASN.
 
 A single **synthetic/public-user** probe (username `tiktok`, amount VND 50,000) obtained order **7052** without paying. The generated EMVCo QR named **IMEDIA JSC** as receiver, account **`Z397926244101696205`**, and resolved through ZaloPay metadata as **`app_id=4982`**. The order was later reported `expired`; no payment, card value, password, OTP, or private credential was submitted. This is a strong **payment-account lead**, not proof of who controlled the account or whether IMEDIA knowingly participated.
 
@@ -23,7 +23,7 @@ The public `taiapi` / `gaudev` / “Gấu” material remains a **lower-confiden
 | Question | Confidence | What the evidence supports | What it does **not** support |
 |---|---|---|---|
 | Are these sites one campaign/kit? | **High** | 20 related IOCs, shared wording/flow, one normalized HTML fingerprint across 19 captures, 32 shared static assets, repeated Cloudflare/Hostinger pattern. | The legal identity of the author or operator. |
-| Which host served the live application? | **High** | Direct Host-header request to 103.149.86.246 returned the fake page; ten apexes also exposed that address in the 2026-09-01 authoritative snapshot. | That the network registrant authored or knew about the content. |
+| Which host served the live application? | **High (direct); medium (apex associations)** | Direct Host-header request to 103.149.86.246:80 returned the fake page for `napxu.hungdungmedia.fun`; ten root apexes also returned that address in the 2026-09-01 authoritative snapshot. | That every associated subdomain used the same vhost, that the allocation holder was the subscriber/operator, or that a hidden upstream backend was not present. |
 | Which payment destination was shown? | **High** | Order 7052 and read-only ZaloPay lookup agree on IMEDIA JSC / account Z397926244101696205 / app 4982. | The KYC customer, beneficial owner, or knowledge/intent of IMEDIA. |
 | Is IMEDIA JSC the scammer? | **Not established** | IMEDIA is a real telecom/digital-goods/payment intermediary and publicly warns about impersonation. | Any knowing involvement; no such evidence was found. |
 | Does `QuocTuan-8386/duanmoi` identify the operator? | **Medium kit-publisher lead only** | Public repository control, 31/32 exact campaign assets, a byte-identical public Pages response, and a copied `nap-xu.orvantis.online` source comment. | Operation of the 20 domains, control of the live origin/payment account, authorship of the original kit, or a verified natural-person identity. |
@@ -71,35 +71,36 @@ This timeline records the principal acquisition and preservation events. The sou
 | 2026-09-01T04:48:58Z | Related `napthetiktok.online` RDAP snapshot captured. | `related_sites/napthetiktok_rdap.json` |
 | 2026-09-01T06:38:04Z–09:19:56Z | Historical exact-kit domains and the `orvantis.online` source-page lead were rechecked with public URLScan, RDAP, and certificate-transparency records. | `related_sites/urlscan_result_pages/`, `related_sites/exact_kit/`, `related_sites/orvantis_certspotter.json` |
 | 2026-09-01T09:25:00Z | QuocTuan repository history, byte-level asset overlap, legacy-kit lineage, and the same-ASN `napgarena.vn` control were consolidated into the follow-up derivatives. | `source_correlation.json` |
+| 2026-09-01T11:11:52Z | Formal APNIC abuse-role verification for both observed addresses, distinctive URLScan hash-search coverage, and the origin/server inventory were consolidated; the ambiguous origin field was removed from the canonical IOC export. | `origin_sources/`, `origin_inventory.json`, `origin_inventory.csv` |
 
 ## Verified campaign IOCs
 
-The following table is the 20-member campaign inventory. `Origin at snapshot` means the address `103.149.86.246` appeared in the authoritative DNS snapshot at `2026-09-01T04:17:17Z`, or the direct Host-header test proved the same origin for `napxu.hungdungmedia.fun`. The vhost column is a **point-in-time** check at approximately `2026-09-01T03:46:52Z–03:47:01Z`; a default page or error does not erase the historical phishing evidence.
+The following table is the 20-member campaign inventory. The `Origin evidence` column uses the explicit levels in [`origin_inventory.json`](origin_inventory.json): **direct Host-header proof**, **root-apex DNS association only**, or **origin unknown**. A root/apex A record is not silently treated as proof that the named subdomain served the phishing body. The vhost column is a **point-in-time** check at approximately `2026-09-01T03:46:52Z–03:47:01Z`; a default page or error does not erase the historical phishing evidence.
 
-| # | Host | Root | Submission | Registered (UTC) | Nameserver pair in RDAP | Origin at snapshot | Vhost check |
+| # | Host | Root | Submission | Registered (UTC) | Nameserver pair in RDAP | Origin evidence (see inventory) | Vhost check |
 |---:|---|---|---:|---|---|---|---|
-| 1 | `nap-xu-247.vntik.shop` | `vntik.shop` | 348421337477287968 | 2026-03-19T08:53:11.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | — | default nginx (200) |
-| 2 | `napxu.gnshop.fun` | `gnshop.fun` | 348389447261229079 | 2026-06-14T01:58:58.733Z | saanvi.ns.cloudflare.com/decker.ns.cloudflare.com | — | default nginx (200) |
-| 3 | `napxu247.muanhanh.shop` | `muanhanh.shop` | 348539296447205417 | 2026-08-14T06:59:47.0Z | marty.ns.cloudflare.com/serena.ns.cloudflare.com | — | default nginx (200) |
-| 4 | `napxunhanhre.khuyenmai2026.site` | `khuyenmai2026.site` | 348866265474928698 | 2026-08-14T07:00:08.739Z | marty.ns.cloudflare.com/serena.ns.cloudflare.com | — | default nginx (200) |
-| 5 | `napxu.dltiktik.shop` | `dltiktik.shop` | 348756442276171825 | 2026-08-19T16:47:26.0Z | marty.ns.cloudflare.com/serena.ns.cloudflare.com | — | default nginx (200) |
-| 6 | `nap-xu.sky1media.shop` | `sky1media.shop` | 350078878372335632 | 2026-08-20T23:32:40.0Z | marty.ns.cloudflare.com/serena.ns.cloudflare.com | — | default nginx (200) |
-| 7 | `napxu.takimedia.shop` | `takimedia.shop` | 349031076745711685 | 2026-08-20T23:38:28.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | — | default nginx (200) |
-| 8 | `nap-xu.thuynmedia.shop` | `thuynmedia.shop` | 350354710311473187 | 2026-08-24T16:39:51.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | — | default nginx (200) |
-| 9 | `napxu.thuytongstore.fun` | `thuytongstore.fun` | 350466798270812200 | 2026-08-25T01:56:00.327Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 | default nginx (200) |
-| 10 | `shop-xu.kimsonmedia.sbs` | `kimsonmedia.sbs` | 350930905994367026 | 2026-08-26T07:43:44.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 | default nginx (200) |
-| 11 | `shop.sonhaimedia.sbs` | `sonhaimedia.sbs` | 351624943487684609 | 2026-08-26T08:32:50.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 | default nginx (200) |
-| 12 | `shop.huuhanstudio.space` | `huuhanstudio.space` | 351387190816673794 | 2026-08-27T08:20:21.125Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 | default nginx (200) |
-| 13 | `shop.dainammedia.space` | `dainammedia.space` | 352185586284498946 | 2026-08-29T14:16:28.648Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 | default nginx (200) |
-| 14 | `napxu.hoanghaimedia.shop` | `hoanghaimedia.shop` | 352342673387950094 | 2026-08-30T05:07:45.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 | default nginx (200) |
-| 15 | `napxu.ko-media.art` | `ko-media.art` | 352730056440680448 | 2026-08-31T07:11:30.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 | default nginx (200) |
-| 16 | `shop.hd-media.space` | `hd-media.space` | 352784145123905536 | 2026-08-31T07:27:16.097Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 | default nginx (200) |
-| 17 | `napxu.quangthaimedia.shop` | `quangthaimedia.shop` | 352799328705712141 | 2026-08-31T08:45:28.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 | default nginx (200) |
-| 18 | `napxu.quanghung-media.site` | `quanghung-media.site` | 352832125797404695 | 2026-08-31T08:57:14.830Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | — | 503/error |
-| 19 | `napxu.hoanganhmedia.sbs` | `hoanganhmedia.sbs` | 352854759947898915 | 2026-08-31T14:16:48.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 | default nginx (200) |
-| 20 | `napxu.hungdungmedia.fun` | `hungdungmedia.fun` | 352880825026482223 | 2026-08-31T14:26:14.609Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 | fake page (200) |
+| 1 | `nap-xu-247.vntik.shop` | `vntik.shop` | 348421337477287968 | 2026-03-19T08:53:11.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | Unknown (Cloudflare/no direct origin) | default nginx (200) |
+| 2 | `napxu.gnshop.fun` | `gnshop.fun` | 348389447261229079 | 2026-06-14T01:58:58.733Z | saanvi.ns.cloudflare.com/decker.ns.cloudflare.com | Unknown (Cloudflare/no direct origin) | default nginx (200) |
+| 3 | `napxu247.muanhanh.shop` | `muanhanh.shop` | 348539296447205417 | 2026-08-14T06:59:47.0Z | marty.ns.cloudflare.com/serena.ns.cloudflare.com | Unknown (Cloudflare/no direct origin) | default nginx (200) |
+| 4 | `napxunhanhre.khuyenmai2026.site` | `khuyenmai2026.site` | 348866265474928698 | 2026-08-14T07:00:08.739Z | marty.ns.cloudflare.com/serena.ns.cloudflare.com | Unknown (Cloudflare/no direct origin) | default nginx (200) |
+| 5 | `napxu.dltiktik.shop` | `dltiktik.shop` | 348756442276171825 | 2026-08-19T16:47:26.0Z | marty.ns.cloudflare.com/serena.ns.cloudflare.com | Unknown (Cloudflare/no direct origin) | default nginx (200) |
+| 6 | `nap-xu.sky1media.shop` | `sky1media.shop` | 350078878372335632 | 2026-08-20T23:32:40.0Z | marty.ns.cloudflare.com/serena.ns.cloudflare.com | Unknown (Cloudflare/no direct origin) | default nginx (200) |
+| 7 | `napxu.takimedia.shop` | `takimedia.shop` | 349031076745711685 | 2026-08-20T23:38:28.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | Unknown (Cloudflare/no direct origin) | default nginx (200) |
+| 8 | `nap-xu.thuynmedia.shop` | `thuynmedia.shop` | 350354710311473187 | 2026-08-24T16:39:51.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | Unknown (Cloudflare/no direct origin) | default nginx (200) |
+| 9 | `napxu.thuytongstore.fun` | `thuytongstore.fun` | 350466798270812200 | 2026-08-25T01:56:00.327Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 — apex A association only | default nginx (200) |
+| 10 | `shop-xu.kimsonmedia.sbs` | `kimsonmedia.sbs` | 350930905994367026 | 2026-08-26T07:43:44.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 — apex A association only | default nginx (200) |
+| 11 | `shop.sonhaimedia.sbs` | `sonhaimedia.sbs` | 351624943487684609 | 2026-08-26T08:32:50.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 — apex A association only | default nginx (200) |
+| 12 | `shop.huuhanstudio.space` | `huuhanstudio.space` | 351387190816673794 | 2026-08-27T08:20:21.125Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 — apex A association only | default nginx (200) |
+| 13 | `shop.dainammedia.space` | `dainammedia.space` | 352185586284498946 | 2026-08-29T14:16:28.648Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 — apex A association only | default nginx (200) |
+| 14 | `napxu.hoanghaimedia.shop` | `hoanghaimedia.shop` | 352342673387950094 | 2026-08-30T05:07:45.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 — apex A association only | default nginx (200) |
+| 15 | `napxu.ko-media.art` | `ko-media.art` | 352730056440680448 | 2026-08-31T07:11:30.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 — apex A association only | default nginx (200) |
+| 16 | `shop.hd-media.space` | `hd-media.space` | 352784145123905536 | 2026-08-31T07:27:16.097Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 — apex A association only | default nginx (200) |
+| 17 | `napxu.quangthaimedia.shop` | `quangthaimedia.shop` | 352799328705712141 | 2026-08-31T08:45:28.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 — apex A association only | default nginx (200) |
+| 18 | `napxu.quanghung-media.site` | `quanghung-media.site` | 352832125797404695 | 2026-08-31T08:57:14.830Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | Unknown (Cloudflare/no direct origin) | 503/error |
+| 19 | `napxu.hoanganhmedia.sbs` | `hoanganhmedia.sbs` | 352854759947898915 | 2026-08-31T14:16:48.0Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 — apex A association only | default nginx (200) |
+| 20 | `napxu.hungdungmedia.fun` | `hungdungmedia.fun` | 352880825026482223 | 2026-08-31T14:26:14.609Z | decker.ns.cloudflare.com/saanvi.ns.cloudflare.com | 103.149.86.246 — direct Host-header proof | fake page (200) |
 
-Machine-readable exports are in [`campaign_iocs.json`](campaign_iocs.json) and [`campaign_iocs.csv`](campaign_iocs.csv). Schema version 2 retains the 20 verified members separately from five historical/related leads. Those leads are **not** current blocklist entries and are intentionally outside the verified-member count; their technical dispositions are in [`source_correlation.json`](source_correlation.json).
+Machine-readable exports are in [`campaign_iocs.json`](campaign_iocs.json) and [`campaign_iocs.csv`](campaign_iocs.csv). The canonical IOC schema now uses a nested `origin_assessment` with explicit evidence levels for current members and related leads; the former ambiguous `origin_ip_observed` field was removed. The complete server-level and per-host inventory is [`origin_inventory.json`](origin_inventory.json), with a flat [`origin_inventory.csv`](origin_inventory.csv) export. Schema version 3 retains the 20 verified members separately from five historical/related leads. Those leads are **not** current blocklist entries and are intentionally outside the verified-member count; their technical dispositions are in [`source_correlation.json`](source_correlation.json).
 
 ## What the pages do
 
@@ -297,44 +298,50 @@ quangthaimedia.shop
 hoanganhmedia.sbs
 ```
 
-The public DNS snapshot at `2026-09-01T04:16:38Z` showed a mix of Cloudflare edge addresses, no answer/delegation, and the direct origin. This is why a Cloudflare address in an initial report must not be treated as the origin. The point-in-time vhost checks found **16 apex hosts on a default nginx page and 4 apex hosts returning a Vietnamese suspension/503 response**. At the subdomain level, **18 returned the same default page, one returned an HTTP 503/error, and `napxu.hungdungmedia.fun` returned the fake page**.
+The public DNS snapshot at `2026-09-01T04:16:38Z` showed a mix of Cloudflare edge addresses, no answer/delegation, and the direct `.246` address. This is why a Cloudflare address in an initial report must not be treated as the origin. The point-in-time vhost checks found **16 apex hosts on a default nginx page and 4 apex hosts returning a Vietnamese suspension/503 response**. At the subdomain level, **18 returned the same default page, one returned an HTTP 503/error, and `napxu.hungdungmedia.fun` returned the fake page**; those response bodies alone do not identify a destination IP.
 
-## Origin and network attribution
+## Origin/server inventory and abuse routing
 
-### Direct origin observation
+The complete machine-readable inventory is [`origin_inventory.json`](origin_inventory.json), with a flat [`origin_inventory.csv`](origin_inventory.csv) export. It records **two defensible server observations**: one current direct serving endpoint and one historical related endpoint. It deliberately does **not** promote Cloudflare edge IPs, registrar names, or a DNS-only association into an origin-server claim. Public URLScan searches for the distinctive current-kit `coin.svg`, `the-cao.svg`, and `bank-qr.svg` hashes returned only Cloudflare primary results; `logo.svg`/`security-tiktok.svg` also returned the GitHub Pages copy. A search for the older `s.js` hash returned only the already-recorded non-Cloudflare `.87.34` observation. The search is historical and non-exhaustive, so this is a documented negative finding rather than proof that no undiscovered server ever existed.
 
-The `respond5` host was only the investigator’s collection environment; it is not the origin identified below. At `2026-09-01T04:18:16Z`, the following direct virtual-host request returned the phishing page:
+### Server records
 
-```text
-GET / HTTP/1.1
-Host: napxu.hungdungmedia.fun
-Destination: 103.149.86.246:80
-HTTP/1.1 200 OK
-Server: Apache
-Content-Type: text/html; charset=utf-8
-Body: 186877 bytes
-SHA-256: a0e74fe2c82e1c9dd46d9ec89428f9253a8d8671ec909272d5b50289f46f1be7
-```
+| IP / service | Role in this case | Evidence and observed server | Public network/allocation holder (not a proven subscriber) | Formal abuse route | Other public contact | Confidence |
+|---|---|---|---|---|---|---|
+| **`103.149.86.246`** | **Confirmed current campaign serving endpoint** | Direct `GET /` to `:80` with `Host: napxu.hungdungmedia.fun` at `2026-09-01T04:18:16Z` returned HTTP 200, `Server: Apache`, title `Nạp xu TikTok`, 186,877 bytes; body SHA-256 `a0e74fe2c82e1c9dd46d9ec89428f9253a8d8671ec909272d5b50289f46f1be7`. Passive Shodan (`2026-08-29T15:35:55Z`) also listed TCP/22 OpenSSH 8.9p1 Ubuntu 3 and TCP/80 Apache httpd. | **4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED**, `DV4S-VN`, **AS149125**, `103.149.86.0/23`, VN. APNIC identifies this as the allocation/route registrant; public evidence does not establish the commercial hoster, VPS customer, or operator. | **`hm-changed@vnnic.vn`** — `IRT-VNNIC-AP`; APNIC explicitly labels it the inetnum abuse contact and `abuse-mailbox`. | **`info@congnghe4s.com`** — Tran Duc Quan (`TDQ9-AP`), APNIC technical/administrative contact only; **not** labeled an abuse mailbox. | **High** for direct serving endpoint; **medium** for ten apex associations. |
+| **`103.149.87.34`** | **Historical adjacent/partial-kit origin; not a confirmed current campaign origin** | URLScan `019754a0-9b7a-7781-8c6a-ad887d26a2e6` observed `naptiktok.net` at `2025-06-09T12:18:28.430Z` over HTTPS with `nginx`; ten exact campaign payment/avatar assets and the older `s.js` hash matched. | Same **4S TECHNOLOGY / AS149125 / 103.149.86.0/23** allocation. The same address also served unrelated `napgarena.vn` in 2024, so the network is not exclusive to the kit. | **`hm-changed@vnnic.vn`** — same APNIC/VNNIC IRT abuse mailbox for the /23. | **`info@congnghe4s.com`** — same public APNIC technical/admin contact; not formal abuse. The current `naptiktok.net` registration is a later Dynadot record (`abuse@dynadot.com`), not evidence about the 2025 server tenancy. | **Medium** for historical infrastructure/partial-kit correlation. |
 
-Equivalent direct probes for non-existent application paths returned the plain body **`404 page not found`** with Apache headers. That error style is compatible with a Go/net/http application, but it is not a unique framework or operator fingerprint.
+**What “hoster” means here.** Public RIR data identify the network/allocation holder, not necessarily the service provider that sold or assigned the individual server. The next decisive records are the subscriber/VPS assignment, reverse-proxy configuration, deployment history, and logs for each address. Neither 4S Technology nor any named contact is identified as the campaign operator by this inventory.
 
-Shodan’s service record (scan `2026-08-29T15:35:55Z`) listed only TCP **22 (OpenSSH 8.9p1 Ubuntu 3)** and **80 (Apache httpd)**. The SSH banner/host key is not reproduced, and no authentication was attempted.
+### Current campaign host-to-origin status
 
-### RIR/ASN record
+The 20 campaign members resolve into three evidentiary groups. The exact per-host records, edge-address exclusions, vhost results, and evidence pointers are in `origin_inventory.json` and the nested `origin_assessment` objects in `campaign_iocs.json`.
 
-APNIC RDAP for `103.149.86.246` (captured `2026-09-01T03:44:24Z`) reports:
+| Evidence level | Campaign hosts | IP / interpretation |
+|---|---|---|
+| **Direct vhost proof (1)** | `napxu.hungdungmedia.fun` | **`103.149.86.246:80`** — direct Host-header request returned the fake page. |
+| **Authoritative root-apex association only (10)** | `napxu.thuytongstore.fun`; `shop-xu.kimsonmedia.sbs`; `shop.huuhanstudio.space`; `shop.sonhaimedia.sbs`; `shop.dainammedia.space`; `napxu.hoanghaimedia.shop`; `napxu.ko-media.art`; `shop.hd-media.space`; `napxu.quangthaimedia.shop`; `napxu.hoanganhmedia.sbs` | **`103.149.86.246`** appeared in the authoritative **root/apex** A record at `2026-09-01T04:17:17.767483Z`. This supports a zone/address association only; it does not prove that each named subdomain served the phishing body at that instant. |
+| **Origin unknown (9)** | `napxu.gnshop.fun`; `nap-xu-247.vntik.shop`; `napxu247.muanhanh.shop`; `napxu.dltiktik.shop`; `napxunhanhre.khuyenmai2026.site`; `napxu.takimedia.shop`; `nap-xu.sky1media.shop`; `nap-xu.thuynmedia.shop`; `napxu.quanghung-media.site` | Historical/current observations are Cloudflare edge/proxy addresses, no answer/delegation, or suspension/error. **No origin IP or server hoster was confirmed** for these nine. Their edge values are retained as exclusions, not origins. |
 
-```text
-Prefix:       103.149.86.0/23
-ASN:          AS149125
-Netname:      DV4S-VN
-Organization: 4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED
-Country:      VN
-Address:      Thanh Cong Village, Tien Phong Commune,
-              Yen Dung District, Bac Giang Province, Vietnam
-```
+The nine unknown hosts may have shared `.246`, used another server, been behind a different reverse proxy, or gone offline before the snapshot. A default Apache/nginx page or a 503 is not enough to infer an origin address without a captured destination or authoritative record. No IPv6 origin was confirmed; the campaign AAAA values observed in captures are Cloudflare edge/proxy addresses or absent.
 
-The public technical/administrative contact in the RDAP record is **Tran Duc Quan** (`TDQ9-AP`), phone `+84-986648126`, email `info@congnghe4s.com`; the APNIC incident-routing contact is `hm-changed@vnnic.vn`. These are appropriate preservation/abuse-routing leads only. A network owner can host customer content without authoring or knowing about it.
+### Abuse/reporting contacts by service role
+
+| Service role | Provider/contact | Correct use | Why it is not a current origin-server attribution |
+|---|---|---|---|
+| RIR allocation abuse | **APNIC/VNNIC IRT** — `hm-changed@vnnic.vn` (IRT-VNNIC-AP) | Primary formal abuse/preservation route for **`103.149.86.0/23`**, including `.246` and historical `.87.34`. Include IP, port, Host header, UTC timestamp, and body hash. | APNIC’s abuse contact routes the network; it does not identify the subscriber or author. |
+| Network technical/admin | **Tran Duc Quan / 4S Technology** — `info@congnghe4s.com`, `+84-986648126` | Optional technical escalation/preservation contact. | APNIC assigns technical/admin roles; it does **not** label this address as abuse. Do not call it a formal abuse mailbox. |
+| Reverse proxy/CDN and authoritative DNS | **Cloudflare Trust & Safety** — [official abuse form](https://www.cloudflare.com/abuse/form) | Report the nine unknown/proxied hosts and request preservation/forwarding of zone and origin metadata. | Cloudflare edge addresses (AS13335, e.g. `104.21.*`, `172.67.*`, `188.114.*`) are shared proxy addresses, not the hidden server. |
+| Domain registrar for the 20 current roots | **HOSTINGER operations, UAB** — `abuse@hostinger.com` | Registrar-domain abuse and account/DNS preservation for the Hostinger-registered roots. | RDAP identifies Hostinger as registrar, not necessarily hoster. Hostinger’s own reply said `huuhanstudio.space` was suspended while `shop.huuhanstudio.space` was not hosted on its network. |
+| Registrar for related exact-kit edge-only domain | **Spaceship, Inc.** — `abuse@spaceship.com` | Registrar report for `napxutiktok.sbs` (historical full-kit deployment) and the related `napthetiktok.online` lead. | Both observations were behind Cloudflare; no origin was recovered. |
+| Registrar for related exact-kit edge-only domain | **NameCheap, Inc.** — `abuse@namecheap.com` | Registrar report for `napthegarena.online` (historical full-kit deployment). | The URLScan addresses were Cloudflare edges; this is not a server-hosting attribution. |
+| Later registrar record for historical `naptiktok.net` | **Dynadot, Inc.** — `abuse@dynadot.com` | Registrar preservation request for the later 2026 `naptiktok.net` registration. | The record post-dates the 2025 `.87.34` observation and cannot be back-projected to that server. |
+
+Cloudflare and the registrars are retained as **reporting routes**, not added to the server list. The inventory’s formal-contact rule is strict: only a source that explicitly assigns an abuse role/mailbox is labeled “formal abuse.”
+
+### Historical network caveat
+
+The `.87.34` observation is useful continuity evidence because it shares the `/23` and ASN with `.246`, but `napgarena.vn` was a different Vietnamese game portal on the same IP in 2024. This control is why the inventory does not equate the 4S allocation holder with the campaign operator, and why the historical address remains separate from the current direct endpoint.
 
 ## Payment-account evidence
 
@@ -463,7 +470,7 @@ The following public sources were consulted read-only. They are listed for prove
 
 * **TikTok:** [Help Center — Gifts/Coins](https://support.tiktok.com/en/live-gifts-wallet/gifts/gifts), [Virtual Items Policy](https://www.tiktok.com/legal/page/row/virtual-items/en), and the official recharge URL `https://www.tiktok.com/coin`.
 * **IMEDIA:** [official site](https://imediatech.com.vn/), captured API base `https://imediatech.com.vn/web/api`, and the [official Facebook impersonation warning](https://www.facebook.com/iMediaTechnologyCompany/posts/879023074224185/).
-* **Network registration:** [APNIC RDAP for 103.149.86.246](https://rdap.apnic.net/ip/103.149.86.246), [RIPEstat prefix view](https://stat.ripe.net/103.149.86.0/23), and [Shodan host record](https://www.shodan.io/host/103.149.86.246).
+* **Network registration and abuse routing:** [APNIC RDAP for 103.149.86.246](https://rdap.apnic.net/ip/103.149.86.246), [APNIC RDAP for 103.149.87.34](https://rdap.apnic.net/ip/103.149.87.34), [RIPEstat prefix view](https://stat.ripe.net/103.149.86.0/23), and [Shodan host record](https://www.shodan.io/host/103.149.86.246). APNIC’s explicit abuse mailbox is `hm-changed@vnnic.vn`; the contact-role distinction is recorded in `origin_inventory.json`.
 * **Payment metadata:** ZaloPay’s read-only dynamic-QR information endpoint (`https://zlp-ofp-emvco-gateway.zalopay.vn/v1/emvco/dynamic-qr/info`). No payment or state-changing API was used.
 * **Public kit/source correlation:** [QuocTuan-8386/duanmoi](https://github.com/QuocTuan-8386/duanmoi), [GitHub Pages copy](https://quoctuan-8386.github.io/duanmoi/), URLScan result pages for `napxutiktok.sbs` and `napthegarena.online`, and the public [PhishDestroy destroylist change](https://github.com/phishdestroy/destroylist/blob/main/changes/2026-07/2026-07-22.json) (availability may change).
 * **Historical public observations:** URLScan pages for `napxu.vip`, `naptiktok.app`, `naptiktok.net`, and the same-ASN control `napgarena.vn`; exact UUIDs and retrieval hashes are in `source_correlation.json`.
@@ -475,7 +482,7 @@ The campaign URLs themselves are intentionally shown as code literals in this re
 
 The working `investigation/tiktok` directory contains the raw captures and sanitized derivatives listed in `evidence_manifest.json`; the Git commit intentionally contains only small, sanitized/derived documentation artifacts. Raw captures remain local because they are large and include temporary cookies, transaction tokens, correspondence metadata, and unrelated public-code credential-like material.
 
-`evidence_manifest.json` records SHA-256 and byte size for the key report inputs, including the 19 MHTML pages used for template comparison, all 20 root RDAP records, the origin/QR/network captures, corporate-source captures, correspondence, and the new public URLScan/GitHub/RDAP correlation records. It also records which paths were deliberately excluded from the commit. `campaign_iocs.*`, `template_fingerprint.json`, `qr_order_evidence.json`, `origin_observation.json`, and `source_correlation.json` are committed derivatives; their hashes are listed in the manifest.
+`evidence_manifest.json` records SHA-256 and byte size for the key report inputs, including the 19 MHTML pages used for template comparison, all 20 root RDAP records, the origin/QR/network captures, corporate-source captures, correspondence, the fresh two-address APNIC/RIR verification, and the public URLScan/GitHub/RDAP correlation records. It also records which paths were deliberately excluded from the commit. `campaign_iocs.*`, `template_fingerprint.json`, `qr_order_evidence.json`, `origin_observation.json`, `origin_inventory.*`, and `source_correlation.json` are committed derivatives; their hashes are listed in the manifest.
 
 ### Key committed derivatives
 
@@ -483,17 +490,19 @@ The working `investigation/tiktok` directory contains the raw captures and sanit
 |---|---|
 | [`REPORT.md`](REPORT.md) | Human-readable assessment and lawful follow-up plan. |
 | [`campaign_iocs.json`](campaign_iocs.json) | 20 verified campaign IOCs plus five explicitly historical/related leads. |
-| [`campaign_iocs.csv`](campaign_iocs.csv) | Flat IOC export for blocklist/case tooling. |
+| [`campaign_iocs.csv`](campaign_iocs.csv) | Flat export of the 20 verified campaign members for blocklist/case tooling; related leads remain in the JSON export. |
 | [`template_fingerprint.json`](template_fingerprint.json) | Reproducible normalized HTML and static-asset comparison. |
 | [`qr_order_evidence.json`](qr_order_evidence.json) | Sanitized order/EMV/ZaloPay evidence; no session/token values. |
 | [`origin_observation.json`](origin_observation.json) | Sanitized direct-origin, DNS split, RIR, and service observation. |
+| [`origin_inventory.json`](origin_inventory.json) | Server-level origin records, host-to-origin evidence levels, provider roles, and abuse contacts. |
+| [`origin_inventory.csv`](origin_inventory.csv) | Flat server and campaign-host origin export for case tooling. |
 | [`source_correlation.json`](source_correlation.json) | Byte-level GitHub/URLScan kit correlation, historical lineage, source-page lead, and same-network control with explicit confidence limits. |
 | [`evidence_manifest.json`](evidence_manifest.json) | Hashes, provenance, sensitivity and commit boundaries. |
 
 ## Limitations and interpretation rules
 
 * A registrar, network owner, payment intermediary, or brand named in an artifact is not thereby the perpetrator.
-* Cloudflare edge IPs are not origin IPs. The origin conclusion rests on direct Host-header behavior and authoritative historical DNS, not on current public resolver output.
+* Cloudflare edge IPs are not origin IPs. The direct-origin conclusion rests on direct Host-header behavior; the ten additional `.246` records are explicitly downgraded to authoritative root-apex associations, not direct vhost proof.
 * RDAP `client hold`/`server hold`, NXDOMAIN, default pages, and 503 responses are point-in-time states; they do not establish when an operator stopped retaining data.
 * A valid QR proves what destination the site presented, not that funds were received or that the named receiver knew about the fraud.
 * Public aliases and code credits are leads. They are not identity proof, and the absence of a string in client code is not proof of non-involvement.
@@ -504,4 +513,4 @@ The working `investigation/tiktok` directory contains the raw captures and sanit
 
 ## Bottom line
 
-The defensible attribution is **campaign → shared kit → public kit-publisher/republisher lead + serving origin/network + payment-account lead**, not **campaign → named individual**. The QuocTuan repository is the strongest public kit correlation, but the kit demonstrably predates that account and no live-domain, server, or payment link was found. The same-ASN `naptiktok.net` observation is useful continuity evidence but shares an address with an unrelated portal. The next evidentiary step is provider-side preservation and KYC/log correlation for `103.149.86.246`, Hostinger/Cloudflare account history, and ZaloPay `app_id=4982`. Until those records are obtained, the campaign operator and any knowing intermediary remain unidentified.
+The defensible attribution is **campaign → shared kit → public kit-publisher/republisher lead + serving origin/network + payment-account lead**, not **campaign → named individual**. The QuocTuan repository is the strongest public kit correlation, but the kit demonstrably predates that account and no live-domain, server, or payment link was found. The same-ASN `naptiktok.net` observation is useful continuity evidence but shares an address with an unrelated portal. The next evidentiary step is provider-side preservation and subscriber/log correlation for `103.149.86.246`, the nine unknown campaign hosts, Hostinger/Cloudflare account history, and ZaloPay `app_id=4982`. Until those records are obtained, the campaign operator, the commercial server tenant, and any knowing intermediary remain unidentified.

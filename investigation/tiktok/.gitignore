@@ -13,3 +13,5 @@
 !evidence_manifest.json
 # Sanitized public-source correlation; raw material under related_sites remains ignored.
 !source_correlation.json
+!origin_inventory.json
+!origin_inventory.csv
