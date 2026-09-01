@@ -1,0 +1,386 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-09-01T05:37:27Z",
+  "method": {
+    "description": "Decode each captured MHTML text/html part as UTF-8 with replacement, lowercase, replace absolute URLs with HOST, replace cid: references with CID, collapse whitespace, and SHA-256 the resulting comparison string.",
+    "important": "This is a derived comparison fingerprint; original MHTML remains unchanged in local evidence storage."
+  },
+  "captured_campaign_pages": [
+    {
+      "submission_id": 348389447261229079,
+      "mhtml_path": "investigation/tiktok/raw/348389447261229079/348389500960903193-website.mhtml",
+      "mhtml_size_bytes": 425423,
+      "mhtml_sha256": "e7ae61219cd0ab67b12125f828b5c5e4afc46efea36b798419b9f4a3cd476851",
+      "html_bytes_after_decode": 28941,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 348421337477287968,
+      "mhtml_path": "investigation/tiktok/raw/348421337477287968/348421386533867554-website.mhtml",
+      "mhtml_size_bytes": 425815,
+      "mhtml_sha256": "5d836af1dc4fb53c55993e73a6aaed84a008534d29346bc5ac3d156364796395",
+      "html_bytes_after_decode": 29151,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 348539296447205417,
+      "mhtml_path": "investigation/tiktok/raw/348539296447205417/348539337404583979-website.mhtml",
+      "mhtml_size_bytes": 425894,
+      "mhtml_sha256": "7e50444d48c10496bb5aac952a8252e31c690370a72a1e80b40c597d51aa72ba",
+      "html_bytes_after_decode": 29193,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 348756442276171825,
+      "mhtml_path": "investigation/tiktok/raw/348756442276171825/348756489193656371-website.mhtml",
+      "mhtml_size_bytes": 425660,
+      "mhtml_sha256": "8dc5d0ef2d25585bb979dd8c5260b3f16cf44f85702b53157161c97f5445f9ea",
+      "html_bytes_after_decode": 29067,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 348866265474928698,
+      "mhtml_path": "investigation/tiktok/raw/348866265474928698/348866318566428732-website.mhtml",
+      "mhtml_size_bytes": 426605,
+      "mhtml_sha256": "b42e872d456b1fd3e64df2eae8d62e0b79944013ecddaf7b3da56d868ab50ace",
+      "html_bytes_after_decode": 29571,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 349031076745711685,
+      "mhtml_path": "investigation/tiktok/raw/349031076745711685/349031124120375367-website.mhtml",
+      "mhtml_size_bytes": 425736,
+      "mhtml_sha256": "c45fdf99863912b764915ed6379030a9644f0b03689fe05bf829e72e010921fe",
+      "html_bytes_after_decode": 29109,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 350078878372335632,
+      "mhtml_path": "investigation/tiktok/raw/350078878372335632/350078909733146642-website.mhtml",
+      "mhtml_size_bytes": 426341,
+      "mhtml_sha256": "968d97f5da2dc9d4ff215128ae943aad9642de95d9559af04176f1d5539a255e",
+      "html_bytes_after_decode": 29151,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 350354710311473187,
+      "mhtml_path": "investigation/tiktok/raw/350354710311473187/350354755580596261-website.mhtml",
+      "mhtml_size_bytes": 426421,
+      "mhtml_sha256": "221525962609b338cd716f8ba5b2aa25c953a61f63820e6e2ea3aedab7adb48b",
+      "html_bytes_after_decode": 29193,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 350466798270812200,
+      "mhtml_path": "investigation/tiktok/raw/350466798270812200/350466840356458538-website.mhtml",
+      "mhtml_size_bytes": 425976,
+      "mhtml_sha256": "a62ec3368eb476a18b0fc3fbb12750b93c5c871bcdb1b4902b87f2f7921e0679",
+      "html_bytes_after_decode": 29235,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 350930905994367026,
+      "mhtml_path": "investigation/tiktok/allraw/350930905994367026/350930949011148852-website.mhtml",
+      "mhtml_size_bytes": 425976,
+      "mhtml_sha256": "8724f61d6e136883807ba6694e73a1148e88cfba9504b03b2b9916f9cdb6e7cb",
+      "html_bytes_after_decode": 29235,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 351387190816673794,
+      "mhtml_path": "investigation/tiktok/allraw/351387190816673794/351387238212308996-website.mhtml",
+      "mhtml_size_bytes": 425976,
+      "mhtml_sha256": "e98ac59f68ea01db5468c649119db37bf1917de9ac069353f5e71856307b30a6",
+      "html_bytes_after_decode": 29235,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 352185586284498946,
+      "mhtml_path": "investigation/tiktok/raw/352185586284498946/352185634439303172-website.mhtml",
+      "mhtml_size_bytes": 425894,
+      "mhtml_sha256": "ab7076cea76e89b5959fb12f8638706b18cb3fefab17ff696b114b3652a7f665",
+      "html_bytes_after_decode": 29193,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 352342673387950094,
+      "mhtml_path": "investigation/tiktok/raw/352342673387950094/352342725355376656-website.mhtml",
+      "mhtml_size_bytes": 426055,
+      "mhtml_sha256": "f3333a9abc6858a0f011885a8e61a8d8cba3f99026449055b4dff9fa0b5d1550",
+      "html_bytes_after_decode": 29277,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 352730056440680448,
+      "mhtml_path": "investigation/tiktok/raw/352730056440680448/352730120210878466-website.mhtml",
+      "mhtml_size_bytes": 425586,
+      "mhtml_sha256": "bddf1589fe2bc0519dfbe0679227a5ef6bb527a475ab141d0fc3a64cdedbdcce",
+      "html_bytes_after_decode": 29025,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 352784145123905536,
+      "mhtml_path": "investigation/tiktok/raw/352784145123905536/352784187536707586-website.mhtml",
+      "mhtml_size_bytes": 425668,
+      "mhtml_sha256": "d3c2b511477a31c4853a3629c66bdb9066e6faeb2f57451364be021366eb673f",
+      "html_bytes_after_decode": 29067,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 352799328705712141,
+      "mhtml_path": "investigation/tiktok/raw/352799328705712141/352799398473764879-website.mhtml",
+      "mhtml_size_bytes": 426148,
+      "mhtml_sha256": "6b8f83a2cd8d9169ae5d9ffd1e276c5a78c27fd6f17c80b5f01e39118b92851a",
+      "html_bytes_after_decode": 29319,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 352832125797404695,
+      "mhtml_path": "investigation/tiktok/raw/352832125797404695/352832180981862425-website.mhtml",
+      "mhtml_size_bytes": 426224,
+      "mhtml_sha256": "ac6287d74ce51f7ea2c90ec13d33716233a9be5f29e9feeed3de40be192efde4",
+      "html_bytes_after_decode": 29361,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 352854759947898915,
+      "mhtml_path": "investigation/tiktok/raw/352854759947898915/352854811890159653-website.mhtml",
+      "mhtml_size_bytes": 425984,
+      "mhtml_sha256": "dc448150702f196006c3cd20f931896cea9d89fa9c326e7f6c30e3967cd500d2",
+      "html_bytes_after_decode": 29235,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    },
+    {
+      "submission_id": 352880825026482223,
+      "mhtml_path": "investigation/tiktok/raw/352880825026482223/352880877438505009-website.mhtml",
+      "mhtml_size_bytes": 425984,
+      "mhtml_sha256": "5f02366a47275c71209b69fb80a6bb823eb6bd7dc0a7cb7ff3f3e179d40739fd",
+      "html_bytes_after_decode": 29235,
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d"
+    }
+  ],
+  "normalized_html_fingerprint": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d",
+  "normalized_html_bytes": 16276,
+  "shared_static_assets": {
+    "asset_count_with_19_copies": 32,
+    "scope": "public/images/tiktok/** assets present byte-identically in all 19 captured campaign pages",
+    "assets": [
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/card/garena.png",
+        "sha256": "237fa12c6a1fa1729ad96150150198f341b04183c8282f82818a5b4393a74415",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/card/mobifone.png",
+        "sha256": "9874b99edd042b57a7fb3927cada8c4dcf9b29436ddaae536965fbb19e319a52",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/card/vcoin.png",
+        "sha256": "506c7a7b7d9f7c18b1df7f224ae7d5c99b7e4aeab54e5ef82bd1154fc2e7f82e",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/card/viettel.png",
+        "sha256": "d7447bb72303a26f0a26d61d4f5055f6c2e51b9a57efce07d38b02123e7c029a",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/card/vinaphone.png",
+        "sha256": "8862bb55fd5f4fd07c5c131b86f565cc5ea9c9cf38ff84dca4704ce96cbd7319",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/card/zing.png",
+        "sha256": "b87cd753fb48701e4829839a7257a8fbbcc7abf546db74be966daeec44d93529",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/method/method_garena.png",
+        "sha256": "48c3a37d0016afc7f5d5a9128c741894ed782ddd60469b3ae1f90ed87608a826",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/method/method_mobifone.png",
+        "sha256": "dffbfd40314bff581fe3cc09548a3f22f6174d293685e6682612636cd0542c45",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/method/method_momo.png",
+        "sha256": "9d4318dc4f56f3f4f2cc34ed572c4f1855ce289942fde4e0a38fa2118f438139",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/method/method_viettel.png",
+        "sha256": "4b5b41b54d088290d0664eeb739edbf7d2a2e71e981f3a41d1608a36e188da6b",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/method/method_vinaphone.png",
+        "sha256": "14a87037736052075d1851f068a43774d2a1476cfb23ad596fb7e7d3fda2fe1d",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/method/method_visa.png",
+        "sha256": "ab911afb829e89c74eba5c851786b3fae0cde43e0433535272d6cceaf1d47dc4",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/method/method_vnpay.png",
+        "sha256": "2c04eeb233561c09b38e69e3fc745b9724a2e1dbce6a907b1f5eaf8d97969355",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/method/method_zalopay.png",
+        "sha256": "be5c45051b064fb4ca3662d9d34917ade7fe8351643d5153af4a09b25976fb9e",
+        "copies": 19
+      },
+      {
+        "content_type": "image/png",
+        "path": "/public/images/tiktok/method/method_zing.png",
+        "sha256": "b46f778a19f74aa8e1bc537a1a7ee0ad56b7195c3ac5065b0e039d238a723f1d",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/method/bank-qr.svg",
+        "sha256": "23e7ba91d2253d914a17ef73fcfc847125ceec9c918c1dac942c2ca0a7c39dec",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/method/the-cao.svg",
+        "sha256": "1bd5739129611aa7f57e373666a1d679f9b6614e0740a3f2f304d99ad180a335",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/arrow-bottom.svg",
+        "sha256": "5aa7df932d251acd3ea82002544c4d339acea3774c7c5271cab3c457ad73994a",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/arrow-left.svg",
+        "sha256": "8a8b69b9ece18ff8f0de627508efa5382d0576d2c7ca8db078c049504a3dcc91",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/arrow-right.svg",
+        "sha256": "c706049cfaf244117e54b585721d65ac826d4e0d0457b1f5a913912bc64b3f40",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/avatar-default.svg",
+        "sha256": "fd8d92216e96dd0461a1b8f3d73bbb8ebf6e96824612ac30b5b5d06d504897de",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/close.svg",
+        "sha256": "4c371d0a03e3b8e056248a640b93d57bba982d3beba73151cf93e11ffc713a87",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/coin.svg",
+        "sha256": "28609f1a92cbfe1cd73a74ed21177db4991bd9cb522ac54dba22a05b32e0a328",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/creator-tools.svg",
+        "sha256": "fd07627d846c049923ebc45d852e220ea00bbe673e3b3513b64c1083698522cd",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/help.svg",
+        "sha256": "bbdd495a219c250e75f23c5609f9a80b2eddda43f94cf5dc41b641d0b6c135cb",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/logo.svg",
+        "sha256": "66ff8524c34494cabd309e6d9b27c39670563ee036d74e2cd56a07566f662ae2",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/menu.svg",
+        "sha256": "ac8f922c34819ffda5d1a7c3f6fa58773c520ff705dce43e3558963013b57deb",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/question.svg",
+        "sha256": "da0ee2d236f4624aac8e1e83e923340841223a346c452bb8a95572fc46feb3c8",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/search.svg",
+        "sha256": "9be18df4331bdc2054e6793498cc80726a4924875aa6d7ca31bdf7b7981d55aa",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/security-tiktok.svg",
+        "sha256": "bb4ae0be7662804ab90f6d840e8bf03d632b781fc66015d54e89d88d358969de",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/shield-tick.svg",
+        "sha256": "7583be49e9c4424b73a7d99c080c034d93c64a0ada9cd74dcd523dbf281d55f7",
+        "copies": 19
+      },
+      {
+        "content_type": "image/svg+xml",
+        "path": "/public/images/tiktok/svg/three-dots.svg",
+        "sha256": "094bf6820c94db4acb4bd626f3db4ca9375264eff8f6bf6cd13cb951c6cf544a",
+        "copies": 19
+      }
+    ]
+  },
+  "missing_capture": {
+    "submission_id": 351624943487684609,
+    "host": "shop.sonhaimedia.sbs",
+    "reason": "No MHTML artifact was available in the captured evidence set; the domain remains an IOC from the submission/DNS/RDAP records."
+  }
+}

@@ -1,0 +1,978 @@
+{
+  "schema_version": 1,
+  "case": "tiktok-recharge-campaign",
+  "generated_at_utc": "2026-09-01T05:37:27Z",
+  "timezone_policy": "All investigative timestamps in REPORT.md are UTC unless a source explicitly labels a local offset.",
+  "source_cutoff_utc": "2026-09-01T04:48:58Z",
+  "scope": {
+    "verified_campaign_domains": 20,
+    "captured_campaign_mhtml_pages": 19,
+    "related_unverified_leads": 1,
+    "raw_evidence_bytes_under_investigation_tiktok": 191917985,
+    "raw_evidence_file_count_under_investigation_tiktok": 1269,
+    "scope_definition": "Counts and bytes exclude the committed derivatives, REPORT.md, and this .gitignore; they cover the local raw/derived acquisition hold only."
+  },
+  "chain_of_custody": {
+    "case_artifacts": "Source capture IDs, report IDs, artifact hashes, and creation timestamps are retained in artifacts_tiktok.csv and the local raw capture tree.",
+    "collection_mode": "Read-only HTTP/DNS/RDAP/RIPEstat/Shodan/public-source retrieval, plus one synthetic/public-user QR order with no payment.",
+    "preservation_note": "Raw evidence remains outside the Git commit because it is large and includes session cookies, transaction tokens, and unrelated credential-like public-code material. Verify against the hashes below under legal hold."
+  },
+  "committed_derivatives": [
+    {
+      "path": "investigation/tiktok/campaign_iocs.json",
+      "role": "machine-readable campaign IOC inventory",
+      "size_bytes": 34394,
+      "sha256": "ff3bee89093e14853d0cb5e7611753eb36ef2598c7ac4cfd1d9ec3edcb3dfa9e",
+      "commit_status": "committed"
+    },
+    {
+      "path": "investigation/tiktok/campaign_iocs.csv",
+      "role": "flat IOC export",
+      "size_bytes": 11282,
+      "sha256": "bd47602ab72184e47560324c3af02ebd78ef92ed151ad83201cee79fb0c62e7c",
+      "commit_status": "committed"
+    },
+    {
+      "path": "investigation/tiktok/template_fingerprint.json",
+      "role": "derived normalized-template comparison",
+      "size_bytes": 16911,
+      "sha256": "0fc1d1c384169c6293ee95c02d5f6c677b07c4b9237ec4985f13e287b84be2b6",
+      "commit_status": "committed"
+    },
+    {
+      "path": "investigation/tiktok/qr_order_evidence.json",
+      "role": "sanitized financial evidence derivative",
+      "size_bytes": 2438,
+      "sha256": "c3e4a7baf43cca5c54f1082a6bb75b430c308f8b94dc0dc4a9931b20779e26da",
+      "commit_status": "committed"
+    },
+    {
+      "path": "investigation/tiktok/origin_observation.json",
+      "role": "sanitized origin/network derivative",
+      "size_bytes": 2151,
+      "sha256": "718e7d31487273619e618f28b3c253c3f8b7f5faac7b20cfc0adcd396bae95e6",
+      "commit_status": "committed"
+    }
+  ],
+  "source_records": [
+    {
+      "path": "investigation/tiktok/domain_timeline.csv",
+      "role": "campaign inventory and registration timeline",
+      "category": "campaign metadata",
+      "exists": true,
+      "size_bytes": 8626,
+      "sha256": "0a14f03166e8ab5bf47343220850c4192620d181b01d5ef0d46892dfbb82b41f",
+      "filesystem_mtime_utc": "2026-09-01T04:10:58Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/dns_snapshot.json",
+      "role": "public DNS snapshot",
+      "category": "DNS",
+      "exists": true,
+      "size_bytes": 8655,
+      "sha256": "eae2a46cd11f3477c69be213e6cb09928c8ddaeb0537171405c847d7cf8e5e32",
+      "filesystem_mtime_utc": "2026-09-01T04:16:46Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/dns_snapshot_rdap_ns.json",
+      "role": "authoritative/RDAP nameserver DNS snapshot",
+      "category": "DNS/origin correlation",
+      "exists": true,
+      "size_bytes": 8538,
+      "sha256": "9888049d695bac72047ff6e4ff5ffacf8048724e77e41524a8fb60b95d0da123",
+      "filesystem_mtime_utc": "2026-09-01T04:17:30Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/vhost_checks.jsonl",
+      "role": "direct vhost checks at 2026-09-01T03:46Z",
+      "category": "current disposition",
+      "exists": true,
+      "size_bytes": 14357,
+      "sha256": "db88e55c5e75803c503e1fc998e40873a8982605c70f1d2a760925835c363c93",
+      "filesystem_mtime_utc": "2026-09-01T03:47:02Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/apex_vhost_checks.json",
+      "role": "apex vhost checks at 2026-09-01T04:17Z",
+      "category": "current disposition",
+      "exists": true,
+      "size_bytes": 7440,
+      "sha256": "eedf01134894d283734b0feaa1403a605eac8310b4af5ff52808800fe54c5fff",
+      "filesystem_mtime_utc": "2026-09-01T04:17:55Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/live_final_dns.txt",
+      "role": "authoritative vs public resolver comparison",
+      "category": "takedown state",
+      "exists": true,
+      "size_bytes": 2672,
+      "sha256": "dc0ce9e4472b0c65c3324aa639679b904387d8345dfde82f77b1de3b67390717",
+      "filesystem_mtime_utc": "2026-09-01T04:18:29Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap_hungdung_final2.json",
+      "role": "final hungdungmedia.fun RDAP",
+      "category": "domain status",
+      "exists": true,
+      "size_bytes": 5252,
+      "sha256": "24af502a755190ace39effc5bb08abd1d0c146e763f966ace85a1619a5c777dc",
+      "filesystem_mtime_utc": "2026-09-01T04:19:03Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/apnic_rdap.json",
+      "role": "APNIC network RDAP for origin IP",
+      "category": "network attribution",
+      "exists": true,
+      "size_bytes": 2986,
+      "sha256": "1f8e146fc2354eed521837d478476e3945060212bc2852ee50a1fb979cb702ce",
+      "filesystem_mtime_utc": "2026-09-01T03:44:24Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/ripestat_network_info.json",
+      "role": "RIPEstat ASN/prefix lookup",
+      "category": "network attribution",
+      "exists": true,
+      "size_bytes": 406,
+      "sha256": "f60e974297d4c861d806a29e00ffefeb65c3ea52328b0043945a374f3b808a0a",
+      "filesystem_mtime_utc": "2026-09-01T04:38:27Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/ripestat_whois.json",
+      "role": "RIPEstat/APNIC WHOIS mirror",
+      "category": "network attribution",
+      "exists": true,
+      "size_bytes": 2158,
+      "sha256": "d7c4f17cea3d99bbc9ca37533887e6bd3766aea2c7dd48bf713162034118a3a4",
+      "filesystem_mtime_utc": "2026-09-01T04:38:27Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/shodan_host_10314986246.html",
+      "role": "Shodan service observation",
+      "category": "network attribution",
+      "exists": true,
+      "size_bytes": 14019,
+      "sha256": "dbfa422f79cba70a9375a2a359bf700919174302b613879032a9afbf6f43dc1e",
+      "filesystem_mtime_utc": "2026-09-01T03:39:48Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/live_final_direct.headers",
+      "role": "direct-origin HTTP headers",
+      "category": "origin observation",
+      "exists": true,
+      "size_bytes": 237,
+      "sha256": "a2b6b3d91816e6d5d590fa0a0f3ae1359b5b96e4540776d8b70e0f35a07263fc",
+      "filesystem_mtime_utc": "2026-09-01T04:18:16Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/live_final_direct.html",
+      "role": "direct-origin HTML body",
+      "category": "origin observation",
+      "exists": true,
+      "size_bytes": 186877,
+      "sha256": "a0e74fe2c82e1c9dd46d9ec89428f9253a8d8671ec909272d5b50289f46f1be7",
+      "filesystem_mtime_utc": "2026-09-01T04:18:17Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/live-direct-ip.txt",
+      "role": "initial direct-IP capture and HTML",
+      "category": "origin observation",
+      "exists": true,
+      "size_bytes": 187114,
+      "sha256": "58ba8c5ea0b18c0a5950076e1e2f692aa21b61e8e98dab85c898acd911b439b4",
+      "filesystem_mtime_utc": "2026-09-01T02:24:49Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/origin_probe/_.headers",
+      "role": "origin application HTTP headers",
+      "category": "origin observation",
+      "exists": true,
+      "size_bytes": 237,
+      "sha256": "bcf408579db731d6cdd567f37d305868fde7cbe4941d222dc21fbb1908c13127",
+      "filesystem_mtime_utc": "2026-09-01T03:39:29Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/origin_probe/health.body",
+      "role": "origin application error body",
+      "category": "origin observation",
+      "exists": true,
+      "size_bytes": 19,
+      "sha256": "b16e15764b8bc06c5c3f9f19bc8b99fa48e7894aa5a6ccdad65da49bbf564793",
+      "filesystem_mtime_utc": "2026-09-01T03:39:26Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/live_js.txt",
+      "role": "extracted client JavaScript evidence",
+      "category": "behavior",
+      "exists": true,
+      "size_bytes": 63615,
+      "sha256": "5b1a4a1f3e04215549cb285939a93516e053c3e85e8bc4be5162497c5ee7d466",
+      "filesystem_mtime_utc": "2026-09-01T02:22:54Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/cards_probe.json",
+      "role": "read-only /cards response",
+      "category": "behavior",
+      "exists": true,
+      "size_bytes": 85,
+      "sha256": "c2bf259b03d1155d1b0234458ad7b66346c2c30fabf6b822f260bb0cf37d77d1",
+      "filesystem_mtime_utc": "2026-09-01T04:06:27Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/cards_probe.headers",
+      "role": "read-only /cards headers",
+      "category": "behavior",
+      "exists": true,
+      "size_bytes": 181,
+      "sha256": "06af82233324e5831aad4258748e32cf7276364ba50e2aac6fea699d95956c79",
+      "filesystem_mtime_utc": "2026-09-01T04:06:27Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/probe_qr_response.txt",
+      "role": "raw QR order response (contains session cookie; local-only)",
+      "category": "financial evidence",
+      "exists": true,
+      "size_bytes": 1316,
+      "sha256": "e5002e12607e90a8ca22da1e502d50355c8a85dc847fb5214c10e0dc49b12338",
+      "filesystem_mtime_utc": "2026-09-01T02:35:09Z",
+      "sensitivity": "local-only-sensitive",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/qr_payload.txt",
+      "role": "captured EMVCo payload",
+      "category": "financial evidence",
+      "exists": true,
+      "size_bytes": 175,
+      "sha256": "2bd6c0b1280d4f54333c275174fb440d41eb7e76177827b769c8b69d5639511b",
+      "filesystem_mtime_utc": "2026-09-01T03:25:11Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/zalopay_emv.headers",
+      "role": "read-only ZaloPay metadata headers",
+      "category": "financial evidence",
+      "exists": true,
+      "size_bytes": 250,
+      "sha256": "4f9dc664f6ee5a17f74581f36b89314bdad098fd6e8ce64b9fac6486593dc163",
+      "filesystem_mtime_utc": "2026-09-01T03:25:35Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/zalopay_emv_response.json",
+      "role": "raw ZaloPay metadata (contains transaction token; local-only)",
+      "category": "financial evidence",
+      "exists": true,
+      "size_bytes": 507,
+      "sha256": "abf49f56f6ebf68dc896da9cf9cdab664dfda81624104d101c785b26a70fa2fe",
+      "filesystem_mtime_utc": "2026-09-01T03:25:35Z",
+      "sensitivity": "local-only-sensitive",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/zalopay_emv_example.json",
+      "role": "generic bundle control response (contains transaction token; local-only)",
+      "category": "control experiment",
+      "exists": true,
+      "size_bytes": 501,
+      "sha256": "89b033e8d65305ce39f50ce785b52fc2256d585d608467c247c978edb9fe226a",
+      "filesystem_mtime_utc": "2026-09-01T04:14:22Z",
+      "sensitivity": "local-only-sensitive",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/qr_status_7052_afterlogin2.json",
+      "role": "final order status",
+      "category": "financial evidence",
+      "exists": true,
+      "size_bytes": 21,
+      "sha256": "21cd29c172e344912bd2c66bfc48b464dcbb7ea557a6e5fd29c5c1ebcdfe0959",
+      "filesystem_mtime_utc": "2026-09-01T04:06:01Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/imedia_api_footer.json",
+      "role": "official iMedia footer/company metadata",
+      "category": "intermediary attribution",
+      "exists": true,
+      "size_bytes": 1784,
+      "sha256": "f9c00f867d19acfa9a28018e783f72b0e25069d7d5031f04da1044a1ad9d2552",
+      "filesystem_mtime_utc": "2026-09-01T03:31:05Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/imedia_api_service_page_list.json",
+      "role": "official iMedia service index",
+      "category": "intermediary attribution",
+      "exists": true,
+      "size_bytes": 1101,
+      "sha256": "828f32bcd18cc95cb28211be417b5e62675052ef38c5a6abf28c814a76d55f05",
+      "filesystem_mtime_utc": "2026-09-01T04:01:18Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/imedia_api_service_page_service_info_serviceSlug_hola_digital___dich_vu_vien_thong.json",
+      "role": "official iMedia telecom/digital-goods service page",
+      "category": "intermediary attribution",
+      "exists": true,
+      "size_bytes": 7743,
+      "sha256": "0a86f7d571b4187d952a6bccbc2bb8a81e113aef1ded2590a4959bf29539b403",
+      "filesystem_mtime_utc": "2026-09-01T04:01:20Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/vietqr_business.json",
+      "role": "public tax/business identity lookup",
+      "category": "intermediary attribution",
+      "exists": true,
+      "size_bytes": 584,
+      "sha256": "4a75449539f92fbc2ed6f5e8af63e0dc02be0c13754aef2b6e1efad12435d4ab",
+      "filesystem_mtime_utc": "2026-09-01T04:04:23Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/imedia_facebook_warning.html",
+      "role": "official iMedia impersonation warning",
+      "category": "intermediary caveat",
+      "exists": true,
+      "size_bytes": 341051,
+      "sha256": "360d6dac2d30ec376fbaa24628994d1f1cab2531d7a7e37a2bbccf6a8f9b9013",
+      "filesystem_mtime_utc": "2026-09-01T02:55:41Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/imedia_api_block_list_block_v1_slug__2F.json",
+      "role": "official iMedia news/content API (executive-context article)",
+      "category": "intermediary attribution",
+      "exists": true,
+      "size_bytes": 727335,
+      "sha256": "88cb5c30554feff78d9783ae49fe901e0da84322dbf7a50ff782ddd1376461f7",
+      "filesystem_mtime_utc": "2026-09-01T04:01:16Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/github-taiapi-user.json",
+      "role": "public GitHub profile metadata",
+      "category": "candidate lead",
+      "exists": true,
+      "size_bytes": 1290,
+      "sha256": "d7df45c1931ea5d71db8fee579a8c611059aa7d2f02803c8fd1e1dcf5d7fd8b8",
+      "filesystem_mtime_utc": "2026-09-01T03:13:32Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/gist-taiapi.json",
+      "role": "public Upload shop gist (contains credential-like code; local-only)",
+      "category": "candidate lead",
+      "exists": true,
+      "size_bytes": 24716,
+      "sha256": "953ed441562899f854f54b86f201ce3708618d23579dafcfa3b4a3e89de1cce2",
+      "filesystem_mtime_utc": "2026-09-01T03:12:45Z",
+      "sensitivity": "local-only-sensitive",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/taiapi_code_indicator_hits.json",
+      "role": "public gist indicator scan (local-only)",
+      "category": "candidate lead",
+      "exists": true,
+      "size_bytes": 84778,
+      "sha256": "dd8ca35d8d04204290c87ef805ebccfd6e0805fe493fc454388f793a8e92f8a1",
+      "filesystem_mtime_utc": "2026-09-01T04:23:34Z",
+      "sensitivity": "local-only-sensitive",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/tiktok_profiles_summary.jsonl",
+      "role": "public TikTok profile snapshots",
+      "category": "candidate lead",
+      "exists": true,
+      "size_bytes": 5471,
+      "sha256": "672245938b9bb164f43f8677fcd6b604e9bd64ec9793de4a2358d2c3b8604938",
+      "filesystem_mtime_utc": "2026-09-01T03:39:01Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/facebook_search_snapshots.txt",
+      "role": "public Facebook search snapshots",
+      "category": "candidate lead",
+      "exists": true,
+      "size_bytes": 76953,
+      "sha256": "69b46dfa6a2a2563cb04690ebd1bf4fd45c9cef8dd946d27326a1028f41573ac",
+      "filesystem_mtime_utc": "2026-09-01T04:35:19Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/all_inbound_replies.json",
+      "role": "Hostinger abuse reply",
+      "category": "takedown correspondence",
+      "exists": true,
+      "size_bytes": 1204,
+      "sha256": "a3c6428937fc920bfe1f81808dd0a1cf09f2e0431b35711a2200c53db1231454",
+      "filesystem_mtime_utc": "2026-09-01T04:47:17Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/provider_reports_tiktok.csv",
+      "role": "provider report state",
+      "category": "takedown correspondence",
+      "exists": true,
+      "size_bytes": 2342,
+      "sha256": "1262d46287e1e7d3a303243eb811dfa0d24edcc77b830e1c82be61f9fef85f26",
+      "filesystem_mtime_utc": "2026-09-01T04:46:30Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/artifacts_tiktok.csv",
+      "role": "case artifact metadata",
+      "category": "chain of custody",
+      "exists": true,
+      "size_bytes": 5271,
+      "sha256": "ea30f5a71f83abb75507bfe98eea6f7487566f2c7f9be6de9a465e41be8fcd17",
+      "filesystem_mtime_utc": "2026-09-01T03:37:10Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/napthetiktok_rdap.json",
+      "role": "related-domain RDAP record",
+      "category": "related lead",
+      "exists": true,
+      "size_bytes": 5268,
+      "sha256": "dc1863349e25fa52fd3f913ef0eae3614ca745bcde2fe2e74838aedab277912d",
+      "filesystem_mtime_utc": "2026-09-01T04:48:58Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/napthetiktok_urlscan.json",
+      "role": "related-domain passive URLScan record",
+      "category": "related lead",
+      "exists": true,
+      "size_bytes": 69,
+      "sha256": "fb9e17e9edd1078c51af0f8281b68e2b703348311f056adad0548ce2758db184",
+      "filesystem_mtime_utc": "2026-09-01T04:48:59Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/napthetiktok_otx.json",
+      "role": "related-domain passive OTX record",
+      "category": "related lead",
+      "exists": true,
+      "size_bytes": 80,
+      "sha256": "54e9ab003d3f39b824123f81540ab21c580d772e055c27c32c9e2fd03e31aaa0",
+      "filesystem_mtime_utc": "2026-09-01T04:48:58Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/mhtml_resource_fingerprints.csv",
+      "role": "derived static-resource fingerprint table",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 22516,
+      "sha256": "6adba55e284143927a7b3b1229ca1bbe3539ad685eb1c8425a236b6f171c0471",
+      "filesystem_mtime_utc": "2026-09-01T04:21:01Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/348389447261229079/348389500960903193-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425423,
+      "sha256": "e7ae61219cd0ab67b12125f828b5c5e4afc46efea36b798419b9f4a3cd476851",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/348421337477287968/348421386533867554-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425815,
+      "sha256": "5d836af1dc4fb53c55993e73a6aaed84a008534d29346bc5ac3d156364796395",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/348539296447205417/348539337404583979-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425894,
+      "sha256": "7e50444d48c10496bb5aac952a8252e31c690370a72a1e80b40c597d51aa72ba",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/348756442276171825/348756489193656371-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425660,
+      "sha256": "8dc5d0ef2d25585bb979dd8c5260b3f16cf44f85702b53157161c97f5445f9ea",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/348866265474928698/348866318566428732-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 426605,
+      "sha256": "b42e872d456b1fd3e64df2eae8d62e0b79944013ecddaf7b3da56d868ab50ace",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/349031076745711685/349031124120375367-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425736,
+      "sha256": "c45fdf99863912b764915ed6379030a9644f0b03689fe05bf829e72e010921fe",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/350078878372335632/350078909733146642-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 426341,
+      "sha256": "968d97f5da2dc9d4ff215128ae943aad9642de95d9559af04176f1d5539a255e",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/350354710311473187/350354755580596261-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 426421,
+      "sha256": "221525962609b338cd716f8ba5b2aa25c953a61f63820e6e2ea3aedab7adb48b",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/350466798270812200/350466840356458538-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425976,
+      "sha256": "a62ec3368eb476a18b0fc3fbb12750b93c5c871bcdb1b4902b87f2f7921e0679",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/allraw/350930905994367026/350930949011148852-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425976,
+      "sha256": "8724f61d6e136883807ba6694e73a1148e88cfba9504b03b2b9916f9cdb6e7cb",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/allraw/351387190816673794/351387238212308996-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425976,
+      "sha256": "e98ac59f68ea01db5468c649119db37bf1917de9ac069353f5e71856307b30a6",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/352185586284498946/352185634439303172-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425894,
+      "sha256": "ab7076cea76e89b5959fb12f8638706b18cb3fefab17ff696b114b3652a7f665",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/352342673387950094/352342725355376656-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 426055,
+      "sha256": "f3333a9abc6858a0f011885a8e61a8d8cba3f99026449055b4dff9fa0b5d1550",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/352730056440680448/352730120210878466-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425586,
+      "sha256": "bddf1589fe2bc0519dfbe0679227a5ef6bb527a475ab141d0fc3a64cdedbdcce",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/352784145123905536/352784187536707586-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425668,
+      "sha256": "d3c2b511477a31c4853a3629c66bdb9066e6faeb2f57451364be021366eb673f",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/352799328705712141/352799398473764879-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 426148,
+      "sha256": "6b8f83a2cd8d9169ae5d9ffd1e276c5a78c27fd6f17c80b5f01e39118b92851a",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/352832125797404695/352832180981862425-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 426224,
+      "sha256": "ac6287d74ce51f7ea2c90ec13d33716233a9be5f29e9feeed3de40be192efde4",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/352854759947898915/352854811890159653-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425984,
+      "sha256": "dc448150702f196006c3cd20f931896cea9d89fa9c326e7f6c30e3967cd500d2",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/raw/352880825026482223/352880877438505009-website.mhtml",
+      "role": "captured MHTML page",
+      "category": "template correlation",
+      "exists": true,
+      "size_bytes": 425984,
+      "sha256": "5f02366a47275c71209b69fb80a6bb823eb6bd7dc0a7cb7ff3f3e179d40739fd",
+      "filesystem_mtime_utc": "1970-01-01T00:00:00Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/dainammedia.space.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 5252,
+      "sha256": "1162efb87e4c14dde940695f971a1a82552320ddf76685deac86666eedef294c",
+      "filesystem_mtime_utc": "2026-09-01T03:43:32Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/dltiktik.shop.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 4242,
+      "sha256": "07359f83791c2d9bf705bc7a461e56b47aa4fa6bdd1711cecdf01d749d4cdad9",
+      "filesystem_mtime_utc": "2026-09-01T03:43:22Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/gnshop.fun.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 5162,
+      "sha256": "37d1619cb52c0b74a978dce92c6524dfff79294565a74c99fdb228929372ddd8",
+      "filesystem_mtime_utc": "2026-09-01T03:43:17Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/hd-media.space.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 5211,
+      "sha256": "e2f027c26b9c13e4ebba391e46df929243d5ed7d50011c86871ba602c796e5cb",
+      "filesystem_mtime_utc": "2026-09-01T03:43:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/hoanganhmedia.sbs.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 4766,
+      "sha256": "b87fae2eb7866be66e31622465c6d1cb85dc8e0e58502288dfd82157e44b3964",
+      "filesystem_mtime_utc": "2026-09-01T03:43:39Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/hoanghaimedia.shop.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 4288,
+      "sha256": "55fc5be8097ddd98ac24346dc11f3d42724745bc4fad82dc361b49642cd19fb2",
+      "filesystem_mtime_utc": "2026-09-01T03:43:34Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/huuhanstudio.space.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 5261,
+      "sha256": "08c804ea7564859876bcbce757427268981bb694ee1eb384b70c9132aaeda601",
+      "filesystem_mtime_utc": "2026-09-01T03:43:31Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/khuyenmai2026.site.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 5230,
+      "sha256": "4194d788a47f014f0a0c4a27c98e7a30e79fa37e5308a4cbfe40b5bf3b203cff",
+      "filesystem_mtime_utc": "2026-09-01T03:43:23Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/kimsonmedia.sbs.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 4811,
+      "sha256": "1d4adb0add2134334d15def2e3a9ab4ad818aaeb41de001dce208d5571cf16be",
+      "filesystem_mtime_utc": "2026-09-01T03:43:30Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/ko-media.art.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 9170,
+      "sha256": "81ec4aac95913b79699b042154948eb699dcf37751bff6171531e0585a913dfb",
+      "filesystem_mtime_utc": "2026-09-01T03:43:35Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/muanhanh.shop.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 4242,
+      "sha256": "22d7e27ac3dfd8d3d3198a790b5d9d88d7801f04959ba00ff9e1ad60beb0bc59",
+      "filesystem_mtime_utc": "2026-09-01T03:43:21Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/quanghung-media.site.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 5265,
+      "sha256": "fbbfef1c8c55104827e0d330a1691831ef35081a404ea63b26b6e06c3babf152",
+      "filesystem_mtime_utc": "2026-09-01T03:43:38Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/quangthaimedia.shop.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 4280,
+      "sha256": "af492cd9c0d89e122c8da0d10186ba0474878fc65514f3b3392204e80d8c08e4",
+      "filesystem_mtime_utc": "2026-09-01T03:43:37Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/sky1media.shop.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 4248,
+      "sha256": "5045fc942f32ccd80164c37cc5e766568fe1aa87a73189b35d8af39c02c48edb",
+      "filesystem_mtime_utc": "2026-09-01T03:43:27Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/sonhaimedia.sbs.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 4811,
+      "sha256": "afc5ed265057204bd91e021f2cfe183cdcd1f27517fc7afe67d052fa48ad6a12",
+      "filesystem_mtime_utc": "2026-09-01T03:43:32Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/takimedia.shop.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 4251,
+      "sha256": "dcf3530f7221a8b27ee299f0aee23004d755ee2be10f9aaa4c0160782411c08a",
+      "filesystem_mtime_utc": "2026-09-01T03:43:25Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/thuynmedia.shop.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 4257,
+      "sha256": "6ecc36bb8502d6f12aef380af9874513d6335db98e9b3d5d9a22a987e2ab86e5",
+      "filesystem_mtime_utc": "2026-09-01T03:43:28Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/thuytongstore.fun.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 5225,
+      "sha256": "bcfc67bf47ca87609a71d244540cdf0acc42d8687a784bfc052ce637bc627da4",
+      "filesystem_mtime_utc": "2026-09-01T03:43:29Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/rdap/vntik.shop.json",
+      "role": "root-domain RDAP record",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 4227,
+      "sha256": "159d5c1fd65ee0f65531f41a4abce7a519a13d7f9a33344b536ad769c2a6791d",
+      "filesystem_mtime_utc": "2026-09-01T03:43:19Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    }
+  ],
+  "excluded_from_commit": [
+    {
+      "path_prefix": "investigation/tiktok/allraw/",
+      "reason": "raw MHTML, screenshots, and correspondence; large and may contain session/case data"
+    },
+    {
+      "path_prefix": "investigation/tiktok/raw/",
+      "reason": "raw MHTML and capture metadata; large"
+    },
+    {
+      "path_prefix": "investigation/tiktok/taiapi_code/",
+      "reason": "public-code captures include credential-like tokens unrelated to the campaign"
+    },
+    {
+      "path_prefix": "investigation/tiktok/login_probes/",
+      "reason": "response headers include temporary session cookies"
+    },
+    {
+      "path_prefix": "investigation/tiktok/*.headers",
+      "reason": "some headers include Set-Cookie; raw copies remain locally preserved"
+    }
+  ],
+  "report_document": {
+    "path": "investigation/tiktok/REPORT.md",
+    "size_bytes": 38816,
+    "sha256": "d57a16c227a0af97abbd0b2c646d7e164dd523ac1326cdc4976c96d1467f35aa",
+    "commit_status": "committed"
+  }
+}

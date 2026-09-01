@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "origin_ip": "103.149.86.246",
+  "network_observation": {
+    "prefix": "103.149.86.0/23",
+    "asn": "AS149125",
+    "netname": "DV4S-VN",
+    "organization": "4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED",
+    "country": "VN",
+    "apnic_capture_utc": "2026-09-01T03:44:24Z",
+    "ripe_network_info_capture_utc": "2026-09-01T04:38:27Z"
+  },
+  "direct_http_observation": {
+    "capture_utc": "2026-09-01T04:18:16Z",
+    "request": "HTTP GET / with Host: napxu.hungdungmedia.fun sent directly to 103.149.86.246:80",
+    "host_header": "napxu.hungdungmedia.fun",
+    "status": 200,
+    "server": "Apache",
+    "content_type": "text/html; charset=utf-8",
+    "title": "Nạp xu TikTok",
+    "body_bytes": 186877,
+    "body_sha256": "a0e74fe2c82e1c9dd46d9ec89428f9253a8d8671ec909272d5b50289f46f1be7"
+  },
+  "application_probe": {
+    "capture_utc": "2026-09-01T03:39:28Z",
+    "path": "/health (and equivalent non-existent paths)",
+    "status": 404,
+    "server": "Apache",
+    "body": "404 page not found",
+    "interpretation": "Go/net/http-like error text identifies application behavior but not a specific framework or operator."
+  },
+  "shodan_observation": {
+    "source_artifact": "investigation/tiktok/shodan_host_10314986246.html",
+    "service_scan_time_utc": "2026-08-29T15:35:55Z",
+    "open_ports": [
+      22,
+      80
+    ],
+    "ssh_product": "OpenSSH 8.9p1 Ubuntu 3",
+    "web_product": "Apache httpd",
+    "note": "No SSH authentication or login attempt was made."
+  },
+  "dns_delegation_split": {
+    "capture_utc": "2026-09-01T04:18:29Z",
+    "authoritative_nameserver_answer": {
+      "host": "napxu.hungdungmedia.fun",
+      "a": [
+        "172.67.151.86",
+        "104.21.80.154"
+      ]
+    },
+    "public_resolver_1_1_1_1": {
+      "host": "napxu.hungdungmedia.fun",
+      "status": "NXDOMAIN"
+    },
+    "interpretation": "Registry/delegation removal was visible to the public resolver while the origin/vhost remained reachable by direct IP and Host header."
+  },
+  "attribution_boundary": "This establishes a serving origin and its network registrant, not the person who operated the campaign."
+}

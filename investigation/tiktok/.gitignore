@@ -1,0 +1,13 @@
+# This directory is a local evidence hold.  Raw captures and third-party
+# responses are intentionally default-deny: they are large and some contain
+# temporary cookies, transaction tokens, or unrelated credential-like code.
+# Keep only the reviewable report and sanitized/derived derivatives in Git.
+*
+!.gitignore
+!REPORT.md
+!campaign_iocs.json
+!campaign_iocs.csv
+!template_fingerprint.json
+!qr_order_evidence.json
+!origin_observation.json
+!evidence_manifest.json

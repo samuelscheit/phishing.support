@@ -1,0 +1,969 @@
+{
+  "schema_version": 1,
+  "case": "tiktok-recharge-campaign",
+  "generated_at_utc": "2026-09-01T05:37:27Z",
+  "scope": {
+    "verified_campaign_members": 20,
+    "related_unverified_leads": 1,
+    "note": "The 20 campaign members are the submissions listed in domain_timeline.csv; one member (shop.sonhaimedia.sbs) lacks a captured MHTML page."
+  },
+  "iocs": [
+    {
+      "indicator_type": "domain",
+      "value": "napxu.gnshop.fun",
+      "root_domain": "gnshop.fun",
+      "campaign_member": true,
+      "submission_id": 348389447261229079,
+      "reported_url": "https://napxu.gnshop.fun/",
+      "first_observed_at_utc": "2026-08-19T08:55:17Z",
+      "registration_time_utc": "2026-06-14T01:58:58.733Z",
+      "last_changed_utc": "2026-08-19T09:13:31.929Z",
+      "expiration_time_utc": "2027-06-14T01:58:58.733Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "saanvi.ns.cloudflare.com",
+        "decker.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "104.21.59.107",
+        "172.67.223.92"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2606:4700:3031::6815:3b6b",
+        "2606:4700:3037::ac43:df5c"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [],
+      "origin_ip_observed": null,
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [],
+      "public_dns_nameservers_at_snapshot": [],
+      "vhost_check_utc": "2026-09-01T03:46:52.089399+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client hold",
+        "client transfer prohibited"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:17.317Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "nap-xu-247.vntik.shop",
+      "root_domain": "vntik.shop",
+      "campaign_member": true,
+      "submission_id": 348421337477287968,
+      "reported_url": "https://nap-xu-247.vntik.shop/",
+      "first_observed_at_utc": "2026-08-19T11:02:00Z",
+      "registration_time_utc": "2026-03-19T08:53:11.0Z",
+      "last_changed_utc": "2026-08-19T12:14:13.0Z",
+      "expiration_time_utc": "2027-03-19T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "188.114.96.3",
+        "188.114.97.3"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2a06:98c1:3120::3",
+        "2a06:98c1:3121::3"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [],
+      "origin_ip_observed": null,
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [],
+      "public_dns_nameservers_at_snapshot": [],
+      "vhost_check_utc": "2026-09-01T03:46:52.567062+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client hold",
+        "client transfer prohibited"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:19.0Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxu247.muanhanh.shop",
+      "root_domain": "muanhanh.shop",
+      "campaign_member": true,
+      "submission_id": 348539296447205417,
+      "reported_url": "https://napxu247.muanhanh.shop/",
+      "first_observed_at_utc": "2026-08-19T18:50:43Z",
+      "registration_time_utc": "2026-08-14T06:59:47.0Z",
+      "last_changed_utc": "2026-08-20T03:10:58.0Z",
+      "expiration_time_utc": "2027-08-14T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "marty.ns.cloudflare.com",
+        "serena.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "188.114.96.3",
+        "188.114.97.3"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2a06:98c1:3121::3",
+        "2a06:98c1:3120::3"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "104.21.39.124",
+        "172.67.145.71"
+      ],
+      "origin_ip_observed": null,
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "172.67.145.71",
+        "104.21.39.124"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "marty.ns.cloudflare.com",
+        "serena.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:46:53.028845+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client hold",
+        "client transfer prohibited"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:20.0Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxu.dltiktik.shop",
+      "root_domain": "dltiktik.shop",
+      "campaign_member": true,
+      "submission_id": 348756442276171825,
+      "reported_url": "https://napxu.dltiktik.shop/",
+      "first_observed_at_utc": "2026-08-20T09:13:35Z",
+      "registration_time_utc": "2026-08-19T16:47:26.0Z",
+      "last_changed_utc": "2026-08-20T10:05:11.0Z",
+      "expiration_time_utc": "2027-08-19T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "marty.ns.cloudflare.com",
+        "serena.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "104.21.40.4",
+        "172.67.172.217"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2606:4700:3036::ac43:acd9",
+        "2606:4700:3032::6815:2804"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [],
+      "origin_ip_observed": null,
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [],
+      "public_dns_nameservers_at_snapshot": [],
+      "vhost_check_utc": "2026-09-01T03:46:53.483087+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client hold",
+        "client transfer prohibited"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:22.0Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxunhanhre.khuyenmai2026.site",
+      "root_domain": "khuyenmai2026.site",
+      "campaign_member": true,
+      "submission_id": 348866265474928698,
+      "reported_url": "https://napxunhanhre.khuyenmai2026.site",
+      "first_observed_at_utc": "2026-08-20T16:29:59Z",
+      "registration_time_utc": "2026-08-14T07:00:08.739Z",
+      "last_changed_utc": "2026-08-20T17:04:05.800Z",
+      "expiration_time_utc": "2027-08-14T07:00:08.739Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "marty.ns.cloudflare.com",
+        "serena.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "104.21.6.217",
+        "172.67.135.79"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2606:4700:3035::ac43:874f",
+        "2606:4700:3031::6815:6d9"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "104.21.6.217",
+        "172.67.135.79"
+      ],
+      "origin_ip_observed": null,
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "104.21.6.217",
+        "172.67.135.79"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "marty.ns.cloudflare.com",
+        "serena.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:46:53.939352+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client transfer prohibited",
+        "client hold"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:23.731Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxu.takimedia.shop",
+      "root_domain": "takimedia.shop",
+      "campaign_member": true,
+      "submission_id": 349031076745711685,
+      "reported_url": "https://napxu.takimedia.shop/",
+      "first_observed_at_utc": "2026-08-21T03:24:53Z",
+      "registration_time_utc": "2026-08-20T23:38:28.0Z",
+      "last_changed_utc": "2026-08-21T04:07:30.0Z",
+      "expiration_time_utc": "2027-08-20T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "188.114.96.3",
+        "188.114.97.3"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2a06:98c1:3121::2",
+        "2a06:98c1:3120::2"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [],
+      "origin_ip_observed": null,
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [],
+      "public_dns_nameservers_at_snapshot": [],
+      "vhost_check_utc": "2026-09-01T03:46:54.397266+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client hold",
+        "client transfer prohibited"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:25.0Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "nap-xu.sky1media.shop",
+      "root_domain": "sky1media.shop",
+      "campaign_member": true,
+      "submission_id": 350078878372335632,
+      "reported_url": "https://nap-xu.sky1media.shop",
+      "first_observed_at_utc": "2026-08-24T00:48:28Z",
+      "registration_time_utc": "2026-08-20T23:32:40.0Z",
+      "last_changed_utc": "2026-08-24T01:03:55.0Z",
+      "expiration_time_utc": "2027-08-20T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "marty.ns.cloudflare.com",
+        "serena.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "188.114.97.3",
+        "188.114.96.3"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2a06:98c1:3120::3",
+        "2a06:98c1:3121::3"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [],
+      "origin_ip_observed": null,
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [],
+      "public_dns_nameservers_at_snapshot": [],
+      "vhost_check_utc": "2026-09-01T03:46:54.855251+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client hold",
+        "client transfer prohibited"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:27.0Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "nap-xu.thuynmedia.shop",
+      "root_domain": "thuynmedia.shop",
+      "campaign_member": true,
+      "submission_id": 350354710311473187,
+      "reported_url": "https://nap-xu.thuynmedia.shop",
+      "first_observed_at_utc": "2026-08-24T19:04:32Z",
+      "registration_time_utc": "2026-08-24T16:39:51.0Z",
+      "last_changed_utc": "2026-08-24T19:19:25.0Z",
+      "expiration_time_utc": "2027-08-24T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "188.114.97.2",
+        "188.114.96.2"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2a06:98c1:3120::3",
+        "2a06:98c1:3121::3"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [],
+      "origin_ip_observed": null,
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [],
+      "public_dns_nameservers_at_snapshot": [],
+      "vhost_check_utc": "2026-09-01T03:46:55.325909+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client hold",
+        "client transfer prohibited"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:28.0Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxu.thuytongstore.fun",
+      "root_domain": "thuytongstore.fun",
+      "campaign_member": true,
+      "submission_id": 350466798270812200,
+      "reported_url": "https://napxu.thuytongstore.fun/",
+      "first_observed_at_utc": "2026-08-25T02:29:56Z",
+      "registration_time_utc": "2026-08-25T01:56:00.327Z",
+      "last_changed_utc": "2026-08-30T01:56:59.570Z",
+      "expiration_time_utc": "2027-08-25T01:56:00.327Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "188.114.97.3",
+        "188.114.96.3"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2a06:98c1:3121::3",
+        "2a06:98c1:3120::3"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "origin_ip_observed": "103.149.86.246",
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:46:55.785918+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client transfer prohibited",
+        "client hold"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:29.769Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "shop-xu.kimsonmedia.sbs",
+      "root_domain": "kimsonmedia.sbs",
+      "campaign_member": true,
+      "submission_id": 350930905994367026,
+      "reported_url": "https://shop-xu.kimsonmedia.sbs/",
+      "first_observed_at_utc": "2026-08-26T09:14:07Z",
+      "registration_time_utc": "2026-08-26T07:43:44.0Z",
+      "last_changed_utc": "2026-08-31T07:47:13.0Z",
+      "expiration_time_utc": "2027-08-26T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "104.21.43.40",
+        "172.67.218.225"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2606:4700:3032::6815:2b28",
+        "2606:4700:3037::ac43:dae1"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "origin_ip_observed": "103.149.86.246",
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:46:56.251824+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "server transfer prohibited",
+        "client hold",
+        "client transfer prohibited"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:30.0Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "shop.huuhanstudio.space",
+      "root_domain": "huuhanstudio.space",
+      "campaign_member": true,
+      "submission_id": 351387190816673794,
+      "reported_url": "https://shop.huuhanstudio.space/",
+      "first_observed_at_utc": "2026-08-27T15:27:14Z",
+      "registration_time_utc": "2026-08-27T08:20:21.125Z",
+      "last_changed_utc": "2026-08-27T16:04:47.558Z",
+      "expiration_time_utc": "2027-08-27T08:20:21.125Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "104.21.20.135",
+        "172.67.192.238"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2606:4700:3034::6815:1487",
+        "2606:4700:3030::ac43:c0ee"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "origin_ip_observed": "103.149.86.246",
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:46:56.711752+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "server hold",
+        "client transfer prohibited",
+        "client hold",
+        "add period"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:31.383Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "shop.sonhaimedia.sbs",
+      "root_domain": "sonhaimedia.sbs",
+      "campaign_member": true,
+      "submission_id": 351624943487684609,
+      "reported_url": "https://shop.sonhaimedia.sbs/",
+      "first_observed_at_utc": "2026-08-28T07:11:59Z",
+      "registration_time_utc": "2026-08-26T08:32:50.0Z",
+      "last_changed_utc": "2026-08-31T08:37:14.0Z",
+      "expiration_time_utc": "2027-08-26T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [],
+      "historical_edge_aaaa_at_submission": [],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "origin_ip_observed": "103.149.86.246",
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:46:57.170665+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "server transfer prohibited",
+        "client hold",
+        "client transfer prohibited"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:32.0Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "shop.dainammedia.space",
+      "root_domain": "dainammedia.space",
+      "campaign_member": true,
+      "submission_id": 352185586284498946,
+      "reported_url": "https://shop.dainammedia.space/",
+      "first_observed_at_utc": "2026-08-29T20:19:47Z",
+      "registration_time_utc": "2026-08-29T14:16:28.648Z",
+      "last_changed_utc": "2026-08-29T20:40:42.429Z",
+      "expiration_time_utc": "2027-08-29T14:16:28.648Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "104.21.73.31",
+        "172.67.157.55"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2606:4700:3032::ac43:9d37",
+        "2606:4700:3032::6815:491f"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "origin_ip_observed": "103.149.86.246",
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:46:57.656244+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client hold",
+        "server hold",
+        "client transfer prohibited",
+        "add period"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:32.882Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxu.hoanghaimedia.shop",
+      "root_domain": "hoanghaimedia.shop",
+      "campaign_member": true,
+      "submission_id": 352342673387950094,
+      "reported_url": "https://napxu.hoanghaimedia.shop/",
+      "first_observed_at_utc": "2026-08-30T06:43:59Z",
+      "registration_time_utc": "2026-08-30T05:07:45.0Z",
+      "last_changed_utc": "2026-08-30T07:04:20.0Z",
+      "expiration_time_utc": "2027-08-30T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "104.21.16.200",
+        "172.67.215.152"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2606:4700:3032::ac43:d798",
+        "2606:4700:3034::6815:10c8"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "origin_ip_observed": "103.149.86.246",
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:46:58.118227+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client hold",
+        "client transfer prohibited",
+        "add period"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:34.0Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxu.ko-media.art",
+      "root_domain": "ko-media.art",
+      "campaign_member": true,
+      "submission_id": 352730056440680448,
+      "reported_url": "https://napxu.ko-media.art/",
+      "first_observed_at_utc": "2026-08-31T08:23:18Z",
+      "registration_time_utc": "2026-08-31T07:11:30.0Z",
+      "last_changed_utc": "2026-08-31T08:50:02.0Z",
+      "expiration_time_utc": "2027-08-31T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "104.21.95.230",
+        "172.67.149.11"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2606:4700:3037::ac43:950b",
+        "2606:4700:3031::6815:5fe6"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "origin_ip_observed": "103.149.86.246",
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:46:58.582235+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "server transfer prohibited",
+        "client hold",
+        "client transfer prohibited",
+        "add period"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:35.0Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "shop.hd-media.space",
+      "root_domain": "hd-media.space",
+      "campaign_member": true,
+      "submission_id": 352784145123905536,
+      "reported_url": "https://shop.hd-media.space/",
+      "first_observed_at_utc": "2026-08-31T11:58:14Z",
+      "registration_time_utc": "2026-08-31T07:27:16.097Z",
+      "last_changed_utc": "2026-08-31T12:46:50.602Z",
+      "expiration_time_utc": "2027-08-31T07:27:16.097Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "104.21.57.218",
+        "172.67.167.13"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2606:4700:3035::ac43:a70d",
+        "2606:4700:3031::6815:39da"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "origin_ip_observed": "103.149.86.246",
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:46:59.044629+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client transfer prohibited",
+        "server hold",
+        "add period"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:36.090Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxu.quangthaimedia.shop",
+      "root_domain": "quangthaimedia.shop",
+      "campaign_member": true,
+      "submission_id": 352799328705712141,
+      "reported_url": "https://napxu.quangthaimedia.shop/",
+      "first_observed_at_utc": "2026-08-31T12:58:34Z",
+      "registration_time_utc": "2026-08-31T08:45:28.0Z",
+      "last_changed_utc": "2026-08-31T08:47:18.0Z",
+      "expiration_time_utc": "2027-08-31T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "172.67.173.115",
+        "104.21.55.220"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2606:4700:3034::6815:37dc",
+        "2606:4700:3035::ac43:ad73"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "origin_ip_observed": "103.149.86.246",
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:46:59.549281+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "client transfer prohibited",
+        "add period"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:37.0Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxu.quanghung-media.site",
+      "root_domain": "quanghung-media.site",
+      "campaign_member": true,
+      "submission_id": 352832125797404695,
+      "reported_url": "https://napxu.quanghung-media.site/",
+      "first_observed_at_utc": "2026-08-31T15:08:54Z",
+      "registration_time_utc": "2026-08-31T08:57:14.830Z",
+      "last_changed_utc": "2026-08-31T15:46:43.211Z",
+      "expiration_time_utc": "2027-08-31T08:57:14.830Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "172.67.129.180",
+        "104.21.2.212"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2606:4700:3030::6815:2d4",
+        "2606:4700:3035::ac43:81b4"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "104.21.2.212",
+        "172.67.129.180"
+      ],
+      "origin_ip_observed": null,
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "104.21.2.212",
+        "172.67.129.180"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:47:00.014483+00:00",
+      "vhost_status": null,
+      "vhost_title": null,
+      "vhost_disposition": "HTTP/service error or suspension response",
+      "rdap_status_at_capture": [
+        "server hold",
+        "client transfer prohibited",
+        "add period"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:38.773Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxu.hoanganhmedia.sbs",
+      "root_domain": "hoanganhmedia.sbs",
+      "campaign_member": true,
+      "submission_id": 352854759947898915,
+      "reported_url": "https://napxu.hoanganhmedia.sbs/",
+      "first_observed_at_utc": "2026-08-31T16:38:50Z",
+      "registration_time_utc": "2026-08-31T14:16:48.0Z",
+      "last_changed_utc": null,
+      "expiration_time_utc": "2027-08-31T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "188.114.97.3",
+        "188.114.96.3"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2a06:98c1:3121::3",
+        "2a06:98c1:3120::3"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "origin_ip_observed": "103.149.86.246",
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "103.149.86.246"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:47:00.479854+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Welcome to nginx!",
+      "vhost_disposition": "default nginx page",
+      "rdap_status_at_capture": [
+        "server transfer prohibited",
+        "client transfer prohibited",
+        "add period"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T03:43:39.0Z"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxu.hungdungmedia.fun",
+      "root_domain": "hungdungmedia.fun",
+      "campaign_member": true,
+      "submission_id": 352880825026482223,
+      "reported_url": "https://napxu.hungdungmedia.fun/",
+      "first_observed_at_utc": "2026-08-31T18:22:24Z",
+      "registration_time_utc": "2026-08-31T14:26:14.609Z",
+      "last_changed_utc": "2026-08-31T18:36:39.771Z",
+      "expiration_time_utc": "2027-08-31T14:26:14.609Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "188.114.96.3",
+        "188.114.97.3"
+      ],
+      "historical_edge_aaaa_at_submission": [
+        "2a06:98c1:3120::3",
+        "2a06:98c1:3121::3"
+      ],
+      "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483+00:00",
+      "authoritative_a_at_snapshot": [],
+      "origin_ip_observed": "103.149.86.246",
+      "public_dns_snapshot_utc": "2026-09-01T04:16:38.233555+00:00",
+      "public_dns_a_at_snapshot": [
+        "104.21.80.154",
+        "172.67.151.86"
+      ],
+      "public_dns_nameservers_at_snapshot": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "vhost_check_utc": "2026-09-01T03:47:00.985706+00:00",
+      "vhost_status": 200,
+      "vhost_title": "Nạp xu TikTok",
+      "vhost_disposition": "fake TikTok page still served",
+      "rdap_status_at_capture": [
+        "client hold",
+        "client transfer prohibited",
+        "server hold",
+        "add period"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T04:19:03.616Z"
+    }
+  ],
+  "related_leads": [
+    {
+      "indicator_type": "domain",
+      "value": "napthetiktok.online",
+      "root_domain": "napthetiktok.online",
+      "campaign_member": false,
+      "relationship": "related/uncorroborated passive lead",
+      "reported_url": "https://www.napthetiktok.online/",
+      "registration_time_utc": "2026-07-12T15:58:57.160Z",
+      "last_changed_utc": "2026-08-31T19:27:44.180Z",
+      "expiration_time_utc": "2027-07-12T15:58:57.160Z",
+      "registrar": "Spaceship, Inc.",
+      "registrar_iana_id": "3862",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "rdap_status_at_capture": [
+        "client update prohibited",
+        "client hold",
+        "client transfer prohibited"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T04:48:58.555Z",
+      "public_dns_disposition": "NXDOMAIN at time of passive checks (historical HTML not independently recovered)"
+    }
+  ]
+}
