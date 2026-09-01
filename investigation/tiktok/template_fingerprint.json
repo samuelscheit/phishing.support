@@ -1,8 +1,19 @@
 {
-  "schema_version": 1,
-  "generated_at_utc": "2026-09-01T05:37:27Z",
+  "schema_version": 2,
+  "generated_at_utc": "2026-09-01T09:25:00Z",
   "method": {
-    "description": "Decode each captured MHTML text/html part as UTF-8 with replacement, lowercase, replace absolute URLs with HOST, replace cid: references with CID, collapse whitespace, and SHA-256 the resulting comparison string.",
+    "description": "Decode each captured MHTML text/html MIME payload as UTF-8 with replacement; lowercase; replace only each absolute URL scheme plus authority (regex https?://[^/\\s\"'<>]+) with HOST while preserving the path; replace cid: references with CID; collapse runs of whitespace to one ASCII space; encode the normalized string as UTF-8 and SHA-256 it.",
+    "html_normalization": {
+      "mime_payload": "Use decoded text/html payload bytes, not the MIME wrapper and not the policy-decoded Unicode string.",
+      "url_replacement_regex": "https?://[^/\\s\"'<>]+",
+      "url_replacement": "HOST",
+      "cid_replacement_regex": "cid:[^\\s\"'<>]+",
+      "cid_replacement": "CID",
+      "whitespace_replacement_regex": "\\s+",
+      "whitespace_replacement": " ",
+      "hash_input_encoding": "UTF-8"
+    },
+    "asset_normalization": "Hash decoded MIME payload bytes. For image/svg+xml payloads, normalize CRLF and CR line endings to LF before hashing; binary image bytes are hashed unchanged. This removes MIME transport line-ending variance while preserving asset content.",
     "important": "This is a derived comparison fingerprint; original MHTML remains unchanged in local evidence storage."
   },
   "captured_campaign_pages": [

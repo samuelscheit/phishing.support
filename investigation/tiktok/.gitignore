@@ -11,3 +11,5 @@
 !qr_order_evidence.json
 !origin_observation.json
 !evidence_manifest.json
+# Sanitized public-source correlation; raw material under related_sites remains ignored.
+!source_correlation.json

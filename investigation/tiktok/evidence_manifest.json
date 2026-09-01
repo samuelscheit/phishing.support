@@ -1,42 +1,42 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "case": "tiktok-recharge-campaign",
-  "generated_at_utc": "2026-09-01T05:37:27Z",
+  "generated_at_utc": "2026-09-01T09:25:00Z",
   "timezone_policy": "All investigative timestamps in REPORT.md are UTC unless a source explicitly labels a local offset.",
-  "source_cutoff_utc": "2026-09-01T04:48:58Z",
+  "source_cutoff_utc": "2026-09-01T09:19:56Z",
   "scope": {
     "verified_campaign_domains": 20,
     "captured_campaign_mhtml_pages": 19,
-    "related_unverified_leads": 1,
-    "raw_evidence_bytes_under_investigation_tiktok": 191917985,
-    "raw_evidence_file_count_under_investigation_tiktok": 1269,
-    "scope_definition": "Counts and bytes exclude the committed derivatives, REPORT.md, and this .gitignore; they cover the local raw/derived acquisition hold only."
+    "related_unverified_leads": 5,
+    "raw_evidence_bytes_under_investigation_tiktok": 210914094,
+    "raw_evidence_file_count_under_investigation_tiktok": 1443,
+    "scope_definition": "Counts include every local file under investigation/tiktok except the root committed derivatives, REPORT.md, source_correlation.json, .gitignore, and this manifest; they include the newly preserved public URLScan/GitHub/RDAP correlation hold."
   },
   "chain_of_custody": {
     "case_artifacts": "Source capture IDs, report IDs, artifact hashes, and creation timestamps are retained in artifacts_tiktok.csv and the local raw capture tree.",
-    "collection_mode": "Read-only HTTP/DNS/RDAP/RIPEstat/Shodan/public-source retrieval, plus one synthetic/public-user QR order with no payment.",
-    "preservation_note": "Raw evidence remains outside the Git commit because it is large and includes session cookies, transaction tokens, and unrelated credential-like public-code material. Verify against the hashes below under legal hold."
+    "collection_mode": "Read-only HTTP/DNS/RDAP/RIPEstat/Shodan/public-source retrieval, public URLScan/GitHub/certificate-transparency correlation, plus one synthetic/public-user QR order with no payment.",
+    "preservation_note": "Raw evidence remains outside the Git commit because it is large and includes session cookies, transaction tokens, third-party responses, correspondence, and unrelated credential-like public-code material. Sanitized source-correlation findings are committed separately; verify every local source against the hashes below under legal hold."
   },
   "committed_derivatives": [
     {
       "path": "investigation/tiktok/campaign_iocs.json",
-      "role": "machine-readable campaign IOC inventory",
-      "size_bytes": 34394,
-      "sha256": "ff3bee89093e14853d0cb5e7611753eb36ef2598c7ac4cfd1d9ec3edcb3dfa9e",
+      "role": "machine-readable campaign IOC inventory (20 verified members plus five explicitly historical/related leads)",
+      "size_bytes": 39833,
+      "sha256": "6d823445f4e6ea5d37eb30f94bf2c0f5e4975e14dc56c6ab54969a799638e6b9",
       "commit_status": "committed"
     },
     {
       "path": "investigation/tiktok/campaign_iocs.csv",
-      "role": "flat IOC export",
-      "size_bytes": 11282,
-      "sha256": "bd47602ab72184e47560324c3af02ebd78ef92ed151ad83201cee79fb0c62e7c",
+      "role": "flat IOC export with confidence and blocklist disposition fields",
+      "size_bytes": 14169,
+      "sha256": "a3e4c24d7b643b51c93b0545f3516395a434cffa7069cfed37ca120a45800c6d",
       "commit_status": "committed"
     },
     {
       "path": "investigation/tiktok/template_fingerprint.json",
       "role": "derived normalized-template comparison",
-      "size_bytes": 16911,
-      "sha256": "0fc1d1c384169c6293ee95c02d5f6c677b07c4b9237ec4985f13e287b84be2b6",
+      "size_bytes": 17767,
+      "sha256": "7201c0e398861ac18f7b920c568d0c689992365ded6f67c7ff0bd539280ed960",
       "commit_status": "committed"
     },
     {
@@ -51,6 +51,13 @@
       "role": "sanitized origin/network derivative",
       "size_bytes": 2151,
       "sha256": "718e7d31487273619e618f28b3c253c3f8b7f5faac7b20cfc0adcd396bae95e6",
+      "commit_status": "committed"
+    },
+    {
+      "path": "investigation/tiktok/source_correlation.json",
+      "role": "sanitized byte-level kit/source, lineage, and network-control correlation",
+      "size_bytes": 81402,
+      "sha256": "456606480cc68d10827bd2a8da16b9d626249834630a60aa33cd83493adb53d3",
       "commit_status": "committed"
     }
   ],
@@ -945,6 +952,820 @@
       "filesystem_mtime_utc": "2026-09-01T03:43:19Z",
       "sensitivity": "local-evidence",
       "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/exact_kit/napthegarena.online_rdap.json",
+      "role": "RDAP record for related exact-kit domain",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 5215,
+      "sha256": "cc8fb0347feab8f068a8c018a249c7147cf65b5272e1abfd3151a7acb68376be",
+      "filesystem_mtime_utc": "2026-09-01T06:38:04Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/exact_kit/naptiktok.net_rdap.json",
+      "role": "RDAP record for historical adjacent-origin lead",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 2566,
+      "sha256": "938797103500b1fb432c4e0d3b6444d9cf87124f53d4931c557aee6748f15227",
+      "filesystem_mtime_utc": "2026-09-01T08:48:16Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/exact_kit/napxutiktok.sbs_rdap.json",
+      "role": "RDAP record for related exact-kit domain",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 4832,
+      "sha256": "d78ceaf100d6b185cc65889b9069b88754283869c48e6a66b0caa0d0b03e0c07",
+      "filesystem_mtime_utc": "2026-09-01T08:48:16Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/exact_kit/orvantis.online_rdap.json",
+      "role": "RDAP record for source-page lead root",
+      "category": "registration/status",
+      "exists": true,
+      "size_bytes": 5181,
+      "sha256": "95dbda5093d38bba1604db33fa7923e46bd08c8045179ff9d0631b1fe78ff813",
+      "filesystem_mtime_utc": "2026-09-01T09:19:56Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/orvantis_certspotter.json",
+      "role": "certificate-transparency record for source-page lead",
+      "category": "certificate transparency",
+      "exists": true,
+      "size_bytes": 435,
+      "sha256": "37df2abaf7755b990da10af6a4553e870372fe9913e83ac4595494a4dfd18357",
+      "filesystem_mtime_utc": "2026-09-01T06:19:49Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/github_activity.json",
+      "role": "GitHub public repository activity snapshot",
+      "category": "public-source metadata",
+      "exists": true,
+      "size_bytes": 11614,
+      "sha256": "dfe235cec36cd4768c9e1a918fad4dff966852885b1fe5f7d840eca03a8a140e",
+      "filesystem_mtime_utc": "2026-09-01T09:23:07Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/github_profile.json",
+      "role": "GitHub public profile snapshot",
+      "category": "public-source metadata",
+      "exists": true,
+      "size_bytes": 1372,
+      "sha256": "009fce5900b838a0d3c8006633a8fcbe4b6d17ba5326eb3ee91b62834ccf15f8",
+      "filesystem_mtime_utc": "2026-09-01T09:23:05Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/github_repo.json",
+      "role": "GitHub public repository metadata snapshot",
+      "category": "public-source metadata",
+      "exists": true,
+      "size_bytes": 5654,
+      "sha256": "7d5c09ab6de6d7bdcc0f05f2299005985a690250f8e911877c45593b438610d3",
+      "filesystem_mtime_utc": "2026-09-01T09:22:58Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/index-0e0e309a93f2f84e9474c73718ddaa39825a2593.html",
+      "role": "captured public GitHub repository index.html revision",
+      "category": "public-source code",
+      "exists": true,
+      "size_bytes": 80475,
+      "sha256": "7a34047088685a8bcbb83bbf41dd0e306a330612bdfccc9baf2b63b532865451",
+      "filesystem_mtime_utc": "2026-09-01T06:02:24Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/index-2a0208db29568b4360be8ae7810a4b103d235554.html",
+      "role": "captured public GitHub repository index.html revision",
+      "category": "public-source code",
+      "exists": true,
+      "size_bytes": 80537,
+      "sha256": "ded043c1d53ec8a00cf1086bd9cbe6f7e3ac0b64e9f76bad1616285f14133f23",
+      "filesystem_mtime_utc": "2026-09-01T06:02:24Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/index-2bf16613be6709cb474f4ed94f3caa670d4e3dec.html",
+      "role": "captured public GitHub repository index.html revision",
+      "category": "public-source code",
+      "exists": true,
+      "size_bytes": 80581,
+      "sha256": "99ddfea7d3c38faf223070bc9cd6193f4051c02a7763ba61dde503b3165c4d78",
+      "filesystem_mtime_utc": "2026-09-01T06:02:25Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/index-996922cb1bf28761ed7611e4c803a9dbe64874a5.html",
+      "role": "captured public GitHub repository index.html revision",
+      "category": "public-source code",
+      "exists": true,
+      "size_bytes": 21891,
+      "sha256": "b7db78ecb2fe484a6ec0e86c9069a8e957fb358829e2ab429c4c631c2100ebd5",
+      "filesystem_mtime_utc": "2026-09-01T06:02:25Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/index-aa39aa610888987ec80075907669c989c434dd5b.html",
+      "role": "captured public GitHub repository index.html revision",
+      "category": "public-source code",
+      "exists": true,
+      "size_bytes": 80514,
+      "sha256": "92581c6927159fdb36c45c7b6cc46404cab0a145e41aa24850951968ee932506",
+      "filesystem_mtime_utc": "2026-09-01T06:02:24Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/index-c2c2ffa65bb2e34ec274dc31c626be30edaf85f1.html",
+      "role": "captured public GitHub repository index.html revision",
+      "category": "public-source code",
+      "exists": true,
+      "size_bytes": 80573,
+      "sha256": "7406f9accc950f34740423ad54c9dd833a06073bcd9e8f8fa70d991d9f18f68b",
+      "filesystem_mtime_utc": "2026-09-01T06:02:25Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/index-ce2aaf2496bc89322b1243fbcafbf407993b8b8d.html",
+      "role": "captured public GitHub repository index.html revision",
+      "category": "public-source code",
+      "exists": true,
+      "size_bytes": 80358,
+      "sha256": "f73c306aea4d55be003de1a6bd1cb82e296232089576f2f9b4ca34116c28e7cf",
+      "filesystem_mtime_utc": "2026-09-01T06:02:24Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/index-e6fafe6ac3a5cf4408f0bc2985b2bdfd0ebff1a6.html",
+      "role": "captured public GitHub repository index.html revision",
+      "category": "public-source code",
+      "exists": true,
+      "size_bytes": 80598,
+      "sha256": "0bbaee19ca4b3cbbab50e5415a273de1d71f8be217ef7b265d224b50c203100d",
+      "filesystem_mtime_utc": "2026-09-01T06:02:25Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__arrow-bottom.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 319,
+      "sha256": "5aa7df932d251acd3ea82002544c4d339acea3774c7c5271cab3c457ad73994a",
+      "filesystem_mtime_utc": "2026-09-01T06:06:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__arrow-left.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 334,
+      "sha256": "8a8b69b9ece18ff8f0de627508efa5382d0576d2c7ca8db078c049504a3dcc91",
+      "filesystem_mtime_utc": "2026-09-01T06:06:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__arrow-right.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 384,
+      "sha256": "c706049cfaf244117e54b585721d65ac826d4e0d0457b1f5a913912bc64b3f40",
+      "filesystem_mtime_utc": "2026-09-01T06:06:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__avatar-default.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 600,
+      "sha256": "fd8d92216e96dd0461a1b8f3d73bbb8ebf6e96824612ac30b5b5d06d504897de",
+      "filesystem_mtime_utc": "2026-09-01T06:06:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__bank-qr.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 1271,
+      "sha256": "23e7ba91d2253d914a17ef73fcfc847125ceec9c918c1dac942c2ca0a7c39dec",
+      "filesystem_mtime_utc": "2026-09-01T06:06:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__close.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 420,
+      "sha256": "4c371d0a03e3b8e056248a640b93d57bba982d3beba73151cf93e11ffc713a87",
+      "filesystem_mtime_utc": "2026-09-01T06:06:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__creator-tools.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 1042,
+      "sha256": "fd07627d846c049923ebc45d852e220ea00bbe673e3b3513b64c1083698522cd",
+      "filesystem_mtime_utc": "2026-09-01T06:06:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__garena.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 4497,
+      "sha256": "237fa12c6a1fa1729ad96150150198f341b04183c8282f82818a5b4393a74415",
+      "filesystem_mtime_utc": "2026-09-01T06:06:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__help.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 1082,
+      "sha256": "bbdd495a219c250e75f23c5609f9a80b2eddda43f94cf5dc41b641d0b6c135cb",
+      "filesystem_mtime_utc": "2026-09-01T06:06:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__logo.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 2951,
+      "sha256": "66ff8524c34494cabd309e6d9b27c39670563ee036d74e2cd56a07566f662ae2",
+      "filesystem_mtime_utc": "2026-09-01T06:06:35Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__menu.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 544,
+      "sha256": "ac8f922c34819ffda5d1a7c3f6fa58773c520ff705dce43e3558963013b57deb",
+      "filesystem_mtime_utc": "2026-09-01T06:06:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__method_garena.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 4948,
+      "sha256": "48c3a37d0016afc7f5d5a9128c741894ed782ddd60469b3ae1f90ed87608a826",
+      "filesystem_mtime_utc": "2026-09-01T06:06:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__method_mobifone.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 4273,
+      "sha256": "dffbfd40314bff581fe3cc09548a3f22f6174d293685e6682612636cd0542c45",
+      "filesystem_mtime_utc": "2026-09-01T06:06:36Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__method_momo.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 2684,
+      "sha256": "9d4318dc4f56f3f4f2cc34ed572c4f1855ce289942fde4e0a38fa2118f438139",
+      "filesystem_mtime_utc": "2026-09-01T06:06:37Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__method_viettel.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 9474,
+      "sha256": "4b5b41b54d088290d0664eeb739edbf7d2a2e71e981f3a41d1608a36e188da6b",
+      "filesystem_mtime_utc": "2026-09-01T06:06:37Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__method_vinaphone.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 4237,
+      "sha256": "14a87037736052075d1851f068a43774d2a1476cfb23ad596fb7e7d3fda2fe1d",
+      "filesystem_mtime_utc": "2026-09-01T06:06:37Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__method_visa.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 1843,
+      "sha256": "ab911afb829e89c74eba5c851786b3fae0cde43e0433535272d6cceaf1d47dc4",
+      "filesystem_mtime_utc": "2026-09-01T06:06:37Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__method_vnpay.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 7017,
+      "sha256": "2c04eeb233561c09b38e69e3fc745b9724a2e1dbce6a907b1f5eaf8d97969355",
+      "filesystem_mtime_utc": "2026-09-01T06:06:37Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__method_zalopay.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 2753,
+      "sha256": "be5c45051b064fb4ca3662d9d34917ade7fe8351643d5153af4a09b25976fb9e",
+      "filesystem_mtime_utc": "2026-09-01T06:06:37Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__method_zing.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 9629,
+      "sha256": "b46f778a19f74aa8e1bc537a1a7ee0ad56b7195c3ac5065b0e039d238a723f1d",
+      "filesystem_mtime_utc": "2026-09-01T06:06:37Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__mobifone.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 27777,
+      "sha256": "9874b99edd042b57a7fb3927cada8c4dcf9b29436ddaae536965fbb19e319a52",
+      "filesystem_mtime_utc": "2026-09-01T06:06:37Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__question.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 564,
+      "sha256": "da0ee2d236f4624aac8e1e83e923340841223a346c452bb8a95572fc46feb3c8",
+      "filesystem_mtime_utc": "2026-09-01T06:06:37Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__search.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 621,
+      "sha256": "9be18df4331bdc2054e6793498cc80726a4924875aa6d7ca31bdf7b7981d55aa",
+      "filesystem_mtime_utc": "2026-09-01T06:06:38Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__security-tiktok.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 705,
+      "sha256": "bb4ae0be7662804ab90f6d840e8bf03d632b781fc66015d54e89d88d358969de",
+      "filesystem_mtime_utc": "2026-09-01T06:06:38Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__shield-tick.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 972,
+      "sha256": "7583be49e9c4424b73a7d99c080c034d93c64a0ada9cd74dcd523dbf281d55f7",
+      "filesystem_mtime_utc": "2026-09-01T06:06:38Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__the-cao.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 449,
+      "sha256": "1bd5739129611aa7f57e373666a1d679f9b6614e0740a3f2f304d99ad180a335",
+      "filesystem_mtime_utc": "2026-09-01T06:06:38Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__three-dots.svg",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 601,
+      "sha256": "094bf6820c94db4acb4bd626f3db4ca9375264eff8f6bf6cd13cb951c6cf544a",
+      "filesystem_mtime_utc": "2026-09-01T06:06:38Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__vcoin.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 14330,
+      "sha256": "506c7a7b7d9f7c18b1df7f224ae7d5c99b7e4aeab54e5ef82bd1154fc2e7f82e",
+      "filesystem_mtime_utc": "2026-09-01T06:06:38Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__viettel.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 11274,
+      "sha256": "d7447bb72303a26f0a26d61d4f5055f6c2e51b9a57efce07d38b02123e7c029a",
+      "filesystem_mtime_utc": "2026-09-01T06:06:38Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__vinaphone.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 19130,
+      "sha256": "8862bb55fd5f4fd07c5c131b86f565cc5ea9c9cf38ff84dca4704ce96cbd7319",
+      "filesystem_mtime_utc": "2026-09-01T06:06:38Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/rc__zing.png",
+      "role": "captured public repository campaign-comparison asset",
+      "category": "public-source asset",
+      "exists": true,
+      "size_bytes": 19672,
+      "sha256": "b87cd753fb48701e4829839a7257a8fbbcc7abf546db74be966daeec44d93529",
+      "filesystem_mtime_utc": "2026-09-01T06:06:38Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/tree-38a6563bf2ed2284f4f33fe472fc1d1ae637069d.json",
+      "role": "GitHub public repository tree snapshot",
+      "category": "public-source metadata",
+      "exists": true,
+      "size_bytes": 15680,
+      "sha256": "9c16c1b70ddfb84d22108331abdeaa4422c48226d45adb76400b7ce8b1ca512c",
+      "filesystem_mtime_utc": "2026-09-01T09:22:43Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_metadata.json",
+      "role": "derived URLScan result metadata index",
+      "category": "derived correlation",
+      "exists": true,
+      "size_bytes": 11008,
+      "sha256": "9530d6aad8072f1f9378b889c867b2bb7bcf77179f1ada76a2e5b159baf9bc83",
+      "filesystem_mtime_utc": "2026-09-01T08:59:08Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019754a0-9b7a-7781-8c6a-ad887d26a2e6.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 254153,
+      "sha256": "c49f3b328b28ab0ae4f85a023d6ac9551557a20962d615b99057920245c99c39",
+      "filesystem_mtime_utc": "2026-09-01T08:40:35Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019754a0-9b7a-7781-8c6a-ad887d26a2e6_content.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 12442,
+      "sha256": "94618b5c465f015c6424850d3aafce3975f6963607a9673cb41451a11c76d96e",
+      "filesystem_mtime_utc": "2026-09-01T08:45:39Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f6f39-d115-7636-bfba-f749b16b39b1.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 434117,
+      "sha256": "4b97628dd079775fadf299b47e4ffb849957f26a2faffd1623dac56c63007bed",
+      "filesystem_mtime_utc": "2026-09-01T06:36:57Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f6f39-d115-7636-bfba-f749b16b39b1_content.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 12374,
+      "sha256": "953733fe6f9ad60211f79b962fbb7b3551c4ef5069a941986924e05e4fe3daf3",
+      "filesystem_mtime_utc": "2026-09-01T08:58:45Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f84b9-ecd2-7105-b73c-f2e4e83e04ff.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 254347,
+      "sha256": "c0d4aafd8563f1cb0da9d92d93967a806b2f1404f7d673aeba39a4c05120ef2a",
+      "filesystem_mtime_utc": "2026-09-01T06:35:39Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f84b9-ecd2-7105-b73c-f2e4e83e04ff_content.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 13350,
+      "sha256": "4a8643bfb7bf1a19ee50f33367b3c7e4efb24b502c66963a8e9fa2273a4a6538",
+      "filesystem_mtime_utc": "2026-09-01T08:58:45Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f84c5-c306-764d-8efa-610b82c9ebbd.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 249448,
+      "sha256": "1e50bd3979e2087f6ef297da1d248a7516cddc1b5de7626af6b53fe0bc206f2a",
+      "filesystem_mtime_utc": "2026-09-01T06:35:39Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f84c5-c306-764d-8efa-610b82c9ebbd_content.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 12482,
+      "sha256": "3f6c83695f5eba645a06b7cfafccee8eaa1bcd64003b2a153ac3a154f5753c5a",
+      "filesystem_mtime_utc": "2026-09-01T08:58:44Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f8583-b2d7-762c-a11a-68199c8343f3.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 271273,
+      "sha256": "f3002975d9e1632974c979016d2ce79dd56f588e3caadb96ee83015b0563b42e",
+      "filesystem_mtime_utc": "2026-09-01T06:35:38Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f8583-b2d7-762c-a11a-68199c8343f3_content.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 12583,
+      "sha256": "5f84c8032fd226a2123c92eb40b255fe4814856d8e1b86a2ceeda15a76f316c9",
+      "filesystem_mtime_utc": "2026-09-01T08:58:42Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f8b1c-d3c1-74a1-b818-59e0541141ab.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 238388,
+      "sha256": "d8bee3208622f546c02b3c8cd86b303eeeb1ac022236f75c1198970a229bad55",
+      "filesystem_mtime_utc": "2026-09-01T06:35:38Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f8b1c-d3c1-74a1-b818-59e0541141ab_content.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 12587,
+      "sha256": "6513d146c63f64965caf91ef65cf17d1f2ea3660f5c7526e879193961b522486",
+      "filesystem_mtime_utc": "2026-09-01T08:58:41Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019fba8b-7e22-733c-be90-d604e0e800d5.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 438615,
+      "sha256": "dea3e2d7b438f253ff4e06a077a54b261bbe3d6dbf1c642788473e55ab56577d",
+      "filesystem_mtime_utc": "2026-09-01T06:36:57Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019fba8b-7e22-733c-be90-d604e0e800d5_content.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 12910,
+      "sha256": "ca4092f4eeb7d6c41e6259a9afd5f121705eca3e206c39f4f9f5e4175208d565",
+      "filesystem_mtime_utc": "2026-09-01T08:58:40Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/01a01c43-6622-7391-bcdc-6f00422c59c5.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 433435,
+      "sha256": "8cd3ab37f0d35610ef22014007fd7c6fc3c334beb0cb94928f926aa1b979a75a",
+      "filesystem_mtime_utc": "2026-09-01T06:36:57Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/01a01c43-6622-7391-bcdc-6f00422c59c5_content.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 12940,
+      "sha256": "79dbe7b70ce672466e31d31c12c4f77fab427cbe44920699abd1b3463c664711",
+      "filesystem_mtime_utc": "2026-09-01T08:58:39Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/15c8070c-a1ed-4da9-b5f6-433897439f1d.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 360859,
+      "sha256": "52efc45f81aea9d44ca184b2af4e324148c965a62f8c777b17592f8e74b2a896",
+      "filesystem_mtime_utc": "2026-09-01T09:16:39Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/15c8070c-a1ed-4da9-b5f6-433897439f1d_content.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 12478,
+      "sha256": "a8c65aa26c6312984e668f70e16b3eba093fcdc928b02423e60de60009c7d153",
+      "filesystem_mtime_utc": "2026-09-01T09:16:40Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/23ac917d-6119-4560-b6d5-2d7d74e16309.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 333960,
+      "sha256": "23049ca55792b9918ddadf6a902e9b2351c1869751a35ec23ff7717f1dc688ab",
+      "filesystem_mtime_utc": "2026-09-01T08:45:27Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/23ac917d-6119-4560-b6d5-2d7d74e16309_content.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 11533,
+      "sha256": "9f855b6eb45b744743c2307894d1e5b0a2eb8df4e0b473728dccad2f063e01ef",
+      "filesystem_mtime_utc": "2026-09-01T08:45:40Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/4b03f732-3fd2-4bd6-96e3-6e944ade097c.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 264345,
+      "sha256": "3b20cf0993ca22a74e73fd3dd32c96059071ce187ce4ea86b60305d78bd6270b",
+      "filesystem_mtime_utc": "2026-09-01T09:16:41Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/4b03f732-3fd2-4bd6-96e3-6e944ade097c_content.html",
+      "role": "public URLScan result/content page snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 11917,
+      "sha256": "9e2eacc6734a5bbde0a662e2943389110c59319f1d26dbf63411a65d484865bc",
+      "filesystem_mtime_utc": "2026-09-01T09:16:41Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_search/0.json",
+      "role": "URLScan asset-search response snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 31426,
+      "sha256": "3438c02dce67e377c11ecaea3fe8e40f72e071129d9eb210cfcbcb0cdcc8775c",
+      "filesystem_mtime_utc": "2026-09-01T06:41:13Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_search/1.json",
+      "role": "URLScan asset-search response snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 77721,
+      "sha256": "8e180c360162fd47595af97cf4f6156eb8c296559fffc0b91766a8135aaf5fc0",
+      "filesystem_mtime_utc": "2026-09-01T06:41:16Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_search/2.json",
+      "role": "URLScan asset-search response snapshot",
+      "category": "public-source web scan",
+      "exists": true,
+      "size_bytes": 66390,
+      "sha256": "21fc4eb4c733f3a3d91110c81239b09d9110774a351c8ab1c1953a7279931a4d",
+      "filesystem_mtime_utc": "2026-09-01T06:41:20Z",
+      "sensitivity": "local-evidence",
+      "commit_status": "not_committed_raw_evidence"
     }
   ],
   "excluded_from_commit": [
@@ -967,12 +1788,17 @@
     {
       "path_prefix": "investigation/tiktok/*.headers",
       "reason": "some headers include Set-Cookie; raw copies remain locally preserved"
+    },
+    {
+      "path_prefix": "investigation/tiktok/related_sites/",
+      "reason": "raw public URLScan/GitHub/RDAP/certificate captures and selected asset copies; only source_correlation.json is intentionally re-included"
     }
   ],
   "report_document": {
     "path": "investigation/tiktok/REPORT.md",
-    "size_bytes": 38816,
-    "sha256": "d57a16c227a0af97abbd0b2c646d7e164dd523ac1326cdc4976c96d1467f35aa",
+    "role": "human-readable investigative assessment and lawful follow-up plan",
+    "size_bytes": 50888,
+    "sha256": "c76fde3cec080405aff76eb0b3a7f39a62892067b6e475118769cc1c29322b27",
     "commit_status": "committed"
   }
 }

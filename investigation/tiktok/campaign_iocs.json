@@ -1,11 +1,12 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "case": "tiktok-recharge-campaign",
-  "generated_at_utc": "2026-09-01T05:37:27Z",
+  "generated_at_utc": "2026-09-01T09:25:00Z",
   "scope": {
     "verified_campaign_members": 20,
-    "related_unverified_leads": 1,
-    "note": "The 20 campaign members are the submissions listed in domain_timeline.csv; one member (shop.sonhaimedia.sbs) lacks a captured MHTML page."
+    "related_unverified_leads": 5,
+    "note": "The 20 campaign members are the submissions listed in domain_timeline.csv; one member (shop.sonhaimedia.sbs) lacks a captured MHTML page.",
+    "related_lead_policy": "Related leads are retained outside the 20 verified campaign members. Historical-only entries must not be treated as current blocklist indicators without revalidation."
   },
   "iocs": [
     {
@@ -963,7 +964,140 @@
         "client transfer prohibited"
       ],
       "rdap_snapshot_utc": "2026-09-01T04:48:58.555Z",
-      "public_dns_disposition": "NXDOMAIN at time of passive checks (historical HTML not independently recovered)"
+      "public_dns_disposition": "NXDOMAIN at time of passive checks (historical HTML not independently recovered)",
+      "confidence": "low",
+      "historical_only": true,
+      "blocklist_disposition": "do not add without current validation"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxutiktok.sbs",
+      "root_domain": "napxutiktok.sbs",
+      "campaign_member": false,
+      "relationship": "related exact full-kit deployment; not a case submission",
+      "confidence": "high technical kit correlation",
+      "historical_only": true,
+      "reported_url": "https://napxutiktok.sbs/",
+      "first_observed_at_utc": "2026-07-17T08:38:14.556Z",
+      "registration_time_utc": "2026-07-15T19:10:34Z",
+      "last_changed_utc": "2026-08-31T19:33:46Z",
+      "registrar": "Spaceship, Inc.",
+      "registrar_iana_id": "3862",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "172.67.132.229"
+      ],
+      "urlscan_ids": [
+        "019f6f39-d115-7636-bfba-f749b16b39b1"
+      ],
+      "exact_campaign_asset_match_count": 32,
+      "rdap_status_at_capture": [
+        "server hold",
+        "server transfer prohibited",
+        "client hold",
+        "client transfer prohibited",
+        "client update prohibited"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T09:19:56Z",
+      "blocklist_disposition": "historical lead; revalidate before blocking",
+      "evidence_ref": "source_correlation.json#/exact_kit_deployments/0"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napthegarena.online",
+      "root_domain": "napthegarena.online",
+      "campaign_member": false,
+      "relationship": "related exact full-kit deployment; not a case submission",
+      "confidence": "high technical kit correlation",
+      "historical_only": true,
+      "reported_url": "https://napthegarena.online/",
+      "first_observed_at_utc": "2026-07-31T23:38:58.092Z",
+      "registration_time_utc": "2025-11-26T02:09:11Z",
+      "last_changed_utc": "2026-08-21T01:06:31.467Z",
+      "registrar": "NameCheap, Inc.",
+      "registrar_iana_id": "1068",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "historical_edge_a_at_submission": [
+        "188.114.97.3",
+        "188.114.96.3"
+      ],
+      "urlscan_ids": [
+        "019fba8b-7e22-733c-be90-d604e0e800d5",
+        "01a01c43-6622-7391-bcdc-6f00422c59c5"
+      ],
+      "exact_campaign_asset_match_count": 32,
+      "rdap_status_at_capture": [
+        "client transfer prohibited",
+        "client hold"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T06:38:04Z",
+      "blocklist_disposition": "historical lead; revalidate before blocking",
+      "evidence_ref": "source_correlation.json#/exact_kit_deployments/1"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "nap-xu.orvantis.online",
+      "root_domain": "orvantis.online",
+      "campaign_member": false,
+      "relationship": "historical source-page URL cited in public repository saved-from comment; no independent live capture",
+      "confidence": "low source-page lead",
+      "historical_only": true,
+      "reported_url": "https://nap-xu.orvantis.online/",
+      "registration_time_utc": "2026-02-10T11:09:28Z",
+      "last_changed_utc": "2026-07-21T17:03:35.354Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "rdap_status_at_capture": [
+        "client transfer prohibited",
+        "client hold"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T09:19:56Z",
+      "blocklist_disposition": "do not block from this source-comment evidence alone",
+      "evidence_ref": "source_correlation.json#/orvantis_source_page_lead"
+    },
+    {
+      "indicator_type": "domain",
+      "value": "naptiktok.net",
+      "root_domain": "naptiktok.net",
+      "campaign_member": false,
+      "relationship": "historical partial-kit deployment on same /23 and ASN as current origin",
+      "confidence": "medium infrastructure/partial-kit lead",
+      "historical_only": true,
+      "reported_url": "https://naptiktok.net/",
+      "first_observed_at_utc": "2025-06-09T12:18:28.430Z",
+      "registration_time_utc": "2026-08-12T09:12:40Z",
+      "last_changed_utc": "2026-08-12T10:50:32Z",
+      "registrar": "Dynadot Inc",
+      "registrar_iana_id": "472",
+      "nameservers": [
+        "GAIL.NS.CLOUDFLARE.COM",
+        "JOHNNY.NS.CLOUDFLARE.COM"
+      ],
+      "historical_edge_a_at_submission": [
+        "103.149.87.34"
+      ],
+      "urlscan_ids": [
+        "019754a0-9b7a-7781-8c6a-ad887d26a2e6"
+      ],
+      "historical_network": "103.149.86.0/23; AS149125",
+      "exact_campaign_asset_match_count": 10,
+      "rdap_status_at_capture": [
+        "client transfer prohibited"
+      ],
+      "rdap_snapshot_utc": "2026-09-01T08:48:08Z",
+      "blocklist_disposition": "historical lead; current 2026 deployment differed and requires validation",
+      "evidence_ref": "source_correlation.json#/legacy_kit_lineage/2",
+      "registration_context": "Current RDAP registration follows the 2025 historical scan; do not interpret the 2026 registration date as the age of the historical deployment."
     }
   ]
 }
