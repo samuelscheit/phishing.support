@@ -113,6 +113,7 @@ export async function submitNetcraftSubmission(
 	const response = await request(NETCRAFT_PROVIDER.reportUrlsUrl, {
 		method: "POST",
 		redirect: "error",
+		...(context.signal ? { signal: context.signal } : {}),
 		headers: {
 			accept: "application/json",
 			"content-type": "application/json",

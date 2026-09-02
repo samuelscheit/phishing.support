@@ -53,6 +53,13 @@ export type SubmissionAbuseProviderReport = {
 };
 
 export type SubmissionStandaloneAbuseDetails = {
+	/** Aggregate handoff state is present before route resolution creates a
+	 * provider card. It prevents a queued report from looking like missing data. */
+	report: {
+		status: string;
+		createdAt: Date;
+		updatedAt: Date;
+	} | null;
 	mailReports: SubmissionAbuseMailReport[];
 	providerReports: SubmissionAbuseProviderReport[];
 };
@@ -119,7 +126,7 @@ export async function getStandaloneAbuseDetailsForSubmission(
 	submissionId: bigint,
 ): Promise<SubmissionStandaloneAbuseDetails> {
 	const report = await AbuseRepository.getReportByIdempotencyKey(`legacy-website:${submissionId.toString()}`);
-	if (!report) return { mailReports: [], providerReports: [] };
+	if (!report) return { report: null, mailReports: [], providerReports: [] };
 
 	const [targets, routes, runs, messages] = await Promise.all([
 		AbuseRepository.listTargets(report.id),
@@ -187,5 +194,13 @@ export async function getStandaloneAbuseDetailsForSubmission(
 			};
 		});
 
-	return { mailReports, providerReports };
+	return {
+		report: {
+			status: report.status,
+			createdAt: report.createdAt,
+			updatedAt: report.updatedAt,
+		},
+		mailReports,
+		providerReports,
+	};
 }

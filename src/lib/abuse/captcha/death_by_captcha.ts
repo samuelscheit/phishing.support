@@ -21,6 +21,8 @@ export type DeathByCaptchaSolverDependencies = {
 	credentials?: Partial<DeathByCaptchaCredentials>;
 	/** Per-request network deadline; the overall solver timeout remains separate. */
 	requestTimeoutMs?: number;
+	/** Cancel an in-flight solve when its owning worker job expires. */
+	signal?: AbortSignal;
 };
 
 type DeathByCaptchaResponse = {
@@ -68,11 +70,16 @@ async function request(
 		path: string;
 		init?: RequestInit;
 		requestTimeoutMs: number;
+		signal?: AbortSignal;
 	},
 ): Promise<DeathByCaptchaResponse> {
 	const controller = new AbortController();
+	const abortParent = () => controller.abort();
+	if (params.signal?.aborted) throw new Error("Death by Captcha solve was canceled.");
+	params.signal?.addEventListener("abort", abortParent, { once: true });
 	let timedOut = false;
 	let timeout: ReturnType<typeof setTimeout> | undefined;
+	let parentAbort: (() => void) | undefined;
 	const timeoutPromise = new Promise<never>((_, reject) => {
 		timeout = setTimeout(() => {
 			timedOut = true;
@@ -80,6 +87,12 @@ async function request(
 			reject(new Error(`Death by Captcha request timed out after ${params.requestTimeoutMs} ms.`));
 		}, params.requestTimeoutMs);
 	});
+	const parentAbortPromise = params.signal
+		? new Promise<never>((_, reject) => {
+			parentAbort = () => reject(new Error("Death by Captcha solve was canceled."));
+			params.signal!.addEventListener("abort", parentAbort, { once: true });
+		})
+		: undefined;
 	try {
 		const { response, body } = await Promise.race([
 			params.fetch(`${DEATH_BY_CAPTCHA_ENDPOINT}${params.path}`, {
@@ -88,6 +101,7 @@ async function request(
 				signal: controller.signal,
 			}).then(async (response) => ({ response, body: await response.text() })),
 			timeoutPromise,
+			...(parentAbortPromise ? [parentAbortPromise] : []),
 		]);
 		if (!response.ok) {
 			throw new Error(`Death by Captcha request failed with HTTP ${response.status}: ${body.slice(0, 500)}`);
@@ -97,10 +111,13 @@ async function request(
 		if (error) throw new Error(`Death by Captcha rejected the request: ${error.slice(0, 500)}`);
 		return parsed;
 	} catch (error) {
+		if (params.signal?.aborted) throw new Error("Death by Captcha solve was canceled.");
 		if (timedOut || controller.signal.aborted) throw new Error(`Death by Captcha request timed out after ${params.requestTimeoutMs} ms.`);
 		throw error;
 	} finally {
 		if (timeout) clearTimeout(timeout);
+		params.signal?.removeEventListener("abort", abortParent);
+		if (parentAbort) params.signal?.removeEventListener("abort", parentAbort);
 	}
 }
 
@@ -122,6 +139,7 @@ export async function solveDeathByCaptchaToken(params: {
 	parameters: Record<string, unknown>;
 	timeoutMs?: number;
 } & DeathByCaptchaSolverDependencies): Promise<string> {
+	if (params.signal?.aborted) throw new Error("Death by Captcha solve was canceled.");
 	if (!Number.isSafeInteger(params.type) || params.type <= 0) throw new Error("Death by Captcha CAPTCHA type must be a positive integer.");
 	if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(params.parametersField)) throw new Error("Death by Captcha parameter field is invalid.");
 
@@ -147,7 +165,9 @@ export async function solveDeathByCaptchaToken(params: {
 		path: "/captcha",
 		requestTimeoutMs,
 		init: { method: "POST", body: form },
+		signal: params.signal,
 	});
+	if (params.signal?.aborted) throw new Error("Death by Captcha solve was canceled.");
 	const id = captchaId(captcha.captcha);
 	if (!id) throw new Error("Death by Captcha did not accept the CAPTCHA request.");
 
@@ -163,10 +183,12 @@ export async function solveDeathByCaptchaToken(params: {
 		const remaining = Math.max(0, deadline - now());
 		if (remaining === 0) break;
 		await pause(Math.min(POLL_INTERVALS_MS[attempt] ?? DEFAULT_POLL_INTERVAL_MS, remaining));
+		if (params.signal?.aborted) throw new Error("Death by Captcha solve was canceled.");
 		captcha = await request({
 			fetch: fetcher,
 			path: `/captcha/${encodeURIComponent(id)}`,
 			requestTimeoutMs,
+			signal: params.signal,
 		});
 	}
 

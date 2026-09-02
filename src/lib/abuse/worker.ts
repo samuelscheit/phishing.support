@@ -2,7 +2,7 @@ import { AbuseRepository } from "./repository";
 import { resolveAbuseTarget } from "./resolver";
 import { AbuseSkyvernAdapter } from "./skyvern";
 import { skyvernApiKeySourceIsConfigured } from "./skyvern_config";
-import type { AbuseJob } from "./schema";
+import type { AbuseJob, AbuseJobType } from "./schema";
 import {
 	executeProviderSubmission,
 	getPortalProvider,
@@ -15,19 +15,81 @@ import { runGenericProviderPortal } from "./worker/portal";
 import { reconcileGenericSkyvern } from "./worker/reconcile";
 import { resolveReport, verifyProviderRoute } from "./worker/resolution";
 import { errorText, envInt, idFrom, parseJobBigInt, randomOwner, type WorkerServices } from "./worker/shared";
+import type { JobClaimFilter } from "./persistence/jobs";
 
 const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;
-const DEFAULT_CONCURRENCY = 4;
-const MAX_CONCURRENCY = 32;
+const DEFAULT_CONTROL_CONCURRENCY = 2;
+const DEFAULT_EXTERNAL_CONCURRENCY = 2;
+const MAX_LANE_CONCURRENCY = 16;
+const DEFAULT_CONTROL_JOB_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_EXTERNAL_JOB_TIMEOUT_MS = 10 * 60_000;
+const MAX_JOB_TIMEOUT_MS = 60 * 60_000;
 const MAX_RETRIES = 8;
+
+/**
+ * Resolution and inbound-correspondence work must always retain capacity even
+ * when a provider browser/API call stalls. Route verification and Skyvern
+ * reconciliation can also block for minutes, so they stay in the external
+ * lane rather than sharing the resolver slots.
+ */
+const CONTROL_JOB_TYPES = [
+	"resolve_report",
+	"monitor_provider_reply",
+	"classify_provider_reply",
+] as const satisfies readonly AbuseJobType[];
+
+/** Jobs that may cross an external provider side-effect boundary. */
+const EXTERNAL_JOB_TYPES = [
+	"verify_provider",
+	"reconcile_skyvern_run",
+	"send_email",
+	"run_portal",
+	"submit_provider",
+	"deliver_provider_verification_code",
+] as const satisfies readonly AbuseJobType[];
+
+const CONTROL_JOB_FILTER: JobClaimFilter = { jobTypes: CONTROL_JOB_TYPES };
+const EXTERNAL_JOB_FILTER: JobClaimFilter = { jobTypes: EXTERNAL_JOB_TYPES };
+
+class JobExecutionTimeoutError extends Error {
+	readonly code = "ABUSE_JOB_TIMEOUT";
+
+	constructor(readonly job: AbuseJob, readonly timeoutMs: number) {
+		super(`Abuse job ${job.id.toString()} (${job.jobType}) exceeded its ${timeoutMs} ms execution deadline.`);
+		this.name = "JobExecutionTimeoutError";
+	}
+}
+
+class WorkerStoppingError extends Error {
+	constructor() {
+		super("Abuse worker is stopping.");
+		this.name = "WorkerStoppingError";
+	}
+}
+
+function boundedConcurrency(value: number, fallback: number): number {
+	return Math.min(MAX_LANE_CONCURRENCY, Math.max(1, Number.isSafeInteger(value) ? value : fallback));
+}
+
+function boundedTimeout(value: number, fallback: number): number {
+	return Math.min(MAX_JOB_TIMEOUT_MS, Math.max(1_000, Number.isFinite(value) ? value : fallback));
+}
 
 export type AbuseWorkerOptions = {
 	owner?: string;
 	leaseMs?: number;
 	pollMs?: number;
-	/** Number of independent durable jobs that may run at once. */
-	concurrency?: number;
+	/** Number of resolver/reconciliation jobs that may run at once. */
+	controlConcurrency?: number;
+	/** Number of provider/browser jobs that may run at once. */
+	externalConcurrency?: number;
+	/** Override the control-lane execution deadline (primarily for tests). */
+	controlJobTimeoutMs?: number;
+	/** Override the provider-lane execution deadline (primarily for tests). */
+	externalJobTimeoutMs?: number;
+	/** Deterministic test hook; production always dispatches through the provider registry. */
+	processJob?: (job: AbuseJob, signal?: AbortSignal) => Promise<void>;
 	adapter?: AbuseSkyvernAdapter;
 	/** Test hook; production uses the resolver implementation above. */
 	resolveTarget?: typeof resolveAbuseTarget;
@@ -41,20 +103,40 @@ export class AbuseWorker {
 	private readonly owner: string;
 	private readonly leaseMs: number;
 	private readonly pollMs: number;
-	private readonly concurrency: number;
+	private readonly controlConcurrency: number;
+	private readonly externalConcurrency: number;
+	private readonly controlJobTimeoutMs: number;
+	private readonly externalJobTimeoutMs: number;
 	private adapter: AbuseSkyvernAdapter | undefined;
 	private readonly resolveTarget: typeof resolveAbuseTarget;
 	private readonly services: WorkerServices;
 	private stopped = true;
 	private loopPromises: Promise<void>[] = [];
+	private readonly activeControllers = new Set<AbortController>();
+	private readonly processJobOverride: AbuseWorkerOptions["processJob"];
 
 	constructor(options: AbuseWorkerOptions = {}) {
 		this.owner = options.owner ?? randomOwner();
 		this.leaseMs = options.leaseMs ?? envInt("ABUSE_WORKER_LEASE_MS", DEFAULT_LEASE_MS);
 		this.pollMs = options.pollMs ?? envInt("ABUSE_WORKER_POLL_MS", DEFAULT_POLL_MS);
-		const configuredConcurrency = options.concurrency ?? envInt("ABUSE_WORKER_CONCURRENCY", DEFAULT_CONCURRENCY);
-		this.concurrency = Math.min(MAX_CONCURRENCY, Math.max(1, Number.isSafeInteger(configuredConcurrency) ? configuredConcurrency : DEFAULT_CONCURRENCY));
+		this.controlConcurrency = boundedConcurrency(
+			options.controlConcurrency ?? envInt("ABUSE_WORKER_CONTROL_CONCURRENCY", DEFAULT_CONTROL_CONCURRENCY),
+			DEFAULT_CONTROL_CONCURRENCY,
+		);
+		this.externalConcurrency = boundedConcurrency(
+			options.externalConcurrency ?? envInt("ABUSE_WORKER_EXTERNAL_CONCURRENCY", DEFAULT_EXTERNAL_CONCURRENCY),
+			DEFAULT_EXTERNAL_CONCURRENCY,
+		);
+		this.controlJobTimeoutMs = boundedTimeout(
+			options.controlJobTimeoutMs ?? envInt("ABUSE_WORKER_CONTROL_JOB_TIMEOUT_MS", DEFAULT_CONTROL_JOB_TIMEOUT_MS),
+			DEFAULT_CONTROL_JOB_TIMEOUT_MS,
+		);
+		this.externalJobTimeoutMs = boundedTimeout(
+			options.externalJobTimeoutMs ?? envInt("ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS", DEFAULT_EXTERNAL_JOB_TIMEOUT_MS),
+			DEFAULT_EXTERNAL_JOB_TIMEOUT_MS,
+		);
 		this.adapter = options.adapter;
+		this.processJobOverride = options.processJob;
 		this.resolveTarget = options.resolveTarget ?? resolveAbuseTarget;
 		this.services = {
 			owner: this.owner,
@@ -86,16 +168,22 @@ export class AbuseWorker {
 		if (!this.stopped) return;
 		this.stopped = false;
 		await AbuseRepository.recoverStaleJobs();
-		// A provider job can legitimately spend minutes obtaining a CAPTCHA,
-		// opening a browser, or waiting for a portal. Keep that slow operation in
-		// one slot instead of blocking every unrelated route in the database.
-		// Durable route/job claims still provide per-route exclusion, so slots can
-		// safely process independent reports concurrently.
-		this.loopPromises = Array.from({ length: this.concurrency }, (_, slot) => this.runLoop(slot === 0));
+		// Provider/browser work gets its own lane. A stuck CAPTCHA or browser can
+		// therefore never consume the capacity reserved for resolution,
+		// reconciliation, and inbound correspondence jobs.
+		this.loopPromises = [
+			...Array.from({ length: this.controlConcurrency }, (_, slot) =>
+				this.runLoop(slot === 0, CONTROL_JOB_FILTER, this.controlJobTimeoutMs),
+			),
+			...Array.from({ length: this.externalConcurrency }, () =>
+				this.runLoop(false, EXTERNAL_JOB_FILTER, this.externalJobTimeoutMs),
+			),
+		];
 	}
 
 	async stop(): Promise<void> {
 		this.stopped = true;
+		for (const controller of this.activeControllers) controller.abort(new WorkerStoppingError());
 		await Promise.all(this.loopPromises);
 		this.loopPromises = [];
 	}
@@ -104,10 +192,10 @@ export class AbuseWorker {
 		for (const provider of listPortalProviders()) await provider.maintain?.();
 	}
 
-	private async runLoop(maintainProviders: boolean): Promise<void> {
+	private async runLoop(maintainProviders: boolean, filter: JobClaimFilter, timeoutMs: number): Promise<void> {
 		while (!this.stopped) {
 			try {
-				const processed = await this.processOne(maintainProviders);
+				const processed = await this.processOne(maintainProviders, filter, timeoutMs);
 				if (!processed) await new Promise((resolve) => setTimeout(resolve, this.pollMs));
 			} catch (error) {
 				console.error("Abuse worker loop error:", error);
@@ -116,17 +204,32 @@ export class AbuseWorker {
 		}
 	}
 
-	async processOne(runProviderMaintenance = true): Promise<boolean> {
+	async processOne(runProviderMaintenance = true, filter?: JobClaimFilter, timeoutMs?: number): Promise<boolean> {
 		if (runProviderMaintenance) await this.maintainProviders();
-		const job = await AbuseRepository.claimNextJob(this.owner, this.leaseMs);
+		const job = await AbuseRepository.claimNextJob(this.owner, this.leaseMs, filter);
 		if (!job) return false;
+		const controller = new AbortController();
+		this.activeControllers.add(controller);
 		const heartbeat = setInterval(() => {
-			void AbuseRepository.renewJobLease(job.id, this.owner, this.leaseMs);
+			void AbuseRepository.renewJobLease(job.id, this.owner, this.leaseMs).catch((error) => {
+				console.error(`Failed to renew abuse job ${job.id.toString()} lease:`, error);
+			});
 		}, Math.max(1_000, Math.floor(this.leaseMs / 3)));
 		try {
-			await this.processJob(job);
+			const defaultTimeout = CONTROL_JOB_TYPES.includes(job.jobType as (typeof CONTROL_JOB_TYPES)[number])
+				? this.controlJobTimeoutMs
+				: this.externalJobTimeoutMs;
+			await this.runJobWithDeadline(job, controller, timeoutMs ?? defaultTimeout);
 			await AbuseRepository.completeJob(job.id, this.owner);
 		} catch (error) {
+			if (error instanceof WorkerStoppingError) {
+				await this.handleInterruptedJob(job, error.message, "worker_stopping");
+				return true;
+			}
+			if (error instanceof JobExecutionTimeoutError) {
+				await this.handleInterruptedJob(job, error.message, "job_execution_timeout", true);
+				return true;
+			}
 			const message = errorText(error);
 			if (job.unknownExternalState || (error as { unknownExternalState?: unknown })?.unknownExternalState === true) {
 				await AbuseRepository.markJobUnknownExternalState({ jobId: job.id, owner: this.owner, error: message });
@@ -138,8 +241,92 @@ export class AbuseWorker {
 			}
 		} finally {
 			clearInterval(heartbeat);
+			this.activeControllers.delete(controller);
 		}
 		return true;
+	}
+
+	/**
+	 * Enforce a deadline independently of provider SDK cancellation support.
+	 * The signal is propagated to code-owned adapters, while the detached
+	 * promise is observed so a late rejection cannot become an unhandled
+	 * process-level rejection. A timed-out operation is fenced below according
+	 * to its durable external-boundary state.
+	 */
+	private async runJobWithDeadline(job: AbuseJob, controller: AbortController, timeoutMs: number): Promise<void> {
+		const operation = this.processJobOverride
+			? this.processJobOverride(job, controller.signal)
+			: this.processJob(job, controller.signal);
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let removeAbortListener: (() => void) | undefined;
+		const interruption = new Promise<never>((_, reject) => {
+			const onAbort = () => reject(controller.signal.reason instanceof Error ? controller.signal.reason : new WorkerStoppingError());
+			removeAbortListener = () => controller.signal.removeEventListener("abort", onAbort);
+			controller.signal.addEventListener("abort", onAbort, { once: true });
+		});
+		const deadline = new Promise<never>((_, reject) => {
+			timer = setTimeout(() => {
+				const timeout = new JobExecutionTimeoutError(job, timeoutMs);
+				controller.abort(timeout);
+				reject(timeout);
+			}, timeoutMs);
+		});
+		operation.catch(() => undefined);
+		try {
+			await Promise.race([operation, interruption, deadline]);
+		} finally {
+			if (timer) clearTimeout(timer);
+			removeAbortListener?.();
+		}
+	}
+
+	private async handleInterruptedJob(
+		job: AbuseJob,
+		message: string,
+		reason: "job_execution_timeout" | "worker_stopping",
+		retryUnfenced = false,
+	): Promise<void> {
+		const route = job.routeId ? await AbuseRepository.getRoute(job.routeId) : undefined;
+		const run = job.runId
+			? await AbuseRepository.getProviderRun(job.runId)
+			: route
+				? await AbuseRepository.getLatestActiveProviderRunForRoute(route.id)
+				: undefined;
+		// Once a route-owned run exists, a non-cooperative provider promise could
+		// still reach its boundary after this worker returns—even when the run is
+		// currently in its preflight phase. Fence every such run. Only jobs that
+		// have not created a run at all can be retried automatically after a
+		// timeout.
+		const shouldFence = Boolean(
+			route && run
+			&& EXTERNAL_JOB_TYPES.includes(job.jobType as (typeof EXTERNAL_JOB_TYPES)[number])
+			&& (reason === "job_execution_timeout" || run.executionStatus !== "starting")
+		);
+		if (shouldFence && route) {
+			await this.markUnknownExternal({
+				routeId: route.id,
+				runId: run?.id,
+				error: `${message} The external operation was fenced; reconciliation is required before any retry.`,
+				reason,
+			});
+			await AbuseRepository.markJobUnknownExternalState({
+				jobId: job.id,
+				owner: this.owner,
+				error: `${message} The external operation was fenced; reconciliation is required before any retry.`,
+			});
+			return;
+		}
+		// A timeout before a durable provider boundary is a normal retryable
+		// failure. During an intentional process shutdown leave the lease for
+		// startup recovery instead; a second worker must not overlap a detached
+		// local operation while the old process is still draining.
+		if (!retryUnfenced) return;
+		if (job.retryCount >= MAX_RETRIES) {
+			await this.failRetryExhaustedJob(job, message);
+		} else {
+			const backoff = Math.min(15 * 60_000, 1_000 * 2 ** job.retryCount);
+			await AbuseRepository.retryJob({ jobId: job.id, owner: this.owner, error: message, afterMs: backoff });
+		}
 	}
 
 	private async failRetryExhaustedJob(job: AbuseJob, error: string): Promise<void> {
@@ -196,7 +383,7 @@ export class AbuseWorker {
 		}
 	}
 
-	private async processJob(job: AbuseJob): Promise<void> {
+	private async processJob(job: AbuseJob, signal?: AbortSignal): Promise<void> {
 		switch (job.jobType) {
 			case "resolve_report":
 				await resolveReport(idFrom(job.reportId, "reportId"), this.resolveTarget);
@@ -205,16 +392,16 @@ export class AbuseWorker {
 				await verifyProviderRoute(idFrom(job.routeId, "routeId"));
 				return;
 			case "send_email":
-				await sendEmail(idFrom(job.routeId, "routeId"), this.services);
+				await sendEmail(idFrom(job.routeId, "routeId"), this.servicesFor(signal));
 				return;
 			case "run_portal":
-				await this.runPortal(job);
+				await this.runPortal(job, signal);
 				return;
 			case "submit_provider":
-				await this.submitProvider(idFrom(job.routeId, "routeId"));
+				await this.submitProvider(idFrom(job.routeId, "routeId"), signal);
 				return;
 			case "reconcile_skyvern_run":
-				await this.reconcilePortalRun(idFrom(job.runId, "runId"));
+				await this.reconcilePortalRun(idFrom(job.runId, "runId"), signal);
 				return;
 			case "classify_provider_reply":
 				await classifyReply(parseJobBigInt(job.payload?.messageId, "payload.messageId"));
@@ -223,32 +410,39 @@ export class AbuseWorker {
 				await monitorProviderReply(idFrom(job.routeId, "routeId"));
 				return;
 			case "deliver_provider_verification_code":
-				await this.deliverProviderVerificationCode(job);
+				await this.deliverProviderVerificationCode(job, signal);
 				return;
 			default:
 				throw new Error(`Unsupported abuse job type ${job.jobType}.`);
 		}
 	}
 
-	private async runPortal(job: AbuseJob): Promise<void> {
+	private servicesFor(signal?: AbortSignal): WorkerServices {
+		return {
+			...this.services,
+			...(signal ? { signal } : {}),
+		};
+	}
+
+	private async runPortal(job: AbuseJob, signal?: AbortSignal): Promise<void> {
 		const routeId = idFrom(job.routeId, "routeId");
 		const route = await AbuseRepository.getRoute(routeId);
 		if (!route) throw new Error("Abuse route no longer exists.");
 		if (route.routeType === "skyvern_portal") {
 			const provider = getPortalProvider(route.providerRegistryKey);
 			if (!provider) throw new Error(`No registered portal provider is available for abuse route ${route.id.toString()}.`);
-			await provider.runPortal(routeId, this.services);
+			await provider.runPortal(routeId, this.servicesFor(signal));
 			return;
 		}
 		if (route.routeType === "email") {
-			await runGenericProviderPortal(routeId, job.payload ?? {}, this.services);
+			await runGenericProviderPortal(routeId, job.payload ?? {}, this.servicesFor(signal));
 			return;
 		}
 		throw new Error(`No code-owned portal adapter is available for abuse route ${route.id.toString()}.`);
 	}
 
 	/** Dispatch a direct submission exclusively through the provider registry. */
-	private async submitProvider(routeId: bigint): Promise<void> {
+	private async submitProvider(routeId: bigint, signal?: AbortSignal): Promise<void> {
 		const route = await AbuseRepository.getRoute(routeId);
 		if (!route || route.routeType !== "provider_submission") return;
 		const provider = getProviderSubmissionProvider(route.providerRegistryKey);
@@ -261,33 +455,33 @@ export class AbuseWorker {
 			});
 			return;
 		}
-		await executeProviderSubmission({ routeId: route.id, provider });
+		await executeProviderSubmission({ routeId: route.id, provider, signal });
 	}
 
-	private async reconcilePortalRun(runId: bigint): Promise<void> {
+	private async reconcilePortalRun(runId: bigint, signal?: AbortSignal): Promise<void> {
 		const run = await AbuseRepository.getProviderRun(runId);
 		if (!run) return;
 		const route = await AbuseRepository.getRoute(run.routeId);
 		if (!route) return;
 		const provider = getPortalProvider(route.providerRegistryKey);
 		if (provider) {
-			await provider.reconcileRun(runId, this.services);
+			await provider.reconcileRun(runId, this.servicesFor(signal));
 			return;
 		}
 		if (route.routeType === "email") {
-			await reconcileGenericSkyvern(runId, this.services);
+			await reconcileGenericSkyvern(runId, this.servicesFor(signal));
 			return;
 		}
 		throw new Error(`No registered portal provider can reconcile abuse route ${route.id.toString()}.`);
 	}
 
-	private async deliverProviderVerificationCode(job: AbuseJob): Promise<void> {
+	private async deliverProviderVerificationCode(job: AbuseJob, signal?: AbortSignal): Promise<void> {
 		const routeId = idFrom(job.routeId, "routeId");
 		const route = await AbuseRepository.getRoute(routeId);
 		if (!route) return;
 		const provider = getPortalProvider(route.providerRegistryKey);
 		if (!provider?.deliverVerificationCode) throw new Error(`No registered provider can deliver a verification code for abuse route ${route.id.toString()}.`);
-		await provider.deliverVerificationCode({ routeId, runId: job.runId ?? undefined, payload: job.payload ?? {} }, this.services);
+		await provider.deliverVerificationCode({ routeId, runId: job.runId ?? undefined, payload: job.payload ?? {} }, this.servicesFor(signal));
 	}
 }
 

@@ -9,7 +9,7 @@ import {
 import type { AnalysisRun, Artifact, ProviderReport, ReportMessage, ReportThread, Submission } from "@/lib/db/schema";
 import { getStandaloneAbuseDetailsForSubmission } from "./abuse_details";
 export type { SubmissionAbuseMailReport, SubmissionAbuseProviderReport } from "./abuse_details";
-import type { SubmissionAbuseMailReport, SubmissionAbuseProviderReport } from "./abuse_details";
+import type { SubmissionAbuseMailReport, SubmissionAbuseProviderReport, SubmissionStandaloneAbuseDetails } from "./abuse_details";
 
 export type SubmissionArtifact = Omit<Artifact, "blob" | "submissionId">;
 
@@ -68,6 +68,8 @@ export type SubmissionDetail = Submission & {
 	abuseMailReports: SubmissionAbuseMailReport[];
 	/** Direct provider submissions persisted by the standalone abuse worker. */
 	abuseProviderReports: SubmissionAbuseProviderReport[];
+	/** Aggregate standalone handoff state, available before routes are resolved. */
+	abuseReport: SubmissionStandaloneAbuseDetails["report"];
 	artifacts: SubmissionArtifact[];
 };
 
@@ -144,6 +146,7 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 		})),
 		abuseMailReports: standaloneAbuse.mailReports,
 		abuseProviderReports: standaloneAbuse.providerReports,
+		abuseReport: standaloneAbuse.report,
 		artifacts,
 	};
 }

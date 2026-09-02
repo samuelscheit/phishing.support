@@ -27,6 +27,7 @@ export type TencentCaptchaSolverDependencies = {
 	sleep?: (milliseconds: number) => Promise<void>;
 	now?: () => number;
 	credentials?: Partial<TencentCaptchaCredentials>;
+	signal?: AbortSignal;
 };
 
 /** Validate the only two solver credentials before writing the submission marker. */
@@ -80,6 +81,7 @@ export async function solveTencentCaptcha(
 		fetch: dependencies.fetch,
 		sleep: dependencies.sleep,
 		now: dependencies.now,
+		signal: dependencies.signal,
 	});
 	return parseTencentCaptchaSolution(solution);
 }

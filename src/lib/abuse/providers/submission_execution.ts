@@ -11,6 +11,7 @@ import {
 	type ProviderSubmissionProvider,
 	type ProviderSubmissionSuccess,
 } from "./submission_contracts";
+import { throwIfAborted } from "../worker/shared";
 
 export type ProviderSubmissionExecutionResult =
 	| { outcome: "submitted"; runId: bigint }
@@ -148,7 +149,10 @@ async function settleInsufficientEvidence(routeId: bigint, reason: string): Prom
 export async function executeProviderSubmission(params: {
 	routeId: bigint;
 	provider: ProviderSubmissionProvider;
+	/** Ephemeral job deadline; never persisted. */
+	signal?: AbortSignal;
 }): Promise<ProviderSubmissionExecutionResult> {
+	throwIfAborted(params.signal);
 	const route = await AbuseRepository.getRoute(params.routeId);
 	if (!route || route.routeType !== "provider_submission" || route.providerRegistryKey !== params.provider.definition.key) {
 		return { outcome: "not_eligible" };
@@ -175,7 +179,12 @@ export async function executeProviderSubmission(params: {
 		if (params.provider.prepareSubmission) {
 			let preparation: ProviderSubmissionPreparation;
 			try {
-				preparation = await params.provider.prepareSubmission({ routeId: route.id, payload: {} });
+				preparation = await params.provider.prepareSubmission({
+					routeId: route.id,
+				payload: {},
+				...(params.signal ? { signal: params.signal } : {}),
+				});
+				throwIfAborted(params.signal);
 			} catch (error) {
 				if (error instanceof ProviderSubmissionRejectedError) {
 					return settleKnownRejection({ routeId: route.id, reason: errorText(error) });
@@ -201,6 +210,7 @@ export async function executeProviderSubmission(params: {
 	} else if (route.status !== "running") {
 		return { outcome: "not_eligible" };
 	}
+	throwIfAborted(params.signal);
 
 	const execution = await AbuseRepository.beginProviderExecution({
 		routeId: route.id,
@@ -209,6 +219,7 @@ export async function executeProviderSubmission(params: {
 		expectedStatus: route.status === "queued" ? "queued" : "verified",
 	});
 	if (!execution) return { outcome: "not_eligible" };
+	throwIfAborted(params.signal);
 
 	const run = execution.run;
 	let durablePayload = run.providerPayload;
@@ -223,7 +234,13 @@ export async function executeProviderSubmission(params: {
 		// mutating a request that may already have reached a provider.
 		let refreshed: ProviderSubmissionPreparation;
 		try {
-			refreshed = await params.provider.prepareSubmission({ routeId: route.id, runId: run.id, payload: isRecord(durablePayload) ? durablePayload : {} });
+			refreshed = await params.provider.prepareSubmission({
+				routeId: route.id,
+				runId: run.id,
+				payload: isRecord(durablePayload) ? durablePayload : {},
+				...(params.signal ? { signal: params.signal } : {}),
+			});
+			throwIfAborted(params.signal);
 		} catch (error) {
 			if (error instanceof ProviderSubmissionRejectedError) {
 				return settleKnownRejection({ routeId: route.id, runId: run.id, reason: errorText(error) });
@@ -268,6 +285,7 @@ export async function executeProviderSubmission(params: {
 			);
 		}
 	}
+	throwIfAborted(params.signal);
 	if (!isRecord(durablePayload)) {
 		return markUnknownExternal({
 			routeId: route.id,
@@ -293,7 +311,12 @@ export async function executeProviderSubmission(params: {
 		});
 	}
 
-	const context: ProviderSubmissionContext = { routeId: route.id, runId: run.id, payload: durablePayload };
+	const context: ProviderSubmissionContext = {
+		routeId: route.id,
+		runId: run.id,
+		payload: durablePayload,
+		...(params.signal ? { signal: params.signal } : {}),
+	};
 	let preflight: ProviderSubmissionPreflight | undefined;
 	if (params.provider.prepareExternalSubmission) {
 		// This hook is deliberately before the durable provider-call marker. A
@@ -301,7 +324,13 @@ export async function executeProviderSubmission(params: {
 		// may retry the same durable run instead of incorrectly fencing it as an
 		// ambiguous provider submission. Providers must clean up partially-created
 		// ephemeral state if their hook itself rejects.
-		preflight = await params.provider.prepareExternalSubmission(context);
+		try {
+			preflight = await params.provider.prepareExternalSubmission(context);
+			throwIfAborted(params.signal);
+		} catch (error) {
+			await disposePreflight(preflight);
+			throw error;
+		}
 	}
 	if (preflight && !params.provider.submitPrepared) {
 		await disposePreflight(preflight);

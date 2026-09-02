@@ -233,16 +233,17 @@ async function postCloudflareApiOnce(page: CloudflareTurnstileSession["page"], f
 	}, { body: form, turnstileToken: token });
 }
 
-async function refreshCloudflareTurnstileToken(session: CloudflareTurnstileSession): Promise<string> {
+async function refreshCloudflareTurnstileToken(session: CloudflareTurnstileSession, signal?: AbortSignal): Promise<string> {
 	return solveDeathByCaptchaToken({
 		type: 12,
 		parametersField: "turnstile_params",
 		parameters: {
 			proxy: session.proxy.url,
 			proxytype: "HTTP",
-			sitekey: session.siteKey,
-			pageurl: CLOUDFLARE_PROVIDER.formUrl,
-		},
+				sitekey: session.siteKey,
+				pageurl: CLOUDFLARE_PROVIDER.formUrl,
+			},
+			signal,
 	});
 }
 
@@ -252,18 +253,18 @@ async function refreshCloudflareTurnstileToken(session: CloudflareTurnstileSessi
  * response as a challenge: that response was generated at the edge and was
  * not forwarded to the abuse-form handler.
  */
-async function postCloudflareApi(session: CloudflareTurnstileSession, form: CloudflareApiForm): Promise<CloudflareApiResponse> {
+async function postCloudflareApi(session: CloudflareTurnstileSession, form: CloudflareApiForm, signal?: AbortSignal): Promise<CloudflareApiResponse> {
 	let token = session.token;
 	let response = await postCloudflareApiOnce(session.page, form, token);
 	if (!isCloudflareEdgeChallenge(response)) return response;
 
 	try {
-		await resolveCloudflareEdgeChallenge(session.page, response.body);
+		await resolveCloudflareEdgeChallenge(session.page, response.body, signal);
 		await dismissCloudflareConsentBanner(session.page).catch(() => undefined);
 		await makeCloudflareClearanceCookieUsable(session.context, CLOUDFLARE_PROVIDER.formUrl).catch(() => undefined);
 		// Cloudflare may consume the first token while issuing the edge challenge;
 		// obtain a fresh token after clearance rather than retrying a stale one.
-		token = await refreshCloudflareTurnstileToken(session);
+		token = await refreshCloudflareTurnstileToken(session, signal);
 		session.token = token;
 	} catch (error) {
 		throw new ProviderSubmissionRejectedError(`Cloudflare's managed security challenge could not be automated: ${error instanceof Error ? error.message : String(error)}`);
@@ -280,7 +281,7 @@ async function postCloudflareApi(session: CloudflareTurnstileSession, form: Clou
  * marker. The token is deliberately kept out of the durable provider run.
  */
 export async function prepareCloudflareExternalSubmission(_context: ProviderSubmissionContext): Promise<ProviderSubmissionPreflight> {
-	const session = await solveCloudflareAbuseTurnstile();
+	const session = await solveCloudflareAbuseTurnstile(undefined, { signal: _context.signal });
 	return {
 		state: session,
 		dispose: async () => {
@@ -300,14 +301,20 @@ export async function submitCloudflareSubmission(
 	if (!session?.page || !session.token) {
 		throw new Error("Cloudflare submission requires a preflight Turnstile session.");
 	}
-	const response = await postCloudflareApi(session, buildCloudflareApiForm(payload.form, session.token, session.userAgent));
-	return parseCloudflareSubmissionResponse({
-		ok: () => response.ok,
-		status: () => response.status,
-		text: async () => response.body,
-		headers: () => ({
-			...(response.cfMitigated ? { "cf-mitigated": response.cfMitigated } : {}),
-			...(response.cfRay ? { "cf-ray": response.cfRay } : {}),
-		}),
-	}, session.page.url(), payload.target);
+	const abortBrowser = () => { void session.browser.close().catch(() => undefined); };
+	context.signal?.addEventListener("abort", abortBrowser, { once: true });
+	try {
+		const response = await postCloudflareApi(session, buildCloudflareApiForm(payload.form, session.token, session.userAgent), context.signal);
+		return parseCloudflareSubmissionResponse({
+			ok: () => response.ok,
+			status: () => response.status,
+			text: async () => response.body,
+			headers: () => ({
+				...(response.cfMitigated ? { "cf-mitigated": response.cfMitigated } : {}),
+				...(response.cfRay ? { "cf-ray": response.cfRay } : {}),
+			}),
+		}, session.page.url(), payload.target);
+	} finally {
+		context.signal?.removeEventListener("abort", abortBrowser);
+	}
 }

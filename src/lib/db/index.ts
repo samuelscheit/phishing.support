@@ -5,6 +5,26 @@ import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
 import { config } from "dotenv";
 
+/**
+ * This application has several independently bundled server entry points
+ * (the custom server, Next route handlers, and background listeners). Each
+ * can open the same SQLite file, so the connection must be configured for
+ * concurrent readers and short competing writes before migrations or normal
+ * queries begin.
+ */
+const SQLITE_BUSY_TIMEOUT_MS = 10_000;
+
+function configureSqlite(client: Database) {
+	// WAL prevents readers from blocking the abuse worker while a submission
+	// page is being rendered. `busy_timeout` lets short write races resolve
+	// instead of immediately dropping durable jobs with SQLITE_BUSY.
+	client.exec(`
+		PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};
+		PRAGMA journal_mode = WAL;
+		PRAGMA synchronous = NORMAL;
+	`);
+}
+
 config({
 	path: join(process.cwd(), ".env"),
 	quiet: true,
@@ -24,11 +44,13 @@ function ensureDatabaseDirectory(fileName: string) {
 async function initializeDatabase() {
 	const fileName = databaseFileName();
 	ensureDatabaseDirectory(fileName);
+	const client = new Database(fileName, {
+		safeIntegers: true,
+	});
+	configureSqlite(client);
 
 	const db = drizzle(
-		new Database(fileName, {
-			safeIntegers: true,
-		}),
+		client,
 		{
 			logger: false,
 		}

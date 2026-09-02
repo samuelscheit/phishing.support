@@ -32,8 +32,12 @@ services:
       ABUSE_SKYVERN_WEBHOOK_URL: http://app:3000/api/skyvern/webhook
       ABUSE_GENERIC_EMAIL_ENABLED: ${ABUSE_GENERIC_EMAIL_ENABLED:-false}
       ABUSE_GENERIC_FORM_ESCALATION_ENABLED: ${ABUSE_GENERIC_FORM_ESCALATION_ENABLED:-false}
-      # Keep slow CAPTCHA/browser work from blocking independent provider jobs.
-      ABUSE_WORKER_CONCURRENCY: ${ABUSE_WORKER_CONCURRENCY:-4}
+      # Keep resolution/reconciliation capacity separate from slow
+      # CAPTCHA/browser work. A stalled provider must never starve intake.
+      ABUSE_WORKER_CONTROL_CONCURRENCY: ${ABUSE_WORKER_CONTROL_CONCURRENCY:-2}
+      ABUSE_WORKER_EXTERNAL_CONCURRENCY: ${ABUSE_WORKER_EXTERNAL_CONCURRENCY:-2}
+      ABUSE_WORKER_CONTROL_JOB_TIMEOUT_MS: ${ABUSE_WORKER_CONTROL_JOB_TIMEOUT_MS:-300000}
+      ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS: ${ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS:-600000}
       # The abuse worker uses a separate, bounded drafting call. Keep its
       # credentials/runtime endpoint explicit; .env is intentionally excluded
       # from the image and these values are injected only at container start.

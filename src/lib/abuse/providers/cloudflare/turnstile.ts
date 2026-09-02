@@ -4,6 +4,7 @@ import { solveDeathByCaptchaToken } from "../../captcha/death_by_captcha";
 import { getChromeExecutablePath, getChromiumSandboxArgs } from "../../../browser/browser";
 import { getProviderProxy, withIproyalStickySession, type ProviderProxy } from "../proxy";
 import { CLOUDFLARE_PROVIDER } from "./definition";
+import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
 
 const turnstileTimeoutMs = 120_000;
 const widgetDiscoveryTimeoutMs = 30_000;
@@ -36,20 +37,21 @@ export function isCloudflareManagedChallenge(params: { status: number; headers: 
  * page lets Cloudflare's own challenge script establish its clearance cookie;
  * the caller can then repeat the original request once.
  */
-export async function resolveCloudflareEdgeChallenge(page: Page, challengeHtml: string): Promise<void> {
+export async function resolveCloudflareEdgeChallenge(page: Page, challengeHtml: string, signal?: AbortSignal): Promise<void> {
 	if (!challengeHtml.includes("_cf_chl_opt") || !/<title>\s*(?:Just a moment|Attention Required)/i.test(challengeHtml)) {
 		throw new Error("Cloudflare returned an unrecognized edge challenge page.");
 	}
-	await page.evaluate((html) => {
+	throwIfOperationCanceled(signal, "Cloudflare Turnstile preparation was canceled.");
+	await raceAbort(page.evaluate((html) => {
 		document.open();
 		document.write(html);
 		document.close();
-	}, challengeHtml);
-	await page.waitForFunction(
+	}, challengeHtml), signal, () => { void page.close().catch(() => undefined); }, "Cloudflare Turnstile preparation was canceled.");
+	await raceAbort(page.waitForFunction(
 		() => location.hostname === "abuse.cloudflare.com" && location.pathname === "/phishing" && Boolean(document.querySelector("form")),
 		undefined,
 		{ timeout: edgeChallengeTimeoutMs },
-	);
+	), signal, () => { void page.close().catch(() => undefined); }, "Cloudflare Turnstile preparation was canceled.");
 }
 
 /**
@@ -100,9 +102,10 @@ function assertReviewedSiteKey(siteKey: string): string {
 	return siteKey;
 }
 
-async function discoverTurnstileSiteKey(page: Page): Promise<string> {
+async function discoverTurnstileSiteKey(page: Page, signal?: AbortSignal): Promise<string> {
 	const deadline = Date.now() + widgetDiscoveryTimeoutMs;
 	while (Date.now() < deadline) {
+		throwIfOperationCanceled(signal, "Cloudflare Turnstile preparation was canceled.");
 		const discovered = await siteKeyFromPage(page).catch(() => undefined);
 		if (discovered) return assertReviewedSiteKey(discovered);
 
@@ -112,7 +115,7 @@ async function discoverTurnstileSiteKey(page: Page): Promise<string> {
 		if (await page.locator('#turnstile-widget [name="cf-turnstile-response"]').count().catch(() => 0)) {
 			return CLOUDFLARE_TURNSTILE_SITE_KEY;
 		}
-		await page.waitForTimeout(250);
+		await raceAbort(page.waitForTimeout(250), signal, () => { void page.close().catch(() => undefined); }, "Cloudflare Turnstile preparation was canceled.");
 	}
 	throw new Error("Cloudflare phishing form did not render its Turnstile widget.");
 }
@@ -131,36 +134,41 @@ function rejectedFormError(response: { status(): number; headers(): Record<strin
  * both systems so the solver and the eventual form request use the same exit
  * network identity.
  */
-async function solveCloudflareAbuseTurnstileOnce(proxy: ProviderProxy): Promise<CloudflareTurnstileSession> {
+async function solveCloudflareAbuseTurnstileOnce(proxy: ProviderProxy, signal?: AbortSignal): Promise<CloudflareTurnstileSession> {
 	const executablePath = getChromeExecutablePath();
-	const browser = await chromium.launch({
+	const browserLaunch = chromium.launch({
 		...(executablePath ? { executablePath } : {}),
 		headless: process.env.BROWSER_HEADLESS === "true",
 		args: getChromiumSandboxArgs(),
 		proxy: proxy.browser,
 	});
+	const browser = await raceAbort(browserLaunch, signal, () => {
+		void browserLaunch.then((lateBrowser) => lateBrowser.close().catch(() => undefined)).catch(() => undefined);
+	}, "Cloudflare Turnstile preparation was canceled.");
 
 	try {
+		throwIfOperationCanceled(signal, "Cloudflare Turnstile preparation was canceled.");
 		const context = await browser.newContext({
 			ignoreHTTPSErrors: true,
 			locale: "en-US",
 			viewport: { width: 1920, height: 1080 },
 		});
 
-		const page = await context.newPage();
+		const page = await raceAbort(context.newPage(), signal, () => { void browser.close().catch(() => undefined); }, "Cloudflare Turnstile preparation was canceled.");
 
-		const response = await page.goto(CLOUDFLARE_PROVIDER.formUrl, { waitUntil: "domcontentloaded", timeout: turnstileTimeoutMs });
+		const navigation = page.goto(CLOUDFLARE_PROVIDER.formUrl, { waitUntil: "domcontentloaded", timeout: turnstileTimeoutMs });
+		const response = await raceAbort(navigation, signal, () => { void browser.close().catch(() => undefined); }, "Cloudflare Turnstile preparation was canceled.");
 		if (!response) throw new Error("Cloudflare abuse form navigation returned no response.");
 		const responseHeaders = response.headers();
 		const responseBody = response.status() === 403 ? await response.text() : "";
 		const managedChallenge = isCloudflareManagedChallenge({ status: response.status(), headers: responseHeaders, body: responseBody });
 		if (!response.ok() && !managedChallenge) throw rejectedFormError(response);
-		if (managedChallenge) await resolveCloudflareEdgeChallenge(page, responseBody);
+		if (managedChallenge) await resolveCloudflareEdgeChallenge(page, responseBody, signal);
 		await dismissCloudflareConsentBanner(page).catch(() => undefined);
 		await makeCloudflareClearanceCookieUsable(context, CLOUDFLARE_PROVIDER.formUrl).catch(() => undefined);
 
-		const siteKey = await discoverTurnstileSiteKey(page);
-		const userAgent = await page.evaluate(() => navigator.userAgent);
+		const siteKey = await discoverTurnstileSiteKey(page, signal);
+		const userAgent = await raceAbort(page.evaluate(() => navigator.userAgent), signal, () => { void browser.close().catch(() => undefined); }, "Cloudflare Turnstile preparation was canceled.");
 		if (!userAgent.trim()) throw new Error("Cloudflare browser session did not expose a user agent.");
 		const token = await solveDeathByCaptchaToken({
 			type: 12,
@@ -171,6 +179,7 @@ async function solveCloudflareAbuseTurnstileOnce(proxy: ProviderProxy): Promise<
 				sitekey: siteKey,
 				pageurl: CLOUDFLARE_PROVIDER.formUrl,
 			},
+			signal,
 		});
 
 		return { page, context, browser, proxy, userAgent, token, siteKey };
@@ -187,6 +196,7 @@ async function solveCloudflareAbuseTurnstileOnce(proxy: ProviderProxy): Promise<
  */
 export async function solveCloudflareAbuseTurnstile(
 	proxy: ProviderProxy = getProviderProxy("Cloudflare abuse reporting"),
+	options: { signal?: AbortSignal } = {},
 ): Promise<CloudflareTurnstileSession> {
 	if (proxy.captchaType !== "HTTP") {
 		throw new Error("Cloudflare Turnstile solving requires an HTTP proxy; configure PROXY_URL with an HTTP endpoint.");
@@ -195,10 +205,11 @@ export async function solveCloudflareAbuseTurnstile(
 	let lastError: unknown;
 	for (let attempt = 0; attempt < maxTurnstileAttempts; attempt += 1) {
 		try {
+			throwIfOperationCanceled(options.signal, "Cloudflare Turnstile preparation was canceled.");
 			// IPRoyal's default gateway rotates on every connection. Turnstile
 			// tokens are IP-bound, so use one stable session for this browser and
 			// its DBC solve; a later attempt receives a new session/exit IP.
-			return await solveCloudflareAbuseTurnstileOnce(withIproyalStickySession(proxy));
+			return await solveCloudflareAbuseTurnstileOnce(withIproyalStickySession(proxy), options.signal);
 		} catch (error) {
 			lastError = error;
 			if (attempt + 1 < maxTurnstileAttempts) await new Promise((resolve) => setTimeout(resolve, 1_000));

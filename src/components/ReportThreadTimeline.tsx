@@ -237,21 +237,63 @@ function StandaloneAbuseProviderCard({ report }: { report: SubmissionAbuseProvid
 	);
 }
 
-export function ReportThreadTimeline({ threads, providerReports, abuseMailReports, abuseProviderReports, artifacts }: {
+const standaloneReportStatusText: Record<string, string> = {
+	accepted: "The abuse report was accepted and is waiting for provider-route resolution.",
+	resolving: "Provider contacts and infrastructure routes are being resolved.",
+	verifying: "Resolved provider routes are being verified.",
+	queued: "Provider reports are queued for submission.",
+	running: "Provider reports are being submitted.",
+	waiting_provider: "Reports were delivered and the service is waiting for provider responses.",
+	partially_submitted: "Some provider routes were submitted; the remaining routes are still processing.",
+	submitted: "All actionable provider routes were submitted or acknowledged.",
+	insufficient_evidence: "The available evidence is insufficient for an automatic provider route.",
+	no_route: "No verified abuse route was found.",
+	failed: "The abuse workflow could not complete safely.",
+	needs_human: "A provider route requires manual safety review.",
+	canceled: "The abuse workflow was canceled.",
+};
+
+function StandaloneAbuseHandoffCard({ report }: {
+	report: { status: string; createdAt: Date | string | number; updatedAt: Date | string | number };
+}) {
+	const status = report.status.replaceAll("_", " ");
+	const terminalFailure = ["failed", "needs_human", "no_route", "insufficient_evidence"].includes(report.status);
+	return (
+		<Card className="overflow-hidden">
+			<CardContent className="space-y-3 p-4">
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<CardTitle className="flex items-center gap-2 text-base"><Send className="h-4 w-4 shrink-0" /> Standalone abuse reporting</CardTitle>
+					<Badge variant={terminalFailure ? "destructive" : report.status === "submitted" ? "secondary" : "outline"} className="capitalize">{status}</Badge>
+				</div>
+				<p className={cn("rounded-md border p-3 text-sm", terminalFailure ? "border-red-200 bg-red-50 text-red-900" : "border-amber-200 bg-amber-50 text-amber-900")}>
+					{standaloneReportStatusText[report.status] ?? `Standalone abuse report status: ${status}.`}
+				</p>
+				<div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+					<div>Accepted: {formatDate(report.createdAt)}</div>
+					<div>Last update: {formatDate(report.updatedAt)}</div>
+				</div>
+			</CardContent>
+		</Card>
+	);
+}
+
+export function ReportThreadTimeline({ threads, providerReports, abuseMailReports, abuseProviderReports, abuseReport, artifacts }: {
 	threads: ReportThreadWithMessages[];
 	providerReports: SubmissionProviderReport[];
 	abuseMailReports: SubmissionAbuseMailReport[];
 	abuseProviderReports: SubmissionAbuseProviderReport[];
+	abuseReport?: { status: string; createdAt: Date | string | number; updatedAt: Date | string | number } | null;
 	artifacts: SubmissionArtifact[];
 }) {
 	const artifactMap = useMemo(() => new Map(artifacts.map((artifact) => [String(artifact.id), artifact])), [artifacts]);
 
 	if (threads.length === 0 && providerReports.length === 0 && abuseMailReports.length === 0 && abuseProviderReports.length === 0) {
-		return <div className="py-10 text-center text-muted-foreground">No reports yet.</div>;
+		return abuseReport ? <StandaloneAbuseHandoffCard report={abuseReport} /> : <div className="py-10 text-center text-muted-foreground">No reports yet.</div>;
 	}
 
 	return (
 		<div className="space-y-5">
+			{abuseReport ? <StandaloneAbuseHandoffCard report={abuseReport} /> : null}
 			{threads.map((thread) => {
 				const messages = [...thread.messages].sort((left, right) => new Date(left.occurredAt).getTime() - new Date(right.occurredAt).getTime());
 				const sent = messages.find((message) => message.direction === "outbound");

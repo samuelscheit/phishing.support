@@ -13,6 +13,9 @@ export type UnknownExternalStateParams = {
 
 export type WorkerServices = {
 	readonly owner: string;
+	/** Per-job cancellation signal. Provider adapters must honor it before and
+	 * during any potentially long external operation. */
+	readonly signal?: AbortSignal;
 	getAdapter(): AbuseSkyvernAdapter;
 	markUnknownExternal(params: UnknownExternalStateParams): Promise<void>;
 };
@@ -21,6 +24,15 @@ export type AbuseTargetResolver = typeof resolveAbuseTarget;
 
 export function errorText(error: unknown): string {
 	return (error instanceof Error ? error.message : String(error)).slice(0, 2_000);
+}
+
+/** Throw a regular Error rather than relying on AbortSignal.reason support in
+ * every runtime/provider SDK. This is used at every irreversible boundary. */
+export function throwIfAborted(signal: AbortSignal | undefined): void {
+	if (!signal?.aborted) return;
+	const reason = signal.reason;
+	if (reason instanceof Error) throw reason;
+	throw new Error("Abuse job was canceled before the external operation completed.");
 }
 
 export function envInt(name: string, fallback: number): number {

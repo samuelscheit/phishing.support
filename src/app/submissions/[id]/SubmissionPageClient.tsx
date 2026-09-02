@@ -64,7 +64,11 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const providerReports = submission?.providerReports ?? [];
 	const abuseMailReports = submission?.abuseMailReports ?? [];
 	const abuseProviderReports = submission?.abuseProviderReports ?? [];
-	const reportCount = reportThreads.length + providerReports.length + abuseMailReports.length + abuseProviderReports.length;
+	const abuseReport = submission?.abuseReport ?? null;
+	// A confirmed website can have a durable standalone abuse handoff before it
+	// has provider routes. Count that visible lifecycle entry so the Reports
+	// badge never says zero while the tab contains its queued state.
+	const reportCount = reportThreads.length + providerReports.length + abuseMailReports.length + abuseProviderReports.length + (abuseReport ? 1 : 0);
 
 	const defaultTab = "runs";
 
@@ -492,6 +496,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 						providerReports={providerReports}
 						abuseMailReports={abuseMailReports}
 						abuseProviderReports={abuseProviderReports}
+						abuseReport={abuseReport}
 						artifacts={submission.artifacts}
 					/>
 				</TabsContent>

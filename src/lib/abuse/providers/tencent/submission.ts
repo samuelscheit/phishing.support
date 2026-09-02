@@ -209,7 +209,7 @@ export async function submitTencentSubmission(
 	}
 
 	const proxy = (dependencies.proxy ?? (() => getProviderProxy("Tencent Cloud abuse reporting")))();
-	const captcha = await (dependencies.captchaSolver ?? solveTencentCaptcha)(proxy);
+	const captcha = await (dependencies.captchaSolver ?? ((candidate) => solveTencentCaptcha(candidate, { signal: context.signal })))(proxy);
 	const requestPayload = buildTencentCloudHttpPayload({ payload, websiteScreenshot: artifact.blob, captcha });
 	const request = dependencies.fetch ?? (proxyFetch as TencentProxyFetch);
 	const response = await request(TENCENT_PROVIDER.submissionUrl, {
@@ -230,6 +230,7 @@ export async function submitTencentSubmission(
 		body: JSON.stringify(requestPayload),
 		method: "POST",
 		proxy: proxy.url,
+		...(context.signal ? { signal: context.signal } : {}),
 	});
 	const result = await parseTencentCloudSubmissionResponse(response);
 	return {

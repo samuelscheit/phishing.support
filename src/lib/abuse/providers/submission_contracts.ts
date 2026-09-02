@@ -30,6 +30,8 @@ export type ProviderSubmissionContext = {
 	routeId: bigint;
 	runId?: bigint;
 	payload: Record<string, unknown>;
+	/** Ephemeral worker deadline; never persisted with the provider payload. */
+	signal?: AbortSignal;
 };
 
 /** Safe, provider-neutral input for a read-only draft preview. */

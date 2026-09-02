@@ -63,20 +63,29 @@ export async function enqueueJob(params: {
 
 /** Atomically leases one due job, never allowing two active jobs for a route. */
 
-export async function claimNextJob(owner: string, leaseMs: number): Promise<AbuseJob | undefined> {
+export type JobClaimFilter = {
+	/** Restrict a lane to a concrete set of job types. */
+	readonly jobTypes?: readonly AbuseJobType[];
+};
+
+export async function claimNextJob(owner: string, leaseMs: number, filter: JobClaimFilter = {}): Promise<AbuseJob | undefined> {
 	const db = await getDb();
 	const timestamp = now();
 	const leaseExpiresAt = new Date(timestamp.getTime() + leaseMs);
 	return db.transaction(
 		(tx) => {
+			const typeFilter = filter.jobTypes?.length ? inArray(abuseJobs.jobType, [...filter.jobTypes]) : undefined;
 			const candidates = tx
 				.select()
 				.from(abuseJobs)
 				.where(
-					or(
-						and(eq(abuseJobs.status, "queued"), lte(abuseJobs.nextAttemptAt, timestamp)),
-						and(eq(abuseJobs.status, "running"), lte(abuseJobs.leaseExpiresAt, timestamp), eq(abuseJobs.unknownExternalState, false)),
-					),
+						and(
+							or(
+								and(eq(abuseJobs.status, "queued"), lte(abuseJobs.nextAttemptAt, timestamp)),
+								and(eq(abuseJobs.status, "running"), lte(abuseJobs.leaseExpiresAt, timestamp), eq(abuseJobs.unknownExternalState, false)),
+							),
+							typeFilter,
+						),
 				)
 				.orderBy(asc(abuseJobs.nextAttemptAt), asc(abuseJobs.createdAt))
 				.limit(32)

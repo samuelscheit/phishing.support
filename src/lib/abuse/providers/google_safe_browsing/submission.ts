@@ -9,6 +9,7 @@ import type {
 } from "../submission_contracts";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { routeContext } from "../../worker/shared";
+import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
 import { GOOGLE_SAFE_BROWSING_PROVIDER } from "./definition";
 import {
 	buildGoogleSafeBrowsingSubmissionPayload,
@@ -189,22 +190,49 @@ export async function submitGoogleSafeBrowsingSubmission(
 	}
 
 	const reportUrl = googleSafeBrowsingReportUrl(payload.target.observedUrl);
-	const session = await (dependencies.getBrowserPage ?? getBrowserPage)();
+	const sessionPromise = (dependencies.getBrowserPage ?? getBrowserPage)();
+	const session = await raceAbort(
+		sessionPromise,
+		context.signal,
+		() => {
+			void sessionPromise.then((lateSession) => lateSession.browser.close().catch(() => undefined)).catch(() => undefined);
+		},
+		"Google Safe Browsing submission was canceled.",
+	);
+	const closeBrowser = () => { void session.browser.close().catch(() => undefined); };
+	const signal = context.signal;
+	throwIfOperationCanceled(signal, "Google Safe Browsing submission was canceled.");
+	signal?.addEventListener("abort", closeBrowser, { once: true });
 	try {
 		const apiKey = dependencies.antiCaptchaApiKey ?? process.env.ANTICAPTCHA_API_KEY;
 		const antiCaptcha = dependencies.antiCaptcha ?? anticaptcha;
 		const token = apiKey?.trim()
-			? await solveRecaptchaToken({ reportUrl, antiCaptcha, apiKey: apiKey.trim() })
+			? await raceAbort(
+				solveRecaptchaToken({ reportUrl, antiCaptcha, apiKey: apiKey.trim() }),
+				signal,
+				closeBrowser,
+				"Google Safe Browsing submission was canceled.",
+			)
 			: undefined;
 		if (token) await configureRecaptchaRequestInterception(session.page);
 
-		await session.page.goto(reportUrl, { waitUntil: "domcontentloaded" });
-		if (token) await installRecaptchaToken(session.page, token);
-		await session.page.waitForSelector("#mat-input-0");
-		await session.page.type("#mat-input-1", payload.report.explanation);
+		await raceAbort(session.page.goto(reportUrl, { waitUntil: "domcontentloaded" }), signal, closeBrowser, "Google Safe Browsing submission was canceled.");
+		if (token) await raceAbort(installRecaptchaToken(session.page, token), signal, closeBrowser, "Google Safe Browsing submission was canceled.");
+		await raceAbort(session.page.waitForSelector("#mat-input-0"), signal, closeBrowser, "Google Safe Browsing submission was canceled.");
+		await raceAbort(session.page.type("#mat-input-1", payload.report.explanation), signal, closeBrowser, "Google Safe Browsing submission was canceled.");
 		const success = await submitGoogleSafeBrowsingForm({
-			pressSubmit: () => pressSubmit(session.page, dependencies.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)))),
-			readStatus: () => readGoogleSafeBrowsingSubmissionStatus(session.page),
+			pressSubmit: () => raceAbort(
+				pressSubmit(session.page, dependencies.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)))),
+				signal,
+				closeBrowser,
+				"Google Safe Browsing submission was canceled.",
+			),
+			readStatus: () => raceAbort(
+				readGoogleSafeBrowsingSubmissionStatus(session.page),
+				signal,
+				closeBrowser,
+				"Google Safe Browsing submission was canceled.",
+			),
 			pause: dependencies.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
 		});
 		return {
@@ -213,6 +241,7 @@ export async function submitGoogleSafeBrowsingSubmission(
 			submittedTargets: [payload.target.normalizedTarget],
 		};
 	} finally {
+		signal?.removeEventListener("abort", closeBrowser);
 		// Cleanup must not discard a provider-confirmed success and cause a
 		// duplicate-risk replay. The browser is nevertheless closed exactly once.
 		await session.browser.close().catch(() => undefined);

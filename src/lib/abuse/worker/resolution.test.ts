@@ -116,7 +116,8 @@ describe("direct provider resolution and dispatch", () => {
 
 		const worker = new AbuseWorker({
 			owner: "concurrent-worker-test",
-			concurrency: 2,
+			controlConcurrency: 2,
+			externalConcurrency: 1,
 			pollMs: 5,
 			resolveTarget: async (target) => {
 				if (target.normalizedTarget === "slow-provider.example.com") {
@@ -150,5 +151,128 @@ describe("direct provider resolution and dispatch", () => {
 			await worker.stop();
 		}
 		expect((await AbuseRepository.getReport(slow.reportId))?.status).toBe("no_route");
+	});
+
+	test("reserves a control lane and fences an external run that exceeds its deadline", async () => {
+		const external = await createReport("external-timeout.example.com");
+		const control = await createReport("control-lane.example.com");
+		const db = await getDb();
+		// These fixtures install their routes directly; retire the automatic
+		// resolver jobs except for the one used to prove the control lane works.
+		db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.reportId, external.reportId)).run();
+		const [externalTarget] = await AbuseRepository.listTargets(external.reportId);
+		if (!externalTarget) throw new Error("External timeout fixture has no target.");
+		const route = await AbuseRepository.upsertResolvedRoute(externalTarget.id, {
+			routeKey: "provider_submission:timeout-provider:contact",
+			providerRegistryKey: "timeout-provider",
+			providerDisplayName: "Timeout Provider",
+			routeType: "provider_submission",
+			providerDefinitionVersion: "test-v1",
+			providerDefinitionHash: "c".repeat(64),
+			resolverProvenance: { source: "worker-timeout-test" },
+			resolutionSnapshot: { source: "worker-timeout-test" },
+			status: "verified",
+		});
+		const execution = await AbuseRepository.beginProviderExecution({
+			routeId: route.id,
+			providerPayload: { adapter: "timeout-test" },
+			correlationKey: `timeout-test:${route.id.toString()}`,
+			expectedStatus: "verified",
+		});
+		if (!execution) throw new Error("Timeout fixture could not create a provider run.");
+		expect(await AbuseRepository.prepareProviderSubmission(execution.run.id)).toBeTrue();
+		const externalJob = await AbuseRepository.enqueueJob({
+			jobType: "submit_provider",
+			reportId: external.reportId,
+			routeId: route.id,
+			payload: {},
+			dedupeKey: `timeout-submit:${route.id.toString()}`,
+		});
+
+		let controlStarted = false;
+		const worker = new AbuseWorker({
+			owner: "worker-timeout-test",
+			controlConcurrency: 1,
+			externalConcurrency: 1,
+			controlJobTimeoutMs: 1_000,
+			externalJobTimeoutMs: 1_000,
+			pollMs: 5,
+			processJob: async (job, signal) => {
+				if (job.id === externalJob.id) {
+					await new Promise<void>((_resolve, reject) => {
+						signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+					});
+					return;
+				}
+				if (job.reportId === control.reportId) controlStarted = true;
+			},
+		});
+
+		await worker.start();
+		try {
+			await waitFor(async () => controlStarted);
+			await waitFor(async () => (await AbuseRepository.getRoute(route.id))?.status === "unknown_external_state", 3_000);
+		} finally {
+			await worker.stop();
+		}
+
+		expect(db.select().from(abuseJobs).where(eq(abuseJobs.id, externalJob.id)).get()).toMatchObject({
+			status: "unknown_external_state",
+			unknownExternalState: true,
+		});
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "unknown_external_state" });
+		expect(await AbuseRepository.getProviderRun(execution.run.id)).toMatchObject({ executionStatus: "unknown_external_state" });
+	});
+
+	test("retries an external timeout before any durable provider run exists", async () => {
+		const created = await createReport("preflight-timeout.example.com");
+		const db = await getDb();
+		db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.reportId, created.reportId)).run();
+		const [target] = await AbuseRepository.listTargets(created.reportId);
+		if (!target) throw new Error("Preflight timeout fixture has no target.");
+		const route = await AbuseRepository.upsertResolvedRoute(target.id, {
+			routeKey: "provider_submission:preflight-timeout:contact",
+			providerRegistryKey: "preflight-timeout",
+			providerDisplayName: "Preflight Timeout Provider",
+			routeType: "provider_submission",
+			providerDefinitionVersion: "test-v1",
+			providerDefinitionHash: "d".repeat(64),
+			resolverProvenance: { source: "worker-preflight-timeout-test" },
+			resolutionSnapshot: { source: "worker-preflight-timeout-test" },
+			status: "verified",
+		});
+		const job = await AbuseRepository.enqueueJob({
+			jobType: "submit_provider",
+			reportId: created.reportId,
+			routeId: route.id,
+			payload: {},
+			dedupeKey: `preflight-timeout:${route.id.toString()}`,
+		});
+		const worker = new AbuseWorker({
+			owner: "worker-preflight-timeout-test",
+			controlConcurrency: 1,
+			externalConcurrency: 1,
+			externalJobTimeoutMs: 1_000,
+			pollMs: 5,
+			processJob: async (claimed, signal) => {
+				if (claimed.id !== job.id) return;
+				await new Promise<void>((_resolve, reject) => {
+					signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+				});
+			},
+		});
+
+		await worker.start();
+		try {
+			await waitFor(async () => {
+				const current = db.select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get();
+				return current?.status === "queued" && current.retryCount === 1;
+			}, 3_000);
+		} finally {
+			await worker.stop();
+		}
+
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "verified" });
+		expect(await AbuseRepository.listProviderRunsForReport(created.reportId)).toEqual([]);
 	});
 });
