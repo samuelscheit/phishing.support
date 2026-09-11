@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { format } from "date-fns";
 import { Check, Copy, Download, ExternalLink, Mail, MessageSquareReply, OctagonAlert, Send, Undo2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +14,7 @@ import type {
 	SubmissionReportThread,
 } from "@/lib/submissions/details";
 import { describeProviderReportStatus } from "@/lib/abuse/provider_status";
+import { formatUtcDateTime } from "@/lib/date_time";
 import { cn } from "@/web_lib/util";
 
 type DateValue = Date | string | number | null | undefined;
@@ -27,9 +27,7 @@ function asKey(value: ArtifactReference): string | undefined {
 }
 
 function formatDate(value: DateValue): string {
-	if (!value) return "Unknown time";
-	const date = new Date(value);
-	return Number.isNaN(date.getTime()) ? "Unknown time" : format(date, "PPP p");
+	return formatUtcDateTime(value) ?? "Unknown time";
 }
 
 function formatAddresses(addresses: string[] | null | undefined): string {

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { format } from "date-fns";
 import { AnalysisLogs } from "@/components/AnalysisLogs";
 import { SubmissionStatus } from "@/components/SubmissionStatus";
 import { ExternalLinkConfirm } from "@/components/ExternalLinkConfirm";
@@ -17,16 +16,11 @@ import { ExternalLink, Mail, Globe, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import type { Artifact } from "@/lib/db/schema";
 import type { SubmissionDetail as ApiSubmissionDetail } from "@/lib/submissions/details";
+import { formatUtcDateTime } from "@/lib/date_time";
 import { cn } from "../../../web_lib/util";
 import { selectDisplayAnalysisRuns } from "@/lib/analysis_run_view";
 
 type SubmissionDetail = ApiSubmissionDetail;
-
-function formatArtifactDate(value: Date | string | number | null | undefined) {
-	if (value === null || value === undefined) return null;
-	const date = new Date(value);
-	return Number.isNaN(date.getTime()) ? null : format(date, "PPP p");
-}
 
 function formatArtifactSize(value: number | bigint | null | undefined) {
 	if (value === null || value === undefined) return "Unknown size";
@@ -140,7 +134,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 			(submission.data.kind === "website" ? Boolean(submission.data.website?.url) : Boolean(emailEml?.id)),
 		);
 	const artifacts = submission?.artifacts.filter((x) => x !== screenshot) || [];
-	const websiteArchiveDate = formatArtifactDate(websiteMhtml?.archivedAt ?? websiteMhtml?.createdAt);
+	const websiteArchiveDate = formatUtcDateTime(websiteMhtml?.archivedAt ?? websiteMhtml?.createdAt);
 
 	const sanitizeHtmlForIframe = (rawHtml: string): string => {
 		try {
@@ -286,13 +280,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 							</CardTitle>
 							<div className="flex flex-col items-end gap-2 shrink-0 md:flex-row">
 								<Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
-									{new Date(submission.createdAt).toLocaleString(globalThis.navigator?.language || "en-US", {
-										year: "numeric",
-										month: "short",
-										day: "numeric",
-										hour: "2-digit",
-										minute: "2-digit",
-									})}
+									{formatUtcDateTime(submission.createdAt) ?? "Unknown time"}
 								</Badge>
 
 								<SubmissionStatus status={submission.status} />
@@ -465,7 +453,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 								<CardTitle className="text-sm flex flex-row items-center gap-2">
 									Archived Email
 									<div className="text-xs text-muted-foreground font-normal">
-										(from {format(new Date(emailEml.createdAt), "PPP p")})
+										(from {formatUtcDateTime(emailEml.createdAt) ?? "unknown date"})
 									</div>
 								</CardTitle>
 								<CardDescription className="text-xs flex flex-row gap-8">
@@ -546,7 +534,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 									<CardDescription className="text-[10px]">
 										{a.mimeType} • {formatArtifactSize(a.size)}
 										{isWebsiteArchiveArtifact(a) ? (
-											<div>Archived {formatArtifactDate(a.archivedAt ?? a.createdAt) ?? "unknown date"}</div>
+											<div>Archived {formatUtcDateTime(a.archivedAt ?? a.createdAt) ?? "unknown date"}</div>
 										) : null}
 									</CardDescription>
 								</CardHeader>

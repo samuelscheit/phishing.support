@@ -1,12 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { format } from "date-fns";
 import { parse as parseDomain } from "tldts";
 import { Globe2, Network, Server } from "lucide-react";
 
 import type { RegionalDnsResolution } from "@/lib/network/regional_dns";
 import type { WhoISInfo } from "@/lib/website_info";
+import { formatUtcDateTime } from "@/lib/date_time";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,9 +15,7 @@ import { recursiveAbuseContact } from "../web_lib/util";
 
 function safeFormatDate(value?: string) {
 	if (!value) return null;
-	const d = new Date(value);
-	if (Number.isNaN(d.getTime())) return value;
-	return format(d, "PPP p");
+	return formatUtcDateTime(value) ?? value;
 }
 
 function uniqStrings(values: Array<string | undefined | null>) {
