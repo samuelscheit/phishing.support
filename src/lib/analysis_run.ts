@@ -1,13 +1,16 @@
 import type { ResponseCreateParamsStreaming, ResponseInputItem } from "openai/resources/responses/responses.mjs";
+import type OpenAI from "openai";
 
 import { analysisRetryDelayMs, describeAnalysisError, isRetryableAnalysisError } from "./analysis_retry";
 import { AnalysisStreamAttemptError, logAndPersistStream } from "./artifact";
 import { AnalysisRunsEntity } from "./db/entities";
 import type { AnalysisRunKind } from "./db/schema";
-import { model, sleep } from "./utils";
+import { getOpenAIClient, sleep } from "./utils";
 import { publishEvent } from "./event/event_transport";
 
 const MAX_ANALYSIS_ATTEMPTS = Math.max(1, Number.parseInt(process.env.OPENAI_ANALYSIS_MAX_ATTEMPTS ?? "3", 10) || 3);
+
+export type AnalysisClient = Pick<OpenAI, "responses">;
 
 function retryDiagnostic(error: unknown, attempts: number, emittedOutput: boolean) {
 	return {
@@ -18,7 +21,10 @@ function retryDiagnostic(error: unknown, attempts: number, emittedOutput: boolea
 	};
 }
 
-export async function runStreamedAnalysisRun(params: { submissionId: bigint; options: ResponseCreateParamsStreaming; analysisKind?: AnalysisRunKind }) {
+export async function runStreamedAnalysisRun(
+	params: { submissionId: bigint; options: ResponseCreateParamsStreaming; analysisKind?: AnalysisRunKind },
+	dependencies: { client?: AnalysisClient } = {},
+) {
 	if (params.options.stream !== true) {
 		throw new Error("runStreamedAnalysisRun requires options.stream === true");
 	}
@@ -40,7 +46,7 @@ export async function runStreamedAnalysisRun(params: { submissionId: bigint; opt
 		let emittedOutput = false;
 		try {
 			params.options.stream = true;
-			const stream = await model.responses.create(params.options);
+			const stream = await (dependencies.client ?? getOpenAIClient()).responses.create(params.options);
 			const result = await logAndPersistStream(stream, runId, topics);
 			return { runId, result };
 		} catch (error) {

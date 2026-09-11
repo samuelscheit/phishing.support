@@ -33,14 +33,14 @@ export function configuredSkyvernApiKey(): string {
 
 	let stat: fs.Stats;
 	try {
-		stat = fs.statSync(file);
+		stat = fs.statSync(/* turbopackIgnore: true */ file);
 	} catch {
 		throw new Error("Skyvern API-key bootstrap is not ready yet.");
 	}
 	if (!stat.isFile()) throw new Error("SKYVERN_API_KEY_FILE must reference a regular file.");
 	let value: string;
 	try {
-		value = fs.readFileSync(file, "utf8").trim();
+		value = fs.readFileSync(/* turbopackIgnore: true */ file, "utf8").trim();
 	} catch {
 		throw new Error("Skyvern API-key bootstrap could not be read.");
 	}

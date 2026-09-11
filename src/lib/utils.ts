@@ -152,10 +152,21 @@ export const defaultReasoning = {
 	summary: "detailed",
 } as const;
 
-export const model = new OpenAI({
-	apiKey: process.env.OPENAI_API_KEY ?? "",
-	baseURL: process.env.OPENAI_API_BASE_URL || "https://api.openai.com/v1",
-	fetchOptions: {
-		verbose: process.env.OPENAI_VERBOSE === "true",
-	},
-});
+/**
+ * Builds the Responses client only when an analysis actually starts.
+ *
+ * Route modules are evaluated during `next build`; constructing the OpenAI
+ * client there makes the image build depend on a runtime-only API key. Keeping
+ * this boundary lazy also produces a clear operational error when a deployed
+ * worker receives an analysis request without credentials.
+ */
+export function getOpenAIClient(): OpenAI {
+	const apiKey = process.env.OPENAI_API_KEY?.trim();
+	if (!apiKey) throw new Error("OPENAI_API_KEY is required to run AI analysis.");
+
+	return new OpenAI({
+		apiKey,
+		baseURL: process.env.OPENAI_API_BASE_URL?.trim() || "https://api.openai.com/v1",
+		logLevel: process.env.OPENAI_VERBOSE === "true" ? "debug" : undefined,
+	});
+}

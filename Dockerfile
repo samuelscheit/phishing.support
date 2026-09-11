@@ -2,7 +2,7 @@
 
 # Multi-stage build for Next.js (Bun)
 
-FROM oven/bun:1.3.5-debian AS deps
+FROM oven/bun:1.4.2-debian AS deps
 WORKDIR /app
 
 # System deps needed for some native modules during install (kept in build stage)
@@ -13,7 +13,7 @@ RUN apt-get update \
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
-FROM oven/bun:1.3.5-debian AS builder
+FROM oven/bun:1.4.2-debian AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -25,7 +25,7 @@ ENV NODE_ENV=production
 RUN bun run build
 
 
-FROM oven/bun:1.3.5-debian AS runner
+FROM oven/bun:1.4.2-debian AS runner
 WORKDIR /app
 
 RUN set -euxo pipefail; \

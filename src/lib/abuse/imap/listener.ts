@@ -57,7 +57,7 @@ export class AbuseImapListener {
 					const processMailbox = async () => {
 						const seen = new Set<number>();
 						const searched = await client.search({ all: true }, { uid: true });
-						const uids = searched === false ? [] : searched;
+						const uids = Array.isArray(searched) ? searched : [];
 						for await (const fetched of client.fetch(uids, { source: true, flags: true, envelope: true, internalDate: true }, { uid: true })) {
 							const message = fetched as FetchMessageObject;
 							if (!message.uid) continue;

@@ -13,6 +13,7 @@
 		"isolatedModules": true,
 		"jsx": "react-jsx",
 		"allowSyntheticDefaultImports": true,
+		"types": ["node", "bun", "next/image-types/global"],
 		"incremental": true,
 		"plugins": [
 			{
@@ -24,5 +25,13 @@
 		}
 	},
 	"include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts", "**/*.mts"],
-	"exclude": ["node_modules", "investigation/**", "output/**", ".playwright-cli/**"]
+	"exclude": [
+		"node_modules",
+		"investigation/**",
+		"output/**",
+		".playwright-cli/**",
+		"**/*.test.ts",
+		"**/*.test.tsx",
+		"src/lib/db/test_helpers.ts"
+	]
 }

@@ -1,7 +1,7 @@
 import fs, { writeFileSync } from "fs";
 import path from "path";
 import { config } from "dotenv";
-import { defaultReasoning, defaultResponseModel, model, sleep } from "./utils";
+import { defaultReasoning, defaultResponseModel, getOpenAIClient, sleep } from "./utils";
 import type { ResponseCreateParamsNonStreaming, ResponseInput } from "openai/resources/responses/responses.mjs";
 import type { ElementHandle, Page } from "rebrowser-puppeteer-core";
 import { getBrowserPage } from "./browser";
@@ -311,7 +311,7 @@ ${(input_elements as any[]).map((el) => `LABEL: "${el.label}" (${el.description}
 		// @ts-ignore
 		console.log(options.input[1].content.slice(0, -1));
 
-		var response: any = await model.responses.create(options);
+		var response: any = await getOpenAIClient().responses.create(options);
 
 		console.log(response.output, step);
 
@@ -372,7 +372,7 @@ ${(input_elements as any[]).map((el) => `LABEL: "${el.label}" (${el.description}
 			doContinue = false;
 			// TODO: generate final report
 
-			await model.responses.create({
+			await getOpenAIClient().responses.create({
 				...options,
 				input: [
 					...(options.input as ResponseInput),

@@ -123,7 +123,11 @@ export function cleanPrivateInformation(mail: MailData) {
 	return recursiveClean(mail, redactionTerms(mail)) as MailData;
 }
 
-export async function parseMail(eml: string) {
+export type ParseMailDependencies = {
+	getInfo?: typeof getInfo;
+};
+
+export async function parseMail(eml: string, dependencies: ParseMailDependencies = {}) {
 	const parsedMail = await simpleParser(eml, {});
 
 	const headers = analyzeHeaders(parsedMail.headerLines.map((x) => x.line).join("\n"));
@@ -132,7 +136,7 @@ export async function parseMail(eml: string) {
 
 	if (headers.routing.originatingIp || headers.routing.originatingServer) {
 		try {
-			whois = await getInfo(headers.routing.originatingIp || headers.routing.originatingServer!);
+			whois = await (dependencies.getInfo ?? getInfo)(headers.routing.originatingIp || headers.routing.originatingServer!);
 		} catch (error) {
 			console.error("Failed to get WHOIS info for mail origin:", error, headers.routing);
 		}
