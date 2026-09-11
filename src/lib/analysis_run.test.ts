@@ -52,6 +52,6 @@ describe("streamed analysis retry boundary", () => {
 		expect(calls).toBe(2);
 		expect(result.result.output_text).toBe("analysis recovered");
 		const persistedRun = (await AnalysisRunsEntity.listForSubmission(submissionId))[0];
-		expect(persistedRun).toMatchObject({ status: "completed", tokensUsed: 11n, analysisKind: "analysis" });
+		expect(persistedRun).toMatchObject({ status: "completed", tokensUsed: 11, analysisKind: "analysis" });
 	});
 });

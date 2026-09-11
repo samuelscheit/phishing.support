@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { AnalysisRunsEntity, SubmissionsEntity } from "./db/entities";
+import { AnalysisRunsEntity, ArtifactsEntity, SubmissionsEntity } from "./db/entities";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { AnalysisStreamAttemptError, logAndPersistStream } from "./artifact";
 
@@ -17,6 +17,28 @@ async function createRun() {
 }
 
 describe("analysis stream consumption", () => {
+	test("decodes artifact byte sizes as numbers while preserving exact artifact IDs", async () => {
+		const submissionId = await SubmissionsEntity.create({
+			id: 1n,
+			kind: "website",
+			data: { kind: "website", website: { url: "https://artifact-types.example.test" } },
+			dedupeKey: "artifact-types",
+		});
+		const buffer = Buffer.from("artifact byte size");
+		const artifactId = await ArtifactsEntity.saveBuffer({
+			submissionId,
+			name: "website.mhtml",
+			kind: "website_mhtml",
+			mimeType: "text/mhtml",
+			buffer,
+		});
+
+		const [artifact] = await ArtifactsEntity.listForSubmission(submissionId);
+		expect(artifact).toMatchObject({ id: artifactId, size: buffer.byteLength });
+		expect(typeof artifact?.id).toBe("bigint");
+		expect(typeof artifact?.size).toBe("number");
+	});
+
 	test("wraps a mid-stream provider error without prematurely marking the run failed", async () => {
 		const { runId } = await createRun();
 		const stream = (async function* () {
@@ -46,6 +68,6 @@ describe("analysis stream consumption", () => {
 
 		const result = await logAndPersistStream(stream as any, runId);
 		expect(result.output_text).toBe("completed");
-		expect((await AnalysisRunsEntity.listForSubmission(submissionId))[0]).toMatchObject({ status: "completed", tokensUsed: 7n });
+		expect((await AnalysisRunsEntity.listForSubmission(submissionId))[0]).toMatchObject({ status: "completed", tokensUsed: 7 });
 	});
 });

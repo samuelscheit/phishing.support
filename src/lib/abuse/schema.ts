@@ -1,5 +1,6 @@
 import { InferSelectModel, sql } from "drizzle-orm";
-import { blob, customType, index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { blob, index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "../db/sqlite_types";
 
 export const abuseReportStatuses = [
 	"accepted",
@@ -98,40 +99,6 @@ export const abuseMailClassifications = [
 ] as const;
 export type AbuseMailClassification = (typeof abuseMailClassifications)[number];
 
-const bignum = customType<{ data: bigint; driverData: bigint }>({
-	dataType: () => "INTEGER",
-	fromDriver: (value) => BigInt(value),
-	// Drizzle's Bun SQLite adapter accepts a string representation for safe integers.
-	// @ts-expect-error drizzle's custom-type driver declaration is narrower than SQLite.
-	toDriver: (value) => value.toString(),
-});
-
-/**
- * The shared SQLite client runs with `safeIntegers: true`, so every SQLite
- * INTEGER arrives from Bun as a bigint. IDs intentionally retain that exact
- * representation through `bignum`; bounded counters, sizes, ordinals, and
- * IMAP values do not. Mapping those fields here prevents lifecycle arithmetic
- * from mixing bigint and number at every repository/worker call site.
- */
-const integer = customType<{ data: number; driverData: bigint }>({
-	dataType: () => "INTEGER",
-	fromDriver: (value) => {
-		const number = Number(value);
-		if (!Number.isSafeInteger(number)) throw new RangeError("SQLite integer exceeds JavaScript's safe numeric range.");
-		return number;
-	},
-	toDriver: (value) => {
-		if (!Number.isSafeInteger(value)) throw new RangeError("Expected a safe integer for SQLite storage.");
-		return BigInt(value);
-	},
-});
-
-const timestamp = customType<{ data: Date; driverData: bigint }>({
-	dataType: () => "INTEGER",
-	toDriver: (value) => BigInt(value.getTime()),
-	fromDriver: (value) => new Date(Number(value)),
-});
-
 /**
  * Completely separate public abuse-reporting aggregate. It intentionally has
  * no foreign keys to submissions, analysis_runs, or legacy report records.
@@ -139,7 +106,7 @@ const timestamp = customType<{ data: Date; driverData: bigint }>({
 export const abuseReports = sqliteTable(
 	"abuse_reports",
 	{
-		id: bignum("id").primaryKey(),
+		id: sqliteBigint("id").primaryKey(),
 		trackingTokenHash: text("tracking_token_hash").notNull(),
 		idempotencyKey: text("idempotency_key"),
 		requestPayloadHash: text("request_payload_hash").notNull(),
@@ -154,8 +121,8 @@ export const abuseReports = sqliteTable(
 		requesterIp: text("requester_ip"),
 		requesterCountry: text("requester_country"),
 		requesterHeaders: text("requester_headers", { mode: "json" }).$type<Record<string, string>>(),
-		createdAt: timestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
-		updatedAt: timestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
+		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
+		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
 		uniqueIndex("abuse_reports_tracking_token_hash_unique").on(table.trackingTokenHash),
@@ -168,11 +135,11 @@ export const abuseReports = sqliteTable(
 export const abuseTargets = sqliteTable(
 	"abuse_targets",
 	{
-		id: bignum("id").primaryKey(),
-		reportId: bignum("report_id")
+		id: sqliteBigint("id").primaryKey(),
+		reportId: sqliteBigint("report_id")
 			.notNull()
 			.references(() => abuseReports.id, { onDelete: "cascade" }),
-		ordinal: integer("ordinal").notNull(),
+		ordinal: sqliteInteger("ordinal").notNull(),
 		originalInput: text("original_input").notNull(),
 		originalInputs: text("original_inputs", { mode: "json" }).$type<string[]>().notNull(),
 		normalizedTarget: text("normalized_target").notNull(),
@@ -181,8 +148,8 @@ export const abuseTargets = sqliteTable(
 		resolutionStatus: text("resolution_status", { enum: abuseTargetStatuses }).notNull().default("pending"),
 		resolverSnapshot: text("resolver_snapshot", { mode: "json" }).$type<Record<string, unknown>>(),
 		disposition: text("disposition"),
-		createdAt: timestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
-		updatedAt: timestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
+		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
+		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
 		uniqueIndex("abuse_targets_report_normalized_unique").on(table.reportId, table.normalizedTarget),
@@ -194,11 +161,11 @@ export const abuseTargets = sqliteTable(
 export const abuseProviderRoutes = sqliteTable(
 	"abuse_provider_routes",
 	{
-		id: bignum("id").primaryKey(),
-		reportId: bignum("report_id")
+		id: sqliteBigint("id").primaryKey(),
+		reportId: sqliteBigint("report_id")
 			.notNull()
 			.references(() => abuseReports.id, { onDelete: "cascade" }),
-		targetId: bignum("target_id")
+		targetId: sqliteBigint("target_id")
 			.notNull()
 			.references(() => abuseTargets.id, { onDelete: "cascade" }),
 		routeKey: text("route_key").notNull(),
@@ -213,8 +180,8 @@ export const abuseProviderRoutes = sqliteTable(
 		verificationResult: text("verification_result", { mode: "json" }).$type<Record<string, unknown>>(),
 		serviceIdentity: text("service_identity", { mode: "json" }).$type<Record<string, unknown>>(),
 		status: text("status", { enum: abuseRouteStatuses }).notNull().default("resolving"),
-		createdAt: timestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
-		updatedAt: timestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
+		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
+		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
 		uniqueIndex("abuse_provider_routes_target_route_key_unique").on(table.targetId, table.routeKey),
@@ -227,26 +194,26 @@ export const abuseProviderRoutes = sqliteTable(
 export const abuseProviderRuns = sqliteTable(
 	"abuse_provider_runs",
 	{
-		id: bignum("id").primaryKey(),
-		reportId: bignum("report_id")
+		id: sqliteBigint("id").primaryKey(),
+		reportId: sqliteBigint("report_id")
 			.notNull()
 			.references(() => abuseReports.id, { onDelete: "cascade" }),
-		routeId: bignum("route_id")
+		routeId: sqliteBigint("route_id")
 			.notNull()
 			.references(() => abuseProviderRoutes.id, { onDelete: "cascade" }),
 		providerPayload: text("provider_payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
 		payloadHash: text("payload_hash").notNull(),
 		correlationKey: text("correlation_key").notNull(),
 		skyvernRunId: text("skyvern_run_id"),
-		attemptCount: integer("attempt_count").notNull().default(0),
+		attemptCount: sqliteInteger("attempt_count").notNull().default(0),
 		executionStatus: text("execution_status", { enum: abuseRunStatuses }).notNull().default("pending"),
 		confirmationId: text("confirmation_id"),
 		confirmationText: text("confirmation_text"),
 		finalUrl: text("final_url"),
 		submittedTargets: text("submitted_targets", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
 		failureReason: text("failure_reason"),
-		createdAt: timestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
-		updatedAt: timestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
+		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
+		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
 		uniqueIndex("abuse_provider_runs_correlation_key_unique").on(table.correlationKey),
@@ -260,21 +227,21 @@ export const abuseProviderRuns = sqliteTable(
 export const abuseArtifacts = sqliteTable(
 	"abuse_artifacts",
 	{
-		id: bignum("id").primaryKey(),
-		reportId: bignum("report_id")
+		id: sqliteBigint("id").primaryKey(),
+		reportId: sqliteBigint("report_id")
 			.notNull()
 			.references(() => abuseReports.id, { onDelete: "cascade" }),
-		targetId: bignum("target_id").references(() => abuseTargets.id, { onDelete: "set null" }),
-		routeId: bignum("route_id").references(() => abuseProviderRoutes.id, { onDelete: "set null" }),
-		runId: bignum("run_id").references(() => abuseProviderRuns.id, { onDelete: "set null" }),
+		targetId: sqliteBigint("target_id").references(() => abuseTargets.id, { onDelete: "set null" }),
+		routeId: sqliteBigint("route_id").references(() => abuseProviderRoutes.id, { onDelete: "set null" }),
+		runId: sqliteBigint("run_id").references(() => abuseProviderRuns.id, { onDelete: "set null" }),
 		name: text("name").notNull(),
 		kind: text("kind").notNull(),
 		mimeType: text("mime_type").notNull(),
 		sha256: text("sha256").notNull(),
-		size: integer("size").notNull(),
+		size: sqliteInteger("size").notNull(),
 		metadata: text("metadata", { mode: "json" }).$type<Record<string, unknown>>(),
 		blob: blob("blob").notNull().$type<Buffer>(),
-		createdAt: timestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
+		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
 		// A hash identifies bytes, not an artifact occurrence. The same bytes can
@@ -291,14 +258,14 @@ export const abuseArtifacts = sqliteTable(
 export const abuseMailMessages = sqliteTable(
 	"abuse_mail_messages",
 	{
-		id: bignum("id").primaryKey(),
-		reportId: bignum("report_id")
+		id: sqliteBigint("id").primaryKey(),
+		reportId: sqliteBigint("report_id")
 			.notNull()
 			.references(() => abuseReports.id, { onDelete: "cascade" }),
-		routeId: bignum("route_id")
+		routeId: sqliteBigint("route_id")
 			.notNull()
 			.references(() => abuseProviderRoutes.id, { onDelete: "cascade" }),
-		runId: bignum("run_id").references(() => abuseProviderRuns.id, { onDelete: "set null" }),
+		runId: sqliteBigint("run_id").references(() => abuseProviderRuns.id, { onDelete: "set null" }),
 		direction: text("direction", { enum: abuseMailDirections }).notNull(),
 		kind: text("kind").notNull(),
 		status: text("status").notNull(),
@@ -313,17 +280,17 @@ export const abuseMailMessages = sqliteTable(
 		correlationKey: text("correlation_key"),
 		classification: text("classification", { enum: abuseMailClassifications }),
 		extractedLinks: text("extracted_links", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
-		rawArtifactId: bignum("raw_artifact_id").references(() => abuseArtifacts.id, { onDelete: "set null" }),
+		rawArtifactId: sqliteBigint("raw_artifact_id").references(() => abuseArtifacts.id, { onDelete: "set null" }),
 		attachmentArtifactIds: text("attachment_artifact_ids", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
 		imapMailbox: text("imap_mailbox"),
-		imapUidValidity: integer("imap_uidvalidity"),
-		imapUid: integer("imap_uid"),
-		processingAttempts: integer("processing_attempts").notNull().default(0),
+		imapUidValidity: sqliteInteger("imap_uidvalidity"),
+		imapUid: sqliteInteger("imap_uid"),
+		processingAttempts: sqliteInteger("processing_attempts").notNull().default(0),
 		disposition: text("disposition"),
 		error: text("error"),
-		occurredAt: timestamp("occurred_at").notNull(),
-		createdAt: timestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
-		updatedAt: timestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
+		occurredAt: sqliteTimestamp("occurred_at").notNull(),
+		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
+		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
 		uniqueIndex("abuse_mail_messages_imap_uid_unique").on(table.imapMailbox, table.imapUidValidity, table.imapUid),
@@ -337,20 +304,20 @@ export const abuseMailMessages = sqliteTable(
 export const abuseMailCodes = sqliteTable(
 	"abuse_mail_codes",
 	{
-		id: bignum("id").primaryKey(),
-		reportId: bignum("report_id")
+		id: sqliteBigint("id").primaryKey(),
+		reportId: sqliteBigint("report_id")
 			.notNull()
 			.references(() => abuseReports.id, { onDelete: "cascade" }),
-		routeId: bignum("route_id")
+		routeId: sqliteBigint("route_id")
 			.notNull()
 			.references(() => abuseProviderRoutes.id, { onDelete: "cascade" }),
-		runId: bignum("run_id").references(() => abuseProviderRuns.id, { onDelete: "set null" }),
-		mailMessageId: bignum("mail_message_id").references(() => abuseMailMessages.id, { onDelete: "set null" }),
+		runId: sqliteBigint("run_id").references(() => abuseProviderRuns.id, { onDelete: "set null" }),
+		mailMessageId: sqliteBigint("mail_message_id").references(() => abuseMailMessages.id, { onDelete: "set null" }),
 		codeHash: text("code_hash").notNull(),
 		correlationKey: text("correlation_key"),
 		status: text("status").notNull().default("received"),
-		createdAt: timestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
-		usedAt: timestamp("used_at"),
+		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
+		usedAt: sqliteTimestamp("used_at"),
 	},
 	(table) => [
 		index("abuse_mail_codes_route_status_idx").on(table.routeId, table.status, table.createdAt),
@@ -361,22 +328,22 @@ export const abuseMailCodes = sqliteTable(
 export const abuseJobs = sqliteTable(
 	"abuse_jobs",
 	{
-		id: bignum("id").primaryKey(),
+		id: sqliteBigint("id").primaryKey(),
 		jobType: text("job_type", { enum: abuseJobTypes }).notNull(),
-		reportId: bignum("report_id").references(() => abuseReports.id, { onDelete: "cascade" }),
-		routeId: bignum("route_id").references(() => abuseProviderRoutes.id, { onDelete: "cascade" }),
-		runId: bignum("run_id").references(() => abuseProviderRuns.id, { onDelete: "cascade" }),
+		reportId: sqliteBigint("report_id").references(() => abuseReports.id, { onDelete: "cascade" }),
+		routeId: sqliteBigint("route_id").references(() => abuseProviderRoutes.id, { onDelete: "cascade" }),
+		runId: sqliteBigint("run_id").references(() => abuseProviderRuns.id, { onDelete: "cascade" }),
 		payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>(),
 		dedupeKey: text("dedupe_key"),
 		status: text("status", { enum: abuseJobStatuses }).notNull().default("queued"),
 		leaseOwner: text("lease_owner"),
-		leaseExpiresAt: timestamp("lease_expires_at"),
-		retryCount: integer("retry_count").notNull().default(0),
-		nextAttemptAt: timestamp("next_attempt_at").notNull(),
+		leaseExpiresAt: sqliteTimestamp("lease_expires_at"),
+		retryCount: sqliteInteger("retry_count").notNull().default(0),
+		nextAttemptAt: sqliteTimestamp("next_attempt_at").notNull(),
 		unknownExternalState: int("unknown_external_state", { mode: "boolean" }).notNull().default(false),
 		lastError: text("last_error"),
-		createdAt: timestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
-		updatedAt: timestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
+		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
+		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
 		index("abuse_jobs_claim_idx").on(table.status, table.nextAttemptAt, table.leaseExpiresAt),
@@ -389,17 +356,17 @@ export const abuseJobs = sqliteTable(
 export const abuseEvents = sqliteTable(
 	"abuse_events",
 	{
-		id: bignum("id").primaryKey(),
-		reportId: bignum("report_id")
+		id: sqliteBigint("id").primaryKey(),
+		reportId: sqliteBigint("report_id")
 			.notNull()
 			.references(() => abuseReports.id, { onDelete: "cascade" }),
-		targetId: bignum("target_id").references(() => abuseTargets.id, { onDelete: "set null" }),
-		routeId: bignum("route_id").references(() => abuseProviderRoutes.id, { onDelete: "set null" }),
-		runId: bignum("run_id").references(() => abuseProviderRuns.id, { onDelete: "set null" }),
-		jobId: bignum("job_id").references(() => abuseJobs.id, { onDelete: "set null" }),
+		targetId: sqliteBigint("target_id").references(() => abuseTargets.id, { onDelete: "set null" }),
+		routeId: sqliteBigint("route_id").references(() => abuseProviderRoutes.id, { onDelete: "set null" }),
+		runId: sqliteBigint("run_id").references(() => abuseProviderRuns.id, { onDelete: "set null" }),
+		jobId: sqliteBigint("job_id").references(() => abuseJobs.id, { onDelete: "set null" }),
 		eventType: text("event_type").notNull(),
 		data: text("data", { mode: "json" }).$type<Record<string, unknown>>().notNull().default(sql`'{}'`),
-		createdAt: timestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
+		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
 		index("abuse_events_report_created_idx").on(table.reportId, table.createdAt),
@@ -411,13 +378,13 @@ export const abuseEvents = sqliteTable(
 export const abuseWebhookEvents = sqliteTable(
 	"abuse_webhook_events",
 	{
-		id: bignum("id").primaryKey(),
+		id: sqliteBigint("id").primaryKey(),
 		eventId: text("event_id").notNull(),
 		skyvernRunId: text("skyvern_run_id"),
-		timestamp: integer("timestamp").notNull(),
+		timestamp: sqliteInteger("timestamp").notNull(),
 		payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
 		payloadHash: text("payload_hash").notNull(),
-		receivedAt: timestamp("received_at").notNull().default(sql`(unixepoch() * 1000)`),
+		receivedAt: sqliteTimestamp("received_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
 		uniqueIndex("abuse_webhook_events_event_id_unique").on(table.eventId),
@@ -431,8 +398,8 @@ export const abuseLocks = sqliteTable(
 	{
 		lockKey: text("lock_key").primaryKey(),
 		owner: text("owner").notNull(),
-		leaseExpiresAt: timestamp("lease_expires_at").notNull(),
-		updatedAt: timestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
+		leaseExpiresAt: sqliteTimestamp("lease_expires_at").notNull(),
+		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [index("abuse_locks_lease_idx").on(table.leaseExpiresAt)]
 );

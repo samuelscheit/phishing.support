@@ -314,10 +314,14 @@ describe("IMAP correspondence ingest", () => {
 			reason: "IMAP fetch did not include the RFC 5322 source.",
 		});
 		expect(await ingestFetchedIncomingMail(malformed, config)).toMatchObject({ disposition: "retry" });
-		expect(await MailIngestEntity.get({ mailbox: config.mailbox, uidValidity: config.uidValidity, uid: 52 })).toMatchObject({
+		const ledger = await MailIngestEntity.get({ mailbox: config.mailbox, uidValidity: config.uidValidity, uid: 52 });
+		expect(ledger).toMatchObject({
 			route: "failed",
 			terminal: false,
-			attempts: 2n,
+			attempts: 2,
 		});
+		expect(typeof ledger?.uidValidity).toBe("number");
+		expect(typeof ledger?.uid).toBe("number");
+		expect(typeof ledger?.attempts).toBe("number");
 	});
 });

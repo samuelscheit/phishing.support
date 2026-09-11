@@ -28,6 +28,13 @@ function formatArtifactDate(value: Date | string | number | null | undefined) {
 	return Number.isNaN(date.getTime()) ? null : format(date, "PPP p");
 }
 
+function formatArtifactSize(value: number | bigint | null | undefined) {
+	if (value === null || value === undefined) return "Unknown size";
+	const bytes = typeof value === "bigint" ? Number(value) : value;
+	if (!Number.isSafeInteger(bytes) || bytes < 0) return "Unknown size";
+	return (bytes / 1024).toFixed(1) + " KB";
+}
+
 function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "name" | "kind" | "mimeType">) {
 	if (artifact.kind?.toLowerCase().startsWith("report_")) return false;
 	const name = artifact.name?.toLowerCase();
@@ -537,7 +544,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 								<CardHeader className="p-3">
 									<CardTitle className="text-xs truncate">{a.name || a.kind}</CardTitle>
 									<CardDescription className="text-[10px]">
-										{a.mimeType} • {((a.size || 0) / 1024).toFixed(1)} KB
+										{a.mimeType} • {formatArtifactSize(a.size)}
 										{isWebsiteArchiveArtifact(a) ? (
 											<div>Archived {formatArtifactDate(a.archivedAt ?? a.createdAt) ?? "unknown date"}</div>
 										) : null}

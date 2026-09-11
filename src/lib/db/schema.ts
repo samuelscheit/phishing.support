@@ -1,8 +1,9 @@
 import { InferSelectModel, sql } from "drizzle-orm";
-import { blob, customType, index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { blob, index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { WhoISInfo } from "../website_info";
 import { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
 import { MailData } from "../mail_ai";
+import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
 
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
@@ -44,25 +45,10 @@ export type WebsiteSubmissionData = {
 
 export type SubmissionData = { kind: "email"; email?: EmailSubmissionData } | { kind: "website"; website: WebsiteSubmissionData };
 
-const bignum = customType<{ data: bigint; driverData: bigint }>({
-	dataType: () => "INTEGER",
-	fromDriver: (value) => {
-		return BigInt(value);
-	},
-	// @ts-ignore
-	toDriver: (value) => value.toString(),
-});
-
-const timestamp = customType<{ data: Date; driverData: bigint }>({
-	dataType: () => "INTEGER",
-	toDriver: (value) => BigInt(value.getTime()),
-	fromDriver: (value) => new Date(Number(value)),
-});
-
 export const submissions = sqliteTable(
 	"submissions",
 	{
-		id: bignum("id").primaryKey(),
+		id: sqliteBigint("id").primaryKey(),
 		kind: text("kind", { enum: submissionKind }).notNull(),
 		source: text("source"),
 		data: text("data", { mode: "json" }).$type<SubmissionData>().notNull(),
@@ -73,10 +59,10 @@ export const submissions = sqliteTable(
 		reporterIp: text("reporter_ip"),
 		reporterCountry: text("reporter_country"),
 		reporterHeaders: text("reporter_headers", { mode: "json" }).$type<Record<string, string>>(),
-		createdAt: timestamp("created_at")
+		createdAt: sqliteTimestamp("created_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
-		updatedAt: timestamp("updated_at")
+		updatedAt: sqliteTimestamp("updated_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
 	},
@@ -94,17 +80,17 @@ export type Submission = InferSelectModel<typeof submissions>;
 export const analysisRuns = sqliteTable(
 	"analysis_runs",
 	{
-		id: bignum("id").primaryKey(),
-		submissionId: bignum("submission_id")
+		id: sqliteBigint("id").primaryKey(),
+		submissionId: sqliteBigint("submission_id")
 			.notNull()
 			.references(() => submissions.id, { onDelete: "cascade" }),
 		status: text("status", { enum: analysisRunStatus }).notNull().default("running"),
 		analysisKind: text("analysis_kind", { enum: analysisRunKind }).notNull().default("unknown"),
 		input: text("input", { mode: "json" }).$type<Array<ResponseInputItem>>(),
 		output: text("output", { mode: "json" }).$type<Array<ResponseOutputItem>>(),
-		tokensUsed: int("tokens_used"),
+		tokensUsed: sqliteInteger("tokens_used"),
 		data: text("data", { mode: "json" }),
-		createdAt: timestamp("created_at")
+		createdAt: sqliteTimestamp("created_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
 	},
@@ -116,20 +102,20 @@ export type AnalysisRun = InferSelectModel<typeof analysisRuns>;
 export const artifacts = sqliteTable(
 	"artifacts",
 	{
-		id: bignum("id").primaryKey(),
-		submissionId: bignum("submission_id").references(() => submissions.id, {
+		id: sqliteBigint("id").primaryKey(),
+		submissionId: sqliteBigint("submission_id").references(() => submissions.id, {
 			onDelete: "cascade",
 		}),
 		name: text("name"),
 		kind: text("kind").notNull(),
-		createdAt: timestamp("created_at")
+		createdAt: sqliteTimestamp("created_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
 		/** When the captured website archive itself was made, if known. */
-		archivedAt: timestamp("archived_at"),
+		archivedAt: sqliteTimestamp("archived_at"),
 		mimeType: text("mime_type"),
 		sha256: text("sha256"),
-		size: int("size"),
+		size: sqliteInteger("size"),
 		blob: blob("blob").notNull().$type<Buffer>(),
 	},
 	(table) => [
@@ -143,11 +129,11 @@ export type Artifact = InferSelectModel<typeof artifacts>;
 export const providerReports = sqliteTable(
 	"provider_reports",
 	{
-		id: bignum("id").primaryKey(),
-		submissionId: bignum("submission_id")
+		id: sqliteBigint("id").primaryKey(),
+		submissionId: sqliteBigint("submission_id")
 			.notNull()
 			.references(() => submissions.id, { onDelete: "cascade" }),
-		analysisRunId: bignum("analysis_run_id").references(() => analysisRuns.id, {
+		analysisRunId: sqliteBigint("analysis_run_id").references(() => analysisRuns.id, {
 			onDelete: "set null",
 		}),
 		channel: text("channel").notNull().default("provider"),
@@ -157,7 +143,7 @@ export const providerReports = sqliteTable(
 		subject: text("subject"),
 		body: text("body").notNull(),
 		status: text("status", { enum: providerReportStatus }).notNull().default("sent"),
-		sentAt: timestamp("sent_at"),
+		sentAt: sqliteTimestamp("sent_at"),
 		providerMessageId: text("provider_message_id"),
 		providerSubmissionUrl: text("provider_submission_url"),
 		error: text("error"),
@@ -166,10 +152,10 @@ export const providerReports = sqliteTable(
 		data: text("data", { mode: "json" }),
 		/** Imported rows predate correspondence threads and are retained for auditability. */
 		legacy: int("legacy", { mode: "boolean" }).notNull().default(false),
-		createdAt: timestamp("created_at")
+		createdAt: sqliteTimestamp("created_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
-		updatedAt: timestamp("updated_at")
+		updatedAt: sqliteTimestamp("updated_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
 	},
@@ -187,11 +173,11 @@ export type ProviderReport = InferSelectModel<typeof providerReports>;
 export const reportThreads = sqliteTable(
 	"report_threads",
 	{
-		id: bignum("id").primaryKey(),
-		submissionId: bignum("submission_id")
+		id: sqliteBigint("id").primaryKey(),
+		submissionId: sqliteBigint("submission_id")
 			.notNull()
 			.references(() => submissions.id, { onDelete: "cascade" }),
-		analysisRunId: bignum("analysis_run_id").references(() => analysisRuns.id, {
+		analysisRunId: sqliteBigint("analysis_run_id").references(() => analysisRuns.id, {
 			onDelete: "set null",
 		}),
 		/** Normalized abuse-recipient addresses. */
@@ -202,10 +188,10 @@ export const reportThreads = sqliteTable(
 		replyToken: text("reply_token").notNull(),
 		status: text("status", { enum: reportThreadStatus }).notNull().default("pending"),
 		data: text("data", { mode: "json" }),
-		createdAt: timestamp("created_at")
+		createdAt: sqliteTimestamp("created_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
-		updatedAt: timestamp("updated_at")
+		updatedAt: sqliteTimestamp("updated_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
 	},
@@ -223,8 +209,8 @@ export type ReportThread = InferSelectModel<typeof reportThreads>;
 export const reportMessages = sqliteTable(
 	"report_messages",
 	{
-		id: bignum("id").primaryKey(),
-		threadId: bignum("thread_id")
+		id: sqliteBigint("id").primaryKey(),
+		threadId: sqliteBigint("thread_id")
 			.notNull()
 			.references(() => reportThreads.id, { onDelete: "cascade" }),
 		direction: text("direction", { enum: reportMessageDirection }).notNull(),
@@ -240,16 +226,16 @@ export const reportMessages = sqliteTable(
 		inReplyTo: text("in_reply_to"),
 		references: text("references", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
 		providerMessageId: text("provider_message_id"),
-		rawArtifactId: bignum("raw_artifact_id").references(() => artifacts.id, { onDelete: "set null" }),
+		rawArtifactId: sqliteBigint("raw_artifact_id").references(() => artifacts.id, { onDelete: "set null" }),
 		attachmentArtifactIds: text("attachment_artifact_ids", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
-		occurredAt: timestamp("occurred_at").notNull(),
+		occurredAt: sqliteTimestamp("occurred_at").notNull(),
 		/** SMTP acceptance time for outbound reports; timeline ordering stays on occurredAt. */
-		sentAt: timestamp("sent_at"),
+		sentAt: sqliteTimestamp("sent_at"),
 		error: text("error"),
-		createdAt: timestamp("created_at")
+		createdAt: sqliteTimestamp("created_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
-		updatedAt: timestamp("updated_at")
+		updatedAt: sqliteTimestamp("updated_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
 	},
@@ -276,24 +262,24 @@ export type ReportMessage = InferSelectModel<typeof reportMessages>;
 export const mailIngest = sqliteTable(
 	"mail_ingest",
 	{
-		id: bignum("id").primaryKey(),
+		id: sqliteBigint("id").primaryKey(),
 		mailbox: text("mailbox").notNull(),
-		uidValidity: int("uid_validity").notNull(),
-		uid: int("uid").notNull(),
+		uidValidity: sqliteInteger("uid_validity").notNull(),
+		uid: sqliteInteger("uid").notNull(),
 		messageId: text("message_id"),
 		route: text("route", { enum: mailIngestRoute }).notNull(),
-		reportMessageId: bignum("report_message_id").references(() => reportMessages.id, {
+		reportMessageId: sqliteBigint("report_message_id").references(() => reportMessages.id, {
 			onDelete: "set null",
 		}),
 		reason: text("reason"),
-		attempts: int("attempts").notNull().default(1),
+		attempts: sqliteInteger("attempts").notNull().default(1),
 		/** Failed parsing/storage attempts are retained but are retried on a later listener pass. */
 		terminal: int("terminal", { mode: "boolean" }).notNull().default(true),
-		processedAt: timestamp("processed_at").notNull(),
-		createdAt: timestamp("created_at")
+		processedAt: sqliteTimestamp("processed_at").notNull(),
+		createdAt: sqliteTimestamp("created_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
-		updatedAt: timestamp("updated_at")
+		updatedAt: sqliteTimestamp("updated_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
 	},
