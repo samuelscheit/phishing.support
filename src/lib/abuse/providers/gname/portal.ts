@@ -4,7 +4,10 @@ import { releaseLock, renewLock, tryAcquireLock } from "../../persistence/locks"
 import { getProviderRun, prepareSkyvernTaskCreation } from "../../persistence/provider_runs";
 import { transitionRouteStatus } from "../../persistence/routes";
 import { stableJson } from "../../security";
-import type { AbuseSkyvernAdapter } from "../../skyvern";
+import {
+	FabricSkyvernTaskAmbiguityError,
+	type AbuseSkyvernAdapter,
+} from "../../skyvern";
 import {
 	errorText,
 	recordValue,
@@ -342,7 +345,29 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 		// the durable pre-call marker so a missing key/base URL remains a normal
 		// retryable setup failure rather than an apparent external ambiguity.
 		const adapter = worker.getAdapter();
-		if (!(await prepareSkyvernTaskCreation(run.id))) {
+		let created: Awaited<ReturnType<WorkerServices["createFabricSkyvernTask"]>>;
+		try {
+			created = await worker.createFabricSkyvernTask({
+				adapter,
+				payload: taskPayload,
+				metadata: {
+					provider: "gname",
+					reportId: report.id.toString(),
+					routeId: route.id.toString(),
+					runId: run.id.toString(),
+				},
+				prepare: () => prepareSkyvernTaskCreation(run.id),
+				record: ({ skyvernRunId, fabricSessionId }) =>
+					recordGnameSkyvernTaskStarted({ runId: run.id, skyvernRunId, fabricSessionId }),
+			});
+		} catch (error) {
+			if (!(error instanceof FabricSkyvernTaskAmbiguityError)) throw error;
+			const message = errorText(error);
+			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "task_creation_ambiguous" });
+			retainCodeLock = true;
+			throw new UnknownExternalStateError(`Fabric-bound Skyvern task creation was ambiguous: ${message}`);
+		}
+		if (created.state === "not_eligible") {
 			const latest = await getProviderRun(run.id);
 			if (latest?.skyvernRunId) {
 				retainCodeLock = true;
@@ -354,17 +379,7 @@ export async function runGnamePortal(routeId: bigint, worker: WorkerServices): P
 			retainCodeLock = true;
 			throw new UnknownExternalStateError(message);
 		}
-
-		let created: { runId: string };
-		try {
-			created = await adapter.createTask(taskPayload);
-		} catch (error) {
-			const message = errorText(error);
-			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "task_creation_ambiguous" });
-			retainCodeLock = true;
-			throw new UnknownExternalStateError(`Skyvern task creation was ambiguous: ${message}`);
-		}
-		if (!(await recordGnameSkyvernTaskStarted({ runId: run.id, skyvernRunId: created.runId }))) {
+		if (created.state === "record_conflict") {
 			const message = "Skyvern task creation completed after the route left its expected state; operational reconciliation is required.";
 			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "task_creation_state_changed" });
 			retainCodeLock = true;

@@ -21,6 +21,54 @@ Phishing Support is an open-source tool to help automate the analysis, reporting
 2. Paste a suspicious website URL into the Website field and click Report.
 3. The app extracts indicators, performs automated checks, and attempts to report the issue.
 
+## Browser Fabric
+
+Browser operations are mandatory Browser Fabric workloads. Phishing Support does
+not install, start, expose, or remotely debug Chromium. Fabric owns the browser
+process, browser profile, egress policy, Turnstile guardian, and the ephemeral
+CDP capability; the application retains only the report workflow and evidence
+logic.
+
+The Compose stack contains one private `fabric-cdp-relay` sidecar. It is an
+internal transport bridge for Puppeteer, Patchright, and the local dynamic
+Skyvern companion, which cannot present an mTLS client certificate while
+opening a WebSocket. The app and Skyvern receive only an opaque route such as
+`ws://fabric-cdp-relay:8085/v1/cdp/browser-session_<id>`; the relay looks up
+the short-lived Fabric capability over mTLS and never exposes it, a raw browser
+port, VNC, or a caller-selected upstream.
+
+The local `skyvern` service remains only because this service has dynamic,
+persisted provider forms, uploads, verification-code workflows, and output
+contracts that are not static Fabric manifests. It never owns Chromium,
+profiles, egress, or CDP. A dynamic task obtains its browser through the relay;
+the opaque Fabric browser-session ID is retained next to the task solely for
+heartbeat/release/cancel reconciliation.
+
+The deployment requires all of the following values and secrets:
+
+```text
+FABRIC_CDP_CLIENT_RELAY_IMAGE=<Browser Fabric relay image digest>
+FABRIC_API_URL=https://fabric.example/v1
+FABRIC_PROJECT=project_...
+FABRIC_PRINCIPAL=principal_...
+FABRIC_CERT_FINGERPRINT=<client certificate fingerprint>
+FABRIC_PHISHING_PROFILE_REF=profile_...
+FABRIC_PHISHING_RECIPE_REF=recipe_rebrowser-phishing@1
+FABRIC_PHISHING_EGRESS_POLICY_REF=egress_phishing-residential@1
+FABRIC_PHISHING_ARTIFACT_POLICY_REF=artifact-policy_standard-30-days@1
+FABRIC_PHISHING_TTL_SECONDS=900
+FABRIC_CLIENT_CERT_PEM=<PEM client certificate>
+FABRIC_CLIENT_KEY_PEM=<PEM client key>
+FABRIC_CLIENT_CA_PEM=<PEM CA bundle>
+```
+
+`FABRIC_CLIENT_*_PEM` values are Docker secrets mounted read-only into both the
+application and relay. Do not add `BROWSER_REMOTE_DEBUGGING_URL`, Chrome/Xvfb,
+VNC/noVNC, a local profile volume, or a capability-bearing CDP URL back to this
+deployment. Tencent's direct non-browser provider route may still require its
+explicit `PROXY_URL` and `DEATHBYCAPTCHA_*` configuration; those values are not
+browser configuration and are never sent to Fabric session metadata.
+
 ## Abuse-report reply correspondence
 
 SMTP abuse reports are stored as individual correspondence threads. Each report uses the configured, authenticated `SMTP_FROM` address as its visible `From` address and a new opaque `Reply-To` address such as `case-<32 hexadecimal characters>@phishing.support`. The reply identity is random, does not contain a submission ID, and is unique to one report target.

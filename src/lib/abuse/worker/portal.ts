@@ -6,6 +6,7 @@ import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { AbuseRepository } from "../repository";
 import {
 	buildGenericProviderFormTaskPayload,
+	FabricSkyvernTaskAmbiguityError,
 	type SkyvernTaskPayload,
 } from "../skyvern";
 import { errorText, envInt, recordValue, routeContext, storedSkyvernTaskPayload, UnknownExternalStateError, type WorkerServices } from "./shared";
@@ -139,7 +140,28 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "generic_portal_payload_missing" });
 			throw new UnknownExternalStateError(message);
 		}
-		if (!(await AbuseRepository.prepareSkyvernTaskCreation(run.id))) {
+		let created: Awaited<ReturnType<WorkerServices["createFabricSkyvernTask"]>>;
+		try {
+			created = await worker.createFabricSkyvernTask({
+				adapter,
+				payload: durableTaskPayload,
+				metadata: {
+					provider: "generic-verified-provider-form",
+					reportId: report.id.toString(),
+					routeId: route.id.toString(),
+					runId: run.id.toString(),
+				},
+				prepare: () => AbuseRepository.prepareSkyvernTaskCreation(run.id),
+				record: ({ skyvernRunId, fabricSessionId }) =>
+					AbuseRepository.recordSkyvernTaskStarted({ runId: run.id, skyvernRunId, fabricSessionId }),
+			});
+		} catch (error) {
+			if (!(error instanceof FabricSkyvernTaskAmbiguityError)) throw error;
+			const message = errorText(error);
+			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "task_creation_ambiguous" });
+			throw new UnknownExternalStateError(`Fabric-bound generic provider form task creation was ambiguous: ${message}`);
+		}
+		if (created.state === "not_eligible") {
 			const latest = await AbuseRepository.getProviderRun(run.id);
 			if (latest?.skyvernRunId) {
 				await AbuseRepository.enqueueJob({
@@ -156,15 +178,7 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "task_creation_marker_conflict" });
 			throw new UnknownExternalStateError(message);
 		}
-		let created: { runId: string };
-		try {
-			created = await adapter.createTask(durableTaskPayload);
-		} catch (error) {
-			const message = errorText(error);
-			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "task_creation_ambiguous" });
-			throw new UnknownExternalStateError(`Generic provider form task creation was ambiguous: ${message}`);
-		}
-		if (!(await AbuseRepository.recordSkyvernTaskStarted({ runId: run.id, skyvernRunId: created.runId }))) {
+		if (created.state === "record_conflict") {
 			const message = "Skyvern task creation completed after the route left its expected state; operational reconciliation is required.";
 			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "task_creation_state_changed" });
 			throw new UnknownExternalStateError(message);

@@ -4,9 +4,7 @@ import type {
 	ProviderSubmissionPreparation,
 	ProviderSubmissionSuccess,
 } from "../submission_contracts";
-import { solveDeathByCaptchaToken } from "../../captcha/death_by_captcha";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
-import { getProviderProxy } from "../proxy";
 import { recordValue, routeContext } from "../../worker/shared";
 
 import { CLOUDFLARE_PROVIDER } from "./definition";
@@ -16,6 +14,7 @@ import {
 	dismissCloudflareConsentBanner,
 	isCloudflareManagedChallenge,
 	makeCloudflareClearanceCookieUsable,
+	readFabricTurnstileToken,
 	resolveCloudflareEdgeChallenge,
 	solveCloudflareAbuseTurnstile,
 	type CloudflareTurnstileSession,
@@ -81,9 +80,6 @@ export async function prepareCloudflareSubmission(context: ProviderSubmissionCon
 	const observedUrl = target.observedUrls[0];
 	if (!observedUrl) return { outcome: "insufficient_evidence", reason: "cloudflare_phishing_form_requires_observed_url" };
 
-	// Validate local configuration before the durable marker. It is deliberately
-	// not embedded in the immutable payload because proxy credentials are secret.
-	getProviderProxy("Cloudflare abuse reporting");
 	const serviceIdentity = cloudflareServiceIdentity(report.requesterCountry);
 	const form = buildCloudflareFormPayload({
 		serviceIdentity,
@@ -234,17 +230,7 @@ async function postCloudflareApiOnce(page: CloudflareTurnstileSession["page"], f
 }
 
 async function refreshCloudflareTurnstileToken(session: CloudflareTurnstileSession, signal?: AbortSignal): Promise<string> {
-	return solveDeathByCaptchaToken({
-		type: 12,
-		parametersField: "turnstile_params",
-		parameters: {
-			proxy: session.proxy.url,
-			proxytype: "HTTP",
-				sitekey: session.siteKey,
-				pageurl: CLOUDFLARE_PROVIDER.formUrl,
-			},
-			signal,
-	});
+	return readFabricTurnstileToken(session.page, signal, session.token);
 }
 
 /**
@@ -281,7 +267,7 @@ async function postCloudflareApi(session: CloudflareTurnstileSession, form: Clou
  * marker. The token is deliberately kept out of the durable provider run.
  */
 export async function prepareCloudflareExternalSubmission(_context: ProviderSubmissionContext): Promise<ProviderSubmissionPreflight> {
-	const session = await solveCloudflareAbuseTurnstile(undefined, { signal: _context.signal });
+	const session = await solveCloudflareAbuseTurnstile({ signal: _context.signal });
 	return {
 		state: session,
 		dispose: async () => {

@@ -38,7 +38,7 @@ export async function deliverGnameVerificationCode(params: {
 	routeId: bigint;
 	runId?: bigint;
 	payload: Record<string, unknown>;
-}, worker: WorkerServices): Promise<void> {
+}, worker: Pick<WorkerServices, "getAdapter" | "markUnknownExternal">): Promise<void> {
 	const route = await getRoute(params.routeId);
 	if (!route || route.providerRegistryKey !== "gname" || route.status !== "waiting_code") return;
 	const messageId = parseJobBigInt(params.payload.messageId, "payload.messageId");

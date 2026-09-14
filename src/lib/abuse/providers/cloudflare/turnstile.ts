@@ -1,8 +1,6 @@
-import { chromium, type Browser, type BrowserContext, type Page } from "patchright";
+import type { Browser, BrowserContext, Page } from "patchright";
 
-import { solveDeathByCaptchaToken } from "../../captcha/death_by_captcha";
-import { getChromeExecutablePath, getChromiumSandboxArgs } from "../../../browser/browser";
-import { getProviderProxy, withIproyalStickySession, type ProviderProxy } from "../proxy";
+import { acquireFabricPatchrightSession } from "../../../browser/fabric";
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
 
@@ -18,7 +16,6 @@ export type CloudflareTurnstileSession = {
 	page: Page;
 	context: BrowserContext;
 	browser: Browser;
-	proxy: ProviderProxy;
 	userAgent: string;
 	token: string;
 	siteKey: string;
@@ -129,30 +126,58 @@ function rejectedFormError(response: { status(): number; headers(): Record<strin
 }
 
 /**
- * Open Cloudflare's form and obtain a short-lived Turnstile token through the
- * documented Death by Captcha token API. The supplied HTTP proxy is passed to
- * both systems so the solver and the eventual form request use the same exit
- * network identity.
+ * The Fabric-owned Turnstile guardian performs the only permitted gesture on
+ * the reviewed widget. The resulting browser-local response is read just long
+ * enough to submit the same-page form; it is never persisted or logged.
  */
-async function solveCloudflareAbuseTurnstileOnce(proxy: ProviderProxy, signal?: AbortSignal): Promise<CloudflareTurnstileSession> {
-	const executablePath = getChromeExecutablePath();
-	const browserLaunch = chromium.launch({
-		...(executablePath ? { executablePath } : {}),
-		headless: process.env.BROWSER_HEADLESS === "true",
-		args: getChromiumSandboxArgs(),
-		proxy: proxy.browser,
-	});
-	const browser = await raceAbort(browserLaunch, signal, () => {
-		void browserLaunch.then((lateBrowser) => lateBrowser.close().catch(() => undefined)).catch(() => undefined);
+export async function readFabricTurnstileToken(page: Page, signal?: AbortSignal, previousToken?: string): Promise<string> {
+	const token = await raceAbort(
+		(async () => {
+			await page.waitForFunction(
+				(previous) => {
+					const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+						'input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"]',
+					));
+					return fields
+						.map((field) => field.value.trim())
+						.some((value) => value.length >= 20 && value.length <= 16_384 && value !== previous);
+				},
+				previousToken,
+				{ timeout: turnstileTimeoutMs },
+			);
+			return await page.evaluate(() => {
+				const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+					'input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"]',
+				));
+				return fields.map((field) => field.value.trim()).find((value) => value.length >= 20 && value.length <= 16_384) ?? "";
+			});
+		})(),
+		signal,
+		() => { void page.close().catch(() => undefined); },
+		"Cloudflare Turnstile preparation was canceled.",
+	);
+	if (!token || token.length > 16_384) throw new Error("Fabric Turnstile guardian did not produce a valid response token.");
+	return token;
+}
+
+/**
+ * Open Cloudflare's form in a Fabric-owned Chromium lease and obtain the
+ * browser-local response produced by Fabric's guardian. Browser egress,
+ * challenge interaction, and proxy affinity stay inside Fabric.
+ */
+async function solveCloudflareAbuseTurnstileOnce(signal?: AbortSignal): Promise<CloudflareTurnstileSession> {
+	const launch = acquireFabricPatchrightSession(
+		{ operation: "cloudflare-turnstile" },
+		{ leaseMode: "clone" },
+	);
+	const fabricSession = await raceAbort(launch, signal, () => {
+		void launch.then((late) => late.cancel().catch(() => undefined)).catch(() => undefined);
 	}, "Cloudflare Turnstile preparation was canceled.");
+	const browser = fabricSession.browser as Browser;
+	const context = fabricSession.context as BrowserContext;
 
 	try {
 		throwIfOperationCanceled(signal, "Cloudflare Turnstile preparation was canceled.");
-		const context = await browser.newContext({
-			ignoreHTTPSErrors: true,
-			locale: "en-US",
-			viewport: { width: 1920, height: 1080 },
-		});
 
 		const page = await raceAbort(context.newPage(), signal, () => { void browser.close().catch(() => undefined); }, "Cloudflare Turnstile preparation was canceled.");
 
@@ -170,19 +195,9 @@ async function solveCloudflareAbuseTurnstileOnce(proxy: ProviderProxy, signal?: 
 		const siteKey = await discoverTurnstileSiteKey(page, signal);
 		const userAgent = await raceAbort(page.evaluate(() => navigator.userAgent), signal, () => { void browser.close().catch(() => undefined); }, "Cloudflare Turnstile preparation was canceled.");
 		if (!userAgent.trim()) throw new Error("Cloudflare browser session did not expose a user agent.");
-		const token = await solveDeathByCaptchaToken({
-			type: 12,
-			parametersField: "turnstile_params",
-			parameters: {
-				proxy: proxy.url,
-				proxytype: "HTTP",
-				sitekey: siteKey,
-				pageurl: CLOUDFLARE_PROVIDER.formUrl,
-			},
-			signal,
-		});
+		const token = await readFabricTurnstileToken(page, signal);
 
-		return { page, context, browser, proxy, userAgent, token, siteKey };
+		return { page, context, browser, userAgent, token, siteKey };
 	} catch (error) {
 		await browser.close().catch(() => undefined);
 		throw error;
@@ -190,26 +205,18 @@ async function solveCloudflareAbuseTurnstileOnce(proxy: ProviderProxy, signal?: 
 }
 
 /**
- * Obtain a token with a fresh IPRoyal session when a rotating exit is blocked
- * or the browser/solver connection drops. All attempts happen before the
- * provider submission marker, so retrying cannot duplicate a complaint.
+ * Obtain a token with a fresh Fabric browser lease when the current guardian
+ * cannot complete the reviewed widget. All attempts happen before the provider
+ * submission marker, so retrying cannot duplicate a complaint.
  */
 export async function solveCloudflareAbuseTurnstile(
-	proxy: ProviderProxy = getProviderProxy("Cloudflare abuse reporting"),
 	options: { signal?: AbortSignal } = {},
 ): Promise<CloudflareTurnstileSession> {
-	if (proxy.captchaType !== "HTTP") {
-		throw new Error("Cloudflare Turnstile solving requires an HTTP proxy; configure PROXY_URL with an HTTP endpoint.");
-	}
-
 	let lastError: unknown;
 	for (let attempt = 0; attempt < maxTurnstileAttempts; attempt += 1) {
 		try {
 			throwIfOperationCanceled(options.signal, "Cloudflare Turnstile preparation was canceled.");
-			// IPRoyal's default gateway rotates on every connection. Turnstile
-			// tokens are IP-bound, so use one stable session for this browser and
-			// its DBC solve; a later attempt receives a new session/exit IP.
-			return await solveCloudflareAbuseTurnstileOnce(withIproyalStickySession(proxy), options.signal);
+			return await solveCloudflareAbuseTurnstileOnce(options.signal);
 		} catch (error) {
 			lastError = error;
 			if (attempt + 1 < maxTurnstileAttempts) await new Promise((resolve) => setTimeout(resolve, 1_000));

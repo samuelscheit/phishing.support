@@ -7,7 +7,7 @@ import { validateAbuseReportRequest } from "../../contracts";
 import { AbuseRepository } from "../../repository";
 import { abuseJobs } from "../../schema";
 import { sha256Hex } from "../../security";
-import type { AbuseSkyvernAdapter } from "../../skyvern";
+import type { AbuseSkyvernAdapter, FabricSkyvernTaskFactory } from "../../skyvern";
 import { AbuseWorker } from "../../worker";
 import { GNAME_PROVIDER } from "./definition";
 import { gnameCodeLockKey, gnameCodeLockOwner } from "./mailbox";
@@ -140,6 +140,23 @@ async function enqueuePortalRun(reportId: bigint, routeId: bigint, suffix: strin
 	return dedupeKey;
 }
 
+function fabricTaskFactory(bindings: Array<{ browserAddress: string; sessionId: string }> = []): FabricSkyvernTaskFactory {
+	return async ({ adapter, payload, metadata, prepare, record }) => {
+		expect(metadata).toMatchObject({ provider: "gname" });
+		if (!(await prepare())) return { state: "not_eligible" };
+		const binding = {
+			browserAddress: "ws://fabric-cdp-relay:8085/v1/cdp/browser-session_gname-test",
+			sessionId: "browser-session_gname-test",
+		};
+		bindings.push(binding);
+		const created = await adapter.createTask(payload, binding);
+		if (!(await record({ skyvernRunId: created.runId, fabricSessionId: binding.sessionId }))) {
+			return { state: "record_conflict", skyvernRunId: created.runId, fabricSessionId: binding.sessionId };
+		}
+		return { state: "created", skyvernRunId: created.runId, fabricSessionId: binding.sessionId };
+	};
+}
+
 describe("GNAME portal durability", () => {
 	test("records each evidence-upload pre-call boundary and refuses to replay an interrupted upload", async () => {
 		const context = await createGnameRoute();
@@ -189,6 +206,7 @@ describe("GNAME portal durability", () => {
 		const context = await createGnameRoute();
 		let uploads = 0;
 		let taskCreations = 0;
+		const bindings: Array<{ browserAddress: string; sessionId: string }> = [];
 		const worker = new AbuseWorker({
 			adapter: {
 				uploadFile: async ({ buffer }: { buffer: Buffer }) => {
@@ -200,14 +218,20 @@ describe("GNAME portal durability", () => {
 					return { runId: "gname-task-1" };
 				},
 			} as unknown as AbuseSkyvernAdapter,
+			fabricSkyvernTaskFactory: fabricTaskFactory(bindings),
 		});
 		await enqueuePortalRun(context.reportId, context.route.id, "first");
 		expect(await worker.processOne()).toBeTrue();
 		expect({ uploads, taskCreations }).toEqual({ uploads: 1, taskCreations: 1 });
+		expect(bindings).toEqual([{
+			browserAddress: "ws://fabric-cdp-relay:8085/v1/cdp/browser-session_gname-test",
+			sessionId: "browser-session_gname-test",
+		}]);
 		const run = await AbuseRepository.getLatestProviderRunForRoute(context.route.id);
 		expect(run).toMatchObject({ skyvernRunId: "gname-task-1", executionStatus: "waiting_code" });
 		const payload = run?.providerPayload as Record<string, unknown>;
 		expect(payload.stage).toBe("task_payload_prepared");
+		expect(payload.__fabricBrowserSessionId).toBe("browser-session_gname-test");
 		expect(payload.evidenceUploads).toEqual([
 			expect.objectContaining({ artifactId: context.artifact.id.toString(), state: "uploaded", presignedUrl: "https://storage.example.com/gname-evidence-1" }),
 		]);

@@ -20,7 +20,8 @@ The authoritative requirements are in the specification attached to this task. T
 - Generic verified-email delivery builds a provider-facing, recipient-specific draft instead of copying the stored analysis: the first versioned draft is durably pinned, bounded AI evidence summaries are optional and fail closed, and safe retries reuse the exact draft.
 - Code-owned provider registry with exact GNAME registrar-ID matching, pinned provider-definition hashes, fail-closed output contracts, final-origin/target checks, declaration checks, and provider-specific evidence derivatives.
 - Skyvern adapter with SDK-derived request types, no retries on side-effectful calls, bounded in-memory uploads with metadata, exact `ai_upload_file` payloads, response-envelope normalization, storage URL hardening, webhook verification, immutable task snapshots, reconciliation, and permanent artifact import.
-- Dedicated abuse-browser/Skyvern/Postgres/MinIO/DBC-extension Compose topology and configuration, kept separate from the normal application browser.
+- Browser Fabric-only browser boundary: Fabric owns Chromium, profile/volume affinity, egress, Turnstile handling, and CDP capability issuance. The private `fabric-cdp-relay` sidecar gives local CDP clients only opaque session routes; it is not a browser or public proxy.
+- Local Skyvern/Postgres/MinIO remains as the dynamic provider-task companion. It receives a Fabric relay route per task and owns no Chromium, egress, profile, capability, or browser listener.
 
 ## Rollout gates and defaults
 
@@ -29,9 +30,9 @@ The authoritative requirements are in the specification attached to this task. T
 - GNAME automation is disabled by default (`ABUSE_GNAME_ENABLED` and verified service identity are required).
 - The generic-form policy does not permit arbitrary uploads; only code-owned provider definitions may select bounded evidence derivatives.
 - No authorized GNAME canary or live production submission was performed for this task.
-- No live DBC CAPTCHA solve or live GNAME TOTP proof was performed.
-- No Skyvern/CDP/browser compatibility proof was performed, and no SDK upload/browser file-input compatibility proof was performed.
-- Stock Skyvern over ordinary CDP does not inherit Patchright/Rebrowser driver-level stealth. The dedicated abuse-browser sidecar is separate from the normal application browser; any stealth/anti-bot compatibility claim requires a separately authorized pilot.
+- No live GNAME TOTP proof was performed.
+- No production Fabric/Skyvern compatibility proof or SDK upload/browser file-input compatibility proof was performed.
+- The old local Chrome/Xvfb/DBC topology was removed. Fabric's reviewed recipe, managed browser runtime, egress policy, and process-level Turnstile guardian are now the only browser implementation; a production acceptance run still requires an authorized operator.
 
 ## Data-retention and operations
 
@@ -44,11 +45,12 @@ The authoritative requirements are in the specification attached to this task. T
 The final validation results are recorded here after the last rerun:
 
 ```text
-`bun test --timeout 30000`: 241 pass, 0 fail, 1034 expect() calls, 60 test files
-`bunx --bun tsc --noEmit --pretty false`: passed
-`bun run build`: passed
-`git diff --check`: passed
-`docker compose config` with test-only required secrets: passed
+The Fabric migration validation is run from the current checkout before each
+release. It includes focused Fabric/Skyvern lifecycle tests, the full TypeScript
+type checks, the full unit suite, image build, and an interpolated Compose
+configuration check with test-only Fabric certificates and identifiers.
 ```
 
-The Compose topology was syntax-validated only; it was not started. No live provider submission, real mail delivery, live CAPTCHA solve, live TOTP proof, or browser/SDK compatibility proof is represented by these checks.
+The Compose topology is syntax-validated only; it is not started by CI. No live
+provider submission, real mail delivery, live CAPTCHA solve, live TOTP proof,
+or Fabric/Skyvern compatibility proof is represented by these checks.

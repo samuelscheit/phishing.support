@@ -1,6 +1,30 @@
 name: phishing-reporter
 
 services:
+  # Private application-side bridge for CDP clients that cannot present the
+  # Fabric client certificate. It is not a browser and never publishes a port.
+  fabric-cdp-relay:
+    image: ${FABRIC_CDP_CLIENT_RELAY_IMAGE:?Set FABRIC_CDP_CLIENT_RELAY_IMAGE to a Browser Fabric relay image digest}
+    restart: unless-stopped
+    environment:
+      FABRIC_API_URL: ${FABRIC_API_URL:?Set FABRIC_API_URL}
+      FABRIC_PROJECT: ${FABRIC_PROJECT:?Set FABRIC_PROJECT}
+      FABRIC_PRINCIPAL: ${FABRIC_PRINCIPAL:?Set FABRIC_PRINCIPAL}
+      FABRIC_CERT_FINGERPRINT: ${FABRIC_CERT_FINGERPRINT:?Set FABRIC_CERT_FINGERPRINT}
+      FABRIC_CDP_RELAY_CLIENT_CERT_FILE: /run/secrets/fabric_phishing_client_cert
+      FABRIC_CDP_RELAY_CLIENT_KEY_FILE: /run/secrets/fabric_phishing_client_key
+      FABRIC_CDP_RELAY_CLIENT_CA_FILE: /run/secrets/fabric_phishing_client_ca
+      PORT: "8085"
+    expose:
+      - "8085"
+    secrets:
+      - source: fabric_phishing_client_cert
+        target: fabric_phishing_client_cert
+      - source: fabric_phishing_client_key
+        target: fabric_phishing_client_key
+      - source: fabric_phishing_client_ca
+        target: fabric_phishing_client_ca
+
   app:
     build:
       context: .
@@ -10,7 +34,6 @@ services:
       - "8014:3000"
     environment:
       DB_FILE_NAME: /app/data/phishing_reporter.sqlite
-      DOCKER: "true"
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://phishing.support}
       REPORT_REPLY_DOMAIN: ${REPORT_REPLY_DOMAIN:-phishing.support}
       ABUSE_REPLY_DOMAIN: ${ABUSE_REPLY_DOMAIN:-phishing.support}
@@ -45,8 +68,8 @@ services:
       ABUSE_OPENAI_API_BASE_URL: ${ABUSE_OPENAI_API_BASE_URL:-${OPENAI_API_BASE_URL:-https://api.openai.com/v1}}
       ABUSE_OPENAI_TIMEOUT_MS: ${ABUSE_OPENAI_TIMEOUT_MS:-45000}
       ABUSE_EMAIL_DRAFT_MODEL: ${ABUSE_EMAIL_DRAFT_MODEL:-${OPENAI_MODEL:-gpt-5.5}}
-      # Cloudflare Turnstile solving uses the documented Death by Captcha API
-      # and the same outbound proxy as the browser session.
+      # Tencent's direct provider route still uses its own explicit solver and
+      # HTTP proxy boundary; these values are not used to launch a browser.
       DEATHBYCAPTCHA_USERNAME: ${DEATHBYCAPTCHA_USERNAME:-}
       DEATHBYCAPTCHA_PASSWORD: ${DEATHBYCAPTCHA_PASSWORD:-}
       PROXY_URL: ${PROXY_URL:-}
@@ -55,10 +78,28 @@ services:
       # protect idempotency responses and bearer-authorized artifact reads.
       ABUSE_TRACKING_TOKEN_SECRET: ${ABUSE_TRACKING_TOKEN_SECRET:?Set ABUSE_TRACKING_TOKEN_SECRET to at least 32 random bytes}
       ABUSE_ARTIFACT_TOKEN_SECRET: ${ABUSE_ARTIFACT_TOKEN_SECRET:?Set ABUSE_ARTIFACT_TOKEN_SECRET to at least 32 random bytes}
+      # Browser Fabric is mandatory for every browser operation. The app gets
+      # only mTLS API access and an opaque private relay route; Fabric owns
+      # Chromium, profiles, egress, and CDP capabilities.
+      FABRIC_API_URL: ${FABRIC_API_URL:?Set FABRIC_API_URL}
+      FABRIC_PROJECT: ${FABRIC_PROJECT:?Set FABRIC_PROJECT}
+      FABRIC_PHISHING_PROFILE_REF: ${FABRIC_PHISHING_PROFILE_REF:?Set FABRIC_PHISHING_PROFILE_REF}
+      FABRIC_PHISHING_RECIPE_REF: ${FABRIC_PHISHING_RECIPE_REF:?Set FABRIC_PHISHING_RECIPE_REF}
+      FABRIC_PHISHING_EGRESS_POLICY_REF: ${FABRIC_PHISHING_EGRESS_POLICY_REF:?Set FABRIC_PHISHING_EGRESS_POLICY_REF}
+      FABRIC_PHISHING_ARTIFACT_POLICY_REF: ${FABRIC_PHISHING_ARTIFACT_POLICY_REF:?Set FABRIC_PHISHING_ARTIFACT_POLICY_REF}
+      FABRIC_PHISHING_TTL_SECONDS: ${FABRIC_PHISHING_TTL_SECONDS:?Set FABRIC_PHISHING_TTL_SECONDS}
+      FABRIC_PRINCIPAL: ${FABRIC_PRINCIPAL:?Set FABRIC_PRINCIPAL}
+      FABRIC_CERT_FINGERPRINT: ${FABRIC_CERT_FINGERPRINT:?Set FABRIC_CERT_FINGERPRINT}
+      FABRIC_CLIENT_CERT_FILE: /run/secrets/fabric_phishing_client_cert
+      FABRIC_CLIENT_KEY_FILE: /run/secrets/fabric_phishing_client_key
+      FABRIC_CLIENT_CA_FILE: /run/secrets/fabric_phishing_client_ca
+      FABRIC_CDP_RELAY_URL: http://fabric-cdp-relay:8085
     volumes:
       - phishing_reporter_data:/app/data
       - skyvern_api_key:/run/skyvern:ro
     depends_on:
+      fabric-cdp-relay:
+        condition: service_started
       skyvern:
         condition: service_started
       skyvern-minio:
@@ -111,21 +152,6 @@ services:
       skyvern-minio:
         condition: service_healthy
 
-  abuse-browser:
-    platform: linux/amd64
-    build:
-      context: .
-      dockerfile: docker/abuse-browser/Dockerfile
-    restart: unless-stopped
-    environment:
-      DBC_USERNAME_FILE: /run/secrets/dbc_username
-      DBC_PASSWORD_FILE: /run/secrets/dbc_password
-    secrets:
-      - dbc_username
-      - dbc_password
-    volumes:
-      - abuse_browser_profile:/data/profile
-
   skyvern:
     image: public.ecr.aws/skyvern/skyvern@sha256:f0c56aa4e19deb14c72d535ddb08a37c14efcf1ef1f32bd124eebb1d7e0b788f
     restart: unless-stopped
@@ -133,7 +159,6 @@ services:
       ENV: local
       DATABASE_STRING: postgresql+psycopg://skyvern:${SKYVERN_POSTGRES_PASSWORD:?Set SKYVERN_POSTGRES_PASSWORD to a deployment secret}@skyvern-postgres:5432/skyvern
       BROWSER_TYPE: cdp-connect
-      BROWSER_REMOTE_DEBUGGING_URL: http://abuse-browser:9222/
       SKYVERN_STORAGE_TYPE: s3
       AWS_ENDPOINT_URL: http://skyvern-minio:9000
       AWS_CONFIG_FILE: /etc/aws/config
@@ -158,7 +183,7 @@ services:
         condition: service_healthy
       skyvern-minio-init:
         condition: service_completed_successfully
-      abuse-browser:
+      fabric-cdp-relay:
         condition: service_started
 
   skyvern-api-key-bootstrap:
@@ -176,11 +201,12 @@ volumes:
   phishing_reporter_data:
   skyvern_postgres_data:
   skyvern_minio_data:
-  abuse_browser_profile:
   skyvern_api_key:
 
 secrets:
-  dbc_username:
-    environment: DBC_USERNAME
-  dbc_password:
-    environment: DBC_PASSWORD
+  fabric_phishing_client_cert:
+    environment: FABRIC_CLIENT_CERT_PEM
+  fabric_phishing_client_key:
+    environment: FABRIC_CLIENT_KEY_PEM
+  fabric_phishing_client_ca:
+    environment: FABRIC_CLIENT_CA_PEM

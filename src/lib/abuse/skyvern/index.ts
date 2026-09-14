@@ -5,6 +5,14 @@ export type {
 	SkyvernRunStatus,
 	SkyvernTaskPayload,
 } from "./contracts";
+export {
+	cancelFabricSkyvernTask,
+	createFabricSkyvernTask,
+	FabricSkyvernTaskAmbiguityError,
+	heartbeatFabricSkyvernTask,
+	releaseFabricSkyvernTask,
+} from "./fabric";
+export type { FabricSkyvernTaskFactory, FabricSkyvernTaskResult } from "./fabric";
 export { buildGenericProviderFormTaskPayload } from "./task_payloads";
 export {
 	isTerminalSkyvernStatus,

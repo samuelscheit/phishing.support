@@ -67,10 +67,20 @@ export class AbuseSkyvernAdapter {
 	/**
 	 * The only task-creation entry point. The payload is already immutable and
 	 * provider-owned when it reaches this method; no public request can add
-	 * prompts, selectors, URLs, headers, proxies, or browser addresses.
+	 * prompts, selectors, URLs, headers, or proxy settings. `browserAddress`
+	 * is an opaque, Fabric relay-issued session path—not a caller-selected CDP
+	 * endpoint—and exists only for the current Skyvern API request.
 	 */
-	async createTask(payload: SkyvernTaskPayload): Promise<{ runId: string; response: Record<string, unknown> }> {
-		const request = { body: payload } satisfies SdkRunTaskRequest;
+	async createTask(
+		payload: SkyvernTaskPayload,
+		binding?: { browserAddress: string },
+	): Promise<{ runId: string; response: Record<string, unknown> }> {
+		const request = {
+			body: {
+				...payload,
+				...(binding ? { browser_address: binding.browserAddress } : {}),
+			},
+		} satisfies SdkRunTaskRequest;
 		const response = objectPayload(await this.client.runTask(request, NO_RETRY), "task creation");
 		const runId = runIdOf(response);
 		if (!runId) throw new Error("Skyvern task creation returned no run ID.");

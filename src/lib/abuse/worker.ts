@@ -1,6 +1,7 @@
 import { AbuseRepository } from "./repository";
 import { resolveAbuseTarget } from "./resolver";
-import { AbuseSkyvernAdapter } from "./skyvern";
+import { AbuseSkyvernAdapter, cancelFabricSkyvernTask, createFabricSkyvernTask, type FabricSkyvernTaskFactory } from "./skyvern";
+import { fabricBrowserSessionIdFromProviderPayload } from "../fabric/session";
 import { skyvernApiKeySourceIsConfigured } from "./skyvern_config";
 import type { AbuseJob, AbuseJobType } from "./schema";
 import {
@@ -91,6 +92,8 @@ export type AbuseWorkerOptions = {
 	/** Deterministic test hook; production always dispatches through the provider registry. */
 	processJob?: (job: AbuseJob, signal?: AbortSignal) => Promise<void>;
 	adapter?: AbuseSkyvernAdapter;
+	/** Test hook for the Fabric browser/Skyvern capability boundary. */
+	fabricSkyvernTaskFactory?: FabricSkyvernTaskFactory;
 	/** Test hook; production uses the resolver implementation above. */
 	resolveTarget?: typeof resolveAbuseTarget;
 };
@@ -141,6 +144,7 @@ export class AbuseWorker {
 		this.services = {
 			owner: this.owner,
 			getAdapter: () => this.getAdapter(),
+			createFabricSkyvernTask: options.fabricSkyvernTaskFactory ?? createFabricSkyvernTask,
 			markUnknownExternal: (params) => this.markUnknownExternal(params),
 		};
 	}
@@ -162,6 +166,11 @@ export class AbuseWorker {
 
 	private async markUnknownExternal(params: { routeId: bigint; runId?: bigint; error: string; reason: string }): Promise<void> {
 		await AbuseRepository.markUnknownExternalState(params);
+		if (params.runId !== undefined) {
+			const run = await AbuseRepository.getProviderRun(params.runId);
+			const sessionId = fabricBrowserSessionIdFromProviderPayload(run?.providerPayload);
+			if (sessionId) await cancelFabricSkyvernTask(sessionId).catch(() => undefined);
+		}
 	}
 
 	async start(): Promise<void> {

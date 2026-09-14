@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "../../db";
+import { isFabricBrowserSessionId } from "../../fabric/session";
 import { generateId } from "../../db/ids";
 import {
 	abuseJobs,
@@ -431,10 +432,14 @@ export type SkyvernTaskStartedTransition = {
 export async function recordSkyvernTaskStartedWithTransition(params: {
 	runId: bigint;
 	skyvernRunId: string;
+	fabricSessionId?: string;
 	expectedProviderKey?: string;
 	transition: SkyvernTaskStartedTransition;
 }): Promise<boolean> {
 	if (!/^[A-Za-z0-9._:-]{1,256}$/.test(params.skyvernRunId)) throw new Error("Skyvern returned an invalid run ID.");
+	if (params.fabricSessionId !== undefined && !isFabricBrowserSessionId(params.fabricSessionId)) {
+		throw new Error("Browser Fabric returned an invalid session ID.");
+	}
 	const db = await getDb();
 	return db.transaction(
 		(tx) => {
@@ -443,10 +448,17 @@ export async function recordSkyvernTaskStartedWithTransition(params: {
 			const route = tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, run.routeId)).get();
 			if (!route || route.status !== "running" || (params.expectedProviderKey && route.providerRegistryKey !== params.expectedProviderKey)) return false;
 			const timestamp = now();
+			const providerPayload = params.fabricSessionId === undefined
+				? run.providerPayload
+				: { ...run.providerPayload, __fabricBrowserSessionId: params.fabricSessionId };
 			const runUpdated = tx
 				.update(abuseProviderRuns)
 				.set({
 					skyvernRunId: params.skyvernRunId,
+					...(params.fabricSessionId === undefined ? {} : {
+						providerPayload,
+						payloadHash: hashStableJson(providerPayload),
+					}),
 					executionStatus: params.transition.executionStatus,
 					attemptCount: run.attemptCount + 1,
 					updatedAt: timestamp,
@@ -460,7 +472,11 @@ export async function recordSkyvernTaskStartedWithTransition(params: {
 				routeId: route.id,
 				runId: run.id,
 				eventType: "provider_run.skyvern_task_started",
-				data: { skyvernRunId: params.skyvernRunId, executionStatus: params.transition.executionStatus },
+				data: {
+					skyvernRunId: params.skyvernRunId,
+					...(params.fabricSessionId === undefined ? {} : { fabricSessionId: params.fabricSessionId }),
+					executionStatus: params.transition.executionStatus,
+				},
 			});
 			if (params.transition.routeStatus !== route.status) {
 				const routeUpdated = tx
@@ -529,7 +545,7 @@ export async function recordSkyvernTaskStartedWithTransition(params: {
 }
 
 /** Persist a generic Skyvern task response without assuming provider phases. */
-export async function recordSkyvernTaskStarted(params: { runId: bigint; skyvernRunId: string }): Promise<boolean> {
+export async function recordSkyvernTaskStarted(params: { runId: bigint; skyvernRunId: string; fabricSessionId?: string }): Promise<boolean> {
 	return recordSkyvernTaskStartedWithTransition({
 		...params,
 		transition: { executionStatus: "running", routeStatus: "running" },

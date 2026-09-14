@@ -1,11 +1,6 @@
 import { simpleParser, type AddressObject } from "mailparser";
-import fs from "fs";
-import path from "path";
-import { config } from "dotenv";
 import { parse } from "node-html-parser";
-import { launch } from "puppeteer-core";
-import { tmpdir } from "os";
-import { getBrowser, getBrowserPage } from "./browser/";
+import { getBrowser } from "./browser/";
 import is_ip_private from "private-ip";
 import { analyzeSMTPHeadersFromRaw } from "@bernierllc/smtp-analyzer";
 import { MailData } from "./mail_ai";

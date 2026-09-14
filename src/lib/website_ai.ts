@@ -76,6 +76,8 @@ Important: classify the captured archive/screenshot evidence, not the result of 
 
 export async function analyzeWebsite(options: {
 	mhtmlSnapshot?: Buffer;
+	/** Existing evidence screenshot used when a retry parses MHTML locally. */
+	screenshotSnapshot?: Buffer;
 	/** Reuse the existing website archive artifacts instead of writing duplicates. */
 	reuseEvidenceArtifacts?: boolean;
 	url: string;
@@ -103,7 +105,10 @@ export async function analyzeWebsite(options: {
 		});
 
 		await emitStep(submissionId, "archive_website", 10);
-		const archive = await retry(() => archiveWebsite({ url, mhtmlSnapshot: options.mhtmlSnapshot }), 2, 3000);
+		const captured = await retry(() => archiveWebsite({ url, mhtmlSnapshot: options.mhtmlSnapshot }), 2, 3000);
+		const archive = captured.screenshotPng || !options.screenshotSnapshot
+			? captured
+			: { ...captured, screenshotPng: options.screenshotSnapshot };
 		await emitStep(submissionId, "save_artifacts", 40);
 
 		if (!reuseEvidenceArtifacts) {
@@ -140,11 +145,13 @@ Please provide a detailed phishing analysis of the website.
 Research if the website impersonates another brand/service using web_search. If possible the exact impersonated brand website URL address.
 Use web search if necessary to gather more information about the content/brand. (the website might be new and doesn't have any web results yet). (you are not be able to access the website directly use the provided website text, html and screenshot).`,
 							},
-							{
-								type: "input_image" as const,
-								detail: "high" as const,
-								image_url: `data:image/png;base64,${archive.screenshotPng.toString("base64")}`,
-							},
+							...(archive.screenshotPng
+								? [{
+									type: "input_image" as const,
+									detail: "high" as const,
+									image_url: `data:image/png;base64,${archive.screenshotPng.toString("base64")}`,
+								}]
+								: []),
 						],
 					},
 				],

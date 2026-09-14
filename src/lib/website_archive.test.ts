@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getMhtmlArchiveDate } from "./website_archive";
+import { archiveWebsite, getMhtmlArchiveDate } from "./website_archive";
 
 function mhtml(preamble: string, body = "content") {
 	return Buffer.from(`${preamble}\r\n\r\n${body}`, "latin1");
@@ -39,4 +39,24 @@ describe("getMhtmlArchiveDate", () => {
 		expect(getMhtmlArchiveDate(mhtml("From: <Saved by Blink>"))).toBeUndefined();
 		expect(getMhtmlArchiveDate(mhtml("Date: not a date"))).toBeUndefined();
 	});
+});
+
+test("archiveWebsite parses a retained MHTML snapshot locally without opening a browser", async () => {
+	const snapshot = Buffer.from([
+		"From: <Saved by Blink>",
+		"Content-Type: multipart/related; boundary=\"fabric-test\"",
+		"",
+		"--fabric-test",
+		"Content-Type: text/html",
+		"Content-Location: https://example.test/",
+		"",
+		"<html><head><title>Captured</title></head><body><p>Captured evidence</p><script>not-run()</script></body></html>",
+		"--fabric-test--",
+	].join("\r\n"), "utf8");
+
+	const archive = await archiveWebsite({ url: "https://example.test/", mhtmlSnapshot: snapshot });
+	expect(archive.html.toString()).toContain("Captured");
+	expect(archive.text.toString()).toContain("Captured evidence");
+	expect(archive.html.toString()).not.toContain("not-run");
+	expect(archive.screenshotPng).toBeUndefined();
 });

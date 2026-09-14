@@ -1,33 +1,28 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-
-import { chromium } from "patchright";
 import sharp from "sharp";
+import type { Route } from "patchright";
 
 import type { CapturedGnameEvidence } from "./evidence";
+import { acquireFabricPatchrightSession } from "../../../browser/fabric";
 import { assertPublicDnsHost, domainMatchesOrIsSubdomain } from "../../security";
 import { publicGnameEvidenceHost } from "./url_policy";
 
 /**
- * Capture a target in a fresh, throw-away Patchright profile. Every requested
+ * Capture a target in a Fabric-owned disposable browser lease. Every requested
  * hostname is DNS-checked before navigation; redirects to a different target
  * domain are recorded but never treated as evidence for the submitted domain.
  */
 export async function captureFreshGnameEvidence(url: string): Promise<CapturedGnameEvidence> {
 	const targetHost = publicGnameEvidenceHost(url);
 	await assertPublicDnsHost(targetHost);
-	const profile = await fs.mkdtemp(path.join(os.tmpdir(), "abuse-browser-"));
-	const executablePath = process.env.CHROME_PATH;
-	const context = await chromium.launchPersistentContext(profile, {
-		...(executablePath ? { executablePath } : {}),
-		headless: true,
-		viewport: { width: 1440, height: 1000 },
-		args: ["--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check"],
-	});
+	const session = await acquireFabricPatchrightSession(
+		{ operation: "gname-evidence-capture" },
+		{ leaseMode: "clone" },
+	);
+	const context = session.context;
 	try {
 		const page = context.pages()[0] ?? (await context.newPage());
-		await context.route("**/*", async (route) => {
+		await page.setViewportSize({ width: 1440, height: 1000 });
+		await context.route("**/*", async (route: Route) => {
 			try {
 				const requestUrl = new URL(route.request().url());
 				if (!["http:", "https:"].includes(requestUrl.protocol)) {
@@ -64,7 +59,6 @@ export async function captureFreshGnameEvidence(url: string): Promise<CapturedGn
 			},
 		};
 	} finally {
-		await context.close();
-		await fs.rm(profile, { recursive: true, force: true });
+		await session.release();
 	}
 }

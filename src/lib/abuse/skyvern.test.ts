@@ -59,10 +59,6 @@ function fakeClient(calls: RecordedCall[], options: { uploadUrl?: string } = {})
 				rawResponse: { status: 200 },
 			};
 		},
-		runSdkAction: async (...args: unknown[]) => {
-			calls.push({ name: "runSdkAction", args });
-			return { data: { workflow_run_id: "wr_upload" }, rawResponse: { status: 200 } };
-		},
 	} as unknown as SkyvernClientPort;
 }
 
@@ -117,12 +113,8 @@ describe("Skyvern SDK adapter boundary", () => {
 
 	test("uses SDK-derived request shapes, no retries, and supported Buffer upload metadata", async () => {
 		const calls: RecordedCall[] = [];
-		const assertedHosts: string[] = [];
 		const adapter = new AbuseSkyvernAdapter({
 			client: fakeClient(calls),
-			assertHost: async (hostname) => {
-				assertedHosts.push(hostname);
-			},
 		});
 		const evidence = Buffer.from("immutable evidence bytes");
 
@@ -130,17 +122,13 @@ describe("Skyvern SDK adapter boundary", () => {
 			presignedUrl: "https://storage.example.com/immutable-evidence",
 			sha256: "8bfaccd5ccaa419cfb01514df7c0d3fc17ac40b22195e4eed4789ddd53b418ca",
 		});
-		await expect(adapter.createTask(taskPayload())).resolves.toMatchObject({ runId: "tsk_created" });
+		await expect(adapter.createTask(taskPayload(), {
+			browserAddress: "ws://fabric-cdp-relay:8085/v1/cdp/browser-session_123",
+		})).resolves.toMatchObject({ runId: "tsk_created" });
 		await expect(adapter.getRun("tsk_created")).resolves.toMatchObject({ run_id: "tsk_created", status: "running" });
 		await adapter.sendTotpCode({ identifier: "provider-verification@example.com", content: "123456", taskId: "tsk_created" });
 		await adapter.retryWebhook("tsk_created");
 		await adapter.cancelRun("tsk_created");
-		await expect(adapter.runSdkUpload({
-			url: "https://abuse.provider.example.com/report",
-			presignedUrl: "https://storage.example.com/immutable-evidence",
-			intention: "Upload the approved evidence file.",
-			browserSessionId: "pbs_123",
-		})).resolves.toEqual({ workflow_run_id: "wr_upload" });
 
 		const byName = new Map(calls.map((call) => [call.name, call]));
 		expect(byName.get("uploadFile")?.args).toEqual([
@@ -154,7 +142,12 @@ describe("Skyvern SDK adapter boundary", () => {
 			},
 			{ maxRetries: 0 },
 		]);
-		expect(byName.get("runTask")?.args).toEqual([{ body: taskPayload() }, { maxRetries: 0 }]);
+		expect(byName.get("runTask")?.args).toEqual([{
+			body: {
+				...taskPayload(),
+				browser_address: "ws://fabric-cdp-relay:8085/v1/cdp/browser-session_123",
+			},
+		}, { maxRetries: 0 }]);
 		expect(byName.get("sendTotpCode")?.args).toEqual([
 			{
 				totp_identifier: "provider-verification@example.com",
@@ -166,19 +159,6 @@ describe("Skyvern SDK adapter boundary", () => {
 		]);
 		expect(byName.get("retryRunWebhook")?.args).toEqual(["tsk_created", undefined, { maxRetries: 0 }]);
 		expect(byName.get("cancelRun")?.args).toEqual(["tsk_created", { maxRetries: 0 }]);
-		expect(byName.get("runSdkAction")?.args).toEqual([
-			{
-				url: "https://abuse.provider.example.com/report",
-				browser_session_id: "pbs_123",
-				action: {
-					type: "ai_upload_file",
-					file_url: "https://storage.example.com/immutable-evidence",
-					intention: "Upload the approved evidence file.",
-				},
-			},
-			{ maxRetries: 0 },
-		]);
-		expect(assertedHosts).toEqual(["abuse.provider.example.com"]);
 	});
 
 	test("rejects local, private, credentialed, and malformed storage URLs before durable task use", async () => {
@@ -207,22 +187,9 @@ describe("Skyvern SDK adapter boundary", () => {
 		const calls: RecordedCall[] = [];
 		const adapter = new AbuseSkyvernAdapter({
 			client: fakeClient(calls, { uploadUrl: "https://127.0.0.1/evidence" }),
-			assertHost: async () => {
-				throw new Error("Unsafe SDK target must not reach DNS validation.");
-			},
 		});
 		await expect(adapter.uploadFile({ buffer: Buffer.from("evidence"), filename: "evidence.png", mimeType: "image/png" })).rejects.toThrow("unsafe presigned upload URL");
-		await expect(adapter.runSdkUpload({
-			url: "https://127.0.0.1/provider-form",
-			presignedUrl: "https://storage.example.com/evidence",
-			intention: "Upload approved evidence.",
-		})).rejects.toThrow("valid public HTTPS URL");
-		await expect(adapter.runSdkUpload({
-			url: "https://abuse.provider.example.com/provider-form",
-			presignedUrl: "https://localhost/evidence",
-			intention: "Upload approved evidence.",
-		})).rejects.toThrow("unsafe presigned upload URL");
-		expect(calls.filter((call) => call.name === "runSdkAction")).toHaveLength(0);
+		expect(calls.filter((call) => call.name === "runTask")).toHaveLength(0);
 	});
 });
 

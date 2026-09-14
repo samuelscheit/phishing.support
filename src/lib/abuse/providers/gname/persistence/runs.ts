@@ -54,6 +54,7 @@ export async function getLatestGnameActiveRunForRoute(routeId: bigint): Promise<
 export async function recordGnameSkyvernTaskStarted(params: {
 	runId: bigint;
 	skyvernRunId: string;
+	fabricSessionId?: string;
 }): Promise<boolean> {
 	const transition: SkyvernTaskStartedTransition = {
 		executionStatus: "waiting_code",

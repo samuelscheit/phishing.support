@@ -98,9 +98,14 @@ export async function retryFailedWebsiteAnalysis(submissionId: bigint): Promise<
 	);
 
 	let mhtmlSnapshot: Buffer | undefined;
+	let screenshotSnapshot: Buffer | undefined;
 	if (mhtmlArtifact) {
 		const artifact = await ArtifactsEntity.get(mhtmlArtifact.id);
 		if (artifact?.blob?.byteLength) mhtmlSnapshot = artifact.blob;
+	}
+	if (screenshotArtifact) {
+		const artifact = await ArtifactsEntity.get(screenshotArtifact.id);
+		if (artifact?.blob?.byteLength) screenshotSnapshot = artifact.blob;
 	}
 
 	const claimed = await SubmissionsEntity.transitionStatus(submissionId, "failed", "queued");
@@ -110,6 +115,7 @@ export async function retryFailedWebsiteAnalysis(submissionId: bigint): Promise<
 		submissionId,
 		url,
 		mhtmlSnapshot,
+		screenshotSnapshot,
 		reporterIp: submission.reporterIp ?? undefined,
 		reporterCountry: submission.reporterCountry ?? undefined,
 		reporterHeaders: submission.reporterHeaders ?? undefined,

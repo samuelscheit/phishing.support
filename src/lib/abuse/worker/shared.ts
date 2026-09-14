@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 import { AbuseRepository } from "../repository";
 import type { resolveAbuseTarget } from "../resolver";
-import type { AbuseSkyvernAdapter, SkyvernTaskPayload } from "../skyvern";
+import type { AbuseSkyvernAdapter, FabricSkyvernTaskFactory, SkyvernTaskPayload } from "../skyvern";
 
 export type UnknownExternalStateParams = {
 	routeId: bigint;
@@ -17,6 +17,7 @@ export type WorkerServices = {
 	 * during any potentially long external operation. */
 	readonly signal?: AbortSignal;
 	getAdapter(): AbuseSkyvernAdapter;
+	createFabricSkyvernTask: FabricSkyvernTaskFactory;
 	markUnknownExternal(params: UnknownExternalStateParams): Promise<void>;
 };
 

@@ -324,28 +324,28 @@ export class ArtifactsEntity {
         submissionId: bigint;
         archive: {
             archivedAt: Date;
-            screenshotPng: Buffer;
+            screenshotPng?: Buffer;
             mhtml: Buffer;
         };
     }) {
-        const [screenshotId, mhtmlId] = await Promise.all([
-            this.saveBuffer({
-                submissionId: submissionId,
-                name: `website.png`,
+        const mhtmlId = await this.saveBuffer({
+            submissionId,
+            name: "website.mhtml",
+            kind: "website_mhtml",
+            mimeType: "text/mhtml",
+            archivedAt: archive.archivedAt,
+            buffer: archive.mhtml,
+        });
+        const screenshotId = archive.screenshotPng?.byteLength
+            ? await this.saveBuffer({
+                submissionId,
+                name: "website.png",
                 kind: "website_png",
                 mimeType: "image/png",
                 archivedAt: archive.archivedAt,
                 buffer: archive.screenshotPng,
-            }),
-            this.saveBuffer({
-                submissionId: submissionId,
-                name: `website.mhtml`,
-                kind: "website_mhtml",
-                mimeType: "text/mhtml",
-                archivedAt: archive.archivedAt,
-                buffer: archive.mhtml,
-            }),
-        ]);
+            })
+            : undefined;
 
         return {
             screenshotId,

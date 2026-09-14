@@ -28,22 +28,11 @@ RUN bun run build
 FROM oven/bun:1.4.2-debian AS runner
 WORKDIR /app
 
-RUN set -euxo pipefail; \
-  apt-get update; \
-  apt-get install -y --no-install-recommends ca-certificates bash xvfb xauth fonts-liberation libasound2 libnss3 libxss1 libgtk-3-0; \
-  if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
-    apt-get install -y --no-install-recommends wget gnupg; \
-    wget -qO- https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-linux-signing-keyring.gpg; \
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends google-chrome-stable; \
-  else \
-    apt-get install -y --no-install-recommends chromium; \
-  fi; \
-  rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
-ENV DOCKER=true
 
 RUN mkdir -p /app/data
 
@@ -60,4 +49,4 @@ COPY --from=builder /app/src ./src
 
 EXPOSE 3000
 
-CMD ["sh", "-lc", "xvfb-run -a --server-args='-screen 0 1280x1024x24 -nolisten tcp' bun /app/src/lib/server_start.ts"]
+CMD ["bun", "/app/src/lib/server_start.ts"]

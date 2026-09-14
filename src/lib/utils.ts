@@ -1,19 +1,4 @@
-// import { Browser, launch } from "puppeteer-core";
 import path from "path";
-import fs from "fs";
-import { tmpdir } from "os";
-
-import {
-	CDPSession,
-	Frame,
-	HTTPResponse,
-	launch,
-	Page,
-	Protocol,
-	PuppeteerLifeCycleEvent,
-	type Browser,
-	type GoToOptions,
-} from "rebrowser-puppeteer-core";
 import sanitize from "sanitize-filename";
 import OpenAI from "openai";
 import { config } from "dotenv";

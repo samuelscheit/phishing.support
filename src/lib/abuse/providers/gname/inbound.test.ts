@@ -82,7 +82,11 @@ async function createWaitingGnameRun() {
 	});
 	if (!execution.acquired) throw new Error("Test route did not acquire its GNAME mailbox lease.");
 	if (!(await prepareSkyvernTaskCreation(execution.run.id))) throw new Error("Test route did not enter task creation.");
-	if (!(await recordGnameSkyvernTaskStarted({ runId: execution.run.id, skyvernRunId: `gname-inbound-${execution.run.id.toString()}` }))) {
+	if (!(await recordGnameSkyvernTaskStarted({
+		runId: execution.run.id,
+		skyvernRunId: `gname-inbound-${execution.run.id.toString()}`,
+		fabricSessionId: `browser-session_gname-inbound-${execution.run.id.toString()}`,
+	}))) {
 		throw new Error("Test route did not enter waiting_code.");
 	}
 	return { ...context, run: execution.run };
@@ -321,7 +325,6 @@ describe("GNAME inbound verification-mail routing", () => {
 				totpIdentifier: "attacker-controlled@evil.example",
 			},
 		}, {
-			owner: "gname-inbound-test",
 			getAdapter: () => ({
 				sendTotpCode: async (params: { identifier: string; content: string; taskId: string }) => {
 					sent.push(params);
