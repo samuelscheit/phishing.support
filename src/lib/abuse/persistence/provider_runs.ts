@@ -131,6 +131,97 @@ export async function updateProviderRun(runId: bigint, values: Partial<typeof ab
 }
 
 /**
+ * Atomically finish a direct-provider job whose local preflight exhausted all
+ * retries before the irreversible submission marker was acquired.
+ */
+export async function failProviderSubmissionPreflight(params: {
+	jobId: bigint;
+	owner: string;
+	error: string;
+}): Promise<boolean> {
+	const db = await getDb();
+	return db.transaction(
+		(tx) => {
+			const job = tx.select().from(abuseJobs).where(eq(abuseJobs.id, params.jobId)).get();
+			if (!job
+				|| job.jobType !== "submit_provider"
+				|| job.status !== "running"
+				|| job.leaseOwner !== params.owner
+				|| !job.routeId) return false;
+
+			const route = tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, job.routeId)).get();
+			if (!route || route.routeType !== "provider_submission" || route.status !== "running") return false;
+
+			const run = job.runId
+				? tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, job.runId)).get()
+				: tx.select()
+					.from(abuseProviderRuns)
+					.where(and(eq(abuseProviderRuns.routeId, route.id), eq(abuseProviderRuns.executionStatus, "starting")))
+					.orderBy(desc(abuseProviderRuns.createdAt), desc(abuseProviderRuns.id))
+					.limit(1)
+					.get();
+			if (!run || run.routeId !== route.id || run.executionStatus !== "starting") return false;
+
+			const timestamp = now();
+			tx.update(abuseJobs)
+				.set({
+					status: "failed",
+					leaseOwner: null,
+					leaseExpiresAt: null,
+					lastError: params.error,
+					updatedAt: timestamp,
+				})
+				.where(eq(abuseJobs.id, job.id))
+				.run();
+			recordEvent(tx, {
+				reportId: route.reportId,
+				targetId: route.targetId,
+				routeId: route.id,
+				runId: run.id,
+				jobId: job.id,
+				eventType: "job.failed",
+				data: { error: params.error, retryCount: job.retryCount },
+			});
+
+			tx.update(abuseProviderRuns)
+				.set({ executionStatus: "failed", failureReason: params.error, updatedAt: timestamp })
+				.where(eq(abuseProviderRuns.id, run.id))
+				.run();
+			recordEvent(tx, {
+				reportId: route.reportId,
+				targetId: route.targetId,
+				routeId: route.id,
+				runId: run.id,
+				jobId: job.id,
+				eventType: "provider_run.settled",
+				data: { executionStatus: "failed", failureReason: params.error },
+			});
+
+			tx.update(abuseProviderRoutes)
+				.set({ status: "failed", updatedAt: timestamp })
+				.where(eq(abuseProviderRoutes.id, route.id))
+				.run();
+			recordEvent(tx, {
+				reportId: route.reportId,
+				targetId: route.targetId,
+				routeId: route.id,
+				runId: run.id,
+				jobId: job.id,
+				eventType: "route.status_changed",
+				data: { from: route.status, to: "failed", reason: "retry_exhausted", error: params.error },
+			});
+
+			recomputeReportStatusInTransaction(tx, route.reportId, {
+				reason: "provider_preflight_retry_exhausted",
+				routeId: route.id.toString(),
+			});
+			return true;
+		},
+		{ behavior: "immediate" },
+	);
+}
+
+/**
  * Finish a known provider run and its provider route in one transaction.
  * Repeated callbacks and stale reconciliation jobs cannot downgrade an
  * already-settled route when an external provider later omits old output or

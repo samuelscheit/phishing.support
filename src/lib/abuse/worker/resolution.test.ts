@@ -275,4 +275,63 @@ describe("direct provider resolution and dispatch", () => {
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "verified" });
 		expect(await AbuseRepository.listProviderRunsForReport(created.reportId)).toEqual([]);
 	});
+
+	test("settles a retry-exhausted direct-provider preflight with its retained error", async () => {
+		const created = await createReport("cloudflare-preflight.example.com");
+		const db = await getDb();
+		db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.reportId, created.reportId)).run();
+		const [target] = await AbuseRepository.listTargets(created.reportId);
+		if (!target) throw new Error("Retry-exhaustion fixture has no target.");
+		const route = await AbuseRepository.upsertResolvedRoute(target.id, {
+			routeKey: "provider_submission:cloudflare-preflight:contact",
+			providerRegistryKey: "cloudflare-preflight",
+			providerDisplayName: "Cloudflare Preflight",
+			routeType: "provider_submission",
+			providerDefinitionVersion: "test-v1",
+			providerDefinitionHash: "e".repeat(64),
+			resolverProvenance: { source: "worker-preflight-retry-exhaustion-test" },
+			resolutionSnapshot: { source: "worker-preflight-retry-exhaustion-test" },
+			status: "verified",
+		});
+		const execution = await AbuseRepository.beginProviderExecution({
+			routeId: route.id,
+			providerPayload: { adapter: "cloudflare-preflight-test" },
+			correlationKey: `cloudflare-preflight-test:${route.id.toString()}`,
+			expectedStatus: "verified",
+		});
+		if (!execution) throw new Error("Retry-exhaustion fixture could not create a provider run.");
+		const job = await AbuseRepository.enqueueJob({
+			jobType: "submit_provider",
+			reportId: created.reportId,
+			routeId: route.id,
+			payload: {},
+			dedupeKey: `cloudflare-preflight-retry-exhaustion:${route.id.toString()}`,
+		});
+		db.update(abuseJobs).set({ retryCount: 8 }).where(eq(abuseJobs.id, job.id)).run();
+		const failure = "goto: net::ERR_TUNNEL_CONNECTION_FAILED at https://abuse.cloudflare.com/phishing";
+		const worker = new AbuseWorker({
+			owner: "worker-preflight-retry-exhaustion-test",
+			processJob: async (claimed) => {
+				if (claimed.id === job.id) throw new Error(failure);
+			},
+		});
+
+		expect(await worker.processOne(false, { jobTypes: ["submit_provider"] })).toBeTrue();
+		expect(db.select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()).toMatchObject({
+			status: "failed",
+			retryCount: 8,
+			lastError: failure,
+		});
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "failed" });
+		expect(await AbuseRepository.getProviderRun(execution.run.id)).toMatchObject({
+			executionStatus: "failed",
+			failureReason: failure,
+		});
+		const publicStatus = await AbuseRepository.getPublicStatus(created.trackingToken);
+		expect(publicStatus?.targets[0]?.providerRoutes[0]).toMatchObject({
+			status: "failed",
+			executionStatus: "failed",
+			error: "The provider route did not complete safely.",
+		});
+	});
 });

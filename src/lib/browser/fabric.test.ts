@@ -9,28 +9,20 @@ import {
 
 function environment(overrides: Record<string, string | undefined> = {}) {
 	return {
-		FABRIC_API_URL: "https://fabric.example.test/v1",
+		FABRIC_API_URL: "http://fabric-cdp-relay:8085/v1",
 		FABRIC_PROJECT: "project_phishing",
-		FABRIC_PRINCIPAL: "principal_phishing",
-		FABRIC_CERT_FINGERPRINT: "sha256:phishing-client",
 		FABRIC_PHISHING_PROFILE_REF: "profile_phishing",
 		FABRIC_PHISHING_RECIPE_REF: "recipe_rebrowser-phishing@1",
 		FABRIC_PHISHING_EGRESS_POLICY_REF: "egress_phishing-residential@1",
 		FABRIC_PHISHING_ARTIFACT_POLICY_REF: "artifact-policy_standard-30-days@1",
 		FABRIC_PHISHING_TTL_SECONDS: "900",
-		FABRIC_CLIENT_CERT_FILE: "/run/secrets/fabric-client-cert",
-		FABRIC_CLIENT_KEY_FILE: "/run/secrets/fabric-client-key",
-		FABRIC_CLIENT_CA_FILE: "/run/secrets/fabric-client-ca",
 		...overrides,
 	};
 }
 
 describe("Phishing Support Browser Fabric boundary", () => {
-	test("requires the complete Fabric identity and never offers a local-browser fallback", () => {
+	test("requires the complete private Fabric relay contract and never offers a local-browser fallback", () => {
 		expect(fabricBrowserConfigFromEnvironment({ environment: {} })).toBeUndefined();
-		expect(() => fabricBrowserConfigFromEnvironment({
-			environment: environment({ FABRIC_PRINCIPAL: undefined }),
-		})).toThrow("FABRIC_PRINCIPAL");
 		expect(() => fabricBrowserConfigFromEnvironment({
 			environment: environment({ FABRIC_PHISHING_PROFILE_REF: undefined }),
 		})).toThrow("FABRIC_PHISHING_PROFILE_REF");

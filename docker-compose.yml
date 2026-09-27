@@ -1,30 +1,6 @@
 name: phishing-reporter
 
 services:
-  # Private application-side bridge for CDP clients that cannot present the
-  # Fabric client certificate. It is not a browser and never publishes a port.
-  fabric-cdp-relay:
-    image: ${FABRIC_CDP_CLIENT_RELAY_IMAGE:?Set FABRIC_CDP_CLIENT_RELAY_IMAGE to a Browser Fabric relay image digest}
-    restart: unless-stopped
-    environment:
-      FABRIC_API_URL: ${FABRIC_API_URL:?Set FABRIC_API_URL}
-      FABRIC_PROJECT: ${FABRIC_PROJECT:?Set FABRIC_PROJECT}
-      FABRIC_PRINCIPAL: ${FABRIC_PRINCIPAL:?Set FABRIC_PRINCIPAL}
-      FABRIC_CERT_FINGERPRINT: ${FABRIC_CERT_FINGERPRINT:?Set FABRIC_CERT_FINGERPRINT}
-      FABRIC_CDP_RELAY_CLIENT_CERT_FILE: /run/secrets/fabric_phishing_client_cert
-      FABRIC_CDP_RELAY_CLIENT_KEY_FILE: /run/secrets/fabric_phishing_client_key
-      FABRIC_CDP_RELAY_CLIENT_CA_FILE: /run/secrets/fabric_phishing_client_ca
-      PORT: "8085"
-    expose:
-      - "8085"
-    secrets:
-      - source: fabric_phishing_client_cert
-        target: fabric_phishing_client_cert
-      - source: fabric_phishing_client_key
-        target: fabric_phishing_client_key
-      - source: fabric_phishing_client_ca
-        target: fabric_phishing_client_ca
-
   app:
     build:
       context: .
@@ -78,8 +54,8 @@ services:
       # protect idempotency responses and bearer-authorized artifact reads.
       ABUSE_TRACKING_TOKEN_SECRET: ${ABUSE_TRACKING_TOKEN_SECRET:?Set ABUSE_TRACKING_TOKEN_SECRET to at least 32 random bytes}
       ABUSE_ARTIFACT_TOKEN_SECRET: ${ABUSE_ARTIFACT_TOKEN_SECRET:?Set ABUSE_ARTIFACT_TOKEN_SECRET to at least 32 random bytes}
-      # Browser Fabric is mandatory for every browser operation. The app gets
-      # only mTLS API access and an opaque private relay route; Fabric owns
+      # Browser Fabric is mandatory for every browser operation. The app talks
+      # only to its private authenticated relay; Fabric owns the API credential,
       # Chromium, profiles, egress, and CDP capabilities.
       FABRIC_API_URL: ${FABRIC_API_URL:?Set FABRIC_API_URL}
       FABRIC_PROJECT: ${FABRIC_PROJECT:?Set FABRIC_PROJECT}
@@ -88,18 +64,14 @@ services:
       FABRIC_PHISHING_EGRESS_POLICY_REF: ${FABRIC_PHISHING_EGRESS_POLICY_REF:?Set FABRIC_PHISHING_EGRESS_POLICY_REF}
       FABRIC_PHISHING_ARTIFACT_POLICY_REF: ${FABRIC_PHISHING_ARTIFACT_POLICY_REF:?Set FABRIC_PHISHING_ARTIFACT_POLICY_REF}
       FABRIC_PHISHING_TTL_SECONDS: ${FABRIC_PHISHING_TTL_SECONDS:?Set FABRIC_PHISHING_TTL_SECONDS}
-      FABRIC_PRINCIPAL: ${FABRIC_PRINCIPAL:?Set FABRIC_PRINCIPAL}
-      FABRIC_CERT_FINGERPRINT: ${FABRIC_CERT_FINGERPRINT:?Set FABRIC_CERT_FINGERPRINT}
-      FABRIC_CLIENT_CERT_FILE: /run/secrets/fabric_phishing_client_cert
-      FABRIC_CLIENT_KEY_FILE: /run/secrets/fabric_phishing_client_key
-      FABRIC_CLIENT_CA_FILE: /run/secrets/fabric_phishing_client_ca
       FABRIC_CDP_RELAY_URL: http://fabric-cdp-relay:8085
     volumes:
       - phishing_reporter_data:/app/data
       - skyvern_api_key:/run/skyvern:ro
+    networks:
+      - default
+      - fabric-phishing
     depends_on:
-      fabric-cdp-relay:
-        condition: service_started
       skyvern:
         condition: service_started
       skyvern-minio:
@@ -178,13 +150,14 @@ services:
       ENABLE_OPENAI: ${SKYVERN_ENABLE_OPENAI:-false}
     volumes:
       - ./docker/skyvern/aws-config:/etc/aws/config:ro
+    networks:
+      - default
+      - fabric-phishing
     depends_on:
       skyvern-postgres:
         condition: service_healthy
       skyvern-minio-init:
         condition: service_completed_successfully
-      fabric-cdp-relay:
-        condition: service_started
 
   skyvern-api-key-bootstrap:
     image: curlimages/curl:latest
@@ -203,10 +176,7 @@ volumes:
   skyvern_minio_data:
   skyvern_api_key:
 
-secrets:
-  fabric_phishing_client_cert:
-    environment: FABRIC_CLIENT_CERT_PEM
-  fabric_phishing_client_key:
-    environment: FABRIC_CLIENT_KEY_PEM
-  fabric_phishing_client_ca:
-    environment: FABRIC_CLIENT_CA_PEM
+networks:
+  fabric-phishing:
+    name: ${FABRIC_DOCKER_NETWORK_PHISHING:-browser-fabric-phishing}
+    external: true

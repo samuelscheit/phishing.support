@@ -29,12 +29,13 @@ process, browser profile, egress policy, Turnstile guardian, and the ephemeral
 CDP capability; the application retains only the report workflow and evidence
 logic.
 
-The Compose stack contains one private `fabric-cdp-relay` sidecar. It is an
-internal transport bridge for Puppeteer, Patchright, and the local dynamic
-Skyvern companion, which cannot present an mTLS client certificate while
-opening a WebSocket. The app and Skyvern receive only an opaque route such as
+Browser Fabric runs one private `fabric-cdp-relay` for the Phishing Support
+trust boundary. It is an internal transport bridge for Puppeteer, Patchright,
+and the local dynamic Skyvern companion. The relay owns the per-principal Basic
+credential for both the narrow browser-session lifecycle API and WebSocket
+upgrade, so the application receives no Fabric credential. The app and Skyvern receive only an opaque route such as
 `ws://fabric-cdp-relay:8085/v1/cdp/browser-session_<id>`; the relay looks up
-the short-lived Fabric capability over mTLS and never exposes it, a raw browser
+the short-lived Fabric capability through the authenticated Fabric edge and never exposes it, a raw browser
 port, VNC, or a caller-selected upstream.
 
 The local `skyvern` service remains only because this service has dynamic,
@@ -47,23 +48,16 @@ heartbeat/release/cancel reconciliation.
 The deployment requires all of the following values and secrets:
 
 ```text
-FABRIC_CDP_CLIENT_RELAY_IMAGE=<Browser Fabric relay image digest>
-FABRIC_API_URL=https://fabric.example/v1
+FABRIC_API_URL=http://fabric-cdp-relay:8085/v1
 FABRIC_PROJECT=project_...
-FABRIC_PRINCIPAL=principal_...
-FABRIC_CERT_FINGERPRINT=<client certificate fingerprint>
 FABRIC_PHISHING_PROFILE_REF=profile_...
 FABRIC_PHISHING_RECIPE_REF=recipe_rebrowser-phishing@1
 FABRIC_PHISHING_EGRESS_POLICY_REF=egress_phishing-residential@1
 FABRIC_PHISHING_ARTIFACT_POLICY_REF=artifact-policy_standard-30-days@1
 FABRIC_PHISHING_TTL_SECONDS=900
-FABRIC_CLIENT_CERT_PEM=<PEM client certificate>
-FABRIC_CLIENT_KEY_PEM=<PEM client key>
-FABRIC_CLIENT_CA_PEM=<PEM CA bundle>
 ```
 
-`FABRIC_CLIENT_*_PEM` values are Docker secrets mounted read-only into both the
-application and relay. Do not add `BROWSER_REMOTE_DEBUGGING_URL`, Chrome/Xvfb,
+Do not add the Fabric principal password, `BROWSER_REMOTE_DEBUGGING_URL`, Chrome/Xvfb,
 VNC/noVNC, a local profile volume, or a capability-bearing CDP URL back to this
 deployment. Tencent's direct non-browser provider route may still require its
 explicit `PROXY_URL` and `DEATHBYCAPTCHA_*` configuration; those values are not

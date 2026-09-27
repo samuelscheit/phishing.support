@@ -369,6 +369,11 @@ export class AbuseWorker {
 				return;
 			}
 		}
+		if (job.jobType === "submit_provider" && await AbuseRepository.failProviderSubmissionPreflight({
+			jobId: job.id,
+			owner: this.owner,
+			error,
+		})) return;
 		await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
 		if (job.routeId) {
 			const route = await AbuseRepository.getRoute(job.routeId);

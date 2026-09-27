@@ -3,8 +3,9 @@
  *
  * This application owns report-domain logic only. Browser Fabric owns every
  * Chromium process, browser profile, egress policy, CDP capability, and lease
- * transition. CDP libraries connect through the private Fabric relay, never
- * directly to Fabric's mTLS-protected gateway.
+ * transition. Browser-session lifecycle calls and CDP libraries both go
+ * through the private per-application relay; the Fabric credential stays in
+ * that Browser Fabric-owned process.
  */
 import type { Browser as PuppeteerBrowser } from "rebrowser-puppeteer-core";
 
@@ -21,18 +22,13 @@ type FabricFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Res
 export interface FabricBrowserConfig {
 	baseUrl: string;
 	project: string;
-	principal: string;
-	certificateFingerprint: string;
 	profileRef?: string;
 	recipeRef: string;
 	runtime: "rebrowser-puppeteer";
 	egressPolicyRef: string;
 	artifactPolicyRef: string;
 	ttlSeconds: number;
-	clientCertificateFile: string;
-	clientKeyFile: string;
-	clientCaFile: string;
-	/** Test-only transport seam. Production always uses the mTLS transport. */
+	/** Test-only transport seam. Production uses the Basic-authenticated Fabric edge. */
 	fetch?: FabricFetch;
 }
 
@@ -151,17 +147,12 @@ export function fabricBrowserConfigFromEnvironment(options: { environment?: Fabr
 	return {
 		baseUrl: fabricApiBaseUrl(apiUrl),
 		project: requiredReference(environment, "FABRIC_PROJECT", "project_"),
-		principal: requiredReference(environment, "FABRIC_PRINCIPAL", "principal_"),
-		certificateFingerprint: requiredEnvironment(environment, "FABRIC_CERT_FINGERPRINT"),
 		profileRef,
 		recipeRef: requiredReference(environment, "FABRIC_PHISHING_RECIPE_REF", "recipe_"),
 		runtime: "rebrowser-puppeteer",
 		egressPolicyRef: requiredReference(environment, "FABRIC_PHISHING_EGRESS_POLICY_REF", "egress_"),
 		artifactPolicyRef: requiredReference(environment, "FABRIC_PHISHING_ARTIFACT_POLICY_REF", "artifact-policy_"),
 		ttlSeconds,
-		clientCertificateFile: requiredEnvironment(environment, "FABRIC_CLIENT_CERT_FILE"),
-		clientKeyFile: requiredEnvironment(environment, "FABRIC_CLIENT_KEY_FILE"),
-		clientCaFile: requiredEnvironment(environment, "FABRIC_CLIENT_CA_FILE"),
 	};
 }
 
@@ -234,16 +225,6 @@ export function buildFabricBrowserSessionCreatePayload(
 	};
 }
 
-function mTlsFabricFetch(config: FabricBrowserConfig): FabricFetch {
-	const tls = {
-		cert: Bun.file(config.clientCertificateFile),
-		key: Bun.file(config.clientKeyFile),
-		ca: Bun.file(config.clientCaFile),
-		rejectUnauthorized: true,
-	};
-	return (input, init = {}) => globalThis.fetch(input, { ...init, tls } as RequestInit);
-}
-
 function resourceUrl(config: FabricBrowserConfig, path: string): string {
 	return `${config.baseUrl}${path}`;
 }
@@ -255,16 +236,12 @@ async function fabricRequest<T>(
 ): Promise<T> {
 	let response: Response;
 	try {
-		response = await (config.fetch ?? mTlsFabricFetch(config))(resourceUrl(config, path), {
+		response = await (config.fetch ?? globalThis.fetch)(resourceUrl(config, path), {
 			method: init.method ?? "GET",
 			headers: {
 				accept: "application/json",
 				...(init.body === undefined ? {} : { "content-type": "application/json" }),
 				...(init.idempotencyKey === undefined ? {} : { "idempotency-key": init.idempotencyKey }),
-				"x-fabric-mtls-verified": "true",
-				"x-fabric-principal": config.principal,
-				"x-fabric-project": config.project,
-				"x-fabric-cert-fingerprint": config.certificateFingerprint,
 			},
 			...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
 		});
