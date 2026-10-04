@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import type { Browser, BrowserContext, Page } from "rebrowser-puppeteer-core";
+
 import { archiveWebsite, getMhtmlArchiveDate } from "./website_archive";
 
 function mhtml(preamble: string, body = "content") {
@@ -59,4 +61,96 @@ test("archiveWebsite parses a retained MHTML snapshot locally without opening a 
 	expect(archive.text.toString()).toContain("Captured evidence");
 	expect(archive.html.toString()).not.toContain("not-run");
 	expect(archive.screenshotPng).toBeUndefined();
+});
+
+function archiveBrowserFixture(options: {
+	goto?: (url: string, navigation: { waitUntil?: string; timeout?: number }) => Promise<{ ok: () => boolean; status: () => number } | null>;
+} = {}) {
+	const eventNames: string[] = [];
+	const navigationCalls: Array<{ url: string; waitUntil?: string; timeout?: number }> = [];
+	let interceptionEnabled = false;
+	let screenshotCount = 0;
+	let closeCount = 0;
+	let captureSnapshotCount = 0;
+	const context = {} as BrowserContext;
+	const page = {
+		browser: () => browser,
+		browserContext: () => context,
+		setViewport: async () => undefined,
+		on: (event: string) => { eventNames.push(event); },
+		setRequestInterception: async (enabled: boolean) => { interceptionEnabled = enabled; },
+		goto: async (url: string, navigation: { waitUntil?: string; timeout?: number }) => {
+			navigationCalls.push({ url, ...navigation });
+			if (options.goto) return options.goto(url, navigation);
+			return { ok: () => true, status: () => 200 };
+		},
+		screenshot: async () => { screenshotCount++; return Buffer.from("png"); },
+		target: () => ({
+			createCDPSession: async () => ({
+				send: async (method: string) => {
+					if (method !== "Page.captureSnapshot") throw new Error(`Unexpected CDP command ${method}`);
+					captureSnapshotCount++;
+					return { data: "From: <Saved by Blink>\r\n\r\nMHTML evidence" };
+				},
+			}),
+		}),
+		evaluate: async (callback: () => unknown) => {
+			const source = callback.toString();
+			if (source.includes("cloneNode")) return "<html><body>Captured HTML</body></html>";
+			if (source.includes("document.body.innerText")) return "Captured page text";
+			if (source.includes("querySelector")) return "Captured description";
+			throw new Error("Unexpected page evaluation");
+		},
+		title: async () => "Captured title",
+	};
+	const browser = {
+		defaultBrowserContext: () => ({ ...context, newPage: async () => page }),
+		close: async () => { closeCount++; },
+	} as unknown as Browser;
+
+	return {
+		browser,
+		page: page as unknown as Page & { setRequestInterception: (enabled: boolean) => Promise<void> },
+		eventNames,
+		navigationCalls,
+		get interceptionEnabled() { return interceptionEnabled; },
+		get screenshotCount() { return screenshotCount; },
+		get closeCount() { return closeCount; },
+		get captureSnapshotCount() { return captureSnapshotCount; },
+	};
+}
+
+test("website capture commits at DOMContentLoaded without intercepting redirect requests", async () => {
+	const fixture = archiveBrowserFixture();
+	const archive = await archiveWebsite(
+		{ url: "https://share.google/ZAq2FghpGquJH6ShL" },
+		{ browser: fixture.browser, sleep: async () => undefined },
+	);
+
+	expect(fixture.navigationCalls).toEqual([{
+		url: "https://share.google/ZAq2FghpGquJH6ShL",
+		waitUntil: "domcontentloaded",
+		timeout: 30_000,
+	}]);
+	expect(fixture.interceptionEnabled).toBe(false);
+	expect(fixture.eventNames).not.toContain("request");
+	expect(fixture.eventNames).not.toContain("response");
+	expect(fixture.captureSnapshotCount).toBe(1);
+	expect(fixture.screenshotCount).toBe(1);
+	expect(fixture.closeCount).toBe(1);
+	expect(archive.text.toString()).toContain("Captured page text");
+});
+
+test("website capture preserves navigation failures and closes the browser lease", async () => {
+	const fixture = archiveBrowserFixture({
+		goto: async () => { throw new Error("Navigation timeout of 30000 ms exceeded"); },
+	});
+
+	await expect(archiveWebsite(
+		{ url: "https://example.test/" },
+		{ browser: fixture.browser, sleep: async () => undefined },
+	)).rejects.toThrow("Navigation timeout of 30000 ms exceeded");
+	expect(fixture.screenshotCount).toBe(1);
+	expect(fixture.captureSnapshotCount).toBe(0);
+	expect(fixture.closeCount).toBe(1);
 });

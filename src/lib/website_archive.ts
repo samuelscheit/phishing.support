@@ -28,6 +28,8 @@ export type WebsiteArchiveResult = {
 	text: Buffer;
 };
 
+const WEBSITE_NAVIGATION_TIMEOUT_MS = 30_000;
+
 export type ArchiveWebsiteOptions = {
 	/** Raw MHTML (decoded bytes). It is parsed locally; Fabric browsers never receive an app-local file:// URL. */
 	mhtmlSnapshot?: Buffer;
@@ -73,11 +75,19 @@ async function archiveMhtmlSnapshot(url: string, mhtml: Buffer): Promise<Website
 	};
 }
 
-async function archiveWebsiteInternal({ url, mhtmlSnapshot }: ArchiveWebsiteOptions): Promise<WebsiteArchiveResult> {
+export type WebsiteArchiveDependencies = {
+	browser?: Awaited<ReturnType<typeof getBrowser>>;
+	sleep?: typeof sleep;
+};
+
+async function archiveWebsiteInternal(
+	{ url, mhtmlSnapshot }: ArchiveWebsiteOptions,
+	dependencies: WebsiteArchiveDependencies = {},
+): Promise<WebsiteArchiveResult> {
 	console.log(`Archiving website ${url}`);
 	if (mhtmlSnapshot?.byteLength) return archiveMhtmlSnapshot(url, mhtmlSnapshot);
 
-	const browser = await getBrowser();
+	const browser = dependencies.browser ?? await getBrowser();
 	try {
 		// Browser Fabric owns the leased profile context. Creating an
 		// application-side incognito context would bypass that profile and egress
@@ -89,29 +99,13 @@ async function archiveWebsiteInternal({ url, mhtmlSnapshot }: ArchiveWebsiteOpti
 		const uri = new URL(url);
 		const { hostname } = uri;
 
-		await page.setRequestInterception(true);
-
-		page.on("response", (response) => {
-			if (!response.request().isNavigationRequest()) return;
-			try {
-				const uri = new URL(response.url());
-				if (hostname !== uri.hostname) {
-					// reject(new Error("Redirected to different hostname"));
-				}
-			} catch {
-				// ignore
-			}
-		});
-
-		page.on("request", (request) => {
-			console.log(`Request: ${request.method()} ${request.url()}`);
-			return request.continue();
-		});
-
 		try {
+			// Capture once the document exists; a stalled image or third-party resource
+			// must not hold the entire analysis open. Fabric owns browser egress, so this
+			// evidence-only navigation does not need an app-level interception layer.
 			const response = await page.goto(url, {
-				waitUntil: "load",
-				timeout: 1000 * 120,
+				waitUntil: "domcontentloaded",
+				timeout: WEBSITE_NAVIGATION_TIMEOUT_MS,
 			});
 
 			if (response && !response.ok()) {
@@ -131,7 +125,7 @@ async function archiveWebsiteInternal({ url, mhtmlSnapshot }: ArchiveWebsiteOpti
 			throw err;
 		}
 
-		await sleep(1000 * 5); // wait for additional content to load
+		await (dependencies.sleep ?? sleep)(1000 * 5); // allow brief post-DOM content hydration
 
 		const screenshotPng = await page.screenshot({
 			fullPage: true,
@@ -183,6 +177,6 @@ async function archiveWebsiteInternal({ url, mhtmlSnapshot }: ArchiveWebsiteOpti
 	}
 }
 
-export async function archiveWebsite(options: ArchiveWebsiteOptions): Promise<WebsiteArchiveResult> {
-	return archiveWebsiteInternal(options);
+export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencies: WebsiteArchiveDependencies = {}): Promise<WebsiteArchiveResult> {
+	return archiveWebsiteInternal(options, dependencies);
 }
