@@ -1,73 +1,127 @@
-import { test, expect } from "bun:test";
+import { expect, test } from "bun:test";
 
-import { buildWebsiteClassificationInput, buildWebsiteEvidence } from "./website_ai";
+import {
+	buildWebsiteAnalysisInput,
+	buildWebsiteClassificationInput,
+	reportableWebsiteHop,
+	validateWebsiteSiteClassification,
+	websiteSiteAssessments,
+} from "./website_ai";
+import type { WebsiteNavigationHop } from "./submissions/website_types";
 
-test("buildWebsiteEvidence preserves captured phishing archive content even when analysis is empty", () => {
-	const evidence = buildWebsiteEvidence({
-		url: "https://idcredian.com/TylerBaker7651",
-		whois: {
-			rdap: {
-				domain: "IDCREDIAN.COM",
-				registrar: { abuse: { email: "support@namebright.com" } },
-			},
-			dns: { A: ["154.201.78.208"] },
-		},
-		archive: {
-			url: "https://idcredian.com/TylerBaker7651",
-			hostname: "idcredian.com",
-			text: Buffer.from("Welcome | USPS\nConfirm your delivery address and pay a redelivery fee.", "utf-8"),
-			html: Buffer.from('<title>Welcome | USPS</title><form><input name="cardNumber"></form>', "utf-8"),
-		},
-		analysisText: "",
-	});
+const shareGoogleHop: WebsiteNavigationHop = {
+	index: 0,
+	url: "https://share.google/ZAq2FghpGquJH6ShL",
+	hostname: "share.google",
+	status: 302,
+	redirectTo: "https://www.google.com/share.google?q=ZAq2FghpGquJH6ShL",
+	contentType: "text/html; charset=UTF-8",
+	contentCaptured: false,
+};
 
-	expect(evidence).toContain("idcredian.com");
-	expect(evidence).toContain("Welcome | USPS");
-	expect(evidence).toContain("cardNumber");
-	expect(evidence).toContain("154.201.78.208");
-	expect(evidence).not.toContain("analysis:");
+const finalTrollHop: WebsiteNavigationHop = {
+	index: 1,
+	url: "https://fuckyou.gay/",
+	hostname: "fuckyou.gay",
+	status: 200,
+	contentType: "text/html; charset=UTF-8",
+	contentCaptured: true,
+};
+
+const redirectArchive = {
+	requestedUrl: shareGoogleHop.url,
+	url: finalTrollHop.url,
+	hostname: finalTrollHop.hostname,
+	navigationHops: [shareGoogleHop, finalTrollHop],
+	text: Buffer.from("You got trolled. Fuck you!", "utf-8"),
+	html: Buffer.from("<html><body>You got trolled. Fuck you!</body></html>", "utf-8"),
+};
+
+test("detailed analysis binds the page content to the exact captured URL", () => {
+	const input = buildWebsiteAnalysisInput(redirectArchive);
+	const system = input[0].content as string;
+	const text = (input[1].content as Array<{ text: string }>)[0]!.text;
+
+	expect(system).toContain("Never attribute one hop's content");
+	expect(text).toContain(`Only this final URL's page content was captured: ${finalTrollHop.url}`);
+	expect(text).toContain(shareGoogleHop.url);
+	expect(text).toContain("redirect response does not include the redirected site's page content");
+	expect(text).toContain("a prank/troll");
+	expect(text).toContain("You got trolled");
 });
 
-test("buildWebsiteEvidence includes prior analysis only as additional evidence", () => {
-	const evidence = buildWebsiteEvidence({
-		url: "https://example.test/path",
-		whois: {},
-		archive: {
-			url: "https://example.test/path",
-			hostname: "example.test",
-			text: Buffer.from("Captured page text", "utf-8"),
-			html: Buffer.from("<html>Captured HTML</html>", "utf-8"),
-		},
-		analysisText: "This resembles a delivery scam.",
-	});
+test("classification receives only one exact site's captured evidence", () => {
+	const input = buildWebsiteClassificationInput(finalTrollHop, redirectArchive);
+	const system = input[0].content as string;
+	const userContent = input[1].content as Array<{ type: string; text?: string }>;
 
-	expect(evidence).toContain("Captured page text");
-	expect(evidence).toContain("This resembles a delivery scam.");
+	expect(system).toContain("A prank, troll page");
+	expect(userContent[0]?.text).toContain(finalTrollHop.url);
+	expect(userContent[0]?.text).toContain("You got trolled");
+	expect(userContent[0]?.text).not.toContain(shareGoogleHop.url);
+	expect(() => buildWebsiteClassificationInput(shareGoogleHop, redirectArchive)).toThrow("exact navigation hop");
 });
 
-test("buildWebsiteClassificationInput classifies captured evidence instead of empty analysis", () => {
-	const input = buildWebsiteClassificationInput({
+test("redirect-only hops cannot inherit the captured destination's phishing finding", () => {
+	expect(websiteSiteAssessments([shareGoogleHop, finalTrollHop], 1, { finding: "prank_or_troll" })).toEqual([
+		{ hopIndex: 0, finding: "insufficient_evidence" },
+		{ hopIndex: 1, finding: "prank_or_troll" },
+	]);
+	expect(validateWebsiteSiteClassification({ finding: "prank_or_troll", phishingBasis: "none", evidenceQuote: "" }, "You got trolled. Fuck you!")).toEqual({ finding: "prank_or_troll" });
+	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "unrelated fabricated evidence" }, "You got trolled. Fuck you!")).toEqual({ finding: "insufficient_evidence" });
+	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "none", evidenceQuote: "You got trolled. Fuck you!" }, "You got trolled. Fuck you!")).toEqual({ finding: "insufficient_evidence" });
+	expect(() => validateWebsiteSiteClassification({ finding: "suspicious", phishingBasis: "none", evidenceQuote: "" }, "page text")).toThrow("invalid finding");
+});
+
+test("a captured credential-collection page remains eligible for an exact-site phishing finding", () => {
+	const hop: WebsiteNavigationHop = {
+		index: 0,
 		url: "https://idcredian.com/TylerBaker7651",
-		whois: { dns: { A: ["154.201.78.208"] } },
-		archive: {
-			url: "https://idcredian.com/TylerBaker7651",
-			hostname: "idcredian.com",
-			text: Buffer.from("Welcome | USPS\nPayment required for delivery.", "utf-8"),
-			html: Buffer.from('<form action="/submit"><input name="cardNumber"></form>', "utf-8"),
-			screenshotPng: Buffer.from("fake png bytes", "utf-8"),
-		},
-		analysisText: "",
+		hostname: "idcredian.com",
+		status: 200,
+		contentType: "text/html",
+		contentCaptured: true,
+	};
+	const archive = {
+		requestedUrl: hop.url,
+		url: hop.url,
+		hostname: hop.hostname,
+		navigationHops: [hop],
+		text: Buffer.from("Welcome | USPS\\nConfirm your delivery address and pay a redelivery fee.", "utf-8"),
+		html: Buffer.from('<title>Welcome | USPS</title><form><input name="cardNumber"></form>', "utf-8"),
+		screenshotPng: Buffer.from("fake png bytes", "utf-8"),
+	};
+	const content = buildWebsiteClassificationInput(hop, archive)[1].content as Array<{ type: string }>;
+
+	expect(content[0]?.type).toBe("input_text");
+	expect(content[1]?.type).toBe("input_image");
+	const classification = validateWebsiteSiteClassification({
+		finding: "phishing",
+		phishingBasis: "credential_theft",
+		evidenceQuote: "Confirm your delivery address and pay a redelivery fee.",
+	}, archive.text.toString());
+	expect(classification).toEqual({ finding: "phishing", evidenceQuote: "Confirm your delivery address and pay a redelivery fee." });
+	expect(websiteSiteAssessments([hop], 0, classification)).toEqual([{
+		hopIndex: 0,
+		finding: "phishing",
+		evidenceQuote: "Confirm your delivery address and pay a redelivery fee.",
+	}]);
+});
+
+
+test("the report gate rejects troll pages and never lets destination content trigger a source-hop report", () => {
+	const trollAssessments = websiteSiteAssessments([shareGoogleHop, finalTrollHop], 1, { finding: "prank_or_troll" });
+	expect(reportableWebsiteHop([shareGoogleHop, finalTrollHop], trollAssessments, redirectArchive)).toBeUndefined();
+
+	const capturedPhishingAssessments = websiteSiteAssessments([shareGoogleHop, finalTrollHop], 1, {
+		finding: "phishing",
+		evidenceQuote: "This exact quote supports the captured site's harmful action.",
 	});
-
-	expect(input[0].role).toBe("system");
-	expect(input[0].content).toContain("captured archive/screenshot evidence");
-	expect(input[1].role).toBe("user");
-	expect(Array.isArray(input[1].content)).toBe(true);
-
-	const content = input[1].content as Array<{ type: string; text?: string; image_url?: string }>;
-	expect(content[0].type).toBe("input_text");
-	expect(content[0].text).toContain("Welcome | USPS");
-	expect(content[0].text).toContain("cardNumber");
-	expect(content[1].type).toBe("input_image");
-	expect(content[1].image_url).toStartWith("data:image/png;base64,");
+	expect(reportableWebsiteHop([shareGoogleHop, finalTrollHop], capturedPhishingAssessments, { ...redirectArchive, text: Buffer.from("This exact quote supports the captured site's harmful action.") })).toEqual(finalTrollHop);
+	// Even a malformed assessment cannot send the terminal page's evidence to the shortener.
+	expect(reportableWebsiteHop(
+		[shareGoogleHop, finalTrollHop],
+		[{ hopIndex: shareGoogleHop.index, finding: "phishing", evidenceQuote: "redirect response only" }],
+		redirectArchive,
+	)).toBeUndefined();
 });

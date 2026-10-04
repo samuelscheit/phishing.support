@@ -1,5 +1,8 @@
+import type { HTTPRequest, HTTPResponse } from "rebrowser-puppeteer-core";
+
 import { getBrowser, getBrowserPage } from "./browser";
 import { sleep } from "./utils";
+import type { WebsiteNavigationHop } from "./submissions/website_types";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
 import parse from "node-html-parser";
@@ -18,8 +21,12 @@ export type ArchivedWebsiteResponse = {
 };
 
 export type WebsiteArchiveResult = {
+	/** The submitted URL is retained separately from the captured document URL. */
+	requestedUrl: string;
+	/** URL whose document body, screenshot, and MHTML are captured. */
 	url: string;
 	hostname: string;
+	navigationHops: WebsiteNavigationHop[];
 	/** Timestamp embedded in the MHTML capture, or the capture time when it is not available. */
 	archivedAt: Date;
 	screenshotPng?: Buffer;
@@ -33,15 +40,16 @@ const WEBSITE_NAVIGATION_TIMEOUT_MS = 30_000;
 export type ArchiveWebsiteOptions = {
 	/** Raw MHTML (decoded bytes). It is parsed locally; Fabric browsers never receive an app-local file:// URL. */
 	mhtmlSnapshot?: Buffer;
-	/** Original remote URL (used for hostname/labeling when loading a local MHTML snapshot). */
+	/** Original user-submitted URL. */
 	url: string;
+	/** Original location represented by the retained MHTML document, when known. */
+	archivedUrl?: string;
+	/** Exact response hops associated with the retained MHTML document, when known. */
+	navigationHops?: WebsiteNavigationHop[];
 };
 
-/**
- * Reads the top-level MHTML Date header emitted by Chromium's snapshot writer.
- * MIME parts can contain their own headers, so only inspect the message preamble.
- */
-export function getMhtmlArchiveDate(snapshot: Buffer): Date | undefined {
+/** Read a top-level MHTML header; MIME-part headers must never override capture metadata. */
+function getMhtmlHeader(snapshot: Buffer, name: string): string | undefined {
 	const crlfHeaderEnd = snapshot.indexOf("\r\n\r\n");
 	const lfHeaderEnd = snapshot.indexOf("\n\n");
 	const headerEnd = crlfHeaderEnd >= 0 ? crlfHeaderEnd : lfHeaderEnd;
@@ -49,16 +57,42 @@ export function getMhtmlArchiveDate(snapshot: Buffer): Date | undefined {
 		.subarray(0, headerEnd < 0 ? snapshot.byteLength : headerEnd)
 		.toString("latin1")
 		.replace(/\r?\n[\t ]+/g, " ");
-	const value = preamble.match(/^Date:\s*(.+)$/im)?.[1]?.trim();
-	if (!value) return undefined;
+	return preamble.match(new RegExp(`^${name}:\\s*(.+)$`, "im"))?.[1]?.trim();
+}
 
+/** Reads the capture time emitted by Chromium's MHTML snapshot writer. */
+export function getMhtmlArchiveDate(snapshot: Buffer): Date | undefined {
+	const value = getMhtmlHeader(snapshot, "Date");
+	if (!value) return undefined;
 	const timestamp = Date.parse(value);
 	return Number.isNaN(timestamp) ? undefined : new Date(timestamp);
 }
 
-async function archiveMhtmlSnapshot(url: string, mhtml: Buffer): Promise<WebsiteArchiveResult> {
-	const { hostname } = new URL(url);
-	const { data } = await convert(mhtml, {
+/** Reads Chromium's document URL so old retained snapshots remain correctly attributed. */
+export function getMhtmlArchiveLocation(snapshot: Buffer): string | undefined {
+	const value = getMhtmlHeader(snapshot, "Snapshot-Content-Location");
+	if (!value) return undefined;
+	try {
+		const url = new URL(value);
+		if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return undefined;
+		return url.toString();
+	} catch {
+		return undefined;
+	}
+}
+
+async function archiveMhtmlSnapshot(options: ArchiveWebsiteOptions & { mhtmlSnapshot: Buffer }): Promise<WebsiteArchiveResult> {
+	const documentUrl = options.archivedUrl ?? getMhtmlArchiveLocation(options.mhtmlSnapshot) ?? options.url;
+	const { hostname } = new URL(documentUrl);
+	const navigationHops = options.navigationHops?.length
+		? options.navigationHops
+		: documentUrl === options.url
+			? [{ index: 0, url: documentUrl, hostname, status: null, contentCaptured: true }]
+			: [
+					{ index: 0, url: options.url, hostname: new URL(options.url).hostname, status: null, redirectTo: documentUrl, contentCaptured: false },
+					{ index: 1, url: documentUrl, hostname, status: null, contentCaptured: true },
+				];
+	const { data } = await convert(options.mhtmlSnapshot, {
 		enableScripts: false,
 		fetchMissingResources: false,
 	});
@@ -66,10 +100,12 @@ async function archiveMhtmlSnapshot(url: string, mhtml: Buffer): Promise<Website
 	dom.querySelectorAll("script, style, link, svg, noscript, img").forEach((element) => element.remove());
 	dom.querySelectorAll("*").forEach((element) => element.removeAttribute("style"));
 	return {
-		url,
+		requestedUrl: options.url,
+		url: documentUrl,
 		hostname,
-		archivedAt: getMhtmlArchiveDate(mhtml) ?? new Date(),
-		mhtml,
+		navigationHops,
+		archivedAt: getMhtmlArchiveDate(options.mhtmlSnapshot) ?? new Date(),
+		mhtml: options.mhtmlSnapshot,
 		html: Buffer.from(dom.outerHTML, "utf-8"),
 		text: Buffer.from(dom.structuredText, "utf-8"),
 	};
@@ -80,12 +116,53 @@ export type WebsiteArchiveDependencies = {
 	sleep?: typeof sleep;
 };
 
+export function navigationHopsFromResponse(
+	response: HTTPResponse | null,
+	finalUrl: string,
+): WebsiteNavigationHop[] {
+	const finalRequest = response?.request();
+	const requests = finalRequest ? [...finalRequest.redirectChain(), finalRequest] : [];
+	if (requests.length === 0) {
+		const { hostname } = new URL(finalUrl);
+		return [{ index: 0, url: finalUrl, hostname, status: response?.status() ?? null, contentCaptured: true }];
+	}
+
+	return requests.map((request: HTTPRequest, index) => {
+		const responseForHop = request === finalRequest ? response : request.response();
+		const hopUrl = request.url();
+		const { hostname } = new URL(hopUrl);
+		const status = responseForHop?.status() ?? null;
+		const headers = responseForHop?.headers() ?? {};
+		const location = status !== null && status >= 300 && status < 400 ? headers.location : undefined;
+		let redirectTo: string | undefined;
+		if (location) {
+			try {
+				redirectTo = new URL(location, hopUrl).toString();
+			} catch {
+				// Keep malformed redirect destinations out of the navigation record.
+			}
+		}
+
+		return {
+			index,
+			url: hopUrl,
+			hostname,
+			status,
+			...(redirectTo ? { redirectTo } : {}),
+			...(headers["content-type"] ? { contentType: headers["content-type"] } : {}),
+			contentCaptured: index === requests.length - 1,
+		};
+	});
+}
+
 async function archiveWebsiteInternal(
-	{ url, mhtmlSnapshot }: ArchiveWebsiteOptions,
+	{ url, mhtmlSnapshot, archivedUrl, navigationHops: retainedNavigationHops }: ArchiveWebsiteOptions,
 	dependencies: WebsiteArchiveDependencies = {},
 ): Promise<WebsiteArchiveResult> {
 	console.log(`Archiving website ${url}`);
-	if (mhtmlSnapshot?.byteLength) return archiveMhtmlSnapshot(url, mhtmlSnapshot);
+	if (mhtmlSnapshot?.byteLength) {
+		return archiveMhtmlSnapshot({ url, mhtmlSnapshot, archivedUrl, navigationHops: retainedNavigationHops });
+	}
 
 	const browser = dependencies.browser ?? await getBrowser();
 	try {
@@ -96,20 +173,21 @@ async function archiveWebsiteInternal(
 
 		const { page } = await getBrowserPage(newPage);
 
-		const uri = new URL(url);
-		const { hostname } = uri;
+		let navigationResponse: HTTPResponse | null = null;
+		let finalUrl = url;
 
 		try {
 			// Capture once the document exists; a stalled image or third-party resource
 			// must not hold the entire analysis open. Fabric owns browser egress, so this
 			// evidence-only navigation does not need an app-level interception layer.
-			const response = await page.goto(url, {
+			navigationResponse = await page.goto(url, {
 				waitUntil: "domcontentloaded",
 				timeout: WEBSITE_NAVIGATION_TIMEOUT_MS,
 			});
+			finalUrl = navigationResponse?.url() ?? page.url();
 
-			if (response && !response.ok()) {
-				throw new Error(`Failed to load page, status code: ${response.status()}`);
+			if (navigationResponse && !navigationResponse.ok()) {
+				throw new Error(`Failed to load page, status code: ${navigationResponse.status()}`);
 			}
 		} catch (err) {
 			await page
@@ -162,10 +240,14 @@ async function archiveWebsiteInternal(
 			.trim();
 
 		const archivedAt = getMhtmlArchiveDate(resolvedMhtml) ?? new Date();
+		const navigationHops = navigationHopsFromResponse(navigationResponse, finalUrl);
+		const { hostname } = new URL(finalUrl);
 
 		return {
-			url: url,
+			requestedUrl: url,
+			url: finalUrl,
 			hostname,
+			navigationHops,
 			archivedAt,
 			screenshotPng: Buffer.from(screenshotPng),
 			mhtml: resolvedMhtml,

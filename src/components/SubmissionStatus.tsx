@@ -14,7 +14,7 @@ export function SubmissionStatus({ status, className }: { status?: string | null
 	const isFailed = key === "failed";
 	const isCompleted = key === "completed";
 
-	const label = isReported ? "Phishing" : isInvalid ? "Safe" : raw || "Unknown";
+	const label = isReported ? "Report submitted" : isInvalid ? "Not phishing" : raw || "Unknown";
 
 	const dotClass = isReported
 		? "bg-red-500"

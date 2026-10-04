@@ -58,8 +58,14 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const statusKey = (submission?.status || "").toLowerCase();
 	const isFailed = statusKey === "failed";
 	const isReported = statusKey === "reported";
+	const isInvalidWebsite = statusKey === "invalid" && submission?.kind === "website" && Boolean(submission.info);
 
 	const isRunning = ["new", "queued", "running"].includes(statusKey);
+	const websiteNavigation = submission?.data.kind === "website" ? submission.data.website.navigationHops ?? [] : [];
+	const websiteAssessmentByHop = new Map(
+		(submission?.data.kind === "website" ? submission.data.website.siteAssessments ?? [] : [])
+			.map((assessment) => [assessment.hopIndex, assessment]),
+	);
 	const runsToShow = submission ? selectDisplayAnalysisRuns(submission.analysisRuns) : [];
 	const reportThreads = submission?.reportThreads ?? [];
 	const providerReports = submission?.providerReports ?? [];
@@ -294,19 +300,22 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 					</div>
 					<div className="space-y-5 flex-1 justify-between flex-col flex">
 						{isReported && submission.data.kind === "website" ? (
-							<div className="rounded-md border bg-destructive/10 p-3">
-								<div className="flex items-center gap-2 text-xs font-semibold text-destructive">
+							<div className="rounded-md border bg-muted/30 p-3">
+								<div className="flex items-center gap-2 text-xs font-semibold">
 									<ShieldAlert className="h-4 w-4" />
-									Phishing Site
+									Report submitted
 								</div>
-								<div className="mt-1 text-sm font-bold text-destructive">
-									Do not visit this site or enter any sensitive information.
+								<div className="mt-1 text-sm font-medium">
+									A phishing allegation was submitted for review; this status does not confirm that the site is phishing.
 								</div>
-								<div className="text-xs text-slate-800">
-									A phishing website is a fake site that looks like a real, trusted one (like your bank or a popular
-									store). It tries to trick you into entering private information, such as your email, phone number,
-									password or credit card.
-								</div>
+								<div className="text-xs text-muted-foreground">Review the captured navigation hops and provider outcomes in Reports.</div>
+							</div>
+						) : null}
+
+						{isInvalidWebsite ? (
+							<div className="rounded-md border bg-muted/30 p-3">
+								<div className="text-xs font-semibold text-muted-foreground">Not reported</div>
+								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info}</div>
 							</div>
 						) : null}
 
@@ -360,6 +369,46 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 								</div>
 							</div>
 						)}
+
+						{submission.data.kind === "website" && websiteNavigation.length > 0 ? (
+							<div className="space-y-2 rounded-md border bg-muted/20 p-3">
+								<div>
+									<h5 className="text-xs font-semibold">Navigation hops (kept separate)</h5>
+									<p className="text-xs text-muted-foreground">Archived page evidence belongs only to the hop marked “Page captured.” A redirect destination is not attributed to the previous URL.</p>
+								</div>
+								<ol className="space-y-2">
+									{websiteNavigation.map((hop) => {
+										const assessment = websiteAssessmentByHop.get(hop.index);
+										const finding = assessment?.finding;
+										const findingLabel = finding === "prank_or_troll"
+											? "Prank / troll — not phishing"
+											: finding === "insufficient_evidence" ? "Insufficient evidence"
+												: finding === "phishing" ? "Phishing"
+													: finding === "benign" ? "Not phishing" : undefined;
+										return (
+											<li key={`${hop.index}:${hop.url}`} className="rounded border bg-background p-2">
+												<div className="flex items-start justify-between gap-2">
+													<div className="min-w-0 space-y-1">
+														<div className="break-all font-mono text-xs">{hop.url}</div>
+														<div className="text-xs text-muted-foreground">
+															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured" : " · redirect response only"}
+														</div>
+														{hop.redirectTo ? <div className="break-all text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
+														{findingLabel ? <div className={cn("text-xs font-medium", finding === "phishing" ? "text-destructive" : "text-muted-foreground")}>{findingLabel}</div> : null}
+														{assessment?.evidenceQuote ? <blockquote className="border-l-2 pl-2 text-xs text-muted-foreground">“{assessment.evidenceQuote}”</blockquote> : null}
+													</div>
+												<ExternalLinkConfirm
+													href={hop.url}
+													description="This opens only this specific redirect hop, not the separately captured destination page."
+													trigger={<button type="button" className="shrink-0 rounded-sm p-1 text-muted-foreground hover:text-primary" aria-label={`Open redirect hop ${hop.index + 1}`}><ExternalLink className="h-4 w-4" /></button>}
+												/>
+											</div>
+										</li>
+									);
+									})}
+								</ol>
+							</div>
+						) : null}
 
 						{submission.data.kind === "email" && (
 							<div className="space-y-2">

@@ -4,6 +4,7 @@ import { WhoISInfo } from "../website_info";
 import { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
 import { MailData } from "../mail_ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
+import type { WebsiteNavigationHop, WebsiteSiteAssessment } from "../submissions/website_types";
 
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
@@ -41,6 +42,11 @@ export type EmailSubmissionData = MailData;
 export type WebsiteSubmissionData = {
 	whois?: WhoISInfo;
 	url: string;
+	/** Final URL whose page content was archived; it may differ from the submitted URL. */
+	archiveUrl?: string;
+	/** Per-response navigation provenance; document content belongs only to contentCaptured hop. */
+	navigationHops?: WebsiteNavigationHop[];
+	siteAssessments?: WebsiteSiteAssessment[];
 };
 
 export type SubmissionData = { kind: "email"; email?: EmailSubmissionData } | { kind: "website"; website: WebsiteSubmissionData };

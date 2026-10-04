@@ -111,10 +111,13 @@ export async function retryFailedWebsiteAnalysis(submissionId: bigint): Promise<
 	const claimed = await SubmissionsEntity.transitionStatus(submissionId, "failed", "queued");
 	if (!claimed) throw new SubmissionRetryError("This submission is already being retried.");
 
+	const websiteData = submission.data.kind === "website" ? submission.data.website : undefined;
 	void analyzeWebsite({
 		submissionId,
 		url,
 		mhtmlSnapshot,
+		archivedUrl: websiteData?.archiveUrl,
+		navigationHops: websiteData?.navigationHops,
 		screenshotSnapshot,
 		reporterIp: submission.reporterIp ?? undefined,
 		reporterCountry: submission.reporterCountry ?? undefined,
