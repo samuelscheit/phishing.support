@@ -7,7 +7,7 @@ import {
 	validateWebsiteSiteClassification,
 	websiteSiteAssessments,
 } from "./website_ai";
-import type { WebsiteNavigationHop } from "./submissions/website_types";
+import type { WebsiteNavigationHop } from "./website_types";
 
 const shareGoogleHop: WebsiteNavigationHop = {
 	index: 0,
@@ -67,10 +67,12 @@ test("redirect-only hops cannot inherit the captured destination's phishing find
 		{ hopIndex: 0, finding: "insufficient_evidence" },
 		{ hopIndex: 1, finding: "prank_or_troll" },
 	]);
-	expect(validateWebsiteSiteClassification({ finding: "prank_or_troll", phishingBasis: "none", evidenceQuote: "" }, "You got trolled. Fuck you!")).toEqual({ finding: "prank_or_troll" });
-	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "unrelated fabricated evidence" }, "You got trolled. Fuck you!")).toEqual({ finding: "insufficient_evidence" });
-	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "none", evidenceQuote: "You got trolled. Fuck you!" }, "You got trolled. Fuck you!")).toEqual({ finding: "insufficient_evidence" });
-	expect(() => validateWebsiteSiteClassification({ finding: "suspicious", phishingBasis: "none", evidenceQuote: "" }, "page text")).toThrow("invalid finding");
+	expect(validateWebsiteSiteClassification({ finding: "prank_or_troll", phishingBasis: "none", evidenceQuote: "" }, "You got trolled. Fuck you!", "<html></html>")).toEqual({ finding: "prank_or_troll" });
+	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "unrelated fabricated evidence" }, "You got trolled. Fuck you!", "<html><form><input type=\"password\"></form></html>")).toEqual({ finding: "insufficient_evidence" });
+	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "password asks to verify the unrelated account credentials".repeat(10) }, "password asks to verify the unrelated account credentials", "<html><form><input type=\"password\"></form></html>")).toEqual({ finding: "insufficient_evidence" });
+	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "the site grabs all your system info like a nosy little bitch" }, "The site grabs all your system info like a nosy little bitch", "<html><body>The site grabs all your system info.</body></html>")).toEqual({ finding: "insufficient_evidence" });
+	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "none", evidenceQuote: "You got trolled. Fuck you!" }, "You got trolled. Fuck you!", "<html></html>")).toEqual({ finding: "insufficient_evidence" });
+	expect(() => validateWebsiteSiteClassification({ finding: "suspicious", phishingBasis: "none", evidenceQuote: "" }, "page text", "<html></html>")).toThrow("invalid finding");
 });
 
 test("a captured credential-collection page remains eligible for an exact-site phishing finding", () => {
@@ -88,7 +90,7 @@ test("a captured credential-collection page remains eligible for an exact-site p
 		hostname: hop.hostname,
 		navigationHops: [hop],
 		text: Buffer.from("Welcome | USPS\\nConfirm your delivery address and pay a redelivery fee.", "utf-8"),
-		html: Buffer.from('<title>Welcome | USPS</title><form><input name="cardNumber"></form>', "utf-8"),
+		html: Buffer.from('<title>Welcome | USPS</title><form><input type="password" name="password"><input name="cardNumber"></form>', "utf-8"),
 		screenshotPng: Buffer.from("fake png bytes", "utf-8"),
 	};
 	const content = buildWebsiteClassificationInput(hop, archive)[1].content as Array<{ type: string }>;
@@ -99,7 +101,7 @@ test("a captured credential-collection page remains eligible for an exact-site p
 		finding: "phishing",
 		phishingBasis: "credential_theft",
 		evidenceQuote: "Confirm your delivery address and pay a redelivery fee.",
-	}, archive.text.toString());
+	}, archive.text.toString(), archive.html.toString());
 	expect(classification).toEqual({ finding: "phishing", evidenceQuote: "Confirm your delivery address and pay a redelivery fee." });
 	expect(websiteSiteAssessments([hop], 0, classification)).toEqual([{
 		hopIndex: 0,

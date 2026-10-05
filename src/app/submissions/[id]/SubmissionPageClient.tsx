@@ -397,14 +397,14 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 														{findingLabel ? <div className={cn("text-xs font-medium", finding === "phishing" ? "text-destructive" : "text-muted-foreground")}>{findingLabel}</div> : null}
 														{assessment?.evidenceQuote ? <blockquote className="border-l-2 pl-2 text-xs text-muted-foreground">“{assessment.evidenceQuote}”</blockquote> : null}
 													</div>
-												<ExternalLinkConfirm
-													href={hop.url}
-													description="This opens only this specific redirect hop, not the separately captured destination page."
-													trigger={<button type="button" className="shrink-0 rounded-sm p-1 text-muted-foreground hover:text-primary" aria-label={`Open redirect hop ${hop.index + 1}`}><ExternalLink className="h-4 w-4" /></button>}
-												/>
-											</div>
-										</li>
-									);
+													<ExternalLinkConfirm
+														href={hop.url}
+														description="This opens this exact URL; your browser may follow its redirects."
+														trigger={<button type="button" className="shrink-0 rounded-sm p-1 text-muted-foreground hover:text-primary" aria-label={`Open redirect hop ${hop.index + 1}`}><ExternalLink className="h-4 w-4" /></button>}
+													/>
+												</div>
+											</li>
+										);
 									})}
 								</ol>
 							</div>
@@ -473,6 +473,9 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 										(from {websiteArchiveDate ?? "unknown date"})
 									</div>
 								</CardTitle>
+								<div className="break-all text-xs text-muted-foreground">
+									Captured page: {submission.data.kind === "website" ? submission.data.website.archiveUrl ?? submission.data.website.url : "unknown"}
+								</div>
 								<CardDescription className="text-xs flex flex-row gap-8">
 									<div className="text-zinc-500 font-semibold font-mono">DO NOT ENTER ANY SENSITIVE INFORMATION</div>
 								</CardDescription>

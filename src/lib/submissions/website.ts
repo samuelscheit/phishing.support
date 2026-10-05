@@ -99,11 +99,14 @@ export async function retryFailedWebsiteAnalysis(submissionId: bigint): Promise<
 
 	let mhtmlSnapshot: Buffer | undefined;
 	let screenshotSnapshot: Buffer | undefined;
-	if (mhtmlArtifact) {
+	const retainedArchiveHasTrustedProvenance = Boolean(
+		submission.data.kind === "website" && submission.data.website.archiveUrl && submission.data.website.navigationHops?.length,
+	);
+	if (mhtmlArtifact && retainedArchiveHasTrustedProvenance) {
 		const artifact = await ArtifactsEntity.get(mhtmlArtifact.id);
 		if (artifact?.blob?.byteLength) mhtmlSnapshot = artifact.blob;
 	}
-	if (screenshotArtifact) {
+	if (screenshotArtifact && retainedArchiveHasTrustedProvenance) {
 		const artifact = await ArtifactsEntity.get(screenshotArtifact.id);
 		if (artifact?.blob?.byteLength) screenshotSnapshot = artifact.blob;
 	}
@@ -118,11 +121,12 @@ export async function retryFailedWebsiteAnalysis(submissionId: bigint): Promise<
 		mhtmlSnapshot,
 		archivedUrl: websiteData?.archiveUrl,
 		navigationHops: websiteData?.navigationHops,
+		trustMhtmlDocumentLocation: Boolean(mhtmlSnapshot),
 		screenshotSnapshot,
 		reporterIp: submission.reporterIp ?? undefined,
 		reporterCountry: submission.reporterCountry ?? undefined,
 		reporterHeaders: submission.reporterHeaders ?? undefined,
-		reuseEvidenceArtifacts: Boolean(mhtmlSnapshot && screenshotArtifact),
+		reuseEvidenceArtifacts: Boolean(mhtmlSnapshot && screenshotArtifact && retainedArchiveHasTrustedProvenance),
 	}).catch((error) => {
 		console.error("Retried website analysis failed:", error);
 	});

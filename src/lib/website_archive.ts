@@ -1,8 +1,7 @@
 import type { HTTPRequest, HTTPResponse } from "rebrowser-puppeteer-core";
 
 import { getBrowser, getBrowserPage } from "./browser";
-import { sleep } from "./utils";
-import type { WebsiteNavigationHop } from "./submissions/website_types";
+import type { WebsiteNavigationHop } from "./website_types";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
 import parse from "node-html-parser";
@@ -33,6 +32,8 @@ export type WebsiteArchiveResult = {
 	mhtml: Buffer;
 	html: Buffer;
 	text: Buffer;
+	/** Non-empty when an uploaded snapshot claims a different host than the submitted target. */
+	attributionError?: string;
 };
 
 const WEBSITE_NAVIGATION_TIMEOUT_MS = 30_000;
@@ -46,6 +47,8 @@ export type ArchiveWebsiteOptions = {
 	archivedUrl?: string;
 	/** Exact response hops associated with the retained MHTML document, when known. */
 	navigationHops?: WebsiteNavigationHop[];
+	/** Only true for MHTML read back from this service's own stored artifact. */
+	trustMhtmlDocumentLocation?: boolean;
 };
 
 /** Read a top-level MHTML header; MIME-part headers must never override capture metadata. */
@@ -82,16 +85,26 @@ export function getMhtmlArchiveLocation(snapshot: Buffer): string | undefined {
 }
 
 async function archiveMhtmlSnapshot(options: ArchiveWebsiteOptions & { mhtmlSnapshot: Buffer }): Promise<WebsiteArchiveResult> {
-	const documentUrl = options.archivedUrl ?? getMhtmlArchiveLocation(options.mhtmlSnapshot) ?? options.url;
+	const declaredDocumentUrl = getMhtmlArchiveLocation(options.mhtmlSnapshot);
+	const requestedUrl = new URL(options.url);
+	const declaredHost = declaredDocumentUrl ? new URL(declaredDocumentUrl).hostname : undefined;
+	const attributionError = !options.archivedUrl && !options.trustMhtmlDocumentLocation && declaredHost && declaredHost !== requestedUrl.hostname
+		? `The uploaded MHTML declares ${declaredHost}, but the submitted target is ${requestedUrl.hostname}.`
+		: undefined;
+	const documentUrl = attributionError
+		? options.url
+		: options.archivedUrl ?? (options.trustMhtmlDocumentLocation ? declaredDocumentUrl : undefined) ?? options.url;
 	const { hostname } = new URL(documentUrl);
 	const navigationHops = options.navigationHops?.length
 		? options.navigationHops
-		: documentUrl === options.url
-			? [{ index: 0, url: documentUrl, hostname, status: null, contentCaptured: true }]
-			: [
-					{ index: 0, url: options.url, hostname: new URL(options.url).hostname, status: null, redirectTo: documentUrl, contentCaptured: false },
-					{ index: 1, url: documentUrl, hostname, status: null, contentCaptured: true },
-				];
+		: attributionError
+			? [{ index: 0, url: options.url, hostname: requestedUrl.hostname, status: null, contentCaptured: false }]
+			: documentUrl === options.url
+				? [{ index: 0, url: documentUrl, hostname, status: null, contentCaptured: true }]
+				: [
+						{ index: 0, url: options.url, hostname: requestedUrl.hostname, status: null, redirectTo: documentUrl, contentCaptured: false },
+						{ index: 1, url: documentUrl, hostname, status: null, contentCaptured: true },
+					];
 	const { data } = await convert(options.mhtmlSnapshot, {
 		enableScripts: false,
 		fetchMissingResources: false,
@@ -99,6 +112,12 @@ async function archiveMhtmlSnapshot(options: ArchiveWebsiteOptions & { mhtmlSnap
 	const dom = parse(data);
 	dom.querySelectorAll("script, style, link, svg, noscript, img").forEach((element) => element.remove());
 	dom.querySelectorAll("*").forEach((element) => element.removeAttribute("style"));
+	const title = dom.querySelector("title")?.textContent ?? "";
+	const description = dom.querySelector("meta[name='description'], meta[property='og:description'], meta[property='twitter:description']")?.getAttribute("content") ?? "";
+	const text = [title, description, dom.structuredText].filter(Boolean).join("\n\n")
+		.replaceAll(/ +/g, " ")
+		.replaceAll(/\n+/g, "\n")
+		.trim();
 	return {
 		requestedUrl: options.url,
 		url: documentUrl,
@@ -107,13 +126,13 @@ async function archiveMhtmlSnapshot(options: ArchiveWebsiteOptions & { mhtmlSnap
 		archivedAt: getMhtmlArchiveDate(options.mhtmlSnapshot) ?? new Date(),
 		mhtml: options.mhtmlSnapshot,
 		html: Buffer.from(dom.outerHTML, "utf-8"),
-		text: Buffer.from(dom.structuredText, "utf-8"),
+		text: Buffer.from(text, "utf-8"),
+		...(attributionError ? { attributionError } : {}),
 	};
 }
 
 export type WebsiteArchiveDependencies = {
 	browser?: Awaited<ReturnType<typeof getBrowser>>;
-	sleep?: typeof sleep;
 };
 
 export function navigationHopsFromResponse(
@@ -127,7 +146,7 @@ export function navigationHopsFromResponse(
 		return [{ index: 0, url: finalUrl, hostname, status: response?.status() ?? null, contentCaptured: true }];
 	}
 
-	return requests.map((request: HTTPRequest, index) => {
+	const hops = requests.map((request: HTTPRequest, index) => {
 		const responseForHop = request === finalRequest ? response : request.response();
 		const hopUrl = request.url();
 		const { hostname } = new URL(hopUrl);
@@ -150,18 +169,28 @@ export function navigationHopsFromResponse(
 			status,
 			...(redirectTo ? { redirectTo } : {}),
 			...(headers["content-type"] ? { contentType: headers["content-type"] } : {}),
-			contentCaptured: index === requests.length - 1,
+			contentCaptured: false,
 		};
 	});
+
+	const matchingCapturedIndex = hops.findLastIndex((hop) => hop.url === finalUrl);
+	if (matchingCapturedIndex >= 0) hops[matchingCapturedIndex]!.contentCaptured = true;
+	else {
+		const { hostname } = new URL(finalUrl);
+		const previousHop = hops.at(-1);
+		if (previousHop && !previousHop.redirectTo) previousHop.redirectTo = finalUrl;
+		hops.push({ index: hops.length, url: finalUrl, hostname, status: null, contentCaptured: true });
+	}
+	return hops;
 }
 
 async function archiveWebsiteInternal(
-	{ url, mhtmlSnapshot, archivedUrl, navigationHops: retainedNavigationHops }: ArchiveWebsiteOptions,
+	{ url, mhtmlSnapshot, archivedUrl, navigationHops: retainedNavigationHops, trustMhtmlDocumentLocation }: ArchiveWebsiteOptions,
 	dependencies: WebsiteArchiveDependencies = {},
 ): Promise<WebsiteArchiveResult> {
 	console.log(`Archiving website ${url}`);
 	if (mhtmlSnapshot?.byteLength) {
-		return archiveMhtmlSnapshot({ url, mhtmlSnapshot, archivedUrl, navigationHops: retainedNavigationHops });
+		return archiveMhtmlSnapshot({ url, mhtmlSnapshot, archivedUrl, navigationHops: retainedNavigationHops, trustMhtmlDocumentLocation });
 	}
 
 	const browser = dependencies.browser ?? await getBrowser();
@@ -203,9 +232,11 @@ async function archiveWebsiteInternal(
 			throw err;
 		}
 
-		await (dependencies.sleep ?? sleep)(1000 * 5); // allow brief post-DOM content hydration
-
-		const screenshotPng = await page.screenshot({
+		// Do not pause between DOMContentLoaded and capture: a page-driven second
+		// navigation must not silently replace the document whose response was just
+		// checked. The MHTML's own Chromium URL header identifies the captured document.
+		const screenshotUrl = page.url();
+		const screenshotBytes = await page.screenshot({
 			fullPage: true,
 			captureBeyondViewport: true,
 			type: "png",
@@ -220,39 +251,18 @@ async function archiveWebsiteInternal(
 			"utf-8",
 		);
 
-		const rawHtml = await page.evaluate(() => {
-			const doc = globalThis.document.cloneNode(true) as Document;
-			const elements = doc.querySelectorAll("script, style, link, svg, noscript, img");
-			elements.forEach((element) => element.remove());
-			doc.querySelectorAll("*").forEach((element) => element.removeAttribute("style"));
-			return doc.documentElement.outerHTML;
+		const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? page.url() ?? finalUrl;
+		const capturedDocument = await archiveMhtmlSnapshot({
+			url,
+			archivedUrl: capturedDocumentUrl,
+			navigationHops: navigationHopsFromResponse(navigationResponse, capturedDocumentUrl),
+			mhtmlSnapshot: resolvedMhtml,
 		});
-
-		let innerText = await page.evaluate(() => globalThis.document.body.innerText);
-		const description = await page.evaluate(() => (
-			globalThis.document
-				.querySelector("meta[name='description'], meta[property='og:description'], meta[property='twitter:description']")
-				?.getAttribute("content") || ""
-		));
-		innerText = ((await page.title()) + "\n\n" + description + "\n\n" + innerText)
-			.replaceAll(/ +/g, " ")
-			.replaceAll(/\n+/g, "\n")
-			.trim();
-
-		const archivedAt = getMhtmlArchiveDate(resolvedMhtml) ?? new Date();
-		const navigationHops = navigationHopsFromResponse(navigationResponse, finalUrl);
-		const { hostname } = new URL(finalUrl);
+		const screenshotPng = screenshotUrl === capturedDocumentUrl ? Buffer.from(screenshotBytes) : undefined;
 
 		return {
-			requestedUrl: url,
-			url: finalUrl,
-			hostname,
-			navigationHops,
-			archivedAt,
-			screenshotPng: Buffer.from(screenshotPng),
-			mhtml: resolvedMhtml,
-			html: Buffer.from(rawHtml, "utf-8"),
-			text: Buffer.from(innerText, "utf-8"),
+			...capturedDocument,
+			screenshotPng,
 		};
 	} finally {
 		await browser.close();

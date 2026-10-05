@@ -4,7 +4,7 @@ import { WhoISInfo } from "../website_info";
 import { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
 import { MailData } from "../mail_ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
-import type { WebsiteNavigationHop, WebsiteSiteAssessment } from "../submissions/website_types";
+import type { WebsiteNavigationHop, WebsiteSiteAssessment } from "../website_types";
 
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];

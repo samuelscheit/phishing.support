@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Browser, BrowserContext, HTTPRequest, HTTPResponse, Page } from "rebrowser-puppeteer-core";
-import type { WebsiteNavigationHop } from "./submissions/website_types";
+import type { WebsiteNavigationHop } from "./website_types";
 
 import { archiveWebsite, getMhtmlArchiveDate, getMhtmlArchiveLocation } from "./website_archive";
 
@@ -144,7 +144,20 @@ function archiveBrowserFixture(options: {
 				send: async (method: string) => {
 					if (method !== "Page.captureSnapshot") throw new Error(`Unexpected CDP command ${method}`);
 					captureSnapshotCount++;
-					return { data: "From: <Saved by Blink>\r\n\r\nMHTML evidence" };
+					return {
+						data: [
+							"From: <Saved by Blink>",
+							`Snapshot-Content-Location: ${options.pageUrl ?? "https://example.test/"}`,
+							"Content-Type: multipart/related; boundary=\"archive-test\"",
+							"",
+							"--archive-test",
+							"Content-Type: text/html",
+							`Content-Location: ${options.pageUrl ?? "https://example.test/"}`,
+							"",
+							"<html><head><title>Captured title</title></head><body>Captured page text</body></html>",
+							"--archive-test--",
+						].join("\r\n"),
+					};
 				},
 			}),
 		}),
@@ -193,7 +206,7 @@ test("website capture records every redirect response separately from the final 
 	});
 	const archive = await archiveWebsite(
 		{ url: requestedUrl },
-		{ browser: fixture.browser, sleep: async () => undefined },
+		{ browser: fixture.browser },
 	);
 
 	expect(fixture.navigationCalls).toEqual([{ url: requestedUrl, waitUntil: "domcontentloaded", timeout: 30_000 }]);
@@ -222,7 +235,7 @@ test("website capture preserves navigation failures and closes the browser lease
 
 	await expect(archiveWebsite(
 		{ url: "https://example.test/" },
-		{ browser: fixture.browser, sleep: async () => undefined },
+		{ browser: fixture.browser },
 	)).rejects.toThrow("Navigation timeout of 30000 ms exceeded");
 	expect(fixture.screenshotCount).toBe(1);
 	expect(fixture.captureSnapshotCount).toBe(0);
@@ -275,7 +288,7 @@ test("legacy retained MHTML recovers its captured URL instead of assigning final
 		"--fabric-test--",
 	].join("\r\n"), "utf8");
 
-	const archive = await archiveWebsite({ url: requestedUrl, mhtmlSnapshot: snapshot });
+	const archive = await archiveWebsite({ url: requestedUrl, mhtmlSnapshot: snapshot, trustMhtmlDocumentLocation: true });
 
 	expect(archive.requestedUrl).toBe(requestedUrl);
 	expect(archive.url).toBe(finalUrl);
@@ -285,4 +298,31 @@ test("legacy retained MHTML recovers its captured URL instead of assigning final
 		{ index: 1, url: finalUrl, hostname: "fuckyou.gay", status: null, contentCaptured: true },
 	]);
 	expect(archive.text.toString()).toContain("troll page");
+});
+
+
+test("untrusted submitted MHTML cannot choose the URL associated with captured page evidence", async () => {
+	const snapshot = Buffer.from([
+		"From: <Saved by Blink>",
+		"Snapshot-Content-Location: https://victim.example/login",
+		"Content-Type: multipart/related; boundary=\"fabric-test\"",
+		"",
+		"--fabric-test",
+		"Content-Type: text/html",
+		"Content-Location: https://victim.example/login",
+		"",
+		"<html><body>untrusted uploaded snapshot</body></html>",
+		"--fabric-test--",
+	].join("\r\n"), "utf8");
+
+	const archive = await archiveWebsite({ url: "https://submitter.example/", mhtmlSnapshot: snapshot });
+
+	expect(archive.url).toBe("https://submitter.example/");
+	expect(archive.navigationHops).toEqual([{
+		index: 0,
+		url: "https://submitter.example/",
+		hostname: "submitter.example",
+		status: null,
+		contentCaptured: false,
+	}]);
 });
