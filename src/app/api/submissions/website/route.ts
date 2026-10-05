@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { analyzeWebsite } from "@/lib/website_ai";
-import { generateId } from "@/lib/db/ids";
-import { getUserCC } from "@/lib/utils";
-import { SubmissionsEntity } from "@/lib/db/entities";
+import { getReporterMetadata } from "@/lib/request_metadata";
+import { createWebsiteSubmission } from "@/lib/submissions/website";
 
 export const runtime = "nodejs";
 
@@ -31,43 +29,12 @@ export async function POST(req: NextRequest) {
 			}
 		}
 
-		const country_code = await getUserCC(req);
-		console.log("Website submission from country:", country_code);
-		const stream_id = await createWebsiteSubmission({ url, country_code, mhtmlSnapshot });
+		const reporter = await getReporterMetadata(req);
+		const stream_id = await createWebsiteSubmission({ url, mhtmlSnapshot, ...reporter });
 
 		return NextResponse.json({ stream_id });
 	} catch (err) {
 		console.error("Submission error:", err);
 		return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
 	}
-}
-
-export async function createWebsiteSubmission(options: {
-	mhtmlSnapshot?: Buffer;
-	url: string;
-	country_code?: string;
-	source?: string;
-}): Promise<bigint> {
-	const stream_id = generateId();
-
-	const { url, source } = options;
-
-	// Create submission
-	const existingId = await SubmissionsEntity.create({
-		kind: "website",
-		data: { kind: "website", website: { url } },
-		dedupeKey: `website-${new URL(url).hostname}`,
-		status: "new",
-		source: source || url,
-		id: stream_id,
-	});
-
-	if (existingId !== stream_id) {
-		// Already exists, return existing ID
-		return existingId;
-	}
-
-	analyzeWebsite({ submissionId: stream_id, ...options }).catch(console.error);
-
-	return stream_id;
 }

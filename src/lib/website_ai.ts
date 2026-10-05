@@ -1,25 +1,17 @@
 import * as toon from "@toon-format/toon";
 import { archiveWebsite } from "./website_archive";
-import { SubmissionsEntity, ArtifactsEntity, ReportsEntity } from "./db/entities";
+import { SubmissionsEntity, ArtifactsEntity } from "./db/entities";
 import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
-import { markSubmissionInvalid, reportToGoogleSafeBrowsing, reportWebsitePhishing } from "./report";
-import { defaultReasoning, defaultResponseModel } from "./utils";
+import { handoffConfirmedWebsitePhishing } from "./abuse/legacy_website";
+import type { ReporterMetadata } from "./request_metadata";
+import { markSubmissionInvalid } from "./submissions/state";
+import { defaultReasoning, defaultResponseModel, retry } from "./utils";
 
 export async function emitStep(streamId: bigint | string | undefined, step: string, progress: number) {
 	if (!streamId) return;
 	await publishEvent(`run:${streamId}`, { type: "analysis.step", step, progress });
-}
-
-export function retry(fn: () => Promise<any>, retries: number = 3, delayMs: number = 5000): Promise<any> {
-	return fn().catch((err) => {
-		if (retries > 0) {
-			return new Promise((resolve) => setTimeout(resolve, delayMs)).then(() => retry(fn, retries - 1, delayMs));
-		} else {
-			return Promise.reject(err);
-		}
-	});
 }
 
 type WebsiteEvidenceArchive = {
@@ -84,17 +76,25 @@ Important: classify the captured archive/screenshot evidence, not the result of 
 
 export async function analyzeWebsite(options: {
 	mhtmlSnapshot?: Buffer;
+	/** Existing evidence screenshot used when a retry parses MHTML locally. */
+	screenshotSnapshot?: Buffer;
+	/** Reuse the existing website archive artifacts instead of writing duplicates. */
+	reuseEvidenceArtifacts?: boolean;
 	url: string;
 	submissionId: bigint;
-	country_code?: string;
-}): Promise<bigint> {
-	const { url, submissionId, country_code } = options!;
+} & ReporterMetadata): Promise<bigint> {
+	const { url, submissionId, reporterIp, reporterCountry, reporterHeaders, reuseEvidenceArtifacts = false } = options!;
 	try {
+		// Claim the submission before any network work. Previously the first
+		// unbounded WHOIS lookup ran while the row still said `new`, so a process
+		// restart could leave it looking queued forever with no retry path.
+		await SubmissionsEntity.update(submissionId, { status: "running", info: "Collecting bounded WHOIS, RDAP, and regional DNS evidence." });
 		await emitStep(submissionId, "whois_lookup", 5);
 		const whois = await getInfo(url);
 
 		await SubmissionsEntity.update(submissionId, {
 			status: "running",
+			info: undefined,
 			data: {
 				kind: "website",
 				website: {
@@ -105,16 +105,21 @@ export async function analyzeWebsite(options: {
 		});
 
 		await emitStep(submissionId, "archive_website", 10);
-		const archive = await retry(() => archiveWebsite(options), 2, 3000);
+		const captured = await retry(() => archiveWebsite({ url, mhtmlSnapshot: options.mhtmlSnapshot }), 2, 3000);
+		const archive = captured.screenshotPng || !options.screenshotSnapshot
+			? captured
+			: { ...captured, screenshotPng: options.screenshotSnapshot };
 		await emitStep(submissionId, "save_artifacts", 40);
 
-		// await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive });
-		await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive });
+		if (!reuseEvidenceArtifacts) {
+			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive });
+		}
 
 		await emitStep(submissionId, "analysis_run", 45);
 
 		const { result: analysis } = await runStreamedAnalysisRun({
 			submissionId,
+			analysisKind: "analysis",
 			options: {
 				model: defaultResponseModel,
 				input: [
@@ -140,11 +145,13 @@ Please provide a detailed phishing analysis of the website.
 Research if the website impersonates another brand/service using web_search. If possible the exact impersonated brand website URL address.
 Use web search if necessary to gather more information about the content/brand. (the website might be new and doesn't have any web results yet). (you are not be able to access the website directly use the provided website text, html and screenshot).`,
 							},
-							{
-								type: "input_image" as const,
-								detail: "high" as const,
-								image_url: `data:image/png;base64,${archive.screenshotPng.toString("base64")}`,
-							},
+							...(archive.screenshotPng
+								? [{
+									type: "input_image" as const,
+									detail: "high" as const,
+									image_url: `data:image/png;base64,${archive.screenshotPng.toString("base64")}`,
+								}]
+								: []),
 						],
 					},
 				],
@@ -157,6 +164,7 @@ Use web search if necessary to gather more information about the content/brand. 
 		await emitStep(submissionId, "structured_response", 75);
 		const { result: structuredResponse } = await runStreamedAnalysisRun({
 			submissionId,
+			analysisKind: "classification",
 			options: {
 				model: defaultResponseModel,
 				input: buildWebsiteClassificationInput({ url, whois, archive, analysisText: analysis.output_text }),
@@ -188,39 +196,21 @@ Use web search if necessary to gather more information about the content/brand. 
 		if (phishing) {
 			await emitStep(submissionId, "reporting", 90);
 			const analysisText = reportEvidenceText({ url, whois, archive, analysisText: analysis.output_text });
-			await reportWebsitePhishing({
+			await handoffConfirmedWebsitePhishing({
 				submissionId,
 				url,
-				whois,
 				analysisText,
-				archive: {
-					screenshotPng: archive.screenshotPng,
-					mhtml: archive.mhtml,
-				},
-				countryCode: country_code,
+				screenshotPng: archive.screenshotPng,
+				reporter: { reporterIp, reporterCountry, reporterHeaders },
 			});
 
-			await emitStep(submissionId, "reporting to Google Safe Browsing", 90);
-
-			try {
-				await reportToGoogleSafeBrowsing({
-					url,
-					submissionId,
-					analysisText,
-				});
-			} catch (err) {
-				console.error("Failed to report to Google Safe Browsing:", err);
-			}
-
-			const reports = await ReportsEntity.listForSubmission(submissionId);
-			if (reports.length > 0) {
-				await SubmissionsEntity.update(submissionId, { status: "reported" });
-			} else {
-				await SubmissionsEntity.update(submissionId, {
-					status: "failed",
-					info: "Phishing confirmed, but no reports were successfully submitted.",
-				});
-			}
+			// Legacy `reported` is a phishing-classification/handoff state. The
+			// standalone report is only queued here; provider delivery remains
+			// independently observable through its durable lifecycle.
+			await SubmissionsEntity.update(submissionId, {
+				status: "reported",
+				info: "Phishing confirmed; standalone abuse report accepted and queued for routing.",
+			});
 		} else {
 			await markSubmissionInvalid(submissionId);
 		}

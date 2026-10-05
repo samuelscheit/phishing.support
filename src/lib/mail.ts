@@ -1,16 +1,10 @@
 import { simpleParser, type AddressObject } from "mailparser";
-import fs from "fs";
-import path from "path";
-import { config } from "dotenv";
 import { parse } from "node-html-parser";
-import { launch } from "puppeteer-core";
-import { tmpdir } from "os";
-import { getBrowser, getBrowserPage } from "./browser/";
+import { getBrowser } from "./browser/";
 import is_ip_private from "private-ip";
 import { analyzeSMTPHeadersFromRaw } from "@bernierllc/smtp-analyzer";
 import { MailData } from "./mail_ai";
 import { sleep } from "./utils";
-import MailAddressParser from "nodemailer/lib/addressparser";
 
 export function getAddressesText(obj: AddressObject[] | AddressObject | undefined): string {
 	if (!obj) return "";
@@ -40,7 +34,7 @@ function getAddressText(obj: AddressObject | undefined): string {
 
 export function getMailLinks(result: MailData) {
 	try {
-		if (!result.html) throw new Error("No HTML content found");
+		if (!result.html) return [];
 
 		const doc = parse(result.html);
 
@@ -164,15 +158,19 @@ export function analyzeHeaders(headers: string) {
 		}
 	});
 
-	const fromHeader = getHeaderValues(headersMap, "from");
-	const from = fromHeader?.length > 0 && MailAddressParser(fromHeader[0], { flatten: true });
-
 	const dmarcPolicy = getHeaderValues(headersMap, "x-dmarc-policy");
 	const dmarcInfo = getHeaderValues(headersMap, "x-dmarc-info");
 	const arcInfo = getHeaderValues(headersMap, "x-arc-info");
 
 	const hops = parseReceived(result.data.routing.totalHops.map((x) => x.raw));
-	const sourceHop = [...hops].find((hop) => hop.fromIp && !is_ip_private(hop.fromIp)) || [...hops].reverse().find((hop) => hop.fromIp);
+	// The RFC 5322 From field is sender-controlled and says nothing about the
+	// SMTP host that delivered the message. Restrict origin attribution to
+	// Received-chain evidence so downstream infrastructure lookups do not
+	// mistake an arbitrary displayed sender domain for a transport endpoint.
+	const sourceHop =
+		[...hops].find((hop) => hop.fromIp && !is_ip_private(hop.fromIp)) ??
+		[...hops].reverse().find((hop) => hop.fromIp) ??
+		[...hops].reverse().find((hop) => hop.fromHost);
 
 	result.data.routing.totalHops.forEach((x) => {
 		// @ts-ignore
@@ -183,15 +181,8 @@ export function analyzeHeaders(headers: string) {
 	delete result.data.securityHeaders.receivedSpf;
 	delete result.data.securityHeaders.dkimSignature;
 
-	let originatingIp = result.data.routing.originatingIp;
-	let originatingServer = result.data.routing.originatingServer;
-
-	if (sourceHop) {
-		originatingIp = sourceHop.fromIp;
-		originatingServer = sourceHop.fromHost;
-	} else if (from && from[0].address && !originatingServer) {
-		originatingServer = from[0].address.split("@")[1];
-	}
+	const originatingIp = sourceHop?.fromIp || undefined;
+	const originatingServer = sourceHop?.fromHost || undefined;
 
 	return {
 		authentication: {

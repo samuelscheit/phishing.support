@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "capture": {
+    "source_artifact": "investigation/tiktok/probe_qr_response.txt",
+    "source_artifact_sha256": "e5002e12607e90a8ca22da1e502d50355c8a85dc847fb5214c10e0dc49b12338",
+    "request_context": "read-only synthetic/public username probe; no payment submitted",
+    "login_identifier": "tiktok",
+    "order_created_at_utc": "2026-09-01T02:35:00Z",
+    "order_id": 7052
+  },
+  "order": {
+    "success": true,
+    "requested_amount_vnd": 50000,
+    "total_payment_vnd": 50000,
+    "pay_amount_vnd": 48500,
+    "discount_amount_vnd": 1500,
+    "discount_percent": 3,
+    "bank_name": "Công ty cổ phần Zion",
+    "receiver_name": "IMEDIA JSC",
+    "receiver_account": "Z397926244101696205",
+    "expires_at_local": "2026-09-01T09:49:59+07:00",
+    "expires_at_utc": "2026-09-01T02:49:59Z"
+  },
+  "emvco": {
+    "payload": "00020101021226530010vn.zalopay01065247360203001031819860415260603964338630010A000000727013300069711010119Z3979262441016962050208QRIBFTTA5204739953037045405485005802VN6304F047",
+    "payload_sha256": "2bd6c0b1280d4f54333c275174fb440d41eb7e76177827b769c8b69d5639511b",
+    "crc16_ccitt_false": "F047",
+    "crc_verified": true,
+    "length_bytes": 174
+  },
+  "zalopay_dynamic_qr_lookup": {
+    "capture_at_utc": "2026-09-01T03:25:35Z",
+    "source_response_sha256": "abf49f56f6ebf68dc896da9cf9cdab664dfda81624104d101c785b26a70fa2fe",
+    "app_id": "4982",
+    "amount_vnd": 48500,
+    "receiver_name": "IMEDIA JSC",
+    "receiver_account": "Z397926244101696205",
+    "partner": 2,
+    "partner_short_name": "Zalopay",
+    "partner_full_name": "Công ty cổ phần Zion",
+    "note": "The source response also contained a transaction token; it is intentionally excluded from this derivative and from the report."
+  },
+  "status": {
+    "final_response": {
+      "status": "expired"
+    },
+    "final_checked_at_utc": "2026-09-01T04:06:01Z",
+    "payment_made": false
+  },
+  "control_experiment": {
+    "source_artifact": "investigation/tiktok/zalopay_emv_example.json",
+    "source_artifact_sha256": "89b033e8d65305ce39f50ce785b52fc2256d585d608467c247c978edb9fe226a",
+    "generic_bundle_example_account": "Z397926202100439920",
+    "generic_bundle_example_receiver": "XPAY",
+    "generic_bundle_example_app_id": "4699",
+    "interpretation": "The generic payment bundle example resolves to a different account/app than the live campaign QR; it is not attribution evidence."
+  }
+}

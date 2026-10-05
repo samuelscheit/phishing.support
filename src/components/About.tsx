@@ -1,6 +1,5 @@
-import Image from "next/image";
-import { ExternalLink } from "lucide-react";
 import pfp from "@/assets/samuelscheit.jpg";
+import Image from "next/image";
 import Donate from "./Donate";
 
 export default function About() {
@@ -122,7 +121,7 @@ export default function About() {
 					site, I'd do that whole process again for the website.
 					<br />
 					<br />
-					Another day, another phishing email landed in my inbox - and that was the moment that pushed me over the edge.
+					Another day, another phishing email landed in my inbox and that was the moment that pushed me over the edge.
 					<br />
 					I thought: there has to be a better way. Why not automate this whole process?
 					<br />

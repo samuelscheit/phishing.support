@@ -1,19 +1,4 @@
-// import { Browser, launch } from "puppeteer-core";
 import path from "path";
-import fs from "fs";
-import { tmpdir } from "os";
-
-import {
-	CDPSession,
-	Frame,
-	HTTPResponse,
-	launch,
-	Page,
-	Protocol,
-	PuppeteerLifeCycleEvent,
-	type Browser,
-	type GoToOptions,
-} from "rebrowser-puppeteer-core";
 import sanitize from "sanitize-filename";
 import OpenAI from "openai";
 import { config } from "dotenv";
@@ -21,11 +6,6 @@ import type { Stream } from "openai/streaming";
 import type { ResponseStreamEvent } from "openai/resources/responses/responses.mjs";
 import nodemailer from "nodemailer";
 import { fileURLToPath } from "url";
-import { SocksProxyAgent } from "socks-proxy-agent";
-import { fetch } from "netbun";
-import axios from "axios";
-import { HttpProxyAgent } from "http-proxy-agent";
-import { userAgent } from "./constants";
 import { extractResponseOutputText, parseResponseJson } from "./openai_response";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -53,6 +33,15 @@ export function pathSafeFilename(input: string, { fallback = "file", maxLen = 18
 
 export async function sleep(ms: number) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function retry<T>(fn: () => Promise<T>, retries: number = 3, delayMs: number = 5000): Promise<T> {
+	return fn().catch((err) => {
+		if (retries > 0) {
+			return sleep(delayMs).then(() => retry(fn, retries - 1, delayMs));
+		}
+		return Promise.reject(err);
+	});
 }
 
 export async function logStream(response: Stream<ResponseStreamEvent>) {
@@ -118,18 +107,18 @@ export async function logStream(response: Stream<ResponseStreamEvent>) {
 	throw new Error("Stream ended without completion");
 }
 
-const smtpHost = process.env.SMTP_HOST || "smtp.ethereal.email";
-const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 587;
+const smtpHost = process.env.SMTP_HOST;
+const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587;
 const smtpSecure = process.env.SMTP_SECURE !== undefined ? process.env.SMTP_SECURE === "true" : smtpPort === 465;
-const smtpUser = process.env.SMTP_USER || "maddison53@ethereal.email";
-const smtpPass = process.env.SMTP_PASS || "jn7jnAPss4f63QBp6D";
+const smtpUser = process.env.SMTP_USER;
+const smtpPass = process.env.SMTP_PASS;
 
 if (smtpSecure && smtpPort === 587) {
 	console.warn("SMTP_SECURE=true with port 587 can cause TLS errors; use SMTP_SECURE=false for STARTTLS.");
 }
 
 export const mailer =
-	smtpHost && smtpPort && smtpUser && smtpPass
+	smtpHost && Number.isFinite(smtpPort) && smtpPort > 0 && smtpUser && smtpPass
 		? nodemailer.createTransport({
 				host: smtpHost,
 				port: smtpPort,
@@ -148,41 +137,21 @@ export const defaultReasoning = {
 	summary: "detailed",
 } as const;
 
-const { PROXY_URL } = process.env;
+/**
+ * Builds the Responses client only when an analysis actually starts.
+ *
+ * Route modules are evaluated during `next build`; constructing the OpenAI
+ * client there makes the image build depend on a runtime-only API key. Keeping
+ * this boundary lazy also produces a clear operational error when a deployed
+ * worker receives an analysis request without credentials.
+ */
+export function getOpenAIClient(): OpenAI {
+	const apiKey = process.env.OPENAI_API_KEY?.trim();
+	if (!apiKey) throw new Error("OPENAI_API_KEY is required to run AI analysis.");
 
-export const model = new OpenAI({
-	apiKey: process.env.OPENAI_API_KEY ?? "",
-	baseURL: process.env.OPENAI_API_BASE_URL || "https://api.openai.com/v1",
-	// fetch,
-	fetchOptions: {
-		// ...getProxyOptions(),
-		verbose: process.env.OPENAI_VERBOSE === "true",
-	},
-});
-
-export function getProxyOptions() {
-	if (!PROXY_URL) return {};
-
-	if (PROXY_URL.startsWith("http://") || PROXY_URL.startsWith("https://")) {
-		const agent = new HttpProxyAgent(PROXY_URL);
-		return { agent, proxy: PROXY_URL };
-	}
-
-	const agent = new SocksProxyAgent(PROXY_URL);
-	return { agent, proxy: PROXY_URL };
-}
-
-export async function getUserCC(req: Request) {
-	try {
-		const ip = req.headers.get("CF-Connecting-IP") || req.headers.get("x-forwarded-for");
-		if (!ip) throw new Error("No IP found");
-
-		console.log("Fetching country code for IP:", ip);
-
-		const response = await axios(`https://api.country.is/${ip}`);
-
-		console.log("Country code response:", response.data);
-		return response.data.country as string;
-	} catch (error) {}
-	return "de";
+	return new OpenAI({
+		apiKey,
+		baseURL: process.env.OPENAI_API_BASE_URL?.trim() || "https://api.openai.com/v1",
+		logLevel: process.env.OPENAI_VERBOSE === "true" ? "debug" : undefined,
+	});
 }

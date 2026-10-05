@@ -15,6 +15,55 @@
       "when": 1768283636749,
       "tag": "0001_workable_shen",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786106028818,
+      "tag": "0002_add_reporter_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1786586194977,
+      "tag": "0003_add_artifact_archive_date",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786590182597,
+      "tag": "0004_per_report_reply_identities",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1786598906042,
+      "tag": "0005_correspondence_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1786598957759,
+      "tag": "0006_standalone_abuse_reporting",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1786742163238,
+      "tag": "0007_netcraft_mail_reporting",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1787867599056,
+      "tag": "0008_light_ikaris",
+      "breakpoints": true
     }
   ]
 }

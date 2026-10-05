@@ -2,7 +2,7 @@
 
 # Multi-stage build for Next.js (Bun)
 
-FROM oven/bun:1.3.5-debian AS deps
+FROM oven/bun:1.4.2-debian AS deps
 WORKDIR /app
 
 # System deps needed for some native modules during install (kept in build stage)
@@ -13,7 +13,7 @@ RUN apt-get update \
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
-FROM oven/bun:1.3.5-debian AS builder
+FROM oven/bun:1.4.2-debian AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -25,22 +25,14 @@ ENV NODE_ENV=production
 RUN bun run build
 
 
-FROM oven/bun:1.3.5-debian AS runner
+FROM oven/bun:1.4.2-debian AS runner
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates wget gnupg
-
-RUN set -euxo pipefail; \
-  wget -qO- https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-linux-signing-keyring.gpg; \
-  echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list; \
-  apt-get update; \
-  apt-get install -y --no-install-recommends ca-certificates bash xvfb xauth fonts-liberation libasound2 libnss3 libxss1 libgtk-3-0 google-chrome-stable; \
-  rm -rf /var/lib/apt/lists/*
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
-ENV DOCKER=true
-ENV CHROME_PATH=/usr/bin/google-chrome-stable
 
 RUN mkdir -p /app/data
 
@@ -57,4 +49,4 @@ COPY --from=builder /app/src ./src
 
 EXPOSE 3000
 
-CMD ["sh", "-lc", "xvfb-run -a --server-args='-screen 0 1280x1024x24 -nolisten tcp' bun /app/src/lib/server_start.ts"]
+CMD ["bun", "/app/src/lib/server_start.ts"]

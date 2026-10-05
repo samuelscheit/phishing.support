@@ -1,0 +1,1542 @@
+{
+  "schema_version": 1,
+  "case": "tiktok-recharge-campaign",
+  "generated_at_utc": "2026-09-01T09:25:00Z",
+  "evidence_cutoff_utc": "2026-09-01T09:19:56Z",
+  "assessment": {
+    "primary_finding": "The 2026 campaign is a shared Vietnamese TikTok-recharge kit. Public-source evidence identifies a likely kit publisher/reseller lead but does not identify the live-domain operator or an individual perpetrator.",
+    "identity_status": "unresolved",
+    "attribution_layers": [
+      "kit/source",
+      "deployment/hosting",
+      "payment destination",
+      "individual identity"
+    ],
+    "interpretation_rule": "Asset or layout reuse can establish technical relatedness; it cannot, without account/log/payment correlation, establish that a repository owner operated a particular domain or payment account."
+  },
+  "comparison_baseline": {
+    "template_fingerprint_path": "investigation/tiktok/template_fingerprint.json",
+    "normalized_campaign_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d",
+    "captured_campaign_mhtml_pages": 19,
+    "shared_campaign_asset_count": 32,
+    "asset_hashes": [
+      {
+        "path": "/public/images/tiktok/card/garena.png",
+        "sha256": "237fa12c6a1fa1729ad96150150198f341b04183c8282f82818a5b4393a74415",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/card/mobifone.png",
+        "sha256": "9874b99edd042b57a7fb3927cada8c4dcf9b29436ddaae536965fbb19e319a52",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/card/vcoin.png",
+        "sha256": "506c7a7b7d9f7c18b1df7f224ae7d5c99b7e4aeab54e5ef82bd1154fc2e7f82e",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/card/viettel.png",
+        "sha256": "d7447bb72303a26f0a26d61d4f5055f6c2e51b9a57efce07d38b02123e7c029a",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/card/vinaphone.png",
+        "sha256": "8862bb55fd5f4fd07c5c131b86f565cc5ea9c9cf38ff84dca4704ce96cbd7319",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/card/zing.png",
+        "sha256": "b87cd753fb48701e4829839a7257a8fbbcc7abf546db74be966daeec44d93529",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/method/bank-qr.svg",
+        "sha256": "23e7ba91d2253d914a17ef73fcfc847125ceec9c918c1dac942c2ca0a7c39dec",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/method/method_garena.png",
+        "sha256": "48c3a37d0016afc7f5d5a9128c741894ed782ddd60469b3ae1f90ed87608a826",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/method/method_mobifone.png",
+        "sha256": "dffbfd40314bff581fe3cc09548a3f22f6174d293685e6682612636cd0542c45",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/method/method_momo.png",
+        "sha256": "9d4318dc4f56f3f4f2cc34ed572c4f1855ce289942fde4e0a38fa2118f438139",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/method/method_viettel.png",
+        "sha256": "4b5b41b54d088290d0664eeb739edbf7d2a2e71e981f3a41d1608a36e188da6b",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/method/method_vinaphone.png",
+        "sha256": "14a87037736052075d1851f068a43774d2a1476cfb23ad596fb7e7d3fda2fe1d",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/method/method_visa.png",
+        "sha256": "ab911afb829e89c74eba5c851786b3fae0cde43e0433535272d6cceaf1d47dc4",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/method/method_vnpay.png",
+        "sha256": "2c04eeb233561c09b38e69e3fc745b9724a2e1dbce6a907b1f5eaf8d97969355",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/method/method_zalopay.png",
+        "sha256": "be5c45051b064fb4ca3662d9d34917ade7fe8351643d5153af4a09b25976fb9e",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/method/method_zing.png",
+        "sha256": "b46f778a19f74aa8e1bc537a1a7ee0ad56b7195c3ac5065b0e039d238a723f1d",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/method/the-cao.svg",
+        "sha256": "1bd5739129611aa7f57e373666a1d679f9b6614e0740a3f2f304d99ad180a335",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/arrow-bottom.svg",
+        "sha256": "5aa7df932d251acd3ea82002544c4d339acea3774c7c5271cab3c457ad73994a",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/arrow-left.svg",
+        "sha256": "8a8b69b9ece18ff8f0de627508efa5382d0576d2c7ca8db078c049504a3dcc91",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/arrow-right.svg",
+        "sha256": "c706049cfaf244117e54b585721d65ac826d4e0d0457b1f5a913912bc64b3f40",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/avatar-default.svg",
+        "sha256": "fd8d92216e96dd0461a1b8f3d73bbb8ebf6e96824612ac30b5b5d06d504897de",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/close.svg",
+        "sha256": "4c371d0a03e3b8e056248a640b93d57bba982d3beba73151cf93e11ffc713a87",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/coin.svg",
+        "sha256": "28609f1a92cbfe1cd73a74ed21177db4991bd9cb522ac54dba22a05b32e0a328",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/creator-tools.svg",
+        "sha256": "fd07627d846c049923ebc45d852e220ea00bbe673e3b3513b64c1083698522cd",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/help.svg",
+        "sha256": "bbdd495a219c250e75f23c5609f9a80b2eddda43f94cf5dc41b641d0b6c135cb",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/logo.svg",
+        "sha256": "66ff8524c34494cabd309e6d9b27c39670563ee036d74e2cd56a07566f662ae2",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/menu.svg",
+        "sha256": "ac8f922c34819ffda5d1a7c3f6fa58773c520ff705dce43e3558963013b57deb",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/question.svg",
+        "sha256": "da0ee2d236f4624aac8e1e83e923340841223a346c452bb8a95572fc46feb3c8",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/search.svg",
+        "sha256": "9be18df4331bdc2054e6793498cc80726a4924875aa6d7ca31bdf7b7981d55aa",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/security-tiktok.svg",
+        "sha256": "bb4ae0be7662804ab90f6d840e8bf03d632b781fc66015d54e89d88d358969de",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/shield-tick.svg",
+        "sha256": "7583be49e9c4424b73a7d99c080c034d93c64a0ada9cd74dcd523dbf281d55f7",
+        "copies": 19
+      },
+      {
+        "path": "/public/images/tiktok/svg/three-dots.svg",
+        "sha256": "094bf6820c94db4acb4bd626f3db4ca9375264eff8f6bf6cd13cb951c6cf544a",
+        "copies": 19
+      }
+    ]
+  },
+  "exact_kit_deployments": [
+    {
+      "domain": "napxutiktok.sbs",
+      "is_verified_campaign_member": false,
+      "classification": "related exact full-kit deployment",
+      "why_not_counted": "It is not one of the 20 phishing-support submissions in this case inventory.",
+      "urlscan_observations": [
+        {
+          "urlscan_id": "019f6f39-d115-7636-bfba-f749b16b39b1",
+          "observed_at_utc": "2026-07-17T08:38:14.556Z",
+          "primary_url": "https://napxutiktok.sbs/",
+          "primary_response_sha256": "dbb008cff746abb0ab7909e9beb5ac350f1b5ecd9d228fe76ccd058cc71607db",
+          "main_ip": "172.67.132.229",
+          "http_transaction_count": 37,
+          "campaign_asset_match_count": 32,
+          "matching_assets": [
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/garena.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/card/garena.png",
+              "sha256": "237fa12c6a1fa1729ad96150150198f341b04183c8282f82818a5b4393a74415"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/mobifone.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/card/mobifone.png",
+              "sha256": "9874b99edd042b57a7fb3927cada8c4dcf9b29436ddaae536965fbb19e319a52"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/vcoin.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/card/vcoin.png",
+              "sha256": "506c7a7b7d9f7c18b1df7f224ae7d5c99b7e4aeab54e5ef82bd1154fc2e7f82e"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/viettel.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/card/viettel.png",
+              "sha256": "d7447bb72303a26f0a26d61d4f5055f6c2e51b9a57efce07d38b02123e7c029a"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/vinaphone.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/card/vinaphone.png",
+              "sha256": "8862bb55fd5f4fd07c5c131b86f565cc5ea9c9cf38ff84dca4704ce96cbd7319"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/zing.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/card/zing.png",
+              "sha256": "b87cd753fb48701e4829839a7257a8fbbcc7abf546db74be966daeec44d93529"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/bank-qr.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/method/bank-qr.svg",
+              "sha256": "23e7ba91d2253d914a17ef73fcfc847125ceec9c918c1dac942c2ca0a7c39dec"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_garena.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/method/method_garena.png",
+              "sha256": "48c3a37d0016afc7f5d5a9128c741894ed782ddd60469b3ae1f90ed87608a826"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_mobifone.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/method/method_mobifone.png",
+              "sha256": "dffbfd40314bff581fe3cc09548a3f22f6174d293685e6682612636cd0542c45"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_momo.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/method/method_momo.png",
+              "sha256": "9d4318dc4f56f3f4f2cc34ed572c4f1855ce289942fde4e0a38fa2118f438139"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_viettel.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/method/method_viettel.png",
+              "sha256": "4b5b41b54d088290d0664eeb739edbf7d2a2e71e981f3a41d1608a36e188da6b"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_vinaphone.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/method/method_vinaphone.png",
+              "sha256": "14a87037736052075d1851f068a43774d2a1476cfb23ad596fb7e7d3fda2fe1d"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_visa.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/method/method_visa.png",
+              "sha256": "ab911afb829e89c74eba5c851786b3fae0cde43e0433535272d6cceaf1d47dc4"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_vnpay.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/method/method_vnpay.png",
+              "sha256": "2c04eeb233561c09b38e69e3fc745b9724a2e1dbce6a907b1f5eaf8d97969355"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_zalopay.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/method/method_zalopay.png",
+              "sha256": "be5c45051b064fb4ca3662d9d34917ade7fe8351643d5153af4a09b25976fb9e"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_zing.png",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/method/method_zing.png",
+              "sha256": "b46f778a19f74aa8e1bc537a1a7ee0ad56b7195c3ac5065b0e039d238a723f1d"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/the-cao.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/method/the-cao.svg",
+              "sha256": "1bd5739129611aa7f57e373666a1d679f9b6614e0740a3f2f304d99ad180a335"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/arrow-bottom.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/arrow-bottom.svg",
+              "sha256": "5aa7df932d251acd3ea82002544c4d339acea3774c7c5271cab3c457ad73994a"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/arrow-left.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/arrow-left.svg",
+              "sha256": "8a8b69b9ece18ff8f0de627508efa5382d0576d2c7ca8db078c049504a3dcc91"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/arrow-right.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/arrow-right.svg",
+              "sha256": "c706049cfaf244117e54b585721d65ac826d4e0d0457b1f5a913912bc64b3f40"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/avatar-default.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/avatar-default.svg",
+              "sha256": "fd8d92216e96dd0461a1b8f3d73bbb8ebf6e96824612ac30b5b5d06d504897de"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/close.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/close.svg",
+              "sha256": "4c371d0a03e3b8e056248a640b93d57bba982d3beba73151cf93e11ffc713a87"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/coin.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/coin.svg",
+              "sha256": "28609f1a92cbfe1cd73a74ed21177db4991bd9cb522ac54dba22a05b32e0a328"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/creator-tools.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/creator-tools.svg",
+              "sha256": "fd07627d846c049923ebc45d852e220ea00bbe673e3b3513b64c1083698522cd"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/help.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/help.svg",
+              "sha256": "bbdd495a219c250e75f23c5609f9a80b2eddda43f94cf5dc41b641d0b6c135cb"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/logo.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/logo.svg",
+              "sha256": "66ff8524c34494cabd309e6d9b27c39670563ee036d74e2cd56a07566f662ae2"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/menu.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/menu.svg",
+              "sha256": "ac8f922c34819ffda5d1a7c3f6fa58773c520ff705dce43e3558963013b57deb"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/question.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/question.svg",
+              "sha256": "da0ee2d236f4624aac8e1e83e923340841223a346c452bb8a95572fc46feb3c8"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/search.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/search.svg",
+              "sha256": "9be18df4331bdc2054e6793498cc80726a4924875aa6d7ca31bdf7b7981d55aa"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/security-tiktok.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/security-tiktok.svg",
+              "sha256": "bb4ae0be7662804ab90f6d840e8bf03d632b781fc66015d54e89d88d358969de"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/shield-tick.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/shield-tick.svg",
+              "sha256": "7583be49e9c4424b73a7d99c080c034d93c64a0ada9cd74dcd523dbf281d55f7"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/three-dots.svg",
+              "resource_url": "https://napxutiktok.sbs/public/images/tiktok/svg/three-dots.svg",
+              "sha256": "094bf6820c94db4acb4bd626f3db4ca9375264eff8f6bf6cd13cb951c6cf544a"
+            }
+          ]
+        }
+      ],
+      "rdap": {
+        "source_path": "investigation/tiktok/related_sites/exact_kit/napxutiktok.sbs_rdap.json",
+        "registration_time_utc": "2026-07-15T19:10:34Z",
+        "expiration_time_utc": "2027-07-15T23:59:59Z",
+        "last_changed_utc": "2026-08-31T19:33:46Z",
+        "registrar": "Spaceship, Inc.",
+        "registrar_iana_id": "3862",
+        "nameservers": [
+          "decker.ns.cloudflare.com",
+          "saanvi.ns.cloudflare.com"
+        ],
+        "status": [
+          "server hold",
+          "server transfer prohibited",
+          "client hold",
+          "client transfer prohibited",
+          "client update prohibited"
+        ],
+        "capture_time_utc": "2026-09-01T09:19:56Z"
+      },
+      "interpretation": "The public scan requested the same 32 campaign asset hashes and the same Vietnamese title/package/payment presentation. This is a strong kit correlation, not evidence that this domain shared the current origin or payment account."
+    },
+    {
+      "domain": "napthegarena.online",
+      "is_verified_campaign_member": false,
+      "classification": "related exact full-kit deployment",
+      "why_not_counted": "It is a historical public URLScan lead, not one of the 20 phishing-support submissions in this case inventory.",
+      "urlscan_observations": [
+        {
+          "urlscan_id": "019fba8b-7e22-733c-be90-d604e0e800d5",
+          "observed_at_utc": "2026-07-31T23:38:58.092Z",
+          "primary_url": "https://napthegarena.online/",
+          "primary_response_sha256": "b397cbf83151ec27273066b7160f12d229680a8a1a8a4f6fb858789c98d6fef8",
+          "main_ip": "188.114.97.3",
+          "http_transaction_count": 37,
+          "campaign_asset_match_count": 32,
+          "matching_assets": [
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/garena.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/card/garena.png",
+              "sha256": "237fa12c6a1fa1729ad96150150198f341b04183c8282f82818a5b4393a74415"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/mobifone.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/card/mobifone.png",
+              "sha256": "9874b99edd042b57a7fb3927cada8c4dcf9b29436ddaae536965fbb19e319a52"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/vcoin.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/card/vcoin.png",
+              "sha256": "506c7a7b7d9f7c18b1df7f224ae7d5c99b7e4aeab54e5ef82bd1154fc2e7f82e"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/viettel.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/card/viettel.png",
+              "sha256": "d7447bb72303a26f0a26d61d4f5055f6c2e51b9a57efce07d38b02123e7c029a"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/vinaphone.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/card/vinaphone.png",
+              "sha256": "8862bb55fd5f4fd07c5c131b86f565cc5ea9c9cf38ff84dca4704ce96cbd7319"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/zing.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/card/zing.png",
+              "sha256": "b87cd753fb48701e4829839a7257a8fbbcc7abf546db74be966daeec44d93529"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/bank-qr.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/bank-qr.svg",
+              "sha256": "23e7ba91d2253d914a17ef73fcfc847125ceec9c918c1dac942c2ca0a7c39dec"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_garena.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_garena.png",
+              "sha256": "48c3a37d0016afc7f5d5a9128c741894ed782ddd60469b3ae1f90ed87608a826"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_mobifone.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_mobifone.png",
+              "sha256": "dffbfd40314bff581fe3cc09548a3f22f6174d293685e6682612636cd0542c45"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_momo.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_momo.png",
+              "sha256": "9d4318dc4f56f3f4f2cc34ed572c4f1855ce289942fde4e0a38fa2118f438139"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_viettel.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_viettel.png",
+              "sha256": "4b5b41b54d088290d0664eeb739edbf7d2a2e71e981f3a41d1608a36e188da6b"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_vinaphone.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_vinaphone.png",
+              "sha256": "14a87037736052075d1851f068a43774d2a1476cfb23ad596fb7e7d3fda2fe1d"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_visa.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_visa.png",
+              "sha256": "ab911afb829e89c74eba5c851786b3fae0cde43e0433535272d6cceaf1d47dc4"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_vnpay.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_vnpay.png",
+              "sha256": "2c04eeb233561c09b38e69e3fc745b9724a2e1dbce6a907b1f5eaf8d97969355"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_zalopay.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_zalopay.png",
+              "sha256": "be5c45051b064fb4ca3662d9d34917ade7fe8351643d5153af4a09b25976fb9e"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_zing.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_zing.png",
+              "sha256": "b46f778a19f74aa8e1bc537a1a7ee0ad56b7195c3ac5065b0e039d238a723f1d"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/the-cao.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/the-cao.svg",
+              "sha256": "1bd5739129611aa7f57e373666a1d679f9b6614e0740a3f2f304d99ad180a335"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/arrow-bottom.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/arrow-bottom.svg",
+              "sha256": "5aa7df932d251acd3ea82002544c4d339acea3774c7c5271cab3c457ad73994a"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/arrow-left.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/arrow-left.svg",
+              "sha256": "8a8b69b9ece18ff8f0de627508efa5382d0576d2c7ca8db078c049504a3dcc91"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/arrow-right.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/arrow-right.svg",
+              "sha256": "c706049cfaf244117e54b585721d65ac826d4e0d0457b1f5a913912bc64b3f40"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/avatar-default.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/avatar-default.svg",
+              "sha256": "fd8d92216e96dd0461a1b8f3d73bbb8ebf6e96824612ac30b5b5d06d504897de"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/close.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/close.svg",
+              "sha256": "4c371d0a03e3b8e056248a640b93d57bba982d3beba73151cf93e11ffc713a87"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/coin.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/coin.svg",
+              "sha256": "28609f1a92cbfe1cd73a74ed21177db4991bd9cb522ac54dba22a05b32e0a328"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/creator-tools.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/creator-tools.svg",
+              "sha256": "fd07627d846c049923ebc45d852e220ea00bbe673e3b3513b64c1083698522cd"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/help.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/help.svg",
+              "sha256": "bbdd495a219c250e75f23c5609f9a80b2eddda43f94cf5dc41b641d0b6c135cb"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/logo.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/logo.svg",
+              "sha256": "66ff8524c34494cabd309e6d9b27c39670563ee036d74e2cd56a07566f662ae2"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/menu.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/menu.svg",
+              "sha256": "ac8f922c34819ffda5d1a7c3f6fa58773c520ff705dce43e3558963013b57deb"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/question.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/question.svg",
+              "sha256": "da0ee2d236f4624aac8e1e83e923340841223a346c452bb8a95572fc46feb3c8"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/search.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/search.svg",
+              "sha256": "9be18df4331bdc2054e6793498cc80726a4924875aa6d7ca31bdf7b7981d55aa"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/security-tiktok.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/security-tiktok.svg",
+              "sha256": "bb4ae0be7662804ab90f6d840e8bf03d632b781fc66015d54e89d88d358969de"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/shield-tick.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/shield-tick.svg",
+              "sha256": "7583be49e9c4424b73a7d99c080c034d93c64a0ada9cd74dcd523dbf281d55f7"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/three-dots.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/three-dots.svg",
+              "sha256": "094bf6820c94db4acb4bd626f3db4ca9375264eff8f6bf6cd13cb951c6cf544a"
+            }
+          ]
+        },
+        {
+          "urlscan_id": "01a01c43-6622-7391-bcdc-6f00422c59c5",
+          "observed_at_utc": "2026-08-19T23:03:00.473Z",
+          "primary_url": "https://napthegarena.online/",
+          "primary_response_sha256": "2e06f717cf526868ed546b7ab9a720cbb2c8c6a4ad82ace71d2f04485b0219f7",
+          "main_ip": "188.114.96.3",
+          "http_transaction_count": 37,
+          "campaign_asset_match_count": 32,
+          "matching_assets": [
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/garena.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/card/garena.png",
+              "sha256": "237fa12c6a1fa1729ad96150150198f341b04183c8282f82818a5b4393a74415"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/mobifone.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/card/mobifone.png",
+              "sha256": "9874b99edd042b57a7fb3927cada8c4dcf9b29436ddaae536965fbb19e319a52"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/vcoin.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/card/vcoin.png",
+              "sha256": "506c7a7b7d9f7c18b1df7f224ae7d5c99b7e4aeab54e5ef82bd1154fc2e7f82e"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/viettel.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/card/viettel.png",
+              "sha256": "d7447bb72303a26f0a26d61d4f5055f6c2e51b9a57efce07d38b02123e7c029a"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/vinaphone.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/card/vinaphone.png",
+              "sha256": "8862bb55fd5f4fd07c5c131b86f565cc5ea9c9cf38ff84dca4704ce96cbd7319"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/card/zing.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/card/zing.png",
+              "sha256": "b87cd753fb48701e4829839a7257a8fbbcc7abf546db74be966daeec44d93529"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/bank-qr.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/bank-qr.svg",
+              "sha256": "23e7ba91d2253d914a17ef73fcfc847125ceec9c918c1dac942c2ca0a7c39dec"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_garena.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_garena.png",
+              "sha256": "48c3a37d0016afc7f5d5a9128c741894ed782ddd60469b3ae1f90ed87608a826"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_mobifone.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_mobifone.png",
+              "sha256": "dffbfd40314bff581fe3cc09548a3f22f6174d293685e6682612636cd0542c45"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_momo.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_momo.png",
+              "sha256": "9d4318dc4f56f3f4f2cc34ed572c4f1855ce289942fde4e0a38fa2118f438139"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_viettel.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_viettel.png",
+              "sha256": "4b5b41b54d088290d0664eeb739edbf7d2a2e71e981f3a41d1608a36e188da6b"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_vinaphone.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_vinaphone.png",
+              "sha256": "14a87037736052075d1851f068a43774d2a1476cfb23ad596fb7e7d3fda2fe1d"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_visa.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_visa.png",
+              "sha256": "ab911afb829e89c74eba5c851786b3fae0cde43e0433535272d6cceaf1d47dc4"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_vnpay.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_vnpay.png",
+              "sha256": "2c04eeb233561c09b38e69e3fc745b9724a2e1dbce6a907b1f5eaf8d97969355"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_zalopay.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_zalopay.png",
+              "sha256": "be5c45051b064fb4ca3662d9d34917ade7fe8351643d5153af4a09b25976fb9e"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/method_zing.png",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/method_zing.png",
+              "sha256": "b46f778a19f74aa8e1bc537a1a7ee0ad56b7195c3ac5065b0e039d238a723f1d"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/method/the-cao.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/method/the-cao.svg",
+              "sha256": "1bd5739129611aa7f57e373666a1d679f9b6614e0740a3f2f304d99ad180a335"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/arrow-bottom.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/arrow-bottom.svg",
+              "sha256": "5aa7df932d251acd3ea82002544c4d339acea3774c7c5271cab3c457ad73994a"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/arrow-left.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/arrow-left.svg",
+              "sha256": "8a8b69b9ece18ff8f0de627508efa5382d0576d2c7ca8db078c049504a3dcc91"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/arrow-right.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/arrow-right.svg",
+              "sha256": "c706049cfaf244117e54b585721d65ac826d4e0d0457b1f5a913912bc64b3f40"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/avatar-default.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/avatar-default.svg",
+              "sha256": "fd8d92216e96dd0461a1b8f3d73bbb8ebf6e96824612ac30b5b5d06d504897de"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/close.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/close.svg",
+              "sha256": "4c371d0a03e3b8e056248a640b93d57bba982d3beba73151cf93e11ffc713a87"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/coin.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/coin.svg",
+              "sha256": "28609f1a92cbfe1cd73a74ed21177db4991bd9cb522ac54dba22a05b32e0a328"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/creator-tools.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/creator-tools.svg",
+              "sha256": "fd07627d846c049923ebc45d852e220ea00bbe673e3b3513b64c1083698522cd"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/help.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/help.svg",
+              "sha256": "bbdd495a219c250e75f23c5609f9a80b2eddda43f94cf5dc41b641d0b6c135cb"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/logo.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/logo.svg",
+              "sha256": "66ff8524c34494cabd309e6d9b27c39670563ee036d74e2cd56a07566f662ae2"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/menu.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/menu.svg",
+              "sha256": "ac8f922c34819ffda5d1a7c3f6fa58773c520ff705dce43e3558963013b57deb"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/question.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/question.svg",
+              "sha256": "da0ee2d236f4624aac8e1e83e923340841223a346c452bb8a95572fc46feb3c8"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/search.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/search.svg",
+              "sha256": "9be18df4331bdc2054e6793498cc80726a4924875aa6d7ca31bdf7b7981d55aa"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/security-tiktok.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/security-tiktok.svg",
+              "sha256": "bb4ae0be7662804ab90f6d840e8bf03d632b781fc66015d54e89d88d358969de"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/shield-tick.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/shield-tick.svg",
+              "sha256": "7583be49e9c4424b73a7d99c080c034d93c64a0ada9cd74dcd523dbf281d55f7"
+            },
+            {
+              "campaign_asset_path": "/public/images/tiktok/svg/three-dots.svg",
+              "resource_url": "https://napthegarena.online/public/images/tiktok/svg/three-dots.svg",
+              "sha256": "094bf6820c94db4acb4bd626f3db4ca9375264eff8f6bf6cd13cb951c6cf544a"
+            }
+          ]
+        }
+      ],
+      "rdap": {
+        "source_path": "investigation/tiktok/related_sites/exact_kit/napthegarena.online_rdap.json",
+        "registration_time_utc": "2025-11-26T02:09:11Z",
+        "expiration_time_utc": "2026-11-26T23:59:59Z",
+        "last_changed_utc": "2026-08-21T01:06:31.467Z",
+        "registrar": "NameCheap, Inc.",
+        "registrar_iana_id": "1068",
+        "nameservers": [
+          "decker.ns.cloudflare.com",
+          "saanvi.ns.cloudflare.com"
+        ],
+        "status": [
+          "client transfer prohibited",
+          "client hold"
+        ],
+        "capture_time_utc": "2026-09-01T06:38:04Z"
+      },
+      "interpretation": "Both historical scans independently show all 32 campaign asset hashes and the same 37-request page bundle. The two scans are retained as corroborating historical kit observations, not as additional case submissions."
+    }
+  ],
+  "public_repository_lead": {
+    "repository_url": "https://github.com/QuocTuan-8386/duanmoi",
+    "pages_url": "https://quoctuan-8386.github.io/duanmoi/",
+    "classification": "medium-confidence public kit-publisher/reseller lead; individual identity and live-operator role unproven",
+    "account": {
+      "login": "QuocTuan-8386",
+      "public_user_id": "306511939",
+      "account_created_at_utc": "2026-07-18T13:47:21Z",
+      "public_repository_count": 1
+    },
+    "repository": {
+      "repository_id": "1304946312",
+      "created_at_utc": "2026-07-18T13:55:08Z",
+      "latest_push_at_utc": "2026-08-15T12:19:59Z",
+      "default_branch": "main",
+      "github_pages_enabled": true,
+      "public_activity_summary": "GitHub public activity records branch creation on 2026-07-18T13:59:50Z, a 2026-07-20 push, five 2026-08-13 pushes, and a 2026-08-15 push by the QuocTuan-8386 account."
+    },
+    "source_revision": {
+      "commit_sha": "0e0e309a93f2f84e9474c73718ddaa39825a2593",
+      "commit_time_utc": "2026-07-20T13:50:14Z",
+      "commit_message": "up",
+      "local_capture_path": "investigation/tiktok/related_sites/quoctuan_repo/index-0e0e309a93f2f84e9474c73718ddaa39825a2593.html",
+      "content_size_bytes": 80475,
+      "content_sha256": "7a34047088685a8bcbb83bbf41dd0e306a330612bdfccc9baf2b63b532865451",
+      "urlscan_primary_resource_sha256": "7a34047088685a8bcbb83bbf41dd0e306a330612bdfccc9baf2b63b532865451",
+      "saved_from_comment": "https://nap-xu.orvantis.online/",
+      "rc_files_checked": 31,
+      "exact_campaign_asset_matches": 31,
+      "campaign_asset_hashes_absent_from_rc": [
+        "28609f1a92cbfe1cd73a74ed21177db4991bd9cb522ac54dba22a05b32e0a328"
+      ],
+      "asset_match_records": [
+        {
+          "repository_path": "rc/garena.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__garena.png",
+          "size_bytes": 4497,
+          "sha256": "237fa12c6a1fa1729ad96150150198f341b04183c8282f82818a5b4393a74415",
+          "campaign_asset_path": "/public/images/tiktok/card/garena.png"
+        },
+        {
+          "repository_path": "rc/mobifone.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__mobifone.png",
+          "size_bytes": 27777,
+          "sha256": "9874b99edd042b57a7fb3927cada8c4dcf9b29436ddaae536965fbb19e319a52",
+          "campaign_asset_path": "/public/images/tiktok/card/mobifone.png"
+        },
+        {
+          "repository_path": "rc/vcoin.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__vcoin.png",
+          "size_bytes": 14330,
+          "sha256": "506c7a7b7d9f7c18b1df7f224ae7d5c99b7e4aeab54e5ef82bd1154fc2e7f82e",
+          "campaign_asset_path": "/public/images/tiktok/card/vcoin.png"
+        },
+        {
+          "repository_path": "rc/viettel.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__viettel.png",
+          "size_bytes": 11274,
+          "sha256": "d7447bb72303a26f0a26d61d4f5055f6c2e51b9a57efce07d38b02123e7c029a",
+          "campaign_asset_path": "/public/images/tiktok/card/viettel.png"
+        },
+        {
+          "repository_path": "rc/vinaphone.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__vinaphone.png",
+          "size_bytes": 19130,
+          "sha256": "8862bb55fd5f4fd07c5c131b86f565cc5ea9c9cf38ff84dca4704ce96cbd7319",
+          "campaign_asset_path": "/public/images/tiktok/card/vinaphone.png"
+        },
+        {
+          "repository_path": "rc/zing.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__zing.png",
+          "size_bytes": 19672,
+          "sha256": "b87cd753fb48701e4829839a7257a8fbbcc7abf546db74be966daeec44d93529",
+          "campaign_asset_path": "/public/images/tiktok/card/zing.png"
+        },
+        {
+          "repository_path": "rc/bank-qr.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__bank-qr.svg",
+          "size_bytes": 1271,
+          "sha256": "23e7ba91d2253d914a17ef73fcfc847125ceec9c918c1dac942c2ca0a7c39dec",
+          "campaign_asset_path": "/public/images/tiktok/method/bank-qr.svg"
+        },
+        {
+          "repository_path": "rc/method_garena.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__method_garena.png",
+          "size_bytes": 4948,
+          "sha256": "48c3a37d0016afc7f5d5a9128c741894ed782ddd60469b3ae1f90ed87608a826",
+          "campaign_asset_path": "/public/images/tiktok/method/method_garena.png"
+        },
+        {
+          "repository_path": "rc/method_mobifone.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__method_mobifone.png",
+          "size_bytes": 4273,
+          "sha256": "dffbfd40314bff581fe3cc09548a3f22f6174d293685e6682612636cd0542c45",
+          "campaign_asset_path": "/public/images/tiktok/method/method_mobifone.png"
+        },
+        {
+          "repository_path": "rc/method_momo.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__method_momo.png",
+          "size_bytes": 2684,
+          "sha256": "9d4318dc4f56f3f4f2cc34ed572c4f1855ce289942fde4e0a38fa2118f438139",
+          "campaign_asset_path": "/public/images/tiktok/method/method_momo.png"
+        },
+        {
+          "repository_path": "rc/method_viettel.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__method_viettel.png",
+          "size_bytes": 9474,
+          "sha256": "4b5b41b54d088290d0664eeb739edbf7d2a2e71e981f3a41d1608a36e188da6b",
+          "campaign_asset_path": "/public/images/tiktok/method/method_viettel.png"
+        },
+        {
+          "repository_path": "rc/method_vinaphone.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__method_vinaphone.png",
+          "size_bytes": 4237,
+          "sha256": "14a87037736052075d1851f068a43774d2a1476cfb23ad596fb7e7d3fda2fe1d",
+          "campaign_asset_path": "/public/images/tiktok/method/method_vinaphone.png"
+        },
+        {
+          "repository_path": "rc/method_visa.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__method_visa.png",
+          "size_bytes": 1843,
+          "sha256": "ab911afb829e89c74eba5c851786b3fae0cde43e0433535272d6cceaf1d47dc4",
+          "campaign_asset_path": "/public/images/tiktok/method/method_visa.png"
+        },
+        {
+          "repository_path": "rc/method_vnpay.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__method_vnpay.png",
+          "size_bytes": 7017,
+          "sha256": "2c04eeb233561c09b38e69e3fc745b9724a2e1dbce6a907b1f5eaf8d97969355",
+          "campaign_asset_path": "/public/images/tiktok/method/method_vnpay.png"
+        },
+        {
+          "repository_path": "rc/method_zalopay.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__method_zalopay.png",
+          "size_bytes": 2753,
+          "sha256": "be5c45051b064fb4ca3662d9d34917ade7fe8351643d5153af4a09b25976fb9e",
+          "campaign_asset_path": "/public/images/tiktok/method/method_zalopay.png"
+        },
+        {
+          "repository_path": "rc/method_zing.png",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__method_zing.png",
+          "size_bytes": 9629,
+          "sha256": "b46f778a19f74aa8e1bc537a1a7ee0ad56b7195c3ac5065b0e039d238a723f1d",
+          "campaign_asset_path": "/public/images/tiktok/method/method_zing.png"
+        },
+        {
+          "repository_path": "rc/the-cao.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__the-cao.svg",
+          "size_bytes": 449,
+          "sha256": "1bd5739129611aa7f57e373666a1d679f9b6614e0740a3f2f304d99ad180a335",
+          "campaign_asset_path": "/public/images/tiktok/method/the-cao.svg"
+        },
+        {
+          "repository_path": "rc/arrow-bottom.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__arrow-bottom.svg",
+          "size_bytes": 319,
+          "sha256": "5aa7df932d251acd3ea82002544c4d339acea3774c7c5271cab3c457ad73994a",
+          "campaign_asset_path": "/public/images/tiktok/svg/arrow-bottom.svg"
+        },
+        {
+          "repository_path": "rc/arrow-left.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__arrow-left.svg",
+          "size_bytes": 334,
+          "sha256": "8a8b69b9ece18ff8f0de627508efa5382d0576d2c7ca8db078c049504a3dcc91",
+          "campaign_asset_path": "/public/images/tiktok/svg/arrow-left.svg"
+        },
+        {
+          "repository_path": "rc/arrow-right.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__arrow-right.svg",
+          "size_bytes": 384,
+          "sha256": "c706049cfaf244117e54b585721d65ac826d4e0d0457b1f5a913912bc64b3f40",
+          "campaign_asset_path": "/public/images/tiktok/svg/arrow-right.svg"
+        },
+        {
+          "repository_path": "rc/avatar-default.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__avatar-default.svg",
+          "size_bytes": 600,
+          "sha256": "fd8d92216e96dd0461a1b8f3d73bbb8ebf6e96824612ac30b5b5d06d504897de",
+          "campaign_asset_path": "/public/images/tiktok/svg/avatar-default.svg"
+        },
+        {
+          "repository_path": "rc/close.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__close.svg",
+          "size_bytes": 420,
+          "sha256": "4c371d0a03e3b8e056248a640b93d57bba982d3beba73151cf93e11ffc713a87",
+          "campaign_asset_path": "/public/images/tiktok/svg/close.svg"
+        },
+        {
+          "repository_path": "rc/creator-tools.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__creator-tools.svg",
+          "size_bytes": 1042,
+          "sha256": "fd07627d846c049923ebc45d852e220ea00bbe673e3b3513b64c1083698522cd",
+          "campaign_asset_path": "/public/images/tiktok/svg/creator-tools.svg"
+        },
+        {
+          "repository_path": "rc/help.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__help.svg",
+          "size_bytes": 1082,
+          "sha256": "bbdd495a219c250e75f23c5609f9a80b2eddda43f94cf5dc41b641d0b6c135cb",
+          "campaign_asset_path": "/public/images/tiktok/svg/help.svg"
+        },
+        {
+          "repository_path": "rc/logo.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__logo.svg",
+          "size_bytes": 2951,
+          "sha256": "66ff8524c34494cabd309e6d9b27c39670563ee036d74e2cd56a07566f662ae2",
+          "campaign_asset_path": "/public/images/tiktok/svg/logo.svg"
+        },
+        {
+          "repository_path": "rc/menu.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__menu.svg",
+          "size_bytes": 544,
+          "sha256": "ac8f922c34819ffda5d1a7c3f6fa58773c520ff705dce43e3558963013b57deb",
+          "campaign_asset_path": "/public/images/tiktok/svg/menu.svg"
+        },
+        {
+          "repository_path": "rc/question.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__question.svg",
+          "size_bytes": 564,
+          "sha256": "da0ee2d236f4624aac8e1e83e923340841223a346c452bb8a95572fc46feb3c8",
+          "campaign_asset_path": "/public/images/tiktok/svg/question.svg"
+        },
+        {
+          "repository_path": "rc/search.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__search.svg",
+          "size_bytes": 621,
+          "sha256": "9be18df4331bdc2054e6793498cc80726a4924875aa6d7ca31bdf7b7981d55aa",
+          "campaign_asset_path": "/public/images/tiktok/svg/search.svg"
+        },
+        {
+          "repository_path": "rc/security-tiktok.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__security-tiktok.svg",
+          "size_bytes": 705,
+          "sha256": "bb4ae0be7662804ab90f6d840e8bf03d632b781fc66015d54e89d88d358969de",
+          "campaign_asset_path": "/public/images/tiktok/svg/security-tiktok.svg"
+        },
+        {
+          "repository_path": "rc/shield-tick.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__shield-tick.svg",
+          "size_bytes": 972,
+          "sha256": "7583be49e9c4424b73a7d99c080c034d93c64a0ada9cd74dcd523dbf281d55f7",
+          "campaign_asset_path": "/public/images/tiktok/svg/shield-tick.svg"
+        },
+        {
+          "repository_path": "rc/three-dots.svg",
+          "local_capture_path": "related_sites/quoctuan_repo/rc__three-dots.svg",
+          "size_bytes": 601,
+          "sha256": "094bf6820c94db4acb4bd626f3db4ca9375264eff8f6bf6cd13cb951c6cf544a",
+          "campaign_asset_path": "/public/images/tiktok/svg/three-dots.svg"
+        }
+      ],
+      "repository_tree_path": "investigation/tiktok/related_sites/quoctuan_repo/tree-38a6563bf2ed2284f4f33fe472fc1d1ae637069d.json",
+      "repository_tree_commit_sha": "38a6563bf2ed2284f4f33fe472fc1d1ae637069d",
+      "repository_tree_rc_file_count": 34,
+      "captured_campaign_comparison_file_count": 31,
+      "rc_comparison_scope": "31 campaign-named rc assets captured locally; the public repository tree contains 34 rc files including two Cloudflare beacon files and all.min.css; those three non-campaign files are excluded from the asset comparison.",
+      "campaign_assets_absent_from_rc": [
+        "/public/images/tiktok/svg/coin.svg"
+      ]
+    },
+    "public_revision_lineage": [
+      {
+        "commit_sha": "aa39aa610888987ec80075907669c989c434dd5b",
+        "commit_time_utc": "2026-07-18T13:55:37Z",
+        "public_git_author_metadata": "placeholder name/email; not treated as identity evidence"
+      },
+      {
+        "commit_sha": "0e0e309a93f2f84e9474c73718ddaa39825a2593",
+        "commit_time_utc": "2026-07-20T13:50:14Z",
+        "public_git_author_metadata": "placeholder name/email; repository activity attributes the push to QuocTuan-8386"
+      },
+      {
+        "commit_sha": "2a0208db29568b4360be8ae7810a4b103d235554",
+        "commit_time_utc": "2026-08-13T01:38:23Z",
+        "public_git_author_metadata": "QuocTuan-8386; public email omitted from this derivative"
+      },
+      {
+        "commit_sha": "ce2aaf2496bc89322b1243fbcafbf407993b8b8d",
+        "commit_time_utc": "2026-08-13T02:35:27Z",
+        "public_git_author_metadata": "QuocTuan-8386; public email omitted from this derivative"
+      },
+      {
+        "commit_sha": "2bf16613be6709cb474f4ed94f3caa670d4e3dec",
+        "commit_time_utc": "2026-08-13T03:04:56Z",
+        "public_git_author_metadata": "QuocTuan-8386; public email omitted from this derivative"
+      },
+      {
+        "commit_sha": "e6fafe6ac3a5cf4408f0bc2985b2bdfd0ebff1a6",
+        "commit_time_utc": "2026-08-13T03:08:21Z",
+        "public_git_author_metadata": "QuocTuan-8386; public email omitted from this derivative"
+      },
+      {
+        "commit_sha": "c2c2ffa65bb2e34ec274dc31c626be30edaf85f1",
+        "commit_time_utc": "2026-08-13T03:14:32Z",
+        "public_git_author_metadata": "QuocTuan-8386; public email omitted from this derivative"
+      },
+      {
+        "commit_sha": "996922cb1bf28761ed7611e4c803a9dbe64874a5",
+        "commit_time_utc": "2026-08-15T12:19:59Z",
+        "public_git_author_metadata": "QuocTuan-8386; public email omitted from this derivative; page changed substantially"
+      }
+    ],
+    "urlscan_observations": [
+      {
+        "urlscan_id": "019f84b9-ecd2-7105-b73c-f2e4e83e04ff",
+        "observed_at_utc": "2026-07-21T12:50:14.619Z",
+        "primary_url": "https://quoctuan-8386.github.io/duanmoi/",
+        "primary_response_sha256": "7a34047088685a8bcbb83bbf41dd0e306a330612bdfccc9baf2b63b532865451",
+        "main_ip": "185.199.111.153",
+        "http_transaction_count": 17,
+        "campaign_asset_match_count": 10,
+        "matching_assets": [
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/arrow-bottom.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/arrow-bottom.svg",
+            "sha256": "5aa7df932d251acd3ea82002544c4d339acea3774c7c5271cab3c457ad73994a"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/arrow-right.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/arrow-right.svg",
+            "sha256": "c706049cfaf244117e54b585721d65ac826d4e0d0457b1f5a913912bc64b3f40"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/avatar-default.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/avatar-default.svg",
+            "sha256": "fd8d92216e96dd0461a1b8f3d73bbb8ebf6e96824612ac30b5b5d06d504897de"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/help.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/help.svg",
+            "sha256": "bbdd495a219c250e75f23c5609f9a80b2eddda43f94cf5dc41b641d0b6c135cb"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/logo.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/logo.svg",
+            "sha256": "66ff8524c34494cabd309e6d9b27c39670563ee036d74e2cd56a07566f662ae2"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/menu.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/menu.svg",
+            "sha256": "ac8f922c34819ffda5d1a7c3f6fa58773c520ff705dce43e3558963013b57deb"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/question.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/question.svg",
+            "sha256": "da0ee2d236f4624aac8e1e83e923340841223a346c452bb8a95572fc46feb3c8"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/search.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/search.svg",
+            "sha256": "9be18df4331bdc2054e6793498cc80726a4924875aa6d7ca31bdf7b7981d55aa"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/security-tiktok.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/security-tiktok.svg",
+            "sha256": "bb4ae0be7662804ab90f6d840e8bf03d632b781fc66015d54e89d88d358969de"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/three-dots.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/three-dots.svg",
+            "sha256": "094bf6820c94db4acb4bd626f3db4ca9375264eff8f6bf6cd13cb951c6cf544a"
+          }
+        ],
+        "classification_signal": "phishdestroy submission tag"
+      },
+      {
+        "urlscan_id": "019f84c5-c306-764d-8efa-610b82c9ebbd",
+        "observed_at_utc": "2026-07-21T13:03:07.135Z",
+        "primary_url": "https://quoctuan-8386.github.io/duanmoi/",
+        "primary_response_sha256": "7a34047088685a8bcbb83bbf41dd0e306a330612bdfccc9baf2b63b532865451",
+        "main_ip": "2606:50c0:8001::153",
+        "http_transaction_count": 17,
+        "campaign_asset_match_count": 10,
+        "matching_assets": [
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/arrow-bottom.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/arrow-bottom.svg",
+            "sha256": "5aa7df932d251acd3ea82002544c4d339acea3774c7c5271cab3c457ad73994a"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/arrow-right.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/arrow-right.svg",
+            "sha256": "c706049cfaf244117e54b585721d65ac826d4e0d0457b1f5a913912bc64b3f40"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/avatar-default.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/avatar-default.svg",
+            "sha256": "fd8d92216e96dd0461a1b8f3d73bbb8ebf6e96824612ac30b5b5d06d504897de"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/help.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/help.svg",
+            "sha256": "bbdd495a219c250e75f23c5609f9a80b2eddda43f94cf5dc41b641d0b6c135cb"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/logo.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/logo.svg",
+            "sha256": "66ff8524c34494cabd309e6d9b27c39670563ee036d74e2cd56a07566f662ae2"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/menu.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/menu.svg",
+            "sha256": "ac8f922c34819ffda5d1a7c3f6fa58773c520ff705dce43e3558963013b57deb"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/question.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/question.svg",
+            "sha256": "da0ee2d236f4624aac8e1e83e923340841223a346c452bb8a95572fc46feb3c8"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/search.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/search.svg",
+            "sha256": "9be18df4331bdc2054e6793498cc80726a4924875aa6d7ca31bdf7b7981d55aa"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/security-tiktok.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/security-tiktok.svg",
+            "sha256": "bb4ae0be7662804ab90f6d840e8bf03d632b781fc66015d54e89d88d358969de"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/three-dots.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/three-dots.svg",
+            "sha256": "094bf6820c94db4acb4bd626f3db4ca9375264eff8f6bf6cd13cb951c6cf544a"
+          }
+        ],
+        "classification_signal": "automatic OpenPhish source"
+      },
+      {
+        "urlscan_id": "019f8583-b2d7-762c-a11a-68199c8343f3",
+        "observed_at_utc": "2026-07-21T16:30:39.628Z",
+        "primary_url": "https://quoctuan-8386.github.io/duanmoi/",
+        "primary_response_sha256": "7a34047088685a8bcbb83bbf41dd0e306a330612bdfccc9baf2b63b532865451",
+        "main_ip": "185.199.111.153",
+        "http_transaction_count": 19,
+        "campaign_asset_match_count": 10,
+        "matching_assets": [
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/arrow-bottom.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/arrow-bottom.svg",
+            "sha256": "5aa7df932d251acd3ea82002544c4d339acea3774c7c5271cab3c457ad73994a"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/arrow-right.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/arrow-right.svg",
+            "sha256": "c706049cfaf244117e54b585721d65ac826d4e0d0457b1f5a913912bc64b3f40"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/avatar-default.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/avatar-default.svg",
+            "sha256": "fd8d92216e96dd0461a1b8f3d73bbb8ebf6e96824612ac30b5b5d06d504897de"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/help.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/help.svg",
+            "sha256": "bbdd495a219c250e75f23c5609f9a80b2eddda43f94cf5dc41b641d0b6c135cb"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/logo.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/logo.svg",
+            "sha256": "66ff8524c34494cabd309e6d9b27c39670563ee036d74e2cd56a07566f662ae2"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/menu.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/menu.svg",
+            "sha256": "ac8f922c34819ffda5d1a7c3f6fa58773c520ff705dce43e3558963013b57deb"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/question.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/question.svg",
+            "sha256": "da0ee2d236f4624aac8e1e83e923340841223a346c452bb8a95572fc46feb3c8"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/search.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/search.svg",
+            "sha256": "9be18df4331bdc2054e6793498cc80726a4924875aa6d7ca31bdf7b7981d55aa"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/security-tiktok.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/security-tiktok.svg",
+            "sha256": "bb4ae0be7662804ab90f6d840e8bf03d632b781fc66015d54e89d88d358969de"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/three-dots.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/three-dots.svg",
+            "sha256": "094bf6820c94db4acb4bd626f3db4ca9375264eff8f6bf6cd13cb951c6cf544a"
+          }
+        ]
+      },
+      {
+        "urlscan_id": "019f8b1c-d3c1-74a1-b818-59e0541141ab",
+        "observed_at_utc": "2026-07-22T18:35:56.606Z",
+        "primary_url": "https://quoctuan-8386.github.io/duanmoi/",
+        "primary_response_sha256": "7a34047088685a8bcbb83bbf41dd0e306a330612bdfccc9baf2b63b532865451",
+        "main_ip": "2606:50c0:8000::153",
+        "http_transaction_count": 17,
+        "campaign_asset_match_count": 10,
+        "matching_assets": [
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/arrow-bottom.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/arrow-bottom.svg",
+            "sha256": "5aa7df932d251acd3ea82002544c4d339acea3774c7c5271cab3c457ad73994a"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/arrow-right.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/arrow-right.svg",
+            "sha256": "c706049cfaf244117e54b585721d65ac826d4e0d0457b1f5a913912bc64b3f40"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/avatar-default.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/avatar-default.svg",
+            "sha256": "fd8d92216e96dd0461a1b8f3d73bbb8ebf6e96824612ac30b5b5d06d504897de"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/help.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/help.svg",
+            "sha256": "bbdd495a219c250e75f23c5609f9a80b2eddda43f94cf5dc41b641d0b6c135cb"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/logo.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/logo.svg",
+            "sha256": "66ff8524c34494cabd309e6d9b27c39670563ee036d74e2cd56a07566f662ae2"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/menu.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/menu.svg",
+            "sha256": "ac8f922c34819ffda5d1a7c3f6fa58773c520ff705dce43e3558963013b57deb"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/question.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/question.svg",
+            "sha256": "da0ee2d236f4624aac8e1e83e923340841223a346c452bb8a95572fc46feb3c8"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/search.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/search.svg",
+            "sha256": "9be18df4331bdc2054e6793498cc80726a4924875aa6d7ca31bdf7b7981d55aa"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/security-tiktok.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/security-tiktok.svg",
+            "sha256": "bb4ae0be7662804ab90f6d840e8bf03d632b781fc66015d54e89d88d358969de"
+          },
+          {
+            "campaign_asset_path": "/public/images/tiktok/svg/three-dots.svg",
+            "resource_url": "https://quoctuan-8386.github.io/duanmoi/rc/three-dots.svg",
+            "sha256": "094bf6820c94db4acb4bd626f3db4ca9375264eff8f6bf6cd13cb951c6cf544a"
+          }
+        ]
+      }
+    ],
+    "independent_classification": {
+      "provider": "PhishDestroy",
+      "record_id": "161899",
+      "record_date_utc": "2026-07-21",
+      "source_url": "http://quoctuan-8386.github.io/duanmoi",
+      "urlscan_id": "019f84b9-ecd2-7105-b73c-f2e4e83e04ff",
+      "interpretation": "A third-party phishing classification supports that the published page was suspicious; it does not establish who operated the 20 live domains.",
+      "destroylist_change_url": "https://github.com/phishdestroy/destroylist/blob/main/changes/2026-07/2026-07-22.json",
+      "destroylist_change_date_utc": "2026-07-22"
+    },
+    "code_and_identity_limits": {
+      "exact_campaign_route_literals_found_in_any_of_eight_public_index_revisions": false,
+      "campaign_payment_identifiers_found_in_repository_history": false,
+      "observed_public_page_behavior": "The early page performs a public TikTok-profile lookup and presents a client-side payment/demo flow; it does not call the current campaign backend routes in the captured source.",
+      "current_revision_behavior": "The 2026-08-15 revision is a materially different static/demo page and is not treated as the current campaign implementation.",
+      "identity_boundary": "The account, repository, public commit metadata, and public email naming convention identify a publisher account, not a verified natural person or live-domain operator."
+    }
+  },
+  "orvantis_source_page_lead": {
+    "domain": "nap-xu.orvantis.online",
+    "classification": "historical source-page lead; not independently recovered as a live deployment",
+    "evidence": "The HTML comment in the first seven public repository revisions says the page was saved from this URL.",
+    "rdap": {
+      "source_path": "investigation/tiktok/related_sites/exact_kit/orvantis.online_rdap.json",
+      "registration_time_utc": "2026-02-10T11:09:28Z",
+      "expiration_time_utc": "2027-02-10T23:59:59Z",
+      "last_changed_utc": "2026-07-21T17:03:35.354Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "status": [
+        "client transfer prohibited",
+        "client hold"
+      ],
+      "capture_time_utc": "2026-09-01T09:19:56Z"
+    },
+    "certificate_transparency": {
+      "source_path": "investigation/tiktok/related_sites/orvantis_certspotter.json",
+      "dns_names": [
+        "*.orvantis.online",
+        "orvantis.online"
+      ],
+      "not_before_utc": "2026-06-25T09:21:03Z",
+      "not_after_utc": "2026-09-23T10:19:44Z",
+      "cert_sha256": "c5ef107cd2ab90057910819872b996d25ebd23a8da55c47845ab5e489d7fc98e",
+      "pubkey_sha256": "b9df500cf88461a72d2bb5c1be63910d74b72c9f607d99d301c78167669ae0f4"
+    },
+    "negative_finding": "No independent URLScan page, historical HTML capture, origin address, payment identifier, or server-code link was recovered for nap-xu.orvantis.online."
+  },
+  "legacy_kit_lineage": [
+    {
+      "representative_domain": "napxu.vip",
+      "urlscan_id": "4b03f732-3fd2-4bd6-96e3-6e944ade097c",
+      "observed_at_utc": "2024-12-25T01:12:58.750Z",
+      "page_title": "Nạp xu TikTok",
+      "campaign_asset_match_count": 10,
+      "shared_resource_hash": "584dc8fb5b08ecf0a40d2fd4bd106422050ee02a60ebeede1e7bfecfd78f8c53",
+      "interpretation": "Representative historical scan with the same Vietnamese ID-only/no-password wording and ten matching payment/avatar assets; not counted as a current campaign member."
+    },
+    {
+      "representative_domain": "naptiktok.app-s1.online",
+      "source_url": "https://naptiktok.app/",
+      "urlscan_id": "15c8070c-a1ed-4da9-b5f6-433897439f1d",
+      "observed_at_utc": "2025-02-19T09:33:07.473Z",
+      "page_title": "Nạp xu TikTok",
+      "campaign_asset_match_count": 19,
+      "shared_resource_hash": "584dc8fb5b08ecf0a40d2fd4bd106422050ee02a60ebeede1e7bfecfd78f8c53",
+      "interpretation": "The same old front-end JavaScript hash and matching asset subset predate the QuocTuan repository; this materially weakens any claim that the repository account originated the kit."
+    },
+    {
+      "representative_domain": "naptiktok.net",
+      "urlscan_id": "019754a0-9b7a-7781-8c6a-ad887d26a2e6",
+      "observed_at_utc": "2025-06-09T12:18:28.430Z",
+      "page_title": "Nạp xu TikTok",
+      "main_ip": "103.149.87.34",
+      "asn": "AS149125",
+      "campaign_asset_match_count": 10,
+      "shared_resource_hash": "584dc8fb5b08ecf0a40d2fd4bd106422050ee02a60ebeede1e7bfecfd78f8c53",
+      "exact_asset_paths": [
+        "/public/images/tiktok/svg/avatar-default.svg",
+        "/public/images/tiktok/method/method_visa.png",
+        "/public/images/tiktok/method/method_viettel.png",
+        "/public/images/tiktok/method/method_vinaphone.png",
+        "/public/images/tiktok/method/method_mobifone.png",
+        "/public/images/tiktok/method/method_garena.png",
+        "/public/images/tiktok/method/method_zing.png",
+        "/public/images/tiktok/method/method_momo.png",
+        "/public/images/tiktok/method/method_vnpay.png",
+        "/public/images/tiktok/method/method_zalopay.png"
+      ],
+      "interpretation": "This is a historical partial-kit deployment on an address in the same /23 and ASN as the current origin. It is infrastructure continuity evidence, not proof of one customer or operator.",
+      "registration_context": "The current RDAP record is a 2026 re-registration and follows the 2025 URLScan observation; the historical deployment is not dated by that current registration."
+    }
+  ],
+  "network_control": {
+    "same_prefix_as_current_origin": "103.149.87.34 and 103.149.86.246 both fall in 103.149.86.0/23, AS149125.",
+    "unrelated_control": {
+      "domain": "napgarena.vn",
+      "urlscan_ids": [
+        "b72b8c5b-b10d-4be8-9f87-782f67732156",
+        "23ac917d-6119-4560-b6d5-2d7d74e16309"
+      ],
+      "observed_at_utc": [
+        "2024-12-04T02:20:04.391Z",
+        "2024-12-04T02:20:10.189Z"
+      ],
+      "main_ip": "103.149.87.34",
+      "page_title": "Different game-recharge portal with Vietnamese corporate footer",
+      "body_resource_sha256": "595fddcea16fa26f8143ddc128c041b52f7f7e29a2868832f8f79a30eb48b000",
+      "interpretation": "The same address served a different portal naming a Vietnamese electronic-sports company. This control demonstrates that the AS/IP is not exclusive to the fake TikTok kit and prevents attribution to the network registrant."
+    },
+    "conclusion": "The /23 and ASN support a provider/infrastructure lead only. Subscriber, virtual-host, deployment, and log records are required to attribute the current service."
+  },
+  "negative_findings": [
+    "No current campaign domain, 103.149.86.246 string, live ZaloPay account, or campaign backend route was found in the QuocTuan repository history examined.",
+    "No public repository, URLScan, RDAP, or certificate record connects QuocTuan-8386 to ZaloPay app 4982 or the live virtual account.",
+    "The shared old JavaScript hash and historical deployments show that the static kit circulated before the QuocTuan account existed; exact assets alone cannot identify the kit author.",
+    "No account-level evidence identifies who provisioned the 20 Hostinger domains, configured Cloudflare, or deployed the application on 103.149.86.246.",
+    "The unrelated same-IP napgarena.vn control prevents treating the AS149125 registrant as the campaign operator."
+  ],
+  "source_artifacts": [
+    {
+      "path": "investigation/tiktok/template_fingerprint.json",
+      "size_bytes": 17767,
+      "sha256": "7201c0e398861ac18f7b920c568d0c689992365ded6f67c7ff0bd539280ed960"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/index-0e0e309a93f2f84e9474c73718ddaa39825a2593.html",
+      "size_bytes": 80475,
+      "sha256": "7a34047088685a8bcbb83bbf41dd0e306a330612bdfccc9baf2b63b532865451"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/tree-38a6563bf2ed2284f4f33fe472fc1d1ae637069d.json",
+      "size_bytes": 15680,
+      "sha256": "9c16c1b70ddfb84d22108331abdeaa4422c48226d45adb76400b7ce8b1ca512c"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f84b9-ecd2-7105-b73c-f2e4e83e04ff.html",
+      "size_bytes": 254347,
+      "sha256": "c0d4aafd8563f1cb0da9d92d93967a806b2f1404f7d673aeba39a4c05120ef2a"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f84c5-c306-764d-8efa-610b82c9ebbd.html",
+      "size_bytes": 249448,
+      "sha256": "1e50bd3979e2087f6ef297da1d248a7516cddc1b5de7626af6b53fe0bc206f2a"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019f6f39-d115-7636-bfba-f749b16b39b1.html",
+      "size_bytes": 434117,
+      "sha256": "4b97628dd079775fadf299b47e4ffb849957f26a2faffd1623dac56c63007bed"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019fba8b-7e22-733c-be90-d604e0e800d5.html",
+      "size_bytes": 438615,
+      "sha256": "dea3e2d7b438f253ff4e06a077a54b261bbe3d6dbf1c642788473e55ab56577d"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/01a01c43-6622-7391-bcdc-6f00422c59c5.html",
+      "size_bytes": 433435,
+      "sha256": "8cd3ab37f0d35610ef22014007fd7c6fc3c334beb0cb94928f926aa1b979a75a"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/019754a0-9b7a-7781-8c6a-ad887d26a2e6.html",
+      "size_bytes": 254153,
+      "sha256": "c49f3b328b28ab0ae4f85a023d6ac9551557a20962d615b99057920245c99c39"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/15c8070c-a1ed-4da9-b5f6-433897439f1d.html",
+      "size_bytes": 360859,
+      "sha256": "52efc45f81aea9d44ca184b2af4e324148c965a62f8c777b17592f8e74b2a896"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/4b03f732-3fd2-4bd6-96e3-6e944ade097c.html",
+      "size_bytes": 264345,
+      "sha256": "3b20cf0993ca22a74e73fd3dd32c96059071ce187ce4ea86b60305d78bd6270b"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/urlscan_result_pages/23ac917d-6119-4560-b6d5-2d7d74e16309.html",
+      "size_bytes": 333960,
+      "sha256": "23049ca55792b9918ddadf6a902e9b2351c1869751a35ec23ff7717f1dc688ab"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/exact_kit/napxutiktok.sbs_rdap.json",
+      "size_bytes": 4832,
+      "sha256": "d78ceaf100d6b185cc65889b9069b88754283869c48e6a66b0caa0d0b03e0c07"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/exact_kit/napthegarena.online_rdap.json",
+      "size_bytes": 5215,
+      "sha256": "cc8fb0347feab8f068a8c018a249c7147cf65b5272e1abfd3151a7acb68376be"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/exact_kit/orvantis.online_rdap.json",
+      "size_bytes": 5181,
+      "sha256": "95dbda5093d38bba1604db33fa7923e46bd08c8045179ff9d0631b1fe78ff813"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/orvantis_certspotter.json",
+      "size_bytes": 435,
+      "sha256": "37df2abaf7755b990da10af6a4553e870372fe9913e83ac4595494a4dfd18357"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/github_profile.json",
+      "size_bytes": 1372,
+      "sha256": "009fce5900b838a0d3c8006633a8fcbe4b6d17ba5326eb3ee91b62834ccf15f8"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/github_repo.json",
+      "size_bytes": 5654,
+      "sha256": "7d5c09ab6de6d7bdcc0f05f2299005985a690250f8e911877c45593b438610d3"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/quoctuan_repo/github_activity.json",
+      "size_bytes": 11614,
+      "sha256": "dfe235cec36cd4768c9e1a918fad4dff966852885b1fe5f7d840eca03a8a140e"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/phishdestroy_changes_2026-07-21.json",
+      "size_bytes": 156,
+      "sha256": "c26c93443df991197b6dfe90ae63ee2b3a7a3983f368a6b977db27ba423c0a4b"
+    },
+    {
+      "path": "investigation/tiktok/related_sites/phishdestroy_changes_2026-07-22.json",
+      "size_bytes": 41042,
+      "sha256": "ba97a44a82ec9b241322bbe2274f7c0d711e45fbfd83dc731db6031f6fef07bc"
+    }
+  ],
+  "method_and_limits": [
+    "URLScan resource hashes and local SHA-256 hashes were compared byte-for-byte; URLScan pages are historical public observations and may be altered or removed.",
+    "The repository comparison checks every captured rc/* asset and every public index.html revision available in the repository at collection time; it does not imply access to private branches, deleted repositories, or server-side code.",
+    "Legacy-family observations are intentionally separated from the 20 verified case submissions and should not be added to a blocklist without current validation.",
+    "The public email in commit metadata and all credential-like/API-key material were omitted from this derivative; omission does not change the negative finding that no live-domain/payment link was found.",
+    "Provider KYC, registrar account records, Cloudflare history, server deployment logs, and payment settlement records remain the decisive next evidence."
+  ]
+}

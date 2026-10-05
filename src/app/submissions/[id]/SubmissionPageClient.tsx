@@ -1,26 +1,49 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { format } from "date-fns";
 import { AnalysisLogs } from "@/components/AnalysisLogs";
-import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { SubmissionStatus } from "@/components/SubmissionStatus";
 import { ExternalLinkConfirm } from "@/components/ExternalLinkConfirm";
 import { UrlParts } from "@/components/UrlParts";
 import { WhoisTab } from "@/components/WhoisTab";
+import { ReporterMeta } from "@/components/ReporterMeta";
+import { ReportThreadTimeline } from "@/components/ReportThreadTimeline";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExternalLink, Mail, Globe, ShieldAlert } from "lucide-react";
 import Link from "next/link";
-import { AnalysisRun, Artifact, Report, Submission } from "@/lib/db/schema";
+import type { Artifact } from "@/lib/db/schema";
+import type { SubmissionDetail as ApiSubmissionDetail } from "@/lib/submissions/details";
+import { formatUtcDateTime } from "@/lib/date_time";
 import { cn } from "../../../web_lib/util";
+import { selectDisplayAnalysisRuns } from "@/lib/analysis_run_view";
 
-type SubmissionDetail = Submission & {
-	analysisRuns: AnalysisRun[];
-	reports: Report[];
-	artifacts: Omit<Artifact, "blob" | "submissionId">[];
-};
+type SubmissionDetail = ApiSubmissionDetail;
+
+function formatArtifactSize(value: number | bigint | null | undefined) {
+	if (value === null || value === undefined) return "Unknown size";
+	const bytes = typeof value === "bigint" ? Number(value) : value;
+	if (!Number.isSafeInteger(bytes) || bytes < 0) return "Unknown size";
+	return (bytes / 1024).toFixed(1) + " KB";
+}
+
+function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "name" | "kind" | "mimeType">) {
+	if (artifact.kind?.toLowerCase().startsWith("report_")) return false;
+	const name = artifact.name?.toLowerCase();
+	const kind = artifact.kind?.toLowerCase();
+	const mimeType = artifact.mimeType?.toLowerCase();
+	return (
+		name?.startsWith("website.") ||
+		kind?.startsWith("website_") ||
+		mimeType === "text/mhtml"
+	);
+}
+
+function isCorrespondenceArtifact(artifact: Pick<Artifact, "kind">) {
+	return artifact.kind?.toLowerCase().startsWith("report_") ?? false;
+}
 
 export function SubmissionPageClient({ id, initialSubmission }: { id: string; initialSubmission?: SubmissionDetail | null }) {
 	const [submission, setSubmission] = useState<SubmissionDetail | null>(initialSubmission ?? null);
@@ -29,15 +52,42 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const [websiteHtmlError, setWebsiteHtmlError] = useState<string | null>(null);
 	const [emailHtml, setEmailHtml] = useState<string | null>(null);
 	const [emailHtmlError, setEmailHtmlError] = useState<string | null>(null);
+	const [retrying, setRetrying] = useState(false);
+	const [retryError, setRetryError] = useState<string | null>(null);
 
 	const statusKey = (submission?.status || "").toLowerCase();
 	const isFailed = statusKey === "failed";
 	const isReported = statusKey === "reported";
 
 	const isRunning = ["new", "queued", "running"].includes(statusKey);
-	const runsToShow = submission?.analysisRuns.slice(0, 1) || [];
+	const runsToShow = submission ? selectDisplayAnalysisRuns(submission.analysisRuns) : [];
+	const reportThreads = submission?.reportThreads ?? [];
+	const providerReports = submission?.providerReports ?? [];
+	const abuseMailReports = submission?.abuseMailReports ?? [];
+	const abuseProviderReports = submission?.abuseProviderReports ?? [];
+	const abuseReport = submission?.abuseReport ?? null;
+	// A confirmed website can have a durable standalone abuse handoff before it
+	// has provider routes. Count that visible lifecycle entry so the Reports
+	// badge never says zero while the tab contains its queued state.
+	const reportCount = reportThreads.length + providerReports.length + abuseMailReports.length + abuseProviderReports.length + (abuseReport ? 1 : 0);
 
 	const defaultTab = "runs";
+
+	const retryAnalysis = async () => {
+		setRetrying(true);
+		setRetryError(null);
+		try {
+			const response = await fetch(`/api/submissions/${id}/retry`, { method: "POST" });
+			const body = await response.json().catch(() => ({}));
+			if (!response.ok) throw new Error(body.error || `Retry failed (${response.status})`);
+			const refreshed = await fetch(`/api/submissions/${id}`);
+			if (refreshed.ok) setSubmission(await refreshed.json());
+		} catch (error) {
+			setRetryError(error instanceof Error ? error.message : "Unable to queue retry.");
+		} finally {
+			setRetrying(false);
+		}
+	};
 
 	const safeHostname = (rawUrl?: string) => {
 		if (!rawUrl) return null;
@@ -54,18 +104,37 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 			: (submission?.data.email?.subject as string | undefined) || "Untitled Submission";
 
 	const screenshot = submission?.artifacts?.find(
-		(a) => (a.name?.toLowerCase() === "website.png" || a.name?.toLowerCase() === "mail.png") && a.mimeType?.startsWith("image/")
+		(a) =>
+			!isCorrespondenceArtifact(a) &&
+			(((a.name?.toLowerCase() === "website.png" || a.name?.toLowerCase() === "mail.png") && a.mimeType?.startsWith("image/")) ||
+				a.kind?.toLowerCase() === "website_png")
 	);
 	const websiteMhtml = submission?.artifacts?.find(
-		(a) => a.name?.toLowerCase() === "website.mhtml" || a.mimeType?.toLowerCase() === "text/mhtml"
+		(a) =>
+			!isCorrespondenceArtifact(a) &&
+			(a.name?.toLowerCase() === "website.mhtml" ||
+				a.mimeType?.toLowerCase() === "text/mhtml" ||
+				a.kind?.toLowerCase() === "website_mhtml")
 	);
 	const emailEml = submission?.artifacts?.find((a) => {
+		if (isCorrespondenceArtifact(a)) return false;
 		const name = a.name?.toLowerCase();
 		const mime = a.mimeType?.toLowerCase();
 		const kind = a.kind?.toLowerCase();
 		return name?.endsWith(".eml") || name === "mail.eml" || mime === "message/rfc822" || kind === "eml";
 	});
+	const canRetryAnalysis =
+		Boolean(
+			isFailed &&
+			submission &&
+			(submission.kind === "website"
+				? !submission.analysisRuns.length || submission.analysisRuns.at(-1)?.status === "failed"
+				: submission.analysisRuns.every((run) => run.status === "failed")) &&
+			reportCount === 0 &&
+			(submission.data.kind === "website" ? Boolean(submission.data.website?.url) : Boolean(emailEml?.id)),
+		);
 	const artifacts = submission?.artifacts.filter((x) => x !== screenshot) || [];
+	const websiteArchiveDate = formatUtcDateTime(websiteMhtml?.archivedAt ?? websiteMhtml?.createdAt);
 
 	const sanitizeHtmlForIframe = (rawHtml: string): string => {
 		try {
@@ -211,18 +280,17 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 							</CardTitle>
 							<div className="flex flex-col items-end gap-2 shrink-0 md:flex-row">
 								<Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
-									{new Date(submission.createdAt).toLocaleString(globalThis.navigator?.language || "en-US", {
-										year: "numeric",
-										month: "short",
-										day: "numeric",
-										hour: "2-digit",
-										minute: "2-digit",
-									})}
+									{formatUtcDateTime(submission.createdAt) ?? "Unknown time"}
 								</Badge>
 
 								<SubmissionStatus status={submission.status} />
 							</div>
 						</div>
+						<ReporterMeta
+							reporterCountry={submission.reporterCountry}
+							reporterHeaders={submission.reporterHeaders}
+							className="mt-2"
+						/>
 					</div>
 					<div className="space-y-5 flex-1 justify-between flex-col flex">
 						{isReported && submission.data.kind === "website" ? (
@@ -242,10 +310,23 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 							</div>
 						) : null}
 
-						{isFailed && submission.info ? (
+						{isFailed ? (
 							<div className="rounded-md border bg-muted/30 p-3">
 								<div className="text-xs font-semibold text-muted-foreground">Failure reason</div>
-								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info}</div>
+								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info || "The analysis did not complete."}</div>
+								{canRetryAnalysis ? (
+									<div className="mt-3 flex flex-wrap items-center gap-3">
+										<Button type="button" variant="outline" size="sm" disabled={retrying} onClick={retryAnalysis}>
+											{retrying ? "Retrying analysis…" : "Retry analysis"}
+										</Button>
+										<span className="text-xs text-muted-foreground">
+											{submission.kind === "website"
+												? "Reuses the captured website archive when available; it will not create a duplicate report."
+												: "Reuses the original email; it will not create a duplicate report."}
+										</span>
+									</div>
+								) : null}
+								{retryError ? <div className="mt-2 text-sm text-destructive">{retryError}</div> : null}
 							</div>
 						) : null}
 
@@ -328,7 +409,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 				<TabsList className="overflow-x-auto max-w-full no-scrollbar">
 					{submission.kind === "website" ? <TabsTrigger value="website">Website</TabsTrigger> : null}
 					{submission.kind === "email" ? <TabsTrigger value="email">Email</TabsTrigger> : null}
-					<TabsTrigger value="reports">Reports ({submission.reports.length})</TabsTrigger>
+					<TabsTrigger value="reports">Reports ({reportCount})</TabsTrigger>
 					<TabsTrigger value="artifacts">Files ({artifacts.length})</TabsTrigger>
 					<TabsTrigger value="runs">Analysis</TabsTrigger>
 					{submission.kind === "website" ? <TabsTrigger value="whois">WhoIS</TabsTrigger> : null}
@@ -340,7 +421,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 								<CardTitle className="text-sm flex flex-row items-center gap-2">
 									Archived Website
 									<div className="text-xs text-muted-foreground font-normal">
-										(from {format(new Date(websiteMhtml.createdAt), "PPP p")})
+										(from {websiteArchiveDate ?? "unknown date"})
 									</div>
 								</CardTitle>
 								<CardDescription className="text-xs flex flex-row gap-8">
@@ -372,7 +453,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 								<CardTitle className="text-sm flex flex-row items-center gap-2">
 									Archived Email
 									<div className="text-xs text-muted-foreground font-normal">
-										(from {format(new Date(emailEml.createdAt), "PPP p")})
+										(from {formatUtcDateTime(emailEml.createdAt) ?? "unknown date"})
 									</div>
 								</CardTitle>
 								<CardDescription className="text-xs flex flex-row gap-8">
@@ -405,44 +486,32 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 					</TabsContent>
 				) : null}
 				<TabsContent value="reports" className="space-y-4 mt-4">
-					{submission.reports.length > 0 ? (
-						submission.reports.map((r: any) => (
-							<Card key={r.id} className="overflow-hidden">
-								<CardContent className="p-4 space-y-3">
-									<div className="flex justify-between items-center">
-										<CardTitle className="text-lg">{r.to}</CardTitle>
-										<Badge variant="outline">{r.type || "report"}</Badge>
-									</div>
-									{r.subject && (
-										<div className="text-sm">
-											<span className="text-muted-foreground">Subject:</span> {r.subject}
-										</div>
-									)}
-									<div className="text-sm whitespace-pre-wrap">{r.body || "No body"}</div>
-								</CardContent>
-							</Card>
-						))
-					) : (
-						<div className="text-center py-10 text-muted-foreground">No reports yet.</div>
-					)}
+					<ReportThreadTimeline
+						threads={reportThreads}
+						providerReports={providerReports}
+						abuseMailReports={abuseMailReports}
+						abuseProviderReports={abuseProviderReports}
+						abuseReport={abuseReport}
+						artifacts={submission.artifacts}
+					/>
 				</TabsContent>
 				<TabsContent value="runs" className="space-y-4 mt-4">
-					<AnalysisProgress streamId={submission.id} status={submission.status} />
-
 					{runsToShow.length > 0 ? (
 						runsToShow.map((run: any) => (
 							<div key={run.id} className={isRunning ? "overflow-hidden" : "overflow-hidden flex flex-col h-[90vh]"}>
-								<div className="py-3 shrink-0">
-									<div className="flex justify-between items-center">
-										<CardTitle className="text-sm font-mono uppercase">AI Analysis</CardTitle>
-										<Badge variant={run.status === "completed" ? "default" : "outline"}>{run.status}</Badge>
-									</div>
-								</div>
 								<div className={cn(isRunning ? "p-0" : "p-0 flex-1 min-h-0", "pt-2")}>
-									<AnalysisLogs streamId={run.id} output={run.output} className={isRunning ? undefined : "h-full"} />
+									<AnalysisLogs
+										streamId={run.id}
+										progressStreamId={isRunning ? submission.id : undefined}
+										status={run.status}
+										output={run.output}
+										className={isRunning ? undefined : "h-full"}
+									/>
 								</div>
 							</div>
 						))
+					) : isRunning ? (
+						<AnalysisLogs streamId={submission.id} status={submission.status} progressOnly />
 					) : (
 						<div className="text-center py-10 text-muted-foreground">No analysis runs yet.</div>
 					)}
@@ -463,7 +532,10 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 								<CardHeader className="p-3">
 									<CardTitle className="text-xs truncate">{a.name || a.kind}</CardTitle>
 									<CardDescription className="text-[10px]">
-										{a.mimeType} • {((a.size || 0) / 1024).toFixed(1)} KB
+										{a.mimeType} • {formatArtifactSize(a.size)}
+										{isWebsiteArchiveArtifact(a) ? (
+											<div>Archived {formatUtcDateTime(a.archivedAt ?? a.createdAt) ?? "unknown date"}</div>
+										) : null}
 									</CardDescription>
 								</CardHeader>
 								<CardContent className="p-3 pt-0">

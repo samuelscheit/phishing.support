@@ -1,11 +1,12 @@
-import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
+import { ArtifactsEntity, ReportingSummaryEntity, SubmissionsEntity } from "./db/entities";
 import { runStreamedAnalysisRun } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
 import { simpleParser } from "mailparser";
 import { analyzeHeaders, getAddressesText, getMailImage } from "./mail";
 import { getInfo } from "./website_info";
 import * as toon from "@toon-format/toon";
-import { markSubmissionInvalid, reportEmailPhishing } from "./report";
+import { reportEmailPhishing } from "./report/reportEmailPhishing";
+import { markSubmissionInvalid } from "./submissions/state";
 import { defaultReasoning, defaultResponseModel, mailer } from "./utils";
 import { abuseReplyMail, abuseReplyName, abuseReplyUrl } from "./constants";
 
@@ -122,7 +123,11 @@ export function cleanPrivateInformation(mail: MailData) {
 	return recursiveClean(mail, redactionTerms(mail)) as MailData;
 }
 
-export async function parseMail(eml: string) {
+export type ParseMailDependencies = {
+	getInfo?: typeof getInfo;
+};
+
+export async function parseMail(eml: string, dependencies: ParseMailDependencies = {}) {
 	const parsedMail = await simpleParser(eml, {});
 
 	const headers = analyzeHeaders(parsedMail.headerLines.map((x) => x.line).join("\n"));
@@ -131,7 +136,7 @@ export async function parseMail(eml: string) {
 
 	if (headers.routing.originatingIp || headers.routing.originatingServer) {
 		try {
-			whois = await getInfo(headers.routing.originatingIp || headers.routing.originatingServer!);
+			whois = await (dependencies.getInfo ?? getInfo)(headers.routing.originatingIp || headers.routing.originatingServer!);
 		} catch (error) {
 			console.error("Failed to get WHOIS info for mail origin:", error, headers.routing);
 		}
@@ -164,38 +169,49 @@ export async function parseMail(eml: string) {
 
 export type MailData = Awaited<ReturnType<typeof parseMail>>;
 
-export async function analyzeMail(emlContent: string, stream_id: bigint) {
+export async function analyzeMail(
+	emlContent: string,
+	stream_id: bigint,
+	options: { existingOriginalEmlArtifactId?: bigint; reuseEvidenceArtifacts?: boolean } = {}
+) {
 	try {
-		const privateMail = await parseMail(emlContent);
-		const mail = cleanPrivateInformation(privateMail);
+		const originalMail = await parseMail(emlContent);
+		const mail = cleanPrivateInformation(originalMail);
 
 		await emitStep(stream_id, "start", 0);
 		await SubmissionsEntity.update(stream_id, { status: "running", data: { kind: "email", email: mail } });
 
-		try {
-			const image = await getMailImage(mail);
-			await ArtifactsEntity.saveBuffer({
-				submissionId: stream_id,
-				name: "mail.png",
-				kind: "screenshot",
-				mimeType: "image/png",
-				buffer: image,
-			});
-		} catch (error) {}
+		if (!options.reuseEvidenceArtifacts) {
+			try {
+				const image = await getMailImage(mail);
+				await ArtifactsEntity.saveBuffer({
+					submissionId: stream_id,
+					name: "mail.png",
+					kind: "screenshot",
+					mimeType: "image/png",
+					buffer: image,
+				});
+			} catch {
+				// Screenshot generation is supplementary evidence and must not block analysis.
+			}
+		}
 
-		// Save EML artifact
-		await ArtifactsEntity.saveBuffer({
-			submissionId: stream_id,
-			name: "mail.eml",
-			kind: "eml",
-			mimeType: "message/rfc822",
-			buffer: Buffer.from(mail.eml, "utf-8"),
-		});
+		// Keep the source artifact unmodified for authorized downstream reporting.
+		const originalEmlArtifactId =
+			options.existingOriginalEmlArtifactId ??
+			(await ArtifactsEntity.saveBuffer({
+				submissionId: stream_id,
+				name: "mail.eml",
+				kind: "eml",
+				mimeType: "message/rfc822",
+				buffer: Buffer.from(originalMail.eml, "utf-8"),
+			}));
 
 		await emitStep(stream_id, "analysis_run", 30);
 
 		const { result: analysis } = await runStreamedAnalysisRun({
 			submissionId: stream_id,
+			analysisKind: "analysis",
 			options: {
 				model: defaultResponseModel,
 				input: [
@@ -235,6 +251,7 @@ ${toon.encode({ ...mail, eml: undefined })}`,
 
 		const { result: structuredResponse } = await runStreamedAnalysisRun({
 			submissionId: stream_id,
+			analysisKind: "classification",
 			options: {
 				stream: true,
 				model: defaultResponseModel,
@@ -275,7 +292,7 @@ ${buildMailEvidence(mail, analysis.output_text)}`,
 		const from = process.env.SMTP_FROM || `${abuseReplyName} <${abuseReplyMail}>`;
 		const date = mail.date ? new Date(mail.date).toLocaleString("en-US", { timeZone: "UTC" }) : undefined;
 		const submissionSubject = `"${mail.from_object?.name || mail.from_object?.address}" ${date ? "from " + date : ""}`;
-		let to = privateMail.to_object?.address;
+		let to = originalMail.to_object?.address;
 
 		if (to?.endsWith("@phishing.support")) {
 			to = undefined;
@@ -285,22 +302,42 @@ ${buildMailEvidence(mail, analysis.output_text)}`,
 			await emitStep(stream_id, "reporting", 90);
 			await reportEmailPhishing({
 				submissionId: stream_id,
-				mail,
+				mail: originalMail,
 				analysisText: analysis.output_text,
+				originalEmlArtifactId,
 			});
 
-			var subject = `Phishing Reported - ${submissionSubject}`;
-			var body = [
-				`Thank you very much for your report!`,
-				"",
-				`We have analyzed the email you provided and determined that it is indeed a phishing attempt.`,
-				"",
-				`Your submission has been reported to the relevant email providers and hosting services involved.`,
-				`You can view details at: ${abuseReplyUrl}/submissions/${stream_id}`,
-				"",
-				`Thank you for helping to combat phishing!`,
-				`Your ${abuseReplyName} Team`,
-			].join("\n");
+			const hasSuccessfulReport = await ReportingSummaryEntity.hasSuccessfulReport(stream_id);
+			if (hasSuccessfulReport) {
+				await SubmissionsEntity.update(stream_id, { status: "reported", info: undefined });
+				var subject = `Phishing Reported - ${submissionSubject}`;
+				var body = [
+					`Thank you very much for your report!`,
+					"",
+					`We have analyzed the email you provided and determined that it is indeed a phishing attempt.`,
+					"",
+					`Your submission has been reported to the relevant email providers and hosting services involved.`,
+					`You can view details at: ${abuseReplyUrl}/submissions/${stream_id}`,
+					"",
+					`Thank you for helping to combat phishing!`,
+					`Your ${abuseReplyName} Team`,
+				].join("\n");
+			} else {
+				await SubmissionsEntity.update(stream_id, {
+					status: "failed",
+					info: "Phishing confirmed, but no reports were successfully submitted.",
+				});
+				var subject = `Phishing Report Could Not Be Reported - ${submissionSubject}`;
+				var body = [
+					`Thank you for your report.`,
+					"",
+					`We analyzed the email you provided and confirmed that it is a phishing attempt, but the abuse report could not be delivered successfully.`,
+					`We have kept the failed delivery details for review at: ${abuseReplyUrl}/submissions/${stream_id}`,
+					"",
+					`Thank you for helping to combat phishing.`,
+					`Your ${abuseReplyName} Team`,
+				].join("\n");
+			}
 		} else {
 			await markSubmissionInvalid(stream_id);
 

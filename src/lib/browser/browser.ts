@@ -1,58 +1,22 @@
-import fs from "fs";
-import { tmpdir } from "os";
-import path from "path";
-import { Browser, launch } from "rebrowser-puppeteer-core";
-import { userAgent } from "../constants";
+import type { Browser } from "rebrowser-puppeteer-core";
 
-export async function getBrowser(use_puppeteer_core = false): Promise<Browser> {
-	// TODO: harden puppeteer/browser for security
+import { acquireFabricPuppeteerBrowser } from "./fabric";
 
-	const isDocker = process.env.DOCKER === "true" || process.env.PUPPETEER_NO_SANDBOX === "true";
-	const chromePath = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-	// const chromePath = process.env.CHROME_PATH || "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
-
-	const userDataDir = path.join(tmpdir(), "puppeteer-user-data");
-	fs.mkdirSync(userDataDir, { recursive: true });
-	console.log(`Created temporary user data directory at: ${userDataDir}`);
-
-	const args: string[] = [
-		`--screen-size=1920,1080`,
-		"--disable-extensions",
-		"--disable-file-system",
-		"--disable-dev-shm-usage",
-		"--disable-blink-features=AutomationControlled",
-		"--disable-features=site-per-process",
-		"--disable-advertisements",
-		"--enable-javascript",
-		"--disable-blink-features=AutomationControlled",
-		"--disable-gpu",
-		"--enable-webgl",
-		`--user-agent=${userAgent}`,
-	];
-
-	// Chromium inside containers commonly requires disabling sandbox.
-	if (isDocker) {
-		args.push("--no-sandbox", "--disable-setuid-sandbox");
-	}
-
-	const options = {
-		executablePath: chromePath,
-		headless: false,
-		// userDataDir,
-		ignoreDefaultArgs: ["--enable-automation"],
-		args,
-		downloadBehavior: {
-			policy: "deny",
-		},
-		acceptInsecureCerts: true,
-		dumpio: true,
-	} as const;
-
-	if (use_puppeteer_core) {
-		const puppeteerCore = await import("puppeteer-core");
-		// @ts-ignore
-		return puppeteerCore.launch(options);
-	}
-
-	return launch(options as any);
+/**
+ * Return a lease-scoped CDP client for a Fabric-owned browser.
+ *
+ * Browser creation used to be scattered across this application and its Docker
+ * image. Keeping one Fabric-only entry point makes the manager the sole owner
+ * of Chromium, the persistent profile, the egress namespace, and teardown.
+ */
+export async function getBrowser(): Promise<Browser> {
+	// A clone of the reviewed Fabric profile provides a disposable volume while
+	// preserving the manager-owned browser fingerprint and egress policy. The
+	// caller receives the worker's default context, never an app-created
+	// incognito context.
+	const leased = await acquireFabricPuppeteerBrowser(
+		{ operation: "phishing-browser" },
+		{ leaseMode: "clone" },
+	);
+	return leased.browser as Browser;
 }
