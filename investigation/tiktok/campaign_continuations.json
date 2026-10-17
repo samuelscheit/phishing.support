@@ -1,0 +1,299 @@
+{
+  "schema_version": 1,
+  "case": "tiktok-recharge-campaign",
+  "generated_at_utc": "2026-09-01T13:34:02Z",
+  "evidence_cutoff_utc": "2026-09-01T13:00:42.456Z",
+  "scope": {
+    "historical_campaign_members": 20,
+    "post_cutoff_verified_continuations": 2,
+    "historical_member_cutoff_utc": "2026-08-31T18:22:24Z",
+    "policy": "These submissions arrived after the original 20-member historical inventory. They are preserved as a separate continuation set rather than silently rewriting the historical count.",
+    "template_relationship": "Both continuation records are confirmed members of the same Vietnamese TikTok recharge template. The first has a stored MHTML and 32 shared assets; the second has a direct body identical to the existing origin capture after host-only substitution."
+  },
+  "continuations": [
+    {
+      "indicator_type": "domain",
+      "value": "napxu.aoanh-media.space",
+      "root_domain": "aoanh-media.space",
+      "historical_campaign_member": false,
+      "post_cutoff_continuation": true,
+      "submission_id": 353088590453936100,
+      "reported_url": "https://napxu.aoanh-media.space/",
+      "submitted_at_utc": "2026-09-01T08:08:00.000Z",
+      "submission_updated_at_utc": "2026-09-01T08:10:29.811Z",
+      "submission_status": "reported",
+      "registration_time_utc": "2026-09-01T06:47:15.903Z",
+      "last_changed_utc": "2026-09-01T06:52:39.770Z",
+      "expiration_time_utc": "2027-09-01T06:47:15.903Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "rdap_status_at_submission": [
+        "client transfer prohibited",
+        "add period"
+      ],
+      "resolver_snapshot": {
+        "host_a": [
+          "172.67.131.146",
+          "104.21.4.25"
+        ],
+        "host_aaaa": [
+          "2a06:98c1:3121::3",
+          "2a06:98c1:3120::3"
+        ],
+        "root_a": [
+          "188.114.97.3",
+          "188.114.96.3"
+        ],
+        "root_aaaa": [
+          "2a06:98c1:3121::3",
+          "2a06:98c1:3120::3"
+        ],
+        "root_ns": [
+          "saanvi.ns.cloudflare.com",
+          "decker.ns.cloudflare.com"
+        ],
+        "edge_disposition": "All listed A/AAAA values are Cloudflare proxy/edge values; none is treated as an origin.",
+        "source_path": "investigation/tiktok/post_cutoff/source/submissions_whois_sanitized.json"
+      },
+      "provider_status": {
+        "snapshot_utc": "2026-09-01T13:00:42.456Z",
+        "report_id": "353089218479656960",
+        "route_statuses": [
+          {
+            "provider_registry_key": "email:hostinger.com",
+            "route_type": "email",
+            "status": "awaiting_provider_reply",
+            "updated_at_utc": "2026-09-01T08:10:43.615Z"
+          },
+          {
+            "provider_registry_key": "cloudflare",
+            "route_type": "provider_submission",
+            "status": "running",
+            "updated_at_utc": "2026-09-01T08:10:32.453Z"
+          },
+          {
+            "provider_registry_key": "google_safe_browsing",
+            "route_type": "provider_submission",
+            "status": "submitted",
+            "updated_at_utc": "2026-09-01T08:10:44.555Z"
+          },
+          {
+            "provider_registry_key": "netcraft",
+            "route_type": "provider_submission",
+            "status": "submitted",
+            "updated_at_utc": "2026-09-01T08:10:32.834Z"
+          }
+        ],
+        "inbound_message_count": 0,
+        "interpretation": "Read-only application workflow snapshot; provider route status is not provider identity or KYC evidence."
+      },
+      "artifact": {
+        "mhtml_artifact_id": 353088658686873600,
+        "mhtml_path": "investigation/tiktok/post_cutoff/raw/353088590453936100/353088658686873600-website.mhtml",
+        "mhtml_size_bytes": 425983,
+        "mhtml_sha256": "5efea24aada0b00f41f563c7f909a35931faeb090435797b23f6494b26805deb",
+        "mhtml_created_at_utc": "2026-09-01T08:08:16.301Z",
+        "mhtml_archived_at_utc": "2026-09-01T08:08:15Z",
+        "png_artifact_id": 353088658682679300,
+        "png_path": "investigation/tiktok/post_cutoff/raw/353088590453936100/353088658682679300-website.png",
+        "png_size_bytes": 74758,
+        "png_sha256": "9d373b7f6d27ca04e136ceefbd9cd4454ae62d3ebc4e9571076cd9d8e91af297"
+      },
+      "template_evidence": {
+        "capture_type": "stored MHTML",
+        "html_bytes_after_decode": 29235,
+        "normalized_html_bytes": 16276,
+        "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d",
+        "baseline_normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d",
+        "same_normalized_html_as_19_historical_captures": true,
+        "shared_static_asset_match_count": 32,
+        "asset_match_paths": [
+          "/public/images/tiktok/card/garena.png",
+          "/public/images/tiktok/card/mobifone.png",
+          "/public/images/tiktok/card/vcoin.png",
+          "/public/images/tiktok/card/viettel.png",
+          "/public/images/tiktok/card/vinaphone.png",
+          "/public/images/tiktok/card/zing.png",
+          "/public/images/tiktok/method/bank-qr.svg",
+          "/public/images/tiktok/method/method_garena.png",
+          "/public/images/tiktok/method/method_mobifone.png",
+          "/public/images/tiktok/method/method_momo.png",
+          "/public/images/tiktok/method/method_viettel.png",
+          "/public/images/tiktok/method/method_vinaphone.png",
+          "/public/images/tiktok/method/method_visa.png",
+          "/public/images/tiktok/method/method_vnpay.png",
+          "/public/images/tiktok/method/method_zalopay.png",
+          "/public/images/tiktok/method/method_zing.png",
+          "/public/images/tiktok/method/the-cao.svg",
+          "/public/images/tiktok/svg/arrow-bottom.svg",
+          "/public/images/tiktok/svg/arrow-left.svg",
+          "/public/images/tiktok/svg/arrow-right.svg",
+          "/public/images/tiktok/svg/avatar-default.svg",
+          "/public/images/tiktok/svg/close.svg",
+          "/public/images/tiktok/svg/coin.svg",
+          "/public/images/tiktok/svg/creator-tools.svg",
+          "/public/images/tiktok/svg/help.svg",
+          "/public/images/tiktok/svg/logo.svg",
+          "/public/images/tiktok/svg/menu.svg",
+          "/public/images/tiktok/svg/question.svg",
+          "/public/images/tiktok/svg/search.svg",
+          "/public/images/tiktok/svg/security-tiktok.svg",
+          "/public/images/tiktok/svg/shield-tick.svg",
+          "/public/images/tiktok/svg/three-dots.svg"
+        ],
+        "comparison_method_ref": "template_fingerprint.json#/method"
+      },
+      "origin_assessment": {
+        "status": "origin_unknown_cloudflare_or_removed",
+        "origin_ip": null,
+        "server_id": null,
+        "evidence_type": "historical_mhtml_plus_later_default_vhost",
+        "evidence_time_utc": "2026-09-01T11:02:25Z",
+        "later_direct_check": {
+          "destination": "103.149.86.246:80",
+          "host_header": "napxu.aoanh-media.space",
+          "status": 200,
+          "server": "Apache",
+          "body_bytes": 615,
+          "body_sha256": "fb47468a2cd3953c7131431991afcc6a2703f14640520102eea0a685a7e8d6de",
+          "title": "Welcome to nginx!",
+          "interpretation": "The earlier stored MHTML is the campaign evidence; the later direct check did not return the fake body, so it is not direct phishing-vhost proof for this continuation."
+        },
+        "caveat": "The stored MHTML confirms the same campaign template. The later direct check reached the observed IP but returned a default page; the active origin at the time of the stored capture remains unresolved."
+      }
+    },
+    {
+      "indicator_type": "domain",
+      "value": "napxu.caothaisonmedia.shop",
+      "root_domain": "caothaisonmedia.shop",
+      "historical_campaign_member": false,
+      "post_cutoff_continuation": true,
+      "submission_id": 353102966678360060,
+      "reported_url": "https://napxu.caothaisonmedia.shop/",
+      "submitted_at_utc": "2026-09-01T09:05:07.000Z",
+      "submission_updated_at_utc": "2026-09-01T09:07:31.433Z",
+      "submission_status": "reported",
+      "registration_time_utc": "2026-09-01T06:38:53.0Z",
+      "last_changed_utc": "2026-09-01T06:41:12.0Z",
+      "expiration_time_utc": "2027-09-01T23:59:59.0Z",
+      "registrar": "HOSTINGER operations, UAB",
+      "registrar_iana_id": "1636",
+      "nameservers": [
+        "decker.ns.cloudflare.com",
+        "saanvi.ns.cloudflare.com"
+      ],
+      "rdap_status_at_submission": [
+        "client transfer prohibited",
+        "add period"
+      ],
+      "resolver_snapshot": {
+        "host_a": [
+          "172.67.156.24",
+          "104.21.42.41"
+        ],
+        "host_aaaa": [
+          "2606:4700:3034::6815:2a29",
+          "2606:4700:3036::ac43:9c18"
+        ],
+        "root_a": [
+          "172.67.156.24",
+          "104.21.42.41"
+        ],
+        "root_aaaa": [
+          "2606:4700:3036::ac43:9c18",
+          "2606:4700:3034::6815:2a29"
+        ],
+        "root_ns": [
+          "saanvi.ns.cloudflare.com",
+          "decker.ns.cloudflare.com"
+        ],
+        "edge_disposition": "All listed A/AAAA values are Cloudflare proxy/edge values; none is treated as an origin.",
+        "source_path": "investigation/tiktok/post_cutoff/source/submissions_whois_sanitized.json"
+      },
+      "provider_status": {
+        "snapshot_utc": "2026-09-01T13:00:42.456Z",
+        "report_id": "353103569865412600",
+        "route_statuses": [
+          {
+            "provider_registry_key": "cloudflare",
+            "route_type": "provider_submission",
+            "status": "running",
+            "updated_at_utc": "2026-09-01T09:07:33.849Z"
+          },
+          {
+            "provider_registry_key": "google_safe_browsing",
+            "route_type": "provider_submission",
+            "status": "submitted",
+            "updated_at_utc": "2026-09-01T09:07:48.698Z"
+          },
+          {
+            "provider_registry_key": "netcraft",
+            "route_type": "provider_submission",
+            "status": "submitted",
+            "updated_at_utc": "2026-09-01T09:07:34.657Z"
+          }
+        ],
+        "inbound_message_count": 0,
+        "interpretation": "Read-only application workflow snapshot; provider route status is not provider identity or KYC evidence."
+      },
+      "artifact": null,
+      "template_evidence": {
+        "capture_type": "direct HTTP body (no stored responder MHTML artifact)",
+        "body_path": "investigation/tiktok/post_cutoff/origin/caothaison_vhost.body",
+        "body_bytes": 186883,
+        "body_sha256": "2659d10a2db6bf1ad56766f89767a3054f2defb7271a089678f2f1efadc7eee3",
+        "host_substitution": {
+          "replace_regex": "caothaisonmedia\\.shop",
+          "replacement": "hungdungmedia.fun",
+          "comparison_target": "investigation/tiktok/live_final_direct.html",
+          "byte_identical_after_substitution": true,
+          "substituted_body_sha256": "a0e74fe2c82e1c9dd46d9ec89428f9253a8d8671ec909272d5b50289f46f1be7",
+          "comparison_target_sha256": "a0e74fe2c82e1c9dd46d9ec89428f9253a8d8671ec909272d5b50289f46f1be7"
+        },
+        "shared_static_asset_match_count": 32,
+        "shared_static_asset_basis": "The body is byte-identical to the existing direct-origin capture after host-only substitution; the 32-asset bundle is independently established by the captured MHTML set."
+      },
+      "origin_assessment": {
+        "status": "confirmed_direct_vhost",
+        "origin_ip": "103.149.86.246",
+        "server_id": "origin-103-149-86-246",
+        "evidence_type": "direct_http_host_header",
+        "evidence_time_utc": "2026-09-01T11:02:24Z",
+        "request": {
+          "destination": "103.149.86.246:80",
+          "host_header": "napxu.caothaisonmedia.shop",
+          "method": "GET",
+          "path": "/"
+        },
+        "response": {
+          "status": 200,
+          "server": "Apache",
+          "content_type": "text/html; charset=utf-8",
+          "body_bytes": 186883,
+          "body_sha256": "2659d10a2db6bf1ad56766f89767a3054f2defb7271a089678f2f1efadc7eee3",
+          "title": "Nạp xu TikTok"
+        },
+        "caveat": "Direct proof establishes that this Host header served the same fake application from the observed IP at the stated time; it does not identify the server subscriber, domain registrant, or individual operator."
+      }
+    }
+  ],
+  "evidence_sources": [
+    "investigation/tiktok/post_cutoff/source/submissions_whois_sanitized.json",
+    "investigation/tiktok/post_cutoff/source/origin_request_metadata.json",
+    "investigation/tiktok/post_cutoff/source/provider_status_snapshot.json",
+    "investigation/tiktok/post_cutoff/raw/353088590453936100/353088658686873600-website.mhtml",
+    "investigation/tiktok/post_cutoff/origin/caothaison_vhost.body",
+    "investigation/tiktok/live_final_direct.html",
+    "investigation/tiktok/template_fingerprint.json"
+  ],
+  "interpretation_limits": [
+    "Hostinger is the registrar in both RDAP records; this does not establish a shared registrar account or hosting tenancy.",
+    "Cloudflare A/AAAA values in the resolver snapshot are proxy addresses and are not origins.",
+    "A direct Host-header match identifies a serving endpoint, not a natural person.",
+    "No password, OTP, payment card, prepaid-card serial/PIN, or payment was submitted for either continuation."
+  ]
+}

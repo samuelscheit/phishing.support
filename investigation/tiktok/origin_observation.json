@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "origin_ip": "103.149.86.246",
   "network_observation": {
     "prefix": "103.149.86.0/23",
@@ -56,9 +56,9 @@
     },
     "interpretation": "Registry/delegation removal was visible to the public resolver while the origin/vhost remained reachable by direct IP and Host header."
   },
-  "attribution_boundary": "This establishes a current serving endpoint and a historical adjacent serving endpoint plus their RIR allocation holder, not the person who operated the campaign. An upstream backend may remain undiscovered.",
-  "generated_at_utc": "2026-09-01T11:11:52Z",
-  "origin_status": "confirmed_direct_serving_endpoint",
+  "attribution_boundary": "This establishes one current serving endpoint with two directly observed malicious Host headers (one historical-cohort host and one post-cutoff continuation) plus a historical adjacent serving endpoint and their RIR allocation holder; it does not identify the person who operated the campaign. An upstream backend may remain undiscovered.",
+  "generated_at_utc": "2026-09-01T13:34:02Z",
+  "origin_status": "confirmed_direct_serving_endpoint_with_post_cutoff_continuation",
   "network_contacts": {
     "formal_abuse": {
       "organization": "IRT-VNNIC-AP",
@@ -97,5 +97,32 @@
     "role": "RIR allocation/route registrant for 103.149.86.0/23 / AS149125",
     "commercial_hoster_confirmed": false,
     "status": "commercial server hoster, subscriber, and operator not established from public evidence"
-  }
+  },
+  "post_cutoff_direct_http_observations": [
+    {
+      "host_header": "napxu.caothaisonmedia.shop",
+      "capture_utc": "2026-09-01T11:02:24Z",
+      "request": "HTTP GET / with Host header sent directly to 103.149.86.246:80",
+      "status": 200,
+      "server": "Apache",
+      "content_type": "text/html; charset=utf-8",
+      "title": "Nạp xu TikTok",
+      "body_bytes": 186883,
+      "body_sha256": "2659d10a2db6bf1ad56766f89767a3054f2defb7271a089678f2f1efadc7eee3",
+      "host_only_equivalence": "After replacing caothaisonmedia.shop with hungdungmedia.fun, bytes equal live_final_direct.html."
+    },
+    {
+      "host_header": "napxu.aoanh-media.space",
+      "capture_utc": "2026-09-01T11:02:25Z",
+      "request": "HTTP GET / with Host header sent directly to 103.149.86.246:80",
+      "status": 200,
+      "server": "Apache",
+      "content_type": "text/html",
+      "title": "Welcome to nginx!",
+      "body_bytes": 615,
+      "body_sha256": "fb47468a2cd3953c7131431991afcc6a2703f14640520102eea0a685a7e8d6de",
+      "interpretation": "Later direct check reached the observed IP but returned a default page; stored MHTML remains the campaign evidence."
+    }
+  ],
+  "continuation_evidence_ref": "campaign_continuations.json#/continuations"
 }

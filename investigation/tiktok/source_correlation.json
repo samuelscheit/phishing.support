@@ -1,10 +1,10 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "case": "tiktok-recharge-campaign",
-  "generated_at_utc": "2026-09-01T09:25:00Z",
-  "evidence_cutoff_utc": "2026-09-01T09:19:56Z",
+  "generated_at_utc": "2026-09-01T13:34:02Z",
+  "evidence_cutoff_utc": "2026-09-01T13:34:02Z",
   "assessment": {
-    "primary_finding": "The 2026 campaign is a shared Vietnamese TikTok-recharge kit. Public-source evidence identifies a likely kit publisher/reseller lead but does not identify the live-domain operator or an individual perpetrator.",
+    "primary_finding": "The 2026 campaign is a shared Vietnamese TikTok-recharge kit. Public-source evidence identifies a likely kit publisher/reseller lead and a separate historical downstream client/consumer lead, but does not identify the live-domain operator or an individual perpetrator.",
     "identity_status": "unresolved",
     "attribution_layers": [
       "kit/source",
@@ -1423,7 +1423,8 @@
     "No public repository, URLScan, RDAP, or certificate record connects QuocTuan-8386 to ZaloPay app 4982 or the live virtual account.",
     "The shared old JavaScript hash and historical deployments show that the static kit circulated before the QuocTuan account existed; exact assets alone cannot identify the kit author.",
     "No account-level evidence identifies who provisioned the 20 Hostinger domains, configured Cloudflare, or deployed the application on 103.149.86.246.",
-    "The unrelated same-IP napgarena.vn control prevents treating the AS149125 registrant as the campaign operator."
+    "The unrelated same-IP napgarena.vn control prevents treating the AS149125 registrant as the campaign operator.",
+    "The vuvanthuan repository is a historical downstream client/consumer lead, not proof of the current campaign operator."
   ],
   "source_artifacts": [
     {
@@ -1530,6 +1531,41 @@
       "path": "investigation/tiktok/related_sites/phishdestroy_changes_2026-07-22.json",
       "size_bytes": 41042,
       "sha256": "ba97a44a82ec9b241322bbe2274f7c0d711e45fbfd83dc731db6031f6fef07bc"
+    },
+    {
+      "path": "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_user.json",
+      "size_bytes": 1345,
+      "sha256": "cfd45eca889bcda7d335a9ad4decf418c745bbdb247ddeaa7d4a6efe4ff916bf"
+    },
+    {
+      "path": "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_repo.json",
+      "size_bytes": 5336,
+      "sha256": "eba0e61e6f45ae6872ff10becc653a062e97ab3735da10c39ef5ddded9bd832e"
+    },
+    {
+      "path": "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_commits.json",
+      "size_bytes": 36826,
+      "sha256": "395e415bfc9b0278956539237122f34a20dd44813f02cac1d0d9ffe46d2374ee"
+    },
+    {
+      "path": "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_repo/src/components/login-modal.tsx",
+      "size_bytes": 6048,
+      "sha256": "005b57c0d9a55f1476efbf12cbc10516561944cf6d5fd88c533ec783c7478ae5"
+    },
+    {
+      "path": "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_repo/src/lib/constants.ts",
+      "size_bytes": 1398,
+      "sha256": "2e7b94ac3994ec9b46a90b617b8576cca237f1786e61433f11bcfd0a23a56024"
+    },
+    {
+      "path": "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_urlscan_dangnhap.html",
+      "size_bytes": 471907,
+      "sha256": "22e728c9a0c95f98f9a324f6e005a6152607cf7f1c622f5b64337250ed986e86"
+    },
+    {
+      "path": "investigation/tiktok/post_cutoff/source/public_correlation/urlscan_query_hash_0355d3d09537dc51bf57ecb5b2e0ae0d6f8762b8a1f70fc4a2eb71610f15f192.json",
+      "size_bytes": 38492,
+      "sha256": "b14d1f7e9bd5a582ac4492ec1d6ce09abe295fa15abe3c213b33c0d2ff2907b1"
     }
   ],
   "method_and_limits": [
@@ -1537,6 +1573,80 @@
     "The repository comparison checks every captured rc/* asset and every public index.html revision available in the repository at collection time; it does not imply access to private branches, deleted repositories, or server-side code.",
     "Legacy-family observations are intentionally separated from the 20 verified case submissions and should not be added to a blocklist without current validation.",
     "The public email in commit metadata and all credential-like/API-key material were omitted from this derivative; omission does not change the negative finding that no live-domain/payment link was found.",
-    "Provider KYC, registrar account records, Cloudflare history, server deployment logs, and payment settlement records remain the decisive next evidence."
-  ]
+    "Provider KYC, registrar account records, Cloudflare history, server deployment logs, and payment settlement records remain the decisive next evidence.",
+    "The vuvanthuan/napthe_tiktok record is temporally downstream of the 2025-01-06 public scan it references; its asset overlap and endpoint reference do not establish backend ownership or current-campaign control."
+  ],
+  "historical_precursor_repository_lead": {
+    "repository_url": "https://github.com/vuvanthuan/napthe_tiktok",
+    "classification": "low-confidence public historical code-consumer/republisher lead; not a current campaign attribution",
+    "repository_account": {
+      "login": "vuvanthuan",
+      "public_user_id": "88172491",
+      "repository_created_at_utc": "2025-01-17T07:11:21Z",
+      "public_profile_capture_path": "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_user.json"
+    },
+    "historical_backend_observation": {
+      "domain": "dangnhapnapxutiktok.com",
+      "urlscan_id": "cc9798ff-093d-40b4-af73-8b71e704d558",
+      "observed_at_utc": "2025-01-06T02:16:34.459Z",
+      "main_ip": "172.67.183.179",
+      "main_server": "cloudflare",
+      "page_title": "Nạp Xu TikTok Giá Rẻ - Uy Tín, Nhanh Chóng | Hướng Dẫn Chi Tiết",
+      "primary_resource_sha256": "5eef793cbd9885b9598db2edbcf8717e49a85f896f57c8cae208fa028ad144b",
+      "main_javascript_sha256": "0355d3d09537dc51bf57ecb5b2e0ae0d6f8762b8a1f70fc4a2eb71610f15f192",
+      "exact_campaign_asset_match_count_in_scan": 7,
+      "interpretation": "A public URLScan record shows the historical page and its public assets; the observed IP is a Cloudflare edge, not an origin."
+    },
+    "repository_revision_evidence": {
+      "endpoint_reference_commit": "5adc6fd06c5959414502b554126225977922a045",
+      "commit_time_utc": "2025-01-17T07:12:04Z",
+      "commit_message": "#update: tiktok",
+      "source_path": "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_repo/src/components/login-modal.tsx",
+      "literal_reference": "https://dangnhapnapxutiktok.com/api/login",
+      "interpretation": "The public client code calls the historical backend endpoint for a username-only TikTok lookup; this establishes a code-consumer relationship, not control of the backend."
+    },
+    "asset_overlap": {
+      "repository_revision_assets_checked": [
+        "public/viettel.png",
+        "public/momo.png",
+        "public/visa.png",
+        "public/zalo_pay.png",
+        "public/mobifone.png",
+        "public/zing.png",
+        "public/vinaphone.png"
+      ],
+      "exact_campaign_asset_matches": 7,
+      "matching_campaign_asset_paths": [
+        "/public/images/tiktok/card/mobifone.png",
+        "/public/images/tiktok/card/viettel.png",
+        "/public/images/tiktok/card/vinaphone.png",
+        "/public/images/tiktok/card/zing.png",
+        "/public/images/tiktok/method/method_momo.png",
+        "/public/images/tiktok/method/method_visa.png",
+        "/public/images/tiktok/method/method_zalopay.png"
+      ],
+      "comparison_note": "The matching assets are common payment/card artwork also present in the historical backend scan; they are not unique operator identifiers."
+    },
+    "timeline_and_limits": {
+      "historical_scan_precedes_repository_creation": true,
+      "historical_scan_precedes_endpoint_reference_commit": true,
+      "current_campaign_connection_found": false,
+      "current_campaign_domains_found": [],
+      "current_origin_ip_found": false,
+      "current_payment_account_found": false,
+      "exact_current_backend_route_match_found": false,
+      "public_identity_fields_used_for_attribution": false,
+      "reason_not_attributed": "The historical URLScan page was observed before the GitHub repository existed publicly; the repository contains a client-side reference to that old public endpoint and a small common-asset subset, but no current campaign domain, 103.149.86.246, live ZaloPay account, or current /login /qr_order /qr_status /buy /cards /logout route."
+    },
+    "source_artifacts": [
+      "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_user.json",
+      "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_repo.json",
+      "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_commits.json",
+      "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_repo/src/components/login-modal.tsx",
+      "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_repo/src/lib/constants.ts",
+      "investigation/tiktok/post_cutoff/source/public_correlation/vuvanthuan_urlscan_dangnhap.html",
+      "investigation/tiktok/post_cutoff/source/public_correlation/urlscan_query_hash_0355d3d09537dc51bf57ecb5b2e0ae0d6f8762b8a1f70fc4a2eb71610f15f192.json"
+    ],
+    "negative_finding": "This public repository is evidence of a downstream client/consumer of a historical TikTok-recharge endpoint, not evidence that the account authored or operated the current 2026 campaign. The public profile display name, commit email, and unrelated payment-code values are intentionally not used as identity evidence."
+  }
 }

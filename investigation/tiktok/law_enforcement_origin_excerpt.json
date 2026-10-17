@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "prepared_date": "2026-10-05",
+  "purpose": "Law-enforcement evidence excerpt; no personal contact or reporter metadata.",
+  "source_derivative": "investigation/tiktok/origin_observation.json",
+  "network_allocation": {
+    "prefix": "103.149.86.0/23",
+    "asn": "AS149125",
+    "netname": "DV4S-VN",
+    "allocation_holder": "4S TECHNOLOGY TRADING SERVICES COMPANY LIMITED",
+    "role": "RIR allocation/route registrant; actual commercial hoster, subscriber, and operator not established",
+    "registry_capture_utc": "2026-09-01T03:44:24Z"
+  },
+  "direct_http_observations": [
+    {
+      "observed_at_utc": "2026-09-01T04:18:16Z",
+      "destination": "103.149.86.246:80",
+      "host_header": "napxu.hungdungmedia.fun",
+      "method": "GET",
+      "path": "/",
+      "http_status": 200,
+      "server": "Apache",
+      "content_type": "text/html; charset=utf-8",
+      "title": "Nạp xu TikTok",
+      "body_bytes": 186877,
+      "body_sha256": "a0e74fe2c82e1c9dd46d9ec89428f9253a8d8671ec909272d5b50289f46f1be7",
+      "interpretation": "The specific Host header returned the campaign page at this time; this establishes a serving observation only, not a customer, subscriber, registrant, or person."
+    },
+    {
+      "observed_at_utc": "2026-09-01T11:02:24Z",
+      "destination": "103.149.86.246:80",
+      "host_header": "napxu.caothaisonmedia.shop",
+      "method": "GET",
+      "path": "/",
+      "http_status": 200,
+      "server": "Apache",
+      "content_type": "text/html; charset=utf-8",
+      "title": "Nạp xu TikTok",
+      "body_bytes": 186883,
+      "body_sha256": "2659d10a2db6bf1ad56766f89767a3054f2defb7271a089678f2f1efadc7eee3",
+      "interpretation": "The specific Host header returned the campaign page at this time; this establishes a serving observation only, not a customer, subscriber, registrant, or person."
+    },
+    {
+      "observed_at_utc": "2026-09-01T11:02:25Z",
+      "destination": "103.149.86.246:80",
+      "host_header": "napxu.aoanh-media.space",
+      "method": "GET",
+      "path": "/",
+      "http_status": 200,
+      "server": "Apache",
+      "content_type": "text/html",
+      "title": "Welcome to nginx!",
+      "body_bytes": 615,
+      "body_sha256": "fb47468a2cd3953c7131431991afcc6a2703f14640520102eea0a685a7e8d6de",
+      "interpretation": "The direct check returned a default page, not the campaign content; the stored MHTML is the content evidence for this host."
+    }
+  ],
+  "limitations": [
+    "RIR allocation identifies a network allocation/route holder, not the commercial hosting customer or operator.",
+    "Cloudflare DNS/edge values and root-apex DNS associations are not treated as proof of origin or direct subdomain serving.",
+    "No named individual or organization is identified as the campaign operator by this excerpt."
+  ]
+}

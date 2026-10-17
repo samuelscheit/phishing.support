@@ -1,0 +1,430 @@
+{
+  "registry_url": "https://dangkykinhdoanh.gov.vn/vn/Pages/trangchu.aspx",
+  "api_url": "https://dichvuthongtin.dkkd.gov.vn/inf/Public/Srv.aspx/GetSearch",
+  "retrieved_utc": "2026-10-05T05:08:11Z",
+  "results": [
+    {
+      "query": "HUNG DUNG MEDIA",
+      "http_status": 200,
+      "results": [
+        {
+          "Id": "2437466",
+          "Name": "CÔNG TY CỔ PHẦN TRUYỀN THÔNG VÀ GIẢI TRÍ HÙNG DŨNG",
+          "Name_F": "HUNG DUNG MEDIA AND ENTERTAINMENT JOINT STOCK COMPANY ",
+          "Short_Name": "HUNG DUNG ENTERTAINMENT., JSC",
+          "Enterprise_Code": "0012576773",
+          "Enterprise_Gdt_Code": "0106917491",
+          "Status": null
+        }
+      ]
+    },
+    {
+      "query": "CAO THAI SON MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "CAOTH AISON MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "CAOTH AISON",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "AOANH MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "AO ANH MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "QUANG THAI MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "QUANGTHAI MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "QUANG HUNG MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "QUANGHUNG MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "HOANG HAI MEDIA",
+      "http_status": 200,
+      "results": [
+        {
+          "Id": "11309362",
+          "Name": "CÔNG TY TNHH HOÀNG HẢI MEDIA",
+          "Name_F": "HOANG HAI MEDIA COMPANY LIMITED",
+          "Short_Name": null,
+          "Enterprise_Code": "0033764464",
+          "Enterprise_Gdt_Code": "0202282854",
+          "Status": null
+        },
+        {
+          "Id": "2574724",
+          "Name": "CÔNG TY TNHH MTV TRUYỀN THÔNG HOÀNG HẢI",
+          "Name_F": "HOANG HAI MEDIA MTV LIMITED COMPANY",
+          "Short_Name": "HOANG HAI MEDIA MTV CO., LTD",
+          "Enterprise_Code": "0012893590",
+          "Enterprise_Gdt_Code": "0107016235",
+          "Status": null
+        },
+        {
+          "Id": "6629971",
+          "Name": "CÔNG TY TNHH DỊCH VỤ TRUYỀN THÔNG HOÀNG HẢI",
+          "Name_F": "HOANG HAI SERVICES MEDIA COMPANY LIMITED",
+          "Short_Name": "HOANG HAI MEDIA CO., LTD",
+          "Enterprise_Code": "0021557153",
+          "Enterprise_Gdt_Code": "3603703907",
+          "Status": null
+        }
+      ]
+    },
+    {
+      "query": "HOANGHAI MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "HOANG HA MEDIA",
+      "http_status": 200,
+      "results": [
+        {
+          "Id": "8150991",
+          "Name": "CÔNG TY TNHH HOÀNG HÀ MEDIA",
+          "Name_F": "HOANG HA MEDIA COMPANY LIMITED",
+          "Short_Name": null,
+          "Enterprise_Code": "0024848647",
+          "Enterprise_Gdt_Code": "0109744568",
+          "Status": null
+        },
+        {
+          "Id": "12709748",
+          "Name": "CÔNG TY TNHH GIÁO DỤC VÀ TRUYỀN THÔNG HOÀNG HÀ",
+          "Name_F": "HOANG HA MEDIA AND EDUCATION COMPANY LIMITED",
+          "Short_Name": "HOANG HA MEDIA AND EDUCATION CO., LTD",
+          "Enterprise_Code": "0037892653",
+          "Enterprise_Gdt_Code": "0111500424",
+          "Status": null
+        }
+      ]
+    },
+    {
+      "query": "KIM SON MEDIA",
+      "http_status": 200,
+      "results": [
+        {
+          "Id": "532784",
+          "Name": "CÔNG TY CỔ PHẦN TRUYỀN THÔNG KIM SƠN",
+          "Name_F": "KIM SON MEDIA JOINT STOCK COMPANY",
+          "Short_Name": "KIM SON MEDIA., JSC",
+          "Enterprise_Code": "0005687012",
+          "Enterprise_Gdt_Code": "0104521310",
+          "Status": null
+        }
+      ]
+    },
+    {
+      "query": "KIMSON MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "THUY TONG STORE",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "THUY TONG",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "DAI NAM MEDIA",
+      "http_status": 200,
+      "results": [
+        {
+          "Id": "231784",
+          "Name": "CÔNG TY TNHH TRUYỀN THÔNG ĐẠI NAM",
+          "Name_F": "DAI NAM MEDIA COMPANY LIMITED",
+          "Short_Name": "DAI NAM MEDIA CO.,LTD",
+          "Enterprise_Code": "0002553244",
+          "Enterprise_Gdt_Code": "3700793173",
+          "Status": null
+        },
+        {
+          "Id": "13148174",
+          "Name": "CÔNG TY TNHH ĐẠI NAM MEDIA",
+          "Name_F": null,
+          "Short_Name": null,
+          "Enterprise_Code": "0039109948",
+          "Enterprise_Gdt_Code": "5702235876",
+          "Status": null
+        },
+        {
+          "Id": "7583306",
+          "Name": "CÔNG TY TNHH PHÁT TRIỂN TRUYỀN THÔNG ĐẠI NAM",
+          "Name_F": "DAI NAM MEDIA DEVELOPMENT COMPANY LIMITED",
+          "Short_Name": "DAI NAM MEDIA DEVELOPMENT CO.,LTD",
+          "Enterprise_Code": "0023504650",
+          "Enterprise_Gdt_Code": "0316650727",
+          "Status": null
+        },
+        {
+          "Id": "7807443",
+          "Name": "CÔNG TY CỔ PHẦN GIẢI PHÁP TRUYỀN THÔNG ĐẠI NAM",
+          "Name_F": "DAI NAM MEDIA SOLUTION JOINT STOCK COMPANY",
+          "Short_Name": "DAI NAM MEDIA SOLUTION., JSC",
+          "Enterprise_Code": "0023915529",
+          "Enterprise_Gdt_Code": "0109551735",
+          "Status": null
+        },
+        {
+          "Id": "1321531",
+          "Name": "CÔNG TY CP TRUYỀN THÔNG VÀ CÔNG NGHỆ ĐẠI NAM",
+          "Name_F": "DAI NAM MEDIA AND TECHNOLOGY JOINT STOCK COMPANY",
+          "Short_Name": "DAI NAM CO.,LTD",
+          "Enterprise_Code": "0009015981",
+          "Enterprise_Gdt_Code": "1801289353",
+          "Status": null
+        },
+        {
+          "Id": "499843",
+          "Name": "CÔNG TY CỔ PHẦN TRUYỀN THÔNG ĐẠI NAM - NCV FILM STUDIO",
+          "Name_F": "NCV FILM STUDIO - DAI NAM MEDIA JOINT STOCK COMPANY",
+          "Short_Name": null,
+          "Enterprise_Code": "0005324556",
+          "Enterprise_Gdt_Code": "0104743994",
+          "Status": null
+        }
+      ]
+    },
+    {
+      "query": "DAINAM MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "HD MEDIA",
+      "http_status": 200,
+      "results": [
+        {
+          "Id": "10477840",
+          "Name": "CÔNG TY TNHH HD MEDIA GROUP ",
+          "Name_F": "HD MEDIA GROUP COMPANY LIMITED",
+          "Short_Name": "HD MEDIA GROUP ",
+          "Enterprise_Code": "0031600650",
+          "Enterprise_Gdt_Code": "2902193106",
+          "Status": null
+        },
+        {
+          "Id": "10036365",
+          "Name": "CÔNG TY TNHH HD MEDIA",
+          "Name_F": "HD MEDIA COMPANY LIMITED",
+          "Short_Name": "HD MEDIA",
+          "Enterprise_Code": "0030299604",
+          "Enterprise_Gdt_Code": "2500711478",
+          "Status": null
+        },
+        {
+          "Id": "8839275",
+          "Name": "CÔNG TY TNHH HD MEDIA & EVENT",
+          "Name_F": "HD MEDIA & EVENT COMPANY LIMITED",
+          "Short_Name": "HD MEDIA & EVENT",
+          "Enterprise_Code": "0026890470",
+          "Enterprise_Gdt_Code": "3603879770",
+          "Status": null
+        },
+        {
+          "Id": "528622",
+          "Name": "CÔNG TY TNHH  HD MEDIA HÀ NỘI",
+          "Name_F": "HD MEDIA HA NOI COMPANY LIMITED",
+          "Short_Name": "HD MEDIA.,LTD",
+          "Enterprise_Code": "0005641314",
+          "Enterprise_Gdt_Code": "0104115012",
+          "Status": null
+        },
+        {
+          "Id": "9347153",
+          "Name": "CÔNG TY TNHH QUẢNG CÁO HD MEDIA",
+          "Name_F": "HD MEDIA ADVERTISEMENT COMPANY LIMITED",
+          "Short_Name": null,
+          "Enterprise_Code": "0028339488",
+          "Enterprise_Gdt_Code": "0110286418",
+          "Status": null
+        },
+        {
+          "Id": "12459748",
+          "Name": "CÔNG TY TNHH HD MEDIA HUB",
+          "Name_F": "HD MEDIA HUB COMPANY LIMITED",
+          "Short_Name": null,
+          "Enterprise_Code": "0037007447",
+          "Enterprise_Gdt_Code": "0111393758",
+          "Status": null
+        },
+        {
+          "Id": "661943",
+          "Name": "CÔNG TY TNHH HD MEDIA VIET NAM",
+          "Name_F": "HD MEDIA VIET NAM COMPANY LIMITED",
+          "Short_Name": null,
+          "Enterprise_Code": "0006717160",
+          "Enterprise_Gdt_Code": "0105142636",
+          "Status": null
+        },
+        {
+          "Id": "2004927",
+          "Name": "CÔNG TY TNHH PHÁT TRIỂN HD MEDIA NAM KHÁNH",
+          "Name_F": "NAM KHANH HD MEDIA DEVELOPMENT COMPANY LIMITED",
+          "Short_Name": "NAM KHANH HD MEDIA CO.,LTD",
+          "Enterprise_Code": "0011084370",
+          "Enterprise_Gdt_Code": "0106625717",
+          "Status": null
+        },
+        {
+          "Id": "3056264",
+          "Name": "CÔNG TY TNHH  THƯƠNG MẠI DỊCH VỤ MARKETING HD MEDIA",
+          "Name_F": "MARKETING HD MEDIA TRADE SERVICE COMPANY LIMITED ",
+          "Short_Name": null,
+          "Enterprise_Code": "0014036091",
+          "Enterprise_Gdt_Code": "0313834204",
+          "Status": null
+        },
+        {
+          "Id": "10357623",
+          "Name": "CÔNG TY CỔ PHẦN TRUYỀN THÔNG HD MEDIA",
+          "Name_F": "HD MEDIA COMMUNICATIONS COMPANY JOINT STOCK COMPANY",
+          "Short_Name": null,
+          "Enterprise_Code": "0031225469",
+          "Enterprise_Gdt_Code": "0110695957",
+          "Status": null
+        }
+      ]
+    },
+    {
+      "query": "HUU HAN STUDIO",
+      "http_status": 200,
+      "results": [
+        {
+          "Id": "3345553",
+          "Name": "CÔNG TY TRÁCH NHIỆM HỮU HẠN STUDIO CHS",
+          "Name_F": "STUDIO CHS COMPANY LIMITED",
+          "Short_Name": "STUDIO CHS LTD.",
+          "Enterprise_Code": "0014669949",
+          "Enterprise_Gdt_Code": "3700585977",
+          "Status": null
+        }
+      ]
+    },
+    {
+      "query": "HUUHAN STUDIO",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "KO MEDIA",
+      "http_status": 200,
+      "results": [
+        {
+          "Id": "6752591",
+          "Name": "CÔNG TY CỔ PHẦN TRUYỀN THÔNG KOS",
+          "Name_F": "KOS MEDIA JOINT STOCK COMPANY",
+          "Short_Name": null,
+          "Enterprise_Code": "0021825964",
+          "Enterprise_Gdt_Code": "0109130751",
+          "Status": null
+        }
+      ]
+    },
+    {
+      "query": "SON HAI MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "SONHAI MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "TAKI MEDIA",
+      "http_status": 200,
+      "results": [
+        {
+          "Id": "6506285",
+          "Name": "CÔNG TY TNHH TRUYỀN THÔNG TAKI MEDIA",
+          "Name_F": "TAKI MEDIA LIMITED LIABILITY COMPANY",
+          "Short_Name": "TAKI MEDIA CO.,LTD",
+          "Enterprise_Code": "0021367974",
+          "Enterprise_Gdt_Code": "3301666342",
+          "Status": null
+        },
+        {
+          "Id": "502398",
+          "Name": "CÔNG TY TNHH TRUYỀN THÔNG TAKI",
+          "Name_F": "TAKI MEDIA COMPANY LIMITED",
+          "Short_Name": "TAKI CO.,LTD",
+          "Enterprise_Code": "0005352665",
+          "Enterprise_Gdt_Code": null,
+          "Status": null
+        },
+        {
+          "Id": "2728753",
+          "Name": "CÔNG TY TNHH TRUYỀN THÔNG TÂN KỶ",
+          "Name_F": "TAN KY MEDIA COMPANY LIMITED",
+          "Short_Name": "TAKY MEDIA CO.,LTD",
+          "Enterprise_Code": "0013258406",
+          "Enterprise_Gdt_Code": "0313581881",
+          "Status": null
+        }
+      ]
+    },
+    {
+      "query": "TAKIMEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "THUYN MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "THUYNMEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "VNTIK MEDIA",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "NAP XU",
+      "http_status": 200,
+      "results": []
+    },
+    {
+      "query": "ORVANTIS MEDIA",
+      "http_status": 200,
+      "results": []
+    }
+  ],
+  "retrieved_local_date": "2026-10-05",
+  "scope_note": "Public organization names/domains only; no personal-name, address, phone, social-profile, or leaked-data searches."
+}

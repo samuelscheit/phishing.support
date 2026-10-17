@@ -1,6 +1,6 @@
 {
-  "schema_version": 2,
-  "generated_at_utc": "2026-09-01T09:25:00Z",
+  "schema_version": 3,
+  "generated_at_utc": "2026-09-01T13:34:02Z",
   "method": {
     "description": "Decode each captured MHTML text/html MIME payload as UTF-8 with replacement; lowercase; replace only each absolute URL scheme plus authority (regex https?://[^/\\s\"'<>]+) with HOST while preserving the path; replace cid: references with CID; collapse runs of whitespace to one ASCII space; encode the normalized string as UTF-8 and SHA-256 it.",
     "html_normalization": {
@@ -393,5 +393,35 @@
     "submission_id": 351624943487684609,
     "host": "shop.sonhaimedia.sbs",
     "reason": "No MHTML artifact was available in the captured evidence set; the domain remains an IOC from the submission/DNS/RDAP records."
+  },
+  "post_cutoff_continuation_comparison": {
+    "policy": "The 19-page baseline remains the historical cohort. Continuation evidence is reported separately and does not rewrite that baseline.",
+    "stored_mhtml": {
+      "submission_id": 353088590453936100,
+      "host": "napxu.aoanh-media.space",
+      "mhtml_path": "investigation/tiktok/post_cutoff/raw/353088590453936100/353088658686873600-website.mhtml",
+      "mhtml_size_bytes": 425983,
+      "mhtml_sha256": "5efea24aada0b00f41f563c7f909a35931faeb090435797b23f6494b26805deb",
+      "normalized_html_bytes": 16276,
+      "normalized_html_sha256": "f248a056b185e69f5441cd4b9a1eaa705f289109a9b3ab891afe05c4bd17889d",
+      "shared_static_asset_match_count": 32,
+      "comparison_result": "same normalized HTML fingerprint and all 32 shared static assets"
+    },
+    "direct_body": {
+      "submission_id": 353102966678360060,
+      "host": "napxu.caothaisonmedia.shop",
+      "body_path": "investigation/tiktok/post_cutoff/origin/caothaison_vhost.body",
+      "body_size_bytes": 186883,
+      "body_sha256": "2659d10a2db6bf1ad56766f89767a3054f2defb7271a089678f2f1efadc7eee3",
+      "host_substitution_result": {
+        "replace_regex": "caothaisonmedia\\.shop",
+        "replacement": "hungdungmedia.fun",
+        "comparison_target": "investigation/tiktok/live_final_direct.html",
+        "byte_identical_after_substitution": true,
+        "substituted_body_sha256": "a0e74fe2c82e1c9dd46d9ec89428f9253a8d8671ec909272d5b50289f46f1be7",
+        "comparison_target_sha256": "a0e74fe2c82e1c9dd46d9ec89428f9253a8d8671ec909272d5b50289f46f1be7"
+      },
+      "comparison_result": "byte-identical to live_final_direct.html after replacing only the host string"
+    }
   }
 }

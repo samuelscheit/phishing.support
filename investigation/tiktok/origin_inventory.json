@@ -1,8 +1,8 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "case": "tiktok-recharge-campaign",
-  "generated_at_utc": "2026-09-01T11:11:52Z",
-  "evidence_cutoff_utc": "2026-09-01T11:11:52Z",
+  "generated_at_utc": "2026-09-01T13:34:02Z",
+  "evidence_cutoff_utc": "2026-09-01T13:34:02Z",
   "scope": {
     "verified_campaign_members": 20,
     "server_records": 2,
@@ -13,14 +13,18 @@
     "definition": "An origin record requires a direct serving observation or a clearly identified historical serving endpoint. Root/apex DNS association is retained separately and is never represented as direct vhost proof.",
     "edge_exclusion": "Cloudflare A/AAAA values are CDN/proxy observations, not origin servers. They are retained per host as edge_addresses_seen_not_origins and excluded from server_records.",
     "hoster_boundary": "RIR allocation holders and registrars are reporting/attribution leads. They are not asserted to be the campaign author, subscriber, or knowing operator without provider-side records.",
-    "confirmed_ipv6_origin_records": 0
+    "confirmed_ipv6_origin_records": 0,
+    "post_cutoff_verified_continuations": 2,
+    "post_cutoff_direct_host_header_vhosts": 1,
+    "post_cutoff_continuation_hosts_without_current_direct_origin": 1,
+    "continuation_inventory": "campaign_continuations.json is the source of truth for the separate post-cutoff cohort; historical 20-member counts are not silently rewritten."
   },
   "server_records": [
     {
       "server_id": "origin-103-149-86-246",
       "ip": "103.149.86.246",
       "role": "confirmed_current_campaign_serving_endpoint",
-      "status": "directly_proven_for_one_campaign_vhost; ten additional campaign roots had authoritative apex A records to this address at the snapshot",
+      "status": "directly_proven_for_two_campaign_vhosts (one historical-cohort host and one post-cutoff continuation); ten additional campaign roots had authoritative apex A records to this address at the historical snapshot",
       "service_observations": [
         {
           "transport": "HTTP",
@@ -34,6 +38,20 @@
           "body_bytes": 186877,
           "body_sha256": "a0e74fe2c82e1c9dd46d9ec89428f9253a8d8671ec909272d5b50289f46f1be7",
           "title": "Nạp xu TikTok"
+        },
+        {
+          "transport": "HTTP",
+          "port": 80,
+          "product": "Apache",
+          "observation_type": "direct Host-header request (post-cutoff continuation)",
+          "observed_at_utc": "2026-09-01T11:02:24Z",
+          "host_header": "napxu.caothaisonmedia.shop",
+          "http_status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "body_bytes": 186883,
+          "body_sha256": "2659d10a2db6bf1ad56766f89767a3054f2defb7271a089678f2f1efadc7eee3",
+          "title": "Nạp xu TikTok",
+          "host_only_equivalent_to": "live_final_direct.html after replacing caothaisonmedia.shop with hungdungmedia.fun"
         },
         {
           "transport": "TCP",
@@ -84,9 +102,6 @@
         }
       ],
       "campaign_association": {
-        "direct_host_header_vhosts": [
-          "napxu.hungdungmedia.fun"
-        ],
         "authoritative_apex_dns_associations": [
           "napxu.thuytongstore.fun",
           "shop-xu.kimsonmedia.sbs",
@@ -100,7 +115,18 @@
           "napxu.hoanganhmedia.sbs"
         ],
         "authoritative_dns_snapshot_utc": "2026-09-01T04:17:17.767483Z",
-        "association_caveat": "The ten records are root/apex A records. They support an address association for the zones, but do not independently prove that each named campaign subdomain was serving the phishing body at that exact time. The direct Host-header proof applies only to napxu.hungdungmedia.fun."
+        "association_caveat": "The ten records are root/apex A records. They support an address association for the zones, but do not independently prove that each named campaign subdomain was serving the phishing body at that exact time. The direct Host-header proof applies only to napxu.hungdungmedia.fun.",
+        "historical_cohort_direct_host_header_vhosts": [
+          "napxu.hungdungmedia.fun"
+        ],
+        "post_cutoff_continuation_direct_host_header_vhosts": [
+          "napxu.caothaisonmedia.shop"
+        ],
+        "direct_host_header_vhosts": [
+          "napxu.hungdungmedia.fun",
+          "napxu.caothaisonmedia.shop"
+        ],
+        "post_cutoff_continuation_caveat": "The caothaisonmedia.shop observation is direct proof at 2026-09-01T11:02:24Z. The aoanh-media.space stored MHTML is template proof; its later direct check returned a default page."
       },
       "confidence": "high for the direct serving endpoint; medium for the ten apex associations",
       "evidence_refs": [
@@ -110,7 +136,10 @@
         "investigation/tiktok/dns_snapshot_rdap_ns.json",
         "investigation/tiktok/apnic_whois.txt",
         "investigation/tiktok/origin_sources/103.149.86.246_apnic_rdap.json",
-        "investigation/tiktok/shodan_host_10314986246.html"
+        "investigation/tiktok/shodan_host_10314986246.html",
+        "investigation/tiktok/campaign_continuations.json#/continuations/1",
+        "investigation/tiktok/post_cutoff/source/origin_request_metadata.json",
+        "investigation/tiktok/post_cutoff/origin/caothaison_vhost.body"
       ],
       "caveats": [
         "The public records establish a serving endpoint and RIR allocation holder, not the subscriber, account holder, or person who deployed the application.",
@@ -1031,6 +1060,36 @@
       "path": "investigation/tiktok/vhost_checks.jsonl",
       "role": "point-in-time campaign virtual-host checks",
       "sha256": "db88e55c5e75803c503e1fc998e40873a8982605c70f1d2a760925835c363c93"
+    },
+    {
+      "path": "investigation/tiktok/campaign_continuations.json",
+      "role": "post-cutoff continuation inventory",
+      "sha256": "1d60c5dbcf22a3d88104694047d6718348842b9d3bc3b7394d5271ed83c3204f"
+    },
+    {
+      "path": "investigation/tiktok/post_cutoff/source/submissions_whois_sanitized.json",
+      "role": "post-cutoff resolver and registrar snapshots",
+      "sha256": "1eb8eaa19526b4ecc1d5d6c1aa0d7da75883a0f1f0259b8df4ac597588b111b8"
+    },
+    {
+      "path": "investigation/tiktok/post_cutoff/source/origin_request_metadata.json",
+      "role": "post-cutoff direct HTTP request metadata",
+      "sha256": "76ffa9ec52694c09a5ab970687af926884a9a3dee3332ffdcb3311ae710e24d2"
+    },
+    {
+      "path": "investigation/tiktok/post_cutoff/origin/caothaison_vhost.body",
+      "role": "post-cutoff direct fake-page body",
+      "sha256": "2659d10a2db6bf1ad56766f89767a3054f2defb7271a089678f2f1efadc7eee3"
+    },
+    {
+      "path": "investigation/tiktok/post_cutoff/origin/caothaison_vhost.headers",
+      "role": "post-cutoff direct fake-page headers",
+      "sha256": "1f428a808cd6b56dd7fedd0d9ebced7aa100ed8ad745d83925fb7be37302062a"
+    },
+    {
+      "path": "investigation/tiktok/post_cutoff/raw/353088590453936100/353088658686873600-website.mhtml",
+      "role": "post-cutoff stored MHTML template capture",
+      "sha256": "5efea24aada0b00f41f563c7f909a35931faeb090435797b23f6494b26805deb"
     }
   ],
   "method_and_limits": [
@@ -1040,7 +1099,9 @@
     "The network organization is the APNIC allocation/route registrant. Subscriber, VPS, reverse-proxy, and backend tenancy remain unresolved.",
     "No IPv6 origin was confirmed; the observed campaign AAAA values are Cloudflare edge/proxy addresses or absent.",
     "Formal abuse contact means a source explicitly labels the address as an abuse contact/mailbox. Technical/admin and registrar contacts are labeled separately.",
-    "No SSH authentication, brute force, Cloudflare bypass, payment, or state-changing request was performed."
+    "No SSH authentication, brute force, Cloudflare bypass, payment, or state-changing request was performed.",
+    "The post-cutoff continuation cohort is kept separate from the historical 20-member host list. Direct proof for caothaisonmedia.shop is time-specific; the aoanh-media.space later direct check returned a default page.",
+    "The two continuation records are Hostinger-registered and Cloudflare-proxied in their resolver snapshots, but those facts do not establish one registrar account, hosting tenant, or operator."
   ],
   "search_coverage": {
     "source": "public URLScan hash searches",
@@ -1093,5 +1154,67 @@
     ],
     "negative_finding": "The distinctive current-kit coin.svg, the-cao.svg, and bank-qr.svg searches returned only Cloudflare AS13335 primary results. logo.svg and security-tiktok.svg additionally returned GitHub Pages AS54113. The older s.js hash returned one non-Cloudflare primary result, the already-recorded historical 103.149.87.34 naptiktok.net observation. No additional direct origin for the current 20-member campaign was identified by these searches.",
     "interpretation_limit": "URLScan search is historical/public and not exhaustive of private scans, deleted records, or origins hidden behind a proxy; this negative result does not prove that no other server ever existed."
-  }
+  },
+  "post_cutoff_continuation_host_status": [
+    {
+      "host": "napxu.aoanh-media.space",
+      "root_domain": "aoanh-media.space",
+      "origin_status": "origin_unknown_cloudflare_or_removed",
+      "origin_ip": null,
+      "server_id": null,
+      "evidence_type": "historical_mhtml_plus_later_default_vhost",
+      "evidence_time_utc": "2026-09-01T11:02:25Z",
+      "edge_addresses_seen_not_origins": [
+        "172.67.131.146",
+        "104.21.4.25"
+      ],
+      "authoritative_apex_a_at_submission": [
+        "188.114.97.3",
+        "188.114.96.3"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T11:02:25Z",
+        "status": 200,
+        "title": "Welcome to nginx!",
+        "disposition": "default nginx page at later check"
+      },
+      "confidence": "not established",
+      "caveat": "The stored MHTML confirms the same campaign template. The later direct check reached the observed IP but returned a default page; the active origin at the time of the stored capture remains unresolved.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_continuations.json",
+        "investigation/tiktok/post_cutoff/source/submissions_whois_sanitized.json",
+        "investigation/tiktok/post_cutoff/source/origin_request_metadata.json"
+      ]
+    },
+    {
+      "host": "napxu.caothaisonmedia.shop",
+      "root_domain": "caothaisonmedia.shop",
+      "origin_status": "confirmed_direct_vhost",
+      "origin_ip": "103.149.86.246",
+      "server_id": "origin-103-149-86-246",
+      "evidence_type": "direct_http_host_header",
+      "evidence_time_utc": "2026-09-01T11:02:24Z",
+      "edge_addresses_seen_not_origins": [
+        "172.67.156.24",
+        "104.21.42.41"
+      ],
+      "authoritative_apex_a_at_submission": [
+        "172.67.156.24",
+        "104.21.42.41"
+      ],
+      "vhost_check": {
+        "time_utc": "2026-09-01T11:02:24Z",
+        "status": 200,
+        "title": "Nạp xu TikTok",
+        "disposition": "fake TikTok page"
+      },
+      "confidence": "high",
+      "caveat": "Direct proof establishes that this Host header served the same fake application from the observed IP at the stated time; it does not identify the server subscriber, domain registrant, or individual operator.",
+      "evidence_refs": [
+        "investigation/tiktok/campaign_continuations.json",
+        "investigation/tiktok/post_cutoff/source/submissions_whois_sanitized.json",
+        "investigation/tiktok/post_cutoff/source/origin_request_metadata.json"
+      ]
+    }
+  ]
 }
