@@ -5,8 +5,8 @@ type DonateLinks = {
 };
 
 const LINKS: DonateLinks = {
-	patreon: "https://www.patreon.com/YOUR_ACCOUNT",
-	paypal: "https://www.paypal.me/YOUR_ACCOUNT",
+	patreon: "https://www.patreon.com/samuelscheit",
+	paypal: "https://www.paypal.me/samuelscheit",
 	githubSponsors: "https://github.com/sponsors/samuelscheit",
 };
 

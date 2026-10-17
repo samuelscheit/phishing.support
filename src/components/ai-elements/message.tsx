@@ -4,14 +4,13 @@ import { Button } from "@/components/ui/button";
 import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/web_lib/util";
-import type { FileUIPart, UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon, PaperclipIcon, XIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
 import { createContext, memo, useContext, useEffect, useState } from "react";
 import { Streamdown } from "streamdown";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
-	from: UIMessage["role"];
+	from: "system" | "user" | "assistant";
 };
 
 export const Message = ({ className, from, ...props }: MessageProps) => (
@@ -19,7 +18,7 @@ export const Message = ({ className, from, ...props }: MessageProps) => (
 		className={cn(
 			"group flex w-full max-w-[95%] flex-col gap-2",
 			from === "user" ? "is-user ml-auto justify-end" : "is-assistant",
-			className
+			className,
 		)}
 		{...props}
 	/>
@@ -33,7 +32,7 @@ export const MessageContent = ({ children, className, ...props }: MessageContent
 			"is-user:dark flex w-fit max-w-full min-w-0 flex-col gap-2 overflow-hidden text-sm",
 			"group-[.is-user]:ml-auto group-[.is-user]:rounded-lg group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
 			"group-[.is-assistant]:text-foreground",
-			className
+			className,
 		)}
 		{...props}
 	>
@@ -164,7 +163,7 @@ export const MessageBranchContent = ({ children, ...props }: MessageBranchConten
 };
 
 export type MessageBranchSelectorProps = HTMLAttributes<HTMLDivElement> & {
-	from: UIMessage["role"];
+	from: "system" | "user" | "assistant";
 };
 
 export const MessageBranchSelector = ({ className, from, ...props }: MessageBranchSelectorProps) => {
@@ -242,13 +241,34 @@ export const MessageResponse = memo(
 	({ className, ...props }: MessageResponseProps) => (
 		<Streamdown className={cn("size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0  break-all pr-4", className)} {...props} />
 	),
-	(prevProps, nextProps) => prevProps.children === nextProps.children
+	(prevProps, nextProps) => prevProps.children === nextProps.children,
 );
 
 MessageResponse.displayName = "MessageResponse";
 
 export type MessageAttachmentProps = HTMLAttributes<HTMLDivElement> & {
-	data: FileUIPart;
+	data: {
+		type: "file";
+		/**
+		 * IANA media type of the file.
+		 *
+		 * @see https://www.iana.org/assignments/media-types/media-types.xhtml
+		 */
+		mediaType: string;
+		/**
+		 * Optional filename of the file.
+		 */
+		filename?: string;
+		/**
+		 * The URL of the file.
+		 * It can either be a URL to a hosted file or a [Data URL](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Data_URLs).
+		 */
+		url: string;
+		/**
+		 * The provider metadata.
+		 */
+		providerMetadata?: any;
+	};
 	className?: string;
 	onRemove?: () => void;
 };
@@ -334,3 +354,4 @@ export const MessageToolbar = ({ className, children, ...props }: MessageToolbar
 		{children}
 	</div>
 );
+
