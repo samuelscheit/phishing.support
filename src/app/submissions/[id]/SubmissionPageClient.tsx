@@ -19,8 +19,18 @@ import type { SubmissionDetail as ApiSubmissionDetail } from "@/lib/submissions/
 import { formatUtcDateTime } from "@/lib/date_time";
 import { cn } from "../../../web_lib/util";
 import { selectDisplayAnalysisRuns } from "@/lib/analysis_run_view";
+import type { WebsiteDataEntryField, WebsitePhishingBasis } from "@/lib/website_types";
 
 type SubmissionDetail = ApiSubmissionDetail;
+
+const PHISHING_BASIS_LABELS: Record<WebsitePhishingBasis, string> = {
+	credential_theft: "credential theft",
+	payment_fraud: "payment fraud",
+};
+
+function describeDataEntryField(field: WebsiteDataEntryField) {
+	return field.label ?? field.placeholder ?? field.name ?? field.id ?? field.control;
+}
 
 function formatArtifactSize(value: number | bigint | null | undefined) {
 	if (value === null || value === undefined) return "Unknown size";
@@ -383,7 +393,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 										const findingLabel = finding === "prank_or_troll"
 											? "Prank / troll — not phishing"
 											: finding === "insufficient_evidence" ? "Insufficient evidence"
-												: finding === "phishing" ? "Phishing"
+												: finding === "phishing" ? (assessment?.phishingBasis ? `Phishing — ${PHISHING_BASIS_LABELS[assessment.phishingBasis]}` : "Phishing")
 													: finding === "benign" ? "Not phishing" : undefined;
 										return (
 											<li key={`${hop.index}:${hop.url}`} className="rounded border bg-background p-2">
@@ -396,6 +406,14 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 														{hop.redirectTo ? <div className="break-all text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
 														{findingLabel ? <div className={cn("text-xs font-medium", finding === "phishing" ? "text-destructive" : "text-muted-foreground")}>{findingLabel}</div> : null}
 														{assessment?.evidenceQuote ? <blockquote className="border-l-2 pl-2 text-xs text-muted-foreground">“{assessment.evidenceQuote}”</blockquote> : null}
+														{assessment?.collectionFields?.length ? (
+															<div className="text-xs text-muted-foreground">
+																Collects data through: {assessment.collectionFields.map((field) => `“${describeDataEntryField(field)}”`).join(", ")}
+															</div>
+														) : null}
+														{assessment?.rejectedPhishingClaim ? (
+															<div className="text-xs text-muted-foreground">Classifier&apos;s phishing claim not corroborated: {assessment.rejectedPhishingClaim}</div>
+														) : null}
 													</div>
 													<ExternalLinkConfirm
 														href={hop.url}
