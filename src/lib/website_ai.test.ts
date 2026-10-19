@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 
+import { buildProviderReportNarrative } from "./abuse/providers/report_payload";
 import {
 	buildWebsiteAnalysisInput,
 	buildWebsiteClassificationInput,
+	buildWebsiteReportEvidence,
 	reportableWebsiteHop,
 	validateWebsiteSiteClassification,
 	WEBSITE_CLASSIFICATION_FORMAT,
@@ -100,6 +102,46 @@ function validateTikTokKit(collectionFieldRefs: unknown, evidenceQuote = "Phươ
 	);
 }
 
+function capturedPage(url: string, text: string, html: string) {
+	const hop: WebsiteNavigationHop = { index: 0, url, hostname: new URL(url).hostname, status: 200, contentType: "text/html", contentCaptured: true };
+	return { hop, archive: { requestedUrl: url, url, hostname: hop.hostname, navigationHops: [hop], text: Buffer.from(text, "utf-8"), html: Buffer.from(html, "utf-8") } };
+}
+
+function classify(page: ReturnType<typeof capturedPage>, response: Record<string, unknown>) {
+	return validateWebsiteSiteClassification({ collectionFieldRefs: [], ...response }, page.archive.text.toString("utf-8"), page.archive.html.toString("utf-8"));
+}
+
+function reportablePage(page: ReturnType<typeof capturedPage>, classification: ReturnType<typeof classify>) {
+	return reportableWebsiteHop(page.archive.navigationHops, websiteSiteAssessments(page.archive.navigationHops, page.hop.index, classification), page.archive);
+}
+
+/** The German Apple-account lure captured for submission 369886451581587485: one button, no fields. */
+const appleAccountLure = capturedPage(
+	"https://appeal.policy-review.cloud/gate/security?next=%2Flogin",
+	[
+		"Apple Account",
+		"Kontoprüfung",
+		"Dein Apple-Account wurde wegen eines möglichen Verstoßes gegen unsere Nutzungsbedingungen für eine Sicherheitsprüfung markiert. Um den Zugriff wiederherzustellen, verifiziere deine Identität.",
+		"Bitte bestätige deine Identität, um einen Einspruch einzureichen und den Zugriff auf dein Konto wiederherzustellen.",
+		"Weiter",
+		"Copyright © 2026 Apple Inc. Alle Rechte vorbehalten.",
+	].join("\n"),
+	'<html lang="de"><head><title>Apple Account</title></head><body><h1>Kontoprüfung</h1><p>Dein Apple-Account wurde wegen eines möglichen Verstoßes gegen unsere Nutzungsbedingungen für eine Sicherheitsprüfung markiert.</p><button class="button" id="continueBtn">Weiter</button></body></html>',
+);
+const appleLureQuote = "Um den Zugriff wiederherzustellen, verifiziere deine Identität.";
+
+const fakeChromeUpdate = capturedPage(
+	"https://chrome-update-center.trycloudflare.com/",
+	"Google Chrome\nYour version of Chrome is out of date and can no longer display this page.\nUpdate Chrome\nInstall the latest update to continue browsing.",
+	'<html><head><title>Google Chrome</title></head><body><p>Your version of Chrome is out of date and can no longer display this page.</p><a id="update" href="/download/ChromeSetup.exe" download>Update Chrome</a></body></html>',
+);
+
+const fakeCaptchaCommand = capturedPage(
+	"https://verification-cloudflare.example-check.com/",
+	"Vérifiez que vous êtes humain\nPour terminer la vérification :\nAppuyez sur Windows + R\nAppuyez sur Ctrl + V\nAppuyez sur Entrée\nCloudflare",
+	'<html lang="fr"><body><h1>Vérifiez que vous êtes humain</h1><ol><li>Appuyez sur Windows + R</li><li>Appuyez sur Ctrl + V</li><li>Appuyez sur Entrée</li></ol><button id="verify">Je ne suis pas un robot</button></body></html>',
+);
+
 test("detailed analysis binds the page content to the exact captured URL", () => {
 	const input = buildWebsiteAnalysisInput(redirectArchive);
 	const system = input[0].content as string;
@@ -126,13 +168,15 @@ test("classification receives only one exact site's captured evidence", () => {
 	expect(() => buildWebsiteClassificationInput(shareGoogleHop, redirectArchive)).toThrow("exact navigation hop");
 });
 
-test("classification lists every data-entry field, including fields beyond the HTML excerpt", () => {
+test("classification covers lures and malware delivery and lists fields beyond the HTML excerpt", () => {
 	const input = buildWebsiteClassificationInput(tiktokCoinKitHop, tiktokCoinKitArchive);
 	const system = input[0].content as string;
 	const text = (input[1].content as Array<{ text: string }>)[0]!.text;
 
 	expect(system).toContain("any language");
-	expect(system).toContain("collectionFieldRefs");
+	expect(system).toContain("A lure page that only leads to that step counts");
+	expect(system).toContain("malware_delivery when it pushes the visitor to download, install, or run");
+	expect(system).toContain("asks to paste a command");
 	expect(tiktokCoinKitArchive.html.toString("utf-8").indexOf("phone-card-code")).toBeGreaterThan(12_000);
 	expect(text).toContain("data_entry_fields[4]{ref,control,id,name,autocomplete,label,placeholder}:");
 	expect(text).toContain('f3,"input[type=text]",phone-card-code,null,off,Mã thẻ,Nhập mã thẻ');
@@ -140,14 +184,14 @@ test("classification lists every data-entry field, including fields beyond the H
 	expect(text).not.toContain("bank-transfer");
 	expect(WEBSITE_CLASSIFICATION_FORMAT.schema).toMatchObject({
 		properties: {
-			phishingBasis: { enum: ["credential_theft", "payment_fraud", "none"] },
+			phishingBasis: { enum: ["credential_theft", "payment_fraud", "malware_delivery", "none"] },
 			collectionFieldRefs: { type: "array", items: { type: "string" } },
 		},
 		required: ["finding", "phishingBasis", "evidenceQuote", "collectionFieldRefs"],
 	});
 });
 
-test("a Vietnamese payment kit without a form is reportable when its fields are cited", () => {
+test("a Vietnamese payment kit without a form is reportable with its cited fields", () => {
 	const classification = validateTikTokKit(["f3", " F4 ", "f3"]);
 	expect(classification).toEqual({
 		finding: "phishing",
@@ -160,6 +204,34 @@ test("a Vietnamese payment kit without a form is reportable when its fields are 
 	expect(reportableWebsiteHop(tiktokCoinKitArchive.navigationHops, assessments, tiktokCoinKitArchive)).toEqual(tiktokCoinKitHop);
 });
 
+test("a lure page that only leads to a sign-in step is reportable without data-entry fields", () => {
+	const classification = classify(appleAccountLure, { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: appleLureQuote });
+
+	expect(classification).toEqual({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: appleLureQuote });
+	expect(reportablePage(appleAccountLure, classification)).toEqual(appleAccountLure.hop);
+});
+
+test("pages that push a download or a pasted command are reportable as malware delivery", () => {
+	const update = classify(fakeChromeUpdate, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Your version of Chrome is out of date and can no longer display this page." });
+	expect(update).toEqual({ finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Your version of Chrome is out of date and can no longer display this page." });
+	expect(reportablePage(fakeChromeUpdate, update)).toEqual(fakeChromeUpdate.hop);
+
+	const command = classify(fakeCaptchaCommand, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Appuyez sur Windows + R\nAppuyez sur Ctrl + V" });
+	expect(command).toEqual({ finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Appuyez sur Windows + R Appuyez sur Ctrl + V" });
+	expect(reportablePage(fakeCaptchaCommand, command)).toEqual(fakeCaptchaCommand.hop);
+});
+
+test("field references are supporting evidence and unknown ones are dropped", () => {
+	// The radio buttons that choose a payment method are not data-entry fields, and element ids are not refs.
+	expect(validateTikTokKit(["f3", "f5", "phone-card-code"])).toEqual({
+		finding: "phishing",
+		phishingBasis: "payment_fraud",
+		evidenceQuote: "Phương thức thanh toán",
+		collectionFields: [tiktokCardFields[0]],
+	});
+	expect(validateTikTokKit([])).toEqual({ finding: "phishing", phishingBasis: "payment_fraud", evidenceQuote: "Phương thức thanh toán" });
+});
+
 test("a quote spanning several page lines keeps its text and drops the line breaks", () => {
 	// gpt-5.5 quoted these consecutive lines of the captured kit.
 	expect(validateTikTokKit(["f3", "f4"], "Thẻ điện thoại & thẻ game\n Chọn nhà cung cấp\n Mã thẻ\n Số seri\n Thanh toán ngay")).toEqual({
@@ -170,21 +242,33 @@ test("a quote spanning several page lines keeps its text and drops the line brea
 	});
 	expect(validateTikTokKit(["f3"], "Mã thẻ\u0007")).toEqual({
 		finding: "insufficient_evidence",
-		rejectedPhishingClaim: "its evidence quote is not a short excerpt of page text",
+		rejectedPhishingClaim: "its evidence quote contains no page text",
 	});
 });
 
-test("a phishing claim is not corroborated without existing data-entry fields of the captured page", () => {
-	expect(validateTikTokKit([])).toEqual({
-		finding: "insufficient_evidence",
-		rejectedPhishingClaim: "it cited no data-entry field through which the captured page collects that data",
+test("quotes match despite typographic punctuation and invisible characters", () => {
+	const page = capturedPage(
+		"https://secure-paypal-review.example.net/",
+		"PayPal\nYour account has been limited \u2014 \u201Cconfirm\u201D your Pay\u200BPal details to restore access.",
+		"<input type=\"password\">",
+	);
+	expect(classify(page, { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "account has been limited - \"confirm\" your PayPal details", collectionFieldRefs: ["f1"] })).toMatchObject({
+		finding: "phishing",
+		collectionFields: [{ ref: "f1", control: "input[type=password]" }],
 	});
-	// The radio buttons that choose a payment method are not data-entry fields.
-	expect(validateTikTokKit(["f3", "f5"])).toEqual({
-		finding: "insufficient_evidence",
-		rejectedPhishingClaim: "it cited a data-entry field that does not exist in the captured page",
-	});
-	expect(validateTikTokKit(["phone-card-code"])).toMatchObject({ finding: "insufficient_evidence" });
+});
+
+test("an overlong verbatim quote is kept as a bounded verbatim prefix", () => {
+	const sentence = "Please verify your account details to avoid suspension.";
+	const page = capturedPage("https://account-verify.example.org/", Array(20).fill(sentence).join(" "), "<input name=\"email\">");
+	const quote = Array(15).fill(sentence).join(" ");
+	const classification = classify(page, { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: quote });
+
+	expect(quote.length).toBeGreaterThan(500);
+	expect(classification.evidenceQuote!.length).toBeLessThanOrEqual(500);
+	expect(quote.startsWith(classification.evidenceQuote!)).toBeTrue();
+	expect(quote[classification.evidenceQuote!.length]).toBe(" ");
+	expect(reportablePage(page, classification)).toEqual(page.hop);
 });
 
 test("short quotes in non-Latin scripts are valid evidence", () => {
@@ -200,11 +284,7 @@ test("short quotes in non-Latin scripts are valid evidence", () => {
 	});
 });
 
-test("redirect-only hops cannot inherit the captured destination's phishing finding", () => {
-	expect(websiteSiteAssessments([shareGoogleHop, finalTrollHop], 1, { finding: "prank_or_troll" })).toEqual([
-		{ hopIndex: 0, finding: "insufficient_evidence" },
-		{ hopIndex: 1, finding: "prank_or_troll" },
-	]);
+test("phishing claims without a harmful action or verbatim page evidence are not reported", () => {
 	expect(validateWebsiteSiteClassification({ finding: "prank_or_troll", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [] }, "You got trolled. Fuck you!", "<html></html>")).toEqual({ finding: "prank_or_troll" });
 	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "unrelated fabricated evidence", collectionFieldRefs: ["f1"] }, "You got trolled. Fuck you!", "<html><form><input type=\"password\"></form></html>")).toEqual({
 		finding: "insufficient_evidence",
@@ -212,18 +292,25 @@ test("redirect-only hops cannot inherit the captured destination's phishing find
 	});
 	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "password asks to verify the unrelated account credentials".repeat(10), collectionFieldRefs: ["f1"] }, "password asks to verify the unrelated account credentials", "<html><form><input type=\"password\"></form></html>")).toEqual({
 		finding: "insufficient_evidence",
-		rejectedPhishingClaim: "its evidence quote is not a short excerpt of page text",
+		rejectedPhishingClaim: "its evidence quote does not appear verbatim in the captured page text",
 	});
-	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "!", collectionFieldRefs: ["f1"] }, "Sign in!", "<input type=\"password\">")).toMatchObject({ finding: "insufficient_evidence" });
-	for (const collectionFieldRefs of [[], ["f1"]]) {
-		expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "the site grabs all your system info like a nosy little bitch", collectionFieldRefs }, "The site grabs all your system info like a nosy little bitch", "<html><body>The site grabs all your system info.</body></html>")).toMatchObject({ finding: "insufficient_evidence" });
-	}
+	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "!", collectionFieldRefs: [] }, "Sign in!", "<input type=\"password\">")).toEqual({
+		finding: "insufficient_evidence",
+		rejectedPhishingClaim: "its evidence quote contains no page text",
+	});
 	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "none", evidenceQuote: "You got trolled. Fuck you!", collectionFieldRefs: [] }, "You got trolled. Fuck you!", "<html></html>")).toEqual({
 		finding: "insufficient_evidence",
-		rejectedPhishingClaim: "it named neither credential theft nor payment fraud as the harmful action",
+		rejectedPhishingClaim: "it named no credential theft, payment fraud, or malware delivery",
 	});
 	expect(() => validateWebsiteSiteClassification({ finding: "suspicious", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [] }, "page text", "<html></html>")).toThrow("invalid finding");
 	expect(() => validateWebsiteSiteClassification({ finding: "benign", phishingBasis: "none", evidenceQuote: "" }, "page text", "<html></html>")).toThrow("collection field references");
+});
+
+test("redirect-only hops cannot inherit the captured destination's finding", () => {
+	expect(websiteSiteAssessments([shareGoogleHop, finalTrollHop], 1, { finding: "prank_or_troll" })).toEqual([
+		{ hopIndex: 0, finding: "insufficient_evidence" },
+		{ hopIndex: 1, finding: "prank_or_troll" },
+	]);
 });
 
 test("a captured credential-collection page remains eligible for an exact-site phishing finding", () => {
@@ -279,19 +366,38 @@ test("the report gate rejects troll pages and never lets destination content tri
 		finding: "phishing" as const,
 		phishingBasis: "credential_theft" as const,
 		evidenceQuote: "This exact quote supports the captured site's harmful action.",
-		collectionFields: [{ ref: "f1", control: "input[type=password]" }],
 	};
 	const capturedArchive = { ...redirectArchive, text: Buffer.from("This exact quote supports the captured site's harmful action.") };
 	expect(reportableWebsiteHop([shareGoogleHop, finalTrollHop], websiteSiteAssessments([shareGoogleHop, finalTrollHop], 1, capturedPhishing), capturedArchive)).toEqual(finalTrollHop);
-	expect(reportableWebsiteHop(
-		[shareGoogleHop, finalTrollHop],
-		websiteSiteAssessments([shareGoogleHop, finalTrollHop], 1, { ...capturedPhishing, collectionFields: [] }),
-		capturedArchive,
-	)).toBeUndefined();
+	expect(reportableWebsiteHop([shareGoogleHop, finalTrollHop], websiteSiteAssessments([shareGoogleHop, finalTrollHop], 1, capturedPhishing), redirectArchive)).toBeUndefined();
 	// Even a malformed assessment cannot send the terminal page's evidence to the shortener.
 	expect(reportableWebsiteHop(
 		[shareGoogleHop, finalTrollHop],
 		[{ hopIndex: shareGoogleHop.index, ...capturedPhishing, evidenceQuote: "redirect response only" }],
 		redirectArchive,
 	)).toBeUndefined();
+});
+
+test("the report handoff leads with the verified finding so provider narratives name the action in any language", () => {
+	const lure = classify(appleAccountLure, { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: appleLureQuote });
+	const evidence = buildWebsiteReportEvidence(appleAccountLure.hop, appleAccountLure.archive, lure);
+	expect(evidence.split("\n").slice(0, 3)).toEqual([
+		"phishing_basis: credential_theft",
+		`evidence_quote: ${JSON.stringify(appleLureQuote)}`,
+		`captured_site_url: ${JSON.stringify(appleAccountLure.hop.url)}`,
+	]);
+
+	const narrate = (description: string) => buildProviderReportNarrative({
+		provider: "cloudflare",
+		target: appleAccountLure.hop.hostname,
+		observedUrls: [appleAccountLure.hop.url],
+		description,
+		maximumLength: 1_000,
+	});
+	// The German page itself contains no English sign-in vocabulary.
+	expect(narrate(buildWebsiteReportEvidence(appleAccountLure.hop, appleAccountLure.archive, { finding: "phishing" }))).not.toContain("credential-collection");
+	expect(narrate(evidence)).toContain("a login or credential-collection flow");
+
+	const update = classify(fakeChromeUpdate, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Update Chrome" });
+	expect(narrate(buildWebsiteReportEvidence(fakeChromeUpdate.hop, fakeChromeUpdate.archive, update))).toContain("malicious content");
 });

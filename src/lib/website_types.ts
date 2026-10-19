@@ -11,7 +11,7 @@ export type WebsiteNavigationHop = {
 /** Only this explicit finding is eligible for the automatic phishing handoff. */
 export type WebsiteSiteFinding = "phishing" | "benign" | "prank_or_troll" | "insufficient_evidence";
 
-export type WebsitePhishingBasis = "credential_theft" | "payment_fraud";
+export type WebsitePhishingBasis = "credential_theft" | "payment_fraud" | "malware_delivery";
 
 /** A captured control through which a visitor can enter data, with or without a surrounding form. */
 export type WebsiteDataEntryField = {
@@ -31,7 +31,7 @@ export type WebsiteSiteClassification = {
 	phishingBasis?: WebsitePhishingBasis;
 	/** Verbatim excerpt of the captured page text, in the page's own language. */
 	evidenceQuote?: string;
-	/** Captured data-entry fields through which the page collects the credentials or payment data. */
+	/** Captured data-entry fields through which the page itself collects the data, when it has any. */
 	collectionFields?: WebsiteDataEntryField[];
 	/** Why the classifier's phishing claim was not corroborated by the captured page. */
 	rejectedPhishingClaim?: string;

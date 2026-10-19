@@ -26,6 +26,7 @@ type SubmissionDetail = ApiSubmissionDetail;
 const PHISHING_BASIS_LABELS: Record<WebsitePhishingBasis, string> = {
 	credential_theft: "credential theft",
 	payment_fraud: "payment fraud",
+	malware_delivery: "malware delivery",
 };
 
 function describeDataEntryField(field: WebsiteDataEntryField) {

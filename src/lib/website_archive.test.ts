@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Browser, BrowserContext, HTTPRequest, HTTPResponse, Page } from "rebrowser-puppeteer-core";
 import type { WebsiteNavigationHop } from "./website_types";
 
-import { archiveWebsite, getMhtmlArchiveDate, getMhtmlArchiveLocation } from "./website_archive";
+import { archiveWebsite, capturedDocumentContent, getMhtmlArchiveDate, getMhtmlArchiveLocation } from "./website_archive";
 
 function mhtml(preamble: string, body = "content") {
 	return Buffer.from(`${preamble}\r\n\r\n${body}`, "latin1");
@@ -325,4 +325,21 @@ test("untrusted submitted MHTML cannot choose the URL associated with captured p
 		status: null,
 		contentCaptured: false,
 	}]);
+});
+
+test("captured page text includes what visitors read from attributes, but never hidden or entered values", () => {
+	const { html, text } = capturedDocumentContent(`<html><head><title>Microsoft</title><script>steal()</script></head><body>
+<img src="logo.png" alt="Microsoft logo"><h1>Sign in</h1>
+<input type="email" placeholder="Email, phone, or Skype"><input type="password" aria-label="Password">
+<input type="hidden" name="token" value="session-secret"><input type="text" name="prefill" value="victim@example.test">
+<input type="submit" value="Next"><div contenteditable aria-placeholder="Code"></div>
+</body></html>`);
+
+	for (const visible of ["Sign in", "Microsoft logo", "Email, phone, or Skype", "Password", "Next", "Code"]) {
+		expect(text.split("\n")).toContain(visible);
+	}
+	expect(text).not.toContain("session-secret");
+	expect(text).not.toContain("victim@example.test");
+	expect(html).not.toContain("<script");
+	expect(html).not.toContain("<img");
 });
