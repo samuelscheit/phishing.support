@@ -63,6 +63,27 @@ deployment. Tencent's direct non-browser provider route may still require its
 explicit `PROXY_URL` and `DEATHBYCAPTCHA_*` configuration; those values are not
 browser configuration and are never sent to Fabric session metadata.
 
+## Cloudflare abuse reports
+
+Cloudflare phishing reports are filed through Cloudflare's authenticated
+[abuse-reports API](https://developers.cloudflare.com/api/resources/abuse_reports/methods/create/)
+(`POST /accounts/{account_id}/abuse-reports/abuse_phishing`) rather than the
+public web form or the dashboard. The API has no browser, Turnstile, or
+IP-reputation challenge, and returns a report identifier (`abuse_rand`) that is
+stored as the provider confirmation. Configure:
+
+```text
+ABUSE_CLOUDFLARE_ACCOUNT_ID=<32-character account id>
+ABUSE_CLOUDFLARE_API_TOKEN=<account API token with Trust and Safety Write>
+```
+
+The account must hold the abuse-reports entitlement (Enterprise accounts have
+it; other accounts must request access). Without it Cloudflare answers HTTP
+401/405, which the route records as a provider rejection naming the missing
+permission. The reporter identity is still taken from
+`ABUSE_CLOUDFLARE_SERVICE_NAME`, `ABUSE_CLOUDFLARE_SERVICE_MAILBOX`,
+`ABUSE_CLOUDFLARE_SERVICE_URL`, and `ABUSE_CLOUDFLARE_REPORTED_COUNTRY`.
+
 ## Abuse-report reply correspondence
 
 SMTP abuse reports are stored as individual correspondence threads. Each report uses the configured, authenticated `SMTP_FROM` address as its visible `From` address and a new opaque `Reply-To` address such as `case-<32 hexadecimal characters>@phishing.support`. The reply identity is random, does not contain a submission ID, and is unique to one report target.

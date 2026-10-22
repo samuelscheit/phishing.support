@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildCloudflareFormPayload } from "./form";
+import { buildCloudflareReportPayload } from "./report";
 
 const serviceIdentity = {
 	name: "Phishing Support",
@@ -9,9 +9,9 @@ const serviceIdentity = {
 	reportedCountry: "DE",
 };
 
-describe("buildCloudflareFormPayload", () => {
-	test("includes the standalone allegation and reviewed DSA controls", () => {
-		const payload = buildCloudflareFormPayload({
+describe("buildCloudflareReportPayload", () => {
+	test("includes the standalone allegation and the legitimate brand", () => {
+		const payload = buildCloudflareReportPayload({
 			serviceIdentity,
 			target: "example.com",
 			observedUrl: "https://login.example.com/collect",
@@ -21,19 +21,27 @@ describe("buildCloudflareFormPayload", () => {
 
 		expect(payload).toMatchObject({
 			email: "support@phishing.support",
-			emailConfirmation: "support@phishing.support",
 			urls: "https://login.example.com/collect",
 			originalWork: "https://brand.example.com/",
-			dsaAttestation: true,
-			dsaCertification: true,
 		});
 		expect(payload.justification).toContain("Observed URL: https://login.example.com/collect");
 		expect(payload.justification).toContain("Legitimate brand URL: https://brand.example.com/");
 		expect(payload.justification).toContain("captures login credentials");
 	});
 
+	test("omits the original work when no legitimate brand is identified", () => {
+		const payload = buildCloudflareReportPayload({
+			serviceIdentity,
+			target: "example.com",
+			observedUrl: "https://example.com/collect",
+			description: "The page captures credentials.",
+		});
+
+		expect(payload).not.toHaveProperty("originalWork");
+	});
+
 	test("bounds untrusted report text without dropping the URL controls", () => {
-		const payload = buildCloudflareFormPayload({
+		const payload = buildCloudflareReportPayload({
 			serviceIdentity,
 			target: "example.com",
 			observedUrl: "https://example.com/collect",

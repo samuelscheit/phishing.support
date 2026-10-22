@@ -3,7 +3,7 @@ import type { CloudflareServiceIdentity } from "./identity";
 import { buildProviderReportNarrative, normalizeObservedUrlForDomain, normalizePublicDomainHttpUrl } from "../report_payload";
 import type { ProviderReportPreviewContext } from "../submission_contracts";
 
-export type CloudflareFormInput = {
+export type CloudflareReportInput = {
 	serviceIdentity: CloudflareServiceIdentity;
 	target: string;
 	observedUrl: string;
@@ -11,20 +11,17 @@ export type CloudflareFormInput = {
 	legalBrandUrl?: string;
 };
 
-export type CloudflareFormPayload = {
+export type CloudflareReportPayload = {
 	name: string;
 	email: string;
-	emailConfirmation: string;
 	company: string;
 	urls: string;
 	justification: string;
-	originalWork: string;
+	originalWork?: string;
 	reportedCountry: string;
-	dsaAttestation: true;
-	dsaCertification: true;
 };
 
-/** Render Cloudflare's read-only report preview without touching its form. */
+/** Render Cloudflare's read-only report preview without calling its API. */
 export function buildCloudflareReportPreview(input: ProviderReportPreviewContext): string | undefined {
 	return buildProviderReportNarrative({
 		provider: "cloudflare",
@@ -37,11 +34,10 @@ export function buildCloudflareReportPreview(input: ProviderReportPreviewContext
 }
 
 /**
- * Create Cloudflare's reviewed form payload from the standalone report. The
- * allegation narrative is intentionally part of `justification`; the old
- * website reporter generated this evidence but discarded it before submit.
+ * Create Cloudflare's reviewed report payload from the standalone report. The
+ * allegation narrative is intentionally part of `justification`.
  */
-export function buildCloudflareFormPayload(input: CloudflareFormInput): CloudflareFormPayload {
+export function buildCloudflareReportPayload(input: CloudflareReportInput): CloudflareReportPayload {
 	const observedUrl = normalizeObservedUrlForDomain(input.observedUrl, input.target);
 	if (!observedUrl) throw new Error("Cloudflare abuse reporting requires a valid observed URL for the target.");
 	const legalBrandUrl = input.legalBrandUrl === undefined ? undefined : normalizePublicDomainHttpUrl(input.legalBrandUrl);
@@ -63,13 +59,10 @@ export function buildCloudflareFormPayload(input: CloudflareFormInput): Cloudfla
 	return {
 		name: input.serviceIdentity.name,
 		email: input.serviceIdentity.mailbox,
-		emailConfirmation: input.serviceIdentity.mailbox,
 		company: input.serviceIdentity.organizationUrl,
 		urls: observedUrl,
 		justification,
-		originalWork: legalBrandUrl ?? "Not identified",
+		...(legalBrandUrl ? { originalWork: legalBrandUrl } : {}),
 		reportedCountry: input.serviceIdentity.reportedCountry,
-		dsaAttestation: true,
-		dsaCertification: true,
 	};
 }

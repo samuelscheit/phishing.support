@@ -1,24 +1,17 @@
 import type { ProviderSubmissionProvider } from "../submission_contracts";
 
 import { CLOUDFLARE_PROVIDER } from "./definition";
-import {
-	prepareCloudflareExternalSubmission,
-	prepareCloudflareSubmission,
-	submitCloudflareSubmission,
-} from "./submission";
-import { buildCloudflareReportPreview } from "./form";
+import { buildCloudflareReportPreview } from "./report";
+import { prepareCloudflareSubmission, submitCloudflareSubmission } from "./submission";
 
-/** The sole executable owner of Cloudflare's abuse-form contract. */
+/** The sole executable owner of Cloudflare's authenticated abuse-report API contract. */
 export const cloudflareProvider: ProviderSubmissionProvider = {
 	definition: CLOUDFLARE_PROVIDER,
-	prepareSubmission: prepareCloudflareSubmission,
-	shouldRefreshStartingPayload: (context) => context.payload.providerNarrativeVersion !== 1,
+	prepareSubmission: (context) => prepareCloudflareSubmission(context),
+	shouldRefreshStartingPayload: (context) => context.payload.adapter !== "cloudflare_abuse_api_v1",
 	buildReportPreview: buildCloudflareReportPreview,
-	prepareExternalSubmission: prepareCloudflareExternalSubmission,
-	submit: submitCloudflareSubmission,
-	submitPrepared: submitCloudflareSubmission,
+	submit: (context) => submitCloudflareSubmission(context),
 };
 
 export { CLOUDFLARE_PROVIDER } from "./definition";
-export { buildCloudflareFormPayload } from "./form";
-export { buildCloudflareReportPreview } from "./form";
+export { buildCloudflareReportPayload, buildCloudflareReportPreview } from "./report";

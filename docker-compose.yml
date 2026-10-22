@@ -50,6 +50,12 @@ services:
       DEATHBYCAPTCHA_PASSWORD: ${DEATHBYCAPTCHA_PASSWORD:-}
       PROXY_URL: ${PROXY_URL:-}
       ABUSE_NETCRAFT_REPORTER_EMAIL: ${ABUSE_NETCRAFT_REPORTER_EMAIL:-support@phishing.support}
+      # Cloudflare phishing reports use the authenticated account API (no browser
+      # or Turnstile). The token needs Trust and Safety Write on an account that
+      # holds the abuse-reports entitlement; an empty value keeps the route
+      # failing closed with a clear configuration error.
+      ABUSE_CLOUDFLARE_ACCOUNT_ID: ${ABUSE_CLOUDFLARE_ACCOUNT_ID:-}
+      ABUSE_CLOUDFLARE_API_TOKEN: ${ABUSE_CLOUDFLARE_API_TOKEN:-}
       # These are required even while provider routes are rollout-gated: they
       # protect idempotency responses and bearer-authorized artifact reads.
       ABUSE_TRACKING_TOKEN_SECRET: ${ABUSE_TRACKING_TOKEN_SECRET:?Set ABUSE_TRACKING_TOKEN_SECRET to at least 32 random bytes}
