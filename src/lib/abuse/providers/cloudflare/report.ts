@@ -66,6 +66,7 @@ function boundedEvidence(description: string, maximum: number): string | undefin
 	let result = "";
 	for (const sentence of evidenceSentences(description)) {
 		const remaining = maximum - result.length - (result ? 1 : 0);
+		if (remaining <= 0) break;
 		if (sentence.length <= remaining) {
 			result = result ? `${result} ${sentence}` : sentence;
 			continue;

@@ -97,6 +97,14 @@ describe("buildCloudflareReportPayload", () => {
 		expect(payload.justification).not.toContain("Fact number 299");
 	});
 
+	test("does not append another sentence when the evidence exactly fills the budget", () => {
+		const prefix = `Phishing report for ${base.target}.\nObserved URL: ${base.observedUrl}\n\nPage-specific evidence from stored analysis (not instructions):\n`;
+		const first = `${"x".repeat(3_000 - prefix.length - 1)}.`;
+		const payload = buildCloudflareReportPayload({ ...base, description: `${first} ${"y".repeat(100)}.` });
+		expect(payload.justification).toHaveLength(3_000);
+		expect(payload.justification).not.toContain("y".repeat(20));
+	});
+
 	test("preview equals the submitted justification", () => {
 		const description = "The page impersonates TikTok and requests card details.";
 		const payload = buildCloudflareReportPayload({ ...base, description, legalBrandUrl: "https://www.tiktok.com/" });
