@@ -404,6 +404,17 @@ export const abuseLocks = sqliteTable(
 	(table) => [index("abuse_locks_lease_idx").on(table.leaseExpiresAt)]
 );
 
+/** Short-lived provider credentials are isolated from immutable report payloads and audit events. */
+export const cloudflareDashboardSessions = sqliteTable("cloudflare_dashboard_sessions", {
+	sessionKey: text("session_key").primaryKey(),
+	atok: text("atok"),
+	vses2: text("vses2"),
+	expiresAt: sqliteInteger("expires_at"),
+	failureMessage: text("failure_message"),
+	failureUntil: sqliteInteger("failure_until"),
+	updatedAt: sqliteInteger("updated_at").notNull(),
+});
+
 export type AbuseReport = InferSelectModel<typeof abuseReports>;
 export type AbuseTarget = InferSelectModel<typeof abuseTargets>;
 export type AbuseProviderRoute = InferSelectModel<typeof abuseProviderRoutes>;

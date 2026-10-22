@@ -17,6 +17,22 @@ import {
 
 type FabricScalar = string | number | boolean | null;
 type FabricEnvironment = Readonly<Record<string, string | undefined>>;
+
+/**
+ * Which Fabric egress policy a browser session uses. `phishing` (default) opens
+ * attacker-controlled pages through Tor; `reporting` talks to abuse portals and
+ * provider dashboards from a direct, non-anonymised exit.
+ */
+export type FabricEgress = "phishing" | "reporting";
+
+export const DEFAULT_FABRIC_PHISHING_EGRESS_POLICY_REF = "egress_tor-egress@1";
+export const DEFAULT_FABRIC_REPORTING_EGRESS_POLICY_REF = "egress_direct-egress@1";
+
+/** Per-session selection shared by every Fabric acquire function. */
+export interface FabricSessionOptions {
+	leaseMode?: "writer" | "clone";
+	egress?: FabricEgress;
+}
 type FabricFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export interface FabricBrowserConfig {
@@ -25,7 +41,7 @@ export interface FabricBrowserConfig {
 	profileRef?: string;
 	recipeRef: string;
 	runtime: "rebrowser-puppeteer";
-	egressPolicyRef: string;
+	egressPolicyRefs: Readonly<Record<FabricEgress, string>>;
 	artifactPolicyRef: string;
 	ttlSeconds: number;
 	/** Test-only transport seam. Production uses the Basic-authenticated Fabric edge. */
@@ -110,6 +126,10 @@ function optionalReference(environment: FabricEnvironment, name: string, prefix:
 	return value;
 }
 
+function referenceWithDefault(environment: FabricEnvironment, name: string, prefix: string, fallback: string): string {
+	return optionalReference(environment, name, prefix) ?? fallback;
+}
+
 function fabricApiBaseUrl(value: string): string {
 	let parsed: URL;
 	try {
@@ -150,7 +170,10 @@ export function fabricBrowserConfigFromEnvironment(options: { environment?: Fabr
 		profileRef,
 		recipeRef: requiredReference(environment, "FABRIC_PHISHING_RECIPE_REF", "recipe_"),
 		runtime: "rebrowser-puppeteer",
-		egressPolicyRef: requiredReference(environment, "FABRIC_PHISHING_EGRESS_POLICY_REF", "egress_"),
+		egressPolicyRefs: {
+			phishing: referenceWithDefault(environment, "FABRIC_PHISHING_EGRESS_POLICY_REF", "egress_", DEFAULT_FABRIC_PHISHING_EGRESS_POLICY_REF),
+			reporting: referenceWithDefault(environment, "FABRIC_REPORTING_EGRESS_POLICY_REF", "egress_", DEFAULT_FABRIC_REPORTING_EGRESS_POLICY_REF),
+		},
 		artifactPolicyRef: requiredReference(environment, "FABRIC_PHISHING_ARTIFACT_POLICY_REF", "artifact-policy_"),
 		ttlSeconds,
 	};
@@ -204,10 +227,11 @@ function assertFabricMetadata(metadata: Record<string, FabricScalar>): void {
 
 /** Build the only durable browser-session payload Phishing Support can submit. */
 export function buildFabricBrowserSessionCreatePayload(
-	config: Pick<FabricBrowserConfig, "project" | "profileRef" | "recipeRef" | "runtime" | "egressPolicyRef" | "artifactPolicyRef" | "ttlSeconds">,
+	config: Pick<FabricBrowserConfig, "project" | "profileRef" | "recipeRef" | "runtime" | "egressPolicyRefs" | "artifactPolicyRef" | "ttlSeconds">,
 	metadata: Record<string, FabricScalar>,
 	leaseMode: "writer" | "clone",
 	idempotencyKey: string,
+	egress: FabricEgress = "phishing",
 ): Record<string, unknown> {
 	if (!idempotencyKey || idempotencyKey.length > 255) throw new Error("Browser Fabric idempotency key is invalid");
 	assertFabricMetadata(metadata);
@@ -218,7 +242,7 @@ export function buildFabricBrowserSessionCreatePayload(
 		browserRecipeRef: config.recipeRef,
 		...(config.profileRef === undefined ? {} : { profileRef: config.profileRef }),
 		leaseMode,
-		egressPolicyRef: config.egressPolicyRef,
+		egressPolicyRef: config.egressPolicyRefs[egress],
 		artifactPolicyRef: config.artifactPolicyRef,
 		ttlSeconds: config.ttlSeconds,
 		metadata: { ...metadata, workload: "phishing-support" },
@@ -264,13 +288,13 @@ async function sessionAction(config: FabricBrowserConfig, sessionId: string, act
 async function acquireFabricSession(
 	config: FabricBrowserConfig,
 	metadata: Record<string, FabricScalar>,
-	leaseMode: "writer" | "clone",
+	{ leaseMode = "writer", egress = "phishing" }: FabricSessionOptions,
 ): Promise<string> {
 	const idempotencyKey = `phishing-${crypto.randomUUID()}`;
 	const created = await fabricRequest<FabricSessionResponse>(config, "/browser-sessions", {
 		method: "POST",
 		idempotencyKey,
-		body: buildFabricBrowserSessionCreatePayload(config, metadata, leaseMode, idempotencyKey),
+		body: buildFabricBrowserSessionCreatePayload(config, metadata, leaseMode, idempotencyKey, egress),
 	});
 	const sessionId = assertFabricBrowserSessionId(created.id);
 	if (TERMINAL_SESSION_STATUSES.has(created.status)) {
@@ -294,11 +318,11 @@ function startSessionHeartbeat(config: FabricBrowserConfig, sessionId: string): 
 /** Acquire a Fabric browser lease without exposing Fabric's CDP capability. */
 export async function acquireFabricBrowserSession(
 	metadata: Record<string, FabricScalar> = {},
-	options: { leaseMode?: "writer" | "clone" } = {},
+	options: FabricSessionOptions = {},
 ): Promise<FabricBrowserSessionLease> {
 	const config = fabricBrowserConfigFromEnvironment();
 	if (!config) throw new Error("FABRIC_API_URL is required; Phishing Support never launches a local browser");
-	const sessionId = await acquireFabricSession(config, metadata, options.leaseMode ?? "writer");
+	const sessionId = await acquireFabricSession(config, metadata, options);
 	let finished = false;
 	const finish = async (action: "release" | "cancel") => {
 		if (finished) return;
@@ -318,8 +342,9 @@ export async function acquireFabricBrowserSession(
 /** Allocate a disposable Fabric browser for one dynamic Skyvern task. */
 export async function acquireFabricSkyvernBrowserSession(
 	metadata: Record<string, FabricScalar> = {},
+	options: Pick<FabricSessionOptions, "egress"> = {},
 ): Promise<FabricSkyvernBrowserSession> {
-	const lease = await acquireFabricBrowserSession(metadata, { leaseMode: "clone" });
+	const lease = await acquireFabricBrowserSession(metadata, { ...options, leaseMode: "clone" });
 	try {
 		return { ...lease, browserAddress: fabricRelayEndpoint(lease.id) };
 	} catch (error) {
@@ -331,8 +356,9 @@ export async function acquireFabricSkyvernBrowserSession(
 /** Bind a dynamic Skyvern task to a Fabric-owned browser without leaking a capability. */
 export async function acquireFabricSkyvernTaskBinding(
 	metadata: Record<string, FabricScalar> = {},
+	options: Pick<FabricSessionOptions, "egress"> = {},
 ): Promise<FabricSkyvernTaskBinding> {
-	const session = await acquireFabricSkyvernBrowserSession(metadata);
+	const session = await acquireFabricSkyvernBrowserSession(metadata, options);
 	return {
 		sessionId: session.id,
 		browserAddress: session.browserAddress,
@@ -377,11 +403,11 @@ export async function disconnectFabricPatchrightClient(browser: any): Promise<vo
 /** Connect Rebrowser to a Fabric relay and map close/disconnect to lease release. */
 export async function acquireFabricPuppeteerBrowser(
 	metadata: Record<string, FabricScalar> = {},
-	options: { leaseMode?: "writer" | "clone" } = {},
+	options: FabricSessionOptions = {},
 ): Promise<{ browser: PuppeteerBrowser; sessionId: string; release(): Promise<void> }> {
 	const config = fabricBrowserConfigFromEnvironment();
 	if (!config) throw new Error("FABRIC_API_URL is required; Phishing Support never launches a local browser");
-	const sessionId = await acquireFabricSession(config, metadata, options.leaseMode ?? "writer");
+	const sessionId = await acquireFabricSession(config, metadata, options);
 	let browser: PuppeteerBrowser;
 	try {
 		const module = await import("rebrowser-puppeteer-core");
@@ -414,11 +440,11 @@ export async function acquireFabricPuppeteerBrowser(
 /** Connect Patchright to Fabric's relay; Patchright close is disconnect + Fabric release. */
 export async function acquireFabricPatchrightSession(
 	metadata: Record<string, FabricScalar> = {},
-	options: { leaseMode?: "writer" | "clone" } = {},
+	options: FabricSessionOptions = {},
 ): Promise<FabricPatchrightSession> {
 	const config = fabricBrowserConfigFromEnvironment();
 	if (!config) throw new Error("FABRIC_API_URL is required; Phishing Support never launches a local browser");
-	const sessionId = await acquireFabricSession(config, metadata, options.leaseMode ?? "writer");
+	const sessionId = await acquireFabricSession(config, metadata, options);
 	let browser: any;
 	try {
 		const { chromium } = await import("patchright");

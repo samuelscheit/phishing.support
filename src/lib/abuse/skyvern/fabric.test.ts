@@ -40,6 +40,23 @@ function adapter(createTask: (binding: { browserAddress: string }) => Promise<{ 
 }
 
 describe("Fabric-bound Skyvern task creation", () => {
+	test("requests direct reporting egress for provider portal browsers", async () => {
+		const lease = binding();
+		let requested: unknown;
+		await createFabricSkyvernTask({
+			adapter: adapter(async () => ({ runId: "task_egress" })),
+			payload,
+			metadata: { provider: "generic" },
+			prepare: async () => true,
+			record: async () => true,
+			acquire: async (_metadata, options) => {
+				requested = options;
+				return lease.value;
+			},
+		});
+		expect(requested).toEqual({ egress: "reporting" });
+	});
+
 	test("releases the browser when the durable pre-call marker rejects creation", async () => {
 		const lease = binding();
 		const result = await createFabricSkyvernTask({

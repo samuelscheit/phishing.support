@@ -63,6 +63,21 @@ export class ProviderSubmissionRejectedError extends Error {
 }
 
 /**
+ * A provider cannot proceed automatically and needs a person (for example an
+ * expired account session or a form that requires reauthentication). The
+ * route settles terminally as `needs_human`; it is neither a provider
+ * rejection nor an ambiguous external state. Throw it only when the failure
+ * is explicit and known: before the durable marker nothing was submitted, and
+ * after it the provider must have unambiguously refused the request.
+ */
+export class ProviderSubmissionNeedsHumanError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "ProviderSubmissionNeedsHumanError";
+	}
+}
+
+/**
  * Provider-owned work that is safe to perform before the durable submission
  * marker. The ready payload becomes the only input to the irreversible
  * `submit` call.

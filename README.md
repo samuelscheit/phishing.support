@@ -52,9 +52,20 @@ FABRIC_API_URL=http://fabric-cdp-relay:8085/v1
 FABRIC_PROJECT=project_...
 FABRIC_PHISHING_PROFILE_REF=profile_...
 FABRIC_PHISHING_RECIPE_REF=recipe_rebrowser-phishing@1
-FABRIC_PHISHING_EGRESS_POLICY_REF=egress_phishing-residential@1
 FABRIC_PHISHING_ARTIFACT_POLICY_REF=artifact-policy_standard-30-days@1
 FABRIC_PHISHING_TTL_SECONDS=900
+```
+
+Egress is split per browser session. Sessions that open attacker-controlled
+phishing pages (the default) use `FABRIC_PHISHING_EGRESS_POLICY_REF`, default
+`egress_tor-egress@1` (Tor). Sessions that talk to abuse portals and provider
+dashboards (Skyvern portal tasks, Cloudflare reporting) request the `reporting`
+egress and use `FABRIC_REPORTING_EGRESS_POLICY_REF`, default
+`egress_direct-egress@1` (direct). Both variables are optional overrides:
+
+```text
+FABRIC_PHISHING_EGRESS_POLICY_REF=egress_tor-egress@1
+FABRIC_REPORTING_EGRESS_POLICY_REF=egress_direct-egress@1
 ```
 
 Do not add the Fabric principal password, `BROWSER_REMOTE_DEBUGGING_URL`, Chrome/Xvfb,
@@ -65,22 +76,25 @@ browser configuration and are never sent to Fabric session metadata.
 
 ## Cloudflare abuse reports
 
-Cloudflare phishing reports are filed through Cloudflare's authenticated
-[abuse-reports API](https://developers.cloudflare.com/api/resources/abuse_reports/methods/create/)
-(`POST /accounts/{account_id}/abuse-reports/abuse_phishing`) rather than the
-public web form or the dashboard. The API has no browser, Turnstile, or
-IP-reputation challenge, and returns a report identifier (`abuse_rand`) that is
-stored as the provider confirmation. Configure:
+Cloudflare phishing reports use the authenticated dashboard API at
+`https://dash.cloudflare.com/api/v4/accounts/{account_id}/abuse-reports/abuse_phishing`.
+Patchright logs in through Fabric's reporting (direct) egress before the durable
+submission marker. The dashboard's `x-atok` and `vses2` credentials are cached in
+the application database, never in report payloads or audit events. Configure:
 
 ```text
 ABUSE_CLOUDFLARE_ACCOUNT_ID=<32-character account id>
-ABUSE_CLOUDFLARE_API_TOKEN=<account API token with Trust and Safety Write>
+ABUSE_CLOUDFLARE_LOGIN_EMAIL=<dashboard login email>
+ABUSE_CLOUDFLARE_LOGIN_PASSWORD=<dashboard login password>
 ```
 
-The account must hold the abuse-reports entitlement (Enterprise accounts have
-it; other accounts must request access). Without it Cloudflare answers HTTP
-401/405, which the route records as a provider rejection naming the missing
-permission. The reporter identity is still taken from
+Login is single-flight through `abuse_locks`. A report POST is never replayed on
+network errors, 5xx, or missing confirmation. Only an explicit HTTP 403/code 9300
+session rejection permits one refreshed login and one new POST; a failed login
+or rejected fresh session requires human intervention. Success requires both
+`result: "success"` and an `abuse_rand` receipt. The public bearer-token API is
+not used because this account lacks its abuse-reports entitlement.
+The reporter identity is still taken from
 `ABUSE_CLOUDFLARE_SERVICE_NAME`, `ABUSE_CLOUDFLARE_SERVICE_MAILBOX`,
 `ABUSE_CLOUDFLARE_SERVICE_URL`, and `ABUSE_CLOUDFLARE_REPORTED_COUNTRY`.
 

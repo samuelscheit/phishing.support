@@ -43,5 +43,5 @@ export type {
 	ProviderSubmissionProvider,
 	ProviderSubmissionSuccess,
 } from "./submission_contracts";
-export { ProviderSubmissionRejectedError } from "./submission_contracts";
+export { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "./submission_contracts";
 export type { ProviderSubmissionRegistry } from "./submission_registry";

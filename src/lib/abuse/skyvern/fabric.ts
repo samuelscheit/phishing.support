@@ -39,9 +39,16 @@ export async function createFabricSkyvernTask(params: {
 	metadata: Record<string, string | number | boolean | null>;
 	prepare(): Promise<boolean>;
 	record(input: { skyvernRunId: string; fabricSessionId: string }): Promise<boolean>;
-	acquire?: (metadata: Record<string, string | number | boolean | null>) => Promise<FabricSkyvernTaskBinding>;
+	acquire?: (
+		metadata: Record<string, string | number | boolean | null>,
+		options: { egress: "reporting" },
+	) => Promise<FabricSkyvernTaskBinding>;
 }): Promise<FabricSkyvernTaskResult> {
-	const binding = await (params.acquire ?? acquireFabricSkyvernTaskBinding)({ operation: "skyvern-portal", ...params.metadata });
+	const binding = await (params.acquire ?? acquireFabricSkyvernTaskBinding)(
+		{ operation: "skyvern-portal", ...params.metadata },
+		// Provider portals are reporting traffic: direct egress, never the Tor phishing exit.
+		{ egress: "reporting" },
+	);
 	let crossedSkyvernBoundary = false;
 	let recorded = false;
 	try {

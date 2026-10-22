@@ -9,6 +9,7 @@ import {
 	ProviderSubmissionUnknownExternalStateError,
 } from "./submission_execution";
 import {
+	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionProvider,
 } from "./submission_contracts";
@@ -299,5 +300,53 @@ describe("provider submission execution boundary", () => {
 		const mismatched = await createProviderRoute(provider, { version: "old-reviewed-version" });
 		await expect(executeProviderSubmission({ routeId: mismatched.route.id, provider })).resolves.toEqual({ outcome: "not_eligible" });
 		expect(await AbuseRepository.getRoute(mismatched.route.id)).toMatchObject({ status: "needs_human" });
+	});
+
+	test("settles an explicit preflight authentication failure as terminal needs_human without a marker or retry", async () => {
+		let submitCalls = 0;
+		let disposed = 0;
+		const provider = testProvider({
+			prepareExternalSubmission: async () => { throw new ProviderSubmissionNeedsHumanError("Provider account login was rejected."); },
+			submitPrepared: async () => { submitCalls += 1; return { submittedTargets: ["example.com"] }; },
+			submit: async () => { submitCalls += 1; return { submittedTargets: ["example.com"] }; },
+		});
+		const { route } = await createProviderRoute(provider);
+
+		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({
+			outcome: "needs_human",
+			runId: expect.any(BigInt),
+			reason: "Provider account login was rejected.",
+		});
+		expect(submitCalls).toBe(0);
+		expect(disposed).toBe(0);
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "needs_human" });
+		const [run] = await AbuseRepository.listProviderRunsForReport(route.reportId);
+		expect(run).toMatchObject({ executionStatus: "failed", failureReason: "Provider account login was rejected." });
+
+		// A stale retry never re-enters the provider.
+		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({ outcome: "not_eligible" });
+		expect(submitCalls).toBe(0);
+	});
+
+	test("settles an explicit post-marker expired-session failure as needs_human, not unknown_external_state", async () => {
+		let disposed = 0;
+		const provider = testProvider({
+			prepareExternalSubmission: async () => ({ state: {}, dispose: async () => { disposed += 1; } }),
+			submitPrepared: async (context) => {
+				expect(await AbuseRepository.getProviderRun(context.runId!)).toMatchObject({ executionStatus: "submission_started" });
+				throw new ProviderSubmissionNeedsHumanError("Provider session expired; sign in again.");
+			},
+		});
+		const { route } = await createProviderRoute(provider);
+
+		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({
+			outcome: "needs_human",
+			runId: expect.any(BigInt),
+			reason: "Provider session expired; sign in again.",
+		});
+		expect(disposed).toBe(1);
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "needs_human" });
+		const [run] = await AbuseRepository.listProviderRunsForReport(route.reportId);
+		expect(run).toMatchObject({ executionStatus: "failed", failureReason: "Provider session expired; sign in again." });
 	});
 });

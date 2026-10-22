@@ -13,7 +13,6 @@ function environment(overrides: Record<string, string | undefined> = {}) {
 		FABRIC_PROJECT: "project_phishing",
 		FABRIC_PHISHING_PROFILE_REF: "profile_phishing",
 		FABRIC_PHISHING_RECIPE_REF: "recipe_rebrowser-phishing@1",
-		FABRIC_PHISHING_EGRESS_POLICY_REF: "egress_phishing-residential@1",
 		FABRIC_PHISHING_ARTIFACT_POLICY_REF: "artifact-policy_standard-30-days@1",
 		FABRIC_PHISHING_TTL_SECONDS: "900",
 		...overrides,
@@ -26,6 +25,27 @@ describe("Phishing Support Browser Fabric boundary", () => {
 		expect(() => fabricBrowserConfigFromEnvironment({
 			environment: environment({ FABRIC_PHISHING_PROFILE_REF: undefined }),
 		})).toThrow("FABRIC_PHISHING_PROFILE_REF");
+	});
+
+	test("splits egress: phishing defaults to Tor, reporting to direct, both overridable", () => {
+		const config = fabricBrowserConfigFromEnvironment({ environment: environment() });
+		if (!config) throw new Error("test Fabric configuration is missing");
+		const create = (egress?: "phishing" | "reporting") =>
+			buildFabricBrowserSessionCreatePayload(config, {}, "writer", "phishing-test-idempotency-key", egress);
+		expect(create().egressPolicyRef).toBe("egress_tor-egress@1");
+		expect(create("phishing").egressPolicyRef).toBe("egress_tor-egress@1");
+		expect(create("reporting").egressPolicyRef).toBe("egress_direct-egress@1");
+
+		const custom = fabricBrowserConfigFromEnvironment({
+			environment: environment({
+				FABRIC_PHISHING_EGRESS_POLICY_REF: "egress_custom-tor@2",
+				FABRIC_REPORTING_EGRESS_POLICY_REF: "egress_custom-direct@2",
+			}),
+		});
+		expect(custom?.egressPolicyRefs).toEqual({ phishing: "egress_custom-tor@2", reporting: "egress_custom-direct@2" });
+		expect(() => fabricBrowserConfigFromEnvironment({
+			environment: environment({ FABRIC_REPORTING_EGRESS_POLICY_REF: "direct" }),
+		})).toThrow("FABRIC_REPORTING_EGRESS_POLICY_REF");
 	});
 
 	test("creates a scalar-only Fabric session payload without credentials, cookies, or proxy data", () => {

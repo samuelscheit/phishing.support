@@ -50,12 +50,11 @@ services:
       DEATHBYCAPTCHA_PASSWORD: ${DEATHBYCAPTCHA_PASSWORD:-}
       PROXY_URL: ${PROXY_URL:-}
       ABUSE_NETCRAFT_REPORTER_EMAIL: ${ABUSE_NETCRAFT_REPORTER_EMAIL:-support@phishing.support}
-      # Cloudflare phishing reports use the authenticated account API (no browser
-      # or Turnstile). The token needs Trust and Safety Write on an account that
-      # holds the abuse-reports entitlement; an empty value keeps the route
-      # failing closed with a clear configuration error.
+      # Patchright logs in through Fabric direct egress; cached dashboard
+      # credentials authorize single-shot HTTP abuse-report submissions.
       ABUSE_CLOUDFLARE_ACCOUNT_ID: ${ABUSE_CLOUDFLARE_ACCOUNT_ID:-}
-      ABUSE_CLOUDFLARE_API_TOKEN: ${ABUSE_CLOUDFLARE_API_TOKEN:-}
+      ABUSE_CLOUDFLARE_LOGIN_EMAIL: ${ABUSE_CLOUDFLARE_LOGIN_EMAIL:-}
+      ABUSE_CLOUDFLARE_LOGIN_PASSWORD: ${ABUSE_CLOUDFLARE_LOGIN_PASSWORD:-}
       # These are required even while provider routes are rollout-gated: they
       # protect idempotency responses and bearer-authorized artifact reads.
       ABUSE_TRACKING_TOKEN_SECRET: ${ABUSE_TRACKING_TOKEN_SECRET:?Set ABUSE_TRACKING_TOKEN_SECRET to at least 32 random bytes}
@@ -67,7 +66,10 @@ services:
       FABRIC_PROJECT: ${FABRIC_PROJECT:?Set FABRIC_PROJECT}
       FABRIC_PHISHING_PROFILE_REF: ${FABRIC_PHISHING_PROFILE_REF:?Set FABRIC_PHISHING_PROFILE_REF}
       FABRIC_PHISHING_RECIPE_REF: ${FABRIC_PHISHING_RECIPE_REF:?Set FABRIC_PHISHING_RECIPE_REF}
-      FABRIC_PHISHING_EGRESS_POLICY_REF: ${FABRIC_PHISHING_EGRESS_POLICY_REF:?Set FABRIC_PHISHING_EGRESS_POLICY_REF}
+      # Phishing-page browsing exits through Tor; reporting (provider portals,
+      # dashboards) exits directly.
+      FABRIC_PHISHING_EGRESS_POLICY_REF: ${FABRIC_PHISHING_EGRESS_POLICY_REF:-egress_tor-egress@1}
+      FABRIC_REPORTING_EGRESS_POLICY_REF: ${FABRIC_REPORTING_EGRESS_POLICY_REF:-egress_direct-egress@1}
       FABRIC_PHISHING_ARTIFACT_POLICY_REF: ${FABRIC_PHISHING_ARTIFACT_POLICY_REF:?Set FABRIC_PHISHING_ARTIFACT_POLICY_REF}
       FABRIC_PHISHING_TTL_SECONDS: ${FABRIC_PHISHING_TTL_SECONDS:?Set FABRIC_PHISHING_TTL_SECONDS}
       FABRIC_CDP_RELAY_URL: http://fabric-cdp-relay:8085

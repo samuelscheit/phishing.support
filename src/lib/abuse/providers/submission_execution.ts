@@ -4,6 +4,7 @@ import { hashStableJson } from "../security";
 import { providerDefinitionMatchesPin } from "./definition";
 
 import {
+	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionContext,
 	type ProviderSubmissionPreflight,
@@ -16,6 +17,7 @@ import { throwIfAborted } from "../worker/shared";
 export type ProviderSubmissionExecutionResult =
 	| { outcome: "submitted"; runId: bigint }
 	| { outcome: "provider_rejected"; runId?: bigint; reason: string }
+	| { outcome: "needs_human"; runId?: bigint; reason: string }
 	| { outcome: "insufficient_evidence"; reason: string }
 	| { outcome: "not_eligible" };
 
@@ -76,20 +78,25 @@ async function markUnknownExternal(params: { routeId: bigint; runId?: bigint; er
 	throw new ProviderSubmissionUnknownExternalStateError(params.error);
 }
 
-async function settleKnownRejection(params: {
+type KnownFailureStatus = "provider_rejected" | "needs_human";
+
+/** Settle an explicit, known provider failure as a terminal route status. */
+async function settleKnownFailure(params: {
 	routeId: bigint;
 	runId?: bigint;
+	status: KnownFailureStatus;
 	reason: string;
 }): Promise<ProviderSubmissionExecutionResult> {
+	const { status } = params;
 	if (params.runId === undefined) {
 		const changed = await AbuseRepository.transitionRouteStatus({
 			routeId: params.routeId,
 			from: ["queued", "verified"],
-			to: "provider_rejected",
+			to: status,
 			data: { reason: params.reason },
 		});
-		if (changed || (await AbuseRepository.getRoute(params.routeId))?.status === "provider_rejected") {
-			return { outcome: "provider_rejected", reason: params.reason };
+		if (changed || (await AbuseRepository.getRoute(params.routeId))?.status === status) {
+			return { outcome: status, reason: params.reason };
 		}
 		return { outcome: "not_eligible" };
 	}
@@ -99,7 +106,7 @@ async function settleKnownRejection(params: {
 		settled = await AbuseRepository.settleProviderRun({
 			runId: params.runId,
 			executionStatus: "failed",
-			routeStatus: "provider_rejected",
+			routeStatus: status,
 			failureReason: params.reason,
 			routeData: { reason: params.reason },
 		});
@@ -107,19 +114,26 @@ async function settleKnownRejection(params: {
 		return markUnknownExternal({
 			routeId: params.routeId,
 			runId: params.runId,
-			error: `Provider rejection could not be durably settled: ${errorText(error)}`,
-			reason: "provider_rejection_settlement_failed",
+			error: `Provider ${status} could not be durably settled: ${errorText(error)}`,
+			reason: `${status}_settlement_failed`,
 		});
 	}
-	if (settled || (await AbuseRepository.getRoute(params.routeId))?.status === "provider_rejected") {
-		return { outcome: "provider_rejected", runId: params.runId, reason: params.reason };
+	if (settled || (await AbuseRepository.getRoute(params.routeId))?.status === status) {
+		return { outcome: status, runId: params.runId, reason: params.reason };
 	}
 	return markUnknownExternal({
 		routeId: params.routeId,
 		runId: params.runId,
-		error: "A provider rejection was received after this route could no longer be settled.",
-		reason: "provider_rejection_settlement_conflict",
+		error: `A provider ${status} result was received after this route could no longer be settled.`,
+		reason: `${status}_settlement_conflict`,
 	});
+}
+
+/** Map a provider's explicit known-failure error to its terminal settlement, if it is one. */
+function knownFailureStatus(error: unknown): KnownFailureStatus | undefined {
+	if (error instanceof ProviderSubmissionRejectedError) return "provider_rejected";
+	if (error instanceof ProviderSubmissionNeedsHumanError) return "needs_human";
+	return undefined;
 }
 
 async function settleInsufficientEvidence(routeId: bigint, reason: string): Promise<ProviderSubmissionExecutionResult> {
@@ -186,9 +200,8 @@ export async function executeProviderSubmission(params: {
 				});
 				throwIfAborted(params.signal);
 			} catch (error) {
-				if (error instanceof ProviderSubmissionRejectedError) {
-					return settleKnownRejection({ routeId: route.id, reason: errorText(error) });
-				}
+				const status = knownFailureStatus(error);
+				if (status) return settleKnownFailure({ routeId: route.id, status, reason: errorText(error) });
 				// Nothing irreversible has happened, so ordinary preparation errors
 				// remain retryable by the durable job.
 				throw error;
@@ -242,9 +255,8 @@ export async function executeProviderSubmission(params: {
 			});
 			throwIfAborted(params.signal);
 		} catch (error) {
-			if (error instanceof ProviderSubmissionRejectedError) {
-				return settleKnownRejection({ routeId: route.id, runId: run.id, reason: errorText(error) });
-			}
+			const status = knownFailureStatus(error);
+			if (status) return settleKnownFailure({ routeId: route.id, runId: run.id, status, reason: errorText(error) });
 			throw error;
 		}
 		if (!isPreparation(refreshed)) {
@@ -329,6 +341,11 @@ export async function executeProviderSubmission(params: {
 			throwIfAborted(params.signal);
 		} catch (error) {
 			await disposePreflight(preflight);
+			// An explicit auth/session failure happens before the marker, so no
+			// complaint was filed; settle it for a person instead of retrying.
+			if (error instanceof ProviderSubmissionNeedsHumanError) {
+				return settleKnownFailure({ routeId: route.id, runId: run.id, status: "needs_human", reason: errorText(error) });
+			}
 			throw error;
 		}
 	}
@@ -361,9 +378,8 @@ export async function executeProviderSubmission(params: {
 			: await params.provider.submit(context);
 	} catch (error) {
 		await disposePreflight(preflight);
-		if (error instanceof ProviderSubmissionRejectedError) {
-			return settleKnownRejection({ routeId: route.id, runId: run.id, reason: errorText(error) });
-		}
+		const status = knownFailureStatus(error);
+		if (status) return settleKnownFailure({ routeId: route.id, runId: run.id, status, reason: errorText(error) });
 		return markUnknownExternal({
 			routeId: route.id,
 			runId: run.id,
