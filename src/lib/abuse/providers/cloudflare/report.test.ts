@@ -2,17 +2,10 @@ import { describe, expect, test } from "bun:test";
 
 import { buildCloudflareReportPayload, buildCloudflareReportPreview } from "./report";
 
-const serviceIdentity = {
-	name: "Phishing Support",
-	mailbox: "support@phishing.support",
-	organizationUrl: "https://phishing.support/",
-	reportedCountry: "DE",
-};
-
 describe("buildCloudflareReportPayload", () => {
 	test("includes the report allegation and the legitimate brand", () => {
 		const payload = buildCloudflareReportPayload({
-			serviceIdentity,
+			reportedCountry: "DE",
 			target: "example.com",
 			observedUrl: "https://login.example.com/collect",
 			description: "The page impersonates the protected brand and captures login credentials.",
@@ -20,7 +13,10 @@ describe("buildCloudflareReportPayload", () => {
 		});
 
 		expect(payload).toMatchObject({
+			name: "Phishing Support",
 			email: "support@phishing.support",
+			company: "https://phishing.support/",
+			reportedCountry: "DE",
 			urls: "https://login.example.com/collect",
 			originalWork: "https://brand.example.com/",
 		});
@@ -31,7 +27,7 @@ describe("buildCloudflareReportPayload", () => {
 
 	test("bounds untrusted report text without dropping the URL controls", () => {
 		const payload = buildCloudflareReportPayload({
-			serviceIdentity,
+			reportedCountry: "DE",
 			target: "example.com",
 			observedUrl: "https://example.com/collect",
 			description: "x".repeat(10_000),
@@ -43,17 +39,24 @@ describe("buildCloudflareReportPayload", () => {
 	});
 
 	test("omits the original work when no legitimate brand is identified", () => {
-		const payload = buildCloudflareReportPayload({ serviceIdentity, target: "example.com", observedUrl: "https://example.com/collect", description: "The page captures credentials." });
+		const payload = buildCloudflareReportPayload({ target: "example.com", observedUrl: "https://example.com/collect", description: "The page captures credentials." });
 		expect(payload).not.toHaveProperty("originalWork");
 		expect(payload).not.toHaveProperty("emailConfirmation");
 	});
 
-	test("refuses to truncate the URL when it leaves no room for evidence", () => {
-		const observedUrl = `https://example.com/${"a".repeat(3_000)}`;
-		expect(() => buildCloudflareReportPayload({ serviceIdentity, target: "example.com", observedUrl, description: "The page captures credentials." })).toThrow();
+	test("reports the submitter's country and falls back to the service's own", () => {
+		const input = { target: "example.com", observedUrl: "https://example.com/collect", description: "The page captures credentials." };
+		expect(buildCloudflareReportPayload({ ...input, reportedCountry: "US" }).reportedCountry).toBe("US");
+		expect(buildCloudflareReportPayload(input).reportedCountry).toBe("DE");
+		expect(buildCloudflareReportPayload({ ...input, reportedCountry: "XX1" }).reportedCountry).toBe("DE");
 	});
 
-	const base = { serviceIdentity, target: "napxu.ko-media.art", observedUrl: "https://napxu.ko-media.art/coin?x=1" };
+	test("refuses to truncate the URL when it leaves no room for evidence", () => {
+		const observedUrl = `https://example.com/${"a".repeat(3_000)}`;
+		expect(() => buildCloudflareReportPayload({ target: "example.com", observedUrl, description: "The page captures credentials." })).toThrow();
+	});
+
+	const base = { target: "napxu.ko-media.art", observedUrl: "https://napxu.ko-media.art/coin?x=1" };
 
 	test("preserves page-specific brand, payment, QR and malware details verbatim", () => {
 		const description = [

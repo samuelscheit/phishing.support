@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { configuredAbuseOpenAI, responseOutputText } from "../ai";
 import { normalizeDomain } from "../security";
-import { abuseReplyUrl } from "../../constants";
+import { serviceIdentity } from "../../constants";
 import { defaultResponseModel } from "../../utils";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
 
@@ -318,7 +318,7 @@ function containsUnapprovedUrl(summary: string, allowedUrls: readonly string[], 
 }
 
 export function abuseEmailCaseUrl(submissionId: bigint | null | undefined): string | undefined {
-	return submissionId === null || submissionId === undefined ? undefined : `${abuseReplyUrl}/submissions/${submissionId.toString()}`;
+	return submissionId === null || submissionId === undefined ? undefined : `${serviceIdentity.url}/submissions/${submissionId.toString()}`;
 }
 
 /** Name the public submitter inside the report; the sender stays the service identity. */
@@ -423,7 +423,7 @@ export async function createAbuseEmailDraft(input: DraftInput, dependencies: Abu
 		? summary
 		: fallbackSummary(category, legalBrandUrl, Boolean(observedUrls.length || attachmentNames.length));
 	return {
-		subject: `[Phishing Support] Abuse report for ${input.target.normalizedTarget}`,
+		subject: `[${serviceIdentity.name}] Abuse report for ${input.target.normalizedTarget}`,
 		body: bodyFor({
 			allegationCategory: category,
 			target: input.target.normalizedTarget,

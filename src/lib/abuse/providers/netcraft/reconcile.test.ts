@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 
 import { getDb } from "../../../db";
@@ -22,10 +22,6 @@ const reportInput = {
 	description: "The captured page impersonates a service and collects login credentials.",
 	observedUrls: [{ target: "shop.hd-media.space", urls: ["https://shop.hd-media.space/"] }],
 };
-
-beforeEach(() => {
-	process.env.ABUSE_TRACKING_TOKEN_SECRET = "01234567890123456789012345678901";
-});
 
 async function createUnresolvedCase(options: { diagnosticId?: string; job?: boolean } = {}) {
 	const request = await validateAbuseReportRequest(reportInput);

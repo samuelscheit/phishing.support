@@ -54,8 +54,8 @@ export async function createReport(params: {
 	return db.transaction(
 		(tx) => {
 			if (params.submissionId !== undefined) {
-				// One submission owns at most one report. Migrated reports predate
-				// the current idempotency key, so the submission link is authoritative.
+				// One submission owns at most one report; its unique link is the
+				// idempotency guard, so a retried analysis reuses the first report.
 				const owned = tx.select({ id: abuseReports.id }).from(abuseReports).where(eq(abuseReports.submissionId, params.submissionId)).get();
 				if (owned) return { reportId: owned.id, trackingToken, created: false };
 			}

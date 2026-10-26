@@ -1,3 +1,4 @@
+import { serviceIdentity } from "../../../constants";
 import { normalizeMailbox } from "../../mail/shared";
 
 export type GnameServiceIdentity = {
@@ -11,7 +12,8 @@ export function isGnameEnabled(): boolean {
 }
 
 export function gnameServiceIdentity(): GnameServiceIdentity {
-	const name = process.env.ABUSE_GNAME_SERVICE_NAME?.trim() ?? "Phishing Support";
+	const name = serviceIdentity.name;
+	// GNAME sends verification codes to this separately verified mailbox.
 	const mailbox = normalizeMailbox(process.env.ABUSE_GNAME_SERVICE_MAILBOX) ?? "";
 	return {
 		name,

@@ -6,7 +6,7 @@ ALTER TABLE `abuse_reports` ADD `reporter_name` text;--> statement-breakpoint
 ALTER TABLE `abuse_reports` DROP COLUMN `reporter_identity`;--> statement-breakpoint
 UPDATE `abuse_reports`
 SET `submission_id` = CAST(substr(`idempotency_key`, 16) AS INTEGER),
-	`idempotency_key` = 'submission:' || substr(`idempotency_key`, 16)
+	`idempotency_key` = NULL
 WHERE `idempotency_key` LIKE 'legacy-website:%'
 	AND EXISTS (SELECT 1 FROM `submissions` s WHERE s.`id` = CAST(substr(`abuse_reports`.`idempotency_key`, 16) AS INTEGER));--> statement-breakpoint
 CREATE UNIQUE INDEX `abuse_reports_submission_unique` ON `abuse_reports` (`submission_id`);--> statement-breakpoint
@@ -32,7 +32,7 @@ WHERE (EXISTS (SELECT 1 FROM `provider_reports` p WHERE p.`submission_id` = s.`i
 		OR EXISTS (SELECT 1 FROM `report_threads` t WHERE t.`submission_id` = s.`id`))
 	AND NOT EXISTS (SELECT 1 FROM `abuse_reports` a WHERE a.`submission_id` = s.`id`);--> statement-breakpoint
 INSERT INTO `abuse_reports` (`id`, `submission_id`, `tracking_token_hash`, `idempotency_key`, `request_payload_hash`, `allegation_category`, `description`, `status`, `requester_ip`, `requester_country`, `requester_headers`, `created_at`, `updated_at`)
-SELECT l.submission_id, l.submission_id, lower(hex(randomblob(32))), 'submission:' || l.submission_id, 'migrated-legacy-report',
+SELECT l.submission_id, l.submission_id, lower(hex(randomblob(32))), NULL, 'migrated-legacy-report',
 	'phishing', 'Migrated from the previous reporting pipeline.', 'submitted', l.reporter_ip, l.reporter_country, l.reporter_headers, l.created_at, l.updated_at
 FROM `__legacy_submissions` l;--> statement-breakpoint
 

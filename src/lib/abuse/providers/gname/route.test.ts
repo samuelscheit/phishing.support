@@ -9,7 +9,6 @@ import { createGnameRegistrarRoute } from "./route";
 
 const environmentNames = [
 	"ABUSE_GNAME_ENABLED",
-	"ABUSE_GNAME_SERVICE_NAME",
 	"ABUSE_GNAME_SERVICE_MAILBOX",
 	"ABUSE_GNAME_IDENTITY_VERIFIED",
 ] as const;
@@ -34,7 +33,6 @@ function resolverWith(routes: Record<string, Record<string, unknown>>): Resolver
 
 beforeEach(() => {
 	delete process.env.ABUSE_GNAME_ENABLED;
-	process.env.ABUSE_GNAME_SERVICE_NAME = "Phishing Support";
 	process.env.ABUSE_GNAME_SERVICE_MAILBOX = "gname-reports@phishing.support";
 	process.env.ABUSE_GNAME_IDENTITY_VERIFIED = "true";
 });

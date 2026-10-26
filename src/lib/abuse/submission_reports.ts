@@ -12,10 +12,6 @@ export const MAX_REPORTED_EMAIL_BYTES = 20 * 1024 * 1024;
 /** The abuse target that stands for the reported phishing message itself. */
 export const EMAIL_MESSAGE_TARGET = "phishing-email";
 
-export function submissionReportIdempotencyKey(submissionId: bigint): string {
-	return `submission:${submissionId.toString()}`;
-}
-
 type SubmissionReportBase = {
 	submissionId: bigint;
 	/** The analyst's explanation, or captured-evidence fallback, for the allegation. */
@@ -78,7 +74,6 @@ function submissionRequest(params: {
 		description: params.description,
 		observedUrls,
 		evidence: params.evidence,
-		idempotencyKey: submissionReportIdempotencyKey(params.submissionId),
 		requestPayloadHash: hashStableJson({
 			submissionId: params.submissionId.toString(),
 			targets: params.targets.map(({ normalizedTarget, targetType, observedUrls: urls }) => ({ normalizedTarget, targetType, urls })),

@@ -6,11 +6,11 @@ import { analyzeHeaders, getAddressesText, getMailImage, getMailLinks } from "./
 import { getInfo } from "./website_info";
 import * as toon from "@toon-format/toon";
 import { reportConfirmedEmailPhishing } from "./abuse/submission_reports";
-import { smtpTransport } from "./mail_config";
+import { smtpSender, smtpTransport } from "./mail_config";
 import { markSubmissionInvalid } from "./submissions/state";
 import { createWebsiteSubmission } from "./submissions/website";
 import { defaultReasoning, defaultResponseModel } from "./utils";
-import { abuseReplyMail, abuseReplyName, abuseReplyUrl } from "./constants";
+import { serviceIdentity } from "./constants";
 
 const URL_RE = /https?:\/\/[^\s"'<>]+/gi;
 
@@ -410,7 +410,6 @@ ${buildMailEvidence(mail, analysis.output_text)}`,
 			throw new Error(`Failed to classify email phishing result: ${structuredResponse.output_text}`);
 		}
 
-		const from = process.env.SMTP_FROM || `${abuseReplyName} <${abuseReplyMail}>`;
 		const date = mail.date ? new Date(mail.date).toLocaleString("en-US", { timeZone: "UTC" }) : undefined;
 		const submissionSubject = `"${mail.from_object?.name || mail.from_object?.address}" ${date ? "from " + date : ""}`;
 		let to = originalMail.to_object?.address;
@@ -451,10 +450,10 @@ ${buildMailEvidence(mail, analysis.output_text)}`,
 				`We have analyzed the email you provided and determined that it is indeed a phishing attempt.`,
 				"",
 				`Your submission is being reported to the email providers and hosting services involved.`,
-				`You can follow each report at: ${abuseReplyUrl}/submissions/${stream_id}`,
+				`You can follow each report at: ${serviceIdentity.url}/submissions/${stream_id}`,
 				"",
 				`Thank you for helping to combat phishing!`,
-				`Your ${abuseReplyName} Team`,
+				`Your ${serviceIdentity.name} Team`,
 			].join("\n");
 		} else {
 			await markSubmissionInvalid(stream_id);
@@ -464,21 +463,22 @@ ${buildMailEvidence(mail, analysis.output_text)}`,
 				`Thank you for your report. We analyzed the email you provided and determined that it is not a phishing attempt.`,
 				"",
 				`As a result, we have marked this submission as invalid.`,
-				`You can view details at: ${abuseReplyUrl}/submissions/${stream_id}`,
+				`You can view details at: ${serviceIdentity.url}/submissions/${stream_id}`,
 				"",
-				`If you believe this is an error, please feel free to reach out to us at ${abuseReplyMail}.`,
+				`If you believe this is an error, please feel free to reach out to us at ${serviceIdentity.mailbox}.`,
 				"",
 				`Thank you for helping to combat phishing!`,
-				`Your ${abuseReplyName} Team`,
+				`Your ${serviceIdentity.name} Team`,
 			].join("\n");
 		}
 
 		// Send a brief notification back to the reporter with the result and a link
 		try {
+			const from = `${serviceIdentity.name} <${smtpSender()}>`;
 			console.log(
 				`Sending reporter notification email to ${to} from ${from} for submission ${stream_id}. Subject: ${subject} Body: ${body}`
 			);
-			if (to && from && subject && body) {
+			if (to && subject && body) {
 				await smtpTransport()?.sendMail({ from, to, subject, text: body });
 			}
 		} catch (err) {

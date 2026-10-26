@@ -1,10 +1,11 @@
 import { CLOUDFLARE_PROVIDER } from "./definition";
-import type { CloudflareServiceIdentity } from "./identity";
+import { serviceIdentity } from "../../../constants";
 import { compactProviderText, normalizeObservedUrlForDomain, normalizePublicDomainHttpUrl, truncateProviderText } from "../report_payload";
 import type { ProviderReportPreviewContext } from "../submission_contracts";
 
 export type CloudflareReportInput = {
-	serviceIdentity: CloudflareServiceIdentity;
+	/** The submitter's country when known; the service's own country otherwise. */
+	reportedCountry?: string | null;
 	target: string;
 	observedUrl: string;
 	description: string;
@@ -112,12 +113,12 @@ export function buildCloudflareReportPayload(input: CloudflareReportInput): Clou
 	if (!justification) throw new Error("Cloudflare abuse reporting requires a non-empty report description.");
 
 	return {
-		name: input.serviceIdentity.name,
-		email: input.serviceIdentity.mailbox,
-		company: input.serviceIdentity.organizationUrl,
+		name: serviceIdentity.name,
+		email: serviceIdentity.mailbox,
+		company: `${serviceIdentity.url}/`,
 		urls: observedUrl,
 		justification,
 		...(legalBrandUrl ? { originalWork: legalBrandUrl } : {}),
-		reportedCountry: input.serviceIdentity.reportedCountry,
+		reportedCountry: /^[A-Z]{2}$/.test(input.reportedCountry ?? "") ? input.reportedCountry! : serviceIdentity.countryCode,
 	};
 }

@@ -10,13 +10,12 @@ import { getSubmissionDetails } from "./details";
 
 useTemporaryDatabase();
 
-const environmentNames = ["SMTP_FROM", "REPLY_DOMAIN", "ABUSE_TRACKING_TOKEN_SECRET"] as const;
+const environmentNames = ["SMTP_FROM", "REPLY_DOMAIN"] as const;
 const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [name, process.env[name]]));
 
 beforeEach(() => {
 	process.env.SMTP_FROM = "support@phishing.support";
 	process.env.REPLY_DOMAIN = "phishing.support";
-	process.env.ABUSE_TRACKING_TOKEN_SECRET = "01234567890123456789012345678901";
 });
 
 afterAll(() => {

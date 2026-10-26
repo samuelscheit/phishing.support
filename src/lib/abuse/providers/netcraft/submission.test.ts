@@ -75,90 +75,83 @@ describe("Netcraft v3 submission response", () => {
 	});
 
 	test("executes one durable API submission with every observed URL", async () => {
-		const previousReporterEmail = process.env.ABUSE_NETCRAFT_REPORTER_EMAIL;
-		process.env.ABUSE_NETCRAFT_REPORTER_EMAIL = "netcraft-test@phishing.support";
-		try {
-			const request = await validateAbuseReportRequest({
-				targets: ["phishing.example.com"],
-				allegationCategory: "phishing",
-				reporterName: "Test Reporter",
-				reporterContactEmail: "reporter@example.org",
-				description: "The URLs host credential-harvesting pages.",
-				observedUrls: [{
-					target: "phishing.example.com",
-					urls: [
-						"https://login.phishing.example.com/collect",
-						"https://phishing.example.com/alternate",
-					],
-				}],
-			});
-			const created = await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } });
-			const [target] = await AbuseRepository.listTargets(created.reportId);
-			if (!target) throw new Error("Expected a report target.");
-			const route = await AbuseRepository.upsertResolvedRoute(target.id, {
-				routeKey: "provider_submission:netcraft:supplemental",
-				providerRegistryKey: NETCRAFT_PROVIDER.key,
-				providerDisplayName: NETCRAFT_PROVIDER.displayName,
-				routeType: "provider_submission",
-				providerDefinitionVersion: NETCRAFT_PROVIDER.version,
-				providerDefinitionHash: NETCRAFT_PROVIDER.contentHash,
-				resolverProvenance: { source: "netcraft_submission_test" },
-				resolutionSnapshot: { source: "netcraft_submission_test" },
-				status: "verified",
-			});
-
-			let requestUrl: string | undefined;
-			let requestBody: Record<string, unknown> | undefined;
-			let requestInit: RequestInit | undefined;
-			const provider: ProviderSubmissionProvider = {
-				definition: NETCRAFT_PROVIDER,
-				prepareSubmission: prepareNetcraftSubmission,
-				shouldRefreshStartingPayload: (context) => context.payload.providerNarrativeVersion !== 1,
-				submit: async (context) => submitNetcraftSubmission(context, {
-					fetch: async (input, init) => {
-						requestUrl = String(input);
-						requestInit = init;
-						requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-						expect(await AbuseRepository.getProviderRun(context.runId!)).toMatchObject({
-							executionStatus: "submission_started",
-						});
-						return new Response(JSON.stringify({
-							message: "Successfully reported",
-							uuid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-						}));
-					},
-				}),
-			};
-
-			await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({
-				outcome: "submitted",
-				runId: expect.any(BigInt),
-			});
-			expect(requestUrl).toBe(NETCRAFT_PROVIDER.reportUrlsUrl);
-			expect(requestInit?.method).toBe("POST");
-			expect(requestInit?.redirect).toBe("error");
-			expect(new Headers(requestInit?.headers).get("content-type")).toBe("application/json");
-			expect(new Headers(requestInit?.headers).get("accept")).toBe("application/json");
-			expect(requestBody).toMatchObject({
-				email: "netcraft-test@phishing.support",
+		const request = await validateAbuseReportRequest({
+			targets: ["phishing.example.com"],
+			allegationCategory: "phishing",
+			reporterName: "Test Reporter",
+			reporterContactEmail: "reporter@example.org",
+			description: "The URLs host credential-harvesting pages.",
+			observedUrls: [{
+				target: "phishing.example.com",
 				urls: [
-					{ url: "https://login.phishing.example.com/collect" },
-					{ url: "https://phishing.example.com/alternate" },
+					"https://login.phishing.example.com/collect",
+					"https://phishing.example.com/alternate",
 				],
-			});
-			expect(requestBody?.reason).toContain("Netcraft");
-			expect(requestBody?.reason).toContain("credential");
-			expect(requestBody?.reason).not.toContain("The URLs host credential-harvesting pages.");
-			const [run] = await AbuseRepository.listProviderRunsForReport(created.reportId);
-			expect(run).toMatchObject({
-				executionStatus: "completed",
-				confirmationId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-				finalUrl: "https://report.netcraft.com/api/v3/submission/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-				submittedTargets: ["phishing.example.com"],
-			});
-		} finally {
-			if (previousReporterEmail === undefined) delete process.env.ABUSE_NETCRAFT_REPORTER_EMAIL;
-			else process.env.ABUSE_NETCRAFT_REPORTER_EMAIL = previousReporterEmail;
-		}
+			}],
+		});
+		const created = await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } });
+		const [target] = await AbuseRepository.listTargets(created.reportId);
+		if (!target) throw new Error("Expected a report target.");
+		const route = await AbuseRepository.upsertResolvedRoute(target.id, {
+			routeKey: "provider_submission:netcraft:supplemental",
+			providerRegistryKey: NETCRAFT_PROVIDER.key,
+			providerDisplayName: NETCRAFT_PROVIDER.displayName,
+			routeType: "provider_submission",
+			providerDefinitionVersion: NETCRAFT_PROVIDER.version,
+			providerDefinitionHash: NETCRAFT_PROVIDER.contentHash,
+			resolverProvenance: { source: "netcraft_submission_test" },
+			resolutionSnapshot: { source: "netcraft_submission_test" },
+			status: "verified",
+		});
+
+		let requestUrl: string | undefined;
+		let requestBody: Record<string, unknown> | undefined;
+		let requestInit: RequestInit | undefined;
+		const provider: ProviderSubmissionProvider = {
+			definition: NETCRAFT_PROVIDER,
+			prepareSubmission: prepareNetcraftSubmission,
+			shouldRefreshStartingPayload: (context) => context.payload.providerNarrativeVersion !== 1,
+			submit: async (context) => submitNetcraftSubmission(context, {
+				fetch: async (input, init) => {
+					requestUrl = String(input);
+					requestInit = init;
+					requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+					expect(await AbuseRepository.getProviderRun(context.runId!)).toMatchObject({
+						executionStatus: "submission_started",
+					});
+					return new Response(JSON.stringify({
+						message: "Successfully reported",
+						uuid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+					}));
+				},
+			}),
+		};
+
+		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({
+			outcome: "submitted",
+			runId: expect.any(BigInt),
+		});
+		expect(requestUrl).toBe(NETCRAFT_PROVIDER.reportUrlsUrl);
+		expect(requestInit?.method).toBe("POST");
+		expect(requestInit?.redirect).toBe("error");
+		expect(new Headers(requestInit?.headers).get("content-type")).toBe("application/json");
+		expect(new Headers(requestInit?.headers).get("accept")).toBe("application/json");
+		expect(requestBody).toMatchObject({
+			email: "support@phishing.support",
+			urls: [
+				{ url: "https://login.phishing.example.com/collect" },
+				{ url: "https://phishing.example.com/alternate" },
+			],
+		});
+		expect(requestBody?.reason).toContain("Netcraft");
+		expect(requestBody?.reason).toContain("credential");
+		expect(requestBody?.reason).not.toContain("The URLs host credential-harvesting pages.");
+		const [run] = await AbuseRepository.listProviderRunsForReport(created.reportId);
+		expect(run).toMatchObject({
+			executionStatus: "completed",
+			confirmationId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			finalUrl: "https://report.netcraft.com/api/v3/submission/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			submittedTargets: ["phishing.example.com"],
+		});
 	});
 });

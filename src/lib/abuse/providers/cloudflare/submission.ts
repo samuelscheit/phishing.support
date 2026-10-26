@@ -9,7 +9,6 @@ import { recordValue, routeContext } from "../../worker/shared";
 
 import { cloudflareApiConfig, submitCloudflareAbuseReport, type CloudflareApiFetch, type CloudflareSessionProvider } from "./api";
 import { getCloudflareSession, type CloudflareSession } from "./session";
-import { cloudflareServiceIdentity } from "./identity";
 import { buildCloudflareReportPayload, type CloudflareReportPayload } from "./report";
 
 type CloudflareSubmissionPayload = {
@@ -72,7 +71,7 @@ export async function prepareCloudflareSubmission(
 			providerNarrativeVersion: 1,
 			target: target.normalizedTarget,
 			report: buildCloudflareReportPayload({
-				serviceIdentity: cloudflareServiceIdentity(report.requesterCountry),
+				reportedCountry: report.requesterCountry,
 				target: target.normalizedTarget,
 				observedUrl,
 				description: report.description,

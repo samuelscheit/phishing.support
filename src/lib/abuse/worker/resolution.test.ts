@@ -21,7 +21,6 @@ const reportPayload = {
 };
 
 async function createReport(target = "example.com") {
-	process.env.ABUSE_TRACKING_TOKEN_SECRET = "01234567890123456789012345678901";
 	const request = await validateAbuseReportRequest({
 		...reportPayload,
 		targets: [target],

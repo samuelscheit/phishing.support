@@ -12,7 +12,7 @@ import {
 	type NetcraftFetch,
 	parseNetcraftSubmissionResponse as parseNetcraftApiSubmissionResponse,
 } from "../../../netcraft/api";
-import { netcraftReporterEmail } from "../../../netcraft/identity";
+import { serviceIdentity } from "../../../constants";
 import { NETCRAFT_PROVIDER } from "./definition";
 import {
 	buildNetcraftReportUrlsBody,
@@ -67,7 +67,7 @@ export async function prepareNetcraftSubmission(context: ProviderSubmissionConte
 		observedUrls: target.observedUrls,
 		description: report.description,
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
-		reporterEmail: netcraftReporterEmail(),
+		reporterEmail: serviceIdentity.mailbox,
 	});
 	if (!payload) return { outcome: "insufficient_evidence", reason: "netcraft_requires_valid_observed_urls_and_report_data" };
 	return { outcome: "ready", payload };

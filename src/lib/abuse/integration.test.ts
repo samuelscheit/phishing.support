@@ -3,7 +3,6 @@ import { Database } from "bun:sqlite";
 
 import { NextRequest } from "next/server";
 
-import { GET as getArtifact } from "../../app/api/abuse/artifacts/[id]/route";
 import { GET as getReportStatus } from "../../app/api/abuse/reports/[trackingToken]/route";
 import { POST as createReportRoute } from "../../app/api/abuse/reports/route";
 import { getDb, resetDatabaseForTesting } from "../db";
@@ -12,13 +11,12 @@ import { validateAbuseReportRequest } from "./contracts";
 import { sendAbuseEmailRoute } from "./mail";
 import { AbuseRepository, aggregateReportStatus } from "./repository";
 import { abuseArtifacts, abuseJobs, abuseMailMessages } from "./schema";
-import { createArtifactAccessToken, sha256Hex } from "./security";
+import { sha256Hex } from "./security";
 
 useTemporaryDatabase();
 
 const environmentNames = [
 	"ABUSE_TRACKING_TOKEN_SECRET",
-	"ABUSE_ARTIFACT_TOKEN_SECRET",
 	"SMTP_FROM",
 	"REPLY_DOMAIN",
 ] as const;
@@ -26,7 +24,6 @@ const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [n
 
 beforeEach(() => {
 	process.env.ABUSE_TRACKING_TOKEN_SECRET = "01234567890123456789012345678901";
-	process.env.ABUSE_ARTIFACT_TOKEN_SECRET = "abcdefghijklmnopqrstuvwxyz123456";
 	process.env.SMTP_FROM = "Phishing Support <support@phishing.support>";
 	process.env.REPLY_DOMAIN = "phishing.support";
 });
@@ -137,12 +134,8 @@ describe("abuse persistence boundary", () => {
 		expect(serialized).not.toContain(reportPayload.description);
 	});
 
-	test("retains repeated bytes as independent immutable artifact occurrences and binds signed reads to one report", async () => {
+	test("retains repeated bytes as independent immutable artifact occurrences", async () => {
 		const first = await createPublicReport();
-		const second = await createPublicReport({
-			targets: ["example.net"],
-			observedUrls: [{ target: "example.net", urls: ["https://login.example.net/collect"] }],
-		});
 		const bytes = Buffer.from("same evidence bytes retained twice");
 		const firstArtifact = await AbuseRepository.saveArtifact({
 			reportId: first.reportId,
@@ -160,23 +153,6 @@ describe("abuse persistence boundary", () => {
 		});
 		expect(firstArtifact).not.toBe(derivativeArtifact);
 		expect((await AbuseRepository.listArtifacts(first.reportId)).filter((artifact) => artifact.sha256 === sha256Hex(bytes))).toHaveLength(2);
-
-		const firstReport = await AbuseRepository.getReport(first.reportId);
-		const secondReport = await AbuseRepository.getReport(second.reportId);
-		if (!firstReport || !secondReport) throw new Error("Test reports were not retained.");
-		const validAccess = createArtifactAccessToken(firstArtifact, firstReport.trackingTokenHash);
-		const invalidAccess = createArtifactAccessToken(firstArtifact, secondReport.trackingTokenHash);
-		const validResponse = await getArtifact(
-			new NextRequest(`http://test.local/api/abuse/artifacts/${firstArtifact.toString()}?accessToken=${encodeURIComponent(validAccess)}`),
-			{ params: Promise.resolve({ id: firstArtifact.toString() }) },
-		);
-		expect(validResponse.status).toBe(200);
-		expect(await validResponse.text()).toBe(bytes.toString());
-		const invalidResponse = await getArtifact(
-			new NextRequest(`http://test.local/api/abuse/artifacts/${firstArtifact.toString()}?accessToken=${encodeURIComponent(invalidAccess)}`),
-			{ params: Promise.resolve({ id: firstArtifact.toString() }) },
-		);
-		expect(invalidResponse.status).toBe(404);
 	});
 
 	test("exposes anonymous creation and token-only status without a public report listing surface", async () => {

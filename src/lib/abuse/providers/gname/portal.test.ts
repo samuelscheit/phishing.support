@@ -22,7 +22,6 @@ useTemporaryDatabase();
 const environmentNames = [
 	"ABUSE_GNAME_ENABLED",
 	"ABUSE_GNAME_IDENTITY_VERIFIED",
-	"ABUSE_GNAME_SERVICE_NAME",
 	"ABUSE_GNAME_SERVICE_MAILBOX",
 	"ABUSE_GNAME_UPLOAD_URL_MAX_AGE_MS",
 	"ABUSE_GNAME_UPLOAD_URL_MIN_REMAINING_MS",
@@ -33,7 +32,6 @@ const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [n
 beforeEach(() => {
 	process.env.ABUSE_GNAME_ENABLED = "true";
 	process.env.ABUSE_GNAME_IDENTITY_VERIFIED = "true";
-	process.env.ABUSE_GNAME_SERVICE_NAME = "Phishing Support";
 	process.env.ABUSE_GNAME_SERVICE_MAILBOX = "gname-reports@phishing.support";
 	process.env.ABUSE_GNAME_UPLOAD_URL_MAX_AGE_MS = "600000";
 	process.env.ABUSE_GNAME_UPLOAD_URL_MIN_REMAINING_MS = "1000";

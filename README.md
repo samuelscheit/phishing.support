@@ -94,9 +94,6 @@ session rejection permits one refreshed login and one new POST; a failed login
 or rejected fresh session requires human intervention. Success requires both
 `result: "success"` and an `abuse_rand` receipt. The public bearer-token API is
 not used because this account lacks its abuse-reports entitlement.
-The reporter identity is still taken from
-`ABUSE_CLOUDFLARE_SERVICE_NAME`, `ABUSE_CLOUDFLARE_SERVICE_MAILBOX`,
-`ABUSE_CLOUDFLARE_SERVICE_URL`, and `ABUSE_CLOUDFLARE_REPORTED_COUNTRY`.
 
 ## Reporting pipeline
 
@@ -108,7 +105,7 @@ Every report goes through one durable reporting worker:
 
 The resolver turns each target into provider routes (registrar/hosting abuse mailboxes, Cloudflare, Tencent, Google Safe Browsing, Netcraft). Each route is submitted, retried, or settled independently; the submission page's Reports tab shows every route with its sent report and provider replies. A report counts as submitted when at least one provider confirmed it, so one unreachable provider never hides the others.
 
-Providers always see the `phishing.support` service identity. For a public-form report, the submitter's name and email appear only in the report text as the original reporter.
+Providers always see the service identity defined in `src/lib/constants.ts` (Phishing Support, `support@phishing.support`, `https://phishing.support`); it is code, not configuration, because routes pin the provider definitions that embed it. For a public-form report, the submitter's name and email appear only in the report text as the original reporter, and Cloudflare additionally receives the submitter's country when known.
 
 ## Mail configuration
 
@@ -200,7 +197,7 @@ the submission, so concurrent clicks cannot create duplicate analysis/report wor
 
 Every report target with one or more validated observed URLs gets an independent Netcraft Reporting API v3 URL submission, alongside the resolver-selected routes and Google Safe Browsing. Every confirmed phishing email is filed with Netcraft's `POST /report/mail` endpoint using the recipient-redacted RFC 822 source stored as report evidence. Netcraft rejects a message without a parseable sender, so a message with no `From` address (for example a forwarded bounce) is submitted with an explicit `From: Unknown sender <unknown-sender@invalid>` header. Messages over Netcraft's 20 MiB limit are settled as insufficient evidence and never sent. Each returned submission UUID is kept on the route.
 
-Netcraft's API requires a reporter email. The service uses `ABUSE_NETCRAFT_REPORTER_EMAIL` (default `support@phishing.support`) and never discloses a submitter's address. URL-only providers are never given invented URLs.
+Netcraft's API requires a reporter email. The service sends its own mailbox and never discloses a submitter's address. URL-only providers are never given invented URLs.
 
 ## Privacy note
 

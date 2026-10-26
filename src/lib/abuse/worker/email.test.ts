@@ -12,19 +12,15 @@ import { resolveReport } from "./resolution";
 
 useTemporaryDatabase();
 
-const originalTrackingTokenSecret = process.env.ABUSE_TRACKING_TOKEN_SECRET;
 const originalAbuseSmtpFrom = process.env.SMTP_FROM;
 const originalAbuseReplyDomain = process.env.REPLY_DOMAIN;
 
 beforeEach(() => {
-	process.env.ABUSE_TRACKING_TOKEN_SECRET = "01234567890123456789012345678901";
 	process.env.SMTP_FROM = "support@phishing.support";
 	process.env.REPLY_DOMAIN = "phishing.support";
 });
 
 afterAll(() => {
-	if (originalTrackingTokenSecret === undefined) delete process.env.ABUSE_TRACKING_TOKEN_SECRET;
-	else process.env.ABUSE_TRACKING_TOKEN_SECRET = originalTrackingTokenSecret;
 	if (originalAbuseSmtpFrom === undefined) delete process.env.SMTP_FROM;
 	else process.env.SMTP_FROM = originalAbuseSmtpFrom;
 	if (originalAbuseReplyDomain === undefined) delete process.env.REPLY_DOMAIN;

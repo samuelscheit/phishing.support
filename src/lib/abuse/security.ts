@@ -59,14 +59,15 @@ export function createTrackingToken(): string {
 }
 
 /**
- * Idempotent requests need a reproducible response without retaining a raw
- * bearer token. A deployment-owned HMAC key produces the same opaque token for
- * the same idempotency key and immutable payload, but it is never persisted.
+ * A public API retry with the same idempotency key must receive the same
+ * tracking token, which is only stored as a hash. A deployment-owned HMAC key
+ * reproduces it from the key and the immutable payload. Submission reports
+ * never use this: their submission is the idempotency guard.
  */
 export function createIdempotentTrackingToken(idempotencyKey: string, payloadHash: string): string {
 	const secret = process.env.ABUSE_TRACKING_TOKEN_SECRET;
 	if (!secret || Buffer.byteLength(secret) < 32) {
-		throw new Error("ABUSE_TRACKING_TOKEN_SECRET must be configured with at least 32 bytes when idempotency keys are accepted.");
+		throw new Error("ABUSE_TRACKING_TOKEN_SECRET must be configured with at least 32 bytes to accept idempotency keys.");
 	}
 	return crypto.createHmac("sha256", secret).update("abuse-tracking-token\0").update(idempotencyKey).update("\0").update(payloadHash).digest("base64url");
 }
@@ -241,31 +242,4 @@ export function safePublicError(status: string, detail?: string | null): string 
 	// A provider's own rejection text is its public answer to our report.
 	if (status === "provider_rejected") return detail.replace(/\s+/g, " ").trim().slice(0, 500);
 	return undefined;
-}
-
-const ARTIFACT_TOKEN_TTL_SECONDS = 10 * 60;
-
-export function createArtifactAccessToken(artifactId: bigint, trackingTokenHash: string, expiresAt = Math.floor(Date.now() / 1000) + ARTIFACT_TOKEN_TTL_SECONDS): string {
-	const secret = process.env.ABUSE_ARTIFACT_TOKEN_SECRET;
-	if (!secret || Buffer.byteLength(secret) < 32) throw new Error("ABUSE_ARTIFACT_TOKEN_SECRET must be configured with at least 32 bytes.");
-	const payload = `${artifactId.toString()}.${expiresAt}.${trackingTokenHash}`;
-	const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
-	return `${artifactId.toString()}.${expiresAt}.${signature}`;
-}
-
-export function verifyArtifactAccessToken(token: string, artifactId: bigint, trackingTokenHash: string): boolean {
-	const secret = process.env.ABUSE_ARTIFACT_TOKEN_SECRET;
-	if (!secret || Buffer.byteLength(secret) < 32) return false;
-	const parts = token.split(".");
-	if (parts.length !== 3 || parts[0] !== artifactId.toString() || !/^\d+$/.test(parts[1])) return false;
-	const expiresAt = Number(parts[1]);
-	if (!Number.isSafeInteger(expiresAt) || expiresAt < Math.floor(Date.now() / 1000)) return false;
-	const expected = crypto.createHmac("sha256", secret).update(`${parts[0]}.${parts[1]}.${trackingTokenHash}`).digest();
-	let received: Buffer;
-	try {
-		received = Buffer.from(parts[2], "base64url");
-	} catch {
-		return false;
-	}
-	return received.byteLength === expected.byteLength && crypto.timingSafeEqual(received, expected);
 }

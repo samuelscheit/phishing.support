@@ -81,9 +81,9 @@ test("migrates every legacy report record into the reporting aggregate and drops
 
 	const reports = database.query("SELECT id, submission_id, idempotency_key, status, requester_ip FROM abuse_reports ORDER BY id").all() as Array<Record<string, unknown>>;
 	expect(reports).toEqual([
-		{ id: 1000n, submission_id: 1000n, idempotency_key: "submission:1000", status: "submitted", requester_ip: "8.8.8.8" },
-		{ id: 1001n, submission_id: 1001n, idempotency_key: "submission:1001", status: "partially_submitted", requester_ip: "8.8.8.8" },
-		{ id: 6000n, submission_id: 1002n, idempotency_key: "submission:1002", status: "partially_submitted", requester_ip: null },
+		{ id: 1000n, submission_id: 1000n, idempotency_key: null, status: "submitted", requester_ip: "8.8.8.8" },
+		{ id: 1001n, submission_id: 1001n, idempotency_key: null, status: "partially_submitted", requester_ip: "8.8.8.8" },
+		{ id: 6000n, submission_id: 1002n, idempotency_key: null, status: "partially_submitted", requester_ip: null },
 		{ id: 7000n, submission_id: null, idempotency_key: "hermes-123", status: "waiting_provider", requester_ip: null },
 	]);
 	expect(database.query("SELECT normalized_target, target_type, observed_urls FROM abuse_targets WHERE report_id IN (1000, 1001) ORDER BY report_id, ordinal").all()).toEqual([

@@ -1,3 +1,4 @@
+import { serviceIdentity } from "../../../constants";
 import { hashStableJson } from "../../security";
 import type { ProviderSubmissionDefinition } from "../submission_contracts";
 
@@ -43,10 +44,10 @@ const definitionWithoutHash = {
 		maximumBytes: 5 * 1024 * 1024,
 	},
 	reporter: {
-		name: "Phishing Support",
-		email: "support@phishing.support",
-		countryCode: "DE",
-		countryName: "Germany",
+		name: serviceIdentity.name,
+		email: serviceIdentity.mailbox,
+		countryCode: serviceIdentity.countryCode,
+		countryName: serviceIdentity.countryName,
 	},
 };
 

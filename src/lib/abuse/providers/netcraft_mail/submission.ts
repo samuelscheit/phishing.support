@@ -1,5 +1,5 @@
 import { NetcraftSubmissionRejectedError, parseNetcraftSubmissionResponse, type NetcraftFetch } from "../../../netcraft/api";
-import { netcraftReporterEmail } from "../../../netcraft/identity";
+import { serviceIdentity } from "../../../constants";
 import { normalizeMailbox } from "../../mail/shared";
 import { sha256Hex } from "../../security";
 import { recordValue, routeContext } from "../../worker/shared";
@@ -85,7 +85,7 @@ export async function prepareNetcraftMailSubmission(context: ProviderSubmissionC
 			adapter: "netcraft_report_mail_v3",
 			definition: { version: NETCRAFT_MAIL_PROVIDER.version, contentHash: NETCRAFT_MAIL_PROVIDER.contentHash },
 			message: { artifactId: artifact.id.toString(), sha256: artifact.sha256, bytes: message.byteLength },
-			report: { reporterEmail: netcraftReporterEmail() },
+			report: { reporterEmail: serviceIdentity.mailbox },
 		} satisfies NetcraftMailSubmissionPayload,
 	};
 }

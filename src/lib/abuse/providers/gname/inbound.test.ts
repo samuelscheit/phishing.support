@@ -24,7 +24,6 @@ const mailbox = { mailbox: "INBOX", uidValidity: 88, intakeAddress: "report@phis
 const environmentNames = [
 	"ABUSE_GNAME_ENABLED",
 	"ABUSE_GNAME_IDENTITY_VERIFIED",
-	"ABUSE_GNAME_SERVICE_NAME",
 	"ABUSE_GNAME_SERVICE_MAILBOX",
 	"ABUSE_GNAME_CODE_SENDER_DOMAINS",
 ] as const;
@@ -33,7 +32,6 @@ const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [n
 beforeEach(() => {
 	process.env.ABUSE_GNAME_ENABLED = "true";
 	process.env.ABUSE_GNAME_IDENTITY_VERIFIED = "true";
-	process.env.ABUSE_GNAME_SERVICE_NAME = "Phishing Support";
 	process.env.ABUSE_GNAME_SERVICE_MAILBOX = "gname-reports@phishing.support";
 	process.env.ABUSE_GNAME_CODE_SENDER_DOMAINS = "gname.com";
 });

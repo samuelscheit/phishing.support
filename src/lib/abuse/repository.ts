@@ -8,7 +8,6 @@
  */
 import {
 	getArtifact,
-	getArtifactById,
 	listArtifactMetadata,
 	listArtifacts,
 	saveArtifact,
@@ -136,7 +135,6 @@ export const AbuseRepository = {
 	listArtifacts,
 	listArtifactMetadata,
 	getArtifact,
-	getArtifactById,
 	enqueueJob,
 	claimNextJob,
 	renewJobLease,

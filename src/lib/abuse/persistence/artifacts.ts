@@ -30,8 +30,3 @@ export async function getArtifact(reportId: bigint, artifactId: bigint): Promise
 	const db = await getDb();
 	return db.select().from(abuseArtifacts).where(and(eq(abuseArtifacts.reportId, reportId), eq(abuseArtifacts.id, artifactId))).get();
 }
-
-export async function getArtifactById(artifactId: bigint): Promise<AbuseArtifact | undefined> {
-	const db = await getDb();
-	return db.select().from(abuseArtifacts).where(eq(abuseArtifacts.id, artifactId)).get();
-}

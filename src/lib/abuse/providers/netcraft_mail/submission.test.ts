@@ -1,5 +1,6 @@
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
+import { serviceIdentity } from "../../../constants";
 import { SubmissionsEntity } from "../../../db/entities";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { AbuseRepository } from "../../repository";
@@ -11,19 +12,6 @@ import { NETCRAFT_MAIL_PROVIDER } from "./definition";
 import { netcraftMailMessage, prepareNetcraftMailSubmission, submitNetcraftMailSubmission } from "./submission";
 
 useTemporaryDatabase();
-
-const originalSecret = process.env.ABUSE_TRACKING_TOKEN_SECRET;
-const originalReporter = process.env.ABUSE_NETCRAFT_REPORTER_EMAIL;
-beforeEach(() => {
-	process.env.ABUSE_TRACKING_TOKEN_SECRET = "01234567890123456789012345678901";
-	process.env.ABUSE_NETCRAFT_REPORTER_EMAIL = "netcraft-test@phishing.support";
-});
-afterAll(() => {
-	if (originalSecret === undefined) delete process.env.ABUSE_TRACKING_TOKEN_SECRET;
-	else process.env.ABUSE_TRACKING_TOKEN_SECRET = originalSecret;
-	if (originalReporter === undefined) delete process.env.ABUSE_NETCRAFT_REPORTER_EMAIL;
-	else process.env.ABUSE_NETCRAFT_REPORTER_EMAIL = originalReporter;
-});
 
 const bounce = [
 	"To: [redacted] <[redacted]>",
@@ -72,7 +60,7 @@ describe("Netcraft mail provider", () => {
 		expect(requests).toHaveLength(1);
 		expect(requests[0]).toEqual({
 			url: NETCRAFT_MAIL_PROVIDER.reportMailUrl,
-			body: { email: "netcraft-test@phishing.support", message: `From: Unknown sender <unknown-sender@invalid>\r\n${bounce}` },
+			body: { email: serviceIdentity.mailbox, message: `From: Unknown sender <unknown-sender@invalid>\r\n${bounce}` },
 		});
 		const [run] = await AbuseRepository.listProviderRunsForReport(route.reportId);
 		expect(run).toMatchObject({ executionStatus: "completed", confirmationId: "cccccccccccccccccccccccccccccccc", submittedTargets: ["phishing-email"] });
