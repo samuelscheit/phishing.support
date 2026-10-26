@@ -48,6 +48,33 @@ test("cleanPrivateInformation redacts MIME encoded recipient headers", async () 
 	expect(serialized).not.toContain(encoded);
 });
 
+test("cleanPrivateInformation redacts VERP bounce addresses, delivery headers, and base64 hints", async () => {
+	const address = "svitek.pavel@gmail.com";
+	const verp = "bounces+20055169-5bed-svitek.pavel=gmail.com@sgmkt.boostcasino.com";
+	const qpVerp = "bounces+20055169-5bed-svitek.pavel=3Dgmail.com@sgmkt.boostcasino.com";
+	const hint = Buffer.from(address, "utf-8").toString("base64").replace(/=+$/, "");
+	const eml = [
+		`Delivered-To: ${address}`,
+		`Return-Path: <${verp}>`,
+		`Received: from wrqvztnc.outbound-mail.sendgrid.net (wrqvztnc.outbound-mail.sendgrid.net. [149.72.231.44]) by mx.google.com with ESMTPS for <${address}>; Sat, 17 Oct 2026 05:39:07 -0700 (PDT)`,
+		`Authentication-Results: mx.google.com; spf=pass (google.com: domain of ${verp} designates 149.72.231.44 as permitted sender) smtp.mailfrom="${verp}"`,
+		"From: Loyalty <loyalty@boostcasino.com>",
+		`To: ${address}`,
+		"Subject: Your account requires immediate attention",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		`https://appeal.policy-review.cloud/gate/security?hint=${hint} ${qpVerp}`,
+	].join("\r\n");
+
+	const cleaned = cleanPrivateInformation(await parseMail(eml, { getInfo: async () => noOriginInfo }));
+	const serialized = JSON.stringify(cleaned);
+
+	expect(serialized).not.toContain("svitek.pavel");
+	expect(serialized).not.toContain(hint);
+	expect(cleaned.eml).toContain("bounces+20055169-5bed-[redacted]@sgmkt.boostcasino.com");
+	expect(cleaned.headers.authentication.spf.mechanism).toContain("bounces+20055169-5bed-[redacted]@sgmkt.boostcasino.com");
+});
+
 test("does not treat the sender-controlled From domain as delivery infrastructure", async () => {
 	let lookups = 0;
 	const mail = await parseMail([

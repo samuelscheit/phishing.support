@@ -1,5 +1,5 @@
 import * as toon from "@toon-format/toon";
-import { MailData } from "../mail_ai";
+import { cleanPrivateInformation, MailData } from "../mail_ai";
 import { generateReportDraft } from "./generateReportDraft";
 import { sendReportEmail } from "./sendReportEmail";
 import { getMailLinks } from "../mail";
@@ -101,14 +101,16 @@ export async function reportEmailPhishing(
 	params: { submissionId: bigint; mail: MailData; analysisText: string; originalEmlArtifactId?: bigint },
 	dependencies: EmailPhishingReportingDependencies = {},
 ) {
+	const redactedMail = cleanPrivateInformation(params.mail);
+	const redactedParams = { ...params, mail: redactedMail };
 	const netcraft = dependencies.reportNetcraftMail ?? reportNetcraftMail;
 	const [netcraftResult, smtpResult] = await Promise.allSettled([
 		netcraft({
-			submissionId: params.submissionId,
-			rawMime: params.mail.eml,
-			originalEmlArtifactId: params.originalEmlArtifactId,
+			submissionId: redactedParams.submissionId,
+			rawMime: redactedMail.eml,
+			originalEmlArtifactId: redactedParams.originalEmlArtifactId,
 		}),
-		reportSendingInfrastructure(params, dependencies),
+		reportSendingInfrastructure(redactedParams, dependencies),
 	]);
 
 	if (netcraftResult.status === "rejected") logReportFailure("Netcraft mail", netcraftResult.reason);

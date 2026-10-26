@@ -25,6 +25,8 @@ describe("reportEmailPhishing", () => {
 		const mail = await parseMail(rawMime);
 		let receivedRawMime: string | undefined;
 		let receivedArtifactId: bigint | undefined;
+		let draftUserPrompt: string | undefined;
+		let sentAttachmentContent: string | undefined;
 		const consoleError = spyOn(console, "error").mockImplementation(() => {});
 		let result: Awaited<ReturnType<typeof reportEmailPhishing>>;
 		try {
@@ -44,15 +46,23 @@ describe("reportEmailPhishing", () => {
 						finalUrl: "https://report.netcraft.com/api/v3/submission/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 					};
 				},
-				generateReportDraft: async () => {
+				generateReportDraft: async (params) => {
+					draftUserPrompt = params.user;
 					throw new Error("draft service unavailable");
+				},
+				sendReportEmail: async (params) => {
+					sentAttachmentContent = params.attachments?.[0]?.content.toString("utf-8");
+					throw new Error("unreachable");
 				},
 			});
 		} finally {
 			consoleError.mockRestore();
 		}
 
-		expect(receivedRawMime).toBe(rawMime);
+		expect(receivedRawMime).toContain("To: [redacted]");
+		expect(receivedRawMime).not.toContain("private.recipient@example.test");
+		expect(draftUserPrompt).not.toContain("private.recipient@example.test");
+		expect(sentAttachmentContent).toBeUndefined();
 		expect(receivedArtifactId).toBe(456n);
 		expect(result.netcraft).toMatchObject({ status: "fulfilled", value: { outcome: "submitted" } });
 		expect(result.smtp).toMatchObject({ status: "rejected", reason: expect.objectContaining({ message: "draft service unavailable" }) });
