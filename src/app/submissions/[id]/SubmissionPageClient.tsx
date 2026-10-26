@@ -7,7 +7,7 @@ import { ExternalLinkConfirm } from "@/components/ExternalLinkConfirm";
 import { UrlParts } from "@/components/UrlParts";
 import { WhoisTab } from "@/components/WhoisTab";
 import { ReporterMeta } from "@/components/ReporterMeta";
-import { ReportThreadTimeline } from "@/components/ReportThreadTimeline";
+import { SubmissionReports } from "@/components/SubmissionReports";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,7 +41,6 @@ function formatArtifactSize(value: number | bigint | null | undefined) {
 }
 
 function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "name" | "kind" | "mimeType">) {
-	if (artifact.kind?.toLowerCase().startsWith("report_")) return false;
 	const name = artifact.name?.toLowerCase();
 	const kind = artifact.kind?.toLowerCase();
 	const mimeType = artifact.mimeType?.toLowerCase();
@@ -50,10 +49,6 @@ function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "name" | "kind" | "mi
 		kind?.startsWith("website_") ||
 		mimeType === "text/mhtml"
 	);
-}
-
-function isCorrespondenceArtifact(artifact: Pick<Artifact, "kind">) {
-	return artifact.kind?.toLowerCase().startsWith("report_") ?? false;
 }
 
 export function SubmissionPageClient({ id, initialSubmission }: { id: string; initialSubmission?: SubmissionDetail | null }) {
@@ -78,15 +73,10 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 			.map((assessment) => [assessment.hopIndex, assessment]),
 	);
 	const runsToShow = submission ? selectDisplayAnalysisRuns(submission.analysisRuns) : [];
-	const reportThreads = submission?.reportThreads ?? [];
-	const providerReports = submission?.providerReports ?? [];
-	const abuseMailReports = submission?.abuseMailReports ?? [];
-	const abuseProviderReports = submission?.abuseProviderReports ?? [];
-	const abuseReport = submission?.abuseReport ?? null;
-	// A confirmed website can have a durable standalone abuse handoff before it
-	// has provider routes. Count that visible lifecycle entry so the Reports
-	// badge never says zero while the tab contains its queued state.
-	const reportCount = reportThreads.length + providerReports.length + abuseMailReports.length + abuseProviderReports.length + (abuseReport ? 1 : 0);
+	const report = submission?.report ?? null;
+	// A report accepted before route resolution still counts, so the badge
+	// never says zero while the tab shows its queued state.
+	const reportCount = report ? Math.max(1, report.routes.length) : 0;
 
 	const defaultTab = "runs";
 
@@ -122,19 +112,16 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 
 	const screenshot = submission?.artifacts?.find(
 		(a) =>
-			!isCorrespondenceArtifact(a) &&
 			(((a.name?.toLowerCase() === "website.png" || a.name?.toLowerCase() === "mail.png") && a.mimeType?.startsWith("image/")) ||
 				a.kind?.toLowerCase() === "website_png")
 	);
 	const websiteMhtml = submission?.artifacts?.find(
 		(a) =>
-			!isCorrespondenceArtifact(a) &&
 			(a.name?.toLowerCase() === "website.mhtml" ||
 				a.mimeType?.toLowerCase() === "text/mhtml" ||
 				a.kind?.toLowerCase() === "website_mhtml")
 	);
 	const emailEml = submission?.artifacts?.find((a) => {
-		if (isCorrespondenceArtifact(a)) return false;
 		const name = a.name?.toLowerCase();
 		const mime = a.mimeType?.toLowerCase();
 		const kind = a.kind?.toLowerCase();
@@ -557,14 +544,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 					</TabsContent>
 				) : null}
 				<TabsContent value="reports" className="space-y-4 mt-4">
-					<ReportThreadTimeline
-						threads={reportThreads}
-						providerReports={providerReports}
-						abuseMailReports={abuseMailReports}
-						abuseProviderReports={abuseProviderReports}
-						abuseReport={abuseReport}
-						artifacts={submission.artifacts}
-					/>
+					<SubmissionReports submissionId={id} report={report} />
 				</TabsContent>
 				<TabsContent value="runs" className="space-y-4 mt-4">
 					{runsToShow.length > 0 ? (

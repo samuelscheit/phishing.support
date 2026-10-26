@@ -19,16 +19,16 @@ useTemporaryDatabase();
 const environmentNames = [
 	"ABUSE_TRACKING_TOKEN_SECRET",
 	"ABUSE_ARTIFACT_TOKEN_SECRET",
-	"ABUSE_SMTP_FROM",
-	"ABUSE_REPLY_DOMAIN",
+	"SMTP_FROM",
+	"REPLY_DOMAIN",
 ] as const;
 const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [name, process.env[name]]));
 
 beforeEach(() => {
 	process.env.ABUSE_TRACKING_TOKEN_SECRET = "01234567890123456789012345678901";
 	process.env.ABUSE_ARTIFACT_TOKEN_SECRET = "abcdefghijklmnopqrstuvwxyz123456";
-	process.env.ABUSE_SMTP_FROM = "Phishing Support <support@phishing.support>";
-	process.env.ABUSE_REPLY_DOMAIN = "phishing.support";
+	process.env.SMTP_FROM = "Phishing Support <support@phishing.support>";
+	process.env.REPLY_DOMAIN = "phishing.support";
 });
 
 afterAll(() => {
@@ -42,12 +42,14 @@ afterAll(() => {
 const reportPayload = {
 	targets: ["example.com"],
 	allegationCategory: "phishing" as const,
+	reporterName: "Test Reporter",
+	reporterContactEmail: "reporter@example.org",
 	description: "A credential-harvesting page impersonates the protected brand.",
 	observedUrls: [{ target: "example.com", urls: ["https://login.example.com/collect"] }],
 	legalBrandUrl: "https://brand.example.com/",
 };
 
-async function createStandaloneReport(overrides: Record<string, unknown> = {}) {
+async function createPublicReport(overrides: Record<string, unknown> = {}) {
 	const request = await validateAbuseReportRequest({ ...reportPayload, ...overrides });
 	return AbuseRepository.createReport({
 		request,
@@ -56,7 +58,7 @@ async function createStandaloneReport(overrides: Record<string, unknown> = {}) {
 }
 
 async function createEmailRoute() {
-	const created = await createStandaloneReport();
+	const created = await createPublicReport();
 	const [target] = await AbuseRepository.listTargets(created.reportId);
 	if (!target) throw new Error("Test report did not create its target.");
 	const route = await AbuseRepository.upsertResolvedRoute(target.id, {
@@ -83,8 +85,8 @@ async function beginEmailDelivery() {
 	return { ...context, run: execution.run };
 }
 
-describe("standalone abuse persistence boundary", () => {
-	test("migrates independently, reopens cleanly, and keeps every abuse foreign key inside the abuse schema", async () => {
+describe("abuse persistence boundary", () => {
+	test("migrates, reopens cleanly, and links reports only to their owning submission", async () => {
 		const db = await getDb();
 		const client = (db as unknown as { $client: Database }).$client;
 		const expectedTables = [
@@ -103,8 +105,9 @@ describe("standalone abuse persistence boundary", () => {
 		const tables = client.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
 		expect(tables.map((row) => row.name)).toEqual(expect.arrayContaining(expectedTables));
 		for (const table of expectedTables) {
-			const foreignKeys = client.query(`PRAGMA foreign_key_list(${table})`).all() as Array<{ table: string }>;
-			expect(foreignKeys.every((foreignKey) => foreignKey.table.startsWith("abuse_")), table).toBeTrue();
+			const foreignKeys = client.query(`PRAGMA foreign_key_list(${table})`).all() as Array<{ table: string; from: string }>;
+			const outside = foreignKeys.filter((foreignKey) => !foreignKey.table.startsWith("abuse_"));
+			expect(outside.map((foreignKey) => `${foreignKey.from}->${foreignKey.table}`), table).toEqual(table === "abuse_reports" ? ["submission_id->submissions"] : []);
 		}
 
 		await resetDatabaseForTesting();
@@ -114,12 +117,12 @@ describe("standalone abuse persistence boundary", () => {
 	});
 
 	test("uses the same deterministic bearer token only for the same idempotent immutable request", async () => {
-		const first = await createStandaloneReport({ idempotencyKey: "abuse-idempotency-key-001" });
-		const second = await createStandaloneReport({ idempotencyKey: "abuse-idempotency-key-001" });
+		const first = await createPublicReport({ idempotencyKey: "abuse-idempotency-key-001" });
+		const second = await createPublicReport({ idempotencyKey: "abuse-idempotency-key-001" });
 		expect(first.created).toBeTrue();
 		expect(second).toMatchObject({ reportId: first.reportId, trackingToken: first.trackingToken, created: false });
 
-		await expect(createStandaloneReport({
+		await expect(createPublicReport({
 			idempotencyKey: "abuse-idempotency-key-001",
 			description: "This is a materially different allegation.",
 		})).rejects.toThrow("already used for a different report");
@@ -135,8 +138,8 @@ describe("standalone abuse persistence boundary", () => {
 	});
 
 	test("retains repeated bytes as independent immutable artifact occurrences and binds signed reads to one report", async () => {
-		const first = await createStandaloneReport();
-		const second = await createStandaloneReport({
+		const first = await createPublicReport();
+		const second = await createPublicReport({
 			targets: ["example.net"],
 			observedUrls: [{ target: "example.net", urls: ["https://login.example.net/collect"] }],
 		});
@@ -207,7 +210,7 @@ describe("standalone abuse persistence boundary", () => {
 	});
 });
 
-describe("standalone abuse email lifecycle", () => {
+describe("abuse email lifecycle", () => {
 	test("persists canonical MIME, attachments, and a pending correspondence record before invoking SMTP", async () => {
 		const { reportId, route, run } = await beginEmailDelivery();
 		let observedBeforeSmtp = false;
@@ -353,11 +356,22 @@ describe("standalone abuse email lifecycle", () => {
 	});
 });
 
-test("aggregate status never hides a route and preserves explicit terminal outcomes", () => {
+test("aggregate status shows work in progress first, and a delivered route is never hidden by another failure", () => {
 	expect(aggregateReportStatus([])).toBe("no_route");
+	expect(aggregateReportStatus(["no_route"])).toBe("no_route");
 	expect(aggregateReportStatus(["no_route", "insufficient_evidence"])).toBe("insufficient_evidence");
-	expect(aggregateReportStatus(["submitted", "no_route"])).toBe("partially_submitted");
 	expect(aggregateReportStatus(["submitted", "acknowledged"])).toBe("submitted");
-	expect(aggregateReportStatus(["submitted", "unknown_external_state"])).toBe("failed");
-	expect(aggregateReportStatus(["needs_human", "submitted"])).toBe("needs_human");
+	// A target without any route is not a failed delivery.
+	expect(aggregateReportStatus(["submitted", "no_route"])).toBe("submitted");
+	expect(aggregateReportStatus(["submitted", "unknown_external_state"])).toBe("partially_submitted");
+	expect(aggregateReportStatus(["submitted", "provider_rejected", "failed"])).toBe("partially_submitted");
+	expect(aggregateReportStatus(["needs_human", "submitted"])).toBe("partially_submitted");
+	expect(aggregateReportStatus(["awaiting_provider_reply", "submitted"])).toBe("waiting_provider");
+	expect(aggregateReportStatus(["awaiting_provider_reply", "unknown_external_state"])).toBe("partially_submitted");
+	expect(aggregateReportStatus(["needs_human", "failed"])).toBe("needs_human");
+	expect(aggregateReportStatus(["unknown_external_state", "provider_rejected"])).toBe("failed");
+	expect(aggregateReportStatus(["submitted", "running"])).toBe("running");
+	expect(aggregateReportStatus(["submitted", "queued"])).toBe("queued");
+	expect(aggregateReportStatus(["submitted", "verified"])).toBe("verifying");
+	expect(aggregateReportStatus(["submitted", "resolving"])).toBe("resolving");
 });

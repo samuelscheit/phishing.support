@@ -98,22 +98,40 @@ The reporter identity is still taken from
 `ABUSE_CLOUDFLARE_SERVICE_NAME`, `ABUSE_CLOUDFLARE_SERVICE_MAILBOX`,
 `ABUSE_CLOUDFLARE_SERVICE_URL`, and `ABUSE_CLOUDFLARE_REPORTED_COUNTRY`.
 
-## Abuse-report reply correspondence
+## Reporting pipeline
 
-SMTP abuse reports are stored as individual correspondence threads. Each report uses the configured, authenticated `SMTP_FROM` address as its visible `From` address and a new opaque `Reply-To` address such as `case-<32 hexadecimal characters>@phishing.support`. The reply identity is random, does not contain a submission ID, and is unique to one report target.
+Every report goes through one durable reporting worker:
 
-Before enabling SMTP report delivery, configure inbound mail for the reply domain:
+- A **website** confirmed as phishing becomes a report targeting the captured host, with the URL and archive screenshot as evidence.
+- An **email** confirmed as phishing becomes a report with two targets: the message itself (filed with Netcraft's mail API) and the public IP of the first external `Received` hop, whose RDAP/WHOIS abuse contact receives the recipient-redacted `.eml`. Every linked page is analyzed as its own website submission.
+- The **public form** at `/abuse-reporting` reports domains or IPs directly. It requires the reporter's name and email.
 
-- Set `REPORT_REPLY_DOMAIN=phishing.support` and keep it equal to the domain in `IMAP_LISTEN_ADDRESS` (for example, `report@phishing.support`). The listener rejects a mismatch at startup.
-- Keep `SMTP_FROM` as a real, authenticated mailbox in the SMTP provider. Generated identities are only `Reply-To` addresses; they are never used as `From` or as the SMTP envelope sender.
-- For iCloud Custom Email Domain, enable **Allow All Incoming Emails** for `phishing.support`. This catch-all must deliver to the mailbox configured by `IMAP_MAILBOX`; confirm the mailbox/rules before rollout. See Apple’s [catch-all configuration guide](https://support.apple.com/guide/icloud/allow-all-incoming-emails-mm9e3ee0680f/icloud).
-- Configure `IMAP_HOST`, `IMAP_PORT`, `IMAP_SECURE`, `IMAP_USER`, `IMAP_PASS`, `IMAP_MAILBOX`, and `IMAP_LISTEN_ADDRESS` for that monitored mailbox.
-- Configure `ABUSE_SMTP_HOST`, `ABUSE_SMTP_PORT`, `ABUSE_SMTP_SECURE`, `ABUSE_SMTP_USER`, `ABUSE_SMTP_PASS`, and `ABUSE_SMTP_FROM` for outbound abuse mail (each falls back to its corresponding `SMTP_*` setting when the abuse-specific key is absent).
-- Perform a controlled preflight: send one report to a test recipient, reply to its generated `Reply-To`, and verify both messages and attachments appear in the submission’s Reports tab.
+The resolver turns each target into provider routes (registrar/hosting abuse mailboxes, Cloudflare, Tencent, Google Safe Browsing, Netcraft). Each route is submitted, retried, or settled independently; the submission page's Reports tab shows every route with its sent report and provider replies. A report counts as submitted when at least one provider confirmed it, so one unreachable provider never hides the others.
 
-Incoming mail is assigned only by an exact generated recipient address, an exact outbound RFC `Message-ID` in `In-Reply-To`/`References`, or a unique diagnostic thread header. The listener never guesses from sender, subject, or quoted content. Forwarded messages to `report@phishing.support` continue through the normal submission intake path. Other messages are recorded as ignored in the IMAP ledger, marked read, and left in the mailbox.
+Providers always see the `phishing.support` service identity. For a public-form report, the submitter's name and email appear only in the report text as the original reporter.
 
-Do not substitute plus-addressing if catch-all routing is unavailable. Use a dedicated reply subdomain backed by a catch-all-capable inbound provider while retaining the authenticated SMTP sender.
+## Mail configuration
+
+The service uses one mailbox for everything:
+
+```text
+SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS
+SMTP_FROM=support@phishing.support      # authenticated sender of every report
+IMAP_HOST, IMAP_PORT, IMAP_SECURE, IMAP_USER, IMAP_PASS
+IMAP_MAILBOX=phishing.report            # receives intake mail and provider replies
+IMAP_LISTEN_ADDRESS=report@phishing.support
+REPLY_DOMAIN=phishing.support           # must equal the IMAP_LISTEN_ADDRESS domain
+```
+
+Each abuse email uses `SMTP_FROM` as its visible sender and a new opaque `Reply-To` such as `abuse-<48 hex>@phishing.support`, unique to one route. `REPLY_DOMAIN` must deliver into `IMAP_MAILBOX` (for iCloud Custom Email Domain, enable **Allow All Incoming Emails**; see Apple's [catch-all guide](https://support.apple.com/guide/icloud/allow-all-incoming-emails-mm9e3ee0680f/icloud)). Do not substitute plus-addressing.
+
+The mailbox listener routes each message exactly once:
+
+1. A message addressed to one of our generated `Reply-To` identities, or whose `In-Reply-To`/`References` names one of our outbound `Message-ID`s, is stored on that route with its raw MIME and attachments and classified (acknowledged, rejected, bounce, …). A message naming more than one report is ignored rather than guessed.
+2. Otherwise, mail to `IMAP_LISTEN_ADDRESS` becomes an email submission (already-read intake mail is skipped).
+3. Everything else is recorded as ignored in the `mail_ingest` ledger and left in the mailbox.
+
+Sender, subject, and quoted content never select a report.
 
 ### Provider-facing reports
 
@@ -137,7 +155,7 @@ not hold unrelated provider routes behind it.
 
 ### Provider-facing email drafts
 
-The generic verified-email route does **not** send the stored AI analysis as the
+An abuse-mailbox route does **not** send the stored AI analysis as the
 message body. Before SMTP, the abuse worker creates a separate provider-facing
 draft for each resolved recipient. The draft has a recipient-specific greeting
 (for example, the Hostinger organization from RDAP), the exact normalized target
@@ -152,10 +170,9 @@ passages and unapproved URLs, and treated as untrusted data.
 The first draft is persisted in the provider run before SMTP and is reused
 unchanged only for a retry that is durably known to have failed before provider
 acceptance. Legacy/unverifiable drafts are stopped rather than resent, avoiding
-an accidental replay of an old analysis-only message. Configure
-`ABUSE_OPENAI_API_KEY`, `ABUSE_OPENAI_API_BASE_URL`, and optionally
-`ABUSE_EMAIL_DRAFT_MODEL` in the runtime environment when AI-written summaries
-are desired; `ABUSE_OPENAI_TIMEOUT_MS` bounds the drafting/classification call
+an accidental replay of an old analysis-only message. Drafting and reply
+classification use the analysis endpoint (`OPENAI_API_KEY`,
+`OPENAI_API_BASE_URL`, `OPENAI_MODEL`); `OPENAI_TIMEOUT_MS` bounds each call
 (5 seconds to 5 minutes, default 45 seconds). The deterministic template works
 without an AI configuration.
 
@@ -179,13 +196,11 @@ retries reuse a retained MHTML capture when one exists and recapture the URL onl
 when the original attempt did not produce an archive. Both actions atomically claim
 the submission, so concurrent clicks cannot create duplicate analysis/report work.
 
-## Supplemental Netcraft reporting
+## Netcraft reporting
 
-Every standalone abuse report with one or more validated observed URLs creates an independent Netcraft Reporting API v3 submission route. This happens alongside normal resolver-selected provider routes and the existing eligible Google Safe Browsing supplemental route. Netcraft receives every observed URL associated with a target in one API submission; the returned submission UUID is retained with the report for auditability.
+Every report target with one or more validated observed URLs gets an independent Netcraft Reporting API v3 URL submission, alongside the resolver-selected routes and Google Safe Browsing. Every confirmed phishing email is filed with Netcraft's `POST /report/mail` endpoint using the recipient-redacted RFC 822 source stored as report evidence. Netcraft rejects a message without a parseable sender, so a message with no `From` address (for example a forwarded bounce) is submitted with an explicit `From: Unknown sender <unknown-sender@invalid>` header. Messages over Netcraft's 20 MiB limit are settled as insufficient evidence and never sent. Each returned submission UUID is kept on the route.
 
-Every email confirmed as phishing is also sent to Netcraft's documented `POST /report/mail` endpoint using the original submitted RFC 822/MIME source. The original source is retained as the submission artifact and linked to the Netcraft report. Netcraft accepts messages up to 20 MiB; larger messages are recorded as a local failed report and are never sent. A durable pre-call marker prevents an interrupted or ambiguous request from being replayed automatically, while explicit API rejections remain visible as failed reports.
-
-Netcraft's API requires a reporter email. The service uses `ABUSE_NETCRAFT_REPORTER_EMAIL`, which defaults to `support@phishing.support` in Docker deployments. It deliberately does not disclose an optional public reporter contact email. URL-only providers are not given invented URLs: a target without a validated observed URL remains eligible for its resolver-derived abuse routes, but has no Netcraft or Google Safe Browsing supplemental submission to make.
+Netcraft's API requires a reporter email. The service uses `ABUSE_NETCRAFT_REPORTER_EMAIL` (default `support@phishing.support`) and never discloses a submitter's address. URL-only providers are never given invented URLs.
 
 ## Privacy note
 

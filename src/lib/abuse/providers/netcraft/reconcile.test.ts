@@ -17,6 +17,8 @@ const submissionId = "lFQ9vJzdwxWau2LTPeu665VWSCpxiFGV";
 const reportInput = {
 	targets: ["shop.hd-media.space"],
 	allegationCategory: "phishing" as const,
+	reporterName: "Test Reporter",
+	reporterContactEmail: "reporter@example.org",
 	description: "The captured page impersonates a service and collects login credentials.",
 	observedUrls: [{ target: "shop.hd-media.space", urls: ["https://shop.hd-media.space/"] }],
 };

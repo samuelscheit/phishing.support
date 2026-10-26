@@ -1,4 +1,5 @@
 import type { ResolvedRouteInput } from "../route_contracts";
+import type { AbuseTargetType } from "../schema";
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -25,7 +26,7 @@ export type ResolverDependencies = {
 
 export type ResolverTarget = {
 	normalizedTarget: string;
-	targetType: "domain" | "ip";
+	targetType: AbuseTargetType;
 	observedUrls: string[];
 };
 

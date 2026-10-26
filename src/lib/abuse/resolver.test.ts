@@ -1,17 +1,6 @@
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 import { parseExplicitWhoisAbuseMailboxes, resolveAbuseTarget, type ResolverDependencies } from "./resolver";
-
-const originalGenericEmail = process.env.ABUSE_GENERIC_EMAIL_ENABLED;
-
-beforeEach(() => {
-	process.env.ABUSE_GENERIC_EMAIL_ENABLED = "true";
-});
-
-afterAll(() => {
-	if (originalGenericEmail === undefined) delete process.env.ABUSE_GENERIC_EMAIL_ENABLED;
-	else process.env.ABUSE_GENERIC_EMAIL_ENABLED = originalGenericEmail;
-});
 
 function rdapResponse(payload: Record<string, unknown>): Response {
 	return new Response(JSON.stringify(payload), {
@@ -49,7 +38,7 @@ function abuseEntity(email: string, handle = "ABUSE") {
 	};
 }
 
-describe("standalone abuse resolver", () => {
+describe("abuse resolver", () => {
 	test("uses only an explicit registrar abuse RDAP entity and excludes nearby technical contacts", async () => {
 		const result = await resolveAbuseTarget(
 			{ normalizedTarget: "example.com", targetType: "domain", observedUrls: [] },

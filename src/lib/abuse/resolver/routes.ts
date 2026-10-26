@@ -1,6 +1,5 @@
 import {
 	getProviderSubmissionProviderForMailbox,
-	isGenericEmailRouteEnabled,
 	providerContactRoute,
 	verifiedDomainsForEmailRoute,
 } from "../providers";
@@ -14,7 +13,6 @@ export function emailRoute(params: {
 	snapshot: JsonRecord;
 }): ResolvedRouteInput {
 	const domain = params.email.slice(params.email.lastIndexOf("@") + 1);
-	const enabled = isGenericEmailRouteEnabled();
 	return {
 		routeKey: `email:${params.email}`,
 		providerRegistryKey: `email:${domain}`,
@@ -24,11 +22,10 @@ export function emailRoute(params: {
 		resolverProvenance: params.provenance,
 		resolutionSnapshot: params.snapshot,
 		verificationResult: {
-			verified: enabled,
+			verified: true,
 			verifiedDomains: verifiedDomainsForEmailRoute(params.email),
-			...(enabled ? {} : { reason: "generic_email_route_disabled" }),
 		},
-		status: enabled ? "verified" : "no_route",
+		status: "verified",
 	};
 }
 

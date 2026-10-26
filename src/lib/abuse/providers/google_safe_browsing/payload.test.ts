@@ -11,7 +11,7 @@ describe("Google Safe Browsing submission payload", () => {
 		expect(providerDefinitionHasValidHash(GOOGLE_SAFE_BROWSING_PROVIDER)).toBeTrue();
 	});
 
-	test("uses standalone evidence and legal-brand context without a legacy draft", () => {
+	test("uses report evidence and legal-brand context without an AI draft", () => {
 		const explanation = makeGoogleSafeBrowsingExplanation({
 			description: `  ${"credential theft on a fake sign-in form ".repeat(80)} `,
 			legalBrandUrl: "https://brand.example.com/legitimate-service",

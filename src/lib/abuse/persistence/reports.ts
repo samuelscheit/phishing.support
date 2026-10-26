@@ -40,6 +40,8 @@ export type CreatedAbuseReport = {
 export async function createReport(params: {
 	request: ValidatedAbuseReportRequest;
 	reporter: ReporterMetadata;
+	/** The submission that owns this report, when it came from website/email analysis. */
+	submissionId?: bigint;
 }): Promise<CreatedAbuseReport> {
 	const db = await getDb();
 	const { request, reporter } = params;
@@ -51,6 +53,12 @@ export async function createReport(params: {
 
 	return db.transaction(
 		(tx) => {
+			if (params.submissionId !== undefined) {
+				// One submission owns at most one report. Migrated reports predate
+				// the current idempotency key, so the submission link is authoritative.
+				const owned = tx.select({ id: abuseReports.id }).from(abuseReports).where(eq(abuseReports.submissionId, params.submissionId)).get();
+				if (owned) return { reportId: owned.id, trackingToken, created: false };
+			}
 			if (idempotencyKey) {
 				const existing = selectExistingIdempotentReport(tx, idempotencyKey);
 				if (existing) {
@@ -69,14 +77,15 @@ export async function createReport(params: {
 			tx.insert(abuseReports)
 				.values({
 					id: reportId,
+					submissionId: params.submissionId,
 					trackingTokenHash,
 					idempotencyKey,
 					requestPayloadHash: request.requestPayloadHash,
 					allegationCategory: request.allegationCategory,
 					description: request.description,
 					legalBrandUrl: request.legalBrandUrl,
-					reporterContactEmail: request.reporterContactEmail,
-					reporterIdentity: request.reporterIdentity,
+					reporterName: request.reporter?.name,
+					reporterContactEmail: request.reporter?.email,
 					status: "accepted",
 					requesterIp: reporter.reporterIp,
 					requesterCountry: reporter.reporterCountry,
@@ -122,7 +131,7 @@ export async function createReport(params: {
 					kind: "user_evidence_original",
 					mimeType: evidence.mimeType,
 					buffer: evidence.buffer,
-					metadata: { source: "public_api", decodedMimeType: evidence.mimeType },
+					metadata: { source: params.submissionId === undefined ? "public_api" : "submission", decodedMimeType: evidence.mimeType },
 				});
 			}
 
@@ -165,15 +174,10 @@ export async function getReportByTrackingTokenHash(trackingTokenHash: string): P
 	return db.select().from(abuseReports).where(eq(abuseReports.trackingTokenHash, trackingTokenHash)).get();
 }
 
-/**
- * Find a report created by an internal handoff. The idempotency key is the
- * durable cross-aggregate link for those reports; unlike the private tracking
- * token it is safe for server-side read models to use and does not need to be
- * exposed to the browser.
- */
-export async function getReportByIdempotencyKey(idempotencyKey: string): Promise<AbuseReport | undefined> {
+/** The report owned by a website/email submission, if analysis confirmed it. */
+export async function getReportForSubmission(submissionId: bigint): Promise<AbuseReport | undefined> {
 	const db = await getDb();
-	return db.select().from(abuseReports).where(eq(abuseReports.idempotencyKey, idempotencyKey)).get();
+	return db.select().from(abuseReports).where(eq(abuseReports.submissionId, submissionId)).get();
 }
 
 export async function getReportByTrackingToken(token: string): Promise<AbuseReport | undefined> {
@@ -248,30 +252,5 @@ export async function transitionReportStatus(params: {
 			return true;
 		},
 		{ behavior: "immediate" }
-	);
-}
-
-/**
- * Compatibility name for non-route phase updates. The operation itself is
- * still compare-and-set and never bypasses a terminal/canceled report.
- */
-
-export async function setReportStatus(reportId: bigint, status: AbuseReportStatus, data: Record<string, unknown> = {}): Promise<boolean> {
-	const db = await getDb();
-	return db.transaction(
-		(tx) => {
-			const report = tx.select({ status: abuseReports.status }).from(abuseReports).where(eq(abuseReports.id, reportId)).get();
-			if (!report || report.status === status || report.status === "canceled" || ["submitted", "insufficient_evidence", "no_route", "needs_human"].includes(report.status)) return false;
-			const updated = tx
-				.update(abuseReports)
-				.set({ status, updatedAt: now() })
-				.where(and(eq(abuseReports.id, reportId), eq(abuseReports.status, report.status)))
-				.returning({ id: abuseReports.id })
-				.get();
-			if (!updated) return false;
-			recordEvent(tx, { reportId, eventType: "report.status_changed", data: { from: report.status, to: status, ...data } });
-			return true;
-		},
-		{ behavior: "immediate" },
 	);
 }

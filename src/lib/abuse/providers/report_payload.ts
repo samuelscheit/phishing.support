@@ -43,7 +43,7 @@ function conciseProviderUrl(value: string): string {
 }
 
 /**
- * The legacy website analyser stores a deliberately detailed model answer in
+ * The website and email analysers store a deliberately detailed model answer in
  * `abuse_reports.description`. That field is useful for auditability, but it
  * is not a provider submission draft: it can contain Markdown, citations,
  * stale conclusions, and instructions written by an untrusted page. Direct

@@ -14,9 +14,11 @@ The captured page uses TikTok branding and Vietnamese TikTok recharge wording wh
 
 const report = {
 	allegationCategory: "phishing",
+	submissionId: 352185586284498946n,
+	reporterName: null,
+	reporterContactEmail: null,
 	description: longAnalysis,
 	legalBrandUrl: "https://www.tiktok.com/coin",
-	idempotencyKey: "legacy-website:352185586284498946",
 };
 
 const target = {
@@ -39,7 +41,7 @@ const hostingerRoute = {
 	},
 };
 
-describe("standalone abuse email drafts", () => {
+describe("abuse email drafts", () => {
 	test("turns analysis evidence into a recipient-specific Hostinger complaint instead of pasting it", async () => {
 		const draft = await createAbuseEmailDraft({
 			report,
@@ -66,7 +68,36 @@ describe("standalone abuse email drafts", () => {
 		expect(draft.body).not.toContain("## Verdict");
 		expect(draft.body).not.toContain("The observed host is not controlled by TikTok");
 		expect(draft.body).not.toContain(longAnalysis);
+		expect(draft.body).not.toContain("Originally reported");
 		expect(hasSubstantialCopiedPassage(longAnalysis, draft.body)).toBeFalse();
+	});
+
+	test("names a public submitter in the body while the case link stays absent", async () => {
+		const draft = await createAbuseEmailDraft({
+			report: { ...report, submissionId: null, reporterName: "Ada Lovelace", reporterContactEmail: "ada@example.org" },
+			target,
+			route: hostingerRoute,
+			recipient: "abuse@hostinger.com",
+		}, { generateSummary: async () => "The captured page impersonates a payment service." });
+		expect(draft.body).toContain("Originally reported to phishing.support by Ada Lovelace <ada@example.org>.");
+		expect(draft.body).not.toContain("Case details:");
+		expect(draft.body).toContain("The phishing.support team");
+	});
+
+	test("reports a phishing email to the abuse contact of its sending infrastructure", async () => {
+		const draft = await createAbuseEmailDraft({
+			report,
+			target: { normalizedTarget: "149.72.231.44", observedUrls: [] },
+			route: { ...hostingerRoute, resolutionSnapshot: { allocationOwner: { organization: "SendGrid, Inc." } } },
+			recipient: "abuse@sendgrid.com",
+			attachmentNames: ["phishing-email.eml"],
+			attachmentMimeTypes: ["message/rfc822"],
+		}, { generateSummary: async () => "The email impersonates a wallet provider and links to a credential-harvesting page." });
+		expect(draft.body).toContain("reporting a phishing email that was sent from 149.72.231.44 to SendGrid, Inc.");
+		expect(draft.body).toContain("The phishing email is attached with its full delivery headers.");
+		expect(draft.body).toContain("Please investigate the sending account or server");
+		expect(draft.body).toContain("Attached evidence: phishing-email.eml.");
+		expect(draft.body).not.toContain("No observed URL was supplied");
 	});
 
 	test("uses a bounded factual fallback when the model is unavailable or echoes the analysis", async () => {

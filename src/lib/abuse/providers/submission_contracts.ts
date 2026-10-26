@@ -1,3 +1,5 @@
+import type { AbuseTargetType } from "../schema";
+
 /**
  * Immutable provider metadata that generic direct-submission infrastructure
  * may inspect. Submission mechanics, credentials, and request payload rules
@@ -20,7 +22,7 @@ export type ProviderSubmissionDefinition = {
 	 * branching on a provider name in resolver code.
 	 */
 	readonly supplementalTargets?: readonly {
-		readonly targetType: "domain" | "ip";
+		readonly targetType: AbuseTargetType;
 		readonly requiresObservedUrl?: boolean;
 	}[];
 };

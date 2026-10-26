@@ -1,13 +1,15 @@
-import { ArtifactsEntity, ReportingSummaryEntity, SubmissionsEntity } from "./db/entities";
+import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
 import { runStreamedAnalysisRun } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
 import { simpleParser } from "mailparser";
-import { analyzeHeaders, getAddressesText, getMailImage } from "./mail";
+import { analyzeHeaders, getAddressesText, getMailImage, getMailLinks } from "./mail";
 import { getInfo } from "./website_info";
 import * as toon from "@toon-format/toon";
-import { reportEmailPhishing } from "./report/reportEmailPhishing";
+import { reportConfirmedEmailPhishing } from "./abuse/submission_reports";
+import { smtpTransport } from "./mail_config";
 import { markSubmissionInvalid } from "./submissions/state";
-import { defaultReasoning, defaultResponseModel, mailer } from "./utils";
+import { createWebsiteSubmission } from "./submissions/website";
+import { defaultReasoning, defaultResponseModel } from "./utils";
 import { abuseReplyMail, abuseReplyName, abuseReplyUrl } from "./constants";
 
 const URL_RE = /https?:\/\/[^\s"'<>]+/gi;
@@ -287,7 +289,7 @@ export type MailData = Awaited<ReturnType<typeof parseMail>>;
 export async function analyzeMail(
 	emlContent: string,
 	stream_id: bigint,
-	options: { existingOriginalEmlArtifactId?: bigint; reuseEvidenceArtifacts?: boolean } = {}
+	options: { reuseEvidenceArtifacts?: boolean } = {}
 ) {
 	try {
 		const originalMail = await parseMail(emlContent);
@@ -296,9 +298,14 @@ export async function analyzeMail(
 		await emitStep(stream_id, "start", 0);
 		await SubmissionsEntity.update(stream_id, { status: "running", data: { kind: "email", email: mail } });
 
-		if (!options.reuseEvidenceArtifacts) {
+		let screenshotPng: Buffer | undefined;
+		if (options.reuseEvidenceArtifacts) {
+			const stored = (await ArtifactsEntity.listForSubmission(stream_id)).find((artifact) => artifact.kind === "screenshot");
+			screenshotPng = stored ? (await ArtifactsEntity.get(stored.id))?.blob : undefined;
+		} else {
 			try {
 				const image = await getMailImage(mail);
+				screenshotPng = image;
 				await ArtifactsEntity.saveBuffer({
 					submissionId: stream_id,
 					name: "mail.png",
@@ -311,15 +318,15 @@ export async function analyzeMail(
 			}
 		}
 
-		const originalEmlArtifactId =
-			options.existingOriginalEmlArtifactId ??
-			(await ArtifactsEntity.saveBuffer({
+		if (!options.reuseEvidenceArtifacts) {
+			await ArtifactsEntity.saveBuffer({
 				submissionId: stream_id,
 				name: "mail.eml",
 				kind: "eml",
 				mimeType: "message/rfc822",
 				buffer: Buffer.from(mail.eml, "utf-8"),
-			}));
+			});
+		}
 
 		await emitStep(stream_id, "analysis_run", 30);
 
@@ -414,44 +421,41 @@ ${buildMailEvidence(mail, analysis.output_text)}`,
 
 		if (phishing) {
 			await emitStep(stream_id, "reporting", 90);
-			await reportEmailPhishing({
+			const submission = await SubmissionsEntity.get(stream_id);
+			const reporter = {
+				reporterIp: submission?.reporterIp ?? undefined,
+				reporterCountry: submission?.reporterCountry ?? undefined,
+				reporterHeaders: submission?.reporterHeaders ?? undefined,
+			};
+			await reportConfirmedEmailPhishing({
 				submissionId: stream_id,
-				mail,
 				analysisText: analysis.output_text,
-				originalEmlArtifactId,
+				redactedEml: mail.eml,
+				sendingIp: mail.headers.routing.originatingIp,
+				screenshotPng,
+				reporter,
 			});
-
-			const hasSuccessfulReport = await ReportingSummaryEntity.hasSuccessfulReport(stream_id);
-			if (hasSuccessfulReport) {
-				await SubmissionsEntity.update(stream_id, { status: "reported", info: undefined });
-				var subject = `Phishing Reported - ${submissionSubject}`;
-				var body = [
-					`Thank you very much for your report!`,
-					"",
-					`We have analyzed the email you provided and determined that it is indeed a phishing attempt.`,
-					"",
-					`Your submission has been reported to the relevant email providers and hosting services involved.`,
-					`You can view details at: ${abuseReplyUrl}/submissions/${stream_id}`,
-					"",
-					`Thank you for helping to combat phishing!`,
-					`Your ${abuseReplyName} Team`,
-				].join("\n");
-			} else {
-				await SubmissionsEntity.update(stream_id, {
-					status: "failed",
-					info: "Phishing confirmed, but no reports were successfully submitted.",
-				});
-				var subject = `Phishing Report Could Not Be Reported - ${submissionSubject}`;
-				var body = [
-					`Thank you for your report.`,
-					"",
-					`We analyzed the email you provided and confirmed that it is a phishing attempt, but the abuse report could not be delivered successfully.`,
-					`We have kept the failed delivery details for review at: ${abuseReplyUrl}/submissions/${stream_id}`,
-					"",
-					`Thank you for helping to combat phishing.`,
-					`Your ${abuseReplyName} Team`,
-				].join("\n");
+			// Every linked page is analyzed and, if confirmed, reported as its own website.
+			for (const link of getMailLinks(mail)) {
+				if (!URL.canParse(link.href)) continue;
+				const url = new URL(link.href);
+				if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+				createWebsiteSubmission({ url: url.toString(), source: `email:${stream_id.toString()}`, ...reporter }).catch(console.error);
 			}
+
+			await SubmissionsEntity.update(stream_id, { status: "reported", info: undefined });
+			var subject = `Phishing Reported - ${submissionSubject}`;
+			var body = [
+				`Thank you very much for your report!`,
+				"",
+				`We have analyzed the email you provided and determined that it is indeed a phishing attempt.`,
+				"",
+				`Your submission is being reported to the email providers and hosting services involved.`,
+				`You can follow each report at: ${abuseReplyUrl}/submissions/${stream_id}`,
+				"",
+				`Thank you for helping to combat phishing!`,
+				`Your ${abuseReplyName} Team`,
+			].join("\n");
 		} else {
 			await markSubmissionInvalid(stream_id);
 
@@ -475,7 +479,7 @@ ${buildMailEvidence(mail, analysis.output_text)}`,
 				`Sending reporter notification email to ${to} from ${from} for submission ${stream_id}. Subject: ${subject} Body: ${body}`
 			);
 			if (to && from && subject && body) {
-				await mailer?.sendMail({ from, to, subject, text: body });
+				await smtpTransport()?.sendMail({ from, to, subject, text: body });
 			}
 		} catch (err) {
 			console.error("Failed to send reporter notification email:", err);

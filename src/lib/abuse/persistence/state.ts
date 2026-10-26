@@ -29,22 +29,30 @@ export const FINAL_OR_BLOCKED_ROUTE_STATUSES = new Set<AbuseRouteStatus>([
 	"unknown_external_state",
 ]);
 
+/** Routes whose report reached the provider (delivered mail awaits a reply). */
+const DELIVERED_ROUTE_STATUSES = new Set<AbuseRouteStatus>(["submitted", "acknowledged", "awaiting_provider_reply"]);
+
+/**
+ * Public report status derived from its routes. Work in progress is shown
+ * first; once every route is settled, any delivered route is a success for
+ * the report even when another provider failed or is ambiguous, so a single
+ * unreachable provider never hides reports that were actually filed.
+ */
 export function aggregateReportStatus(routeStatuses: AbuseRouteStatus[]): AbuseReportStatus {
 	if (routeStatuses.length === 0) return "no_route";
-	if (routeStatuses.includes("needs_human")) return "needs_human";
-	if (routeStatuses.includes("unknown_external_state")) return "failed";
 	if (routeStatuses.some((status) => ["running", "waiting_code", "escalating_to_portal"].includes(status))) return "running";
 	if (routeStatuses.includes("queued")) return "queued";
 	if (routeStatuses.includes("verified")) return "verifying";
 	if (routeStatuses.includes("resolving")) return "resolving";
-	if (routeStatuses.includes("awaiting_provider_reply")) return "waiting_provider";
 
-	const successful = routeStatuses.filter((status) => status === "submitted" || status === "acknowledged").length;
-	if (successful === routeStatuses.length) return "submitted";
-	if (successful > 0) return "partially_submitted";
-
-	const routable = routeStatuses.filter((status) => status !== "no_route");
-	if (routable.length === 0) return "no_route";
-	if (routable.every((status) => status === "insufficient_evidence")) return "insufficient_evidence";
+	const actionable = routeStatuses.filter((status) => status !== "no_route");
+	const delivered = actionable.filter((status) => DELIVERED_ROUTE_STATUSES.has(status));
+	if (delivered.length > 0) {
+		if (delivered.length < actionable.length) return "partially_submitted";
+		return delivered.includes("awaiting_provider_reply") ? "waiting_provider" : "submitted";
+	}
+	if (actionable.length === 0) return "no_route";
+	if (actionable.includes("needs_human")) return "needs_human";
+	if (actionable.every((status) => status === "insufficient_evidence")) return "insufficient_evidence";
 	return "failed";
 }

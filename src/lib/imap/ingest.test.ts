@@ -1,30 +1,39 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { eq } from "drizzle-orm";
 
-import {
-	AnalysisRunsEntity,
-	ArtifactsEntity,
-	MailIngestEntity,
-	ReportMessagesEntity,
-	ReportThreadsEntity,
-	SubmissionsEntity,
-} from "../db/entities";
+import { getDb } from "../db";
+import { MailIngestEntity, SubmissionsEntity } from "../db/entities";
 import { useTemporaryDatabase } from "../db/test_helpers";
-import { getSubmissionDetails } from "../submissions/details";
-import { ingestFetchedIncomingMail, type FetchedIncomingMail, type IncomingMailIngestConfig } from "./ingest";
+import { validateAbuseReportRequest } from "../abuse/contracts";
+import { sendAbuseEmailRoute } from "../abuse/mail";
+import { AbuseRepository } from "../abuse/repository";
+import { abuseJobs } from "../abuse/schema";
+import { ingestFetchedMail, type MailIngestConfig } from "./ingest";
+import type { FetchedMail } from "./rfc";
 
 useTemporaryDatabase();
 
-const config: IncomingMailIngestConfig = {
-	mailbox: "phishing.report",
-	uidValidity: 73,
-	intakeAddress: "report@phishing.support",
-	processSeen: false,
-};
+const config: MailIngestConfig = { mailbox: "phishing.report", uidValidity: 73, intakeAddress: "report@phishing.support" };
+const environmentNames = ["SMTP_FROM", "REPLY_DOMAIN", "ABUSE_TRACKING_TOKEN_SECRET"] as const;
+const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [name, process.env[name]]));
+
+beforeEach(() => {
+	process.env.SMTP_FROM = "Phishing Support <support@phishing.support>";
+	process.env.REPLY_DOMAIN = "phishing.support";
+	process.env.ABUSE_TRACKING_TOKEN_SECRET = "01234567890123456789012345678901";
+});
+
+afterAll(() => {
+	for (const name of environmentNames) {
+		const value = originalEnvironment[name];
+		if (value === undefined) delete process.env[name];
+		else process.env[name] = value;
+	}
+});
 
 function eml(headers: Record<string, string>, body: string, parts?: Array<{ filename: string; content: string; contentType?: string }>) {
 	const headerLines = Object.entries(headers).map(([name, value]) => `${name}: ${value}`);
 	if (!parts?.length) return Buffer.from([...headerLines, "", body].join("\r\n"));
-
 	const boundary = "mail-boundary-8bc7a4";
 	return Buffer.from([
 		...headerLines,
@@ -48,280 +57,167 @@ function eml(headers: Record<string, string>, body: string, parts?: Array<{ file
 	].join("\r\n"));
 }
 
-function fetched(uid: number, source: Buffer, options: Partial<FetchedIncomingMail> = {}): FetchedIncomingMail {
-	return {
-		uid,
-		source,
-		internalDate: new Date("2026-08-13T12:00:00.000Z"),
-		...options,
-	};
+function fetched(uid: number, source: Buffer, options: Partial<FetchedMail> = {}): FetchedMail {
+	return { uid, source, internalDate: new Date("2026-08-13T12:00:00.000Z"), ...options };
 }
 
-async function createThread(key: string, replyToken = "0123456789abcdef0123456789abcdef") {
-	const submissionId = await SubmissionsEntity.create({
-		kind: "website",
-		data: { kind: "website", website: { url: `https://${key}.example.test/path` } },
-		dedupeKey: key,
+const noIntake = async () => {
+	throw new Error("Intake must not run for this message.");
+};
+
+/** A sent abuse email whose Reply-To and Message-ID identify exactly one route. */
+async function sentReport(target = "example.com") {
+	const request = await validateAbuseReportRequest({
+		targets: [target],
+		allegationCategory: "phishing",
+		reporterName: "Test Reporter",
+		reporterContactEmail: "reporter@example.org",
+		description: "A credential-harvesting page impersonates the protected brand.",
+		observedUrls: [{ target, urls: [`https://login.${target}/collect`] }],
 	});
-	const replyAddress = `case-${replyToken}@phishing.support`;
-	const outboundMessageId = `<outbound-${key}@phishing.support>`;
-	const created = await ReportThreadsEntity.createWithPendingOutbound({
-		submissionId,
-		to: ["abuse@example.test"],
-		subject: `Abuse report ${key}`,
-		replyAddress,
-		replyToken,
-		from: "support@phishing.support",
-		textBody: "Please investigate.",
-		rfcMessageId: outboundMessageId,
+	const report = await AbuseRepository.createReport({ request, reporter: {} });
+	const [reportTarget] = await AbuseRepository.listTargets(report.reportId);
+	const route = await AbuseRepository.upsertResolvedRoute(reportTarget!.id, {
+		routeKey: `email:abuse@provider.${target}`,
+		providerRegistryKey: `email:provider.${target}`,
+		providerDisplayName: "Provider abuse desk",
+		routeType: "email",
+		verifiedEmail: `abuse@provider.${target}`,
+		resolverProvenance: { source: "test" },
+		resolutionSnapshot: { source: "test" },
+		status: "verified",
 	});
-	await ReportMessagesEntity.settleOutbound({
-		threadId: created.threadId,
-		messageId: created.messageId,
-		result: "sent",
-		providerMessageId: `provider-${key}`,
+	const delivery = await AbuseRepository.beginEmailDelivery({ routeId: route.id, providerPayload: { source: "test" }, correlationKey: `test-mail:${route.id.toString()}` });
+	if (!delivery) throw new Error("Test email run was not created.");
+	await sendAbuseEmailRoute({
+		reportId: report.reportId,
+		routeId: route.id,
+		runId: delivery.run.id,
+		recipient: `abuse@provider.${target}`,
+		subject: "Automated abuse report",
+		body: "Please investigate this phishing target.",
+		correlationKey: delivery.run.correlationKey,
+		transport: { sendMail: async () => ({ messageId: "smtp-test" }) },
 	});
-	return { submissionId, replyAddress, outboundMessageId, ...created };
+	await AbuseRepository.settleEmailDelivery({ runId: delivery.run.id, expectedRunStatus: "starting", expectedRouteStatus: "running", outcome: "sent" });
+	const outbound = await AbuseRepository.getOutboundMailForRun(delivery.run.id);
+	if (!outbound?.replyAddress || !outbound.messageId) throw new Error("Test outbound message was not persisted.");
+	return { report, route, replyAddress: outbound.replyAddress, outboundMessageId: outbound.messageId };
 }
 
-describe("IMAP correspondence ingest", () => {
-	test("assigns an already-seen reply by generated identity, stores its raw message and attachment, and never creates an analysis", async () => {
-		const thread = await createThread("imap-reply");
+async function inboundMessages(reportId: bigint) {
+	return (await AbuseRepository.listMailForReport(reportId)).filter((message) => message.direction === "inbound");
+}
+
+describe("mailbox ingest", () => {
+	test("stores an already-seen provider reply by its Reply-To identity with raw MIME, attachment, and one classifier job", async () => {
+		const sent = await sentReport();
+		const source = eml({
+			From: "Abuse Desk <abuse@provider.example.com>",
+			To: `Generated Address <${sent.replyAddress.toUpperCase()}>`,
+			"Message-ID": "<reply-one@provider.example.com>",
+			Subject: "Case received",
+		}, "We have received your report.", [{ filename: "case-note.txt", content: "Ticket #123" }]);
+
+		const result = await ingestFetchedMail(fetched(44, source, { flags: new Set(["\\Seen"]) }), config, { createIntakeSubmission: noIntake });
+		expect(result).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_provider_reply" });
+		if (result.disposition !== "terminal" || !result.messageId) throw new Error("Expected a stored reply.");
+
+		const stored = await AbuseRepository.getMailMessage(result.messageId);
+		expect(stored).toMatchObject({ routeId: sent.route.id, direction: "inbound", status: "received", messageId: "<reply-one@provider.example.com>" });
+		expect(stored?.textBody).toContain("We have received your report.");
+		expect(stored?.attachmentArtifactIds).toHaveLength(1);
+		expect((await AbuseRepository.getArtifact(sent.report.reportId, stored!.rawArtifactId!))?.blob.equals(source)).toBeTrue();
+		expect((await AbuseRepository.getArtifact(sent.report.reportId, BigInt(stored!.attachmentArtifactIds[0]!)))?.blob.toString()).toBe("Ticket #123");
+		const jobs = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.dedupeKey, `classify-abuse-mail:${result.messageId.toString()}`)).all();
+		expect(jobs).toMatchObject([{ jobType: "classify_provider_reply", status: "queued", routeId: sent.route.id }]);
+		expect(await MailIngestEntity.get({ ...config, uid: 44 })).toMatchObject({ route: "reply", terminal: true });
+	});
+
+	test("correlates a reply by In-Reply-To even when it is addressed to the intake mailbox", async () => {
+		const sent = await sentReport();
+		const result = await ingestFetchedMail(fetched(45, eml({
+			From: "abuse@provider.example.com",
+			To: "report@phishing.support",
+			"Message-ID": "<reply-two@provider.example.com>",
+			"In-Reply-To": sent.outboundMessageId,
+			Subject: "Re: Automated abuse report",
+		}, "The site was suspended.")), config, { createIntakeSubmission: noIntake });
+		expect(result).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_provider_reply" });
+		expect(await inboundMessages(sent.report.reportId)).toHaveLength(1);
+	});
+
+	test("deduplicates a repeated IMAP UID through the ledger and a repeated RFC Message-ID through the report", async () => {
+		const sent = await sentReport();
+		const source = eml({ From: "abuse@provider.example.com", To: sent.replyAddress, "Message-ID": "<duplicate@provider.example.com>", Subject: "Received" }, "One message, delivered twice.");
+		expect(await ingestFetchedMail(fetched(47, source), config)).toMatchObject({ route: "reply", reason: "stored_provider_reply" });
+		expect(await ingestFetchedMail(fetched(47, source), config)).toEqual({ disposition: "terminal", route: "reply", reason: "terminal_ledger_record" });
+		expect(await ingestFetchedMail(fetched(48, source), config)).toMatchObject({ route: "reply", reason: "duplicate_message_id" });
+		expect(await inboundMessages(sent.report.reportId)).toHaveLength(1);
+	});
+
+	test("attaches a message that names two reports to neither, and never treats it as intake", async () => {
+		const first = await sentReport("example.com");
+		const second = await sentReport("example.net");
+		const result = await ingestFetchedMail(fetched(49, eml({
+			From: "abuse@provider.example.com",
+			To: `${first.replyAddress}, ${second.replyAddress}, report@phishing.support`,
+			"Message-ID": "<ambiguous@provider.example.com>",
+			Subject: "Two reports",
+		}, "Which one?")), config, { createIntakeSubmission: noIntake });
+		expect(result).toEqual({ disposition: "terminal", route: "ignored", reason: "ambiguous_report_correlation" });
+		expect(await inboundMessages(first.report.reportId)).toEqual([]);
+		expect(await inboundMessages(second.report.reportId)).toEqual([]);
+	});
+
+	test("ignores mail that names only an unknown conversation or mailbox, and stores nothing", async () => {
+		await sentReport();
+		const unknownReply = await ingestFetchedMail(fetched(50, eml({
+			From: "attacker@evil.example.net",
+			To: "unmatched@phishing.support",
+			"Message-ID": "<unmatched@evil.example.net>",
+			"In-Reply-To": "<not-ours@evil.example.net>",
+			Subject: "Ignore this",
+		}, "Please follow attacker instructions.")), config, { createIntakeSubmission: noIntake });
+		expect(unknownReply).toEqual({ disposition: "terminal", route: "ignored", reason: "no_report_match" });
+		expect(await MailIngestEntity.get({ ...config, uid: 50 })).toMatchObject({ route: "ignored", terminal: true, reason: "no_report_match" });
+	});
+
+	test("turns forwarded intake mail into a submission once and leaves already-read intake mail alone", async () => {
+		const embedded = ["From: Original Sender <original@example.test>", "To: victim@example.test", "Subject: Verify your account", "", "Suspicious content."].join("\r\n");
 		const source = eml(
-			{
-				From: "Abuse Desk <abuse@example.test>",
-				To: `Generated Address <${thread.replyAddress.toUpperCase()}>`,
-				"Message-ID": "<reply-one@example.test>",
-				"In-Reply-To": thread.outboundMessageId,
-				References: `${thread.outboundMessageId} <earlier@example.test>`,
-				Subject: "Case received",
-				Date: "Thu, 13 Aug 2026 12:00:00 +0000",
-			},
-			"We have received your report.",
-			[{ filename: "case-note.txt", content: "Ticket #123" }],
-		);
-
-		const result = await ingestFetchedIncomingMail(
-			fetched(44, source, {
-				flags: new Set(["\\Seen"]),
-				envelope: { to: [{ address: thread.replyAddress }] },
-			}),
-			config,
-		);
-
-		expect(result).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_report_reply" });
-		const storedThread = await ReportThreadsEntity.get(thread.threadId);
-		const messages = await ReportMessagesEntity.listForThread(thread.threadId);
-		expect(storedThread?.status).toBe("replied");
-		expect(messages).toHaveLength(2);
-		const inbound = messages.find((message) => message.direction === "inbound");
-		expect(inbound).toMatchObject({
-			kind: "reply",
-			status: "received",
-			from: "Abuse Desk <abuse@example.test>",
-			to: [thread.replyAddress],
-			messageId: "<reply-one@example.test>",
-			inReplyTo: thread.outboundMessageId,
-			textBody: "We have received your report.",
-		});
-		expect(inbound?.attachmentArtifactIds).toHaveLength(1);
-		expect(inbound?.rawArtifactId).toBeDefined();
-
-		const rawArtifact = await ArtifactsEntity.get(inbound!.rawArtifactId!);
-		const attachment = await ArtifactsEntity.get(BigInt(inbound!.attachmentArtifactIds[0]!));
-		expect(rawArtifact?.blob.equals(source)).toBeTrue();
-		expect(attachment?.blob.toString()).toBe("Ticket #123");
-		expect(await AnalysisRunsEntity.listForSubmission(thread.submissionId)).toEqual([]);
-
-		const detail = await getSubmissionDetails(thread.submissionId.toString());
-		expect(detail?.reportThreads).toHaveLength(1);
-		expect(detail?.reportThreads[0]?.messages).toHaveLength(2);
-		expect(detail?.reportThreads[0]?.messages.find((message) => message.direction === "inbound")).toMatchObject({
-		inReplyTo: thread.outboundMessageId,
-		references: [thread.outboundMessageId, "<earlier@example.test>"],
-		attachmentArtifactIds: [expect.any(String)],
-	});
-		expect((await MailIngestEntity.get({ mailbox: config.mailbox, uidValidity: config.uidValidity, uid: 44 }))?.route).toBe("reply");
-	});
-
-	test("uses Delivered-To and X-Original-To recipient headers and persists auto replies and bounces", async () => {
-		const autoThread = await createThread("imap-auto", "11111111111111111111111111111111");
-		const autoResult = await ingestFetchedIncomingMail(
-			fetched(
-				45,
-				eml(
-					{
-						From: "Abuse Desk <abuse@example.test>",
-						To: "Undisclosed recipients:;",
-						"Delivered-To": `Reply Mailbox <${autoThread.replyAddress.toUpperCase()}>`,
-						"Message-ID": "<auto-reply@example.test>",
-						"In-Reply-To": autoThread.outboundMessageId,
-						"Auto-Submitted": "auto-replied",
-						Subject: "Out of office",
-					},
-					"I am unavailable.",
-				),
-			),
-			config,
-		);
-		expect(autoResult).toMatchObject({ disposition: "terminal", route: "reply" });
-		expect((await ReportMessagesEntity.listForThread(autoThread.threadId)).find((message) => message.direction === "inbound")).toMatchObject({
-			kind: "auto_reply",
-			status: "received",
-		});
-		expect((await ReportThreadsEntity.get(autoThread.threadId))?.status).toBe("replied");
-
-		const bounceThread = await createThread("imap-bounce", "22222222222222222222222222222222");
-		const bounceResult = await ingestFetchedIncomingMail(
-			fetched(
-				46,
-				eml(
-					{
-						From: "MAILER-DAEMON <mailer-daemon@example.test>",
-						To: "Undisclosed recipients:;",
-						"X-Original-To": bounceThread.replyAddress,
-						"Message-ID": "<bounce@example.test>",
-						"In-Reply-To": bounceThread.outboundMessageId,
-						"Content-Type": "multipart/report; report-type=delivery-status",
-						Subject: "Delivery Status Notification (Failure)",
-					},
-					"Your message could not be delivered.",
-				),
-			),
-			config,
-		);
-		expect(bounceResult).toMatchObject({ disposition: "terminal", route: "reply" });
-		expect((await ReportMessagesEntity.listForThread(bounceThread.threadId)).find((message) => message.direction === "inbound")).toMatchObject({
-			kind: "bounce",
-			status: "received",
-		});
-		expect((await ReportThreadsEntity.get(bounceThread.threadId))?.status).toBe("delivery_failed");
-	});
-
-	test("deduplicates both an IMAP UID and a repeated RFC Message-ID", async () => {
-		const thread = await createThread("imap-duplicates", "33333333333333333333333333333333");
-		const source = eml(
-			{
-				From: "Abuse Desk <abuse@example.test>",
-				To: thread.replyAddress,
-				"Message-ID": "<duplicate@example.test>",
-				"In-Reply-To": thread.outboundMessageId,
-				Subject: "Received",
-			},
-			"One message, delivered more than once.",
-		);
-
-		expect(await ingestFetchedIncomingMail(fetched(47, source), config)).toMatchObject({ disposition: "terminal", route: "reply" });
-		expect(await ingestFetchedIncomingMail(fetched(47, source), config)).toEqual({
-			disposition: "terminal",
-			route: "reply",
-			reason: "terminal_ledger_record",
-		reportMessageId: expect.any(BigInt),
-	});
-		expect(await ingestFetchedIncomingMail(fetched(48, source), config)).toMatchObject({
-			disposition: "terminal",
-			route: "reply",
-			reason: "duplicate_message_id",
-		});
-		expect((await ReportMessagesEntity.listForThread(thread.threadId)).filter((message) => message.direction === "inbound")).toHaveLength(1);
-		expect(await MailIngestEntity.get({ mailbox: config.mailbox, uidValidity: config.uidValidity, uid: 48 })).toMatchObject({
-		terminal: true,
-		route: "reply",
-		reason: "duplicate_message_id",
-	});
-	});
-
-	test("records unmatched mail as ignored without copying its body, attachments, or creating a submission", async () => {
-		const submissionId = await SubmissionsEntity.create({
-			kind: "website",
-			data: { kind: "website", website: { url: "https://existing.example.test" } },
-			dedupeKey: "ignored-mail-existing-submission",
-		});
-		const result = await ingestFetchedIncomingMail(
-			fetched(
-				49,
-				eml(
-					{
-						From: "Unrelated <unrelated@example.test>",
-						To: "unmatched@phishing.support",
-						"Message-ID": "<ignored@example.test>",
-						Subject: "Unrelated mailbox message",
-					},
-					"This must remain only in IMAP.",
-					[{ filename: "unrelated.txt", content: "do not store me" }],
-				),
-			),
-			config,
-		);
-
-		expect(result).toEqual({ disposition: "terminal", route: "ignored", reason: "no_report_thread_match" });
-		expect(await MailIngestEntity.get({ mailbox: config.mailbox, uidValidity: config.uidValidity, uid: 49 })).toMatchObject({
-			route: "ignored",
-			terminal: true,
-			reason: "no_report_thread_match",
-		});
-		expect(await ArtifactsEntity.listForSubmission(submissionId)).toEqual([]);
-	});
-
-	test("keeps normal report@ intake behavior while leaving already-seen intake mail untouched", async () => {
-		const embedded = [
-			"From: Original Sender <original@example.test>",
-			"To: report@phishing.support",
-			"Subject: Forwarded phishing message",
-			"",
-			"Suspicious content.",
-		].join("\r\n");
-		const source = eml(
-			{
-				From: "Reporter <reporter@example.test>",
-				To: "report@phishing.support",
-				"Message-ID": "<public-intake@example.test>",
-				Subject: "Forwarded message",
-			},
+			{ From: "Reporter <reporter@example.test>", To: "report@phishing.support", "Message-ID": "<intake@example.test>", Subject: "Fwd: phishing" },
 			"See attached.",
 			[{ filename: "original.eml", content: embedded, contentType: "message/rfc822" }],
 		);
 		const created: Array<{ eml: string; source?: string }> = [];
-		const createIntakeSubmission = async (emlContent: string, options: { source?: string }) => {
-			created.push({ eml: emlContent, source: options.source });
+		const createIntakeSubmission = async (content: string, options: { source?: string }) => {
+			created.push({ eml: content, source: options.source });
 			return 999n;
 		};
-
-		expect(await ingestFetchedIncomingMail(fetched(50, source), config, { createIntakeSubmission })).toEqual({
-			disposition: "terminal",
-			route: "intake",
-			reason: "processed_public_intake",
-		});
+		expect(await ingestFetchedMail(fetched(51, source), config, { createIntakeSubmission })).toEqual({ disposition: "terminal", route: "intake", reason: "processed_intake" });
 		expect(created).toHaveLength(1);
 		expect(created[0]?.eml).toContain("Original Sender");
-		expect(created[0]?.source).toBe("imap:phishing.report:73:50");
-		expect(await MailIngestEntity.get({ mailbox: config.mailbox, uidValidity: config.uidValidity, uid: 50 })).toMatchObject({ route: "intake", terminal: true });
+		expect(created[0]?.source).toBe("imap:phishing.report:73:51");
 
-		expect(await ingestFetchedIncomingMail(fetched(51, source, { flags: new Set(["\\Seen"]) }), config, { createIntakeSubmission })).toEqual({
-			disposition: "skipped",
-			route: "intake",
-			reason: "already_seen",
-	});
+		expect(await ingestFetchedMail(fetched(52, source, { flags: new Set(["\\Seen"]) }), config, { createIntakeSubmission })).toEqual({ disposition: "skipped", route: "intake", reason: "already_seen" });
 		expect(created).toHaveLength(1);
-		expect(await MailIngestEntity.get({ mailbox: config.mailbox, uidValidity: config.uidValidity, uid: 51 })).toBeUndefined();
+		expect(await MailIngestEntity.get({ ...config, uid: 52 })).toBeUndefined();
 	});
 
-	test("leaves malformed/unpersistable messages retryable and increments ingest attempts", async () => {
-		const malformed = { uid: 52 } satisfies FetchedIncomingMail;
+	test("never resubmits intake mail whose submission already exists", async () => {
+		await SubmissionsEntity.create({ kind: "email", data: { kind: "email" }, dedupeKey: "existing-intake", source: "imap:phishing.report:73:53" });
+		const result = await ingestFetchedMail(
+			fetched(53, eml({ From: "reporter@example.test", To: "report@phishing.support", "Message-ID": "<intake-two@example.test>", Subject: "Fwd" }, "Body")),
+			config,
+			{ createIntakeSubmission: noIntake },
+		);
+		expect(result).toMatchObject({ route: "intake", reason: "processed_intake" });
+	});
 
-		expect(await ingestFetchedIncomingMail(malformed, config)).toMatchObject({
-			disposition: "retry",
-			reason: "IMAP fetch did not include the RFC 5322 source.",
-		});
-		expect(await ingestFetchedIncomingMail(malformed, config)).toMatchObject({ disposition: "retry" });
-		const ledger = await MailIngestEntity.get({ mailbox: config.mailbox, uidValidity: config.uidValidity, uid: 52 });
-		expect(ledger).toMatchObject({
-			route: "failed",
-			terminal: false,
-			attempts: 2,
-		});
-		expect(typeof ledger?.uidValidity).toBe("number");
-		expect(typeof ledger?.uid).toBe("number");
-		expect(typeof ledger?.attempts).toBe("number");
+	test("leaves a message without source retryable and counts its attempts", async () => {
+		expect(await ingestFetchedMail({ uid: 54 }, config)).toMatchObject({ disposition: "retry", reason: "IMAP fetch did not include the RFC 5322 source." });
+		expect(await ingestFetchedMail({ uid: 54 }, config)).toMatchObject({ disposition: "retry" });
+		expect(await MailIngestEntity.get({ ...config, uid: 54 })).toMatchObject({ route: "failed", terminal: false, attempts: 2 });
 	});
 });

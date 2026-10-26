@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({ trackingToken: created.trackingToken, status: "accepted", statusUrl }, { status: created.created ? 202 : 200 });
 	} catch (error) {
 		if (error instanceof AbuseInputError) return NextResponse.json({ error: error.message }, { status: error.status });
-		console.error("Standalone abuse report creation failed:", error);
+		console.error("Abuse report creation failed:", error);
 		return NextResponse.json({ error: "The report could not be accepted." }, { status: 500 });
 	}
 }

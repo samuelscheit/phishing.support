@@ -11,25 +11,27 @@ services:
     environment:
       DB_FILE_NAME: /app/data/phishing_reporter.sqlite
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://phishing.support}
-      REPORT_REPLY_DOMAIN: ${REPORT_REPLY_DOMAIN:-phishing.support}
-      ABUSE_REPLY_DOMAIN: ${ABUSE_REPLY_DOMAIN:-phishing.support}
-      ABUSE_SMTP_HOST: ${ABUSE_SMTP_HOST:-${SMTP_HOST:-}}
-      ABUSE_SMTP_PORT: ${ABUSE_SMTP_PORT:-${SMTP_PORT:-587}}
-      ABUSE_SMTP_SECURE: ${ABUSE_SMTP_SECURE:-${SMTP_SECURE:-false}}
-      ABUSE_SMTP_USER: ${ABUSE_SMTP_USER:-${SMTP_USER:-}}
-      ABUSE_SMTP_PASS: ${ABUSE_SMTP_PASS:-${SMTP_PASS:-}}
-      ABUSE_SMTP_FROM: ${ABUSE_SMTP_FROM:-${SMTP_FROM:-support@phishing.support}}
-      ABUSE_IMAP_HOST: ${ABUSE_IMAP_HOST:-${IMAP_HOST:-}}
-      ABUSE_IMAP_PORT: ${ABUSE_IMAP_PORT:-${IMAP_PORT:-993}}
-      ABUSE_IMAP_SECURE: ${ABUSE_IMAP_SECURE:-${IMAP_SECURE:-true}}
-      ABUSE_IMAP_USER: ${ABUSE_IMAP_USER:-${IMAP_USER:-}}
-      ABUSE_IMAP_PASS: ${ABUSE_IMAP_PASS:-${IMAP_PASS:-}}
-      ABUSE_IMAP_MAILBOX: ${ABUSE_IMAP_MAILBOX:-${IMAP_MAILBOX:-phishing.report}}
+      # One mailbox: SMTP_FROM sends every report; IMAP_MAILBOX receives
+      # forwarded phishing mail (IMAP_LISTEN_ADDRESS) and provider replies to
+      # generated abuse-<token>@REPLY_DOMAIN identities.
+      REPLY_DOMAIN: ${REPLY_DOMAIN:-phishing.support}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-support@phishing.support}
+      IMAP_HOST: ${IMAP_HOST:-}
+      IMAP_PORT: ${IMAP_PORT:-993}
+      IMAP_SECURE: ${IMAP_SECURE:-true}
+      IMAP_USER: ${IMAP_USER:-}
+      IMAP_PASS: ${IMAP_PASS:-}
+      IMAP_MAILBOX: ${IMAP_MAILBOX:-phishing.report}
+      IMAP_LISTEN_ADDRESS: ${IMAP_LISTEN_ADDRESS:-report@phishing.support}
       SKYVERN_BASE_URL: http://skyvern:8000
       SKYVERN_API_KEY_FILE: /run/skyvern/api-key
       SKYVERN_INTERNAL_S3_ORIGIN: http://skyvern-minio:9000
       ABUSE_SKYVERN_WEBHOOK_URL: http://app:3000/api/skyvern/webhook
-      ABUSE_GENERIC_EMAIL_ENABLED: ${ABUSE_GENERIC_EMAIL_ENABLED:-false}
       ABUSE_GENERIC_FORM_ESCALATION_ENABLED: ${ABUSE_GENERIC_FORM_ESCALATION_ENABLED:-false}
       # Keep resolution/reconciliation capacity separate from slow
       # CAPTCHA/browser work. A stalled provider must never starve intake.
@@ -37,13 +39,12 @@ services:
       ABUSE_WORKER_EXTERNAL_CONCURRENCY: ${ABUSE_WORKER_EXTERNAL_CONCURRENCY:-2}
       ABUSE_WORKER_CONTROL_JOB_TIMEOUT_MS: ${ABUSE_WORKER_CONTROL_JOB_TIMEOUT_MS:-300000}
       ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS: ${ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS:-600000}
-      # The abuse worker uses a separate, bounded drafting call. Keep its
-      # credentials/runtime endpoint explicit; .env is intentionally excluded
-      # from the image and these values are injected only at container start.
-      ABUSE_OPENAI_API_KEY: ${ABUSE_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}
-      ABUSE_OPENAI_API_BASE_URL: ${ABUSE_OPENAI_API_BASE_URL:-${OPENAI_API_BASE_URL:-https://api.openai.com/v1}}
-      ABUSE_OPENAI_TIMEOUT_MS: ${ABUSE_OPENAI_TIMEOUT_MS:-45000}
-      ABUSE_EMAIL_DRAFT_MODEL: ${ABUSE_EMAIL_DRAFT_MODEL:-${OPENAI_MODEL:-gpt-5.5}}
+      # Analysis, report drafting, and reply classification share one model
+      # endpoint. .env is excluded from the image; values are injected at start.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.5}
+      OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-45000}
       # Tencent's direct provider route still uses its own explicit solver and
       # HTTP proxy boundary; these values are not used to launch a browser.
       DEATHBYCAPTCHA_USERNAME: ${DEATHBYCAPTCHA_USERNAME:-}

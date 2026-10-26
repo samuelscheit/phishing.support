@@ -4,37 +4,39 @@ import { useTemporaryDatabase } from "../../db/test_helpers";
 import { validateAbuseReportRequest } from "../contracts";
 import { createAbuseEmailDraft, sendAbuseEmailRoute, type AbuseEmailDraft } from "../mail";
 import { AbuseRepository } from "../repository";
+import { SubmissionsEntity } from "../../db/entities";
+import { emailRoute } from "../resolver/routes";
+import { reportConfirmedEmailPhishing } from "../submission_reports";
 import { sendEmail } from "./email";
+import { resolveReport } from "./resolution";
 
 useTemporaryDatabase();
 
-const originalGenericEmail = process.env.ABUSE_GENERIC_EMAIL_ENABLED;
 const originalTrackingTokenSecret = process.env.ABUSE_TRACKING_TOKEN_SECRET;
-const originalAbuseSmtpFrom = process.env.ABUSE_SMTP_FROM;
-const originalAbuseReplyDomain = process.env.ABUSE_REPLY_DOMAIN;
+const originalAbuseSmtpFrom = process.env.SMTP_FROM;
+const originalAbuseReplyDomain = process.env.REPLY_DOMAIN;
 
 beforeEach(() => {
 	process.env.ABUSE_TRACKING_TOKEN_SECRET = "01234567890123456789012345678901";
-	process.env.ABUSE_GENERIC_EMAIL_ENABLED = "true";
-	process.env.ABUSE_SMTP_FROM = "support@phishing.support";
-	process.env.ABUSE_REPLY_DOMAIN = "phishing.support";
+	process.env.SMTP_FROM = "support@phishing.support";
+	process.env.REPLY_DOMAIN = "phishing.support";
 });
 
 afterAll(() => {
-	if (originalGenericEmail === undefined) delete process.env.ABUSE_GENERIC_EMAIL_ENABLED;
-	else process.env.ABUSE_GENERIC_EMAIL_ENABLED = originalGenericEmail;
 	if (originalTrackingTokenSecret === undefined) delete process.env.ABUSE_TRACKING_TOKEN_SECRET;
 	else process.env.ABUSE_TRACKING_TOKEN_SECRET = originalTrackingTokenSecret;
-	if (originalAbuseSmtpFrom === undefined) delete process.env.ABUSE_SMTP_FROM;
-	else process.env.ABUSE_SMTP_FROM = originalAbuseSmtpFrom;
-	if (originalAbuseReplyDomain === undefined) delete process.env.ABUSE_REPLY_DOMAIN;
-	else process.env.ABUSE_REPLY_DOMAIN = originalAbuseReplyDomain;
+	if (originalAbuseSmtpFrom === undefined) delete process.env.SMTP_FROM;
+	else process.env.SMTP_FROM = originalAbuseSmtpFrom;
+	if (originalAbuseReplyDomain === undefined) delete process.env.REPLY_DOMAIN;
+	else process.env.REPLY_DOMAIN = originalAbuseReplyDomain;
 });
 
 async function setupRoute() {
 	const request = await validateAbuseReportRequest({
 		targets: ["example.com"],
 		allegationCategory: "phishing",
+		reporterName: "Test Reporter",
+		reporterContactEmail: "reporter@example.org",
 		description: "A long analyst report that must never be copied verbatim into a provider email. It identifies a credential collection page and includes many forensic details.",
 		observedUrls: [{ target: "example.com", urls: ["https://login.example.com/collect"] }],
 	});
@@ -54,7 +56,7 @@ async function setupRoute() {
 	return { created, route };
 }
 
-describe("standalone email worker draft boundary", () => {
+describe("email worker draft boundary", () => {
 	test("persists and sends the provider-facing draft rather than the stored analysis", async () => {
 		const { created, route } = await setupRoute();
 		const draft: AbuseEmailDraft = {
@@ -182,5 +184,39 @@ describe("standalone email worker draft boundary", () => {
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "unknown_external_state" });
 		expect(await AbuseRepository.getProviderRun(execution.run.id)).toMatchObject({ executionStatus: "unknown_external_state" });
 		expect(await AbuseRepository.getReport(created.reportId)).toMatchObject({ status: "failed" });
+	});
+});
+
+describe("email submission reporting", () => {
+	test("resolves the sending IP to its abuse contact and mails it the phishing message with an email-specific draft", async () => {
+		const submissionId = 372818777718394942n;
+		await SubmissionsEntity.create({ id: submissionId, kind: "email", data: { kind: "email" }, dedupeKey: "email-worker-sending-ip" });
+		const eml = "From: Wallet <notice@express.example.com>\r\nTo: [redacted]\r\nSubject: Verify\r\n\r\nVerify your wallet.";
+		const created = await reportConfirmedEmailPhishing({ submissionId, analysisText: "The email impersonates a wallet provider.", redactedEml: eml, sendingIp: "199.102.178.225", reporter: {} });
+
+		await resolveReport(created.reportId, async (target) => target.targetType === "ip"
+			? {
+				status: "resolved",
+				resolverSnapshot: { source: "test" },
+				routes: [emailRoute({ email: "abuse@medallia.com", providerName: "Medallia", provenance: { source: "ip_rdap" }, snapshot: { allocationOwner: { organization: "Medallia, Inc." } } })],
+			}
+			: { status: "no_route", disposition: "no_mail_report_provider", resolverSnapshot: {}, routes: [] });
+		const routes = await AbuseRepository.listRoutes(created.reportId);
+		const mailRoute = routes.find((route) => route.routeType === "email");
+		expect(mailRoute).toMatchObject({ verifiedEmail: "abuse@medallia.com", status: "verified" });
+
+		let sent: { attachments: Array<{ filename: string; mimeType: string; content: Buffer }>; body: string } | undefined;
+		await sendEmail(mailRoute!.id, {
+			markUnknownExternal: async () => undefined,
+			createDraft: async (input) => createAbuseEmailDraft(input, { generateSummary: async () => "The email impersonates a wallet provider and links to a credential page." }),
+			send: async (params) => {
+				sent = { attachments: params.attachments ?? [], body: params.body };
+				return { messageId: 1n, status: "sent", rfcMessageId: "<sent@phishing.support>" };
+			},
+		});
+		expect(sent?.attachments.map((attachment) => [attachment.filename, attachment.mimeType])).toEqual([["phishing-email.eml", "message/rfc822"]]);
+		expect(sent?.attachments[0]?.content.toString()).toBe(eml);
+		expect(sent?.body).toContain("reporting a phishing email that was sent from 199.102.178.225 to Medallia, Inc.");
+		expect(sent?.body).toContain(`Case details: https://phishing.support/submissions/${submissionId.toString()}`);
 	});
 });

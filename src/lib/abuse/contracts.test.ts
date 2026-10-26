@@ -13,6 +13,8 @@ import { AbuseInputError, isPublicIp, normalizeDomain } from "./security";
 const baseRequest = {
 	targets: ["example.com"],
 	allegationCategory: "phishing" as const,
+	reporterName: "Test Reporter",
+	reporterContactEmail: "reporter@example.org",
 	description: "A credential-harvesting page impersonates the service.",
 };
 
@@ -27,7 +29,7 @@ async function pngBuffer(width = 2, height = 2): Promise<Buffer> {
 	}).png().toBuffer();
 }
 
-describe("standalone abuse-report input contract", () => {
+describe("public abuse-report input contract", () => {
 	test("normalizes IDNA, case, and trailing dots while retaining ordered original provenance", async () => {
 		expect(normalizeDomain(" BÜCHER.DE. ")).toBe("xn--bcher-kva.de");
 		expect(normalizeAbuseTarget("EXAMPLE.COM.")).toEqual({ normalizedTarget: "example.com", targetType: "domain" });

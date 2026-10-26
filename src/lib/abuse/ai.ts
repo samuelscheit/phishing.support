@@ -3,24 +3,23 @@ import OpenAI from "openai";
 const DEFAULT_ABUSE_AI_TIMEOUT_MS = 45_000;
 
 function abuseAiTimeoutMs(): number {
-	const configured = Number.parseInt(process.env.ABUSE_OPENAI_TIMEOUT_MS ?? "", 10);
+	const configured = Number.parseInt(process.env.OPENAI_TIMEOUT_MS ?? "", 10);
 	return Number.isSafeInteger(configured) && configured >= 5_000 && configured <= 5 * 60_000
 		? configured
 		: DEFAULT_ABUSE_AI_TIMEOUT_MS;
 }
 
 /**
- * Create the narrowly scoped OpenAI client used by the standalone abuse
- * service. Keeping this separate from the legacy analyser means an abuse
- * worker can still send its deterministic report when the model is absent or
- * unavailable.
+ * A bounded client for report drafting and reply classification. Unlike the
+ * analyser, these calls are optional: a missing or failing model falls back to
+ * deterministic report text instead of blocking a report.
  */
 export function configuredAbuseOpenAI(): OpenAI | undefined {
-	const apiKey = process.env.ABUSE_OPENAI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim();
+	const apiKey = process.env.OPENAI_API_KEY?.trim();
 	if (!apiKey) return undefined;
 	return new OpenAI({
 		apiKey,
-		baseURL: process.env.ABUSE_OPENAI_API_BASE_URL?.trim() || process.env.OPENAI_API_BASE_URL?.trim() || "https://api.openai.com/v1",
+		baseURL: process.env.OPENAI_API_BASE_URL?.trim() || "https://api.openai.com/v1",
 		timeout: abuseAiTimeoutMs(),
 	});
 }

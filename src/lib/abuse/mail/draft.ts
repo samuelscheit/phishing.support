@@ -2,9 +2,10 @@ import { z } from "zod";
 
 import { configuredAbuseOpenAI, responseOutputText } from "../ai";
 import { normalizeDomain } from "../security";
+import { abuseReplyUrl } from "../../constants";
+import { defaultResponseModel } from "../../utils";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
 
-const DEFAULT_EMAIL_DRAFT_MODEL = "gpt-5.5";
 const MAX_DESCRIPTION_INPUT = 12_000;
 const MAX_SUMMARY_LENGTH = 1_200;
 const MAX_BODY_LENGTH = 5_000;
@@ -63,11 +64,12 @@ export type AbuseEmailDraftDependencies = {
 };
 
 type DraftInput = {
-	report: Pick<AbuseReport, "allegationCategory" | "description" | "legalBrandUrl"> & { idempotencyKey?: string | null };
+	report: Pick<AbuseReport, "allegationCategory" | "description" | "legalBrandUrl" | "submissionId" | "reporterName" | "reporterContactEmail">;
 	target: Pick<AbuseTarget, "normalizedTarget" | "observedUrls">;
 	route: Pick<AbuseProviderRoute, "providerDisplayName" | "resolverProvenance" | "resolutionSnapshot">;
 	recipient: string;
 	attachmentNames?: string[];
+	attachmentMimeTypes?: string[];
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -212,7 +214,7 @@ async function generateEmailSummaryWithAI(input: AbuseEmailSummaryInput): Promis
 		const client = configuredAbuseOpenAI();
 		if (!client) return undefined;
 		const response = await client.responses.create({
-			model: process.env.ABUSE_EMAIL_DRAFT_MODEL?.trim() || process.env.OPENAI_MODEL?.trim() || DEFAULT_EMAIL_DRAFT_MODEL,
+			model: defaultResponseModel,
 			store: false,
 			max_output_tokens: 500,
 			input: [
@@ -315,10 +317,16 @@ function containsUnapprovedUrl(summary: string, allowedUrls: readonly string[], 
 	return false;
 }
 
-export function abuseEmailCaseUrl(idempotencyKey: string | null | undefined): string | undefined {
-	const matched = typeof idempotencyKey === "string" && idempotencyKey.match(/^legacy-website:(\d+)$/);
-	if (!matched) return undefined;
-	return `https://phishing.support/submissions/${matched[1]}`;
+export function abuseEmailCaseUrl(submissionId: bigint | null | undefined): string | undefined {
+	return submissionId === null || submissionId === undefined ? undefined : `${abuseReplyUrl}/submissions/${submissionId.toString()}`;
+}
+
+/** Name the public submitter inside the report; the sender stays the service identity. */
+export function reporterAttribution(report: Pick<AbuseReport, "reporterName" | "reporterContactEmail">): string | undefined {
+	const name = cleanText(report.reporterName, 200);
+	const email = cleanText(report.reporterContactEmail, 320);
+	if (!name || !email) return undefined;
+	return `Originally reported to phishing.support by ${name} <${email}>.`;
 }
 
 function cleanAttachmentNames(names: readonly string[] | undefined): string[] {
@@ -341,23 +349,30 @@ function bodyFor(params: {
 	observedUrls: string[];
 	legalBrandUrl?: string | null;
 	caseUrl?: string;
+	reporterAttribution?: string;
+	/** True when the attached original message was sent from the target. */
+	sentPhishingEmail: boolean;
 	recipientLabel: string;
 	summary: string;
 	attachmentNames: string[];
 }): string {
 	const observedUrls = params.observedUrls.length
 		? params.observedUrls.map((url) => `- ${url}`).join("\n")
-		: "- No observed URL was supplied with this report.";
+		: params.sentPhishingEmail
+			? "- The phishing email is attached with its full delivery headers."
+			: "- No observed URL was supplied with this report.";
 	const attachments = params.attachmentNames.length
 		? `Attached evidence: ${params.attachmentNames.join(", ")}.`
 		: "No file attachment was available for this report; the target and any observed URL are included above.";
 	const brandReference = params.legalBrandUrl ? `Impersonated/legitimate brand reference: ${params.legalBrandUrl}` : undefined;
 	const caseReference = params.caseUrl ? `Case details: ${params.caseUrl}` : undefined;
-	const detailLines = [`Target: ${params.target}`, "Observed URLs:", observedUrls, brandReference, caseReference].filter((line): line is string => Boolean(line)).join("\n");
+	const detailLines = [`Target: ${params.target}`, "Observed URLs:", observedUrls, brandReference, caseReference, params.reporterAttribution].filter((line): line is string => Boolean(line)).join("\n");
 	const body = [
 		recipientGreeting(params.recipientLabel),
 		"",
-		`The phishing.support team is reporting suspected ${params.allegationCategory} activity involving ${params.target} to ${params.recipientLabel}. Public resolver data lists this address as the abuse contact for the target.`,
+		params.sentPhishingEmail
+			? `The phishing.support team is reporting a ${params.allegationCategory} email that was sent from ${params.target} to ${params.recipientLabel}. Public resolver data lists this address as the abuse contact for that sending infrastructure.`
+			: `The phishing.support team is reporting suspected ${params.allegationCategory} activity involving ${params.target} to ${params.recipientLabel}. Public resolver data lists this address as the abuse contact for the target.`,
 		"",
 		detailLines,
 		"",
@@ -365,7 +380,9 @@ function bodyFor(params: {
 		params.summary,
 		"",
 		attachments,
-		"Please investigate the relevant domain or account and take any appropriate mitigation action under your abuse policy. Reply to this email if further information is required.",
+		params.sentPhishingEmail
+			? "Please investigate the sending account or server and take any appropriate mitigation action under your abuse policy. Reply to this email if further information is required."
+			: "Please investigate the relevant domain or account and take any appropriate mitigation action under your abuse policy. Reply to this email if further information is required.",
 		"",
 		"Regards,",
 		"The phishing.support team",
@@ -381,7 +398,7 @@ function bodyFor(params: {
  */
 export async function createAbuseEmailDraft(input: DraftInput, dependencies: AbuseEmailDraftDependencies = {}): Promise<AbuseEmailDraft> {
 	const recipientLabel = abuseEmailRecipientLabel({ route: input.route, recipient: input.recipient });
-	const caseUrl = abuseEmailCaseUrl(input.report.idempotencyKey);
+	const caseUrl = abuseEmailCaseUrl(input.report.submissionId);
 	const observedUrls = normalizedBodyUrls(input.target.observedUrls);
 	const legalBrandUrl = safeBodyUrl(input.report.legalBrandUrl);
 	const attachmentNames = cleanAttachmentNames(input.attachmentNames);
@@ -413,6 +430,8 @@ export async function createAbuseEmailDraft(input: DraftInput, dependencies: Abu
 			observedUrls,
 			legalBrandUrl,
 			caseUrl,
+			reporterAttribution: reporterAttribution(input.report),
+			sentPhishingEmail: input.attachmentMimeTypes?.includes("message/rfc822") ?? false,
 			recipientLabel,
 			summary: safeSummary,
 			attachmentNames,

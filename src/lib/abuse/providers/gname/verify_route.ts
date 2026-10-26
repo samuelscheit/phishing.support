@@ -43,7 +43,7 @@ export async function verifyGnameProviderRoute(routeId: bigint): Promise<void> {
 		observedUrls: target.observedUrls,
 		legalBrandUrl: report.legalBrandUrl ?? undefined,
 		description: report.description,
-		userEvidence: evidenceArtifacts.map((artifact) => ({
+		userEvidence: evidenceArtifacts.filter((artifact) => artifact.mimeType.startsWith("image/")).map((artifact) => ({
 			filename: artifact.name,
 			mimeType: artifact.mimeType as "image/jpeg" | "image/png" | "image/webp",
 			buffer: artifact.blob,

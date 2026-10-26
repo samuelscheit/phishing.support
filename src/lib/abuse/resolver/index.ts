@@ -1,5 +1,6 @@
 import { resolveDomainTarget } from "./domain";
 import { resolveIpTarget } from "./ip";
+import { unroutableRoute } from "./routes";
 import {
 	listSupplementalProviderSubmissionProvidersForTarget,
 	providerSupplementalRoute,
@@ -11,17 +12,25 @@ export { parseExplicitWhoisAbuseMailboxes } from "./whois";
 export type { ResolverDependencies, ResolverTarget, ResolvedAbuseTarget } from "./types";
 
 /**
- * Resolves one already-normalized public target into durable route candidates.
- * It is deliberately independent from legacy `website_info` so its fallback
- * chain, port-43 contract, and full resolver provenance remain auditable.
+ * A reported email message has no registry or network owner of its own; its
+ * sending infrastructure is a separate IP target. Only mail-aware
+ * supplemental providers can act on the message.
+ */
+function resolveEmailMessageTarget(target: ResolverTarget): ResolvedAbuseTarget {
+	const snapshot = { target: target.normalizedTarget, targetType: "email" };
+	return { status: "no_route", disposition: "no_mail_report_provider", resolverSnapshot: snapshot, routes: [unroutableRoute("no_mail_report_provider", snapshot)] };
+}
+
+/**
+ * Resolves one already-normalized target into durable route candidates with
+ * full resolver provenance (RDAP, authoritative port-43 WHOIS, BGP origin).
  */
 export async function resolveAbuseTarget(target: ResolverTarget, dependencies: ResolverDependencies = {}): Promise<ResolvedAbuseTarget> {
 	const resolved = target.targetType === "domain"
 		? await resolveDomainTarget(target, dependencies)
 		: target.targetType === "ip"
 			? await resolveIpTarget(target, dependencies)
-			: undefined;
-	if (!resolved) throw new Error("Unsupported abuse target type.");
+			: resolveEmailMessageTarget(target);
 
 	const supplementalProviders = listSupplementalProviderSubmissionProvidersForTarget(target);
 	if (supplementalProviders.length === 0) return resolved;

@@ -5,7 +5,6 @@
 	"private": true,
 	"scripts": {
 		"dev": "bunx --bun next dev",
-		"imap": "bun run src/lib/imap/run.ts",
 		"build": "bunx --bun next build",
 		"start": "NODE_ENV=production bun src/lib/server_start.ts",
 		"test": "bun test",

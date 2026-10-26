@@ -9,6 +9,7 @@
 import {
 	getArtifact,
 	getArtifactById,
+	listArtifactMetadata,
 	listArtifacts,
 	saveArtifact,
 } from "./persistence/artifacts";
@@ -64,7 +65,7 @@ import { getPublicStatus } from "./persistence/public_status";
 import {
 	createReport,
 	getReport,
-	getReportByIdempotencyKey,
+	getReportForSubmission,
 	getReportByTrackingToken,
 	getReportByTrackingTokenHash,
 	getReportInput,
@@ -72,7 +73,6 @@ import {
 	getTarget,
 	listRoutes,
 	listTargets,
-	setReportStatus,
 	setReportVerificationOutcome,
 	transitionReportStatus,
 } from "./persistence/reports";
@@ -99,7 +99,7 @@ export const AbuseRepository = {
 	getReport,
 	getReportByTrackingTokenHash,
 	getReportByTrackingToken,
-	getReportByIdempotencyKey,
+	getReportForSubmission,
 	listTargets,
 	listRoutes,
 	getRoute,
@@ -107,7 +107,6 @@ export const AbuseRepository = {
 	getReportInput,
 	setReportVerificationOutcome,
 	transitionReportStatus,
-	setReportStatus,
 	setTargetResolution,
 	upsertResolvedRoute,
 	transitionRouteStatus,
@@ -135,6 +134,7 @@ export const AbuseRepository = {
 	settleCorrelatedEmailBounce,
 	saveArtifact,
 	listArtifacts,
+	listArtifactMetadata,
 	getArtifact,
 	getArtifactById,
 	enqueueJob,

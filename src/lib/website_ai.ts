@@ -5,7 +5,7 @@ import { SubmissionsEntity, ArtifactsEntity } from "./db/entities";
 import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
-import { handoffConfirmedWebsitePhishing } from "./abuse/legacy_website";
+import { reportConfirmedWebsitePhishing } from "./abuse/submission_reports";
 import type { ReporterMetadata } from "./request_metadata";
 import { defaultReasoning, defaultResponseModel, retry } from "./utils";
 import { extractWebsiteDataEntryFields } from "./website_fields";
@@ -356,7 +356,7 @@ export async function analyzeWebsite(options: {
 		const reportableSite = reportableWebsiteHop(archive.navigationHops, siteAssessments, archive);
 		if (reportableSite) {
 			await emitStep(submissionId, "reporting", 90);
-			await handoffConfirmedWebsitePhishing({
+			await reportConfirmedWebsitePhishing({
 				submissionId,
 				url: reportableSite.url,
 				analysisText: buildWebsiteReportEvidence(reportableSite, archive, capturedClassification),

@@ -81,6 +81,8 @@ describe("Netcraft v3 submission response", () => {
 			const request = await validateAbuseReportRequest({
 				targets: ["phishing.example.com"],
 				allegationCategory: "phishing",
+				reporterName: "Test Reporter",
+				reporterContactEmail: "reporter@example.org",
 				description: "The URLs host credential-harvesting pages.",
 				observedUrls: [{
 					target: "phishing.example.com",

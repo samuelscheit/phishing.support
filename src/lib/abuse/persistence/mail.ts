@@ -145,7 +145,7 @@ export async function getOutboundMailForRun(runId: bigint) {
 		.get();
 }
 
-/** List all correspondence for one standalone abuse report in timeline order. */
+/** List all correspondence for one abuse report in timeline order. */
 export async function listMailForReport(reportId: bigint) {
 	const db = await getDb();
 	return db
@@ -156,6 +156,11 @@ export async function listMailForReport(reportId: bigint) {
 		.all();
 }
 
+/**
+ * Find the one route an inbound message answers. `matched` means the message
+ * named at least one of our reply identities or outbound Message-IDs; it is
+ * then never treated as new intake, even when the match is ambiguous.
+ */
 export async function findCorrelatedInboundRoute(params: { recipients: string[]; inReplyTo?: string; references?: string[] }): Promise<{
 	route: AbuseProviderRoute | undefined;
 	matched: boolean;
@@ -177,7 +182,7 @@ export async function findCorrelatedInboundRoute(params: { recipients: string[];
 			.where(and(eq(abuseMailMessages.direction, "outbound"), inArray(abuseMailMessages.messageId, refs)));
 		for (const row of byMessageId) candidateRouteIds.add(row.routeId);
 	}
-	if (candidateRouteIds.size !== 1) return { route: undefined, matched: candidateRouteIds.size > 0 || refs.length > 0 };
+	if (candidateRouteIds.size !== 1) return { route: undefined, matched: candidateRouteIds.size > 0 };
 	const routeId = [...candidateRouteIds][0];
 	return {
 		route: db.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, routeId)).get(),

@@ -52,8 +52,8 @@ export function AbuseReportForm() {
 	const [description, setDescription] = useState("");
 	const [observedUrls, setObservedUrls] = useState("");
 	const [legalBrandUrl, setLegalBrandUrl] = useState("");
+	const [reporterName, setReporterName] = useState("");
 	const [reporterEmail, setReporterEmail] = useState("");
-	const [reporterIdentity, setReporterIdentity] = useState<"service" | "submitter">("service");
 	const [files, setFiles] = useState<EvidenceItem[]>([]);
 	const [error, setError] = useState<string>();
 	const [submittedUrl, setSubmittedUrl] = useState<string>();
@@ -109,6 +109,10 @@ export function AbuseReportForm() {
 			setError("Describe what makes the target abusive.");
 			return;
 		}
+		if (!reporterName.trim() || !reporterEmail.trim()) {
+			setError("Add your name and email address.");
+			return;
+		}
 		setSubmitting(true);
 		try {
 			const payload = {
@@ -117,8 +121,8 @@ export function AbuseReportForm() {
 				description: description.trim(),
 				observedUrls: observedUrls.trim() ? parseObservedUrls(observedUrls, targetList) : undefined,
 				legalBrandUrl: legalBrandUrl.trim() || undefined,
-				reporterContactEmail: reporterEmail.trim() || undefined,
-				reporterIdentity,
+				reporterName: reporterName.trim(),
+				reporterContactEmail: reporterEmail.trim(),
 				evidence: files.length ? files : undefined,
 			};
 			const response = await fetch("/api/abuse/reports", {
@@ -269,45 +273,41 @@ export function AbuseReportForm() {
 			</div>
 
 			<div className="rounded-2xl border bg-card p-6 shadow-sm">
-				<h2 className="text-lg font-semibold">Reporter contact (optional)</h2>
-				<div className="mt-4 space-y-2">
-					<label htmlFor="abuse-email" className="text-sm font-semibold">
-						Email address
-					</label>
-					<input
-						id="abuse-email"
-						type="email"
-						value={reporterEmail}
-						onChange={(event) => setReporterEmail(event.target.value)}
-						placeholder="you@example.org"
-						className="w-full rounded-lg border bg-background p-3"
-					/>
-				</div>
-				<fieldset className="mt-5">
-					<legend className="text-sm font-semibold">External identity preference</legend>
-					<div className="mt-3 flex flex-wrap gap-4">
-						<label className="inline-flex items-center gap-2">
-							<input
-								type="radio"
-								name="reporter-identity"
-								value="service"
-								checked={reporterIdentity === "service"}
-								onChange={() => setReporterIdentity("service")}
-							/>{" "}
-							Phishing Support
+				<h2 className="text-lg font-semibold">Reporter</h2>
+				<p className="mt-1 text-sm text-muted-foreground">
+					Reports are sent as Phishing Support. Your name and email are included in the report text as the original reporter.
+				</p>
+				<div className="mt-4 grid gap-4 sm:grid-cols-2">
+					<div className="space-y-2">
+						<label htmlFor="abuse-name" className="text-sm font-semibold">
+							Name
 						</label>
-						<label className="inline-flex items-center gap-2">
-							<input
-								type="radio"
-								name="reporter-identity"
-								value="submitter"
-								checked={reporterIdentity === "submitter"}
-								onChange={() => setReporterIdentity("submitter")}
-							/>{" "}
-							My identity, when a route permits it
-						</label>
+						<input
+							id="abuse-name"
+							required
+							maxLength={200}
+							value={reporterName}
+							onChange={(event) => setReporterName(event.target.value)}
+							autoComplete="name"
+							className="w-full rounded-lg border bg-background p-3"
+						/>
 					</div>
-				</fieldset>
+					<div className="space-y-2">
+						<label htmlFor="abuse-email" className="text-sm font-semibold">
+							Email address
+						</label>
+						<input
+							id="abuse-email"
+							type="email"
+							required
+							value={reporterEmail}
+							onChange={(event) => setReporterEmail(event.target.value)}
+							placeholder="you@example.org"
+							autoComplete="email"
+							className="w-full rounded-lg border bg-background p-3"
+						/>
+					</div>
+				</div>
 			</div>
 
 			{error && (

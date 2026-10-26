@@ -1,10 +1,9 @@
 import crypto from "node:crypto";
 
 import MailComposer from "nodemailer/lib/mail-composer";
-import nodemailer from "nodemailer";
 
+import { replyDomain, smtpSender, smtpTransport } from "../../mail_config";
 import { AbuseRepository } from "../repository";
-import { normalizeDomain } from "../security";
 import { attachmentFilename } from "./shared";
 import {
 	type AbuseMailAttachment,
@@ -30,20 +29,6 @@ function normalizedMailbox(value: string): string {
 	return candidate;
 }
 
-function configuredSender(): string {
-	const configured = process.env.ABUSE_SMTP_FROM ?? process.env.SMTP_FROM;
-	if (!configured) throw new Error("ABUSE_SMTP_FROM or SMTP_FROM must be configured.");
-	const match = configured.match(/<([^<>]+)>/)?.[1] ?? configured;
-	return normalizedMailbox(match);
-}
-
-function replyDomain(): string {
-	const value = process.env.ABUSE_REPLY_DOMAIN ?? process.env.REPORT_REPLY_DOMAIN;
-	const domain = value ? normalizeDomain(value) : undefined;
-	if (!domain) throw new Error("ABUSE_REPLY_DOMAIN must be configured as a public domain.");
-	return domain;
-}
-
 function createReplyIdentity(): { address: string; token: string } {
 	const token = crypto.randomBytes(24).toString("hex");
 	return { token, address: `abuse-${token}@${replyDomain()}` };
@@ -64,7 +49,7 @@ export async function buildCanonicalAbuseMail(params: {
 	/** Reuse the route-owned reply address when retrying a known delivery failure. */
 	replyAddress?: string;
 }): Promise<CanonicalAbuseMail> {
-	const from = normalizedMailbox(params.from ?? configuredSender());
+	const from = normalizedMailbox(params.from ?? smtpSender());
 	const to = [...new Set(params.to.map(normalizedMailbox))];
 	if (to.length === 0) throw new Error("At least one abuse recipient is required.");
 	const subject = safeHeader("Subject", params.subject);
@@ -103,16 +88,6 @@ export async function buildCanonicalAbuseMail(params: {
 		messageId,
 		rawMime: await composer.compile().build(),
 	};
-}
-
-function configuredTransport(): AbuseMailTransport | undefined {
-	const host = process.env.ABUSE_SMTP_HOST ?? process.env.SMTP_HOST;
-	const user = process.env.ABUSE_SMTP_USER ?? process.env.SMTP_USER;
-	const pass = process.env.ABUSE_SMTP_PASS ?? process.env.SMTP_PASS;
-	if (!host || !user || !pass) return undefined;
-	const port = Number(process.env.ABUSE_SMTP_PORT ?? process.env.SMTP_PORT ?? 587);
-	const secure = (process.env.ABUSE_SMTP_SECURE ?? process.env.SMTP_SECURE) === "true" || port === 465;
-	return nodemailer.createTransport({ host, port, secure, auth: { user, pass } });
 }
 
 function isKnownSmtpRejection(error: unknown): boolean {
@@ -195,7 +170,7 @@ export async function sendAbuseEmailRoute(params: {
 		);
 	}
 
-	const transport = params.transport ?? configuredTransport();
+	const transport = params.transport ?? smtpTransport();
 	if (!transport) {
 		try {
 			await AbuseRepository.settleOutboundMail({ messageId: storedMessageId, status: "failed", error: "SMTP transport is not configured." });

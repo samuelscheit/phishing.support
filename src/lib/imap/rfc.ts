@@ -1,9 +1,24 @@
-import { simpleParser, type AddressObject, type EmailAddress, type ParsedMail } from "mailparser";
+import type { AddressObject, EmailAddress, ParsedMail } from "mailparser";
 
-import type { FetchedAbuseMail } from "./types";
-import { normalizeMailbox } from "../mail/shared";
+import { normalizeMailbox } from "../abuse/mail/shared";
 
-export { normalizeMailbox } from "../mail/shared";
+export { normalizeMailbox } from "../abuse/mail/shared";
+
+type EnvelopeAddress = { address?: string | null };
+
+/** The listener-specific portion of an IMAP FETCH response needed for ingest. */
+export type FetchedMail = {
+	uid: number;
+	source?: Buffer | Uint8Array | string;
+	flags?: ReadonlySet<string> | { has(flag: string): boolean } | readonly string[];
+	envelope?: {
+		to?: EnvelopeAddress[];
+		cc?: EnvelopeAddress[];
+		bcc?: EnvelopeAddress[];
+		messageId?: string;
+	};
+	internalDate?: Date | string;
+};
 
 export function normalizeMessageId(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
@@ -48,7 +63,7 @@ function addressField(parsed: ParsedMail, field: "to" | "cc" | "bcc"): string[] 
 	return [...new Set([...parsedAddresses, ...headerAddresses])];
 }
 
-export function recipients(parsed: ParsedMail, message: FetchedAbuseMail): string[] {
+export function recipients(parsed: ParsedMail, message: FetchedMail): string[] {
 	const envelope = [...(message.envelope?.to ?? []), ...(message.envelope?.cc ?? []), ...(message.envelope?.bcc ?? [])]
 		.map((entry) => normalizeMailbox(entry.address))
 		.filter((value): value is string => Boolean(value));
@@ -61,7 +76,7 @@ export function references(parsed: ParsedMail): string[] {
 	return [...new Set(values.flatMap((value) => value.match(/<[^<>\s]+@[^<>\s]+>/g) ?? []).map(normalizeMessageId).filter((value): value is string => Boolean(value)))];
 }
 
-export function isSeen(flags: FetchedAbuseMail["flags"]): boolean {
+export function isSeen(flags: FetchedMail["flags"]): boolean {
 	if (!flags) return false;
 	if (typeof (flags as { has?: unknown }).has === "function") return (flags as { has(flag: string): boolean }).has("\\Seen");
 	return Array.isArray(flags) && flags.includes("\\Seen");
@@ -71,6 +86,3 @@ export function messageBody(parsed: ParsedMail): string {
 	return [parsed.text ?? "", typeof parsed.html === "string" ? parsed.html.replace(/<[^>]+>/g, " ") : ""].join(" ");
 }
 
-export async function parseAbuseMail(raw: Buffer): Promise<ParsedMail> {
-	return simpleParser(raw, { skipTextToHtml: true });
-}

@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { validateAbuseReportRequest } from "../../contracts";
-import { ingestFetchedAbuseMail } from "../../imap";
+import { ingestFetchedMail } from "../../../imap/ingest";
 import { prepareSkyvernTaskCreation } from "../../persistence/provider_runs";
 import { AbuseRepository } from "../../repository";
 import { abuseJobs, abuseMailCodes } from "../../schema";
@@ -18,6 +18,8 @@ import { beginGnamePortalExecution } from "./persistence/portal";
 import { recordGnameSkyvernTaskStarted } from "./persistence/runs";
 
 useTemporaryDatabase();
+
+const mailbox = { mailbox: "INBOX", uidValidity: 88, intakeAddress: "report@phishing.support" };
 
 const environmentNames = [
 	"ABUSE_GNAME_ENABLED",
@@ -48,6 +50,8 @@ async function createGnameRoute(status: "queued" | "waiting_code" = "queued") {
 	const request = await validateAbuseReportRequest({
 		targets: ["example.com"],
 		allegationCategory: "phishing",
+		reporterName: "Test Reporter",
+		reporterContactEmail: "reporter@example.org",
 		description: "A credential-harvesting page impersonates the protected brand.",
 		observedUrls: [{ target: "example.com", urls: ["https://login.example.com/collect"] }],
 		legalBrandUrl: "https://brand.example.com/",
@@ -128,32 +132,32 @@ describe("GNAME inbound verification-mail routing", () => {
 
 	test("routes the generic IMAP fallback through GNAME policy and rejects wrong sender, recipient, and ambiguous code", async () => {
 		const context = await createWaitingGnameRun();
-		const accepted = await ingestFetchedAbuseMail(
+		const accepted = await ingestFetchedMail(
 			{ uid: 20, source: gnameVerificationMail() },
-			{ mailbox: "INBOX", uidValidity: 88, processSeen: true },
+			mailbox,
 		);
-		expect(accepted).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_abuse_reply" });
+		expect(accepted).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_provider_reply" });
 
-		const wrongSender = await ingestFetchedAbuseMail(
+		const wrongSender = await ingestFetchedMail(
 			{ uid: 21, source: gnameVerificationMail({ messageId: "<gname-code-imap-2@evil.example>", sender: "security@evil.example" }) },
-			{ mailbox: "INBOX", uidValidity: 88, processSeen: true },
+			mailbox,
 		);
-		expect(wrongSender).toEqual({ disposition: "terminal", route: "ignored", reason: "no_exact_abuse_reply_match" });
-		const wrongRecipient = await ingestFetchedAbuseMail(
+		expect(wrongSender).toEqual({ disposition: "terminal", route: "ignored", reason: "no_report_match" });
+		const wrongRecipient = await ingestFetchedMail(
 			{ uid: 22, source: gnameVerificationMail({ messageId: "<gname-code-imap-3@gname.com>", recipient: "other@phishing.support" }) },
-			{ mailbox: "INBOX", uidValidity: 88, processSeen: true },
+			mailbox,
 		);
-		expect(wrongRecipient).toEqual({ disposition: "terminal", route: "ignored", reason: "no_exact_abuse_reply_match" });
-		const ambiguous = await ingestFetchedAbuseMail(
+		expect(wrongRecipient).toEqual({ disposition: "terminal", route: "ignored", reason: "no_report_match" });
+		const ambiguous = await ingestFetchedMail(
 			{ uid: 23, source: gnameVerificationMail({ messageId: "<gname-code-imap-4@gname.com>", body: "Codes 123456 and 654321 are present." }) },
-			{ mailbox: "INBOX", uidValidity: 88, processSeen: true },
+			mailbox,
 		);
-		expect(ambiguous).toEqual({ disposition: "terminal", route: "ignored", reason: "no_exact_abuse_reply_match" });
-		const unresolvedExplicitReply = await ingestFetchedAbuseMail(
+		expect(ambiguous).toEqual({ disposition: "terminal", route: "ignored", reason: "no_report_match" });
+		const unresolvedExplicitReply = await ingestFetchedMail(
 			{ uid: 25, source: gnameVerificationMail({ messageId: "<gname-code-imap-5@gname.com>", inReplyTo: "<unknown-outbound@evil.example>" }) },
-			{ mailbox: "INBOX", uidValidity: 88, processSeen: true },
+			mailbox,
 		);
-		expect(unresolvedExplicitReply).toEqual({ disposition: "terminal", route: "ignored", reason: "no_exact_abuse_reply_match" });
+		expect(unresolvedExplicitReply).toEqual({ disposition: "terminal", route: "ignored", reason: "no_report_match" });
 
 		const jobs = (await getDb())
 			.select()
@@ -165,15 +169,15 @@ describe("GNAME inbound verification-mail routing", () => {
 
 	test("retains an envelope-only recipient for post-storage GNAME authorization", async () => {
 		const context = await createWaitingGnameRun();
-		const result = await ingestFetchedAbuseMail(
+		const result = await ingestFetchedMail(
 			{
 				uid: 26,
 				envelope: { bcc: [{ address: "gname-reports@phishing.support" }] },
 				source: gnameVerificationMail({ messageId: "<gname-envelope-code@gname.com>", recipient: null }),
 			},
-			{ mailbox: "INBOX", uidValidity: 88, processSeen: true },
+			mailbox,
 		);
-		expect(result).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_abuse_reply" });
+		expect(result).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_provider_reply" });
 		if (result.disposition !== "terminal" || !result.messageId) throw new Error("Expected the envelope-only code message to be stored.");
 		expect(await AbuseRepository.getMailMessage(result.messageId)).toMatchObject({
 			routeId: context.route.id,
@@ -213,14 +217,14 @@ describe("GNAME inbound verification-mail routing", () => {
 			rawArtifactId,
 			attachmentArtifactIds: [],
 		});
-		const result = await ingestFetchedAbuseMail(
+		const result = await ingestFetchedMail(
 			{
 				uid: 24,
 				source: gnameVerificationMail({ messageId: "<gname-explicit-inbound@gname.com>", inReplyTo: outboundMessageId, recipient: "other@phishing.support" }),
 			},
-			{ mailbox: "INBOX", uidValidity: 88, processSeen: true },
+			mailbox,
 		);
-		expect(result).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_abuse_reply" });
+		expect(result).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_provider_reply" });
 		const jobs = (await getDb())
 			.select()
 			.from(abuseJobs)

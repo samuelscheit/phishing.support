@@ -1,3 +1,4 @@
+import { defaultResponseModel } from "../../utils";
 import { isIP } from "node:net";
 
 import { configuredAbuseOpenAI, responseOutputText } from "../ai";
@@ -9,7 +10,6 @@ import { abuseReplyClassifications, abuseReplyClassificationSchema, type AbuseRe
 
 const URL_PATTERN = /https:\/\/[^\s<>'"`]+/gi;
 const MAX_REPLY_CLASSIFICATION_INPUT = 120_000;
-const DEFAULT_REPLY_CLASSIFIER_MODEL = "gpt-5.5";
 const OPENAI_REPLY_CLASSIFICATION_SCHEMA = {
 	type: "object",
 	additionalProperties: false,
@@ -39,7 +39,7 @@ function parseClassifierJson(text: string): unknown {
 }
 
 /**
- * Classify provider mail with a standalone OpenAI Responses call. The mail
+ * Classify provider mail with a bounded OpenAI Responses call. The mail
  * body and sender are explicitly delimited untrusted data; they can contain
  * prompt-injection text, links, or fake instructions and are never copied
  * into a system/developer instruction. Missing configuration, transport
@@ -52,7 +52,7 @@ export async function classifyProviderReplyWithAI(params: { text: string; from?:
 		const client = configuredAbuseOpenAI();
 		if (!client) return ambiguousReplyClassification("AI reply classifier is not configured.");
 		const response = await client.responses.create({
-			model: process.env.ABUSE_REPLY_CLASSIFIER_MODEL?.trim() || DEFAULT_REPLY_CLASSIFIER_MODEL,
+			model: defaultResponseModel,
 			store: false,
 			max_output_tokens: 400,
 			input: [

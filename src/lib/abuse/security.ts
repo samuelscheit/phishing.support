@@ -238,6 +238,8 @@ export function safePublicError(status: string, detail?: string | null): string 
 	if (status === "no_route") return "No verified abuse-reporting route was available for this target.";
 	if (status === "delivery_failed") return "The provider report could not be delivered.";
 	if (status === "failed" || status === "unknown_external_state") return "The provider route did not complete safely.";
+	// A provider's own rejection text is its public answer to our report.
+	if (status === "provider_rejected") return detail.replace(/\s+/g, " ").trim().slice(0, 500);
 	return undefined;
 }
 

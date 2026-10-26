@@ -102,7 +102,7 @@ export function buildCloudflareReportPreview(input: ProviderReportPreviewContext
 	return buildCloudflareJustification({ target: input.target, observedUrl, ...(legalBrandUrl ? { legalBrandUrl } : {}), description: input.description });
 }
 
-/** Create Cloudflare's reviewed form payload from the standalone report. */
+/** Create Cloudflare's reviewed form payload from the abuse report. */
 export function buildCloudflareReportPayload(input: CloudflareReportInput): CloudflareReportPayload {
 	const observedUrl = normalizeObservedUrlForDomain(input.observedUrl, input.target);
 	if (!observedUrl) throw new Error("Cloudflare abuse reporting requires a valid observed URL for the target.");

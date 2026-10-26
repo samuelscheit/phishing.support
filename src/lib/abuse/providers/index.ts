@@ -24,7 +24,7 @@ export {
 	providerDefinitionHasValidHash,
 	providerDefinitionMatchesPin,
 } from "./definition";
-export { isGenericEmailRouteEnabled, isVerifiedEmailRouteOriginAllowed, verifiedDomainsForEmailRoute } from "./email";
+export { isVerifiedEmailRouteOriginAllowed, verifiedDomainsForEmailRoute } from "./email";
 export { GENERIC_PROVIDER_FORM_ADAPTER, genericProviderFormAdapterHasValidHash, isGenericFormEscalationEnabled } from "./generic_form";
 export type {
 	PortalProvider,

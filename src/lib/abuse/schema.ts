@@ -1,6 +1,7 @@
 import { InferSelectModel, sql } from "drizzle-orm";
 import { blob, index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "../db/sqlite_types";
+import { submissions } from "../db/schema";
 
 export const abuseReportStatuses = [
 	"accepted",
@@ -19,7 +20,8 @@ export const abuseReportStatuses = [
 ] as const;
 export type AbuseReportStatus = (typeof abuseReportStatuses)[number];
 
-export const abuseTargetTypes = ["domain", "ip"] as const;
+/** `email` targets the phishing message itself; its routes need the stored message evidence. */
+export const abuseTargetTypes = ["domain", "ip", "email"] as const;
 export type AbuseTargetType = (typeof abuseTargetTypes)[number];
 
 export const abuseTargetStatuses = ["pending", "resolved", "no_route", "failed"] as const;
@@ -100,21 +102,24 @@ export const abuseMailClassifications = [
 export type AbuseMailClassification = (typeof abuseMailClassifications)[number];
 
 /**
- * Completely separate public abuse-reporting aggregate. It intentionally has
- * no foreign keys to submissions, analysis_runs, or legacy report records.
+ * The single reporting aggregate. Website and email submissions own their
+ * report through `submissionId`; public API reports carry the submitter's
+ * name/email instead. Providers always see the phishing.support service
+ * identity, with any submitter named only inside the report text.
  */
 export const abuseReports = sqliteTable(
 	"abuse_reports",
 	{
 		id: sqliteBigint("id").primaryKey(),
+		submissionId: sqliteBigint("submission_id").references(() => submissions.id, { onDelete: "cascade" }),
 		trackingTokenHash: text("tracking_token_hash").notNull(),
 		idempotencyKey: text("idempotency_key"),
 		requestPayloadHash: text("request_payload_hash").notNull(),
 		allegationCategory: text("allegation_category").notNull(),
 		description: text("description").notNull(),
 		legalBrandUrl: text("legal_brand_url"),
+		reporterName: text("reporter_name"),
 		reporterContactEmail: text("reporter_contact_email"),
-		reporterIdentity: text("reporter_identity").notNull().default("service"),
 		serviceIdentity: text("service_identity", { mode: "json" }).$type<Record<string, unknown>>(),
 		verificationOutcome: text("verification_outcome", { mode: "json" }).$type<Record<string, unknown>>(),
 		status: text("status", { enum: abuseReportStatuses }).notNull().default("accepted"),
@@ -127,6 +132,7 @@ export const abuseReports = sqliteTable(
 	(table) => [
 		uniqueIndex("abuse_reports_tracking_token_hash_unique").on(table.trackingTokenHash),
 		uniqueIndex("abuse_reports_idempotency_key_unique").on(table.idempotencyKey),
+		uniqueIndex("abuse_reports_submission_unique").on(table.submissionId),
 		index("abuse_reports_status_updated_idx").on(table.status, table.updatedAt),
 	]
 );

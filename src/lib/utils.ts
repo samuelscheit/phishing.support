@@ -4,7 +4,6 @@ import OpenAI from "openai";
 import { config } from "dotenv";
 import type { Stream } from "openai/streaming";
 import type { ResponseStreamEvent } from "openai/resources/responses/responses.mjs";
-import nodemailer from "nodemailer";
 import { fileURLToPath } from "url";
 import { extractResponseOutputText, parseResponseJson } from "./openai_response";
 
@@ -106,29 +105,6 @@ export async function logStream(response: Stream<ResponseStreamEvent>) {
 
 	throw new Error("Stream ended without completion");
 }
-
-const smtpHost = process.env.SMTP_HOST;
-const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587;
-const smtpSecure = process.env.SMTP_SECURE !== undefined ? process.env.SMTP_SECURE === "true" : smtpPort === 465;
-const smtpUser = process.env.SMTP_USER;
-const smtpPass = process.env.SMTP_PASS;
-
-if (smtpSecure && smtpPort === 587) {
-	console.warn("SMTP_SECURE=true with port 587 can cause TLS errors; use SMTP_SECURE=false for STARTTLS.");
-}
-
-export const mailer =
-	smtpHost && Number.isFinite(smtpPort) && smtpPort > 0 && smtpUser && smtpPass
-		? nodemailer.createTransport({
-				host: smtpHost,
-				port: smtpPort,
-				secure: smtpSecure,
-				auth: {
-					user: smtpUser,
-					pass: smtpPass,
-				},
-			})
-		: undefined;
 
 export const max_output_tokens = 30000;
 export const defaultResponseModel = process.env.OPENAI_MODEL || "gpt-5.5";

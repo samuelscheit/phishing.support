@@ -1,11 +1,10 @@
 import next from "next";
 import { createServer } from "node:http";
 
-import { startImapListener } from "./lib/imap/imap_listener";
 import { SubmissionsEntity } from "./lib/db/entities";
 import { resumePendingWebsiteAnalyses } from "./lib/submissions/website";
 import { startAbuseWorker, stopAbuseWorker } from "./lib/abuse/worker";
-import { startAbuseImapListener, stopAbuseImapListener } from "./lib/abuse/imap";
+import { startMailboxListener, stopMailboxListener } from "./lib/imap/listener";
 
 function envInt(name: string, defaultValue: number): number {
 	const raw = process.env[name];
@@ -42,21 +41,19 @@ void resumePendingWebsiteAnalyses().then((resumed) => {
 	if (resumed > 0) console.warn(`Resumed ${resumed} pending website analyses on startup.`);
 }).catch((err) => console.error("Failed to resume pending website analyses on startup:", err));
 
-// Start IMAP listener in the same process
-startImapListener().catch((err) => {
-	console.error("IMAP listener crashed:", err);
-});
-
-// Standalone abuse reporting has its own durable worker and optional mailbox
-// bridge. Neither path touches the legacy submission/analysis tables.
+// The durable reporting worker files every confirmed report; the mailbox
+// listener turns forwarded phishing mail into submissions and records provider
+// replies. A misconfigured mailbox must not prevent the HTTP service from booting.
 try {
 	await startAbuseWorker();
-	await startAbuseImapListener();
-	console.log("Standalone abuse worker started.");
+	console.log("Reporting worker started.");
 } catch (err) {
-	// A misconfigured optional mailbox must not prevent the HTTP service from
-	// booting, but a worker startup failure is retained in logs for operations.
-	console.error("Standalone abuse worker failed to start:", err);
+	console.error("Reporting worker failed to start:", err);
+}
+try {
+	if (!startMailboxListener()) console.warn("IMAP is not configured; mail intake and provider replies are disabled.");
+} catch (err) {
+	console.error("Mailbox listener failed to start:", err);
 }
 
 const server = createServer((req, res) => {
@@ -71,7 +68,7 @@ const server = createServer((req, res) => {
 
 const shutdown = async (signal: string) => {
 	console.log(`Received ${signal}, shutting down...`);
-	await stopAbuseImapListener();
+	await stopMailboxListener();
 	await stopAbuseWorker();
 	server.close(() => {
 		// no-op

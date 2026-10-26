@@ -1,4 +1,5 @@
-import { AnalysisRunsEntity, ProviderReportsEntity, ReportThreadsEntity, SubmissionsEntity } from "@/lib/db/entities";
+import { AbuseRepository } from "@/lib/abuse/repository";
+import { AnalysisRunsEntity, SubmissionsEntity } from "@/lib/db/entities";
 import type { SubmissionKind } from "@/lib/db/schema";
 
 /** A user-facing validation error for a retry that cannot safely be queued. */
@@ -32,10 +33,9 @@ export async function getRetryableSubmission(
 		throw new SubmissionRetryError("Only failed submissions can be retried.");
 	}
 
-	const [runs, reportThreads, providerReports] = await Promise.all([
+	const [runs, report] = await Promise.all([
 		AnalysisRunsEntity.listForSubmission(submissionId),
-		ReportThreadsEntity.listForSubmission(submissionId),
-		ProviderReportsEntity.listForSubmission(submissionId),
+		AbuseRepository.getReportForSubmission(submissionId),
 	]);
 	// A website has two analysis runs (narrative, then classification), so an
 	// earlier completed run is expected when the later classification run fails.
@@ -50,8 +50,7 @@ export async function getRetryableSubmission(
 		runs.some((run) => run.status === "running") ||
 		(!options.allowCompletedPriorRuns && runs.some((run) => run.status === "completed")) ||
 		(latestRun && latestRun.status !== "failed") ||
-		reportThreads.length > 0 ||
-		providerReports.length > 0
+		report
 	) {
 		throw new SubmissionRetryError("This submission already completed analysis or reporting and cannot be retried.");
 	}

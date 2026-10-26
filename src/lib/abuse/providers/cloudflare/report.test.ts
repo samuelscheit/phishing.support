@@ -10,7 +10,7 @@ const serviceIdentity = {
 };
 
 describe("buildCloudflareReportPayload", () => {
-	test("includes the standalone allegation and the legitimate brand", () => {
+	test("includes the report allegation and the legitimate brand", () => {
 		const payload = buildCloudflareReportPayload({
 			serviceIdentity,
 			target: "example.com",

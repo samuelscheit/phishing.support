@@ -1,3 +1,4 @@
+import { abuseTargetTypes, type AbuseTargetType } from "../schema";
 import type { ProviderSubmissionProvider } from "./submission_contracts";
 import { providerDefinitionHasValidHash } from "./definition";
 
@@ -6,7 +7,7 @@ export type ProviderSubmissionRegistry = {
 	get(key: string): ProviderSubmissionProvider | undefined;
 	getForMailbox(mailbox: string | undefined): ProviderSubmissionProvider | undefined;
 	listSupplemental(): readonly ProviderSubmissionProvider[];
-	listSupplementalForTarget(target: { targetType: "domain" | "ip"; observedUrls: readonly string[] }): readonly ProviderSubmissionProvider[];
+	listSupplementalForTarget(target: { targetType: AbuseTargetType; observedUrls: readonly string[] }): readonly ProviderSubmissionProvider[];
 };
 
 /**
@@ -45,7 +46,7 @@ export function createProviderSubmissionRegistry(providers: readonly ProviderSub
 			throw new Error(`Supplemental provider submission ${definition.key} must declare at least one target rule.`);
 		}
 		for (const rule of definition.supplementalTargets ?? []) {
-			if (rule.targetType !== "domain" && rule.targetType !== "ip") {
+			if (!abuseTargetTypes.includes(rule.targetType)) {
 				throw new Error(`Supplemental provider submission ${definition.key} has an invalid target type.`);
 			}
 		}

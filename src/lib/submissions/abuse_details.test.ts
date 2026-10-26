@@ -1,20 +1,21 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import sharp from "sharp";
 
 import { SubmissionsEntity } from "../db/entities";
 import { useTemporaryDatabase } from "../db/test_helpers";
-import { validateAbuseReportRequest } from "../abuse/contracts";
 import { sendAbuseEmailRoute } from "../abuse/mail";
 import { AbuseRepository } from "../abuse/repository";
+import { reportConfirmedEmailPhishing, reportConfirmedWebsitePhishing } from "../abuse/submission_reports";
 import { getSubmissionDetails } from "./details";
 
 useTemporaryDatabase();
 
-const environmentNames = ["ABUSE_SMTP_FROM", "ABUSE_REPLY_DOMAIN", "ABUSE_TRACKING_TOKEN_SECRET"] as const;
+const environmentNames = ["SMTP_FROM", "REPLY_DOMAIN", "ABUSE_TRACKING_TOKEN_SECRET"] as const;
 const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [name, process.env[name]]));
 
 beforeEach(() => {
-	process.env.ABUSE_SMTP_FROM = "support@phishing.support";
-	process.env.ABUSE_REPLY_DOMAIN = "phishing.support";
+	process.env.SMTP_FROM = "support@phishing.support";
+	process.env.REPLY_DOMAIN = "phishing.support";
 	process.env.ABUSE_TRACKING_TOKEN_SECRET = "01234567890123456789012345678901";
 });
 
@@ -26,31 +27,35 @@ afterAll(() => {
 	}
 });
 
-describe("legacy submission abuse-report read model", () => {
-	async function createLegacyWebsiteReport(submissionId: bigint) {
-		await SubmissionsEntity.create({
-			id: submissionId,
-			kind: "website",
-			data: { kind: "website", website: { url: "https://shop.example.com/" } },
-			dedupeKey: `legacy-website-abuse-details-test:${submissionId.toString()}`,
-			status: "reported",
-		});
-		const request = await validateAbuseReportRequest({
-			targets: ["shop.example.com"],
-			allegationCategory: "phishing",
-			description: "The captured page impersonates a trusted service and collects credentials.",
-			observedUrls: [{ target: "shop.example.com", urls: ["https://shop.example.com/"] }],
-			idempotencyKey: `legacy-website:${submissionId.toString()}`,
-		});
-		const report = await AbuseRepository.createReport({ request, reporter: {} });
-		const [target] = await AbuseRepository.listTargets(report.reportId);
-		if (!target) throw new Error("The test target was not persisted.");
-		return { report, target };
-	}
+async function createWebsiteReport(submissionId: bigint) {
+	await SubmissionsEntity.create({
+		id: submissionId,
+		kind: "website",
+		data: { kind: "website", website: { url: "https://shop.example.com/" } },
+		dedupeKey: `website-report-details-test:${submissionId.toString()}`,
+		status: "reported",
+	});
+	const report = await reportConfirmedWebsitePhishing({
+		submissionId,
+		url: "https://shop.example.com/",
+		analysisText: "The captured page impersonates a trusted service and collects credentials.",
+		reporter: {},
+	});
+	const [target] = await AbuseRepository.listTargets(report.reportId);
+	if (!target) throw new Error("The test target was not persisted.");
+	return { report, target };
+}
 
-	test("includes standalone worker emails in the legacy submission Reports tab", async () => {
+describe("submission report read model", () => {
+	test("returns no report for a submission that was never confirmed", async () => {
+		const submissionId = 351387190816673790n;
+		await SubmissionsEntity.create({ id: submissionId, kind: "website", data: { kind: "website", website: { url: "https://benign.example.com/" } }, dedupeKey: "unreported" });
+		expect((await getSubmissionDetails(submissionId.toString()))?.report).toBeNull();
+	});
+
+	test("shows a sent abuse email and its provider reply on the same route", async () => {
 		const submissionId = 351387190816673794n;
-		const { report: abuseReport, target } = await createLegacyWebsiteReport(submissionId);
+		const { report, target } = await createWebsiteReport(submissionId);
 		const route = await AbuseRepository.upsertResolvedRoute(target.id, {
 			routeKey: "email:abuse@provider.example.test",
 			providerRegistryKey: "email:provider.example.test",
@@ -61,40 +66,51 @@ describe("legacy submission abuse-report read model", () => {
 			resolutionSnapshot: { source: "test" },
 			status: "verified",
 		});
-		const run = await AbuseRepository.beginEmailDelivery({
-			routeId: route.id,
-			providerPayload: { source: "test" },
-			correlationKey: `legacy-abuse-details-test:${submissionId.toString()}`,
-		});
+		const run = await AbuseRepository.beginEmailDelivery({ routeId: route.id, providerPayload: { source: "test" }, correlationKey: `details-test:${submissionId.toString()}` });
 		if (!run) throw new Error("The test delivery run was not created.");
 		await sendAbuseEmailRoute({
-			reportId: abuseReport.reportId,
+			reportId: report.reportId,
 			routeId: route.id,
 			runId: run.run.id,
 			recipient: "abuse@provider.example.test",
 			subject: "[Phishing Support] Abuse report for shop.example.com",
-			body: "The captured page impersonates a trusted service and collects credentials.",
+			body: "Please investigate the credential-harvesting page.",
 			correlationKey: run.run.correlationKey,
 			transport: { sendMail: async () => ({ messageId: "smtp-test" }) },
 		});
+		await AbuseRepository.settleEmailDelivery({ runId: run.run.id, expectedRunStatus: "starting", expectedRouteStatus: "running", outcome: "sent" });
+		const outbound = await AbuseRepository.getOutboundMailForRun(run.run.id);
+		await AbuseRepository.persistInboundMailWithArtifacts({
+			reportId: report.reportId,
+			routeId: route.id,
+			kind: "reply",
+			fromAddress: "abuse@provider.example.test",
+			toAddresses: [outbound!.replyAddress!],
+			subject: "Re: abuse report",
+			textBody: "The site was suspended.",
+			messageId: "<reply@provider.example.test>",
+			inReplyTo: outbound!.messageId!,
+			mailbox: "INBOX",
+			uidValidity: 1,
+			uid: 7,
+			rawMime: { name: "reply.eml", buffer: Buffer.from("From: abuse@provider.example.test\r\n\r\nThe site was suspended.") },
+			attachments: [],
+		});
 
 		const details = await getSubmissionDetails(submissionId.toString());
-		expect(details?.reportThreads).toEqual([]);
-		expect(details?.providerReports).toEqual([]);
-		expect(details?.abuseMailReports).toHaveLength(1);
-		expect(details?.abuseMailReports[0]).toMatchObject({
-			provider: "Provider abuse desk",
-			target: "shop.example.com",
-			status: "sent",
-			subject: "[Phishing Support] Abuse report for shop.example.com",
-			textBody: "The captured page impersonates a trusted service and collects credentials.",
-		});
-		expect(details?.abuseMailReports[0]?.messageId).toMatch(/^<abuse-[a-f0-9]+@phishing\.support>$/);
+		expect(details?.report?.status).toBe("waiting_provider");
+		const mailRoute = details?.report?.routes.find((item) => item.routeType === "email");
+		expect(mailRoute).toMatchObject({ provider: "Provider abuse desk", target: "shop.example.com", status: "awaiting_provider_reply", body: null });
+		expect(mailRoute?.messages.map((message) => [message.direction, message.status])).toEqual([["outbound", "sent"], ["inbound", "received"]]);
+		expect(mailRoute?.messages[0]?.messageId).toMatch(/^<abuse-[a-f0-9]+@phishing\.support>$/);
+		const rawId = mailRoute?.messages[1]?.rawArtifactId;
+		expect(details?.report?.artifacts.find((artifact) => artifact.id === rawId)).toMatchObject({ name: "reply.eml", kind: "inbound_mail_mime" });
+		expect(JSON.stringify(details?.report?.artifacts)).not.toContain("blob");
 	});
 
-	test("includes direct provider outcomes and the pinned report text without exposing provider payloads", async () => {
+	test("shows pinned provider text and outcomes without exposing provider payloads", async () => {
 		const submissionId = 352342673387950094n;
-		const { report, target } = await createLegacyWebsiteReport(submissionId);
+		const { target } = await createWebsiteReport(submissionId);
 		const submittedRoute = await AbuseRepository.upsertResolvedRoute(target.id, {
 			routeKey: "provider_submission:google_safe_browsing:test",
 			providerRegistryKey: "google_safe_browsing",
@@ -120,7 +136,6 @@ describe("legacy submission abuse-report read model", () => {
 			routeStatus: "submitted",
 			confirmationId: "google-confirmation-123",
 			confirmationText: "The URL was submitted.",
-			finalUrl: "https://safebrowsing.google.com/safebrowsing/report_phish/?url=https%3A%2F%2Fshop.example.com%2F",
 			submittedTargets: [target.normalizedTarget],
 		})).toBeTrue();
 
@@ -137,48 +152,41 @@ describe("legacy submission abuse-report read model", () => {
 		});
 		const unresolved = await AbuseRepository.beginProviderExecution({
 			routeId: unresolvedRoute.id,
-			providerPayload: { providerNarrativeVersion: 1, form: { justification: "The Cloudflare report explains the TikTok impersonation evidence.", privateCookie: "do-not-expose" } },
+			providerPayload: { providerNarrativeVersion: 1, form: { justification: "The Cloudflare report explains the impersonation evidence.", privateCookie: "do-not-expose" } },
 			correlationKey: `cloudflare:${submissionId.toString()}`,
 			expectedStatus: "verified",
 		});
 		if (!unresolved) throw new Error("The unresolved provider run was not created.");
 		expect(await AbuseRepository.prepareProviderSubmission(unresolved.run.id)).toBeTrue();
-		await AbuseRepository.markUnknownExternalState({
-			routeId: unresolvedRoute.id,
-			runId: unresolved.run.id,
-			error: "The provider response could not be verified.",
-			reason: "test_unknown_external_state",
-		});
+		await AbuseRepository.markUnknownExternalState({ routeId: unresolvedRoute.id, runId: unresolved.run.id, error: "The provider response could not be verified.", reason: "test_unknown_external_state" });
 
 		const details = await getSubmissionDetails(submissionId.toString());
-		expect(details?.abuseProviderReports).toEqual(expect.arrayContaining([
+		expect(details?.report?.routes).toEqual(expect.arrayContaining([
 			expect.objectContaining({
 				provider: "Google Safe Browsing",
 				status: "submitted",
+				bodySource: "prepared",
 				body: "The submitted Google report explains the credential-harvesting evidence.",
 				observedUrls: ["https://shop.example.com/"],
 				submittedTargets: ["shop.example.com"],
 				confirmationId: "google-confirmation-123",
-				confirmationText: "The URL was submitted.",
 			}),
 			expect.objectContaining({
 				provider: "Cloudflare Abuse",
 				status: "unknown_external_state",
-				body: "The Cloudflare report explains the TikTok impersonation evidence.",
+				body: "The Cloudflare report explains the impersonation evidence.",
 				error: "The provider route did not complete safely.",
 			}),
 		]));
+		// One provider stuck in an unknown state must not hide the confirmed submission.
+		expect(details?.report?.status).toBe("partially_submitted");
 		expect(JSON.stringify(details)).not.toContain("do-not-expose");
-		expect(details?.abuseMailReports).toEqual([]);
-		expect(details?.providerReports).toEqual([]);
-		expect(report.created).toBeTrue();
 	});
 
-	test("shows a provider-specific preview instead of exposing an unprepared or legacy analysis draft", async () => {
+	test("shows a provider-specific preview instead of an unprepared or analysis-only draft", async () => {
 		const submissionId = 352342673387950095n;
-		const { report, target } = await createLegacyWebsiteReport(submissionId);
-		const persistedReport = await AbuseRepository.getReport(report.reportId);
-		if (!persistedReport) throw new Error("The test abuse report was not persisted.");
+		const { report, target } = await createWebsiteReport(submissionId);
+		const persisted = await AbuseRepository.getReport(report.reportId);
 		const route = await AbuseRepository.upsertResolvedRoute(target.id, {
 			routeKey: "provider_submission:netcraft:preview",
 			providerRegistryKey: "netcraft",
@@ -190,38 +198,52 @@ describe("legacy submission abuse-report read model", () => {
 			resolutionSnapshot: { source: "test" },
 			status: "verified",
 		});
+		const unprepared = (await getSubmissionDetails(submissionId.toString()))?.report?.routes.find((item) => item.provider === "Netcraft");
+		expect(unprepared).toMatchObject({ status: "verified", bodySource: "preview" });
+		expect(unprepared?.body).toContain("Netcraft");
+		expect(unprepared?.body).not.toContain(persisted!.description);
 
-		const unprepared = await getSubmissionDetails(submissionId.toString());
-		const preview = unprepared?.abuseProviderReports.find((item) => item.provider === "Netcraft");
-		expect(preview).toMatchObject({ status: "verified", bodySource: "preview" });
-		expect(preview?.body).toContain("Netcraft");
-		expect(preview?.body).not.toContain(persistedReport.description);
-
-		const execution = await AbuseRepository.beginProviderExecution({
+		await AbuseRepository.beginProviderExecution({
 			routeId: route.id,
-			providerPayload: { report: { reason: persistedReport.description }, legacyPrivateField: "must-not-be-rendered" },
-			correlationKey: `legacy-analysis-preview:${submissionId.toString()}`,
+			providerPayload: { report: { reason: persisted!.description }, privateField: "must-not-be-rendered" },
+			correlationKey: `analysis-only:${submissionId.toString()}`,
 			expectedStatus: "verified",
 		});
-		expect(execution).toBeDefined();
-		const legacy = await getSubmissionDetails(submissionId.toString());
-		const legacyPreview = legacy?.abuseProviderReports.find((item) => item.provider === "Netcraft");
-		expect(legacyPreview).toMatchObject({ status: "running", bodySource: "legacy_preview" });
-		expect(legacyPreview?.body).toContain("Netcraft");
-		expect(legacyPreview?.body).not.toContain(persistedReport.description);
-		expect(JSON.stringify(legacy)).not.toContain("must-not-be-rendered");
-		expect(await AbuseRepository.prepareProviderSubmission(execution!.run.id)).toBeTrue();
-		expect(await AbuseRepository.settleProviderRun({
-			runId: execution!.run.id,
-			executionStatus: "completed",
-			routeStatus: "submitted",
-			confirmationId: "historical-preview-test",
-			submittedTargets: [target.normalizedTarget],
-		})).toBeTrue();
-		const historical = await getSubmissionDetails(submissionId.toString());
-		expect(historical?.abuseProviderReports.find((item) => item.provider === "Netcraft")).toMatchObject({
-			status: "submitted",
-			bodySource: "historical_legacy",
+		const analysisOnly = await getSubmissionDetails(submissionId.toString());
+		const historical = analysisOnly?.report?.routes.find((item) => item.provider === "Netcraft");
+		expect(historical).toMatchObject({ status: "running", bodySource: "historical" });
+		expect(historical?.body).not.toContain(persisted!.description);
+		expect(JSON.stringify(analysisOnly)).not.toContain("must-not-be-rendered");
+	});
+
+	test("files a confirmed email as one report: the message for mail providers and the sending IP for its abuse contact", async () => {
+		const submissionId = 372818777718394942n;
+		await SubmissionsEntity.create({ id: submissionId, kind: "email", data: { kind: "email" }, dedupeKey: "email-report-details" });
+		const screenshot = await sharp({ create: { width: 2, height: 2, channels: 3, background: "#123456" } }).png().toBuffer();
+		const eml = "From: Wallet <notice@express.example.com>\r\nTo: [redacted]\r\nSubject: Verify\r\n\r\nVerify your wallet.";
+		const first = await reportConfirmedEmailPhishing({
+			submissionId,
+			analysisText: "The email impersonates a wallet provider.",
+			redactedEml: eml,
+			sendingIp: "199.102.178.225",
+			screenshotPng: screenshot,
+			reporter: { reporterIp: "8.8.8.8" },
 		});
+		const replay = await reportConfirmedEmailPhishing({ submissionId, analysisText: "A different retry analysis.", redactedEml: eml, reporter: {} });
+		expect(replay).toMatchObject({ reportId: first.reportId, created: false });
+
+		const targets = await AbuseRepository.listTargets(first.reportId);
+		expect(targets.map((item) => [item.normalizedTarget, item.targetType])).toEqual([["phishing-email", "email"], ["199.102.178.225", "ip"]]);
+		const evidence = await AbuseRepository.listArtifacts(first.reportId, ["user_evidence_original"]);
+		expect(evidence.map((item) => [item.name, item.mimeType])).toEqual([["phishing-email.eml", "message/rfc822"], ["phishing-email.png", "image/png"]]);
+		expect(evidence[0]?.blob.toString()).toBe(eml);
+		expect((await getSubmissionDetails(submissionId.toString()))?.report).toMatchObject({ status: "accepted" });
+	});
+
+	test("rejects a private sending IP instead of routing it", async () => {
+		const submissionId = 372818777718394943n;
+		await SubmissionsEntity.create({ id: submissionId, kind: "email", data: { kind: "email" }, dedupeKey: "email-private-ip" });
+		const created = await reportConfirmedEmailPhishing({ submissionId, analysisText: "Phishing.", redactedEml: "Subject: x\r\n\r\nbody", sendingIp: "10.0.0.5", reporter: {} });
+		expect((await AbuseRepository.listTargets(created.reportId)).map((item) => item.targetType)).toEqual(["email"]);
 	});
 });

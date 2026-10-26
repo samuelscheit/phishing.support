@@ -7,7 +7,6 @@ import {
 	type AbuseEmailDraft,
 	verifiedEmailProviderPayload,
 } from "../mail";
-import { isGenericEmailRouteEnabled } from "../providers/email";
 import { AbuseRepository } from "../repository";
 import { errorText, RetryableDeliveryError, routeContext, UnknownExternalStateError, type WorkerServices } from "./shared";
 
@@ -32,17 +31,8 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices): P
 		throw new UnknownExternalStateError(message);
 	}
 	if (!["verified", "delivery_failed"].includes(route.status)) return;
-	if (!isGenericEmailRouteEnabled()) {
-		await AbuseRepository.transitionRouteStatus({
-			routeId: route.id,
-			from: ["verified", "delivery_failed"],
-			to: "no_route",
-			data: { reason: "generic_email_route_disabled" },
-		});
-		return;
-	}
 	const correlationKey = `email-run:${route.id.toString()}`;
-	const caseUrl = abuseEmailCaseUrl(report.idempotencyKey);
+	const caseUrl = abuseEmailCaseUrl(report.submissionId);
 	const allowedDraftUrls = [
 		...target.observedUrls,
 		...(report.legalBrandUrl ? [report.legalBrandUrl] : []),
@@ -74,6 +64,7 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices): P
 			route,
 			recipient: route.verifiedEmail,
 			attachmentNames: attachments.map((attachment) => attachment.filename),
+			attachmentMimeTypes: attachments.map((attachment) => attachment.mimeType),
 		});
 		providerPayload = verifiedEmailProviderPayload({
 			target: target.normalizedTarget,

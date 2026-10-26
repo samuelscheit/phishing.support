@@ -63,7 +63,7 @@ function gnameImageMime(mimeType: string): mimeType is "image/jpeg" | "image/png
 async function generateGnameEvidenceDerivatives(
 	evidence: DecodedEvidence[],
 ): Promise<GnameEvidenceDerivativeGeneration> {
-	const eligible = evidence.filter((item) => GNAME_PROVIDER.evidence.acceptedMimeTypes.includes(item.mimeType as "image/jpeg" | "image/png"));
+	const eligible = evidence.filter((item) => (GNAME_PROVIDER.evidence.acceptedMimeTypes as readonly string[]).includes(item.mimeType));
 	const derivatives: GnameEvidenceDerivative[] = [];
 	let failures = 0;
 	for (const [index, item] of eligible.slice(0, GNAME_PROVIDER.evidence.maximumImages).entries()) {

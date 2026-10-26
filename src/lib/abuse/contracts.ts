@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import sharp from "sharp";
 import { z } from "zod";
 
+import type { AbuseTargetType } from "./schema";
 import { AbuseInputError, domainMatchesOrIsSubdomain, hashStableJson, isPublicIp, normalizeDomain, sha256Hex } from "./security";
 
 export const MAX_TARGETS_PER_REPORT = 100;
@@ -36,8 +37,8 @@ export const abuseReportRequestSchema = z
 		description: z.string().trim().min(1).max(30_000),
 		observedUrls: z.array(observedUrlsSchema).max(MAX_TARGETS_PER_REPORT).optional(),
 		legalBrandUrl: z.string().trim().url().max(4_096).optional(),
-		reporterContactEmail: z.string().trim().email().max(320).optional(),
-		reporterIdentity: z.enum(["service", "submitter"]).optional(),
+		reporterName: z.string().trim().min(1).max(200).regex(/^[^\u0000-\u001f\u007f<>]+$/, "must not contain control characters or angle brackets"),
+		reporterContactEmail: z.string().trim().email().max(320),
 		evidence: z.array(evidenceSchema).max(MAX_EVIDENCE_ITEMS).optional(),
 		idempotencyKey: z.string().trim().min(8).max(200).regex(/^[A-Za-z0-9._:-]+$/).optional(),
 	})
@@ -50,26 +51,29 @@ export type NormalizedAbuseTarget = {
 	originalInput: string;
 	originalInputs: string[];
 	normalizedTarget: string;
-	targetType: "domain" | "ip";
+	targetType: AbuseTargetType;
 	observedUrls: string[];
 };
 
+export type EvidenceMimeType = "image/jpeg" | "image/png" | "image/webp" | "message/rfc822";
+
 export type DecodedEvidence = {
 	filename: string;
-	mimeType: "image/jpeg" | "image/png" | "image/webp";
+	mimeType: EvidenceMimeType;
 	buffer: Buffer;
 	sha256: string;
 };
 
 export type ValidatedAbuseReportRequest = {
-	originalRequest: AbuseReportRequest;
+	/** The caller's request as received; retained verbatim as an artifact. */
+	originalRequest: Record<string, unknown>;
 	targets: NormalizedAbuseTarget[];
 	allegationCategory: (typeof allegationCategories)[number];
 	description: string;
 	observedUrls: Array<{ target: string; urls: string[] }>;
 	legalBrandUrl?: string;
-	reporterContactEmail?: string;
-	reporterIdentity: "service" | "submitter";
+	/** Public API submitter. Submission-owned reports have no external reporter. */
+	reporter?: { name: string; email: string };
 	evidence: DecodedEvidence[];
 	idempotencyKey?: string;
 	requestPayloadHash: string;
@@ -93,7 +97,7 @@ export function normalizeAbuseTarget(value: string): { normalizedTarget: string;
 	return { normalizedTarget: domain, targetType: "domain" };
 }
 
-function normalizeObservedUrl(value: string): string {
+export function normalizeObservedUrl(value: string): string {
 	let url: URL;
 	try {
 		url = new URL(value);
@@ -141,7 +145,8 @@ function strictBase64(value: string): Buffer {
 	return buffer;
 }
 
-async function decodeEvidence(item: z.infer<typeof evidenceSchema>): Promise<DecodedEvidence> {
+/** Decode untrusted image evidence and bind its MIME type to the decoded bytes. */
+export async function decodeImageEvidence(item: z.infer<typeof evidenceSchema>): Promise<DecodedEvidence> {
 	const buffer = strictBase64(item.base64);
 	if (buffer.byteLength > MAX_EVIDENCE_BYTES_PER_ITEM) {
 		throw new AbuseInputError(`Evidence ${item.filename} exceeds the ${MAX_EVIDENCE_BYTES_PER_ITEM / 1024 / 1024} MB item limit.`, 413);
@@ -213,21 +218,21 @@ export async function validateAbuseReportRequest(value: unknown): Promise<Valida
 		return { target: target.normalizedTarget, urls };
 	});
 
-	const evidence = await Promise.all((input.evidence ?? []).map(decodeEvidence));
+	const evidence = await Promise.all((input.evidence ?? []).map(decodeImageEvidence));
 	const evidenceBytes = evidence.reduce((total, item) => total + item.buffer.byteLength, 0);
 	if (evidenceBytes > MAX_EVIDENCE_BYTES_PER_REPORT) {
 		throw new AbuseInputError(`Evidence exceeds the ${MAX_EVIDENCE_BYTES_PER_REPORT / 1024 / 1024} MB report limit.`, 413);
 	}
 
 	const legalBrandUrl = normalizeLegalBrandUrl(input.legalBrandUrl);
+	const reporter = { name: input.reporterName, email: input.reporterContactEmail.toLowerCase() };
 	const normalizedForHash = {
 		targets: targets.map(({ normalizedTarget, targetType, observedUrls: targetUrls }) => ({ normalizedTarget, targetType, observedUrls: targetUrls })),
 		allegationCategory: input.allegationCategory,
 		description: input.description,
 		observedUrls,
 		legalBrandUrl,
-		reporterContactEmail: input.reporterContactEmail?.toLowerCase(),
-		reporterIdentity: input.reporterIdentity ?? "service",
+		reporter,
 		evidence: evidence.map(({ filename, mimeType, sha256 }) => ({ filename, mimeType, sha256 })),
 	};
 
@@ -238,8 +243,7 @@ export async function validateAbuseReportRequest(value: unknown): Promise<Valida
 		description: input.description,
 		observedUrls,
 		legalBrandUrl,
-		reporterContactEmail: input.reporterContactEmail?.toLowerCase(),
-		reporterIdentity: input.reporterIdentity ?? "service",
+		reporter,
 		evidence,
 		idempotencyKey: input.idempotencyKey,
 		requestPayloadHash: hashStableJson(normalizedForHash),

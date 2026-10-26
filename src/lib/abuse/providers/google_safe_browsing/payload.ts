@@ -20,9 +20,8 @@ export type GoogleSafeBrowsingSubmissionPayload = {
 };
 
 /**
- * Google has one free-text reason field. Preserve the standalone report's
- * evidence and legal-brand context directly instead of regenerating an AI
- * draft or depending on a legacy reporting record.
+ * Google has one free-text reason field. Build it from the report's
+ * evidence and legal-brand context instead of regenerating an AI draft.
  */
 export function makeGoogleSafeBrowsingExplanation(params: {
 	target?: string;

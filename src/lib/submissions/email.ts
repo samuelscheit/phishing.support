@@ -58,10 +58,7 @@ export async function retryFailedEmailAnalysis(submissionId: bigint): Promise<vo
 	const claimed = await SubmissionsEntity.transitionStatus(submissionId, "failed", "queued");
 	if (!claimed) throw new SubmissionRetryError("This submission is already being retried.");
 
-	void analyzeMail(artifact.blob.toString("utf-8"), submissionId, {
-		existingOriginalEmlArtifactId: artifact.id,
-		reuseEvidenceArtifacts: true,
-	}).catch(async (error) => {
+	void analyzeMail(artifact.blob.toString("utf-8"), submissionId, { reuseEvidenceArtifacts: true }).catch(async (error) => {
 		console.error("Retried email analysis failed:", error);
 	});
 }

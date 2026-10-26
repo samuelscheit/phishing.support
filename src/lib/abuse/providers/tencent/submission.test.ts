@@ -78,7 +78,7 @@ describe("Tencent Cloud abuse submission", () => {
 		expect(String(payload.payload.formData.filename)).toMatch(/^tencent_report_101_[a-f0-9]{12}\.png$/);
 	});
 
-	test("keeps the standalone report explanation concise without invoking a legacy draft generator", () => {
+	test("keeps the report explanation concise without invoking a draft generator", () => {
 		const explanation = makeTencentExplanation({
 			target: "phishing.example",
 			observedUrl: "https://login.phishing.example/collect",

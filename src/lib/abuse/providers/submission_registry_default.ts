@@ -1,6 +1,8 @@
+import type { AbuseTargetType } from "../schema";
 import { cloudflareProvider } from "./cloudflare";
 import { googleSafeBrowsingProvider } from "./google_safe_browsing";
 import { netcraftProvider } from "./netcraft";
+import { netcraftMailProvider } from "./netcraft_mail";
 import { createProviderSubmissionRegistry } from "./submission_registry";
 import type { ProviderSubmissionProvider } from "./submission_contracts";
 import { tencentProvider } from "./tencent";
@@ -15,6 +17,7 @@ const registry = createProviderSubmissionRegistry([
 	tencentProvider,
 	googleSafeBrowsingProvider,
 	netcraftProvider,
+	netcraftMailProvider,
 ]);
 
 export function listProviderSubmissionProviders(): readonly ProviderSubmissionProvider[] {
@@ -34,7 +37,7 @@ export function listSupplementalProviderSubmissionProviders(): readonly Provider
 }
 
 export function listSupplementalProviderSubmissionProvidersForTarget(target: {
-	targetType: "domain" | "ip";
+	targetType: AbuseTargetType;
 	observedUrls: readonly string[];
 }): readonly ProviderSubmissionProvider[] {
 	return registry.listSupplementalForTarget(target);

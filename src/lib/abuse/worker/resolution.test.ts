@@ -14,6 +14,8 @@ useTemporaryDatabase();
 const reportPayload = {
 	targets: ["example.com"],
 	allegationCategory: "phishing" as const,
+	reporterName: "Test Reporter",
+	reporterContactEmail: "reporter@example.org",
 	description: "A credential-harvesting page impersonates the protected brand.",
 	observedUrls: [{ target: "example.com", urls: ["https://login.example.com/collect"] }],
 };
