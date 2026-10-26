@@ -102,9 +102,11 @@ describe("Skyvern SDK adapter boundary", () => {
 			description: analysis,
 			observedUrls: ["https://login.example.com/collect"],
 			legalBrandUrl: "https://www.tiktok.com/coin",
+			reporterContactEmail: "support@phishing.support",
 		});
 
 		expect(payload.prompt).toContain("Suspected phishing activity involving example.com");
+		expect(payload.prompt).toContain('"reporterContactEmail":"support@phishing.support"');
 		expect(payload.prompt).toContain("Please investigate the reported activity");
 		expect(payload.prompt).not.toContain("## Verdict");
 		expect(payload.prompt).not.toContain("Do not copy this entire analysis");

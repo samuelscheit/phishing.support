@@ -182,6 +182,27 @@ describe("abuse persistence boundary", () => {
 			body: JSON.stringify({ ...reportPayload, providerUrl: "https://attacker.invalid/portal" }),
 		}));
 		expect(invalid.status).toBe(400);
+
+		// An API client that sends no identity is attributed to the service alone.
+		const { reporterName: _name, reporterContactEmail: _email, ...withoutReporter } = reportPayload;
+		const unattributed = await createReportRoute(new NextRequest("http://test.local/api/abuse/reports", {
+			method: "POST",
+			headers: { "content-type": "application/json", "user-agent": "Hermes-Phishing-Reporter/0.1" },
+			body: JSON.stringify({ ...withoutReporter, idempotencyKey: "hermes-20261020T121945Z-316fb2b3d923" }),
+		}));
+		expect(unattributed.status).toBe(202);
+		const unattributedReport = await AbuseRepository.getReportByTrackingToken((await unattributed.json() as { trackingToken: string }).trackingToken);
+		expect(unattributedReport).toMatchObject({ reporterName: null, reporterContactEmail: null });
+
+		const emailOnly = await createPublicReport({ reporterName: undefined, reporterContactEmail: " Reporter@Example.ORG " });
+		expect(await AbuseRepository.getReport(emailOnly.reportId)).toMatchObject({ reporterName: null, reporterContactEmail: "reporter@example.org" });
+
+		const malformedEmail = await createReportRoute(new NextRequest("http://test.local/api/abuse/reports", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ ...reportPayload, reporterContactEmail: "not-an-email" }),
+		}));
+		expect(malformedEmail.status).toBe(400);
 		expect((await getReportStatus(new Request("http://test.local/api/abuse/reports/not-a-token"), { params: Promise.resolve({ trackingToken: "not-a-token" }) })).status).toBe(404);
 	});
 });

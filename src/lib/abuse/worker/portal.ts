@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { resolveVerifiedProviderLink } from "../mail";
 import { isGenericFormEscalationEnabled } from "../providers/generic_form";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
+import { serviceIdentity } from "../../constants";
 import { AbuseRepository } from "../repository";
 import {
 	buildGenericProviderFormTaskPayload,
@@ -55,7 +56,7 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 			description: report.description,
 			observedUrls: target.observedUrls,
 			legalBrandUrl: report.legalBrandUrl ?? undefined,
-			reporterContactEmail: report.reporterContactEmail ?? undefined,
+			reporterContactEmail: serviceIdentity.mailbox,
 			webhookUrl: process.env.ABUSE_SKYVERN_WEBHOOK_URL,
 		});
 		correlationKey = `generic-portal:${route.id.toString()}:${crypto.createHash("sha256").update(entryUrl.toString()).digest("hex").slice(0, 24)}`;

@@ -101,11 +101,11 @@ Every report goes through one durable reporting worker:
 
 - A **website** confirmed as phishing becomes a report targeting the captured host, with the URL and archive screenshot as evidence.
 - An **email** confirmed as phishing becomes a report with two targets: the message itself (filed with Netcraft's mail API) and the public IP of the first external `Received` hop, whose RDAP/WHOIS abuse contact receives the recipient-redacted `.eml`. Every linked page is analyzed as its own website submission.
-- The **public form** at `/abuse-reporting` reports domains or IPs directly. It requires the reporter's name and email.
+- The **public form** at `/abuse-reporting` reports domains or IPs directly and asks for the reporter's name and email. The `POST /api/abuse/reports` API it uses accepts `reporterName` and `reporterContactEmail` as optional fields; an integration that sends neither files the report as Phishing Support alone.
 
 The resolver turns each target into provider routes (registrar/hosting abuse mailboxes, Cloudflare, Tencent, Google Safe Browsing, Netcraft). Each route is submitted, retried, or settled independently; the submission page's Reports tab shows every route with its sent report and provider replies. A report counts as submitted when at least one provider confirmed it, so one unreachable provider never hides the others.
 
-Providers always see the service identity defined in `src/lib/constants.ts` (Phishing Support, `support@phishing.support`, `https://phishing.support`); it is code, not configuration, because routes pin the provider definitions that embed it. For a public-form report, the submitter's name and email appear only in the report text as the original reporter, and Cloudflare additionally receives the submitter's country when known.
+Providers always see the service identity defined in `src/lib/constants.ts` (Phishing Support, `support@phishing.support`, `https://phishing.support`); it is code, not configuration, because routes pin the provider definitions that embed it. When a public report names its submitter, the name and/or email appear only in the report text as the original reporter, and Cloudflare additionally receives the submitter's country when known.
 
 ## Mail configuration
 

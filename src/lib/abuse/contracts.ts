@@ -37,8 +37,8 @@ export const abuseReportRequestSchema = z
 		description: z.string().trim().min(1).max(30_000),
 		observedUrls: z.array(observedUrlsSchema).max(MAX_TARGETS_PER_REPORT).optional(),
 		legalBrandUrl: z.string().trim().url().max(4_096).optional(),
-		reporterName: z.string().trim().min(1).max(200).regex(/^[^\u0000-\u001f\u007f<>]+$/, "must not contain control characters or angle brackets"),
-		reporterContactEmail: z.string().trim().email().max(320),
+		reporterName: z.string().trim().min(1).max(200).regex(/^[^\u0000-\u001f\u007f<>]+$/, "must not contain control characters or angle brackets").optional(),
+		reporterContactEmail: z.string().trim().email().max(320).optional(),
 		evidence: z.array(evidenceSchema).max(MAX_EVIDENCE_ITEMS).optional(),
 		idempotencyKey: z.string().trim().min(8).max(200).regex(/^[A-Za-z0-9._:-]+$/).optional(),
 	})
@@ -72,8 +72,12 @@ export type ValidatedAbuseReportRequest = {
 	description: string;
 	observedUrls: Array<{ target: string; urls: string[] }>;
 	legalBrandUrl?: string;
-	/** Public API submitter. Submission-owned reports have no external reporter. */
-	reporter?: { name: string; email: string };
+	/**
+	 * The public submitter, named only in the report text. Absent for
+	 * submission-owned reports and API clients that send no identity: those
+	 * reports are attributed to the service alone.
+	 */
+	reporter?: { name?: string; email?: string };
 	evidence: DecodedEvidence[];
 	idempotencyKey?: string;
 	requestPayloadHash: string;
@@ -225,7 +229,9 @@ export async function validateAbuseReportRequest(value: unknown): Promise<Valida
 	}
 
 	const legalBrandUrl = normalizeLegalBrandUrl(input.legalBrandUrl);
-	const reporter = { name: input.reporterName, email: input.reporterContactEmail.toLowerCase() };
+	const reporter = input.reporterName || input.reporterContactEmail
+		? { name: input.reporterName, email: input.reporterContactEmail?.toLowerCase() }
+		: undefined;
 	const normalizedForHash = {
 		targets: targets.map(({ normalizedTarget, targetType, observedUrls: targetUrls }) => ({ normalizedTarget, targetType, observedUrls: targetUrls })),
 		allegationCategory: input.allegationCategory,

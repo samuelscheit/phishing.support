@@ -325,8 +325,8 @@ export function abuseEmailCaseUrl(submissionId: bigint | null | undefined): stri
 export function reporterAttribution(report: Pick<AbuseReport, "reporterName" | "reporterContactEmail">): string | undefined {
 	const name = cleanText(report.reporterName, 200);
 	const email = cleanText(report.reporterContactEmail, 320);
-	if (!name || !email) return undefined;
-	return `Originally reported to phishing.support by ${name} <${email}>.`;
+	const submitter = name && email ? `${name} <${email}>` : name || email;
+	return submitter ? `Originally reported to ${new URL(serviceIdentity.url).host} by ${submitter}.` : undefined;
 }
 
 function cleanAttachmentNames(names: readonly string[] | undefined): string[] {

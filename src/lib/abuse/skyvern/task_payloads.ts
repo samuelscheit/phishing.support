@@ -21,7 +21,7 @@ export function buildGenericProviderFormTaskPayload(params: {
 	description: string;
 	observedUrls: string[];
 	legalBrandUrl?: string;
-	reporterContactEmail?: string;
+	reporterContactEmail: string;
 	webhookUrl?: string;
 }): SkyvernTaskPayload {
 	const definition = GENERIC_PROVIDER_FORM_ADAPTER;

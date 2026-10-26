@@ -84,6 +84,18 @@ describe("abuse email drafts", () => {
 		expect(draft.body).toContain("The phishing.support team");
 	});
 
+	test("names a submitter who gave only one of name or email, and nobody when an API client sent neither", async () => {
+		const draftFor = async (reporterName: string | null, reporterContactEmail: string | null) => (await createAbuseEmailDraft({
+			report: { ...report, submissionId: null, reporterName, reporterContactEmail },
+			target,
+			route: hostingerRoute,
+			recipient: "abuse@hostinger.com",
+		}, { generateSummary: async () => "The captured page impersonates a payment service." })).body;
+		expect(await draftFor("Ada Lovelace", null)).toContain("Originally reported to phishing.support by Ada Lovelace.");
+		expect(await draftFor(null, "ada@example.org")).toContain("Originally reported to phishing.support by ada@example.org.");
+		expect(await draftFor(null, null)).not.toContain("Originally reported");
+	});
+
 	test("reports a phishing email to the abuse contact of its sending infrastructure", async () => {
 		const draft = await createAbuseEmailDraft({
 			report,
