@@ -52,6 +52,25 @@ describe("retryFailedWebsiteAnalysis", () => {
 		});
 		await expect(getRetryableSubmission(id, "website")).rejects.toBeInstanceOf(SubmissionRetryError);
 	});
+
+	test("marks interrupted running analysis runs as failed on startup so the submission remains retryable", async () => {
+		const id = await SubmissionsEntity.create({
+			id: 4n,
+			kind: "website",
+			data: { kind: "website", website: { url: "https://interrupted.example.test" } },
+			dedupeKey: "website-retry-interrupted-run",
+			status: "running",
+		});
+		const runId = await AnalysisRunsEntity.create(id, undefined, "analysis");
+
+		await expect(SubmissionsEntity.failAllRunning()).resolves.toEqual([{ id }]);
+
+		const runs = await AnalysisRunsEntity.listForSubmission(id);
+		expect(runs).toMatchObject([{ id: runId, status: "failed" }]);
+		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({
+			submission: { id, status: "failed" },
+		});
+	});
 });
 
 describe("resumePendingWebsiteAnalyses", () => {

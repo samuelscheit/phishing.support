@@ -121,11 +121,22 @@ export class SubmissionsEntity {
     static async failAllRunning(params?: { info?: string }) {
         const db = await getDb();
         const info = params?.info ?? "Marked as failed (previous run did not complete).";
+        const now = nowDate();
         const rows = await db
             .update(submissions)
-            .set({ status: "failed", info, updatedAt: nowDate() })
+            .set({ status: "failed", info, updatedAt: now })
             .where(eq(submissions.status, "running"))
             .returning({ id: submissions.id });
+        await db
+            .update(analysisRuns)
+            .set({
+                status: "failed",
+                data: {
+                    lastError: info,
+                    failedAt: now.toISOString(),
+                },
+            })
+            .where(eq(analysisRuns.status, "running"));
         return rows;
     }
 
