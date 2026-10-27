@@ -56,7 +56,8 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 			description: report.description,
 			observedUrls: target.observedUrls,
 			legalBrandUrl: report.legalBrandUrl ?? undefined,
-			reporterContactEmail: serviceIdentity.mailbox,
+			reporter: { name: serviceIdentity.name, organization: serviceIdentity.name, website: serviceIdentity.url, email: serviceIdentity.mailbox },
+			observedAt: report.createdAt,
 			webhookUrl: process.env.ABUSE_SKYVERN_WEBHOOK_URL,
 		});
 		correlationKey = `generic-portal:${route.id.toString()}:${crypto.createHash("sha256").update(entryUrl.toString()).digest("hex").slice(0, 24)}`;

@@ -102,11 +102,17 @@ describe("Skyvern SDK adapter boundary", () => {
 			description: analysis,
 			observedUrls: ["https://login.example.com/collect"],
 			legalBrandUrl: "https://www.tiktok.com/coin",
-			reporterContactEmail: "support@phishing.support",
+			reporter: { name: "Phishing Support", organization: "Phishing Support", website: "https://phishing.support", email: "support@phishing.support" },
+			observedAt: new Date("2026-10-26T09:39:58Z"),
 		});
 
 		expect(payload.prompt).toContain("Suspected phishing activity involving example.com");
 		expect(payload.prompt).toContain('"reporterContactEmail":"support@phishing.support"');
+		// Forms that ask for a name, website, or incident time get them from the payload instead of stopping.
+		expect(payload.prompt).toContain('"reporterName":"Phishing Support"');
+		expect(payload.prompt).toContain('"reporterWebsite":"https://phishing.support"');
+		expect(payload.prompt).toContain('"incidentDate":"2026-10-26","incidentTime":"09:39","incidentTimeZone":"UTC"');
+		expect(payload.prompt).toContain("When the form has no dedicated target or URL field");
 		expect(payload.prompt).toContain("Please investigate the reported activity");
 		expect(payload.prompt).not.toContain("## Verdict");
 		expect(payload.prompt).not.toContain("Do not copy this entire analysis");
