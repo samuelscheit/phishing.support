@@ -9,6 +9,7 @@ import { reportConfirmedWebsitePhishing } from "./abuse/submission_reports";
 import type { ReporterMetadata } from "./request_metadata";
 import { defaultReasoning, defaultResponseModel, retry } from "./utils";
 import { extractWebsiteDataEntryFields } from "./website_fields";
+import { describeDataEntryField } from "./website_types";
 import type {
 	WebsiteDataEntryField,
 	WebsiteNavigationHop,
@@ -116,17 +117,25 @@ function capturedEvidenceForHop(params: { hop: WebsiteNavigationHop; archive: We
 	};
 }
 
+const PHISHING_BASIS_STATEMENTS: Record<WebsitePhishingBasis, string> = {
+	credential_theft: "The page asks visitors for a password, sign-in details, a verification code, or identity details, or leads them to a step that does.",
+	payment_fraud: "The page asks visitors for payment information or money, or leads them to a step that does.",
+	malware_delivery: "The page pushes visitors to download, install, or run a file, app, or command, which is malicious content.",
+};
+
 /**
- * Captured evidence handed to abuse reporting. It leads with the verified
- * finding so provider narratives can name the harmful action whatever the
- * page's language.
+ * The verified finding as plain sentences, one fact per line, handed to abuse
+ * reporting as the report description. Providers and mail drafts read it, so
+ * it states what the page does and quotes the proof in the page's own
+ * language instead of dumping the captured document.
  */
-export function buildWebsiteReportEvidence(hop: WebsiteNavigationHop, archive: WebsiteEvidenceArchive, classification: WebsiteSiteClassification): string {
-	return toon.encode({
-		phishing_basis: classification.phishingBasis,
-		evidence_quote: classification.evidenceQuote,
-		...capturedEvidenceForHop({ hop, archive }),
-	});
+export function buildWebsiteReportEvidence(classification: WebsiteSiteClassification): string {
+	const { phishingBasis, evidenceQuote, collectionFields } = classification;
+	return [
+		phishingBasis ? PHISHING_BASIS_STATEMENTS[phishingBasis] : undefined,
+		evidenceQuote ? `Page text that shows it, in its original language: ${JSON.stringify(evidenceQuote)}.` : undefined,
+		collectionFields?.length ? `The page collects this data through: ${collectionFields.map((field) => JSON.stringify(describeDataEntryField(field))).join(", ")}.` : undefined,
+	].filter((line): line is string => Boolean(line)).join("\n");
 }
 
 const WEBSITE_PHISHING_BASES = ["credential_theft", "payment_fraud", "malware_delivery"] as const satisfies readonly WebsitePhishingBasis[];
@@ -359,7 +368,7 @@ export async function analyzeWebsite(options: {
 			await reportConfirmedWebsitePhishing({
 				submissionId,
 				url: reportableSite.url,
-				analysisText: buildWebsiteReportEvidence(reportableSite, archive, capturedClassification),
+				analysisText: buildWebsiteReportEvidence(capturedClassification),
 				screenshotPng: archive.screenshotPng,
 				reporter: { reporterIp, reporterCountry, reporterHeaders },
 			});

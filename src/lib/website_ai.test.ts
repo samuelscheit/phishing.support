@@ -378,14 +378,14 @@ test("the report gate rejects troll pages and never lets destination content tri
 	)).toBeUndefined();
 });
 
-test("the report handoff leads with the verified finding so provider narratives name the action in any language", () => {
+test("the report handoff states the verified finding as plain sentences, not the captured document", () => {
 	const lure = classify(appleAccountLure, { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: appleLureQuote });
-	const evidence = buildWebsiteReportEvidence(appleAccountLure.hop, appleAccountLure.archive, lure);
-	expect(evidence.split("\n").slice(0, 3)).toEqual([
-		"phishing_basis: credential_theft",
-		`evidence_quote: ${JSON.stringify(appleLureQuote)}`,
-		`captured_site_url: ${JSON.stringify(appleAccountLure.hop.url)}`,
+	const evidence = buildWebsiteReportEvidence(lure);
+	expect(evidence.split("\n")).toEqual([
+		"The page asks visitors for a password, sign-in details, a verification code, or identity details, or leads them to a step that does.",
+		`Page text that shows it, in its original language: ${JSON.stringify(appleLureQuote)}.`,
 	]);
+	expect(evidence).not.toContain("<html");
 
 	const narrate = (description: string) => buildProviderReportNarrative({
 		provider: "cloudflare",
@@ -394,10 +394,9 @@ test("the report handoff leads with the verified finding so provider narratives 
 		description,
 		maximumLength: 1_000,
 	});
-	// The German page itself contains no English sign-in vocabulary.
-	expect(narrate(buildWebsiteReportEvidence(appleAccountLure.hop, appleAccountLure.archive, { finding: "phishing" }))).not.toContain("credential-collection");
+	expect(narrate(buildWebsiteReportEvidence({ finding: "phishing" }))).toBeUndefined();
 	expect(narrate(evidence)).toContain("a login or credential-collection flow");
 
 	const update = classify(fakeChromeUpdate, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Update Chrome" });
-	expect(narrate(buildWebsiteReportEvidence(fakeChromeUpdate.hop, fakeChromeUpdate.archive, update))).toContain("malicious content");
+	expect(narrate(buildWebsiteReportEvidence(update))).toContain("malicious content");
 });

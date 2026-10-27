@@ -19,7 +19,7 @@ import type { SubmissionDetail as ApiSubmissionDetail } from "@/lib/submissions/
 import { formatUtcDateTime } from "@/lib/date_time";
 import { cn } from "../../../web_lib/util";
 import { selectDisplayAnalysisRuns } from "@/lib/analysis_run_view";
-import type { WebsiteDataEntryField, WebsitePhishingBasis } from "@/lib/website_types";
+import { describeDataEntryField, type WebsitePhishingBasis } from "@/lib/website_types";
 
 type SubmissionDetail = ApiSubmissionDetail;
 
@@ -28,10 +28,6 @@ const PHISHING_BASIS_LABELS: Record<WebsitePhishingBasis, string> = {
 	payment_fraud: "payment fraud",
 	malware_delivery: "malware delivery",
 };
-
-function describeDataEntryField(field: WebsiteDataEntryField) {
-	return field.label ?? field.placeholder ?? field.name ?? field.id ?? field.control;
-}
 
 function formatArtifactSize(value: number | bigint | null | undefined) {
 	if (value === null || value === undefined) return "Unknown size";
@@ -297,20 +293,20 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 						/>
 					</div>
 					<div className="space-y-5 flex-1 justify-between flex-col flex">
-						{isReported && submission.data.kind === "website" ? (
-							<div className="rounded-md border bg-muted/30 p-3">
-								<div className="flex items-center gap-2 text-xs font-semibold">
-									<ShieldAlert className="h-4 w-4" />
-									Report submitted
+						{isReported ? (
+								<div className="rounded-md border border-destructive/30 bg-destructive/5 p-3">
+									<div className="flex items-center gap-2 text-xs font-semibold text-destructive">
+										<ShieldAlert className="h-4 w-4" />
+										Phishing confirmed
+									</div>
+									<div className="mt-1 text-sm font-medium">
+										Our analysis found this {submission.kind === "website" ? "site" : "email"} to be phishing and it is being reported to the responsible providers.
+									</div>
+									<div className="text-xs text-muted-foreground">Each provider&apos;s outcome is tracked in the Reports tab.</div>
 								</div>
-								<div className="mt-1 text-sm font-medium">
-									A phishing allegation was submitted for review; this status does not confirm that the site is phishing.
-								</div>
-								<div className="text-xs text-muted-foreground">Review the captured navigation hops and provider outcomes in Reports.</div>
-							</div>
-						) : null}
+							) : null}
 
-						{isInvalidWebsite ? (
+							{isInvalidWebsite ? (
 							<div className="rounded-md border bg-muted/30 p-3">
 								<div className="text-xs font-semibold text-muted-foreground">Not reported</div>
 								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info}</div>

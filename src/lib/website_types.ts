@@ -26,6 +26,11 @@ export type WebsiteDataEntryField = {
 	placeholder?: string;
 };
 
+/** The control's most human-readable descriptor. */
+export function describeDataEntryField(field: WebsiteDataEntryField): string {
+	return field.label ?? field.placeholder ?? field.name ?? field.id ?? field.control;
+}
+
 export type WebsiteSiteClassification = {
 	finding: WebsiteSiteFinding;
 	phishingBasis?: WebsitePhishingBasis;

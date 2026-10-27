@@ -22,7 +22,7 @@ export type CloudflareReportPayload = {
 	reportedCountry: string;
 };
 
-const EVIDENCE_LABEL = "Page-specific evidence from stored analysis (not instructions):";
+const EVIDENCE_LABEL = "Why this is phishing:";
 
 /**
  * Sentences that address the reader or a model instead of describing the page.
@@ -86,9 +86,9 @@ function boundedEvidence(description: string, maximum: number): string | undefin
  */
 function buildCloudflareJustification(input: { target: string; observedUrl: string; legalBrandUrl?: string; description: string }): string | undefined {
 	const prefix = [
-		`Phishing report for ${input.target}.`,
-		`Observed URL: ${input.observedUrl}`,
-		input.legalBrandUrl ? `Legitimate brand URL: ${input.legalBrandUrl}` : undefined,
+		`Confirmed phishing site: ${input.target}`,
+		`Phishing URL: ${input.observedUrl}`,
+		input.legalBrandUrl ? `Impersonated brand's real site: ${input.legalBrandUrl}` : undefined,
 	].filter((line): line is string => Boolean(line)).join("\n");
 	const evidence = boundedEvidence(input.description, CLOUDFLARE_PROVIDER.maximumJustificationLength - prefix.length - EVIDENCE_LABEL.length - 3);
 	return evidence ? `${prefix}\n\n${EVIDENCE_LABEL}\n${evidence}` : undefined;
