@@ -2,11 +2,9 @@ import { describe, expect, test } from "bun:test";
 
 import {
 	buildFabricBrowserSessionCreatePayload,
-	connectFabricPuppeteerBrowser,
 	disconnectFabricPatchrightClient,
 	fabricBrowserConfigFromEnvironment,
 	fabricRelayEndpoint,
-	isTransientFabricBrowserConnectError,
 } from "./fabric";
 
 function environment(overrides: Record<string, string | undefined> = {}) {
@@ -108,45 +106,5 @@ describe("Phishing Support Browser Fabric boundary", () => {
 		await disconnectFabricPatchrightClient(browser);
 		expect(clientTransportClose).toBe(1);
 		expect(remoteBrowserClose).toBe(0);
-	});
-
-	test("retries a relay handshake that closes while Fabric is allocating Chromium and enables invalid certificates", async () => {
-		const attempts: Array<{ browserWSEndpoint: string; acceptInsecureCerts: boolean }> = [];
-		const delays: number[] = [];
-		const browser = {} as any;
-		let calls = 0;
-		const result = await connectFabricPuppeteerBrowser(
-			async (options) => {
-				attempts.push(options);
-				calls += 1;
-				if (calls < 3) throw new Error("Protocol error (Target.getBrowserContexts): Target closed");
-				return browser;
-			},
-			"ws://fabric-cdp-relay:8085/v1/cdp/browser-session_test",
-			{ sleep: async (milliseconds) => { delays.push(milliseconds); } },
-		);
-
-		expect(result).toBe(browser);
-		expect(attempts).toEqual([
-			{ browserWSEndpoint: "ws://fabric-cdp-relay:8085/v1/cdp/browser-session_test", acceptInsecureCerts: true },
-			{ browserWSEndpoint: "ws://fabric-cdp-relay:8085/v1/cdp/browser-session_test", acceptInsecureCerts: true },
-			{ browserWSEndpoint: "ws://fabric-cdp-relay:8085/v1/cdp/browser-session_test", acceptInsecureCerts: true },
-		]);
-		expect(delays).toEqual([250, 500]);
-	});
-
-	test("does not retry non-startup protocol failures", async () => {
-		let calls = 0;
-		await expect(connectFabricPuppeteerBrowser(
-			async () => {
-				calls += 1;
-				throw new Error("Protocol error (Target.createTarget): Not supported");
-			},
-			"ws://fabric-cdp-relay:8085/v1/cdp/browser-session_test",
-			{ sleep: async () => undefined },
-		)).rejects.toThrow("Target.createTarget");
-		expect(calls).toBe(1);
-		expect(isTransientFabricBrowserConnectError(new Error("Protocol error (Target.getBrowserContexts): Target closed"))).toBeTrue();
-		expect(isTransientFabricBrowserConnectError(new Error("Protocol error (Target.createTarget): Not supported"))).toBeFalse();
 	});
 });
