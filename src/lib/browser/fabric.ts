@@ -35,6 +35,9 @@ export interface FabricSessionOptions {
 }
 type FabricFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+const FABRIC_BROWSER_CONNECT_ATTEMPTS = 4;
+const FABRIC_BROWSER_CONNECT_RETRY_DELAY_MS = 250;
+
 export interface FabricBrowserConfig {
 	baseUrl: string;
 	project: string;
@@ -315,6 +318,75 @@ function startSessionHeartbeat(config: FabricBrowserConfig, sessionId: string): 
 	return () => clearInterval(timer);
 }
 
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Fabric can accept a relay WebSocket while Chromium is still being attached.
+ * Puppeteer then reports the closed transport as a Target.getBrowserContexts
+ * failure. Retry only that startup condition; ordinary protocol failures must
+ * still fail immediately and release the lease.
+ */
+export function isTransientFabricBrowserConnectError(error: unknown): boolean {
+	const message = errorMessage(error);
+	return /Target\.getBrowserContexts.*Target closed|Target closed.*Target\.getBrowserContexts|Session closed|WebSocket is not open|WebSocket closed|Connection closed/i.test(message);
+}
+
+type FabricPuppeteerConnect = (options: {
+	browserWSEndpoint: string;
+	acceptInsecureCerts: boolean;
+}) => Promise<PuppeteerBrowser>;
+
+/** Connect through the relay without racing Fabric's Chromium allocation. */
+export async function connectFabricPuppeteerBrowser(
+	connect: FabricPuppeteerConnect,
+	endpoint: string,
+	options: { sleep?: (milliseconds: number) => Promise<void> } = {},
+): Promise<PuppeteerBrowser> {
+	let lastError: unknown;
+	for (let attempt = 0; attempt < FABRIC_BROWSER_CONNECT_ATTEMPTS; attempt += 1) {
+		try {
+			return await connect({ browserWSEndpoint: endpoint, acceptInsecureCerts: true });
+		} catch (error) {
+			lastError = error;
+			if (!isTransientFabricBrowserConnectError(error) || attempt + 1 === FABRIC_BROWSER_CONNECT_ATTEMPTS) throw error;
+			await (options.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))))(
+				FABRIC_BROWSER_CONNECT_RETRY_DELAY_MS * (attempt + 1),
+			);
+		}
+	}
+	throw lastError;
+}
+
+async function connectFabricPatchrightBrowser(chromium: { connectOverCDP(endpoint: string): Promise<any> }, endpoint: string): Promise<any> {
+	let lastError: unknown;
+	for (let attempt = 0; attempt < FABRIC_BROWSER_CONNECT_ATTEMPTS; attempt += 1) {
+		try {
+			return await chromium.connectOverCDP(endpoint);
+		} catch (error) {
+			lastError = error;
+			if (!isTransientFabricBrowserConnectError(error) || attempt + 1 === FABRIC_BROWSER_CONNECT_ATTEMPTS) throw error;
+			await new Promise((resolve) => setTimeout(resolve, FABRIC_BROWSER_CONNECT_RETRY_DELAY_MS * (attempt + 1)));
+		}
+	}
+	throw lastError;
+}
+
+async function allowInsecureCertificates(browser: any): Promise<void> {
+	if (typeof browser?.newBrowserCDPSession !== "function") return;
+	const cdp = await browser.newBrowserCDPSession();
+	try {
+		await cdp.send("Security.setIgnoreCertificateErrors", { ignore: true });
+	} finally {
+		try {
+			await cdp.detach?.();
+		} catch {
+			// Detaching the short-lived setup session is best-effort.
+		}
+	}
+}
+
 /** Acquire a Fabric browser lease without exposing Fabric's CDP capability. */
 export async function acquireFabricBrowserSession(
 	metadata: Record<string, FabricScalar> = {},
@@ -411,7 +483,10 @@ export async function acquireFabricPuppeteerBrowser(
 	let browser: PuppeteerBrowser;
 	try {
 		const module = await import("rebrowser-puppeteer-core");
-		browser = await module.connect({ browserWSEndpoint: fabricRelayEndpoint(sessionId) });
+		browser = await connectFabricPuppeteerBrowser(
+			(module.connect as unknown as FabricPuppeteerConnect),
+			fabricRelayEndpoint(sessionId),
+		);
 	} catch (error) {
 		await sessionAction(config, sessionId, "cancel").catch(() => undefined);
 		throw error;
@@ -448,7 +523,8 @@ export async function acquireFabricPatchrightSession(
 	let browser: any;
 	try {
 		const { chromium } = await import("patchright");
-		browser = await chromium.connectOverCDP(fabricRelayEndpoint(sessionId));
+		browser = await connectFabricPatchrightBrowser(chromium, fabricRelayEndpoint(sessionId));
+		await allowInsecureCertificates(browser);
 		const context = browser.contexts()[0];
 		if (!context) throw new Error("Fabric browser did not expose its leased profile context");
 
