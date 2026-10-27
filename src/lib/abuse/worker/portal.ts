@@ -4,6 +4,7 @@ import { resolveVerifiedProviderLink } from "../mail";
 import { isGenericFormEscalationEnabled } from "../providers/generic_form";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { serviceIdentity } from "../../constants";
+import { deriveProviderFormFacts } from "../skyvern/form_facts";
 import { AbuseRepository } from "../repository";
 import {
 	buildGenericProviderFormTaskPayload,
@@ -48,6 +49,11 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 			return;
 		}
 		const entryUrl = new URL(resolvedEntryUrl);
+		const analysisFacts = await deriveProviderFormFacts({
+			target: target.normalizedTarget,
+			analysis: report.description,
+			...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
+		});
 		taskPayload = buildGenericProviderFormTaskPayload({
 			entryUrl: entryUrl.toString(),
 			allowedDomains: verifiedDomains,
@@ -58,6 +64,7 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 			legalBrandUrl: report.legalBrandUrl ?? undefined,
 			reporter: { name: serviceIdentity.name, organization: serviceIdentity.name, website: serviceIdentity.url, email: serviceIdentity.mailbox },
 			observedAt: report.createdAt,
+			analysisFacts,
 			webhookUrl: process.env.ABUSE_SKYVERN_WEBHOOK_URL,
 		});
 		correlationKey = `generic-portal:${route.id.toString()}:${crypto.createHash("sha256").update(entryUrl.toString()).digest("hex").slice(0, 24)}`;
