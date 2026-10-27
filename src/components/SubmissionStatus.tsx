@@ -2,7 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/web_lib/util";
-import { CheckCircle2, Loader2, ShieldAlert, XCircle } from "lucide-react";
+import { CheckCircle2, CornerDownRight, Loader2, ShieldAlert, XCircle } from "lucide-react";
 
 export function SubmissionStatus({ status, className }: { status?: string | null; className?: string }) {
 	const raw = (status || "").trim();
@@ -13,6 +13,7 @@ export function SubmissionStatus({ status, className }: { status?: string | null
 	const isInvalid = key === "invalid";
 	const isFailed = key === "failed";
 	const isCompleted = key === "completed";
+	const isRedirected = key === "redirected";
 
 	const label = isReported ? "Phishing" : isInvalid ? "Not phishing" : raw || "Unknown";
 
@@ -42,6 +43,15 @@ export function SubmissionStatus({ status, className }: { status?: string | null
 			<Badge variant="outline" className={cn("gap-1 border-emerald-200 bg-emerald-50 text-emerald-700", className)}>
 				<CheckCircle2 className="h-3.5 w-3.5" />
 				{label}
+			</Badge>
+		);
+	}
+
+	if (isRedirected) {
+		return (
+			<Badge variant="outline" className={cn("gap-1 border-amber-200 bg-amber-50 text-amber-800", className)}>
+				<CornerDownRight className="h-3.5 w-3.5" />
+				Redirects
 			</Badge>
 		);
 	}

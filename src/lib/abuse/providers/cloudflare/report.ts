@@ -1,6 +1,7 @@
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import { serviceIdentity } from "../../../constants";
-import { compactProviderText, normalizeObservedUrlForDomain, normalizePublicDomainHttpUrl, truncateProviderText } from "../report_payload";
+import { normalizePublicHttpUrl } from "../../security";
+import { compactProviderText, normalizeObservedUrlForTarget, truncateProviderText } from "../report_payload";
 import type { ProviderReportPreviewContext } from "../submission_contracts";
 
 export type CloudflareReportInput = {
@@ -96,18 +97,18 @@ function buildCloudflareJustification(input: { target: string; observedUrl: stri
 
 /** Render the exact justification the Cloudflare form will receive. */
 export function buildCloudflareReportPreview(input: ProviderReportPreviewContext): string | undefined {
-	const observedUrl = input.observedUrls.map((url) => normalizeObservedUrlForDomain(url, input.target)).find(Boolean);
+	const observedUrl = input.observedUrls.map((url) => normalizeObservedUrlForTarget(url, input.target)).find(Boolean);
 	if (!observedUrl) return undefined;
-	const legalBrandUrl = input.legalBrandUrl ? normalizePublicDomainHttpUrl(input.legalBrandUrl) : undefined;
+	const legalBrandUrl = input.legalBrandUrl ? normalizePublicHttpUrl(input.legalBrandUrl, { domainOnly: true }) : undefined;
 	if (input.legalBrandUrl && !legalBrandUrl) return undefined;
 	return buildCloudflareJustification({ target: input.target, observedUrl, ...(legalBrandUrl ? { legalBrandUrl } : {}), description: input.description });
 }
 
 /** Create Cloudflare's reviewed form payload from the abuse report. */
 export function buildCloudflareReportPayload(input: CloudflareReportInput): CloudflareReportPayload {
-	const observedUrl = normalizeObservedUrlForDomain(input.observedUrl, input.target);
+	const observedUrl = normalizeObservedUrlForTarget(input.observedUrl, input.target);
 	if (!observedUrl) throw new Error("Cloudflare abuse reporting requires a valid observed URL for the target.");
-	const legalBrandUrl = input.legalBrandUrl === undefined ? undefined : normalizePublicDomainHttpUrl(input.legalBrandUrl);
+	const legalBrandUrl = input.legalBrandUrl === undefined ? undefined : normalizePublicHttpUrl(input.legalBrandUrl, { domainOnly: true });
 	if (input.legalBrandUrl !== undefined && !legalBrandUrl) throw new Error("Cloudflare abuse reporting requires a valid legal brand URL.");
 	const justification = buildCloudflareJustification({ target: input.target, observedUrl, ...(legalBrandUrl ? { legalBrandUrl } : {}), description: input.description });
 	if (!justification) throw new Error("Cloudflare abuse reporting requires a non-empty report description.");

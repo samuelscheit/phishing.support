@@ -5,7 +5,7 @@ import {
 	type NetcraftFetch,
 } from "../../../netcraft/api";
 import { AbuseRepository } from "../../repository";
-import { normalizeObservedUrlForDomain } from "../report_payload";
+import { normalizeObservedUrlForTarget } from "../report_payload";
 
 import { NETCRAFT_PROVIDER } from "./definition";
 
@@ -23,7 +23,7 @@ export type NetcraftProviderReconciliationResult =
 function canonicalObservedUrls(target: { normalizedTarget: string; observedUrls: string[] }): string[] | undefined {
 	const urls: string[] = [];
 	for (const observedUrl of target.observedUrls) {
-		const normalized = normalizeObservedUrlForDomain(observedUrl, target.normalizedTarget);
+		const normalized = normalizeObservedUrlForTarget(observedUrl, target.normalizedTarget);
 		if (!normalized || urls.includes(normalized)) return undefined;
 		urls.push(normalized);
 	}
@@ -80,7 +80,7 @@ export async function reconcileNetcraftProviderRun(params: {
 	}
 
 	const target = await AbuseRepository.getTarget(route.targetId);
-	if (!target || target.targetType !== "domain") return { outcome: "not_eligible", reason: "netcraft_target_not_found" };
+	if (!target || target.targetType === "email") return { outcome: "not_eligible", reason: "netcraft_target_not_found" };
 	const expectedUrls = canonicalObservedUrls(target);
 	if (!expectedUrls) return { outcome: "not_eligible", reason: "netcraft_expected_urls_invalid" };
 
@@ -88,7 +88,7 @@ export async function reconcileNetcraftProviderRun(params: {
 	if (!receipt.hasUrls) return { outcome: "not_eligible", reason: "netcraft_receipt_has_no_urls" };
 	const receivedUrls = new Set(
 		receipt.urls
-			.map((entry) => normalizeObservedUrlForDomain(entry.url, target.normalizedTarget))
+			.map((entry) => normalizeObservedUrlForTarget(entry.url, target.normalizedTarget))
 			.filter((url): url is string => Boolean(url)),
 	);
 	// A receipt for another submission could contain this target alongside

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { configuredAbuseOpenAI, responseOutputText } from "../ai";
-import { normalizeDomain } from "../security";
+import { normalizePublicHttpUrl } from "../security";
 import { serviceIdentity } from "../../constants";
 import { defaultResponseModel } from "../../utils";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
@@ -270,17 +270,7 @@ function recipientGreeting(label: string): string {
 
 function safeBodyUrl(value: unknown): string | undefined {
 	const raw = cleanText(value, MAX_URL_LENGTH_IN_BODY);
-	if (!raw) return undefined;
-	try {
-		const url = new URL(raw);
-		const hostname = normalizeDomain(url.hostname);
-		if (!hostname || (url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) return undefined;
-		url.hostname = hostname;
-		url.hash = "";
-		return url.toString();
-	} catch {
-		return undefined;
-	}
+	return raw ? normalizePublicHttpUrl(raw) : undefined;
 }
 
 function normalizedBodyUrls(observedUrls: readonly string[]): string[] {

@@ -1,16 +1,14 @@
 import { ArtifactsEntity, SubmissionsEntity } from "@/lib/db/entities";
 import { generateId } from "@/lib/db/ids";
-import { analyzeWebsite } from "@/lib/website_ai";
+import { analyzeWebsite, type AnalyzeWebsiteOptions } from "@/lib/website_ai";
 import type { ReporterMetadata } from "@/lib/request_metadata";
 import { getRetryableSubmission, SubmissionRetryError } from "./retry";
 
 export { SubmissionRetryError } from "./retry";
 
-export type WebsiteSubmissionOptions = ReporterMetadata & {
-	mhtmlSnapshot?: Buffer;
-	url: string;
-	source?: string;
-};
+export type WebsiteSubmissionOptions = ReporterMetadata
+	& Pick<AnalyzeWebsiteOptions, "url" | "mhtmlSnapshot" | "archivedUrl" | "navigationHops" | "screenshotSnapshot">
+	& { source?: string };
 
 type WebsiteAnalysisRecoveryOptions = ReporterMetadata & {
 	submissionId: bigint;
@@ -52,7 +50,10 @@ export async function resumePendingWebsiteAnalyses(params: {
 	return resumed;
 }
 
-export async function createWebsiteSubmission(options: WebsiteSubmissionOptions): Promise<bigint> {
+export async function createWebsiteSubmission(
+	options: WebsiteSubmissionOptions,
+	startAnalysis: (options: AnalyzeWebsiteOptions) => Promise<unknown> = analyzeWebsite,
+): Promise<bigint> {
 	const streamId = generateId();
 	const { url, source } = options;
 
@@ -73,7 +74,7 @@ export async function createWebsiteSubmission(options: WebsiteSubmissionOptions)
 
 	if (existingId !== streamId) return existingId;
 
-	analyzeWebsite({ submissionId: streamId, ...options }).catch(console.error);
+	startAnalysis({ submissionId: streamId, ...options }).catch(console.error);
 
 	return streamId;
 }

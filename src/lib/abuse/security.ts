@@ -204,9 +204,32 @@ export function isPublicIp(value: string): boolean {
 	return version === 4 || isInCidr(value, "2000::", 3);
 }
 
-export function isSafePublicHostname(value: string): boolean {
-	if (isIP(value)) return isPublicIp(value);
-	return Boolean(normalizeDomain(value));
+/**
+ * Canonical public host: a public DNS domain or a public routable IP address.
+ * URL hostnames wrap IPv6 in brackets; the WHATWG parser also compresses it,
+ * so every spelling of one address yields the same target.
+ */
+export function normalizePublicHost(value: string): string | undefined {
+	const host = value.trim().replace(/^\[(.*)\]$/, "$1");
+	if (!isIP(host)) return normalizeDomain(host);
+	if (!isPublicIp(host)) return undefined;
+	return isIP(host) === 6 ? new URL(`http://[${host}]/`).hostname.slice(1, -1) : host;
+}
+
+/** Normalize an HTTP(S) URL without credentials whose host is public; its fragment is dropped. */
+export function normalizePublicHttpUrl(value: string, options: { domainOnly?: boolean } = {}): string | undefined {
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return undefined;
+	}
+	if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) return undefined;
+	const host = options.domainOnly ? normalizeDomain(url.hostname) : normalizePublicHost(url.hostname);
+	if (!host) return undefined;
+	if (!isIP(host)) url.hostname = host;
+	url.hash = "";
+	return url.toString();
 }
 
 export function registrableDomain(value: string): string | undefined {
@@ -217,6 +240,14 @@ export function domainMatchesOrIsSubdomain(hostname: string, targetDomain: strin
 	const host = normalizeDomain(hostname);
 	const target = normalizeDomain(targetDomain);
 	return Boolean(host && target && (host === target || host.endsWith(`.${target}`)));
+}
+
+/** A host belongs to a domain target or its subdomains, and only to the exact address of an IP target. */
+export function hostBelongsToTarget(hostname: string, target: string): boolean {
+	const host = normalizePublicHost(hostname);
+	const normalizedTarget = normalizePublicHost(target);
+	if (!host || !normalizedTarget) return false;
+	return isIP(normalizedTarget) ? host === normalizedTarget : domainMatchesOrIsSubdomain(host, normalizedTarget);
 }
 
 /** Resolve every hostname candidate before a service-side network operation. */

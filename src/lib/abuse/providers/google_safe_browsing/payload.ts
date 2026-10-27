@@ -1,6 +1,6 @@
-import { normalizeDomain } from "../../security";
+import { normalizePublicHost } from "../../security";
 import { recordValue } from "../../worker/shared";
-import { buildProviderReportNarrative, normalizeObservedUrlForDomain } from "../report_payload";
+import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
 import { GOOGLE_SAFE_BROWSING_PROVIDER } from "./definition";
 
 export type GoogleSafeBrowsingSubmissionPayload = {
@@ -46,8 +46,8 @@ export function buildGoogleSafeBrowsingSubmissionPayload(params: {
 	description: string;
 	legalBrandUrl?: string;
 }): GoogleSafeBrowsingSubmissionPayload | undefined {
-	const target = normalizeDomain(params.target);
-	const observedUrl = target ? normalizeObservedUrlForDomain(params.observedUrl, target) : undefined;
+	const target = normalizePublicHost(params.target);
+	const observedUrl = target ? normalizeObservedUrlForTarget(params.observedUrl, target) : undefined;
 	const explanation = makeGoogleSafeBrowsingExplanation({
 		target,
 		observedUrl,
@@ -76,9 +76,9 @@ export function storedGoogleSafeBrowsingSubmissionPayload(value: unknown): Googl
 		|| !report || typeof report.explanation !== "string" || report.explanation.length === 0 || report.explanation.length > GOOGLE_SAFE_BROWSING_PROVIDER.explanationMaximumLength) {
 		return undefined;
 	}
-	const normalizedTarget = normalizeDomain(target.normalizedTarget);
+	const normalizedTarget = normalizePublicHost(target.normalizedTarget);
 	if (!normalizedTarget || normalizedTarget !== target.normalizedTarget) return undefined;
-	const observed = normalizeObservedUrlForDomain(target.observedUrl, normalizedTarget);
+	const observed = normalizeObservedUrlForTarget(target.observedUrl, normalizedTarget);
 	if (!observed || observed !== target.observedUrl) return undefined;
 	return {
 		adapter: "google_safe_browsing_phish_v1",

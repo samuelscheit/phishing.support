@@ -143,12 +143,12 @@ export async function submitGoogleSafeBrowsingForm(params: {
 	);
 }
 
-/** Enforce the supplemental provider's domain + observed-URL eligibility before its marker. */
+/** Enforce the supplemental provider's web target + observed-URL eligibility before its marker. */
 export async function prepareGoogleSafeBrowsingSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation> {
 	const { route, report, target } = await routeContext(context.routeId);
 	if (route.routeType !== "provider_submission" || route.providerRegistryKey !== GOOGLE_SAFE_BROWSING_PROVIDER.key
-		|| target.targetType !== "domain") {
-		return { outcome: "insufficient_evidence", reason: "google_safe_browsing_requires_a_domain_target" };
+		|| target.targetType === "email") {
+		return { outcome: "insufficient_evidence", reason: "google_safe_browsing_requires_a_web_target" };
 	}
 	if (!providerDefinitionMatchesPin(GOOGLE_SAFE_BROWSING_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)) {
 		return { outcome: "insufficient_evidence", reason: "google_safe_browsing_provider_definition_pin_mismatch" };
@@ -175,7 +175,7 @@ export async function submitGoogleSafeBrowsingSubmission(
 	const { route, report, target } = await routeContext(context.routeId);
 	if (route.routeType !== "provider_submission" || route.providerRegistryKey !== GOOGLE_SAFE_BROWSING_PROVIDER.key
 		|| !providerDefinitionMatchesPin(GOOGLE_SAFE_BROWSING_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)
-		|| target.targetType !== "domain"
+		|| target.targetType === "email"
 		|| target.normalizedTarget !== payload.target.normalizedTarget || !target.observedUrls.includes(payload.target.observedUrl)) {
 		throw new Error("The persisted Google Safe Browsing payload no longer matches its route.");
 	}

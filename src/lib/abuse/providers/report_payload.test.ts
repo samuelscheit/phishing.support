@@ -2,20 +2,33 @@ import { describe, expect, test } from "bun:test";
 
 import {
 	buildProviderReportNarrative,
-	normalizeObservedUrlForDomain,
-	normalizePublicDomainHttpUrl,
+	normalizeObservedUrlForTarget,
 } from "./report_payload";
+import { normalizePublicHttpUrl } from "../security";
 
 describe("shared supplemental-provider payload helpers", () => {
-	test("normalizes only public-domain HTTP(S) URLs and binds observed URLs to their target", () => {
-		expect(normalizePublicDomainHttpUrl("HTTPS://LOGIN.Example.COM/path#discarded")).toBe(
+	test("normalizes only public HTTP(S) URLs and binds observed URLs to their target", () => {
+		expect(normalizePublicHttpUrl("HTTPS://LOGIN.Example.COM/path#discarded")).toBe(
 			"https://login.example.com/path",
 		);
-		expect(normalizePublicDomainHttpUrl("https://user:pass@example.com/")).toBeUndefined();
-		expect(normalizeObservedUrlForDomain("https://login.example.com/collect", "example.com")).toBe(
+		expect(normalizePublicHttpUrl("https://user:pass@example.com/")).toBeUndefined();
+		expect(normalizePublicHttpUrl("http://85.215.226.225/Netflix/Home/login.php")).toBe("http://85.215.226.225/Netflix/Home/login.php");
+		expect(normalizePublicHttpUrl("http://85.215.226.225/", { domainOnly: true })).toBeUndefined();
+		expect(normalizePublicHttpUrl("http://192.168.1.10/login")).toBeUndefined();
+		expect(normalizePublicHttpUrl("http://[2606:4700:0::1111]/x")).toBe("http://[2606:4700::1111]/x");
+		expect(normalizeObservedUrlForTarget("https://login.example.com/collect", "example.com")).toBe(
 			"https://login.example.com/collect",
 		);
-		expect(normalizeObservedUrlForDomain("https://unrelated.example.net/collect", "example.com")).toBeUndefined();
+		expect(normalizeObservedUrlForTarget("https://unrelated.example.net/collect", "example.com")).toBeUndefined();
+	});
+
+	test("binds an IP-hosted URL only to its exact address", () => {
+		expect(normalizeObservedUrlForTarget("https://85.215.226.225/Netflix/Home/login.php", "85.215.226.225")).toBe(
+			"https://85.215.226.225/Netflix/Home/login.php",
+		);
+		expect(normalizeObservedUrlForTarget("https://85.215.226.226/", "85.215.226.225")).toBeUndefined();
+		expect(normalizeObservedUrlForTarget("https://85.215.226.225/", "example.com")).toBeUndefined();
+		expect(normalizeObservedUrlForTarget("http://[2606:4700:0:0::1111]/", "2606:4700::1111")).toBe("http://[2606:4700::1111]/");
 	});
 
 	test("never exceeds a provider maximum when adding legal-brand context", () => {

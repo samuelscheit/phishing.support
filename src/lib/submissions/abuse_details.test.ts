@@ -36,7 +36,7 @@ async function createWebsiteReport(submissionId: bigint) {
 	});
 	const report = await reportConfirmedWebsitePhishing({
 		submissionId,
-		url: "https://shop.example.com/",
+		urls: ["https://shop.example.com/"],
 		analysisText: "The captured page impersonates a trusted service and collects credentials.",
 		reporter: {},
 	});

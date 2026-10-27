@@ -4,7 +4,7 @@ import sharp from "sharp";
 import { z } from "zod";
 
 import type { AbuseTargetType } from "./schema";
-import { AbuseInputError, domainMatchesOrIsSubdomain, hashStableJson, isPublicIp, normalizeDomain, sha256Hex } from "./security";
+import { AbuseInputError, hashStableJson, hostBelongsToTarget, normalizePublicHost, normalizePublicHttpUrl, sha256Hex } from "./security";
 
 export const MAX_TARGETS_PER_REPORT = 100;
 export const MAX_OBSERVED_URLS_PER_TARGET = 100;
@@ -92,13 +92,13 @@ function schemaError(error: z.ZodError): never {
 export function normalizeAbuseTarget(value: string): { normalizedTarget: string; targetType: "domain" | "ip" } {
 	const original = value.trim();
 	if (!original) throw new AbuseInputError("A report target cannot be empty.");
-	if (isIP(original)) {
-		if (!isPublicIp(original)) throw new AbuseInputError(`Target ${original} is not a public routable IP address.`);
-		return { normalizedTarget: original.toLowerCase(), targetType: "ip" };
+	const host = normalizePublicHost(original);
+	if (!host) {
+		throw new AbuseInputError(isIP(original.replace(/^\[(.*)\]$/, "$1"))
+			? `Target ${original} is not a public routable IP address.`
+			: `Target ${original} is not a public domain or IP address.`);
 	}
-	const domain = normalizeDomain(original);
-	if (!domain) throw new AbuseInputError(`Target ${original} is not a public domain or IP address.`);
-	return { normalizedTarget: domain, targetType: "domain" };
+	return { normalizedTarget: host, targetType: isIP(host) ? "ip" : "domain" };
 }
 
 export function normalizeObservedUrl(value: string): string {
@@ -110,29 +110,16 @@ export function normalizeObservedUrl(value: string): string {
 	}
 	if (url.protocol !== "http:" && url.protocol !== "https:") throw new AbuseInputError("Observed URLs must use http or https.");
 	if (url.username || url.password) throw new AbuseInputError("Observed URLs must not contain credentials.");
-	if (isIP(url.hostname)) throw new AbuseInputError("Observed URLs must be associated with a submitted domain, not a raw IP address.");
-	const hostname = normalizeDomain(url.hostname);
-	if (!hostname) throw new AbuseInputError("Observed URL hostname must be a public domain.");
-	url.hostname = hostname;
-	url.hash = "";
-	return url.toString();
+	const normalized = normalizePublicHttpUrl(value);
+	if (!normalized) throw new AbuseInputError("Observed URL host must be a public domain or public IP address.");
+	return normalized;
 }
 
 function normalizeLegalBrandUrl(value: string | undefined): string | undefined {
 	if (!value) return undefined;
-	let url: URL;
-	try {
-		url = new URL(value);
-	} catch {
-		throw new AbuseInputError("Legal brand URL is invalid.");
-	}
-	if (url.protocol !== "https:" && url.protocol !== "http:") throw new AbuseInputError("Legal brand URL must use http or https.");
-	if (url.username || url.password || isIP(url.hostname) || !normalizeDomain(url.hostname)) {
-		throw new AbuseInputError("Legal brand URL must use a public domain without credentials.");
-	}
-	url.hostname = normalizeDomain(url.hostname)!;
-	url.hash = "";
-	return url.toString();
+	const normalized = normalizePublicHttpUrl(value, { domainOnly: true });
+	if (!normalized) throw new AbuseInputError("Legal brand URL must use http or https with a public domain and no credentials.");
+	return normalized;
 }
 
 function strictBase64(value: string): Buffer {
@@ -207,14 +194,13 @@ export async function validateAbuseReportRequest(value: unknown): Promise<Valida
 
 	const observedUrls = (input.observedUrls ?? []).map((entry) => {
 		const target = normalizeAbuseTarget(entry.target);
-		if (target.targetType !== "domain" || !targetByNormalized.has(target.normalizedTarget)) {
-			throw new AbuseInputError("Observed URLs must be associated with one of the submitted domain targets.");
+		if (!targetByNormalized.has(target.normalizedTarget)) {
+			throw new AbuseInputError("Observed URLs must be associated with one of the submitted targets.");
 		}
 		const urls = entry.urls.map(normalizeObservedUrl);
 		for (const url of urls) {
-			const host = new URL(url).hostname;
-			if (!domainMatchesOrIsSubdomain(host, target.normalizedTarget)) {
-				throw new AbuseInputError(`Observed URL ${url} is not associated with submitted domain ${target.normalizedTarget}.`);
+			if (!hostBelongsToTarget(new URL(url).hostname, target.normalizedTarget)) {
+				throw new AbuseInputError(`Observed URL ${url} is not associated with submitted target ${target.normalizedTarget}.`);
 			}
 		}
 		const targetRow = targetByNormalized.get(target.normalizedTarget)!;

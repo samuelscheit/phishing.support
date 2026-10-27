@@ -102,11 +102,39 @@ describe("public abuse-report input contract", () => {
 		await expect(validateAbuseReportRequest({
 			...baseRequest,
 			observedUrls: [{ target: "example.com", urls: ["https://evil.example.net/collect"] }],
-		})).rejects.toThrow("not associated with submitted domain");
+		})).rejects.toThrow("not associated with submitted target example.com");
 		await expect(validateAbuseReportRequest({
 			...baseRequest,
 			observedUrls: [{ target: "example.com", urls: ["file:///etc/passwd"] }],
 		})).rejects.toThrow("must use http or https");
+	});
+
+	test("accepts observed URLs on a submitted public IP target, bound to that exact address", async () => {
+		const request = await validateAbuseReportRequest({
+			...baseRequest,
+			targets: ["85.215.226.225"],
+			observedUrls: [{ target: "85.215.226.225", urls: ["http://85.215.226.225/Netflix/Home/login.php#x", "https://85.215.226.225/Netflix/Home/login.php"] }],
+		});
+		expect(request.targets).toMatchObject([{
+			normalizedTarget: "85.215.226.225",
+			targetType: "ip",
+			observedUrls: ["http://85.215.226.225/Netflix/Home/login.php", "https://85.215.226.225/Netflix/Home/login.php"],
+		}]);
+		await expect(validateAbuseReportRequest({
+			...baseRequest,
+			targets: ["85.215.226.225"],
+			observedUrls: [{ target: "85.215.226.225", urls: ["http://85.215.226.226/"] }],
+		})).rejects.toThrow("not associated with submitted target 85.215.226.225");
+		await expect(validateAbuseReportRequest({
+			...baseRequest,
+			targets: ["example.com"],
+			observedUrls: [{ target: "example.com", urls: ["http://10.0.0.1/login"] }],
+		})).rejects.toThrow("public domain or public IP address");
+	});
+
+	test("canonicalizes IPv6 targets so every spelling is one target", () => {
+		expect(normalizeAbuseTarget("2606:4700:0:0::1111")).toEqual({ normalizedTarget: "2606:4700::1111", targetType: "ip" });
+		expect(normalizeAbuseTarget("[2606:4700::1111]")).toEqual({ normalizedTarget: "2606:4700::1111", targetType: "ip" });
 	});
 
 	test("requires strict base64 and decoded MIME agreement rather than trusting filenames", async () => {

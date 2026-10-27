@@ -9,7 +9,8 @@ import type { WebsiteNavigationHop, WebsiteSiteAssessment } from "../website_typ
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
 
-export const submissionStatus = ["new", "queued", "running", "failed", "reported", "invalid"] as const;
+/** `redirected`: the site led to another host, which is analyzed in its own submission. */
+export const submissionStatus = ["new", "queued", "running", "failed", "reported", "invalid", "redirected"] as const;
 export type SubmissionStatus = (typeof submissionStatus)[number];
 
 export const analysisRunStatus = ["running", "completed", "failed"] as const;
@@ -30,6 +31,8 @@ export type WebsiteSubmissionData = {
 	/** Per-response navigation provenance; document content belongs only to contentCaptured hop. */
 	navigationHops?: WebsiteNavigationHop[];
 	siteAssessments?: WebsiteSiteAssessment[];
+	/** Submission that analyzes the host this site redirected to; its id as a decimal string. */
+	redirectSubmissionId?: string;
 };
 
 export type SubmissionData = { kind: "email"; email?: EmailSubmissionData } | { kind: "website"; website: WebsiteSubmissionData };

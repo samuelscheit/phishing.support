@@ -61,6 +61,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const isFailed = statusKey === "failed";
 	const isReported = statusKey === "reported";
 	const isInvalidWebsite = statusKey === "invalid" && submission?.kind === "website" && Boolean(submission.info);
+	const redirectSubmissionId = submission?.data.kind === "website" ? submission.data.website.redirectSubmissionId : undefined;
 
 	const isRunning = ["new", "queued", "running"].includes(statusKey);
 	const websiteNavigation = submission?.data.kind === "website" ? submission.data.website.navigationHops ?? [] : [];
@@ -128,7 +129,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 			isFailed &&
 			submission &&
 			(submission.kind === "website"
-				? !submission.analysisRuns.length || submission.analysisRuns.at(-1)?.status === "failed"
+				? submission.analysisRuns.every((run) => run.status !== "running")
 				: submission.analysisRuns.every((run) => run.status === "failed")) &&
 			reportCount === 0 &&
 			(submission.data.kind === "website" ? Boolean(submission.data.website?.url) : Boolean(emailEml?.id)),
@@ -313,6 +314,18 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 							</div>
 						) : null}
 
+						{statusKey === "redirected" ? (
+							<div className="rounded-md border border-amber-200 bg-amber-50/60 p-3">
+								<div className="text-xs font-semibold text-amber-800">Redirects to another site</div>
+								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info}</div>
+								{redirectSubmissionId ? (
+									<Link href={`/submissions/${redirectSubmissionId}`} className="mt-2 inline-block text-sm font-medium text-primary hover:underline">
+										Open the case for the destination
+									</Link>
+								) : null}
+							</div>
+						) : null}
+
 						{isFailed ? (
 							<div className="rounded-md border bg-muted/30 p-3">
 								<div className="text-xs font-semibold text-muted-foreground">Failure reason</div>
@@ -368,7 +381,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 							<div className="space-y-2 rounded-md border bg-muted/20 p-3">
 								<div>
 									<h5 className="text-xs font-semibold">Navigation hops (kept separate)</h5>
-									<p className="text-xs text-muted-foreground">Archived page evidence belongs only to the hop marked “Page captured.” A redirect destination is not attributed to the previous URL.</p>
+									<p className="text-xs text-muted-foreground">Redirects within one host belong to that site and share its finding. A destination on another host is never attributed to the URL that redirected to it.</p>
 								</div>
 								<ol className="space-y-2">
 									{websiteNavigation.map((hop) => {
@@ -388,6 +401,11 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured" : " · redirect response only"}
 														</div>
 														{hop.redirectTo ? <div className="break-all text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
+														{redirectSubmissionId && hop.contentCaptured ? (
+															<Link href={`/submissions/${redirectSubmissionId}`} className="inline-block text-xs font-medium text-primary hover:underline">
+																Analyzed in its own case →
+															</Link>
+														) : null}
 														{findingLabel ? <div className={cn("text-xs font-medium", finding === "phishing" ? "text-destructive" : "text-muted-foreground")}>{findingLabel}</div> : null}
 														{assessment?.evidenceQuote ? <blockquote className="border-l-2 pl-2 text-xs text-muted-foreground">“{assessment.evidenceQuote}”</blockquote> : null}
 														{assessment?.collectionFields?.length ? (

@@ -13,7 +13,7 @@ describe("Netcraft submission payload", () => {
 	test("pins the reviewed supplemental API definition", () => {
 		expect(NETCRAFT_PROVIDER.supplemental).toBeTrue();
 		expect(NETCRAFT_PROVIDER.exactMailboxes).toEqual([]);
-		expect(NETCRAFT_PROVIDER.supplementalTargets).toEqual([{ targetType: "domain", requiresObservedUrl: true }]);
+		expect(NETCRAFT_PROVIDER.supplementalTargets).toEqual([{ targetType: "domain", requiresObservedUrl: true }, { targetType: "ip", requiresObservedUrl: true }]);
 		expect(providerDefinitionHasValidHash(NETCRAFT_PROVIDER)).toBeTrue();
 	});
 

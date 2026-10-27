@@ -1,7 +1,7 @@
 import { normalizeMailbox } from "../../mail/shared";
-import { normalizeDomain } from "../../security";
+import { normalizePublicHost } from "../../security";
 import { recordValue } from "../../worker/shared";
-import { buildProviderReportNarrative, normalizeObservedUrlForDomain } from "../report_payload";
+import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
 import { NETCRAFT_PROVIDER } from "./definition";
 
 export type NetcraftSubmissionPayload = {
@@ -36,7 +36,7 @@ function normalizeObservedUrls(values: unknown, target: string): string[] | unde
 	const normalized: string[] = [];
 	for (const value of values) {
 		if (typeof value !== "string") return undefined;
-		const url = normalizeObservedUrlForDomain(value, target);
+		const url = normalizeObservedUrlForTarget(value, target);
 		if (!url) return undefined;
 		if (!normalized.includes(url)) normalized.push(url);
 	}
@@ -68,7 +68,7 @@ export function buildNetcraftSubmissionPayload(params: {
 	legalBrandUrl?: string;
 	reporterEmail: string;
 }): NetcraftSubmissionPayload | undefined {
-	const normalizedTarget = normalizeDomain(params.target);
+	const normalizedTarget = normalizePublicHost(params.target);
 	const observedUrls = normalizedTarget ? normalizeObservedUrls(params.observedUrls, normalizedTarget) : undefined;
 	const reporterEmail = normalizeMailbox(params.reporterEmail);
 	const reason = makeNetcraftReason({
@@ -101,7 +101,7 @@ export function storedNetcraftSubmissionPayload(value: unknown): NetcraftSubmiss
 		|| report.reason.length === 0 || report.reason.length > NETCRAFT_PROVIDER.maximumReasonLength) {
 		return undefined;
 	}
-	const normalizedTarget = normalizeDomain(target.normalizedTarget);
+	const normalizedTarget = normalizePublicHost(target.normalizedTarget);
 	const observedUrls = normalizedTarget ? normalizeObservedUrls(target.observedUrls, normalizedTarget) : undefined;
 	const reporterEmail = normalizeMailbox(report.reporterEmail);
 	if (!normalizedTarget || normalizedTarget !== target.normalizedTarget || !observedUrls || !Array.isArray(target.observedUrls)

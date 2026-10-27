@@ -1,4 +1,4 @@
-import { domainMatchesOrIsSubdomain, normalizeDomain } from "../security";
+import { hostBelongsToTarget, normalizePublicHttpUrl } from "../security";
 
 export function compactProviderText(value: string): string {
 	return value
@@ -15,26 +15,10 @@ export function truncateProviderText(value: string, maximum: number): string {
 	return (separator >= Math.floor(maximum * 0.6) ? bounded.slice(0, separator) : bounded).trim();
 }
 
-/** Normalize an HTTP(S) URL whose hostname is a public DNS domain. */
-export function normalizePublicDomainHttpUrl(value: string): string | undefined {
-	try {
-		const url = new URL(value);
-		const hostname = normalizeDomain(url.hostname);
-		if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password || !hostname) return undefined;
-		url.hostname = hostname;
-		url.hash = "";
-		return url.toString();
-	} catch {
-		return undefined;
-	}
-}
-
-/** Normalize an observed URL and bind it to the domain target that owns it. */
-export function normalizeObservedUrlForDomain(value: string, target: string): string | undefined {
-	const normalizedTarget = normalizeDomain(target);
-	const observedUrl = normalizePublicDomainHttpUrl(value);
-	if (!normalizedTarget || !observedUrl || !domainMatchesOrIsSubdomain(new URL(observedUrl).hostname, normalizedTarget)) return undefined;
-	return observedUrl;
+/** Normalize an observed URL and bind it to the domain or IP target that owns it. */
+export function normalizeObservedUrlForTarget(value: string, target: string): string | undefined {
+	const observedUrl = normalizePublicHttpUrl(value);
+	return observedUrl && hostBelongsToTarget(new URL(observedUrl).hostname, target) ? observedUrl : undefined;
 }
 
 function conciseProviderUrl(value: string): string {
@@ -230,7 +214,7 @@ export function buildProviderReportNarrative(params: ProviderReportNarrativeInpu
 
 	const legalBrandUrl = params.legalBrandUrl === undefined
 		? undefined
-		: normalizePublicDomainHttpUrl(params.legalBrandUrl);
+		: normalizePublicHttpUrl(params.legalBrandUrl, { domainOnly: true });
 	if (params.legalBrandUrl !== undefined && !legalBrandUrl) return undefined;
 
 	const provider = params.provider ?? "generic";

@@ -56,8 +56,8 @@ export async function parseNetcraftSubmissionResponse(
 export async function prepareNetcraftSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation> {
 	const { route, report, target } = await routeContext(context.routeId);
 	if (route.routeType !== "provider_submission" || route.providerRegistryKey !== NETCRAFT_PROVIDER.key
-		|| target.targetType !== "domain") {
-		return { outcome: "insufficient_evidence", reason: "netcraft_requires_a_domain_target" };
+		|| target.targetType === "email") {
+		return { outcome: "insufficient_evidence", reason: "netcraft_requires_a_web_target" };
 	}
 	if (!providerDefinitionMatchesPin(NETCRAFT_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)) {
 		return { outcome: "insufficient_evidence", reason: "netcraft_provider_definition_pin_mismatch" };
@@ -84,7 +84,7 @@ export async function submitNetcraftSubmission(
 	const routeStillMatches = route.routeType === "provider_submission"
 		&& route.providerRegistryKey === NETCRAFT_PROVIDER.key
 		&& providerDefinitionMatchesPin(NETCRAFT_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)
-		&& target.targetType === "domain"
+		&& target.targetType !== "email"
 		&& target.normalizedTarget === payload.target.normalizedTarget
 		&& target.observedUrls.length === payload.target.observedUrls.length
 		&& target.observedUrls.every((url, index) => url === payload.target.observedUrls[index]);

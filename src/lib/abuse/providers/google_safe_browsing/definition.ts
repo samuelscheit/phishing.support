@@ -16,10 +16,13 @@ export type GoogleSafeBrowsingProviderDefinition = ProviderSubmissionDefinition 
 const definitionWithoutHash = {
 	key: "google_safe_browsing",
 	displayName: "Google Safe Browsing",
-	version: "2026-08-14.1",
+	version: "2026-10-27.1",
 	exactMailboxes: [],
 	supplemental: true,
-	supplementalTargets: [{ targetType: "domain" as const, requiresObservedUrl: true as const }],
+	supplementalTargets: [
+		{ targetType: "domain" as const, requiresObservedUrl: true as const },
+		{ targetType: "ip" as const, requiresObservedUrl: true as const },
+	],
 	reportPageUrl: "https://safebrowsing.google.com/safebrowsing/report_phish/",
 	maximumSubmitAttempts: 2,
 	explanationMaximumLength: 800,

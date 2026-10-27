@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { AnalysisRunsEntity, SubmissionsEntity } from "../db/entities";
 import { useTemporaryDatabase } from "../db/test_helpers";
+import { reportConfirmedWebsitePhishing } from "../abuse/submission_reports";
 import { getRetryableSubmission } from "./retry";
 import { resumePendingWebsiteAnalyses, SubmissionRetryError, retryFailedWebsiteAnalysis } from "./website";
 
@@ -51,6 +52,21 @@ describe("retryFailedWebsiteAnalysis", () => {
 			submission: { id, status: "failed" },
 		});
 		await expect(getRetryableSubmission(id, "website")).rejects.toBeInstanceOf(SubmissionRetryError);
+	});
+
+	test("a website that failed while handing its finding to reporting stays retryable until a report exists", async () => {
+		const id = await SubmissionsEntity.create({
+			id: 30n,
+			kind: "website",
+			data: { kind: "website", website: { url: "http://85.215.226.225/Netflix/Home/login.php" } },
+			dedupeKey: "website-retry-report-handoff",
+			status: "failed",
+		});
+		for (const _stage of ["analysis", "classification"]) await AnalysisRunsEntity.complete(await AnalysisRunsEntity.create(id));
+
+		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({ submission: { id } });
+		await reportConfirmedWebsitePhishing({ submissionId: id, urls: ["https://85.215.226.225/Netflix/Home/login.php"], analysisText: "Credential page.", reporter: {} });
+		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).rejects.toThrow("cannot be retried");
 	});
 
 	test("marks interrupted running analysis runs as failed on startup so the submission remains retryable", async () => {

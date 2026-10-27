@@ -20,8 +20,11 @@ type SubmissionReportBase = {
 };
 
 export type ConfirmedWebsitePhishing = SubmissionReportBase & {
-	/** The URL captured and classified by the website-analysis pipeline. */
-	url: string;
+	/**
+	 * The captured and classified page first, then the URLs on the same host
+	 * that redirected to it. They all belong to one reported site.
+	 */
+	urls: string[];
 	/** The archive screenshot, when the capture produced a decodable PNG. */
 	screenshotPng?: Buffer;
 };
@@ -83,16 +86,17 @@ function submissionRequest(params: {
 	};
 }
 
-/** Build the website report: exactly the captured host, with its URL as observed evidence. */
+/** Build the website report: exactly the captured host, with its URLs as observed evidence. */
 export async function buildWebsitePhishingRequest(params: ConfirmedWebsitePhishing): Promise<ValidatedAbuseReportRequest> {
-	const observedUrl = normalizeObservedUrl(params.url.trim());
-	const host = target(0, new URL(observedUrl).hostname, [observedUrl]);
+	const observedUrls = [...new Set(params.urls.map((url) => normalizeObservedUrl(url.trim())))];
+	const hosts = new Set(observedUrls.map((url) => new URL(url).hostname));
+	if (hosts.size !== 1) throw new Error("A website report covers the URLs of exactly one captured host.");
 	return submissionRequest({
 		submissionId: params.submissionId,
 		description: reportDescription(params.analysisText),
-		targets: [host],
+		targets: [target(0, [...hosts][0]!, observedUrls)],
 		evidence: await screenshotEvidence("website.png", params.screenshotPng),
-		source: { kind: "website", url: params.url },
+		source: { kind: "website", urls: params.urls },
 	});
 }
 

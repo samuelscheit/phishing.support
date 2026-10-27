@@ -14,9 +14,9 @@ export class SubmissionRetryError extends Error {
  * Load and validate the common retry boundary for an analysis submission.
  *
  * Retrying is deliberately limited to failed analyses that have not crossed the
- * reporting boundary. Callers may allow a completed earlier stage to be
- * superseded when a later stage failed; active runs and any report work are
- * never replayed. The status transition is performed by each analyzer after
+ * reporting boundary. Callers may allow completed stages to be superseded when
+ * a later stage, including the report handoff itself, failed; active runs and
+ * any report work are never replayed. The status transition is performed by each analyzer after
  * kind-specific source validation, so concurrent requests are serialized by the
  * database rather than by the HTTP process.
  */
@@ -37,19 +37,12 @@ export async function getRetryableSubmission(
 		AnalysisRunsEntity.listForSubmission(submissionId),
 		AbuseRepository.getReportForSubmission(submissionId),
 	]);
-	// A website has two analysis runs (narrative, then classification), so an
-	// earlier completed run is expected when the later classification run fails.
-	// The latest run must be failed; any report work still makes replay unsafe.
-	const latestRun = runs.reduce<(typeof runs)[number] | undefined>((latest, run) => {
-		if (!latest) return run;
-		if (run.createdAt > latest.createdAt) return run;
-		if (run.createdAt.getTime() === latest.createdAt.getTime() && run.id > latest.id) return run;
-		return latest;
-	}, undefined);
+	// A website has two analysis runs (narrative, then classification) and can
+	// fail after both completed, while handing the finding to reporting. Only an
+	// existing report makes replay unsafe: it may already have reached providers.
 	if (
 		runs.some((run) => run.status === "running") ||
 		(!options.allowCompletedPriorRuns && runs.some((run) => run.status === "completed")) ||
-		(latestRun && latestRun.status !== "failed") ||
 		report
 	) {
 		throw new SubmissionRetryError("This submission already completed analysis or reporting and cannot be retried.");

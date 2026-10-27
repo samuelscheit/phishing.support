@@ -3,9 +3,10 @@ import type { ResponseFormatTextJSONSchemaConfig } from "openai/resources/respon
 import { archiveWebsite } from "./website_archive";
 import { SubmissionsEntity, ArtifactsEntity } from "./db/entities";
 import { getInfo } from "./website_info";
-import { runStreamedAnalysisRun } from "./analysis_run";
+import { runStreamedAnalysisRun, type AnalysisClient } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
 import { reportConfirmedWebsitePhishing } from "./abuse/submission_reports";
+import { createWebsiteSubmission } from "./submissions/website";
 import type { ReporterMetadata } from "./request_metadata";
 import { defaultReasoning, defaultResponseModel, retry } from "./utils";
 import { extractWebsiteDataEntryFields } from "./website_fields";
@@ -238,14 +239,36 @@ export function websiteSiteAssessments(
 	capturedHopIndex: number,
 	capturedClassification: WebsiteSiteClassification,
 ): WebsiteSiteAssessment[] {
+	const capturedHop = hops.find((hop) => hop.index === capturedHopIndex && hop.contentCaptured);
 	return hops.map((hop) => ({
 		hopIndex: hop.index,
-		// A redirect response without its own captured page cannot inherit the
-		// destination's classification or trigger an external report.
-		...(hop.index === capturedHopIndex && hop.contentCaptured
+		// A redirect within the captured host is part of that site. A redirect
+		// response on another host has no captured page of its own and cannot
+		// inherit the destination's classification or trigger a report.
+		...(capturedHop && hop.hostname === capturedHop.hostname
 			? capturedClassification
 			: { finding: "insufficient_evidence" as const }),
 	}));
+}
+
+/**
+ * Every URL of the captured host in the navigation, captured page first:
+ * single-URL providers receive the page itself, while URL lists also cover
+ * the same-site link a visitor actually received.
+ */
+export function websiteReportUrls(hops: WebsiteNavigationHop[], capturedHop: WebsiteNavigationHop): string[] {
+	return [...new Set([capturedHop.url, ...hops.filter((hop) => hop.hostname === capturedHop.hostname).map((hop) => hop.url)])];
+}
+
+/**
+ * The navigation as if the captured host had been submitted directly: the
+ * trailing run of hops on that host, ending at the captured page.
+ */
+export function capturedHostNavigation(hops: WebsiteNavigationHop[], capturedHop: WebsiteNavigationHop): WebsiteNavigationHop[] {
+	const end = hops.findIndex((hop) => hop.index === capturedHop.index);
+	let start = end;
+	while (start > 0 && hops[start - 1]!.hostname === capturedHop.hostname) start--;
+	return hops.slice(start, end + 1).map((hop, index) => ({ ...hop, index }));
 }
 
 
@@ -263,7 +286,13 @@ export function reportableWebsiteHop(
 		: undefined;
 }
 
-export async function analyzeWebsite(options: {
+function capturedArchiveHop(archive: Pick<WebsiteEvidenceArchive, "url" | "navigationHops">): WebsiteNavigationHop {
+	const capturedHops = archive.navigationHops.filter((hop) => hop.contentCaptured && hop.url === archive.url);
+	if (capturedHops.length !== 1) throw new Error("Website archive must bind its content to exactly one navigation hop.");
+	return capturedHops[0]!;
+}
+
+export type AnalyzeWebsiteOptions = {
 	mhtmlSnapshot?: Buffer;
 	/** Original captured document URL for retained MHTML, distinct from its submitted URL. */
 	archivedUrl?: string;
@@ -277,15 +306,60 @@ export async function analyzeWebsite(options: {
 	reuseEvidenceArtifacts?: boolean;
 	url: string;
 	submissionId: bigint;
-} & ReporterMetadata): Promise<bigint> {
-	const { url, submissionId, reporterIp, reporterCountry, reporterHeaders, reuseEvidenceArtifacts = false } = options!;
+} & ReporterMetadata;
+
+/** Network boundaries of one website analysis; tests replace them. */
+export type WebsiteAnalysisDependencies = {
+	getInfo?: typeof getInfo;
+	archiveWebsite?: typeof archiveWebsite;
+	analysisClient?: AnalysisClient;
+};
+
+/**
+ * A capture that ended on another host belongs to that host: it opens that
+ * host's own case with the captured evidence and its same-host navigation, as
+ * if the destination had been submitted directly. The submitted site gets no
+ * finding of its own; its navigation links to the destination case.
+ */
+async function handOffRedirectedCapture(params: {
+	submissionId: bigint;
+	url: string;
+	whois: Awaited<ReturnType<typeof getInfo>>;
+	archive: Awaited<ReturnType<typeof archiveWebsite>>;
+	capturedHop: WebsiteNavigationHop;
+	reporter: ReporterMetadata;
+	dependencies: WebsiteAnalysisDependencies;
+}) {
+	const { submissionId, url, whois, archive, capturedHop } = params;
+	const navigationHops = capturedHostNavigation(archive.navigationHops, capturedHop);
+	const redirectSubmissionId = await createWebsiteSubmission({
+		url: navigationHops[0]!.url,
+		source: `redirect:${submissionId.toString()}`,
+		mhtmlSnapshot: archive.mhtml,
+		archivedUrl: archive.url,
+		navigationHops,
+		screenshotSnapshot: archive.screenshotPng,
+		...params.reporter,
+	}, (options) => analyzeWebsite(options, params.dependencies));
+	await SubmissionsEntity.update(submissionId, {
+		status: "redirected",
+		info: `${url} redirects to ${capturedHop.hostname}; that site is analyzed and reported in its own case.`,
+		data: {
+			kind: "website",
+			website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, redirectSubmissionId: redirectSubmissionId.toString() },
+		},
+	});
+}
+
+export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencies: WebsiteAnalysisDependencies = {}): Promise<bigint> {
+	const { url, submissionId, reporterIp, reporterCountry, reporterHeaders, reuseEvidenceArtifacts = false } = options;
 	try {
 		// Claim the submission before any network work. Previously the first
 		// unbounded WHOIS lookup ran while the row still said `new`, so a process
 		// restart could leave it looking queued forever with no retry path.
 		await SubmissionsEntity.update(submissionId, { status: "running", info: "Collecting bounded WHOIS, RDAP, and regional DNS evidence." });
 		await emitStep(submissionId, "whois_lookup", 5);
-		const whois = await getInfo(url);
+		const whois = await (dependencies.getInfo ?? getInfo)(url);
 
 		await SubmissionsEntity.update(submissionId, {
 			status: "running",
@@ -294,7 +368,7 @@ export async function analyzeWebsite(options: {
 		});
 
 		await emitStep(submissionId, "archive_website", 10);
-		const captured = await retry(() => archiveWebsite({
+		const captured = await retry(() => (dependencies.archiveWebsite ?? archiveWebsite)({
 			url,
 			mhtmlSnapshot: options.mhtmlSnapshot,
 			archivedUrl: options.archivedUrl,
@@ -304,12 +378,18 @@ export async function analyzeWebsite(options: {
 		const archive = captured.screenshotPng || !options.screenshotSnapshot
 			? captured
 			: { ...captured, screenshotPng: options.screenshotSnapshot };
-		await emitStep(submissionId, "save_artifacts", 40);
+		const capturedHop = archive.attributionError ? undefined : capturedArchiveHop(archive);
+		if (capturedHop && capturedHop.hostname !== new URL(url).hostname) {
+			await handOffRedirectedCapture({ submissionId, url, whois, archive, capturedHop, reporter: { reporterIp, reporterCountry, reporterHeaders }, dependencies });
+			await emitStep(submissionId, "completed", 100);
+			return submissionId;
+		}
 
+		await emitStep(submissionId, "save_artifacts", 40);
 		if (!reuseEvidenceArtifacts) {
 			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive });
 		}
-		if (archive.attributionError) {
+		if (!capturedHop) {
 			await SubmissionsEntity.update(submissionId, {
 				status: "invalid",
 				info: `${archive.attributionError} No report was created; resubmit the exact site whose page should be analyzed.`,
@@ -335,11 +415,7 @@ export async function analyzeWebsite(options: {
 				reasoning: defaultReasoning,
 				stream: true,
 			},
-		});
-
-		const capturedHops = archive.navigationHops.filter((hop) => hop.contentCaptured && hop.url === archive.url);
-		if (capturedHops.length !== 1) throw new Error("Website archive must bind its content to exactly one navigation hop.");
-		const capturedHop = capturedHops[0]!;
+		}, { client: dependencies.analysisClient });
 
 		await emitStep(submissionId, "structured_response", 75);
 		const { result: structuredResponse } = await runStreamedAnalysisRun({
@@ -351,7 +427,7 @@ export async function analyzeWebsite(options: {
 				text: { format: WEBSITE_CLASSIFICATION_FORMAT, verbosity: "low" },
 				stream: true,
 			},
-		});
+		}, { client: dependencies.analysisClient });
 
 		const capturedClassification = validateWebsiteSiteClassification(structuredResponse.output_parsed, archive.text.toString("utf-8"), archive.html.toString("utf-8"));
 		const siteAssessments = websiteSiteAssessments(archive.navigationHops, capturedHop.index, capturedClassification);
@@ -365,19 +441,20 @@ export async function analyzeWebsite(options: {
 		const reportableSite = reportableWebsiteHop(archive.navigationHops, siteAssessments, archive);
 		if (reportableSite) {
 			await emitStep(submissionId, "reporting", 90);
+			const reportUrls = websiteReportUrls(archive.navigationHops, reportableSite);
 			await reportConfirmedWebsitePhishing({
 				submissionId,
-				url: reportableSite.url,
+				urls: reportUrls,
 				analysisText: buildWebsiteReportEvidence(capturedClassification),
 				screenshotPng: archive.screenshotPng,
 				reporter: { reporterIp, reporterCountry, reporterHeaders },
 			});
 
-			// The handoff targets only the exact host whose document was captured;
-			// intermediate shorteners and redirect destinations are not combined.
 			await SubmissionsEntity.update(submissionId, {
 				status: "reported",
-				info: `Phishing confirmed at the independently captured redirect hop ${reportableSite.url}; a report for that exact site was queued.`,
+				info: reportUrls.length === 1
+					? `Phishing confirmed at ${reportableSite.url}; a report for that site was queued.`
+					: `Phishing confirmed at ${reportableSite.url}; a report for it and the ${reportUrls.length - 1} redirecting URL${reportUrls.length === 2 ? "" : "s"} on ${reportableSite.hostname} was queued.`,
 			});
 		} else {
 			const { finding, rejectedPhishingClaim } = capturedClassification;
