@@ -1,9 +1,9 @@
 import { simpleParser, type AddressObject } from "mailparser";
 import { parse } from "node-html-parser";
 import { getBrowser } from "./browser/";
-import is_ip_private from "private-ip";
 import { analyzeSMTPHeadersFromRaw } from "@bernierllc/smtp-analyzer";
 import { MailData } from "./mail_ai";
+import { isPrivateIpAddress } from "./ip_address";
 import { sleep } from "./utils";
 
 export function getAddressesText(obj: AddressObject[] | AddressObject | undefined): string {
@@ -168,7 +168,7 @@ export function analyzeHeaders(headers: string) {
 	// Received-chain evidence so downstream infrastructure lookups do not
 	// mistake an arbitrary displayed sender domain for a transport endpoint.
 	const sourceHop =
-		[...hops].find((hop) => hop.fromIp && !is_ip_private(hop.fromIp)) ??
+		[...hops].find((hop) => hop.fromIp && !isPrivateIpAddress(hop.fromIp)) ??
 		[...hops].reverse().find((hop) => hop.fromIp) ??
 		[...hops].reverse().find((hop) => hop.fromHost);
 
