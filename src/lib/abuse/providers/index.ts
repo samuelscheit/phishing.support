@@ -15,8 +15,11 @@ export {
 	listSupplementalProviderSubmissionProvidersForTarget,
 } from "./submission_registry_default";
 export {
+	CORRESPONDENCE_POLL_INTERVAL_MS,
+	CORRESPONDENCE_POLL_WINDOW_MS,
 	executeProviderSubmission,
 	ProviderSubmissionUnknownExternalStateError,
+	queueCorrespondencePoll,
 } from "./submission_execution";
 export type { ProviderSubmissionExecutionResult } from "./submission_execution";
 export {
@@ -36,6 +39,9 @@ export type {
 } from "./contracts";
 export type {
 	ProviderReportPreviewContext,
+	ProviderCorrespondence,
+	ProviderCorrespondenceMessage,
+	ProviderInboundMail,
 	ProviderSubmissionContext,
 	ProviderSubmissionDefinition,
 	ProviderSubmissionPreflight,

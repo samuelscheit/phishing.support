@@ -35,3 +35,4 @@ export {
 export type { ProviderLinkFetch, VerifiedProviderLinkResolution } from "./mail/reply";
 
 export { persistInboundAbuseMail } from "./mail/inbound";
+export type { InboundMailKind } from "./mail/inbound";

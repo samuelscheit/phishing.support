@@ -417,6 +417,7 @@ export async function executeProviderSubmission(params: {
 		});
 	}
 	if (settled || (await AbuseRepository.getRoute(route.id))?.status === "submitted") {
+		if (params.provider.fetchCorrespondence && success.confirmationId) await queueCorrespondencePoll(route);
 		return { outcome: "submitted", runId: run.id };
 	}
 	return markUnknownExternal({
@@ -424,5 +425,21 @@ export async function executeProviderSubmission(params: {
 		runId: run.id,
 		error: "Provider submission completed but its durable settlement could not be recorded.",
 		reason: "provider_submission_settlement_conflict",
+	});
+}
+
+/** How long, and how often, a submitted report's provider correspondence is read. */
+export const CORRESPONDENCE_POLL_WINDOW_MS = 30 * 24 * 60 * 60_000;
+export const CORRESPONDENCE_POLL_INTERVAL_MS = 60 * 60_000;
+
+/** Queue the next correspondence read for a route; one pending poll per route. */
+export async function queueCorrespondencePoll(route: { id: bigint; reportId: bigint }, options: { delayMs?: number; successorOf?: bigint } = {}): Promise<void> {
+	await AbuseRepository.enqueueJob({
+		jobType: "poll_provider_correspondence",
+		reportId: route.reportId,
+		routeId: route.id,
+		dedupeKey: `poll-provider-correspondence:${route.id.toString()}`,
+		nextAttemptAt: new Date(Date.now() + (options.delayMs ?? 0)),
+		...(options.successorOf === undefined ? {} : { successorOf: options.successorOf }),
 	});
 }

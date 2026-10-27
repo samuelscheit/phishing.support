@@ -11,6 +11,7 @@ import {
 	listPortalProviders,
 } from "./providers";
 import { sendEmail } from "./worker/email";
+import { ensureCorrespondencePolls, pollProviderCorrespondence } from "./worker/correspondence";
 import { classifyReply, monitorProviderReply } from "./worker/mail";
 import { runGenericProviderPortal } from "./worker/portal";
 import { reconcileGenericSkyvern } from "./worker/reconcile";
@@ -38,6 +39,8 @@ const CONTROL_JOB_TYPES = [
 	"resolve_report",
 	"monitor_provider_reply",
 	"classify_provider_reply",
+	// Read-only provider API calls, kept apart from browser and SMTP work.
+	"poll_provider_correspondence",
 ] as const satisfies readonly AbuseJobType[];
 
 /** Jobs that may cross an external provider side-effect boundary. */
@@ -177,6 +180,7 @@ export class AbuseWorker {
 		if (!this.stopped) return;
 		this.stopped = false;
 		await AbuseRepository.recoverStaleJobs();
+		await ensureCorrespondencePolls();
 		// Provider/browser work gets its own lane. A stuck CAPTCHA or browser can
 		// therefore never consume the capacity reserved for resolution,
 		// reconciliation, and inbound correspondence jobs.
@@ -419,6 +423,9 @@ export class AbuseWorker {
 				return;
 			case "classify_provider_reply":
 				await classifyReply(parseJobBigInt(job.payload?.messageId, "payload.messageId"));
+				return;
+			case "poll_provider_correspondence":
+				await pollProviderCorrespondence({ routeId: idFrom(job.routeId, "routeId"), jobId: job.id, signal });
 				return;
 			case "monitor_provider_reply":
 				await monitorProviderReply(idFrom(job.routeId, "routeId"));

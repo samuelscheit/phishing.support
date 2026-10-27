@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { generateId } from "../../db/ids";
@@ -7,6 +7,7 @@ import type { ValidatedAbuseReportRequest } from "../contracts";
 import {
 	abuseJobs,
 	abuseProviderRoutes,
+	abuseProviderRuns,
 	abuseReports,
 	abuseTargets,
 	type AbuseProviderRoute,
@@ -253,4 +254,20 @@ export async function transitionReportStatus(params: {
 		},
 		{ behavior: "immediate" }
 	);
+}
+
+/** Submitted provider routes of the given providers, with the time their receipt was recorded. */
+export async function listSubmittedRoutesWithReceipt(providerRegistryKeys: string[]) {
+	if (providerRegistryKeys.length === 0) return [];
+	const db = await getDb();
+	return db
+		.select({ route: abuseProviderRoutes, submittedAt: abuseProviderRuns.createdAt })
+		.from(abuseProviderRoutes)
+		.innerJoin(abuseProviderRuns, eq(abuseProviderRuns.routeId, abuseProviderRoutes.id))
+		.where(and(
+			eq(abuseProviderRoutes.status, "submitted"),
+			inArray(abuseProviderRoutes.providerRegistryKey, providerRegistryKeys),
+			isNotNull(abuseProviderRuns.confirmationId),
+		))
+		.all();
 }

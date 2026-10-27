@@ -7,7 +7,8 @@ import type {
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { recordValue, routeContext } from "../../worker/shared";
 
-import { cloudflareApiConfig, submitCloudflareAbuseReport, type CloudflareApiFetch, type CloudflareSessionProvider } from "./api";
+import type { ProviderCorrespondence } from "../submission_contracts";
+import { cloudflareApiConfig, fetchCloudflareSubmittedReport, submitCloudflareAbuseReport, type CloudflareApiFetch, type CloudflareSessionProvider } from "./api";
 import { getCloudflareSession, type CloudflareSession } from "./session";
 import { buildCloudflareReportPayload, type CloudflareReportPayload } from "./report";
 
@@ -113,6 +114,23 @@ export async function submitCloudflareSubmission(
 		...(dependencies.getSession ? { getSession: dependencies.getSession } : {}),
 		report: payload.report,
 		target: payload.target,
+		...(context.signal ? { signal: context.signal } : {}),
+		...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+	});
+}
+
+/** Read a submitted report's status and Cloudflare's emails about it, by its receipt. */
+export async function fetchCloudflareCorrespondence(
+	context: { confirmationId: string; signal?: AbortSignal },
+	dependencies: CloudflareSubmissionDependencies = {},
+): Promise<ProviderCorrespondence> {
+	const config = cloudflareApiConfig(dependencies.environment);
+	const getSession = dependencies.getSession ?? getCloudflareSession;
+	return fetchCloudflareSubmittedReport({
+		config,
+		session: await getSession(config, { signal: context.signal }),
+		getSession,
+		reportId: context.confirmationId,
 		...(context.signal ? { signal: context.signal } : {}),
 		...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
 	});

@@ -11,17 +11,20 @@ function noConnection(error: unknown): boolean {
 	return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "NoConnection");
 }
 
+type MailboxConnection = Omit<ImapConfig, "mailboxes"> & { mailbox: string };
+
 /**
- * The client only fetches and marks messages. Routing, parsing, persistence,
- * and idempotency live in `ingest.ts` so they run against deterministic
- * RFC 5322 fixtures in tests.
+ * Watches one folder: IMAP IDLE observes only the selected mailbox. The client
+ * only fetches and marks messages. Routing, parsing, persistence, and
+ * idempotency live in `ingest.ts` so they run against deterministic RFC 5322
+ * fixtures in tests.
  */
-export class MailboxListener {
+class MailboxListener {
 	private stopped = true;
 	private loopPromise: Promise<void> | undefined;
 	private activeClient: ImapFlow | undefined;
 
-	constructor(private readonly config: ImapConfig) {}
+	constructor(private readonly config: MailboxConnection) {}
 
 	start(): void {
 		if (!this.stopped) return;
@@ -131,18 +134,21 @@ export class MailboxListener {
 	}
 }
 
-let singleton: MailboxListener | undefined;
+let listeners: MailboxListener[] = [];
 
-/** Start the mailbox listener when IMAP is configured; returns whether it started. */
+/** Start one listener per configured folder when IMAP is configured; returns whether they started. */
 export function startMailboxListener(): boolean {
 	const config = imapConfig();
 	if (!config) return false;
-	singleton ??= new MailboxListener(config);
-	singleton.start();
+	if (listeners.length === 0) {
+		const { mailboxes, ...connection } = config;
+		listeners = mailboxes.map((mailbox) => new MailboxListener({ ...connection, mailbox }));
+	}
+	for (const listener of listeners) listener.start();
 	return true;
 }
 
 export async function stopMailboxListener(): Promise<void> {
-	await singleton?.stop();
-	singleton = undefined;
+	await Promise.all(listeners.map((listener) => listener.stop()));
+	listeners = [];
 }

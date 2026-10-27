@@ -1,5 +1,5 @@
 import { recordValue } from "../../worker/shared";
-import type { ProviderSubmissionSuccess } from "../submission_contracts";
+import type { ProviderCorrespondence, ProviderCorrespondenceMessage, ProviderSubmissionSuccess } from "../submission_contracts";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 
 import { CLOUDFLARE_PROVIDER } from "./definition";
@@ -101,47 +101,57 @@ export function parseCloudflareApiResponse(
 	};
 }
 
-/** Single-shot POST. Only code 9300, which cannot have filed a report, permits one fresh login. */
-export async function submitCloudflareAbuseReport(params: {
+type CloudflareRequestContext = {
 	config: CloudflareApiConfig;
 	session: CloudflareSession;
-	report: CloudflareReportPayload;
-	target: string;
 	signal?: AbortSignal;
 	fetch?: CloudflareApiFetch;
 	getSession?: CloudflareSessionProvider;
-}): Promise<ProviderSubmissionSuccess> {
-	const request = params.fetch ?? globalThis.fetch;
+};
+
+/**
+ * One authenticated dashboard API call. Only an explicit expired-session
+ * rejection (code 9300), which cannot have changed anything, permits one fresh
+ * login and a single repeat.
+ */
+async function cloudflareDashboardRequest<T>(
+	context: CloudflareRequestContext,
+	request: { url: string; method: "GET" | "POST"; body?: unknown },
+	parse: (status: number, rawBody: string) => T,
+): Promise<T> {
+	const fetchImplementation = context.fetch ?? globalThis.fetch;
 	const send = async (session: CloudflareSession) => {
-		params.signal?.throwIfAborted();
+		context.signal?.throwIfAborted();
 		const deadline = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-		const response = await request(cloudflareReportsUrl(params.config.accountId), {
-			method: "POST",
+		const response = await fetchImplementation(request.url, {
+			method: request.method,
 			redirect: "error",
-			signal: params.signal ? AbortSignal.any([params.signal, deadline]) : deadline,
+			signal: context.signal ? AbortSignal.any([context.signal, deadline]) : deadline,
 			headers: {
 				accept: "application/json",
-				"content-type": "application/json",
+				...(request.body === undefined ? {} : { "content-type": "application/json" }),
 				"x-atok": session.atok,
 				cookie: `vses2=${session.vses2}`,
 				"x-cross-site-security": "dash",
 				referer: `${CLOUDFLARE_PROVIDER.dashboardUrl}/`,
 			},
-			body: JSON.stringify(buildCloudflareApiBody(params.report)),
+			...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
 		});
-		return parseCloudflareApiResponse(response.status, await response.text(), { accountId: params.config.accountId, target: params.target });
+		return parse(response.status, await response.text());
 	};
 	try {
-		return await send(params.session);
+		return await send(context.session);
 	} catch (error) {
 		if (!(error instanceof CloudflareSessionExpiredError)) throw error;
 	}
 	let fresh: CloudflareSession;
 	try {
-		fresh = await (params.getSession ?? getCloudflareSession)(params.config, { signal: params.signal, expiredSession: params.session });
+		fresh = await (context.getSession ?? getCloudflareSession)(context.config, { signal: context.signal, expiredSession: context.session });
 	} catch {
 		throw new ProviderSubmissionNeedsHumanError("Cloudflare dashboard reauthentication failed after an expired session; manual login is required.");
 	}
+	// Later requests in the same operation use the refreshed session.
+	context.session = fresh;
 	try {
 		return await send(fresh);
 	} catch (error) {
@@ -150,4 +160,71 @@ export async function submitCloudflareAbuseReport(params: {
 		}
 		throw error;
 	}
+}
+
+/** Single-shot POST of one abuse report. */
+export async function submitCloudflareAbuseReport(params: CloudflareRequestContext & {
+	report: CloudflareReportPayload;
+	target: string;
+}): Promise<ProviderSubmissionSuccess> {
+	return cloudflareDashboardRequest(
+		params,
+		{ url: cloudflareReportsUrl(params.config.accountId), method: "POST", body: buildCloudflareApiBody(params.report) },
+		(status, rawBody) => parseCloudflareApiResponse(status, rawBody, { accountId: params.config.accountId, target: params.target }),
+	);
+}
+
+const SUBMITTED_REPORT_ID = /^[a-f0-9]{16}$/;
+const MAX_EMAIL_PAGES = 5;
+
+function submittedReportUrl(accountId: string, reportId: string, suffix = ""): string {
+	if (!SUBMITTED_REPORT_ID.test(reportId)) throw new Error("Cloudflare report receipt is not a submitted-report ID.");
+	return `${CLOUDFLARE_PROVIDER.apiBaseUrl}/accounts/${accountId}/abuse-reports/submitted/${reportId}${suffix}`;
+}
+
+/** A successful read of Cloudflare's documented submitted-report API. */
+function parseCloudflareRead(status: number, rawBody: string): Record<string, unknown> {
+	const json = responseJson(rawBody);
+	const errors = Array.isArray(json?.errors) ? json.errors.map(recordValue) : [];
+	if (status === 403 && (String(json?.err_code) === "9300" || errors.some((error) => String(error?.code) === "9300"))) throw new CloudflareSessionExpiredError();
+	if (status < 200 || status >= 300 || json?.success !== true) {
+		const detail = errors.map((error) => stringField(error?.message)).filter(Boolean).join("; ") || rawBody.slice(0, 300);
+		throw new Error(`Cloudflare submitted-report read failed with HTTP ${status}: ${detail}`);
+	}
+	const result = recordValue(json.result);
+	if (!result) throw new Error("Cloudflare submitted-report read returned no result.");
+	return { ...result, result_info: json.result_info };
+}
+
+/**
+ * Read one submitted report's review status and every email Cloudflare
+ * delivered to us about it. Both are read-only.
+ */
+export async function fetchCloudflareSubmittedReport(params: CloudflareRequestContext & { reportId: string }): Promise<ProviderCorrespondence> {
+	const report = await cloudflareDashboardRequest(params, { url: submittedReportUrl(params.config.accountId, params.reportId), method: "GET" }, parseCloudflareRead);
+	const messages: ProviderCorrespondenceMessage[] = [];
+	for (let page = 1; page <= MAX_EMAIL_PAGES; page++) {
+		const result = await cloudflareDashboardRequest(
+			params,
+			{ url: submittedReportUrl(params.config.accountId, params.reportId, `/emails?page=${page}&per_page=100`), method: "GET" },
+			parseCloudflareRead,
+		);
+		for (const email of Array.isArray(result.emails) ? result.emails.map(recordValue) : []) {
+			const id = stringField(email?.id);
+			const sentAt = stringField(email?.sent_at);
+			if (!id || !sentAt || Number.isNaN(Date.parse(sentAt))) continue;
+			messages.push({
+				id,
+				subject: stringField(email?.subject) ?? "",
+				body: typeof email?.body === "string" ? email.body.slice(0, MAX_RESPONSE_CHARS) : "",
+				...(stringField(email?.recipient) ? { recipient: stringField(email?.recipient) } : {}),
+				sentAt: new Date(sentAt),
+			});
+		}
+		const totalPages = Number(recordValue(result.result_info)?.total_pages ?? 1);
+		if (!Number.isFinite(totalPages) || page >= totalPages) break;
+	}
+	const state = stringField(report.status);
+	const detail = stringField(report.denial_reason);
+	return { messages, ...(state ? { status: { state, ...(detail ? { detail } : {}) } } : {}) };
 }

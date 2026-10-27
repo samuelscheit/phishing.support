@@ -65,6 +65,16 @@ function normalizeSubmissionId(value: unknown): string | undefined {
 	return undefined;
 }
 
+/**
+ * Submission IDs named by `report.netcraft.com/submission/<id>` links, as
+ * Netcraft's report-update emails carry them.
+ */
+export function netcraftSubmissionIdsFromText(text: string): string[] {
+	return [...new Set([...text.matchAll(/report\.netcraft\.com\/(?:api\/v3\/)?submission\/([A-Za-z0-9-]{32,36})\b/g)]
+		.map((match) => normalizeSubmissionId(match[1]))
+		.filter((id): id is string => Boolean(id)))];
+}
+
 /** Extract a provider submission identifier from our bounded diagnostic text. */
 export function netcraftSubmissionIdFromDiagnostic(value: string): string | undefined {
 	if (typeof value !== "string") return undefined;

@@ -13,6 +13,7 @@ const longAnalysis = `## Verdict: Likely phishing / fraudulent impersonation
 The captured page uses TikTok branding and Vietnamese TikTok recharge wording while operating from an unrelated newly registered domain. The page offers discounted Coins packages, includes a payment flow, and asks visitors to log in. TikTok's legitimate Coins page is hosted at https://www.tiktok.com/coin. The observed host is not controlled by TikTok and the registration record identifies a different registrant. This combination strongly supports a report of fraudulent impersonation and payment phishing. Providers should investigate the customer account, preserve relevant logs, and suspend the abusive content.`;
 
 const report = {
+	id: 373043025057681485n,
 	allegationCategory: "phishing",
 	submissionId: 352185586284498946n,
 	reporterName: null,
@@ -54,7 +55,7 @@ describe("abuse email drafts", () => {
 		});
 
 		expect(draft).toMatchObject({
-			subject: "[Phishing Support] Abuse report for shop.dainammedia.space",
+			subject: "[Phishing Support] [PS-50a7a280104d] Abuse report for shop.dainammedia.space",
 			recipientLabel: "Hostinger operations, UAB",
 		});
 		expect(draft.body).toContain("Hello Hostinger Abuse Team,");

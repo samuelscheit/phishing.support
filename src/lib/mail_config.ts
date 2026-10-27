@@ -4,9 +4,9 @@ import { normalizeMailbox } from "./abuse/mail/shared";
 import { normalizeDomain } from "./abuse/security";
 
 /**
- * The service owns one mailbox: SMTP_FROM sends every report and reporter
- * notification, and IMAP_MAILBOX receives both forwarded phishing mail and
- * provider replies (to `abuse-<token>@REPLY_DOMAIN` Reply-To identities).
+ * The service owns one mail account: SMTP_FROM sends every report and reporter
+ * notification, and the IMAP_MAILBOXES folders receive forwarded phishing mail
+ * and provider replies. Server-side rules may file them into different folders.
  */
 
 function envBool(name: string, fallback: boolean): boolean {
@@ -49,7 +49,7 @@ export function smtpSender(): string {
 	return mailbox;
 }
 
-/** Domain for generated Reply-To and Message-ID identities. It must deliver into IMAP_MAILBOX. */
+/** Domain for generated Reply-To and Message-ID identities. It must deliver into one of IMAP_MAILBOXES. */
 export function replyDomain(): string {
 	const domain = normalizeDomain(process.env.REPLY_DOMAIN ?? "");
 	if (!domain) throw new Error("REPLY_DOMAIN must be configured as a public domain.");
@@ -62,7 +62,8 @@ export type ImapConfig = {
 	secure: boolean;
 	user: string;
 	pass: string;
-	mailbox: string;
+	/** Every watched folder; each message is routed the same way whichever folder holds it. */
+	mailboxes: string[];
 	/** Address that receives forwarded phishing mail for analysis. */
 	intakeAddress: string;
 };
@@ -72,13 +73,13 @@ export function imapConfig(): ImapConfig | undefined {
 	const host = process.env.IMAP_HOST?.trim();
 	const user = process.env.IMAP_USER?.trim();
 	const pass = process.env.IMAP_PASS;
-	const mailbox = process.env.IMAP_MAILBOX?.trim();
+	const mailboxes = [...new Set((process.env.IMAP_MAILBOXES ?? "").split(",").map((mailbox) => mailbox.trim()).filter(Boolean))];
 	const intake = process.env.IMAP_LISTEN_ADDRESS?.trim();
-	if (!host || !user || !pass || !mailbox || !intake) return undefined;
+	if (!host || !user || !pass || mailboxes.length === 0 || !intake) return undefined;
 	const intakeAddress = normalizeMailbox(intake);
 	if (!intakeAddress) throw new Error("IMAP_LISTEN_ADDRESS must be a valid mailbox.");
 	if (intakeAddress.slice(intakeAddress.lastIndexOf("@") + 1) !== replyDomain()) {
 		throw new Error("REPLY_DOMAIN must match the domain of IMAP_LISTEN_ADDRESS so provider replies reach the monitored mailbox.");
 	}
-	return { host, port: envPort("IMAP_PORT", 993), secure: envBool("IMAP_SECURE", true), user, pass, mailbox, intakeAddress };
+	return { host, port: envPort("IMAP_PORT", 993), secure: envBool("IMAP_SECURE", true), user, pass, mailboxes, intakeAddress };
 }

@@ -85,6 +85,7 @@ export const abuseJobTypes = [
 	"reconcile_skyvern_run",
 	"deliver_provider_verification_code",
 	"classify_provider_reply",
+	"poll_provider_correspondence",
 ] as const;
 export type AbuseJobType = (typeof abuseJobTypes)[number];
 

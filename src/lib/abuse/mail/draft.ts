@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { abuseCaseTag } from "./correlation";
 
 import { configuredAbuseOpenAI, responseOutputText } from "../ai";
 import { normalizePublicHttpUrl } from "../security";
@@ -64,7 +65,7 @@ export type AbuseEmailDraftDependencies = {
 };
 
 type DraftInput = {
-	report: Pick<AbuseReport, "allegationCategory" | "description" | "legalBrandUrl" | "submissionId" | "reporterName" | "reporterContactEmail">;
+	report: Pick<AbuseReport, "id" | "allegationCategory" | "description" | "legalBrandUrl" | "submissionId" | "reporterName" | "reporterContactEmail">;
 	target: Pick<AbuseTarget, "normalizedTarget" | "observedUrls">;
 	route: Pick<AbuseProviderRoute, "providerDisplayName" | "resolverProvenance" | "resolutionSnapshot">;
 	recipient: string;
@@ -413,7 +414,8 @@ export async function createAbuseEmailDraft(input: DraftInput, dependencies: Abu
 		? summary
 		: fallbackSummary(category, legalBrandUrl, Boolean(observedUrls.length || attachmentNames.length));
 	return {
-		subject: `[${serviceIdentity.name}] Abuse report for ${input.target.normalizedTarget}`,
+		// The case tag survives helpdesks that answer without threading headers.
+		subject: `[${serviceIdentity.name}] [${abuseCaseTag(input.report.id)}] Abuse report for ${input.target.normalizedTarget}`,
 		body: bodyFor({
 			allegationCategory: category,
 			target: input.target.normalizedTarget,

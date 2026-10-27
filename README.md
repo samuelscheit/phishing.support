@@ -115,20 +115,23 @@ The service uses one mailbox for everything:
 SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS
 SMTP_FROM=support@phishing.support      # authenticated sender of every report
 IMAP_HOST, IMAP_PORT, IMAP_SECURE, IMAP_USER, IMAP_PASS
-IMAP_MAILBOX=phishing.report            # receives intake mail and provider replies
+IMAP_MAILBOXES=phishing.report,phishing.support  # every folder that receives intake mail or provider replies
 IMAP_LISTEN_ADDRESS=report@phishing.support
 REPLY_DOMAIN=phishing.support           # must equal the IMAP_LISTEN_ADDRESS domain
 ```
 
-Each abuse email uses `SMTP_FROM` as its visible sender and a new opaque `Reply-To` such as `abuse-<48 hex>@phishing.support`, unique to one route. `REPLY_DOMAIN` must deliver into `IMAP_MAILBOX` (for iCloud Custom Email Domain, enable **Allow All Incoming Emails**; see Apple's [catch-all guide](https://support.apple.com/guide/icloud/allow-all-incoming-emails-mm9e3ee0680f/icloud)). Do not substitute plus-addressing.
+Each abuse email uses `SMTP_FROM` as its visible sender and a new opaque `Reply-To` such as `abuse-<48 hex>@phishing.support`, unique to one route. `REPLY_DOMAIN` must deliver into one of `IMAP_MAILBOXES` (for iCloud Custom Email Domain, enable **Allow All Incoming Emails**; see Apple's [catch-all guide](https://support.apple.com/guide/icloud/allow-all-incoming-emails-mm9e3ee0680f/icloud)). Do not substitute plus-addressing.
 
-The mailbox listener routes each message exactly once:
+Every abuse email subject carries a case tag such as `[PS-50a7a280104d]`, because most helpdesks answer from their own address without `In-Reply-To`. The mailbox listener watches every folder and routes each message exactly once, strongest evidence first:
 
-1. A message addressed to one of our generated `Reply-To` identities, or whose `In-Reply-To`/`References` names one of our outbound `Message-ID`s, is stored on that route with its raw MIME and attachments and classified (acknowledged, rejected, bounce, …). A message naming more than one report is ignored rather than guessed.
-2. Otherwise, mail to `IMAP_LISTEN_ADDRESS` becomes an email submission (already-read intake mail is skipped).
-3. Everything else is recorded as ignored in the `mail_ingest` ledger and left in the mailbox.
+1. A message addressed to one of our generated `Reply-To` identities, or whose `In-Reply-To`/`References` names one of our outbound `Message-ID`s, is stored on that route.
+2. A delivery-status notification is stored on the route whose outbound `Message-ID` it returned. A permanent rejection marks the email undeliverable; a temporary one resends it with the same identity.
+3. An authenticated notification from a direct provider (Netcraft) is stored on the route whose receipt ID it names. Cloudflare's correspondence is read from its submitted-report API instead (hourly for 30 days after submission), so its emails are not attached twice.
+4. A reply whose sender iCloud authenticated (DMARC, or an aligned DKIM/SPF pass) and which we emailed is stored on that sender's route when it names the case tag or case URL, or else repeats our exact subject.
+5. Otherwise, mail to `IMAP_LISTEN_ADDRESS` becomes an email submission (already-read intake mail is skipped).
+6. Everything else is recorded as ignored in the `mail_ingest` ledger and left in the mailbox.
 
-Sender, subject, and quoted content never select a report.
+A message that fits more than one route attaches to none. An unauthenticated sender never selects a report.
 
 ### Provider-facing reports
 

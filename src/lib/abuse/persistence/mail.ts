@@ -2,7 +2,9 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { generateId } from "../../db/ids";
-import { abuseJobs, abuseMailMessages, abuseProviderRoutes, type AbuseMailClassification, type AbuseProviderRoute } from "../schema";
+import { abuseCaseTag, subjectRepeats } from "../mail/correlation";
+import { abuseJobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports, type AbuseMailClassification, type AbuseProviderRoute } from "../schema";
+import { registrableDomain } from "../security";
 import { insertArtifact, now, recordEvent } from "./shared";
 
 class DuplicateInboundMailError extends Error {
@@ -188,6 +190,136 @@ export async function findCorrelatedInboundRoute(params: { recipients: string[];
 		route: db.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, routeId)).get(),
 		matched: true,
 	};
+}
+
+/**
+ * Routes whose outbound abuse email went to `sender`'s mailbox or, for
+ * helpdesks that answer from another address, its registrable domain. Only
+ * routes that actually received our mail are candidates.
+ */
+function emailedRoutesForSender(tx: any, sender: string, reportIds?: bigint[]) {
+	const domain = registrableDomain(sender.slice(sender.lastIndexOf("@") + 1));
+	const filters = [eq(abuseMailMessages.direction, "outbound"), inArray(abuseMailMessages.status, ["sent", "failed"])];
+	if (reportIds) filters.push(inArray(abuseMailMessages.reportId, reportIds));
+	const outbound: Array<{ routeId: bigint; reportId: bigint; subject: string | null; toAddresses: string[] }> = tx
+		.select({ routeId: abuseMailMessages.routeId, reportId: abuseMailMessages.reportId, subject: abuseMailMessages.subject, toAddresses: abuseMailMessages.toAddresses })
+		.from(abuseMailMessages)
+		.where(and(...filters))
+		.all();
+	const exact = outbound.filter((message) => message.toAddresses.includes(sender));
+	if (exact.length > 0) return exact;
+	return domain ? outbound.filter((message) => message.toAddresses.some((recipient) => registrableDomain(recipient.slice(recipient.lastIndexOf("@") + 1)) === domain)) : [];
+}
+
+function soleRoute(tx: any, routeIds: Iterable<bigint>): AbuseProviderRoute | undefined {
+	const unique = [...new Set(routeIds)];
+	return unique.length === 1 ? tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, unique[0])).get() : undefined;
+}
+
+/**
+ * Correlate a reply that carries no threading headers, as most helpdesks
+ * send them. The sender must be authenticated and must be a mailbox (or the
+ * domain of a mailbox) we emailed; the report is then named by our case tag
+ * or quoted case URL, or else by our exact original subject. Anything that
+ * leaves more than one route is ambiguous and attaches nowhere.
+ */
+export async function findReplyRouteForSender(params: {
+	sender: string;
+	caseTags: string[];
+	submissionIds: bigint[];
+	subject: string;
+}): Promise<{ route: AbuseProviderRoute | undefined; matched: boolean }> {
+	const db = await getDb();
+	return db.transaction((tx) => {
+		const reportIds = new Set<bigint>();
+		if (params.submissionIds.length > 0) {
+			for (const row of tx.select({ id: abuseReports.id }).from(abuseReports).where(inArray(abuseReports.submissionId, params.submissionIds)).all()) reportIds.add(row.id);
+		}
+		if (params.caseTags.length > 0) {
+			// Case tags are derived from report IDs, so compare against the IDs
+			// that actually emailed this sender instead of reversing the tag.
+			for (const message of emailedRoutesForSender(tx, params.sender)) {
+				if (params.caseTags.includes(abuseCaseTag(message.reportId))) reportIds.add(message.reportId);
+			}
+		}
+		if (reportIds.size > 0) {
+			const named = emailedRoutesForSender(tx, params.sender, [...reportIds]);
+			return { route: soleRoute(tx, named.map((message) => message.routeId)), matched: true };
+		}
+		if (!params.subject) return { route: undefined, matched: false };
+		const bySubject = emailedRoutesForSender(tx, params.sender).filter((message) => subjectRepeats(params.subject, message.subject));
+		return { route: soleRoute(tx, bySubject.map((message) => message.routeId)), matched: bySubject.length > 0 };
+	});
+}
+
+/**
+ * The provider-submission route whose recorded receipt is one of these
+ * provider confirmation IDs (for example a Netcraft submission ID).
+ */
+export async function findRouteByConfirmationId(params: { providerRegistryKeys: string[]; confirmationIds: string[] }): Promise<AbuseProviderRoute | undefined> {
+	if (params.confirmationIds.length === 0) return undefined;
+	const db = await getDb();
+	return db.transaction((tx) => soleRoute(tx, tx
+		.select({ routeId: abuseProviderRuns.routeId })
+		.from(abuseProviderRuns)
+		.innerJoin(abuseProviderRoutes, eq(abuseProviderRoutes.id, abuseProviderRuns.routeId))
+		.where(and(inArray(abuseProviderRoutes.providerRegistryKey, params.providerRegistryKeys), inArray(abuseProviderRuns.confirmationId, params.confirmationIds)))
+		.all()
+		.map((run) => run.routeId)));
+}
+
+/** The outbound message a delivery-status notification returned, by our own Message-ID. */
+export async function findBouncedOutboundRoute(messageIds: string[]): Promise<AbuseProviderRoute | undefined> {
+	if (messageIds.length === 0) return undefined;
+	const db = await getDb();
+	// Our generated Message-IDs are lowercase hex, as is the bounce parser's output.
+	return db.transaction((tx) => soleRoute(tx, tx
+		.select({ routeId: abuseMailMessages.routeId })
+		.from(abuseMailMessages)
+		.where(and(eq(abuseMailMessages.direction, "outbound"), inArray(abuseMailMessages.messageId, messageIds)))
+		.all()
+		.map((message) => message.routeId)));
+}
+
+/**
+ * Record messages a provider returned from its own API on their route. The
+ * provider's message ID is the correlation key, so a repeated fetch stores
+ * nothing new. Returns how many messages were new.
+ */
+export async function recordProviderCorrespondence(params: {
+	route: AbuseProviderRoute;
+	messages: Array<{ id: string; subject: string; body: string; recipient?: string; sentAt: Date; from: string }>;
+}): Promise<number> {
+	const db = await getDb();
+	return db.transaction((tx) => {
+		let created = 0;
+		for (const message of params.messages) {
+			const correlationKey = `provider-api:${params.route.providerRegistryKey}:${message.id}`;
+			const existing = tx.select({ id: abuseMailMessages.id }).from(abuseMailMessages).where(eq(abuseMailMessages.correlationKey, correlationKey)).get();
+			if (existing) continue;
+			const timestamp = now();
+			tx.insert(abuseMailMessages).values({
+				id: generateId(),
+				reportId: params.route.reportId,
+				routeId: params.route.id,
+				direction: "inbound",
+				kind: "provider_api",
+				status: "received",
+				fromAddress: message.from,
+				toAddresses: message.recipient ? [message.recipient] : [],
+				subject: message.subject,
+				textBody: message.body,
+				correlationKey,
+				processingAttempts: 0,
+				occurredAt: message.sentAt,
+				createdAt: timestamp,
+				updatedAt: timestamp,
+			}).run();
+			recordEvent(tx, { reportId: params.route.reportId, routeId: params.route.id, eventType: "mail.provider_api_received", data: { providerMessageId: message.id } });
+			created++;
+		}
+		return created;
+	}, { behavior: "immediate" });
 }
 
 /**

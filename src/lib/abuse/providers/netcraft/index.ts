@@ -3,6 +3,7 @@ import { NETCRAFT_PROVIDER } from "./definition";
 import { prepareNetcraftSubmission, submitNetcraftSubmission } from "./submission";
 import { makeNetcraftReason } from "./payload";
 import { reconcileNetcraftProviderRun } from "./reconcile";
+import { NETCRAFT_INBOUND_MAIL } from "./inbound";
 
 /** Supplemental Netcraft route for every report with one or more observed URLs. */
 export const netcraftProvider: ProviderSubmissionProvider = {
@@ -15,6 +16,7 @@ export const netcraftProvider: ProviderSubmissionProvider = {
 		description: context.description,
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),
+	inboundMail: NETCRAFT_INBOUND_MAIL,
 	submit: submitNetcraftSubmission,
 };
 

@@ -251,6 +251,8 @@ export async function settleCorrelatedEmailBounce(params: {
 	inboundMessageId: bigint;
 	failureReason?: string;
 	retryAfterMs?: number;
+	/** Resend only after a temporary failure; a permanent rejection would bounce again. */
+	retry?: boolean;
 }): Promise<{ settled: boolean; routeId?: bigint; runId?: bigint; outboundMessageId?: bigint }> {
 	const db = await getDb();
 	return db.transaction(
@@ -335,7 +337,7 @@ export async function settleCorrelatedEmailBounce(params: {
 					),
 				)
 				.get();
-			if (!existingRetry) {
+			if (params.retry !== false && !existingRetry) {
 				const jobId = generateId();
 				tx.insert(abuseJobs)
 					.values({

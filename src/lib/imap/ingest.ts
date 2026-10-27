@@ -63,9 +63,21 @@ export async function ingestFetchedMail(
 
 		const reply = await matchProviderReply(parsed, recipientAddresses);
 		if (reply.kind === "reply") {
-			const stored = await storeProviderReply({ route: reply.route, parsed, raw, recipientAddresses, ...ledgerKey });
+			const stored = await storeProviderReply({
+				route: reply.route,
+				mailKind: reply.mailKind,
+				...(reply.bouncedMessageIds ? { bouncedMessageIds: reply.bouncedMessageIds } : {}),
+				parsed,
+				raw,
+				recipientAddresses,
+				...ledgerKey,
+			});
 			await MailIngestEntity.recordTerminal({ ...ledgerKey, messageId: rawMessageId, route: "reply", reason: stored.reason });
 			return { disposition: "terminal", route: "reply", reason: stored.reason, messageId: stored.messageId };
+		}
+		if (reply.kind === "provider_api") {
+			await MailIngestEntity.recordTerminal({ ...ledgerKey, messageId: rawMessageId, route: "ignored", reason: "provider_api_correspondence" });
+			return { disposition: "terminal", route: "ignored", reason: "provider_api_correspondence" };
 		}
 		if (reply.kind === "ambiguous") {
 			await MailIngestEntity.recordTerminal({ ...ledgerKey, messageId: rawMessageId, route: "ignored", reason: "ambiguous_report_correlation" });

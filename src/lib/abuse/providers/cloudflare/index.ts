@@ -2,7 +2,7 @@ import type { ProviderSubmissionProvider } from "../submission_contracts";
 
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import { buildCloudflareReportPreview } from "./report";
-import { prepareCloudflareExternalSubmission, prepareCloudflareSubmission, submitCloudflareSubmission } from "./submission";
+import { fetchCloudflareCorrespondence, prepareCloudflareExternalSubmission, prepareCloudflareSubmission, submitCloudflareSubmission } from "./submission";
 
 /** The sole executable owner of Cloudflare's authenticated abuse-report API contract. */
 export const cloudflareProvider: ProviderSubmissionProvider = {
@@ -13,6 +13,10 @@ export const cloudflareProvider: ProviderSubmissionProvider = {
 	prepareExternalSubmission: (context) => prepareCloudflareExternalSubmission(context),
 	submit: (context) => submitCloudflareSubmission(context),
 	submitPrepared: (context, preflight) => submitCloudflareSubmission(context, {}, preflight),
+	// The submitted-report API is the authoritative record of Cloudflare's
+	// correspondence; its notification mails are not attached a second time.
+	inboundMail: { senderDomains: ["cloudflare.com"] },
+	fetchCorrespondence: (context) => fetchCloudflareCorrespondence(context),
 };
 
 export { CLOUDFLARE_PROVIDER } from "./definition";

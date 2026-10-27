@@ -3,8 +3,18 @@ import { simpleParser, type ParsedMail } from "mailparser";
 import { AbuseRepository } from "../repository";
 import { attachmentFilename, inboundBodyText, isRfcMessageId } from "./shared";
 
+/**
+ * `reply`: a provider's answer, classified by the reply classifier.
+ * `bounce`: a delivery-status notification for our outbound mail.
+ * `notification`: a provider status update about a filed report.
+ */
+export type InboundMailKind = "reply" | "bounce" | "notification";
+
 /** Parse and retain raw inbound MIME plus attachments before any classification. */
 export async function persistInboundAbuseMail(params: {
+	kind: InboundMailKind;
+	/** For a bounce: the returned outbound Message-IDs, kept as its references. */
+	bouncedMessageIds?: string[];
 	routeId: bigint;
 	reportId: bigint;
 	/** Canonical delivery recipients from IMAP headers and envelope metadata. */
@@ -24,7 +34,7 @@ export async function persistInboundAbuseMail(params: {
 	const stored = await AbuseRepository.persistInboundMailWithArtifacts({
 		reportId: params.reportId,
 		routeId: params.routeId,
-		kind: "reply",
+		kind: params.kind,
 		fromAddress: from,
 		// IMAP ingestion selected the route from this complete canonical set,
 		// including envelope and delivery-recipient fields that may not occur in
@@ -35,7 +45,7 @@ export async function persistInboundAbuseMail(params: {
 		textBody: inboundBodyText(parsed),
 		messageId: isRfcMessageId(parsed.messageId) ? parsed.messageId : undefined,
 		inReplyTo: parsed.inReplyTo,
-		references: typeof parsed.references === "string" ? [parsed.references] : parsed.references,
+		references: params.bouncedMessageIds ?? (typeof parsed.references === "string" ? [parsed.references] : parsed.references),
 		mailbox: params.mailbox,
 		uidValidity: params.uidValidity,
 		uid: params.uid,

@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, lte, or } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lte, ne, or } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { generateId } from "../../db/ids";
@@ -18,6 +18,8 @@ export async function enqueueJob(params: {
 	payload?: Record<string, unknown>;
 	dedupeKey?: string;
 	nextAttemptAt?: Date;
+	/** The running job that queues its own successor; it does not count as a duplicate. */
+	successorOf?: bigint;
 }): Promise<AbuseJob> {
 	const db = await getDb();
 	return db.transaction(
@@ -30,6 +32,7 @@ export async function enqueueJob(params: {
 						and(
 							eq(abuseJobs.dedupeKey, params.dedupeKey),
 							inArray(abuseJobs.status, ["queued", "running", "unknown_external_state"]),
+							...(params.successorOf === undefined ? [] : [ne(abuseJobs.id, params.successorOf)]),
 						),
 					)
 					.get();

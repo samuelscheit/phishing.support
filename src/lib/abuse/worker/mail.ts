@@ -6,9 +6,24 @@ import { AbuseRepository } from "../repository";
 export async function classifyReply(messageId: bigint): Promise<void> {
 	const message = await AbuseRepository.getMailMessage(messageId);
 	if (!message) return;
-	const result = await classifyProviderReply({ text: message.textBody ?? "", from: message.fromAddress ?? undefined });
 	const route = await AbuseRepository.getRoute(message.routeId);
 	if (!route) return;
+	if (message.kind === "notification") {
+		// A provider status update about a report it accepted is part of the
+		// case record; it never changes the route by itself.
+		await AbuseRepository.setMailClassification(message.id, "acknowledged", [], "provider_notification");
+		return;
+	}
+	if (message.kind === "bounce") {
+		const status = message.textBody?.match(/\bStatus:\s*([245])\.\d{1,3}\.\d{1,3}/i)?.[1];
+		await AbuseRepository.setMailClassification(message.id, "bounce", [], "delivery_status_notification");
+		await settleBounce(message.id, route, {
+			retry: status === "4",
+			failureReason: message.textBody?.match(/\bDiagnostic-Code:\s*([^\n]+)/i)?.[1]?.trim().slice(0, 1_000) ?? "The recipient's mail server rejected the report.",
+		});
+		return;
+	}
+	const result = await classifyProviderReply({ text: message.textBody ?? "", from: message.fromAddress ?? undefined });
 	const links = result.classification === "not_monitored"
 		? await extractVerifiedProviderLinks({
 			providerKey: route.providerRegistryKey,
@@ -53,14 +68,20 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 		await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: "awaiting_provider_reply", to: "provider_rejected" });
 	}
 	else if (result.classification === "bounce") {
-		// A bounce may arrive immediately after SMTP acceptance, before the
-		// sender moves the run/route into its normal waiting state. Correlate and
-		// settle all three records atomically so a late sender completion cannot
-		// restore `awaiting_provider_reply` over the known delivery failure.
-		const bounced = await AbuseRepository.settleCorrelatedEmailBounce({ inboundMessageId: message.id });
-		if (!bounced.settled) {
-			await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: "awaiting_provider_reply", to: "provider_rejected", data: { reason: "uncorrelated_provider_bounce" } });
-		}
+		await settleBounce(message.id, route);
+	}
+}
+
+/**
+ * A bounce may arrive immediately after SMTP acceptance, before the sender
+ * moves the run/route into its normal waiting state. Correlate and settle all
+ * three records atomically so a late sender completion cannot restore
+ * `awaiting_provider_reply` over the known delivery failure.
+ */
+async function settleBounce(messageId: bigint, route: { id: bigint }, options: { retry?: boolean; failureReason?: string } = {}): Promise<void> {
+	const bounced = await AbuseRepository.settleCorrelatedEmailBounce({ inboundMessageId: messageId, ...options });
+	if (!bounced.settled) {
+		await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: "awaiting_provider_reply", to: "provider_rejected", data: { reason: "uncorrelated_provider_bounce" } });
 	}
 }
 

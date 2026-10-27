@@ -101,6 +101,35 @@ export type ProviderSubmissionSuccess = {
 	submittedTargets: string[];
 };
 
+/** One message the provider sent about a filed report, read from its own API. */
+export type ProviderCorrespondenceMessage = {
+	/** Provider-assigned ID; it deduplicates repeated fetches. */
+	id: string;
+	subject: string;
+	body: string;
+	recipient?: string;
+	sentAt: Date;
+};
+
+/** The provider's current record of a filed report. */
+export type ProviderCorrespondence = {
+	messages: ProviderCorrespondenceMessage[];
+	/** Review state, for example `accepted` or `denied`, with the provider's reason. */
+	status?: { state: string; detail?: string };
+};
+
+/** Mail a provider sends to the service mailbox about reports it received. */
+export type ProviderInboundMail = {
+	/** Registrable domains of the authenticated notification senders. */
+	readonly senderDomains: readonly string[];
+	/**
+	 * The provider receipt IDs a notification names. Absent when the
+	 * provider's API is the authoritative correspondence source, so its
+	 * mail is not attached to a case a second time.
+	 */
+	confirmationIds?(text: string): string[];
+};
+
 /**
  * A direct provider integration. Generic code selects it from the registry
  * and invokes it, but never branches on provider names or request details.
@@ -130,6 +159,12 @@ export type ProviderSubmissionProvider = {
 	 */
 	prepareExternalSubmission?(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreflight>;
 	submit(context: ProviderSubmissionContext): Promise<ProviderSubmissionSuccess>;
+	readonly inboundMail?: ProviderInboundMail;
+	/**
+	 * Read the provider's correspondence for a submitted report by its
+	 * receipt. The worker polls it for a bounded period after submission.
+	 */
+	fetchCorrespondence?(context: { confirmationId: string; signal?: AbortSignal }): Promise<ProviderCorrespondence>;
 	/** Provider entry point that consumes the ephemeral preflight state, when needed. */
 	submitPrepared?(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess>;
 };

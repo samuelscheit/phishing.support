@@ -28,7 +28,7 @@ describe("IP-hosted phishing sites", () => {
 		const draft = await createAbuseEmailDraft({
 			route: { routeType: "email", verifiedEmail: "abuse@ionos.com" },
 			recipient: "abuse@ionos.com",
-			report: { allegationCategory: "phishing", description, submissionId: 373426928255766528n, reporterName: null, reporterContactEmail: null, legalBrandUrl: null },
+			report: { id: 1n, allegationCategory: "phishing", description, submissionId: 373426928255766528n, reporterName: null, reporterContactEmail: null, legalBrandUrl: null },
 			target: { normalizedTarget: target, observedUrls },
 		} as never, { generateSummary: async () => undefined });
 		for (const url of observedUrls) expect(draft.body).toContain(url);

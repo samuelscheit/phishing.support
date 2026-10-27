@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Download, ExternalLink, Mail, MessageSquareReply, OctagonAlert, Send } from "lucide-react";
+import { Bell, Check, Copy, Download, ExternalLink, Mail, MessageSquareReply, OctagonAlert, Send } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -72,20 +72,30 @@ function CopyReplyAddress({ replyAddress }: { replyAddress: string }) {
 	);
 }
 
+/** What each stored message is, as the case timeline shows it. */
+function messageTitle(message: SubmissionReportMessage): string {
+	if (message.direction === "outbound") return "Report sent";
+	if (message.kind === "bounce" || message.classification === "bounce") return "Delivery failed";
+	if (message.kind === "notification") return "Provider update";
+	if (message.kind === "provider_api") return "Provider message";
+	return "Reply received";
+}
+
 function MessageItem({ submissionId, message, artifacts }: { submissionId: string; message: SubmissionReportMessage; artifacts: Map<string, SubmissionReportArtifact> }) {
 	const outbound = message.direction === "outbound";
-	const bounce = message.classification === "bounce";
+	const bounce = message.kind === "bounce" || message.classification === "bounce";
+	const update = message.kind === "notification" || message.kind === "provider_api";
 	return (
 		<div className={cn("relative border-l-2 pb-6 pl-4 last:pb-0", bounce ? "border-red-300" : "border-muted")}>
 			<div className="absolute -left-[9px] top-0 grid h-4 w-4 place-items-center rounded-full bg-background">
-				{bounce ? <OctagonAlert className="h-4 w-4 text-red-700" /> : outbound ? <Send className="h-4 w-4 text-blue-700" /> : <MessageSquareReply className="h-4 w-4 text-emerald-700" />}
+				{bounce ? <OctagonAlert className="h-4 w-4 text-red-700" /> : outbound ? <Send className="h-4 w-4 text-blue-700" /> : update ? <Bell className="h-4 w-4 text-slate-600" /> : <MessageSquareReply className="h-4 w-4 text-emerald-700" />}
 			</div>
 			<div className={cn("rounded-md border p-3", bounce ? "border-red-200 bg-red-50/60" : "bg-muted/20")}>
 				<div className="flex flex-wrap items-start justify-between gap-2">
 					<div className="flex flex-wrap items-center gap-2">
-						<Badge variant="secondary">{outbound ? "Report sent" : "Reply received"}</Badge>
-						<Badge variant="outline" className={cn("capitalize", statusClass(message.status))}>{label(message.status)}</Badge>
-						{message.classification ? <Badge variant="outline" className="capitalize">{label(message.classification)}</Badge> : null}
+						<Badge variant="secondary">{messageTitle(message)}</Badge>
+						{outbound ? <Badge variant="outline" className={cn("capitalize", statusClass(message.status))}>{label(message.status)}</Badge> : null}
+						{message.classification && !update && !bounce ? <Badge variant="outline" className="capitalize">{label(message.classification)}</Badge> : null}
 					</div>
 					<div className="text-xs text-muted-foreground">{formatDate(message.occurredAt)}</div>
 				</div>
