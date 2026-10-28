@@ -4,7 +4,7 @@ import { getBrowser, getBrowserPage } from "./browser";
 import type { WebsiteNavigationHop } from "./website_types";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
-import parse, { type HTMLElement } from "node-html-parser";
+import parse, { HTMLElement } from "node-html-parser";
 
 export type ArchivedWebsiteResponse = {
 	name: string;
@@ -130,35 +130,44 @@ const CAPTION_INPUT_TYPES = new Set(["button", "reset", "submit"]);
  * Text a visitor reads from attributes rather than text nodes: field hints,
  * button captions, image alternatives, and accessible labels. Kits often label
  * their fields only with placeholders and their buttons with input values.
+ * Each caption becomes its own line where its element stands, so the text
+ * keeps the order a visitor reads and a quote spanning a heading and the
+ * fields below it appears in the text as it does on the page.
  */
-function visibleAttributeText(dom: HTMLElement): string[] {
-	const texts = new Set<string>();
+function inlineAttributeText(dom: HTMLElement): void {
 	for (const element of dom.querySelectorAll("[placeholder], [aria-placeholder], [aria-label], img[alt], input[value]")) {
 		const tag = element.tagName.toLowerCase();
-		const captions = [
+		const ownText = compactText(element.textContent);
+		const captions = new Set([
 			...TEXT_ATTRIBUTES.map((attribute) => element.getAttribute(attribute)),
 			tag === "img" ? element.getAttribute("alt") : undefined,
 			tag === "input" && CAPTION_INPUT_TYPES.has(element.getAttribute("type")?.trim().toLowerCase() ?? "") ? element.getAttribute("value") : undefined,
-		];
+		].map(compactText).filter((caption) => caption && caption !== ownText));
 		for (const caption of captions) {
-			const compact = caption?.replace(/\s+/g, " ").trim();
-			if (compact) texts.add(compact);
+			const line = new HTMLElement("div", {}, "");
+			line.textContent = caption;
+			element.before(line);
 		}
 	}
-	return [...texts];
+}
+
+function compactText(value: string | undefined): string {
+	return value?.replace(/\s+/g, " ").trim() ?? "";
 }
 
 /** Sanitized HTML and visitor-readable text of a captured document. */
 export function capturedDocumentContent(documentHtml: string): { html: string; text: string } {
 	const dom = parse(documentHtml);
-	const attributeText = visibleAttributeText(dom);
-	dom.querySelectorAll("script, style, link, svg, noscript, img").forEach((element) => element.remove());
+	dom.querySelectorAll("script, style, link, svg, noscript").forEach((element) => element.remove());
 	dom.querySelectorAll("*").forEach((element) => element.removeAttribute("style"));
+	const textDom = parse(dom.outerHTML);
+	inlineAttributeText(textDom);
+	dom.querySelectorAll("img").forEach((element) => element.remove());
 	const title = dom.querySelector("title")?.textContent ?? "";
 	const description = dom.querySelector("meta[name='description'], meta[property='og:description'], meta[property='twitter:description']")?.getAttribute("content") ?? "";
-	const text = [title, description, dom.structuredText, ...attributeText].filter(Boolean).join("\n\n")
+	const text = [title, description, textDom.structuredText].filter(Boolean).join("\n\n")
 		.replaceAll(/ +/g, " ")
-		.replaceAll(/\n+/g, "\n")
+		.replaceAll(/ *\n[\n ]*/g, "\n")
 		.trim();
 	return { html: dom.outerHTML, text };
 }

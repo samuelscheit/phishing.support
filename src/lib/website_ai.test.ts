@@ -10,6 +10,7 @@ import {
 	WEBSITE_CLASSIFICATION_FORMAT,
 	websiteSiteAssessments,
 } from "./website_ai";
+import { capturedDocumentContent } from "./website_archive";
 import type { WebsiteNavigationHop } from "./website_types";
 
 const shareGoogleHop: WebsiteNavigationHop = {
@@ -281,6 +282,25 @@ test("short quotes in non-Latin scripts are valid evidence", () => {
 		phishingBasis: "credential_theft",
 		evidenceQuote: "请输入密码",
 		collectionFields: [{ ref: "f2", control: "input[type=password]", label: "密码" }],
+	});
+});
+
+test("a quote running from a heading into placeholder-only fields is verbatim page text", () => {
+	// Production case: a Microsoft kit whose fields carry their labels only as placeholders.
+	const { html, text } = capturedDocumentContent(`<html lang="es"><head><title>DEMO</title></head><body><form>
+<p><img src="microsoft_logo.png" alt="Microsoft Logo"></p><h1>Iniciar sesión</h1><p>Verificación Microsoft</p>
+<input type="email" placeholder="Correo electrónico, teléfono o Skype" required><input type="text" placeholder="Contraseña de correo" required>
+<a href="#">¿No puede acceder a su cuenta?</a><button>Siguiente</button>
+</form></body></html>`);
+
+	expect(validateWebsiteSiteClassification(
+		{ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Verificación Microsoft\nCorreo electrónico, teléfono o Skype\nContraseña de correo", collectionFieldRefs: ["f1", "f2"] },
+		text,
+		html,
+	)).toMatchObject({
+		finding: "phishing",
+		evidenceQuote: "Verificación Microsoft Correo electrónico, teléfono o Skype Contraseña de correo",
+		collectionFields: [{ ref: "f1", control: "input[type=email]" }, { ref: "f2", control: "input[type=text]" }],
 	});
 });
 

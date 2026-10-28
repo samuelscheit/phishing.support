@@ -343,3 +343,18 @@ test("captured page text includes what visitors read from attributes, but never 
 	expect(html).not.toContain("<script");
 	expect(html).not.toContain("<img");
 });
+
+test("captured page text keeps attribute captions where a visitor reads them", () => {
+	// A kit that labels its fields only with placeholders, quoted by the classifier across heading and fields.
+	const { html, text } = capturedDocumentContent(`<html><body><form>
+<p><img alt="Microsoft Logo"></p><h1>Iniciar sesión</h1><p>Verificación Microsoft</p>
+<input type="email" placeholder="Correo electrónico, teléfono o Skype"><input type="text" placeholder="Contraseña de correo">
+<a href="#">¿No puede acceder a su cuenta?</a><button aria-label="Siguiente">Siguiente</button>
+</form></body></html>`);
+
+	expect(text).toContain("Microsoft Logo\nIniciar sesión\nVerificación Microsoft\nCorreo electrónico, teléfono o Skype\nContraseña de correo\n¿No puede acceder a su cuenta?");
+	// A caption equal to the element's own text is not repeated.
+	expect(text.match(/Siguiente/g)).toHaveLength(1);
+	expect(html).not.toContain("<img");
+	expect(html.match(/Contraseña de correo/g)).toHaveLength(1);
+});
