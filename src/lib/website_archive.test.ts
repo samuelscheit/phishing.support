@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Browser, BrowserContext, HTTPRequest, HTTPResponse, Page } from "rebrowser-puppeteer-core";
+import type { FabricEgress } from "./browser/fabric";
 import type { WebsiteNavigationHop } from "./website_types";
 
 import { archiveWebsite, capturedDocumentContent, getMhtmlArchiveDate, getMhtmlArchiveLocation } from "./website_archive";
@@ -75,6 +76,8 @@ test("archiveWebsite parses a retained MHTML snapshot locally without opening a 
 	expect(archive.screenshotPng).toBeUndefined();
 });
 
+const mainFrame = {};
+
 function responseForNavigation(
 	url: string,
 	status: number,
@@ -86,6 +89,8 @@ function responseForNavigation(
 			url: () => hopUrl,
 			response: () => hopResponse,
 			redirectChain: () => redirects,
+			isNavigationRequest: () => true,
+			frame: () => mainFrame,
 		} as unknown as HTTPRequest;
 		hopResponse = {
 			ok: () => hopStatus >= 200 && hopStatus < 300,
@@ -116,71 +121,94 @@ function responseForNavigation(
 	}, priorRequests) as HTTPResponse;
 }
 
+type FixtureNavigation = {
+	url: string;
+	egress: FabricEgress;
+	/** Deliver a later main-frame document response, as a self-replacing interstitial does. */
+	replaceDocument: (response: HTTPResponse) => void;
+};
+
 function archiveBrowserFixture(options: {
-	goto?: (url: string, navigation: { waitUntil?: string; timeout?: number }) => Promise<HTTPResponse | null>;
+	goto?: (navigation: FixtureNavigation) => Promise<HTTPResponse | null>;
 	pageUrl?: string;
 } = {}) {
 	const eventNames: string[] = [];
-	const navigationCalls: Array<{ url: string; waitUntil?: string; timeout?: number }> = [];
+	const navigationCalls: Array<{ url: string; egress: FabricEgress; waitUntil?: string; timeout?: number }> = [];
+	const leasedEgress: FabricEgress[] = [];
 	let interceptionEnabled = false;
 	let screenshotCount = 0;
 	let closeCount = 0;
 	let captureSnapshotCount = 0;
-	const context = {} as BrowserContext;
-	const page = {
-		browser: () => browser,
-		browserContext: () => context,
-		setViewport: async () => undefined,
-		on: (event: string) => { eventNames.push(event); },
-		setRequestInterception: async (enabled: boolean) => { interceptionEnabled = enabled; },
-		goto: async (url: string, navigation: { waitUntil?: string; timeout?: number }) => {
-			navigationCalls.push({ url, ...navigation });
-			if (options.goto) return options.goto(url, navigation);
-			return responseForNavigation(options.pageUrl ?? url, 200, { contentType: "text/html" });
-		},
-		screenshot: async () => { screenshotCount++; return Buffer.from("png"); },
-		target: () => ({
-			createCDPSession: async () => ({
-				send: async (method: string) => {
-					if (method !== "Page.captureSnapshot") throw new Error(`Unexpected CDP command ${method}`);
-					captureSnapshotCount++;
-					return {
-						data: [
-							"From: <Saved by Blink>",
-							`Snapshot-Content-Location: ${options.pageUrl ?? "https://example.test/"}`,
-							"Content-Type: multipart/related; boundary=\"archive-test\"",
-							"",
-							"--archive-test",
-							"Content-Type: text/html",
-							`Content-Location: ${options.pageUrl ?? "https://example.test/"}`,
-							"",
-							"<html><head><title>Captured title</title></head><body>Captured page text</body></html>",
-							"--archive-test--",
-						].join("\r\n"),
-					};
-				},
+
+	const getBrowser = async (egress: FabricEgress = "phishing") => {
+		leasedEgress.push(egress);
+		const responseListeners: Array<(response: HTTPResponse) => void> = [];
+		let currentUrl = options.pageUrl ?? "https://example.test/";
+		const context = {} as BrowserContext;
+		const page = {
+			browser: () => browser,
+			browserContext: () => context,
+			mainFrame: () => mainFrame,
+			setViewport: async () => undefined,
+			on: (event: string, listener: (response: HTTPResponse) => void) => {
+				eventNames.push(event);
+				if (event === "response") responseListeners.push(listener);
+			},
+			setRequestInterception: async (enabled: boolean) => { interceptionEnabled = enabled; },
+			goto: async (url: string, navigation: { waitUntil?: string; timeout?: number }) => {
+				navigationCalls.push({ url, egress, ...navigation });
+				const deliver = (response: HTTPResponse) => {
+					currentUrl = response.url();
+					for (const listener of responseListeners) listener(response);
+				};
+				const response = options.goto
+					? await options.goto({ url, egress, replaceDocument: deliver })
+					: responseForNavigation(options.pageUrl ?? url, 200, { contentType: "text/html" });
+				if (response) deliver(response);
+				return response;
+			},
+			screenshot: async () => { screenshotCount++; return Buffer.from("png"); },
+			target: () => ({
+				createCDPSession: async () => ({
+					send: async (method: string) => {
+						if (method !== "Page.captureSnapshot") throw new Error(`Unexpected CDP command ${method}`);
+						captureSnapshotCount++;
+						return {
+							data: [
+								"From: <Saved by Blink>",
+								`Snapshot-Content-Location: ${currentUrl}`,
+								"Content-Type: multipart/related; boundary=\"archive-test\"",
+								"",
+								"--archive-test",
+								"Content-Type: text/html",
+								`Content-Location: ${currentUrl}`,
+								"",
+								"<html><head><title>Captured title</title></head><body>Captured page text</body></html>",
+								"--archive-test--",
+							].join("\r\n"),
+						};
+					},
+				}),
 			}),
-		}),
-		evaluate: async (callback: () => unknown) => {
-			const source = callback.toString();
-			if (source.includes("cloneNode")) return "<html><body>Captured HTML</body></html>";
-			if (source.includes("document.body.innerText")) return "Captured page text";
-			if (source.includes("querySelector")) return "Captured description";
-			throw new Error("Unexpected page evaluation");
-		},
-		title: async () => "Captured title",
-		url: () => options.pageUrl ?? "https://example.test/",
+			evaluate: async (callback: () => unknown) => {
+				if (callback.toString().includes("readyState")) return "interactive";
+				throw new Error("Unexpected page evaluation");
+			},
+			title: async () => "Just a moment...",
+			url: () => currentUrl,
+		};
+		const browser = {
+			defaultBrowserContext: () => ({ ...context, newPage: async () => page }),
+			close: async () => { closeCount++; },
+		} as unknown as Browser;
+		return browser;
 	};
-	const browser = {
-		defaultBrowserContext: () => ({ ...context, newPage: async () => page }),
-		close: async () => { closeCount++; },
-	} as unknown as Browser;
 
 	return {
-		browser,
-		page: page as unknown as Page & { setRequestInterception: (enabled: boolean) => Promise<void> },
+		getBrowser,
 		eventNames,
 		navigationCalls,
+		leasedEgress,
 		get interceptionEnabled() { return interceptionEnabled; },
 		get screenshotCount() { return screenshotCount; },
 		get closeCount() { return closeCount; },
@@ -206,13 +234,13 @@ test("website capture records every redirect response separately from the final 
 	});
 	const archive = await archiveWebsite(
 		{ url: requestedUrl },
-		{ browser: fixture.browser },
+		{ getBrowser: fixture.getBrowser },
 	);
 
-	expect(fixture.navigationCalls).toEqual([{ url: requestedUrl, waitUntil: "domcontentloaded", timeout: 30_000 }]);
+	expect(fixture.navigationCalls).toEqual([{ url: requestedUrl, egress: "phishing", waitUntil: "domcontentloaded", timeout: 30_000 }]);
+	expect(fixture.leasedEgress).toEqual(["phishing"]);
 	expect(fixture.interceptionEnabled).toBe(false);
 	expect(fixture.eventNames).not.toContain("request");
-	expect(fixture.eventNames).not.toContain("response");
 	expect(archive.requestedUrl).toBe(requestedUrl);
 	expect(archive.url).toBe(destinationUrl);
 	expect(archive.hostname).toBe("fuckyou.gay");
@@ -228,18 +256,110 @@ test("website capture records every redirect response separately from the final 
 	expect(archive.text.toString()).toContain("Captured page text");
 });
 
-test("website capture preserves navigation failures and closes the browser lease", async () => {
+test("a navigation failure over Tor is retried from the server's direct exit", async () => {
+	const url = "https://www8-receitafazendagerador.com/Aplicacao/Mei/pgmei.app";
+	const fixture = archiveBrowserFixture({
+		pageUrl: url,
+		goto: async ({ egress }) => {
+			if (egress === "phishing") throw new Error(`net::ERR_TIMED_OUT at ${url}`);
+			return responseForNavigation(url, 200, { contentType: "text/html" });
+		},
+	});
+
+	const archive = await archiveWebsite({ url }, { getBrowser: fixture.getBrowser });
+
+	expect(fixture.leasedEgress).toEqual(["phishing", "reporting"]);
+	expect(fixture.closeCount).toBe(2);
+	expect(fixture.captureSnapshotCount).toBe(1);
+	expect(archive.url).toBe(url);
+});
+
+test("website capture reports the navigation failure of every egress and closes each browser lease", async () => {
 	const fixture = archiveBrowserFixture({
 		goto: async () => { throw new Error("Navigation timeout of 30000 ms exceeded"); },
 	});
 
 	await expect(archiveWebsite(
 		{ url: "https://example.test/" },
-		{ browser: fixture.browser },
-	)).rejects.toThrow("Navigation timeout of 30000 ms exceeded");
-	expect(fixture.screenshotCount).toBe(1);
+		{ getBrowser: fixture.getBrowser },
+	)).rejects.toThrow("Failed to load page: Navigation timeout of 30000 ms exceeded via Tor exit; Navigation timeout of 30000 ms exceeded via server IP");
+	expect(fixture.leasedEgress).toEqual(["phishing", "reporting"]);
+	expect(fixture.screenshotCount).toBe(0);
 	expect(fixture.captureSnapshotCount).toBe(0);
+	expect(fixture.closeCount).toBe(2);
+});
+
+test("a failure after the page loaded is not retried on another egress", async () => {
+	const fixture = archiveBrowserFixture();
+	const getBrowser: typeof fixture.getBrowser = async (egress) => {
+		const browser = await fixture.getBrowser(egress);
+		const context = browser.defaultBrowserContext();
+		const newPage = context.newPage.bind(context);
+		context.newPage = async () => Object.assign(await newPage(), { screenshot: async () => { throw new Error("Protocol error (Page.captureScreenshot)"); } });
+		return Object.assign(browser, { defaultBrowserContext: () => context });
+	};
+
+	await expect(archiveWebsite({ url: "https://example.test/" }, { getBrowser })).rejects.toThrow("Protocol error (Page.captureScreenshot)");
+	expect(fixture.leasedEgress).toEqual(["phishing"]);
 	expect(fixture.closeCount).toBe(1);
+});
+
+test("an HTTP error over Tor is retried from the server's direct exit", async () => {
+	const url = "https://xfinityy111.weebly.com/";
+	const fixture = archiveBrowserFixture({
+		pageUrl: url,
+		goto: async ({ egress }) => responseForNavigation(url, egress === "phishing" ? 403 : 200, { contentType: "text/html" }),
+	});
+
+	const archive = await archiveWebsite({ url }, { getBrowser: fixture.getBrowser, errorDocumentSettleMs: 20 });
+
+	expect(fixture.leasedEgress).toEqual(["phishing", "reporting"]);
+	expect(fixture.closeCount).toBe(2);
+	expect(fixture.captureSnapshotCount).toBe(1);
+	expect(archive.url).toBe(url);
+	expect(archive.navigationHops).toEqual([
+		{ index: 0, url, hostname: "xfinityy111.weebly.com", status: 200, contentType: "text/html", contentCaptured: true },
+	]);
+});
+
+test("a bot-check interstitial that reloads into the real page is captured with the real page's response", async () => {
+	const url = "https://www8-receitafazendagerador.com/Aplicacao/Mei/pgmei.app";
+	const realUrl = `${url}/`;
+	const fixture = archiveBrowserFixture({
+		pageUrl: url,
+		goto: async ({ replaceDocument }) => {
+			setTimeout(() => replaceDocument(responseForNavigation(realUrl, 200, {
+				contentType: "text/html; charset=UTF-8",
+				redirects: [{ url, status: 301, location: realUrl }],
+			})), 30);
+			return responseForNavigation(url, 403, { contentType: "text/html" });
+		},
+	});
+
+	const archive = await archiveWebsite({ url }, { getBrowser: fixture.getBrowser, errorDocumentSettleMs: 2_000 });
+
+	expect(fixture.leasedEgress).toEqual(["phishing"]);
+	expect(fixture.captureSnapshotCount).toBe(1);
+	expect(archive.url).toBe(realUrl);
+	expect(archive.navigationHops).toEqual([
+		{ index: 0, url, hostname: "www8-receitafazendagerador.com", status: 301, redirectTo: realUrl, contentType: "text/html", contentCaptured: false },
+		{ index: 1, url: realUrl, hostname: "www8-receitafazendagerador.com", status: 200, contentType: "text/html; charset=UTF-8", contentCaptured: true },
+	]);
+});
+
+test("an HTTP error on every egress fails with each route's status and page title", async () => {
+	const url = "https://blocked.example/";
+	const fixture = archiveBrowserFixture({
+		pageUrl: url,
+		goto: async ({ egress }) => responseForNavigation(url, egress === "phishing" ? 403 : 503, { contentType: "text/html" }),
+	});
+
+	await expect(archiveWebsite({ url }, { getBrowser: fixture.getBrowser, errorDocumentSettleMs: 20 })).rejects.toThrow(
+		'Failed to load page: HTTP 403 ("Just a moment...") via Tor exit; HTTP 503 ("Just a moment...") via server IP',
+	);
+	expect(fixture.leasedEgress).toEqual(["phishing", "reporting"]);
+	expect(fixture.captureSnapshotCount).toBe(0);
+	expect(fixture.closeCount).toBe(2);
 });
 
 

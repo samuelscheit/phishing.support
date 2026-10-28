@@ -1,6 +1,8 @@
-import type { HTTPRequest, HTTPResponse } from "rebrowser-puppeteer-core";
+import type { HTTPRequest, HTTPResponse, Page } from "rebrowser-puppeteer-core";
 
 import { getBrowser, getBrowserPage } from "./browser";
+import type { FabricEgress } from "./browser/fabric";
+import { sleep } from "./utils";
 import type { WebsiteNavigationHop } from "./website_types";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
@@ -173,7 +175,9 @@ export function capturedDocumentContent(documentHtml: string): { html: string; t
 }
 
 export type WebsiteArchiveDependencies = {
-	browser?: Awaited<ReturnType<typeof getBrowser>>;
+	getBrowser?: typeof getBrowser;
+	/** Test seam for the bounded wait on a self-replacing HTTP error document. */
+	errorDocumentSettleMs?: number;
 };
 
 export function navigationHopsFromResponse(
@@ -225,52 +229,83 @@ export function navigationHopsFromResponse(
 	return hops;
 }
 
-async function archiveWebsiteInternal(
-	{ url, mhtmlSnapshot, archivedUrl, navigationHops: retainedNavigationHops, trustMhtmlDocumentLocation }: ArchiveWebsiteOptions,
-	dependencies: WebsiteArchiveDependencies = {},
-): Promise<WebsiteArchiveResult> {
-	console.log(`Archiving website ${url}`);
-	if (mhtmlSnapshot?.byteLength) {
-		return archiveMhtmlSnapshot({ url, mhtmlSnapshot, archivedUrl, navigationHops: retainedNavigationHops, trustMhtmlDocumentLocation });
-	}
+/**
+ * Egress routes tried for a live capture, in order. Tor keeps the reporting
+ * server's address away from attacker infrastructure, but Tor exits are widely
+ * blocked, either with an HTTP error page or by dropping the connection; a page
+ * that is unreachable over Tor is retried from the server's own direct exit.
+ */
+const WEBSITE_CAPTURE_EGRESS: readonly FabricEgress[] = ["phishing", "reporting"];
+const WEBSITE_EGRESS_LABEL: Record<FabricEgress, string> = { phishing: "Tor exit", reporting: "server IP" };
 
-	const browser = dependencies.browser ?? await getBrowser();
+/** How long an HTTP error document may take to replace itself, e.g. a JavaScript bot-check interstitial. */
+const WEBSITE_ERROR_DOCUMENT_SETTLE_MS = 20_000;
+const WEBSITE_ERROR_DOCUMENT_POLL_MS = 500;
+
+/**
+ * The site's main document could not be loaded over one egress route: the
+ * navigation failed, or it answered with an HTTP error that did not resolve itself.
+ */
+export class WebsiteUnreachableError extends Error {
+	constructor(readonly egress: FabricEgress, readonly reason: string) {
+		super(`${reason} via ${WEBSITE_EGRESS_LABEL[egress]}`);
+		this.name = "WebsiteUnreachableError";
+	}
+}
+
+/**
+ * Bot-check interstitials answer with 403/503 and then reload or redirect to
+ * the real page once their script passes. Follow the main frame until it holds
+ * a successful, parsed document, or give up after a bounded wait.
+ */
+async function settleErrorDocument(page: Page, latestDocumentResponse: () => HTTPResponse | null, settleMs: number): Promise<HTTPResponse | null> {
+	const deadline = Date.now() + settleMs;
+	while (Date.now() < deadline) {
+		await sleep(WEBSITE_ERROR_DOCUMENT_POLL_MS);
+		const response = latestDocumentResponse();
+		if (!response?.ok()) continue;
+		const readyState = await page.evaluate(() => document.readyState).catch(() => "loading");
+		if (readyState !== "loading" && page.url() === response.url()) return response;
+	}
+	return null;
+}
+
+async function captureLiveWebsite(url: string, egress: FabricEgress, dependencies: WebsiteArchiveDependencies): Promise<WebsiteArchiveResult> {
+	const browser = await (dependencies.getBrowser ?? getBrowser)(egress);
 	try {
 		// Browser Fabric owns the leased profile context. Creating an
 		// application-side incognito context would bypass that profile and egress
 		// boundary, so archive work always uses the Fabric lease's default context.
-		const newPage = await browser.defaultBrowserContext().newPage();
+		const { page } = await getBrowserPage(await browser.defaultBrowserContext().newPage());
 
-		const { page } = await getBrowserPage(newPage);
-
-		let navigationResponse: HTTPResponse | null = null;
-		let finalUrl = url;
-
-		try {
-			// Capture once the document exists; a stalled image or third-party resource
-			// must not hold the entire analysis open. Fabric owns browser egress, so this
-			// evidence-only navigation does not need an app-level interception layer.
-			navigationResponse = await page.goto(url, {
-				waitUntil: "domcontentloaded",
-				timeout: WEBSITE_NAVIGATION_TIMEOUT_MS,
-			});
-			finalUrl = navigationResponse?.url() ?? page.url();
-
-			if (navigationResponse && !navigationResponse.ok()) {
-				throw new Error(`Failed to load page, status code: ${navigationResponse.status()}`);
+		// The last final (non-redirect) main-frame document response, so a
+		// document that replaces an error interstitial is seen with its status.
+		let latestDocumentResponse = null as HTTPResponse | null;
+		page.on("response", (response) => {
+			const request = response.request();
+			const status = response.status();
+			if (request.isNavigationRequest() && request.frame() === page.mainFrame() && (status < 300 || status >= 400)) {
+				latestDocumentResponse = response;
 			}
-		} catch (err) {
-			await page
-				.screenshot({
-					fullPage: true,
-					captureBeyondViewport: true,
-					type: "png",
-				})
-				.catch((screenshotError) => {
-					console.warn(`Failed to capture archive error screenshot:`, screenshotError);
-				});
+		});
 
-			throw err;
+		// Capture once the document exists; a stalled image or third-party resource
+		// must not hold the entire analysis open. Fabric owns browser egress, so this
+		// evidence-only navigation does not need an app-level interception layer.
+		let navigationResponse = await page.goto(url, {
+			waitUntil: "domcontentloaded",
+			timeout: WEBSITE_NAVIGATION_TIMEOUT_MS,
+		}).catch((error: unknown) => {
+			throw new WebsiteUnreachableError(egress, error instanceof Error ? error.message : String(error));
+		});
+		if (navigationResponse && !navigationResponse.ok()) {
+			const settled = await settleErrorDocument(page, () => latestDocumentResponse, dependencies.errorDocumentSettleMs ?? WEBSITE_ERROR_DOCUMENT_SETTLE_MS);
+			if (!settled) {
+				const title = compactText(await page.title().catch(() => ""));
+				const status = latestDocumentResponse?.status() ?? navigationResponse.status();
+				throw new WebsiteUnreachableError(egress, `HTTP ${status}${title ? ` ("${title}")` : ""}`);
+			}
+			navigationResponse = settled;
 		}
 
 		// Do not pause between DOMContentLoaded and capture: a page-driven second
@@ -292,7 +327,7 @@ async function archiveWebsiteInternal(
 			"utf-8",
 		);
 
-		const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? page.url() ?? finalUrl;
+		const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? page.url();
 		const capturedDocument = await archiveMhtmlSnapshot({
 			url,
 			archivedUrl: capturedDocumentUrl,
@@ -311,5 +346,21 @@ async function archiveWebsiteInternal(
 }
 
 export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencies: WebsiteArchiveDependencies = {}): Promise<WebsiteArchiveResult> {
-	return archiveWebsiteInternal(options, dependencies);
+	const { url, mhtmlSnapshot, archivedUrl, navigationHops, trustMhtmlDocumentLocation } = options;
+	console.log(`Archiving website ${url}`);
+	if (mhtmlSnapshot?.byteLength) {
+		return archiveMhtmlSnapshot({ url, mhtmlSnapshot, archivedUrl, navigationHops, trustMhtmlDocumentLocation });
+	}
+
+	const failures: WebsiteUnreachableError[] = [];
+	for (const egress of WEBSITE_CAPTURE_EGRESS) {
+		try {
+			return await captureLiveWebsite(url, egress, dependencies);
+		} catch (error) {
+			if (!(error instanceof WebsiteUnreachableError)) throw error;
+			console.warn(`Website capture of ${url} failed: ${error.message}`);
+			failures.push(error);
+		}
+	}
+	throw new Error(`Failed to load page: ${failures.map((error) => error.message).join("; ")}`);
 }
