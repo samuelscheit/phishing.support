@@ -440,6 +440,8 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 
 		const reportableSite = reportableWebsiteHop(archive.navigationHops, siteAssessments, archive);
 		if (reportableSite) {
+			const phishingBasis = capturedClassification.phishingBasis;
+			if (!phishingBasis) throw new Error("A reportable phishing classification is missing its basis.");
 			await emitStep(submissionId, "reporting", 90);
 			const reportUrls = websiteReportUrls(archive.navigationHops, reportableSite);
 			await reportConfirmedWebsitePhishing({
@@ -448,6 +450,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 				analysisText: buildWebsiteReportEvidence(capturedClassification),
 				screenshotPng: archive.screenshotPng,
 				reporter: { reporterIp, reporterCountry, reporterHeaders },
+				phishingBasis,
 			});
 
 			await SubmissionsEntity.update(submissionId, {

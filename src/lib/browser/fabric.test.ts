@@ -71,6 +71,15 @@ describe("Phishing Support Browser Fabric boundary", () => {
 			},
 		}));
 		expect(JSON.stringify(payload)).not.toMatch(/cookie|credential|password|proxy|token/i);
+		expect(payload.maxExternalConnections).toBe(1);
+		expect(buildFabricBrowserSessionCreatePayload(
+			config,
+			{ operation: "exfiltration-probe" },
+			"clone",
+			"probe-idempotency-key",
+			"phishing",
+			2,
+		).maxExternalConnections).toBe(2);
 		expect(() => buildFabricBrowserSessionCreatePayload(
 			config,
 			{ proxyUrl: "http://user:password@proxy.example" },

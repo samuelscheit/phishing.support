@@ -32,6 +32,8 @@ export const DEFAULT_FABRIC_REPORTING_EGRESS_POLICY_REF = "egress_direct-egress@
 export interface FabricSessionOptions {
 	leaseMode?: "writer" | "clone";
 	egress?: FabricEgress;
+	/** Explicitly opt into a recorder plus one automation client. */
+	maxExternalConnections?: 1 | 2;
 }
 type FabricFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -232,6 +234,7 @@ export function buildFabricBrowserSessionCreatePayload(
 	leaseMode: "writer" | "clone",
 	idempotencyKey: string,
 	egress: FabricEgress = "phishing",
+	maxExternalConnections: 1 | 2 = 1,
 ): Record<string, unknown> {
 	if (!idempotencyKey || idempotencyKey.length > 255) throw new Error("Browser Fabric idempotency key is invalid");
 	assertFabricMetadata(metadata);
@@ -244,6 +247,7 @@ export function buildFabricBrowserSessionCreatePayload(
 		leaseMode,
 		egressPolicyRef: config.egressPolicyRefs[egress],
 		artifactPolicyRef: config.artifactPolicyRef,
+		maxExternalConnections,
 		ttlSeconds: config.ttlSeconds,
 		metadata: { ...metadata, workload: "phishing-support" },
 	};
@@ -288,13 +292,13 @@ async function sessionAction(config: FabricBrowserConfig, sessionId: string, act
 async function acquireFabricSession(
 	config: FabricBrowserConfig,
 	metadata: Record<string, FabricScalar>,
-	{ leaseMode = "writer", egress = "phishing" }: FabricSessionOptions,
+	{ leaseMode = "writer", egress = "phishing", maxExternalConnections = 1 }: FabricSessionOptions,
 ): Promise<string> {
 	const idempotencyKey = `phishing-${crypto.randomUUID()}`;
 	const created = await fabricRequest<FabricSessionResponse>(config, "/browser-sessions", {
 		method: "POST",
 		idempotencyKey,
-		body: buildFabricBrowserSessionCreatePayload(config, metadata, leaseMode, idempotencyKey, egress),
+		body: buildFabricBrowserSessionCreatePayload(config, metadata, leaseMode, idempotencyKey, egress, maxExternalConnections),
 	});
 	const sessionId = assertFabricBrowserSessionId(created.id);
 	if (TERMINAL_SESSION_STATUSES.has(created.status)) {
@@ -356,7 +360,7 @@ export async function acquireFabricBrowserSession(
 /** Allocate a disposable Fabric browser for one dynamic Skyvern task. */
 export async function acquireFabricSkyvernBrowserSession(
 	metadata: Record<string, FabricScalar> = {},
-	options: Pick<FabricSessionOptions, "egress"> = {},
+	options: Pick<FabricSessionOptions, "egress" | "maxExternalConnections"> = {},
 ): Promise<FabricSkyvernBrowserSession> {
 	const lease = await acquireFabricBrowserSession(metadata, { ...options, leaseMode: "clone" });
 	try {
@@ -370,7 +374,7 @@ export async function acquireFabricSkyvernBrowserSession(
 /** Bind a dynamic Skyvern task to a Fabric-owned browser without leaking a capability. */
 export async function acquireFabricSkyvernTaskBinding(
 	metadata: Record<string, FabricScalar> = {},
-	options: Pick<FabricSessionOptions, "egress"> = {},
+	options: Pick<FabricSessionOptions, "egress" | "maxExternalConnections"> = {},
 ): Promise<FabricSkyvernTaskBinding> {
 	const session = await acquireFabricSkyvernBrowserSession(metadata, options);
 	return {
@@ -452,6 +456,12 @@ export async function acquireFabricPuppeteerBrowser(
 	(browser as unknown as { disconnect: () => Promise<void> }).disconnect = release;
 	browser.once?.("disconnected", () => { void release(); });
 	return { browser, sessionId, release };
+}
+
+/** Attach one additional client to an existing Fabric session without owning its lease. */
+export async function connectFabricPuppeteerClient(browserAddress: string): Promise<PuppeteerBrowser> {
+	const module = await import("rebrowser-puppeteer-core");
+	return module.connect({ browserWSEndpoint: browserAddress, acceptInsecureCerts: true });
 }
 
 /** Connect Patchright to Fabric's relay; Patchright close is disconnect + Fabric release. */

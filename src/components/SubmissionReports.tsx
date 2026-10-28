@@ -156,9 +156,7 @@ function RouteCard({ submissionId, route, artifacts }: { submissionId: string; r
 	);
 }
 
-/** Reports tab: the submission's report with one card per provider route. */
-export function SubmissionReports({ submissionId, report }: { submissionId: string; report: SubmissionReport | null }) {
-	if (!report) return <div className="py-10 text-center text-muted-foreground">No reports yet.</div>;
+function ReportGroup({ submissionId, report, index }: { submissionId: string; report: SubmissionReport; index: number }) {
 	const artifacts = new Map(report.artifacts.map((artifact) => [String(artifact.id), artifact]));
 	const evidence = report.artifacts.filter((artifact) => artifact.kind === "user_evidence_original");
 	return (
@@ -166,10 +164,11 @@ export function SubmissionReports({ submissionId, report }: { submissionId: stri
 			<Card>
 				<CardContent className="space-y-3 p-4">
 					<div className="flex flex-wrap items-center justify-between gap-2">
-						<CardTitle className="text-base">Abuse report</CardTitle>
+						<CardTitle className="text-base">{index === 0 ? "Phishing-site report" : "Discovered backend report"}</CardTitle>
 						<Badge variant="outline" className={cn("capitalize", statusClass(report.status))}>{label(report.status)}</Badge>
 					</div>
 					<p className="text-sm text-muted-foreground">{reportStatusText[report.status] ?? `Report status: ${label(report.status)}.`}</p>
+					{index > 0 ? <p className="whitespace-pre-wrap text-sm">{report.description}</p> : null}
 					<div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
 						<div>Accepted: {formatDate(report.createdAt)}</div>
 						<div>Last update: {formatDate(report.updatedAt)}</div>
@@ -178,6 +177,16 @@ export function SubmissionReports({ submissionId, report }: { submissionId: stri
 				</CardContent>
 			</Card>
 			{report.routes.map((route) => <RouteCard key={String(route.id)} submissionId={submissionId} route={route} artifacts={artifacts} />)}
+		</div>
+	);
+}
+
+/** Reports tab: the primary phishing case followed by each independently routed backend case. */
+export function SubmissionReports({ submissionId, reports }: { submissionId: string; reports: SubmissionReport[] }) {
+	if (reports.length === 0) return <div className="py-10 text-center text-muted-foreground">No reports yet.</div>;
+	return (
+		<div className="space-y-8">
+			{reports.map((report, index) => <ReportGroup key={String(report.id)} submissionId={submissionId} report={report} index={index} />)}
 		</div>
 	);
 }

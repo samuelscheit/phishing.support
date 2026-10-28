@@ -1,6 +1,7 @@
 import { resolveDomainTarget } from "./domain";
 import { resolveIpTarget } from "./ip";
 import { unroutableRoute } from "./routes";
+import { resolveServiceAccountTarget } from "./service_account";
 import {
 	listSupplementalProviderSubmissionProvidersForTarget,
 	providerSupplementalRoute,
@@ -30,7 +31,9 @@ export async function resolveAbuseTarget(target: ResolverTarget, dependencies: R
 		? await resolveDomainTarget(target, dependencies)
 		: target.targetType === "ip"
 			? await resolveIpTarget(target, dependencies)
-			: resolveEmailMessageTarget(target);
+			: target.targetType === "service_account"
+				? resolveServiceAccountTarget(target)
+				: resolveEmailMessageTarget(target);
 
 	const supplementalProviders = listSupplementalProviderSubmissionProvidersForTarget(target);
 	if (supplementalProviders.length === 0) return resolved;

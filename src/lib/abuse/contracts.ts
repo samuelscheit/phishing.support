@@ -55,7 +55,7 @@ export type NormalizedAbuseTarget = {
 	observedUrls: string[];
 };
 
-export type EvidenceMimeType = "image/jpeg" | "image/png" | "image/webp" | "message/rfc822";
+export type EvidenceMimeType = "image/jpeg" | "image/png" | "image/webp" | "message/rfc822" | "application/json";
 
 export type DecodedEvidence = {
 	filename: string;

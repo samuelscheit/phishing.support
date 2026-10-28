@@ -11,8 +11,12 @@ export const dynamic = "force-dynamic";
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string; artifactId: string }> }) {
 	const { id, artifactId } = await params;
 	if (!/^\d+$/.test(id) || !/^\d+$/.test(artifactId)) return new Response("Not found", { status: 404 });
-	const report = await AbuseRepository.getReportForSubmission(BigInt(id));
-	const artifact = report ? await AbuseRepository.getArtifact(report.id, BigInt(artifactId)) : undefined;
+	const reports = await AbuseRepository.listReportsForSubmission(BigInt(id));
+	let artifact;
+	for (const report of reports) {
+		artifact = await AbuseRepository.getArtifact(report.id, BigInt(artifactId));
+		if (artifact) break;
+	}
 	if (!artifact) return new Response("Not found", { status: 404 });
 	return new Response(artifact.blob as unknown as BodyInit, {
 		headers: {

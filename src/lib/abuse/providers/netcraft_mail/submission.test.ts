@@ -91,7 +91,7 @@ describe("Netcraft mail provider", () => {
 
 	test("never applies to a website report", async () => {
 		await SubmissionsEntity.create({ id: 371157972019056819n, kind: "website", data: { kind: "website", website: { url: "https://login.example.com/" } }, dedupeKey: "netcraft-mail-website" });
-		const report = await reportConfirmedWebsitePhishing({ submissionId: 371157972019056819n, urls: ["https://login.example.com/"], analysisText: "Credential page.", reporter: {} });
+		const report = await reportConfirmedWebsitePhishing({ submissionId: 371157972019056819n, urls: ["https://login.example.com/"], analysisText: "Credential page.", reporter: {}, phishingBasis: "credential_theft" });
 		const [target] = await AbuseRepository.listTargets(report.reportId);
 		const resolved = await resolveAbuseTarget(target!, {
 			fetch: async () => new Response("{}", { status: 404 }),

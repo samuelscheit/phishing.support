@@ -70,10 +70,11 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 			.map((assessment) => [assessment.hopIndex, assessment]),
 	);
 	const runsToShow = submission ? selectDisplayAnalysisRuns(submission.analysisRuns) : [];
-	const report = submission?.report ?? null;
+	const reports = submission?.reports ?? [];
+	const backendProbe = submission?.data.kind === "website" ? submission.data.website.backendProbe : undefined;
 	// A report accepted before route resolution still counts, so the badge
 	// never says zero while the tab shows its queued state.
-	const reportCount = report ? Math.max(1, report.routes.length) : 0;
+	const reportCount = reports.reduce((count, report) => count + Math.max(1, report.routes.length), 0);
 
 	const defaultTab = "runs";
 
@@ -558,7 +559,24 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 					</TabsContent>
 				) : null}
 				<TabsContent value="reports" className="space-y-4 mt-4">
-					<SubmissionReports submissionId={id} report={report} />
+					{backendProbe ? (
+						<Card>
+							<CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+								<div>
+									<div className="text-sm font-medium">Credential destination probe</div>
+									<div className="text-xs text-muted-foreground">
+										{backendProbe.status === "completed"
+											? `${backendProbe.backendCount ?? 0} independently reportable backend${backendProbe.backendCount === 1 ? "" : "s"} found.`
+											: backendProbe.status === "failed"
+												? "The controlled form probe could not be completed; the phishing-site report is unaffected."
+												: "A controlled browser is submitting unique synthetic values and recording where they are sent."}
+									</div>
+								</div>
+								<Badge variant="outline" className="capitalize">{backendProbe.status}</Badge>
+							</CardContent>
+						</Card>
+					) : null}
+					<SubmissionReports submissionId={id} reports={reports} />
 				</TabsContent>
 				<TabsContent value="runs" className="space-y-4 mt-4">
 					{runsToShow.length > 0 ? (

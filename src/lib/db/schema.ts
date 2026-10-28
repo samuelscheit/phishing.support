@@ -33,6 +33,13 @@ export type WebsiteSubmissionData = {
 	siteAssessments?: WebsiteSiteAssessment[];
 	/** Submission that analyzes the host this site redirected to; its id as a decimal string. */
 	redirectSubmissionId?: string;
+	/** Durable supplementary probe state; it never changes the phishing verdict. */
+	backendProbe?: {
+		status: "queued" | "running" | "completed" | "failed";
+		backendCount?: number;
+		lastError?: string;
+		updatedAt: string;
+	};
 };
 
 export type SubmissionData = { kind: "email"; email?: EmailSubmissionData } | { kind: "website"; website: WebsiteSubmissionData };

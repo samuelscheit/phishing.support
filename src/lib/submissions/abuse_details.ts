@@ -2,7 +2,7 @@ import { AbuseRepository } from "@/lib/abuse/repository";
 import { safePublicError } from "@/lib/abuse/security";
 import { getProviderSubmissionProvider } from "@/lib/abuse/providers/submission_registry_default";
 import { buildProviderReportNarrative } from "@/lib/abuse/providers/report_payload";
-import type { AbuseMailClassification } from "@/lib/abuse/schema";
+import type { AbuseMailClassification, AbuseReport } from "@/lib/abuse/schema";
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
 	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -55,6 +55,8 @@ export type SubmissionReportRoute = {
 export type SubmissionReportArtifact = { id: bigint; name: string; kind: string; mimeType: string; size: number };
 
 export type SubmissionReport = {
+	id: bigint;
+	description: string;
 	status: string;
 	createdAt: Date;
 	updatedAt: Date;
@@ -109,11 +111,7 @@ function providerReportBody(params: {
 	};
 }
 
-/** The submission's report, its provider routes, and all correspondence. */
-export async function getReportForSubmission(submissionId: bigint): Promise<SubmissionReport | null> {
-	const report = await AbuseRepository.getReportForSubmission(submissionId);
-	if (!report) return null;
-
+async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionReport> {
 	const [targets, routes, runs, messages, artifacts] = await Promise.all([
 		AbuseRepository.listTargets(report.id),
 		AbuseRepository.listRoutes(report.id),
@@ -147,6 +145,8 @@ export async function getReportForSubmission(submissionId: bigint): Promise<Subm
 	}
 
 	return {
+		id: report.id,
+		description: report.description,
 		status: report.status,
 		createdAt: report.createdAt,
 		updatedAt: report.updatedAt,
@@ -188,4 +188,10 @@ export async function getReportForSubmission(submissionId: bigint): Promise<Subm
 			}),
 		artifacts,
 	};
+}
+
+/** Every report owned by a submission, with its provider routes and correspondence. */
+export async function getReportsForSubmission(submissionId: bigint): Promise<SubmissionReport[]> {
+	const reports = await AbuseRepository.listReportsForSubmission(submissionId);
+	return Promise.all(reports.map(hydrateSubmissionReport));
 }

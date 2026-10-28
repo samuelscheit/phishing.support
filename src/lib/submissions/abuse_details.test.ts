@@ -7,15 +7,19 @@ import { sendAbuseEmailRoute } from "../abuse/mail";
 import { AbuseRepository } from "../abuse/repository";
 import { reportConfirmedEmailPhishing, reportConfirmedWebsitePhishing } from "../abuse/submission_reports";
 import { getSubmissionDetails } from "./details";
+import { getDb } from "../db";
+import { abuseJobs } from "../abuse/schema";
+import { reportExfiltrationBackend } from "../exfiltration/reporting";
 
 useTemporaryDatabase();
 
-const environmentNames = ["SMTP_FROM", "REPLY_DOMAIN"] as const;
+const environmentNames = ["SMTP_FROM", "REPLY_DOMAIN", "ABUSE_TRACKING_TOKEN_SECRET"] as const;
 const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [name, process.env[name]]));
 
 beforeEach(() => {
 	process.env.SMTP_FROM = "support@phishing.support";
 	process.env.REPLY_DOMAIN = "phishing.support";
+	process.env.ABUSE_TRACKING_TOKEN_SECRET = "test-secret-that-is-at-least-thirty-two-bytes-long";
 });
 
 afterAll(() => {
@@ -39,6 +43,7 @@ async function createWebsiteReport(submissionId: bigint) {
 		urls: ["https://shop.example.com/"],
 		analysisText: "The captured page impersonates a trusted service and collects credentials.",
 		reporter: {},
+		phishingBasis: "credential_theft",
 	});
 	const [target] = await AbuseRepository.listTargets(report.reportId);
 	if (!target) throw new Error("The test target was not persisted.");
@@ -46,10 +51,52 @@ async function createWebsiteReport(submissionId: bigint) {
 }
 
 describe("submission report read model", () => {
+	test("queues probing only for credential or payment collection", async () => {
+		const credential = await createWebsiteReport(351387190816673788n);
+		const malwareSubmissionId = 351387190816673789n;
+		await SubmissionsEntity.create({ id: malwareSubmissionId, kind: "website", data: { kind: "website", website: { url: "https://malware.example.com/" } }, dedupeKey: "malware-only" });
+		await reportConfirmedWebsitePhishing({
+			submissionId: malwareSubmissionId,
+			urls: ["https://malware.example.com/"],
+			analysisText: "The page pushes a malicious executable.",
+			reporter: {},
+			phishingBasis: "malware_delivery",
+		});
+		const jobs = (await getDb()).select().from(abuseJobs).all().filter((job) => job.jobType === "probe_exfiltration");
+		expect(jobs).toHaveLength(1);
+		expect(jobs[0]).toMatchObject({
+			reportId: credential.report.reportId,
+			payload: { submissionId: "351387190816673788", pageUrl: "https://shop.example.com/", phishingBasis: "credential_theft" },
+		});
+	});
+
+	test("shows independently routed discovered backends on the original submission", async () => {
+		const submissionId = 351387190816673791n;
+		const { report } = await createWebsiteReport(submissionId);
+		const endpointUrl = "https://api.collector.com/submit";
+		const backend = {
+			kind: "domain" as const,
+			key: "domain:api.collector.com",
+			endpointUrl,
+			hostname: "api.collector.com",
+			method: "POST",
+			matchedCanaries: ["email" as const],
+			request: { timestamp: "2026-10-28T00:00:00.000Z", method: "POST", url: endpointUrl, postData: "synthetic" },
+		};
+		await reportExfiltrationBackend({ submissionId, sourceReportId: report.reportId, backend, pageUrl: "https://shop.example.com/", observedAt: new Date("2026-10-28T00:00:00Z"), reporter: {} });
+		const replay = await reportExfiltrationBackend({ submissionId, sourceReportId: report.reportId, backend, pageUrl: "https://shop.example.com/", observedAt: new Date("2026-10-28T00:00:00Z"), reporter: {} });
+		expect(replay.created).toBeFalse();
+
+		const details = await getSubmissionDetails(submissionId.toString());
+		expect(details?.reports).toHaveLength(2);
+		expect(details?.reports[1]?.description).toContain("api.collector.com/submit");
+		expect(details?.reports[1]?.routes).toEqual([]);
+	});
+
 	test("returns no report for a submission that was never confirmed", async () => {
 		const submissionId = 351387190816673790n;
 		await SubmissionsEntity.create({ id: submissionId, kind: "website", data: { kind: "website", website: { url: "https://benign.example.com/" } }, dedupeKey: "unreported" });
-		expect((await getSubmissionDetails(submissionId.toString()))?.report).toBeNull();
+		expect((await getSubmissionDetails(submissionId.toString()))?.reports).toEqual([]);
 	});
 
 	test("shows a sent abuse email and its provider reply on the same route", async () => {
@@ -97,14 +144,14 @@ describe("submission report read model", () => {
 		});
 
 		const details = await getSubmissionDetails(submissionId.toString());
-		expect(details?.report?.status).toBe("waiting_provider");
-		const mailRoute = details?.report?.routes.find((item) => item.routeType === "email");
+		expect(details?.reports[0]?.status).toBe("waiting_provider");
+		const mailRoute = details?.reports[0]?.routes.find((item) => item.routeType === "email");
 		expect(mailRoute).toMatchObject({ provider: "Provider abuse desk", target: "shop.example.com", status: "awaiting_provider_reply", body: null });
 		expect(mailRoute?.messages.map((message) => [message.direction, message.status])).toEqual([["outbound", "sent"], ["inbound", "received"]]);
 		expect(mailRoute?.messages[0]?.messageId).toMatch(/^<abuse-[a-f0-9]+@phishing\.support>$/);
 		const rawId = mailRoute?.messages[1]?.rawArtifactId;
-		expect(details?.report?.artifacts.find((artifact) => artifact.id === rawId)).toMatchObject({ name: "reply.eml", kind: "inbound_mail_mime" });
-		expect(JSON.stringify(details?.report?.artifacts)).not.toContain("blob");
+		expect(details?.reports[0]?.artifacts.find((artifact) => artifact.id === rawId)).toMatchObject({ name: "reply.eml", kind: "inbound_mail_mime" });
+		expect(JSON.stringify(details?.reports[0]?.artifacts)).not.toContain("blob");
 	});
 
 	test("shows pinned provider text and outcomes without exposing provider payloads", async () => {
@@ -160,7 +207,7 @@ describe("submission report read model", () => {
 		await AbuseRepository.markUnknownExternalState({ routeId: unresolvedRoute.id, runId: unresolved.run.id, error: "The provider response could not be verified.", reason: "test_unknown_external_state" });
 
 		const details = await getSubmissionDetails(submissionId.toString());
-		expect(details?.report?.routes).toEqual(expect.arrayContaining([
+		expect(details?.reports[0]?.routes).toEqual(expect.arrayContaining([
 			expect.objectContaining({
 				provider: "Google Safe Browsing",
 				status: "submitted",
@@ -178,7 +225,7 @@ describe("submission report read model", () => {
 			}),
 		]));
 		// One provider stuck in an unknown state must not hide the confirmed submission.
-		expect(details?.report?.status).toBe("partially_submitted");
+		expect(details?.reports[0]?.status).toBe("partially_submitted");
 		expect(JSON.stringify(details)).not.toContain("do-not-expose");
 	});
 
@@ -197,7 +244,7 @@ describe("submission report read model", () => {
 			resolutionSnapshot: { source: "test" },
 			status: "verified",
 		});
-		const unprepared = (await getSubmissionDetails(submissionId.toString()))?.report?.routes.find((item) => item.provider === "Netcraft");
+		const unprepared = (await getSubmissionDetails(submissionId.toString()))?.reports[0]?.routes.find((item) => item.provider === "Netcraft");
 		expect(unprepared).toMatchObject({ status: "verified", bodySource: "preview" });
 		expect(unprepared?.body).toContain("Netcraft");
 		expect(unprepared?.body).not.toContain(persisted!.description);
@@ -209,7 +256,7 @@ describe("submission report read model", () => {
 			expectedStatus: "verified",
 		});
 		const analysisOnly = await getSubmissionDetails(submissionId.toString());
-		const historical = analysisOnly?.report?.routes.find((item) => item.provider === "Netcraft");
+		const historical = analysisOnly?.reports[0]?.routes.find((item) => item.provider === "Netcraft");
 		expect(historical).toMatchObject({ status: "running", bodySource: "historical" });
 		expect(historical?.body).not.toContain(persisted!.description);
 		expect(JSON.stringify(analysisOnly)).not.toContain("must-not-be-rendered");
@@ -236,7 +283,7 @@ describe("submission report read model", () => {
 		const evidence = await AbuseRepository.listArtifacts(first.reportId, ["user_evidence_original"]);
 		expect(evidence.map((item) => [item.name, item.mimeType])).toEqual([["phishing-email.eml", "message/rfc822"], ["phishing-email.png", "image/png"]]);
 		expect(evidence[0]?.blob.toString()).toBe(eml);
-		expect((await getSubmissionDetails(submissionId.toString()))?.report).toMatchObject({ status: "accepted" });
+		expect((await getSubmissionDetails(submissionId.toString()))?.reports[0]).toMatchObject({ status: "accepted" });
 	});
 
 	test("rejects a private sending IP instead of routing it", async () => {

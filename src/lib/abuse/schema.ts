@@ -21,7 +21,7 @@ export const abuseReportStatuses = [
 export type AbuseReportStatus = (typeof abuseReportStatuses)[number];
 
 /** `email` targets the phishing message itself; its routes need the stored message evidence. */
-export const abuseTargetTypes = ["domain", "ip", "email"] as const;
+export const abuseTargetTypes = ["domain", "ip", "email", "service_account"] as const;
 export type AbuseTargetType = (typeof abuseTargetTypes)[number];
 
 export const abuseTargetStatuses = ["pending", "resolved", "no_route", "failed"] as const;
@@ -86,6 +86,7 @@ export const abuseJobTypes = [
 	"deliver_provider_verification_code",
 	"classify_provider_reply",
 	"poll_provider_correspondence",
+	"probe_exfiltration",
 ] as const;
 export type AbuseJobType = (typeof abuseJobTypes)[number];
 
@@ -133,7 +134,7 @@ export const abuseReports = sqliteTable(
 	(table) => [
 		uniqueIndex("abuse_reports_tracking_token_hash_unique").on(table.trackingTokenHash),
 		uniqueIndex("abuse_reports_idempotency_key_unique").on(table.idempotencyKey),
-		uniqueIndex("abuse_reports_submission_unique").on(table.submissionId),
+		index("abuse_reports_submission_idx").on(table.submissionId),
 		index("abuse_reports_status_updated_idx").on(table.status, table.updatedAt),
 	]
 );

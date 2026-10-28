@@ -54,9 +54,9 @@ export async function createReport(params: {
 
 	return db.transaction(
 		(tx) => {
-			if (params.submissionId !== undefined) {
-				// One submission owns at most one report; its unique link is the
-				// idempotency guard, so a retried analysis reuses the first report.
+			if (params.submissionId !== undefined && !idempotencyKey) {
+				// The primary report remains idempotent by ownership. Derived backend
+				// reports carry explicit stable idempotency keys and share the submission.
 				const owned = tx.select({ id: abuseReports.id }).from(abuseReports).where(eq(abuseReports.submissionId, params.submissionId)).get();
 				if (owned) return { reportId: owned.id, trackingToken, created: false };
 			}
@@ -178,7 +178,12 @@ export async function getReportByTrackingTokenHash(trackingTokenHash: string): P
 /** The report owned by a website/email submission, if analysis confirmed it. */
 export async function getReportForSubmission(submissionId: bigint): Promise<AbuseReport | undefined> {
 	const db = await getDb();
-	return db.select().from(abuseReports).where(eq(abuseReports.submissionId, submissionId)).get();
+	return db.select().from(abuseReports).where(eq(abuseReports.submissionId, submissionId)).orderBy(asc(abuseReports.createdAt)).get();
+}
+
+export async function listReportsForSubmission(submissionId: bigint): Promise<AbuseReport[]> {
+	const db = await getDb();
+	return db.select().from(abuseReports).where(eq(abuseReports.submissionId, submissionId)).orderBy(asc(abuseReports.createdAt)).all();
 }
 
 export async function getReportByTrackingToken(token: string): Promise<AbuseReport | undefined> {

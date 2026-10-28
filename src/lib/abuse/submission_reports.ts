@@ -4,6 +4,7 @@ import type { ReporterMetadata } from "../request_metadata";
 import { AbuseRepository, type CreatedAbuseReport } from "./repository";
 import { decodeImageEvidence, normalizeAbuseTarget, normalizeObservedUrl, type DecodedEvidence, type NormalizedAbuseTarget, type ValidatedAbuseReportRequest } from "./contracts";
 import { AbuseInputError, hashStableJson, isPublicIp, sha256Hex } from "./security";
+import { setExfiltrationProbeStatus } from "../exfiltration/status";
 
 const MAX_REPORT_DESCRIPTION_LENGTH = 30_000;
 /** Netcraft's documented raw-message limit, which is also the strictest mail-evidence consumer. */
@@ -27,6 +28,8 @@ export type ConfirmedWebsitePhishing = SubmissionReportBase & {
 	urls: string[];
 	/** The archive screenshot, when the capture produced a decodable PNG. */
 	screenshotPng?: Buffer;
+	/** Only credential/payment collection is safe and useful to exercise. */
+	phishingBasis: "credential_theft" | "payment_fraud" | "malware_delivery";
 };
 
 export type ConfirmedEmailPhishing = SubmissionReportBase & {
@@ -135,7 +138,22 @@ export async function buildEmailPhishingRequest(params: ConfirmedEmailPhishing):
  * outcomes are recorded on its routes.
  */
 export async function reportConfirmedWebsitePhishing(params: ConfirmedWebsitePhishing): Promise<CreatedAbuseReport> {
-	return AbuseRepository.createReport({ request: await buildWebsitePhishingRequest(params), reporter: params.reporter, submissionId: params.submissionId });
+	const created = await AbuseRepository.createReport({ request: await buildWebsitePhishingRequest(params), reporter: params.reporter, submissionId: params.submissionId });
+	if (created.created && (params.phishingBasis === "credential_theft" || params.phishingBasis === "payment_fraud")) {
+		await setExfiltrationProbeStatus(params.submissionId, { status: "queued", updatedAt: new Date().toISOString() });
+		try {
+			await AbuseRepository.enqueueJob({
+				jobType: "probe_exfiltration",
+				reportId: created.reportId,
+				payload: { submissionId: params.submissionId.toString(), pageUrl: params.urls[0]!, phishingBasis: params.phishingBasis },
+				dedupeKey: `probe-exfiltration:${created.reportId.toString()}`,
+			});
+		} catch (error) {
+			await setExfiltrationProbeStatus(params.submissionId, { status: "failed", lastError: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
+			throw error;
+		}
+	}
+	return created;
 }
 
 export async function reportConfirmedEmailPhishing(params: ConfirmedEmailPhishing): Promise<CreatedAbuseReport> {

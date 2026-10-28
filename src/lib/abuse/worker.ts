@@ -18,6 +18,8 @@ import { reconcileGenericSkyvern } from "./worker/reconcile";
 import { resolveReport, verifyProviderRoute } from "./worker/resolution";
 import { errorText, envInt, idFrom, parseJobBigInt, randomOwner, type WorkerServices } from "./worker/shared";
 import type { JobClaimFilter } from "./persistence/jobs";
+import { runExfiltrationProbe, type ExfiltrationProbeInput } from "../exfiltration/probe";
+import { setExfiltrationProbeStatus } from "../exfiltration/status";
 
 const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;
@@ -51,6 +53,7 @@ const EXTERNAL_JOB_TYPES = [
 	"run_portal",
 	"submit_provider",
 	"deliver_provider_verification_code",
+	"probe_exfiltration",
 ] as const satisfies readonly AbuseJobType[];
 
 const CONTROL_JOB_FILTER: JobClaimFilter = { jobTypes: CONTROL_JOB_TYPES };
@@ -99,6 +102,8 @@ export type AbuseWorkerOptions = {
 	fabricSkyvernTaskFactory?: FabricSkyvernTaskFactory;
 	/** Test hook; production uses the resolver implementation above. */
 	resolveTarget?: typeof resolveAbuseTarget;
+	/** Deterministic test hook for the submission-level browser probe. */
+	exfiltrationProbe?: typeof runExfiltrationProbe;
 };
 
 /**
@@ -120,6 +125,7 @@ export class AbuseWorker {
 	private loopPromises: Promise<void>[] = [];
 	private readonly activeControllers = new Set<AbortController>();
 	private readonly processJobOverride: AbuseWorkerOptions["processJob"];
+	private readonly exfiltrationProbe: typeof runExfiltrationProbe;
 
 	constructor(options: AbuseWorkerOptions = {}) {
 		this.owner = options.owner ?? randomOwner();
@@ -144,6 +150,7 @@ export class AbuseWorker {
 		this.adapter = options.adapter;
 		this.processJobOverride = options.processJob;
 		this.resolveTarget = options.resolveTarget ?? resolveAbuseTarget;
+		this.exfiltrationProbe = options.exfiltrationProbe ?? runExfiltrationProbe;
 		this.services = {
 			owner: this.owner,
 			getAdapter: () => this.getAdapter(),
@@ -343,6 +350,16 @@ export class AbuseWorker {
 	}
 
 	private async failRetryExhaustedJob(job: AbuseJob, error: string): Promise<void> {
+		if (job.jobType === "probe_exfiltration") {
+			// Discovery is supplementary. Its failure must never turn the already
+			// confirmed phishing report into a false reporting failure.
+			await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
+			if (job.reportId) {
+				const report = await AbuseRepository.getReport(job.reportId);
+				if (report?.submissionId) await setExfiltrationProbeStatus(report.submissionId, { status: "failed", lastError: error, updatedAt: new Date().toISOString() });
+			}
+			return;
+		}
 		// Provider-owned external actions get one chance to fence an active task
 		// before generic retry exhaustion changes the route to ordinary failure.
 		if (job.routeId) {
@@ -433,8 +450,41 @@ export class AbuseWorker {
 			case "deliver_provider_verification_code":
 				await this.deliverProviderVerificationCode(job, signal);
 				return;
+			case "probe_exfiltration":
+				await this.runExfiltrationJob(job, signal);
+				return;
 			default:
 				throw new Error(`Unsupported abuse job type ${job.jobType}.`);
+		}
+	}
+
+	private async runExfiltrationJob(job: AbuseJob, signal?: AbortSignal): Promise<void> {
+		const reportId = idFrom(job.reportId, "reportId");
+		const report = await AbuseRepository.getReport(reportId);
+		if (!report?.submissionId) return;
+		const pageUrl = typeof job.payload?.pageUrl === "string" ? job.payload.pageUrl : undefined;
+		if (!pageUrl) throw new Error("Exfiltration probe job is missing payload.pageUrl.");
+		const input: ExfiltrationProbeInput = {
+			reportId,
+			submissionId: report.submissionId,
+			pageUrl,
+			reporter: {
+				reporterIp: report.requesterIp ?? undefined,
+				reporterCountry: report.requesterCountry ?? undefined,
+				reporterHeaders: report.requesterHeaders ?? undefined,
+			},
+		};
+		await setExfiltrationProbeStatus(report.submissionId, { status: "running", updatedAt: new Date().toISOString() });
+		try {
+			const result = await this.exfiltrationProbe(input, this.getAdapter(), signal);
+			await setExfiltrationProbeStatus(report.submissionId, { status: "completed", backendCount: result.backends, updatedAt: new Date().toISOString() });
+		} catch (error) {
+			await setExfiltrationProbeStatus(report.submissionId, {
+				status: "queued",
+				lastError: errorText(error),
+				updatedAt: new Date().toISOString(),
+			});
+			throw error;
 		}
 	}
 
