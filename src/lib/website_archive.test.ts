@@ -553,7 +553,38 @@ describe("cloaking", () => {
 		expect(archive.url).toBe(decoyUrl);
 		expect(archive.cloaking).toEqual({
 			outcome: "unresolved",
-			detail: `${url} sent the Tor exit to wikipedia.org by script, and the residential exit could not check what other visitors see (net::ERR_PROXY_CONNECTION_FAILED via residential exit)`,
+			detail: `${url} sent the Tor exit to wikipedia.org by script; the residential exit capture failed: net::ERR_PROXY_CONNECTION_FAILED via residential exit`,
+		});
+	});
+
+	test("a scripted destination that fails is unreachable, never a capture of Chromium's error page", async () => {
+		// Production 2026-10-30: the residential exit followed the cloaker to the kit,
+		// which redirected to a dead decoy host (HTTP 502). Chromium then showed
+		// chrome-error://chromewebdata/, which was captured as if it were a site.
+		const deadUrl = "http://ogenhoallin.com/";
+		const fixture = archiveBrowserFixture({
+			pageUrl: url,
+			goto: async ({ egress, replaceDocument }) => {
+				if (egress === "residential") {
+					setTimeout(() => replaceDocument(Object.assign(
+						responseForNavigation(deadUrl, 502, { contentType: "text/html", redirects: [{ url: "https://device.ledger-config.live/", status: 307, location: deadUrl }] }),
+						{ url: () => deadUrl },
+					)), 5);
+					setTimeout(() => replaceDocument(responseForNavigation("chrome-error://chromewebdata/", 200, {})), 15);
+				} else {
+					setTimeout(() => replaceDocument(responseForNavigation(decoyUrl, 200, { contentType: "text/html" })), 5);
+				}
+				return responseForNavigation(url, 200, { contentType: "text/html; charset=utf-8" });
+			},
+		});
+
+		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+
+		expect(fixture.leasedEgress).toEqual(["phishing", "residential"]);
+		expect(archive.url).toBe(decoyUrl);
+		expect(archive.cloaking).toEqual({
+			outcome: "unresolved",
+			detail: `${url} sent the Tor exit to wikipedia.org by script; the residential exit capture failed: the page sent the visitor to https://device.ledger-config.live/, which ended in HTTP 502 at ${deadUrl} via residential exit`,
 		});
 	});
 

@@ -351,7 +351,8 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 		page.on("response", (response) => {
 			const request = response.request();
 			const status = response.status();
-			if (request.isNavigationRequest() && request.frame() === page.mainFrame() && (status < 300 || status >= 400)) {
+			// Only network documents: Chromium's own chrome-error:// page is not a site response.
+			if (request.isNavigationRequest() && request.frame() === page.mainFrame() && (status < 300 || status >= 400) && /^https?:/i.test(response.url())) {
 				latestDocumentResponse = response;
 			}
 		});
@@ -381,6 +382,15 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 		// step as its own hop. The MHTML's own Chromium URL header identifies the
 		// captured document either way.
 		const scriptNavigation = await settleScriptNavigation(page, () => latestDocumentResponse, navigationResponse, dependencies.scriptNavigationSettleMs ?? WEBSITE_SCRIPT_NAVIGATION_SETTLE_MS);
+		// A navigation the page started that ended in an HTTP error or a network
+		// failure leaves Chromium's own error document (chrome-error://) in the
+		// main frame. That is not a site: the destination was unreachable.
+		if (!/^https?:$/i.test(new URL(page.url()).protocol)) {
+			const failed = latestDocumentResponse !== navigationResponse ? latestDocumentResponse : null;
+			throw new WebsiteUnreachableError(egress, failed
+				? `the page sent the visitor to ${failed.request().redirectChain()[0]?.url() ?? failed.url()}, which ended in HTTP ${failed.status()} at ${failed.url()}`
+				: "the page's own navigation failed before reaching a site");
+		}
 		const screenshotUrl = page.url();
 		const screenshotBytes = await page.screenshot({
 			fullPage: true,
@@ -473,7 +483,7 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 			...decoy.archive,
 			cloaking: {
 				outcome: "unresolved",
-				detail: `${url} sent the ${WEBSITE_EGRESS_LABEL[decoy.egress]} to ${decoy.site} by script, and the ${WEBSITE_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} could not check what other visitors see (${failures.at(-1)?.message ?? "unavailable"})`,
+				detail: `${url} sent the ${WEBSITE_EGRESS_LABEL[decoy.egress]} to ${decoy.site} by script; the ${WEBSITE_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} capture failed: ${failures.at(-1)?.message ?? "unavailable"}`,
 			},
 		};
 	}
