@@ -5,6 +5,7 @@ import { AbuseRepository, type CreatedAbuseReport } from "./repository";
 import { decodeImageEvidence, normalizeAbuseTarget, normalizeObservedUrl, type DecodedEvidence, type NormalizedAbuseTarget, type ValidatedAbuseReportRequest } from "./contracts";
 import { AbuseInputError, hashStableJson, isPublicIp, sha256Hex } from "./security";
 import { setExfiltrationProbeStatus } from "../exfiltration/status";
+import { enqueueKitSiblingDiscovery } from "./origin/kit_job";
 
 const MAX_REPORT_DESCRIPTION_LENGTH = 30_000;
 /** Netcraft's documented raw-message limit, which is also the strictest mail-evidence consumer. */
@@ -139,6 +140,7 @@ export async function buildEmailPhishingRequest(params: ConfirmedEmailPhishing):
  */
 export async function reportConfirmedWebsitePhishing(params: ConfirmedWebsitePhishing): Promise<CreatedAbuseReport> {
 	const created = await AbuseRepository.createReport({ request: await buildWebsitePhishingRequest(params), reporter: params.reporter, submissionId: params.submissionId });
+	await enqueueKitSiblingDiscovery(created.reportId, params.submissionId);
 	if (created.created && (params.phishingBasis === "credential_theft" || params.phishingBasis === "payment_fraud")) {
 		await setExfiltrationProbeStatus(params.submissionId, { status: "queued", updatedAt: new Date().toISOString() });
 		try {

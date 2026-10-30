@@ -96,15 +96,20 @@ or rejected fresh session requires human intervention. Success requires both
 `result: "success"` and an `abuse_rand` receipt. The public bearer-token API is
 not used because this account lacks its abuse-reports entitlement.
 
+Every confirmed website report hashes same-host scripts, stylesheets, and image
+assets from its retained MHTML and searches urlscan.io for exact matches. One
+script/stylesheet hash is sufficient; image-only candidates must match at least
+two assets. Each candidate opens as a normal website submission, and the
+ordinary capture and classifier still decide whether it is reportable. `URLSCAN_API_KEY` enables
+authenticated search quota; if absent, the same bounded search uses urlscan.io's
+anonymous quota.
+
 When Cloudflare explicitly names a hosting-provider abuse mailbox in a reply,
-the worker validates matching ASNs through RIPEstat, performs a TLS-only sweep
-of at most 65,536 public IPv4 addresses, and reports every server that presents
-the phishing domain's certificate through the normal durable email route. It
-also hashes same-host script and stylesheet resources from the retained MHTML,
-searches urlscan.io for matching kits, proves each candidate against the swept
-origin certificate, and opens a normal website submission for every confirmed
-sibling. `URLSCAN_API_KEY` enables authenticated search quota; if absent, the
-same bounded search uses urlscan.io's anonymous quota.
+the worker additionally validates matching ASNs through RIPEstat, performs a
+TLS-only sweep of at most 65,536 public IPv4 addresses, and reports every server
+that presents the phishing domain's certificate through the normal durable
+email route. Sibling domains found by the all-case search are included in that
+host report only after the swept origin also presents their certificate.
 
 ## Reporting pipeline
 

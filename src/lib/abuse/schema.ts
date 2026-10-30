@@ -88,6 +88,8 @@ export const abuseJobTypes = [
 	"poll_provider_correspondence",
 	"probe_exfiltration",
 	"report_origin_host",
+	"discover_kit_siblings",
+	"analyze_kit_sibling",
 ] as const;
 export type AbuseJobType = (typeof abuseJobTypes)[number];
 

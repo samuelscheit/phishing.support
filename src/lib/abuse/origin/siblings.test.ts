@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { sha256Hex } from "../security";
-import { discoverSiblingDomains, kitFingerprintsFromMhtml } from "./siblings";
+import { discoverSiblingDomains, findKitSiblingCandidates, kitFingerprintsFromMhtml } from "./siblings";
 
 const CSS = "body{" + "color:#123456;".repeat(100) + "}";
 const MHTML = Buffer.from([
@@ -24,9 +24,43 @@ const MHTML = Buffer.from([
 	"",
 ].join("\r\n"), "utf8");
 
+function imageMhtml() {
+	const first = Buffer.alloc(2_048, 1);
+	const second = Buffer.alloc(2_048, 2);
+	return {
+		first,
+		second,
+		mhtml: Buffer.from([
+			"From: <Saved by Blink>",
+			"Snapshot-Content-Location: https://login.example.com/",
+			"Content-Type: multipart/related; boundary=images",
+			"",
+			"--images",
+			"Content-Type: text/html",
+			"Content-Location: https://login.example.com/",
+			"",
+			"<html></html>",
+			"--images",
+			"Content-Type: image/gif",
+			"Content-Transfer-Encoding: base64",
+			"Content-Location: https://login.example.com/one.gif",
+			"",
+			first.toString("base64"),
+			"--images",
+			"Content-Type: image/gif",
+			"Content-Transfer-Encoding: base64",
+			"Content-Location: https://login.example.com/two.gif",
+			"",
+			second.toString("base64"),
+			"--images--",
+			"",
+		].join("\r\n"), "utf8"),
+	};
+}
+
 describe("origin sibling discovery", () => {
-	test("hashes decoded same-host kit resources", () => {
-		expect(kitFingerprintsFromMhtml(MHTML, "login.example.com")).toEqual([{
+	test("hashes decoded same-host kit resources", async () => {
+		expect(await kitFingerprintsFromMhtml(MHTML, "login.example.com")).toEqual([{
 			sha256: sha256Hex(CSS),
 			mimeType: "text/css",
 			url: "https://login.example.com/kit.css",
@@ -65,6 +99,28 @@ describe("origin sibling discovery", () => {
 			url: "https://sibling.example.net/signin",
 			matchingHashes: [sha256Hex(CSS)],
 			originIp: "8.8.8.8",
+		}]);
+	});
+
+	test("requires two matching hashes when candidates are supported only by image assets", async () => {
+		const images = imageMhtml();
+		const firstHash = sha256Hex(images.first);
+		const secondHash = sha256Hex(images.second);
+		const result = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "login.example.com" }, {
+			apiKey: "test-key",
+			loadMhtml: async () => images.mhtml,
+			fetch: async (url) => {
+				const query = new URL(url).searchParams.get("q") ?? "";
+				const domains = query.includes(firstHash)
+					? ["single-image.example.net", "two-images.example.net"]
+					: query.includes(secondHash) ? ["two-images.example.net"] : [];
+				return new Response(JSON.stringify({ results: domains.map((domain) => ({ page: { domain, url: `https://${domain}/` } })) }), { status: 200 });
+			},
+		});
+		expect(result.candidates).toEqual([{
+			domain: "two-images.example.net",
+			url: "https://two-images.example.net/",
+			matchingHashes: [firstHash, secondHash],
 		}]);
 	});
 });

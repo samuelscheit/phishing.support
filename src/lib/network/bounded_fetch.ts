@@ -33,7 +33,7 @@ export class RequestTimeoutError extends Error {
 	}
 }
 
-class RequestStatusError extends Error {
+export class RequestStatusError extends Error {
 	constructor(
 		readonly status: number,
 		readonly url: string,
