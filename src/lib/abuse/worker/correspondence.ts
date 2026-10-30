@@ -6,6 +6,7 @@ import {
 	queueCorrespondencePoll,
 } from "../providers";
 import { AbuseRepository } from "../repository";
+import { enqueueOriginHostDisclosures } from "../origin/disclosure";
 
 /**
  * Read a submitted report's correspondence from its provider's API, record
@@ -21,7 +22,7 @@ export async function pollProviderCorrespondence(params: { routeId: bigint; jobI
 	if (!provider?.fetchCorrespondence || !run?.confirmationId) return;
 
 	const correspondence = await provider.fetchCorrespondence({ confirmationId: run.confirmationId, ...(signal ? { signal } : {}) });
-	await AbuseRepository.recordProviderCorrespondence({
+	const stored = await AbuseRepository.recordProviderCorrespondence({
 		route,
 		messages: [
 			...correspondence.messages.map((message) => ({ ...message, from: provider.definition.displayName })),
@@ -37,6 +38,9 @@ export async function pollProviderCorrespondence(params: { routeId: bigint; jobI
 				: []),
 		],
 	});
+	const storedMessages = (await Promise.all(stored.map(({ id }) => AbuseRepository.getMailMessage(id))))
+		.filter((message) => message !== undefined);
+	await enqueueOriginHostDisclosures(route, storedMessages);
 
 	const elapsed = Date.now() - run.createdAt.getTime();
 	if (elapsed < CORRESPONDENCE_POLL_WINDOW_MS) await queueCorrespondencePoll(route, { delayMs: CORRESPONDENCE_POLL_INTERVAL_MS, successorOf: params.jobId });

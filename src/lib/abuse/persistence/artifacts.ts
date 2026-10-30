@@ -2,6 +2,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { abuseArtifacts, type AbuseArtifact } from "../schema";
+import { sha256Hex } from "../security";
 import { insertArtifact, type ArtifactValuesParams } from "./shared";
 
 export async function saveArtifact(params: ArtifactValuesParams): Promise<bigint> {
@@ -9,9 +10,39 @@ export async function saveArtifact(params: ArtifactValuesParams): Promise<bigint
 	return db.transaction((tx) => insertArtifact(tx, params), { behavior: "immediate" });
 }
 
+/** Save one immutable route-owned artifact, returning the existing occurrence on replay. */
+export async function saveRouteArtifactOnce(params: ArtifactValuesParams & { routeId: bigint }): Promise<bigint> {
+	const db = await getDb();
+	return db.transaction((tx) => {
+		const existing = tx
+			.select({ id: abuseArtifacts.id, sha256: abuseArtifacts.sha256 })
+			.from(abuseArtifacts)
+			.where(and(
+				eq(abuseArtifacts.reportId, params.reportId),
+				eq(abuseArtifacts.routeId, params.routeId),
+				eq(abuseArtifacts.kind, params.kind),
+				eq(abuseArtifacts.name, params.name),
+			))
+			.get();
+		if (existing) {
+			if (existing.sha256 !== sha256Hex(params.buffer)) throw new Error("Route artifact replay does not match the immutable stored evidence.");
+			return existing.id;
+		}
+		return insertArtifact(tx, params);
+	}, { behavior: "immediate" });
+}
+
 export async function listArtifacts(reportId: bigint, kinds?: string[]): Promise<AbuseArtifact[]> {
 	const db = await getDb();
 	const where = kinds?.length ? and(eq(abuseArtifacts.reportId, reportId), inArray(abuseArtifacts.kind, kinds)) : eq(abuseArtifacts.reportId, reportId);
+	return db.select().from(abuseArtifacts).where(where).orderBy(asc(abuseArtifacts.createdAt)).all();
+}
+
+export async function listRouteArtifacts(routeId: bigint, kinds?: string[]): Promise<AbuseArtifact[]> {
+	const db = await getDb();
+	const where = kinds?.length
+		? and(eq(abuseArtifacts.routeId, routeId), inArray(abuseArtifacts.kind, kinds))
+		: eq(abuseArtifacts.routeId, routeId);
 	return db.select().from(abuseArtifacts).where(where).orderBy(asc(abuseArtifacts.createdAt)).all();
 }
 

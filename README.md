@@ -86,6 +86,7 @@ the application database, never in report payloads or audit events. Configure:
 ABUSE_CLOUDFLARE_ACCOUNT_ID=<32-character account id>
 ABUSE_CLOUDFLARE_LOGIN_EMAIL=<dashboard login email>
 ABUSE_CLOUDFLARE_LOGIN_PASSWORD=<dashboard login password>
+URLSCAN_API_KEY=<urlscan.io API key>
 ```
 
 Login is single-flight through `abuse_locks`. A report POST is never replayed on
@@ -94,6 +95,16 @@ session rejection permits one refreshed login and one new POST; a failed login
 or rejected fresh session requires human intervention. Success requires both
 `result: "success"` and an `abuse_rand` receipt. The public bearer-token API is
 not used because this account lacks its abuse-reports entitlement.
+
+When Cloudflare explicitly names a hosting-provider abuse mailbox in a reply,
+the worker validates matching ASNs through RIPEstat, performs a TLS-only sweep
+of at most 65,536 public IPv4 addresses, and reports every server that presents
+the phishing domain's certificate through the normal durable email route. It
+also hashes same-host script and stylesheet resources from the retained MHTML,
+searches urlscan.io for matching kits, proves each candidate against the swept
+origin certificate, and opens a normal website submission for every confirmed
+sibling. `URLSCAN_API_KEY` enables authenticated search quota; if absent, the
+same bounded search uses urlscan.io's anonymous quota.
 
 ## Reporting pipeline
 

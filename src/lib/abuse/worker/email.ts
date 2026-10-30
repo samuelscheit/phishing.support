@@ -38,7 +38,11 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices): P
 		...(report.legalBrandUrl ? [report.legalBrandUrl] : []),
 		...(caseUrl ? [caseUrl] : []),
 	];
-	const attachments = evidenceArtifacts.slice(0, 15).map((artifact) => ({ filename: artifact.name, mimeType: artifact.mimeType, content: artifact.blob }));
+	const routeArtifacts = await AbuseRepository.listRouteArtifacts(route.id, ["origin_host_evidence"]);
+	const attachments = [...routeArtifacts, ...evidenceArtifacts]
+		.filter((artifact, index, all) => all.findIndex((candidate) => candidate.id === artifact.id) === index)
+		.slice(0, 15)
+		.map((artifact) => ({ filename: artifact.name, mimeType: artifact.mimeType, content: artifact.blob }));
 	let draft: AbuseEmailDraft | undefined;
 	let providerPayload: Record<string, unknown>;
 	if (route.status === "delivery_failed") {

@@ -135,4 +135,26 @@ describe("Cloudflare correspondence polling", () => {
 		await ensureCorrespondencePolls();
 		expect(await pollJobs(route.id)).toEqual([]);
 	});
+
+	test("immediately queues one origin-host follow-up for a newly recorded disclosure", async () => {
+		Object.assign(process.env, environment);
+		await sqliteCloudflareSessionStore.writeSession(cloudflareSessionKey(cloudflareApiConfig(environment)), session);
+		const hostPage = {
+			...emailsPage,
+			result: {
+				emails: [{
+					...emailsPage.result.emails[0],
+					body: "The host for the reported domain is:\nabuse@hosting.example\nYou may use this information to follow up directly with the hosting provider.",
+				}],
+			},
+		};
+		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? hostPage : detail)) as typeof fetch;
+		const { reportId, route } = await submittedCloudflareRoute();
+		await ensureCorrespondencePolls();
+		const [first] = await pollJobs(route.id);
+		await pollProviderCorrespondence({ routeId: route.id, jobId: first!.id });
+		await pollProviderCorrespondence({ routeId: route.id, jobId: first!.id });
+		const jobs = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, reportId)).all();
+		expect(jobs.filter(({ jobType }) => jobType === "report_origin_host")).toHaveLength(1);
+	});
 });

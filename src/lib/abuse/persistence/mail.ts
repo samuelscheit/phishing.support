@@ -284,22 +284,23 @@ export async function findBouncedOutboundRoute(messageIds: string[]): Promise<Ab
 /**
  * Record messages a provider returned from its own API on their route. The
  * provider's message ID is the correlation key, so a repeated fetch stores
- * nothing new. Returns how many messages were new.
+ * nothing new. Returns the durable IDs of messages inserted by this call.
  */
 export async function recordProviderCorrespondence(params: {
 	route: AbuseProviderRoute;
 	messages: Array<{ id: string; subject: string; body: string; recipient?: string; sentAt: Date; from: string }>;
-}): Promise<number> {
+}): Promise<Array<{ id: bigint; providerMessageId: string }>> {
 	const db = await getDb();
 	return db.transaction((tx) => {
-		let created = 0;
+		const created: Array<{ id: bigint; providerMessageId: string }> = [];
 		for (const message of params.messages) {
 			const correlationKey = `provider-api:${params.route.providerRegistryKey}:${message.id}`;
 			const existing = tx.select({ id: abuseMailMessages.id }).from(abuseMailMessages).where(eq(abuseMailMessages.correlationKey, correlationKey)).get();
 			if (existing) continue;
 			const timestamp = now();
+			const id = generateId();
 			tx.insert(abuseMailMessages).values({
-				id: generateId(),
+				id,
 				reportId: params.route.reportId,
 				routeId: params.route.id,
 				direction: "inbound",
@@ -316,10 +317,26 @@ export async function recordProviderCorrespondence(params: {
 				updatedAt: timestamp,
 			}).run();
 			recordEvent(tx, { reportId: params.route.reportId, routeId: params.route.id, eventType: "mail.provider_api_received", data: { providerMessageId: message.id } });
-			created++;
+			created.push({ id, providerMessageId: message.id });
 		}
 		return created;
 	}, { behavior: "immediate" });
+}
+
+/** Provider-API messages used to recover immutable event-driven follow-up jobs after a restart. */
+export async function listProviderCorrespondence(providerRegistryKey: string) {
+	const db = await getDb();
+	return db
+		.select({ message: abuseMailMessages })
+		.from(abuseMailMessages)
+		.innerJoin(abuseProviderRoutes, eq(abuseProviderRoutes.id, abuseMailMessages.routeId))
+		.where(and(
+			eq(abuseMailMessages.direction, "inbound"),
+			eq(abuseMailMessages.kind, "provider_api"),
+			eq(abuseProviderRoutes.providerRegistryKey, providerRegistryKey),
+		))
+		.all()
+		.map(({ message }) => message);
 }
 
 /**

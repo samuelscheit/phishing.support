@@ -64,6 +64,50 @@ export async function enqueueJob(params: {
 	);
 }
 
+/**
+ * Enqueue a lifecycle job exactly once, including across completed and failed
+ * executions. This is for immutable source events such as a provider message;
+ * recurring jobs must continue to use `enqueueJob`'s active-only dedupe.
+ */
+export async function enqueueJobOnce(params: Omit<Parameters<typeof enqueueJob>[0], "dedupeKey" | "successorOf"> & {
+	dedupeKey: string;
+}): Promise<AbuseJob> {
+	const db = await getDb();
+	return db.transaction(
+		(tx) => {
+			const existing = tx.select().from(abuseJobs).where(eq(abuseJobs.dedupeKey, params.dedupeKey)).get();
+			if (existing) return existing;
+			const id = generateId();
+			const timestamp = now();
+			tx.insert(abuseJobs).values({
+				id,
+				jobType: params.jobType,
+				reportId: params.reportId,
+				routeId: params.routeId,
+				runId: params.runId,
+				payload: params.payload ?? {},
+				dedupeKey: params.dedupeKey,
+				status: "queued",
+				retryCount: 0,
+				nextAttemptAt: params.nextAttemptAt ?? timestamp,
+				unknownExternalState: false,
+				createdAt: timestamp,
+				updatedAt: timestamp,
+			}).run();
+			recordEvent(tx, {
+				reportId: params.reportId,
+				routeId: params.routeId,
+				runId: params.runId,
+				jobId: id,
+				eventType: "job.queued",
+				data: { jobType: params.jobType, lifetimeDedupe: true },
+			});
+			return tx.select().from(abuseJobs).where(eq(abuseJobs.id, id)).get()!;
+		},
+		{ behavior: "immediate" },
+	);
+}
+
 /** Atomically leases one due job, never allowing two active jobs for a route. */
 
 export type JobClaimFilter = {

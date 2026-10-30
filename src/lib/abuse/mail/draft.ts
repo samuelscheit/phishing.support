@@ -6,6 +6,7 @@ import { normalizePublicHttpUrl } from "../security";
 import { serviceIdentity } from "../../constants";
 import { defaultResponseModel } from "../../utils";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
+import { createOriginHostEmailDraft } from "../origin/draft";
 
 const MAX_DESCRIPTION_INPUT = 12_000;
 const MAX_SUMMARY_LENGTH = 1_200;
@@ -388,6 +389,8 @@ function bodyFor(params: {
  * evidence summary and falls back safely when unavailable.
  */
 export async function createAbuseEmailDraft(input: DraftInput, dependencies: AbuseEmailDraftDependencies = {}): Promise<AbuseEmailDraft> {
+	const originHostDraft = createOriginHostEmailDraft(input);
+	if (originHostDraft) return originHostDraft;
 	const recipientLabel = abuseEmailRecipientLabel({ route: input.route, recipient: input.recipient });
 	const caseUrl = abuseEmailCaseUrl(input.report.submissionId);
 	const observedUrls = normalizedBodyUrls(input.target.observedUrls);

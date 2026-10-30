@@ -195,6 +195,63 @@ export async function listTargets(reportId: bigint) {
 	return db.select().from(abuseTargets).where(eq(abuseTargets.reportId, reportId)).orderBy(asc(abuseTargets.ordinal)).all();
 }
 
+/** Add or refresh a code-derived target without duplicating it on job replay. */
+export async function upsertDerivedTarget(params: {
+	reportId: bigint;
+	normalizedTarget: string;
+	targetType: "domain" | "ip";
+	observedUrls: string[];
+	resolverSnapshot: Record<string, unknown>;
+	disposition: string;
+}) {
+	const db = await getDb();
+	return db.transaction((tx) => {
+		const existing = tx
+			.select()
+			.from(abuseTargets)
+			.where(and(eq(abuseTargets.reportId, params.reportId), eq(abuseTargets.normalizedTarget, params.normalizedTarget)))
+			.get();
+		const timestamp = now();
+		if (existing) {
+			if (existing.resolutionStatus === "pending") {
+				tx.update(abuseTargets).set({
+					observedUrls: params.observedUrls,
+					resolutionStatus: "resolved",
+					resolverSnapshot: params.resolverSnapshot,
+					disposition: params.disposition,
+					updatedAt: timestamp,
+				}).where(eq(abuseTargets.id, existing.id)).run();
+			}
+			return tx.select().from(abuseTargets).where(eq(abuseTargets.id, existing.id)).get()!;
+		}
+		const maximum = tx.select({ ordinal: abuseTargets.ordinal }).from(abuseTargets)
+			.where(eq(abuseTargets.reportId, params.reportId)).orderBy(asc(abuseTargets.ordinal)).all().at(-1)?.ordinal ?? -1;
+		const id = generateId();
+		tx.insert(abuseTargets).values({
+			id,
+			reportId: params.reportId,
+			ordinal: maximum + 1,
+			originalInput: params.normalizedTarget,
+			originalInputs: [params.normalizedTarget],
+			normalizedTarget: params.normalizedTarget,
+			targetType: params.targetType,
+			observedUrls: params.observedUrls,
+			resolutionStatus: "resolved",
+			resolverSnapshot: params.resolverSnapshot,
+			disposition: params.disposition,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+		}).run();
+		recordEvent(tx, {
+			reportId: params.reportId,
+			targetId: id,
+			eventType: "target.derived",
+			data: { normalizedTarget: params.normalizedTarget, disposition: params.disposition },
+		});
+		return tx.select().from(abuseTargets).where(eq(abuseTargets.id, id)).get()!;
+	}, { behavior: "immediate" });
+}
+
 export async function listRoutes(reportId: bigint) {
 	const db = await getDb();
 	return db.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.reportId, reportId)).orderBy(asc(abuseProviderRoutes.createdAt)).all();

@@ -12,6 +12,8 @@ import {
 } from "./providers";
 import { sendEmail } from "./worker/email";
 import { ensureCorrespondencePolls, pollProviderCorrespondence } from "./worker/correspondence";
+import { ensureOriginHostDisclosureJobs } from "./origin/disclosure";
+import { reportOriginHostJob } from "./origin/report";
 import { classifyReply, monitorProviderReply } from "./worker/mail";
 import { runGenericProviderPortal } from "./worker/portal";
 import { reconcileGenericSkyvern } from "./worker/reconcile";
@@ -54,6 +56,7 @@ const EXTERNAL_JOB_TYPES = [
 	"submit_provider",
 	"deliver_provider_verification_code",
 	"probe_exfiltration",
+	"report_origin_host",
 ] as const satisfies readonly AbuseJobType[];
 
 const CONTROL_JOB_FILTER: JobClaimFilter = { jobTypes: CONTROL_JOB_TYPES };
@@ -188,6 +191,7 @@ export class AbuseWorker {
 		this.stopped = false;
 		await AbuseRepository.recoverStaleJobs();
 		await ensureCorrespondencePolls();
+		await ensureOriginHostDisclosureJobs();
 		// Provider/browser work gets its own lane. A stuck CAPTCHA or browser can
 		// therefore never consume the capacity reserved for resolution,
 		// reconciliation, and inbound correspondence jobs.
@@ -360,6 +364,12 @@ export class AbuseWorker {
 			}
 			return;
 		}
+		if (job.jobType === "report_origin_host") {
+			// Origin attribution is supplementary follow-up. Failure must not turn
+			// a successfully submitted phishing report into a reporting failure.
+			await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
+			return;
+		}
 		// Provider-owned external actions get one chance to fence an active task
 		// before generic retry exhaustion changes the route to ordinary failure.
 		if (job.routeId) {
@@ -452,6 +462,9 @@ export class AbuseWorker {
 				return;
 			case "probe_exfiltration":
 				await this.runExfiltrationJob(job, signal);
+				return;
+			case "report_origin_host":
+				await reportOriginHostJob(job.payload, idFrom(job.reportId, "reportId"), signal);
 				return;
 			default:
 				throw new Error(`Unsupported abuse job type ${job.jobType}.`);

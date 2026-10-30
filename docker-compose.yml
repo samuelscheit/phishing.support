@@ -55,6 +55,9 @@ services:
       ABUSE_CLOUDFLARE_ACCOUNT_ID: ${ABUSE_CLOUDFLARE_ACCOUNT_ID:-}
       ABUSE_CLOUDFLARE_LOGIN_EMAIL: ${ABUSE_CLOUDFLARE_LOGIN_EMAIL:-}
       ABUSE_CLOUDFLARE_LOGIN_PASSWORD: ${ABUSE_CLOUDFLARE_LOGIN_PASSWORD:-}
+      # Cloudflare host disclosures trigger a bounded origin TLS sweep. Matching
+      # captured kit files are searched on urlscan; anonymous quota is the fallback.
+      URLSCAN_API_KEY: ${URLSCAN_API_KEY:-}
       # Reproduces the tracking token of a retried public API report that
       # carries an idempotency key; only the token's hash is stored.
       ABUSE_TRACKING_TOKEN_SECRET: ${ABUSE_TRACKING_TOKEN_SECRET:?Set ABUSE_TRACKING_TOKEN_SECRET to at least 32 random bytes}

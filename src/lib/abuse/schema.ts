@@ -87,6 +87,7 @@ export const abuseJobTypes = [
 	"classify_provider_reply",
 	"poll_provider_correspondence",
 	"probe_exfiltration",
+	"report_origin_host",
 ] as const;
 export type AbuseJobType = (typeof abuseJobTypes)[number];
 
