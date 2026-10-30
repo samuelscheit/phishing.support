@@ -393,7 +393,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive });
 			await SubmissionsEntity.update(submissionId, {
 				status: "failed",
-				info: `Cloaking suspected: ${archive.cloaking.detail}. Retry once the residential exit is online.`,
+				info: `Cloaking suspected: ${archive.cloaking.detail}. No verdict or report was made from the decoy; retry to visit the site again.`,
 				data: { kind: "website", website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, cloaking: archive.cloaking } },
 			});
 			await emitStep(submissionId, "failed", 100);

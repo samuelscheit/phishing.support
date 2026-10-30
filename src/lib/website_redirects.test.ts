@@ -257,7 +257,7 @@ describe("cloaked websites", () => {
 
 		const submission = await SubmissionsEntity.get(id);
 		expect(submission?.status).toBe("failed");
-		expect(submission?.info).toBe(`Cloaking suspected: ${detail}. Retry once the residential exit is online.`);
+		expect(submission?.info).toBe(`Cloaking suspected: ${detail}. No verdict or report was made from the decoy; retry to visit the site again.`);
 		const website = submission?.data.kind === "website" ? submission.data.website : undefined;
 		expect(website?.cloaking).toEqual({ outcome: "unresolved", detail });
 		expect(website?.redirectSubmissionId).toBeUndefined();
