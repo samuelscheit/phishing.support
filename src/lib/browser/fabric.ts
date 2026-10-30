@@ -21,12 +21,15 @@ type FabricEnvironment = Readonly<Record<string, string | undefined>>;
 /**
  * Which Fabric egress policy a browser session uses. `phishing` (default) opens
  * attacker-controlled pages through Tor; `reporting` talks to abuse portals and
- * provider dashboards from a direct, non-anonymised exit.
+ * provider dashboards from a direct, non-anonymised exit; `residential` leaves
+ * through the operator's own connection (a Tailscale exit node) for phishing
+ * pages that cloak Tor and datacenter visitors.
  */
-export type FabricEgress = "phishing" | "reporting";
+export type FabricEgress = "phishing" | "reporting" | "residential";
 
 export const DEFAULT_FABRIC_PHISHING_EGRESS_POLICY_REF = "egress_tor-egress@1";
 export const DEFAULT_FABRIC_REPORTING_EGRESS_POLICY_REF = "egress_direct-egress@1";
+export const DEFAULT_FABRIC_RESIDENTIAL_EGRESS_POLICY_REF = "egress_mac-exit@1";
 
 /** Per-session selection shared by every Fabric acquire function. */
 export interface FabricSessionOptions {
@@ -175,6 +178,7 @@ export function fabricBrowserConfigFromEnvironment(options: { environment?: Fabr
 		egressPolicyRefs: {
 			phishing: referenceWithDefault(environment, "FABRIC_PHISHING_EGRESS_POLICY_REF", "egress_", DEFAULT_FABRIC_PHISHING_EGRESS_POLICY_REF),
 			reporting: referenceWithDefault(environment, "FABRIC_REPORTING_EGRESS_POLICY_REF", "egress_", DEFAULT_FABRIC_REPORTING_EGRESS_POLICY_REF),
+			residential: referenceWithDefault(environment, "FABRIC_RESIDENTIAL_EGRESS_POLICY_REF", "egress_", DEFAULT_FABRIC_RESIDENTIAL_EGRESS_POLICY_REF),
 		},
 		artifactPolicyRef: requiredReference(environment, "FABRIC_PHISHING_ARTIFACT_POLICY_REF", "artifact-policy_"),
 		ttlSeconds,

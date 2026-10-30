@@ -225,3 +225,44 @@ test("a new website submission hands its options to the analysis it starts", asy
 	const id = await createWebsiteSubmission({ url: "https://fresh.example.com/" }, async (options) => started.push(options));
 	expect(started).toEqual([{ submissionId: id, url: "https://fresh.example.com/" }]);
 });
+
+describe("cloaked websites", () => {
+	const cloakerUrl = "https://lookup-lgr.to/en/verification";
+	const kitUrl = "https://device.ledger-config.live/en";
+	const decoyUrl = "https://www.wikipedia.org/";
+
+	test("a cloaker whose residential capture reached the kit hands that kit to its own case and says why", async () => {
+		const detail = `${cloakerUrl} sent the Tor exit to wikipedia.org but the residential exit to ledger-config.live`;
+		const archive = { ...archiveOf([hop(0, cloakerUrl, 200, kitUrl), hop(1, kitUrl, 200)]), cloaking: { outcome: "detected" as const, detail } };
+		const id = await websiteSubmission(374589286864916480n, cloakerUrl);
+
+		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, dependencies(archive));
+
+		const parent = await SubmissionsEntity.get(id);
+		expect(parent?.status).toBe("redirected");
+		expect(parent?.info).toBe(`${cloakerUrl} cloaks: ${detail}. device.ledger-config.live is analyzed and reported in its own case.`);
+		const website = parent?.data.kind === "website" ? parent.data.website : undefined;
+		expect(website?.cloaking).toEqual({ outcome: "detected", detail });
+		expect(website?.redirectSubmissionId).toBeDefined();
+	});
+
+	test("a decoy-only capture is kept as evidence but never classified or reported as not phishing", async () => {
+		const detail = `${cloakerUrl} sent the Tor exit to wikipedia.org by script, and the residential exit could not check what other visitors see (offline)`;
+		const archive = { ...archiveOf([hop(0, cloakerUrl, 200, decoyUrl), hop(1, decoyUrl, 200)]), cloaking: { outcome: "unresolved" as const, detail } };
+		let modelCalls = 0;
+		const deps = { ...dependencies(archive), analysisClient: { responses: { create: async () => { modelCalls++; throw new Error("must not classify a decoy"); } } } as unknown as AnalysisClient };
+		const id = await websiteSubmission(2n, cloakerUrl);
+
+		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, deps);
+
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("failed");
+		expect(submission?.info).toBe(`Cloaking suspected: ${detail}. Retry once the residential exit is online.`);
+		const website = submission?.data.kind === "website" ? submission.data.website : undefined;
+		expect(website?.cloaking).toEqual({ outcome: "unresolved", detail });
+		expect(website?.redirectSubmissionId).toBeUndefined();
+		expect(modelCalls).toBe(0);
+		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
+		expect((await ArtifactsEntity.listForSubmission(id)).map((artifact) => artifact.kind).sort()).toEqual(["website_mhtml", "website_png"]);
+	});
+});

@@ -1,4 +1,5 @@
 import type { HTTPRequest, HTTPResponse, Page } from "rebrowser-puppeteer-core";
+import { getDomain } from "tldts";
 
 import { getBrowser, getBrowserPage } from "./browser";
 import type { FabricEgress } from "./browser/fabric";
@@ -24,6 +25,13 @@ export type ArchivedWebsiteResponse = {
 export type WebsiteArchiveResult = {
 	/** The submitted URL is retained separately from the captured document URL. */
 	requestedUrl: string;
+	/**
+	 * How the capture handled a cloaker: a page whose own script sends Tor and
+	 * datacenter visitors to a different site than a residential visitor.
+	 * `detected`: the residential exit reached a different site, which this
+	 * archive holds. `unresolved`: only the decoy could be captured.
+	 */
+	cloaking?: { outcome: "detected" | "unresolved"; detail: string };
 	/** URL whose document body, screenshot, and MHTML are captured. */
 	url: string;
 	hostname: string;
@@ -178,6 +186,8 @@ export type WebsiteArchiveDependencies = {
 	getBrowser?: typeof getBrowser;
 	/** Test seam for the bounded wait on a self-replacing HTTP error document. */
 	errorDocumentSettleMs?: number;
+	/** Test seam for the bounded wait on a page's own script navigation. */
+	scriptNavigationSettleMs?: number;
 };
 
 export function navigationHopsFromResponse(
@@ -234,13 +244,19 @@ export function navigationHopsFromResponse(
  * server's address away from attacker infrastructure, but Tor exits are widely
  * blocked, either with an HTTP error page or by dropping the connection; a page
  * that is unreachable over Tor is retried from the server's own direct exit.
+ * Cloakers go further and answer Tor and datacenter visitors with a script
+ * navigation to an unrelated decoy site; only then is the capture repeated from
+ * the operator's residential exit, which exposes that connection's address.
  */
 const WEBSITE_CAPTURE_EGRESS: readonly FabricEgress[] = ["phishing", "reporting"];
-const WEBSITE_EGRESS_LABEL: Record<FabricEgress, string> = { phishing: "Tor exit", reporting: "server IP" };
+const WEBSITE_CLOAKING_EGRESS: FabricEgress = "residential";
+const WEBSITE_EGRESS_LABEL: Record<FabricEgress, string> = { phishing: "Tor exit", reporting: "server IP", residential: "residential exit" };
 
 /** How long an HTTP error document may take to replace itself, e.g. a JavaScript bot-check interstitial. */
 const WEBSITE_ERROR_DOCUMENT_SETTLE_MS = 20_000;
 const WEBSITE_ERROR_DOCUMENT_POLL_MS = 500;
+/** How long a loaded page may take before its own script navigates the main frame elsewhere. */
+const WEBSITE_SCRIPT_NAVIGATION_SETTLE_MS = 8_000;
 
 /**
  * The site's main document could not be loaded over one egress route: the
@@ -251,6 +267,25 @@ export class WebsiteUnreachableError extends Error {
 		super(`${reason} via ${WEBSITE_EGRESS_LABEL[egress]}`);
 		this.name = "WebsiteUnreachableError";
 	}
+}
+
+/** Registrable domain (eTLD+1) of a URL, falling back to its hostname. */
+function siteOf(url: string): string {
+	const { hostname } = new URL(url);
+	return getDomain(hostname) ?? hostname;
+}
+
+/**
+ * The site a capture's submitted page sent the visitor to by script, or
+ * undefined when the capture stayed on the submitted site or followed an HTTP
+ * redirect (the submitted host's declared destination).
+ */
+function scriptDestinationSite(archive: WebsiteArchiveResult): string | undefined {
+	const submittedSite = siteOf(archive.requestedUrl);
+	const capturedSite = siteOf(archive.url);
+	if (capturedSite === submittedSite) return undefined;
+	const httpRedirectOffSite = archive.navigationHops.some((hop) => hop.status !== null && hop.status >= 300 && hop.status < 400 && hop.redirectTo && siteOf(hop.redirectTo) !== submittedSite);
+	return httpRedirectOffSite ? undefined : capturedSite;
 }
 
 /**
@@ -268,6 +303,38 @@ async function settleErrorDocument(page: Page, latestDocumentResponse: () => HTT
 		if (readyState !== "loading" && page.url() === response.url()) return response;
 	}
 	return null;
+}
+
+/**
+ * Follow a main-frame navigation the loaded page starts by itself (for example
+ * `location.href = ...` after a server-side visitor check). Returns the new
+ * document's response once it is parsed, or undefined when the page stays put.
+ */
+async function settleScriptNavigation(
+	page: Page,
+	latestDocumentResponse: () => HTTPResponse | null,
+	loadedResponse: HTTPResponse | null,
+	settleMs: number,
+): Promise<HTTPResponse | undefined> {
+	const deadline = Date.now() + settleMs;
+	while (Date.now() < deadline) {
+		await sleep(WEBSITE_ERROR_DOCUMENT_POLL_MS);
+		const response = latestDocumentResponse();
+		if (!response || response === loadedResponse || !response.ok()) continue;
+		const readyState = await page.evaluate(() => document.readyState).catch(() => "loading");
+		if (readyState !== "loading" && page.url() === response.url()) return response;
+	}
+	return undefined;
+}
+
+/** Hops of the loaded page followed by the hops of the document its script navigated to. */
+function scriptNavigationHops(loadedResponse: HTTPResponse | null, scriptResponse: HTTPResponse, capturedDocumentUrl: string): WebsiteNavigationHop[] {
+	const loadedUrl = loadedResponse?.url() ?? capturedDocumentUrl;
+	const loaded = navigationHopsFromResponse(loadedResponse, loadedUrl).map((hop) => ({ ...hop, contentCaptured: false }));
+	const last = loaded.at(-1);
+	if (last && !last.redirectTo) last.redirectTo = scriptResponse.request().redirectChain()[0]?.url() ?? scriptResponse.url();
+	const followed = navigationHopsFromResponse(scriptResponse, capturedDocumentUrl);
+	return [...loaded, ...followed].map((hop, index) => ({ ...hop, index }));
 }
 
 async function captureLiveWebsite(url: string, egress: FabricEgress, dependencies: WebsiteArchiveDependencies): Promise<WebsiteArchiveResult> {
@@ -308,9 +375,12 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 			navigationResponse = settled;
 		}
 
-		// Do not pause between DOMContentLoaded and capture: a page-driven second
-		// navigation must not silently replace the document whose response was just
-		// checked. The MHTML's own Chromium URL header identifies the captured document.
+		// A cloaking interstitial loads, asks its server where to send this visitor,
+		// then navigates the main frame by script. Wait for that navigation so the
+		// capture holds the page the visitor ends up on, and record the scripted
+		// step as its own hop. The MHTML's own Chromium URL header identifies the
+		// captured document either way.
+		const scriptNavigation = await settleScriptNavigation(page, () => latestDocumentResponse, navigationResponse, dependencies.scriptNavigationSettleMs ?? WEBSITE_SCRIPT_NAVIGATION_SETTLE_MS);
 		const screenshotUrl = page.url();
 		const screenshotBytes = await page.screenshot({
 			fullPage: true,
@@ -331,7 +401,9 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 		const capturedDocument = await archiveMhtmlSnapshot({
 			url,
 			archivedUrl: capturedDocumentUrl,
-			navigationHops: navigationHopsFromResponse(navigationResponse, capturedDocumentUrl),
+			navigationHops: scriptNavigation
+				? scriptNavigationHops(navigationResponse, scriptNavigation, capturedDocumentUrl)
+				: navigationHopsFromResponse(navigationResponse, capturedDocumentUrl),
 			mhtmlSnapshot: resolvedMhtml,
 		});
 		const screenshotPng = screenshotUrl === capturedDocumentUrl ? Buffer.from(screenshotBytes) : undefined;
@@ -353,14 +425,57 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 	}
 
 	const failures: WebsiteUnreachableError[] = [];
+	let decoy: { archive: WebsiteArchiveResult; site: string; egress: FabricEgress } | undefined;
 	for (const egress of WEBSITE_CAPTURE_EGRESS) {
 		try {
-			return await captureLiveWebsite(url, egress, dependencies);
+			const archive = await captureLiveWebsite(url, egress, dependencies);
+			const site = scriptDestinationSite(archive);
+			if (!site) return archive;
+			console.warn(`Website capture of ${url} via ${WEBSITE_EGRESS_LABEL[egress]}: the page sent the visitor to ${site} by script`);
+			decoy = { archive, site, egress };
+			break;
 		} catch (error) {
 			if (!(error instanceof WebsiteUnreachableError)) throw error;
 			console.warn(`Website capture of ${url} failed: ${error.message}`);
 			failures.push(error);
 		}
+	}
+
+	// A scripted jump to another site, or no page at all, is how cloakers answer
+	// Tor and datacenter visitors. Ask once more as a residential visitor would.
+	let residential: WebsiteArchiveResult | undefined;
+	try {
+		residential = await captureLiveWebsite(url, WEBSITE_CLOAKING_EGRESS, dependencies);
+	} catch (error) {
+		// The residential exit depends on the operator's machine being online; its
+		// failure must not hide what the other routes captured.
+		const reason = error instanceof WebsiteUnreachableError ? error : new WebsiteUnreachableError(WEBSITE_CLOAKING_EGRESS, error instanceof Error ? error.message : String(error));
+		console.warn(`Website capture of ${url} failed: ${reason.message}`);
+		failures.push(reason);
+	}
+
+	if (residential) {
+		const residentialSite = scriptDestinationSite(residential);
+		// The same scripted destination for every visitor is an ordinary redirect.
+		if (decoy && residentialSite === decoy.site) return decoy.archive;
+		if (!decoy) return residential;
+		const reached = residentialSite ?? siteOf(residential.url);
+		return {
+			...residential,
+			cloaking: {
+				outcome: "detected",
+				detail: `${url} sent the ${WEBSITE_EGRESS_LABEL[decoy.egress]} to ${decoy.site} but the ${WEBSITE_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} to ${reached}`,
+			},
+		};
+	}
+	if (decoy) {
+		return {
+			...decoy.archive,
+			cloaking: {
+				outcome: "unresolved",
+				detail: `${url} sent the ${WEBSITE_EGRESS_LABEL[decoy.egress]} to ${decoy.site} by script, and the ${WEBSITE_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} could not check what other visitors see (${failures.at(-1)?.message ?? "unavailable"})`,
+			},
+		};
 	}
 	throw new Error(`Failed to load page: ${failures.map((error) => error.message).join("; ")}`);
 }

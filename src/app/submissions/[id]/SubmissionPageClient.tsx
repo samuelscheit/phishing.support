@@ -62,6 +62,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const isReported = statusKey === "reported";
 	const isInvalidWebsite = statusKey === "invalid" && submission?.kind === "website" && Boolean(submission.info);
 	const redirectSubmissionId = submission?.data.kind === "website" ? submission.data.website.redirectSubmissionId : undefined;
+	const websiteCloaking = submission?.data.kind === "website" ? submission.data.website.cloaking : undefined;
 
 	const isRunning = ["new", "queued", "running"].includes(statusKey);
 	const websiteNavigation = submission?.data.kind === "website" ? submission.data.website.navigationHops ?? [] : [];
@@ -317,7 +318,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 
 						{statusKey === "redirected" ? (
 							<div className="rounded-md border border-amber-200 bg-amber-50/60 p-3">
-								<div className="text-xs font-semibold text-amber-800">Redirects to another site</div>
+								<div className="text-xs font-semibold text-amber-800">{websiteCloaking ? "Cloaks: shows scanners a different site" : "Redirects to another site"}</div>
 								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info}</div>
 								{redirectSubmissionId ? (
 									<Link href={`/submissions/${redirectSubmissionId}`} className="mt-2 inline-block text-sm font-medium text-primary hover:underline">
@@ -338,7 +339,9 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 										</Button>
 										<span className="text-xs text-muted-foreground">
 											{submission.kind === "website"
-												? "Reuses the captured website archive when available; it will not create a duplicate report."
+												? websiteCloaking?.outcome === "unresolved"
+													? "Visits the site again, including from the residential exit; it will not create a duplicate report."
+													: "Reuses the captured website archive when available; it will not create a duplicate report."
 												: "Reuses the original email; it will not create a duplicate report."}
 										</span>
 									</div>
@@ -399,7 +402,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 													<div className="min-w-0 space-y-1">
 														<div className="break-all font-mono text-xs">{hop.url}</div>
 														<div className="text-xs text-muted-foreground">
-															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured" : " · redirect response only"}
+															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured" : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
 														</div>
 														{hop.redirectTo ? <div className="break-all text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
 														{redirectSubmissionId && hop.contentCaptured ? (

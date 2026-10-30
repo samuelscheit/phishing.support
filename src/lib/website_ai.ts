@@ -50,7 +50,7 @@ export function buildWebsiteAnalysisInput(archive: WebsiteEvidenceArchive) {
 					type: "input_text" as const,
 					text: `Submitted URL: ${archive.requestedUrl}
 
-HTTP redirect responses, recorded individually. A redirect response does not include the redirected site's page content:
+Navigation hops, recorded individually: HTTP redirect responses, and pages whose own script sent the visitor on (an HTTP 2xx status with redirect_to). A hop whose page content was not captured contributes no page content:
 ${toon.encode(archive.navigationHops.map(({ index, url, status, redirectTo, contentCaptured }) => ({ index, url, status, redirect_to: redirectTo, page_content_captured_for_this_hop: contentCaptured })))}
 
 Only this final URL's page content was captured: ${archive.url}
@@ -343,10 +343,19 @@ async function handOffRedirectedCapture(params: {
 	}, (options) => analyzeWebsite(options, params.dependencies));
 	await SubmissionsEntity.update(submissionId, {
 		status: "redirected",
-		info: `${url} redirects to ${capturedHop.hostname}; that site is analyzed and reported in its own case.`,
+		info: archive.cloaking
+			? `${url} cloaks: ${archive.cloaking.detail}. ${capturedHop.hostname} is analyzed and reported in its own case.`
+			: `${url} redirects to ${capturedHop.hostname}; that site is analyzed and reported in its own case.`,
 		data: {
 			kind: "website",
-			website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, redirectSubmissionId: redirectSubmissionId.toString() },
+			website: {
+				url,
+				whois,
+				archiveUrl: archive.url,
+				navigationHops: archive.navigationHops,
+				redirectSubmissionId: redirectSubmissionId.toString(),
+				...(archive.cloaking ? { cloaking: archive.cloaking } : {}),
+			},
 		},
 	});
 }
@@ -378,6 +387,18 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		const archive = captured.screenshotPng || !options.screenshotSnapshot
 			? captured
 			: { ...captured, screenshotPng: options.screenshotSnapshot };
+		if (archive.cloaking?.outcome === "unresolved") {
+			// The capture holds only the decoy every reachable route was shown. It
+			// is neither evidence against the submitted site nor a case of its own.
+			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive });
+			await SubmissionsEntity.update(submissionId, {
+				status: "failed",
+				info: `Cloaking suspected: ${archive.cloaking.detail}. Retry once the residential exit is online.`,
+				data: { kind: "website", website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, cloaking: archive.cloaking } },
+			});
+			await emitStep(submissionId, "failed", 100);
+			return submissionId;
+		}
 		const capturedHop = archive.attributionError ? undefined : capturedArchiveHop(archive);
 		if (capturedHop && capturedHop.hostname !== new URL(url).hostname) {
 			await handOffRedirectedCapture({ submissionId, url, whois, archive, capturedHop, reporter: { reporterIp, reporterCountry, reporterHeaders }, dependencies });
@@ -400,7 +421,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
-				website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops },
+				website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, ...(archive.cloaking ? { cloaking: archive.cloaking } : {}) },
 			},
 		});
 
@@ -434,7 +455,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
-				website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, siteAssessments },
+				website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, siteAssessments, ...(archive.cloaking ? { cloaking: archive.cloaking } : {}) },
 			},
 		});
 

@@ -85,7 +85,10 @@ export async function createWebsiteSubmission(
  * a transient model failure cannot cause the site to be fetched again after it
  * has changed or started redirecting scanners.
  */
-export async function retryFailedWebsiteAnalysis(submissionId: bigint): Promise<void> {
+export async function retryFailedWebsiteAnalysis(
+	submissionId: bigint,
+	startAnalysis: (options: AnalyzeWebsiteOptions) => Promise<unknown> = analyzeWebsite,
+): Promise<void> {
 	const { submission } = await getRetryableSubmission(submissionId, "website", { allowCompletedPriorRuns: true });
 	const url = submission.data.kind === "website" ? submission.data.website?.url : undefined;
 	if (!url) throw new SubmissionRetryError("The original website URL is unavailable.");
@@ -100,8 +103,12 @@ export async function retryFailedWebsiteAnalysis(submissionId: bigint): Promise<
 
 	let mhtmlSnapshot: Buffer | undefined;
 	let screenshotSnapshot: Buffer | undefined;
+	// A cloaked capture holds only the decoy; a retry must visit the site again.
 	const retainedArchiveHasTrustedProvenance = Boolean(
-		submission.data.kind === "website" && submission.data.website.archiveUrl && submission.data.website.navigationHops?.length,
+		submission.data.kind === "website"
+		&& submission.data.website.archiveUrl
+		&& submission.data.website.navigationHops?.length
+		&& submission.data.website.cloaking?.outcome !== "unresolved",
 	);
 	if (mhtmlArtifact && retainedArchiveHasTrustedProvenance) {
 		const artifact = await ArtifactsEntity.get(mhtmlArtifact.id);
@@ -116,7 +123,7 @@ export async function retryFailedWebsiteAnalysis(submissionId: bigint): Promise<
 	if (!claimed) throw new SubmissionRetryError("This submission is already being retried.");
 
 	const websiteData = submission.data.kind === "website" ? submission.data.website : undefined;
-	void analyzeWebsite({
+	void startAnalysis({
 		submissionId,
 		url,
 		mhtmlSnapshot,

@@ -27,22 +27,24 @@ describe("Phishing Support Browser Fabric boundary", () => {
 		})).toThrow("FABRIC_PHISHING_PROFILE_REF");
 	});
 
-	test("splits egress: phishing defaults to Tor, reporting to direct, both overridable", () => {
+	test("splits egress: phishing defaults to Tor, reporting to direct, residential to the Mac exit, all overridable", () => {
 		const config = fabricBrowserConfigFromEnvironment({ environment: environment() });
 		if (!config) throw new Error("test Fabric configuration is missing");
-		const create = (egress?: "phishing" | "reporting") =>
+		const create = (egress?: "phishing" | "reporting" | "residential") =>
 			buildFabricBrowserSessionCreatePayload(config, {}, "writer", "phishing-test-idempotency-key", egress);
 		expect(create().egressPolicyRef).toBe("egress_tor-egress@1");
 		expect(create("phishing").egressPolicyRef).toBe("egress_tor-egress@1");
 		expect(create("reporting").egressPolicyRef).toBe("egress_direct-egress@1");
+		expect(create("residential").egressPolicyRef).toBe("egress_mac-exit@1");
 
 		const custom = fabricBrowserConfigFromEnvironment({
 			environment: environment({
 				FABRIC_PHISHING_EGRESS_POLICY_REF: "egress_custom-tor@2",
 				FABRIC_REPORTING_EGRESS_POLICY_REF: "egress_custom-direct@2",
+				FABRIC_RESIDENTIAL_EGRESS_POLICY_REF: "egress_custom-exit@2",
 			}),
 		});
-		expect(custom?.egressPolicyRefs).toEqual({ phishing: "egress_custom-tor@2", reporting: "egress_custom-direct@2" });
+		expect(custom?.egressPolicyRefs).toEqual({ phishing: "egress_custom-tor@2", reporting: "egress_custom-direct@2", residential: "egress_custom-exit@2" });
 		expect(() => fabricBrowserConfigFromEnvironment({
 			environment: environment({ FABRIC_REPORTING_EGRESS_POLICY_REF: "direct" }),
 		})).toThrow("FABRIC_REPORTING_EGRESS_POLICY_REF");

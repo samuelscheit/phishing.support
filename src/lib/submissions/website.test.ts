@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { AnalysisRunsEntity, SubmissionsEntity } from "../db/entities";
+import { AnalysisRunsEntity, ArtifactsEntity, SubmissionsEntity } from "../db/entities";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { reportConfirmedWebsitePhishing } from "../abuse/submission_reports";
 import { getRetryableSubmission } from "./retry";
@@ -67,6 +67,33 @@ describe("retryFailedWebsiteAnalysis", () => {
 		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({ submission: { id } });
 		await reportConfirmedWebsitePhishing({ submissionId: id, urls: ["https://85.215.226.225/Netflix/Home/login.php"], analysisText: "Credential page.", reporter: {}, phishingBasis: "credential_theft" });
 		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).rejects.toThrow("cannot be retried");
+	});
+
+	test("a capture that showed only a cloaking decoy is fetched again instead of re-analyzing the retained decoy", async () => {
+		const url = "https://lookup-lgr.to/en/verification";
+		const decoyUrl = "https://www.wikipedia.org/";
+		const navigationHops = [
+			{ index: 0, url, hostname: "lookup-lgr.to", status: 200, redirectTo: decoyUrl, contentCaptured: false },
+			{ index: 1, url: decoyUrl, hostname: "www.wikipedia.org", status: 200, contentCaptured: true },
+		];
+		const id = await SubmissionsEntity.create({
+			id: 40n,
+			kind: "website",
+			data: { kind: "website", website: { url, archiveUrl: decoyUrl, navigationHops, cloaking: { outcome: "unresolved", detail: "decoy only" } } },
+			dedupeKey: "website-retry-cloaked",
+			status: "failed",
+		});
+		await ArtifactsEntity.saveWebsiteArtifacts({
+			submissionId: id,
+			archive: { archivedAt: new Date(), mhtml: Buffer.from("From: <Saved by Blink>\r\n\r\n<html></html>"), screenshotPng: Buffer.from("png") },
+		});
+		const started: Array<{ mhtmlSnapshot?: Buffer; reuseEvidenceArtifacts?: boolean }> = [];
+
+		await retryFailedWebsiteAnalysis(id, async (options) => started.push(options));
+
+		expect(started).toHaveLength(1);
+		expect(started[0]?.mhtmlSnapshot).toBeUndefined();
+		expect(started[0]?.reuseEvidenceArtifacts).toBe(false);
 	});
 
 	test("marks interrupted running analysis runs as failed on startup so the submission remains retryable", async () => {

@@ -33,6 +33,8 @@ export type WebsiteSubmissionData = {
 	siteAssessments?: WebsiteSiteAssessment[];
 	/** Submission that analyzes the host this site redirected to; its id as a decimal string. */
 	redirectSubmissionId?: string;
+	/** Set when the submitted page cloaks: it showed Tor/datacenter visitors a different site than residential ones. */
+	cloaking?: { outcome: "detected" | "unresolved"; detail: string };
 	/** Durable supplementary probe state; it never changes the phishing verdict. */
 	backendProbe?: {
 		status: "queued" | "running" | "completed" | "failed";

@@ -151,7 +151,7 @@ test("detailed analysis binds the page content to the exact captured URL", () =>
 	expect(system).toContain("Never attribute one hop's content");
 	expect(text).toContain(`Only this final URL's page content was captured: ${finalTrollHop.url}`);
 	expect(text).toContain(shareGoogleHop.url);
-	expect(text).toContain("redirect response does not include the redirected site's page content");
+	expect(text).toContain("A hop whose page content was not captured contributes no page content");
 	expect(text).toContain("a prank/troll");
 	expect(text).toContain("You got trolled");
 });
