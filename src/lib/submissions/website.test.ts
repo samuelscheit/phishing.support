@@ -4,7 +4,7 @@ import { AnalysisRunsEntity, ArtifactsEntity, SubmissionsEntity } from "../db/en
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { reportConfirmedWebsitePhishing } from "../abuse/submission_reports";
 import { getRetryableSubmission } from "./retry";
-import { resumePendingWebsiteAnalyses, SubmissionRetryError, retryFailedWebsiteAnalysis } from "./website";
+import { createWebsiteSubmission, resumePendingWebsiteAnalyses, SubmissionRetryError, retryFailedWebsiteAnalysis, websiteSubmissionUrl } from "./website";
 
 useTemporaryDatabase();
 
@@ -113,6 +113,27 @@ describe("retryFailedWebsiteAnalysis", () => {
 		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({
 			submission: { id, status: "failed" },
 		});
+	});
+});
+
+describe("createWebsiteSubmission", () => {
+	test("a pasted blob: address is analyzed as the site that served it, keeping what the reporter pasted as the source", async () => {
+		const pasted = "blob:https://6996419621491608.9262480229243856756051631876451bau3amzwa.workers.dev/5c83e339-d1c5-4d0b-95ab-8064e20dfcda";
+		const started: string[] = [];
+
+		const id = await createWebsiteSubmission({ url: pasted }, async ({ url }) => { started.push(url); });
+
+		const site = "https://6996419621491608.9262480229243856756051631876451bau3amzwa.workers.dev/";
+		expect(started).toEqual([site]);
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.data).toEqual({ kind: "website", website: { url: site } });
+		expect(submission?.source).toBe(pasted);
+	});
+
+	test("ordinary page addresses are kept as submitted", () => {
+		expect(websiteSubmissionUrl(" https://kit.example/c2222120?x=1 ")).toBe("https://kit.example/c2222120?x=1");
+		expect(websiteSubmissionUrl("http://85.215.226.225/Netflix/Home/login.php")).toBe("http://85.215.226.225/Netflix/Home/login.php");
+		expect(() => websiteSubmissionUrl("not a url")).toThrow();
 	});
 });
 

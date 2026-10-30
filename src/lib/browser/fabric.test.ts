@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
 	buildFabricBrowserSessionCreatePayload,
+	connectThroughRelay,
 	disconnectFabricPatchrightClient,
 	fabricBrowserConfigFromEnvironment,
 	fabricRelayEndpoint,
@@ -117,5 +118,60 @@ describe("Phishing Support Browser Fabric boundary", () => {
 		await disconnectFabricPatchrightClient(browser);
 		expect(clientTransportClose).toBe(1);
 		expect(remoteBrowserClose).toBe(0);
+	});
+
+	describe("relay capacity", () => {
+		const relayFull = () => new Error("WebSocket connection to 'ws://fabric-cdp-relay-phishing:8085/v1/cdp/browser-session_abc' failed: Expected 101 status code");
+
+		test("waits while every relay connection is taken, keeping the session alive, then connects", async () => {
+			let attempts = 0;
+			let heartbeats = 0;
+			let clock = 0;
+			const realNow = Date.now;
+			Date.now = () => clock;
+			try {
+				const browser = await connectThroughRelay(
+					async () => {
+						attempts++;
+						if (attempts < 8) throw relayFull();
+						return "browser";
+					},
+					async () => { heartbeats++; },
+					{ retryMs: 2_000, sleep: async (ms) => { clock += ms; } },
+				);
+				expect(browser).toBe("browser");
+				expect(attempts).toBe(8);
+				// 14 seconds of waiting crosses one 10-second heartbeat interval.
+				expect(heartbeats).toBe(1);
+			} finally {
+				Date.now = realNow;
+			}
+		});
+
+		test("gives up once the relay stays full past the bound", async () => {
+			let clock = 0;
+			const realNow = Date.now;
+			Date.now = () => clock;
+			try {
+				await expect(connectThroughRelay(
+					async () => { throw relayFull(); },
+					async () => undefined,
+					{ waitMs: 10_000, retryMs: 2_000, sleep: async (ms) => { clock += ms; } },
+				)).rejects.toThrow("Expected 101 status code");
+				expect(clock).toBe(10_000);
+			} finally {
+				Date.now = realNow;
+			}
+		});
+
+		test("never retries a failure that is not the relay being full", async () => {
+			let attempts = 0;
+			await expect(connectThroughRelay(
+				async () => { attempts++; throw new Error("Browser Fabric session ended in failed"); },
+				async () => undefined,
+				{ sleep: async () => undefined },
+			)).rejects.toThrow("session ended in failed");
+			expect(attempts).toBe(1);
+		});
 	});
 });

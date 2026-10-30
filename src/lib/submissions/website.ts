@@ -7,7 +7,7 @@ import { getRetryableSubmission, SubmissionRetryError } from "./retry";
 export { SubmissionRetryError } from "./retry";
 
 export type WebsiteSubmissionOptions = ReporterMetadata
-	& Pick<AnalyzeWebsiteOptions, "url" | "mhtmlSnapshot" | "archivedUrl" | "navigationHops" | "screenshotSnapshot">
+	& Pick<AnalyzeWebsiteOptions, "url" | "mhtmlSnapshot" | "archivedUrl" | "navigationHops" | "screenshotSnapshot" | "verificationGate">
 	& { source?: string };
 
 type WebsiteAnalysisRecoveryOptions = ReporterMetadata & {
@@ -50,12 +50,25 @@ export async function resumePendingWebsiteAnalyses(params: {
 	return resumed;
 }
 
+/**
+ * The address of the site a submitted URL points at. Kits that swap their page
+ * in from a script leave a `blob:` URL in the address bar, which a reporter may
+ * copy; it exists only inside that one browser tab, and its origin is the site
+ * that served it.
+ */
+export function websiteSubmissionUrl(url: string): string {
+	const parsed = new URL(url.trim());
+	if (parsed.protocol === "blob:") return new URL(parsed.pathname).origin + "/";
+	return parsed.toString();
+}
+
 export async function createWebsiteSubmission(
 	options: WebsiteSubmissionOptions,
 	startAnalysis: (options: AnalyzeWebsiteOptions) => Promise<unknown> = analyzeWebsite,
 ): Promise<bigint> {
 	const streamId = generateId();
-	const { url, source } = options;
+	const url = websiteSubmissionUrl(options.url);
+	const { source } = options;
 
 	const existingId = await SubmissionsEntity.create({
 		kind: "website",
@@ -65,7 +78,7 @@ export async function createWebsiteSubmission(
 		// durable boundary so a process restart cannot leave a submission looking
 		// perpetually new while its first WHOIS lookup is in flight.
 		status: "running",
-		source: source || url,
+		source: source || options.url,
 		reporterIp: options.reporterIp,
 		reporterCountry: options.reporterCountry,
 		reporterHeaders: options.reporterHeaders,
@@ -74,7 +87,7 @@ export async function createWebsiteSubmission(
 
 	if (existingId !== streamId) return existingId;
 
-	startAnalysis({ submissionId: streamId, ...options }).catch(console.error);
+	startAnalysis({ submissionId: streamId, ...options, url }).catch(console.error);
 
 	return streamId;
 }
@@ -130,6 +143,7 @@ export async function retryFailedWebsiteAnalysis(
 		archivedUrl: websiteData?.archiveUrl,
 		navigationHops: websiteData?.navigationHops,
 		trustMhtmlDocumentLocation: Boolean(mhtmlSnapshot),
+		verificationGate: mhtmlSnapshot ? websiteData?.verificationGate : undefined,
 		screenshotSnapshot,
 		reporterIp: submission.reporterIp ?? undefined,
 		reporterCountry: submission.reporterCountry ?? undefined,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { type Browser, type BrowserContext, type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
+import { homedir } from "node:os";
+import puppeteer, { type Browser, type BrowserContext, type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
 import type { FabricEgress } from "./browser/fabric";
 import type { WebsiteNavigationHop } from "./website_types";
 
@@ -569,6 +570,20 @@ test("captured page text keeps attribute captions where a visitor reads them", (
 	expect(html.match(/Contraseña de correo/g)).toHaveLength(1);
 });
 
+test("captured page text leaves out filler a visitor cannot see, which kits use to drown out their form", () => {
+	const filler = "Family photos stay in the local archive until the next backup.";
+	const { html, text } = capturedDocumentContent(`<!DOCTYPE html><html><body>
+<i style="font-size:0!important;opacity:0!important;position:absolute!important">${filler}</i>
+<p style="color:transparent; font-size: 0px">${filler}</p><span hidden>${filler}</span><!-- ${filler} -->
+<div style="display:none">${filler}</div><div style="visibility: hidden">${filler}</div>
+<h1>Sign in with Apple Account</h1><input placeholder="Email or Phone Number">
+<p style="opacity:0.5">Forgot password?</p><p style="font-size:0.9em">Keep me signed in</p>
+</body></html>`);
+
+	expect(text).toBe("Sign in with Apple Account\nEmail or Phone Number\nForgot password?\nKeep me signed in");
+	expect(html).not.toContain(filler);
+});
+
 describe("cloaking", () => {
 	const url = "https://lookup-lgr.to/en/verification";
 	const decoyUrl = "https://www.wikipedia.org/";
@@ -703,4 +718,115 @@ describe("cloaking", () => {
 		expect(fixture.leasedEgress).toEqual(["phishing"]);
 		expect(archive.cloaking).toBeUndefined();
 	});
+});
+
+const chromiumExecutable = process.env.PHISHING_TEST_CHROMIUM
+	?? `${homedir()}/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
+const chromiumAvailable = await Bun.file(chromiumExecutable).exists();
+
+describe.skipIf(!chromiumAvailable)("verification gates, in a real browser", () => {
+	const filler = "Family photos stay in the local archive until the next backup.";
+	const hiddenFiller = `<i style="font-size:0!important;opacity:0!important;position:absolute!important">${filler}</i>`.repeat(40);
+	const appleForm = `<h1>Sign in with Apple Account</h1><input id="email" placeholder="Email or Phone Number"><input id="password" type="password" placeholder="Password"><button type="submit">Sign In</button>`;
+
+	/** Serves one kit page; `/verify` answers after a silent proof of work, like the workers.dev kit. */
+	function serveKit(page: string, hits: string[]) {
+		return Bun.serve({
+			port: 0,
+			fetch: async (request) => {
+				const { pathname } = new URL(request.url);
+				hits.push(pathname);
+				if (pathname === "/verify") return Response.json({ ok: true });
+				if (pathname === "/login-form") return new Response(appleForm, { headers: { "content-type": "text/html" } });
+				return new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
+			},
+		});
+	}
+
+	const launch = async () => puppeteer.launch({ executablePath: chromiumExecutable, headless: true, args: ["--no-first-run"] });
+
+	test("clicks the kit's own 'I'm not a robot' control and captures the sign-in page it reveals", async () => {
+		const hits: string[] = [];
+		const server = serveKit(`<!DOCTYPE html><html><head><title>\u200b</title></head><body>${hiddenFiller}
+<main><section id="gate"><h1>Security Check</h1>
+<div role="button" tabindex="0" id="box" aria-label="I'm not a robot"><span class="check"></span><span>I'm not a robot</span><div>reCAPTCHA</div><div>Privacy - Terms</div></div>
+</section><div id="content"></div></main>
+<footer>Copyright © 2024 Apple Inc. All rights reserved.</footer>
+<script>
+document.getElementById("box").addEventListener("click", async () => {
+	// A silent proof of work before the kit talks to its backend again.
+	const until = Date.now() + 1500; while (Date.now() < until) await new Promise((r) => setTimeout(r, 50));
+	await fetch("/verify", { method: "POST" });
+	const html = await (await fetch("/login-form")).text();
+	document.getElementById("gate").remove();
+	document.getElementById("content").innerHTML = html;
+});
+</script></body></html>`, hits);
+		try {
+			const url = `http://127.0.0.1:${server.port}/c2222120`;
+			const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 5_000, getBrowser: launch });
+
+			expect(archive.verificationGate).toEqual({ label: "I'm not a robot" });
+			const text = archive.text.toString();
+			expect(text).toContain("Sign in with Apple Account");
+			expect(text).toContain("Email or Phone Number");
+			expect(text).not.toContain("Security Check");
+			expect(text).not.toContain(filler);
+			expect(hits).toEqual(["/c2222120", "/verify", "/login-form"]);
+			expect(archive.screenshotPng?.byteLength).toBeGreaterThan(0);
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+
+	test("captures a kit that swaps its real page in from a blob: URL as the page it loaded", async () => {
+		const hits: string[] = [];
+		const server = serveKit(`<!DOCTYPE html><html><body><div class="spinner"></div><script>
+setTimeout(async () => {
+	const html = "<!DOCTYPE html><html><body>${appleForm.replaceAll('"', '\\"')}</body></html>";
+	location.replace(URL.createObjectURL(new Blob([html], { type: "text/html" })));
+}, 50);
+</script></body></html>`, hits);
+		try {
+			const url = `http://127.0.0.1:${server.port}/c2222120`;
+			const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 2_000, getBrowser: launch });
+
+			expect(archive.url).toBe(url);
+			expect(archive.navigationHops).toEqual([expect.objectContaining({ url, status: 200, contentCaptured: true })]);
+			expect(archive.text.toString()).toContain("Sign in with Apple Account");
+			expect(archive.screenshotPng?.byteLength).toBeGreaterThan(0);
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+
+	test("never clicks anything on a page that already shows data-entry fields, even next to a robot checkbox", async () => {
+		const hits: string[] = [];
+		const server = serveKit(`<!DOCTYPE html><html><body>${appleForm}
+<label><input type="checkbox" id="robot" onclick="fetch('/verify', { method: 'POST' })"> I'm not a robot</label></body></html>`, hits);
+		try {
+			const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/login` }, { ...fast, renderSettleMs: 1_000, getBrowser: launch });
+
+			expect(archive.verificationGate).toBeUndefined();
+			expect(archive.text.toString()).toContain("Sign in with Apple Account");
+			expect(hits).toEqual(["/login"]);
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+
+	test("leaves a page alone when more than one control could be the gate", async () => {
+		const hits: string[] = [];
+		const server = serveKit(`<!DOCTYPE html><html><body><h1>Choose</h1>
+<button onclick="fetch('/verify', { method: 'POST' })">I'm not a robot</button>
+<button onclick="fetch('/verify', { method: 'POST' })">Verify you are human</button></body></html>`, hits);
+		try {
+			const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/two` }, { ...fast, renderSettleMs: 1_000, getBrowser: launch });
+
+			expect(archive.verificationGate).toBeUndefined();
+			expect(hits).toEqual(["/two"]);
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
 });

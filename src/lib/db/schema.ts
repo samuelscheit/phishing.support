@@ -35,6 +35,8 @@ export type WebsiteSubmissionData = {
 	redirectSubmissionId?: string;
 	/** Set when the submitted page cloaks: it showed Tor/datacenter visitors a different site than residential ones. */
 	cloaking?: { outcome: "detected" | "unresolved"; detail: string };
+	/** Set when the captured page sat behind the kit's own "I'm not a robot" gate, which the capture clicked through. */
+	verificationGate?: { label: string };
 	/** Durable supplementary probe state; it never changes the phishing verdict. */
 	backendProbe?: {
 		status: "queued" | "running" | "completed" | "failed";

@@ -32,6 +32,8 @@ export type WebsiteArchiveResult = {
 	 * archive holds. `unresolved`: only the decoy could be captured.
 	 */
 	cloaking?: { outcome: "detected" | "unresolved"; detail: string };
+	/** Set when the captured page sat behind a fake verification gate that was clicked through. */
+	verificationGate?: WebsiteVerificationGate;
 	/** URL whose document body, screenshot, and MHTML are captured. */
 	url: string;
 	hostname: string;
@@ -59,6 +61,8 @@ export type ArchiveWebsiteOptions = {
 	navigationHops?: WebsiteNavigationHop[];
 	/** Only true for MHTML read back from this service's own stored artifact. */
 	trustMhtmlDocumentLocation?: boolean;
+	/** The verification gate the retained MHTML was captured behind, when known. */
+	verificationGate?: WebsiteVerificationGate;
 };
 
 /** Read a top-level MHTML header; MIME-part headers must never override capture metadata. */
@@ -130,6 +134,7 @@ async function archiveMhtmlSnapshot(options: ArchiveWebsiteOptions & { mhtmlSnap
 		html: Buffer.from(html, "utf-8"),
 		text: Buffer.from(text, "utf-8"),
 		...(attributionError ? { attributionError } : {}),
+		...(options.verificationGate ? { verificationGate: options.verificationGate } : {}),
 	};
 }
 
@@ -165,10 +170,22 @@ function compactText(value: string | undefined): string {
 	return value?.replace(/\s+/g, " ").trim() ?? "";
 }
 
+/**
+ * Inline styles that keep an element's text from any visitor. Kits pad pages
+ * with large blocks of such text (zero font size, zero opacity) so that a
+ * scanner reading the document sees harmless filler instead of the login form.
+ * Fractional values such as `opacity: 0.5` remain visible.
+ */
+const HIDING_INLINE_STYLE = /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)|opacity\s*:\s*0(?:\.0+)?|font-size\s*:\s*0(?:px|pt|em|rem|%)?)\s*(?:!\s*important\s*)?(?=;|$)/i;
+
 /** Sanitized HTML and visitor-readable text of a captured document. */
 export function capturedDocumentContent(documentHtml: string): { html: string; text: string } {
-	const dom = parse(documentHtml);
+	// The doctype parses as a text node and would otherwise lead the page text.
+	const dom = parse(documentHtml.replace(/^\s*<!DOCTYPE[^>]*>/i, ""), { comment: false });
 	dom.querySelectorAll("script, style, link, svg, noscript").forEach((element) => element.remove());
+	dom.querySelectorAll("[hidden], [style]")
+		.filter((element) => element.hasAttribute("hidden") || HIDING_INLINE_STYLE.test(element.getAttribute("style") ?? ""))
+		.forEach((element) => element.remove());
 	dom.querySelectorAll("*").forEach((element) => element.removeAttribute("style"));
 	const textDom = parse(dom.outerHTML);
 	inlineAttributeText(textDom);
@@ -190,6 +207,16 @@ export type WebsiteArchiveDependencies = {
 	scriptNavigationSettleMs?: number;
 	/** Test seam for the bounded wait on the captured document's own rendering requests. */
 	renderSettleMs?: number;
+};
+
+/**
+ * What a fake human-verification gate revealed: the kit's own "I'm not a robot"
+ * control, drawn in the page itself rather than in a captcha provider's frame,
+ * which only swaps in the real page once clicked.
+ */
+export type WebsiteVerificationGate = {
+	/** The control's own caption, e.g. "I'm not a robot". */
+	label: string;
 };
 
 export function navigationHopsFromResponse(
@@ -348,6 +375,79 @@ async function settleRendering(page: Page, settleMs: number): Promise<void> {
 	});
 }
 
+/**
+ * Finds a kit's own human-verification gate: a page showing no data-entry
+ * field, only a single clickable "I'm not a robot"/"verify you are human"
+ * control in the main document. Real captcha widgets live in their provider's
+ * iframe and are never matched here; Fabric handles Cloudflare Turnstile.
+ * Returns the control's caption, and marks the control so it can be clicked.
+ */
+const GATE_ATTRIBUTE = "data-phishing-support-gate";
+function findVerificationGate(): string | null {
+	const caption = /\b(?:i['’`]?\s*a?m\s+not\s+a\s+robot|verify\s+(?:that\s+)?you\s+are\s+(?:a\s+)?human|(?:confirm|prove)\s+(?:that\s+)?you(?:['’`]re|\s+are)\s+(?:a\s+)?human)\b/i;
+	const visible = (element: Element) => {
+		const box = element.getBoundingClientRect();
+		const style = getComputedStyle(element);
+		return box.width > 4 && box.height > 4 && style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0.1;
+	};
+	const fields = [...document.querySelectorAll("input:not([type=hidden]):not([type=checkbox]):not([type=submit]):not([type=button]), textarea, select")];
+	if (fields.some(visible)) return null;
+	const candidates = [...document.querySelectorAll("[role=button], [role=checkbox], button, input[type=checkbox], label, [tabindex]")]
+		.filter((element) => visible(element) && caption.test(`${element.getAttribute("aria-label") ?? ""} ${element.textContent ?? ""}`));
+	// The innermost control carrying the caption is the one a visitor clicks.
+	const controls = candidates.filter((element) => !candidates.some((other) => other !== element && element.contains(other)));
+	if (controls.length !== 1) return null;
+	const [control] = controls;
+	// Same value as GATE_ATTRIBUTE; this function runs in the page, not here.
+	control!.setAttribute("data-phishing-support-gate", "");
+	const label = (control!.getAttribute("aria-label") || control!.textContent || "").replace(/\s+/g, " ").trim();
+	return label.slice(0, 120) || "verification gate";
+}
+
+/**
+ * Clicks through a kit's fake verification gate, like a visitor would, and
+ * waits for the page it reveals. Returns the gate when one was clicked.
+ */
+async function passVerificationGate(page: Page, settleMs: number): Promise<WebsiteVerificationGate | undefined> {
+	const label = await page.evaluate(findVerificationGate).catch(() => null);
+	if (!label) return undefined;
+	const control = await page.$(`[${GATE_ATTRIBUTE}]`);
+	if (!control) return undefined;
+	try {
+		await control.click({ delay: 60 + Math.round(Math.random() * 80) });
+		// Gates verify against their own backend first (a proof of work, a
+		// warm-up call), then hide themselves and insert the real page. Wait for
+		// the gate to go, not for a quiet network: the proof of work is silent.
+		await page.waitForFunction((attribute: string) => {
+			const gate = document.querySelector(`[${attribute}]`);
+			if (!gate || !gate.isConnected) return true;
+			const box = gate.getBoundingClientRect();
+			return box.width === 0 || box.height === 0;
+		}, { timeout: settleMs, polling: 250 }, GATE_ATTRIBUTE).catch((error: unknown) => {
+			if (!(error instanceof TimeoutError)) throw error;
+		});
+		await settleRendering(page, settleMs);
+	} finally {
+		await control.dispose().catch(() => undefined);
+		await page.evaluate((attribute: string) => document.querySelector(`[${attribute}]`)?.removeAttribute(attribute), GATE_ATTRIBUTE).catch(() => undefined);
+	}
+	return { label };
+}
+
+/**
+ * The http(s) address a captured main-frame document belongs to. Kits that
+ * fetch their real page and swap it in through `location.replace(blob:...)`
+ * leave a blob: document of their own origin in the main frame; it is still the
+ * page the visitor loaded. Anything else that is not http(s), such as
+ * Chromium's own chrome-error:// page, belongs to no site.
+ */
+function documentAddress(pageUrl: string, loadedUrl: string): string | undefined {
+	const page = new URL(pageUrl);
+	if (/^https?:$/i.test(page.protocol)) return page.toString();
+	if (page.protocol === "blob:" && page.origin === new URL(loadedUrl).origin) return loadedUrl;
+	return undefined;
+}
+
 /** Hops of the loaded page followed by the hops of the document its script navigated to. */
 function scriptNavigationHops(loadedResponse: HTTPResponse | null, scriptResponse: HTTPResponse, capturedDocumentUrl: string): WebsiteNavigationHop[] {
 	const loadedUrl = loadedResponse?.url() ?? capturedDocumentUrl;
@@ -407,14 +507,17 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 		// A navigation the page started that ended in an HTTP error or a network
 		// failure leaves Chromium's own error document (chrome-error://) in the
 		// main frame. That is not a site: the destination was unreachable.
-		if (!/^https?:$/i.test(new URL(page.url()).protocol)) {
+		const loadedUrl = (scriptNavigation ?? navigationResponse)?.url() ?? url;
+		if (!documentAddress(page.url(), loadedUrl)) {
 			const failed = latestDocumentResponse !== navigationResponse ? latestDocumentResponse : null;
 			throw new WebsiteUnreachableError(egress, failed
 				? `the page sent the visitor to ${failed.request().redirectChain()[0]?.url() ?? failed.url()}, which ended in HTTP ${failed.status()} at ${failed.url()}`
 				: "the page's own navigation failed before reaching a site");
 		}
-		await settleRendering(page, dependencies.renderSettleMs ?? WEBSITE_RENDER_SETTLE_MS);
-		const screenshotUrl = page.url();
+		const renderSettleMs = dependencies.renderSettleMs ?? WEBSITE_RENDER_SETTLE_MS;
+		await settleRendering(page, renderSettleMs);
+		const verificationGate = await passVerificationGate(page, renderSettleMs);
+		const screenshotUrl = documentAddress(page.url(), loadedUrl);
 		const screenshotBytes = await page.screenshot({
 			fullPage: true,
 			captureBeyondViewport: true,
@@ -430,7 +533,7 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 			"utf-8",
 		);
 
-		const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? page.url();
+		const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? documentAddress(page.url(), loadedUrl) ?? page.url();
 		const capturedDocument = await archiveMhtmlSnapshot({
 			url,
 			archivedUrl: capturedDocumentUrl,
@@ -444,6 +547,7 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 		return {
 			...capturedDocument,
 			screenshotPng,
+			...(verificationGate ? { verificationGate } : {}),
 		};
 	} finally {
 		await browser.close();
@@ -451,10 +555,10 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 }
 
 export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencies: WebsiteArchiveDependencies = {}): Promise<WebsiteArchiveResult> {
-	const { url, mhtmlSnapshot, archivedUrl, navigationHops, trustMhtmlDocumentLocation } = options;
+	const { url, mhtmlSnapshot } = options;
 	console.log(`Archiving website ${url}`);
 	if (mhtmlSnapshot?.byteLength) {
-		return archiveMhtmlSnapshot({ url, mhtmlSnapshot, archivedUrl, navigationHops, trustMhtmlDocumentLocation });
+		return archiveMhtmlSnapshot({ ...options, mhtmlSnapshot });
 	}
 
 	const failures: WebsiteUnreachableError[] = [];

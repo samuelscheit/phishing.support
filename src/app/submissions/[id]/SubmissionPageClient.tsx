@@ -63,6 +63,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const isInvalidWebsite = statusKey === "invalid" && submission?.kind === "website" && Boolean(submission.info);
 	const redirectSubmissionId = submission?.data.kind === "website" ? submission.data.website.redirectSubmissionId : undefined;
 	const websiteCloaking = submission?.data.kind === "website" ? submission.data.website.cloaking : undefined;
+	const verificationGate = submission?.data.kind === "website" ? submission.data.website.verificationGate : undefined;
 
 	const isRunning = ["new", "queued", "running"].includes(statusKey);
 	const websiteNavigation = submission?.data.kind === "website" ? submission.data.website.navigationHops ?? [] : [];
@@ -405,6 +406,9 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured" : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
 														</div>
 														{hop.redirectTo ? <div className="break-all text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
+														{verificationGate && hop.contentCaptured ? (
+															<div className="text-xs text-muted-foreground">Behind the page's own “{verificationGate.label}” gate, clicked to reveal it</div>
+														) : null}
 														{redirectSubmissionId && hop.contentCaptured ? (
 															<Link href={`/submissions/${redirectSubmissionId}`} className="inline-block text-xs font-medium text-primary hover:underline">
 																Analyzed in its own case →

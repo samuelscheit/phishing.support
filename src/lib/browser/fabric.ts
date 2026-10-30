@@ -315,10 +315,54 @@ async function acquireFabricSession(
 	return sessionId;
 }
 
+const SESSION_HEARTBEAT_MS = 10_000;
+/** How long a client waits for a free relay connection before giving up on its session. */
+const RELAY_CAPACITY_WAIT_MS = 5 * 60_000;
+const RELAY_CAPACITY_RETRY_MS = 2_000;
+
+/**
+ * The relay refuses a WebSocket upgrade with HTTP 503 while all of its
+ * connections are taken; CDP clients report that as a failed handshake.
+ */
+export function isRelayCapacityError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return /Expected 101 status code|Unexpected server response: 503/i.test(message);
+}
+
+/**
+ * Open a CDP client through the relay, waiting while the relay is at capacity
+ * (long-running Skyvern probes can hold several connections). The allocated
+ * session is kept alive meanwhile, so a busy relay delays work instead of
+ * failing it.
+ */
+export async function connectThroughRelay<T>(
+	connect: () => Promise<T>,
+	heartbeat: () => Promise<void>,
+	options: { waitMs?: number; retryMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<T> {
+	const waitMs = options.waitMs ?? RELAY_CAPACITY_WAIT_MS;
+	const retryMs = options.retryMs ?? RELAY_CAPACITY_RETRY_MS;
+	const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+	const deadline = Date.now() + waitMs;
+	let lastHeartbeat = Date.now();
+	for (;;) {
+		try {
+			return await connect();
+		} catch (error) {
+			if (!isRelayCapacityError(error) || Date.now() >= deadline) throw error;
+		}
+		await sleep(retryMs);
+		if (Date.now() - lastHeartbeat >= SESSION_HEARTBEAT_MS) {
+			lastHeartbeat = Date.now();
+			await heartbeat().catch(() => undefined);
+		}
+	}
+}
+
 function startSessionHeartbeat(config: FabricBrowserConfig, sessionId: string): () => void {
 	const timer = setInterval(() => {
 		void sessionAction(config, sessionId, "heartbeat").catch(() => undefined);
-	}, 10_000);
+	}, SESSION_HEARTBEAT_MS);
 	timer.unref?.();
 	return () => clearInterval(timer);
 }
@@ -433,10 +477,10 @@ export async function acquireFabricPuppeteerBrowser(
 	let browser: PuppeteerBrowser;
 	try {
 		const module = await import("rebrowser-puppeteer-core");
-		browser = await module.connect({
-			browserWSEndpoint: fabricRelayEndpoint(sessionId),
-			acceptInsecureCerts: true,
-		});
+		browser = await connectThroughRelay(
+			() => module.connect({ browserWSEndpoint: fabricRelayEndpoint(sessionId), acceptInsecureCerts: true }),
+			() => sessionAction(config, sessionId, "heartbeat"),
+		);
 	} catch (error) {
 		await sessionAction(config, sessionId, "cancel").catch(() => undefined);
 		throw error;
@@ -479,7 +523,10 @@ export async function acquireFabricPatchrightSession(
 	let browser: any;
 	try {
 		const { chromium } = await import("patchright");
-		browser = await chromium.connectOverCDP(fabricRelayEndpoint(sessionId));
+		browser = await connectThroughRelay(
+			() => chromium.connectOverCDP(fabricRelayEndpoint(sessionId)),
+			() => sessionAction(config, sessionId, "heartbeat"),
+		);
 		await allowInsecureCertificates(browser);
 		const context = browser.contexts()[0];
 		if (!context) throw new Error("Fabric browser did not expose its leased profile context");

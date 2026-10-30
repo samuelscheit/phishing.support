@@ -1,6 +1,6 @@
 import * as toon from "@toon-format/toon";
 import type { ResponseFormatTextJSONSchemaConfig } from "openai/resources/responses/responses.mjs";
-import { archiveWebsite } from "./website_archive";
+import { archiveWebsite, type WebsiteVerificationGate } from "./website_archive";
 import { SubmissionsEntity, ArtifactsEntity } from "./db/entities";
 import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun, type AnalysisClient } from "./analysis_run";
@@ -30,6 +30,7 @@ type WebsiteEvidenceArchive = {
 	url: string;
 	hostname: string;
 	navigationHops: WebsiteNavigationHop[];
+	verificationGate?: WebsiteVerificationGate;
 	html: Buffer;
 	text: Buffer;
 	screenshotPng?: Buffer;
@@ -54,7 +55,8 @@ Navigation hops, recorded individually: HTTP redirect responses, and pages whose
 ${toon.encode(archive.navigationHops.map(({ index, url, status, redirectTo, contentCaptured }) => ({ index, url, status, redirect_to: redirectTo, page_content_captured_for_this_hop: contentCaptured })))}
 
 Only this final URL's page content was captured: ${archive.url}
-<captured_document_url>${archive.url}</captured_document_url>
+${archive.verificationGate ? `The page first showed only its own human-verification control (${JSON.stringify(archive.verificationGate.label)}), drawn by the page itself rather than by a captcha provider; the capture clicked it, as a visitor would, and the content below is what the page then showed.
+` : ""}<captured_document_url>${archive.url}</captured_document_url>
 <website_text>
 ${archive.text.toString("utf-8").slice(0, 10000)}
 </website_text>
@@ -302,6 +304,8 @@ export type AnalyzeWebsiteOptions = {
 	trustMhtmlDocumentLocation?: boolean;
 	/** Existing evidence screenshot used when a retry parses MHTML locally. */
 	screenshotSnapshot?: Buffer;
+	/** The verification gate retained MHTML was captured behind. */
+	verificationGate?: WebsiteVerificationGate;
 	/** Reuse the existing website archive artifacts instead of writing duplicates. */
 	reuseEvidenceArtifacts?: boolean;
 	url: string;
@@ -339,6 +343,7 @@ async function handOffRedirectedCapture(params: {
 		archivedUrl: archive.url,
 		navigationHops,
 		screenshotSnapshot: archive.screenshotPng,
+		verificationGate: archive.verificationGate,
 		...params.reporter,
 	}, (options) => analyzeWebsite(options, params.dependencies));
 	await SubmissionsEntity.update(submissionId, {
@@ -383,6 +388,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			archivedUrl: options.archivedUrl,
 			navigationHops: options.navigationHops,
 			trustMhtmlDocumentLocation: options.trustMhtmlDocumentLocation,
+			verificationGate: options.verificationGate,
 		}), 2, 3000);
 		const archive = captured.screenshotPng || !options.screenshotSnapshot
 			? captured
@@ -421,7 +427,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
-				website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, ...(archive.cloaking ? { cloaking: archive.cloaking } : {}) },
+				website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, ...(archive.cloaking ? { cloaking: archive.cloaking } : {}), ...(archive.verificationGate ? { verificationGate: archive.verificationGate } : {}) },
 			},
 		});
 
@@ -455,7 +461,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
-				website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, siteAssessments, ...(archive.cloaking ? { cloaking: archive.cloaking } : {}) },
+				website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, siteAssessments, ...(archive.cloaking ? { cloaking: archive.cloaking } : {}), ...(archive.verificationGate ? { verificationGate: archive.verificationGate } : {}) },
 			},
 		});
 
