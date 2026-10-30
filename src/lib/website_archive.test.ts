@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Browser, BrowserContext, HTTPRequest, HTTPResponse, Page } from "rebrowser-puppeteer-core";
+import { type Browser, type BrowserContext, type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
 import type { FabricEgress } from "./browser/fabric";
 import type { WebsiteNavigationHop } from "./website_types";
 
@@ -132,10 +132,13 @@ type FixtureNavigation = {
 
 function archiveBrowserFixture(options: {
 	goto?: (navigation: FixtureNavigation) => Promise<HTTPResponse | null>;
+	/** How the page's network goes idle; may render the document's body meanwhile. */
+	networkIdle?: (wait: { timeout?: number; render: (body: string) => void }) => Promise<void>;
 	pageUrl?: string;
 } = {}) {
 	const eventNames: string[] = [];
 	const navigationCalls: Array<{ url: string; egress: FabricEgress; waitUntil?: string; timeout?: number }> = [];
+	const networkIdleWaits: Array<{ idleTime?: number; concurrency?: number; timeout?: number }> = [];
 	const leasedEgress: FabricEgress[] = [];
 	let interceptionEnabled = false;
 	let screenshotCount = 0;
@@ -146,6 +149,7 @@ function archiveBrowserFixture(options: {
 		leasedEgress.push(egress);
 		const responseListeners: Array<(response: HTTPResponse) => void> = [];
 		let currentUrl = options.pageUrl ?? "https://example.test/";
+		let body = "Captured page text";
 		const context = {} as BrowserContext;
 		const page = {
 			browser: () => browser,
@@ -169,6 +173,10 @@ function archiveBrowserFixture(options: {
 				if (response) deliver(response);
 				return response;
 			},
+			waitForNetworkIdle: async (wait: { idleTime?: number; concurrency?: number; timeout?: number }) => {
+				networkIdleWaits.push(wait);
+				await options.networkIdle?.({ timeout: wait.timeout, render: (html) => { body = html; } });
+			},
 			screenshot: async () => { screenshotCount++; return Buffer.from("png"); },
 			target: () => ({
 				createCDPSession: async () => ({
@@ -185,7 +193,7 @@ function archiveBrowserFixture(options: {
 								"Content-Type: text/html",
 								`Content-Location: ${currentUrl}`,
 								"",
-								"<html><head><title>Captured title</title></head><body>Captured page text</body></html>",
+								`<html><head><title>Captured title</title></head><body>${body}</body></html>`,
 								"--archive-test--",
 							].join("\r\n"),
 						};
@@ -210,6 +218,7 @@ function archiveBrowserFixture(options: {
 		getBrowser,
 		eventNames,
 		navigationCalls,
+		networkIdleWaits,
 		leasedEgress,
 		get interceptionEnabled() { return interceptionEnabled; },
 		get screenshotCount() { return screenshotCount; },
@@ -304,6 +313,85 @@ test("a failure after the page loaded is not retried on another egress", async (
 	await expect(archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser })).rejects.toThrow("Protocol error (Page.captureScreenshot)");
 	expect(fixture.leasedEgress).toEqual(["phishing"]);
 	expect(fixture.closeCount).toBe(1);
+});
+
+describe("rendering", () => {
+	// A Flazio site builder page: the document is a shell, and the login form
+	// arrives through XHR after DOMContentLoaded.
+	const url = "https://microsoftoutlook.flazio.online/";
+	const form = "<form><h1>Melden Sie sich bei Ihrem Microsoft-Konto an</h1><input type=\"email\" placeholder=\"E-Mail-Adresse\"><input type=\"password\" placeholder=\"Passwort\"></form>";
+
+	test("waits for the page's own requests to finish so the capture holds the form they render", async () => {
+		const fixture = archiveBrowserFixture({
+			pageUrl: url,
+			networkIdle: async ({ render }) => {
+				await Bun.sleep(5);
+				render(form);
+			},
+		});
+
+		const archive = await archiveWebsite({ url }, { ...fast, getBrowser: fixture.getBrowser });
+
+		expect(archive.text.toString()).toContain("Melden Sie sich bei Ihrem Microsoft-Konto an");
+		expect(archive.text.toString()).toContain("E-Mail-Adresse");
+		expect(archive.text.toString()).toContain("Passwort");
+		expect(fixture.networkIdleWaits).toEqual([{ idleTime: 1_000, concurrency: 2, timeout: 10_000 }]);
+	});
+
+	test("a page that never goes quiet is captured as it stands once the bound passes", async () => {
+		const fixture = archiveBrowserFixture({
+			pageUrl: url,
+			networkIdle: async ({ timeout, render }) => {
+				render(form);
+				await Bun.sleep(timeout ?? 0);
+				throw new TimeoutError(`Timed out after waiting ${timeout}ms`);
+			},
+		});
+
+		const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 20, getBrowser: fixture.getBrowser });
+
+		expect(archive.text.toString()).toContain("E-Mail-Adresse");
+		expect(fixture.networkIdleWaits).toEqual([{ idleTime: 20, concurrency: 2, timeout: 20 }]);
+		expect(fixture.leasedEgress).toEqual(["phishing"]);
+		expect(fixture.screenshotCount).toBe(1);
+	});
+
+	test("a browser failure while waiting is not mistaken for a slow page", async () => {
+		const fixture = archiveBrowserFixture({
+			pageUrl: url,
+			networkIdle: async () => { throw new Error("Protocol error: Target closed"); },
+		});
+
+		await expect(archiveWebsite({ url }, { ...fast, getBrowser: fixture.getBrowser })).rejects.toThrow("Target closed");
+		expect(fixture.leasedEgress).toEqual(["phishing"]);
+		expect(fixture.screenshotCount).toBe(0);
+		expect(fixture.closeCount).toBe(1);
+	});
+
+	test("waits on the document a cloaker's script navigated to, not on the interstitial", async () => {
+		const interstitial = "https://interstitial.example/";
+		const events: string[] = [];
+		const fixture = archiveBrowserFixture({
+			pageUrl: interstitial,
+			goto: async ({ replaceDocument }) => {
+				setTimeout(() => {
+					events.push("script navigation");
+					replaceDocument(responseForNavigation("https://interstitial.example/login", 200, { contentType: "text/html" }));
+				}, 5);
+				return responseForNavigation(interstitial, 200, { contentType: "text/html" });
+			},
+			networkIdle: async ({ render }) => {
+				events.push("render");
+				render(form);
+			},
+		});
+
+		const archive = await archiveWebsite({ url: interstitial }, { scriptNavigationSettleMs: 1_100, getBrowser: fixture.getBrowser });
+
+		expect(events).toEqual(["script navigation", "render"]);
+		expect(archive.url).toBe("https://interstitial.example/login");
+		expect(archive.text.toString()).toContain("E-Mail-Adresse");
+	});
 });
 
 test("an HTTP error over Tor is retried from the server's direct exit", async () => {

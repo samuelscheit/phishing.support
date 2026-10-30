@@ -1,4 +1,4 @@
-import type { HTTPRequest, HTTPResponse, Page } from "rebrowser-puppeteer-core";
+import { type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
 import { getDomain } from "tldts";
 
 import { getBrowser, getBrowserPage } from "./browser";
@@ -188,6 +188,8 @@ export type WebsiteArchiveDependencies = {
 	errorDocumentSettleMs?: number;
 	/** Test seam for the bounded wait on a page's own script navigation. */
 	scriptNavigationSettleMs?: number;
+	/** Test seam for the bounded wait on the captured document's own rendering requests. */
+	renderSettleMs?: number;
 };
 
 export function navigationHopsFromResponse(
@@ -257,6 +259,12 @@ const WEBSITE_ERROR_DOCUMENT_SETTLE_MS = 20_000;
 const WEBSITE_ERROR_DOCUMENT_POLL_MS = 500;
 /** How long a loaded page may take before its own script navigates the main frame elsewhere. */
 const WEBSITE_SCRIPT_NAVIGATION_SETTLE_MS = 8_000;
+/** How long the captured document may keep fetching what it renders before it is captured as it stands. */
+const WEBSITE_RENDER_SETTLE_MS = 10_000;
+/** A quiet network for this long means the page's script has fetched what it renders. */
+const WEBSITE_RENDER_IDLE_MS = 1_000;
+/** Requests that may stay open while the page counts as rendered: analytics beacons, long polls, captcha widgets. */
+const WEBSITE_RENDER_IDLE_CONCURRENCY = 2;
 
 /**
  * The site's main document could not be loaded over one egress route: the
@@ -327,6 +335,19 @@ async function settleScriptNavigation(
 	return undefined;
 }
 
+/**
+ * Site builders and single-page apps serve a shell and build the visible page
+ * (a login form, for example) from XHR responses after DOMContentLoaded. Wait
+ * until those requests are done so the capture holds what a visitor sees, but
+ * never let a request that stays open hold the analysis: past the bound, the
+ * document is captured as it stands.
+ */
+async function settleRendering(page: Page, settleMs: number): Promise<void> {
+	await page.waitForNetworkIdle({ idleTime: Math.min(WEBSITE_RENDER_IDLE_MS, settleMs), concurrency: WEBSITE_RENDER_IDLE_CONCURRENCY, timeout: settleMs }).catch((error: unknown) => {
+		if (!(error instanceof TimeoutError)) throw error;
+	});
+}
+
 /** Hops of the loaded page followed by the hops of the document its script navigated to. */
 function scriptNavigationHops(loadedResponse: HTTPResponse | null, scriptResponse: HTTPResponse, capturedDocumentUrl: string): WebsiteNavigationHop[] {
 	const loadedUrl = loadedResponse?.url() ?? capturedDocumentUrl;
@@ -357,9 +378,10 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 			}
 		});
 
-		// Capture once the document exists; a stalled image or third-party resource
-		// must not hold the entire analysis open. Fabric owns browser egress, so this
-		// evidence-only navigation does not need an app-level interception layer.
+		// Navigation completes once the document exists; a stalled image or
+		// third-party resource must not hold the entire analysis open. Fabric owns
+		// browser egress, so this evidence-only navigation does not need an
+		// app-level interception layer.
 		let navigationResponse = await page.goto(url, {
 			waitUntil: "domcontentloaded",
 			timeout: WEBSITE_NAVIGATION_TIMEOUT_MS,
@@ -391,6 +413,7 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 				? `the page sent the visitor to ${failed.request().redirectChain()[0]?.url() ?? failed.url()}, which ended in HTTP ${failed.status()} at ${failed.url()}`
 				: "the page's own navigation failed before reaching a site");
 		}
+		await settleRendering(page, dependencies.renderSettleMs ?? WEBSITE_RENDER_SETTLE_MS);
 		const screenshotUrl = page.url();
 		const screenshotBytes = await page.screenshot({
 			fullPage: true,
