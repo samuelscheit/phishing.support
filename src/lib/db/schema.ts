@@ -39,6 +39,8 @@ export type WebsiteSubmissionData = {
 	verificationGate?: { label: string };
 	/** Same-host scripts and stylesheets received by the live capture; absent for uploaded or retained MHTML. */
 	kitResources?: WebsiteKitResource[];
+	/** Set when the browser service (not the site) failed; the analysis is re-queued automatically. */
+	autoRetry?: { attempts: number; nextAttemptAt: string; reason: string };
 	/** Durable supplementary probe state; it never changes the phishing verdict. */
 	backendProbe?: {
 		status: "queued" | "running" | "completed" | "failed";

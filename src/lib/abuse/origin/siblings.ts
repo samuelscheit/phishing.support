@@ -7,6 +7,7 @@ import { normalizeDomain, normalizePublicHttpUrl } from "../security";
 import { throwIfAborted } from "../worker/shared";
 import { mapConcurrent } from "./concurrency";
 import { certificateCovers, presentedCertificate, type OriginServer, type PresentedCertificate, type TlsProbe } from "./sweep";
+import { errorSummary } from "../../error_text";
 
 const MAX_FINGERPRINTS = 5;
 const MAX_CANDIDATES = 100;
@@ -124,10 +125,6 @@ async function searchUrlscan(hash: string, apiKey: string | undefined, dependenc
 	return parsed.data.results;
 }
 
-function detail(error: unknown): string {
-	return (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").slice(0, 500);
-}
-
 /**
  * Find domains serving an exact copy of the kit's own files. A hash counts
  * only when it is rare on urlscan, and a candidate must share at least one
@@ -156,7 +153,7 @@ export async function findKitSiblingCandidates(params: {
 			results = await searchUrlscan(fingerprint.sha256, apiKey, dependencies);
 		} catch (error) {
 			if (error instanceof RequestTimeoutError || error instanceof RequestStatusError && (error.status === 429 || error.status >= 500)) throw error;
-			errors.push(`urlscan ${fingerprint.sha256.slice(0, 12)}: ${detail(error)}`);
+			errors.push(`urlscan ${fingerprint.sha256.slice(0, 12)}: ${errorSummary(error)}`);
 			continue;
 		}
 		const domains = new Map<string, string>();

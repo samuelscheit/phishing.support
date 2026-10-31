@@ -6,6 +6,7 @@ import { decodeImageEvidence, normalizeAbuseTarget, normalizeObservedUrl, type D
 import { AbuseInputError, hashStableJson, isPublicIp, sha256Hex } from "./security";
 import { setExfiltrationProbeStatus } from "../exfiltration/status";
 import { enqueueKitSiblingDiscovery } from "./origin/kit_job";
+import { errorText } from "../error_text";
 
 const MAX_REPORT_DESCRIPTION_LENGTH = 30_000;
 /** Netcraft's documented raw-message limit, which is also the strictest mail-evidence consumer. */
@@ -151,7 +152,7 @@ export async function reportConfirmedWebsitePhishing(params: ConfirmedWebsitePhi
 				dedupeKey: `probe-exfiltration:${created.reportId.toString()}`,
 			});
 		} catch (error) {
-			await setExfiltrationProbeStatus(params.submissionId, { status: "failed", lastError: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
+			await setExfiltrationProbeStatus(params.submissionId, { status: "failed", lastError: errorText(error), updatedAt: new Date().toISOString() });
 			throw error;
 		}
 	}

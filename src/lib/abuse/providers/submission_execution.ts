@@ -13,6 +13,7 @@ import {
 	type ProviderSubmissionSuccess,
 } from "./submission_contracts";
 import { throwIfAborted } from "../worker/shared";
+import { errorText as describeError } from "../../error_text";
 
 export type ProviderSubmissionExecutionResult =
 	| { outcome: "submitted"; runId: bigint }
@@ -36,7 +37,7 @@ export class ProviderSubmissionUnknownExternalStateError extends Error {
 }
 
 function errorText(error: unknown): string {
-	return (error instanceof Error ? error.message : String(error)).slice(0, 2_000);
+	return describeError(error).slice(0, 2_000);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

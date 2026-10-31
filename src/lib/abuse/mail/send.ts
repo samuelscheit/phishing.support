@@ -12,6 +12,7 @@ import {
 	type CanonicalAbuseMail,
 	SafeEmailDeliveryFailure,
 } from "./types";
+import { errorText } from "../../error_text";
 
 const HEADER_BREAK = /[\r\n\u0000]/;
 const MAILBOX = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
@@ -165,7 +166,7 @@ export async function sendAbuseEmailRoute(params: {
 		});
 	} catch (error) {
 		throw new SafeEmailDeliveryFailure(
-			`Unable to prepare the canonical abuse email before SMTP: ${error instanceof Error ? error.message : String(error)}`,
+			`Unable to prepare the canonical abuse email before SMTP: ${errorText(error)}`,
 			{ cause: error },
 		);
 	}
@@ -176,7 +177,7 @@ export async function sendAbuseEmailRoute(params: {
 			await AbuseRepository.settleOutboundMail({ messageId: storedMessageId, status: "failed", error: "SMTP transport is not configured." });
 		} catch (error) {
 			throw new SafeEmailDeliveryFailure(
-				`SMTP is not configured and the local failed-delivery record could not be stored: ${error instanceof Error ? error.message : String(error)}`,
+				`SMTP is not configured and the local failed-delivery record could not be stored: ${errorText(error)}`,
 				{ cause: error },
 			);
 		}
@@ -187,7 +188,7 @@ export async function sendAbuseEmailRoute(params: {
 	try {
 		result = await transport.sendMail({ raw: mail.rawMime, envelope: { from: mail.from, to: mail.to } });
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
+		const message = errorText(error);
 		if (isKnownSmtpRejection(error)) {
 			try {
 				await AbuseRepository.settleOutboundMail({ messageId: storedMessageId, status: "failed", error: message });
@@ -196,7 +197,7 @@ export async function sendAbuseEmailRoute(params: {
 				// failure here remains safe to recover and retry with the same route
 				// correlation identity.
 				throw new SafeEmailDeliveryFailure(
-					`SMTP rejected the message but the local failed-delivery record could not be stored: ${settlementError instanceof Error ? settlementError.message : String(settlementError)}`,
+					`SMTP rejected the message but the local failed-delivery record could not be stored: ${errorText(settlementError)}`,
 					{ cause: settlementError },
 				);
 			}
@@ -219,7 +220,7 @@ export async function sendAbuseEmailRoute(params: {
 		return {
 			messageId: storedMessageId,
 			status: "unknown_external_state",
-			error: `SMTP accepted the message but local settlement failed: ${error instanceof Error ? error.message : String(error)}`,
+			error: `SMTP accepted the message but local settlement failed: ${errorText(error)}`,
 			rfcMessageId: result.messageId ?? mail.messageId,
 		};
 	}

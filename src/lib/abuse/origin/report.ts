@@ -14,6 +14,7 @@ import { resolveOriginHostNetworks } from "./network";
 import { discoverSiblingDomains, type SiblingDiscoveryResult } from "./siblings";
 import { originSweepProgressSchema, readOriginHostSnapshot, type OriginHostSnapshot, type OriginSweepProgress } from "./snapshot";
 import { findOriginServers, MAX_ORIGIN_RESULTS, originSweepAddresses, planOriginSweep, SWEEP_SLICE_ADDRESSES, type OriginSweepPlan } from "./sweep";
+import { errorSummary } from "../../error_text";
 
 const ORIGIN_ROUTE_PROVIDER_KEY = "origin-host-email";
 const ORIGIN_EVIDENCE_KIND = "origin_host_evidence";
@@ -30,10 +31,6 @@ export type OriginHostReportDependencies = {
 	/** Addresses one invocation sweeps before queueing its successor. */
 	sliceAddresses?: number;
 };
-
-function errorDetail(error: unknown): string {
-	return (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").slice(0, 500);
-}
 
 function containingPrefix(ip: string, prefixes: OriginSweepPlan["selectedPrefixes"]) {
 	try {
@@ -205,7 +202,7 @@ export async function reportOriginHost(params: {
 			const resolution = await (dependencies.resolveNetworks ?? resolveOriginHostNetworks)(disclosure.recipient, params.signal);
 			progress = { networks: resolution.networks, offset: 0, servers: [], errors: resolution.errors.slice(0, MAX_ERRORS) };
 		} catch (error) {
-			progress = { networks: [], offset: 0, servers: [], errors: [`network attribution: ${errorDetail(error)}`] };
+			progress = { networks: [], offset: 0, servers: [], errors: [`network attribution: ${errorSummary(error)}`] };
 		}
 	}
 	const sweepPlan = planOriginSweep(progress.networks.flatMap((network) =>
@@ -224,7 +221,7 @@ export async function reportOriginHost(params: {
 			}));
 		} catch (error) {
 			throwIfAborted(params.signal);
-			errors.push(`TLS sweep at offset ${progress.offset}: ${errorDetail(error)}`);
+			errors.push(`TLS sweep at offset ${progress.offset}: ${errorSummary(error)}`);
 		}
 		const next: OriginSweepProgress = {
 			networks: progress.networks,
@@ -278,7 +275,7 @@ async function completeOriginHostReport(params: {
 			});
 			errors.push(...siblingDiscovery.errors);
 		} catch (error) {
-			errors.push(`sibling discovery: ${errorDetail(error)}`);
+			errors.push(`sibling discovery: ${errorSummary(error)}`);
 		}
 	}
 
@@ -298,7 +295,7 @@ async function completeOriginHostReport(params: {
 			const siblingRegisteredAt = await registeredAt(sibling.domain).catch(() => undefined);
 			siblingSubmissions.push({ ...sibling, ...(siblingRegisteredAt ? { registeredAt: siblingRegisteredAt } : {}), submissionId: submissionId.toString() });
 		} catch (error) {
-			errors.push(`sibling ${sibling.domain}: ${errorDetail(error)}`);
+			errors.push(`sibling ${sibling.domain}: ${errorSummary(error)}`);
 		}
 	}
 
@@ -308,7 +305,7 @@ async function completeOriginHostReport(params: {
 		try {
 			kit = await (dependencies.kitFacts ?? capturedKitFacts)(report.submissionId);
 		} catch (error) {
-			errors.push(`kit facts: ${errorDetail(error)}`);
+			errors.push(`kit facts: ${errorSummary(error)}`);
 		}
 		originalDomainRegisteredAt = await submissionRegisteredAt(report.submissionId).catch(() => undefined);
 	}

@@ -1,4 +1,5 @@
 import { fetchJson, RequestTimeoutError, type FetchImplementation } from "../network/bounded_fetch";
+import { errorText } from "../error_text";
 
 export const NETCRAFT_REPORT_URLS_URL = "https://report.netcraft.com/api/v3/report/urls";
 export const NETCRAFT_REPORT_MAIL_URL = "https://report.netcraft.com/api/v3/report/mail";
@@ -186,7 +187,7 @@ async function fetchNetcraftJson(
 		if (error instanceof RequestTimeoutError) {
 			throw new Error(`Netcraft ${label} request timed out.`);
 		}
-		const message = error instanceof Error ? error.message : String(error);
+		const message = errorText(error);
 		if (/not valid JSON/i.test(message)) throw new Error(`Netcraft ${label} request returned malformed JSON.`);
 		throw new Error(`Netcraft ${label} request failed: ${message}`);
 	}

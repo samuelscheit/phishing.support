@@ -1,5 +1,6 @@
 import { fetchJson, withTimeout, type FetchImplementation } from "./bounded_fetch";
 import { isIP } from "node:net";
+import { errorText } from "../error_text";
 
 const GLOBALPING_MEASUREMENTS_URL = "https://api.globalping.io/v1/measurements";
 const DEFAULT_COUNTRIES = ["BR", "DE", "JP", "US"] as const;
@@ -209,7 +210,7 @@ async function collectRegionalDns(
 			results: [],
 			resolvedAddresses: [],
 			geographicallyScoped: false,
-			error: error instanceof Error ? error.message : String(error),
+			error: errorText(error),
 		};
 	}
 }
@@ -236,7 +237,7 @@ export async function resolveRegionalDns(
 			results: [],
 			resolvedAddresses: [],
 			geographicallyScoped: false,
-			error: error instanceof Error ? error.message : String(error),
+			error: errorText(error),
 		};
 	}
 }

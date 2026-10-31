@@ -4,6 +4,7 @@ import { isPublicIp } from "../security";
 import type { ResolvedRouteInput } from "../route_contracts";
 import { resolveIpTarget } from "./ip";
 import type { JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
+import { errorText } from "../../error_text";
 
 const MAX_INFRASTRUCTURE_IPS = 16;
 
@@ -16,10 +17,6 @@ export type DomainInfrastructureResolution = {
 	routes: ResolvedRouteInput[];
 	snapshot: JsonRecord;
 };
-
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
 
 function isRecord(value: unknown): value is JsonRecord {
 	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -44,7 +41,7 @@ async function lookupInfrastructureAddresses(domain: string, dependencies: Resol
 			records.combined = { addresses: rawAddresses };
 			if (!Array.isArray(resolved)) errors.push({ source: "dependency", error: "Domain address resolver returned a non-array result." });
 		} catch (error) {
-			errors.push({ source: "dependency", error: errorMessage(error) });
+			errors.push({ source: "dependency", error: errorText(error) });
 		}
 	} else {
 		source = "dns";
@@ -54,7 +51,7 @@ async function lookupInfrastructureAddresses(domain: string, dependencies: Resol
 				records[recordType] = { addresses: result.value };
 				rawAddresses.push(...result.value);
 			} else {
-				const error = errorMessage(result.reason);
+				const error = errorText(result.reason);
 				records[recordType] = { error };
 				errors.push({ recordType, error });
 			}
@@ -202,7 +199,7 @@ export async function resolveDomainInfrastructure(target: ResolverTarget, depend
 				ip,
 				status: "failed" as const,
 				disposition: "resolver_failed",
-				resolverSnapshot: { target: ip, error: errorMessage(error) },
+				resolverSnapshot: { target: ip, error: errorText(error) },
 				routes: [],
 			};
 		}

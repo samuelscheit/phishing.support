@@ -7,7 +7,7 @@ import { abuseJobs } from "./abuse/schema";
 import { getDb } from "./db";
 import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
 import { useTemporaryDatabase } from "./db/test_helpers";
-import { createWebsiteSubmission } from "./submissions/website";
+import { createWebsiteSubmission, runDueWebsiteAutoRetries } from "./submissions/website";
 import type { WebsiteArchiveResult } from "./website_archive";
 import { analyzeWebsite, capturedHostNavigation, websiteReportUrls, websiteSiteAssessments, type WebsiteAnalysisDependencies } from "./website_ai";
 import type { WebsiteNavigationHop } from "./website_types";
@@ -272,5 +272,90 @@ describe("cloaked websites", () => {
 		expect(modelCalls).toBe(0);
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
 		expect((await ArtifactsEntity.listForSubmission(id)).map((artifact) => artifact.kind).sort()).toEqual(["website_mhtml", "website_png"]);
+	});
+});
+
+describe("browser-service failures", () => {
+	const url = "https://app.karntappkrakurl.es/naivator/captcha/sign-in.php";
+	// What puppeteer under Bun rejects with when the relay is full: an ErrorEvent, not an Error.
+	const relayFull = () => Object.assign(new Event("error"), { message: "Unexpected server response: 503" });
+
+	test("a capture that loses the browser is retried with backoff and then succeeds", async () => {
+		const archive = archiveOf([hop(0, url, 200)]);
+		let attempts = 0;
+		const id = await websiteSubmission(374703356112802863n, url);
+
+		await analyzeWebsite({ submissionId: id, url }, {
+			...dependencies(archive),
+			browserBackoffMs: [1, 1, 1],
+			archiveWebsite: async () => {
+				attempts++;
+				if (attempts === 1) throw relayFull();
+				if (attempts === 2) throw new Error("Protocol error (Target.getBrowserContexts): Target closed");
+				return archive;
+			},
+		});
+
+		expect(attempts).toBe(3);
+		expect((await SubmissionsEntity.get(id))?.status).toBe("reported");
+	});
+
+	test("a lasting browser outage fails with a readable reason and is retried automatically, at most three times", async () => {
+		const id = await websiteSubmission(374703356112802864n, url);
+		const failing = { ...dependencies(archiveOf([hop(0, url, 200)])), browserBackoffMs: [1], archiveWebsite: async () => { throw relayFull(); } };
+		const run = () => analyzeWebsite({ submissionId: id, url }, failing);
+		const autoRetryOf = async () => {
+			const submission = (await SubmissionsEntity.get(id))!;
+			return { submission, autoRetry: submission.data.kind === "website" ? submission.data.website.autoRetry : undefined };
+		};
+
+		await run();
+		let { submission, autoRetry } = await autoRetryOf();
+		expect(submission.status).toBe("failed");
+		expect(submission.info).toStartWith("The browser service failed (Unexpected server response: 503); retrying automatically at ");
+		expect(submission.info).toEndWith(" UTC (attempt 1 of 3).");
+		expect(submission.info).not.toContain("[object");
+		expect(autoRetry).toMatchObject({ attempts: 1, reason: "Unexpected server response: 503" });
+		const dueAt = new Date(autoRetry!.nextAttemptAt);
+		expect(dueAt.getTime() - Date.now()).toBeGreaterThan(9 * 60_000);
+
+		// Not due yet: nothing is started.
+		const started: bigint[] = [];
+		const startAnalysis = async (options: { submissionId: bigint }) => { started.push(options.submissionId); };
+		expect(await runDueWebsiteAutoRetries({ now: new Date(dueAt.getTime() - 1_000), startAnalysis })).toBe(0);
+		// Due: re-queued through the normal retry boundary.
+		expect(await runDueWebsiteAutoRetries({ now: dueAt, startAnalysis })).toBe(1);
+		expect(started).toEqual([id]);
+		expect((await SubmissionsEntity.get(id))?.status).toBe("queued");
+
+		// The second and third outages keep counting; the fourth gives up.
+		await run();
+		expect((await autoRetryOf()).autoRetry?.attempts).toBe(2);
+		await run();
+		expect((await autoRetryOf()).autoRetry?.attempts).toBe(3);
+		await run();
+		({ submission, autoRetry } = await autoRetryOf());
+		expect(submission.status).toBe("failed");
+		expect(submission.info).toBe("Unexpected server response: 503 The browser service failed 4 times in a row; retry once it has recovered.");
+		expect(autoRetry).toBeUndefined();
+		expect(await runDueWebsiteAutoRetries({ now: new Date(Date.now() + 24 * 60 * 60_000), startAnalysis })).toBe(0);
+	});
+
+	test("a site that blocks every egress is final: no backoff and no automatic retry", async () => {
+		const id = await websiteSubmission(374703356112802865n, url);
+		let attempts = 0;
+		await analyzeWebsite({ submissionId: id, url }, {
+			...dependencies(archiveOf([hop(0, url, 200)])),
+			browserBackoffMs: [1, 1, 1],
+			archiveWebsite: async () => {
+				attempts++;
+				throw new Error('Failed to load page: HTTP 403 ("Attention Required! | Cloudflare") via Tor exit; HTTP 403 via server IP');
+			},
+		});
+		const submission = (await SubmissionsEntity.get(id))!;
+		expect(attempts).toBe(1);
+		expect(submission.status).toBe("failed");
+		expect(submission.info).toBe('Failed to load page: HTTP 403 ("Attention Required! | Cloudflare") via Tor exit; HTTP 403 via server IP');
+		expect(submission.data.kind === "website" ? submission.data.website.autoRetry : "not website").toBeUndefined();
 	});
 });

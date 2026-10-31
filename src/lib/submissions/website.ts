@@ -50,6 +50,41 @@ export async function resumePendingWebsiteAnalyses(params: {
 	return resumed;
 }
 
+const AUTO_RETRY_POLL_MS = 60_000;
+
+/**
+ * Re-queue failed analyses whose browser-service failure has waited out its
+ * backoff. They go through the normal retry boundary, so a case that has
+ * since been reported or retried by hand is left alone.
+ */
+export async function runDueWebsiteAutoRetries(params: {
+	now?: Date;
+	startAnalysis?: (options: AnalyzeWebsiteOptions) => Promise<unknown>;
+} = {}): Promise<number> {
+	let started = 0;
+	for (const { id } of await SubmissionsEntity.listDueWebsiteAutoRetries(params.now ?? new Date())) {
+		try {
+			await retryFailedWebsiteAnalysis(id, params.startAnalysis);
+			started++;
+		} catch (error) {
+			if (!(error instanceof SubmissionRetryError)) throw error;
+			console.warn(`Automatic retry of website analysis ${id.toString()} skipped: ${error.message}`);
+		}
+	}
+	return started;
+}
+
+/** Poll for due automatic retries until the returned stop function is called. */
+export function startWebsiteAutoRetries(): () => void {
+	const timer = setInterval(() => {
+		void runDueWebsiteAutoRetries().then((started) => {
+			if (started > 0) console.warn(`Automatically retried ${started} website analyses after browser-service failures.`);
+		}).catch((error) => console.error("Automatic website analysis retry failed:", error));
+	}, AUTO_RETRY_POLL_MS);
+	timer.unref?.();
+	return () => clearInterval(timer);
+}
+
 /**
  * The address of the site a submitted URL points at. Kits that swap their page
  * in from a script leave a `blob:` URL in the address bar, which a reporter may

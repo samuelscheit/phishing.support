@@ -1,6 +1,7 @@
 import * as toon from "@toon-format/toon";
 import type { ResponseFormatTextJSONSchemaConfig } from "openai/resources/responses/responses.mjs";
-import { archiveWebsite, type WebsiteVerificationGate } from "./website_archive";
+import { archiveWebsite, isBrowserInfrastructureFailure, type WebsiteVerificationGate } from "./website_archive";
+import { errorText } from "./error_text";
 import { SubmissionsEntity, ArtifactsEntity } from "./db/entities";
 import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun, type AnalysisClient } from "./analysis_run";
@@ -8,7 +9,7 @@ import { publishEvent } from "./event/event_transport";
 import { reportConfirmedWebsitePhishing } from "./abuse/submission_reports";
 import { createWebsiteSubmission } from "./submissions/website";
 import type { ReporterMetadata } from "./request_metadata";
-import { defaultReasoning, defaultResponseModel, retry } from "./utils";
+import { defaultReasoning, defaultResponseModel, sleep } from "./utils";
 import { extractWebsiteDataEntryFields } from "./website_fields";
 import { describeDataEntryField, type WebsiteKitResource } from "./website_types";
 import type {
@@ -330,7 +331,30 @@ export type WebsiteAnalysisDependencies = {
 	getInfo?: typeof getInfo;
 	archiveWebsite?: typeof archiveWebsite;
 	analysisClient?: AnalysisClient;
+	/** Waits between capture attempts after a browser-service failure. */
+	browserBackoffMs?: readonly number[];
 };
+
+/** Capture retries after a browser-service failure: 5 s, 15 s, then 45 s. */
+const BROWSER_BACKOFF_MS = [5_000, 15_000, 45_000] as const;
+
+/**
+ * Retry a capture only when the browser service failed (relay full, a dropped
+ * CDP connection, a closed target). A site that blocks or times out was
+ * already retried across every egress inside the capture and is final.
+ */
+async function withBrowserBackoff<T>(capture: () => Promise<T>, delaysMs: readonly number[]): Promise<T> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await capture();
+		} catch (error) {
+			const delayMs = delaysMs[attempt];
+			if (delayMs === undefined || !isBrowserInfrastructureFailure(error)) throw error;
+			console.warn(`Website capture hit a browser-service failure (${errorText(error)}); retrying in ${delayMs / 1000}s.`);
+			await sleep(delayMs);
+		}
+	}
+}
 
 /**
  * A capture that ended on another host belongs to that host: it opens that
@@ -389,14 +413,18 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await emitStep(submissionId, "whois_lookup", 5);
 		const whois = await (dependencies.getInfo ?? getInfo)(url);
 
+		// Keep the automatic-retry count through the run so a browser outage that
+		// lasts across retries stops after the limit; a verdict below drops it.
+		const prior = await SubmissionsEntity.get(submissionId);
+		const autoRetry = prior?.data.kind === "website" ? prior.data.website.autoRetry : undefined;
 		await SubmissionsEntity.update(submissionId, {
 			status: "running",
 			info: undefined,
-			data: { kind: "website", website: { url, whois } },
+			data: { kind: "website", website: { url, whois, ...(autoRetry ? { autoRetry } : {}) } },
 		});
 
 		await emitStep(submissionId, "archive_website", 10);
-		const captured = await retry(() => (dependencies.archiveWebsite ?? archiveWebsite)({
+		const captured = await withBrowserBackoff(() => (dependencies.archiveWebsite ?? archiveWebsite)({
 			url,
 			mhtmlSnapshot: options.mhtmlSnapshot,
 			archivedUrl: options.archivedUrl,
@@ -404,7 +432,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			trustMhtmlDocumentLocation: options.trustMhtmlDocumentLocation,
 			verificationGate: options.verificationGate,
 			kitResources: options.kitResources,
-		}), 2, 3000);
+		}), dependencies.browserBackoffMs ?? BROWSER_BACKOFF_MS);
 		const archive = captured.screenshotPng || !options.screenshotSnapshot
 			? captured
 			: { ...captured, screenshotPng: options.screenshotSnapshot };
@@ -516,9 +544,41 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await emitStep(submissionId, "completed", 100);
 	} catch (error) {
 		console.error("Website analysis failed:", error);
-		await SubmissionsEntity.update(submissionId, { status: "failed", info: String(error) });
+		await recordWebsiteAnalysisFailure(submissionId, error);
 		await emitStep(submissionId, "failed", 100);
 	}
 
 	return submissionId;
+}
+
+/** Re-queues after a browser-service failure: 10 minutes apart, at most 3 times. */
+const AUTO_RETRY_DELAY_MS = 10 * 60_000;
+const MAX_AUTO_RETRIES = 3;
+
+/**
+ * Store a readable failure. When the browser service (not the site) failed,
+ * schedule the analysis to be retried automatically instead of leaving the
+ * case failed until someone notices.
+ */
+async function recordWebsiteAnalysisFailure(submissionId: bigint, error: unknown): Promise<void> {
+	const reason = errorText(error);
+	const submission = await SubmissionsEntity.get(submissionId);
+	const website = submission?.data.kind === "website" ? submission.data.website : undefined;
+	const attempts = website?.autoRetry?.attempts ?? 0;
+	const browserFailure = isBrowserInfrastructureFailure(error);
+	if (!website || !browserFailure || attempts >= MAX_AUTO_RETRIES) {
+		const exhausted = website && browserFailure ? ` The browser service failed ${attempts + 1} times in a row; retry once it has recovered.` : "";
+		await SubmissionsEntity.update(submissionId, {
+			status: "failed",
+			info: `${reason}${exhausted}`,
+			...(website?.autoRetry ? { data: { kind: "website", website: { ...website, autoRetry: undefined } } } : {}),
+		});
+		return;
+	}
+	const nextAttemptAt = new Date(Date.now() + AUTO_RETRY_DELAY_MS);
+	await SubmissionsEntity.update(submissionId, {
+		status: "failed",
+		info: `The browser service failed (${reason}); retrying automatically at ${nextAttemptAt.toISOString().slice(11, 16)} UTC (attempt ${attempts + 1} of ${MAX_AUTO_RETRIES}).`,
+		data: { kind: "website", website: { ...website, autoRetry: { attempts: attempts + 1, nextAttemptAt: nextAttemptAt.toISOString(), reason } } },
+	});
 }

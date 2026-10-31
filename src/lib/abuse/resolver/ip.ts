@@ -12,6 +12,7 @@ import { contactRoute, unroutableRoute } from "./routes";
 import { queryPort43 } from "./port43";
 import { parseExplicitWhoisAbuseMailboxes, parseWhoisNetworkMetadata } from "./whois";
 import type { AbuseMailbox, JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
+import { errorText } from "../../error_text";
 
 const RDAP_IP_URL = "https://rdap.org/ip/";
 const RDAP_AUTNUM_URL = "https://rdap.org/autnum/";
@@ -31,7 +32,7 @@ export async function resolveIpTarget(target: ResolverTarget, dependencies: Reso
 	try {
 		ipRdap = await safeJsonFetch(rdapUrl, dependencies);
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
+		const message = errorText(error);
 		const snapshot = { target: target.normalizedTarget, ipRdap: { error: message } };
 		return { status: "failed", disposition: "resolver_failed", resolverSnapshot: snapshot, routes: [unroutableRoute("resolver_failed", snapshot, "failed")] };
 	}
@@ -53,7 +54,7 @@ export async function resolveIpTarget(target: ResolverTarget, dependencies: Reso
 	try {
 		ripe = await safeJsonFetch(`${RIPE_NETWORK_INFO_URL}${encodeURIComponent(target.normalizedTarget)}`, dependencies);
 	} catch (error) {
-		ripeError = error instanceof Error ? error.message : String(error);
+		ripeError = errorText(error);
 	}
 
 	const asns = originAsns(ripe);
@@ -70,7 +71,7 @@ export async function resolveIpTarget(target: ResolverTarget, dependencies: Reso
 		} catch (error) {
 			asnRdap.push({
 				asn,
-				error: error instanceof Error ? error.message : String(error),
+				error: errorText(error),
 				explicitAbuseMailboxes: [],
 			});
 		}

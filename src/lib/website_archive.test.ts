@@ -5,7 +5,7 @@ import puppeteer, { type Browser, type BrowserContext, type HTTPRequest, type HT
 import type { FabricEgress } from "./browser/fabric";
 import type { WebsiteNavigationHop } from "./website_types";
 
-import { archiveWebsite, capturedDocumentContent, getMhtmlArchiveDate, getMhtmlArchiveLocation } from "./website_archive";
+import { archiveWebsite, BrowserInfrastructureError, capturedDocumentContent, getMhtmlArchiveDate, getMhtmlArchiveLocation, isBrowserInfrastructureFailure, WebsiteCaptureFailedError } from "./website_archive";
 
 function mhtml(preamble: string, body = "content") {
 	return Buffer.from(`${preamble}\r\n\r\n${body}`, "latin1");
@@ -369,6 +369,29 @@ test("a failure after the page loaded is not retried on another egress", async (
 	await expect(archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser })).rejects.toThrow("Protocol error (Page.captureScreenshot)");
 	expect(fixture.leasedEgress).toEqual(["phishing"]);
 	expect(fixture.closeCount).toBe(1);
+});
+
+test("browser-service failures are told apart from a site that cannot be reached", async () => {
+	const unavailable = archiveBrowserFixture();
+	const relayDown = async () => { throw Object.assign(new Event("error"), { message: "Unexpected server response: 503" }); };
+	const relayError = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: relayDown }).then(() => undefined, (error: unknown) => error);
+	expect(relayError).toBeInstanceOf(BrowserInfrastructureError);
+	expect((relayError as Error).message).toBe("Browser service unavailable: Unexpected server response: 503");
+	expect(isBrowserInfrastructureFailure(relayError)).toBe(true);
+	expect(unavailable.leasedEgress).toEqual([]);
+
+	// A browser that closes during navigation is the service's fault, not the site's.
+	const closed = archiveBrowserFixture({ goto: async () => { throw new Error("Protocol error (Page.navigate): Target closed"); } });
+	const closedError = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: closed.getBrowser }).then(() => undefined, (error: unknown) => error);
+	expect(isBrowserInfrastructureFailure(closedError)).toBe(true);
+	expect(closed.leasedEgress).toEqual(["phishing"]);
+
+	// A site that answers no route is final, even when a route's reason mentions a closed connection.
+	const blocked = archiveBrowserFixture({ goto: async () => { throw new Error("net::ERR_CONNECTION_CLOSED at https://example.test/"); } });
+	const blockedError = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: blocked.getBrowser }).then(() => undefined, (error: unknown) => error);
+	expect(blockedError).toBeInstanceOf(WebsiteCaptureFailedError);
+	expect(isBrowserInfrastructureFailure(blockedError)).toBe(false);
+	expect(blocked.leasedEgress).toEqual(["phishing", "reporting", "residential"]);
 });
 
 describe("rendering", () => {

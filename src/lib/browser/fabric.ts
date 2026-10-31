@@ -14,6 +14,7 @@ import {
 	fabricBrowserSessionIdFromProviderPayload,
 	isFabricBrowserSessionId,
 } from "../fabric/session";
+import { asError, errorText } from "../error_text";
 
 type FabricScalar = string | number | boolean | null;
 type FabricEnvironment = Readonly<Record<string, string | undefined>>;
@@ -325,7 +326,7 @@ const RELAY_CAPACITY_RETRY_MS = 2_000;
  * connections are taken; CDP clients report that as a failed handshake.
  */
 export function isRelayCapacityError(error: unknown): boolean {
-	const message = error instanceof Error ? error.message : String(error);
+	const message = errorText(error);
 	return /Expected 101 status code|Unexpected server response: 503/i.test(message);
 }
 
@@ -348,7 +349,9 @@ export async function connectThroughRelay<T>(
 	for (;;) {
 		try {
 			return await connect();
-		} catch (error) {
+		} catch (thrown) {
+			// Under Bun the CDP WebSocket handshake rejects with an ErrorEvent, not an Error.
+			const error = asError(thrown);
 			if (!isRelayCapacityError(error) || Date.now() >= deadline) throw error;
 		}
 		await sleep(retryMs);

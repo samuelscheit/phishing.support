@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 
 import { getDb } from "./index";
 import {
@@ -138,6 +138,30 @@ export class SubmissionsEntity {
         return await db.select().from(submissions).orderBy(desc(submissions.createdAt)).limit(limit);
     }
 
+	/**
+	 * One page of the public submission list, newest first, holding only what a
+	 * card shows. Rows older than `before` (creation time, then id) follow the
+	 * previous page with no gaps or repeats while new submissions arrive.
+	 */
+	static async listCards(params: { limit: number; before?: { createdAt: Date; id: bigint } }) {
+		const db = await getDb();
+		const { before } = params;
+		return db
+			.select({
+				id: submissions.id,
+				kind: submissions.kind,
+				status: submissions.status,
+				createdAt: submissions.createdAt,
+				title: sql<string | null>`coalesce(json_extract(${submissions.data}, '$.website.url'), nullif(json_extract(${submissions.data}, '$.email.subject'), ''), ${submissions.dedupeKey})`,
+			})
+			.from(submissions)
+			.where(before
+				? or(lt(submissions.createdAt, before.createdAt), and(eq(submissions.createdAt, before.createdAt), lt(submissions.id, before.id)))
+				: undefined)
+			.orderBy(desc(submissions.createdAt), desc(submissions.id))
+			.limit(params.limit);
+	}
+
     static async get(id: bigint) {
         const db = await getDb();
         const [row] = await db.select().from(submissions).where(eq(submissions.id, id));
@@ -169,6 +193,21 @@ export class SubmissionsEntity {
 			.select()
 			.from(submissions)
 			.where(and(eq(submissions.kind, "website"), inArray(submissions.status, ["new", "queued"])))
+			.orderBy(submissions.createdAt)
+			.limit(limit);
+	}
+
+	/** Failed website analyses whose automatic retry (after a browser-service failure) is due. */
+	static async listDueWebsiteAutoRetries(now: Date, limit = 10) {
+		const db = await getDb();
+		return db
+			.select({ id: submissions.id })
+			.from(submissions)
+			.where(and(
+				eq(submissions.kind, "website"),
+				eq(submissions.status, "failed"),
+				sql`json_extract(${submissions.data}, '$.website.autoRetry.nextAttemptAt') <= ${now.toISOString()}`,
+			))
 			.orderBy(submissions.createdAt)
 			.limit(limit);
 	}

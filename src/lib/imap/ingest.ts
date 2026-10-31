@@ -7,6 +7,7 @@ import { extractEmlsFromIncomingMessage } from "@/lib/mail_forwarded";
 import { createEmailSubmissionFromEml, type EmailSubmissionOptions } from "@/lib/submissions/email";
 
 import { headerStrings, isSeen, recipients, type FetchedMail } from "./rfc";
+import { errorText } from "../error_text";
 
 export type MailIngestConfig = {
 	mailbox: string;
@@ -96,7 +97,7 @@ export async function ingestFetchedMail(
 		await MailIngestEntity.recordTerminal({ ...ledgerKey, messageId: rawMessageId, route: "ignored", reason: "no_report_match" });
 		return { disposition: "terminal", route: "ignored", reason: "no_report_match" };
 	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error);
+		const reason = errorText(error);
 		try {
 			await MailIngestEntity.recordFailure({ ...ledgerKey, messageId: rawMessageId, reason });
 		} catch (ledgerError) {

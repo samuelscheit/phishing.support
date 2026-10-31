@@ -22,6 +22,7 @@ import {
 	unwrapSdkResponse,
 } from "./contracts";
 import { ensureSkyvernStorageUrl, fetchSkyvernArtifact, safeArtifactUrl, urlHostname } from "./storage";
+import { errorText } from "../../error_text";
 
 function createConfiguredClient(): SkyvernClientPort {
 	const baseUrl = configuredSkyvernBaseUrl();
@@ -30,7 +31,7 @@ function createConfiguredClient(): SkyvernClientPort {
 }
 
 function redactExternalError(error: unknown): string {
-	const message = error instanceof Error ? error.message : String(error);
+	const message = errorText(error);
 	return message.replace(/(?:api[_-]?key|authorization|bearer)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]").slice(0, 2_000);
 }
 

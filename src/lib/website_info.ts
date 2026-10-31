@@ -7,6 +7,7 @@ import { parse } from "tldts";
 import { recursiveAbuseContact } from "../web_lib/util";
 import { fetchJson, retryWithTimeout, type FetchImplementation } from "./network/bounded_fetch";
 import { resolveRegionalDns, type RegionalDnsDependencies, type RegionalDnsResolution } from "./network/regional_dns";
+import { errorText } from "./error_text";
 
 const LOOKUP_TIMEOUT_MS = 5_000;
 const LOOKUP_ATTEMPTS = 2;
@@ -41,10 +42,6 @@ function lookupOptions(dependencies: WebsiteInfoDependencies, label: string) {
 	};
 }
 
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
-
 async function lookup<T>(operation: () => Promise<T>, dependencies: WebsiteInfoDependencies, label: string): Promise<T> {
 	return retryWithTimeout(operation, lookupOptions(dependencies, label));
 }
@@ -73,7 +70,7 @@ async function settledDnsLookup<T>(
 	try {
 		return { recordType, value: await lookup(operation, dependencies, `DNS ${recordType} lookup`) };
 	} catch (error) {
-		return { recordType, value: undefined, error: errorMessage(error) };
+		return { recordType, value: undefined, error: errorText(error) };
 	}
 }
 

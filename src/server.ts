@@ -2,7 +2,7 @@ import next from "next";
 import { createServer } from "node:http";
 
 import { SubmissionsEntity } from "./lib/db/entities";
-import { resumePendingWebsiteAnalyses } from "./lib/submissions/website";
+import { resumePendingWebsiteAnalyses, startWebsiteAutoRetries } from "./lib/submissions/website";
 import { startAbuseWorker, stopAbuseWorker } from "./lib/abuse/worker";
 import { startMailboxListener, stopMailboxListener } from "./lib/imap/listener";
 
@@ -41,6 +41,10 @@ void resumePendingWebsiteAnalyses().then((resumed) => {
 	if (resumed > 0) console.warn(`Resumed ${resumed} pending website analyses on startup.`);
 }).catch((err) => console.error("Failed to resume pending website analyses on startup:", err));
 
+// A capture that failed because the browser service was down is retried on
+// its own schedule rather than left failed.
+const stopWebsiteAutoRetries = startWebsiteAutoRetries();
+
 // The durable reporting worker files every confirmed report; the mailbox
 // listener turns forwarded phishing mail into submissions and records provider
 // replies. A misconfigured mailbox must not prevent the HTTP service from booting.
@@ -68,6 +72,7 @@ const server = createServer((req, res) => {
 
 const shutdown = async (signal: string) => {
 	console.log(`Received ${signal}, shutting down...`);
+	stopWebsiteAutoRetries();
 	await stopMailboxListener();
 	await stopAbuseWorker();
 	server.close(() => {

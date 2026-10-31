@@ -7,6 +7,7 @@ import { isPublicIp, normalizeDomain, registrableDomain } from "../security";
 import { normalizeMailbox } from "../mail/shared";
 import { throwIfAborted } from "../worker/shared";
 import { mapConcurrent } from "./concurrency";
+import { errorSummary } from "../../error_text";
 
 const RIPESTAT = "https://stat.ripe.net/data";
 const SOURCE_APP = "phishing-support";
@@ -51,10 +52,6 @@ function asnNumber(value: unknown): number | undefined {
 	const match = String(value ?? "").toUpperCase().match(/^(?:AS)?(\d{1,10})$/);
 	const asn = match ? Number(match[1]) : Number.NaN;
 	return Number.isSafeInteger(asn) && asn > 0 && asn <= 4_294_967_295 ? asn : undefined;
-}
-
-function safeDetail(error: unknown): string {
-	return (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").slice(0, 500);
 }
 
 async function ripeData(
@@ -112,7 +109,7 @@ export async function resolveOriginHostNetworks(
 			for (const suggestion of category.suggestions) addCandidate(asnNumber(suggestion.value ?? suggestion.label), "registry_name_search");
 		}
 	} catch (error) {
-		errors.push(`registry search: ${safeDetail(error)}`);
+		errors.push(`registry search: ${errorSummary(error)}`);
 	}
 
 	const resolve4 = dependencies.resolve4 ?? dns.resolve4;
@@ -124,7 +121,7 @@ export async function resolveOriginHostNetworks(
 			if (exchange && dnsHosts.size < 12) dnsHosts.add(exchange);
 		}
 	} catch (error) {
-		errors.push(`MX lookup: ${safeDetail(error)}`);
+		errors.push(`MX lookup: ${errorSummary(error)}`);
 	}
 
 	const discoveredIps: Array<{ ip: string; source: string }> = [];
@@ -134,7 +131,7 @@ export async function resolveOriginHostNetworks(
 				if (isPublicIp(ip) && discoveredIps.length < MAX_DNS_ADDRESSES) discoveredIps.push({ ip, source: host === mailboxDomain ? "mailbox_domain_dns" : "mail_exchanger_dns" });
 			}
 		} catch (error) {
-			errors.push(`A lookup for ${host}: ${safeDetail(error)}`);
+			errors.push(`A lookup for ${host}: ${errorSummary(error)}`);
 		}
 	}
 
@@ -145,7 +142,7 @@ export async function resolveOriginHostNetworks(
 			if (!parsed.success) throw new Error("RIPEstat network-info response was malformed.");
 			return parsed.data.asns.map(asnNumber).filter((asn): asn is number => Boolean(asn)).map((asn) => ({ asn, source }));
 		} catch (error) {
-			errors.push(`network lookup for ${ip}: ${safeDetail(error)}`);
+			errors.push(`network lookup for ${ip}: ${errorSummary(error)}`);
 			return [];
 		}
 	});
@@ -172,7 +169,7 @@ export async function resolveOriginHostNetworks(
 				discoverySources: [...sources],
 			} satisfies OriginHostNetwork;
 		} catch (error) {
-			errors.push(`AS${asn}: ${safeDetail(error)}`);
+			errors.push(`AS${asn}: ${errorSummary(error)}`);
 			return undefined;
 		}
 	});

@@ -3,6 +3,7 @@ import { ResponseStreamEvent } from "openai/resources/responses/responses.mjs";
 import { AnalysisRunsEntity } from "./db/entities";
 import { publishEvent } from "./event/event_transport";
 import { extractResponseOutputText, parseResponseJson } from "./openai_response";
+import { errorText } from "./error_text";
 
 export class AnalysisStreamAttemptError extends Error {
 	readonly emittedOutput: boolean;
@@ -79,7 +80,7 @@ export async function logAndPersistStream(response: Stream<ResponseStreamEvent>,
 		throw new Error("Stream ended without completion");
 	} catch (error) {
 		if (error instanceof AnalysisStreamAttemptError) throw error;
-		throw new AnalysisStreamAttemptError(`Analysis stream failed: ${error instanceof Error ? error.message : String(error)}`, {
+		throw new AnalysisStreamAttemptError(`Analysis stream failed: ${errorText(error)}`, {
 			cause: error,
 			emittedOutput,
 		});

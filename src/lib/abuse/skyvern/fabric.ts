@@ -8,6 +8,7 @@ import {
 
 import type { AbuseSkyvernAdapter } from "./adapter";
 import type { SkyvernTaskPayload } from "./contracts";
+import { errorText } from "../../error_text";
 
 export type FabricSkyvernTaskResult =
 	| { state: "created"; skyvernRunId: string; fabricSessionId: string }
@@ -19,7 +20,7 @@ export type FabricSkyvernTaskFactory = typeof createFabricSkyvernTask;
 /** The companion request may have reached Skyvern but missed its durable response boundary. */
 export class FabricSkyvernTaskAmbiguityError extends Error {
 	constructor(cause: unknown) {
-		super(`Fabric-bound Skyvern task creation became ambiguous (${cause instanceof Error ? cause.message : String(cause)})`);
+		super(`Fabric-bound Skyvern task creation became ambiguous (${errorText(cause)})`);
 		this.name = "FabricSkyvernTaskAmbiguityError";
 	}
 }

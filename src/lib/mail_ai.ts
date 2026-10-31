@@ -11,6 +11,7 @@ import { markSubmissionInvalid } from "./submissions/state";
 import { createWebsiteSubmission } from "./submissions/website";
 import { defaultReasoning, defaultResponseModel } from "./utils";
 import { serviceIdentity } from "./constants";
+import { errorText } from "./error_text";
 
 const URL_RE = /https?:\/\/[^\s"'<>]+/gi;
 
@@ -488,7 +489,7 @@ ${buildMailEvidence(mail, analysis.output_text)}`,
 		await emitStep(stream_id, "completed", 100);
 	} catch (error) {
 		console.error("Email analysis failed:", error);
-		await SubmissionsEntity.update(stream_id, { status: "failed", info: String(error) });
+		await SubmissionsEntity.update(stream_id, { status: "failed", info: errorText(error) });
 		await emitStep(stream_id, "failed", 100);
 	}
 }

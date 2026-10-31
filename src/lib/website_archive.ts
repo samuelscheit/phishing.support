@@ -10,6 +10,7 @@ import type { WebsiteKitResource, WebsiteNavigationHop } from "./website_types";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
 import parse, { HTMLElement } from "node-html-parser";
+import { errorText } from "./error_text";
 
 export type ArchivedWebsiteResponse = {
 	name: string;
@@ -349,6 +350,34 @@ const WEBSITE_RENDER_IDLE_CONCURRENCY = 2;
  * The site's main document could not be loaded over one egress route: the
  * navigation failed, or it answered with an HTTP error that did not resolve itself.
  */
+/**
+ * The browser service failed rather than the site: Fabric's relay was full or
+ * unreachable, the CDP connection dropped, or the leased browser closed under
+ * the capture. These say nothing about the site and are worth retrying later.
+ */
+export class BrowserInfrastructureError extends Error {
+	constructor(message: string, options?: { cause?: unknown }) {
+		super(message, options);
+		this.name = "BrowserInfrastructureError";
+	}
+}
+
+const BROWSER_INFRASTRUCTURE_FAILURE = /Expected 101 status code|Unexpected server response: (?:502|503|504)|ECONNREFUSED|ECONNRESET|socket hang up|Target closed|Session closed|Connection closed|Protocol error|browser has disconnected|Navigating frame was detached|Execution context was destroyed|Browser Fabric (?:transport request failed|session ended)/i;
+
+/** Every route failed to reach the site; its reasons may quote a route's own browser trouble. */
+export class WebsiteCaptureFailedError extends Error {
+	constructor(readonly failures: readonly WebsiteUnreachableError[]) {
+		super(`Failed to load page: ${failures.map((error) => error.message).join("; ")}`);
+		this.name = "WebsiteCaptureFailedError";
+	}
+}
+
+/** Whether a capture failure came from the browser service rather than the site. */
+export function isBrowserInfrastructureFailure(error: unknown): boolean {
+	if (error instanceof WebsiteUnreachableError || error instanceof WebsiteCaptureFailedError) return false;
+	return error instanceof BrowserInfrastructureError || BROWSER_INFRASTRUCTURE_FAILURE.test(errorText(error));
+}
+
 export class WebsiteUnreachableError extends Error {
 	constructor(readonly egress: FabricEgress, readonly reason: string) {
 		super(`${reason} via ${WEBSITE_EGRESS_LABEL[egress]}`);
@@ -516,7 +545,9 @@ function scriptNavigationHops(loadedResponse: HTTPResponse | null, scriptRespons
 }
 
 async function captureLiveWebsite(url: string, egress: FabricEgress, dependencies: WebsiteArchiveDependencies): Promise<WebsiteArchiveResult> {
-	const browser = await (dependencies.getBrowser ?? getBrowser)(egress);
+	const browser = await (dependencies.getBrowser ?? getBrowser)(egress).catch((error: unknown) => {
+		throw new BrowserInfrastructureError(`Browser service unavailable: ${errorText(error)}`, { cause: error });
+	});
 	try {
 		// Browser Fabric owns the leased profile context. Creating an
 		// application-side incognito context would bypass that profile and egress
@@ -543,7 +574,9 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 			waitUntil: "domcontentloaded",
 			timeout: WEBSITE_NAVIGATION_TIMEOUT_MS,
 		}).catch((error: unknown) => {
-			throw new WebsiteUnreachableError(egress, error instanceof Error ? error.message : String(error));
+			// A browser that died under the navigation says nothing about the site.
+			if (isBrowserInfrastructureFailure(error)) throw new BrowserInfrastructureError(errorText(error), { cause: error });
+			throw new WebsiteUnreachableError(egress, errorText(error));
 		});
 		// A kit that swaps in its blob: page before DOMContentLoaded makes the
 		// navigation resolve with that blob: document; the site's own response is
@@ -648,7 +681,7 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 	} catch (error) {
 		// The residential exit depends on the operator's machine being online; its
 		// failure must not hide what the other routes captured.
-		const reason = error instanceof WebsiteUnreachableError ? error : new WebsiteUnreachableError(WEBSITE_CLOAKING_EGRESS, error instanceof Error ? error.message : String(error));
+		const reason = error instanceof WebsiteUnreachableError ? error : new WebsiteUnreachableError(WEBSITE_CLOAKING_EGRESS, errorText(error));
 		console.warn(`Website capture of ${url} failed: ${reason.message}`);
 		failures.push(reason);
 	}
@@ -676,5 +709,5 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 			},
 		};
 	}
-	throw new Error(`Failed to load page: ${failures.map((error) => error.message).join("; ")}`);
+	throw new WebsiteCaptureFailedError(failures);
 }

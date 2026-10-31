@@ -164,6 +164,31 @@ describe("Phishing Support Browser Fabric boundary", () => {
 			}
 		});
 
+		test("recognizes a full relay reported as a WebSocket ErrorEvent, as puppeteer does under Bun", async () => {
+			let attempts = 0;
+			// puppeteer's browser transport rejects with the raw event; its cause is in `error`/`message`.
+			const errorEvent = () => Object.assign(new Event("error"), { message: "Unexpected server response: 503", error: new Error("Unexpected server response: 503") });
+			const browser = await connectThroughRelay(
+				async () => {
+					attempts++;
+					if (attempts < 3) throw errorEvent();
+					return "browser";
+				},
+				async () => undefined,
+				{ sleep: async () => undefined },
+			);
+			expect(browser).toBe("browser");
+			expect(attempts).toBe(3);
+			// A different failure surfaces as a readable Error, never as "[object ErrorEvent]".
+			const refused = await connectThroughRelay(
+				async () => { throw Object.assign(new Event("error"), { message: "connect ECONNREFUSED 10.0.0.1:8085" }); },
+				async () => undefined,
+				{ sleep: async () => undefined },
+			).then(() => undefined, (error: unknown) => error);
+			expect(refused).toBeInstanceOf(Error);
+			expect((refused as Error).message).toBe("connect ECONNREFUSED 10.0.0.1:8085");
+		});
+
 		test("never retries a failure that is not the relay being full", async () => {
 			let attempts = 0;
 			await expect(connectThroughRelay(

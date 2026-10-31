@@ -5,6 +5,7 @@ import { isIP } from "node:net";
 import { AbuseInputError, assertPublicDnsHost, isPublicIp } from "../security";
 import { retryWithTimeout } from "../../network/bounded_fetch";
 import type { ResolverDependencies } from "./types";
+import { errorText } from "../../error_text";
 
 const MAX_WHOIS_BYTES = 1024 * 1024;
 const WHOIS_TIMEOUT_MS = 12_000;
@@ -80,6 +81,6 @@ export async function queryPort43(server: string | undefined, query: string, dep
 		if (Buffer.byteLength(raw) > MAX_WHOIS_BYTES) throw new Error("WHOIS response exceeded its size limit.");
 		return { raw };
 	} catch (error) {
-		return { error: error instanceof Error ? error.message : String(error) };
+		return { error: errorText(error) };
 	}
 }

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { AbuseRepository } from "../repository";
 import type { resolveAbuseTarget } from "../resolver";
 import type { AbuseSkyvernAdapter, FabricSkyvernTaskFactory, SkyvernTaskPayload } from "../skyvern";
+import { errorText as describeError } from "../../error_text";
 
 export type UnknownExternalStateParams = {
 	routeId: bigint;
@@ -24,7 +25,7 @@ export type WorkerServices = {
 export type AbuseTargetResolver = typeof resolveAbuseTarget;
 
 export function errorText(error: unknown): string {
-	return (error instanceof Error ? error.message : String(error)).slice(0, 2_000);
+	return describeError(error).slice(0, 2_000);
 }
 
 /** Throw a regular Error rather than relying on AbortSignal.reason support in

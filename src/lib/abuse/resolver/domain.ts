@@ -14,19 +14,16 @@ import { contactRoute, unroutableRoute } from "./routes";
 import { queryPort43 } from "./port43";
 import { parseExplicitWhoisAbuseMailboxes, parseWhoisNetworkMetadata } from "./whois";
 import type { JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
+import { errorText } from "../../error_text";
 
 const RDAP_DOMAIN_URL = "https://rdap.org/domain/";
-
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
 
 export async function resolveDomainTarget(target: ResolverTarget, dependencies: ResolverDependencies): Promise<ResolvedAbuseTarget> {
 	// Infrastructure ownership remains useful even if the registrar RDAP
 	// endpoint is unavailable, so do not make it conditional on domain RDAP.
 	const infrastructurePromise = resolveDomainInfrastructure(target, dependencies).catch((error): DomainInfrastructureResolution => ({
 		routes: [],
-		snapshot: { error: errorMessage(error) },
+		snapshot: { error: errorText(error) },
 	}));
 
 	const rdapUrl = `${RDAP_DOMAIN_URL}${encodeURIComponent(target.normalizedTarget)}`;
@@ -35,7 +32,7 @@ export async function resolveDomainTarget(target: ResolverTarget, dependencies: 
 	try {
 		rdap = await safeJsonFetch(rdapUrl, dependencies);
 	} catch (error) {
-		rdapError = errorMessage(error);
+		rdapError = errorText(error);
 	}
 	const infrastructure = await infrastructurePromise;
 
