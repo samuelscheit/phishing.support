@@ -38,6 +38,7 @@ export type ProviderReportProfile =
 	| "generic"
 	| "cloudflare"
 	| "google_safe_browsing"
+	| "google_cloud"
 	| "netcraft"
 	| "namesilo"
 	| "tencent"
@@ -140,6 +141,12 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 			return {
 				lead: `A suspected phishing URL on ${target} is being submitted to Google Safe Browsing.`,
 				action: "Please evaluate the submitted URL for inclusion in Safe Browsing protections.",
+				urlContext,
+			};
+		case "google_cloud":
+			return {
+				lead: `A phishing page hosted on Google infrastructure at ${target} is being reported.`,
+				action: "Please investigate the content and take action under the Google Cloud Acceptable Use Policy.",
 				urlContext,
 			};
 		case "netcraft":

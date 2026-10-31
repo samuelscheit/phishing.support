@@ -1,5 +1,6 @@
 import type { AbuseTargetType } from "../schema";
 import { cloudflareProvider } from "./cloudflare";
+import { googleCloudProvider } from "./google_cloud";
 import { googleSafeBrowsingProvider } from "./google_safe_browsing";
 import { nameSiloProvider } from "./namesilo";
 import { netcraftProvider } from "./netcraft";
@@ -17,6 +18,7 @@ const registry = createProviderSubmissionRegistry([
 	cloudflareProvider,
 	tencentProvider,
 	nameSiloProvider,
+	googleCloudProvider,
 	googleSafeBrowsingProvider,
 	netcraftProvider,
 	netcraftMailProvider,
