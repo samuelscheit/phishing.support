@@ -39,6 +39,7 @@ export type ProviderReportProfile =
 	| "cloudflare"
 	| "google_safe_browsing"
 	| "netcraft"
+	| "namesilo"
 	| "tencent"
 	| "gname";
 
@@ -151,6 +152,12 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 			return {
 				lead: `A suspected phishing domain report is being submitted to Tencent Cloud for ${target}.`,
 				action: "Please investigate and mitigate the reported domain under your abuse policy.",
+				urlContext,
+			};
+		case "namesilo":
+			return {
+				lead: `A suspected phishing domain report is being submitted to NameSilo for ${target}.`,
+				action: "Please investigate the captured evidence and apply the appropriate registrar abuse action.",
 				urlContext,
 			};
 		case "gname":

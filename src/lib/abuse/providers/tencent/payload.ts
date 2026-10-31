@@ -1,24 +1,24 @@
 import type { AbuseArtifact } from "../../schema";
-import { normalizeDomain, registrableDomain, sha256Hex } from "../../security";
+import { normalizeDomain, registrableDomain } from "../../security";
 import { recordValue } from "../../worker/shared";
+import {
+	isIntactProviderEvidenceImageArtifact,
+	selectProviderEvidenceImageArtifact,
+	storedProviderEvidenceImageReference,
+	type ProviderEvidenceImageContract,
+	type ProviderEvidenceImageReference,
+} from "../evidence_image";
 import { buildProviderReportNarrative } from "../report_payload";
 import { TENCENT_PROVIDER } from "./definition";
 
 const maximumExplanationLength = 400;
-const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+export const TENCENT_EVIDENCE_CONTRACT = {
+	acceptedMimeTypes: [TENCENT_PROVIDER.evidence.requiredMimeType],
+	maximumBytes: TENCENT_PROVIDER.evidence.maximumBytes,
+	filenamePrefix: "tencent_report",
+} as const satisfies ProviderEvidenceImageContract<"image/png">;
 
-function screenshotFilename(artifactId: string, sha256: string): string {
-	return `tencent_report_${artifactId}_${sha256.slice(0, 12).toLowerCase()}.png`;
-}
-
-export type TencentScreenshotReference = {
-	artifactId: string;
-	name: string;
-	mimeType: "image/png";
-	sha256: string;
-	size: number;
-	filename: string;
-};
+export type TencentScreenshotReference = ProviderEvidenceImageReference<"image/png">;
 
 export type TencentSubmissionPayload = {
 	adapter: "tencent_cloud_dns_abuse_v1";
@@ -56,22 +56,11 @@ export function makeTencentExplanation(params: {
 	});
 }
 
-function isPng(bytes: Buffer): boolean {
-	return bytes.byteLength >= pngSignature.byteLength && bytes.subarray(0, pngSignature.byteLength).equals(pngSignature);
-}
-
 /** Verify the artifact bytes as well as their immutable metadata before use. */
 export function isIntactTencentScreenshotArtifact(
 	artifact: Pick<AbuseArtifact, "kind" | "mimeType" | "sha256" | "size" | "blob">,
 ): boolean {
-	return artifact.kind === "user_evidence_original"
-		&& artifact.mimeType === TENCENT_PROVIDER.evidence.requiredMimeType
-		&& Buffer.isBuffer(artifact.blob)
-		&& artifact.blob.byteLength > 0
-		&& artifact.blob.byteLength <= TENCENT_PROVIDER.evidence.maximumBytes
-		&& artifact.size === artifact.blob.byteLength
-		&& isPng(artifact.blob)
-		&& sha256Hex(artifact.blob) === artifact.sha256.toLowerCase();
+	return isIntactProviderEvidenceImageArtifact(artifact, TENCENT_EVIDENCE_CONTRACT);
 }
 
 /**
@@ -79,19 +68,7 @@ export function isIntactTencentScreenshotArtifact(
  * artifact whose bytes and immutable metadata still agree with its hash.
  */
 export function selectTencentScreenshotArtifact(artifacts: readonly AbuseArtifact[]): TencentScreenshotReference | undefined {
-	for (const artifact of artifacts) {
-		if (!isIntactTencentScreenshotArtifact(artifact)) continue;
-		const artifactId = artifact.id.toString();
-		return {
-			artifactId,
-			name: artifact.name,
-			mimeType: "image/png",
-			sha256: artifact.sha256.toLowerCase(),
-			size: artifact.size,
-			filename: screenshotFilename(artifactId, artifact.sha256),
-		};
-	}
-	return undefined;
+	return selectProviderEvidenceImageArtifact(artifacts, TENCENT_EVIDENCE_CONTRACT);
 }
 
 function observedUrlForTarget(value: string, target: string): { observedUrl: string; registrableDomain: string } | undefined {
@@ -161,16 +138,7 @@ export function buildTencentSubmissionPayload(params: {
 }
 
 function validTencentScreenshotReference(value: unknown): value is TencentScreenshotReference {
-	const screenshot = recordValue(value);
-	return Boolean(
-		screenshot
-		&& typeof screenshot.artifactId === "string" && /^\d+$/.test(screenshot.artifactId)
-		&& typeof screenshot.name === "string" && screenshot.name.length > 0 && screenshot.name.length <= 180
-		&& screenshot.mimeType === "image/png"
-		&& typeof screenshot.sha256 === "string" && /^[a-f0-9]{64}$/.test(screenshot.sha256)
-		&& typeof screenshot.size === "number" && Number.isSafeInteger(screenshot.size) && screenshot.size > 0 && screenshot.size <= TENCENT_PROVIDER.evidence.maximumBytes
-		&& typeof screenshot.filename === "string" && screenshot.filename === screenshotFilename(screenshot.artifactId, screenshot.sha256),
-	);
+	return storedProviderEvidenceImageReference(value, TENCENT_EVIDENCE_CONTRACT) !== undefined;
 }
 
 /** Read only a payload previously built by this provider before its submission marker. */

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { defaultResponseModel } from "../../utils";
 import { configuredAbuseOpenAI, responseOutputText } from "../ai";
-import { hostBelongsToTarget, normalizePublicHttpUrl } from "../security";
+import { hostBelongsToTarget, normalizePublicHttpUrl, registrableDomain } from "../security";
 
 const MAX_ANALYSIS_INPUT = 24_000;
 
@@ -88,7 +88,14 @@ export async function deriveProviderFormFacts(
 	// web URL that is not the reported site itself.
 	const candidate = params.legalBrandUrl ?? parsed?.brandOfficialWebsite;
 	const website = candidate ? normalizePublicHttpUrl(candidate, { domainOnly: true }) : undefined;
-	const officialWebsite = website && !hostBelongsToTarget(new URL(website).hostname, params.target) ? website : undefined;
+	const websiteHost = website ? new URL(website).hostname : undefined;
+	const sameRegisteredDomain = websiteHost
+		&& registrableDomain(websiteHost) === registrableDomain(params.target);
+	const officialWebsite = website && websiteHost
+		&& !sameRegisteredDomain
+		&& !hostBelongsToTarget(websiteHost, params.target)
+		? website
+		: undefined;
 	return {
 		...(parsed?.impersonatedBrand ? { impersonatedBrand: parsed.impersonatedBrand } : {}),
 		...(officialWebsite ? { brandOfficialWebsite: officialWebsite } : {}),

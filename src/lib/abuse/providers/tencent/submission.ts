@@ -1,8 +1,8 @@
 import { fetch as proxyFetch } from "netbun";
 
 import { AbuseRepository } from "../../repository";
-import type { AbuseArtifact } from "../../schema";
 import { providerDefinitionMatchesPin } from "../definition";
+import { providerEvidenceImageArtifactMatches } from "../evidence_image";
 import { getProviderProxy, type ProviderProxy } from "../proxy";
 import type {
 	ProviderSubmissionContext,
@@ -15,10 +15,9 @@ import { getTencentCaptchaCredentials, solveTencentCaptcha, type TencentCaptcha 
 import { TENCENT_PROVIDER } from "./definition";
 import {
 	buildTencentSubmissionPayload,
-	isIntactTencentScreenshotArtifact,
 	selectTencentScreenshotArtifact,
 	storedTencentSubmissionPayload,
-	type TencentScreenshotReference,
+	TENCENT_EVIDENCE_CONTRACT,
 	type TencentSubmissionPayload,
 } from "./payload";
 
@@ -127,16 +126,6 @@ export function buildTencentCloudHttpPayload(params: {
 	};
 }
 
-function sameScreenshot(reference: TencentScreenshotReference, artifact: Pick<AbuseArtifact, "id" | "name" | "kind" | "mimeType" | "sha256" | "size" | "blob">): boolean {
-	return isIntactTencentScreenshotArtifact(artifact)
-		&& artifact.id.toString() === reference.artifactId
-		&& artifact.name === reference.name
-		&& artifact.mimeType === reference.mimeType
-		&& artifact.sha256.toLowerCase() === reference.sha256
-		&& artifact.size === reference.size
-		&& artifact.blob.byteLength === reference.size;
-}
-
 /**
  * Construct a provider-owned report draft before generic execution records an
  * irreversible submission marker. Configuration is intentionally validated
@@ -204,7 +193,7 @@ export async function submitTencentSubmission(
 		throw new Error("The persisted Tencent screenshot artifact ID is invalid.");
 	}
 	const artifact = await AbuseRepository.getArtifact(report.id, screenshotId);
-	if (!artifact || !sameScreenshot(payload.screenshot, artifact)) {
+	if (!artifact || !providerEvidenceImageArtifactMatches(payload.screenshot, artifact, TENCENT_EVIDENCE_CONTRACT)) {
 		throw new Error("The persisted Tencent screenshot artifact no longer matches its immutable reference.");
 	}
 

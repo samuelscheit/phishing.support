@@ -38,7 +38,7 @@ describe("provider form facts from the phishing analysis", () => {
 	});
 
 	test("never present the reported site or a private URL as the brand's official website", async () => {
-		for (const brandOfficialWebsite of ["https://login.swisscapitalloans.sc-sec.online/", "http://10.0.0.1/", "not a url"]) {
+		for (const brandOfficialWebsite of ["https://login.swisscapitalloans.sc-sec.online/", "https://sc-sec.online/", "http://10.0.0.1/", "not a url"]) {
 			const facts = await deriveProviderFormFacts({ target: "swisscapitalloans.sc-sec.online", analysis: "x" }, async () => ({ ...extracted, brandOfficialWebsite }));
 			expect(facts.brandOfficialWebsite).toBeUndefined();
 			expect(facts.impersonatedBrand).toBe("Swiss Capital Corp");

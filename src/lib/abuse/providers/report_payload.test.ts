@@ -82,6 +82,9 @@ The page uses TikTok branding, a fake login popup, discounted Coin packages, and
 		expect(tencent).toContain("TikTok");
 		expect(tencent).toContain("Please investigate and mitigate");
 		expect(tencent).not.toContain("Impersonated brand: Please");
+		const namesilo = buildProviderReportNarrative({ ...common, provider: "namesilo", maximumLength: 5_000 });
+		expect(namesilo).toContain("NameSilo");
+		expect(namesilo).toContain("appropriate registrar abuse action");
 	});
 
 	test("extracts the labeled brand without swallowing adjacent Markdown fields", () => {

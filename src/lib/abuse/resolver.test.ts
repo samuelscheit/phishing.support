@@ -214,8 +214,10 @@ describe("abuse resolver", () => {
 	for (const { mailbox, provider } of [
 		{ mailbox: "Abuse@Cloudflare.COM", provider: "cloudflare" },
 		{ mailbox: "dnsabuse_complaint@tencent.com", provider: "tencent" },
+		{ mailbox: "abuse@namesilo.com", provider: "namesilo" },
+		{ mailbox: "support@namesilo.com", provider: "namesilo" },
 	]) {
-		test(`routes the exact ${provider} abuse mailbox to its direct provider`, async () => {
+		test(`routes the exact ${mailbox} mailbox to the ${provider} direct provider`, async () => {
 			const result = await resolveAbuseTarget(
 				{ normalizedTarget: "example.com", targetType: "domain", observedUrls: [] },
 				resolverWith({
