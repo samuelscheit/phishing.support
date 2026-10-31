@@ -20,6 +20,7 @@ import { formatUtcDateTime } from "@/lib/date_time";
 import { cn } from "../../../web_lib/util";
 import { selectDisplayAnalysisRuns } from "@/lib/analysis_run_view";
 import { describeDataEntryField, type WebsitePhishingBasis } from "@/lib/website_types";
+import { websiteSiteName } from "@/lib/website_site";
 
 type SubmissionDetail = ApiSubmissionDetail;
 
@@ -96,18 +97,9 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 		}
 	};
 
-	const safeHostname = (rawUrl?: string) => {
-		if (!rawUrl) return null;
-		try {
-			return new URL(rawUrl).hostname;
-		} catch {
-			return null;
-		}
-	};
-
 	const targetName =
 		submission?.data?.kind === "website"
-			? safeHostname(submission.data.website?.url)
+			? websiteSiteName(submission.data.website?.url)
 			: (submission?.data.email?.subject as string | undefined) || "Untitled Submission";
 
 	const screenshot = submission?.artifacts?.find(

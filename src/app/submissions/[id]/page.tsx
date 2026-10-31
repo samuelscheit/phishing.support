@@ -4,17 +4,9 @@ import { getSubmissionDetails } from "@/lib/submissions/details";
 import { notFound } from "next/navigation";
 import { SubmissionPageClient } from "./SubmissionPageClient";
 import { Submission } from "@/lib/db/schema";
+import { websiteSiteName } from "@/lib/website_site";
 
 export const dynamic = "force-dynamic";
-
-function safeHostname(rawUrl?: string): string | null {
-	if (!rawUrl) return null;
-	try {
-		return new URL(rawUrl).hostname;
-	} catch {
-		return null;
-	}
-}
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }, _parent: ResolvingMetadata): Promise<Metadata> {
 	const { id } = await params;
@@ -35,7 +27,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 	const targetName =
 		submission.data.kind === "website"
-			? safeHostname(submission.data.website?.url) || "Website Submission"
+			? websiteSiteName(submission.data.website?.url) || "Website Submission"
 			: submission.data.email?.subject || "Email Submission";
 
 	const title = `${targetName} — Submission #${submission.id.toString()} — Phishing Support`;

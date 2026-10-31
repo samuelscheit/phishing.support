@@ -7,6 +7,7 @@ import { getBrowser, getBrowserPage } from "./browser";
 import type { FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
 import type { WebsiteKitResource, WebsiteNavigationHop } from "./website_types";
+import { hasPathTenants, isSameWebsite, websiteSite } from "./website_site";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
 import parse, { HTMLElement } from "node-html-parser";
@@ -84,9 +85,14 @@ function recordKitResources(page: Page): { settled: () => Promise<WebsiteKitReso
 	};
 }
 
-/** Resources from the captured document's own host, once per hash. */
+/**
+ * Resources from the captured document's own host, once per hash. A shared
+ * host's scripts are the platform's own, served to every tenant, so they
+ * identify no kit.
+ */
 function sameHostKitResources(resources: readonly WebsiteKitResource[], documentUrl: string): WebsiteKitResource[] {
 	const host = new URL(documentUrl).hostname;
+	if (hasPathTenants(host)) return [];
 	const byHash = new Map<string, WebsiteKitResource>();
 	for (const resource of resources) {
 		let resourceHost: string;
@@ -153,9 +159,8 @@ export function getMhtmlArchiveLocation(snapshot: Buffer): string | undefined {
 async function archiveMhtmlSnapshot(options: ArchiveWebsiteOptions & { mhtmlSnapshot: Buffer }): Promise<WebsiteArchiveResult> {
 	const declaredDocumentUrl = getMhtmlArchiveLocation(options.mhtmlSnapshot);
 	const requestedUrl = new URL(options.url);
-	const declaredHost = declaredDocumentUrl ? new URL(declaredDocumentUrl).hostname : undefined;
-	const attributionError = !options.archivedUrl && !options.trustMhtmlDocumentLocation && declaredHost && declaredHost !== requestedUrl.hostname
-		? `The uploaded MHTML declares ${declaredHost}, but the submitted target is ${requestedUrl.hostname}.`
+	const attributionError = !options.archivedUrl && !options.trustMhtmlDocumentLocation && declaredDocumentUrl && !isSameWebsite(declaredDocumentUrl, requestedUrl)
+		? `The uploaded MHTML declares ${websiteSite(declaredDocumentUrl)}, but the submitted target is ${websiteSite(requestedUrl)}.`
 		: undefined;
 	const documentUrl = attributionError
 		? options.url

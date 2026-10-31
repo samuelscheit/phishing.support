@@ -7,7 +7,7 @@ import { abuseJobs } from "./abuse/schema";
 import { getDb } from "./db";
 import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
 import { useTemporaryDatabase } from "./db/test_helpers";
-import { createWebsiteSubmission, runDueWebsiteAutoRetries } from "./submissions/website";
+import { createWebsiteSubmission, runDueWebsiteAutoRetries, websiteSubmissionDedupeKey } from "./submissions/website";
 import type { WebsiteArchiveResult } from "./website_archive";
 import { analyzeWebsite, capturedHostNavigation, websiteReportUrls, websiteSiteAssessments, type WebsiteAnalysisDependencies } from "./website_ai";
 import type { WebsiteNavigationHop } from "./website_types";
@@ -78,7 +78,7 @@ function dependencies(archive: WebsiteArchiveResult, archiveCalls: ArchiveCall[]
 }
 
 async function websiteSubmission(id: bigint, url: string) {
-	return SubmissionsEntity.create({ id, kind: "website", data: { kind: "website", website: { url } }, dedupeKey: `website-${new URL(url).hostname}`, status: "running", source: url });
+	return SubmissionsEntity.create({ id, kind: "website", data: { kind: "website", website: { url } }, dedupeKey: websiteSubmissionDedupeKey(url), status: "running", source: url });
 }
 
 async function waitForStatus(id: bigint, statuses: string[]) {
@@ -186,6 +186,43 @@ describe("website redirects", () => {
 		expect(parent?.status).toBe("redirected");
 		expect(parent?.data.kind === "website" ? parent.data.website.redirectSubmissionId : undefined).toBe(existingId.toString());
 		expect(archiveCalls).toHaveLength(1);
+	});
+
+	test("a second site on a shared host opens its own case and is reported on its own", async () => {
+		const reported = "https://sites.google.com/view/start-trezor-suite";
+		const existingId = await createWebsiteSubmission({ url: reported }, async () => undefined);
+		await SubmissionsEntity.update(existingId, { status: "reported" });
+
+		const url = "https://sites.google.com/view/revert-change";
+		const page = "https://sites.google.com/view/revert-change/login";
+		const id = await createWebsiteSubmission({ url }, (options) => analyzeWebsite(options, dependencies(archiveOf([hop(0, url, 302, page), hop(1, page, 200)]))));
+		expect(id).not.toBe(existingId);
+		// The same site submitted again still lands on its own case.
+		expect(await createWebsiteSubmission({ url: "https://sites.google.com/view/Revert-Change/" }, async () => undefined)).toBe(id);
+
+		const submission = await waitForStatus(id, ["reported", "failed", "invalid", "redirected"]);
+		expect(submission.status).toBe("reported");
+		expect(submission.info).toBe(`Phishing confirmed at ${page}; a report for it and the 1 redirecting URL on sites.google.com/view/revert-change was queued.`);
+		const report = await AbuseRepository.getReportForSubmission(id);
+		const targets = await AbuseRepository.listTargets(report!.id);
+		expect(targets.map(({ normalizedTarget, observedUrls }) => ({ normalizedTarget, observedUrls }))).toEqual([
+			{ normalizedTarget: "sites.google.com", observedUrls: [page, url] },
+		]);
+	});
+
+	test("a redirect from one tenant of a shared host to another hands off to the other tenant's case", async () => {
+		const url = "https://sites.google.com/view/landing";
+		const kitPage = "https://sites.google.com/view/wallet-restore/home";
+		const id = await websiteSubmission(3n, url);
+
+		await analyzeWebsite({ submissionId: id, url }, dependencies(archiveOf([hop(0, url, 302, kitPage), hop(1, kitPage, 200)])));
+
+		const parent = await SubmissionsEntity.get(id);
+		expect(parent?.status).toBe("redirected");
+		expect(parent?.info).toBe(`${url} redirects to sites.google.com/view/wallet-restore; that site is analyzed and reported in its own case.`);
+		const child = await waitForStatus(BigInt(parent!.data.kind === "website" ? parent!.data.website.redirectSubmissionId! : "0"), ["reported", "failed", "invalid"]);
+		expect(child.status).toBe("reported");
+		expect(child.data.kind === "website" ? child.data.website.navigationHops?.map((hop) => hop.url) : undefined).toEqual([kitPage]);
 	});
 });
 

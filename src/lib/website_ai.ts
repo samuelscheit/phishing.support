@@ -12,6 +12,7 @@ import type { ReporterMetadata } from "./request_metadata";
 import { defaultReasoning, defaultResponseModel, sleep } from "./utils";
 import { extractWebsiteDataEntryFields } from "./website_fields";
 import { describeDataEntryField, type WebsiteKitResource } from "./website_types";
+import { isSameWebsite, websiteSite } from "./website_site";
 import type {
 	WebsiteDataEntryField,
 	WebsiteNavigationHop,
@@ -245,32 +246,32 @@ export function websiteSiteAssessments(
 	const capturedHop = hops.find((hop) => hop.index === capturedHopIndex && hop.contentCaptured);
 	return hops.map((hop) => ({
 		hopIndex: hop.index,
-		// A redirect within the captured host is part of that site. A redirect
-		// response on another host has no captured page of its own and cannot
-		// inherit the destination's classification or trigger a report.
-		...(capturedHop && hop.hostname === capturedHop.hostname
+		// A redirect within the captured site is part of it. A redirect response
+		// on another site has no captured page of its own and cannot inherit the
+		// destination's classification or trigger a report.
+		...(capturedHop && isSameWebsite(hop.url, capturedHop.url)
 			? capturedClassification
 			: { finding: "insufficient_evidence" as const }),
 	}));
 }
 
 /**
- * Every URL of the captured host in the navigation, captured page first:
+ * Every URL of the captured site in the navigation, captured page first:
  * single-URL providers receive the page itself, while URL lists also cover
  * the same-site link a visitor actually received.
  */
 export function websiteReportUrls(hops: WebsiteNavigationHop[], capturedHop: WebsiteNavigationHop): string[] {
-	return [...new Set([capturedHop.url, ...hops.filter((hop) => hop.hostname === capturedHop.hostname).map((hop) => hop.url)])];
+	return [...new Set([capturedHop.url, ...hops.filter((hop) => isSameWebsite(hop.url, capturedHop.url)).map((hop) => hop.url)])];
 }
 
 /**
- * The navigation as if the captured host had been submitted directly: the
- * trailing run of hops on that host, ending at the captured page.
+ * The navigation as if the captured site had been submitted directly: the
+ * trailing run of hops on that site, ending at the captured page.
  */
 export function capturedHostNavigation(hops: WebsiteNavigationHop[], capturedHop: WebsiteNavigationHop): WebsiteNavigationHop[] {
 	const end = hops.findIndex((hop) => hop.index === capturedHop.index);
 	let start = end;
-	while (start > 0 && hops[start - 1]!.hostname === capturedHop.hostname) start--;
+	while (start > 0 && isSameWebsite(hops[start - 1]!.url, capturedHop.url)) start--;
 	return hops.slice(start, end + 1).map((hop, index) => ({ ...hop, index }));
 }
 
@@ -357,8 +358,8 @@ async function withBrowserBackoff<T>(capture: () => Promise<T>, delaysMs: readon
 }
 
 /**
- * A capture that ended on another host belongs to that host: it opens that
- * host's own case with the captured evidence and its same-host navigation, as
+ * A capture that ended on another site belongs to that site: it opens that
+ * site's own case with the captured evidence and its same-site navigation, as
  * if the destination had been submitted directly. The submitted site gets no
  * finding of its own; its navigation links to the destination case.
  */
@@ -387,8 +388,8 @@ async function handOffRedirectedCapture(params: {
 	await SubmissionsEntity.update(submissionId, {
 		status: "redirected",
 		info: archive.cloaking
-			? `${url} cloaks: ${archive.cloaking.detail}. ${capturedHop.hostname} is analyzed and reported in its own case.`
-			: `${url} redirects to ${capturedHop.hostname}; that site is analyzed and reported in its own case.`,
+			? `${url} cloaks: ${archive.cloaking.detail}. ${websiteSite(capturedHop.url)} is analyzed and reported in its own case.`
+			: `${url} redirects to ${websiteSite(capturedHop.url)}; that site is analyzed and reported in its own case.`,
 		data: {
 			kind: "website",
 			website: {
@@ -449,7 +450,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			return submissionId;
 		}
 		const capturedHop = archive.attributionError ? undefined : capturedArchiveHop(archive);
-		if (capturedHop && capturedHop.hostname !== new URL(url).hostname) {
+		if (capturedHop && !isSameWebsite(capturedHop.url, url)) {
 			await handOffRedirectedCapture({ submissionId, url, whois, archive, capturedHop, reporter: { reporterIp, reporterCountry, reporterHeaders }, dependencies });
 			await emitStep(submissionId, "completed", 100);
 			return submissionId;
@@ -527,7 +528,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 				status: "reported",
 				info: reportUrls.length === 1
 					? `Phishing confirmed at ${reportableSite.url}; a report for that site was queued.`
-					: `Phishing confirmed at ${reportableSite.url}; a report for it and the ${reportUrls.length - 1} redirecting URL${reportUrls.length === 2 ? "" : "s"} on ${reportableSite.hostname} was queued.`,
+					: `Phishing confirmed at ${reportableSite.url}; a report for it and the ${reportUrls.length - 1} redirecting URL${reportUrls.length === 2 ? "" : "s"} on ${websiteSite(reportableSite.url)} was queued.`,
 			});
 		} else {
 			const { finding, rejectedPhishingClaim } = capturedClassification;

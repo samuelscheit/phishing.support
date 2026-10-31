@@ -2,6 +2,7 @@ import { ArtifactsEntity, SubmissionsEntity } from "@/lib/db/entities";
 import { generateId } from "@/lib/db/ids";
 import { analyzeWebsite, type AnalyzeWebsiteOptions } from "@/lib/website_ai";
 import type { ReporterMetadata } from "@/lib/request_metadata";
+import { websiteSite } from "@/lib/website_site";
 import { getRetryableSubmission, SubmissionRetryError } from "./retry";
 
 export { SubmissionRetryError } from "./retry";
@@ -97,6 +98,11 @@ export function websiteSubmissionUrl(url: string): string {
 	return parsed.toString();
 }
 
+/** One case per site; tenants of a shared host such as sites.google.com are separate sites. */
+export function websiteSubmissionDedupeKey(url: string): string {
+	return `website-${websiteSite(url)}`;
+}
+
 export async function createWebsiteSubmission(
 	options: WebsiteSubmissionOptions,
 	startAnalysis: (options: AnalyzeWebsiteOptions) => Promise<unknown> = analyzeWebsite,
@@ -108,7 +114,7 @@ export async function createWebsiteSubmission(
 	const existingId = await SubmissionsEntity.create({
 		kind: "website",
 		data: { kind: "website", website: { url } },
-		dedupeKey: `website-${new URL(url).hostname}`,
+		dedupeKey: websiteSubmissionDedupeKey(url),
 		// The worker starts immediately after insertion. Mark it running at the
 		// durable boundary so a process restart cannot leave a submission looking
 		// perpetually new while its first WHOIS lookup is in flight.

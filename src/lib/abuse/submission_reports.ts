@@ -7,6 +7,7 @@ import { AbuseInputError, hashStableJson, isPublicIp, sha256Hex } from "./securi
 import { setExfiltrationProbeStatus } from "../exfiltration/status";
 import { enqueueKitSiblingDiscovery } from "./origin/kit_job";
 import { errorText } from "../error_text";
+import { websiteSite } from "../website_site";
 
 const MAX_REPORT_DESCRIPTION_LENGTH = 30_000;
 /** Netcraft's documented raw-message limit, which is also the strictest mail-evidence consumer. */
@@ -91,15 +92,17 @@ function submissionRequest(params: {
 	};
 }
 
-/** Build the website report: exactly the captured host, with its URLs as observed evidence. */
+/**
+ * Build the website report: the captured site's host, with its URLs as
+ * observed evidence. On a shared host the URLs name the one tenant reported.
+ */
 export async function buildWebsitePhishingRequest(params: ConfirmedWebsitePhishing): Promise<ValidatedAbuseReportRequest> {
 	const observedUrls = [...new Set(params.urls.map((url) => normalizeObservedUrl(url.trim())))];
-	const hosts = new Set(observedUrls.map((url) => new URL(url).hostname));
-	if (hosts.size !== 1) throw new Error("A website report covers the URLs of exactly one captured host.");
+	if (new Set(observedUrls.map(websiteSite)).size !== 1) throw new Error("A website report covers the URLs of exactly one captured site.");
 	return submissionRequest({
 		submissionId: params.submissionId,
 		description: reportDescription(params.analysisText),
-		targets: [target(0, [...hosts][0]!, observedUrls)],
+		targets: [target(0, new URL(observedUrls[0]!).hostname, observedUrls)],
 		evidence: await screenshotEvidence("website.png", params.screenshotPng),
 		source: { kind: "website", urls: params.urls },
 	});
