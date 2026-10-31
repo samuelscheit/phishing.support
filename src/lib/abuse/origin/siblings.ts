@@ -6,7 +6,7 @@ import { fetchJson, RequestStatusError, RequestTimeoutError, type FetchImplement
 import { normalizeDomain, normalizePublicHttpUrl, sha256Hex } from "../security";
 import { throwIfAborted } from "../worker/shared";
 import { mapConcurrent } from "./concurrency";
-import { certificateCovers, presentedCertificate, type OriginServer, type TlsProbe } from "./sweep";
+import { certificateCovers, presentedCertificate, type OriginServer, type PresentedCertificate, type TlsProbe } from "./sweep";
 
 const MAX_FINGERPRINTS = 5;
 const MAX_CANDIDATES = 100;
@@ -46,6 +46,7 @@ export type ConfirmedSiblingDomain = {
 	url: string;
 	matchingHashes: string[];
 	originIp: string;
+	certificate: PresentedCertificate;
 };
 
 export type KitSiblingCandidate = {
@@ -200,7 +201,7 @@ export async function discoverSiblingDomains(params: {
 			throwIfAborted(params.signal);
 			const certificate = await probe(server.ip, candidate.domain, 2_000);
 			if (certificate && certificateCovers(certificate.names, candidate.domain)) {
-				return { ...candidate, originIp: server.ip } satisfies ConfirmedSiblingDomain;
+				return { ...candidate, originIp: server.ip, certificate } satisfies ConfirmedSiblingDomain;
 			}
 		}
 		return undefined;

@@ -34,3 +34,21 @@ export function extractUnambiguousVerificationCode(text: string): string | undef
 	const candidates = [...text.matchAll(/\b(\d{6,8})\b/g)].map((match) => match[1]);
 	return candidates.length === 1 ? candidates[0] : undefined;
 }
+
+/** Make RDAP/RIR all-caps organization names usable in a greeting, keeping legal suffixes. */
+export function humanizeOrganization(value: string): string {
+	// Preserve mixed-case organization names and standard legal suffixes while
+	// making RDAP's all-caps company names usable in a human email greeting.
+	const humanized = value.replace(/\b[A-Z]{3,}\b/g, (word) => {
+		if (["LLC", "LTD", "INC", "PLC", "GMBH", "UAB", "BV", "AG", "SA", "SAS"].includes(word)) return word;
+		return `${word[0]}${word.slice(1).toLowerCase()}`;
+	});
+	return /^[a-z]/.test(humanized) ? `${humanized[0]!.toUpperCase()}${humanized.slice(1)}` : humanized;
+}
+
+export function recipientGreeting(label: string): string {
+	const greetingLabel = label.replace(/\s+(?:operations?|services?),\s+[A-Z]{2,6}$/i, "").trim() || label;
+	return /\babuse\s+(?:team|desk|contact)\b/i.test(greetingLabel)
+		? `Hello ${greetingLabel},`
+		: `Hello ${greetingLabel} Abuse Team,`;
+}

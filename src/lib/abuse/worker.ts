@@ -31,6 +31,7 @@ const DEFAULT_EXTERNAL_CONCURRENCY = 2;
 const MAX_LANE_CONCURRENCY = 16;
 const DEFAULT_CONTROL_JOB_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_EXTERNAL_JOB_TIMEOUT_MS = 10 * 60_000;
+const DEFAULT_SWEEP_JOB_TIMEOUT_MS = 20 * 60_000;
 const MAX_JOB_TIMEOUT_MS = 60 * 60_000;
 const MAX_RETRIES = 8;
 
@@ -57,13 +58,20 @@ const EXTERNAL_JOB_TYPES = [
 	"submit_provider",
 	"deliver_provider_verification_code",
 	"probe_exfiltration",
-	"report_origin_host",
 	"discover_kit_siblings",
 	"analyze_kit_sibling",
 ] as const satisfies readonly AbuseJobType[];
 
+/**
+ * Origin-host TLS sweeps run slice after slice for hours. One dedicated slot
+ * keeps them from occupying provider capacity and keeps the scan rate of the
+ * egress address bounded to one sweep at a time.
+ */
+const SWEEP_JOB_TYPES = ["report_origin_host"] as const satisfies readonly AbuseJobType[];
+
 const CONTROL_JOB_FILTER: JobClaimFilter = { jobTypes: CONTROL_JOB_TYPES };
 const EXTERNAL_JOB_FILTER: JobClaimFilter = { jobTypes: EXTERNAL_JOB_TYPES };
+const SWEEP_JOB_FILTER: JobClaimFilter = { jobTypes: SWEEP_JOB_TYPES };
 
 class JobExecutionTimeoutError extends Error {
 	readonly code = "ABUSE_JOB_TIMEOUT";
@@ -101,6 +109,8 @@ export type AbuseWorkerOptions = {
 	controlJobTimeoutMs?: number;
 	/** Override the provider-lane execution deadline (primarily for tests). */
 	externalJobTimeoutMs?: number;
+	/** Override the origin-sweep execution deadline (primarily for tests). */
+	sweepJobTimeoutMs?: number;
 	/** Deterministic test hook; production always dispatches through the provider registry. */
 	processJob?: (job: AbuseJob, signal?: AbortSignal) => Promise<void>;
 	adapter?: AbuseSkyvernAdapter;
@@ -124,6 +134,7 @@ export class AbuseWorker {
 	private readonly externalConcurrency: number;
 	private readonly controlJobTimeoutMs: number;
 	private readonly externalJobTimeoutMs: number;
+	private readonly sweepJobTimeoutMs: number;
 	private adapter: AbuseSkyvernAdapter | undefined;
 	private readonly resolveTarget: typeof resolveAbuseTarget;
 	private readonly services: WorkerServices;
@@ -152,6 +163,10 @@ export class AbuseWorker {
 		this.externalJobTimeoutMs = boundedTimeout(
 			options.externalJobTimeoutMs ?? envInt("ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS", DEFAULT_EXTERNAL_JOB_TIMEOUT_MS),
 			DEFAULT_EXTERNAL_JOB_TIMEOUT_MS,
+		);
+		this.sweepJobTimeoutMs = boundedTimeout(
+			options.sweepJobTimeoutMs ?? envInt("ABUSE_WORKER_SWEEP_JOB_TIMEOUT_MS", DEFAULT_SWEEP_JOB_TIMEOUT_MS),
+			DEFAULT_SWEEP_JOB_TIMEOUT_MS,
 		);
 		this.adapter = options.adapter;
 		this.processJobOverride = options.processJob;
@@ -206,6 +221,7 @@ export class AbuseWorker {
 			...Array.from({ length: this.externalConcurrency }, () =>
 				this.runLoop(false, EXTERNAL_JOB_FILTER, this.externalJobTimeoutMs),
 			),
+			this.runLoop(false, SWEEP_JOB_FILTER, this.sweepJobTimeoutMs),
 		];
 	}
 
@@ -246,7 +262,9 @@ export class AbuseWorker {
 		try {
 			const defaultTimeout = CONTROL_JOB_TYPES.includes(job.jobType as (typeof CONTROL_JOB_TYPES)[number])
 				? this.controlJobTimeoutMs
-				: this.externalJobTimeoutMs;
+				: SWEEP_JOB_TYPES.includes(job.jobType as (typeof SWEEP_JOB_TYPES)[number])
+					? this.sweepJobTimeoutMs
+					: this.externalJobTimeoutMs;
 			await this.runJobWithDeadline(job, controller, timeoutMs ?? defaultTimeout);
 			await AbuseRepository.completeJob(job.id, this.owner);
 		} catch (error) {
@@ -468,7 +486,7 @@ export class AbuseWorker {
 				await this.runExfiltrationJob(job, signal);
 				return;
 			case "report_origin_host":
-				await reportOriginHostJob(job.payload, idFrom(job.reportId, "reportId"), signal);
+				await reportOriginHostJob(job, idFrom(job.reportId, "reportId"), signal);
 				return;
 			case "discover_kit_siblings":
 				await discoverKitSiblings({ reportId: idFrom(job.reportId, "reportId"), signal });

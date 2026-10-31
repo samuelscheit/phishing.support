@@ -7,10 +7,13 @@ import { serviceIdentity } from "../../constants";
 import { defaultResponseModel } from "../../utils";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
 import { createOriginHostEmailDraft } from "../origin/draft";
+import { humanizeOrganization, recipientGreeting } from "./shared";
 
 const MAX_DESCRIPTION_INPUT = 12_000;
 const MAX_SUMMARY_LENGTH = 1_200;
 const MAX_BODY_LENGTH = 5_000;
+/** Evidence-rich drafts (origin-host reports list every linked domain) may exceed the generic template's cap. */
+const MAX_STORED_BODY_LENGTH = 20_000;
 const MAX_URLS_IN_BODY = 20;
 const MAX_URL_LENGTH_IN_BODY = 2_048;
 const MAX_OBSERVED_URL_CHARS_IN_BODY = 2_400;
@@ -134,16 +137,6 @@ export function abuseEmailRecipientLabel(params: Pick<DraftInput, "route" | "rec
 	return mailboxDomain || "Provider";
 }
 
-function humanizeOrganization(value: string): string {
-	// Preserve mixed-case organization names and standard legal suffixes while
-	// making RDAP's all-caps company names usable in a human email greeting.
-	const humanized = value.replace(/\b[A-Z]{3,}\b/g, (word) => {
-		if (["LLC", "LTD", "INC", "PLC", "GMBH", "UAB", "BV", "AG", "SA", "SAS"].includes(word)) return word;
-		return `${word[0]}${word.slice(1).toLowerCase()}`;
-	});
-	return /^[a-z]/.test(humanized) ? `${humanized[0]!.toUpperCase()}${humanized.slice(1)}` : humanized;
-}
-
 function descriptionExcerpt(description: string): string {
 	const source = description.trim();
 	if (source.length <= MAX_DESCRIPTION_INPUT) return source;
@@ -263,13 +256,6 @@ async function generateEmailSummaryWithAI(input: AbuseEmailSummaryInput): Promis
 	}
 }
 
-function recipientGreeting(label: string): string {
-	const greetingLabel = label.replace(/\s+(?:operations?|services?),\s+[A-Z]{2,6}$/i, "").trim() || label;
-	return /\babuse\s+(?:team|desk|contact)\b/i.test(greetingLabel)
-		? `Hello ${greetingLabel},`
-		: `Hello ${greetingLabel} Abuse Team,`;
-}
-
 function safeBodyUrl(value: unknown): string | undefined {
 	const raw = cleanText(value, MAX_URL_LENGTH_IN_BODY);
 	return raw ? normalizePublicHttpUrl(raw) : undefined;
@@ -302,9 +288,9 @@ function containsUnapprovedUrl(summary: string, allowedUrls: readonly string[], 
 	if (/\b(?:javascript|data|file|mailto):/i.test(summary)) return true;
 	for (const match of summary.match(/https?:\/\/[^\s<>'"`]+/gi) ?? []) {
 		const truncated = match.endsWith("...");
-		const candidate = match.replace(/[),.;!?]+$/, "").toLowerCase();
 		if (options.allowTruncated && truncated) continue;
-		if (!allowed.has(candidate)) return true;
+		const candidate = safeBodyUrl(match.replace(/[),.;!?]+$/, ""))?.toLowerCase();
+		if (!candidate || !allowed.has(candidate)) return true;
 	}
 	return false;
 }
@@ -472,7 +458,7 @@ export function readVerifiedEmailDraft(payload: unknown, params: {
 	}
 	const parsed = z.object({
 		subject: z.string().trim().min(1).max(400),
-		body: z.string().trim().min(1).max(MAX_BODY_LENGTH),
+		body: z.string().trim().min(1).max(MAX_STORED_BODY_LENGTH),
 		recipientLabel: z.string().trim().min(1).max(160),
 	}).strict().safeParse(record.email);
 	if (!parsed.success || hasSubstantialCopiedPassage(params.description, parsed.data.body)) return undefined;

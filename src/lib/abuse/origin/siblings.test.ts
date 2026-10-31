@@ -99,6 +99,7 @@ describe("origin sibling discovery", () => {
 			url: "https://sibling.example.net/signin",
 			matchingHashes: [sha256Hex(CSS)],
 			originIp: "8.8.8.8",
+			certificate: { names: ["sibling.example.net"], issuer: "CA", fingerprint256: "BB", notBefore: "2026-01-01", notAfter: "2027-01-01" },
 		}]);
 	});
 

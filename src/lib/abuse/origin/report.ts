@@ -1,24 +1,33 @@
 import ipaddr from "ipaddr.js";
 
+import { SubmissionsEntity } from "../../db/entities";
+import { queryRDAPDomain } from "../../website_info";
 import { createWebsiteSubmission, type WebsiteSubmissionOptions } from "../../submissions/website";
-import { normalizeDomain } from "../security";
+import { normalizeDomain, registrableDomain } from "../security";
 import { AbuseRepository } from "../repository";
+import type { AbuseJob } from "../schema";
 import { parseJobBigInt, throwIfAborted } from "../worker/shared";
 import { parseCloudflareOriginDisclosure } from "./disclosure";
-import { resolveOriginHostNetworks, type OriginNetworkResolution } from "./network";
+import { capturedKitFacts } from "./kit_facts";
+import { resolveOriginHostNetworks } from "./network";
 import { discoverSiblingDomains, type SiblingDiscoveryResult } from "./siblings";
-import { readOriginHostSnapshot, type OriginHostSnapshot } from "./snapshot";
-import { findOriginServers, planOriginSweep, type OriginServer, type OriginSweepPlan } from "./sweep";
+import { originSweepProgressSchema, readOriginHostSnapshot, type OriginHostSnapshot, type OriginSweepProgress } from "./snapshot";
+import { findOriginServers, MAX_ORIGIN_RESULTS, originSweepAddresses, planOriginSweep, SWEEP_SLICE_ADDRESSES, type OriginSweepPlan } from "./sweep";
 
 const ORIGIN_ROUTE_PROVIDER_KEY = "origin-host-email";
 const ORIGIN_EVIDENCE_KIND = "origin_host_evidence";
 const ORIGIN_EVIDENCE_NAME = "origin-host-evidence.txt";
+const MAX_ERRORS = 100;
 
 export type OriginHostReportDependencies = {
 	resolveNetworks?: typeof resolveOriginHostNetworks;
 	findServers?: typeof findOriginServers;
 	discoverSiblings?: typeof discoverSiblingDomains;
 	createSiblingSubmission?: (options: WebsiteSubmissionOptions) => Promise<bigint>;
+	kitFacts?: typeof capturedKitFacts;
+	registeredAt?: (domain: string) => Promise<string | undefined>;
+	/** Addresses one invocation sweeps before queueing its successor. */
+	sliceAddresses?: number;
 };
 
 function errorDetail(error: unknown): string {
@@ -41,40 +50,71 @@ function containingPrefix(ip: string, prefixes: OriginSweepPlan["selectedPrefixe
 	}
 }
 
-function providerLabel(disclosed: string | undefined, resolution: OriginNetworkResolution): string {
+/** RIPEstat holders read "AS-NAME - Organization, CC"; the AS name is what a host calls itself. */
+function holderName(holder: string): string {
+	return holder.match(/^(\S+) - .+, [A-Z]{2}$/)?.[1] ?? holder;
+}
+
+function providerLabel(disclosed: string | undefined, networks: OriginSweepProgress["networks"], recipient: string): string {
 	if (disclosed?.trim()) return disclosed.replace(/\s+/g, " ").trim().slice(0, 200);
-	const holders = [...new Set(resolution.networks.map(({ holder }) => holder))];
-	return holders.join(" / ").slice(0, 200) || resolution.mailboxDomain;
+	const holders = [...new Set(networks.map(({ holder }) => holderName(holder)))];
+	return holders.join(" / ").slice(0, 200) || recipient.split("@")[1]!;
 }
 
 function cloudflareReportId(subject: string | null): string | undefined {
 	return subject?.match(/\b([a-f0-9]{16})\b/i)?.[1]?.toLowerCase();
 }
 
+/** Registration time of a domain's registrable parent, from the case capture or a fresh RDAP query. */
+async function domainRegisteredAt(domain: string): Promise<string | undefined> {
+	const registrable = registrableDomain(domain) ?? domain;
+	const registration = (await queryRDAPDomain(registrable))?.events.registration;
+	const parsed = registration ? new Date(registration) : undefined;
+	return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : undefined;
+}
+
+async function submissionRegisteredAt(submissionId: bigint): Promise<string | undefined> {
+	const submission = await SubmissionsEntity.get(submissionId);
+	const registration = submission?.data.kind === "website" ? submission.data.website.whois?.rdap?.events.registration : undefined;
+	const parsed = registration ? new Date(registration) : undefined;
+	return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : undefined;
+}
+
 export function originHostEvidence(snapshot: OriginHostSnapshot): Buffer {
+	const certificateLines = (certificate: OriginHostSnapshot["servers"][number]["certificate"]) => [
+		`  names: ${certificate.names.join(", ")}`,
+		`  issuer: ${certificate.issuer}`,
+		`  validity: ${certificate.notBefore} to ${certificate.notAfter}`,
+		`  SHA-256: ${certificate.fingerprint256}`,
+	];
 	const lines = [
 		`Cloudflare origin-host evidence for ${snapshot.originalDomain}`,
 		`Source provider message: ${snapshot.sourceMessageId}`,
 		`Observed: ${snapshot.observedAt}`,
 		`Hosting abuse contact: ${snapshot.recipient}`,
 		...(snapshot.cloudflareReportId ? [`Cloudflare report: ${snapshot.cloudflareReportId}`] : []),
+		...(snapshot.originalDomainRegisteredAt ? [`${snapshot.originalDomain} registered: ${snapshot.originalDomainRegisteredAt}`] : []),
 		"",
 		"Validated networks:",
 		...(snapshot.networks.length
 			? snapshot.networks.map((network) => `AS${network.asn} ${network.holder} (${network.prefixes.length} announced IPv4/IPv6 prefixes; matched through ${network.discoverySources.join(", ")})`)
 			: ["No ASN was validated against the disclosed abuse mailbox."]),
 		"",
-		`TLS sweep: ${snapshot.scan.addressesScanned} of ${snapshot.scan.totalAddresses} public IPv4 addresses${snapshot.scan.truncated ? " (capped)" : ""}`,
+		`TLS sweep (completed ${snapshot.scan.completedAt}): ${snapshot.scan.addressesScanned} of ${snapshot.scan.totalAddresses} public IPv4 addresses${snapshot.scan.truncated ? " (capped)" : ""}`,
 		...snapshot.scan.selectedPrefixes.map(({ asn, prefix }) => `- AS${asn} ${prefix}`),
 		"",
 		"Servers presenting a certificate for the reported domain:",
 		...(snapshot.servers.length ? snapshot.servers.flatMap((server) => [
 			`- ${server.ip}${server.asn ? ` AS${server.asn}` : ""}${server.prefix ? ` ${server.prefix}` : ""}`,
-			`  names: ${server.certificate.names.join(", ")}`,
-			`  issuer: ${server.certificate.issuer}`,
-			`  validity: ${server.certificate.notBefore} to ${server.certificate.notAfter}`,
-			`  SHA-256: ${server.certificate.fingerprint256}`,
-		]) : ["- none found within the bounded scan"]),
+			...certificateLines(server.certificate),
+			`  check: openssl s_client -connect ${server.ip}:443 -servername ${snapshot.originalDomain}`,
+		]) : ["- none found within the scan"]),
+		"",
+		"Captured kit:",
+		`- basis: ${snapshot.kit.phishingBasis ?? "unspecified"}`,
+		...(snapshot.kit.evidenceQuote ? [`- page text: "${snapshot.kit.evidenceQuote}"`] : []),
+		`- collects: ${snapshot.kit.collects.join(", ") || "not determined from the first page"}`,
+		...(snapshot.kit.exfiltrationTargets.length ? [`- exfiltration backends: ${snapshot.kit.exfiltrationTargets.join(", ")}`] : []),
 		"",
 		"Captured kit fingerprints searched on urlscan.io:",
 		...(snapshot.fingerprints.length
@@ -83,7 +123,11 @@ export function originHostEvidence(snapshot: OriginHostSnapshot): Buffer {
 		"",
 		"Sibling domains confirmed by both a matching kit hash and the origin certificate:",
 		...(snapshot.siblings.length
-			? snapshot.siblings.map((sibling) => `- ${sibling.domain} at ${sibling.originIp}; hashes ${sibling.matchingHashes.join(", ")}; submission ${sibling.submissionId}`)
+			? snapshot.siblings.flatMap((sibling) => [
+				`- ${sibling.domain} at ${sibling.originIp}; submission ${sibling.submissionId}${sibling.registeredAt ? `; registered ${sibling.registeredAt}` : ""}`,
+				`  hashes: ${sibling.matchingHashes.join(", ")}`,
+				...certificateLines(sibling.certificate),
+			])
 			: ["- none"]),
 		...(snapshot.errors.length ? ["", "Non-fatal discovery errors:", ...snapshot.errors.map((error) => `- ${error}`)] : []),
 	];
@@ -115,10 +159,18 @@ async function ensureDelivery(reportId: bigint, routeId: bigint, snapshot: Origi
 	}
 }
 
-/** Execute one immutable Cloudflare host disclosure from evidence to a normal email route. */
+/**
+ * Execute one immutable Cloudflare host disclosure from evidence to a normal
+ * email route. The TLS sweep can cover millions of addresses, so each
+ * invocation sweeps one slice and hands its progress to a successor job;
+ * discovery and the route are built only after the last slice.
+ */
 export async function reportOriginHost(params: {
 	reportId: bigint;
 	messageId: bigint;
+	progress?: OriginSweepProgress;
+	/** The running job, so its successor is not treated as its duplicate. */
+	jobId?: bigint;
 	signal?: AbortSignal;
 }, dependencies: OriginHostReportDependencies = {}): Promise<void> {
 	const message = await AbuseRepository.getMailMessage(params.messageId);
@@ -144,33 +196,75 @@ export async function reportOriginHost(params: {
 		await ensureDelivery(params.reportId, existing.id, snapshot);
 		return;
 	}
+
+	throwIfAborted(params.signal);
+	let progress = params.progress;
+	if (!progress) {
+		try {
+			const resolution = await (dependencies.resolveNetworks ?? resolveOriginHostNetworks)(disclosure.recipient, params.signal);
+			progress = { networks: resolution.networks, offset: 0, servers: [], errors: resolution.errors.slice(0, MAX_ERRORS) };
+		} catch (error) {
+			progress = { networks: [], offset: 0, servers: [], errors: [`network attribution: ${errorDetail(error)}`] };
+		}
+	}
+	const sweepPlan = planOriginSweep(progress.networks.flatMap((network) =>
+		network.prefixes.map((prefix) => ({ asn: network.asn, prefix }))
+	));
+	if (progress.offset < sweepPlan.addressCount && progress.servers.length < MAX_ORIGIN_RESULTS) {
+		const slice = originSweepAddresses(sweepPlan, progress.offset, dependencies.sliceAddresses ?? SWEEP_SLICE_ADDRESSES);
+		const servers = [...progress.servers];
+		const errors = [...progress.errors];
+		try {
+			servers.push(...await (dependencies.findServers ?? findOriginServers)({
+				domain: originalDomain,
+				addresses: slice,
+				maxResults: MAX_ORIGIN_RESULTS - servers.length,
+				signal: params.signal,
+			}));
+		} catch (error) {
+			throwIfAborted(params.signal);
+			errors.push(`TLS sweep at offset ${progress.offset}: ${errorDetail(error)}`);
+		}
+		const next: OriginSweepProgress = {
+			networks: progress.networks,
+			offset: progress.offset + slice.length,
+			servers: servers.slice(0, MAX_ORIGIN_RESULTS),
+			errors: errors.slice(0, MAX_ERRORS),
+		};
+		if (next.offset < sweepPlan.addressCount && next.servers.length < MAX_ORIGIN_RESULTS) {
+			await AbuseRepository.enqueueJob({
+				jobType: "report_origin_host",
+				reportId: params.reportId,
+				payload: { messageId: params.messageId.toString(), progress: next },
+				dedupeKey: `origin-host-sweep:${params.messageId.toString()}`,
+				...(params.jobId === undefined ? {} : { successorOf: params.jobId }),
+			});
+			return;
+		}
+		progress = next;
+	}
+	await completeOriginHostReport({ report, message, disclosure, sourceTarget, originalDomain, routeKey, reportRoutes, progress, sweepPlan, signal: params.signal }, dependencies);
+}
+
+async function completeOriginHostReport(params: {
+	report: NonNullable<Awaited<ReturnType<typeof AbuseRepository.getReport>>>;
+	message: NonNullable<Awaited<ReturnType<typeof AbuseRepository.getMailMessage>>>;
+	disclosure: NonNullable<ReturnType<typeof parseCloudflareOriginDisclosure>>;
+	sourceTarget: NonNullable<Awaited<ReturnType<typeof AbuseRepository.getTarget>>>;
+	originalDomain: string;
+	routeKey: string;
+	reportRoutes: Awaited<ReturnType<typeof AbuseRepository.listRoutes>>;
+	progress: OriginSweepProgress;
+	sweepPlan: OriginSweepPlan;
+	signal?: AbortSignal;
+}, dependencies: OriginHostReportDependencies): Promise<void> {
+	const { report, message, disclosure, sourceTarget, originalDomain, progress, sweepPlan } = params;
+	const errors = [...progress.errors];
+	const servers = progress.servers;
 	// A staff-created or resolver-created route may already have reported this
 	// exact disclosed mailbox. Continue discovery so sibling cases are created,
 	// but never send a second complaint to the same recipient for one report.
-	const recipientAlreadyReported = reportRoutes.some((route) => route.routeType === "email" && route.verifiedEmail === disclosure.recipient);
-
-	throwIfAborted(params.signal);
-	const errors: string[] = [];
-	let networkResolution: OriginNetworkResolution;
-	try {
-		networkResolution = await (dependencies.resolveNetworks ?? resolveOriginHostNetworks)(disclosure.recipient, params.signal);
-		errors.push(...networkResolution.errors);
-	} catch (error) {
-		const recipientDomain = disclosure.recipient.split("@")[1]!;
-		networkResolution = { recipient: disclosure.recipient, mailboxDomain: recipientDomain, networks: [], errors: [] };
-		errors.push(`network attribution: ${errorDetail(error)}`);
-	}
-	const sweepPlan = planOriginSweep(networkResolution.networks.flatMap((network) =>
-		network.prefixes.map((prefix) => ({ asn: network.asn, prefix }))
-	));
-	let servers: OriginServer[] = [];
-	try {
-		servers = sweepPlan.addresses.length
-			? await (dependencies.findServers ?? findOriginServers)({ domain: originalDomain, addresses: sweepPlan.addresses, signal: params.signal })
-			: [];
-	} catch (error) {
-		errors.push(`TLS sweep: ${errorDetail(error)}`);
-	}
+	const recipientAlreadyReported = params.reportRoutes.some((route) => route.routeType === "email" && route.verifiedEmail === disclosure.recipient);
 
 	let siblingDiscovery: SiblingDiscoveryResult = { fingerprints: [], candidateCount: 0, confirmed: [], errors: [] };
 	if (report.submissionId) {
@@ -187,6 +281,7 @@ export async function reportOriginHost(params: {
 		}
 	}
 
+	const registeredAt = dependencies.registeredAt ?? domainRegisteredAt;
 	const siblingSubmissions: OriginHostSnapshot["siblings"] = [];
 	const createSibling = dependencies.createSiblingSubmission ?? createWebsiteSubmission;
 	for (const sibling of siblingDiscovery.confirmed) {
@@ -194,42 +289,58 @@ export async function reportOriginHost(params: {
 			throwIfAborted(params.signal);
 			const submissionId = await createSibling({
 				url: sibling.url,
-				source: `origin-sibling:${report.submissionId?.toString() ?? "standalone"}:${params.messageId.toString()}`,
+				source: `origin-sibling:${report.submissionId?.toString() ?? "standalone"}:${message.id.toString()}`,
 				reporterIp: report.requesterIp ?? undefined,
 				reporterCountry: report.requesterCountry ?? undefined,
 				reporterHeaders: report.requesterHeaders ?? undefined,
 			});
-			siblingSubmissions.push({ ...sibling, submissionId: submissionId.toString() });
+			const siblingRegisteredAt = await registeredAt(sibling.domain).catch(() => undefined);
+			siblingSubmissions.push({ ...sibling, ...(siblingRegisteredAt ? { registeredAt: siblingRegisteredAt } : {}), submissionId: submissionId.toString() });
 		} catch (error) {
 			errors.push(`sibling ${sibling.domain}: ${errorDetail(error)}`);
 		}
 	}
 
+	let kit: OriginHostSnapshot["kit"] = { collects: [], exfiltrationProbed: false, exfiltrationTargets: [] };
+	let originalDomainRegisteredAt: string | undefined;
+	if (report.submissionId) {
+		try {
+			kit = await (dependencies.kitFacts ?? capturedKitFacts)(report.submissionId);
+		} catch (error) {
+			errors.push(`kit facts: ${errorDetail(error)}`);
+		}
+		originalDomainRegisteredAt = await submissionRegisteredAt(report.submissionId).catch(() => undefined);
+	}
+	originalDomainRegisteredAt ??= await registeredAt(originalDomain).catch(() => undefined);
+
 	const reportConfirmationId = cloudflareReportId(message.subject);
 	const snapshot: OriginHostSnapshot = {
 		kind: "cloudflare_origin_host",
-		version: 1,
-		recipient: networkResolution.recipient,
-		providerLabel: providerLabel(disclosure.providerLabel, networkResolution),
+		version: 2,
+		recipient: disclosure.recipient,
+		providerLabel: providerLabel(disclosure.providerLabel, progress.networks, disclosure.recipient),
 		originalDomain,
-		sourceMessageId: params.messageId.toString(),
+		...(originalDomainRegisteredAt ? { originalDomainRegisteredAt } : {}),
+		sourceMessageId: message.id.toString(),
 		...(reportConfirmationId ? { cloudflareReportId: reportConfirmationId } : {}),
 		observedAt: message.occurredAt.toISOString(),
-		networks: networkResolution.networks,
+		networks: progress.networks,
 		scan: {
-			addressesScanned: sweepPlan.addresses.length,
+			addressesScanned: Math.min(progress.offset, sweepPlan.addressCount),
 			totalAddresses: sweepPlan.totalAddresses,
 			truncated: sweepPlan.truncated,
 			selectedPrefixes: sweepPlan.selectedPrefixes,
+			completedAt: new Date().toISOString(),
 		},
 		servers: servers.map((server) => {
 			const network = containingPrefix(server.ip, sweepPlan.selectedPrefixes);
 			return { ...server, ...(network ? { asn: network.asn, prefix: network.prefix } : {}) };
-		}),
+		}).sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true })),
+		kit,
 		fingerprints: siblingDiscovery.fingerprints,
 		siblingCandidateCount: siblingDiscovery.candidateCount,
 		siblings: siblingSubmissions,
-		errors: errors.slice(0, 100),
+		errors: errors.slice(0, MAX_ERRORS),
 	};
 	const observedUrls = [...new Set([
 		...sourceTarget.observedUrls,
@@ -239,8 +350,8 @@ export async function reportOriginHost(params: {
 	if (recipientAlreadyReported) return;
 	const routeTarget = servers[0]
 		? await AbuseRepository.upsertDerivedTarget({
-			reportId: params.reportId,
-			normalizedTarget: servers[0].ip,
+			reportId: report.id,
+			normalizedTarget: snapshot.servers[0]!.ip,
 			targetType: "ip",
 			observedUrls,
 			resolverSnapshot: snapshot,
@@ -248,7 +359,7 @@ export async function reportOriginHost(params: {
 		})
 		: sourceTarget;
 	const route = await AbuseRepository.upsertResolvedRoute(routeTarget.id, {
-		routeKey,
+		routeKey: params.routeKey,
 		providerRegistryKey: ORIGIN_ROUTE_PROVIDER_KEY,
 		providerDisplayName: snapshot.providerLabel,
 		routeType: "email",
@@ -261,10 +372,17 @@ export async function reportOriginHost(params: {
 		resolutionSnapshot: snapshot,
 		status: "verified",
 	});
-	await ensureDelivery(params.reportId, route.id, snapshot);
-	await AbuseRepository.recomputeReportStatus(params.reportId);
+	await ensureDelivery(report.id, route.id, snapshot);
+	await AbuseRepository.recomputeReportStatus(report.id);
 }
 
-export async function reportOriginHostJob(payload: Record<string, unknown> | null | undefined, reportId: bigint, signal?: AbortSignal): Promise<void> {
-	await reportOriginHost({ reportId, messageId: parseJobBigInt(payload?.messageId, "payload.messageId"), signal });
+export async function reportOriginHostJob(job: Pick<AbuseJob, "id" | "payload">, reportId: bigint, signal?: AbortSignal): Promise<void> {
+	const progress = job.payload?.progress === undefined ? undefined : originSweepProgressSchema.parse(job.payload.progress);
+	await reportOriginHost({
+		reportId,
+		messageId: parseJobBigInt(job.payload?.messageId, "payload.messageId"),
+		progress,
+		jobId: job.id,
+		signal,
+	});
 }

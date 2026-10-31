@@ -39,6 +39,7 @@ services:
       ABUSE_WORKER_EXTERNAL_CONCURRENCY: ${ABUSE_WORKER_EXTERNAL_CONCURRENCY:-2}
       ABUSE_WORKER_CONTROL_JOB_TIMEOUT_MS: ${ABUSE_WORKER_CONTROL_JOB_TIMEOUT_MS:-300000}
       ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS: ${ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS:-600000}
+      ABUSE_WORKER_SWEEP_JOB_TIMEOUT_MS: ${ABUSE_WORKER_SWEEP_JOB_TIMEOUT_MS:-1200000}
       # Analysis, report drafting, and reply classification share one model
       # endpoint. .env is excluded from the image; values are injected at start.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

@@ -3,13 +3,15 @@ import tls from "node:tls";
 
 import ipaddr from "ipaddr.js";
 
-import { isPublicIp } from "../security";
+import { NON_PUBLIC_IPV4 } from "../security";
 
-/** The largest IPv4 address space one host may be swept across: a /16. */
-export const MAX_SWEEP_ADDRESSES = 65_536;
+/** The largest IPv4 address space one host may be swept across. */
+export const MAX_SWEEP_ADDRESSES = 4_000_000;
+/** Addresses one job sweeps before handing the rest to a successor job. */
+export const SWEEP_SLICE_ADDRESSES = 65_536;
+export const MAX_ORIGIN_RESULTS = 16;
 const DEFAULT_CONCURRENCY = 256;
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 1_500;
-const MAX_ORIGIN_RESULTS = 16;
 
 /** What a server presented when asked for a domain by name. */
 export type PresentedCertificate = {
@@ -27,8 +29,10 @@ export type OriginServer = {
 };
 
 export type OriginSweepPrefix = { asn: number; prefix: string };
+export type OriginSweepRange = OriginSweepPrefix & { start: number; end: number };
 export type OriginSweepPlan = {
-	addresses: string[];
+	ranges: OriginSweepRange[];
+	addressCount: number;
 	selectedPrefixes: OriginSweepPrefix[];
 	totalAddresses: number;
 	truncated: boolean;
@@ -89,57 +93,136 @@ export const presentedCertificate: TlsProbe = (ip, serverName, timeoutMs) => new
 	socket.once("error", () => finish(undefined));
 });
 
-function ipv4Range(item: OriginSweepPrefix): (OriginSweepPrefix & { start: number; end: number; size: number }) | undefined {
+const ipv4Integer = (address: ipaddr.IPv4) => address.toByteArray().reduce((value, byte) => value * 256 + byte, 0);
+
+function ipv4FromInteger(value: number): string {
+	return [value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].join(".");
+}
+
+function ipv4Range(item: OriginSweepPrefix): OriginSweepRange | undefined {
 	try {
 		if (!item.prefix.includes(".")) return undefined;
 		const [network, bits] = ipaddr.parseCIDR(item.prefix);
 		if (network.kind() !== "ipv4" || bits < 8 || bits > 32) return undefined;
-		const base = (network as ipaddr.IPv4).toByteArray().reduce((value, byte) => value * 256 + byte, 0);
 		const size = 2 ** (32 - bits);
-		const start = base - (base % size);
-		const first = [start >>> 24, (start >>> 16) & 255, (start >>> 8) & 255, start & 255].join(".");
-		const end = start + size - 1;
-		const last = [end >>> 24, (end >>> 16) & 255, (end >>> 8) & 255, end & 255].join(".");
-		if (!isPublicIp(first) || !isPublicIp(last)) return undefined;
-		return { ...item, start, end, size };
+		const start = ipv4Integer(network as ipaddr.IPv4) - (ipv4Integer(network as ipaddr.IPv4) % size);
+		return { ...item, start, end: start + size - 1 };
 	} catch {
 		return undefined;
 	}
 }
 
-/** Build a deterministic public-IPv4 plan capped at one /16 of TLS handshakes. */
+/** Sorted, disjoint, inclusive integer intervals. */
+class IntervalSet {
+	private readonly items: Array<[number, number]> = [];
+
+	private firstEndingAtOrAfter(value: number): number {
+		let low = 0;
+		let high = this.items.length;
+		while (low < high) {
+			const middle = (low + high) >>> 1;
+			if (this.items[middle]![1] < value) low = middle + 1;
+			else high = middle;
+		}
+		return low;
+	}
+
+	/** The parts of [start, end] this set does not contain, in ascending order. */
+	gaps(start: number, end: number): Array<[number, number]> {
+		const gaps: Array<[number, number]> = [];
+		let cursor = start;
+		for (let index = this.firstEndingAtOrAfter(start); index < this.items.length && cursor <= end; index++) {
+			const [itemStart, itemEnd] = this.items[index]!;
+			if (itemStart > end) break;
+			if (itemStart > cursor) gaps.push([cursor, itemStart - 1]);
+			cursor = Math.max(cursor, itemEnd + 1);
+		}
+		if (cursor <= end) gaps.push([cursor, end]);
+		return gaps;
+	}
+
+	add(start: number, end: number): void {
+		const first = this.firstEndingAtOrAfter(start - 1);
+		let last = first;
+		let mergedStart = start;
+		let mergedEnd = end;
+		while (last < this.items.length && this.items[last]![0] <= end + 1) {
+			mergedStart = Math.min(mergedStart, this.items[last]![0]);
+			mergedEnd = Math.max(mergedEnd, this.items[last]![1]);
+			last++;
+		}
+		this.items.splice(first, last - first, [mergedStart, mergedEnd]);
+	}
+
+	get size(): number {
+		return this.items.reduce((sum, [start, end]) => sum + end - start + 1, 0);
+	}
+}
+
+function nonPublicIpv4(): IntervalSet {
+	const blocked = new IntervalSet();
+	for (const [base, bits] of NON_PUBLIC_IPV4) {
+		const start = ipv4Integer(ipaddr.IPv4.parse(base));
+		blocked.add(start, start + 2 ** (32 - bits) - 1);
+	}
+	return blocked;
+}
+
+/**
+ * Build a deterministic plan over the public IPv4 space of the given
+ * prefixes, capped at `limit` addresses. The plan holds integer ranges, so a
+ * multi-million-address sweep never materializes its address list.
+ */
 export function planOriginSweep(prefixes: readonly OriginSweepPrefix[], limit = MAX_SWEEP_ADDRESSES): OriginSweepPlan {
 	const cap = Math.min(MAX_SWEEP_ADDRESSES, Math.max(1, Math.floor(limit)));
 	const ranges = prefixes.map(ipv4Range).filter((range) => range !== undefined);
-	const byAddress = [...ranges].sort((a, b) => a.start - b.start || a.end - b.end);
-	const merged: Array<[number, number]> = [];
-	for (const range of byAddress) {
-		const last = merged.at(-1);
-		if (last && range.start <= last[1] + 1) last[1] = Math.max(last[1], range.end);
-		else merged.push([range.start, range.end]);
-	}
-	const totalAddresses = merged.reduce((sum, [start, end]) => sum + end - start + 1, 0);
+	const union = nonPublicIpv4();
+	const blockedSize = union.size;
+	for (const range of ranges) union.add(range.start, range.end);
+	const totalAddresses = union.size - blockedSize;
 
 	// Cover complete small allocations before consuming the cap on a large one;
 	// preserve ASN discovery order as the tie-breaker.
-	const priority = [...ranges].sort((a, b) => a.size - b.size);
-	const addresses: string[] = [];
-	const seen = new Set<number>();
-	const selectedPrefixes: OriginSweepPrefix[] = [];
+	const priority = [...ranges].sort((a, b) => (a.end - a.start) - (b.end - b.start));
+	const covered = nonPublicIpv4();
+	const selected: OriginSweepRange[] = [];
+	const selectedPrefixes = new Map<string, OriginSweepPrefix>();
+	let addressCount = 0;
 	for (const range of priority) {
-		let used = false;
-		for (let value = range.start; value <= range.end && addresses.length < cap; value++) {
-			if (seen.has(value)) continue;
-			const ip = [value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].join(".");
-			if (!isPublicIp(ip)) continue;
-			seen.add(value);
-			addresses.push(ip);
-			used = true;
+		for (const [start, gapEnd] of covered.gaps(range.start, range.end)) {
+			if (addressCount >= cap) break;
+			const end = Math.min(gapEnd, start + cap - addressCount - 1);
+			selected.push({ asn: range.asn, prefix: range.prefix, start, end });
+			covered.add(start, end);
+			addressCount += end - start + 1;
+			selectedPrefixes.set(`${range.asn}:${range.prefix}`, { asn: range.asn, prefix: range.prefix });
 		}
-		if (used) selectedPrefixes.push({ asn: range.asn, prefix: range.prefix });
-		if (addresses.length >= cap) break;
+		if (addressCount >= cap) break;
 	}
-	return { addresses, selectedPrefixes, totalAddresses, truncated: addresses.length < totalAddresses };
+	return {
+		ranges: selected,
+		addressCount,
+		selectedPrefixes: [...selectedPrefixes.values()],
+		totalAddresses,
+		truncated: addressCount < totalAddresses,
+	};
+}
+
+/** The plan's addresses from position `offset`, at most `count` of them. */
+export function originSweepAddresses(plan: OriginSweepPlan, offset: number, count: number): string[] {
+	const addresses: string[] = [];
+	let skip = Math.max(0, offset);
+	for (const range of plan.ranges) {
+		const size = range.end - range.start + 1;
+		if (skip >= size) {
+			skip -= size;
+			continue;
+		}
+		for (let value = range.start + skip; value <= range.end && addresses.length < count; value++) addresses.push(ipv4FromInteger(value));
+		skip = 0;
+		if (addresses.length >= count) break;
+	}
+	return addresses;
 }
 
 /**

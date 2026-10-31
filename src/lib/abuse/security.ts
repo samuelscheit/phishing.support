@@ -145,7 +145,7 @@ function isInCidr(value: string, base: string, prefixLength: number): boolean {
 	return true;
 }
 
-const NON_PUBLIC_IPV4: Array<[string, number]> = [
+export const NON_PUBLIC_IPV4: ReadonlyArray<readonly [string, number]> = [
 	["0.0.0.0", 8],
 	["10.0.0.0", 8],
 	["100.64.0.0", 10],

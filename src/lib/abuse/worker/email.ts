@@ -7,6 +7,7 @@ import {
 	type AbuseEmailDraft,
 	verifiedEmailProviderPayload,
 } from "../mail";
+import { serviceIdentity } from "../../constants";
 import { AbuseRepository } from "../repository";
 import { errorText, RetryableDeliveryError, routeContext, UnknownExternalStateError, type WorkerServices } from "./shared";
 
@@ -34,6 +35,7 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices): P
 	const correlationKey = `email-run:${route.id.toString()}`;
 	const caseUrl = abuseEmailCaseUrl(report.submissionId);
 	const allowedDraftUrls = [
+		serviceIdentity.url,
 		...target.observedUrls,
 		...(report.legalBrandUrl ? [report.legalBrandUrl] : []),
 		...(caseUrl ? [caseUrl] : []),
