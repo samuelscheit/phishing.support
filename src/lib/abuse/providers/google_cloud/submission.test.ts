@@ -89,8 +89,13 @@ describe("Google Cloud abuse report payload", () => {
 
 	test("only Google's explicit answer decides: a 4xx rejects, anything unreadable stays ambiguous", async () => {
 		const response = (status: number, text: string) => ({ status: () => status, text: async () => text });
-		await expect(readGoogleCloudSubmitResponse(response(200, `)]}'\n{"name":"cases/9-1234567890123"}`))).resolves.toEqual({ caseId: "9-1234567890123" });
-		await expect(readGoogleCloudSubmitResponse(response(200, "{}"))).resolves.toEqual({});
+		await expect(readGoogleCloudSubmitResponse(response(200, ACCEPTED.body))).resolves.toEqual({ outcome: "accepted", caseId: "9-1234567890123" });
+		await expect(readGoogleCloudSubmitResponse(response(200, `{"result":["SUCCESS"]}`))).resolves.toEqual({ outcome: "accepted" });
+		await expect(readGoogleCloudSubmitResponse(response(200, CAPTCHA_REQUIRED.body))).resolves.toEqual({ outcome: "captcha_required" });
+		await expect(readGoogleCloudSubmitResponse(response(200, `{"result":["PERM_FAILURE"]}`))).rejects.toMatchObject({ name: "ProviderSubmissionRejectedError" });
+		// A validation error on a field, or an empty answer, created no case Google confirmed: ambiguous, not success.
+		await expect(readGoogleCloudSubmitResponse(response(200, `{"result":["REQUIRED_FORM_FRD_VALUE:8000020:"]}`))).rejects.toThrow("unrecognized answer");
+		await expect(readGoogleCloudSubmitResponse(response(200, "{}"))).rejects.toThrow("unrecognized answer");
 		await expect(readGoogleCloudSubmitResponse(response(400, "bad request"))).rejects.toMatchObject({ name: "ProviderSubmissionRejectedError" });
 		await expect(readGoogleCloudSubmitResponse(response(503, "unavailable"))).rejects.not.toMatchObject({ name: "ProviderSubmissionRejectedError" });
 		await expect(readGoogleCloudSubmitResponse(response(200, "<html>"))).rejects.toThrow("unreadable response");
@@ -101,16 +106,27 @@ const chromiumExecutable = process.env.PHISHING_TEST_CHROMIUM
 	?? `${homedir()}/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 const chromiumAvailable = await Bun.file(chromiumExecutable).exists();
 
-/** The fields, button, endpoint and confirmation of Google's form as captured on 2026-10-31. */
-function googleCloudForm(answer: { status: number; body: string } | "never", captchaDelayMs = 300) {
+type FormAnswer = { status: number; body: string } | "never";
+const ACCEPTED = { status: 200, body: `)]}'\n{"header":[],"result":["SUCCESS"],"case_id":"9-1234567890123","submit_error":[]}` };
+const CAPTCHA_REQUIRED = { status: 200, body: `{"header":[],"result":["REQUIRED_RECAPTCHA:"],"submit_error":[]}` };
+
+/**
+ * Google's form as observed on 2026-10-31: the same field IDs, button,
+ * endpoint and confirmation; an invisible reCAPTCHA token on each request;
+ * and on `REQUIRED_RECAPTCHA` a checkbox widget whose token the next request
+ * carries as `recaptcha_response`. Answers are served in order.
+ */
+function googleCloudForm(answers: FormAnswer | FormAnswer[], captchaDelayMs = 300) {
+	const queue = Array.isArray(answers) ? [...answers] : [answers];
 	const posts: Array<Record<string, string>> = [];
 	const server = Bun.serve({
 		port: 0,
 		fetch: async (request) => {
 			const url = new URL(request.url);
 			if (request.method === "POST" && url.pathname === "/apis/cufinsert") {
-				const body = await request.json() as { resource: { header: Array<{ name: string; value: string }> }; recaptcha_response_v3?: string };
-				posts.push({ ...Object.fromEntries(body.resource.header.map(({ name, value }) => [name, value])), recaptcha: body.recaptcha_response_v3 ?? "" });
+				const body = await request.json() as { resource: { header: Array<{ name: string; value: string }> }; recaptcha_response_v3?: string; recaptcha_response?: string };
+				posts.push({ ...Object.fromEntries(body.resource.header.map(({ name, value }) => [name, value])), recaptcha: body.recaptcha_response_v3 ?? "", recaptchaCheckbox: body.recaptcha_response ?? "" });
+				const answer = queue.length > 1 ? queue.shift()! : queue[0]!;
 				if (answer === "never") return new Promise<Response>(() => undefined);
 				return new Response(answer.body, { status: answer.status, headers: { "content-type": "application/json" } });
 			}
@@ -119,19 +135,30 @@ function googleCloudForm(answer: { status: number; body: string } | "never", cap
 ${["n_a", "google_app_engine", "compute_engine", "cloud_storage"].map((value) => `<label><input type="radio" name="Google_Cloud_Platform_Service" id="Google_Cloud_Platform_Service--${value}" value="${value}">${value}</label>`).join("")}
 <input id="abuse_date" name="abuse_date" placeholder="MM/DD/YYYY" type="text">
 <textarea id="abuse_details" name="abuse_details" maxlength="1000"></textarea>
+<div class="g-recaptcha-v2"></div>
 <div class="notification-area"></div>
 <button class="submit-button" type="button">Submit</button>
 <div class="confirmation-message__text" style="display:none">Thanks for your request. We'll only follow up with you if we need additional information.</div>
 </form><script>
+let checkbox = false;
 // The live form loads reCAPTCHA asynchronously and adds its token to the request.
-setTimeout(() => { window.grecaptcha = { execute: async () => "recaptcha-token" }; }, ${captchaDelayMs});
+setTimeout(() => { window.grecaptcha = { execute: async () => "recaptcha-token", getResponse: () => "" }; }, ${captchaDelayMs});
 document.querySelector(".submit-button").addEventListener("click", async () => {
 	const field = (name) => document.querySelector("[name='" + name + "']" + (name === "Google_Cloud_Platform_Service" ? ":checked" : ""))?.value ?? "";
 	const header = ["email_prefill_req", "Google_Cloud_Platform_Service", "abuse_date", "abuse_details"].map((name) => ({ name, value: field(name) }));
-	const recaptcha_response_v3 = window.grecaptcha ? await window.grecaptcha.execute() : undefined;
-	const response = await fetch("/apis/cufinsert?v=0", { method: "POST", body: JSON.stringify({ resource: { form_id: "cloud_platform_report", header }, recaptcha_response_v3 }) });
-	if (response.ok) { document.querySelector(".confirmation-message__text").style.display = "block"; }
-	else document.querySelector(".notification-area").textContent = "There were problems sending your form.";
+	const body = { resource: { form_id: "cloud_platform_report", header } };
+	if (checkbox) body.recaptcha_response = window.grecaptcha.getResponse();
+	else if (window.grecaptcha) body.recaptcha_response_v3 = await window.grecaptcha.execute();
+	const response = await fetch("/apis/cufinsert?v=0", { method: "POST", body: JSON.stringify(body) });
+	const answer = response.ok ? JSON.parse((await response.text()).replace(/^\\)\\]\\}'\\n/, "")) : undefined;
+	if (answer && ["SUCCESS", "ACCEPTED"].includes(answer.result?.[0])) document.querySelector(".confirmation-message__text").style.display = "block";
+	else if (answer && answer.result?.[0]?.startsWith("REQUIRED_RECAPTCHA")) {
+		checkbox = true;
+		const frame = document.createElement("iframe");
+		frame.src = "about:blank";
+		document.querySelector(".g-recaptcha-v2").append(frame, Object.assign(document.createElement("textarea"), { name: "g-recaptcha-response" }));
+		document.querySelector(".notification-area").textContent = "Complete the reCAPTCHA to continue";
+	} else document.querySelector(".notification-area").textContent = "There were problems sending your form.";
 });
 </script></body></html>`, { headers: { "content-type": "text/html" } });
 		},
@@ -152,12 +179,17 @@ async function googleCloudRoute() {
 	return { created, route };
 }
 
-function browserProvider(form: { url: string }, timeouts?: { formReadyMs?: number; submitResponseMs?: number; confirmationMs?: number }): ProviderSubmissionProvider {
+function browserProvider(
+	form: { url: string },
+	timeouts?: { formReadyMs?: number; submitResponseMs?: number; confirmationMs?: number },
+	solveCaptcha: () => Promise<string> = async () => { throw new Error("No checkbox reCAPTCHA was expected."); },
+): ProviderSubmissionProvider {
 	return {
 		definition: GOOGLE_CLOUD_PROVIDER,
 		prepareSubmission: prepareGoogleCloudSubmission,
 		submit: (context) => submitGoogleCloudSubmission(context, {
 			reportPageUrl: form.url,
+			solveCaptcha,
 			...(timeouts ? { timeouts } : {}),
 			openPage: async () => {
 				const browser = await puppeteer.launch({ executablePath: chromiumExecutable, headless: true, args: ["--no-first-run"] });
@@ -169,7 +201,7 @@ function browserProvider(form: { url: string }, timeouts?: { formReadyMs?: numbe
 
 describe.skipIf(!chromiumAvailable)("Google Cloud abuse form, in a real browser", () => {
 	test("fills the form from the durable draft and records Google's confirmation", async () => {
-		const form = googleCloudForm({ status: 200, body: `)]}'\n{"name":"cases/9-1234567890123"}` });
+		const form = googleCloudForm(ACCEPTED);
 		try {
 			const { created, route } = await googleCloudRoute();
 			await expect(executeProviderSubmission({ routeId: route.id, provider: browserProvider(form) })).resolves.toEqual({ outcome: "submitted", runId: expect.any(BigInt) });
@@ -194,12 +226,45 @@ describe.skipIf(!chromiumAvailable)("Google Cloud abuse form, in a real browser"
 	}, 60_000);
 
 	test("a form whose reCAPTCHA never loads is never submitted", async () => {
-		const form = googleCloudForm({ status: 200, body: "{}" }, 60_000);
+		const form = googleCloudForm(ACCEPTED, 60_000);
 		try {
 			const { route } = await googleCloudRoute();
 			const provider = browserProvider(form, { formReadyMs: 1_500 });
 			await executeProviderSubmission({ routeId: route.id, provider }).catch(() => undefined);
 			expect(form.posts).toHaveLength(0);
+		} finally {
+			form.server.stop(true);
+		}
+	}, 60_000);
+
+	test("when Google asks for the checkbox reCAPTCHA, it is solved and the same form is sent once more", async () => {
+		const form = googleCloudForm([CAPTCHA_REQUIRED, ACCEPTED]);
+		let solves = 0;
+		try {
+			const { created, route } = await googleCloudRoute();
+			const provider = browserProvider(form, undefined, async () => { solves += 1; return "solved-checkbox-token"; });
+			await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({ outcome: "submitted", runId: expect.any(BigInt) });
+
+			expect(solves).toBe(1);
+			expect(form.posts).toHaveLength(2);
+			expect(form.posts[0]).toMatchObject({ recaptcha: "recaptcha-token", recaptchaCheckbox: "" });
+			expect(form.posts[1]).toMatchObject({ recaptchaCheckbox: "solved-checkbox-token" });
+			// Both requests carry the same report.
+			expect(form.posts[1]!.abuse_details).toBe(form.posts[0]!.abuse_details);
+			const [run] = await AbuseRepository.listProviderRunsForReport(created.reportId);
+			expect(run).toMatchObject({ executionStatus: "completed", confirmationId: "9-1234567890123" });
+		} finally {
+			form.server.stop(true);
+		}
+	}, 60_000);
+
+	test("a solved reCAPTCHA Google still refuses is a rejection, with no third request", async () => {
+		const form = googleCloudForm(CAPTCHA_REQUIRED);
+		try {
+			const { route } = await googleCloudRoute();
+			const provider = browserProvider(form, undefined, async () => "rejected-token");
+			await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toMatchObject({ outcome: "provider_rejected" });
+			expect(form.posts).toHaveLength(2);
 		} finally {
 			form.server.stop(true);
 		}

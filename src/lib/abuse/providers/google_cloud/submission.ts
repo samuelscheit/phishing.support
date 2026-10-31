@@ -1,6 +1,7 @@
 import type { HTTPResponse, Page } from "rebrowser-puppeteer-core";
 
 import { getBrowser, getBrowserPage } from "../../../browser";
+import { solveDeathByCaptchaToken } from "../../captcha/death_by_captcha";
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
 import { recordValue, routeContext } from "../../worker/shared";
@@ -30,7 +31,18 @@ export type GoogleCloudSubmissionDependencies = {
 	openPage?: () => Promise<GoogleCloudFormSession>;
 	reportPageUrl?: string;
 	timeouts?: Partial<{ formReadyMs: number; submitResponseMs: number; confirmationMs: number }>;
+	solveCaptcha?: (signal?: AbortSignal) => Promise<string>;
 };
+
+/** Solve the checkbox reCAPTCHA the form falls back to. */
+export async function solveGoogleCloudCaptcha(signal?: AbortSignal): Promise<string> {
+	return solveDeathByCaptchaToken({
+		type: GOOGLE_CLOUD_PROVIDER.captcha.type,
+		parametersField: "token_params",
+		parameters: { googlekey: GOOGLE_CLOUD_PROVIDER.captcha.siteKey, pageurl: GOOGLE_CLOUD_PROVIDER.reportPageUrl },
+		...(signal ? { signal } : {}),
+	});
+}
 
 async function openReportingPage(): Promise<GoogleCloudFormSession> {
 	const browser = await getBrowser("reporting");
@@ -108,30 +120,89 @@ async function formNotification(page: Page): Promise<string> {
 		.join(" ")).catch(() => "");
 }
 
+export type GoogleCloudSubmitAnswer =
+	| { outcome: "accepted"; caseId?: string }
+	/** No case was created: Google wants the checkbox reCAPTCHA solved first. */
+	| { outcome: "captcha_required" };
+
 /**
  * Read the form's own submit response. Only Google's explicit answer decides
- * the outcome; a missing or unreadable response after the click is ambiguous
- * and is never retried automatically.
+ * the outcome: `ACCEPTED`/`SUCCESS`/`RETRIED` created a case, a
+ * `REQUIRED_RECAPTCHA` result created none, a 4xx or `PERM_FAILURE` is a
+ * rejection, and anything else after the click is ambiguous.
  */
-export async function readGoogleCloudSubmitResponse(response: Pick<HTTPResponse, "status" | "text">): Promise<{ caseId?: string }> {
+export async function readGoogleCloudSubmitResponse(response: Pick<HTTPResponse, "status" | "text">): Promise<GoogleCloudSubmitAnswer> {
 	const body = await response.text().catch(() => "");
 	// Google prefixes JSON API responses with an anti-hijacking line.
-	const json = (() => {
+	const json = recordValue((() => {
 		try {
 			return JSON.parse(body.replace(/^\)\]\}'[^\n]*\n/, "")) as unknown;
 		} catch {
 			return undefined;
 		}
-	})();
+	})());
 	const status = response.status();
 	if (status >= 400 && status < 500) {
 		throw new ProviderSubmissionRejectedError(`Google Cloud abuse form rejected the report with HTTP ${status}: ${body.slice(0, 300)}`);
 	}
-	if (status < 200 || status >= 300 || json === undefined) {
+	if (status < 200 || status >= 300 || !json) {
 		throw new Error(`Google Cloud abuse form answered HTTP ${status} with an unreadable response: ${body.slice(0, 300)}`);
 	}
-	const caseId = /"(?:name|case_id|caseId)"\s*:\s*"(?:cases\/)?([A-Za-z0-9-]{4,64})"/.exec(JSON.stringify(json))?.[1];
-	return caseId ? { caseId } : {};
+	const results = Array.isArray(json.result) ? json.result.filter((item): item is string => typeof item === "string") : [];
+	const [first] = results;
+	if (json.error === undefined && first && ["ACCEPTED", "SUCCESS", "RETRIED"].includes(first)) {
+		const caseId = typeof json.case_id === "string" && /^[A-Za-z0-9-]{4,64}$/.test(json.case_id) ? json.case_id : undefined;
+		return { outcome: "accepted", ...(caseId ? { caseId } : {}) };
+	}
+	if (results.length > 0 && results.every((item) => item.split(":")[0] === "REQUIRED_RECAPTCHA")) return { outcome: "captcha_required" };
+	if (first?.startsWith("PERM_FAILURE") || (Array.isArray(json.submit_error) && json.submit_error.length > 0)) {
+		throw new ProviderSubmissionRejectedError(`Google Cloud abuse form refused the report: ${body.slice(0, 300)}`);
+	}
+	throw new Error(`Google Cloud abuse form gave an unrecognized answer: ${body.slice(0, 300)}`);
+}
+
+type SubmitAttempt = { answer: GoogleCloudSubmitAnswer; sentToken: "v3" | "v2" | undefined };
+
+/** Click Submit once and read the form's own request and Google's answer to it. */
+async function submitOnce(page: Page, step: <T>(operation: Promise<T>) => Promise<T>, timeoutMs: number): Promise<SubmitAttempt> {
+	const submitResponse = page.waitForResponse(
+		(response) => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith(GOOGLE_CLOUD_PROVIDER.submitEndpointPath),
+		{ timeout: timeoutMs },
+	);
+	// Swallow its rejection until it is awaited below, so an earlier failure cannot leave it unhandled.
+	submitResponse.catch(() => undefined);
+	await step(page.click("button.submit-button"));
+	const response = await step(submitResponse).catch(async (error: unknown) => {
+		const notification = await formNotification(page);
+		throw new Error(`Google Cloud abuse form sent no readable answer${notification ? ` ("${notification}")` : ""}: ${error instanceof Error ? error.message : String(error)}`);
+	});
+	const sent = recordValue((() => {
+		try {
+			return JSON.parse(response.request().postData() ?? "") as unknown;
+		} catch {
+			return undefined;
+		}
+	})());
+	const sentToken = typeof sent?.recaptcha_response === "string" && sent.recaptcha_response ? "v2"
+		: typeof sent?.recaptcha_response_v3 === "string" && sent.recaptcha_response_v3 ? "v3"
+			: undefined;
+	return { answer: await step(readGoogleCloudSubmitResponse(response)), sentToken };
+}
+
+/**
+ * Place a solved checkbox token where the form's own widget keeps it, so the
+ * form's next request carries it as `recaptcha_response`.
+ */
+async function installCheckboxToken(page: Page, token: string): Promise<void> {
+	await page.waitForFunction(() => {
+		const recaptcha = (window as Window & { grecaptcha?: { getResponse?: unknown } }).grecaptcha;
+		return typeof recaptcha?.getResponse === "function" && document.querySelector(".g-recaptcha-v2 iframe") !== null;
+	}, { timeout: 20_000 });
+	await page.evaluate((value) => {
+		const recaptcha = (window as unknown as { grecaptcha: { getResponse: (widget?: unknown) => string } }).grecaptcha;
+		recaptcha.getResponse = () => value;
+		for (const field of document.querySelectorAll<HTMLTextAreaElement>(".g-recaptcha-v2 textarea[name='g-recaptcha-response']")) field.value = value;
+	}, token);
 }
 
 /** Fill and send the form from its durable draft, then read Google's confirmation. */
@@ -171,28 +242,21 @@ export async function submitGoogleCloudSubmission(
 		await step(page.waitForFunction(() => typeof (window as Window & { grecaptcha?: { execute?: unknown } }).grecaptcha?.execute === "function", { timeout: timeouts.formReadyMs }));
 		await step(fillGoogleCloudForm(page, payload));
 
-		const submitResponse = page.waitForResponse(
-			(response) => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith(GOOGLE_CLOUD_PROVIDER.submitEndpointPath),
-			{ timeout: timeouts.submitResponseMs },
-		);
-		// Swallow its rejection until it is awaited below, so an earlier failure cannot leave it unhandled.
-		submitResponse.catch(() => undefined);
-		await step(page.click("button.submit-button"));
-		const response = await step(submitResponse).catch(async (error: unknown) => {
-			const notification = await formNotification(page);
-			throw new Error(`Google Cloud abuse form sent no readable answer${notification ? ` ("${notification}")` : ""}: ${error instanceof Error ? error.message : String(error)}`);
-		});
-		const sent = recordValue((() => {
-			try {
-				return JSON.parse(response.request().postData() ?? "") as unknown;
-			} catch {
-				return undefined;
+		let attempt = await submitOnce(page, step, timeouts.submitResponseMs);
+		if (attempt.answer.outcome === "captcha_required") {
+			// Google created no case and switched the form to its checkbox
+			// reCAPTCHA. Solve it and send the same form once more.
+			const token = await step((dependencies.solveCaptcha ?? solveGoogleCloudCaptcha)(signal));
+			await step(installCheckboxToken(page, token));
+			attempt = await submitOnce(page, step, timeouts.submitResponseMs);
+			if (attempt.answer.outcome === "captcha_required") {
+				throw new ProviderSubmissionRejectedError("Google Cloud abuse form rejected the solved reCAPTCHA; no case was created.");
 			}
-		})());
-		if (!sent || typeof sent.recaptcha_response_v3 !== "string" || sent.recaptcha_response_v3.length === 0) {
+			if (attempt.sentToken !== "v2") throw new Error("The Google Cloud abuse form resent the report without the solved reCAPTCHA token.");
+		} else if (!attempt.sentToken) {
 			throw new Error("The Google Cloud abuse form sent its report without a reCAPTCHA token.");
 		}
-		const { caseId } = await step(readGoogleCloudSubmitResponse(response));
+		const caseId = attempt.answer.outcome === "accepted" ? attempt.answer.caseId : undefined;
 		const confirmation = await step(page.waitForSelector(".confirmation-message__text", { visible: true, timeout: timeouts.confirmationMs }))
 			.then((element) => element?.evaluate((node) => (node as HTMLElement).innerText.trim()))
 			.catch(() => undefined);
