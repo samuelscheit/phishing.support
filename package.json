@@ -40,7 +40,8 @@
 	"overrides": {
 		"@esbuild-kit/core-utils": {
 			"esbuild": "0.25.12"
-		}
+		},
+		"follow-redirects": "1.16.2"
 	},
 	"dependencies": {
 		"@antiadmin/anticaptchaofficial": "1.0.57",
