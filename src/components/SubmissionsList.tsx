@@ -7,8 +7,8 @@ import { cn } from "@/web_lib/util";
 import { formatDistanceToNow } from "date-fns";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { Submission } from "../lib/db/schema";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { SubmissionCard as SubmissionCardData, SubmissionCardPage } from "@/lib/submissions/list";
 
 const PREVIEW_ROWS = 3;
 
@@ -39,7 +39,7 @@ function useGridColumnCount() {
 	return columnCount;
 }
 
-function SubmissionCard({ submission, obscured = false }: { submission: Submission; obscured?: boolean }) {
+function SubmissionCard({ submission, obscured = false }: { submission: SubmissionCardData; obscured?: boolean }) {
 	return (
 		<Link
 			href={`/submissions/${submission.id}`}
@@ -59,21 +59,39 @@ function SubmissionCard({ submission, obscured = false }: { submission: Submissi
 							{formatDistanceToNow(new Date(submission.createdAt), { addSuffix: true })}
 						</span>
 					</div>
-					<CardTitle className="text-lg truncate min-w-0">
-						{submission.data?.kind === "email"
-							? submission.data.email?.subject || submission.dedupeKey
-							: submission.data.website.url}
-					</CardTitle>
+					<CardTitle className="text-lg truncate min-w-0">{submission.title}</CardTitle>
 				</CardContent>
 			</Card>
 		</Link>
 	);
 }
 
+async function fetchPage(cursor?: string): Promise<SubmissionCardPage> {
+	const res = await fetch(cursor ? `/api/submissions?cursor=${encodeURIComponent(cursor)}` : "/api/submissions");
+	if (!res.ok) throw new Error(`Listing submissions failed with HTTP ${res.status}`);
+	return res.json();
+}
+
+/** Newest page first, then older pages; a card refreshed on the newest page replaces its older copy. */
+function mergePages(newest: SubmissionCardData[], older: SubmissionCardData[]): SubmissionCardData[] {
+	const seen = new Set(newest.map(({ id }) => id));
+	return [...newest, ...older.filter(({ id }) => !seen.has(id))];
+}
+
+/**
+ * Recent submissions: the newest page refreshes every five seconds, and once
+ * expanded, older pages load as the reader scrolls to the end of the list.
+ */
 export function SubmissionsList() {
-	const [submissions, setSubmissions] = useState<Submission[]>([]);
+	const [newest, setNewest] = useState<SubmissionCardData[]>([]);
+	const [older, setOlder] = useState<SubmissionCardData[]>([]);
+	// `undefined` until the first page arrives; `null` once every page is loaded.
+	const [nextCursor, setNextCursor] = useState<string | null | undefined>(undefined);
+	const [loadingOlder, setLoadingOlder] = useState(false);
 	const [loading, setLoading] = useState(true);
 	const [expanded, setExpanded] = useState(false);
+	const sentinel = useRef<HTMLDivElement>(null);
+	const submissions = mergePages(newest, older);
 	const columnCount = useGridColumnCount();
 	const previewSubmissionCount = columnCount * PREVIEW_ROWS;
 	const hasMoreSubmissions = submissions.length > previewSubmissionCount;
@@ -82,13 +100,12 @@ export function SubmissionsList() {
 	const obscuredSubmissions = isCollapsed ? submissions.slice(previewSubmissionCount) : [];
 
 	useEffect(() => {
-		const fetchSubmissions = async () => {
+		const refreshNewest = async () => {
 			try {
-				const res = await fetch("/api/submissions");
-				if (res.ok) {
-					const data = await res.json();
-					setSubmissions(data);
-				}
+				const page = await fetchPage();
+				setNewest(page.submissions);
+				// Only the first load decides where older pages start; refreshes must not reset paging.
+				setNextCursor((current) => current === undefined ? page.nextCursor ?? null : current);
 			} catch (err) {
 				console.error("Failed to fetch submissions:", err);
 			} finally {
@@ -96,10 +113,36 @@ export function SubmissionsList() {
 			}
 		};
 
-		fetchSubmissions();
-		const interval = setInterval(fetchSubmissions, 5000);
+		refreshNewest();
+		const interval = setInterval(refreshNewest, 5000);
 		return () => clearInterval(interval);
 	}, []);
+
+	const loadOlder = useCallback(async () => {
+		if (!nextCursor || loadingOlder) return;
+		setLoadingOlder(true);
+		try {
+			const page = await fetchPage(nextCursor);
+			setOlder((current) => [...current, ...page.submissions]);
+			setNextCursor(page.nextCursor ?? null);
+		} catch (err) {
+			console.error("Failed to fetch older submissions:", err);
+		} finally {
+			setLoadingOlder(false);
+		}
+	}, [nextCursor, loadingOlder]);
+
+	useEffect(() => {
+		const target = sentinel.current;
+		if (!expanded || !target || !nextCursor) return;
+		// Content follows the list, so a reader who jumps to the page end (End key,
+		// scrollbar drag) passes the list's end without it ever intersecting.
+		const observer = new IntersectionObserver((entries) => {
+			if (entries.some((entry) => entry.isIntersecting || entry.boundingClientRect.bottom < 0)) void loadOlder();
+		}, { rootMargin: "600px 0px" });
+		observer.observe(target);
+		return () => observer.disconnect();
+	}, [expanded, nextCursor, loadOlder]);
 
 	if (loading && submissions.length === 0) {
 		return <div className="text-center py-10 text-muted-foreground">Loading submissions...</div>;
@@ -144,6 +187,12 @@ export function SubmissionsList() {
 					</div>
 				)}
 			</div>
+
+			{expanded && nextCursor && (
+				<div ref={sentinel} className="py-6 text-center text-sm text-muted-foreground" aria-live="polite">
+					{loadingOlder ? "Loading older submissions..." : ""}
+				</div>
+			)}
 
 			{hasMoreSubmissions && expanded && (
 				<div className="mt-4 flex justify-center">
