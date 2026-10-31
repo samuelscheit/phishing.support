@@ -48,6 +48,16 @@ describe("provider form facts from the phishing analysis", () => {
 		expect(lookalike.brandOfficialWebsite).toBe("https://examplebank.com/");
 	});
 
+	test("accept a well-known brand homepage the analysis itself does not name", async () => {
+		const analysis = 'Page text: "Sign in with your Google Account." The page collects "Email or phone".';
+		const facts = await deriveProviderFormFacts({ target: "2dayduecheck.website", analysis }, async () => ({
+			...extracted,
+			impersonatedBrand: "Google",
+			brandOfficialWebsite: "https://www.google.com/",
+		}));
+		expect(facts.brandOfficialWebsite).toBe("https://www.google.com/");
+	});
+
 	test("prefer an operator-supplied brand URL and survive a failing or malformed model", async () => {
 		const supplied = await deriveProviderFormFacts({ target: "x.example", analysis: "x", legalBrandUrl: "https://www.tiktok.com/coin" }, async () => extracted);
 		expect(supplied.brandOfficialWebsite).toBe("https://www.tiktok.com/coin");
