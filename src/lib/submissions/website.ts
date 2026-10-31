@@ -7,7 +7,7 @@ import { getRetryableSubmission, SubmissionRetryError } from "./retry";
 export { SubmissionRetryError } from "./retry";
 
 export type WebsiteSubmissionOptions = ReporterMetadata
-	& Pick<AnalyzeWebsiteOptions, "url" | "mhtmlSnapshot" | "archivedUrl" | "navigationHops" | "screenshotSnapshot" | "verificationGate">
+	& Pick<AnalyzeWebsiteOptions, "url" | "mhtmlSnapshot" | "archivedUrl" | "navigationHops" | "screenshotSnapshot" | "verificationGate" | "kitResources">
 	& { source?: string };
 
 type WebsiteAnalysisRecoveryOptions = ReporterMetadata & {
@@ -144,6 +144,7 @@ export async function retryFailedWebsiteAnalysis(
 		navigationHops: websiteData?.navigationHops,
 		trustMhtmlDocumentLocation: Boolean(mhtmlSnapshot),
 		verificationGate: mhtmlSnapshot ? websiteData?.verificationGate : undefined,
+		kitResources: mhtmlSnapshot ? websiteData?.kitResources : undefined,
 		screenshotSnapshot,
 		reporterIp: submission.reporterIp ?? undefined,
 		reporterCountry: submission.reporterCountry ?? undefined,

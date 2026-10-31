@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import puppeteer, { type Browser, type BrowserContext, type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
 import type { FabricEgress } from "./browser/fabric";
@@ -93,6 +94,7 @@ function responseForNavigation(
 			response: () => hopResponse,
 			redirectChain: () => redirects,
 			isNavigationRequest: () => true,
+			resourceType: () => "document",
 			frame: () => mainFrame,
 		} as unknown as HTTPRequest;
 		hopResponse = {
@@ -129,7 +131,31 @@ type FixtureNavigation = {
 	egress: FabricEgress;
 	/** Deliver a later main-frame document response, as a self-replacing interstitial does. */
 	replaceDocument: (response: HTTPResponse) => void;
+	/** Deliver a subresource response (script, stylesheet, image) the page loaded. */
+	loadResource: (response: HTTPResponse) => void;
 };
+
+/** A non-navigation subresource response with a body. */
+function subresource(url: string, resourceType: string, body: string | Error, options: { status?: number; contentType?: string } = {}): HTTPResponse {
+	const request = {
+		url: () => url,
+		isNavigationRequest: () => false,
+		resourceType: () => resourceType,
+		frame: () => mainFrame,
+		redirectChain: () => [],
+	} as unknown as HTTPRequest;
+	return {
+		ok: () => (options.status ?? 200) < 300,
+		status: () => options.status ?? 200,
+		url: () => url,
+		headers: () => (options.contentType ? { "content-type": options.contentType } : {}),
+		request: () => request,
+		buffer: async () => {
+			if (body instanceof Error) throw body;
+			return Buffer.from(body);
+		},
+	} as unknown as HTTPResponse;
+}
 
 function archiveBrowserFixture(options: {
 	goto?: (navigation: FixtureNavigation) => Promise<HTTPResponse | null>;
@@ -168,8 +194,11 @@ function archiveBrowserFixture(options: {
 					currentUrl = response.url();
 					for (const listener of responseListeners) listener(response);
 				};
+				const loadResource = (response: HTTPResponse) => {
+					for (const listener of responseListeners) listener(response);
+				};
 				const response = options.goto
-					? await options.goto({ url, egress, replaceDocument: deliver })
+					? await options.goto({ url, egress, replaceDocument: deliver, loadResource })
 					: responseForNavigation(options.pageUrl ?? url, 200, { contentType: "text/html" });
 				if (response) deliver(response);
 				return response;
@@ -227,6 +256,32 @@ function archiveBrowserFixture(options: {
 		get captureSnapshotCount() { return captureSnapshotCount; },
 	};
 }
+
+test("a live capture records the hashes of the kit's own scripts and stylesheets as received", async () => {
+	const url = "https://kit.example.com/signin";
+	const script = "window.kit = " + "1;".repeat(600);
+	const style = "body{" + "color:#123456;".repeat(100) + "}";
+	const fixture = archiveBrowserFixture({
+		goto: async ({ loadResource }) => {
+			loadResource(subresource("https://kit.example.com/index.js?v=2", "script", script, { contentType: "application/javascript; charset=utf-8" }));
+			loadResource(subresource("https://kit.example.com/res/style.css", "stylesheet", style, { contentType: "text/css" }));
+			// The same script under a second URL is recorded once.
+			loadResource(subresource("https://kit.example.com/index.js?v=3", "script", script, { contentType: "application/javascript" }));
+			// Third-party files, images, failed responses and unreadable bodies are not kit evidence.
+			loadResource(subresource("https://cdn.example.net/jquery.js", "script", "jquery", { contentType: "application/javascript" }));
+			loadResource(subresource("https://kit.example.com/logo.png", "image", "png-bytes", { contentType: "image/png" }));
+			loadResource(subresource("https://kit.example.com/missing.js", "script", "not found", { status: 404, contentType: "text/html" }));
+			loadResource(subresource("https://kit.example.com/evicted.js", "script", new Error("No resource with given identifier found")));
+			return responseForNavigation(url, 200, { contentType: "text/html" });
+		},
+	});
+	const archive = await archiveWebsite({ url }, { getBrowser: fixture.getBrowser, ...fast });
+	const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+	expect(archive.kitResources).toEqual([
+		{ url: "https://kit.example.com/index.js?v=2", mimeType: "application/javascript", size: Buffer.byteLength(script), sha256: sha256(script) },
+		{ url: "https://kit.example.com/res/style.css", mimeType: "text/css", size: Buffer.byteLength(style), sha256: sha256(style) },
+	]);
+});
 
 test("website capture records every redirect response separately from the final page evidence", async () => {
 	const requestedUrl = "https://share.google/ZAq2FghpGquJH6ShL";

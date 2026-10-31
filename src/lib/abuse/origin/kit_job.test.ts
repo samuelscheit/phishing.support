@@ -4,39 +4,91 @@ import { eq } from "drizzle-orm";
 import { SubmissionsEntity } from "../../db/entities";
 import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
+import type { WebsiteSiteAssessment } from "../../website_types";
 import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
 import { abuseJobs } from "../schema";
-import { analyzeKitSibling, discoverKitSiblings, ensureKitSiblingDiscoveryJobs } from "./kit_job";
+import { analyzeKitSibling, discoverKitSiblings, enqueueKitSiblingDiscovery, isKitSiblingSeed } from "./kit_job";
 
-describe("all-case kit sibling discovery", () => {
+const CREDENTIAL_KIT: WebsiteSiteAssessment[] = [{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in" }];
+
+async function websiteCase(id: bigint, domain: string, options: { source?: string; siteAssessments?: WebsiteSiteAssessment[] } = {}) {
+	await SubmissionsEntity.create({
+		id,
+		kind: "website",
+		data: { kind: "website", website: { url: `https://${domain}/`, ...(options.siteAssessments ? { siteAssessments: options.siteAssessments } : {}) } },
+		dedupeKey: `website-${domain}`,
+		status: "reported",
+		source: options.source ?? `https://${domain}/`,
+	});
+	const request = await validateAbuseReportRequest({
+		targets: [domain],
+		allegationCategory: "phishing",
+		description: "Confirmed credential phishing.",
+		observedUrls: [{ target: domain, urls: [`https://${domain}/`] }],
+	});
+	return AbuseRepository.createReport({ request, reporter: { reporterCountry: "DE" }, submissionId: id });
+}
+
+const discoveryJobs = async () => (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "discover_kit_siblings")).all();
+
+describe("kit sibling discovery jobs", () => {
 	useTemporaryDatabase();
 
-	test("backfills one lifetime job and opens every exact-hash candidate as a normal website submission", async () => {
-		const submissionId = 420000000000000001n;
-		await SubmissionsEntity.create({
-			id: submissionId,
-			kind: "website",
-			data: { kind: "website", website: { url: "https://login.example.com/" } },
-			dedupeKey: "website-login.example.com",
-			status: "reported",
-			source: "https://login.example.com/",
+	test("only an original, classifier-confirmed credential or payment kit seeds a search", async () => {
+		const cases = {
+			credential: await websiteCase(420000000000000001n, "login.example.com", { siteAssessments: CREDENTIAL_KIT }),
+			payment: await websiteCase(420000000000000002n, "pay.example.com", { siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "payment_fraud" }] }),
+			malware: await websiteCase(420000000000000003n, "update.example.com", { siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "malware_delivery" }] }),
+			// A report migrated from the old pipeline never had a classifier verdict (the gambling site that spread to 80 casinos).
+			migrated: await websiteCase(420000000000000004n, "casino.example.com"),
+			sibling: await websiteCase(420000000000000005n, "sibling.example.com", { source: "kit-sibling:420000000000000001:1", siteAssessments: CREDENTIAL_KIT }),
+			originSibling: await websiteCase(420000000000000006n, "origin.example.com", { source: "origin-sibling:420000000000000001:1", siteAssessments: CREDENTIAL_KIT }),
+			// A sibling that redirected keeps its lineage through the redirect hand-off.
+			redirectedSibling: await websiteCase(420000000000000007n, "landing.example.com", { source: "redirect:420000000000000005", siteAssessments: CREDENTIAL_KIT }),
+			redirectedOriginal: await websiteCase(420000000000000008n, "final.example.com", { source: "redirect:420000000000000001", siteAssessments: CREDENTIAL_KIT }),
+		};
+		const seeds = Object.fromEntries(await Promise.all(Object.entries(cases).map(async ([name, report]) => {
+			const reportRow = (await AbuseRepository.getReport(report.reportId))!;
+			return [name, await isKitSiblingSeed(reportRow.submissionId!)];
+		})));
+		expect(seeds).toEqual({
+			credential: true,
+			payment: true,
+			malware: false,
+			migrated: false,
+			sibling: false,
+			originSibling: false,
+			redirectedSibling: false,
+			redirectedOriginal: true,
 		});
-		const request = await validateAbuseReportRequest({
-			targets: ["login.example.com"],
-			allegationCategory: "phishing",
-			description: "Confirmed credential phishing.",
-			observedUrls: [{ target: "login.example.com", urls: ["https://login.example.com/"] }],
-		});
-		const report = await AbuseRepository.createReport({ request, reporter: { reporterCountry: "DE" }, submissionId });
-		expect(await ensureKitSiblingDiscoveryJobs()).toBe(1);
-		expect(await ensureKitSiblingDiscoveryJobs()).toBe(1);
-		const jobs = await (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "discover_kit_siblings")).all();
-		expect(jobs).toHaveLength(1);
 
-		const result = await discoverKitSiblings({ reportId: report.reportId }, {
+		for (const report of Object.values(cases)) {
+			const reportRow = (await AbuseRepository.getReport(report.reportId))!;
+			await enqueueKitSiblingDiscovery(report.reportId, reportRow.submissionId!);
+			await enqueueKitSiblingDiscovery(report.reportId, reportRow.submissionId!);
+		}
+		expect((await discoveryJobs()).map(({ reportId }) => reportId).sort()).toEqual(
+			[cases.credential.reportId, cases.payment.reportId, cases.redirectedOriginal.reportId].sort(),
+		);
+
+		// A job queued before this rule existed is a no-op when it runs.
+		const searched: bigint[] = [];
+		const result = await discoverKitSiblings({ reportId: cases.migrated.reportId }, {
+			findCandidates: async ({ submissionId }) => {
+				searched.push(submissionId);
+				return { fingerprints: [], candidates: [], errors: [] };
+			},
+		});
+		expect(result).toEqual({ fingerprints: [], candidates: [], errors: [] });
+		expect(searched).toEqual([]);
+	});
+
+	test("queues paced analyses and runs each one to completion inside its job", async () => {
+		const report = await websiteCase(420000000000000011n, "kit.example.com", { siteAssessments: CREDENTIAL_KIT });
+		await discoverKitSiblings({ reportId: report.reportId }, {
 			findCandidates: async () => ({
-				fingerprints: [{ sha256: "a".repeat(64), mimeType: "text/css", url: "https://login.example.com/kit.css", size: 1234 }],
+				fingerprints: [{ sha256: "a".repeat(64), mimeType: "application/javascript", url: "https://kit.example.com/index.js", size: 50_000 }],
 				candidates: [
 					{ domain: "one.example.net", url: "https://one.example.net/login", matchingHashes: ["a".repeat(64)] },
 					{ domain: "two.example.org", url: "https://two.example.org/", matchingHashes: ["a".repeat(64)] },
@@ -44,24 +96,29 @@ describe("all-case kit sibling discovery", () => {
 				errors: [],
 			}),
 		});
-		expect(result.candidates).toHaveLength(2);
 		const analysisJobs = await (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "analyze_kit_sibling")).all();
-		expect(analysisJobs).toHaveLength(2);
 		expect(analysisJobs.map(({ payload }) => payload)).toEqual([
 			{ url: "https://one.example.net/login" },
 			{ url: "https://two.example.org/" },
 		]);
 		expect(analysisJobs[1]!.nextAttemptAt.getTime() - analysisJobs[0]!.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(29_000);
 
-		const created: Array<{ url: string; source?: string; reporterCountry?: string }> = [];
-		await analyzeKitSibling({ reportId: report.reportId, url: analysisJobs[0]!.payload?.url }, {
-			createSubmission: async (options) => {
-				created.push(options);
-				return 1n;
+		let finished = false;
+		const started: Array<{ url: string; submissionId: bigint }> = [];
+		const submissionId = await analyzeKitSibling({ reportId: report.reportId, url: analysisJobs[0]!.payload?.url }, {
+			analyzeWebsite: async (options) => {
+				started.push({ url: options.url, submissionId: options.submissionId });
+				await Bun.sleep(20);
+				finished = true;
+				return options.submissionId;
 			},
 		});
-		expect(created).toMatchObject([
-			{ url: "https://one.example.net/login", source: `kit-sibling:${submissionId.toString()}:${report.reportId.toString()}`, reporterCountry: "DE" },
-		]);
+		// The job does not return until the analysis it started has finished.
+		expect(finished).toBe(true);
+		expect(started).toEqual([{ url: "https://one.example.net/login", submissionId: submissionId! }]);
+		const created = (await SubmissionsEntity.get(submissionId!))!;
+		expect(created.source).toBe(`kit-sibling:420000000000000011:${report.reportId.toString()}`);
+		expect(created.reporterCountry).toBe("DE");
+		expect(await isKitSiblingSeed(submissionId!)).toBe(false);
 	});
 });

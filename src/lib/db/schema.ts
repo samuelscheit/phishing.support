@@ -4,7 +4,7 @@ import { WhoISInfo } from "../website_info";
 import { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
 import { MailData } from "../mail_ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
-import type { WebsiteNavigationHop, WebsiteSiteAssessment } from "../website_types";
+import type { WebsiteKitResource, WebsiteNavigationHop, WebsiteSiteAssessment } from "../website_types";
 
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
@@ -37,6 +37,8 @@ export type WebsiteSubmissionData = {
 	cloaking?: { outcome: "detected" | "unresolved"; detail: string };
 	/** Set when the captured page sat behind the kit's own "I'm not a robot" gate, which the capture clicked through. */
 	verificationGate?: { label: string };
+	/** Same-host scripts and stylesheets received by the live capture; absent for uploaded or retained MHTML. */
+	kitResources?: WebsiteKitResource[];
 	/** Durable supplementary probe state; it never changes the phishing verdict. */
 	backendProbe?: {
 		status: "queued" | "running" | "completed" | "failed";

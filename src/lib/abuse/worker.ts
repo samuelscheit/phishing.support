@@ -14,7 +14,7 @@ import { sendEmail } from "./worker/email";
 import { ensureCorrespondencePolls, pollProviderCorrespondence } from "./worker/correspondence";
 import { ensureOriginHostDisclosureJobs } from "./origin/disclosure";
 import { reportOriginHostJob } from "./origin/report";
-import { analyzeKitSibling, discoverKitSiblings, ensureKitSiblingDiscoveryJobs } from "./origin/kit_job";
+import { analyzeKitSibling, discoverKitSiblings } from "./origin/kit_job";
 import { classifyReply, monitorProviderReply } from "./worker/mail";
 import { runGenericProviderPortal } from "./worker/portal";
 import { reconcileGenericSkyvern } from "./worker/reconcile";
@@ -210,7 +210,6 @@ export class AbuseWorker {
 		await AbuseRepository.recoverStaleJobs();
 		await ensureCorrespondencePolls();
 		await ensureOriginHostDisclosureJobs();
-		await ensureKitSiblingDiscoveryJobs();
 		// Provider/browser work gets its own lane. A stuck CAPTCHA or browser can
 		// therefore never consume the capacity reserved for resolution,
 		// reconciliation, and inbound correspondence jobs.

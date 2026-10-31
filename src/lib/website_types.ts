@@ -8,6 +8,18 @@ export type WebsiteNavigationHop = {
 	contentCaptured: boolean;
 };
 
+/**
+ * A same-host script or stylesheet as the browser received it during capture.
+ * Its hash is the HTTP response-body hash urlscan.io indexes, so it can find
+ * other sites serving the identical kit file.
+ */
+export type WebsiteKitResource = {
+	url: string;
+	mimeType: string;
+	size: number;
+	sha256: string;
+};
+
 /** Only this explicit finding is eligible for the automatic phishing handoff. */
 export type WebsiteSiteFinding = "phishing" | "benign" | "prank_or_troll" | "insufficient_evidence";
 

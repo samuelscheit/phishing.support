@@ -10,7 +10,7 @@ import { createWebsiteSubmission } from "./submissions/website";
 import type { ReporterMetadata } from "./request_metadata";
 import { defaultReasoning, defaultResponseModel, retry } from "./utils";
 import { extractWebsiteDataEntryFields } from "./website_fields";
-import { describeDataEntryField } from "./website_types";
+import { describeDataEntryField, type WebsiteKitResource } from "./website_types";
 import type {
 	WebsiteDataEntryField,
 	WebsiteNavigationHop,
@@ -294,6 +294,17 @@ function capturedArchiveHop(archive: Pick<WebsiteEvidenceArchive, "url" | "navig
 	return capturedHops[0]!;
 }
 
+/** What a capture contributes to the submission record. */
+function capturedWebsiteData(archive: Awaited<ReturnType<typeof archiveWebsite>>) {
+	return {
+		archiveUrl: archive.url,
+		navigationHops: archive.navigationHops,
+		...(archive.cloaking ? { cloaking: archive.cloaking } : {}),
+		...(archive.verificationGate ? { verificationGate: archive.verificationGate } : {}),
+		...(archive.kitResources?.length ? { kitResources: archive.kitResources } : {}),
+	};
+}
+
 export type AnalyzeWebsiteOptions = {
 	mhtmlSnapshot?: Buffer;
 	/** Original captured document URL for retained MHTML, distinct from its submitted URL. */
@@ -306,6 +317,8 @@ export type AnalyzeWebsiteOptions = {
 	screenshotSnapshot?: Buffer;
 	/** The verification gate retained MHTML was captured behind. */
 	verificationGate?: WebsiteVerificationGate;
+	/** Same-host scripts and stylesheets the original live capture of retained MHTML received. */
+	kitResources?: WebsiteKitResource[];
 	/** Reuse the existing website archive artifacts instead of writing duplicates. */
 	reuseEvidenceArtifacts?: boolean;
 	url: string;
@@ -344,6 +357,7 @@ async function handOffRedirectedCapture(params: {
 		navigationHops,
 		screenshotSnapshot: archive.screenshotPng,
 		verificationGate: archive.verificationGate,
+		kitResources: archive.kitResources,
 		...params.reporter,
 	}, (options) => analyzeWebsite(options, params.dependencies));
 	await SubmissionsEntity.update(submissionId, {
@@ -389,6 +403,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			navigationHops: options.navigationHops,
 			trustMhtmlDocumentLocation: options.trustMhtmlDocumentLocation,
 			verificationGate: options.verificationGate,
+			kitResources: options.kitResources,
 		}), 2, 3000);
 		const archive = captured.screenshotPng || !options.screenshotSnapshot
 			? captured
@@ -427,7 +442,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
-				website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, ...(archive.cloaking ? { cloaking: archive.cloaking } : {}), ...(archive.verificationGate ? { verificationGate: archive.verificationGate } : {}) },
+				website: { url, whois, ...capturedWebsiteData(archive) },
 			},
 		});
 
@@ -461,7 +476,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
-				website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, siteAssessments, ...(archive.cloaking ? { cloaking: archive.cloaking } : {}), ...(archive.verificationGate ? { verificationGate: archive.verificationGate } : {}) },
+				website: { url, whois, ...capturedWebsiteData(archive), siteAssessments },
 			},
 		});
 

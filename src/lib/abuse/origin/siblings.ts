@@ -1,31 +1,27 @@
-import { simpleParser } from "mailparser";
 import { z } from "zod";
 
-import { ArtifactsEntity } from "../../db/entities";
+import { SubmissionsEntity } from "../../db/entities";
 import { fetchJson, RequestStatusError, RequestTimeoutError, type FetchImplementation } from "../../network/bounded_fetch";
-import { normalizeDomain, normalizePublicHttpUrl, sha256Hex } from "../security";
+import type { WebsiteKitResource } from "../../website_types";
+import { normalizeDomain, normalizePublicHttpUrl } from "../security";
 import { throwIfAborted } from "../worker/shared";
 import { mapConcurrent } from "./concurrency";
 import { certificateCovers, presentedCertificate, type OriginServer, type PresentedCertificate, type TlsProbe } from "./sweep";
 
 const MAX_FINGERPRINTS = 5;
 const MAX_CANDIDATES = 100;
+/** Below this, a file is too generic (a tracking snippet, a one-line loader) to identify a kit. */
 const MIN_RESOURCE_BYTES = 1_024;
-const MAX_RESOURCE_BYTES = 2 * 1024 * 1024;
+/**
+ * A hash seen on more distinct domains than this is a shared library, theme
+ * or framework file, not one operator's kit. Searching it is what let
+ * discovery drift from a phishing kit to unrelated sites (bank logos on 80+
+ * gambling sites, for example).
+ */
+const MAX_HASH_DOMAINS = 25;
 const URLSCAN_SEARCH_URL = "https://urlscan.io/api/v1/search/";
-const STRONG_KIT_MIME_TYPES = new Set([
-	"text/css",
-	"text/javascript",
-	"application/javascript",
-	"application/x-javascript",
-]);
-const KIT_MIME_TYPES = new Set([
-	...STRONG_KIT_MIME_TYPES,
-	"image/gif",
-	"image/jpeg",
-	"image/png",
-	"image/webp",
-]);
+const SCRIPT_MIME_TYPES = new Set(["text/javascript", "application/javascript", "application/x-javascript", "script"]);
+const KIT_MIME_TYPES = new Set([...SCRIPT_MIME_TYPES, "text/css", "stylesheet"]);
 
 const urlscanResponseSchema = z.object({
 	results: z.array(z.object({
@@ -71,45 +67,42 @@ export type SiblingDiscoveryResult = {
 export type SiblingDiscoveryDependencies = {
 	fetch?: FetchImplementation;
 	apiKey?: string;
-	loadMhtml?: (submissionId: bigint) => Promise<Buffer | undefined>;
+	loadKitResources?: (submissionId: bigint) => Promise<WebsiteKitResource[] | undefined>;
 	probe?: TlsProbe;
 };
 
-/** Hash MIME-decoded resource bytes exactly as urlscan's HTTP-response `hash` field does. */
-export async function kitFingerprintsFromMhtml(mhtml: Buffer, originalDomain: string): Promise<KitFingerprint[]> {
+const isScript = (mimeType: string) => SCRIPT_MIME_TYPES.has(mimeType);
+
+/**
+ * The captured page's own scripts and stylesheets, as the browser received
+ * them from the phishing host. Images are never used: stock logos and icons
+ * are shared by unrelated sites.
+ */
+export function kitFingerprints(resources: readonly WebsiteKitResource[], originalDomain: string): KitFingerprint[] {
 	const domain = normalizeDomain(originalDomain);
 	if (!domain) return [];
-	const parsed = await simpleParser(mhtml, { skipHtmlToText: true, skipTextToHtml: true });
 	const fingerprints = new Map<string, KitFingerprint>();
-	for (const attachment of parsed.attachments) {
-		const mimeType = attachment.contentType?.split(";", 1)[0]?.trim().toLowerCase();
-		if (!mimeType || !KIT_MIME_TYPES.has(mimeType)) continue;
-		const location = attachment.headers.get("content-location");
-		const url = normalizePublicHttpUrl(typeof location === "string" ? location : "");
-		if (!url || new URL(url).hostname !== domain) continue;
-		const body = attachment.content;
-		if (body.byteLength < MIN_RESOURCE_BYTES || body.byteLength > MAX_RESOURCE_BYTES) continue;
-		const sha256 = sha256Hex(body);
-		if (!fingerprints.has(sha256)) fingerprints.set(sha256, { sha256, mimeType, url, size: body.byteLength });
+	for (const resource of resources) {
+		const url = normalizePublicHttpUrl(resource.url);
+		if (!url || new URL(url).hostname !== domain || !KIT_MIME_TYPES.has(resource.mimeType)) continue;
+		if (resource.size < MIN_RESOURCE_BYTES || !/^[a-f0-9]{64}$/.test(resource.sha256)) continue;
+		if (!fingerprints.has(resource.sha256)) fingerprints.set(resource.sha256, { sha256: resource.sha256, mimeType: resource.mimeType, url, size: resource.size });
 	}
 	return [...fingerprints.values()]
-		.sort((a, b) => {
-			const priority = (item: KitFingerprint) => item.mimeType.includes("javascript") ? 0 : item.mimeType === "text/css" ? 1 : 2;
-			return priority(a) - priority(b) || b.size - a.size || a.url.localeCompare(b.url);
-		})
+		.sort((a, b) => Number(isScript(b.mimeType)) - Number(isScript(a.mimeType)) || b.size - a.size || a.url.localeCompare(b.url))
 		.slice(0, MAX_FINGERPRINTS);
 }
 
-async function loadSubmissionMhtml(submissionId: bigint): Promise<Buffer | undefined> {
-	const metadata = await ArtifactsEntity.listForSubmission(submissionId);
-	const item = metadata.find((artifact) => artifact.kind === "website_mhtml" || artifact.name?.toLowerCase() === "website.mhtml");
-	return item ? (await ArtifactsEntity.get(item.id))?.blob : undefined;
+async function loadSubmissionKitResources(submissionId: bigint): Promise<WebsiteKitResource[] | undefined> {
+	const submission = await SubmissionsEntity.get(submissionId);
+	return submission?.data.kind === "website" ? submission.data.website.kitResources : undefined;
 }
 
 async function searchUrlscan(hash: string, apiKey: string | undefined, dependencies: SiblingDiscoveryDependencies) {
 	const query = new URLSearchParams({
 		q: `hash:${hash} AND date:>now-90d`,
-		size: "100",
+		// One past the rarity limit is enough to tell a kit file from a shared one.
+		size: String(MAX_HASH_DOMAINS + 1),
 		collapse: "page.domain.keyword",
 	});
 	const response = await fetchJson<unknown>(`${URLSCAN_SEARCH_URL}?${query}`, {
@@ -135,7 +128,11 @@ function detail(error: unknown): string {
 	return (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").slice(0, 500);
 }
 
-/** Find domains serving an exact hash of a same-host executable/style resource. */
+/**
+ * Find domains serving an exact copy of the kit's own files. A hash counts
+ * only when it is rare on urlscan, and a candidate must share at least one
+ * script: stylesheets alone are too often reused across unrelated templates.
+ */
 export async function findKitSiblingCandidates(params: {
 	submissionId: bigint;
 	originalDomain: string;
@@ -144,42 +141,49 @@ export async function findKitSiblingCandidates(params: {
 	const errors: string[] = [];
 	const apiKey = dependencies.apiKey ?? process.env.URLSCAN_API_KEY;
 	if (!apiKey) errors.push("URLSCAN_API_KEY is not configured; urlscan discovery used the anonymous quota.");
-	const mhtml = await (dependencies.loadMhtml ?? loadSubmissionMhtml)(params.submissionId);
-	if (!mhtml?.byteLength) return { fingerprints: [], candidates: [], errors: ["The submission has no retained MHTML capture."] };
-	let fingerprints: KitFingerprint[];
-	try {
-		fingerprints = await kitFingerprintsFromMhtml(mhtml, params.originalDomain);
-	} catch (error) {
-		return { fingerprints: [], candidates: [], errors: [`MHTML parsing: ${detail(error)}`] };
-	}
-	if (fingerprints.length === 0) return { fingerprints, candidates: [], errors };
+	const resources = await (dependencies.loadKitResources ?? loadSubmissionKitResources)(params.submissionId);
+	if (!resources?.length) return { fingerprints: [], candidates: [], errors: ["The capture recorded no same-host scripts or stylesheets."] };
+	const fingerprints = kitFingerprints(resources, params.originalDomain);
+	if (!fingerprints.some(({ mimeType }) => isScript(mimeType))) return { fingerprints, candidates: [], errors };
 
 	const original = normalizeDomain(params.originalDomain);
 	const candidates = new Map<string, { url: string; hashes: Set<string> }>();
+	const scriptHashes = new Set<string>();
 	for (const fingerprint of fingerprints) {
 		throwIfAborted(params.signal);
+		let results: Awaited<ReturnType<typeof searchUrlscan>>;
 		try {
-			for (const result of await searchUrlscan(fingerprint.sha256, apiKey, dependencies)) {
-				const domain = normalizeDomain(result.page?.domain ?? result.task?.domain ?? "");
-				if (!domain || domain === original || candidates.size >= MAX_CANDIDATES && !candidates.has(domain)) continue;
-				const suppliedUrl = normalizePublicHttpUrl(result.page?.url ?? result.task?.url ?? "");
-				const url = suppliedUrl && new URL(suppliedUrl).hostname === domain ? suppliedUrl : `https://${domain}/`;
-				const candidate = candidates.get(domain) ?? { url, hashes: new Set<string>() };
-				candidate.hashes.add(fingerprint.sha256);
-				candidates.set(domain, candidate);
-			}
+			results = await searchUrlscan(fingerprint.sha256, apiKey, dependencies);
 		} catch (error) {
 			if (error instanceof RequestTimeoutError || error instanceof RequestStatusError && (error.status === 429 || error.status >= 500)) throw error;
 			errors.push(`urlscan ${fingerprint.sha256.slice(0, 12)}: ${detail(error)}`);
+			continue;
+		}
+		const domains = new Map<string, string>();
+		for (const result of results) {
+			const domain = normalizeDomain(result.page?.domain ?? result.task?.domain ?? "");
+			if (!domain || domains.has(domain)) continue;
+			const suppliedUrl = normalizePublicHttpUrl(result.page?.url ?? result.task?.url ?? "");
+			domains.set(domain, suppliedUrl && new URL(suppliedUrl).hostname === domain ? suppliedUrl : `https://${domain}/`);
+		}
+		if (domains.size > MAX_HASH_DOMAINS) {
+			errors.push(`urlscan ${fingerprint.sha256.slice(0, 12)}: seen on more than ${MAX_HASH_DOMAINS} domains, treated as a shared library`);
+			continue;
+		}
+		if (isScript(fingerprint.mimeType)) scriptHashes.add(fingerprint.sha256);
+		for (const [domain, url] of domains) {
+			if (domain === original || candidates.size >= MAX_CANDIDATES && !candidates.has(domain)) continue;
+			const candidate = candidates.get(domain) ?? { url, hashes: new Set<string>() };
+			candidate.hashes.add(fingerprint.sha256);
+			candidates.set(domain, candidate);
 		}
 	}
 
-	const strongHashes = new Set(fingerprints.filter(({ mimeType }) => STRONG_KIT_MIME_TYPES.has(mimeType)).map(({ sha256 }) => sha256));
 	return {
 		fingerprints,
 		candidates: [...candidates]
 			.map(([domain, candidate]) => ({ domain, url: candidate.url, matchingHashes: [...candidate.hashes] }))
-			.filter((candidate) => candidate.matchingHashes.length >= 2 || candidate.matchingHashes.some((hash) => strongHashes.has(hash))),
+			.filter((candidate) => candidate.matchingHashes.some((hash) => scriptHashes.has(hash))),
 		errors,
 	};
 }

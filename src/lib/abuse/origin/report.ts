@@ -9,6 +9,7 @@ import type { AbuseJob } from "../schema";
 import { parseJobBigInt, throwIfAborted } from "../worker/shared";
 import { parseCloudflareOriginDisclosure } from "./disclosure";
 import { capturedKitFacts } from "./kit_facts";
+import { isKitSiblingSeed } from "./kit_job";
 import { resolveOriginHostNetworks } from "./network";
 import { discoverSiblingDomains, type SiblingDiscoveryResult } from "./siblings";
 import { originSweepProgressSchema, readOriginHostSnapshot, type OriginHostSnapshot, type OriginSweepProgress } from "./snapshot";
@@ -267,7 +268,7 @@ async function completeOriginHostReport(params: {
 	const recipientAlreadyReported = params.reportRoutes.some((route) => route.routeType === "email" && route.verifiedEmail === disclosure.recipient);
 
 	let siblingDiscovery: SiblingDiscoveryResult = { fingerprints: [], candidateCount: 0, confirmed: [], errors: [] };
-	if (report.submissionId) {
+	if (report.submissionId && await isKitSiblingSeed(report.submissionId)) {
 		try {
 			siblingDiscovery = await (dependencies.discoverSiblings ?? discoverSiblingDomains)({
 				submissionId: report.submissionId,

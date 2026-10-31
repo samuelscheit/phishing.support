@@ -1,10 +1,12 @@
+import { createHash } from "node:crypto";
+
 import { type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
 import { getDomain } from "tldts";
 
 import { getBrowser, getBrowserPage } from "./browser";
 import type { FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
-import type { WebsiteNavigationHop } from "./website_types";
+import type { WebsiteKitResource, WebsiteNavigationHop } from "./website_types";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
 import parse, { HTMLElement } from "node-html-parser";
@@ -44,11 +46,58 @@ export type WebsiteArchiveResult = {
 	mhtml: Buffer;
 	html: Buffer;
 	text: Buffer;
+	/** Same-host scripts and stylesheets the live capture received; MHTML drops scripts and re-serializes CSS. */
+	kitResources?: WebsiteKitResource[];
 	/** Non-empty when an uploaded snapshot claims a different host than the submitted target. */
 	attributionError?: string;
 };
 
 const WEBSITE_NAVIGATION_TIMEOUT_MS = 30_000;
+const KIT_RESOURCE_TYPES = new Set(["script", "stylesheet"]);
+const MAX_KIT_RESOURCES = 40;
+const MAX_KIT_RESOURCE_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Record the hash of every same-host script and stylesheet response body,
+ * exactly as received. These are the bytes urlscan.io hashes; the MHTML
+ * snapshot cannot provide them because it omits scripts and rewrites CSS.
+ */
+function recordKitResources(page: Page): { settled: () => Promise<WebsiteKitResource[]> } {
+	const pending: Array<Promise<WebsiteKitResource | undefined>> = [];
+	page.on("response", (response) => {
+		const request = response.request();
+		if (pending.length >= MAX_KIT_RESOURCES || !KIT_RESOURCE_TYPES.has(request.resourceType()) || response.status() !== 200) return;
+		pending.push((async () => {
+			const body = await response.buffer();
+			if (body.byteLength === 0 || body.byteLength > MAX_KIT_RESOURCE_BYTES) return undefined;
+			return {
+				url: response.url(),
+				mimeType: (response.headers()["content-type"] ?? "").split(";", 1)[0]!.trim().toLowerCase() || request.resourceType(),
+				size: body.byteLength,
+				sha256: createHash("sha256").update(body).digest("hex"),
+			};
+		})().catch(() => undefined));
+	});
+	return {
+		settled: async () => (await Promise.all(pending)).filter((resource): resource is WebsiteKitResource => Boolean(resource)),
+	};
+}
+
+/** Resources from the captured document's own host, once per hash. */
+function sameHostKitResources(resources: readonly WebsiteKitResource[], documentUrl: string): WebsiteKitResource[] {
+	const host = new URL(documentUrl).hostname;
+	const byHash = new Map<string, WebsiteKitResource>();
+	for (const resource of resources) {
+		let resourceHost: string;
+		try {
+			resourceHost = new URL(resource.url).hostname;
+		} catch {
+			continue;
+		}
+		if (resourceHost === host && !byHash.has(resource.sha256)) byHash.set(resource.sha256, resource);
+	}
+	return [...byHash.values()];
+}
 
 export type ArchiveWebsiteOptions = {
 	/** Raw MHTML (decoded bytes). It is parsed locally; Fabric browsers never receive an app-local file:// URL. */
@@ -63,6 +112,8 @@ export type ArchiveWebsiteOptions = {
 	trustMhtmlDocumentLocation?: boolean;
 	/** The verification gate the retained MHTML was captured behind, when known. */
 	verificationGate?: WebsiteVerificationGate;
+	/** Kit resources the original live capture of the retained MHTML received. */
+	kitResources?: WebsiteKitResource[];
 };
 
 /** Read a top-level MHTML header; MIME-part headers must never override capture metadata. */
@@ -135,6 +186,7 @@ async function archiveMhtmlSnapshot(options: ArchiveWebsiteOptions & { mhtmlSnap
 		text: Buffer.from(text, "utf-8"),
 		...(attributionError ? { attributionError } : {}),
 		...(options.verificationGate ? { verificationGate: options.verificationGate } : {}),
+		...(options.kitResources?.length ? { kitResources: options.kitResources } : {}),
 	};
 }
 
@@ -466,6 +518,7 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 		// boundary, so archive work always uses the Fabric lease's default context.
 		const { page } = await getBrowserPage(await browser.defaultBrowserContext().newPage());
 
+		const kitResources = recordKitResources(page);
 		// The last final (non-redirect) main-frame document response, so a
 		// document that replaces an error interstitial is seen with its status.
 		let latestDocumentResponse = null as HTTPResponse | null;
@@ -547,6 +600,7 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 		return {
 			...capturedDocument,
 			screenshotPng,
+			kitResources: sameHostKitResources(await kitResources.settled(), capturedDocument.url),
 			...(verificationGate ? { verificationGate } : {}),
 		};
 	} finally {

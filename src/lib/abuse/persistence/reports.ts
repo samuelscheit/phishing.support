@@ -3,7 +3,6 @@ import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 import { getDb } from "../../db";
 import { generateId } from "../../db/ids";
 import type { ReporterMetadata } from "../../request_metadata";
-import { submissions } from "../../db/schema";
 import type { ValidatedAbuseReportRequest } from "../contracts";
 import {
 	abuseJobs,
@@ -185,24 +184,6 @@ export async function getReportForSubmission(submissionId: bigint): Promise<Abus
 export async function listReportsForSubmission(submissionId: bigint): Promise<AbuseReport[]> {
 	const db = await getDb();
 	return db.select().from(abuseReports).where(eq(abuseReports.submissionId, submissionId)).orderBy(asc(abuseReports.createdAt)).all();
-}
-
-/** Primary report for every website submission, used to backfill supplementary discovery jobs. */
-export async function listWebsiteReports() {
-	const db = await getDb();
-	const rows = await db
-		.select({ reportId: abuseReports.id, submissionId: abuseReports.submissionId, createdAt: abuseReports.createdAt })
-		.from(abuseReports)
-		.innerJoin(submissions, eq(submissions.id, abuseReports.submissionId))
-		.where(eq(submissions.kind, "website"))
-		.orderBy(asc(abuseReports.createdAt))
-		.all();
-	const seen = new Set<bigint>();
-	return rows.filter((row): row is typeof row & { submissionId: bigint } => {
-		if (row.submissionId === null || seen.has(row.submissionId)) return false;
-		seen.add(row.submissionId);
-		return true;
-	});
 }
 
 export async function getReportByTrackingToken(token: string): Promise<AbuseReport | undefined> {

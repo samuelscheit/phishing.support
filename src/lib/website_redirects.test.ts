@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { and, eq } from "drizzle-orm";
 
 import type { AnalysisClient } from "./analysis_run";
 import { AbuseRepository } from "./abuse/repository";
+import { abuseJobs } from "./abuse/schema";
+import { getDb } from "./db";
 import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { createWebsiteSubmission } from "./submissions/website";
@@ -69,7 +72,7 @@ function dependencies(archive: WebsiteArchiveResult, archiveCalls: ArchiveCall[]
 			archiveCalls.push(options);
 			if (!options.mhtmlSnapshot) return archive;
 			const navigationHops = options.navigationHops!;
-			return { ...archive, requestedUrl: options.url, url: options.archivedUrl!, hostname: new URL(options.archivedUrl!).hostname, navigationHops, screenshotPng: undefined };
+			return { ...archive, requestedUrl: options.url, url: options.archivedUrl!, hostname: new URL(options.archivedUrl!).hostname, navigationHops, screenshotPng: undefined, kitResources: options.kitResources };
 		},
 	};
 }
@@ -116,11 +119,12 @@ describe("website redirects", () => {
 		const shortUrl = "https://bit.ly/netflix-help";
 		const kitStart = "http://login-netflix.example.com/";
 		const kitPage = "https://login-netflix.example.com/signin";
-		const archive = archiveOf([
+		const kitResources = [{ url: "https://login-netflix.example.com/kit.js", mimeType: "application/javascript", size: 40_000, sha256: "a".repeat(64) }];
+		const archive = { ...archiveOf([
 			hop(0, shortUrl, 301, kitStart),
 			hop(1, kitStart, 302, kitPage),
 			hop(2, kitPage, 200),
-		]);
+		]), kitResources };
 		const archiveCalls: ArchiveCall[] = [];
 		const id = await websiteSubmission(1n, shortUrl);
 
@@ -149,7 +153,9 @@ describe("website redirects", () => {
 
 		// The browser is not sent to the kit again: the parent's capture is reused.
 		expect(archiveCalls).toHaveLength(2);
-		expect(archiveCalls[1]).toMatchObject({ url: kitStart, archivedUrl: kitPage, mhtmlSnapshot: MHTML });
+		expect(archiveCalls[1]).toMatchObject({ url: kitStart, archivedUrl: kitPage, mhtmlSnapshot: MHTML, kitResources });
+		// The kit's captured file hashes move with the capture, so its case can search for siblings.
+		expect(childWebsite?.kitResources).toEqual(kitResources);
 		expect((await ArtifactsEntity.listForSubmission(childId)).map((artifact) => artifact.name).sort()).toEqual(["website.mhtml", "website.png"]);
 
 		const report = await AbuseRepository.getReportForSubmission(childId);
@@ -157,6 +163,8 @@ describe("website redirects", () => {
 		expect(targets.map(({ normalizedTarget, observedUrls }) => ({ normalizedTarget, observedUrls }))).toEqual([
 			{ normalizedTarget: "login-netflix.example.com", observedUrls: [kitPage, kitStart] },
 		]);
+		const discovery = await (await getDb()).select().from(abuseJobs).where(and(eq(abuseJobs.reportId, report!.id), eq(abuseJobs.jobType, "discover_kit_siblings"))).all();
+		expect(discovery).toHaveLength(1);
 	});
 
 	test("a redirect to a host that already has a case links the existing case instead of duplicating it", async () => {
