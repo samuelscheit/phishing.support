@@ -182,6 +182,8 @@ function archiveBrowserFixture(options: {
 			browser: () => browser,
 			browserContext: () => context,
 			mainFrame: () => mainFrame,
+			// The fake document draws no frame a verification gate could sit in.
+			frames: () => [],
 			setViewport: async () => undefined,
 			on: (event: string, listener: (response: HTTPResponse) => void) => {
 				eventNames.push(event);
@@ -662,6 +664,23 @@ test("captured page text leaves out filler a visitor cannot see, which kits use 
 	expect(html).not.toContain(filler);
 });
 
+test("captured page text shows each frame's document where the frame stands, however deep, but not hidden frames", () => {
+	// How mhtml-to-html leaves a Google Sites page embedding an Apps Script kit: each frame's document in its srcdoc.
+	const kit = `<!DOCTYPE html><html><head><title>Security Verification</title></head><body><h1>Sign in</h1><input type="password" aria-label="Password"></body></html>`;
+	const sandbox = `<html><body><iframe id="userHtmlFrame" srcdoc="${kit.replaceAll("&", "&amp;").replaceAll('"', "&quot;")}"></iframe></body></html>`;
+	const page = `<!DOCTYPE html><html><head><title>Revert apps</title></head><body><h1>Embedded Files</h1>
+<iframe aria-label="Apps Script" srcdoc="${sandbox.replaceAll("&", "&amp;").replaceAll('"', "&quot;")}"></iframe>
+<iframe hidden srcdoc="<p>tracking pixel frame</p>"></iframe><iframe style="display:none" srcdoc="<p>invisible frame</p>"></iframe>
+<p>Page updated</p></body></html>`;
+
+	const { html, text } = capturedDocumentContent(page);
+
+	expect(text).toBe("Revert apps\nRevert apps\nEmbedded Files\nSign in\nPassword\nPage updated");
+	expect(html).not.toContain("<iframe");
+	expect(html).not.toContain("srcdoc");
+	expect(html).toContain('type="password"');
+});
+
 describe("cloaking", () => {
 	const url = "https://lookup-lgr.to/en/verification";
 	const decoyUrl = "https://www.wikipedia.org/";
@@ -909,6 +928,153 @@ location.replace(URL.createObjectURL(new Blob(["<!DOCTYPE html><html><body>${app
 			expect(archive.verificationGate).toBeUndefined();
 			expect(archive.text.toString()).toContain("Sign in with Apple Account");
 			expect(hits).toEqual(["/login"]);
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+
+	/**
+	 * A Google Sites page whose Apps Script embed draws the kit's gate two
+	 * frames deep, each frame on its own origin, like sites.google.com →
+	 * script.google.com → *-script.googleusercontent.com. A hidden second embed
+	 * loads the same gate; a visitor never sees it, so it is no second control.
+	 */
+	function serveFramedKit(gatePage: string, hits: string[]) {
+		const kit = Bun.serve({
+			port: 0,
+			fetch: async (request) => {
+				const { pathname } = new URL(request.url);
+				hits.push(`kit${pathname}`);
+				if (pathname === "/verify") return Response.json({ ok: true });
+				if (pathname === "/login-form") return new Response(appleForm, { headers: { "content-type": "text/html" } });
+				return new Response(gatePage, { headers: { "content-type": "text/html; charset=utf-8" } });
+			},
+		});
+		const sandbox = Bun.serve({
+			port: 0,
+			fetch: () => new Response(`<!DOCTYPE html><html><body style="margin:0"><iframe id="userHtmlFrame" src="http://127.0.0.1:${kit.port}/userCodeAppPanel" style="border:0;width:100%;height:600px"></iframe></body></html>`, { headers: { "content-type": "text/html" } }),
+		});
+		const site = Bun.serve({
+			port: 0,
+			fetch: () => new Response(`<!DOCTYPE html><html><head><title>Revert apps</title></head><body><header><input type="search" aria-label="Search this site"></header>
+<h1>Revert apps</h1><iframe aria-label="Apps Script" src="http://localhost:${sandbox.port}/exec" style="border:0;width:800px;height:620px"></iframe>
+<iframe src="http://localhost:${sandbox.port}/preload" style="display:none"></iframe><footer>Report abuse</footer></body></html>`, { headers: { "content-type": "text/html" } }),
+		});
+		return { url: `http://127.0.0.1:${site.port}/view/revert-change`, stop: () => [kit, sandbox, site].forEach((server) => server.stop(true)) };
+	}
+
+	test("clicks a gate drawn in a nested cross-origin frame and captures the sign-in page it reveals there", async () => {
+		const hits: string[] = [];
+		const served = serveFramedKit(`<!DOCTYPE html><html><head><title>Security Verification</title></head><body>
+<div id="gate"><h1>google.com</h1><h2>Performing security verification</h2>
+<div class="cb" id="checkbox" role="checkbox" aria-checked="false" tabindex="0" style="width:24px;height:24px;border:2px solid #555"></div><span>I'm not a robot</span>
+<div>reCAPTCHA</div></div><div id="content"></div>
+<script>
+document.getElementById("checkbox").addEventListener("click", async () => {
+	await fetch("/verify", { method: "POST" });
+	const html = await (await fetch("/login-form")).text();
+	document.getElementById("gate").remove();
+	document.getElementById("content").innerHTML = html;
+});
+</script></body></html>`, hits);
+		try {
+			const archive = await archiveWebsite({ url: served.url }, { ...fast, renderSettleMs: 5_000, getBrowser: launch });
+
+			// The empty role=checkbox control takes its caption from the span drawn beside it.
+			expect(archive.verificationGate).toEqual({ label: "I'm not a robot" });
+			expect(hits).toEqual(["kit/userCodeAppPanel", "kit/userCodeAppPanel", "kit/verify", "kit/login-form"]);
+			const text = archive.text.toString();
+			expect(text).toContain("Revert apps");
+			expect(text).toContain("Sign in with Apple Account");
+			expect(text).toContain("Email or Phone Number");
+			expect(text).not.toContain("Performing security verification");
+			expect(archive.url).toBe(served.url);
+		} finally {
+			served.stop();
+		}
+	}, 60_000);
+
+	test("follows a framed gate that navigates its frame to the kit on another site", async () => {
+		// The revert-change kit: clicking the checkbox sends the Apps Script frame to revert-app.com's sign-in page.
+		const hits: string[] = [];
+		const kitSite = Bun.serve({
+			port: 0,
+			fetch: async (request) => {
+				hits.push(`kit-site${new URL(request.url).pathname}`);
+				// The kit fetches its form after load, so the frame shows it only once that request returns.
+				return new Response(`<!DOCTYPE html><html><body><div id="app"></div><script>
+fetch("/session").then(() => { document.getElementById("app").innerHTML = ${JSON.stringify(appleForm)}; });
+</script></body></html>`, { headers: { "content-type": "text/html" } });
+			},
+		});
+		const served = serveFramedKit(`<!DOCTYPE html><html><body><h2>Performing security verification</h2>
+<div id="checkbox" role="checkbox" tabindex="0" style="width:24px;height:24px;border:2px solid #555"></div><span>I'm not a robot</span>
+<script>document.getElementById("checkbox").addEventListener("click", () => { setTimeout(() => { location.href = "http://127.0.0.1:${kitSite.port}/?k=token"; }, 300); });</script>
+</body></html>`, hits);
+		try {
+			const archive = await archiveWebsite({ url: served.url }, { ...fast, renderSettleMs: 5_000, getBrowser: launch });
+
+			expect(archive.verificationGate).toEqual({ label: "I'm not a robot" });
+			expect(hits).toContain("kit-site/session");
+			const text = archive.text.toString();
+			expect(text).toContain("Revert apps");
+			expect(text).toContain("Email or Phone Number");
+			expect(text).not.toContain("Performing security verification");
+			// The submitted page is still the captured site; the kit lives in its frame.
+			expect(archive.url).toBe(served.url);
+		} finally {
+			served.stop();
+			kitSite.stop(true);
+		}
+	}, 60_000);
+
+	test("never clicks a framed robot checkbox when a frame already shows a sign-in form", async () => {
+		const hits: string[] = [];
+		const served = serveFramedKit(`<!DOCTYPE html><html><body>${appleForm}
+<label><input type="checkbox" onclick="fetch('/verify', { method: 'POST' })"> I'm not a robot</label></body></html>`, hits);
+		try {
+			const archive = await archiveWebsite({ url: served.url }, { ...fast, renderSettleMs: 1_000, getBrowser: launch });
+
+			expect(archive.verificationGate).toBeUndefined();
+			expect(hits).toEqual(["kit/userCodeAppPanel", "kit/userCodeAppPanel"]);
+			// The framed form is still captured as the page shows it.
+			expect(archive.text.toString()).toContain("Email or Phone Number");
+		} finally {
+			served.stop();
+		}
+	}, 60_000);
+
+	test("never clicks a real captcha provider's checkbox", async () => {
+		// Real reCAPTCHA draws its own "I'm not a robot" checkbox inside google.com/recaptcha; it is a challenge, not a kit's gate.
+		const hits: string[] = [];
+		const server = serveKit(`<!DOCTYPE html><html><body><h1>Please wait</h1>
+<iframe src="https://www.google.com/recaptcha/api2/anchor?k=test" style="width:304px;height:78px"></iframe></body></html>`, hits);
+		const providerFrames: string[] = [];
+		try {
+			const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/wait` }, {
+				...fast,
+				renderSettleMs: 1_000,
+				getBrowser: async () => {
+					const browser = await launch();
+					const newPage = browser.defaultBrowserContext().newPage.bind(browser.defaultBrowserContext());
+					// Serve the provider frame locally so the test never reaches Google; it draws the real widget's caption.
+					browser.defaultBrowserContext().newPage = async () => {
+						const page = await newPage();
+						await page.setRequestInterception(true);
+						page.on("request", (request) => {
+							if (!request.url().startsWith("https://www.google.com/recaptcha/")) return void request.continue();
+							providerFrames.push(request.url());
+							void request.respond({ status: 200, contentType: "text/html", body: `<html><body><div role="checkbox" id="recaptcha-anchor" tabindex="0" style="width:28px;height:28px" onclick="fetch('http://127.0.0.1:${server.port}/verify', { method: 'POST', mode: 'no-cors' })"></div><label for="recaptcha-anchor">I'm not a robot</label></body></html>` });
+						});
+						return page;
+					};
+					return browser;
+				},
+			});
+
+			expect(providerFrames).toHaveLength(1);
+			expect(archive.verificationGate).toBeUndefined();
+			expect(hits).toEqual(["/wait"]);
 		} finally {
 			server.stop(true);
 		}
