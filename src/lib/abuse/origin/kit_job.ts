@@ -82,7 +82,17 @@ export async function discoverKitSiblings(
 			nextAttemptAt: new Date(Date.now() + index * 30_000),
 		});
 	}
-	if (result.errors.length) console.warn(`Kit sibling discovery for report ${report.id.toString()} completed with warnings: ${result.errors.join("; ")}`);
+	// A search that found nothing must say why; a silent "completed" hid a
+	// capture that recorded no searchable file at all.
+	await AbuseRepository.appendEvent({
+		reportId: report.id,
+		eventType: "kit_siblings.discovered",
+		data: {
+			fingerprints: result.fingerprints.map(({ sha256, url, size }) => ({ sha256, url, size })),
+			candidates: result.candidates.map(({ domain }) => domain),
+			errors: result.errors,
+		},
+	});
 	return result;
 }
 

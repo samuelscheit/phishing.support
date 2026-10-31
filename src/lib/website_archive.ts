@@ -8,7 +8,7 @@ import { getBrowser, getBrowserPage } from "./browser";
 import type { FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
 import type { WebsiteKitResource, WebsiteNavigationHop } from "./website_types";
-import { hasPathTenants, isSameWebsite, websiteSite } from "./website_site";
+import { isSameWebsite, websiteSite } from "./website_site";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
 import parse, { HTMLElement } from "node-html-parser";
@@ -51,7 +51,7 @@ export type WebsiteArchiveResult = {
 	mhtml: Buffer;
 	html: Buffer;
 	text: Buffer;
-	/** Same-host scripts and stylesheets the live capture received; MHTML drops scripts and re-serializes CSS. */
+	/** Scripts and stylesheets the live capture received, from any host; MHTML drops scripts and re-serializes CSS. */
 	kitResources?: WebsiteKitResource[];
 	/** Non-empty when an uploaded snapshot claims a different host than the submitted target. */
 	attributionError?: string;
@@ -63,9 +63,11 @@ const MAX_KIT_RESOURCES = 40;
 const MAX_KIT_RESOURCE_BYTES = 2 * 1024 * 1024;
 
 /**
- * Record the hash of every same-host script and stylesheet response body,
- * exactly as received. These are the bytes urlscan.io hashes; the MHTML
+ * Record the hash of every script and stylesheet response body, from any
+ * host, exactly as received. These are the bytes urlscan.io hashes; the MHTML
  * snapshot cannot provide them because it omits scripts and rewrites CSS.
+ * A loader kit serves its real code from a separate backend host, so those
+ * files are kept too; sibling discovery judges each one by its rarity.
  */
 function recordKitResources(page: Page): { settled: () => Promise<WebsiteKitResource[]> } {
 	const pending: Array<Promise<WebsiteKitResource | undefined>> = [];
@@ -84,29 +86,10 @@ function recordKitResources(page: Page): { settled: () => Promise<WebsiteKitReso
 		})().catch(() => undefined));
 	});
 	return {
-		settled: async () => (await Promise.all(pending)).filter((resource): resource is WebsiteKitResource => Boolean(resource)),
+		// Once per hash: the same file under a second URL identifies nothing new.
+		settled: async () => (await Promise.all(pending)).filter((resource, index, all): resource is WebsiteKitResource =>
+			Boolean(resource) && all.findIndex((other) => other?.sha256 === resource!.sha256) === index),
 	};
-}
-
-/**
- * Resources from the captured document's own host, once per hash. A shared
- * host's scripts are the platform's own, served to every tenant, so they
- * identify no kit.
- */
-function sameHostKitResources(resources: readonly WebsiteKitResource[], documentUrl: string): WebsiteKitResource[] {
-	const host = new URL(documentUrl).hostname;
-	if (hasPathTenants(host)) return [];
-	const byHash = new Map<string, WebsiteKitResource>();
-	for (const resource of resources) {
-		let resourceHost: string;
-		try {
-			resourceHost = new URL(resource.url).hostname;
-		} catch {
-			continue;
-		}
-		if (resourceHost === host && !byHash.has(resource.sha256)) byHash.set(resource.sha256, resource);
-	}
-	return [...byHash.values()];
 }
 
 export type ArchiveWebsiteOptions = {
@@ -781,7 +764,7 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 			...capturedDocument,
 			route: WEBSITE_EGRESS_LABEL[egress],
 			screenshotPng,
-			kitResources: sameHostKitResources(await kitResources.settled(), capturedDocument.url),
+			kitResources: await kitResources.settled(),
 			...(verificationGate ? { verificationGate } : {}),
 		};
 	} finally {

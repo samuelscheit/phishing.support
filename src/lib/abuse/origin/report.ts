@@ -22,6 +22,8 @@ const ORIGIN_ROUTE_PROVIDER_KEY = "origin-host-email";
 const ORIGIN_EVIDENCE_KIND = "origin_host_evidence";
 const ORIGIN_EVIDENCE_NAME = "origin-host-evidence.txt";
 const MAX_ERRORS = 100;
+/** Each target is one request per swept address, so a few exact files are enough. */
+const MAX_VERIFICATION_TARGETS = 5;
 
 export type OriginHostReportDependencies = {
 	resolveNetworks?: typeof resolveOriginHostNetworks;
@@ -84,10 +86,12 @@ async function originVerificationTargets(submissionId: bigint | null, domain: st
 	if (!submissionId) return [];
 	const submission = await SubmissionsEntity.get(submissionId);
 	const resources = submission?.data.kind === "website" ? submission.data.website.kitResources : undefined;
-	const liveTargets = kitFingerprints(resources ?? [], domain).map(({ url, sha256 }) => {
-		const parsed = new URL(url);
-		return { path: `${parsed.pathname}${parsed.search}`, sha256 };
-	});
+	// Only the reported host's own files can be requested from its candidate origin.
+	const liveTargets = kitFingerprints(resources ?? [])
+		.map(({ url, sha256 }) => ({ url: new URL(url), sha256 }))
+		.filter(({ url }) => url.hostname === domain)
+		.slice(0, MAX_VERIFICATION_TARGETS)
+		.map(({ url, sha256 }) => ({ path: `${url.pathname}${url.search}`, sha256 }));
 	if (liveTargets.length) return liveTargets;
 
 	// Uploaded and inherited captures have no live response recorder. Chromium's
@@ -114,7 +118,7 @@ async function originVerificationTargets(submissionId: bigint | null, domain: st
 		if (url.hostname !== domain) continue;
 		const path = `${url.pathname}${url.search}`;
 		targets.set(path, { path, sha256: createHash("sha256").update(attachment.content).digest("hex") });
-		if (targets.size >= 5) break;
+		if (targets.size >= MAX_VERIFICATION_TARGETS) break;
 	}
 	return [...targets.values()];
 }

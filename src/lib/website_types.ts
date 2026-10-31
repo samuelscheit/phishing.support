@@ -9,7 +9,7 @@ export type WebsiteNavigationHop = {
 };
 
 /**
- * A same-host script or stylesheet as the browser received it during capture.
+ * A script or stylesheet, from any host, as the browser received it during capture.
  * Its hash is the HTTP response-body hash urlscan.io indexes, so it can find
  * other sites serving the identical kit file.
  */

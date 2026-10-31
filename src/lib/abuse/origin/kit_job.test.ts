@@ -102,6 +102,11 @@ describe("kit sibling discovery jobs", () => {
 			{ url: "https://two.example.org/" },
 		]);
 		expect(analysisJobs[1]!.nextAttemptAt.getTime() - analysisJobs[0]!.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(29_000);
+		expect((await AbuseRepository.listEvents(report.reportId)).filter(({ eventType }) => eventType === "kit_siblings.discovered").map(({ data }) => data)).toEqual([{
+			fingerprints: [{ sha256: "a".repeat(64), url: "https://kit.example.com/index.js", size: 50_000 }],
+			candidates: ["one.example.net", "two.example.org"],
+			errors: [],
+		}]);
 
 		let finished = false;
 		const started: Array<{ url: string; submissionId: bigint }> = [];
@@ -120,5 +125,33 @@ describe("kit sibling discovery jobs", () => {
 		expect(created.source).toBe(`kit-sibling:420000000000000011:${report.reportId.toString()}`);
 		expect(created.reporterCountry).toBe("DE");
 		expect(await isKitSiblingSeed(submissionId!)).toBe(false);
+	});
+
+	test("records why a search found nothing", async () => {
+		const report = await websiteCase(420000000000000021n, "loader.example.com", { siteAssessments: CREDENTIAL_KIT });
+		await discoverKitSiblings({ reportId: report.reportId }, {
+			findCandidates: async () => ({ fingerprints: [], candidates: [], errors: ["The capture recorded no scripts or stylesheets."] }),
+		});
+		const events = (await AbuseRepository.listEvents(report.reportId)).filter(({ eventType }) => eventType === "kit_siblings.discovered");
+		expect(events.map(({ data }) => data)).toEqual([{ fingerprints: [], candidates: [], errors: ["The capture recorded no scripts or stylesheets."] }]);
+	});
+
+	test("a confirmed sibling never searches again, so discovery stays one level deep", async () => {
+		const report = await websiteCase(420000000000000031n, "seed.example.com", { siteAssessments: CREDENTIAL_KIT });
+		const sibling = await websiteCase(420000000000000032n, "front-page.example.net", {
+			source: `kit-sibling:420000000000000031:${report.reportId.toString()}`,
+			siteAssessments: CREDENTIAL_KIT,
+		});
+		const siblingRow = (await AbuseRepository.getReport(sibling.reportId))!;
+		await enqueueKitSiblingDiscovery(sibling.reportId, siblingRow.submissionId!);
+		const searched: bigint[] = [];
+		await discoverKitSiblings({ reportId: sibling.reportId }, {
+			findCandidates: async ({ submissionId }) => {
+				searched.push(submissionId);
+				return { fingerprints: [], candidates: [], errors: [] };
+			},
+		});
+		expect(await discoveryJobs()).toEqual([]);
+		expect(searched).toEqual([]);
 	});
 });

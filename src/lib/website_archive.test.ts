@@ -275,7 +275,7 @@ function archiveBrowserFixture(options: {
 	};
 }
 
-test("a live capture records the hashes of the kit's own scripts and stylesheets as received", async () => {
+test("a live capture records the hashes of every host's scripts and stylesheets as received", async () => {
 	const url = "https://kit.example.com/signin";
 	const script = "window.kit = " + "1;".repeat(600);
 	const style = "body{" + "color:#123456;".repeat(100) + "}";
@@ -285,8 +285,9 @@ test("a live capture records the hashes of the kit's own scripts and stylesheets
 			loadResource(subresource("https://kit.example.com/res/style.css", "stylesheet", style, { contentType: "text/css" }));
 			// The same script under a second URL is recorded once.
 			loadResource(subresource("https://kit.example.com/index.js?v=3", "script", script, { contentType: "application/javascript" }));
-			// Third-party files, images, failed responses and unreadable bodies are not kit evidence.
-			loadResource(subresource("https://cdn.example.net/jquery.js", "script", "jquery", { contentType: "application/javascript" }));
+			// A loader kit's code on its backend host is kept like the page's own.
+			loadResource(subresource("https://backend.example.net/gmail/js/start.js", "script", "start", { contentType: "application/javascript" }));
+			// Images, failed responses and unreadable bodies are not kit evidence.
 			loadResource(subresource("https://kit.example.com/logo.png", "image", "png-bytes", { contentType: "image/png" }));
 			loadResource(subresource("https://kit.example.com/missing.js", "script", "not found", { status: 404, contentType: "text/html" }));
 			loadResource(subresource("https://kit.example.com/evicted.js", "script", new Error("No resource with given identifier found")));
@@ -298,6 +299,7 @@ test("a live capture records the hashes of the kit's own scripts and stylesheets
 	expect(archive.kitResources).toEqual([
 		{ url: "https://kit.example.com/index.js?v=2", mimeType: "application/javascript", size: Buffer.byteLength(script), sha256: sha256(script) },
 		{ url: "https://kit.example.com/res/style.css", mimeType: "text/css", size: Buffer.byteLength(style), sha256: sha256(style) },
+		{ url: "https://backend.example.net/gmail/js/start.js", mimeType: "application/javascript", size: 5, sha256: sha256("start") },
 	]);
 });
 

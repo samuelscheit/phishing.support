@@ -20,7 +20,7 @@ import {
 	settleCorrelatedEmailBounce,
 	settleEmailDelivery,
 } from "./persistence/email_delivery";
-import { listEvents } from "./persistence/events";
+import { appendEvent, listEvents } from "./persistence/events";
 import {
 	claimNextJob,
 	completeJob,
@@ -182,6 +182,7 @@ export const AbuseRepository = {
 	persistWebhook,
 	enqueueReconciliationForSkyvernRun,
 	listEvents,
+	appendEvent,
 	recomputeReportStatus,
 	getPublicStatus,
 };
