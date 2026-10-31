@@ -1,0 +1,17 @@
+{
+	"name": "cloudflare-origin-probe",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"deploy": "cf deploy",
+		"deploy:check": "cf deploy --dry-run",
+		"test": "bun test ./worker.test.js ./http.test.js"
+	},
+	"dependencies": {
+		"ws": "8.18.3"
+	},
+	"devDependencies": {
+		"cf": "1.0.0-beta.26",
+		"wrangler": "4.156.0"
+	}
+}

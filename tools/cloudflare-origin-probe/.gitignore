@@ -1,0 +1,4 @@
+.cloudflare/
+.dev.vars*
+.env*
+node_modules/
