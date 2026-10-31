@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { certificateCovers, findOriginServers, MAX_SWEEP_ADDRESSES, originSweepAddresses, planOriginSweep, type PresentedCertificate } from "./sweep";
+import { capturedKitResponseMatches, certificateCovers, findOriginServers, MAX_SWEEP_ADDRESSES, originSweepAddresses, planOriginSweep, type PresentedCertificate } from "./sweep";
 
 const certificate: PresentedCertificate = {
 	names: ["login.example.com"],
@@ -16,6 +16,15 @@ describe("origin TLS sweep", () => {
 		expect(certificateCovers(["*.example.com"], "login.example.com")).toBe(true);
 		expect(certificateCovers(["*.example.com"], "deep.login.example.com")).toBe(false);
 		expect(certificateCovers(["*.example.com"], "notexample.com")).toBe(false);
+	});
+
+	test("requires an exact captured body and rejects Cloudflare responses", () => {
+		const hash = "a".repeat(64);
+		expect(capturedKitResponseMatches(200, { server: "nginx" }, hash, hash)).toBe(true);
+		expect(capturedKitResponseMatches(200, { server: "nginx" }, "b".repeat(64), hash)).toBe(false);
+		expect(capturedKitResponseMatches(403, { server: "nginx" }, hash, hash)).toBe(false);
+		expect(capturedKitResponseMatches(200, { server: "cloudflare" }, hash, hash)).toBe(false);
+		expect(capturedKitResponseMatches(200, { "cf-ray": "ray-DUS" }, hash, hash)).toBe(false);
 	});
 
 	test("deduplicates overlapping prefixes, prefers complete small ranges, and enforces the cap", () => {
@@ -105,7 +114,9 @@ describe("origin TLS sweep", () => {
 		const found = await findOriginServers({
 			domain: "login.example.com",
 			addresses: ["8.8.8.8", "9.9.9.9", "1.1.1.1"],
+			verificationTargets: [{ path: "/kit.js", sha256: "a".repeat(64) }],
 			concurrency: 2,
+			verify: async (ip) => ip === "9.9.9.9",
 			probe: async (ip) => {
 				calls.push(ip);
 				return ip === "9.9.9.9" ? certificate : { ...certificate, names: ["other.example.com"] };
@@ -113,5 +124,24 @@ describe("origin TLS sweep", () => {
 		});
 		expect(calls.sort()).toEqual(["1.1.1.1", "8.8.8.8", "9.9.9.9"]);
 		expect(found).toEqual([{ ip: "9.9.9.9", certificate }]);
+	});
+
+	test("scans every address after the result limit so forwarders cannot hide a later endpoint", async () => {
+		const calls: string[] = [];
+		const addresses = Array.from({ length: 20 }, (_, index) => `8.8.8.${index}`);
+		const found = await findOriginServers({
+			domain: "login.example.com",
+			addresses,
+			verificationTargets: [{ path: "/kit.js", sha256: "a".repeat(64) }],
+			maxResults: 2,
+			concurrency: 1,
+			probe: async (ip) => {
+				calls.push(ip);
+				return certificate;
+			},
+			verify: async () => true,
+		});
+		expect(calls).toEqual(addresses);
+		expect(found.map(({ ip }) => ip)).toEqual(["8.8.8.0", "8.8.8.1"]);
 	});
 });

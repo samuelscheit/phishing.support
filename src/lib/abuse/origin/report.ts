@@ -1,6 +1,8 @@
 import ipaddr from "ipaddr.js";
+import { createHash } from "node:crypto";
+import { simpleParser } from "mailparser";
 
-import { SubmissionsEntity } from "../../db/entities";
+import { ArtifactsEntity, SubmissionsEntity } from "../../db/entities";
 import { queryRDAPDomain } from "../../website_info";
 import { createWebsiteSubmission, type WebsiteSubmissionOptions } from "../../submissions/website";
 import { normalizeDomain, registrableDomain } from "../security";
@@ -11,9 +13,9 @@ import { parseCloudflareOriginDisclosure } from "./disclosure";
 import { capturedKitFacts } from "./kit_facts";
 import { isKitSiblingSeed } from "./kit_job";
 import { resolveOriginHostNetworks } from "./network";
-import { discoverSiblingDomains, type SiblingDiscoveryResult } from "./siblings";
+import { discoverSiblingDomains, kitFingerprints, type SiblingDiscoveryResult } from "./siblings";
 import { originSweepProgressSchema, readOriginHostSnapshot, type OriginHostSnapshot, type OriginSweepProgress } from "./snapshot";
-import { findOriginServers, MAX_ORIGIN_RESULTS, originSweepAddresses, planOriginSweep, SWEEP_SLICE_ADDRESSES, type OriginSweepPlan } from "./sweep";
+import { findOriginServers, MAX_ORIGIN_RESULTS, originSweepAddresses, planOriginSweep, SWEEP_SLICE_ADDRESSES, type OriginSweepPlan, type OriginVerificationTarget } from "./sweep";
 import { errorSummary } from "../../error_text";
 
 const ORIGIN_ROUTE_PROVIDER_KEY = "origin-host-email";
@@ -78,6 +80,45 @@ async function submissionRegisteredAt(submissionId: bigint): Promise<string | un
 	return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : undefined;
 }
 
+async function originVerificationTargets(submissionId: bigint | null, domain: string): Promise<OriginVerificationTarget[]> {
+	if (!submissionId) return [];
+	const submission = await SubmissionsEntity.get(submissionId);
+	const resources = submission?.data.kind === "website" ? submission.data.website.kitResources : undefined;
+	const liveTargets = kitFingerprints(resources ?? [], domain).map(({ url, sha256 }) => {
+		const parsed = new URL(url);
+		return { path: `${parsed.pathname}${parsed.search}`, sha256 };
+	});
+	if (liveTargets.length) return liveTargets;
+
+	// Uploaded and inherited captures have no live response recorder. Chromium's
+	// MHTML still retains same-host stylesheets as decoded MIME parts, which are
+	// safe exact-byte verification targets (scripts are deliberately not guessed).
+	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
+	const mhtmlReference = artifacts.find(({ kind, mimeType, name }) =>
+		kind === "website_mhtml" || mimeType?.toLowerCase() === "text/mhtml" || name?.toLowerCase() === "website.mhtml");
+	if (!mhtmlReference) return [];
+	const mhtml = await ArtifactsEntity.get(mhtmlReference.id);
+	if (!mhtml?.blob) return [];
+	const parsed = await simpleParser(mhtml.blob);
+	const targets = new Map<string, OriginVerificationTarget>();
+	for (const attachment of parsed.attachments) {
+		if (attachment.contentType !== "text/css" || attachment.content.byteLength < 1_024) continue;
+		const location = attachment.headers.get("content-location");
+		if (typeof location !== "string") continue;
+		let url: URL;
+		try {
+			url = new URL(location);
+		} catch {
+			continue;
+		}
+		if (url.hostname !== domain) continue;
+		const path = `${url.pathname}${url.search}`;
+		targets.set(path, { path, sha256: createHash("sha256").update(attachment.content).digest("hex") });
+		if (targets.size >= 5) break;
+	}
+	return [...targets.values()];
+}
+
 export function originHostEvidence(snapshot: OriginHostSnapshot): Buffer {
 	const certificateLines = (certificate: OriginHostSnapshot["servers"][number]["certificate"]) => [
 		`  names: ${certificate.names.join(", ")}`,
@@ -101,7 +142,7 @@ export function originHostEvidence(snapshot: OriginHostSnapshot): Buffer {
 		`TLS sweep (completed ${snapshot.scan.completedAt}): ${snapshot.scan.addressesScanned} of ${snapshot.scan.totalAddresses} public IPv4 addresses${snapshot.scan.truncated ? " (capped)" : ""}`,
 		...snapshot.scan.selectedPrefixes.map(({ asn, prefix }) => `- AS${asn} ${prefix}`),
 		"",
-		"Servers presenting a certificate for the reported domain:",
+		"Servers returning exact captured kit bytes (and presenting the reported domain's certificate):",
 		...(snapshot.servers.length ? snapshot.servers.flatMap((server) => [
 			`- ${server.ip}${server.asn ? ` AS${server.asn}` : ""}${server.prefix ? ` ${server.prefix}` : ""}`,
 			...certificateLines(server.certificate),
@@ -208,7 +249,8 @@ export async function reportOriginHost(params: {
 	const sweepPlan = planOriginSweep(progress.networks.flatMap((network) =>
 		network.prefixes.map((prefix) => ({ asn: network.asn, prefix }))
 	));
-	if (progress.offset < sweepPlan.addressCount && progress.servers.length < MAX_ORIGIN_RESULTS) {
+	const verificationTargets = await originVerificationTargets(report.submissionId, originalDomain);
+	if (progress.offset < sweepPlan.addressCount) {
 		const slice = originSweepAddresses(sweepPlan, progress.offset, dependencies.sliceAddresses ?? SWEEP_SLICE_ADDRESSES);
 		const servers = [...progress.servers];
 		const errors = [...progress.errors];
@@ -216,6 +258,7 @@ export async function reportOriginHost(params: {
 			servers.push(...await (dependencies.findServers ?? findOriginServers)({
 				domain: originalDomain,
 				addresses: slice,
+				verificationTargets,
 				maxResults: MAX_ORIGIN_RESULTS - servers.length,
 				signal: params.signal,
 			}));
@@ -229,7 +272,7 @@ export async function reportOriginHost(params: {
 			servers: servers.slice(0, MAX_ORIGIN_RESULTS),
 			errors: errors.slice(0, MAX_ERRORS),
 		};
-		if (next.offset < sweepPlan.addressCount && next.servers.length < MAX_ORIGIN_RESULTS) {
+		if (next.offset < sweepPlan.addressCount) {
 			await AbuseRepository.enqueueJob({
 				jobType: "report_origin_host",
 				reportId: params.reportId,

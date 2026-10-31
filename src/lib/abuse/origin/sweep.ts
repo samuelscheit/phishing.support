@@ -1,4 +1,6 @@
-import { X509Certificate } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
+import https from "node:https";
+import type { IncomingHttpHeaders } from "node:http";
 import tls from "node:tls";
 
 import ipaddr from "ipaddr.js";
@@ -39,6 +41,76 @@ export type OriginSweepPlan = {
 };
 
 export type TlsProbe = (ip: string, serverName: string, timeoutMs: number) => Promise<PresentedCertificate | undefined>;
+export type OriginVerificationTarget = { path: string; sha256: string };
+export type OriginVerifier = (
+	ip: string,
+	domain: string,
+	targets: readonly OriginVerificationTarget[],
+	timeoutMs: number,
+) => Promise<boolean>;
+
+const MAX_VERIFICATION_BODY_BYTES = 2 * 1024 * 1024;
+
+export function capturedKitResponseMatches(
+	statusCode: number | undefined,
+	headers: IncomingHttpHeaders,
+	bodySha256: string,
+	expectedSha256: string,
+): boolean {
+	const server = Array.isArray(headers.server) ? headers.server.join(" ") : headers.server;
+	return statusCode === 200
+		&& !headers["cf-ray"]
+		&& !server?.toLowerCase().includes("cloudflare")
+		&& bodySha256 === expectedSha256;
+}
+
+/**
+ * Prove that an address serves captured kit bytes, rather than merely relaying
+ * the domain's TLS handshake. CDN responses are excluded even if they happen
+ * to retain a cached copy: they do not establish the disclosed host as origin.
+ */
+export const servesCapturedKit: OriginVerifier = async (ip, domain, targets, timeoutMs) => {
+	for (const target of targets) {
+		const matched = await new Promise<boolean>((resolve) => {
+			let settled = false;
+			const finish = (value: boolean) => {
+				if (settled) return;
+				settled = true;
+				request.destroy();
+				resolve(value);
+			};
+			const request = https.request({
+				host: ip,
+				port: 443,
+				servername: domain,
+				path: target.path,
+				method: "GET",
+				headers: { Host: domain, Accept: "*/*", Connection: "close" },
+				rejectUnauthorized: false,
+				timeout: timeoutMs,
+			}, (response) => {
+				if (response.statusCode !== 200 || response.headers["cf-ray"] || String(response.headers.server ?? "").toLowerCase().includes("cloudflare")) {
+					response.resume();
+					return finish(false);
+				}
+				const hash = createHash("sha256");
+				let bytes = 0;
+				response.on("data", (chunk: Buffer) => {
+					bytes += chunk.byteLength;
+					if (bytes > MAX_VERIFICATION_BODY_BYTES) return finish(false);
+					hash.update(chunk);
+				});
+				response.once("end", () => finish(bytes > 0 && capturedKitResponseMatches(response.statusCode, response.headers, hash.digest("hex"), target.sha256)));
+				response.once("error", () => finish(false));
+			});
+			request.once("timeout", () => finish(false));
+			request.once("error", () => finish(false));
+			request.end();
+		});
+		if (matched) return true;
+	}
+	return false;
+};
 
 /** Whether a certificate names a host, directly or through a one-label wildcard. */
 export function certificateCovers(names: readonly string[], host: string): boolean {
@@ -226,31 +298,36 @@ export function originSweepAddresses(plan: OriginSweepPlan, offset: number, coun
 }
 
 /**
- * Find the servers in a host's own address space that present a certificate
- * for the domain. A domain behind Cloudflare keeps its real server secret, but
- * that server still holds the domain's certificate and shows it to anyone who
- * asks for the domain by name.
+ * Find addresses that both present the domain's certificate and serve exact
+ * captured kit bytes without a Cloudflare response. Certificate presentation
+ * alone is only a relay candidate and is deliberately not returned.
  */
 export async function findOriginServers(params: {
 	domain: string;
 	addresses: readonly string[];
+	verificationTargets: readonly OriginVerificationTarget[];
 	probe?: TlsProbe;
+	verify?: OriginVerifier;
 	concurrency?: number;
 	timeoutMs?: number;
 	maxResults?: number;
 	signal?: AbortSignal;
 }): Promise<OriginServer[]> {
 	const probe = params.probe ?? presentedCertificate;
+	const verify = params.verify ?? servesCapturedKit;
 	const timeoutMs = params.timeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
 	const found: OriginServer[] = [];
 	const maximum = Math.min(MAX_ORIGIN_RESULTS, Math.max(1, params.maxResults ?? MAX_ORIGIN_RESULTS));
 	let next = 0;
 	const worker = async () => {
-		while (next < params.addresses.length && found.length < maximum) {
+		while (next < params.addresses.length) {
 			if (params.signal?.aborted) throw params.signal.reason ?? new Error("Origin sweep was canceled.");
 			const ip = params.addresses[next++]!;
 			const certificate = await probe(ip, params.domain, timeoutMs);
-			if (certificate && certificateCovers(certificate.names, params.domain)) found.push({ ip, certificate });
+			if (certificate
+				&& certificateCovers(certificate.names, params.domain)
+				&& await verify(ip, params.domain, params.verificationTargets, timeoutMs)
+				&& found.length < maximum) found.push({ ip, certificate });
 		}
 	};
 	const concurrency = Math.min(512, Math.max(1, params.concurrency ?? DEFAULT_CONCURRENCY));

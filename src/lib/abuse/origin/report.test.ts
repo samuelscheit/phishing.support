@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 
-import { SubmissionsEntity } from "../../db/entities";
+import { ArtifactsEntity, SubmissionsEntity } from "../../db/entities";
 import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { createAbuseEmailDraft } from "../mail/draft";
@@ -30,6 +31,26 @@ describe("origin-host report workflow", () => {
 			dedupeKey: "website-login.example.com",
 			status: "reported",
 			source: "https://login.example.com/",
+		});
+		const capturedCss = Buffer.from(".captured-kit { color: red; }\n".repeat(40));
+		const capturedCssSha256 = createHash("sha256").update(capturedCss).digest("hex");
+		await ArtifactsEntity.saveBuffer({
+			submissionId,
+			name: "website.mhtml",
+			kind: "website_mhtml",
+			mimeType: "text/mhtml",
+			buffer: Buffer.from([
+				"MIME-Version: 1.0",
+				"Content-Type: multipart/related; boundary=kit",
+				"",
+				"--kit",
+				"Content-Type: text/css",
+				"Content-Transfer-Encoding: base64",
+				"Content-Location: https://login.example.com/kit.css?v=1",
+				"",
+				capturedCss.toString("base64"),
+				"--kit--",
+			].join("\r\n")),
 		});
 		const request = await validateAbuseReportRequest({
 			targets: ["login.example.com"],
@@ -61,6 +82,7 @@ describe("origin-host report workflow", () => {
 		});
 		const siblingOptions: Array<{ url: string; source?: string }> = [];
 		const sweptSlices: string[][] = [];
+		const verificationTargets: Array<Array<{ path: string; sha256: string }>> = [];
 		const originCertificate = { names: ["login.example.com"], notBefore: "2026-10-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:00.000Z", issuer: "C=US, O=Let's Encrypt, CN=R11", fingerprint256: "AA:BB" };
 		const siblingCertificate = { ...originCertificate, names: ["sibling.example.net"], notBefore: "2026-10-20T10:00:00.000Z", fingerprint256: "CC:DD" };
 		let networkResolutions = 0;
@@ -74,8 +96,9 @@ describe("origin-host report workflow", () => {
 					errors: [],
 				};
 			},
-			findServers: async ({ addresses }: { addresses: readonly string[] }) => {
+			findServers: async ({ addresses, verificationTargets: targets }: { addresses: readonly string[]; verificationTargets: readonly { path: string; sha256: string }[] }) => {
 				sweptSlices.push([...addresses]);
+				verificationTargets.push([...targets]);
 				return addresses.includes("8.8.8.6") ? [{ ip: "8.8.8.6", certificate: originCertificate }] : [];
 			},
 			discoverSiblings: async () => ({
@@ -103,6 +126,7 @@ describe("origin-host report workflow", () => {
 		const queuedJob = async () => (await (await getDb()).select().from(abuseJobs).where(and(eq(abuseJobs.jobType, "report_origin_host"), eq(abuseJobs.status, "queued"))).all());
 		await reportOriginHost({ reportId: report.id, messageId: stored!.id }, dependencies);
 		expect(sweptSlices).toEqual([["8.8.8.0", "8.8.8.1", "8.8.8.2"]]);
+		expect(verificationTargets).toEqual([[{ path: "/kit.css?v=1", sha256: capturedCssSha256 }]]);
 		expect(await AbuseRepository.listRoutes(report.id)).toHaveLength(1);
 		const [successor] = await queuedJob();
 		expect(successor!.payload).toMatchObject({ messageId: stored!.id.toString(), progress: { offset: 3, servers: [] } });
@@ -158,13 +182,13 @@ Phishing domains served from it:
 - login.example.com (behind Cloudflare)
 - sibling.example.net
 
-How the server is tied to these domains (observed ${draft.body.match(/observed (\d{4}-\d\d-\d\d \d\d:\d\d UTC)/)![1]}): when asked for each domain by name, 8.8.8.6:443 presents a certificate for it from Let's Encrypt:
+How the server is tied to these domains (observed ${draft.body.match(/observed (\d{4}-\d\d-\d\d \d\d:\d\d UTC)/)![1]}): a request pinned to 8.8.8.6:443 returned a byte-identical captured phishing-kit file (same SHA-256), and the TLS endpoint presents a certificate for each domain from Let's Encrypt:
 - login.example.com: issued 2026-10-01 00:00 UTC, domain registered 2026-09-30 12:00 UTC
   SHA-256 AA:BB
 - sibling.example.net: issued 2026-10-20 10:00 UTC, domain registered 2026-10-19 08:00 UTC
   SHA-256 CC:DD
 You can check this with: openssl s_client -connect 8.8.8.6:443 -servername login.example.com
-We found it by asking 8 public IPv4 addresses announced by AS64500 for this certificate.
+We found it by checking 8 public IPv4 addresses announced by AS64500 for both the certificate and captured kit bytes.
 
 What the kit does: it asks victims for their sign-in email or phone, password and one-time 2FA codes. The page reads: "Sign in with your Example Account"
 In a controlled test with synthetic data, the kit sent what was typed to: telegram-bot:123456.
@@ -173,7 +197,7 @@ The server therefore holds live victim credentials.
 login.example.com is behind Cloudflare. Cloudflare processed our phishing report (report 0123456789abcdef) and named abuse@host.example as the host. The other domain serves byte-identical kit files (same SHA-256 on urlscan.io).
 
 Evidence (screenshot, archived page, analysis): https://phishing.support/submissions/${submissionId.toString()}
-Attached: a screenshot of the phishing page (website.png) and the full certificate and network checks (origin-host-evidence.txt).
+Attached: a screenshot of the phishing page (website.png) and the full content-hash, certificate and network checks (origin-host-evidence.txt).
 
 We ask you to:
 1. Suspend the server, so both domains go offline at once.

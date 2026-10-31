@@ -71,7 +71,7 @@ function linkage(snapshot: OriginHostSnapshot): string[] {
 	if (!first) {
 		const scanned = snapshot.scan.addressesScanned;
 		return scanned
-			? [`We asked ${scanned.toLocaleString("en-US")} public IPv4 addresses announced by your network${snapshot.networks.length ? ` (${snapshot.networks.map(({ asn }) => `AS${asn}`).join(", ")})` : ""} for ${snapshot.originalDomain}'s certificate; none presented it, so the site may run on a service outside those ranges.`]
+			? [`We checked ${scanned.toLocaleString("en-US")} public IPv4 addresses announced by your network${snapshot.networks.length ? ` (${snapshot.networks.map(({ asn }) => `AS${asn}`).join(", ")})` : ""}; none both presented ${snapshot.originalDomain}'s certificate and returned an exact captured phishing-kit file, so the site may run on a service outside those ranges.`]
 			: [];
 	}
 	const issuers = [...new Set([first.certificate, ...snapshot.siblings.map(({ certificate }) => certificate)].map(({ issuer }) => issuerName(issuer)))];
@@ -80,13 +80,13 @@ function linkage(snapshot: OriginHostSnapshot): string[] {
 	const siblings = snapshot.siblings.slice(0, MAX_CERTIFICATES_IN_BODY - 1);
 	const deferred = snapshot.siblings.length - siblings.length;
 	return [
-		`How the ${snapshot.servers.length === 1 ? "server is" : "servers are"} tied to ${snapshot.siblings.length ? "these domains" : "this domain"} (observed ${utc(snapshot.scan.completedAt)}): when asked for ${snapshot.siblings.length ? "each domain" : "the domain"} by name, ${where} presents a certificate for it from ${list(issuers)}:`,
+		`How the ${snapshot.servers.length === 1 ? "server is" : "servers are"} tied to ${snapshot.siblings.length ? "these domains" : "this domain"} (observed ${utc(snapshot.scan.completedAt)}): a request pinned to ${where} returned a byte-identical captured phishing-kit file (same SHA-256), and the TLS endpoint presents a certificate for ${snapshot.siblings.length ? "each domain" : "the domain"} from ${list(issuers)}:`,
 		...certificateLine(snapshot.originalDomain, first.certificate, snapshot.originalDomainRegisteredAt),
 		...siblings.flatMap((sibling) => certificateLine(sibling.domain, sibling.certificate, sibling.registeredAt)),
 		...(deferred ? [`- the certificates of the other ${deferred} domains are in the attached evidence`] : []),
 		...(shared ? [] : ["The other servers present certificates for the same domain; the attached evidence lists each fingerprint."]),
 		`You can check this with: openssl s_client -connect ${first.ip}:443 -servername ${snapshot.originalDomain}`,
-		`We found ${snapshot.servers.length === 1 ? "it" : "them"} by asking ${snapshot.scan.addressesScanned.toLocaleString("en-US")} public IPv4 addresses announced by ${snapshot.networks.map(({ asn }) => `AS${asn}`).join(", ") || "your network"} for this certificate.`,
+		`We found ${snapshot.servers.length === 1 ? "it" : "them"} by checking ${snapshot.scan.addressesScanned.toLocaleString("en-US")} public IPv4 addresses announced by ${snapshot.networks.map(({ asn }) => `AS${asn}`).join(", ") || "your network"} for both the certificate and captured kit bytes.`,
 	];
 }
 
@@ -122,7 +122,7 @@ function cloudflareContext(snapshot: OriginHostSnapshot): string[] {
 
 function evidence(snapshot: OriginHostSnapshot, caseUrl: string | undefined, attachmentNames: readonly string[]): string[] {
 	const described = attachmentNames.map((name) => name === "origin-host-evidence.txt"
-		? "the full certificate and network checks (origin-host-evidence.txt)"
+		? "the full content-hash, certificate and network checks (origin-host-evidence.txt)"
 		: /\.png$/i.test(name) ? `a screenshot of the phishing page (${name})` : name);
 	return [
 		"",

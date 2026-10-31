@@ -106,10 +106,11 @@ anonymous quota.
 
 When Cloudflare explicitly names a hosting-provider abuse mailbox in a reply,
 the worker additionally validates matching ASNs through RIPEstat, performs a
-TLS-only sweep of at most 65,536 public IPv4 addresses, and reports every server
-that presents the phishing domain's certificate through the normal durable
-email route. Sibling domains found by the all-case search are included in that
-host report only after the swept origin also presents their certificate.
+bounded sweep of public IPv4 addresses, and reports only servers that both
+present the phishing domain's certificate and return an exact captured kit-file
+hash through the normal durable email route. Sibling domains found by the
+all-case search are included in that host report only after the swept origin
+also presents their certificate.
 
 ## Reporting pipeline
 
