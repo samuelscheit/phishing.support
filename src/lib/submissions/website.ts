@@ -8,7 +8,7 @@ import { getRetryableSubmission, SubmissionRetryError } from "./retry";
 export { SubmissionRetryError } from "./retry";
 
 export type WebsiteSubmissionOptions = ReporterMetadata
-	& Pick<AnalyzeWebsiteOptions, "url" | "mhtmlSnapshot" | "archivedUrl" | "navigationHops" | "screenshotSnapshot" | "verificationGate" | "kitResources">
+	& Pick<AnalyzeWebsiteOptions, "url" | "mhtmlSnapshot" | "archivedUrl" | "navigationHops" | "screenshotSnapshot" | "captureRoute" | "verificationGate" | "kitResources">
 	& { source?: string };
 
 type WebsiteAnalysisRecoveryOptions = ReporterMetadata & {

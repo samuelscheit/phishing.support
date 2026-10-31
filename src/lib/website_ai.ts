@@ -2,6 +2,8 @@ import * as toon from "@toon-format/toon";
 import type { ResponseFormatTextJSONSchemaConfig } from "openai/resources/responses/responses.mjs";
 import { archiveWebsite, isBrowserInfrastructureFailure, type WebsiteVerificationGate } from "./website_archive";
 import { errorText } from "./error_text";
+import { buildWebsiteEvidence, type WebsiteEvidencePackage } from "./evidence/package";
+import type { timestampEvidence } from "./evidence/timestamp";
 import { SubmissionsEntity, ArtifactsEntity } from "./db/entities";
 import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun, type AnalysisClient } from "./analysis_run";
@@ -307,6 +309,25 @@ function capturedWebsiteData(archive: Awaited<ReturnType<typeof archiveWebsite>>
 	};
 }
 
+/** The evidence package for a capture: stamped screenshot, manifest, and its timestamp. */
+async function websiteEvidence(
+	submissionId: bigint,
+	submittedUrl: string,
+	archive: Awaited<ReturnType<typeof archiveWebsite>>,
+	dependencies: WebsiteAnalysisDependencies,
+): Promise<WebsiteEvidencePackage> {
+	return buildWebsiteEvidence({
+		caseId: submissionId.toString(),
+		submittedUrl,
+		capturedUrl: archive.url,
+		capturedAt: archive.archivedAt,
+		...(archive.route ? { route: archive.route } : {}),
+		navigationHops: archive.navigationHops,
+		...(archive.screenshotPng ? { screenshotPng: archive.screenshotPng } : {}),
+		mhtml: archive.mhtml,
+	}, dependencies.timestampEvidence ? { timestamp: dependencies.timestampEvidence } : {});
+}
+
 export type AnalyzeWebsiteOptions = {
 	mhtmlSnapshot?: Buffer;
 	/** Original captured document URL for retained MHTML, distinct from its submitted URL. */
@@ -317,6 +338,8 @@ export type AnalyzeWebsiteOptions = {
 	trustMhtmlDocumentLocation?: boolean;
 	/** Existing evidence screenshot used when a retry parses MHTML locally. */
 	screenshotSnapshot?: Buffer;
+	/** The network route the original live capture of retained MHTML used. */
+	captureRoute?: string;
 	/** The verification gate retained MHTML was captured behind. */
 	verificationGate?: WebsiteVerificationGate;
 	/** Same-host scripts and stylesheets the original live capture of retained MHTML received. */
@@ -334,6 +357,8 @@ export type WebsiteAnalysisDependencies = {
 	analysisClient?: AnalysisClient;
 	/** Waits between capture attempts after a browser-service failure. */
 	browserBackoffMs?: readonly number[];
+	/** The RFC 3161 authority call that timestamps the evidence manifest. */
+	timestampEvidence?: typeof timestampEvidence;
 };
 
 /** Capture retries after a browser-service failure: 5 s, 15 s, then 45 s. */
@@ -381,6 +406,7 @@ async function handOffRedirectedCapture(params: {
 		archivedUrl: archive.url,
 		navigationHops,
 		screenshotSnapshot: archive.screenshotPng,
+		...(archive.route ? { captureRoute: archive.route } : {}),
 		verificationGate: archive.verificationGate,
 		kitResources: archive.kitResources,
 		...params.reporter,
@@ -434,13 +460,15 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			verificationGate: options.verificationGate,
 			kitResources: options.kitResources,
 		}), dependencies.browserBackoffMs ?? BROWSER_BACKOFF_MS);
-		const archive = captured.screenshotPng || !options.screenshotSnapshot
-			? captured
-			: { ...captured, screenshotPng: options.screenshotSnapshot };
+		const archive = {
+			...captured,
+			...(!captured.screenshotPng && options.screenshotSnapshot ? { screenshotPng: options.screenshotSnapshot } : {}),
+			...(!captured.route && options.captureRoute ? { route: options.captureRoute } : {}),
+		};
 		if (archive.cloaking?.outcome === "unresolved") {
 			// The capture holds only the decoy every reachable route was shown. It
 			// is neither evidence against the submitted site nor a case of its own.
-			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive });
+			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await websiteEvidence(submissionId, url, archive, dependencies) });
 			await SubmissionsEntity.update(submissionId, {
 				status: "failed",
 				info: `Cloaking suspected: ${archive.cloaking.detail}. No verdict or report was made from the decoy; retry to visit the site again.`,
@@ -457,8 +485,10 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		}
 
 		await emitStep(submissionId, "save_artifacts", 40);
+		// A retry that reuses the stored capture keeps its original evidence package.
+		const evidence = reuseEvidenceArtifacts ? undefined : await websiteEvidence(submissionId, url, archive, dependencies);
 		if (!reuseEvidenceArtifacts) {
-			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive });
+			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence });
 		}
 		if (!capturedHop) {
 			await SubmissionsEntity.update(submissionId, {
@@ -519,7 +549,8 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 				submissionId,
 				urls: reportUrls,
 				analysisText: buildWebsiteReportEvidence(capturedClassification),
-				screenshotPng: archive.screenshotPng,
+				// Providers receive the screenshot that names its URL and capture time.
+				screenshotPng: evidence?.stampedScreenshotPng ?? archive.screenshotPng,
 				reporter: { reporterIp, reporterCountry, reporterHeaders },
 				phishingBasis,
 			});

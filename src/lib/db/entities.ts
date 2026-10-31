@@ -17,6 +17,7 @@ import {
 import { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
 import { generateId } from "./ids";
 import type { ReporterMetadata } from "../request_metadata";
+import { websiteEvidenceFiles, type WebsiteEvidencePackage } from "../evidence/package";
 
 function nowDate(): Date {
     return new Date();
@@ -352,9 +353,15 @@ export class ArtifactsEntity {
         return row;
     }
 
+    /**
+     * Store a capture with its evidence package: the raw screenshot and MHTML
+     * exactly as captured, the screenshot with its address bar, the manifest
+     * naming every file by SHA-256, and the RFC 3161 token for that manifest.
+     */
     static async saveWebsiteArtifacts({
         archive,
         submissionId,
+        evidence,
     }: {
         submissionId: bigint;
         archive: {
@@ -362,6 +369,7 @@ export class ArtifactsEntity {
             screenshotPng?: Buffer;
             mhtml: Buffer;
         };
+        evidence?: WebsiteEvidencePackage;
     }) {
         const mhtmlId = await this.saveBuffer({
             submissionId,
@@ -381,6 +389,16 @@ export class ArtifactsEntity {
                 buffer: archive.screenshotPng,
             })
             : undefined;
+        for (const file of evidence ? websiteEvidenceFiles(evidence) : []) {
+            await this.saveBuffer({
+                submissionId,
+                name: file.name,
+                kind: "website_evidence",
+                mimeType: file.mimeType,
+                archivedAt: archive.archivedAt,
+                buffer: file.bytes,
+            });
+        }
 
         return {
             screenshotId,

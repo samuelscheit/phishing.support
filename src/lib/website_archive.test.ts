@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import puppeteer, { type Browser, type BrowserContext, type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
+import sharp from "sharp";
 import type { FabricEgress } from "./browser/fabric";
 import type { WebsiteNavigationHop } from "./website_types";
 
@@ -157,11 +158,19 @@ function subresource(url: string, resourceType: string, body: string | Error, op
 	} as unknown as HTTPResponse;
 }
 
+/** A page with something drawn on it, and one Chromium had not painted yet. */
+const PAINTED_PNG = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#ffffff" } })
+	.composite([{ input: { create: { width: 32, height: 12, channels: 3, background: "#202124" } }, top: 18, left: 16 }])
+	.png().toBuffer();
+const BLANK_PNG = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#ffffff" } }).png().toBuffer();
+
 function archiveBrowserFixture(options: {
 	goto?: (navigation: FixtureNavigation) => Promise<HTTPResponse | null>;
 	/** How the page's network goes idle; may render the document's body meanwhile. */
 	networkIdle?: (wait: { timeout?: number; render: (body: string) => void }) => Promise<void>;
 	pageUrl?: string;
+	/** Screenshots served in order; the last repeats. Defaults to a painted page. */
+	screenshots?: Buffer[];
 } = {}) {
 	const eventNames: string[] = [];
 	const navigationCalls: Array<{ url: string; egress: FabricEgress; waitUntil?: string; timeout?: number }> = [];
@@ -209,7 +218,10 @@ function archiveBrowserFixture(options: {
 				networkIdleWaits.push(wait);
 				await options.networkIdle?.({ timeout: wait.timeout, render: (html) => { body = html; } });
 			},
-			screenshot: async () => { screenshotCount++; return Buffer.from("png"); },
+			screenshot: async () => {
+				const shots = options.screenshots ?? [PAINTED_PNG];
+				return shots[Math.min(screenshotCount++, shots.length - 1)]!;
+			},
 			target: () => ({
 				createCDPSession: async () => ({
 					send: async (method: string) => {
@@ -233,7 +245,11 @@ function archiveBrowserFixture(options: {
 				}),
 			}),
 			evaluate: async (callback: () => unknown) => {
-				if (callback.toString().includes("readyState")) return "interactive";
+				const source = callback.toString();
+				if (source.includes("readyState")) return "interactive";
+				// The blank-screenshot retry asks whether the page shows text, then waits for a frame.
+				if (source.includes("innerText")) return body.trim().length > 0;
+				if (source.includes("requestAnimationFrame")) return undefined;
 				throw new Error("Unexpected page evaluation");
 			},
 			title: async () => "Just a moment...",
@@ -323,6 +339,25 @@ test("website capture records every redirect response separately from the final 
 	expect(fixture.screenshotCount).toBe(1);
 	expect(fixture.closeCount).toBe(1);
 	expect(archive.text.toString()).toContain("Captured page text");
+});
+
+test("a blank screenshot of a page that shows text is taken again once the page has painted", async () => {
+	const fixture = archiveBrowserFixture({ screenshots: [BLANK_PNG, BLANK_PNG, PAINTED_PNG] });
+
+	const archive = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: fixture.getBrowser });
+
+	expect(fixture.screenshotCount).toBe(3);
+	expect(archive.screenshotPng?.equals(PAINTED_PNG)).toBeTrue();
+	expect(archive.route).toBe("Tor exit");
+});
+
+test("a page that stays blank is captured blank after a bounded number of attempts", async () => {
+	const fixture = archiveBrowserFixture({ screenshots: [BLANK_PNG] });
+
+	const archive = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: fixture.getBrowser });
+
+	expect(fixture.screenshotCount).toBe(4);
+	expect(archive.screenshotPng?.equals(BLANK_PNG)).toBeTrue();
 });
 
 test("a navigation failure over Tor is retried from the server's direct exit", async () => {

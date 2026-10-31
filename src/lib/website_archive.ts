@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { type Frame, type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
+import sharp from "sharp";
 import { getDomain } from "tldts";
 
 import { getBrowser, getBrowserPage } from "./browser";
@@ -44,6 +45,8 @@ export type WebsiteArchiveResult = {
 	navigationHops: WebsiteNavigationHop[];
 	/** Timestamp embedded in the MHTML capture, or the capture time when it is not available. */
 	archivedAt: Date;
+	/** The network route the live capture used, for example "Tor exit"; absent for MHTML. */
+	route?: string;
 	screenshotPng?: Buffer;
 	mhtml: Buffer;
 	html: Buffer;
@@ -655,6 +658,35 @@ function scriptNavigationHops(loadedResponse: HTTPResponse | null, scriptRespons
 	return [...loaded, ...followed].map((hop, index) => ({ ...hop, index }));
 }
 
+/** Attempts at a screenshot that shows what the page has rendered. */
+const SCREENSHOT_PAINT_ATTEMPTS = 4;
+
+/** Whether a screenshot is one flat colour: no text, no edges, nothing drawn. */
+export async function isBlankScreenshot(png: Uint8Array): Promise<boolean> {
+	const { channels } = await sharp(png).stats();
+	return channels.slice(0, 3).every((channel) => channel.stdev < 2);
+}
+
+/**
+ * A full-page screenshot of what the page shows. Headless Chromium sometimes
+ * returns a frame it has not painted yet, a blank page over a document full of
+ * text (a Google Site captured right after its embedded kit navigated). When
+ * the document shows text but the image is blank, wait for the next frames to
+ * paint and capture again; a page that is truly empty stays blank.
+ */
+async function capturePaintedScreenshot(page: Page): Promise<Uint8Array> {
+	const capture = () => page.screenshot({ fullPage: true, captureBeyondViewport: true, type: "png" });
+	let screenshot = await capture();
+	for (let attempt = 1; attempt < SCREENSHOT_PAINT_ATTEMPTS && await isBlankScreenshot(screenshot); attempt++) {
+		const showsText = await page.evaluate(() => (document.body?.innerText ?? "").trim().length > 0).catch(() => false);
+		if (!showsText) break;
+		await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))).catch(() => undefined);
+		await sleep(500 * attempt);
+		screenshot = await capture();
+	}
+	return screenshot;
+}
+
 async function captureLiveWebsite(url: string, egress: FabricEgress, dependencies: WebsiteArchiveDependencies): Promise<WebsiteArchiveResult> {
 	const browser = await (dependencies.getBrowser ?? getBrowser)(egress).catch((error: unknown) => {
 		throw new BrowserInfrastructureError(`Browser service unavailable: ${errorText(error)}`, { cause: error });
@@ -723,11 +755,7 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 		await settleRendering(page, renderSettleMs);
 		const verificationGate = await passVerificationGate(page, renderSettleMs);
 		const screenshotUrl = documentAddress(page.url(), loadedUrl);
-		const screenshotBytes = await page.screenshot({
-			fullPage: true,
-			captureBeyondViewport: true,
-			type: "png",
-		});
+		const screenshotBytes = await capturePaintedScreenshot(page);
 		const cdp = await page.target().createCDPSession();
 		const resolvedMhtml = Buffer.from(
 			(
@@ -751,6 +779,7 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 
 		return {
 			...capturedDocument,
+			route: WEBSITE_EGRESS_LABEL[egress],
 			screenshotPng,
 			kitResources: sameHostKitResources(await kitResources.settled(), capturedDocument.url),
 			...(verificationGate ? { verificationGate } : {}),

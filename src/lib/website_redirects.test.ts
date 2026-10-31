@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import sharp from "sharp";
 import { and, eq } from "drizzle-orm";
 
 import type { AnalysisClient } from "./analysis_run";
@@ -17,7 +18,9 @@ useTemporaryDatabase();
 const NETFLIX_TEXT = "Netflix\nSign In\nEmail or phone number\nPassword\nSign In";
 const NETFLIX_HTML = '<html><head><title>Netflix</title></head><body><h1>Sign In</h1><input type="text" id="iduserLoginId" aria-label="Email or phone number"><input type="password" id="idpassword" aria-label="Password"><button>Sign In</button></body></html>';
 const MHTML = Buffer.from("From: <Saved by Blink>\r\nContent-Type: text/html\r\n\r\n<html><body>Netflix</body></html>", "utf8");
-const PNG = Buffer.from("not-a-real-png");
+const PNG = await sharp({ create: { width: 32, height: 24, channels: 3, background: "#ffffff" } })
+	.composite([{ input: { create: { width: 16, height: 8, channels: 3, background: "#202124" } }, top: 8, left: 8 }])
+	.png().toBuffer();
 
 function hop(index: number, url: string, status: number | null, redirectTo?: string): WebsiteNavigationHop {
 	return { index, url, hostname: new URL(url).hostname, status, ...(redirectTo ? { redirectTo } : {}), contentCaptured: !redirectTo };
@@ -66,6 +69,8 @@ function dependencies(archive: WebsiteArchiveResult, archiveCalls: ArchiveCall[]
 	return {
 		getInfo: async () => ({ ip_rdaps: [] }),
 		analysisClient: phishingModel(),
+		// Never reach a real time-stamping authority from a test.
+		timestampEvidence: async () => undefined,
 		// A handed-over capture is parsed from its MHTML; the fake returns the
 		// same evidence with the provenance it was given.
 		archiveWebsite: async (options) => {
@@ -156,7 +161,8 @@ describe("website redirects", () => {
 		expect(archiveCalls[1]).toMatchObject({ url: kitStart, archivedUrl: kitPage, mhtmlSnapshot: MHTML, kitResources });
 		// The kit's captured file hashes move with the capture, so its case can search for siblings.
 		expect(childWebsite?.kitResources).toEqual(kitResources);
-		expect((await ArtifactsEntity.listForSubmission(childId)).map((artifact) => artifact.name).sort()).toEqual(["website.mhtml", "website.png"]);
+		// The capture moves with its evidence package: the stamped screenshot and the manifest.
+		expect((await ArtifactsEntity.listForSubmission(childId)).map((artifact) => artifact.name).sort()).toEqual(["evidence-manifest.json", "website-stamped.png", "website.mhtml", "website.png"]);
 
 		const report = await AbuseRepository.getReportForSubmission(childId);
 		const targets = await AbuseRepository.listTargets(report!.id);
@@ -308,7 +314,8 @@ describe("cloaked websites", () => {
 		expect(website?.redirectSubmissionId).toBeUndefined();
 		expect(modelCalls).toBe(0);
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
-		expect((await ArtifactsEntity.listForSubmission(id)).map((artifact) => artifact.kind).sort()).toEqual(["website_mhtml", "website_png"]);
+		// The decoy is kept with its evidence package, so it is documented like any capture.
+		expect((await ArtifactsEntity.listForSubmission(id)).map((artifact) => artifact.kind).filter((kind) => kind !== "website_evidence").sort()).toEqual(["website_mhtml", "website_png"]);
 	});
 });
 

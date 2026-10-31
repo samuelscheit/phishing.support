@@ -102,11 +102,13 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 			? websiteSiteName(submission.data.website?.url)
 			: (submission?.data.email?.subject as string | undefined) || "Untitled Submission";
 
-	const screenshot = submission?.artifacts?.find(
-		(a) =>
-			(((a.name?.toLowerCase() === "website.png" || a.name?.toLowerCase() === "mail.png") && a.mimeType?.startsWith("image/")) ||
-				a.kind?.toLowerCase() === "website_png")
-	);
+	// The stamped copy shows the page's URL and capture time; older cases only have the raw one.
+	const screenshot = submission?.artifacts?.find((a) => a.name === "website-stamped.png")
+		?? submission?.artifacts?.find(
+			(a) =>
+				(((a.name?.toLowerCase() === "website.png" || a.name?.toLowerCase() === "mail.png") && a.mimeType?.startsWith("image/")) ||
+					a.kind?.toLowerCase() === "website_png")
+		);
 	const websiteMhtml = submission?.artifacts?.find(
 		(a) =>
 			(a.name?.toLowerCase() === "website.mhtml" ||
@@ -615,6 +617,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 									<CardTitle className="text-xs truncate">{a.name || a.kind}</CardTitle>
 									<CardDescription className="text-[10px]">
 										{a.mimeType} • {formatArtifactSize(a.size)}
+										{a.sha256 ? <div className="font-mono break-all">SHA-256 {a.sha256}</div> : null}
 										{isWebsiteArchiveArtifact(a) ? (
 											<div>Archived {formatUtcDateTime(a.archivedAt ?? a.createdAt) ?? "unknown date"}</div>
 										) : null}
