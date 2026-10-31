@@ -41,6 +41,13 @@ captured kit. The broad, identical certificate behavior is consistent with a
 distributed Cloudflare-bound SNI relay and invalidates certificate-only origin
 attribution.
 
+The subsequent controlled-hostname experiment made that classification
+stronger. Fourteen live relay addresses across fourteen prefixes returned
+Cloudflare responses for `2dayduecheck.website`, but rejected a publicly
+trusted, controlled Tailscale Funnel hostname before and after the Cloudflare
+positive control. The controlled origin received no relayed request. See
+`controlled-sni-experiment.md` and its three JSONL files.
+
 ## Files
 
 - `as149440-prefixes.json`, `as212083-prefixes.json`: RIPEstat source snapshots.
@@ -53,3 +60,11 @@ attribution.
 - `resource-only-results.jsonl`: an earlier independent pass. It observed 571
   transient certificate candidates across 138 prefixes and the same zero
   content matches; the difference quantifies the relay endpoints' instability.
+- `controlled-sni-experiment.md`: controlled endpoint design, paired controls,
+  interpretation, limits, and cleanup.
+- `controlled-non-cloudflare-before.jsonl`: two non-Cloudflare attempts through
+  each of fourteen Evoxt relay addresses.
+- `cloudflare-paired-control.jsonl`: successful Cloudflare positive control
+  through the same fourteen addresses.
+- `controlled-non-cloudflare-after.jsonl`: final non-Cloudflare attempt through
+  each address immediately after its positive control.

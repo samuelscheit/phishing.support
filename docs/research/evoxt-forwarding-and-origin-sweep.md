@@ -310,3 +310,28 @@ most of the announced prefixes is empirical evidence for a broadly deployed
 Cloudflare-bound relay behavior, not 571 independent origins. It still does
 not identify the relay operator, Cloudflare product/account, hidden second
 hop, or the attacker's origin outside the swept ranges.
+
+## Controlled non-Cloudflare positive/negative control
+
+After the range sweep, a live endpoint was exposed temporarily at
+`respond5.tail8471cc.ts.net` through Tailscale Funnel. It was outside Cloudflare
+and forwarded to a controlled request logger. A direct request returned a
+unique response token and was recorded by that logger.
+
+Fourteen live Evoxt relay addresses across fourteen different `/24`s were then
+tested in three phases from the independent Worker tunnel:
+
+1. Two non-Cloudflare attempts per address: all 28 failed at TLS with alert 40;
+   the controlled logger received none.
+2. An immediate `2dayduecheck.website` positive control: all 14 addresses
+   returned Cloudflare HTTP 403 responses with `Server: cloudflare`, `CF-Ray`,
+   and the domain certificate.
+3. An immediate second non-Cloudflare attempt: all 14 again failed at TLS with
+   alert 40; the controlled logger received none.
+
+Because the same addresses were demonstrably live for Cloudflare between the
+two non-Cloudflare failures, relay downtime does not explain the result. The
+experiment rules out a generic Internet-wide SNI proxy for this sample and
+supports Cloudflare-specific SNI forwarding or an equivalent Cloudflare-only
+routing policy. Full methodology, cleanup, and raw JSONL evidence are in
+`investigation/2dayduecheck/evoxt-sweep/controlled-sni-experiment.md`.
