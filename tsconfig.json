@@ -29,6 +29,7 @@
 		"node_modules",
 		"investigation/**",
 		"output/**",
+		"tools/**",
 		".playwright-cli/**",
 		"**/*.test.ts",
 		"**/*.test.tsx",

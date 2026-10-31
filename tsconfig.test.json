@@ -1,5 +1,5 @@
 {
 	"extends": "./tsconfig.json",
 	"include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts", "**/*.mts"],
-	"exclude": ["node_modules", "investigation/**", "output/**", ".playwright-cli/**"]
+	"exclude": ["node_modules", "investigation/**", "output/**", "tools/**", ".playwright-cli/**"]
 }
