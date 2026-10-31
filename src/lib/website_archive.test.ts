@@ -855,6 +855,27 @@ setTimeout(async () => {
 		}
 	}, 60_000);
 
+	test("captures a kit that swaps in its blob: page before the page finishes loading as the page it loaded", async () => {
+		const hits: string[] = [];
+		// secure.nicholasmeeker.com replaced itself synchronously, so the browser's
+		// own navigation result was the blob: document rather than the site.
+		const server = serveKit(`<!DOCTYPE html><html><head><script>
+location.replace(URL.createObjectURL(new Blob(["<!DOCTYPE html><html><body>${appleForm.replaceAll('"', '\\"')}</body></html>"], { type: "text/html" })));
+</script></head><body></body></html>`, hits);
+		try {
+			const url = `http://127.0.0.1:${server.port}/c2222120`;
+			const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 2_000, getBrowser: launch });
+
+			expect(archive.url).toBe(url);
+			expect(archive.hostname).toBe("127.0.0.1");
+			expect(archive.navigationHops).toEqual([expect.objectContaining({ url, hostname: "127.0.0.1", status: 200, contentCaptured: true })]);
+			expect(archive.text.toString()).toContain("Sign in with Apple Account");
+			expect(archive.screenshotPng?.byteLength).toBeGreaterThan(0);
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+
 	test("never clicks anything on a page that already shows data-entry fields, even next to a robot checkbox", async () => {
 		const hits: string[] = [];
 		const server = serveKit(`<!DOCTYPE html><html><body>${appleForm}

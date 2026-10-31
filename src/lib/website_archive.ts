@@ -486,6 +486,11 @@ async function passVerificationGate(page: Page, settleMs: number): Promise<Websi
 	return { label };
 }
 
+/** A response a site sent over the network, not one Chromium made itself (chrome-error://, blob:). */
+function isNetworkDocument(response: HTTPResponse): boolean {
+	return /^https?:/i.test(response.url());
+}
+
 /**
  * The http(s) address a captured main-frame document belongs to. Kits that
  * fetch their real page and swap it in through `location.replace(blob:...)`
@@ -525,8 +530,7 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 		page.on("response", (response) => {
 			const request = response.request();
 			const status = response.status();
-			// Only network documents: Chromium's own chrome-error:// page is not a site response.
-			if (request.isNavigationRequest() && request.frame() === page.mainFrame() && (status < 300 || status >= 400) && /^https?:/i.test(response.url())) {
+			if (request.isNavigationRequest() && request.frame() === page.mainFrame() && (status < 300 || status >= 400) && isNetworkDocument(response)) {
 				latestDocumentResponse = response;
 			}
 		});
@@ -541,6 +545,10 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 		}).catch((error: unknown) => {
 			throw new WebsiteUnreachableError(egress, error instanceof Error ? error.message : String(error));
 		});
+		// A kit that swaps in its blob: page before DOMContentLoaded makes the
+		// navigation resolve with that blob: document; the site's own response is
+		// the document the visitor loaded.
+		if (navigationResponse && !isNetworkDocument(navigationResponse)) navigationResponse = latestDocumentResponse;
 		if (navigationResponse && !navigationResponse.ok()) {
 			const settled = await settleErrorDocument(page, () => latestDocumentResponse, dependencies.errorDocumentSettleMs ?? WEBSITE_ERROR_DOCUMENT_SETTLE_MS);
 			if (!settled) {
