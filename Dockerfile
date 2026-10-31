@@ -28,8 +28,10 @@ RUN bun run build
 FROM oven/bun:1.4.2-debian AS runner
 WORKDIR /app
 
+# Fonts: evidence screenshots carry an address bar rendered from SVG text;
+# without a font every glyph renders as an empty box.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates \
+  && apt-get install -y --no-install-recommends ca-certificates fontconfig fonts-dejavu-core \
   && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production

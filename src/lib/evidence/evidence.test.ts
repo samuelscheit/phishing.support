@@ -202,3 +202,15 @@ describe("website evidence package", () => {
 		expect(websiteEvidenceFiles(first).map((file) => file.name)).toEqual(["evidence-manifest.json"]);
 	});
 });
+
+describe("address bar text", () => {
+	test("the URL is drawn as readable glyphs, not as one repeated box", async () => {
+		const page = await pagePng(800, 200);
+		const stamp = (url: string) => stampAddressBar(page, { url, capturedAt: new Date("2026-10-31T09:55:03Z"), route: "Tor exit", caseId: "1", screenshotSha256: "0".repeat(64) });
+		// Two URLs of the same length but different letters must draw differently.
+		const bar = async (png: Buffer) => sharp(png).extract({ left: 60, top: 20, width: 400, height: 24 }).raw().toBuffer();
+		const narrow = await bar(await stamp("https://iiiiiiiiiiiii.test/"));
+		const wide = await bar(await stamp("https://MWMWMWMWMWMWM.test/"));
+		expect(narrow.equals(wide)).toBeFalse();
+	});
+});
