@@ -421,11 +421,16 @@ function siteOf(url: string): string {
  * redirect (the submitted host's declared destination).
  */
 function scriptDestinationSite(archive: WebsiteArchiveResult): string | undefined {
-	const submittedSite = siteOf(archive.requestedUrl);
-	const capturedSite = siteOf(archive.url);
-	if (capturedSite === submittedSite) return undefined;
-	const httpRedirectOffSite = archive.navigationHops.some((hop) => hop.status !== null && hop.status >= 300 && hop.status < 400 && hop.redirectTo && siteOf(hop.redirectTo) !== submittedSite);
-	return httpRedirectOffSite ? undefined : capturedSite;
+	// The page that ran the script is the one that answered with a document
+	// instead of an HTTP redirect. Short links reach a cloaker through HTTP
+	// redirects of their own, which say nothing about where its script sends
+	// this visitor.
+	const scripted = archive.navigationHops.find((hop) => hop.redirectTo && !isHttpRedirect(hop.status) && siteOf(hop.redirectTo) !== siteOf(hop.url));
+	return scripted ? siteOf(archive.url) : undefined;
+}
+
+function isHttpRedirect(status: number | null): boolean {
+	return status !== null && status >= 300 && status < 400;
 }
 
 /**

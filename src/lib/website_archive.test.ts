@@ -841,6 +841,36 @@ describe("cloaking", () => {
 		expect(archive.cloaking).toBeUndefined();
 	});
 
+	test("a short link's HTTP redirects to a cloaker do not hide the cloaker's scripted jump", async () => {
+		// Production 2026-11-01 (375199039110516736): share.google 302s through
+		// google.com to an s-url.sbs bot check, whose script sent the Tor exit to
+		// a troll page and real visitors to an Ozon kit.
+		const shortUrl = "https://share.google/xnf72t40tx4fzvKM2";
+		const googleUrl = "https://www.google.com/share.google?q=xnf72t40tx4fzvKM2";
+		const cloakerUrl = "https://s-url.sbs/EoZAxs";
+		const trollUrl = "https://fuckyou.gay/";
+		const ozonUrl = "https://xj0r2x2j-ozon.agenticive.com/price.php";
+		const fixture = archiveBrowserFixture({
+			pageUrl: cloakerUrl,
+			goto: async ({ egress, replaceDocument }) => {
+				setTimeout(() => replaceDocument(responseForNavigation(egress === "residential" ? ozonUrl : trollUrl, 200, { contentType: "text/html" })), 5);
+				return responseForNavigation(cloakerUrl, 200, {
+					contentType: "text/html; charset=utf-8",
+					redirects: [{ url: shortUrl, status: 302, location: googleUrl }, { url: googleUrl, status: 301, location: cloakerUrl }],
+				});
+			},
+		});
+
+		const archive = await archiveWebsite({ url: shortUrl }, { ...settle, getBrowser: fixture.getBrowser });
+
+		expect(fixture.leasedEgress).toEqual(["phishing", "residential"]);
+		expect(archive.url).toBe(ozonUrl);
+		expect(archive.cloaking).toEqual({
+			outcome: "detected",
+			detail: `${shortUrl} sent the Tor exit to fuckyou.gay but the residential exit to agenticive.com`,
+		});
+	});
+
 	test("an HTTP redirect to another site is the host's declared destination and never triggers the residential exit", async () => {
 		const fixture = archiveBrowserFixture({
 			pageUrl: kitUrl,
