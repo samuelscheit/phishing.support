@@ -193,7 +193,7 @@ function archiveBrowserFixture(options: {
 			mainFrame: () => mainFrame,
 			// The fake document draws no frame a verification gate could sit in.
 			frames: () => [],
-			setViewport: async () => undefined,
+			createCDPSession: async () => ({ send: async (method: string) => (method === "Browser.getWindowForTarget" ? { windowId: 1 } : {}) }),
 			on: (event: string, listener: (response: HTTPResponse) => void) => {
 				eventNames.push(event);
 				if (event === "response") responseListeners.push(listener);
