@@ -21,7 +21,10 @@ export const analysisRunKind = ["analysis", "classification", "report_draft", "u
 export type AnalysisRunKind = (typeof analysisRunKind)[number];
 
 
-export type EmailSubmissionData = MailData;
+export type EmailSubmissionData = MailData & {
+	/** The website case each linked page was handed to; several links may share one case. */
+	linkedWebsites?: Array<{ url: string; submissionId: string }>;
+};
 
 export type WebsiteSubmissionData = {
 	whois?: WhoISInfo;

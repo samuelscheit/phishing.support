@@ -33,6 +33,9 @@ describe("website site identity", () => {
 	test("short links and buckets keep their case-sensitive codes", () => {
 		expect(websiteSite("https://bit.ly/AbC")).toBe("bit.ly/AbC");
 		expect(isSameWebsite("https://bit.ly/AbC", "https://bit.ly/abc")).toBe(false);
+		// Submission 375160822747370869 linked one share.google code; an earlier, unrelated code had taken the whole host.
+		expect(websiteSite("https://share.google/xnf72t40tx4fzvKM2")).toBe("share.google/xnf72t40tx4fzvKM2");
+		expect(isSameWebsite("https://share.google/xnf72t40tx4fzvKM2", "https://share.google/ZAq2FghpGquJH6ShL")).toBe(false);
 		expect(websiteSite("https://storage.googleapis.com/savelinge/clearpath.html#frag")).toBe("storage.googleapis.com/savelinge");
 		expect(websiteSite("https://github.com/Evil/repo/blob/main/x")).toBe("github.com/evil");
 	});

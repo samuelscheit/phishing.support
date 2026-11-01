@@ -447,6 +447,21 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 										</div>
 									</div>
 								</div>
+								{submission.data.email?.linkedWebsites?.length ? (
+									<div className="rounded-lg border bg-muted/30 p-3">
+										<div className="text-xs text-muted-foreground">Linked websites, each analyzed in its own case</div>
+										<ul className="mt-1 space-y-1">
+											{submission.data.email.linkedWebsites.map((link) => (
+												<li key={link.url} className="flex items-start justify-between gap-3">
+													<span className="min-w-0 font-mono text-xs break-all">{link.url}</span>
+													<Link href={`/submissions/${link.submissionId}`} className="shrink-0 text-xs font-medium text-primary hover:underline">
+														Open case
+													</Link>
+												</li>
+											))}
+										</ul>
+									</div>
+								) : null}
 							</div>
 						)}
 					</div>

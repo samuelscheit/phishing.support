@@ -32,24 +32,27 @@ function getAddressText(obj: AddressObject | undefined): string {
 	return text.trim();
 }
 
-export function getMailLinks(result: MailData) {
-	try {
-		if (!result.html) return [];
+const TEXT_URL_RE = /https?:\/\/[^\s"'<>]+/gi;
+/** Sentence punctuation that follows a URL written in running text. */
+const TRAILING_PUNCTUATION_RE = /[.,;:!?)\]}]+$/;
 
-		const doc = parse(result.html);
-
-		return doc.querySelectorAll("a").map((link) => {
-			const href = link.getAttribute("href");
-
-			return {
-				href: href || "",
-				text: link.text.trim(),
-			};
-		});
-	} catch (error) {
-		console.error("Error processing HTML content:", error);
+/**
+ * The web pages a message links to: every anchor in its HTML part and every
+ * URL written in its text, which plain-text and multipart mails rely on. Image
+ * and stylesheet URLs are deliberately excluded; they are not destinations.
+ */
+export function getMailWebsiteUrls(mail: Pick<MailData, "html" | "text">): string[] {
+	const candidates = [
+		...(mail.html ? parse(mail.html).querySelectorAll("a").map((link) => link.getAttribute("href")?.trim() ?? "") : []),
+		...(mail.text.match(TEXT_URL_RE) ?? []).map((url) => url.replace(TRAILING_PUNCTUATION_RE, "")),
+	];
+	const urls = new Set<string>();
+	for (const candidate of candidates) {
+		if (!URL.canParse(candidate)) continue;
+		const url = new URL(candidate);
+		if (url.protocol === "http:" || url.protocol === "https:") urls.add(url.toString());
 	}
-	return [];
+	return [...urls];
 }
 
 export async function getMailImage(result: MailData) {

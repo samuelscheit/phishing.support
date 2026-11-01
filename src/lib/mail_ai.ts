@@ -2,7 +2,7 @@ import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
 import { runStreamedAnalysisRun } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
 import { simpleParser } from "mailparser";
-import { analyzeHeaders, getAddressesText, getMailImage, getMailLinks } from "./mail";
+import { analyzeHeaders, getAddressesText, getMailImage, getMailWebsiteUrls } from "./mail";
 import { getInfo } from "./website_info";
 import * as toon from "@toon-format/toon";
 import { reportConfirmedEmailPhishing } from "./abuse/submission_reports";
@@ -12,12 +12,8 @@ import { createWebsiteSubmission } from "./submissions/website";
 import { defaultReasoning, defaultResponseModel } from "./utils";
 import { serviceIdentity } from "./constants";
 import { errorText } from "./error_text";
-
-const URL_RE = /https?:\/\/[^\s"'<>]+/gi;
-
-export function extractEmailUrls(mail: MailData) {
-	return Array.from(new Set([...(mail.text.match(URL_RE) ?? []), ...(mail.html.match(URL_RE) ?? [])]));
-}
+import type { EmailSubmissionData } from "./db/schema";
+import type { ReporterMetadata } from "./request_metadata";
 
 export function buildMailEvidence(mail: MailData, analysisText?: string) {
 	return toon.encode({
@@ -25,7 +21,7 @@ export function buildMailEvidence(mail: MailData, analysisText?: string) {
 		subject: mail.subject,
 		text: mail.text,
 		html_excerpt: mail.html.slice(0, 12000),
-		urls: extractEmailUrls(mail),
+		urls: getMailWebsiteUrls(mail),
 		headers: mail.headers,
 		whois: mail.whois,
 		analysis: analysisText || undefined,
@@ -287,6 +283,30 @@ export async function parseMail(eml: string, dependencies: ParseMailDependencies
 
 export type MailData = Awaited<ReturnType<typeof parseMail>>;
 
+/**
+ * Every page a confirmed phishing mail links to is analyzed and, if confirmed,
+ * reported as its own website. The returned links name the case each one
+ * landed in, so the email case can show where its links went.
+ */
+export async function handOffMailLinks(params: {
+	mail: MailData;
+	submissionId: bigint;
+	reporter: ReporterMetadata;
+	createWebsite?: typeof createWebsiteSubmission;
+}): Promise<NonNullable<EmailSubmissionData["linkedWebsites"]>> {
+	const createWebsite = params.createWebsite ?? createWebsiteSubmission;
+	const linked: NonNullable<EmailSubmissionData["linkedWebsites"]> = [];
+	for (const url of getMailWebsiteUrls(params.mail)) {
+		try {
+			const submissionId = await createWebsite({ url, source: `email:${params.submissionId.toString()}`, ...params.reporter });
+			linked.push({ url, submissionId: submissionId.toString() });
+		} catch (error) {
+			console.error(`Failed to open a website case for ${url} linked from email ${params.submissionId.toString()}:`, error);
+		}
+	}
+	return linked;
+}
+
 export async function analyzeMail(
 	emlContent: string,
 	stream_id: bigint,
@@ -435,15 +455,8 @@ ${buildMailEvidence(mail, analysis.output_text)}`,
 				screenshotPng,
 				reporter,
 			});
-			// Every linked page is analyzed and, if confirmed, reported as its own website.
-			for (const link of getMailLinks(mail)) {
-				if (!URL.canParse(link.href)) continue;
-				const url = new URL(link.href);
-				if (url.protocol !== "http:" && url.protocol !== "https:") continue;
-				createWebsiteSubmission({ url: url.toString(), source: `email:${stream_id.toString()}`, ...reporter }).catch(console.error);
-			}
-
-			await SubmissionsEntity.update(stream_id, { status: "reported", info: undefined });
+			const linkedWebsites = await handOffMailLinks({ mail, submissionId: stream_id, reporter });
+			await SubmissionsEntity.update(stream_id, { status: "reported", info: undefined, data: { kind: "email", email: { ...mail, linkedWebsites } } });
 			var subject = `Phishing Reported - ${submissionSubject}`;
 			var body = [
 				`Thank you very much for your report!`,
