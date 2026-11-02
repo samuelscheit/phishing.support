@@ -20,8 +20,11 @@ export function probeMaxSteps(value: string | undefined): number {
 }
 
 /**
- * The approved scope of the investigation. CAPTCHAs are out of scope on purpose:
- * the agent stops and reports rather than solving one.
+ * The approved scope of the investigation. Token and checkbox CAPTCHAs (reCAPTCHA
+ * v2, Cloudflare Turnstile) are cleared by the Fabric browser guardian, which runs
+ * before the agent's first action and acts on its own, so the agent proceeds
+ * normally and waits for the gate to clear. The agent never solves one itself, and
+ * it stops at any challenge the guardian cannot clear, such as hCaptcha.
  */
 export function buildExfiltrationProbeTask(
 	pageUrl: string,
@@ -49,8 +52,8 @@ export function buildExfiltrationProbeTask(
 			`Fill every visible phishing form with the semantically matching synthetic values and submit it. Continue through the kit's own flow, including a repeated-password or one-time-code stage when shown. Make at most ${MAX_FORM_SUBMISSIONS} form submissions in total.`,
 			"Follow the kit's flow onto another domain only when a form, redirect, frame, or the page's own button leads to the next stage of the same sign-in or payment flow. Do not follow advertisements, footer or social links, search results, or links to the impersonated brand's real website.",
 			"When the page offers a download or install control, click it once so the file is saved. Never open, run, install, execute, extract, or interact with any downloaded file, and never enter data into one.",
-			"Do not solve CAPTCHAs or bot challenges, authenticate to a real service, approve a real login or second factor, grant browser permissions, install extensions, change browser settings, or accept a dialog that installs software.",
-			`Stop when the flow finishes, blocks the synthetic data, shows a CAPTCHA or asks for operator approval, leaves the kit's flow, or ${MAX_FORM_SUBMISSIONS} submissions have been made. The investigation has a time limit of about eight minutes.`,
+			"A reCAPTCHA v2 or Cloudflare Turnstile checkbox is cleared automatically by the browser's guardian: do not click it yourself, and wait a few seconds for it to clear before acting. Do not authenticate to a real service, approve a real login or second factor, grant browser permissions, install extensions, change browser settings, or accept a dialog that installs software.",
+			`Stop when the flow finishes, blocks the synthetic data, shows a challenge that is still present after waiting (such as hCaptcha or an image puzzle) or asks for operator approval, leaves the kit's flow, or ${MAX_FORM_SUBMISSIONS} submissions have been made. The investigation has a time limit of about eight minutes.`,
 			"Return only a short factual result; network and download evidence is recorded independently.",
 		].join("\n"),
 		max_steps: maxSteps,
