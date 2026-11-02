@@ -184,7 +184,36 @@ function boundedQuote(quote: string): string {
 	if (characters.length <= MAX_EVIDENCE_QUOTE_LENGTH) return quote;
 	const prefix = characters.slice(0, MAX_EVIDENCE_QUOTE_LENGTH).join("");
 	const wordEnd = prefix.lastIndexOf(" ");
-	return wordEnd >= prefix.length / 2 ? prefix.slice(0, wordEnd) : prefix;
+	const bounded = wordEnd >= prefix.length / 2 ? prefix.slice(0, wordEnd) : prefix;
+	// A cut right after a gap marker would leave a marker that no page line contains.
+	return bounded.replace(/ …$/u, "");
+}
+
+/** Marks where a stored quote skips page text between two verbatim lines. */
+const QUOTE_GAP = " … ";
+
+function hasPageText(value: string): boolean {
+	return (normalizedEvidence(value).match(/\p{L}/gu)?.length ?? 0) >= 2;
+}
+
+/**
+ * Returns the quote as reported page text, or why it is not page text. Line
+ * breaks of a quote spanning consecutive page lines are layout, not evidence.
+ * A model also quotes separate lines together (a heading and the button below
+ * it, production case 375349501428240400); each line must then be verbatim
+ * page text on its own, and the report marks the gap between them.
+ */
+function verbatimEvidenceQuote(quote: string, normalizedPageText: string): string | { rejected: string } {
+	const joined = quote.replace(/\s+/g, " ").trim();
+	if (!hasPageText(joined) || /[\u0000-\u001f\u007f]/.test(joined)) {
+		return { rejected: "its evidence quote contains no page text" };
+	}
+	if (normalizedPageText.includes(normalizedEvidence(joined))) return joined;
+	const lines = quote.split(/[\r\n]+/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
+	if (lines.length > 1 && lines.every((line) => hasPageText(line) && normalizedPageText.includes(normalizedEvidence(line)))) {
+		return lines.join(QUOTE_GAP);
+	}
+	return { rejected: "its evidence quote does not appear verbatim in the captured page text" };
 }
 
 function uncorroboratedPhishingClaim(reason: string): WebsiteSiteClassification {
@@ -217,15 +246,8 @@ export function validateWebsiteSiteClassification(
 	if (!WEBSITE_PHISHING_BASES.includes(phishingBasis)) {
 		return uncorroboratedPhishingClaim("it named no credential theft, payment fraud, or malware delivery");
 	}
-	// Line breaks of a quote spanning several page lines are layout, not evidence.
-	const evidenceQuote = result.evidenceQuote.replace(/\s+/g, " ").trim();
-	const normalizedQuote = normalizedEvidence(evidenceQuote);
-	if ((normalizedQuote.match(/\p{L}/gu)?.length ?? 0) < 2 || /[\u0000-\u001f\u007f]/.test(evidenceQuote)) {
-		return uncorroboratedPhishingClaim("its evidence quote contains no page text");
-	}
-	if (!normalizedEvidence(capturedPageText).includes(normalizedQuote)) {
-		return uncorroboratedPhishingClaim("its evidence quote does not appear verbatim in the captured page text");
-	}
+	const evidenceQuote = verbatimEvidenceQuote(result.evidenceQuote, normalizedEvidence(capturedPageText));
+	if (typeof evidenceQuote !== "string") return uncorroboratedPhishingClaim(evidenceQuote.rejected);
 
 	// A mistyped field reference does not undo a verified quote; it is dropped.
 	const fieldsByRef = new Map(extractWebsiteDataEntryFields(capturedPageHtml).map((field) => [field.ref, field]));
@@ -287,7 +309,8 @@ export function reportableWebsiteHop(
 	if (!capturedHop) return undefined;
 	const assessment = assessments.find((candidate) => candidate.hopIndex === capturedHop.index);
 	if (assessment?.finding !== "phishing" || !assessment.evidenceQuote) return undefined;
-	return normalizedEvidence(archive.text.toString("utf-8")).includes(normalizedEvidence(assessment.evidenceQuote))
+	const stored = assessment.evidenceQuote.split(QUOTE_GAP).join("\n");
+	return typeof verbatimEvidenceQuote(stored, normalizedEvidence(archive.text.toString("utf-8"))) === "string"
 		? capturedHop
 		: undefined;
 }

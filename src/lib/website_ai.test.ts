@@ -247,6 +247,30 @@ test("a quote spanning several page lines keeps its text and drops the line brea
 	});
 });
 
+test("a quote joining separate page lines is evidence when each line is verbatim page text", () => {
+	// Production case 375349501428240400: a fake Chrome download page; the model
+	// quoted the page heading with a download button further down.
+	const page = capturedPage(
+		"https://googie-chrome.top/",
+		"Google Chrome 网络浏览器\n得益于 Google 的智能工具，Chrome 现在更易用、更安全、更快捷。\n下载 Chrome\n适用于 Windows 11/10 64-bit",
+		"<a href=\"#download\">下载 Chrome</a>",
+	);
+	const classification = classify(page, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Google Chrome 网络浏览器\n下载 Chrome" });
+	expect(classification).toEqual({ finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Google Chrome 网络浏览器 … 下载 Chrome" });
+	expect(reportablePage(page, classification)).toEqual(page.hop);
+
+	// One invented line still makes the whole quote invented.
+	expect(classify(page, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Google Chrome 网络浏览器\n立即安装更新" })).toEqual({
+		finding: "insufficient_evidence",
+		rejectedPhishingClaim: "its evidence quote does not appear verbatim in the captured page text",
+	});
+	// Each line must carry page text of its own, not only punctuation found anywhere.
+	expect(classify(page, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Google Chrome 网络浏览器\n。" })).toEqual({
+		finding: "insufficient_evidence",
+		rejectedPhishingClaim: "its evidence quote does not appear verbatim in the captured page text",
+	});
+});
+
 test("quotes match despite typographic punctuation and invisible characters", () => {
 	const page = capturedPage(
 		"https://secure-paypal-review.example.net/",
