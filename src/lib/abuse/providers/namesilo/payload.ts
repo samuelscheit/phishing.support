@@ -64,6 +64,7 @@ export function makeNameSiloExplanation(params: {
 	target?: string;
 	observedUrl?: string;
 	description: string;
+	allegationCategory?: string;
 	realWebsite?: string;
 }): string | undefined {
 	return buildProviderReportNarrative({
@@ -71,6 +72,7 @@ export function makeNameSiloExplanation(params: {
 		target: params.target,
 		observedUrls: params.observedUrl ? [params.observedUrl] : [],
 		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.realWebsite ? { legalBrandUrl: params.realWebsite } : {}),
 		maximumLength: NAMESILO_PROVIDER.maximumReportLength,
 	});
@@ -81,6 +83,7 @@ export function buildNameSiloSubmissionPayload(params: {
 	target: string;
 	observedUrl: string;
 	description: string;
+	allegationCategory?: string;
 	realWebsite: string;
 	evidence: NameSiloEvidenceReference;
 }): NameSiloSubmissionPayload | undefined {
@@ -92,6 +95,7 @@ export function buildNameSiloSubmissionPayload(params: {
 		target,
 		observedUrl,
 		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		realWebsite,
 	});
 	const evidence = storedProviderEvidenceImageReference(params.evidence, NAMESILO_EVIDENCE_CONTRACT);

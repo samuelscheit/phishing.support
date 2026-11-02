@@ -48,6 +48,7 @@ export function makeNetcraftReason(params: {
 	target?: string;
 	observedUrls?: readonly string[];
 	description: string;
+	allegationCategory?: string;
 	legalBrandUrl?: string;
 }): string | undefined {
 	return buildProviderReportNarrative({
@@ -55,6 +56,7 @@ export function makeNetcraftReason(params: {
 		target: params.target,
 		observedUrls: params.observedUrls,
 		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
 		maximumLength: NETCRAFT_PROVIDER.maximumReasonLength,
 	});
@@ -65,6 +67,7 @@ export function buildNetcraftSubmissionPayload(params: {
 	target: string;
 	observedUrls: readonly string[];
 	description: string;
+	allegationCategory?: string;
 	legalBrandUrl?: string;
 	reporterEmail: string;
 }): NetcraftSubmissionPayload | undefined {
@@ -75,6 +78,7 @@ export function buildNetcraftSubmissionPayload(params: {
 		target: normalizedTarget,
 		observedUrls,
 		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl === undefined ? {} : { legalBrandUrl: params.legalBrandUrl }),
 	});
 	if (!normalizedTarget || !observedUrls || !reporterEmail || !reason) return undefined;

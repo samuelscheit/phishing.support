@@ -11,7 +11,7 @@ describe("durable exfiltration probe operation", () => {
 		const reported: string[] = [];
 		let released = 0;
 		const result = await runExfiltrationProbe(
-			{ reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", phishingBasis: "credential_theft" as const, reporter: {} },
+			{ reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", reporter: {} },
 			{
 				createTask: async () => { order.push("skyvern"); return { runId: "run-1", response: {} }; },
 				getRun: async () => ({ status: "completed" }),
@@ -35,7 +35,7 @@ describe("durable exfiltration probe operation", () => {
 		);
 		expect(order).toEqual(["recorder", "skyvern"]);
 		expect(reported).toEqual(["domain:collector.example"]);
-		expect(result).toEqual({ requests: 1, backends: 1, egress: "phishing" });
+		expect(result).toMatchObject({ requests: 1, backends: [{ key: "domain:collector.example" }], downloads: [], egress: "phishing" });
 		expect(released).toBe(1);
 	});
 
@@ -43,7 +43,7 @@ describe("durable exfiltration probe operation", () => {
 		let canceledRun = 0;
 		let canceledBinding = 0;
 		await expect(runExfiltrationProbe(
-			{ reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", phishingBasis: "credential_theft" as const, reporter: {} },
+			{ reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", reporter: {} },
 			{ createTask: async () => ({ runId: "run-1", response: {} }), getRun: async () => ({ status: "failed" }), cancelRun: async () => { canceledRun++; } },
 			undefined,
 			{

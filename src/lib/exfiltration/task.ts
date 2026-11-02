@@ -47,7 +47,7 @@ export function buildExfiltrationProbeTask(
 	return {
 		url: url.toString(),
 		prompt: [
-			"This is a controlled defensive investigation of a page already confirmed as phishing or payment fraud.",
+			"This is a controlled defensive investigation of a page already confirmed as phishing or malware distribution.",
 			`Use only these synthetic values: ${JSON.stringify(syntheticValues)}. Never enter, request, or retrieve real personal data, credentials, messages, account content, or payment data.`,
 			`Fill every visible phishing form with the semantically matching synthetic values and submit it. Continue through the kit's own flow, including a repeated-password or one-time-code stage when shown. Make at most ${MAX_FORM_SUBMISSIONS} form submissions in total.`,
 			"Follow the kit's flow onto another domain only when a form, redirect, frame, or the page's own button leads to the next stage of the same sign-in or payment flow. Do not follow advertisements, footer or social links, search results, or links to the impersonated brand's real website.",

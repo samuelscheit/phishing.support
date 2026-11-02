@@ -21,6 +21,7 @@ import { PROBE_EGRESS_ORDER, routeVerdictForFailedRun, runProbeRoutes } from "./
 import { buildExfiltrationProbeTask, INVESTIGATION_BUDGET_MS } from "./task";
 import { collectDownloads, type CollectedDownload } from "./downloads/collect";
 import { downloadPipelineConfigFromEnvironment, investigateCollectedDownload } from "./downloads/pipeline";
+import type { InvestigationOutcome } from "./downloads/investigate";
 import type { CapturedNetworkRequest, ExfiltrationBackend, ExfiltrationCanaries } from "./types";
 import { WebsiteUnreachableError } from "../website_archive";
 import { errorText } from "../error_text";
@@ -33,9 +34,15 @@ export type ExfiltrationProbeInput = {
 	reportId: bigint;
 	submissionId: bigint;
 	pageUrl: string;
-	/** The classification that enqueued the probe; it decides whether a download may ever be uploaded. */
-	phishingBasis: "credential_theft" | "payment_fraud" | "malware_delivery";
 	reporter: ReporterMetadata;
+};
+
+/** What one completed probe found: the form's data drops and the files its download controls deliver. */
+export type ExfiltrationProbeResult = {
+	requests: number;
+	backends: ExfiltrationBackend[];
+	downloads: Array<{ url: string; remoteName?: string; outcome?: InvestigationOutcome; error?: string }>;
+	egress: FabricEgress;
 };
 
 type Recorder = { start(browser: Browser): Promise<void>; stop(): Promise<CapturedNetworkRequest[]> };
@@ -81,7 +88,7 @@ export type ExfiltrationProbeDependencies = {
 	/** Wall-clock budget for every route together; defaults to the approved eight minutes. */
 	investigationBudgetMs: number;
 	/** Fetch and hash one collected download, then keep it. Failures here never fail the probe. */
-	investigateDownload(file: CollectedDownload, phishingBasis: ExfiltrationProbeInput["phishingBasis"]): Promise<unknown>;
+	investigateDownload(file: CollectedDownload): Promise<InvestigationOutcome>;
 };
 
 function defaultDependencies(): ExfiltrationProbeDependencies {
@@ -104,7 +111,7 @@ function defaultDependencies(): ExfiltrationProbeDependencies {
 			metadata,
 		}),
 		investigationBudgetMs: INVESTIGATION_BUDGET_MS,
-		investigateDownload: (file, phishingBasis) => investigateCollectedDownload(file, downloadPipelineConfigFromEnvironment(), { phishingBasis }),
+		investigateDownload: (file) => investigateCollectedDownload(file, downloadPipelineConfigFromEnvironment()),
 		heartbeat: heartbeatFabricBrowserSession,
 		sleep: (ms, signal) => new Promise<void>((resolve, reject) => {
 			let abort: (() => void) | undefined;
@@ -189,7 +196,7 @@ export async function runExfiltrationProbe(
 	adapter: Pick<AbuseSkyvernAdapter, "createTask" | "getRun" | "cancelRun">,
 	signal?: AbortSignal,
 	dependencies: Partial<ExfiltrationProbeDependencies> = {},
-): Promise<{ requests: number; backends: number; egress: FabricEgress }> {
+): Promise<ExfiltrationProbeResult> {
 	const deps = { ...defaultDependencies(), ...dependencies };
 	const canaries = deps.createCanaries();
 	const observedAt = new Date();
@@ -247,15 +254,19 @@ export async function runExfiltrationProbe(
 			await deps.report({ ...input, sourceReportId: input.reportId, backend, observedAt });
 		}
 		// Downloads come after the capture and reports are durable. A failed download is
-		// recorded as skipped; it must never discard the network evidence above.
+		// recorded with its reason; it must never discard the network evidence above.
+		const downloads: ExfiltrationProbeResult["downloads"] = [];
 		for (const file of value.downloads) {
+			const base = { url: file.url.origin, ...(file.remoteName ? { remoteName: file.remoteName } : {}) };
 			try {
-				await deps.investigateDownload(file, input.phishingBasis);
+				downloads.push({ ...base, outcome: await deps.investigateDownload(file) });
 			} catch (error) {
-				console.warn(`Download investigation skipped for ${file.url.origin}: ${redactExternalError(error)}`);
+				const reason = redactExternalError(error);
+				console.warn(`Download investigation skipped for ${file.url.origin}: ${reason}`);
+				downloads.push({ ...base, error: reason });
 			}
 		}
-		return { requests: requests.length, backends: enriched.length, egress };
+		return { requests: requests.length, backends: enriched, downloads, egress };
 	} finally {
 		await value.binding.release().catch(() => undefined);
 	}

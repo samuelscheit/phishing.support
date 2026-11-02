@@ -24,7 +24,7 @@ function snapshot(overrides: Partial<OriginHostSnapshot> = {}): OriginHostSnapsh
 		networks: [{ asn: 64500, holder: "EXAMPLE", prefixes: ["8.8.8.0/24"], discoverySources: ["registry_name_search"] }],
 		scan: { addressesScanned: 256, totalAddresses: 256, truncated: false, selectedPrefixes: [{ asn: 64500, prefix: "8.8.8.0/24" }], completedAt: "2026-10-30T22:49:00.000Z" },
 		servers: [],
-		kit: { phishingBasis: "credential_theft", collects: ["sign-in email or phone", "password"], exfiltrationProbed: true, exfiltrationTargets: [] },
+		kit: { abuse: "credential_theft", collects: ["sign-in email or phone", "password"], exfiltrationProbed: true, exfiltrationTargets: [] },
 		fingerprints: [],
 		siblingCandidateCount: 0,
 		siblings: [],
@@ -97,13 +97,14 @@ describe("origin-host email draft", () => {
 		expect(resend?.body).toBe(body);
 	});
 
-	test("describes malware delivery without credential claims", () => {
+	test("describes malware distribution without credential claims", () => {
 		const { subject, body } = draft(snapshot({
 			servers: [{ ip: "8.8.8.1", certificate: certificate(["login.example.com"], "AA") }],
-			kit: { phishingBasis: "malware_delivery", evidenceQuote: "Update your browser", collects: [], exfiltrationProbed: false, exfiltrationTargets: [] },
+			kit: { abuse: "malware", evidenceQuote: "Update your browser", collects: [], exfiltrationProbed: false, exfiltrationTargets: [] },
 		}));
-		expect(subject).toContain("malware delivery kit on 8.8.8.1");
-		expect(body).toContain("runs a phishing operation that delivers malware to visitors");
+		expect(subject).toContain("Malware abuse: malware distribution site on 8.8.8.1");
+		expect(body).toContain("runs a malware distribution operation that delivers malware to visitors");
+		expect(body).not.toContain("phishing operation");
 		expect(body).toContain('What the kit does: it pushes visitors to download, install or run something. The page reads: "Update your browser"');
 		expect(body).not.toContain("victims who need to be warned");
 	});

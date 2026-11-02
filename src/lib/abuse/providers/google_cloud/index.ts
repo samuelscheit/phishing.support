@@ -13,6 +13,7 @@ export const googleCloudProvider: ProviderSubmissionProvider = {
 		target: context.target,
 		observedUrls: context.observedUrls,
 		description: context.description,
+		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		capturedAt: new Date(),
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),

@@ -55,10 +55,11 @@ async function openReportingPage(): Promise<GoogleCloudFormSession> {
 	}
 }
 
-function reportInputs(report: { description: string; createdAt: Date; submissionId: bigint | null; legalBrandUrl: string | null }) {
+function reportInputs(report: { description: string; allegationCategory: string; createdAt: Date; submissionId: bigint | null; legalBrandUrl: string | null }) {
 	const caseUrl = abuseEmailCaseUrl(report.submissionId);
 	return {
 		description: report.description,
+		allegationCategory: report.allegationCategory,
 		capturedAt: report.createdAt,
 		...(caseUrl ? { caseUrl } : {}),
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),

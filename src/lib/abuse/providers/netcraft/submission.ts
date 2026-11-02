@@ -66,6 +66,7 @@ export async function prepareNetcraftSubmission(context: ProviderSubmissionConte
 		target: target.normalizedTarget,
 		observedUrls: target.observedUrls,
 		description: report.description,
+		allegationCategory: report.allegationCategory,
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
 		reporterEmail: serviceIdentity.mailbox,
 	});
@@ -97,6 +98,7 @@ export async function submitNetcraftSubmission(
 		target: target.normalizedTarget,
 		observedUrls: payload.target.observedUrls,
 		description: report.description,
+		allegationCategory: report.allegationCategory,
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
 		reporterEmail: payload.report.reporterEmail,
 	});

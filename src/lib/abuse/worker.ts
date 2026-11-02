@@ -21,9 +21,10 @@ import { reconcileGenericSkyvern } from "./worker/reconcile";
 import { resolveReport, verifyProviderRoute } from "./worker/resolution";
 import { errorText, envInt, idFrom, parseJobBigInt, randomOwner, type WorkerServices } from "./worker/shared";
 import type { JobClaimFilter } from "./persistence/jobs";
-import { runExfiltrationProbe, type ExfiltrationProbeInput } from "../exfiltration/probe";
 import { INVESTIGATION_BUDGET_MS } from "../exfiltration/task";
-import { setExfiltrationProbeStatus } from "../exfiltration/status";
+import { readInvestigationJobPayload } from "../investigation/payload";
+import { releaseAfterFailedInvestigation, runReportInvestigation } from "../investigation/run";
+import { setInvestigationStatus } from "../investigation/status";
 import { startSamplePurgeSchedule } from "../exfiltration/downloads/sample_purge_job";
 
 const DEFAULT_LEASE_MS = 90_000;
@@ -34,8 +35,12 @@ const MAX_LANE_CONCURRENCY = 16;
 const DEFAULT_CONTROL_JOB_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_EXTERNAL_JOB_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_SWEEP_JOB_TIMEOUT_MS = 20 * 60_000;
-/** A probe's route budget plus the work after its routes: backend lookups, the capture, reports, and downloads. */
-const PROBE_JOB_TIMEOUT_MS = INVESTIGATION_BUDGET_MS + 5 * 60_000;
+/**
+ * An investigation's probe route budget plus the work around it: payload
+ * downloads with their awaited public analyses, backend lookups, the capture,
+ * reports, and probe downloads.
+ */
+const INVESTIGATION_JOB_TIMEOUT_MS = INVESTIGATION_BUDGET_MS + 12 * 60_000;
 const MAX_JOB_TIMEOUT_MS = 60 * 60_000;
 const MAX_RETRIES = 8;
 
@@ -61,7 +66,7 @@ const EXTERNAL_JOB_TYPES = [
 	"run_portal",
 	"submit_provider",
 	"deliver_provider_verification_code",
-	"probe_exfiltration",
+	"investigate_report",
 	"discover_kit_siblings",
 	"analyze_kit_sibling",
 ] as const satisfies readonly AbuseJobType[];
@@ -131,8 +136,8 @@ export type AbuseWorkerOptions = {
 	fabricSkyvernTaskFactory?: FabricSkyvernTaskFactory;
 	/** Test hook; production uses the resolver implementation above. */
 	resolveTarget?: typeof resolveAbuseTarget;
-	/** Deterministic test hook for the submission-level browser probe. */
-	exfiltrationProbe?: typeof runExfiltrationProbe;
+	/** Deterministic test hook for the pre-report evidence investigation. */
+	investigateReport?: typeof runReportInvestigation;
 };
 
 /**
@@ -156,7 +161,7 @@ export class AbuseWorker {
 	private stopSamplePurge: (() => void) | undefined;
 	private readonly activeControllers = new Set<AbortController>();
 	private readonly processJobOverride: AbuseWorkerOptions["processJob"];
-	private readonly exfiltrationProbe: typeof runExfiltrationProbe;
+	private readonly investigateReport: typeof runReportInvestigation;
 
 	constructor(options: AbuseWorkerOptions = {}) {
 		this.owner = options.owner ?? randomOwner();
@@ -185,7 +190,7 @@ export class AbuseWorker {
 		this.adapter = options.adapter;
 		this.processJobOverride = options.processJob;
 		this.resolveTarget = options.resolveTarget ?? resolveAbuseTarget;
-		this.exfiltrationProbe = options.exfiltrationProbe ?? runExfiltrationProbe;
+		this.investigateReport = options.investigateReport ?? runReportInvestigation;
 		this.services = {
 			owner: this.owner,
 			getAdapter: () => this.getAdapter(),
@@ -280,8 +285,8 @@ export class AbuseWorker {
 				? this.controlJobTimeoutMs
 				: SWEEP_JOB_TYPES.includes(job.jobType as (typeof SWEEP_JOB_TYPES)[number])
 					? this.sweepJobTimeoutMs
-					: job.jobType === "probe_exfiltration"
-						? Math.max(this.externalJobTimeoutMs, PROBE_JOB_TIMEOUT_MS)
+					: job.jobType === "investigate_report"
+						? Math.max(this.externalJobTimeoutMs, INVESTIGATION_JOB_TIMEOUT_MS)
 						: this.externalJobTimeoutMs;
 			await this.runJobWithDeadline(job, controller, timeoutMs ?? defaultTimeout);
 			await AbuseRepository.completeJob(job.id, this.owner);
@@ -398,13 +403,13 @@ export class AbuseWorker {
 	}
 
 	private async failRetryExhaustedJob(job: AbuseJob, error: string): Promise<void> {
-		if (job.jobType === "probe_exfiltration") {
-			// Discovery is supplementary. Its failure must never turn the already
-			// confirmed phishing report into a false reporting failure.
+		if (job.jobType === "investigate_report") {
+			// Evidence gathering is supplementary. Its failure must never keep the
+			// confirmed site from being reported: the report goes out without it.
 			await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
 			if (job.reportId) {
 				const report = await AbuseRepository.getReport(job.reportId);
-				if (report?.submissionId) await setExfiltrationProbeStatus(report.submissionId, { status: "failed", lastError: error, updatedAt: new Date().toISOString() });
+				await releaseAfterFailedInvestigation(job.reportId, report?.submissionId ?? undefined, error);
 			}
 			return;
 		}
@@ -504,8 +509,8 @@ export class AbuseWorker {
 			case "deliver_provider_verification_code":
 				await this.deliverProviderVerificationCode(job, signal);
 				return;
-			case "probe_exfiltration":
-				await this.runExfiltrationJob(job, signal);
+			case "investigate_report":
+				await this.runInvestigationJob(job, signal);
 				return;
 			case "report_origin_host":
 				await reportOriginHostJob(job, idFrom(job.reportId, "reportId"), signal);
@@ -521,39 +526,26 @@ export class AbuseWorker {
 		}
 	}
 
-	private async runExfiltrationJob(job: AbuseJob, signal?: AbortSignal): Promise<void> {
+	private async runInvestigationJob(job: AbuseJob, signal?: AbortSignal): Promise<void> {
 		const reportId = idFrom(job.reportId, "reportId");
 		const report = await AbuseRepository.getReport(reportId);
 		if (!report?.submissionId) return;
-		const pageUrl = typeof job.payload?.pageUrl === "string" ? job.payload.pageUrl : undefined;
-		if (!pageUrl) throw new Error("Exfiltration probe job is missing payload.pageUrl.");
-		const phishingBasis = job.payload?.phishingBasis;
-		if (phishingBasis !== "credential_theft" && phishingBasis !== "payment_fraud" && phishingBasis !== "malware_delivery") {
-			throw new Error("Exfiltration probe job is missing a valid payload.phishingBasis.");
-		}
-		const input: ExfiltrationProbeInput = {
-			reportId,
-			submissionId: report.submissionId,
-			pageUrl,
-			phishingBasis,
-			reporter: {
-				reporterIp: report.requesterIp ?? undefined,
-				reporterCountry: report.requesterCountry ?? undefined,
-				reporterHeaders: report.requesterHeaders ?? undefined,
-			},
-		};
-		await setExfiltrationProbeStatus(report.submissionId, { status: "running", updatedAt: new Date().toISOString() });
+		const payload = readInvestigationJobPayload(job.payload);
 		try {
-			const result = await this.exfiltrationProbe(input, this.getAdapter(), signal);
-			await setExfiltrationProbeStatus(report.submissionId, { status: "completed", backendCount: result.backends, updatedAt: new Date().toISOString() });
+			await this.investigateReport({
+				reportId,
+				payload,
+				reporter: {
+					reporterIp: report.requesterIp ?? undefined,
+					reporterCountry: report.requesterCountry ?? undefined,
+					reporterHeaders: report.requesterHeaders ?? undefined,
+				},
+				...(signal ? { signal } : {}),
+			}, () => this.getAdapter());
 		} catch (error) {
 			// The worker decides finality: a retryable failure is queued again, and a
-			// terminal one is marked failed on its single terminal path.
-			await setExfiltrationProbeStatus(report.submissionId, {
-				status: "queued",
-				lastError: errorText(error),
-				updatedAt: new Date().toISOString(),
-			});
+			// terminal one releases the report on its single terminal path.
+			await setInvestigationStatus(report.submissionId, { status: "queued", lastError: errorText(error), updatedAt: new Date().toISOString() });
 			throw error;
 		}
 	}

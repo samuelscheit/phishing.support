@@ -18,7 +18,7 @@ describe("download investigation with the real protected archive", () => {
 	test("a file with no verdict is kept in an AES archive that opens to the exact sample", async () => {
 		const bytes = Buffer.from("MZ-synthetic-end-to-end-sample-".repeat(64));
 		const outcome = await investigateDownload(
-			{ bytes, remoteName: "Teams-x64.zip", phishingBasis: "malware_delivery", origin: "other", signature: "not_signed" },
+			{ bytes, remoteName: "Teams-x64.zip", signature: "not_signed" },
 			{
 				storeRoot: root,
 				now: () => new Date("2026-11-02T12:00:00.000Z"),
@@ -46,7 +46,7 @@ describe("download investigation with the real protected archive", () => {
 	test("a known verdict is recorded and the sample is still kept, with no upload", async () => {
 		const bytes = Buffer.from("known-verdict-end-to-end-sample");
 		const outcome = await investigateDownload(
-			{ bytes, remoteName: "x.exe", phishingBasis: "malware_delivery", origin: "other", signature: "not_signed" },
+			{ bytes, remoteName: "x.exe", signature: "not_signed" },
 			{
 				storeRoot: root,
 				now: () => new Date("2026-11-02T12:00:00.000Z"),

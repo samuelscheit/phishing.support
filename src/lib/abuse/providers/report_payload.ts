@@ -21,6 +21,61 @@ export function normalizeObservedUrlForTarget(value: string, target: string): st
 	return observedUrl && hostBelongsToTarget(new URL(observedUrl).hostname, target) ? observedUrl : undefined;
 }
 
+/**
+ * Sentences that address the reader or a model instead of describing the page.
+ * The stored analysis may quote attacker-controlled page text, so imperative or
+ * prompt-injection-shaped sentences are dropped while factual sentences (brand
+ * fields, payment methods, QR codes, download names) are kept exactly as written.
+ */
+const INSTRUCTION_SENTENCE = [
+	/\b(?:ignore|disregard|forget|override)\b[^.]{0,60}\b(?:instruction|prompt|rule|previous|prior|above|guideline)s?\b/i,
+	/\b(?:system|developer)\s+(?:prompt|message|instruction)s?\b/i,
+	/\b(?:as|you\s+are)\s+(?:now\s+)?an?\s+(?:ai|assistant|language\s+model)\b/i,
+	/^(?:please\s+|now\s+|also\s+)?(?:forward|send|email|reveal|disclose|exfiltrate|leak|post|visit|click|open|mark|classify|report|submit|do\s+not|don't|never|always|instead)\b/i,
+	/\b(?:mark|classify|treat|label)\s+(?:this|it|the\s+(?:page|site|url))\s+as\s+(?:safe|legitimate|benign|false\s+positive)\b/i,
+];
+
+export function evidenceSentences(description: string): string[] {
+	const seen = new Set<string>();
+	const sentences: string[] = [];
+	const lines = description
+		.normalize("NFKC")
+		.replace(/[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F]/g, " ")
+		.split(/\r?\n/);
+	for (const line of lines) {
+		const text = compactProviderText(line.replace(/^\s*(?:#{1,6}|[-*+>]|\d+[.)])\s+/, "").replace(/\*{1,3}|`/g, ""));
+		if (!text) continue;
+		for (const sentence of text.split(/(?<=[.!?])\s+/)) {
+			// Each Markdown line is its own statement; keep identifiers such as
+			// Setup_Tool.exe literal and terminate lines so they do not run together.
+			const candidate = sentence.trim().replace(/(?<![.!?])$/, ".");
+			if (!candidate || INSTRUCTION_SENTENCE.some((pattern) => pattern.test(candidate))) continue;
+			const key = candidate.toLowerCase();
+			if (seen.has(key)) continue;
+			seen.add(key);
+			sentences.push(candidate);
+		}
+	}
+	return sentences;
+}
+
+export function boundedEvidence(description: string, maximum: number): string | undefined {
+	if (maximum <= 0) return undefined;
+	let result = "";
+	for (const sentence of evidenceSentences(description)) {
+		const remaining = maximum - result.length - (result ? 1 : 0);
+		if (remaining <= 0) break;
+		if (sentence.length <= remaining) {
+			result = result ? `${result} ${sentence}` : sentence;
+			continue;
+		}
+		const partial = truncateProviderText(sentence, remaining);
+		if (partial.length >= 20) result = result ? `${result} ${partial}` : partial;
+		break;
+	}
+	return result || undefined;
+}
+
 function conciseProviderUrl(value: string): string {
 	if (value.length <= 320) return value;
 	return new URL(value).origin + "/";
@@ -46,6 +101,8 @@ export type ProviderReportProfile =
 
 type ProviderReportNarrativeInput = {
 	provider?: ProviderReportProfile;
+	/** The report's allegation; a malware report never reads as a phishing report. */
+	allegationCategory?: string;
 	target?: string;
 	observedUrls?: readonly string[];
 	description: string;
@@ -124,7 +181,12 @@ function joinIndicators(indicators: readonly string[]): string {
 	return `${readable.slice(0, -1).join(", ")}, and ${readable.at(-1)}`;
 }
 
-function profileCopy(provider: ProviderReportProfile, target: string, observedUrlCount: number): { lead: string; action: string; urlContext: string } {
+/** What a provider reads the report as: "phishing" or "malware distribution". */
+export function allegationLabel(allegationCategory: string | undefined): string {
+	return allegationCategory === "malware" ? "malware distribution" : "phishing";
+}
+
+function profileCopy(provider: ProviderReportProfile, target: string, observedUrlCount: number, allegation: string): { lead: string; action: string; urlContext: string } {
 	const urlContext = observedUrlCount === 1
 		? "The submitted form identifies one observed URL."
 		: observedUrlCount > 1
@@ -133,49 +195,49 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 		switch (provider) {
 		case "cloudflare":
 			return {
-				lead: `A suspected phishing URL using Cloudflare infrastructure is being reported for ${target}.`,
+				lead: `A suspected ${allegation} URL using Cloudflare infrastructure is being reported for ${target}.`,
 				action: "Please investigate the hosted content and take any appropriate action under Cloudflare's abuse policy.",
 				urlContext,
 			};
 		case "google_safe_browsing":
 			return {
-				lead: `A suspected phishing URL on ${target} is being submitted to Google Safe Browsing.`,
+				lead: `A suspected ${allegation} URL on ${target} is being submitted to Google Safe Browsing.`,
 				action: "Please evaluate the submitted URL for inclusion in Safe Browsing protections.",
 				urlContext,
 			};
 		case "google_cloud":
 			return {
-				lead: `A phishing page hosted on Google infrastructure at ${target} is being reported.`,
+				lead: `A ${allegation} page hosted on Google infrastructure at ${target} is being reported.`,
 				action: "Please investigate the content and take action under the Google Cloud Acceptable Use Policy.",
 				urlContext,
 			};
 		case "netcraft":
 			return {
-				lead: `A suspected phishing URL report is being submitted to Netcraft for ${target}.`,
+				lead: `A suspected ${allegation} URL report is being submitted to Netcraft for ${target}.`,
 				action: "Please investigate the URL and associated infrastructure.",
 				urlContext,
 			};
 		case "tencent":
 			return {
-				lead: `A suspected phishing domain report is being submitted to Tencent Cloud for ${target}.`,
+				lead: `A suspected ${allegation} domain report is being submitted to Tencent Cloud for ${target}.`,
 				action: "Please investigate and mitigate the reported domain under your abuse policy.",
 				urlContext,
 			};
 		case "namesilo":
 			return {
-				lead: `A suspected phishing domain report is being submitted to NameSilo for ${target}.`,
+				lead: `A suspected ${allegation} domain report is being submitted to NameSilo for ${target}.`,
 				action: "Please investigate the captured evidence and apply the appropriate registrar abuse action.",
 				urlContext,
 			};
 		case "gname":
 			return {
-				lead: `A suspected phishing or fraud report is being prepared for GNAME regarding ${target}.`,
+				lead: `A suspected ${allegation === "phishing" ? "phishing or fraud" : allegation} report is being prepared for GNAME regarding ${target}.`,
 				action: "Please review the captured evidence and apply the appropriate registrar abuse action.",
 				urlContext,
 			};
 		default:
 			return {
-				lead: `Suspected phishing activity involving ${target} is being reported.`,
+				lead: `Suspected ${allegation} activity involving ${target} is being reported.`,
 				action: "Please investigate the reported activity.",
 				urlContext,
 			};
@@ -233,7 +295,14 @@ export function buildProviderReportNarrative(params: ProviderReportNarrativeInpu
 
 	const provider = params.provider ?? "generic";
 	const target = safeNarrativeTarget(params.target, params.maximumLength <= 500 ? 240 : 255);
-	const copy = profileCopy(provider, target, params.observedUrls?.length ?? 0);
+	const copy = profileCopy(provider, target, params.observedUrls?.length ?? 0, allegationLabel(params.allegationCategory));
+	if (params.allegationCategory === "malware") {
+		// A malware report's proof is its facts (the command, payload host, hash,
+		// and verdict), not phishing keywords; it names no impersonated brand.
+		const room = params.maximumLength - copy.lead.length - copy.action.length - 2;
+		const facts = boundedEvidence(params.description, room) ?? "";
+		return fitNarrative([copy.lead, copy.urlContext, facts, "", copy.action], params.maximumLength);
+	}
 	const brand = extractedBrandName(extractionDescription);
 	// Small provider fields should never end halfway through an allegation.
 	// Keep the two strongest evidence categories rather than truncating a

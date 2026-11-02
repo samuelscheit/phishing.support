@@ -60,7 +60,7 @@ describe("Tencent Cloud abuse submission", () => {
 					observedUrl: "https://login.phishing.example/path",
 					registrableDomain: "phishing.example",
 				},
-				report: { explanation: "Credential theft impersonating the bank.", legalBrandUrl: "https://bank.example/" },
+				report: { category: "Phishing", explanation: "Credential theft impersonating the bank.", legalBrandUrl: "https://bank.example/" },
 				screenshot,
 			},
 			websiteScreenshot: screenshotBytes,

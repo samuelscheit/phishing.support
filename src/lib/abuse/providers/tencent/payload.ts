@@ -33,17 +33,27 @@ export type TencentSubmissionPayload = {
 		registrableDomain: string;
 	};
 	report: {
+		/** The form's category option, pinned with the narrative. */
+		category: TencentAbuseCategory;
 		explanation: string;
 		legalBrandUrl?: string;
 	};
 	screenshot: TencentScreenshotReference;
 };
 
+/** The form's category options this service reports under; the form also offers Botnets, Pharming, Spam, Others. */
+export type TencentAbuseCategory = "Phishing" | "Malware";
+
+export function tencentCategory(allegationCategory: string | undefined): TencentAbuseCategory {
+	return allegationCategory === "malware" ? "Malware" : "Phishing";
+}
+
 /** Keep Tencent's small description field provider-specific and deterministic. */
 export function makeTencentExplanation(params: {
 	target?: string;
 	observedUrl?: string;
 	description: string;
+	allegationCategory?: string;
 	legalBrandUrl?: string;
 }): string | undefined {
 	return buildProviderReportNarrative({
@@ -51,6 +61,7 @@ export function makeTencentExplanation(params: {
 		target: params.target,
 		observedUrls: params.observedUrl ? [params.observedUrl] : [],
 		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
 		maximumLength: maximumExplanationLength,
 	});
@@ -108,6 +119,7 @@ export function buildTencentSubmissionPayload(params: {
 	target: string;
 	observedUrl: string;
 	description: string;
+	allegationCategory?: string;
 	legalBrandUrl?: string;
 	screenshot: TencentScreenshotReference;
 }): TencentSubmissionPayload | undefined {
@@ -117,6 +129,7 @@ export function buildTencentSubmissionPayload(params: {
 		target: normalizedTarget,
 		observedUrl: observed?.observedUrl,
 		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
 	});
 	if (!normalizedTarget || !observed || !explanation || !validTencentScreenshotReference(params.screenshot)) return undefined;
@@ -132,7 +145,7 @@ export function buildTencentSubmissionPayload(params: {
 			observedUrl: observed.observedUrl,
 			registrableDomain: observed.registrableDomain,
 		},
-		report: { explanation, ...(legalBrandUrl ? { legalBrandUrl } : {}) },
+		report: { category: tencentCategory(params.allegationCategory), explanation, ...(legalBrandUrl ? { legalBrandUrl } : {}) },
 		screenshot: params.screenshot,
 	};
 }
@@ -150,7 +163,8 @@ export function storedTencentSubmissionPayload(value: unknown): TencentSubmissio
 	if (!payload || payload.adapter !== "tencent_cloud_dns_abuse_v1" || payload.providerNarrativeVersion !== 1
 		|| !definition || definition.version !== TENCENT_PROVIDER.version || definition.contentHash !== TENCENT_PROVIDER.contentHash
 		|| !target || typeof target.normalizedTarget !== "string" || typeof target.observedUrl !== "string" || typeof target.registrableDomain !== "string"
-		|| !report || typeof report.explanation !== "string" || report.explanation.trim().length === 0
+		|| !report || (report.category !== "Phishing" && report.category !== "Malware")
+		|| typeof report.explanation !== "string" || report.explanation.trim().length === 0
 		|| report.explanation.length > maximumExplanationLength
 		|| (report.legalBrandUrl !== undefined && !validLegalBrandUrl(report.legalBrandUrl))
 		|| !validTencentScreenshotReference(payload.screenshot)) {
@@ -166,6 +180,7 @@ export function storedTencentSubmissionPayload(value: unknown): TencentSubmissio
 		definition: { version: TENCENT_PROVIDER.version, contentHash: TENCENT_PROVIDER.contentHash },
 		target: { normalizedTarget, observedUrl: observed.observedUrl, registrableDomain: observed.registrableDomain },
 		report: {
+			category: report.category,
 			explanation: report.explanation,
 			...(report.legalBrandUrl === undefined ? {} : { legalBrandUrl: report.legalBrandUrl as string }),
 		},

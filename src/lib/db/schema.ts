@@ -44,10 +44,15 @@ export type WebsiteSubmissionData = {
 	kitResources?: WebsiteKitResource[];
 	/** Set when the browser service (not the site) failed; the analysis is re-queued automatically. */
 	autoRetry?: { attempts: number; nextAttemptAt: string; reason: string };
-	/** Durable supplementary probe state; it never changes the phishing verdict. */
-	backendProbe?: {
+	/** Evidence collected after the verdict and before the report reaches any provider. */
+	investigation?: {
 		status: "queued" | "running" | "completed" | "failed";
+		/** Data drops (Telegram bots, Discord webhooks, collector hosts) the form probe found. */
 		backendCount?: number;
+		/** Payloads fetched from the commands the page tells visitors to run. */
+		payloads?: Array<{ url: string; sha256?: string; sizeBytes?: number; verdict?: string; error?: string }>;
+		/** Why the form probe could not run, when it failed; the report is still sent. */
+		probeError?: string;
 		lastError?: string;
 		updatedAt: string;
 	};

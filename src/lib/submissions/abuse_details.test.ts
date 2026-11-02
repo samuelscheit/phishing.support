@@ -5,7 +5,7 @@ import { SubmissionsEntity } from "../db/entities";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { sendAbuseEmailRoute } from "../abuse/mail";
 import { AbuseRepository } from "../abuse/repository";
-import { reportConfirmedEmailPhishing, reportConfirmedWebsitePhishing } from "../abuse/submission_reports";
+import { reportConfirmedEmailPhishing, reportConfirmedWebsiteAbuse } from "../abuse/submission_reports";
 import { getSubmissionDetails } from "./details";
 import { getDb } from "../db";
 import { abuseJobs } from "../abuse/schema";
@@ -38,12 +38,12 @@ async function createWebsiteReport(submissionId: bigint) {
 		dedupeKey: `website-report-details-test:${submissionId.toString()}`,
 		status: "reported",
 	});
-	const report = await reportConfirmedWebsitePhishing({
+	const report = await reportConfirmedWebsiteAbuse({
 		submissionId,
 		urls: ["https://shop.example.com/"],
 		analysisText: "The captured page impersonates a trusted service and collects credentials.",
 		reporter: {},
-		phishingBasis: "credential_theft",
+		finding: { finding: "phishing", phishingBasis: "credential_theft" },
 	});
 	const [target] = await AbuseRepository.listTargets(report.reportId);
 	if (!target) throw new Error("The test target was not persisted.");
@@ -51,23 +51,28 @@ async function createWebsiteReport(submissionId: bigint) {
 }
 
 describe("submission report read model", () => {
-	test("queues probing only for credential or payment collection", async () => {
+	test("holds every confirmed site's report for its investigation, malware included", async () => {
 		const credential = await createWebsiteReport(351387190816673788n);
 		const malwareSubmissionId = 351387190816673789n;
 		await SubmissionsEntity.create({ id: malwareSubmissionId, kind: "website", data: { kind: "website", website: { url: "https://malware.example.com/" } }, dedupeKey: "malware-only" });
-		await reportConfirmedWebsitePhishing({
+		await reportConfirmedWebsiteAbuse({
 			submissionId: malwareSubmissionId,
 			urls: ["https://malware.example.com/"],
 			analysisText: "The page pushes a malicious executable.",
 			reporter: {},
-			phishingBasis: "malware_delivery",
+			finding: { finding: "malware" },
 		});
-		const jobs = (await getDb()).select().from(abuseJobs).all().filter((job) => job.jobType === "probe_exfiltration");
-		expect(jobs).toHaveLength(1);
-		expect(jobs[0]).toMatchObject({
-			reportId: credential.report.reportId,
-			payload: { submissionId: "351387190816673788", pageUrl: "https://shop.example.com/", phishingBasis: "credential_theft" },
+		const jobs = (await getDb()).select().from(abuseJobs).all();
+		expect(jobs.filter((job) => job.jobType === "resolve_report")).toEqual([]);
+		const investigations = jobs.filter((job) => job.jobType === "investigate_report");
+		expect(investigations).toHaveLength(2);
+		expect(investigations.find((job) => job.reportId === credential.report.reportId)).toMatchObject({
+			payload: { submissionId: "351387190816673788", pageUrl: "https://shop.example.com/", finding: { finding: "phishing", phishingBasis: "credential_theft" }, pasteCommands: [] },
 		});
+		expect((await AbuseRepository.getReport(credential.report.reportId))?.status).toBe("investigating");
+		const malwareReport = await AbuseRepository.getReportForSubmission(malwareSubmissionId);
+		expect(malwareReport).toMatchObject({ status: "investigating", allegationCategory: "malware" });
+		expect(investigations.find((job) => job.reportId === malwareReport?.id)?.payload).toMatchObject({ finding: { finding: "malware" } });
 	});
 
 	test("shows independently routed discovered backends on the original submission", async () => {

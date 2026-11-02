@@ -27,7 +27,6 @@ type SubmissionDetail = ApiSubmissionDetail;
 const PHISHING_BASIS_LABELS: Record<WebsitePhishingBasis, string> = {
 	credential_theft: "credential theft",
 	payment_fraud: "payment fraud",
-	malware_delivery: "malware delivery",
 };
 
 function formatArtifactSize(value: number | bigint | null | undefined) {
@@ -74,7 +73,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	);
 	const runsToShow = submission ? selectDisplayAnalysisRuns(submission.analysisRuns) : [];
 	const reports = submission?.reports ?? [];
-	const backendProbe = submission?.data.kind === "website" ? submission.data.website.backendProbe : undefined;
+	const investigation = submission?.data.kind === "website" ? submission.data.website.investigation : undefined;
 	// A report accepted before route resolution still counts, so the badge
 	// never says zero while the tab shows its queued state.
 	const reportCount = reports.reduce((count, report) => count + Math.max(1, report.routes.length), 0);
@@ -390,7 +389,8 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 											? "Prank / troll — not phishing"
 											: finding === "insufficient_evidence" ? "Insufficient evidence"
 												: finding === "phishing" ? (assessment?.phishingBasis ? `Phishing — ${PHISHING_BASIS_LABELS[assessment.phishingBasis]}` : "Phishing")
-													: finding === "benign" ? "Not phishing" : undefined;
+													: finding === "malware" ? "Malware distribution"
+														: finding === "benign" ? "Not phishing or malware" : undefined;
 										return (
 											<li key={`${hop.index}:${hop.url}`} className="rounded border bg-background p-2">
 												<div className="flex items-start justify-between gap-2">
@@ -408,15 +408,15 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 																Analyzed in its own case →
 															</Link>
 														) : null}
-														{findingLabel ? <div className={cn("text-xs font-medium", finding === "phishing" ? "text-destructive" : "text-muted-foreground")}>{findingLabel}</div> : null}
+														{findingLabel ? <div className={cn("text-xs font-medium", finding === "phishing" || finding === "malware" ? "text-destructive" : "text-muted-foreground")}>{findingLabel}</div> : null}
 														{assessment?.evidenceQuote ? <blockquote className="border-l-2 pl-2 text-xs text-muted-foreground">“{assessment.evidenceQuote}”</blockquote> : null}
 														{assessment?.collectionFields?.length ? (
 															<div className="text-xs text-muted-foreground">
 																Collects data through: {assessment.collectionFields.map((field) => `“${describeDataEntryField(field)}”`).join(", ")}
 															</div>
 														) : null}
-														{assessment?.rejectedPhishingClaim ? (
-															<div className="text-xs text-muted-foreground">Classifier&apos;s phishing claim not corroborated: {assessment.rejectedPhishingClaim}</div>
+														{assessment?.rejectedClaim ? (
+															<div className="text-xs text-muted-foreground">Classifier&apos;s finding not corroborated: {assessment.rejectedClaim}</div>
 														) : null}
 													</div>
 													<ExternalLinkConfirm
@@ -575,20 +575,31 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 					</TabsContent>
 				) : null}
 				<TabsContent value="reports" className="space-y-4 mt-4">
-					{backendProbe ? (
+					{investigation ? (
 						<Card>
-							<CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-								<div>
-									<div className="text-sm font-medium">Credential destination probe</div>
-									<div className="text-xs text-muted-foreground">
-										{backendProbe.status === "completed"
-											? `${backendProbe.backendCount ?? 0} independently reportable backend${backendProbe.backendCount === 1 ? "" : "s"} found.`
-											: backendProbe.status === "failed"
-												? "The controlled form probe could not be completed; the phishing-site report is unaffected."
-												: "A controlled browser is submitting unique synthetic values and recording where they are sent."}
+							<CardContent className="space-y-2 p-4">
+								<div className="flex flex-wrap items-center justify-between gap-3">
+									<div>
+										<div className="text-sm font-medium">Pre-report investigation</div>
+										<div className="text-xs text-muted-foreground">
+											{investigation.status === "completed"
+												? `Evidence collected before any provider was contacted: ${investigation.payloads?.length ?? 0} command payload${investigation.payloads?.length === 1 ? "" : "s"}, ${investigation.backendCount ?? 0} data-drop backend${investigation.backendCount === 1 ? "" : "s"}.`
+												: investigation.status === "failed"
+													? "The investigation could not be completed; the report was sent with the evidence already captured."
+													: "Payloads are downloaded and checked, and a controlled browser submits synthetic values, before the report is sent."}
+										</div>
 									</div>
+									<Badge variant="outline" className="capitalize">{investigation.status}</Badge>
 								</div>
-								<Badge variant="outline" className="capitalize">{backendProbe.status}</Badge>
+								{investigation.payloads?.map((payload) => (
+									<div key={payload.url} className="rounded border bg-muted/20 p-2 text-xs">
+										<div className="break-all font-mono">{payload.url}</div>
+										{payload.sha256 ? <div className="break-all text-muted-foreground">SHA-256 {payload.sha256}{payload.sizeBytes ? ` · ${formatArtifactSize(payload.sizeBytes)}` : ""}</div> : null}
+										{payload.verdict ? <div className="font-medium text-destructive">{payload.verdict}</div> : null}
+										{payload.error ? <div className="text-muted-foreground">Not downloaded: {payload.error}</div> : null}
+									</div>
+								))}
+								{investigation.probeError ? <div className="text-xs text-muted-foreground">Form probe: {investigation.probeError}</div> : null}
 							</CardContent>
 						</Card>
 					) : null}

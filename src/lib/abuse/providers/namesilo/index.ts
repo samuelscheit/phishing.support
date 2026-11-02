@@ -17,6 +17,7 @@ export const nameSiloProvider: ProviderSubmissionProvider = {
 		target: context.target,
 		observedUrl: context.observedUrls[0],
 		description: context.description,
+		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		...(context.legalBrandUrl ? { realWebsite: context.legalBrandUrl } : {}),
 	}),
 	prepareExternalSubmission: prepareNameSiloExternalSubmission,

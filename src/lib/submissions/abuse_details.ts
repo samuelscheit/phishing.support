@@ -57,6 +57,7 @@ export type SubmissionReportArtifact = { id: bigint; name: string; kind: string;
 export type SubmissionReport = {
 	id: bigint;
 	description: string;
+	allegationCategory?: string;
 	status: string;
 	createdAt: Date;
 	updatedAt: Date;
@@ -75,6 +76,7 @@ function providerReportBody(params: {
 	target: string;
 	observedUrls: string[];
 	description: string;
+	allegationCategory?: string;
 	legalBrandUrl?: string | null;
 }): { body: string; bodySource: "prepared" | "preview" | "historical" } {
 	const payload = recordValue(params.providerPayload);
@@ -96,12 +98,14 @@ function providerReportBody(params: {
 		target: params.target,
 		observedUrls: params.observedUrls,
 		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		legalBrandUrl: params.legalBrandUrl,
 	}) ?? buildProviderReportNarrative({
 		provider: "generic",
 		target: params.target,
 		observedUrls: params.observedUrls,
 		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 		maximumLength: 1_000,
 	});
@@ -147,6 +151,7 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 	return {
 		id: report.id,
 		description: report.description,
+		allegationCategory: report.allegationCategory,
 		status: report.status,
 		createdAt: report.createdAt,
 		updatedAt: report.updatedAt,
@@ -163,6 +168,7 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 						target: target?.normalizedTarget ?? "Unknown target",
 						observedUrls: target?.observedUrls ?? [],
 						description: report.description,
+						allegationCategory: report.allegationCategory,
 						legalBrandUrl: report.legalBrandUrl,
 					})
 					: undefined;

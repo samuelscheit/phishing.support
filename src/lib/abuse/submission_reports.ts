@@ -4,10 +4,12 @@ import type { ReporterMetadata } from "../request_metadata";
 import { AbuseRepository, type CreatedAbuseReport } from "./repository";
 import { decodeImageEvidence, normalizeAbuseTarget, normalizeObservedUrl, type DecodedEvidence, type NormalizedAbuseTarget, type ValidatedAbuseReportRequest } from "./contracts";
 import { AbuseInputError, hashStableJson, isPublicIp, sha256Hex } from "./security";
-import { setExfiltrationProbeStatus } from "../exfiltration/status";
+import { setInvestigationStatus } from "../investigation/status";
 import { enqueueKitSiblingDiscovery } from "./origin/kit_job";
-import { errorText } from "../error_text";
 import { websiteSite } from "../website_site";
+import type { ReportableWebsiteFinding } from "../website_types";
+import type { PasteCommand } from "../malware/paste_commands";
+import type { InvestigationJobPayload } from "../investigation/payload";
 
 const MAX_REPORT_DESCRIPTION_LENGTH = 30_000;
 /** Netcraft's documented raw-message limit, which is also the strictest mail-evidence consumer. */
@@ -23,7 +25,7 @@ type SubmissionReportBase = {
 	reporter: ReporterMetadata;
 };
 
-export type ConfirmedWebsitePhishing = SubmissionReportBase & {
+export type ConfirmedWebsiteAbuse = SubmissionReportBase & {
 	/**
 	 * The captured and classified page first, then the URLs on the same host
 	 * that redirected to it. They all belong to one reported site.
@@ -31,8 +33,9 @@ export type ConfirmedWebsitePhishing = SubmissionReportBase & {
 	urls: string[];
 	/** The archive screenshot, when the capture produced a decodable PNG. */
 	screenshotPng?: Buffer;
-	/** Only credential/payment collection is safe and useful to exercise. */
-	phishingBasis: "credential_theft" | "payment_fraud" | "malware_delivery";
+	finding: ReportableWebsiteFinding;
+	/** Commands the page tells visitors to paste; the investigation fetches their payloads. */
+	pasteCommands?: readonly PasteCommand[];
 };
 
 export type ConfirmedEmailPhishing = SubmissionReportBase & {
@@ -68,6 +71,7 @@ function target(ordinal: number, value: string, observedUrls: string[] = []): No
 
 function submissionRequest(params: {
 	submissionId: bigint;
+	allegationCategory?: ValidatedAbuseReportRequest["allegationCategory"];
 	description: string;
 	targets: NormalizedAbuseTarget[];
 	evidence: DecodedEvidence[];
@@ -79,7 +83,7 @@ function submissionRequest(params: {
 	return {
 		originalRequest: { submissionId: params.submissionId.toString(), ...params.source },
 		targets: params.targets,
-		allegationCategory: "phishing",
+		allegationCategory: params.allegationCategory ?? "phishing",
 		description: params.description,
 		observedUrls,
 		evidence: params.evidence,
@@ -96,11 +100,12 @@ function submissionRequest(params: {
  * Build the website report: the captured site's host, with its URLs as
  * observed evidence. On a shared host the URLs name the one tenant reported.
  */
-export async function buildWebsitePhishingRequest(params: ConfirmedWebsitePhishing): Promise<ValidatedAbuseReportRequest> {
+export async function buildWebsiteAbuseRequest(params: ConfirmedWebsiteAbuse): Promise<ValidatedAbuseReportRequest> {
 	const observedUrls = [...new Set(params.urls.map((url) => normalizeObservedUrl(url.trim())))];
 	if (new Set(observedUrls.map(websiteSite)).size !== 1) throw new Error("A website report covers the URLs of exactly one captured site.");
 	return submissionRequest({
 		submissionId: params.submissionId,
+		allegationCategory: params.finding.finding,
 		description: reportDescription(params.analysisText),
 		targets: [target(0, new URL(observedUrls[0]!).hostname, observedUrls)],
 		evidence: await screenshotEvidence("website.png", params.screenshotPng),
@@ -138,27 +143,27 @@ export async function buildEmailPhishingRequest(params: ConfirmedEmailPhishing):
 }
 
 /**
- * Accept a confirmed submission into the reporting aggregate. A successful
- * return only means the durable report and its resolve job exist; provider
- * outcomes are recorded on its routes.
+ * Accept a confirmed website into the reporting aggregate. The report is held
+ * in `investigating` while its evidence is collected (command payloads, the
+ * controlled form probe, linked payload-host reports); providers are contacted
+ * only once that investigation releases it. A successful return means the
+ * durable report and its investigation job exist.
  */
-export async function reportConfirmedWebsitePhishing(params: ConfirmedWebsitePhishing): Promise<CreatedAbuseReport> {
-	const created = await AbuseRepository.createReport({ request: await buildWebsitePhishingRequest(params), reporter: params.reporter, submissionId: params.submissionId });
+export async function reportConfirmedWebsiteAbuse(params: ConfirmedWebsiteAbuse): Promise<CreatedAbuseReport> {
+	const payload: InvestigationJobPayload = {
+		submissionId: params.submissionId.toString(),
+		pageUrl: params.urls[0]!,
+		finding: params.finding,
+		pasteCommands: (params.pasteCommands ?? []).map(({ shown, payloadUrls, interpreters }) => ({ shown, payloadUrls, interpreters })),
+	};
+	const created = await AbuseRepository.createReport({
+		request: await buildWebsiteAbuseRequest(params),
+		reporter: params.reporter,
+		submissionId: params.submissionId,
+		investigation: { payload },
+	});
+	if (created.created) await setInvestigationStatus(params.submissionId, { status: "queued", updatedAt: new Date().toISOString() });
 	await enqueueKitSiblingDiscovery(created.reportId, params.submissionId);
-	if (created.created && (params.phishingBasis === "credential_theft" || params.phishingBasis === "payment_fraud")) {
-		await setExfiltrationProbeStatus(params.submissionId, { status: "queued", updatedAt: new Date().toISOString() });
-		try {
-			await AbuseRepository.enqueueJob({
-				jobType: "probe_exfiltration",
-				reportId: created.reportId,
-				payload: { submissionId: params.submissionId.toString(), pageUrl: params.urls[0]!, phishingBasis: params.phishingBasis },
-				dedupeKey: `probe-exfiltration:${created.reportId.toString()}`,
-			});
-		} catch (error) {
-			await setExfiltrationProbeStatus(params.submissionId, { status: "failed", lastError: errorText(error), updatedAt: new Date().toISOString() });
-			throw error;
-		}
-	}
 	return created;
 }
 

@@ -4,6 +4,8 @@ import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "../db/sqlite_types
 import { submissions } from "../db/schema";
 
 export const abuseReportStatuses = [
+	/** Accepted, and evidence about the reported site is still being collected; no provider has been contacted. */
+	"investigating",
 	"accepted",
 	"resolving",
 	"verifying",
@@ -86,7 +88,7 @@ export const abuseJobTypes = [
 	"deliver_provider_verification_code",
 	"classify_provider_reply",
 	"poll_provider_correspondence",
-	"probe_exfiltration",
+	"investigate_report",
 	"report_origin_host",
 	"discover_kit_siblings",
 	"analyze_kit_sibling",

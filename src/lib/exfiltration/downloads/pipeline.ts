@@ -6,7 +6,7 @@ import { signatureStateOf } from "./pe_signature";
 import type { CollectedDownload } from "./collect";
 import { buildSampleArchive } from "./archive_adapter";
 import { investigateDownload, type InvestigationOutcome, type SubmitFile } from "./investigate";
-import type { LookupResult, SignatureState, VerdictProvider } from "./policy";
+import type { LookupResult, VerdictProvider } from "./policy";
 import { sampleRetentionMs } from "./retention";
 
 /**
@@ -43,26 +43,23 @@ export function downloadPipelineConfigFromEnvironment(environment: Readonly<Reco
 	};
 }
 
+type SampleDependencies = {
+	lookups?: (sha256: string) => Promise<LookupResult[]>;
+	submit?: SubmitFile;
+	now?: () => Date;
+};
+
 /**
- * Fetch one download through the audited artifact fetcher (public host on every
- * hop, size cap, redirect cap), then investigate it. The probe calls this only
- * after its capture is durable, and it never executes the file. Every provider
- * is queried by hash, and an upload goes only to a provider the operator permitted.
+ * Hash, look up, upload when unknown, and keep one captured sample. It never
+ * executes the file; the structural signature check reads only the
+ * certificate table. Every provider is queried by hash first, and an upload
+ * goes only to a provider the operator permitted.
  */
-export async function investigateCollectedDownload(
-	file: CollectedDownload,
+export async function investigateSample(
+	sample: { bytes: Buffer; remoteName: string | undefined },
 	config: DownloadPipelineConfig,
-	dependencies: {
-		fetch?: (url: string) => Promise<{ body: Buffer; mimeType?: string }>;
-		lookups?: (sha256: string) => Promise<LookupResult[]>;
-		submit?: SubmitFile;
-		now?: () => Date;
-		phishingBasis: "credential_theft" | "payment_fraud" | "malware_delivery";
-	},
-): Promise<InvestigationOutcome | undefined> {
-	const fetched = await (dependencies.fetch ?? fetchSkyvernArtifact)(file.url.toString());
-	// The structural check reads the certificate table only; the file is never loaded or executed.
-	const signature: SignatureState = signatureStateOf(fetched.body);
+	dependencies: SampleDependencies = {},
+): Promise<InvestigationOutcome> {
 	const lookups = dependencies.lookups ?? (async (sha256: string): Promise<LookupResult[]> => [
 		await lookupMalwareBazaar({ sha256, authKey: config.malwareBazaarAuthKey }),
 		await lookupVirusTotal({ sha256, apiKey: config.virusTotalApiKey }),
@@ -72,7 +69,7 @@ export async function investigateCollectedDownload(
 		return uploadToVirusTotal({ bytes: upload.bytes, apiKey: config.virusTotalApiKey, fileName: upload.fileName });
 	});
 	return investigateDownload(
-		{ bytes: fetched.body, remoteName: file.remoteName, phishingBasis: dependencies.phishingBasis, origin: "probe", signature },
+		{ bytes: sample.bytes, remoteName: sample.remoteName, signature: signatureStateOf(sample.bytes) },
 		{
 			storeRoot: config.storeRoot,
 			now: dependencies.now ?? (() => new Date()),
@@ -82,4 +79,18 @@ export async function investigateCollectedDownload(
 			submit,
 		},
 	);
+}
+
+/**
+ * Fetch one probe download through the audited artifact fetcher (public host
+ * on every hop, size cap, redirect cap), then investigate it. The probe calls
+ * this only after its capture is durable.
+ */
+export async function investigateCollectedDownload(
+	file: CollectedDownload,
+	config: DownloadPipelineConfig,
+	dependencies: SampleDependencies & { fetch?: (url: string) => Promise<{ body: Buffer; mimeType?: string }> } = {},
+): Promise<InvestigationOutcome> {
+	const fetched = await (dependencies.fetch ?? fetchSkyvernArtifact)(file.url.toString());
+	return investigateSample({ bytes: fetched.body, remoteName: file.remoteName }, config, dependencies);
 }

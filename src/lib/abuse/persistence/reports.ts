@@ -43,6 +43,12 @@ export async function createReport(params: {
 	reporter: ReporterMetadata;
 	/** The submission that owns this report, when it came from website/email analysis. */
 	submissionId?: bigint;
+	/**
+	 * Collect evidence before any provider is contacted: the report is held in
+	 * `investigating` with this job queued instead of `resolve_report`, and
+	 * `releaseInvestigatedReport` starts resolution once the evidence is in.
+	 */
+	investigation?: { payload: Record<string, unknown> };
 }): Promise<CreatedAbuseReport> {
 	const db = await getDb();
 	const { request, reporter } = params;
@@ -87,7 +93,7 @@ export async function createReport(params: {
 					legalBrandUrl: request.legalBrandUrl,
 					reporterName: request.reporter?.name,
 					reporterContactEmail: request.reporter?.email,
-					status: "accepted",
+					status: params.investigation ? "investigating" : "accepted",
 					requesterIp: reporter.reporterIp,
 					requesterCountry: reporter.reporterCountry,
 					requesterHeaders: reporter.reporterHeaders,
@@ -137,13 +143,14 @@ export async function createReport(params: {
 			}
 
 			const jobId = generateId();
+			const firstJob = params.investigation
+				? { jobType: "investigate_report" as const, payload: params.investigation.payload, dedupeKey: `investigate:${reportId.toString()}` }
+				: { jobType: "resolve_report" as const, payload: {}, dedupeKey: `resolve:${reportId.toString()}` };
 			tx.insert(abuseJobs)
 				.values({
 					id: jobId,
-					jobType: "resolve_report",
 					reportId,
-					payload: {},
-					dedupeKey: `resolve:${reportId.toString()}`,
+					...firstJob,
 					status: "queued",
 					retryCount: 0,
 					nextAttemptAt: timestamp,
@@ -157,13 +164,68 @@ export async function createReport(params: {
 				eventType: "report.accepted",
 				data: { targetCount: targetIds.size, evidenceCount: request.evidence.length },
 			});
-			recordEvent(tx, { reportId, jobId, eventType: "job.queued", data: { jobType: "resolve_report" } });
+			recordEvent(tx, { reportId, jobId, eventType: "job.queued", data: { jobType: firstJob.jobType } });
 
 			return { reportId, trackingToken, created: true };
 		},
 			{ behavior: "immediate" }
 		);
 	}
+
+/**
+ * End a report's investigation: append the collected evidence to its
+ * description and attachments, then queue provider resolution. Runs once;
+ * a replayed investigation finds the report already released.
+ */
+export async function releaseInvestigatedReport(params: {
+	reportId: bigint;
+	/** Evidence sentences appended to the description providers receive. */
+	findings: string[];
+	evidence: Array<{ filename: string; mimeType: string; buffer: Buffer; metadata?: Record<string, unknown> }>;
+}): Promise<boolean> {
+	const db = await getDb();
+	return db.transaction(
+		(tx) => {
+			const report = tx.select().from(abuseReports).where(eq(abuseReports.id, params.reportId)).get();
+			if (!report || report.status !== "investigating") return false;
+			const timestamp = now();
+			const description = [report.description, ...params.findings].join("\n").slice(0, 30_000);
+			tx.update(abuseReports).set({ status: "accepted", description, updatedAt: timestamp }).where(eq(abuseReports.id, params.reportId)).run();
+			for (const evidence of params.evidence) {
+				insertArtifact(tx, {
+					reportId: params.reportId,
+					name: evidence.filename,
+					kind: "user_evidence_original",
+					mimeType: evidence.mimeType,
+					buffer: evidence.buffer,
+					metadata: { source: "investigation", decodedMimeType: evidence.mimeType, ...evidence.metadata },
+				});
+			}
+			const jobId = generateId();
+			tx.insert(abuseJobs).values({
+				id: jobId,
+				jobType: "resolve_report",
+				reportId: params.reportId,
+				payload: {},
+				dedupeKey: `resolve:${params.reportId.toString()}`,
+				status: "queued",
+				retryCount: 0,
+				nextAttemptAt: timestamp,
+				unknownExternalState: false,
+				createdAt: timestamp,
+				updatedAt: timestamp,
+			}).run();
+			recordEvent(tx, {
+				reportId: params.reportId,
+				jobId,
+				eventType: "report.investigated",
+				data: { findingCount: params.findings.length, evidenceCount: params.evidence.length },
+			});
+			return true;
+		},
+		{ behavior: "immediate" },
+	);
+}
 
 export async function getReport(reportId: bigint): Promise<AbuseReport | undefined> {
 	const db = await getDb();

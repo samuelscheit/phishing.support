@@ -55,8 +55,8 @@ export async function prepareCloudflareSubmission(
 	dependencies: CloudflareSubmissionDependencies = {},
 ): Promise<ProviderSubmissionPreparation> {
 	const { report, target } = await routeContext(context.routeId);
-	if (report.allegationCategory !== "phishing") {
-		throw new ProviderSubmissionRejectedError("Cloudflare's phishing report can only receive phishing allegations.");
+	if (report.allegationCategory !== "phishing" && report.allegationCategory !== "malware") {
+		throw new ProviderSubmissionRejectedError("Cloudflare's \"Phishing & Malware\" report can only receive phishing or malware allegations.");
 	}
 	if (target.targetType !== "domain") {
 		return { outcome: "insufficient_evidence", reason: "cloudflare_phishing_report_requires_domain_target" };
@@ -76,6 +76,7 @@ export async function prepareCloudflareSubmission(
 				target: target.normalizedTarget,
 				observedUrl,
 				description: report.description,
+				allegationCategory: report.allegationCategory,
 				legalBrandUrl: report.legalBrandUrl ?? undefined,
 			}),
 		},

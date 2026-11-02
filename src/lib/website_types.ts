@@ -20,10 +20,15 @@ export type WebsiteKitResource = {
 	sha256: string;
 };
 
-/** Only this explicit finding is eligible for the automatic phishing handoff. */
-export type WebsiteSiteFinding = "phishing" | "benign" | "prank_or_troll" | "insufficient_evidence";
+/**
+ * `phishing` impersonates a trusted brand to take credentials or payment;
+ * `malware` gets the visitor to download, install, or run something, whether
+ * or not it borrows a real brand. Only these two findings are reported.
+ */
+export type WebsiteSiteFinding = "phishing" | "malware" | "benign" | "prank_or_troll" | "insufficient_evidence";
 
-export type WebsitePhishingBasis = "credential_theft" | "payment_fraud" | "malware_delivery";
+/** What a confirmed phishing page takes from its visitor. */
+export type WebsitePhishingBasis = "credential_theft" | "payment_fraud";
 
 /** A captured control through which a visitor can enter data, with or without a surrounding form. */
 export type WebsiteDataEntryField = {
@@ -45,15 +50,19 @@ export function describeDataEntryField(field: WebsiteDataEntryField): string {
 
 export type WebsiteSiteClassification = {
 	finding: WebsiteSiteFinding;
+	/** Set only for `phishing`. */
 	phishingBasis?: WebsitePhishingBasis;
 	/** Verbatim excerpt of the captured page text, in the page's own language. */
 	evidenceQuote?: string;
 	/** Captured data-entry fields through which the page itself collects the data, when it has any. */
 	collectionFields?: WebsiteDataEntryField[];
-	/** Why the classifier's phishing claim was not corroborated by the captured page. */
-	rejectedPhishingClaim?: string;
+	/** Why the classifier's phishing or malware claim was not corroborated by the captured page. */
+	rejectedClaim?: string;
 };
 
 export type WebsiteSiteAssessment = WebsiteSiteClassification & {
 	hopIndex: number;
 };
+
+/** The two findings that are reported to providers. */
+export type ReportableWebsiteFinding = { finding: "phishing"; phishingBasis: WebsitePhishingBasis } | { finding: "malware" };

@@ -112,7 +112,7 @@ describe("origin-host report workflow", () => {
 				return 410000000000000002n;
 			},
 			kitFacts: async () => ({
-				phishingBasis: "credential_theft" as const,
+				abuse: "credential_theft" as const,
 				evidenceQuote: "Sign in with your Example Account",
 				collects: ["sign-in email or phone", "password", "one-time 2FA codes"] satisfies KitCollectedData[],
 				exfiltrationProbed: true,

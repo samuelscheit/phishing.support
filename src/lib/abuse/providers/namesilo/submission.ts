@@ -1,3 +1,4 @@
+import { abuseEmailCaseUrl } from "../../mail/draft";
 import { userAgent } from "../../../constants";
 import { AbuseRepository } from "../../repository";
 import type { ProviderFormFacts } from "../../skyvern/form_facts";
@@ -204,6 +205,26 @@ async function defaultNameSiloFacts(input: {
 		: deriveProviderFormFacts(input);
 }
 
+/**
+ * The form's required "real website" field. A phishing report names the
+ * impersonated brand's site. A malware site impersonates nothing (its app may
+ * be invented), so the field carries the case page that holds the evidence;
+ * NameSilo's form is its only abuse channel (abuse@ answers with its link).
+ */
+async function nameSiloRealWebsite(
+	report: { allegationCategory: string; description: string; legalBrandUrl: string | null; submissionId: bigint | null },
+	target: string,
+	dependencies: NameSiloPreparationDependencies,
+): Promise<string | undefined> {
+	if (report.allegationCategory === "malware") return report.legalBrandUrl ?? abuseEmailCaseUrl(report.submissionId);
+	const facts = await (dependencies.deriveFacts ?? defaultNameSiloFacts)({
+		target,
+		analysis: report.description,
+		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
+	});
+	return facts.brandOfficialWebsite;
+}
+
 /** Prepare the immutable NameSilo draft and fail closed on missing evidence. */
 export async function prepareNameSiloSubmission(
 	context: ProviderSubmissionContext,
@@ -223,19 +244,16 @@ export async function prepareNameSiloSubmission(
 	if (!evidence) return { outcome: "insufficient_evidence", reason: "namesilo_requires_a_valid_supported_evidence_image" };
 
 	getNameSiloCaptchaCredentials();
-	const facts = await (dependencies.deriveFacts ?? defaultNameSiloFacts)({
-		target: target.normalizedTarget,
-		analysis: report.description,
-		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
-	});
-	if (!facts.brandOfficialWebsite) {
+	const realWebsite = await nameSiloRealWebsite(report, target.normalizedTarget, dependencies);
+	if (!realWebsite) {
 		return { outcome: "insufficient_evidence", reason: "namesilo_requires_a_verified_brand_website" };
 	}
 	const payload = buildNameSiloSubmissionPayload({
 		target: target.normalizedTarget,
 		observedUrl,
 		description: report.description,
-		realWebsite: facts.brandOfficialWebsite,
+		allegationCategory: report.allegationCategory,
+		realWebsite,
 		evidence,
 	});
 	if (!payload) return { outcome: "insufficient_evidence", reason: "namesilo_report_payload_invalid" };
@@ -283,6 +301,7 @@ export async function submitNameSiloSubmission(
 		target: target.normalizedTarget,
 		observedUrl: payload.target.observedUrl,
 		description: report.description,
+		allegationCategory: report.allegationCategory,
 		realWebsite: payload.report.realWebsite,
 		evidence: payload.evidence,
 	});

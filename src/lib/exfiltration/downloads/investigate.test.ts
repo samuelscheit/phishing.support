@@ -10,7 +10,7 @@ import { investigateDownload, type InvestigationDependencies } from "./investiga
 
 const bytes = Buffer.from("synthetic-downloaded-file-for-investigation-tests");
 const sha256 = createHash("sha256").update(bytes).digest("hex");
-const evidence = { bytes, remoteName: "Teams setup.exe", phishingBasis: "malware_delivery" as const, origin: "probe" as const, signature: "not_signed" as const };
+const evidence = { bytes, remoteName: "Teams setup.exe", signature: "not_signed" as const };
 // The production AES builder: the store verifies every archive it writes by reading it back.
 const wrap = buildSampleArchive;
 
@@ -98,7 +98,7 @@ describe("download investigation without any configured store", () => {
 		const hash = createHash("sha256").update(bytesHere).digest("hex");
 		const seen: string[] = [];
 		const outcome = await investigateDownload(
-			{ bytes: bytesHere, remoteName: "a.exe", phishingBasis: "malware_delivery", origin: "other", signature: "not_signed" },
+			{ bytes: bytesHere, remoteName: "a.exe", signature: "not_signed" },
 			{
 				storeRoot: undefined,
 				now: () => new Date("2026-11-02T12:00:00.000Z"),
@@ -117,7 +117,7 @@ describe("download investigation performs only the decided upload", () => {
 	test("submits to each permitted provider only when the policy decided upload, with the safe leaf name", async () => {
 		const submitted: Array<{ provider: string; fileName: string; bytes: number }> = [];
 		const outcome = await investigateDownload(
-			{ bytes: Buffer.from("probe-download-for-upload-wiring"), remoteName: "../../evil.exe", phishingBasis: "credential_theft", origin: "probe", signature: "not_signed" },
+			{ bytes: Buffer.from("probe-download-for-upload-wiring"), remoteName: "../../evil.exe", signature: "not_signed" },
 			{
 				storeRoot: undefined,
 				now: () => new Date("2026-11-02T12:00:00.000Z"),
@@ -138,7 +138,7 @@ describe("download investigation performs only the decided upload", () => {
 	test("a skipped decision never calls the submit transport", async () => {
 		let submits = 0;
 		await investigateDownload(
-			{ bytes: Buffer.from("known-bad-for-skip-test"), remoteName: "x", phishingBasis: "credential_theft", origin: "probe", signature: "not_signed" },
+			{ bytes: Buffer.from("known-bad-for-skip-test"), remoteName: "x", signature: "not_signed" },
 			{
 				storeRoot: undefined,
 				now: () => new Date("2026-11-02T12:00:00.000Z"),
@@ -155,7 +155,7 @@ describe("download investigation performs only the decided upload", () => {
 describe("a decided upload is never dropped silently", () => {
 	test("without a submit transport, a decided upload is recorded as not attempted", async () => {
 		const outcome = await investigateDownload(
-			{ bytes: Buffer.from("decided-upload-without-transport"), remoteName: "x", phishingBasis: "credential_theft", origin: "probe", signature: "not_signed" },
+			{ bytes: Buffer.from("decided-upload-without-transport"), remoteName: "x", signature: "not_signed" },
 			{
 				storeRoot: undefined,
 				now: () => new Date("2026-11-02T12:00:00.000Z"),

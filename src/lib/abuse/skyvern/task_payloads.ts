@@ -44,6 +44,7 @@ export function buildGenericProviderFormTaskPayload(params: {
 		target: params.target,
 		observedUrls: params.observedUrls,
 		description: params.description,
+		allegationCategory: params.allegationCategory,
 		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
 		maximumLength: definition.maxDescriptionLength,
 	});

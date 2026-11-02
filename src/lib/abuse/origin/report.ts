@@ -154,7 +154,7 @@ export function originHostEvidence(snapshot: OriginHostSnapshot): Buffer {
 		]) : ["- none found within the scan"]),
 		"",
 		"Captured kit:",
-		`- basis: ${snapshot.kit.phishingBasis ?? "unspecified"}`,
+		`- abuse: ${snapshot.kit.abuse ?? "unspecified"}`,
 		...(snapshot.kit.evidenceQuote ? [`- page text: "${snapshot.kit.evidenceQuote}"`] : []),
 		`- collects: ${snapshot.kit.collects.join(", ") || "not determined from the first page"}`,
 		...(snapshot.kit.exfiltrationTargets.length ? [`- exfiltration backends: ${snapshot.kit.exfiltrationTargets.join(", ")}`] : []),

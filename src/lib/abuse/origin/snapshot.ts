@@ -54,7 +54,8 @@ export const originHostSnapshotSchema = z.object({
 	}).strict(),
 	servers: z.array(originServerSchema).max(16),
 	kit: z.object({
-		phishingBasis: z.enum(["credential_theft", "payment_fraud", "malware_delivery"]).optional(),
+		/** What the confirmed site does to its visitors. */
+		abuse: z.enum(["credential_theft", "payment_fraud", "malware"]).optional(),
 		evidenceQuote: z.string().max(300).optional(),
 		collects: z.array(z.enum(kitCollectedData)).max(kitCollectedData.length),
 		exfiltrationProbed: z.boolean(),

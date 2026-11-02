@@ -54,3 +54,43 @@ export async function lookupVirusTotal(params: {
 	if (stats.suspicious > 0) return { provider, state: "known", verdict: "suspicious" };
 	return { provider, state: "known", verdict: "benign" };
 }
+
+const ANALYSIS_POLL_MS = 20_000;
+const ANALYSIS_WAIT_MS = 4 * 60_000;
+
+/**
+ * Wait for the public analysis of a file we just submitted, then read its
+ * verdict from the file report. A provider that never finishes leaves the
+ * report with the analysis link only; that is not a failure.
+ */
+export async function awaitVirusTotalVerdict(params: {
+	sha256: string;
+	analysisId: string;
+	apiKey: string | undefined;
+	fetch?: Fetch;
+	signal?: AbortSignal;
+	sleep?: (ms: number) => Promise<void>;
+	waitMs?: number;
+}): Promise<LookupResult> {
+	const provider = "virustotal" as const;
+	if (!params.apiKey?.trim()) return { provider, state: "not_configured" };
+	const pause = params.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+	const deadline = Date.now() + (params.waitMs ?? ANALYSIS_WAIT_MS);
+	while (Date.now() < deadline) {
+		params.signal?.throwIfAborted();
+		try {
+			const response = await (params.fetch ?? fetch)(`${VIRUSTOTAL_API}/analyses/${encodeURIComponent(params.analysisId)}`, {
+				headers: { "x-apikey": params.apiKey.trim(), accept: "application/json" },
+				signal: params.signal ? AbortSignal.any([params.signal, AbortSignal.timeout(LOOKUP_TIMEOUT_MS)]) : AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
+			});
+			const body = response.ok ? await response.json().catch(() => undefined) as { data?: { attributes?: { status?: unknown } } } | undefined : undefined;
+			if (body?.data?.attributes?.status === "completed") {
+				return lookupVirusTotal({ sha256: params.sha256, apiKey: params.apiKey, ...(params.fetch ? { fetch: params.fetch } : {}), ...(params.signal ? { signal: params.signal } : {}) });
+			}
+		} catch (error) {
+			if (params.signal?.aborted) throw error;
+		}
+		await pause(ANALYSIS_POLL_MS);
+	}
+	return { provider, state: "unavailable", reason: "analysis did not finish in time" };
+}

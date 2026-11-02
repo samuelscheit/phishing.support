@@ -5,7 +5,7 @@ import { SubmissionsEntity } from "../../../db/entities";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { AbuseRepository } from "../../repository";
 import { resolveAbuseTarget } from "../../resolver";
-import { reportConfirmedEmailPhishing, reportConfirmedWebsitePhishing } from "../../submission_reports";
+import { reportConfirmedEmailPhishing, reportConfirmedWebsiteAbuse } from "../../submission_reports";
 import { executeProviderSubmission } from "../submission_execution";
 import type { ProviderSubmissionProvider } from "../submission_contracts";
 import { NETCRAFT_MAIL_PROVIDER } from "./definition";
@@ -91,7 +91,7 @@ describe("Netcraft mail provider", () => {
 
 	test("never applies to a website report", async () => {
 		await SubmissionsEntity.create({ id: 371157972019056819n, kind: "website", data: { kind: "website", website: { url: "https://login.example.com/" } }, dedupeKey: "netcraft-mail-website" });
-		const report = await reportConfirmedWebsitePhishing({ submissionId: 371157972019056819n, urls: ["https://login.example.com/"], analysisText: "Credential page.", reporter: {}, phishingBasis: "credential_theft" });
+		const report = await reportConfirmedWebsiteAbuse({ submissionId: 371157972019056819n, urls: ["https://login.example.com/"], analysisText: "Credential page.", reporter: {}, finding: { finding: "phishing", phishingBasis: "credential_theft" } });
 		const [target] = await AbuseRepository.listTargets(report.reportId);
 		const resolved = await resolveAbuseTarget(target!, {
 			fetch: async () => new Response("{}", { status: 404 }),

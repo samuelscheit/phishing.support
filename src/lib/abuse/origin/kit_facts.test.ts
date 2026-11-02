@@ -41,7 +41,7 @@ describe("captured kit facts", () => {
 					{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in with your\nGoogle Account.", collectionFields: HERSTEL_FIELDS },
 					{ hopIndex: 1, finding: "benign", collectionFields: [{ ref: "f1", control: "input[type=text]", name: "card-number" }] },
 				],
-				backendProbe: { status: "completed", backendCount: 1, updatedAt: "2026-10-30T00:00:00.000Z" },
+				investigation: { status: "completed", backendCount: 1, updatedAt: "2026-10-30T00:00:00.000Z" },
 			} },
 			dedupeKey: "website-herstel.example.com",
 			status: "reported",
@@ -58,7 +58,7 @@ describe("captured kit facts", () => {
 		}
 
 		expect(await capturedKitFacts(submissionId)).toEqual({
-			phishingBasis: "credential_theft",
+			abuse: "credential_theft",
 			evidenceQuote: "Sign in with your Google Account.",
 			collects: ["sign-in email or phone", "password", "one-time 2FA codes", "authenticator codes", "backup codes", "recovery email", "phone number"],
 			exfiltrationProbed: true,

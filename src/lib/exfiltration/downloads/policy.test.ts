@@ -10,8 +10,6 @@ const permitted = new Set(["malwarebazaar" as const]);
 describe("download policy: known verdicts short-circuit", () => {
 	test("a known malicious verdict is recorded and nothing is uploaded", () => {
 		const action = decideDownloadAction({
-			origin: "other",
-			phishingBasis: "malware_delivery",
 			lookups: [{ provider: "malwarebazaar", state: "known", verdict: "malicious" }],
 			uploadPermitted: permitted,
 		});
@@ -20,8 +18,6 @@ describe("download policy: known verdicts short-circuit", () => {
 
 	test("a known verdict wins even when another provider is unavailable", () => {
 		const action = decideDownloadAction({
-			origin: "other",
-			phishingBasis: "malware_delivery",
 			lookups: [
 				{ provider: "virustotal", state: "unavailable", reason: "HTTP 503" },
 				{ provider: "malwarebazaar", state: "known", verdict: "suspicious" },
@@ -34,21 +30,12 @@ describe("download policy: known verdicts short-circuit", () => {
 
 describe("download policy: uploads are gated", () => {
 	test("uploads only when a malware basis and every configured provider reported not_found", () => {
-		expect(decideDownloadAction({ phishingBasis: "malware_delivery", lookups: [notFound, unconfigured], uploadPermitted: permitted, origin: "other", signature: "not_signed" }))
+		expect(decideDownloadAction({ lookups: [notFound, unconfigured], uploadPermitted: permitted, signature: "not_signed" }))
 			.toEqual({ action: "upload", providers: ["malwarebazaar"] });
-	});
-
-	test("never uploads a file that is not a malware-delivery classification", () => {
-		for (const phishingBasis of ["credential_theft", "payment_fraud"] as const) {
-			expect(decideDownloadAction({ phishingBasis, origin: "other", lookups: [notFound], uploadPermitted: permitted, signature: "not_signed" }))
-				.toEqual({ action: "skip", reason: "not_malware_basis" });
-		}
 	});
 
 	test("an unavailable lookup means unknown, and unknown never uploads", () => {
 		const action = decideDownloadAction({
-			origin: "other",
-			phishingBasis: "malware_delivery",
 			lookups: [{ provider: "virustotal", state: "unavailable", reason: "timeout" }, notFound],
 			uploadPermitted: permitted,
 		});
@@ -57,8 +44,6 @@ describe("download policy: uploads are gated", () => {
 
 	test("a configured provider that has not answered not_found blocks the upload", () => {
 		const action = decideDownloadAction({
-			origin: "other",
-			phishingBasis: "malware_delivery",
 			lookups: [{ provider: "virustotal", state: "not_configured" }, { provider: "malwarebazaar", state: "unavailable", reason: "x" }],
 			uploadPermitted: permitted,
 		});
@@ -66,19 +51,17 @@ describe("download policy: uploads are gated", () => {
 	});
 
 	test("no upload happens without an explicit operator permission", () => {
-		expect(decideDownloadAction({ origin: "other", phishingBasis: "malware_delivery", lookups: [notFound], uploadPermitted: new Set() }))
+		expect(decideDownloadAction({ lookups: [notFound], uploadPermitted: new Set() }))
 			.toEqual({ action: "skip", reason: "no_upload_permitted" });
 	});
 
 	test("with no provider configured at all, the file is skipped cleanly and no key is required", () => {
-		expect(decideDownloadAction({ origin: "other", phishingBasis: "malware_delivery", lookups: [unconfigured], uploadPermitted: permitted }))
+		expect(decideDownloadAction({ lookups: [unconfigured], uploadPermitted: permitted }))
 			.toEqual({ action: "skip", reason: "no_provider_configured" });
 	});
 
 	test("the upload order is deterministic", () => {
 		const action = decideDownloadAction({
-			origin: "other",
-			phishingBasis: "malware_delivery",
 			lookups: [notFound, { provider: "virustotal", state: "not_found" }],
 			uploadPermitted: new Set(["virustotal" as const, "malwarebazaar" as const]),
 			signature: "not_signed",
@@ -148,8 +131,6 @@ describe("download policy: a permitted provider must be queried first", () => {
 	test("never uploads to a permitted provider that was not part of the lookups", () => {
 		// VirusTotal is permitted for upload, but no lookup for it ran: no verdict was sought.
 		const action = decideDownloadAction({
-			origin: "other",
-			phishingBasis: "malware_delivery",
 			lookups: [notFound],
 			uploadPermitted: new Set(["malwarebazaar" as const, "virustotal" as const]),
 		});
@@ -158,8 +139,6 @@ describe("download policy: a permitted provider must be queried first", () => {
 
 	test("uploads only to permitted providers that were themselves queried and returned not_found", () => {
 		const action = decideDownloadAction({
-			origin: "other",
-			phishingBasis: "malware_delivery",
 			lookups: [{ provider: "virustotal", state: "not_found" }, notFound],
 			uploadPermitted: new Set(["malwarebazaar" as const, "virustotal" as const]),
 			signature: "not_signed",
@@ -169,7 +148,7 @@ describe("download policy: a permitted provider must be queried first", () => {
 });
 
 describe("download policy: the publisher-signature gate", () => {
-	const clean = { origin: "other" as const, phishingBasis: "malware_delivery" as const, lookups: [notFound], uploadPermitted: permitted };
+	const clean = { lookups: [notFound], uploadPermitted: permitted };
 
 	test("an unsigned or unexpectedly signed file is eligible for upload", () => {
 		for (const signature of ["not_signed"] as const) {
@@ -191,7 +170,7 @@ describe("download policy: the publisher-signature gate", () => {
 });
 
 describe("download policy: probe downloads may be uploaded", () => {
-	const probe = { origin: "probe" as const, phishingBasis: "credential_theft" as const, lookups: [notFound], uploadPermitted: permitted };
+	const probe = { lookups: [notFound], uploadPermitted: permitted };
 
 	test("a probe download with no verdict from any queried provider is uploaded", () => {
 		expect(decideDownloadAction({ ...probe, signature: "not_signed" })).toEqual({ action: "upload", providers: ["malwarebazaar"] });
@@ -209,9 +188,5 @@ describe("download policy: probe downloads may be uploaded", () => {
 
 	test("a probe download that is a signed installer is not uploaded", () => {
 		expect(decideDownloadAction({ ...probe, signature: "signed_binary" })).toEqual({ action: "skip", reason: "signed_binary" });
-	});
-
-	test("a non-probe credential page download keeps the malware-delivery rule", () => {
-		expect(decideDownloadAction({ ...probe, origin: "other", signature: "not_signed" })).toEqual({ action: "skip", reason: "not_malware_basis" });
 	});
 });

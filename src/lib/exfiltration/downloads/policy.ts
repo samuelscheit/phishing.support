@@ -22,14 +22,13 @@ export type LookupResult =
  */
 export type SignatureState = "not_signed" | "signed_binary" | "unknown";
 
+/**
+ * Every file decided here was captured by us from a site already confirmed as
+ * phishing or malware: a download the form probe clicked, or the payload a
+ * pasted command fetches. Such a file may be uploaded once every provider
+ * reports it unknown.
+ */
 export type DownloadPolicyInput = {
-	phishingBasis: "credential_theft" | "payment_fraud" | "malware_delivery";
-	/**
-	 * Where the file came from. `probe` files were captured by the exfiltration probe and
-	 * may be uploaded once every provider reports them unknown; `other` files keep the
-	 * malware-delivery rule.
-	 */
-	origin: "probe" | "other";
 	lookups: LookupResult[];
 	/** Providers whose operator explicitly enabled public upload. */
 	uploadPermitted: ReadonlySet<VerdictProvider>;
@@ -40,7 +39,7 @@ export type DownloadPolicyInput = {
 export type DownloadAction =
 	| { action: "record_known_verdict"; verdict: "malicious" | "suspicious" | "benign"; provider: VerdictProvider }
 	| { action: "upload"; providers: VerdictProvider[] }
-	| { action: "skip"; reason: "not_malware_basis" | "lookup_unavailable" | "no_upload_permitted" | "no_provider_configured" | "signed_binary" | "signature_unverified" };
+	| { action: "skip"; reason: "lookup_unavailable" | "no_upload_permitted" | "no_provider_configured" | "signed_binary" | "signature_unverified" };
 
 /**
  * ANY.RUN is not a `VerdictProvider` at all: its API needs an Enterprise plan the
@@ -53,8 +52,6 @@ export function decideDownloadAction(input: DownloadPolicyInput): DownloadAction
 			return { action: "record_known_verdict", verdict: lookup.verdict, provider: lookup.provider };
 		}
 	}
-	// Only a malware-delivery classification justifies a public upload at all.
-	if (input.origin === "other" && input.phishingBasis !== "malware_delivery") return { action: "skip", reason: "not_malware_basis" };
 	// Any provider that could not answer means "unknown", and unknown never triggers an upload.
 	if (input.lookups.some((lookup) => lookup.state === "unavailable")) return { action: "skip", reason: "lookup_unavailable" };
 	const configured = input.lookups.filter((lookup) => lookup.state !== "not_configured");

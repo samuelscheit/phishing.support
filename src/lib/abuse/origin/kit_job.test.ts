@@ -39,7 +39,7 @@ describe("kit sibling discovery jobs", () => {
 		const cases = {
 			credential: await websiteCase(420000000000000001n, "login.example.com", { siteAssessments: CREDENTIAL_KIT }),
 			payment: await websiteCase(420000000000000002n, "pay.example.com", { siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "payment_fraud" }] }),
-			malware: await websiteCase(420000000000000003n, "update.example.com", { siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "malware_delivery" }] }),
+			malware: await websiteCase(420000000000000003n, "update.example.com", { siteAssessments: [{ hopIndex: 0, finding: "malware" }] }),
 			// A report migrated from the old pipeline never had a classifier verdict (the gambling site that spread to 80 casinos).
 			migrated: await websiteCase(420000000000000004n, "casino.example.com"),
 			sibling: await websiteCase(420000000000000005n, "sibling.example.com", { source: "kit-sibling:420000000000000001:1", siteAssessments: CREDENTIAL_KIT }),

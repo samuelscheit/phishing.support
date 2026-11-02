@@ -12,6 +12,7 @@ export const tencentProvider: ProviderSubmissionProvider = {
 		target: context.target,
 		observedUrl: context.observedUrls[0],
 		description: context.description,
+		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),
 	submit: submitTencentSubmission,

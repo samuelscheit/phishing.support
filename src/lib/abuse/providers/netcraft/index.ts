@@ -14,6 +14,7 @@ export const netcraftProvider: ProviderSubmissionProvider = {
 		target: context.target,
 		observedUrls: context.observedUrls,
 		description: context.description,
+		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),
 	inboundMail: NETCRAFT_INBOUND_MAIL,

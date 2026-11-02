@@ -12,9 +12,6 @@ export type DownloadEvidence = {
 	bytes: Buffer;
 	/** Untrusted remote name; used only as sanitized metadata. */
 	remoteName: string | undefined;
-	phishingBasis: "credential_theft" | "payment_fraud" | "malware_delivery";
-	/** Where the file came from; probe files may be uploaded once every provider reports them unknown. */
-	origin: "probe" | "other";
 	/** Required: the structural signature state. Nothing is uploaded without it. */
 	signature: SignatureState;
 };
@@ -58,7 +55,7 @@ export async function investigateDownload(evidence: DownloadEvidence, deps: Inve
 	// Step 2: verdict lookups happen before any decision that could upload.
 	const lookups = await deps.lookups(sha256);
 	// Step 3: the decision is pure; no upload is possible unless it returns "upload".
-	const action = decideDownloadAction({ phishingBasis: evidence.phishingBasis, origin: evidence.origin, lookups, uploadPermitted: deps.uploadPermitted, signature: evidence.signature });
+	const action = decideDownloadAction({ lookups, uploadPermitted: deps.uploadPermitted, signature: evidence.signature });
 	// Step 3b: only a decided upload reaches the transport, and each provider gets the same safe leaf name.
 	const uploads: UploadOutcome[] = [];
 	if (action.action === "upload") {

@@ -41,6 +41,7 @@ export type ProviderReportPreviewContext = {
 	target: string;
 	observedUrls: readonly string[];
 	description: string;
+	allegationCategory?: string;
 	legalBrandUrl?: string | null;
 };
 

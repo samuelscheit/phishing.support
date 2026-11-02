@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { AnalysisRunsEntity, ArtifactsEntity, SubmissionsEntity } from "../db/entities";
 import { useTemporaryDatabase } from "../db/test_helpers";
-import { reportConfirmedWebsitePhishing } from "../abuse/submission_reports";
+import { reportConfirmedWebsiteAbuse } from "../abuse/submission_reports";
 import { getRetryableSubmission } from "./retry";
 import { createWebsiteSubmission, resumePendingWebsiteAnalyses, SubmissionRetryError, retryFailedWebsiteAnalysis, websiteSubmissionUrl } from "./website";
 
@@ -65,7 +65,7 @@ describe("retryFailedWebsiteAnalysis", () => {
 		for (const _stage of ["analysis", "classification"]) await AnalysisRunsEntity.complete(await AnalysisRunsEntity.create(id));
 
 		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({ submission: { id } });
-		await reportConfirmedWebsitePhishing({ submissionId: id, urls: ["https://85.215.226.225/Netflix/Home/login.php"], analysisText: "Credential page.", reporter: {}, phishingBasis: "credential_theft" });
+		await reportConfirmedWebsiteAbuse({ submissionId: id, urls: ["https://85.215.226.225/Netflix/Home/login.php"], analysisText: "Credential page.", reporter: {}, finding: { finding: "phishing", phishingBasis: "credential_theft" } });
 		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).rejects.toThrow("cannot be retried");
 	});
 

@@ -5,7 +5,7 @@ import { ExfiltrationProbeExhaustedError, ExfiltrationProbeBudgetError, runExfil
 import type { ExfiltrationCanaries } from "./types";
 
 const canaries: ExfiltrationCanaries = { marker: "psprobe_budget0", email: "probe.budget0@probe-canary.invalid", password: "A9!psprobe_budget0!qZ", phone: "+12125550100", cardNumber: "4242424242424242", oneTimeCode: "123456" };
-const input = { reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", phishingBasis: "credential_theft" as const, reporter: {} };
+const input = { reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", reporter: {} };
 
 describe("investigation budget expiry", () => {
 	test("a budget that elapses mid-route is a terminal, non-retryable outcome, never a retry", async () => {
@@ -61,7 +61,7 @@ describe("investigation budget expiry", () => {
 describe("caller cancellation during an investigation", () => {
 	test("a shutdown of the caller is an infrastructure stop, not a terminal budget verdict, so the job can retry", async () => {
 		const shutdown = new AbortController();
-		const error = await runExfiltrationProbe({ reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", phishingBasis: "credential_theft", reporter: {} }, {
+		const error = await runExfiltrationProbe({ reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", reporter: {} }, {
 			createTask: async () => ({ runId: "run-phishing", response: {} }),
 			getRun: async () => { shutdown.abort(new Error("Abuse worker is stopping.")); return { status: "running" }; },
 			cancelRun: async () => undefined,

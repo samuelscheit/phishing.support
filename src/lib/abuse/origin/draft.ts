@@ -31,10 +31,15 @@ function list(values: readonly string[]): string {
 
 const SENSITIVE_DATA: readonly KitCollectedData[] = ["password", "one-time 2FA codes", "authenticator codes", "backup codes", "payment card details", "identity details"];
 
+/** The site's abuse in a host's words: "phishing" or "malware distribution". */
+function abuseNoun(kit: OriginHostSnapshot["kit"]): string {
+	return kit.abuse === "malware" ? "malware distribution" : "phishing";
+}
+
 function stolenData(kit: OriginHostSnapshot["kit"]): string {
-	if (kit.phishingBasis === "malware_delivery") return "delivers malware to visitors";
+	if (kit.abuse === "malware") return "delivers malware to visitors";
 	const sensitive = kit.collects.filter((item) => SENSITIVE_DATA.includes(item) && item !== "password");
-	const subject = kit.phishingBasis === "payment_fraud" ? "payment details" : "account credentials";
+	const subject = kit.abuse === "payment_fraud" ? "payment details" : "account credentials";
 	return `steals ${subject}${sensitive.length ? `, including ${list(sensitive)}` : ""}`;
 }
 
@@ -51,12 +56,12 @@ function originIntro(snapshot: OriginHostSnapshot, domains: number): string[] {
 	const servers = snapshot.servers;
 	if (servers.length === 0) {
 		return [
-			`Cloudflare named you as the host of the phishing site ${snapshot.originalDomain}, which ${stolenData(snapshot.kit)}. Please find the service behind it, suspend it, and preserve its data for law enforcement.`,
+			`Cloudflare named you as the host of the ${abuseNoun(snapshot.kit)} site ${snapshot.originalDomain}, which ${stolenData(snapshot.kit)}. Please find the service behind it, suspend it, and preserve its data for law enforcement.`,
 		];
 	}
 	const subject = servers.length === 1 ? "A server in your network runs" : `${servers.length} servers in your network run`;
 	return [
-		`${subject} a phishing operation that ${stolenData(snapshot.kit)}. Please suspend ${servers.length === 1 ? "it" : "them"} and preserve ${servers.length === 1 ? "its" : "their"} data for law enforcement.`,
+		`${subject} a ${abuseNoun(snapshot.kit)} operation that ${stolenData(snapshot.kit)}. Please suspend ${servers.length === 1 ? "it" : "them"} and preserve ${servers.length === 1 ? "its" : "their"} data for law enforcement.`,
 		"",
 		servers.length === 1
 			? `Server: ${servers[0]!.ip}${servers[0]!.prefix || servers[0]!.asn ? ` (${[servers[0]!.prefix, servers[0]!.asn ? `AS${servers[0]!.asn}` : undefined].filter(Boolean).join(", ")})` : ""}`
@@ -71,7 +76,7 @@ function linkage(snapshot: OriginHostSnapshot): string[] {
 	if (!first) {
 		const scanned = snapshot.scan.addressesScanned;
 		return scanned
-			? [`We checked ${scanned.toLocaleString("en-US")} public IPv4 addresses announced by your network${snapshot.networks.length ? ` (${snapshot.networks.map(({ asn }) => `AS${asn}`).join(", ")})` : ""}; none both presented ${snapshot.originalDomain}'s certificate and returned an exact captured phishing-kit file, so the site may run on a service outside those ranges.`]
+			? [`We checked ${scanned.toLocaleString("en-US")} public IPv4 addresses announced by your network${snapshot.networks.length ? ` (${snapshot.networks.map(({ asn }) => `AS${asn}`).join(", ")})` : ""}; none both presented ${snapshot.originalDomain}'s certificate and returned an exact captured ${snapshot.kit.abuse === "malware" ? "site" : "phishing-kit"} file, so the site may run on a service outside those ranges.`]
 			: [];
 	}
 	const issuers = [...new Set([first.certificate, ...snapshot.siblings.map(({ certificate }) => certificate)].map(({ issuer }) => issuerName(issuer)))];
@@ -80,7 +85,7 @@ function linkage(snapshot: OriginHostSnapshot): string[] {
 	const siblings = snapshot.siblings.slice(0, MAX_CERTIFICATES_IN_BODY - 1);
 	const deferred = snapshot.siblings.length - siblings.length;
 	return [
-		`How the ${snapshot.servers.length === 1 ? "server is" : "servers are"} tied to ${snapshot.siblings.length ? "these domains" : "this domain"} (observed ${utc(snapshot.scan.completedAt)}): a request pinned to ${where} returned a byte-identical captured phishing-kit file (same SHA-256), and the TLS endpoint presents a certificate for ${snapshot.siblings.length ? "each domain" : "the domain"} from ${list(issuers)}:`,
+		`How the ${snapshot.servers.length === 1 ? "server is" : "servers are"} tied to ${snapshot.siblings.length ? "these domains" : "this domain"} (observed ${utc(snapshot.scan.completedAt)}): a request pinned to ${where} returned a byte-identical captured ${snapshot.kit.abuse === "malware" ? "site" : "phishing-kit"} file (same SHA-256), and the TLS endpoint presents a certificate for ${snapshot.siblings.length ? "each domain" : "the domain"} from ${list(issuers)}:`,
 		...certificateLine(snapshot.originalDomain, first.certificate, snapshot.originalDomainRegisteredAt),
 		...siblings.flatMap((sibling) => certificateLine(sibling.domain, sibling.certificate, sibling.registeredAt)),
 		...(deferred ? [`- the certificates of the other ${deferred} domains are in the attached evidence`] : []),
@@ -94,7 +99,7 @@ function kitSection(snapshot: OriginHostSnapshot): string[] {
 	const { kit } = snapshot;
 	const lines: string[] = [];
 	const quote = kit.evidenceQuote ? ` The page reads: "${kit.evidenceQuote}"` : "";
-	if (kit.phishingBasis === "malware_delivery") {
+	if (kit.abuse === "malware") {
 		lines.push(`What the kit does: it pushes visitors to download, install or run something.${quote}`);
 	} else if (kit.collects.length) {
 		lines.push(`What the kit does: it asks victims for their ${list(kit.collects)}.${quote}`);
@@ -104,9 +109,9 @@ function kitSection(snapshot: OriginHostSnapshot): string[] {
 	if (kit.exfiltrationTargets.length) {
 		lines.push(`In a controlled test with synthetic data, the kit sent what was typed to: ${kit.exfiltrationTargets.join(", ")}.`);
 	}
-	if (kit.phishingBasis !== "malware_delivery" && kit.collects.some((item) => SENSITIVE_DATA.includes(item))) {
+	if (kit.abuse !== "malware" && kit.collects.some((item) => SENSITIVE_DATA.includes(item))) {
 		const holder = snapshot.servers.length === 0 ? "The hosting service" : snapshot.servers.length === 1 ? "The server" : "These servers";
-		lines.push(`${holder} therefore ${snapshot.servers.length > 1 ? "hold" : "holds"} live victim ${kit.phishingBasis === "payment_fraud" ? "payment data" : "credentials"}.`);
+		lines.push(`${holder} therefore ${snapshot.servers.length > 1 ? "hold" : "holds"} live victim ${kit.abuse === "payment_fraud" ? "payment data" : "credentials"}.`);
 	}
 	return lines.length ? ["", ...lines] : [];
 }
@@ -116,14 +121,14 @@ function cloudflareContext(snapshot: OriginHostSnapshot): string[] {
 	const siblings = snapshot.siblings.length;
 	return [
 		"",
-		`${snapshot.originalDomain} is behind Cloudflare. Cloudflare processed our phishing report${report} and named ${snapshot.recipient} as the host.${siblings ? ` The other ${siblings === 1 ? "domain serves" : `${siblings} domains serve`} byte-identical kit files (same SHA-256 on urlscan.io).` : ""}`,
+		`${snapshot.originalDomain} is behind Cloudflare. Cloudflare processed our ${snapshot.kit.abuse === "malware" ? "malware" : "phishing"} report${report} and named ${snapshot.recipient} as the host.${siblings ? ` The other ${siblings === 1 ? "domain serves" : `${siblings} domains serve`} byte-identical kit files (same SHA-256 on urlscan.io).` : ""}`,
 	];
 }
 
 function evidence(snapshot: OriginHostSnapshot, caseUrl: string | undefined, attachmentNames: readonly string[]): string[] {
 	const described = attachmentNames.map((name) => name === "origin-host-evidence.txt"
 		? "the full content-hash, certificate and network checks (origin-host-evidence.txt)"
-		: /\.png$/i.test(name) ? `a screenshot of the phishing page (${name})` : name);
+		: /\.png$/i.test(name) ? `a screenshot of the ${abuseNoun(snapshot.kit)} page (${name})` : name);
 	return [
 		"",
 		...(caseUrl ? [`Evidence (screenshot, archived page, analysis): ${caseUrl}`] : []),
@@ -133,7 +138,7 @@ function evidence(snapshot: OriginHostSnapshot, caseUrl: string | undefined, att
 
 function actions(snapshot: OriginHostSnapshot, domains: number): string[] {
 	const servers = snapshot.servers.length;
-	const victims = snapshot.kit.phishingBasis !== "malware_delivery" && snapshot.kit.collects.length
+	const victims = snapshot.kit.abuse !== "malware" && snapshot.kit.collects.length
 		? "; the stored data identifies victims who need to be warned"
 		: "";
 	return [
@@ -183,7 +188,7 @@ export function createOriginHostEmailDraft(input: {
 		serviceIdentity.mailbox,
 		serviceIdentity.url,
 	].join("\n").trim().slice(0, 20_000);
-	const kitLabel = snapshot.kit.phishingBasis === "malware_delivery" ? "malware delivery kit" : snapshot.kit.phishingBasis === "payment_fraud" ? "payment phishing kit" : "credential phishing kit";
+	const kitLabel = snapshot.kit.abuse === "malware" ? "malware distribution site" : snapshot.kit.abuse === "payment_fraud" ? "payment phishing kit" : "credential phishing kit";
 	const location = snapshot.servers.length === 1
 		? `on ${snapshot.servers[0]!.ip}`
 		: snapshot.servers.length
@@ -191,7 +196,7 @@ export function createOriginHostEmailDraft(input: {
 			: `for ${snapshot.originalDomain}`;
 	const reportReference = snapshot.cloudflareReportId ? ` (Cloudflare report ${snapshot.cloudflareReportId})` : "";
 	return {
-		subject: `[${serviceIdentity.name}] [${abuseCaseTag(input.report.id)}] Phishing abuse: ${kitLabel} ${location}${reportReference}`,
+		subject: `[${serviceIdentity.name}] [${abuseCaseTag(input.report.id)}] ${snapshot.kit.abuse === "malware" ? "Malware" : "Phishing"} abuse: ${kitLabel} ${location}${reportReference}`,
 		body,
 		recipientLabel: providerLabel,
 	};

@@ -26,7 +26,7 @@ describe("probe to upload, end to end with fakes only", () => {
 			cancelRun: async () => undefined,
 		};
 		const result = await runExfiltrationProbe(
-			{ reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", phishingBasis: "credential_theft", reporter: {} },
+			{ reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", reporter: {} },
 			adapter,
 			undefined,
 			{
@@ -39,8 +39,7 @@ describe("probe to upload, end to end with fakes only", () => {
 				saveCapture: async () => undefined,
 				heartbeat: async () => undefined,
 				sleep: async () => undefined,
-				investigateDownload: (file, phishingBasis) => investigateCollectedDownload(file, config, {
-					phishingBasis,
+				investigateDownload: (file) => investigateCollectedDownload(file, config, {
 					fetch: async (url) => { expect(url).toBe(downloadUrl); return { body: payload }; },
 					lookups: async (sha256) => { lookedUp.push(sha256); return [{ provider: "virustotal", state: "not_found" }]; },
 					submit: async (provider, file) => { uploads.push({ provider, fileName: file.fileName, bytes: file.bytes.byteLength }); return { state: "submitted", analysisId: "analysis-e2e" }; },
@@ -56,7 +55,6 @@ describe("probe to upload, end to end with fakes only", () => {
 		let uploads = 0;
 		const config: DownloadPipelineConfig = { storeRoot: undefined, malwareBazaarAuthKey: undefined, virusTotalApiKey: "k", uploadPermitted: new Set(["virustotal" as const]), retentionMs: 30 * 86_400_000 };
 		await investigateCollectedDownload({ url: new URL(downloadUrl), remoteName: "a.zip", reportedSha256: undefined }, config, {
-			phishingBasis: "credential_theft",
 			fetch: async () => ({ body: payload }),
 			lookups: async () => [{ provider: "virustotal", state: "unavailable", reason: "HTTP 429" }],
 			submit: async () => { uploads++; return { state: "submitted", analysisId: "x" }; },

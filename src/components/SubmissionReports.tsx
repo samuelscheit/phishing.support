@@ -23,11 +23,12 @@ function label(value: string): string {
 function statusClass(status: string) {
 	if (["sent", "submitted", "acknowledged", "received"].includes(status)) return "border-emerald-200 bg-emerald-50 text-emerald-800";
 	if (["delivery_failed", "failed", "provider_rejected", "unknown_external_state", "needs_human", "insufficient_evidence", "no_route"].includes(status)) return "border-red-200 bg-red-50 text-red-800";
-	if (["pending", "queued", "running", "verified", "resolving", "accepted", "verifying"].includes(status)) return "border-amber-200 bg-amber-50 text-amber-800";
+	if (["pending", "queued", "running", "verified", "resolving", "investigating", "accepted", "verifying"].includes(status)) return "border-amber-200 bg-amber-50 text-amber-800";
 	return "border-blue-200 bg-blue-50 text-blue-800";
 }
 
 const reportStatusText: Record<string, string> = {
+	investigating: "Evidence about the site is being collected; no provider has been contacted yet.",
 	accepted: "The report was accepted and its provider routes are being resolved.",
 	resolving: "Abuse contacts and infrastructure routes are being resolved.",
 	verifying: "Resolved provider routes are being verified.",

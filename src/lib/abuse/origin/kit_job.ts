@@ -19,8 +19,6 @@ const SIBLING_SOURCE = /^(?:kit|origin)-sibling:/;
 /** A redirect hand-off opens the destination's own case; it inherits its parent's lineage. */
 const REDIRECT_SOURCE = /^redirect:(\d{1,20})$/;
 const MAX_REDIRECT_LINEAGE = 5;
-const KIT_SEED_BASES = new Set(["credential_theft", "payment_fraud"]);
-
 /**
  * Only a page our classifier confirmed as a credential or payment kit may seed
  * a search, and never a site that was itself found by one. Without this a
@@ -30,7 +28,7 @@ const KIT_SEED_BASES = new Set(["credential_theft", "payment_fraud"]);
 export async function isKitSiblingSeed(submissionId: bigint): Promise<boolean> {
 	const submission = await SubmissionsEntity.get(submissionId);
 	if (submission?.data.kind !== "website" || await discoveredBySiblingSearch(submission.source)) return false;
-	return (submission.data.website.siteAssessments ?? []).some(({ finding, phishingBasis }) => finding === "phishing" && KIT_SEED_BASES.has(phishingBasis ?? ""));
+	return (submission.data.website.siteAssessments ?? []).some(({ finding }) => finding === "phishing");
 }
 
 async function discoveredBySiblingSearch(source: string | null | undefined): Promise<boolean> {

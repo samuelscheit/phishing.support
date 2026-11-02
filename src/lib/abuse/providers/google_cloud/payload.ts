@@ -58,6 +58,7 @@ export function makeGoogleCloudAbuseDetails(params: {
 	target?: string;
 	observedUrls: readonly string[];
 	description: string;
+	allegationCategory?: string;
 	capturedAt: Date;
 	caseUrl?: string;
 	legalBrandUrl?: string;
@@ -75,6 +76,7 @@ export function makeGoogleCloudAbuseDetails(params: {
 			target: params.target,
 			observedUrls: params.observedUrls,
 			description: params.description,
+			...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 			...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
 			maximumLength: narrativeRoom,
 		})
@@ -89,6 +91,7 @@ export function buildGoogleCloudSubmissionPayload(params: {
 	target: string;
 	observedUrls: readonly string[];
 	description: string;
+	allegationCategory?: string;
 	capturedAt: Date;
 	caseUrl?: string;
 	legalBrandUrl?: string;
@@ -100,6 +103,7 @@ export function buildGoogleCloudSubmissionPayload(params: {
 		target,
 		observedUrls,
 		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		capturedAt: params.capturedAt,
 		...(params.caseUrl ? { caseUrl: params.caseUrl } : {}),
 		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),

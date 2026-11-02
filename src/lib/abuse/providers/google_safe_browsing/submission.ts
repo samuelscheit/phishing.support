@@ -13,6 +13,7 @@ import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
 import { GOOGLE_SAFE_BROWSING_PROVIDER } from "./definition";
 import {
 	buildGoogleSafeBrowsingSubmissionPayload,
+	GOOGLE_SAFE_BROWSING_MALWARE_THREAT,
 	storedGoogleSafeBrowsingSubmissionPayload,
 } from "./payload";
 
@@ -92,6 +93,15 @@ async function installRecaptchaToken(page: GoogleSafeBrowsingPage, token: string
 	}, token);
 }
 
+/** Open one Angular Material select and pick the option with this exact label. */
+async function selectFormOption(page: GoogleSafeBrowsingPage, formControlName: string, label: string): Promise<void> {
+	await page.click(`mat-select[formcontrolname="${formControlName}"]`);
+	const option = await page.waitForFunction((text) => [...document.querySelectorAll("mat-option")]
+		.find((element) => element.textContent?.replace(/\s+/g, " ").trim() === text), {}, label);
+	await (option.asElement() as Awaited<ReturnType<GoogleSafeBrowsingPage["$"]>>)?.click();
+	await page.waitForFunction((name, text) => document.querySelector(`mat-select[formcontrolname="${name}"]`)?.textContent?.replace(/\s+/g, " ").trim() === text, {}, formControlName, label);
+}
+
 async function pressSubmit(page: GoogleSafeBrowsingPage, pause: (milliseconds: number) => Promise<void>): Promise<void> {
 	await page.focus('button[type="submit"]');
 	await pause(750);
@@ -159,6 +169,7 @@ export async function prepareGoogleSafeBrowsingSubmission(context: ProviderSubmi
 		target: target.normalizedTarget,
 		observedUrl,
 		description: report.description,
+		allegationCategory: report.allegationCategory,
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
 	});
 	if (!payload) return { outcome: "insufficient_evidence", reason: "google_safe_browsing_report_payload_invalid" };
@@ -183,9 +194,10 @@ export async function submitGoogleSafeBrowsingSubmission(
 		target: target.normalizedTarget,
 		observedUrl: payload.target.observedUrl,
 		description: report.description,
+		allegationCategory: report.allegationCategory,
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
 	});
-	if (!expected || expected.report.explanation !== payload.report.explanation) {
+	if (!expected || expected.report.explanation !== payload.report.explanation || expected.report.threat !== payload.report.threat) {
 		throw new Error("The persisted Google Safe Browsing payload no longer matches the report evidence.");
 	}
 
@@ -220,6 +232,10 @@ export async function submitGoogleSafeBrowsingSubmission(
 		if (token) await raceAbort(installRecaptchaToken(session.page, token), signal, closeBrowser, "Google Safe Browsing submission was canceled.");
 		await raceAbort(session.page.waitForSelector("#mat-input-0"), signal, closeBrowser, "Google Safe Browsing submission was canceled.");
 		await raceAbort(session.page.type("#mat-input-1", payload.report.explanation), signal, closeBrowser, "Google Safe Browsing submission was canceled.");
+		if (payload.report.threat === "malware") {
+			await raceAbort(selectFormOption(session.page, "l1Taxonomy", GOOGLE_SAFE_BROWSING_MALWARE_THREAT.category), signal, closeBrowser, "Google Safe Browsing submission was canceled.");
+			await raceAbort(selectFormOption(session.page, "l3Taxonomy", GOOGLE_SAFE_BROWSING_MALWARE_THREAT.type), signal, closeBrowser, "Google Safe Browsing submission was canceled.");
+		}
 		const success = await submitGoogleSafeBrowsingForm({
 			pressSubmit: () => raceAbort(
 				pressSubmit(session.page, dependencies.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)))),
@@ -236,7 +252,7 @@ export async function submitGoogleSafeBrowsingSubmission(
 			pause: dependencies.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
 		});
 		return {
-			confirmationText: success.text || "Google Safe Browsing accepted the phishing report.",
+			confirmationText: success.text || `Google Safe Browsing accepted the ${payload.report.threat === "malware" ? "malware" : "phishing"} report.`,
 			finalUrl: session.page.url(),
 			submittedTargets: [payload.target.normalizedTarget],
 		};

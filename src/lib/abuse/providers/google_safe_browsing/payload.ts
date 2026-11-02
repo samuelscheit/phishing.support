@@ -15,9 +15,18 @@ export type GoogleSafeBrowsingSubmissionPayload = {
 		observedUrl: string;
 	};
 	report: {
+		/**
+		 * The form's optional threat category. Google's report_badware path is a
+		 * redirect to this same form; the category is what marks a malware report.
+		 */
+		threat?: GoogleSafeBrowsingThreat;
 		explanation: string;
 	};
 };
+
+/** Labels of the form's "Kategorie der Bedrohung" and "Art der Bedrohung" options (hl=de) for a malware report. */
+export const GOOGLE_SAFE_BROWSING_MALWARE_THREAT = { category: "Malware", type: "Desktop-Malware" } as const;
+export type GoogleSafeBrowsingThreat = "malware";
 
 /**
  * Google has one free-text reason field. Build it from the report's
@@ -27,6 +36,7 @@ export function makeGoogleSafeBrowsingExplanation(params: {
 	target?: string;
 	observedUrl?: string;
 	description: string;
+	allegationCategory?: string;
 	legalBrandUrl?: string;
 }): string | undefined {
 	return buildProviderReportNarrative({
@@ -34,6 +44,7 @@ export function makeGoogleSafeBrowsingExplanation(params: {
 		target: params.target,
 		observedUrls: params.observedUrl ? [params.observedUrl] : [],
 		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
 		maximumLength: GOOGLE_SAFE_BROWSING_PROVIDER.explanationMaximumLength,
 	});
@@ -44,6 +55,7 @@ export function buildGoogleSafeBrowsingSubmissionPayload(params: {
 	target: string;
 	observedUrl: string;
 	description: string;
+	allegationCategory?: string;
 	legalBrandUrl?: string;
 }): GoogleSafeBrowsingSubmissionPayload | undefined {
 	const target = normalizePublicHost(params.target);
@@ -52,6 +64,7 @@ export function buildGoogleSafeBrowsingSubmissionPayload(params: {
 		target,
 		observedUrl,
 		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
 	});
 	if (!target || !observedUrl || !explanation) return undefined;
@@ -60,7 +73,7 @@ export function buildGoogleSafeBrowsingSubmissionPayload(params: {
 		providerNarrativeVersion: 1,
 		definition: { version: GOOGLE_SAFE_BROWSING_PROVIDER.version, contentHash: GOOGLE_SAFE_BROWSING_PROVIDER.contentHash },
 		target: { normalizedTarget: target, observedUrl },
-		report: { explanation },
+		report: { ...(params.allegationCategory === "malware" ? { threat: "malware" as const } : {}), explanation },
 	};
 }
 
@@ -73,7 +86,8 @@ export function storedGoogleSafeBrowsingSubmissionPayload(value: unknown): Googl
 	if (!payload || payload.adapter !== "google_safe_browsing_phish_v1" || payload.providerNarrativeVersion !== 1
 		|| !definition || definition.version !== GOOGLE_SAFE_BROWSING_PROVIDER.version || definition.contentHash !== GOOGLE_SAFE_BROWSING_PROVIDER.contentHash
 		|| !target || typeof target.normalizedTarget !== "string" || typeof target.observedUrl !== "string"
-		|| !report || typeof report.explanation !== "string" || report.explanation.length === 0 || report.explanation.length > GOOGLE_SAFE_BROWSING_PROVIDER.explanationMaximumLength) {
+		|| !report || (report.threat !== undefined && report.threat !== "malware")
+		|| typeof report.explanation !== "string" || report.explanation.length === 0 || report.explanation.length > GOOGLE_SAFE_BROWSING_PROVIDER.explanationMaximumLength) {
 		return undefined;
 	}
 	const normalizedTarget = normalizePublicHost(target.normalizedTarget);
@@ -85,6 +99,6 @@ export function storedGoogleSafeBrowsingSubmissionPayload(value: unknown): Googl
 		providerNarrativeVersion: 1,
 		definition: { version: GOOGLE_SAFE_BROWSING_PROVIDER.version, contentHash: GOOGLE_SAFE_BROWSING_PROVIDER.contentHash },
 		target: { normalizedTarget, observedUrl: observed },
-		report: { explanation: report.explanation },
+		report: { ...(report.threat === "malware" ? { threat: "malware" as const } : {}), explanation: report.explanation },
 	};
 }

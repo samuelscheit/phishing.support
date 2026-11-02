@@ -5,7 +5,7 @@ import { runExfiltrationProbe } from "../probe";
 import type { ExfiltrationCanaries } from "../types";
 
 const canaries: ExfiltrationCanaries = { marker: "psprobe_step0000000000", email: "probe.step@probe-canary.invalid", password: "A9!psprobe_step!qZ", phone: "+12125550101", cardNumber: "4242424242424242", oneTimeCode: "123456" };
-const input = { reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", phishingBasis: "credential_theft" as const, reporter: {} };
+const input = { reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", reporter: {} };
 
 function harness(downloadedFiles: unknown, options: { fetchFails?: boolean } = {}) {
 	const saved: string[] = [];
@@ -31,7 +31,7 @@ function harness(downloadedFiles: unknown, options: { fetchFails?: boolean } = {
 			investigateDownload: async (file) => {
 				if (options.fetchFails) throw new Error("download host refused");
 				investigated.push(file.url.toString());
-				return undefined;
+				return { sha256: "a".repeat(64), action: { action: "skip", reason: "no_upload_permitted" }, uploads: [] };
 			},
 		}),
 	};
@@ -55,7 +55,7 @@ describe("download step inside the probe", () => {
 			saveCapture: async () => { order.push("capture"); },
 			heartbeat: async () => undefined,
 			sleep: async () => undefined,
-			investigateDownload: async () => { order.push("download"); return undefined; },
+			investigateDownload: async () => { order.push("download"); return { sha256: "a".repeat(64), action: { action: "skip", reason: "no_upload_permitted" }, uploads: [] }; },
 		});
 		await runWithOrder();
 		expect(order).toEqual(["capture", "download"]);

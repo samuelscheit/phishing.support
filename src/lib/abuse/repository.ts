@@ -71,6 +71,7 @@ import {
 import { getPublicStatus } from "./persistence/public_status";
 import {
 	createReport,
+	releaseInvestigatedReport,
 	getReport,
 	getReportForSubmission,
 	listReportsForSubmission,
@@ -106,6 +107,7 @@ export { aggregateReportStatus } from "./persistence/state";
 
 export const AbuseRepository = {
 	createReport,
+	releaseInvestigatedReport,
 	getReport,
 	getReportByTrackingTokenHash,
 	getReportByTrackingToken,

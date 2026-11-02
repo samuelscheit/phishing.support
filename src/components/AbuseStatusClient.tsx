@@ -27,6 +27,7 @@ type ReportStatus = {
 };
 
 const statusText: Record<string, string> = {
+	investigating: "Collecting evidence before reporting",
 	accepted: "Accepted and queued",
 	resolving: "Resolving provider contacts",
 	verifying: "Verifying evidence",

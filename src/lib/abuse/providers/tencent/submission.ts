@@ -112,7 +112,7 @@ export function buildTencentCloudHttpPayload(params: {
 				url: params.payload.target.observedUrl,
 				describe: params.payload.report.explanation,
 				...(params.payload.report.legalBrandUrl ? { infringedUrl: params.payload.report.legalBrandUrl } : {}),
-				category: ["Phishing"],
+				category: [params.payload.report.category],
 				name: TENCENT_PROVIDER.reporter.name,
 				email: TENCENT_PROVIDER.reporter.email,
 				privacyCheckbox1: true,
@@ -153,6 +153,7 @@ export async function prepareTencentSubmission(context: ProviderSubmissionContex
 		target: target.normalizedTarget,
 		observedUrl,
 		description: report.description,
+		allegationCategory: report.allegationCategory,
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
 		screenshot,
 	});
@@ -179,10 +180,11 @@ export async function submitTencentSubmission(
 		target: target.normalizedTarget,
 		observedUrl: payload.target.observedUrl,
 		description: report.description,
+		allegationCategory: report.allegationCategory,
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
 		screenshot: payload.screenshot,
 	});
-	if (!rebuilt || rebuilt.report.explanation !== expectedExplanation || rebuilt.report.legalBrandUrl !== payload.report.legalBrandUrl) {
+	if (!rebuilt || rebuilt.report.explanation !== expectedExplanation || rebuilt.report.category !== payload.report.category || rebuilt.report.legalBrandUrl !== payload.report.legalBrandUrl) {
 		throw new Error("The persisted Tencent submission draft no longer matches the report evidence.");
 	}
 

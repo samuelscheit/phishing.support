@@ -85,6 +85,13 @@
       "when": 1793180447780,
       "tag": "0011_exfiltration_backends",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1793640000000,
+      "tag": "0012_malware_finding",
+      "breakpoints": true
     }
   ]
 }

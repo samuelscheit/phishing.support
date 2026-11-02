@@ -32,12 +32,12 @@ function line(value: string, maximum: number): string {
 
 /**
  * Summarize what the captured kit demonstrably does, from the classifier's
- * cited page fields and the controlled exfiltration probe only.
+ * cited page fields and the pre-report investigation only.
  */
 export async function capturedKitFacts(submissionId: bigint): Promise<OriginHostSnapshot["kit"]> {
 	const submission = await SubmissionsEntity.get(submissionId);
 	const website = submission?.data.kind === "website" ? submission.data.website : undefined;
-	const assessment = website?.siteAssessments?.find(({ finding }) => finding === "phishing");
+	const assessment = website?.siteAssessments?.find(({ finding }) => finding === "phishing" || finding === "malware");
 	const collected = new Set(
 		(website?.siteAssessments ?? [])
 			.filter(({ finding }) => finding === "phishing")
@@ -46,7 +46,7 @@ export async function capturedKitFacts(submissionId: bigint): Promise<OriginHost
 			.filter((category): category is KitCollectedData => Boolean(category)),
 	);
 	const exfiltrationTargets: string[] = [];
-	if (website?.backendProbe?.status === "completed") {
+	if (website?.investigation?.status === "completed") {
 		for (const report of await AbuseRepository.listReportsForSubmission(submissionId)) {
 			if (!report.idempotencyKey?.startsWith("exfil:")) continue;
 			for (const target of await AbuseRepository.listTargets(report.id)) exfiltrationTargets.push(line(target.normalizedTarget, 300));
@@ -54,10 +54,10 @@ export async function capturedKitFacts(submissionId: bigint): Promise<OriginHost
 	}
 	const evidenceQuote = assessment?.evidenceQuote ? line(assessment.evidenceQuote, 300) : undefined;
 	return {
-		...(assessment?.phishingBasis ? { phishingBasis: assessment.phishingBasis } : {}),
+		...(assessment?.finding === "malware" ? { abuse: "malware" as const } : assessment?.phishingBasis ? { abuse: assessment.phishingBasis } : {}),
 		...(evidenceQuote ? { evidenceQuote } : {}),
 		collects: kitCollectedData.filter((category) => collected.has(category)),
-		exfiltrationProbed: website?.backendProbe?.status === "completed",
+		exfiltrationProbed: website?.investigation?.status === "completed",
 		exfiltrationTargets: [...new Set(exfiltrationTargets)].slice(0, 20),
 	};
 }

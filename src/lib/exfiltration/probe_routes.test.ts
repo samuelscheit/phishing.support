@@ -15,7 +15,7 @@ const canaries: ExfiltrationCanaries = {
 	oneTimeCode: "123456",
 };
 
-const input = { reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", phishingBasis: "credential_theft" as const, reporter: {} };
+const input = { reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", reporter: {} };
 
 /** A scripted Skyvern run: each attempt on a route ends in the given status and failure reason. */
 function scriptedRoutes(outcomes: Partial<Record<FabricEgress, { status: string; failureReason?: string }>>) {
@@ -62,7 +62,7 @@ describe("exfiltration probe route walk", () => {
 		const result = await runExfiltrationProbe(input, routes.adapter, undefined, routes.dependencies);
 		expect(routes.bindings).toEqual(["phishing", "reporting", "residential"]);
 		expect(routes.createdOn).toEqual(["phishing", "reporting", "residential"]);
-		expect(result).toEqual({ requests: 0, backends: 0, egress: "residential" });
+		expect(result).toEqual({ requests: 0, backends: [], downloads: [], egress: "residential" });
 	});
 
 	test("stops at the first route that completes; later routes are never bound", async () => {
