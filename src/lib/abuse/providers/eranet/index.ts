@@ -16,6 +16,7 @@ export const eranetProvider: ProviderSubmissionProvider = {
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),
 	prepareExternalSubmission: prepareEranetExternalSubmission,
+	// The executor always calls submitPrepared: the code lives in the preflight's browser session.
 	submit: (context) => submitEranetSubmission(context, undefined),
 	submitPrepared: (context, preflight) => submitEranetSubmission(context, preflight),
 };

@@ -6,7 +6,7 @@ import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { eranetCodeFromMail } from "./code_mail";
 import { ERANET_PROVIDER } from "./definition";
 import { buildEranetSubmissionPayload, eranetSubTypes, storedEranetSubmissionPayload } from "./payload";
-import { prepareEranetExternalSubmission, prepareEranetSubmission, submitEranetSubmission, type EranetDependencies } from "./submission";
+import { prepareEranetExternalSubmission, prepareEranetSubmission, submitEranetSubmission, type EranetDependencies, type EranetSession } from "./submission";
 
 // A minimal valid PNG: the evidence contract checks the magic bytes and digest.
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
@@ -26,16 +26,18 @@ function routeContext(allegationCategory: "phishing" | "malware" = "malware") {
 }
 
 function eranetApi(responses: Record<string, () => Record<string, unknown>>) {
-	const calls: Array<{ path: string; json?: Record<string, unknown>; form?: FormData; headers: Headers }> = [];
-	const fetch = async (input: string, init?: RequestInit) => {
-		const path = input.replace(`${ERANET_PROVIDER.apiBaseUrl}/`, "");
-		const body = init?.body;
-		calls.push({ path, headers: new Headers(init?.headers), ...(typeof body === "string" ? { json: JSON.parse(body) } : { form: body as FormData }) });
-		const respond = responses[path];
-		if (!respond) throw new Error(`unexpected Eranet call ${path}`);
-		return Response.json({ RequestId: "r", ...respond() });
+	const calls: Array<{ path: string; json?: Record<string, unknown>; upload?: { type: string; filename: string; mimeType: string; base64: string } }> = [];
+	let closed = 0;
+	const session: EranetSession = {
+		call: async (path, body) => {
+			calls.push({ path, ..."json" in body ? { json: body.json } : { upload: body.upload } });
+			const respond = responses[path];
+			if (!respond) throw new Error(`unexpected Eranet call ${path}`);
+			return { RequestId: "r", ...respond() };
+		},
+		close: async () => { closed++; },
 	};
-	return { calls, fetch };
+	return { calls, session, openSession: async () => session, closed: () => closed };
 }
 
 describe("Eranet abuse form", () => {
@@ -64,7 +66,7 @@ describe("Eranet abuse form", () => {
 		});
 		const codeRequests: Date[] = [];
 		const deps: EranetDependencies = {
-			fetch: api.fetch,
+			openSession: api.openSession,
 			loadRouteContext: routeContext(),
 			getArtifact: async () => artifact,
 			readCode: async (requestedAt) => { codeRequests.push(requestedAt); return "893731"; },
@@ -72,11 +74,12 @@ describe("Eranet abuse form", () => {
 		};
 		const preflight = await prepareEranetExternalSubmission({ routeId: 5n, payload }, deps);
 		expect(api.calls.map((call) => call.path)).toEqual(["UploadFile", "GetEmailCode"]);
-		expect(api.calls[0]!.form?.get("type")).toBe("reportPageScreenshot");
+		expect(api.calls[0]!.upload).toMatchObject({ type: "reportPageScreenshot", mimeType: "image/png", base64: PNG.toString("base64") });
 		expect(api.calls[1]!.json).toEqual({ Email: "support@phishing.support", AliyunCaptchaVerifyParam: "" });
 		expect(codeRequests).toEqual([new Date("2026-11-03T00:00:00Z")]);
 
-		const success = await submitEranetSubmission({ routeId: 5n, payload }, preflight, deps);
+		// The code is valid only inside the session that requested it, so submit reuses it.
+		const success = await submitEranetSubmission({ routeId: 5n, payload }, preflight);
 		expect(api.calls.map((call) => call.path)).toEqual(["UploadFile", "GetEmailCode", "CreateComplaint"]);
 		expect(api.calls[2]!.json).toMatchObject({
 			Email: "support@phishing.support",
@@ -89,23 +92,28 @@ describe("Eranet abuse form", () => {
 			Website: "https://phishing.support/submissions/375628583143477248",
 		});
 		expect(String(api.calls[2]!.json?.Description)).toContain("malware distribution domain report is being submitted to Eranet for keychainagent.pro");
-		expect(api.calls[2]!.headers.get("referer")).toBe(ERANET_PROVIDER.reportPageUrl);
+		await preflight.dispose?.();
+		expect(api.closed()).toBe(1);
 		expect(success).toEqual({ confirmationId: "AB20261103001", confirmationText: "Eranet accepted the report (receipt AB20261103001).", finalUrl: ERANET_PROVIDER.reportPageUrl, submittedTargets: ["keychainagent.pro"] });
 	});
 
 	test("a named Eranet error is a known rejection, and a code that never arrives stops before the marker", async () => {
 		const payload = buildEranetSubmissionPayload({ target: "keychainagent.pro", observedUrl: "https://keychainagent.pro/x", description: "The page distributes malware.", allegationCategory: "malware", website: "https://phishing.support/submissions/1" })!;
 		const rejecting = eranetApi({ CreateComplaint: () => ({ error: "VerifyCode.NotFound.Code" }) });
-		await expect(submitEranetSubmission({ routeId: 5n, payload }, { state: { code: "123456", screenshots: [] } }, { fetch: rejecting.fetch }))
+		await expect(submitEranetSubmission({ routeId: 5n, payload }, { state: { session: rejecting.session, code: "123456", screenshots: [] } }))
 			.rejects.toBeInstanceOf(ProviderSubmissionRejectedError);
+		await expect(submitEranetSubmission({ routeId: 5n, payload }, { state: { code: "123456", screenshots: [] } }))
+			.rejects.toThrow("browser session");
 
 		const silent = eranetApi({ GetEmailCode: () => ({}) });
 		await expect(prepareEranetExternalSubmission({ routeId: 5n, payload }, {
-			fetch: silent.fetch,
+			openSession: silent.openSession,
 			loadRouteContext: routeContext(),
 			readCode: async () => { throw new Error("Eranet's verification code did not arrive in time."); },
 		})).rejects.toThrow("did not arrive in time");
 		expect(silent.calls.map((call) => call.path)).toEqual(["GetEmailCode"]);
+		// A failed preflight never leaks its browser.
+		expect(silent.closed()).toBe(1);
 	});
 
 	test("phishing reports file as phishing sites, and a stored draft from another definition is refused", () => {
