@@ -168,9 +168,15 @@ export function buildNameSiloHttpPayload(params: {
 
 /** Distinguish explicit NameSilo rejections from ambiguous transport results. */
 export async function parseNameSiloSubmissionResponse(
-	response: Pick<Response, "ok" | "status" | "text">,
+	response: Pick<Response, "ok" | "status" | "text"> & { headers?: Pick<Headers, "get"> },
 ): Promise<NameSiloResult> {
 	const body = await response.text();
+	// Cloudflare's firewall in front of NameSilo answered the request itself: it
+	// never reached NameSilo, so nothing was filed (a shell chain piped into an
+	// interpreter plus an upload trips its rule, production case 375628583143477248).
+	if (response.status === 403 && response.headers?.get("cf-mitigated") === "challenge") {
+		throw new ProviderSubmissionRejectedError("NameSilo's Cloudflare firewall blocked the report before it reached NameSilo (cf-mitigated: challenge); nothing was filed.");
+	}
 	const json = parseJsonRecord(body);
 	const result = json?.result;
 	const message = json?.message;

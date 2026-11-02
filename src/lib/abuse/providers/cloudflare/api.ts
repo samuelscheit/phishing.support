@@ -163,16 +163,67 @@ async function cloudflareDashboardRequest<T>(
 	}
 }
 
-/** Single-shot POST of one abuse report. */
+/** Cloudflare stores a report and can still answer its gateway with 5xx; this many seconds of clock skew are tolerated. */
+const RECEIPT_LOOKUP_SKEW_MS = 60_000;
+
+/**
+ * Find the report a POST created when its answer was lost. The account's
+ * submitted reports are searched by domain, limited to those created since the
+ * POST, and a report counts only when its URLs and justification are exactly
+ * the ones sent. More than one match stays ambiguous.
+ */
+export async function findSubmittedCloudflareReport(params: CloudflareRequestContext & {
+	report: CloudflareReportPayload;
+	target: string;
+	sentAt: Date;
+}): Promise<string | undefined> {
+	const url = `${CLOUDFLARE_PROVIDER.apiBaseUrl}/accounts/${params.config.accountId}/abuse-reports/submitted?search=${encodeURIComponent(params.target)}&per_page=50`;
+	const listed = await cloudflareDashboardRequest(params, { url, method: "GET" }, parseCloudflareRead);
+	const reports = Array.isArray(listed.reports) ? listed.reports.map(recordValue) : [];
+	const candidates = reports.filter((report) => {
+		const id = stringField(report?.id);
+		const created = Date.parse(stringField(report?.cdate) ?? "");
+		return id && SUBMITTED_REPORT_ID.test(id) && stringField(report?.domain) === params.target
+			&& Number.isFinite(created) && created >= params.sentAt.getTime() - RECEIPT_LOOKUP_SKEW_MS;
+	});
+	const matches: string[] = [];
+	for (const candidate of candidates) {
+		const id = stringField(candidate?.id)!;
+		const detail = await cloudflareDashboardRequest(params, { url: submittedReportUrl(params.config.accountId, id), method: "GET" }, parseCloudflareRead);
+		const urls = Array.isArray(detail.urls) ? detail.urls.filter((item): item is string => typeof item === "string") : [];
+		if (urls.join("\n") === params.report.urls && stringField(detail.justification) === params.report.justification) matches.push(id);
+	}
+	return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
+ * Single-shot POST of one abuse report. A server error or a lost answer does
+ * not prove the report is missing: Cloudflare stored report 397af589383e9ad3
+ * and answered HTTP 504. The account's submitted reports decide it before
+ * the outcome is left ambiguous.
+ */
 export async function submitCloudflareAbuseReport(params: CloudflareRequestContext & {
 	report: CloudflareReportPayload;
 	target: string;
 }): Promise<ProviderSubmissionSuccess> {
-	return cloudflareDashboardRequest(
-		params,
-		{ url: cloudflareReportsUrl(params.config.accountId), method: "POST", body: buildCloudflareApiBody(params.report) },
-		(status, rawBody) => parseCloudflareApiResponse(status, rawBody, { accountId: params.config.accountId, target: params.target }),
-	);
+	const sentAt = new Date();
+	try {
+		return await cloudflareDashboardRequest(
+			params,
+			{ url: cloudflareReportsUrl(params.config.accountId), method: "POST", body: buildCloudflareApiBody(params.report) },
+			(status, rawBody) => parseCloudflareApiResponse(status, rawBody, { accountId: params.config.accountId, target: params.target }),
+		);
+	} catch (error) {
+		if (error instanceof ProviderSubmissionRejectedError || error instanceof ProviderSubmissionNeedsHumanError || error instanceof CloudflareSessionExpiredError) throw error;
+		const receipt = await findSubmittedCloudflareReport({ ...params, sentAt }).catch(() => undefined);
+		if (!receipt) throw error;
+		return {
+			confirmationId: receipt,
+			confirmationText: "Cloudflare stored the abuse report; its answer to the request was lost, and the report was found in the account's submitted reports.",
+			finalUrl: `${CLOUDFLARE_PROVIDER.dashboardUrl}/${params.config.accountId}/abuse-reports/submitted`,
+			submittedTargets: [params.target],
+		};
+	}
 }
 
 const SUBMITTED_REPORT_ID = /^[a-f0-9]{16}$/;

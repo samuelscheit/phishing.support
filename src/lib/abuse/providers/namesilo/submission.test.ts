@@ -145,6 +145,11 @@ describe("NameSilo phishing report submission", () => {
 	});
 
 	test("treats only explicit provider errors as known rejections", async () => {
+		// NameSilo's Cloudflare firewall answers for NameSilo: the report never arrived, so this is a known failure.
+		await expect(parseNameSiloSubmissionResponse(new Response("<title>Just a moment...</title>", { status: 403, headers: { "cf-mitigated": "challenge" } })))
+			.rejects.toBeInstanceOf(ProviderSubmissionRejectedError);
+		await expect(parseNameSiloSubmissionResponse(new Response("<title>Just a moment...</title>", { status: 403 })))
+			.rejects.not.toBeInstanceOf(ProviderSubmissionRejectedError);
 		await expect(parseNameSiloSubmissionResponse(new Response(JSON.stringify({ result: "success", message: null, data: null }))))
 			.resolves.toMatchObject({ result: "success" });
 		await expect(parseNameSiloSubmissionResponse(new Response(JSON.stringify({

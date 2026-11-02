@@ -80,13 +80,41 @@ describe("Cloudflare dashboard API", () => {
 
 	test("never retries network failures, server errors, redirects, rejections or missing receipts", async () => {
 		for (const response of [new Response("bad gateway", { status: 502 }), new Response("redirect", { status: 302 }), new Response("no", { status: 403 }), new Response('{"result":"success"}'), undefined]) {
-			let calls = 0;
+			let posts = 0;
 			await expect(submitCloudflareAbuseReport({ config, session, report, target: context.target,
 				getSession: async () => { throw new Error("must not login"); },
-				fetch: async () => { calls++; if (!response) throw new Error("network"); return response; },
+				fetch: async (_url, init) => {
+					// An ambiguous answer is looked up read-only; no stored report means it stays ambiguous.
+					if (init?.method === "GET") return Response.json({ success: true, result: { reports: [] } });
+					posts++;
+					if (!response) throw new Error("network");
+					return response;
+				},
 			})).rejects.toThrow();
-			expect(calls).toBe(1);
+			expect(posts).toBe(1);
 		}
+	});
+
+	test("a 504 whose report Cloudflare did store is settled from the account's submitted reports", async () => {
+		// Production: report 397af589383e9ad3 was stored while the POST answered HTTP 504.
+		const requests: string[] = [];
+		const lookup = (justification: string) => async (url: string, init?: RequestInit) => {
+			requests.push(`${init?.method} ${url.replace(/^.*\/abuse-reports/, "")}`);
+			if (init?.method === "POST") return new Response('{"title":"Error 504: Gateway time-out"}', { status: 504 });
+			if (url.includes("/submitted?")) {
+				return Response.json({ success: true, result: { reports: [
+					{ id: "397af589383e9ad3", cdate: new Date().toISOString(), domain: context.target },
+					{ id: "0000000000000001", cdate: "2020-01-01T00:00:00Z", domain: context.target },
+				] } });
+			}
+			return Response.json({ success: true, result: { id: "397af589383e9ad3", urls: [report.urls], justification } });
+		};
+		const found = await submitCloudflareAbuseReport({ config, session, report, target: context.target, fetch: lookup(report.justification) });
+		expect(found).toMatchObject({ confirmationId: "397af589383e9ad3", submittedTargets: [context.target] });
+		expect(requests.filter((request) => request.startsWith("POST"))).toHaveLength(1);
+		// The old report from 2020 is never read; a stored report with other text is not ours.
+		expect(requests.some((request) => request.includes("0000000000000001"))).toBeFalse();
+		await expect(submitCloudflareAbuseReport({ config, session, report, target: context.target, fetch: lookup("someone else's report") })).rejects.toThrow("HTTP 504");
 	});
 
 	test("relogs in exactly once only after an explicit expired-session rejection", async () => {
@@ -117,7 +145,7 @@ describe("Cloudflare dashboard API", () => {
 		let calls = 0;
 		try {
 			await submitCloudflareAbuseReport({ config, session, report, target: context.target, getSession: async () => fresh,
-				fetch: async () => { if (++calls === 1) return expired(); throw new Error("connection lost"); },
+				fetch: async (_url, init) => { if (init?.method === "GET") throw new Error("lookup unavailable"); if (++calls === 1) return expired(); throw new Error("connection lost"); },
 			});
 			throw new Error("expected failure");
 		} catch (error) {
