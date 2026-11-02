@@ -8,7 +8,7 @@
 		"test": "bun test ./worker.test.js ./http.test.js"
 	},
 	"dependencies": {
-		"ws": "8.18.3"
+		"ws": "8.21.0"
 	},
 	"devDependencies": {
 		"cf": "1.0.0-beta.26",
