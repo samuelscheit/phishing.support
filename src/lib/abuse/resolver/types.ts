@@ -39,7 +39,7 @@ export type ResolvedAbuseTarget = {
 
 export type AbuseMailbox = {
 	email: string;
-	source: "domain_rdap" | "domain_whois" | "ip_rdap" | "ip_whois" | "asn_rdap";
+	source: "registrar_rdap" | "domain_rdap" | "domain_whois" | "ip_rdap" | "ip_whois" | "asn_rdap";
 	entityHandle?: string;
 	entityName?: string;
 	roles?: string[];

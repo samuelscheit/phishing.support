@@ -53,6 +53,7 @@ export function buildCloudflareApiBody(report: CloudflareReportPayload) {
 		justification: report.justification,
 		...(report.originalWork ? { original_work: report.originalWork } : {}),
 		reported_country: report.reportedCountry,
+		...(report.reportedUserAgent ? { reported_user_agent: report.reportedUserAgent } : {}),
 		host_notification: "send-anon",
 		owner_notification: "send-anon",
 	} as const;

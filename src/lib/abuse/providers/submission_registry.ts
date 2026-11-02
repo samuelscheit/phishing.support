@@ -6,6 +6,7 @@ export type ProviderSubmissionRegistry = {
 	list(): readonly ProviderSubmissionProvider[];
 	get(key: string): ProviderSubmissionProvider | undefined;
 	getForMailbox(mailbox: string | undefined): ProviderSubmissionProvider | undefined;
+	getForRegistrarId(registrarId: number | undefined): ProviderSubmissionProvider | undefined;
 	listSupplemental(): readonly ProviderSubmissionProvider[];
 	listSupplementalForTarget(target: { targetType: AbuseTargetType; observedUrls: readonly string[] }): readonly ProviderSubmissionProvider[];
 };
@@ -33,14 +34,21 @@ export function createProviderSubmissionRegistry(providers: readonly ProviderSub
 	const registeredProviders = [...providers] as readonly ProviderSubmissionProvider[];
 	const byKey = new Map<string, ProviderSubmissionProvider>();
 	const byMailbox = new Map<string, ProviderSubmissionProvider>();
+	const byRegistrarId = new Map<number, ProviderSubmissionProvider>();
 
 	for (const provider of registeredProviders) {
 		const { definition } = provider;
 		if (byKey.has(definition.key)) throw new Error(`Duplicate provider submission key ${definition.key}.`);
 		if (!providerDefinitionHasValidHash(definition)) throw new Error(`Provider submission ${definition.key} has an invalid content hash.`);
 		if (!Array.isArray(definition.exactMailboxes)) throw new Error(`Provider submission ${definition.key} must declare exact mailboxes as an array.`);
-		if (!definition.supplemental && definition.exactMailboxes.length === 0) {
-			throw new Error(`Provider submission ${definition.key} must declare an exact mailbox or be supplemental.`);
+		if (!definition.supplemental && definition.exactMailboxes.length === 0 && !definition.registrarIds?.length) {
+			throw new Error(`Provider submission ${definition.key} must declare an exact mailbox, a registrar ID, or be supplemental.`);
+		}
+		for (const registrarId of definition.registrarIds ?? []) {
+			if (!Number.isSafeInteger(registrarId) || registrarId <= 0) throw new Error(`Invalid registrar ID for provider submission ${definition.key}.`);
+			const existing = byRegistrarId.get(registrarId);
+			if (existing) throw new Error(`Registrar ID ${registrarId} is registered by both ${existing.definition.key} and ${definition.key}.`);
+			byRegistrarId.set(registrarId, provider);
 		}
 		if (definition.supplemental && (!Array.isArray(definition.supplementalTargets) || definition.supplementalTargets.length === 0)) {
 			throw new Error(`Supplemental provider submission ${definition.key} must declare at least one target rule.`);
@@ -71,6 +79,7 @@ export function createProviderSubmissionRegistry(providers: readonly ProviderSub
 			const normalized = normalizeExactMailbox(mailbox);
 			return normalized ? byMailbox.get(normalized) : undefined;
 		},
+		getForRegistrarId: (registrarId) => registrarId !== undefined && Number.isSafeInteger(registrarId) ? byRegistrarId.get(registrarId) : undefined,
 		listSupplemental: () => supplementalProviders,
 		listSupplementalForTarget: (target) => supplementalProviders.filter((provider) =>
 			provider.definition.supplementalTargets!.some((rule) =>

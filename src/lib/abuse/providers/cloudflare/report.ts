@@ -13,6 +13,8 @@ export type CloudflareReportInput = {
 	/** `phishing` or `malware`: Cloudflare's phishing report type is its "Phishing & Malware" form. */
 	allegationCategory?: string;
 	legalBrandUrl?: string;
+	/** The User-Agent Cloudflare's reviewer must send to see the content. */
+	reportedUserAgent?: string;
 };
 
 export type CloudflareReportPayload = {
@@ -23,6 +25,7 @@ export type CloudflareReportPayload = {
 	justification: string;
 	originalWork?: string;
 	reportedCountry: string;
+	reportedUserAgent?: string;
 };
 
 /**
@@ -68,5 +71,6 @@ export function buildCloudflareReportPayload(input: CloudflareReportInput): Clou
 		justification,
 		...(legalBrandUrl ? { originalWork: legalBrandUrl } : {}),
 		reportedCountry: /^[A-Z]{2}$/.test(input.reportedCountry ?? "") ? input.reportedCountry! : serviceIdentity.countryCode,
+		...(input.reportedUserAgent ? { reportedUserAgent: input.reportedUserAgent.slice(0, 255) } : {}),
 	};
 }

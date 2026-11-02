@@ -14,6 +14,11 @@ export type ProviderSubmissionDefinition = {
 	readonly contentHash: string;
 	/** Explicit abuse mailboxes that select this provider, never a domain rule. */
 	readonly exactMailboxes: readonly string[];
+	/**
+	 * IANA registrar IDs whose domains this provider reports through its own
+	 * form, whatever mailbox the RDAP record names (it may not exist).
+	 */
+	readonly registrarIds?: readonly number[];
 	/** Whether this provider should run in addition to the mailbox-selected one. */
 	readonly supplemental: boolean;
 	/**

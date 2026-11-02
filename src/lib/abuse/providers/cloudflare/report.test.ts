@@ -1,8 +1,26 @@
 import { describe, expect, test } from "bun:test";
 
+import { buildCloudflareApiBody } from "./api";
 import { buildCloudflareReportPayload, buildCloudflareReportPreview } from "./report";
 
 describe("buildCloudflareReportPayload", () => {
+	test("a malware payload host carries the User-Agent Cloudflare's reviewer must send", () => {
+		// keychainagent.pro served its script to curl and a 404 to browsers; Cloudflare denied
+		// report 397af589383e9ad3 as content_removed after checking with a browser.
+		const payload = buildCloudflareReportPayload({
+			reportedCountry: "DE",
+			target: "keychainagent.pro",
+			observedUrl: "https://keychainagent.pro/wksxgj/wZZLR9xY29o4",
+			description: "This host serves malware. The host serves the file only to that downloader and answers a web browser with 404 Not Found.",
+			allegationCategory: "malware",
+			reportedUserAgent: "curl/8.7.1",
+		});
+		expect(payload.reportedUserAgent).toBe("curl/8.7.1");
+		expect(payload.justification).toStartWith("Confirmed malware distribution site: keychainagent.pro");
+		expect(buildCloudflareApiBody(payload)).toMatchObject({ act: "abuse_phishing", reported_user_agent: "curl/8.7.1" });
+		expect(buildCloudflareApiBody(buildCloudflareReportPayload({ target: "example.com", observedUrl: "https://example.com/x", description: "Credential page." }))).not.toHaveProperty("reported_user_agent");
+	});
+
 	test("includes the report allegation and the legitimate brand", () => {
 		const payload = buildCloudflareReportPayload({
 			reportedCountry: "DE",

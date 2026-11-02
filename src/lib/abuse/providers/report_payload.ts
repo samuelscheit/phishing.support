@@ -97,6 +97,7 @@ export type ProviderReportProfile =
 	| "netcraft"
 	| "namesilo"
 	| "tencent"
+	| "eranet"
 	| "gname";
 
 type ProviderReportNarrativeInput = {
@@ -227,6 +228,12 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 			return {
 				lead: `A suspected ${allegation} domain report is being submitted to NameSilo for ${target}.`,
 				action: "Please investigate the captured evidence and apply the appropriate registrar abuse action.",
+				urlContext,
+			};
+		case "eranet":
+			return {
+				lead: `A suspected ${allegation} domain report is being submitted to Eranet for ${target}.`,
+				action: "Please investigate the captured evidence and suspend the domain under your registrar abuse policy.",
 				urlContext,
 			};
 		case "gname":

@@ -15,6 +15,7 @@ import { defaultReasoning, defaultResponseModel, sleep } from "./utils";
 import { extractWebsiteDataEntryFields } from "./website_fields";
 import { describeDataEntryField, type WebsiteKitResource } from "./website_types";
 import { extractPasteCommands, type PasteCommand } from "./malware/paste_commands";
+import { defangCommand, defangUrl } from "./malware/defang";
 import { isSameWebsite, websiteSite } from "./website_site";
 import type {
 	ReportableWebsiteFinding,
@@ -163,10 +164,10 @@ function pasteCommandStatements(commands: readonly PasteCommand[]): string[] {
 	return commands.flatMap((command) => {
 		const decoded = command.layers.slice(1).map((layer) => layer.text);
 		return [
-			`The page tells visitors to paste and run this command: ${JSON.stringify(command.shown)}.`,
-			...(decoded.length ? [`Decoded, it runs: ${decoded.map((text) => JSON.stringify(text)).join(" -> ")}.`] : []),
-			...(command.decoys.length ? [`It shows ${command.decoys.map((decoy) => JSON.stringify(decoy)).join(", ")} so the visitor believes a legitimate install is running.`] : []),
-			...(command.payloadUrls.length ? [`It downloads and runs code from: ${command.payloadUrls.join(", ")}.`] : []),
+			`The page tells visitors to paste and run this command (defanged): ${JSON.stringify(defangCommand(command.shown))}.`,
+			...(decoded.length ? [`Decoded, it runs: ${decoded.map((text) => JSON.stringify(defangCommand(text))).join(" -> ")}.`] : []),
+			...(command.decoys.length ? [`It shows ${command.decoys.map((decoy) => JSON.stringify(defangCommand(decoy))).join(", ")} so the visitor believes a legitimate install is running.`] : []),
+			...(command.payloadUrls.length ? [`It downloads and runs code from: ${command.payloadUrls.map(defangUrl).join(", ")}.`] : []),
 		];
 	});
 }
@@ -182,7 +183,8 @@ export function buildWebsiteReportEvidence(classification: WebsiteSiteClassifica
 	const { finding, phishingBasis, evidenceQuote, collectionFields } = classification;
 	return [
 		finding === "malware" ? MALWARE_STATEMENT : phishingBasis ? PHISHING_BASIS_STATEMENTS[phishingBasis] : undefined,
-		evidenceQuote ? `Page text that shows it, in its original language: ${JSON.stringify(evidenceQuote)}.` : undefined,
+		// A malware page's quote is the command itself; it is quoted defanged.
+		evidenceQuote ? `Page text that shows it, in its original language${finding === "malware" ? " (defanged)" : ""}: ${JSON.stringify(finding === "malware" ? defangCommand(evidenceQuote) : evidenceQuote)}.` : undefined,
 		collectionFields?.length ? `The page collects this data through: ${collectionFields.map((field) => JSON.stringify(describeDataEntryField(field))).join(", ")}.` : undefined,
 		...(finding === "malware" ? pasteCommandStatements(commands) : []),
 	].filter((line): line is string => Boolean(line)).join("\n");

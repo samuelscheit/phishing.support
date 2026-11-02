@@ -1,5 +1,6 @@
 import type { AbuseTargetType } from "../schema";
 import { cloudflareProvider } from "./cloudflare";
+import { eranetProvider } from "./eranet";
 import { googleCloudProvider } from "./google_cloud";
 import { googleSafeBrowsingProvider } from "./google_safe_browsing";
 import { nameSiloProvider } from "./namesilo";
@@ -18,6 +19,7 @@ const registry = createProviderSubmissionRegistry([
 	cloudflareProvider,
 	tencentProvider,
 	nameSiloProvider,
+	eranetProvider,
 	googleCloudProvider,
 	googleSafeBrowsingProvider,
 	netcraftProvider,
@@ -34,6 +36,10 @@ export function getProviderSubmissionProvider(key: string): ProviderSubmissionPr
 
 export function getProviderSubmissionProviderForMailbox(mailbox: string | undefined): ProviderSubmissionProvider | undefined {
 	return registry.getForMailbox(mailbox);
+}
+
+export function getProviderSubmissionProviderForRegistrarId(registrarId: number | undefined): ProviderSubmissionProvider | undefined {
+	return registry.getForRegistrarId(registrarId);
 }
 
 export function listSupplementalProviderSubmissionProviders(): readonly ProviderSubmissionProvider[] {

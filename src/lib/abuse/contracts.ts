@@ -72,6 +72,8 @@ export type ValidatedAbuseReportRequest = {
 	description: string;
 	observedUrls: Array<{ target: string; urls: string[] }>;
 	legalBrandUrl?: string;
+	/** The User-Agent a reviewer must send to see the content; see `abuse_reports.reported_user_agent`. */
+	reportedUserAgent?: string;
 	/**
 	 * The public submitter, named only in the report text. Absent for
 	 * submission-owned reports and API clients that send no identity: those

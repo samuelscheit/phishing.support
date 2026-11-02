@@ -9,6 +9,7 @@ import { fetchCommandPayload, type FetchedPayload } from "../malware/payload_fet
 import { payloadEvidence, payloadVerdictSentence, type PayloadEvidence } from "../malware/payload_evidence";
 import { reportPayloadHost } from "../malware/payload_host_report";
 import type { ReporterMetadata } from "../request_metadata";
+import { defangCommand, defangUrl } from "../malware/defang";
 import type { InvestigationJobPayload, InvestigationPasteCommand } from "./payload";
 import { setInvestigationStatus } from "./status";
 
@@ -82,10 +83,10 @@ async function investigatePayloads(
 function payloadFindings(results: readonly PayloadResult[]): string[] {
 	return results.flatMap(({ evidence, error, command }) => evidence
 		? [
-			`We downloaded the payload from ${evidence.url} as the command does (${evidence.sizeBytes} bytes, SHA-256 ${evidence.sha256}) and did not run it.`,
+			`We downloaded the payload from ${defangUrl(evidence.url)} as the command does (${evidence.sizeBytes} bytes, SHA-256 ${evidence.sha256}) and did not run it.`,
 			payloadVerdictSentence(evidence),
 		]
-		: [`The payload host for ${JSON.stringify(command.shown)} refused the download during our check (${error}).`]);
+		: [`The payload host for the command ${JSON.stringify(defangCommand(command.shown))} refused the download during our check (${error}).`]);
 }
 
 function probeFindings(result: ExfiltrationProbeResult): string[] {
@@ -122,7 +123,7 @@ export async function runReportInvestigation(
 	const payloads = await investigatePayloads(payload.pasteCommands, deps, signal);
 	for (const { command, evidence } of payloads) {
 		if (!evidence) continue;
-		await deps.reportPayloadHost({ submissionId, sourceReportId: reportId, pageUrl: payload.pageUrl, command: command.shown, payload: evidence, reporter });
+		await deps.reportPayloadHost({ submissionId, sourceReportId: reportId, pageUrl: payload.pageUrl, command: command.shown, interpreters: command.interpreters, payload: evidence, reporter });
 	}
 
 	let probe: ExfiltrationProbeResult | undefined;

@@ -91,7 +91,8 @@ describe("pre-report investigation", () => {
 		const released = await AbuseRepository.getReport(report.reportId);
 		expect(released?.status).toBe("accepted");
 		expect(released?.allegationCategory).toBe("malware");
-		expect(released?.description).toContain(`We downloaded the payload from ${PAYLOAD_URL} as the command does`);
+		expect(released?.description).toContain("We downloaded the payload from hxxps://keychainagent[.]pro/wksxgj/wZZLR9xY29o4 as the command does");
+		expect(released?.description).not.toContain("| zsh");
 		expect(released?.description).toContain("SHA-256 e23507e03916279372baa4f0c314fb3df5d78d741eeb7df25f43fe33ae50d9c5");
 		expect(released?.description).toContain("VirusTotal classifies this file as malicious: https://www.virustotal.com/gui/file/e23507e03916279372baa4f0c314fb3df5d78d741eeb7df25f43fe33ae50d9c5");
 		expect((await jobsOf(report.reportId)).map((item) => item.jobType).sort()).toEqual(["investigate_report", "resolve_report"]);
@@ -101,8 +102,13 @@ describe("pre-report investigation", () => {
 		// The payload host has its own malware report on the same case.
 		const reports = await AbuseRepository.listReportsForSubmission(submissionId);
 		const hostReport = reports.find((item) => item.id !== report.reportId)!;
-		expect(hostReport).toMatchObject({ allegationCategory: "malware", status: "accepted" });
+		// Cloudflare's reviewer must send the downloader's User-Agent: the host answers a browser with 404.
+		expect(hostReport).toMatchObject({ allegationCategory: "malware", status: "accepted", reportedUserAgent: "curl/8.7.1" });
 		expect(hostReport.description).toContain(`tells visitors to paste a command into their terminal, and that command downloads and runs code from ${PAYLOAD_URL}`);
+		expect(hostReport.description).toContain(`request the URL with the User-Agent "curl/8.7.1", for example: curl -A "curl/8.7.1"`);
+		expect(hostReport.description).toContain("Command shown on the page (defanged): ");
+		expect(hostReport.description).toContain("[pipe] base64 -d [pipe] zsh");
+		expect(hostReport.description).not.toContain("| zsh");
 		expect((await AbuseRepository.listTargets(hostReport.id)).map((target) => [target.normalizedTarget, target.observedUrls])).toEqual([["keychainagent.pro", [PAYLOAD_URL]]]);
 
 		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { investigation: {

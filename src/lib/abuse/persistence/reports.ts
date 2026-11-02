@@ -91,6 +91,7 @@ export async function createReport(params: {
 					allegationCategory: request.allegationCategory,
 					description: request.description,
 					legalBrandUrl: request.legalBrandUrl,
+					reportedUserAgent: request.reportedUserAgent,
 					reporterName: request.reporter?.name,
 					reporterContactEmail: request.reporter?.email,
 					status: params.investigation ? "investigating" : "accepted",

@@ -67,7 +67,7 @@ describe("provider submission registry", () => {
 	test("requires contact-selected providers to declare a mailbox but permits supplemental-only providers", () => {
 		expect(() => createProviderSubmissionRegistry([
 			testProvider("contact-only", []),
-		])).toThrow("Provider submission contact-only must declare an exact mailbox or be supplemental");
+		])).toThrow("Provider submission contact-only must declare an exact mailbox, a registrar ID, or be supplemental");
 
 		const supplementalOnly = testProvider("supplemental-only", [], true);
 		const registry = createProviderSubmissionRegistry([supplementalOnly]);

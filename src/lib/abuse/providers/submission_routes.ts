@@ -33,6 +33,32 @@ export function providerContactRoute(params: {
 	};
 }
 
+/** Build a pinned route for a registrar that takes abuse reports through its own form. */
+export function providerRegistrarRoute(params: {
+	provider: ProviderSubmissionProvider;
+	registrarId: number;
+	source: ProviderRouteSource;
+}): ResolvedRouteInput {
+	const { provider } = params;
+	return {
+		routeKey: `provider_submission:${provider.definition.key}:registrar`,
+		providerRegistryKey: provider.definition.key,
+		providerDisplayName: provider.definition.displayName,
+		routeType: "provider_submission",
+		providerDefinitionVersion: provider.definition.version,
+		providerDefinitionHash: provider.definition.contentHash,
+		resolverProvenance: {
+			...params.source.resolverProvenance,
+			match: "registrar_iana_id",
+			registrarId: params.registrarId,
+			providerRegistryKey: provider.definition.key,
+		},
+		resolutionSnapshot: params.source.resolutionSnapshot,
+		verificationResult: { verified: true, method: "registrar_iana_id" },
+		status: "verified",
+	};
+}
+
 /** Build a pinned route for a provider that supplements contact resolution. */
 export function providerSupplementalRoute(params: {
 	provider: ProviderSubmissionProvider;

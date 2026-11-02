@@ -54,7 +54,7 @@ function eml(lines: string[], body: string): Buffer {
 }
 
 /** A sent abuse email to `recipient` for its own report, like production's Gransy report. */
-async function sentReport(target: string, recipient: string, subject?: string, submissionId?: bigint) {
+async function sentReport(target: string, recipient: string, subject?: string, submissionId?: bigint, resolverProvenance: Record<string, unknown> = { source: "test" }) {
 	const request = await validateAbuseReportRequest({
 		targets: [target],
 		allegationCategory: "phishing",
@@ -72,7 +72,7 @@ async function sentReport(target: string, recipient: string, subject?: string, s
 		providerDisplayName: "Registrar abuse desk",
 		routeType: "email",
 		verifiedEmail: recipient,
-		resolverProvenance: { source: "test" },
+		resolverProvenance,
 		resolutionSnapshot: { source: "test" },
 		status: "verified",
 	});
@@ -256,6 +256,47 @@ describe("delivery-status notifications", () => {
 		expect(await AbuseRepository.getMailMessage(bounce!.id)).toMatchObject({ classification: "bounce" });
 		const resends = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, sent.route.id)).all().filter((job) => job.jobType === "send_email");
 		expect(resends).toEqual([]);
+	});
+
+	test("a permanent rejection moves the report to the target's next published abuse contact", async () => {
+		// keychainagent.pro: the registry's abuse@eranet.com does not exist; Eranet's own RDAP names support@tnet.hk.
+		const sent = await sentReport("keychain.example.com", "abuse@deadbox.example", undefined, undefined, {
+			email: "abuse@deadbox.example",
+			source: "domain_rdap",
+			fallbackContacts: [{ email: "support@helpdesk.example", source: "registrar_rdap", entityName: "Helpdesk" }, { email: "cs@helpdesk.example", source: "domain_whois" }],
+		});
+		await ingestFetchedMail({ uid: 540, source: icloudBounce(sent.outbound, "abuse@deadbox.example", "553") }, config, { createIntakeSubmission: noIntake });
+		const [bounce] = await inbound(sent.reportId);
+		await classifyReply(bounce!.id);
+		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
+
+		const routes = await AbuseRepository.listRoutes(sent.reportId);
+		const next = routes.find((route) => route.verifiedEmail === "support@helpdesk.example");
+		expect(next).toMatchObject({ routeType: "email", status: "verified", providerDisplayName: "Helpdesk" });
+		expect(next?.resolverProvenance).toMatchObject({
+			reason: "fallback_after_permanent_bounce",
+			bouncedRouteId: sent.route.id.toString(),
+			fallbackContacts: [{ email: "cs@helpdesk.example", source: "domain_whois" }],
+		});
+		const jobs = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, next!.id)).all();
+		expect(jobs.map((job) => job.jobType)).toEqual(["send_email"]);
+		// No resend to the dead mailbox itself.
+		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, sent.route.id)).all().filter((job) => job.jobType === "send_email")).toEqual([]);
+		// A replayed classification never opens a second route for the same contact.
+		await (await import("../abuse/worker/mail")).routeToNextContact(sent.route.id);
+		expect((await AbuseRepository.listRoutes(sent.reportId)).filter((route) => route.verifiedEmail === "support@helpdesk.example")).toHaveLength(1);
+	});
+
+	test("a temporary failure retries the same mailbox and never falls back", async () => {
+		const sent = await sentReport("greylisted-fallback.example.com", "abuse@greylist2.example", undefined, undefined, {
+			email: "abuse@greylist2.example",
+			source: "domain_rdap",
+			fallbackContacts: [{ email: "support@other.example", source: "registrar_rdap" }],
+		});
+		await ingestFetchedMail({ uid: 541, source: icloudBounce(sent.outbound, "abuse@greylist2.example", "451") }, config, { createIntakeSubmission: noIntake });
+		const [bounce] = await inbound(sent.reportId);
+		await classifyReply(bounce!.id);
+		expect((await AbuseRepository.listRoutes(sent.reportId)).map((route) => route.verifiedEmail)).toEqual(["abuse@greylist2.example"]);
 	});
 
 	test("a temporary failure queues one resend with the same identity", async () => {

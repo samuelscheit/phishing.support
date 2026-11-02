@@ -125,6 +125,12 @@ export const abuseReports = sqliteTable(
 		allegationCategory: text("allegation_category").notNull(),
 		description: text("description").notNull(),
 		legalBrandUrl: text("legal_brand_url"),
+		/**
+		 * The User-Agent a reviewer must send to see the reported content. A
+		 * payload host serves its script only to the command's downloader and
+		 * answers a browser with 404.
+		 */
+		reportedUserAgent: text("reported_user_agent"),
 		reporterName: text("reporter_name"),
 		reporterContactEmail: text("reporter_contact_email"),
 		serviceIdentity: text("service_identity", { mode: "json" }).$type<Record<string, unknown>>(),

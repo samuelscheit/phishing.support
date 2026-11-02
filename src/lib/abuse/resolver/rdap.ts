@@ -123,6 +123,32 @@ export function extractPort43(record: JsonRecord | undefined): string | undefine
 	return normalizeDomain(server);
 }
 
+/**
+ * The registrar's own RDAP record for a domain: the registry response's
+ * `related` link with an RDAP media type and a `/domain/` path. Only HTTPS
+ * is accepted; the fetch itself still passes the resolver's SSRF checks.
+ */
+export function registrarRdapUrl(record: JsonRecord): string | undefined {
+	const self = asArray(record.links).map(asRecord).find((link) => text(link?.rel) === "self");
+	for (const link of asArray(record.links).map(asRecord)) {
+		if (text(link?.rel) !== "related") continue;
+		const type = text(link?.type);
+		if (type && !/application\/rdap\+json/i.test(type)) continue;
+		const href = text(link?.href);
+		if (!href) continue;
+		let url: URL;
+		try {
+			url = new URL(href);
+		} catch {
+			continue;
+		}
+		if (url.protocol !== "https:" || !/\/domain\/[^/]+$/i.test(url.pathname)) continue;
+		if (self && text(self.href) === url.toString()) continue;
+		return url.toString();
+	}
+	return undefined;
+}
+
 export function dedupeMailboxes(mailboxes: AbuseMailbox[]): AbuseMailbox[] {
 	const byEmail = new Map<string, AbuseMailbox>();
 	for (const mailbox of mailboxes) if (!byEmail.has(mailbox.email)) byEmail.set(mailbox.email, mailbox);

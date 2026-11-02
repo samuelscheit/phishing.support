@@ -35,7 +35,8 @@ function parseStoredPayload(value: Record<string, unknown>): CloudflareSubmissio
 		|| typeof report.urls !== "string"
 		|| typeof report.justification !== "string"
 		|| typeof report.reportedCountry !== "string"
-		|| (report.originalWork !== undefined && typeof report.originalWork !== "string")) return undefined;
+		|| (report.originalWork !== undefined && typeof report.originalWork !== "string")
+		|| (report.reportedUserAgent !== undefined && typeof report.reportedUserAgent !== "string")) return undefined;
 	try {
 		new URL(report.urls);
 		new URL(report.company);
@@ -78,6 +79,7 @@ export async function prepareCloudflareSubmission(
 				description: report.description,
 				allegationCategory: report.allegationCategory,
 				legalBrandUrl: report.legalBrandUrl ?? undefined,
+				reportedUserAgent: report.reportedUserAgent ?? undefined,
 			}),
 		},
 	};

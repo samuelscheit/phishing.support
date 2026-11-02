@@ -6,10 +6,11 @@ export {
 	listPortalProviders,
 } from "./registry";
 export { createProviderSubmissionRegistry } from "./submission_registry";
-export { providerContactRoute, providerSupplementalRoute } from "./submission_routes";
+export { providerContactRoute, providerRegistrarRoute, providerSupplementalRoute } from "./submission_routes";
 export {
 	getProviderSubmissionProvider,
 	getProviderSubmissionProviderForMailbox,
+	getProviderSubmissionProviderForRegistrarId,
 	listProviderSubmissionProviders,
 	listSupplementalProviderSubmissionProviders,
 	listSupplementalProviderSubmissionProvidersForTarget,
