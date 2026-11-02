@@ -24,7 +24,11 @@ export type PeCertificateState =
 	| { kind: "certificate_table"; offset: number; size: number };
 
 export function readPeCertificateTable(bytes: Buffer): PeCertificateState {
-	if (bytes.byteLength < 0x40 || bytes.readUInt16LE(0) !== DOS_MAGIC) return { kind: "not_pe" };
+	// Only a file that does not even claim the DOS magic is "not a PE". A file that
+	// starts with "MZ" is a Windows executable, so a truncated header is malformed and
+	// must fail closed rather than look like an ordinary, upload-eligible file.
+	if (bytes.byteLength < 2 || bytes.readUInt16LE(0) !== DOS_MAGIC) return { kind: "not_pe" };
+	if (bytes.byteLength < 0x40) return { kind: "malformed", reason: "truncated DOS header" };
 	const peOffset = bytes.readUInt32LE(0x3c);
 	if (peOffset + 24 > bytes.byteLength || bytes.readUInt32LE(peOffset) !== PE_MAGIC) return { kind: "malformed", reason: "missing PE signature" };
 	const optionalOffset = peOffset + 24;

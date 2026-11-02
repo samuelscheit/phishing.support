@@ -17,7 +17,7 @@ import { createExfiltrationCanaries } from "./canaries";
 import { enrichBackendIdentity } from "./identity";
 import { ExfiltrationNetworkRecorder } from "./recorder";
 import { reportExfiltrationBackend } from "./reporting";
-import { PROBE_EGRESS_ORDER, probeRouteOutcome, runProbeRoutes, SkyvernPlanningLimitError } from "./routes";
+import { PROBE_EGRESS_ORDER, routeVerdictForFailedRun, runProbeRoutes } from "./routes";
 import { buildExfiltrationProbeTask, INVESTIGATION_BUDGET_MS } from "./task";
 import { collectDownloads, type CollectedDownload } from "./downloads/collect";
 import { downloadPipelineConfigFromEnvironment, investigateCollectedDownload } from "./downloads/pipeline";
@@ -124,20 +124,6 @@ function throwIfAborted(signal?: AbortSignal): void {
 	throw signal.reason instanceof Error ? signal.reason : new Error("Exfiltration probe canceled.");
 }
 
-/**
- * A Skyvern run that ended in a site-level route verdict. Only these advance to
- * the next egress; anything else that ends a run is an infrastructure failure.
- */
-const SITE_VERDICT_PATTERN = /planning iteration|blank page|blocked|not available in your location|you have been blocked|net::ERR_|navigation (?:timed out|failed)|HTTP [45]\d\d/i;
-
-/** Map a non-completed Skyvern terminal run to the route outcome it proves. */
-function routeVerdictForRun(egress: FabricEgress, status: string, failureReason: string | undefined): Error {
-	const reason = failureReason ?? "no failure reason";
-	if (/planning iteration/i.test(reason)) return new SkyvernPlanningLimitError(egress, reason);
-	if (SITE_VERDICT_PATTERN.test(reason)) return new WebsiteUnreachableError(egress, reason);
-	return new Error(`Skyvern exfiltration probe ended in ${status} via ${egress}: ${reason}`);
-}
-
 /** One Fabric binding, one Skyvern run, and one recorder per route. */
 async function attemptRoute(
 	egress: FabricEgress,
@@ -171,7 +157,7 @@ async function attemptRoute(
 			if (status && TERMINAL.has(status)) {
 				if (status !== "completed") {
 					const failureReason = typeof run.failure_reason === "string" ? run.failure_reason : undefined;
-					throw routeVerdictForRun(egress, status, failureReason);
+					throw routeVerdictForFailedRun(egress, status, failureReason);
 				}
 				completedRun = run;
 				break;
