@@ -37,7 +37,7 @@ export type InvestigationDependencies = {
 	now(): Date;
 	lookups(sha256: string): Promise<LookupResult[]>;
 	uploadPermitted: ReadonlySet<VerdictProvider>;
-	buildArchive(entryName: string, data: Buffer, password: string): Buffer;
+	buildArchive(entryName: string, data: Buffer, password: string): Promise<Buffer>;
 	/** Performs an upload the policy has decided on. Absent means no upload transport is configured. */
 	submit?: SubmitFile;
 };

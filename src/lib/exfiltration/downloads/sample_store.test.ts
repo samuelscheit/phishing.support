@@ -4,12 +4,14 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync }
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { buildSampleArchive } from "./archive_adapter";
+import { readProtectedArchive } from "./protected_archive";
 import { MAX_STORED_SAMPLE_BYTES, SAMPLE_ARCHIVE_PASSWORD, sampleIsExpired, storeSample } from "./sample_store";
 
 let root: string;
 const now = new Date("2026-11-02T12:00:00.000Z");
-// A stand-in archive builder: it wraps the bytes, so the test can prove the raw sample is never written.
-const wrap = (entryName: string, data: Buffer, password: string) => Buffer.concat([Buffer.from(`ARCHIVE|${entryName}|${password}|`, "utf8"), data]);
+// The production AES builder. A stand-in cannot pass the store's read-back verification.
+const wrap = buildSampleArchive;
 
 beforeAll(() => {
 	root = mkdtempSync(path.join(tmpdir(), "sample-store-test-"));
@@ -38,7 +40,11 @@ describe("sample store", () => {
 		expect(stored.relativePath).toBe(`${sha256.slice(0, 2)}/${sha256}.zip`);
 		expect(stored.displayName).toBe("Teams setup.exe");
 		const onDisk = readFileSync(path.join(root, stored.relativePath));
-		expect(onDisk.toString()).toContain(`|${sha256}.bin|${SAMPLE_ARCHIVE_PASSWORD}|`);
+		// The file opens with the documented password and yields exactly the sample bytes.
+		const opened = await readProtectedArchive(onDisk, SAMPLE_ARCHIVE_PASSWORD);
+		expect(createHash("sha256").update(opened.data).digest("hex")).toBe(sha256);
+		// The sample is not readable from the file without that password.
+		expect(onDisk.includes(bytes)).toBeFalse();
 	});
 
 	test("the raw sample bytes never appear as a loose file under the store", async () => {

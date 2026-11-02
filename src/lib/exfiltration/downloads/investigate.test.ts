@@ -4,13 +4,15 @@ import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { buildSampleArchive } from "./archive_adapter";
 import type { LookupResult } from "./policy";
 import { investigateDownload, type InvestigationDependencies } from "./investigate";
 
 const bytes = Buffer.from("synthetic-downloaded-file-for-investigation-tests");
 const sha256 = createHash("sha256").update(bytes).digest("hex");
 const evidence = { bytes, remoteName: "Teams setup.exe", phishingBasis: "malware_delivery" as const, origin: "probe" as const, signature: "not_signed" as const };
-const wrap = (entryName: string, data: Buffer, password: string) => Buffer.concat([Buffer.from(`ARCHIVE|${entryName}|${password}|`), data]);
+// The production AES builder: the store verifies every archive it writes by reading it back.
+const wrap = buildSampleArchive;
 
 let root: string;
 beforeAll(() => { root = mkdtempSync(path.join(tmpdir(), "investigate-test-")); });

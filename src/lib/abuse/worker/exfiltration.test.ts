@@ -134,6 +134,26 @@ describe("exfiltration probe worker lifecycle", () => {
 		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { backendProbe: { status: "failed" } } });
 	});
 
+	test("a probe that runs past the external lane deadline is not cut off, because probes get their own budget", async () => {
+		const submissionId = 405n;
+		const { job } = await probeContext(submissionId);
+		let finished = false;
+		const worker = new AbuseWorker({
+			owner: "probe-long-budget",
+			adapter,
+			// A short external deadline stands in for the production 10 minutes; the probe still outlives it.
+			externalJobTimeoutMs: 1_000,
+			exfiltrationProbe: async () => {
+				await new Promise((resolve) => setTimeout(resolve, 1_600));
+				finished = true;
+				return { requests: 1, backends: 0, egress: "phishing" as const };
+			},
+		});
+		expect(await worker.processOne(false, { jobTypes: ["probe_exfiltration"] })).toBeTrue();
+		expect(finished).toBeTrue();
+		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()?.status).toBe("completed");
+	}, 20_000);
+
 	test("retry exhaustion fails only the supplementary probe, never the phishing report", async () => {
 		const submissionId = 402n;
 		const { report, job } = await probeContext(submissionId);

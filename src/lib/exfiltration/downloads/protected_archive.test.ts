@@ -6,82 +6,102 @@ import path from "node:path";
 
 import { readProtectedArchive, writeProtectedArchive } from "./protected_archive";
 
-const UNZIP = "/usr/bin/unzip";
+const BSDTAR = "/usr/bin/bsdtar";
 const PASSWORD = "infected";
 let scratch: string;
 
 beforeAll(() => { scratch = mkdtempSync(path.join(tmpdir(), "protected-archive-test-")); });
 afterAll(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-describe("protected archive round trip", () => {
-	test("returns the same entry name and bytes for a random buffer", () => {
+describe("protected archive round trip (AES-256)", () => {
+	test("returns the same entry name and bytes for a random buffer", async () => {
 		const data = randomBytes(4096);
-		const archive = writeProtectedArchive({ entryName: "sample.bin", data, password: PASSWORD });
-		const back = readProtectedArchive(archive, PASSWORD);
+		const archive = await writeProtectedArchive({ entryName: "sample.bin", data, password: PASSWORD });
+		const back = await readProtectedArchive(archive, PASSWORD);
 		expect(back.entryName).toBe("sample.bin");
 		expect(back.data.equals(data)).toBeTrue();
 	});
 
-	test("round-trips empty data", () => {
-		const archive = writeProtectedArchive({ entryName: "empty.bin", data: Buffer.alloc(0), password: PASSWORD });
-		expect(readProtectedArchive(archive, PASSWORD).data.byteLength).toBe(0);
+	test("round-trips empty data", async () => {
+		const archive = await writeProtectedArchive({ entryName: "sample.bin", data: Buffer.alloc(0), password: PASSWORD });
+		expect((await readProtectedArchive(archive, PASSWORD)).data.byteLength).toBe(0);
 	});
 
-	test("starts with the local-file signature and ends with the end-of-central-directory signature", () => {
-		const archive = writeProtectedArchive({ entryName: "sample.bin", data: Buffer.from("x"), password: PASSWORD });
-		expect(archive.subarray(0, 4).toString("hex")).toBe("504b0304");
-		expect(archive.includes(Buffer.from("504b0506", "hex"))).toBeTrue();
+	test("never stores the sample bytes in the clear", async () => {
+		const marker = Buffer.from("PLAINTEXT-MARKER-THAT-MUST-NOT-APPEAR");
+		const archive = await writeProtectedArchive({ entryName: "sample.bin", data: marker, password: PASSWORD });
+		expect(archive.includes(marker)).toBeFalse();
+	});
+
+	test("writes AES, not the broken ZipCrypto cipher", async () => {
+		const archive = await writeProtectedArchive({ entryName: "sample.bin", data: Buffer.from("x".repeat(64)), password: PASSWORD });
+		// The archive must be readable by the reader only with AES; a ZipCrypto archive would be
+		// rejected by the zipCrypto guard in readProtectedArchive, so a round trip proves the cipher.
+		expect((await readProtectedArchive(archive, PASSWORD)).data.toString()).toBe("x".repeat(64));
+	});
+
+	test("produces a different archive for the same input each time", async () => {
+		const data = Buffer.from("same-sample");
+		const first = await writeProtectedArchive({ entryName: "sample.bin", data, password: PASSWORD });
+		const second = await writeProtectedArchive({ entryName: "sample.bin", data, password: PASSWORD });
+		expect(first.equals(second)).toBeFalse();
 	});
 });
 
-describe("protected archive password and integrity", () => {
-	test("a wrong password is rejected with the generic message and no password echo", () => {
-		const archive = writeProtectedArchive({ entryName: "sample.bin", data: Buffer.from("secret-body"), password: PASSWORD });
-		expect(() => readProtectedArchive(archive, "nope")).toThrow("Protected archive could not be opened with the supplied password.");
-		try {
-			readProtectedArchive(archive, "nope");
-		} catch (error) {
-			expect((error as Error).message.includes("nope")).toBeFalse();
-		}
+describe("protected archive failures", () => {
+	// zip.js reports the same "Invalid password" error for a wrong password and a damaged
+	// payload, so these tests use a promise handler rather than `expect().rejects`: the
+	// latter never settles on this rejection path under Bun's test runner.
+	const outcomeOf = (promise: Promise<unknown>) => promise.then(() => "resolved", (error: Error) => error.message);
+
+	test("a wrong password is refused, and no bytes are returned", async () => {
+		const archive = await writeProtectedArchive({ entryName: "sample.bin", data: Buffer.from("secret-body"), password: PASSWORD });
+		expect(await outcomeOf(readProtectedArchive(archive, "nope")))
+			.toBe("Protected archive could not be opened: the password is wrong or the archive is damaged.");
 	});
 
-	test("an empty or over-long password is refused when writing", () => {
-		expect(() => writeProtectedArchive({ entryName: "a.bin", data: Buffer.from("x"), password: "" })).toThrow();
-		expect(() => writeProtectedArchive({ entryName: "a.bin", data: Buffer.from("x"), password: "p".repeat(256) })).toThrow();
-	});
-
-	test("tampering with a ciphertext byte makes the archive unreadable", () => {
-		const data = Buffer.from("payload-that-must-not-be-altered-silently");
-		const archive = writeProtectedArchive({ entryName: "sample.bin", data, password: PASSWORD });
-		// The encrypted payload begins after the 30-byte local header and the entry name.
-		const payloadOffset = 30 + "sample.bin".length;
+	test("a damaged archive is refused, and no bytes are returned", async () => {
+		const archive = await writeProtectedArchive({ entryName: "sample.bin", data: Buffer.from("payload-bytes-here"), password: PASSWORD });
 		const tampered = Buffer.from(archive);
-		tampered[payloadOffset + 14] ^= 0x01;
-		expect(() => readProtectedArchive(tampered, PASSWORD)).toThrow();
-	});
-});
-
-describe("protected archive entry names and size gate", () => {
-	test("refuses names that could escape a directory, hide a file, or break the format", () => {
-		for (const entryName of ["", "../x", "a/b", ".hidden", "x".repeat(101), "name with space", "héllo"]) {
-			expect(() => writeProtectedArchive({ entryName, data: Buffer.from("x"), password: PASSWORD })).toThrow();
-		}
+		// Flip a byte inside the encrypted payload, past the local header.
+		tampered[60] = tampered[60]! ^ 0xff;
+		expect(await outcomeOf(readProtectedArchive(tampered, PASSWORD)))
+			.toBe("Protected archive could not be opened: the password is wrong or the archive is damaged.");
 	});
 
-	test("refuses data over the 100 MiB ceiling", () => {
+	test("a directory entry or a foreign entry name is not accepted as a sample", async () => {
+		await expect(writeProtectedArchive({ entryName: "../escape.bin", data: Buffer.from("x"), password: PASSWORD })).rejects.toThrow("fixed sample name");
+		await expect(writeProtectedArchive({ entryName: "other.bin", data: Buffer.from("x"), password: PASSWORD })).rejects.toThrow("fixed sample name");
+	});
+
+	test("an empty or oversized password is refused before any encryption", async () => {
+		await expect(writeProtectedArchive({ entryName: "sample.bin", data: Buffer.from("x"), password: "" })).rejects.toThrow("non-empty password");
+		await expect(writeProtectedArchive({ entryName: "sample.bin", data: Buffer.from("x"), password: "p".repeat(256) })).rejects.toThrow("too long");
+	});
+
+	test("a sample above the size limit is refused rather than written", async () => {
 		const oversize = Buffer.alloc(100 * 1024 * 1024 + 1);
-		expect(() => writeProtectedArchive({ entryName: "big.bin", data: oversize, password: PASSWORD })).toThrow();
+		await expect(writeProtectedArchive({ entryName: "sample.bin", data: oversize, password: PASSWORD })).rejects.toThrow("size limit");
 	});
 });
 
-describe("interoperability with the system unzip", () => {
-	test.skipIf(!existsSync(UNZIP))("the system unzip tests and extracts the archive, and rejects a wrong password", () => {
+describe("interoperability with bsdtar (libarchive), which opens AES ZIP", () => {
+	test.skipIf(!existsSync(BSDTAR))("bsdtar extracts the exact bytes with the password and refuses a wrong one", async () => {
 		const data = randomBytes(2048);
 		const archivePath = path.join(scratch, "interop.zip");
-		writeFileSync(archivePath, writeProtectedArchive({ entryName: "sample.bin", data, password: PASSWORD }));
-		expect(Bun.spawnSync([UNZIP, "-t", "-P", PASSWORD, archivePath]).exitCode).toBe(0);
-		const extracted = Bun.spawnSync([UNZIP, "-p", "-P", PASSWORD, archivePath]);
-		expect(Buffer.from(extracted.stdout).equals(data)).toBeTrue();
-		expect(Bun.spawnSync([UNZIP, "-t", "-P", "wrongpass", archivePath]).exitCode).not.toBe(0);
+		writeFileSync(archivePath, await writeProtectedArchive({ entryName: "sample.bin", data, password: PASSWORD }));
+		const outDir = path.join(scratch, "extract-ok");
+		Bun.spawnSync(["mkdir", "-p", outDir]);
+		const good = Bun.spawnSync([BSDTAR, "-xf", archivePath, "-C", outDir, "--passphrase", PASSWORD]);
+		expect(good.exitCode).toBe(0);
+		expect(Buffer.from(await Bun.file(path.join(outDir, "sample.bin")).arrayBuffer()).equals(data)).toBeTrue();
+
+		const badDir = path.join(scratch, "extract-bad");
+		Bun.spawnSync(["mkdir", "-p", badDir]);
+		const bad = Bun.spawnSync([BSDTAR, "-xf", archivePath, "-C", badDir, "--passphrase", "wrong"]);
+		// bsdtar reports the wrong passphrase with a non-zero exit, but it still writes a zero-byte
+		// placeholder named sample.bin. An analyst must therefore check the SHA-256 recorded in the
+		// database before trusting any extracted file; the exit status alone is not enough.
+		expect(bad.exitCode).not.toBe(0);
 	});
 });

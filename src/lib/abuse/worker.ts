@@ -22,7 +22,9 @@ import { resolveReport, verifyProviderRoute } from "./worker/resolution";
 import { errorText, envInt, idFrom, parseJobBigInt, randomOwner, type WorkerServices } from "./worker/shared";
 import type { JobClaimFilter } from "./persistence/jobs";
 import { runExfiltrationProbe, type ExfiltrationProbeInput } from "../exfiltration/probe";
+import { INVESTIGATION_BUDGET_MS } from "../exfiltration/task";
 import { setExfiltrationProbeStatus } from "../exfiltration/status";
+import { startSamplePurgeSchedule } from "../exfiltration/downloads/sample_purge_job";
 
 const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;
@@ -32,6 +34,8 @@ const MAX_LANE_CONCURRENCY = 16;
 const DEFAULT_CONTROL_JOB_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_EXTERNAL_JOB_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_SWEEP_JOB_TIMEOUT_MS = 20 * 60_000;
+/** A probe's route budget plus the work after its routes: backend lookups, the capture, reports, and downloads. */
+const PROBE_JOB_TIMEOUT_MS = INVESTIGATION_BUDGET_MS + 5 * 60_000;
 const MAX_JOB_TIMEOUT_MS = 60 * 60_000;
 const MAX_RETRIES = 8;
 
@@ -149,6 +153,7 @@ export class AbuseWorker {
 	private readonly services: WorkerServices;
 	private stopped = true;
 	private loopPromises: Promise<void>[] = [];
+	private stopSamplePurge: (() => void) | undefined;
 	private readonly activeControllers = new Set<AbortController>();
 	private readonly processJobOverride: AbuseWorkerOptions["processJob"];
 	private readonly exfiltrationProbe: typeof runExfiltrationProbe;
@@ -231,10 +236,13 @@ export class AbuseWorker {
 			),
 			this.runLoop(false, SWEEP_JOB_FILTER, this.sweepJobTimeoutMs),
 		];
+		this.stopSamplePurge = startSamplePurgeSchedule();
 	}
 
 	async stop(): Promise<void> {
 		this.stopped = true;
+		this.stopSamplePurge?.();
+		this.stopSamplePurge = undefined;
 		for (const controller of this.activeControllers) controller.abort(new WorkerStoppingError());
 		await Promise.all(this.loopPromises);
 		this.loopPromises = [];
@@ -272,7 +280,9 @@ export class AbuseWorker {
 				? this.controlJobTimeoutMs
 				: SWEEP_JOB_TYPES.includes(job.jobType as (typeof SWEEP_JOB_TYPES)[number])
 					? this.sweepJobTimeoutMs
-					: this.externalJobTimeoutMs;
+					: job.jobType === "probe_exfiltration"
+						? Math.max(this.externalJobTimeoutMs, PROBE_JOB_TIMEOUT_MS)
+						: this.externalJobTimeoutMs;
 			await this.runJobWithDeadline(job, controller, timeoutMs ?? defaultTimeout);
 			await AbuseRepository.completeJob(job.id, this.owner);
 		} catch (error) {
