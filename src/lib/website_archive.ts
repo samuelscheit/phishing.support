@@ -5,7 +5,7 @@ import sharp from "sharp";
 import { getDomain } from "tldts";
 
 import { getBrowser, getBrowserPage } from "./browser";
-import type { FabricEgress } from "./browser/fabric";
+import { FABRIC_EGRESS_LABEL, type FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
 import type { WebsiteKitResource, WebsiteNavigationHop } from "./website_types";
 import { isSameWebsite, websiteSite } from "./website_site";
@@ -354,7 +354,6 @@ export function navigationHopsFromResponse(
  */
 const WEBSITE_CAPTURE_EGRESS: readonly FabricEgress[] = ["phishing", "reporting"];
 const WEBSITE_CLOAKING_EGRESS: FabricEgress = "residential";
-const WEBSITE_EGRESS_LABEL: Record<FabricEgress, string> = { phishing: "Tor exit", reporting: "server IP", residential: "residential exit" };
 
 /** How long an HTTP error document may take to replace itself, e.g. a JavaScript bot-check interstitial. */
 const WEBSITE_ERROR_DOCUMENT_SETTLE_MS = 20_000;
@@ -404,7 +403,7 @@ export function isBrowserInfrastructureFailure(error: unknown): boolean {
 
 export class WebsiteUnreachableError extends Error {
 	constructor(readonly egress: FabricEgress, readonly reason: string) {
-		super(`${reason} via ${WEBSITE_EGRESS_LABEL[egress]}`);
+		super(`${reason} via ${FABRIC_EGRESS_LABEL[egress]}`);
 		this.name = "WebsiteUnreachableError";
 	}
 }
@@ -767,7 +766,7 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 
 		return {
 			...capturedDocument,
-			route: WEBSITE_EGRESS_LABEL[egress],
+			route: FABRIC_EGRESS_LABEL[egress],
 			screenshotPng,
 			kitResources: await kitResources.settled(),
 			...(verificationGate ? { verificationGate } : {}),
@@ -791,7 +790,7 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 			const archive = await captureLiveWebsite(url, egress, dependencies);
 			const site = scriptDestinationSite(archive);
 			if (!site) return archive;
-			console.warn(`Website capture of ${url} via ${WEBSITE_EGRESS_LABEL[egress]}: the page sent the visitor to ${site} by script`);
+			console.warn(`Website capture of ${url} via ${FABRIC_EGRESS_LABEL[egress]}: the page sent the visitor to ${site} by script`);
 			decoy = { archive, site, egress };
 			break;
 		} catch (error) {
@@ -824,7 +823,7 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 			...residential,
 			cloaking: {
 				outcome: "detected",
-				detail: `${url} sent the ${WEBSITE_EGRESS_LABEL[decoy.egress]} to ${decoy.site} but the ${WEBSITE_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} to ${reached}`,
+				detail: `${url} sent the ${FABRIC_EGRESS_LABEL[decoy.egress]} to ${decoy.site} but the ${FABRIC_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} to ${reached}`,
 			},
 		};
 	}
@@ -833,7 +832,7 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 			...decoy.archive,
 			cloaking: {
 				outcome: "unresolved",
-				detail: `${url} sent the ${WEBSITE_EGRESS_LABEL[decoy.egress]} to ${decoy.site} by script; the ${WEBSITE_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} capture failed: ${failures.at(-1)?.message ?? "unavailable"}`,
+				detail: `${url} sent the ${FABRIC_EGRESS_LABEL[decoy.egress]} to ${decoy.site} by script; the ${FABRIC_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} capture failed: ${failures.at(-1)?.message ?? "unavailable"}`,
 			},
 		};
 	}

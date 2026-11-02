@@ -37,6 +37,27 @@ describe("CDP exfiltration recorder", () => {
 		]));
 	});
 
+	test("records cross-origin iframes and workers that puppeteer reports as other", async () => {
+		const frameSession = new FakeSession();
+		const attached: string[] = [];
+		const target = (id: string, type: string) => ({
+			_targetId: id,
+			type: () => "other",
+			_getTargetInfo: () => ({ type }),
+			url: () => `https://kit.example/${id}`,
+			createCDPSession: async () => { attached.push(id); return id === "frame" ? frameSession : new FakeSession(); },
+		});
+		const browser = Object.assign(new EventEmitter(), {
+			targets: () => [target("frame", "iframe"), target("worker", "worker"), target("hub", "other")],
+		});
+		const recorder = new ExfiltrationNetworkRecorder();
+		await recorder.start(browser as never);
+		frameSession.emit("Network.requestWillBeSent", { requestId: "1", type: "Fetch", request: { url: "https://drop.example/check", method: "POST", postData: "email=canary" } });
+		const captured = await recorder.stop();
+		expect(attached.sort()).toEqual(["frame", "worker"]);
+		expect(captured).toEqual([expect.objectContaining({ url: "https://drop.example/check", postData: "email=canary" })]);
+	});
+
 	test("ignores non-network targets instead of attaching to the browser process", async () => {
 		let attaches = 0;
 		const target = { _targetId: "browser", type: () => "browser", url: () => "", createCDPSession: async () => { attaches++; } };

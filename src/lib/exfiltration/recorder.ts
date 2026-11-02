@@ -13,6 +13,19 @@ function bounded(value: unknown): string | undefined {
 		: Buffer.from(value).subarray(0, MAX_VALUE_BYTES).toString("utf8");
 }
 
+/** CDP target types that own a network stack the kit can send from. */
+const NETWORK_TARGET_TYPES = new Set(["page", "iframe", "worker", "service_worker", "shared_worker"]);
+
+/**
+ * The raw CDP target type. Puppeteer's `Target.type()` folds out-of-process
+ * iframes and dedicated workers into `"other"`, which hid every cross-origin
+ * kit frame (e.g. a loader page framing `stop.relizedog.com`) from the recorder.
+ */
+function cdpTargetType(target: Target): string {
+	const info = (target as unknown as { _getTargetInfo?: () => { type?: string } })._getTargetInfo?.();
+	return info?.type ?? target.type();
+}
+
 /** Records outbound payloads from every page/worker target while Skyvern drives the browser. */
 export class ExfiltrationNetworkRecorder {
 	private readonly requests: CapturedNetworkRequest[] = [];
@@ -41,7 +54,7 @@ export class ExfiltrationNetworkRecorder {
 	private async attach(target: Target): Promise<void> {
 		const targetId = (target as unknown as { _targetId?: string })._targetId ?? `${target.type()}:${target.url()}`;
 		if (this.attachedTargets.has(targetId)) return;
-		if (!["page", "iframe", "service_worker", "shared_worker", "worker"].includes(target.type())) return;
+		if (!NETWORK_TARGET_TYPES.has(cdpTargetType(target))) return;
 		this.attachedTargets.add(targetId);
 		let session: CDPSession;
 		try {
