@@ -9,7 +9,7 @@ import { investigateDownload, type InvestigationDependencies } from "./investiga
 
 const bytes = Buffer.from("synthetic-downloaded-file-for-investigation-tests");
 const sha256 = createHash("sha256").update(bytes).digest("hex");
-const evidence = { bytes, remoteName: "Teams setup.exe", phishingBasis: "malware_delivery" as const, signature: "unsigned" as const };
+const evidence = { bytes, remoteName: "Teams setup.exe", phishingBasis: "malware_delivery" as const, origin: "probe" as const, signature: "not_signed" as const };
 const wrap = (entryName: string, data: Buffer, password: string) => Buffer.concat([Buffer.from(`ARCHIVE|${entryName}|${password}|`), data]);
 
 let root: string;
@@ -96,7 +96,7 @@ describe("download investigation without any configured store", () => {
 		const hash = createHash("sha256").update(bytesHere).digest("hex");
 		const seen: string[] = [];
 		const outcome = await investigateDownload(
-			{ bytes: bytesHere, remoteName: "a.exe", phishingBasis: "malware_delivery", signature: "unsigned" },
+			{ bytes: bytesHere, remoteName: "a.exe", phishingBasis: "malware_delivery", origin: "other", signature: "not_signed" },
 			{
 				storeRoot: undefined,
 				now: () => new Date("2026-11-02T12:00:00.000Z"),
@@ -108,5 +108,61 @@ describe("download investigation without any configured store", () => {
 		expect(seen).toEqual([hash]);
 		expect(outcome.stored).toBeUndefined();
 		expect(outcome.action).toEqual({ action: "skip", reason: "no_upload_permitted" });
+	});
+});
+
+describe("download investigation performs only the decided upload", () => {
+	test("submits to each permitted provider only when the policy decided upload, with the safe leaf name", async () => {
+		const submitted: Array<{ provider: string; fileName: string; bytes: number }> = [];
+		const outcome = await investigateDownload(
+			{ bytes: Buffer.from("probe-download-for-upload-wiring"), remoteName: "../../evil.exe", phishingBasis: "credential_theft", origin: "probe", signature: "not_signed" },
+			{
+				storeRoot: undefined,
+				now: () => new Date("2026-11-02T12:00:00.000Z"),
+				lookups: async () => [
+					{ provider: "malwarebazaar", state: "not_found" },
+					{ provider: "virustotal", state: "not_found" },
+				],
+				uploadPermitted: new Set(["virustotal" as const]),
+				buildArchive: wrap,
+				submit: async (provider, file) => { submitted.push({ provider, fileName: file.fileName, bytes: file.bytes.byteLength }); return { state: "submitted", analysisId: "analysis-1" }; },
+			},
+		);
+		expect(outcome.action).toEqual({ action: "upload", providers: ["virustotal"] });
+		expect(submitted).toEqual([{ provider: "virustotal", fileName: expect.stringMatching(/^[a-f0-9]{16}\.bin$/), bytes: Buffer.from("probe-download-for-upload-wiring").byteLength }]);
+		expect(outcome.uploads).toEqual([{ provider: "virustotal", state: "submitted", analysisId: "analysis-1" }]);
+	});
+
+	test("a skipped decision never calls the submit transport", async () => {
+		let submits = 0;
+		await investigateDownload(
+			{ bytes: Buffer.from("known-bad-for-skip-test"), remoteName: "x", phishingBasis: "credential_theft", origin: "probe", signature: "not_signed" },
+			{
+				storeRoot: undefined,
+				now: () => new Date("2026-11-02T12:00:00.000Z"),
+				lookups: async () => [{ provider: "virustotal", state: "known", verdict: "malicious" }],
+				uploadPermitted: new Set(["virustotal" as const]),
+				buildArchive: wrap,
+				submit: async () => { submits++; return { state: "submitted", analysisId: "x" }; },
+			},
+		);
+		expect(submits).toBe(0);
+	});
+});
+
+describe("a decided upload is never dropped silently", () => {
+	test("without a submit transport, a decided upload is recorded as not attempted", async () => {
+		const outcome = await investigateDownload(
+			{ bytes: Buffer.from("decided-upload-without-transport"), remoteName: "x", phishingBasis: "credential_theft", origin: "probe", signature: "not_signed" },
+			{
+				storeRoot: undefined,
+				now: () => new Date("2026-11-02T12:00:00.000Z"),
+				lookups: async () => [{ provider: "virustotal", state: "not_found" }],
+				uploadPermitted: new Set(["virustotal" as const]),
+				buildArchive: wrap,
+			},
+		);
+		expect(outcome.action).toEqual({ action: "upload", providers: ["virustotal"] });
+		expect(outcome.uploads).toEqual([{ provider: "virustotal", state: "not_attempted", reason: "no upload transport configured" }]);
 	});
 });
