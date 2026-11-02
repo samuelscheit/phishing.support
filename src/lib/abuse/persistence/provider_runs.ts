@@ -305,19 +305,21 @@ export async function settleProviderRun(params: {
  * another provider submission. This lets an operator repair a parser/schema
  * drift incident without weakening the no-replay boundary.
  */
-export async function reconcileProviderRun(params: {
+/**
+ * Settle an unresolved run from verified external evidence. `submitted`
+ * needs the provider's receipt; `provider_rejected` needs proof that the
+ * request never reached the provider (for example its firewall answering
+ * in its place). Only the route's latest run may be settled, and only from
+ * `unknown_external_state`; unresolved submit jobs for the route are closed.
+ */
+async function settleUnresolvedProviderRun(params: {
 	runId: bigint;
 	providerRegistryKey: string;
-	confirmationId: string;
-	confirmationText?: string;
-	finalUrl?: string;
-	submittedTargets: string[];
-	reconciliationReason?: string;
+	reason: string;
+	outcome:
+		| { routeStatus: "submitted"; confirmationId: string; confirmationText?: string; finalUrl?: string; submittedTargets: string[] }
+		| { routeStatus: "provider_rejected"; failureReason: string };
 }): Promise<boolean> {
-	if (!params.confirmationId.trim()) throw new Error("A reconciled provider run requires a confirmation identifier.");
-	if (params.submittedTargets.length === 0 || params.submittedTargets.some((target) => !target.trim())) {
-		throw new Error("A reconciled provider run requires at least one submitted target.");
-	}
 	const db = await getDb();
 	return db.transaction(
 		(tx) => {
@@ -328,8 +330,7 @@ export async function reconcileProviderRun(params: {
 			if (route.status !== "unknown_external_state" || run.executionStatus !== "unknown_external_state") return false;
 			// A route can only be repaired from its current unresolved run. If an
 			// older run somehow remains alongside a newer attempt, accepting the
-			// older receipt could settle the route with evidence for the wrong
-			// provider request.
+			// older evidence could settle the route for the wrong provider request.
 			const latestRun = tx
 				.select({ id: abuseProviderRuns.id })
 				.from(abuseProviderRuns)
@@ -340,16 +341,19 @@ export async function reconcileProviderRun(params: {
 			if (!latestRun || latestRun.id !== run.id) return false;
 
 			const timestamp = now();
+			const { outcome } = params;
 			tx.update(abuseProviderRuns)
-				.set({
-					executionStatus: "completed",
-					confirmationId: params.confirmationId,
-					confirmationText: params.confirmationText,
-					finalUrl: params.finalUrl,
-					submittedTargets: [...params.submittedTargets],
-					failureReason: null,
-					updatedAt: timestamp,
-				})
+				.set(outcome.routeStatus === "submitted"
+					? {
+						executionStatus: "completed",
+						confirmationId: outcome.confirmationId,
+						confirmationText: outcome.confirmationText,
+						finalUrl: outcome.finalUrl,
+						submittedTargets: [...outcome.submittedTargets],
+						failureReason: null,
+						updatedAt: timestamp,
+					}
+					: { executionStatus: "failed", failureReason: outcome.failureReason, updatedAt: timestamp })
 				.where(and(eq(abuseProviderRuns.id, run.id), eq(abuseProviderRuns.executionStatus, "unknown_external_state")))
 				.run();
 			recordEvent(tx, {
@@ -360,8 +364,9 @@ export async function reconcileProviderRun(params: {
 				eventType: "provider_run.reconciled",
 				data: {
 					providerRegistryKey: params.providerRegistryKey,
-					confirmationId: params.confirmationId,
-					reconciliationReason: params.reconciliationReason ?? "verified_external_receipt",
+					to: outcome.routeStatus,
+					...(outcome.routeStatus === "submitted" ? { confirmationId: outcome.confirmationId } : { failureReason: outcome.failureReason }),
+					reconciliationReason: params.reason,
 				},
 			});
 
@@ -396,13 +401,13 @@ export async function reconcileProviderRun(params: {
 					runId: run.id,
 					jobId: job.id,
 					eventType: "job.reconciled",
-					data: { from: "unknown_external_state", to: "completed", reason: params.reconciliationReason ?? "verified_external_receipt" },
+					data: { from: "unknown_external_state", to: "completed", reason: params.reason },
 				});
 			}
 
 			const routeUpdated = tx
 				.update(abuseProviderRoutes)
-				.set({ status: "submitted", updatedAt: timestamp })
+				.set({ status: outcome.routeStatus, updatedAt: timestamp })
 				.where(and(eq(abuseProviderRoutes.id, route.id), eq(abuseProviderRoutes.status, "unknown_external_state")))
 				.returning({ id: abuseProviderRoutes.id })
 				.get();
@@ -413,11 +418,7 @@ export async function reconcileProviderRun(params: {
 				routeId: route.id,
 				runId: run.id,
 				eventType: "route.status_changed",
-				data: {
-					from: route.status,
-					to: "submitted",
-					reason: params.reconciliationReason ?? "verified_external_receipt",
-				},
+				data: { from: route.status, to: outcome.routeStatus, reason: params.reason },
 			});
 			recomputeReportStatusInTransaction(tx, route.reportId, {
 				reason: "provider_run_reconciled",
@@ -427,6 +428,50 @@ export async function reconcileProviderRun(params: {
 		},
 		{ behavior: "immediate" },
 	);
+}
+
+/** Settle an unresolved run as submitted from the provider's verified receipt. */
+export async function reconcileProviderRun(params: {
+	runId: bigint;
+	providerRegistryKey: string;
+	confirmationId: string;
+	confirmationText?: string;
+	finalUrl?: string;
+	submittedTargets: string[];
+	reconciliationReason?: string;
+}): Promise<boolean> {
+	if (!params.confirmationId.trim()) throw new Error("A reconciled provider run requires a confirmation identifier.");
+	if (params.submittedTargets.length === 0 || params.submittedTargets.some((target) => !target.trim())) {
+		throw new Error("A reconciled provider run requires at least one submitted target.");
+	}
+	return settleUnresolvedProviderRun({
+		runId: params.runId,
+		providerRegistryKey: params.providerRegistryKey,
+		reason: params.reconciliationReason ?? "verified_external_receipt",
+		outcome: {
+			routeStatus: "submitted",
+			confirmationId: params.confirmationId,
+			...(params.confirmationText ? { confirmationText: params.confirmationText } : {}),
+			...(params.finalUrl ? { finalUrl: params.finalUrl } : {}),
+			submittedTargets: params.submittedTargets,
+		},
+	});
+}
+
+/** Settle an unresolved run as rejected once it is proven the request never reached the provider. */
+export async function reconcileProviderRunRejection(params: {
+	runId: bigint;
+	providerRegistryKey: string;
+	failureReason: string;
+	reconciliationReason: string;
+}): Promise<boolean> {
+	if (!params.failureReason.trim()) throw new Error("A rejected reconciliation requires its failure reason.");
+	return settleUnresolvedProviderRun({
+		runId: params.runId,
+		providerRegistryKey: params.providerRegistryKey,
+		reason: params.reconciliationReason,
+		outcome: { routeStatus: "provider_rejected", failureReason: params.failureReason },
+	});
 }
 
 /**

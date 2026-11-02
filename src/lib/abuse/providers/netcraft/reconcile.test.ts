@@ -180,3 +180,17 @@ describe("Netcraft unknown-external-state reconciliation", () => {
 		expect(await AbuseRepository.getRoute(context.route.id)).toMatchObject({ status: "unknown_external_state" });
 	});
 });
+
+describe("rejected reconciliation", () => {
+	test("settles an unresolved run as rejected once the request is proven never to have reached the provider", async () => {
+		const unresolved = await createUnresolvedCase();
+		const reason = "The provider's firewall answered in its place (cf-mitigated: challenge); nothing was filed.";
+		expect(await AbuseRepository.reconcileProviderRunRejection({ runId: unresolved.run.id, providerRegistryKey: "namesilo", failureReason: reason, reconciliationReason: "edge_firewall_block" })).toBeFalse();
+		expect(await AbuseRepository.reconcileProviderRunRejection({ runId: unresolved.run.id, providerRegistryKey: NETCRAFT_PROVIDER.key, failureReason: reason, reconciliationReason: "edge_firewall_block" })).toBeTrue();
+		expect(await AbuseRepository.getRoute(unresolved.route.id)).toMatchObject({ status: "provider_rejected" });
+		expect(await AbuseRepository.getProviderRun(unresolved.run.id)).toMatchObject({ executionStatus: "failed", failureReason: reason });
+		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, unresolved.job!.id)).get()?.status).toBe("completed");
+		// Settled once: a replay finds nothing left to reconcile.
+		expect(await AbuseRepository.reconcileProviderRunRejection({ runId: unresolved.run.id, providerRegistryKey: NETCRAFT_PROVIDER.key, failureReason: reason, reconciliationReason: "edge_firewall_block" })).toBeFalse();
+	});
+});
