@@ -94,6 +94,11 @@ export class ExfiltrationNetworkRecorder {
 		});
 	}
 
+	/** Requests recorded so far, without detaching; used to wait for a known request to arrive. */
+	snapshot(): CapturedNetworkRequest[] {
+		return structuredClone(this.requests);
+	}
+
 	async stop(): Promise<CapturedNetworkRequest[]> {
 		if (this.browser && this.targetHandler) {
 			this.browser.off("targetcreated", this.targetHandler);

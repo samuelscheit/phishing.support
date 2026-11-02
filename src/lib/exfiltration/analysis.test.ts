@@ -5,9 +5,9 @@ import type { ExfiltrationCanaries } from "./types";
 
 const canaries: ExfiltrationCanaries = {
 	marker: "psprobe_deadbeef",
-	email: "audit+psprobe_deadbeef@example.com",
+	email: "probe.deadbeef@probe-canary.invalid",
 	password: "A9!psprobe_deadbeef!qZ",
-	phone: "+15551234567",
+	phone: "+12125550142",
 	cardNumber: "4242424242424242",
 	oneTimeCode: "123456",
 };

@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { runExfiltrationProbe } from "./probe";
 import type { ExfiltrationCanaries } from "./types";
 
-const canaries: ExfiltrationCanaries = { marker: "psprobe_x", email: "audit+psprobe_x@example.com", password: "A9!psprobe_x!", phone: "+15550000000", cardNumber: "1234567890123452", oneTimeCode: "123456" };
+const canaries: ExfiltrationCanaries = { marker: "psprobe_x", email: "probe.x@probe-canary.invalid", password: "A9!psprobe_x!", phone: "+12125550100", cardNumber: "1234567890123452", oneTimeCode: "123456" };
 
 describe("durable exfiltration probe operation", () => {
 	test("attaches the recorder before Skyvern, persists capture, and reports every confirmed backend", async () => {
@@ -11,7 +11,7 @@ describe("durable exfiltration probe operation", () => {
 		const reported: string[] = [];
 		let released = 0;
 		const result = await runExfiltrationProbe(
-			{ reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", reporter: {} },
+			{ reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", phishingBasis: "credential_theft" as const, reporter: {} },
 			{
 				createTask: async () => { order.push("skyvern"); return { runId: "run-1", response: {} }; },
 				getRun: async () => ({ status: "completed" }),
@@ -35,7 +35,7 @@ describe("durable exfiltration probe operation", () => {
 		);
 		expect(order).toEqual(["recorder", "skyvern"]);
 		expect(reported).toEqual(["domain:collector.example"]);
-		expect(result).toEqual({ requests: 1, backends: 1 });
+		expect(result).toEqual({ requests: 1, backends: 1, egress: "phishing" });
 		expect(released).toBe(1);
 	});
 
@@ -43,7 +43,7 @@ describe("durable exfiltration probe operation", () => {
 		let canceledRun = 0;
 		let canceledBinding = 0;
 		await expect(runExfiltrationProbe(
-			{ reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", reporter: {} },
+			{ reportId: 1n, submissionId: 2n, pageUrl: "https://phish.example/", phishingBasis: "credential_theft" as const, reporter: {} },
 			{ createTask: async () => ({ runId: "run-1", response: {} }), getRun: async () => ({ status: "failed" }), cancelRun: async () => { canceledRun++; } },
 			undefined,
 			{

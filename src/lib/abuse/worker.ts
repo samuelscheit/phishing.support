@@ -82,6 +82,15 @@ class JobExecutionTimeoutError extends Error {
 	}
 }
 
+/**
+ * An error whose own type states that repeating the work cannot change the
+ * outcome. Only typed verdicts set `retryable: false`; a message match never
+ * makes a failure terminal.
+ */
+function isNonRetryableError(error: unknown): boolean {
+	return (error as { retryable?: unknown } | null)?.retryable === false;
+}
+
 class WorkerStoppingError extends Error {
 	constructor() {
 		super("Abuse worker is stopping.");
@@ -278,6 +287,10 @@ export class AbuseWorker {
 			const message = errorText(error);
 			if (job.unknownExternalState || (error as { unknownExternalState?: unknown })?.unknownExternalState === true) {
 				await AbuseRepository.markJobUnknownExternalState({ jobId: job.id, owner: this.owner, error: message });
+			} else if (isNonRetryableError(error)) {
+				// A verdict that repeating the same work cannot change: fail now rather than
+				// spend the remaining retries on identical Skyvern tasks.
+				await this.failRetryExhaustedJob(job, message);
 			} else if (job.retryCount >= MAX_RETRIES) {
 				await this.failRetryExhaustedJob(job, message);
 			} else {
@@ -504,10 +517,15 @@ export class AbuseWorker {
 		if (!report?.submissionId) return;
 		const pageUrl = typeof job.payload?.pageUrl === "string" ? job.payload.pageUrl : undefined;
 		if (!pageUrl) throw new Error("Exfiltration probe job is missing payload.pageUrl.");
+		const phishingBasis = job.payload?.phishingBasis;
+		if (phishingBasis !== "credential_theft" && phishingBasis !== "payment_fraud" && phishingBasis !== "malware_delivery") {
+			throw new Error("Exfiltration probe job is missing a valid payload.phishingBasis.");
+		}
 		const input: ExfiltrationProbeInput = {
 			reportId,
 			submissionId: report.submissionId,
 			pageUrl,
+			phishingBasis,
 			reporter: {
 				reporterIp: report.requesterIp ?? undefined,
 				reporterCountry: report.requesterCountry ?? undefined,
@@ -519,6 +537,8 @@ export class AbuseWorker {
 			const result = await this.exfiltrationProbe(input, this.getAdapter(), signal);
 			await setExfiltrationProbeStatus(report.submissionId, { status: "completed", backendCount: result.backends, updatedAt: new Date().toISOString() });
 		} catch (error) {
+			// The worker decides finality: a retryable failure is queued again, and a
+			// terminal one is marked failed on its single terminal path.
 			await setExfiltrationProbeStatus(report.submissionId, {
 				status: "queued",
 				lastError: errorText(error),

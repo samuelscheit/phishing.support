@@ -30,9 +30,19 @@ function createConfiguredClient(): SkyvernClientPort {
 	return new SkyvernClient({ baseUrl, apiKey, maxRetries: 0 }) as unknown as SkyvernClientPort;
 }
 
-function redactExternalError(error: unknown): string {
-	const message = errorText(error);
-	return message.replace(/(?:api[_-]?key|authorization|bearer)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]").slice(0, 2_000);
+/**
+ * Strip credential-shaped text from an error before it is persisted or logged:
+ * key/auth assignments, bearer tokens, and the signature and credential query
+ * parameters of a presigned storage URL. The placeholder keeps the name it hid.
+ */
+export function redactExternalError(error: unknown): string {
+	// Bearer tokens first: the assignment rule below would otherwise consume the word
+	// "Bearer" as the value of an Authorization header and leave the token behind.
+	const message = errorText(error)
+		.replace(/\bbearer\s+[^\s,;]+/gi, "Bearer [redacted]")
+		.replace(/\b(api[_-]?key|authorization)(\s*[:=]\s*)[^\s,;]+/gi, "$1$2[redacted]")
+		.replace(/\b(X-Amz-(?:Signature|Credential|Security-Token)|Signature|token|sig)=[^&\s]+/gi, "$1=[redacted]");
+	return message.slice(0, 2_000);
 }
 
 export class AbuseSkyvernAdapter {
