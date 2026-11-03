@@ -3,6 +3,7 @@ import { generateId } from "@/lib/db/ids";
 import { analyzeWebsite, type AnalyzeWebsiteOptions } from "@/lib/website_ai";
 import type { ReporterMetadata } from "@/lib/request_metadata";
 import { websiteSite } from "@/lib/website_site";
+import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website_capture_files";
 import { getRetryableSubmission, SubmissionRetryError } from "./retry";
 
 export { SubmissionRetryError } from "./retry";
@@ -147,13 +148,11 @@ export async function retryFailedWebsiteAnalysis(
 	const url = submission.data.kind === "website" ? submission.data.website?.url : undefined;
 	if (!url) throw new SubmissionRetryError("The original website URL is unavailable.");
 
+	// The analyzed page is the last one the capture reached through the site's own links.
 	const artifactList = await ArtifactsEntity.listForSubmission(submissionId);
-	const mhtmlArtifact = artifactList.find(
-		(artifact) => artifact.kind === "website_mhtml" || artifact.mimeType?.toLowerCase() === "text/mhtml" || artifact.name?.toLowerCase() === "website.mhtml",
-	);
-	const screenshotArtifact = artifactList.find(
-		(artifact) => artifact.kind === "website_png" || artifact.name?.toLowerCase() === "website.png",
-	);
+	const names = websiteCaptureFileNames(analyzedCaptureStep(submission.data.kind === "website" ? submission.data.website.navigationHops : undefined));
+	const mhtmlArtifact = latestArtifactNamed(artifactList, names.mhtml);
+	const screenshotArtifact = latestArtifactNamed(artifactList, names.screenshot);
 
 	let mhtmlSnapshot: Buffer | undefined;
 	let screenshotSnapshot: Buffer | undefined;

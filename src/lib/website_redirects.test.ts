@@ -41,11 +41,11 @@ function archiveOf(hops: WebsiteNavigationHop[]): WebsiteArchiveResult {
 	};
 }
 
-/** Streams the narrative, then the classification the production model returned for submission 373426928255766528. */
+/** Streams the classification the production model returned for submission 373426928255766528, then the narrative. */
 function phishingModel(): AnalysisClient {
 	const outputs = [
+		JSON.stringify({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign In Email or phone number Password", collectionFieldRefs: ["f1", "f2"], continuationRef: "" }),
 		"The captured page impersonates Netflix and asks for an email and password.",
-		JSON.stringify({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign In Email or phone number Password", collectionFieldRefs: ["f1", "f2"] }),
 	];
 	let call = 0;
 	return {
@@ -106,7 +106,7 @@ describe("website redirects", () => {
 
 		const submission = await SubmissionsEntity.get(id);
 		expect(submission?.status).toBe("reported");
-		expect(submission?.info).toBe(`Phishing confirmed at ${httpsUrl}; evidence for it and the 1 redirecting URL on 85.215.226.225 is being collected before the report is sent.`);
+		expect(submission?.info).toBe(`Phishing confirmed at ${httpsUrl}; evidence for it and the 1 URL on 85.215.226.225 that leads to it is being collected before the report is sent.`);
 		const website = submission?.data.kind === "website" ? submission.data.website : undefined;
 		expect(website?.siteAssessments?.map(({ hopIndex, finding }) => ({ hopIndex, finding }))).toEqual([
 			{ hopIndex: 0, finding: "phishing" },
@@ -208,7 +208,7 @@ describe("website redirects", () => {
 
 		const submission = await waitForStatus(id, ["reported", "failed", "invalid", "redirected"]);
 		expect(submission.status).toBe("reported");
-		expect(submission.info).toBe(`Phishing confirmed at ${page}; evidence for it and the 1 redirecting URL on sites.google.com/view/revert-change is being collected before the report is sent.`);
+		expect(submission.info).toBe(`Phishing confirmed at ${page}; evidence for it and the 1 URL on sites.google.com/view/revert-change that leads to it is being collected before the report is sent.`);
 		const report = await AbuseRepository.getReportForSubmission(id);
 		const targets = await AbuseRepository.listTargets(report!.id);
 		expect(targets.map(({ normalizedTarget, observedUrls }) => ({ normalizedTarget, observedUrls }))).toEqual([

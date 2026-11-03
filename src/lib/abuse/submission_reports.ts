@@ -28,11 +28,15 @@ type SubmissionReportBase = {
 export type ConfirmedWebsiteAbuse = SubmissionReportBase & {
 	/**
 	 * The captured and classified page first, then the URLs on the same host
-	 * that redirected to it. They all belong to one reported site.
+	 * that led to it (redirects and the pages whose links were followed). They
+	 * all belong to one reported site.
 	 */
 	urls: string[];
-	/** The archive screenshot, when the capture produced a decodable PNG. */
-	screenshotPng?: Buffer;
+	/**
+	 * Screenshots of the captured pages, the classified page first, then the
+	 * pages of its flow that led to it in visit order.
+	 */
+	screenshots?: ReadonlyArray<{ filename: string; png: Buffer }>;
 	finding: ReportableWebsiteFinding;
 	/** Commands the page tells visitors to paste; the investigation fetches their payloads. */
 	pasteCommands?: readonly PasteCommand[];
@@ -108,7 +112,7 @@ export async function buildWebsiteAbuseRequest(params: ConfirmedWebsiteAbuse): P
 		allegationCategory: params.finding.finding,
 		description: reportDescription(params.analysisText),
 		targets: [target(0, new URL(observedUrls[0]!).hostname, observedUrls)],
-		evidence: await screenshotEvidence("website.png", params.screenshotPng),
+		evidence: (await Promise.all((params.screenshots ?? []).map(({ filename, png }) => screenshotEvidence(filename, png)))).flat(),
 		source: { kind: "website", urls: params.urls },
 	});
 }

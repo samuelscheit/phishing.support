@@ -173,7 +173,7 @@ function archiveBrowserFixture(options: {
 	screenshots?: Buffer[];
 } = {}) {
 	const eventNames: string[] = [];
-	const navigationCalls: Array<{ url: string; egress: FabricEgress; waitUntil?: string; timeout?: number }> = [];
+	const navigationCalls: Array<{ url: string; egress: FabricEgress; waitUntil?: string; timeout?: number; referer?: string }> = [];
 	const networkIdleWaits: Array<{ idleTime?: number; concurrency?: number; timeout?: number }> = [];
 	const leasedEgress: FabricEgress[] = [];
 	let interceptionEnabled = false;
@@ -199,7 +199,7 @@ function archiveBrowserFixture(options: {
 				if (event === "response") responseListeners.push(listener);
 			},
 			setRequestInterception: async (enabled: boolean) => { interceptionEnabled = enabled; },
-			goto: async (url: string, navigation: { waitUntil?: string; timeout?: number }) => {
+			goto: async (url: string, navigation: { waitUntil?: string; timeout?: number; referer?: string }) => {
 				navigationCalls.push({ url, egress, ...navigation });
 				const deliver = (response: HTTPResponse) => {
 					currentUrl = response.url();
@@ -300,6 +300,25 @@ test("a live capture records the hashes of every host's scripts and stylesheets 
 		{ url: "https://kit.example.com/index.js?v=2", mimeType: "application/javascript", size: Buffer.byteLength(script), sha256: sha256(script) },
 		{ url: "https://kit.example.com/res/style.css", mimeType: "text/css", size: Buffer.byteLength(style), sha256: sha256(style) },
 		{ url: "https://backend.example.net/gmail/js/start.js", mimeType: "application/javascript", size: 5, sha256: sha256("start") },
+	]);
+});
+
+test("a followed link is opened with the page that showed it as the Referer, on every route", async () => {
+	const url = "https://kit.example.com/secure.html";
+	const referrer = "https://kit.example.com/Access.html";
+	const fixture = archiveBrowserFixture({
+		goto: async ({ url: requested, egress }) => {
+			if (egress !== "residential") throw new Error(`net::ERR_CONNECTION_CLOSED at ${requested}`);
+			return responseForNavigation(requested, 200, { contentType: "text/html" });
+		},
+	});
+	const archive = await archiveWebsite({ url, referrer }, { getBrowser: fixture.getBrowser, ...fast });
+
+	expect(archive.url).toBe(url);
+	expect(fixture.navigationCalls.map(({ egress, referer }) => ({ egress, referer }))).toEqual([
+		{ egress: "phishing", referer: referrer },
+		{ egress: "reporting", referer: referrer },
+		{ egress: "residential", referer: referrer },
 	]);
 });
 

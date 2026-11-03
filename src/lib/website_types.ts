@@ -5,7 +5,23 @@ export type WebsiteNavigationHop = {
 	status: number | null;
 	redirectTo?: string;
 	contentType?: string;
+	/**
+	 * Set when the capture followed this page's own link, as a visitor would,
+	 * to the next page of its flow; `redirectTo` is the page that link opened.
+	 * The page was captured as an earlier step of the case.
+	 */
+	followedLink?: { label: string };
 	contentCaptured: boolean;
+};
+
+/** A link on a captured page to another page of the same site, which the capture can follow. */
+export type WebsiteContinuationLink = {
+	/** Reference assigned in document order; the classifier cites it. */
+	ref: string;
+	/** The caption a visitor clicks, when the link has one. */
+	label?: string;
+	/** Absolute URL the link opens. */
+	url: string;
 };
 
 /**

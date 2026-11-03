@@ -86,6 +86,7 @@ describe("retryFailedWebsiteAnalysis", () => {
 		await ArtifactsEntity.saveWebsiteArtifacts({
 			submissionId: id,
 			archive: { archivedAt: new Date(), mhtml: Buffer.from("From: <Saved by Blink>\r\n\r\n<html></html>"), screenshotPng: Buffer.from("png") },
+			evidence: { step: 0, manifest: Buffer.from("{}") },
 		});
 		const started: Array<{ mhtmlSnapshot?: Buffer; reuseEvidenceArtifacts?: boolean }> = [];
 

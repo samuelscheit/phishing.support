@@ -21,6 +21,7 @@ import { cn } from "../../../web_lib/util";
 import { selectDisplayAnalysisRuns } from "@/lib/analysis_run_view";
 import { describeDataEntryField, type WebsitePhishingBasis } from "@/lib/website_types";
 import { websiteSiteName } from "@/lib/website_site";
+import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website_capture_files";
 
 type SubmissionDetail = ApiSubmissionDetail;
 
@@ -36,15 +37,8 @@ function formatArtifactSize(value: number | bigint | null | undefined) {
 	return (bytes / 1024).toFixed(1) + " KB";
 }
 
-function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "name" | "kind" | "mimeType">) {
-	const name = artifact.name?.toLowerCase();
-	const kind = artifact.kind?.toLowerCase();
-	const mimeType = artifact.mimeType?.toLowerCase();
-	return (
-		name?.startsWith("website.") ||
-		kind?.startsWith("website_") ||
-		mimeType === "text/mhtml"
-	);
+function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "kind">) {
+	return artifact.kind.startsWith("website_");
 }
 
 export function SubmissionPageClient({ id, initialSubmission }: { id: string; initialSubmission?: SubmissionDetail | null }) {
@@ -101,19 +95,15 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 			? websiteSiteName(submission.data.website?.url)
 			: (submission?.data.email?.subject as string | undefined) || "Untitled Submission";
 
-	// The stamped copy shows the page's URL and capture time; older cases only have the raw one.
-	const screenshot = submission?.artifacts?.find((a) => a.name === "website-stamped.png")
-		?? submission?.artifacts?.find(
-			(a) =>
-				(((a.name?.toLowerCase() === "website.png" || a.name?.toLowerCase() === "mail.png") && a.mimeType?.startsWith("image/")) ||
-					a.kind?.toLowerCase() === "website_png")
-		);
-	const websiteMhtml = submission?.artifacts?.find(
-		(a) =>
-			(a.name?.toLowerCase() === "website.mhtml" ||
-				a.mimeType?.toLowerCase() === "text/mhtml" ||
-				a.kind?.toLowerCase() === "website_mhtml")
-	);
+	// The analyzed page is the last one the capture reached through the site's
+	// own links. Its stamped copy shows the URL and capture time; a capture whose
+	// screenshot could not be stamped only has the raw one.
+	const submissionArtifacts = submission?.artifacts ?? [];
+	const analyzedFiles = websiteCaptureFileNames(analyzedCaptureStep(websiteNavigation));
+	const screenshot = submission?.kind === "website"
+		? latestArtifactNamed(submissionArtifacts, analyzedFiles.stampedScreenshot) ?? latestArtifactNamed(submissionArtifacts, analyzedFiles.screenshot)
+		: latestArtifactNamed(submissionArtifacts, "mail.png");
+	const websiteMhtml = latestArtifactNamed(submissionArtifacts, analyzedFiles.mhtml);
 	const emailEml = submission?.artifacts?.find((a) => {
 		const name = a.name?.toLowerCase();
 		const mime = a.mimeType?.toLowerCase();
@@ -379,7 +369,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 							<div className="space-y-2 rounded-md border bg-muted/20 p-3">
 								<div>
 									<h5 className="text-xs font-semibold">Navigation hops (kept separate)</h5>
-									<p className="text-xs text-muted-foreground">Redirects within one host belong to that site and share its finding. A destination on another host is never attributed to the URL that redirected to it.</p>
+									<p className="text-xs text-muted-foreground">Redirects and followed links within one site belong to that site and share the finding of the page they lead to. A destination on another host is never attributed to the URL that redirected to it.</p>
 								</div>
 								<ol className="space-y-2">
 									{websiteNavigation.map((hop) => {
@@ -397,9 +387,11 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 													<div className="min-w-0 space-y-1">
 														<div className="break-all font-mono text-xs">{hop.url}</div>
 														<div className="text-xs text-muted-foreground">
-															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured" : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
+															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured and analyzed" : hop.followedLink ? " · Page captured, its link followed" : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
 														</div>
-														{hop.redirectTo ? <div className="break-all text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
+														{hop.followedLink && hop.redirectTo ? (
+															<div className="break-all text-xs text-muted-foreground">Its link “{hop.followedLink.label}” opens {hop.redirectTo}</div>
+														) : hop.redirectTo ? <div className="break-all text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
 														{verificationGate && hop.contentCaptured ? (
 															<div className="text-xs text-muted-foreground">Behind the page's own “{verificationGate.label}” gate, clicked to reveal it</div>
 														) : null}

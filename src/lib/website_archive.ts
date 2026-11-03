@@ -97,6 +97,8 @@ export type ArchiveWebsiteOptions = {
 	mhtmlSnapshot?: Buffer;
 	/** Original user-submitted URL. */
 	url: string;
+	/** The page whose link a live capture follows; the browser sends it as the Referer, as a visitor's would. */
+	referrer?: string;
 	/** Original location represented by the retained MHTML document, when known. */
 	archivedUrl?: string;
 	/** Exact response hops associated with the retained MHTML document, when known. */
@@ -674,7 +676,7 @@ async function capturePaintedScreenshot(page: Page): Promise<Uint8Array> {
 	return screenshot;
 }
 
-async function captureLiveWebsite(url: string, egress: FabricEgress, dependencies: WebsiteArchiveDependencies): Promise<WebsiteArchiveResult> {
+async function captureLiveWebsite(url: string, referrer: string | undefined, egress: FabricEgress, dependencies: WebsiteArchiveDependencies): Promise<WebsiteArchiveResult> {
 	const browser = await (dependencies.getBrowser ?? getBrowser)(egress).catch((error: unknown) => {
 		throw new BrowserInfrastructureError(`Browser service unavailable: ${errorText(error)}`, { cause: error });
 	});
@@ -703,6 +705,8 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 		let navigationResponse = await page.goto(url, {
 			waitUntil: "domcontentloaded",
 			timeout: WEBSITE_NAVIGATION_TIMEOUT_MS,
+			// A kit's later page may check that the visitor came from its earlier one.
+			...(referrer ? { referer: referrer } : {}),
 		}).catch((error: unknown) => {
 			// A browser that died under the navigation says nothing about the site.
 			if (isBrowserInfrastructureFailure(error)) throw new BrowserInfrastructureError(errorText(error), { cause: error });
@@ -777,7 +781,7 @@ async function captureLiveWebsite(url: string, egress: FabricEgress, dependencie
 }
 
 export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencies: WebsiteArchiveDependencies = {}): Promise<WebsiteArchiveResult> {
-	const { url, mhtmlSnapshot } = options;
+	const { url, referrer, mhtmlSnapshot } = options;
 	console.log(`Archiving website ${url}`);
 	if (mhtmlSnapshot?.byteLength) {
 		return archiveMhtmlSnapshot({ ...options, mhtmlSnapshot });
@@ -787,7 +791,7 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 	let decoy: { archive: WebsiteArchiveResult; site: string; egress: FabricEgress } | undefined;
 	for (const egress of WEBSITE_CAPTURE_EGRESS) {
 		try {
-			const archive = await captureLiveWebsite(url, egress, dependencies);
+			const archive = await captureLiveWebsite(url, referrer, egress, dependencies);
 			const site = scriptDestinationSite(archive);
 			if (!site) return archive;
 			console.warn(`Website capture of ${url} via ${FABRIC_EGRESS_LABEL[egress]}: the page sent the visitor to ${site} by script`);
@@ -804,7 +808,7 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 	// Tor and datacenter visitors. Ask once more as a residential visitor would.
 	let residential: WebsiteArchiveResult | undefined;
 	try {
-		residential = await captureLiveWebsite(url, WEBSITE_CLOAKING_EGRESS, dependencies);
+		residential = await captureLiveWebsite(url, referrer, WEBSITE_CLOAKING_EGRESS, dependencies);
 	} catch (error) {
 		// The residential exit depends on the operator's machine being online; its
 		// failure must not hide what the other routes captured.

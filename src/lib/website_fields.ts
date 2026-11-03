@@ -1,6 +1,7 @@
 import { parse, type HTMLElement } from "node-html-parser";
 
-import type { WebsiteDataEntryField } from "./website_types";
+import type { WebsiteContinuationLink, WebsiteDataEntryField } from "./website_types";
+import { isSameWebsite } from "./website_site";
 
 /** Input types that trigger an action, pick from fixed choices, or declare a site search box. */
 const NON_DATA_ENTRY_INPUT_TYPES = new Set(["button", "checkbox", "color", "hidden", "image", "radio", "range", "reset", "search", "submit"]);
@@ -79,4 +80,51 @@ export function extractWebsiteDataEntryFields(html: string): WebsiteDataEntryFie
 		if (fields.length === MAX_DATA_ENTRY_FIELDS) break;
 	}
 	return fields;
+}
+
+const MAX_CONTINUATION_LINKS = 30;
+
+/** The page a link opens, without the fragment that only scrolls within it. */
+function pageAddress(href: string, base: string): string | undefined {
+	try {
+		const url = new URL(href, base);
+		if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+		url.hash = "";
+		return url.toString();
+	} catch {
+		return undefined;
+	}
+}
+
+function linkLabel(element: HTMLElement): string | undefined {
+	return descriptor(element.textContent)
+		?? descriptor(element.getAttribute("aria-label"))
+		?? descriptor(element.getAttribute("title"))
+		?? descriptor(element.querySelector("img[alt]")?.getAttribute("alt"))
+		?? descriptor(element.getAttribute("alt"));
+}
+
+/**
+ * Lists the links on a captured page that open another page of the same
+ * site: the next step of a kit that spreads its flow over several pages (a
+ * consent screen, then a welcome page, then the form). Links to other sites
+ * and downloads are not steps of the page's own flow. References are
+ * assigned in document order, one per destination.
+ */
+export function extractWebsiteContinuationLinks(html: string, pageUrl: string): WebsiteContinuationLink[] {
+	const root = parse(html);
+	const base = pageAddress(root.querySelector("base[href]")?.getAttribute("href") ?? pageUrl, pageUrl) ?? pageUrl;
+	const page = pageAddress(pageUrl, pageUrl);
+	const links: WebsiteContinuationLink[] = [];
+	const seen = new Set<string>();
+	for (const element of root.querySelectorAll("a[href], area[href]")) {
+		if (element.hasAttribute("download")) continue;
+		const url = pageAddress(element.getAttribute("href")!, base);
+		if (!url || url === page || seen.has(url) || !isSameWebsite(url, pageUrl)) continue;
+		seen.add(url);
+		const label = linkLabel(element);
+		links.push({ ref: `l${links.length + 1}`, ...(label ? { label } : {}), url });
+		if (links.length === MAX_CONTINUATION_LINKS) break;
+	}
+	return links;
 }

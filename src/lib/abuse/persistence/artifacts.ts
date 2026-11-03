@@ -35,7 +35,7 @@ export async function saveRouteArtifactOnce(params: ArtifactValuesParams & { rou
 export async function listArtifacts(reportId: bigint, kinds?: string[]): Promise<AbuseArtifact[]> {
 	const db = await getDb();
 	const where = kinds?.length ? and(eq(abuseArtifacts.reportId, reportId), inArray(abuseArtifacts.kind, kinds)) : eq(abuseArtifacts.reportId, reportId);
-	return db.select().from(abuseArtifacts).where(where).orderBy(asc(abuseArtifacts.createdAt)).all();
+	return db.select().from(abuseArtifacts).where(where).orderBy(asc(abuseArtifacts.createdAt), asc(abuseArtifacts.id)).all();
 }
 
 export async function listRouteArtifacts(routeId: bigint, kinds?: string[]): Promise<AbuseArtifact[]> {
@@ -43,7 +43,7 @@ export async function listRouteArtifacts(routeId: bigint, kinds?: string[]): Pro
 	const where = kinds?.length
 		? and(eq(abuseArtifacts.routeId, routeId), inArray(abuseArtifacts.kind, kinds))
 		: eq(abuseArtifacts.routeId, routeId);
-	return db.select().from(abuseArtifacts).where(where).orderBy(asc(abuseArtifacts.createdAt)).all();
+	return db.select().from(abuseArtifacts).where(where).orderBy(asc(abuseArtifacts.createdAt), asc(abuseArtifacts.id)).all();
 }
 
 /** Artifact listing for read models; never loads the stored bytes. */
@@ -53,7 +53,7 @@ export async function listArtifactMetadata(reportId: bigint) {
 		.select({ id: abuseArtifacts.id, name: abuseArtifacts.name, kind: abuseArtifacts.kind, mimeType: abuseArtifacts.mimeType, size: abuseArtifacts.size })
 		.from(abuseArtifacts)
 		.where(eq(abuseArtifacts.reportId, reportId))
-		.orderBy(asc(abuseArtifacts.createdAt))
+		.orderBy(asc(abuseArtifacts.createdAt), asc(abuseArtifacts.id))
 		.all();
 }
 

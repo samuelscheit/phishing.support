@@ -148,6 +148,7 @@ describe("website evidence package", () => {
 		const timestamped: Buffer[] = [];
 		const evidence = await buildWebsiteEvidence({
 			caseId: "374851334366564352",
+			step: 0,
 			submittedUrl: "https://sites.google.com/view/revert-change",
 			capturedUrl: "https://sites.google.com/view/revert-change",
 			capturedAt: new Date("2026-10-31T09:55:03.412Z"),
@@ -188,6 +189,7 @@ describe("website evidence package", () => {
 	test("the manifest is canonical: the same capture always hashes the same", async () => {
 		const facts = {
 			caseId: "1",
+			step: 0,
 			submittedUrl: "https://a.test/",
 			capturedUrl: "https://a.test/",
 			capturedAt: new Date("2026-01-01T00:00:00Z"),
@@ -200,6 +202,30 @@ describe("website evidence package", () => {
 		// Without a screenshot or a reachable authority the package still records the MHTML.
 		expect(JSON.parse(first.manifest.toString()).files.map((file: { name: string }) => file.name)).toEqual(["website.mhtml"]);
 		expect(websiteEvidenceFiles(first).map((file) => file.name)).toEqual(["evidence-manifest.json"]);
+	});
+
+	test("a page reached by following the site's links is its own step, with its own file names and the link in its navigation", async () => {
+		const screenshotPng = await pagePng();
+		const mhtml = Buffer.from("From: <Saved by Blink>\r\n\r\n<html>form</html>");
+		const evidence = await buildWebsiteEvidence({
+			caseId: "375914181917937690",
+			step: 2,
+			submittedUrl: "https://kit.example.com/",
+			capturedUrl: "https://kit.example.com/secure.html",
+			capturedAt: new Date("2026-11-03T07:48:00Z"),
+			navigationHops: [
+				{ index: 0, url: "https://kit.example.com/", hostname: "kit.example.com", status: 200, redirectTo: "https://kit.example.com/Access.html", followedLink: { label: "I agree" }, contentCaptured: false },
+				{ index: 1, url: "https://kit.example.com/Access.html", hostname: "kit.example.com", status: 200, redirectTo: "https://kit.example.com/secure.html", followedLink: { label: "Import an existing wallet" }, contentCaptured: false },
+				{ index: 2, url: "https://kit.example.com/secure.html", hostname: "kit.example.com", status: 200, contentCaptured: true },
+			],
+			screenshotPng,
+			mhtml,
+		}, { timestamp: async () => ({ authority: "Test TSA", authorityUrl: "https://tsa.test/", time: "2026-11-03T07:48:01.000Z", serialNumber: "1", token: Buffer.from("token") }) });
+
+		const manifest = JSON.parse(evidence.manifest.toString("utf8"));
+		expect(manifest.files.map(({ name }: { name: string }) => name)).toEqual(["website-step3.png", "website-step3-stamped.png", "website-step3.mhtml"]);
+		expect(manifest.capture.navigation[0]).toEqual({ index: 0, url: "https://kit.example.com/", status: 200, redirectTo: "https://kit.example.com/Access.html", followedLink: { label: "I agree" }, contentCaptured: false });
+		expect(websiteEvidenceFiles(evidence).map(({ name }) => name)).toEqual(["website-step3-stamped.png", "evidence-step3-manifest.json", "evidence-step3-manifest.tsr"]);
 	});
 });
 

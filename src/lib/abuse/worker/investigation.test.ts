@@ -38,7 +38,7 @@ async function confirmedCase(id: bigint, finding: Parameters<typeof reportConfir
 		reporter: {},
 		finding,
 		pasteCommands: finding.finding === "malware" ? extractPasteCommands(PANEO_COMMAND) : [],
-		screenshotPng: SCREENSHOT,
+		screenshots: [{ filename: "website.png", png: SCREENSHOT }],
 	});
 	const job = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, report.reportId)).get()!;
 	return { report, job };

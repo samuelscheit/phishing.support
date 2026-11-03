@@ -97,28 +97,28 @@ async function originVerificationTargets(submissionId: bigint | null, domain: st
 	// Uploaded and inherited captures have no live response recorder. Chromium's
 	// MHTML still retains same-host stylesheets as decoded MIME parts, which are
 	// safe exact-byte verification targets (scripts are deliberately not guessed).
+	// Every page the capture reached on the site contributes its stylesheets.
 	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
-	const mhtmlReference = artifacts.find(({ kind, mimeType, name }) =>
-		kind === "website_mhtml" || mimeType?.toLowerCase() === "text/mhtml" || name?.toLowerCase() === "website.mhtml");
-	if (!mhtmlReference) return [];
-	const mhtml = await ArtifactsEntity.get(mhtmlReference.id);
-	if (!mhtml?.blob) return [];
-	const parsed = await simpleParser(mhtml.blob);
 	const targets = new Map<string, OriginVerificationTarget>();
-	for (const attachment of parsed.attachments) {
-		if (attachment.contentType !== "text/css" || attachment.content.byteLength < 1_024) continue;
-		const location = attachment.headers.get("content-location");
-		if (typeof location !== "string") continue;
-		let url: URL;
-		try {
-			url = new URL(location);
-		} catch {
-			continue;
+	for (const reference of artifacts.filter(({ kind }) => kind === "website_mhtml")) {
+		const mhtml = await ArtifactsEntity.get(reference.id);
+		if (!mhtml?.blob) continue;
+		const parsed = await simpleParser(mhtml.blob);
+		for (const attachment of parsed.attachments) {
+			if (attachment.contentType !== "text/css" || attachment.content.byteLength < 1_024) continue;
+			const location = attachment.headers.get("content-location");
+			if (typeof location !== "string") continue;
+			let url: URL;
+			try {
+				url = new URL(location);
+			} catch {
+				continue;
+			}
+			if (url.hostname !== domain) continue;
+			const path = `${url.pathname}${url.search}`;
+			targets.set(path, { path, sha256: createHash("sha256").update(attachment.content).digest("hex") });
+			if (targets.size >= MAX_VERIFICATION_TARGETS) return [...targets.values()];
 		}
-		if (url.hostname !== domain) continue;
-		const path = `${url.pathname}${url.search}`;
-		targets.set(path, { path, sha256: createHash("sha256").update(attachment.content).digest("hex") });
-		if (targets.size >= MAX_VERIFICATION_TARGETS) break;
 	}
 	return [...targets.values()];
 }

@@ -123,6 +123,7 @@ export function humanizeAnalysisStep(value: string): string {
 		website_analysis: "Checking the website",
 		email_analysis: "Checking the email",
 		classification: "Assessing risk",
+		follow_link: "Following the page's link to its next page",
 		structured_response: "Confirming the result",
 		resolution: "Finding the right contacts",
 		reporting: "Preparing reports",

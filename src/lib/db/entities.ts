@@ -18,6 +18,7 @@ import { ResponseInputItem, ResponseOutputItem } from "openai/resources/response
 import { generateId } from "./ids";
 import type { ReporterMetadata } from "../request_metadata";
 import { websiteEvidenceFiles, type WebsiteEvidencePackage } from "../evidence/package";
+import { websiteCaptureFileNames } from "../website_capture_files";
 
 function nowDate(): Date {
     return new Date();
@@ -369,11 +370,13 @@ export class ArtifactsEntity {
             screenshotPng?: Buffer;
             mhtml: Buffer;
         };
-        evidence?: WebsiteEvidencePackage;
+        /** Names the files after the page of the case's flow it covers. */
+        evidence: WebsiteEvidencePackage;
     }) {
+        const names = websiteCaptureFileNames(evidence.step);
         const mhtmlId = await this.saveBuffer({
             submissionId,
-            name: "website.mhtml",
+            name: names.mhtml,
             kind: "website_mhtml",
             mimeType: "text/mhtml",
             archivedAt: archive.archivedAt,
@@ -382,14 +385,14 @@ export class ArtifactsEntity {
         const screenshotId = archive.screenshotPng?.byteLength
             ? await this.saveBuffer({
                 submissionId,
-                name: "website.png",
+                name: names.screenshot,
                 kind: "website_png",
                 mimeType: "image/png",
                 archivedAt: archive.archivedAt,
                 buffer: archive.screenshotPng,
             })
             : undefined;
-        for (const file of evidence ? websiteEvidenceFiles(evidence) : []) {
+        for (const file of websiteEvidenceFiles(evidence)) {
             await this.saveBuffer({
                 submissionId,
                 name: file.name,

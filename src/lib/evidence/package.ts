@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { serviceIdentity } from "../constants";
+import { websiteCaptureFileNames } from "../website_capture_files";
 import type { WebsiteNavigationHop } from "../website_types";
 import { stampAddressBar } from "./address_bar";
 import { timestampEvidence, type EvidenceTimestamp } from "./timestamp";
@@ -12,6 +13,8 @@ export type EvidenceFile = { name: string; mimeType: string; bytes: Buffer };
 /** What one live website capture saw, and how. */
 export type WebsiteCaptureFacts = {
 	caseId: string;
+	/** Which page of the case's flow this is: 0 for the first, then one per followed link. */
+	step: number;
 	submittedUrl: string;
 	/** The page whose content, screenshot and archive were captured. */
 	capturedUrl: string;
@@ -23,6 +26,8 @@ export type WebsiteCaptureFacts = {
 };
 
 export type WebsiteEvidencePackage = {
+	/** The page of the case's flow the package covers; it names the files. */
+	step: number;
 	/** The screenshot with the address bar drawn above it; the raw one stays unchanged. */
 	stampedScreenshotPng?: Buffer;
 	/** Canonical JSON naming every file by SHA-256; this is what the timestamp covers. */
@@ -68,10 +73,11 @@ export async function buildWebsiteEvidence(
 			return undefined;
 		})
 		: undefined;
+	const names = websiteCaptureFileNames(facts.step);
 	const files: Array<{ name: string; mimeType: string; sha256: string; size: number }> = [
-		...(facts.screenshotPng ? [{ name: "website.png", mimeType: "image/png", sha256: screenshotSha256!, size: facts.screenshotPng.byteLength }] : []),
-		...(stampedScreenshotPng ? [{ name: "website-stamped.png", mimeType: "image/png", sha256: sha256(stampedScreenshotPng), size: stampedScreenshotPng.byteLength }] : []),
-		{ name: "website.mhtml", mimeType: "text/mhtml", sha256: sha256(facts.mhtml), size: facts.mhtml.byteLength },
+		...(facts.screenshotPng ? [{ name: names.screenshot, mimeType: "image/png", sha256: screenshotSha256!, size: facts.screenshotPng.byteLength }] : []),
+		...(stampedScreenshotPng ? [{ name: names.stampedScreenshot, mimeType: "image/png", sha256: sha256(stampedScreenshotPng), size: stampedScreenshotPng.byteLength }] : []),
+		{ name: names.mhtml, mimeType: "text/mhtml", sha256: sha256(facts.mhtml), size: facts.mhtml.byteLength },
 	];
 	const manifest = Buffer.from(`${canonicalJson({
 		format: "phishing.support/evidence-manifest@1",
@@ -82,20 +88,21 @@ export async function buildWebsiteEvidence(
 			capturedUrl: facts.capturedUrl,
 			capturedAt: facts.capturedAt.toISOString(),
 			route: facts.route,
-			navigation: facts.navigationHops.map(({ index, url, status, redirectTo, contentCaptured }) => ({ index, url, status, redirectTo, contentCaptured })),
+			navigation: facts.navigationHops.map(({ index, url, status, redirectTo, followedLink, contentCaptured }) => ({ index, url, status, redirectTo, followedLink, contentCaptured })),
 		},
 		files,
 		hashAlgorithm: "SHA-256",
 	})}\n`, "utf8");
 	const timestamp = await (dependencies.timestamp ?? timestampEvidence)(manifest);
-	return { ...(stampedScreenshotPng ? { stampedScreenshotPng } : {}), manifest, ...(timestamp ? { timestamp } : {}) };
+	return { step: facts.step, ...(stampedScreenshotPng ? { stampedScreenshotPng } : {}), manifest, ...(timestamp ? { timestamp } : {}) };
 }
 
 /** The files a package adds next to the raw screenshot and MHTML. */
 export function websiteEvidenceFiles(evidence: WebsiteEvidencePackage): EvidenceFile[] {
+	const names = websiteCaptureFileNames(evidence.step);
 	return [
-		...(evidence.stampedScreenshotPng ? [{ name: "website-stamped.png", mimeType: "image/png", bytes: evidence.stampedScreenshotPng }] : []),
-		{ name: "evidence-manifest.json", mimeType: "application/json", bytes: evidence.manifest },
-		...(evidence.timestamp ? [{ name: "evidence-manifest.tsr", mimeType: "application/timestamp-reply", bytes: evidence.timestamp.token }] : []),
+		...(evidence.stampedScreenshotPng ? [{ name: names.stampedScreenshot, mimeType: "image/png", bytes: evidence.stampedScreenshotPng }] : []),
+		{ name: names.manifest, mimeType: "application/json", bytes: evidence.manifest },
+		...(evidence.timestamp ? [{ name: names.timestamp, mimeType: "application/timestamp-reply", bytes: evidence.timestamp.token }] : []),
 	];
 }
