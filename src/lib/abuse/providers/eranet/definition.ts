@@ -13,7 +13,12 @@ export type EranetProviderDefinition = ProviderSubmissionDefinition & {
 		uploadType: "reportPageScreenshot";
 	};
 	maximumDescriptionLength: number;
-	reporter: { email: string; contactType: "E"; phone: string };
+	/**
+	 * `contact` fills the form's required "Contact Information" field (sent as
+	 * `Phone`; empty is refused with `InvaildAbuseDomain.PhoneEmpty`). The
+	 * service has no phone line, so it names the service mailbox.
+	 */
+	reporter: { email: string; contactType: "E"; contact: string };
 };
 
 /**
@@ -27,7 +32,7 @@ export type EranetProviderDefinition = ProviderSubmissionDefinition & {
 const definitionWithoutHash = {
 	key: "eranet",
 	displayName: "Eranet Fraud & Phishing Report",
-	version: "2026-11-03.1",
+	version: "2026-11-03.2",
 	exactMailboxes: ["abuse@eranet.com", "support@eranet.com", "support@tnet.hk", "cs@eranet.com"],
 	registrarIds: [1868],
 	supplemental: false,
@@ -48,7 +53,7 @@ const definitionWithoutHash = {
 	reporter: {
 		email: serviceIdentity.mailbox,
 		contactType: "E" as const,
-		phone: "",
+		contact: serviceIdentity.mailbox,
 	},
 };
 

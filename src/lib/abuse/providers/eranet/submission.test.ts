@@ -89,6 +89,7 @@ describe("Eranet abuse form", () => {
 			SubTypes: "other",
 			Screenshot: ["uploads/abc.png"],
 			ContactType: "E",
+			Phone: "support@phishing.support",
 			Website: "https://phishing.support/submissions/375628583143477248",
 		});
 		expect(String(api.calls[2]!.json?.Description)).toContain("malware distribution domain report is being submitted to Eranet for keychainagent.pro");

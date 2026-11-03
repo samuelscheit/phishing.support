@@ -176,7 +176,7 @@ function complaintBody(payload: EranetSubmissionPayload, state: EranetPreflightS
 		Screenshot: state.screenshots,
 		ContactType: ERANET_PROVIDER.reporter.contactType,
 		Name: "",
-		Phone: ERANET_PROVIDER.reporter.phone,
+		Phone: ERANET_PROVIDER.reporter.contact,
 		Certificate: "",
 		Proof: "",
 		Agent: false,
