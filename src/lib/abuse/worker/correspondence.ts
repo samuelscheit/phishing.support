@@ -41,6 +41,17 @@ export async function pollProviderCorrespondence(params: { routeId: bigint; jobI
 	const storedMessages = (await Promise.all(stored.map(({ id }) => AbuseRepository.getMailMessage(id))))
 		.filter((message) => message !== undefined);
 	await enqueueOriginHostDisclosures(route, storedMessages);
+	const state = correspondence.status?.state;
+	if (state && provider.decisionFollowUp?.contestedStates.includes(state)) {
+		// Once per route and decision, for the lifetime of the case.
+		await AbuseRepository.enqueueJobOnce({
+			jobType: "follow_up_provider_decision",
+			reportId: route.reportId,
+			routeId: route.id,
+			payload: { state, ...(correspondence.status?.detail ? { detail: correspondence.status.detail } : {}) },
+			dedupeKey: `decision-follow-up:${route.id.toString()}:${state}`,
+		});
+	}
 
 	const elapsed = Date.now() - run.createdAt.getTime();
 	if (elapsed < CORRESPONDENCE_POLL_WINDOW_MS) await queueCorrespondencePoll(route, { delayMs: CORRESPONDENCE_POLL_INTERVAL_MS, successorOf: params.jobId });

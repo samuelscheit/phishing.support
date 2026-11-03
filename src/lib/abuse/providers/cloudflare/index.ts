@@ -10,6 +10,13 @@ export const cloudflareProvider: ProviderSubmissionProvider = {
 	prepareSubmission: (context) => prepareCloudflareSubmission(context),
 	shouldRefreshStartingPayload: (context) => context.payload.adapter !== "cloudflare_abuse_api_v1" || context.payload.providerNarrativeVersion !== 1,
 	buildReportPreview: buildCloudflareReportPreview,
+	// Cloudflare's decision mail: "please send an email to abusereply@cloudflare.com with
+	// the report identification number included in the subject line".
+	decisionFollowUp: {
+		contestedStates: ["denied"],
+		replyAddress: "abusereply@cloudflare.com",
+		subject: (confirmationId) => `[${confirmationId}] Additional evidence for abuse report ${confirmationId}`,
+	},
 	prepareExternalSubmission: (context) => prepareCloudflareExternalSubmission(context),
 	submit: (context) => submitCloudflareSubmission(context),
 	submitPrepared: (context, preflight) => submitCloudflareSubmission(context, {}, preflight),

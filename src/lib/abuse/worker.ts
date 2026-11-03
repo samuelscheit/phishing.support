@@ -25,6 +25,7 @@ import { INVESTIGATION_BUDGET_MS } from "../exfiltration/task";
 import { readInvestigationJobPayload } from "../investigation/payload";
 import { releaseAfterFailedInvestigation, runReportInvestigation } from "../investigation/run";
 import { setInvestigationStatus } from "../investigation/status";
+import { followUpProviderDecision, readDecisionFollowUpPayload } from "./followup/decision";
 import { startSamplePurgeSchedule } from "../exfiltration/downloads/sample_purge_job";
 
 const DEFAULT_LEASE_MS = 90_000;
@@ -67,6 +68,7 @@ const EXTERNAL_JOB_TYPES = [
 	"submit_provider",
 	"deliver_provider_verification_code",
 	"investigate_report",
+	"follow_up_provider_decision",
 	"discover_kit_siblings",
 	"analyze_kit_sibling",
 ] as const satisfies readonly AbuseJobType[];
@@ -511,6 +513,9 @@ export class AbuseWorker {
 				return;
 			case "investigate_report":
 				await this.runInvestigationJob(job, signal);
+				return;
+			case "follow_up_provider_decision":
+				await followUpProviderDecision({ routeId: idFrom(job.routeId, "routeId"), ...readDecisionFollowUpPayload(job.payload) });
 				return;
 			case "report_origin_host":
 				await reportOriginHostJob(job, idFrom(job.reportId, "reportId"), signal);

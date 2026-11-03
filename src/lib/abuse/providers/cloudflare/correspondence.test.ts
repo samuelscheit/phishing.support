@@ -108,6 +108,19 @@ describe("Cloudflare correspondence polling", () => {
 		return (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, routeId)).all().filter((job) => job.jobType === "poll_provider_correspondence");
 	}
 
+	test("a denied review queues exactly one decision follow-up, however often it is polled", async () => {
+		Object.assign(process.env, environment);
+		await sqliteCloudflareSessionStore.writeSession(cloudflareSessionKey(cloudflareApiConfig(environment)), session);
+		const denied = { ...detail, result: { ...detail.result, status: "denied", denial_reason: "no_abuse_found" } };
+		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? emailsPage : denied)) as typeof fetch;
+		const { route } = await submittedCloudflareRoute();
+		await pollProviderCorrespondence({ routeId: route.id, jobId: 1n });
+		await pollProviderCorrespondence({ routeId: route.id, jobId: 2n });
+		const followUps = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, route.id)).all().filter((job) => job.jobType === "follow_up_provider_decision");
+		expect(followUps).toHaveLength(1);
+		expect(followUps[0]).toMatchObject({ payload: { state: "denied", detail: "no_abuse_found" }, dedupeKey: `decision-follow-up:${route.id.toString()}:denied` });
+	});
+
 	test("records Cloudflare's emails and status once, then schedules the next hourly read", async () => {
 		Object.assign(process.env, environment);
 		await sqliteCloudflareSessionStore.writeSession(cloudflareSessionKey(cloudflareApiConfig(environment)), session);

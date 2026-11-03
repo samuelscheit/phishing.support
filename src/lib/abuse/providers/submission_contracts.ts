@@ -167,6 +167,17 @@ export type ProviderSubmissionProvider = {
 	submit(context: ProviderSubmissionContext): Promise<ProviderSubmissionSuccess>;
 	readonly inboundMail?: ProviderInboundMail;
 	/**
+	 * How to answer a review decision the provider reports through its API.
+	 * A contested state (for example Cloudflare's `denied`) gets one reply per
+	 * route with a fresh live check and reproduction steps.
+	 */
+	readonly decisionFollowUp?: {
+		readonly contestedStates: readonly string[];
+		/** The address the provider's decision mail names for questions about a report. */
+		readonly replyAddress: string;
+		subject(confirmationId: string): string;
+	};
+	/**
 	 * Read the provider's correspondence for a submitted report by its
 	 * receipt. The worker polls it for a bounded period after submission.
 	 */
