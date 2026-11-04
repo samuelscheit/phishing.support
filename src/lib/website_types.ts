@@ -14,6 +14,16 @@ export type WebsiteNavigationHop = {
 	contentCaptured: boolean;
 };
 
+/**
+ * How a capture handled a page whose own script sends visitors to another site.
+ * `detected`: Tor/datacenter visitors and the residential exit reached
+ * different sites; the archive holds the residential one. `uniform`: every
+ * route, including the residential exit, was sent to the same site, which the
+ * archive holds; a harmless destination then means the page cloaks against all
+ * of them. `unresolved`: only the decoy could be captured.
+ */
+export type WebsiteCloaking = { outcome: "detected" | "uniform" | "unresolved"; detail: string };
+
 /** A link on a captured page to another page of the same site, which the capture can follow. */
 export type WebsiteContinuationLink = {
 	/** Reference assigned in document order; the classifier cites it. */

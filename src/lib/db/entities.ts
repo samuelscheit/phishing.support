@@ -164,6 +164,18 @@ export class SubmissionsEntity {
 			.limit(params.limit);
 	}
 
+	/** Submissions handed off to `destinationId` that still wait on its verdict. */
+	static async listRedirectedTo(destinationId: bigint) {
+		const db = await getDb();
+		return db
+			.select()
+			.from(submissions)
+			.where(and(
+				eq(submissions.status, "redirected"),
+				sql`json_extract(${submissions.data}, '$.website.redirectSubmissionId') = ${destinationId.toString()}`,
+			));
+	}
+
     static async get(id: bigint) {
         const db = await getDb();
         const [row] = await db.select().from(submissions).where(eq(submissions.id, id));

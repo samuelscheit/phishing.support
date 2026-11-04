@@ -302,7 +302,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 
 						{statusKey === "redirected" ? (
 							<div className="rounded-md border border-amber-200 bg-amber-50/60 p-3">
-								<div className="text-xs font-semibold text-amber-800">{websiteCloaking ? "Cloaks: shows scanners a different site" : "Redirects to another site"}</div>
+								<div className="text-xs font-semibold text-amber-800">{websiteCloaking?.outcome === "detected" ? "Cloaks: shows scanners a different site" : "Redirects to another site"}</div>
 								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info}</div>
 								{redirectSubmissionId ? (
 									<Link href={`/submissions/${redirectSubmissionId}`} className="mt-2 inline-block text-sm font-medium text-primary hover:underline">

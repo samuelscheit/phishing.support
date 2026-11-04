@@ -790,13 +790,28 @@ describe("cloaking", () => {
 		]);
 	});
 
-	test("the same scripted destination for every visitor is an ordinary redirect, not cloaking", async () => {
-		const fixture = cloakerFixture(() => kitUrl);
+	test("the same scripted destination for every route captures it and leaves the verdict to the destination", async () => {
+		const fixture = cloakerFixture(() => decoyUrl);
 
 		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
 
+		// apple-condition.com (submission 376291398434951215): its cloakit check
+		// sent Tor and the residential exit alike to Wikipedia.
 		expect(fixture.leasedEgress).toEqual(["phishing", "residential"]);
-		expect(archive.url).toBe(kitUrl);
+		expect(fixture.closeCount).toBe(2);
+		expect(archive.url).toBe(decoyUrl);
+		expect(archive.cloaking).toEqual({
+			outcome: "uniform",
+			detail: `${url} sent both the Tor exit and the residential exit to wikipedia.org by script`,
+		});
+	});
+
+	test("a scripted jump that stays on the submitted site never triggers the residential exit or a cloaking mark", async () => {
+		const fixture = cloakerFixture(() => `${url}/step-2`);
+
+		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+
+		expect(fixture.leasedEgress).toEqual(["phishing"]);
 		expect(archive.cloaking).toBeUndefined();
 	});
 

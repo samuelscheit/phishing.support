@@ -7,7 +7,7 @@ import { getDomain } from "tldts";
 import { getBrowser, getBrowserPage } from "./browser";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
-import type { WebsiteKitResource, WebsiteNavigationHop } from "./website_types";
+import type { WebsiteCloaking, WebsiteKitResource, WebsiteNavigationHop } from "./website_types";
 import { isSameWebsite, websiteSite } from "./website_site";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
@@ -30,13 +30,8 @@ export type ArchivedWebsiteResponse = {
 export type WebsiteArchiveResult = {
 	/** The submitted URL is retained separately from the captured document URL. */
 	requestedUrl: string;
-	/**
-	 * How the capture handled a cloaker: a page whose own script sends Tor and
-	 * datacenter visitors to a different site than a residential visitor.
-	 * `detected`: the residential exit reached a different site, which this
-	 * archive holds. `unresolved`: only the decoy could be captured.
-	 */
-	cloaking?: { outcome: "detected" | "unresolved"; detail: string };
+	/** How the capture handled the page's scripted jump to another site. */
+	cloaking?: WebsiteCloaking;
 	/** Set when the captured page sat behind a fake verification gate that was clicked through. */
 	verificationGate?: WebsiteVerificationGate;
 	/** URL whose document body, screenshot, and MHTML are captured. */
@@ -819,8 +814,18 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 
 	if (residential) {
 		const residentialSite = scriptDestinationSite(residential);
-		// The same scripted destination for every visitor is an ordinary redirect.
-		if (decoy && residentialSite === decoy.site) return decoy.archive;
+		// The same scripted destination for every route is either an ordinary
+		// redirect or a cloaker that turns all of them away; the destination's
+		// own verdict tells them apart.
+		if (decoy && residentialSite === decoy.site) {
+			return {
+				...decoy.archive,
+				cloaking: {
+					outcome: "uniform",
+					detail: `${url} sent both the ${FABRIC_EGRESS_LABEL[decoy.egress]} and the ${FABRIC_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} to ${decoy.site} by script`,
+				},
+			};
+		}
 		if (!decoy) return residential;
 		const reached = residentialSite ?? siteOf(residential.url);
 		return {

@@ -43,10 +43,21 @@ function archiveOf(hops: WebsiteNavigationHop[]): WebsiteArchiveResult {
 
 /** Streams the classification the production model returned for submission 373426928255766528, then the narrative. */
 function phishingModel(): AnalysisClient {
-	const outputs = [
+	return scriptedModel([
 		JSON.stringify({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign In Email or phone number Password", collectionFieldRefs: ["f1", "f2"], continuationRef: "" }),
 		"The captured page impersonates Netflix and asks for an email and password.",
-	];
+	]);
+}
+
+/** Classifies the captured page as harmless, as the model did for the Wikipedia decoy of submission 376291398434951215. */
+function benignModel(): AnalysisClient {
+	return scriptedModel([
+		JSON.stringify({ finding: "benign", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "" }),
+		"The page is a Wikipedia language and search landing page.",
+	]);
+}
+
+function scriptedModel(outputs: string[]): AnalysisClient {
 	let call = 0;
 	return {
 		responses: {
@@ -316,6 +327,98 @@ describe("cloaked websites", () => {
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
 		// The decoy is kept with its evidence package, so it is documented like any capture.
 		expect((await ArtifactsEntity.listForSubmission(id)).map((artifact) => artifact.kind).filter((kind) => kind !== "website_evidence").sort()).toEqual(["website_mhtml", "website_png"]);
+	});
+});
+
+describe("scripted jumps every route followed to the same site", () => {
+	const cloakerUrl = "https://apple-condition.com/en/verification";
+	const decoyUrl = "https://www.wikipedia.org/";
+	const kitUrl = "https://login-netflix.example.com/signin";
+	const uniform = (destination: string, submitted = cloakerUrl) => ({
+		outcome: "uniform" as const,
+		detail: `${submitted} sent both the Tor exit and the residential exit to ${new URL(destination).hostname.replace(/^www\./, "")} by script`,
+	});
+	const uniformArchive = (destination: string, submitted = cloakerUrl) => ({ ...archiveOf([hop(0, submitted, 200, destination), hop(1, destination, 200)]), cloaking: uniform(destination, submitted) });
+
+	test("a harmless destination fails the submitted case as suspected cloaking, retryable, with the destination's case kept", async () => {
+		const archive = uniformArchive(decoyUrl);
+		const id = await websiteSubmission(376291398434951215n, cloakerUrl);
+
+		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, { ...dependencies(archive), analysisClient: benignModel() });
+
+		const handedOff = await SubmissionsEntity.get(id);
+		const childId = BigInt(handedOff?.data.kind === "website" ? handedOff.data.website.redirectSubmissionId! : "0");
+		expect((await waitForStatus(childId, ["reported", "failed", "invalid"])).status).toBe("invalid");
+		const parent = await waitForStatus(id, ["failed"]);
+		const detail = `${uniform(decoyUrl).detail}, which shows nothing reportable`;
+		expect(parent.info).toBe(`Cloaking suspected: ${detail}. No verdict or report was made from the decoy; retry to visit the site again.`);
+		const website = parent.data.kind === "website" ? parent.data.website : undefined;
+		expect(website?.cloaking).toEqual({ outcome: "unresolved", detail });
+		expect(website?.redirectSubmissionId).toBe(childId.toString());
+		expect(website?.navigationHops).toEqual(archive.navigationHops);
+		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
+		expect(await AbuseRepository.getReportForSubmission(childId)).toBeUndefined();
+	});
+
+	test("a phishing destination keeps the submitted case redirected to the reported case", async () => {
+		const id = await websiteSubmission(10n, cloakerUrl);
+
+		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, dependencies(uniformArchive(kitUrl)));
+
+		const parent = await SubmissionsEntity.get(id);
+		expect(parent?.status).toBe("redirected");
+		expect(parent?.info).toBe(`${uniform(kitUrl).detail}; that site is analyzed in its own case. If it shows nothing reportable, ${cloakerUrl} is treated as a cloaker that turned every route away.`);
+		const childId = BigInt(parent!.data.kind === "website" ? parent!.data.website.redirectSubmissionId! : "0");
+		expect((await waitForStatus(childId, ["reported", "failed", "invalid"])).status).toBe("reported");
+		const settled = await SubmissionsEntity.get(id);
+		expect(settled?.status).toBe("redirected");
+		expect(settled?.data.kind === "website" ? settled.data.website.cloaking : undefined).toEqual(uniform(kitUrl));
+	});
+
+	test("a destination whose case already found nothing fails the submitted case at once, without analyzing the decoy again", async () => {
+		await SubmissionsEntity.create({ id: 60n, kind: "website", data: { kind: "website", website: { url: decoyUrl } }, dedupeKey: websiteSubmissionDedupeKey(decoyUrl), status: "invalid" });
+		const archiveCalls: ArchiveCall[] = [];
+		const id = await websiteSubmission(11n, cloakerUrl);
+
+		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, dependencies(uniformArchive(decoyUrl), archiveCalls));
+
+		const parent = await SubmissionsEntity.get(id);
+		expect(parent?.status).toBe("failed");
+		expect(parent?.data.kind === "website" ? parent.data.website.cloaking?.outcome : undefined).toBe("unresolved");
+		expect(archiveCalls).toHaveLength(1);
+	});
+
+	test("a destination whose case is still running settles every case waiting on it once it finds nothing", async () => {
+		const decoyId = await SubmissionsEntity.create({ id: 61n, kind: "website", data: { kind: "website", website: { url: decoyUrl } }, dedupeKey: websiteSubmissionDedupeKey(decoyUrl), status: "running" });
+		const siblingUrl = "https://apple-conditions.com/en/verification";
+		const plainUrl = "https://short.example.org/wiki";
+		const first = await websiteSubmission(12n, cloakerUrl);
+		const sibling = await websiteSubmission(13n, siblingUrl);
+		const plain = await websiteSubmission(14n, plainUrl);
+
+		await analyzeWebsite({ submissionId: first, url: cloakerUrl }, dependencies(uniformArchive(decoyUrl)));
+		await analyzeWebsite({ submissionId: sibling, url: siblingUrl }, dependencies(uniformArchive(decoyUrl, siblingUrl)));
+		// An HTTP redirect is the host's declared destination, never a cloaking suspicion.
+		await analyzeWebsite({ submissionId: plain, url: plainUrl }, dependencies(archiveOf([hop(0, plainUrl, 302, decoyUrl), hop(1, decoyUrl, 200)])));
+		for (const id of [first, sibling, plain]) expect((await SubmissionsEntity.get(id))?.status).toBe("redirected");
+
+		await analyzeWebsite({ submissionId: decoyId, url: decoyUrl }, { ...dependencies(archiveOf([hop(0, decoyUrl, 200)])), analysisClient: benignModel() });
+
+		expect((await SubmissionsEntity.get(decoyId))?.status).toBe("invalid");
+		expect((await SubmissionsEntity.get(first))?.status).toBe("failed");
+		expect((await SubmissionsEntity.get(sibling))?.info).toStartWith(`Cloaking suspected: ${siblingUrl} sent both`);
+		expect((await SubmissionsEntity.get(plain))?.status).toBe("redirected");
+	});
+
+	test("a destination whose analysis fails leaves the submitted case redirected", async () => {
+		const decoyId = await SubmissionsEntity.create({ id: 62n, kind: "website", data: { kind: "website", website: { url: decoyUrl } }, dedupeKey: websiteSubmissionDedupeKey(decoyUrl), status: "running" });
+		const id = await websiteSubmission(15n, cloakerUrl);
+		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, dependencies(uniformArchive(decoyUrl)));
+
+		await analyzeWebsite({ submissionId: decoyId, url: decoyUrl }, { ...dependencies(archiveOf([hop(0, decoyUrl, 200)])), archiveWebsite: async () => { throw new Error("site blocked every egress"); } });
+
+		expect((await SubmissionsEntity.get(decoyId))?.status).toBe("failed");
+		expect((await SubmissionsEntity.get(id))?.status).toBe("redirected");
 	});
 });
 

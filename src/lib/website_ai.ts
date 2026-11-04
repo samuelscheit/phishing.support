@@ -14,19 +14,21 @@ import type { ReporterMetadata } from "./request_metadata";
 import { defaultReasoning, defaultResponseModel, sleep } from "./utils";
 import { extractWebsiteContinuationLinks, extractWebsiteDataEntryFields } from "./website_fields";
 import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "./website_capture_files";
-import { describeDataEntryField, type WebsiteKitResource } from "./website_types";
 import { extractPasteCommands, type PasteCommand } from "./malware/paste_commands";
 import { defangCommand, defangUrl } from "./malware/defang";
 import { isSameWebsite, websiteSite } from "./website_site";
-import type {
-	ReportableWebsiteFinding,
-	WebsiteContinuationLink,
-	WebsiteDataEntryField,
-	WebsiteNavigationHop,
-	WebsitePhishingBasis,
-	WebsiteSiteAssessment,
-	WebsiteSiteClassification,
-	WebsiteSiteFinding,
+import {
+	describeDataEntryField,
+	type ReportableWebsiteFinding,
+	type WebsiteCloaking,
+	type WebsiteContinuationLink,
+	type WebsiteDataEntryField,
+	type WebsiteNavigationHop,
+	type WebsitePhishingBasis,
+	type WebsiteSiteAssessment,
+	type WebsiteSiteClassification,
+	type WebsiteSiteFinding,
+	type WebsiteKitResource,
 } from "./website_types";
 
 export async function emitStep(streamId: bigint | string | undefined, step: string, progress: number) {
@@ -640,11 +642,14 @@ async function handOffRedirectedCapture(params: {
 		kitResources: archive.kitResources,
 		...params.reporter,
 	}, (options) => analyzeWebsite(options, params.dependencies));
+	const destination = websiteSite(capturedHop.url);
 	await SubmissionsEntity.update(submissionId, {
 		status: "redirected",
-		info: archive.cloaking
-			? `${url} cloaks: ${archive.cloaking.detail}. ${websiteSite(capturedHop.url)} is analyzed and reported in its own case.`
-			: `${url} redirects to ${websiteSite(capturedHop.url)}; that site is analyzed and reported in its own case.`,
+		info: archive.cloaking?.outcome === "detected"
+			? `${url} cloaks: ${archive.cloaking.detail}. ${destination} is analyzed and reported in its own case.`
+			: archive.cloaking?.outcome === "uniform"
+				? `${archive.cloaking.detail}; that site is analyzed in its own case. If it shows nothing reportable, ${url} is treated as a cloaker that turned every route away.`
+				: `${url} redirects to ${destination}; that site is analyzed and reported in its own case.`,
 		data: {
 			kind: "website",
 			website: {
@@ -657,6 +662,40 @@ async function handOffRedirectedCapture(params: {
 			},
 		},
 	});
+	// The destination may already have a verdict: an earlier case for it, or a fast analysis.
+	await settleUniformRedirect(submissionId);
+}
+
+/**
+ * A page that sent every route, the residential exit included, to the same
+ * site by script waits on that site's verdict. A harmless destination
+ * (Wikipedia, a store front) is the decoy of a cloaker that turned every route
+ * away, not where the page leads its real visitors; the submitted case then
+ * fails as suspected cloaking so a retry visits it again.
+ */
+async function settleUniformRedirect(submissionId: bigint): Promise<void> {
+	const submission = await SubmissionsEntity.get(submissionId);
+	const website = submission?.status === "redirected" && submission.data.kind === "website" ? submission.data.website : undefined;
+	if (website?.cloaking?.outcome !== "uniform" || !website.redirectSubmissionId) return;
+	const destination = await SubmissionsEntity.get(BigInt(website.redirectSubmissionId));
+	if (destination?.status !== "invalid") return;
+	const cloaking = { outcome: "unresolved" as const, detail: `${website.cloaking.detail}, which shows nothing reportable` };
+	await SubmissionsEntity.update(submissionId, {
+		status: "failed",
+		info: cloakingSuspectedInfo(cloaking),
+		data: { kind: "website", website: { ...website, cloaking } },
+	});
+}
+
+function cloakingSuspectedInfo(cloaking: WebsiteCloaking): string {
+	return `Cloaking suspected: ${cloaking.detail}. No verdict or report was made from the decoy; retry to visit the site again.`;
+}
+
+/** Settle the submitted cases that were handed off to this destination and wait on its verdict. */
+async function settleUniformRedirectsTo(destinationId: bigint): Promise<void> {
+	for (const submission of await SubmissionsEntity.listRedirectedTo(destinationId)) {
+		await settleUniformRedirect(submission.id);
+	}
 }
 
 export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencies: WebsiteAnalysisDependencies = {}): Promise<bigint> {
@@ -700,7 +739,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await websiteEvidence(submissionId, url, archive, dependencies) });
 			await SubmissionsEntity.update(submissionId, {
 				status: "failed",
-				info: `Cloaking suspected: ${archive.cloaking.detail}. No verdict or report was made from the decoy; retry to visit the site again.`,
+				info: cloakingSuspectedInfo(archive.cloaking),
 				data: { kind: "website", website: { url, whois, archiveUrl: archive.url, navigationHops: archive.navigationHops, cloaking: archive.cloaking } },
 			});
 			await emitStep(submissionId, "failed", 100);
@@ -799,6 +838,8 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		console.error("Website analysis failed:", error);
 		await recordWebsiteAnalysisFailure(submissionId, error);
 		await emitStep(submissionId, "failed", 100);
+	} finally {
+		await settleUniformRedirectsTo(submissionId).catch((error: unknown) => console.error("Settling redirected cases failed:", error));
 	}
 
 	return submissionId;
