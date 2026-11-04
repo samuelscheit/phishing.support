@@ -1,4 +1,4 @@
-import type { Browser, BrowserContext, Page } from "rebrowser-puppeteer-core";
+import type { Browser, BrowserContext, CDPSession, Page, Protocol } from "rebrowser-puppeteer-core";
 
 import { sleep } from "../utils";
 import { getBrowser } from "./browser";
@@ -14,9 +14,67 @@ const DESKTOP_SCREEN = { width: 1920, height: 1080 } as const;
 const DESKTOP_WINDOW = { left: 0, top: 25, width: 1920, height: 1050 } as const;
 const BROWSER_TOOLBAR_HEIGHT = 87;
 
-/** The metrics override lives as long as the CDP session that set it, so the session stays attached to the page. */
+/**
+ * Chrome's brand list for a major version, as Chrome builds it: a GREASE brand
+ * whose characters, version and position follow from the major version, then
+ * Chromium and Google Chrome (Chromium's user_agent_utils.cc).
+ */
+export function chromeBrands(major: number, version: string): Protocol.Emulation.UserAgentBrandVersion[] {
+	const greaseChars = [" ", "(", ":", "-", ".", "/", ")", ";", "=", "?", "_"];
+	const grease = { brand: `Not${greaseChars[major % greaseChars.length]}A${greaseChars[(major + 1) % greaseChars.length]}Brand`, version: ["8", "99", "24"][major % 3]! };
+	const brands = [grease, { brand: "Chromium", version }, { brand: "Google Chrome", version }];
+	const order = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]][major % 6]!;
+	const shuffled: Protocol.Emulation.UserAgentBrandVersion[] = [];
+	order.forEach((position, index) => { shuffled[position] = brands[index]!; });
+	return shuffled;
+}
+
+/**
+ * The browser's own Chrome build, presented as Google Chrome on 64-bit
+ * Windows: the User-Agent header, navigator.userAgent/platform and the client
+ * hints all say so. Fabric's browsers are Chromium on Linux, and kits send
+ * Linux desktops, which few real victims use, to a dead decoy host
+ * (device.ledger-access.live → ogenhoallin.com for production case 374589286864916480).
+ */
+export function windowsDesktopIdentity(product: string): Protocol.Emulation.SetUserAgentOverrideRequest {
+	const fullVersion = /^(?:Headless)?Chrome\/(\d+)\.[\d.]+$/.exec(product) ? product.slice(product.indexOf("/") + 1) : undefined;
+	if (!fullVersion) throw new Error(`The browser reports no Chrome version: ${product}`);
+	const major = fullVersion.split(".")[0]!;
+	return {
+		userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`,
+		platform: "Win32",
+		userAgentMetadata: {
+			brands: chromeBrands(Number(major), major),
+			fullVersionList: chromeBrands(Number(major), fullVersion),
+			fullVersion,
+			platform: "Windows",
+			platformVersion: "19.0.0",
+			architecture: "x86",
+			bitness: "64",
+			model: "",
+			mobile: false,
+			wow64: false,
+		},
+	};
+}
+
+/**
+ * Puppeteer applies the identity to the page and to every worker and
+ * out-of-process frame it attaches later, but through the Network domain,
+ * whose platform Chrome ignores: navigator.platform stayed "Linux x86_64". The
+ * same identity through the Emulation domain on the page's session sets it.
+ * Dedicated workers keep their own navigator.platform, which neither domain reaches.
+ */
+async function useWindowsDesktopIdentity(page: Page, cdp: CDPSession) {
+	const identity = windowsDesktopIdentity(await page.browser().version());
+	await page.setUserAgent({ userAgent: identity.userAgent, userAgentMetadata: identity.userAgentMetadata, platform: identity.platform });
+	await cdp.send("Emulation.setUserAgentOverride", identity);
+}
+
+/** The overrides live as long as the CDP session that set them, so the session stays attached to the page. */
 async function useDesktopWindow(page: Page) {
 	const cdp = await page.createCDPSession();
+	await useWindowsDesktopIdentity(page, cdp);
 	const { windowId } = await cdp.send("Browser.getWindowForTarget");
 	await cdp.send("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal", ...DESKTOP_WINDOW } });
 	await cdp.send("Emulation.setDeviceMetricsOverride", {

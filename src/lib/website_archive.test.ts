@@ -199,6 +199,7 @@ function archiveBrowserFixture(options: {
 				if (event === "response") responseListeners.push(listener);
 			},
 			setRequestInterception: async (enabled: boolean) => { interceptionEnabled = enabled; },
+			setUserAgent: async () => undefined,
 			goto: async (url: string, navigation: { waitUntil?: string; timeout?: number; referer?: string }) => {
 				navigationCalls.push({ url, egress, ...navigation });
 				const deliver = (response: HTTPResponse) => {
@@ -257,6 +258,7 @@ function archiveBrowserFixture(options: {
 		};
 		const browser = {
 			defaultBrowserContext: () => ({ ...context, newPage: async () => page }),
+			version: async () => "Chrome/156.0.8078.73",
 			close: async () => { closeCount++; },
 		} as unknown as Browser;
 		return browser;
