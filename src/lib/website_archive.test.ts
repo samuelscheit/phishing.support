@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import puppeteer, { type Browser, type BrowserContext, type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
 import sharp from "sharp";
 import type { FabricEgress } from "./browser/fabric";
-import type { WebsiteNavigationHop } from "./website_types";
+import type { WebsiteNavigationHop, WebsitePageAction } from "./website_types";
 
 import { archiveWebsite, BrowserInfrastructureError, capturedDocumentContent, getMhtmlArchiveDate, getMhtmlArchiveLocation, isBrowserInfrastructureFailure, WebsiteCaptureFailedError } from "./website_archive";
 
@@ -1138,11 +1138,11 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 			});
 		}
 
-		const capture = (url: string, fieldSubmissions = [{ field: emailField, value }]) => {
+		const capture = (url: string, pageActions: WebsitePageAction[] = [{ kind: "fill", field: emailField, value }]) => {
 			const leased: FabricEgress[] = [];
 			return {
 				leased,
-				run: () => archiveWebsite({ url, egress: "residential", fieldSubmissions }, {
+				run: () => archiveWebsite({ url, egress: "residential", pageActions }, {
 					...fast,
 					renderSettleMs: 1_500,
 					humanCheckMs: 3_000,
@@ -1164,7 +1164,7 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 				expect(archive.cloaking).toBeUndefined();
 				// The honeypots stay empty, the captcha's token went along.
 				expect(posts).toEqual([{ website: "", company_url: "", email: value, "cf-turnstile-response": "0.token" }]);
-				expect(archive.submittedField).toEqual({ field: emailField, value, humanCheck: "passed" });
+				expect(archive.performedAction).toEqual({ kind: "fill", field: emailField, value, humanCheck: "passed" });
 				expect(archive.url).toBe(`http://127.0.0.1:${server.port}/word/signin.php`);
 				// The hops start at the submission: the POST's redirect, then the page it opened.
 				expect(archive.navigationHops).toEqual([
@@ -1183,7 +1183,7 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 			try {
 				const archive = await capture(`http://127.0.0.1:${server.port}/word/verify.workspace.php`).run();
 				expect(posts).toEqual([{ website: "", company_url: "", email: value, "cf-turnstile-response": "" }]);
-				expect(archive.submittedField?.humanCheck).toBe("unsolved");
+				expect(archive.performedAction).toMatchObject({ humanCheck: "unsolved" });
 			} finally {
 				server.stop(true);
 			}
@@ -1201,9 +1201,9 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 			try {
 				const url = `http://127.0.0.1:${server.port}/common/oauth2`;
 				const field = { ref: "f1", control: "input[type=text]", id: "login", name: "loginfmt", placeholder: "Email, phone, or Skype" };
-				const archive = await capture(url, [{ field, value }]).run();
+				const archive = await capture(url, [{ kind: "fill", field, value }]).run();
 
-				expect(archive.submittedField).toEqual({ field, value });
+				expect(archive.performedAction).toEqual({ kind: "fill", field, value });
 				expect(archive.navigationHops).toEqual([expect.objectContaining({ index: 0, url, status: 200, contentCaptured: true })]);
 				expect(archive.navigationHops[0]!.redirectTo).toBeUndefined();
 				expect(archive.text.toString()).toContain(value);
@@ -1229,7 +1229,7 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 			});
 			try {
 				const field = { ref: "f1", control: "input[type=email]", name: "email" };
-				const archive = await capture(`http://127.0.0.1:${server.port}/`, [{ field, value }]).run();
+				const archive = await capture(`http://127.0.0.1:${server.port}/`, [{ kind: "fill", field, value }]).run();
 				expect(posts).toEqual([{ email: value }]);
 				expect(archive.url).toBe(`http://127.0.0.1:${server.port}/next`);
 				expect(archive.text.toString()).toContain("Enter password");
@@ -1257,15 +1257,107 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 			try {
 				const phone = "+12125550142";
 				const archive = await capture(`http://127.0.0.1:${server.port}/`, [
-					{ field: { ref: "f1", control: "input[type=email]", name: "email" }, value },
-					{ field: { ref: "f1", control: "input[type=tel]", id: "phone" }, value: phone },
+					{ kind: "fill", field: { ref: "f1", control: "input[type=email]", name: "email" }, value },
+					{ kind: "fill", field: { ref: "f1", control: "input[type=tel]", id: "phone" }, value: phone },
 				]).run();
 				expect(posts).toEqual([{ path: "/email", body: { email: value } }, { path: "/phone-check", body: { phone } }]);
-				expect(archive.submittedField?.value).toBe(phone);
+				expect(archive.performedAction).toMatchObject({ value: phone });
 				expect(archive.navigationHops.map(({ url, status }) => ({ path: new URL(url).pathname, status }))).toEqual([
 					{ path: "/phone-check", status: 303 },
 					{ path: "/signin", status: 200 },
 				]);
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+
+		/**
+		 * The DocuSign kit's "One more step" interstitial (submission
+		 * 376813288618463354): ids and classes change on every visit, an
+		 * off-screen honeypot, and a "Confirm" button that opens the email page.
+		 */
+		const interstitial = (suffix: string) => `<div class="spb7e6hqb${suffix}">Protected session</div><h1 class="tz2gz97e2${suffix}">One more step</h1>
+<p>One click verifies your session and lets you continue.</p>
+<button type="button" class="xknzu4dhlw96${suffix}" id="fsjrdbmpp03a${suffix}"><span class="b3h956noz9e"></span><span id="muol5dp2apeh${suffix}">Confirm</span></button>
+<input type="text" name="website" value="" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0">
+<script>document.querySelector("button").addEventListener("click", () => { location.href = "/word/verify.workspace.php?step=email"; });</script>`;
+
+		function serveInterstitial(posts: Array<Record<string, string>>, options: { skipGate?: boolean } = {}) {
+			let visit = 0;
+			return Bun.serve({
+				port: 0,
+				fetch: async (request) => {
+					const { pathname, searchParams } = new URL(request.url);
+					if (request.method === "POST") {
+						posts.push(Object.fromEntries(new URLSearchParams(await request.text())));
+						return new Response(null, { status: 302, headers: { location: "/word/signin.php" } });
+					}
+					if (pathname === "/word/signin.php") return html(signIn);
+					if (searchParams.get("step") === "email" || options.skipGate) return html(gatePage(0));
+					return html(interstitial(String(++visit)));
+				},
+			});
+		}
+
+		test("clicks the named button by its caption, whatever ids the page gives it on this visit", async () => {
+			const server = serveInterstitial([]);
+			try {
+				const url = `http://127.0.0.1:${server.port}/word/verify.workspace.php`;
+				const archive = await capture(url, [{ kind: "click", control: { ref: "b1", label: "Confirm" } }]).run();
+
+				expect(archive.performedAction).toEqual({ kind: "click", control: { ref: "b1", label: "Confirm" } });
+				expect(archive.url).toBe(`${url}?step=email`);
+				expect(archive.navigationHops).toEqual([expect.objectContaining({ index: 0, url: `${url}?step=email`, status: 200, contentCaptured: true })]);
+				expect(archive.text.toString()).toContain("Email address");
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+
+		test("replays the click, then submits the email page it opened", async () => {
+			const posts: Array<Record<string, string>> = [];
+			const server = serveInterstitial(posts);
+			try {
+				const url = `http://127.0.0.1:${server.port}/word/verify.workspace.php`;
+				const archive = await capture(url, [
+					{ kind: "click", control: { ref: "b1", label: "Confirm" } },
+					{ kind: "fill", field: emailField, value },
+				]).run();
+
+				expect(posts).toEqual([{ website: "", company_url: "", email: value, "cf-turnstile-response": "0.token" }]);
+				expect(archive.performedAction).toMatchObject({ kind: "fill", humanCheck: "passed" });
+				expect(archive.text.toString()).toContain("Enter password");
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+
+		test("skips an earlier step a visit no longer needs when the new step's target already shows", async () => {
+			// The kit varies its gate per visit; this visit shows the email page at once.
+			const posts: Array<Record<string, string>> = [];
+			const server = serveInterstitial(posts, { skipGate: true });
+			try {
+				const archive = await capture(`http://127.0.0.1:${server.port}/word/verify.workspace.php`, [
+					{ kind: "click", control: { ref: "b1", label: "Confirm" } },
+					{ kind: "fill", field: emailField, value },
+				]).run();
+
+				expect(posts).toHaveLength(1);
+				expect(archive.performedAction?.kind).toBe("fill");
+				expect(archive.text.toString()).toContain("Enter password");
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+
+		test("never clicks a disabled or hidden button that only carries the caption", async () => {
+			const server = Bun.serve({
+				port: 0,
+				fetch: () => html(`<button disabled>Confirm</button><button style="display:none">Confirm</button><div role="button" style="visibility:hidden">Confirm</div>`),
+			});
+			try {
+				const error = await capture(`http://127.0.0.1:${server.port}/`, [{ kind: "click", control: { ref: "b1", label: "Confirm" } }]).run().catch((caught: unknown) => caught);
+				expect((error as Error).message).toBe(`Failed to load page: the page showed no button "Confirm" to click via residential exit`);
 			} finally {
 				server.stop(true);
 			}
@@ -1277,7 +1369,7 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 				const { leased, run } = capture(`http://127.0.0.1:${server.port}/`);
 				const error = await run().catch((caught: unknown) => caught);
 				expect(error).toBeInstanceOf(WebsiteCaptureFailedError);
-				expect((error as Error).message).toBe(`Failed to load page: the page showed no field "Email address" to enter the address into via residential exit`);
+				expect((error as Error).message).toBe(`Failed to load page: the page showed no field "Email address" to enter the value into via residential exit`);
 				expect(leased).toEqual(["residential"]);
 			} finally {
 				server.stop(true);

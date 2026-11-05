@@ -387,13 +387,15 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 													<div className="min-w-0 space-y-1">
 														<div className="break-all font-mono text-xs">{hop.url}</div>
 														<div className="text-xs text-muted-foreground">
-															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured and analyzed" : hop.followedLink ? " · Page captured, its link followed" : hop.submittedField ? " · Page captured, its field submitted" : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
+															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured and analyzed" : hop.followedLink ? " · Page captured, its link followed" : hop.performedAction ? (hop.performedAction.kind === "fill" ? " · Page captured, its field submitted" : " · Page captured, its button clicked") : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
 														</div>
 														{hop.followedLink && hop.redirectTo ? (
 															<div className="break-all text-xs text-muted-foreground">Its link “{hop.followedLink.label}” opens {hop.redirectTo}</div>
-														) : hop.submittedField && hop.redirectTo ? (
+														) : hop.performedAction && hop.redirectTo ? (
 															<div className="break-all text-xs text-muted-foreground">
-																Entering the made-up “{hop.submittedField.value}” into “{describeDataEntryField(hop.submittedField.field)}”{hop.submittedField.humanCheck === "unsolved" ? " (its captcha never passed)" : ""} shows {hop.redirectTo}
+																{hop.performedAction.kind === "fill"
+																	? <>Entering the made-up “{hop.performedAction.value}” into “{describeDataEntryField(hop.performedAction.field)}”{hop.performedAction.humanCheck === "unsolved" ? " (its captcha never passed)" : ""} shows {hop.redirectTo}</>
+																	: <>Clicking its button “{hop.performedAction.control.label}” shows {hop.redirectTo}</>}
 															</div>
 														) : hop.redirectTo ? <div className="break-all text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
 														{verificationGate && hop.contentCaptured ? (

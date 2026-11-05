@@ -1,6 +1,6 @@
 import { parse, type HTMLElement } from "node-html-parser";
 
-import type { WebsiteContinuationLink, WebsiteDataEntryField } from "./website_types";
+import type { WebsiteContinuationControl, WebsiteContinuationLink, WebsiteDataEntryField } from "./website_types";
 import { isSameWebsite } from "./website_site";
 
 /** Input types that trigger an action, pick from fixed choices, or declare a site search box. */
@@ -127,4 +127,35 @@ export function extractWebsiteContinuationLinks(html: string, pageUrl: string): 
 		if (links.length === MAX_CONTINUATION_LINKS) break;
 	}
 	return links;
+}
+
+const MAX_CONTINUATION_CONTROLS = 30;
+/** Elements a visitor clicks that are not links; links are listed as continuation links. */
+export const CONTINUATION_CONTROL_SELECTOR = "button, [role=button], input[type=submit], input[type=button]";
+
+/** A button's caption, as a visitor reads it: its text, or an input button's value, or its accessible name. */
+export function controlCaption(element: { textContent: string | null; getAttribute(name: string): string | null | undefined; tagName: string }): string | undefined {
+	const value = element.tagName.toLowerCase() === "input" ? element.getAttribute("value") ?? undefined : undefined;
+	return descriptor(element.textContent ?? undefined) ?? descriptor(value) ?? descriptor(element.getAttribute("aria-label") ?? undefined) ?? descriptor(element.getAttribute("title") ?? undefined);
+}
+
+/**
+ * Lists the buttons on a captured page: a kit's own interstitial often moves
+ * on through a button rather than a link ("One more step" → "Confirm").
+ * Disabled and captionless controls cannot be clicked or named. References
+ * are assigned in document order, one per caption, since the caption is how
+ * the live page finds the control again.
+ */
+export function extractWebsiteContinuationControls(html: string): WebsiteContinuationControl[] {
+	const controls: WebsiteContinuationControl[] = [];
+	const seen = new Set<string>();
+	for (const element of parse(html).querySelectorAll(CONTINUATION_CONTROL_SELECTOR)) {
+		if (element.hasAttribute("disabled") || element.getAttribute("aria-hidden") === "true") continue;
+		const label = controlCaption(element);
+		if (!label || seen.has(label)) continue;
+		seen.add(label);
+		controls.push({ ref: `b${controls.length + 1}`, label });
+		if (controls.length === MAX_CONTINUATION_CONTROLS) break;
+	}
+	return controls;
 }

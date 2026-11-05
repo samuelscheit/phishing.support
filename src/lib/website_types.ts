@@ -12,30 +12,53 @@ export type WebsiteNavigationHop = {
 	 */
 	followedLink?: { label: string };
 	/**
-	 * Set when the capture entered a made-up value into this page's field, as
-	 * a visitor enters their address, and submitted it; `redirectTo` is the
-	 * page that then showed. The page was captured as an earlier step of the case.
+	 * Set when the capture acted on this page as a visitor would, to reach the
+	 * next step of its flow: entered a made-up value into its field and
+	 * submitted it, or clicked its button. `redirectTo` is the page that then
+	 * showed. The page was captured as an earlier step of the case.
 	 */
-	submittedField?: WebsiteSubmittedField;
+	performedAction?: WebsitePerformedAction;
 	contentCaptured: boolean;
 };
 
-/** The identifier a capture entered into a page's field to reach the kit's next step. */
-export type WebsiteSubmittedField = {
-	/** The field as the captured page recorded it; its id or name finds it again when the visit is replayed. */
-	field: WebsiteDataEntryField;
-	/** The made-up value entered, a canary that can reach no one. */
-	value: string;
-	/**
-	 * The captcha widget beside the field (Turnstile, reCAPTCHA, hCaptcha):
-	 * `passed` when it issued its token before the form was submitted,
-	 * `unsolved` when it never did. Absent when the form had none.
-	 */
-	humanCheck?: "passed" | "unsolved";
+/** A button on a captured page that continues its flow; found again on the live page by its caption. */
+export type WebsiteContinuationControl = {
+	/** Reference assigned in document order; the classifier cites it. */
+	ref: string;
+	/** The caption a visitor reads on it. */
+	label: string;
 };
 
-/** A field a live capture fills and submits; the value goes into that field only. */
-export type WebsiteFieldSubmission = Pick<WebsiteSubmittedField, "field" | "value">;
+/**
+ * One step a live capture takes on a page, as a visitor would: enter a value
+ * into a field and submit it (the value goes into that field only), or click
+ * a button.
+ */
+export type WebsitePageAction =
+	| { kind: "fill"; field: WebsiteDataEntryField; value: string }
+	| { kind: "click"; control: WebsiteContinuationControl };
+
+/** A page action as the capture took it. */
+export type WebsitePerformedAction =
+	| (Extract<WebsitePageAction, { kind: "fill" }> & {
+		/**
+		 * The captcha widget beside the field (Turnstile, reCAPTCHA, hCaptcha):
+		 * `passed` when it issued its token before the form was submitted,
+		 * `unsolved` when it never did. Absent when the form had none.
+		 */
+		humanCheck?: "passed" | "unsolved";
+	})
+	| Extract<WebsitePageAction, { kind: "click" }>;
+
+/** The page action without what the capture observed while taking it, for replaying the visit. */
+export function pageActionOf(performed: WebsitePerformedAction): WebsitePageAction {
+	return performed.kind === "fill" ? { kind: "fill", field: performed.field, value: performed.value } : performed;
+}
+
+/** How the action reads to a person: `the field "Email address"`, `the button "Confirm"`. */
+export function describePageAction(action: WebsitePageAction): string {
+	return action.kind === "fill" ? `the field ${JSON.stringify(describeDataEntryField(action.field))}` : `the button ${JSON.stringify(action.control.label)}`;
+}
 
 /**
  * How a capture handled a page whose own script sends visitors to another site.
