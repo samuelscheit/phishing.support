@@ -1080,6 +1080,32 @@ location.replace(URL.createObjectURL(new Blob(["<!DOCTYPE html><html><body>${app
 		}
 	}, 60_000);
 
+	test("records the page a clicked gate navigates the main frame to as its own hop", async () => {
+		// docusign.alt3-doc3ea7-v2.sbs over the residential exit: a self-posting
+		// interstitial, a "Confirm you are human" page, then the email form. The
+		// hops ended at the interstitial's 302, which was marked as the captured page.
+		const hits: string[] = [];
+		const server = serveKit(`<!DOCTYPE html><html><body><main><h1>Security Check</h1>
+<div role="button" tabindex="0" id="box" aria-label="Confirm you are human"><span>Confirm you are human</span></div></main>
+<script>document.getElementById("box").addEventListener("click", () => { location.href = "/login-form"; });</script></body></html>`, hits);
+		try {
+			const url = `http://127.0.0.1:${server.port}/c2222120`;
+			const loginUrl = `http://127.0.0.1:${server.port}/login-form`;
+			const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 3_000, getBrowser: launch });
+
+			expect(archive.verificationGate).toEqual({ label: "Confirm you are human" });
+			expect(archive.url).toBe(loginUrl);
+			expect(archive.navigationHops).toEqual([
+				expect.objectContaining({ index: 0, url, status: 200, redirectTo: loginUrl, contentCaptured: false }),
+				expect.objectContaining({ index: 1, url: loginUrl, status: 200, contentCaptured: true }),
+			]);
+			expect(archive.text.toString()).toContain("Sign in with Apple Account");
+			expect(hits).toEqual(["/c2222120", "/login-form"]);
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+
 	test("records a jump the page's <head> makes to another site before it finishes loading as the submitted page's own hop", async () => {
 		// docusign.alt3-doc3ea7-v2.sbs: meta refresh and `location.replace` to a news
 		// site in <head>. Chromium's navigation resolves with the news site's response.
