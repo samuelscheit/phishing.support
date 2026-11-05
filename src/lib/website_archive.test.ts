@@ -4,9 +4,9 @@ import { homedir } from "node:os";
 import puppeteer, { type Browser, type BrowserContext, type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
 import sharp from "sharp";
 import type { FabricEgress } from "./browser/fabric";
-import type { WebsiteNavigationHop, WebsitePageAction } from "./website_types";
+import type { WebsiteDataEntryField, WebsiteNavigationHop, WebsitePageAction } from "./website_types";
 
-import { archiveWebsite, BrowserInfrastructureError, capturedDocumentContent, getMhtmlArchiveDate, getMhtmlArchiveLocation, isBrowserInfrastructureFailure, WebsiteCaptureFailedError } from "./website_archive";
+import { type WebsiteArchiveResult, archiveWebsite, BrowserInfrastructureError, capturedDocumentContent, getMhtmlArchiveDate, getMhtmlArchiveLocation, isBrowserInfrastructureFailure, WebsiteCaptureFailedError } from "./website_archive";
 
 function mhtml(preamble: string, body = "content") {
 	return Buffer.from(`${preamble}\r\n\r\n${body}`, "latin1");
@@ -1106,11 +1106,13 @@ location.replace(URL.createObjectURL(new Blob(["<!DOCTYPE html><html><body>${app
 		}
 	}, 60_000);
 
-	describe("identifier fields", () => {
-		const html = (body: string) => new Response(`<!DOCTYPE html><html><body>${body}</body></html>`, { headers: { "content-type": "text/html; charset=utf-8" } });
+	describe("acting on the captured page in the same visit", () => {
+		const html = (body: string, headers: Record<string, string> = {}) => new Response(`<!DOCTYPE html><html><body>${body}</body></html>`, { headers: { "content-type": "text/html; charset=utf-8", ...headers } });
 		const signIn = `<h1>Enter password</h1><input type="password" name="passwd" placeholder="Password"><button>Sign in</button>`;
 		const emailField = { ref: "f5", control: "input[type=email]", id: "email", name: "email", label: "Email address" };
 		const value = "probe.0123456789abcdef@probe-canary.invalid";
+		const fill = (field: WebsiteDataEntryField = emailField, fillValue = value) => ({ kind: "fill" as const, field, value: fillValue });
+		const click = (label: string): WebsitePageAction => ({ kind: "click", control: { ref: "b1", label } });
 
 		/** The DocuSign gate: honeypots, the email field, a captcha widget that issues its token (or never does), and an "Open" button. */
 		function gatePage(tokenAfterMs: number | undefined) {
@@ -1123,69 +1125,118 @@ location.replace(URL.createObjectURL(new Blob(["<!DOCTYPE html><html><body>${app
 ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySelector("[name=cf-turnstile-response]").value = "0.token"; }, ${tokenAfterMs});</script>`}`;
 		}
 
-		function serveGate(tokenAfterMs: number | undefined, posts: Array<Record<string, string>>) {
-			return Bun.serve({
+		/**
+		 * The DocuSign kit's "One more step" interstitial (submission
+		 * 376813288618463354): ids and classes change on every visit, an
+		 * off-screen honeypot, and a "Confirm" button. Its click sets the kit's
+		 * session cookie; the email page only shows to a visitor holding it, and
+		 * the sign-in page only to one who also posted an address.
+		 */
+		const interstitial = (suffix: string) => `<div class="spb7e6hqb${suffix}">Protected session</div><h1 class="tz2gz97e2${suffix}">One more step</h1>
+<p>One click verifies your session and lets you continue.</p>
+<button type="button" class="xknzu4dhlw96${suffix}" id="fsjrdbmpp03a${suffix}"><span class="b3h956noz9e"></span><span id="muol5dp2apeh${suffix}">Confirm</span></button>
+<input type="text" name="website" value="" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0">
+<script>document.querySelector("button").addEventListener("click", () => { document.cookie = "kit_session=${suffix}; path=/"; location.href = "/word/verify.workspace.php"; });</script>`;
+
+		function serveKit(options: { tokenAfterMs?: number } = { tokenAfterMs: 0 }) {
+			const posts: Array<Record<string, string>> = [];
+			let visit = 0;
+			const server = Bun.serve({
 				port: 0,
 				fetch: async (request) => {
 					const { pathname } = new URL(request.url);
+					const cookie = request.headers.get("cookie") ?? "";
+					const session = cookie.match(/kit_session=(\w+)/)?.[1];
 					if (request.method === "POST") {
 						posts.push(Object.fromEntries(new URLSearchParams(await request.text())));
-						return new Response(null, { status: 302, headers: { location: "/word/signin.php" } });
+						return new Response(null, { status: 302, headers: { location: "/word/signin.php", "set-cookie": "kit_email=1; path=/" } });
 					}
-					if (pathname === "/word/signin.php") return html(signIn);
-					return html(gatePage(tokenAfterMs));
+					if (pathname === "/word/signin.php") return html(session && cookie.includes("kit_email=1") ? signIn : interstitial(String(++visit)));
+					return html(session ? gatePage(options.tokenAfterMs) : interstitial(String(++visit)));
 				},
 			});
+			return { server, posts, url: `http://127.0.0.1:${server.port}/word/verify.workspace.php` };
 		}
 
-		const capture = (url: string, pageActions: WebsitePageAction[] = [{ kind: "fill", field: emailField, value }]) => {
+		/** Captures the page keeping its browser open, takes the actions in that visit, then releases it. */
+		async function visit(url: string, actions: WebsitePageAction[]) {
 			const leased: FabricEgress[] = [];
-			return {
-				leased,
-				run: () => archiveWebsite({ url, egress: "residential", pageActions }, {
-					...fast,
-					renderSettleMs: 1_500,
-					humanCheckMs: 3_000,
-					getBrowser: async (egress?: FabricEgress) => { leased.push(egress!); return launch(); },
-				}),
-			};
-		};
-
-		test("fills only the named field, waits for the captcha's token, and captures what the form's button opens", async () => {
-			const posts: Array<Record<string, string>> = [];
-			const server = serveGate(800, posts);
+			const browsers: Browser[] = [];
+			const first = await archiveWebsite({ url, keepSession: true }, {
+				...fast,
+				renderSettleMs: 1_500,
+				humanCheckMs: 3_000,
+				getBrowser: async (egress?: FabricEgress) => {
+					leased.push(egress!);
+					const browser = await launch();
+					browsers.push(browser);
+					return browser;
+				},
+			});
+			const pages: WebsiteArchiveResult[] = [];
 			try {
-				const url = `http://127.0.0.1:${server.port}/word/verify.workspace.php`;
-				const { leased, run } = capture(url);
-				const archive = await run();
-
-				expect(leased).toEqual(["residential"]);
-				expect(archive.route).toBe("residential exit");
-				expect(archive.cloaking).toBeUndefined();
-				// The honeypots stay empty, the captcha's token went along.
-				expect(posts).toEqual([{ website: "", company_url: "", email: value, "cf-turnstile-response": "0.token" }]);
-				expect(archive.performedAction).toEqual({ kind: "fill", field: emailField, value, humanCheck: "passed" });
-				expect(archive.url).toBe(`http://127.0.0.1:${server.port}/word/signin.php`);
-				// The hops start at the submission: the POST's redirect, then the page it opened.
-				expect(archive.navigationHops).toEqual([
-					expect.objectContaining({ index: 0, url, status: 302, redirectTo: archive.url, contentCaptured: false }),
-					expect.objectContaining({ index: 1, url: archive.url, status: 200, contentCaptured: true }),
-				]);
-				expect(archive.text.toString()).toContain("Enter password");
+				for (const action of actions) pages.push(await first.session!.act(action));
 			} finally {
-				server.stop(true);
+				await first.session?.close();
+			}
+			return { leased, first, pages, last: pages.at(-1) ?? first, connected: browsers.map((browser) => browser.connected) };
+		}
+
+		test("the email page of a kit that binds it to its session is reached by clicking through in the same visit", async () => {
+			const kit = serveKit();
+			try {
+				const { leased, first, pages, last, connected } = await visit(kit.url, [click("Confirm"), fill()]);
+
+				// One browser, one route, kept for the whole flow and released at the end.
+				expect(leased).toEqual(["phishing"]);
+				expect(connected).toEqual([false]);
+				expect(first.session).toBeDefined();
+				expect(first.text.toString()).toContain("One more step");
+
+				expect(pages[0]!.performedAction).toEqual(click("Confirm"));
+				expect(pages[0]!.url).toBe(kit.url);
+				expect(pages[0]!.navigationHops).toEqual([expect.objectContaining({ index: 0, url: kit.url, status: 200, contentCaptured: true })]);
+				expect(pages[0]!.text.toString()).toContain("Email address");
+
+				// The honeypots stay empty, and the captcha's token went along.
+				expect(kit.posts).toEqual([{ website: "", company_url: "", email: value, "cf-turnstile-response": "0.token" }]);
+				expect(last.performedAction).toEqual({ ...fill(), humanCheck: "passed" });
+				expect(last.url).toBe(kit.url.replace("verify.workspace.php", "signin.php"));
+				// The hops start at the submission: the POST's redirect, then the page it opened.
+				expect(last.navigationHops).toEqual([
+					expect.objectContaining({ index: 0, url: kit.url, status: 302, redirectTo: last.url, contentCaptured: false }),
+					expect.objectContaining({ index: 1, url: last.url, status: 200, contentCaptured: true }),
+				]);
+				expect(last.text.toString()).toContain("Enter password");
+				expect(last.route).toBe("Tor exit");
+				expect(last.screenshotPng?.byteLength).toBeGreaterThan(0);
+			} finally {
+				kit.server.stop(true);
+			}
+		}, 60_000);
+
+		test("a new visit without the kit's session never sees its email page", async () => {
+			// Why the flow keeps one visit: a second, fresh visit is shown the gate again.
+			const kit = serveKit();
+			try {
+				const clicked = await visit(kit.url, [click("Confirm")]);
+				expect(clicked.last.text.toString()).toContain("Email address");
+				const fresh = await archiveWebsite({ url: kit.url }, { ...fast, renderSettleMs: 1_500, getBrowser: launch });
+				expect(fresh.text.toString()).toContain("One more step");
+				expect(fresh.session).toBeUndefined();
+			} finally {
+				kit.server.stop(true);
 			}
 		}, 60_000);
 
 		test("submits anyway when the captcha never passes, and records that it did not", async () => {
-			const posts: Array<Record<string, string>> = [];
-			const server = serveGate(undefined, posts);
+			const kit = serveKit({ tokenAfterMs: undefined });
 			try {
-				const archive = await capture(`http://127.0.0.1:${server.port}/word/verify.workspace.php`).run();
-				expect(posts).toEqual([{ website: "", company_url: "", email: value, "cf-turnstile-response": "" }]);
-				expect(archive.performedAction).toMatchObject({ humanCheck: "unsolved" });
+				const { last } = await visit(kit.url, [click("Confirm"), fill()]);
+				expect(kit.posts).toEqual([{ website: "", company_url: "", email: value, "cf-turnstile-response": "" }]);
+				expect(last.performedAction).toMatchObject({ humanCheck: "unsolved" });
 			} finally {
-				server.stop(true);
+				kit.server.stop(true);
 			}
 		}, 90_000);
 
@@ -1201,13 +1252,13 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 			try {
 				const url = `http://127.0.0.1:${server.port}/common/oauth2`;
 				const field = { ref: "f1", control: "input[type=text]", id: "login", name: "loginfmt", placeholder: "Email, phone, or Skype" };
-				const archive = await capture(url, [{ kind: "fill", field, value }]).run();
+				const { last } = await visit(url, [fill(field)]);
 
-				expect(archive.performedAction).toEqual({ kind: "fill", field, value });
-				expect(archive.navigationHops).toEqual([expect.objectContaining({ index: 0, url, status: 200, contentCaptured: true })]);
-				expect(archive.navigationHops[0]!.redirectTo).toBeUndefined();
-				expect(archive.text.toString()).toContain(value);
-				expect(archive.text.toString()).toContain("Enter password");
+				expect(last.performedAction).toEqual(fill(field));
+				expect(last.navigationHops).toEqual([expect.objectContaining({ index: 0, url, status: 200, contentCaptured: true })]);
+				expect(last.navigationHops[0]!.redirectTo).toBeUndefined();
+				expect(last.text.toString()).toContain(value);
+				expect(last.text.toString()).toContain("Enter password");
 			} finally {
 				server.stop(true);
 			}
@@ -1228,17 +1279,16 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 				},
 			});
 			try {
-				const field = { ref: "f1", control: "input[type=email]", name: "email" };
-				const archive = await capture(`http://127.0.0.1:${server.port}/`, [{ kind: "fill", field, value }]).run();
+				const { last } = await visit(`http://127.0.0.1:${server.port}/`, [fill({ ref: "f1", control: "input[type=email]", name: "email" })]);
 				expect(posts).toEqual([{ email: value }]);
-				expect(archive.url).toBe(`http://127.0.0.1:${server.port}/next`);
-				expect(archive.text.toString()).toContain("Enter password");
+				expect(last.url).toBe(`http://127.0.0.1:${server.port}/next`);
+				expect(last.text.toString()).toContain("Enter password");
 			} finally {
 				server.stop(true);
 			}
 		}, 60_000);
 
-		test("replays earlier submissions in order before the new one", async () => {
+		test("a second identifier step is taken on the page the first one opened", async () => {
 			const posts: Array<{ path: string; body: Record<string, string> }> = [];
 			const server = Bun.serve({
 				port: 0,
@@ -1256,123 +1306,60 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 			});
 			try {
 				const phone = "+12125550142";
-				const archive = await capture(`http://127.0.0.1:${server.port}/`, [
-					{ kind: "fill", field: { ref: "f1", control: "input[type=email]", name: "email" }, value },
-					{ kind: "fill", field: { ref: "f1", control: "input[type=tel]", id: "phone" }, value: phone },
-				]).run();
-				expect(posts).toEqual([{ path: "/email", body: { email: value } }, { path: "/phone-check", body: { phone } }]);
-				expect(archive.performedAction).toMatchObject({ value: phone });
-				expect(archive.navigationHops.map(({ url, status }) => ({ path: new URL(url).pathname, status }))).toEqual([
-					{ path: "/phone-check", status: 303 },
-					{ path: "/signin", status: 200 },
+				const { pages } = await visit(`http://127.0.0.1:${server.port}/`, [
+					fill({ ref: "f1", control: "input[type=email]", name: "email" }),
+					fill({ ref: "f1", control: "input[type=tel]", id: "phone" }, phone),
 				]);
+				expect(posts).toEqual([{ path: "/email", body: { email: value } }, { path: "/phone-check", body: { phone } }]);
+				expect(pages.map((page) => page.navigationHops.map(({ url, status }) => ({ path: new URL(url).pathname, status })))).toEqual([
+					[{ path: "/email", status: 303 }, { path: "/phone", status: 200 }],
+					[{ path: "/phone-check", status: 303 }, { path: "/signin", status: 200 }],
+				]);
+				expect(pages[1]!.performedAction).toMatchObject({ value: phone });
 			} finally {
 				server.stop(true);
 			}
 		}, 60_000);
 
-		/**
-		 * The DocuSign kit's "One more step" interstitial (submission
-		 * 376813288618463354): ids and classes change on every visit, an
-		 * off-screen honeypot, and a "Confirm" button that opens the email page.
-		 */
-		const interstitial = (suffix: string) => `<div class="spb7e6hqb${suffix}">Protected session</div><h1 class="tz2gz97e2${suffix}">One more step</h1>
-<p>One click verifies your session and lets you continue.</p>
-<button type="button" class="xknzu4dhlw96${suffix}" id="fsjrdbmpp03a${suffix}"><span class="b3h956noz9e"></span><span id="muol5dp2apeh${suffix}">Confirm</span></button>
-<input type="text" name="website" value="" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0">
-<script>document.querySelector("button").addEventListener("click", () => { location.href = "/word/verify.workspace.php?step=email"; });</script>`;
-
-		function serveInterstitial(posts: Array<Record<string, string>>, options: { skipGate?: boolean } = {}) {
-			let visit = 0;
-			return Bun.serve({
-				port: 0,
-				fetch: async (request) => {
-					const { pathname, searchParams } = new URL(request.url);
-					if (request.method === "POST") {
-						posts.push(Object.fromEntries(new URLSearchParams(await request.text())));
-						return new Response(null, { status: 302, headers: { location: "/word/signin.php" } });
-					}
-					if (pathname === "/word/signin.php") return html(signIn);
-					if (searchParams.get("step") === "email" || options.skipGate) return html(gatePage(0));
-					return html(interstitial(String(++visit)));
-				},
-			});
-		}
-
-		test("clicks the named button by its caption, whatever ids the page gives it on this visit", async () => {
-			const server = serveInterstitial([]);
-			try {
-				const url = `http://127.0.0.1:${server.port}/word/verify.workspace.php`;
-				const archive = await capture(url, [{ kind: "click", control: { ref: "b1", label: "Confirm" } }]).run();
-
-				expect(archive.performedAction).toEqual({ kind: "click", control: { ref: "b1", label: "Confirm" } });
-				expect(archive.url).toBe(`${url}?step=email`);
-				expect(archive.navigationHops).toEqual([expect.objectContaining({ index: 0, url: `${url}?step=email`, status: 200, contentCaptured: true })]);
-				expect(archive.text.toString()).toContain("Email address");
-			} finally {
-				server.stop(true);
-			}
-		}, 60_000);
-
-		test("replays the click, then submits the email page it opened", async () => {
-			const posts: Array<Record<string, string>> = [];
-			const server = serveInterstitial(posts);
-			try {
-				const url = `http://127.0.0.1:${server.port}/word/verify.workspace.php`;
-				const archive = await capture(url, [
-					{ kind: "click", control: { ref: "b1", label: "Confirm" } },
-					{ kind: "fill", field: emailField, value },
-				]).run();
-
-				expect(posts).toEqual([{ website: "", company_url: "", email: value, "cf-turnstile-response": "0.token" }]);
-				expect(archive.performedAction).toMatchObject({ kind: "fill", humanCheck: "passed" });
-				expect(archive.text.toString()).toContain("Enter password");
-			} finally {
-				server.stop(true);
-			}
-		}, 60_000);
-
-		test("skips an earlier step a visit no longer needs when the new step's target already shows", async () => {
-			// The kit varies its gate per visit; this visit shows the email page at once.
-			const posts: Array<Record<string, string>> = [];
-			const server = serveInterstitial(posts, { skipGate: true });
-			try {
-				const archive = await capture(`http://127.0.0.1:${server.port}/word/verify.workspace.php`, [
-					{ kind: "click", control: { ref: "b1", label: "Confirm" } },
-					{ kind: "fill", field: emailField, value },
-				]).run();
-
-				expect(posts).toHaveLength(1);
-				expect(archive.performedAction?.kind).toBe("fill");
-				expect(archive.text.toString()).toContain("Enter password");
-			} finally {
-				server.stop(true);
-			}
-		}, 60_000);
-
-		test("never clicks a disabled or hidden button that only carries the caption", async () => {
+		test("never clicks a disabled or hidden button that only carries the caption, and never fills an off-screen honeypot", async () => {
 			const server = Bun.serve({
 				port: 0,
-				fetch: () => html(`<button disabled>Confirm</button><button style="display:none">Confirm</button><div role="button" style="visibility:hidden">Confirm</div>`),
+				fetch: () => html(`<button disabled>Confirm</button><button style="display:none">Confirm</button><div role="button" style="visibility:hidden">Confirm</div>
+<input type="text" name="website" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">`),
 			});
 			try {
-				const error = await capture(`http://127.0.0.1:${server.port}/`, [{ kind: "click", control: { ref: "b1", label: "Confirm" } }]).run().catch((caught: unknown) => caught);
-				expect((error as Error).message).toBe(`Failed to load page: the page showed no button "Confirm" to click via residential exit`);
+				const url = `http://127.0.0.1:${server.port}/`;
+				const missingClick = await visit(url, [click("Confirm")]).catch((caught: unknown) => caught);
+				expect(missingClick).toBeInstanceOf(WebsiteCaptureFailedError);
+				expect((missingClick as Error).message).toBe(`Failed to load page: the page showed no button "Confirm" to click via Tor exit`);
+				const missingField = await visit(url, [fill({ ref: "f1", control: "input[type=text]", name: "website" })]).catch((caught: unknown) => caught);
+				expect((missingField as Error).message).toBe(`Failed to load page: the page showed no field "website" to enter the value into via Tor exit`);
 			} finally {
 				server.stop(true);
 			}
 		}, 60_000);
 
-		test("a page without the named field fails on its one route, without trying the others", async () => {
-			const server = Bun.serve({ port: 0, fetch: () => html(`<h1>World news</h1>`) });
+		test("a capture made without keepSession, and every route not returned, closes its browser", async () => {
+			const kit = serveKit();
 			try {
-				const { leased, run } = capture(`http://127.0.0.1:${server.port}/`);
-				const error = await run().catch((caught: unknown) => caught);
-				expect(error).toBeInstanceOf(WebsiteCaptureFailedError);
-				expect((error as Error).message).toBe(`Failed to load page: the page showed no field "Email address" to enter the value into via residential exit`);
-				expect(leased).toEqual(["residential"]);
+				const browsers: Browser[] = [];
+				const archive = await archiveWebsite({ url: kit.url }, { ...fast, renderSettleMs: 1_000, getBrowser: async () => { const browser = await launch(); browsers.push(browser); return browser; } });
+				expect(archive.session).toBeUndefined();
+				expect(browsers.map((browser) => browser.connected)).toEqual([false]);
 			} finally {
-				server.stop(true);
+				kit.server.stop(true);
+			}
+		}, 60_000);
+
+		test("acting after the session is closed fails instead of opening a new visit", async () => {
+			const kit = serveKit();
+			try {
+				const first = await archiveWebsite({ url: kit.url, keepSession: true }, { ...fast, renderSettleMs: 1_000, getBrowser: launch });
+				await first.session!.close();
+				await first.session!.close();
+				await expect(first.session!.act(click("Confirm"))).rejects.toThrow("The capture's browser is already closed.");
+			} finally {
+				kit.server.stop(true);
 			}
 		}, 60_000);
 	});

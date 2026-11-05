@@ -8,7 +8,7 @@ import { getBrowser, getBrowserPage } from "./browser";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
 import type { WebsiteCloaking, WebsiteKitResource, WebsiteNavigationHop, WebsitePageAction, WebsitePerformedAction } from "./website_types";
-import { pageShowsActionTarget, performPageAction, WebsitePageActionTargetMissingError } from "./website_page_actions";
+import { performPageAction, WebsitePageActionTargetMissingError } from "./website_page_actions";
 import { isSameWebsite, websiteSite } from "./website_site";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
@@ -56,6 +56,20 @@ export type WebsiteArchiveResult = {
 	kitResources?: WebsiteKitResource[];
 	/** Non-empty when an uploaded snapshot claims a different host than the submitted target. */
 	attributionError?: string;
+	/** The open browser of a live capture made with `keepSession`. */
+	session?: WebsitePageSession;
+};
+
+/**
+ * A live capture's browser, kept open on the captured page: the flow acts on
+ * that page as a visitor would (same cookies, same session, same variant of
+ * a kit that changes per visit) and captures what it then shows.
+ */
+export type WebsitePageSession = {
+	/** Take one step on the page as it stands and capture what it then shows; its hops start at the step's response. */
+	act(action: WebsitePageAction): Promise<WebsiteArchiveResult>;
+	/** Release the browser; later calls do nothing. */
+	close(): Promise<void>;
 };
 
 const WEBSITE_NAVIGATION_TIMEOUT_MS = 30_000;
@@ -111,16 +125,10 @@ export type ArchiveWebsiteOptions = {
 	/** Kit resources the original live capture of the retained MHTML received. */
 	kitResources?: WebsiteKitResource[];
 	/**
-	 * The only route a live capture uses, with no cloaking retry: the route
-	 * that already reached the page, when the visit is replayed to act on it.
+	 * Keep the live capture's browser open as the result's `session`, so the
+	 * caller can act on the captured page in the same visit; the caller closes it.
 	 */
-	egress?: FabricEgress;
-	/**
-	 * Steps a live capture takes in order, once the page and any verification
-	 * gate are through, each on the page the previous one opened. The last one
-	 * is the new step; the earlier ones replay the visit that reached its page.
-	 */
-	pageActions?: readonly WebsitePageAction[];
+	keepSession?: boolean;
 };
 
 /** Read a top-level MHTML header; MIME-part headers must never override capture metadata. */
@@ -733,11 +741,20 @@ async function capturePaintedScreenshot(page: Page): Promise<Uint8Array> {
 	return screenshot;
 }
 
-async function captureLiveWebsite(options: ArchiveWebsiteOptions, egress: FabricEgress, dependencies: WebsiteArchiveDependencies): Promise<WebsiteArchiveResult> {
-	const { url, referrer, pageActions = [] } = options;
+/** A live capture: the captured page, and the open browser the flow can keep acting in. */
+type LiveCapture = { archive: WebsiteArchiveResult; session: WebsitePageSession };
+
+async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgress, dependencies: WebsiteArchiveDependencies): Promise<LiveCapture> {
+	const { url, referrer } = options;
 	const browser = await (dependencies.getBrowser ?? getBrowser)(egress).catch((error: unknown) => {
 		throw new BrowserInfrastructureError(`Browser service unavailable: ${errorText(error)}`, { cause: error });
 	});
+	let open = true;
+	const close = async () => {
+		if (!open) return;
+		open = false;
+		await browser.close();
+	};
 	try {
 		// Browser Fabric owns the leased profile context. Creating an
 		// application-side incognito context would bypass that profile and egress
@@ -750,9 +767,10 @@ async function captureLiveWebsite(options: ArchiveWebsiteOptions, egress: Fabric
 		let latestDocumentResponse = null as HTTPResponse | null;
 		// Every successful main-frame document the visit passed through, in order:
 		// the submitted page, where its script sent the visitor (even from its
-		// <head>, before the navigation resolves), and what a clicked verification
-		// gate navigated to. An HTTP error document (a bot check that reloads into
-		// the real page) is replaced, not passed through.
+		// <head>, before the navigation resolves), what a clicked verification
+		// gate navigated to, and what each page action opened. An HTTP error
+		// document (a bot check that reloads into the real page) is replaced, not
+		// passed through.
 		const documents: HTTPResponse[] = [];
 		page.on("response", (response) => {
 			const request = response.request();
@@ -810,64 +828,62 @@ async function captureLiveWebsite(options: ArchiveWebsiteOptions, egress: Fabric
 		const renderSettleMs = dependencies.renderSettleMs ?? WEBSITE_RENDER_SETTLE_MS;
 		await settleRendering(page, renderSettleMs);
 		let verificationGate = await passVerificationGate(page, renderSettleMs);
-		// The hops of a capture that acts on the page start at the response to
-		// its last action; the pages before it were captured as earlier steps.
-		let performedAction: WebsitePerformedAction | undefined;
-		let resultDocumentsFrom = 0;
-		const newStep = pageActions.at(-1);
-		for (const [position, action] of pageActions.entries()) {
-			// A kit that varies its gate per visit (or one the gate heuristic
-			// already passed) can show the new step's target before an earlier
-			// step is replayed: the replay has already arrived.
-			if (position < pageActions.length - 1 && await pageShowsActionTarget(page, newStep!)) continue;
-			resultDocumentsFrom = documents.length;
+
+		/** The page as it stands: screenshot, MHTML, and the hops that led to it. */
+		const snapshot = async (hopsTo: (capturedDocumentUrl: string) => WebsiteNavigationHop[], performedAction?: WebsitePerformedAction): Promise<WebsiteArchiveResult> => {
+			const documentUrl = documents.at(-1)?.url() ?? loadedUrl;
+			const screenshotUrl = documentAddress(page.url(), documentUrl);
+			const screenshotBytes = await capturePaintedScreenshot(page);
+			const cdp = await page.target().createCDPSession();
+			const resolvedMhtml = Buffer.from((await cdp.send("Page.captureSnapshot", { format: "mhtml" })).data, "utf-8");
+			const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? documentAddress(page.url(), documentUrl) ?? page.url();
+			const capturedDocument = await archiveMhtmlSnapshot({ url, archivedUrl: capturedDocumentUrl, navigationHops: hopsTo(capturedDocumentUrl), mhtmlSnapshot: resolvedMhtml });
+			return {
+				...capturedDocument,
+				route: FABRIC_EGRESS_LABEL[egress],
+				screenshotPng: screenshotUrl === capturedDocumentUrl ? Buffer.from(screenshotBytes) : undefined,
+				kitResources: await kitResources.settled(),
+				...(verificationGate ? { verificationGate } : {}),
+				...(performedAction ? { performedAction } : {}),
+			};
+		};
+
+		const act = async (action: WebsitePageAction): Promise<WebsiteArchiveResult> => {
+			if (!open) throw new Error("The capture's browser is already closed.");
+			// The hops of what the action opened start at its response; the pages
+			// before it were captured as earlier steps.
+			const resultDocumentsFrom = documents.length;
 			const textBefore = await pageText(page);
+			let performedAction: WebsitePerformedAction;
 			try {
 				performedAction = await performPageAction(page, action, dependencies.humanCheckMs);
 			} catch (error) {
-				if (error instanceof WebsitePageActionTargetMissingError) throw new WebsiteUnreachableError(egress, error.message);
-				throw error;
+				if (!(error instanceof WebsitePageActionTargetMissingError)) throw error;
+				const reason = new WebsiteUnreachableError(egress, error.message);
+				console.warn(`Website action on ${page.url()} failed: ${reason.message}`);
+				throw new WebsiteCaptureFailedError([reason]);
 			}
 			await settlePageAction(page, () => documents.length > resultDocumentsFrom, textBefore, dependencies.pageActionSettleMs ?? WEBSITE_PAGE_ACTION_SETTLE_MS);
 			await settleRendering(page, renderSettleMs);
 			verificationGate = await passVerificationGate(page, renderSettleMs) ?? verificationGate;
-		}
-		const screenshotUrl = documentAddress(page.url(), loadedUrl);
-		const screenshotBytes = await capturePaintedScreenshot(page);
-		const cdp = await page.target().createCDPSession();
-		const resolvedMhtml = Buffer.from(
-			(
-				await cdp.send("Page.captureSnapshot", {
-					format: "mhtml",
-				})
-			).data,
-			"utf-8",
-		);
-
-		const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? documentAddress(page.url(), loadedUrl) ?? page.url();
-		const capturedDocument = await archiveMhtmlSnapshot({
-			url,
-			archivedUrl: capturedDocumentUrl,
-			navigationHops: performedAction
-				? actionResultHops(documents.slice(resultDocumentsFrom), documents.at(-1), capturedDocumentUrl)
-				: documentNavigationHops(documents, capturedDocumentUrl),
-			mhtmlSnapshot: resolvedMhtml,
-		});
-		const screenshotPng = screenshotUrl === capturedDocumentUrl ? Buffer.from(screenshotBytes) : undefined;
-
-		return {
-			...capturedDocument,
-			route: FABRIC_EGRESS_LABEL[egress],
-			screenshotPng,
-			kitResources: await kitResources.settled(),
-			...(verificationGate ? { verificationGate } : {}),
-			...(performedAction ? { performedAction } : {}),
+			return snapshot((capturedDocumentUrl) => actionResultHops(documents.slice(resultDocumentsFrom), documents.at(-1), capturedDocumentUrl), performedAction);
 		};
-	} finally {
-		await browser.close();
+
+		const archive = await snapshot((capturedDocumentUrl) => documentNavigationHops(documents, capturedDocumentUrl));
+		return { archive, session: { act, close } };
+	} catch (error) {
+		await close();
+		throw error;
 	}
 }
 
+/**
+ * Capture the page over the first route that reaches it and, when its script
+ * sends Tor and datacenter visitors to another site, once more from the
+ * residential exit. With `keepSession`, the browser of the capture returned
+ * stays open as its `session`, and the caller closes it; every other capture's
+ * browser is closed here.
+ */
 export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencies: WebsiteArchiveDependencies = {}): Promise<WebsiteArchiveResult> {
 	const { url, mhtmlSnapshot } = options;
 	console.log(`Archiving website ${url}`);
@@ -875,78 +891,86 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 		return archiveMhtmlSnapshot({ ...options, mhtmlSnapshot });
 	}
 
-	if (options.egress) {
-		try {
-			return await captureLiveWebsite(options, options.egress, dependencies);
-		} catch (error) {
-			if (!(error instanceof WebsiteUnreachableError)) throw error;
-			console.warn(`Website capture of ${url} failed: ${error.message}`);
-			throw new WebsiteCaptureFailedError([error]);
-		}
-	}
-
-	const failures: WebsiteUnreachableError[] = [];
-	let decoy: { archive: WebsiteArchiveResult; site: string; egress: FabricEgress } | undefined;
-	for (const egress of WEBSITE_CAPTURE_EGRESS) {
-		try {
-			const archive = await captureLiveWebsite(options, egress, dependencies);
-			const site = scriptDestinationSite(archive);
-			if (!site) return archive;
-			console.warn(`Website capture of ${url} via ${FABRIC_EGRESS_LABEL[egress]}: the page sent the visitor to ${site} by script`);
-			decoy = { archive, site, egress };
-			break;
-		} catch (error) {
-			if (!(error instanceof WebsiteUnreachableError)) throw error;
-			console.warn(`Website capture of ${url} failed: ${error.message}`);
-			failures.push(error);
-		}
-	}
-
-	// A scripted jump to another site, or no page at all, is how cloakers answer
-	// Tor and datacenter visitors. Ask once more as a residential visitor would.
-	let residential: WebsiteArchiveResult | undefined;
+	const opened: LiveCapture[] = [];
+	const capture = async (egress: FabricEgress) => {
+		const live = await openLiveCapture(options, egress, dependencies);
+		opened.push(live);
+		return live.archive;
+	};
+	let returned: WebsiteArchiveResult | undefined;
+	const keep = (archive: WebsiteArchiveResult, result: WebsiteArchiveResult = archive): WebsiteArchiveResult => {
+		const session = opened.find((live) => live.archive === archive)?.session;
+		returned = archive;
+		return options.keepSession && session ? { ...result, session } : result;
+	};
 	try {
-		residential = await captureLiveWebsite(options, WEBSITE_CLOAKING_EGRESS, dependencies);
-	} catch (error) {
-		// The residential exit depends on the operator's machine being online; its
-		// failure must not hide what the other routes captured.
-		const reason = error instanceof WebsiteUnreachableError ? error : new WebsiteUnreachableError(WEBSITE_CLOAKING_EGRESS, errorText(error));
-		console.warn(`Website capture of ${url} failed: ${reason.message}`);
-		failures.push(reason);
-	}
+		const failures: WebsiteUnreachableError[] = [];
+		let decoy: { archive: WebsiteArchiveResult; site: string; egress: FabricEgress } | undefined;
+		for (const egress of WEBSITE_CAPTURE_EGRESS) {
+			try {
+				const archive = await capture(egress);
+				const site = scriptDestinationSite(archive);
+				if (!site) return keep(archive);
+				console.warn(`Website capture of ${url} via ${FABRIC_EGRESS_LABEL[egress]}: the page sent the visitor to ${site} by script`);
+				decoy = { archive, site, egress };
+				break;
+			} catch (error) {
+				if (!(error instanceof WebsiteUnreachableError)) throw error;
+				console.warn(`Website capture of ${url} failed: ${error.message}`);
+				failures.push(error);
+			}
+		}
 
-	if (residential) {
-		const residentialSite = scriptDestinationSite(residential);
-		// The same scripted destination for every route is either an ordinary
-		// redirect or a cloaker that turns all of them away; the destination's
-		// own verdict tells them apart.
-		if (decoy && residentialSite === decoy.site) {
-			return {
+		// A scripted jump to another site, or no page at all, is how cloakers answer
+		// Tor and datacenter visitors. Ask once more as a residential visitor would.
+		let residential: WebsiteArchiveResult | undefined;
+		try {
+			residential = await capture(WEBSITE_CLOAKING_EGRESS);
+		} catch (error) {
+			// The residential exit depends on the operator's machine being online; its
+			// failure must not hide what the other routes captured.
+			const reason = error instanceof WebsiteUnreachableError ? error : new WebsiteUnreachableError(WEBSITE_CLOAKING_EGRESS, errorText(error));
+			console.warn(`Website capture of ${url} failed: ${reason.message}`);
+			failures.push(reason);
+		}
+
+		if (residential) {
+			const residentialSite = scriptDestinationSite(residential);
+			// The same scripted destination for every route is either an ordinary
+			// redirect or a cloaker that turns all of them away; the destination's
+			// own verdict tells them apart.
+			if (decoy && residentialSite === decoy.site) {
+				return keep(decoy.archive, {
+					...decoy.archive,
+					cloaking: {
+						outcome: "uniform",
+						detail: `${url} sent both the ${FABRIC_EGRESS_LABEL[decoy.egress]} and the ${FABRIC_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} to ${decoy.site} by script`,
+					},
+				});
+			}
+			if (!decoy) return keep(residential);
+			const reached = residentialSite ?? siteOf(residential.url);
+			return keep(residential, {
+				...residential,
+				cloaking: {
+					outcome: "detected",
+					detail: `${url} sent the ${FABRIC_EGRESS_LABEL[decoy.egress]} to ${decoy.site} but the ${FABRIC_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} to ${reached}`,
+				},
+			});
+		}
+		if (decoy) {
+			return keep(decoy.archive, {
 				...decoy.archive,
 				cloaking: {
-					outcome: "uniform",
-					detail: `${url} sent both the ${FABRIC_EGRESS_LABEL[decoy.egress]} and the ${FABRIC_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} to ${decoy.site} by script`,
+					outcome: "unresolved",
+					detail: `${url} sent the ${FABRIC_EGRESS_LABEL[decoy.egress]} to ${decoy.site} by script; the ${FABRIC_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} capture failed: ${failures.at(-1)?.message ?? "unavailable"}`,
 				},
-			};
+			});
 		}
-		if (!decoy) return residential;
-		const reached = residentialSite ?? siteOf(residential.url);
-		return {
-			...residential,
-			cloaking: {
-				outcome: "detected",
-				detail: `${url} sent the ${FABRIC_EGRESS_LABEL[decoy.egress]} to ${decoy.site} but the ${FABRIC_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} to ${reached}`,
-			},
-		};
+		throw new WebsiteCaptureFailedError(failures);
+	} finally {
+		for (const live of opened) {
+			if (!options.keepSession || live.archive !== returned) await live.session.close();
+		}
 	}
-	if (decoy) {
-		return {
-			...decoy.archive,
-			cloaking: {
-				outcome: "unresolved",
-				detail: `${url} sent the ${FABRIC_EGRESS_LABEL[decoy.egress]} to ${decoy.site} by script; the ${FABRIC_EGRESS_LABEL[WEBSITE_CLOAKING_EGRESS]} capture failed: ${failures.at(-1)?.message ?? "unavailable"}`,
-			},
-		};
-	}
-	throw new WebsiteCaptureFailedError(failures);
 }

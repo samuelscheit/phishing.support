@@ -92,13 +92,6 @@ async function findTarget(page: Page, action: WebsitePageAction, waitMs: number)
 	return undefined;
 }
 
-/** Whether the action's target is on the page right now, without waiting for it. */
-export async function pageShowsActionTarget(page: Page, action: WebsitePageAction): Promise<boolean> {
-	const found = await findTarget(page, action, 0);
-	await found?.target.dispose().catch(() => undefined);
-	return found !== undefined;
-}
-
 /** Whether the field's frame has a captcha widget and, once it does, whether that widget issued its token. */
 async function waitForHumanCheck(frame: Frame, humanCheckMs: number): Promise<"passed" | "unsolved" | undefined> {
 	const hasWidget = await frame.$(HUMAN_CHECK_WIDGET_SELECTOR).then((widget) => widget !== null).catch(() => false);

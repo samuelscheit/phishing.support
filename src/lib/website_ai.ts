@@ -1,6 +1,6 @@
 import * as toon from "@toon-format/toon";
 import type { ResponseFormatTextJSONSchemaConfig } from "openai/resources/responses/responses.mjs";
-import { archiveWebsite, isBrowserInfrastructureFailure, WebsiteCaptureFailedError, type WebsiteVerificationGate } from "./website_archive";
+import { archiveWebsite, isBrowserInfrastructureFailure, WebsiteCaptureFailedError, type ArchiveWebsiteOptions, type WebsitePageSession, type WebsiteVerificationGate } from "./website_archive";
 import { errorText } from "./error_text";
 import { buildWebsiteEvidence, type WebsiteEvidencePackage } from "./evidence/package";
 import type { timestampEvidence } from "./evidence/timestamp";
@@ -17,7 +17,6 @@ import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } fro
 import { extractPasteCommands, type PasteCommand } from "./malware/paste_commands";
 import { defangCommand, defangUrl } from "./malware/defang";
 import { isSameWebsite, websiteSite } from "./website_site";
-import { fabricEgressForLabel } from "./browser/fabric";
 import { createExfiltrationCanaries } from "./exfiltration/canaries";
 import {
 	describeDataEntryField,
@@ -506,22 +505,12 @@ export function continuedNavigation(
 	].map((hop, index) => ({ ...hop, index }));
 }
 
-/**
- * Where the capture of the current page started, and the actions it took on
- * the way: the submitted URL or the last followed link's page. A new action
- * replays this visit, since a kit keeps the earlier answers in its own session.
- */
-function flowSegment(hops: readonly WebsiteNavigationHop[]): { url: string; referrer?: string; actions: WebsitePageAction[] } {
-	const lastLink = hops.findLastIndex((hop) => hop.followedLink);
-	const segment = hops.slice(lastLink + 1);
-	return {
-		url: segment[0]!.url,
-		...(lastLink >= 0 ? { referrer: hops[lastLink]!.url } : {}),
-		actions: segment.flatMap((hop) => (hop.performedAction ? [pageActionOf(hop.performedAction)] : [])),
-	};
+/** The page the visitor came from to the captured page: the last page whose link the flow followed to it. */
+function referrerOf(hops: readonly WebsiteNavigationHop[], capturedHop: WebsiteNavigationHop): string | undefined {
+	return hops.findLast((hop) => hop.index < capturedHop.index && hop.followedLink)?.url;
 }
 
-/** The same field or button: the target a replayed visit finds again. */
+/** The same field or button. */
 function sameActionTarget(a: WebsitePageAction, b: WebsitePageAction): boolean {
 	if (a.kind === "click" && b.kind === "click") return a.control.label === b.control.label;
 	if (a.kind === "fill" && b.kind === "fill") return a.field.control === b.field.control && a.field.id === b.field.id && a.field.name === b.field.name;
@@ -571,10 +560,11 @@ async function followWebsiteFlow(params: {
 	archive: WebsiteCapture;
 	capturedHop: WebsiteNavigationHop;
 	dependencies: WebsiteAnalysisDependencies;
+	/** Captures a page live, keeping its browser open for the flow's next action. */
+	capture: (options: ArchiveWebsiteOptions) => Promise<WebsiteCapture>;
 }): Promise<{ archive: WebsiteCapture; capturedHop: WebsiteNavigationHop; classification: WebsiteSiteClassification; stopped?: string }> {
-	const { submissionId, url, whois, dependencies } = params;
+	const { submissionId, url, whois, dependencies, capture } = params;
 	let { archive, capturedHop } = params;
-	const capture = dependencies.archiveWebsite ?? archiveWebsite;
 	const canaries = createExfiltrationCanaries();
 	for (;;) {
 		const step = analyzedCaptureStep(archive.navigationHops);
@@ -598,20 +588,22 @@ async function followWebsiteFlow(params: {
 				const { link } = continuation;
 				if (archive.navigationHops.some((hop) => hop.url === link.url)) return stop("leads back to a page already captured");
 				await emitStep(submissionId, "follow_link", 48 + step * 7);
-				next = await withBrowserBackoff(() => capture({ url: link.url, referrer: archive.url }), dependencies.browserBackoffMs ?? BROWSER_BACKOFF_MS);
+				// A followed link is a new page load; the page it leaves is done.
+				await archive.session?.close();
+				next = await capture({ url: link.url, referrer: archive.url });
 				flowStep = { redirectTo: link.url, followedLink: { label: link.label ?? link.url } };
 			} else {
-				const segment = flowSegment(archive.navigationHops);
-				if (segment.actions.some((earlier) => sameActionTarget(earlier, action!))) return stop(`was already ${verb} on the way to this page`);
+				if (archive.navigationHops.some((hop) => hop.performedAction && sameActionTarget(pageActionOf(hop.performedAction), action!))) {
+					return stop(`was already ${verb} on the way to this page`);
+				}
 				await emitStep(submissionId, action!.kind === "fill" ? "submit_field" : "click_control", 48 + step * 7);
-				// The kit keeps earlier answers in its own session, so the visit is
-				// replayed from where this page's capture started, on the route that reached it.
-				next = await withBrowserBackoff(() => capture({
-					url: segment.url,
-					...(segment.referrer ? { referrer: segment.referrer } : {}),
-					egress: fabricEgressForLabel(archive.route),
-					pageActions: [...segment.actions, action!],
-				}), dependencies.browserBackoffMs ?? BROWSER_BACKOFF_MS);
+				// The action is taken in the visit that captured the page: same
+				// browser, same cookies, same variant of a kit that changes per
+				// visit. A page from a stored capture is loaded live first.
+				const referrer = referrerOf(archive.navigationHops, capturedHop);
+				const session = archive.session ?? (await capture({ url: archive.url, ...(referrer ? { referrer } : {}) })).session;
+				if (!session) return stop(`could not be ${verb} (the page could not be loaded live)`);
+				next = { ...await session.act(action!), session };
 				if (next.performedAction) flowStep = { redirectTo: next.navigationHops[0]?.url ?? next.url, performedAction: next.performedAction };
 			}
 		} catch (error) {
@@ -807,6 +799,15 @@ async function settleCloakedRedirectsTo(destinationId: bigint): Promise<void> {
 
 export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencies: WebsiteAnalysisDependencies = {}): Promise<bigint> {
 	const { url, submissionId, reporterIp, reporterCountry, reporterHeaders, reuseEvidenceArtifacts = false } = options;
+	// Every live capture keeps its browser open for the flow's next action on
+	// the page; each one is closed once the flow is done with it.
+	const sessions: WebsitePageSession[] = [];
+	const closeSessions = () => Promise.all(sessions.splice(0).map((session) => session.close().catch((error: unknown) => console.warn("Closing a capture browser failed:", error))));
+	const capture = async (captureOptions: ArchiveWebsiteOptions) => {
+		const captured = await withBrowserBackoff(() => (dependencies.archiveWebsite ?? archiveWebsite)({ ...captureOptions, keepSession: true }), dependencies.browserBackoffMs ?? BROWSER_BACKOFF_MS);
+		if (captured.session) sessions.push(captured.session);
+		return captured;
+	};
 	try {
 		// Claim the submission before any network work. Previously the first
 		// unbounded WHOIS lookup ran while the row still said `new`, so a process
@@ -826,7 +827,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		});
 
 		await emitStep(submissionId, "archive_website", 10);
-		const captured = await withBrowserBackoff(() => (dependencies.archiveWebsite ?? archiveWebsite)({
+		const captured = await capture({
 			url,
 			mhtmlSnapshot: options.mhtmlSnapshot,
 			archivedUrl: options.archivedUrl,
@@ -834,7 +835,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			trustMhtmlDocumentLocation: options.trustMhtmlDocumentLocation,
 			verificationGate: options.verificationGate,
 			kitResources: options.kitResources,
-		}), dependencies.browserBackoffMs ?? BROWSER_BACKOFF_MS);
+		});
 		let archive = {
 			...captured,
 			...(!captured.screenshotPng && options.screenshotSnapshot ? { screenshotPng: options.screenshotSnapshot } : {}),
@@ -879,7 +880,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			},
 		});
 
-		const flow = await followWebsiteFlow({ submissionId, url, whois, archive, capturedHop, dependencies });
+		const flow = await followWebsiteFlow({ submissionId, url, whois, archive, capturedHop, dependencies, capture }).finally(closeSessions);
 		const { classification: capturedClassification, stopped } = flow;
 		archive = flow.archive;
 		capturedHop = flow.capturedHop;
@@ -946,6 +947,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await recordWebsiteAnalysisFailure(submissionId, error);
 		await emitStep(submissionId, "failed", 100);
 	} finally {
+		await closeSessions();
 		await settleCloakedRedirectsTo(submissionId).catch((error: unknown) => console.error("Settling redirected cases failed:", error));
 	}
 
