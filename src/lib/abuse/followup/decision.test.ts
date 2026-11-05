@@ -9,7 +9,7 @@ import { AbuseRepository } from "../repository";
 import { abuseJobs, abuseReports } from "../schema";
 import { followUpProviderDecision } from "./decision";
 import { collectDecisionEvidence, type EvidenceFetcher } from "./evidence";
-import { acceptableNarrative, composeDecisionReply } from "./reply";
+import { acceptableNarrative, composeDecisionReply, narrativeRejection } from "./reply";
 
 useTemporaryDatabase();
 
@@ -147,6 +147,30 @@ describe("provider decision follow-up", () => {
 });
 
 describe("reply composition", () => {
+	test("a refused narrative is retried once with the rule it broke, and the retry is used when it keeps the rules", async () => {
+		const evidence = await collectDecisionEvidence({ observedUrl: "https://paneo.work/", fetcher: liveWeb() });
+		const good = "Your reviewer most likely loaded the page in a browser and saw an ordinary product page. The malicious command sits inside the install dialog that the page's download buttons open, so it stays hidden until a visitor clicks one. It is still served as of our check.";
+		const attempts: Array<string | undefined> = [];
+		const { body, narrativeSource } = await composeDecisionReply({ providerName: "Cloudflare", confirmationId: "35b8aafac3a6a6d9", decision: { state: "denied" }, allegationCategory: "malware", target: "paneo.work", reportedUrl: "https://paneo.work/", description: "x", replyKind: "contest", evidence }, async (_input, rejected) => {
+			attempts.push(rejected?.reason);
+			return rejected ? good : `${good} It hides there; a click opens it.`;
+		});
+		expect(attempts).toEqual([undefined, "it contains shell syntax (|, ;, backticks, $( or &&)"]);
+		expect(narrativeSource).toBe("model");
+		expect(body).toContain(good);
+	});
+
+	test("each narrative rule names what it refuses", () => {
+		const base = "Your reviewer most likely loaded the page in a browser and saw an ordinary product page, because the command sits inside a dialog that only opens from the page's own download buttons.";
+		expect(narrativeRejection(base)).toBeUndefined();
+		expect(narrativeRejection("short")).toBe("it is 5 characters, under the 120 minimum");
+		expect(narrativeRejection(base.repeat(20))).toMatch(/^it is \d+ characters, over the 2000 maximum$/);
+		expect(narrativeRejection(`${base} See www.example.com.`)).toBe("it contains a link or URL");
+		expect(narrativeRejection(`${base}\n- a list item`)).toBe("it contains a heading or a list");
+		expect(narrativeRejection(`Hello team, ${base}`)).toBe("it starts with a greeting");
+		expect(narrativeRejection(`${base}\n\nThank you for your help`)).toBe("it ends with a sign-off");
+	});
+
 	test("keeps every measured fact even when the narrative is the fallback", async () => {
 		const evidence = await collectDecisionEvidence({ observedUrl: "https://paneo.work/", caseUrl: "https://phishing.support/submissions/1", fetcher: liveWeb() });
 		const { body, narrativeSource } = await composeDecisionReply({ providerName: "Cloudflare", confirmationId: "35b8aafac3a6a6d9", decision: { state: "denied", detail: "no_abuse_found" }, allegationCategory: "malware", target: "paneo.work", reportedUrl: "https://paneo.work/", description: "x", replyKind: "contest", evidence }, async () => "nope");
