@@ -7,7 +7,7 @@ import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { retryFailedWebsiteAnalysis, websiteSubmissionDedupeKey } from "./submissions/website";
 import { capturedDocumentContent, WebsiteCaptureFailedError, WebsiteUnreachableError, type ArchiveWebsiteOptions, type WebsiteArchiveResult } from "./website_archive";
-import { analyzeWebsite, buildWebsiteClassificationInput, buildWebsiteReportEvidence, followedNavigation, websiteContinuationLink, type WebsiteAnalysisDependencies } from "./website_ai";
+import { analyzeWebsite, buildWebsiteClassificationInput, buildWebsiteReportEvidence, continuedNavigation, websiteContinuation, type WebsiteAnalysisDependencies } from "./website_ai";
 import { extractWebsiteContinuationLinks } from "./website_fields";
 import type { WebsiteNavigationHop } from "./website_types";
 
@@ -165,17 +165,17 @@ describe("continuation links", () => {
 
 	test("the classifier can only name one of the page's own links", () => {
 		const html = capturedDocumentContent(PAGES[CONSENT]!).html;
-		expect(websiteContinuationLink({ continuationRef: " L1" }, html, CONSENT)).toEqual({ ref: "l1", label: "I agree", url: GET_STARTED });
+		expect(websiteContinuation({ continuationRef: " L1" }, html, CONSENT)).toEqual({ kind: "link", link: { ref: "l1", label: "I agree", url: GET_STARTED } });
 		// The privacy link goes to another site and is never a step of the kit's flow.
-		expect(websiteContinuationLink({ continuationRef: "l2" }, html, CONSENT)).toBeUndefined();
-		expect(websiteContinuationLink({ continuationRef: "" }, html, CONSENT)).toBeUndefined();
-		expect(websiteContinuationLink({}, html, CONSENT)).toBeUndefined();
+		expect(websiteContinuation({ continuationRef: "l2" }, html, CONSENT)).toBeUndefined();
+		expect(websiteContinuation({ continuationRef: "" }, html, CONSENT)).toBeUndefined();
+		expect(websiteContinuation({}, html, CONSENT)).toBeUndefined();
 	});
 
 	test("a followed page records the link that opened it and how the visitor got there", () => {
 		const consent = liveCapture(CONSENT);
 		const next = liveCapture(GET_STARTED);
-		const hops = followedNavigation(consent.navigationHops, consent.navigationHops[0]!, { ref: "l1", label: "I agree", url: GET_STARTED }, next.navigationHops);
+		const hops = continuedNavigation(consent.navigationHops, consent.navigationHops[0]!, { redirectTo: GET_STARTED, followedLink: { label: "I agree" } }, next.navigationHops);
 		expect(hops).toEqual([
 			{ index: 0, url: CONSENT, hostname: new URL(SITE).hostname, status: 200, contentType: "text/html", redirectTo: GET_STARTED, followedLink: { label: "I agree" }, contentCaptured: false },
 			{ index: 1, url: GET_STARTED, hostname: new URL(SITE).hostname, status: 200, contentType: "text/html", contentCaptured: true },
@@ -355,6 +355,228 @@ describe("multi-page kits", () => {
 		expect(endlessCaptures.map(({ url }) => url)).toEqual(pages.slice(0, 4));
 		const endlessCase = await SubmissionsEntity.get(endlessId);
 		expect(endlessCase?.status).toBe("invalid");
-		expect(endlessCase?.info).toEndWith(`its link "Next" to ${pages[4]} was not followed after 3 followed links.`);
+		expect(endlessCase?.info).toEndWith(`its link "Next" to ${pages[4]} was not followed after 3 steps.`);
+	});
+});
+
+/**
+ * The DocuSign email gate of submission 376813288618463354, as the residential
+ * exit captured it: honeypot fields, the email field, a Turnstile widget, and
+ * an "Open" button. Submitting it opens the kit's sign-in page.
+ */
+const GATE_SITE = "https://docusign.alt3-doc3ea7-v2.sbs";
+const GATE = `${GATE_SITE}/word/verify.workspace.php`;
+const SIGN_IN = `${GATE_SITE}/word/signin.php`;
+PAGES[GATE] = `<html lang="en"><head><title>Verify Your Email</title></head><body>
+<div class="card"><h1>Verify Your Email</h1>
+<form action="${GATE}" method="POST" novalidate autocomplete="off" id="mainForm">
+<label for="email">Email address</label>
+<input type="text" name="website" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
+<input type="text" name="company_url" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
+<input type="text" name="fax_number" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
+<input type="text" name="address_line2" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
+<input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email" required>
+<div class="cf-turnstile" data-sitekey="0x4AAAAAADg6vRuzsW0g74ZR"></div>
+<button type="submit" id="submitBtn">Open</button>
+</form></div></body></html>`;
+PAGES[SIGN_IN] = `<html lang="en"><head><title>Sign in to your account</title></head><body>
+<div class="card"><img alt="Microsoft"><div id="identity">probe@example.invalid</div><h1>Enter password</h1>
+<form action="${GATE_SITE}/word/next.php" method="POST"><input type="password" name="passwd" placeholder="Password"><button type="submit">Sign in</button></form>
+</div></body></html>`;
+
+const GATE_ANSWERS: ClassifierAnswers = {
+	[GATE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "f5" },
+	[SIGN_IN]: { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Enter password", collectionFieldRefs: ["f1"], continuationRef: "" },
+};
+
+const EMAIL_FIELD = { ref: "f5", control: "input[type=email]", id: "email", name: "email", autocomplete: "email", label: "Email address", placeholder: "you@example.com" };
+
+/** The email page over the residential exit, and what its submission opens: a POST answered by a redirect, then the sign-in page. */
+function gateCapture(options: ArchiveWebsiteOptions): WebsiteArchiveResult {
+	const route = { route: "residential exit" };
+	const submission = options.fieldSubmissions?.at(-1);
+	if (!submission) return { ...liveCapture(GATE), ...route };
+	return {
+		...liveCapture(GATE, [
+			{ index: 0, url: GATE, hostname: new URL(GATE).hostname, status: 302, redirectTo: SIGN_IN, contentCaptured: false },
+			{ index: 1, url: SIGN_IN, hostname: new URL(GATE).hostname, status: 200, contentType: "text/html", contentCaptured: true },
+		]),
+		...route,
+		submittedField: { ...submission, humanCheck: "passed" },
+	};
+}
+
+describe("identifier fields a kit asks for first", () => {
+	test("only an identifier field the page can find again, on a page without a password field, can be submitted", () => {
+		const gateHtml = capturedDocumentContent(PAGES[GATE]!).html;
+		expect(websiteContinuation({ continuationRef: "F5" }, gateHtml, GATE)).toEqual({ kind: "field", field: EMAIL_FIELD });
+		// Unknown refs, and a field with neither id nor name, name nothing.
+		expect(websiteContinuation({ continuationRef: "f9" }, gateHtml, GATE)).toBeUndefined();
+		expect(websiteContinuation({ continuationRef: "f1" }, `<input type="email" placeholder="Email">`, GATE)).toBeUndefined();
+		// A password field is never filled, and a page that asks for one shows its harmful step itself.
+		const signInHtml = capturedDocumentContent(PAGES[SIGN_IN]!).html;
+		expect(websiteContinuation({ continuationRef: "f1" }, signInHtml, SIGN_IN)).toBeUndefined();
+		expect(websiteContinuation({ continuationRef: "f1" }, `<input type="email" name="email"><input type="password" name="pw">`, GATE)).toBeUndefined();
+		// Only typed identifiers: no selects, text areas, or numbers.
+		expect(websiteContinuation({ continuationRef: "f1" }, `<select name="country"><option>DE</option></select>`, GATE)).toBeUndefined();
+		expect(websiteContinuation({ continuationRef: "f1" }, `<textarea name="message"></textarea>`, GATE)).toBeUndefined();
+		expect(websiteContinuation({ continuationRef: "f1" }, `<input type="number" name="amount">`, GATE)).toBeUndefined();
+		expect(websiteContinuation({ continuationRef: "f1" }, `<input type="tel" name="phone">`, GATE)).toMatchObject({ kind: "field", field: { name: "phone" } });
+	});
+
+	test("the DocuSign email gate is submitted with a canary on the route that reached it, and its sign-in page is reported", async () => {
+		const captures: ArchiveWebsiteOptions[] = [];
+		const modelCalls: Array<{ kind: "classification" | "analysis"; url: string }> = [];
+		const id = await websiteSubmission(376813288618463354n, GATE);
+
+		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({ answers: GATE_ANSWERS, captures, modelCalls, capture: gateCapture }));
+
+		// The visit is replayed from the submitted URL on the residential exit,
+		// and only the email field is filled, with a value that reaches no one.
+		expect(captures).toHaveLength(2);
+		expect(captures[1]).toEqual({ url: GATE, egress: "residential", fieldSubmissions: [{ field: EMAIL_FIELD, value: expect.stringMatching(/^probe\.[0-9a-f]{16}@probe-canary\.invalid$/) }] });
+		const value = captures[1]!.fieldSubmissions![0]!.value;
+		expect(modelCalls).toEqual([
+			{ kind: "classification", url: GATE },
+			{ kind: "classification", url: SIGN_IN },
+			{ kind: "analysis", url: SIGN_IN },
+		]);
+
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("reported");
+		const website = websiteData(submission);
+		expect(website?.archiveUrl).toBe(SIGN_IN);
+		expect(website?.navigationHops).toEqual([
+			{ index: 0, url: GATE, hostname: new URL(GATE).hostname, status: 200, contentType: "text/html", redirectTo: GATE, submittedField: { field: EMAIL_FIELD, value, humanCheck: "passed" }, contentCaptured: false },
+			{ index: 1, url: GATE, hostname: new URL(GATE).hostname, status: 302, redirectTo: SIGN_IN, contentCaptured: false },
+			{ index: 2, url: SIGN_IN, hostname: new URL(GATE).hostname, status: 200, contentType: "text/html", contentCaptured: true },
+		]);
+		expect(website?.siteAssessments?.map(({ hopIndex, finding }) => ({ hopIndex, finding }))).toEqual([
+			{ hopIndex: 0, finding: "phishing" },
+			{ hopIndex: 1, finding: "phishing" },
+			{ hopIndex: 2, finding: "phishing" },
+		]);
+
+		// The sign-in page is classified knowing how it was reached and whose value it shows.
+		const input = buildWebsiteClassificationInput(
+			website!.navigationHops![2]!,
+			{ ...liveCapture(SIGN_IN), navigationHops: website!.navigationHops! },
+		);
+		const text = (input[1]!.content as Array<{ text?: string }>)[0]!.text!;
+		expect(text).toContain(`The visitor reaches this page by entering their details into the field "Email address" on ${GATE}, an earlier page of the same site, and submitting it. The capture entered the made-up value "${value}"; wherever this page shows that value, it is the capture's, not a real visitor's.`);
+		expect(text).not.toContain("captcha beside that field had not passed");
+
+		// The email page is its own evidence step.
+		expect((await ArtifactsEntity.listForSubmission(id)).map(({ name }) => name).sort()).toEqual([
+			"evidence-manifest.json",
+			"evidence-step2-manifest.json",
+			"website-stamped.png",
+			"website-step2-stamped.png",
+			"website-step2.mhtml",
+			"website-step2.png",
+			"website.mhtml",
+			"website.png",
+		]);
+		const report = await AbuseRepository.getReportForSubmission(id);
+		expect(report!.description).toContain(`Visitors reach the page through the site's own earlier pages: submitting the field "Email address" on ${GATE}.`);
+		// The canary is ours; it never goes into a provider's report.
+		expect(report!.description).not.toContain(value);
+	});
+
+	test("a submission whose captcha never passed and that changed nothing stops the flow and says so", async () => {
+		const id = await websiteSubmission(376813288618463355n, GATE);
+
+		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({
+			answers: GATE_ANSWERS,
+			captures: [],
+			capture: (options) => {
+				const submission = options.fieldSubmissions?.at(-1);
+				const page = { ...liveCapture(GATE), route: "residential exit" };
+				return submission ? { ...page, submittedField: { ...submission, humanCheck: "unsolved" as const } } : page;
+			},
+		}));
+
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("invalid");
+		expect(submission?.info).toEndWith(`The capture stopped following the site's flow: its field "Email address" changed nothing on the page; the captcha beside it never passed.`);
+		expect(websiteData(submission)?.navigationHops).toHaveLength(1);
+	});
+
+	test("a page that asks for the same field again after its submission is not submitted twice", async () => {
+		const id = await websiteSubmission(376813288618463358n, GATE);
+		const captures: ArchiveWebsiteOptions[] = [];
+		const rejected = PAGES[GATE]!.replace("<h1>Verify Your Email</h1>", "<h1>Verify Your Email</h1><p>This address is not allowed.</p>");
+
+		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({
+			answers: GATE_ANSWERS,
+			captures,
+			capture: (options) => {
+				const submission = options.fieldSubmissions?.at(-1);
+				const page = { ...liveCapture(GATE), route: "residential exit" };
+				if (!submission) return page;
+				const { html, text } = capturedDocumentContent(rejected);
+				return { ...page, html: Buffer.from(html), text: Buffer.from(text), submittedField: { ...submission, humanCheck: "passed" as const } };
+			},
+		}));
+
+		expect(captures).toHaveLength(2);
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.info).toEndWith(`its field "Email address" was already submitted on the way to this page.`);
+		expect(websiteData(submission)?.navigationHops?.map(({ url, submittedField, contentCaptured }) => ({ url, submitted: Boolean(submittedField), contentCaptured }))).toEqual([
+			{ url: GATE, submitted: true, contentCaptured: false },
+			{ url: GATE, submitted: false, contentCaptured: true },
+		]);
+	});
+
+	test("a field the replayed visit cannot find stops the flow with the reason", async () => {
+		const id = await websiteSubmission(376813288618463356n, GATE);
+		const missing = new WebsiteCaptureFailedError([new WebsiteUnreachableError("residential", `the page showed no field "Email address" to enter the address into`)]);
+
+		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({
+			answers: GATE_ANSWERS,
+			captures: [],
+			capture: (options) => {
+				if (options.fieldSubmissions) throw missing;
+				return { ...liveCapture(GATE), route: "residential exit" };
+			},
+		}));
+
+		expect((await SubmissionsEntity.get(id))?.info).toEndWith(`its field "Email address" could not be submitted (${missing.message}).`);
+	});
+
+	test("a second identifier step replays the first submission", async () => {
+		const PHONE = `${GATE_SITE}/word/phone.php`;
+		PAGES[PHONE] = `<html><body><h1>Confirm your phone</h1><form method="POST"><input type="tel" id="phone" name="phone"><button>Next</button></form></body></html>`;
+		const answers: ClassifierAnswers = {
+			[GATE]: GATE_ANSWERS[GATE]!,
+			[PHONE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "f1" },
+			[SIGN_IN]: { ...GATE_ANSWERS[SIGN_IN]!, finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [] },
+		};
+		const captures: ArchiveWebsiteOptions[] = [];
+		const id = await websiteSubmission(376813288618463357n, GATE);
+
+		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({
+			answers,
+			captures,
+			capture: (options) => {
+				const submissions = options.fieldSubmissions ?? [];
+				const page = submissions.length === 0 ? GATE : submissions.length === 1 ? PHONE : SIGN_IN;
+				const capture = { ...liveCapture(page, [{ index: 0, url: page, hostname: new URL(page).hostname, status: 200, contentCaptured: true }]), requestedUrl: options.url, route: "residential exit" };
+				return submissions.length ? { ...capture, submittedField: { ...submissions.at(-1)! } } : capture;
+			},
+		}));
+
+		expect(captures.map(({ fieldSubmissions }) => fieldSubmissions?.map(({ field, value }) => ({ name: field.name, value })))).toEqual([
+			undefined,
+			[{ name: "email", value: expect.stringMatching(/@probe-canary\.invalid$/) }],
+			[{ name: "email", value: captures[1]!.fieldSubmissions![0]!.value }, { name: "phone", value: expect.stringMatching(/^\+12125550[01]\d\d$/) }],
+		]);
+		expect(new Set(captures.map(({ url }) => url))).toEqual(new Set([GATE]));
+		const hops = websiteData(await SubmissionsEntity.get(id))?.navigationHops;
+		expect(hops?.map(({ url, submittedField }) => ({ url, field: submittedField?.field.name }))).toEqual([
+			{ url: GATE, field: "email" },
+			{ url: PHONE, field: "phone" },
+			{ url: SIGN_IN, field: undefined },
+		]);
 	});
 });

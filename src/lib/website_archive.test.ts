@@ -1106,6 +1106,185 @@ location.replace(URL.createObjectURL(new Blob(["<!DOCTYPE html><html><body>${app
 		}
 	}, 60_000);
 
+	describe("identifier fields", () => {
+		const html = (body: string) => new Response(`<!DOCTYPE html><html><body>${body}</body></html>`, { headers: { "content-type": "text/html; charset=utf-8" } });
+		const signIn = `<h1>Enter password</h1><input type="password" name="passwd" placeholder="Password"><button>Sign in</button>`;
+		const emailField = { ref: "f5", control: "input[type=email]", id: "email", name: "email", label: "Email address" };
+		const value = "probe.0123456789abcdef@probe-canary.invalid";
+
+		/** The DocuSign gate: honeypots, the email field, a captcha widget that issues its token (or never does), and an "Open" button. */
+		function gatePage(tokenAfterMs: number | undefined) {
+			return `<form action="/word/verify.workspace.php" method="POST" id="mainForm"><label for="email">Email address</label>
+<input type="text" name="website" class="hp-field" tabindex="-1" style="position:absolute;left:-9999px">
+<input type="text" name="company_url" class="hp-field" tabindex="-1" style="position:absolute;left:-9999px">
+<input type="email" id="email" name="email" placeholder="you@example.com">
+<div class="cf-turnstile"><input type="hidden" name="cf-turnstile-response" value=""></div>
+<button type="submit" id="submitBtn">Open</button></form>
+${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySelector("[name=cf-turnstile-response]").value = "0.token"; }, ${tokenAfterMs});</script>`}`;
+		}
+
+		function serveGate(tokenAfterMs: number | undefined, posts: Array<Record<string, string>>) {
+			return Bun.serve({
+				port: 0,
+				fetch: async (request) => {
+					const { pathname } = new URL(request.url);
+					if (request.method === "POST") {
+						posts.push(Object.fromEntries(new URLSearchParams(await request.text())));
+						return new Response(null, { status: 302, headers: { location: "/word/signin.php" } });
+					}
+					if (pathname === "/word/signin.php") return html(signIn);
+					return html(gatePage(tokenAfterMs));
+				},
+			});
+		}
+
+		const capture = (url: string, fieldSubmissions = [{ field: emailField, value }]) => {
+			const leased: FabricEgress[] = [];
+			return {
+				leased,
+				run: () => archiveWebsite({ url, egress: "residential", fieldSubmissions }, {
+					...fast,
+					renderSettleMs: 1_500,
+					humanCheckMs: 3_000,
+					getBrowser: async (egress?: FabricEgress) => { leased.push(egress!); return launch(); },
+				}),
+			};
+		};
+
+		test("fills only the named field, waits for the captcha's token, and captures what the form's button opens", async () => {
+			const posts: Array<Record<string, string>> = [];
+			const server = serveGate(800, posts);
+			try {
+				const url = `http://127.0.0.1:${server.port}/word/verify.workspace.php`;
+				const { leased, run } = capture(url);
+				const archive = await run();
+
+				expect(leased).toEqual(["residential"]);
+				expect(archive.route).toBe("residential exit");
+				expect(archive.cloaking).toBeUndefined();
+				// The honeypots stay empty, the captcha's token went along.
+				expect(posts).toEqual([{ website: "", company_url: "", email: value, "cf-turnstile-response": "0.token" }]);
+				expect(archive.submittedField).toEqual({ field: emailField, value, humanCheck: "passed" });
+				expect(archive.url).toBe(`http://127.0.0.1:${server.port}/word/signin.php`);
+				// The hops start at the submission: the POST's redirect, then the page it opened.
+				expect(archive.navigationHops).toEqual([
+					expect.objectContaining({ index: 0, url, status: 302, redirectTo: archive.url, contentCaptured: false }),
+					expect.objectContaining({ index: 1, url: archive.url, status: 200, contentCaptured: true }),
+				]);
+				expect(archive.text.toString()).toContain("Enter password");
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+
+		test("submits anyway when the captcha never passes, and records that it did not", async () => {
+			const posts: Array<Record<string, string>> = [];
+			const server = serveGate(undefined, posts);
+			try {
+				const archive = await capture(`http://127.0.0.1:${server.port}/word/verify.workspace.php`).run();
+				expect(posts).toEqual([{ website: "", company_url: "", email: value, "cf-turnstile-response": "" }]);
+				expect(archive.submittedField?.humanCheck).toBe("unsolved");
+			} finally {
+				server.stop(true);
+			}
+		}, 90_000);
+
+		test("a kit that draws its field without a form and swaps in its next step is captured as the same page", async () => {
+			const server = Bun.serve({
+				port: 0,
+				fetch: () => html(`<div id="step"><input id="login" name="loginfmt" type="text" placeholder="Email, phone, or Skype"><div role="button" id="next">Next</div></div>
+<script>document.getElementById("next").addEventListener("click", () => {
+	const who = document.getElementById("login").value;
+	document.getElementById("step").innerHTML = "<div>" + who + "</div>" + ${JSON.stringify(signIn)};
+});</script>`),
+			});
+			try {
+				const url = `http://127.0.0.1:${server.port}/common/oauth2`;
+				const field = { ref: "f1", control: "input[type=text]", id: "login", name: "loginfmt", placeholder: "Email, phone, or Skype" };
+				const archive = await capture(url, [{ field, value }]).run();
+
+				expect(archive.submittedField).toEqual({ field, value });
+				expect(archive.navigationHops).toEqual([expect.objectContaining({ index: 0, url, status: 200, contentCaptured: true })]);
+				expect(archive.navigationHops[0]!.redirectTo).toBeUndefined();
+				expect(archive.text.toString()).toContain(value);
+				expect(archive.text.toString()).toContain("Enter password");
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+
+		test("a form without a button is sent with Enter, and a field the page draws late is waited for", async () => {
+			const posts: Array<Record<string, string>> = [];
+			const server = Bun.serve({
+				port: 0,
+				fetch: async (request) => {
+					if (request.method === "POST") {
+						posts.push(Object.fromEntries(new URLSearchParams(await request.text())));
+						return html(signIn);
+					}
+					return html(`<div id="slot"></div><script>setTimeout(() => {
+	document.getElementById("slot").innerHTML = '<form method="POST" action="/next"><input type="email" name="email"></form>';
+}, 1500);</script>`);
+				},
+			});
+			try {
+				const field = { ref: "f1", control: "input[type=email]", name: "email" };
+				const archive = await capture(`http://127.0.0.1:${server.port}/`, [{ field, value }]).run();
+				expect(posts).toEqual([{ email: value }]);
+				expect(archive.url).toBe(`http://127.0.0.1:${server.port}/next`);
+				expect(archive.text.toString()).toContain("Enter password");
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+
+		test("replays earlier submissions in order before the new one", async () => {
+			const posts: Array<{ path: string; body: Record<string, string> }> = [];
+			const server = Bun.serve({
+				port: 0,
+				fetch: async (request) => {
+					const { pathname } = new URL(request.url);
+					if (request.method === "POST") {
+						posts.push({ path: pathname, body: Object.fromEntries(new URLSearchParams(await request.text())) });
+						return new Response(null, { status: 303, headers: { location: pathname === "/email" ? "/phone" : "/signin" } });
+					}
+					if (pathname === "/phone") return html(`<form method="POST" action="/phone-check"><input type="tel" id="phone"><input type="hidden" name="phone" id="phone-value"><button>Next</button></form>
+<script>document.getElementById("phone").addEventListener("input", (event) => { document.getElementById("phone-value").value = event.target.value; });</script>`);
+					if (pathname === "/signin") return html(signIn);
+					return html(`<form method="POST" action="/email"><input type="email" name="email"><button>Next</button></form>`);
+				},
+			});
+			try {
+				const phone = "+12125550142";
+				const archive = await capture(`http://127.0.0.1:${server.port}/`, [
+					{ field: { ref: "f1", control: "input[type=email]", name: "email" }, value },
+					{ field: { ref: "f1", control: "input[type=tel]", id: "phone" }, value: phone },
+				]).run();
+				expect(posts).toEqual([{ path: "/email", body: { email: value } }, { path: "/phone-check", body: { phone } }]);
+				expect(archive.submittedField?.value).toBe(phone);
+				expect(archive.navigationHops.map(({ url, status }) => ({ path: new URL(url).pathname, status }))).toEqual([
+					{ path: "/phone-check", status: 303 },
+					{ path: "/signin", status: 200 },
+				]);
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+
+		test("a page without the named field fails on its one route, without trying the others", async () => {
+			const server = Bun.serve({ port: 0, fetch: () => html(`<h1>World news</h1>`) });
+			try {
+				const { leased, run } = capture(`http://127.0.0.1:${server.port}/`);
+				const error = await run().catch((caught: unknown) => caught);
+				expect(error).toBeInstanceOf(WebsiteCaptureFailedError);
+				expect((error as Error).message).toBe(`Failed to load page: the page showed no field "Email address" to enter the address into via residential exit`);
+				expect(leased).toEqual(["residential"]);
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+	});
+
 	test("records a jump the page's <head> makes to another site before it finishes loading as the submitted page's own hop", async () => {
 		// docusign.alt3-doc3ea7-v2.sbs: meta refresh and `location.replace` to a news
 		// site in <head>. Chromium's navigation resolves with the news site's response.

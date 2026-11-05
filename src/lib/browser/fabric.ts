@@ -31,6 +31,11 @@ export type FabricEgress = "phishing" | "reporting" | "residential";
 /** How each egress appears to a visited site, for logs and evidence. */
 export const FABRIC_EGRESS_LABEL: Readonly<Record<FabricEgress, string>> = { phishing: "Tor exit", reporting: "server IP", residential: "residential exit" };
 
+/** The egress whose label a capture recorded as its route, for example "residential exit". */
+export function fabricEgressForLabel(label: string | undefined): FabricEgress | undefined {
+	return (Object.keys(FABRIC_EGRESS_LABEL) as FabricEgress[]).find((egress) => FABRIC_EGRESS_LABEL[egress] === label);
+}
+
 export const DEFAULT_FABRIC_PHISHING_EGRESS_POLICY_REF = "egress_tor-egress@1";
 export const DEFAULT_FABRIC_REPORTING_EGRESS_POLICY_REF = "egress_direct-egress@1";
 export const DEFAULT_FABRIC_RESIDENTIAL_EGRESS_POLICY_REF = "egress_mac-exit@1";

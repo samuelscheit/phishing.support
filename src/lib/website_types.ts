@@ -11,8 +11,31 @@ export type WebsiteNavigationHop = {
 	 * The page was captured as an earlier step of the case.
 	 */
 	followedLink?: { label: string };
+	/**
+	 * Set when the capture entered a made-up value into this page's field, as
+	 * a visitor enters their address, and submitted it; `redirectTo` is the
+	 * page that then showed. The page was captured as an earlier step of the case.
+	 */
+	submittedField?: WebsiteSubmittedField;
 	contentCaptured: boolean;
 };
+
+/** The identifier a capture entered into a page's field to reach the kit's next step. */
+export type WebsiteSubmittedField = {
+	/** The field as the captured page recorded it; its id or name finds it again when the visit is replayed. */
+	field: WebsiteDataEntryField;
+	/** The made-up value entered, a canary that can reach no one. */
+	value: string;
+	/**
+	 * The captcha widget beside the field (Turnstile, reCAPTCHA, hCaptcha):
+	 * `passed` when it issued its token before the form was submitted,
+	 * `unsolved` when it never did. Absent when the form had none.
+	 */
+	humanCheck?: "passed" | "unsolved";
+};
+
+/** A field a live capture fills and submits; the value goes into that field only. */
+export type WebsiteFieldSubmission = Pick<WebsiteSubmittedField, "field" | "value">;
 
 /**
  * How a capture handled a page whose own script sends visitors to another site.

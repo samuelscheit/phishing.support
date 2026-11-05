@@ -7,7 +7,8 @@ import { getDomain } from "tldts";
 import { getBrowser, getBrowserPage } from "./browser";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
-import type { WebsiteCloaking, WebsiteKitResource, WebsiteNavigationHop } from "./website_types";
+import type { WebsiteCloaking, WebsiteFieldSubmission, WebsiteKitResource, WebsiteNavigationHop, WebsiteSubmittedField } from "./website_types";
+import { submitWebsiteField, WebsiteFieldMissingError } from "./website_form_submission";
 import { isSameWebsite, websiteSite } from "./website_site";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
@@ -34,6 +35,11 @@ export type WebsiteArchiveResult = {
 	cloaking?: WebsiteCloaking;
 	/** Set when the captured page sat behind a fake verification gate that was clicked through. */
 	verificationGate?: WebsiteVerificationGate;
+	/**
+	 * The last field the capture filled and submitted to reach the captured
+	 * page. `navigationHops` then starts at the response to that submission.
+	 */
+	submittedField?: WebsiteSubmittedField;
 	/** URL whose document body, screenshot, and MHTML are captured. */
 	url: string;
 	hostname: string;
@@ -104,6 +110,16 @@ export type ArchiveWebsiteOptions = {
 	verificationGate?: WebsiteVerificationGate;
 	/** Kit resources the original live capture of the retained MHTML received. */
 	kitResources?: WebsiteKitResource[];
+	/**
+	 * The only route a live capture uses, with no cloaking retry: the route
+	 * that already reached the page, when the visit is replayed to submit its fields.
+	 */
+	egress?: FabricEgress;
+	/**
+	 * Fields a live capture fills and submits in order, once the page and any
+	 * verification gate are through, each on the page the previous one opened.
+	 */
+	fieldSubmissions?: readonly WebsiteFieldSubmission[];
 };
 
 /** Read a top-level MHTML header; MIME-part headers must never override capture metadata. */
@@ -279,6 +295,10 @@ export type WebsiteArchiveDependencies = {
 	scriptNavigationSettleMs?: number;
 	/** Test seam for the bounded wait on the captured document's own rendering requests. */
 	renderSettleMs?: number;
+	/** Test seam for the bounded wait on what a submitted field opens. */
+	fieldSubmissionSettleMs?: number;
+	/** Test seam for the bounded wait on a captcha widget beside a submitted field. */
+	humanCheckMs?: number;
 };
 
 /**
@@ -359,6 +379,8 @@ const WEBSITE_ERROR_DOCUMENT_POLL_MS = 500;
 const WEBSITE_SCRIPT_NAVIGATION_SETTLE_MS = 8_000;
 /** How long the captured document may keep fetching what it renders before it is captured as it stands. */
 const WEBSITE_RENDER_SETTLE_MS = 10_000;
+/** How long a submitted field's next step may take to show. */
+const WEBSITE_FIELD_SUBMISSION_SETTLE_MS = 15_000;
 /** How often a clicked verification gate is checked for the page it reveals. */
 const WEBSITE_GATE_POLL_MS = 250;
 /** A quiet network for this long means the page's script has fetched what it renders. */
@@ -649,6 +671,38 @@ function documentNavigationHops(documents: readonly HTTPResponse[], capturedDocu
 	}).map((hop, index) => ({ ...hop, index }));
 }
 
+/**
+ * Hops of what a field submission opened: the documents that arrived after it
+ * (a POST answered by a redirect, then the next page), or the same document
+ * again when the kit swapped in its next step without navigating.
+ */
+function submissionResultHops(arrived: readonly HTTPResponse[], current: HTTPResponse | undefined, capturedDocumentUrl: string): WebsiteNavigationHop[] {
+	if (arrived.length) return documentNavigationHops(arrived, capturedDocumentUrl);
+	const { redirectTo: _, ...hop } = navigationHopsFromResponse(current ?? null, capturedDocumentUrl).at(-1)!;
+	return [{ ...hop, index: 0, contentCaptured: true }];
+}
+
+async function pageText(page: Page): Promise<string> {
+	return page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+}
+
+/**
+ * Waits until a submitted field's result shows: the next document has
+ * loaded, or the page's own text changed (a kit that swaps in its next step,
+ * or shows an error). Past the bound the page is captured as it stands.
+ */
+async function settleFieldSubmission(page: Page, navigated: () => boolean, textBefore: string, settleMs: number): Promise<void> {
+	const deadline = Date.now() + settleMs;
+	while (Date.now() < deadline) {
+		await sleep(WEBSITE_GATE_POLL_MS);
+		const readyState = await page.evaluate(() => document.readyState).catch(() => "loading");
+		if (readyState === "loading") continue;
+		if (navigated()) return;
+		const text = await pageText(page);
+		if (text && text !== textBefore) return;
+	}
+}
+
 /** Attempts at a screenshot that shows what the page has rendered. */
 const SCREENSHOT_PAINT_ATTEMPTS = 4;
 
@@ -678,7 +732,8 @@ async function capturePaintedScreenshot(page: Page): Promise<Uint8Array> {
 	return screenshot;
 }
 
-async function captureLiveWebsite(url: string, referrer: string | undefined, egress: FabricEgress, dependencies: WebsiteArchiveDependencies): Promise<WebsiteArchiveResult> {
+async function captureLiveWebsite(options: ArchiveWebsiteOptions, egress: FabricEgress, dependencies: WebsiteArchiveDependencies): Promise<WebsiteArchiveResult> {
+	const { url, referrer, fieldSubmissions = [] } = options;
 	const browser = await (dependencies.getBrowser ?? getBrowser)(egress).catch((error: unknown) => {
 		throw new BrowserInfrastructureError(`Browser service unavailable: ${errorText(error)}`, { cause: error });
 	});
@@ -753,7 +808,24 @@ async function captureLiveWebsite(url: string, referrer: string | undefined, egr
 		}
 		const renderSettleMs = dependencies.renderSettleMs ?? WEBSITE_RENDER_SETTLE_MS;
 		await settleRendering(page, renderSettleMs);
-		const verificationGate = await passVerificationGate(page, renderSettleMs);
+		let verificationGate = await passVerificationGate(page, renderSettleMs);
+		// The hops of a capture that submits fields start at the response to the
+		// last submission; the pages before it were captured as earlier steps.
+		let submittedField: WebsiteSubmittedField | undefined;
+		let resultDocumentsFrom = 0;
+		for (const submission of fieldSubmissions) {
+			resultDocumentsFrom = documents.length;
+			const textBefore = await pageText(page);
+			try {
+				submittedField = await submitWebsiteField(page, submission, dependencies.humanCheckMs);
+			} catch (error) {
+				if (error instanceof WebsiteFieldMissingError) throw new WebsiteUnreachableError(egress, error.message);
+				throw error;
+			}
+			await settleFieldSubmission(page, () => documents.length > resultDocumentsFrom, textBefore, dependencies.fieldSubmissionSettleMs ?? WEBSITE_FIELD_SUBMISSION_SETTLE_MS);
+			await settleRendering(page, renderSettleMs);
+			verificationGate = await passVerificationGate(page, renderSettleMs) ?? verificationGate;
+		}
 		const screenshotUrl = documentAddress(page.url(), loadedUrl);
 		const screenshotBytes = await capturePaintedScreenshot(page);
 		const cdp = await page.target().createCDPSession();
@@ -770,7 +842,9 @@ async function captureLiveWebsite(url: string, referrer: string | undefined, egr
 		const capturedDocument = await archiveMhtmlSnapshot({
 			url,
 			archivedUrl: capturedDocumentUrl,
-			navigationHops: documentNavigationHops(documents, capturedDocumentUrl),
+			navigationHops: submittedField
+				? submissionResultHops(documents.slice(resultDocumentsFrom), documents.at(-1), capturedDocumentUrl)
+				: documentNavigationHops(documents, capturedDocumentUrl),
 			mhtmlSnapshot: resolvedMhtml,
 		});
 		const screenshotPng = screenshotUrl === capturedDocumentUrl ? Buffer.from(screenshotBytes) : undefined;
@@ -781,6 +855,7 @@ async function captureLiveWebsite(url: string, referrer: string | undefined, egr
 			screenshotPng,
 			kitResources: await kitResources.settled(),
 			...(verificationGate ? { verificationGate } : {}),
+			...(submittedField ? { submittedField } : {}),
 		};
 	} finally {
 		await browser.close();
@@ -788,17 +863,27 @@ async function captureLiveWebsite(url: string, referrer: string | undefined, egr
 }
 
 export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencies: WebsiteArchiveDependencies = {}): Promise<WebsiteArchiveResult> {
-	const { url, referrer, mhtmlSnapshot } = options;
+	const { url, mhtmlSnapshot } = options;
 	console.log(`Archiving website ${url}`);
 	if (mhtmlSnapshot?.byteLength) {
 		return archiveMhtmlSnapshot({ ...options, mhtmlSnapshot });
+	}
+
+	if (options.egress) {
+		try {
+			return await captureLiveWebsite(options, options.egress, dependencies);
+		} catch (error) {
+			if (!(error instanceof WebsiteUnreachableError)) throw error;
+			console.warn(`Website capture of ${url} failed: ${error.message}`);
+			throw new WebsiteCaptureFailedError([error]);
+		}
 	}
 
 	const failures: WebsiteUnreachableError[] = [];
 	let decoy: { archive: WebsiteArchiveResult; site: string; egress: FabricEgress } | undefined;
 	for (const egress of WEBSITE_CAPTURE_EGRESS) {
 		try {
-			const archive = await captureLiveWebsite(url, referrer, egress, dependencies);
+			const archive = await captureLiveWebsite(options, egress, dependencies);
 			const site = scriptDestinationSite(archive);
 			if (!site) return archive;
 			console.warn(`Website capture of ${url} via ${FABRIC_EGRESS_LABEL[egress]}: the page sent the visitor to ${site} by script`);
@@ -815,7 +900,7 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 	// Tor and datacenter visitors. Ask once more as a residential visitor would.
 	let residential: WebsiteArchiveResult | undefined;
 	try {
-		residential = await captureLiveWebsite(url, referrer, WEBSITE_CLOAKING_EGRESS, dependencies);
+		residential = await captureLiveWebsite(options, WEBSITE_CLOAKING_EGRESS, dependencies);
 	} catch (error) {
 		// The residential exit depends on the operator's machine being online; its
 		// failure must not hide what the other routes captured.
