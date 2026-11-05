@@ -260,6 +260,24 @@ describe("a phishing site's denial is answered from a recheck of the site", () =
 		expect(body).toContain("at 2026-11-05T21:30:00.000Z, after your review");
 	});
 
+	test("a dry run hands back the draft and leaves the case as it found it: nothing sent, no event", async () => {
+		const { reportId, route } = await deniedPhishingCase();
+		const { sent, send } = recordingSend();
+		const drafts: unknown[] = [];
+		expect(await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "content_removed" }, { send, dryRun: (draft) => drafts.push(draft), website: { capture: gone }, writeNarrative: async () => undefined })).toBe("skipped");
+		expect(sent).toEqual([]);
+		expect(drafts).toEqual([expect.objectContaining({ outcome: "reply", replyKind: "account", recipient: "abusereply@cloudflare.com", narrative: "fallback", body: expect.stringContaining(SITEKEY) })]);
+		expect((await AbuseRepository.listEvents(reportId)).filter((event) => event.eventType.startsWith("provider_decision."))).toEqual([]);
+
+		// A dry run of a decision that would not be answered records nothing either.
+		// On its own domain, so the first case's sitekey cannot tie it to an account.
+		const quiet = await deniedPhishingCase({ html: KIT_PAGE.replace(`data-sitekey="${SITEKEY}"`, ""), url: "https://docusign.quiet-kit.sbs/word/verify.workspace.php" });
+		const quietDrafts: Array<{ outcome: string }> = [];
+		await followUpProviderDecision({ routeId: quiet.route.id, state: "denied" }, { send, dryRun: (draft) => quietDrafts.push(draft), website: { capture: gone }, writeNarrative: async () => undefined });
+		expect(quietDrafts.map(({ outcome }) => outcome)).toEqual(["not_contested"]);
+		expect((await AbuseRepository.listEvents(quiet.reportId)).filter((event) => event.eventType.startsWith("provider_decision."))).toEqual([]);
+	});
+
 	test("a malware report from a case keeps the paste-command check, never a site recheck", async () => {
 		const submissionId = nextCase++;
 		await SubmissionsEntity.create({ id: submissionId, kind: "website", source: "https://paneo.work/", dedupeKey: `website-${submissionId}`, status: "reported", data: { kind: "website", website: { url: "https://paneo.work/" } } });

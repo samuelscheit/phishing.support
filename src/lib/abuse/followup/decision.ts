@@ -15,7 +15,18 @@ export type DecisionFollowUpDependencies = {
 	writeNarrative?: NarrativeWriter;
 	send?: typeof sendAbuseEmailRoute;
 	now?: () => Date;
+	/**
+	 * Build the answer without acting on it: nothing is sent and no event is
+	 * recorded, so the run leaves the case as it found it. The draft, or why
+	 * there would be none, goes here instead.
+	 */
+	dryRun?: (draft: DecisionFollowUpDraft) => void;
 };
+
+/** What a dry run of a follow-up would have done. */
+export type DecisionFollowUpDraft =
+	| { outcome: "reply"; replyKind: DecisionReplyInput["replyKind"]; recipient: string; subject: string; body: string; attachments: string[]; narrative: "model" | "fallback" }
+	| { outcome: "not_contested"; summary: Record<string, unknown> };
 
 /** The provider's own message about its decision: the newest provider-API mail that is not a status record. */
 function providerDecisionMessage(messages: Awaited<ReturnType<typeof AbuseRepository.listMailForReport>>, routeId: bigint) {
@@ -97,6 +108,10 @@ export async function followUpProviderDecision(
 		});
 	const replyKind = replyKindFor(evidence);
 	if (!replyKind) {
+		if (dependencies.dryRun) {
+			dependencies.dryRun({ outcome: "not_contested", summary: recheckSummary(evidence) });
+			return "skipped";
+		}
 		await AbuseRepository.appendEvent({ reportId: route.reportId, routeId: route.id, eventType: "provider_decision.not_contested", data: { state: params.state, detail: params.detail ?? null, ...recheckSummary(evidence) } });
 		return "skipped";
 	}
@@ -120,6 +135,10 @@ export async function followUpProviderDecision(
 		...fresh,
 		...input.evidenceArtifacts.slice(0, MAX_ATTACHMENTS - fresh.length).map((artifact) => ({ filename: artifact.name, mimeType: artifact.mimeType, content: Buffer.from(artifact.blob) })),
 	];
+	if (dependencies.dryRun) {
+		dependencies.dryRun({ outcome: "reply", replyKind, recipient: followUp.replyAddress, subject: followUp.subject(run.confirmationId), body: reply.body, attachments: attachments.map((attachment) => attachment.filename), narrative: reply.narrativeSource });
+		return "skipped";
+	}
 	const result = await (dependencies.send ?? sendAbuseEmailRoute)({
 		routeId: route.id,
 		runId: run.id,

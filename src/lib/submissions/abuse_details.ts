@@ -3,6 +3,7 @@ import { safePublicError } from "@/lib/abuse/security";
 import { getProviderSubmissionProvider } from "@/lib/abuse/providers/submission_registry_default";
 import { buildProviderReportNarrative } from "@/lib/abuse/providers/report_payload";
 import type { AbuseMailClassification, AbuseReport } from "@/lib/abuse/schema";
+import { describeDecisionFollowUp, type DecisionFollowUpSummary } from "@/lib/abuse/followup/describe";
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
 	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -27,6 +28,8 @@ export type SubmissionReportMessage = {
 	replyAddress: string | null;
 	rawArtifactId: bigint | null;
 	attachmentArtifactIds: string[];
+	/** An outbound answer to a provider's review decision, not the report itself. */
+	decisionReply: boolean;
 	occurredAt: Date;
 };
 
@@ -48,6 +51,8 @@ export type SubmissionReportRoute = {
 	finalUrl: string | null;
 	error: string | null;
 	messages: SubmissionReportMessage[];
+	/** How each review decision the provider sent was answered, or why it was not. */
+	decisionFollowUps: DecisionFollowUpSummary[];
 	createdAt: Date;
 	updatedAt: Date;
 };
@@ -116,13 +121,20 @@ function providerReportBody(params: {
 }
 
 async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionReport> {
-	const [targets, routes, runs, messages, artifacts] = await Promise.all([
+	const [targets, routes, runs, messages, artifacts, events] = await Promise.all([
 		AbuseRepository.listTargets(report.id),
 		AbuseRepository.listRoutes(report.id),
 		AbuseRepository.listProviderRunsForReport(report.id),
 		AbuseRepository.listMailForReport(report.id),
 		AbuseRepository.listArtifactMetadata(report.id),
+		AbuseRepository.listEvents(report.id),
 	]);
+	const followUpsByRoute = new Map<bigint, DecisionFollowUpSummary[]>();
+	for (const event of events) {
+		const summary = event.routeId ? describeDecisionFollowUp(event) : undefined;
+		if (!summary) continue;
+		followUpsByRoute.set(event.routeId!, [...(followUpsByRoute.get(event.routeId!) ?? []), summary]);
+	}
 	const targetsById = new Map(targets.map((target) => [target.id, target]));
 	const latestRunByRoute = new Map<bigint, (typeof runs)[number]>();
 	for (const run of runs) if (!latestRunByRoute.has(run.routeId)) latestRunByRoute.set(run.routeId, run);
@@ -143,6 +155,7 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 			replyAddress: message.replyAddress,
 			rawArtifactId: message.rawArtifactId,
 			attachmentArtifactIds: message.attachmentArtifactIds,
+			decisionReply: message.direction === "outbound" && Boolean(message.correlationKey?.startsWith("decision-follow-up:")),
 			occurredAt: message.occurredAt,
 		});
 		messagesByRoute.set(message.routeId, list);
@@ -188,6 +201,7 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 					finalUrl: run?.finalUrl ?? null,
 					error: safePublicError(route.status, run?.failureReason ?? target?.disposition) ?? null,
 					messages: routeMessages,
+					decisionFollowUps: followUpsByRoute.get(route.id) ?? [],
 					createdAt: run?.createdAt ?? route.createdAt,
 					updatedAt: run?.updatedAt ?? route.updatedAt,
 				};

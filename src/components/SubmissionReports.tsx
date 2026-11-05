@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Bell, Check, Copy, Download, ExternalLink, Mail, MessageSquareReply, OctagonAlert, Send } from "lucide-react";
+import { Bell, Check, CircleSlash, Copy, Download, ExternalLink, Mail, MessageSquareReply, OctagonAlert, Reply, Send } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { SubmissionReport, SubmissionReportArtifact, SubmissionReportMessage, SubmissionReportRoute } from "@/lib/submissions/details";
+import type { DecisionFollowUpSummary } from "@/lib/abuse/followup/describe";
 import { describeProviderReportStatus } from "@/lib/abuse/provider_status";
 import { formatUtcDateTime } from "@/lib/date_time";
 import { cn } from "@/web_lib/util";
@@ -75,7 +76,7 @@ function CopyReplyAddress({ replyAddress }: { replyAddress: string }) {
 
 /** What each stored message is, as the case timeline shows it. */
 function messageTitle(message: SubmissionReportMessage): string {
-	if (message.direction === "outbound") return "Report sent";
+	if (message.direction === "outbound") return message.decisionReply ? "Reply sent" : "Report sent";
 	if (message.kind === "bounce" || message.classification === "bounce") return "Delivery failed";
 	if (message.kind === "notification") return "Provider update";
 	if (message.kind === "provider_api") return "Provider message";
@@ -117,6 +118,28 @@ function MessageItem({ submissionId, message, artifacts }: { submissionId: strin
 	);
 }
 
+/** How a provider's review decision was handled: the reply sent, or why none was. */
+function DecisionFollowUpItem({ followUp }: { followUp: DecisionFollowUpSummary }) {
+	const replied = followUp.outcome === "replied";
+	return (
+		<div className="relative border-l-2 border-muted pb-6 pl-4 last:pb-0">
+			<div className="absolute -left-[9px] top-0 grid h-4 w-4 place-items-center rounded-full bg-background">
+				{replied ? <Reply className="h-4 w-4 text-blue-700" /> : <CircleSlash className="h-4 w-4 text-slate-500" />}
+			</div>
+			<div className={cn("rounded-md border p-3", replied ? "bg-muted/20" : "border-slate-200 bg-slate-50/60")}>
+				<div className="flex flex-wrap items-start justify-between gap-2">
+					<div className="flex flex-wrap items-center gap-2">
+						<Badge variant="secondary">{replied ? (followUp.replyKind === "account" ? "Asked to act on the account" : "Decision contested") : "No reply sent"}</Badge>
+						<Badge variant="outline" className="capitalize">{label(followUp.decision)}</Badge>
+					</div>
+					<div className="text-xs text-muted-foreground">{formatDate(followUp.occurredAt)}</div>
+				</div>
+				<p className="mt-2 break-words text-sm">{followUp.explanation}</p>
+			</div>
+		</div>
+	);
+}
+
 function RouteCard({ submissionId, route, artifacts }: { submissionId: string; route: SubmissionReportRoute; artifacts: Map<string, SubmissionReportArtifact> }) {
 	const confirmed = route.status === "submitted" || route.status === "acknowledged";
 	const failed = ["unknown_external_state", "provider_rejected", "failed", "delivery_failed", "needs_human", "insufficient_evidence", "no_route"].includes(route.status);
@@ -150,7 +173,14 @@ function RouteCard({ submissionId, route, artifacts }: { submissionId: string; r
 						<pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words font-sans text-sm">{route.body}</pre>
 					</details>
 				) : null}
-				{route.messages.length ? <div>{route.messages.map((message) => <MessageItem key={String(message.id)} submissionId={submissionId} message={message} artifacts={artifacts} />)}</div> : null}
+				{route.messages.length || route.decisionFollowUps.length ? (
+					<div>
+						{[
+							...route.messages.map((message) => ({ at: new Date(message.occurredAt).getTime(), node: <MessageItem key={`m${String(message.id)}`} submissionId={submissionId} message={message} artifacts={artifacts} /> })),
+							...route.decisionFollowUps.map((followUp, index) => ({ at: new Date(followUp.occurredAt).getTime(), node: <DecisionFollowUpItem key={`d${index}`} followUp={followUp} /> })),
+						].sort((a, b) => a.at - b.at).map(({ node }) => node)}
+					</div>
+				) : null}
 				{route.finalUrl ? <a href={route.finalUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><ExternalLink className="h-3.5 w-3.5" /> Open provider confirmation</a> : null}
 			</CardContent>
 		</Card>

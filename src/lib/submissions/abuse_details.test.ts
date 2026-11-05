@@ -51,6 +51,27 @@ async function createWebsiteReport(submissionId: bigint) {
 }
 
 describe("submission report read model", () => {
+	test("a route carries how each provider decision was answered, in order", async () => {
+		const submissionId = 351387190816673790n;
+		const { report, target } = await createWebsiteReport(submissionId);
+		const route = await AbuseRepository.upsertResolvedRoute(target.id, {
+			routeKey: "provider_submission:cloudflare:contact", providerRegistryKey: "cloudflare", providerDisplayName: "Cloudflare Abuse",
+			routeType: "provider_submission", resolverProvenance: { source: "test" }, resolutionSnapshot: { source: "test" }, status: "submitted",
+		});
+		await AbuseRepository.appendEvent({ reportId: report.reportId, routeId: route.id, eventType: "provider_decision.not_contested", data: { state: "denied", detail: "no_abuse_found", recheck: { checkedAt: "2026-11-05T23:07:30.000Z", recheck: { reached: false, failure: "net::ERR_NAME_NOT_RESOLVED" }, stillServed: false, accountIdentifiers: [] } } });
+		await AbuseRepository.appendEvent({ reportId: report.reportId, routeId: route.id, eventType: "provider_decision.followed_up", data: { state: "denied", detail: "content_removed", replyKind: "contest", to: "abusereply@cloudflare.com" } });
+
+		const details = await getSubmissionDetails(submissionId.toString());
+		const shown = details!.reports[0]!.routes.find((item) => item.id === route.id)!;
+		expect(shown.decisionFollowUps.map(({ outcome, decision, replyKind }) => ({ outcome, decision, replyKind }))).toEqual([
+			{ outcome: "not_replied", decision: "no_abuse_found", replyKind: undefined },
+			{ outcome: "replied", decision: "content_removed", replyKind: "contest" },
+		]);
+		expect(shown.decisionFollowUps[0]!.explanation).toEndWith("No reply was sent.");
+		// Another route of the report has no follow-ups of its own.
+		expect(details!.reports[0]!.routes.filter((item) => item.id !== route.id).every((item) => item.decisionFollowUps.length === 0)).toBeTrue();
+	});
+
 	test("holds every confirmed site's report for its investigation, malware included", async () => {
 		const credential = await createWebsiteReport(351387190816673788n);
 		const malwareSubmissionId = 351387190816673789n;
