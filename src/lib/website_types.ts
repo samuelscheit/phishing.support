@@ -17,7 +17,9 @@ export type WebsiteNavigationHop = {
 /**
  * How a capture handled a page whose own script sends visitors to another site.
  * `detected`: Tor/datacenter visitors and the residential exit reached
- * different sites; the archive holds the residential one. `uniform`: every
+ * different sites; the archive holds the residential one. When that is
+ * another site too, it may be just another decoy (a cloaker rotating decoy
+ * sites per visit), so its verdict settles the submitted case like `uniform`. `uniform`: every
  * route, including the residential exit, was sent to the same site, which the
  * archive holds; a harmless destination then means the page cloaks against all
  * of them. `unresolved`: only the decoy could be captured.

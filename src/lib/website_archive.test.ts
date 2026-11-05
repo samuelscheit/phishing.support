@@ -745,14 +745,23 @@ describe("cloaking", () => {
 	const kitUrl = "https://device.ledger-config.live/en";
 
 	/** The submitted interstitial loads, then its script navigates to where its server sent this visitor. */
-	function cloakerFixture(destination: (egress: FabricEgress) => string | undefined, options: { residentialOnline?: boolean } = {}) {
+	function cloakerFixture(destination: (egress: FabricEgress) => string | undefined, options: { residentialOnline?: boolean; jumpBeforeLoad?: boolean } = {}) {
 		return archiveBrowserFixture({
 			pageUrl: url,
 			goto: async ({ egress, replaceDocument }) => {
 				if (egress === "residential" && options.residentialOnline === false) throw new Error("net::ERR_PROXY_CONNECTION_FAILED");
 				const target = destination(egress);
-				if (target) setTimeout(() => replaceDocument(responseForNavigation(target, 200, { contentType: "text/html; charset=utf-8" })), 5);
-				return responseForNavigation(url, 200, { contentType: "text/html; charset=utf-8" });
+				const submitted = responseForNavigation(url, 200, { contentType: "text/html; charset=utf-8" });
+				if (!target) return submitted;
+				const jumped = responseForNavigation(target, 200, { contentType: "text/html; charset=utf-8" });
+				// A jump from the page's <head> beats DOMContentLoaded: the browser
+				// sees the submitted document, and the navigation resolves with the destination.
+				if (options.jumpBeforeLoad) {
+					replaceDocument(submitted);
+					return jumped;
+				}
+				setTimeout(() => replaceDocument(jumped), 5);
+				return submitted;
 			},
 		});
 	}
@@ -806,6 +815,56 @@ describe("cloaking", () => {
 			outcome: "uniform",
 			detail: `${url} sent both the Tor exit and the residential exit to wikipedia.org by script`,
 		});
+	});
+
+	test("a jump the page's <head> makes before it finishes loading is still the submitted page's scripted jump", async () => {
+		// docusign.alt3-doc3ea7-v2.sbs (submission 376813288618463354) answers with
+		// `location.replace` to a random news front page in its <head>, so the
+		// navigation resolved with the news site and the capture looked like a
+		// plain visit to it.
+		const rotation: Partial<Record<FabricEgress, string>> = { phishing: "https://www.reuters.com/", residential: "https://www.bbc.com/" };
+		const fixture = cloakerFixture((egress) => rotation[egress], { jumpBeforeLoad: true });
+
+		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+
+		expect(fixture.leasedEgress).toEqual(["phishing", "residential"]);
+		expect(archive.url).toBe("https://www.bbc.com/");
+		expect(archive.cloaking).toEqual({
+			outcome: "detected",
+			detail: `${url} sent the Tor exit to reuters.com but the residential exit to bbc.com`,
+		});
+		expect(archive.navigationHops).toEqual([
+			{ index: 0, url, hostname: "lookup-lgr.to", status: 200, redirectTo: "https://www.bbc.com/", contentType: "text/html; charset=utf-8", contentCaptured: false },
+			{ index: 1, url: "https://www.bbc.com/", hostname: "www.bbc.com", status: 200, contentType: "text/html; charset=utf-8", contentCaptured: true },
+		]);
+	});
+
+	test("a jump before load to the same site for every route is uniform cloaking", async () => {
+		const fixture = cloakerFixture(() => decoyUrl, { jumpBeforeLoad: true });
+
+		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+
+		expect(fixture.leasedEgress).toEqual(["phishing", "residential"]);
+		expect(archive.url).toBe(decoyUrl);
+		expect(archive.cloaking?.outcome).toBe("uniform");
+		expect(archive.navigationHops.map(({ url: hopUrl, redirectTo }) => ({ hopUrl, redirectTo }))).toEqual([
+			{ hopUrl: url, redirectTo: decoyUrl },
+			{ hopUrl: decoyUrl, redirectTo: undefined },
+		]);
+	});
+
+	test("a jump before load that stays on the submitted site is recorded as a hop and never triggers the residential exit", async () => {
+		const fixture = cloakerFixture(() => `${url}/step-2`, { jumpBeforeLoad: true });
+
+		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+
+		expect(fixture.leasedEgress).toEqual(["phishing"]);
+		expect(archive.cloaking).toBeUndefined();
+		expect(archive.url).toBe(`${url}/step-2`);
+		expect(archive.navigationHops.map(({ url: hopUrl, redirectTo, contentCaptured }) => ({ hopUrl, redirectTo, contentCaptured }))).toEqual([
+			{ hopUrl: url, redirectTo: `${url}/step-2`, contentCaptured: false },
+			{ hopUrl: `${url}/step-2`, redirectTo: undefined, contentCaptured: true },
+		]);
 	});
 
 	test("a scripted jump that stays on the submitted site never triggers the residential exit or a cloaking mark", async () => {
@@ -1018,6 +1077,35 @@ location.replace(URL.createObjectURL(new Blob(["<!DOCTYPE html><html><body>${app
 			expect(archive.screenshotPng?.byteLength).toBeGreaterThan(0);
 		} finally {
 			server.stop(true);
+		}
+	}, 60_000);
+
+	test("records a jump the page's <head> makes to another site before it finishes loading as the submitted page's own hop", async () => {
+		// docusign.alt3-doc3ea7-v2.sbs: meta refresh and `location.replace` to a news
+		// site in <head>. Chromium's navigation resolves with the news site's response.
+		const decoyHits: string[] = [];
+		const decoy = serveKit(`<!DOCTYPE html><html><body><h1>World news</h1></body></html>`, decoyHits);
+		const decoyUrl = `http://127.0.0.1:${decoy.port}/`;
+		const hits: string[] = [];
+		const cloaker = serveKit(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${decoyUrl}"><title>Redirecting...</title><script>window.location.replace("${decoyUrl}");</script></head><body></body></html>`, hits);
+		try {
+			const url = `http://localhost:${cloaker.port}/word/verify.workspace.php`;
+			const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 2_000, getBrowser: launch });
+
+			expect(archive.url).toBe(decoyUrl);
+			expect(archive.navigationHops).toEqual([
+				expect.objectContaining({ index: 0, url, status: 200, redirectTo: decoyUrl, contentCaptured: false }),
+				expect.objectContaining({ index: 1, url: decoyUrl, status: 200, contentCaptured: true }),
+			]);
+			// Every route of this test browser reaches the same decoy.
+			expect(archive.cloaking).toEqual({
+				outcome: "uniform",
+				detail: `${url} sent both the Tor exit and the residential exit to 127.0.0.1 by script`,
+			});
+			expect(hits).toEqual(["/word/verify.workspace.php", "/word/verify.workspace.php"]);
+		} finally {
+			cloaker.stop(true);
+			decoy.stop(true);
 		}
 	}, 60_000);
 

@@ -302,10 +302,35 @@ describe("cloaked websites", () => {
 
 		const parent = await SubmissionsEntity.get(id);
 		expect(parent?.status).toBe("redirected");
-		expect(parent?.info).toBe(`${cloakerUrl} cloaks: ${detail}. device.ledger-config.live is analyzed and reported in its own case.`);
+		expect(parent?.info).toBe(`${cloakerUrl} cloaks: ${detail}. device.ledger-config.live is analyzed in its own case. If it shows nothing reportable, ${cloakerUrl} is treated as a cloaker that turned every route away.`);
 		const website = parent?.data.kind === "website" ? parent.data.website : undefined;
 		expect(website?.cloaking).toEqual({ outcome: "detected", detail });
-		expect(website?.redirectSubmissionId).toBeDefined();
+		const childId = BigInt(website?.redirectSubmissionId ?? "0");
+		expect((await waitForStatus(childId, ["reported", "failed", "invalid"])).status).toBe("reported");
+		expect((await SubmissionsEntity.get(id))?.status).toBe("redirected");
+	});
+
+	test("a cloaker that sent the residential exit to another harmless site fails as suspected cloaking, not as a redirect", async () => {
+		// docusign.alt3-doc3ea7-v2.sbs (submission 376813288618463354) answers every
+		// visit with `location.replace` to a random news front page.
+		const submitted = "https://docusign.alt3-doc3ea7-v2.sbs/word/verify.workspace.php";
+		const residentialDecoy = "https://www.bbc.com/";
+		const detail = `${submitted} sent the Tor exit to reuters.com but the residential exit to bbc.com`;
+		const archive = { ...archiveOf([hop(0, submitted, 200, residentialDecoy), hop(1, residentialDecoy, 200)]), cloaking: { outcome: "detected" as const, detail } };
+		const id = await websiteSubmission(376813288618463354n, submitted);
+
+		await analyzeWebsite({ submissionId: id, url: submitted }, { ...dependencies(archive), analysisClient: benignModel() });
+
+		const handedOff = await SubmissionsEntity.get(id);
+		const childId = BigInt(handedOff?.data.kind === "website" ? handedOff.data.website.redirectSubmissionId! : "0");
+		expect((await waitForStatus(childId, ["reported", "failed", "invalid"])).status).toBe("invalid");
+		const parent = await waitForStatus(id, ["failed"]);
+		expect(parent.info).toBe(`Cloaking suspected: ${detail}, which shows nothing reportable. No verdict or report was made from the decoy; retry to visit the site again.`);
+		const website = parent.data.kind === "website" ? parent.data.website : undefined;
+		expect(website?.cloaking).toEqual({ outcome: "unresolved", detail: `${detail}, which shows nothing reportable` });
+		expect(website?.redirectSubmissionId).toBe(childId.toString());
+		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
+		expect(await AbuseRepository.getReportForSubmission(childId)).toBeUndefined();
 	});
 
 	test("a decoy-only capture is kept as evidence but never classified or reported as not phishing", async () => {

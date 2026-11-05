@@ -646,9 +646,9 @@ async function handOffRedirectedCapture(params: {
 	await SubmissionsEntity.update(submissionId, {
 		status: "redirected",
 		info: archive.cloaking?.outcome === "detected"
-			? `${url} cloaks: ${archive.cloaking.detail}. ${destination} is analyzed and reported in its own case.`
+			? `${url} cloaks: ${archive.cloaking.detail}. ${destination} is analyzed in its own case. ${decoyDestinationClause(url)}`
 			: archive.cloaking?.outcome === "uniform"
-				? `${archive.cloaking.detail}; that site is analyzed in its own case. If it shows nothing reportable, ${url} is treated as a cloaker that turned every route away.`
+				? `${archive.cloaking.detail}; that site is analyzed in its own case. ${decoyDestinationClause(url)}`
 				: `${url} redirects to ${destination}; that site is analyzed and reported in its own case.`,
 		data: {
 			kind: "website",
@@ -663,20 +663,27 @@ async function handOffRedirectedCapture(params: {
 		},
 	});
 	// The destination may already have a verdict: an earlier case for it, or a fast analysis.
-	await settleUniformRedirect(submissionId);
+	await settleCloakedRedirect(submissionId);
+}
+
+function decoyDestinationClause(url: string): string {
+	return `If it shows nothing reportable, ${url} is treated as a cloaker that turned every route away.`;
 }
 
 /**
- * A page that sent every route, the residential exit included, to the same
- * site by script waits on that site's verdict. A harmless destination
- * (Wikipedia, a store front) is the decoy of a cloaker that turned every route
- * away, not where the page leads its real visitors; the submitted case then
- * fails as suspected cloaking so a retry visits it again.
+ * A cloaking page handed off to where it sent the residential exit waits on
+ * that site's verdict. The residential exit reached either the same site as
+ * Tor (`uniform`) or another one (`detected`): a kit on its own domain, or just
+ * another decoy from a cloaker that picks a random news site per visit
+ * (docusign.alt3-doc3ea7-v2.sbs). A harmless destination (Wikipedia, a news
+ * front page) is the decoy of a cloaker that turned every route away, not where
+ * the page leads its real visitors; the submitted case then fails as suspected
+ * cloaking so a retry visits it again.
  */
-async function settleUniformRedirect(submissionId: bigint): Promise<void> {
+async function settleCloakedRedirect(submissionId: bigint): Promise<void> {
 	const submission = await SubmissionsEntity.get(submissionId);
 	const website = submission?.status === "redirected" && submission.data.kind === "website" ? submission.data.website : undefined;
-	if (website?.cloaking?.outcome !== "uniform" || !website.redirectSubmissionId) return;
+	if (!website?.cloaking || !website.redirectSubmissionId) return;
 	const destination = await SubmissionsEntity.get(BigInt(website.redirectSubmissionId));
 	if (destination?.status !== "invalid") return;
 	const cloaking = { outcome: "unresolved" as const, detail: `${website.cloaking.detail}, which shows nothing reportable` };
@@ -692,9 +699,9 @@ function cloakingSuspectedInfo(cloaking: WebsiteCloaking): string {
 }
 
 /** Settle the submitted cases that were handed off to this destination and wait on its verdict. */
-async function settleUniformRedirectsTo(destinationId: bigint): Promise<void> {
+async function settleCloakedRedirectsTo(destinationId: bigint): Promise<void> {
 	for (const submission of await SubmissionsEntity.listRedirectedTo(destinationId)) {
-		await settleUniformRedirect(submission.id);
+		await settleCloakedRedirect(submission.id);
 	}
 }
 
@@ -839,7 +846,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await recordWebsiteAnalysisFailure(submissionId, error);
 		await emitStep(submissionId, "failed", 100);
 	} finally {
-		await settleUniformRedirectsTo(submissionId).catch((error: unknown) => console.error("Settling redirected cases failed:", error));
+		await settleCloakedRedirectsTo(submissionId).catch((error: unknown) => console.error("Settling redirected cases failed:", error));
 	}
 
 	return submissionId;

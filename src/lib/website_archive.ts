@@ -632,14 +632,21 @@ function documentAddress(pageUrl: string, loadedUrl: string): string | undefined
 	return undefined;
 }
 
-/** Hops of the loaded page followed by the hops of the document its script navigated to. */
-function scriptNavigationHops(loadedResponse: HTTPResponse | null, scriptResponse: HTTPResponse, capturedDocumentUrl: string): WebsiteNavigationHop[] {
-	const loadedUrl = loadedResponse?.url() ?? capturedDocumentUrl;
-	const loaded = navigationHopsFromResponse(loadedResponse, loadedUrl).map((hop) => ({ ...hop, contentCaptured: false }));
-	const last = loaded.at(-1);
-	if (last && !last.redirectTo) last.redirectTo = scriptResponse.request().redirectChain()[0]?.url() ?? scriptResponse.url();
-	const followed = navigationHopsFromResponse(scriptResponse, capturedDocumentUrl);
-	return [...loaded, ...followed].map((hop, index) => ({ ...hop, index }));
+/**
+ * Hops of every main-frame document the visit passed through, in order. Each
+ * document but the last sent the visitor on by script, so its last hop points
+ * at the next document's first request; only the last document is captured.
+ */
+function documentNavigationHops(documents: readonly HTTPResponse[], capturedDocumentUrl: string): WebsiteNavigationHop[] {
+	if (documents.length === 0) return navigationHopsFromResponse(null, capturedDocumentUrl);
+	return documents.flatMap((response, position) => {
+		const next = documents[position + 1];
+		if (!next) return navigationHopsFromResponse(response, capturedDocumentUrl);
+		const hops = navigationHopsFromResponse(response, response.url()).map((hop) => ({ ...hop, contentCaptured: false }));
+		const last = hops.at(-1);
+		if (last && !last.redirectTo) last.redirectTo = next.request().redirectChain()[0]?.url() ?? next.url();
+		return hops;
+	}).map((hop, index) => ({ ...hop, index }));
 }
 
 /** Attempts at a screenshot that shows what the page has rendered. */
@@ -685,10 +692,13 @@ async function captureLiveWebsite(url: string, referrer: string | undefined, egr
 		// The last final (non-redirect) main-frame document response, so a
 		// document that replaces an error interstitial is seen with its status.
 		let latestDocumentResponse = null as HTTPResponse | null;
+		// The submitted page's own document: the first final main-frame response.
+		let submittedDocumentResponse = null as HTTPResponse | null;
 		page.on("response", (response) => {
 			const request = response.request();
 			const status = response.status();
 			if (request.isNavigationRequest() && request.frame() === page.mainFrame() && (status < 300 || status >= 400) && isNetworkDocument(response)) {
+				submittedDocumentResponse ??= response;
 				latestDocumentResponse = response;
 			}
 		});
@@ -711,6 +721,17 @@ async function captureLiveWebsite(url: string, referrer: string | undefined, egr
 		// navigation resolve with that blob: document; the site's own response is
 		// the document the visitor loaded.
 		if (navigationResponse && !isNetworkDocument(navigationResponse)) navigationResponse = latestDocumentResponse;
+		// A script in the submitted page's <head> (a cloaker's
+		// `location.replace(decoy)`) navigates before DOMContentLoaded, and the
+		// navigation then resolves with the destination's response. The submitted
+		// document is still the first one the visit passed through. An HTTP error
+		// document (a bot check that reloads into the real page) is replaced, not
+		// passed through.
+		const documents: HTTPResponse[] = [];
+		const passedThrough = (response: HTTPResponse | null | undefined) => {
+			if (response?.ok() && !documents.includes(response)) documents.push(response);
+		};
+		passedThrough(submittedDocumentResponse ?? navigationResponse);
 		if (navigationResponse && !navigationResponse.ok()) {
 			const settled = await settleErrorDocument(page, () => latestDocumentResponse, dependencies.errorDocumentSettleMs ?? WEBSITE_ERROR_DOCUMENT_SETTLE_MS);
 			if (!settled) {
@@ -720,6 +741,7 @@ async function captureLiveWebsite(url: string, referrer: string | undefined, egr
 			}
 			navigationResponse = settled;
 		}
+		passedThrough(navigationResponse);
 
 		// A cloaking interstitial loads, asks its server where to send this visitor,
 		// then navigates the main frame by script. Wait for that navigation so the
@@ -727,6 +749,7 @@ async function captureLiveWebsite(url: string, referrer: string | undefined, egr
 		// step as its own hop. The MHTML's own Chromium URL header identifies the
 		// captured document either way.
 		const scriptNavigation = await settleScriptNavigation(page, () => latestDocumentResponse, navigationResponse, dependencies.scriptNavigationSettleMs ?? WEBSITE_SCRIPT_NAVIGATION_SETTLE_MS);
+		passedThrough(scriptNavigation);
 		// A navigation the page started that ended in an HTTP error or a network
 		// failure leaves Chromium's own error document (chrome-error://) in the
 		// main frame. That is not a site: the destination was unreachable.
@@ -756,9 +779,7 @@ async function captureLiveWebsite(url: string, referrer: string | undefined, egr
 		const capturedDocument = await archiveMhtmlSnapshot({
 			url,
 			archivedUrl: capturedDocumentUrl,
-			navigationHops: scriptNavigation
-				? scriptNavigationHops(navigationResponse, scriptNavigation, capturedDocumentUrl)
-				: navigationHopsFromResponse(navigationResponse, capturedDocumentUrl),
+			navigationHops: documentNavigationHops(documents, capturedDocumentUrl),
 			mhtmlSnapshot: resolvedMhtml,
 		});
 		const screenshotPng = screenshotUrl === capturedDocumentUrl ? Buffer.from(screenshotBytes) : undefined;
