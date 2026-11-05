@@ -1,5 +1,11 @@
 /** An identifier in a kit's own pages that ties it to an account at a provider, e.g. a Cloudflare Turnstile sitekey. */
-export type ProviderAccountIdentifier = { kind: string; label: string; value: string };
+export type ProviderAccountIdentifier = {
+	kind: string;
+	label: string;
+	value: string;
+	/** The host whose captured pages carry it: the reported site, or a confirmed case on the same registrable domain. */
+	foundOn?: string;
+};
 
 /** Finds a provider's account identifiers in a captured page's HTML. */
 export type AccountIdentifierExtractor = (html: string) => ProviderAccountIdentifier[];

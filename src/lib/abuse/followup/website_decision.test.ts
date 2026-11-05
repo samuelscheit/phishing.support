@@ -36,6 +36,7 @@ const KIT_PAGE = `<html><head><title>Verify Your Email</title></head><body><div 
 <form action="${URL_REPORTED}" method="POST"><label for="email">Email address</label><input type="email" id="email" name="email" placeholder="you@example.com">
 <div class="cf-turnstile" data-sitekey="${SITEKEY}"></div><button type="submit">Open</button></form>
 <p>Your DocuSign document is ready to review once your email address is confirmed for this secure workspace session.</p></div></body></html>`;
+const GMAIL_PAGE = `<html><head><title>Gmail</title></head><body><h1>Sign in</h1><p>to continue to Gmail</p><form action="pass.php" method="POST"><input type="email" name="identifier" placeholder="Email or phone"><input type="password" name="hiddenPassword" style="display:none"><button>Next</button></form></body></html>`;
 const DECOY_PAGE = `<html><head><title>Al Jazeera</title></head><body><h1>Breaking news, world news and video from Al Jazeera</h1><p>Live updates from around the world.</p></body></html>`;
 const PNG = await sharp({ create: { width: 40, height: 30, channels: 3, background: "#ffffff" } })
 	.composite([{ input: { create: { width: 20, height: 10, channels: 3, background: "#202124" } }, top: 10, left: 10 }]).png().toBuffer();
@@ -64,31 +65,34 @@ function capture(url: string, html: string, extra: Partial<WebsiteArchiveResult>
 let nextCase = 376813288618463354n;
 
 /** A reported, denied phishing case as production holds it: the kit's capture, its cloaking, Cloudflare's "no longer visible". */
-async function deniedPhishingCase(options: { capturedAt?: Date; html?: string } = {}) {
+async function deniedPhishingCase(options: { capturedAt?: Date; html?: string; url?: string; status?: "reported" | "invalid" } = {}) {
 	const submissionId = nextCase++;
+	const url = options.url ?? URL_REPORTED;
+	const host = new URL(url).hostname;
 	await SubmissionsEntity.create({
 		id: submissionId,
 		kind: "website",
-		source: URL_REPORTED,
-		dedupeKey: `website-${submissionId}`,
-		status: "reported",
+		source: url,
+		dedupeKey: `website-${host}`,
+		status: options.status ?? "reported",
 		data: {
 			kind: "website",
 			website: {
-				url: URL_REPORTED,
-				archiveUrl: URL_REPORTED,
+				url,
+				archiveUrl: url,
 				cloaking: { outcome: "detected", detail: CLOAKING },
 				siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Verify Your Email" }],
 			},
 		},
 	});
-	const archive = capture(URL_REPORTED, options.html ?? KIT_PAGE, { archivedAt: options.capturedAt ?? new Date("2026-11-05T21:04:45Z") });
-	await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await buildWebsiteEvidence({ caseId: submissionId.toString(), step: 0, submittedUrl: URL_REPORTED, capturedUrl: URL_REPORTED, capturedAt: archive.archivedAt, route: "residential exit", navigationHops: archive.navigationHops, screenshotPng: PNG, mhtml: archive.mhtml }, { timestamp: async () => undefined }) });
+	const archive = { ...capture(url, options.html ?? KIT_PAGE, { archivedAt: options.capturedAt ?? new Date("2026-11-05T21:04:45Z") }), requestedUrl: url };
+	await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await buildWebsiteEvidence({ caseId: submissionId.toString(), step: 0, submittedUrl: url, capturedUrl: url, capturedAt: archive.archivedAt, route: "residential exit", navigationHops: archive.navigationHops, screenshotPng: PNG, mhtml: archive.mhtml }, { timestamp: async () => undefined }) });
+
 	const request = await validateAbuseReportRequest({
-		targets: ["docusign.alt3-doc3ea7-v2.sbs"],
+		targets: [host],
 		allegationCategory: "phishing",
 		description: "The page impersonates a trusted brand and asks visitors for sign-in details.",
-		observedUrls: [{ target: "docusign.alt3-doc3ea7-v2.sbs", urls: [URL_REPORTED] }],
+		observedUrls: [{ target: host, urls: [url] }],
 	});
 	const report = await AbuseRepository.createReport({ request, reporter: {}, submissionId });
 	const [target] = await AbuseRepository.listTargets(report.reportId);
@@ -97,8 +101,8 @@ async function deniedPhishingCase(options: { capturedAt?: Date; html?: string } 
 		routeType: "provider_submission", resolverProvenance: { source: "test" }, resolutionSnapshot: { source: "test" }, status: "verified",
 	});
 	const run = await AbuseRepository.createProviderRun({ routeId: route.id, providerPayload: {}, correlationKey: `cf:${route.id.toString()}` });
-	await AbuseRepository.settleProviderRun({ runId: run.id, executionStatus: "completed", routeStatus: "submitted", confirmationId: "67faa5d38a60c855", submittedTargets: ["docusign.alt3-doc3ea7-v2.sbs"] });
-	await AbuseRepository.recordProviderCorrespondence({ route, messages: [{ id: "response-1", subject: "[67faa5d38a60c855]: Response to your Phishing report", body: "The reported content is no longer visible at the URLs included in your complaint.", sentAt: new Date("2026-11-05T21:18:44Z"), from: "Cloudflare Abuse" }] });
+	await AbuseRepository.settleProviderRun({ runId: run.id, executionStatus: "completed", routeStatus: "submitted", confirmationId: "67faa5d38a60c855", submittedTargets: [host] });
+	await AbuseRepository.recordProviderCorrespondence({ route, messages: [{ id: `response-${submissionId}`, subject: "[67faa5d38a60c855]: Response to your Phishing report", body: "The reported content is no longer visible at the URLs included in your complaint.", sentAt: new Date("2026-11-05T21:18:44Z"), from: "Cloudflare Abuse" }] });
 	return { submissionId, reportId: report.reportId, route };
 }
 
@@ -217,6 +221,27 @@ describe("a phishing site's denial is answered from a recheck of the site", () =
 		expect(sent).toEqual([]);
 		const event = (await AbuseRepository.listEvents(reportId)).find((item) => item.eventType === "provider_decision.not_contested");
 		expect(event?.data).toMatchObject({ state: "denied", detail: "content_removed", recheck: { stillServed: false, recheck: { reached: true, url: "https://www.aljazeera.com/" }, accountIdentifiers: [] } });
+	});
+
+	test("a sibling host's sitekey on the same domain ties a gone site to the account, credited to the host it was found on", async () => {
+		// workspace.alt3-doc3ea7-v2.sbs (report 416165dbaf260a63): its stored page is the
+		// Gmail clone, without the Turnstile widget docusign.'s email gate carries.
+		await deniedPhishingCase();
+		const workspaceUrl = "https://workspace.alt3-doc3ea7-v2.sbs/workspace/drive/";
+		const { route } = await deniedPhishingCase({ html: GMAIL_PAGE, url: workspaceUrl });
+		const { sent, send } = recordingSend();
+		expect(await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "content_removed" }, { send, website: { capture: gone }, writeNarrative: async () => undefined })).toBe("sent");
+		expect(sent[0]!.body).toContain(`- Cloudflare Turnstile sitekey: ${SITEKEY} (in the pages of docusign[.]alt3-doc3ea7-v2[.]sbs)`);
+		expect(sent[0]!.body).toContain("Please review that account.");
+	});
+
+	test("a sitekey on another domain, or on an unconfirmed case, is never borrowed", async () => {
+		await deniedPhishingCase({ url: "https://docusign.other-kit.sbs/word/verify.workspace.php" });
+		await deniedPhishingCase({ url: "https://drive.alt4-unrelated.sbs/", status: "invalid" });
+		const { route } = await deniedPhishingCase({ html: GMAIL_PAGE, url: "https://workspace.alt4-unrelated.sbs/workspace/drive/" });
+		const { sent, send } = recordingSend();
+		expect(await followUpProviderDecision({ routeId: route.id, state: "denied" }, { send, website: { capture: gone }, writeNarrative: async () => undefined })).toBe("skipped");
+		expect(sent).toEqual([]);
 	});
 
 	test("a site gone everywhere with no account identifiers and no capture after the review is not contested", async () => {

@@ -1,3 +1,5 @@
+import { getDomain } from "tldts";
+
 import { ArtifactsEntity, SubmissionsEntity } from "../../db/entities";
 import { buildWebsiteEvidence } from "../../evidence/package";
 import type { timestampEvidence } from "../../evidence/timestamp";
@@ -59,8 +61,13 @@ function sameKitPage(freshText: string, stored: { text: string; quote?: string }
 /** The case's captures: every page's text and HTML, the analyzed page's quote, and when the latest was made. */
 async function storedCaptures(submissionId: bigint) {
 	const submission = await SubmissionsEntity.get(submissionId);
+	return capturesOf(submission);
+}
+
+async function capturesOf(submission: Awaited<ReturnType<typeof SubmissionsEntity.get>>) {
+	const submissionId = submission?.id;
 	const website = submission?.data.kind === "website" ? submission.data.website : undefined;
-	if (!website) return { pages: [] };
+	if (!website || submissionId === undefined) return { pages: [] };
 	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
 	const pages: Array<{ text: string; html: string; capturedAt: Date }> = [];
 	for (const artifact of artifacts.filter((item) => /^website(?:-step\d+)?\.mhtml$/.test(item.name ?? ""))) {
@@ -79,6 +86,27 @@ async function storedCaptures(submissionId: bigint) {
 			? { at: latestAt, url: website.archiveUrl, timestamped: artifacts.some((item) => item.name?.endsWith(".tsr")) }
 			: undefined,
 	};
+}
+
+/**
+ * Pages of other confirmed cases on the reported site's registrable domain: a
+ * kit spread over several hosts of one domain (docusign. and workspace.) is
+ * one operator, and an identifier one of them carries ties the others to the
+ * same account. Private public suffixes (vercel.app, github.io) keep unrelated
+ * tenants of shared hosting apart.
+ */
+async function sameDomainPages(submissionId: bigint, reportedUrl: string): Promise<Array<{ host: string; html: string }>> {
+	const domain = getDomain(new URL(reportedUrl).hostname, { allowPrivateDomains: true });
+	if (!domain) return [];
+	const pages: Array<{ host: string; html: string }> = [];
+	for (const sibling of await SubmissionsEntity.listWebsitesOnDomain(domain)) {
+		if (sibling.id === submissionId) continue;
+		const submission = await SubmissionsEntity.get(sibling.id);
+		if (submission?.status !== "reported" || submission.data.kind !== "website") continue;
+		const host = new URL(submission.data.website.url).hostname;
+		for (const page of (await capturesOf(submission)).pages) pages.push({ host, html: page.html });
+	}
+	return pages;
 }
 
 function freshScreenshotOf(archive: WebsiteArchiveResult, caseId: string, dependencies: WebsiteEvidenceDependencies) {
@@ -136,11 +164,21 @@ export async function collectWebsiteDecisionEvidence(params: {
 	const stillServed = recheck.reached && isSameWebsite(recheck.url, params.reportedUrl)
 		&& (recheck.finding.finding === "phishing" || recheck.finding.finding === "malware" || recheck.matchesReportedKit);
 	const extract = params.accountIdentifiers;
-	const accountIdentifiers = extract
-		? [...new Map([...stored.pages.map((page) => page.html), ...(fresh ? [fresh.html.toString("utf8")] : [])]
-			.flatMap((html) => extract(html))
-			.map((identifier) => [`${identifier.kind}:${identifier.value}`, identifier] as const)).values()]
-		: [];
+	const reportedHost = new URL(params.reportedUrl).hostname;
+	const accountIdentifiers: ProviderAccountIdentifier[] = [];
+	if (extract) {
+		// The reported host's own pages come first, so an identifier it carries is credited to it.
+		const sources = [
+			...stored.pages.map((page) => ({ host: reportedHost, html: page.html })),
+			...(fresh ? [{ host: reportedHost, html: fresh.html.toString("utf8") }] : []),
+			...await sameDomainPages(params.submissionId, params.reportedUrl),
+		];
+		for (const { host, html } of sources) {
+			for (const identifier of extract(html)) {
+				if (!accountIdentifiers.some((known) => known.kind === identifier.kind && known.value === identifier.value)) accountIdentifiers.push({ ...identifier, foundOn: host });
+			}
+		}
+	}
 	const freshScreenshot = stillServed && fresh ? await freshScreenshotOf(fresh, params.submissionId.toString(), dependencies) : undefined;
 	return {
 		kind: "website",

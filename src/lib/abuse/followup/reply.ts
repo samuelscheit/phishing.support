@@ -42,6 +42,7 @@ function narrativeGuidance(input: DecisionReplyInput): string[] {
 		return [
 			cloaking,
 			"measuredEvidence.recheck says the site no longer answers on any route, so the domain is now offline; do not ask them to review the URL again and do not claim it is still served.",
+			"Do not concede their finding: a cloaking site shows a reviewer's connection the decoy, so not seeing the phishing page then does not mean it was gone; it is offline now. Never write that you acknowledge or agree the content was not visible.",
 			"When measuredEvidence.capture is set, say when we captured the kit and, if capture.afterReview is true, that this was after their review.",
 			"Ask them to act on the account behind the site: measuredEvidence.accountIdentifiers lists identifiers the kit's own pages carry that belong to an account at their service (for example a Turnstile sitekey), which likely serves the same operator's other sites.",
 		];
@@ -124,8 +125,10 @@ export const writeNarrativeWithModel: NarrativeWriter = async (input) => {
 			},
 		} as never);
 		const parsed = narrativeSchema.safeParse(JSON.parse(responseOutputText(response) ?? "null"));
+		if (!parsed.success) console.warn(`The reply narrative for report ${input.confirmationId} did not match its schema; the fallback is used.`);
 		return parsed.success ? parsed.data.narrative : undefined;
-	} catch {
+	} catch (error) {
+		console.warn(`The reply narrative for report ${input.confirmationId} could not be written; the fallback is used:`, error instanceof Error ? error.message : error);
 		return undefined;
 	}
 };
@@ -188,7 +191,7 @@ function websiteEvidenceLines(evidence: WebsiteDecisionEvidence, reportedUrl: st
 		...(recheck.reached && recheck.cloaking ? [`- How it answered the routes: ${defangText(recheck.cloaking)}.`] : []),
 		...(evidence.reportedCloaking ? ["", `When we reported it: ${defangText(evidence.reportedCloaking)}. Visitors from datacenter and Tor addresses are sent elsewhere by script; residential visitors get the phishing page.`] : []),
 		...(evidence.capture ? ["", `Our capture: ${defangUrl(evidence.capture.url)} at ${evidence.capture.at}${evidence.capture.afterReview ? ", after your review" : ""}${evidence.capture.quote ? `, showing "${evidence.capture.quote}"` : ""}.${evidence.capture.timestamped ? " Its evidence manifest is timestamped under RFC 3161 and is on the case page below." : ""}`] : []),
-		...(evidence.accountIdentifiers.length ? ["", "Identifiers in the phishing pages that belong to an account at your service:", ...evidence.accountIdentifiers.map((identifier) => `- ${identifier.label}: ${identifier.value}`)] : []),
+		...(evidence.accountIdentifiers.length ? ["", "Identifiers in the phishing pages that belong to an account at your service:", ...evidence.accountIdentifiers.map((identifier) => `- ${identifier.label}: ${identifier.value}${identifier.foundOn ? ` (in the pages of ${defangText(identifier.foundOn)})` : ""}`)] : []),
 		...(evidence.freshScreenshot ? ["", `Attached: ${evidence.freshScreenshot.filename}, the recheck's screenshot with its URL and time stamped on it.`] : []),
 	];
 }
@@ -203,6 +206,7 @@ export async function composeDecisionReply(input: DecisionReplyInput, writer: Na
 	const written = await writer(input);
 	// Hostnames the model names are defanged like every URL below, so no mail client links them.
 	const accepted = written ? acceptableNarrative(written) : undefined;
+	if (written && !accepted) console.warn(`The reply narrative for report ${input.confirmationId} broke the narrative rules (links, commands, lists, greeting, or length); the fallback is used.`);
 	const narrative = accepted ? defangText(accepted) : undefined;
 	const { evidence } = input;
 	const body = [
