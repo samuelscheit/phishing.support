@@ -153,9 +153,9 @@ describe("reply composition", () => {
 		const attempts: Array<string | undefined> = [];
 		const { body, narrativeSource } = await composeDecisionReply({ providerName: "Cloudflare", confirmationId: "35b8aafac3a6a6d9", decision: { state: "denied" }, allegationCategory: "malware", target: "paneo.work", reportedUrl: "https://paneo.work/", description: "x", replyKind: "contest", evidence }, async (_input, rejected) => {
 			attempts.push(rejected?.reason);
-			return rejected ? good : `${good} It hides there; a click opens it.`;
+			return rejected ? good : `${good} It hides there | a click opens it.`;
 		});
-		expect(attempts).toEqual([undefined, "it contains shell syntax (|, ;, backticks, $( or &&)"]);
+		expect(attempts).toEqual([undefined, "it contains shell syntax (|, backticks, $( or &&)"]);
 		expect(narrativeSource).toBe("model");
 		expect(body).toContain(good);
 	});
@@ -166,6 +166,9 @@ describe("reply composition", () => {
 		expect(narrativeRejection("short")).toBe("it is 5 characters, under the 120 minimum");
 		expect(narrativeRejection(base.repeat(20))).toMatch(/^it is \d+ characters, over the 2000 maximum$/);
 		expect(narrativeRejection(`${base} See www.example.com.`)).toBe("it contains a link or URL");
+		// Prose punctuation is not shell syntax: the narrative of report 67faa5d38a60c855 was refused for "…your reviewer; the decoy…".
+		expect(narrativeRejection(`${base} This explains what your reviewer saw; the decoy is not the kit.`)).toBeUndefined();
+		expect(narrativeRejection(`${base} Run sh -c "$(echo x)" to see it.`)).toBe("it contains shell syntax (|, backticks, $( or &&)");
 		expect(narrativeRejection(`${base}\n- a list item`)).toBe("it contains a heading or a list");
 		expect(narrativeRejection(`Hello team, ${base}`)).toBe("it starts with a greeting");
 		expect(narrativeRejection(`${base}\n\nThank you for your help`)).toBe("it ends with a sign-off");
