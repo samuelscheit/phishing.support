@@ -1166,6 +1166,7 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 				...fast,
 				renderSettleMs: 1_500,
 				humanCheckMs: 3_000,
+				pageActionQuietMs: 2_000,
 				getBrowser: async (egress?: FabricEgress) => {
 					leased.push(egress!);
 					const browser = await launch();
@@ -1212,6 +1213,56 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 				expect(last.screenshotPng?.byteLength).toBeGreaterThan(0);
 			} finally {
 				kit.server.stop(true);
+			}
+		}, 60_000);
+
+		test("a kit's own progress text is waited out until the page it opens", async () => {
+			// docusign.alt3-doc3ea7-v2.sbs: "Confirm" turns into "Checking…" before the
+			// email page loads, and the email submission shows "Success! Opening...
+			// Connecting" before the sign-in page.
+			const server = Bun.serve({
+				port: 0,
+				fetch: async (request) => {
+					const { pathname } = new URL(request.url);
+					if (pathname === "/signin") return html(signIn);
+					if (pathname === "/email") return html(`<form id="f"><input type="email" id="email" name="email"><button>Open</button></form><div id="status"></div>
+<script>document.getElementById("f").addEventListener("submit", (event) => {
+	event.preventDefault();
+	document.getElementById("status").textContent = "Success! Opening...";
+	setTimeout(() => { document.getElementById("status").textContent = "Success! Opening... Connecting"; }, 1500);
+	setTimeout(() => { location.href = "/signin"; }, 4000);
+});</script>`);
+					return html(`<h1>Hold on a second</h1><button id="c">Confirm</button>
+<script>document.getElementById("c").addEventListener("click", () => {
+	document.getElementById("c").textContent = "Checking…";
+	setTimeout(() => { location.href = "/email"; }, 3000);
+});</script>`);
+				},
+			});
+			try {
+				const { pages } = await visit(`http://127.0.0.1:${server.port}/`, [click("Confirm"), fill()]);
+				expect(pages.map((page) => new URL(page.url).pathname)).toEqual(["/email", "/signin"]);
+				expect(pages[1]!.text.toString()).toContain("Enter password");
+				expect(pages[1]!.navigationHops).toEqual([expect.objectContaining({ index: 0, status: 200, contentCaptured: true })]);
+			} finally {
+				server.stop(true);
+			}
+		}, 90_000);
+
+		test("a page that only changes its text, and keeps it, is captured once the text settles", async () => {
+			const server = Bun.serve({
+				port: 0,
+				fetch: () => html(`<form id="f"><input type="email" id="email" name="email"><button>Next</button></form><p id="error"></p>
+<script>document.getElementById("f").addEventListener("submit", (event) => { event.preventDefault(); document.getElementById("error").textContent = "This address is not allowed."; });</script>`),
+			});
+			try {
+				const started = Date.now();
+				const { last } = await visit(`http://127.0.0.1:${server.port}/`, [fill()]);
+				expect(last.text.toString()).toContain("This address is not allowed.");
+				// Settled after the quiet period, well before the overall bound.
+				expect(Date.now() - started).toBeLessThan(20_000);
+			} finally {
+				server.stop(true);
 			}
 		}, 60_000);
 

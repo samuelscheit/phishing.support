@@ -306,6 +306,8 @@ export type WebsiteArchiveDependencies = {
 	renderSettleMs?: number;
 	/** Test seam for the bounded wait on what a page action opens. */
 	pageActionSettleMs?: number;
+	/** Test seam for how long a page's changed text must stay the same to count as the action's result. */
+	pageActionQuietMs?: number;
 	/** Test seam for the bounded wait on a captcha widget beside a submitted field. */
 	humanCheckMs?: number;
 };
@@ -389,7 +391,9 @@ const WEBSITE_SCRIPT_NAVIGATION_SETTLE_MS = 8_000;
 /** How long the captured document may keep fetching what it renders before it is captured as it stands. */
 const WEBSITE_RENDER_SETTLE_MS = 10_000;
 /** How long a page action's next step may take to show. */
-const WEBSITE_PAGE_ACTION_SETTLE_MS = 15_000;
+const WEBSITE_PAGE_ACTION_SETTLE_MS = 25_000;
+/** How long a page's changed text must stay the same before it counts as the action's result rather than its progress indicator. */
+const WEBSITE_PAGE_ACTION_QUIET_MS = 5_000;
 /** How often a clicked verification gate is checked for the page it reveals. */
 const WEBSITE_GATE_POLL_MS = 250;
 /** A quiet network for this long means the page's script has fetched what it renders. */
@@ -697,18 +701,28 @@ async function pageText(page: Page): Promise<string> {
 
 /**
  * Waits until a page action's result shows: the next document has loaded, or
- * the page's own text changed (a kit that swaps in its next step, or shows an
- * error). Past the bound the page is captured as it stands.
+ * the page's own text changed and then stayed the same for a quiet period (a
+ * kit that swaps in its next step, or shows an error). A kit's own progress
+ * text ("Checking…", "Opening... Connecting") changes the page before it
+ * navigates, so a change only counts once it has settled, and a navigation
+ * within the bound always wins. Past the bound the page is captured as it stands.
  */
-async function settlePageAction(page: Page, navigated: () => boolean, textBefore: string, settleMs: number): Promise<void> {
-	const deadline = Date.now() + settleMs;
+async function settlePageAction(page: Page, navigated: () => boolean, textBefore: string, settle: { settleMs: number; quietMs: number }): Promise<void> {
+	const deadline = Date.now() + settle.settleMs;
+	let lastText = textBefore;
+	let lastChangeAt: number | undefined;
 	while (Date.now() < deadline) {
 		await sleep(WEBSITE_GATE_POLL_MS);
 		const readyState = await page.evaluate(() => document.readyState).catch(() => "loading");
 		if (readyState === "loading") continue;
 		if (navigated()) return;
 		const text = await pageText(page);
-		if (text && text !== textBefore) return;
+		if (text !== lastText) {
+			lastText = text;
+			lastChangeAt = Date.now();
+			continue;
+		}
+		if (lastChangeAt !== undefined && text !== textBefore && Date.now() - lastChangeAt >= settle.quietMs) return;
 	}
 }
 
@@ -863,7 +877,10 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 				console.warn(`Website action on ${page.url()} failed: ${reason.message}`);
 				throw new WebsiteCaptureFailedError([reason]);
 			}
-			await settlePageAction(page, () => documents.length > resultDocumentsFrom, textBefore, dependencies.pageActionSettleMs ?? WEBSITE_PAGE_ACTION_SETTLE_MS);
+			await settlePageAction(page, () => documents.length > resultDocumentsFrom, textBefore, {
+				settleMs: dependencies.pageActionSettleMs ?? WEBSITE_PAGE_ACTION_SETTLE_MS,
+				quietMs: dependencies.pageActionQuietMs ?? WEBSITE_PAGE_ACTION_QUIET_MS,
+			});
 			await settleRendering(page, renderSettleMs);
 			verificationGate = await passVerificationGate(page, renderSettleMs) ?? verificationGate;
 			return snapshot((capturedDocumentUrl) => actionResultHops(documents.slice(resultDocumentsFrom), documents.at(-1), capturedDocumentUrl), performedAction);
