@@ -11,7 +11,7 @@ import { publishEvent } from "./event/event_transport";
 import { reportConfirmedWebsiteAbuse } from "./abuse/submission_reports";
 import { createWebsiteSubmission } from "./submissions/website";
 import type { ReporterMetadata } from "./request_metadata";
-import { defaultReasoning, defaultResponseModel, sleep } from "./utils";
+import { defaultReasoning, defaultResponseModel, getOpenAIClient, sleep } from "./utils";
 import { extractWebsiteContinuationControls, extractWebsiteContinuationLinks, extractWebsiteDataEntryFields } from "./website_fields";
 import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "./website_capture_files";
 import { extractPasteCommands, type PasteCommand } from "./malware/paste_commands";
@@ -522,6 +522,22 @@ function sameActionTarget(a: WebsitePageAction, b: WebsitePageAction): boolean {
 function mergedKitResources(...captures: WebsiteCapture[]): WebsiteKitResource[] {
 	return captures.flatMap((capture) => capture.kitResources ?? [])
 		.filter((resource, index, all) => all.findIndex((other) => other.sha256 === resource.sha256) === index);
+}
+
+/**
+ * Classify a capture without recording it on a case: a recheck of a page
+ * already reported, whose verdict only decides whether to answer a provider.
+ */
+export async function classifyWebsiteCapture(archive: WebsiteEvidenceArchive, client: AnalysisClient = getOpenAIClient()): Promise<WebsiteSiteClassification> {
+	const hop = capturedArchiveHop(archive);
+	const response = await client.responses.create({
+		model: defaultResponseModel,
+		input: buildWebsiteClassificationInput(hop, archive),
+		text: { format: WEBSITE_CLASSIFICATION_FORMAT, verbosity: "low" },
+	});
+	const output = (response as { output_text?: string }).output_text;
+	if (!output) throw new Error("Website classification response had no output.");
+	return validateWebsiteSiteClassification(JSON.parse(output), archive.text.toString("utf-8"), archive.html.toString("utf-8"));
 }
 
 async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigationHop, archive: WebsiteCapture, dependencies: WebsiteAnalysisDependencies) {

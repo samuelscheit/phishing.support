@@ -1,3 +1,4 @@
+import { extractTurnstileSitekeys } from "../../followup/account_identifiers";
 import type { ProviderSubmissionProvider } from "../submission_contracts";
 
 import { CLOUDFLARE_PROVIDER } from "./definition";
@@ -16,6 +17,8 @@ export const cloudflareProvider: ProviderSubmissionProvider = {
 		contestedStates: ["denied"],
 		replyAddress: "abusereply@cloudflare.com",
 		subject: (confirmationId) => `[${confirmationId}] Additional evidence for abuse report ${confirmationId}`,
+		// A Turnstile widget's sitekey names the Cloudflare account that created it.
+		accountIdentifiers: extractTurnstileSitekeys,
 	},
 	prepareExternalSubmission: (context) => prepareCloudflareExternalSubmission(context),
 	submit: (context) => submitCloudflareSubmission(context),

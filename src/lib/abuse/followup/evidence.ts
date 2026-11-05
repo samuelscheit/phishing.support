@@ -17,6 +17,7 @@ export type LiveCheck = { url: string; userAgent: string; as: string; status: nu
  * by a model; a reply's narrative may only restate it.
  */
 export type DecisionEvidence = {
+	kind: "paste_command";
 	checkedAt: string;
 	/** What our server received just now, per URL and User-Agent. */
 	liveChecks: LiveCheck[];
@@ -97,7 +98,7 @@ async function payloadChecks(fetcher: EvidenceFetcher, url: string, agent: strin
 }
 
 /** A malware page that tells visitors to paste a command: fetch it as a browser would and find the command again. */
-async function pageEvidence(pageUrl: string, fetcher: EvidenceFetcher): Promise<Omit<DecisionEvidence, "checkedAt" | "references">> {
+async function pageEvidence(pageUrl: string, fetcher: EvidenceFetcher): Promise<Omit<DecisionEvidence, "kind" | "checkedAt" | "references">> {
 	const page = await check(fetcher, pageUrl, browserUserAgent, "a desktop browser");
 	const liveChecks = [page.check];
 	if (!page.body) return { liveChecks, reproduction: [] };
@@ -140,6 +141,7 @@ export async function collectDecisionEvidence(params: {
 		: await pageEvidence(params.observedUrl, fetcher);
 	const sha256 = measured.liveChecks.find((item) => item.as === "the command's own downloader" && item.sha256)?.sha256;
 	return {
+		kind: "paste_command",
 		checkedAt,
 		...measured,
 		references: [...(sha256 ? [payloadLookupUrl(sha256)] : []), ...(params.caseUrl ? [params.caseUrl] : [])],

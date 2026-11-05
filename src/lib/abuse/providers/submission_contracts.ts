@@ -1,3 +1,4 @@
+import type { AccountIdentifierExtractor } from "../followup/account_identifiers";
 import type { AbuseTargetType } from "../schema";
 
 /**
@@ -176,6 +177,8 @@ export type ProviderSubmissionProvider = {
 		/** The address the provider's decision mail names for questions about a report. */
 		readonly replyAddress: string;
 		subject(confirmationId: string): string;
+		/** Finds identifiers in a kit's pages that belong to an account at this provider, e.g. Turnstile sitekeys. */
+		readonly accountIdentifiers?: AccountIdentifierExtractor;
 	};
 	/**
 	 * Read the provider's correspondence for a submitted report by its

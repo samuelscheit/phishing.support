@@ -149,7 +149,7 @@ describe("provider decision follow-up", () => {
 describe("reply composition", () => {
 	test("keeps every measured fact even when the narrative is the fallback", async () => {
 		const evidence = await collectDecisionEvidence({ observedUrl: "https://paneo.work/", caseUrl: "https://phishing.support/submissions/1", fetcher: liveWeb() });
-		const { body, narrativeSource } = await composeDecisionReply({ providerName: "Cloudflare", confirmationId: "35b8aafac3a6a6d9", decision: { state: "denied", detail: "no_abuse_found" }, allegationCategory: "malware", target: "paneo.work", reportedUrl: "https://paneo.work/", description: "x", evidence }, async () => "nope");
+		const { body, narrativeSource } = await composeDecisionReply({ providerName: "Cloudflare", confirmationId: "35b8aafac3a6a6d9", decision: { state: "denied", detail: "no_abuse_found" }, allegationCategory: "malware", target: "paneo.work", reportedUrl: "https://paneo.work/", description: "x", replyKind: "contest", evidence }, async () => "nope");
 		expect(narrativeSource).toBe("fallback");
 		expect(body).toContain('Your review of report 35b8aafac3a6a6d9 concluded "no_abuse_found"');
 		expect(body).toContain("https://phishing.support/submissions/1");
