@@ -8,7 +8,7 @@ import { getBrowser, getBrowserPage } from "./browser";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
 import type { WebsiteCloaking, WebsiteKitResource, WebsiteNavigationHop, WebsitePageAction, WebsitePerformedAction } from "./website_types";
-import { performPageAction, WebsitePageActionTargetMissingError } from "./website_page_actions";
+import { CAPTCHA_PROVIDER_FRAME, performPageAction, WebsitePageActionTargetMissingError } from "./website_page_actions";
 import { isSameWebsite, websiteSite } from "./website_site";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
@@ -310,6 +310,8 @@ export type WebsiteArchiveDependencies = {
 	pageActionQuietMs?: number;
 	/** Test seam for the bounded wait on a captcha widget beside a submitted field. */
 	humanCheckMs?: number;
+	/** Test seam for which frames are a captcha provider's widget. */
+	captchaProviderFrame?: RegExp;
 };
 
 /**
@@ -565,11 +567,6 @@ function scanVerificationGate(dataEntrySelector: string): FrameGateScan {
 	return { fields: false, controls: 1, label: label.slice(0, 120) || "verification gate" };
 }
 
-/**
- * Frames of real captcha services. Their checkbox is a real challenge, never a
- * kit's own gate, and Fabric already handles Cloudflare Turnstile.
- */
-const CAPTCHA_PROVIDER_FRAME = /^https:\/\/(?:www\.)?(?:google\.com\/recaptcha\/|recaptcha\.net\/|[\w-]+\.hcaptcha\.com\/|hcaptcha\.com\/|challenges\.cloudflare\.com\/)/i;
 
 /** Whether a frame is drawn on the page: every frame element up to the top document has a visible box. */
 async function frameIsVisible(frame: Frame): Promise<boolean> {
@@ -870,7 +867,7 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 			const textBefore = await pageText(page);
 			let performedAction: WebsitePerformedAction;
 			try {
-				performedAction = await performPageAction(page, action, dependencies.humanCheckMs);
+				performedAction = await performPageAction(page, action, { humanCheckMs: dependencies.humanCheckMs, captchaProviderFrame: dependencies.captchaProviderFrame });
 			} catch (error) {
 				if (!(error instanceof WebsitePageActionTargetMissingError)) throw error;
 				const reason = new WebsiteUnreachableError(egress, error.message);

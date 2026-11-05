@@ -31,6 +31,7 @@ import {
 	type WebsiteSiteFinding,
 	type WebsiteKitResource,
 	describePageAction,
+	humanCheckUnsolved,
 	pageActionOf,
 	type WebsiteContinuationControl,
 	type WebsitePageAction,
@@ -380,7 +381,7 @@ function arrivalStatement(arrival: WebsiteNavigationHop): string {
 	return [
 		`The visitor reaches this page by entering their details into ${describePageAction(action)} on ${arrival.url}, an earlier page of the same site, and submitting it.`,
 		`The capture entered the made-up value ${JSON.stringify(action.value)}; wherever this page shows that value, it is the capture's, not a real visitor's.`,
-		action.humanCheck === "unsolved" ? "The captcha beside that field had not passed when the capture submitted it." : undefined,
+		humanCheckUnsolved(action.humanCheck) ? "The captcha beside that field had not passed when the capture submitted it." : undefined,
 	].filter(Boolean).join(" ");
 }
 
@@ -615,7 +616,7 @@ async function followWebsiteFlow(params: {
 		const nextHop = capturedArchiveHop(next);
 		if (!isSameWebsite(nextHop.url, archive.url)) return stop(`led to another site, ${websiteSite(nextHop.url)}`);
 		if ("performedAction" in flowStep && next.url === archive.url && next.text.equals(archive.text)) {
-			const unsolved = flowStep.performedAction.kind === "fill" && flowStep.performedAction.humanCheck === "unsolved";
+			const unsolved = flowStep.performedAction.kind === "fill" && humanCheckUnsolved(flowStep.performedAction.humanCheck);
 			return stop(`changed nothing on the page${unsolved ? "; the captcha beside it never passed" : ""}`);
 		}
 

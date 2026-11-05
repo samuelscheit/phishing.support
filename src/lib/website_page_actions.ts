@@ -2,13 +2,14 @@ import type { ElementHandle, Frame, Page } from "rebrowser-puppeteer-core";
 
 import { sleep } from "./utils";
 import { CONTINUATION_CONTROL_SELECTOR } from "./website_fields";
-import { describePageAction, type WebsiteDataEntryField, type WebsitePageAction, type WebsitePerformedAction } from "./website_types";
+import { describePageAction, type WebsiteDataEntryField, type WebsiteHumanCheck, type WebsitePageAction, type WebsitePerformedAction } from "./website_types";
 
 /** How long the action's target may take to appear, for example after an earlier step re-renders the page. */
 const TARGET_APPEAR_MS = 10_000;
 /** How long a captcha widget beside a field may take to issue its token. */
 const HUMAN_CHECK_MS = 30_000;
 const POLL_MS = 250;
+const clickDelay = () => 60 + Math.round(Math.random() * 80);
 
 /** Hidden inputs a captcha widget fills with its token once the visitor passes it. */
 const HUMAN_CHECK_TOKEN_SELECTOR = "[name=cf-turnstile-response], [name=g-recaptcha-response], [name=h-captcha-response]";
@@ -92,20 +93,72 @@ async function findTarget(page: Page, action: WebsitePageAction, waitMs: number)
 	return undefined;
 }
 
-/** Whether the field's frame has a captcha widget and, once it does, whether that widget issued its token. */
-async function waitForHumanCheck(frame: Frame, humanCheckMs: number): Promise<"passed" | "unsolved" | undefined> {
+/**
+ * Frames of real captcha services: Google reCAPTCHA, hCaptcha, and Cloudflare
+ * Turnstile. Their checkbox is a real challenge, never a kit's own gate.
+ */
+export const CAPTCHA_PROVIDER_FRAME = /^https:\/\/(?:www\.)?(?:google\.com\/recaptcha\/|recaptcha\.net\/|[\w-]+\.hcaptcha\.com\/|hcaptcha\.com\/|challenges\.cloudflare\.com\/)/i;
+/** How long a widget may pass invisibly before the capture clicks its checkbox, as a visitor would; at most a third of the overall bound. */
+const HUMAN_CHECK_INVISIBLE_MS = 5_000;
+/**
+ * Where a visitor clicks the checkbox in a provider's widget frame, from its
+ * left edge: Turnstile, reCAPTCHA, and hCaptcha all draw it about 30 px in,
+ * centred vertically. Turnstile draws it inside closed shadow roots, so the
+ * frame's position is the only reliable handle.
+ */
+const HUMAN_CHECK_CHECKBOX_X = 30;
+
+export type HumanCheckOptions = {
+	/** The overall bound on the widget issuing its token. */
+	humanCheckMs?: number;
+	/** Which frames are a captcha provider's widget; a test seam. */
+	captchaProviderFrame?: RegExp;
+};
+
+async function hasToken(frame: Frame): Promise<boolean> {
+	return frame.evaluate(
+		(selector: string) => [...document.querySelectorAll<HTMLInputElement>(selector)].some((input) => input.value.trim().length > 0),
+		HUMAN_CHECK_TOKEN_SELECTOR,
+	).catch(() => false);
+}
+
+/** Clicks the checkbox of the provider widget drawn in the field's frame, once; false when no widget frame is shown. */
+async function clickHumanCheckCheckbox(page: Page, frame: Frame, providerFrame: RegExp): Promise<boolean> {
+	for (const widget of frame.childFrames()) {
+		if (widget.detached || !providerFrame.test(widget.url())) continue;
+		const element = await widget.frameElement().catch(() => null);
+		const box = await element?.boundingBox().catch(() => null);
+		await element?.dispose().catch(() => undefined);
+		if (!box || box.width < 50 || box.height < 20) continue;
+		const x = box.x + Math.min(HUMAN_CHECK_CHECKBOX_X, box.width / 2);
+		const y = box.y + box.height / 2;
+		await page.mouse.move(x - 40 + Math.random() * 10, y - 15 + Math.random() * 10);
+		await page.mouse.move(x, y, { steps: 8 });
+		await page.mouse.click(x, y, { delay: clickDelay() });
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Whether the field's frame has a captcha widget and, once it does, whether
+ * that widget issued its token. A widget that does not pass invisibly within
+ * a few seconds gets one click on its checkbox, as a visitor would; an image
+ * challenge it may show then is never attempted.
+ */
+async function waitForHumanCheck(page: Page, frame: Frame, options: HumanCheckOptions): Promise<WebsiteHumanCheck | undefined> {
 	const hasWidget = await frame.$(HUMAN_CHECK_WIDGET_SELECTOR).then((widget) => widget !== null).catch(() => false);
 	if (!hasWidget) return undefined;
-	const deadline = Date.now() + humanCheckMs;
+	const boundMs = options.humanCheckMs ?? HUMAN_CHECK_MS;
+	const deadline = Date.now() + boundMs;
+	const clickAt = Date.now() + Math.min(HUMAN_CHECK_INVISIBLE_MS, boundMs / 3);
+	let clicked = false;
 	while (Date.now() < deadline) {
-		const token = await frame.evaluate(
-			(selector: string) => [...document.querySelectorAll<HTMLInputElement>(selector)].some((input) => input.value.trim().length > 0),
-			HUMAN_CHECK_TOKEN_SELECTOR,
-		).catch(() => false);
-		if (token) return "passed";
+		if (await hasToken(frame)) return clicked ? "passed_after_click" : "passed";
+		if (!clicked && Date.now() >= clickAt) clicked = await clickHumanCheckCheckbox(page, frame, options.captchaProviderFrame ?? CAPTCHA_PROVIDER_FRAME);
 		await sleep(POLL_MS);
 	}
-	return "unsolved";
+	return clicked ? "unsolved_after_click" : "unsolved";
 }
 
 /**
@@ -132,8 +185,6 @@ async function submitControl(field: ElementHandle<Element>): Promise<ElementHand
 	return control ?? undefined;
 }
 
-const clickDelay = () => 60 + Math.round(Math.random() * 80);
-
 /**
  * Take one step on the live page as a visitor would. A fill enters the
  * canary into the named field, waits for a captcha widget beside it to pass,
@@ -141,7 +192,7 @@ const clickDelay = () => 60 + Math.round(Math.random() * 80);
  * filled, so a kit's hidden honeypot fields stay empty. A click presses the
  * named button.
  */
-export async function performPageAction(page: Page, action: WebsitePageAction, humanCheckMs = HUMAN_CHECK_MS): Promise<WebsitePerformedAction> {
+export async function performPageAction(page: Page, action: WebsitePageAction, humanCheck: HumanCheckOptions = {}): Promise<WebsitePerformedAction> {
 	const found = await findTarget(page, action, TARGET_APPEAR_MS);
 	if (!found) throw new WebsitePageActionTargetMissingError(action);
 	const { frame, target } = found;
@@ -155,14 +206,14 @@ export async function performPageAction(page: Page, action: WebsitePageAction, h
 			if ("value" in element) (element as HTMLInputElement).value = "";
 		});
 		await target.type(action.value, { delay: 25 + Math.round(Math.random() * 40) });
-		const humanCheck = await waitForHumanCheck(frame, humanCheckMs);
+		const check = await waitForHumanCheck(page, frame, humanCheck);
 		const control = await submitControl(target);
 		if (control) {
 			await control.click({ delay: clickDelay() }).finally(() => control.dispose().catch(() => undefined));
 		} else {
 			await target.press("Enter");
 		}
-		return { ...action, ...(humanCheck ? { humanCheck } : {}) };
+		return { ...action, ...(check ? { humanCheck: check } : {}) };
 	} finally {
 		await target.dispose().catch(() => undefined);
 	}

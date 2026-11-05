@@ -38,15 +38,24 @@ export type WebsitePageAction =
 	| { kind: "fill"; field: WebsiteDataEntryField; value: string }
 	| { kind: "click"; control: WebsiteContinuationControl };
 
+/**
+ * How the captcha widget beside a submitted field (Turnstile, reCAPTCHA,
+ * hCaptcha) went before the form was sent: `passed` issued its token by
+ * itself; `passed_after_click` did once the capture clicked its checkbox, as
+ * a visitor would; `unsolved` and `unsolved_after_click` never did.
+ */
+export type WebsiteHumanCheck = "passed" | "passed_after_click" | "unsolved" | "unsolved_after_click";
+
+/** Whether the widget beside the field never issued its token. */
+export function humanCheckUnsolved(check: WebsiteHumanCheck | undefined): boolean {
+	return check === "unsolved" || check === "unsolved_after_click";
+}
+
 /** A page action as the capture took it. */
 export type WebsitePerformedAction =
 	| (Extract<WebsitePageAction, { kind: "fill" }> & {
-		/**
-		 * The captcha widget beside the field (Turnstile, reCAPTCHA, hCaptcha):
-		 * `passed` when it issued its token before the form was submitted,
-		 * `unsolved` when it never did. Absent when the form had none.
-		 */
-		humanCheck?: "passed" | "unsolved";
+		/** The captcha widget beside the field; absent when the form had none. */
+		humanCheck?: WebsiteHumanCheck;
 	})
 	| Extract<WebsitePageAction, { kind: "click" }>;
 

@@ -1291,6 +1291,92 @@ ${tokenAfterMs === undefined ? "" : `<script>setTimeout(() => { document.querySe
 			}
 		}, 90_000);
 
+		/**
+		 * A stand-in for a provider's widget, drawn like Turnstile: its frame sits
+		 * in a closed shadow root beside the field, and the checkbox about 30 px
+		 * in. `mode` says how it behaves: it passes by itself, passes once its
+		 * checkbox is clicked, or turns into an image challenge on the click.
+		 */
+		function serveWidgetKit(mode: "invisible" | "click" | "image") {
+			const posts: Array<Record<string, string>> = [];
+			let checkboxClicks = 0;
+			const server = Bun.serve({
+				port: 0,
+				fetch: async (request) => {
+					const { pathname } = new URL(request.url);
+					if (pathname === "/captcha/clicked") { checkboxClicks++; return new Response("ok"); }
+					if (pathname === "/captcha/widget") return html(`<div style="margin:0;height:65px;position:relative">
+<label id="box" style="position:absolute;left:16px;top:20px;width:24px;height:24px;border:2px solid #666;display:block"></label><span style="position:absolute;left:52px;top:22px">Verify you are human</span></div>
+<script>${mode === "invisible" ? `setTimeout(() => parent.postMessage("token", "*"), 300);` : ""}
+document.getElementById("box").addEventListener("click", () => { fetch("/captcha/clicked"); ${mode === "click" ? `parent.postMessage("token", "*");` : `document.body.innerHTML = "<p>Select all images with a bus</p>";`} });</script>`);
+					if (request.method === "POST") {
+						posts.push(Object.fromEntries(new URLSearchParams(await request.text())));
+						return html(signIn);
+					}
+					return html(`<form method="POST" action="/next"><input type="email" id="email" name="email">
+<div class="cf-turnstile" id="widget" style="width:300px;height:65px"></div><input type="hidden" name="cf-turnstile-response" value=""><button>Open</button></form>
+<script>
+const root = document.getElementById("widget").attachShadow({ mode: "closed" });
+root.innerHTML = '<iframe src="/captcha/widget" style="width:300px;height:65px;border:0"></iframe>';
+addEventListener("message", (event) => { if (event.data === "token") document.querySelector("[name=cf-turnstile-response]").value = "0.widget-token"; });
+</script>`);
+				},
+			});
+			return { server, posts, clicks: () => checkboxClicks, url: `http://127.0.0.1:${server.port}/` };
+		}
+
+		const widgetVisit = (url: string, port: number) => archiveWebsite({ url, keepSession: true }, {
+			...fast,
+			renderSettleMs: 1_500,
+			humanCheckMs: 6_000,
+			pageActionQuietMs: 1_000,
+			captchaProviderFrame: new RegExp(`^http://127\\.0\\.0\\.1:${port}/captcha/widget`),
+			getBrowser: launch,
+		}).then(async (first) => {
+			try {
+				return await first.session!.act(fill());
+			} finally {
+				await first.session!.close();
+			}
+		});
+
+		test("a captcha that passes by itself is never clicked", async () => {
+			const kit = serveWidgetKit("invisible");
+			try {
+				const page = await widgetVisit(kit.url, kit.server.port!);
+				expect(page.performedAction).toMatchObject({ humanCheck: "passed" });
+				expect(kit.clicks()).toBe(0);
+				expect(kit.posts).toEqual([{ email: value, "cf-turnstile-response": "0.widget-token" }]);
+			} finally {
+				kit.server.stop(true);
+			}
+		}, 60_000);
+
+		test("a captcha that asks for its checkbox gets one click inside its closed shadow root, then the form is sent with its token", async () => {
+			const kit = serveWidgetKit("click");
+			try {
+				const page = await widgetVisit(kit.url, kit.server.port!);
+				expect(kit.clicks()).toBe(1);
+				expect(page.performedAction).toMatchObject({ humanCheck: "passed_after_click" });
+				expect(kit.posts).toEqual([{ email: value, "cf-turnstile-response": "0.widget-token" }]);
+				expect(page.text.toString()).toContain("Enter password");
+			} finally {
+				kit.server.stop(true);
+			}
+		}, 60_000);
+
+		test("an image challenge after the click is never attempted: one click, then the form is sent without a token", async () => {
+			const kit = serveWidgetKit("image");
+			try {
+				const page = await widgetVisit(kit.url, kit.server.port!);
+				expect(kit.clicks()).toBe(1);
+				expect(page.performedAction).toMatchObject({ humanCheck: "unsolved_after_click" });
+				expect(kit.posts).toEqual([{ email: value, "cf-turnstile-response": "" }]);
+			} finally {
+				kit.server.stop(true);
+			}
+		}, 60_000);
+
 		test("a kit that draws its field without a form and swaps in its next step is captured as the same page", async () => {
 			const server = Bun.serve({
 				port: 0,

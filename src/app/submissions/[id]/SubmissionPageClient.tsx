@@ -19,7 +19,7 @@ import type { SubmissionDetail as ApiSubmissionDetail } from "@/lib/submissions/
 import { formatUtcDateTime } from "@/lib/date_time";
 import { cn } from "../../../web_lib/util";
 import { selectDisplayAnalysisRuns } from "@/lib/analysis_run_view";
-import { describeDataEntryField, type WebsitePhishingBasis } from "@/lib/website_types";
+import { describeDataEntryField, humanCheckUnsolved, type WebsitePhishingBasis } from "@/lib/website_types";
 import { websiteSiteName } from "@/lib/website_site";
 import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website_capture_files";
 
@@ -394,7 +394,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 														) : hop.performedAction && hop.redirectTo ? (
 															<div className="break-all text-xs text-muted-foreground">
 																{hop.performedAction.kind === "fill"
-																	? <>Entering the made-up “{hop.performedAction.value}” into “{describeDataEntryField(hop.performedAction.field)}”{hop.performedAction.humanCheck === "unsolved" ? " (its captcha never passed)" : ""} shows {hop.redirectTo}</>
+																	? <>Entering the made-up “{hop.performedAction.value}” into “{describeDataEntryField(hop.performedAction.field)}”{humanCheckUnsolved(hop.performedAction.humanCheck) ? " (its captcha never passed)" : hop.performedAction.humanCheck === "passed_after_click" ? " (its captcha passed once its checkbox was clicked)" : ""} shows {hop.redirectTo}</>
 																	: <>Clicking its button “{hop.performedAction.control.label}” shows {hop.redirectTo}</>}
 															</div>
 														) : hop.redirectTo ? <div className="break-all text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
