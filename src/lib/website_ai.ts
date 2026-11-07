@@ -118,7 +118,7 @@ function hiddenFrameEvidence(frames: readonly WebsiteHiddenFrame[] | undefined):
 				stage_urls: frame.signals.stageUrls,
 				data_uploads: frame.signals.dataUploads.map((upload) => ({ url: upload.url, data: upload.data, observed: upload.observed })),
 			},
-			loaded: frame.resources.slice(0, MAX_FRAME_RESOURCES_PROMPT).map(({ url, type, status, size }) => ({ url, type, status, size })),
+			loaded: frame.resources.slice(0, MAX_FRAME_RESOURCES_PROMPT).map(({ url, type, loadedBy, status, size }) => ({ url, type, loadedBy, status, size })),
 			sent: frame.sentRequests.map(({ url, method }) => ({ url, method })),
 			source,
 		};

@@ -47,10 +47,19 @@ export type WebsiteFrameResource = {
 	url: string;
 	/** Chromium's resource type: `document`, `script`, `fetch`, `xhr`, … */
 	type: string;
+	/**
+	 * What asked for it: the frame's markup (a `<script src>` or `<link>` the
+	 * parser met, such as the beacon Cloudflare injects into every page it
+	 * proxies) or the frame's code at run time (`fetch`, an appended script),
+	 * which is how a loader pulls its next stage.
+	 */
+	loadedBy: WebsiteResourceInitiator;
 	status: number;
 	size: number;
 	sha256: string;
 };
+
+export type WebsiteResourceInitiator = "markup" | "script" | "other";
 
 /** A request other than GET a hidden frame sent: where a loader posts what it took. */
 export type WebsiteFrameRequest = {

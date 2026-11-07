@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { Frame, HTTPRequest, HTTPResponse, Page } from "rebrowser-puppeteer-core";
 
 import { exploitLoaderSignals, type FrameCode } from "./malware/exploit_loader";
-import type { WebsiteFrameRequest, WebsiteFrameResource, WebsiteHiddenFrame } from "./website_types";
+import type { WebsiteFrameRequest, WebsiteFrameResource, WebsiteHiddenFrame, WebsiteResourceInitiator } from "./website_types";
 
 /** Frames kept per capture; a page needs only one to run its loader. */
 const MAX_HIDDEN_FRAMES = 6;
@@ -24,6 +24,12 @@ type FrameTraffic = { responses: FrameResponse[]; requests: WebsiteFrameRequest[
 
 /** Everything the page's frames other than the main frame received and sent, per frame. */
 export type FrameTrafficRecorder = { traffic: Map<Frame, FrameTraffic> };
+
+/** Chromium's initiator of the request: the HTML parser, running script, or neither (preload, preflight, redirect). */
+function loadedBy(request: HTTPRequest): WebsiteResourceInitiator {
+	const type = request.initiator()?.type;
+	return type === "parser" ? "markup" : type === "script" ? "script" : "other";
+}
 
 function frameOf(request: HTTPRequest): Frame | null {
 	try {
@@ -51,6 +57,7 @@ export function recordFrameTraffic(page: Page): FrameTrafficRecorder {
 		if (!frame || frame === page.mainFrame()) return;
 		const entry = of(frame);
 		const type = request.resourceType();
+		const initiator = loadedBy(request);
 		const status = response.status();
 		const body = status >= 300 && status < 400 ? Promise.resolve(undefined) : response.buffer().catch(() => undefined);
 		if (type === "document" && request.isNavigationRequest()) {
@@ -61,11 +68,12 @@ export function recordFrameTraffic(page: Page): FrameTrafficRecorder {
 			resource: body.then((bytes) => ({
 				url: response.url(),
 				type,
+				loadedBy: initiator,
 				status,
 				size: bytes?.byteLength ?? 0,
 				sha256: createHash("sha256").update(bytes ?? Buffer.alloc(0)).digest("hex"),
 			})),
-			code: body.then((bytes) => (bytes && CODE_TYPES.has(type) && bytes.byteLength <= MAX_CODE_BYTES ? { url: response.url(), text: bytes.toString("utf8") } : undefined)),
+			code: body.then((bytes) => (bytes && CODE_TYPES.has(type) && bytes.byteLength <= MAX_CODE_BYTES ? { url: response.url(), text: bytes.toString("utf8"), markup: type === "document" } : undefined)),
 		});
 	});
 	page.on("request", (request: HTTPRequest) => {
@@ -149,7 +157,7 @@ export async function hiddenFrames(page: Page, recorder: FrameTrafficRecorder, u
 			source: source.slice(0, MAX_HIDDEN_FRAME_SOURCE_CHARACTERS),
 			resources,
 			sentRequests,
-			signals: exploitLoaderSignals({ frameUrl: url, code: [{ url, text: source }, ...scripts], resources, sentRequests }),
+			signals: exploitLoaderSignals({ frameUrl: url, code: [{ url, text: source, markup: true }, ...scripts], resources, sentRequests }),
 			userAgent,
 		});
 	}

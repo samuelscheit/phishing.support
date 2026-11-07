@@ -34,8 +34,8 @@ const PNG = await sharp({ create: { width: 32, height: 24, channels: 3, backgrou
 function loaderFrame(device: "desktop" | "iphone"): WebsiteHiddenFrame {
 	const resources: WebsiteFrameResource[] = device === "iphone"
 		? [
-			{ url: `${CORUNA_HOST}/pe/0cb19f768eb8cd92.js`, type: "fetch", status: 200, size: 5_874, sha256: "a".repeat(64) },
-			{ url: `${CORUNA_HOST}/pe_main.js?v=1762531200000`, type: "script", status: 200, size: 782_325, sha256: "b".repeat(64) },
+			{ url: `${CORUNA_HOST}/pe/0cb19f768eb8cd92.js`, type: "fetch", loadedBy: "script", status: 200, size: 5_874, sha256: "a".repeat(64) },
+			{ url: `${CORUNA_HOST}/pe_main.js?v=1762531200000`, type: "script", loadedBy: "script", status: 200, size: 782_325, sha256: "b".repeat(64) },
 		]
 		: [];
 	const sentRequests: WebsiteFrameRequest[] = device === "iphone" ? [{ url: CORUNA_LOOT_URL, method: "POST", body: '{"cmd":"bridge_status","source":"darksw bridge"}' }] : [];
@@ -48,7 +48,7 @@ function loaderFrame(device: "desktop" | "iphone"): WebsiteHiddenFrame {
 		source: CORUNA_LOADER,
 		resources,
 		sentRequests,
-		signals: exploitLoaderSignals({ frameUrl: CORUNA_FRAME_URL, code: [{ url: CORUNA_FRAME_URL, text: CORUNA_LOADER }], resources, sentRequests }),
+		signals: exploitLoaderSignals({ frameUrl: CORUNA_FRAME_URL, code: [{ url: CORUNA_FRAME_URL, text: CORUNA_LOADER, markup: true }], resources, sentRequests }),
 		userAgent: device === "iphone" ? IPHONE_USER_AGENT : DESKTOP_USER_AGENT,
 	};
 }
