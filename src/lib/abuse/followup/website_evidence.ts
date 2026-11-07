@@ -144,7 +144,9 @@ export async function collectWebsiteDecisionEvidence(params: {
 	let recheck: WebsiteDecisionEvidence["recheck"];
 	let fresh: WebsiteArchiveResult | undefined;
 	try {
-		fresh = await (dependencies.capture ?? archiveWebsite)({ url: params.reportedUrl });
+		// A kit that turns desktops away is rechecked as the phone the case reached it with.
+		const device = stored.website?.device;
+		fresh = await (dependencies.capture ?? archiveWebsite)({ url: params.reportedUrl, ...(device ? { device } : {}) });
 		const finding = await (dependencies.classify ?? classifyWebsiteCapture)(fresh);
 		const freshText = fresh.text.toString("utf8");
 		const onReportedSite = isSameWebsite(fresh.url, params.reportedUrl);

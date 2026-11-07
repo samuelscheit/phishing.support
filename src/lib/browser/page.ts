@@ -1,6 +1,7 @@
 import type { Browser, BrowserContext, CDPSession, Page, Protocol } from "rebrowser-puppeteer-core";
 
 import { sleep } from "../utils";
+import type { WebsiteDevice } from "../website_types";
 import { getBrowser } from "./browser";
 
 /**
@@ -65,16 +66,17 @@ export function windowsDesktopIdentity(product: string): Protocol.Emulation.SetU
  * same identity through the Emulation domain on the page's session sets it.
  * Dedicated workers keep their own navigator.platform, which neither domain reaches.
  */
-async function useWindowsDesktopIdentity(page: Page, cdp: CDPSession) {
+async function useWindowsDesktopIdentity(page: Page, cdp: CDPSession): Promise<string> {
 	const identity = windowsDesktopIdentity(await page.browser().version());
 	await page.setUserAgent({ userAgent: identity.userAgent, userAgentMetadata: identity.userAgentMetadata, platform: identity.platform });
 	await cdp.send("Emulation.setUserAgentOverride", identity);
+	return identity.userAgent;
 }
 
 /** The overrides live as long as the CDP session that set them, so the session stays attached to the page. */
-async function useDesktopWindow(page: Page) {
+async function useDesktopWindow(page: Page): Promise<string> {
 	const cdp = await page.createCDPSession();
-	await useWindowsDesktopIdentity(page, cdp);
+	const userAgent = await useWindowsDesktopIdentity(page, cdp);
 	const { windowId } = await cdp.send("Browser.getWindowForTarget");
 	await cdp.send("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal", ...DESKTOP_WINDOW } });
 	await cdp.send("Emulation.setDeviceMetricsOverride", {
@@ -85,10 +87,43 @@ async function useDesktopWindow(page: Page) {
 		screenWidth: DESKTOP_SCREEN.width,
 		screenHeight: DESKTOP_SCREEN.height,
 	});
+	return userAgent;
+}
+
+/**
+ * Safari on an iPhone 15 with iOS 18.6.2. Mobile-only kits turn desktops
+ * away with a QR code and serve their exploit loader only to iPhones of the
+ * versions it targets (production case 377486973465530391 gates on
+ * 18.5–18.6.2 and below 18); a current iOS is served nothing. The exploit
+ * code is built for Apple's WebKit and only runs to its first failure in
+ * Chromium, which is how the capture sees the stages it loads.
+ */
+export const IPHONE_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1";
+const IPHONE_SCREEN = { width: 393, height: 852, deviceScaleFactor: 3 } as const;
+/** Safari exposes no User-Agent client hints; Chromium's would give the Linux build away. */
+const SAFARI_NAVIGATOR = "delete Navigator.prototype.userAgentData;";
+
+async function useIphone(page: Page): Promise<string> {
+	const cdp = await page.createCDPSession();
+	const identity = { userAgent: IPHONE_USER_AGENT, platform: "iPhone" };
+	await page.setUserAgent(identity);
+	await cdp.send("Emulation.setUserAgentOverride", identity);
+	await cdp.send("Emulation.setDeviceMetricsOverride", {
+		width: IPHONE_SCREEN.width,
+		height: IPHONE_SCREEN.height,
+		deviceScaleFactor: IPHONE_SCREEN.deviceScaleFactor,
+		mobile: true,
+		screenWidth: IPHONE_SCREEN.width,
+		screenHeight: IPHONE_SCREEN.height,
+	});
+	await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+	// On the page's own session: a script added through this side session never runs.
+	await page.evaluateOnNewDocument(SAFARI_NAVIGATOR);
+	return IPHONE_USER_AGENT;
 }
 
 /** Set up a page attached to a Fabric-owned browser lease. */
-export async function getBrowserPage(existingPage?: Page) {
+export async function getBrowserPage(existingPage?: Page, device: WebsiteDevice = "desktop") {
 	const browser = (existingPage ? existingPage.browser() : await getBrowser()) as Browser;
 	const context = (existingPage ? existingPage.browserContext() : browser.defaultBrowserContext()) as BrowserContext;
 	const page = existingPage || (await context.newPage());
@@ -101,7 +136,8 @@ export async function getBrowserPage(existingPage?: Page) {
 		await sleep(1000 * Math.random() + 1000);
 		await dialog.dismiss();
 	});
-	await useDesktopWindow(page);
+	/** The User-Agent every request of the page sends. */
+	const userAgent = await (device === "iphone" ? useIphone(page) : useDesktopWindow(page));
 
-	return { page, context, browser };
+	return { page, context, browser, userAgent };
 }

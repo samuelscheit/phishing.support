@@ -77,14 +77,14 @@ type ClassifierAnswers = Record<string, Record<string, unknown>>;
 
 /** What the classifier answers for each page of the kit. */
 const KIT_ANSWERS: ClassifierAnswers = {
-	[CONSENT]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "l1" },
-	[GET_STARTED]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "L1 " },
+	[CONSENT]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "l1", hiddenFrameRef: "", mobileHandoff: false },
+	[GET_STARTED]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "L1 ", hiddenFrameRef: "", mobileHandoff: false },
 	[RECOVERY]: {
 		finding: "phishing",
 		phishingBasis: "credential_theft",
 		evidenceQuote: "Access your wallet with your Secret Recovery Phrase",
 		collectionFieldRefs: ["f2", "f3"],
-		continuationRef: "",
+		continuationRef: "", hiddenFrameRef: "", mobileHandoff: false,
 	},
 };
 
@@ -191,8 +191,7 @@ describe("continuation links", () => {
 
 		expect(buildWebsiteReportEvidence(
 			{ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Access your wallet with your Secret Recovery Phrase" },
-			[],
-			[...hops.slice(0, 1), { ...hops[1]!, contentCaptured: false, redirectTo: RECOVERY, followedLink: { label: "Import an existing wallet" } }, { index: 2, url: RECOVERY, hostname: new URL(SITE).hostname, status: 200, contentCaptured: true }],
+			{ navigationHops: [...hops.slice(0, 1), { ...hops[1]!, contentCaptured: false, redirectTo: RECOVERY, followedLink: { label: "Import an existing wallet" } }, { index: 2, url: RECOVERY, hostname: new URL(SITE).hostname, status: 200, contentCaptured: true }] },
 		)).toBe([
 			"The page impersonates a trusted brand and asks visitors for a password, sign-in details, a verification code, or identity details, or leads them to a step that does.",
 			`Visitors reach the page through the site's own earlier pages: the link "I agree" on ${CONSENT}, then the link "Import an existing wallet" on ${GET_STARTED}.`,
@@ -280,7 +279,7 @@ describe("multi-page kits", () => {
 
 	test("a retry reuses the analyzed page's own capture, not the first page's", async () => {
 		const id = await websiteSubmission(375914181917937691n, CONSENT);
-		const unconfirmed = { ...KIT_ANSWERS, [RECOVERY]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "" } };
+		const unconfirmed = { ...KIT_ANSWERS, [RECOVERY]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false } };
 		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({ answers: unconfirmed, captures: [] }));
 		// As if the analysis had failed after its captures: the case is retryable.
 		await SubmissionsEntity.update(id, { status: "failed" });
@@ -348,7 +347,7 @@ describe("multi-page kits", () => {
 		// A site whose every page links on stops after three followed links.
 		const pages = Array.from({ length: 6 }, (_, index) => `${SITE}/page-${index}.html`);
 		pages.forEach((page, index) => { PAGES[page] = `<html><body><h1>MetaMask step ${index}</h1><a href="${pages[index + 1] ?? pages[0]}">Next</a></body></html>`; });
-		const endless: ClassifierAnswers = Object.fromEntries(pages.map((page) => [page, { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "l1" }]));
+		const endless: ClassifierAnswers = Object.fromEntries(pages.map((page) => [page, { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "l1", hiddenFrameRef: "", mobileHandoff: false }]));
 		const endlessCaptures: ArchiveWebsiteOptions[] = [];
 		const endlessId = await websiteSubmission(375914181917937695n, pages[0]!);
 		await analyzeWebsite({ submissionId: endlessId, url: pages[0]! }, dependencies({ answers: endless, captures: endlessCaptures }));
@@ -385,8 +384,8 @@ PAGES[SIGN_IN] = `<html lang="en"><head><title>Sign in to your account</title></
 </div></body></html>`;
 
 const GATE_ANSWERS: ClassifierAnswers = {
-	[GATE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "f5" },
-	[SIGN_IN]: { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Enter password", collectionFieldRefs: ["f1"], continuationRef: "" },
+	[GATE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "f5", hiddenFrameRef: "", mobileHandoff: false },
+	[SIGN_IN]: { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Enter password", collectionFieldRefs: ["f1"], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false },
 };
 
 const EMAIL_FIELD = { ref: "f5", control: "input[type=email]", id: "email", name: "email", autocomplete: "email", label: "Email address", placeholder: "you@example.com" };
@@ -521,7 +520,7 @@ describe("actions on a kit's own pages", () => {
 <p>One click verifies your session and lets you continue.</p><button type="button" id="fsjrdbmpp03a"><span>Confirm</span></button>
 <input type="text" name="website" tabindex="-1" aria-hidden="true"></body></html>`;
 		const answers: ClassifierAnswers = {
-			[INTERSTITIAL_URL]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "b1" },
+			[INTERSTITIAL_URL]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "b1", hiddenFrameRef: "", mobileHandoff: false },
 			...GATE_ANSWERS,
 		};
 		const captures: ArchiveWebsiteOptions[] = [];
@@ -625,7 +624,7 @@ describe("actions on a kit's own pages", () => {
 		PAGES[PHONE] = `<html><body><h1>Confirm your phone</h1><form method="POST"><input type="tel" id="phone" name="phone"><button>Next</button></form></body></html>`;
 		const answers: ClassifierAnswers = {
 			[GATE]: GATE_ANSWERS[GATE]!,
-			[PHONE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "f1" },
+			[PHONE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "f1", hiddenFrameRef: "", mobileHandoff: false },
 			[SIGN_IN]: { ...GATE_ANSWERS[SIGN_IN]!, finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [] },
 		};
 		const visit = liveVisit({ ...liveCapture(GATE), ...RESIDENTIAL }, (action, taken) => ({

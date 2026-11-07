@@ -7,7 +7,7 @@ import { AbuseInputError, hashStableJson, isPublicIp, sha256Hex } from "./securi
 import { setInvestigationStatus } from "../investigation/status";
 import { enqueueKitSiblingDiscovery } from "./origin/kit_job";
 import { websiteSite } from "../website_site";
-import type { ReportableWebsiteFinding } from "../website_types";
+import type { ReportableWebsiteFinding, WebsiteHiddenFrame } from "../website_types";
 import type { PasteCommand } from "../malware/paste_commands";
 import type { InvestigationJobPayload } from "../investigation/payload";
 
@@ -40,6 +40,12 @@ export type ConfirmedWebsiteAbuse = SubmissionReportBase & {
 	finding: ReportableWebsiteFinding;
 	/** Commands the page tells visitors to paste; the investigation fetches their payloads. */
 	pasteCommands?: readonly PasteCommand[];
+	/**
+	 * A drive-by finding's hidden frame: its source is attached, and the
+	 * investigation fetches the stages its loader loads as the browser the
+	 * frame was served to.
+	 */
+	hiddenFrame?: WebsiteHiddenFrame;
 };
 
 export type ConfirmedEmailPhishing = SubmissionReportBase & {
@@ -101,6 +107,17 @@ function submissionRequest(params: {
 }
 
 /**
+ * The hidden frame of a drive-by finding as a provider can check it: its URL,
+ * why no visitor sees it, the hash and source of its document as received,
+ * what it loaded and sent, and what its code was found to do.
+ */
+function hiddenFrameEvidence(frame: WebsiteHiddenFrame): DecodedEvidence {
+	const { ref: _ref, ...evidence } = frame;
+	const buffer = Buffer.from(JSON.stringify(evidence, null, 2), "utf8");
+	return { filename: `hidden-frame-${frame.sha256.slice(0, 16)}.json`, mimeType: "application/json", buffer, sha256: sha256Hex(buffer) };
+}
+
+/**
  * Build the website report: the captured site's host, with its URLs as
  * observed evidence. On a shared host the URLs name the one tenant reported.
  */
@@ -112,7 +129,10 @@ export async function buildWebsiteAbuseRequest(params: ConfirmedWebsiteAbuse): P
 		allegationCategory: params.finding.finding,
 		description: reportDescription(params.analysisText),
 		targets: [target(0, new URL(observedUrls[0]!).hostname, observedUrls)],
-		evidence: (await Promise.all((params.screenshots ?? []).map(({ filename, png }) => screenshotEvidence(filename, png)))).flat(),
+		evidence: [
+			...(await Promise.all((params.screenshots ?? []).map(({ filename, png }) => screenshotEvidence(filename, png)))).flat(),
+			...(params.hiddenFrame ? [hiddenFrameEvidence(params.hiddenFrame)] : []),
+		],
 		source: { kind: "website", urls: params.urls },
 	});
 }
@@ -159,6 +179,14 @@ export async function reportConfirmedWebsiteAbuse(params: ConfirmedWebsiteAbuse)
 		pageUrl: params.urls[0]!,
 		finding: params.finding,
 		pasteCommands: (params.pasteCommands ?? []).map(({ shown, payloadUrls, interpreters }) => ({ shown, payloadUrls, interpreters })),
+		...(params.hiddenFrame ? {
+			exploitLoader: {
+				frameUrl: params.hiddenFrame.url,
+				userAgent: params.hiddenFrame.userAgent,
+				stageUrls: params.hiddenFrame.signals.stageUrls,
+				dataUploads: params.hiddenFrame.signals.dataUploads,
+			},
+		} : {}),
 	};
 	const created = await AbuseRepository.createReport({
 		request: await buildWebsiteAbuseRequest(params),

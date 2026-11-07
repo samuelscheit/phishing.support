@@ -126,6 +126,7 @@ export function humanizeAnalysisStep(value: string): string {
 		follow_link: "Following the page's link to its next page",
 		submit_field: "Submitting the page's field to reach its next step",
 		click_control: "Clicking the page's button to reach its next step",
+		revisit_as_phone: "Opening the page again as an iPhone, since it turns desktops away",
 		structured_response: "Confirming the result",
 		resolution: "Finding the right contacts",
 		reporting: "Preparing reports",

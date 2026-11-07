@@ -12,6 +12,9 @@ import { readInvestigationJobPayload } from "../../investigation/payload";
 import { abuseArtifacts, abuseJobs } from "../schema";
 import { AbuseRepository } from "../repository";
 import { AbuseWorker } from "../worker";
+import { IPHONE_USER_AGENT } from "../../browser/page";
+import { CORUNA_LOADER } from "../../malware/coruna_loader.fixture";
+import type { WebsiteHiddenFrame } from "../../website_types";
 
 useTemporaryDatabase();
 
@@ -53,10 +56,10 @@ function jobsOf(reportId: bigint) {
 
 /** Investigation dependencies that never touch the network; uploads are recorded. */
 function offline(overrides: Partial<InvestigationDependencies> = {}) {
-	const fetched: Array<{ url: string; interpreters: readonly string[] }> = [];
+	const fetched: Array<{ url: string; userAgent: string }> = [];
 	const deps: Partial<InvestigationDependencies> = {
-		fetchPayload: async (url, interpreters) => {
-			fetched.push({ url, interpreters });
+		fetchPayload: async (url, userAgent) => {
+			fetched.push({ url, userAgent });
 			return { url, finalUrl: url, body: PAYLOAD, contentType: "application/octet-stream", fileName: "wZZLR9xY29o4.js" };
 		},
 		pipelineConfig: () => ({ storeRoot: undefined, malwareBazaarAuthKey: undefined, virusTotalApiKey: "vt-key", uploadPermitted: new Set(["virustotal" as const]), retentionMs: 86_400_000 }),
@@ -89,7 +92,8 @@ describe("pre-report investigation", () => {
 		expect(await workerWith(deps, "investigation-malware").processOne(false, { jobTypes: ["investigate_report"] })).toBeTrue();
 
 		// The command is fetched with the downloader the command itself uses.
-		expect(fetched).toEqual([{ url: PAYLOAD_URL, interpreters: ["curl", "osascript"] }]);
+		// The command pipes curl into osascript: the host answers curl's User-Agent.
+		expect(fetched).toEqual([{ url: PAYLOAD_URL, userAgent: "curl/8.7.1" }]);
 
 		const released = await AbuseRepository.getReport(report.reportId);
 		expect(released?.status).toBe("accepted");
@@ -259,4 +263,96 @@ describe("pre-report investigation", () => {
 		expect(finished).toBeTrue();
 		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()?.status).toBe("completed");
 	}, 20_000);
+});
+
+describe("drive-by exploit investigation", () => {
+	// ktrced.top frames the loader of 92haoyun.icu (production case 377486973465530391).
+	const PAGE = "https://ktrced.top/";
+	const FRAME = "https://ktrced.top/gooll/gooll.html";
+	const REMOTE_STAGE = "https://92haoyun.icu/pe/0cb19f768eb8cd92.js";
+	const LOCAL_STAGE = "https://ktrced.top/pe_main.js";
+	const LOOT = "https://92haoyun.icu/coruna-loot";
+	const LOCAL_DROP = "https://ktrced.top/logs";
+
+	function hiddenFrame(): WebsiteHiddenFrame {
+		return {
+			ref: "frame1",
+			url: FRAME,
+			hiddenBy: "0×0 size",
+			sha256: "f".repeat(64),
+			size: CORUNA_LOADER.length,
+			source: CORUNA_LOADER,
+			resources: [],
+			sentRequests: [{ url: LOOT, method: "POST", body: '{"cmd":"bridge_status"}' }],
+			signals: {
+				platformGate: ["iPhone OS", "CPU OS"],
+				runsFetchedCode: true,
+				stageUrls: [REMOTE_STAGE, LOCAL_STAGE],
+				dataUploads: [
+					{ url: LOOT, data: ["keychain", "wallet"], observed: true },
+					{ url: LOCAL_DROP, data: ["passwords"], observed: false },
+				],
+			},
+			userAgent: IPHONE_USER_AGENT,
+		};
+	}
+
+	test("the loader's stages are fetched as the iPhone it attacks, another host's stage and data drop get linked reports, and no form probe runs", async () => {
+		const submissionId = 520n;
+		await SubmissionsEntity.create({ id: submissionId, kind: "website", data: { kind: "website", website: { url: PAGE } }, dedupeKey: `investigation:${submissionId.toString()}` });
+		const report = await reportConfirmedWebsiteAbuse({
+			submissionId,
+			urls: [PAGE],
+			analysisText: "The page attacks its visitors' devices without any action from them.",
+			reporter: {},
+			finding: { finding: "malware" },
+			screenshots: [{ filename: "website.png", png: SCREENSHOT }],
+			hiddenFrame: hiddenFrame(),
+		});
+		const payload = readInvestigationJobPayload((await jobsOf(report.reportId))[0]!.payload);
+		expect(payload.exploitLoader).toEqual({ frameUrl: FRAME, userAgent: IPHONE_USER_AGENT, stageUrls: [REMOTE_STAGE, LOCAL_STAGE], dataUploads: hiddenFrame().signals.dataUploads });
+		// The page's own report carries the frame's source for the provider to check.
+		const pageEvidence = (await AbuseRepository.getReportInput(report.reportId))!.evidenceArtifacts;
+		expect(pageEvidence.map((artifact) => [artifact.name, artifact.mimeType])).toEqual([["website.png", "image/png"], [`hidden-frame-${"f".repeat(16)}.json`, "application/json"]]);
+		const frameEvidence = JSON.parse(Buffer.from(pageEvidence[1]!.blob).toString("utf8"));
+		expect(frameEvidence).toMatchObject({ url: FRAME, hiddenBy: "0×0 size", source: CORUNA_LOADER, userAgent: IPHONE_USER_AGENT });
+		expect(frameEvidence.ref).toBeUndefined();
+
+		const { deps, fetched } = offline({ probe: async () => { throw new Error("A drive-by case has no form to probe."); } });
+		expect(await workerWith(deps, "investigation-drive-by").processOne(false, { jobTypes: ["investigate_report"] })).toBeTrue();
+
+		expect(fetched).toEqual([{ url: REMOTE_STAGE, userAgent: IPHONE_USER_AGENT }, { url: LOCAL_STAGE, userAgent: IPHONE_USER_AGENT }]);
+		const released = await AbuseRepository.getReport(report.reportId);
+		expect(released?.status).toBe("accepted");
+		expect(released?.description).toContain("We downloaded the exploit loader's file hxxps://92haoyun[.]icu/pe/0cb19f768eb8cd92.js as the browser it attacks would");
+		expect(released?.description).toContain("We downloaded the exploit loader's file hxxps://ktrced[.]top/pe_main.js as the browser it attacks would");
+
+		// Only another host gets its own report: the page's own stage and drop are the page's report.
+		const linked = (await AbuseRepository.listReportsForSubmission(submissionId)).filter((item) => item.id !== report.reportId);
+		const targets = await Promise.all(linked.map(async (item) => ({ item, targets: await AbuseRepository.listTargets(item.id) })));
+		const stageReport = targets.find(({ item }) => item.description.startsWith("This host serves malware"))!;
+		expect(stageReport.item).toMatchObject({ allegationCategory: "malware", reportedUserAgent: IPHONE_USER_AGENT });
+		expect(stageReport.item.description).toContain(`runs an exploit loader in a frame no visitor can see (hxxps://ktrced[.]top/gooll/gooll.html), and that loader downloads this file from ${REMOTE_STAGE}`);
+		expect(stageReport.targets.map((target) => [target.normalizedTarget, target.observedUrls])).toEqual([["92haoyun.icu", [REMOTE_STAGE]]]);
+		const dropReport = targets.find(({ item }) => item.description.startsWith("This host receives data stolen"))!;
+		expect(dropReport.item.allegationCategory).toBe("malware");
+		expect(dropReport.item.description).toContain(`sends keychain, wallet data from the device to ${LOOT}`);
+		expect(dropReport.item.description).toContain("Our capture saw the loader send a request to this endpoint.");
+		expect(dropReport.targets.map((target) => [target.normalizedTarget, target.observedUrls])).toEqual([["92haoyun.icu", [LOOT]]]);
+		const dropEvidence = (await AbuseRepository.getReportInput(dropReport.item.id))!.evidenceArtifacts;
+		expect(dropEvidence.map((artifact) => artifact.name)).toEqual(["malware-data-drop-evidence.json", "lure-page.png"]);
+		expect(linked).toHaveLength(2);
+
+		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { investigation: { status: "completed", backendCount: 0 } } });
+		expect(((await SubmissionsEntity.get(submissionId))?.data as { website: { investigation: { probeError?: string } } }).website.investigation.probeError).toBeUndefined();
+	});
+
+	test("a job stored with a malformed exploit loader is a programming error, not a site verdict", () => {
+		const base = { submissionId: "1", pageUrl: PAGE, finding: { finding: "malware" }, pasteCommands: [] };
+		expect(() => readInvestigationJobPayload({ ...base, exploitLoader: { frameUrl: FRAME, stageUrls: [] } })).toThrow("malformed payload.exploitLoader");
+		expect(readInvestigationJobPayload(base).exploitLoader).toBeUndefined();
+		// An upload without its data or observation is dropped, not trusted.
+		expect(readInvestigationJobPayload({ ...base, exploitLoader: { frameUrl: FRAME, userAgent: IPHONE_USER_AGENT, stageUrls: [REMOTE_STAGE], dataUploads: [{ url: LOOT }, { url: LOOT, data: ["keychain"], observed: false }] } }).exploitLoader)
+			.toEqual({ frameUrl: FRAME, userAgent: IPHONE_USER_AGENT, stageUrls: [REMOTE_STAGE], dataUploads: [{ url: LOOT, data: ["keychain"], observed: false }] });
+	});
 });

@@ -5,88 +5,116 @@ import { errorText } from "../error_text";
 import { downloadPipelineConfigFromEnvironment, investigateSample, type DownloadPipelineConfig } from "../exfiltration/downloads/pipeline";
 import { awaitVirusTotalVerdict } from "../exfiltration/downloads/virustotal";
 import { runExfiltrationProbe, type ExfiltrationProbeResult } from "../exfiltration/probe";
-import { fetchCommandPayload, type FetchedPayload } from "../malware/payload_fetch";
+import { downloaderUserAgent, fetchPayload, type FetchedPayload } from "../malware/payload_fetch";
 import { payloadEvidence, payloadVerdictSentence, type PayloadEvidence } from "../malware/payload_evidence";
-import { reportPayloadHost } from "../malware/payload_host_report";
+import { reportDataDrop, reportPayloadHost, type PayloadDelivery } from "../malware/payload_host_report";
 import type { ReporterMetadata } from "../request_metadata";
 import { defangCommand, defangUrl } from "../malware/defang";
-import type { InvestigationJobPayload, InvestigationPasteCommand } from "./payload";
+import { isSameWebsite } from "../website_site";
+import type { InvestigationJobPayload } from "./payload";
 import { setInvestigationStatus } from "./status";
 
-const MAX_PAYLOADS = 5;
+/** Payloads fetched per case: a command's few, plus an exploit loader's stages. */
+const MAX_PAYLOADS = 12;
 
 export type InvestigationDependencies = {
-	fetchPayload(url: string, interpreters: readonly string[], signal?: AbortSignal): Promise<FetchedPayload>;
+	fetchPayload(url: string, userAgent: string, signal?: AbortSignal): Promise<FetchedPayload>;
 	pipelineConfig(): DownloadPipelineConfig;
 	investigateSample: typeof investigateSample;
 	awaitVerdict: typeof awaitVirusTotalVerdict;
 	reportPayloadHost: typeof reportPayloadHost;
+	reportDataDrop: typeof reportDataDrop;
 	probe(input: Parameters<typeof runExfiltrationProbe>[0], signal?: AbortSignal): Promise<ExfiltrationProbeResult>;
 	now(): Date;
 };
 
 function defaultDependencies(adapter: () => Pick<AbuseSkyvernAdapter, "createTask" | "getRun" | "cancelRun">): InvestigationDependencies {
 	return {
-		fetchPayload: (url, interpreters, signal) => fetchCommandPayload(url, interpreters, signal ? { signal } : {}),
+		fetchPayload: (url, userAgent, signal) => fetchPayload(url, userAgent, signal ? { signal } : {}),
 		pipelineConfig: () => downloadPipelineConfigFromEnvironment(),
 		investigateSample,
 		awaitVerdict: awaitVirusTotalVerdict,
 		reportPayloadHost,
+		reportDataDrop,
 		probe: (input, signal) => runExfiltrationProbe(input, adapter(), signal),
 		now: () => new Date(),
 	};
 }
 
-type PayloadResult = { command: InvestigationPasteCommand; evidence?: PayloadEvidence; bytes?: FetchedPayload; error?: string };
+type PayloadResult = { url: string; delivery: PayloadDelivery; evidence?: PayloadEvidence; error?: string };
+
+/** Every payload the page gets onto a visitor's device, with how it does. */
+function payloadSources(payload: InvestigationJobPayload): Array<{ url: string; delivery: PayloadDelivery }> {
+	return [
+		...payload.pasteCommands.flatMap((command) => command.payloadUrls.map((url) => ({
+			url,
+			delivery: { kind: "paste_command" as const, command: command.shown, interpreters: command.interpreters },
+		}))),
+		...(payload.exploitLoader?.stageUrls ?? []).map((url) => ({
+			url,
+			delivery: { kind: "exploit_stage" as const, frameUrl: payload.exploitLoader!.frameUrl, userAgent: payload.exploitLoader!.userAgent },
+		})),
+	];
+}
+
+function deliveryUserAgent(delivery: PayloadDelivery): string {
+	return delivery.kind === "paste_command" ? downloaderUserAgent(delivery.interpreters) : delivery.userAgent;
+}
 
 /**
- * Download, hash, and judge every payload the page's commands fetch. A
- * payload a database already knows keeps that verdict; one nobody knows is
- * submitted for public analysis and its verdict awaited, so the report can
- * cite it. A host that refuses the download is recorded, not retried.
+ * Download, hash, and judge every payload the page gets onto its visitors'
+ * devices, as the client that runs it would request it. A payload a database
+ * already knows keeps that verdict; one nobody knows is submitted for public
+ * analysis and its verdict awaited, so the report can cite it. A host that
+ * refuses the download is recorded, not retried.
  */
 async function investigatePayloads(
-	commands: readonly InvestigationPasteCommand[],
+	sources: ReadonlyArray<{ url: string; delivery: PayloadDelivery }>,
 	deps: InvestigationDependencies,
 	signal: AbortSignal | undefined,
 ): Promise<PayloadResult[]> {
 	const config = deps.pipelineConfig();
 	const results: PayloadResult[] = [];
 	const seen = new Set<string>();
-	for (const command of commands) {
-		for (const url of command.payloadUrls) {
-			if (seen.has(url) || seen.size >= MAX_PAYLOADS) continue;
-			seen.add(url);
-			signal?.throwIfAborted();
-			let fetched: FetchedPayload;
-			try {
-				fetched = await deps.fetchPayload(url, command.interpreters, signal);
-			} catch (error) {
-				if (signal?.aborted) throw error;
-				results.push({ command, error: errorText(error) });
-				continue;
-			}
-			const fetchedAt = deps.now();
-			const outcome = await deps.investigateSample({ bytes: fetched.body, remoteName: fetched.fileName }, config);
-			let evidence = payloadEvidence({ ...fetched, fetchedAt, sizeBytes: fetched.body.byteLength, outcome });
-			const analysis = evidence.submittedAnalyses.find((submitted) => submitted.provider === "virustotal");
-			if (!evidence.knownVerdict && analysis) {
-				const verdict = await deps.awaitVerdict({ sha256: evidence.sha256, analysisId: analysis.analysisId, apiKey: config.virusTotalApiKey, ...(signal ? { signal } : {}) });
-				if (verdict.state === "known") evidence = { ...evidence, knownVerdict: { provider: verdict.provider, verdict: verdict.verdict } };
-			}
-			results.push({ command, evidence, bytes: fetched });
+	for (const { url, delivery } of sources) {
+		if (seen.has(url) || seen.size >= MAX_PAYLOADS) continue;
+		seen.add(url);
+		signal?.throwIfAborted();
+		let fetched: FetchedPayload;
+		try {
+			fetched = await deps.fetchPayload(url, deliveryUserAgent(delivery), signal);
+		} catch (error) {
+			if (signal?.aborted) throw error;
+			results.push({ url, delivery, error: errorText(error) });
+			continue;
 		}
+		const fetchedAt = deps.now();
+		const outcome = await deps.investigateSample({ bytes: fetched.body, remoteName: fetched.fileName }, config);
+		let evidence = payloadEvidence({ ...fetched, fetchedAt, sizeBytes: fetched.body.byteLength, outcome });
+		const analysis = evidence.submittedAnalyses.find((submitted) => submitted.provider === "virustotal");
+		if (!evidence.knownVerdict && analysis) {
+			const verdict = await deps.awaitVerdict({ sha256: evidence.sha256, analysisId: analysis.analysisId, apiKey: config.virusTotalApiKey, ...(signal ? { signal } : {}) });
+			if (verdict.state === "known") evidence = { ...evidence, knownVerdict: { provider: verdict.provider, verdict: verdict.verdict } };
+		}
+		results.push({ url, delivery, evidence });
 	}
 	return results;
 }
 
 function payloadFindings(results: readonly PayloadResult[]): string[] {
-	return results.flatMap(({ evidence, error, command }) => evidence
-		? [
-			`We downloaded the payload from ${defangUrl(evidence.url)} as the command does (${evidence.sizeBytes} bytes, SHA-256 ${evidence.sha256}) and did not run it.`,
+	return results.flatMap(({ url, delivery, evidence, error }) => {
+		if (!evidence) {
+			return [delivery.kind === "paste_command"
+				? `The payload host for the command ${JSON.stringify(defangCommand(delivery.command))} refused the download during our check (${error}).`
+				: `The host of the exploit loader's file ${defangUrl(url)} refused the download during our check (${error}).`];
+		}
+		return [
+			delivery.kind === "paste_command"
+				? `We downloaded the payload from ${defangUrl(evidence.url)} as the command does (${evidence.sizeBytes} bytes, SHA-256 ${evidence.sha256}) and did not run it.`
+				: `We downloaded the exploit loader's file ${defangUrl(evidence.url)} as the browser it attacks would (${evidence.sizeBytes} bytes, SHA-256 ${evidence.sha256}) and did not run it.`,
 			payloadVerdictSentence(evidence),
-		]
-		: [`The payload host for the command ${JSON.stringify(defangCommand(command.shown))} refused the download during our check (${error}).`]);
+		];
+	});
 }
 
 function probeFindings(result: ExfiltrationProbeResult): string[] {
@@ -120,17 +148,30 @@ export async function runReportInvestigation(
 	if (report?.status !== "investigating") return;
 	await setInvestigationStatus(submissionId, { status: "running", updatedAt: deps.now().toISOString() });
 
-	const payloads = await investigatePayloads(payload.pasteCommands, deps, signal);
-	const pageScreenshot = payloads.some(({ evidence }) => evidence) ? await lurePageScreenshot(reportId) : undefined;
-	for (const { command, evidence } of payloads) {
-		if (!evidence) continue;
+	const payloads = await investigatePayloads(payloadSources(payload), deps, signal);
+	// A payload or data drop on the page's own site is covered by the page's
+	// report; only another host gets a linked report of its own.
+	const linkedPayloads = payloads.filter(({ evidence }) => evidence && !isSameWebsite(evidence.url, payload.pageUrl));
+	const dataDrops = (payload.exploitLoader?.dataUploads ?? []).filter((upload) => !isSameWebsite(upload.url, payload.pageUrl));
+	const pageScreenshot = linkedPayloads.length || dataDrops.length ? await lurePageScreenshot(reportId) : undefined;
+	for (const { delivery, evidence } of linkedPayloads) {
 		await deps.reportPayloadHost({
 			submissionId,
 			sourceReportId: reportId,
 			pageUrl: payload.pageUrl,
-			command: command.shown,
-			interpreters: command.interpreters,
-			payload: evidence,
+			delivery,
+			payload: evidence!,
+			...(pageScreenshot ? { pageScreenshot } : {}),
+			reporter,
+		});
+	}
+	for (const upload of dataDrops) {
+		await deps.reportDataDrop({
+			submissionId,
+			sourceReportId: reportId,
+			pageUrl: payload.pageUrl,
+			frameUrl: payload.exploitLoader!.frameUrl,
+			upload,
 			...(pageScreenshot ? { pageScreenshot } : {}),
 			reporter,
 		});
@@ -138,14 +179,18 @@ export async function runReportInvestigation(
 
 	let probe: ExfiltrationProbeResult | undefined;
 	let probeError: string | undefined;
-	try {
-		probe = await deps.probe({ reportId, submissionId, pageUrl: payload.pageUrl, reporter }, signal);
-	} catch (error) {
-		if (signal?.aborted) throw error;
-		// A retryable browser-service failure retries the whole job; the payload
-		// reports above are idempotent, so a retry re-fetches without duplicating them.
-		if ((error as { retryable?: unknown } | null)?.retryable !== false) throw error;
-		probeError = redactExternalError(error);
+	// A drive-by exploit takes nothing a visitor types or downloads: there is
+	// no form or download for the probe to try, only the decoy in front of it.
+	if (!payload.exploitLoader) {
+		try {
+			probe = await deps.probe({ reportId, submissionId, pageUrl: payload.pageUrl, reporter }, signal);
+		} catch (error) {
+			if (signal?.aborted) throw error;
+			// A retryable browser-service failure retries the whole job; the payload
+			// reports above are idempotent, so a retry re-fetches without duplicating them.
+			if ((error as { retryable?: unknown } | null)?.retryable !== false) throw error;
+			probeError = redactExternalError(error);
+		}
 	}
 
 	const findings = [...payloadFindings(payloads), ...(probe ? probeFindings(probe) : [])];
@@ -159,9 +204,9 @@ export async function runReportInvestigation(
 	await setInvestigationStatus(submissionId, {
 		status: "completed",
 		backendCount: probe?.backends.length ?? 0,
-		payloads: payloads.map(({ command, evidence: item, error }) => item
+		payloads: payloads.map(({ url, evidence: item, error }) => item
 			? { url: item.url, sha256: item.sha256, sizeBytes: item.sizeBytes, ...(item.knownVerdict ? { verdict: `${item.knownVerdict.provider}: ${item.knownVerdict.verdict}` } : {}) }
-			: { url: command.payloadUrls[0] ?? command.shown, ...(error ? { error } : {}) }),
+			: { url, ...(error ? { error } : {}) }),
 		...(probeError ? { probeError } : {}),
 		updatedAt: deps.now().toISOString(),
 	});

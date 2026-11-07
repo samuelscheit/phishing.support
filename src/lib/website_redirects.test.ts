@@ -44,7 +44,7 @@ function archiveOf(hops: WebsiteNavigationHop[]): WebsiteArchiveResult {
 /** Streams the classification the production model returned for submission 373426928255766528, then the narrative. */
 function phishingModel(): AnalysisClient {
 	return scriptedModel([
-		JSON.stringify({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign In Email or phone number Password", collectionFieldRefs: ["f1", "f2"], continuationRef: "" }),
+		JSON.stringify({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign In Email or phone number Password", collectionFieldRefs: ["f1", "f2"], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false }),
 		"The captured page impersonates Netflix and asks for an email and password.",
 	]);
 }
@@ -52,7 +52,7 @@ function phishingModel(): AnalysisClient {
 /** Classifies the captured page as harmless, as the model did for the Wikipedia decoy of submission 376291398434951215. */
 function benignModel(): AnalysisClient {
 	return scriptedModel([
-		JSON.stringify({ finding: "benign", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "" }),
+		JSON.stringify({ finding: "benign", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false }),
 		"The page is a Wikipedia language and search landing page.",
 	]);
 }

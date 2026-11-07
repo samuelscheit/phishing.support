@@ -7,7 +7,8 @@ import { getDomain } from "tldts";
 import { getBrowser, getBrowserPage } from "./browser";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
-import type { WebsiteCloaking, WebsiteKitResource, WebsiteNavigationHop, WebsitePageAction, WebsitePerformedAction } from "./website_types";
+import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsitePageAction, WebsitePerformedAction } from "./website_types";
+import { hiddenFrames, recordFrameTraffic } from "./website_hidden_frames";
 import { CAPTCHA_PROVIDER_FRAME, performPageAction, WebsitePageActionTargetMissingError } from "./website_page_actions";
 import { isSameWebsite, websiteSite } from "./website_site";
 // @ts-ignore
@@ -54,6 +55,10 @@ export type WebsiteArchiveResult = {
 	text: Buffer;
 	/** Scripts and stylesheets the live capture received, from any host; MHTML drops scripts and re-serializes CSS. */
 	kitResources?: WebsiteKitResource[];
+	/** Frames of the captured page no visitor can see, with the code they loaded; MHTML keeps none of it. */
+	hiddenFrames?: WebsiteHiddenFrame[];
+	/** The browser the live capture presented; absent means the Windows desktop. */
+	device?: WebsiteDevice;
 	/** Non-empty when an uploaded snapshot claims a different host than the submitted target. */
 	attributionError?: string;
 	/** The open browser of a live capture made with `keepSession`. */
@@ -124,6 +129,10 @@ export type ArchiveWebsiteOptions = {
 	verificationGate?: WebsiteVerificationGate;
 	/** Kit resources the original live capture of the retained MHTML received. */
 	kitResources?: WebsiteKitResource[];
+	/** Hidden frames the original live capture of the retained MHTML recorded. */
+	hiddenFrames?: WebsiteHiddenFrame[];
+	/** The browser a live capture presents, and the retained MHTML was captured with. */
+	device?: WebsiteDevice;
 	/**
 	 * Keep the live capture's browser open as the result's `session`, so the
 	 * caller can act on the captured page in the same visit; the caller closes it.
@@ -201,6 +210,8 @@ async function archiveMhtmlSnapshot(options: ArchiveWebsiteOptions & { mhtmlSnap
 		...(attributionError ? { attributionError } : {}),
 		...(options.verificationGate ? { verificationGate: options.verificationGate } : {}),
 		...(options.kitResources?.length ? { kitResources: options.kitResources } : {}),
+		...(options.hiddenFrames?.length ? { hiddenFrames: options.hiddenFrames } : {}),
+		...(options.device && options.device !== "desktop" ? { device: options.device } : {}),
 	};
 }
 
@@ -770,9 +781,11 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 		// Browser Fabric owns the leased profile context. Creating an
 		// application-side incognito context would bypass that profile and egress
 		// boundary, so archive work always uses the Fabric lease's default context.
-		const { page } = await getBrowserPage(await browser.defaultBrowserContext().newPage());
+		const device = options.device ?? "desktop";
+		const { page, userAgent } = await getBrowserPage(await browser.defaultBrowserContext().newPage(), device);
 
 		const kitResources = recordKitResources(page);
+		const frameTraffic = recordFrameTraffic(page);
 		// The last final (non-redirect) main-frame document response, so a
 		// document that replaces an error interstitial is seen with its status.
 		let latestDocumentResponse = null as HTTPResponse | null;
@@ -849,11 +862,14 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 			const resolvedMhtml = Buffer.from((await cdp.send("Page.captureSnapshot", { format: "mhtml" })).data, "utf-8");
 			const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? documentAddress(page.url(), documentUrl) ?? page.url();
 			const capturedDocument = await archiveMhtmlSnapshot({ url, archivedUrl: capturedDocumentUrl, navigationHops: hopsTo(capturedDocumentUrl), mhtmlSnapshot: resolvedMhtml });
+			const frames = await hiddenFrames(page, frameTraffic, userAgent);
 			return {
 				...capturedDocument,
 				route: FABRIC_EGRESS_LABEL[egress],
 				screenshotPng: screenshotUrl === capturedDocumentUrl ? Buffer.from(screenshotBytes) : undefined,
 				kitResources: await kitResources.settled(),
+				...(frames.length ? { hiddenFrames: frames } : {}),
+				...(device !== "desktop" ? { device } : {}),
 				...(verificationGate ? { verificationGate } : {}),
 				...(performedAction ? { performedAction } : {}),
 			};

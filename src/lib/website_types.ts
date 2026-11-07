@@ -18,7 +18,94 @@ export type WebsiteNavigationHop = {
 	 * showed. The page was captured as an earlier step of the case.
 	 */
 	performedAction?: WebsitePerformedAction;
+	/**
+	 * Set when the page turned desktop visitors away to a phone (a QR code, a
+	 * link to copy, "not available on desktop") and the capture opened it
+	 * again as that phone; `redirectTo` is the page the phone was shown.
+	 */
+	revisitedAs?: WebsiteMobileDevice;
 	contentCaptured: boolean;
+};
+
+/** Whether the capture took a step of the page's flow from this hop: followed its link, acted on it, or opened it again as a phone. */
+export function isFlowStepHop(hop: WebsiteNavigationHop): boolean {
+	return Boolean(hop.followedLink || hop.performedAction || hop.revisitedAs);
+}
+
+/** The browser a capture presents: a Windows desktop, or a phone a mobile-only kit asks for. */
+export type WebsiteDevice = "desktop" | WebsiteMobileDevice;
+export type WebsiteMobileDevice = "iphone";
+
+/** How a person reads the device a page was opened as. */
+export const WEBSITE_DEVICE_LABEL: Record<WebsiteDevice, string> = {
+	desktop: "Google Chrome on Windows",
+	iphone: "Safari on an iPhone (iOS 18.6.2)",
+};
+
+/** A response a hidden frame received while the capture watched it. */
+export type WebsiteFrameResource = {
+	url: string;
+	/** Chromium's resource type: `document`, `script`, `fetch`, `xhr`, … */
+	type: string;
+	status: number;
+	size: number;
+	sha256: string;
+};
+
+/** A request other than GET a hidden frame sent: where a loader posts what it took. */
+export type WebsiteFrameRequest = {
+	url: string;
+	method: string;
+	/** The start of its body, as sent. */
+	body?: string;
+};
+
+/** Data a loader's code sends off the device, and the endpoint it sends it to. */
+export type WebsiteDataUpload = {
+	url: string;
+	/** What the code around the upload names, e.g. `keychain`, `wallet`. */
+	data: string[];
+	/** Whether the capture saw the request go out, not just the code that sends it. */
+	observed: boolean;
+};
+
+/**
+ * What a hidden frame's code was found to do, from its source and the
+ * scripts it loaded. These are hints for the classifier and facts for the
+ * report; the classifier's quote from the source is what decides.
+ */
+export type WebsiteExploitSignals = {
+	/** Platform tokens the code reads from the visitor's User-Agent to choose what to load, e.g. `iPhone OS`. */
+	platformGate: string[];
+	/** The code fetches code and runs it (`eval`, `new Function`). */
+	runsFetchedCode: boolean;
+	/** Files of the next stages: what the frame loaded, and the code files its source names. */
+	stageUrls: string[];
+	dataUploads: WebsiteDataUpload[];
+};
+
+/**
+ * A frame on the captured page that no visitor can see: zero-sized,
+ * off-screen, or hidden by style, or inside such a frame. Exploit kits run
+ * there; its source is evidence that the MHTML (which drops scripts) and the
+ * page text (which drops what no one sees) both lose.
+ */
+export type WebsiteHiddenFrame = {
+	/** Reference assigned in frame order; the classifier cites it. */
+	ref: string;
+	url: string;
+	/** Why no visitor sees it, e.g. `0×0 size`, `positioned off-screen`. */
+	hiddenBy: string;
+	/** Hash and size of the frame's document as received. */
+	sha256: string;
+	size: number;
+	/** The document's source, as received (bounded). */
+	source: string;
+	resources: WebsiteFrameResource[];
+	sentRequests: WebsiteFrameRequest[];
+	signals: WebsiteExploitSignals;
+	/** The User-Agent the frame was served to; its loader may serve its stages only to it. */
+	userAgent: string;
 };
 
 /** A button on a captured page that continues its flow; found again on the live page by its caption. */
@@ -106,7 +193,8 @@ export type WebsiteKitResource = {
 /**
  * `phishing` impersonates a trusted brand to take credentials or payment;
  * `malware` gets the visitor to download, install, or run something, whether
- * or not it borrows a real brand. Only these two findings are reported.
+ * or not it borrows a real brand, or attacks the visitor's device from a
+ * frame no one sees (a drive-by exploit). Only these two findings are reported.
  */
 export type WebsiteSiteFinding = "phishing" | "malware" | "benign" | "prank_or_troll" | "insufficient_evidence";
 
@@ -139,6 +227,11 @@ export type WebsiteSiteClassification = {
 	evidenceQuote?: string;
 	/** Captured data-entry fields through which the page itself collects the data, when it has any. */
 	collectionFields?: WebsiteDataEntryField[];
+	/**
+	 * Set for a drive-by exploit: the hidden frame whose source the quote comes
+	 * from, instead of the page text.
+	 */
+	hiddenFrame?: { ref: string; url: string };
 	/** Why the classifier's phishing or malware claim was not corroborated by the captured page. */
 	rejectedClaim?: string;
 };

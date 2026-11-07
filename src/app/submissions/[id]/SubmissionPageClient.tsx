@@ -19,7 +19,7 @@ import type { SubmissionDetail as ApiSubmissionDetail } from "@/lib/submissions/
 import { formatUtcDateTime } from "@/lib/date_time";
 import { cn } from "../../../web_lib/util";
 import { selectDisplayAnalysisRuns } from "@/lib/analysis_run_view";
-import { describeDataEntryField, humanCheckUnsolved, type WebsitePhishingBasis } from "@/lib/website_types";
+import { describeDataEntryField, humanCheckUnsolved, WEBSITE_DEVICE_LABEL, type WebsitePhishingBasis } from "@/lib/website_types";
 import { websiteSiteName } from "@/lib/website_site";
 import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website_capture_files";
 
@@ -379,7 +379,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 											? "Prank / troll — not phishing"
 											: finding === "insufficient_evidence" ? "Insufficient evidence"
 												: finding === "phishing" ? (assessment?.phishingBasis ? `Phishing — ${PHISHING_BASIS_LABELS[assessment.phishingBasis]}` : "Phishing")
-													: finding === "malware" ? "Malware distribution"
+													: finding === "malware" ? (assessment?.hiddenFrame ? "Malware — drive-by exploit in a hidden frame" : "Malware distribution")
 														: finding === "benign" ? "Not phishing or malware" : undefined;
 										return (
 											<li key={`${hop.index}:${hop.url}`} className="rounded border bg-background p-2">
@@ -387,7 +387,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 													<div className="min-w-0 space-y-1">
 														<div className="break-all font-mono text-xs">{hop.url}</div>
 														<div className="text-xs text-muted-foreground">
-															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured and analyzed" : hop.followedLink ? " · Page captured, its link followed" : hop.performedAction ? (hop.performedAction.kind === "fill" ? " · Page captured, its field submitted" : " · Page captured, its button clicked") : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
+															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured and analyzed" : hop.followedLink ? " · Page captured, its link followed" : hop.performedAction ? (hop.performedAction.kind === "fill" ? " · Page captured, its field submitted" : " · Page captured, its button clicked") : hop.revisitedAs ? " · Page captured, it turns desktops away to a phone" : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
 														</div>
 														{hop.followedLink && hop.redirectTo ? (
 															<div className="break-all text-xs text-muted-foreground">Its link “{hop.followedLink.label}” opens {hop.redirectTo}</div>
@@ -397,6 +397,8 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 																	? <>Entering the made-up “{hop.performedAction.value}” into “{describeDataEntryField(hop.performedAction.field)}”{humanCheckUnsolved(hop.performedAction.humanCheck) ? " (its captcha never passed)" : hop.performedAction.humanCheck === "passed_after_click" ? " (its captcha passed once its checkbox was clicked)" : ""} shows {hop.redirectTo}</>
 																	: <>Clicking its button “{hop.performedAction.control.label}” shows {hop.redirectTo}</>}
 															</div>
+														) : hop.revisitedAs && hop.redirectTo ? (
+															<div className="break-all text-xs text-muted-foreground">Opened again as {WEBSITE_DEVICE_LABEL[hop.revisitedAs]}, it shows {hop.redirectTo}</div>
 														) : hop.redirectTo ? <div className="break-all text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
 														{verificationGate && hop.contentCaptured ? (
 															<div className="text-xs text-muted-foreground">Behind the page's own “{verificationGate.label}” gate, clicked to reveal it</div>

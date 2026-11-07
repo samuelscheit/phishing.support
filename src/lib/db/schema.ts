@@ -4,7 +4,7 @@ import { WhoISInfo } from "../website_info";
 import { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
 import { MailData } from "../mail_ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
-import type { WebsiteCloaking, WebsiteKitResource, WebsiteNavigationHop, WebsiteSiteAssessment } from "../website_types";
+import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteSiteAssessment } from "../website_types";
 
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
@@ -42,6 +42,10 @@ export type WebsiteSubmissionData = {
 	verificationGate?: { label: string };
 	/** Scripts and stylesheets, from any host, received by the live capture; absent for uploaded or retained MHTML. */
 	kitResources?: WebsiteKitResource[];
+	/** Frames of the analyzed page no visitor can see, with the code they loaded; absent for uploaded MHTML. */
+	hiddenFrames?: WebsiteHiddenFrame[];
+	/** The phone the analyzed page was captured as, when it turned desktops away. */
+	device?: WebsiteDevice;
 	/** Set when the browser service (not the site) failed; the analysis is re-queued automatically. */
 	autoRetry?: { attempts: number; nextAttemptAt: string; reason: string };
 	/** Evidence collected after the verdict and before the report reaches any provider. */

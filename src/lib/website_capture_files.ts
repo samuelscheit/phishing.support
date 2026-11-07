@@ -1,4 +1,4 @@
-import type { WebsiteNavigationHop } from "./website_types";
+import { isFlowStepHop, type WebsiteNavigationHop } from "./website_types";
 
 /**
  * File names of one captured page of a website case. A kit can spread its
@@ -18,9 +18,9 @@ export function websiteCaptureFileNames(step: number) {
 	};
 }
 
-/** The step of the analyzed page: one per link the capture followed or page action it took to reach it. */
+/** The step of the analyzed page: one per link the capture followed, page action it took, or phone it reopened the page as to reach it. */
 export function analyzedCaptureStep(navigationHops: readonly WebsiteNavigationHop[] | undefined): number {
-	return navigationHops?.filter((hop) => hop.followedLink || hop.performedAction).length ?? 0;
+	return navigationHops?.filter(isFlowStepHop).length ?? 0;
 }
 
 /** The newest artifact with this name; a retry may store the same page again. */

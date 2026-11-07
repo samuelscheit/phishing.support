@@ -5,7 +5,7 @@ import { userAgent as browserUserAgent } from "../../constants";
 import { capturedDocumentContent } from "../../website_archive";
 import { encodedPayloadToken, extractPasteCommands, type PasteCommand } from "../../malware/paste_commands";
 import { defangCommand } from "../../malware/defang";
-import { downloaderUserAgent, fetchCommandPayload, type FetchedPayload } from "../../malware/payload_fetch";
+import { downloaderUserAgent, fetchPayload, type FetchedPayload } from "../../malware/payload_fetch";
 import { payloadLookupUrl } from "../../malware/payload_evidence";
 
 export type LiveCheck = { url: string; userAgent: string; as: string; status: number | "error"; bytes?: number; sha256?: string };
@@ -34,7 +34,7 @@ export type DecisionEvidence = {
 
 export type EvidenceFetcher = (url: string, userAgent: string) => Promise<FetchedPayload>;
 
-const defaultFetcher: EvidenceFetcher = (url, userAgent) => fetchCommandPayload(url, [], { userAgent });
+const defaultFetcher: EvidenceFetcher = (url, userAgent) => fetchPayload(url, userAgent);
 
 /** One request, recorded as the reviewer would see it; the body is returned separately. */
 async function check(fetcher: EvidenceFetcher, url: string, userAgent: string, as: string): Promise<{ check: LiveCheck; body?: Buffer }> {
