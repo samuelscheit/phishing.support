@@ -19,6 +19,12 @@ const SIBLING_SOURCE = /^(?:kit|origin)-sibling:/;
 /** A redirect hand-off opens the destination's own case; it inherits its parent's lineage. */
 const REDIRECT_SOURCE = /^redirect:(\d{1,20})$/;
 const MAX_REDIRECT_LINEAGE = 5;
+
+/** The case a redirect hand-off came from, when `source` names one. */
+export function redirectParentId(source: string | null | undefined): bigint | undefined {
+	const parent = REDIRECT_SOURCE.exec(source ?? "")?.[1];
+	return parent === undefined ? undefined : BigInt(parent);
+}
 /**
  * Only a page our classifier confirmed as a credential or payment kit may seed
  * a search, and never a site that was itself found by one. Without this a
@@ -35,9 +41,9 @@ async function discoveredBySiblingSearch(source: string | null | undefined): Pro
 	let current = source ?? "";
 	for (let depth = 0; depth <= MAX_REDIRECT_LINEAGE; depth++) {
 		if (SIBLING_SOURCE.test(current)) return true;
-		const parent = REDIRECT_SOURCE.exec(current)?.[1];
-		if (!parent) return false;
-		current = (await SubmissionsEntity.get(BigInt(parent)))?.source ?? "";
+		const parent = redirectParentId(current);
+		if (parent === undefined) return false;
+		current = (await SubmissionsEntity.get(parent))?.source ?? "";
 	}
 	// An implausibly long redirect chain is not trusted as an original report.
 	return true;

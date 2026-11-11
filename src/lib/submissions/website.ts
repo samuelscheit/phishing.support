@@ -10,7 +10,15 @@ export { SubmissionRetryError } from "./retry";
 
 export type WebsiteSubmissionOptions = ReporterMetadata
 	& Pick<AnalyzeWebsiteOptions, "url" | "mhtmlSnapshot" | "archivedUrl" | "navigationHops" | "screenshotSnapshot" | "captureRoute" | "verificationGate" | "kitResources" | "hiddenFrames" | "device">
-	& { source?: string };
+	& {
+		source?: string;
+		/**
+		 * Opens a separate case for another visit of a site that already has
+		 * one, named by this key (a redirector watch's daily check). Without it
+		 * a site has one case.
+		 */
+		visit?: string;
+	};
 
 type WebsiteAnalysisRecoveryOptions = ReporterMetadata & {
 	submissionId: bigint;
@@ -99,9 +107,13 @@ export function websiteSubmissionUrl(url: string): string {
 	return parsed.toString();
 }
 
-/** One case per site; tenants of a shared host such as sites.google.com are separate sites. */
-export function websiteSubmissionDedupeKey(url: string): string {
-	return `website-${websiteSite(url)}`;
+/**
+ * One case per site; tenants of a shared host such as sites.google.com are
+ * separate sites. A named visit of the site is a case of its own:
+ * `website-<site>#<visit>`.
+ */
+export function websiteSubmissionDedupeKey(url: string, visit?: string): string {
+	return `website-${websiteSite(url)}${visit ? `#${visit}` : ""}`;
 }
 
 export async function createWebsiteSubmission(
@@ -110,12 +122,12 @@ export async function createWebsiteSubmission(
 ): Promise<bigint> {
 	const streamId = generateId();
 	const url = websiteSubmissionUrl(options.url);
-	const { source } = options;
+	const { source, visit: _visit, ...analysisOptions } = options;
 
 	const existingId = await SubmissionsEntity.create({
 		kind: "website",
 		data: { kind: "website", website: { url } },
-		dedupeKey: websiteSubmissionDedupeKey(url),
+		dedupeKey: websiteSubmissionDedupeKey(url, options.visit),
 		// The worker starts immediately after insertion. Mark it running at the
 		// durable boundary so a process restart cannot leave a submission looking
 		// perpetually new while its first WHOIS lookup is in flight.
@@ -129,7 +141,7 @@ export async function createWebsiteSubmission(
 
 	if (existingId !== streamId) return existingId;
 
-	startAnalysis({ submissionId: streamId, ...options, url }).catch(console.error);
+	startAnalysis({ submissionId: streamId, ...analysisOptions, url }).catch(console.error);
 
 	return streamId;
 }

@@ -164,7 +164,7 @@ export class SubmissionsEntity {
 			.limit(params.limit);
 	}
 
-	/** Website submissions for `domain` itself or any host under it, by their dedupe key (`website-<host>`). */
+	/** Website submissions for `domain` itself or any host under it, visits included, by their dedupe key (`website-<host>[#<visit>]`). */
 	static async listWebsitesOnDomain(domain: string) {
 		const db = await getDb();
 		return db
@@ -172,7 +172,12 @@ export class SubmissionsEntity {
 			.from(submissions)
 			.where(and(
 				eq(submissions.kind, "website"),
-				or(eq(submissions.dedupeKey, `website-${domain}`), sql`${submissions.dedupeKey} like ${`website-%.${domain}`}`),
+				or(
+					eq(submissions.dedupeKey, `website-${domain}`),
+					sql`${submissions.dedupeKey} like ${`website-%.${domain}`}`,
+					sql`${submissions.dedupeKey} like ${`website-${domain}#%`}`,
+					sql`${submissions.dedupeKey} like ${`website-%.${domain}#%`}`,
+				),
 			));
 	}
 

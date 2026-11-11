@@ -6,6 +6,7 @@ import { decodeImageEvidence, normalizeAbuseTarget, normalizeObservedUrl, type D
 import { AbuseInputError, hashStableJson, isPublicIp, sha256Hex } from "./security";
 import { setInvestigationStatus } from "../investigation/status";
 import { enqueueKitSiblingDiscovery } from "./origin/kit_job";
+import { enqueueRedirectorWatch } from "./origin/redirector_watch";
 import { websiteSite } from "../website_site";
 import type { ReportableWebsiteFinding, WebsiteHiddenFrame } from "../website_types";
 import type { PasteCommand } from "../malware/paste_commands";
@@ -196,6 +197,7 @@ export async function reportConfirmedWebsiteAbuse(params: ConfirmedWebsiteAbuse)
 	});
 	if (created.created) await setInvestigationStatus(params.submissionId, { status: "queued", updatedAt: new Date().toISOString() });
 	await enqueueKitSiblingDiscovery(created.reportId, params.submissionId);
+	await enqueueRedirectorWatch(created.reportId, params.submissionId);
 	return created;
 }
 

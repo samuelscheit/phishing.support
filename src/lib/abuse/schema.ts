@@ -93,6 +93,7 @@ export const abuseJobTypes = [
 	"report_origin_host",
 	"discover_kit_siblings",
 	"analyze_kit_sibling",
+	"watch_redirector",
 ] as const;
 export type AbuseJobType = (typeof abuseJobTypes)[number];
 

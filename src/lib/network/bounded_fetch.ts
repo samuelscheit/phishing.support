@@ -89,7 +89,7 @@ async function withAttemptDeadline<T>(
 	}
 }
 
-async function readResponseBody(response: Response, maxBytes: number): Promise<Buffer> {
+export async function readResponseBody(response: Response, maxBytes: number): Promise<Buffer> {
 	const lengthHeader = Number(response.headers.get("content-length"));
 	if (Number.isFinite(lengthHeader) && lengthHeader > maxBytes) {
 		throw new Error("Response exceeded its size limit.");

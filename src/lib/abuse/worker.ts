@@ -15,6 +15,7 @@ import { ensureCorrespondencePolls, pollProviderCorrespondence } from "./worker/
 import { ensureOriginHostDisclosureJobs } from "./origin/disclosure";
 import { reportOriginHostJob } from "./origin/report";
 import { analyzeKitSibling, discoverKitSiblings } from "./origin/kit_job";
+import { watchRedirector } from "./origin/redirector_watch";
 import { classifyReply, monitorProviderReply } from "./worker/mail";
 import { runGenericProviderPortal } from "./worker/portal";
 import { reconcileGenericSkyvern } from "./worker/reconcile";
@@ -71,6 +72,7 @@ const EXTERNAL_JOB_TYPES = [
 	"follow_up_provider_decision",
 	"discover_kit_siblings",
 	"analyze_kit_sibling",
+	"watch_redirector",
 ] as const satisfies readonly AbuseJobType[];
 
 /**
@@ -415,7 +417,7 @@ export class AbuseWorker {
 			}
 			return;
 		}
-		if (["report_origin_host", "discover_kit_siblings", "analyze_kit_sibling"].includes(job.jobType)) {
+		if (["report_origin_host", "discover_kit_siblings", "analyze_kit_sibling", "watch_redirector"].includes(job.jobType)) {
 			// Infrastructure and kit discovery are supplementary follow-up. Failure must not turn
 			// a successfully submitted phishing report into a reporting failure.
 			await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
@@ -525,6 +527,9 @@ export class AbuseWorker {
 				return;
 			case "analyze_kit_sibling":
 				await analyzeKitSibling({ reportId: idFrom(job.reportId, "reportId"), url: job.payload?.url, signal });
+				return;
+			case "watch_redirector":
+				await watchRedirector({ job, signal });
 				return;
 			default:
 				throw new Error(`Unsupported abuse job type ${job.jobType}.`);
