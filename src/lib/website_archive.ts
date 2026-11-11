@@ -551,7 +551,17 @@ function scanVerificationGate(dataEntrySelector: string): FrameGateScan {
 		return box.width > 4 && box.height > 4 && style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0.1;
 	};
 	if ([...document.querySelectorAll(dataEntrySelector)].some(visible)) return { fields: true, controls: 0, label: null };
-	const clickable = [...document.querySelectorAll("[role=button], [role=checkbox], button, input[type=checkbox], label, [tabindex]")].filter(visible);
+	// A kit often draws its checkbox as a bare <div> whose script listens for the
+	// click (x-com.email's fake Turnstile); the hand cursor it styles is the only
+	// mark it carries. The cursor is inherited, so the element that sets it is the
+	// one the listener sits on. Links lead elsewhere and are no gate.
+	const setsPointer = (element: Element) => !element.matches("a[href], area[href]")
+		&& getComputedStyle(element).cursor === "pointer"
+		&& (!element.parentElement || getComputedStyle(element.parentElement).cursor !== "pointer");
+	const clickable = [...new Set([
+		...document.querySelectorAll("[role=button], [role=checkbox], button, input[type=checkbox], label, [tabindex]"),
+		...[...document.querySelectorAll("body *")].filter(setsPointer),
+	])].filter(visible);
 	// A control's caption is its own text or, for an empty checkbox drawn next
 	// to its caption, the text of the nearest widget around it that holds no
 	// other control.

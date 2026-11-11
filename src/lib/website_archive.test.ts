@@ -1109,6 +1109,127 @@ location.replace(URL.createObjectURL(new Blob(["<!DOCTYPE html><html><body>${app
 		}
 	}, 60_000);
 
+	describe("a gate drawn as a bare element that only its script and hand cursor mark as clickable", () => {
+		// x-com.email (production case 378201777197027393): a fake Cloudflare
+		// Turnstile for x.com, a <div> with a click listener and cursor:pointer,
+		// whose caption and Privacy/Terms anchors inherit the cursor.
+		const turnstileCss = `<style>
+.cf-turnstile-wrapper { width: 300px; height: 65px; display: flex; align-items: center; cursor: pointer; }
+.cf-turnstile-wrapper.verifying { pointer-events: none; }
+.turnstile-checkbox { width: 24px; height: 24px; border: 2px solid #666; }
+.footer a { color: #888; }
+</style>`;
+		const turnstile = (id: string, caption = "Verify you are human") => `<div class="cf-turnstile-wrapper" id="${id}"><div class="turnstile-inner">
+<div class="turnstile-left"><div class="turnstile-checkbox"></div><span class="turnstile-label">${caption}</span></div>
+<div class="turnstile-right"><div class="privacy-links"><a>Privacy</a><a>Terms</a></div></div></div></div>`;
+		const fakeChallenge = (body: string, script: string) => `<!DOCTYPE html><html lang="en"><head><title>Just a moment...</title>${turnstileCss}</head><body>
+<div class="main-content"><span class="host-name">x.com</span>
+<h1>Verifying you are human. This may take a few seconds.</h1><p>x.com needs to review the security of your connection before proceeding.</p>
+${body}</div>
+<footer class="footer">Ray ID: <code>292ba0375e2a57e0</code> • Performance &amp; security by <a>Cloudflare</a></footer>
+<script>${script}</script></body></html>`;
+		const xLogin = `<h1>Sign in to X</h1><input name="text" autocomplete="username" placeholder="Phone, email, or username"><input type="password" name="password" placeholder="Password"><button>Log in</button>`;
+
+		function serveChallenge(page: string, hits: string[]) {
+			return Bun.serve({
+				port: 0,
+				fetch: (request) => {
+					const { pathname } = new URL(request.url);
+					hits.push(pathname);
+					if (pathname === "/i/flow/login") return new Response(`<!DOCTYPE html><html><body>${xLogin}</body></html>`, { headers: { "content-type": "text/html" } });
+					return new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
+				},
+			});
+		}
+
+		test("clicks the fake Turnstile and captures the X sign-in page it navigates to", async () => {
+			const hits: string[] = [];
+			const server = serveChallenge(fakeChallenge(turnstile("turnstile"), `
+const box = document.getElementById("turnstile");
+box.addEventListener("click", () => {
+	box.classList.add("verifying");
+	setTimeout(() => { location.href = "/i/flow/login"; }, 800);
+});`), hits);
+			try {
+				const url = `http://127.0.0.1:${server.port}/`;
+				const loginUrl = `http://127.0.0.1:${server.port}/i/flow/login`;
+				const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 4_000, getBrowser: launch });
+
+				expect(archive.verificationGate).toEqual({ label: "Verify you are human" });
+				expect(archive.url).toBe(loginUrl);
+				expect(archive.navigationHops).toEqual([
+					expect.objectContaining({ index: 0, url, status: 200, redirectTo: loginUrl, contentCaptured: false }),
+					expect.objectContaining({ index: 1, url: loginUrl, status: 200, contentCaptured: true }),
+				]);
+				const text = archive.text.toString();
+				expect(text).toContain("Sign in to X");
+				expect(text).not.toContain("Verifying you are human");
+				expect(hits).toEqual(["/", "/i/flow/login"]);
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+
+		test("captures the sign-in form a clicked bare gate swaps into the same page", async () => {
+			const hits: string[] = [];
+			const server = serveChallenge(fakeChallenge(`${turnstile("turnstile")}<div id="content"></div>`, `
+document.getElementById("turnstile").addEventListener("click", async () => {
+	const html = await (await fetch("/i/flow/login")).text();
+	document.querySelector(".main-content").innerHTML = html;
+});`), hits);
+			try {
+				const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 4_000, getBrowser: launch });
+
+				expect(archive.verificationGate).toEqual({ label: "Verify you are human" });
+				expect(archive.text.toString()).toContain("Phone, email, or username");
+				expect(hits).toEqual(["/", "/i/flow/login"]);
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+
+		test("never takes a link captioned like a gate for one", async () => {
+			const hits: string[] = [];
+			const server = serveChallenge(fakeChallenge(`<p><a href="/i/flow/login">Verify you are human</a></p>`, ""), hits);
+			try {
+				const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 1_000, getBrowser: launch });
+
+				expect(archive.verificationGate).toBeUndefined();
+				expect(hits).toEqual(["/"]);
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+
+		test("leaves a page alone when two bare elements could be the gate", async () => {
+			const hits: string[] = [];
+			const server = serveChallenge(fakeChallenge(`${turnstile("first")}${turnstile("second", "I'm not a robot")}`, `
+for (const id of ["first", "second"]) document.getElementById(id).addEventListener("click", () => { location.href = "/i/flow/login"; });`), hits);
+			try {
+				const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 1_000, getBrowser: launch });
+
+				expect(archive.verificationGate).toBeUndefined();
+				expect(hits).toEqual(["/"]);
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+
+		test("never clicks a hand-cursor element whose caption is no human check", async () => {
+			const hits: string[] = [];
+			const server = serveChallenge(fakeChallenge(turnstile("turnstile", "Continue to x.com"), `
+document.getElementById("turnstile").addEventListener("click", () => { location.href = "/i/flow/login"; });`), hits);
+			try {
+				const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 1_000, getBrowser: launch });
+
+				expect(archive.verificationGate).toBeUndefined();
+				expect(hits).toEqual(["/"]);
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+	});
+
 	describe("acting on the captured page in the same visit", () => {
 		const html = (body: string, headers: Record<string, string> = {}) => new Response(`<!DOCTYPE html><html><body>${body}</body></html>`, { headers: { "content-type": "text/html; charset=utf-8", ...headers } });
 		const signIn = `<h1>Enter password</h1><input type="password" name="passwd" placeholder="Password"><button>Sign in</button>`;
