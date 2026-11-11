@@ -42,14 +42,21 @@ const CHECK_TIMEOUT_MS = 15_000;
 /** A page that only sends its visitor on is a few hundred bytes; a kit page that big holds no redirect worth reading. */
 const MAX_PAGE_BYTES = 512 * 1024;
 
+/** Kept of a page the redirector served, as evidence of how it sends visitors on. */
+const MAX_EVIDENCE_PAGE_CHARACTERS = 64 * 1024;
+
+/** The last page the redirector served on its own site: the one that sent the visitor on, or that stayed. */
+export type RedirectorPage = { url: string; status: number; html: string };
+
 /** Where the cheap check of a redirector ended. */
-export type RedirectorCheck =
+export type RedirectorCheck = (
 	/** The redirector sent the visitor to another site; `url` is the last page reached there. */
 	| { kind: "destination"; url: string; urls: string[] }
 	/** The redirector answered with a page of its own that sends the visitor nowhere a plain client can follow. */
 	| { kind: "stays"; urls: string[] }
 	/** The redirector did not answer, or answered with an error, and sent the visitor nowhere. */
-	| { kind: "unreachable"; reason: string; urls: string[] };
+	| { kind: "unreachable"; reason: string; urls: string[] }
+) & { page?: RedirectorPage };
 
 /**
  * The page a document sends its visitor to by itself: a `<meta http-equiv="refresh">`
@@ -95,7 +102,8 @@ export async function checkRedirector(url: string, dependencies: RedirectorCheck
 	const urls: string[] = [];
 	let current = url;
 	let failure: string | undefined;
-	for (let page = 0; page <= MAX_PAGE_REDIRECTS; page++) {
+	let page: RedirectorPage | undefined;
+	for (let step = 0; step <= MAX_PAGE_REDIRECTS; step++) {
 		let response: Response;
 		try {
 			const answer = await fetchThroughPublicRedirects(current, {
@@ -120,13 +128,16 @@ export async function checkRedirector(url: string, dependencies: RedirectorCheck
 		const isHtml = /\bhtml\b/i.test(response.headers.get("content-type") ?? "text/html");
 		const body = isHtml ? await readResponseBody(response, MAX_PAGE_BYTES).catch(() => undefined) : undefined;
 		if (!isHtml) await response.body?.cancel().catch(() => undefined);
-		const next = body ? documentRedirect(body.toString("utf8"), urls.at(-1)!) : undefined;
+		const html = body?.toString("utf8");
+		if (html !== undefined && websiteSite(urls.at(-1)!) === site) page = { url: urls.at(-1)!, status: response.status, html: html.slice(0, MAX_EVIDENCE_PAGE_CHARACTERS) };
+		const next = html ? documentRedirect(html, urls.at(-1)!) : undefined;
 		if (!next || urls.includes(next)) break;
 		current = next;
 	}
 	const away = urls.filter((reached) => websiteSite(reached) !== site);
-	if (away.length) return { kind: "destination", url: away.at(-1)!, urls };
-	return failure ? { kind: "unreachable", reason: failure, urls } : { kind: "stays", urls };
+	const evidence = page ? { page } : {};
+	if (away.length) return { kind: "destination", url: away.at(-1)!, urls, ...evidence };
+	return failure ? { kind: "unreachable", reason: failure, urls, ...evidence } : { kind: "stays", urls, ...evidence };
 }
 
 const watchStateSchema = z.object({
@@ -157,21 +168,37 @@ export function redirectorHop(hops: readonly WebsiteNavigationHop[], destination
 	return hop;
 }
 
+/** A confirmed destination's redirector, with the chain it was recorded in. */
+export type RedirectorOf = {
+	url: string;
+	destinationUrl: string;
+	/** The submitted case whose capture went through the redirector to the destination. */
+	parent: { id: bigint; createdAt: Date; hops: WebsiteNavigationHop[] };
+};
+
+/** The redirector a destination case was reached through, from the chain of the case that handed off to it. */
+export async function redirectorOf(submissionId: bigint): Promise<RedirectorOf | undefined> {
+	const destination = await SubmissionsEntity.get(submissionId);
+	const parentId = redirectParentId(destination?.source);
+	if (destination?.data.kind !== "website" || parentId === undefined) return undefined;
+	const parent = await SubmissionsEntity.get(parentId);
+	if (parent?.data.kind !== "website") return undefined;
+	const hops = parent.data.website.navigationHops ?? [];
+	const hop = redirectorHop(hops, destination.data.website.url);
+	const url = hop ? normalizePublicHttpUrl(hop.url) : undefined;
+	return url ? { url, destinationUrl: destination.data.website.url, parent: { id: parent.id, createdAt: parent.createdAt, hops } } : undefined;
+}
+
 /**
  * Start watching the redirector a confirmed destination was reached through.
  * One watch runs per redirector URL; a report for a host the watch itself
  * found finds that watch still running and adds nothing.
  */
 export async function enqueueRedirectorWatch(reportId: bigint, submissionId: bigint, now = new Date()): Promise<void> {
-	const destination = await SubmissionsEntity.get(submissionId);
-	const parentId = redirectParentId(destination?.source);
-	if (destination?.data.kind !== "website" || parentId === undefined) return;
-	const parent = await SubmissionsEntity.get(parentId);
-	if (parent?.data.kind !== "website") return;
-	const hop = redirectorHop(parent.data.website.navigationHops ?? [], destination.data.website.url);
-	const url = hop ? normalizePublicHttpUrl(hop.url) : undefined;
-	if (!url) return;
-	const state: RedirectorWatchState = { url, sites: [websiteSite(destination.data.website.url)], checks: 0, misses: 0, lastNewAt: now.toISOString() };
+	const redirector = await redirectorOf(submissionId);
+	if (!redirector) return;
+	const { url } = redirector;
+	const state: RedirectorWatchState = { url, sites: [websiteSite(redirector.destinationUrl)], checks: 0, misses: 0, lastNewAt: now.toISOString() };
 	await AbuseRepository.enqueueJob({
 		jobType: "watch_redirector",
 		reportId,

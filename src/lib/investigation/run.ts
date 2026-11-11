@@ -1,3 +1,4 @@
+import { reportRedirector } from "../abuse/origin/redirector_report";
 import { AbuseRepository } from "../abuse/repository";
 import type { AbuseSkyvernAdapter } from "../abuse/skyvern/adapter";
 import { redactExternalError } from "../abuse/skyvern/adapter";
@@ -24,6 +25,7 @@ export type InvestigationDependencies = {
 	awaitVerdict: typeof awaitVirusTotalVerdict;
 	reportPayloadHost: typeof reportPayloadHost;
 	reportDataDrop: typeof reportDataDrop;
+	reportRedirector: typeof reportRedirector;
 	probe(input: Parameters<typeof runExfiltrationProbe>[0], signal?: AbortSignal): Promise<ExfiltrationProbeResult>;
 	now(): Date;
 };
@@ -36,6 +38,7 @@ function defaultDependencies(adapter: () => Pick<AbuseSkyvernAdapter, "createTas
 		awaitVerdict: awaitVirusTotalVerdict,
 		reportPayloadHost,
 		reportDataDrop,
+		reportRedirector,
 		probe: (input, signal) => runExfiltrationProbe(input, adapter(), signal),
 		now: () => new Date(),
 	};
@@ -153,7 +156,9 @@ export async function runReportInvestigation(
 	// report; only another host gets a linked report of its own.
 	const linkedPayloads = payloads.filter(({ evidence }) => evidence && !isSameWebsite(evidence.url, payload.pageUrl));
 	const dataDrops = (payload.exploitLoader?.dataUploads ?? []).filter((upload) => !isSameWebsite(upload.url, payload.pageUrl));
-	const pageScreenshot = linkedPayloads.length || dataDrops.length ? await lurePageScreenshot(reportId) : undefined;
+	let screenshot: ReturnType<typeof lurePageScreenshot> | undefined;
+	const lureScreenshot = () => (screenshot ??= lurePageScreenshot(reportId));
+	const pageScreenshot = linkedPayloads.length || dataDrops.length ? await lureScreenshot() : undefined;
 	for (const { delivery, evidence } of linkedPayloads) {
 		await deps.reportPayloadHost({
 			submissionId,
@@ -174,6 +179,20 @@ export async function runReportInvestigation(
 			upload,
 			...(pageScreenshot ? { pageScreenshot } : {}),
 			reporter,
+		});
+	}
+
+	// The link the campaign hands out, when the page was reached through one:
+	// it outlives this page and forwards to the next. Idempotent like the
+	// payload reports, so a retried job finds its report.
+	const redirector = await deps.reportRedirector({ reportId, submissionId, finding: payload.finding, reporter, pageScreenshot: lureScreenshot, signal });
+	if (redirector) {
+		await AbuseRepository.appendEvent({
+			reportId,
+			eventType: `redirector.${redirector.kind}`,
+			data: redirector.kind === "reported"
+				? { url: redirector.url, reportId: redirector.report.reportId.toString(), created: redirector.report.created }
+				: { url: redirector.url, reason: redirector.reason },
 		});
 	}
 

@@ -102,6 +102,8 @@ describe("the cheap check of a redirector", () => {
 			kind: "destination",
 			url: "https://assistdeparments-x.com/",
 			urls: ["https://openanonymity.chat/x?ots-cmpgn-refer=TEST_REFERRER", ROTATOR, "https://assistdeparments-x.com//", "https://assistdeparments-x.com/"],
+			// The redirector's own page is kept as evidence; the kit's pages are not.
+			page: { url: ROTATOR, status: 200, html: ROTATOR_PAGE },
 		});
 		expect(requested).toEqual(check.urls);
 	});
@@ -109,7 +111,12 @@ describe("the cheap check of a redirector", () => {
 	test("names the destination even when the kit host it leads to is gone or not public", async () => {
 		// x-com.email after Railway dropped it: the redirector still pointed there.
 		const gone = web({ [ROTATOR]: { body: ROTATOR_PAGE } }, { "assistdeparments-x.com": "queryA ENOTFOUND assistdeparments-x.com" });
-		expect(await checkRedirector(ROTATOR, gone.dependencies)).toEqual({ kind: "destination", url: "https://assistdeparments-x.com//", urls: [ROTATOR, "https://assistdeparments-x.com//"] });
+		expect(await checkRedirector(ROTATOR, gone.dependencies)).toEqual({
+			kind: "destination",
+			url: "https://assistdeparments-x.com//",
+			urls: [ROTATOR, "https://assistdeparments-x.com//"],
+			page: { url: ROTATOR, status: 200, html: ROTATOR_PAGE },
+		});
 		expect(gone.requested).toEqual([ROTATOR]);
 
 		const errors = web({ [ROTATOR]: { status: 302, location: "https://kit.example/" }, "https://kit.example/": { status: 404 } });
@@ -136,15 +143,27 @@ describe("the cheap check of a redirector", () => {
 
 	test("says the redirector stays put when its page sends the visitor nowhere a plain client can follow", async () => {
 		// A cloaker that computes its target in script, a page that refreshes itself, a non-HTML answer.
-		expect(await checkRedirector(ROTATOR, web({ [ROTATOR]: { body: `<script>location.href = atob("aHR0cHM6Ly9raXQuZXhhbXBsZS8=")</script>` } }).dependencies))
-			.toEqual({ kind: "stays", urls: [ROTATOR] });
-		const loop = web({ [ROTATOR]: { body: `<meta http-equiv="refresh" content="0;url=${ROTATOR}">` } });
-		expect(await checkRedirector(ROTATOR, loop.dependencies)).toEqual({ kind: "stays", urls: [ROTATOR] });
+		const computed = `<script>location.href = atob("aHR0cHM6Ly9raXQuZXhhbXBsZS8=")</script>`;
+		expect(await checkRedirector(ROTATOR, web({ [ROTATOR]: { body: computed } }).dependencies))
+			.toEqual({ kind: "stays", urls: [ROTATOR], page: { url: ROTATOR, status: 200, html: computed } });
+		const refresh = `<meta http-equiv="refresh" content="0;url=${ROTATOR}">`;
+		const loop = web({ [ROTATOR]: { body: refresh } });
+		expect(await checkRedirector(ROTATOR, loop.dependencies)).toEqual({ kind: "stays", urls: [ROTATOR], page: { url: ROTATOR, status: 200, html: refresh } });
 		expect(loop.requested).toEqual([ROTATOR]);
 		const binary = web({ [ROTATOR]: { body: `location.href = "https://kit.example/"`, contentType: "application/octet-stream" } });
 		expect(await checkRedirector(ROTATOR, binary.dependencies)).toEqual({ kind: "stays", urls: [ROTATOR] });
 		const huge = web({ [ROTATOR]: { body: `${" ".repeat(600 * 1024)}<script>location.href = "https://kit.example/"</script>` } });
 		expect(await checkRedirector(ROTATOR, huge.dependencies)).toEqual({ kind: "stays", urls: [ROTATOR] });
+	});
+
+	test("keeps at most 64 KiB of the redirector's page as evidence, and only of a page it read", async () => {
+		const padded = `<meta http-equiv="refresh" content="0;url=https://kit.example/">${"x".repeat(100 * 1024)}`;
+		const check = await checkRedirector(ROTATOR, web({ [ROTATOR]: { body: padded }, "https://kit.example/": { body: "kit" } }).dependencies);
+		expect(check).toMatchObject({ kind: "destination", url: "https://kit.example/" });
+		expect(check.page?.html).toBe(padded.slice(0, 64 * 1024));
+		// An HTTP redirect has no page; neither has an error answer.
+		expect((await checkRedirector(ROTATOR, web({ [ROTATOR]: { status: 302, location: "https://kit.example/" }, "https://kit.example/": { body: "kit" } }).dependencies)).page).toBeUndefined();
+		expect((await checkRedirector(ROTATOR, web({ [ROTATOR]: { status: 404, body: "gone" } }).dependencies)).page).toBeUndefined();
 	});
 
 	test("stops following a chain of refresh pages after a bounded number", async () => {
