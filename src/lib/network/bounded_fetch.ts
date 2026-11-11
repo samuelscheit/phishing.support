@@ -118,11 +118,12 @@ async function readResponseBody(response: Response, maxBytes: number): Promise<B
 }
 
 /**
- * Fetch a JSON endpoint with a deadline that covers connection and streaming
- * body consumption.  `404` is represented as `undefined`; callers can use
- * it for RDAP's normal not-found response without treating it as an outage.
+ * Fetch a body with a deadline that covers connection and streaming body
+ * consumption, then decode it. `404` is represented as `undefined`; callers
+ * can use it for RDAP's normal not-found response without treating it as an
+ * outage.
  */
-export async function fetchJson<T>(url: string, init: RequestInit, options: BoundedRequestOptions = {}): Promise<T | undefined> {
+async function fetchDecoded<T>(url: string, init: RequestInit, options: BoundedRequestOptions, decode: (body: Buffer) => T): Promise<T | undefined> {
 	const config = settings(options);
 	const fetchImplementation = options.fetch ?? fetch;
 	let lastError: unknown;
@@ -133,12 +134,7 @@ export async function fetchJson<T>(url: string, init: RequestInit, options: Boun
 				const response = await fetchImplementation(url, { ...init, signal });
 				if (response.status === 404) return undefined;
 				if (!response.ok) throw new RequestStatusError(response.status, url);
-				const body = await readResponseBody(response, config.maxResponseBytes);
-				try {
-					return JSON.parse(body.toString("utf8")) as T;
-				} catch {
-					throw new Error(`Response from ${new URL(url).hostname} was not valid JSON.`);
-				}
+				return decode(await readResponseBody(response, config.maxResponseBytes));
 			}, config.timeoutMs, `Request to ${new URL(url).hostname}`);
 		} catch (error) {
 			lastError = error;
@@ -148,6 +144,22 @@ export async function fetchJson<T>(url: string, init: RequestInit, options: Boun
 	}
 
 	throw lastError instanceof Error ? lastError : new Error(`Request to ${new URL(url).hostname} failed.`);
+}
+
+/** Fetch a JSON endpoint within the bounds of `fetchDecoded`. */
+export async function fetchJson<T>(url: string, init: RequestInit, options: BoundedRequestOptions = {}): Promise<T | undefined> {
+	return fetchDecoded(url, init, options, (body) => {
+		try {
+			return JSON.parse(body.toString("utf8")) as T;
+		} catch {
+			throw new Error(`Response from ${new URL(url).hostname} was not valid JSON.`);
+		}
+	});
+}
+
+/** Fetch a UTF-8 text document within the bounds of `fetchDecoded`. */
+export async function fetchText(url: string, init: RequestInit, options: BoundedRequestOptions = {}): Promise<string | undefined> {
+	return fetchDecoded(url, init, options, (body) => body.toString("utf8"));
 }
 
 /** Bound arbitrary asynchronous work whose implementation can ignore cancellation. */

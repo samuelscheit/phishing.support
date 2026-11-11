@@ -37,6 +37,8 @@ function urlscan(domainsByHash: Record<string, string[]>) {
 	return { fetch, queries };
 }
 
+const noPopularDomains = async () => new Set<string>();
+
 const manyDomains = (count: number, prefix: string) => Array.from({ length: count }, (_, index) => `${prefix}-${index}.example.org`);
 
 describe("kit sibling discovery", () => {
@@ -64,6 +66,7 @@ describe("kit sibling discovery", () => {
 			apiKey: "test-key",
 			loadKitResources: async () => loader,
 			fetch,
+			loadPopularDomains: noPopularDomains,
 		});
 		expect(result.candidates.map(({ domain }) => domain)).toEqual(frontPages);
 		expect(result.errors).toEqual([`urlscan ${LIBRARY.slice(0, 12)}: seen on more than 99 domains, treated as a shared library`]);
@@ -81,6 +84,7 @@ describe("kit sibling discovery", () => {
 			apiKey: "test-key",
 			loadKitResources: async () => RESOURCES.filter(({ sha256 }) => sha256 !== BACKEND_SCRIPT),
 			fetch,
+			loadPopularDomains: noPopularDomains,
 		});
 		expect(queries.map((query) => query.searchParams.get("size"))).toEqual(["100", "100", "26"]);
 		expect(queries[0]!.searchParams.get("collapse")).toBe("page.domain.keyword");
@@ -103,6 +107,7 @@ describe("kit sibling discovery", () => {
 			apiKey: "test-key",
 			loadKitResources: async () => RESOURCES.slice(0, 2),
 			fetch,
+			loadPopularDomains: noPopularDomains,
 		});
 		expect(result.candidates).toEqual([{ domain: "sibling.example.net", url: "https://sibling.example.net/signin", matchingHashes: [SCRIPT, STYLE] }]);
 	});
@@ -113,6 +118,7 @@ describe("kit sibling discovery", () => {
 			apiKey: "test-key",
 			loadKitResources: async () => RESOURCES.filter(({ mimeType }) => mimeType === "text/css"),
 			fetch,
+			loadPopularDomains: noPopularDomains,
 		});
 		expect(stylesOnly.candidates).toEqual([]);
 		expect(stylesOnly.errors).toEqual(["The capture recorded no script large enough to identify a kit."]);
@@ -120,9 +126,62 @@ describe("kit sibling discovery", () => {
 			apiKey: "test-key",
 			loadKitResources: async () => undefined,
 			fetch,
+			loadPopularDomains: noPopularDomains,
 		});
 		expect(legacy).toEqual({ fingerprints: [], candidates: [], errors: ["The capture recorded no scripts or stylesheets."] });
 		expect(queries).toHaveLength(0);
+	});
+
+	test("never takes the brand a clone copied its files from for a sibling", async () => {
+		// assistdeparments-x.com (production case 378865919855693904) serves X's
+		// own web bundle: its hashes led to x.com itself.
+		const { fetch } = urlscan({
+			[SCRIPT]: [
+				"login.example.com",
+				"x.com",
+				"abs.twimg.com",
+				// Tenants of ranked platforms are their own sites.
+				"x-clone.workers.dev",
+				"quiz.int.vidio.com.ntc.fzstore.dpdns.org",
+				// A path-tenant host is never judged by its hostname.
+				"sites.google.com",
+				"clone.example.net",
+			],
+		});
+		const result = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "login.example.com" }, {
+			apiKey: "test-key",
+			loadKitResources: async () => RESOURCES.slice(0, 1),
+			fetch,
+			loadPopularDomains: async () => new Set(["x.com", "twimg.com", "workers.dev", "dpdns.org", "google.com"]),
+		});
+		expect(result.candidates.map(({ domain }) => domain)).toEqual([
+			"x-clone.workers.dev",
+			"quiz.int.vidio.com.ntc.fzstore.dpdns.org",
+			"sites.google.com",
+			"clone.example.net",
+		]);
+		expect(result.errors).toEqual(["x.com, abs.twimg.com: a top-ranked site (Tranco), the original the kit copied files from, not a sibling"]);
+	});
+
+	test("loads the popular-site list only when there is a candidate to judge", async () => {
+		const { fetch } = urlscan({ [SCRIPT]: ["login.example.com"] });
+		const result = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "login.example.com" }, {
+			apiKey: "test-key",
+			loadKitResources: async () => RESOURCES.slice(0, 1),
+			fetch,
+			loadPopularDomains: async () => { throw new Error("Tranco must not be asked"); },
+		});
+		expect(result).toEqual({ fingerprints: kitFingerprints(RESOURCES.slice(0, 1)), candidates: [], errors: [] });
+	});
+
+	test("fails the search when the popular-site list is unavailable, rather than letting brands through", async () => {
+		const { fetch } = urlscan({ [SCRIPT]: ["login.example.com", "x.com"] });
+		await expect(findKitSiblingCandidates({ submissionId: 1n, originalDomain: "login.example.com" }, {
+			apiKey: "test-key",
+			loadKitResources: async () => RESOURCES.slice(0, 1),
+			fetch,
+			loadPopularDomains: async () => { throw new Error("Tranco is down"); },
+		})).rejects.toThrow("Tranco is down");
 	});
 
 	test("accepts a candidate only when the swept origin presents its certificate", async () => {
@@ -135,6 +194,7 @@ describe("kit sibling discovery", () => {
 			apiKey: "secret-test-key",
 			loadKitResources: async () => RESOURCES.slice(0, 1),
 			fetch,
+			loadPopularDomains: noPopularDomains,
 			probe: async (_ip, domain) => domain === "sibling.example.net"
 				? { names: [domain], issuer: "CA", fingerprint256: "BB", notBefore: "2026-01-01", notAfter: "2027-01-01" }
 				: { names: ["someone-else.example"], issuer: "CA", fingerprint256: "CC", notBefore: "2026-01-01", notAfter: "2027-01-01" },

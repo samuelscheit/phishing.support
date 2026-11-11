@@ -6,6 +6,7 @@ import type { WebsiteKitResource } from "../../website_types";
 import { normalizeDomain, normalizePublicHttpUrl } from "../security";
 import { throwIfAborted } from "../worker/shared";
 import { mapConcurrent } from "./concurrency";
+import { isPopularSite, loadPopularDomains, type PopularDomains } from "./popular_domains";
 import { certificateCovers, presentedCertificate, type OriginServer, type PresentedCertificate, type TlsProbe } from "./sweep";
 import { errorSummary } from "../../error_text";
 
@@ -75,6 +76,7 @@ export type SiblingDiscoveryDependencies = {
 	fetch?: FetchImplementation;
 	apiKey?: string;
 	loadKitResources?: (submissionId: bigint) => Promise<WebsiteKitResource[] | undefined>;
+	loadPopularDomains?: () => Promise<PopularDomains>;
 	probe?: TlsProbe;
 };
 
@@ -183,13 +185,15 @@ export async function findKitSiblingCandidates(params: {
 		}
 	}
 
-	return {
-		fingerprints,
-		candidates: [...candidates]
-			.map(([domain, candidate]) => ({ domain, url: candidate.url, matchingHashes: [...candidate.hashes] }))
-			.filter((candidate) => candidate.matchingHashes.some((hash) => scriptHashes.has(hash))),
-		errors,
-	};
+	const sharingScript = [...candidates]
+		.map(([domain, candidate]) => ({ domain, url: candidate.url, matchingHashes: [...candidate.hashes] }))
+		.filter((candidate) => candidate.matchingHashes.some((hash) => scriptHashes.has(hash)));
+	// A clone kit copies the impersonated site's own files; that site shares
+	// them but is the brand, never a sibling (x.com for an X clone).
+	const popular = sharingScript.length ? await (dependencies.loadPopularDomains ?? loadPopularDomains)() : undefined;
+	const brands = sharingScript.filter(({ domain }) => popular && isPopularSite(domain, popular));
+	if (brands.length) errors.push(`${brands.map(({ domain }) => domain).join(", ")}: a top-ranked site (Tranco), the original the kit copied files from, not a sibling`);
+	return { fingerprints, candidates: sharingScript.filter((candidate) => !brands.includes(candidate)), errors };
 }
 
 /** Find domains sharing captured kit bytes and prove they answer on the swept origin. */
