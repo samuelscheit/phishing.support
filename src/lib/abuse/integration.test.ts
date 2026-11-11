@@ -93,7 +93,6 @@ describe("abuse persistence boundary", () => {
 			"abuse_provider_runs",
 			"abuse_artifacts",
 			"abuse_mail_messages",
-			"abuse_mail_codes",
 			"abuse_jobs",
 			"abuse_events",
 			"abuse_webhook_events",

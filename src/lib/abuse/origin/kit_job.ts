@@ -25,8 +25,11 @@ export function redirectParentId(source: string | null | undefined): bigint | un
 	const parent = REDIRECT_SOURCE.exec(source ?? "")?.[1];
 	return parent === undefined ? undefined : BigInt(parent);
 }
+/** Findings whose kit is worth finding elsewhere: a credential or payment kit, or a malware kit such as an exploit loader. */
+const SEED_FINDINGS = new Set(["phishing", "malware"]);
+
 /**
- * Only a page our classifier confirmed as a credential or payment kit may seed
+ * Only a page our classifier confirmed as a phishing or malware kit may seed
  * a search, and never a site that was itself found by one. Without this a
  * search from a sibling found its own siblings, and every shared file pulled
  * in more unrelated sites.
@@ -34,7 +37,7 @@ export function redirectParentId(source: string | null | undefined): bigint | un
 export async function isKitSiblingSeed(submissionId: bigint): Promise<boolean> {
 	const submission = await SubmissionsEntity.get(submissionId);
 	if (submission?.data.kind !== "website" || await discoveredBySiblingSearch(submission.source)) return false;
-	return (submission.data.website.siteAssessments ?? []).some(({ finding }) => finding === "phishing");
+	return (submission.data.website.siteAssessments ?? []).some(({ finding }) => SEED_FINDINGS.has(finding));
 }
 
 async function discoveredBySiblingSearch(source: string | null | undefined): Promise<boolean> {

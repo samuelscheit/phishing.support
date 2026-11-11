@@ -40,7 +40,7 @@ const DELIVERED_ROUTE_STATUSES = new Set<AbuseRouteStatus>(["submitted", "acknow
  */
 export function aggregateReportStatus(routeStatuses: AbuseRouteStatus[]): AbuseReportStatus {
 	if (routeStatuses.length === 0) return "no_route";
-	if (routeStatuses.some((status) => ["running", "waiting_code", "escalating_to_portal"].includes(status))) return "running";
+	if (routeStatuses.some((status) => ["running", "escalating_to_portal"].includes(status))) return "running";
 	if (routeStatuses.includes("queued")) return "queued";
 	if (routeStatuses.includes("verified")) return "verifying";
 	if (routeStatuses.includes("resolving")) return "resolving";

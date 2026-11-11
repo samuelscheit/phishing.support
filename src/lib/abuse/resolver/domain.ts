@@ -1,4 +1,4 @@
-import { getPortalProviderForRegistrarId, getProviderSubmissionProviderForRegistrarId, providerRegistrarRoute } from "../providers";
+import { getProviderSubmissionProviderForRegistrarId, providerRegistrarRoute } from "../providers";
 import { sha256Hex } from "../security";
 import { finalizeDomainRouteResolution, resolveDomainInfrastructure, type DomainInfrastructureResolution } from "./domain_infrastructure";
 import { safeJsonFetch } from "./http";
@@ -106,18 +106,6 @@ export async function resolveDomainTarget(target: ResolverTarget, dependencies: 
 		},
 		infrastructure: infrastructure.snapshot,
 	};
-
-	const provider = getPortalProviderForRegistrarId(registrarId);
-	if (provider) {
-		const route = provider.createRegistrarRoute({ registrarId: registrarId!, resolutionSnapshot: snapshot });
-		return finalizeDomainRouteResolution({
-			resolverSnapshot: snapshot,
-			domainRoutes: [route],
-			infrastructureRoutes: infrastructure.routes,
-			baseStatus: route.status === "no_route" ? "no_route" : "resolved",
-			baseDisposition: route.status === "no_route" ? "provider_route_disabled_or_unproven" : undefined,
-		});
-	}
 
 	const registrarForm = getProviderSubmissionProviderForRegistrarId(registrarId);
 	if (registrarForm) {

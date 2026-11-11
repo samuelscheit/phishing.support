@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import type { WebsiteKitResource } from "../../website_types";
+import { createHash } from "node:crypto";
+
+import { CORUNA_FRAME_URL, CORUNA_LOADER } from "../../malware/coruna_loader.fixture";
+import type { WebsiteHiddenFrame, WebsiteKitResource } from "../../website_types";
 import { discoverSiblingDomains, findKitSiblingCandidates, kitFingerprints } from "./siblings";
 
 const hash = (character: string) => character.repeat(64);
@@ -43,11 +46,11 @@ const manyDomains = (count: number, prefix: string) => Array.from({ length: coun
 
 describe("kit sibling discovery", () => {
 	test("fingerprints every host's scripts and stylesheets, scripts first", () => {
-		expect(kitFingerprints(RESOURCES)).toEqual([
-			{ sha256: LIBRARY, mimeType: "application/javascript", url: "https://cdn.example.net/jquery.min.js", size: 90_000 },
-			{ sha256: SCRIPT, mimeType: "application/javascript", url: "https://login.example.com/index.js", size: 58_737 },
-			{ sha256: BACKEND_SCRIPT, mimeType: "application/javascript", url: "https://backend.example.net/gmail/js/start.js", size: 3_280 },
-			{ sha256: STYLE, mimeType: "text/css", url: "https://login.example.com/res/css/style.css?v=4", size: 14_364 },
+		expect(kitFingerprints({ kitResources: RESOURCES })).toEqual([
+			{ sha256: LIBRARY, kind: "script", url: "https://cdn.example.net/jquery.min.js", size: 90_000 },
+			{ sha256: SCRIPT, kind: "script", url: "https://login.example.com/index.js", size: 58_737 },
+			{ sha256: BACKEND_SCRIPT, kind: "script", url: "https://backend.example.net/gmail/js/start.js", size: 3_280 },
+			{ sha256: STYLE, kind: "stylesheet", url: "https://login.example.com/res/css/style.css?v=4", size: 14_364 },
 		]);
 	});
 
@@ -64,7 +67,7 @@ describe("kit sibling discovery", () => {
 		});
 		const result = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "storage.googleapis.com" }, {
 			apiKey: "test-key",
-			loadKitResources: async () => loader,
+			loadKitCapture: async () => ({ kitResources: loader }),
 			fetch,
 			loadPopularDomains: noPopularDomains,
 		});
@@ -82,7 +85,7 @@ describe("kit sibling discovery", () => {
 		});
 		const result = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "login.example.com" }, {
 			apiKey: "test-key",
-			loadKitResources: async () => RESOURCES.filter(({ sha256 }) => sha256 !== BACKEND_SCRIPT),
+			loadKitCapture: async () => ({ kitResources: RESOURCES.filter(({ sha256 }) => sha256 !== BACKEND_SCRIPT) }),
 			fetch,
 			loadPopularDomains: noPopularDomains,
 		});
@@ -105,7 +108,7 @@ describe("kit sibling discovery", () => {
 		});
 		const result = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "login.example.com" }, {
 			apiKey: "test-key",
-			loadKitResources: async () => RESOURCES.slice(0, 2),
+			loadKitCapture: async () => ({ kitResources: RESOURCES.slice(0, 2) }),
 			fetch,
 			loadPopularDomains: noPopularDomains,
 		});
@@ -116,19 +119,19 @@ describe("kit sibling discovery", () => {
 		const { fetch, queries } = urlscan({ [STYLE]: ["sibling.example.net"] });
 		const stylesOnly = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "login.example.com" }, {
 			apiKey: "test-key",
-			loadKitResources: async () => RESOURCES.filter(({ mimeType }) => mimeType === "text/css"),
+			loadKitCapture: async () => ({ kitResources: RESOURCES.filter(({ mimeType }) => mimeType === "text/css") }),
 			fetch,
 			loadPopularDomains: noPopularDomains,
 		});
 		expect(stylesOnly.candidates).toEqual([]);
-		expect(stylesOnly.errors).toEqual(["The capture recorded no script large enough to identify a kit."]);
+		expect(stylesOnly.errors).toEqual(["The capture recorded no script or hidden frame large enough to identify a kit."]);
 		const legacy = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "login.example.com" }, {
 			apiKey: "test-key",
-			loadKitResources: async () => undefined,
+			loadKitCapture: async () => undefined,
 			fetch,
 			loadPopularDomains: noPopularDomains,
 		});
-		expect(legacy).toEqual({ fingerprints: [], candidates: [], errors: ["The capture recorded no scripts or stylesheets."] });
+		expect(legacy).toEqual({ fingerprints: [], candidates: [], errors: ["The capture recorded no scripts, stylesheets, or hidden frames."] });
 		expect(queries).toHaveLength(0);
 	});
 
@@ -150,7 +153,7 @@ describe("kit sibling discovery", () => {
 		});
 		const result = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "login.example.com" }, {
 			apiKey: "test-key",
-			loadKitResources: async () => RESOURCES.slice(0, 1),
+			loadKitCapture: async () => ({ kitResources: RESOURCES.slice(0, 1) }),
 			fetch,
 			loadPopularDomains: async () => new Set(["x.com", "twimg.com", "workers.dev", "dpdns.org", "google.com"]),
 		});
@@ -167,18 +170,18 @@ describe("kit sibling discovery", () => {
 		const { fetch } = urlscan({ [SCRIPT]: ["login.example.com"] });
 		const result = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "login.example.com" }, {
 			apiKey: "test-key",
-			loadKitResources: async () => RESOURCES.slice(0, 1),
+			loadKitCapture: async () => ({ kitResources: RESOURCES.slice(0, 1) }),
 			fetch,
 			loadPopularDomains: async () => { throw new Error("Tranco must not be asked"); },
 		});
-		expect(result).toEqual({ fingerprints: kitFingerprints(RESOURCES.slice(0, 1)), candidates: [], errors: [] });
+		expect(result).toEqual({ fingerprints: kitFingerprints({ kitResources: RESOURCES.slice(0, 1) }), candidates: [], errors: [] });
 	});
 
 	test("fails the search when the popular-site list is unavailable, rather than letting brands through", async () => {
 		const { fetch } = urlscan({ [SCRIPT]: ["login.example.com", "x.com"] });
 		await expect(findKitSiblingCandidates({ submissionId: 1n, originalDomain: "login.example.com" }, {
 			apiKey: "test-key",
-			loadKitResources: async () => RESOURCES.slice(0, 1),
+			loadKitCapture: async () => ({ kitResources: RESOURCES.slice(0, 1) }),
 			fetch,
 			loadPopularDomains: async () => { throw new Error("Tranco is down"); },
 		})).rejects.toThrow("Tranco is down");
@@ -192,7 +195,7 @@ describe("kit sibling discovery", () => {
 			originServers: [{ ip: "8.8.8.8", certificate: { names: ["login.example.com"], issuer: "CA", fingerprint256: "AA", notBefore: "2026-01-01", notAfter: "2027-01-01" } }],
 		}, {
 			apiKey: "secret-test-key",
-			loadKitResources: async () => RESOURCES.slice(0, 1),
+			loadKitCapture: async () => ({ kitResources: RESOURCES.slice(0, 1) }),
 			fetch,
 			loadPopularDomains: noPopularDomains,
 			probe: async (_ip, domain) => domain === "sibling.example.net"
@@ -207,5 +210,64 @@ describe("kit sibling discovery", () => {
 			originIp: "8.8.8.8",
 			certificate: { names: ["sibling.example.net"], issuer: "CA", fingerprint256: "BB", notBefore: "2026-01-01", notAfter: "2027-01-01" },
 		}]);
+	});
+
+	describe("an exploit kit found through the loader in its hidden frame (production case 377486973465530391)", () => {
+		const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+		const ORIGIN_LOADER = Buffer.from(CORUNA_LOADER);
+		// Cloudflare in front of the seed adds its beacon line; the lure domains without Cloudflare serve the loader as is.
+		const SERVED_LOADER = Buffer.from(CORUNA_LOADER.replace("</body>", `<script defer src="https://static.cloudflareinsights.com/beacon.min.js/vcd15cbe7772f49c399c6a5babf22c1241717689176015" data-cf-beacon='{"token":"t"}' crossorigin="anonymous"></script>\n</body>`));
+		const frame = (document: Buffer, source = document.toString("utf8")): WebsiteHiddenFrame => ({
+			ref: "frame1", url: CORUNA_FRAME_URL, hiddenBy: "0×0 size", sha256: sha(document), size: document.byteLength, source,
+			resources: [], sentRequests: [], signals: { platformGate: [], runsFetchedCode: false, stageUrls: [], dataUploads: [] }, userAgent: "ua",
+		});
+		// The fake-captcha lure the kit wraps itself in is on hundreds of unrelated domains.
+		const LURE_SCRIPT = hash("9");
+		const LURE: WebsiteKitResource[] = [{ url: "https://92haoyun.icu/src/recaptcha.js", mimeType: "application/javascript", size: 29_098, sha256: LURE_SCRIPT }];
+		const FRONTS = ["ktrced.top", "crhhmd.top", "cshsus.top", "kcfmfk.ltd", "tucuem.icu"];
+
+		test("a frame document is code: as received, and as its origin served it when the CDN inserted tags", () => {
+			expect(kitFingerprints({ hiddenFrames: [frame(SERVED_LOADER)] })).toEqual([
+				{ sha256: sha(SERVED_LOADER), kind: "hidden_frame", url: CORUNA_FRAME_URL, size: SERVED_LOADER.byteLength },
+				{ sha256: sha(ORIGIN_LOADER), kind: "hidden_frame", url: CORUNA_FRAME_URL, size: ORIGIN_LOADER.byteLength },
+			]);
+			// No CDN, one hash.
+			expect(kitFingerprints({ hiddenFrames: [frame(ORIGIN_LOADER)] }).map(({ sha256 }) => sha256)).toEqual([sha(ORIGIN_LOADER)]);
+			// A source the capture cut short cannot be re-hashed.
+			expect(kitFingerprints({ hiddenFrames: [frame(SERVED_LOADER, SERVED_LOADER.toString("utf8").slice(0, 2_000))] }).map(({ sha256 }) => sha256)).toEqual([sha(SERVED_LOADER)]);
+			// A tracking pixel frame is too small to identify anything; a non-public frame URL is no evidence.
+			expect(kitFingerprints({ hiddenFrames: [frame(Buffer.from("<html><body></body></html>"))] })).toEqual([]);
+			expect(kitFingerprints({ hiddenFrames: [{ ...frame(ORIGIN_LOADER), url: "http://127.0.0.1/gooll.html" }] })).toEqual([]);
+		});
+
+		test("the lure domains are found through the loader's origin hash, though the shared lure script is on hundreds of sites", async () => {
+			const { fetch, queries } = urlscan({
+				[sha(ORIGIN_LOADER)]: [...FRONTS, "92haoyun.icu"],
+				[LURE_SCRIPT]: manyDomains(250, "captcha"),
+			});
+			const result = await findKitSiblingCandidates({ submissionId: 377486973465530391n, originalDomain: "92haoyun.icu" }, {
+				apiKey: "test-key",
+				loadKitCapture: async () => ({ kitResources: LURE, hiddenFrames: [frame(SERVED_LOADER)] }),
+				fetch,
+				loadPopularDomains: noPopularDomains,
+			});
+			expect(result.candidates.map(({ domain }) => domain)).toEqual(FRONTS);
+			expect(result.candidates[0]).toEqual({ domain: "ktrced.top", url: "https://ktrced.top/signin", matchingHashes: [sha(ORIGIN_LOADER)] });
+			expect(result.errors).toContain(`urlscan ${LURE_SCRIPT.slice(0, 12)}: seen on more than 99 domains, treated as a shared library`);
+			// Every fingerprint is searched once, frames held to the script limit.
+			expect(queries.map((query) => query.searchParams.get("size"))).toEqual(["100", "100", "100"]);
+		});
+
+		test("a capture with only a hidden frame still searches", async () => {
+			const { fetch } = urlscan({ [sha(ORIGIN_LOADER)]: FRONTS });
+			const result = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "92haoyun.icu" }, {
+				apiKey: "test-key",
+				loadKitCapture: async () => ({ hiddenFrames: [frame(ORIGIN_LOADER)] }),
+				fetch,
+				loadPopularDomains: noPopularDomains,
+			});
+			expect(result.candidates).toHaveLength(FRONTS.length);
+			expect(result.errors).toEqual([]);
+		});
 	});
 });

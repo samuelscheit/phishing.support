@@ -335,3 +335,113 @@ experiment rules out a generic Internet-wide SNI proxy for this sample and
 supports Cloudflare-specific SNI forwarding or an equivalent Cloudflare-only
 routing policy. Full methodology, cleanup, and raw JSONL evidence are in
 `investigation/2dayduecheck/evoxt-sweep/controlled-sni-experiment.md`.
+
+## Finding the hidden origin
+
+### Present case state and negative evidence
+
+As of 2026-10-31, `2dayduecheck.website` returns `NXDOMAIN`; the `.website`
+registry SOA is authoritative for the negative answer. At capture time on
+2026-10-30, the apex had only Cloudflare anycast A/AAAA answers and Cloudflare
+nameservers, with no MX, TXT, CNAME, or observed DNS-only address. The public
+urlscan Search API returns one scan for the domain, at
+`2026-10-30T19:14:24.177Z`, whose primary address was Cloudflare
+`188.114.97.3`/AS13335 and whose server was `cloudflare`. The captured
+stylesheet hash has no public urlscan hit.
+
+The two archived GIF hashes are not origin identifiers: even the conjunction
+of both hashes appears in 93 urlscan results across unrelated Google-themed
+kits, including `storage.googleapis.com` and many unrelated direct hosts.
+Those assets are shared kit material, so their associated IP addresses must not
+be treated as candidates for this campaign. The controlled backend probe also
+recorded zero credential-destination endpoints. These negative results remove
+the easiest public pivots: current DNS, a public pre-Cloudflare scan, a rare
+asset hash, and a captured exfiltration endpoint.
+
+Cloudflare itself documents why the remaining public path is historical data:
+proxied A/AAAA records answer with Cloudflare addresses instead of the origin,
+while historical DNS, DNS-only records, and co-located mail infrastructure can
+expose an origin. [Cloudflare IP addresses](https://developers.cloudflare.com/fundamentals/concepts/cloudflare-ip-addresses/),
+[Protect origin IP address](https://developers.cloudflare.com/learning-paths/prevent-ddos-attacks/advanced/protect-origin-ip/),
+and [DNS proxy status](https://developers.cloudflare.com/dns/proxy-status/).
+
+### Ranked action plan
+
+1. **Cloudflare preservation and lawful disclosure — highest confidence.**
+   Send Cloudflare the abuse report ID, every retained `CF-Ray`, exact UTC
+   timestamps, hostname, URL, and the controlled-relay findings. Ask it to
+   preserve the zone account, complete DNS-record change history, configured
+   origin host/IP, Workers/Pages/Tunnel/routes, account login IPs, billing/KYC,
+   and request/origin-error logs. Ask that those records be disclosed to the
+   competent law-enforcement request, not publicly. Cloudflare states that
+   every request through its network receives a Ray ID and that Ray IDs can be
+   filtered in Security Events, Logs, Log Explorer, enterprise logs, and the
+   zone Ray-ID API; sampled Security Events can omit a request. [Cloudflare Ray
+   ID](https://developers.cloudflare.com/fundamentals/reference/cloudflare-ray-id/),
+   [Cloudflare Logs](https://developers.cloudflare.com/observability/logs/),
+   and [Ray-ID API](https://developers.cloudflare.com/api/resources/logs/subresources/rayid/methods/get/).
+   A public Ray ID does not grant an outsider access to the zone, origin field,
+   or account; Cloudflare/account-owner records are required.
+
+2. **Registrar preservation — high confidence for operator evidence, not
+   necessarily origin IP.** The domain was registered through NameSilo at
+   `2026-10-30T05:43:48.059Z`, changed at `05:49:16.888Z`, and disappeared
+   from DNS by the next day. Send NameSilo the domain, those timestamps, report
+   ID, and archived evidence; request preservation of registration/login IPs,
+   account identifiers, payment records, contact changes, nameserver changes,
+   API activity, and deletion/suspension events for lawful disclosure. This can
+   identify the operator or its access network even when it does not reveal the
+   web origin.
+
+3. **Historical/passive DNS for the six-minute provisioning window — best
+   remaining public origin-IP chance.** Query reputable passive-DNS datasets
+   for the apex and every observed hostname, centered on registration through
+   nameserver change (`05:43:48Z–05:49:16Z`) and the first hours afterward.
+   Retain first-seen/last-seen, RR type, bailiwick, resolver/source count, and
+   raw answer. Prioritize any A/AAAA seen before Cloudflare delegation and any
+   later DNS-only `origin`, `www`, `api`, `admin`, `panel`, `mail`, `smtp`,
+   `ftp`, or random-label record. A passive record is a lead only; attribute it
+   only after content or provider-log verification. Cloudflare explicitly notes
+   that public historical records and DNS-only sibling services can expose an
+   origin in the official guidance linked above.
+
+4. **Campaign sibling capture with rare, executable fingerprints — medium
+   confidence.** The case already links `herstel-google.com`, registered two
+   days earlier, but both known domains were captured behind Cloudflare and had
+   no backend-probe destination. Search future/public scans using rare same-host
+   JavaScript or CSS response hashes, DOM/text hashes, unique API paths, and
+   distinctive identifiers — not the two shared GIFs. urlscan documents that
+   its Search API can query historical scans by `hash`, `domain`, `ip`,
+   `filename`, page IP/ASN/server, DOM/text hashes, and contacted domains.
+   [urlscan Search API reference](https://urlscan.io/docs/search/) and
+   [urlscan OpenAPI Search](https://docs.urlscan.io/apis/urlscan-openapi/search).
+   When a sibling is caught before takedown, perform the already bounded
+   synthetic-flow capture and preserve every request destination and remote IP.
+
+5. **Certificate Transparency for hostname discovery, not IP attribution —
+   medium/low yield here.** Enumerate certificates for the apex and sibling
+   domains to find overlooked hostnames, then check those names in historical
+   DNS/urlscan. CT is an append-only public record of issued public TLS
+   certificates and certificate chains; it does not record the server IP that
+   used a certificate. [RFC 9162](https://www.rfc-editor.org/rfc/rfc9162.html)
+   and [Cloudflare CT Monitoring](https://developers.cloudflare.com/ssl/edge-certificates/additional-options/certificate-transparency-monitoring/).
+   A Cloudflare edge certificate or wildcard therefore cannot identify the
+   origin, as the Evoxt experiment already demonstrated.
+
+6. **Hosting-provider flow records if Cloudflare supplies a candidate — final
+   corroboration.** For any origin IP/hostname Cloudflare or passive history
+   supplies, ask its network owner to match exact Cloudflare-to-origin flows at
+   the retained UTC times and preserve the customer account. Confirm publicly
+   only with an exact rare kit response, a controlled backend interaction, or
+   provider records; a certificate, open port, default page, shared image, ASN,
+   or timeout is insufficient.
+
+### Practical bottom line
+
+The origin cannot now be recovered reliably by scanning more Evoxt addresses:
+the complete sweep and controlled SNI experiment disproved that route, and the
+domain is already `NXDOMAIN`. The highest-probability path is **Cloudflare DNS
+and zone configuration history**, followed by **NameSilo account records** and
+**passive DNS from the brief registration/provisioning window**. Public asset
+search can still find a live sibling, but the two available GIF hashes are too
+common and must not be used for attribution.

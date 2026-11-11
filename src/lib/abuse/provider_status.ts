@@ -45,8 +45,6 @@ export function describeProviderReportStatus(report: ProviderReportLifecycle): s
 			}
 			if (executionStatus) return `The provider-specific report is in the ${executionStatus.replaceAll("_", " ")} phase. Provider receipt has not been confirmed yet.`;
 			return "The provider-specific report is being submitted. Provider receipt has not been confirmed yet.";
-		case "waiting_code":
-			return "The provider requires a verification code before the report can be submitted.";
 		case "awaiting_provider_reply":
 			return "The report was delivered to the provider. The service is waiting for a provider reply.";
 		case "escalating_to_portal":

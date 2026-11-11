@@ -1,4 +1,3 @@
-import { getPortalProvider } from "../providers";
 import { AbuseRepository } from "../repository";
 import type { AbuseTargetResolver } from "./shared";
 
@@ -26,15 +25,7 @@ export async function resolveReport(reportId: bigint, resolveTarget: AbuseTarget
 		});
 		for (const routeInput of resolved.routes) {
 			const route = await AbuseRepository.upsertResolvedRoute(target.id, routeInput);
-			if (route.status === "resolving" && route.routeType === "skyvern_portal") {
-				await AbuseRepository.enqueueJob({
-				jobType: "verify_provider",
-					reportId,
-					routeId: route.id,
-					payload: {},
-					dedupeKey: `verify:${route.id.toString()}`,
-				});
-			} else if (route.status === "verified" && route.routeType === "provider_submission") {
+			if (route.status === "verified" && route.routeType === "provider_submission") {
 				await AbuseRepository.enqueueJob({
 					jobType: "submit_provider",
 					reportId,
@@ -54,20 +45,4 @@ export async function resolveReport(reportId: bigint, resolveTarget: AbuseTarget
 		}
 	}
 	await AbuseRepository.recomputeReportStatus(reportId);
-}
-
-export async function verifyProviderRoute(routeId: bigint): Promise<void> {
-	const route = await AbuseRepository.getRoute(routeId);
-	if (!route || route.routeType !== "skyvern_portal" || route.status !== "resolving") return;
-	const provider = getPortalProvider(route.providerRegistryKey);
-	if (provider) {
-		await provider.verifyRoute(routeId);
-		return;
-	}
-	await AbuseRepository.transitionRouteStatus({
-		routeId: route.id,
-		from: "resolving",
-		to: "needs_human",
-		data: { reason: "provider_implementation_missing" },
-	});
 }

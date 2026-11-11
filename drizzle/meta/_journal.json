@@ -99,6 +99,13 @@
       "when": 1793700000000,
       "tag": "0013_reported_user_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1794083723321,
+      "tag": "0014_gname_form_and_kit_fingerprints",
+      "breakpoints": true
     }
   ]
 }

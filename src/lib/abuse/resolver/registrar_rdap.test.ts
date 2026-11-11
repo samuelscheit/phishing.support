@@ -69,7 +69,7 @@ describe("registrar RDAP and contact fallbacks", () => {
 			{ normalizedTarget: "keychainagent.pro", targetType: "domain", observedUrls: ["https://keychainagent.pro/wksxgj/x"] },
 			resolverWith({ "https://rdap.org/domain/keychainagent.pro": registry("keychainagent.pro", 1868, "abuse@eranet.com") }),
 		);
-		// Google Safe Browsing and Netcraft supplement every web target; the registrar route replaces only the mailbox.
+		// Netcraft supplements every web target; the registrar route replaces only the mailbox.
 		const domainRoutes = result.routes.filter((route) => route.resolverProvenance.match !== "supplemental_provider_target_rule");
 		expect(domainRoutes).toHaveLength(1);
 		expect(domainRoutes[0]).toMatchObject({

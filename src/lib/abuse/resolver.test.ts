@@ -256,7 +256,7 @@ describe("abuse resolver", () => {
 		]);
 	});
 
-	test("adds Google Safe Browsing and Netcraft supplemental providers only when a domain has an observed URL", async () => {
+	test("adds the Netcraft supplemental provider only when a domain has an observed URL", async () => {
 		const dependencies = resolverWith({
 			"https://rdap.org/domain/example.com": { entities: [] },
 		});
@@ -270,17 +270,11 @@ describe("abuse resolver", () => {
 		);
 
 		expect(withoutObservedUrl.routes).not.toEqual(expect.arrayContaining([
-			expect.objectContaining({ providerRegistryKey: "google_safe_browsing" }),
 			expect.objectContaining({ providerRegistryKey: "netcraft" }),
 		]));
 		expect(withObservedUrl).toMatchObject({ status: "resolved" });
-		expect(withObservedUrl.routes).toHaveLength(2);
+		expect(withObservedUrl.routes).toHaveLength(1);
 		expect(withObservedUrl.routes).toEqual(expect.arrayContaining([
-			expect.objectContaining({
-				providerRegistryKey: "google_safe_browsing",
-				routeType: "provider_submission",
-				status: "verified",
-			}),
 			expect.objectContaining({
 				providerRegistryKey: "netcraft",
 				routeType: "provider_submission",

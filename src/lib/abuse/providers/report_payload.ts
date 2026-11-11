@@ -92,7 +92,6 @@ function conciseProviderUrl(value: string): string {
 export type ProviderReportProfile =
 	| "generic"
 	| "cloudflare"
-	| "google_safe_browsing"
 	| "google_cloud"
 	| "netcraft"
 	| "namesilo"
@@ -200,12 +199,6 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 				action: "Please investigate the hosted content and take any appropriate action under Cloudflare's abuse policy.",
 				urlContext,
 			};
-		case "google_safe_browsing":
-			return {
-				lead: `A suspected ${allegation} URL on ${target} is being submitted to Google Safe Browsing.`,
-				action: "Please evaluate the submitted URL for inclusion in Safe Browsing protections.",
-				urlContext,
-			};
 		case "google_cloud":
 			return {
 				lead: `A ${allegation} page hosted on Google infrastructure at ${target} is being reported.`,
@@ -238,8 +231,8 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 			};
 		case "gname":
 			return {
-				lead: `A suspected ${allegation === "phishing" ? "phishing or fraud" : allegation} report is being prepared for GNAME regarding ${target}.`,
-				action: "Please review the captured evidence and apply the appropriate registrar abuse action.",
+				lead: `A suspected ${allegation === "phishing" ? "phishing or fraud" : allegation} domain report is being submitted to GNAME for ${target}.`,
+				action: "Please investigate the captured evidence and suspend the domain under your registrar abuse policy.",
 				urlContext,
 			};
 		default:

@@ -56,7 +56,7 @@ describe("Phishing Support Browser Fabric boundary", () => {
 		if (!config) throw new Error("test Fabric configuration is missing");
 		const payload = buildFabricBrowserSessionCreatePayload(
 			config,
-			{ operation: "gname-evidence-capture", reportId: "42", retry: false },
+			{ operation: "provider-evidence-capture", reportId: "42", retry: false },
 			"clone",
 			"phishing-test-idempotency-key",
 		);
@@ -67,7 +67,7 @@ describe("Phishing Support Browser Fabric boundary", () => {
 			profileRef: "profile_phishing",
 			leaseMode: "clone",
 			metadata: {
-				operation: "gname-evidence-capture",
+				operation: "provider-evidence-capture",
 				reportId: "42",
 				retry: false,
 				workload: "phishing-support",

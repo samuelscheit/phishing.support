@@ -6,9 +6,7 @@ import { skyvernApiKeySourceIsConfigured } from "./skyvern_config";
 import type { AbuseJob, AbuseJobType } from "./schema";
 import {
 	executeProviderSubmission,
-	getPortalProvider,
 	getProviderSubmissionProvider,
-	listPortalProviders,
 } from "./providers";
 import { sendEmail } from "./worker/email";
 import { ensureCorrespondencePolls, pollProviderCorrespondence } from "./worker/correspondence";
@@ -19,7 +17,7 @@ import { watchRedirector } from "./origin/redirector_watch";
 import { classifyReply, monitorProviderReply } from "./worker/mail";
 import { runGenericProviderPortal } from "./worker/portal";
 import { reconcileGenericSkyvern } from "./worker/reconcile";
-import { resolveReport, verifyProviderRoute } from "./worker/resolution";
+import { resolveReport } from "./worker/resolution";
 import { errorText, envInt, idFrom, parseJobBigInt, randomOwner, type WorkerServices } from "./worker/shared";
 import type { JobClaimFilter } from "./persistence/jobs";
 import { INVESTIGATION_BUDGET_MS } from "../exfiltration/task";
@@ -62,12 +60,10 @@ const CONTROL_JOB_TYPES = [
 
 /** Jobs that may cross an external provider side-effect boundary. */
 const EXTERNAL_JOB_TYPES = [
-	"verify_provider",
 	"reconcile_skyvern_run",
 	"send_email",
 	"run_portal",
 	"submit_provider",
-	"deliver_provider_verification_code",
 	"investigate_report",
 	"follow_up_provider_decision",
 	"discover_kit_siblings",
@@ -253,13 +249,9 @@ export class AbuseWorker {
 		// therefore never consume the capacity reserved for resolution,
 		// reconciliation, and inbound correspondence jobs.
 		this.loopPromises = [
-			...Array.from({ length: this.controlConcurrency }, (_, slot) =>
-				this.runLoop(slot === 0, CONTROL_JOB_FILTER, this.controlJobTimeoutMs),
-			),
-			...Array.from({ length: this.externalConcurrency }, () =>
-				this.runLoop(false, EXTERNAL_JOB_FILTER, this.externalJobTimeoutMs),
-			),
-			this.runLoop(false, SWEEP_JOB_FILTER, this.sweepJobTimeoutMs),
+			...Array.from({ length: this.controlConcurrency }, () => this.runLoop(CONTROL_JOB_FILTER, this.controlJobTimeoutMs)),
+			...Array.from({ length: this.externalConcurrency }, () => this.runLoop(EXTERNAL_JOB_FILTER, this.externalJobTimeoutMs)),
+			this.runLoop(SWEEP_JOB_FILTER, this.sweepJobTimeoutMs),
 		];
 		this.stopSamplePurge = startSamplePurgeSchedule();
 	}
@@ -273,14 +265,10 @@ export class AbuseWorker {
 		this.loopPromises = [];
 	}
 
-	private async maintainProviders(): Promise<void> {
-		for (const provider of listPortalProviders()) await provider.maintain?.();
-	}
-
-	private async runLoop(maintainProviders: boolean, filter: JobClaimFilter, timeoutMs: number): Promise<void> {
+	private async runLoop(filter: JobClaimFilter, timeoutMs: number): Promise<void> {
 		while (!this.stopped) {
 			try {
-				const processed = await this.processOne(maintainProviders, filter, timeoutMs);
+				const processed = await this.processOne(filter, timeoutMs);
 				if (!processed) await new Promise((resolve) => setTimeout(resolve, this.pollMs));
 			} catch (error) {
 				console.error("Abuse worker loop error:", error);
@@ -289,8 +277,7 @@ export class AbuseWorker {
 		}
 	}
 
-	async processOne(runProviderMaintenance = true, filter?: JobClaimFilter, timeoutMs?: number): Promise<boolean> {
-		if (runProviderMaintenance) await this.maintainProviders();
+	async processOne(filter?: JobClaimFilter, timeoutMs?: number): Promise<boolean> {
 		const job = await AbuseRepository.claimNextJob(this.owner, this.leaseMs, filter);
 		if (!job) return false;
 		const controller = new AbortController();
@@ -438,21 +425,6 @@ export class AbuseWorker {
 			await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
 			return;
 		}
-		// Provider-owned external actions get one chance to fence an active task
-		// before generic retry exhaustion changes the route to ordinary failure.
-		if (job.routeId) {
-			const route = await AbuseRepository.getRoute(job.routeId);
-			const provider = route ? getPortalProvider(route.providerRegistryKey) : undefined;
-			if (provider?.onRetryExhausted && await provider.onRetryExhausted({
-				routeId: job.routeId,
-				runId: job.runId ?? undefined,
-				jobType: job.jobType,
-				error,
-			}, this.services)) {
-				await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
-				return;
-			}
-		}
 		// Reconciliation itself is generic transport work. A known external run
 		// must never be downgraded simply because polling exhausted its retries.
 		if (job.jobType === "reconcile_skyvern_run" && job.routeId) {
@@ -479,7 +451,7 @@ export class AbuseWorker {
 			if (route) {
 				await AbuseRepository.transitionRouteStatus({
 					routeId: route.id,
-					from: ["resolving", "verified", "queued", "running", "waiting_code", "awaiting_provider_reply", "escalating_to_portal", "delivery_failed"],
+					from: ["resolving", "verified", "queued", "running", "awaiting_provider_reply", "escalating_to_portal", "delivery_failed"],
 					to: "failed",
 					data: { reason: "retry_exhausted", error },
 				});
@@ -501,9 +473,6 @@ export class AbuseWorker {
 			case "resolve_report":
 				await resolveReport(idFrom(job.reportId, "reportId"), this.resolveTarget);
 				return;
-			case "verify_provider":
-				await verifyProviderRoute(idFrom(job.routeId, "routeId"));
-				return;
 			case "send_email":
 				await sendEmail(idFrom(job.routeId, "routeId"), this.servicesFor(signal));
 				return;
@@ -524,9 +493,6 @@ export class AbuseWorker {
 				return;
 			case "monitor_provider_reply":
 				await monitorProviderReply(idFrom(job.routeId, "routeId"));
-				return;
-			case "deliver_provider_verification_code":
-				await this.deliverProviderVerificationCode(job, signal);
 				return;
 			case "investigate_report":
 				await this.runInvestigationJob(job, signal);
@@ -586,12 +552,6 @@ export class AbuseWorker {
 		const routeId = idFrom(job.routeId, "routeId");
 		const route = await AbuseRepository.getRoute(routeId);
 		if (!route) throw new Error("Abuse route no longer exists.");
-		if (route.routeType === "skyvern_portal") {
-			const provider = getPortalProvider(route.providerRegistryKey);
-			if (!provider) throw new Error(`No registered portal provider is available for abuse route ${route.id.toString()}.`);
-			await provider.runPortal(routeId, this.servicesFor(signal));
-			return;
-		}
 		if (route.routeType === "email") {
 			await runGenericProviderPortal(routeId, job.payload ?? {}, this.servicesFor(signal));
 			return;
@@ -621,25 +581,11 @@ export class AbuseWorker {
 		if (!run) return;
 		const route = await AbuseRepository.getRoute(run.routeId);
 		if (!route) return;
-		const provider = getPortalProvider(route.providerRegistryKey);
-		if (provider) {
-			await provider.reconcileRun(runId, this.servicesFor(signal));
-			return;
-		}
 		if (route.routeType === "email") {
 			await reconcileGenericSkyvern(runId, this.servicesFor(signal));
 			return;
 		}
 		throw new Error(`No registered portal provider can reconcile abuse route ${route.id.toString()}.`);
-	}
-
-	private async deliverProviderVerificationCode(job: AbuseJob, signal?: AbortSignal): Promise<void> {
-		const routeId = idFrom(job.routeId, "routeId");
-		const route = await AbuseRepository.getRoute(routeId);
-		if (!route) return;
-		const provider = getPortalProvider(route.providerRegistryKey);
-		if (!provider?.deliverVerificationCode) throw new Error(`No registered provider can deliver a verification code for abuse route ${route.id.toString()}.`);
-		await provider.deliverVerificationCode({ routeId, runId: job.runId ?? undefined, payload: job.payload ?? {} }, this.servicesFor(signal));
 	}
 }
 

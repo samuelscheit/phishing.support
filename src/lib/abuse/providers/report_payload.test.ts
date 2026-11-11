@@ -33,7 +33,7 @@ describe("shared supplemental-provider payload helpers", () => {
 
 	test("never exceeds a provider maximum when adding legal-brand context", () => {
 		const explanation = buildProviderReportNarrative({
-			provider: "google_safe_browsing",
+			provider: "gname",
 			target: "phishing.example.com",
 			observedUrls: ["https://phishing.example.com/collect"],
 			description: "Credential theft.",
@@ -58,10 +58,10 @@ The page uses TikTok branding, a fake login popup, discounted Coin packages, and
 			legalBrandUrl: "https://www.tiktok.com/coin",
 		};
 		const cloudflare = buildProviderReportNarrative({ ...common, provider: "cloudflare", maximumLength: 3_000 });
-		const google = buildProviderReportNarrative({ ...common, provider: "google_safe_browsing", maximumLength: 800 });
+		const gname = buildProviderReportNarrative({ ...common, provider: "gname", maximumLength: 800 });
 		const netcraft = buildProviderReportNarrative({ ...common, provider: "netcraft", maximumLength: 10_000 });
 
-		for (const narrative of [cloudflare, google, netcraft]) {
+		for (const narrative of [cloudflare, gname, netcraft]) {
 			expect(narrative).toBeDefined();
 			expect(narrative).not.toContain("## Verdict");
 			expect(narrative).not.toContain("Vietnamese payment methods");
@@ -71,9 +71,10 @@ The page uses TikTok branding, a fake login popup, discounted Coin packages, and
 			expect(narrative).toContain("credential");
 		}
 		expect(cloudflare).toContain("Cloudflare's abuse policy");
-		expect(google).toContain("Safe Browsing protections");
+		expect(gname).toContain("suspend the domain under your registrar abuse policy");
+		expect(gname!.length).toBeLessThanOrEqual(800);
 		expect(netcraft).toContain("Netcraft");
-		expect(new Set([cloudflare, google, netcraft]).size).toBe(3);
+		expect(new Set([cloudflare, gname, netcraft]).size).toBe(3);
 
 		const tencent = buildProviderReportNarrative({ ...common, provider: "tencent", maximumLength: 400 });
 		expect(tencent).toBeDefined();

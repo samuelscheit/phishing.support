@@ -70,7 +70,7 @@ export const originHostSnapshotSchema = z.object({
 	}).strict(),
 	fingerprints: z.array(z.object({
 		sha256: z.string().regex(/^[a-f0-9]{64}$/),
-		mimeType: z.string().max(100),
+		kind: z.enum(["script", "stylesheet", "hidden_frame"]),
 		url: z.string().url().max(4_096),
 		size: z.number().int().positive(),
 	}).strict()).max(MAX_KIT_FINGERPRINTS),

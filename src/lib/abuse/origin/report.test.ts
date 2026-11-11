@@ -102,7 +102,7 @@ describe("origin-host report workflow", () => {
 				return addresses.includes("8.8.8.6") ? [{ ip: "8.8.8.6", certificate: originCertificate }] : [];
 			},
 			discoverSiblings: async () => ({
-				fingerprints: [{ sha256: "a".repeat(64), mimeType: "text/css", url: "https://login.example.com/kit.css", size: 2048 }],
+				fingerprints: [{ sha256: "a".repeat(64), kind: "stylesheet" as const, url: "https://login.example.com/kit.css", size: 2048 }],
 				candidateCount: 2,
 				confirmed: [{ domain: "sibling.example.net", url: "https://sibling.example.net/login", matchingHashes: ["a".repeat(64)], originIp: "8.8.8.6", certificate: siblingCertificate }],
 				errors: [],

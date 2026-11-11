@@ -11,7 +11,7 @@ import type {
 	ProviderSubmissionSuccess,
 } from "../submission_contracts";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
-import { readEranetCodeFromMailbox, type EranetCodeReader } from "./code_mail";
+import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
 import { ERANET_PROVIDER } from "./definition";
 import {
 	buildEranetSubmissionPayload,
@@ -38,7 +38,7 @@ export type EranetSession = {
 
 export type EranetDependencies = {
 	openSession?: () => Promise<EranetSession>;
-	readCode?: EranetCodeReader;
+	readCode?: MailedCodeReader;
 	loadRouteContext?: typeof routeContext;
 	getArtifact?: typeof AbuseRepository.getArtifact;
 	now?: () => Date;
@@ -156,7 +156,7 @@ export async function prepareEranetExternalSubmission(context: ProviderSubmissio
 		// The form's Aliyun slider token is optional server-side; the mailed code is the gate.
 		const sent = await session.call("GetEmailCode", { json: { Email: ERANET_PROVIDER.reporter.email, AliyunCaptchaVerifyParam: "" } });
 		if (errorOf(sent)) throw new Error(`Eranet did not send its verification code: ${errorOf(sent)}`);
-		const code = await (dependencies.readCode ?? readEranetCodeFromMailbox)(requestedAt, context.signal);
+		const code = await (dependencies.readCode ?? mailedCodeReader(ERANET_PROVIDER.codeMail))(requestedAt, context.signal);
 		const state: EranetPreflightState = { session, code, screenshots };
 		return { state, dispose: () => session.close() };
 	} catch (error) {

@@ -2,10 +2,8 @@ import { defaultResponseModel } from "../../utils";
 import { isIP } from "node:net";
 
 import { configuredAbuseOpenAI, responseOutputText } from "../ai";
-import { isProviderReplyLinkAllowed } from "../providers/definition";
 import { isVerifiedEmailRouteOriginAllowed } from "../providers/email";
-import { getProviderDefinition } from "../providers/registry";
-import { assertPublicDnsHost, normalizeDomain, registrableDomain } from "../security";
+import { assertPublicDnsHost, normalizeDomain } from "../security";
 import { abuseReplyClassifications, abuseReplyClassificationSchema, type AbuseReplyClassification } from "./types";
 
 const URL_PATTERN = /https:\/\/[^\s<>'"`]+/gi;
@@ -112,11 +110,9 @@ function candidateUrls(textValue: string): string[] {
 
 /** Extract links only after a provider explicitly says its mailbox is not monitored. */
 export async function extractVerifiedProviderLinks(params: {
-	providerKey?: string;
 	/**
-	 * Email routes do not have a portal registry entry. Their explicit abuse
-	 * mailbox is nevertheless a verified provider identity, so a link may be
-	 * followed only within this already-resolved domain boundary.
+	 * The route's explicit abuse mailbox is a verified provider identity, so a
+	 * link may be followed only within its already-resolved domain boundary.
 	 */
 	verifiedDomains?: string[];
 	text: string;
@@ -127,7 +123,6 @@ export async function extractVerifiedProviderLinks(params: {
 	for (const candidate of candidateUrls(params.text)) {
 		const resolved = await resolveVerifiedProviderLink({
 			candidate,
-			providerKey: params.providerKey,
 			verifiedDomains: params.verifiedDomains,
 			fetch: params.fetch,
 			assertHost: params.assertHost,
@@ -139,7 +134,6 @@ export async function extractVerifiedProviderLinks(params: {
 
 export type VerifiedProviderLinkResolution = {
 	candidate: string;
-	providerKey?: string;
 	verifiedDomains?: string[];
 	fetch?: ProviderLinkFetch;
 	assertHost?: (hostname: string) => Promise<void>;
@@ -160,12 +154,9 @@ export type ProviderLinkFetch = (url: URL, init?: RequestInit) => Promise<Respon
  * the earlier mailbox scan is not a sufficient time-of-use check.
  */
 export async function resolveVerifiedProviderLink(params: VerifiedProviderLinkResolution): Promise<string | undefined> {
-	const definition = params.providerKey ? getProviderDefinition(params.providerKey) : undefined;
 	const verifiedDomains = params.verifiedDomains?.map((domain) => normalizeDomain(domain)).filter((domain): domain is string => Boolean(domain)) ?? [];
-	if (!definition && verifiedDomains.length === 0) return undefined;
-	if (definition && !definition.escalation.allowExplicitUnmonitoredReplyLink) return undefined;
-	const allowed = (url: URL) => definition ? isProviderReplyLinkAllowed(definition, url) : isVerifiedEmailRouteOriginAllowed(verifiedDomains, url);
-	const registrableBoundary = definition ? registrableDomain(definition.verifiedDomains[0]) : undefined;
+	if (verifiedDomains.length === 0) return undefined;
+	const allowed = (url: URL) => isVerifiedEmailRouteOriginAllowed(verifiedDomains, url);
 	const fetchImplementation = params.fetch ?? fetch;
 	const assertHost = params.assertHost ?? assertPublicDnsHost;
 	const maxRedirects = params.maxRedirects ?? 3;
@@ -190,7 +181,6 @@ export async function resolveVerifiedProviderLink(params: VerifiedProviderLinkRe
 		// credentials, a fragment, or an off-domain host.
 		if (!allowed(current) || current.username || current.password || current.hash || current.port || isIP(current.hostname)) return undefined;
 		if (!normalizeDomain(current.hostname)) return undefined;
-		if (registrableBoundary && registrableDomain(current.hostname) !== registrableBoundary) return undefined;
 		try {
 			await assertHost(current.hostname);
 			let response = await inspectResponse(current, "HEAD");

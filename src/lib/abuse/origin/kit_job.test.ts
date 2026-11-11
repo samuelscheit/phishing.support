@@ -35,11 +35,14 @@ const discoveryJobs = async () => (await getDb()).select().from(abuseJobs).where
 describe("kit sibling discovery jobs", () => {
 	useTemporaryDatabase();
 
-	test("only an original, classifier-confirmed credential or payment kit seeds a search", async () => {
+	test("only an original, classifier-confirmed phishing or malware kit seeds a search", async () => {
 		const cases = {
 			credential: await websiteCase(420000000000000001n, "login.example.com", { siteAssessments: CREDENTIAL_KIT }),
 			payment: await websiteCase(420000000000000002n, "pay.example.com", { siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "payment_fraud" }] }),
+			// A malware kit, such as an exploit loader on many lure domains (production case 377486973465530391).
 			malware: await websiteCase(420000000000000003n, "update.example.com", { siteAssessments: [{ hopIndex: 0, finding: "malware" }] }),
+			unconfirmed: await websiteCase(420000000000000009n, "maybe.example.com", { siteAssessments: [{ hopIndex: 0, finding: "insufficient_evidence" }] }),
+			malwareSibling: await websiteCase(420000000000000010n, "lure.example.com", { source: "kit-sibling:420000000000000003:1", siteAssessments: [{ hopIndex: 0, finding: "malware" }] }),
 			// A report migrated from the old pipeline never had a classifier verdict (the gambling site that spread to 80 casinos).
 			migrated: await websiteCase(420000000000000004n, "casino.example.com"),
 			sibling: await websiteCase(420000000000000005n, "sibling.example.com", { source: "kit-sibling:420000000000000001:1", siteAssessments: CREDENTIAL_KIT }),
@@ -55,7 +58,9 @@ describe("kit sibling discovery jobs", () => {
 		expect(seeds).toEqual({
 			credential: true,
 			payment: true,
-			malware: false,
+			malware: true,
+			unconfirmed: false,
+			malwareSibling: false,
 			migrated: false,
 			sibling: false,
 			originSibling: false,
@@ -69,7 +74,7 @@ describe("kit sibling discovery jobs", () => {
 			await enqueueKitSiblingDiscovery(report.reportId, reportRow.submissionId!);
 		}
 		expect((await discoveryJobs()).map(({ reportId }) => reportId).sort()).toEqual(
-			[cases.credential.reportId, cases.payment.reportId, cases.redirectedOriginal.reportId].sort(),
+			[cases.credential.reportId, cases.payment.reportId, cases.malware.reportId, cases.redirectedOriginal.reportId].sort(),
 		);
 
 		// A job queued before this rule existed is a no-op when it runs.
@@ -88,7 +93,7 @@ describe("kit sibling discovery jobs", () => {
 		const report = await websiteCase(420000000000000011n, "kit.example.com", { siteAssessments: CREDENTIAL_KIT });
 		await discoverKitSiblings({ reportId: report.reportId }, {
 			findCandidates: async () => ({
-				fingerprints: [{ sha256: "a".repeat(64), mimeType: "application/javascript", url: "https://kit.example.com/index.js", size: 50_000 }],
+				fingerprints: [{ sha256: "a".repeat(64), kind: "script", url: "https://kit.example.com/index.js", size: 50_000 }],
 				candidates: [
 					{ domain: "one.example.net", url: "https://one.example.net/login", matchingHashes: ["a".repeat(64)] },
 					{ domain: "two.example.org", url: "https://two.example.org/", matchingHashes: ["a".repeat(64)] },

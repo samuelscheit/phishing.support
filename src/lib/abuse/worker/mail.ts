@@ -30,7 +30,6 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 	const result = await classifyProviderReply({ text: message.textBody ?? "", from: message.fromAddress ?? undefined });
 	const links = result.classification === "not_monitored"
 		? await extractVerifiedProviderLinks({
-			providerKey: route.providerRegistryKey,
 			verifiedDomains: route.verifiedEmail ? verifiedDomainsForEmailRoute(route.verifiedEmail) : undefined,
 			text: message.textBody ?? "",
 		})

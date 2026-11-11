@@ -29,7 +29,7 @@ export type AbuseTargetType = (typeof abuseTargetTypes)[number];
 export const abuseTargetStatuses = ["pending", "resolved", "no_route", "failed"] as const;
 export type AbuseTargetStatus = (typeof abuseTargetStatuses)[number];
 
-export const abuseRouteTypes = ["email", "skyvern_portal", "provider_submission", "manual_unroutable"] as const;
+export const abuseRouteTypes = ["email", "provider_submission", "manual_unroutable"] as const;
 export type AbuseRouteType = (typeof abuseRouteTypes)[number];
 
 export const abuseRouteStatuses = [
@@ -37,7 +37,6 @@ export const abuseRouteStatuses = [
 	"verified",
 	"queued",
 	"running",
-	"waiting_code",
 	"submitted",
 	"awaiting_provider_reply",
 	"escalating_to_portal",
@@ -64,8 +63,6 @@ export const abuseRunStatuses = [
 	// the same complaint again.
 	"submission_started",
 	"running",
-	"waiting_code",
-	"sending_code",
 	"delivered",
 	"completed",
 	"failed",
@@ -79,13 +76,11 @@ export type AbuseJobStatus = (typeof abuseJobStatuses)[number];
 
 export const abuseJobTypes = [
 	"resolve_report",
-	"verify_provider",
 	"send_email",
 	"monitor_provider_reply",
 	"run_portal",
 	"submit_provider",
 	"reconcile_skyvern_run",
-	"deliver_provider_verification_code",
 	"classify_provider_reply",
 	"poll_provider_correspondence",
 	"investigate_report",
@@ -321,30 +316,6 @@ export const abuseMailMessages = sqliteTable(
 	]
 );
 
-/** Verification-code correlations retain a hash; complete source email stays in its raw artifact. */
-export const abuseMailCodes = sqliteTable(
-	"abuse_mail_codes",
-	{
-		id: sqliteBigint("id").primaryKey(),
-		reportId: sqliteBigint("report_id")
-			.notNull()
-			.references(() => abuseReports.id, { onDelete: "cascade" }),
-		routeId: sqliteBigint("route_id")
-			.notNull()
-			.references(() => abuseProviderRoutes.id, { onDelete: "cascade" }),
-		runId: sqliteBigint("run_id").references(() => abuseProviderRuns.id, { onDelete: "set null" }),
-		mailMessageId: sqliteBigint("mail_message_id").references(() => abuseMailMessages.id, { onDelete: "set null" }),
-		codeHash: text("code_hash").notNull(),
-		correlationKey: text("correlation_key"),
-		status: text("status").notNull().default("received"),
-		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
-		usedAt: sqliteTimestamp("used_at"),
-	},
-	(table) => [
-		index("abuse_mail_codes_route_status_idx").on(table.routeId, table.status, table.createdAt),
-	]
-);
-
 /** Durable worker jobs. No process-local stream is used as execution state. */
 export const abuseJobs = sqliteTable(
 	"abuse_jobs",
@@ -442,6 +413,5 @@ export type AbuseProviderRoute = InferSelectModel<typeof abuseProviderRoutes>;
 export type AbuseProviderRun = InferSelectModel<typeof abuseProviderRuns>;
 export type AbuseArtifact = InferSelectModel<typeof abuseArtifacts>;
 export type AbuseMailMessage = InferSelectModel<typeof abuseMailMessages>;
-export type AbuseMailCode = InferSelectModel<typeof abuseMailCodes>;
 export type AbuseJob = InferSelectModel<typeof abuseJobs>;
 export type AbuseEvent = InferSelectModel<typeof abuseEvents>;

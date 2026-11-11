@@ -1,10 +1,10 @@
 import type { ParsedMail } from "mailparser";
 
-import { flattenAddresses, headerStrings, messageBody, normalizeMailbox, normalizeMessageId, references } from "../imap/rfc";
+import { headerStrings, messageBody, normalizeMessageId, references } from "../imap/rfc";
 import type { AbuseProviderRoute } from "./schema";
 import { persistInboundAbuseMail, type InboundMailKind } from "./mail";
 import { authenticatedSender, caseSubmissionIdsIn, caseTagsIn, deliveryFailure } from "./mail/correlation";
-import { getPortalProvider, listPortalProviders, listProviderSubmissionProviders } from "./providers";
+import { listProviderSubmissionProviders } from "./providers";
 import { registrableDomain } from "./security";
 import { AbuseRepository } from "./repository";
 
@@ -19,12 +19,6 @@ export type ProviderReplyMatch =
 	/** The message names one of our reports but cannot be tied to exactly one route. */
 	| { kind: "ambiguous" }
 	| { kind: "none" };
-
-async function findProviderInboundRoute(params: { senderAddresses: string[]; recipients: string[]; textBody: string }) {
-	const matches = (await Promise.all(listPortalProviders().flatMap((provider) => provider.findInboundRoute ? [provider.findInboundRoute(params)] : [])))
-		.filter((route): route is NonNullable<typeof route> => Boolean(route));
-	return matches.length === 1 ? matches[0] : undefined;
-}
 
 /**
  * Mail from a direct provider's authenticated notification domain belongs to
@@ -55,8 +49,7 @@ const TRUSTED_AUTHSERV_ID = "icloud.com";
  * 1. our generated Reply-To identity or one of our Message-IDs in
  *    In-Reply-To/References (a bounce names ours in its returned headers);
  * 2. an authenticated sender we emailed, plus our case tag or case URL;
- * 3. an authenticated sender we emailed, plus our exact original subject;
- * 4. a provider-owned shared-mailbox matcher.
+ * 3. an authenticated sender we emailed, plus our exact original subject.
  * A message that names several routes attaches to none.
  */
 export async function matchProviderReply(parsed: ParsedMail, recipientAddresses: string[]): Promise<ProviderReplyMatch> {
@@ -87,24 +80,13 @@ export async function matchProviderReply(parsed: ParsedMail, recipientAddresses:
 		if (bySender.route) return { kind: "reply", route: bySender.route, mailKind: "reply" };
 		if (bySender.matched) return { kind: "ambiguous" };
 	}
-
-	// A message answering some other conversation must not be attached to a
-	// report by the provider shared-mailbox heuristic.
-	if (inReplyTo || messageReferences.length > 0) return { kind: "none" };
-	const route = await findProviderInboundRoute({
-		senderAddresses: flattenAddresses(parsed.from)
-			.map((entry) => normalizeMailbox(entry.address))
-			.filter((address): address is string => Boolean(address)),
-		recipients: recipientAddresses,
-		textBody: body,
-	});
-	return route ? { kind: "reply", route, mailKind: "reply" } : { kind: "none" };
+	return { kind: "none" };
 }
 
 /**
- * Persist one provider reply with its raw MIME and attachments, queue its
- * classifier, and run any provider post-storage hook exactly once per
- * message. Replays of the same UID or RFC Message-ID resolve to the stored row.
+ * Persist one provider reply with its raw MIME and attachments and queue its
+ * classifier once per message. Replays of the same UID or RFC Message-ID
+ * resolve to the stored row.
  */
 export async function storeProviderReply(params: {
 	route: AbuseProviderRoute;
@@ -120,12 +102,9 @@ export async function storeProviderReply(params: {
 	const messageId = normalizeMessageId(params.parsed.messageId ?? headerStrings(params.parsed, "message-id")[0]);
 	const existing = messageId ? await AbuseRepository.getInboundMailByMessageId(messageId) : undefined;
 	if (existing) {
-		// A prior attempt may have stored the message while its follow-up
-		// failed. Re-run the durable hooks against the originally stored route.
+		// A prior attempt may have stored the message while its classifier job
+		// was not queued yet.
 		await AbuseRepository.ensureInboundReplyClassification(existing.id);
-		const existingRoute = await AbuseRepository.getRoute(existing.routeId);
-		const provider = existingRoute ? getPortalProvider(existingRoute.providerRegistryKey) : undefined;
-		await provider?.onInboundMessageStored?.({ routeId: existing.routeId, reportId: existing.reportId, messageId: existing.id });
 		return { messageId: existing.id, reason: "duplicate_message_id" };
 	}
 	const stored = await persistInboundAbuseMail({
@@ -139,7 +118,5 @@ export async function storeProviderReply(params: {
 		uidValidity: params.uidValidity,
 		uid: params.uid,
 	});
-	const provider = getPortalProvider(params.route.providerRegistryKey);
-	await provider?.onInboundMessageStored?.({ routeId: params.route.id, reportId: params.route.reportId, messageId: stored.messageId });
 	return { messageId: stored.messageId, reason: stored.created ? "stored_provider_reply" : "duplicate_imap_delivery" };
 }

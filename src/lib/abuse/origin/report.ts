@@ -85,9 +85,8 @@ async function submissionRegisteredAt(submissionId: bigint): Promise<string | un
 async function originVerificationTargets(submissionId: bigint | null, domain: string): Promise<OriginVerificationTarget[]> {
 	if (!submissionId) return [];
 	const submission = await SubmissionsEntity.get(submissionId);
-	const resources = submission?.data.kind === "website" ? submission.data.website.kitResources : undefined;
 	// Only the reported host's own files can be requested from its candidate origin.
-	const liveTargets = kitFingerprints(resources ?? [])
+	const liveTargets = kitFingerprints(submission?.data.kind === "website" ? submission.data.website : {})
 		.map(({ url, sha256 }) => ({ url: new URL(url), sha256 }))
 		.filter(({ url }) => url.hostname === domain)
 		.slice(0, MAX_VERIFICATION_TARGETS)
@@ -161,7 +160,7 @@ export function originHostEvidence(snapshot: OriginHostSnapshot): Buffer {
 		"",
 		"Captured kit fingerprints searched on urlscan.io:",
 		...(snapshot.fingerprints.length
-			? snapshot.fingerprints.map((fingerprint) => `- ${fingerprint.sha256} ${fingerprint.mimeType} ${fingerprint.size} bytes ${fingerprint.url}`)
+			? snapshot.fingerprints.map((fingerprint) => `- ${fingerprint.sha256} ${fingerprint.kind.replace("_", " ")} ${fingerprint.size} bytes ${fingerprint.url}`)
 			: ["- none"]),
 		"",
 		"Sibling domains confirmed by both a matching kit hash and the origin certificate:",

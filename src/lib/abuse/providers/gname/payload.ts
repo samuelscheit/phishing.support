@@ -1,180 +1,117 @@
-import { isSafeSkyvernStorageUrl } from "../../skyvern/storage";
+import type { AbuseArtifact } from "../../schema";
+import { normalizeDomain } from "../../security";
 import { recordValue } from "../../worker/shared";
+import {
+	selectProviderEvidenceImageArtifact,
+	storedProviderEvidenceImageReference,
+	type ProviderEvidenceImageContract,
+	type ProviderEvidenceImageReference,
+} from "../evidence_image";
+import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
+import { GNAME_PROVIDER, type GnameComplaintKind } from "./definition";
 
-export type GnameEvidenceSource = {
-	id: string;
-	name: string;
-	mimeType: string;
-	sha256: string;
-	size: number;
+export const GNAME_EVIDENCE_CONTRACT = {
+	acceptedMimeTypes: GNAME_PROVIDER.evidence.acceptedMimeTypes,
+	maximumBytes: GNAME_PROVIDER.evidence.maximumBytes,
+	filenamePrefix: "gname_report",
+} as const satisfies ProviderEvidenceImageContract;
+
+export type GnameEvidenceReference = ProviderEvidenceImageReference<(typeof GNAME_PROVIDER.evidence.acceptedMimeTypes)[number]>;
+
+export type GnameSubmissionPayload = {
+	adapter: "gname_abuse_complaint_v1";
+	providerNarrativeVersion: 1;
+	definition: { version: string; contentHash: string };
+	target: { domain: string; observedUrl: string };
+	report: {
+		kind: GnameComplaintKind;
+		description: string;
+		/** The imitated brand's site, or the case page; only phishing complaints carry it. */
+		legalBrandUrl?: string;
+	};
+	/** The form requires a screenshot. */
+	evidence: GnameEvidenceReference;
 };
 
-export type GnameEvidenceUpload = {
-	artifactId: string;
-	sha256: string;
-	state: "pending" | "upload_started" | "uploaded";
-	startedAt?: string;
-	presignedUrl?: string;
-	uploadedAt?: string;
-	expiresAt?: string;
-};
-
-export type GnameTaskInput = {
-	entryUrl: string;
-	description: string;
-	domains: string[];
-	observedUrls: string[];
-	serviceName: string;
-	legalBrandUrl: string;
-	serviceMailbox: string;
-	webhookUrl?: string;
-	totpIdentifier?: string;
-};
-
-function stringArray(value: unknown, maximum: number): string[] | undefined {
-	if (!Array.isArray(value) || value.length === 0 || value.length > maximum || value.some((item) => typeof item !== "string" || item.length === 0 || item.length > 4_096)) {
-		return undefined;
-	}
-	return [...value] as string[];
+export function gnameComplaintKind(allegationCategory: string | undefined): GnameComplaintKind {
+	return allegationCategory === "malware" ? "malware" : "phishing";
 }
 
-export function storedGnameTaskInput(providerPayload: Record<string, unknown>): GnameTaskInput | undefined {
-	const input = recordValue(providerPayload.taskInput);
-	if (!input
-		|| typeof input.entryUrl !== "string"
-		|| typeof input.description !== "string" || input.description.length > 1_000
-		|| typeof input.serviceName !== "string" || input.serviceName.length === 0 || input.serviceName.length > 500
-		|| typeof input.legalBrandUrl !== "string" || input.legalBrandUrl.length === 0 || input.legalBrandUrl.length > 4_096
-		|| typeof input.serviceMailbox !== "string" || input.serviceMailbox.length === 0 || input.serviceMailbox.length > 320
-		|| (input.webhookUrl !== undefined && typeof input.webhookUrl !== "string")
-		|| (input.totpIdentifier !== undefined && typeof input.totpIdentifier !== "string")) {
-		return undefined;
-	}
-	const domains = stringArray(input.domains, 100);
-	const observedUrls = stringArray(input.observedUrls, 100);
-	if (!domains || !observedUrls) return undefined;
+/** The complaint's `sm`. */
+export function makeGnameDescription(params: { target?: string; observedUrl?: string; description: string; allegationCategory?: string; legalBrandUrl?: string }): string | undefined {
+	return buildProviderReportNarrative({
+		provider: "gname",
+		target: params.target,
+		observedUrls: params.observedUrl ? [params.observedUrl] : [],
+		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
+		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
+		maximumLength: GNAME_PROVIDER.maximumDescriptionLength,
+	});
+}
+
+export function selectGnameEvidenceArtifact(artifacts: readonly AbuseArtifact[]): GnameEvidenceReference | undefined {
+	return selectProviderEvidenceImageArtifact(artifacts, GNAME_EVIDENCE_CONTRACT);
+}
+
+/** The durable, secret-free GNAME draft: everything but the mailed code and the upload paths. */
+export function buildGnameSubmissionPayload(params: {
+	target: string;
+	observedUrl: string;
+	description: string;
+	allegationCategory?: string;
+	legalBrandUrl: string;
+	evidence: GnameEvidenceReference;
+}): GnameSubmissionPayload | undefined {
+	const domain = normalizeDomain(params.target);
+	const observedUrl = domain ? normalizeObservedUrlForTarget(params.observedUrl, domain) : undefined;
+	const kind = gnameComplaintKind(params.allegationCategory);
+	const asksForBrand = GNAME_PROVIDER.complaintTypes[kind].legalBrandUrl;
+	const description = makeGnameDescription({
+		target: domain,
+		observedUrl,
+		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
+	});
+	if (!domain || !observedUrl || !description || (asksForBrand && !params.legalBrandUrl)) return undefined;
 	return {
-		entryUrl: input.entryUrl,
-		description: input.description,
-		domains,
-		observedUrls,
-		serviceName: input.serviceName,
-		legalBrandUrl: input.legalBrandUrl,
-		serviceMailbox: input.serviceMailbox,
-		webhookUrl: input.webhookUrl,
-		totpIdentifier: input.totpIdentifier,
+		adapter: "gname_abuse_complaint_v1",
+		providerNarrativeVersion: 1,
+		definition: { version: GNAME_PROVIDER.version, contentHash: GNAME_PROVIDER.contentHash },
+		target: { domain, observedUrl },
+		report: { kind, description, ...(asksForBrand ? { legalBrandUrl: params.legalBrandUrl } : {}) },
+		evidence: params.evidence,
 	};
 }
 
-export function storedGnameEvidenceSources(providerPayload: Record<string, unknown>): GnameEvidenceSource[] | undefined {
-	if (!Array.isArray(providerPayload.sourceArtifacts) || providerPayload.sourceArtifacts.length === 0) return undefined;
-	const sources: GnameEvidenceSource[] = [];
-	for (const value of providerPayload.sourceArtifacts) {
-		const source = recordValue(value);
-		if (!source
-			|| typeof source.id !== "string" || !/^\d+$/.test(source.id)
-			|| typeof source.name !== "string" || source.name.length === 0 || source.name.length > 180
-			|| (source.mimeType !== "image/jpeg" && source.mimeType !== "image/png")
-			|| typeof source.sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(source.sha256)
-			|| typeof source.size !== "number" || !Number.isSafeInteger(source.size) || source.size <= 0) {
-			return undefined;
-		}
-		sources.push({
-			id: source.id,
-			name: source.name,
-			mimeType: source.mimeType,
-			sha256: source.sha256.toLowerCase(),
-			size: source.size,
-		});
+export function storedGnameSubmissionPayload(value: unknown): GnameSubmissionPayload | undefined {
+	const payload = recordValue(value);
+	const definition = payload && recordValue(payload.definition);
+	const target = payload && recordValue(payload.target);
+	const report = payload && recordValue(payload.report);
+	if (!payload || payload.adapter !== "gname_abuse_complaint_v1" || payload.providerNarrativeVersion !== 1
+		|| definition?.version !== GNAME_PROVIDER.version || definition?.contentHash !== GNAME_PROVIDER.contentHash
+		|| typeof target?.domain !== "string" || typeof target.observedUrl !== "string"
+		|| !report || (report.kind !== "phishing" && report.kind !== "malware")
+		|| typeof report.description !== "string" || !report.description || report.description.length > GNAME_PROVIDER.maximumDescriptionLength) {
+		return undefined;
 	}
-	return new Set(sources.map((source) => source.id)).size === sources.length ? sources : undefined;
+	const kind: GnameComplaintKind = report.kind;
+	const asksForBrand = GNAME_PROVIDER.complaintTypes[kind].legalBrandUrl;
+	if (asksForBrand ? typeof report.legalBrandUrl !== "string" || !report.legalBrandUrl : report.legalBrandUrl !== undefined) return undefined;
+	const evidence = storedProviderEvidenceImageReference(payload.evidence, GNAME_EVIDENCE_CONTRACT);
+	if (!evidence) return undefined;
+	return {
+		adapter: "gname_abuse_complaint_v1",
+		providerNarrativeVersion: 1,
+		definition: { version: GNAME_PROVIDER.version, contentHash: GNAME_PROVIDER.contentHash },
+		target: { domain: target.domain, observedUrl: target.observedUrl },
+		report: { kind, description: report.description, ...(asksForBrand ? { legalBrandUrl: report.legalBrandUrl as string } : {}) },
+		evidence,
+	};
 }
 
-function validIsoTimestamp(value: unknown): value is string {
-	return typeof value === "string" && Number.isFinite(Date.parse(value));
-}
-
-/**
- * Every SDK file upload gets its own durable pre-call marker. A process that
- * dies after marking an upload started cannot know whether Skyvern accepted
- * it, so a later worker must fail closed rather than upload the same evidence
- * again. Completed URLs are intentionally bounded in age: a retry must never
- * silently substitute a fresh upload after a presigned URL may have expired.
- */
-export function storedGnameEvidenceUploads(
-	providerPayload: Record<string, unknown>,
-	sources: GnameEvidenceSource[],
-): GnameEvidenceUpload[] | undefined {
-	if (!Array.isArray(providerPayload.evidenceUploads) || providerPayload.evidenceUploads.length !== sources.length) return undefined;
-	const uploads: GnameEvidenceUpload[] = [];
-	for (const [index, value] of providerPayload.evidenceUploads.entries()) {
-		const candidate = recordValue(value);
-		const source = sources[index];
-		if (!candidate || !source
-			|| candidate.artifactId !== source.id
-			|| candidate.sha256 !== source.sha256
-			|| !["pending", "upload_started", "uploaded"].includes(candidate.state as string)) {
-			return undefined;
-		}
-		const state = candidate.state as GnameEvidenceUpload["state"];
-		if (state === "pending") {
-			if (candidate.startedAt !== undefined || candidate.presignedUrl !== undefined || candidate.uploadedAt !== undefined || candidate.expiresAt !== undefined) return undefined;
-			uploads.push({ artifactId: source.id, sha256: source.sha256, state });
-			continue;
-		}
-		if (state === "upload_started") {
-			if (!validIsoTimestamp(candidate.startedAt) || candidate.presignedUrl !== undefined || candidate.uploadedAt !== undefined || candidate.expiresAt !== undefined) return undefined;
-			uploads.push({ artifactId: source.id, sha256: source.sha256, state, startedAt: candidate.startedAt });
-			continue;
-		}
-		if (typeof candidate.presignedUrl !== "string" || !isSafeSkyvernStorageUrl(candidate.presignedUrl)
-			|| !validIsoTimestamp(candidate.uploadedAt) || !validIsoTimestamp(candidate.expiresAt)
-			|| Date.parse(candidate.expiresAt) <= Date.parse(candidate.uploadedAt)) {
-			return undefined;
-		}
-		uploads.push({
-			artifactId: source.id,
-			sha256: source.sha256,
-			state,
-			presignedUrl: candidate.presignedUrl,
-			uploadedAt: candidate.uploadedAt,
-			expiresAt: candidate.expiresAt,
-		});
-	}
-	return uploads;
-}
-
-function queryParam(url: URL, name: string): string | undefined {
-	for (const [key, value] of url.searchParams) if (key.toLowerCase() === name.toLowerCase()) return value;
-	return undefined;
-}
-
-/**
- * Bounds a persisted upload URL without trusting URL query parameters to
- * extend its lifetime. `maximumAgeMs` is supplied by the caller so this
- * parser remains deterministic and independently testable.
- */
-export function gnameEvidenceUploadDeadline(presignedUrl: string, uploadedAt: Date, maximumAgeMs: number): Date {
-	const fallback = uploadedAt.getTime() + maximumAgeMs;
-	let deadline = fallback;
-	try {
-		const url = new URL(presignedUrl);
-		const expires = queryParam(url, "expires");
-		if (expires && /^\d{10,13}$/.test(expires)) {
-			const epoch = Number(expires) * (expires.length === 10 ? 1_000 : 1);
-			if (Number.isSafeInteger(epoch)) deadline = Math.min(deadline, epoch);
-		}
-		const amzDate = queryParam(url, "x-amz-date");
-		const amzExpires = queryParam(url, "x-amz-expires");
-		const match = amzDate?.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
-		if (match && amzExpires && /^\d{1,8}$/.test(amzExpires)) {
-			const signedAt = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]));
-			const candidate = signedAt + Number(amzExpires) * 1_000;
-			if (Number.isSafeInteger(candidate)) deadline = Math.min(deadline, candidate);
-		}
-	} catch {
-		// The storage URL was validated before this helper. Retain the conservative
-		// fallback in case a storage provider uses an opaque URL shape.
-	}
-	return new Date(deadline);
+/** `ymlb`: each domain, with its URL base64-encoded after a bar, as the form joins them. */
+export function gnameDomainEntry(target: GnameSubmissionPayload["target"]): string {
+	return `${target.domain}|${Buffer.from(target.observedUrl, "utf8").toString("base64")}`;
 }

@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { sha256Hex } from "../../security";
 import type { AbuseArtifact } from "../../schema";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
-import { eranetCodeFromMail } from "./code_mail";
+import { mailedCodeFrom } from "../mailed_code";
 import { ERANET_PROVIDER } from "./definition";
 import { buildEranetSubmissionPayload, eranetSubTypes, storedEranetSubmissionPayload } from "./payload";
 import { prepareEranetExternalSubmission, prepareEranetSubmission, submitEranetSubmission, type EranetDependencies, type EranetSession } from "./submission";
@@ -43,10 +43,10 @@ function eranetApi(responses: Record<string, () => Record<string, unknown>>) {
 describe("Eranet abuse form", () => {
 	test("reads the six-digit code only from Eranet's verification mail", () => {
 		const subject = "Online complaint/grievance verification email verification code!";
-		expect(eranetCodeFromMail({ from: "system@noreply.eranet.com", subject, body: "<p>Your verification code is: 893731 . Please ignore it</p>" })).toBe("893731");
-		expect(eranetCodeFromMail({ from: "attacker@evil.example", subject, body: "Your verification code is: 893731" })).toBeUndefined();
-		expect(eranetCodeFromMail({ from: "system@noreply.eranet.com", subject: "Your invoice", body: "Your verification code is: 893731" })).toBeUndefined();
-		expect(eranetCodeFromMail({ from: "system@noreply.eranet.com", subject, body: "no code here" })).toBeUndefined();
+		expect(mailedCodeFrom(ERANET_PROVIDER.codeMail, { from: "system@noreply.eranet.com", subject, body: "<p>Your verification code is: 893731 . Please ignore it</p>" })).toBe("893731");
+		expect(mailedCodeFrom(ERANET_PROVIDER.codeMail, { from: "attacker@evil.example", subject, body: "Your verification code is: 893731" })).toBeUndefined();
+		expect(mailedCodeFrom(ERANET_PROVIDER.codeMail, { from: "system@noreply.eranet.com", subject: "Your invoice", body: "Your verification code is: 893731" })).toBeUndefined();
+		expect(mailedCodeFrom(ERANET_PROVIDER.codeMail, { from: "system@noreply.eranet.com", subject, body: "no code here" })).toBeUndefined();
 	});
 
 	test("files a malware report: screenshot upload and mailed code before the marker, one CreateComplaint after it", async () => {

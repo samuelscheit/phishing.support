@@ -1,24 +1,39 @@
+import { serviceIdentity } from "../../../constants";
 import { hashStableJson } from "../../security";
-import type { PortalProviderDefinition } from "../contracts";
+import type { MailedCodeSpec } from "../mailed_code";
+import type { ProviderSubmissionDefinition } from "../submission_contracts";
 
-export type GnameDefinition = PortalProviderDefinition
-	& {
-		entryUrl: string;
-		requiredSemanticLandmarks: readonly string[];
-		requiredFields: readonly string[];
-		evidence: {
-			acceptedMimeTypes: readonly ("image/jpeg" | "image/png")[];
-			maximumImages: number;
-			maximumBytesPerImage: number;
-		};
-		identityPolicy: "verified_service_identity";
-		captchaPolicy: "dbc_extension";
-		emailCodePolicy: "shared_mailbox_serialized";
-		extractionSchema: Record<string, unknown>;
+/** The complaint types this service files: the form's `lx` values. */
+export type GnameComplaintKind = "phishing" | "malware";
+
+export type GnameComplaintType = {
+	/** The form's `lx`. */
+	lx: number;
+	/** The form page that offers the type. */
+	pageUrl: string;
+	/** The form's caption for the type, as the report names it. */
+	caption: string;
+	/** Whether the form asks for the legitimate site a phishing page imitates (`wzdz`). */
+	legalBrandUrl: boolean;
+};
+
+export type GnameProviderDefinition = ProviderSubmissionDefinition & {
+	origin: string;
+	complaintTypes: Readonly<Record<GnameComplaintKind, GnameComplaintType>>;
+	/** The form's own slider before it mails a code: GnSliderVerify, scored at `/request/slideverify`. */
+	slider: { handle: string; rail: string };
+	codeMail: MailedCodeSpec;
+	evidence: {
+		acceptedMimeTypes: readonly ["image/png", "image/jpeg"];
+		maximumBytes: number;
 	};
+	/** `sm`: "1-1000 digits". */
+	maximumDescriptionLength: number;
+	reporter: { name: string; email: string };
+};
 
-/** Exact accredited GNAME registrar IDs reviewed against IANA registrar data. */
-export const GNAME_REGISTRAR_IDS = Object.freeze([
+/** Accredited GNAME registrar IDs, reviewed against IANA registrar data. */
+const GNAME_REGISTRAR_IDS = Object.freeze([
 	1923,
 	...range(3941, 3950),
 	...range(3980, 4019),
@@ -31,58 +46,50 @@ function range(start: number, end: number): number[] {
 	return Array.from({ length: end - start + 1 }, (_, index) => start + index);
 }
 
+/**
+ * Code-owned contract for GNAME's abuse complaint form (www.gname.com/abuse),
+ * read from its page and `lyts.js` on 2026-11-07. GNAME's RDAP names
+ * complaint@gname.com; the form is its documented channel and returns a
+ * case number. A complaint needs a mailed code, and the code is sent only
+ * after the form's behavioural slider passes. Phishing is "Set up phishing
+ * and fraud site" (category 2); the form has no malware type, so malware is
+ * "Other issue" (category 4).
+ */
 const definitionWithoutHash = {
 	key: "gname",
-	displayName: "GNAME",
-	version: "2026-08-13.3",
-	routeType: "skyvern_portal" as const,
-	entryUrl: "https://www.gname.com/abuse/category/2",
-	verifiedDomains: ["gname.com"],
-	allowedReplyLinkDomains: ["gname.com"],
+	displayName: "GNAME Abuse Complaint",
+	version: "2026-11-07.1",
+	exactMailboxes: ["complaint@gname.com"],
 	registrarIds: [...GNAME_REGISTRAR_IDS],
-	requiredSemanticLandmarks: [
-		"GNAME abuse category 2 entry page",
-		"category 8 Set up phishing and fraud site",
-		"domain and observed-URL inputs",
-		"evidence upload control",
-		"email verification-code request",
-		"declaration acknowledgement",
-		"final submit control",
-	],
-	requiredFields: ["category", "domains", "observedUrls", "description", "screenshots", "serviceName", "legalBrandUrl", "serviceMailbox", "declaration"],
+	supplemental: false,
+	origin: "https://www.gname.com",
+	complaintTypes: {
+		phishing: { lx: 8, pageUrl: "https://www.gname.com/abuse/category/2", caption: "Set up phishing and fraud site", legalBrandUrl: true },
+		malware: { lx: 7, pageUrl: "https://www.gname.com/abuse/category/4", caption: "Other issue", legalBrandUrl: false },
+	},
+	slider: { handle: ".gn-slide-bar", rail: ".gn-slide-rail" },
+	codeMail: {
+		provider: "GNAME",
+		// gname.com/help/396.html: its system mail comes from gname@gname.net,
+		// gname@gname.vip, and noreply@share-dns.net. The code mail of
+		// 2026-11-07 came from gname@gname.net through Aliyun DirectMail.
+		senderDomains: ["gname.net", "gname.vip", "share-dns.net"],
+		// "GNAME: Verify your email address"
+		subjectPattern: "verify your email",
+		// "Here's your verification code: <strong>752253</strong>"
+		codePattern: "verification code:?\\s*(\\d{6})\\b",
+		maxAgeMs: 10 * 60_000,
+		waitMs: 4 * 60_000,
+	},
 	evidence: {
-		acceptedMimeTypes: ["image/jpeg", "image/png"] as const,
-		maximumImages: 15,
-		maximumBytesPerImage: 2 * 1024 * 1024,
+		acceptedMimeTypes: ["image/png", "image/jpeg"] as const,
+		maximumBytes: 2 * 1024 * 1024,
 	},
-	identityPolicy: "verified_service_identity" as const,
-	captchaPolicy: "dbc_extension" as const,
-	emailCodePolicy: "shared_mailbox_serialized" as const,
-	extractionSchema: {
-		type: "object",
-		additionalProperties: false,
-		properties: {
-			form_contract_passed: { type: "boolean" },
-			confirmation_text: { type: "string" },
-			confirmation_id: { type: "string" },
-			final_url: { type: "string" },
-			submitted_domains: { type: "array", items: { type: "string" } },
-			submitted_urls: { type: "array", items: { type: "string" } },
-			provider_errors: { type: "array", items: { type: "string" } },
-			form_drift: { type: "boolean" },
-			form_drift_reason: { type: "string" },
-			final_submit_clicked: { type: "boolean" },
-			final_submit_control: { type: "string", enum: ["provider_report_submit"] },
-			declaration_checked: { type: "boolean" },
-			declaration_contract: { type: "string", enum: ["gname_service_declaration_v1"] },
-			irreversible_actions: { type: "array", items: { type: "string", enum: ["provider_report_submit"] }, maxItems: 1 },
-		},
-		required: ["form_contract_passed", "confirmation_text", "final_url", "submitted_domains", "submitted_urls", "provider_errors", "form_drift", "final_submit_clicked", "final_submit_control", "declaration_checked", "declaration_contract", "irreversible_actions"],
-	},
-	escalation: { allowExplicitUnmonitoredReplyLink: true },
+	maximumDescriptionLength: 1_000,
+	reporter: { name: serviceIdentity.name, email: serviceIdentity.mailbox },
 };
 
-export const GNAME_PROVIDER: GnameDefinition = Object.freeze({
+export const GNAME_PROVIDER: GnameProviderDefinition = Object.freeze({
 	...definitionWithoutHash,
 	contentHash: hashStableJson(definitionWithoutHash),
 });

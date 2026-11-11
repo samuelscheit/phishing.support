@@ -5,7 +5,6 @@
     "": {
       "name": "phishing_reporter",
       "dependencies": {
-        "@antiadmin/anticaptchaofficial": "1.0.57",
         "@bernierllc/smtp-analyzer": "0.6.0",
         "@hookform/resolvers": "5.9.1",
         "@libsql/client": "0.18.0",
@@ -112,8 +111,6 @@
   },
   "packages": {
     "@alloc/quick-lru": ["@alloc/quick-lru@5.3.0", "", {}, "sha512-U4+70Pc5ZS9osnCBCE5Jha/ciHM+Yp+CNMNC/7HvYbNRk1Ldd+f7qO65W5qfhu/TCv+/ozljlXXe9Nj8419DMA=="],
-
-    "@antiadmin/anticaptchaofficial": ["@antiadmin/anticaptchaofficial@1.0.57", "", { "dependencies": { "axios": "^1.0.0" } }, "sha512-c0Qvtra6MV02euXZ46xlhcBoeJLKUahs9OR/uYhR25Ix13brTJ+8b1C0eg98NcR+ewuMBxT3nwfGostx9OzdUg=="],
 
     "@babel/helper-string-parser": ["@babel/helper-string-parser@7.29.7", "", {}, "sha512-Pb5ijPrZ89GDH8223L4UP8i6QApWxs04RbPQJTeWDV0/keR2E36MeKnyr6LYmUUvqRRI+Iv87SuF1W6ErINzYw=="],
 

@@ -44,7 +44,6 @@
 		"follow-redirects": "1.16.2"
 	},
 	"dependencies": {
-		"@antiadmin/anticaptchaofficial": "1.0.57",
 		"@bernierllc/smtp-analyzer": "0.6.0",
 		"@hookform/resolvers": "5.9.1",
 		"@libsql/client": "0.18.0",

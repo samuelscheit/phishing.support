@@ -47,7 +47,7 @@ describe("origin-host email draft", () => {
 		// The schema allowed 5, so the draft fell back to the generic resolver template.
 		const fingerprints = Array.from({ length: 31 }, (_, index) => ({
 			sha256: index.toString(16).padStart(64, "0"),
-			mimeType: "application/javascript",
+			kind: "script" as const,
 			url: `https://assistdeparments-x.com/xgabs/x-web/x-web/assets/${index}.js?v=v2.2.3`,
 			size: 2_000 + index,
 		}));

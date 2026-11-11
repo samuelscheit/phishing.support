@@ -1,12 +1,13 @@
 import { serviceIdentity } from "../../../constants";
 import { hashStableJson } from "../../security";
+import type { MailedCodeSpec } from "../mailed_code";
 import type { ProviderSubmissionDefinition } from "../submission_contracts";
 
 export type EranetProviderDefinition = ProviderSubmissionDefinition & {
 	reportPageUrl: string;
 	apiBaseUrl: string;
 	/** The verification-code mail the form sends before it accepts a complaint. */
-	codeMail: { senderDomain: string; subjectPattern: string; maxAgeMs: number; waitMs: number };
+	codeMail: MailedCodeSpec;
 	evidence: {
 		acceptedMimeTypes: readonly ["image/png", "image/jpeg", "image/gif"];
 		maximumBytes: number;
@@ -32,15 +33,17 @@ export type EranetProviderDefinition = ProviderSubmissionDefinition & {
 const definitionWithoutHash = {
 	key: "eranet",
 	displayName: "Eranet Fraud & Phishing Report",
-	version: "2026-11-03.2",
+	version: "2026-11-07.1",
 	exactMailboxes: ["abuse@eranet.com", "support@eranet.com", "support@tnet.hk", "cs@eranet.com"],
 	registrarIds: [1868],
 	supplemental: false,
 	reportPageUrl: "https://www.eranet.com/panel/abuse/report/phishing-report/index",
 	apiBaseUrl: "https://www.eranet.com/api/domain/abuse",
 	codeMail: {
-		senderDomain: "noreply.eranet.com",
+		provider: "Eranet",
+		senderDomains: ["noreply.eranet.com"],
 		subjectPattern: "verification code",
+		codePattern: "verification code is:?\\s*(\\d{6})\\b",
 		maxAgeMs: 10 * 60_000,
 		waitMs: 3 * 60_000,
 	},

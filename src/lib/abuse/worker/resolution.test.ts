@@ -317,7 +317,7 @@ describe("direct provider resolution and dispatch", () => {
 			},
 		});
 
-		expect(await worker.processOne(false, { jobTypes: ["submit_provider"] })).toBeTrue();
+		expect(await worker.processOne({ jobTypes: ["submit_provider"] })).toBeTrue();
 		expect(db.select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()).toMatchObject({
 			status: "failed",
 			retryCount: 8,

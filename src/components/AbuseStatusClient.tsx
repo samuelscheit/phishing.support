@@ -47,7 +47,6 @@ const routeText: Record<string, string> = {
 	verified: "Verified route",
 	queued: "Queued",
 	running: "Running",
-	waiting_code: "Waiting for provider code",
 	submitted: "Submitted",
 	awaiting_provider_reply: "Awaiting provider reply",
 	acknowledged: "Provider acknowledged",
