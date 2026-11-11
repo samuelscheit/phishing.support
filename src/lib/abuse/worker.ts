@@ -86,6 +86,22 @@ const CONTROL_JOB_FILTER: JobClaimFilter = { jobTypes: CONTROL_JOB_TYPES };
 const EXTERNAL_JOB_FILTER: JobClaimFilter = { jobTypes: EXTERNAL_JOB_TYPES };
 const SWEEP_JOB_FILTER: JobClaimFilter = { jobTypes: SWEEP_JOB_TYPES };
 
+/** The longest any error may ask a job to wait before its next attempt. */
+const MAX_RETRY_AFTER_MS = 60 * 60_000;
+
+/**
+ * How long a failed job waits before its next attempt: exponential backoff,
+ * or longer when the error says when its dependency can be tried again
+ * (`retryAfterMs`, e.g. a provider login that is backing off). Retrying
+ * sooner would only replay that failure and spend the job's retries.
+ */
+export function retryDelayMs(error: unknown, retryCount: number): number {
+	const backoff = Math.min(15 * 60_000, 1_000 * 2 ** retryCount);
+	const retryAfterMs = (error as { retryAfterMs?: unknown } | null)?.retryAfterMs;
+	if (typeof retryAfterMs !== "number" || !Number.isFinite(retryAfterMs)) return backoff;
+	return Math.max(backoff, Math.min(Math.ceil(retryAfterMs), MAX_RETRY_AFTER_MS));
+}
+
 class JobExecutionTimeoutError extends Error {
 	readonly code = "ABUSE_JOB_TIMEOUT";
 
@@ -313,8 +329,7 @@ export class AbuseWorker {
 			} else if (job.retryCount >= MAX_RETRIES) {
 				await this.failRetryExhaustedJob(job, message);
 			} else {
-				const backoff = Math.min(15 * 60_000, 1_000 * 2 ** job.retryCount);
-				await AbuseRepository.retryJob({ jobId: job.id, owner: this.owner, error: message, afterMs: backoff });
+				await AbuseRepository.retryJob({ jobId: job.id, owner: this.owner, error: message, afterMs: retryDelayMs(error, job.retryCount) });
 			}
 		} finally {
 			clearInterval(heartbeat);

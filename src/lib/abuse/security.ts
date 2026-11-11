@@ -265,7 +265,10 @@ export async function assertPublicDnsHost(hostname: string, lookup: typeof dns.l
 
 export function safePublicError(status: string, detail?: string | null): string | undefined {
 	if (!detail) return undefined;
-	if (status === "needs_human") return "The provider form changed in a way that prevented a safe automatic submission.";
+	// Every needs_human route settles before anything reaches the provider:
+	// a provider's form or definition changed, its login or payload needs a
+	// look. The detail stays internal; the public text says what is certain.
+	if (status === "needs_human") return "The automatic submission stopped before anything was sent to this provider; it needs a person to finish it.";
 	if (status === "insufficient_evidence") return "The stored evidence did not satisfy this provider's verification requirements.";
 	if (status === "no_route") return "No verified abuse-reporting route was available for this target.";
 	if (status === "delivery_failed") return "The provider report could not be delivered.";

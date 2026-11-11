@@ -3,6 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { buildCloudflareApiBody, cloudflareApiConfig, cloudflareReportsUrl, CloudflareSessionExpiredError, parseCloudflareApiResponse, submitCloudflareAbuseReport } from "./api";
 import type { CloudflareReportPayload } from "./report";
+import { retryDelayMs } from "../../worker";
+import { CloudflareLoginUnavailableError } from "./session";
 import { prepareCloudflareExternalSubmission, submitCloudflareSubmission } from "./submission";
 
 const ACCOUNT_ID = "b9077acfb4ef45e0f94b0f52c06c289a";
@@ -170,8 +172,13 @@ describe("Cloudflare provider preflight", () => {
 		expect(logins).toBe(1);
 		expect(JSON.stringify(payload)).not.toContain(session.atok);
 	});
-	test("login failure requires a human before any POST", async () => {
-		await expect(prepareCloudflareExternalSubmission({ routeId: 1n, payload }, { environment, getSession: async () => { throw new Error("sensitive browser error"); } })).rejects.toBeInstanceOf(ProviderSubmissionNeedsHumanError);
+	test("a failed login is retryable before any POST and says when to try again", async () => {
+		// Nothing was sent, so the job retries once the login backoff ends instead of parking the route for a person.
+		const unavailable = new CloudflareLoginUnavailableError("Cloudflare dashboard login failed: Cloudflare's Turnstile challenge issued no token within 120 s.", 540_000);
+		const err = await prepareCloudflareExternalSubmission({ routeId: 1n, payload }, { environment, getSession: async () => { throw unavailable; } }).catch((e: unknown) => e);
+		expect(err).toBe(unavailable);
+		expect(err).not.toBeInstanceOf(ProviderSubmissionNeedsHumanError);
+		expect(retryDelayMs(err, 0)).toBe(540_000);
 	});
 	test("rejects malformed drafts before login or the irreversible-call marker", async () => {
 		let logins = 0;

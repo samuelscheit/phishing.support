@@ -85,7 +85,12 @@ export async function prepareCloudflareSubmission(
 	};
 }
 
-/** Login before the durable irreversible-call marker; session secrets stay ephemeral. */
+/**
+ * Login before the durable irreversible-call marker; session secrets stay
+ * ephemeral. A failed login sent nothing, so it is an ordinary retryable
+ * failure: the error says when the next login may be tried, and the job
+ * waits that long. Only a job that runs out of retries ends the route.
+ */
 export async function prepareCloudflareExternalSubmission(
 	context: ProviderSubmissionContext,
 	dependencies: CloudflareSubmissionDependencies = {},
@@ -94,12 +99,7 @@ export async function prepareCloudflareExternalSubmission(
 		throw new ProviderSubmissionNeedsHumanError("The persisted Cloudflare provider payload is malformed; review the draft before submitting.");
 	}
 	const config = cloudflareApiConfig(dependencies.environment);
-	try {
-		return { state: await (dependencies.getSession ?? getCloudflareSession)(config, { signal: context.signal }) };
-	} catch {
-		context.signal?.throwIfAborted();
-		throw new ProviderSubmissionNeedsHumanError("Cloudflare dashboard login failed; manual login is required before submitting this report.");
-	}
+	return { state: await (dependencies.getSession ?? getCloudflareSession)(config, { signal: context.signal }) };
 }
 
 /** Submit one already-persisted Cloudflare report through the dashboard API. */

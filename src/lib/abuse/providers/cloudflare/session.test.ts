@@ -4,7 +4,10 @@ import {
 	buildCloudflareSession,
 	CLOUDFLARE_DEFAULT_SESSION_TTL_MS,
 	CLOUDFLARE_LOGIN_FAILURE_TTL_MS,
+	CLOUDFLARE_LOGIN_TIMEOUT_MS,
 	CLOUDFLARE_SESSION_SAFETY_MS,
+	CloudflareLoginError,
+	CloudflareLoginUnavailableError,
 	cloudflareSessionKey,
 	getCloudflareSession,
 	loginWithContext,
@@ -143,19 +146,37 @@ describe("getCloudflareSession", () => {
 		expect(h.state.logins).toBe(0);
 	});
 
-	test("records a generic failure briefly and does not stampede", async () => {
+	test("records a generic failure for the backoff window, says how long to wait, and does not stampede", async () => {
 		const h = harness({ login: async () => { h.state.logins += 1; throw new Error("boom token=SECRET-ATOK hunter2-secret"); } });
 		const err = await getCloudflareSession(config, {}, h.deps).catch((e: Error) => e);
+		expect(err).toBeInstanceOf(CloudflareLoginUnavailableError);
 		expect((err as Error).message).toBe("Cloudflare dashboard login failed.");
+		expect((err as CloudflareLoginUnavailableError).retryAfterMs).toBe(CLOUDFLARE_LOGIN_FAILURE_TTL_MS);
 		expect(JSON.stringify(h.store.records.get(key))).not.toContain("SECRET");
 		expect(h.locks.size).toBe(0);
 
-		await expect(getCloudflareSession(config, {}, h.deps)).rejects.toThrow("login failed");
+		// Callers inside the window get the failure and the time left, without a login.
+		h.state.time += 4 * 60_000;
+		const replayed = await getCloudflareSession(config, {}, h.deps).catch((e: CloudflareLoginUnavailableError) => e);
+		expect(replayed.retryAfterMs).toBe(CLOUDFLARE_LOGIN_FAILURE_TTL_MS - 4 * 60_000);
 		expect(h.state.logins).toBe(1);
 
-		h.state.time += CLOUDFLARE_LOGIN_FAILURE_TTL_MS + 1;
+		h.state.time += CLOUDFLARE_LOGIN_FAILURE_TTL_MS;
 		await expect(getCloudflareSession(config, {}, h.deps)).rejects.toThrow("login failed");
 		expect(h.state.logins).toBe(2);
+	});
+
+	test("keeps the failed step for everyone the failure is replayed to", async () => {
+		const h = harness({ login: async () => { h.state.logins += 1; throw new CloudflareLoginError("Cloudflare's Turnstile challenge issued no token within 120 s"); } });
+		const message = "Cloudflare dashboard login failed: Cloudflare's Turnstile challenge issued no token within 120 s.";
+		await expect(getCloudflareSession(config, {}, h.deps)).rejects.toThrow(message);
+		expect(h.store.records.get(key)?.failure?.message).toBe(message);
+		await expect(getCloudflareSession(config, {}, h.deps)).rejects.toThrow(message);
+		expect(h.state.logins).toBe(1);
+	});
+
+	test("waits ten minutes after a failed login: at most six real logins an hour", () => {
+		expect(CLOUDFLARE_LOGIN_FAILURE_TTL_MS).toBe(10 * 60_000);
 	});
 
 	test("a successful login clears a prior failure", async () => {
@@ -198,12 +219,19 @@ describe("getCloudflareSession", () => {
 type Call = [string, ...unknown[]];
 type FakeRequest = { url(): string; headers(): Record<string, string>; allHeaders(): Promise<Record<string, string>> };
 
-function fakeContext(options: { atok?: string; vses2?: string; failOn?: string; extraRequests?: FakeRequest[]; allHeadersOnly?: boolean } = {}) {
+type FakeResponse = { url(): string; status(): number; request(): { method(): string } };
+
+function fakeContext(options: { atok?: string; vses2?: string; failOn?: string; extraRequests?: FakeRequest[]; allHeadersOnly?: boolean; signInStatus?: number; hangOn?: string } = {}) {
 	const calls: Call[] = [];
 	let requestHandler: ((request: FakeRequest) => void) | undefined;
+	let responseHandler: ((response: FakeResponse) => void) | undefined;
 	let closed = false;
+	const hang = (name: string) => options.hangOn === name ? new Promise<never>(() => undefined) : undefined;
 	const page = {
-		on: (event: string, handler: typeof requestHandler) => { if (event === "request") requestHandler = handler; },
+		on: (event: string, handler: never) => {
+			if (event === "request") requestHandler = handler;
+			if (event === "response") responseHandler = handler;
+		},
 		goto: async (url: string) => {
 			calls.push(["goto", url]);
 			if (options.failOn === "goto") throw new Error("nav failed with hunter2-secret");
@@ -221,8 +249,13 @@ function fakeContext(options: { atok?: string; vses2?: string; failOn?: string; 
 		},
 		evaluate: async () => { calls.push(["evaluate"]); },
 		fill: async (selector: string, value: string) => { calls.push(["fill", selector, value]); },
-		waitForFunction: async () => { calls.push(["waitForFunction"]); },
-		click: async (selector: string) => { calls.push(["click", selector]); },
+		waitForFunction: async () => { calls.push(["waitForFunction"]); await hang("waitForFunction"); },
+		click: async (selector: string) => {
+			calls.push(["click", selector]);
+			// The sign-in POST answers; a refused one leaves the page on /login.
+			responseHandler?.({ url: () => "https://dash.cloudflare.com/api/v4/login", status: () => options.signInStatus ?? 200, request: () => ({ method: () => "POST" }) });
+			if (options.signInStatus && options.signInStatus >= 400) throw new Error("Timeout 120000ms exceeded waiting for hunter2-secret");
+		},
 		waitForURL: async () => { calls.push(["waitForURL"]); },
 		waitForTimeout: async () => { await new Promise((r) => setTimeout(r, 1)); },
 		close: async () => { closed = true; },
@@ -278,29 +311,48 @@ describe("loginWithContext", () => {
 		expect(result.atok).toBe("1800003600-extra");
 	});
 
-	test("rejects an already expired atok as a generic failure", async () => {
+	test("names an already expired atok as the step that failed", async () => {
 		const f = fakeContext({ atok: "1700000000-old", vses2: "v" });
-		await expect(loginWithContext(f.context, config, new AbortController().signal, () => T0)).rejects.toThrow("Cloudflare dashboard login failed.");
+		await expect(loginWithContext(f.context, config, new AbortController().signal, () => T0)).rejects.toThrow("Cloudflare dashboard login failed: Cloudflare issued an already expired session.");
 	});
 
 	test("the overall deadline bounds waiting for x-atok", async () => {
 		const f = fakeContext({ vses2: "v" });
 		let time = T0;
 		const err = await loginWithContext(f.context, config, new AbortController().signal, () => (time += 40_000)).catch((e: Error) => e);
-		expect((err as Error).message).toBe("Cloudflare dashboard login failed.");
+		expect(err).toBeInstanceOf(CloudflareLoginError);
+		expect((err as Error).message).toBe("Cloudflare dashboard login failed: the dashboard issued no session token.");
 		expect(f.isClosed()).toBe(true);
 	});
 
-	test("fails with a generic message when vses2 is missing", async () => {
+	test("names the missing session cookie's step", async () => {
 		const f = fakeContext({ atok: "1800000000-token" });
-		await expect(loginWithContext(f.context, config, new AbortController().signal, () => T0)).rejects.toThrow("Cloudflare dashboard login failed.");
+		await expect(loginWithContext(f.context, config, new AbortController().signal, () => T0)).rejects.toThrow("Cloudflare dashboard login failed: the dashboard issued no session token.");
+		expect(f.isClosed()).toBe(true);
+	});
+
+	test("says Cloudflare refused the sign-in, with its status and nothing the browser said", async () => {
+		const f = fakeContext({ signInStatus: 403 });
+		const err = await loginWithContext(f.context, config, new AbortController().signal, () => T0).catch((e: Error) => e);
+		expect((err as Error).message).toBe("Cloudflare dashboard login failed: Cloudflare refused the sign-in (HTTP 403).");
+		expect((err as Error).message).not.toContain("hunter2");
+	});
+
+	test("names the step the login deadline stopped, rather than reporting a cancel", async () => {
+		// A Turnstile that never issues a token runs into the 120 s bound.
+		const f = fakeContext({ hangOn: "waitForFunction" });
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(new DOMException("The operation timed out.", "TimeoutError")), 5);
+		const err = await loginWithContext(f.context, config, controller.signal, () => T0).catch((e: Error) => e);
+		expect(err).toBeInstanceOf(CloudflareLoginError);
+		expect((err as Error).message).toBe(`Cloudflare dashboard login failed: Cloudflare's Turnstile challenge issued no token within ${CLOUDFLARE_LOGIN_TIMEOUT_MS / 1000} s.`);
 		expect(f.isClosed()).toBe(true);
 	});
 
 	test("does not leak credentials from browser errors", async () => {
 		const f = fakeContext({ failOn: "goto" });
 		const err = await loginWithContext(f.context, config, new AbortController().signal, () => T0).catch((e: Error) => e);
-		expect((err as Error).message).toBe("Cloudflare dashboard login failed.");
+		expect((err as Error).message).toBe("Cloudflare dashboard login failed: the login page did not load.");
 		expect((err as Error).message).not.toContain("hunter2");
 		expect(f.isClosed()).toBe(true);
 	});
