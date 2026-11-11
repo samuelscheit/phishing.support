@@ -73,6 +73,27 @@ describe("abuse email drafts", () => {
 		expect(hasSubstantialCopiedPassage(longAnalysis, draft.body)).toBeFalse();
 	});
 
+	test("sends a summary with the hosts it names written plainly, never obfuscated", async () => {
+		// The openanonymity.chat report to Synlinq was rejected with 554 5.7.1 (2026-11-11): Rspamd scored
+		// "assistdeparments-x[.]com" as obfuscation (+5) and, undoing it, found the domain on Spamhaus DBL (+6.5).
+		const summaryOf = async (generated: string, observedUrls = ["https://openanonymity.chat/x/?ots-cmpgn-refer=TEST_REFERRER"]) => (await createAbuseEmailDraft({
+			report: { ...report, description: "This URL forwards visitors to a confirmed credential phishing page." },
+			target: { normalizedTarget: "openanonymity.chat", observedUrls },
+			route: hostingerRoute,
+			recipient: "abuse@living-bots.net",
+		}, { generateSummary: async () => generated })).body;
+		const plain = await summaryOf("On 2026-11-11 the reported URL redirected captures to assistdeparments-x[.]com, where a page solicited an \"Email or username.\"");
+		expect(plain).toContain("redirected captures to assistdeparments-x.com, where a page solicited");
+		expect(plain).not.toMatch(/\[\.\]|hxxp/i);
+		// A restored URL the template did not approve is still refused, and the factual fallback is sent.
+		const unapproved = await summaryOf("The redirector sends visitors to hxxps://assistdeparments-x[.]com/i/jf/onboarding/web.");
+		expect(unapproved).not.toContain("assistdeparments-x");
+		expect(unapproved).toContain("Captured evidence was submitted with this phishing report");
+		// The approved observed URL survives being refanged.
+		expect(await summaryOf("The reported URL hxxps://openanonymity[.]chat/x/?ots-cmpgn-refer=TEST_REFERRER forwards to a phishing page.".replace("TEST_REFERRER", "TESTREFERRER"), ["https://openanonymity.chat/x/?ots-cmpgn-refer=TESTREFERRER"]))
+			.toContain("The reported URL https://openanonymity.chat/x/?ots-cmpgn-refer=TESTREFERRER forwards to a phishing page.");
+	});
+
 	test("names a public submitter in the body while the case link stays absent", async () => {
 		const draft = await createAbuseEmailDraft({
 			report: { ...report, submissionId: null, reporterName: "Ada Lovelace", reporterContactEmail: "ada@example.org" },

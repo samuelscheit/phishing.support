@@ -10,7 +10,7 @@ import { downloaderUserAgent, fetchPayload, type FetchedPayload } from "../malwa
 import { payloadEvidence, payloadVerdictSentence, type PayloadEvidence } from "../malware/payload_evidence";
 import { reportDataDrop, reportPayloadHost, type PayloadDelivery } from "../malware/payload_host_report";
 import type { ReporterMetadata } from "../request_metadata";
-import { defangCommand, defangUrl } from "../malware/defang";
+import { defangCommand } from "../malware/defang";
 import { isSameWebsite } from "../website_site";
 import type { InvestigationJobPayload } from "./payload";
 import { setInvestigationStatus } from "./status";
@@ -109,12 +109,12 @@ function payloadFindings(results: readonly PayloadResult[]): string[] {
 		if (!evidence) {
 			return [delivery.kind === "paste_command"
 				? `The payload host for the command ${JSON.stringify(defangCommand(delivery.command))} refused the download during our check (${error}).`
-				: `The host of the exploit loader's file ${defangUrl(url)} refused the download during our check (${error}).`];
+				: `The host of the exploit loader's file ${url} refused the download during our check (${error}).`];
 		}
 		return [
 			delivery.kind === "paste_command"
-				? `We downloaded the payload from ${defangUrl(evidence.url)} as the command does (${evidence.sizeBytes} bytes, SHA-256 ${evidence.sha256}) and did not run it.`
-				: `We downloaded the exploit loader's file ${defangUrl(evidence.url)} as the browser it attacks would (${evidence.sizeBytes} bytes, SHA-256 ${evidence.sha256}) and did not run it.`,
+				? `We downloaded the payload from ${evidence.url} as the command does (${evidence.sizeBytes} bytes, SHA-256 ${evidence.sha256}) and did not run it.`
+				: `We downloaded the exploit loader's file ${evidence.url} as the browser it attacks would (${evidence.sizeBytes} bytes, SHA-256 ${evidence.sha256}) and did not run it.`,
 			payloadVerdictSentence(evidence),
 		];
 	});

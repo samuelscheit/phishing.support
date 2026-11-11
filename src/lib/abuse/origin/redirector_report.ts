@@ -1,5 +1,4 @@
 import { SubmissionsEntity } from "../../db/entities";
-import { defangUrl } from "../../malware/defang";
 import type { ReporterMetadata } from "../../request_metadata";
 import { hasPathTenants, websiteSite } from "../../website_site";
 import type { ReportableWebsiteFinding } from "../../website_types";
@@ -30,7 +29,7 @@ function checkStatement(check: RedirectorCheck & { checkedAt: string }, destinat
 	const moved = websiteSite(check.url) !== websiteSite(destinationUrl)
 		? " That is a new host: the campaign moves its pages to new hosts and keeps handing out this URL."
 		: "";
-	return `Checked again at ${check.checkedAt}: it ${how} ${defangUrl(check.url)}.${moved}`;
+	return `Checked again at ${check.checkedAt}: it ${how} ${check.url}.${moved}`;
 }
 
 /**
@@ -50,7 +49,7 @@ export function buildRedirectorRequest(params: {
 }): ValidatedAbuseReportRequest {
 	const { redirector, destination, check } = params;
 	const description = [
-		`This URL forwards visitors to a confirmed ${findingPhrase(destination.finding)} page: on ${redirector.parent.createdAt.toISOString()} it sent our capture to ${defangUrl(destination.url)}, which we confirmed as ${findingPhrase(destination.finding)}.`,
+		`This URL forwards visitors to a confirmed ${findingPhrase(destination.finding)} page: on ${redirector.parent.createdAt.toISOString()} it sent our capture to ${destination.url}, which we confirmed as ${findingPhrase(destination.finding)}.`,
 		...(destination.evidenceQuote ? [`That page shows: ${JSON.stringify(destination.evidenceQuote)}.`] : []),
 		checkStatement(check, destination.url),
 		"Disabling this URL stops the links already handed out for this campaign from reaching its current page and the ones it moves to next.",

@@ -15,7 +15,7 @@ import { defaultReasoning, defaultResponseModel, getOpenAIClient, sleep } from "
 import { extractWebsiteContinuationControls, extractWebsiteContinuationLinks, extractWebsiteDataEntryFields } from "./website_fields";
 import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "./website_capture_files";
 import { extractPasteCommands, type PasteCommand } from "./malware/paste_commands";
-import { defangCommand, defangUrl, defangUrls } from "./malware/defang";
+import { defangCommand } from "./malware/defang";
 import { isSameWebsite, websiteSite } from "./website_site";
 import { createExfiltrationCanaries } from "./exfiltration/canaries";
 import { hasExploitSignals } from "./malware/exploit_loader";
@@ -234,7 +234,7 @@ function pasteCommandStatements(commands: readonly PasteCommand[]): string[] {
 			`The page tells visitors to paste and run this command (defanged): ${JSON.stringify(defangCommand(command.shown))}.`,
 			...(decoded.length ? [`Decoded, it runs: ${decoded.map((text) => JSON.stringify(defangCommand(text))).join(" -> ")}.`] : []),
 			...(command.decoys.length ? [`It shows ${command.decoys.map((decoy) => JSON.stringify(defangCommand(decoy))).join(", ")} so the visitor believes a legitimate install is running.`] : []),
-			...(command.payloadUrls.length ? [`It downloads and runs code from: ${command.payloadUrls.map(defangUrl).join(", ")}.`] : []),
+			...(command.payloadUrls.length ? [`It downloads and runs code from: ${command.payloadUrls.join(", ")}.`] : []),
 		];
 	});
 }
@@ -255,11 +255,11 @@ function classifiedHiddenFrame(classification: Pick<WebsiteSiteClassification, "
 function hiddenFrameStatements(frame: WebsiteHiddenFrame): string[] {
 	const { signals } = frame;
 	return [
-		`The hidden frame is ${defangUrl(frame.url)} (hidden by ${frame.hiddenBy}; its document is ${frame.size} bytes, SHA-256 ${frame.sha256}).`,
+		`The hidden frame is ${frame.url} (hidden by ${frame.hiddenBy}; its document is ${frame.size} bytes, SHA-256 ${frame.sha256}).`,
 		...(signals.platformGate.length ? [`Its code reads the visitor's operating system version from the browser (${signals.platformGate.join(", ")}) to choose what to load.`] : []),
 		...(signals.runsFetchedCode ? ["Its code downloads further code and runs it."] : []),
-		...(signals.stageUrls.length ? [`It loads these files: ${signals.stageUrls.map(defangUrl).join(", ")}.`] : []),
-		...signals.dataUploads.map((upload) => `It sends ${upload.data.join(", ")} data from the device to ${defangUrl(upload.url)}${upload.observed ? "; the capture saw this request go out" : ""}.`),
+		...(signals.stageUrls.length ? [`It loads these files: ${signals.stageUrls.join(", ")}.`] : []),
+		...signals.dataUploads.map((upload) => `It sends ${upload.data.join(", ")} data from the device to ${upload.url}${upload.observed ? "; the capture saw this request go out" : ""}.`),
 	];
 }
 
@@ -294,10 +294,10 @@ export function buildWebsiteReportEvidence(
 					: `opening ${hop.url} on a phone (${WEBSITE_DEVICE_LABEL[hop.revisitedAs!]}), since it turns desktop visitors away`)).join(", then ")}.`
 			: undefined,
 		...(frame ? hiddenFrameStatements(frame) : []),
-		// A malware page's quote is the command or code itself; it is quoted defanged.
+		// A malware page's quote is the command or code itself; a command is quoted with its operators spelled out.
 		evidenceQuote
 			? frame
-				? `Code in the hidden frame that shows it (URLs defanged): ${JSON.stringify(defangUrls(evidenceQuote))}.`
+				? `Code in the hidden frame that shows it: ${JSON.stringify(evidenceQuote)}.`
 				: `Page text that shows it, in its original language${finding === "malware" ? " (defanged)" : ""}: ${JSON.stringify(finding === "malware" ? defangCommand(evidenceQuote) : evidenceQuote)}.`
 			: undefined,
 		collectionFields?.length ? `The page collects this data through: ${collectionFields.map((field) => JSON.stringify(describeDataEntryField(field))).join(", ")}.` : undefined,

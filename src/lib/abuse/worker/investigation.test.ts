@@ -98,7 +98,7 @@ describe("pre-report investigation", () => {
 		const released = await AbuseRepository.getReport(report.reportId);
 		expect(released?.status).toBe("accepted");
 		expect(released?.allegationCategory).toBe("malware");
-		expect(released?.description).toContain("We downloaded the payload from hxxps://keychainagent[.]pro/wksxgj/wZZLR9xY29o4 as the command does");
+		expect(released?.description).toContain("We downloaded the payload from https://keychainagent.pro/wksxgj/wZZLR9xY29o4 as the command does");
 		expect(released?.description).not.toContain("| zsh");
 		expect(released?.description).toContain("SHA-256 e23507e03916279372baa4f0c314fb3df5d78d741eeb7df25f43fe33ae50d9c5");
 		expect(released?.description).toContain("VirusTotal classifies this file as malicious: https://www.virustotal.com/gui/file/e23507e03916279372baa4f0c314fb3df5d78d741eeb7df25f43fe33ae50d9c5");
@@ -324,15 +324,15 @@ describe("drive-by exploit investigation", () => {
 		expect(fetched).toEqual([{ url: REMOTE_STAGE, userAgent: IPHONE_USER_AGENT }, { url: LOCAL_STAGE, userAgent: IPHONE_USER_AGENT }]);
 		const released = await AbuseRepository.getReport(report.reportId);
 		expect(released?.status).toBe("accepted");
-		expect(released?.description).toContain("We downloaded the exploit loader's file hxxps://92haoyun[.]icu/pe/0cb19f768eb8cd92.js as the browser it attacks would");
-		expect(released?.description).toContain("We downloaded the exploit loader's file hxxps://ktrced[.]top/pe_main.js as the browser it attacks would");
+		expect(released?.description).toContain("We downloaded the exploit loader's file https://92haoyun.icu/pe/0cb19f768eb8cd92.js as the browser it attacks would");
+		expect(released?.description).toContain("We downloaded the exploit loader's file https://ktrced.top/pe_main.js as the browser it attacks would");
 
 		// Only another host gets its own report: the page's own stage and drop are the page's report.
 		const linked = (await AbuseRepository.listReportsForSubmission(submissionId)).filter((item) => item.id !== report.reportId);
 		const targets = await Promise.all(linked.map(async (item) => ({ item, targets: await AbuseRepository.listTargets(item.id) })));
 		const stageReport = targets.find(({ item }) => item.description.startsWith("This host serves malware"))!;
 		expect(stageReport.item).toMatchObject({ allegationCategory: "malware", reportedUserAgent: IPHONE_USER_AGENT });
-		expect(stageReport.item.description).toContain(`runs an exploit loader in a frame no visitor can see (hxxps://ktrced[.]top/gooll/gooll.html), and that loader downloads this file from ${REMOTE_STAGE}`);
+		expect(stageReport.item.description).toContain(`runs an exploit loader in a frame no visitor can see (https://ktrced.top/gooll/gooll.html), and that loader downloads this file from ${REMOTE_STAGE}`);
 		expect(stageReport.targets.map((target) => [target.normalizedTarget, target.observedUrls])).toEqual([["92haoyun.icu", [REMOTE_STAGE]]]);
 		const dropReport = targets.find(({ item }) => item.description.startsWith("This host receives data stolen"))!;
 		expect(dropReport.item.allegationCategory).toBe("malware");

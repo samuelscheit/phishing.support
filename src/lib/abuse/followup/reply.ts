@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { serviceIdentity } from "../../constants";
-import { defangUrl } from "../../malware/defang";
+import { refangText } from "../../malware/defang";
 import { defaultResponseModel } from "../../utils";
 import { configuredAbuseOpenAI, responseOutputText } from "../ai";
 import type { DecisionEvidence } from "./evidence";
@@ -154,7 +154,7 @@ function fallbackNarrative(input: DecisionReplyInput): string {
 		const cloaking = evidence.recheck.reached && evidence.recheck.cloaking ? evidence.recheck.cloaking : evidence.reportedCloaking;
 		return [
 			concluded,
-			cloaking ? `The site cloaks: ${defangText(cloaking)}. A review from a datacenter connection is shown the other site, not the phishing page.` : undefined,
+			cloaking ? `The site cloaks: ${cloaking}. A review from a datacenter connection is shown the other site, not the phishing page.` : undefined,
 			input.replyKind === "account"
 				? "The domain no longer answers, so there is nothing left to review at the URL. The identifiers below come from the phishing pages themselves and belong to an account at your service, which likely serves the same operator's other sites. Please review that account."
 				: evidence.stillServed
@@ -200,20 +200,16 @@ function websiteEvidenceLines(evidence: WebsiteDecisionEvidence, reportedUrl: st
 	return [
 		`Rechecked at ${evidence.checkedAt} with a desktop browser, over Tor, our server's own address, and a residential connection:`,
 		recheck.reached
-			? `- ${defangUrl(reportedUrl)} ended on ${defangUrl(recheck.url)}${recheck.route ? ` (${recheck.route})` : ""}: ${evidence.stillServed ? "the phishing page is still served" : "not the phishing page"}${recheck.finding.evidenceQuote ? `; it shows "${recheck.finding.evidenceQuote}"` : ""}.`
-			: `- ${defangUrl(reportedUrl)} no longer answers on any route (${defangText(recheck.failure)}).`,
-		...(recheck.reached && recheck.cloaking ? [`- How it answered the routes: ${defangText(recheck.cloaking)}.`] : []),
-		...(evidence.reportedCloaking ? ["", `When we reported it: ${defangText(evidence.reportedCloaking)}. Visitors from datacenter and Tor addresses are sent elsewhere by script; residential visitors get the phishing page.`] : []),
-		...(evidence.capture ? ["", `Our capture: ${defangUrl(evidence.capture.url)} at ${evidence.capture.at}${evidence.capture.afterReview ? ", after your review" : ""}${evidence.capture.quote ? `, showing "${evidence.capture.quote}"` : ""}.${evidence.capture.timestamped ? " Its evidence manifest is timestamped under RFC 3161 and is on the case page below." : ""}`] : []),
-		...(evidence.accountIdentifiers.length ? ["", "Identifiers in the phishing pages that belong to an account at your service:", ...evidence.accountIdentifiers.map((identifier) => `- ${identifier.label}: ${identifier.value}${identifier.foundOn ? ` (in the pages of ${defangText(identifier.foundOn)})` : ""}`)] : []),
+			? `- ${reportedUrl} ended on ${recheck.url}${recheck.route ? ` (${recheck.route})` : ""}: ${evidence.stillServed ? "the phishing page is still served" : "not the phishing page"}${recheck.finding.evidenceQuote ? `; it shows "${recheck.finding.evidenceQuote}"` : ""}.`
+			: `- ${reportedUrl} no longer answers on any route (${recheck.failure}).`,
+		...(recheck.reached && recheck.cloaking ? [`- How it answered the routes: ${recheck.cloaking}.`] : []),
+		...(evidence.reportedCloaking ? ["", `When we reported it: ${evidence.reportedCloaking}. Visitors from datacenter and Tor addresses are sent elsewhere by script; residential visitors get the phishing page.`] : []),
+		...(evidence.capture ? ["", `Our capture: ${evidence.capture.url} at ${evidence.capture.at}${evidence.capture.afterReview ? ", after your review" : ""}${evidence.capture.quote ? `, showing "${evidence.capture.quote}"` : ""}.${evidence.capture.timestamped ? " Its evidence manifest is timestamped under RFC 3161 and is on the case page below." : ""}`] : []),
+		...(evidence.accountIdentifiers.length ? ["", "Identifiers in the phishing pages that belong to an account at your service:", ...evidence.accountIdentifiers.map((identifier) => `- ${identifier.label}: ${identifier.value}${identifier.foundOn ? ` (in the pages of ${identifier.foundOn})` : ""}`)] : []),
 		...(evidence.freshScreenshot ? ["", `Attached: ${evidence.freshScreenshot.filename}, the recheck's screenshot with its URL and time stamped on it.`] : []),
 	];
 }
 
-/** Hostnames in a measured detail, defanged like the URLs around them. */
-function defangText(text: string): string {
-	return text.replace(/\bhttps?:\/\/\S+/g, (url) => defangUrl(url)).replace(/\b((?:[a-z0-9-]+\.)+[a-z]{2,})\b/gi, (host) => host.replace(/\./g, "[.]"));
-}
 
 /** The full reply: model narrative (or its fallback), then the measured evidence, written by code. */
 export async function composeDecisionReply(input: DecisionReplyInput, writer: NarrativeWriter = writeNarrativeWithModel): Promise<{ body: string; narrativeSource: "model" | "fallback" }> {
@@ -227,8 +223,9 @@ export async function composeDecisionReply(input: DecisionReplyInput, writer: Na
 		if (written && rejection) console.warn(`The retried reply narrative for report ${input.confirmationId} was refused because ${rejection}; the fallback is used.`);
 	}
 	const accepted = written && !rejection ? acceptableNarrative(written) : undefined;
-	// Hostnames the model names are defanged like every URL below, so no mail client links them.
-	const narrative = accepted ? defangText(accepted) : undefined;
+	// A model may obfuscate the hosts it names; spam filters score that and
+	// undo it before their blocklist lookup (see malware/defang.ts).
+	const narrative = accepted ? refangText(accepted) : undefined;
 	const { evidence } = input;
 	const body = [
 		`Hello ${input.providerName} Trust & Safety,`,

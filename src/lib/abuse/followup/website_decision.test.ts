@@ -9,7 +9,6 @@ import type { WebsiteSiteClassification } from "../../website_types";
 import { validateAbuseReportRequest } from "../contracts";
 import type { sendAbuseEmailRoute } from "../mail";
 import { AbuseRepository } from "../repository";
-import { defangUrl } from "../../malware/defang";
 import { extractTurnstileSitekeys } from "./account_identifiers";
 import { followUpProviderDecision } from "./decision";
 import type { DecisionReplyInput } from "./reply";
@@ -159,9 +158,9 @@ describe("a phishing site's denial is answered from a recheck of the site", () =
 		expect(body).not.toContain("review the report again");
 		expect(body).toContain("no longer answers on any route (Failed to load page: net::ERR_TUNNEL_CONNECTION_FAILED");
 		expect(body).toContain(`- Cloudflare Turnstile sitekey: ${SITEKEY}`);
-		expect(body).toContain(`Our capture: ${defangUrl(URL_REPORTED)} at 2026-11-05T21:04:45.000Z, showing "Verify Your Email".`);
-		// Every URL and hostname in the reply is defanged.
-		expect(body).not.toMatch(/https?:\/\/(?!phishing\.support)|aljazeera\.com/);
+		expect(body).toContain(`Our capture: ${URL_REPORTED} at 2026-11-05T21:04:45.000Z, showing "Verify Your Email".`);
+		// No URL or hostname in the reply is obfuscated: spam filters score hxxp and [.] and undo them before their blocklist lookup.
+		expect(body).not.toMatch(/hxxp|\[\.\]/i);
 		// The report's own evidence goes along; there is no fresh screenshot of a gone site.
 		expect(sent[0]!.attachments!.map(({ filename }) => filename)).not.toContain("recheck-stamped.png");
 		const events = await AbuseRepository.listEvents(reportId);
@@ -187,9 +186,9 @@ describe("a phishing site's denial is answered from a recheck of the site", () =
 		expect(narratives[0]!.replyKind).toBe("contest");
 		expect(narratives[0]!.evidence).toMatchObject({ stillServed: true, recheck: { reached: true, route: "residential exit", matchesReportedKit: true } });
 		const body = sent[0]!.body;
-		expect(body).toContain("Your reviewer most likely visited from a datacenter connection, which this site sends to aljazeera[.]com by script.");
-		expect(body).toContain(`ended on ${defangUrl(URL_REPORTED)} (residential exit): the phishing page is still served; it shows "Verify Your Email".`);
-		expect(body).toContain("- How it answered the routes: hxxps://docusign[.]alt3-doc3ea7-v2[.]sbs/word/verify[.]workspace[.]php sent the Tor exit to aljazeera[.]com but the residential exit to alt3-doc3ea7-v2[.]sbs.");
+		expect(body).toContain("Your reviewer most likely visited from a datacenter connection, which this site sends to aljazeera.com by script.");
+		expect(body).toContain(`ended on ${URL_REPORTED} (residential exit): the phishing page is still served; it shows "Verify Your Email".`);
+		expect(body).toContain("- How it answered the routes: https://docusign.alt3-doc3ea7-v2.sbs/word/verify.workspace.php sent the Tor exit to aljazeera.com but the residential exit to alt3-doc3ea7-v2.sbs.");
 		expect(body).toContain("Attached: recheck-stamped.png");
 		expect(sent[0]!.attachments![0]).toMatchObject({ filename: "recheck-stamped.png", mimeType: "image/png" });
 		expect(sent[0]!.attachments!.length).toBeLessThanOrEqual(5);
@@ -231,7 +230,7 @@ describe("a phishing site's denial is answered from a recheck of the site", () =
 		const { route } = await deniedPhishingCase({ html: GMAIL_PAGE, url: workspaceUrl });
 		const { sent, send } = recordingSend();
 		expect(await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "content_removed" }, { send, website: { capture: gone }, writeNarrative: async () => undefined })).toBe("sent");
-		expect(sent[0]!.body).toContain(`- Cloudflare Turnstile sitekey: ${SITEKEY} (in the pages of docusign[.]alt3-doc3ea7-v2[.]sbs)`);
+		expect(sent[0]!.body).toContain(`- Cloudflare Turnstile sitekey: ${SITEKEY} (in the pages of docusign.alt3-doc3ea7-v2.sbs)`);
 		expect(sent[0]!.body).toContain("Please review that account.");
 	});
 

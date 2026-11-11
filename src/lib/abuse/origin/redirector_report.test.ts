@@ -50,9 +50,9 @@ describe("the report of a redirector", () => {
 		expect(request.targets.map(({ normalizedTarget }) => normalizedTarget)).toEqual(["openanonymity.chat"]);
 		expect(request.observedUrls).toEqual([{ target: "openanonymity.chat", urls: [ROTATOR] }]);
 		expect(request.description).toBe([
-			"This URL forwards visitors to a confirmed credential phishing page: on 2026-11-11T11:18:20.000Z it sent our capture to hxxps://assistdeparments-x[.]com/, which we confirmed as credential phishing.",
+			"This URL forwards visitors to a confirmed credential phishing page: on 2026-11-11T11:18:20.000Z it sent our capture to https://assistdeparments-x.com/, which we confirmed as credential phishing.",
 			`That page shows: "Email or username".`,
-			"Checked again at 2026-11-11T11:19:00.000Z: it serves a page that immediately sends the visitor on to hxxps://assistdeparments-x[.]com/.",
+			"Checked again at 2026-11-11T11:19:00.000Z: it serves a page that immediately sends the visitor on to https://assistdeparments-x.com/.",
 			"Disabling this URL stops the links already handed out for this campaign from reaching its current page and the ones it moves to next.",
 		].join("\n"));
 		expect(request.evidence.map(({ filename, mimeType }) => [filename, mimeType])).toEqual([["redirector-evidence.json", "application/json"], ["lure-page.png", "image/png"]]);
@@ -82,10 +82,10 @@ describe("the report of a redirector", () => {
 			check: { ...check, checkedAt: CHECKED_AT },
 		});
 		const moved = build(STILL_FORWARDING);
-		expect(moved.description).toContain("it serves a page that immediately sends the visitor on to hxxps://assistdeparments-x[.]com/. That is a new host: the campaign moves its pages to new hosts and keeps handing out this URL.");
+		expect(moved.description).toContain("it serves a page that immediately sends the visitor on to https://assistdeparments-x.com/. That is a new host: the campaign moves its pages to new hosts and keeps handing out this URL.");
 		expect(moved.description).not.toContain("That page shows");
 		expect(moved.evidence).toHaveLength(1);
-		expect(build({ kind: "destination", url: "https://x-com.email/login", urls: [] }).description).toContain("Checked again at 2026-11-11T11:19:00.000Z: it redirects to hxxps://x-com[.]email/login.\n");
+		expect(build({ kind: "destination", url: "https://x-com.email/login", urls: [] }).description).toContain("Checked again at 2026-11-11T11:19:00.000Z: it redirects to https://x-com.email/login.\n");
 		expect(build({ kind: "stays", urls: [ROTATOR] }).description).toContain("the URL still answers; it sends a browser on by script, which a plain HTTP request does not run.");
 		const malware = build(STILL_FORWARDING, { finding: "malware" });
 		expect(malware.allegationCategory).toBe("malware");
@@ -157,7 +157,7 @@ describe("reporting a confirmed page's redirector", () => {
 		expect(linked).toMatchObject({ submissionId: 440000000000000002n, allegationCategory: "phishing" });
 		// The capture time is when the case that went through the redirector was opened.
 		const parent = await SubmissionsEntity.get(440000000000000001n);
-		expect(linked?.description).toContain(`on ${parent!.createdAt.toISOString()} it sent our capture to hxxps://assistdeparments-x[.]com/`);
+		expect(linked?.description).toContain(`on ${parent!.createdAt.toISOString()} it sent our capture to https://assistdeparments-x.com/`);
 		expect((await AbuseRepository.listTargets(linked!.id)).map(({ normalizedTarget }) => normalizedTarget)).toEqual(["openanonymity.chat"]);
 
 		// The watch's visit of the redirector later reached the next host.

