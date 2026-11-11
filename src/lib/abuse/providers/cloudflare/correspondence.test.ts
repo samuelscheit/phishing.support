@@ -7,7 +7,9 @@ import { validateAbuseReportRequest } from "../../contracts";
 import { AbuseRepository } from "../../repository";
 import { abuseJobs, abuseProviderRuns } from "../../schema";
 import { ensureCorrespondencePolls, pollProviderCorrespondence } from "../../worker/correspondence";
-import { cloudflareApiConfig } from "./api";
+import { parseCloudflareOriginDisclosure } from "../../origin/disclosure";
+import { nextCorrespondencePollDelayMs } from "../submission_execution";
+import { cloudflareApiConfig, unescapeCloudflareText } from "./api";
 import { cloudflareSessionKey } from "./session";
 import { sqliteCloudflareSessionStore } from "./session-store";
 import { fetchCloudflareCorrespondence } from "./submission";
@@ -140,13 +142,46 @@ describe("Cloudflare correspondence polling", () => {
 		]);
 		const queued = (await pollJobs(route.id)).filter((job) => job.id !== first!.id);
 		expect(queued).toHaveLength(1);
-		expect(queued[0]!.nextAttemptAt.getTime()).toBeGreaterThan(Date.now() + 59 * 60_000);
+		// Read again a minute after submitting: Cloudflare's emails arrive within seconds.
+		expect(queued[0]!.nextAttemptAt.getTime()).toBeGreaterThan(Date.now() + 50_000);
+		expect(queued[0]!.nextAttemptAt.getTime()).toBeLessThanOrEqual(Date.now() + 60_000);
+	});
+
+	test("reads soon after submitting, then hourly", () => {
+		const minute = 60_000;
+		expect(nextCorrespondencePollDelayMs(0)).toBe(minute);
+		expect(nextCorrespondencePollDelayMs(2_000)).toBe(minute - 2_000);
+		expect(nextCorrespondencePollDelayMs(minute)).toBe(4 * minute);
+		expect(nextCorrespondencePollDelayMs(5 * minute + 1)).toBe(10 * minute - 1);
+		expect(nextCorrespondencePollDelayMs(15 * minute)).toBe(60 * minute);
+		expect(nextCorrespondencePollDelayMs(3 * 24 * 60 * minute)).toBe(60 * minute);
+		// A clock that runs behind the run's creation time never schedules in the past or too late.
+		expect(nextCorrespondencePollDelayMs(-5_000)).toBe(minute);
 	});
 
 	test("stops polling a report submitted more than 30 days ago", async () => {
 		const { route } = await submittedCloudflareRoute(31);
 		await ensureCorrespondencePolls();
 		expect(await pollJobs(route.id)).toEqual([]);
+	});
+
+	test("names the disclosed host as Cloudflare wrote it, without its HTML escapes", async () => {
+		// Production report c666c757e287432d (assistdeparments-x.com), 2026-11-11, as the API returned it.
+		const disclosure = "Cloudflare received your Phishing report regarding: assistdeparments-x[.]com.\n\nThe host for the reported domain is:\nSKN-NETWORK-1 - SKN Subnet &amp; Telecom Ltd, KN\nabuse@skntelecom.com\n\nYou may use this information to follow up directly with the hosting provider.\n\nPage text that shows it: &#34;Email or username&#34;. &lt;b&gt; &#x27;x&#x27; &unknown; &#0; &#xD800;";
+		const page = { ...emailsPage, result: { emails: [{ ...emailsPage.result.emails[0], subject: "Response &amp; review", body: disclosure }] } };
+		const result = await fetchCloudflareCorrespondence({ confirmationId: "ddfb9a8d1137a9e7" }, {
+			environment,
+			getSession: async () => session,
+			fetch: async (url) => json(url.includes("/emails") ? page : detail),
+		});
+		const [message] = result.messages;
+		expect(message!.subject).toBe("Response & review");
+		expect(message!.body).toContain("SKN-NETWORK-1 - SKN Subnet & Telecom Ltd, KN");
+		// Unknown names, NUL and lone surrogates stay as written.
+		expect(message!.body).toEndWith(`Page text that shows it: "Email or username". <b> 'x' &unknown; &#0; &#xD800;`);
+		expect(parseCloudflareOriginDisclosure(message!.body)).toEqual({ recipient: "abuse@skntelecom.com", providerLabel: "SKN-NETWORK-1 - SKN Subnet & Telecom Ltd, KN" });
+		// Unescaped once: an escaped escape stays an escape.
+		expect(unescapeCloudflareText("&amp;amp; &amp;#34;")).toBe("&amp; &#34;");
 	});
 
 	test("immediately queues one origin-host follow-up for a newly recorded disclosure", async () => {

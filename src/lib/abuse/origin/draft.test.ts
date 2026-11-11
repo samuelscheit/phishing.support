@@ -42,6 +42,32 @@ describe("origin-host email draft", () => {
 		expect(createOriginHostEmailDraft({ report: { id: 1n, submissionId: 2n }, route: { resolutionSnapshot: { kind: "other" } } })).toBeUndefined();
 	});
 
+	test("reads a snapshot with every fingerprint a real capture records", () => {
+		// assistdeparments-x.com (production route 378905878629191859, 2026-11-11): 31 fingerprints, the X web bundle.
+		// The schema allowed 5, so the draft fell back to the generic resolver template.
+		const fingerprints = Array.from({ length: 31 }, (_, index) => ({
+			sha256: index.toString(16).padStart(64, "0"),
+			mimeType: "application/javascript",
+			url: `https://assistdeparments-x.com/xgabs/x-web/x-web/assets/${index}.js?v=v2.2.3`,
+			size: 2_000 + index,
+		}));
+		const sibling = {
+			domain: "x-login-help.com",
+			url: "https://x-login-help.com/",
+			matchingHashes: fingerprints.slice(0, 12).map(({ sha256 }) => sha256),
+			originIp: "8.8.8.8",
+			certificate: certificate(["x-login-help.com"], "BB"),
+			submissionId: "3",
+		};
+		const value = { ...snapshot(), providerLabel: "SKN-NETWORK-1 - SKN Subnet & Telecom Ltd, KN", fingerprints, siblings: [sibling] };
+		expect(originHostSnapshotSchema.safeParse(value).success).toBeTrue();
+		const { body } = draft(value as OriginHostSnapshot);
+		expect(body).toStartWith("Hello Skn-Network-1 - Skn Subnet & Telecom Ltd, KN Abuse Team,");
+		expect(body).toContain("Cloudflare named you as the host of the phishing site login.example.com");
+		expect(body).not.toContain("Public resolver data");
+		expect(originHostSnapshotSchema.safeParse({ ...value, fingerprints: [...fingerprints, ...fingerprints, ...fingerprints] }).success).toBeFalse();
+	});
+
 	test("asks the host to find the service when the sweep found no server", () => {
 		const { subject, body } = draft(snapshot());
 		expect(subject).toEndWith("Phishing abuse: credential phishing kit for login.example.com");

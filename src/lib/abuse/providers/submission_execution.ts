@@ -418,7 +418,7 @@ export async function executeProviderSubmission(params: {
 		});
 	}
 	if (settled || (await AbuseRepository.getRoute(route.id))?.status === "submitted") {
-		if (params.provider.fetchCorrespondence && success.confirmationId) await queueCorrespondencePoll(route);
+		if (params.provider.fetchCorrespondence && success.confirmationId) await queueCorrespondencePoll(route, { delayMs: nextCorrespondencePollDelayMs(0) });
 		return { outcome: "submitted", runId: run.id };
 	}
 	return markUnknownExternal({
@@ -432,6 +432,19 @@ export async function executeProviderSubmission(params: {
 /** How long, and how often, a submitted report's provider correspondence is read. */
 export const CORRESPONDENCE_POLL_WINDOW_MS = 30 * 24 * 60 * 60_000;
 export const CORRESPONDENCE_POLL_INTERVAL_MS = 60 * 60_000;
+/**
+ * Reads soon after submitting, measured from it, before the hourly ones.
+ * Cloudflare emails its receipt and the hosting provider it names within
+ * seconds; a read right at submission found nothing and the next came an
+ * hour later, holding back the follow-up with that host.
+ */
+const CORRESPONDENCE_EARLY_POLLS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
+
+/** How long after a read the next one is due, by the time since the report was submitted. */
+export function nextCorrespondencePollDelayMs(sinceSubmittedMs: number): number {
+	const early = CORRESPONDENCE_EARLY_POLLS_MS.find((offset) => offset > sinceSubmittedMs);
+	return early === undefined ? CORRESPONDENCE_POLL_INTERVAL_MS : early - Math.max(0, sinceSubmittedMs);
+}
 
 /** Queue the next correspondence read for a route; one pending poll per route. */
 export async function queueCorrespondencePoll(route: { id: bigint; reportId: bigint }, options: { delayMs?: number; successorOf?: bigint } = {}): Promise<void> {

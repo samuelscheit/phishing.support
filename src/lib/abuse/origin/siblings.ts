@@ -6,6 +6,7 @@ import type { WebsiteKitResource } from "../../website_types";
 import { normalizeDomain, normalizePublicHttpUrl } from "../security";
 import { throwIfAborted } from "../worker/shared";
 import { mapConcurrent } from "./concurrency";
+import { MAX_KIT_FINGERPRINTS } from "./snapshot";
 import { isPopularSite, loadPopularDomains, type PopularDomains } from "./popular_domains";
 import { certificateCovers, presentedCertificate, type OriginServer, type PresentedCertificate, type TlsProbe } from "./sweep";
 import { errorSummary } from "../../error_text";
@@ -99,7 +100,8 @@ export function kitFingerprints(resources: readonly WebsiteKitResource[]): KitFi
 		if (!fingerprints.has(resource.sha256)) fingerprints.set(resource.sha256, { sha256: resource.sha256, mimeType: resource.mimeType, url, size: resource.size });
 	}
 	return [...fingerprints.values()]
-		.sort((a, b) => Number(isScript(b.mimeType)) - Number(isScript(a.mimeType)) || b.size - a.size || a.url.localeCompare(b.url));
+		.sort((a, b) => Number(isScript(b.mimeType)) - Number(isScript(a.mimeType)) || b.size - a.size || a.url.localeCompare(b.url))
+		.slice(0, MAX_KIT_FINGERPRINTS);
 }
 
 async function loadSubmissionKitResources(submissionId: bigint): Promise<WebsiteKitResource[] | undefined> {

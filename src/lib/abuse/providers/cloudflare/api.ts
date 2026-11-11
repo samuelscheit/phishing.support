@@ -249,6 +249,21 @@ function parseCloudflareRead(status: number, rawBody: string): Record<string, un
 }
 
 /**
+ * Cloudflare's report emails are plain text with HTML escapes in them
+ * ("SKN Subnet &amp; Telecom", "&#34;Email or username&#34;"), as Go's
+ * html.EscapeString writes them. Unescaped once here, the text reads as sent
+ * and the hosting provider it names is used as written.
+ */
+export function unescapeCloudflareText(value: string): string {
+	const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: "\u00a0" };
+	return value.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|([a-z]{2,6}));/gi, (entity, decimal: string | undefined, hex: string | undefined, name: string | undefined) => {
+		const codePoint = decimal ? Number(decimal) : hex ? Number.parseInt(hex, 16) : undefined;
+		if (codePoint !== undefined) return codePoint > 0 && codePoint <= 0x10ffff && (codePoint < 0xd800 || codePoint > 0xdfff) ? String.fromCodePoint(codePoint) : entity;
+		return named[name!.toLowerCase()] ?? entity;
+	});
+}
+
+/**
  * Read one submitted report's review status and every email Cloudflare
  * delivered to us about it. Both are read-only.
  */
@@ -267,8 +282,8 @@ export async function fetchCloudflareSubmittedReport(params: CloudflareRequestCo
 			if (!id || !sentAt || Number.isNaN(Date.parse(sentAt))) continue;
 			messages.push({
 				id,
-				subject: stringField(email?.subject) ?? "",
-				body: typeof email?.body === "string" ? email.body.slice(0, MAX_RESPONSE_CHARS) : "",
+				subject: unescapeCloudflareText(stringField(email?.subject) ?? ""),
+				body: typeof email?.body === "string" ? unescapeCloudflareText(email.body.slice(0, MAX_RESPONSE_CHARS)) : "",
 				...(stringField(email?.recipient) ? { recipient: stringField(email?.recipient) } : {}),
 				sentAt: new Date(sentAt),
 			});

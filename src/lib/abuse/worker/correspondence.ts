@@ -1,10 +1,10 @@
 import {
-	CORRESPONDENCE_POLL_INTERVAL_MS,
 	CORRESPONDENCE_POLL_WINDOW_MS,
 	getProviderSubmissionProvider,
 	listProviderSubmissionProviders,
 	queueCorrespondencePoll,
 } from "../providers";
+import { nextCorrespondencePollDelayMs } from "../providers/submission_execution";
 import { AbuseRepository } from "../repository";
 import { enqueueOriginHostDisclosures } from "../origin/disclosure";
 
@@ -54,7 +54,7 @@ export async function pollProviderCorrespondence(params: { routeId: bigint; jobI
 	}
 
 	const elapsed = Date.now() - run.createdAt.getTime();
-	if (elapsed < CORRESPONDENCE_POLL_WINDOW_MS) await queueCorrespondencePoll(route, { delayMs: CORRESPONDENCE_POLL_INTERVAL_MS, successorOf: params.jobId });
+	if (elapsed < CORRESPONDENCE_POLL_WINDOW_MS) await queueCorrespondencePoll(route, { delayMs: nextCorrespondencePollDelayMs(elapsed), successorOf: params.jobId });
 }
 
 /**

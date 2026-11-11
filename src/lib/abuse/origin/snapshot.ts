@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+/**
+ * Fingerprints kept per capture: every script and stylesheet a page loaded
+ * (up to 40) and the document of every hidden frame. Code is kept first. The
+ * origin-host snapshot stores them and accepts exactly this many.
+ */
+export const MAX_KIT_FINGERPRINTS = 64;
+
 export const certificateSchema = z.object({
 	names: z.array(z.string().max(253)).max(100),
 	notBefore: z.string().max(64),
@@ -66,12 +73,12 @@ export const originHostSnapshotSchema = z.object({
 		mimeType: z.string().max(100),
 		url: z.string().url().max(4_096),
 		size: z.number().int().positive(),
-	}).strict()).max(5),
+	}).strict()).max(MAX_KIT_FINGERPRINTS),
 	siblingCandidateCount: z.number().int().nonnegative().max(100),
 	siblings: z.array(z.object({
 		domain: z.string().max(253),
 		url: z.string().url().max(4_096),
-		matchingHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(5),
+		matchingHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(MAX_KIT_FINGERPRINTS),
 		originIp: z.string().max(64),
 		certificate: certificateSchema,
 		registeredAt: z.string().datetime().optional(),
