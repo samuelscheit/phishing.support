@@ -135,6 +135,15 @@ async function websiteSubmission(id: bigint, url: string) {
 	return SubmissionsEntity.create({ id, kind: "website", data: { kind: "website", website: { url } }, dedupeKey: websiteSubmissionDedupeKey(url), status: "running", source: url });
 }
 
+async function waitForStatus(id: bigint, statuses: string[]) {
+	for (let attempt = 0; attempt < 200; attempt++) {
+		const submission = await SubmissionsEntity.get(id);
+		if (submission && statuses.includes(submission.status)) return submission;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	throw new Error(`Submission ${id} did not reach ${statuses.join("/")}.`);
+}
+
 function websiteData(submission: Awaited<ReturnType<typeof SubmissionsEntity.get>>) {
 	return submission?.data.kind === "website" ? submission.data.website : undefined;
 }
@@ -312,13 +321,15 @@ describe("multi-page kits", () => {
 		expect((await ArtifactsEntity.listForSubmission(id)).map(({ name }) => name)).not.toContain("website-step2.mhtml");
 	});
 
-	test("a link whose page ends on another site is not followed into it", async () => {
+	test("a link whose page ends on another site hands that site to its own case, as a redirect would", async () => {
 		const id = await websiteSubmission(375914181917937693n, CONSENT);
 		const elsewhere = "https://wallet-restore.example.net/";
 		PAGES[elsewhere] = "<html><body><h1>Restore</h1></body></html>";
+		const captures: ArchiveWebsiteOptions[] = [];
 
 		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({
-			captures: [],
+			captures,
+			answers: { ...KIT_ANSWERS, [elsewhere]: { ...KIT_ANSWERS[CONSENT]!, continuationRef: "" } },
 			capture: (options) => options.url === GET_STARTED
 				? liveCapture(options.url, [
 					{ index: 0, url: GET_STARTED, hostname: new URL(SITE).hostname, status: 302, redirectTo: elsewhere, contentCaptured: false },
@@ -328,9 +339,18 @@ describe("multi-page kits", () => {
 		}));
 
 		const submission = await SubmissionsEntity.get(id);
-		expect(submission?.status).toBe("invalid");
-		expect(submission?.info).toEndWith(`The capture stopped following the site's flow: its link "I agree" to ${GET_STARTED} led to another site, wallet-restore.example.net.`);
-		expect(websiteData(submission)?.archiveUrl).toBe(CONSENT);
+		expect(submission?.status).toBe("redirected");
+		expect(submission?.info).toBe(`${CONSENT} sends visitors on to wallet-restore.example.net through its link "I agree" to ${GET_STARTED}; that site is analyzed and reported in its own case.`);
+		expect(websiteData(submission)?.navigationHops?.map(({ url, status, followedLink }) => ({ url, status, followed: followedLink?.label }))).toEqual([
+			{ url: CONSENT, status: 200, followed: "I agree" },
+			{ url: GET_STARTED, status: 302, followed: undefined },
+			{ url: elsewhere, status: 200, followed: undefined },
+		]);
+		const child = await waitForStatus(BigInt(websiteData(submission)!.redirectSubmissionId!), ["reported", "failed", "invalid"]);
+		expect(child.source).toBe(`redirect:${id}`);
+		expect(websiteData(child)?.navigationHops?.map(({ url }) => url)).toEqual([elsewhere]);
+		// The destination's case analyzes the page the link reached; it does not load it again.
+		expect(captures.filter(({ url }) => url === elsewhere)).toEqual([expect.objectContaining({ archivedUrl: elsewhere, mhtmlSnapshot: expect.any(Buffer) })]);
 	});
 
 	test("a link back to a page already captured, or past the follow limit, is not followed", async () => {
@@ -646,6 +666,54 @@ describe("actions on a kit's own pages", () => {
 			{ url: PHONE, field: "phone" },
 			{ url: SIGN_IN, field: undefined },
 		]);
+	});
+
+	test("a session gate whose button sends the visitor to the kit's own domain hands that domain to its own case, which is reported", async () => {
+		// Submission 379232259422556174: a shortener answers with a "Verify this
+		// session" page; its "Continue" button opens the kit on another domain.
+		const SHORT = "https://encurtador09ea.com/sa";
+		const SESSION_GATE = "https://encurtador09ea.com/e4d5b3c9a66e";
+		const KIT = "https://en-web09.pw/login";
+		PAGES[SESSION_GATE] = `<html><head><title>Verify this session</title></head><body><main><h1>Verify this session</h1>
+<p>Press continue to open the page.</p><button type="button" id="go">Continue</button></main></body></html>`;
+		PAGES[KIT] = `<html><head><title>Sign in</title></head><body><img alt="Microsoft"><h1>Sign in</h1>
+<form method="POST"><input type="email" name="login" placeholder="Email"><input type="password" name="passwd" placeholder="Password"><button>Sign in</button></form></body></html>`;
+		const answers: ClassifierAnswers = {
+			[SESSION_GATE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "b1", hiddenFrameRef: "", mobileHandoff: false },
+			[KIT]: { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in", collectionFieldRefs: ["f1", "f2"], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false },
+		};
+		const captures: ArchiveWebsiteOptions[] = [];
+		const visit = liveVisit({ ...liveCapture(SESSION_GATE, hopsTo(SESSION_GATE, { url: SHORT, status: 302 })), requestedUrl: SHORT, ...RESIDENTIAL }, (action) => ({
+			...liveCapture(KIT, hopsTo(KIT)),
+			requestedUrl: SHORT,
+			...RESIDENTIAL,
+			performedAction: performed(action),
+		}));
+		const id = await websiteSubmission(379232259422556174n, SHORT);
+
+		await analyzeWebsite({ submissionId: id, url: SHORT }, dependencies({
+			answers,
+			captures,
+			capture: (options) => (options.url === SHORT ? visit.archive : { ...liveCapture(options.url), ...RESIDENTIAL }),
+		}));
+
+		expect(visit.actions).toEqual([{ kind: "click", control: { ref: "b1", label: "Continue" } }]);
+		expect(visit.closed).toBeGreaterThanOrEqual(1);
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("redirected");
+		expect(submission?.info).toBe(`${SHORT} sends visitors on to en-web09.pw through its button "Continue"; that site is analyzed and reported in its own case.`);
+		expect(websiteData(submission)?.navigationHops?.map(({ url, status, performedAction, contentCaptured }) => ({ url, status, action: performedAction?.kind, contentCaptured }))).toEqual([
+			{ url: SHORT, status: 302, action: undefined, contentCaptured: false },
+			{ url: SESSION_GATE, status: 200, action: "click", contentCaptured: false },
+			{ url: KIT, status: 200, action: undefined, contentCaptured: true },
+		]);
+		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
+
+		const child = await waitForStatus(BigInt(websiteData(submission)!.redirectSubmissionId!), ["reported", "failed", "invalid"]);
+		expect(child.status).toBe("reported");
+		expect(websiteData(child)?.url).toBe(KIT);
+		expect(websiteData(child)?.navigationHops?.map(({ index, url }) => ({ index, url }))).toEqual([{ index: 0, url: KIT }]);
+		expect((await AbuseRepository.getReportForSubmission(child.id))?.description).toContain('"Sign in"');
 	});
 
 	test("a followed link releases the page it leaves before loading the next one", async () => {

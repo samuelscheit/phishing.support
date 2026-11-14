@@ -684,10 +684,13 @@ async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigation
  * form), or enter a canary into the identifier field a kit asks for first and
  * submit it (an email gate before the sign-in page). Each page is stored as
  * its own step with its evidence package. The last page reached is the
- * analyzed one: its classification is the case's finding. The flow stops at a
- * step that cannot be taken, that cloaks, that ends on another site, or that
- * changes nothing; the page before it stays the analyzed one, and `stopped`
- * says why.
+ * analyzed one: its classification is the case's finding. A step that ends on
+ * another site (a gate whose button sends the visitor to the kit's own
+ * domain) belongs to that site exactly like a redirect does: the flow returns
+ * the page it reached with `handedOffVia` naming the step, and that site is
+ * analyzed in its own case. The flow stops at a step that cannot be taken,
+ * that cloaks, or that changes nothing; the page before it stays the analyzed
+ * one, and `stopped` says why.
  */
 async function followWebsiteFlow(params: {
 	submissionId: bigint;
@@ -698,7 +701,7 @@ async function followWebsiteFlow(params: {
 	dependencies: WebsiteAnalysisDependencies;
 	/** Captures a page live, keeping its browser open for the flow's next action. */
 	capture: (options: ArchiveWebsiteOptions) => Promise<WebsiteCapture>;
-}): Promise<{ archive: WebsiteCapture; capturedHop: WebsiteNavigationHop; classification: WebsiteSiteClassification; stopped?: string }> {
+}): Promise<{ archive: WebsiteCapture; capturedHop: WebsiteNavigationHop; classification: WebsiteSiteClassification; stopped?: string; handedOffVia?: string }> {
 	const { submissionId, url, whois, dependencies, capture } = params;
 	let { archive, capturedHop } = params;
 	const canaries = createExfiltrationCanaries();
@@ -763,9 +766,8 @@ async function followWebsiteFlow(params: {
 		}
 		if (!flowStep) return stop(`could not be ${verb} (the capture took no action)`);
 		if (next.cloaking?.outcome === "unresolved") return stop(`cloaks: ${next.cloaking.detail}`);
-		const nextHop = capturedArchiveHop(next);
-		if (!isSameWebsite(nextHop.url, archive.url)) return stop(`led to another site, ${websiteSite(nextHop.url)}`);
-		if ("performedAction" in flowStep && next.url === archive.url && next.text.equals(archive.text)) {
+		const crossesSite = !isSameWebsite(capturedArchiveHop(next).url, archive.url);
+		if (!crossesSite && "performedAction" in flowStep && next.url === archive.url && next.text.equals(archive.text)) {
 			const unsolved = flowStep.performedAction.kind === "fill" && humanCheckUnsolved(flowStep.performedAction.humanCheck);
 			return stop(`changed nothing on the page${unsolved ? "; the captcha beside it never passed" : ""}`);
 		}
@@ -780,6 +782,7 @@ async function followWebsiteFlow(params: {
 			...(kitResources.length ? { kitResources } : {}),
 		};
 		capturedHop = capturedArchiveHop(archive);
+		if (crossesSite) return { archive, capturedHop, classification, handedOffVia: named };
 		await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await websiteEvidence(submissionId, url, archive, dependencies) });
 		await SubmissionsEntity.update(submissionId, { data: { kind: "website", website: { url, whois, ...capturedWebsiteData(archive) } } });
 	}
@@ -864,7 +867,9 @@ async function withBrowserBackoff<T>(capture: () => Promise<T>, delaysMs: readon
  * A capture that ended on another site belongs to that site: it opens that
  * site's own case with the captured evidence and its same-site navigation, as
  * if the destination had been submitted directly. The submitted site gets no
- * finding of its own; its navigation links to the destination case.
+ * finding of its own; its navigation links to the destination case. `via`
+ * names the step of the submitted site's flow that led there (its button, its
+ * link, its field), when the capture had to take one.
  */
 async function handOffRedirectedCapture(params: {
 	submissionId: bigint;
@@ -874,8 +879,9 @@ async function handOffRedirectedCapture(params: {
 	capturedHop: WebsiteNavigationHop;
 	reporter: ReporterMetadata;
 	dependencies: WebsiteAnalysisDependencies;
+	via?: string;
 }) {
-	const { submissionId, url, whois, archive, capturedHop } = params;
+	const { submissionId, url, whois, archive, capturedHop, via } = params;
 	const navigationHops = capturedHostNavigation(archive.navigationHops, capturedHop);
 	const redirectSubmissionId = await createWebsiteSubmission({
 		url: navigationHops[0]!.url,
@@ -898,7 +904,7 @@ async function handOffRedirectedCapture(params: {
 			? `${url} cloaks: ${archive.cloaking.detail}. ${destination} is analyzed in its own case. ${decoyDestinationClause(url)}`
 			: archive.cloaking?.outcome === "uniform"
 				? `${archive.cloaking.detail}; that site is analyzed in its own case. ${decoyDestinationClause(url)}`
-				: `${url} redirects to ${destination}; that site is analyzed and reported in its own case.`,
+				: `${url} ${via ? `sends visitors on to ${destination} through ${via}` : `redirects to ${destination}`}; that site is analyzed and reported in its own case.`,
 		data: {
 			kind: "website",
 			website: {
@@ -1040,9 +1046,14 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		});
 
 		const flow = await followWebsiteFlow({ submissionId, url, whois, archive, capturedHop, dependencies, capture }).finally(closeSessions);
-		const { classification: capturedClassification, stopped } = flow;
+		const { classification: capturedClassification, stopped, handedOffVia } = flow;
 		archive = flow.archive;
 		capturedHop = flow.capturedHop;
+		if (handedOffVia) {
+			await handOffRedirectedCapture({ submissionId, url, whois, archive, capturedHop, via: handedOffVia, reporter: { reporterIp, reporterCountry, reporterHeaders }, dependencies });
+			await emitStep(submissionId, "completed", 100);
+			return submissionId;
+		}
 
 		await emitStep(submissionId, "analysis_run", 75);
 		await runStreamedAnalysisRun({
