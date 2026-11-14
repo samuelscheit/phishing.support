@@ -17,7 +17,8 @@ const DOWNLOAD_WAIT_MS = 15_000;
 /** A button that only opens a download dialog gets one more click, on the control the dialog shows. */
 const DIALOG_CONTROL = /download|install|get|continue|confirm|proceed|start|^ok$|^yes/i;
 
-export type DownloadedFile = { url: string; fileName: string; contentType?: string; bytes: Buffer };
+/** The file, and the User-Agent of the visit that got it: a host may serve it only to that browser. */
+export type DownloadedFile = { url: string; fileName: string; contentType?: string; bytes: Buffer; userAgent: string };
 
 /** The page's download step did not deliver a file: no download started, or the file could not be read. */
 export class WebsiteDownloadFailedError extends Error {
@@ -141,7 +142,7 @@ async function readInPage(page: Page, url: string): Promise<{ bytes: Buffer; con
 }
 
 /** Watches one tab for the download a step starts and takes its file. */
-function watchDownload(page: Page, cdp: CDPSession) {
+function watchDownload(page: Page, cdp: CDPSession, userAgent: string) {
 	let settle: (result: DownloadedFile | Error) => void = () => undefined;
 	const result = new Promise<DownloadedFile | Error>((resolve) => { settle = resolve; });
 	let opened: string | undefined;
@@ -165,6 +166,7 @@ function watchDownload(page: Page, cdp: CDPSession) {
 					fileName: downloadFileName(paused.request.url, header(paused.responseHeaders, "content-disposition")),
 					...(contentType ? { contentType } : {}),
 					bytes,
+					userAgent,
 				});
 			}
 			// The browser never saves the file.
@@ -178,7 +180,7 @@ function watchDownload(page: Page, cdp: CDPSession) {
 		if (!/^(?:blob|data):/i.test(event.url)) return;
 		try {
 			const read = await readInPage(page, event.url);
-			settle({ url: event.url.slice(0, 300), fileName: downloadFileName(event.url, undefined, event.suggestedFilename), ...read });
+			settle({ url: event.url.slice(0, 300), fileName: downloadFileName(event.url, undefined, event.suggestedFilename), ...read, userAgent });
 		} catch (error) {
 			settle(error instanceof Error ? error : new Error(String(error)));
 		}
@@ -210,7 +212,7 @@ export async function downloadOfferedFile(page: Page, target: WebsiteDownloadTar
 		await cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*", resourceType: "Document", requestStage: "Response" }] });
 		// Files built by script would otherwise be saved; no download reaches the browser's disk.
 		await cdp.send("Browser.setDownloadBehavior", { behavior: "deny", eventsEnabled: true }).catch(() => undefined);
-		const watch = watchDownload(page, cdp);
+		const watch = watchDownload(page, cdp, await page.evaluate(() => navigator.userAgent));
 
 		if (target.kind === "link") {
 			await followLink(page, target.link.url);

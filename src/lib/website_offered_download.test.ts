@@ -82,7 +82,7 @@ function scenario(params: { before: Answer; after?: Answer; download?: (target: 
 		act: async () => { throw new Error("no page action expected"); },
 		download: async (target) => {
 			downloads.push(target);
-			return params.download ? params.download(target) : { url: "https://rbxcore.pro/Game-Copier.zip", fileName: "Game-Copier.zip", contentType: "application/zip", bytes: EXTENSION };
+			return params.download ? params.download(target) : { url: "https://rbxcore.pro/Game-Copier.zip", fileName: "Game-Copier.zip", contentType: "application/zip", bytes: EXTENSION, userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/156.0.0.0" };
 		},
 		close: async () => undefined,
 	};
@@ -149,6 +149,9 @@ describe("a page whose harm is the file it offers", () => {
 		]));
 		expect(report!.description).toContain("Addresses named in its code: ");
 		expect(report!.description).toContain("https://rbxcore.pro/api/validate-cookie");
+		// The investigation fetches the file again from its own site, as the browser that got it.
+		const job = await AbuseRepository.getReport(report!.id);
+		expect(job?.status).toBe("investigating");
 		const input = await AbuseRepository.getReportInput(report!.id);
 		const attached = input?.evidenceArtifacts.find(({ name }) => name.startsWith("offered-download-"));
 		expect(JSON.parse(attached!.blob.toString("utf8"))).toMatchObject({ fileName: "Game-Copier.zip", sha256: data!.offeredDownload!.sha256 });

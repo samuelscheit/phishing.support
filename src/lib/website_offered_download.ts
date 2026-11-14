@@ -38,6 +38,7 @@ export async function fetchOfferedDownload(
 		...(file.contentType ? { contentType: file.contentType } : {}),
 		sizeBytes: file.bytes.length,
 		sha256,
+		userAgent: file.userAgent,
 		inspection: await inspectDownload({ bytes: file.bytes, fileName: file.fileName, sha256 }, { lookups }),
 	};
 }

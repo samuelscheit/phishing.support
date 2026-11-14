@@ -19,6 +19,19 @@ export type InvestigationExploitLoader = {
 	dataUploads: WebsiteDataUpload[];
 };
 
+/**
+ * The file a malware page hands out through its download step, as the
+ * investigation needs it: where to fetch it again, as which browser, and
+ * how the visitor gets it.
+ */
+export type InvestigationOfferedDownload = {
+	url: string;
+	userAgent: string;
+	/** The page's step, e.g. `the button "Download Game-Copier.zip"`. */
+	via: string;
+	fileName: string;
+};
+
 /** The durable payload of one `investigate_report` job. */
 export type InvestigationJobPayload = {
 	submissionId: string;
@@ -26,7 +39,17 @@ export type InvestigationJobPayload = {
 	finding: ReportableWebsiteFinding;
 	pasteCommands: InvestigationPasteCommand[];
 	exploitLoader?: InvestigationExploitLoader;
+	offeredDownload?: InvestigationOfferedDownload;
 };
+
+function readOfferedDownload(value: unknown): InvestigationOfferedDownload | undefined {
+	if (value === undefined) return undefined;
+	const download = value && typeof value === "object" ? value as Record<string, unknown> : {};
+	if (typeof download.url !== "string" || !/^https?:\/\//i.test(download.url) || typeof download.userAgent !== "string" || typeof download.via !== "string" || typeof download.fileName !== "string") {
+		throw new Error("Investigation job has a malformed payload.offeredDownload.");
+	}
+	return { url: download.url, userAgent: download.userAgent, via: download.via, fileName: download.fileName };
+}
 
 const MAX_COMMANDS = 10;
 const MAX_URLS_PER_COMMAND = 5;
@@ -72,5 +95,6 @@ export function readInvestigationJobPayload(value: unknown): InvestigationJobPay
 		return typeof record.shown === "string" && payloadUrls && interpreters ? [{ shown: record.shown, payloadUrls, interpreters }] : [];
 	});
 	const exploitLoader = readExploitLoader(payload.exploitLoader);
-	return { submissionId: payload.submissionId, pageUrl: payload.pageUrl, finding: reportable, pasteCommands, ...(exploitLoader ? { exploitLoader } : {}) };
+	const offeredDownload = readOfferedDownload(payload.offeredDownload);
+	return { submissionId: payload.submissionId, pageUrl: payload.pageUrl, finding: reportable, pasteCommands, ...(exploitLoader ? { exploitLoader } : {}), ...(offeredDownload ? { offeredDownload } : {}) };
 }

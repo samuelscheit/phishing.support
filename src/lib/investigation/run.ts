@@ -57,7 +57,23 @@ function payloadSources(payload: InvestigationJobPayload): Array<{ url: string; 
 			url,
 			delivery: { kind: "exploit_stage" as const, frameUrl: payload.exploitLoader!.frameUrl, userAgent: payload.exploitLoader!.userAgent },
 		})),
+		// The file the page hands out, fetched again as the browser that got it.
+		...(payload.offeredDownload ? [{
+			url: payload.offeredDownload.url,
+			delivery: { kind: "offered_download" as const, via: payload.offeredDownload.via, userAgent: payload.offeredDownload.userAgent },
+		}] : []),
 	];
+}
+
+/** How the page delivers the file, as a finding names it. */
+function deliveryPhrase(delivery: PayloadDelivery, url: string): { refused: string; fetched: string } {
+	if (delivery.kind === "paste_command") {
+		return { refused: `The payload host for the command ${JSON.stringify(defangCommand(delivery.command))}`, fetched: "the payload from {url} as the command does" };
+	}
+	if (delivery.kind === "offered_download") {
+		return { refused: `The host of the file the page offers, ${url},`, fetched: "the file the page offers, {url}, as the browser that got it" };
+	}
+	return { refused: `The host of the exploit loader's file ${url}`, fetched: "the exploit loader's file {url} as the browser it attacks would" };
 }
 
 function deliveryUserAgent(delivery: PayloadDelivery): string {
@@ -106,15 +122,10 @@ async function investigatePayloads(
 
 function payloadFindings(results: readonly PayloadResult[]): string[] {
 	return results.flatMap(({ url, delivery, evidence, error }) => {
-		if (!evidence) {
-			return [delivery.kind === "paste_command"
-				? `The payload host for the command ${JSON.stringify(defangCommand(delivery.command))} refused the download during our check (${error}).`
-				: `The host of the exploit loader's file ${url} refused the download during our check (${error}).`];
-		}
+		const phrase = deliveryPhrase(delivery, url);
+		if (!evidence) return [`${phrase.refused} refused the download during our check (${error}).`];
 		return [
-			delivery.kind === "paste_command"
-				? `We downloaded the payload from ${evidence.url} as the command does (${evidence.sizeBytes} bytes, SHA-256 ${evidence.sha256}) and did not run it.`
-				: `We downloaded the exploit loader's file ${evidence.url} as the browser it attacks would (${evidence.sizeBytes} bytes, SHA-256 ${evidence.sha256}) and did not run it.`,
+			`We downloaded ${phrase.fetched.replace("{url}", evidence.url)} (${evidence.sizeBytes} bytes, SHA-256 ${evidence.sha256}) and did not run it.`,
 			payloadVerdictSentence(evidence),
 		];
 	});

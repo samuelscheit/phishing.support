@@ -197,6 +197,15 @@ export async function reportConfirmedWebsiteAbuse(params: ConfirmedWebsiteAbuse)
 				dataUploads: params.hiddenFrame.signals.dataUploads,
 			},
 		} : {}),
+		// A file the page's script built (blob:) has no host to fetch it from or report.
+		...(params.offeredDownload && /^https?:\/\//i.test(params.offeredDownload.url) ? {
+			offeredDownload: {
+				url: params.offeredDownload.url,
+				userAgent: params.offeredDownload.userAgent,
+				via: params.offeredDownload.via,
+				fileName: params.offeredDownload.fileName,
+			},
+		} : {}),
 	};
 	const created = await AbuseRepository.createReport({
 		request: await buildWebsiteAbuseRequest(params),

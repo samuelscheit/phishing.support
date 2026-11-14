@@ -269,6 +269,8 @@ export type WebsiteOfferedDownload = {
 	contentType?: string;
 	sizeBytes: number;
 	sha256: string;
+	/** The browser identity the file was served to; a host may refuse any other. */
+	userAgent: string;
 	inspection: DownloadInspection;
 };
 

@@ -78,7 +78,7 @@ describe.skipIf(!chromiumAvailable)("taking a page's download step, in a real br
 		const { server, hits, origin } = gameCopierSite();
 		try {
 			const { file } = await downloadFrom(`${origin}/game-copier/`, control("Download Game-Copier.zip"));
-			expect(file).toEqual({ url: `${origin}/Game-Copier.zip`, fileName: "Game-Copier.zip", contentType: "application/zip", bytes: ZIP });
+			expect(file).toEqual({ url: `${origin}/Game-Copier.zip`, fileName: "Game-Copier.zip", contentType: "application/zip", bytes: ZIP, userAgent: expect.stringContaining("Mozilla/5.0") });
 			expect(hits.filter((path) => path === "/Game-Copier.zip")).toHaveLength(1);
 		} finally {
 			server.stop(true);

@@ -356,3 +356,67 @@ describe("drive-by exploit investigation", () => {
 			.toEqual({ frameUrl: FRAME, userAgent: IPHONE_USER_AGENT, stageUrls: [REMOTE_STAGE], dataUploads: [{ url: LOOT, data: ["keychain"], observed: false }] });
 	});
 });
+
+describe("the file a malware page offers", () => {
+	const CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
+	const PAGE_URL = "https://rbxcore.pro/game-copier/";
+	const offered = (url: string) => ({
+		via: 'the button "Download Game-Copier.zip"',
+		url,
+		fileName: "Game-Copier.zip",
+		contentType: "application/zip",
+		sizeBytes: 138_957,
+		sha256: "5004df0ae963fa887c1f6350116ee2ed3437319f165edf57973014927c7f7b75",
+		userAgent: CHROME,
+		inspection: { format: "browser_extension" as const, signals: {}, endpoints: [], excerpts: [] },
+	});
+
+	async function offeringCase(id: bigint, downloadUrl: string) {
+		await SubmissionsEntity.create({ id, kind: "website", data: { kind: "website", website: { url: PAGE_URL } }, dedupeKey: `investigation:${id.toString()}` });
+		const report = await reportConfirmedWebsiteAbuse({
+			submissionId: id,
+			urls: [PAGE_URL],
+			analysisText: "The page distributes malware.",
+			reporter: {},
+			finding: { finding: "malware" },
+			screenshots: [{ filename: "website.png", png: SCREENSHOT }],
+			offeredDownload: offered(downloadUrl),
+		});
+		return report;
+	}
+
+	test("hosted on another site, it is fetched again as the browser that got it and its host gets a linked malware report", async () => {
+		const submissionId = 601n;
+		const fileUrl = "https://cdn.discordapp.com/attachments/1/2/Game-Copier.zip";
+		const report = await offeringCase(submissionId, fileUrl);
+		const { deps, fetched } = offline();
+		expect(await workerWith(deps, "investigation-offered").processOne({ jobTypes: ["investigate_report"] })).toBeTrue();
+
+		expect(fetched).toEqual([{ url: fileUrl, userAgent: CHROME }]);
+		const released = await AbuseRepository.getReport(report.reportId);
+		expect(released?.status).toBe("accepted");
+		expect(released?.description).toContain(`We downloaded the file the page offers, ${fileUrl}, as the browser that got it (${PAYLOAD.byteLength} bytes`);
+		const hostReport = (await AbuseRepository.listReportsForSubmission(submissionId)).find((item) => item.id !== report.reportId)!;
+		expect(hostReport).toMatchObject({ allegationCategory: "malware", reportedUserAgent: CHROME });
+		expect(hostReport.description).toContain(`This host serves malware: the malware distribution page ${PAGE_URL} gets visitors to download ${fileUrl} through the button "Download Game-Copier.zip".`);
+		expect((await AbuseRepository.listTargets(hostReport.id)).map((target) => [target.normalizedTarget, target.observedUrls])).toEqual([["cdn.discordapp.com", [fileUrl]]]);
+	});
+
+	test("on the page's own site, it is fetched and judged but covered by the page's report", async () => {
+		const submissionId = 602n;
+		const report = await offeringCase(submissionId, "https://rbxcore.pro/Game-Copier.zip");
+		const { deps, fetched } = offline();
+		await workerWith(deps, "investigation-offered-same-site").processOne({ jobTypes: ["investigate_report"] });
+		expect(fetched).toEqual([{ url: "https://rbxcore.pro/Game-Copier.zip", userAgent: CHROME }]);
+		expect((await AbuseRepository.getReport(report.reportId))?.description).toContain("VirusTotal classifies this file as malicious");
+		expect(await AbuseRepository.listReportsForSubmission(submissionId)).toHaveLength(1);
+	});
+
+	test("a file the page's script built has no host, and a malformed job is a programming error", async () => {
+		const report = await offeringCase(603n, "blob:https://rbxcore.pro/2b1c-uuid");
+		expect(readInvestigationJobPayload((await jobsOf(report.reportId))[0]!.payload).offeredDownload).toBeUndefined();
+		const base = { submissionId: "1", pageUrl: PAGE_URL, finding: { finding: "malware" }, pasteCommands: [] };
+		expect(() => readInvestigationJobPayload({ ...base, offeredDownload: { url: "file:///etc/passwd", userAgent: CHROME, via: "x", fileName: "x" } })).toThrow("malformed payload.offeredDownload");
+		expect(() => readInvestigationJobPayload({ ...base, offeredDownload: { url: "https://x.example/a.zip" } })).toThrow("malformed payload.offeredDownload");
+	});
+});
