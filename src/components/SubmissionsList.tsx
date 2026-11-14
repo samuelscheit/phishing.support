@@ -1,5 +1,6 @@
 "use client";
 
+import { SubmissionFilterChips } from "@/components/SubmissionFilterChips";
 import { SubmissionStatus } from "@/components/SubmissionStatus";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,9 +9,30 @@ import { formatDistanceToNow } from "date-fns";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { DEFAULT_SUBMISSION_FILTERS, isSubmissionFilter, type SubmissionFilter } from "@/lib/submissions/filters";
 import type { SubmissionCard as SubmissionCardData, SubmissionCardPage } from "@/lib/submissions/list";
 
 const PREVIEW_ROWS = 3;
+const FILTERS_STORAGE_KEY = "phishing-support:submission-filters";
+
+/** The chips the reader picked last time on this browser, or the default. */
+function storedFilters(): SubmissionFilter[] {
+	try {
+		const stored: unknown = JSON.parse(window.localStorage.getItem(FILTERS_STORAGE_KEY) ?? "null");
+		if (Array.isArray(stored) && stored.every(isSubmissionFilter)) return [...new Set(stored)];
+	} catch {
+		// Unreadable or blocked storage: fall back to the default.
+	}
+	return [...DEFAULT_SUBMISSION_FILTERS];
+}
+
+function storeFilters(filters: readonly SubmissionFilter[]) {
+	try {
+		window.localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters));
+	} catch {
+		// Storage blocked: the choice lasts for this page only.
+	}
+}
 
 function getGridColumnCount() {
 	if (typeof window === "undefined") return 1;
@@ -66,8 +88,10 @@ function SubmissionCard({ submission, obscured = false }: { submission: Submissi
 	);
 }
 
-async function fetchPage(cursor?: string): Promise<SubmissionCardPage> {
-	const res = await fetch(cursor ? `/api/submissions?cursor=${encodeURIComponent(cursor)}` : "/api/submissions");
+async function fetchPage(filters: readonly SubmissionFilter[], cursor?: string): Promise<SubmissionCardPage> {
+	const query = new URLSearchParams({ status: filters.join(",") });
+	if (cursor) query.set("cursor", cursor);
+	const res = await fetch(`/api/submissions?${query}`);
 	if (!res.ok) throw new Error(`Listing submissions failed with HTTP ${res.status}`);
 	return res.json();
 }
@@ -79,10 +103,18 @@ function mergePages(newest: SubmissionCardData[], older: SubmissionCardData[]): 
 }
 
 /**
- * Recent submissions: the newest page refreshes every five seconds, and once
- * expanded, older pages load as the reader scrolls to the end of the list.
+ * Recent submissions of the status chips the reader picked (running and
+ * phishing by default, remembered on this browser): the newest page refreshes
+ * every five seconds, and once expanded, older pages load as the reader
+ * scrolls to the end of the list.
  */
 export function SubmissionsList() {
+	// `null` until the stored choice is read, so the default never flashes in before it.
+	const [filters, setFilters] = useState<SubmissionFilter[] | null>(null);
+	const [counts, setCounts] = useState<SubmissionCardPage["counts"]>();
+	// Set while the cards on screen still belong to the previous choice of chips.
+	const [switching, setSwitching] = useState(false);
+	const filtersRef = useRef(filters);
 	const [newest, setNewest] = useState<SubmissionCardData[]>([]);
 	const [older, setOlder] = useState<SubmissionCardData[]>([]);
 	// `undefined` until the first page arrives; `null` once every page is loaded.
@@ -99,30 +131,55 @@ export function SubmissionsList() {
 	const visibleSubmissions = isCollapsed ? submissions.slice(0, previewSubmissionCount) : submissions;
 	const obscuredSubmissions = isCollapsed ? submissions.slice(previewSubmissionCount) : [];
 
+	useEffect(() => setFilters(storedFilters()), []);
+
+	const changeFilters = (next: SubmissionFilter[]) => {
+		storeFilters(next);
+		setSwitching(true);
+		setFilters(next);
+	};
+
 	useEffect(() => {
+		filtersRef.current = filters;
+		if (!filters) return;
+		let cancelled = false;
+		let first = true;
 		const refreshNewest = async () => {
 			try {
-				const page = await fetchPage();
+				const page = await fetchPage(filters);
+				if (cancelled) return;
 				setNewest(page.submissions);
-				// Only the first load decides where older pages start; refreshes must not reset paging.
-				setNextCursor((current) => current === undefined ? page.nextCursor ?? null : current);
+				setCounts(page.counts);
+				// Only the first load of a choice of chips decides where its older pages
+				// start; refreshes must not reset paging.
+				if (first) {
+					first = false;
+					setOlder([]);
+					setNextCursor(page.nextCursor ?? null);
+					setSwitching(false);
+				}
 			} catch (err) {
 				console.error("Failed to fetch submissions:", err);
 			} finally {
-				setLoading(false);
+				if (!cancelled) setLoading(false);
 			}
 		};
 
 		refreshNewest();
 		const interval = setInterval(refreshNewest, 5000);
-		return () => clearInterval(interval);
-	}, []);
+		return () => {
+			cancelled = true;
+			clearInterval(interval);
+		};
+	}, [filters]);
 
 	const loadOlder = useCallback(async () => {
-		if (!nextCursor || loadingOlder) return;
+		if (!filters || !nextCursor || loadingOlder || switching) return;
 		setLoadingOlder(true);
 		try {
-			const page = await fetchPage(nextCursor);
+			const page = await fetchPage(filters, nextCursor);
+			// A page of the previous choice of chips arriving after a change is dropped.
+			if (filtersRef.current !== filters) return;
 			setOlder((current) => [...current, ...page.submissions]);
 			setNextCursor(page.nextCursor ?? null);
 		} catch (err) {
@@ -130,7 +187,7 @@ export function SubmissionsList() {
 		} finally {
 			setLoadingOlder(false);
 		}
-	}, [nextCursor, loadingOlder]);
+	}, [filters, nextCursor, loadingOlder, switching]);
 
 	useEffect(() => {
 		const target = sentinel.current;
@@ -144,17 +201,37 @@ export function SubmissionsList() {
 		return () => observer.disconnect();
 	}, [expanded, nextCursor, loadOlder]);
 
-	if (loading && submissions.length === 0) {
-		return <div className="text-center py-10 text-muted-foreground">Loading submissions...</div>;
+	const header = (
+		<div className="flex flex-wrap items-center justify-between gap-3">
+			<h2 className="text-2xl font-semibold">Recent Submissions</h2>
+			{filters && <SubmissionFilterChips filters={filters} counts={counts} onChange={changeFilters} />}
+		</div>
+	);
+
+	if (!filters || (loading && submissions.length === 0)) {
+		return (
+			<div className="space-y-4">
+				{header}
+				<div className="text-center py-10 text-muted-foreground">Loading submissions...</div>
+			</div>
+		);
 	}
 
 	if (submissions.length === 0) {
-		return <div className="text-center py-10 text-muted-foreground">No submissions found.</div>;
+		return (
+			<div className="space-y-4">
+				{header}
+				<div className="rounded-xl border border-dashed py-10 text-center text-muted-foreground">
+					{switching ? "Loading submissions..." : filters.length ? "No submissions match these filters." : "Pick a status to list its submissions."}
+				</div>
+			</div>
+		);
 	}
 
 	return (
-		<div>
-			<div id="recent-submissions-list">
+		<div className="space-y-4">
+			{header}
+			<div id="recent-submissions-list" aria-busy={switching} className={cn("transition-opacity duration-200", switching && "opacity-50")}>
 				<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 					{visibleSubmissions.map((submission) => (
 						<SubmissionCard key={submission.id} submission={submission} />

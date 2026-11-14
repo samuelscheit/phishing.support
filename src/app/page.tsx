@@ -1,6 +1,6 @@
 import { SubmissionForm } from "@/components/SubmissionForm";
 import { SubmissionsList } from "@/components/SubmissionsList";
-import SiteLayout, { SiteFooter, SiteHeader } from "@/components/SiteLayout";
+import { SiteFooter, SiteHeader } from "@/components/SiteLayout";
 import type { Metadata } from "next";
 import About from "../components/About";
 import Link from "next/link";
@@ -23,10 +23,7 @@ export default function Home() {
 					<Link href="/abuse-reporting" className="mt-4 inline-flex rounded-lg bg-primary px-4 py-2 font-medium text-primary-foreground hover:opacity-90">Open abuse reporting</Link>
 				</div>
 
-				<div className="space-y-4">
-					<h2 className="text-2xl font-semibold">Recent Submissions</h2>
-					<SubmissionsList />
-				</div>
+				<SubmissionsList />
 			</main>
 
 			<div className="container mx-auto px-4 max-w-2xl">

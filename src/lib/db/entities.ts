@@ -144,10 +144,11 @@ export class SubmissionsEntity {
 	 * One page of the public submission list, newest first, holding only what a
 	 * card shows. Rows older than `before` (creation time, then id) follow the
 	 * previous page with no gaps or repeats while new submissions arrive.
+	 * `statuses` keeps only those; absent, every status is listed.
 	 */
-	static async listCards(params: { limit: number; before?: { createdAt: Date; id: bigint } }) {
+	static async listCards(params: { limit: number; before?: { createdAt: Date; id: bigint }; statuses?: readonly SubmissionStatus[] }) {
 		const db = await getDb();
-		const { before } = params;
+		const { before, statuses } = params;
 		return db
 			.select({
 				id: submissions.id,
@@ -157,11 +158,23 @@ export class SubmissionsEntity {
 				title: sql<string | null>`coalesce(json_extract(${submissions.data}, '$.website.url'), nullif(json_extract(${submissions.data}, '$.email.subject'), ''), ${submissions.dedupeKey})`,
 			})
 			.from(submissions)
-			.where(before
-				? or(lt(submissions.createdAt, before.createdAt), and(eq(submissions.createdAt, before.createdAt), lt(submissions.id, before.id)))
-				: undefined)
+			.where(and(
+				before
+					? or(lt(submissions.createdAt, before.createdAt), and(eq(submissions.createdAt, before.createdAt), lt(submissions.id, before.id)))
+					: undefined,
+				statuses ? inArray(submissions.status, [...statuses]) : undefined,
+			))
 			.orderBy(desc(submissions.createdAt), desc(submissions.id))
 			.limit(params.limit);
+	}
+
+	/** How many submissions have each status; a status no submission has is absent. */
+	static async countByStatus() {
+		const db = await getDb();
+		return db
+			.select({ status: submissions.status, count: sql<number>`count(*)` })
+			.from(submissions)
+			.groupBy(submissions.status);
 	}
 
 	/** Website submissions for `domain` itself or any host under it, visits included, by their dedupe key (`website-<host>[#<visit>]`). */
