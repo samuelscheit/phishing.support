@@ -201,11 +201,19 @@ async function waitForText(page: Page, text: string, step: string): Promise<void
  * option) with the mouse, as a person would: the form's dropdown opens on a
  * real mousedown, not on a scripted click.
  */
-async function clickText(page: Page, text: string, selector = "button, [role=option], [role=button], [tabindex], div, span"): Promise<void> {
+async function clickText(page: Page, text: string, selector = "button, [role=option], [role=button], [tabindex], label, div, span"): Promise<void> {
 	const marked = await page.evaluate((wanted, candidates) => {
 		document.querySelector("[data-ps-click]")?.removeAttribute("data-ps-click");
-		const leaf = [...document.querySelectorAll<HTMLElement>(candidates)].find((element) => element.innerText?.trim() === wanted && ![...element.children].some((child) => (child as HTMLElement).innerText?.trim() === wanted));
-		const target = leaf?.closest<HTMLElement>("button, [role=option], [role=button], [tabindex]") ?? leaf;
+		// The innermost element showing exactly the text, then the nearest
+		// element of the wanted kind around it (a button's caption sits in a
+		// child). The last visible one: a step that is leaving can still be in
+		// the page beside the one that replaced it.
+		const leaf = [...document.querySelectorAll<HTMLElement>("body *")].filter((element) => {
+			if (element.innerText?.trim() !== wanted || [...element.children].some((child) => (child as HTMLElement).innerText?.trim() === wanted)) return false;
+			const box = element.getBoundingClientRect();
+			return box.width > 0 && box.height > 0;
+		}).at(-1);
+		const target = leaf?.closest<HTMLElement>(candidates);
 		target?.setAttribute("data-ps-click", "");
 		return Boolean(target);
 	}, text, selector);
@@ -257,12 +265,20 @@ export async function openDiscordDsaSession(): Promise<DiscordDsaSession> {
 				await typeInto(page, 0, report.description, "textarea");
 				await clickText(page, "Next", "button");
 				await waitForText(page, "accurate and complete", "after the description");
-				const confirmed = await page.evaluate(() => {
+				await page.evaluate(() => {
 					const box = document.querySelector<HTMLInputElement>("input[type=checkbox]");
 					if (box && !box.checked) box.click();
-					return box?.checked ?? false;
 				});
-				if (!confirmed) throw new Error("Discord's report form did not take the good-faith declaration.");
+				// "Next" only goes on once the form has taken the declaration.
+				try {
+					await page.waitForFunction(() => {
+						const box = document.querySelector<HTMLInputElement>("input[type=checkbox]");
+						const next = [...document.querySelectorAll("button")].find((button) => button.innerText.trim() === "Next");
+						return Boolean(box?.checked && next && !next.disabled && next.getAttribute("aria-disabled") !== "true");
+					}, { timeout: 10_000 });
+				} catch {
+					throw new Error("Discord's report form did not take the good-faith declaration.");
+				}
 				await clickText(page, "Next", "button");
 				await waitForText(page, "Submit Report", "after the declaration");
 			},
