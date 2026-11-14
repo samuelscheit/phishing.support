@@ -1,5 +1,6 @@
 import React from "react";
 import Link from "next/link";
+import { GUIDES } from "@/lib/seo/guides";
 
 export function SiteHeader() {
 	return (
@@ -15,13 +16,29 @@ export function SiteHeader() {
 export function SiteFooter() {
 	return (
 		<footer className="border-t bg-background/50 mt-12">
-			<div className="container mx-auto py-6 px-4 flex items-center justify-between">
+			<div className="container mx-auto flex flex-col gap-4 px-4 py-6 sm:flex-row sm:items-start sm:justify-between">
 				<p className="text-sm text-muted-foreground">© {new Date().getFullYear()} Phishing Support</p>
-				<div className="text-sm">
-					<Link href="/info" className="underline hover:text-primary">
-						Info
-					</Link>
-				</div>
+				<nav aria-label="Guides and information">
+					<ul className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
+						{GUIDES.map(({ slug, label }) => (
+							<li key={slug}>
+								<Link href={`/${slug}`} className="text-muted-foreground hover:text-primary hover:underline">
+									{label}
+								</Link>
+							</li>
+						))}
+						<li>
+							<Link href="/abuse-reporting" className="text-muted-foreground hover:text-primary hover:underline">
+								Abuse reporting
+							</Link>
+						</li>
+						<li>
+							<Link href="/info" className="text-muted-foreground hover:text-primary hover:underline">
+								About
+							</Link>
+						</li>
+					</ul>
+				</nav>
 			</div>
 		</footer>
 	);

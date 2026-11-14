@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { SubmissionsEntity } from "@/lib/db/entities";
+import { GUIDES } from "@/lib/seo/guides";
 import { absoluteUrl } from "@/lib/seo/site";
 
 export const dynamic = "force-dynamic";
@@ -7,6 +8,7 @@ export const dynamic = "force-dynamic";
 /** The pages that explain the site; each is listed with the priority a crawler should give it. */
 const STATIC_PAGES: Array<{ path: string; priority: number; changeFrequency: MetadataRoute.Sitemap[number]["changeFrequency"] }> = [
 	{ path: "/", priority: 1, changeFrequency: "hourly" },
+	...GUIDES.map(({ slug }) => ({ path: `/${slug}`, priority: 0.9, changeFrequency: "monthly" as const })),
 	{ path: "/abuse-reporting", priority: 0.8, changeFrequency: "monthly" },
 	{ path: "/info", priority: 0.5, changeFrequency: "monthly" },
 ];

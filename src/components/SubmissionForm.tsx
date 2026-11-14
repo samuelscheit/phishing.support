@@ -9,7 +9,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Link, Mail, Upload, Loader2 } from "lucide-react";
 
-export function SubmissionForm() {
+/** The report form; `defaultTab` opens it on the email or the website tab. */
+export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" | "url" }) {
 	const router = useRouter();
 	const [url, setUrl] = useState("");
 	const [file, setFile] = useState<File | null>(null);
@@ -130,7 +131,7 @@ export function SubmissionForm() {
 				<CardDescription>Submit a suspicious website URL or email for analysis and to report it.</CardDescription>
 			</CardHeader>
 			<CardContent>
-				<Tabs defaultValue="email" className="w-full">
+				<Tabs defaultValue={defaultTab} className="w-full">
 					<TabsList className="grid w-full grid-cols-2">
 						<TabsTrigger value="url">
 							<Link className="w-4 h-4 mr-2" />

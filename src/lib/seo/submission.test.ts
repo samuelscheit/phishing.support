@@ -27,6 +27,11 @@ describe("submission page SEO", () => {
 		expect(seo.description.length).toBeLessThanOrEqual(160);
 	});
 
+	test("a failed or running case's technical status text stays out of its description", () => {
+		expect(submissionSeo(website("failed", {}, "Failed to load page: net::ERR_TUNNEL_CONNECTION_FAILED")).description).toBe("login.x-com.email could not be fully checked. Checked on 2026-11-12 by Phishing Support.");
+		expect(submissionSeo(website("running", {}, "Collecting bounded WHOIS, RDAP, and regional DNS evidence.")).description).toBe("login.x-com.email is being checked for phishing. Checked on 2026-11-12 by Phishing Support.");
+	});
+
 	test("a malware finding is named as such", () => {
 		expect(submissionSeo(website("reported", { siteAssessments: [{ hopIndex: 0, finding: "malware" }] as never })).verdict).toBe("Confirmed malware site");
 	});

@@ -12,6 +12,8 @@ export type SubmissionSeo = {
 	description: string;
 };
 
+const VERDICT_STATUSES = new Set<Submission["status"]>(["reported", "invalid", "redirected"]);
+
 /** Search engines show about 160 characters of a description. */
 const DESCRIPTION_LENGTH = 160;
 
@@ -71,11 +73,13 @@ export function submissionSeo(submission: Submission): SubmissionSeo {
 	const { verdict, tone, phrase } = isWebsite ? websiteVerdict(submission) : emailVerdict(submission);
 	const named = isWebsite ? subject : `The email “${truncateText(subject, 70)}”`;
 	const checked = `Checked on ${submission.createdAt.toISOString().slice(0, 10)} by Phishing Support.`;
+	// Only a finished verdict's text says what was found; a failure's is a technical error.
+	const finding = VERDICT_STATUSES.has(submission.status) ? (submission.info ?? "") : "";
 	return {
 		subject,
 		verdict,
 		tone,
 		title: isWebsite ? `Is ${subject} a scam? ${verdict}` : `“${truncateText(subject, 60)}” – ${verdict}`,
-		description: truncateText(`${named} ${phrase}. ${checked} ${submission.info ?? ""}`, DESCRIPTION_LENGTH),
+		description: truncateText(`${named} ${phrase}. ${checked} ${finding}`, DESCRIPTION_LENGTH),
 	};
 }
