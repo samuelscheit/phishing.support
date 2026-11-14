@@ -75,17 +75,26 @@ class MailboxListener {
 						// UID 1:* is deliberate: a provider reply may already be marked
 						// read. The terminal ledger makes the scan idempotent. IMAPFlow
 						// forbids commands inside its fetch iterator, so flags wait.
-						// A shared folder is searched on the server for our domain first,
-						// so the owner's own mail is never downloaded.
+						// A shared folder is searched on the server for our domain first
+						// (iCloud matches only whole tokens, so a TO search on the bare
+						// domain finds nothing; TEXT does). Only the envelopes of those
+						// matches are read, and only mail addressed to the domain is
+						// downloaded: the owner's own mail is never fetched.
 						const domain = this.config.onlyAddressedTo;
-						const uids = domain ? await client.search({ or: [{ to: domain }, { cc: domain }] }, { uid: true }) : undefined;
-						if (uids !== undefined && (!uids || uids.length === 0)) return;
+						let uids: number[] | undefined;
+						if (domain) {
+							const matches = await client.search({ text: domain }, { uid: true });
+							if (!matches || matches.length === 0) return;
+							uids = [];
+							for await (const candidate of client.fetch(matches.join(","), { uid: true, envelope: true }, { uid: true })) {
+								if (candidate.uid && addressedTo(candidate.envelope, domain)) uids.push(candidate.uid);
+							}
+							if (uids.length === 0) return;
+						}
 						const seen = new Set<number>();
 						for await (const fetched of client.fetch(uids ? uids.join(",") : "1:*", { uid: true, source: true, flags: true, envelope: true, internalDate: true }, uids ? { uid: true } : undefined)) {
 							const message = fetched as FetchMessageObject;
 							if (!message.uid) continue;
-							// The server's search matches header text; the parsed recipients decide.
-							if (domain && !addressedTo(message.envelope, domain)) continue;
 							const result = await ingestFetchedMail(message, { mailbox: this.config.mailbox, uidValidity, intakeAddress: this.config.intakeAddress });
 							if (result.disposition === "terminal") seen.add(message.uid);
 							else if (result.disposition === "retry") console.error(`IMAP message ${message.uid} will be retried: ${result.reason}`);
