@@ -18,6 +18,8 @@ export type MailedCodeSpec = {
 	subjectPattern: string;
 	/** A regular expression source; group 1 is the code. Matched case-insensitively against the text with tags and runs of white space collapsed. */
 	codePattern: string;
+	/** Where the code stands: the body (default) or the subject ("Your one-time verification key is TPSD5P"). */
+	codeSource?: "subject";
 	/** A mail older than this after the request is not its answer. */
 	maxAgeMs: number;
 	/** How long the reader waits for the mail. */
@@ -37,7 +39,7 @@ function senderMatches(spec: MailedCodeSpec, from: string): boolean {
 export function mailedCodeFrom(spec: MailedCodeSpec, mail: { from: string; subject: string; body: string }): string | undefined {
 	if (!senderMatches(spec, mail.from)) return undefined;
 	if (!mail.subject.toLowerCase().includes(spec.subjectPattern)) return undefined;
-	const text = mail.body.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ");
+	const text = (spec.codeSource === "subject" ? mail.subject : mail.body).replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ");
 	return new RegExp(spec.codePattern, "i").exec(text)?.[1];
 }
 
@@ -56,7 +58,8 @@ export function mailedCodeReader(spec: MailedCodeSpec): MailedCodeReader {
 		try {
 			while (Date.now() < deadline) {
 				signal?.throwIfAborted();
-				for (const mailbox of config.mailboxes) {
+				// A code mail no server rule filed stays in a shared folder; the search by sender reads nothing else there.
+				for (const mailbox of [...config.mailboxes, ...config.sharedMailboxes]) {
 					const lock = await client.getMailboxLock(mailbox, { readOnly: true });
 					try {
 						const since = new Date(requestedAt.getTime() - 60_000);

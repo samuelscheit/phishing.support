@@ -23,18 +23,25 @@ export function resolveServiceAccountTarget(target: ResolverTarget): ResolvedAbu
 			})],
 		};
 	}
-	// The webhook itself is deleted by the supplemental `discord_webhook`
-	// provider; Trust & Safety gets the evidence to act on the account behind it.
+	// Discord reviews no abuse mail ("We're unable to review email submissions
+	// to abuse@discord.com"). Its routes are the supplemental providers that
+	// match the webhook URL: `discord_webhook` deletes the webhook and
+	// `discord_dsa` files a DSA notice about its server; this placeholder only
+	// stands in until they replace it.
 	if (DISCORD_WEBHOOK.test(target.normalizedTarget)) {
 		return {
-			status: "resolved",
+			status: "no_route",
+			disposition: "discord_webhook_handled_by_its_providers",
 			resolverSnapshot: snapshot,
-			routes: [emailRoute({
-				email: "abuse@discord.com",
-				providerName: "Discord Trust & Safety",
-				provenance: { source: "service_account_registry", service: "discord", accountType: "webhook" },
-				snapshot,
-			})],
+			routes: [{
+				routeKey: `manual:${target.normalizedTarget}`,
+				providerRegistryKey: "manual_unroutable",
+				providerDisplayName: "Discord",
+				routeType: "manual_unroutable",
+				resolverProvenance: { source: "service_account_registry", service: "discord", reason: "discord_reviews_no_abuse_mail" },
+				resolutionSnapshot: snapshot,
+				status: "no_route",
+			}],
 		};
 	}
 	return {

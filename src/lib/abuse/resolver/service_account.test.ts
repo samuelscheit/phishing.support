@@ -18,17 +18,13 @@ describe("service account abuse routing", () => {
 		});
 	});
 
-	test("routes Discord webhooks to Discord's abuse mailbox", () => {
+	test("never mails Discord, which reviews no abuse mail; its providers route a webhook", () => {
 		const result = resolveServiceAccountTarget({
 			normalizedTarget: "discord-webhook:987654321",
 			targetType: "service_account",
 			observedUrls: ["https://discord.com/api/webhooks/987654321/token"],
 		});
-		expect(result.status).toBe("resolved");
-		expect(result.routes).toEqual([expect.objectContaining({
-			routeType: "email",
-			verifiedEmail: "abuse@discord.com",
-			providerDisplayName: "Discord Trust & Safety",
-		})]);
+		expect(result.routes).toEqual([expect.objectContaining({ routeType: "manual_unroutable" })]);
+		expect(result.routes.some((route) => route.verifiedEmail)).toBe(false);
 	});
 });

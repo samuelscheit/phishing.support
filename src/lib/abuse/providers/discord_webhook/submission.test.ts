@@ -66,49 +66,49 @@ function discord(...answers: Array<Response | Error>) {
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 describe("Discord webhook routes", () => {
-	test("a phishing kit's webhook is reported to Trust & Safety by email and deleted through Discord's API", async () => {
+	test("a phishing kit's webhook is deleted through Discord's API and its server reported in a DSA notice, never by mail", async () => {
 		const routes = await webhookRoutes(379996268098752545n);
-		expect(routes.map(({ routeType, providerRegistryKey, providerDisplayName, verifiedEmail, status }) => ({ routeType, providerRegistryKey, providerDisplayName, verifiedEmail, status }))).toEqual([
-			{ routeType: "email", providerRegistryKey: null, providerDisplayName: "Discord Trust & Safety", verifiedEmail: "abuse@discord.com", status: "verified" },
-			{ routeType: "provider_submission", providerRegistryKey: "discord_webhook", providerDisplayName: "Discord webhook deletion", verifiedEmail: null, status: "verified" },
-		].map((route) => expect.objectContaining(Object.fromEntries(Object.entries(route).filter(([, value]) => value !== null)))));
+		expect(routes.map(({ routeType, providerRegistryKey, status }) => ({ routeType, providerRegistryKey, status }))).toEqual([
+			{ routeType: "provider_submission", providerRegistryKey: "discord_webhook", status: "verified" },
+			{ routeType: "provider_submission", providerRegistryKey: "discord_dsa", status: "verified" },
+		]);
 
 		const api = discord(new Response(null, { status: 204 }));
-		await expect(executeProviderSubmission({ routeId: routes[1]!.id, provider: provider(api) })).resolves.toMatchObject({ outcome: "submitted" });
+		await expect(executeProviderSubmission({ routeId: routes[0]!.id, provider: provider(api) })).resolves.toMatchObject({ outcome: "submitted" });
 		expect(api.requests).toEqual([{ url: `https://discord.com/api/v10/webhooks/${WEBHOOK_ID}/${TOKEN}`, method: "DELETE" }]);
-		const route = await AbuseRepository.getRoute(routes[1]!.id);
+		const route = await AbuseRepository.getRoute(routes[0]!.id);
 		expect(route?.status).toBe("submitted");
 		// It is deleted once; a replayed job does nothing.
-		await expect(executeProviderSubmission({ routeId: routes[1]!.id, provider: provider(api) })).resolves.toEqual({ outcome: "not_eligible" });
+		await expect(executeProviderSubmission({ routeId: routes[0]!.id, provider: provider(api) })).resolves.toEqual({ outcome: "not_eligible" });
 		expect(api.requests).toHaveLength(1);
 	});
 
 	test("a webhook already gone counts as deleted", async () => {
 		const routes = await webhookRoutes(379996268098752546n);
 		const api = discord(json(404, { message: "Unknown Webhook", code: 10015 }));
-		await expect(executeProviderSubmission({ routeId: routes[1]!.id, provider: provider(api) })).resolves.toMatchObject({ outcome: "submitted" });
+		await expect(executeProviderSubmission({ routeId: routes[0]!.id, provider: provider(api) })).resolves.toMatchObject({ outcome: "submitted" });
 	});
 
 	test("rate limits and Discord outages are retried in place; a refused token is a provider rejection", async () => {
 		const waits: number[] = [];
 		const retried = await webhookRoutes(379996268098752547n);
 		const api = discord(json(429, { message: "You are being rate limited.", retry_after: 1.5, global: false }), json(502, {}), new Error("socket hang up"), new Response(null, { status: 204 }));
-		await expect(executeProviderSubmission({ routeId: retried[1]!.id, provider: provider({ fetch: api.fetch, sleep: async (ms) => { waits.push(ms); } }) })).resolves.toMatchObject({ outcome: "submitted" });
+		await expect(executeProviderSubmission({ routeId: retried[0]!.id, provider: provider({ fetch: api.fetch, sleep: async (ms) => { waits.push(ms); } }) })).resolves.toMatchObject({ outcome: "submitted" });
 		expect(api.requests).toHaveLength(4);
 		expect(waits).toEqual([1500, 5000, 10000]);
 
 		const refused = await webhookRoutes(379996268098752548n);
 		const denied = discord(json(401, { message: "Invalid Webhook Token", code: 50027 }));
-		await expect(executeProviderSubmission({ routeId: refused[1]!.id, provider: provider(denied) })).resolves.toMatchObject({ outcome: "provider_rejected" });
-		expect((await AbuseRepository.getRoute(refused[1]!.id))?.status).toBe("provider_rejected");
+		await expect(executeProviderSubmission({ routeId: refused[0]!.id, provider: provider(denied) })).resolves.toMatchObject({ outcome: "provider_rejected" });
+		expect((await AbuseRepository.getRoute(refused[0]!.id))?.status).toBe("provider_rejected");
 	});
 
 	test("an outage that outlasts every attempt leaves the deletion ambiguous instead of claiming it", async () => {
 		const routes = await webhookRoutes(379996268098752549n);
 		const api = discord(json(503, {}), json(503, {}), json(503, {}), json(503, {}));
-		await expect(executeProviderSubmission({ routeId: routes[1]!.id, provider: provider(api) })).rejects.toThrow("did not complete after 4 attempts: Discord answered HTTP 503");
+		await expect(executeProviderSubmission({ routeId: routes[0]!.id, provider: provider(api) })).rejects.toThrow("did not complete after 4 attempts: Discord answered HTTP 503");
 		expect(api.requests).toHaveLength(4);
-		expect((await AbuseRepository.getRoute(routes[1]!.id))?.status).toBe("unknown_external_state");
+		expect((await AbuseRepository.getRoute(routes[0]!.id))?.status).toBe("unknown_external_state");
 	});
 
 	test("only Discord webhook URLs carrying a token are deletable, on any Discord host and API version", () => {
