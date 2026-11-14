@@ -7,7 +7,9 @@ import { getDomain } from "tldts";
 import { getBrowser, getBrowserPage } from "./browser";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
-import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsitePageAction, WebsitePerformedAction } from "./website_types";
+import type { WebsiteCloaking, WebsiteDevice, WebsiteDownloadTarget, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsitePageAction, WebsitePerformedAction, WebsiteProviderWarning } from "./website_types";
+import { downloadOfferedFile, type DownloadedFile } from "./website_download";
+import { passProviderWarning } from "./website_provider_warning";
 import { hiddenFrames, recordFrameTraffic } from "./website_hidden_frames";
 import { CAPTCHA_PROVIDER_FRAME, performPageAction, WebsitePageActionTargetMissingError } from "./website_page_actions";
 import { isSameWebsite, websiteSite } from "./website_site";
@@ -36,6 +38,8 @@ export type WebsiteArchiveResult = {
 	cloaking?: WebsiteCloaking;
 	/** Set when the captured page sat behind a fake verification gate that was clicked through. */
 	verificationGate?: WebsiteVerificationGate;
+	/** Set when a provider's warning page stood before the site and the capture dismissed it. */
+	providerWarning?: WebsiteProviderWarning;
 	/**
 	 * The last page action the capture took to reach the captured page.
 	 * `navigationHops` then starts at the response to that action.
@@ -73,6 +77,8 @@ export type WebsiteArchiveResult = {
 export type WebsitePageSession = {
 	/** Take one step on the page as it stands and capture what it then shows; its hops start at the step's response. */
 	act(action: WebsitePageAction): Promise<WebsiteArchiveResult>;
+	/** Take the page's download step and return the file, which the browser never saves or opens. */
+	download(target: WebsiteDownloadTarget): Promise<DownloadedFile>;
 	/** Release the browser; later calls do nothing. */
 	close(): Promise<void>;
 };
@@ -321,6 +327,8 @@ export type WebsiteArchiveDependencies = {
 	pageActionQuietMs?: number;
 	/** Test seam for the bounded wait on a captcha widget beside a submitted field. */
 	humanCheckMs?: number;
+	/** How long a download step may take to start its download. */
+	downloadWaitMs?: number;
 	/** Test seam for which frames are a captcha provider's widget. */
 	captchaProviderFrame?: RegExp;
 };
@@ -833,7 +841,9 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 		// navigation resolve with that blob: document; the site's own response is
 		// the document the visitor loaded.
 		if (navigationResponse && !isNetworkDocument(navigationResponse)) navigationResponse = latestDocumentResponse;
+		let providerWarning: WebsiteProviderWarning | undefined;
 		if (navigationResponse && !navigationResponse.ok()) {
+			providerWarning = await passProviderWarning(page, { humanCheckMs: dependencies.humanCheckMs, captchaProviderFrame: dependencies.captchaProviderFrame });
 			const settled = await settleErrorDocument(page, () => latestDocumentResponse, dependencies.errorDocumentSettleMs ?? WEBSITE_ERROR_DOCUMENT_SETTLE_MS);
 			if (!settled) {
 				const title = compactText(await page.title().catch(() => ""));
@@ -881,6 +891,7 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 				...(frames.length ? { hiddenFrames: frames } : {}),
 				...(device !== "desktop" ? { device } : {}),
 				...(verificationGate ? { verificationGate } : {}),
+				...(providerWarning ? { providerWarning } : {}),
 				...(performedAction ? { performedAction } : {}),
 			};
 		};
@@ -909,8 +920,13 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 			return snapshot((capturedDocumentUrl) => actionResultHops(documents.slice(resultDocumentsFrom), documents.at(-1), capturedDocumentUrl), performedAction);
 		};
 
+		const download = async (target: WebsiteDownloadTarget): Promise<DownloadedFile> => {
+			if (!open) throw new Error("The capture's browser is already closed.");
+			return downloadOfferedFile(page, target, { waitMs: dependencies.downloadWaitMs });
+		};
+
 		const archive = await snapshot((capturedDocumentUrl) => documentNavigationHops(documents, capturedDocumentUrl));
-		return { archive, session: { act, close } };
+		return { archive, session: { act, download, close } };
 	} catch (error) {
 		await close();
 		throw error;

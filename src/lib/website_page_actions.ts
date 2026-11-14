@@ -146,7 +146,7 @@ async function clickHumanCheckCheckbox(page: Page, frame: Frame, providerFrame: 
  * a few seconds gets one click on its checkbox, as a visitor would; an image
  * challenge it may show then is never attempted.
  */
-async function waitForHumanCheck(page: Page, frame: Frame, options: HumanCheckOptions): Promise<WebsiteHumanCheck | undefined> {
+export async function waitForHumanCheck(page: Page, frame: Frame, options: HumanCheckOptions): Promise<WebsiteHumanCheck | undefined> {
 	const hasWidget = await frame.$(HUMAN_CHECK_WIDGET_SELECTOR).then((widget) => widget !== null).catch(() => false);
 	if (!hasWidget) return undefined;
 	const boundMs = options.humanCheckMs ?? HUMAN_CHECK_MS;

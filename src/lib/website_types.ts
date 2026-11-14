@@ -177,6 +177,107 @@ export function describePageAction(action: WebsitePageAction): string {
  */
 export type WebsiteCloaking = { outcome: "detected" | "uniform" | "unresolved"; detail: string };
 
+/** A link on a captured page to a file (an archive, installer, app, extension, or script), on any site. */
+export type WebsiteDownloadLink = {
+	/** Reference assigned in document order; the classifier cites it. */
+	ref: string;
+	label?: string;
+	/** Absolute URL of the file. */
+	url: string;
+};
+
+/** What gets the file a page offers: one of its download links, or one of its buttons. */
+export type WebsiteDownloadTarget =
+	| { kind: "link"; link: WebsiteDownloadLink }
+	| { kind: "click"; control: WebsiteContinuationControl };
+
+/** How a person reads the download target: `the link "Get it" to https://…`, `the button "Download"`. */
+export function describeDownloadTarget(target: WebsiteDownloadTarget): string {
+	return target.kind === "link"
+		? `the link ${JSON.stringify(target.link.label ?? target.link.url)} to ${target.link.url}`
+		: `the button ${JSON.stringify(target.control.label)}`;
+}
+
+/** What a downloaded file is, from its own bytes rather than its name or served type. */
+export type DownloadFormat =
+	| "browser_extension"
+	| "zip_archive"
+	| "android_app"
+	| "java_archive"
+	| "windows_executable"
+	| "windows_installer"
+	| "macos_disk_image"
+	| "macos_executable"
+	| "linux_executable"
+	| "disk_image"
+	| "rar_archive"
+	| "7z_archive"
+	| "gzip_archive"
+	| "pdf"
+	| "script"
+	| "html"
+	| "other";
+
+/** A line of the file's code that reads, sends, or runs something, with the lines around it. */
+export type DownloadCodeExcerpt = {
+	/** The file inside the download (its path in an archive), or the download's own name. */
+	file: string;
+	/** 1-based line of the match; minified code is cut around the match instead of by lines. */
+	line: number;
+	text: string;
+	/** What the matched code does: `reads_cookies`, `reads_credentials`, `sends_data`, `runs_code`. */
+	signals: DownloadCodeSignal[];
+};
+
+export type DownloadCodeSignal = "reads_cookies" | "reads_credentials" | "sends_data" | "runs_code";
+
+/**
+ * A file inspected without ever being run: what it is, what it holds, and the
+ * code in it that touches the visitor's data. Signals are hints for the
+ * classifier; its quote from an excerpt is what decides.
+ */
+export type DownloadInspection = {
+	format: DownloadFormat;
+	/** Files inside an archive (bounded), with the total count. */
+	entries?: Array<{ path: string; size: number }>;
+	entryCount?: number;
+	/** A browser extension's manifest: what it may read and where it runs. */
+	browserExtension?: {
+		name: string;
+		version?: string;
+		permissions: string[];
+		hostPermissions: string[];
+		contentScriptMatches: string[];
+	};
+	/** A Windows executable's Authenticode certificate table, read structurally. */
+	signature?: "not_signed" | "signed_binary" | "unknown";
+	/** Which files' code does what. */
+	signals: Partial<Record<DownloadCodeSignal, string[]>>;
+	/** Remote addresses named in the code, most frequent first. */
+	endpoints: string[];
+	excerpts: DownloadCodeExcerpt[];
+	/** What a malware scanner already says about the file's hash. */
+	scannerVerdicts?: Array<{ provider: string; verdict: "malicious" | "suspicious" | "benign" }>;
+};
+
+/** The file a page offers, as the capture received it by taking the page's own download step. */
+export type WebsiteOfferedDownload = {
+	/** The step the capture took to get it, e.g. `the button "Download Game-Copier.zip"`. */
+	via: string;
+	url: string;
+	fileName: string;
+	contentType?: string;
+	sizeBytes: number;
+	sha256: string;
+	inspection: DownloadInspection;
+};
+
+/**
+ * A provider's own warning page that stood before the site, which the capture
+ * dismissed as a visitor would: Cloudflare's "Suspected Phishing" interstitial.
+ */
+export type WebsiteProviderWarning = { provider: string; warning: string };
+
 /** A link on a captured page to another page of the same site, which the capture can follow. */
 export type WebsiteContinuationLink = {
 	/** Reference assigned in document order; the classifier cites it. */
@@ -241,6 +342,11 @@ export type WebsiteSiteClassification = {
 	 * from, instead of the page text.
 	 */
 	hiddenFrame?: { ref: string; url: string };
+	/**
+	 * Set for malware proven by the file the page offers: the quote comes from
+	 * the code of that file, instead of the page text.
+	 */
+	offeredDownload?: { fileName: string; sha256: string };
 	/** Why the classifier's phishing or malware claim was not corroborated by the captured page. */
 	rejectedClaim?: string;
 };

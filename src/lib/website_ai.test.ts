@@ -193,8 +193,9 @@ test("classification covers lures and malware and lists fields beyond the HTML e
 			continuationRef: { type: "string" },
 			hiddenFrameRef: { type: "string" },
 			mobileHandoff: { type: "boolean" },
+			downloadRef: { type: "string" },
 		},
-		required: ["finding", "phishingBasis", "evidenceQuote", "collectionFieldRefs", "continuationRef", "hiddenFrameRef", "mobileHandoff"],
+		required: ["finding", "phishingBasis", "evidenceQuote", "collectionFieldRefs", "continuationRef", "hiddenFrameRef", "mobileHandoff", "downloadRef"],
 	});
 });
 

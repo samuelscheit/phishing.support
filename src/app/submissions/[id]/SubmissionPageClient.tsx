@@ -58,6 +58,8 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const redirectSubmissionId = submission?.data.kind === "website" ? submission.data.website.redirectSubmissionId : undefined;
 	const websiteCloaking = submission?.data.kind === "website" ? submission.data.website.cloaking : undefined;
 	const verificationGate = submission?.data.kind === "website" ? submission.data.website.verificationGate : undefined;
+	const providerWarning = submission?.data.kind === "website" ? submission.data.website.providerWarning : undefined;
+	const offeredDownload = submission?.data.kind === "website" ? submission.data.website.offeredDownload : undefined;
 
 	const isRunning = ["new", "queued", "running"].includes(statusKey);
 	const websiteNavigation = submission?.data.kind === "website" ? submission.data.website.navigationHops ?? [] : [];
@@ -379,7 +381,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 											? "Prank / troll — not phishing"
 											: finding === "insufficient_evidence" ? "Insufficient evidence"
 												: finding === "phishing" ? (assessment?.phishingBasis ? `Phishing — ${PHISHING_BASIS_LABELS[assessment.phishingBasis]}` : "Phishing")
-													: finding === "malware" ? (assessment?.hiddenFrame ? "Malware — drive-by exploit in a hidden frame" : "Malware distribution")
+													: finding === "malware" ? (assessment?.hiddenFrame ? "Malware — drive-by exploit in a hidden frame" : assessment?.offeredDownload ? "Malware — the file it offers" : "Malware distribution")
 														: finding === "benign" ? "Not phishing or malware" : undefined;
 										return (
 											<li key={`${hop.index}:${hop.url}`} className="rounded border bg-background p-2">
@@ -402,6 +404,18 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 														) : hop.redirectTo ? <div className="break-all text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
 														{verificationGate && hop.contentCaptured ? (
 															<div className="text-xs text-muted-foreground">Behind the page's own “{verificationGate.label}” gate, clicked to reveal it</div>
+														) : null}
+														{providerWarning && hop.contentCaptured ? (
+															<div className="text-xs text-muted-foreground">{providerWarning.provider} shows its “{providerWarning.warning}” warning before this page; the capture proceeded past it</div>
+														) : null}
+														{offeredDownload && hop.contentCaptured ? (
+															<div className="space-y-0.5 text-xs text-muted-foreground">
+																<div className="break-all">Offers <span className="font-mono">{offeredDownload.fileName}</span> ({offeredDownload.sizeBytes.toLocaleString()} bytes), got through {offeredDownload.via} and inspected without running it</div>
+																<div className="break-all font-mono">SHA-256 {offeredDownload.sha256}</div>
+																{offeredDownload.inspection.browserExtension ? (
+																	<div className="break-all">Browser extension “{offeredDownload.inspection.browserExtension.name}” with permissions {[...offeredDownload.inspection.browserExtension.permissions, ...offeredDownload.inspection.browserExtension.hostPermissions].join(", ")}</div>
+																) : null}
+															</div>
 														) : null}
 														{redirectSubmissionId && hop.contentCaptured ? (
 															<Link href={`/submissions/${redirectSubmissionId}`} className="inline-block text-xs font-medium text-primary hover:underline">

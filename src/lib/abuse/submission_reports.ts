@@ -8,7 +8,7 @@ import { setInvestigationStatus } from "../investigation/status";
 import { enqueueKitSiblingDiscovery } from "./origin/kit_job";
 import { enqueueRedirectorWatch } from "./origin/redirector_watch";
 import { websiteSite } from "../website_site";
-import type { ReportableWebsiteFinding, WebsiteHiddenFrame } from "../website_types";
+import type { ReportableWebsiteFinding, WebsiteHiddenFrame, WebsiteOfferedDownload } from "../website_types";
 import type { PasteCommand } from "../malware/paste_commands";
 import type { InvestigationJobPayload } from "../investigation/payload";
 
@@ -47,6 +47,8 @@ export type ConfirmedWebsiteAbuse = SubmissionReportBase & {
 	 * frame was served to.
 	 */
 	hiddenFrame?: WebsiteHiddenFrame;
+	/** The file a malware page offers, with its static inspection; attached so a provider can check it. */
+	offeredDownload?: WebsiteOfferedDownload;
 };
 
 export type ConfirmedEmailPhishing = SubmissionReportBase & {
@@ -118,6 +120,12 @@ function hiddenFrameEvidence(frame: WebsiteHiddenFrame): DecodedEvidence {
 	return { filename: `hidden-frame-${frame.sha256.slice(0, 16)}.json`, mimeType: "application/json", buffer, sha256: sha256Hex(buffer) };
 }
 
+/** The offered file's inspection as a provider can check it: where it came from, its hash, and what its code does. */
+function offeredDownloadEvidence(download: WebsiteOfferedDownload): DecodedEvidence {
+	const buffer = Buffer.from(JSON.stringify(download, null, 2), "utf8");
+	return { filename: `offered-download-${download.sha256.slice(0, 16)}.json`, mimeType: "application/json", buffer, sha256: sha256Hex(buffer) };
+}
+
 /**
  * Build the website report: the captured site's host, with its URLs as
  * observed evidence. On a shared host the URLs name the one tenant reported.
@@ -133,6 +141,7 @@ export async function buildWebsiteAbuseRequest(params: ConfirmedWebsiteAbuse): P
 		evidence: [
 			...(await Promise.all((params.screenshots ?? []).map(({ filename, png }) => screenshotEvidence(filename, png)))).flat(),
 			...(params.hiddenFrame ? [hiddenFrameEvidence(params.hiddenFrame)] : []),
+			...(params.offeredDownload ? [offeredDownloadEvidence(params.offeredDownload)] : []),
 		],
 		source: { kind: "website", urls: params.urls },
 	});

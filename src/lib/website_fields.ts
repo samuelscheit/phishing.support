@@ -1,6 +1,6 @@
 import { parse, type HTMLElement } from "node-html-parser";
 
-import type { WebsiteContinuationControl, WebsiteContinuationLink, WebsiteDataEntryField } from "./website_types";
+import type { WebsiteContinuationControl, WebsiteContinuationLink, WebsiteDataEntryField, WebsiteDownloadLink } from "./website_types";
 import { isSameWebsite } from "./website_site";
 
 /** Input types that trigger an action, pick from fixed choices, or declare a site search box. */
@@ -125,6 +125,37 @@ export function extractWebsiteContinuationLinks(html: string, pageUrl: string): 
 		const label = linkLabel(element);
 		links.push({ ref: `l${links.length + 1}`, ...(label ? { label } : {}), url });
 		if (links.length === MAX_CONTINUATION_LINKS) break;
+	}
+	return links;
+}
+
+const MAX_DOWNLOAD_LINKS = 15;
+/** Files a visitor installs, unpacks or runs; a page's documents and media are not its harmful step. */
+const DOWNLOADABLE_FILE = /\.(?:zip|rar|7z|tar|t?gz|bz2|xz|cab|iso|img|exe|msi|msix|appx|appxbundle|scr|com|bat|cmd|ps1|vbs|vbe|wsf|hta|lnk|jar|dmg|pkg|mpkg|app|apk|xapk|aab|ipa|crx|xpi|deb|rpm|appimage|run|sh)$/i;
+
+/**
+ * Lists the links on a captured page to a file a visitor downloads: a link
+ * marked `download`, or one whose path names an archive, installer, app,
+ * extension, or script. Kits host the file anywhere (a file host, GitHub, a
+ * CDN), so links to other sites count. References are assigned in document
+ * order, one per file.
+ */
+export function extractWebsiteDownloadLinks(html: string, pageUrl: string): WebsiteDownloadLink[] {
+	const root = parse(html);
+	const base = pageAddress(root.querySelector("base[href]")?.getAttribute("href") ?? pageUrl, pageUrl) ?? pageUrl;
+	const links: WebsiteDownloadLink[] = [];
+	const seen = new Set<string>();
+	for (const element of root.querySelectorAll("a[href], area[href]")) {
+		const href = element.getAttribute("href")!;
+		// A blob: link holds a file the page's script built; it is only valid in that visit.
+		const url = /^blob:https?:\/\//i.test(href) ? href : pageAddress(href, base);
+		if (!url || seen.has(url)) continue;
+		const path = url.startsWith("blob:") ? "" : new URL(url).pathname;
+		if (!element.hasAttribute("download") && !DOWNLOADABLE_FILE.test(path)) continue;
+		seen.add(url);
+		const label = linkLabel(element);
+		links.push({ ref: `d${links.length + 1}`, ...(label ? { label } : {}), url });
+		if (links.length === MAX_DOWNLOAD_LINKS) break;
 	}
 	return links;
 }

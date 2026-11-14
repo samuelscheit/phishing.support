@@ -1,6 +1,27 @@
 import { expect, test } from "bun:test";
 
-import { extractWebsiteDataEntryFields } from "./website_fields";
+import { extractWebsiteDataEntryFields, extractWebsiteDownloadLinks } from "./website_fields";
+
+test("lists the page's links to files a visitor installs or runs, on any host, once each", () => {
+	const page = "https://rbxcore.pro/game-copier/";
+	const links = extractWebsiteDownloadLinks(`<body>
+<a href="/Game-Copier.zip">Download Game-Copier.zip</a>
+<a href="/Game-Copier.zip#top">Again</a>
+<a href="https://github.com/kit/releases/download/v1/Setup.EXE?raw=1">Windows</a>
+<a href="/get?id=7" download>Get it</a>
+<a href="blob:https://rbxcore.pro/2b1c-uuid" download="fix.ps1">Fix</a>
+<a href="/guide.pdf">Guide</a><a href="/about">About</a><a href="/files/">Files</a>
+<a href="javascript:void(0)" download>Nothing</a><a href="data:text/plain,hi" download>Inline</a>
+<a href="/app.apk"><img alt="Android app"></a>
+</body>`, page);
+	expect(links).toEqual([
+		{ ref: "d1", label: "Download Game-Copier.zip", url: "https://rbxcore.pro/Game-Copier.zip" },
+		{ ref: "d2", label: "Windows", url: "https://github.com/kit/releases/download/v1/Setup.EXE?raw=1" },
+		{ ref: "d3", label: "Get it", url: "https://rbxcore.pro/get?id=7" },
+		{ ref: "d4", label: "Fix", url: "blob:https://rbxcore.pro/2b1c-uuid" },
+		{ ref: "d5", label: "Android app", url: "https://rbxcore.pro/app.apk" },
+	]);
+});
 
 test("lists data-entry controls of script-driven dialogs that have no form element", () => {
 	const fields = extractWebsiteDataEntryFields(`<body>
