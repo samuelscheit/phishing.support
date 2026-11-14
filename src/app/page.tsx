@@ -64,13 +64,13 @@ export default function Home() {
 				<SiteHeader />
 				<SubmissionForm />
 
+				<SubmissionsList />
+
 				<div className="rounded-2xl border bg-muted/30 p-6">
 					<h2 className="text-xl font-semibold">Need to report an abusive domain or server?</h2>
 					<p className="mt-2 text-muted-foreground">Report abusive domains or IP addresses directly; reports go to the verified abuse contacts of each domain and network provider.</p>
 					<Link href="/abuse-reporting" className="mt-4 inline-flex rounded-lg bg-primary px-4 py-2 font-medium text-primary-foreground hover:opacity-90">Open abuse reporting</Link>
 				</div>
-
-				<SubmissionsList />
 			</main>
 
 			<div className="container mx-auto px-4 max-w-2xl">
