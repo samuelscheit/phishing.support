@@ -57,6 +57,7 @@ export function createProviderSubmissionRegistry(providers: readonly ProviderSub
 			if (!abuseTargetTypes.includes(rule.targetType)) {
 				throw new Error(`Supplemental provider submission ${definition.key} has an invalid target type.`);
 			}
+			if (rule.observedUrlPattern !== undefined) new RegExp(rule.observedUrlPattern);
 		}
 
 		byKey.set(definition.key, provider);
@@ -83,7 +84,9 @@ export function createProviderSubmissionRegistry(providers: readonly ProviderSub
 		listSupplemental: () => supplementalProviders,
 		listSupplementalForTarget: (target) => supplementalProviders.filter((provider) =>
 			provider.definition.supplementalTargets!.some((rule) =>
-				rule.targetType === target.targetType && (!rule.requiresObservedUrl || target.observedUrls.length > 0),
+				rule.targetType === target.targetType
+				&& (!rule.requiresObservedUrl || target.observedUrls.length > 0)
+				&& (rule.observedUrlPattern === undefined || target.observedUrls.some((url) => new RegExp(rule.observedUrlPattern!).test(url))),
 			),
 		),
 	};

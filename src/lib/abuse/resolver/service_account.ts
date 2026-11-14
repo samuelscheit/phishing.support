@@ -23,20 +23,18 @@ export function resolveServiceAccountTarget(target: ResolverTarget): ResolvedAbu
 			})],
 		};
 	}
+	// The webhook itself is deleted by the supplemental `discord_webhook`
+	// provider; Trust & Safety gets the evidence to act on the account behind it.
 	if (DISCORD_WEBHOOK.test(target.normalizedTarget)) {
 		return {
 			status: "resolved",
-			disposition: "discord_webhook_requires_human_report",
 			resolverSnapshot: snapshot,
-			routes: [{
-				routeKey: `manual:discord:${target.normalizedTarget}`,
-				providerRegistryKey: "discord_webhook_manual",
-				providerDisplayName: "Discord Trust & Safety",
-				routeType: "manual_unroutable",
-				resolverProvenance: { source: "service_account_registry", service: "discord", reason: "no_supported_webhook_report_api" },
-				resolutionSnapshot: snapshot,
-				status: "needs_human",
-			}],
+			routes: [emailRoute({
+				email: "abuse@discord.com",
+				providerName: "Discord Trust & Safety",
+				provenance: { source: "service_account_registry", service: "discord", accountType: "webhook" },
+				snapshot,
+			})],
 		};
 	}
 	return {

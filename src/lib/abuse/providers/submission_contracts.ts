@@ -30,6 +30,8 @@ export type ProviderSubmissionDefinition = {
 	readonly supplementalTargets?: readonly {
 		readonly targetType: AbuseTargetType;
 		readonly requiresObservedUrl?: boolean;
+		/** Regular-expression source an observed URL must match, e.g. one service's webhook URLs. */
+		readonly observedUrlPattern?: string;
 	}[];
 };
 

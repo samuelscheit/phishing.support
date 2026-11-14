@@ -84,6 +84,14 @@ describe("provider submission registry", () => {
 		expect(registry.listSupplementalForTarget({ targetType: "ip", observedUrls: [] })).toEqual([ip]);
 	});
 
+	test("a supplemental rule can require an observed URL of one service", () => {
+		const webhooks = testProvider("webhooks", [], true, [{ targetType: "service_account", observedUrlPattern: "^https://hooks\\.example/" }]);
+		const registry = createProviderSubmissionRegistry([webhooks]);
+		expect(registry.listSupplementalForTarget({ targetType: "service_account", observedUrls: ["https://hooks.example/1/token"] })).toEqual([webhooks]);
+		expect(registry.listSupplementalForTarget({ targetType: "service_account", observedUrls: ["https://api.telegram.org/botX/sendMessage"] })).toEqual([]);
+		expect(() => createProviderSubmissionRegistry([testProvider("broken", [], true, [{ targetType: "service_account", observedUrlPattern: "(" }])])).toThrow();
+	});
+
 	test("rejects a supplemental provider without explicit target eligibility", () => {
 		expect(() => createProviderSubmissionRegistry([
 			testProvider("missing-rules", [], true, []),

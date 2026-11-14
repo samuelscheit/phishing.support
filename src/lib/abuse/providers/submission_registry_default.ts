@@ -1,5 +1,6 @@
 import type { AbuseTargetType } from "../schema";
 import { cloudflareProvider } from "./cloudflare";
+import { discordWebhookProvider } from "./discord_webhook";
 import { eranetProvider } from "./eranet";
 import { gnameProvider } from "./gname";
 import { googleCloudProvider } from "./google_cloud";
@@ -24,6 +25,7 @@ const registry = createProviderSubmissionRegistry([
 	googleCloudProvider,
 	netcraftProvider,
 	netcraftMailProvider,
+	discordWebhookProvider,
 ]);
 
 export function listProviderSubmissionProviders(): readonly ProviderSubmissionProvider[] {
