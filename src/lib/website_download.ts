@@ -66,10 +66,15 @@ function markControl(selector: string, label: string, mark: string): "shown" | "
 		}
 		return undefined;
 	};
+	// A control a visitor can click: the point at its centre lands on it. A dialog
+	// that is closed by its container's opacity and pointer-events is not shown,
+	// though each of its buttons, by its own style, is.
 	const shown = (element: Element) => {
+		element.scrollIntoView({ block: "center", inline: "center" });
 		const box = element.getBoundingClientRect();
-		const style = getComputedStyle(element);
-		return box.width > 4 && box.height > 4 && style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
+		if (box.width <= 4 || box.height <= 4) return false;
+		const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+		return Boolean(hit && (hit === element || element.contains(hit)));
 	};
 	const matches = [...document.querySelectorAll(selector)].filter((element) => caption(element) === label && !element.hasAttribute("disabled"));
 	const element = matches.find(shown) ?? matches[0];
@@ -83,8 +88,11 @@ function markControl(selector: string, label: string, mark: string): "shown" | "
 function shownCaptions(selector: string): string[] {
 	return [...document.querySelectorAll(selector)].flatMap((element) => {
 		const box = element.getBoundingClientRect();
-		const style = getComputedStyle(element);
-		if (box.width <= 4 || box.height <= 4 || style.visibility === "hidden" || style.display === "none" || style.opacity === "0" || element.hasAttribute("disabled")) return [];
+		if (box.width <= 4 || box.height <= 4 || element.hasAttribute("disabled")) return [];
+		// Only a control the point at its centre lands on is one a visitor can click.
+		const inView = box.top >= 0 && box.left >= 0 && box.bottom <= innerHeight && box.right <= innerWidth;
+		const hit = inView ? document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2) : null;
+		if (inView ? !hit || (hit !== element && !element.contains(hit)) : getComputedStyle(element).visibility === "hidden") return [];
 		const caption = (element.textContent ?? element.getAttribute("value") ?? element.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
 		return caption ? [caption] : [];
 	});

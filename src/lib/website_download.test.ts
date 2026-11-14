@@ -21,11 +21,18 @@ const html = (body: string, init: ResponseInit = {}, title = "RBXCore — Game C
  * and only the dialog's "Download Game-Copier.zip" starts the download, by
  * clicking an anchor its script creates. The file needs the visit's cookie.
  */
-const GAME_COPIER = `<style>.dl-modal{visibility:hidden;opacity:0}.dl-modal.is-open{visibility:visible;opacity:1}</style>
-<nav><button class="btn-pill" data-dl-trigger>Download</button></nav>
+const GAME_COPIER = `<style>
+.dl-modal{position:fixed;inset:0;display:grid;place-items:center;opacity:0;pointer-events:none}
+.dl-modal.is-open{opacity:1;pointer-events:auto}
+.dl-modal-card *{pointer-events:inherit}
+.game-card{position:fixed;inset:0;z-index:0}
+.dl-modal{z-index:1}
+</style>
+<div class="game-card">Adopt Me! · Export .rbxl</div>
+<nav style="position:relative;z-index:2"><button class="btn-pill" data-dl-trigger>Download</button></nav>
 <h1>Game to Studio. One export.</h1>
-<div id="dlModal" class="dl-modal"><p>Install in Chrome: download the ZIP, go to chrome://extensions, enable Developer mode, and load unpacked.</p>
-<button id="dlConfirm">Download Game-Copier.zip</button></div>
+<div id="dlModal" class="dl-modal"><div class="dl-modal-card"><p>Install in Chrome: download the ZIP, go to chrome://extensions, enable Developer mode, and load unpacked.</p>
+<button id="dlConfirm">Download Game-Copier.zip</button></div></div>
 <script>
 document.cookie = "visit=1; path=/";
 document.querySelector("[data-dl-trigger]").addEventListener("click", () => { document.getElementById("dlModal").classList.add("is-open"); });
