@@ -46,8 +46,10 @@ export type WebsiteSubmissionData = {
 	hiddenFrames?: WebsiteHiddenFrame[];
 	/** The phone the analyzed page was captured as, when it turned desktops away. */
 	device?: WebsiteDevice;
-	/** Set when the browser service (not the site) failed; the analysis is re-queued automatically. */
+	/** Set when a failure another visit can change ended the run; the analysis is re-queued automatically. */
 	autoRetry?: { attempts: number; nextAttemptAt: string; reason: string };
+	/** Why the capture could not finish the site's flow: the step it could not take. A retry visits the site again. */
+	unfinishedFlow?: string;
 	/** Evidence collected after the verdict and before the report reaches any provider. */
 	investigation?: {
 		status: "queued" | "running" | "completed" | "failed";

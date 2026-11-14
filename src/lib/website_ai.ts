@@ -5,6 +5,7 @@ import { errorText } from "./error_text";
 import { buildWebsiteEvidence, type WebsiteEvidencePackage } from "./evidence/package";
 import type { timestampEvidence } from "./evidence/timestamp";
 import { SubmissionsEntity, ArtifactsEntity } from "./db/entities";
+import type { WebsiteSubmissionData } from "./db/schema";
 import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun, type AnalysisClient } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
@@ -600,6 +601,17 @@ async function websiteEvidence(
 	}, dependencies.timestampEvidence ? { timestamp: dependencies.timestampEvidence } : {});
 }
 
+/**
+ * How a site's flow stopped short of its next step:
+ * - `ended`: the site's own flow ends there; it leads back to a page already
+ *   captured, or asks for a step already taken. The last page is the verdict.
+ * - `unseen`: the next page was not seen in this visit; the step could not be
+ *   taken, cloaked, or changed nothing. No verdict; another visit may see it.
+ * - `limit`: the flow went on past `MAX_FLOW_STEPS`. No verdict, and another
+ *   visit would stop there again.
+ */
+type WebsiteFlowStop = "ended" | "unseen" | "limit";
+
 /** Links followed at most beyond the submitted page, so a site whose every page links on cannot hold the analysis open. */
 const MAX_FLOW_STEPS = 3;
 
@@ -690,7 +702,7 @@ async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigation
  * the page it reached with `handedOffVia` naming the step, and that site is
  * analyzed in its own case. The flow stops at a step that cannot be taken,
  * that cloaks, or that changes nothing; the page before it stays the analyzed
- * one, and `stopped` says why.
+ * one, and `stopped` says why and how it stopped (`WebsiteFlowStop`).
  */
 async function followWebsiteFlow(params: {
 	submissionId: bigint;
@@ -701,7 +713,7 @@ async function followWebsiteFlow(params: {
 	dependencies: WebsiteAnalysisDependencies;
 	/** Captures a page live, keeping its browser open for the flow's next action. */
 	capture: (options: ArchiveWebsiteOptions) => Promise<WebsiteCapture>;
-}): Promise<{ archive: WebsiteCapture; capturedHop: WebsiteNavigationHop; classification: WebsiteSiteClassification; stopped?: string; handedOffVia?: string }> {
+}): Promise<{ archive: WebsiteCapture; capturedHop: WebsiteNavigationHop; classification: WebsiteSiteClassification; stopped?: { reason: string; cause: WebsiteFlowStop }; handedOffVia?: string }> {
 	const { submissionId, url, whois, dependencies, capture } = params;
 	let { archive, capturedHop } = params;
 	const canaries = createExfiltrationCanaries();
@@ -724,8 +736,8 @@ async function followWebsiteFlow(params: {
 			: continuation.kind === "link" ? `its link ${JSON.stringify(continuation.link.label ?? continuation.link.url)} to ${continuation.link.url}`
 				: continuation.kind === "revisit" ? `its hand-off to a phone (${WEBSITE_DEVICE_LABEL[continuation.device]})` : "";
 		const verb = !action ? "followed" : action.kind === "fill" ? "submitted" : "clicked";
-		const stop = (reason: string) => ({ archive, capturedHop, classification, stopped: `${named} ${reason}` });
-		if (step >= MAX_FLOW_STEPS) return stop(`was not ${verb} after ${MAX_FLOW_STEPS} steps`);
+		const stop = (reason: string, cause: WebsiteFlowStop = "unseen") => ({ archive, capturedHop, classification, stopped: { reason: `${named} ${reason}`, cause } });
+		if (step >= MAX_FLOW_STEPS) return stop(`was not ${verb} after ${MAX_FLOW_STEPS} steps`, "limit");
 
 		// Every later page of the flow is opened on the device the kit was shown on.
 		const device = archive.device ? { device: archive.device } : {};
@@ -740,7 +752,7 @@ async function followWebsiteFlow(params: {
 				flowStep = { redirectTo: next.navigationHops[0]?.url ?? next.url, revisitedAs: continuation.device };
 			} else if (continuation.kind === "link") {
 				const { link } = continuation;
-				if (archive.navigationHops.some((hop) => hop.url === link.url)) return stop("leads back to a page already captured");
+				if (archive.navigationHops.some((hop) => hop.url === link.url)) return stop("leads back to a page already captured", "ended");
 				await emitStep(submissionId, "follow_link", 48 + step * 7);
 				// A followed link is a new page load; the page it leaves is done.
 				await archive.session?.close();
@@ -748,7 +760,7 @@ async function followWebsiteFlow(params: {
 				flowStep = { redirectTo: link.url, followedLink: { label: link.label ?? link.url } };
 			} else {
 				if (archive.navigationHops.some((hop) => hop.performedAction && sameActionTarget(pageActionOf(hop.performedAction), action!))) {
-					return stop(`was already ${verb} on the way to this page`);
+					return stop(`was already ${verb} on the way to this page`, "ended");
 				}
 				await emitStep(submissionId, action!.kind === "fill" ? "submit_field" : "click_control", 48 + step * 7);
 				// The action is taken in the visit that captured the page: same
@@ -965,6 +977,8 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 	// Every live capture keeps its browser open for the flow's next action on
 	// the page; each one is closed once the flow is done with it.
 	const sessions: WebsitePageSession[] = [];
+	// Automatic retries already spent on this case; the run's own data writes drop the record.
+	let priorAttempts = 0;
 	const closeSessions = () => Promise.all(sessions.splice(0).map((session) => session.close().catch((error: unknown) => console.warn("Closing a capture browser failed:", error))));
 	const capture = async (captureOptions: ArchiveWebsiteOptions) => {
 		const captured = await withBrowserBackoff(() => (dependencies.archiveWebsite ?? archiveWebsite)({ ...captureOptions, keepSession: true }), dependencies.browserBackoffMs ?? BROWSER_BACKOFF_MS);
@@ -972,6 +986,8 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		return captured;
 	};
 	try {
+		const prior = await SubmissionsEntity.get(submissionId);
+		priorAttempts = (prior?.data.kind === "website" && prior.data.website.autoRetry?.attempts) || 0;
 		// Claim the submission before any network work. Previously the first
 		// unbounded WHOIS lookup ran while the row still said `new`, so a process
 		// restart could leave it looking queued forever with no retry path.
@@ -979,14 +995,10 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await emitStep(submissionId, "whois_lookup", 5);
 		const whois = await (dependencies.getInfo ?? getInfo)(url);
 
-		// Keep the automatic-retry count through the run so a browser outage that
-		// lasts across retries stops after the limit; a verdict below drops it.
-		const prior = await SubmissionsEntity.get(submissionId);
-		const autoRetry = prior?.data.kind === "website" ? prior.data.website.autoRetry : undefined;
 		await SubmissionsEntity.update(submissionId, {
 			status: "running",
 			info: undefined,
-			data: { kind: "website", website: { url, whois, ...(autoRetry ? { autoRetry } : {}) } },
+			data: { kind: "website", website: { url, whois } },
 		});
 
 		await emitStep(submissionId, "archive_website", 10);
@@ -1099,6 +1111,15 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 					? `${label} confirmed at ${reportableSite.url}; its evidence is being collected before the report is sent.`
 					: `${label} confirmed at ${reportableSite.url}; evidence for it and the ${reportUrls.length - 1} URL${reportUrls.length === 2 ? "" : "s"} on ${websiteSite(reportableSite.url)} that lead${reportUrls.length === 2 ? "s" : ""} to it is being collected before the report is sent.`,
 			});
+		} else if (stopped && stopped.cause !== "ended") {
+			// The step past this page was never seen, so the page is no verdict on the site.
+			await failWebsiteAnalysis(submissionId, {
+				info: `Inconclusive: the capture could not finish the site's flow: ${stopped.reason}. The last page it reached, ${archive.url}, shows nothing reportable by itself; no verdict or report was made.`,
+				data: { unfinishedFlow: stopped.reason },
+				...(stopped.cause === "unseen" ? { retry: { attempts: priorAttempts, reason: stopped.reason, exhausted: (visits: number) => `The flow stopped there on ${visits} visits; retry to visit the site again.` } } : {}),
+			});
+			await emitStep(submissionId, "failed", 100);
+			return submissionId;
 		} else {
 			const { finding, rejectedClaim } = capturedClassification;
 			const verdict = finding === "prank_or_troll"
@@ -1108,14 +1129,14 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 					: `No reportable phishing or malware evidence was found at the captured destination ${archive.url}; no report was created.`;
 			await SubmissionsEntity.update(submissionId, {
 				status: "invalid",
-				info: stopped ? `${verdict} The capture stopped following the site's flow: ${stopped}.` : verdict,
+				info: stopped ? `${verdict} The site's flow ended there: ${stopped.reason}.` : verdict,
 			});
 		}
 
 		await emitStep(submissionId, "completed", 100);
 	} catch (error) {
 		console.error("Website analysis failed:", error);
-		await recordWebsiteAnalysisFailure(submissionId, error);
+		await recordWebsiteAnalysisFailure(submissionId, error, priorAttempts);
 		await emitStep(submissionId, "failed", 100);
 	} finally {
 		await closeSessions();
@@ -1125,34 +1146,45 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 	return submissionId;
 }
 
-/** Re-queues after a browser-service failure: 10 minutes apart, at most 3 times. */
+/** Automatic re-queues of a failure another visit can change: 10 minutes apart, at most 3 times. */
 const AUTO_RETRY_DELAY_MS = 10 * 60_000;
 const MAX_AUTO_RETRIES = 3;
 
 /**
- * Store a readable failure. When the browser service (not the site) failed,
- * schedule the analysis to be retried automatically instead of leaving the
- * case failed until someone notices.
+ * Fail the case with a readable reason. A failure another visit can change
+ * (`retry`: the browser service failed, or the site's flow could not be
+ * finished) is re-queued automatically instead of waiting until someone
+ * notices; `exhausted` says so once the retries are spent.
  */
-async function recordWebsiteAnalysisFailure(submissionId: bigint, error: unknown): Promise<void> {
-	const reason = errorText(error);
+async function failWebsiteAnalysis(submissionId: bigint, failure: {
+	info: string;
+	data?: Partial<WebsiteSubmissionData>;
+	retry?: { attempts: number; reason: string; exhausted: (visits: number) => string };
+}): Promise<void> {
 	const submission = await SubmissionsEntity.get(submissionId);
-	const website = submission?.data.kind === "website" ? submission.data.website : undefined;
-	const attempts = website?.autoRetry?.attempts ?? 0;
-	const browserFailure = isBrowserInfrastructureFailure(error);
-	if (!website || !browserFailure || attempts >= MAX_AUTO_RETRIES) {
-		const exhausted = website && browserFailure ? ` The browser service failed ${attempts + 1} times in a row; retry once it has recovered.` : "";
+	const current = submission?.data.kind === "website" ? submission.data.website : undefined;
+	const website = current && { ...current, ...failure.data, autoRetry: undefined };
+	const { retry } = failure;
+	if (!website || !retry || retry.attempts >= MAX_AUTO_RETRIES) {
 		await SubmissionsEntity.update(submissionId, {
 			status: "failed",
-			info: `${reason}${exhausted}`,
-			...(website?.autoRetry ? { data: { kind: "website", website: { ...website, autoRetry: undefined } } } : {}),
+			info: website && retry ? `${failure.info} ${retry.exhausted(retry.attempts + 1)}` : failure.info,
+			...(website ? { data: { kind: "website" as const, website } } : {}),
 		});
 		return;
 	}
 	const nextAttemptAt = new Date(Date.now() + AUTO_RETRY_DELAY_MS);
 	await SubmissionsEntity.update(submissionId, {
 		status: "failed",
-		info: `The browser service failed (${reason}); retrying automatically at ${nextAttemptAt.toISOString().slice(11, 16)} UTC (attempt ${attempts + 1} of ${MAX_AUTO_RETRIES}).`,
-		data: { kind: "website", website: { ...website, autoRetry: { attempts: attempts + 1, nextAttemptAt: nextAttemptAt.toISOString(), reason } } },
+		info: `${failure.info} Retrying automatically at ${nextAttemptAt.toISOString().slice(11, 16)} UTC (attempt ${retry.attempts + 1} of ${MAX_AUTO_RETRIES}).`,
+		data: { kind: "website", website: { ...website, autoRetry: { attempts: retry.attempts + 1, nextAttemptAt: nextAttemptAt.toISOString(), reason: retry.reason } } },
 	});
+}
+
+/** A failed run: retried automatically when the browser service (not the site) failed. */
+async function recordWebsiteAnalysisFailure(submissionId: bigint, error: unknown, attempts: number): Promise<void> {
+	const reason = errorText(error);
+	await failWebsiteAnalysis(submissionId, isBrowserInfrastructureFailure(error)
+		? { info: `The browser service failed (${reason}).`, retry: { attempts, reason, exhausted: (visits) => `It failed ${visits} times in a row; retry once it has recovered.` } }
+		: { info: reason });
 }

@@ -7,7 +7,7 @@ import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { retryFailedWebsiteAnalysis, websiteSubmissionDedupeKey } from "./submissions/website";
 import { capturedDocumentContent, WebsiteCaptureFailedError, WebsiteUnreachableError, type ArchiveWebsiteOptions, type WebsiteArchiveResult, type WebsitePageSession } from "./website_archive";
-import { analyzeWebsite, buildWebsiteClassificationInput, buildWebsiteReportEvidence, continuedNavigation, websiteContinuation, type WebsiteAnalysisDependencies } from "./website_ai";
+import { analyzeWebsite, buildWebsiteClassificationInput, buildWebsiteReportEvidence, continuedNavigation, websiteContinuation, type AnalyzeWebsiteOptions, type WebsiteAnalysisDependencies } from "./website_ai";
 import { extractWebsiteContinuationControls, extractWebsiteContinuationLinks } from "./website_fields";
 import type { WebsiteNavigationHop, WebsitePageAction, WebsitePerformedAction } from "./website_types";
 
@@ -302,23 +302,68 @@ describe("multi-page kits", () => {
 		expect(started[0]!.navigationHops?.filter((hop) => hop.followedLink)).toHaveLength(2);
 	});
 
-	test("a link that cannot be loaded leaves the last page reached as the finding and says why", async () => {
+	test("a link that cannot be loaded is no verdict: the case is inconclusive and visited again from the submitted URL, at most three more times", async () => {
 		const id = await websiteSubmission(375914181917937692n, CONSENT);
 		const unreachable = new WebsiteCaptureFailedError([new WebsiteUnreachableError("phishing", "HTTP 404")]);
-
-		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({
-			captures: [],
-			capture: (options) => {
-				if (options.url === GET_STARTED) throw unreachable;
-				return liveCapture(options.url);
+		const captures: ArchiveWebsiteOptions[] = [];
+		const run = (options: Partial<AnalyzeWebsiteOptions> = {}) => analyzeWebsite({ submissionId: id, url: CONSENT, ...options }, dependencies({
+			captures,
+			capture: (capture) => {
+				if (capture.url === GET_STARTED) throw unreachable;
+				return liveCapture(capture.url);
 			},
 		}));
+		const reason = `its link "I agree" to ${GET_STARTED} could not be loaded (${unreachable.message})`;
+		const inconclusive = `Inconclusive: the capture could not finish the site's flow: ${reason}. The last page it reached, ${CONSENT}, shows nothing reportable by itself; no verdict or report was made.`;
 
-		const submission = await SubmissionsEntity.get(id);
-		expect(submission?.status).toBe("invalid");
-		expect(submission?.info).toBe(`No reportable phishing or malware evidence was found at the captured destination ${CONSENT}; no report was created. The capture stopped following the site's flow: its link "I agree" to ${GET_STARTED} could not be loaded (${unreachable.message}).`);
+		await run();
+		let submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("failed");
+		expect(submission?.info).toStartWith(`${inconclusive} Retrying automatically at `);
+		expect(submission?.info).toEndWith(" UTC (attempt 1 of 3).");
+		expect(websiteData(submission)).toMatchObject({ unfinishedFlow: reason, autoRetry: { attempts: 1, reason }, archiveUrl: CONSENT });
 		expect(websiteData(submission)?.navigationHops).toHaveLength(1);
 		expect((await ArtifactsEntity.listForSubmission(id)).map(({ name }) => name)).not.toContain("website-step2.mhtml");
+		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
+
+		// The retry visits the submitted URL live; the stored page before the step is not reused.
+		const retried: AnalyzeWebsiteOptions[] = [];
+		await retryFailedWebsiteAnalysis(id, async (options) => { retried.push(options); });
+		expect(retried).toEqual([expect.objectContaining({ url: CONSENT, mhtmlSnapshot: undefined, trustMhtmlDocumentLocation: false, reuseEvidenceArtifacts: false })]);
+
+		// Each visit that stops there again counts; the fourth gives up and says so.
+		await run(retried[0]);
+		expect(websiteData(await SubmissionsEntity.get(id))?.autoRetry?.attempts).toBe(2);
+		await run();
+		await run();
+		submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("failed");
+		expect(submission?.info).toBe(`${inconclusive} The flow stopped there on 4 visits; retry to visit the site again.`);
+		expect(websiteData(submission)?.autoRetry).toBeUndefined();
+		expect(websiteData(submission)?.unfinishedFlow).toBe(reason);
+		expect(captures.filter(({ url }) => url === CONSENT).every((capture) => !capture.mhtmlSnapshot)).toBe(true);
+	});
+
+	test("a page that reaches its harmful step on a later visit is reported, and the unfinished flow is forgotten", async () => {
+		const id = await websiteSubmission(375914181917937697n, CONSENT);
+		let visits = 0;
+		const deps = dependencies({
+			captures: [],
+			capture: (options) => {
+				if (options.url === CONSENT) visits++;
+				if (options.url === GET_STARTED && visits === 1) throw new WebsiteCaptureFailedError([new WebsiteUnreachableError("phishing", "HTTP 502")]);
+				return liveCapture(options.url);
+			},
+		});
+
+		await analyzeWebsite({ submissionId: id, url: CONSENT }, deps);
+		expect((await SubmissionsEntity.get(id))?.status).toBe("failed");
+		await analyzeWebsite({ submissionId: id, url: CONSENT }, deps);
+
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("reported");
+		expect(websiteData(submission)?.unfinishedFlow).toBeUndefined();
+		expect(websiteData(submission)?.autoRetry).toBeUndefined();
 	});
 
 	test("a link whose page ends on another site hands that site to its own case, as a redirect would", async () => {
@@ -362,7 +407,10 @@ describe("multi-page kits", () => {
 			capture: (options) => options.url === GET_STARTED ? { ...liveCapture(options.url), html: Buffer.from(consentHtml, "utf8") } : liveCapture(options.url),
 		}));
 		expect(loopCaptures.map(({ url }) => url)).toEqual([CONSENT, GET_STARTED]);
-		expect((await SubmissionsEntity.get(loopId))?.info).toEndWith(`its link "Import an existing wallet" to ${CONSENT} leads back to a page already captured.`);
+		// A loop ends the site's flow: the page before it is the verdict.
+		const loopCase = await SubmissionsEntity.get(loopId);
+		expect(loopCase?.status).toBe("invalid");
+		expect(loopCase?.info).toBe(`No reportable phishing or malware evidence was found at the captured destination ${GET_STARTED}; no report was created. The site's flow ended there: its link "Import an existing wallet" to ${CONSENT} leads back to a page already captured.`);
 
 		// A site whose every page links on stops after three followed links.
 		const pages = Array.from({ length: 6 }, (_, index) => `${SITE}/page-${index}.html`);
@@ -372,9 +420,11 @@ describe("multi-page kits", () => {
 		const endlessId = await websiteSubmission(375914181917937695n, pages[0]!);
 		await analyzeWebsite({ submissionId: endlessId, url: pages[0]! }, dependencies({ answers: endless, captures: endlessCaptures }));
 		expect(endlessCaptures.map(({ url }) => url)).toEqual(pages.slice(0, 4));
+		// The flow goes on past the limit: no verdict, and no automatic retry, which would stop there again.
 		const endlessCase = await SubmissionsEntity.get(endlessId);
-		expect(endlessCase?.status).toBe("invalid");
-		expect(endlessCase?.info).toEndWith(`its link "Next" to ${pages[4]} was not followed after 3 steps.`);
+		expect(endlessCase?.status).toBe("failed");
+		expect(endlessCase?.info).toBe(`Inconclusive: the capture could not finish the site's flow: its link "Next" to ${pages[4]} was not followed after 3 steps. The last page it reached, ${pages[3]}, shows nothing reportable by itself; no verdict or report was made.`);
+		expect(websiteData(endlessCase)?.autoRetry).toBeUndefined();
 	});
 });
 
@@ -583,8 +633,9 @@ describe("actions on a kit's own pages", () => {
 		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({ answers: GATE_ANSWERS, captures: [], capture: () => visit.archive }));
 
 		const submission = await SubmissionsEntity.get(id);
-		expect(submission?.status).toBe("invalid");
-		expect(submission?.info).toEndWith(`The capture stopped following the site's flow: its field "Email address" changed nothing on the page; the captcha beside it never passed.`);
+		expect(submission?.status).toBe("failed");
+		expect(submission?.info).toStartWith(`Inconclusive: the capture could not finish the site's flow: its field "Email address" changed nothing on the page; the captcha beside it never passed. The last page it reached, ${GATE}, shows nothing reportable by itself;`);
+		expect(websiteData(submission)?.autoRetry?.attempts).toBe(1);
 		expect(websiteData(submission)?.navigationHops).toHaveLength(1);
 		expect(visit.closed).toBeGreaterThanOrEqual(1);
 	});
@@ -604,7 +655,8 @@ describe("actions on a kit's own pages", () => {
 
 		expect(visit.actions).toHaveLength(1);
 		const submission = await SubmissionsEntity.get(id);
-		expect(submission?.info).toEndWith(`its field "Email address" was already submitted on the way to this page.`);
+		expect(submission?.status).toBe("invalid");
+		expect(submission?.info).toEndWith(`The site's flow ended there: its field "Email address" was already submitted on the way to this page.`);
 		expect(websiteData(submission)?.navigationHops?.map(({ url, performedAction, contentCaptured }) => ({ url, submitted: Boolean(performedAction), contentCaptured }))).toEqual([
 			{ url: GATE, submitted: true, contentCaptured: false },
 			{ url: GATE, submitted: false, contentCaptured: true },
@@ -618,7 +670,7 @@ describe("actions on a kit's own pages", () => {
 
 		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({ answers: GATE_ANSWERS, captures: [], capture: () => visit.archive }));
 
-		expect((await SubmissionsEntity.get(id))?.info).toEndWith(`its field "Email address" could not be submitted (${missing.message}).`);
+		expect((await SubmissionsEntity.get(id))?.info).toStartWith(`Inconclusive: the capture could not finish the site's flow: its field "Email address" could not be submitted (${missing.message}).`);
 		expect(visit.closed).toBeGreaterThanOrEqual(1);
 	});
 
@@ -631,7 +683,7 @@ describe("actions on a kit's own pages", () => {
 			answers: GATE_ANSWERS,
 			captures,
 			// The first capture is a stored MHTML: it has no open browser.
-			capture: (options) => (captures.length === 1 ? { ...liveCapture(GATE), ...RESIDENTIAL } : visit.archive),
+			capture: () => (captures.length === 1 ? { ...liveCapture(GATE), ...RESIDENTIAL } : visit.archive),
 		}));
 
 		expect(captures.map(({ url }) => url)).toEqual([GATE, GATE]);

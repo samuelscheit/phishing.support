@@ -168,12 +168,15 @@ export async function retryFailedWebsiteAnalysis(
 
 	let mhtmlSnapshot: Buffer | undefined;
 	let screenshotSnapshot: Buffer | undefined;
-	// A cloaked capture holds only the decoy; a retry must visit the site again.
+	// A cloaked capture holds only the decoy, and an unfinished flow only the
+	// page before the step it could not take, often a one-time gate URL that no
+	// longer loads; a retry must visit the site again from the submitted URL.
 	const retainedArchiveHasTrustedProvenance = Boolean(
 		submission.data.kind === "website"
 		&& submission.data.website.archiveUrl
 		&& submission.data.website.navigationHops?.length
-		&& submission.data.website.cloaking?.outcome !== "unresolved",
+		&& submission.data.website.cloaking?.outcome !== "unresolved"
+		&& !submission.data.website.unfinishedFlow,
 	);
 	if (mhtmlArtifact && retainedArchiveHasTrustedProvenance) {
 		const artifact = await ArtifactsEntity.get(mhtmlArtifact.id);

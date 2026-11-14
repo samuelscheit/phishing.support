@@ -484,7 +484,7 @@ describe("browser-service failures", () => {
 		await run();
 		let { submission, autoRetry } = await autoRetryOf();
 		expect(submission.status).toBe("failed");
-		expect(submission.info).toStartWith("The browser service failed (Unexpected server response: 503); retrying automatically at ");
+		expect(submission.info).toStartWith("The browser service failed (Unexpected server response: 503). Retrying automatically at ");
 		expect(submission.info).toEndWith(" UTC (attempt 1 of 3).");
 		expect(submission.info).not.toContain("[object");
 		expect(autoRetry).toMatchObject({ attempts: 1, reason: "Unexpected server response: 503" });
@@ -508,7 +508,7 @@ describe("browser-service failures", () => {
 		await run();
 		({ submission, autoRetry } = await autoRetryOf());
 		expect(submission.status).toBe("failed");
-		expect(submission.info).toBe("Unexpected server response: 503 The browser service failed 4 times in a row; retry once it has recovered.");
+		expect(submission.info).toBe("The browser service failed (Unexpected server response: 503). It failed 4 times in a row; retry once it has recovered.");
 		expect(autoRetry).toBeUndefined();
 		expect(await runDueWebsiteAutoRetries({ now: new Date(Date.now() + 24 * 60 * 60_000), startAnalysis })).toBe(0);
 	});
