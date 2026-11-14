@@ -263,7 +263,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 								) : (
 									<Mail className="h-8 w-8 shrink-0" />
 								)}
-								<span className="leading-none text-xl -mt-1 wrap-break-word sm:text-2xl">{targetName}</span>
+								<h1 className="leading-none text-xl -mt-1 wrap-break-word sm:text-2xl">{targetName}</h1>
 							</CardTitle>
 							<div className="flex flex-col items-end gap-2 shrink-0 md:flex-row">
 								<Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">

@@ -4,7 +4,7 @@ import { getSubmissionDetails } from "@/lib/submissions/details";
 import { notFound } from "next/navigation";
 import { SubmissionPageClient } from "./SubmissionPageClient";
 import { Submission } from "@/lib/db/schema";
-import { websiteSiteName } from "@/lib/website_site";
+import { submissionSeo } from "@/lib/seo/submission";
 
 export const dynamic = "force-dynamic";
 
@@ -20,22 +20,20 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 	if (!submission) {
 		return {
-			title: "Submission Not Found — Phishing Support",
+			title: "Submission not found",
 			robots: { index: false, follow: false },
 		};
 	}
 
-	const targetName =
-		submission.data.kind === "website"
-			? websiteSiteName(submission.data.website?.url) || "Website Submission"
-			: submission.data.email?.subject || "Email Submission";
-
-	const title = `${targetName} — Submission #${submission.id.toString()} — Phishing Support`;
-
+	const { title, description } = submissionSeo(submission);
+	const path = `/submissions/${submission.id.toString()}`;
 	return {
 		title,
-		description: "Submission detail view and analysis results.",
-		robots: { index: false, follow: false },
+		description,
+		alternates: { canonical: path },
+		openGraph: { type: "article", url: path, title, description, publishedTime: submission.createdAt.toISOString() },
+		// The page shows the phishing URLs it analyzed as text; it links to none of them.
+		robots: { index: true, follow: true },
 	};
 }
 

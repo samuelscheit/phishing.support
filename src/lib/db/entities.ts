@@ -135,10 +135,15 @@ export class SubmissionsEntity {
             .where(eq(submissions.id, id));
     }
 
-    static async list(limit: number = 50) {
-        const db = await getDb();
-        return await db.select().from(submissions).orderBy(desc(submissions.createdAt)).limit(limit);
-    }
+	/** The newest submissions' ids and change times, for the sitemap. */
+	static async listSitemapEntries(limit: number) {
+		const db = await getDb();
+		return db
+			.select({ id: submissions.id, createdAt: submissions.createdAt, updatedAt: submissions.updatedAt })
+			.from(submissions)
+			.orderBy(desc(submissions.createdAt))
+			.limit(limit);
+	}
 
 	/**
 	 * One page of the public submission list, newest first, holding only what a

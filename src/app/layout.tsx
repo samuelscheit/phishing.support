@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Head from "next/head";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/seo/site";
 
 const geistSans = Geist({
 	variable: "--font-geist-sans",
@@ -14,8 +14,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-	title: "Phishing Support",
-	description: "Report and analyze phishing threats",
+	metadataBase: new URL(SITE_URL),
+	title: { default: SITE_NAME, template: `%s · ${SITE_NAME}` },
+	description: SITE_DESCRIPTION,
+	applicationName: SITE_NAME,
+	openGraph: { type: "website", siteName: SITE_NAME, locale: "en_US" },
+	twitter: { card: "summary_large_image", creator: "@SamuelScheit" },
 };
 
 export default function RootLayout({

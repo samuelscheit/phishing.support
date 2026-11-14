@@ -1,26 +1,28 @@
 import type { MetadataRoute } from "next";
 import { SubmissionsEntity } from "@/lib/db/entities";
+import { absoluteUrl } from "@/lib/seo/site";
 
 export const dynamic = "force-dynamic";
 
+/** The pages that explain the site; each is listed with the priority a crawler should give it. */
+const STATIC_PAGES: Array<{ path: string; priority: number; changeFrequency: MetadataRoute.Sitemap[number]["changeFrequency"] }> = [
+	{ path: "/", priority: 1, changeFrequency: "hourly" },
+	{ path: "/abuse-reporting", priority: 0.8, changeFrequency: "monthly" },
+	{ path: "/info", priority: 0.5, changeFrequency: "monthly" },
+];
+
+/** One sitemap holds at most 50,000 URLs; the newest submissions fill what the static pages leave. */
+const MAX_SITEMAP_URLS = 50_000;
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-	const base = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-
-	const staticPaths = ["/", "/info"];
-
-	const submissions = await SubmissionsEntity.list(1000);
-
-	const urls: MetadataRoute.Sitemap = [];
-
-	for (const p of staticPaths) {
-		urls.push({ url: `${base}${p}`, lastModified: new Date() });
-	}
-
-	for (const s of submissions) {
-		const id = s.id.toString();
-		const lastModified = s.updatedAt ? new Date(s.updatedAt) : s.createdAt ? new Date(s.createdAt) : undefined;
-		urls.push({ url: `${base}/submissions/${id}`, lastModified });
-	}
-
-	return urls;
+	const submissions = await SubmissionsEntity.listSitemapEntries(MAX_SITEMAP_URLS - STATIC_PAGES.length);
+	return [
+		...STATIC_PAGES.map(({ path, priority, changeFrequency }) => ({ url: absoluteUrl(path), priority, changeFrequency })),
+		...submissions.map((submission) => ({
+			url: absoluteUrl(`/submissions/${submission.id.toString()}`),
+			lastModified: submission.updatedAt ?? submission.createdAt,
+			changeFrequency: "weekly" as const,
+			priority: 0.6,
+		})),
+	];
 }

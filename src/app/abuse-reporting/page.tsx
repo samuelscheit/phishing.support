@@ -4,8 +4,9 @@ import { AbuseReportForm } from "@/components/AbuseReportForm";
 import { SiteFooter } from "@/components/SiteLayout";
 
 export const metadata: Metadata = {
-	title: "Abuse reporting | Phishing Support",
-	description: "Unified abuse reporting for domain and server providers",
+	title: "Report an abusive domain or IP address",
+	description: "Report an abusive domain or IP address once: Phishing Support finds the verified abuse contacts of its registrar and network provider and sends each of them the report.",
+	alternates: { canonical: "/abuse-reporting" },
 };
 
 export default function AbuseReportingPage() {

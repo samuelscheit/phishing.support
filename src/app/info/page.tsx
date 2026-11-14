@@ -5,8 +5,9 @@ import Donate from "@/components/Donate";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-	title: "Info — Phishing Support",
-	description: "About the Phishing Support application and contact details.",
+	title: "About and contact",
+	description: "Who runs Phishing Support, why it exists, how it reports phishing to registrars and hosting providers, and how to get in touch.",
+	alternates: { canonical: "/info" },
 };
 
 export default function InfoPage() {
