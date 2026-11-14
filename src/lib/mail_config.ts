@@ -64,6 +64,12 @@ export type ImapConfig = {
 	pass: string;
 	/** Every watched folder; each message is routed the same way whichever folder holds it. */
 	mailboxes: string[];
+	/**
+	 * Folders that also hold the account owner's own mail, such as INBOX, where a
+	 * provider's reply lands when no server rule files it. Only mail addressed to
+	 * REPLY_DOMAIN is read from them; everything else is never fetched.
+	 */
+	sharedMailboxes: string[];
 	/** Address that receives forwarded phishing mail for analysis. */
 	intakeAddress: string;
 };
@@ -73,7 +79,9 @@ export function imapConfig(): ImapConfig | undefined {
 	const host = process.env.IMAP_HOST?.trim();
 	const user = process.env.IMAP_USER?.trim();
 	const pass = process.env.IMAP_PASS;
-	const mailboxes = [...new Set((process.env.IMAP_MAILBOXES ?? "").split(",").map((mailbox) => mailbox.trim()).filter(Boolean))];
+	const folders = (name: string) => [...new Set((process.env[name] ?? "").split(",").map((mailbox) => mailbox.trim()).filter(Boolean))];
+	const mailboxes = folders("IMAP_MAILBOXES");
+	const sharedMailboxes = folders("IMAP_SHARED_MAILBOXES").filter((mailbox) => !mailboxes.includes(mailbox));
 	const intake = process.env.IMAP_LISTEN_ADDRESS?.trim();
 	if (!host || !user || !pass || mailboxes.length === 0 || !intake) return undefined;
 	const intakeAddress = normalizeMailbox(intake);
@@ -81,5 +89,5 @@ export function imapConfig(): ImapConfig | undefined {
 	if (intakeAddress.slice(intakeAddress.lastIndexOf("@") + 1) !== replyDomain()) {
 		throw new Error("REPLY_DOMAIN must match the domain of IMAP_LISTEN_ADDRESS so provider replies reach the monitored mailbox.");
 	}
-	return { host, port: envPort("IMAP_PORT", 993), secure: envBool("IMAP_SECURE", true), user, pass, mailboxes, intakeAddress };
+	return { host, port: envPort("IMAP_PORT", 993), secure: envBool("IMAP_SECURE", true), user, pass, mailboxes, sharedMailboxes, intakeAddress };
 }

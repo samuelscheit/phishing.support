@@ -1,6 +1,6 @@
 import { ImapFlow, type FetchMessageObject } from "imapflow";
 
-import { imapConfig, type ImapConfig } from "../mail_config";
+import { imapConfig, replyDomain, type ImapConfig } from "../mail_config";
 import { ingestFetchedMail } from "./ingest";
 
 function sleep(ms: number): Promise<void> {
@@ -11,7 +11,16 @@ function noConnection(error: unknown): boolean {
 	return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "NoConnection");
 }
 
-type MailboxConnection = Omit<ImapConfig, "mailboxes"> & { mailbox: string };
+type MailboxConnection = Omit<ImapConfig, "mailboxes" | "sharedMailboxes"> & {
+	mailbox: string;
+	/** For a folder shared with the owner's own mail: the only domain whose mail is read from it. */
+	onlyAddressedTo?: string;
+};
+
+/** Whether the message's To or Cc names a mailbox at `domain`. */
+export function addressedTo(envelope: FetchMessageObject["envelope"], domain: string): boolean {
+	return [...(envelope?.to ?? []), ...(envelope?.cc ?? [])].some((recipient) => recipient.address?.trim().toLowerCase().endsWith(`@${domain}`));
+}
 
 /**
  * Watches one folder: IMAP IDLE observes only the selected mailbox. The client
@@ -66,10 +75,17 @@ class MailboxListener {
 						// UID 1:* is deliberate: a provider reply may already be marked
 						// read. The terminal ledger makes the scan idempotent. IMAPFlow
 						// forbids commands inside its fetch iterator, so flags wait.
+						// A shared folder is searched on the server for our domain first,
+						// so the owner's own mail is never downloaded.
+						const domain = this.config.onlyAddressedTo;
+						const uids = domain ? await client.search({ or: [{ to: domain }, { cc: domain }] }, { uid: true }) : undefined;
+						if (uids !== undefined && (!uids || uids.length === 0)) return;
 						const seen = new Set<number>();
-						for await (const fetched of client.fetch("1:*", { uid: true, source: true, flags: true, envelope: true, internalDate: true })) {
+						for await (const fetched of client.fetch(uids ? uids.join(",") : "1:*", { uid: true, source: true, flags: true, envelope: true, internalDate: true }, uids ? { uid: true } : undefined)) {
 							const message = fetched as FetchMessageObject;
 							if (!message.uid) continue;
+							// The server's search matches header text; the parsed recipients decide.
+							if (domain && !addressedTo(message.envelope, domain)) continue;
 							const result = await ingestFetchedMail(message, { mailbox: this.config.mailbox, uidValidity, intakeAddress: this.config.intakeAddress });
 							if (result.disposition === "terminal") seen.add(message.uid);
 							else if (result.disposition === "retry") console.error(`IMAP message ${message.uid} will be retried: ${result.reason}`);
@@ -141,8 +157,12 @@ export function startMailboxListener(): boolean {
 	const config = imapConfig();
 	if (!config) return false;
 	if (listeners.length === 0) {
-		const { mailboxes, ...connection } = config;
-		listeners = mailboxes.map((mailbox) => new MailboxListener({ ...connection, mailbox }));
+		const { mailboxes, sharedMailboxes, ...connection } = config;
+		const domain = replyDomain();
+		listeners = [
+			...mailboxes.map((mailbox) => new MailboxListener({ ...connection, mailbox })),
+			...sharedMailboxes.map((mailbox) => new MailboxListener({ ...connection, mailbox, onlyAddressedTo: domain })),
+		];
 	}
 	for (const listener of listeners) listener.start();
 	return true;
