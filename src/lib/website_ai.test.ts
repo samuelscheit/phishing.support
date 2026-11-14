@@ -177,7 +177,7 @@ test("classification covers lures and malware and lists fields beyond the HTML e
 
 	expect(system).toContain("any language");
 	expect(system).toContain("A lure page that only leads to that step counts");
-	expect(system).toContain("Return malware when the page gets the visitor to download, install, or run");
+	expect(system).toContain("A page distributes malware when it gets the visitor to download, install, or run a file, app, or command that would harm them");
 	expect(system).toContain("asks to paste a command");
 	expect(system).not.toContain("malware_delivery");
 	expect(tiktokCoinKitArchive.html.toString("utf-8").indexOf("phone-card-code")).toBeGreaterThan(12_000);
@@ -493,8 +493,11 @@ test("the classifier reads the whole page and the decoded install command, not a
 	const classification = buildWebsiteClassificationInput(paneo.hop, { ...paneo.archive });
 	const system = classification[0].content as string;
 	const user = (classification[1].content as Array<{ text: string }>)[0]!.text;
-	expect(system).toContain("Return malware when");
+	expect(system).toContain("A page distributes malware when");
 	expect(system).toContain("The brand on a malware page may be invented");
+	// The narrative judges by the same rules, so it cannot call a page malware the classifier did not.
+	expect(analysis[0].content).toContain("The brand on a malware page may be invented");
+	expect(analysis[0].content).toContain("that would harm them");
 	expect(user).toContain("Install Paneo");
 	expect(user).toContain("payload_urls");
 	expect(user).toContain("https://keychainagent.pro/wksxgj/ogZhMJB7F277");
