@@ -228,7 +228,7 @@ export class SubmissionsEntity {
 			.limit(limit);
 	}
 
-	/** Failed website analyses whose automatic retry (after a browser-service failure) is due. */
+	/** Failed website analyses whose automatic retry is due. */
 	static async listDueWebsiteAutoRetries(now: Date, limit = 10) {
 		const db = await getDb();
 		return db

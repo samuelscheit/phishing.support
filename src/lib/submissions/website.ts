@@ -63,8 +63,9 @@ export async function resumePendingWebsiteAnalyses(params: {
 const AUTO_RETRY_POLL_MS = 60_000;
 
 /**
- * Re-queue failed analyses whose browser-service failure has waited out its
- * backoff. They go through the normal retry boundary, so a case that has
+ * Re-queue failed analyses whose automatic retry (a browser-service failure,
+ * or a flow step not seen in that visit) has waited out its backoff. They go
+ * through the normal retry boundary, so a case that has
  * since been reported or retried by hand is left alone.
  */
 export async function runDueWebsiteAutoRetries(params: {
@@ -88,7 +89,7 @@ export async function runDueWebsiteAutoRetries(params: {
 export function startWebsiteAutoRetries(): () => void {
 	const timer = setInterval(() => {
 		void runDueWebsiteAutoRetries().then((started) => {
-			if (started > 0) console.warn(`Automatically retried ${started} website analyses after browser-service failures.`);
+			if (started > 0) console.warn(`Automatically retried ${started} website analyses.`);
 		}).catch((error) => console.error("Automatic website analysis retry failed:", error));
 	}, AUTO_RETRY_POLL_MS);
 	timer.unref?.();
