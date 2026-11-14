@@ -31,14 +31,6 @@ export default function RootLayout({
 		<html lang="en">
 			<body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
 				{children}
-
-				<script async src="https://p.samuelscheit.com/js/pa-25BABMWufuiHdv_puxmeh.js"></script>
-				<script
-					dangerouslySetInnerHTML={{
-						__html: `window.plausible=window.plausible||function(){(plausible.q = plausible.q || []).push(arguments)}
-					,plausible.init=plausible.init||function(i){(plausible.o = i || {})}; plausible.init()`,
-					}}
-				></script>
 			</body>
 		</html>
 	);
