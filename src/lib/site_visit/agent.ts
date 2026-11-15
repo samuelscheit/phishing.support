@@ -1,3 +1,4 @@
+import { visitAgentReport } from "./task";
 import type { AbuseSkyvernAdapter, SkyvernTaskPayload } from "../abuse/skyvern";
 import { statusOf } from "../abuse/skyvern/contracts";
 import { redactExternalError } from "../abuse/skyvern/adapter";
@@ -114,6 +115,9 @@ export function skyvernVisitAgent(createAdapter: () => Pick<AbuseSkyvernAdapter,
 			if (!status || !TERMINAL.has(status)) return { state: "running" };
 			if (status === "completed") return { state: "completed", output: run.output };
 			const reason = typeof run.failure_reason === "string" ? run.failure_reason : status;
+			// The agent ending the walk itself (the flow ended, blocked the synthetic data, or asked
+			// for nothing it could give) is a finished visit; its reason is its report.
+			if (status === "terminated") return { state: "completed", output: visitAgentReport(run.output) ?? { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, stoppedReason: redactExternalError(reason).slice(0, 300) } };
 			return { state: "failed", reason: redactExternalError(`${status}: ${reason}`).slice(0, 500) };
 		},
 		// Task V2 runs (`tsk_v2_…`) have a timeline; Task V1 and V3 runs (`tsk_…`) only their actions.

@@ -242,4 +242,20 @@ describe("the agent's task actions (Task V1 and V3)", () => {
 		expect(await agent.actions("tsk_597175287129714516")).toEqual([{ id: "act_1", kind: "click", text: "Clicked", selector: "#dlConfirm" }]);
 		expect(calls).toEqual(["timeline tsk_v2_597084519460743340", "actions tsk_597175287129714516"]);
 	});
+
+	test("an agent that ends the walk itself has finished the visit, with its reason as the report; a broken run has not", async () => {
+		const runs: Record<string, Record<string, unknown>> = {
+			terminated: { status: "terminated", failure_reason: "The form stayed on the same page after the password was entered three times." },
+			failed: { status: "failed", failure_reason: "Browser session closed" },
+		};
+		const agent = skyvernVisitAgent(() => ({
+			createTask: async () => ({ runId: "x", response: {} }),
+			getRun: async (runId: string) => runs[runId]!,
+			cancelRun: async () => undefined,
+			getRunTimeline: async () => [],
+			getTaskActions: async () => [],
+		}));
+		expect(await agent.state("terminated")).toEqual({ state: "completed", output: { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, stoppedReason: "The form stayed on the same page after the password was entered three times." } });
+		expect(await agent.state("failed")).toEqual({ state: "failed", reason: "failed: Browser session closed" });
+	});
 });
