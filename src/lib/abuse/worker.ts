@@ -469,7 +469,7 @@ export class AbuseWorker {
 	private async processJob(job: AbuseJob, signal?: AbortSignal): Promise<void> {
 		switch (job.jobType) {
 			case "resolve_report":
-				await resolveReport(idFrom(job.reportId, "reportId"), this.resolveTarget);
+				await resolveReport(idFrom(job.reportId, "reportId"), this.resolveTarget, job.retryCount);
 				return;
 			case "send_email":
 				await sendEmail(idFrom(job.routeId, "routeId"), this.servicesFor(signal));

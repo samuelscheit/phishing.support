@@ -2,6 +2,7 @@ import { AbuseInputError, assertPublicDnsHost } from "../security";
 import { retryWithTimeout } from "../../network/bounded_fetch";
 import { asRecord } from "./records";
 import type { JsonRecord, ResolverDependencies } from "./types";
+import { defaultRdapLocator, type RdapObject } from "../../network/rdap_bootstrap";
 
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
@@ -89,6 +90,12 @@ async function requestJson(url: URL, dependencies: ResolverDependencies): Promis
 	} finally {
 		if (timeout) clearTimeout(timeout);
 	}
+}
+
+/** The record from its authoritative RDAP server; undefined when no server or record exists. */
+export async function fetchRdapRecord(object: RdapObject, value: string, dependencies: ResolverDependencies): Promise<JsonRecord | undefined> {
+	const url = await (dependencies.rdapLocator ?? defaultRdapLocator)(object, value);
+	return url ? safeJsonFetch(url, dependencies) : undefined;
 }
 
 /** Fetch an RDAP/RIPE endpoint while enforcing the resolver's SSRF contract. */

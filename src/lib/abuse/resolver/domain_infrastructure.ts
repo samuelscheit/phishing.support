@@ -16,6 +16,7 @@ type DomainAddressLookup = {
 export type DomainInfrastructureResolution = {
 	routes: ResolvedRouteInput[];
 	snapshot: JsonRecord;
+	lookupFailures: string[];
 };
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -187,6 +188,7 @@ export async function resolveDomainInfrastructure(target: ResolverTarget, depend
 				status: resolved.status,
 				disposition: resolved.disposition,
 				resolverSnapshot: resolved.resolverSnapshot,
+				lookupFailures: resolved.lookupFailures ?? [],
 				routes: resolved.routes.map((route) => attachInfrastructureRoute({
 					domain: target.normalizedTarget,
 					ip,
@@ -200,6 +202,7 @@ export async function resolveDomainInfrastructure(target: ResolverTarget, depend
 				status: "failed" as const,
 				disposition: "resolver_failed",
 				resolverSnapshot: { target: ip, error: errorText(error) },
+				lookupFailures: [`hosting of ${ip}: ${errorText(error)}`],
 				routes: [],
 			};
 		}
@@ -209,8 +212,9 @@ export async function resolveDomainInfrastructure(target: ResolverTarget, depend
 		routes: resolutions.flatMap((resolution) => resolution.routes),
 		snapshot: {
 			dns: addressLookup.snapshot,
-			ipResolutions: resolutions.map(({ routes: _routes, ...resolution }) => resolution),
+			ipResolutions: resolutions.map(({ routes: _routes, lookupFailures: _failures, ...resolution }) => resolution),
 		},
+		lookupFailures: resolutions.flatMap((resolution) => resolution.lookupFailures),
 	};
 }
 

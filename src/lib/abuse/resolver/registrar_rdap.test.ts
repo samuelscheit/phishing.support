@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { resolveAbuseTarget, type ResolverDependencies } from "../resolver";
+import { testRdapLocator } from "../../network/rdap_test_helpers";
 import { registrarRdapUrl } from "./rdap";
 
 function resolverWith(routes: Record<string, Record<string, unknown>>, requested: string[] = []): ResolverDependencies {
@@ -8,6 +9,7 @@ function resolverWith(routes: Record<string, Record<string, unknown>>, requested
 		assertPublicHost: async () => undefined,
 		resolveDomainAddresses: async () => [],
 		port43Query: async () => "",
+		rdapLocator: testRdapLocator,
 		fetch: async (input) => {
 			const key = String(input);
 			requested.push(key);
@@ -40,7 +42,7 @@ describe("registrar RDAP and contact fallbacks", () => {
 		const result = await resolveAbuseTarget(
 			{ normalizedTarget: "lure.example", targetType: "domain", observedUrls: [] },
 			resolverWith({
-				"https://rdap.org/domain/lure.example": registry("lure.example", 999, "abuse@registrar.example", "https://rdap.registrar.example/v1/domain/lure.example"),
+				"https://rdap.test/domain/lure.example": registry("lure.example", 999, "abuse@registrar.example", "https://rdap.registrar.example/v1/domain/lure.example"),
 				"https://rdap.registrar.example/v1/domain/lure.example": { entities: [{ roles: ["registrar"], entities: [abuse("support@registrar-helpdesk.example")] }] },
 			}, requested),
 		);
@@ -57,7 +59,7 @@ describe("registrar RDAP and contact fallbacks", () => {
 	test("an unreachable registrar RDAP keeps the registry contact and records why", async () => {
 		const result = await resolveAbuseTarget(
 			{ normalizedTarget: "lure.example", targetType: "domain", observedUrls: [] },
-			resolverWith({ "https://rdap.org/domain/lure.example": registry("lure.example", 999, "abuse@registrar.example", "https://rdap.registrar.example/v1/domain/lure.example") }),
+			resolverWith({ "https://rdap.test/domain/lure.example": registry("lure.example", 999, "abuse@registrar.example", "https://rdap.registrar.example/v1/domain/lure.example") }),
 		);
 		expect(result.routes[0]).toMatchObject({ verifiedEmail: "abuse@registrar.example" });
 		expect(result.routes[0]?.resolverProvenance).not.toHaveProperty("fallbackContacts");
@@ -67,7 +69,7 @@ describe("registrar RDAP and contact fallbacks", () => {
 	test("a registrar with its own abuse form gets that form, not its mailboxes", async () => {
 		const result = await resolveAbuseTarget(
 			{ normalizedTarget: "keychainagent.pro", targetType: "domain", observedUrls: ["https://keychainagent.pro/wksxgj/x"] },
-			resolverWith({ "https://rdap.org/domain/keychainagent.pro": registry("keychainagent.pro", 1868, "abuse@eranet.com") }),
+			resolverWith({ "https://rdap.test/domain/keychainagent.pro": registry("keychainagent.pro", 1868, "abuse@eranet.com") }),
 		);
 		// Netcraft supplements every web target; the registrar route replaces only the mailbox.
 		const domainRoutes = result.routes.filter((route) => route.resolverProvenance.match !== "supplemental_provider_target_rule");

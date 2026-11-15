@@ -1,7 +1,7 @@
 import { getProviderSubmissionProviderForRegistrarId, providerRegistrarRoute } from "../providers";
 import { sha256Hex } from "../security";
 import { finalizeDomainRouteResolution, resolveDomainInfrastructure, type DomainInfrastructureResolution } from "./domain_infrastructure";
-import { safeJsonFetch } from "./http";
+import { fetchRdapRecord, safeJsonFetch } from "./http";
 import {
 	dedupeMailboxes,
 	entityOrganization,
@@ -17,7 +17,6 @@ import { parseExplicitWhoisAbuseMailboxes, parseWhoisNetworkMetadata } from "./w
 import type { AbuseMailbox, JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
 import { errorText } from "../../error_text";
 
-const RDAP_DOMAIN_URL = "https://rdap.org/domain/";
 
 export async function resolveDomainTarget(target: ResolverTarget, dependencies: ResolverDependencies): Promise<ResolvedAbuseTarget> {
 	// Infrastructure ownership remains useful even if the registrar RDAP
@@ -25,18 +24,29 @@ export async function resolveDomainTarget(target: ResolverTarget, dependencies: 
 	const infrastructurePromise = resolveDomainInfrastructure(target, dependencies).catch((error): DomainInfrastructureResolution => ({
 		routes: [],
 		snapshot: { error: errorText(error) },
+		lookupFailures: [`hosting: ${errorText(error)}`],
 	}));
 
-	const rdapUrl = `${RDAP_DOMAIN_URL}${encodeURIComponent(target.normalizedTarget)}`;
 	let rdap: JsonRecord | undefined;
 	let rdapError: string | undefined;
 	try {
-		rdap = await safeJsonFetch(rdapUrl, dependencies);
+		rdap = await fetchRdapRecord("domain", target.normalizedTarget, dependencies);
 	} catch (error) {
 		rdapError = errorText(error);
 	}
 	const infrastructure = await infrastructurePromise;
+	const resolved = await resolveRegisteredDomain(target, dependencies, rdap, rdapError, infrastructure);
+	const lookupFailures = [...(rdapError ? [`domain RDAP: ${rdapError}`] : []), ...infrastructure.lookupFailures];
+	return lookupFailures.length > 0 ? { ...resolved, lookupFailures } : resolved;
+}
 
+async function resolveRegisteredDomain(
+	target: ResolverTarget,
+	dependencies: ResolverDependencies,
+	rdap: JsonRecord | undefined,
+	rdapError: string | undefined,
+	infrastructure: DomainInfrastructureResolution,
+): Promise<ResolvedAbuseTarget> {
 	if (rdapError) {
 		const snapshot: JsonRecord = {
 			target: target.normalizedTarget,

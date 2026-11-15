@@ -7,7 +7,7 @@ import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
 import { abuseJobs } from "../schema";
 import { AbuseWorker } from "../worker";
-import { resolveReport } from "./resolution";
+import { IncompleteResolutionError, RESOLUTION_LOOKUP_RETRIES, resolveReport } from "./resolution";
 
 useTemporaryDatabase();
 
@@ -334,5 +334,58 @@ describe("direct provider resolution and dispatch", () => {
 			executionStatus: "failed",
 			error: "The provider route did not complete safely.",
 		});
+	});
+});
+
+describe("a resolution whose lookups failed", () => {
+	const netcraftRoute = {
+		routeKey: "provider_submission:netcraft:contact",
+		providerRegistryKey: "netcraft",
+		providerDisplayName: "Netcraft",
+		routeType: "provider_submission" as const,
+		providerDefinitionVersion: "test-v1",
+		providerDefinitionHash: "a".repeat(64),
+		resolverProvenance: { source: "test" },
+		resolutionSnapshot: { source: "test" },
+		verificationResult: { verified: true },
+		status: "verified" as const,
+	};
+	const hostingRoute = {
+		...netcraftRoute,
+		routeKey: "email:abuse@render.com",
+		providerRegistryKey: "email",
+		providerDisplayName: "Render Abuse Contact",
+		routeType: "email" as const,
+		verifiedEmail: "abuse@render.com",
+	};
+	const rateLimited = async () => ({
+		status: "resolved" as const,
+		resolverSnapshot: { source: "test" },
+		routes: [netcraftRoute],
+		lookupFailures: ["IP RDAP for 216.24.57.16: Resolver request to rdap.test failed with HTTP 429."],
+	});
+
+	test("is repeated before anything is saved, so the hosting route found next time is reported too", async () => {
+		const created = await createReport("policy-transparency-advisory.onrender.com");
+
+		const failure = await resolveReport(created.reportId, rateLimited, 0).catch((error: unknown) => error);
+		expect(failure).toBeInstanceOf(IncompleteResolutionError);
+		expect((failure as IncompleteResolutionError).retryAfterMs).toBe(60_000);
+		expect(String((failure as Error).message)).toContain("HTTP 429");
+		expect(await AbuseRepository.listRoutes(created.reportId)).toEqual([]);
+		expect((await AbuseRepository.getReport(created.reportId))?.status).toBe("resolving");
+
+		await resolveReport(created.reportId, async () => ({ status: "resolved", resolverSnapshot: { source: "test" }, routes: [netcraftRoute, hostingRoute] }), 1);
+		const routes = await AbuseRepository.listRoutes(created.reportId);
+		expect(routes.map((route) => route.providerDisplayName).sort()).toEqual(["Netcraft", "Render Abuse Contact"]);
+		const db = await getDb();
+		expect(db.select().from(abuseJobs).where(eq(abuseJobs.reportId, created.reportId)).all().map((job) => job.jobType).filter((type) => type !== "resolve_report").sort()).toEqual(["send_email", "submit_provider"]);
+	});
+
+	test("keeps what it found once the retries are spent, so the report still goes out", async () => {
+		const created = await createReport("policy-transparency-advisory.onrender.com");
+		await resolveReport(created.reportId, rateLimited, RESOLUTION_LOOKUP_RETRIES);
+		const routes = await AbuseRepository.listRoutes(created.reportId);
+		expect(routes.map((route) => route.providerDisplayName)).toEqual(["Netcraft"]);
 	});
 });

@@ -1,5 +1,6 @@
 import type { ResolvedRouteInput } from "../route_contracts";
 import type { AbuseTargetType } from "../schema";
+import type { RdapLocator } from "../../network/rdap_bootstrap";
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -22,6 +23,8 @@ export type ResolverDependencies = {
 	assertPublicHost?: (hostname: string) => Promise<void>;
 	/** Injectable A/AAAA lookup used to discover hosting-network abuse routes for a domain. */
 	resolveDomainAddresses?: (domain: string) => Promise<string[]>;
+	/** Finds the authoritative RDAP server. Production reads IANA's bootstrap registries. */
+	rdapLocator?: RdapLocator;
 };
 
 export type ResolverTarget = {
@@ -35,6 +38,12 @@ export type ResolvedAbuseTarget = {
 	disposition?: string;
 	resolverSnapshot: JsonRecord;
 	routes: ResolvedRouteInput[];
+	/**
+	 * Lookups that failed rather than finding nothing (an HTTP 429, a timeout,
+	 * a server error). A route they would have found may be missing, so the
+	 * resolution is worth repeating.
+	 */
+	lookupFailures?: string[];
 };
 
 export type AbuseMailbox = {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { parseExplicitWhoisAbuseMailboxes, resolveAbuseTarget, type ResolverDependencies } from "./resolver";
+import { testRdapLocator } from "../network/rdap_test_helpers";
 
 function rdapResponse(payload: Record<string, unknown>): Response {
 	return new Response(JSON.stringify(payload), {
@@ -21,6 +22,7 @@ function resolverWith(
 		// workstation DNS resolver for every fixture domain.
 		resolveDomainAddresses,
 		port43Query: async (server, query) => port43(server, query),
+		rdapLocator: testRdapLocator,
 		fetch: async (input) => {
 			const key = String(input);
 			const payload = routes[key];
@@ -43,7 +45,7 @@ describe("abuse resolver", () => {
 		const result = await resolveAbuseTarget(
 			{ normalizedTarget: "example.com", targetType: "domain", observedUrls: [] },
 			resolverWith({
-				"https://rdap.org/domain/example.com": {
+				"https://rdap.test/domain/example.com": {
 					port43: "whois.example.net",
 					entities: [
 						{
@@ -73,7 +75,7 @@ describe("abuse resolver", () => {
 			{ normalizedTarget: "example.com", targetType: "domain", observedUrls: [] },
 			resolverWith(
 				{
-					"https://rdap.org/domain/example.com": {
+					"https://rdap.test/domain/example.com": {
 						port43: "whois.example.net",
 						entities: [{ roles: ["registrar"], publicIds: [{ type: "IANA Registrar ID", identifier: "999" }], entities: [{ roles: ["technical"], email: "technical@example.com" }] }],
 					},
@@ -97,7 +99,7 @@ describe("abuse resolver", () => {
 			{ normalizedTarget: target, targetType: "ip", observedUrls: [] },
 			resolverWith(
 				{
-					[`https://rdap.org/ip/${target}`]: {
+					[`https://rdap.test/ip/${target}`]: {
 						port43: "whois.example.net",
 						name: "Allocation owner",
 						entities: [{ roles: ["technical"], vcardArray: ["vcard", [["email", {}, "text", "noc@example.net"]]] }],
@@ -105,7 +107,7 @@ describe("abuse resolver", () => {
 					[`https://stat.ripe.net/data/network-info/data.json?resource=${target}`]: {
 						data: { prefix: "154.201.78.0/24", asns: [402506] },
 					},
-					"https://rdap.org/autnum/402506": {
+					"https://rdap.test/autnum/402506": {
 						handle: "AS402506",
 						entities: [abuseEntity("abuse@tgtserver.com", "TGT-ABUSE")],
 					},
@@ -135,12 +137,13 @@ describe("abuse resolver", () => {
 					port43Calls++;
 					return "abuse-mailbox: whois@example.net";
 				},
+				rdapLocator: testRdapLocator,
 				fetch: async (input) => {
 					const url = String(input);
 					requestedUrls.push(url);
-					if (url === `https://rdap.org/ip/${target}`) return rdapResponse({ entities: [abuseEntity("allocation@example.net")] });
+					if (url === `https://rdap.test/ip/${target}`) return rdapResponse({ entities: [abuseEntity("allocation@example.net")] });
 					if (url === `https://stat.ripe.net/data/network-info/data.json?resource=${target}`) return rdapResponse({ data: { asns: [402506] } });
-					if (url === "https://rdap.org/autnum/402506") return rdapResponse({ entities: [abuseEntity("asn@example.net")] });
+					if (url === "https://rdap.test/autnum/402506") return rdapResponse({ entities: [abuseEntity("asn@example.net")] });
 					return new Response(null, { status: 404 });
 				},
 			},
@@ -149,9 +152,9 @@ describe("abuse resolver", () => {
 		expect(result.routes.map((route) => route.verifiedEmail)).toEqual(["allocation@example.net"]);
 		expect(port43Calls).toBe(0);
 		expect(requestedUrls).toEqual([
-			`https://rdap.org/ip/${target}`,
+			`https://rdap.test/ip/${target}`,
 			`https://stat.ripe.net/data/network-info/data.json?resource=${target}`,
-			"https://rdap.org/autnum/402506",
+			"https://rdap.test/autnum/402506",
 		]);
 	});
 
@@ -161,6 +164,7 @@ describe("abuse resolver", () => {
 			{ normalizedTarget: "154.201.78.249", targetType: "ip", observedUrls: [] },
 			{
 				assertPublicHost: async () => undefined,
+				rdapLocator: testRdapLocator,
 				fetch: async (input) => {
 					requestedUrls.push(String(input));
 					return new Response(null, { status: 404 });
@@ -170,7 +174,7 @@ describe("abuse resolver", () => {
 
 		expect(result).toMatchObject({ status: "no_route", disposition: "no_verified_abuse_contact" });
 		expect(result.routes[0]).toMatchObject({ routeType: "manual_unroutable", status: "no_route" });
-		expect(requestedUrls).toEqual(["https://rdap.org/ip/154.201.78.249"]);
+		expect(requestedUrls).toEqual(["https://rdap.test/ip/154.201.78.249"]);
 	});
 
 	test("discovers exact direct-provider routes from public domain infrastructure and records ignored DNS answers", async () => {
@@ -181,9 +185,9 @@ describe("abuse resolver", () => {
 			{ normalizedTarget: target, targetType: "domain", observedUrls: [] },
 			resolverWith(
 				{
-					[`https://rdap.org/domain/${target}`]: { entities: [] },
-					[`https://rdap.org/ip/${cloudflareIp}`]: { entities: [abuseEntity("abuse@cloudflare.com")] },
-					[`https://rdap.org/ip/${tencentIp}`]: { entities: [abuseEntity("dnsabuse_complaint@tencent.com")] },
+					[`https://rdap.test/domain/${target}`]: { entities: [] },
+					[`https://rdap.test/ip/${cloudflareIp}`]: { entities: [abuseEntity("abuse@cloudflare.com")] },
+					[`https://rdap.test/ip/${tencentIp}`]: { entities: [abuseEntity("dnsabuse_complaint@tencent.com")] },
 				},
 				async () => "",
 				async () => [cloudflareIp, "10.0.0.1", tencentIp, "2001:db8::1", cloudflareIp],
@@ -221,7 +225,7 @@ describe("abuse resolver", () => {
 			const result = await resolveAbuseTarget(
 				{ normalizedTarget: "example.com", targetType: "domain", observedUrls: [] },
 				resolverWith({
-					"https://rdap.org/domain/example.com": {
+					"https://rdap.test/domain/example.com": {
 						entities: [{ roles: ["registrar"], entities: [abuseEntity(mailbox)] }],
 					},
 				}),
@@ -241,7 +245,7 @@ describe("abuse resolver", () => {
 		const result = await resolveAbuseTarget(
 			{ normalizedTarget: "example.com", targetType: "domain", observedUrls: [] },
 			resolverWith({
-				"https://rdap.org/domain/example.com": {
+				"https://rdap.test/domain/example.com": {
 					entities: [{ roles: ["registrar"], entities: [abuseEntity("abuse@sub.cloudflare.com")] }],
 				},
 			}),
@@ -258,7 +262,7 @@ describe("abuse resolver", () => {
 
 	test("adds the Netcraft supplemental provider only when a domain has an observed URL", async () => {
 		const dependencies = resolverWith({
-			"https://rdap.org/domain/example.com": { entities: [] },
+			"https://rdap.test/domain/example.com": { entities: [] },
 		});
 		const withoutObservedUrl = await resolveAbuseTarget(
 			{ normalizedTarget: "example.com", targetType: "domain", observedUrls: [] },
@@ -291,10 +295,11 @@ describe("abuse resolver", () => {
 			{
 				assertPublicHost: async () => undefined,
 				resolveDomainAddresses: async () => [infrastructureIp],
+				rdapLocator: testRdapLocator,
 				fetch: async (input) => {
 					const url = String(input);
-					if (url === `https://rdap.org/domain/${target}`) throw new Error("domain RDAP unavailable");
-					if (url === `https://rdap.org/ip/${infrastructureIp}`) return rdapResponse({ entities: [abuseEntity("abuse@cloudflare.com")] });
+					if (url === `https://rdap.test/domain/${target}`) throw new Error("domain RDAP unavailable");
+					if (url === `https://rdap.test/ip/${infrastructureIp}`) return rdapResponse({ entities: [abuseEntity("abuse@cloudflare.com")] });
 					return new Response(null, { status: 404 });
 				},
 			},
@@ -305,6 +310,40 @@ describe("abuse resolver", () => {
 			expect.objectContaining({ providerRegistryKey: "cloudflare", routeType: "provider_submission" }),
 		]);
 		expect((result.resolverSnapshot as Record<string, any>).domainRdap).toMatchObject({ error: "domain RDAP unavailable" });
+		expect(result.lookupFailures).toEqual(["domain RDAP: domain RDAP unavailable"]);
+	});
+
+	test("a rate-limited hosting lookup is a lookup failure even when another route makes the target resolved", async () => {
+		// policy-transparency-advisory.onrender.com: every RDAP lookup answered HTTP 429, so
+		// Render's abuse mailbox was never found and only Netcraft received the report.
+		const target = "policy-transparency-advisory.onrender.com";
+		const result = await resolveAbuseTarget(
+			{ normalizedTarget: target, targetType: "domain", observedUrls: [`https://${target}/help`] },
+			{
+				assertPublicHost: async () => undefined,
+				resolveDomainAddresses: async () => ["216.24.57.16", "216.24.57.18"],
+				rdapLocator: testRdapLocator,
+				httpRetryAttempts: 1,
+				fetch: async () => new Response(null, { status: 429 }),
+			},
+		);
+
+		expect(result.status).toBe("resolved");
+		expect(result.routes.map((route) => route.providerRegistryKey)).toEqual(["netcraft"]);
+		expect(result.lookupFailures).toEqual([
+			"domain RDAP: Resolver request to rdap.test failed with HTTP 429.",
+			"IP RDAP for 216.24.57.16: Resolver request to rdap.test failed with HTTP 429.",
+			"IP RDAP for 216.24.57.18: Resolver request to rdap.test failed with HTTP 429.",
+		]);
+	});
+
+	test("a record that does not exist is not a lookup failure", async () => {
+		const result = await resolveAbuseTarget(
+			{ normalizedTarget: "203.0.113.9", targetType: "ip", observedUrls: [] },
+			{ assertPublicHost: async () => undefined, rdapLocator: async () => undefined, fetch: async () => new Response(null, { status: 404 }) },
+		);
+		expect(result.status).toBe("no_route");
+		expect(result.lookupFailures).toBeUndefined();
 	});
 
 	test("merges duplicate infrastructure routes without discarding either source", async () => {
@@ -315,9 +354,9 @@ describe("abuse resolver", () => {
 			{ normalizedTarget: target, targetType: "domain", observedUrls: [] },
 			resolverWith(
 				{
-					[`https://rdap.org/domain/${target}`]: { entities: [] },
-					[`https://rdap.org/ip/${firstIp}`]: { entities: [abuseEntity("abuse@cloudflare.com")] },
-					[`https://rdap.org/ip/${secondIp}`]: { entities: [abuseEntity("abuse@cloudflare.com")] },
+					[`https://rdap.test/domain/${target}`]: { entities: [] },
+					[`https://rdap.test/ip/${firstIp}`]: { entities: [abuseEntity("abuse@cloudflare.com")] },
+					[`https://rdap.test/ip/${secondIp}`]: { entities: [abuseEntity("abuse@cloudflare.com")] },
 				},
 				async () => "",
 				async () => [firstIp, secondIp],
@@ -345,6 +384,7 @@ describe("abuse resolver", () => {
 			{
 				assertPublicHost: async () => undefined,
 				resolveDomainAddresses: async () => ["10.0.0.1", "127.0.0.1", "2001:db8::1"],
+				rdapLocator: testRdapLocator,
 				fetch: async (input) => {
 					requestedUrls.push(String(input));
 					return rdapResponse({ entities: [] });
@@ -354,7 +394,7 @@ describe("abuse resolver", () => {
 
 		expect(result).toMatchObject({ status: "no_route", disposition: "no_verified_abuse_contact" });
 		expect(result.routes).toEqual([expect.objectContaining({ routeType: "manual_unroutable" })]);
-		expect(requestedUrls).toEqual([`https://rdap.org/domain/${target}`]);
+		expect(requestedUrls).toEqual([`https://rdap.test/domain/${target}`]);
 	});
 
 });

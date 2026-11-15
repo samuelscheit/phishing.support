@@ -1,6 +1,6 @@
 import { sha256Hex } from "../security";
 import { originAsns } from "./bgp";
-import { safeJsonFetch } from "./http";
+import { fetchRdapRecord, safeJsonFetch } from "./http";
 import { asRecord, text } from "./records";
 import {
 	dedupeMailboxes,
@@ -14,8 +14,7 @@ import { parseExplicitWhoisAbuseMailboxes, parseWhoisNetworkMetadata } from "./w
 import type { AbuseMailbox, JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
 import { errorText } from "../../error_text";
 
-const RDAP_IP_URL = "https://rdap.org/ip/";
-const RDAP_AUTNUM_URL = "https://rdap.org/autnum/";
+
 const RIPE_NETWORK_INFO_URL = "https://stat.ripe.net/data/network-info/data.json?resource=";
 
 type AsnRdapResult = {
@@ -27,14 +26,19 @@ type AsnRdapResult = {
 };
 
 export async function resolveIpTarget(target: ResolverTarget, dependencies: ResolverDependencies): Promise<ResolvedAbuseTarget> {
-	const rdapUrl = `${RDAP_IP_URL}${encodeURIComponent(target.normalizedTarget)}`;
 	let ipRdap: JsonRecord | undefined;
 	try {
-		ipRdap = await safeJsonFetch(rdapUrl, dependencies);
+		ipRdap = await fetchRdapRecord("ip", target.normalizedTarget, dependencies);
 	} catch (error) {
 		const message = errorText(error);
 		const snapshot = { target: target.normalizedTarget, ipRdap: { error: message } };
-		return { status: "failed", disposition: "resolver_failed", resolverSnapshot: snapshot, routes: [unroutableRoute("resolver_failed", snapshot, "failed")] };
+		return {
+			status: "failed",
+			disposition: "resolver_failed",
+			resolverSnapshot: snapshot,
+			routes: [unroutableRoute("resolver_failed", snapshot, "failed")],
+			lookupFailures: [`IP RDAP for ${target.normalizedTarget}: ${message}`],
+		};
 	}
 
 	if (!ipRdap) {
@@ -61,7 +65,7 @@ export async function resolveIpTarget(target: ResolverTarget, dependencies: Reso
 	const asnRdap: AsnRdapResult[] = [];
 	for (const asn of asns) {
 		try {
-			const rdap = await safeJsonFetch(`${RDAP_AUTNUM_URL}${asn}`, dependencies);
+			const rdap = await fetchRdapRecord("autnum", String(asn), dependencies);
 			asnRdap.push({
 				asn,
 				rdap,
@@ -106,7 +110,18 @@ export async function resolveIpTarget(target: ResolverTarget, dependencies: Reso
 	};
 
 	if (contacts.length === 0) {
-		return { status: "no_route", disposition: "no_verified_abuse_contact", resolverSnapshot: snapshot, routes: [unroutableRoute("no_verified_abuse_contact", snapshot)] };
+		// The ASN is the last fallback: when its lookup failed, a contact may exist.
+		const lookupFailures = [
+			...(ripeError ? [`BGP origin for ${target.normalizedTarget}: ${ripeError}`] : []),
+			...asnRdap.flatMap((entry) => entry.error ? [`AS${entry.asn} RDAP: ${entry.error}`] : []),
+		];
+		return {
+			status: "no_route",
+			disposition: "no_verified_abuse_contact",
+			resolverSnapshot: snapshot,
+			routes: [unroutableRoute("no_verified_abuse_contact", snapshot)],
+			...(lookupFailures.length > 0 ? { lookupFailures } : {}),
+		};
 	}
 
 	return {

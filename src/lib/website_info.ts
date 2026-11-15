@@ -7,6 +7,7 @@ import { parse } from "tldts";
 import { recursiveAbuseContact } from "../web_lib/util";
 import { fetchJson, retryWithTimeout, type FetchImplementation } from "./network/bounded_fetch";
 import { resolveRegionalDns, type RegionalDnsDependencies, type RegionalDnsResolution } from "./network/regional_dns";
+import { defaultRdapLocator, type RdapLocator, type RdapObject } from "./network/rdap_bootstrap";
 import { errorText } from "./error_text";
 
 const LOOKUP_TIMEOUT_MS = 5_000;
@@ -31,6 +32,8 @@ export type WebsiteInfoDependencies = {
 	retryAttempts?: number;
 	retryDelayMs?: number;
 	regionalDns?: false | RegionalDnsDependencies;
+	/** Finds the authoritative RDAP server. Production reads IANA's bootstrap registries. */
+	rdapLocator?: RdapLocator;
 };
 
 function lookupOptions(dependencies: WebsiteInfoDependencies, label: string) {
@@ -194,22 +197,7 @@ export type RDAPDomainInfo = {
 	registrar: (RDAPEntity & { abuse: RDAPAbuseContact | null }) | null;
 };
 
-const rdapDomainResolverUrl = "https://rdap.org/domain/";
-const rdapIpResolverUrl = "https://rdap.org/ip/";
-const rdapAutnumResolverUrl = "https://rdap.org/autnum/";
 const ripeStatNetworkInfoUrl = "https://stat.ripe.net/data/network-info/data.json?resource=";
-
-export function getDomainRdapUrl(domain: string) {
-	return `${rdapDomainResolverUrl}${encodeURIComponent(domain)}`;
-}
-
-export function getIPRdapUrl(ip: string) {
-	return `${rdapIpResolverUrl}${encodeURIComponent(ip)}`;
-}
-
-export function getAutnumRdapUrl(asn: number) {
-	return `${rdapAutnumResolverUrl}${asn}`;
-}
 
 export function getRipeStatNetworkInfoUrl(ip: string) {
 	return `${ripeStatNetworkInfoUrl}${encodeURIComponent(ip)}`;
@@ -281,7 +269,10 @@ function requestOptions(dependencies: WebsiteInfoDependencies) {
 	};
 }
 
-async function fetchRdap(url: string, dependencies: WebsiteInfoDependencies): Promise<Record<string, unknown> | undefined> {
+/** The record from its authoritative RDAP server; undefined when no server or record exists. */
+async function fetchRdap(object: RdapObject, value: string, dependencies: WebsiteInfoDependencies): Promise<Record<string, unknown> | undefined> {
+	const url = await (dependencies.rdapLocator ?? defaultRdapLocator)(object, value);
+	if (!url) return undefined;
 	return fetchJson<Record<string, unknown>>(
 		url,
 		{
@@ -349,7 +340,7 @@ function simplifyAutnum(json: Record<string, unknown>, asn: number): RDAPAutnumI
 
 export async function queryRDAPDomain(domain: string, dependencies: WebsiteInfoDependencies = {}): Promise<RDAPDomainInfo | undefined> {
 	try {
-		const json = await fetchRdap(getDomainRdapUrl(domain), dependencies);
+		const json = await fetchRdap("domain", domain, dependencies);
 		return json ? simplifyDomainRDAP(json, domain) : undefined;
 	} catch (error) {
 		console.error("Error querying RDAP for domain:", domain, error);
@@ -374,7 +365,7 @@ export async function queryOriginASNs(ip: string, dependencies: WebsiteInfoDepen
 
 export async function queryRDAPAutnum(asn: number, dependencies: WebsiteInfoDependencies = {}): Promise<RDAPAutnumInfo | undefined> {
 	try {
-		const json = await fetchRdap(getAutnumRdapUrl(asn), dependencies);
+		const json = await fetchRdap("autnum", String(asn), dependencies);
 		return json ? simplifyAutnum(json, asn) : undefined;
 	} catch (error) {
 		console.error("Error querying RDAP for ASN:", asn, error);
@@ -384,7 +375,7 @@ export async function queryRDAPAutnum(asn: number, dependencies: WebsiteInfoDepe
 
 export async function queryRDAPIP(ip: string, dependencies: WebsiteInfoDependencies = {}): Promise<RDAPIPInfo | undefined> {
 	try {
-		const [json, origins] = await Promise.all([fetchRdap(getIPRdapUrl(ip), dependencies), queryOriginASNs(ip, dependencies)]);
+		const [json, origins] = await Promise.all([fetchRdap("ip", ip, dependencies), queryOriginASNs(ip, dependencies)]);
 		if (!json) return undefined;
 		const origin_asns = await Promise.all(origins.map(async (origin) => {
 			const rdap = await queryRDAPAutnum(origin.asn, dependencies);

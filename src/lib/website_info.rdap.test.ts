@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { getAutnumRdapUrl, getIPRdapUrl, getRipeStatNetworkInfoUrl, queryRDAPDomain, queryRDAPIP } from "./website_info";
+import { getRipeStatNetworkInfoUrl, queryRDAPDomain, queryRDAPIP } from "./website_info";
+import { TEST_RDAP_SERVER, testRdapLocator } from "./network/rdap_test_helpers";
 
 const xyzRdapResponse = {
 	ldhName: "kinder2026.xyz",
@@ -96,10 +97,10 @@ describe("queryRDAPDomain", () => {
 			return new Response(JSON.stringify(xyzRdapResponse), { status: 200 });
 		};
 
-		const result = await queryRDAPDomain("kinder2026.xyz", { fetch: fetchImplementation, retryAttempts: 1 });
+		const result = await queryRDAPDomain("kinder2026.xyz", { rdapLocator: testRdapLocator, fetch: fetchImplementation, retryAttempts: 1 });
 
 		expect(requests).toHaveLength(1);
-		expect(String(requests[0].input)).toBe("https://rdap.org/domain/kinder2026.xyz");
+		expect(String(requests[0].input)).toBe("https://rdap.test/domain/kinder2026.xyz");
 		expect(requests[0].init?.redirect).toBe("follow");
 		expect(new Headers(requests[0].init?.headers).get("accept")).toBe("application/rdap+json");
 		expect(result?.domain).toBe("kinder2026.xyz");
@@ -109,7 +110,7 @@ describe("queryRDAPDomain", () => {
 	test("does not fabricate a registrar report target when the registry returns an error", async () => {
 		const fetchImplementation = async () => new Response(null, { status: 404 });
 
-		await expect(queryRDAPDomain("missing.xyz", { fetch: fetchImplementation, retryAttempts: 1 })).resolves.toBeUndefined();
+		await expect(queryRDAPDomain("missing.xyz", { rdapLocator: testRdapLocator, fetch: fetchImplementation, retryAttempts: 1 })).resolves.toBeUndefined();
 	});
 });
 
@@ -120,21 +121,21 @@ describe("queryRDAPIP", () => {
 		const fetchImplementation = async (input: string, init?: RequestInit) => {
 			requests.push({ input, init });
 			switch (input) {
-				case getIPRdapUrl(ip):
+				case `${TEST_RDAP_SERVER}ip/${ip}`:
 					return new Response(JSON.stringify(cognetcloudIpRdapResponse), { status: 200 });
 				case getRipeStatNetworkInfoUrl(ip):
 					return new Response(JSON.stringify({ data: { prefix: "154.201.78.0/23", asns: ["AS402506"] } }), { status: 200 });
-				case getAutnumRdapUrl(402506):
+				case `${TEST_RDAP_SERVER}autnum/402506`:
 					return new Response(JSON.stringify(as402506RdapResponse), { status: 200 });
 				default:
 					throw new Error(`Unexpected request: ${input}`);
 			}
 		};
 
-		const result = await queryRDAPIP(ip, { fetch: fetchImplementation, retryAttempts: 1 });
+		const result = await queryRDAPIP(ip, { rdapLocator: testRdapLocator, fetch: fetchImplementation, retryAttempts: 1 });
 
 		expect(requests.map((request) => request.input).sort()).toEqual(
-			[getIPRdapUrl(ip), getRipeStatNetworkInfoUrl(ip), getAutnumRdapUrl(402506)].sort()
+			[`${TEST_RDAP_SERVER}ip/${ip}`, getRipeStatNetworkInfoUrl(ip), `${TEST_RDAP_SERVER}autnum/402506`].sort()
 		);
 		expect(result?.abuse).toBeNull();
 		expect(result?.origin_asns).toEqual([
@@ -154,12 +155,12 @@ describe("queryRDAPIP", () => {
 	test("keeps the IP RDAP result when BGP-origin lookup is unavailable", async () => {
 		const ip = "154.201.78.249";
 		const fetchImplementation = async (input: string) => {
-			if (input === getIPRdapUrl(ip)) return new Response(JSON.stringify(cognetcloudIpRdapResponse), { status: 200 });
+			if (input === `${TEST_RDAP_SERVER}ip/${ip}`) return new Response(JSON.stringify(cognetcloudIpRdapResponse), { status: 200 });
 			if (input === getRipeStatNetworkInfoUrl(ip)) return new Response(null, { status: 503 });
 			throw new Error(`Unexpected request: ${input}`);
 		};
 
-		const result = await queryRDAPIP(ip, { fetch: fetchImplementation, retryAttempts: 1 });
+		const result = await queryRDAPIP(ip, { rdapLocator: testRdapLocator, fetch: fetchImplementation, retryAttempts: 1 });
 
 		expect(result?.ip).toBe(ip);
 		expect(result?.origin_asns).toEqual([]);
