@@ -43,12 +43,13 @@ describe("the site visit task", () => {
 		expect(prompt).toContain("Do not authenticate to a real service, approve a real login or second factor, grant browser permissions, install extensions");
 		expect(prompt).toContain("when it asks to be opened on a phone instead (set asksForPhone)");
 		expect(prompt).toContain("when the site is an ordinary site with nothing to submit or download");
+		expect(prompt).toContain("The visit has a time limit of about 20 minutes.");
 	});
 
 	test("refuses a URL with credentials or another scheme, and bounds the step limit", () => {
 		expect(() => buildSiteVisitTask("https://user:pass@phish.example/", canaries, 80)).toThrow("credential-free HTTP URL");
 		expect(() => buildSiteVisitTask("file:///etc/passwd", canaries, 80)).toThrow("credential-free HTTP URL");
-		expect(visitMaxSteps(undefined)).toBe(80);
+		expect(visitMaxSteps(undefined)).toBe(150);
 		expect(visitMaxSteps(" 40 ")).toBe(40);
 		expect(() => visitMaxSteps("0")).toThrow("from 1 to 200");
 		expect(() => visitMaxSteps("12abc")).toThrow("whole number");
