@@ -330,6 +330,8 @@ export type WebsiteArchiveDependencies = {
 	renderSettleMs?: number;
 	/** Test seam for the bounded wait on a captcha widget beside a submitted field. */
 	humanCheckMs?: number;
+	/** Test seam for how long one screenshot may take before the page is captured without one. */
+	screenshotTimeoutMs?: number;
 	/** Test seams for a visit: its budget, how often it looks at the page, and how long a changed page must stay the same. */
 	visitBudgetMs?: number;
 	visitPollMs?: number;
@@ -738,10 +740,45 @@ export async function isBlankScreenshot(png: Uint8Array): Promise<boolean> {
  * the document shows text but the image is blank, wait for the next frames to
  * paint and capture again; a page that is truly empty stays blank.
  */
-async function capturePaintedScreenshot(page: Page): Promise<Uint8Array> {
-	const capture = () => page.screenshot({ fullPage: true, captureBeyondViewport: true, type: "png" });
+/**
+ * A page that cannot be pictured: Chromium refuses a document with no
+ * laid-out content ("Cannot take screenshot with 0 width"), or never answers
+ * for one that stopped producing frames (a redirect script whose target
+ * answered 204 No Content, production case 380167497774534682: full-page,
+ * viewport and raw CDP screenshots all hung while its layout was 1920×963).
+ * That is the page, not a broken browser: it is captured without a
+ * screenshot, and its MHTML and text remain the evidence.
+ */
+const UNPICTURABLE_PAGE = /Cannot take screenshot with 0 (?:width|height)/i;
+/** How long one screenshot may take before the page counts as one that cannot be pictured. */
+const SCREENSHOT_TIMEOUT_MS = 20_000;
+
+class ScreenshotTimeoutError extends Error {}
+
+async function capturePaintedScreenshot(page: Page, timeoutMs = SCREENSHOT_TIMEOUT_MS): Promise<Uint8Array | undefined> {
+	const capture = async (): Promise<Uint8Array | undefined> => {
+		const shot = page.screenshot({ fullPage: true, captureBeyondViewport: true, type: "png" });
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			return await Promise.race([shot, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ScreenshotTimeoutError()), timeoutMs); })]);
+		} catch (error) {
+			if (error instanceof ScreenshotTimeoutError) {
+				// The hung call may still settle later; nobody is waiting for it.
+				void shot.catch(() => undefined);
+				console.warn(`Screenshot of ${page.url()} did not answer within ${timeoutMs / 1000}s; captured without one.`);
+				return undefined;
+			}
+			if (UNPICTURABLE_PAGE.test(errorText(error))) {
+				console.warn(`Screenshot of ${page.url()} refused (${errorText(error)}); captured without one.`);
+				return undefined;
+			}
+			throw error;
+		} finally {
+			clearTimeout(timer);
+		}
+	};
 	let screenshot = await capture();
-	for (let attempt = 1; attempt < SCREENSHOT_PAINT_ATTEMPTS && await isBlankScreenshot(screenshot); attempt++) {
+	for (let attempt = 1; screenshot && attempt < SCREENSHOT_PAINT_ATTEMPTS && await isBlankScreenshot(screenshot); attempt++) {
 		const showsText = await page.evaluate(() => (document.body?.innerText ?? "").trim().length > 0).catch(() => false);
 		if (!showsText) break;
 		await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))).catch(() => undefined);
@@ -851,7 +888,7 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 		const snapshot = async (hopsTo: (capturedDocumentUrl: string) => WebsiteNavigationHop[]): Promise<WebsiteArchiveResult> => {
 			const documentUrl = documents.at(-1)?.url() ?? loadedUrl;
 			const screenshotUrl = documentAddress(page.url(), documentUrl);
-			const screenshotBytes = await capturePaintedScreenshot(page);
+			const screenshotBytes = await capturePaintedScreenshot(page, dependencies.screenshotTimeoutMs);
 			const cdp = await page.target().createCDPSession();
 			const resolvedMhtml = Buffer.from((await cdp.send("Page.captureSnapshot", { format: "mhtml" })).data, "utf-8");
 			const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? documentAddress(page.url(), documentUrl) ?? page.url();
@@ -860,7 +897,7 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 			return {
 				...capturedDocument,
 				route: FABRIC_EGRESS_LABEL[egress],
-				screenshotPng: screenshotUrl === capturedDocumentUrl ? Buffer.from(screenshotBytes) : undefined,
+				screenshotPng: screenshotBytes && screenshotUrl === capturedDocumentUrl ? Buffer.from(screenshotBytes) : undefined,
 				kitResources: await kitResources.settled(),
 				...(frames.length ? { hiddenFrames: frames } : {}),
 				...(device !== "desktop" ? { device } : {}),

@@ -172,7 +172,8 @@ function archiveBrowserFixture(options: {
 	networkIdle?: (wait: { timeout?: number; render: (body: string) => void }) => Promise<void>;
 	pageUrl?: string;
 	/** Screenshots served in order; the last repeats. Defaults to a painted page. */
-	screenshots?: Buffer[];
+	/** What each screenshot answers: an image, an error it throws, or "hang" for one that never answers. */
+	screenshots?: Array<Buffer | Error | "hang">;
 } = {}) {
 	const eventNames: string[] = [];
 	const navigationCalls: Array<{ url: string; egress: FabricEgress; waitUntil?: string; timeout?: number; referer?: string }> = [];
@@ -224,7 +225,10 @@ function archiveBrowserFixture(options: {
 			},
 			screenshot: async () => {
 				const shots = options.screenshots ?? [PAINTED_PNG];
-				return shots[Math.min(screenshotCount++, shots.length - 1)]!;
+				const shot = shots[Math.min(screenshotCount++, shots.length - 1)]!;
+				if (shot === "hang") return new Promise<Buffer>(() => undefined);
+				if (shot instanceof Error) throw shot;
+				return shot;
 			},
 			target: () => ({
 				createCDPSession: async () => ({
@@ -375,6 +379,26 @@ test("a blank screenshot of a page that shows text is taken again once the page 
 	expect(fixture.screenshotCount).toBe(3);
 	expect(archive.screenshotPng?.equals(PAINTED_PNG)).toBeTrue();
 	expect(archive.route).toBe("Tor exit");
+});
+
+test("a page that cannot be pictured is captured without a screenshot, not failed as a browser outage", async () => {
+	// Production case 380167497774534682: a redirect script whose target answered 204 left a
+	// document whose screenshots Chromium refused ("0 width") or never answered.
+	const refused = archiveBrowserFixture({ screenshots: [new Error("Protocol error (Page.captureScreenshot): Cannot take screenshot with 0 width.")] });
+	const refusedArchive = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: refused.getBrowser });
+	expect(refusedArchive.screenshotPng).toBeUndefined();
+	expect(refusedArchive.mhtml.toString()).toContain("Captured page text");
+
+	const hung = archiveBrowserFixture({ screenshots: ["hang"] });
+	const started = Date.now();
+	const hungArchive = await archiveWebsite({ url: "https://example.test/" }, { ...fast, screenshotTimeoutMs: 50, getBrowser: hung.getBrowser });
+	expect(hungArchive.screenshotPng).toBeUndefined();
+	expect(hungArchive.text.toString()).toContain("Captured page text");
+	expect(Date.now() - started).toBeLessThan(5_000);
+
+	// Any other screenshot failure is still the browser's, and fails the capture.
+	const closed = archiveBrowserFixture({ screenshots: [new Error("Protocol error (Page.captureScreenshot): Target closed")] });
+	await expect(archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: closed.getBrowser })).rejects.toThrow("Target closed");
 });
 
 test("a page that stays blank is captured blank after a bounded number of attempts", async () => {
