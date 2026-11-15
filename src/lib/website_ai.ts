@@ -184,7 +184,7 @@ export async function classifyWebsiteCapture(archive: WebsiteEvidenceArchive, cl
 	});
 	const output = (response as { output_text?: string }).output_text;
 	if (!output) throw new Error("Website classification response had no output.");
-	return validateWebsiteSiteClassification(JSON.parse(output), archive.text.toString("utf-8"), archive.html.toString("utf-8"), archive.hiddenFrames, archive.offeredDownload);
+	return validateWebsiteSiteClassification(JSON.parse(output), archive.text.toString("utf-8"), archive.html.toString("utf-8"), archive.hiddenFrames, archive.offeredDownload, archive.url);
 }
 
 async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigationHop, archive: WebsiteEvidenceArchive, dependencies: WebsiteAnalysisDependencies) {
@@ -199,7 +199,7 @@ async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigation
 		},
 	}, { client: dependencies.analysisClient });
 	return {
-		classification: validateWebsiteSiteClassification(result.output_parsed, archive.text.toString("utf-8"), archive.html.toString("utf-8"), archive.hiddenFrames, archive.offeredDownload),
+		classification: validateWebsiteSiteClassification(result.output_parsed, archive.text.toString("utf-8"), archive.html.toString("utf-8"), archive.hiddenFrames, archive.offeredDownload, hop.url),
 		mobileHandoff: websiteMobileHandoff(result.output_parsed),
 	};
 }
@@ -660,6 +660,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 				finding,
 				pasteCommands: commands,
 				...(finding.finding === "malware" && archive.offeredDownload ? { offeredDownload: archive.offeredDownload } : {}),
+				...(capturedClassification.impersonatedBrand ? { legalBrandUrl: capturedClassification.impersonatedBrand.officialUrl } : {}),
 				...(capturedClassification.hiddenFrame ? { hiddenFrame: classifiedHiddenFrame(capturedClassification, archive.hiddenFrames)! } : {}),
 				...(visited.backends.length ? { visitCapture: { canaries: visited.canaries, requests: visited.requests, backends: visited.backends } } : {}),
 			});

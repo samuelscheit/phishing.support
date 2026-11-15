@@ -57,6 +57,8 @@ export type ConfirmedWebsiteAbuse = SubmissionReportBase & {
 	 * own host by the investigation.
 	 */
 	visitCapture?: { canaries: ExfiltrationCanaries; requests: CapturedNetworkRequest[]; backends: ExfiltrationBackend[] };
+	/** The impersonated brand's own official site; providers want the real brand linked. */
+	legalBrandUrl?: string;
 };
 
 export type ConfirmedEmailPhishing = SubmissionReportBase & {
@@ -97,6 +99,7 @@ function submissionRequest(params: {
 	targets: NormalizedAbuseTarget[];
 	evidence: DecodedEvidence[];
 	source: Record<string, unknown>;
+	legalBrandUrl?: string;
 }): ValidatedAbuseReportRequest {
 	const observedUrls = params.targets
 		.filter((item) => item.observedUrls.length > 0)
@@ -107,11 +110,13 @@ function submissionRequest(params: {
 		allegationCategory: params.allegationCategory ?? "phishing",
 		description: params.description,
 		observedUrls,
+		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 		evidence: params.evidence,
 		requestPayloadHash: hashStableJson({
 			submissionId: params.submissionId.toString(),
 			targets: params.targets.map(({ normalizedTarget, targetType, observedUrls: urls }) => ({ normalizedTarget, targetType, urls })),
 			description: params.description,
+			...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 			evidence: params.evidence.map(({ filename, mimeType, sha256 }) => ({ filename, mimeType, sha256 })),
 		}),
 	};
@@ -152,6 +157,7 @@ export async function buildWebsiteAbuseRequest(params: ConfirmedWebsiteAbuse): P
 			...(params.offeredDownload ? [offeredDownloadEvidence(params.offeredDownload)] : []),
 		],
 		source: { kind: "website", urls: params.urls },
+		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 	});
 }
 

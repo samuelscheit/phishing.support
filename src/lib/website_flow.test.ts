@@ -103,7 +103,7 @@ function kitModel(answers: ClassifierAnswers, calls: Array<{ kind: "classificati
 				const classification = Boolean(options.text);
 				const url = classification
 					? prompt.match(/Exact captured target URL: (\S+?)\\n/)![1]!
-					: prompt.match(/The page content below belongs only to this final URL: (\S+?)\\n/)![1]!;
+					: prompt.match(/The analyzed page is (\S+?):\\n/)![1]!;
 				calls.push({ kind: classification ? "classification" : "analysis", url });
 				const text = classification ? JSON.stringify(answers[url]) : `The page at ${url} asks for a MetaMask recovery phrase.`;
 				call++;
@@ -190,7 +190,7 @@ PAGES[SIGN_IN] = `<html lang="en"><head><title>Sign in to your account</title></
 
 const GATE_ANSWERS: ClassifierAnswers = {
 	[GATE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false },
-	[SIGN_IN]: { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Enter password", collectionFieldRefs: ["f1"], hiddenFrameRef: "", mobileHandoff: false },
+	[SIGN_IN]: { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Enter password", collectionFieldRefs: ["f1"], hiddenFrameRef: "", mobileHandoff: false, impersonatedBrand: "Microsoft", brandOfficialUrl: "https://www.microsoft.com" },
 };
 
 
@@ -327,6 +327,10 @@ describe("a visit through a multi-page kit", () => {
 		const report = await AbuseRepository.getReportForSubmission(id);
 		expect(report!.description).toContain(`Visitors reach the page through the site's own earlier pages: ${GATE}, where our visit entered a synthetic email address and submitted.`);
 		expect(report!.description).toContain(`In our visit with synthetic data, the site sent the entered password to ${bot} (POST).`);
+		// Providers want the real brand named and linked.
+		expect(report!.description).toContain("The page impersonates Microsoft and asks visitors for a password");
+		expect(report!.description).toContain("Microsoft's official website is https://www.microsoft.com/; the reported site is not part of it.");
+		expect(report!.legalBrandUrl).toBe("https://www.microsoft.com/");
 		// The data drop is reported at its own host by the investigation, from the visit's own recording.
 		const job = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, report!.id)).get()!;
 		expect(readInvestigationJobPayload(job.payload).dataDrops).toEqual([expect.objectContaining({ kind: "telegram_bot", key: "telegram-token:8123456789:AAH-kit-token", matchedCanaries: ["marker", "password"] })]);

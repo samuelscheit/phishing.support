@@ -191,7 +191,7 @@ test("classification covers lures and malware and lists fields beyond the HTML e
 			hiddenFrameRef: { type: "string" },
 			mobileHandoff: { type: "boolean" },
 		},
-		required: ["finding", "phishingBasis", "evidenceQuote", "collectionFieldRefs", "hiddenFrameRef", "mobileHandoff"],
+		required: ["finding", "phishingBasis", "evidenceQuote", "collectionFieldRefs", "hiddenFrameRef", "mobileHandoff", "impersonatedBrand", "brandOfficialUrl"],
 	});
 });
 
@@ -535,4 +535,28 @@ test("a malware claim needs a verbatim quote and phishing never carries a malwar
 	});
 	// A malware finding names no phishing basis even if the model sends one.
 	expect(classify(paneo, { finding: "malware", phishingBasis: "credential_theft", evidenceQuote: "Install Paneo" })).toEqual({ finding: "malware", evidenceQuote: "Install Paneo" });
+});
+
+test("a phishing finding names the brand it imitates and that brand's own site, never the reported one", () => {
+	const page = "Sign in to your Microsoft account\nEnter password";
+	const html = "<html><body><h1>Sign in to your Microsoft account</h1><input type=\"password\"></body></html>";
+	const answer = (brand: string, url: string) => validateWebsiteSiteClassification(
+		{ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Enter password", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false, impersonatedBrand: brand, brandOfficialUrl: url },
+		page, html, [], undefined, "https://microsoft-login.kit-host.example.com/signin",
+	);
+	expect(answer("  Microsoft ", "https://www.microsoft.com").impersonatedBrand).toEqual({ name: "Microsoft", officialUrl: "https://www.microsoft.com/" });
+	// The reported site is never passed off as the official one; neither is plain http, an IP, or an overlong name.
+	expect(answer("Microsoft", "https://kit-host.example.com/").impersonatedBrand).toBeUndefined();
+	expect(answer("Microsoft", "http://www.microsoft.com").impersonatedBrand).toBeUndefined();
+	expect(answer("Microsoft", "https://203.0.113.7/").impersonatedBrand).toBeUndefined();
+	expect(answer("M".repeat(81), "https://www.microsoft.com").impersonatedBrand).toBeUndefined();
+	// No brand, or an older answer without the fields, keeps the finding itself.
+	const plain = validateWebsiteSiteClassification({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Enter password", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false }, page, html);
+	expect(plain).toEqual({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Enter password" });
+
+	expect(buildWebsiteReportEvidence({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Enter password", impersonatedBrand: { name: "Microsoft", officialUrl: "https://www.microsoft.com/" } }).split("\n").slice(0, 2)).toEqual([
+		"The page impersonates Microsoft and asks visitors for a password, sign-in details, a verification code, or identity details, or leads them to a step that does.",
+		"Microsoft's official website is https://www.microsoft.com/; the reported site is not part of it.",
+	]);
+	expect(WEBSITE_CLASSIFICATION_FORMAT.schema).toMatchObject({ required: expect.arrayContaining(["impersonatedBrand", "brandOfficialUrl"]) });
 });

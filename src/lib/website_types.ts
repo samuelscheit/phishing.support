@@ -292,6 +292,8 @@ export type WebsiteSiteClassification = {
 	 * from, instead of the page text.
 	 */
 	hiddenFrame?: { ref: string; url: string };
+	/** For phishing: the brand the page imitates and that brand's own official site. */
+	impersonatedBrand?: { name: string; officialUrl: string };
 	/**
 	 * Set for malware proven by the file the page offers: the quote comes from
 	 * the code of that file, instead of the page text.
