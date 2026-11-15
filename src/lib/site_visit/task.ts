@@ -19,6 +19,21 @@ export function visitMaxSteps(value: string | undefined): number {
 	return steps;
 }
 
+/**
+ * The Skyvern engine that walks the site. `skyvern-3.0` (Task V3) keeps one
+ * conversation for the whole visit and appends only each new tool result,
+ * instead of planning, scraping, acting and verifying from scratch on every
+ * step as `skyvern-2.0` does.
+ */
+export type VisitEngine = "skyvern-3.0" | "skyvern-2.0";
+
+export function visitEngine(value: string | undefined): VisitEngine {
+	const trimmed = value?.trim();
+	if (!trimmed) return "skyvern-3.0";
+	if (trimmed !== "skyvern-3.0" && trimmed !== "skyvern-2.0") throw new Error("SITE_VISIT_SKYVERN_ENGINE must be skyvern-3.0 or skyvern-2.0.");
+	return trimmed;
+}
+
 /** What the agent reports when it stops; the recording, not this, is the evidence. */
 export type VisitAgentReport = {
 	submissionsAttempted: number;
@@ -40,6 +55,7 @@ export function buildSiteVisitTask(
 	pageUrl: string,
 	canaries: ExfiltrationCanaries,
 	maxSteps: number = visitMaxSteps(process.env.SITE_VISIT_SKYVERN_MAX_STEPS),
+	engine: VisitEngine = visitEngine(process.env.SITE_VISIT_SKYVERN_ENGINE),
 ): SkyvernTaskPayload {
 	const url = new URL(pageUrl);
 	if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("A site visit needs a credential-free HTTP URL.");
@@ -82,8 +98,9 @@ export function buildSiteVisitTask(
 			required: ["submissionsAttempted", "downloadsStarted", "asksForPhone", "stoppedReason"],
 			additionalProperties: false,
 		},
-		engine: "skyvern-2.0",
-		include_action_history_in_verification: true,
+		engine,
+		// Task V3 has no separate verification step; its conversation already holds the history.
+		...(engine === "skyvern-2.0" ? { include_action_history_in_verification: true } : {}),
 	};
 }
 

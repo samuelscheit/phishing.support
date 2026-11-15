@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ExfiltrationCanaries } from "../exfiltration/types";
-import { buildSiteVisitTask, MAX_FORM_SUBMISSIONS, visitAgentReport, visitMaxSteps } from "./task";
+import { buildSiteVisitTask, MAX_FORM_SUBMISSIONS, visitAgentReport, visitEngine, visitMaxSteps } from "./task";
 
 const canaries: ExfiltrationCanaries = {
 	marker: "psprobe_0123456789abcdef",
@@ -53,6 +53,16 @@ describe("the site visit task", () => {
 		expect(visitMaxSteps(" 40 ")).toBe(40);
 		expect(() => visitMaxSteps("0")).toThrow("from 1 to 200");
 		expect(() => visitMaxSteps("12abc")).toThrow("whole number");
+	});
+
+	test("runs on Task V3 by default, which keeps one conversation for the visit; skyvern-2.0 can still be chosen", () => {
+		expect(visitEngine(undefined)).toBe("skyvern-3.0");
+		expect(visitEngine(" skyvern-2.0 ")).toBe("skyvern-2.0");
+		expect(() => visitEngine("openai-cua")).toThrow("SITE_VISIT_SKYVERN_ENGINE must be skyvern-3.0 or skyvern-2.0.");
+		const v3 = buildSiteVisitTask("https://phish.example/", canaries, 150, "skyvern-3.0");
+		expect(v3).toMatchObject({ engine: "skyvern-3.0", max_steps: 150 });
+		expect(v3.include_action_history_in_verification).toBeUndefined();
+		expect(buildSiteVisitTask("https://phish.example/", canaries, 150, "skyvern-2.0")).toMatchObject({ engine: "skyvern-2.0", include_action_history_in_verification: true });
 	});
 
 	test("reads the agent's report, whether Skyvern wraps it or not", () => {

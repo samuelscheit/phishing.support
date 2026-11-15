@@ -89,6 +89,8 @@ export class AbuseSkyvernAdapter {
 		const request = {
 			body: {
 				...payload,
+				// The SDK's engine list predates `skyvern-3.0`; the server accepts it and runs Task V3.
+				engine: payload.engine as SdkRunTaskRequest["body"]["engine"],
 				...(binding ? { browser_address: binding.browserAddress } : {}),
 			},
 		} satisfies SdkRunTaskRequest;

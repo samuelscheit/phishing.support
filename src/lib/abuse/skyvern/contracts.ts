@@ -33,7 +33,8 @@ export type SkyvernTaskPayload = {
 	data_extraction_schema: Record<string, unknown>;
 	webhook_url?: string;
 	totp_identifier?: string;
-	engine?: SdkRunTaskRequest["body"]["engine"];
+	/** `skyvern-3.0` (Task V3, one persistent tool-calling conversation) is newer than the SDK's engine list. */
+	engine?: SdkRunTaskRequest["body"]["engine"] | "skyvern-3.0";
 	include_action_history_in_verification?: boolean;
 };
 
