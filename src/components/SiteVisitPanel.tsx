@@ -134,10 +134,10 @@ export function SiteVisitPanel({ submissionId, running, pages, visit, offeredDow
 							// eslint-disable-next-line @next/next/no-img-element
 							<img src={`data:image/jpeg;base64,${frame!.jpeg}`} alt="The visited site, live" className="absolute inset-0 h-full w-full object-contain object-top" />
 						) : page?.screenshotId ? (
-							// A page screenshot is the whole page: it fills the frame from its top, and opens in full.
+							// A page screenshot is the whole page: it fills the frame's width from its top, and opens in full.
 							<a href={`/api/artifacts/${page.screenshotId}`} target="_blank" rel="noreferrer" className="absolute inset-0 overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" title="Open the full screenshot">
 								{/* eslint-disable-next-line @next/next/no-img-element */}
-								<img src={`/api/artifacts/${page.screenshotId}`} alt={`Page ${shown + 1} of the visit: ${page.url}`} className="h-full w-full object-cover object-top" />
+								<img src={`/api/artifacts/${page.screenshotId}`} alt={`Page ${shown + 1} of the visit: ${page.url}`} className="block h-auto w-full" />
 							</a>
 						) : (
 							<div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">{running ? "Waiting for the browser…" : "No screenshot of this page."}</div>

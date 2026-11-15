@@ -99,14 +99,10 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 			? websiteSiteName(submission.data.website?.url)
 			: (submission?.data.email?.subject as string | undefined) || "Untitled Submission";
 
-	// The analyzed page is the last one the capture reached through the site's
-	// own links. Its stamped copy shows the URL and capture time; a capture whose
-	// screenshot could not be stamped only has the raw one.
+	// The analyzed page is the last one the visit reached; its archive is the MHTML of that step.
 	const submissionArtifacts = submission?.artifacts ?? [];
 	const analyzedFiles = websiteCaptureFileNames(analyzedCaptureStep(websiteNavigation));
-	const screenshot = submission?.kind === "website"
-		? latestArtifactNamed(submissionArtifacts, analyzedFiles.stampedScreenshot) ?? latestArtifactNamed(submissionArtifacts, analyzedFiles.screenshot)
-		: latestArtifactNamed(submissionArtifacts, "mail.png");
+	const emailScreenshot = submission?.kind === "email" ? latestArtifactNamed(submissionArtifacts, "mail.png") : undefined;
 	const websiteMhtml = latestArtifactNamed(submissionArtifacts, analyzedFiles.mhtml);
 	const emailEml = submission?.artifacts?.find((a) => {
 		const name = a.name?.toLowerCase();
@@ -124,12 +120,14 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 			reportCount === 0 &&
 			(submission.data.kind === "website" ? Boolean(submission.data.website?.url) : Boolean(emailEml?.id)),
 		);
-	const artifacts = submission?.artifacts.filter((x) => x !== screenshot) || [];
+	// Only the email image shown beside the facts is left out of the files; a website's screenshots are files.
+	const artifacts = submission?.artifacts.filter((x) => x !== emailScreenshot) || [];
 	const websiteArchiveDate = formatUtcDateTime(websiteMhtml?.archivedAt ?? websiteMhtml?.createdAt);
 	// Each page of the visit with its screenshot: the pages it moved on from, then the analyzed one.
 	const visitPages: SiteVisitPage[] = [...websiteNavigation.filter(isFlowStepHop), ...websiteNavigation.filter((hop) => hop.contentCaptured)].map((hop, step) => {
 		const names = websiteCaptureFileNames(step);
-		const shot = latestArtifactNamed(submissionArtifacts, names.stampedScreenshot) ?? latestArtifactNamed(submissionArtifacts, names.screenshot);
+		// The plain screenshot: the stamped copy's banner belongs to the evidence files, not the viewer.
+		const shot = latestArtifactNamed(submissionArtifacts, names.screenshot) ?? latestArtifactNamed(submissionArtifacts, names.stampedScreenshot);
 		return { url: hop.url, ...(shot ? { screenshotId: String(shot.id) } : {}) };
 	});
 
@@ -263,8 +261,9 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 				</div>
 			</div>
 
-			<div className="grid gap-6 items-stretch pt-4 md:grid-cols-12">
-				<div className="col-span-8 h-full flex flex-col ">
+			{/* A website's pages are shown by its site visit; only an email keeps the rendered message beside the facts. */}
+			<div className={cn("grid gap-6 items-stretch pt-4", emailScreenshot ? "md:grid-cols-12" : "")}>
+				<div className={cn("h-full flex flex-col", emailScreenshot ? "md:col-span-8" : "")}>
 					<div className="pb-4">
 						<div className="flex justify-between items-start gap-0">
 							<CardTitle className="flex flex-row items-center gap-2 min-w-0">
@@ -491,28 +490,16 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 					</div>
 				</div>
 
-				<div className="col-span-4 flex">
-					{screenshot ? (
+				{emailScreenshot ? (
+					<div className="md:col-span-4 flex">
 						<Card className="overflow-hidden h-full w-full border-none shadow-none">
-							<div className="bg-muted overflow-hidden h-full flex relative">
-								<img
-									src={`/api/artifacts/${screenshot.id}`}
-									alt="website.png"
-									className="absolute object-contain w-full h-full"
-								/>
+							<div className="bg-muted overflow-hidden h-full min-h-80 flex relative">
+								{/* eslint-disable-next-line @next/next/no-img-element */}
+								<img src={`/api/artifacts/${emailScreenshot.id}`} alt="The reported email, rendered" className="absolute object-contain w-full h-full" />
 							</div>
 						</Card>
-					) : isFailed && submission.info ? (
-						<Card className="h-full w-full border-none shadow-none">
-							<CardHeader>
-								<CardTitle>Error</CardTitle>
-							</CardHeader>
-							<CardContent>
-								<div className="text-sm whitespace-pre-wrap">{submission.info}</div>
-							</CardContent>
-						</Card>
-					) : null}
-				</div>
+					</div>
+				) : null}
 			</div>
 
 			<Tabs defaultValue={defaultTab} className="w-full">
