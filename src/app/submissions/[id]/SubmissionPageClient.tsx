@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { AnalysisLogs } from "@/components/AnalysisLogs";
 import { SubmissionStatus } from "@/components/SubmissionStatus";
 import { ExternalLinkConfirm } from "@/components/ExternalLinkConfirm";
-import { UrlParts } from "@/components/UrlParts";
 import { WhoisTab } from "@/components/WhoisTab";
 import { ReporterMeta } from "@/components/ReporterMeta";
 import { SubmissionReports } from "@/components/SubmissionReports";
@@ -20,7 +19,7 @@ import { formatUtcDateTime } from "@/lib/date_time";
 import { cn } from "../../../web_lib/util";
 import { selectDisplayAnalysisRuns } from "@/lib/analysis_run_view";
 import { CANARY_FIELD_LABEL, describeDataEntryField, isFlowStepHop, WEBSITE_DEVICE_LABEL, type WebsitePhishingBasis } from "@/lib/website_types";
-import { SiteVisitPanel, type SiteVisitPage } from "@/components/SiteVisitPanel";
+import { SiteVisitBrowser, SiteVisitTimeline, useLiveVisit, type SiteVisitPage } from "@/components/SiteVisitPanel";
 import { websiteSiteName } from "@/lib/website_site";
 import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website_capture_files";
 
@@ -36,6 +35,14 @@ function formatArtifactSize(value: number | bigint | null | undefined) {
 	const bytes = typeof value === "bigint" ? Number(value) : value;
 	if (!Number.isSafeInteger(bytes) || bytes < 0) return "Unknown size";
 	return (bytes / 1024).toFixed(1) + " KB";
+}
+
+function hostOfUrl(url: string): string {
+	try {
+		return new URL(url).host;
+	} catch {
+		return url;
+	}
 }
 
 function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "kind">) {
@@ -76,7 +83,16 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	// never says zero while the tab shows its queued state.
 	const reportCount = reports.reduce((count, report) => count + Math.max(1, report.routes.length), 0);
 
-	const defaultTab = "runs";
+	const [tab, setTab] = useState("runs");
+	const liveVisit = useLiveVisit(id, ["new", "queued", "running"].includes(statusKey) && submission?.kind === "website");
+	// The page the finding rests on: the one whose content was captured and analyzed.
+	const analyzedHop = websiteNavigation.find((hop) => hop.contentCaptured);
+	const analyzedAssessment = analyzedHop ? websiteAssessmentByHop.get(analyzedHop.index) : undefined;
+	const verdictLabel = analyzedAssessment?.finding === "phishing"
+		? analyzedAssessment.phishingBasis ? `Phishing: ${PHISHING_BASIS_LABELS[analyzedAssessment.phishingBasis]}` : "Phishing"
+		: analyzedAssessment?.finding === "malware"
+			? analyzedAssessment.hiddenFrame ? "Malware: drive-by exploit in a hidden frame" : analyzedAssessment.offeredDownload ? "Malware: the file it offers" : "Malware distribution"
+			: undefined;
 
 	const retryAnalysis = async () => {
 		setRetrying(true);
@@ -247,143 +263,197 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	if (loading && !submission) return <div className="p-10 text-center">Loading...</div>;
 	if (!submission) return <div className="p-10 text-center">Submission not found</div>;
 
+	const openSite = submission.data.kind === "website" && submission.data.website?.url ? (
+		<ExternalLinkConfirm
+			href={submission.data.website.url}
+			trigger={
+				<button type="button" className="shrink-0 rounded-sm p-1 text-muted-foreground hover:text-primary" aria-label="Open the submitted URL" title="Open the submitted URL">
+					<ExternalLink className="h-4 w-4" />
+				</button>
+			}
+		/>
+	) : null;
+
 	return (
-		<div className="container mx-auto py-10 px-4 space-y-6">
-			<div className="flex items-center justify-between">
-				<div className="space-y-1">
-					<div className="flex items-center gap-2">
-						<Link href="/" className="text-sm text-muted-foreground hover:underline">
-							Submissions
-						</Link>
-						<span className="text-muted-foreground">/</span>
-						<span className="text-sm font-medium">{targetName}</span>
+		<div className="container mx-auto max-w-7xl py-8 px-4 space-y-6">
+			<header className="space-y-3">
+				<nav className="flex items-center gap-2 text-sm" aria-label="Breadcrumb">
+					<Link href="/" className="text-muted-foreground hover:underline">Submissions</Link>
+					<span className="text-muted-foreground">/</span>
+					<span className="truncate font-medium">{targetName}</span>
+				</nav>
+				<div className="flex flex-wrap items-start justify-between gap-3">
+					<div className="min-w-0 space-y-1">
+						<h1 className="flex items-center gap-2 text-xl font-semibold leading-tight tracking-tight wrap-break-word sm:text-2xl">
+							{submission.kind === "website" ? <Globe className="h-6 w-6 shrink-0 text-muted-foreground" /> : <Mail className="h-6 w-6 shrink-0 text-muted-foreground" />}
+							<span className="min-w-0">{targetName}</span>
+						</h1>
+						<ReporterMeta reporterCountry={submission.reporterCountry} reporterHeaders={submission.reporterHeaders} />
+					</div>
+					<div className="flex shrink-0 items-center gap-2">
+						<Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
+							{formatUtcDateTime(submission.createdAt) ?? "Unknown time"}
+						</Badge>
+						<SubmissionStatus status={submission.status} />
 					</div>
 				</div>
-			</div>
+			</header>
 
-			{/* A website's pages are shown by its site visit; only an email keeps the rendered message beside the facts. */}
-			<div className={cn("grid gap-6 items-stretch pt-4", emailScreenshot ? "md:grid-cols-12" : "")}>
-				<div className={cn("h-full flex flex-col", emailScreenshot ? "md:col-span-8" : "")}>
-					<div className="pb-4">
-						<div className="flex justify-between items-start gap-0">
-							<CardTitle className="flex flex-row items-center gap-2 min-w-0">
-								{submission.kind === "website" ? (
-									<Globe className="h-8 w-8 shrink-0" />
-								) : (
-									<Mail className="h-8 w-8 shrink-0" />
-								)}
-								<h1 className="leading-none text-xl -mt-1 wrap-break-word sm:text-2xl">{targetName}</h1>
-							</CardTitle>
-							<div className="flex flex-col items-end gap-2 shrink-0 md:flex-row">
-								<Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
-									{formatUtcDateTime(submission.createdAt) ?? "Unknown time"}
-								</Badge>
-
-								<SubmissionStatus status={submission.status} />
+			<div className="grid items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+				<div className="min-w-0 space-y-6">
+					{submission.data.kind === "website" ? (
+						<SiteVisitBrowser running={isRunning} pages={visitPages} live={liveVisit} fallbackUrl={submission.data.website?.url ?? ""} openAction={openSite} />
+					) : null}
+					{submission.data.kind === "email" && (
+						<div className="space-y-2">
+							<h4 className="text-sm font-semibold">Email</h4>
+							<div className="grid gap-3 sm:grid-cols-2">
+								<div className="rounded-lg border bg-muted/30 p-3">
+									<div className="text-xs text-muted-foreground">From</div>
+									<div className="mt-1 font-mono text-xs break-all">{submission.data.email?.from || "—"}</div>
+								</div>
+								<div className="rounded-lg border bg-muted/30 p-3">
+									<div className="text-xs text-muted-foreground">Subject</div>
+									<div className="mt-1 text-sm font-medium wrap-break-word">
+										{submission.data.email?.subject || "—"}
+									</div>
+								</div>
 							</div>
-						</div>
-						<ReporterMeta
-							reporterCountry={submission.reporterCountry}
-							reporterHeaders={submission.reporterHeaders}
-							className="mt-2"
-						/>
-					</div>
-					<div className="space-y-5 flex-1 justify-between flex-col flex">
-						{isReported ? (
-								<div className="rounded-md border border-destructive/30 bg-destructive/5 p-3">
-									<div className="flex items-center gap-2 text-xs font-semibold text-destructive">
-										<ShieldAlert className="h-4 w-4" />
-										Phishing confirmed
-									</div>
-									<div className="mt-1 text-sm font-medium">
-										Our analysis found this {submission.kind === "website" ? "site" : "email"} to be phishing and it is being reported to the responsible providers.
-									</div>
-									<div className="text-xs text-muted-foreground">Each provider&apos;s outcome is tracked in the Reports tab.</div>
+							{submission.data.email?.linkedWebsites?.length ? (
+								<div className="rounded-lg border bg-muted/30 p-3">
+									<div className="text-xs text-muted-foreground">Linked websites, each analyzed in its own case</div>
+									<ul className="mt-1 space-y-1">
+										{submission.data.email.linkedWebsites.map((link) => (
+											<li key={link.url} className="flex items-start justify-between gap-3">
+												<span className="min-w-0 font-mono text-xs break-all">{link.url}</span>
+												<Link href={`/submissions/${link.submissionId}`} className="shrink-0 text-xs font-medium text-primary hover:underline">
+													Open case
+												</Link>
+											</li>
+										))}
+									</ul>
 								</div>
 							) : null}
-
-							{isInvalidWebsite ? (
-							<div className="rounded-md border bg-muted/30 p-3">
-								<div className="text-xs font-semibold text-muted-foreground">Not reported</div>
-								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info}</div>
-							</div>
-						) : null}
-
-						{statusKey === "redirected" ? (
-							<div className="rounded-md border border-amber-200 bg-amber-50/60 p-3">
-								<div className="text-xs font-semibold text-amber-800">{websiteCloaking?.outcome === "detected" ? "Cloaks: shows scanners a different site" : "Redirects to another site"}</div>
-								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info}</div>
-								{redirectSubmissionId ? (
-									<Link href={`/submissions/${redirectSubmissionId}`} className="mt-2 inline-block text-sm font-medium text-primary hover:underline">
-										Open the case for the destination
-									</Link>
-								) : null}
-							</div>
-						) : null}
-
-						{isFailed ? (
-							<div className="rounded-md border bg-muted/30 p-3">
-								<div className="text-xs font-semibold text-muted-foreground">Failure reason</div>
-								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info || "The analysis did not complete."}</div>
-								{canRetryAnalysis ? (
-									<div className="mt-3 flex flex-wrap items-center gap-3">
-										<Button type="button" variant="outline" size="sm" disabled={retrying} onClick={retryAnalysis}>
-											{retrying ? "Retrying analysis…" : "Retry analysis"}
-										</Button>
-										<span className="text-xs text-muted-foreground">
-											{submission.kind === "website"
-												? websiteCloaking?.outcome === "unresolved"
-													? "Visits the site again, including from the residential exit; it will not create a duplicate report."
-													: "Reuses the captured website archive when available; it will not create a duplicate report."
-												: "Reuses the original email; it will not create a duplicate report."}
-										</span>
-									</div>
-								) : null}
-								{retryError ? <div className="mt-2 text-sm text-destructive">{retryError}</div> : null}
-							</div>
-						) : null}
-
-						{submission.data.kind === "website" && (
-							<div className="space-y-2">
-								<div className="flex items-center justify-between gap-3">
-									<h4 className="text-sm font-semibold">Website</h4>
-								</div>
-								<div className="flex items-start gap-2 rounded-md border bg-muted/30 p-3">
-									<div className="min-w-0 flex-1">
-										{submission.data.website?.url ? (
-											<UrlParts url={submission.data.website.url} />
+						</div>
+					)}
+					<Tabs value={tab} onValueChange={setTab} className="w-full min-w-0">
+						<TabsList className="overflow-x-auto max-w-full no-scrollbar">
+												{submission.kind === "email" ? <TabsTrigger value="email">Email</TabsTrigger> : null}
+							<TabsTrigger value="runs">Analysis</TabsTrigger>
+							{submission.kind === "website" && websiteNavigation.length > 0 ? <TabsTrigger value="navigation">Navigation</TabsTrigger> : null}
+							<TabsTrigger value="reports">Reports ({reportCount})</TabsTrigger>
+							<TabsTrigger value="artifacts">Files ({artifacts.length})</TabsTrigger>
+							{submission.kind === "website" && websiteMhtml ? <TabsTrigger value="website">Archived page</TabsTrigger> : null}
+							{submission.kind === "website" ? <TabsTrigger value="whois">WHOIS</TabsTrigger> : null}
+						</TabsList>
+						{submission.kind === "website" && websiteMhtml ? (
+							<TabsContent value="website" className="space-y-4 mt-4">
+								<Card className="overflow-hidden">
+									<CardHeader className="py-3">
+										<CardTitle className="text-sm flex flex-row items-center gap-2">
+											Archived Website
+											<div className="text-xs text-muted-foreground font-normal">
+												(from {websiteArchiveDate ?? "unknown date"})
+											</div>
+										</CardTitle>
+										<div className="break-all text-xs text-muted-foreground">
+											Captured page: {submission.data.kind === "website" ? submission.data.website.archiveUrl ?? submission.data.website.url : "unknown"}
+										</div>
+										<CardDescription className="text-xs flex flex-row gap-8">
+											<div className="text-zinc-500 font-semibold font-mono">DO NOT ENTER ANY SENSITIVE INFORMATION</div>
+										</CardDescription>
+									</CardHeader>
+									<CardContent className="p-0">
+										{websiteHtmlError ? (
+											<div className="p-4 text-sm text-muted-foreground">{websiteHtmlError}</div>
+										) : websiteHtml ? (
+											<iframe
+												title="Archived Website"
+												srcDoc={websiteHtml}
+												className="w-full h-[70vh] bg-background"
+												sandbox=""
+												referrerPolicy="no-referrer"
+											/>
 										) : (
-											<div className="font-mono text-xs">—</div>
+											<div className="p-4 text-sm text-muted-foreground">Rendering…</div>
 										)}
-									</div>
-									{submission.data.website?.url ? (
-										<ExternalLinkConfirm
-											href={submission.data.website.url}
-											trigger={
-												<button
-													type="button"
-													className="shrink-0 rounded-sm p-1 text-muted-foreground hover:text-primary"
-													aria-label="Open target URL"
-												>
-													<ExternalLink className="h-4 w-4" />
-												</button>
-											}
-										/>
-									) : null}
-								</div>
-							</div>
-						)}
-
-						{submission.data.kind === "website" ? (
-							<SiteVisitPanel submissionId={String(submission.id)} running={isRunning} pages={visitPages} visit={siteVisit} offeredDownload={offeredDownload} />
+									</CardContent>
+								</Card>
+							</TabsContent>
 						) : null}
-
-						{submission.data.kind === "website" && websiteNavigation.length > 0 ? (
-							<div className="space-y-2 rounded-md border bg-muted/20 p-3">
-								<div>
-									<h5 className="text-xs font-semibold">Navigation hops (kept separate)</h5>
-									<p className="text-xs text-muted-foreground">Redirects and followed links within one site belong to that site and share the finding of the page they lead to. A destination on another host is never attributed to the URL that redirected to it.</p>
-								</div>
+						{submission.kind === "email" && emailEml ? (
+							<TabsContent value="email" className="space-y-4 mt-4">
+								<Card className="overflow-hidden">
+									<CardHeader className="py-3">
+										<CardTitle className="text-sm flex flex-row items-center gap-2">
+											Archived Email
+											<div className="text-xs text-muted-foreground font-normal">
+												(from {formatUtcDateTime(emailEml.createdAt) ?? "unknown date"})
+											</div>
+										</CardTitle>
+										<CardDescription className="text-xs flex flex-row gap-8">
+											<div className="text-zinc-500 font-semibold font-mono">
+												DO NOT CLICK ANY LINKS NOR ENTER ANY SENSITIVE INFORMATION
+											</div>
+										</CardDescription>
+									</CardHeader>
+									<CardContent className="p-0">
+										{emailHtmlError ? (
+											<div className="p-4 text-sm text-muted-foreground">{emailHtmlError}</div>
+										) : emailHtml ? (
+											<iframe
+												title="Archived Email"
+												srcDoc={emailHtml}
+												className="w-full h-[70vh] bg-background"
+												sandbox=""
+												referrerPolicy="no-referrer"
+											/>
+										) : (
+											<div className="p-4 text-sm text-muted-foreground">Rendering…</div>
+										)}
+									</CardContent>
+								</Card>
+							</TabsContent>
+						) : null}
+						{submission.data.kind === "website" ? (
+							<TabsContent value="whois" className="space-y-4 mt-4">
+								<WhoisTab url={submission.data.website?.url} whois={submission.data.website?.whois} />
+							</TabsContent>
+						) : null}
+						<TabsContent value="reports" className="space-y-4 mt-4">
+							{investigation ? (
+								<Card>
+									<CardContent className="space-y-2 p-4">
+										<div className="flex flex-wrap items-center justify-between gap-3">
+											<div>
+												<div className="text-sm font-medium">Pre-report investigation</div>
+												<div className="text-xs text-muted-foreground">
+													{investigation.status === "completed"
+														? `Evidence collected before any provider was contacted: ${investigation.payloads?.length ?? 0} command payload${investigation.payloads?.length === 1 ? "" : "s"}, ${investigation.backendCount ?? 0} data-drop backend${investigation.backendCount === 1 ? "" : "s"}.`
+														: investigation.status === "failed"
+															? "The investigation could not be completed; the report was sent with the evidence already captured."
+															: "Payloads are downloaded and checked, and a controlled browser submits synthetic values, before the report is sent."}
+												</div>
+											</div>
+											<Badge variant="outline" className="capitalize">{investigation.status}</Badge>
+										</div>
+										{investigation.payloads?.map((payload) => (
+											<div key={payload.url} className="rounded border bg-muted/20 p-2 text-xs">
+												<div className="break-all font-mono">{payload.url}</div>
+												{payload.sha256 ? <div className="break-all text-muted-foreground">SHA-256 {payload.sha256}{payload.sizeBytes ? ` · ${formatArtifactSize(payload.sizeBytes)}` : ""}</div> : null}
+												{payload.verdict ? <div className="font-medium text-destructive">{payload.verdict}</div> : null}
+												{payload.error ? <div className="text-muted-foreground">Not downloaded: {payload.error}</div> : null}
+											</div>
+										))}
+										{investigation.probeError ? <div className="text-xs text-muted-foreground">Form probe: {investigation.probeError}</div> : null}
+									</CardContent>
+								</Card>
+							) : null}
+							<SubmissionReports submissionId={id} reports={reports} />
+						</TabsContent>
+						{submission.kind === "website" && websiteNavigation.length > 0 ? (
+							<TabsContent value="navigation" className="space-y-2 mt-4">
+								<p className="text-xs text-muted-foreground">Redirects and followed links within one site belong to that site and share the finding of the page they lead to. A destination on another host is never attributed to the URL that redirected to it.</p>
 								<ol className="space-y-2">
 									{websiteNavigation.map((hop) => {
 										const assessment = websiteAssessmentByHop.get(hop.index);
@@ -452,232 +522,155 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 										);
 									})}
 								</ol>
+							</TabsContent>
+						) : null}
+						<TabsContent value="runs" className="space-y-4 mt-4">
+							{runsToShow.length > 0 ? (
+								runsToShow.map((run: any) => (
+									<div key={run.id} className={isRunning ? "overflow-hidden" : "overflow-hidden flex flex-col h-[90vh]"}>
+										<div className={cn(isRunning ? "p-0" : "p-0 flex-1 min-h-0", "pt-2")}>
+											<AnalysisLogs
+												streamId={run.id}
+												progressStreamId={isRunning ? submission.id : undefined}
+												status={run.status}
+												output={run.output}
+												className={isRunning ? undefined : "h-full"}
+											/>
+										</div>
+									</div>
+								))
+							) : isRunning ? (
+								<AnalysisLogs streamId={submission.id} status={submission.status} progressOnly />
+							) : (
+								<div className="text-center py-10 text-muted-foreground">No analysis runs yet.</div>
+							)}
+						</TabsContent>
+						<TabsContent value="artifacts" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mt-4">
+							{artifacts.length > 0 ? (
+								artifacts.map((a) => (
+									<Card key={a.id} className="overflow-hidden">
+										{a.mimeType?.startsWith("image/") ? (
+											<div className="aspect-video bg-muted relative">
+												<img src={`/api/artifacts/${a.id}`} alt={a.name!} className="object-cover w-full h-full" />
+											</div>
+										) : (
+											<div className="aspect-video flex items-center justify-center bg-muted">
+												<ShieldAlert className="w-10 h-10 text-muted-foreground" />
+											</div>
+										)}
+										<CardHeader className="p-3">
+											<CardTitle className="text-xs truncate">{a.name || a.kind}</CardTitle>
+											<CardDescription className="text-[10px]">
+												{a.mimeType} • {formatArtifactSize(a.size)}
+												{a.sha256 ? <div className="font-mono break-all">SHA-256 {a.sha256}</div> : null}
+												{isWebsiteArchiveArtifact(a) ? (
+													<div>Archived {formatUtcDateTime(a.archivedAt ?? a.createdAt) ?? "unknown date"}</div>
+												) : null}
+											</CardDescription>
+										</CardHeader>
+										<CardContent className="p-3 pt-0">
+											<a
+												href={`/api/artifacts/${a.id}`}
+												download={a.name}
+												className="text-[10px] text-primary hover:underline font-medium"
+											>
+												Download
+											</a>
+										</CardContent>
+									</Card>
+								))
+							) : (
+								<div className="text-center py-10 text-muted-foreground md:col-span-full">
+									No artifacts found for this submission.
+								</div>
+							)}
+						</TabsContent>
+					</Tabs>
+				</div>
+
+				<aside className="min-w-0 space-y-4 lg:sticky lg:top-6">
+					{isReported ? (
+						<section className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+							<div className="flex items-center gap-2 text-sm font-semibold text-destructive">
+								<ShieldAlert className="h-4 w-4" />
+								{verdictLabel ?? "Phishing confirmed"}
+							</div>
+							{analyzedAssessment?.impersonatedBrand ? (
+								<p className="mt-2 text-sm">
+									Impersonates <span className="font-medium">{analyzedAssessment.impersonatedBrand.name}</span>
+									<span className="text-muted-foreground"> · official site </span>
+									<span className="break-all text-muted-foreground">{hostOfUrl(analyzedAssessment.impersonatedBrand.officialUrl)}</span>
+								</p>
+							) : null}
+							{analyzedAssessment?.evidenceQuote ? (
+								<>
+									<div className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Evidence</div>
+									<blockquote className="mt-1 border-l-2 pl-2 text-xs text-muted-foreground">“{analyzedAssessment.evidenceQuote}”</blockquote>
+								</>
+							) : null}
+							{analyzedAssessment?.collectionFields?.length ? (
+								<p className="mt-2 text-xs text-muted-foreground">Asks for {analyzedAssessment.collectionFields.map((field) => `“${describeDataEntryField(field)}”`).join(", ")}</p>
+							) : null}
+							<div className="mt-3 flex items-center justify-between gap-2 border-t border-destructive/15 pt-3 text-xs">
+								<span className="text-muted-foreground">Being reported to the responsible providers.</span>
+								<button type="button" onClick={() => setTab("reports")} className="shrink-0 font-medium text-primary hover:underline">{reportCount} report{reportCount === 1 ? "" : "s"} →</button>
+							</div>
+						</section>
+					) : null}
+
+					{isInvalidWebsite ? (
+							<div className="rounded-lg border bg-muted/30 p-4">
+								<div className="text-xs font-semibold text-muted-foreground">Not reported</div>
+								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info}</div>
 							</div>
 						) : null}
 
-						{submission.data.kind === "email" && (
-							<div className="space-y-2">
-								<h4 className="text-sm font-semibold">Email</h4>
-								<div className="grid gap-3 sm:grid-cols-2">
-									<div className="rounded-lg border bg-muted/30 p-3">
-										<div className="text-xs text-muted-foreground">From</div>
-										<div className="mt-1 font-mono text-xs break-all">{submission.data.email?.from || "—"}</div>
-									</div>
-									<div className="rounded-lg border bg-muted/30 p-3">
-										<div className="text-xs text-muted-foreground">Subject</div>
-										<div className="mt-1 text-sm font-medium wrap-break-word">
-											{submission.data.email?.subject || "—"}
-										</div>
-									</div>
-								</div>
-								{submission.data.email?.linkedWebsites?.length ? (
-									<div className="rounded-lg border bg-muted/30 p-3">
-										<div className="text-xs text-muted-foreground">Linked websites, each analyzed in its own case</div>
-										<ul className="mt-1 space-y-1">
-											{submission.data.email.linkedWebsites.map((link) => (
-												<li key={link.url} className="flex items-start justify-between gap-3">
-													<span className="min-w-0 font-mono text-xs break-all">{link.url}</span>
-													<Link href={`/submissions/${link.submissionId}`} className="shrink-0 text-xs font-medium text-primary hover:underline">
-														Open case
-													</Link>
-												</li>
-											))}
-										</ul>
-									</div>
+					{statusKey === "redirected" ? (
+							<div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+								<div className="text-xs font-semibold text-amber-700 dark:text-amber-400">{websiteCloaking?.outcome === "detected" ? "Cloaks: shows scanners a different site" : "Redirects to another site"}</div>
+								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info}</div>
+								{redirectSubmissionId ? (
+									<Link href={`/submissions/${redirectSubmissionId}`} className="mt-2 inline-block text-sm font-medium text-primary hover:underline">
+										Open the case for the destination
+									</Link>
 								) : null}
 							</div>
-						)}
-					</div>
-				</div>
+						) : null}
 
-				{emailScreenshot ? (
-					<div className="md:col-span-4 flex">
-						<Card className="overflow-hidden h-full w-full border-none shadow-none">
-							<div className="bg-muted overflow-hidden h-full min-h-80 flex relative">
-								{/* eslint-disable-next-line @next/next/no-img-element */}
-								<img src={`/api/artifacts/${emailScreenshot.id}`} alt="The reported email, rendered" className="absolute object-contain w-full h-full" />
+					{isFailed ? (
+							<div className="rounded-lg border bg-muted/30 p-4">
+								<div className="text-xs font-semibold text-muted-foreground">Failure reason</div>
+								<div className="mt-1 text-sm whitespace-pre-wrap">{submission.info || "The analysis did not complete."}</div>
+								{canRetryAnalysis ? (
+									<div className="mt-3 flex flex-wrap items-center gap-3">
+										<Button type="button" variant="outline" size="sm" disabled={retrying} onClick={retryAnalysis}>
+											{retrying ? "Retrying analysis…" : "Retry analysis"}
+										</Button>
+										<span className="text-xs text-muted-foreground">
+											{submission.kind === "website"
+												? websiteCloaking?.outcome === "unresolved"
+													? "Visits the site again, including from the residential exit; it will not create a duplicate report."
+													: "Reuses the captured website archive when available; it will not create a duplicate report."
+												: "Reuses the original email; it will not create a duplicate report."}
+										</span>
+									</div>
+								) : null}
+								{retryError ? <div className="mt-2 text-sm text-destructive">{retryError}</div> : null}
 							</div>
-						</Card>
-					</div>
-				) : null}
-			</div>
+						) : null}
 
-			<Tabs defaultValue={defaultTab} className="w-full">
-				<TabsList className="overflow-x-auto max-w-full no-scrollbar">
-					{submission.kind === "website" ? <TabsTrigger value="website">Website</TabsTrigger> : null}
-					{submission.kind === "email" ? <TabsTrigger value="email">Email</TabsTrigger> : null}
-					<TabsTrigger value="reports">Reports ({reportCount})</TabsTrigger>
-					<TabsTrigger value="artifacts">Files ({artifacts.length})</TabsTrigger>
-					<TabsTrigger value="runs">Analysis</TabsTrigger>
-					{submission.kind === "website" ? <TabsTrigger value="whois">WhoIS</TabsTrigger> : null}
-				</TabsList>
-				{submission.kind === "website" && websiteMhtml ? (
-					<TabsContent value="website" className="space-y-4 mt-4">
-						<Card className="overflow-hidden">
-							<CardHeader className="py-3">
-								<CardTitle className="text-sm flex flex-row items-center gap-2">
-									Archived Website
-									<div className="text-xs text-muted-foreground font-normal">
-										(from {websiteArchiveDate ?? "unknown date"})
-									</div>
-								</CardTitle>
-								<div className="break-all text-xs text-muted-foreground">
-									Captured page: {submission.data.kind === "website" ? submission.data.website.archiveUrl ?? submission.data.website.url : "unknown"}
-								</div>
-								<CardDescription className="text-xs flex flex-row gap-8">
-									<div className="text-zinc-500 font-semibold font-mono">DO NOT ENTER ANY SENSITIVE INFORMATION</div>
-								</CardDescription>
-							</CardHeader>
-							<CardContent className="p-0">
-								{websiteHtmlError ? (
-									<div className="p-4 text-sm text-muted-foreground">{websiteHtmlError}</div>
-								) : websiteHtml ? (
-									<iframe
-										title="Archived Website"
-										srcDoc={websiteHtml}
-										className="w-full h-[75vh] bg-background"
-										sandbox=""
-										referrerPolicy="no-referrer"
-									/>
-								) : (
-									<div className="p-4 text-sm text-muted-foreground">Rendering…</div>
-								)}
-							</CardContent>
-						</Card>
-					</TabsContent>
-				) : null}
-				{submission.kind === "email" && emailEml ? (
-					<TabsContent value="email" className="space-y-4 mt-4">
-						<Card className="overflow-hidden">
-							<CardHeader className="py-3">
-								<CardTitle className="text-sm flex flex-row items-center gap-2">
-									Archived Email
-									<div className="text-xs text-muted-foreground font-normal">
-										(from {formatUtcDateTime(emailEml.createdAt) ?? "unknown date"})
-									</div>
-								</CardTitle>
-								<CardDescription className="text-xs flex flex-row gap-8">
-									<div className="text-zinc-500 font-semibold font-mono">
-										DO NOT CLICK ANY LINKS NOR ENTER ANY SENSITIVE INFORMATION
-									</div>
-								</CardDescription>
-							</CardHeader>
-							<CardContent className="p-0">
-								{emailHtmlError ? (
-									<div className="p-4 text-sm text-muted-foreground">{emailHtmlError}</div>
-								) : emailHtml ? (
-									<iframe
-										title="Archived Email"
-										srcDoc={emailHtml}
-										className="w-full h-[75vh] bg-background"
-										sandbox=""
-										referrerPolicy="no-referrer"
-									/>
-								) : (
-									<div className="p-4 text-sm text-muted-foreground">Rendering…</div>
-								)}
-							</CardContent>
-						</Card>
-					</TabsContent>
-				) : null}
-				{submission.data.kind === "website" ? (
-					<TabsContent value="whois" className="space-y-4 mt-4">
-						<WhoisTab url={submission.data.website?.url} whois={submission.data.website?.whois} />
-					</TabsContent>
-				) : null}
-				<TabsContent value="reports" className="space-y-4 mt-4">
-					{investigation ? (
-						<Card>
-							<CardContent className="space-y-2 p-4">
-								<div className="flex flex-wrap items-center justify-between gap-3">
-									<div>
-										<div className="text-sm font-medium">Pre-report investigation</div>
-										<div className="text-xs text-muted-foreground">
-											{investigation.status === "completed"
-												? `Evidence collected before any provider was contacted: ${investigation.payloads?.length ?? 0} command payload${investigation.payloads?.length === 1 ? "" : "s"}, ${investigation.backendCount ?? 0} data-drop backend${investigation.backendCount === 1 ? "" : "s"}.`
-												: investigation.status === "failed"
-													? "The investigation could not be completed; the report was sent with the evidence already captured."
-													: "Payloads are downloaded and checked, and a controlled browser submits synthetic values, before the report is sent."}
-										</div>
-									</div>
-									<Badge variant="outline" className="capitalize">{investigation.status}</Badge>
-								</div>
-								{investigation.payloads?.map((payload) => (
-									<div key={payload.url} className="rounded border bg-muted/20 p-2 text-xs">
-										<div className="break-all font-mono">{payload.url}</div>
-										{payload.sha256 ? <div className="break-all text-muted-foreground">SHA-256 {payload.sha256}{payload.sizeBytes ? ` · ${formatArtifactSize(payload.sizeBytes)}` : ""}</div> : null}
-										{payload.verdict ? <div className="font-medium text-destructive">{payload.verdict}</div> : null}
-										{payload.error ? <div className="text-muted-foreground">Not downloaded: {payload.error}</div> : null}
-									</div>
-								))}
-								{investigation.probeError ? <div className="text-xs text-muted-foreground">Form probe: {investigation.probeError}</div> : null}
-							</CardContent>
-						</Card>
+					{submission.data.kind === "website" ? (
+						<SiteVisitTimeline running={isRunning} visit={siteVisit} offeredDownload={offeredDownload} live={liveVisit} pageCount={visitPages.length} />
 					) : null}
-					<SubmissionReports submissionId={id} reports={reports} />
-				</TabsContent>
-				<TabsContent value="runs" className="space-y-4 mt-4">
-					{runsToShow.length > 0 ? (
-						runsToShow.map((run: any) => (
-							<div key={run.id} className={isRunning ? "overflow-hidden" : "overflow-hidden flex flex-col h-[90vh]"}>
-								<div className={cn(isRunning ? "p-0" : "p-0 flex-1 min-h-0", "pt-2")}>
-									<AnalysisLogs
-										streamId={run.id}
-										progressStreamId={isRunning ? submission.id : undefined}
-										status={run.status}
-										output={run.output}
-										className={isRunning ? undefined : "h-full"}
-									/>
-								</div>
-							</div>
-						))
-					) : isRunning ? (
-						<AnalysisLogs streamId={submission.id} status={submission.status} progressOnly />
-					) : (
-						<div className="text-center py-10 text-muted-foreground">No analysis runs yet.</div>
-					)}
-				</TabsContent>
-				<TabsContent value="artifacts" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
-					{artifacts.length > 0 ? (
-						artifacts.map((a) => (
-							<Card key={a.id} className="overflow-hidden">
-								{a.mimeType?.startsWith("image/") ? (
-									<div className="aspect-video bg-muted relative">
-										<img src={`/api/artifacts/${a.id}`} alt={a.name!} className="object-cover w-full h-full" />
-									</div>
-								) : (
-									<div className="aspect-video flex items-center justify-center bg-muted">
-										<ShieldAlert className="w-10 h-10 text-muted-foreground" />
-									</div>
-								)}
-								<CardHeader className="p-3">
-									<CardTitle className="text-xs truncate">{a.name || a.kind}</CardTitle>
-									<CardDescription className="text-[10px]">
-										{a.mimeType} • {formatArtifactSize(a.size)}
-										{a.sha256 ? <div className="font-mono break-all">SHA-256 {a.sha256}</div> : null}
-										{isWebsiteArchiveArtifact(a) ? (
-											<div>Archived {formatUtcDateTime(a.archivedAt ?? a.createdAt) ?? "unknown date"}</div>
-										) : null}
-									</CardDescription>
-								</CardHeader>
-								<CardContent className="p-3 pt-0">
-									<a
-										href={`/api/artifacts/${a.id}`}
-										download={a.name}
-										className="text-[10px] text-primary hover:underline font-medium"
-									>
-										Download
-									</a>
-								</CardContent>
-							</Card>
-						))
-					) : (
-						<div className="text-center py-10 text-muted-foreground md:col-span-full">
-							No artifacts found for this submission.
+
+					{emailScreenshot ? (
+						<div className="overflow-hidden rounded-lg border bg-muted">
+							{/* eslint-disable-next-line @next/next/no-img-element */}
+							<img src={`/api/artifacts/${emailScreenshot.id}`} alt="The reported email, rendered" className="block h-auto w-full" />
 						</div>
-					)}
-				</TabsContent>
-			</Tabs>
+					) : null}
+				</aside>
+			</div>
 		</div>
 	);
 }
