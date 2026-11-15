@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, MousePointerClick, Send, ShieldAlert, Sparkles } from "lucide-react";
+import { CheckSquare, Download, Flag, Globe, Keyboard, ListChecks, MousePointerClick, Send, ShieldAlert, Sparkles, Upload } from "lucide-react";
 
 import { cn } from "../web_lib/util";
 import { CANARY_FIELD_LABEL, type CanaryField, type WebsiteOfferedDownload, type WebsiteVisitRecord } from "@/lib/website_types";
@@ -166,6 +166,19 @@ function pathOf(url: string): string {
 	}
 }
 
+/** An icon for each kind of agent action; anything else is a click. */
+function actionIcon(kind: string): React.ReactNode {
+	const Icon = kind === "input_text" || kind === "keypress" ? Keyboard
+		: kind === "select_option" ? ListChecks
+			: kind === "checkbox" ? CheckSquare
+				: kind === "upload_file" ? Upload
+					: kind === "download_file" ? Download
+						: kind === "goto_url" ? Globe
+							: kind === "complete" || kind === "terminate" ? Flag
+								: MousePointerClick;
+	return <Icon className="h-3 w-3" />;
+}
+
 function TimelineRow({ icon, tone = "muted", children }: { icon: React.ReactNode; tone?: "muted" | "danger"; children: React.ReactNode }) {
 	return (
 		<li className="flex gap-2.5 py-1.5">
@@ -219,7 +232,7 @@ export function SiteVisitTimeline({ running, visit, offeredDownload, live: { ent
 							Downloaded <span className="font-mono">{entry.fileName}</span>
 						</TimelineRow>
 					) : (
-						<TimelineRow key={index} icon={<MousePointerClick className="h-3 w-3" />}>{entry.text}</TimelineRow>
+						<TimelineRow key={index} icon={actionIcon(entry.actionKind)}>{entry.text}</TimelineRow>
 					)
 				))}
 				{!running && thirdParty.map((sent, index) => (
