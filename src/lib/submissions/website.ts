@@ -80,6 +80,12 @@ export async function runDueWebsiteAutoRetries(params: {
 		} catch (error) {
 			if (!(error instanceof SubmissionRetryError)) throw error;
 			console.warn(`Automatic retry of website analysis ${id.toString()} skipped: ${error.message}`);
+			// A case the retry boundary refuses (reported, or retried by hand) is never
+			// due again; left scheduled, it would take a sweep slot on every pass.
+			const submission = await SubmissionsEntity.get(id);
+			if (submission?.data.kind === "website" && submission.status === "failed" && submission.data.website.autoRetry) {
+				await SubmissionsEntity.update(id, { data: { kind: "website", website: { ...submission.data.website, autoRetry: undefined } } });
+			}
 		}
 	}
 	return started;

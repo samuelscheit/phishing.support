@@ -516,6 +516,26 @@ describe("browser-service failures", () => {
 		expect(await runDueWebsiteAutoRetries({ now: new Date(Date.now() + 24 * 60 * 60_000), startAnalysis })).toBe(0);
 	});
 
+	test("a due retry the retry boundary refuses, because the case was reported, is dropped instead of being refused on every pass", async () => {
+		const id = await websiteSubmission(374703356112802866n, "https://netflix-reported-before.com/");
+		await analyzeWebsite({ submissionId: id, url: "https://netflix-reported-before.com/" }, dependencies(archiveOf([hop(0, "https://netflix-reported-before.com/", 200)])));
+		const reported = await SubmissionsEntity.get(id);
+		expect({ status: reported?.status, info: reported?.info }).toEqual({ status: "reported", info: expect.any(String) });
+		// As if a later analysis of the reported case had stopped unfinished.
+		const website = (await SubmissionsEntity.get(id))!.data;
+		const dueAt = new Date("2026-11-15T01:30:00Z");
+		await SubmissionsEntity.update(id, { status: "failed", data: { kind: "website", website: { ...(website.kind === "website" ? website.website : { url: "" }), autoRetry: { attempts: 1, nextAttemptAt: dueAt.toISOString(), reason: "The visit's 8-minute budget ended the walk." } } } });
+
+		const started: bigint[] = [];
+		const startAnalysis = async (options: { submissionId: bigint }) => { started.push(options.submissionId); };
+		expect(await runDueWebsiteAutoRetries({ now: dueAt, startAnalysis })).toBe(0);
+		expect(started).toEqual([]);
+		const after = await SubmissionsEntity.get(id);
+		expect(after?.status).toBe("failed");
+		expect(after?.data.kind === "website" ? after.data.website.autoRetry : "none").toBeUndefined();
+		expect(await SubmissionsEntity.listDueWebsiteAutoRetries(new Date(dueAt.getTime() + 60_000))).toEqual([]);
+	});
+
 	test("a site that blocks every egress is final: no backoff and no automatic retry", async () => {
 		const id = await websiteSubmission(374703356112802865n, url);
 		let attempts = 0;
