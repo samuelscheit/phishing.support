@@ -59,7 +59,12 @@ function useLiveVisit(submissionId: string, enabled: boolean) {
 	return { frame, entries };
 }
 
-function BrowserChrome({ url, live, children }: { url: string; live: boolean; children: React.ReactNode }) {
+/**
+ * `viewport`: the frame has the desktop viewport's shape (the live screen, a
+ * placeholder). `content`: it takes the screenshot's own height, up to most of
+ * the window, and a taller full-page screenshot scrolls inside it.
+ */
+function BrowserChrome({ url, live, fit, children }: { url: string; live: boolean; fit: "viewport" | "content"; children: React.ReactNode }) {
 	return (
 		<div className="overflow-hidden rounded-lg border bg-muted/30 shadow-sm">
 			<div className="flex items-center gap-2 border-b bg-muted/60 px-3 py-2">
@@ -81,7 +86,7 @@ function BrowserChrome({ url, live, children }: { url: string; live: boolean; ch
 					</span>
 				) : null}
 			</div>
-			<div className="relative aspect-[4/3] w-full bg-background">{children}</div>
+			<div className={cn("relative w-full bg-background", fit === "viewport" ? "aspect-[2/1]" : "max-h-[70vh] overflow-y-auto")}>{children}</div>
 		</div>
 	);
 }
@@ -129,13 +134,13 @@ export function SiteVisitPanel({ submissionId, running, pages, visit, offeredDow
 			</div>
 			<div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
 				<div className="space-y-2">
-					<BrowserChrome url={live ? frame!.url : page?.url ?? ""} live={live}>
+					<BrowserChrome url={live ? frame!.url : page?.url ?? ""} live={live} fit={!live && page?.screenshotId ? "content" : "viewport"}>
 						{live ? (
 							// eslint-disable-next-line @next/next/no-img-element
 							<img src={`data:image/jpeg;base64,${frame!.jpeg}`} alt="The visited site, live" className="absolute inset-0 h-full w-full object-contain object-top" />
 						) : page?.screenshotId ? (
 							// A page screenshot is the whole page: it fills the frame's width from its top, and opens in full.
-							<a href={`/api/artifacts/${page.screenshotId}`} target="_blank" rel="noreferrer" className="absolute inset-0 overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" title="Open the full screenshot">
+							<a href={`/api/artifacts/${page.screenshotId}`} target="_blank" rel="noreferrer" className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" title="Open the full screenshot">
 								{/* eslint-disable-next-line @next/next/no-img-element */}
 								<img src={`/api/artifacts/${page.screenshotId}`} alt={`Page ${shown + 1} of the visit: ${page.url}`} className="block h-auto w-full" />
 							</a>
@@ -153,7 +158,7 @@ export function SiteVisitPanel({ submissionId, running, pages, visit, offeredDow
 										aria-current={index === shown ? "step" : undefined}
 										className={cn("w-28 overflow-hidden rounded-md border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", index === shown ? "border-primary ring-1 ring-primary" : "hover:border-foreground/30")}
 									>
-										<div className="relative aspect-[4/3] bg-muted">
+										<div className="relative aspect-[2/1] bg-muted">
 											{candidate.screenshotId ? (
 												// eslint-disable-next-line @next/next/no-img-element
 												<img src={`/api/artifacts/${candidate.screenshotId}`} alt="" className="absolute inset-0 h-full w-full object-cover object-top" />
