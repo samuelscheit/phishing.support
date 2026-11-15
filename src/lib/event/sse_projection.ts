@@ -12,6 +12,8 @@ type JsonRecord = Record<string, unknown>;
 const MAX_TEXT = 8_000;
 const MAX_OUTPUT_TEXT = 160_000;
 const MAX_LIST = 24;
+/** A live screencast frame, base64 JPEG; a frame past this is dropped rather than cut. */
+const MAX_BROWSER_FRAME = 600_000;
 
 function asRecord(value: unknown): JsonRecord | null {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
@@ -117,6 +119,13 @@ export function projectSseEvent(value: unknown, depth = 0): JsonRecord {
 	}
 	for (const key of ["sequence_number", "output_index", "content_index", "summary_index", "progress", "attempt", "delayMs"]) {
 		setIfDefined(projected, key, asNumber(source[key]));
+	}
+
+	// The visit's live view: the tab's screen, each recorded page, the agent's actions, and downloads.
+	if (type.startsWith("browser.")) {
+		if (typeof source.jpeg === "string" && source.jpeg.length <= MAX_BROWSER_FRAME && /^[A-Za-z0-9+/=]+$/.test(source.jpeg)) projected.jpeg = source.jpeg;
+		for (const key of ["url", "title", "kind", "text", "fileName"]) setIfDefined(projected, key, asString(source[key], 1_000));
+		setIfDefined(projected, "index", asNumber(source.index));
 	}
 
 	if (type.startsWith("response.")) {

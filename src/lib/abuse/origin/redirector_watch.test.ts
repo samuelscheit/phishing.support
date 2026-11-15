@@ -194,8 +194,8 @@ describe("which page of a chain is the redirector", () => {
 	});
 
 	test("is none when the visitor had to act, or the chain never left the destination", () => {
-		expect(redirectorHop([hop(0, "https://landing.example/", { redirectTo: "https://kit.example/", followedLink: { label: "Continue" } }), hop(1, "https://kit.example/")], "https://kit.example/")).toBeUndefined();
-		expect(redirectorHop([hop(0, "https://landing.example/", { redirectTo: "https://kit.example/", performedAction: { kind: "click", control: { ref: "b1", label: "Open" } } }), hop(1, "https://kit.example/")], "https://kit.example/")).toBeUndefined();
+		expect(redirectorHop([hop(0, "https://landing.example/", { redirectTo: "https://kit.example/", visitorStep: { submitted: [] } }), hop(1, "https://kit.example/")], "https://kit.example/")).toBeUndefined();
+		expect(redirectorHop([hop(0, "https://landing.example/", { redirectTo: "https://kit.example/", visitorStep: { submitted: ["email"] } }), hop(1, "https://kit.example/")], "https://kit.example/")).toBeUndefined();
 		expect(redirectorHop([hop(0, "https://kit.example/")], "https://kit.example/")).toBeUndefined();
 		expect(redirectorHop(EMAIL_LINK_HOPS, "https://elsewhere.example/")).toBeUndefined();
 	});

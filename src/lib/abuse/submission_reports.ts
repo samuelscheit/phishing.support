@@ -11,6 +11,8 @@ import { websiteSite } from "../website_site";
 import type { ReportableWebsiteFinding, WebsiteHiddenFrame, WebsiteOfferedDownload } from "../website_types";
 import type { PasteCommand } from "../malware/paste_commands";
 import type { InvestigationJobPayload } from "../investigation/payload";
+import type { CapturedNetworkRequest, ExfiltrationBackend, ExfiltrationCanaries } from "../exfiltration/types";
+import { stableJson } from "./security";
 
 const MAX_REPORT_DESCRIPTION_LENGTH = 30_000;
 /** Netcraft's documented raw-message limit, which is also the strictest mail-evidence consumer. */
@@ -49,6 +51,12 @@ export type ConfirmedWebsiteAbuse = SubmissionReportBase & {
 	hiddenFrame?: WebsiteHiddenFrame;
 	/** The file a malware page offers, with its static inspection; attached so a provider can check it. */
 	offeredDownload?: WebsiteOfferedDownload;
+	/**
+	 * The visit's network traffic, when it saw the synthetic values sent to
+	 * another site: kept with the report, and each data drop reported at its
+	 * own host by the investigation.
+	 */
+	visitCapture?: { canaries: ExfiltrationCanaries; requests: CapturedNetworkRequest[]; backends: ExfiltrationBackend[] };
 };
 
 export type ConfirmedEmailPhishing = SubmissionReportBase & {
@@ -202,10 +210,11 @@ export async function reportConfirmedWebsiteAbuse(params: ConfirmedWebsiteAbuse)
 			offeredDownload: {
 				url: params.offeredDownload.url,
 				userAgent: params.offeredDownload.userAgent,
-				via: params.offeredDownload.via,
+				pageUrl: params.offeredDownload.pageUrl,
 				fileName: params.offeredDownload.fileName,
 			},
 		} : {}),
+		...(params.visitCapture?.backends.length ? { dataDrops: params.visitCapture.backends } : {}),
 	};
 	const created = await AbuseRepository.createReport({
 		request: await buildWebsiteAbuseRequest(params),
@@ -213,6 +222,17 @@ export async function reportConfirmedWebsiteAbuse(params: ConfirmedWebsiteAbuse)
 		submissionId: params.submissionId,
 		investigation: { payload },
 	});
+	if (created.created && params.visitCapture) {
+		const { canaries, requests, backends } = params.visitCapture;
+		await AbuseRepository.saveArtifact({
+			reportId: created.reportId,
+			name: "exfiltration-network-capture.json",
+			kind: "exfiltration_network_capture",
+			mimeType: "application/json",
+			buffer: Buffer.from(stableJson({ version: 2, pageUrl: params.urls[0]!, canaries, requests, backends }), "utf8"),
+			metadata: { pageUrl: params.urls[0]!, requestCount: requests.length, backendCount: backends.length },
+		});
+	}
 	if (created.created) await setInvestigationStatus(params.submissionId, { status: "queued", updatedAt: new Date().toISOString() });
 	await enqueueKitSiblingDiscovery(created.reportId, params.submissionId);
 	await enqueueRedirectorWatch(created.reportId, params.submissionId);

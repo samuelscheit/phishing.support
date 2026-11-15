@@ -164,7 +164,7 @@ export function redirectorHop(hops: readonly WebsiteNavigationHop[], destination
 	const destination = websiteSite(destinationUrl);
 	const arrival = hops.findIndex((hop) => websiteSite(hop.url) === destination);
 	const hop = arrival > 0 ? hops[arrival - 1] : undefined;
-	if (!hop?.redirectTo || hop.followedLink || hop.performedAction || hop.revisitedAs) return undefined;
+	if (!hop?.redirectTo || hop.visitorStep || hop.revisitedAs) return undefined;
 	return hop;
 }
 

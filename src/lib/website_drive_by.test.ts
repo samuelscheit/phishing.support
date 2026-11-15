@@ -13,7 +13,9 @@ import { readInvestigationJobPayload } from "./investigation/payload";
 import { CORUNA_FRAME_URL, CORUNA_HOST, CORUNA_LOADER, CORUNA_LOOT_URL, CORUNA_LURE_TEXT } from "./malware/coruna_loader.fixture";
 import { exploitLoaderSignals } from "./malware/exploit_loader";
 import { websiteSubmissionDedupeKey } from "./submissions/website";
-import { analyzeWebsite, buildWebsiteClassificationInput, buildWebsiteReportEvidence, reportableWebsiteHop, validateWebsiteSiteClassification, websiteMobileHandoff, websiteSiteAssessments } from "./website_ai";
+import { analyzeWebsite, reportableWebsiteHop, websiteSiteAssessments } from "./website_ai";
+import { buildWebsiteClassificationInput, buildWebsiteReportEvidence, validateWebsiteSiteClassification, websiteMobileHandoff } from "./website_classification";
+import { scriptedVisitSession } from "./site_visit/test_helpers";
 import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "./website_archive";
 import type { WebsiteFrameRequest, WebsiteFrameResource, WebsiteHiddenFrame, WebsiteNavigationHop } from "./website_types";
 
@@ -69,11 +71,13 @@ function capture(options: ArchiveWebsiteOptions): WebsiteArchiveResult {
 		text: Buffer.from(text, "utf8"),
 		hiddenFrames: [loaderFrame(device)],
 		...(device === "iphone" ? { device } : {}),
+		// The visit finds nothing beyond the captured page.
+		session: scriptedVisitSession(),
 	};
 }
 
 type Answer = Record<string, unknown>;
-const NOTHING: Answer = { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false };
+const NOTHING: Answer = { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false };
 
 /** Answers the desktop decoy and the page the iPhone is shown, telling them apart by the device statement. */
 function model(answers: { desktop: Answer; iphone: Answer }, prompts: string[] = []): AnalysisClient {
@@ -120,7 +124,7 @@ describe("a mobile-only drive-by exploit kit (production case 377486973465530391
 		const captures: ArchiveWebsiteOptions[] = [];
 		const prompts: string[] = [];
 		// The decoy also names its Verify button; the phone comes first.
-		const { submission, website } = await analyze(377486973465530391n, { desktop: { ...NOTHING, continuationRef: "c1", mobileHandoff: true }, iphone: DRIVE_BY }, captures, prompts);
+		const { submission, website } = await analyze(377486973465530391n, { desktop: { ...NOTHING, mobileHandoff: true }, iphone: DRIVE_BY }, captures, prompts);
 
 		expect(captures.map(({ url, device }) => ({ url, device }))).toEqual([{ url: PAGE, device: undefined }, { url: PAGE, device: "iphone" }]);
 		expect(submission?.status).toBe("reported");

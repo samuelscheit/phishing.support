@@ -6,10 +6,15 @@ import { AbuseRepository } from "./abuse/repository";
 import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { retryFailedWebsiteAnalysis, websiteSubmissionDedupeKey } from "./submissions/website";
-import { capturedDocumentContent, WebsiteCaptureFailedError, WebsiteUnreachableError, type ArchiveWebsiteOptions, type WebsiteArchiveResult, type WebsitePageSession } from "./website_archive";
-import { analyzeWebsite, buildWebsiteClassificationInput, buildWebsiteReportEvidence, continuedNavigation, websiteContinuation, type AnalyzeWebsiteOptions, type WebsiteAnalysisDependencies } from "./website_ai";
-import { extractWebsiteContinuationControls, extractWebsiteContinuationLinks } from "./website_fields";
-import type { WebsiteNavigationHop, WebsitePageAction, WebsitePerformedAction } from "./website_types";
+import { capturedDocumentContent, type ArchiveWebsiteOptions, type WebsiteArchiveResult, type WebsitePageSession } from "./website_archive";
+import { analyzeWebsite, type WebsiteAnalysisDependencies } from "./website_ai";
+import { buildWebsiteClassificationInput } from "./website_classification";
+import { getDb } from "./db";
+import { abuseJobs, abuseArtifacts } from "./abuse/schema";
+import { readInvestigationJobPayload } from "./investigation/payload";
+import { scriptedVisitSession, type ScriptedVisit } from "./site_visit/test_helpers";
+import type { WebsiteNavigationHop } from "./website_types";
+import { eq } from "drizzle-orm";
 
 useTemporaryDatabase();
 
@@ -77,14 +82,14 @@ type ClassifierAnswers = Record<string, Record<string, unknown>>;
 
 /** What the classifier answers for each page of the kit. */
 const KIT_ANSWERS: ClassifierAnswers = {
-	[CONSENT]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "l1", hiddenFrameRef: "", mobileHandoff: false },
-	[GET_STARTED]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "L1 ", hiddenFrameRef: "", mobileHandoff: false },
+	[CONSENT]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false },
+	[GET_STARTED]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false },
 	[RECOVERY]: {
 		finding: "phishing",
 		phishingBasis: "credential_theft",
 		evidenceQuote: "Access your wallet with your Secret Recovery Phrase",
 		collectionFieldRefs: ["f2", "f3"],
-		continuationRef: "", hiddenFrameRef: "", mobileHandoff: false,
+		hiddenFrameRef: "", mobileHandoff: false,
 	},
 };
 
@@ -113,10 +118,19 @@ function kitModel(answers: ClassifierAnswers, calls: Array<{ kind: "classificati
 	} as unknown as AnalysisClient;
 }
 
+/** The visit's session for the page: it plays `visit`, and records whether it was closed. */
+function visited(page: WebsiteArchiveResult, visit: ScriptedVisit = {}) {
+	const state = { closed: 0 };
+	const scripted = scriptedVisitSession(visit);
+	const session: WebsitePageSession = { visit: scripted.visit, close: async () => { state.closed++; } };
+	return { archive: { ...page, session }, state };
+}
+
 function dependencies(params: {
 	answers?: ClassifierAnswers;
 	captures: ArchiveWebsiteOptions[];
 	modelCalls?: Array<{ kind: "classification" | "analysis"; url: string }>;
+	/** The capture of each requested page, with the visit it plays. */
 	capture?: (options: ArchiveWebsiteOptions) => WebsiteArchiveResult;
 }): WebsiteAnalysisDependencies {
 	return {
@@ -124,9 +138,10 @@ function dependencies(params: {
 		analysisClient: kitModel(params.answers ?? KIT_ANSWERS, params.modelCalls),
 		timestampEvidence: async () => undefined,
 		browserBackoffMs: [1],
+		downloadLookups: async () => [],
 		archiveWebsite: async (options) => {
 			params.captures.push(options);
-			return params.capture ? params.capture(options) : liveCapture(options.url);
+			return params.capture ? params.capture(options) : visited(liveCapture(options.url)).archive;
 		},
 	};
 }
@@ -147,286 +162,6 @@ async function waitForStatus(id: bigint, statuses: string[]) {
 function websiteData(submission: Awaited<ReturnType<typeof SubmissionsEntity.get>>) {
 	return submission?.data.kind === "website" ? submission.data.website : undefined;
 }
-
-describe("continuation links", () => {
-	test("only links to other pages of the same site are listed, once per page", () => {
-		const html = `<base href="${SITE}/app/">
-<a href="${SITE}/app/">this page</a><a href="#top">top</a>
-<a href="step2.html">Continue</a><a href="step2.html#form">Continue again</a>
-<a href="/terms"><img alt="Terms of use"></a>
-<a href="https://metamask.io/privacy.html">Privacy</a>
-<a href="mailto:help@example.com">Mail</a><a href="javascript:void(0)">Nothing</a>
-<a href="/kit.zip" download>Download</a>
-<area href="/map-target" alt="Map">`;
-		expect(extractWebsiteContinuationLinks(html, `${SITE}/app/`)).toEqual([
-			{ ref: "l1", label: "Continue", url: `${SITE}/app/step2.html` },
-			{ ref: "l2", label: "Terms of use", url: `${SITE}/terms` },
-			{ ref: "l3", label: "Map", url: `${SITE}/map-target` },
-		]);
-	});
-
-	test("on a shared host, another tenant's pages are another site", () => {
-		const html = '<a href="/view/kit/login">Sign in</a><a href="/view/other-site/">Other</a>';
-		expect(extractWebsiteContinuationLinks(html, "https://sites.google.com/view/kit")).toEqual([
-			{ ref: "l1", label: "Sign in", url: "https://sites.google.com/view/kit/login" },
-		]);
-	});
-
-	test("the classifier can only name one of the page's own links", () => {
-		const html = capturedDocumentContent(PAGES[CONSENT]!).html;
-		expect(websiteContinuation({ continuationRef: " L1" }, html, CONSENT)).toEqual({ kind: "link", link: { ref: "l1", label: "I agree", url: GET_STARTED } });
-		// The privacy link goes to another site and is never a step of the kit's flow.
-		expect(websiteContinuation({ continuationRef: "l2" }, html, CONSENT)).toBeUndefined();
-		expect(websiteContinuation({ continuationRef: "" }, html, CONSENT)).toBeUndefined();
-		expect(websiteContinuation({}, html, CONSENT)).toBeUndefined();
-	});
-
-	test("a followed page records the link that opened it and how the visitor got there", () => {
-		const consent = liveCapture(CONSENT);
-		const next = liveCapture(GET_STARTED);
-		const hops = continuedNavigation(consent.navigationHops, consent.navigationHops[0]!, { redirectTo: GET_STARTED, followedLink: { label: "I agree" } }, next.navigationHops);
-		expect(hops).toEqual([
-			{ index: 0, url: CONSENT, hostname: new URL(SITE).hostname, status: 200, contentType: "text/html", redirectTo: GET_STARTED, followedLink: { label: "I agree" }, contentCaptured: false },
-			{ index: 1, url: GET_STARTED, hostname: new URL(SITE).hostname, status: 200, contentType: "text/html", contentCaptured: true },
-		]);
-
-		const input = buildWebsiteClassificationInput(hops[1]!, { ...next, navigationHops: hops });
-		const text = (input[1]!.content as Array<{ text?: string }>)[0]!.text!;
-		expect(text).toContain(`The visitor reaches this page by following the link "I agree" on ${CONSENT}, an earlier page of the same site.`);
-		expect(text).toContain(`continuation_links[1]{ref,label,url}:\n  l1,Import an existing wallet,"${RECOVERY}"`);
-		const system = input[0]!.content as string;
-		expect(system).toContain("set continuationRef to the ref of the link a visitor follows to continue that flow");
-		expect(system).toContain("a wallet recovery phrase or private key");
-
-		expect(buildWebsiteReportEvidence(
-			{ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Access your wallet with your Secret Recovery Phrase" },
-			{ navigationHops: [...hops.slice(0, 1), { ...hops[1]!, contentCaptured: false, redirectTo: RECOVERY, followedLink: { label: "Import an existing wallet" } }, { index: 2, url: RECOVERY, hostname: new URL(SITE).hostname, status: 200, contentCaptured: true }] },
-		)).toBe([
-			"The page impersonates a trusted brand and asks visitors for a password, sign-in details, a verification code, or identity details, or leads them to a step that does.",
-			`Visitors reach the page through the site's own earlier pages: the link "I agree" on ${CONSENT}, then the link "Import an existing wallet" on ${GET_STARTED}.`,
-			'Page text that shows it, in its original language: "Access your wallet with your Secret Recovery Phrase".',
-		].join("\n"));
-	});
-});
-
-describe("multi-page kits", () => {
-	test("the MetaMask kit is followed from its consent page to the recovery-phrase form and reported with every page", async () => {
-		const captures: ArchiveWebsiteOptions[] = [];
-		const modelCalls: Array<{ kind: "classification" | "analysis"; url: string }> = [];
-		const id = await websiteSubmission(375914181917937690n, CONSENT);
-
-		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({ captures, modelCalls }));
-
-		// Each link is opened as a visitor would: from the page that shows it.
-		expect(captures.map(({ url, referrer }) => ({ url, referrer }))).toEqual([
-			{ url: CONSENT, referrer: undefined },
-			{ url: GET_STARTED, referrer: CONSENT },
-			{ url: RECOVERY, referrer: GET_STARTED },
-		]);
-		// Every page is classified; the narrative describes the page the flow ends on.
-		expect(modelCalls).toEqual([
-			{ kind: "classification", url: CONSENT },
-			{ kind: "classification", url: GET_STARTED },
-			{ kind: "classification", url: RECOVERY },
-			{ kind: "analysis", url: RECOVERY },
-		]);
-
-		const submission = await SubmissionsEntity.get(id);
-		expect(submission?.status).toBe("reported");
-		expect(submission?.info).toBe(`Phishing confirmed at ${RECOVERY}; evidence for it and the 2 URLs on ${new URL(SITE).hostname} that lead to it is being collected before the report is sent.`);
-		const website = websiteData(submission);
-		expect(website?.archiveUrl).toBe(RECOVERY);
-		expect(website?.navigationHops?.map(({ index, url, redirectTo, followedLink, contentCaptured }) => ({ index, url, redirectTo, followedLink, contentCaptured }))).toEqual([
-			{ index: 0, url: CONSENT, redirectTo: GET_STARTED, followedLink: { label: "I agree" }, contentCaptured: false },
-			{ index: 1, url: GET_STARTED, redirectTo: RECOVERY, followedLink: { label: "Import an existing wallet" }, contentCaptured: false },
-			{ index: 2, url: RECOVERY, redirectTo: undefined, followedLink: undefined, contentCaptured: true },
-		]);
-		expect(website?.siteAssessments?.map(({ hopIndex, finding }) => ({ hopIndex, finding }))).toEqual([
-			{ hopIndex: 0, finding: "phishing" },
-			{ hopIndex: 1, finding: "phishing" },
-			{ hopIndex: 2, finding: "phishing" },
-		]);
-		expect(website?.siteAssessments?.[2]).toMatchObject({
-			phishingBasis: "credential_theft",
-			evidenceQuote: "Access your wallet with your Secret Recovery Phrase",
-			collectionFields: [{ ref: "f2", name: "word1" }, { ref: "f3", name: "word2" }],
-		});
-		// The kit files of every page are kept for sibling discovery, once per hash.
-		expect(website?.kitResources?.map(({ sha256 }) => sha256)).toEqual(["a".repeat(64), "b".repeat(64)]);
-
-		// Every page is evidence with its own stamped screenshot and manifest.
-		const artifacts = await ArtifactsEntity.listForSubmission(id);
-		expect(artifacts.map(({ name }) => name).sort()).toEqual([
-			"evidence-manifest.json",
-			"evidence-step2-manifest.json",
-			"evidence-step3-manifest.json",
-			"website-stamped.png",
-			"website-step2-stamped.png",
-			"website-step2.mhtml",
-			"website-step2.png",
-			"website-step3-stamped.png",
-			"website-step3.mhtml",
-			"website-step3.png",
-			"website.mhtml",
-			"website.png",
-		]);
-		const manifest = JSON.parse((await ArtifactsEntity.get(artifacts.find(({ name }) => name === "evidence-step3-manifest.json")!.id))!.blob.toString("utf8"));
-		expect(manifest.capture.capturedUrl).toBe(RECOVERY);
-		expect(manifest.files.map(({ name }: { name: string }) => name)).toEqual(["website-step3.png", "website-step3-stamped.png", "website-step3.mhtml"]);
-		expect(manifest.capture.navigation[1]).toMatchObject({ url: GET_STARTED, followedLink: { label: "Import an existing wallet" } });
-
-		// The report names all three pages, the form first, and shows each page.
-		const report = await AbuseRepository.getReportForSubmission(id);
-		const targets = await AbuseRepository.listTargets(report!.id);
-		expect(targets.map(({ normalizedTarget, observedUrls }) => ({ normalizedTarget, observedUrls }))).toEqual([
-			{ normalizedTarget: new URL(SITE).hostname, observedUrls: [RECOVERY, CONSENT, GET_STARTED] },
-		]);
-		const input = await AbuseRepository.getReportInput(report!.id);
-		expect(input?.evidenceArtifacts.map(({ name }) => name)).toEqual(["website-step3.png", "website.png", "website-step2.png"]);
-		expect(report!.description).toContain(`Visitors reach the page through the site's own earlier pages: the link "I agree" on ${CONSENT}, then the link "Import an existing wallet" on ${GET_STARTED}.`);
-	});
-
-	test("a retry reuses the analyzed page's own capture, not the first page's", async () => {
-		const id = await websiteSubmission(375914181917937691n, CONSENT);
-		const unconfirmed = { ...KIT_ANSWERS, [RECOVERY]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false } };
-		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({ answers: unconfirmed, captures: [] }));
-		// As if the analysis had failed after its captures: the case is retryable.
-		await SubmissionsEntity.update(id, { status: "failed" });
-
-		const started: Array<Parameters<typeof analyzeWebsite>[0]> = [];
-		await retryFailedWebsiteAnalysis(id, async (options) => { started.push(options); });
-		expect(started).toHaveLength(1);
-		expect(started[0]!.archivedUrl).toBe(RECOVERY);
-		expect(started[0]!.mhtmlSnapshot?.toString("utf8")).toContain(`Snapshot-Content-Location: ${RECOVERY}`);
-		expect(started[0]!.reuseEvidenceArtifacts).toBe(true);
-		expect(started[0]!.navigationHops?.filter((hop) => hop.followedLink)).toHaveLength(2);
-	});
-
-	test("a link that cannot be loaded is no verdict: the case is inconclusive and visited again from the submitted URL, at most three more times", async () => {
-		const id = await websiteSubmission(375914181917937692n, CONSENT);
-		const unreachable = new WebsiteCaptureFailedError([new WebsiteUnreachableError("phishing", "HTTP 404")]);
-		const captures: ArchiveWebsiteOptions[] = [];
-		const run = (options: Partial<AnalyzeWebsiteOptions> = {}) => analyzeWebsite({ submissionId: id, url: CONSENT, ...options }, dependencies({
-			captures,
-			capture: (capture) => {
-				if (capture.url === GET_STARTED) throw unreachable;
-				return liveCapture(capture.url);
-			},
-		}));
-		const reason = `its link "I agree" to ${GET_STARTED} could not be loaded (${unreachable.message})`;
-		const inconclusive = `Inconclusive: the capture could not finish the site's flow: ${reason}. The last page it reached, ${CONSENT}, shows nothing reportable by itself; no verdict or report was made.`;
-
-		await run();
-		let submission = await SubmissionsEntity.get(id);
-		expect(submission?.status).toBe("failed");
-		expect(submission?.info).toStartWith(`${inconclusive} Retrying automatically at `);
-		expect(submission?.info).toEndWith(" UTC (attempt 1 of 3).");
-		expect(websiteData(submission)).toMatchObject({ unfinishedFlow: reason, autoRetry: { attempts: 1, reason }, archiveUrl: CONSENT });
-		expect(websiteData(submission)?.navigationHops).toHaveLength(1);
-		expect((await ArtifactsEntity.listForSubmission(id)).map(({ name }) => name)).not.toContain("website-step2.mhtml");
-		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
-
-		// The retry visits the submitted URL live; the stored page before the step is not reused.
-		const retried: AnalyzeWebsiteOptions[] = [];
-		await retryFailedWebsiteAnalysis(id, async (options) => { retried.push(options); });
-		expect(retried).toEqual([expect.objectContaining({ url: CONSENT, mhtmlSnapshot: undefined, trustMhtmlDocumentLocation: false, reuseEvidenceArtifacts: false })]);
-
-		// Each visit that stops there again counts; the fourth gives up and says so.
-		await run(retried[0]);
-		expect(websiteData(await SubmissionsEntity.get(id))?.autoRetry?.attempts).toBe(2);
-		await run();
-		await run();
-		submission = await SubmissionsEntity.get(id);
-		expect(submission?.status).toBe("failed");
-		expect(submission?.info).toBe(`${inconclusive} The flow stopped there on 4 visits; retry to visit the site again.`);
-		expect(websiteData(submission)?.autoRetry).toBeUndefined();
-		expect(websiteData(submission)?.unfinishedFlow).toBe(reason);
-		expect(captures.filter(({ url }) => url === CONSENT).every((capture) => !capture.mhtmlSnapshot)).toBe(true);
-	});
-
-	test("a page that reaches its harmful step on a later visit is reported, and the unfinished flow is forgotten", async () => {
-		const id = await websiteSubmission(375914181917937697n, CONSENT);
-		let visits = 0;
-		const deps = dependencies({
-			captures: [],
-			capture: (options) => {
-				if (options.url === CONSENT) visits++;
-				if (options.url === GET_STARTED && visits === 1) throw new WebsiteCaptureFailedError([new WebsiteUnreachableError("phishing", "HTTP 502")]);
-				return liveCapture(options.url);
-			},
-		});
-
-		await analyzeWebsite({ submissionId: id, url: CONSENT }, deps);
-		expect((await SubmissionsEntity.get(id))?.status).toBe("failed");
-		await analyzeWebsite({ submissionId: id, url: CONSENT }, deps);
-
-		const submission = await SubmissionsEntity.get(id);
-		expect(submission?.status).toBe("reported");
-		expect(websiteData(submission)?.unfinishedFlow).toBeUndefined();
-		expect(websiteData(submission)?.autoRetry).toBeUndefined();
-	});
-
-	test("a link whose page ends on another site hands that site to its own case, as a redirect would", async () => {
-		const id = await websiteSubmission(375914181917937693n, CONSENT);
-		const elsewhere = "https://wallet-restore.example.net/";
-		PAGES[elsewhere] = "<html><body><h1>Restore</h1></body></html>";
-		const captures: ArchiveWebsiteOptions[] = [];
-
-		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({
-			captures,
-			answers: { ...KIT_ANSWERS, [elsewhere]: { ...KIT_ANSWERS[CONSENT]!, continuationRef: "" } },
-			capture: (options) => options.url === GET_STARTED
-				? liveCapture(options.url, [
-					{ index: 0, url: GET_STARTED, hostname: new URL(SITE).hostname, status: 302, redirectTo: elsewhere, contentCaptured: false },
-					{ index: 1, url: elsewhere, hostname: "wallet-restore.example.net", status: 200, contentCaptured: true },
-				])
-				: liveCapture(options.url),
-		}));
-
-		const submission = await SubmissionsEntity.get(id);
-		expect(submission?.status).toBe("redirected");
-		expect(submission?.info).toBe(`${CONSENT} sends visitors on to wallet-restore.example.net through its link "I agree" to ${GET_STARTED}; that site is analyzed and reported in its own case.`);
-		expect(websiteData(submission)?.navigationHops?.map(({ url, status, followedLink }) => ({ url, status, followed: followedLink?.label }))).toEqual([
-			{ url: CONSENT, status: 200, followed: "I agree" },
-			{ url: GET_STARTED, status: 302, followed: undefined },
-			{ url: elsewhere, status: 200, followed: undefined },
-		]);
-		const child = await waitForStatus(BigInt(websiteData(submission)!.redirectSubmissionId!), ["reported", "failed", "invalid"]);
-		expect(child.source).toBe(`redirect:${id}`);
-		expect(websiteData(child)?.navigationHops?.map(({ url }) => url)).toEqual([elsewhere]);
-		// The destination's case analyzes the page the link reached; it does not load it again.
-		expect(captures.filter(({ url }) => url === elsewhere)).toEqual([expect.objectContaining({ archivedUrl: elsewhere, mhtmlSnapshot: expect.any(Buffer) })]);
-	});
-
-	test("a link back to a page already captured, or past the follow limit, is not followed", async () => {
-		const loopId = await websiteSubmission(375914181917937694n, CONSENT);
-		const loopCaptures: ArchiveWebsiteOptions[] = [];
-		const consentHtml = capturedDocumentContent(PAGES[GET_STARTED]!.replace('href="secure.html"', `href="${CONSENT}"`)).html;
-		await analyzeWebsite({ submissionId: loopId, url: CONSENT }, dependencies({
-			captures: loopCaptures,
-			capture: (options) => options.url === GET_STARTED ? { ...liveCapture(options.url), html: Buffer.from(consentHtml, "utf8") } : liveCapture(options.url),
-		}));
-		expect(loopCaptures.map(({ url }) => url)).toEqual([CONSENT, GET_STARTED]);
-		// A loop ends the site's flow: the page before it is the verdict.
-		const loopCase = await SubmissionsEntity.get(loopId);
-		expect(loopCase?.status).toBe("invalid");
-		expect(loopCase?.info).toBe(`No reportable phishing or malware evidence was found at the captured destination ${GET_STARTED}; no report was created. The site's flow ended there: its link "Import an existing wallet" to ${CONSENT} leads back to a page already captured.`);
-
-		// A site whose every page links on stops after three followed links.
-		const pages = Array.from({ length: 6 }, (_, index) => `${SITE}/page-${index}.html`);
-		pages.forEach((page, index) => { PAGES[page] = `<html><body><h1>MetaMask step ${index}</h1><a href="${pages[index + 1] ?? pages[0]}">Next</a></body></html>`; });
-		const endless: ClassifierAnswers = Object.fromEntries(pages.map((page) => [page, { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "l1", hiddenFrameRef: "", mobileHandoff: false }]));
-		const endlessCaptures: ArchiveWebsiteOptions[] = [];
-		const endlessId = await websiteSubmission(375914181917937695n, pages[0]!);
-		await analyzeWebsite({ submissionId: endlessId, url: pages[0]! }, dependencies({ answers: endless, captures: endlessCaptures }));
-		expect(endlessCaptures.map(({ url }) => url)).toEqual(pages.slice(0, 4));
-		// The flow goes on past the limit: no verdict, and no automatic retry, which would stop there again.
-		const endlessCase = await SubmissionsEntity.get(endlessId);
-		expect(endlessCase?.status).toBe("failed");
-		expect(endlessCase?.info).toBe(`Inconclusive: the capture could not finish the site's flow: its link "Next" to ${pages[4]} was not followed after 3 steps. The last page it reached, ${pages[3]}, shows nothing reportable by itself; no verdict or report was made.`);
-		expect(websiteData(endlessCase)?.autoRetry).toBeUndefined();
-	});
-});
 
 /**
  * The DocuSign email gate of submission 376813288618463354, as the residential
@@ -454,275 +189,220 @@ PAGES[SIGN_IN] = `<html lang="en"><head><title>Sign in to your account</title></
 </div></body></html>`;
 
 const GATE_ANSWERS: ClassifierAnswers = {
-	[GATE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "f5", hiddenFrameRef: "", mobileHandoff: false },
-	[SIGN_IN]: { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Enter password", collectionFieldRefs: ["f1"], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false },
+	[GATE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false },
+	[SIGN_IN]: { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Enter password", collectionFieldRefs: ["f1"], hiddenFrameRef: "", mobileHandoff: false },
 };
 
-const EMAIL_FIELD = { ref: "f5", control: "input[type=email]", id: "email", name: "email", autocomplete: "email", label: "Email address", placeholder: "you@example.com" };
-
-/**
- * A live visit whose browser stays open: `pages` answers each action with what
- * the page then shows (by the action and how many were taken before it), and
- * the session records every action and whether it was closed.
- */
-function liveVisit(first: WebsiteArchiveResult, pages: (action: WebsitePageAction, taken: number) => WebsiteArchiveResult | Error) {
-	const actions: WebsitePageAction[] = [];
-	const visit = { actions, closed: 0, archive: undefined as unknown as WebsiteArchiveResult };
-	const session: WebsitePageSession = {
-		act: async (action) => {
-			if (visit.closed) throw new Error("act on a closed session");
-			const page = pages(action, actions.length);
-			actions.push(action);
-			if (page instanceof Error) throw page;
-			return page;
-		},
-		close: async () => { visit.closed++; },
-	};
-	visit.archive = { ...first, session };
-	return visit;
-}
 
 const RESIDENTIAL = { route: "residential exit" } as const;
 const hopsTo = (url: string, from?: { url: string; status: number }) => from
 	? [{ index: 0, url: from.url, hostname: new URL(from.url).hostname, status: from.status, redirectTo: url, contentCaptured: false }, { index: 1, url, hostname: new URL(url).hostname, status: 200, contentType: "text/html", contentCaptured: true }]
 	: [{ index: 0, url, hostname: new URL(url).hostname, status: 200, contentType: "text/html", contentCaptured: true }];
-const performed = (action: WebsitePageAction, humanCheck?: "passed" | "unsolved") => (action.kind === "fill" && humanCheck ? { ...action, humanCheck } : action) as WebsitePerformedAction;
 
-describe("actions on a kit's own pages", () => {
-	test("only an identifier field the page can find again, on a page without a password field, can be submitted", () => {
-		const gateHtml = capturedDocumentContent(PAGES[GATE]!).html;
-		expect(websiteContinuation({ continuationRef: "F5" }, gateHtml, GATE)).toEqual({ kind: "field", field: EMAIL_FIELD });
-		// Unknown refs, and a field with neither id nor name, name nothing.
-		expect(websiteContinuation({ continuationRef: "f9" }, gateHtml, GATE)).toBeUndefined();
-		expect(websiteContinuation({ continuationRef: "f1" }, `<input type="email" placeholder="Email">`, GATE)).toBeUndefined();
-		// A password field is never filled, and a page that asks for one shows its harmful step itself.
-		const signInHtml = capturedDocumentContent(PAGES[SIGN_IN]!).html;
-		expect(websiteContinuation({ continuationRef: "f1" }, signInHtml, SIGN_IN)).toBeUndefined();
-		expect(websiteContinuation({ continuationRef: "f1" }, `<input type="email" name="email"><input type="password" name="pw">`, GATE)).toBeUndefined();
-		// Only typed identifiers: no selects, text areas, or numbers.
-		expect(websiteContinuation({ continuationRef: "f1" }, `<select name="country"><option>DE</option></select>`, GATE)).toBeUndefined();
-		expect(websiteContinuation({ continuationRef: "f1" }, `<textarea name="message"></textarea>`, GATE)).toBeUndefined();
-		expect(websiteContinuation({ continuationRef: "f1" }, `<input type="number" name="amount">`, GATE)).toBeUndefined();
-		expect(websiteContinuation({ continuationRef: "f1" }, `<input type="tel" name="phone">`, GATE)).toMatchObject({ kind: "field", field: { name: "phone" } });
-	});
+/** The MetaMask kit's visit: the agent agrees, gets started, and reaches the recovery form. */
+const METAMASK_VISIT: ScriptedVisit = { steps: [liveCapture(GET_STARTED), liveCapture(RECOVERY)] };
 
-	test("a kit's buttons are listed once per caption, never disabled, hidden, or captionless ones", () => {
-		const html = `<div class="card"><h1>One more step</h1><button type="button" id="x1"><span></span><span>Confirm</span></button>
-<button>Confirm</button><button disabled>Continue</button><button aria-hidden="true">Skip</button><button><svg/></button>
-<input type="submit" value="View document"><div role="button" aria-label="Open file"></div><a href="/next">Next</a></div>`;
-		expect(extractWebsiteContinuationControls(html)).toEqual([
-			{ ref: "b1", label: "Confirm" },
-			{ ref: "b2", label: "View document" },
-			{ ref: "b3", label: "Open file" },
-		]);
-		expect(websiteContinuation({ continuationRef: "B1" }, html, GATE)).toEqual({ kind: "click", control: { ref: "b1", label: "Confirm" } });
-		expect(websiteContinuation({ continuationRef: "b9" }, html, GATE)).toBeUndefined();
-		// Links keep their own refs; a link ref never names a button.
-		expect(websiteContinuation({ continuationRef: "l1" }, html, GATE)).toMatchObject({ kind: "link" });
-	});
-
-	test("the DocuSign email gate is submitted with a canary in the same visit, and its sign-in page is reported", async () => {
+describe("a visit through a multi-page kit", () => {
+	test("the MetaMask kit is walked from its consent page to the recovery-phrase form and reported with every page", async () => {
 		const captures: ArchiveWebsiteOptions[] = [];
 		const modelCalls: Array<{ kind: "classification" | "analysis"; url: string }> = [];
-		const visit = liveVisit({ ...liveCapture(GATE), ...RESIDENTIAL }, (action) => ({
-			...liveCapture(GATE, hopsTo(SIGN_IN, { url: GATE, status: 302 })),
-			...RESIDENTIAL,
-			performedAction: performed(action, "passed"),
-		}));
+		const id = await websiteSubmission(375914181917937690n, CONSENT);
+		const visit = visited(liveCapture(CONSENT), METAMASK_VISIT);
+
+		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({ captures, modelCalls, capture: () => visit.archive }));
+
+		// One capture; the agent walks the rest of the site in its browser, which is released.
+		expect(captures.map(({ url }) => url)).toEqual([CONSENT]);
+		expect(visit.state.closed).toBeGreaterThanOrEqual(1);
+		// The pages are judged in the order shown until the first reportable one; the narrative describes it.
+		expect(modelCalls).toEqual([
+			{ kind: "classification", url: CONSENT },
+			{ kind: "classification", url: GET_STARTED },
+			{ kind: "classification", url: RECOVERY },
+			{ kind: "analysis", url: RECOVERY },
+		]);
+
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("reported");
+		expect(submission?.info).toBe(`Phishing confirmed at ${RECOVERY}; evidence for it and the 2 URLs on ${new URL(SITE).hostname} that lead to it is being collected before the report is sent.`);
+		const website = websiteData(submission);
+		expect(website?.archiveUrl).toBe(RECOVERY);
+		expect(website?.navigationHops?.map(({ index, url, redirectTo, visitorStep, contentCaptured }) => ({ index, url, redirectTo, visitorStep, contentCaptured }))).toEqual([
+			{ index: 0, url: CONSENT, redirectTo: GET_STARTED, visitorStep: { submitted: [] }, contentCaptured: false },
+			{ index: 1, url: GET_STARTED, redirectTo: RECOVERY, visitorStep: { submitted: [] }, contentCaptured: false },
+			{ index: 2, url: RECOVERY, redirectTo: undefined, visitorStep: undefined, contentCaptured: true },
+		]);
+		// Each page keeps its own finding.
+		expect(website?.siteAssessments?.map(({ hopIndex, finding }) => ({ hopIndex, finding }))).toEqual([
+			{ hopIndex: 0, finding: "insufficient_evidence" },
+			{ hopIndex: 1, finding: "insufficient_evidence" },
+			{ hopIndex: 2, finding: "phishing" },
+		]);
+		expect(website?.siteAssessments?.[2]).toMatchObject({
+			phishingBasis: "credential_theft",
+			evidenceQuote: "Access your wallet with your Secret Recovery Phrase",
+			collectionFields: [{ ref: "f2", name: "word1" }, { ref: "f3", name: "word2" }],
+		});
+		expect(website?.visit).toMatchObject({ runId: "tsk_v2_scripted", outcome: "completed" });
+		// The kit files of every page are kept for sibling discovery, once per hash.
+		expect(website?.kitResources?.map(({ sha256 }) => sha256)).toEqual(["a".repeat(64), "b".repeat(64)]);
+
+		// Every page is evidence with its own stamped screenshot and manifest.
+		const artifacts = await ArtifactsEntity.listForSubmission(id);
+		expect(artifacts.map(({ name }) => name).sort()).toEqual([
+			"evidence-manifest.json",
+			"evidence-step2-manifest.json",
+			"evidence-step3-manifest.json",
+			"website-stamped.png",
+			"website-step2-stamped.png",
+			"website-step2.mhtml",
+			"website-step2.png",
+			"website-step3-stamped.png",
+			"website-step3.mhtml",
+			"website-step3.png",
+			"website.mhtml",
+			"website.png",
+		]);
+		const manifest = JSON.parse((await ArtifactsEntity.get(artifacts.find(({ name }) => name === "evidence-step3-manifest.json")!.id))!.blob.toString("utf8"));
+		expect(manifest.capture.capturedUrl).toBe(RECOVERY);
+		expect(manifest.capture.navigation[1]).toMatchObject({ url: GET_STARTED, visitorStep: { submitted: [] } });
+
+		// The report names all three pages, the form first, and shows each page.
+		const report = await AbuseRepository.getReportForSubmission(id);
+		const targets = await AbuseRepository.listTargets(report!.id);
+		expect(targets.map(({ normalizedTarget, observedUrls }) => ({ normalizedTarget, observedUrls }))).toEqual([
+			{ normalizedTarget: new URL(SITE).hostname, observedUrls: [RECOVERY, CONSENT, GET_STARTED] },
+		]);
+		const input = await AbuseRepository.getReportInput(report!.id);
+		expect(input?.evidenceArtifacts.map(({ name }) => name)).toEqual(["website-step3.png", "website.png", "website-step2.png"]);
+		expect(report!.description).toContain(`Visitors reach the page through the site's own earlier pages: ${CONSENT}, then ${GET_STARTED}.`);
+	});
+
+	test("the DocuSign gate takes the visit's made-up email, and its sign-in page sends the made-up password to a Telegram bot: reported with that data drop", async () => {
+		const modelCalls: Array<{ kind: "classification" | "analysis"; url: string }> = [];
 		const id = await websiteSubmission(376813288618463354n, GATE);
+		const bot = "https://api.telegram.org/bot8123456789:AAH-kit-token/sendMessage";
+		const visit = visited({ ...liveCapture(GATE), ...RESIDENTIAL }, {
+			steps: [{ ...liveCapture(GATE, hopsTo(SIGN_IN, { url: GATE, status: 302 })), ...RESIDENTIAL }],
+			requests: (canaries) => [
+				// The gate's form posts the email to the kit itself while the gate is shown…
+				{ timestamp: "2026-11-15T10:00:00.500Z", url: GATE, method: "POST", postData: `email=${encodeURIComponent(canaries.email)}` },
+				// …and the sign-in page's script posts the password to the kit's bot.
+				{ timestamp: "2026-11-15T10:00:01.500Z", url: bot, method: "POST", postData: JSON.stringify({ chat_id: "-100777", text: `pass: ${canaries.password}` }) },
+			],
+			agent: { report: { submissionsAttempted: 2, downloadsStarted: 0, asksForPhone: false, stoppedReason: "The sign-in page showed an error after the password." } },
+		});
 
-		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({ answers: GATE_ANSWERS, captures, modelCalls, capture: () => visit.archive }));
+		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({ answers: GATE_ANSWERS, captures: [], modelCalls, capture: () => visit.archive }));
 
-		// One live capture; the email is submitted on its page, and only the email
-		// field is filled, with a value that reaches no one.
-		expect(captures).toEqual([expect.objectContaining({ url: GATE, keepSession: true })]);
-		expect(visit.actions).toEqual([{ kind: "fill", field: EMAIL_FIELD, value: expect.stringMatching(/^probe\.[0-9a-f]{16}@probe-canary\.invalid$/) }]);
-		const value = (visit.actions[0] as { value: string }).value;
-		// The browser is released once the flow is done, before the narrative and the report.
-		expect(visit.closed).toBeGreaterThanOrEqual(1);
 		expect(modelCalls).toEqual([
 			{ kind: "classification", url: GATE },
 			{ kind: "classification", url: SIGN_IN },
 			{ kind: "analysis", url: SIGN_IN },
 		]);
-
 		const submission = await SubmissionsEntity.get(id);
 		expect(submission?.status).toBe("reported");
 		const website = websiteData(submission);
-		expect(website?.archiveUrl).toBe(SIGN_IN);
 		expect(website?.navigationHops).toEqual([
-			{ index: 0, url: GATE, hostname: new URL(GATE).hostname, status: 200, contentType: "text/html", redirectTo: GATE, performedAction: { kind: "fill", field: EMAIL_FIELD, value, humanCheck: "passed" }, contentCaptured: false },
+			{ index: 0, url: GATE, hostname: new URL(GATE).hostname, status: 200, contentType: "text/html", redirectTo: GATE, visitorStep: { submitted: ["email"] }, contentCaptured: false },
 			{ index: 1, url: GATE, hostname: new URL(GATE).hostname, status: 302, redirectTo: SIGN_IN, contentCaptured: false },
 			{ index: 2, url: SIGN_IN, hostname: new URL(GATE).hostname, status: 200, contentType: "text/html", contentCaptured: true },
 		]);
-		expect(website?.siteAssessments?.map(({ hopIndex, finding }) => ({ hopIndex, finding }))).toEqual([
-			{ hopIndex: 0, finding: "phishing" },
-			{ hopIndex: 1, finding: "phishing" },
-			{ hopIndex: 2, finding: "phishing" },
+		expect(website?.visit?.dataSent).toEqual([
+			{ url: GATE, method: "POST", fields: ["email"], sameSite: true },
+			{ url: bot, method: "POST", fields: ["password"], sameSite: false },
 		]);
 
-		// The sign-in page is classified knowing how it was reached and whose value it shows.
-		const input = buildWebsiteClassificationInput(website!.navigationHops![2]!, { ...liveCapture(SIGN_IN), navigationHops: website!.navigationHops! });
+		// The sign-in page is classified knowing how it was reached and what it sent.
+		const input = buildWebsiteClassificationInput(website!.navigationHops![2]!, {
+			...liveCapture(SIGN_IN),
+			navigationHops: website!.navigationHops!,
+			dataSent: [{ url: bot, method: "POST", fields: ["password"], sameSite: false }],
+		});
 		const text = (input[1]!.content as Array<{ text?: string }>)[0]!.text!;
-		expect(text).toContain(`The visitor reaches this page by entering their details into the field "Email address" on ${GATE}, an earlier page of the same site, and submitting it. The capture entered the made-up value "${value}"; wherever this page shows that value, it is the capture's, not a real visitor's.`);
-		expect(text).not.toContain("captcha beside that field had not passed");
+		expect(text).toContain(`The visitor reaches this page from ${GATE}, an earlier page of the same visit, after entering the synthetic email address there and submitting; wherever this page shows those values, they are the visit's, not a real visitor's.`);
+		expect(text).toContain(`data_sent[1]:\n  - url: "${bot}"\n    method: POST\n    values[1]: password\n    same_site: false`);
+		expect((input[0]!.content as string)).toContain("a page whose form sent the synthetic values it asked for to a messaging bot (api.telegram.org)");
 
-		// The email page is its own evidence step.
-		expect((await ArtifactsEntity.listForSubmission(id)).map(({ name }) => name).sort()).toEqual([
-			"evidence-manifest.json",
-			"evidence-step2-manifest.json",
-			"website-stamped.png",
-			"website-step2-stamped.png",
-			"website-step2.mhtml",
-			"website-step2.png",
-			"website.mhtml",
-			"website.png",
-		]);
 		const report = await AbuseRepository.getReportForSubmission(id);
-		expect(report!.description).toContain(`Visitors reach the page through the site's own earlier pages: submitting the field "Email address" on ${GATE}.`);
-		// The canary is ours; it never goes into a provider's report.
-		expect(report!.description).not.toContain(value);
+		expect(report!.description).toContain(`Visitors reach the page through the site's own earlier pages: ${GATE}, where our visit entered a synthetic email address and submitted.`);
+		expect(report!.description).toContain(`In our visit with synthetic data, the site sent the entered password to ${bot} (POST).`);
+		// The data drop is reported at its own host by the investigation, from the visit's own recording.
+		const job = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, report!.id)).get()!;
+		expect(readInvestigationJobPayload(job.payload).dataDrops).toEqual([expect.objectContaining({ kind: "telegram_bot", key: "telegram-token:8123456789:AAH-kit-token", matchedCanaries: ["marker", "password"] })]);
+		const capture = (await getDb()).select().from(abuseArtifacts).where(eq(abuseArtifacts.reportId, report!.id)).all().find((artifact) => artifact.name === "exfiltration-network-capture.json");
+		expect(JSON.parse(Buffer.from(capture!.blob).toString("utf8"))).toMatchObject({ version: 2, pageUrl: SIGN_IN, backends: [expect.objectContaining({ kind: "telegram_bot" })] });
 	});
 
-	test("the kit's \"One more step\" button is clicked, then its email page submitted, all in one visit", async () => {
-		const INTERSTITIAL_URL = `${GATE_SITE}/bddd57b086e6`;
-		PAGES[INTERSTITIAL_URL] = `<html><head><title>One more step</title></head><body><div>Protected session</div><h1>One more step</h1>
-<p>One click verifies your session and lets you continue.</p><button type="button" id="fsjrdbmpp03a"><span>Confirm</span></button>
-<input type="text" name="website" tabindex="-1" aria-hidden="true"></body></html>`;
-		const answers: ClassifierAnswers = {
-			[INTERSTITIAL_URL]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "b1", hiddenFrameRef: "", mobileHandoff: false },
-			...GATE_ANSWERS,
-		};
-		const captures: ArchiveWebsiteOptions[] = [];
+	test("a page that is already reportable ends the judging: later pages are not classified", async () => {
 		const modelCalls: Array<{ kind: "classification" | "analysis"; url: string }> = [];
-		// The submitted URL's self-posting step lands on the interstitial.
-		const visit = liveVisit({ ...liveCapture(INTERSTITIAL_URL, hopsTo(INTERSTITIAL_URL, { url: GATE, status: 302 })), requestedUrl: GATE, ...RESIDENTIAL }, (action, taken) => (taken === 0
-			? { ...liveCapture(GATE, hopsTo(GATE)), requestedUrl: GATE, ...RESIDENTIAL, performedAction: performed(action) }
-			: { ...liveCapture(SIGN_IN, hopsTo(SIGN_IN, { url: GATE, status: 302 })), requestedUrl: GATE, ...RESIDENTIAL, performedAction: performed(action, "passed") }));
-		const id = await websiteSubmission(376813288618463359n, GATE);
-
-		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({ answers, captures, modelCalls, capture: () => visit.archive }));
-
-		expect(captures).toHaveLength(1);
-		expect(visit.actions.map((action) => action.kind)).toEqual(["click", "fill"]);
-		expect(visit.actions[0]).toEqual({ kind: "click", control: { ref: "b1", label: "Confirm" } });
-		expect(modelCalls.map(({ url }) => url)).toEqual([INTERSTITIAL_URL, GATE, SIGN_IN, SIGN_IN]);
-
-		const submission = await SubmissionsEntity.get(id);
-		expect(submission?.status).toBe("reported");
-		const website = websiteData(submission);
-		expect(website?.navigationHops?.map(({ url, status, performedAction, contentCaptured }) => ({ url, status, action: performedAction?.kind, contentCaptured }))).toEqual([
-			{ url: GATE, status: 302, action: undefined, contentCaptured: false },
-			{ url: INTERSTITIAL_URL, status: 200, action: "click", contentCaptured: false },
-			{ url: GATE, status: 200, action: "fill", contentCaptured: false },
-			{ url: GATE, status: 302, action: undefined, contentCaptured: false },
-			{ url: SIGN_IN, status: 200, action: undefined, contentCaptured: true },
-		]);
-		// The email page, as it was classified: reached by the click before it.
-		const emailPageHops = website!.navigationHops!.slice(0, 3).map((hop, index) => (index === 2 ? { ...hop, performedAction: undefined, contentCaptured: true } : hop));
-		const input = buildWebsiteClassificationInput(emailPageHops[2]!, { ...liveCapture(GATE), navigationHops: emailPageHops });
-		expect((input[1]!.content as Array<{ text?: string }>)[0]!.text!).toContain(`The visitor reaches this page by clicking the button "Confirm" on ${INTERSTITIAL_URL}, an earlier page of the same site.`);
-		const report = await AbuseRepository.getReportForSubmission(id);
-		expect(report!.description).toContain(`Visitors reach the page through the site's own earlier pages: clicking the button "Confirm" on ${INTERSTITIAL_URL}, then submitting the field "Email address" on ${GATE}.`);
+		const id = await websiteSubmission(375914181917937698n, CONSENT);
+		const visit = visited(liveCapture(CONSENT), METAMASK_VISIT);
+		const answers = { ...KIT_ANSWERS, [GET_STARTED]: { ...KIT_ANSWERS[RECOVERY]!, evidenceQuote: "Import an existing wallet", collectionFieldRefs: [] } };
+		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({ answers, captures: [], modelCalls, capture: () => visit.archive }));
+		expect(modelCalls.map(({ url }) => url)).toEqual([CONSENT, GET_STARTED, GET_STARTED]);
+		expect(websiteData(await SubmissionsEntity.get(id))?.archiveUrl).toBe(GET_STARTED);
 	});
 
-	test("a submission whose captcha never passed and that changed nothing stops the flow and says so", async () => {
-		const id = await websiteSubmission(376813288618463355n, GATE);
-		const visit = liveVisit({ ...liveCapture(GATE), ...RESIDENTIAL }, (action) => ({ ...liveCapture(GATE), ...RESIDENTIAL, performedAction: performed(action, "unsolved") }));
+	test("a visit that did not finish leaves a case with nothing reportable inconclusive, retried from the submitted URL; a later visit that finishes reports it", async () => {
+		const id = await websiteSubmission(375914181917937692n, CONSENT);
+		const failure = "failed: Skyvern could not reach its model";
+		let visits = 0;
+		const deps = dependencies({
+			captures: [],
+			capture: () => (++visits === 1
+				? visited(liveCapture(CONSENT), { steps: [liveCapture(GET_STARTED)], agent: { outcome: "failed", failure, report: undefined } })
+				: visited(liveCapture(CONSENT), METAMASK_VISIT)).archive,
+		});
 
-		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({ answers: GATE_ANSWERS, captures: [], capture: () => visit.archive }));
-
-		const submission = await SubmissionsEntity.get(id);
+		await analyzeWebsite({ submissionId: id, url: CONSENT }, deps);
+		let submission = await SubmissionsEntity.get(id);
 		expect(submission?.status).toBe("failed");
-		expect(submission?.info).toStartWith(`Inconclusive: the capture could not finish the site's flow: its field "Email address" changed nothing on the page; the captcha beside it never passed. The last page it reached, ${GATE}, shows nothing reportable by itself;`);
-		expect(websiteData(submission)?.autoRetry?.attempts).toBe(1);
-		expect(websiteData(submission)?.navigationHops).toHaveLength(1);
-		expect(visit.closed).toBeGreaterThanOrEqual(1);
+		expect(submission?.info).toStartWith(`Inconclusive: the visit could not finish the site's flow: ${failure} The last page it reached, ${GET_STARTED}, shows nothing reportable by itself; no verdict or report was made. Retrying automatically at `);
+		expect(websiteData(submission)).toMatchObject({ unfinishedFlow: failure, autoRetry: { attempts: 1, reason: failure } });
+		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
+
+		// The retry visits the submitted URL live; the stored page of an unfinished visit is not reused.
+		const retried: Array<Parameters<typeof analyzeWebsite>[0]> = [];
+		await retryFailedWebsiteAnalysis(id, async (options) => { retried.push(options); });
+		expect(retried).toEqual([expect.objectContaining({ url: CONSENT, mhtmlSnapshot: undefined, reuseEvidenceArtifacts: false })]);
+
+		await analyzeWebsite(retried[0]!, deps);
+		submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("reported");
+		expect(websiteData(submission)?.unfinishedFlow).toBeUndefined();
+		expect(websiteData(submission)?.autoRetry).toBeUndefined();
 	});
 
-	test("a page that asks for the same field again after its submission is not submitted twice", async () => {
-		const id = await websiteSubmission(376813288618463358n, GATE);
-		const rejected = capturedDocumentContent(PAGES[GATE]!.replace("<h1>Verify Your Email</h1>", "<h1>Verify Your Email</h1><p>This address is not allowed.</p>"));
-		const visit = liveVisit({ ...liveCapture(GATE), ...RESIDENTIAL }, (action) => ({
-			...liveCapture(GATE),
-			...RESIDENTIAL,
-			html: Buffer.from(rejected.html),
-			text: Buffer.from(rejected.text),
-			performedAction: performed(action, "passed"),
-		}));
-
-		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({ answers: GATE_ANSWERS, captures: [], capture: () => visit.archive }));
-
-		expect(visit.actions).toHaveLength(1);
+	test("a finished visit that found nothing is a verdict, not a retry", async () => {
+		const id = await websiteSubmission(375914181917937699n, CONSENT);
+		const nothing = { ...KIT_ANSWERS, [RECOVERY]: { ...KIT_ANSWERS[CONSENT]! } };
+		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({ answers: nothing, captures: [], capture: () => visited(liveCapture(CONSENT), METAMASK_VISIT).archive }));
 		const submission = await SubmissionsEntity.get(id);
 		expect(submission?.status).toBe("invalid");
-		expect(submission?.info).toEndWith(`The site's flow ended there: its field "Email address" was already submitted on the way to this page.`);
-		expect(websiteData(submission)?.navigationHops?.map(({ url, performedAction, contentCaptured }) => ({ url, submitted: Boolean(performedAction), contentCaptured }))).toEqual([
-			{ url: GATE, submitted: true, contentCaptured: false },
-			{ url: GATE, submitted: false, contentCaptured: true },
-		]);
+		expect(submission?.info).toBe(`No reportable phishing or malware evidence was found at the captured destination ${RECOVERY}; no report was created.`);
+		expect(websiteData(submission)?.autoRetry).toBeUndefined();
 	});
 
-	test("a field the live page does not show stops the flow with the reason", async () => {
-		const id = await websiteSubmission(376813288618463356n, GATE);
-		const missing = new WebsiteCaptureFailedError([new WebsiteUnreachableError("residential", `the page showed no field "Email address" to enter the value into`)]);
-		const visit = liveVisit({ ...liveCapture(GATE), ...RESIDENTIAL }, () => missing);
+	test("a retry reuses the analyzed page's own capture, not the first page's", async () => {
+		const id = await websiteSubmission(375914181917937691n, CONSENT);
+		const unconfirmed = { ...KIT_ANSWERS, [RECOVERY]: { ...KIT_ANSWERS[CONSENT]! } };
+		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({ answers: unconfirmed, captures: [], capture: () => visited(liveCapture(CONSENT), METAMASK_VISIT).archive }));
+		// As if the analysis had failed after its captures: the case is retryable.
+		await SubmissionsEntity.update(id, { status: "failed" });
 
-		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({ answers: GATE_ANSWERS, captures: [], capture: () => visit.archive }));
-
-		expect((await SubmissionsEntity.get(id))?.info).toStartWith(`Inconclusive: the capture could not finish the site's flow: its field "Email address" could not be submitted (${missing.message}).`);
-		expect(visit.closed).toBeGreaterThanOrEqual(1);
+		const started: Array<Parameters<typeof analyzeWebsite>[0]> = [];
+		await retryFailedWebsiteAnalysis(id, async (options) => { started.push(options); });
+		expect(started).toHaveLength(1);
+		expect(started[0]!.archivedUrl).toBe(RECOVERY);
+		expect(started[0]!.mhtmlSnapshot?.toString("utf8")).toContain(`Snapshot-Content-Location: ${RECOVERY}`);
+		expect(started[0]!.reuseEvidenceArtifacts).toBe(true);
+		expect(started[0]!.navigationHops?.filter((hop) => hop.visitorStep)).toHaveLength(2);
 	});
 
-	test("a page from a stored capture is loaded live before the action, from the page that linked to it", async () => {
-		const id = await websiteSubmission(376813288618463360n, GATE);
-		const captures: ArchiveWebsiteOptions[] = [];
-		const visit = liveVisit({ ...liveCapture(GATE), ...RESIDENTIAL }, (action) => ({ ...liveCapture(SIGN_IN, hopsTo(SIGN_IN, { url: GATE, status: 302 })), ...RESIDENTIAL, performedAction: performed(action, "passed") }));
-
-		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({
-			answers: GATE_ANSWERS,
-			captures,
-			// The first capture is a stored MHTML: it has no open browser.
-			capture: () => (captures.length === 1 ? { ...liveCapture(GATE), ...RESIDENTIAL } : visit.archive),
-		}));
-
-		expect(captures.map(({ url }) => url)).toEqual([GATE, GATE]);
-		expect(visit.actions.map((action) => action.kind)).toEqual(["fill"]);
-		expect((await SubmissionsEntity.get(id))?.status).toBe("reported");
-	});
-
-	test("a second identifier step is taken on the page the first one opened", async () => {
-		const PHONE = `${GATE_SITE}/word/phone.php`;
-		PAGES[PHONE] = `<html><body><h1>Confirm your phone</h1><form method="POST"><input type="tel" id="phone" name="phone"><button>Next</button></form></body></html>`;
-		const answers: ClassifierAnswers = {
-			[GATE]: GATE_ANSWERS[GATE]!,
-			[PHONE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "f1", hiddenFrameRef: "", mobileHandoff: false },
-			[SIGN_IN]: { ...GATE_ANSWERS[SIGN_IN]!, finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [] },
-		};
-		const visit = liveVisit({ ...liveCapture(GATE), ...RESIDENTIAL }, (action, taken) => ({
-			...liveCapture(taken === 0 ? PHONE : SIGN_IN, hopsTo(taken === 0 ? PHONE : SIGN_IN)),
-			...RESIDENTIAL,
-			performedAction: performed(action),
-		}));
-		const id = await websiteSubmission(376813288618463357n, GATE);
-
-		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({ answers, captures: [], capture: () => visit.archive }));
-
-		expect(visit.actions.map((action) => (action.kind === "fill" ? { name: action.field.name, value: action.value } : action))).toEqual([
-			{ name: "email", value: expect.stringMatching(/@probe-canary\.invalid$/) },
-			{ name: "phone", value: expect.stringMatching(/^\+12125550[01]\d\d$/) },
-		]);
-		const hops = websiteData(await SubmissionsEntity.get(id))?.navigationHops;
-		expect(hops?.map(({ url, performedAction }) => ({ url, field: performedAction?.kind === "fill" ? performedAction.field.name : undefined }))).toEqual([
-			{ url: GATE, field: "email" },
-			{ url: PHONE, field: "phone" },
-			{ url: SIGN_IN, field: undefined },
-		]);
-	});
-
-	test("a session gate whose button sends the visitor to the kit's own domain hands that domain to its own case, which is reported", async () => {
+	test("a visit whose flow reaches another site before anything reportable hands that site to its own case, as a redirect would", async () => {
 		// Submission 379232259422556174: a shortener answers with a "Verify this
-		// session" page; its "Continue" button opens the kit on another domain.
+		// session" page; the agent presses "Continue" and lands on the kit's own domain.
 		const SHORT = "https://encurtador09ea.com/sa";
 		const SESSION_GATE = "https://encurtador09ea.com/e4d5b3c9a66e";
 		const KIT = "https://en-web09.pw/login";
@@ -731,33 +411,29 @@ describe("actions on a kit's own pages", () => {
 		PAGES[KIT] = `<html><head><title>Sign in</title></head><body><img alt="Microsoft"><h1>Sign in</h1>
 <form method="POST"><input type="email" name="login" placeholder="Email"><input type="password" name="passwd" placeholder="Password"><button>Sign in</button></form></body></html>`;
 		const answers: ClassifierAnswers = {
-			[SESSION_GATE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "b1", hiddenFrameRef: "", mobileHandoff: false },
-			[KIT]: { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in", collectionFieldRefs: ["f1", "f2"], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false },
+			[SESSION_GATE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false },
+			[KIT]: { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in", collectionFieldRefs: ["f1", "f2"], hiddenFrameRef: "", mobileHandoff: false },
 		};
 		const captures: ArchiveWebsiteOptions[] = [];
-		const visit = liveVisit({ ...liveCapture(SESSION_GATE, hopsTo(SESSION_GATE, { url: SHORT, status: 302 })), requestedUrl: SHORT, ...RESIDENTIAL }, (action) => ({
-			...liveCapture(KIT, hopsTo(KIT)),
-			requestedUrl: SHORT,
-			...RESIDENTIAL,
-			performedAction: performed(action),
-		}));
+		const visit = visited({ ...liveCapture(SESSION_GATE, hopsTo(SESSION_GATE, { url: SHORT, status: 302 })), requestedUrl: SHORT, ...RESIDENTIAL }, {
+			steps: [{ ...liveCapture(KIT, hopsTo(KIT)), requestedUrl: SHORT, ...RESIDENTIAL }],
+		});
 		const id = await websiteSubmission(379232259422556174n, SHORT);
 
 		await analyzeWebsite({ submissionId: id, url: SHORT }, dependencies({
 			answers,
 			captures,
-			capture: (options) => (options.url === SHORT ? visit.archive : { ...liveCapture(options.url), ...RESIDENTIAL }),
+			capture: (options) => (options.url === SHORT ? visit.archive : visited({ ...liveCapture(options.url), ...RESIDENTIAL }).archive),
 		}));
 
-		expect(visit.actions).toEqual([{ kind: "click", control: { ref: "b1", label: "Continue" } }]);
-		expect(visit.closed).toBeGreaterThanOrEqual(1);
+		expect(visit.state.closed).toBeGreaterThanOrEqual(1);
 		const submission = await SubmissionsEntity.get(id);
 		expect(submission?.status).toBe("redirected");
-		expect(submission?.info).toBe(`${SHORT} sends visitors on to en-web09.pw through its button "Continue"; that site is analyzed and reported in its own case.`);
-		expect(websiteData(submission)?.navigationHops?.map(({ url, status, performedAction, contentCaptured }) => ({ url, status, action: performedAction?.kind, contentCaptured }))).toEqual([
-			{ url: SHORT, status: 302, action: undefined, contentCaptured: false },
-			{ url: SESSION_GATE, status: 200, action: "click", contentCaptured: false },
-			{ url: KIT, status: 200, action: undefined, contentCaptured: true },
+		expect(submission?.info).toBe(`${SHORT} sends visitors on to en-web09.pw through its own flow; that site is analyzed and reported in its own case.`);
+		expect(websiteData(submission)?.navigationHops?.map(({ url, status, visitorStep, contentCaptured }) => ({ url, status, moved: Boolean(visitorStep), contentCaptured }))).toEqual([
+			{ url: SHORT, status: 302, moved: false, contentCaptured: false },
+			{ url: SESSION_GATE, status: 200, moved: true, contentCaptured: false },
+			{ url: KIT, status: 200, moved: false, contentCaptured: true },
 		]);
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
 
@@ -766,15 +442,5 @@ describe("actions on a kit's own pages", () => {
 		expect(websiteData(child)?.url).toBe(KIT);
 		expect(websiteData(child)?.navigationHops?.map(({ index, url }) => ({ index, url }))).toEqual([{ index: 0, url: KIT }]);
 		expect((await AbuseRepository.getReportForSubmission(child.id))?.description).toContain('"Sign in"');
-	});
-
-	test("a followed link releases the page it leaves before loading the next one", async () => {
-		const id = await websiteSubmission(375914181917937696n, CONSENT);
-		const visits = [CONSENT, GET_STARTED, RECOVERY].map((page) => liveVisit(liveCapture(page), () => new Error("no action expected")));
-
-		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({ captures: [], capture: (options) => visits.find((visit) => visit.archive.url === options.url)!.archive }));
-
-		expect((await SubmissionsEntity.get(id))?.status).toBe("reported");
-		expect(visits.map((visit) => visit.closed > 0)).toEqual([true, true, true]);
 	});
 });

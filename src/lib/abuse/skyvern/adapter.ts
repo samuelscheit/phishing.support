@@ -102,6 +102,11 @@ export class AbuseSkyvernAdapter {
 		return objectPayload(await this.client.getRun(runId), "run");
 	}
 
+	/** What the run did so far: its blocks, actions and thoughts. */
+	async getRunTimeline(runId: string): Promise<unknown> {
+		return unwrapSdkResponse<unknown>(await this.client.getRunTimeline(runId));
+	}
+
 	async cancelRun(runId: string): Promise<void> {
 		await this.client.cancelRun(runId, NO_RETRY);
 	}

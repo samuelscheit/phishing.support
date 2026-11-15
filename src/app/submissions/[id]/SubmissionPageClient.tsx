@@ -19,7 +19,8 @@ import type { SubmissionDetail as ApiSubmissionDetail } from "@/lib/submissions/
 import { formatUtcDateTime } from "@/lib/date_time";
 import { cn } from "../../../web_lib/util";
 import { selectDisplayAnalysisRuns } from "@/lib/analysis_run_view";
-import { describeDataEntryField, humanCheckUnsolved, WEBSITE_DEVICE_LABEL, type WebsitePhishingBasis } from "@/lib/website_types";
+import { CANARY_FIELD_LABEL, describeDataEntryField, isFlowStepHop, WEBSITE_DEVICE_LABEL, type WebsitePhishingBasis } from "@/lib/website_types";
+import { SiteVisitPanel, type SiteVisitPage } from "@/components/SiteVisitPanel";
 import { websiteSiteName } from "@/lib/website_site";
 import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website_capture_files";
 
@@ -60,6 +61,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const verificationGate = submission?.data.kind === "website" ? submission.data.website.verificationGate : undefined;
 	const providerWarning = submission?.data.kind === "website" ? submission.data.website.providerWarning : undefined;
 	const offeredDownload = submission?.data.kind === "website" ? submission.data.website.offeredDownload : undefined;
+	const siteVisit = submission?.data.kind === "website" ? submission.data.website.visit : undefined;
 
 	const isRunning = ["new", "queued", "running"].includes(statusKey);
 	const websiteNavigation = submission?.data.kind === "website" ? submission.data.website.navigationHops ?? [] : [];
@@ -124,6 +126,12 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 		);
 	const artifacts = submission?.artifacts.filter((x) => x !== screenshot) || [];
 	const websiteArchiveDate = formatUtcDateTime(websiteMhtml?.archivedAt ?? websiteMhtml?.createdAt);
+	// Each page of the visit with its screenshot: the pages it moved on from, then the analyzed one.
+	const visitPages: SiteVisitPage[] = [...websiteNavigation.filter(isFlowStepHop), ...websiteNavigation.filter((hop) => hop.contentCaptured)].map((hop, step) => {
+		const names = websiteCaptureFileNames(step);
+		const shot = latestArtifactNamed(submissionArtifacts, names.stampedScreenshot) ?? latestArtifactNamed(submissionArtifacts, names.screenshot);
+		return { url: hop.url, ...(shot ? { screenshotId: String(shot.id) } : {}) };
+	});
 
 	const sanitizeHtmlForIframe = (rawHtml: string): string => {
 		try {
@@ -367,6 +375,10 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 							</div>
 						)}
 
+						{submission.data.kind === "website" ? (
+							<SiteVisitPanel submissionId={String(submission.id)} running={isRunning} pages={visitPages} visit={siteVisit} offeredDownload={offeredDownload} />
+						) : null}
+
 						{submission.data.kind === "website" && websiteNavigation.length > 0 ? (
 							<div className="space-y-2 rounded-md border bg-muted/20 p-3">
 								<div>
@@ -389,15 +401,13 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 													<div className="min-w-0 space-y-1">
 														<div className="break-all font-mono text-xs">{hop.url}</div>
 														<div className="text-xs text-muted-foreground">
-															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured and analyzed" : hop.followedLink ? " · Page captured, its link followed" : hop.performedAction ? (hop.performedAction.kind === "fill" ? " · Page captured, its field submitted" : " · Page captured, its button clicked") : hop.revisitedAs ? " · Page captured, it turns desktops away to a phone" : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
+															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured and analyzed" : hop.visitorStep ? " · Page captured, the visit moved on" : hop.revisitedAs ? " · Page captured, it turns desktops away to a phone" : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
 														</div>
-														{hop.followedLink && hop.redirectTo ? (
-															<div className="break-all text-xs text-muted-foreground">Its link “{hop.followedLink.label}” opens {hop.redirectTo}</div>
-														) : hop.performedAction && hop.redirectTo ? (
+														{hop.visitorStep && hop.redirectTo ? (
 															<div className="break-all text-xs text-muted-foreground">
-																{hop.performedAction.kind === "fill"
-																	? <>Entering the made-up “{hop.performedAction.value}” into “{describeDataEntryField(hop.performedAction.field)}”{humanCheckUnsolved(hop.performedAction.humanCheck) ? " (its captcha never passed)" : hop.performedAction.humanCheck === "passed_after_click" ? " (its captcha passed once its checkbox was clicked)" : ""} shows {hop.redirectTo}</>
-																	: <>Clicking its button “{hop.performedAction.control.label}” shows {hop.redirectTo}</>}
+																{hop.visitorStep.submitted.length
+																	? <>The visit entered the made-up {hop.visitorStep.submitted.map((field) => CANARY_FIELD_LABEL[field]).join(", ")} here; it then showed {hop.redirectTo}</>
+																	: <>The visit moved on to {hop.redirectTo}</>}
 															</div>
 														) : hop.revisitedAs && hop.redirectTo ? (
 															<div className="break-all text-xs text-muted-foreground">Opened again as {WEBSITE_DEVICE_LABEL[hop.revisitedAs]}, it shows {hop.redirectTo}</div>
@@ -406,11 +416,11 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 															<div className="text-xs text-muted-foreground">Behind the page's own “{verificationGate.label}” gate, clicked to reveal it</div>
 														) : null}
 														{providerWarning && hop.contentCaptured ? (
-															<div className="text-xs text-muted-foreground">{providerWarning.provider} shows its “{providerWarning.warning}” warning before this page; the capture proceeded past it</div>
+															<div className="text-xs text-muted-foreground">{providerWarning.provider} shows its “{providerWarning.warning}” warning before this page; the visit proceeded past it</div>
 														) : null}
 														{offeredDownload && hop.contentCaptured ? (
 															<div className="space-y-0.5 text-xs text-muted-foreground">
-																<div className="break-all">Offers <span className="font-mono">{offeredDownload.fileName}</span> ({offeredDownload.sizeBytes.toLocaleString()} bytes), got through {offeredDownload.via} and inspected without running it</div>
+																<div className="break-all">Offers <span className="font-mono">{offeredDownload.fileName}</span> ({offeredDownload.sizeBytes.toLocaleString()} bytes), downloaded by the visit and inspected without running it</div>
 																<div className="break-all font-mono">SHA-256 {offeredDownload.sha256}</div>
 																{offeredDownload.inspection.browserExtension ? (
 																	<div className="break-all">Browser extension “{offeredDownload.inspection.browserExtension.name}” with permissions {[...offeredDownload.inspection.browserExtension.permissions, ...offeredDownload.inspection.browserExtension.hostPermissions].join(", ")}</div>

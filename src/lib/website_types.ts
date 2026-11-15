@@ -6,18 +6,12 @@ export type WebsiteNavigationHop = {
 	redirectTo?: string;
 	contentType?: string;
 	/**
-	 * Set when the capture followed this page's own link, as a visitor would,
-	 * to the next page of its flow; `redirectTo` is the page that link opened.
-	 * The page was captured as an earlier step of the case.
+	 * Set on a page the visiting agent moved on from, as a victim would:
+	 * `redirectTo` is the page that then showed, and `submitted` names the
+	 * synthetic values the page sent off while it was shown (its form, or its
+	 * script). The page was captured as an earlier step of the case.
 	 */
-	followedLink?: { label: string };
-	/**
-	 * Set when the capture acted on this page as a visitor would, to reach the
-	 * next step of its flow: entered a made-up value into its field and
-	 * submitted it, or clicked its button. `redirectTo` is the page that then
-	 * showed. The page was captured as an earlier step of the case.
-	 */
-	performedAction?: WebsitePerformedAction;
+	visitorStep?: { submitted: CanaryField[] };
 	/**
 	 * Set when the page turned desktop visitors away to a phone (a QR code, a
 	 * link to copy, "not available on desktop") and the capture opened it
@@ -27,9 +21,42 @@ export type WebsiteNavigationHop = {
 	contentCaptured: boolean;
 };
 
-/** Whether the capture took a step of the page's flow from this hop: followed its link, acted on it, or opened it again as a phone. */
+/** The synthetic values a visit enters, by name. */
+export type CanaryField = "email" | "password" | "phone" | "cardNumber" | "oneTimeCode";
+
+/** How a report and a person name a synthetic value. */
+export const CANARY_FIELD_LABEL: Record<CanaryField, string> = {
+	email: "email address",
+	password: "password",
+	phone: "phone number",
+	cardNumber: "card number",
+	oneTimeCode: "one-time code",
+};
+
+/** One request through which a page sent synthetic values off while it was shown. */
+export type VisitDataSent = {
+	url: string;
+	method: string;
+	fields: CanaryField[];
+	/** Sent to the page's own site, rather than to a bot, a webhook, or another host. */
+	sameSite: boolean;
+};
+
+/** The visit as the case keeps it: what the agent did, and every request that carried synthetic values. */
+export type WebsiteVisitRecord = {
+	runId?: string;
+	/** `completed`: the agent finished; `failed`: it failed or could not start; `timed_out`: the visit's budget ended it. */
+	outcome: "completed" | "failed" | "timed_out";
+	failure?: string;
+	report?: { submissionsAttempted: number; downloadsStarted: number; asksForPhone: boolean; stoppedReason: string };
+	actions: Array<{ kind: string; text: string }>;
+	dataSent: VisitDataSent[];
+	downloadFailures: Array<{ url: string; reason: string }>;
+};
+
+/** Whether the visit moved on from this hop to a later page: the agent went on, or it was opened again as a phone. */
 export function isFlowStepHop(hop: WebsiteNavigationHop): boolean {
-	return Boolean(hop.followedLink || hop.performedAction || hop.revisitedAs);
+	return Boolean(hop.visitorStep || hop.revisitedAs);
 }
 
 /** The browser a capture presents: a Windows desktop, or a phone a mobile-only kit asks for. */
@@ -117,54 +144,6 @@ export type WebsiteHiddenFrame = {
 	userAgent: string;
 };
 
-/** A button on a captured page that continues its flow; found again on the live page by its caption. */
-export type WebsiteContinuationControl = {
-	/** Reference assigned in document order; the classifier cites it. */
-	ref: string;
-	/** The caption a visitor reads on it. */
-	label: string;
-};
-
-/**
- * One step a live capture takes on a page, as a visitor would: enter a value
- * into a field and submit it (the value goes into that field only), or click
- * a button.
- */
-export type WebsitePageAction =
-	| { kind: "fill"; field: WebsiteDataEntryField; value: string }
-	| { kind: "click"; control: WebsiteContinuationControl };
-
-/**
- * How the captcha widget beside a submitted field (Turnstile, reCAPTCHA,
- * hCaptcha) went before the form was sent: `passed` issued its token by
- * itself; `passed_after_click` did once the capture clicked its checkbox, as
- * a visitor would; `unsolved` and `unsolved_after_click` never did.
- */
-export type WebsiteHumanCheck = "passed" | "passed_after_click" | "unsolved" | "unsolved_after_click";
-
-/** Whether the widget beside the field never issued its token. */
-export function humanCheckUnsolved(check: WebsiteHumanCheck | undefined): boolean {
-	return check === "unsolved" || check === "unsolved_after_click";
-}
-
-/** A page action as the capture took it. */
-export type WebsitePerformedAction =
-	| (Extract<WebsitePageAction, { kind: "fill" }> & {
-		/** The captcha widget beside the field; absent when the form had none. */
-		humanCheck?: WebsiteHumanCheck;
-	})
-	| Extract<WebsitePageAction, { kind: "click" }>;
-
-/** The page action without what the capture observed while taking it, for replaying the visit. */
-export function pageActionOf(performed: WebsitePerformedAction): WebsitePageAction {
-	return performed.kind === "fill" ? { kind: "fill", field: performed.field, value: performed.value } : performed;
-}
-
-/** How the action reads to a person: `the field "Email address"`, `the button "Confirm"`. */
-export function describePageAction(action: WebsitePageAction): string {
-	return action.kind === "fill" ? `the field ${JSON.stringify(describeDataEntryField(action.field))}` : `the button ${JSON.stringify(action.control.label)}`;
-}
-
 /**
  * How a capture handled a page whose own script sends visitors to another site.
  * `detected`: Tor/datacenter visitors and the residential exit reached
@@ -176,27 +155,6 @@ export function describePageAction(action: WebsitePageAction): string {
  * of them. `unresolved`: only the decoy could be captured.
  */
 export type WebsiteCloaking = { outcome: "detected" | "uniform" | "unresolved"; detail: string };
-
-/** A link on a captured page to a file (an archive, installer, app, extension, or script), on any site. */
-export type WebsiteDownloadLink = {
-	/** Reference assigned in document order; the classifier cites it. */
-	ref: string;
-	label?: string;
-	/** Absolute URL of the file. */
-	url: string;
-};
-
-/** What gets the file a page offers: one of its download links, or one of its buttons. */
-export type WebsiteDownloadTarget =
-	| { kind: "link"; link: WebsiteDownloadLink }
-	| { kind: "click"; control: WebsiteContinuationControl };
-
-/** How a person reads the download target: `the link "Get it" to https://…`, `the button "Download"`. */
-export function describeDownloadTarget(target: WebsiteDownloadTarget): string {
-	return target.kind === "link"
-		? `the link ${JSON.stringify(target.link.label ?? target.link.url)} to ${target.link.url}`
-		: `the button ${JSON.stringify(target.control.label)}`;
-}
 
 /** What a downloaded file is, from its own bytes rather than its name or served type. */
 export type DownloadFormat =
@@ -262,8 +220,8 @@ export type DownloadInspection = {
 
 /** The file a page offers, as the capture received it by taking the page's own download step. */
 export type WebsiteOfferedDownload = {
-	/** The step the capture took to get it, e.g. `the button "Download Game-Copier.zip"`. */
-	via: string;
+	/** The page the visit was on when the file downloaded. */
+	pageUrl: string;
 	url: string;
 	fileName: string;
 	contentType?: string;
@@ -279,16 +237,6 @@ export type WebsiteOfferedDownload = {
  * dismissed as a visitor would: Cloudflare's "Suspected Phishing" interstitial.
  */
 export type WebsiteProviderWarning = { provider: string; warning: string };
-
-/** A link on a captured page to another page of the same site, which the capture can follow. */
-export type WebsiteContinuationLink = {
-	/** Reference assigned in document order; the classifier cites it. */
-	ref: string;
-	/** The caption a visitor clicks, when the link has one. */
-	label?: string;
-	/** Absolute URL the link opens. */
-	url: string;
-};
 
 /**
  * A script or stylesheet, from any host, as the browser received it during capture.

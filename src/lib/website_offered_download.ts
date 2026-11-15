@@ -5,8 +5,8 @@ import { lookupMalwareBazaar } from "./exfiltration/downloads/malwarebazaar";
 import type { LookupResult } from "./exfiltration/downloads/policy";
 import { lookupVirusTotal } from "./exfiltration/downloads/virustotal";
 import { downloadExcerptText, inspectDownload } from "./malware/download_inspection";
-import type { WebsitePageSession } from "./website_archive";
-import { describeDownloadTarget, type DownloadCodeSignal, type DownloadFormat, type WebsiteDownloadTarget, type WebsiteOfferedDownload } from "./website_types";
+import type { DownloadedFile } from "./website_download";
+import type { DownloadCodeSignal, DownloadFormat, WebsiteOfferedDownload } from "./website_types";
 
 /**
  * The file a page offers, as evidence: the capture takes the page's own
@@ -23,16 +23,15 @@ export async function defaultDownloadLookups(sha256: string, environment: Readon
 	]);
 }
 
-/** Take the page's download step in its live visit and inspect the file it delivers. */
-export async function fetchOfferedDownload(
-	session: Pick<WebsitePageSession, "download">,
-	target: WebsiteDownloadTarget,
+/** A file the visit downloaded, hashed and inspected without being run. */
+export async function offeredDownloadOf(
+	file: DownloadedFile,
+	pageUrl: string,
 	lookups: (sha256: string) => Promise<LookupResult[]> = defaultDownloadLookups,
 ): Promise<WebsiteOfferedDownload> {
-	const file = await session.download(target);
 	const sha256 = createHash("sha256").update(file.bytes).digest("hex");
 	return {
-		via: describeDownloadTarget(target),
+		pageUrl,
 		url: file.url,
 		fileName: file.fileName,
 		...(file.contentType ? { contentType: file.contentType } : {}),
@@ -85,7 +84,7 @@ export function offeredDownloadEvidence(download: WebsiteOfferedDownload | undef
 	const facts = {
 		file_name: download.fileName,
 		url: download.url,
-		got_through: download.via,
+		downloaded_on: download.pageUrl,
 		served_as: download.contentType,
 		size_bytes: download.sizeBytes,
 		sha256: download.sha256,
@@ -99,11 +98,11 @@ export function offeredDownloadEvidence(download: WebsiteOfferedDownload | undef
 		endpoints: inspection.endpoints,
 	};
 	const excerpts = inspection.excerpts.map((excerpt) => `<download_code file=${JSON.stringify(excerpt.file)} line="${excerpt.line}" signals="${excerpt.signals.join(",")}">\n${excerpt.text}\n</download_code>`).join("\n");
-	return `\noffered_download is the file this page offers, as the capture received it by taking the page's download step; it was inspected without being run. signals and endpoints are patterns found in its code (hints, not proof); each download_code block below is an excerpt of its code, verbatim:\n${toon.encode({ offered_download: facts })}\n${excerpts || "(No code in the file matched what the inspection looks for.)"}\n`;
+	return `\noffered_download is the file the visit downloaded while this page was shown, as a visitor gets it; it was inspected without being run. signals and endpoints are patterns found in its code (hints, not proof); each download_code block below is an excerpt of its code, verbatim:\n${toon.encode({ offered_download: facts })}\n${excerpts || "(No code in the file matched what the inspection looks for.)"}\n`;
 }
 
-/** What the classifier is told about downloads: when to name one, and how to judge the file. */
-export const DOWNLOAD_INSTRUCTIONS = "download_links lists the page's links to files (archives, installers, apps, browser extensions, scripts), on any site. When this page offers a file whose effect decides the finding and offered_download is not given yet, set downloadRef to the ref of the download link, or of the continuation_controls button, a visitor uses to get that file; prefer the control that delivers the file itself (\"Download Game-Copier.zip\") over one that only opens a dialog. The capture then takes that step in the same visit, inspects the file without running it, and classifies this page again with offered_download. Set downloadRef whatever finding the page text alone suggests; leave it empty when offered_download is given, when the page offers no file, or for an ordinary site's own product download. When offered_download is given, judge the page by what the file does: a file whose code reads the visitor's cookies, saved passwords, session tokens, or wallets and sends them to a server, or installs or runs something other than what the page advertises, makes the page malware however harmless the page looks; copy evidenceQuote verbatim from one download_code block that shows it. A file a malware scanner in scanner_verdicts already calls malicious also makes the page malware; quote the page text that offers it.";
+/** How the classifier judges a page by the file it hands out. */
+export const OFFERED_DOWNLOAD_INSTRUCTIONS = "When offered_download is given, judge the page by what the file does: a file whose code reads the visitor's cookies, saved passwords, session tokens, or wallets and sends them to a server, or installs or runs something other than what the page advertises, makes the page malware however harmless the page looks; copy evidenceQuote verbatim from one download_code block that shows it. A file a malware scanner in scanner_verdicts already calls malicious also makes the page malware; quote the page text that offers it.";
 
 /** The file as report facts, one per line. */
 export function offeredDownloadStatements(download: WebsiteOfferedDownload): string[] {
@@ -111,7 +110,7 @@ export function offeredDownloadStatements(download: WebsiteOfferedDownload): str
 	const extension = inspection.browserExtension;
 	const signals = (Object.entries(inspection.signals) as Array<[DownloadCodeSignal, string[]]>).filter(([, files]) => files.length);
 	return [
-		`The page offers the file ${JSON.stringify(download.fileName)} from ${download.url}: ${FORMAT_LABEL[inspection.format]}, ${download.sizeBytes} bytes, SHA-256 ${download.sha256}. The capture got it through ${download.via}, as a visitor would, and inspected it without running it.`,
+		`The page offers the file ${JSON.stringify(download.fileName)} from ${download.url}: ${FORMAT_LABEL[inspection.format]}, ${download.sizeBytes} bytes, SHA-256 ${download.sha256}. Our visit downloaded it from ${download.pageUrl}, as a visitor would, and inspected it without running it.`,
 		...(extension
 			? [`It is the browser extension ${JSON.stringify(extension.name)}${extension.version ? ` ${extension.version}` : ""}, with the permissions ${[...extension.permissions, ...extension.hostPermissions].join(", ") || "(none)"}${extension.contentScriptMatches.length ? `; it runs its code on ${extension.contentScriptMatches.join(", ")}` : ""}.`]
 			: []),

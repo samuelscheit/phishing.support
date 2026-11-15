@@ -8,6 +8,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	const { id } = await params;
 	const topic = `run:${id}`;
 	const progressOnly = req.nextUrl.searchParams.get("progress") === "1";
+	// The live browser view: the visit's events and the progress that ends it.
+	const browserOnly = req.nextUrl.searchParams.get("browser") === "1";
 	let cancelled = false;
 	let sub: Awaited<ReturnType<typeof subscribeToEvents>> | null = null;
 	const cancel = () => {
@@ -28,6 +30,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 					if (progressOnly && message?.type !== "analysis.step") {
 						continue;
 					}
+					if (browserOnly && message?.type !== "analysis.step" && !message?.type?.startsWith("browser.")) {
+						continue;
+					}
 					// Keep the browser stream semantic and bounded.  Internal Responses
 					// packets can contain encrypted reasoning and large tool payloads;
 					// the UI only needs the allow-listed projection.
@@ -35,10 +40,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 					controller.enqueue(`data: ${payload}\n\n`);
 
 					if (message) {
-						if (progressOnly && (message.step === "completed" || message.step === "failed" || message.progress === 100)) {
+						if ((progressOnly || browserOnly) && (message.step === "completed" || message.step === "failed" || message.progress === 100)) {
 							break;
 						}
-						if (progressOnly) continue;
+						if (progressOnly || browserOnly) continue;
 						if (message.type === "run.completed" || message.type === "run.failed") {
 							break;
 						}

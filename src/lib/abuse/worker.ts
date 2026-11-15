@@ -20,7 +20,6 @@ import { reconcileGenericSkyvern } from "./worker/reconcile";
 import { resolveReport } from "./worker/resolution";
 import { errorText, envInt, idFrom, parseJobBigInt, randomOwner, type WorkerServices } from "./worker/shared";
 import type { JobClaimFilter } from "./persistence/jobs";
-import { INVESTIGATION_BUDGET_MS } from "../exfiltration/task";
 import { readInvestigationJobPayload } from "../investigation/payload";
 import { releaseAfterFailedInvestigation, runReportInvestigation } from "../investigation/run";
 import { setInvestigationStatus } from "../investigation/status";
@@ -36,11 +35,10 @@ const DEFAULT_CONTROL_JOB_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_EXTERNAL_JOB_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_SWEEP_JOB_TIMEOUT_MS = 20 * 60_000;
 /**
- * An investigation's probe route budget plus the work around it: payload
- * downloads with their awaited public analyses, backend lookups, the capture,
- * reports, and probe downloads.
+ * An investigation's work: payload downloads with their awaited public
+ * analyses, data-drop lookups, and the linked reports.
  */
-const INVESTIGATION_JOB_TIMEOUT_MS = INVESTIGATION_BUDGET_MS + 12 * 60_000;
+const INVESTIGATION_JOB_TIMEOUT_MS = 15 * 60_000;
 const MAX_JOB_TIMEOUT_MS = 60 * 60_000;
 const MAX_RETRIES = 8;
 
@@ -532,7 +530,7 @@ export class AbuseWorker {
 					reporterHeaders: report.requesterHeaders ?? undefined,
 				},
 				...(signal ? { signal } : {}),
-			}, () => this.getAdapter());
+			});
 		} catch (error) {
 			// The worker decides finality: a retryable failure is queued again, and a
 			// terminal one releases the report on its single terminal path.

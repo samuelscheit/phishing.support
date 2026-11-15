@@ -214,8 +214,8 @@ describe("website evidence package", () => {
 			capturedUrl: "https://kit.example.com/secure.html",
 			capturedAt: new Date("2026-11-03T07:48:00Z"),
 			navigationHops: [
-				{ index: 0, url: "https://kit.example.com/", hostname: "kit.example.com", status: 200, redirectTo: "https://kit.example.com/Access.html", followedLink: { label: "I agree" }, contentCaptured: false },
-				{ index: 1, url: "https://kit.example.com/Access.html", hostname: "kit.example.com", status: 200, redirectTo: "https://kit.example.com/secure.html", followedLink: { label: "Import an existing wallet" }, contentCaptured: false },
+				{ index: 0, url: "https://kit.example.com/", hostname: "kit.example.com", status: 200, redirectTo: "https://kit.example.com/Access.html", visitorStep: { submitted: [] }, contentCaptured: false },
+				{ index: 1, url: "https://kit.example.com/Access.html", hostname: "kit.example.com", status: 200, redirectTo: "https://kit.example.com/secure.html", visitorStep: { submitted: ["email"] }, contentCaptured: false },
 				{ index: 2, url: "https://kit.example.com/secure.html", hostname: "kit.example.com", status: 200, contentCaptured: true },
 			],
 			screenshotPng,
@@ -224,7 +224,7 @@ describe("website evidence package", () => {
 
 		const manifest = JSON.parse(evidence.manifest.toString("utf8"));
 		expect(manifest.files.map(({ name }: { name: string }) => name)).toEqual(["website-step3.png", "website-step3-stamped.png", "website-step3.mhtml"]);
-		expect(manifest.capture.navigation[0]).toEqual({ index: 0, url: "https://kit.example.com/", status: 200, redirectTo: "https://kit.example.com/Access.html", followedLink: { label: "I agree" }, contentCaptured: false });
+		expect(manifest.capture.navigation[0]).toEqual({ index: 0, url: "https://kit.example.com/", status: 200, redirectTo: "https://kit.example.com/Access.html", visitorStep: { submitted: [] }, contentCaptured: false });
 		expect(websiteEvidenceFiles(evidence).map(({ name }) => name)).toEqual(["website-step3-stamped.png", "evidence-step3-manifest.json", "evidence-step3-manifest.tsr"]);
 	});
 });

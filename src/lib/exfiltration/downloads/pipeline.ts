@@ -1,9 +1,7 @@
-import { fetchSkyvernArtifact } from "../../abuse/skyvern/storage";
 import { lookupMalwareBazaar } from "./malwarebazaar";
 import { lookupVirusTotal } from "./virustotal";
 import { uploadToVirusTotal } from "./virustotal_upload";
 import { signatureStateOf } from "./pe_signature";
-import type { CollectedDownload } from "./collect";
 import { buildSampleArchive } from "./archive_adapter";
 import { investigateDownload, type InvestigationOutcome, type SubmitFile } from "./investigate";
 import type { LookupResult, VerdictProvider } from "./policy";
@@ -79,18 +77,4 @@ export async function investigateSample(
 			submit,
 		},
 	);
-}
-
-/**
- * Fetch one probe download through the audited artifact fetcher (public host
- * on every hop, size cap, redirect cap), then investigate it. The probe calls
- * this only after its capture is durable.
- */
-export async function investigateCollectedDownload(
-	file: CollectedDownload,
-	config: DownloadPipelineConfig,
-	dependencies: SampleDependencies & { fetch?: (url: string) => Promise<{ body: Buffer; mimeType?: string }> } = {},
-): Promise<InvestigationOutcome> {
-	const fetched = await (dependencies.fetch ?? fetchSkyvernArtifact)(file.url.toString());
-	return investigateSample({ bytes: fetched.body, remoteName: file.remoteName }, config, dependencies);
 }

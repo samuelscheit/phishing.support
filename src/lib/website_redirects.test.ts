@@ -10,6 +10,7 @@ import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { createWebsiteSubmission, runDueWebsiteAutoRetries, websiteSubmissionDedupeKey } from "./submissions/website";
 import type { WebsiteArchiveResult } from "./website_archive";
+import { scriptedVisitSession } from "./site_visit/test_helpers";
 import { analyzeWebsite, capturedHostNavigation, websiteReportUrls, websiteSiteAssessments, type WebsiteAnalysisDependencies } from "./website_ai";
 import type { WebsiteNavigationHop } from "./website_types";
 
@@ -38,13 +39,15 @@ function archiveOf(hops: WebsiteNavigationHop[]): WebsiteArchiveResult {
 		mhtml: MHTML,
 		html: Buffer.from(NETFLIX_HTML, "utf8"),
 		text: Buffer.from(NETFLIX_TEXT, "utf8"),
+		// The visit finds nothing beyond the captured page.
+		session: scriptedVisitSession(),
 	};
 }
 
 /** Streams the classification the production model returned for submission 373426928255766528, then the narrative. */
 function phishingModel(): AnalysisClient {
 	return scriptedModel([
-		JSON.stringify({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign In Email or phone number Password", collectionFieldRefs: ["f1", "f2"], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false }),
+		JSON.stringify({ finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign In Email or phone number Password", collectionFieldRefs: ["f1", "f2"], hiddenFrameRef: "", mobileHandoff: false }),
 		"The captured page impersonates Netflix and asks for an email and password.",
 	]);
 }
@@ -52,7 +55,7 @@ function phishingModel(): AnalysisClient {
 /** Classifies the captured page as harmless, as the model did for the Wikipedia decoy of submission 376291398434951215. */
 function benignModel(): AnalysisClient {
 	return scriptedModel([
-		JSON.stringify({ finding: "benign", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false }),
+		JSON.stringify({ finding: "benign", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false }),
 		"The page is a Wikipedia language and search landing page.",
 	]);
 }

@@ -6,10 +6,9 @@ import { AbuseRepository } from "./abuse/repository";
 import { SubmissionsEntity } from "./db/entities";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { websiteSubmissionDedupeKey } from "./submissions/website";
-import { capturedDocumentContent, type WebsiteArchiveResult, type WebsitePageSession } from "./website_archive";
-import { analyzeWebsite, buildWebsiteClassificationInput, type WebsiteAnalysisDependencies } from "./website_ai";
-import { WebsiteDownloadFailedError, type DownloadedFile } from "./website_download";
-import type { WebsiteDownloadTarget } from "./website_types";
+import { capturedDocumentContent, type WebsiteArchiveResult, type WebsitePageSession, type WebsiteVisitParams } from "./website_archive";
+import { analyzeWebsite, type WebsiteAnalysisDependencies } from "./website_ai";
+import { scriptedVisitSession, type ScriptedVisit } from "./site_visit/test_helpers";
 
 useTemporaryDatabase();
 
@@ -22,7 +21,7 @@ useTemporaryDatabase();
  */
 const URL_ = "https://rbxcore.pro/game-copier/";
 const PAGE = `<!DOCTYPE html><html><head><title>RBXCore — Game Copier</title></head><body>
-<nav><a href="https://rbxcore.pro/">RBXCore</a><button class="btn-pill" data-dl-trigger>Download</button></nav>
+<nav><a href="https://rbxcore.pro/">RBXCore</a><button class="btn-pill">Download</button></nav>
 <h1>Game to Studio. One export.</h1><p>Open a Roblox game in Chrome, hit the extension, save a Studio-ready .rbxl. Export runs in the browser — no shady file hosts.</p>
 <ol><li>Download and unzip Game-Copier.zip</li><li>chrome://extensions → Developer mode → Load unpacked</li><li>Sign in to Roblox, open a game → extension → Export .rbxl</li></ol>
 <p>© 2026 RBXCore · Not affiliated with Roblox</p>
@@ -56,17 +55,17 @@ function capture(session: WebsitePageSession): WebsiteArchiveResult {
 }
 
 type Answer = Record<string, unknown>;
-const answer = (overrides: Answer): Answer => ({ finding: "benign", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], continuationRef: "", hiddenFrameRef: "", mobileHandoff: false, downloadRef: "", ...overrides });
+const answer = (overrides: Answer): Answer => ({ finding: "benign", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false, ...overrides });
 
-/** Answers before and after the file was inspected; records every prompt. */
-function model(before: Answer, after: Answer, prompts: Array<{ kind: string; prompt: string }>): AnalysisClient {
+/** Answers every classification the same way; records every prompt. */
+function model(classification: Answer, prompts: Array<{ kind: string; prompt: string }>): AnalysisClient {
 	return {
 		responses: {
 			create: async (options: { input: unknown; text?: unknown }) => {
 				const prompt = JSON.stringify(options.input);
 				const kind = options.text ? "classification" : "analysis";
 				prompts.push({ kind, prompt });
-				const text = kind === "analysis" ? "The page offers a browser extension that steals cookies." : JSON.stringify(prompt.includes("offered_download is the file") ? after : before);
+				const text = kind === "analysis" ? "The page offers a browser extension that steals cookies." : JSON.stringify(classification);
 				return (async function* () {
 					yield { type: "response.completed", response: { id: `r${prompts.length}`, status: "completed", output: [{ type: "message", content: [{ type: "output_text", text }] }], usage: { total_tokens: 1 } } };
 				})();
@@ -75,26 +74,21 @@ function model(before: Answer, after: Answer, prompts: Array<{ kind: string; pro
 	} as unknown as AnalysisClient;
 }
 
-function scenario(params: { before: Answer; after?: Answer; download?: (target: WebsiteDownloadTarget) => Promise<DownloadedFile> }) {
-	const downloads: WebsiteDownloadTarget[] = [];
+const DOWNLOAD = { url: "https://rbxcore.pro/Game-Copier.zip", fileName: "Game-Copier.zip", contentType: "application/zip", bytes: EXTENSION, userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/156.0.0.0" };
+
+function scenario(params: { classification: Answer; visit?: ScriptedVisit }) {
 	const prompts: Array<{ kind: string; prompt: string }> = [];
-	const session: WebsitePageSession = {
-		act: async () => { throw new Error("no page action expected"); },
-		download: async (target) => {
-			downloads.push(target);
-			return params.download ? params.download(target) : { url: "https://rbxcore.pro/Game-Copier.zip", fileName: "Game-Copier.zip", contentType: "application/zip", bytes: EXTENSION, userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/156.0.0.0" };
-		},
-		close: async () => undefined,
-	};
+	const visits: WebsiteVisitParams[] = [];
+	const session = scriptedVisitSession(params.visit ?? { downloads: [DOWNLOAD], agent: { report: { submissionsAttempted: 0, downloadsStarted: 1, asksForPhone: false, stoppedReason: "Downloaded Game-Copier.zip." } } }, visits);
 	const dependencies: WebsiteAnalysisDependencies = {
 		getInfo: async () => ({ ip_rdaps: [] }),
-		analysisClient: model(params.before, params.after ?? params.before, prompts),
+		analysisClient: model(params.classification, prompts),
 		timestampEvidence: async () => undefined,
 		browserBackoffMs: [1],
 		archiveWebsite: async () => capture(session),
 		downloadLookups: async () => [{ provider: "virustotal", state: "not_found" }],
 	};
-	return { downloads, prompts, dependencies };
+	return { prompts, visits, dependencies };
 }
 
 async function submission(id: bigint) {
@@ -108,57 +102,48 @@ const website = async (id: bigint) => {
 };
 
 describe("a page whose harm is the file it offers", () => {
-	test("the Game Copier page is classified by its extension, which posts the visitor's cookies away, and reported with it", async () => {
-		const { downloads, prompts, dependencies } = scenario({
-			before: answer({ downloadRef: "b2" }),
-			// Naming the download again once it is inspected fetches nothing more.
-			after: answer({ finding: "malware", evidenceQuote: QUOTE, downloadRef: "b2" }),
-		});
+	test("the Game Copier page is judged by the extension its visit downloaded, which posts the visitor's cookies away, and reported with it", async () => {
+		const { prompts, visits, dependencies } = scenario({ classification: answer({ finding: "malware", evidenceQuote: QUOTE }) });
 		const id = await submission(380115867024756863n);
 		await analyzeWebsite({ submissionId: id, url: URL_ }, dependencies);
 
-		expect(downloads).toEqual([{ kind: "click", control: { ref: "b2", label: "Download Game-Copier.zip" } }]);
-		expect(prompts.map(({ kind }) => kind)).toEqual(["classification", "classification", "analysis"]);
-		expect(prompts[0]!.prompt).toContain("set downloadRef to the ref of the download link");
-		expect(prompts[0]!.prompt).not.toContain("offered_download is the file");
-		expect(prompts[0]!.prompt).toContain("Cloudflare showed its own \\\"Suspected Malware\\\" warning page before this site");
-		for (const { prompt } of prompts.slice(1)) {
-			expect(prompt).toContain("offered_download is the file this page offers");
+		expect(visits).toHaveLength(1);
+		expect(prompts.map(({ kind }) => kind)).toEqual(["classification", "analysis"]);
+		for (const { prompt } of prompts) {
+			expect(prompt).toContain("offered_download is the file the visit downloaded while this page was shown");
 			expect(prompt).toContain(QUOTE);
 		}
+		expect(prompts[0]!.prompt).toContain("Cloudflare showed its own \\\"Suspected Malware\\\" warning page before this site");
 
 		const { stored, data } = await website(id);
 		expect(stored?.status).toBe("reported");
 		expect(data?.offeredDownload).toMatchObject({
-			via: 'the button "Download Game-Copier.zip"',
+			pageUrl: URL_,
 			url: "https://rbxcore.pro/Game-Copier.zip",
 			fileName: "Game-Copier.zip",
 			sizeBytes: EXTENSION.length,
 			inspection: { format: "browser_extension", browserExtension: { name: "Game Copier", hostPermissions: ["<all_urls>"] } },
 		});
 		expect(data?.providerWarning).toEqual({ provider: "Cloudflare", warning: "Suspected Malware" });
+		expect(data?.visit).toMatchObject({ runId: "tsk_v2_scripted", outcome: "completed", report: { downloadsStarted: 1 } });
 		expect(data?.siteAssessments?.[0]).toMatchObject({ finding: "malware", evidenceQuote: QUOTE, offeredDownload: { fileName: "Game-Copier.zip", sha256: data!.offeredDownload!.sha256 } });
 
 		const report = await AbuseRepository.getReportForSubmission(id);
 		expect(report!.description.split("\n")).toEqual(expect.arrayContaining([
 			"The page distributes malware: it gets visitors to download, install, or run something that harms them.",
 			'Cloudflare already shows its "Suspected Malware" warning before the site.',
-			`The page offers the file "Game-Copier.zip" from https://rbxcore.pro/Game-Copier.zip: a browser extension (ZIP), ${EXTENSION.length} bytes, SHA-256 ${data!.offeredDownload!.sha256}. The capture got it through the button "Download Game-Copier.zip", as a visitor would, and inspected it without running it.`,
+			`The page offers the file "Game-Copier.zip" from https://rbxcore.pro/Game-Copier.zip: a browser extension (ZIP), ${EXTENSION.length} bytes, SHA-256 ${data!.offeredDownload!.sha256}. Our visit downloaded it from ${URL_}, as a visitor would, and inspected it without running it.`,
 			'It is the browser extension "Game Copier" 1.6.9, with the permissions alarms, cookies, downloads, tabs, activeTab, scripting, storage, <all_urls>; it runs its code on https://www.roblox.com/*, https://roblox.com/*, https://*.roblox.com/*.',
 			`Code in the file (background.js) that shows it: ${JSON.stringify(QUOTE)}.`,
 		]));
-		expect(report!.description).toContain("Addresses named in its code: ");
 		expect(report!.description).toContain("https://rbxcore.pro/api/validate-cookie");
-		// The investigation fetches the file again from its own site, as the browser that got it.
-		const job = await AbuseRepository.getReport(report!.id);
-		expect(job?.status).toBe("investigating");
 		const input = await AbuseRepository.getReportInput(report!.id);
 		const attached = input?.evidenceArtifacts.find(({ name }) => name.startsWith("offered-download-"));
 		expect(JSON.parse(attached!.blob.toString("utf8"))).toMatchObject({ fileName: "Game-Copier.zip", sha256: data!.offeredDownload!.sha256 });
 	});
 
 	test("a quote that is in neither the page nor the file proves nothing", async () => {
-		const { dependencies } = scenario({ before: answer({ downloadRef: "b2" }), after: answer({ finding: "malware", evidenceQuote: "stealCookies(victim)" }) });
+		const { dependencies } = scenario({ classification: answer({ finding: "malware", evidenceQuote: "stealCookies(victim)" }) });
 		const id = await submission(380115867024756864n);
 		await analyzeWebsite({ submissionId: id, url: URL_ }, dependencies);
 		const { stored, data } = await website(id);
@@ -167,36 +152,25 @@ describe("a page whose harm is the file it offers", () => {
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
 	});
 
-	test("a download step that delivers no file leaves the page inconclusive and visits it again", async () => {
-		const { downloads, dependencies } = scenario({
-			before: answer({ downloadRef: "b2" }),
-			download: async () => { throw new WebsiteDownloadFailedError('the button "Download Game-Copier.zip" started no download'); },
-		});
+	test("a visit that could not finish leaves a page that shows nothing by itself inconclusive, and visits it again", async () => {
+		const { dependencies } = scenario({ classification: answer({}), visit: { agent: { outcome: "failed", failure: "failed: Skyvern could not reach its model", report: undefined } } });
 		const id = await submission(380115867024756865n);
 		await analyzeWebsite({ submissionId: id, url: URL_ }, dependencies);
 		const { stored, data } = await website(id);
-		expect(downloads).toHaveLength(1);
 		expect(stored?.status).toBe("failed");
-		expect(stored?.info).toStartWith('Inconclusive: the capture could not finish the site\'s flow: its download step, the button "Download Game-Copier.zip", delivered no file (the button "Download Game-Copier.zip" started no download).');
+		expect(stored?.info).toStartWith("Inconclusive: the visit could not finish the site's flow: failed: Skyvern could not reach its model The last page it reached");
 		expect(data?.autoRetry?.attempts).toBe(1);
-		expect(data?.offeredDownload).toBeUndefined();
 	});
 
-	test("a reference to no download link or button of the page fetches nothing", async () => {
-		const { downloads, dependencies } = scenario({ before: answer({ downloadRef: "d9" }) });
+	test("what the visit already proved stands, even when the agent failed afterwards", async () => {
+		const { dependencies } = scenario({
+			classification: answer({ finding: "malware", evidenceQuote: QUOTE }),
+			visit: { downloads: [DOWNLOAD], agent: { outcome: "timed_out", failure: "The visit's 8-minute budget ended the walk.", report: undefined } },
+		});
 		const id = await submission(380115867024756866n);
 		await analyzeWebsite({ submissionId: id, url: URL_ }, dependencies);
-		expect(downloads).toEqual([]);
-		expect((await website(id)).stored?.status).toBe("invalid");
-	});
-
-	test("the classifier is shown the page's download links, on any host, beside its buttons", () => {
-		const page = `<a href="/about">About</a><a href="https://cdn.example.net/files/RobloxExecutor.exe">Get the executor</a><a href="/files/mod.zip">Mirror</a><a href="/doc.pdf">Guide</a><button>Download</button>`;
-		const { html, text } = capturedDocumentContent(`<html><body>${page}</body></html>`);
-		const hop = { index: 0, url: URL_, hostname: "rbxcore.pro", status: 200, contentCaptured: true };
-		const input = buildWebsiteClassificationInput(hop, { requestedUrl: URL_, url: URL_, hostname: "rbxcore.pro", navigationHops: [hop], html: Buffer.from(html), text: Buffer.from(text) });
-		const prompt = (input[1]!.content as Array<{ text?: string }>)[0]!.text!;
-		expect(prompt).toContain('download_links[2]{ref,label,url}:\n  d1,Get the executor,"https://cdn.example.net/files/RobloxExecutor.exe"\n  d2,Mirror,"https://rbxcore.pro/files/mod.zip"');
-		expect(prompt).toContain("continuation_controls[1]{ref,label}:\n  b1,Download");
+		const { stored, data } = await website(id);
+		expect(stored?.status).toBe("reported");
+		expect(data?.visit).toMatchObject({ outcome: "timed_out", failure: "The visit's 8-minute budget ended the walk." });
 	});
 });

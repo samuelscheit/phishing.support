@@ -1,3 +1,4 @@
+import type { ExfiltrationBackend } from "../exfiltration/types";
 import type { ReportableWebsiteFinding, WebsiteDataUpload } from "../website_types";
 
 /** A command the page shows, as the investigation needs it: what to fetch and what runs it. */
@@ -27,8 +28,8 @@ export type InvestigationExploitLoader = {
 export type InvestigationOfferedDownload = {
 	url: string;
 	userAgent: string;
-	/** The page's step, e.g. `the button "Download Game-Copier.zip"`. */
-	via: string;
+	/** The page the visit downloaded it from. */
+	pageUrl: string;
 	fileName: string;
 };
 
@@ -40,15 +41,32 @@ export type InvestigationJobPayload = {
 	pasteCommands: InvestigationPasteCommand[];
 	exploitLoader?: InvestigationExploitLoader;
 	offeredDownload?: InvestigationOfferedDownload;
+	/** Where the visit saw the site send the synthetic values: each is reported at its own host. */
+	dataDrops?: ExfiltrationBackend[];
 };
+
+const MAX_DATA_DROPS = 10;
+const BACKEND_KINDS = new Set(["telegram_bot", "discord_webhook", "domain"]);
+
+function readDataDrops(value: unknown): ExfiltrationBackend[] | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value)) throw new Error("Investigation job has a malformed payload.dataDrops.");
+	return value.slice(0, MAX_DATA_DROPS).map((entry) => {
+		const backend = entry && typeof entry === "object" ? entry as ExfiltrationBackend : undefined;
+		if (!backend || !BACKEND_KINDS.has(backend.kind) || typeof backend.key !== "string" || typeof backend.endpointUrl !== "string" || typeof backend.hostname !== "string" || !Array.isArray(backend.matchedCanaries) || !backend.request) {
+			throw new Error("Investigation job has a malformed payload.dataDrops.");
+		}
+		return backend;
+	});
+}
 
 function readOfferedDownload(value: unknown): InvestigationOfferedDownload | undefined {
 	if (value === undefined) return undefined;
 	const download = value && typeof value === "object" ? value as Record<string, unknown> : {};
-	if (typeof download.url !== "string" || !/^https?:\/\//i.test(download.url) || typeof download.userAgent !== "string" || typeof download.via !== "string" || typeof download.fileName !== "string") {
+	if (typeof download.url !== "string" || !/^https?:\/\//i.test(download.url) || typeof download.userAgent !== "string" || typeof download.pageUrl !== "string" || typeof download.fileName !== "string") {
 		throw new Error("Investigation job has a malformed payload.offeredDownload.");
 	}
-	return { url: download.url, userAgent: download.userAgent, via: download.via, fileName: download.fileName };
+	return { url: download.url, userAgent: download.userAgent, pageUrl: download.pageUrl, fileName: download.fileName };
 }
 
 const MAX_COMMANDS = 10;
@@ -96,5 +114,14 @@ export function readInvestigationJobPayload(value: unknown): InvestigationJobPay
 	});
 	const exploitLoader = readExploitLoader(payload.exploitLoader);
 	const offeredDownload = readOfferedDownload(payload.offeredDownload);
-	return { submissionId: payload.submissionId, pageUrl: payload.pageUrl, finding: reportable, pasteCommands, ...(exploitLoader ? { exploitLoader } : {}), ...(offeredDownload ? { offeredDownload } : {}) };
+	const dataDrops = readDataDrops(payload.dataDrops);
+	return {
+		submissionId: payload.submissionId,
+		pageUrl: payload.pageUrl,
+		finding: reportable,
+		pasteCommands,
+		...(exploitLoader ? { exploitLoader } : {}),
+		...(offeredDownload ? { offeredDownload } : {}),
+		...(dataDrops?.length ? { dataDrops } : {}),
+	};
 }

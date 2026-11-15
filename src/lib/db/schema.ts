@@ -4,7 +4,7 @@ import { WhoISInfo } from "../website_info";
 import { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
 import { MailData } from "../mail_ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
-import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteSiteAssessment } from "../website_types";
+import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteSiteAssessment, WebsiteVisitRecord } from "../website_types";
 
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
@@ -48,8 +48,10 @@ export type WebsiteSubmissionData = {
 	device?: WebsiteDevice;
 	/** A provider's own warning page (Cloudflare's "Suspected Phishing") the capture dismissed before the site. */
 	providerWarning?: WebsiteProviderWarning;
-	/** The file the analyzed page offers, as its download step delivered it, with its static inspection. */
+	/** The file the visit downloaded on the analyzed page, with its static inspection. */
 	offeredDownload?: WebsiteOfferedDownload;
+	/** The visit through the site: what the agent did and where the synthetic values went. */
+	visit?: WebsiteVisitRecord;
 	/** Set when a failure another visit can change ended the run; the analysis is re-queued automatically. */
 	autoRetry?: { attempts: number; nextAttemptAt: string; reason: string };
 	/** Why the capture could not finish the site's flow: the step it could not take. A retry visits the site again. */

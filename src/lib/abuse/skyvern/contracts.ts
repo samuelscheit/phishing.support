@@ -16,6 +16,7 @@ export type SkyvernClientPort = {
 	getRun: (runId: string) => Promise<unknown>;
 	cancelRun: (runId: string, options?: Parameters<SkyvernClient["cancelRun"]>[1]) => Promise<unknown>;
 	getRunArtifacts: (runId: string) => Promise<unknown>;
+	getRunTimeline: (runId: string) => Promise<unknown>;
 	getArtifact: (artifactId: string) => Promise<unknown>;
 	retryRunWebhook: (runId: string, request?: Parameters<SkyvernClient["retryRunWebhook"]>[1], options?: Parameters<SkyvernClient["retryRunWebhook"]>[2]) => Promise<unknown>;
 	sendTotpCode: (request: SdkTotpCodeRequest, options?: Parameters<SkyvernClient["sendTotpCode"]>[1]) => Promise<unknown>;

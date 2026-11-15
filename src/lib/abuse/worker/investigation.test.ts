@@ -5,7 +5,7 @@ import { SubmissionsEntity } from "../../db/entities";
 import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { reportConfirmedWebsiteAbuse } from "../submission_reports";
-import { ExfiltrationProbeExhaustedError, runExfiltrationProbe, type ExfiltrationProbeResult } from "../../exfiltration/probe";
+import type { ExfiltrationBackend } from "../../exfiltration/types";
 import { runReportInvestigation, type InvestigationDependencies } from "../../investigation/run";
 import { extractPasteCommands } from "../../malware/paste_commands";
 import { readInvestigationJobPayload } from "../../investigation/payload";
@@ -48,7 +48,6 @@ async function confirmedCase(id: bigint, finding: Parameters<typeof reportConfir
 }
 
 const adapter = {} as never;
-const noProbe: ExfiltrationProbeResult = { requests: 3, backends: [], downloads: [], egress: "phishing" };
 
 function jobsOf(reportId: bigint) {
 	return getDb().then((db) => db.select().from(abuseJobs).where(eq(abuseJobs.reportId, reportId)).all());
@@ -69,7 +68,7 @@ function offline(overrides: Partial<InvestigationDependencies> = {}) {
 			uploads: [{ provider: "virustotal", state: "submitted", analysisId: `analysis-${sample.bytes.byteLength}` }],
 		}),
 		awaitVerdict: async () => ({ provider: "virustotal", state: "known", verdict: "malicious" }),
-		probe: async () => noProbe,
+		enrich: async (backend) => backend,
 		now: () => new Date("2026-11-02T20:00:00.000Z"),
 		...overrides,
 	};
@@ -77,7 +76,7 @@ function offline(overrides: Partial<InvestigationDependencies> = {}) {
 }
 
 function workerWith(deps: Partial<InvestigationDependencies>, owner: string) {
-	return new AbuseWorker({ owner, adapter, investigateReport: (params, getAdapter) => runReportInvestigation(params, getAdapter, deps) });
+	return new AbuseWorker({ owner, adapter, investigateReport: (params) => runReportInvestigation(params, deps) });
 }
 
 describe("pre-report investigation", () => {
@@ -136,8 +135,8 @@ describe("pre-report investigation", () => {
 		const { report } = await confirmedCase(submissionId, { finding: "malware" });
 		const params = { reportId: report.reportId, payload: readInvestigationJobPayload((await jobsOf(report.reportId))[0]!.payload), reporter: {} };
 		// The first attempt reports the payload host, then the browser service fails before the release.
-		const crashing = offline({ probe: async () => { throw new Error("Expected 101 status code"); } });
-		await expect(runReportInvestigation(params, () => adapter, crashing.deps)).rejects.toThrow("Expected 101");
+		const crashing = offline({ reportRedirector: async () => { throw new Error("Expected 101 status code"); } });
+		await expect(runReportInvestigation(params, crashing.deps)).rejects.toThrow("Expected 101");
 		expect(await AbuseRepository.listReportsForSubmission(submissionId)).toHaveLength(2);
 		expect((await AbuseRepository.getReport(report.reportId))?.status).toBe("investigating");
 
@@ -146,12 +145,12 @@ describe("pre-report investigation", () => {
 			now: () => new Date("2026-11-02T20:05:00.000Z"),
 			fetchPayload: async (url) => ({ url, finalUrl: `${url}-rotated`, body: PAYLOAD }),
 		});
-		await runReportInvestigation(params, () => adapter, retry.deps);
+		await runReportInvestigation(params, retry.deps);
 		expect(await AbuseRepository.listReportsForSubmission(submissionId)).toHaveLength(2);
 		expect((await AbuseRepository.getReport(report.reportId))?.status).toBe("accepted");
 
 		// A replay of an already released report does nothing at all.
-		await runReportInvestigation(params, () => adapter, retry.deps);
+		await runReportInvestigation(params, retry.deps);
 		expect(await AbuseRepository.listReportsForSubmission(submissionId)).toHaveLength(2);
 		expect((await jobsOf(report.reportId)).filter((item) => item.jobType === "resolve_report")).toHaveLength(1);
 	});
@@ -168,39 +167,36 @@ describe("pre-report investigation", () => {
 		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { investigation: { status: "completed", payloads: [{ url: PAYLOAD_URL, error: "The payload host answered HTTP 404." }] } } });
 	});
 
-	test("an exhausted form probe is recorded and the report is sent with what was collected", async () => {
-		const submissionId = 504n;
-		const { report, job } = await confirmedCase(submissionId, { finding: "phishing", phishingBasis: "credential_theft" }, "https://phish.example.com/");
-		let attempts = 0;
-		const { deps } = offline({ probe: async () => { attempts++; throw new ExfiltrationProbeExhaustedError([{ egress: "phishing", reason: "blocked" }]); } });
-		expect(await workerWith(deps, "investigation-exhausted").processOne({ jobTypes: ["investigate_report"] })).toBeTrue();
-		expect(attempts).toBe(1);
-		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()).toMatchObject({ status: "completed", retryCount: 0 });
-		expect((await AbuseRepository.getReport(report.reportId))?.status).toBe("accepted");
-		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { investigation: { status: "completed", probeError: expect.stringContaining("exhausted every route") } } });
-	});
-
-	test("a probe's data drops and downloads become report evidence", async () => {
+	test("the visit's data drops are reported at their own hosts and named in the page's report", async () => {
 		const submissionId = 505n;
-		const { report } = await confirmedCase(submissionId, { finding: "phishing", phishingBasis: "credential_theft" }, "https://phish.example.com/");
-		const { deps } = offline({
-			probe: async () => ({
-				requests: 4,
-				backends: [{ kind: "domain", key: "domain:collector.example.net", endpointUrl: "https://collector.example.net/x", hostname: "collector.example.net", method: "POST", matchedCanaries: ["email"], request: { timestamp: "t", method: "POST", url: "https://collector.example.net/x" } }],
-				downloads: [{ url: "https://cdn.example.net", outcome: { sha256: "b".repeat(64), action: { action: "record_known_verdict", verdict: "malicious", provider: "malwarebazaar" }, uploads: [] } }],
-				egress: "phishing",
-			}),
+		await SubmissionsEntity.create({ id: submissionId, kind: "website", data: { kind: "website", website: { url: "https://phish.example.com/" } }, dedupeKey: `investigation:${submissionId}` });
+		const drop: ExfiltrationBackend = { kind: "domain", key: "domain:collector.example.net", endpointUrl: "https://collector.example.net/x", hostname: "collector.example.net", method: "POST", matchedCanaries: ["email"], request: { timestamp: "2026-11-15T10:00:01.000Z", method: "POST", url: "https://collector.example.net/x", postData: "email=probe" } };
+		const report = await reportConfirmedWebsiteAbuse({
+			submissionId,
+			urls: ["https://phish.example.com/"],
+			analysisText: "The page collects account credentials.",
+			reporter: {},
+			finding: { finding: "phishing", phishingBasis: "credential_theft" },
+			screenshots: [{ filename: "website.png", png: SCREENSHOT }],
+			visitCapture: { canaries: { marker: "m", email: "probe", password: "p", phone: "1", cardNumber: "4", oneTimeCode: "1" }, requests: [drop.request], backends: [drop] },
 		});
-		await workerWith(deps, "investigation-probe").processOne({ jobTypes: ["investigate_report"] });
-		const description = (await AbuseRepository.getReport(report.reportId))?.description;
-		expect(description).toContain("the page sent what was typed to: collector.example.net");
-		expect(description).toContain(`delivered a file with SHA-256 ${"b".repeat(64)}, which malwarebazaar classifies as malicious`);
+		const reported: Array<{ backend: ExfiltrationBackend; observedAt: Date }> = [];
+		const { deps } = offline({
+			enrich: async (backend) => ({ ...backend, method: "POST" }),
+			reportBackend: async (params) => { reported.push({ backend: params.backend, observedAt: params.observedAt }); return { reportId: 9_999n, created: true } as never; },
+		});
+		await workerWith(deps, "investigation-drops").processOne({ jobTypes: ["investigate_report"] });
+		expect(reported).toEqual([{ backend: expect.objectContaining({ key: "domain:collector.example.net" }), observedAt: new Date("2026-11-15T10:00:01.000Z") }]);
+		const released = await AbuseRepository.getReport(report.reportId);
+		expect(released?.status).toBe("accepted");
+		expect(released?.description).toContain("In our visit with synthetic data, the site sent what was entered to: collector.example.net.");
+		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { investigation: { status: "completed", backendCount: 1 } } });
 	});
 
 	test("a browser-service failure retries the whole investigation and keeps the report held", async () => {
 		const submissionId = 506n;
 		const { report, job } = await confirmedCase(submissionId, { finding: "phishing", phishingBasis: "credential_theft" }, "https://phish.example.com/");
-		const { deps } = offline({ probe: async () => { throw new Error("Expected 101 status code"); } });
+		const { deps } = offline({ reportRedirector: async () => { throw new Error("Expected 101 status code"); } });
 		await workerWith(deps, "investigation-infra").processOne({ jobTypes: ["investigate_report"] });
 		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()).toMatchObject({ status: "queued", retryCount: 1 });
 		expect((await AbuseRepository.getReport(report.reportId))?.status).toBe("investigating");
@@ -211,7 +207,7 @@ describe("pre-report investigation", () => {
 		const submissionId = 507n;
 		const { report, job } = await confirmedCase(submissionId, { finding: "phishing", phishingBasis: "credential_theft" }, "https://phish.example.com/");
 		(await getDb()).update(abuseJobs).set({ retryCount: 8 }).where(eq(abuseJobs.id, job.id)).run();
-		const { deps } = offline({ probe: async () => { throw new Error("browser unavailable"); } });
+		const { deps } = offline({ reportRedirector: async () => { throw new Error("browser unavailable"); } });
 		await workerWith(deps, "investigation-exhausted-retries").processOne({ jobTypes: ["investigate_report"] });
 		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()).toMatchObject({ status: "failed", lastError: "browser unavailable" });
 		expect((await AbuseRepository.getReport(report.reportId))?.status).toBe("accepted");
@@ -219,46 +215,12 @@ describe("pre-report investigation", () => {
 		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { investigation: { status: "failed", lastError: "browser unavailable" } } });
 	});
 
-	test("site verdicts on every route from a real Skyvern walk end the probe after one walk", async () => {
-		const submissionId = 508n;
-		const { report, job } = await confirmedCase(submissionId, { finding: "phishing", phishingBasis: "credential_theft" }, "https://phish.example.com/");
-		const runsByEgress: string[] = [];
-		const siteVerdicts: Record<string, { status: string; failure_reason: string }> = {
-			phishing: { status: "failed", failure_reason: "Max steps exceeded" },
-			reporting: { status: "failed", failure_reason: "Cloudflare challenge did not clear" },
-			residential: { status: "failed", failure_reason: "Could not verify you are human" },
-		};
-		const fakeAdapter = {
-			createTask: async (_payload: unknown, options?: { browserAddress: string }) => {
-				const egress = options?.browserAddress.replace("ws://relay/", "") ?? "unknown";
-				runsByEgress.push(egress);
-				return { runId: `run-${egress}`, response: {} };
-			},
-			getRun: async (runId: string) => siteVerdicts[runId.replace("run-", "")]!,
-			cancelRun: async () => undefined,
-		};
-		const { deps } = offline({
-			probe: (input, signal) => runExfiltrationProbe(input, fakeAdapter, signal, {
-				createCanaries: () => ({ marker: "psprobe_0123456789abcdef", email: "probe.0123456789abcdef@probe-canary.invalid", password: "A9!psprobe_0123456789abcdef!qZ", phone: "+15550100123", cardNumber: "4242424242424242", oneTimeCode: "123456" }),
-				acquireBinding: async (egress) => ({ sessionId: `browser-session_${egress}`, browserAddress: `ws://relay/${egress}`, release: async () => undefined, cancel: async () => undefined }),
-				connectBrowser: async () => ({ disconnect: () => undefined } as never),
-				createRecorder: () => ({ start: async () => undefined, stop: async () => [] }),
-				heartbeat: async () => undefined,
-				sleep: async () => undefined,
-			}),
-		});
-		await workerWith(deps, "investigation-real-verdicts").processOne({ jobTypes: ["investigate_report"] });
-		expect(runsByEgress).toEqual(["phishing", "reporting", "residential"]);
-		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()).toMatchObject({ status: "completed", retryCount: 0 });
-		expect((await AbuseRepository.getReport(report.reportId))?.status).toBe("accepted");
-	});
-
 	test("an investigation that outlives the external lane deadline is not cut off", async () => {
 		const submissionId = 509n;
 		const { job } = await confirmedCase(submissionId, { finding: "phishing", phishingBasis: "credential_theft" }, "https://phish.example.com/");
 		let finished = false;
-		const { deps } = offline({ probe: async () => { await new Promise((resolve) => setTimeout(resolve, 1_600)); finished = true; return noProbe; } });
-		const worker = new AbuseWorker({ owner: "investigation-long", adapter, externalJobTimeoutMs: 1_000, investigateReport: (params, getAdapter) => runReportInvestigation(params, getAdapter, deps) });
+		const { deps } = offline({ reportRedirector: async () => { await new Promise((resolve) => setTimeout(resolve, 1_600)); finished = true; return undefined; } });
+		const worker = new AbuseWorker({ owner: "investigation-long", adapter, externalJobTimeoutMs: 1_000, investigateReport: (params) => runReportInvestigation(params, deps) });
 		await worker.processOne({ jobTypes: ["investigate_report"] });
 		expect(finished).toBeTrue();
 		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()?.status).toBe("completed");
@@ -297,7 +259,7 @@ describe("drive-by exploit investigation", () => {
 		};
 	}
 
-	test("the loader's stages are fetched as the iPhone it attacks, another host's stage and data drop get linked reports, and no form probe runs", async () => {
+	test("the loader's stages are fetched as the iPhone it attacks, and another host's stage and data drop get linked reports", async () => {
 		const submissionId = 520n;
 		await SubmissionsEntity.create({ id: submissionId, kind: "website", data: { kind: "website", website: { url: PAGE } }, dedupeKey: `investigation:${submissionId.toString()}` });
 		const report = await reportConfirmedWebsiteAbuse({
@@ -318,7 +280,7 @@ describe("drive-by exploit investigation", () => {
 		expect(frameEvidence).toMatchObject({ url: FRAME, hiddenBy: "0×0 size", source: CORUNA_LOADER, userAgent: IPHONE_USER_AGENT });
 		expect(frameEvidence.ref).toBeUndefined();
 
-		const { deps, fetched } = offline({ probe: async () => { throw new Error("A drive-by case has no form to probe."); } });
+		const { deps, fetched } = offline();
 		expect(await workerWith(deps, "investigation-drive-by").processOne({ jobTypes: ["investigate_report"] })).toBeTrue();
 
 		expect(fetched).toEqual([{ url: REMOTE_STAGE, userAgent: IPHONE_USER_AGENT }, { url: LOCAL_STAGE, userAgent: IPHONE_USER_AGENT }]);
@@ -344,7 +306,6 @@ describe("drive-by exploit investigation", () => {
 		expect(linked).toHaveLength(2);
 
 		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { investigation: { status: "completed", backendCount: 0 } } });
-		expect(((await SubmissionsEntity.get(submissionId))?.data as { website: { investigation: { probeError?: string } } }).website.investigation.probeError).toBeUndefined();
 	});
 
 	test("a job stored with a malformed exploit loader is a programming error, not a site verdict", () => {
@@ -361,7 +322,7 @@ describe("the file a malware page offers", () => {
 	const CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
 	const PAGE_URL = "https://rbxcore.pro/game-copier/";
 	const offered = (url: string) => ({
-		via: 'the button "Download Game-Copier.zip"',
+		pageUrl: PAGE_URL,
 		url,
 		fileName: "Game-Copier.zip",
 		contentType: "application/zip",
@@ -398,7 +359,7 @@ describe("the file a malware page offers", () => {
 		expect(released?.description).toContain(`We downloaded the file the page offers, ${fileUrl}, as the browser that got it (${PAYLOAD.byteLength} bytes`);
 		const hostReport = (await AbuseRepository.listReportsForSubmission(submissionId)).find((item) => item.id !== report.reportId)!;
 		expect(hostReport).toMatchObject({ allegationCategory: "malware", reportedUserAgent: CHROME });
-		expect(hostReport.description).toContain(`This host serves malware: the malware distribution page ${PAGE_URL} gets visitors to download ${fileUrl} through the button "Download Game-Copier.zip".`);
+		expect(hostReport.description).toContain(`This host serves malware: the malware distribution page ${PAGE_URL} gets visitors to download ${fileUrl}.`);
 		expect((await AbuseRepository.listTargets(hostReport.id)).map((target) => [target.normalizedTarget, target.observedUrls])).toEqual([["cdn.discordapp.com", [fileUrl]]]);
 	});
 
@@ -416,7 +377,7 @@ describe("the file a malware page offers", () => {
 		const report = await offeringCase(603n, "blob:https://rbxcore.pro/2b1c-uuid");
 		expect(readInvestigationJobPayload((await jobsOf(report.reportId))[0]!.payload).offeredDownload).toBeUndefined();
 		const base = { submissionId: "1", pageUrl: PAGE_URL, finding: { finding: "malware" }, pasteCommands: [] };
-		expect(() => readInvestigationJobPayload({ ...base, offeredDownload: { url: "file:///etc/passwd", userAgent: CHROME, via: "x", fileName: "x" } })).toThrow("malformed payload.offeredDownload");
+		expect(() => readInvestigationJobPayload({ ...base, offeredDownload: { url: "file:///etc/passwd", userAgent: CHROME, pageUrl: PAGE_URL, fileName: "x" } })).toThrow("malformed payload.offeredDownload");
 		expect(() => readInvestigationJobPayload({ ...base, offeredDownload: { url: "https://x.example/a.zip" } })).toThrow("malformed payload.offeredDownload");
 	});
 });

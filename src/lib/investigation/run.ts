@@ -1,11 +1,11 @@
 import { reportRedirector } from "../abuse/origin/redirector_report";
 import { AbuseRepository } from "../abuse/repository";
-import type { AbuseSkyvernAdapter } from "../abuse/skyvern/adapter";
-import { redactExternalError } from "../abuse/skyvern/adapter";
 import { errorText } from "../error_text";
 import { downloadPipelineConfigFromEnvironment, investigateSample, type DownloadPipelineConfig } from "../exfiltration/downloads/pipeline";
 import { awaitVirusTotalVerdict } from "../exfiltration/downloads/virustotal";
-import { runExfiltrationProbe, type ExfiltrationProbeResult } from "../exfiltration/probe";
+import { enrichBackendIdentity } from "../exfiltration/identity";
+import { reportExfiltrationBackend } from "../exfiltration/reporting";
+import type { ExfiltrationBackend } from "../exfiltration/types";
 import { downloaderUserAgent, fetchPayload, type FetchedPayload } from "../malware/payload_fetch";
 import { payloadEvidence, payloadVerdictSentence, type PayloadEvidence } from "../malware/payload_evidence";
 import { reportDataDrop, reportPayloadHost, type PayloadDelivery } from "../malware/payload_host_report";
@@ -26,11 +26,13 @@ export type InvestigationDependencies = {
 	reportPayloadHost: typeof reportPayloadHost;
 	reportDataDrop: typeof reportDataDrop;
 	reportRedirector: typeof reportRedirector;
-	probe(input: Parameters<typeof runExfiltrationProbe>[0], signal?: AbortSignal): Promise<ExfiltrationProbeResult>;
+	/** Name the bot, webhook, or host behind a data drop from its own API, where it has one. */
+	enrich(backend: ExfiltrationBackend, signal?: AbortSignal): Promise<ExfiltrationBackend>;
+	reportBackend: typeof reportExfiltrationBackend;
 	now(): Date;
 };
 
-function defaultDependencies(adapter: () => Pick<AbuseSkyvernAdapter, "createTask" | "getRun" | "cancelRun">): InvestigationDependencies {
+function defaultDependencies(): InvestigationDependencies {
 	return {
 		fetchPayload: (url, userAgent, signal) => fetchPayload(url, userAgent, signal ? { signal } : {}),
 		pipelineConfig: () => downloadPipelineConfigFromEnvironment(),
@@ -39,7 +41,8 @@ function defaultDependencies(adapter: () => Pick<AbuseSkyvernAdapter, "createTas
 		reportPayloadHost,
 		reportDataDrop,
 		reportRedirector,
-		probe: (input, signal) => runExfiltrationProbe(input, adapter(), signal),
+		enrich: (backend, signal) => enrichBackendIdentity(backend, globalThis.fetch, signal),
+		reportBackend: reportExfiltrationBackend,
 		now: () => new Date(),
 	};
 }
@@ -60,7 +63,7 @@ function payloadSources(payload: InvestigationJobPayload): Array<{ url: string; 
 		// The file the page hands out, fetched again as the browser that got it.
 		...(payload.offeredDownload ? [{
 			url: payload.offeredDownload.url,
-			delivery: { kind: "offered_download" as const, via: payload.offeredDownload.via, userAgent: payload.offeredDownload.userAgent },
+			delivery: { kind: "offered_download" as const, downloadedOn: payload.offeredDownload.pageUrl, userAgent: payload.offeredDownload.userAgent },
 		}] : []),
 	];
 }
@@ -131,31 +134,22 @@ function payloadFindings(results: readonly PayloadResult[]): string[] {
 	});
 }
 
-function probeFindings(result: ExfiltrationProbeResult): string[] {
-	const findings: string[] = [];
-	if (result.backends.length) {
-		findings.push(`In a controlled test with synthetic data, the page sent what was typed to: ${result.backends.map((backend) => backend.kind === "domain" ? backend.hostname : backend.key).join(", ")}.`);
-	}
-	for (const download of result.downloads) {
-		if (!download.outcome) continue;
-		const known = download.outcome.action.action === "record_known_verdict" ? download.outcome.action : undefined;
-		findings.push(`The page's download control delivered a file with SHA-256 ${download.outcome.sha256}${known ? `, which ${known.provider} classifies as ${known.verdict}` : ""}.`);
-	}
-	return findings;
+function dataDropFindings(backends: readonly ExfiltrationBackend[]): string[] {
+	if (!backends.length) return [];
+	return [`In our visit with synthetic data, the site sent what was entered to: ${backends.map((backend) => backend.kind === "domain" ? backend.hostname : backend.key).join(", ")}.`];
 }
 
 /**
  * Collect every piece of evidence about a confirmed site before its report
- * reaches a provider, then release the report. A failed probe step never
+ * reaches a provider, then release the report. A failed step never
  * holds the report back: it is sent with what was collected, and the failure
  * is recorded on the case.
  */
 export async function runReportInvestigation(
 	params: { reportId: bigint; payload: InvestigationJobPayload; reporter: ReporterMetadata; signal?: AbortSignal },
-	adapter: () => Pick<AbuseSkyvernAdapter, "createTask" | "getRun" | "cancelRun">,
 	dependencies: Partial<InvestigationDependencies> = {},
 ): Promise<void> {
-	const deps = { ...defaultDependencies(adapter), ...dependencies };
+	const deps = { ...defaultDependencies(), ...dependencies };
 	const { reportId, payload, reporter, signal } = params;
 	const submissionId = BigInt(payload.submissionId);
 	const report = await AbuseRepository.getReport(reportId);
@@ -207,23 +201,18 @@ export async function runReportInvestigation(
 		});
 	}
 
-	let probe: ExfiltrationProbeResult | undefined;
-	let probeError: string | undefined;
-	// A drive-by exploit takes nothing a visitor types or downloads: there is
-	// no form or download for the probe to try, only the decoy in front of it.
-	if (!payload.exploitLoader) {
-		try {
-			probe = await deps.probe({ reportId, submissionId, pageUrl: payload.pageUrl, reporter }, signal);
-		} catch (error) {
-			if (signal?.aborted) throw error;
-			// A retryable browser-service failure retries the whole job; the payload
-			// reports above are idempotent, so a retry re-fetches without duplicating them.
-			if ((error as { retryable?: unknown } | null)?.retryable !== false) throw error;
-			probeError = redactExternalError(error);
-		}
+	// Each place the visit saw the site send the synthetic values gets a report
+	// of its own: a Telegram bot, a Discord webhook, a collector host. Reports
+	// are idempotent, so a retried job finds the ones it made.
+	const reportedDrops: ExfiltrationBackend[] = [];
+	for (const backend of payload.dataDrops ?? []) {
+		signal?.throwIfAborted();
+		const enriched = await deps.enrich(backend, signal).catch(() => backend);
+		reportedDrops.push(enriched);
+		await deps.reportBackend({ submissionId, sourceReportId: reportId, backend: enriched, pageUrl: payload.pageUrl, observedAt: new Date(enriched.request.timestamp), reporter });
 	}
 
-	const findings = [...payloadFindings(payloads), ...(probe ? probeFindings(probe) : [])];
+	const findings = [...payloadFindings(payloads), ...dataDropFindings(reportedDrops)];
 	const evidence = payloads.flatMap(({ evidence: item }) => item ? [{
 		filename: `payload-${item.sha256.slice(0, 16)}.json`,
 		mimeType: "application/json",
@@ -233,11 +222,10 @@ export async function runReportInvestigation(
 	await AbuseRepository.releaseInvestigatedReport({ reportId, findings, evidence });
 	await setInvestigationStatus(submissionId, {
 		status: "completed",
-		backendCount: probe?.backends.length ?? 0,
+		backendCount: reportedDrops.length,
 		payloads: payloads.map(({ url, evidence: item, error }) => item
 			? { url: item.url, sha256: item.sha256, sizeBytes: item.sizeBytes, ...(item.knownVerdict ? { verdict: `${item.knownVerdict.provider}: ${item.knownVerdict.verdict}` } : {}) }
 			: { url, ...(error ? { error } : {}) }),
-		...(probeError ? { probeError } : {}),
 		updatedAt: deps.now().toISOString(),
 	});
 }

