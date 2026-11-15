@@ -4,7 +4,7 @@ import type { ExfiltrationCanaries } from "../exfiltration/types";
 /** Wall-clock budget of one site visit: the agent's walk through the site, from its first page to where the flow ends. */
 export const VISIT_BUDGET_MS = 20 * 60_000;
 /** Form submissions the agent may make in one visit. */
-export const MAX_FORM_SUBMISSIONS = 3;
+export const MAX_FORM_SUBMISSIONS = 10;
 
 const DEFAULT_MAX_STEPS = 150;
 const MAX_STEPS_LIMIT = 200;
