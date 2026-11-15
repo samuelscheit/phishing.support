@@ -4,6 +4,14 @@ import { projectSseEvent } from "@/lib/event/sse_projection";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * A comment line on a quiet stream. Proxies in front of the app (the
+ * Cloudflare tunnel) close a connection that sends nothing for about 100 s,
+ * and a site visit can go minutes without a progress step; the browser
+ * ignores comment lines.
+ */
+const KEEP_ALIVE_MS = 15_000;
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
 	const topic = `run:${id}`;
@@ -12,8 +20,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 	const browserOnly = req.nextUrl.searchParams.get("browser") === "1";
 	let cancelled = false;
 	let sub: Awaited<ReturnType<typeof subscribeToEvents>> | null = null;
+	let keepAlive: ReturnType<typeof setInterval> | undefined;
 	const cancel = () => {
 		cancelled = true;
+		clearInterval(keepAlive);
 		sub?.close();
 	};
 
@@ -24,6 +34,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 				sub = await subscribeToEvents(topic);
 				if (cancelled) return;
 				controller.enqueue(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
+				keepAlive = setInterval(() => {
+					try {
+						controller.enqueue(": keep-alive\n\n");
+					} catch {
+						clearInterval(keepAlive);
+					}
+				}, KEEP_ALIVE_MS);
 				for await (const msgData of sub) {
 					const message =
 						typeof msgData === "object" && msgData ? (msgData as { type?: string; step?: string; progress?: number }) : null;
@@ -52,6 +69,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 			} catch (err) {
 				if (!cancelled) console.error("SSE Stream error:", err);
 			} finally {
+				clearInterval(keepAlive);
 				sub?.close();
 				req.signal.removeEventListener("abort", cancel);
 				if (!cancelled) controller.close();
