@@ -2,8 +2,12 @@ import type { AbuseSkyvernAdapter, SkyvernTaskPayload } from "../abuse/skyvern";
 import { statusOf } from "../abuse/skyvern/contracts";
 import { redactExternalError } from "../abuse/skyvern/adapter";
 
-/** One thing the agent did or decided, as its timeline names it. */
-export type VisitAgentAction = { id: string; kind: string; text: string };
+/**
+ * One thing the agent did or decided. `selector` names the element a Task V3
+ * action acted on in the live page, whose caption the visit reads to say what
+ * it was; its own record has no text.
+ */
+export type VisitAgentAction = { id: string; kind: string; text: string; selector?: string };
 
 export type VisitAgentState =
 	| { state: "running" }
@@ -61,12 +65,45 @@ export function timelineActions(timeline: unknown): VisitAgentAction[] {
 	return found.sort((a, b) => a.at.localeCompare(b.at)).map(({ at: _at, ...action }) => action);
 }
 
+/** How a person reads a task action without its element: `Clicked`, `Typed into`. */
+export const ACTION_VERB: Record<string, string> = {
+	click: "Clicked",
+	input_text: "Typed into",
+	select_option: "Selected an option in",
+	checkbox: "Ticked",
+	upload_file: "Uploaded a file to",
+	download_file: "Downloaded from",
+	keypress: "Pressed a key in",
+	scroll: "Scrolled",
+	hover: "Hovered over",
+	goto_url: "Opened",
+	wait: "Waited",
+	complete: "Finished",
+	terminate: "Stopped",
+};
+
+/**
+ * The actions of a Task V1/V3 run, oldest first. They carry no reasoning, only
+ * what was done and to which element (`[data-tv3="t13"]`, `#dlConfirm`).
+ */
+export function taskActions(actions: readonly unknown[]): VisitAgentAction[] {
+	return actions.flatMap((entry): VisitAgentAction[] => {
+		const record = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
+		const id = text(record.action_id);
+		const kind = text(record.action_type);
+		if (!id || !kind) return [];
+		const selector = text(record.element_id);
+		const description = text(record.intention) ?? text(record.reasoning) ?? ACTION_VERB[kind] ?? kind;
+		return [{ id, kind, text: description, ...(selector ? { selector } : {}) }];
+	});
+}
+
 /**
  * Skyvern, attached through Fabric's relay to the browser the capture
  * already holds. Its client is made on the first call, so a visit that never
  * starts the agent never needs Skyvern's configuration.
  */
-export function skyvernVisitAgent(createAdapter: () => Pick<AbuseSkyvernAdapter, "createTask" | "getRun" | "cancelRun" | "getRunTimeline">): VisitAgent {
+export function skyvernVisitAgent(createAdapter: () => Pick<AbuseSkyvernAdapter, "createTask" | "getRun" | "cancelRun" | "getRunTimeline" | "getTaskActions">): VisitAgent {
 	let made: ReturnType<typeof createAdapter> | undefined;
 	const adapter = () => (made ??= createAdapter());
 	return {
@@ -79,7 +116,10 @@ export function skyvernVisitAgent(createAdapter: () => Pick<AbuseSkyvernAdapter,
 			const reason = typeof run.failure_reason === "string" ? run.failure_reason : status;
 			return { state: "failed", reason: redactExternalError(`${status}: ${reason}`).slice(0, 500) };
 		},
-		actions: async (runId) => timelineActions(await adapter().getRunTimeline(runId)),
+		// Task V2 runs (`tsk_v2_…`) have a timeline; Task V1 and V3 runs (`tsk_…`) only their actions.
+		actions: async (runId) => (runId.startsWith("tsk_v2_")
+			? timelineActions(await adapter().getRunTimeline(runId))
+			: taskActions(await adapter().getTaskActions(runId))),
 		cancel: (runId) => adapter().cancelRun(runId),
 	};
 }

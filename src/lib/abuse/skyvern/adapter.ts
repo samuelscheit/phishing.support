@@ -104,6 +104,23 @@ export class AbuseSkyvernAdapter {
 		return objectPayload(await this.client.getRun(runId), "run");
 	}
 
+	/**
+	 * The actions of a task run (Task V1 and V3, `tsk_…`), oldest first. These
+	 * runs have no timeline ("Timeline not available for run type task_v3"); the
+	 * SDK has no call for this route, so it is read directly.
+	 */
+	async getTaskActions(runId: string): Promise<unknown[]> {
+		if (!/^tsk_[A-Za-z0-9_]{1,80}$/.test(runId)) throw new Error("A Skyvern task id is required.");
+		const response = await fetch(`${configuredSkyvernBaseUrl()}/api/v1/tasks/${runId}/actions`, {
+			headers: { "x-api-key": configuredSkyvernApiKey() },
+			signal: AbortSignal.timeout(15_000),
+		});
+		if (!response.ok) throw new Error(`Skyvern task actions answered HTTP ${response.status}.`);
+		const actions = await response.json();
+		if (!Array.isArray(actions)) throw new Error("Skyvern returned an invalid action list.");
+		return actions;
+	}
+
 	/** What the run did so far: its blocks, actions and thoughts. */
 	async getRunTimeline(runId: string): Promise<unknown> {
 		return unwrapSdkResponse<unknown>(await this.client.getRunTimeline(runId));

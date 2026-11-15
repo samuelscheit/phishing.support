@@ -92,6 +92,34 @@ async function startScreencast(cdp: CDPSession, page: Page, live: (event: SiteVi
 	return () => cdp.send("Page.stopScreencast").then(() => undefined, () => undefined);
 }
 
+/** Runs in the page: what a person reads on the element a selector names (its label, text, placeholder, or name). */
+function elementCaption(selector: string): string | null {
+	let element: Element | null;
+	try {
+		element = document.querySelector(selector);
+	} catch {
+		return null;
+	}
+	if (!element) return null;
+	const compact = (value: string | null | undefined) => value?.replace(/\s+/g, " ").trim().slice(0, 80) || null;
+	const id = element.getAttribute("id");
+	const label = (id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null) ?? element.closest("label");
+	return compact(label?.textContent)
+		?? compact(element.getAttribute("aria-label"))
+		?? compact((element as HTMLElement).innerText)
+		?? compact(element.getAttribute("placeholder"))
+		?? compact(element.getAttribute("value"))
+		?? compact(element.getAttribute("title"))
+		?? compact(element.getAttribute("name"));
+}
+
+/** The action as a person reads it: its element's caption added to a bare verb (`Clicked "Download"`). */
+async function described(page: Page, action: VisitAgentAction): Promise<VisitAgentAction> {
+	if (!action.selector) return action;
+	const caption = await page.evaluate(elementCaption, action.selector).catch(() => null);
+	return caption ? { ...action, text: `${action.text} ${JSON.stringify(caption)}` } : action;
+}
+
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 	return new Promise((resolve) => {
 		const timer = setTimeout(resolve, ms);
@@ -172,8 +200,9 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 				const known = new Set(actions.map((action) => action.id));
 				for (const action of await agent.actions(runId).catch(() => [])) {
 					if (known.has(action.id)) continue;
-					actions.push(action);
-					live({ type: "browser.action", kind: action.kind, text: action.text });
+					const read = await described(page, action);
+					actions.push(read);
+					live({ type: "browser.action", kind: read.kind, text: read.text });
 				}
 			}
 			if (now < nextAgentPoll) continue;
@@ -196,7 +225,7 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 		}
 		if (runId) {
 			const known = new Set(actions.map((action) => action.id));
-			for (const action of await agent.actions(runId).catch(() => [])) if (!known.has(action.id)) actions.push(action);
+			for (const action of await agent.actions(runId).catch(() => [])) if (!known.has(action.id)) actions.push(await described(page, action));
 		}
 		// The page the walk ended on is a step of its own, whatever the quiet period.
 		await recordStep(true);

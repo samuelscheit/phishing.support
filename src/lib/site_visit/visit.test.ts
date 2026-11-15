@@ -5,7 +5,7 @@ import puppeteer, { type Page } from "rebrowser-puppeteer-core";
 import { createExfiltrationCanaries } from "../exfiltration/canaries";
 import type { ExfiltrationCanaries } from "../exfiltration/types";
 import { archiveWebsite } from "../website_archive";
-import { timelineActions, type VisitAgent, type VisitAgentAction } from "./agent";
+import { skyvernVisitAgent, taskActions, timelineActions, type VisitAgent, type VisitAgentAction } from "./agent";
 import type { SiteVisitLiveEvent } from "./visit";
 
 const chromiumExecutable = process.env.PHISHING_TEST_CHROMIUM
@@ -63,6 +63,8 @@ function scriptedAgent(walk: (page: Page, canaries: ExfiltrationCanaries) => Pro
 					const [page] = await connection.pages();
 					await walk(page!, canaries);
 					actions.push({ id: "a1", kind: "click", text: "Submitted the sign-in form with the synthetic values" });
+					// A Task V3 action has no text of its own, only the element it acted on.
+					actions.push({ id: "a2", kind: "click", text: "Clicked", selector: "#open" });
 				} finally {
 					await connection.disconnect();
 					finished = !options.neverEnds;
@@ -128,6 +130,8 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser", () => {
 			expect(live.filter((event) => event.type === "browser.step").map((event) => (event as { url: string }).url)).toContain(`${url}verify`);
 			expect(live).toContainEqual({ type: "browser.download", fileName: "Verifier.zip", url: `${url}Verifier.zip` });
 			expect(live).toContainEqual({ type: "browser.action", kind: "click", text: "Submitted the sign-in form with the synthetic values" });
+			// The visit reads the element's caption in the live page.
+			expect(recording.agent.actions).toContainEqual({ id: "a2", kind: "click", text: 'Clicked "Get Verifier"', selector: "#open" });
 		} finally {
 			await archive.session?.close();
 			server.stop(true);
@@ -208,4 +212,34 @@ describe.skipIf(!chromiumAvailable)("the capture's browser around a visit, in a 
 			server.stop(true);
 		}
 	}, 60_000);
+});
+
+describe("the agent's task actions (Task V1 and V3)", () => {
+	test("are read as a verb and the element they acted on; actions without an id or type are dropped", () => {
+		expect(taskActions([
+			{ action_id: "act_1", action_type: "click", element_id: "[data-tv3=\"t0\"]", reasoning: null, intention: null },
+			{ action_id: "act_2", action_type: "input_text", element_id: "#phone-input" },
+			{ action_id: "act_3", action_type: "complete" },
+			{ action_type: "click" },
+			null,
+		])).toEqual([
+			{ id: "act_1", kind: "click", text: "Clicked", selector: "[data-tv3=\"t0\"]" },
+			{ id: "act_2", kind: "input_text", text: "Typed into", selector: "#phone-input" },
+			{ id: "act_3", kind: "complete", text: "Finished" },
+		]);
+	});
+
+	test("a Task V2 run is read from its timeline; a Task V3 run, which has none, from its actions", async () => {
+		const calls: string[] = [];
+		const agent = skyvernVisitAgent(() => ({
+			createTask: async () => ({ runId: "x", response: {} }),
+			getRun: async () => ({}),
+			cancelRun: async () => undefined,
+			getRunTimeline: async (runId: string) => { calls.push(`timeline ${runId}`); return [{ thought: { thought_id: "ot_1", thought: "Plan." } }]; },
+			getTaskActions: async (runId: string) => { calls.push(`actions ${runId}`); return [{ action_id: "act_1", action_type: "click", element_id: "#dlConfirm" }]; },
+		}));
+		expect(await agent.actions("tsk_v2_597084519460743340")).toEqual([{ id: "ot_1", kind: "thought", text: "Plan." }]);
+		expect(await agent.actions("tsk_597175287129714516")).toEqual([{ id: "act_1", kind: "click", text: "Clicked", selector: "#dlConfirm" }]);
+		expect(calls).toEqual(["timeline tsk_v2_597084519460743340", "actions tsk_597175287129714516"]);
+	});
 });
