@@ -4,7 +4,7 @@ import { type Frame, type HTTPRequest, type HTTPResponse, type Page, TimeoutErro
 import sharp from "sharp";
 import { getDomain } from "tldts";
 
-import { getBrowser, getBrowserPage } from "./browser";
+import { getBrowser, getBrowserPage, type BrowserIdentity } from "./browser";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
 import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteProviderWarning } from "./website_types";
@@ -146,6 +146,8 @@ export type ArchiveWebsiteOptions = {
 	hiddenFrames?: WebsiteHiddenFrame[];
 	/** The browser a live capture presents, and the retained MHTML was captured with. */
 	device?: WebsiteDevice;
+	/** The reporter's own browser, which a desktop capture presents instead of Google Chrome on Windows. */
+	visitor?: BrowserIdentity;
 	/**
 	 * Keep the live capture's browser open as the result's `session`, so the
 	 * caller can act on the captured page in the same visit; the caller closes it.
@@ -811,7 +813,7 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 		// as well: both must see the same tab.
 		const context = browser.defaultBrowserContext();
 		const [existing] = await context.pages();
-		const { page, userAgent } = await getBrowserPage(existing ?? await context.newPage(), device);
+		const { page, userAgent } = await getBrowserPage(existing ?? await context.newPage(), device, options.visitor);
 
 		const kitResources = recordKitResources(page);
 		const frameTraffic = recordFrameTraffic(page);

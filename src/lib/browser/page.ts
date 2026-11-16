@@ -59,24 +59,43 @@ export function windowsDesktopIdentity(product: string): Protocol.Emulation.SetU
 	};
 }
 
+/** A touch device's screen, which its page fills. */
+export type TouchScreen = { width: number; height: number; deviceScaleFactor: number; mobile: boolean };
+
 /**
- * Puppeteer applies the identity to the page and to every worker and
- * out-of-process frame it attaches later, but through the Network domain,
- * whose platform Chrome ignores: navigator.platform stayed "Linux x86_64". The
- * same identity through the Emulation domain on the page's session sets it.
- * Dedicated workers keep their own navigator.platform, which neither domain reaches.
+ * Who the browser claims to be: its User-Agent, navigator.platform, client
+ * hints and languages, on a desktop window or a touch screen. A browser
+ * without `userAgentMetadata` (Safari, Firefox) exposes no client hints.
  */
-async function useWindowsDesktopIdentity(page: Page, cdp: CDPSession): Promise<string> {
-	const identity = windowsDesktopIdentity(await page.browser().version());
-	await page.setUserAgent({ userAgent: identity.userAgent, userAgentMetadata: identity.userAgentMetadata, platform: identity.platform });
-	await cdp.send("Emulation.setUserAgentOverride", identity);
-	return identity.userAgent;
+export type BrowserIdentity = {
+	override: Protocol.Emulation.SetUserAgentOverrideRequest;
+	screen: "desktop" | TouchScreen;
+};
+
+/** Safari and Firefox expose no User-Agent client hints; Chromium's would give the Linux build away. */
+const NO_CLIENT_HINTS = "delete Navigator.prototype.userAgentData;";
+
+/**
+ * Present an identity to the page. Puppeteer applies it to the page and to
+ * every worker and out-of-process frame it attaches later, but through the
+ * Network domain, whose platform Chrome ignores: navigator.platform stayed
+ * "Linux x86_64". The same identity through the Emulation domain on the
+ * page's session sets it. Dedicated workers keep their own
+ * navigator.platform, which neither domain reaches. The overrides live as
+ * long as the CDP session that set them, so the session stays attached.
+ */
+async function presentIdentity(page: Page, identity: BrowserIdentity): Promise<string> {
+	const cdp = await page.createCDPSession();
+	const { userAgent, userAgentMetadata, platform } = identity.override;
+	await page.setUserAgent({ userAgent, userAgentMetadata, platform });
+	await cdp.send("Emulation.setUserAgentOverride", identity.override);
+	// On the page's own session: a script added through the side session never runs.
+	if (!userAgentMetadata) await page.evaluateOnNewDocument(NO_CLIENT_HINTS);
+	await (identity.screen === "desktop" ? useDesktopWindow(cdp) : useTouchScreen(cdp, identity.screen));
+	return userAgent;
 }
 
-/** The overrides live as long as the CDP session that set them, so the session stays attached to the page. */
-async function useDesktopWindow(page: Page): Promise<string> {
-	const cdp = await page.createCDPSession();
-	const userAgent = await useWindowsDesktopIdentity(page, cdp);
+async function useDesktopWindow(cdp: CDPSession): Promise<void> {
 	const { windowId } = await cdp.send("Browser.getWindowForTarget");
 	await cdp.send("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal", ...DESKTOP_WINDOW } });
 	await cdp.send("Emulation.setDeviceMetricsOverride", {
@@ -87,7 +106,11 @@ async function useDesktopWindow(page: Page): Promise<string> {
 		screenWidth: DESKTOP_SCREEN.width,
 		screenHeight: DESKTOP_SCREEN.height,
 	});
-	return userAgent;
+}
+
+async function useTouchScreen(cdp: CDPSession, screen: TouchScreen): Promise<void> {
+	await cdp.send("Emulation.setDeviceMetricsOverride", { ...screen, screenWidth: screen.width, screenHeight: screen.height });
+	await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
 }
 
 /**
@@ -99,31 +122,16 @@ async function useDesktopWindow(page: Page): Promise<string> {
  * Chromium, which is how the capture sees the stages it loads.
  */
 export const IPHONE_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1";
-const IPHONE_SCREEN = { width: 393, height: 852, deviceScaleFactor: 3 } as const;
-/** Safari exposes no User-Agent client hints; Chromium's would give the Linux build away. */
-const SAFARI_NAVIGATOR = "delete Navigator.prototype.userAgentData;";
+export const IPHONE_SCREEN: TouchScreen = { width: 393, height: 852, deviceScaleFactor: 3, mobile: true };
+const IPHONE_IDENTITY: BrowserIdentity = { override: { userAgent: IPHONE_USER_AGENT, platform: "iPhone" }, screen: IPHONE_SCREEN };
 
-async function useIphone(page: Page): Promise<string> {
-	const cdp = await page.createCDPSession();
-	const identity = { userAgent: IPHONE_USER_AGENT, platform: "iPhone" };
-	await page.setUserAgent(identity);
-	await cdp.send("Emulation.setUserAgentOverride", identity);
-	await cdp.send("Emulation.setDeviceMetricsOverride", {
-		width: IPHONE_SCREEN.width,
-		height: IPHONE_SCREEN.height,
-		deviceScaleFactor: IPHONE_SCREEN.deviceScaleFactor,
-		mobile: true,
-		screenWidth: IPHONE_SCREEN.width,
-		screenHeight: IPHONE_SCREEN.height,
-	});
-	await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
-	// On the page's own session: a script added through this side session never runs.
-	await page.evaluateOnNewDocument(SAFARI_NAVIGATOR);
-	return IPHONE_USER_AGENT;
-}
-
-/** Set up a page attached to a Fabric-owned browser lease. */
-export async function getBrowserPage(existingPage?: Page, device: WebsiteDevice = "desktop") {
+/**
+ * Set up a page attached to a Fabric-owned browser lease. A desktop capture
+ * presents the reporter's own browser when it is known (`visitor`), since
+ * kits serve their payload only to the platforms they target, and otherwise
+ * Google Chrome on Windows; a phone handoff presents the iPhone.
+ */
+export async function getBrowserPage(existingPage?: Page, device: WebsiteDevice = "desktop", visitor?: BrowserIdentity) {
 	const browser = (existingPage ? existingPage.browser() : await getBrowser()) as Browser;
 	const context = (existingPage ? existingPage.browserContext() : browser.defaultBrowserContext()) as BrowserContext;
 	const page = existingPage || (await context.newPage());
@@ -137,7 +145,8 @@ export async function getBrowserPage(existingPage?: Page, device: WebsiteDevice 
 		await dialog.dismiss();
 	});
 	/** The User-Agent every request of the page sends. */
-	const userAgent = await (device === "iphone" ? useIphone(page) : useDesktopWindow(page));
+	const identity = device === "iphone" ? IPHONE_IDENTITY : visitor ?? { override: windowsDesktopIdentity(await browser.version()), screen: "desktop" as const };
+	const userAgent = await presentIdentity(page, identity);
 
 	return { page, context, browser, userAgent };
 }

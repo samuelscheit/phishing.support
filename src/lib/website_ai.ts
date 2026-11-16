@@ -1,3 +1,4 @@
+import { reporterBrowserIdentity } from "./browser/reporter_identity";
 import { archiveWebsite, isBrowserInfrastructureFailure, type ArchiveWebsiteOptions, type WebsitePageSession, type WebsiteVerificationGate } from "./website_archive";
 import { errorText } from "./error_text";
 import { buildWebsiteEvidence, type WebsiteEvidencePackage } from "./evidence/package";
@@ -536,8 +537,10 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 	// Automatic retries already spent on this case; the run's own data writes drop the record.
 	let priorAttempts = 0;
 	const closeSessions = () => Promise.all(sessions.splice(0).map((session) => session.close().catch((error: unknown) => console.warn("Closing a capture browser failed:", error))));
+	// Every live capture of the case, the visit's included, presents the reporter's own browser.
+	const visitor = reporterBrowserIdentity(reporterHeaders);
 	const capture = async (captureOptions: ArchiveWebsiteOptions) => {
-		const captured = await withBrowserBackoff(() => (dependencies.archiveWebsite ?? archiveWebsite)({ ...captureOptions, keepSession: true }), dependencies.browserBackoffMs ?? BROWSER_BACKOFF_MS);
+		const captured = await withBrowserBackoff(() => (dependencies.archiveWebsite ?? archiveWebsite)({ ...captureOptions, ...(visitor ? { visitor } : {}), keepSession: true }), dependencies.browserBackoffMs ?? BROWSER_BACKOFF_MS);
 		if (captured.session) sessions.push(captured.session);
 		return captured;
 	};

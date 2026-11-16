@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import type { Browser, BrowserContext, Page } from "rebrowser-puppeteer-core";
 
-import { chromeBrands, getBrowserPage, windowsDesktopIdentity } from "./page";
+import { chromeBrands, getBrowserPage, IPHONE_SCREEN, IPHONE_USER_AGENT, windowsDesktopIdentity } from "./page";
+import { reporterBrowserIdentity } from "./reporter_identity";
 
 function fakePage() {
 	const goto = async () => null;
@@ -10,6 +11,7 @@ function fakePage() {
 	const userAgents: unknown[] = [];
 	const handlers = new Map<string, (...args: unknown[]) => void>();
 	const cdpCalls: Array<{ method: string; params: unknown }> = [];
+	const documentScripts: string[] = [];
 	let detached = false;
 	const page = {
 		browser: () => browser,
@@ -22,11 +24,48 @@ function fakePage() {
 			detach: async () => { detached = true; },
 		}),
 		setUserAgent: async (options: unknown) => { userAgents.push(options); },
+		evaluateOnNewDocument: async (script: string) => { documentScripts.push(script); },
 		on: (event: string, listener: (...args: unknown[]) => void) => { handlers.set(event, listener); },
 		goto,
 	} as unknown as Page;
-	return { page, goto, handlers, cdpCalls, userAgents, isDetached: () => detached };
+	return { page, goto, handlers, cdpCalls, userAgents, documentScripts, isDetached: () => detached };
 }
+
+test("a reporter's browser replaces the Windows default, on the same desktop window", async () => {
+	// Production case 380697679325302795: macmorrow.app showed its Terminal command
+	// only to a Mac; the Windows capture got "MacMorrow is made for Mac".
+	const { page, userAgents, cdpCalls, documentScripts } = fakePage();
+	const visitor = reporterBrowserIdentity({
+		"user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+		"sec-ch-ua": "\"Not-A.Brand\";v=\"99\", \"Google Chrome\";v=\"157\", \"Chromium\";v=\"157\"",
+		"accept-language": "de-DE,de;q=0.9",
+	})!;
+
+	const { userAgent } = await getBrowserPage(page, "desktop", visitor);
+
+	expect(userAgent).toBe(visitor.override.userAgent);
+	expect(userAgents).toEqual([{ userAgent, userAgentMetadata: visitor.override.userAgentMetadata, platform: "MacIntel" }]);
+	expect(cdpCalls[0]).toEqual({ method: "Emulation.setUserAgentOverride", params: visitor.override });
+	expect(cdpCalls.map(({ method }) => method).slice(1)).toEqual(["Browser.getWindowForTarget", "Browser.setWindowBounds", "Emulation.setDeviceMetricsOverride"]);
+	// Chrome keeps its client hints.
+	expect(documentScripts).toEqual([]);
+});
+
+test("a phone handoff presents the iPhone even when the reporter's browser is known", async () => {
+	const { page, cdpCalls, documentScripts } = fakePage();
+	const visitor = reporterBrowserIdentity({ "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" })!;
+
+	const { userAgent } = await getBrowserPage(page, "iphone", visitor);
+
+	expect(userAgent).toBe(IPHONE_USER_AGENT);
+	expect(cdpCalls).toEqual([
+		{ method: "Emulation.setUserAgentOverride", params: { userAgent: IPHONE_USER_AGENT, platform: "iPhone" } },
+		{ method: "Emulation.setDeviceMetricsOverride", params: { ...IPHONE_SCREEN, screenWidth: 393, screenHeight: 852 } },
+		{ method: "Emulation.setTouchEmulationEnabled", params: { enabled: true, maxTouchPoints: 5 } },
+	]);
+	// Safari exposes no client hints.
+	expect(documentScripts).toEqual(["delete Navigator.prototype.userAgentData;"]);
+});
 
 test("getBrowserPage leaves Puppeteer's native navigation lifecycle untouched", async () => {
 	const { page, goto, handlers } = fakePage();

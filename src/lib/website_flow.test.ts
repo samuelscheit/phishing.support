@@ -13,6 +13,7 @@ import { getDb } from "./db";
 import { abuseJobs, abuseArtifacts } from "./abuse/schema";
 import { readInvestigationJobPayload } from "./investigation/payload";
 import { scriptedVisitSession, type ScriptedVisit } from "./site_visit/test_helpers";
+import { reporterBrowserIdentity } from "./browser/reporter_identity";
 import type { WebsiteNavigationHop } from "./website_types";
 import { eq } from "drizzle-orm";
 
@@ -386,6 +387,27 @@ describe("a visit through a multi-page kit", () => {
 		expect(submission?.status).toBe("invalid");
 		expect(submission?.info).toBe(`No reportable phishing or malware evidence was found at the captured destination ${RECOVERY}; no report was created.`);
 		expect(websiteData(submission)?.autoRetry).toBeUndefined();
+	});
+
+	test("every live capture of the case presents the reporter's own browser; a report without one keeps the default", async () => {
+		// Production case 380697679325302795: macmorrow.app showed its Terminal command
+		// only to Macs, and the reporter's Chrome on macOS was one.
+		const reporterHeaders = {
+			"user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+			"sec-ch-ua": "\"Not-A.Brand\";v=\"99\", \"Google Chrome\";v=\"157\", \"Chromium\";v=\"157\"",
+			"sec-ch-ua-platform": "\"macOS\"",
+		};
+		const captures: ArchiveWebsiteOptions[] = [];
+		// A capture without a session: the visit loads the page live once more.
+		await analyzeWebsite({ submissionId: await websiteSubmission(380697679325302795n, CONSENT), url: CONSENT, reporterHeaders }, dependencies({ captures, capture: (options) => liveCapture(options.url) }));
+		expect(captures.length).toBe(2);
+		expect(captures.map(({ visitor }) => visitor)).toEqual([reporterBrowserIdentity(reporterHeaders), reporterBrowserIdentity(reporterHeaders)]);
+		expect(captures[0]!.visitor?.override.platform).toBe("MacIntel");
+
+		const anonymous: ArchiveWebsiteOptions[] = [];
+		await analyzeWebsite({ submissionId: await websiteSubmission(380697679325302796n, CONSENT), url: CONSENT }, dependencies({ captures: anonymous, capture: (options) => liveCapture(options.url) }));
+		expect(anonymous.length).toBe(2);
+		expect(anonymous.every((options) => !("visitor" in options))).toBe(true);
 	});
 
 	test("a retry reuses the analyzed page's own capture, not the first page's", async () => {
