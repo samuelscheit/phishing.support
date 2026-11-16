@@ -7,7 +7,7 @@ import { buildWebsiteEvidence } from "../../evidence/package";
 import type { timestampEvidence } from "../../evidence/timestamp";
 import { extractPasteCommands } from "../../malware/paste_commands";
 import { fetchThroughPublicRedirects } from "../../network/public_redirects";
-import { archiveWebsite, WebsiteCaptureFailedError } from "../../website_archive";
+import { archiveWebsite, snapshotDocumentHtml, WebsiteCaptureFailedError } from "../../website_archive";
 import type { WebsiteDevice } from "../../website_types";
 import type { AccountIdentifierExtractor } from "./account_identifiers";
 
@@ -44,7 +44,7 @@ export const DECISION_TOOL_DEFINITIONS = [
 	{
 		type: "function",
 		name: "recheck_page",
-		description: "Open a URL in a real browser now, the way the case captured it (Tor first, then our server's address, then a residential connection when the site cloaks), presenting the reporter's browser. Returns where it ended, over which route, how the routes were answered, the rendered page text (hidden dialogs included), any paste-and-run commands decoded layer by layer, identifiers of accounts at the provider found in the page, and the name of a stamped screenshot you may attach.",
+		description: "Open a URL in a real browser now, the way the case captured it (Tor first, then our server's address, then a residential connection when the site cloaks), presenting the reporter's browser. Returns where it ended, over which route, how the routes were answered, the text a visitor sees on load, the full document text after scripts ran (closed dialogs and hidden elements a button reveals included), any paste-and-run commands in the document decoded layer by layer, identifiers of accounts at the provider found in it, and the name of a stamped screenshot you may attach.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -134,9 +134,12 @@ async function recheckPage(url: string, device: "case" | "iphone", context: Deci
 		if (error instanceof WebsiteCaptureFailedError) return { reached: false, failure: error.message };
 		throw error;
 	}
-	const html = archive.html.toString("utf8");
-	// The serialized DOM holds what scripts filled in, hidden dialogs included.
-	const fullText = parse(html).structuredText;
+	// The snapshot's whole DOM: what scripts filled in, and the dialog a button opens.
+	// The archive's own HTML and text keep only what a visitor sees before clicking.
+	const documentHtml = await snapshotDocumentHtml(archive.mhtml);
+	const document = parse(documentHtml);
+	document.querySelectorAll("script, style, noscript, svg").forEach((element) => element.remove());
+	const documentText = document.structuredText.replaceAll(/ *\n[\n ]*/g, "\n").trim();
 	let screenshot: string | undefined;
 	if (archive.screenshotPng) {
 		const stamped = await buildWebsiteEvidence({
@@ -163,9 +166,10 @@ async function recheckPage(url: string, device: "case" | "iphone", context: Deci
 		cloaking: archive.cloaking?.detail ?? null,
 		userAgent: archive.userAgent ?? null,
 		navigation: archive.navigationHops.map(({ url: hopUrl, status, redirectTo }) => ({ url: hopUrl, status, redirectTo: redirectTo ?? null })),
-		pageText: archive.text.toString("utf8").slice(0, MAX_TEXT),
-		pasteCommands: extractPasteCommands(fullText).map((command) => ({ shown: command.shown, decoded: command.layers.slice(1).map((layer) => layer.text), payloadUrls: command.payloadUrls })),
-		accountIdentifiers: context.accountIdentifiers ? context.accountIdentifiers(html) : [],
+		visiblePageText: archive.text.toString("utf8").slice(0, MAX_TEXT),
+		fullDocumentText: documentText.slice(0, MAX_TEXT),
+		pasteCommands: extractPasteCommands(documentText).map((command) => ({ shown: command.shown, decoded: command.layers.slice(1).map((layer) => layer.text), payloadUrls: command.payloadUrls })),
+		accountIdentifiers: context.accountIdentifiers ? context.accountIdentifiers(documentHtml) : [],
 		screenshot: screenshot ?? null,
 	};
 }

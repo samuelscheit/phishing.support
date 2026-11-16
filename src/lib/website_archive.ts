@@ -210,11 +210,7 @@ async function archiveMhtmlSnapshot(options: ArchiveWebsiteOptions & { mhtmlSnap
 						{ index: 0, url: options.url, hostname: requestedUrl.hostname, status: null, redirectTo: documentUrl, contentCaptured: false },
 						{ index: 1, url: documentUrl, hostname, status: null, contentCaptured: true },
 					];
-	const { data } = await convert(options.mhtmlSnapshot, {
-		enableScripts: false,
-		fetchMissingResources: false,
-	});
-	const { html, text } = capturedDocumentContent(data);
+	const { html, text } = capturedDocumentContent(await snapshotDocumentHtml(options.mhtmlSnapshot));
 	return {
 		requestedUrl: options.url,
 		url: documentUrl,
@@ -304,6 +300,15 @@ function inlineFrames(dom: HTMLElement, depth = 0): void {
 }
 
 /** Sanitized HTML and visitor-readable text of a captured document, with its frames shown in place. */
+/**
+ * The whole document an MHTML snapshot holds, as the browser's DOM was when it
+ * was taken: what scripts filled in and what is hidden (a closed dialog)
+ * included. `capturedDocumentContent` keeps only what a visitor sees of it.
+ */
+export async function snapshotDocumentHtml(mhtml: Buffer): Promise<string> {
+	return (await convert(mhtml, { enableScripts: false, fetchMissingResources: false })).data;
+}
+
 export function capturedDocumentContent(documentHtml: string): { html: string; text: string } {
 	const dom = parseDocument(documentHtml);
 	const title = dom.querySelector("title")?.textContent ?? "";
