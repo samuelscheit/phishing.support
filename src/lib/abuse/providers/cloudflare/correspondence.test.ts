@@ -147,6 +147,24 @@ describe("Cloudflare correspondence polling", () => {
 		expect(queued[0]!.nextAttemptAt.getTime()).toBeLessThanOrEqual(Date.now() + 60_000);
 	});
 
+	test("every route keeps its own status record when several reach the same state", async () => {
+		// Production 2026-11-16: status records were keyed by state alone, so of 36 submitted
+		// Cloudflare routes only the first to be accepted, denied or submitted got one, and
+		// Eranet's "process completed" for keychainagent.pro was dropped the same way.
+		Object.assign(process.env, environment);
+		await sqliteCloudflareSessionStore.writeSession(cloudflareSessionKey(cloudflareApiConfig(environment)), session);
+		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? emailsPage : detail)) as typeof fetch;
+		const first = await submittedCloudflareRoute();
+		const second = await submittedCloudflareRoute();
+		await pollProviderCorrespondence({ routeId: first.route.id, jobId: 1n });
+		await pollProviderCorrespondence({ routeId: second.route.id, jobId: 2n });
+		await pollProviderCorrespondence({ routeId: second.route.id, jobId: 3n });
+		for (const { reportId, route } of [first, second]) {
+			const statuses = (await AbuseRepository.listMailForReport(reportId)).filter((message) => message.routeId === route.id && message.subject === "Report status: accepted");
+			expect(statuses.map(({ correlationKey }) => correlationKey)).toEqual([`provider-api:cloudflare:status:${route.id.toString()}:accepted`]);
+		}
+	});
+
 	test("reads soon after submitting, then hourly", () => {
 		const minute = 60_000;
 		expect(nextCorrespondencePollDelayMs(0)).toBe(minute);

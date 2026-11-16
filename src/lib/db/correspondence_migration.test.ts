@@ -18,6 +18,25 @@ function applySqlMigration(database: Database, name: string) {
 	}
 }
 
+test("status records move to route-scoped keys; provider messages and other mail keep theirs", () => {
+	const directory = mkdtempSync(join(tmpdir(), "phishing-reporter-status-key-test-"));
+	temporaryDirectories.push(directory);
+	const database = new Database(join(directory, "status.sqlite"), { safeIntegers: true });
+	database.exec("CREATE TABLE abuse_mail_messages (id integer PRIMARY KEY, kind text NOT NULL, route_id integer, correlation_key text)");
+	const insert = database.query("INSERT INTO abuse_mail_messages (id, kind, route_id, correlation_key) VALUES (?, ?, ?, ?)");
+	insert.run(1n, "provider_api", 372039731095015427n, "provider-api:cloudflare:status:accepted");
+	insert.run(2n, "provider_api", 379991011708899501n, "provider-api:eranet:status:process completed");
+	insert.run(3n, "provider_api", 372039731095015427n, "provider-api:cloudflare:ddfb9a8d1137a9e7-email-1");
+	insert.run(4n, "reply", 372039731095015427n, "email-run:372039731095015427");
+	applySqlMigration(database, "0015_scope_provider_status_records.sql");
+	expect(database.query("SELECT correlation_key FROM abuse_mail_messages ORDER BY id").all().map((row) => (row as { correlation_key: string }).correlation_key)).toEqual([
+		"provider-api:cloudflare:status:372039731095015427:accepted",
+		"provider-api:eranet:status:379991011708899501:process completed",
+		"provider-api:cloudflare:ddfb9a8d1137a9e7-email-1",
+		"email-run:372039731095015427",
+	]);
+});
+
 /** Builds a populated pre-correspondence database from the actual old migrations. */
 function createLegacyDatabase() {
 	const directory = mkdtempSync(join(tmpdir(), "phishing-reporter-migration-test-"));

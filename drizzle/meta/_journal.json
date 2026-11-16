@@ -106,6 +106,13 @@
       "when": 1794083723321,
       "tag": "0014_gname_form_and_kit_fingerprints",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1794837895193,
+      "tag": "0015_scope_provider_status_records",
+      "breakpoints": true
     }
   ]
 }

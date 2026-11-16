@@ -28,8 +28,9 @@ export async function pollProviderCorrespondence(params: { routeId: bigint; jobI
 			...correspondence.messages.map((message) => ({ ...message, from: provider.definition.displayName })),
 			...(correspondence.status
 				? [{
-					// One record per distinct review state keeps the status history.
-					id: `status:${correspondence.status.state}`,
+					// One record per route and distinct review state keeps the status history;
+					// the id is unique per provider, so it names the route.
+					id: `status:${route.id.toString()}:${correspondence.status.state}`,
 					subject: `Report status: ${correspondence.status.state}`,
 					body: correspondence.status.detail ?? "",
 					sentAt: new Date(),
