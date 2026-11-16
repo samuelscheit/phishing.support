@@ -382,6 +382,22 @@ export async function transitionReportStatus(params: {
 }
 
 /** Submitted provider routes of the given providers, with the time their receipt was recorded. */
+/** Provider runs whose submission may have reached the provider without an answer, with their routes. */
+export async function listUnresolvedProviderRuns(providerRegistryKeys: string[]) {
+	if (providerRegistryKeys.length === 0) return [];
+	const db = await getDb();
+	return db
+		.select({ route: abuseProviderRoutes, run: abuseProviderRuns })
+		.from(abuseProviderRoutes)
+		.innerJoin(abuseProviderRuns, eq(abuseProviderRuns.routeId, abuseProviderRoutes.id))
+		.where(and(
+			eq(abuseProviderRoutes.status, "unknown_external_state"),
+			eq(abuseProviderRuns.executionStatus, "unknown_external_state"),
+			inArray(abuseProviderRoutes.providerRegistryKey, providerRegistryKeys),
+		))
+		.all();
+}
+
 export async function listSubmittedRoutesWithReceipt(providerRegistryKeys: string[]) {
 	if (providerRegistryKeys.length === 0) return [];
 	const db = await getDb();

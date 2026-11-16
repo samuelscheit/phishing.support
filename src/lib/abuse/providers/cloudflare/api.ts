@@ -215,15 +215,23 @@ export async function submitCloudflareAbuseReport(params: CloudflareRequestConte
 		);
 	} catch (error) {
 		if (error instanceof ProviderSubmissionRejectedError || error instanceof ProviderSubmissionNeedsHumanError || error instanceof CloudflareSessionExpiredError) throw error;
-		const receipt = await findSubmittedCloudflareReport({ ...params, sentAt }).catch(() => undefined);
+		const receipt = await findSubmittedCloudflareReport({ ...params, sentAt }).catch((lookupError: unknown) => {
+			console.warn(`Cloudflare submitted-report lookup after a failed POST for ${params.target} failed:`, lookupError);
+			return undefined;
+		});
 		if (!receipt) throw error;
-		return {
-			confirmationId: receipt,
-			confirmationText: "Cloudflare stored the abuse report; its answer to the request was lost, and the report was found in the account's submitted reports.",
-			finalUrl: `${CLOUDFLARE_PROVIDER.dashboardUrl}/${params.config.accountId}/abuse-reports/submitted`,
-			submittedTargets: [params.target],
-		};
+		return cloudflareReceiptSuccess(params.config.accountId, params.target, receipt);
 	}
+}
+
+/** A report found in the account's submitted reports after the answer to its POST was lost. */
+export function cloudflareReceiptSuccess(accountId: string, target: string, receipt: string): ProviderSubmissionSuccess {
+	return {
+		confirmationId: receipt,
+		confirmationText: "Cloudflare stored the abuse report; its answer to the request was lost, and the report was found in the account's submitted reports.",
+		finalUrl: `${CLOUDFLARE_PROVIDER.dashboardUrl}/${accountId}/abuse-reports/submitted`,
+		submittedTargets: [target],
+	};
 }
 
 const SUBMITTED_REPORT_ID = /^[a-f0-9]{16}$/;

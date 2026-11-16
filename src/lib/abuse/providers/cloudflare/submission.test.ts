@@ -5,7 +5,7 @@ import { buildCloudflareApiBody, cloudflareApiConfig, cloudflareReportsUrl, Clou
 import type { CloudflareReportPayload } from "./report";
 import { retryDelayMs } from "../../worker";
 import { CloudflareLoginUnavailableError } from "./session";
-import { prepareCloudflareExternalSubmission, submitCloudflareSubmission } from "./submission";
+import { findCloudflareSubmission, prepareCloudflareExternalSubmission, submitCloudflareSubmission } from "./submission";
 
 const ACCOUNT_ID = "b9077acfb4ef45e0f94b0f52c06c289a";
 const environment = { ABUSE_CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID, ABUSE_CLOUDFLARE_LOGIN_EMAIL: "operator@example.com", ABUSE_CLOUDFLARE_LOGIN_PASSWORD: "test-password" };
@@ -190,5 +190,28 @@ describe("Cloudflare provider preflight", () => {
 	test("refuses malformed stored payloads and missing credentials", async () => {
 		await expect(submitCloudflareSubmission({ routeId: 1n, payload: {} }, { environment })).rejects.toThrow("malformed");
 		await expect(submitCloudflareSubmission({ routeId: 1n, payload }, { environment: {} })).rejects.toThrow("ABUSE_CLOUDFLARE_ACCOUNT_ID");
+	});
+	test("a later lookup finds the report a 504 POST stored, read-only and by the exact payload sent", async () => {
+		// Production 2026-11-16: report 58dd5e517c5fc535 (keychainagent.pro) was stored behind an
+		// HTTP 504 and listed only after the lookup right after the POST.
+		const sentAt = new Date();
+		const methods: string[] = [];
+		const listing = (justification: string) => async (url: string, init?: RequestInit) => {
+			methods.push(init?.method ?? "GET");
+			if (url.includes("/submitted?")) return Response.json({ success: true, result: { reports: [{ id: "58dd5e517c5fc535", cdate: sentAt.toISOString(), domain: context.target }] } });
+			return Response.json({ success: true, result: { id: "58dd5e517c5fc535", urls: [report.urls], justification } });
+		};
+		const deps = { environment, getSession: async () => session };
+		expect(await findCloudflareSubmission({ routeId: 1n, payload, sentAt }, { ...deps, fetch: listing(report.justification) })).toEqual({
+			confirmationId: "58dd5e517c5fc535",
+			confirmationText: "Cloudflare stored the abuse report; its answer to the request was lost, and the report was found in the account's submitted reports.",
+			finalUrl: `https://dash.cloudflare.com/${ACCOUNT_ID}/abuse-reports/submitted`,
+			submittedTargets: [context.target],
+		});
+		// Another report on the same domain is not ours.
+		expect(await findCloudflareSubmission({ routeId: 1n, payload, sentAt }, { ...deps, fetch: listing("another report") })).toBeUndefined();
+		expect(methods.every((method) => method === "GET")).toBeTrue();
+		// A malformed stored payload is never looked up.
+		expect(await findCloudflareSubmission({ routeId: 1n, payload: {}, sentAt }, { ...deps, fetch: async () => { throw new Error("must not read"); } })).toBeUndefined();
 	});
 });

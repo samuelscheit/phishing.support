@@ -381,12 +381,13 @@ export async function executeProviderSubmission(params: {
 		await disposePreflight(preflight);
 		const status = knownFailureStatus(error);
 		if (status) return settleKnownFailure({ routeId: route.id, runId: run.id, status, reason: errorText(error) });
-		return markUnknownExternal({
-			routeId: route.id,
-			runId: run.id,
-			error: errorText(error),
-			reason: "provider_submission_ambiguous",
-		});
+		await AbuseRepository.markUnknownExternalState({ routeId: route.id, runId: run.id, error: errorText(error), reason: "provider_submission_ambiguous" });
+		// The provider may have filed it anyway; its own records settle that later.
+		if (params.provider.findSubmission) {
+			await queueReceiptLookup(route, run.id, { delayMs: nextReceiptLookupDelayMs(0)! })
+				.catch((queueError: unknown) => console.warn(`Queueing the receipt lookup for route ${route.id.toString()} failed:`, queueError));
+		}
+		throw new ProviderSubmissionUnknownExternalStateError(errorText(error));
 	}
 	await disposePreflight(preflight);
 	if (!isSubmissionSuccess(success)) {
@@ -444,6 +445,32 @@ const CORRESPONDENCE_EARLY_POLLS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const
 export function nextCorrespondencePollDelayMs(sinceSubmittedMs: number): number {
 	const early = CORRESPONDENCE_EARLY_POLLS_MS.find((offset) => offset > sinceSubmittedMs);
 	return early === undefined ? CORRESPONDENCE_POLL_INTERVAL_MS : early - Math.max(0, sinceSubmittedMs);
+}
+
+/**
+ * When a submission whose answer was lost is looked for at its provider,
+ * measured from the submission. A provider can list a report minutes after
+ * storing it; after the last lookup the route stays for a person.
+ */
+const RECEIPT_LOOKUPS_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 60 * 60_000, 24 * 60 * 60_000] as const;
+
+/** How long until the next receipt lookup, or undefined once the schedule is over. */
+export function nextReceiptLookupDelayMs(sinceSubmittedMs: number): number | undefined {
+	const next = RECEIPT_LOOKUPS_MS.find((offset) => offset > sinceSubmittedMs);
+	return next === undefined ? undefined : next - Math.max(0, sinceSubmittedMs);
+}
+
+/** Queue the next receipt lookup for an ambiguous run; one pending lookup per run. */
+export async function queueReceiptLookup(route: { id: bigint; reportId: bigint }, runId: bigint, options: { delayMs: number; successorOf?: bigint }): Promise<void> {
+	await AbuseRepository.enqueueJob({
+		jobType: "find_provider_receipt",
+		reportId: route.reportId,
+		routeId: route.id,
+		runId,
+		dedupeKey: `find-provider-receipt:${runId.toString()}`,
+		nextAttemptAt: new Date(Date.now() + options.delayMs),
+		...(options.successorOf === undefined ? {} : { successorOf: options.successorOf }),
+	});
 }
 
 /** Queue the next correspondence read for a route; one pending poll per route. */

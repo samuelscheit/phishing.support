@@ -168,6 +168,14 @@ export type ProviderSubmissionProvider = {
 	 */
 	prepareExternalSubmission?(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreflight>;
 	submit(context: ProviderSubmissionContext): Promise<ProviderSubmissionSuccess>;
+	/**
+	 * Read-only: find the report a submission filed when its answer was lost
+	 * (a gateway timeout, a dropped connection), by the immutable payload it
+	 * sent. Undefined when the provider lists no such report (yet). The worker
+	 * looks again on a bounded schedule and settles the route on a match; it
+	 * never submits a second time.
+	 */
+	findSubmission?(context: ProviderSubmissionContext & { sentAt: Date }): Promise<ProviderSubmissionSuccess | undefined>;
 	readonly inboundMail?: ProviderInboundMail;
 	/**
 	 * How to answer a review decision the provider reports through its API.

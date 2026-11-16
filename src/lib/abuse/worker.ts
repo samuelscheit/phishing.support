@@ -10,6 +10,7 @@ import {
 } from "./providers";
 import { sendEmail } from "./worker/email";
 import { ensureCorrespondencePolls, pollProviderCorrespondence } from "./worker/correspondence";
+import { ensureReceiptLookups, findProviderReceipt } from "./worker/receipt";
 import { ensureOriginHostDisclosureJobs } from "./origin/disclosure";
 import { reportOriginHostJob } from "./origin/report";
 import { analyzeKitSibling, discoverKitSiblings } from "./origin/kit_job";
@@ -54,6 +55,7 @@ const CONTROL_JOB_TYPES = [
 	"classify_provider_reply",
 	// Read-only provider API calls, kept apart from browser and SMTP work.
 	"poll_provider_correspondence",
+	"find_provider_receipt",
 ] as const satisfies readonly AbuseJobType[];
 
 /** Jobs that may cross an external provider side-effect boundary. */
@@ -242,6 +244,7 @@ export class AbuseWorker {
 		this.stopped = false;
 		await AbuseRepository.recoverStaleJobs();
 		await ensureCorrespondencePolls();
+		await ensureReceiptLookups();
 		await ensureOriginHostDisclosureJobs();
 		// Provider/browser work gets its own lane. A stuck CAPTCHA or browser can
 		// therefore never consume the capacity reserved for resolution,
@@ -488,6 +491,9 @@ export class AbuseWorker {
 				return;
 			case "poll_provider_correspondence":
 				await pollProviderCorrespondence({ routeId: idFrom(job.routeId, "routeId"), jobId: job.id, signal });
+				return;
+			case "find_provider_receipt":
+				await findProviderReceipt({ runId: idFrom(job.runId, "runId"), jobId: job.id, signal });
 				return;
 			case "monitor_provider_reply":
 				await monitorProviderReply(idFrom(job.routeId, "routeId"));

@@ -12,8 +12,10 @@ export {
 	CORRESPONDENCE_POLL_INTERVAL_MS,
 	CORRESPONDENCE_POLL_WINDOW_MS,
 	executeProviderSubmission,
+	nextReceiptLookupDelayMs,
 	ProviderSubmissionUnknownExternalStateError,
 	queueCorrespondencePoll,
+	queueReceiptLookup,
 } from "./submission_execution";
 export type { ProviderSubmissionExecutionResult } from "./submission_execution";
 export { providerDefinitionHasValidHash, providerDefinitionMatchesPin } from "./definition";

@@ -8,7 +8,15 @@ import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } fr
 import { recordValue, routeContext } from "../../worker/shared";
 
 import type { ProviderCorrespondence } from "../submission_contracts";
-import { cloudflareApiConfig, fetchCloudflareSubmittedReport, submitCloudflareAbuseReport, type CloudflareApiFetch, type CloudflareSessionProvider } from "./api";
+import {
+	cloudflareApiConfig,
+	cloudflareReceiptSuccess,
+	fetchCloudflareSubmittedReport,
+	findSubmittedCloudflareReport,
+	submitCloudflareAbuseReport,
+	type CloudflareApiFetch,
+	type CloudflareSessionProvider,
+} from "./api";
 import { getCloudflareSession, type CloudflareSession } from "./session";
 import { buildCloudflareReportPayload, type CloudflareReportPayload } from "./report";
 
@@ -120,6 +128,32 @@ export async function submitCloudflareSubmission(
 		...(context.signal ? { signal: context.signal } : {}),
 		...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
 	});
+}
+
+/**
+ * Find the report an ambiguous submission filed among the account's submitted
+ * reports: Cloudflare stored report 58dd5e517c5fc535 (keychainagent.pro)
+ * behind an HTTP 504, and the lookup right after the POST did not list it.
+ */
+export async function findCloudflareSubmission(
+	context: ProviderSubmissionContext & { sentAt: Date },
+	dependencies: CloudflareSubmissionDependencies = {},
+): Promise<ProviderSubmissionSuccess | undefined> {
+	const payload = parseStoredPayload(context.payload);
+	if (!payload) return undefined;
+	const config = cloudflareApiConfig(dependencies.environment);
+	const getSession = dependencies.getSession ?? getCloudflareSession;
+	const receipt = await findSubmittedCloudflareReport({
+		config,
+		session: await getSession(config, { signal: context.signal }),
+		getSession,
+		report: payload.report,
+		target: payload.target,
+		sentAt: context.sentAt,
+		...(context.signal ? { signal: context.signal } : {}),
+		...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+	});
+	return receipt ? cloudflareReceiptSuccess(config.accountId, payload.target, receipt) : undefined;
 }
 
 /** Read a submitted report's status and Cloudflare's emails about it, by its receipt. */

@@ -83,6 +83,7 @@ export const abuseJobTypes = [
 	"reconcile_skyvern_run",
 	"classify_provider_reply",
 	"poll_provider_correspondence",
+	"find_provider_receipt",
 	"investigate_report",
 	"follow_up_provider_decision",
 	"report_origin_host",
