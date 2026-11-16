@@ -62,6 +62,8 @@ export type SiteVisitParams<Step> = {
 	url: string;
 	canaries: ExfiltrationCanaries;
 	agent: VisitAgent;
+	/** Extra instructions for the visiting agent, on top of the walk itself. */
+	instructions?: string;
 	/** Record the page as it stands as the visit's next step. */
 	snapshot: () => Promise<Step>;
 	live?: (event: SiteVisitLiveEvent) => void;
@@ -181,7 +183,7 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 
 		let runId: string | undefined;
 		try {
-			({ runId } = await agent.start(buildSiteVisitTask(params.url, params.canaries), params.agentAddress));
+			({ runId } = await agent.start(buildSiteVisitTask(params.url, params.canaries, undefined, undefined, params.instructions), params.agentAddress));
 			agentOutcome.runId = runId;
 		} catch (error) {
 			agentOutcome.failure = `The visiting agent could not start: ${errorText(error).slice(0, 300)}`;

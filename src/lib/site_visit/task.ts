@@ -56,6 +56,8 @@ export function buildSiteVisitTask(
 	canaries: ExfiltrationCanaries,
 	maxSteps: number = visitMaxSteps(process.env.SITE_VISIT_SKYVERN_MAX_STEPS),
 	engine: VisitEngine = visitEngine(process.env.SITE_VISIT_SKYVERN_ENGINE),
+	/** What whoever asked for this visit wants done or looked at, on top of the walk itself. */
+	instructions?: string,
 ): SkyvernTaskPayload {
 	const url = new URL(pageUrl);
 	if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("A site visit needs a credential-free HTTP URL.");
@@ -87,6 +89,7 @@ export function buildSiteVisitTask(
 			"Follow the site onto another domain only when its own form, redirect, frame, or button leads to the next step of the same flow. Do not follow advertisements, footer or social links, search results, or links to the impersonated brand's real website.",
 			"A reCAPTCHA v2 or Cloudflare Turnstile checkbox is cleared automatically by the browser's guardian: do not click it yourself, and wait a few seconds for it to clear before acting. Do not authenticate to a real service, approve a real login or second factor, grant browser permissions, install extensions, change browser settings, or accept a dialog that installs software.",
 			`Stop when the flow ends (a confirmation, an error, a page that asks for nothing more, or a redirect to the real brand's site), when it blocks the synthetic data, when a challenge is still present after waiting (such as hCaptcha or an image puzzle), when it asks to be opened on a phone instead (set asksForPhone), when the site is an ordinary site with nothing to submit or download, or after ${MAX_FORM_SUBMISSIONS} submissions. The visit has a time limit of about ${VISIT_BUDGET_MS / 60_000} minutes.`,
+			...(instructions?.trim() ? [`For this visit, the investigator who asked for it adds: ${instructions.trim()} Follow that as well; every rule above on synthetic values and on never running, installing, or opening anything still applies.`] : []),
 			"Return only a short factual result; the pages, the network traffic, and the downloads are recorded independently.",
 		].join("\n"),
 		max_steps: maxSteps,

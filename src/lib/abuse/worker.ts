@@ -40,6 +40,8 @@ const DEFAULT_SWEEP_JOB_TIMEOUT_MS = 20 * 60_000;
  * analyses, data-drop lookups, and the linked reports.
  */
 const INVESTIGATION_JOB_TIMEOUT_MS = 15 * 60_000;
+/** A follow-up's agent may recheck and walk the site several times; one walk alone may take 20 minutes. */
+const FOLLOW_UP_JOB_TIMEOUT_MS = 60 * 60_000;
 const MAX_JOB_TIMEOUT_MS = 60 * 60_000;
 const MAX_RETRIES = 8;
 
@@ -295,7 +297,9 @@ export class AbuseWorker {
 					? this.sweepJobTimeoutMs
 					: job.jobType === "investigate_report"
 						? Math.max(this.externalJobTimeoutMs, INVESTIGATION_JOB_TIMEOUT_MS)
-						: this.externalJobTimeoutMs;
+						: job.jobType === "follow_up_provider_decision"
+							? Math.max(this.externalJobTimeoutMs, FOLLOW_UP_JOB_TIMEOUT_MS)
+							: this.externalJobTimeoutMs;
 			await this.runJobWithDeadline(job, controller, timeoutMs ?? defaultTimeout);
 			await AbuseRepository.completeJob(job.id, this.owner);
 		} catch (error) {
@@ -502,7 +506,7 @@ export class AbuseWorker {
 				await this.runInvestigationJob(job, signal);
 				return;
 			case "follow_up_provider_decision":
-				await followUpProviderDecision({ routeId: idFrom(job.routeId, "routeId"), ...readDecisionFollowUpPayload(job.payload) });
+				await followUpProviderDecision({ routeId: idFrom(job.routeId, "routeId"), ...readDecisionFollowUpPayload(job.payload) }, signal ? { signal } : {});
 				return;
 			case "report_origin_host":
 				await reportOriginHostJob(job, idFrom(job.reportId, "reportId"), signal);

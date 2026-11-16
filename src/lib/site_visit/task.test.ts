@@ -15,6 +15,15 @@ const canaries: ExfiltrationCanaries = {
 describe("the site visit task", () => {
 	const prompt = buildSiteVisitTask("https://phish.example/", canaries, 80).prompt;
 
+	test("carries an investigator's instructions for this visit, under the same safety rules; none by default", () => {
+		const instructed = buildSiteVisitTask("https://phish.example/", canaries, 80, "skyvern-3.0", "  Open the Download for Mac dialog and report the command it shows.  ").prompt;
+		expect(instructed).toContain("For this visit, the investigator who asked for it adds: Open the Download for Mac dialog and report the command it shows. Follow that as well; every rule above on synthetic values and on never running, installing, or opening anything still applies.");
+		// Before the closing line, so the agent's report rules stay last.
+		expect(instructed.trim().endsWith("are recorded independently.")).toBeTrue();
+		expect(prompt).not.toContain("the investigator who asked for it");
+		expect(buildSiteVisitTask("https://phish.example/", canaries, 80, "skyvern-3.0", "   ").prompt).not.toContain("the investigator who asked for it");
+	});
+
 	test("goes through the site as its victim would, with synthetic values only", () => {
 		expect(prompt).toContain("Go through the site the way a person it targets would");
 		expect(prompt).toContain(`"email":"${canaries.email}"`);

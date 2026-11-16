@@ -20,6 +20,8 @@ export type DecisionFollowUpDependencies = {
 	/** The registered provider of a route; tests answer through their own channel. */
 	providerFor?: typeof getProviderSubmissionProvider;
 	now?: () => Date;
+	/** The job's deadline: the agent and its site visits stop when it fires. */
+	signal?: AbortSignal;
 	/**
 	 * Run the agent without acting on its decision: nothing is sent and
 	 * nothing is recorded, so the case is left as it was found.
@@ -118,7 +120,7 @@ export async function followUpProviderDecision(
 			attachable,
 		},
 		...(dependencies.model ? { model: dependencies.model } : {}),
-		...(dependencies.tools ? { dependencies: dependencies.tools } : {}),
+		dependencies: { ...dependencies.tools, ...(dependencies.signal ? { signal: dependencies.signal } : {}) },
 	});
 	if (dependencies.dryRun) {
 		dependencies.dryRun({ outcome, steps, recipient });

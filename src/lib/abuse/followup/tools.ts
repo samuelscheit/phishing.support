@@ -7,7 +7,11 @@ import { buildWebsiteEvidence } from "../../evidence/package";
 import type { timestampEvidence } from "../../evidence/timestamp";
 import { extractPasteCommands } from "../../malware/paste_commands";
 import { fetchThroughPublicRedirects } from "../../network/public_redirects";
-import { archiveWebsite, WebsiteCaptureFailedError } from "../../website_archive";
+import { AbuseSkyvernAdapter } from "../skyvern";
+import { createExfiltrationCanaries } from "../../exfiltration/canaries";
+import { skyvernVisitAgent, type VisitAgent } from "../../site_visit/agent";
+import { visitPages } from "../../site_visit/evidence";
+import { archiveWebsite, WebsiteCaptureFailedError, type WebsiteArchiveResult } from "../../website_archive";
 import type { WebsiteDevice } from "../../website_types";
 import type { AccountIdentifierExtractor } from "./account_identifiers";
 
@@ -33,6 +37,10 @@ export type DecisionToolDependencies = {
 	assertPublicHost?: (hostname: string) => Promise<void>;
 	/** The RFC 3161 authority that timestamps a recheck's evidence. */
 	timestamp?: typeof timestampEvidence;
+	/** The agent that walks the site in `visit_site`; Skyvern in production. */
+	visitAgent?: VisitAgent;
+	/** The job's deadline; a visit stops when it fires. */
+	signal?: AbortSignal;
 };
 
 const MAX_TEXT = 15_000;
@@ -52,6 +60,22 @@ export const DECISION_TOOL_DEFINITIONS = [
 				device: { type: "string", enum: ["case", "iphone"], description: "`case`: the browser the case used; `iphone`: Safari on an iPhone, for kits that serve only phones." },
 			},
 			required: ["url", "device"],
+			additionalProperties: false,
+		},
+		strict: true,
+	},
+	{
+		type: "function",
+		name: "visit_site",
+		description: "Walk the site from a URL the way its victim would, with an AI browser agent in the same browser recheck_page uses: it clicks through, opens dialogs, fills forms with made-up values only (never real data), submits them, and starts downloads, without ever running anything. Returns every page it reached (each described like recheck_page, with its own screenshot), the requests that carried the made-up values and where they went, every downloaded file with its SHA-256, and the agent's own account of what it did. Takes several minutes; use it when what matters only shows after interaction. `instructions` tells the visiting agent what to do or look for on top of the walk, for example which button to press, which step to reach, or what to check.",
+		parameters: {
+			type: "object",
+			properties: {
+				url: { type: "string" },
+				device: { type: "string", enum: ["case", "iphone"], description: "`case`: the browser the case used; `iphone`: Safari on an iPhone." },
+				instructions: { type: "string", description: "Extra instructions for the visiting agent; empty for a plain walk." },
+			},
+			required: ["url", "device", "instructions"],
 			additionalProperties: false,
 		},
 		strict: true,
@@ -115,6 +139,7 @@ export async function caseCaptureNames(submissionId: bigint | undefined): Promis
 export async function runDecisionTool(name: string, args: Record<string, unknown>, context: DecisionToolContext, dependencies: DecisionToolDependencies = {}): Promise<unknown> {
 	try {
 		if (name === "recheck_page") return await recheckPage(String(args.url), args.device === "iphone" ? "iphone" : "case", context, dependencies);
+		if (name === "visit_site") return await visitSite(String(args.url), args.device === "iphone" ? "iphone" : "case", String(args.instructions ?? ""), context, dependencies);
 		if (name === "fetch_url") return await fetchUrl(String(args.url), String(args.userAgent), dependencies);
 		if (name === "read_case_capture") return await readCaseCapture(String(args.name), context);
 		return { error: `There is no tool named ${name}.` };
@@ -124,16 +149,72 @@ export async function runDecisionTool(name: string, args: Record<string, unknown
 }
 
 async function recheckPage(url: string, device: "case" | "iphone", context: DecisionToolContext, dependencies: DecisionToolDependencies) {
-	const identity = device === "iphone"
-		? { device: "iphone" as const }
-		: { ...(context.device ? { device: context.device } : {}), ...(context.visitor ? { visitor: context.visitor } : {}) };
 	let archive;
 	try {
-		archive = await (dependencies.capture ?? archiveWebsite)({ url, ...identity });
+		archive = await (dependencies.capture ?? archiveWebsite)({ url, ...captureIdentity(device, context) });
 	} catch (error) {
 		if (error instanceof WebsiteCaptureFailedError) return { reached: false, failure: error.message };
 		throw error;
 	}
+	return { reached: true, ...await describePage(archive, "recheck", context, dependencies) };
+}
+
+/**
+ * Walk the site with the visiting agent from a live capture held open, as
+ * the case's own visit did, and describe every page it reached with what each
+ * sent off and made the visitor download.
+ */
+async function visitSite(url: string, device: "case" | "iphone", instructions: string, context: DecisionToolContext, dependencies: DecisionToolDependencies) {
+	let first;
+	try {
+		first = await (dependencies.capture ?? archiveWebsite)({ url, ...captureIdentity(device, context), keepSession: true });
+	} catch (error) {
+		if (error instanceof WebsiteCaptureFailedError) return { reached: false, failure: error.message };
+		throw error;
+	}
+	const { session } = first;
+	if (!session) return { reached: true, error: "The page could not be held open for a visit." };
+	try {
+		const canaries = createExfiltrationCanaries();
+		const recording = await session.visit({
+			canaries,
+			agent: dependencies.visitAgent ?? skyvernVisitAgent(() => new AbuseSkyvernAdapter()),
+			...(instructions.trim() ? { instructions } : {}),
+			...(dependencies.signal ? { signal: dependencies.signal } : {}),
+		});
+		const pages = [];
+		for (const page of visitPages(first, recording, canaries)) {
+			pages.push({
+				...await describePage(page.archive, "visit", context, dependencies),
+				sentMadeUpData: page.dataSent.map(({ url: sentTo, method, fields, sameSite }) => ({ url: sentTo, method, fields, sameSite })),
+				downloads: page.downloads.map((file) => ({ url: file.url, fileName: file.fileName, contentType: file.contentType ?? null, bytes: file.bytes.byteLength, sha256: createHash("sha256").update(file.bytes).digest("hex") })),
+			});
+		}
+		return {
+			reached: true,
+			agent: {
+				outcome: recording.agent.outcome,
+				report: recording.agent.report ?? null,
+				failure: recording.agent.failure ?? null,
+				actions: recording.agent.actions.map((action) => action.text),
+			},
+			madeUpValues: { email: canaries.email, password: canaries.password, phone: canaries.phone, cardNumber: canaries.cardNumber },
+			pages,
+			downloadFailures: recording.downloadFailures,
+		};
+	} finally {
+		await session.close();
+	}
+}
+
+function captureIdentity(device: "case" | "iphone", context: DecisionToolContext) {
+	return device === "iphone"
+		? { device: "iphone" as const }
+		: { ...(context.device ? { device: context.device } : {}), ...(context.visitor ? { visitor: context.visitor } : {}) };
+}
+
+/** One captured page as the agent reads it, its stamped screenshot made attachable. */
+async function describePage(archive: WebsiteArchiveResult, kind: "recheck" | "visit", context: DecisionToolContext, dependencies: DecisionToolDependencies) {
 	// The live DOM: what scripts filled in, and the closed dialog a button opens.
 	// The archive's own HTML and text keep only what a visitor sees before clicking.
 	const documentHtml = archive.documentHtml ?? archive.html.toString("utf8");
@@ -154,12 +235,11 @@ async function recheckPage(url: string, device: "case" | "iphone", context: Deci
 			mhtml: archive.mhtml,
 		}, dependencies.timestamp ? { timestamp: dependencies.timestamp } : {});
 		if (stamped.stampedScreenshotPng) {
-			screenshot = `recheck-${context.attachable.size + 1}.png`;
+			screenshot = `${kind}-${context.attachable.size + 1}.png`;
 			context.attachable.set(screenshot, { filename: screenshot, mimeType: "image/png", content: stamped.stampedScreenshotPng });
 		}
 	}
 	return {
-		reached: true,
 		checkedAt: archive.archivedAt.toISOString(),
 		finalUrl: archive.url,
 		route: archive.route ?? null,

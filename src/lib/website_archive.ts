@@ -94,6 +94,8 @@ export type WebsitePageSession = {
 export type WebsiteVisitParams = {
 	canaries: ExfiltrationCanaries;
 	agent: VisitAgent;
+	/** Extra instructions for the visiting agent, on top of the walk itself. */
+	instructions?: string;
 	live?: (event: SiteVisitLiveEvent) => void;
 	signal?: AbortSignal;
 };

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import sharp from "sharp";
 
 import { useTemporaryDatabase } from "../../db/test_helpers";
@@ -7,7 +8,8 @@ import type { sendAbuseEmailRoute } from "../mail";
 import { ProviderSubmissionRejectedError, type DecisionAnswer, type ProviderSubmissionProvider } from "../providers/submission_contracts";
 import { AbuseRepository } from "../repository";
 import { UnknownExternalStateError } from "../worker/shared";
-import { capturedDocumentContent, type WebsiteArchiveResult } from "../../website_archive";
+import { capturedDocumentContent, type WebsiteArchiveResult, type WebsiteVisitParams } from "../../website_archive";
+import { scriptedVisitSession } from "../../site_visit/test_helpers";
 import type { DecisionAgentModel } from "./agent";
 import { followUpProviderDecision } from "./decision";
 
@@ -130,6 +132,50 @@ describe("provider decision follow-up agent", () => {
 		expect(events.find((event) => event.eventType === "provider_decision.followed_up")?.data).toMatchObject({ to: "abusereply@cloudflare.com", summary: "The command still sits in the install dialog; asked them to open it." });
 		const transcript = (await AbuseRepository.listArtifacts(reportId)).find((artifact) => artifact.kind === "decision_follow_up_transcript");
 		expect(JSON.parse(Buffer.from(transcript!.blob).toString("utf8")).steps.map(({ tool }: { tool: string }) => tool)).toEqual(["recheck_page", "fetch_url", "fetch_url", "answer"]);
+	});
+
+	test("walks the site with the visiting agent and its instructions, and reads every page, data drop and download", async () => {
+		const { route } = await deniedRoute("paneo.work", "https://paneo.work/");
+		const { sent, send } = recordingSend();
+		const visits: WebsiteVisitParams[] = [];
+		let closed = 0;
+		const bot = "https://api.telegram.org/bot8123456789:AAH-kit-token/sendMessage";
+		const visitTools = {
+			...tools,
+			capture: async (options: { url: string; keepSession?: boolean }) => ({
+				...liveCapture(options.url),
+				...(options.keepSession ? {
+					session: {
+						...scriptedVisitSession({
+							steps: [liveCapture("https://paneo.work/install")],
+							requests: (canaries) => [{ timestamp: "", url: bot, method: "POST", postData: JSON.stringify({ text: `mail: ${canaries.email}` }) }],
+							downloads: [{ url: "https://paneo.work/Paneo.dmg", fileName: "Paneo.dmg", contentType: "application/x-apple-diskimage", bytes: Buffer.from("dmg"), userAgent: "curl/8.7.1" }],
+							agent: { actions: [{ id: "a1", kind: "click", text: "Clicked \"Download for macOS\"" }] },
+						}, visits),
+						close: async () => { closed++; },
+					},
+				} : {}),
+			}),
+		};
+		const instructions = "Open the Download for macOS dialog and click the button inside it.";
+		const { model, inputs } = scripted(
+			[call("visit_site", { url: "https://paneo.work/", device: "case", instructions })],
+			[call("answer", { text: "Hello Cloudflare,\n\nThe dialog still delivers the stealer.", attachments: ["visit-2.png"], summary: "Walked the dialog; it still delivers." })],
+		);
+
+		expect(await followUpProviderDecision({ routeId: route.id, state: "denied" }, { model, tools: visitTools, send })).toBe("sent");
+
+		expect(visits.map((visit) => visit.instructions)).toEqual([instructions]);
+		expect(closed).toBe(1);
+		const visit = JSON.parse((inputs[1]!.find((item) => (item as { type?: string }).type === "function_call_output") as { output: string }).output);
+		expect(visit.agent).toMatchObject({ outcome: "completed", actions: ["Clicked \"Download for macOS\""] });
+		expect(visit.pages.map(({ finalUrl, screenshot }: { finalUrl: string; screenshot: string }) => ({ finalUrl, screenshot }))).toEqual([
+			{ finalUrl: "https://paneo.work/", screenshot: "visit-1.png" },
+			{ finalUrl: "https://paneo.work/install", screenshot: "visit-2.png" },
+		]);
+		expect(visit.pages[1].sentMadeUpData).toEqual([{ url: bot, method: "POST", fields: ["email"], sameSite: false }]);
+		expect(visit.pages[1].downloads).toEqual([{ url: "https://paneo.work/Paneo.dmg", fileName: "Paneo.dmg", contentType: "application/x-apple-diskimage", bytes: 3, sha256: createHash("sha256").update("dmg").digest("hex") }]);
+		expect(sent[0]!.attachments!.map(({ filename }) => filename)).toEqual(["visit-2.png"]);
 	});
 
 	test("an agent that decides not to answer sends nothing, records its reason, and is not asked again", async () => {
