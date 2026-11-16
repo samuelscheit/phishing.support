@@ -1,4 +1,5 @@
 import type { ProviderReportPreviewContext, ProviderSubmissionProvider } from "../submission_contracts";
+import { fetchEranetCorrespondence } from "./correspondence";
 import { ERANET_PROVIDER } from "./definition";
 import { makeEranetDescription } from "./payload";
 import { prepareEranetExternalSubmission, prepareEranetSubmission, submitEranetSubmission } from "./submission";
@@ -19,6 +20,9 @@ export const eranetProvider: ProviderSubmissionProvider = {
 	// The executor always calls submitPrepared: the code lives in the preflight's browser session.
 	submit: (context) => submitEranetSubmission(context, undefined),
 	submitPrepared: (context, preflight) => submitEranetSubmission(context, preflight),
+	// Eranet answers in its portal; its mails only say that the status changed.
+	inboundMail: { senderDomains: ["eranet.com"] },
+	fetchCorrespondence: (context) => fetchEranetCorrespondence(context),
 };
 
 export { ERANET_PROVIDER } from "./definition";
