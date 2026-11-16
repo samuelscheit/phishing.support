@@ -7,7 +7,7 @@ import { buildWebsiteEvidence } from "../../evidence/package";
 import type { timestampEvidence } from "../../evidence/timestamp";
 import { extractPasteCommands } from "../../malware/paste_commands";
 import { fetchThroughPublicRedirects } from "../../network/public_redirects";
-import { archiveWebsite, snapshotDocumentHtml, WebsiteCaptureFailedError } from "../../website_archive";
+import { archiveWebsite, WebsiteCaptureFailedError } from "../../website_archive";
 import type { WebsiteDevice } from "../../website_types";
 import type { AccountIdentifierExtractor } from "./account_identifiers";
 
@@ -134,9 +134,9 @@ async function recheckPage(url: string, device: "case" | "iphone", context: Deci
 		if (error instanceof WebsiteCaptureFailedError) return { reached: false, failure: error.message };
 		throw error;
 	}
-	// The snapshot's whole DOM: what scripts filled in, and the dialog a button opens.
+	// The live DOM: what scripts filled in, and the closed dialog a button opens.
 	// The archive's own HTML and text keep only what a visitor sees before clicking.
-	const documentHtml = await snapshotDocumentHtml(archive.mhtml);
+	const documentHtml = archive.documentHtml ?? archive.html.toString("utf8");
 	const document = parse(documentHtml);
 	document.querySelectorAll("script, style, noscript, svg").forEach((element) => element.remove());
 	const documentText = document.structuredText.replaceAll(/ *\n[\n ]*/g, "\n").trim();

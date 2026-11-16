@@ -28,8 +28,9 @@ const PAGE = `<html><body><h1>Window Manager for Power Users</h1><a href="#downl
 const PNG = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#ffffff" } }).png().toBuffer();
 
 /**
- * A capture as the archive makes it: the snapshot holds the whole DOM, the
- * archive's HTML and text only what a visitor sees, so not the closed dialog.
+ * A capture as the archive makes it: the live DOM holds the closed dialog;
+ * the MHTML (Chrome leaves out what is not rendered) and the archive's HTML
+ * and text, which keep only what a visitor sees, do not.
  */
 function liveCapture(url: string): WebsiteArchiveResult {
 	const visible = capturedDocumentContent(PAGE);
@@ -42,7 +43,8 @@ function liveCapture(url: string): WebsiteArchiveResult {
 		route: "residential exit",
 		userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
 		screenshotPng: PNG,
-		mhtml: Buffer.from(`From: <Saved by Blink>\r\nSnapshot-Content-Location: ${url}\r\nContent-Type: text/html\r\n\r\n${PAGE}`),
+		mhtml: Buffer.from(`From: <Saved by Blink>\r\nSnapshot-Content-Location: ${url}\r\nContent-Type: text/html\r\n\r\n${visible.html}`),
+		documentHtml: PAGE,
 		html: Buffer.from(visible.html),
 		text: Buffer.from(visible.text),
 	};

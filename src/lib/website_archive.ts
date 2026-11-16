@@ -63,6 +63,12 @@ export type WebsiteArchiveResult = {
 	device?: WebsiteDevice;
 	/** The User-Agent the live capture presented; a provider's reviewer needs it to see what the capture saw. */
 	userAgent?: string;
+	/**
+	 * The live page's whole DOM when it was captured, closed dialogs included.
+	 * Chrome's MHTML leaves out elements that are not rendered, so a command in
+	 * a `hidden` install dialog (macmorrow.app) is only here. Live captures only.
+	 */
+	documentHtml?: string;
 	/** Non-empty when an uploaded snapshot claims a different host than the submitted target. */
 	attributionError?: string;
 	/** The open browser of a live capture made with `keepSession`. */
@@ -210,7 +216,11 @@ async function archiveMhtmlSnapshot(options: ArchiveWebsiteOptions & { mhtmlSnap
 						{ index: 0, url: options.url, hostname: requestedUrl.hostname, status: null, redirectTo: documentUrl, contentCaptured: false },
 						{ index: 1, url: documentUrl, hostname, status: null, contentCaptured: true },
 					];
-	const { html, text } = capturedDocumentContent(await snapshotDocumentHtml(options.mhtmlSnapshot));
+	const { data } = await convert(options.mhtmlSnapshot, {
+		enableScripts: false,
+		fetchMissingResources: false,
+	});
+	const { html, text } = capturedDocumentContent(data);
 	return {
 		requestedUrl: options.url,
 		url: documentUrl,
@@ -300,14 +310,6 @@ function inlineFrames(dom: HTMLElement, depth = 0): void {
 }
 
 /** Sanitized HTML and visitor-readable text of a captured document, with its frames shown in place. */
-/**
- * The whole document an MHTML snapshot holds, as the browser's DOM was when it
- * was taken: what scripts filled in and what is hidden (a closed dialog)
- * included. `capturedDocumentContent` keeps only what a visitor sees of it.
- */
-export async function snapshotDocumentHtml(mhtml: Buffer): Promise<string> {
-	return (await convert(mhtml, { enableScripts: false, fetchMissingResources: false })).data;
-}
 
 export function capturedDocumentContent(documentHtml: string): { html: string; text: string } {
 	const dom = parseDocument(documentHtml);
@@ -900,6 +902,7 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 			const screenshotBytes = await capturePaintedScreenshot(page, dependencies.screenshotTimeoutMs);
 			const cdp = await page.target().createCDPSession();
 			const resolvedMhtml = Buffer.from((await cdp.send("Page.captureSnapshot", { format: "mhtml" })).data, "utf-8");
+			const documentHtml = await page.evaluate(() => document.documentElement.outerHTML).catch(() => undefined);
 			const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? documentAddress(page.url(), documentUrl) ?? page.url();
 			const capturedDocument = await archiveMhtmlSnapshot({ url, archivedUrl: capturedDocumentUrl, navigationHops: hopsTo(capturedDocumentUrl), mhtmlSnapshot: resolvedMhtml });
 			const frames = await hiddenFrames(page, frameTraffic, userAgent);
@@ -907,6 +910,7 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 				...capturedDocument,
 				route: FABRIC_EGRESS_LABEL[egress],
 				screenshotPng: screenshotBytes && screenshotUrl === capturedDocumentUrl ? Buffer.from(screenshotBytes) : undefined,
+				...(documentHtml ? { documentHtml } : {}),
 				kitResources: await kitResources.settled(),
 				...(frames.length ? { hiddenFrames: frames } : {}),
 				...(device !== "desktop" ? { device } : {}),
