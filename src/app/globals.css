@@ -146,6 +146,9 @@
 
   body {
     @apply bg-background text-foreground;
+    /* Long unbroken tokens (base64 commands, URLs, hashes) wrap instead of bleeding out of
+       their card; unlike break-word this also lets flex and grid items shrink below them. */
+    overflow-wrap: anywhere;
   }
 }
 
@@ -157,12 +160,6 @@ button {
   @apply [scrollbar-width:none] [&::-webkit-scrollbar]:hidden;
 }
 
-@utility wrap-break-word {
-  overflow-wrap: break-word;
-  word-wrap: break-word;
-  word-break: break-word;
-  hyphens: auto;
-}
 
 div[data-radix-scroll-area-viewport]>div {
   display: block !important;

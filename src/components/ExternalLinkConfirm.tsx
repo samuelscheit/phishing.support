@@ -37,7 +37,7 @@ export function ExternalLinkConfirm({
 				<DialogHeader>
 					<DialogTitle className="text-center">Warning</DialogTitle>
 					<DialogDescription className="text-white text-center">
-						This will open <span className="font-mono break-all font-semibold">{href}</span> in a new tab.
+						This will open <span className="font-mono font-semibold">{href}</span> in a new tab.
 						{description && <p className="mt-2">{description}</p>}
 					</DialogDescription>
 				</DialogHeader>

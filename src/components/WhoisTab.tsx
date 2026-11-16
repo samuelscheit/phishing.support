@@ -39,8 +39,8 @@ function KeyValueTable({ rows }: { rows: Array<{ k: string; v?: React.ReactNode 
 					{filtered.map((row) => (
 						<TableRow key={row.k}>
 							<TableCell className="font-medium text-muted-foreground min-w-36 w-36">{row.k}</TableCell>
-							<TableCell className="break-all">
-								<pre>{row.v}</pre>
+							<TableCell>
+								<pre className="whitespace-pre-wrap">{row.v}</pre>
 								{/* {row.v} */}
 							</TableCell>
 						</TableRow>
@@ -76,7 +76,7 @@ function RegionalDnsRecords({ title, resolution }: { title: string; resolution?:
 				{failed ? <Badge variant="outline">Measurement unavailable</Badge> : null}
 			</div>
 			{failed ? (
-				<div className="text-xs text-muted-foreground break-all">{failed}</div>
+				<div className="text-xs text-muted-foreground">{failed}</div>
 			) : (
 				<KeyValueTable
 					rows={[
@@ -206,7 +206,7 @@ export function WhoisTab({ url, whois }: { url?: string | null; whois?: WhoISInf
 								<Card key={`${ip.ip}-${ip.handle}`}>
 									<CardHeader className="space-y-1">
 										<CardTitle className="font-mono text-sm">{ip.ip}</CardTitle>
-										<div className="text-[11px] text-muted-foreground break-all">
+										<div className="text-[11px] text-muted-foreground">
 											{ip.name || ip.handle || "—"}
 											{ip.country ? ` \u00b7 ${ip.country}` : ""}
 											{ip.type ? ` \u00b7 ${ip.type}` : ""}
@@ -247,7 +247,7 @@ export function WhoisTab({ url, whois }: { url?: string | null; whois?: WhoISInf
 													<Card key={`${ip.ip}-AS${origin.asn}`}>
 														<CardHeader className="space-y-1">
 															<CardTitle className="font-mono text-sm">AS{origin.asn}</CardTitle>
-															<div className="text-[11px] text-muted-foreground break-all">
+															<div className="text-[11px] text-muted-foreground">
 																{origin.rdap?.name || origin.rdap?.handle || "RDAP details unavailable"}
 															</div>
 														</CardHeader>

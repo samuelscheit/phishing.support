@@ -32,7 +32,7 @@ function TooltipDetailsContent({ title, description, example }: TooltipDetails) 
 			{example ? (
 				<div className="py-1">
 					<div className="text-[10px] opacity-80">Example</div>
-					<div className="mt-1 rounded-sm bg-gray-200 px-2 py-1 font-mono text-[11px] break-all">{example}</div>
+					<div className="mt-1 rounded-sm bg-gray-200 px-2 py-1 font-mono text-[11px]">{example}</div>
 				</div>
 			) : null}
 			<div
@@ -77,7 +77,7 @@ function UrlPartsDetailsTable({ parts }: { parts: UrlPartDetails[] }) {
 						<tr key={part.id} className="border-b last:border-b-0">
 							<td className="px-1 text-center h-full whitespace-break-spaces text-foreground w-24 max-w-24 text-xs flex flex-col gap-1 py-1">
 								<span className="text-black text-xs">{part.tooltip.title}</span>
-								<div className="font-mono break-all flex-1 justify-center flex items-end text-blue-900">{part.value}</div>
+								<div className="font-mono flex-1 justify-center flex items-end text-blue-900">{part.value}</div>
 							</td>
 							<td className="align-top py-1">
 								<div
@@ -114,7 +114,7 @@ export function UrlParts({ url, className }: UrlPartsProps) {
 	}
 
 	if (!parsedUrl) {
-		return <div className={cn("font-mono text-xs break-all", className)}>{url}</div>;
+		return <div className={cn("font-mono text-xs", className)}>{url}</div>;
 	}
 
 	const protocol = parsedUrl.protocol.replace(":", "");
@@ -159,7 +159,7 @@ export function UrlParts({ url, className }: UrlPartsProps) {
 	return (
 		<TooltipProvider delayDuration={0} skipDelayDuration={0}>
 			<div className={cn("w-full", className)}>
-				<div className="flex flex-wrap items-center gap-1 break-all">
+				<div className="flex flex-wrap items-center gap-1">
 					<Part tooltip={protocolTooltip} className="text-muted-foreground">
 						{protocol}
 					</Part>

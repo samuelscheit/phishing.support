@@ -234,7 +234,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 				const raw =
 					(parsed?.html as string | undefined) ||
 					(typeof parsed?.text === "string" && parsed.text.trim().length > 0
-						? `<!doctype html><html><head><meta charset="utf-8" /></head><body><pre style="white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">${parsed.text
+						? `<!doctype html><html><head><meta charset="utf-8" /></head><body><pre style="white-space:pre-wrap; overflow-wrap:anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">${parsed.text
 								.replace(/&/g, "&amp;")
 								.replace(/</g, "&lt;")
 								.replace(/>/g, "&gt;")}</pre></body></html>`
@@ -284,7 +284,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 				</nav>
 				<div className="flex flex-wrap items-start justify-between gap-3">
 					<div className="min-w-0 space-y-1">
-						<h1 className="flex items-center gap-2 text-xl font-semibold leading-tight tracking-tight wrap-break-word sm:text-2xl">
+						<h1 className="flex items-center gap-2 text-xl font-semibold leading-tight tracking-tight sm:text-2xl">
 							{submission.kind === "website" ? <Globe className="h-6 w-6 shrink-0 text-muted-foreground" /> : <Mail className="h-6 w-6 shrink-0 text-muted-foreground" />}
 							<span className="min-w-0">{targetName}</span>
 						</h1>
@@ -310,11 +310,11 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 							<div className="grid gap-3 sm:grid-cols-2">
 								<div className="rounded-lg border bg-muted/30 p-3">
 									<div className="text-xs text-muted-foreground">From</div>
-									<div className="mt-1 font-mono text-xs break-all">{submission.data.email?.from || "—"}</div>
+									<div className="mt-1 font-mono text-xs">{submission.data.email?.from || "—"}</div>
 								</div>
 								<div className="rounded-lg border bg-muted/30 p-3">
 									<div className="text-xs text-muted-foreground">Subject</div>
-									<div className="mt-1 text-sm font-medium wrap-break-word">
+									<div className="mt-1 text-sm font-medium">
 										{submission.data.email?.subject || "—"}
 									</div>
 								</div>
@@ -325,7 +325,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 									<ul className="mt-1 space-y-1">
 										{submission.data.email.linkedWebsites.map((link) => (
 											<li key={link.url} className="flex items-start justify-between gap-3">
-												<span className="min-w-0 font-mono text-xs break-all">{link.url}</span>
+												<span className="min-w-0 font-mono text-xs">{link.url}</span>
 												<Link href={`/submissions/${link.submissionId}`} className="shrink-0 text-xs font-medium text-primary hover:underline">
 													Open case
 												</Link>
@@ -356,7 +356,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 												(from {websiteArchiveDate ?? "unknown date"})
 											</div>
 										</CardTitle>
-										<div className="break-all text-xs text-muted-foreground">
+										<div className="text-xs text-muted-foreground">
 											Captured page: {submission.data.kind === "website" ? submission.data.website.archiveUrl ?? submission.data.website.url : "unknown"}
 										</div>
 										<CardDescription className="text-xs flex flex-row gap-8">
@@ -439,8 +439,8 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 										</div>
 										{investigation.payloads?.map((payload) => (
 											<div key={payload.url} className="rounded border bg-muted/20 p-2 text-xs">
-												<div className="break-all font-mono">{payload.url}</div>
-												{payload.sha256 ? <div className="break-all text-muted-foreground">SHA-256 {payload.sha256}{payload.sizeBytes ? ` · ${formatArtifactSize(payload.sizeBytes)}` : ""}</div> : null}
+												<div className="font-mono">{payload.url}</div>
+												{payload.sha256 ? <div className="text-muted-foreground">SHA-256 {payload.sha256}{payload.sizeBytes ? ` · ${formatArtifactSize(payload.sizeBytes)}` : ""}</div> : null}
 												{payload.verdict ? <div className="font-medium text-destructive">{payload.verdict}</div> : null}
 												{payload.error ? <div className="text-muted-foreground">Not downloaded: {payload.error}</div> : null}
 											</div>
@@ -468,19 +468,19 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 											<li key={`${hop.index}:${hop.url}`} className="rounded border bg-background p-2">
 												<div className="flex items-start justify-between gap-2">
 													<div className="min-w-0 space-y-1">
-														<div className="break-all font-mono text-xs">{hop.url}</div>
+														<div className="font-mono text-xs">{hop.url}</div>
 														<div className="text-xs text-muted-foreground">
 															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured and analyzed" : hop.visitorStep ? " · Page captured, the visit moved on" : hop.revisitedAs ? " · Page captured, it turns desktops away to a phone" : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
 														</div>
 														{hop.visitorStep && hop.redirectTo ? (
-															<div className="break-all text-xs text-muted-foreground">
+															<div className="text-xs text-muted-foreground">
 																{hop.visitorStep.submitted.length
 																	? <>The visit entered the made-up {hop.visitorStep.submitted.map((field) => CANARY_FIELD_LABEL[field]).join(", ")} here; it then showed {hop.redirectTo}</>
 																	: <>The visit moved on to {hop.redirectTo}</>}
 															</div>
 														) : hop.revisitedAs && hop.redirectTo ? (
-															<div className="break-all text-xs text-muted-foreground">Opened again as {WEBSITE_DEVICE_LABEL[hop.revisitedAs]}, it shows {hop.redirectTo}</div>
-														) : hop.redirectTo ? <div className="break-all text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
+															<div className="text-xs text-muted-foreground">Opened again as {WEBSITE_DEVICE_LABEL[hop.revisitedAs]}, it shows {hop.redirectTo}</div>
+														) : hop.redirectTo ? <div className="text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
 														{verificationGate && hop.contentCaptured ? (
 															<div className="text-xs text-muted-foreground">Behind the page's own “{verificationGate.label}” gate, clicked to reveal it</div>
 														) : null}
@@ -489,10 +489,10 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 														) : null}
 														{offeredDownload && hop.contentCaptured ? (
 															<div className="space-y-0.5 text-xs text-muted-foreground">
-																<div className="break-all">Offers <span className="font-mono">{offeredDownload.fileName}</span> ({offeredDownload.sizeBytes.toLocaleString()} bytes), downloaded by the visit and inspected without running it</div>
-																<div className="break-all font-mono">SHA-256 {offeredDownload.sha256}</div>
+																<div>Offers <span className="font-mono">{offeredDownload.fileName}</span> ({offeredDownload.sizeBytes.toLocaleString()} bytes), downloaded by the visit and inspected without running it</div>
+																<div className="font-mono">SHA-256 {offeredDownload.sha256}</div>
 																{offeredDownload.inspection.browserExtension ? (
-																	<div className="break-all">Browser extension “{offeredDownload.inspection.browserExtension.name}” with permissions {[...offeredDownload.inspection.browserExtension.permissions, ...offeredDownload.inspection.browserExtension.hostPermissions].join(", ")}</div>
+																	<div>Browser extension “{offeredDownload.inspection.browserExtension.name}” with permissions {[...offeredDownload.inspection.browserExtension.permissions, ...offeredDownload.inspection.browserExtension.hostPermissions].join(", ")}</div>
 																) : null}
 															</div>
 														) : null}
@@ -562,7 +562,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 											<CardTitle className="text-xs truncate">{a.name || a.kind}</CardTitle>
 											<CardDescription className="text-[10px]">
 												{a.mimeType} • {formatArtifactSize(a.size)}
-												{a.sha256 ? <div className="font-mono break-all">SHA-256 {a.sha256}</div> : null}
+												{a.sha256 ? <div className="font-mono">SHA-256 {a.sha256}</div> : null}
 												{isWebsiteArchiveArtifact(a) ? (
 													<div>Archived {formatUtcDateTime(a.archivedAt ?? a.createdAt) ?? "unknown date"}</div>
 												) : null}
@@ -599,7 +599,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 								<p className="mt-2 text-sm">
 									Impersonates <span className="font-medium">{analyzedAssessment.impersonatedBrand.name}</span>
 									<span className="text-muted-foreground"> · official site </span>
-									<span className="break-all text-muted-foreground">{hostOfUrl(analyzedAssessment.impersonatedBrand.officialUrl)}</span>
+									<span className="text-muted-foreground">{hostOfUrl(analyzedAssessment.impersonatedBrand.officialUrl)}</span>
 								</p>
 							) : null}
 							{analyzedAssessment?.evidenceQuote ? (

@@ -48,7 +48,7 @@ const reportStatusText: Record<string, string> = {
 function ArtifactLink({ submissionId, artifact, fallback }: { submissionId: string; artifact?: SubmissionReportArtifact; fallback: string }) {
 	if (!artifact) return null;
 	return (
-		<a href={`/api/submissions/${submissionId}/report-artifacts/${artifact.id}`} className="inline-flex max-w-full items-center gap-1 break-all text-xs text-primary hover:underline">
+		<a href={`/api/submissions/${submissionId}/report-artifacts/${artifact.id}`} className="inline-flex max-w-full items-center gap-1 text-xs text-primary hover:underline">
 			<Download className="h-3.5 w-3.5 shrink-0" />
 			{artifact.name || fallback}
 		</a>
@@ -102,12 +102,12 @@ function MessageItem({ submissionId, message, artifacts }: { submissionId: strin
 					<div className="text-xs text-muted-foreground">{formatDate(message.occurredAt)}</div>
 				</div>
 				<div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-					<div><span className="text-muted-foreground">From:</span> <span className="break-all">{message.fromAddress || "—"}</span></div>
-					<div><span className="text-muted-foreground">To:</span> <span className="break-all">{message.toAddresses.join(", ") || "—"}</span></div>
-					{message.messageId ? <div className="sm:col-span-2"><span className="text-muted-foreground">Message-ID:</span> <span className="break-all font-mono">{message.messageId}</span></div> : null}
+					<div><span className="text-muted-foreground">From:</span> <span>{message.fromAddress || "—"}</span></div>
+					<div><span className="text-muted-foreground">To:</span> <span>{message.toAddresses.join(", ") || "—"}</span></div>
+					{message.messageId ? <div className="sm:col-span-2"><span className="text-muted-foreground">Message-ID:</span> <span className="font-mono">{message.messageId}</span></div> : null}
 				</div>
 				{message.subject ? <div className="mt-3 text-sm"><span className="text-muted-foreground">Subject:</span> {message.subject}</div> : null}
-				{message.textBody ? <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border bg-background p-3 font-sans text-sm">{message.textBody}</pre> : null}
+				{message.textBody ? <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded border bg-background p-3 font-sans text-sm">{message.textBody}</pre> : null}
 				{outbound && message.replyAddress ? <div className="mt-3 space-y-1 text-xs"><div className="text-muted-foreground">Generated Reply-To</div><CopyReplyAddress replyAddress={message.replyAddress} /></div> : null}
 				<div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
 					<ArtifactLink submissionId={submissionId} artifact={message.rawArtifactId ? artifacts.get(String(message.rawArtifactId)) : undefined} fallback="Raw message (.eml)" />
@@ -134,7 +134,7 @@ function DecisionFollowUpItem({ followUp }: { followUp: DecisionFollowUpSummary 
 					</div>
 					<div className="text-xs text-muted-foreground">{formatDate(followUp.occurredAt)}</div>
 				</div>
-				<p className="mt-2 break-words text-sm">{followUp.explanation}</p>
+				<p className="mt-2 text-sm">{followUp.explanation}</p>
 			</div>
 		</div>
 	);
@@ -150,7 +150,7 @@ function RouteCard({ submissionId, route, artifacts }: { submissionId: string; r
 				<div className="flex flex-wrap items-start justify-between gap-3">
 					<div className="min-w-0 space-y-1">
 						<CardTitle className="flex items-center gap-2 text-base">{mail ? <Mail className="h-4 w-4 shrink-0" /> : <Send className="h-4 w-4 shrink-0" />} {route.provider}</CardTitle>
-						<CardDescription className="break-all">{mail ? "Abuse email" : "Direct provider submission"} • target: {route.target}</CardDescription>
+						<CardDescription>{mail ? "Abuse email" : "Direct provider submission"} • target: {route.target}</CardDescription>
 					</div>
 					<Badge variant="outline" className={cn("capitalize", statusClass(route.status))}>{label(route.status)}</Badge>
 				</div>
@@ -163,14 +163,14 @@ function RouteCard({ submissionId, route, artifacts }: { submissionId: string; r
 				<div className={cn("rounded-md border p-3 text-sm", confirmed ? "border-emerald-200 bg-emerald-50 text-emerald-900" : failed ? "border-red-200 bg-red-50 text-red-900" : "border-amber-200 bg-amber-50 text-amber-900")}>
 					{describeProviderReportStatus(route)}
 				</div>
-				{route.observedUrls.length ? <div className="text-xs"><div className="mb-1 text-muted-foreground">Reported URL{route.observedUrls.length === 1 ? "" : "s"}</div><div className="space-y-1 break-all font-mono">{route.observedUrls.map((url) => <div key={url}>{url}</div>)}</div></div> : null}
-				{route.confirmationId ? <div className="text-xs"><span className="text-muted-foreground">Confirmation:</span> <span className="break-all font-mono">{route.confirmationId}</span></div> : null}
+				{route.observedUrls.length ? <div className="text-xs"><div className="mb-1 text-muted-foreground">Reported URL{route.observedUrls.length === 1 ? "" : "s"}</div><div className="space-y-1 font-mono">{route.observedUrls.map((url) => <div key={url}>{url}</div>)}</div></div> : null}
+				{route.confirmationId ? <div className="text-xs"><span className="text-muted-foreground">Confirmation:</span> <span className="font-mono">{route.confirmationId}</span></div> : null}
 				{route.confirmationText ? <div className="text-sm"><span className="text-muted-foreground">Provider response:</span> {route.confirmationText}</div> : null}
 				{route.body ? (
 					<details className="rounded border bg-muted/10 p-3">
 						<summary className="cursor-pointer text-sm font-medium">{route.bodySource === "prepared" ? "View submitted report" : route.bodySource === "historical" ? "View historical report" : "View report draft preview"}</summary>
 						{route.bodySource === "preview" ? <div className="mt-2 text-xs text-muted-foreground">This draft is generated for this provider and pinned when submission starts.</div> : null}
-						<pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words font-sans text-sm">{route.body}</pre>
+						<pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap font-sans text-sm">{route.body}</pre>
 					</details>
 				) : null}
 				{route.messages.length || route.decisionFollowUps.length ? (

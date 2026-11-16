@@ -183,7 +183,7 @@ function TimelineRow({ icon, tone = "muted", children }: { icon: React.ReactNode
 	return (
 		<li className="flex gap-2.5 py-1.5">
 			<span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full", tone === "danger" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>{icon}</span>
-			<div className="min-w-0 flex-1 break-words text-xs leading-relaxed">{children}</div>
+			<div className="min-w-0 flex-1 text-xs leading-relaxed">{children}</div>
 		</li>
 	);
 }
@@ -237,7 +237,7 @@ export function SiteVisitTimeline({ running, visit, offeredDownload, live: { ent
 				))}
 				{!running && thirdParty.map((sent, index) => (
 					<TimelineRow key={`sent-${index}`} icon={<Send className="h-3 w-3" />} tone="danger">
-						Sent the made-up {fieldList(sent.fields)} to <span className="break-all font-mono">{sent.url.slice(0, 160)}</span>
+						Sent the made-up {fieldList(sent.fields)} to <span className="font-mono">{sent.url.slice(0, 160)}</span>
 					</TimelineRow>
 				))}
 				{!running && offeredDownload ? (
