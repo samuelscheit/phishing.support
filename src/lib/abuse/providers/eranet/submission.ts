@@ -89,7 +89,7 @@ export async function openEranetBrowserSession(): Promise<EranetSession> {
 	}
 }
 
-function errorOf(body: EranetResponse): string | undefined {
+export function errorOf(body: EranetResponse): string | undefined {
 	const error = body.error ?? body.Error;
 	return typeof error === "string" && error ? error : undefined;
 }
@@ -145,24 +145,41 @@ export async function prepareEranetExternalSubmission(context: ProviderSubmissio
 	}
 	const session = await (dependencies.openSession ?? openEranetBrowserSession)();
 	try {
-		const screenshots: string[] = [];
-		if (payload.evidence && artifactBlob) {
-			const uploaded = await session.call("UploadFile", { upload: { type: ERANET_PROVIDER.evidence.uploadType, filename: payload.evidence.filename, mimeType: payload.evidence.mimeType, base64: artifactBlob.toString("base64") } });
-			const filename = uploaded.Data?.filename;
-			if (errorOf(uploaded) || typeof filename !== "string" || !filename) throw new Error(`Eranet screenshot upload failed: ${errorOf(uploaded) ?? "no file name returned"}`);
-			screenshots.push(filename);
-		}
-		const requestedAt = (dependencies.now ?? (() => new Date()))();
-		// The form's Aliyun slider token is optional server-side; the mailed code is the gate.
-		const sent = await session.call("GetEmailCode", { json: { Email: ERANET_PROVIDER.reporter.email, AliyunCaptchaVerifyParam: "" } });
-		if (errorOf(sent)) throw new Error(`Eranet did not send its verification code: ${errorOf(sent)}`);
-		const code = await (dependencies.readCode ?? mailedCodeReader(ERANET_PROVIDER.codeMail))(requestedAt, context.signal);
+		const files = payload.evidence && artifactBlob ? [{ filename: payload.evidence.filename, mimeType: payload.evidence.mimeType, content: artifactBlob }] : [];
+		const { screenshots, code } = await uploadAndRequestCode(session, ERANET_PROVIDER.evidence.uploadType, files, context.signal, dependencies);
 		const state: EranetPreflightState = { session, code, screenshots };
 		return { state, dispose: () => session.close() };
 	} catch (error) {
 		await session.close();
 		throw error;
 	}
+}
+
+/**
+ * What every Eranet form needs before its one filing request: the screenshots
+ * uploaded under the form's upload type, and the code Eranet mails to the
+ * reporter. Neither files anything, so a failure here is a safe retry.
+ */
+export async function uploadAndRequestCode(
+	session: EranetSession,
+	uploadType: string,
+	files: ReadonlyArray<{ filename: string; mimeType: string; content: Buffer }>,
+	signal: AbortSignal | undefined,
+	dependencies: Pick<EranetDependencies, "readCode" | "now">,
+): Promise<{ screenshots: string[]; code: string }> {
+	const screenshots: string[] = [];
+	for (const file of files) {
+		const uploaded = await session.call("UploadFile", { upload: { type: uploadType, filename: file.filename, mimeType: file.mimeType, base64: file.content.toString("base64") } });
+		const filename = uploaded.Data?.filename;
+		if (errorOf(uploaded) || typeof filename !== "string" || !filename) throw new Error(`Eranet screenshot upload failed: ${errorOf(uploaded) ?? "no file name returned"}`);
+		screenshots.push(filename);
+	}
+	const requestedAt = (dependencies.now ?? (() => new Date()))();
+	// The form's Aliyun slider token is optional server-side; the mailed code is the gate.
+	const sent = await session.call("GetEmailCode", { json: { Email: ERANET_PROVIDER.reporter.email, AliyunCaptchaVerifyParam: "" } });
+	if (errorOf(sent)) throw new Error(`Eranet did not send its verification code: ${errorOf(sent)}`);
+	const code = await (dependencies.readCode ?? mailedCodeReader(ERANET_PROVIDER.codeMail))(requestedAt, signal);
+	return { screenshots, code };
 }
 
 function complaintBody(payload: EranetSubmissionPayload, state: EranetPreflightState): Record<string, unknown> {

@@ -139,6 +139,29 @@ export type ProviderInboundMail = {
 	confirmationIds?(text: string): string[];
 };
 
+/** A composed answer to a provider's review decision, with its evidence files. */
+export type DecisionAnswer = {
+	confirmationId: string;
+	body: string;
+	attachments: ReadonlyArray<{ filename: string; mimeType: string; content: Buffer }>;
+	signal?: AbortSignal;
+};
+
+export type DecisionAnswerChannel =
+	| { readonly kind: "email"; readonly replyAddress: string; subject(confirmationId: string): string }
+	| {
+		readonly kind: "form";
+		/** How the case page names where the answer went, e.g. "Eranet's supplement form". */
+		readonly name: string;
+		/**
+		 * Submit the answer through the provider's form. `markSending` records
+		 * the answer durably and must be awaited right before the one request
+		 * that files it: a failure before it is retried, one after it never is.
+		 * A named refusal of that request throws ProviderSubmissionRejectedError.
+		 */
+		submit(answer: DecisionAnswer, markSending: () => Promise<void>): Promise<void>;
+	};
+
 /**
  * A direct provider integration. Generic code selects it from the registry
  * and invokes it, but never branches on provider names or request details.
@@ -184,9 +207,10 @@ export type ProviderSubmissionProvider = {
 	 */
 	readonly decisionFollowUp?: {
 		readonly contestedStates: readonly string[];
-		/** The address the provider's decision mail names for questions about a report. */
-		readonly replyAddress: string;
-		subject(confirmationId: string): string;
+		/** Whom the answer greets: "Hello <addressee> Trust & Safety". */
+		readonly addressee: string;
+		/** Where the answer goes: the mailbox the provider's decision names, or the provider's own form. */
+		readonly channel: DecisionAnswerChannel;
 		/** Finds identifiers in a kit's pages that belong to an account at this provider, e.g. Turnstile sitekeys. */
 		readonly accountIdentifiers?: AccountIdentifierExtractor;
 	};

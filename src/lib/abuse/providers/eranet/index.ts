@@ -1,5 +1,6 @@
 import type { ProviderReportPreviewContext, ProviderSubmissionProvider } from "../submission_contracts";
 import { fetchEranetCorrespondence } from "./correspondence";
+import { submitEranetSupplement } from "./supplement";
 import { ERANET_PROVIDER } from "./definition";
 import { makeEranetDescription } from "./payload";
 import { prepareEranetExternalSubmission, prepareEranetSubmission, submitEranetSubmission } from "./submission";
@@ -23,6 +24,12 @@ export const eranetProvider: ProviderSubmissionProvider = {
 	// Eranet answers in its portal; its mails only say that the status changed.
 	inboundMail: { senderDomains: ["eranet.com"] },
 	fetchCorrespondence: (context) => fetchEranetCorrespondence(context),
+	// "Supplement required": Eranet could not confirm the abuse from the report and waits on more material.
+	decisionFollowUp: {
+		contestedStates: ["supplement required"],
+		addressee: "Eranet",
+		channel: { kind: "form", name: "Eranet's supplement form", submit: (answer, markSending) => submitEranetSupplement(answer, markSending) },
+	},
 };
 
 export { ERANET_PROVIDER } from "./definition";

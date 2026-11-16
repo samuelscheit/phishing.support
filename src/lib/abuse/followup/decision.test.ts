@@ -9,6 +9,8 @@ import type { sendAbuseEmailRoute } from "../mail";
 import { AbuseRepository } from "../repository";
 import { abuseJobs, abuseReports } from "../schema";
 import { followUpProviderDecision } from "./decision";
+import { ProviderSubmissionRejectedError, type DecisionAnswer, type ProviderSubmissionProvider } from "../providers/submission_contracts";
+import { UnknownExternalStateError } from "../worker/shared";
 import { collectDecisionEvidence, type EvidenceFetcher } from "./evidence";
 import { acceptableNarrative, composeDecisionReply, narrativeRejection } from "./reply";
 
@@ -166,6 +168,72 @@ describe("provider decision follow-up", () => {
 		await enqueue();
 		const jobs = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, route.id)).all().filter((job) => job.jobType === "follow_up_provider_decision");
 		expect(jobs).toHaveLength(1);
+	});
+});
+
+describe("answering through a provider's form", () => {
+	/** Eranet's supplement form as a test double: what it was given, and when the answer was recorded. */
+	function formProvider(behave: (markSending: () => Promise<void>) => Promise<void> = (mark) => mark()) {
+		const calls: Array<{ answer: DecisionAnswer; recordedBefore: boolean }> = [];
+		const provider = {
+			definition: { key: "cloudflare", displayName: "Eranet Fraud & Phishing Report" },
+			decisionFollowUp: {
+				contestedStates: ["supplement required"],
+				addressee: "Eranet",
+				channel: {
+					kind: "form" as const,
+					name: "Eranet's supplement form",
+					submit: async (answer: DecisionAnswer, markSending: () => Promise<void>) => {
+						let recorded = false;
+						await behave(async () => { await markSending(); recorded = true; });
+						calls.push({ answer, recordedBefore: recorded });
+					},
+				},
+			},
+		} as unknown as ProviderSubmissionProvider;
+		return { calls, providerFor: () => provider };
+	}
+	const formAnswers = async (reportId: bigint) => (await AbuseRepository.listMailForReport(reportId)).filter((message) => message.kind === "provider_form");
+
+	test("files the answer through the form, recorded right before the filing request, once per decision", async () => {
+		const { reportId, route } = await deniedCloudflareRoute("paneo.work", "https://paneo.work/");
+		const { calls, providerFor } = formProvider();
+		const remark = "Based on the materials you have provided, we are unable to determine whether the website has committed any violations.";
+		expect(await followUpProviderDecision({ routeId: route.id, state: "supplement required", detail: remark }, { fetcher: liveWeb(), providerFor, writeNarrative: async () => undefined })).toBe("sent");
+		expect(calls).toHaveLength(1);
+		expect(calls[0]!.recordedBefore).toBeTrue();
+		expect(calls[0]!.answer.confirmationId).toBe("35b8aafac3a6a6d9");
+		expect(calls[0]!.answer.body).toStartWith("Hello Eranet Trust & Safety,\n\nThis is about report 35b8aafac3a6a6d9 (paneo.work).");
+		expect(calls[0]!.answer.body).toContain("The command the page shows (defanged)");
+		const [recorded] = await formAnswers(reportId);
+		expect(recorded).toMatchObject({ direction: "outbound", status: "sent", toAddresses: ["Eranet's supplement form"], subject: "Additional evidence for Eranet report 35b8aafac3a6a6d9", correlationKey: `decision-follow-up:${route.id.toString()}:supplement required` });
+		const event = (await AbuseRepository.listEvents(reportId)).find((item) => item.eventType === "provider_decision.followed_up");
+		expect(event?.data).toMatchObject({ state: "supplement required", to: "Eranet's supplement form", replyKind: "contest", messageId: recorded!.id.toString() });
+
+		expect(await followUpProviderDecision({ routeId: route.id, state: "supplement required" }, { fetcher: liveWeb(), providerFor })).toBe("skipped");
+		expect(calls).toHaveLength(1);
+	});
+
+	test("a failure before the filing request is retried; one of the request itself never is; a named refusal settles it", async () => {
+		const before = await deniedCloudflareRoute("paneo.work", "https://paneo.work/");
+		const failing = formProvider(async () => { throw new Error("Eranet did not send its verification code"); });
+		await expect(followUpProviderDecision({ routeId: before.route.id, state: "supplement required" }, { fetcher: liveWeb(), providerFor: failing.providerFor, writeNarrative: async () => undefined })).rejects.toThrow("verification code");
+		expect(await formAnswers(before.reportId)).toEqual([]);
+		// Nothing was filed, so the job's retry answers.
+		expect(await followUpProviderDecision({ routeId: before.route.id, state: "supplement required" }, { fetcher: liveWeb(), providerFor: formProvider().providerFor, writeNarrative: async () => undefined })).toBe("sent");
+
+		const during = await deniedCloudflareRoute("paneo.work", "https://paneo.work/");
+		const dropped = formProvider(async (mark) => { await mark(); throw new Error("Eranet Supplement failed with HTTP 502"); });
+		await expect(followUpProviderDecision({ routeId: during.route.id, state: "supplement required" }, { fetcher: liveWeb(), providerFor: dropped.providerFor, writeNarrative: async () => undefined })).rejects.toBeInstanceOf(UnknownExternalStateError);
+		expect((await formAnswers(during.reportId)).map(({ status }) => status)).toEqual(["pending"]);
+		const again = formProvider();
+		expect(await followUpProviderDecision({ routeId: during.route.id, state: "supplement required" }, { fetcher: liveWeb(), providerFor: again.providerFor })).toBe("skipped");
+		expect(again.calls).toHaveLength(0);
+
+		const refused = await deniedCloudflareRoute("paneo.work", "https://paneo.work/");
+		const named = formProvider(async (mark) => { await mark(); throw new ProviderSubmissionRejectedError("Eranet refused the supplement: VerifyCode.NotFound.Code"); });
+		await expect(followUpProviderDecision({ routeId: refused.route.id, state: "supplement required" }, { fetcher: liveWeb(), providerFor: named.providerFor, writeNarrative: async () => undefined })).rejects.toBeInstanceOf(ProviderSubmissionRejectedError);
+		expect((await formAnswers(refused.reportId)).map(({ status, error }) => ({ status, error }))).toEqual([{ status: "failed", error: "Eranet refused the supplement: VerifyCode.NotFound.Code" }]);
 	});
 });
 

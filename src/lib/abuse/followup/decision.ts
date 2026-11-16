@@ -1,7 +1,9 @@
 import { reporterBrowserIdentity } from "../../browser/reporter_identity";
 import { SubmissionsEntity } from "../../db/entities";
 import { isSameWebsite } from "../../website_site";
+import { errorText as describeError } from "../../error_text";
 import { abuseEmailCaseUrl, sendAbuseEmailRoute } from "../mail";
+import { ProviderSubmissionRejectedError, type DecisionAnswerChannel } from "../providers/submission_contracts";
 import { getProviderSubmissionProvider } from "../providers";
 import { AbuseRepository } from "../repository";
 import { recordValue, UnknownExternalStateError } from "../worker/shared";
@@ -23,6 +25,8 @@ export type DecisionFollowUpDependencies = {
 	website?: WebsiteEvidenceDependencies;
 	writeNarrative?: NarrativeWriter;
 	send?: typeof sendAbuseEmailRoute;
+	/** The registered provider of a route; tests answer through their own channel. */
+	providerFor?: typeof getProviderSubmissionProvider;
 	now?: () => Date;
 	/**
 	 * Build the answer without acting on it: nothing is sent and no event is
@@ -81,7 +85,7 @@ export async function followUpProviderDecision(
 	dependencies: DecisionFollowUpDependencies = {},
 ): Promise<"sent" | "skipped"> {
 	const route = await AbuseRepository.getRoute(params.routeId);
-	const provider = route && getProviderSubmissionProvider(route.providerRegistryKey);
+	const provider = route && (dependencies.providerFor ?? getProviderSubmissionProvider)(route.providerRegistryKey);
 	const followUp = provider?.decisionFollowUp;
 	if (!route || !followUp || !followUp.contestedStates.includes(params.state)) return "skipped";
 	const run = await AbuseRepository.getLatestProviderRunForRoute(route.id);
@@ -133,7 +137,7 @@ export async function followUpProviderDecision(
 	}
 
 	const reply = await composeDecisionReply({
-		providerName: provider.definition.displayName.replace(/\s+Abuse$/i, ""),
+		providerName: followUp.addressee,
 		confirmationId: run.confirmationId,
 		decision: { state: params.state, ...(params.detail ? { detail: params.detail } : {}), ...(decisionMessage?.textBody ? { providerMessage: decisionMessage.textBody } : {}) },
 		allegationCategory: input.report.allegationCategory,
@@ -151,29 +155,85 @@ export async function followUpProviderDecision(
 		...fresh,
 		...input.evidenceArtifacts.slice(0, MAX_ATTACHMENTS - fresh.length).map((artifact) => ({ filename: artifact.name, mimeType: artifact.mimeType, content: Buffer.from(artifact.blob) })),
 	];
+	const { channel } = followUp;
+	const recipient = channel.kind === "email" ? channel.replyAddress : channel.name;
+	const subject = channel.kind === "email" ? channel.subject(run.confirmationId) : `Additional evidence for ${followUp.addressee} report ${run.confirmationId}`;
 	if (dependencies.dryRun) {
-		dependencies.dryRun({ outcome: "reply", replyKind, recipient: followUp.replyAddress, subject: followUp.subject(run.confirmationId), body: reply.body, attachments: attachments.map((attachment) => attachment.filename), narrative: reply.narrativeSource });
+		dependencies.dryRun({ outcome: "reply", replyKind, recipient, subject, body: reply.body, attachments: attachments.map((attachment) => attachment.filename), narrative: reply.narrativeSource });
 		return "skipped";
 	}
-	const result = await (dependencies.send ?? sendAbuseEmailRoute)({
-		routeId: route.id,
-		runId: run.id,
-		reportId: route.reportId,
-		recipient: followUp.replyAddress,
-		subject: followUp.subject(run.confirmationId),
-		body: reply.body,
-		attachments,
-		correlationKey,
-	});
-	if (result.status === "unknown_external_state") throw new UnknownExternalStateError(`The follow-up to ${followUp.replyAddress} may have been sent: ${result.error ?? "SMTP outcome unknown"}`);
-	if (result.status !== "sent") throw new Error(`The follow-up to ${followUp.replyAddress} was not sent: ${result.error ?? "SMTP failure"}`);
+	const answer = { route, runId: run.id, confirmationId: run.confirmationId, subject, body: reply.body, attachments, correlationKey };
+	const messageId = channel.kind === "email"
+		? await answerByMail({ ...answer, recipient }, dependencies.send ?? sendAbuseEmailRoute)
+		: await answerThroughForm({ ...answer, channel });
 	await AbuseRepository.appendEvent({
 		reportId: route.reportId,
 		routeId: route.id,
 		eventType: "provider_decision.followed_up",
-		data: { state: params.state, detail: params.detail ?? null, confirmationId: run.confirmationId, to: followUp.replyAddress, replyKind, narrative: reply.narrativeSource, messageId: result.rfcMessageId ?? null },
+		data: { state: params.state, detail: params.detail ?? null, confirmationId: run.confirmationId, to: recipient, replyKind, narrative: reply.narrativeSource, messageId },
 	});
 	return "sent";
+}
+
+type Answer = {
+	route: { id: bigint; reportId: bigint };
+	runId: bigint;
+	confirmationId: string;
+	subject: string;
+	body: string;
+	attachments: Array<{ filename: string; mimeType: string; content: Buffer }>;
+	correlationKey: string;
+};
+
+/** Mail the answer; its outbound record, under the follow-up's correlation key, keeps it from being sent twice. */
+async function answerByMail(answer: Answer & { recipient: string }, send: typeof sendAbuseEmailRoute): Promise<string | null> {
+	const result = await send({
+		routeId: answer.route.id,
+		runId: answer.runId,
+		reportId: answer.route.reportId,
+		recipient: answer.recipient,
+		subject: answer.subject,
+		body: answer.body,
+		attachments: answer.attachments,
+		correlationKey: answer.correlationKey,
+	});
+	if (result.status === "unknown_external_state") throw new UnknownExternalStateError(`The follow-up to ${answer.recipient} may have been sent: ${result.error ?? "SMTP outcome unknown"}`);
+	if (result.status !== "sent") throw new Error(`The follow-up to ${answer.recipient} was not sent: ${result.error ?? "SMTP failure"}`);
+	return result.rfcMessageId ?? null;
+}
+
+/**
+ * File the answer through the provider's form. Its record is written right
+ * before the request that files it, under the follow-up's correlation key:
+ * a failure before that is retried by the job, a failure of that request is
+ * never repeated, and a named refusal settles the record as failed.
+ */
+async function answerThroughForm(answer: Answer & { channel: Extract<DecisionAnswerChannel, { kind: "form" }> }): Promise<string> {
+	let recorded: bigint | undefined;
+	const markSending = async () => {
+		recorded = await AbuseRepository.createOutboundProviderMessage({
+			reportId: answer.route.reportId,
+			routeId: answer.route.id,
+			runId: answer.runId,
+			to: answer.channel.name,
+			subject: answer.subject,
+			textBody: answer.body,
+			correlationKey: answer.correlationKey,
+		});
+	};
+	try {
+		await answer.channel.submit({ confirmationId: answer.confirmationId, body: answer.body, attachments: answer.attachments }, markSending);
+	} catch (error) {
+		if (recorded === undefined) throw error;
+		if (error instanceof ProviderSubmissionRejectedError) {
+			await AbuseRepository.settleOutboundMail({ messageId: recorded, status: "failed", error: describeError(error) });
+			throw error;
+		}
+		throw new UnknownExternalStateError(`The answer through ${answer.channel.name} may have been filed: ${describeError(error)}`);
+	}
+	if (recorded === undefined) throw new Error(`${answer.channel.name} filed the answer without recording it first.`);
+	await AbuseRepository.settleOutboundMail({ messageId: recorded, status: "sent" });
+	return recorded.toString();
 }
 
 /** Read a queued follow-up's payload. */

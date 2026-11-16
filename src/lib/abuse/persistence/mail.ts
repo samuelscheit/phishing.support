@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
+import { serviceIdentity } from "../../constants";
 import { getDb } from "../../db";
 import { generateId } from "../../db/ids";
 import { abuseCaseTag, subjectRepeats } from "../mail/correlation";
@@ -103,6 +104,43 @@ export async function createOutboundMail(params: {
 		correlationKey: params.correlationKey,
 		rawArtifactId: params.rawArtifactId,
 		attachmentArtifactIds: params.attachmentArtifactIds.map(String),
+		processingAttempts: 0,
+		occurredAt: now(),
+		createdAt: now(),
+		updatedAt: now(),
+	});
+	return id;
+}
+
+/**
+ * Record an answer filed through a provider's own form, as `pending` right
+ * before the request that files it; `settleOutboundMail` settles it. Its
+ * correlation key makes it the answer's idempotency marker, as an email's is.
+ */
+export async function createOutboundProviderMessage(params: {
+	reportId: bigint;
+	routeId: bigint;
+	runId: bigint;
+	to: string;
+	subject: string;
+	textBody: string;
+	correlationKey: string;
+}): Promise<bigint> {
+	const db = await getDb();
+	const id = generateId();
+	await db.insert(abuseMailMessages).values({
+		id,
+		reportId: params.reportId,
+		routeId: params.routeId,
+		runId: params.runId,
+		direction: "outbound",
+		kind: "provider_form",
+		status: "pending",
+		fromAddress: serviceIdentity.mailbox,
+		toAddresses: [params.to],
+		subject: params.subject,
+		textBody: params.textBody,
+		correlationKey: params.correlationKey,
 		processingAttempts: 0,
 		occurredAt: now(),
 		createdAt: now(),

@@ -15,8 +15,12 @@ export const cloudflareProvider: ProviderSubmissionProvider = {
 	// the report identification number included in the subject line".
 	decisionFollowUp: {
 		contestedStates: ["denied"],
-		replyAddress: "abusereply@cloudflare.com",
-		subject: (confirmationId) => `[${confirmationId}] Additional evidence for abuse report ${confirmationId}`,
+		addressee: "Cloudflare",
+		channel: {
+			kind: "email",
+			replyAddress: "abusereply@cloudflare.com",
+			subject: (confirmationId) => `[${confirmationId}] Additional evidence for abuse report ${confirmationId}`,
+		},
 		// A Turnstile widget's sitekey names the Cloudflare account that created it.
 		accountIdentifiers: extractTurnstileSitekeys,
 	},

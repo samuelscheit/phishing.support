@@ -35,6 +35,7 @@ import {
 import { releaseLock, renewLock, tryAcquireLock } from "./persistence/locks";
 import {
 	createOutboundMail,
+	createOutboundProviderMessage,
 	ensureInboundReplyClassification,
 	findBouncedOutboundRoute,
 	findCorrelatedInboundRoute,
@@ -170,6 +171,7 @@ export const AbuseRepository = {
 	releaseLock,
 	renewLock,
 	createOutboundMail,
+	createOutboundProviderMessage,
 	ensureInboundReplyClassification,
 	settleOutboundMail,
 	getOutboundMailForRun,
