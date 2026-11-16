@@ -369,6 +369,23 @@ export function verbatimEvidenceQuote(quote: string, normalizedPageText: string,
 	return { rejected: `its evidence quote does not appear verbatim in ${source}` };
 }
 
+/**
+ * The command the page shows whose decoded layers contain the quote. The
+ * classifier is given those layers, decoded here locally and
+ * deterministically, and may quote the payload they reveal (macmorrow.app,
+ * production case 380697679325302795, quoted its `curl … | osascript`
+ * instead of the base64 wrapper the page shows); the quote is as corroborated
+ * as the page text, and the report keeps the shown command.
+ */
+const MIN_DECODED_QUOTE_LENGTH = 16;
+
+function commandDecodingTo(quote: string, capturedPageText: string): string | undefined {
+	const wanted = normalizedEvidence(quote.replace(/\s+/g, " ").trim());
+	// A fragment as short as "curl" or "zsh" names no payload.
+	if (wanted.length < MIN_DECODED_QUOTE_LENGTH || !hasPageText(wanted)) return undefined;
+	return extractPasteCommands(capturedPageText).find((command) => command.layers.slice(1).some((layer) => normalizedEvidence(layer.text).includes(wanted)))?.shown;
+}
+
 function uncorroboratedClaim(reason: string): WebsiteSiteClassification {
 	// A model's unsupported phishing or malware assertion cannot trigger an external report.
 	return { finding: "insufficient_evidence", rejectedClaim: reason };
@@ -419,6 +436,9 @@ export function validateWebsiteSiteClassification(
 	}
 	const evidenceQuote = verbatimEvidenceQuote(result.evidenceQuote, normalizedEvidence(capturedPageText));
 	if (typeof evidenceQuote !== "string") {
+		// A quote of what a shown command decodes to stands for that command, as the page shows it.
+		const shown = result.finding === "malware" ? commandDecodingTo(result.evidenceQuote, capturedPageText) : undefined;
+		if (shown) return { finding: "malware", evidenceQuote: boundedQuote(shown) };
 		// Malware proven by the file the page offers is quoted from the file's code.
 		const fromFile = result.finding === "malware" && offeredDownload
 			? verbatimEvidenceQuote(result.evidenceQuote, normalizedEvidence(offeredDownloadSource(offeredDownload)), "the offered file's code")
