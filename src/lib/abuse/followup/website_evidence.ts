@@ -1,5 +1,7 @@
 import { getDomain } from "tldts";
 
+import type { BrowserIdentity } from "../../browser/page";
+
 import { ArtifactsEntity, SubmissionsEntity } from "../../db/entities";
 import { buildWebsiteEvidence } from "../../evidence/package";
 import type { timestampEvidence } from "../../evidence/timestamp";
@@ -138,6 +140,8 @@ export async function collectWebsiteDecisionEvidence(params: {
 	reviewedAt?: Date;
 	caseUrl?: string;
 	accountIdentifiers?: AccountIdentifierExtractor;
+	/** The reporter's browser, which the case's captures presented. */
+	visitor?: BrowserIdentity;
 }, dependencies: WebsiteEvidenceDependencies = {}): Promise<WebsiteDecisionEvidence> {
 	const checkedAt = (dependencies.now ?? (() => new Date()))().toISOString();
 	const stored = await storedCaptures(params.submissionId);
@@ -146,7 +150,7 @@ export async function collectWebsiteDecisionEvidence(params: {
 	try {
 		// A kit that turns desktops away is rechecked as the phone the case reached it with.
 		const device = stored.website?.device;
-		fresh = await (dependencies.capture ?? archiveWebsite)({ url: params.reportedUrl, ...(device ? { device } : {}) });
+		fresh = await (dependencies.capture ?? archiveWebsite)({ url: params.reportedUrl, ...(device ? { device } : {}), ...(params.visitor ? { visitor: params.visitor } : {}) });
 		const finding = await (dependencies.classify ?? classifyWebsiteCapture)(fresh);
 		const freshText = fresh.text.toString("utf8");
 		const onReportedSite = isSameWebsite(fresh.url, params.reportedUrl);

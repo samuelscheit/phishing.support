@@ -249,6 +249,8 @@ export function buildWebsiteReportEvidence(
 		navigationHops?: readonly WebsiteNavigationHop[];
 		hiddenFrames?: readonly WebsiteHiddenFrame[];
 		device?: WebsiteDevice;
+		/** The reporter's own browser, when the capture presented it: kits show their content only to the platforms they target. */
+		reporterUserAgent?: string;
 		providerWarning?: WebsiteProviderWarning;
 		offeredDownload?: WebsiteOfferedDownload;
 		/** Requests of the whole visit that sent synthetic values to another site. */
@@ -256,7 +258,11 @@ export function buildWebsiteReportEvidence(
 	} = {},
 ): string {
 	const { finding, phishingBasis, evidenceQuote, collectionFields } = classification;
-	const steps = (capture.navigationHops ?? []).filter(isFlowStepHop);
+	const hops = capture.navigationHops ?? [];
+	const capturedUrl = hops.find((hop) => hop.contentCaptured)?.url;
+	const steps = hops.filter(isFlowStepHop)
+		// A click that left the visitor on the same page (opening a dialog) passes no earlier page.
+		.filter((hop, index, all) => hop.revisitedAs || hop.visitorStep?.submitted.length || hop.url !== (all[index + 1]?.url ?? capturedUrl));
 	const frame = classifiedHiddenFrame(classification, capture.hiddenFrames);
 	const download = finding === "malware" && !frame ? capture.offeredDownload : undefined;
 	const quotedFile = classification.offeredDownload && download && evidenceQuote ? quotedDownloadFile(download, evidenceQuote) : undefined;
@@ -271,6 +277,9 @@ export function buildWebsiteReportEvidence(
 			: undefined,
 		capture.providerWarning ? `${capture.providerWarning.provider} already shows its "${capture.providerWarning.warning}" warning before the site.` : undefined,
 		capture.device && capture.device !== "desktop" ? `The page turns desktop visitors away to a phone; it was captured as ${WEBSITE_DEVICE_LABEL[capture.device]}.` : undefined,
+		capture.reporterUserAgent && (!capture.device || capture.device === "desktop")
+			? `It was captured with the browser of the person who reported it, User-Agent "${capture.reporterUserAgent}"; such pages show their content only to the platforms they target, so open it with that User-Agent to see what we saw.`
+			: undefined,
 		steps.length
 			? `Visitors reach the page through the site's own earlier pages: ${steps.map((hop) => (hop.revisitedAs
 				? `opening ${hop.url} on a phone (${WEBSITE_DEVICE_LABEL[hop.revisitedAs]}), since it turns desktop visitors away`

@@ -657,7 +657,8 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			await reportConfirmedWebsiteAbuse({
 				submissionId,
 				urls: reportUrls,
-				analysisText: buildWebsiteReportEvidence(capturedClassification, { commands, navigationHops: archive.navigationHops, hiddenFrames: archive.hiddenFrames, device: archive.device, providerWarning: archive.providerWarning, offeredDownload: archive.offeredDownload, dataDrops: visited.dataDrops }),
+				analysisText: buildWebsiteReportEvidence(capturedClassification, { commands, navigationHops: archive.navigationHops, hiddenFrames: archive.hiddenFrames, device: archive.device, ...(visitor ? { reporterUserAgent: visitor.override.userAgent } : {}), providerWarning: archive.providerWarning, offeredDownload: archive.offeredDownload, dataDrops: visited.dataDrops }),
+				...(archive.userAgent ? { userAgent: archive.userAgent } : {}),
 				screenshots: await capturedPageScreenshots(submissionId, analyzedCaptureStep(archive.navigationHops)),
 				reporter: { reporterIp, reporterCountry, reporterHeaders },
 				finding,

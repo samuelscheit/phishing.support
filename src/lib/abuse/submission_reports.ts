@@ -35,6 +35,8 @@ export type ConfirmedWebsiteAbuse = SubmissionReportBase & {
 	 * all belong to one reported site.
 	 */
 	urls: string[];
+	/** The User-Agent the capture presented; the report's reviewer sends it to see the page as the capture did. */
+	userAgent?: string;
 	/**
 	 * Screenshots of the captured pages, the classified page first, then the
 	 * pages of its flow that led to it in visit order.
@@ -100,6 +102,7 @@ function submissionRequest(params: {
 	evidence: DecodedEvidence[];
 	source: Record<string, unknown>;
 	legalBrandUrl?: string;
+	reportedUserAgent?: string;
 }): ValidatedAbuseReportRequest {
 	const observedUrls = params.targets
 		.filter((item) => item.observedUrls.length > 0)
@@ -111,6 +114,7 @@ function submissionRequest(params: {
 		description: params.description,
 		observedUrls,
 		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
+		...(params.reportedUserAgent ? { reportedUserAgent: params.reportedUserAgent } : {}),
 		evidence: params.evidence,
 		requestPayloadHash: hashStableJson({
 			submissionId: params.submissionId.toString(),
@@ -158,6 +162,7 @@ export async function buildWebsiteAbuseRequest(params: ConfirmedWebsiteAbuse): P
 		],
 		source: { kind: "website", urls: params.urls },
 		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
+		...(params.userAgent ? { reportedUserAgent: params.userAgent } : {}),
 	});
 }
 

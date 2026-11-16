@@ -208,9 +208,12 @@ describe("a visit through a multi-page kit", () => {
 		const captures: ArchiveWebsiteOptions[] = [];
 		const modelCalls: Array<{ kind: "classification" | "analysis"; url: string }> = [];
 		const id = await websiteSubmission(375914181917937690n, CONSENT);
-		const visit = visited(liveCapture(CONSENT), METAMASK_VISIT);
+		const reporterUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36";
+		// Every page of the visit is a snapshot of the one browser, which presents the reporter's.
+		const asReporter = (page: WebsiteArchiveResult) => ({ ...page, userAgent: reporterUserAgent });
+		const visit = visited(asReporter(liveCapture(CONSENT)), { steps: METAMASK_VISIT.steps!.map(asReporter) });
 
-		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({ captures, modelCalls, capture: () => visit.archive }));
+		await analyzeWebsite({ submissionId: id, url: CONSENT, reporterHeaders: { "user-agent": reporterUserAgent } }, dependencies({ captures, modelCalls, capture: () => visit.archive }));
 
 		// One capture; the agent walks the rest of the site in its browser, which is released.
 		expect(captures.map(({ url }) => url)).toEqual([CONSENT]);
@@ -277,6 +280,9 @@ describe("a visit through a multi-page kit", () => {
 		const input = await AbuseRepository.getReportInput(report!.id);
 		expect(input?.evidenceArtifacts.map(({ name }) => name)).toEqual(["website-step3.png", "website.png", "website-step2.png"]);
 		expect(report!.description).toContain(`Visitors reach the page through the site's own earlier pages: ${CONSENT}, then ${GET_STARTED}.`);
+		// A reviewer gets the browser the capture presented: Cloudflare's form takes it as its own field.
+		expect(report!.reportedUserAgent).toBe(reporterUserAgent);
+		expect(report!.description).toContain(`It was captured with the browser of the person who reported it, User-Agent "${reporterUserAgent}"`);
 	});
 
 	test("the DocuSign gate takes the visit's made-up email, and its sign-in page sends the made-up password to a Telegram bot: reported with that data drop", async () => {

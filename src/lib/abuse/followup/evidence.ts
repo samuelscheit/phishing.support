@@ -97,9 +97,13 @@ async function payloadChecks(fetcher: EvidenceFetcher, url: string, agent: strin
 	};
 }
 
-/** A malware page that tells visitors to paste a command: fetch it as a browser would and find the command again. */
-async function pageEvidence(pageUrl: string, fetcher: EvidenceFetcher): Promise<Omit<DecisionEvidence, "kind" | "checkedAt" | "references">> {
-	const page = await check(fetcher, pageUrl, browserUserAgent, "a desktop browser");
+/**
+ * A malware page that tells visitors to paste a command: fetch it as the
+ * browser the case captured it with (the reporter's, when the report names
+ * it) and find the command again.
+ */
+async function pageEvidence(pageUrl: string, fetcher: EvidenceFetcher, agent: string): Promise<Omit<DecisionEvidence, "kind" | "checkedAt" | "references">> {
+	const page = await check(fetcher, pageUrl, agent, agent === browserUserAgent ? "a desktop browser" : "the browser the page targets");
 	const liveChecks = [page.check];
 	if (!page.body) return { liveChecks, reproduction: [] };
 	const text = capturedDocumentContent(page.body.toString("utf8")).text;
@@ -108,8 +112,8 @@ async function pageEvidence(pageUrl: string, fetcher: EvidenceFetcher): Promise<
 	const token = encodedPayloadToken(command);
 	const reproduction = [token
 		// The token's first characters encode the command's fixed start, so they stay stable when the path rotates.
-		? `curl -s -A "${browserUserAgent}" "${pageUrl}" | grep -o '${token.slice(0, 24)}[A-Za-z0-9+/=]*' | base64 -d`
-		: `curl -s -A "${browserUserAgent}" "${pageUrl}" | grep -F -o '${command.shown.slice(0, 40).replace(/'/g, "")}'`];
+		? `curl -s -A "${agent}" "${pageUrl}" | grep -o '${token.slice(0, 24)}[A-Za-z0-9+/=]*' | base64 -d`
+		: `curl -s -A "${agent}" "${pageUrl}" | grep -F -o '${command.shown.slice(0, 40).replace(/'/g, "")}'`];
 	for (const url of command.payloadUrls) {
 		const payload = await payloadChecks(fetcher, url, downloaderUserAgent(command.interpreters));
 		liveChecks.push(...payload.checks);
@@ -128,17 +132,19 @@ async function pageEvidence(pageUrl: string, fetcher: EvidenceFetcher): Promise<
 
 export async function collectDecisionEvidence(params: {
 	observedUrl: string;
-	/** Set on payload-host reports: the User-Agent the host serves its file to. */
+	/** The User-Agent a reviewer must send: a payload host's downloader, or the browser a page was captured as. */
 	reportedUserAgent?: string | null;
+	/** The reported URL is a host serving a file to `reportedUserAgent`, not a page. */
+	payloadHost?: boolean;
 	caseUrl?: string;
 	now?: () => Date;
 	fetcher?: EvidenceFetcher;
 }): Promise<DecisionEvidence> {
 	const fetcher = params.fetcher ?? defaultFetcher;
 	const checkedAt = (params.now ?? (() => new Date()))().toISOString();
-	const measured = params.reportedUserAgent
+	const measured = params.payloadHost && params.reportedUserAgent
 		? await payloadChecks(fetcher, params.observedUrl, params.reportedUserAgent).then(({ checks, reproduction }) => ({ liveChecks: checks, reproduction }))
-		: await pageEvidence(params.observedUrl, fetcher);
+		: await pageEvidence(params.observedUrl, fetcher, params.reportedUserAgent ?? browserUserAgent);
 	const sha256 = measured.liveChecks.find((item) => item.as === "the command's own downloader" && item.sha256)?.sha256;
 	return {
 		kind: "paste_command",

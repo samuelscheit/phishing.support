@@ -61,6 +61,8 @@ export type WebsiteArchiveResult = {
 	hiddenFrames?: WebsiteHiddenFrame[];
 	/** The browser the live capture presented; absent means the Windows desktop. */
 	device?: WebsiteDevice;
+	/** The User-Agent the live capture presented; a provider's reviewer needs it to see what the capture saw. */
+	userAgent?: string;
 	/** Non-empty when an uploaded snapshot claims a different host than the submitted target. */
 	attributionError?: string;
 	/** The open browser of a live capture made with `keepSession`. */
@@ -903,6 +905,7 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 				kitResources: await kitResources.settled(),
 				...(frames.length ? { hiddenFrames: frames } : {}),
 				...(device !== "desktop" ? { device } : {}),
+				userAgent,
 				...(verificationGate ? { verificationGate } : {}),
 				...(providerWarning ? { providerWarning } : {}),
 			};

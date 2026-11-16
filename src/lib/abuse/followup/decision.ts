@@ -1,3 +1,6 @@
+import { reporterBrowserIdentity } from "../../browser/reporter_identity";
+import { SubmissionsEntity } from "../../db/entities";
+import { isSameWebsite } from "../../website_site";
 import { abuseEmailCaseUrl, sendAbuseEmailRoute } from "../mail";
 import { getProviderSubmissionProvider } from "../providers";
 import { AbuseRepository } from "../repository";
@@ -7,6 +10,12 @@ import { composeDecisionReply, type DecisionReplyInput, type NarrativeWriter } f
 import { collectWebsiteDecisionEvidence, type WebsiteDecisionEvidence, type WebsiteEvidenceDependencies } from "./website_evidence";
 
 const MAX_ATTACHMENTS = 5;
+
+/** Whether the reported URL is on the site its case submitted, rather than a host that site links to. */
+async function isCaseSite(submissionId: bigint | null, reportedUrl: string): Promise<boolean> {
+	const submission = submissionId ? await SubmissionsEntity.get(submissionId) : undefined;
+	return submission?.data.kind === "website" && isSameWebsite(submission.data.website.url, reportedUrl);
+}
 
 export type DecisionFollowUpDependencies = {
 	fetcher?: EvidenceFetcher;
@@ -90,11 +99,17 @@ export async function followUpProviderDecision(
 	const caseUrl = abuseEmailCaseUrl(input.report.submissionId);
 	// A phishing site from a case is rechecked as the case captured it; a
 	// paste-command page or payload host is fetched as its visitors fetch it.
-	const pasteCommandReport = Boolean(input.report.reportedUserAgent) || input.report.allegationCategory === "malware";
+	// A host other than the case's own site that names a User-Agent serves its
+	// file only to that client (a payload host); the case's own page names the
+	// browser it was captured as.
+	const payloadHost = Boolean(input.report.reportedUserAgent) && !(await isCaseSite(input.report.submissionId, reportedUrl));
+	const pasteCommandReport = payloadHost || input.report.allegationCategory === "malware";
+	const visitor = reporterBrowserIdentity(input.report.requesterHeaders ?? undefined);
 	const evidence = !pasteCommandReport && input.report.submissionId
 		? await collectWebsiteDecisionEvidence({
 			submissionId: input.report.submissionId,
 			reportedUrl,
+			...(visitor ? { visitor } : {}),
 			...(decisionMessage?.occurredAt ? { reviewedAt: decisionMessage.occurredAt } : {}),
 			...(caseUrl ? { caseUrl } : {}),
 			...(followUp.accountIdentifiers ? { accountIdentifiers: followUp.accountIdentifiers } : {}),
@@ -102,6 +117,7 @@ export async function followUpProviderDecision(
 		: await collectDecisionEvidence({
 			observedUrl: reportedUrl,
 			reportedUserAgent: input.report.reportedUserAgent,
+			payloadHost,
 			...(caseUrl ? { caseUrl } : {}),
 			...(dependencies.fetcher ? { fetcher: dependencies.fetcher } : {}),
 			...(dependencies.now ? { now: dependencies.now } : {}),
