@@ -436,18 +436,3 @@ describe("a daily redirector check", () => {
 	});
 });
 
-describe("separate visits of one site", () => {
-	useTemporaryDatabase();
-
-	test("are cases on the site's domain next to its first case", async () => {
-		await SubmissionsEntity.create({ kind: "website", data: { kind: "website", website: { url: ROTATOR } }, dedupeKey: "website-openanonymity.chat" });
-		await SubmissionsEntity.create({ kind: "website", data: { kind: "website", website: { url: ROTATOR } }, dedupeKey: "website-openanonymity.chat#watch-1" });
-		await SubmissionsEntity.create({ kind: "website", data: { kind: "website", website: { url: "https://cdn.openanonymity.chat/" } }, dedupeKey: "website-cdn.openanonymity.chat#watch-2" });
-		await SubmissionsEntity.create({ kind: "website", data: { kind: "website", website: { url: "https://notopenanonymity.chat/" } }, dedupeKey: "website-notopenanonymity.chat#watch-3" });
-		expect((await SubmissionsEntity.listWebsitesOnDomain("openanonymity.chat")).map(({ dedupeKey }) => dedupeKey).sort()).toEqual([
-			"website-cdn.openanonymity.chat#watch-2",
-			"website-openanonymity.chat",
-			"website-openanonymity.chat#watch-1",
-		]);
-	});
-});

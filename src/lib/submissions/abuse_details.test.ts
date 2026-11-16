@@ -58,16 +58,15 @@ describe("submission report read model", () => {
 			routeKey: "provider_submission:cloudflare:contact", providerRegistryKey: "cloudflare", providerDisplayName: "Cloudflare Abuse",
 			routeType: "provider_submission", resolverProvenance: { source: "test" }, resolutionSnapshot: { source: "test" }, status: "submitted",
 		});
-		await AbuseRepository.appendEvent({ reportId: report.reportId, routeId: route.id, eventType: "provider_decision.not_contested", data: { state: "denied", detail: "no_abuse_found", recheck: { checkedAt: "2026-11-05T23:07:30.000Z", recheck: { reached: false, failure: "net::ERR_NAME_NOT_RESOLVED" }, stillServed: false, accountIdentifiers: [] } } });
-		await AbuseRepository.appendEvent({ reportId: report.reportId, routeId: route.id, eventType: "provider_decision.followed_up", data: { state: "denied", detail: "content_removed", replyKind: "contest", to: "abusereply@cloudflare.com" } });
+		await AbuseRepository.appendEvent({ reportId: report.reportId, routeId: route.id, eventType: "provider_decision.not_answered", data: { state: "denied", detail: "no_abuse_found", reason: "The domain no longer resolves; there is nothing left for them to act on." } });
+		await AbuseRepository.appendEvent({ reportId: report.reportId, routeId: route.id, eventType: "provider_decision.followed_up", data: { state: "denied", detail: "content_removed", summary: "The kit still loads for residential visitors; asked them to review it again.", to: "abusereply@cloudflare.com" } });
 
 		const details = await getSubmissionDetails(submissionId.toString());
 		const shown = details!.reports[0]!.routes.find((item) => item.id === route.id)!;
-		expect(shown.decisionFollowUps.map(({ outcome, decision, replyKind }) => ({ outcome, decision, replyKind }))).toEqual([
-			{ outcome: "not_replied", decision: "no_abuse_found", replyKind: undefined },
-			{ outcome: "replied", decision: "content_removed", replyKind: "contest" },
+		expect(shown.decisionFollowUps.map(({ outcome, decision, explanation }) => ({ outcome, decision, explanation }))).toEqual([
+			{ outcome: "not_replied", decision: "no_abuse_found", explanation: "The domain no longer resolves; there is nothing left for them to act on." },
+			{ outcome: "replied", decision: "content_removed", explanation: "The kit still loads for residential visitors; asked them to review it again. Sent to abusereply@cloudflare.com." },
 		]);
-		expect(shown.decisionFollowUps[0]!.explanation).toEndWith("No reply was sent.");
 		// Another route of the report has no follow-ups of its own.
 		expect(details!.reports[0]!.routes.filter((item) => item.id !== route.id).every((item) => item.decisionFollowUps.length === 0)).toBeTrue();
 	});

@@ -28,7 +28,12 @@ export const eranetProvider: ProviderSubmissionProvider = {
 	decisionFollowUp: {
 		contestedStates: ["supplement required"],
 		addressee: "Eranet",
-		channel: { kind: "form", name: "Eranet's supplement form", submit: (answer, markSending) => submitEranetSupplement(answer, markSending) },
+		channel: {
+			kind: "form",
+			name: "Eranet's supplement form",
+			requirements: "The form takes plain text and requires at least one screenshot (PNG, JPG or GIF, up to 8 MB, at most 12).",
+			submit: (answer, markSending) => submitEranetSupplement(answer, markSending),
+		},
 	},
 };
 

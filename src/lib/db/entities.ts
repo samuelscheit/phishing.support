@@ -182,22 +182,7 @@ export class SubmissionsEntity {
 			.groupBy(submissions.status);
 	}
 
-	/** Website submissions for `domain` itself or any host under it, visits included, by their dedupe key (`website-<host>[#<visit>]`). */
-	static async listWebsitesOnDomain(domain: string) {
-		const db = await getDb();
-		return db
-			.select({ id: submissions.id, dedupeKey: submissions.dedupeKey })
-			.from(submissions)
-			.where(and(
-				eq(submissions.kind, "website"),
-				or(
-					eq(submissions.dedupeKey, `website-${domain}`),
-					sql`${submissions.dedupeKey} like ${`website-%.${domain}`}`,
-					sql`${submissions.dedupeKey} like ${`website-${domain}#%`}`,
-					sql`${submissions.dedupeKey} like ${`website-%.${domain}#%`}`,
-				),
-			));
-	}
+
 
 	/** Submissions handed off to `destinationId` that still wait on its verdict. */
 	static async listRedirectedTo(destinationId: bigint) {

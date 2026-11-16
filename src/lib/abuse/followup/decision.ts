@@ -1,84 +1,40 @@
 import { reporterBrowserIdentity } from "../../browser/reporter_identity";
 import { SubmissionsEntity } from "../../db/entities";
-import { isSameWebsite } from "../../website_site";
 import { errorText as describeError } from "../../error_text";
 import { abuseEmailCaseUrl, sendAbuseEmailRoute } from "../mail";
-import { ProviderSubmissionRejectedError, type DecisionAnswerChannel } from "../providers/submission_contracts";
 import { getProviderSubmissionProvider } from "../providers";
+import { ProviderSubmissionRejectedError, type DecisionAnswerChannel } from "../providers/submission_contracts";
 import { AbuseRepository } from "../repository";
 import { recordValue, UnknownExternalStateError } from "../worker/shared";
-import { collectDecisionEvidence, type DecisionEvidence, type EvidenceFetcher } from "./evidence";
-import { composeDecisionReply, type DecisionReplyInput, type NarrativeWriter } from "./reply";
-import { collectWebsiteDecisionEvidence, type WebsiteDecisionEvidence, type WebsiteEvidenceDependencies } from "./website_evidence";
+import { runDecisionAgent, type DecisionAgentModel, type DecisionAgentOutcome, type DecisionAgentStep } from "./agent";
+import { caseCaptureNames, type AttachableFile, type DecisionToolDependencies } from "./tools";
 
-const MAX_ATTACHMENTS = 5;
-
-/** Whether the reported URL is on the site its case submitted, rather than a host that site links to. */
-async function isCaseSite(submissionId: bigint | null, reportedUrl: string): Promise<boolean> {
-	const submission = submissionId ? await SubmissionsEntity.get(submissionId) : undefined;
-	return submission?.data.kind === "website" && isSameWebsite(submission.data.website.url, reportedUrl);
-}
+const MAX_MESSAGE_TEXT = 6_000;
 
 export type DecisionFollowUpDependencies = {
-	fetcher?: EvidenceFetcher;
-	/** The recheck of a reported phishing site: capture, classification, stamping. */
-	website?: WebsiteEvidenceDependencies;
-	writeNarrative?: NarrativeWriter;
+	/** The agent's model; tests script it. */
+	model?: DecisionAgentModel;
+	/** The tools' browser capture and network; tests replace them. */
+	tools?: DecisionToolDependencies;
 	send?: typeof sendAbuseEmailRoute;
 	/** The registered provider of a route; tests answer through their own channel. */
 	providerFor?: typeof getProviderSubmissionProvider;
 	now?: () => Date;
 	/**
-	 * Build the answer without acting on it: nothing is sent and no event is
-	 * recorded, so the run leaves the case as it found it. The draft, or why
-	 * there would be none, goes here instead.
+	 * Run the agent without acting on its decision: nothing is sent and
+	 * nothing is recorded, so the case is left as it was found.
 	 */
-	dryRun?: (draft: DecisionFollowUpDraft) => void;
+	dryRun?: (draft: { outcome: DecisionAgentOutcome; steps: DecisionAgentStep[]; recipient: string }) => void;
 };
 
-/** What a dry run of a follow-up would have done. */
-export type DecisionFollowUpDraft =
-	| { outcome: "reply"; replyKind: DecisionReplyInput["replyKind"]; recipient: string; subject: string; body: string; attachments: string[]; narrative: "model" | "fallback" }
-	| { outcome: "not_contested"; summary: Record<string, unknown> };
-
-/** The provider's own message about its decision: the newest provider-API mail that is not a status record. */
-function providerDecisionMessage(messages: Awaited<ReturnType<typeof AbuseRepository.listMailForReport>>, routeId: bigint) {
-	return messages
-		.filter((message) => message.routeId === routeId && message.direction === "inbound" && !message.correlationKey?.includes(":status:") && !/confirmation/i.test(message.subject ?? ""))
-		.at(-1);
-}
-
 /**
- * Whether and how to answer, from what the recheck measured. A paste-command
- * page is contested while our server still receives it. A phishing site is
- * contested while it still serves the kit, or when our capture after the
- * review shows it was visible then; once it is gone everywhere, identifiers
- * that tie it to an account at the provider still warrant asking them to act
- * on that account. Anything else the provider may be right about.
- */
-function replyKindFor(evidence: DecisionEvidence | WebsiteDecisionEvidence): DecisionReplyInput["replyKind"] | undefined {
-	if (evidence.kind === "paste_command") {
-		return evidence.liveChecks.some((check) => check.status === 200 && (check.as === "the command's own downloader" || evidence.command)) ? "contest" : undefined;
-	}
-	if (evidence.stillServed) return "contest";
-	if (!evidence.recheck.reached && evidence.accountIdentifiers.length) return "account";
-	if (evidence.capture?.afterReview) return "contest";
-	return undefined;
-}
-
-/** What a not-contested decision records about the recheck, without the screenshot. */
-function recheckSummary(evidence: DecisionEvidence | WebsiteDecisionEvidence) {
-	if (evidence.kind === "paste_command") return { liveChecks: evidence.liveChecks };
-	const { freshScreenshot: _, ...summary } = evidence;
-	return { recheck: summary };
-}
-
-/**
- * Answer a provider that reviewed a filed report and found nothing (or found
- * it gone), once per route and decision. The reply restates a fresh recheck
- * and what a reviewer needs to see the content: reproduction steps for a
- * paste-command page, the cloaking and routes for a phishing site. A decision
- * the recheck supports is not contested.
+ * Answer a provider's review decision when an agent finds that answering
+ * helps. The agent gets the decision, our report, the case and every message
+ * on the route; it investigates with a real browser, plain requests, the
+ * case's own captures and web search, then either writes the answer, sent
+ * exactly as written through the provider's channel, or decides to send
+ * nothing. Either way its reason and every step it took are kept with the
+ * case. One answer at most per route and decision.
  */
 export async function followUpProviderDecision(
 	params: { routeId: bigint; state: string; detail?: string },
@@ -92,77 +48,98 @@ export async function followUpProviderDecision(
 	if (!run?.confirmationId) return "skipped";
 	const input = await AbuseRepository.getReportInput(route.reportId);
 	const target = input?.targets.find((item) => item.id === route.targetId);
-	const reportedUrl = target?.observedUrls[0];
-	if (!input || !target || !reportedUrl) return "skipped";
+	if (!input || !target) return "skipped";
 
 	const correlationKey = `decision-follow-up:${route.id.toString()}:${params.state}`;
 	const mail = await AbuseRepository.listMailForReport(route.reportId);
 	if (mail.some((message) => message.direction === "outbound" && message.correlationKey === correlationKey)) return "skipped";
-	const decisionMessage = providerDecisionMessage(mail, route.id);
+	if ((await AbuseRepository.listEvents(route.reportId)).some((event) => event.routeId === route.id && event.eventType === "provider_decision.not_answered" && recordValue(event.data)?.state === params.state)) return "skipped";
 
-	const caseUrl = abuseEmailCaseUrl(input.report.submissionId);
-	// A phishing site from a case is rechecked as the case captured it; a
-	// paste-command page or payload host is fetched as its visitors fetch it.
-	// A host other than the case's own site that names a User-Agent serves its
-	// file only to that client (a payload host); the case's own page names the
-	// browser it was captured as.
-	const payloadHost = Boolean(input.report.reportedUserAgent) && !(await isCaseSite(input.report.submissionId, reportedUrl));
-	const pasteCommandReport = payloadHost || input.report.allegationCategory === "malware";
-	const visitor = reporterBrowserIdentity(input.report.requesterHeaders ?? undefined);
-	const evidence = !pasteCommandReport && input.report.submissionId
-		? await collectWebsiteDecisionEvidence({
-			submissionId: input.report.submissionId,
-			reportedUrl,
-			...(visitor ? { visitor } : {}),
-			...(decisionMessage?.occurredAt ? { reviewedAt: decisionMessage.occurredAt } : {}),
-			...(caseUrl ? { caseUrl } : {}),
-			...(followUp.accountIdentifiers ? { accountIdentifiers: followUp.accountIdentifiers } : {}),
-		}, { ...dependencies.website, ...(dependencies.now ? { now: dependencies.now } : {}) })
-		: await collectDecisionEvidence({
-			observedUrl: reportedUrl,
-			reportedUserAgent: input.report.reportedUserAgent,
-			payloadHost,
-			...(caseUrl ? { caseUrl } : {}),
-			...(dependencies.fetcher ? { fetcher: dependencies.fetcher } : {}),
-			...(dependencies.now ? { now: dependencies.now } : {}),
-		});
-	const replyKind = replyKindFor(evidence);
-	if (!replyKind) {
-		if (dependencies.dryRun) {
-			dependencies.dryRun({ outcome: "not_contested", summary: recheckSummary(evidence) });
-			return "skipped";
-		}
-		await AbuseRepository.appendEvent({ reportId: route.reportId, routeId: route.id, eventType: "provider_decision.not_contested", data: { state: params.state, detail: params.detail ?? null, ...recheckSummary(evidence) } });
-		return "skipped";
-	}
-
-	const reply = await composeDecisionReply({
-		providerName: followUp.addressee,
-		confirmationId: run.confirmationId,
-		decision: { state: params.state, ...(params.detail ? { detail: params.detail } : {}), ...(decisionMessage?.textBody ? { providerMessage: decisionMessage.textBody } : {}) },
-		allegationCategory: input.report.allegationCategory,
-		target: target.normalizedTarget,
-		reportedUrl,
-		description: input.report.description,
-		replyKind,
-		evidence,
-	}, dependencies.writeNarrative);
-
-	const fresh = evidence.kind === "website" && evidence.freshScreenshot
-		? [{ filename: evidence.freshScreenshot.filename, mimeType: "image/png", content: evidence.freshScreenshot.png }]
-		: [];
-	const attachments = [
-		...fresh,
-		...input.evidenceArtifacts.slice(0, MAX_ATTACHMENTS - fresh.length).map((artifact) => ({ filename: artifact.name, mimeType: artifact.mimeType, content: Buffer.from(artifact.blob) })),
-	];
 	const { channel } = followUp;
 	const recipient = channel.kind === "email" ? channel.replyAddress : channel.name;
 	const subject = channel.kind === "email" ? channel.subject(run.confirmationId) : `Additional evidence for ${followUp.addressee} report ${run.confirmationId}`;
+	const submissionId = input.report.submissionId ?? undefined;
+	const submission = submissionId === undefined ? undefined : await SubmissionsEntity.get(submissionId);
+	const website = submission?.data.kind === "website" ? submission.data.website : undefined;
+	const caseUrl = abuseEmailCaseUrl(input.report.submissionId);
+	const attachable = new Map<string, AttachableFile>(input.evidenceArtifacts.map((artifact) => [artifact.name, { filename: artifact.name, mimeType: artifact.mimeType, content: Buffer.from(artifact.blob) }]));
+	const visitor = reporterBrowserIdentity(input.report.requesterHeaders ?? undefined);
+
+	const context = {
+		now: (dependencies.now ?? (() => new Date()))().toISOString(),
+		we: "phishing.support (support@phishing.support, https://phishing.support)",
+		provider: followUp.addressee,
+		channel: channel.kind === "email"
+			? { kind: "email", to: channel.replyAddress, subject }
+			: { kind: "form", name: channel.name, ...(channel.requirements ? { requirements: channel.requirements } : {}) },
+		decision: { state: params.state, reason: params.detail ?? null },
+		report: {
+			receipt: run.confirmationId,
+			filedAt: run.createdAt.toISOString(),
+			allegation: input.report.allegationCategory,
+			target: target.normalizedTarget,
+			reportedUrls: target.observedUrls,
+			textWeFiled: input.report.description,
+			reportedUserAgent: input.report.reportedUserAgent ?? null,
+			impersonatedBrandSite: input.report.legalBrandUrl ?? null,
+		},
+		case: {
+			url: caseUrl ?? null,
+			...(website ? {
+				submittedUrl: website.url,
+				capturedUrl: website.archiveUrl ?? null,
+				findings: (website.siteAssessments ?? []).filter((assessment) => assessment.finding === "phishing" || assessment.finding === "malware"),
+				cloaking: website.cloaking ?? null,
+				device: website.device ?? null,
+				navigation: (website.navigationHops ?? []).map(({ url, status, redirectTo }) => ({ url, status, redirectTo: redirectTo ?? null })),
+				visit: website.visit?.report ?? null,
+			} : {}),
+		},
+		correspondence: mail.filter((message) => message.routeId === route.id).map((message) => ({
+			direction: message.direction,
+			from: message.fromAddress,
+			to: message.toAddresses,
+			at: message.occurredAt.toISOString(),
+			subject: message.subject,
+			text: message.textBody?.slice(0, MAX_MESSAGE_TEXT) ?? null,
+		})),
+		caseCaptures: await caseCaptureNames(submissionId),
+		attachableFiles: [...attachable.values()].map(({ filename, mimeType }) => ({ name: filename, mimeType })),
+	};
+
+	const { outcome, steps } = await runDecisionAgent({
+		context,
+		tools: {
+			...(submissionId !== undefined ? { submissionId } : {}),
+			...(caseUrl ? { caseUrl } : {}),
+			...(visitor ? { visitor } : {}),
+			...(website?.device ? { device: website.device } : {}),
+			...(followUp.accountIdentifiers ? { accountIdentifiers: followUp.accountIdentifiers } : {}),
+			attachable,
+		},
+		...(dependencies.model ? { model: dependencies.model } : {}),
+		...(dependencies.tools ? { dependencies: dependencies.tools } : {}),
+	});
 	if (dependencies.dryRun) {
-		dependencies.dryRun({ outcome: "reply", replyKind, recipient, subject, body: reply.body, attachments: attachments.map((attachment) => attachment.filename), narrative: reply.narrativeSource });
+		dependencies.dryRun({ outcome, steps, recipient });
 		return "skipped";
 	}
-	const answer = { route, runId: run.id, confirmationId: run.confirmationId, subject, body: reply.body, attachments, correlationKey };
+	await AbuseRepository.saveArtifact({
+		reportId: route.reportId,
+		routeId: route.id,
+		runId: run.id,
+		name: `decision-follow-up-${params.state.replace(/[^a-z0-9]+/gi, "-")}.json`,
+		kind: "decision_follow_up_transcript",
+		mimeType: "application/json",
+		buffer: Buffer.from(JSON.stringify({ decision: params, outcome, steps }, null, 2), "utf8"),
+	});
+	if (outcome.kind === "do_not_answer") {
+		await AbuseRepository.appendEvent({ reportId: route.reportId, routeId: route.id, eventType: "provider_decision.not_answered", data: { state: params.state, detail: params.detail ?? null, reason: outcome.reason } });
+		return "skipped";
+	}
+
+	const attachments = outcome.attachments.map((name) => attachable.get(name)).filter((file): file is AttachableFile => file !== undefined);
+	const answer = { route, runId: run.id, confirmationId: run.confirmationId, subject, body: outcome.text, attachments, correlationKey };
 	const messageId = channel.kind === "email"
 		? await answerByMail({ ...answer, recipient }, dependencies.send ?? sendAbuseEmailRoute)
 		: await answerThroughForm({ ...answer, channel });
@@ -170,7 +147,7 @@ export async function followUpProviderDecision(
 		reportId: route.reportId,
 		routeId: route.id,
 		eventType: "provider_decision.followed_up",
-		data: { state: params.state, detail: params.detail ?? null, confirmationId: run.confirmationId, to: recipient, replyKind, narrative: reply.narrativeSource, messageId },
+		data: { state: params.state, detail: params.detail ?? null, confirmationId: run.confirmationId, to: recipient, summary: outcome.summary, messageId },
 	});
 	return "sent";
 }

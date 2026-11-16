@@ -129,7 +129,7 @@ function DecisionFollowUpItem({ followUp }: { followUp: DecisionFollowUpSummary 
 			<div className={cn("rounded-md border p-3", replied ? "bg-muted/20" : "border-slate-200 bg-slate-50/60")}>
 				<div className="flex flex-wrap items-start justify-between gap-2">
 					<div className="flex flex-wrap items-center gap-2">
-						<Badge variant="secondary">{replied ? (followUp.replyKind === "account" ? "Asked to act on the account" : "Decision contested") : "No reply sent"}</Badge>
+						<Badge variant="secondary">{replied ? "Answered" : "Not answered"}</Badge>
 						<Badge variant="outline" className="capitalize">{label(followUp.decision)}</Badge>
 					</div>
 					<div className="text-xs text-muted-foreground">{formatDate(followUp.occurredAt)}</div>

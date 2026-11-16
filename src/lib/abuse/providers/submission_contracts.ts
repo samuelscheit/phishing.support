@@ -153,6 +153,8 @@ export type DecisionAnswerChannel =
 		readonly kind: "form";
 		/** How the case page names where the answer went, e.g. "Eranet's supplement form". */
 		readonly name: string;
+		/** What the form insists on, told to whoever writes the answer. */
+		readonly requirements?: string;
 		/**
 		 * Submit the answer through the provider's form. `markSending` records
 		 * the answer durably and must be awaited right before the one request
