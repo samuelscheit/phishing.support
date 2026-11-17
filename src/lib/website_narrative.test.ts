@@ -46,7 +46,6 @@ describe("the website case analysis", () => {
 		const evidence = visitNarrativeEvidence({
 			pages: [{ url: "https://kit.example/", title: "Verify", text: "Verify your email" }, { url: "https://kit.example/signin", text: `Enter password ${"x".repeat(5_000)}` }],
 			visit: {
-				runId: "tsk_v2_1",
 				outcome: "completed",
 				report: { submissionsAttempted: 2, downloadsStarted: 0, asksForPhone: false, stoppedReason: "The sign-in page showed an error." },
 				actions: [{ kind: "input_text", text: "Enter the synthetic email" }],

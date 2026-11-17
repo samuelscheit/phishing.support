@@ -26,6 +26,22 @@ export function asError(error: unknown): Error {
 	return error instanceof Error ? error : new Error(errorText(error), { cause: error });
 }
 
+/**
+ * An external error's text with credential-shaped parts removed, for storing
+ * or logging: key and authorization assignments, bearer tokens, and the
+ * signature and credential parameters of a signed URL. The placeholder keeps
+ * the name it hid; the text is bounded.
+ */
+export function redactedErrorText(error: unknown): string {
+	// Bearer tokens first: the assignment rule below would otherwise consume the word
+	// "Bearer" as the value of an Authorization header and leave the token behind.
+	return errorText(error)
+		.replace(/\bbearer\s+[^\s,;]+/gi, "Bearer [redacted]")
+		.replace(/\b(api[_-]?key|authorization)(\s*[:=]\s*)[^\s,;]+/gi, "$1$2[redacted]")
+		.replace(/\b(X-Amz-(?:Signature|Credential|Security-Token)|Signature|token|sig)=[^&\s]+/gi, "$1=[redacted]")
+		.slice(0, 2_000);
+}
+
 /** One line of at most 500 characters, for error lists stored in snapshots and logs. */
 export function errorSummary(error: unknown): string {
 	return errorText(error).replace(/\s+/g, " ").slice(0, 500);

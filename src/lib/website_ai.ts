@@ -9,7 +9,6 @@ import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun, type AnalysisClient } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
 import { reportConfirmedWebsiteAbuse } from "./abuse/submission_reports";
-import { AbuseSkyvernAdapter } from "./abuse/skyvern";
 import { createWebsiteSubmission } from "./submissions/website";
 import type { ReporterMetadata } from "./request_metadata";
 import { defaultReasoning, defaultResponseModel, sleep } from "./utils";
@@ -21,7 +20,7 @@ import { isSameWebsite, websiteSite } from "./website_site";
 import { createExfiltrationCanaries } from "./exfiltration/canaries";
 import { discoverExfiltrationBackends } from "./exfiltration/analysis";
 import type { CapturedNetworkRequest, ExfiltrationBackend, ExfiltrationCanaries } from "./exfiltration/types";
-import { skyvernVisitAgent, type VisitAgent } from "./site_visit/agent";
+import { taskAgentVisit, type VisitAgent } from "./site_visit/agent";
 import { visitNavigation, visitPages, type VisitPage } from "./site_visit/evidence";
 import type { SiteVisitRecording } from "./site_visit/visit";
 import { buildWebsiteAnalysisInput, type NarrativeVisitPage } from "./website_narrative";
@@ -196,7 +195,6 @@ const isReportable = (classification: WebsiteSiteClassification) => classificati
 function visitRecord(recording: SiteVisitRecording<unknown>, pages: ReadonlyArray<VisitPage<unknown>>): WebsiteVisitRecord {
 	const { agent } = recording;
 	return {
-		...(agent.runId ? { runId: agent.runId } : {}),
 		outcome: agent.outcome,
 		...(agent.failure ? { failure: agent.failure } : {}),
 		...(agent.report ? { report: agent.report } : {}),
@@ -255,7 +253,7 @@ async function visitWebsite(params: {
 	// A page from a stored capture is loaded live first: the visit walks the live site.
 	const session = first.session ?? (await capture({ url: first.url, ...device })).session;
 	const canaries = createExfiltrationCanaries();
-	const agent = dependencies.visitAgent ?? skyvernVisitAgent(() => new AbuseSkyvernAdapter());
+	const agent = dependencies.visitAgent ?? taskAgentVisit();
 	const empty: SiteVisitRecording<WebsiteCapture> = { startedAt: new Date(), steps: [], requests: [], downloads: [], downloadFailures: [], agent: { outcome: "failed", failure: "The page could not be loaded live for the visit.", actions: [] } };
 	const recording = session
 		? await session.visit({ canaries, agent, live: (event) => { void publishEvent(`run:${submissionId}`, event); } }) as SiteVisitRecording<WebsiteCapture>
@@ -392,7 +390,7 @@ export type WebsiteAnalysisDependencies = {
 	timestampEvidence?: typeof timestampEvidence;
 	/** What malware scanners say about an offered file's hash. */
 	downloadLookups?: (sha256: string) => Promise<LookupResult[]>;
-	/** The agent that walks the site; Skyvern in production. */
+	/** The agent that walks the site; the browser task agent in production. */
 	visitAgent?: VisitAgent;
 };
 

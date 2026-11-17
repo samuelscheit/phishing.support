@@ -26,7 +26,7 @@ function cdpTargetType(target: Target): string {
 	return info?.type ?? target.type();
 }
 
-/** Records outbound payloads from every page/worker target while Skyvern drives the browser. */
+/** Records outbound payloads from every page/worker target while the visiting agent drives the browser. */
 export class ExfiltrationNetworkRecorder {
 	private readonly requests: CapturedNetworkRequest[] = [];
 	private readonly sessions = new Set<CDPSession>();

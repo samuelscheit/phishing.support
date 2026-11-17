@@ -1,8 +1,8 @@
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { userAgent } from "../../../constants";
 import { AbuseRepository } from "../../repository";
-import type { ProviderFormFacts } from "../../skyvern/form_facts";
-import { deriveProviderFormFacts } from "../../skyvern/form_facts";
+import type { ProviderFormFacts } from "../../portal/form_facts";
+import { deriveProviderFormFacts } from "../../portal/form_facts";
 import { recordValue, routeContext } from "../../worker/shared";
 import { providerDefinitionMatchesPin } from "../definition";
 import {

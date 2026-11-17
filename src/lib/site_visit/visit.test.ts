@@ -1,16 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { homedir } from "node:os";
-import puppeteer, { type Page } from "rebrowser-puppeteer-core";
+import puppeteer from "rebrowser-puppeteer-core";
 
 import { createExfiltrationCanaries } from "../exfiltration/canaries";
 import type { ExfiltrationCanaries } from "../exfiltration/types";
 import { archiveWebsite } from "../website_archive";
-import { skyvernVisitAgent, taskActions, timelineActions, type VisitAgent, type VisitAgentAction } from "./agent";
+import type { ChatModel } from "../browser_task/agent";
+import { chromiumAvailable, chromiumExecutable, refIn, ScriptedModel, StalledModel, type ScriptedTurn } from "../browser_task/test_helpers";
+import { stepActions, taskAgentVisit, type VisitAgent } from "./agent";
 import type { SiteVisitLiveEvent } from "./visit";
 
-const chromiumExecutable = process.env.PHISHING_TEST_CHROMIUM
-	?? `${homedir()}/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
-const chromiumAvailable = await Bun.file(chromiumExecutable).exists();
 const launch = async () => puppeteer.launch({ executablePath: chromiumExecutable, headless: true, args: ["--no-first-run"] });
 const fast = { scriptNavigationSettleMs: 20, renderSettleMs: 800, visitPollMs: 150, visitStepQuietMs: 400 } as const;
 
@@ -46,72 +44,54 @@ document.getElementById("dl").onclick=()=>{const a=document.createElement("a");a
 }
 
 /**
- * Drives the page the way Skyvern does: over its own connection to the
- * browser, on the tab that is already open, with the synthetic values.
+ * The walk a victim takes through the kit, as model turns: sign in with the
+ * synthetic email and the password placeholder, open the dialog, take the
+ * file, report. Each turn reads its refs from the observation.
  */
-function scriptedAgent(walk: (page: Page, canaries: ExfiltrationCanaries) => Promise<void>, canaries: ExfiltrationCanaries, options: { fail?: string; neverEnds?: boolean } = {}) {
-	const tasks: Array<{ url: string; prompt: string; address: string }> = [];
-	let done: Promise<unknown> = Promise.resolve();
-	let finished = false;
-	const actions: VisitAgentAction[] = [];
-	const agent: VisitAgent = {
-		start: async (task, address) => {
-			tasks.push({ url: task.url, prompt: task.prompt, address });
-			done = (async () => {
-				const connection = await puppeteer.connect({ browserWSEndpoint: address });
-				try {
-					const [page] = await connection.pages();
-					await walk(page!, canaries);
-					actions.push({ id: "a1", kind: "click", text: "Submitted the sign-in form with the synthetic values" });
-					// A Task V3 action has no text of its own, only the element it acted on.
-					actions.push({ id: "a2", kind: "click", text: "Clicked", selector: "#open" });
-				} finally {
-					await connection.disconnect();
-					finished = !options.neverEnds;
-				}
-			})();
-			return { runId: "tsk_v2_test" };
+function kitWalk(canaries: ExfiltrationCanaries): ScriptedTurn[] {
+	return [
+		(page) => ({
+			text: "The kit asks to log in; I enter the synthetic values.",
+			calls: [
+				{ name: "type", arguments: { ref: refIn(page, 'textbox "Username"'), text: canaries.email } },
+				{ name: "type", arguments: { ref: refIn(page, 'textbox "Password"'), text: "{{secret:password}}" } },
+				{ name: "click", arguments: { ref: refIn(page, 'button "Log In"') } },
+			],
+		}),
+		(page) => {
+			expect(page).toContain("Verify your account");
+			return { text: "The verify page offers a verifier.", calls: [{ name: "click", arguments: { ref: refIn(page, 'button "Get Verifier"') } }] };
 		},
-		state: async () => {
-			if (!finished) return { state: "running" };
-			await done;
-			return options.fail ? { state: "failed", reason: options.fail } : { state: "completed", output: { submissionsAttempted: 1, downloadsStarted: 1, asksForPhone: false, stoppedReason: "Downloaded the verifier." } };
-		},
-		actions: async () => [...actions],
-		cancel: async () => { finished = true; },
-	};
-	return { agent, tasks };
+		(page) => ({ calls: [{ name: "click", arguments: { ref: refIn(page, 'button "Download Verifier.zip"') } }] }),
+		() => ({ calls: [{ name: "done", arguments: { result: { submissionsAttempted: 1, downloadsStarted: 1, asksForPhone: false, stoppedReason: "Downloaded the verifier." }, summary: "Done." } }] }),
+	];
 }
 
-async function signInAndDownload(page: Page, canaries: ExfiltrationCanaries) {
-	await page.type("input[name=username]", canaries.email);
-	await page.type("input[name=password]", canaries.password);
-	await Promise.all([page.waitForNavigation(), page.click("button")]);
-	await new Promise((resolve) => setTimeout(resolve, 900));
-	await page.click("#open");
-	await new Promise((resolve) => setTimeout(resolve, 300));
-	await page.click("#dl");
-	await new Promise((resolve) => setTimeout(resolve, 900));
+class FailingModel implements ChatModel {
+	readonly id = "test/failing";
+	async complete(): Promise<never> {
+		throw new Error("model answered HTTP 401: invalid api_key=sk-live-123456789");
+	}
 }
 
-describe.skipIf(!chromiumAvailable)("a site visit, in a real browser", () => {
+describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by the task agent", () => {
 	test("records each page the agent reaches, where the synthetic values went, and the file it downloaded, live", async () => {
 		const { server, posts, url } = serveKit();
 		const canaries = createExfiltrationCanaries();
-		const { agent, tasks } = scriptedAgent(signInAndDownload, canaries);
+		const model = new ScriptedModel(kitWalk(canaries));
 		const live: SiteVisitLiveEvent[] = [];
 		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: launch });
 		try {
-			const recording = await archive.session!.visit({ canaries, agent, live: (event) => live.push(event) });
+			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event) });
+			expect(recording.agent).toMatchObject({ outcome: "completed", report: { submissionsAttempted: 1, downloadsStarted: 1, stoppedReason: "Downloaded the verifier." } });
 
-			// The agent was started on the captured tab, with the synthetic values.
-			expect(tasks).toHaveLength(1);
-			expect(tasks[0]!.url).toBe(url);
-			expect(tasks[0]!.prompt).toContain(canaries.password);
-			expect(recording.agent).toMatchObject({ runId: "tsk_v2_test", outcome: "completed", report: { submissionsAttempted: 1, stoppedReason: "Downloaded the verifier." } });
+			// The agent continued on the captured tab: its first observation is the captured sign-in page.
+			expect(model.seen()).toContain(`The browser is already on its page (${url})`);
+			expect(model.seen()).toContain(`Current page:\nURL: ${url}\nTitle: Roblox`);
 
-			// The sign-in was submitted to the kit's collector, and the network recording shows it.
+			// The sign-in was submitted to the kit's collector with the real synthetic password, and the network recording shows it.
 			expect(posts).toHaveLength(1);
+			expect(new URLSearchParams(posts[0]).get("password")).toBe(canaries.password);
 			const submitted = recording.requests.find((request) => request.method === "POST" && request.url === `${url}collect`);
 			expect(new URLSearchParams(submitted?.postData).get("password")).toBe(canaries.password);
 
@@ -129,34 +109,67 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser", () => {
 			expect(live.some((event) => event.type === "browser.frame" && event.jpeg.length > 100)).toBeTrue();
 			expect(live.filter((event) => event.type === "browser.step").map((event) => (event as { url: string }).url)).toContain(`${url}verify`);
 			expect(live).toContainEqual({ type: "browser.download", fileName: "Verifier.zip", url: `${url}Verifier.zip` });
-			expect(live).toContainEqual({ type: "browser.action", kind: "click", text: "Submitted the sign-in form with the synthetic values" });
-			// The visit reads the element's caption in the live page.
-			expect(recording.agent.actions).toContainEqual({ id: "a2", kind: "click", text: 'Clicked "Get Verifier"', selector: "#open" });
+			// The live log reads the agent's thoughts and what each action did.
+			expect(live).toContainEqual({ type: "browser.action", kind: "thought", text: "The kit asks to log in; I enter the synthetic values." });
+			expect(recording.agent.actions.map((action) => action.kind)).toEqual(["thought", "type", "type", "click", "thought", "click", "click", "done"]);
+			expect(recording.agent.actions.find((action) => action.kind === "click")?.text).toStartWith("clicked e");
+
+			// The password never reached the model, the action log, or the live view: only its placeholder did.
+			expect(model.seen()).not.toContain(canaries.password);
+			expect(model.seen()).toContain("{{secret:password}}");
+			expect(JSON.stringify(recording.agent)).not.toContain(canaries.password);
+			expect(JSON.stringify(live.filter((event) => event.type !== "browser.frame"))).not.toContain(canaries.password);
+			expect(recording.agent.actions).toContainEqual({ id: "1.2", kind: "type", text: "typed into e2; its value is now (secret entered)" });
 		} finally {
 			await archive.session?.close();
 			server.stop(true);
 		}
 	}, 60_000);
 
-	test("an agent that fails or runs past the budget ends the walk with what was recorded", async () => {
+	test("a model that fails ends the walk as failed, with the reason redacted; a walk past the budget is timed out", async () => {
 		const { server, url } = serveKit();
 		const canaries = createExfiltrationCanaries();
-		const failing = scriptedAgent(async () => undefined, canaries, { fail: "failed: Skyvern could not reach its model" });
-		const late = scriptedAgent(async (page) => { await page.type("input[name=username]", canaries.email); }, canaries, { neverEnds: true });
 		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: launch });
 		try {
-			const failed = await archive.session!.visit({ canaries, agent: failing.agent });
-			expect(failed.agent).toMatchObject({ outcome: "failed", failure: "failed: Skyvern could not reach its model" });
+			const failed = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new FailingModel()) });
+			expect(failed.agent.outcome).toBe("failed");
+			expect(failed.agent.failure).toStartWith("failed: Error: model answered HTTP 401: invalid api_key=[redacted]");
 			expect(failed.steps).toEqual([]);
 		} finally {
 			await archive.session?.close();
 		}
 		const second = await archiveWebsite({ url, keepSession: true }, { ...fast, visitBudgetMs: 2_500, getBrowser: launch });
 		try {
-			const timedOut = await second.session!.visit({ canaries, agent: late.agent });
+			const started = Date.now();
+			const timedOut = await second.session!.visit({ canaries, agent: taskAgentVisit(() => new StalledModel()) });
 			expect(timedOut.agent).toMatchObject({ outcome: "timed_out", failure: "The visit's 0-minute budget ended the walk." });
+			expect(Date.now() - started).toBeLessThan(10_000);
 		} finally {
 			await second.session?.close();
+			server.stop(true);
+		}
+	}, 60_000);
+
+	// Three walks on one capture session: the agent continues in the captured tab and never closes it.
+	test("an agent that stops the walk itself, or asks for something it cannot give, has finished the visit with its reason", async () => {
+		const { server, url } = serveKit();
+		const canaries = createExfiltrationCanaries();
+		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: launch });
+		try {
+			const gaveUp = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new ScriptedModel([() => ({ calls: [{ name: "fail", arguments: { reason: "The form rejected the password three times." } }] })])) });
+			expect(gaveUp.agent).toMatchObject({ outcome: "completed", report: { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, stoppedReason: "The form rejected the password three times." } });
+			const asks = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new ScriptedModel([() => ({ calls: [{ name: "needs_input", arguments: { question: "The site wants a code sent to a real phone." } }] })])) });
+			expect(asks.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "The site wants a code sent to a real phone." } });
+			const scroll: ScriptedTurn = () => ({ calls: [{ name: "scroll", arguments: { direction: "down" } }] });
+			process.env.SITE_VISIT_TASK_MAX_STEPS = "2";
+			try {
+				const looping = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new ScriptedModel([scroll, scroll])) });
+				expect(looping.agent).toMatchObject({ outcome: "failed", failure: "step_limit: Stopped after 2 steps without finishing." });
+			} finally {
+				delete process.env.SITE_VISIT_TASK_MAX_STEPS;
+			}
+		} finally {
+			await archive.session?.close();
 			server.stop(true);
 		}
 	}, 60_000);
@@ -164,34 +177,15 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser", () => {
 	test("an agent that cannot start is a failed walk, not a broken visit", async () => {
 		const { server, url } = serveKit();
 		const canaries = createExfiltrationCanaries();
-		const agent: VisitAgent = { start: async () => { throw new Error("Skyvern answered HTTP 503"); }, state: async () => ({ state: "running" }), actions: async () => [], cancel: async () => undefined };
+		const agent: VisitAgent = async () => { throw new Error("no CDP connection is free"); };
 		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: launch });
 		try {
-			expect((await archive.session!.visit({ canaries, agent })).agent).toMatchObject({ outcome: "failed", failure: "The visiting agent could not start: Skyvern answered HTTP 503" });
+			expect((await archive.session!.visit({ canaries, agent })).agent).toMatchObject({ outcome: "failed", failure: "no CDP connection is free" });
 		} finally {
 			await archive.session?.close();
 			server.stop(true);
 		}
 	}, 60_000);
-});
-
-describe("the agent's timeline", () => {
-	test("lists its actions and thoughts once each, oldest first", () => {
-		const timeline = [
-			{ type: "thought", thought: { thought_id: "ot_2", thought: "The page shows a sign-in form.", thought_type: "plan", created_at: "2026-11-14T23:41:02" }, children: [] },
-			{ type: "block", block: { actions: [
-				{ action_id: "a_1", action_type: "input_text", intention: "Enter the synthetic email into Username", created_at: "2026-11-14T23:41:05" },
-				{ action_id: "a_2", action_type: "click", reasoning: "Submit the form", created_at: "2026-11-14T23:41:07" },
-			] }, children: [{ type: "thought", thought: { thought_id: "ot_2", thought: "duplicate" } }] },
-			{ type: "thought", thought: { thought_id: "ot_1", thought: "Open the page.", thought_type: "plan", created_at: "2026-11-14T23:40:58" } },
-		];
-		expect(timelineActions(timeline)).toEqual([
-			{ id: "ot_1", kind: "plan", text: "Open the page." },
-			{ id: "ot_2", kind: "plan", text: "The page shows a sign-in form." },
-			{ id: "a_1", kind: "input_text", text: "Enter the synthetic email into Username" },
-			{ id: "a_2", kind: "click", text: "Submit the form" },
-		]);
-	});
 });
 
 describe.skipIf(!chromiumAvailable)("the capture's browser around a visit, in a real browser", () => {
@@ -206,56 +200,31 @@ describe.skipIf(!chromiumAvailable)("the capture's browser around a visit, in a 
 			const kept = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: launch });
 			await kept.session!.close();
 			await kept.session!.close();
-			const { agent } = scriptedAgent(async () => undefined, createExfiltrationCanaries());
-			await expect(kept.session!.visit({ canaries: createExfiltrationCanaries(), agent })).rejects.toThrow("The capture's browser is already closed.");
+			await expect(kept.session!.visit({ canaries: createExfiltrationCanaries(), agent: taskAgentVisit(() => new ScriptedModel([])) })).rejects.toThrow("The capture's browser is already closed.");
 		} finally {
 			server.stop(true);
 		}
 	}, 60_000);
 });
 
-describe("the agent's task actions (Task V1 and V3)", () => {
-	test("are read as a verb and the element they acted on; actions without an id or type are dropped", () => {
-		expect(taskActions([
-			{ action_id: "act_1", action_type: "click", element_id: "[data-tv3=\"t0\"]", reasoning: null, intention: null },
-			{ action_id: "act_2", action_type: "input_text", element_id: "#phone-input" },
-			{ action_id: "act_3", action_type: "complete" },
-			{ action_type: "click" },
-			null,
-		])).toEqual([
-			{ id: "act_1", kind: "click", text: "Clicked", selector: "[data-tv3=\"t0\"]" },
-			{ id: "act_2", kind: "input_text", text: "Typed into", selector: "#phone-input" },
-			{ id: "act_3", kind: "complete", text: "Finished" },
+describe("the agent's steps in the live log", () => {
+	test("are the model's thought, then each action's outcome, bounded; a step without a thought has only its actions", () => {
+		const usage = { inputTokens: 0, outputTokens: 0 };
+		expect(stepActions({
+			step: 3, url: "https://kit.example/", title: "Kit", durationMs: 1, usage,
+			thought: "  Submit\nthe   form. ",
+			actions: [
+				{ tool: "type", args: { ref: "e1", text: "{{secret:password}}" }, ok: true, output: "typed into e1; its value is now \"(password entered)\"" },
+				{ tool: "click", args: { ref: "e2" }, ok: true, output: "clicked e2; the page navigated\nmore" },
+				{ tool: "wait", args: {}, ok: true, output: "" },
+			],
+		})).toEqual([
+			{ id: "3", kind: "thought", text: "Submit the form." },
+			{ id: "3.1", kind: "type", text: "typed into e1; its value is now \"(password entered)\"" },
+			{ id: "3.2", kind: "click", text: "clicked e2; the page navigated" },
+			{ id: "3.3", kind: "wait", text: "wait" },
 		]);
-	});
-
-	test("a Task V2 run is read from its timeline; a Task V3 run, which has none, from its actions", async () => {
-		const calls: string[] = [];
-		const agent = skyvernVisitAgent(() => ({
-			createTask: async () => ({ runId: "x", response: {} }),
-			getRun: async () => ({}),
-			cancelRun: async () => undefined,
-			getRunTimeline: async (runId: string) => { calls.push(`timeline ${runId}`); return [{ thought: { thought_id: "ot_1", thought: "Plan." } }]; },
-			getTaskActions: async (runId: string) => { calls.push(`actions ${runId}`); return [{ action_id: "act_1", action_type: "click", element_id: "#dlConfirm" }]; },
-		}));
-		expect(await agent.actions("tsk_v2_597084519460743340")).toEqual([{ id: "ot_1", kind: "thought", text: "Plan." }]);
-		expect(await agent.actions("tsk_597175287129714516")).toEqual([{ id: "act_1", kind: "click", text: "Clicked", selector: "#dlConfirm" }]);
-		expect(calls).toEqual(["timeline tsk_v2_597084519460743340", "actions tsk_597175287129714516"]);
-	});
-
-	test("an agent that ends the walk itself has finished the visit, with its reason as the report; a broken run has not", async () => {
-		const runs: Record<string, Record<string, unknown>> = {
-			terminated: { status: "terminated", failure_reason: "The form stayed on the same page after the password was entered three times." },
-			failed: { status: "failed", failure_reason: "Browser session closed" },
-		};
-		const agent = skyvernVisitAgent(() => ({
-			createTask: async () => ({ runId: "x", response: {} }),
-			getRun: async (runId: string) => runs[runId]!,
-			cancelRun: async () => undefined,
-			getRunTimeline: async () => [],
-			getTaskActions: async () => [],
-		}));
-		expect(await agent.state("terminated")).toEqual({ state: "completed", output: { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, stoppedReason: "The form stayed on the same page after the password was entered three times." } });
-		expect(await agent.state("failed")).toEqual({ state: "failed", reason: "failed: Browser session closed" });
+		expect(stepActions({ step: 1, url: "", title: "", durationMs: 0, usage, thought: "", actions: [{ tool: "click", args: {}, ok: false, output: "x".repeat(500) }] }))
+			.toEqual([{ id: "1.1", kind: "click", text: "x".repeat(300) }]);
 	});
 });

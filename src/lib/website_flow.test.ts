@@ -247,7 +247,7 @@ describe("a visit through a multi-page kit", () => {
 			evidenceQuote: "Access your wallet with your Secret Recovery Phrase",
 			collectionFields: [{ ref: "f2", name: "word1" }, { ref: "f3", name: "word2" }],
 		});
-		expect(website?.visit).toMatchObject({ runId: "tsk_v2_scripted", outcome: "completed" });
+		expect(website?.visit).toMatchObject({ outcome: "completed" });
 		// The kit files of every page are kept for sibling discovery, once per hash.
 		expect(website?.kitResources?.map(({ sha256 }) => sha256)).toEqual(["a".repeat(64), "b".repeat(64)]);
 
@@ -357,7 +357,7 @@ describe("a visit through a multi-page kit", () => {
 
 	test("a visit that did not finish leaves a case with nothing reportable inconclusive, retried from the submitted URL; a later visit that finishes reports it", async () => {
 		const id = await websiteSubmission(375914181917937692n, CONSENT);
-		const failure = "failed: Skyvern could not reach its model";
+		const failure = "failed: Error: the model answered HTTP 503";
 		let visits = 0;
 		const deps = dependencies({
 			captures: [],

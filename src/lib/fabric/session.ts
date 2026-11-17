@@ -7,7 +7,8 @@ export function isFabricBrowserSessionId(value: unknown): value is string {
 
 /**
  * Provider-run payloads may retain only the opaque Fabric session ID needed to
- * heartbeat, release, or cancel an already-created dynamic Skyvern browser.
+ * cancel the browser of a provider-form task that a crash or a fenced job
+ * interrupted.
  * Capabilities, endpoints, cookies, and other browser data are never durable.
  */
 export function fabricBrowserSessionIdFromProviderPayload(value: unknown): string | undefined {

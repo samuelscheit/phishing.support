@@ -84,7 +84,7 @@ describe.skipIf(!chromiumAvailable)("exfiltration recorder against real Chrome",
 		expect(frames.length).toBeGreaterThan(0);
 		const recorder = new ExfiltrationNetworkRecorder();
 		await recorder.start(browser! as never);
-		// Drive the frame after the recorder attached, as Skyvern does during a probe.
+		// Drive the frame after the recorder attached, as the visiting agent does during a visit.
 		await frames[0]!.evaluate(() => (window as unknown as { sendCanary: () => Promise<unknown> }).sendCanary());
 		await new Promise((resolve) => setTimeout(resolve, 1_000));
 		const captured = await recorder.stop();

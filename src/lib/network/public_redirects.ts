@@ -1,5 +1,9 @@
 import { assertPublicDnsHost } from "../abuse/security";
-import { urlHostname } from "../abuse/skyvern/storage";
+
+/** The host as `isIP` and DNS take it: WHATWG URLs keep IPv6 literals in brackets. */
+export function urlHostname(url: URL): string {
+	return url.hostname.replace(/^\[|\]$/g, "");
+}
 
 export type PublicFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
