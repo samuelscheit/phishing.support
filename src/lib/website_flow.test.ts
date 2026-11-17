@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import sharp from "sharp";
 
@@ -257,6 +258,10 @@ describe("a visit through a multi-page kit", () => {
 			"evidence-manifest.json",
 			"evidence-step2-manifest.json",
 			"evidence-step3-manifest.json",
+			// The visit itself is evidence: its record, the readable chronology and their manifest.
+			"visit-manifest.json",
+			"visit-protocol.txt",
+			"visit-record.json",
 			"website-stamped.png",
 			"website-step2-stamped.png",
 			"website-step2.mhtml",
@@ -343,6 +348,27 @@ describe("a visit through a multi-page kit", () => {
 		expect(readInvestigationJobPayload(job.payload).dataDrops).toEqual([expect.objectContaining({ kind: "telegram_bot", key: "telegram-token:8123456789:AAH-kit-token", matchedCanaries: ["marker", "password"] })]);
 		const capture = (await getDb()).select().from(abuseArtifacts).where(eq(abuseArtifacts.reportId, report!.id)).all().find((artifact) => artifact.name === "exfiltration-network-capture.json");
 		expect(JSON.parse(Buffer.from(capture!.blob).toString("utf8"))).toMatchObject({ version: 2, pageUrl: SIGN_IN, backends: [expect.objectContaining({ kind: "telegram_bot" })] });
+
+		// The visit is kept as evidence that holds up on its own: which values were made up,
+		// every request that carried one with its full body, and the order of what happened.
+		const files = await ArtifactsEntity.listForSubmission(id);
+		const read = async (name: string) => Buffer.from((await ArtifactsEntity.get(files.find((file) => file.name === name)!.id))!.blob);
+		const record = JSON.parse((await read("visit-record.json")).toString("utf8"));
+		expect(record).toMatchObject({ version: 1, caseId: id.toString(), submittedUrl: GATE });
+		expect(record.requests.map(({ url, carries }: { url: string; carries: string[] }) => ({ url, carries }))).toEqual([
+			{ url: GATE, carries: ["email"] },
+			{ url: bot, carries: ["password"] },
+		]);
+		expect(record.requests[1].postData).toContain(record.syntheticValues.password);
+		const protocol = (await read("visit-protocol.txt")).toString("utf8");
+		expect(protocol).toContain(`  password: ${record.syntheticValues.password}`);
+		expect(protocol.indexOf(`Request POST ${GATE} carried the synthetic email address`)).toBeLessThan(protocol.indexOf(`Request POST ${bot} carried the synthetic password`));
+		const manifest = JSON.parse((await read("visit-manifest.json")).toString("utf8"));
+		const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+		expect(manifest.files).toEqual([
+			{ name: "visit-record.json", sha256: sha(await read("visit-record.json")), size: (await read("visit-record.json")).byteLength },
+			{ name: "visit-protocol.txt", sha256: sha(await read("visit-protocol.txt")), size: (await read("visit-protocol.txt")).byteLength },
+		]);
 	});
 
 	test("a page that is already reportable ends the judging: later pages are not classified", async () => {

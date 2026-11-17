@@ -19,6 +19,9 @@ export type DossierProviderReport = {
 
 export type DossierEvidenceFile = { artifactId: string; name: string; kind: string; sha256: string; size: number; archivedAt?: string };
 
+/** Where the page sent the synthetic values our visit entered. */
+export type DossierDataDestination = { url: string; method: string; fields: string[]; sameSite: boolean };
+
 export type DossierSite = {
 	submissionId: string;
 	url: string;
@@ -26,6 +29,9 @@ export type DossierSite = {
 	firstSeenAt: string;
 	registeredAt?: string;
 	registrar?: string;
+	/** The site's DNS answers when it was analyzed. */
+	dns: { a: string[]; aaaa: string[]; cname: string[]; ns: string[] };
+	dataDestinations: DossierDataDestination[];
 	impersonates: string[];
 	reports: DossierProviderReport[];
 	evidence: DossierEvidenceFile[];
@@ -57,8 +63,10 @@ export type Dossier = {
 	indicators: DossierIndicator[];
 	providers: DossierProvider[];
 	impersonates: string[];
-	/** What the sites asked visitors to enter, as the visits' synthetic values showed. */
+	/** What the sites asked visitors to enter, as the visits' synthetic values showed, in German. */
 	dataRequested: string[];
+	/** The same as field names (`email`, `password`, …). */
+	requestedFields: string[];
 };
 
 export type DossierDependencies = {
@@ -96,6 +104,23 @@ function registrarName(submission: Submission | undefined): string | undefined {
 	const vcard = registrar?.vcard;
 	const name = vcard?.fn ?? vcard?.org;
 	return typeof name === "string" && name.trim() ? name.trim() : registrar?.handle;
+}
+
+function siteDns(submission: Submission | undefined): DossierSite["dns"] {
+	const dns = submission?.data.kind === "website" ? submission.data.website.whois?.dns : undefined;
+	return { a: dns?.A ?? [], aaaa: dns?.AAAA ?? [], cname: dns?.CNAME ?? [], ns: dns?.NS ?? [] };
+}
+
+function dataDestinations(submission: Submission | undefined): DossierDataDestination[] {
+	const sent = submission?.data.kind === "website" ? submission.data.website.visit?.dataSent ?? [] : [];
+	const unique = new Map<string, DossierDataDestination>();
+	for (const request of sent) {
+		const key = `${request.method} ${request.url}`;
+		const entry = unique.get(key) ?? { url: request.url, method: request.method, fields: [], sameSite: request.sameSite };
+		entry.fields = [...new Set([...entry.fields, ...request.fields])];
+		unique.set(key, entry);
+	}
+	return [...unique.values()];
 }
 
 function registeredAt(submission: Submission | undefined): string | undefined {
@@ -161,6 +186,8 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 			firstSeenAt: member.createdAt.toISOString(),
 			...(registered ? { registeredAt: registered } : {}),
 			...(registrar ? { registrar } : {}),
+			dns: siteDns(submission),
+			dataDestinations: dataDestinations(submission),
 			impersonates: [...impersonates].sort(),
 			reports,
 			evidence,
@@ -201,10 +228,12 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 	}).sort((a, b) => b.siteCount - a.siteCount || a.name.localeCompare(b.name));
 
 	const dataRequested = new Set<string>();
-	for (const indicator of indicators) {
-		const fields = indicator.evidence.matchedFields;
-		if (Array.isArray(fields)) for (const field of fields) if (typeof field === "string" && FIELD_LABELS[field]) dataRequested.add(FIELD_LABELS[field]!);
-	}
+	const requestedFields = [
+		...indicators.flatMap((indicator) => Array.isArray(indicator.evidence.matchedFields) ? indicator.evidence.matchedFields : []),
+		...sites.flatMap((site) => site.dataDestinations.flatMap((destination) => destination.fields)),
+	];
+	const fieldNames = [...new Set(requestedFields.filter((field): field is string => typeof field === "string" && Boolean(FIELD_LABELS[field])))];
+	for (const field of fieldNames) dataRequested.add(FIELD_LABELS[field]!);
 	const seen = sites.map((site) => site.firstSeenAt).sort();
 	const now = (dependencies.now ?? (() => new Date()))();
 	return {
@@ -217,6 +246,7 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 		providers,
 		impersonates: [...new Set(sites.flatMap((site) => site.impersonates))].sort(),
 		dataRequested: [...dataRequested],
+		requestedFields: fieldNames,
 	};
 }
 

@@ -15,7 +15,7 @@ export async function POST(request: Request) {
 	return operatorHandler(request, async () => {
 		if (running) return Response.json({ state: "running" }, { status: 202 });
 		running = rebuildCampaigns()
-			.then((result) => console.log(`Campaign rebuild linked ${result.linked} sites; ${result.failed.length} failed.`, result.failed.slice(0, 20)))
+			.then((result) => console.log(`Campaign rebuild linked ${result.linked} sites and described ${result.described} campaigns; ${result.failed.length} failed.`, result.failed.slice(0, 20)))
 			.catch((error) => console.error("Campaign rebuild failed:", error))
 			.finally(() => { running = undefined; });
 		return Response.json({ state: "started" }, { status: 202 });

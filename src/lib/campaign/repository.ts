@@ -5,7 +5,7 @@ import { generateId } from "../db/ids";
 import { submissions, type Submission } from "../db/schema";
 import { assignCampaigns } from "./cluster";
 import type { ExtractedIndicator } from "./indicators";
-import { campaignIndicators, campaignMembers, campaigns, kitHashChecks, type Campaign, type CampaignIndicator } from "./schema";
+import { campaignIndicators, campaignMembers, campaigns, campaignSiteFacts, kitHashChecks, type Campaign, type CampaignIndicator } from "./schema";
 
 export type CampaignMemberView = {
 	submissionId: bigint;
@@ -200,6 +200,42 @@ export const CampaignRepository = {
 			});
 		}
 		return summaries;
+	},
+
+	async saveSiteFacts(submissionId: bigint, facts: { language: string | null; thumbnailArtifactId: bigint | null }) {
+		const db = await getDb();
+		const values = { submissionId, ...facts, updatedAt: new Date() };
+		await db.insert(campaignSiteFacts).values(values).onConflictDoUpdate({ target: campaignSiteFacts.submissionId, set: values });
+	},
+
+	async listSiteFacts(submissionIds: readonly bigint[]) {
+		if (!submissionIds.length) return [];
+		const db = await getDb();
+		return db.select().from(campaignSiteFacts).where(inArray(campaignSiteFacts.submissionId, [...submissionIds])).all();
+	},
+
+	async memberCount(campaignId: bigint): Promise<number> {
+		const db = await getDb();
+		const row = db.select({ count: sql<number>`count(*)` }).from(campaignMembers).where(eq(campaignMembers.campaignId, campaignId)).get();
+		return Number(row?.count ?? 0);
+	},
+
+	async saveDescription(campaignId: bigint, description: { title: string; summary: string; siteCount: number }) {
+		const db = await getDb();
+		await db.update(campaigns)
+			.set({ title: description.title, summary: description.summary, summarySiteCount: description.siteCount, summaryGeneratedAt: new Date() })
+			.where(eq(campaigns.id, campaignId));
+	},
+
+	/** Current campaigns whose title and summary describe another number of sites than they now have. */
+	async listCampaignsNeedingDescription(): Promise<bigint[]> {
+		const db = await getDb();
+		return db
+			.select({ id: campaigns.id })
+			.from(campaigns)
+			.where(and(isNull(campaigns.mergedInto), sql`coalesce(${campaigns.summarySiteCount}, -1) <> (select count(*) from campaign_members where campaign_members.campaign_id = ${campaigns.id})`, sql`exists (select 1 from campaign_members where campaign_members.campaign_id = ${campaigns.id})`))
+			.all()
+			.map((row) => row.id);
 	},
 
 	/** Website submissions confirmed as phishing, oldest first, for a full rebuild. */

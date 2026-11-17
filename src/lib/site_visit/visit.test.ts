@@ -131,7 +131,12 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser", () => {
 			expect(live).toContainEqual({ type: "browser.download", fileName: "Verifier.zip", url: `${url}Verifier.zip` });
 			expect(live).toContainEqual({ type: "browser.action", kind: "click", text: "Submitted the sign-in form with the synthetic values" });
 			// The visit reads the element's caption in the live page.
-			expect(recording.agent.actions).toContainEqual({ id: "a2", kind: "click", text: 'Clicked "Get Verifier"', selector: "#open" });
+			// When the agent gives no time, the visit stamps the action when it first reads it.
+			expect(recording.agent.actions).toContainEqual({ id: "a2", kind: "click", text: 'Clicked "Get Verifier"', selector: "#open", at: expect.any(String) });
+			expect(recording.agent.actions.every((action) => !Number.isNaN(Date.parse(action.at!)))).toBe(true);
+			// The request that carried a value keeps the page it came from and the server's answer.
+			// The collector answered the form with a redirect: that redirect is the recorded answer.
+			expect(submitted).toMatchObject({ documentUrl: expect.stringContaining(url), requestHeaders: { "content-type": "application/x-www-form-urlencoded" }, response: { status: 302, receivedAt: expect.any(String) } });
 		} finally {
 			await archive.session?.close();
 			server.stop(true);
@@ -180,16 +185,17 @@ describe("the agent's timeline", () => {
 		const timeline = [
 			{ type: "thought", thought: { thought_id: "ot_2", thought: "The page shows a sign-in form.", thought_type: "plan", created_at: "2026-11-14T23:41:02" }, children: [] },
 			{ type: "block", block: { actions: [
-				{ action_id: "a_1", action_type: "input_text", intention: "Enter the synthetic email into Username", created_at: "2026-11-14T23:41:05" },
+				{ action_id: "a_1", action_type: "input_text", intention: "Enter the synthetic email into Username", created_at: "2026-11-14T23:41:05", text: "canary-7f3@example.test", element_id: "#username" },
 				{ action_id: "a_2", action_type: "click", reasoning: "Submit the form", created_at: "2026-11-14T23:41:07" },
 			] }, children: [{ type: "thought", thought: { thought_id: "ot_2", thought: "duplicate" } }] },
 			{ type: "thought", thought: { thought_id: "ot_1", thought: "Open the page.", thought_type: "plan", created_at: "2026-11-14T23:40:58" } },
 		];
+		// Each action keeps when it happened and, for typing, the value typed into which element.
 		expect(timelineActions(timeline)).toEqual([
-			{ id: "ot_1", kind: "plan", text: "Open the page." },
-			{ id: "ot_2", kind: "plan", text: "The page shows a sign-in form." },
-			{ id: "a_1", kind: "input_text", text: "Enter the synthetic email into Username" },
-			{ id: "a_2", kind: "click", text: "Submit the form" },
+			{ id: "ot_1", kind: "plan", text: "Open the page.", at: "2026-11-14T23:40:58" },
+			{ id: "ot_2", kind: "plan", text: "The page shows a sign-in form.", at: "2026-11-14T23:41:02" },
+			{ id: "a_1", kind: "input_text", text: "Enter the synthetic email into Username", selector: "#username", value: "canary-7f3@example.test", at: "2026-11-14T23:41:05" },
+			{ id: "a_2", kind: "click", text: "Submit the form", at: "2026-11-14T23:41:07" },
 		]);
 	});
 });
@@ -218,14 +224,16 @@ describe("the agent's task actions (Task V1 and V3)", () => {
 	test("are read as a verb and the element they acted on; actions without an id or type are dropped", () => {
 		expect(taskActions([
 			{ action_id: "act_1", action_type: "click", element_id: "[data-tv3=\"t0\"]", reasoning: null, intention: null },
-			{ action_id: "act_2", action_type: "input_text", element_id: "#phone-input" },
+			{ action_id: "act_2", action_type: "input_text", element_id: "#phone-input", text: "+4915112345678", created_at: "2026-11-15T10:00:01Z" },
 			{ action_id: "act_3", action_type: "complete" },
+			{ action_id: "act_4", action_type: "select_option", element_id: "#country", option: { label: "Deutschland", value: "DE" } },
 			{ action_type: "click" },
 			null,
 		])).toEqual([
 			{ id: "act_1", kind: "click", text: "Clicked", selector: "[data-tv3=\"t0\"]" },
-			{ id: "act_2", kind: "input_text", text: "Typed into", selector: "#phone-input" },
+			{ id: "act_2", kind: "input_text", text: "Typed into", selector: "#phone-input", value: "+4915112345678", at: "2026-11-15T10:00:01Z" },
 			{ id: "act_3", kind: "complete", text: "Finished" },
+			{ id: "act_4", kind: "select_option", text: "Selected an option in", selector: "#country", value: "Deutschland" },
 		]);
 	});
 

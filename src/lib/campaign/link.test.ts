@@ -5,8 +5,9 @@ import type { Submission } from "../db/schema";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import type { ExfiltrationBackend } from "../exfiltration/types";
 import type { WebsiteKitResource } from "../website_types";
-import { backendIndicatorValue, extractIndicators, lookupPublishedLibrary, type IndicatorDependencies } from "./indicators";
-import { linkSubmissionToCampaign, rebuildCampaigns } from "./link";
+import { backendIndicatorValue, extractIndicators, lookupPublishedLibrary } from "./indicators";
+import { describeCampaignIfChanged, linkSubmissionToCampaign, rebuildCampaigns, type LinkDependencies } from "./link";
+import type { DescribeDependencies } from "./summary";
 import { CampaignRepository } from "./repository";
 
 useTemporaryDatabase();
@@ -51,7 +52,10 @@ function website(id: bigint, host: string, kitResources: WebsiteKitResource[] = 
 }
 
 /** Stored submissions with what their investigation and capture showed. */
-function fixtures(sites: Record<string, { submission: Submission; backends?: ExfiltrationBackend[]; text?: string }>): IndicatorDependencies {
+/** The model's heading for every campaign; a test never reaches a real model. */
+const heading: DescribeDependencies = { generate: async () => ({ title: "Fake test notice campaign", summary: "Several look-alike test pages ask for passwords and run the same code, so one operator runs them." }) };
+
+function fixtures(sites: Record<string, { submission: Submission; backends?: ExfiltrationBackend[]; text?: string }>): LinkDependencies & DescribeDependencies {
 	const byId = new Map(Object.values(sites).map((site) => [site.submission.id, site]));
 	return {
 		loadSubmission: async (id) => byId.get(id)?.submission,
@@ -59,6 +63,8 @@ function fixtures(sites: Record<string, { submission: Submission; backends?: Exf
 		loadPageTexts: async (id) => byId.get(id)?.text ? [{ name: "website.mhtml", text: byId.get(id)!.text! }] : [],
 		libraryFor: async (sha256) => sha256 === JQUERY ? "gh:jquery/jquery@3.7.1/dist/jquery.min.js" : undefined,
 		loadPopularDomains: async () => new Set(["jsdelivr.net", "dhl.de"]),
+		saveThumbnail: async () => undefined,
+		...heading,
 	};
 }
 
@@ -172,8 +178,43 @@ describe("campaign grouping on record", () => {
 		const before = await Promise.all([1n, 2n, 3n].map((id) => CampaignRepository.campaignForSubmission(id)));
 
 		const result = await rebuildCampaigns(dependencies);
-		expect(result).toEqual({ linked: 3, failed: [] });
+		// The first rebuild describes both campaigns; a second one finds nothing changed.
+		expect(result).toEqual({ linked: 3, described: 2, failed: [] });
+		expect((await rebuildCampaigns(dependencies)).described).toBe(0);
 		expect(await Promise.all([1n, 2n, 3n].map((id) => CampaignRepository.campaignForSubmission(id)))).toEqual(before);
+	});
+
+	test("a linked site keeps its page language and preview; a campaign is described again only when its sites change", async () => {
+		const german = "Da die Zugänglichkeit Ihrer Seite eingeschränkt ist, bitten wir Sie, für dieses Konto höhere Sicherheitsanforderungen anzuwenden. Wir haben dieses Programm erstellt, um Ihre Seiten zu entsperren, und bitten Sie, die Daten einzugeben.";
+		const sites = {
+			a: { submission: website(1n, "a-kit-test.com"), backends: [botBackend("7001")], text: german },
+			b: { submission: website(2n, "b-kit-test.com"), backends: [botBackend("7001")] },
+			c: { submission: website(3n, "c-kit-test.com"), backends: [botBackend("7001")] },
+		};
+		await store(...Object.values(sites).map((site) => site.submission));
+		const facts: Array<{ siteCount: number; languages: string[]; links: string[] }> = [];
+		const dependencies = { ...fixtures(sites), saveThumbnail: async (id: bigint) => id * 10n, generate: async (input: { siteCount: number; languages: string[]; links: string[] }) => {
+			facts.push({ siteCount: input.siteCount, languages: input.languages, links: input.links });
+			return { title: "Fake test notice campaign", summary: "Several look-alike test pages ask for passwords and send them to one bot, so one operator runs them." };
+		} };
+		await linkSubmissionToCampaign(1n, dependencies);
+		await linkSubmissionToCampaign(2n, dependencies);
+		const campaign = (await CampaignRepository.campaignForSubmission(1n))!;
+		expect(await CampaignRepository.listSiteFacts([1n, 2n])).toEqual([
+			expect.objectContaining({ submissionId: 1n, language: "de", thumbnailArtifactId: 10n }),
+			expect.objectContaining({ submissionId: 2n, language: null, thumbnailArtifactId: 20n }),
+		]);
+
+		expect(await describeCampaignIfChanged(campaign, dependencies)).toBe(true);
+		expect(await describeCampaignIfChanged(campaign, dependencies)).toBe(false);
+		await linkSubmissionToCampaign(3n, dependencies);
+		expect(await describeCampaignIfChanged(campaign, dependencies)).toBe(true);
+		expect(facts).toEqual([
+			{ siteCount: 2, languages: ["de"], links: ["same_backend"] },
+			{ siteCount: 3, languages: ["de"], links: ["same_backend"] },
+		]);
+		expect(await CampaignRepository.getCampaign(campaign)).toMatchObject({ title: "Fake test notice campaign", summarySiteCount: 3 });
+		expect(await describeCampaignIfChanged(999n, dependencies)).toBe(false);
 	});
 
 	test("a site whose extraction fails keeps what is on record and is reported", async () => {

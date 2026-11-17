@@ -202,7 +202,7 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 				const known = new Set(actions.map((action) => action.id));
 				for (const action of await agent.actions(runId).catch(() => [])) {
 					if (known.has(action.id)) continue;
-					const read = await described(page, action);
+					const read = await described(page, { ...action, at: action.at ?? new Date().toISOString() });
 					actions.push(read);
 					live({ type: "browser.action", kind: read.kind, text: read.text });
 				}
@@ -227,7 +227,7 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 		}
 		if (runId) {
 			const known = new Set(actions.map((action) => action.id));
-			for (const action of await agent.actions(runId).catch(() => [])) if (!known.has(action.id)) actions.push(await described(page, action));
+			for (const action of await agent.actions(runId).catch(() => [])) if (!known.has(action.id)) actions.push(await described(page, { ...action, at: action.at ?? new Date().toISOString() }));
 		}
 		// The page the walk ended on is a step of its own, whatever the quiet period.
 		await recordStep(true);

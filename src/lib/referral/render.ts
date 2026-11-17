@@ -166,6 +166,6 @@ export function dossierText(dossier: Dossier): string {
 		"Ermittlungsansätze bei den Anbietern",
 		...providerLines(dossier.providers),
 		"",
-		"Beweismittel je Website: MHTML-Mitschnitt, Bildschirmfoto, Bildschirmfoto mit eingeblendeter URL und Zeit, Manifest mit SHA-256 aller Dateien und RFC-3161-Zeitstempel einer unabhängigen Zeitstempelstelle über das Manifest. Die Prüfsummen stehen in Websites.csv.",
+		"Beweismittel je Website: MHTML-Mitschnitt, Bildschirmfoto, Bildschirmfoto mit eingeblendeter URL und Zeit, Manifest mit SHA-256 aller Dateien und RFC-3161-Zeitstempel einer unabhängigen Zeitstempelstelle über das Manifest. Wo die Seite mit synthetischen Werten durchlaufen wurde, zusätzlich das zeitgestempelte Besuchsprotokoll (visit-protocol.txt, visit-record.json, visit-manifest.json, visit-manifest.tsr): welcher Wert wann in welches Feld eingegeben wurde und welche Anfrage ihn wohin übertrug, mit vollständigem Inhalt und der Antwort des Servers. Die Prüfsummen stehen in Websites.csv.",
 	].filter((line, index, lines) => line !== "" || lines[index - 1] !== "").join("\n").trim();
 }

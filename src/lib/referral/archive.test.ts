@@ -17,6 +17,7 @@ const dossier: Dossier = {
 	lastSeenAt: "2026-11-12T08:00:00.000Z",
 	impersonates: ["www.dhl.de"],
 	dataRequested: ["Passwort"],
+	requestedFields: ["password"],
 	providers: [{ name: "Hostinger International Ltd.", siteCount: 1, contacts: ["abuse@hostinger.com"] }],
 	indicators: [{ kind: "exfiltration_backend", value: "telegram-bot:7001", links: true, evidence: { backendKind: "telegram_bot", telegram: { token: "7001:AAE", chatId: "-1" } }, sites: ["https://dhl-a.com/"] }],
 	sites: [{
@@ -25,6 +26,8 @@ const dossier: Dossier = {
 		host: "dhl-a.com",
 		firstSeenAt: "2026-11-10T08:00:00.000Z",
 		impersonates: ["www.dhl.de"],
+		dns: { a: ["203.0.113.7"], aaaa: [], cname: [], ns: [] },
+		dataDestinations: [{ url: "https://dhl-a.com/api/send", method: "POST", fields: ["password"], sameSite: true }],
 		reports: [{ provider: "Hostinger International Ltd.", target: "dhl-a.com", channel: "email", contact: "abuse@hostinger.com", status: "acknowledged", reportedAt: "2026-11-10T09:00:00.000Z" }],
 		evidence: [
 			{ artifactId: "1", name: "website.mhtml", kind: "website_mhtml", sha256: sha(mhtml), size: mhtml.length },

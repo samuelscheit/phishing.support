@@ -26,7 +26,7 @@ import { releaseAfterFailedInvestigation, runReportInvestigation } from "../inve
 import { setInvestigationStatus } from "../investigation/status";
 import { followUpProviderDecision, readDecisionFollowUpPayload } from "./followup/decision";
 import { startSamplePurgeSchedule } from "../exfiltration/downloads/sample_purge_job";
-import { linkSubmissionToCampaign } from "../campaign/link";
+import { describeCampaignIfChanged, linkSubmissionToCampaign } from "../campaign/link";
 
 const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;
@@ -74,6 +74,8 @@ const EXTERNAL_JOB_TYPES = [
 	"discover_kit_siblings",
 	"analyze_kit_sibling",
 	"watch_redirector",
+	// Writes a campaign's public title and summary with the model.
+	"describe_campaign",
 ] as const satisfies readonly AbuseJobType[];
 
 /**
@@ -523,8 +525,22 @@ export class AbuseWorker {
 			case "watch_redirector":
 				await watchRedirector({ job, signal });
 				return;
-			case "link_campaign":
-				await linkSubmissionToCampaign(parseJobBigInt(job.payload?.submissionId, "payload.submissionId"));
+			case "link_campaign": {
+				const campaignId = await linkSubmissionToCampaign(parseJobBigInt(job.payload?.submissionId, "payload.submissionId"));
+				// Sites of one campaign arrive in bursts: describe it once the burst settles.
+				if (campaignId !== undefined) {
+					await AbuseRepository.enqueueJob({
+						jobType: "describe_campaign",
+						reportId: idFrom(job.reportId, "reportId"),
+						payload: { campaignId: campaignId.toString() },
+						dedupeKey: `campaign-describe:${campaignId.toString()}`,
+						nextAttemptAt: new Date(Date.now() + 5 * 60_000),
+					});
+				}
+				return;
+			}
+			case "describe_campaign":
+				await describeCampaignIfChanged(parseJobBigInt(job.payload?.campaignId, "payload.campaignId"));
 				return;
 			default:
 				throw new Error(`Unsupported abuse job type ${job.jobType}.`);

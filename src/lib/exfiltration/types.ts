@@ -14,6 +14,12 @@ export type CapturedNetworkRequest = {
 	resourceType?: string;
 	postData?: string;
 	webSocketPayload?: string;
+	/** The page or frame the request was sent from. */
+	documentUrl?: string;
+	/** The headers that show how the data was sent: content type, origin, referrer. */
+	requestHeaders?: Record<string, string>;
+	/** The server's answer, when one arrived while the visit was recorded. */
+	response?: { status: number; statusText?: string; receivedAt: string; remoteAddress?: string; mimeType?: string };
 };
 
 export type ExfiltrationBackend = {

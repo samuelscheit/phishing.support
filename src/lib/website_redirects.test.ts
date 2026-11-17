@@ -175,8 +175,8 @@ describe("website redirects", () => {
 		expect(archiveCalls[1]).toMatchObject({ url: kitStart, archivedUrl: kitPage, mhtmlSnapshot: MHTML, kitResources });
 		// The kit's captured file hashes move with the capture, so its case can search for siblings.
 		expect(childWebsite?.kitResources).toEqual(kitResources);
-		// The capture moves with its evidence package: the stamped screenshot and the manifest.
-		expect((await ArtifactsEntity.listForSubmission(childId)).map((artifact) => artifact.name).sort()).toEqual(["evidence-manifest.json", "website-stamped.png", "website.mhtml", "website.png"]);
+		// The capture moves with its evidence package (the stamped screenshot and the manifest) and the visit's record.
+		expect((await ArtifactsEntity.listForSubmission(childId)).map((artifact) => artifact.name).sort()).toEqual(["evidence-manifest.json", "visit-manifest.json", "visit-protocol.txt", "visit-record.json", "website-stamped.png", "website.mhtml", "website.png"]);
 
 		const report = await AbuseRepository.getReportForSubmission(childId);
 		const targets = await AbuseRepository.listTargets(report!.id);

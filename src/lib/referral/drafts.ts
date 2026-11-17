@@ -56,7 +56,7 @@ function campaignSummary(dossier: Dossier, sites: readonly DossierSite[]): strin
 function evidenceParagraph(download: DraftContext["download"]): string[] {
 	return [
 		"Beweismittel",
-		"Für jede Website liegen ein MHTML-Mitschnitt, ein Bildschirmfoto mit eingeblendeter URL und Uhrzeit, ein Manifest mit den SHA-256-Prüfsummen aller Dateien und ein RFC-3161-Zeitstempel einer unabhängigen Zeitstempelstelle über dieses Manifest vor. Die Prüfsummen stehen in der Anlage Websites.csv; die Dateien selbst können Sie hier als ZIP-Archiv herunterladen:",
+		"Für jede Website liegen ein MHTML-Mitschnitt, ein Bildschirmfoto mit eingeblendeter URL und Uhrzeit, ein Manifest mit den SHA-256-Prüfsummen aller Dateien und ein RFC-3161-Zeitstempel einer unabhängigen Zeitstempelstelle über dieses Manifest vor. Wo unser Browser die Seite mit synthetischen Werten durchlaufen hat, belegt ein ebenso zeitgestempeltes Besuchsprotokoll (visit-protocol.txt, visit-record.json), welcher Wert wann in welches Feld eingegeben wurde und welche Anfrage ihn wohin übertrug, mit vollständigem Inhalt und der Antwort des Servers. Die Prüfsummen stehen in der Anlage Websites.csv; die Dateien selbst können Sie hier als ZIP-Archiv herunterladen:",
 		download.url,
 		`(Der Link ist bis ${germanDate(download.expiresAt.toISOString())} gültig. Auf Wunsch übermitteln wir die Dateien auch auf anderem Weg.)`,
 	];

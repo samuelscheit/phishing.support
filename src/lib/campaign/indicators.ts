@@ -53,7 +53,7 @@ async function loadReportedBackends(submissionId: bigint) {
 }
 
 /** Each captured page of the case as a visitor reads it; a capture that cannot be read is skipped. */
-async function loadCapturedPageTexts(submissionId: bigint) {
+export async function loadCapturedPageTexts(submissionId: bigint) {
 	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
 	const texts: Array<{ name: string; text: string }> = [];
 	for (let step = 0; step < 20; step += 1) {

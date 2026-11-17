@@ -2,6 +2,8 @@ import { reporterBrowserIdentity } from "./browser/reporter_identity";
 import { archiveWebsite, isBrowserInfrastructureFailure, type ArchiveWebsiteOptions, type WebsitePageSession, type WebsiteVerificationGate } from "./website_archive";
 import { errorText } from "./error_text";
 import { buildWebsiteEvidence, type WebsiteEvidencePackage } from "./evidence/package";
+import { buildVisitEvidence } from "./evidence/visit";
+import { WEBSITE_DEVICE_LABEL } from "./website_types";
 import type { timestampEvidence } from "./evidence/timestamp";
 import { SubmissionsEntity, ArtifactsEntity } from "./db/entities";
 import type { WebsiteSubmissionData } from "./db/schema";
@@ -166,6 +168,45 @@ async function websiteEvidence(
 	}, dependencies.timestampEvidence ? { timestamp: dependencies.timestampEvidence } : {});
 }
 
+/**
+ * Keep the visit as timestamped evidence next to the case's captures: the
+ * synthetic values, what the agent typed where, the pages shown, and every
+ * request that carried a value with the server's answer.
+ */
+async function saveVisitEvidence(params: {
+	submissionId: bigint;
+	url: string;
+	device?: WebsiteDevice;
+	recording: SiteVisitRecording<WebsiteCapture>;
+	pages: ReadonlyArray<VisitPage<WebsiteCapture>>;
+	canaries: ExfiltrationCanaries;
+	dependencies: WebsiteAnalysisDependencies;
+}): Promise<void> {
+	const { recording } = params;
+	const endedAt = new Date();
+	const evidence = await buildVisitEvidence({
+		caseId: params.submissionId.toString(),
+		submittedUrl: params.url,
+		startedAt: recording.startedAt,
+		endedAt,
+		environment: {
+			device: WEBSITE_DEVICE_LABEL[params.device ?? "desktop"],
+			...(process.env.FABRIC_PHISHING_EGRESS_POLICY_REF ? { egress: `Browser Fabric egress policy ${process.env.FABRIC_PHISHING_EGRESS_POLICY_REF}` } : {}),
+			agent: "Skyvern",
+			...(recording.agent.runId ? { agentRunId: recording.agent.runId } : {}),
+			agentOutcome: recording.agent.outcome,
+		},
+		syntheticValues: params.canaries,
+		actions: recording.agent.actions,
+		pages: params.pages.map((page) => ({ url: page.archive.url, shownFrom: page.shownFrom, ...(page.shownUntil ? { shownUntil: page.shownUntil } : {}) })),
+		requests: recording.requests,
+		backends: discoverExfiltrationBackends({ requests: recording.requests, canaries: params.canaries, pageUrl: params.url }),
+	}, params.dependencies.timestampEvidence ? { timestamp: params.dependencies.timestampEvidence } : {});
+	for (const file of evidence.files) {
+		await ArtifactsEntity.saveBuffer({ submissionId: params.submissionId, name: file.name, kind: "website_evidence", mimeType: file.mimeType, archivedAt: endedAt, buffer: file.bytes });
+	}
+}
+
 /** Every page's kit files, once per hash. */
 function mergedKitResources(...captures: WebsiteCapture[]): WebsiteKitResource[] {
 	return captures.flatMap((capture) => capture.kitResources ?? [])
@@ -263,6 +304,8 @@ async function visitWebsite(params: {
 
 	const pages = visitPages<WebsiteCapture>(first, recording, canaries);
 	const record = visitRecord(recording, pages);
+	// A visit that walked the live site is evidence of how the values were entered and where they went.
+	if (session) await saveVisitEvidence({ submissionId, url, device: first.device, recording, pages, canaries, dependencies });
 	const dataDrops = pages.flatMap((page) => page.dataSent.filter((sent) => !sent.sameSite));
 	const backends = discoverExfiltrationBackends({ requests: recording.requests, canaries, pageUrl: url });
 	const base = { dataDrops, backends, requests: recording.requests, canaries, record };

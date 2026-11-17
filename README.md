@@ -131,7 +131,24 @@ Providers always see the service identity defined in `src/lib/constants.ts` (Phi
 
 Takedown alone does not stop an operator, and a single phishing site with an unknown operator is closed by any prosecutor. Authorities act on a case that ties many sites to one operator, so every confirmed website is grouped into a **campaign** by what only one operator has: the Telegram bot, Discord webhook or collector host its visit sent the synthetic values to, an IBAN or crypto address the page names (checksums verified), or a script/hidden-frame file of the kit itself. A kit file counts only when it is at least 1 KiB, not served from a top-ranked site, and not a published library file (checked by SHA-256 against jsDelivr). The server IP is recorded but never links sites. Grouping runs after every report resolution; `/operator/campaigns` can rebuild all campaigns.
 
-A campaign page (`/operator/campaigns/<id>`, behind HTTP Basic auth with `OPERATOR_PASSWORD`) drafts, for one authority at a time:
+Every campaign has a public page, `/campaigns/<id>`, that the submission list links as one tile per campaign. It is built from stored data for every campaign alike:
+
+- a title and summary the model writes from the sites' analyses (with a fixed-wording fallback), rewritten when sites join;
+- each page with a preview cut to what the page drew, its language and its takedown history;
+- why the pages are one operator's, from the indicators that hold;
+- the technical record: where entered data went, bot tokens and accounts exactly as the kit published them, kit files, DNS, every report with its ticket, and every evidence file with its SHA-256;
+- `/campaigns/<id>/evidence.zip`, the whole dossier with its files.
+
+**Visit evidence.** When the visiting agent walks a site with synthetic values, the case keeps a timestamped record for use in court:
+
+- `visit-record.json`: the synthetic values, each agent action with what it typed into which element and when, the pages shown, and every request the browser sent, with its body, the page that sent it, its headers and the server's answer;
+- `visit-protocol.txt`: the same as a dated chronology;
+- `visit-manifest.json`: both files by SHA-256;
+- `visit-manifest.tsr`: an RFC 3161 token over the manifest.
+
+Nothing is injected into the page; only CDP's Network domain is used, because enabling Runtime is what anti-bot kits detect.
+
+A campaign's operator page (`/operator/campaigns/<id>`, behind HTTP Basic auth with `OPERATOR_PASSWORD`) drafts, for one authority at a time:
 
 - a **criminal complaint against persons unknown**, with every site, its takedown reports, the linking indicators, how an investigator reaches each provider's records, a signed download link for the evidence archive, and `Websites.csv`/`Merkmale.csv` attached;
 - a **supplement** with only the sites the authority has not received, under its file number;

@@ -1,60 +1,259 @@
-import { buildDossier, type DossierDependencies, type DossierIndicator } from "../referral/dossier";
+import { getDomain } from "tldts";
+
+import { buildDossier, type Dossier, type DossierDependencies, type DossierSite } from "../referral/dossier";
+import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
+import { factsFromDossier } from "./link";
 import { CampaignRepository } from "./repository";
+import { fallbackDescription } from "./summary";
 
 /**
- * What the public campaign page shows: every site with its takedown state
- * and what links the sites. It is the authority's dossier without what must
- * stay with the authority: a bot's token and chat (anyone could take over or
- * spam the bot, and the operator would learn it is known), a payment account
- * (it often belongs to a mule who is a victim too), the server addresses and
- * the evidence files.
+ * Everything the public page of a campaign shows, derived from stored data
+ * for every campaign alike: a heading written from the sites' analyses, the
+ * sites with previews and takedown history, why they belong together, and
+ * the full technical record: everything the authorities get, including the
+ * bot tokens and accounts the operators published on their own pages.
  */
+export type PublicReportState = "accepted" | "awaiting" | "confirmed" | "rejected" | "bounced" | "failed" | "pending";
+
 export type PublicCampaignSite = {
 	submissionId: string;
 	url: string;
+	host: string;
 	firstSeenAt: string;
-	takedown: Array<{ provider: string; status: string }>;
+	language?: string;
+	thumbnailUrl?: string;
+	screenshotUrl?: string;
+	asks: string[];
+	reports: Array<{ provider: string; channel: string; state: PublicReportState; reportedAt?: string; ticket?: string }>;
+	evidence: Array<{ name: string; size: number; sha256: string; url: string }>;
+	/** The furthest any provider got: confirmed, reported, or not reported yet. */
+	takedown: "confirmed" | "reported" | "problem" | "none";
 };
 
-export type PublicCampaignLink = { kind: DossierIndicator["kind"]; label: string; siteCount: number };
+export type PublicCampaignReason = { kind: "same_code" | "same_backend" | "same_payment_account" | "same_pattern"; title: string; text: string };
 
 export type PublicCampaign = {
 	campaignId: string;
+	title: string;
+	summary: string;
 	firstSeenAt: string;
 	lastSeenAt: string;
-	impersonates: string[];
+	durationMinutes: number;
+	/** The usual gap between two new sites, when there are at least three. */
+	typicalIntervalMinutes?: number;
+	/** The platform every site is a subdomain of, e.g. `onrender.com`. */
+	platform?: string;
+	domainCount: number;
+	reportedCount: number;
+	confirmedCount: number;
+	languages: string[];
 	sites: PublicCampaignSite[];
-	links: PublicCampaignLink[];
+	reasons: PublicCampaignReason[];
+	technical: {
+		destinations: Array<{ endpoint: string; method: string; fields: string[]; sameSite: boolean; siteCount: number }>;
+		backends: Array<{ kind: string; label: string; details: Array<[string, string]>; siteCount: number }>;
+		payments: Array<{ kind: string; value: string; siteCount: number }>;
+		kitFiles: Array<{ sha256: string; size: number; path: string; siteCount: number }>;
+		dns: Array<{ record: string; value: string; siteCount: number }>;
+		abuseContacts: string[];
+	};
 };
 
-function publicLabel(indicator: DossierIndicator): string {
-	if (indicator.kind === "exfiltration_backend") {
-		if (indicator.evidence.backendKind === "telegram_bot") return "The same Telegram bot receives what visitors enter";
-		if (indicator.evidence.backendKind === "discord_webhook") return "The same Discord webhook receives what visitors enter";
-		return `The same collector host receives what visitors enter: ${indicator.value.replace(/^collector-host:/, "")}`;
-	}
-	if (indicator.kind === "payment_receiver") return "The same payment account is named to visitors";
-	return `The same kit file (SHA-256 ${indicator.value})`;
+const DELIVERED = new Set(["submitted", "acknowledged", "awaiting_provider_reply"]);
+const STATE: Record<string, PublicReportState> = {
+	submitted: "accepted",
+	awaiting_provider_reply: "awaiting",
+	acknowledged: "confirmed",
+	provider_rejected: "rejected",
+	delivery_failed: "bounced",
+	failed: "failed",
+	unknown_external_state: "failed",
+};
+
+const artifactUrl = (id: string) => `/api/artifacts/${id}`;
+
+function minutes(from: string, to: string): number {
+	return Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 60_000));
 }
 
-/** The public view of a campaign, or undefined when it has no sites (merged or emptied). */
+function median(values: number[]): number | undefined {
+	if (!values.length) return undefined;
+	const sorted = [...values].sort((a, b) => a - b);
+	return sorted[Math.floor(sorted.length / 2)];
+}
+
+function duration(value: number): string {
+	if (value < 120) return `${value} minutes`;
+	if (value < 72 * 60) return `${Math.round(value / 60)} hours`;
+	return `${Math.round(value / 1_440)} days`;
+}
+
+/** The newest stored file of each name: a retried capture replaces the earlier one. */
+function latestEvidence(site: DossierSite) {
+	const byName = new Map<string, DossierSite["evidence"][number]>();
+	for (const file of site.evidence) {
+		const existing = byName.get(file.name);
+		if (!existing || BigInt(file.artifactId) > BigInt(existing.artifactId)) byName.set(file.name, file);
+	}
+	return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function takedownOf(reports: PublicCampaignSite["reports"]): PublicCampaignSite["takedown"] {
+	if (reports.some((report) => report.state === "confirmed")) return "confirmed";
+	if (reports.some((report) => report.state === "accepted" || report.state === "awaiting")) return "reported";
+	if (reports.length) return "problem";
+	return "none";
+}
+
+function count<T>(items: readonly T[], key: (item: T) => string[]): Array<[string, number]> {
+	const counts = new Map<string, number>();
+	for (const item of items) for (const value of new Set(key(item))) counts.set(value, (counts.get(value) ?? 0) + 1);
+	return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+function backendDetails(evidence: Record<string, unknown>, value: string): { kind: string; label: string; details: Array<[string, string]> } {
+	const record = (entry: unknown) => (entry && typeof entry === "object" ? entry as Record<string, unknown> : {});
+	const text = (entry: unknown) => (typeof entry === "string" && entry ? entry : undefined);
+	if (evidence.backendKind === "telegram_bot") {
+		const telegram = record(evidence.telegram);
+		const details: Array<[string, string | undefined]> = [["Bot ID", value.replace(/^telegram-bot:/, "")], ["Bot username", text(telegram.username) && `@${telegram.username}`], ["Chat ID", text(telegram.chatId)], ["Token", text(telegram.token)], ["Endpoint", text(evidence.endpointUrl)]];
+		return { kind: "telegram_bot", label: "Telegram bot", details: details.filter((entry): entry is [string, string] => Boolean(entry[1])) };
+	}
+	if (evidence.backendKind === "discord_webhook") {
+		const discord = record(evidence.discord);
+		const details: Array<[string, string | undefined]> = [["Webhook ID", value.replace(/^discord-webhook:/, "")], ["Server ID", text(discord.guildId)], ["Channel ID", text(discord.channelId)], ["Webhook name", text(discord.name)], ["Token", text(discord.token)], ["Endpoint", text(evidence.endpointUrl)]];
+		return { kind: "discord_webhook", label: "Discord webhook", details: details.filter((entry): entry is [string, string] => Boolean(entry[1])) };
+	}
+	const details: Array<[string, string | undefined]> = [["Host", value.replace(/^collector-host:/, "")], ["Endpoint", text(evidence.endpointUrl)]];
+	return { kind: "collector_host", label: "Collector server", details: details.filter((entry): entry is [string, string] => Boolean(entry[1])) };
+}
+
+/** Why the sites are one operator's, in plain words, from the indicators that hold. */
+function reasons(dossier: Dossier, stats: { platform?: string; durationMinutes: number; typicalIntervalMinutes?: number }): PublicCampaignReason[] {
+	const shared = dossier.indicators.filter((indicator) => indicator.links && indicator.sites.length > 1);
+	const all = dossier.sites.length;
+	const result: PublicCampaignReason[] = [];
+	const kit = shared.filter((indicator) => indicator.kind === "kit_fingerprint");
+	if (kit.length) {
+		const widest = Math.max(...kit.map((indicator) => indicator.sites.length));
+		result.push({ kind: "same_code", title: "Same code", text: `${widest === all ? "Every page runs" : `${widest} of the ${all} pages run`} the same program ${kit.length === 1 ? "file" : `files (${kit.length})`}, byte for byte. A copied design would not match this exactly, and none of these files is a public library.` });
+	}
+	const backend = shared.filter((indicator) => indicator.kind === "exfiltration_backend");
+	if (backend.length) {
+		const names = backend.map((indicator) => backendDetails(indicator.evidence, indicator.value).label.toLowerCase());
+		result.push({ kind: "same_backend", title: "Same receiver", text: `What visitors enter goes to the same ${[...new Set(names)].join(" and ")} from ${Math.max(...backend.map((indicator) => indicator.sites.length))} pages. Only whoever controls it receives the stolen data.` });
+	}
+	if (shared.some((indicator) => indicator.kind === "payment_receiver")) {
+		result.push({ kind: "same_payment_account", title: "Same payment account", text: "The pages ask visitors to pay into the same account." });
+	}
+	if (all >= 3 && stats.typicalIntervalMinutes !== undefined && stats.durationMinutes <= 7 * 1_440) {
+		result.push({ kind: "same_pattern", title: "Same pattern", text: `${all} pages${stats.platform ? ` on ${stats.platform}` : ""} within ${duration(stats.durationMinutes)}, a new one about every ${duration(stats.typicalIntervalMinutes)}.` });
+	}
+	return result;
+}
+
 export async function getPublicCampaign(campaignId: bigint, dependencies: DossierDependencies = {}): Promise<PublicCampaign | undefined> {
-	if (!await CampaignRepository.getCampaign(campaignId)) return undefined;
+	const campaign = await CampaignRepository.getCampaign(campaignId);
+	if (!campaign) return undefined;
 	const dossier = await buildDossier(campaignId, dependencies);
 	if (!dossier.sites.length) return undefined;
-	return {
-		campaignId: dossier.campaignId,
-		firstSeenAt: dossier.firstSeenAt,
-		lastSeenAt: dossier.lastSeenAt,
-		impersonates: dossier.impersonates,
-		sites: dossier.sites.map((site) => ({
+	const siteFacts = new Map((await CampaignRepository.listSiteFacts(dossier.sites.map((site) => BigInt(site.submissionId)))).map((facts) => [facts.submissionId.toString(), facts]));
+
+	const sites: PublicCampaignSite[] = dossier.sites.map((site) => {
+		const facts = siteFacts.get(site.submissionId);
+		const evidence = latestEvidence(site);
+		const screenshot = evidence.find((file) => file.name === "website-stamped.png") ?? evidence.find((file) => file.name === "website.png");
+		const reports = site.reports.map((report) => ({
+			provider: report.provider,
+			channel: report.channel === "email" ? report.contact ?? "email" : report.channel === "form" ? "web form / API" : "none",
+			state: STATE[report.status] ?? "pending",
+			...(report.reportedAt ? { reportedAt: report.reportedAt } : {}),
+			...(report.confirmationId ? { ticket: report.confirmationId } : {}),
+		}));
+		return {
 			submissionId: site.submissionId,
 			url: site.url,
+			host: site.host,
 			firstSeenAt: site.firstSeenAt,
-			takedown: site.reports.map((report) => ({ provider: report.provider, status: report.status })),
-		})),
-		links: dossier.indicators
-			.filter((indicator) => indicator.links && indicator.sites.length > 1)
-			.map((indicator) => ({ kind: indicator.kind, label: publicLabel(indicator), siteCount: indicator.sites.length })),
+			...(facts?.language ? { language: facts.language } : {}),
+			...(facts?.thumbnailArtifactId ? { thumbnailUrl: artifactUrl(facts.thumbnailArtifactId.toString()) } : {}),
+			...(screenshot ? { screenshotUrl: artifactUrl(screenshot.artifactId) } : {}),
+			asks: [...new Set(site.dataDestinations.flatMap((destination) => destination.fields))].map((field) => CANARY_FIELD_LABEL[field as CanaryField] ?? field),
+			reports,
+			evidence: evidence.map((file) => ({ name: file.name, size: file.size, sha256: file.sha256, url: artifactUrl(file.artifactId) })),
+			takedown: takedownOf(reports),
+		};
+	});
+
+	const times = [...new Set(sites.map((site) => site.firstSeenAt))].sort();
+	const gaps = times.slice(1).map((time, index) => minutes(times[index]!, time)).filter((gap) => gap > 0);
+	const durationMinutes = minutes(dossier.firstSeenAt, dossier.lastSeenAt);
+	const typicalIntervalMinutes = sites.length >= 3 ? median(gaps) : undefined;
+	const domains = new Set(sites.map((site) => getDomain(site.host, { allowPrivateDomains: false }) ?? site.host));
+	const platform = domains.size === 1 && sites.every((site) => site.host !== [...domains][0]) ? [...domains][0] : undefined;
+	const stats = { platform, durationMinutes, ...(typicalIntervalMinutes !== undefined ? { typicalIntervalMinutes } : {}) };
+
+	const shared = dossier.indicators.filter((indicator) => indicator.links);
+	const destinations = new Map<string, PublicCampaign["technical"]["destinations"][number]>();
+	for (const site of dossier.sites) {
+		for (const destination of site.dataDestinations) {
+			let endpoint = destination.url;
+			if (destination.sameSite) {
+				try {
+					endpoint = `https://<site>${new URL(destination.url).pathname}`;
+				} catch {
+					// Keep the redacted URL as it is.
+				}
+			}
+			const key = `${destination.method} ${endpoint}`;
+			const entry = destinations.get(key) ?? { endpoint, method: destination.method, fields: [], sameSite: destination.sameSite, siteCount: 0 };
+			entry.fields = [...new Set([...entry.fields, ...destination.fields.map((field) => CANARY_FIELD_LABEL[field as CanaryField] ?? field)])];
+			entry.siteCount += 1;
+			destinations.set(key, entry);
+		}
+	}
+	const dnsRecords: PublicCampaign["technical"]["dns"] = [];
+	for (const [record, key] of [["CNAME", "cname"], ["A", "a"], ["AAAA", "aaaa"], ["NS", "ns"]] as const) {
+		for (const [value, siteCount] of count(dossier.sites, (site) => site.dns[key])) dnsRecords.push({ record, value, siteCount });
+	}
+	const description = campaign.title && campaign.summary
+		? { title: campaign.title, summary: campaign.summary }
+		: fallbackDescription(factsFromDossier(dossier, [...siteFacts.values()].map((facts) => facts.language)));
+
+	return {
+		campaignId: dossier.campaignId,
+		...description,
+		firstSeenAt: dossier.firstSeenAt,
+		lastSeenAt: dossier.lastSeenAt,
+		...stats,
+		domainCount: domains.size,
+		reportedCount: dossier.sites.filter((site) => site.reports.some((report) => DELIVERED.has(report.status))).length,
+		confirmedCount: dossier.sites.filter((site) => site.reports.some((report) => report.status === "acknowledged")).length,
+		languages: [...new Set(sites.map((site) => site.language).filter((language): language is string => Boolean(language)))],
+		sites,
+		reasons: reasons(dossier, stats),
+		technical: {
+			destinations: [...destinations.values()],
+			backends: shared.filter((indicator) => indicator.kind === "exfiltration_backend").map((indicator) => ({
+				...backendDetails(indicator.evidence, indicator.value),
+				siteCount: indicator.sites.length,
+			})),
+			payments: shared.filter((indicator) => indicator.kind === "payment_receiver").map((indicator) => ({
+				kind: String(indicator.evidence.receiverKind ?? "account"),
+				value: String(indicator.evidence.receiver ?? indicator.value.replace(/^[a-z]+:/, "")),
+				siteCount: indicator.sites.length,
+			})),
+			kitFiles: dossier.indicators.filter((indicator) => indicator.kind === "kit_fingerprint" && indicator.links).map((indicator) => {
+				let path = String(indicator.evidence.url ?? "");
+				try {
+					path = new URL(path).pathname;
+				} catch {
+					// Keep what was stored.
+				}
+				return { sha256: indicator.value, size: Number(indicator.evidence.size ?? 0), path, siteCount: indicator.sites.length };
+			}).sort((a, b) => b.siteCount - a.siteCount || b.size - a.size),
+			dns: dnsRecords,
+			abuseContacts: [...new Set(dossier.sites.flatMap((site) => site.reports.map((report) => report.contact).filter((contact): contact is string => Boolean(contact))))].sort(),
+		},
 	};
 }

@@ -2,7 +2,7 @@ import { InferSelectModel, sql } from "drizzle-orm";
 import { index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 import { submissions } from "../db/schema";
-import { sqliteBigint, sqliteTimestamp } from "../db/sqlite_types";
+import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "../db/sqlite_types";
 
 /**
  * What a confirmed site shows about who runs it.
@@ -22,6 +22,13 @@ export const campaigns = sqliteTable(
 		id: sqliteBigint("id").primaryKey(),
 		/** Set when another campaign absorbed this one; its referrals stay on record under the old id. */
 		mergedInto: sqliteBigint("merged_into"),
+		/** What the public page calls the campaign, written from its sites' analyses. */
+		title: text("title"),
+		/** Two or three plain sentences: what the sites do, to whom, and why they are one operator's. */
+		summary: text("summary"),
+		/** How many sites the title and summary describe; a different count means they are rewritten. */
+		summarySiteCount: sqliteInteger("summary_site_count"),
+		summaryGeneratedAt: sqliteTimestamp("summary_generated_at"),
 		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
 		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
@@ -40,6 +47,25 @@ export const campaignMembers = sqliteTable(
 		joinedAt: sqliteTimestamp("joined_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [index("campaign_members_campaign_idx").on(table.campaignId, table.joinedAt)],
+);
+
+/**
+ * What the public page shows of one site beyond its submission: the
+ * language its captured page spoke and a screenshot cut to the page's
+ * content. Kept apart from membership, which a regrouping rewrites.
+ */
+export const campaignSiteFacts = sqliteTable(
+	"campaign_site_facts",
+	{
+		submissionId: sqliteBigint("submission_id")
+			.primaryKey()
+			.references(() => submissions.id, { onDelete: "cascade" }),
+		/** ISO 639-1 code of the captured page's language, when the text was long enough to tell. */
+		language: text("language"),
+		/** The trimmed screenshot artifact of the analyzed page. */
+		thumbnailArtifactId: sqliteBigint("thumbnail_artifact_id"),
+		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
+	},
 );
 
 export type CampaignIndicatorEvidence = Record<string, unknown>;

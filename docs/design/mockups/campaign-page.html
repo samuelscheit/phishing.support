@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup – Phishing campaign page</title>
+<style>
+	:root {
+		--bg: #fafafa; --card: #fff; --fg: #0a0a0a; --muted: #6b7280; --line: #e5e7eb;
+		--red: #dc2626; --red-bg: #fef2f2; --amber: #b45309; --amber-bg: #fffbeb; --green: #047857; --green-bg: #ecfdf5;
+		--blue: #2563eb;
+	}
+	* { box-sizing: border-box; }
+	/* `hidden` must win over a class's display, or the view switch shows both views */
+	[hidden] { display: none !important; }
+	body { margin: 0; font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); }
+	main { max-width: 1080px; margin: 0 auto; padding: 32px 20px 64px; }
+	a { color: inherit; }
+	.crumb { display: block; font-size: 13px; color: var(--muted); text-decoration: none; }
+	.eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--red); background: var(--red-bg); border: 1px solid #fecaca; border-radius: 999px; padding: 2px 10px; margin-top: 20px; }
+	h1 { font-size: 34px; line-height: 1.15; letter-spacing: -.02em; margin: 12px 0 10px; }
+	.lead { font-size: 17px; color: #374151; max-width: 760px; margin: 0; }
+	.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 28px 0 8px; }
+	.stat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+	.stat b { display: block; font-size: 24px; letter-spacing: -.01em; }
+	.stat span { font-size: 13px; color: var(--muted); }
+	section { margin-top: 40px; }
+	h2 { font-size: 20px; margin: 0 0 4px; }
+	.sub { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+	/* timeline */
+	.timeline { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px 14px; }
+	.axis { position: relative; height: 44px; margin: 0 8px; }
+	.axis::before { content: ""; position: absolute; left: 0; right: 0; top: 18px; height: 2px; background: var(--line); }
+	.dot { position: absolute; top: 11px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--red); border: 3px solid #fff; box-shadow: 0 0 0 1px #fca5a5; cursor: pointer; }
+	.dot.stack { top: -3px; }
+	.dot:hover, .dot:focus-visible { transform: scale(1.25); outline: none; }
+	.ticks { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin: 0 8px; }
+	/* gallery */
+	.toolbar { display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+	.seg { display: inline-flex; background: #f3f4f6; border-radius: 10px; padding: 3px; }
+	.seg button { border: 0; background: transparent; font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 8px; cursor: pointer; color: var(--muted); }
+	.seg button.on { background: #fff; color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+	.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+	.site { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; cursor: pointer; text-align: left; padding: 0; font: inherit; color: inherit; transition: border-color .15s, box-shadow .15s, transform .15s; }
+	.site:hover, .site:focus-visible { border-color: #cbd5e1; box-shadow: 0 6px 20px rgba(0,0,0,.06); transform: translateY(-1px); outline: none; }
+	.thumb { aspect-ratio: 4 / 3; background: #f3f8fc; border-bottom: 1px solid var(--line); position: relative; overflow: hidden; }
+	/* The kit draws its page in the left 800 px of a 1917 px wide capture: show only that part. */
+	.thumb img { width: 239.6%; max-width: none; display: block; }
+	.thumb .n { position: absolute; top: 8px; left: 8px; font-size: 12px; font-weight: 600; background: rgba(10,10,10,.75); color: #fff; border-radius: 6px; padding: 1px 7px; }
+	.meta { padding: 12px 14px 14px; }
+	.host { font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.host span { color: var(--muted); }
+	.flag { font-size: 11px; font-weight: 600; color: #374151; background: #f3f4f6; border-radius: 5px; padding: 0 6px; margin-left: 4px; }
+	.row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+	.pill { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 500; border: 1px solid; }
+	.pill.wait { color: var(--amber); background: var(--amber-bg); border-color: #fde68a; }
+	.pill.ok { color: var(--green); background: var(--green-bg); border-color: #a7f3d0; }
+	.pill.bad { color: var(--red); background: var(--red-bg); border-color: #fecaca; }
+	.pill i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+	table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; font-size: 14px; }
+	th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+	th { font-size: 12px; font-weight: 600; color: var(--muted); background: #f9fafb; }
+	tbody tr { cursor: pointer; }
+	tbody tr:hover { background: #f9fafb; }
+	td .mini { width: 72px; height: 48px; overflow: hidden; border-radius: 6px; border: 1px solid var(--line); }
+	td .mini img { width: 172px; display: block; }
+	td.host { max-width: 320px; }
+	/* why one operator */
+	.why { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+	.why div { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+	.why b { display: block; margin-bottom: 4px; }
+	.why p { margin: 0; color: #4b5563; font-size: 14px; }
+	.more { display: flex; justify-content: center; margin-top: 16px; }
+	.more .btn { padding: 8px 16px; border-radius: 999px; font-weight: 500; }
+	/* technical record */
+	.tech h3 { font-size: 15px; margin: 26px 0 4px; }
+	.tech .sub { margin-bottom: 10px; }
+	.tech table { font-size: 13px; }
+	.tech td, .tech th { padding: 8px 12px; }
+	.tech tbody tr { cursor: default; }
+	.mono { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+	.tag { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 5px; padding: 0 6px; background: #f3f4f6; color: #374151; }
+	.tag.y { background: var(--green-bg); color: var(--green); }
+	.secret { background: #fff7ed; border: 1px dashed #fdba74; border-radius: 12px; padding: 12px 14px; font-size: 13px; color: #9a3412; }
+	.copy { border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 12px; padding: 0 0 0 6px; }
+	.copy:hover { color: var(--fg); }
+	.dl { color: var(--blue); text-decoration: none; font-size: 12px; white-space: nowrap; }
+	.site-block { background: var(--card); border: 1px solid var(--line); border-radius: 14px; margin-bottom: 10px; }
+	.site-block summary { cursor: pointer; padding: 10px 14px; font-size: 13px; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+	.site-block summary::-webkit-details-marker { display: none; }
+	.site-block[open] summary { border-bottom: 1px solid var(--line); }
+	.site-block .inner { padding: 12px 14px; display: grid; gap: 12px; }
+	.site-block table { border: 0; border-radius: 0; }
+	/* drawer */
+	.scrim { position: fixed; inset: 0; background: rgba(10,10,10,.45); opacity: 0; pointer-events: none; transition: opacity .2s; }
+	.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(720px, 100vw); background: #fff; box-shadow: -10px 0 40px rgba(0,0,0,.15); transform: translateX(100%); transition: transform .25s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; }
+	.drawer { visibility: hidden; transition: transform .25s cubic-bezier(.2,.8,.2,1), visibility 0s .25s; }
+	.open .scrim { opacity: 1; pointer-events: auto; }
+	.open .drawer { transform: none; visibility: visible; transition: transform .25s cubic-bezier(.2,.8,.2,1); }
+	.dhead { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+	.dhead .nav { display: flex; gap: 6px; }
+	.btn { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+	.btn:hover { background: #f9fafb; }
+	.dbody { overflow: auto; padding: 18px; }
+	.shot { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #f3f8fc; aspect-ratio: 800 / 810; }
+	.shot img { width: 239.6%; max-width: none; display: block; }
+	.warn { font-size: 12px; color: var(--muted); margin: 8px 0 18px; }
+	dl { display: grid; grid-template-columns: 140px 1fr; gap: 8px 16px; margin: 0 0 18px; font-size: 14px; }
+	dt { color: var(--muted); }
+	dd { margin: 0; }
+	.steps { list-style: none; padding: 0; margin: 0; border-left: 2px solid var(--line); }
+	.steps li { position: relative; padding: 0 0 12px 16px; font-size: 14px; }
+	.steps li::before { content: ""; position: absolute; left: -6px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: #d1d5db; }
+	.steps li.done::before { background: var(--green); }
+	.steps small { color: var(--muted); display: block; }
+	.note { display: inline-block; font-size: 12px; background: #111827; color: #fff; padding: 3px 9px; border-radius: 6px; margin-bottom: 16px; }
+	@media (max-width: 860px) { .grid, .why { grid-template-columns: repeat(2, 1fr); } .stats { grid-template-columns: repeat(2, 1fr); } }
+	@media (max-width: 560px) { .grid, .why { grid-template-columns: 1fr; } h1 { font-size: 27px; } dl { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+	<div class="note">Mockup · real data of campaign 381039186385310339</div>
+	<a class="crumb" href="#">← Phishing Support · Campaigns</a>
+	<div class="eyebrow">● Phishing campaign · credential theft</div>
+	<h1>Fake “Meta Protect” page-restriction notice</h1>
+	<p class="lead">
+		Nine look-alike pages tell Facebook page owners that their page has been restricted and ask them to “unlock” it by
+		signing in with their email address and password. Each page speaks the visitor's language: we saw it in German,
+		Danish and English. The pages went online one after another within 48 minutes on the same free hosting platform and
+		run identical code, so we treat them as the work of one operator.
+	</p>
+
+	<div class="stats">
+		<div class="stat"><b>9</b><span>phishing pages</span></div>
+		<div class="stat"><b>48 min</b><span>from first to last · a new page every ~10 min</span></div>
+		<div class="stat"><b>Render</b><span>hosting · onrender.com subdomains</span></div>
+		<div class="stat"><b>9 / 9</b><span>reported for takedown · 0 confirmed down yet</span></div>
+	</div>
+
+	<section>
+		<h2>When the pages appeared</h2>
+		<p class="sub">15 November 2026, UTC. Each dot is one page; click it to open the page.</p>
+		<div class="timeline">
+			<div class="axis" id="axis"></div>
+			<div class="ticks"><span>00:30</span><span>00:45</span><span>01:00</span><span>01:15</span><span>01:30</span></div>
+		</div>
+	</section>
+
+	<section>
+		<div class="toolbar">
+			<div>
+				<h2>The pages</h2>
+				<p class="sub" style="margin:0">Screenshots as our browser captured them. Click a page for its details and takedown status.</p>
+			</div>
+			<div class="seg" role="tablist">
+				<button class="on" data-view="grid">Gallery</button>
+				<button data-view="table">Table</button>
+			</div>
+		</div>
+		<div id="grid" class="grid"></div>
+		<table id="table" hidden>
+			<thead><tr><th></th><th>Page</th><th>Seen</th><th>Language</th><th>Takedown</th></tr></thead>
+			<tbody></tbody>
+		</table>
+		<div class="more"><button class="btn" id="more" aria-expanded="false"></button></div>
+	</section>
+
+	<section>
+		<h2>Why we think one operator runs them</h2>
+		<p class="sub">Any one of these alone would link the pages; here all three hold.</p>
+		<div class="why">
+			<div><b>Same code</b><p>Every page runs the same program files, byte for byte. A copied design would not match this exactly.</p></div>
+			<div><b>Same text and look</b><p>The same “Meta Protect” notice and layout on all nine pages, translated into the visitor's language.</p></div>
+			<div><b>Same pattern</b><p>Same host, same naming scheme (policy-…, …-advisory, …-center), published every ten minutes.</p></div>
+		</div>
+	</section>
+
+	<section class="tech">
+		<h2>Technical record</h2>
+		<p class="sub">Everything we recorded about this campaign, for investigators, providers and researchers. Every value can be checked against the evidence files below.</p>
+
+		<h3>Where the entered data goes</h3>
+		<p class="sub">Observed when our browser filled the form with synthetic values.</p>
+		<table><thead><tr><th>Destination</th><th>Method</th><th>Fields received</th><th>Sites</th></tr></thead>
+			<tbody><tr><td class="mono">https://&lt;site&gt;.onrender.com/api/send <span class="tag">same site</span></td><td>POST</td><td>email, password</td><td>9 / 9</td></tr></tbody></table>
+		<div class="secret" style="margin-top:10px"><b>Bot tokens, chat IDs and payment accounts.</b> This campaign sends to its own server, so it has none. A campaign that sends to a Telegram bot or names an account lists them here in full, as the kit published them: bot ID, @username, token, chat ID, IBAN or wallet.</div>
+
+		<h3>Kit files shared by every page</h3>
+		<p class="sub">Identical bytes on all 9 pages. None of them is a published library (checked against jsDelivr).</p>
+		<table><thead><tr><th>SHA-256</th><th>Size</th><th>File on the first page</th><th>Pages</th></tr></thead><tbody id="kit"></tbody></table>
+
+		<h3>Infrastructure</h3>
+		<table><thead><tr><th>Record</th><th>Value</th><th>Owner</th></tr></thead>
+			<tbody>
+				<tr><td>CNAME</td><td class="mono">gcp-us-west1-1.origin.onrender.com</td><td>Render Services, Inc. (USA), on Google Cloud us-west1</td></tr>
+				<tr><td>A</td><td class="mono">216.24.57.16, 216.24.57.18</td><td>Render Services, Inc.</td></tr>
+				<tr><td>Abuse contact</td><td class="mono">abuse@render.com</td><td>Render</td></tr>
+			</tbody></table>
+
+		<h3>Per page: reports and evidence files</h3>
+		<p class="sub">Each capture is an MHTML archive, a screenshot, the screenshot with address and time stamped in, a manifest of SHA-256 hashes, and an RFC 3161 timestamp token over that manifest from an independent authority.</p>
+		<div id="persite"></div>
+		<p style="margin-top:14px"><a class="dl" href="#" style="font-size:14px">⤓ Download the whole evidence archive (ZIP)</a></p>
+	</section>
+</main>
+
+<div id="layer">
+	<div class="scrim" data-close></div>
+	<aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="dtitle">
+		<div class="dhead">
+			<div><div style="font-size:12px;color:var(--muted)" id="dpos"></div><div class="host" id="dtitle" style="font-size:14px"></div></div>
+			<div class="nav"><button class="btn" data-step="-1" aria-label="Previous page">←</button><button class="btn" data-step="1" aria-label="Next page">→</button><button class="btn" data-close aria-label="Close">✕</button></div>
+		</div>
+		<div class="dbody">
+			<div class="shot"><img id="dimg" alt=""></div>
+			<p class="warn">Screenshot of the phishing page as captured. Do not visit the address and never enter data there.</p>
+			<dl>
+				<dt>Address</dt><dd class="host" id="durl"></dd>
+				<dt>First seen</dt><dd id="dseen"></dd>
+				<dt>Asks for</dt><dd>Email address and password (sent to the page's own server, <code>/api/send</code>)</dd>
+				<dt>Language seen</dt><dd id="dlang"></dd>
+				<dt>Hosting</dt><dd>Render (onrender.com)</dd>
+			</dl>
+			<h3 style="font-size:15px;margin:0 0 10px">Takedown</h3>
+			<ul class="steps" id="dsteps"></ul>
+			<p style="margin-top:18px"><a href="#" style="color:var(--blue)">Full analysis of this page →</a></p>
+		</div>
+	</aside>
+</div>
+<script>
+const TECH = {"kit":[{"sha":"f4b27b738bd8241a177acc69beadbb4a191eba57e0c3ac4f7be577ed05aba73a","size":27846,"file":"/_next/static/chunks/0328fab0897e0e2d.js"},{"sha":"aa5b1b1ed180b7e1402b4f7036c7702aa6ec0acb7072ab7af55868471d73ea74","size":78040,"file":"/_next/static/chunks/d9493cf6ccb2a296.js"},{"sha":"84be583babcfe89d0a80ab1ea31be71a3794146080a686f3e79a16e9eacfa76b","size":85397,"file":"/_next/static/chunks/9a92860c2f6451e1.js"},{"sha":"7ea008b3817d1bc23b6af9cfed93c2792eef7b860c7bc2b465f53d671e170389","size":13422,"file":"/_next/static/chunks/84409e1e650578e1.js"},{"sha":"3238de1f4894d2111012e8b2bf3e8ecfd9c05e8f7e222d3ef28fc4ec62849cd2","size":3801,"file":"/_next/static/chunks/015919345ccf095d.js"},{"sha":"31361df9a11d077d8cd06f852af0509d115ad1a4f5565b3643d81d93f8b02a3c","size":215029,"file":"/_next/static/chunks/42c2f976f917735c.js"},{"sha":"2697b51ba1e021e49a3678dfcd47ecf6534da683086db9f2ee519db6f892f1be","size":39955,"file":"/_next/static/chunks/d05bbab223271673.js"},{"sha":"0f7589ffdd71756fd372243ec807749d9cb52f6315b6962d6492c7b1abd52f3f","size":50740,"file":"/_next/static/chunks/664b1e113cca09c3.js"},{"sha":"052b4920626f683adb2501061f44436eb9bcd0c7aa97b7e4104de4b6a98c78a6","size":9118,"file":"/_next/static/chunks/effc31f2c2f4cb47.js"},{"sha":"00538e4f3951a3744300781d419d9d5c2bc7c90d615ae968cb9fc1c26019f93a","size":9945,"file":"/_next/static/chunks/turbopack-80da49f704d6686a.js"}],"sites":[{"id":"380153057440174080","dns":{"A":["216.24.57.18","216.24.57.16"],"CNAME":["gcp-us-west1-1.origin.onrender.com"]},"files":[{"name":"evidence-manifest.json","sha256":"2084adad3d3d94b66b2559969cf63b9d001218dbf2c7e1e624cbfffb6b281c0c","size":999},{"name":"evidence-manifest.tsr","sha256":"d40024e0768b001530c598b8721c1590e98d3c32a894ff28b79c9b17a3e7a4ec","size":6007},{"name":"website-stamped.png","sha256":"5e2aaa662402279a6b702e3a9184220294a71a4840bb4ad4813da05b05fb303f","size":152845},{"name":"website.mhtml","sha256":"5ec4ebea00d2550929d2b717450bfa18ef1b28049e7d60eaa6a96fc50f6add40","size":495787},{"name":"website.png","sha256":"51d99df8854da02c53d7c4e616a7d9904faa854fb236b105d2f4c000464df63e","size":120298}],"runs":[{"p":"Render Abuse Contact","e":"abuse@render.com","st":"awaiting_provider_reply","c":null,"t":"2026-11-15 00:42:35"},{"p":"Netcraft","e":null,"st":"submitted","c":"8RHJ4bAdlwYjwf1HCIJIFbefunon1Npy","t":"2026-11-15 00:42:32"}]},{"id":"380157577901641733","dns":{"A":["216.24.57.16","216.24.57.18"],"CNAME":["gcp-us-west1-1.origin.onrender.com"]},"files":[{"name":"evidence-manifest.json","sha256":"c2479834f7ec5ada7e2370907a71a84b7c57f538562a8c44dc3cd856da508bd4","size":1005},{"name":"evidence-manifest.tsr","sha256":"42bbb24964eb6914f7e6337a23766414740f1c4d9d578ec77f529a81a46a01ec","size":6007},{"name":"website-stamped.png","sha256":"16e9091d0072962aec56c570570058a5ad06d08a15c0173e0175a10e87131a65","size":147568},{"name":"website.mhtml","sha256":"666c0dd36070b214e47e08a2818491b8a6d393ec9b8d92af454a41ea3a17a714","size":495869},{"name":"website.png","sha256":"e746f0b34b946015432fd583a3df838cdb118b3fc7d4ac572681813ed029190f","size":115234}],"runs":[{"p":"Render Abuse Contact","e":"abuse@render.com","st":"awaiting_provider_reply","c":null,"t":"2026-11-15 01:39:02"},{"p":"Netcraft","e":null,"st":"submitted","c":"ZbSUxQhP0ThrY4f3hb91uLlqk4dnfTTJ","t":"2026-11-15 01:38:55"}]},{"id":"380157577905836038","dns":{"A":["216.24.57.16","216.24.57.18"],"CNAME":["gcp-us-west1-1.origin.onrender.com"]},"files":[{"name":"evidence-manifest.json","sha256":"054f6ace5383945ce3944ea38415eb30784554b4729f986ad2ccba72d5a6b757","size":1008},{"name":"evidence-manifest.tsr","sha256":"c03b1e0599eea54497b1020764d0da49946d49e4760322c5eee797456728f23f","size":6006},{"name":"website-stamped.png","sha256":"2690f6773e36e8bbdbc1908073aab26f56c31d9cb7717286eb3884e98c4726af","size":147049},{"name":"website.mhtml","sha256":"6f35343904ca4ee183fc91c9ff657f6d0bbe31f61fcbc88cb83220f15df23fbf","size":495748},{"name":"website.png","sha256":"32b7af554d1fca7ed47b53f4f9af9e05cee6494fd22dd1edda321310fa69edd6","size":114473}],"runs":[{"p":"Render Abuse Contact","e":"abuse@render.com","st":"awaiting_provider_reply","c":null,"t":"2026-11-15 01:39:02"},{"p":"Netcraft","e":null,"st":"submitted","c":"MGjEGku5mC4MoTmNpzD2dlAR3Wz5csWB","t":"2026-11-15 01:39:05"}]},{"id":"380160094312075306","dns":{"A":["216.24.57.18","216.24.57.16"],"CNAME":["gcp-us-west1-1.origin.onrender.com"]},"files":[{"name":"evidence-manifest.json","sha256":"270e587ba0a83f93a478878d5aaa4e8be9863eb3b4a769082d378073245bf10c","size":1002},{"name":"evidence-manifest.tsr","sha256":"0eaceb4160768dd41a7f258c610928d0e625813265a061b1b5478c45d04123d6","size":6007},{"name":"website-stamped.png","sha256":"d7f8c277878616e2d610b49d650bc0c75cea1d4a35b94522be10d135aa62de4f","size":147297},{"name":"website.mhtml","sha256":"fd4c87fa8cf4a55422060aad432f45bfa8328358dd5a59c228d30e93516d2a86","size":495853},{"name":"website.png","sha256":"e746f0b34b946015432fd583a3df838cdb118b3fc7d4ac572681813ed029190f","size":115234}],"runs":[{"p":"Netcraft","e":null,"st":"submitted","c":"yz6WcFscWP1fgjY88W0S9AL5IAbPmI6w","t":"2026-11-15 01:39:05"},{"p":"Render Abuse Contact","e":"abuse@render.com","st":"awaiting_provider_reply","c":null,"t":"2026-11-15 10:14:59"}]},{"id":"380160094383378477","dns":{"A":["216.24.57.18","216.24.57.16"],"CNAME":["gcp-us-west1-1.origin.onrender.com"]},"files":[{"name":"evidence-manifest.json","sha256":"b1c12af7099f354418aca49cbc3f40834d463a19a49ed5a78ab7475a2169befa","size":1005},{"name":"evidence-manifest.tsr","sha256":"c8ff256a3db862fc48e202c5561a6cf694e4dfac7ada66e9f4b153c7e39a8d70","size":6007},{"name":"website-stamped.png","sha256":"d9b77c197381b3eba78b927cbbe6381f7e8070c92145df7ab7576d348da76fa0","size":153449},{"name":"website.mhtml","sha256":"96c065688ff2c3b174c52680e76f444891b815263b25707a2f38d67ee5d50d68","size":495901},{"name":"website.png","sha256":"bd0c4a0054c487349177f370b6e6975669943334f61bce8210765fc5befadfa8","size":121547}],"runs":[{"p":"Netcraft","e":null,"st":"submitted","c":"P0nd2ab5LFrvxXncJn3aa9mG1wPvTcjG","t":"2026-11-15 01:39:05"},{"p":"Render Abuse Contact","e":"abuse@render.com","st":"awaiting_provider_reply","c":null,"t":"2026-11-15 10:15:20"}]},{"id":"380162610923835546","dns":{"A":["216.24.57.16","216.24.57.18"],"CNAME":["gcp-us-west1-1.origin.onrender.com"]},"files":[{"name":"evidence-manifest.json","sha256":"2ab6753288ab07f4857fa8d2407e47029a2b166bad368a8472c2673db77d9767","size":1017},{"name":"evidence-manifest.tsr","sha256":"cea76fe0b8dd40d50d3dc7c24633fafc2a8ac1329af33df1d4cd9e1d335f428d","size":6007},{"name":"website-stamped.png","sha256":"23a8889854e984536c2db82099e87c84036841cc362a8dd3cbcf36ce36b2cbee","size":153831},{"name":"website.mhtml","sha256":"47b7533a4425283d4ce0edf97bfec764251d241a3dcd23878cfce392bfaa566c","size":495968},{"name":"website.png","sha256":"bd0c4a0054c487349177f370b6e6975669943334f61bce8210765fc5befadfa8","size":121547}],"runs":[{"p":"Netcraft","e":null,"st":"submitted","c":"nn39PtGRefk7VtxGUGlAuxBTxq8JtyCl","t":"2026-11-15 01:39:05"},{"p":"Render Abuse Contact","e":"abuse@render.com","st":"awaiting_provider_reply","c":null,"t":"2026-11-15 10:15:28"}]},{"id":"380162610982555805","dns":{"A":["216.24.57.16","216.24.57.18"],"CNAME":["gcp-us-west1-1.origin.onrender.com"]},"files":[{"name":"evidence-manifest.json","sha256":"5dbcbd6a7776c27c7c6aa71aa829390aba7ca4636bcff65388545fa08a56f530","size":1017},{"name":"evidence-manifest.tsr","sha256":"9bd218a9210e9659b6f9d264169efaec9126bbae713def09ce047af391383d03","size":6006},{"name":"website-stamped.png","sha256":"af8ea9679ee78f7b3b4149a577bd1102286c1fe6a345ca032f2a246352c23abd","size":145556},{"name":"website.mhtml","sha256":"163a0506ac8344244031731d5fb9cc01d65a0d179ff01c779676a47915b806a7","size":495920},{"name":"website.png","sha256":"2153011231411e844f0fd3242d7b4f610c3f31dc6bf3f1169f0b8547f8447c4b","size":113056}],"runs":[{"p":"Netcraft","e":null,"st":"submitted","c":"8G43Q104Is4slrlKAucKSTg6UfQQexUN","t":"2026-11-15 01:39:05"},{"p":"Render Abuse Contact","e":"abuse@render.com","st":"delivery_failed","c":null,"t":"2026-11-15 10:15:36"}]},{"id":"380165127623676133","dns":{"A":["216.24.57.16","216.24.57.18"],"CNAME":["gcp-us-west1-1.origin.onrender.com"]},"files":[{"name":"evidence-manifest.json","sha256":"6f9501890ac3897248bb1367703380bc3a1cf3208ab4b5c8b9b4160b0920048a","size":1014},{"name":"evidence-manifest.tsr","sha256":"c35ab40d262856a5e3b1e31811d63b4eed4b0078bc8a27eaf58b1be5a6682ec6","size":6007},{"name":"website-stamped.png","sha256":"59c90f6399c3cb65ab849b5f728deaacf81461d6de0c5b6c6fad0a5ebb292733","size":145547},{"name":"website.mhtml","sha256":"b5ae19a1a1ab6ee1b034d0863530f970f10680f0b082e90a667e5323d2e644ba","size":497206},{"name":"website.png","sha256":"11d8ab0bdb53c21da8caa2ec85972d3b02d71c70b995e6fa512997fa1cd0d3bb","size":113047}],"runs":[{"p":"Netcraft","e":null,"st":"submitted","c":"XZ0tmFdlU52WvDYabYB5DMvbimffKTv2","t":"2026-11-15 01:39:05"},{"p":"Render Abuse Contact","e":"abuse@render.com","st":"awaiting_provider_reply","c":null,"t":"2026-11-15 10:16:03"}]},{"id":"380165127694979304","dns":{"A":["216.24.57.16","216.24.57.18"],"CNAME":["gcp-us-west1-1.origin.onrender.com"]},"files":[{"name":"evidence-manifest.json","sha256":"5b2bb930277b4757f11dfd9e22fb7e895305456a6ef4a1e9635967c8fdf20be9","size":1008},{"name":"evidence-manifest.tsr","sha256":"560170d935cc202082fd3c081db215d65880ac6c6dfb5499d9427cf195aa0ab6","size":6007},{"name":"website-stamped.png","sha256":"52c23c59f50a28b31124780e1aee396c5b1b91af3fefe1ad8f45967289a879ff","size":145068},{"name":"website.mhtml","sha256":"7bb0a458697937e85d2f796b2f20760054aecbac06e97f81ddc14cacd295d833","size":495872},{"name":"website.png","sha256":"2153011231411e844f0fd3242d7b4f610c3f31dc6bf3f1169f0b8547f8447c4b","size":113056}],"runs":[{"p":"Netcraft","e":null,"st":"submitted","c":"xwgvGieAq90e5hkq48Qtm3rCqMdwo3UM","t":"2026-11-15 01:39:05"},{"p":"Render Abuse Contact","e":"abuse@render.com","st":"awaiting_provider_reply","c":null,"t":"2026-11-15 10:15:54"}]}]};
+const ART = "https://phishing.support/api/artifacts/";
+const sites = [
+	["policy-trust-assurance", "00:32", "380153189766270978", "wait", "DE"],
+	["platformcomplianceoffice", "00:50", "380159657978630178", "wait", "DA"],
+	["policy-standards-advisory", "00:50", "380157923759755285", "wait", "EN"],
+	["policy-trust-principles", "01:00", "380160489289682998", "wait", "DA"],
+	["communityintegrityreview", "01:00", "380162517239861325", "wait", "DE"],
+	["policy-transparency-advisory", "01:10", "380163122062692549", "wait", "DE"],
+	["policy-compliance-principles", "01:10", "380164774643634399", "bad", "DA"],
+	["standardsverificationcenter", "01:20", "380165811798544643", "wait", "DA"],
+	["policy-integrity-insights", "01:20", "380165612913037562", "wait", "DA"],
+].map(([name, time, shot, state, lang], i) => ({ i, name, host: `${name}.onrender.com`, url: `https://${name}.onrender.com/help`, time, shot: ART + shot, state, lang }));
+const LANG = { DE: "German", DA: "Danish", EN: "English" };
+const hostHtml = (s) => `${s.name}<span>.onrender.com</span>`;
+const pill = (s) => s.state === "bad"
+	? '<span class="pill bad"><i></i>Render mailbox bounced</span>'
+	: '<span class="pill wait"><i></i>Reported · awaiting Render</span>';
+
+const PREVIEW = 3;
+let expanded = false;
+const grid = document.getElementById("grid");
+grid.innerHTML = sites.map((s) => `
+	<button class="site" data-i="${s.i}" ${s.i >= PREVIEW ? "data-extra hidden" : ""}>
+		<div class="thumb"><img loading="lazy" src="${s.shot}" alt="Screenshot of ${s.host}"><span class="n">${s.i + 1}</span></div>
+		<div class="meta"><div class="host" title="${s.host}">${hostHtml(s)}</div><div class="row"><span>${s.time} UTC <span class="flag">${s.lang}</span></span>${pill(s)}</div></div>
+	</button>`).join("");
+document.querySelector("#table tbody").innerHTML = sites.map((s) => `
+	<tr data-i="${s.i}" ${s.i >= PREVIEW ? "data-extra hidden" : ""}><td><div class="mini"><img src="${s.shot}" alt=""></div></td><td class="host">${hostHtml(s)}</td><td>${s.time} UTC</td><td>${LANG[s.lang]}</td><td>${pill(s)}</td></tr>`).join("");
+
+const axis = document.getElementById("axis");
+const minutes = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+const start = minutes("00:30"), end = minutes("01:30"), seen = {};
+for (const s of sites) {
+	const stacked = seen[s.time]; seen[s.time] = true;
+	const left = ((minutes(s.time) - start) / (end - start)) * 100;
+	axis.insertAdjacentHTML("beforeend", `<button class="dot${stacked ? " stack" : ""}" style="left:${left}%" data-i="${s.i}" title="${s.host} · ${s.time} UTC" aria-label="${s.host}"></button>`);
+}
+
+document.querySelectorAll(".seg button").forEach((button) => button.addEventListener("click", () => {
+	document.querySelectorAll(".seg button").forEach((b) => {
+		b.classList.toggle("on", b === button);
+		b.setAttribute("aria-selected", String(b === button));
+	});
+	document.getElementById("grid").hidden = button.dataset.view !== "grid";
+	document.getElementById("table").hidden = button.dataset.view !== "table";
+}));
+
+const more = document.getElementById("more");
+function renderMore() {
+	document.querySelectorAll("[data-extra]").forEach((element) => { element.hidden = !expanded; });
+	more.textContent = expanded ? "Show fewer pages" : `Show all ${sites.length} pages`;
+	more.setAttribute("aria-expanded", String(expanded));
+}
+more.addEventListener("click", () => { expanded = !expanded; renderMore(); });
+renderMore();
+
+const short = (sha) => `${sha.slice(0, 16)}…${sha.slice(-8)}`;
+const copy = (value) => `<button class="copy" title="Copy" onclick="navigator.clipboard.writeText('${value}')">⧉</button>`;
+const kb = (bytes) => bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
+document.getElementById("kit").innerHTML = TECH.kit.map((file) => `
+	<tr><td class="mono" title="${file.sha}">${short(file.sha)}${copy(file.sha)}</td><td>${kb(file.size)}</td><td class="mono">${file.file}</td><td><span class="tag y">9 / 9</span></td></tr>`).join("");
+const PROVIDER_STATE = { submitted: "accepted", awaiting_provider_reply: "sent, no answer yet", delivery_failed: "bounced", acknowledged: "confirmed" };
+document.getElementById("persite").innerHTML = TECH.sites.map((site, i) => `
+	<details class="site-block" ${i === 0 ? "open" : ""}>
+		<summary><span class="host">${sites[i].name}<span>.onrender.com</span></span><span style="color:var(--muted)">${site.runs.length} reports · ${site.files.length} evidence files ▾</span></summary>
+		<div class="inner">
+			<table><thead><tr><th>Reported to</th><th>Channel</th><th>When (UTC)</th><th>State</th><th>Ticket</th></tr></thead><tbody>
+				${site.runs.map((run) => `<tr><td>${run.p.replace(" Abuse Contact", "")}</td><td class="mono">${run.e ?? "API"}</td><td>${run.t?.slice(5, 16) ?? ""}</td><td>${PROVIDER_STATE[run.st] ?? run.st}</td><td class="mono">${run.c ?? "–"}</td></tr>`).join("")}
+			</tbody></table>
+			<table><thead><tr><th>Evidence file</th><th>Size</th><th>SHA-256</th><th></th></tr></thead><tbody>
+				${site.files.map((file) => `<tr><td class="mono">${file.name}</td><td>${kb(file.size)}</td><td class="mono" title="${file.sha256}">${short(file.sha256)}${copy(file.sha256)}</td><td><a class="dl" href="#">⤓ download</a></td></tr>`).join("")}
+			</tbody></table>
+		</div>
+	</details>`).join("");
+
+let current = 0;
+function open(i) {
+	current = (i + sites.length) % sites.length;
+	const s = sites[current];
+	document.getElementById("dpos").textContent = `Page ${current + 1} of ${sites.length}`;
+	document.getElementById("dtitle").textContent = s.host;
+	document.getElementById("durl").textContent = s.url.replace("https://", "hxxps://");
+	document.getElementById("dseen").textContent = `15 Nov 2026, ${s.time} UTC`;
+	document.getElementById("dlang").textContent = `${LANG[s.lang]} (the page adapts to the visitor)`;
+	document.getElementById("dimg").src = s.shot;
+	document.getElementById("dsteps").innerHTML = [
+		`<li class="done">Captured and confirmed as phishing<small>15 Nov, ${s.time} UTC</small></li>`,
+		`<li class="done">Reported to Netcraft (blocklists)<small>15 Nov, 01:39 UTC</small></li>`,
+		s.state === "bad"
+			? `<li>Report to Render bounced<small>15 Nov, 10:20 UTC</small></li>`
+			: `<li class="done">Reported to Render, waiting for their answer<small>15 Nov</small></li>`,
+		`<li>Page taken down<small>not yet confirmed</small></li>`,
+	].join("");
+	document.getElementById("layer").classList.add("open");
+}
+document.addEventListener("click", (event) => {
+	const target = event.target.closest("[data-i],[data-close],[data-step]");
+	if (!target) return;
+	if (target.dataset.close !== undefined) document.getElementById("layer").classList.remove("open");
+	else if (target.dataset.step) open(current + Number(target.dataset.step));
+	else open(Number(target.dataset.i));
+});
+document.addEventListener("keydown", (event) => {
+	if (!document.getElementById("layer").classList.contains("open")) return;
+	if (event.key === "Escape") document.getElementById("layer").classList.remove("open");
+	if (event.key === "ArrowRight") open(current + 1);
+	if (event.key === "ArrowLeft") open(current - 1);
+});
+</script>
+</body>
+</html>

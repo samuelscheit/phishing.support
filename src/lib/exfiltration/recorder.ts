@@ -15,6 +15,12 @@ function bounded(value: unknown): string | undefined {
 
 /** CDP target types that own a network stack the kit can send from. */
 const NETWORK_TARGET_TYPES = new Set(["page", "iframe", "worker", "service_worker", "shared_worker"]);
+/**
+ * Request headers that show how data was sent; cookies and credentials are
+ * never kept. Only the Network domain is used: enabling Runtime on a page
+ * is what anti-bot kits detect, and a kit that detects us hides its payload.
+ */
+const KEPT_REQUEST_HEADERS = new Set(["content-type", "origin", "referer", "user-agent", "x-requested-with"]);
 
 /**
  * The raw CDP target type. Puppeteer's `Target.type()` folds out-of-process
@@ -43,12 +49,13 @@ export class ExfiltrationNetworkRecorder {
 		await Promise.all(browser.targets().map((target) => this.attach(target)));
 	}
 
-	private push(request: CapturedNetworkRequest): void {
-		if (this.requests.length >= MAX_CAPTURE_COUNT) return;
+	private push(request: CapturedNetworkRequest): boolean {
+		if (this.requests.length >= MAX_CAPTURE_COUNT) return false;
 		const size = Buffer.byteLength(JSON.stringify(request));
-		if (this.capturedBytes + size > MAX_CAPTURE_BYTES) return;
+		if (this.capturedBytes + size > MAX_CAPTURE_BYTES) return false;
 		this.capturedBytes += size;
 		this.requests.push(request);
+		return true;
 	}
 
 	private async attach(target: Target): Promise<void> {
@@ -65,6 +72,22 @@ export class ExfiltrationNetworkRecorder {
 			return;
 		}
 		this.sessions.add(session);
+		type CdpResponse = { status: number; statusText?: string; remoteIPAddress?: string; mimeType?: string };
+		const pending = new Map<string, CapturedNetworkRequest>();
+		/** The server's answer to a recorded request; a redirect answers it as well as a final response. */
+		const answer = (requestId: string, response: CdpResponse) => {
+			const request = pending.get(requestId);
+			if (!request) return;
+			pending.delete(requestId);
+			request.response = {
+				status: response.status,
+				...(response.statusText ? { statusText: response.statusText } : {}),
+				receivedAt: new Date().toISOString(),
+				...(response.remoteIPAddress ? { remoteAddress: response.remoteIPAddress } : {}),
+				...(response.mimeType ? { mimeType: response.mimeType } : {}),
+			};
+		};
+		session.on("Network.responseReceived", (event: { requestId: string; response: CdpResponse }) => answer(event.requestId, event.response));
 		const webSockets = new Map<string, string>();
 		session.on("Network.webSocketCreated", (event: { requestId: string; url: string }) => webSockets.set(event.requestId, event.url));
 		session.on("Network.webSocketFrameSent", (event: { requestId: string; response: { payloadData?: string } }) => {
@@ -75,15 +98,28 @@ export class ExfiltrationNetworkRecorder {
 		session.on("Network.requestWillBeSent", (event: {
 			requestId: string;
 			type?: string;
-			request: { url: string; method: string; postData?: string; hasPostData?: boolean };
+			documentURL?: string;
+			redirectResponse?: CdpResponse;
+			request: { url: string; method: string; postData?: string; hasPostData?: boolean; headers?: Record<string, string> };
 		}) => {
-			const record = (postData?: string) => this.push({
-				timestamp: new Date().toISOString(),
-				url: event.request.url,
-				method: event.request.method,
-				...(event.type ? { resourceType: event.type } : {}),
-				...(bounded(postData) ? { postData: bounded(postData) } : {}),
-			});
+			// A redirect reuses the request id: the earlier request got this answer.
+			if (event.redirectResponse) answer(event.requestId, event.redirectResponse);
+			const sentAt = new Date().toISOString();
+			const headers = Object.fromEntries(Object.entries(event.request.headers ?? {})
+				.filter(([name]) => KEPT_REQUEST_HEADERS.has(name.toLowerCase()))
+				.map(([name, value]) => [name.toLowerCase(), String(value).slice(0, 1_000)]));
+			const record = (postData?: string) => {
+				const request: CapturedNetworkRequest = {
+					timestamp: sentAt,
+					url: event.request.url,
+					method: event.request.method,
+					...(event.type ? { resourceType: event.type } : {}),
+					...(bounded(postData) ? { postData: bounded(postData) } : {}),
+					...(event.documentURL ? { documentUrl: event.documentURL } : {}),
+					...(Object.keys(headers).length ? { requestHeaders: headers } : {}),
+				};
+				if (this.push(request)) pending.set(event.requestId, request);
+			};
 			if (event.request.postData || !event.request.hasPostData) {
 				record(event.request.postData);
 				return;

@@ -46,11 +46,13 @@ const dependencies: ReferralDependencies = {
 	now: () => new Date("2026-11-17T09:00:00Z"),
 };
 
+/** The secret half of a bot token, as long as real ones are. */
+const TOKEN_SECRET = "AAEsecretSecretSecretSecretSecret0123";
 const telegram = (botId: string): ExtractedIndicator => ({
 	kind: "exfiltration_backend",
 	value: `telegram-bot:${botId}`,
 	links: true,
-	evidence: { backendKind: "telegram_bot", endpointUrl: `https://api.telegram.org/bot${botId}:AAE/sendMessage`, method: "POST", observedAt: "2026-11-10T08:00:00.000Z", matchedFields: ["email", "password"], telegram: { token: `${botId}:AAEsecret`, botId, username: "dhl_paket_bot", chatId: "-100200300" } },
+	evidence: { backendKind: "telegram_bot", endpointUrl: `https://api.telegram.org/bot${botId}:${TOKEN_SECRET}/sendMessage`, method: "POST", observedAt: "2026-11-10T08:00:00.000Z", matchedFields: ["email", "password"], telegram: { token: `${botId}:${TOKEN_SECRET}`, botId, username: "dhl_paket_bot", chatId: "-100200300" } },
 });
 const kit = (sha: string): ExtractedIndicator => ({ kind: "kit_fingerprint", value: sha, links: true, evidence: { fileKind: "script", url: "https://kit.example/app.js", size: 18_000 } });
 
@@ -170,28 +172,53 @@ describe("criminal referral of a campaign", () => {
 		await expect(prepareSupplement(campaignId, "by-zcb", dependencies)).rejects.toThrow("No complaint");
 	});
 
-	test("the public campaign page shows the sites and what links them, never a bot's token, a chat or a payment account", async () => {
+	test("the public campaign page shows the sites, why they belong together and the full technical record, as the operators published it", async () => {
 		const campaignId = await campaignWithThreeSites();
 		await reportedSite(15n, "dhl-iban-zahlung.com");
 		const iban: ExtractedIndicator = { kind: "payment_receiver", value: "iban:DE89370400440532013000", links: true, evidence: { receiverKind: "iban", receiver: "DE89370400440532013000" } };
-		await CampaignRepository.recordIndicators(15n, [telegram("7001"), iban]);
-		await CampaignRepository.recordIndicators(13n, [kit("a".repeat(64)), iban]);
-		const campaign = await getPublicCampaign(campaignId);
-		expect(campaign?.sites.map((site) => site.url)).toEqual([
+		const wallet: ExtractedIndicator = { kind: "payment_receiver", value: "tron:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", links: true, evidence: { receiverKind: "tron", receiver: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t" } };
+		await CampaignRepository.recordIndicators(15n, [telegram("7001"), iban, wallet]);
+		await CampaignRepository.recordIndicators(13n, [kit("a".repeat(64)), iban, wallet]);
+		await CampaignRepository.saveSiteFacts(11n, { language: "de", thumbnailArtifactId: 4242n });
+		const campaign = (await getPublicCampaign(campaignId))!;
+
+		// Without a written heading, the fixed wording describes the campaign.
+		expect(campaign.title).toBe("Phishing campaign impersonating www.dhl.de");
+		expect(campaign.sites.map((site) => site.url)).toEqual([
 			"https://dhl-paket-zustellung.com/login",
 			"https://dhl-sendung-pruefen.net/login",
 			"https://paket-dhl-info.org/login",
 			"https://dhl-iban-zahlung.com/login",
 		]);
-		expect(campaign?.sites[0]?.takedown).toEqual([{ provider: "Hostinger International Ltd.", status: "awaiting_provider_reply" }]);
-		expect(campaign?.links).toEqual([
-			{ kind: "exfiltration_backend", label: "The same Telegram bot receives what visitors enter", siteCount: 3 },
-			{ kind: "payment_receiver", label: "The same payment account is named to visitors", siteCount: 2 },
-			{ kind: "kit_fingerprint", label: `The same kit file (SHA-256 ${"a".repeat(64)})`, siteCount: 2 },
-		]);
-		const published = JSON.stringify(campaign);
-		for (const secret of ["AAEsecret", "7001", "-100200300", "dhl_paket_bot", "DE89370400440532013000", "api.telegram.org"]) expect(published).not.toContain(secret);
+		expect(campaign.sites[0]).toMatchObject({ language: "de", thumbnailUrl: "/api/artifacts/4242", takedown: "reported", reports: [{ provider: "Hostinger International Ltd.", channel: "abuse@hostinger.example", state: "awaiting" }] });
+		expect(campaign.sites[2]).toMatchObject({ takedown: "none", reports: [] });
+		expect(campaign).toMatchObject({ reportedCount: 2, confirmedCount: 0, domainCount: 4 });
+		expect(campaign.platform).toBeUndefined();
+		// Sites seen at the same moment show no rhythm, so no pattern is claimed.
+		expect(campaign.reasons.map((reason) => reason.kind)).toEqual(["same_code", "same_backend", "same_payment_account"]);
+		expect(campaign.typicalIntervalMinutes).toBeUndefined();
+
+		// The record: the bot with its token as the kit published it, the accounts in full, the kit file and the abuse contacts.
+		expect(campaign.technical.backends).toEqual([{ kind: "telegram_bot", label: "Telegram bot", siteCount: 3, details: [
+			["Bot ID", "7001"], ["Bot username", "@dhl_paket_bot"], ["Chat ID", "-100200300"], ["Token", `7001:${TOKEN_SECRET}`], ["Endpoint", `https://api.telegram.org/bot7001:${TOKEN_SECRET}/sendMessage`],
+		] }]);
+		expect(campaign.technical.payments).toEqual([{ kind: "iban", value: "DE89370400440532013000", siteCount: 2 }, { kind: "tron", value: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", siteCount: 2 }]);
+		expect(campaign.technical.kitFiles).toEqual([{ sha256: "a".repeat(64), size: 18_000, path: "/app.js", siteCount: 2 }]);
+		expect(campaign.technical.abuseContacts).toEqual(["abuse@hostinger.example"]);
 		expect(await getPublicCampaign(999n)).toBeUndefined();
+	});
+
+	test("sites on one platform appearing at a steady rhythm are named as a pattern", async () => {
+		for (const [index, name] of ["policy-a", "policy-b", "policy-c", "policy-d"].entries()) {
+			const id = BigInt(21 + index);
+			await reportedSite(id, `${name}.onrender.com`);
+			await SubmissionsEntity.update(id, { createdAt: new Date(Date.parse("2026-11-15T00:30:00Z") + index * 10 * 60_000) });
+			await CampaignRepository.recordIndicators(id, [kit("b".repeat(64))]);
+		}
+		const campaign = (await getPublicCampaign((await CampaignRepository.campaignForSubmission(21n))!))!;
+		expect(campaign).toMatchObject({ platform: "onrender.com", domainCount: 1, durationMinutes: 30, typicalIntervalMinutes: 10 });
+		expect(campaign.reasons.find((reason) => reason.kind === "same_pattern")?.text).toBe("4 pages on onrender.com within 30 minutes, a new one about every 10 minutes.");
+		expect(campaign.reasons.find((reason) => reason.kind === "same_code")?.text).toContain("Every page runs the same program file, byte for byte.");
 	});
 
 	test("the public list shows a site's campaign when the campaign has other sites", async () => {

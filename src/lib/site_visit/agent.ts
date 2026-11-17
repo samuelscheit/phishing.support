@@ -8,7 +8,22 @@ import { redactExternalError } from "../abuse/skyvern/adapter";
  * action acted on in the live page, whose caption the visit reads to say what
  * it was; its own record has no text.
  */
-export type VisitAgentAction = { id: string; kind: string; text: string; selector?: string };
+/**
+ * One thing the agent did. `value` is what it typed or chose (synthetic
+ * values only, from its task); `at` is when it acted, by the agent's clock,
+ * or when the visit first read the action when the agent gives no time.
+ */
+export type VisitAgentAction = { id: string; kind: string; text: string; selector?: string; value?: string; at?: string };
+
+const MAX_ACTION_VALUE = 2_000;
+
+/** What an action typed or chose: Skyvern keeps it in `text` (input) or `option` (select). */
+function actionValue(record: Record<string, unknown>): string | undefined {
+	const typed = typeof record.text === "string" && record.text ? record.text.slice(0, MAX_ACTION_VALUE) : undefined;
+	const option = record.option && typeof record.option === "object" ? record.option as Record<string, unknown> : undefined;
+	const chosen = option ? text(option.label) ?? text(option.value) : undefined;
+	return typed ?? chosen;
+}
 
 export type VisitAgentState =
 	| { state: "running" }
@@ -57,13 +72,15 @@ export function timelineActions(timeline: unknown): VisitAgentAction[] {
 				: text(record.thought) ?? text(record.observation);
 			if (description) {
 				seen.add(id);
-				found.push({ id, kind: text(record.action_type) ?? text(record.thought_type) ?? "thought", text: description, at: text(record.created_at) ?? "" });
+				const value = record.action_type ? actionValue(record) : undefined;
+				const selector = text(record.element_id);
+				found.push({ id, kind: text(record.action_type) ?? text(record.thought_type) ?? "thought", text: description, at: text(record.created_at) ?? "", ...(selector ? { selector } : {}), ...(value ? { value } : {}) });
 			}
 		}
 		for (const value of Object.values(record)) if (value && typeof value === "object") walk(value);
 	};
 	walk(timeline);
-	return found.sort((a, b) => a.at.localeCompare(b.at)).map(({ at: _at, ...action }) => action);
+	return found.sort((a, b) => a.at.localeCompare(b.at)).map(({ at, ...action }) => (at ? { ...action, at } : action));
 }
 
 /** How a person reads a task action without its element: `Clicked`, `Typed into`. */
@@ -95,7 +112,9 @@ export function taskActions(actions: readonly unknown[]): VisitAgentAction[] {
 		if (!id || !kind) return [];
 		const selector = text(record.element_id);
 		const description = text(record.intention) ?? text(record.reasoning) ?? ACTION_VERB[kind] ?? kind;
-		return [{ id, kind, text: description, ...(selector ? { selector } : {}) }];
+		const value = actionValue(record);
+		const at = text(record.created_at);
+		return [{ id, kind, text: description, ...(selector ? { selector } : {}), ...(value ? { value } : {}), ...(at ? { at } : {}) }];
 	});
 }
 
