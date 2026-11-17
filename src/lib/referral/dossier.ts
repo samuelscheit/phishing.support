@@ -3,6 +3,7 @@ import { CampaignRepository, type CampaignMemberView } from "../campaign/reposit
 import type { CampaignIndicator } from "../campaign/schema";
 import { ArtifactsEntity, SubmissionsEntity } from "../db/entities";
 import type { Submission } from "../db/schema";
+import { describeDataEntryField } from "../website_types";
 import { isAuthorityRoute, isPreservationRoute } from "./routes";
 import { GENERIC_LEAD, providerLead, type ProviderLead } from "./provider_leads";
 
@@ -22,6 +23,21 @@ export type DossierEvidenceFile = { artifactId: string; name: string; kind: stri
 /** Where the page sent the synthetic values our visit entered. */
 export type DossierDataDestination = { url: string; method: string; fields: string[]; sameSite: boolean };
 
+/** Why the site was judged phishing or malware: the classifier's finding on the reported page. */
+export type DossierVerdict = {
+	finding: string;
+	basis?: string;
+	/** The page's own words that show it, verbatim and in its language. */
+	quote?: string;
+	impersonates?: { name: string; officialUrl: string };
+	/** The page's fields that collect the data, as the page labels them. */
+	fields: string[];
+	pageUrl?: string;
+};
+
+/** The visit through the site as the case recorded it at the time. */
+export type DossierVisit = { outcome: string; failure?: string; actions: Array<{ kind: string; text: string }> };
+
 export type DossierSite = {
 	submissionId: string;
 	url: string;
@@ -32,6 +48,10 @@ export type DossierSite = {
 	/** The site's DNS answers when it was analyzed. */
 	dns: { a: string[]; aaaa: string[]; cname: string[]; ns: string[] };
 	dataDestinations: DossierDataDestination[];
+	verdict?: DossierVerdict;
+	visit?: DossierVisit;
+	/** What we told the providers about the site. */
+	reportText?: string;
 	impersonates: string[];
 	reports: DossierProviderReport[];
 	evidence: DossierEvidenceFile[];
@@ -123,6 +143,29 @@ function dataDestinations(submission: Submission | undefined): DossierDataDestin
 	return [...unique.values()];
 }
 
+/** The reportable assessment of the case: the page its report is about. */
+function verdictOf(submission: Submission | undefined): DossierVerdict | undefined {
+	if (submission?.data.kind !== "website") return undefined;
+	const website = submission.data.website;
+	const assessment = website.siteAssessments?.find((candidate) => candidate.finding === "phishing" || candidate.finding === "malware");
+	if (!assessment) return undefined;
+	const pageUrl = website.navigationHops?.find((hop) => hop.index === assessment.hopIndex)?.url ?? website.archiveUrl ?? website.url;
+	return {
+		finding: assessment.finding,
+		...(assessment.phishingBasis ? { basis: assessment.phishingBasis } : {}),
+		...(assessment.evidenceQuote ? { quote: assessment.evidenceQuote } : {}),
+		...(assessment.impersonatedBrand ? { impersonates: assessment.impersonatedBrand } : {}),
+		fields: (assessment.collectionFields ?? []).map(describeDataEntryField),
+		pageUrl,
+	};
+}
+
+function visitOf(submission: Submission | undefined): DossierVisit | undefined {
+	const visit = submission?.data.kind === "website" ? submission.data.website.visit : undefined;
+	if (!visit) return undefined;
+	return { outcome: visit.outcome, ...(visit.failure ? { failure: visit.failure } : {}), actions: visit.actions.map(({ kind, text }) => ({ kind, text })) };
+}
+
 function registeredAt(submission: Submission | undefined): string | undefined {
 	if (submission?.data.kind !== "website") return undefined;
 	return submission.data.website.whois?.rdap?.events?.registration;
@@ -149,8 +192,10 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 		const submission = await loadSubmission(member.submissionId);
 		const reports: DossierProviderReport[] = [];
 		const impersonates = new Set<string>();
+		let reportText: string | undefined;
 		for (const report of await listReports(member.submissionId)) {
 			if (report.legalBrandUrl) impersonates.add(hostOf(report.legalBrandUrl));
+			if (!report.idempotencyKey && report.description) reportText = report.description;
 			const [routes, targets, runs] = await Promise.all([listRoutes(report.id), listTargets(report.id), listRuns(report.id)]);
 			for (const route of routes) {
 				if (isAuthorityRoute(route) || isPreservationRoute(route)) continue;
@@ -177,6 +222,8 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 				size: artifact.size ?? 0,
 				...(artifact.archivedAt ? { archivedAt: artifact.archivedAt.toISOString() } : {}),
 			}));
+		const verdict = verdictOf(submission);
+		const visit = visitOf(submission);
 		const registered = registeredAt(submission);
 		const registrar = registrarName(submission);
 		sites.push({
@@ -188,7 +235,10 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 			...(registrar ? { registrar } : {}),
 			dns: siteDns(submission),
 			dataDestinations: dataDestinations(submission),
-			impersonates: [...impersonates].sort(),
+			...(verdict ? { verdict } : {}),
+			...(visit ? { visit } : {}),
+			...(reportText ? { reportText } : {}),
+			impersonates: [...new Set([...impersonates, ...(verdict?.impersonates ? [verdict.impersonates.name] : [])])].sort(),
 			reports,
 			evidence,
 			indicators: member.indicators.map(({ kind, value, links, evidence: indicatorEvidence }) => ({ kind, value, links, evidence: indicatorEvidence })),

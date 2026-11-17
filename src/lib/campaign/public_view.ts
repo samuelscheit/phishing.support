@@ -24,6 +24,10 @@ export type PublicCampaignSite = {
 	thumbnailUrl?: string;
 	screenshotUrl?: string;
 	asks: string[];
+	/** Why the page was judged phishing: the page's own words and the fields it collects with. */
+	verdict?: { finding: string; basis?: string; quote?: string; impersonates?: string; fields: string[] };
+	/** Where the synthetic values our visit entered went. */
+	sent: Array<{ url: string; method: string; fields: string[]; sameSite: boolean }>;
 	reports: Array<{ provider: string; channel: string; state: PublicReportState; reportedAt?: string; ticket?: string }>;
 	evidence: Array<{ name: string; size: number; sha256: string; url: string }>;
 	/** The furthest any provider got: confirmed, reported, or not reported yet. */
@@ -179,6 +183,14 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 			...(facts?.thumbnailArtifactId ? { thumbnailUrl: artifactUrl(facts.thumbnailArtifactId.toString()) } : {}),
 			...(screenshot ? { screenshotUrl: artifactUrl(screenshot.artifactId) } : {}),
 			asks: [...new Set(site.dataDestinations.flatMap((destination) => destination.fields))].map((field) => CANARY_FIELD_LABEL[field as CanaryField] ?? field),
+			...(site.verdict ? { verdict: {
+				finding: site.verdict.finding,
+				...(site.verdict.basis ? { basis: site.verdict.basis } : {}),
+				...(site.verdict.quote ? { quote: site.verdict.quote } : {}),
+				...(site.verdict.impersonates ? { impersonates: site.verdict.impersonates.name } : {}),
+				fields: site.verdict.fields,
+			} } : {}),
+			sent: site.dataDestinations.map((destination) => ({ ...destination, fields: destination.fields.map((field) => CANARY_FIELD_LABEL[field as CanaryField] ?? field) })),
 			reports,
 			evidence: evidence.map((file) => ({ name: file.name, size: file.size, sha256: file.sha256, url: artifactUrl(file.artifactId) })),
 			takedown: takedownOf(reports),

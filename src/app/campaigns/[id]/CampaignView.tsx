@@ -171,6 +171,26 @@ function SiteDetail({ campaign, index, onStep }: { campaign: PublicCampaign; ind
 						{site.screenshotUrl && <> <a href={site.screenshotUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Full capture with address and time</a></>}
 					</p>
 				</div>
+				{site.verdict && (
+					<div className="space-y-2 rounded-lg border bg-muted/30 p-4 text-sm">
+						<h3 className="font-semibold">Why it is phishing</h3>
+						<p>
+							{site.verdict.basis === "credential_theft" ? "It collects sign-in credentials" : site.verdict.basis === "payment_fraud" ? "It takes payment or card data" : `Finding: ${site.verdict.finding}`}
+							{site.verdict.impersonates ? `, imitating ${site.verdict.impersonates}` : ""}.
+						</p>
+						{site.verdict.quote && <blockquote className="border-l-2 pl-3 italic text-muted-foreground">&ldquo;{site.verdict.quote}&rdquo;</blockquote>}
+						{site.verdict.fields.length > 0 && <p className="text-muted-foreground">Fields it asks for: {site.verdict.fields.join(", ")}</p>}
+						{site.sent.length > 0 && (
+							<ul className="space-y-1 pt-1">
+								{site.sent.map((sent) => (
+									<li key={`${sent.method} ${sent.url}`} className="break-all">
+										Our synthetic {sent.fields.join(", ")} went to <span className="font-mono text-xs">{sent.method} {sent.url}</span>{sent.sameSite ? " (the site's own server)" : ""}.
+									</li>
+								))}
+							</ul>
+						)}
+					</div>
+				)}
 				<dl className="grid grid-cols-[8.5rem_1fr] gap-x-4 gap-y-2 text-sm">
 					<dt className="text-muted-foreground">Address</dt><dd className="break-all font-mono text-[13px]">{site.url.replace(/^http/, "hxxp")}</dd>
 					<dt className="text-muted-foreground">First seen</dt><dd>{formatUtcDateTime(site.firstSeenAt)}</dd>

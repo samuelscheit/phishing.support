@@ -3,7 +3,7 @@ import { approvalDraftOf } from "../abuse/persistence/approvals";
 import { CampaignRepository } from "../campaign/repository";
 import { AUTHORITIES, authorityById } from "./authorities";
 import { buildDossier, type Dossier } from "./dossier";
-import { describeIndicator } from "./render";
+import { describeIndicatorEnglish } from "./archive_text";
 import { authorityIdOf, isAuthorityRoute, isPreservationRoute, referralMailKind, reportedSubmissionIds } from "./routes";
 import { unreportedSites } from "./service";
 
@@ -87,7 +87,7 @@ export async function getCampaignOverview(campaignId: bigint): Promise<CampaignO
 		value: indicator.value,
 		links: indicator.links,
 		siteCount: indicator.sites.length,
-		description: describeIndicator(indicator),
+		description: describeIndicatorEnglish(indicator),
 	}));
 	const authorities = AUTHORITIES.map((authority) => {
 		const own = routes.filter((route) => authorityIdOf(route) === authority.id);

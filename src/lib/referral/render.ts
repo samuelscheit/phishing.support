@@ -1,6 +1,6 @@
-import type { Dossier, DossierIndicator, DossierProvider, DossierSite } from "./dossier";
+/** The German wording of the complaint mails to German authorities; the evidence archive has its own English texts (archive_text.ts). */
+import type { DossierIndicator, DossierProvider, DossierSite } from "./dossier";
 import { GENERIC_LEAD } from "./provider_leads";
-import { publicCampaignUrl } from "../campaign/urls";
 
 const BERLIN = new Intl.DateTimeFormat("de-DE", {
 	timeZone: "Europe/Berlin",
@@ -110,62 +110,4 @@ export function providerLines(providers: readonly DossierProvider[]): string[] {
 		return `- ${lead} (${plural(provider.siteCount, "Seite", "Seiten")}${provider.contacts.length ? `; Abuse-Kontakt ${provider.contacts.join(", ")}` : ""})`;
 	});
 	return [...new Set(lines)];
-}
-
-function csvCell(value: unknown): string {
-	const cell = value === undefined || value === null ? "" : String(value);
-	return /[";\n\r]/.test(cell) ? `"${cell.replaceAll("\"", "\"\"")}"` : cell;
-}
-
-function csv(rows: unknown[][]): string {
-	// Semicolons and a BOM make the file open as columns in German Excel.
-	return `\uFEFF${rows.map((row) => row.map(csvCell).join(";")).join("\r\n")}\r\n`;
-}
-
-export function sitesCsv(sites: readonly DossierSite[]): string {
-	return csv([
-		["Nr", "URL", "Host", "Erfasst (UTC)", "Registriert", "Registrar", "Imitiert", "Sperrmeldungen", "Verbindende Merkmale", "Beweisdateien (SHA-256)", "Fall-ID phishing.support"],
-		...sites.map((site, index) => [
-			index + 1,
-			site.url,
-			site.host,
-			site.firstSeenAt,
-			site.registeredAt ?? "",
-			site.registrar ?? "",
-			site.impersonates.join(", "),
-			site.reports.map((report) => `${report.provider} (${report.target}): ${report.status}${report.reportedAt ? ` ${report.reportedAt}` : ""}${report.confirmationId ? ` #${report.confirmationId}` : ""}`).join(" | "),
-			site.indicators.filter((indicator) => indicator.links).map((indicator) => `${indicator.kind}:${indicator.value}`).join(" | "),
-			site.evidence.map((file) => `${file.name} ${file.sha256}`).join(" | "),
-			site.submissionId,
-		]),
-	]);
-}
-
-export function indicatorsCsv(indicators: readonly DossierIndicator[]): string {
-	return csv([
-		["Art", "Wert", "Verbindet Seiten", "Beschreibung", "Seiten"],
-		...indicators.map((indicator) => [indicator.kind, indicator.value, indicator.links ? "ja" : "nein", describeIndicator(indicator), indicator.sites.join(" | ")]),
-	]);
-}
-
-/** The dossier as a self-contained text file, without salutation or signature. */
-export function dossierText(dossier: Dossier): string {
-	return [
-		`Dossier Phishing-Kampagne ${dossier.campaignId} (phishing.support), erstellt ${germanDateTime(dossier.generatedAt)}`,
-		"",
-		`${plural(dossier.sites.length, "Website", "Websites")}, erfasst zwischen ${germanDateTime(dossier.firstSeenAt)} und ${germanDateTime(dossier.lastSeenAt)}. Laufend aktualisierte Übersicht: ${publicCampaignUrl(dossier.campaignId)}`,
-		dossier.impersonates.length ? `Imitierte Marken/Dienste: ${dossier.impersonates.join(", ")}.` : "",
-		dossier.dataRequested.length ? `Abgefragte Daten: ${dossier.dataRequested.join(", ")}.` : "",
-		"",
-		"Verbindende Merkmale",
-		...indicatorLines(dossier.indicators),
-		"",
-		"Websites",
-		...dossier.sites.map(siteLine),
-		"",
-		"Ermittlungsansätze bei den Anbietern",
-		...providerLines(dossier.providers),
-		"",
-		"Beweismittel je Website: MHTML-Mitschnitt, Bildschirmfoto, Bildschirmfoto mit eingeblendeter URL und Zeit, Manifest mit SHA-256 aller Dateien und RFC-3161-Zeitstempel einer unabhängigen Zeitstempelstelle über das Manifest. Wo die Seite mit synthetischen Werten durchlaufen wurde, zusätzlich das zeitgestempelte Besuchsprotokoll (visit-protocol.txt, visit-record.json, visit-manifest.json, visit-manifest.tsr): welcher Wert wann in welches Feld eingegeben wurde und welche Anfrage ihn wohin übertrug, mit vollständigem Inhalt und der Antwort des Servers. Die Prüfsummen stehen in Websites.csv.",
-	].filter((line, index, lines) => line !== "" || lines[index - 1] !== "").join("\n").trim();
 }

@@ -163,9 +163,9 @@ describe("criminal referral of a campaign", () => {
 		expect(draft.allowedUrls).toContain("https://paket-dhl-info.org/login");
 
 		const attachments = await AbuseRepository.listRouteArtifacts(route.id, ["referral_attachment"]);
-		expect(attachments.map((artifact) => artifact.name)).toEqual(["Websites.csv", "Merkmale.csv"]);
+		expect(attachments.map((artifact) => artifact.name)).toEqual(["sites.csv", "indicators.csv"]);
 		const sites = Buffer.from(attachments[0]!.blob).toString("utf8");
-		expect(sites.startsWith("\uFEFFNr;URL;Host;")).toBe(true);
+		expect(sites.startsWith("No,URL,Host,")).toBe(true);
 		expect(sites.split("\r\n").filter(Boolean)).toHaveLength(4);
 
 		await expect(prepareComplaint(campaignId, "by-zcb", dependencies)).rejects.toThrow(ReferralError);
@@ -258,8 +258,8 @@ describe("criminal referral of a campaign", () => {
 		const raw = await deliver(route.id);
 		expect(raw).toContain("To: cybercrime@gensta-ba.bayern.de");
 		expect(raw).toContain("vorab telefonisch");
-		expect(raw).toContain("Websites.csv");
-		expect(raw).toContain("Merkmale.csv");
+		expect(raw).toContain("filename=sites.csv");
+		expect(raw).toContain("filename=indicators.csv");
 		expect((await AbuseRepository.getRoute(route.id))?.status).toBe("awaiting_provider_reply");
 
 		const [outbound] = (await AbuseRepository.listMailForReport(route.reportId)).filter((message) => message.direction === "outbound");

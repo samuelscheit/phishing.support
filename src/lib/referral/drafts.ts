@@ -39,7 +39,7 @@ function signature(complainant: Complainant): string[] {
 function siteList(sites: readonly DossierSite[]): string[] {
 	const listed = sites.slice(0, MAX_SITES_IN_MAIL).map(siteLine);
 	const rest = sites.length - listed.length;
-	return rest > 0 ? [...listed, `… und ${rest} weitere in der Anlage Websites.csv.`] : listed;
+	return rest > 0 ? [...listed, `… und ${rest} weitere in der Anlage sites.csv.`] : listed;
 }
 
 function campaignSummary(dossier: Dossier, sites: readonly DossierSite[]): string {
@@ -56,7 +56,7 @@ function campaignSummary(dossier: Dossier, sites: readonly DossierSite[]): strin
 function evidenceParagraph(download: DraftContext["download"]): string[] {
 	return [
 		"Beweismittel",
-		"Für jede Website liegen ein MHTML-Mitschnitt, ein Bildschirmfoto mit eingeblendeter URL und Uhrzeit, ein Manifest mit den SHA-256-Prüfsummen aller Dateien und ein RFC-3161-Zeitstempel einer unabhängigen Zeitstempelstelle über dieses Manifest vor. Wo unser Browser die Seite mit synthetischen Werten durchlaufen hat, belegt ein ebenso zeitgestempeltes Besuchsprotokoll (visit-protocol.txt, visit-record.json), welcher Wert wann in welches Feld eingegeben wurde und welche Anfrage ihn wohin übertrug, mit vollständigem Inhalt und der Antwort des Servers. Die Prüfsummen stehen in der Anlage Websites.csv; die Dateien selbst können Sie hier als ZIP-Archiv herunterladen:",
+		"Für jede Website liegen ein MHTML-Mitschnitt, ein Bildschirmfoto mit eingeblendeter URL und Uhrzeit, ein Manifest mit den SHA-256-Prüfsummen aller Dateien und ein RFC-3161-Zeitstempel einer unabhängigen Zeitstempelstelle über dieses Manifest vor. Wo unser Browser die Seite mit synthetischen Werten durchlaufen hat, belegt ein ebenso zeitgestempeltes Besuchsprotokoll (visit-protocol.txt, visit-record.json), welcher Wert wann in welches Feld eingegeben wurde und welche Anfrage ihn wohin übertrug, mit vollständigem Inhalt und der Antwort des Servers. Die Prüfsummen stehen in der Anlage sites.csv. Das ZIP-Archiv enthält die Dateien und je Website eine Auswertung (analysis.txt: warum die Seite Phishing ist, was eingegeben und wohin es gesendet wurde); Archiv und Auswertungen sind englisch, damit sie auch Anbieter und ausländische Stellen lesen können. Herunterladen können Sie es hier:",
 		download.url,
 		`(Der Link ist bis ${germanDate(download.expiresAt.toISOString())} gültig. Auf Wunsch übermitteln wir die Dateien auch auf anderem Weg.)`,
 	];
@@ -97,7 +97,7 @@ export function complaintDraft(context: DraftContext & { authority: Authority })
 		"Weiteres Vorgehen",
 		`Bitte teilen Sie uns das Aktenzeichen mit. Neue Websites derselben Kampagne würden wir als Nachtrag zu diesem Verfahren übersenden; bitte nennen Sie uns dafür, wenn möglich, eine Ansprechperson oder eine Adresse. Antworten auf diese E-Mail erreichen uns direkt. Sollte die Anzeige bei ${authority.name} nicht richtig sein, bitten wir um Weiterleitung an die zuständige Stelle.`,
 		"",
-		"Anlagen: Websites.csv (alle Websites mit Prüfsummen der Beweisdateien), Merkmale.csv (alle Merkmale mit Fundstellen)",
+		"Anlagen: sites.csv (alle Websites mit Einstufung und Prüfsummen der Beweisdateien), indicators.csv (alle Merkmale mit Fundstellen)",
 		"",
 		...signature(complainant),
 	].join("\n");
@@ -125,7 +125,7 @@ export function supplementDraft(context: DraftContext & { authority: Authority; 
 		"",
 		...evidenceParagraph(context.download),
 		"",
-		"Anlagen: Websites.csv (alle Websites der Kampagne), Merkmale.csv",
+		"Anlagen: sites.csv (alle Websites der Kampagne), indicators.csv",
 		"",
 		...signature(complainant),
 	].join("\n");

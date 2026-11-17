@@ -371,7 +371,7 @@ describe("a visit through a multi-page kit", () => {
 		]);
 	});
 
-	test("a page that is already reportable ends the judging: later pages are not classified", async () => {
+	test("a page that is already reportable ends the judging: later pages are not classified, but are kept as evidence", async () => {
 		const modelCalls: Array<{ kind: "classification" | "analysis"; url: string }> = [];
 		const id = await websiteSubmission(375914181917937698n, CONSENT);
 		const visit = visited(liveCapture(CONSENT), METAMASK_VISIT);
@@ -379,6 +379,11 @@ describe("a visit through a multi-page kit", () => {
 		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({ answers, captures: [], modelCalls, capture: () => visit.archive }));
 		expect(modelCalls.map(({ url }) => url)).toEqual([CONSENT, GET_STARTED, GET_STARTED]);
 		expect(websiteData(await SubmissionsEntity.get(id))?.archiveUrl).toBe(GET_STARTED);
+		// The recovery form after the reportable page is where the values went in: it is evidence too.
+		const names = (await ArtifactsEntity.listForSubmission(id)).map(({ name }) => name);
+		expect(names).toEqual(expect.arrayContaining(["website-step3.mhtml", "website-step3-stamped.png", "evidence-step3-manifest.json"]));
+		const manifest = JSON.parse((await ArtifactsEntity.get((await ArtifactsEntity.listForSubmission(id)).find(({ name }) => name === "evidence-step3-manifest.json")!.id))!.blob.toString("utf8"));
+		expect(manifest.capture.capturedUrl).toBe(RECOVERY);
 	});
 
 	test("a visit that did not finish leaves a case with nothing reportable inconclusive, retried from the submitted URL; a later visit that finishes reports it", async () => {

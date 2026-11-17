@@ -3,7 +3,7 @@ import sanitizeFilename from "sanitize-filename";
 
 import { ArtifactsEntity } from "../db/entities";
 import type { Dossier } from "./dossier";
-import { dossierText, indicatorsCsv, sitesCsv } from "./render";
+import { dossierText, indicatorsCsv, siteAnalysisText, sitesCsv } from "./archive_text";
 
 export type DossierArchiveDependencies = {
 	loadArtifact?: (artifactId: bigint) => Promise<{ blob: Uint8Array | Buffer } | undefined>;
@@ -12,8 +12,8 @@ export type DossierArchiveDependencies = {
 /** The small files every referral mail carries and every archive starts with. */
 export function dossierAttachments(dossier: Dossier): Array<{ name: string; mimeType: string; content: Buffer }> {
 	return [
-		{ name: "Websites.csv", mimeType: "text/csv", content: Buffer.from(sitesCsv(dossier.sites), "utf8") },
-		{ name: "Merkmale.csv", mimeType: "text/csv", content: Buffer.from(indicatorsCsv(dossier.indicators), "utf8") },
+		{ name: "sites.csv", mimeType: "text/csv", content: Buffer.from(sitesCsv(dossier.sites), "utf8") },
+		{ name: "indicators.csv", mimeType: "text/csv", content: Buffer.from(indicatorsCsv(dossier.indicators), "utf8") },
 	];
 }
 
@@ -27,12 +27,13 @@ export async function buildDossierArchive(dossier: Dossier, dependencies: Dossie
 	const loadArtifact = dependencies.loadArtifact ?? ArtifactsEntity.get;
 	const writer = new ZipWriter(new Uint8ArrayWriter());
 	const add = (name: string, content: Uint8Array) => writer.add(name, new Uint8ArrayReader(content));
-	await add("Dossier.txt", Buffer.from(dossierText(dossier), "utf8"));
+	await add("dossier.txt", Buffer.from(dossierText(dossier), "utf8"));
 	for (const attachment of dossierAttachments(dossier)) await add(attachment.name, attachment.content);
-	await add("Dossier.json", Buffer.from(JSON.stringify(dossier, null, 2), "utf8"));
+	await add("dossier.json", Buffer.from(JSON.stringify(dossier, null, 2), "utf8"));
 	const missing: string[] = [];
 	for (const [index, site] of dossier.sites.entries()) {
-		const folder = `Beweise/${String(index + 1).padStart(3, "0")}-${sanitizeFilename(site.host) || site.submissionId}`;
+		const folder = `evidence/${String(index + 1).padStart(3, "0")}-${sanitizeFilename(site.host) || site.submissionId}`;
+		await add(`${folder}/analysis.txt`, Buffer.from(siteAnalysisText(site), "utf8"));
 		const used = new Set<string>();
 		// A case captured again keeps every capture: a repeated name gets its artifact id, the newest keeps the plain name.
 		const newestFirst = [...site.evidence].sort((a, b) => (BigInt(b.artifactId) > BigInt(a.artifactId) ? 1 : -1));
@@ -41,7 +42,7 @@ export async function buildDossierArchive(dossier: Dossier, dependencies: Dossie
 			const bytes = artifact ? Buffer.from(artifact.blob) : undefined;
 			const hash = bytes ? new Bun.CryptoHasher("sha256").update(bytes).digest("hex") : undefined;
 			if (!bytes || hash !== file.sha256) {
-				missing.push(`${folder}/${file.name}: ${bytes ? "gespeicherte Bytes passen nicht zur Prüfsumme" : "nicht mehr gespeichert"}`);
+				missing.push(`${folder}/${file.name}: ${bytes ? "the stored bytes do not match the recorded SHA-256" : "no longer stored"}`);
 				continue;
 			}
 			const name = sanitizeFilename(file.name) || file.artifactId;
@@ -50,6 +51,6 @@ export async function buildDossierArchive(dossier: Dossier, dependencies: Dossie
 			await add(`${folder}/${unique}`, bytes);
 		}
 	}
-	if (missing.length) await add("Fehlende-Dateien.txt", Buffer.from(`${missing.join("\n")}\n`, "utf8"));
+	if (missing.length) await add("missing-files.txt", Buffer.from(`${missing.join("\n")}\n`, "utf8"));
 	return writer.close();
 }

@@ -365,6 +365,11 @@ async function visitWebsite(params: {
 			const inconclusive = !isReportable(classified.classification) && recording.agent.outcome !== "completed"
 				? recording.agent.failure ?? "The visiting agent did not finish the site's flow."
 				: undefined;
+			// The verdict needs no later page, but the evidence does: the form the values were
+			// typed into and the pages after it show what the site took and where it went.
+			for (const later of archives.slice(position + 1)) {
+				await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive: later, evidence: await websiteEvidence(submissionId, url, later, dependencies) });
+			}
 			return { ...base, archive, capturedHop, classification: classified.classification, assessments, pages: narrativePages(position), ...(inconclusive ? { inconclusive } : {}) };
 		}
 	}
