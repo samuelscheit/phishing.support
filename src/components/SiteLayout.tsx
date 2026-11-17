@@ -37,6 +37,16 @@ export function SiteFooter() {
 								About
 							</Link>
 						</li>
+						<li>
+							<Link href="/impressum" className="text-muted-foreground hover:text-primary hover:underline">
+								Impressum
+							</Link>
+						</li>
+						<li>
+							<Link href="/datenschutz" className="text-muted-foreground hover:text-primary hover:underline">
+								Datenschutz
+							</Link>
+						</li>
 					</ul>
 				</nav>
 			</div>

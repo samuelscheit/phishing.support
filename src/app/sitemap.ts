@@ -12,6 +12,8 @@ const STATIC_PAGES: Array<{ path: string; priority: number; changeFrequency: Met
 	...GUIDES.map(({ slug }) => ({ path: `/${slug}`, priority: 0.9, changeFrequency: "monthly" as const })),
 	{ path: "/abuse-reporting", priority: 0.8, changeFrequency: "monthly" },
 	{ path: "/info", priority: 0.5, changeFrequency: "monthly" },
+	{ path: "/impressum", priority: 0.2, changeFrequency: "yearly" },
+	{ path: "/datenschutz", priority: 0.2, changeFrequency: "yearly" },
 ];
 
 /** One sitemap holds at most 50,000 URLs; the newest submissions fill what the static pages leave. */
