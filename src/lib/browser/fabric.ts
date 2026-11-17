@@ -16,7 +16,7 @@ import {
 } from "../fabric/session";
 import { asError, errorText } from "../error_text";
 
-type FabricScalar = string | number | boolean | null;
+export type FabricScalar = string | number | boolean | null;
 type FabricEnvironment = Readonly<Record<string, string | undefined>>;
 
 /**
@@ -31,9 +31,24 @@ export type FabricEgress = "phishing" | "reporting" | "residential";
 /** How each egress appears to a visited site, for logs and evidence. */
 export const FABRIC_EGRESS_LABEL: Readonly<Record<FabricEgress, string>> = { phishing: "Tor exit", reporting: "server IP", residential: "residential exit" };
 
-export const DEFAULT_FABRIC_PHISHING_EGRESS_POLICY_REF = "egress_tor-egress@1";
-export const DEFAULT_FABRIC_REPORTING_EGRESS_POLICY_REF = "egress_direct-egress@1";
-export const DEFAULT_FABRIC_RESIDENTIAL_EGRESS_POLICY_REF = "egress_mac-exit@1";
+/**
+ * Defaults are Browser Fabric's built-ins, except the residential exit: Fabric
+ * has no such built-in, so the deployment catalog must declare it (README,
+ * "Browser Fabric catalog").
+ */
+export const FABRIC_DEFAULTS = {
+	runtime: "chrome",
+	profileRef: "profile_default",
+	/** Headful Chrome on Xvfb: phishing kits and provider forms cloak headless browsers. */
+	recipeRef: "recipe_chrome@1",
+	artifactPolicyRef: "artifact-policy_standard-30-days@1",
+	ttlSeconds: 900,
+	egressPolicyRefs: {
+		phishing: "egress_tor@1",
+		reporting: "egress_direct@1",
+		residential: "egress_residential@1",
+	},
+} as const satisfies Omit<FabricBrowserConfig, "baseUrl" | "project">;
 
 /** Per-session selection shared by every Fabric acquire function. */
 export interface FabricSessionOptions {
@@ -47,9 +62,10 @@ type FabricFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Res
 export interface FabricBrowserConfig {
 	baseUrl: string;
 	project: string;
-	profileRef?: string;
+	profileRef: string;
 	recipeRef: string;
-	runtime: "rebrowser-puppeteer";
+	/** Fabric's browser runtime; the CDP client (Rebrowser, Patchright, the task agent) is this app's choice. */
+	runtime: string;
 	egressPolicyRefs: Readonly<Record<FabricEgress, string>>;
 	artifactPolicyRef: string;
 	ttlSeconds: number;
@@ -73,18 +89,16 @@ type FabricSessionResponse = {
 	status: FabricSessionStatus;
 };
 
-/** A Fabric-owned browser lease with no exposed CDP capability. */
-export interface FabricBrowserSessionLease {
+/**
+ * A Fabric browser lease for a raw-CDP client (the browser task agent). The
+ * lease heartbeats itself until it is released or cancelled.
+ */
+export interface FabricCdpSession {
 	id: string;
-	heartbeat(): Promise<void>;
+	/** Opaque relay route; it carries no Fabric capability. */
+	cdpEndpoint: string;
 	release(): Promise<void>;
 	cancel(): Promise<void>;
-}
-
-/** A Fabric browser presented to Skyvern through the fixed internal relay. */
-export interface FabricSkyvernBrowserSession extends FabricBrowserSessionLease {
-	/** Opaque relay route; it contains no Fabric capability query parameter. */
-	browserAddress: string;
 }
 
 export interface FabricPatchrightSession {
@@ -94,15 +108,6 @@ export interface FabricPatchrightSession {
 	release(): Promise<void>;
 	cancel(): Promise<void>;
 }
-
-export type FabricSkyvernTaskBinding = {
-	/** Opaque Fabric browser-session ID retained next to the local Skyvern run. */
-	sessionId: string;
-	/** Fixed-origin relay URL that hides Fabric's one-time CDP capability. */
-	browserAddress: string;
-	release(): Promise<void>;
-	cancel(): Promise<void>;
-};
 
 const TERMINAL_SESSION_STATUSES = new Set<FabricSessionStatus>([
 	"released",
@@ -118,25 +123,19 @@ function requiredEnvironment(environment: FabricEnvironment, name: string): stri
 	return value;
 }
 
-function requiredReference(environment: FabricEnvironment, name: string, prefix: string): string {
-	const value = requiredEnvironment(environment, name);
-	if (!new RegExp(`^${prefix}[A-Za-z0-9][A-Za-z0-9_.@-]{0,255}$`).test(value)) {
-		throw new Error(`${name} must be a valid ${prefix} reference`);
-	}
+/**
+ * A Fabric reference from the environment, or its default. Versioned catalog
+ * kinds (recipes, egress policies, artifact policies) must name their version
+ * (`recipe_chrome@1`); a bare name would let Fabric pick whatever is current.
+ */
+function reference(environment: FabricEnvironment, name: string, prefix: string, fallback?: string, versioned = true): string {
+	const value = environment[name]?.trim() || fallback;
+	if (!value) throw new Error(`${name} is required when FABRIC_API_URL is configured`);
+	const pattern = versioned
+		? new RegExp(`^${prefix}[a-z0-9][a-z0-9-]{0,62}@[1-9][0-9]{0,8}$`)
+		: new RegExp(`^${prefix}[A-Za-z0-9][A-Za-z0-9_.@-]{0,255}$`);
+	if (!pattern.test(value)) throw new Error(`${name} must be a valid ${prefix} reference${versioned ? " with a version (name@1)" : ""}`);
 	return value;
-}
-
-function optionalReference(environment: FabricEnvironment, name: string, prefix: string): string | undefined {
-	const value = environment[name]?.trim();
-	if (!value) return undefined;
-	if (!new RegExp(`^${prefix}[A-Za-z0-9][A-Za-z0-9_.@-]{0,255}$`).test(value)) {
-		throw new Error(`${name} must be a valid ${prefix} reference`);
-	}
-	return value;
-}
-
-function referenceWithDefault(environment: FabricEnvironment, name: string, prefix: string, fallback: string): string {
-	return optionalReference(environment, name, prefix) ?? fallback;
 }
 
 function fabricApiBaseUrl(value: string): string {
@@ -166,25 +165,27 @@ export function fabricBrowserConfigFromEnvironment(options: { environment?: Fabr
 	const apiUrl = environment.FABRIC_API_URL?.trim();
 	if (!apiUrl) return undefined;
 
-	const profileRef = optionalReference(environment, "FABRIC_PHISHING_PROFILE_REF", "profile_");
-	if (!profileRef) throw new Error("FABRIC_PHISHING_PROFILE_REF is required for every Phishing Support Fabric browser operation");
-	const ttlSeconds = Number(requiredEnvironment(environment, "FABRIC_PHISHING_TTL_SECONDS"));
+	const runtime = environment.FABRIC_BROWSER_RUNTIME?.trim() || FABRIC_DEFAULTS.runtime;
+	if (!/^[a-z][a-z0-9-]{0,62}$/.test(runtime)) throw new Error("FABRIC_BROWSER_RUNTIME must be a Fabric runtime name such as chrome");
+	const ttlText = environment.FABRIC_TTL_SECONDS?.trim();
+	const ttlSeconds = ttlText ? Number(ttlText) : FABRIC_DEFAULTS.ttlSeconds;
 	if (!Number.isInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > 14_400) {
-		throw new Error("FABRIC_PHISHING_TTL_SECONDS must be an integer from 60 to 14400");
+		throw new Error("FABRIC_TTL_SECONDS must be an integer from 60 to 14400");
 	}
+	const egress = FABRIC_DEFAULTS.egressPolicyRefs;
 
 	return {
 		baseUrl: fabricApiBaseUrl(apiUrl),
-		project: requiredReference(environment, "FABRIC_PROJECT", "project_"),
-		profileRef,
-		recipeRef: requiredReference(environment, "FABRIC_PHISHING_RECIPE_REF", "recipe_"),
-		runtime: "rebrowser-puppeteer",
+		project: reference(environment, "FABRIC_PROJECT", "project_", undefined, false),
+		profileRef: reference(environment, "FABRIC_PROFILE_REF", "profile_", FABRIC_DEFAULTS.profileRef, false),
+		recipeRef: reference(environment, "FABRIC_RECIPE_REF", "recipe_", FABRIC_DEFAULTS.recipeRef),
+		runtime,
 		egressPolicyRefs: {
-			phishing: referenceWithDefault(environment, "FABRIC_PHISHING_EGRESS_POLICY_REF", "egress_", DEFAULT_FABRIC_PHISHING_EGRESS_POLICY_REF),
-			reporting: referenceWithDefault(environment, "FABRIC_REPORTING_EGRESS_POLICY_REF", "egress_", DEFAULT_FABRIC_REPORTING_EGRESS_POLICY_REF),
-			residential: referenceWithDefault(environment, "FABRIC_RESIDENTIAL_EGRESS_POLICY_REF", "egress_", DEFAULT_FABRIC_RESIDENTIAL_EGRESS_POLICY_REF),
+			phishing: reference(environment, "FABRIC_PHISHING_EGRESS_POLICY_REF", "egress_", egress.phishing),
+			reporting: reference(environment, "FABRIC_REPORTING_EGRESS_POLICY_REF", "egress_", egress.reporting),
+			residential: reference(environment, "FABRIC_RESIDENTIAL_EGRESS_POLICY_REF", "egress_", egress.residential),
 		},
-		artifactPolicyRef: requiredReference(environment, "FABRIC_PHISHING_ARTIFACT_POLICY_REF", "artifact-policy_"),
+		artifactPolicyRef: reference(environment, "FABRIC_ARTIFACT_POLICY_REF", "artifact-policy_", FABRIC_DEFAULTS.artifactPolicyRef),
 		ttlSeconds,
 	};
 }
@@ -251,7 +252,7 @@ export function buildFabricBrowserSessionCreatePayload(
 		idempotencyKey,
 		runtime: config.runtime,
 		browserRecipeRef: config.recipeRef,
-		...(config.profileRef === undefined ? {} : { profileRef: config.profileRef }),
+		profileRef: config.profileRef,
 		leaseMode,
 		egressPolicyRef: config.egressPolicyRefs[egress],
 		artifactPolicyRef: config.artifactPolicyRef,
@@ -335,7 +336,7 @@ export function isRelayCapacityError(error: unknown): boolean {
 
 /**
  * Open a CDP client through the relay, waiting while the relay is at capacity
- * (long-running Skyvern probes can hold several connections). The allocated
+ * (long-running agent visits can hold several connections). The allocated
  * session is kept alive meanwhile, so a busy relay delays work instead of
  * failing it.
  */
@@ -387,77 +388,48 @@ async function allowInsecureCertificates(browser: any): Promise<void> {
 	}
 }
 
-/** Acquire a Fabric browser lease without exposing Fabric's CDP capability. */
-export async function acquireFabricBrowserSession(
-	metadata: Record<string, FabricScalar> = {},
-	options: FabricSessionOptions = {},
-): Promise<FabricBrowserSessionLease> {
-	const config = fabricBrowserConfigFromEnvironment();
-	if (!config) throw new Error("FABRIC_API_URL is required; Phishing Support never launches a local browser");
-	const sessionId = await acquireFabricSession(config, metadata, options);
-	let finished = false;
-	const finish = async (action: "release" | "cancel") => {
-		if (finished) return;
-		finished = true;
-		await sessionAction(config, sessionId, action).catch(() => undefined);
-	};
-	return {
-		id: sessionId,
-		heartbeat: async () => {
-			if (!finished) await sessionAction(config, sessionId, "heartbeat");
-		},
-		release: () => finish("release"),
-		cancel: () => finish("cancel"),
-	};
-}
-
-/** Allocate a disposable Fabric browser for one dynamic Skyvern task. */
-export async function acquireFabricSkyvernBrowserSession(
-	metadata: Record<string, FabricScalar> = {},
-	options: Pick<FabricSessionOptions, "egress" | "maxExternalConnections"> = {},
-): Promise<FabricSkyvernBrowserSession> {
-	const lease = await acquireFabricBrowserSession(metadata, { ...options, leaseMode: "clone" });
-	try {
-		return { ...lease, browserAddress: fabricRelayEndpoint(lease.id) };
-	} catch (error) {
-		await lease.cancel().catch(() => undefined);
-		throw error;
-	}
-}
-
-/** Bind a dynamic Skyvern task to a Fabric-owned browser without leaking a capability. */
-export async function acquireFabricSkyvernTaskBinding(
-	metadata: Record<string, FabricScalar> = {},
-	options: Pick<FabricSessionOptions, "egress" | "maxExternalConnections"> = {},
-): Promise<FabricSkyvernTaskBinding> {
-	const session = await acquireFabricSkyvernBrowserSession(metadata, options);
-	return {
-		sessionId: session.id,
-		browserAddress: session.browserAddress,
-		release: session.release,
-		cancel: session.cancel,
-	};
-}
-
-function lifecycleConfig(): FabricBrowserConfig {
-	const config = fabricBrowserConfigFromEnvironment();
+function requiredConfig(config = fabricBrowserConfigFromEnvironment()): FabricBrowserConfig {
 	if (!config) throw new Error("FABRIC_API_URL is required; Phishing Support never launches a local browser");
 	return config;
 }
 
-/** Renew a Fabric browser session while its dynamic Skyvern task remains active. */
-export async function heartbeatFabricBrowserSession(sessionId: string): Promise<void> {
-	await sessionAction(lifecycleConfig(), sessionId, "heartbeat");
+/**
+ * Lease a disposable (clone) Fabric browser for one raw-CDP client: the
+ * browser task agent connects to `cdpEndpoint` itself. The lease heartbeats
+ * until `release` (the work finished) or `cancel` (its outcome is unknown, so
+ * the browser must stop at once).
+ */
+export async function acquireFabricCdpSession(
+	metadata: Record<string, FabricScalar> = {},
+	options: Pick<FabricSessionOptions, "egress"> = {},
+	config: FabricBrowserConfig = requiredConfig(),
+): Promise<FabricCdpSession> {
+	const sessionId = await acquireFabricSession(config, metadata, { ...options, leaseMode: "clone" });
+	let cdpEndpoint: string;
+	try {
+		cdpEndpoint = fabricRelayEndpoint(sessionId);
+	} catch (error) {
+		await sessionAction(config, sessionId, "cancel").catch(() => undefined);
+		throw error;
+	}
+	const stopHeartbeat = startSessionHeartbeat(config, sessionId);
+	let finished = false;
+	const finish = async (action: "release" | "cancel") => {
+		if (finished) return;
+		finished = true;
+		stopHeartbeat();
+		await sessionAction(config, sessionId, action).catch(() => undefined);
+	};
+	return { id: sessionId, cdpEndpoint, release: () => finish("release"), cancel: () => finish("cancel") };
 }
 
-/** Release a Fabric browser only after its attached Skyvern task is terminal. */
-export async function releaseFabricBrowserSession(sessionId: string): Promise<void> {
-	await sessionAction(lifecycleConfig(), sessionId, "release");
-}
-
-/** Stop an ambiguous or interrupted companion before it can continue using a browser. */
+/**
+ * Stop a browser whose lease this process no longer holds in memory: a task
+ * run interrupted by a crash or a fenced job, found through its durable
+ * session ID.
+ */
 export async function cancelFabricBrowserSession(sessionId: string): Promise<void> {
-	await sessionAction(lifecycleConfig(), sessionId, "cancel");
+	await sessionAction(requiredConfig(), sessionId, "cancel");
 }
 
 /** Disconnect only this Patchright CDP client; never send Browser.close to Fabric Chromium. */
@@ -477,8 +449,7 @@ export async function acquireFabricPuppeteerBrowser(
 	metadata: Record<string, FabricScalar> = {},
 	options: FabricSessionOptions = {},
 ): Promise<{ browser: PuppeteerBrowser; sessionId: string; release(): Promise<void> }> {
-	const config = fabricBrowserConfigFromEnvironment();
-	if (!config) throw new Error("FABRIC_API_URL is required; Phishing Support never launches a local browser");
+	const config = requiredConfig();
 	const sessionId = await acquireFabricSession(config, metadata, options);
 	let browser: PuppeteerBrowser;
 	try {
@@ -512,19 +483,12 @@ export async function acquireFabricPuppeteerBrowser(
 	return { browser, sessionId, release };
 }
 
-/** Attach one additional client to an existing Fabric session without owning its lease. */
-export async function connectFabricPuppeteerClient(browserAddress: string): Promise<PuppeteerBrowser> {
-	const module = await import("rebrowser-puppeteer-core");
-	return module.connect({ browserWSEndpoint: browserAddress, acceptInsecureCerts: true });
-}
-
 /** Connect Patchright to Fabric's relay; Patchright close is disconnect + Fabric release. */
 export async function acquireFabricPatchrightSession(
 	metadata: Record<string, FabricScalar> = {},
 	options: FabricSessionOptions = {},
 ): Promise<FabricPatchrightSession> {
-	const config = fabricBrowserConfigFromEnvironment();
-	if (!config) throw new Error("FABRIC_API_URL is required; Phishing Support never launches a local browser");
+	const config = requiredConfig();
 	const sessionId = await acquireFabricSession(config, metadata, options);
 	let browser: any;
 	try {

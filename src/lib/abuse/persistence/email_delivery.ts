@@ -96,10 +96,9 @@ export async function beginEmailDelivery(params: {
 }
 
 /**
- * Persist a durable marker immediately before calling Skyvern's task-create
- * endpoint. The immutable payload must have been saved already. A restart
- * after this marker but before a task ID is known is intentionally ambiguous
- * and must fail closed rather than create a duplicate provider complaint.
+ * Settle a known SMTP outcome and its route in one compare-and-set
+ * transaction. This prevents a late bounce, a duplicate classifier, or a
+ * lease-replayed sender from overwriting a newer email lifecycle state.
  */
 
 export async function settleEmailDelivery(params: {

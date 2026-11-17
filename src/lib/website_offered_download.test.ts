@@ -125,7 +125,7 @@ describe("a page whose harm is the file it offers", () => {
 			inspection: { format: "browser_extension", browserExtension: { name: "Game Copier", hostPermissions: ["<all_urls>"] } },
 		});
 		expect(data?.providerWarning).toEqual({ provider: "Cloudflare", warning: "Suspected Malware" });
-		expect(data?.visit).toMatchObject({ runId: "tsk_v2_scripted", outcome: "completed", report: { downloadsStarted: 1 } });
+		expect(data?.visit).toMatchObject({ outcome: "completed", report: { downloadsStarted: 1 } });
 		expect(data?.siteAssessments?.[0]).toMatchObject({ finding: "malware", evidenceQuote: QUOTE, offeredDownload: { fileName: "Game-Copier.zip", sha256: data!.offeredDownload!.sha256 } });
 
 		const report = await AbuseRepository.getReportForSubmission(id);
@@ -153,12 +153,12 @@ describe("a page whose harm is the file it offers", () => {
 	});
 
 	test("a visit that could not finish leaves a page that shows nothing by itself inconclusive, and visits it again", async () => {
-		const { dependencies } = scenario({ classification: answer({}), visit: { agent: { outcome: "failed", failure: "failed: Skyvern could not reach its model", report: undefined } } });
+		const { dependencies } = scenario({ classification: answer({}), visit: { agent: { outcome: "failed", failure: "failed: Error: the model answered HTTP 503", report: undefined } } });
 		const id = await submission(380115867024756865n);
 		await analyzeWebsite({ submissionId: id, url: URL_ }, dependencies);
 		const { stored, data } = await website(id);
 		expect(stored?.status).toBe("failed");
-		expect(stored?.info).toStartWith("Inconclusive: the visit could not finish the site's flow: failed: Skyvern could not reach its model The last page it reached");
+		expect(stored?.info).toStartWith("Inconclusive: the visit could not finish the site's flow: failed: Error: the model answered HTTP 503 The last page it reached");
 		expect(data?.autoRetry?.attempts).toBe(1);
 	});
 

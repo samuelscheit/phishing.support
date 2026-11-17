@@ -7,7 +7,7 @@ import {
 	normalizeAllowedDomains,
 } from "./provider_contract";
 
-export type SkyvernOutputContract = {
+export type ProviderFormOutputContract = {
 	passed: boolean;
 	reason?: string;
 	confirmationId?: string;
@@ -18,10 +18,10 @@ export type SkyvernOutputContract = {
 
 /**
  * A code-owned output policy supplied by the concrete form adapter. The
- * Skyvern boundary only validates an immutable submission contract; it never
- * switches on a provider name or imports a concrete provider definition.
+ * browser-task boundary only validates an immutable submission contract; it
+ * never switches on a provider name or imports a concrete provider definition.
  */
-export type SkyvernOutputValidationPolicy = {
+export type ProviderFormOutputPolicy = {
 	allowedOutputKeys: readonly string[];
 	expectedTargets: readonly string[];
 	expectedUrls: readonly string[];
@@ -61,19 +61,22 @@ function stringArray(value: unknown): string[] | undefined {
 		: undefined;
 }
 
-function contractFailure(reason: string): SkyvernOutputContract {
+function contractFailure(reason: string): ProviderFormOutputContract {
 	return { passed: false, reason, submittedTargets: [] };
 }
 
 /**
- * Validate the shared irreversible-submit portion of a Skyvern extraction.
+ * Validate the shared irreversible-submit portion of a form task's result.
+ * The task agent already checked the result against the JSON schema; this
+ * checks what a schema cannot: that what was submitted is exactly the
+ * immutable report, on the verified provider origin, with a confirmation.
  * Concrete providers pass only code-owned policy values; their custom fields
  * and pinning rules remain in their own module.
  */
-export function validateSkyvernOutputContract(params: {
+export function validateProviderFormOutputContract(params: {
 	output: unknown;
-	policy: SkyvernOutputValidationPolicy;
-}): SkyvernOutputContract {
+	policy: ProviderFormOutputPolicy;
+}): ProviderFormOutputContract {
 	const output = recordValue(params.output);
 	if (!output) return contractFailure("form_contract_output_invalid");
 	const allowedKeys = new Set(params.policy.allowedOutputKeys);
@@ -141,7 +144,7 @@ export function validateSkyvernOutputContract(params: {
 export function validateGenericProviderFormOutput(params: {
 	output: unknown;
 	providerPayload: unknown;
-}): SkyvernOutputContract {
+}): ProviderFormOutputContract {
 	const payload = recordValue(params.providerPayload);
 	const immutableContract = payload && recordValue(payload.contract);
 	if (!immutableContract) return contractFailure("immutable_output_contract_missing");
@@ -149,7 +152,7 @@ export function validateGenericProviderFormOutput(params: {
 	const observedUrls = stringArray(immutableContract.observedUrls);
 	const allowedDomains = normalizeAllowedDomains(immutableContract.allowedFinalDomains) ?? [];
 	const entryUrl = typeof immutableContract.entryUrl === "string" ? immutableContract.entryUrl : undefined;
-	return validateSkyvernOutputContract({
+	return validateProviderFormOutputContract({
 		output: params.output,
 		policy: {
 			allowedOutputKeys: GENERIC_PROVIDER_FORM_OUTPUT_KEYS,
@@ -165,8 +168,4 @@ export function validateGenericProviderFormOutput(params: {
 			},
 		},
 	});
-}
-
-export function isTerminalSkyvernStatus(status: string | undefined): boolean {
-	return ["completed", "failed", "terminated", "timed_out", "canceled"].includes(status ?? "");
 }

@@ -62,10 +62,9 @@ export type AbuseRouteStatus = (typeof abuseRouteStatuses)[number];
 export const abuseRunStatuses = [
 	"pending",
 	"starting",
-	// The immutable Skyvern task payload has been persisted and a task-create
-	// request may have crossed the provider boundary. A restart in this state
-	// must fail closed rather than issue another task creation call.
-	"task_creation_started",
+	// A browser task agent may be acting on the provider's form. A restart in
+	// this state must fail closed rather than run the task again.
+	"task_started",
 	// A direct provider submission may have crossed its provider boundary. A
 	// restart in this state must be reconciled rather than automatically submit
 	// the same complaint again.
@@ -88,7 +87,6 @@ export const abuseJobTypes = [
 	"monitor_provider_reply",
 	"run_portal",
 	"submit_provider",
-	"reconcile_skyvern_run",
 	"classify_provider_reply",
 	"poll_provider_correspondence",
 	"find_provider_receipt",
@@ -237,7 +235,6 @@ export const abuseProviderRuns = sqliteTable(
 		providerPayload: text("provider_payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
 		payloadHash: text("payload_hash").notNull(),
 		correlationKey: text("correlation_key").notNull(),
-		skyvernRunId: text("skyvern_run_id"),
 		attemptCount: sqliteInteger("attempt_count").notNull().default(0),
 		executionStatus: text("execution_status", { enum: abuseRunStatuses }).notNull().default("pending"),
 		confirmationId: text("confirmation_id"),
@@ -250,7 +247,6 @@ export const abuseProviderRuns = sqliteTable(
 	},
 	(table) => [
 		uniqueIndex("abuse_provider_runs_correlation_key_unique").on(table.correlationKey),
-		uniqueIndex("abuse_provider_runs_skyvern_run_unique").on(table.skyvernRunId),
 		index("abuse_provider_runs_route_created_idx").on(table.routeId, table.createdAt),
 		index("abuse_provider_runs_status_updated_idx").on(table.executionStatus, table.updatedAt),
 	]
@@ -380,24 +376,6 @@ export const abuseEvents = sqliteTable(
 	(table) => [
 		index("abuse_events_report_created_idx").on(table.reportId, table.createdAt),
 		index("abuse_events_route_created_idx").on(table.routeId, table.createdAt),
-	]
-);
-
-/** Persisted webhook ledger provides replay protection independently from the worker. */
-export const abuseWebhookEvents = sqliteTable(
-	"abuse_webhook_events",
-	{
-		id: sqliteBigint("id").primaryKey(),
-		eventId: text("event_id").notNull(),
-		skyvernRunId: text("skyvern_run_id"),
-		timestamp: sqliteInteger("timestamp").notNull(),
-		payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
-		payloadHash: text("payload_hash").notNull(),
-		receivedAt: sqliteTimestamp("received_at").notNull().default(sql`(unixepoch() * 1000)`),
-	},
-	(table) => [
-		uniqueIndex("abuse_webhook_events_event_id_unique").on(table.eventId),
-		index("abuse_webhook_events_run_idx").on(table.skyvernRunId),
 	]
 );
 

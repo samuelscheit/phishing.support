@@ -67,11 +67,6 @@ export async function getProviderRun(runId: bigint): Promise<AbuseProviderRun | 
 	return db.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, runId)).get();
 }
 
-export async function getProviderRunBySkyvernRunId(skyvernRunId: string): Promise<AbuseProviderRun | undefined> {
-	const db = await getDb();
-	return db.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.skyvernRunId, skyvernRunId)).get();
-}
-
 export async function getProviderRunByCorrelationKey(correlationKey: string): Promise<AbuseProviderRun | undefined> {
 	const db = await getDb();
 	return db.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.correlationKey, correlationKey)).get();
@@ -103,7 +98,7 @@ export async function getLatestActiveProviderRunForRoute(routeId: bigint): Promi
 		.where(
 			and(
 				eq(abuseProviderRuns.routeId, routeId),
-				inArray(abuseProviderRuns.executionStatus, ["pending", "starting", "task_creation_started", "submission_started", "running", "unknown_external_state"]),
+				inArray(abuseProviderRuns.executionStatus, ["pending", "starting", "task_started", "submission_started", "running", "unknown_external_state"]),
 			),
 		)
 		.orderBy(desc(abuseProviderRuns.createdAt))
@@ -512,25 +507,33 @@ export async function prepareProviderSubmission(runId: bigint): Promise<boolean>
 }
 
 /**
- * Atomically claim a route for an irreversible portal execution.  Creating
- * the durable run record must happen only after this transition succeeds;
- * otherwise two replayed jobs can both observe `queued` and each create an
- * independent external task.
+ * The durable boundary of a provider-form browser task: the run moves from
+ * `starting` to `task_started` and keeps the Fabric session that runs it,
+ * before the agent touches the provider's page. A restart that finds a run
+ * in `task_started` cannot know whether the form was submitted; it fails
+ * closed (unknown external state) and cancels that browser instead of
+ * running the task again.
  */
-
-export async function prepareSkyvernTaskCreation(runId: bigint): Promise<boolean> {
+export async function startBrowserTask(params: { runId: bigint; fabricSessionId: string }): Promise<boolean> {
+	if (!isFabricBrowserSessionId(params.fabricSessionId)) throw new Error("Browser Fabric returned an invalid session ID.");
 	const db = await getDb();
 	return db.transaction(
 		(tx) => {
-			const run = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, runId)).get();
-			if (!run || run.executionStatus !== "starting" || run.skyvernRunId) return false;
+			const run = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, params.runId)).get();
+			if (!run || run.executionStatus !== "starting") return false;
 			const route = tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, run.routeId)).get();
 			if (!route || route.status !== "running") return false;
-			const timestamp = now();
+			const providerPayload = { ...run.providerPayload, __fabricBrowserSessionId: params.fabricSessionId };
 			const updated = tx
 				.update(abuseProviderRuns)
-				.set({ executionStatus: "task_creation_started", updatedAt: timestamp })
-				.where(and(eq(abuseProviderRuns.id, run.id), eq(abuseProviderRuns.executionStatus, "starting"), sql`${abuseProviderRuns.skyvernRunId} is null`))
+				.set({
+					executionStatus: "task_started",
+					providerPayload,
+					payloadHash: hashStableJson(providerPayload),
+					attemptCount: run.attemptCount + 1,
+					updatedAt: now(),
+				})
+				.where(and(eq(abuseProviderRuns.id, run.id), eq(abuseProviderRuns.executionStatus, "starting")))
 				.returning({ id: abuseProviderRuns.id })
 				.get();
 			if (!updated) return false;
@@ -538,158 +541,11 @@ export async function prepareSkyvernTaskCreation(runId: bigint): Promise<boolean
 				reportId: run.reportId,
 				routeId: route.id,
 				runId: run.id,
-				eventType: "provider_run.skyvern_task_creation_started",
+				eventType: "provider_run.browser_task_started",
+				data: { fabricSessionId: params.fabricSessionId },
 			});
 			return true;
 		},
 		{ behavior: "immediate" },
 	);
 }
-
-/**
- * Persist the task ID returned by Skyvern and the corresponding route phase
- * together. A response that is lost before this transaction is deliberately
- * handled as `unknown_external_state` by the caller instead of creating a
- * second task.
- */
-
-export type SkyvernTaskStartedTransition = {
-	executionStatus: AbuseRunStatus;
-	routeStatus: AbuseRouteStatus;
-};
-
-/**
- * Apply the shared, atomic Skyvern response boundary with a provider-owned
- * lifecycle transition. The generic worker uses the public wrapper below,
- * which always settles a run and route into `running`; providers with an
- * additional durable phase supply that phase from their own persistence
- * module without putting its vocabulary in this generic core.
- */
-export async function recordSkyvernTaskStartedWithTransition(params: {
-	runId: bigint;
-	skyvernRunId: string;
-	fabricSessionId?: string;
-	expectedProviderKey?: string;
-	transition: SkyvernTaskStartedTransition;
-}): Promise<boolean> {
-	if (!/^[A-Za-z0-9._:-]{1,256}$/.test(params.skyvernRunId)) throw new Error("Skyvern returned an invalid run ID.");
-	if (params.fabricSessionId !== undefined && !isFabricBrowserSessionId(params.fabricSessionId)) {
-		throw new Error("Browser Fabric returned an invalid session ID.");
-	}
-	const db = await getDb();
-	return db.transaction(
-		(tx) => {
-			const run = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, params.runId)).get();
-			if (!run || run.executionStatus !== "task_creation_started") return false;
-			const route = tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, run.routeId)).get();
-			if (!route || route.status !== "running" || (params.expectedProviderKey && route.providerRegistryKey !== params.expectedProviderKey)) return false;
-			const timestamp = now();
-			const providerPayload = params.fabricSessionId === undefined
-				? run.providerPayload
-				: { ...run.providerPayload, __fabricBrowserSessionId: params.fabricSessionId };
-			const runUpdated = tx
-				.update(abuseProviderRuns)
-				.set({
-					skyvernRunId: params.skyvernRunId,
-					...(params.fabricSessionId === undefined ? {} : {
-						providerPayload,
-						payloadHash: hashStableJson(providerPayload),
-					}),
-					executionStatus: params.transition.executionStatus,
-					attemptCount: run.attemptCount + 1,
-					updatedAt: timestamp,
-				})
-				.where(and(eq(abuseProviderRuns.id, run.id), eq(abuseProviderRuns.executionStatus, "task_creation_started")))
-				.returning({ id: abuseProviderRuns.id })
-				.get();
-			if (!runUpdated) return false;
-			recordEvent(tx, {
-				reportId: run.reportId,
-				routeId: route.id,
-				runId: run.id,
-				eventType: "provider_run.skyvern_task_started",
-				data: {
-					skyvernRunId: params.skyvernRunId,
-					...(params.fabricSessionId === undefined ? {} : { fabricSessionId: params.fabricSessionId }),
-					executionStatus: params.transition.executionStatus,
-				},
-			});
-			if (params.transition.routeStatus !== route.status) {
-				const routeUpdated = tx
-					.update(abuseProviderRoutes)
-					.set({ status: params.transition.routeStatus, updatedAt: timestamp })
-					.where(and(eq(abuseProviderRoutes.id, route.id), eq(abuseProviderRoutes.status, "running")))
-					.returning({ id: abuseProviderRoutes.id })
-					.get();
-				if (!routeUpdated) throw new Error("Skyvern task was created after the route left its running state.");
-				recordEvent(tx, {
-					reportId: route.reportId,
-					targetId: route.targetId,
-					routeId: route.id,
-					runId: run.id,
-					eventType: "route.status_changed",
-					data: { from: route.status, to: params.transition.routeStatus, reason: "skyvern_task_started" },
-				});
-			}
-			const reconciliationDedupeKey = `reconcile:${run.id.toString()}:${params.skyvernRunId}`;
-			const existingReconciliation = tx
-				.select({ id: abuseJobs.id })
-				.from(abuseJobs)
-				.where(
-					and(
-						eq(abuseJobs.dedupeKey, reconciliationDedupeKey),
-						inArray(abuseJobs.status, ["queued", "running", "unknown_external_state"]),
-					),
-				)
-				.get();
-			if (!existingReconciliation) {
-				const jobId = generateId();
-				tx.insert(abuseJobs)
-					.values({
-						id: jobId,
-						jobType: "reconcile_skyvern_run",
-						reportId: run.reportId,
-						routeId: route.id,
-						runId: run.id,
-						payload: { skyvernRunId: params.skyvernRunId },
-						dedupeKey: reconciliationDedupeKey,
-						status: "queued",
-						retryCount: 0,
-						nextAttemptAt: new Date(timestamp.getTime() + 5_000),
-						unknownExternalState: false,
-						createdAt: timestamp,
-						updatedAt: timestamp,
-					})
-					.run();
-				recordEvent(tx, {
-					reportId: run.reportId,
-					routeId: route.id,
-					runId: run.id,
-					jobId,
-					eventType: "job.queued",
-					data: { jobType: "reconcile_skyvern_run", skyvernRunId: params.skyvernRunId },
-				});
-			}
-			recomputeReportStatusInTransaction(tx, route.reportId, {
-				reason: "skyvern_task_started",
-				routeId: route.id.toString(),
-			});
-			return true;
-		},
-		{ behavior: "immediate" },
-	);
-}
-
-/** Persist a generic Skyvern task response without assuming provider phases. */
-export async function recordSkyvernTaskStarted(params: { runId: bigint; skyvernRunId: string; fabricSessionId?: string }): Promise<boolean> {
-	return recordSkyvernTaskStartedWithTransition({
-		...params,
-		transition: { executionStatus: "running", routeStatus: "running" },
-	});
-}
-
-/**
- * Settle a known SMTP outcome and its route in one compare-and-set
- * transaction. This prevents a late bounce, a duplicate classifier, or a
- * lease-replayed sender from overwriting a newer email lifecycle state.
- */

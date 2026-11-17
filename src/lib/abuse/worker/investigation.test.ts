@@ -47,8 +47,6 @@ async function confirmedCase(id: bigint, finding: Parameters<typeof reportConfir
 	return { report, job };
 }
 
-const adapter = {} as never;
-
 function jobsOf(reportId: bigint) {
 	return getDb().then((db) => db.select().from(abuseJobs).where(eq(abuseJobs.reportId, reportId)).all());
 }
@@ -76,7 +74,7 @@ function offline(overrides: Partial<InvestigationDependencies> = {}) {
 }
 
 function workerWith(deps: Partial<InvestigationDependencies>, owner: string) {
-	return new AbuseWorker({ owner, adapter, investigateReport: (params) => runReportInvestigation(params, deps) });
+	return new AbuseWorker({ owner, investigateReport: (params) => runReportInvestigation(params, deps) });
 }
 
 describe("pre-report investigation", () => {
@@ -220,7 +218,7 @@ describe("pre-report investigation", () => {
 		const { job } = await confirmedCase(submissionId, { finding: "phishing", phishingBasis: "credential_theft" }, "https://phish.example.com/");
 		let finished = false;
 		const { deps } = offline({ reportRedirector: async () => { await new Promise((resolve) => setTimeout(resolve, 1_600)); finished = true; return undefined; } });
-		const worker = new AbuseWorker({ owner: "investigation-long", adapter, externalJobTimeoutMs: 1_000, investigateReport: (params) => runReportInvestigation(params, deps) });
+		const worker = new AbuseWorker({ owner: "investigation-long", externalJobTimeoutMs: 1_000, investigateReport: (params) => runReportInvestigation(params, deps) });
 		await worker.processOne({ jobTypes: ["investigate_report"] });
 		expect(finished).toBeTrue();
 		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()?.status).toBe("completed");

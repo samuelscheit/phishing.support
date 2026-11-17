@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 
 import { AbuseRepository } from "../repository";
 import type { resolveAbuseTarget } from "../resolver";
-import type { AbuseSkyvernAdapter, FabricSkyvernTaskFactory, SkyvernTaskPayload } from "../skyvern";
+import type { BrowserTask, ChatModel } from "../../browser_task/agent";
+import type { FabricCdpSessionAcquirer } from "../../browser_task/fabric";
 import { errorText as describeError } from "../../error_text";
 
 export type UnknownExternalStateParams = {
@@ -17,8 +18,10 @@ export type WorkerServices = {
 	/** Per-job cancellation signal. Provider adapters must honor it before and
 	 * during any potentially long external operation. */
 	readonly signal?: AbortSignal;
-	getAdapter(): AbuseSkyvernAdapter;
-	createFabricSkyvernTask: FabricSkyvernTaskFactory;
+	/** The model that drives browser tasks; throws when it is not configured. */
+	browserTaskModel(): ChatModel;
+	/** Leases the disposable Fabric browser a browser task runs on. */
+	acquireBrowserSession: FabricCdpSessionAcquirer;
 	markUnknownExternal(params: UnknownExternalStateParams): Promise<void>;
 };
 
@@ -79,19 +82,27 @@ export function recordValue(value: unknown): Record<string, unknown> | undefined
 	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
-/** Read only a payload shape that this service itself persisted before an SDK call. */
-export function storedSkyvernTaskPayload(value: unknown): SkyvernTaskPayload | undefined {
+/** Read only a task shape that this service itself persisted before running it. */
+export function storedBrowserTask(value: unknown): BrowserTask | undefined {
 	const task = recordValue(value);
-	if (!task || typeof task.prompt !== "string" || typeof task.url !== "string" || !Number.isFinite(task.max_steps) || !recordValue(task.data_extraction_schema)) {
+	if (
+		!task
+		|| typeof task.goal !== "string"
+		|| !task.goal.trim()
+		|| typeof task.startUrl !== "string"
+		|| !Number.isInteger(task.maxSteps)
+		|| (task.maxSteps as number) < 1
+		|| !recordValue(task.resultSchema)
+	) {
 		return undefined;
 	}
 	try {
-		const url = new URL(task.url);
+		const url = new URL(task.startUrl);
 		if (url.protocol !== "https:" || url.username || url.password) return undefined;
 	} catch {
 		return undefined;
 	}
-	return task as unknown as SkyvernTaskPayload;
+	return { goal: task.goal, startUrl: task.startUrl, maxSteps: task.maxSteps as number, resultSchema: recordValue(task.resultSchema)! };
 }
 
 export async function routeContext(routeId: bigint) {

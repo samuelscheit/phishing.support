@@ -11,12 +11,13 @@ const facts: VisitEvidenceFacts = {
 	submittedUrl: "https://policy-trust-assurance.onrender.com/help",
 	startedAt: new Date("2026-11-15T00:32:40.000Z"),
 	endedAt: new Date("2026-11-15T00:34:10.000Z"),
-	environment: { device: "Google Chrome on Windows", egress: "Browser Fabric egress policy egress_tor-egress@1", agent: "Skyvern", agentRunId: "tsk_1", agentOutcome: "completed" },
+	environment: { device: "Google Chrome on Windows", egress: "Browser Fabric egress policy egress_tor@1", agent: "Browser Fabric task agent", agentOutcome: "completed" },
 	syntheticValues: values,
 	actions: [
-		{ id: "a1", kind: "input_text", text: "Typed into", selector: "#email", value: values.email, at: "2026-11-15T00:32:51.100Z" },
-		{ id: "a2", kind: "input_text", text: "Typed into", selector: "#password", value: values.password, at: "2026-11-15T00:32:53.400Z" },
-		{ id: "a3", kind: "click", text: 'Clicked "Weitermachen"', at: "2026-11-15T00:32:54.000Z" },
+		{ id: "2.1", kind: "type", text: `typed into e3 its value is now ${JSON.stringify(values.email)}`, selector: "e3", value: values.email, at: "2026-11-15T00:32:51.100Z" },
+		// The agent's log keeps a secret as its placeholder; the values list above says what it stood for.
+		{ id: "2.2", kind: "type", text: "typed into e4 its value is now (secret entered)", selector: "e4", value: "{{secret:password}}", at: "2026-11-15T00:32:53.400Z" },
+		{ id: "3.1", kind: "click", text: 'clicked e5 "Weitermachen"', selector: "e5", at: "2026-11-15T00:32:54.000Z" },
 	],
 	pages: [{ url: "https://policy-trust-assurance.onrender.com/help", shownFrom: new Date("2026-11-15T00:32:40.000Z") }],
 	requests: [
@@ -66,8 +67,10 @@ describe("the visit as evidence", () => {
 		expect(text).toContain("They were generated for this visit only and belong to no person");
 		expect(text).toContain(`  email address: ${values.email}`);
 		// The chronology reads in time order: typing, clicking, then the request that carried both values.
-		const typedEmail = text.indexOf(`value ${JSON.stringify(values.email)} [element #email]`);
-		const clicked = text.indexOf('Agent click: Clicked "Weitermachen"');
+		expect(text).toContain("Visiting agent: Browser Fabric task agent, outcome completed");
+		const typedEmail = text.indexOf(`value ${JSON.stringify(values.email)} [element e3]`);
+		expect(text).toContain('Agent type: typed into e4 its value is now (secret entered) value "{{secret:password}}" [element e4]');
+		const clicked = text.indexOf('Agent click: clicked e5 "Weitermachen"');
 		const sent = text.indexOf("Request POST https://policy-trust-assurance.onrender.com/api/send carried the synthetic email address, password, sent from https://policy-trust-assurance.onrender.com/help. Answer: HTTP 200 from 216.24.57.16 at 2026-11-15 00:32:54.480 UTC.");
 		expect(typedEmail).toBeGreaterThan(0);
 		expect(clicked).toBeGreaterThan(typedEmail);

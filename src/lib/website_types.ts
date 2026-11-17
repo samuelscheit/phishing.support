@@ -44,7 +44,6 @@ export type VisitDataSent = {
 
 /** The visit as the case keeps it: what the agent did, and every request that carried synthetic values. */
 export type WebsiteVisitRecord = {
-	runId?: string;
 	/** `completed`: the agent finished; `failed`: it failed or could not start; `timed_out`: the visit's budget ended it. */
 	outcome: "completed" | "failed" | "timed_out";
 	failure?: string;

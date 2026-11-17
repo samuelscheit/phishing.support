@@ -4,7 +4,7 @@ import { errorText } from "../error_text";
 import { ExfiltrationNetworkRecorder } from "../exfiltration/recorder";
 import type { CapturedNetworkRequest, ExfiltrationCanaries } from "../exfiltration/types";
 import { interceptDownloads, type DownloadedFile, type DownloadInterceptor, type FailedDownload } from "../website_download";
-import type { VisitAgent, VisitAgentAction } from "./agent";
+import type { VisitAgent, VisitAgentAction, VisitAgentState } from "./agent";
 import { buildSiteVisitTask, visitAgentReport, VISIT_BUDGET_MS, type VisitAgentReport } from "./task";
 
 /**
@@ -19,8 +19,6 @@ import { buildSiteVisitTask, visitAgentReport, VISIT_BUDGET_MS, type VisitAgentR
 /** Pages recorded per visit beyond the first; a site that changes forever cannot hold it open. */
 const MAX_STEPS = 12;
 const POLL_MS = 1_000;
-const AGENT_POLL_MS = 2_000;
-const ACTIONS_POLL_MS = 4_000;
 /** A page change is recorded once the page has stayed the same this long. */
 const STEP_QUIET_MS = 2_000;
 /** Screencast frames published per second at most. */
@@ -34,7 +32,6 @@ export type SiteVisitLiveEvent =
 	| { type: "browser.download"; fileName: string; url: string };
 
 export type SiteVisitAgentOutcome = {
-	runId?: string;
 	/** `completed`: the agent finished; `failed`: it failed or could not start; `timed_out`: the visit's budget ended it. */
 	outcome: "completed" | "failed" | "timed_out";
 	report?: VisitAgentReport;
@@ -92,34 +89,6 @@ async function startScreencast(cdp: CDPSession, page: Page, live: (event: SiteVi
 	});
 	await cdp.send("Page.startScreencast", { format: "jpeg", quality: 55, maxWidth: 960, maxHeight: 720, everyNthFrame: 2 });
 	return () => cdp.send("Page.stopScreencast").then(() => undefined, () => undefined);
-}
-
-/** Runs in the page: what a person reads on the element a selector names (its label, text, placeholder, or name). */
-function elementCaption(selector: string): string | null {
-	let element: Element | null;
-	try {
-		element = document.querySelector(selector);
-	} catch {
-		return null;
-	}
-	if (!element) return null;
-	const compact = (value: string | null | undefined) => value?.replace(/\s+/g, " ").trim().slice(0, 80) || null;
-	const id = element.getAttribute("id");
-	const label = (id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null) ?? element.closest("label");
-	return compact(label?.textContent)
-		?? compact(element.getAttribute("aria-label"))
-		?? compact((element as HTMLElement).innerText)
-		?? compact(element.getAttribute("placeholder"))
-		?? compact(element.getAttribute("value"))
-		?? compact(element.getAttribute("title"))
-		?? compact(element.getAttribute("name"));
-}
-
-/** The action as a person reads it: its element's caption added to a bare verb (`Clicked "Download"`). */
-async function described(page: Page, action: VisitAgentAction): Promise<VisitAgentAction> {
-	if (!action.selector) return action;
-	const caption = await page.evaluate(elementCaption, action.selector).catch(() => null);
-	return caption ? { ...action, text: `${action.text} ${JSON.stringify(caption)}` } : action;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -181,53 +150,44 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 			announcedDownloads = downloads!.files().length;
 		};
 
-		let runId: string | undefined;
+		let walk: Promise<VisitAgentState> | undefined;
 		try {
-			({ runId } = await agent.start(buildSiteVisitTask(params.url, params.canaries, undefined, undefined, params.instructions), params.agentAddress));
-			agentOutcome.runId = runId;
+			const task = buildSiteVisitTask(params.url, params.canaries, undefined, params.instructions);
+			const { targetInfo } = await cdp.send("Target.getTargetInfo");
+			walk = agent({
+				task,
+				cdpEndpoint: params.agentAddress,
+				targetId: targetInfo.targetId,
+				signal: stopped,
+				onAction: (action) => {
+					actions.push(action);
+					live({ type: "browser.action", kind: action.kind, text: action.text });
+				},
+			}).catch((error: unknown) => ({ state: "failed" as const, reason: errorText(error).slice(0, 300) }));
 		} catch (error) {
 			agentOutcome.failure = `The visiting agent could not start: ${errorText(error).slice(0, 300)}`;
 		}
 
-		let nextAgentPoll = 0;
-		let nextActionsPoll = 0;
-		while (runId && !stopped.aborted) {
-			await sleep(pollMs, stopped);
-			if (stopped.aborted) break;
-			await recordStep();
-			announceDownloads();
-			const now = Date.now();
-			if (now >= nextActionsPoll) {
-				nextActionsPoll = now + ACTIONS_POLL_MS;
-				const known = new Set(actions.map((action) => action.id));
-				for (const action of await agent.actions(runId).catch(() => [])) {
-					if (known.has(action.id)) continue;
-					const read = await described(page, { ...action, at: action.at ?? new Date().toISOString() });
-					actions.push(read);
-					live({ type: "browser.action", kind: read.kind, text: read.text });
-				}
+		if (walk) {
+			let ended: VisitAgentState | undefined;
+			void walk.then((state) => { ended = state; });
+			while (!ended && !stopped.aborted) {
+				await Promise.race([sleep(pollMs, stopped), walk]);
+				await recordStep();
+				announceDownloads();
 			}
-			if (now < nextAgentPoll) continue;
-			nextAgentPoll = now + AGENT_POLL_MS;
-			const state = await agent.state(runId).catch((error: unknown) => ({ state: "failed" as const, reason: errorText(error).slice(0, 300) }));
-			if (state.state === "running") continue;
-			if (state.state === "completed") {
+			// An aborted walk winds down on its own signal; wait for it so it no longer acts.
+			const state = ended ?? await walk;
+			if (stopped.aborted && state.state !== "completed") {
+				agentOutcome.outcome = "timed_out";
+				agentOutcome.failure = budget.aborted ? `The visit's ${Math.round((params.budgetMs ?? VISIT_BUDGET_MS) / 60_000)}-minute budget ended the walk.` : "The visit was canceled.";
+			} else if (state.state === "completed") {
 				agentOutcome.outcome = "completed";
 				const report = visitAgentReport(state.output);
 				if (report) agentOutcome.report = report;
 			} else {
 				agentOutcome.failure = state.reason;
 			}
-			break;
-		}
-		if (runId && stopped.aborted && !agentOutcome.failure && agentOutcome.outcome !== "completed") {
-			agentOutcome.outcome = "timed_out";
-			agentOutcome.failure = budget.aborted ? `The visit's ${Math.round((params.budgetMs ?? VISIT_BUDGET_MS) / 60_000)}-minute budget ended the walk.` : "The visit was canceled.";
-			await agent.cancel(runId).catch(() => undefined);
-		}
-		if (runId) {
-			const known = new Set(actions.map((action) => action.id));
-			for (const action of await agent.actions(runId).catch(() => [])) if (!known.has(action.id)) actions.push(await described(page, { ...action, at: action.at ?? new Date().toISOString() }));
 		}
 		// The page the walk ended on is a step of its own, whatever the quiet period.
 		await recordStep(true);

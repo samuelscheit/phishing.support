@@ -33,7 +33,7 @@ export type VisitEvidenceFacts = {
 	submittedUrl: string;
 	startedAt: Date;
 	endedAt: Date;
-	environment: { device: string; egress?: string; agent: string; agentRunId?: string; agentOutcome: string };
+	environment: { device: string; egress?: string; agent: string; agentOutcome: string };
 	syntheticValues: ExfiltrationCanaries;
 	actions: readonly VisitAgentAction[];
 	pages: ReadonlyArray<{ url: string; shownFrom: Date; shownUntil?: Date }>;
@@ -88,7 +88,7 @@ function protocol(facts: VisitEvidenceFacts, recordSha256: string): string {
 		`Site: ${facts.submittedUrl}`,
 		`Visit: ${time(facts.startedAt)} to ${time(facts.endedAt)}`,
 		`Browser: ${facts.environment.device}${facts.environment.egress ? `; network exit: ${facts.environment.egress}` : ""}`,
-		`Visiting agent: ${facts.environment.agent}${facts.environment.agentRunId ? ` (run ${facts.environment.agentRunId})` : ""}, outcome ${facts.environment.agentOutcome}`,
+		`Visiting agent: ${facts.environment.agent}, outcome ${facts.environment.agentOutcome}`,
 		"",
 		"Synthetic values used. They were generated for this visit only and belong to no person:",
 		...values,

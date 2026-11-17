@@ -1,148 +1,102 @@
-import { visitAgentReport } from "./task";
-import type { AbuseSkyvernAdapter, SkyvernTaskPayload } from "../abuse/skyvern";
-import { statusOf } from "../abuse/skyvern/contracts";
-import { redactExternalError } from "../abuse/skyvern/adapter";
+import { agentGaveUp, browserTaskModel, runTask, type ChatModel, type StepLog } from "../browser_task/agent";
+import { redactedErrorText } from "../error_text";
+import type { SiteVisitTask } from "./task";
 
 /**
- * One thing the agent did or decided. `selector` names the element a Task V3
- * action acted on in the live page, whose caption the visit reads to say what
- * it was; its own record has no text.
- */
-/**
- * One thing the agent did. `value` is what it typed or chose (synthetic
- * values only, from its task); `at` is when it acted, by the agent's clock,
- * or when the visit first read the action when the agent gives no time.
+ * One thing the agent did or concluded, as the live log and the visit record
+ * show it. `selector` is the agent's ref of the element it acted on, `value`
+ * what it typed or chose (synthetic values only; secrets stay
+ * `{{secret:NAME}}` placeholders), `at` when its step acted.
  */
 export type VisitAgentAction = { id: string; kind: string; text: string; selector?: string; value?: string; at?: string };
 
-const MAX_ACTION_VALUE = 2_000;
-
-/** What an action typed or chose: Skyvern keeps it in `text` (input) or `option` (select). */
-function actionValue(record: Record<string, unknown>): string | undefined {
-	const typed = typeof record.text === "string" && record.text ? record.text.slice(0, MAX_ACTION_VALUE) : undefined;
-	const option = record.option && typeof record.option === "object" ? record.option as Record<string, unknown> : undefined;
-	const chosen = option ? text(option.label) ?? text(option.value) : undefined;
-	return typed ?? chosen;
-}
-
 export type VisitAgentState =
-	| { state: "running" }
 	| { state: "completed"; output: unknown }
 	| { state: "failed"; reason: string };
 
-/**
- * The agent that walks the site: started on the capture's own browser, so the
- * recording sees every step it takes. Skyvern in production; tests drive the
- * page themselves.
- */
-export type VisitAgent = {
-	start(task: SkyvernTaskPayload, browserAddress: string): Promise<{ runId: string }>;
-	state(runId: string): Promise<VisitAgentState>;
-	/** Everything it did so far, oldest first; read for the live log and the record. */
-	actions(runId: string): Promise<VisitAgentAction[]>;
-	cancel(runId: string): Promise<void>;
+export type VisitAgentRun = {
+	task: SiteVisitTask;
+	/** Browser-level CDP endpoint of the capture's browser (its second relay connection). */
+	cdpEndpoint: string;
+	/** The capture's tab: the agent continues there and never closes it. */
+	targetId: string;
+	/** Ends the walk (the visit's budget, or a cancelled job). */
+	signal: AbortSignal;
+	onAction(action: VisitAgentAction): void;
 };
 
-const TERMINAL = new Set(["completed", "failed", "terminated", "timed_out", "canceled"]);
+/**
+ * The agent that walks the site: started on the capture's own browser and
+ * tab, so the recording sees every step it takes. It resolves when the walk
+ * ends and never throws for what happens on the site.
+ */
+export type VisitAgent = (run: VisitAgentRun) => Promise<VisitAgentState>;
+
 const MAX_ACTION_TEXT = 300;
+const MAX_ACTION_VALUE = 2_000;
 
-function text(value: unknown): string | undefined {
-	return typeof value === "string" && value.trim() ? value.trim().slice(0, MAX_ACTION_TEXT) : undefined;
+/**
+ * What an action typed (`type`'s text) or chose (`select`'s values), as the
+ * agent's log keeps it: the log is redacted, so a secret is its placeholder.
+ */
+function actionValue(args: Record<string, unknown>): string | undefined {
+	const chosen = args.values ?? args.value;
+	const value = typeof args.text === "string" ? args.text
+		: Array.isArray(chosen) ? chosen.map(String).join(", ")
+		: typeof chosen === "string" ? chosen
+		: undefined;
+	return value ? value.slice(0, MAX_ACTION_VALUE) : undefined;
 }
 
 /**
- * The actions and thoughts in a Skyvern timeline, oldest first. The timeline
- * nests blocks, their actions and thoughts; an action names what it does
- * (`intention`, `reasoning`), a thought what the agent concluded.
+ * The step as the live log and the evidence read it: what the model
+ * concluded, then each action's outcome with the element and value it acted
+ * with. `at` is when the step's actions ended (the agent reports a step once
+ * it acted).
  */
-export function timelineActions(timeline: unknown): VisitAgentAction[] {
-	const found: Array<VisitAgentAction & { at: string }> = [];
-	const seen = new Set<string>();
-	const walk = (node: unknown) => {
-		if (Array.isArray(node)) {
-			for (const item of node) walk(item);
-			return;
-		}
-		if (!node || typeof node !== "object") return;
-		const record = node as Record<string, unknown>;
-		const id = text(record.action_id) ?? text(record.thought_id);
-		if (id && !seen.has(id)) {
-			const description = record.action_type
-				? text(record.intention) ?? text(record.reasoning) ?? text(record.action_type)
-				: text(record.thought) ?? text(record.observation);
-			if (description) {
-				seen.add(id);
-				const value = record.action_type ? actionValue(record) : undefined;
-				const selector = text(record.element_id);
-				found.push({ id, kind: text(record.action_type) ?? text(record.thought_type) ?? "thought", text: description, at: text(record.created_at) ?? "", ...(selector ? { selector } : {}), ...(value ? { value } : {}) });
-			}
-		}
-		for (const value of Object.values(record)) if (value && typeof value === "object") walk(value);
-	};
-	walk(timeline);
-	return found.sort((a, b) => a.at.localeCompare(b.at)).map(({ at, ...action }) => (at ? { ...action, at } : action));
-}
-
-/** How a person reads a task action without its element: `Clicked`, `Typed into`. */
-export const ACTION_VERB: Record<string, string> = {
-	click: "Clicked",
-	input_text: "Typed into",
-	select_option: "Selected an option in",
-	checkbox: "Ticked",
-	upload_file: "Uploaded a file to",
-	download_file: "Downloaded from",
-	keypress: "Pressed a key in",
-	scroll: "Scrolled",
-	hover: "Hovered over",
-	goto_url: "Opened",
-	wait: "Waited",
-	complete: "Finished",
-	terminate: "Stopped",
-};
-
-/**
- * The actions of a Task V1/V3 run, oldest first. They carry no reasoning, only
- * what was done and to which element (`[data-tv3="t13"]`, `#dlConfirm`).
- */
-export function taskActions(actions: readonly unknown[]): VisitAgentAction[] {
-	return actions.flatMap((entry): VisitAgentAction[] => {
-		const record = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
-		const id = text(record.action_id);
-		const kind = text(record.action_type);
-		if (!id || !kind) return [];
-		const selector = text(record.element_id);
-		const description = text(record.intention) ?? text(record.reasoning) ?? ACTION_VERB[kind] ?? kind;
-		const value = actionValue(record);
-		const at = text(record.created_at);
-		return [{ id, kind, text: description, ...(selector ? { selector } : {}), ...(value ? { value } : {}), ...(at ? { at } : {}) }];
+export function stepActions(step: StepLog, at: string): VisitAgentAction[] {
+	const actions: VisitAgentAction[] = [];
+	const thought = step.thought.replace(/\s+/g, " ").trim();
+	if (thought) actions.push({ id: `${step.step}`, kind: "thought", text: thought.slice(0, MAX_ACTION_TEXT), at });
+	step.actions.forEach((action, index) => {
+		const outcome = action.output.split("\n")[0]!.trim();
+		const selector = typeof action.args.ref === "string" && action.args.ref ? action.args.ref : undefined;
+		const value = actionValue(action.args);
+		actions.push({ id: `${step.step}.${index + 1}`, kind: action.tool, text: (outcome || action.tool).slice(0, MAX_ACTION_TEXT), ...(selector ? { selector } : {}), ...(value ? { value } : {}), at });
 	});
+	return actions;
 }
 
 /**
- * Skyvern, attached through Fabric's relay to the browser the capture
- * already holds. Its client is made on the first call, so a visit that never
- * starts the agent never needs Skyvern's configuration.
+ * The browser task agent, attached to the capture's browser. Its model is
+ * made on the first walk, so a capture that never visits never needs one.
  */
-export function skyvernVisitAgent(createAdapter: () => Pick<AbuseSkyvernAdapter, "createTask" | "getRun" | "cancelRun" | "getRunTimeline" | "getTaskActions">): VisitAgent {
-	let made: ReturnType<typeof createAdapter> | undefined;
-	const adapter = () => (made ??= createAdapter());
-	return {
-		start: (task, browserAddress) => adapter().createTask(task, { browserAddress }),
-		state: async (runId) => {
-			const run = await adapter().getRun(runId);
-			const status = statusOf(run);
-			if (!status || !TERMINAL.has(status)) return { state: "running" };
-			if (status === "completed") return { state: "completed", output: run.output };
-			const reason = typeof run.failure_reason === "string" ? run.failure_reason : status;
-			// The agent ending the walk itself (the flow ended, blocked the synthetic data, or asked
-			// for nothing it could give) is a finished visit; its reason is its report.
-			if (status === "terminated") return { state: "completed", output: visitAgentReport(run.output) ?? { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, stoppedReason: redactExternalError(reason).slice(0, 300) } };
-			return { state: "failed", reason: redactExternalError(`${status}: ${reason}`).slice(0, 500) };
-		},
-		// Task V2 runs (`tsk_v2_…`) have a timeline; Task V1 and V3 runs (`tsk_…`) only their actions.
-		actions: async (runId) => (runId.startsWith("tsk_v2_")
-			? timelineActions(await adapter().getRunTimeline(runId))
-			: taskActions(await adapter().getTaskActions(runId))),
-		cancel: (runId) => adapter().cancelRun(runId),
+export function taskAgentVisit(model: () => ChatModel = () => browserTaskModel()): VisitAgent {
+	return async (run) => {
+		let result;
+		try {
+			result = await runTask({
+				cdpEndpoint: run.cdpEndpoint,
+				targetId: run.targetId,
+				goal: run.task.goal,
+				resultSchema: run.task.resultSchema,
+				maxSteps: run.task.maxSteps,
+				secrets: run.task.secrets,
+				// The visit's own budget ends the walk through `signal`.
+				timeoutMs: 24 * 60 * 60_000,
+				signal: run.signal,
+				model: model(),
+				onStep: (step) => { for (const action of stepActions(step, new Date().toISOString())) run.onAction(action); },
+			});
+		} catch (error) {
+			return { state: "failed", reason: redactedErrorText(error).slice(0, 500) };
+		}
+		if (result.status === "done") return { state: "completed", output: result.result };
+		// The agent ending the walk itself (the flow ended, blocked the synthetic data, or asked
+		// for something it could not give) is a finished visit; its reason is its report.
+		if (agentGaveUp(result) || result.status === "needs_input") {
+			return { state: "completed", output: { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, stoppedReason: (result.question ?? result.summary).slice(0, 300) } };
+		}
+		return { state: "failed", reason: redactedErrorText(`${result.status}: ${result.summary}`).slice(0, 500) };
 	};
 }

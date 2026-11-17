@@ -1,4 +1,5 @@
 import { reporterBrowserIdentity } from "./browser/reporter_identity";
+import { fabricBrowserConfigFromEnvironment } from "./browser/fabric";
 import { archiveWebsite, isBrowserInfrastructureFailure, type ArchiveWebsiteOptions, type WebsitePageSession, type WebsiteVerificationGate } from "./website_archive";
 import { errorText } from "./error_text";
 import { buildWebsiteEvidence, type WebsiteEvidencePackage } from "./evidence/package";
@@ -11,7 +12,6 @@ import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun, type AnalysisClient } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
 import { reportConfirmedWebsiteAbuse } from "./abuse/submission_reports";
-import { AbuseSkyvernAdapter } from "./abuse/skyvern";
 import { createWebsiteSubmission } from "./submissions/website";
 import type { ReporterMetadata } from "./request_metadata";
 import { defaultReasoning, defaultResponseModel, sleep } from "./utils";
@@ -23,7 +23,7 @@ import { isSameWebsite, websiteSite } from "./website_site";
 import { createExfiltrationCanaries } from "./exfiltration/canaries";
 import { discoverExfiltrationBackends } from "./exfiltration/analysis";
 import type { CapturedNetworkRequest, ExfiltrationBackend, ExfiltrationCanaries } from "./exfiltration/types";
-import { skyvernVisitAgent, type VisitAgent } from "./site_visit/agent";
+import { taskAgentVisit, type VisitAgent } from "./site_visit/agent";
 import { visitNavigation, visitPages, type VisitPage } from "./site_visit/evidence";
 import type { SiteVisitRecording } from "./site_visit/visit";
 import { buildWebsiteAnalysisInput, type NarrativeVisitPage } from "./website_narrative";
@@ -184,6 +184,8 @@ async function saveVisitEvidence(params: {
 }): Promise<void> {
 	const { recording } = params;
 	const endedAt = new Date();
+	// The policy the visit's browser was leased with: the configured ref or Fabric's built-in default.
+	const egressPolicy = fabricBrowserConfigFromEnvironment()?.egressPolicyRefs.phishing;
 	const evidence = await buildVisitEvidence({
 		caseId: params.submissionId.toString(),
 		submittedUrl: params.url,
@@ -191,9 +193,8 @@ async function saveVisitEvidence(params: {
 		endedAt,
 		environment: {
 			device: WEBSITE_DEVICE_LABEL[params.device ?? "desktop"],
-			...(process.env.FABRIC_PHISHING_EGRESS_POLICY_REF ? { egress: `Browser Fabric egress policy ${process.env.FABRIC_PHISHING_EGRESS_POLICY_REF}` } : {}),
-			agent: "Skyvern",
-			...(recording.agent.runId ? { agentRunId: recording.agent.runId } : {}),
+			...(egressPolicy ? { egress: `Browser Fabric egress policy ${egressPolicy}` } : {}),
+			agent: "Browser Fabric task agent",
 			agentOutcome: recording.agent.outcome,
 		},
 		syntheticValues: params.canaries,
@@ -237,7 +238,6 @@ const isReportable = (classification: WebsiteSiteClassification) => classificati
 function visitRecord(recording: SiteVisitRecording<unknown>, pages: ReadonlyArray<VisitPage<unknown>>): WebsiteVisitRecord {
 	const { agent } = recording;
 	return {
-		...(agent.runId ? { runId: agent.runId } : {}),
 		outcome: agent.outcome,
 		...(agent.failure ? { failure: agent.failure } : {}),
 		...(agent.report ? { report: agent.report } : {}),
@@ -296,7 +296,7 @@ async function visitWebsite(params: {
 	// A page from a stored capture is loaded live first: the visit walks the live site.
 	const session = first.session ?? (await capture({ url: first.url, ...device })).session;
 	const canaries = createExfiltrationCanaries();
-	const agent = dependencies.visitAgent ?? skyvernVisitAgent(() => new AbuseSkyvernAdapter());
+	const agent = dependencies.visitAgent ?? taskAgentVisit();
 	const empty: SiteVisitRecording<WebsiteCapture> = { startedAt: new Date(), steps: [], requests: [], downloads: [], downloadFailures: [], agent: { outcome: "failed", failure: "The page could not be loaded live for the visit.", actions: [] } };
 	const recording = session
 		? await session.visit({ canaries, agent, live: (event) => { void publishEvent(`run:${submissionId}`, event); } }) as SiteVisitRecording<WebsiteCapture>
@@ -440,7 +440,7 @@ export type WebsiteAnalysisDependencies = {
 	timestampEvidence?: typeof timestampEvidence;
 	/** What malware scanners say about an offered file's hash. */
 	downloadLookups?: (sha256: string) => Promise<LookupResult[]>;
-	/** The agent that walks the site; Skyvern in production. */
+	/** The agent that walks the site; the browser task agent in production. */
 	visitAgent?: VisitAgent;
 };
 

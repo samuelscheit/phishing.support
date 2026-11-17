@@ -1,8 +1,9 @@
 import { AbuseRepository } from "./repository";
 import { resolveAbuseTarget } from "./resolver";
-import { AbuseSkyvernAdapter, cancelFabricSkyvernTask, createFabricSkyvernTask, type FabricSkyvernTaskFactory } from "./skyvern";
+import { acquireFabricCdpSession, cancelFabricBrowserSession } from "../browser/fabric";
+import { browserTaskModel, type ChatModel } from "../browser_task/agent";
+import type { FabricCdpSessionAcquirer } from "../browser_task/fabric";
 import { fabricBrowserSessionIdFromProviderPayload } from "../fabric/session";
-import { skyvernApiKeySourceIsConfigured } from "./skyvern_config";
 import type { AbuseJob, AbuseJobType } from "./schema";
 import {
 	executeProviderSubmission,
@@ -17,7 +18,6 @@ import { analyzeKitSibling, discoverKitSiblings } from "./origin/kit_job";
 import { watchRedirector } from "./origin/redirector_watch";
 import { classifyReply, monitorProviderReply } from "./worker/mail";
 import { runGenericProviderPortal } from "./worker/portal";
-import { reconcileGenericSkyvern } from "./worker/reconcile";
 import { resolveReport } from "./worker/resolution";
 import { errorText, envInt, idFrom, parseJobBigInt, randomOwner, type WorkerServices } from "./worker/shared";
 import type { JobClaimFilter } from "./persistence/jobs";
@@ -48,9 +48,9 @@ const MAX_RETRIES = 8;
 
 /**
  * Resolution and inbound-correspondence work must always retain capacity even
- * when a provider browser/API call stalls. Route verification and Skyvern
- * reconciliation can also block for minutes, so they stay in the external
- * lane rather than sharing the resolver slots.
+ * when a provider browser/API call stalls. Route verification and browser
+ * tasks can also block for minutes, so they stay in the external lane rather
+ * than sharing the resolver slots.
  */
 const CONTROL_JOB_TYPES = [
 	"resolve_report",
@@ -65,7 +65,6 @@ const CONTROL_JOB_TYPES = [
 
 /** Jobs that may cross an external provider side-effect boundary. */
 const EXTERNAL_JOB_TYPES = [
-	"reconcile_skyvern_run",
 	"send_email",
 	"run_portal",
 	"submit_provider",
@@ -154,9 +153,10 @@ export type AbuseWorkerOptions = {
 	sweepJobTimeoutMs?: number;
 	/** Deterministic test hook; production always dispatches through the provider registry. */
 	processJob?: (job: AbuseJob, signal?: AbortSignal) => Promise<void>;
-	adapter?: AbuseSkyvernAdapter;
-	/** Test hook for the Fabric browser/Skyvern capability boundary. */
-	fabricSkyvernTaskFactory?: FabricSkyvernTaskFactory;
+	/** Test hook: the model that drives browser tasks (production reads PHISHING_TASK_MODEL). */
+	browserTaskModel?: () => ChatModel;
+	/** Test hook: the browser a browser task runs on (production leases a Fabric browser). */
+	acquireBrowserSession?: FabricCdpSessionAcquirer;
 	/** Test hook; production uses the resolver implementation above. */
 	resolveTarget?: typeof resolveAbuseTarget;
 	/** Deterministic test hook for the pre-report evidence investigation. */
@@ -176,7 +176,6 @@ export class AbuseWorker {
 	private readonly controlJobTimeoutMs: number;
 	private readonly externalJobTimeoutMs: number;
 	private readonly sweepJobTimeoutMs: number;
-	private adapter: AbuseSkyvernAdapter | undefined;
 	private readonly resolveTarget: typeof resolveAbuseTarget;
 	private readonly services: WorkerServices;
 	private stopped = true;
@@ -210,31 +209,16 @@ export class AbuseWorker {
 			options.sweepJobTimeoutMs ?? envInt("ABUSE_WORKER_SWEEP_JOB_TIMEOUT_MS", DEFAULT_SWEEP_JOB_TIMEOUT_MS),
 			DEFAULT_SWEEP_JOB_TIMEOUT_MS,
 		);
-		this.adapter = options.adapter;
 		this.processJobOverride = options.processJob;
 		this.resolveTarget = options.resolveTarget ?? resolveAbuseTarget;
 		this.investigateReport = options.investigateReport ?? runReportInvestigation;
 		this.services = {
 			owner: this.owner,
-			getAdapter: () => this.getAdapter(),
-			createFabricSkyvernTask: options.fabricSkyvernTaskFactory ?? createFabricSkyvernTask,
+			// Resolved per task, so routes that never use a portal never need a model.
+			browserTaskModel: options.browserTaskModel ?? (() => browserTaskModel()),
+			acquireBrowserSession: options.acquireBrowserSession ?? ((metadata, sessionOptions) => acquireFabricCdpSession(metadata, sessionOptions)),
 			markUnknownExternal: (params) => this.markUnknownExternal(params),
 		};
-	}
-
-	/**
-	 * Keep the durable resolver/email worker available while the optional
-	 * Skyvern sidecar is still bootstrapping. Creating the SDK client eagerly
-	 * used to make a missing mounted API-key file prevent all abuse jobs from
-	 * starting, including routes that never use a portal.
-	 */
-	private getAdapter(): AbuseSkyvernAdapter {
-		if (this.adapter) return this.adapter;
-		if (!process.env.SKYVERN_BASE_URL || !skyvernApiKeySourceIsConfigured()) {
-			throw new Error("Skyvern is not configured for portal execution.");
-		}
-		this.adapter = new AbuseSkyvernAdapter();
-		return this.adapter;
 	}
 
 	private async markUnknownExternal(params: { routeId: bigint; runId?: bigint; error: string; reason: string }): Promise<void> {
@@ -242,7 +226,7 @@ export class AbuseWorker {
 		if (params.runId !== undefined) {
 			const run = await AbuseRepository.getProviderRun(params.runId);
 			const sessionId = fabricBrowserSessionIdFromProviderPayload(run?.providerPayload);
-			if (sessionId) await cancelFabricSkyvernTask(sessionId).catch(() => undefined);
+			if (sessionId) await cancelFabricBrowserSession(sessionId).catch(() => undefined);
 		}
 	}
 
@@ -321,7 +305,7 @@ export class AbuseWorker {
 				await AbuseRepository.markJobUnknownExternalState({ jobId: job.id, owner: this.owner, error: message });
 			} else if (isNonRetryableError(error)) {
 				// A verdict that repeating the same work cannot change: fail now rather than
-				// spend the remaining retries on identical Skyvern tasks.
+				// spend the remaining retries on identical browser tasks.
 				await this.failRetryExhaustedJob(job, message);
 			} else if (job.retryCount >= MAX_RETRIES) {
 				await this.failRetryExhaustedJob(job, message);
@@ -435,21 +419,6 @@ export class AbuseWorker {
 			await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
 			return;
 		}
-		// Reconciliation itself is generic transport work. A known external run
-		// must never be downgraded simply because polling exhausted its retries.
-		if (job.jobType === "reconcile_skyvern_run" && job.routeId) {
-			const run = job.runId ? await AbuseRepository.getProviderRun(job.runId) : await AbuseRepository.getLatestActiveProviderRunForRoute(job.routeId);
-			if (run?.skyvernRunId) {
-				await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
-				await this.markUnknownExternal({
-					routeId: job.routeId,
-					runId: run.id,
-					error: `Reconciliation retries were exhausted while a Skyvern task remained externally active: ${error}`,
-					reason: "skyvern_reconciliation_retry_exhausted",
-				});
-				return;
-			}
-		}
 		if (job.jobType === "submit_provider" && await AbuseRepository.failProviderSubmissionPreflight({
 			jobId: job.id,
 			owner: this.owner,
@@ -491,9 +460,6 @@ export class AbuseWorker {
 				return;
 			case "submit_provider":
 				await this.submitProvider(idFrom(job.routeId, "routeId"), signal);
-				return;
-			case "reconcile_skyvern_run":
-				await this.reconcilePortalRun(idFrom(job.runId, "runId"), signal);
 				return;
 			case "classify_provider_reply":
 				await classifyReply(parseJobBigInt(job.payload?.messageId, "payload.messageId"));
@@ -604,18 +570,6 @@ export class AbuseWorker {
 			return;
 		}
 		await executeProviderSubmission({ routeId: route.id, provider, signal });
-	}
-
-	private async reconcilePortalRun(runId: bigint, signal?: AbortSignal): Promise<void> {
-		const run = await AbuseRepository.getProviderRun(runId);
-		if (!run) return;
-		const route = await AbuseRepository.getRoute(run.routeId);
-		if (!route) return;
-		if (route.routeType === "email") {
-			await reconcileGenericSkyvern(runId, this.servicesFor(signal));
-			return;
-		}
-		throw new Error(`No registered portal provider can reconcile abuse route ${route.id.toString()}.`);
 	}
 }
 

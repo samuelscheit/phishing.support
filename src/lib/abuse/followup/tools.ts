@@ -7,9 +7,8 @@ import { buildWebsiteEvidence } from "../../evidence/package";
 import type { timestampEvidence } from "../../evidence/timestamp";
 import { extractPasteCommands } from "../../malware/paste_commands";
 import { fetchThroughPublicRedirects } from "../../network/public_redirects";
-import { AbuseSkyvernAdapter } from "../skyvern";
 import { createExfiltrationCanaries } from "../../exfiltration/canaries";
-import { skyvernVisitAgent, type VisitAgent } from "../../site_visit/agent";
+import { taskAgentVisit, type VisitAgent } from "../../site_visit/agent";
 import { visitPages } from "../../site_visit/evidence";
 import { archiveWebsite, WebsiteCaptureFailedError, type WebsiteArchiveResult } from "../../website_archive";
 import type { WebsiteDevice } from "../../website_types";
@@ -37,7 +36,7 @@ export type DecisionToolDependencies = {
 	assertPublicHost?: (hostname: string) => Promise<void>;
 	/** The RFC 3161 authority that timestamps a recheck's evidence. */
 	timestamp?: typeof timestampEvidence;
-	/** The agent that walks the site in `visit_site`; Skyvern in production. */
+	/** The agent that walks the site in `visit_site`; the browser task agent in production. */
 	visitAgent?: VisitAgent;
 	/** The job's deadline; a visit stops when it fires. */
 	signal?: AbortSignal;
@@ -178,7 +177,7 @@ async function visitSite(url: string, device: "case" | "iphone", instructions: s
 		const canaries = createExfiltrationCanaries();
 		const recording = await session.visit({
 			canaries,
-			agent: dependencies.visitAgent ?? skyvernVisitAgent(() => new AbuseSkyvernAdapter()),
+			agent: dependencies.visitAgent ?? taskAgentVisit(),
 			...(instructions.trim() ? { instructions } : {}),
 			...(dependencies.signal ? { signal: dependencies.signal } : {}),
 		});

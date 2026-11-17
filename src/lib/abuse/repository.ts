@@ -60,15 +60,13 @@ import {
 	getLatestProviderRunForRoute,
 	getProviderRun,
 	getProviderRunByCorrelationKey,
-	getProviderRunBySkyvernRunId,
 	failProviderSubmissionPreflight,
 	listProviderRunsForReport,
 	prepareProviderSubmission,
 	reconcileProviderRun,
 	reconcileProviderRunRejection,
-	prepareSkyvernTaskCreation,
-	recordSkyvernTaskStarted,
 	settleProviderRun,
+	startBrowserTask,
 	updateProviderRun,
 } from "./persistence/provider_runs";
 import { getPublicStatus } from "./persistence/public_status";
@@ -100,10 +98,6 @@ import {
 	transitionRouteStatus,
 	upsertResolvedRoute,
 } from "./persistence/routes";
-import {
-	enqueueReconciliationForSkyvernRun,
-	persistWebhook,
-} from "./persistence/webhooks";
 
 export type { CreatedAbuseReport } from "./persistence/reports";
 export type { ResolvedRouteInput } from "./route_contracts";
@@ -135,7 +129,6 @@ export const AbuseRepository = {
 	setRouteVerification,
 	createProviderRun,
 	getProviderRun,
-	getProviderRunBySkyvernRunId,
 	getProviderRunByCorrelationKey,
 	failProviderSubmissionPreflight,
 	listProviderRunsForReport,
@@ -148,8 +141,7 @@ export const AbuseRepository = {
 	prepareProviderSubmission,
 	reconcileProviderRun,
 	reconcileProviderRunRejection,
-	prepareSkyvernTaskCreation,
-	recordSkyvernTaskStarted,
+	startBrowserTask,
 	settleEmailDelivery,
 	recoverEmailPreparationFailure,
 	settleCorrelatedEmailBounce,
@@ -188,8 +180,6 @@ export const AbuseRepository = {
 	getInboundMailByImap,
 	getInboundMailByMessageId,
 	setMailClassification,
-	persistWebhook,
-	enqueueReconciliationForSkyvernRun,
 	listEvents,
 	appendEvent,
 	recomputeReportStatus,

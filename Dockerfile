@@ -5,9 +5,11 @@
 FROM oven/bun:1.4.2-debian AS deps
 WORKDIR /app
 
-# System deps needed for some native modules during install (kept in build stage)
+# System deps needed for some native modules during install (kept in build
+# stage). The browser-fabric dependency (github:samuelscheit/browser, public) is
+# fetched as a GitHub tarball and needs no git.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ \
+  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json bun.lock ./

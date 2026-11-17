@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { deriveProviderFormFacts } from "./form_facts";
-import { buildGenericProviderFormTaskPayload } from "./task_payloads";
+import { buildGenericProviderFormTask } from "./task";
 
 /** The analysis stored for production's Swiss Capital loan-scam report. */
 const swissCapitalAnalysis = "## Verdict: **Likely phishing / fraudulent loan website**\nThe site `https://swisscapitalloans.sc-sec.online/` impersonates **Swiss Capital**.\nProbable legitimate site: **https://swisscapitalcorp.com/**";
@@ -21,7 +21,7 @@ describe("provider form facts from the phishing analysis", () => {
 		});
 		expect(facts).toEqual(extracted);
 
-		const payload = buildGenericProviderFormTaskPayload({
+		const payload = buildGenericProviderFormTask({
 			entryUrl: "https://www.dynadot.com/community/contact",
 			allowedDomains: ["dynadot.com"],
 			target: "swisscapitalloans.sc-sec.online",
@@ -32,9 +32,9 @@ describe("provider form facts from the phishing analysis", () => {
 			observedAt: new Date("2026-08-30T10:34:09Z"),
 			analysisFacts: facts,
 		});
-		expect(payload.prompt).toContain('"impersonatedBrand":"Swiss Capital Corp"');
-		expect(payload.prompt).toContain('"brandOfficialWebsite":"https://swisscapitalcorp.com/"');
-		expect(payload.prompt).toContain("brandOfficialWebsite for brand, trademark, or official-website fields");
+		expect(payload.goal).toContain('"impersonatedBrand":"Swiss Capital Corp"');
+		expect(payload.goal).toContain('"brandOfficialWebsite":"https://swisscapitalcorp.com/"');
+		expect(payload.goal).toContain("brandOfficialWebsite for brand, trademark, or official-website fields");
 	});
 
 	test("never present the reported site or a private URL as the brand's official website", async () => {
