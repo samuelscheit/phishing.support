@@ -26,8 +26,8 @@ export async function operatorHandler(request: Request, handler: () => Promise<R
 	}
 }
 
-export function zipResponse(bytes: Uint8Array, filename: string): Response {
-	return new Response(bytes as unknown as BodyInit, {
+export function zipResponse(body: ReadableStream<Uint8Array>, filename: string): Response {
+	return new Response(body, {
 		headers: {
 			"content-type": "application/zip",
 			"content-disposition": `attachment; filename="${filename.replace(/[\r\n"\\]/g, "_")}"`,

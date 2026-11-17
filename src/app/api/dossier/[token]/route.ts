@@ -1,5 +1,5 @@
 import { CampaignRepository } from "@/lib/campaign/repository";
-import { buildDossierArchive } from "@/lib/referral/archive";
+import { dossierArchive } from "@/lib/referral/archive";
 import { buildReferralDossier } from "@/lib/referral/dossier";
 import { verifyDossierToken } from "@/lib/referral/download_link";
 import { zipResponse } from "@/lib/referral/http";
@@ -21,6 +21,5 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
 	}
 	const current = campaignId === undefined ? undefined : await CampaignRepository.currentCampaignId(campaignId);
 	if (current === undefined) return new Response("Dieser Link ist ungültig oder abgelaufen.", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
-	const archive = await buildDossierArchive(await buildReferralDossier(current));
-	return zipResponse(archive, `phishing-kampagne-${current.toString()}.zip`);
+	return zipResponse(dossierArchive(await buildReferralDossier(current)), `phishing-kampagne-${current.toString()}.zip`);
 }

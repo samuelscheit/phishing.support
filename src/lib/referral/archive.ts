@@ -1,4 +1,4 @@
-import { Uint8ArrayReader, Uint8ArrayWriter, ZipWriter } from "@zip.js/zip.js";
+import { Uint8ArrayReader, ZipWriter } from "@zip.js/zip.js";
 import sanitizeFilename from "sanitize-filename";
 
 import { AbuseRepository } from "../abuse/repository";
@@ -25,17 +25,32 @@ export function dossierAttachments(dossier: Dossier): Array<{ name: string; mime
 	];
 }
 
+/** Formats that are compressed already: deflating them costs CPU time and saves nothing. */
+const COMPRESSED = /\.(png|jpe?g|gif|webp|avif|gz|zip)$/i;
+
 /**
- * The whole campaign as one ZIP: the dossier as text, CSV and JSON, and each
- * site's evidence files byte for byte, so their SHA-256 match the manifests
- * and the RFC 3161 tokens. A file whose stored bytes no longer match its
- * recorded hash is left out and named in the archive instead of being shipped.
+ * The whole campaign as one ZIP, streamed while it is written: the dossier as
+ * text, CSV and JSON, and each site's evidence files byte for byte, so their
+ * SHA-256 match the manifests and the RFC 3161 tokens. A file whose stored
+ * bytes no longer match its recorded hash is left out and named in the
+ * archive instead of being shipped. Each file is loaded only when its entry is
+ * written and the stream's backpressure paces the writing, so a campaign of
+ * hundreds of megabytes starts downloading at once and is never held in memory.
  */
-export async function buildDossierArchive(dossier: Dossier, dependencies: DossierArchiveDependencies = {}): Promise<Uint8Array> {
+export function dossierArchive(dossier: Dossier, dependencies: DossierArchiveDependencies = {}): ReadableStream<Uint8Array> {
+	const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+	writeDossierArchive(new ZipWriter(writable), dossier, dependencies).catch(async (error: unknown) => {
+		console.error(`Dossier archive of campaign ${dossier.campaignId} failed:`, error);
+		// The download ends as failed instead of as a truncated file that looks complete.
+		await writable.abort(error).catch(() => undefined);
+	});
+	return readable;
+}
+
+async function writeDossierArchive(writer: ZipWriter<unknown>, dossier: Dossier, dependencies: DossierArchiveDependencies): Promise<void> {
 	const loadArtifact = dependencies.loadArtifact ?? ArtifactsEntity.get;
 	const loadMail = dependencies.loadMail ?? AbuseRepository.getArtifact;
-	const writer = new ZipWriter(new Uint8ArrayWriter());
-	const add = (name: string, content: Uint8Array) => writer.add(name, new Uint8ArrayReader(content));
+	const add = (name: string, content: Uint8Array) => writer.add(name, new Uint8ArrayReader(content), COMPRESSED.test(name) ? { level: 0 } : {});
 	await add("dossier.txt", Buffer.from(dossierText(dossier), "utf8"));
 	for (const attachment of dossierAttachments(dossier)) await add(attachment.name, attachment.content);
 	await add("dossier.json", Buffer.from(JSON.stringify(dossier, null, 2), "utf8"));
@@ -80,5 +95,5 @@ export async function buildDossierArchive(dossier: Dossier, dependencies: Dossie
 		}
 	}
 	if (missing.length) await add("missing-files.txt", Buffer.from(`${missing.join("\n")}\n`, "utf8"));
-	return writer.close();
+	await writer.close();
 }

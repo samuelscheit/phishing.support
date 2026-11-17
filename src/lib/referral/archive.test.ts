@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "@zip.js/zip.js";
 
-import { buildDossierArchive } from "./archive";
+import { dossierArchive } from "./archive";
 import type { Dossier } from "./dossier";
 import { dossierText, siteAnalysisText } from "./archive_text";
 
@@ -43,21 +43,32 @@ const dossier: Dossier = {
 	}],
 };
 
-async function entries(zip: Uint8Array) {
-	const reader = new ZipReader(new Uint8ArrayReader(zip));
-	const files = new Map<string, Buffer>();
+async function zipEntries(archive: ReadableStream<Uint8Array>) {
+	const reader = new ZipReader(new Uint8ArrayReader(await new Response(archive).bytes()));
+	const result = new Map<string, { bytes: Buffer; compressionMethod: number }>();
 	for (const entry of await reader.getEntries()) {
 		if (entry.directory) continue;
-		files.set(entry.filename, Buffer.from(await entry.getData!(new Uint8ArrayWriter())));
+		result.set(entry.filename, { bytes: Buffer.from(await entry.getData!(new Uint8ArrayWriter())), compressionMethod: entry.compressionMethod });
 	}
 	await reader.close();
-	return files;
+	return result;
+}
+
+async function entries(archive: ReadableStream<Uint8Array>) {
+	return new Map([...await zipEntries(archive)].map(([name, entry]) => [name, entry.bytes]));
+}
+
+/** A site whose evidence is `count` page captures with the given ids, sized and hashed as `blob`. */
+function siteWithCaptures(count: number, blob: Buffer) {
+	return { ...dossier.sites[0]!, evidence: Array.from({ length: count }, (_, index) => (
+		{ artifactId: String(index + 1), name: `page-${index + 1}.mhtml`, kind: "website_mhtml", sha256: sha(blob), size: blob.length }
+	)) };
 }
 
 describe("dossier archive", () => {
 	test("ships the dossier and each evidence file byte for byte, under a safe name", async () => {
 		const blobs = new Map<string, Buffer>([["1", mhtml], ["2", png], ["3", Buffer.from("{}")], ["4", png]]);
-		const files = await entries(await buildDossierArchive(dossier, { loadArtifact: async (id) => ({ blob: blobs.get(id.toString())! }) }));
+		const files = await entries(dossierArchive(dossier, { loadArtifact: async (id) => ({ blob: blobs.get(id.toString())! }) }));
 		expect([...files.keys()].sort()).toEqual([
 			"annexes/CY-Cyprus.txt",
 			"dossier.json",
@@ -98,7 +109,7 @@ describe("dossier archive", () => {
 			{ artifactId: "20", name: "website.mhtml", kind: "website_mhtml", sha256: sha(mhtml), size: mhtml.length },
 		] };
 		const blobs = new Map([["10", older], ["20", mhtml]]);
-		const files = await entries(await buildDossierArchive({ ...dossier, sites: [site] }, { loadArtifact: async (id) => ({ blob: blobs.get(id.toString())! }) }));
+		const files = await entries(dossierArchive({ ...dossier, sites: [site] }, { loadArtifact: async (id) => ({ blob: blobs.get(id.toString())! }) }));
 		expect(files.get("evidence/001-dhl-a.com/website.mhtml")!.toString()).toBe(mhtml.toString());
 		expect(files.get("evidence/001-dhl-a.com/website.10.mhtml")!.toString()).toBe(older.toString());
 	});
@@ -113,7 +124,7 @@ describe("dossier archive", () => {
 			{ reportId: "70", direction: "inbound" as const, occurredAt: "2026-11-12T08:00:00.000Z", provider: "Hostinger International Ltd.", to: [], raw: { artifactId: "83", sha256: "0".repeat(64), size: 3 } },
 		] };
 		const mails = new Map([["81", sent], ["82", reply], ["83", Buffer.from("bad")]]);
-		const files = await entries(await buildDossierArchive({ ...dossier, sites: [site] }, {
+		const files = await entries(dossierArchive({ ...dossier, sites: [site] }, {
 			loadArtifact: async () => undefined,
 			loadMail: async (reportId, artifactId) => (reportId === 70n ? { blob: mails.get(artifactId.toString())! } : undefined),
 		}));
@@ -133,8 +144,75 @@ describe("dossier archive", () => {
 		expect(files.get("evidence/001-dhl-a.com/analysis.txt")!.toString()).toContain("The 4 mails with the providers are in correspondence/");
 	});
 
+	test("stores formats that are compressed already and deflates the rest", async () => {
+		const page = Buffer.from("<html>".padEnd(4096, "a"));
+		const image = Buffer.from(Array.from({ length: 4096 }, (_, index) => (index * 7919) % 251));
+		const site = { ...dossier.sites[0]!, evidence: [
+			{ artifactId: "1", name: "website.mhtml", kind: "website_mhtml", sha256: sha(page), size: page.length },
+			{ artifactId: "2", name: "website-stamped.PNG", kind: "website_evidence", sha256: sha(image), size: image.length },
+		] };
+		const blobs = new Map([["1", page], ["2", image]]);
+		const files = await zipEntries(dossierArchive({ ...dossier, sites: [site] }, { loadArtifact: async (id) => ({ blob: blobs.get(id.toString())! }) }));
+		const folder = "evidence/001-dhl-a.com";
+		expect(files.get(`${folder}/website.mhtml`)).toEqual({ bytes: page, compressionMethod: 8 });
+		expect(files.get(`${folder}/website-stamped.PNG`)).toEqual({ bytes: image, compressionMethod: 0 });
+		expect(files.get("dossier.json")!.compressionMethod).toBe(8);
+	});
+
+	test("streams while it writes: the first bytes come before the evidence is loaded, and loading waits for the reader", async () => {
+		const page = Buffer.alloc(256 * 1024, "a");
+		const loaded: string[] = [];
+		const archive = dossierArchive({ ...dossier, sites: [siteWithCaptures(40, page)] }, {
+			loadArtifact: async (id) => {
+				loaded.push(id.toString());
+				return { blob: page };
+			},
+		});
+		const reader = archive.getReader();
+		const first = await reader.read();
+		expect(first.done).toBe(false);
+		// Nobody reads on: the writer waits instead of loading all 40 files into memory.
+		await Bun.sleep(50);
+		expect(loaded.length).toBeLessThan(5);
+		let total = first.value!.length;
+		for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) total += chunk.value.length;
+		expect(loaded.length).toBe(40);
+		expect(total).toBeGreaterThan(0);
+	});
+
+	test("ends the download as failed when a file cannot be loaded, not as a truncated archive", async () => {
+		const page = Buffer.from("page");
+		const archive = dossierArchive({ ...dossier, sites: [siteWithCaptures(3, page)] }, {
+			loadArtifact: async (id) => {
+				if (id === 2n) throw new Error("database is locked");
+				return { blob: page };
+			},
+		});
+		const errors = console.error;
+		console.error = () => undefined;
+		try {
+			await expect(new Response(archive).bytes()).rejects.toThrow("database is locked");
+		} finally {
+			console.error = errors;
+		}
+	});
+
+	test("stops loading files when the reader cancels the download", async () => {
+		const page = Buffer.alloc(256 * 1024, "a");
+		let loads = 0;
+		const archive = dossierArchive({ ...dossier, sites: [siteWithCaptures(40, page)] }, { loadArtifact: async () => { loads += 1; return { blob: page }; } });
+		const reader = archive.getReader();
+		await reader.read();
+		await reader.cancel("client went away");
+		const errors = console.error;
+		console.error = () => undefined;
+		await Bun.sleep(50);
+		console.error = errors;
+		expect(loads).toBeLessThan(5);
+	});
+
 	test("names a file that is no longer stored", async () => {
-		const files = await entries(await buildDossierArchive({ ...dossier, sites: [{ ...dossier.sites[0]!, evidence: [dossier.sites[0]!.evidence[0]!] }] }, { loadArtifact: async () => undefined }));
+		const files = await entries(dossierArchive({ ...dossier, sites: [{ ...dossier.sites[0]!, evidence: [dossier.sites[0]!.evidence[0]!] }] }, { loadArtifact: async () => undefined }));
 		expect(files.get("missing-files.txt")!.toString()).toContain("website.mhtml: no longer stored");
 	});
 });

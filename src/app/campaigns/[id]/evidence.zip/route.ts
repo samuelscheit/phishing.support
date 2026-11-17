@@ -1,5 +1,5 @@
 import { CampaignRepository } from "@/lib/campaign/repository";
-import { buildDossierArchive } from "@/lib/referral/archive";
+import { dossierArchive } from "@/lib/referral/archive";
 import { buildReferralDossier } from "@/lib/referral/dossier";
 import { zipResponse } from "@/lib/referral/http";
 
@@ -17,5 +17,5 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 	if (current === undefined) return new Response("Not found", { status: 404 });
 	const dossier = await buildReferralDossier(current);
 	if (!dossier.sites.length) return new Response("Not found", { status: 404 });
-	return zipResponse(await buildDossierArchive(dossier), `phishing-campaign-${current.toString()}.zip`);
+	return zipResponse(dossierArchive(dossier), `phishing-campaign-${current.toString()}.zip`);
 }
