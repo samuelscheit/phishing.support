@@ -17,18 +17,6 @@ export function SubmissionStatus({ status, className }: { status?: string | null
 
 	const label = isReported ? "Phishing" : isInvalid ? "Not phishing" : raw || "Unknown";
 
-	const dotClass = isReported
-		? "bg-red-500"
-		: isInvalid
-			? "bg-emerald-500"
-			: isFailed
-				? "bg-red-500"
-				: isCompleted
-					? "bg-green-500"
-					: isPending
-						? "bg-blue-500"
-						: "bg-yellow-500";
-
 	if (isReported) {
 		return (
 			<Badge variant="destructive" className={cn("gap-1", className)}>
@@ -65,9 +53,10 @@ export function SubmissionStatus({ status, className }: { status?: string | null
 		);
 	}
 
+	// A failed analysis says nothing about the site; it is not an alarm.
 	if (isFailed) {
 		return (
-			<Badge variant="destructive" className={cn("gap-1 capitalize", className)}>
+			<Badge variant="outline" className={cn("gap-1 capitalize border-gray-200 bg-gray-50 text-gray-600", className)}>
 				<XCircle className="h-3.5 w-3.5" />
 				{raw || "failed"}
 			</Badge>

@@ -6,7 +6,7 @@ import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/web_lib/util";
 import { formatDistanceToNow } from "date-fns";
-import { ChevronDown, ChevronUp, Layers } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_SUBMISSION_FILTERS, isSubmissionFilter, type SubmissionFilter } from "@/lib/submissions/filters";
@@ -111,21 +111,18 @@ function CampaignCard({ item, obscured = false }: { item: Extract<ListItem, { ty
 				obscured && "pointer-events-none select-none opacity-35 blur-sm"
 			)}
 		>
-			<Card className="hover:bg-accent transition-colors cursor-pointer h-full w-full border-primary/30">
+			<Card className="hover:bg-accent transition-colors cursor-pointer h-full w-full">
 				<CardContent className="py-4 space-y-2 min-w-0">
 					<div className="flex justify-between items-start gap-2">
-						<span className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/5 px-2 py-0.5 text-xs font-medium text-primary">
-							<Layers className="h-3.5 w-3.5" />
-							Campaign · {item.siteCount} sites
+						<span className="flex items-center gap-2">
+							<SubmissionStatus status="reported" />
+							{item.siteCount > 1 && <span className="text-xs text-muted-foreground">{item.siteCount} sites</span>}
 						</span>
 						<span className="text-xs text-muted-foreground whitespace-nowrap">
 							{formatDistanceToNow(new Date(item.newest.createdAt), { addSuffix: true })}
 						</span>
 					</div>
 					<CardTitle className="text-lg truncate min-w-0">{hosts[0]}</CardTitle>
-					<p className="truncate text-xs text-muted-foreground">
-						{item.siteCount > 1 ? `and ${item.siteCount - 1} more ${item.siteCount === 2 ? "site" : "sites"} by the same operator` : ""}
-					</p>
 				</CardContent>
 			</Card>
 		</Link>

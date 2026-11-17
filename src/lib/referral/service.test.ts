@@ -233,7 +233,7 @@ describe("criminal referral of a campaign", () => {
 		expect(campaign.reasons.find((reason) => reason.kind === "same_code")?.text).toContain("Every page runs the same program file, byte for byte.");
 	});
 
-	test("the public list shows a site's campaign when the campaign has other sites", async () => {
+	test("the public list shows every phishing site as its campaign's card, a campaign of one included", async () => {
 		await campaignWithThreeSites();
 		await reportedSite(16n, "unrelated-solo.com");
 		await CampaignRepository.recordIndicators(16n, [telegram("9999")]);
@@ -241,10 +241,9 @@ describe("criminal referral of a campaign", () => {
 		const campaignOf = (id: string) => page.submissions.find((card) => card.id === id)?.campaign;
 		expect(campaignOf("11")).toMatchObject({ siteCount: 3 });
 		expect(campaignOf("13")).toEqual(campaignOf("11"));
-		// A campaign of one is shown as its single site.
-		expect(campaignOf("16")).toBeUndefined();
+		expect(campaignOf("16")).toMatchObject({ siteCount: 1 });
 		const items = groupByCampaign(page.submissions);
-		expect(items.map((item) => item.type === "campaign" ? `campaign:${item.siteCount}:${item.titles.length}` : item.submission.id)).toEqual(["16", "campaign:3:3"]);
+		expect(items.map((item) => item.type === "campaign" ? `campaign:${item.siteCount}:${item.titles.length}` : item.submission.id)).toEqual(["campaign:1:1", "campaign:3:3"]);
 	});
 
 	test("refuses to approve a text the sender would refuse, and keeps the draft", async () => {
