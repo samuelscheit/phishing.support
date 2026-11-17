@@ -3,7 +3,7 @@ import { describeIndicatorEnglish, fieldLabel } from "./archive_text";
 import { countryName, countryRoutes, directComplaint, isEuMemberState } from "./countries";
 import type { Dossier } from "./dossier";
 import { plural, utc } from "./format";
-import { claimNodeName, indicatorInfrastructure, ROLE_LABEL, type InfrastructureNode } from "./infrastructure";
+import { claimNodeName, indicatorInfrastructure, nodeHolder, ROLE_LABEL, type InfrastructureNode } from "./infrastructure";
 import { OFFENCES, OFFENCES_TRANSLATION_SOURCE } from "./offences";
 
 /**
@@ -53,8 +53,9 @@ function campaignFacts(dossier: Dossier): string {
 
 function nodeSection(node: InfrastructureNode, dossier: Dossier, country: string): string[] {
 	const { first, last } = period(node, dossier);
-	const holder = node.via ? `${node.name}, behind ${node.lead?.holder.en ?? node.via}` : node.lead?.holder.en ?? node.name;
-	const custodian = node.lead?.holder.en ?? node.via ?? node.name;
+	const holder = nodeHolder(node, "en");
+	// The server's host holds the server; behind a CDN without a named origin, the CDN holds what leads there.
+	const custodian = node.originHost ?? node.lead?.holder.en ?? node.via ?? node.name;
 	const records = node.role === "payment"
 		? `The account holder's identity, the account's opening documents and its transactions, from ${utc(first)} to the present.`
 		: `The customer account behind these identifiers: subscriber and payment data, and the IP addresses and times of account creation and of every login, upload or configuration change, from account creation to the present; at least for ${utc(first)} to ${utc(last)}.`;

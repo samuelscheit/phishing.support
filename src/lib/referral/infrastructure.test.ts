@@ -172,6 +172,20 @@ describe("locateInfrastructure", () => {
 		expect(node!.country).toBeUndefined();
 	});
 
+	test("a data collector on a domain Cloudflare named a host for is on that host, without any lookup", async () => {
+		const skn = route({ ...cryphora, verifiedEmail: "abuse@skntelecom.com", resolutionSnapshot: { providerLabel: "SKN-NETWORK-1 - SKN Subnet &amp; Telecom Ltd, KN", originalDomain: "www.assistdeparments-x.com", networks: [{ asn: 64500 }] } });
+		const { lookup, asked } = fakeLookup({}, {});
+		const nodes = await locateInfrastructure(mergeInfrastructure([
+			{ site: "https://assistdeparments-x.com/", claim: claim(skn) },
+			// Another name of the same registrable domain.
+			{ site: "https://assistdeparments-x.com/", claim: { role: "exfiltration", name: "api.assistdeparments-x.com", resources: [] } },
+		]), lookup);
+		const collector = nodes.find((node) => node.role === "exfiltration")!;
+		expect(collector).toMatchObject({ via: "Cloudflare", originHost: "SKN-NETWORK-1 - SKN Subnet & Telecom Ltd, KN", country: "KN" });
+		expect(asked.filter((question) => question.includes("assistdeparments"))).toEqual([]);
+		expect(infrastructureLines(nodes, "de")).toContain("  - Empfänger der Eingaben: api.assistdeparments-x.com (hinter Cloudflare; Server laut Cloudflare bei SKN-NETWORK-1 - SKN Subnet & Telecom Ltd, KN) (1 Seite)");
+	});
+
 	test("a data collector is resolved; behind Cloudflare, Cloudflare holds the records about its origin", async () => {
 		const collectors = mergeInfrastructure([
 			{ site: "https://a.example/", claim: { role: "exfiltration", name: "api.bitflowpay.com", resources: [] } },

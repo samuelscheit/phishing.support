@@ -2,6 +2,7 @@ import dns from "node:dns/promises";
 
 import { retryWithTimeout } from "../network/bounded_fetch";
 import { locatedCountry, originAsns, registeredCountry } from "../network/ripestat";
+import { registrableDomain } from "../abuse/security";
 import type { AbuseProviderRoute } from "../abuse/schema";
 import { countryName, countryRoutes, directComplaint, type Bilingual } from "./countries";
 import { plural, record, text } from "./format";
@@ -27,6 +28,10 @@ export type InfrastructureNode = {
 	serverCountry?: string;
 	/** The CDN in front of the node, which then holds the records about its origin. */
 	via?: string;
+	/** For a host Cloudflare named: the domains Cloudflare named it for. */
+	hosts?: string[];
+	/** For a data collector behind a CDN: the host the CDN named as its origin. */
+	originHost?: string;
 	/** Server addresses or AS numbers behind the node, as `192.0.2.1` or `AS64500`. */
 	resources: string[];
 	contacts: string[];
@@ -34,7 +39,7 @@ export type InfrastructureNode = {
 };
 
 /** What one takedown route says about the infrastructure, before country lookups. */
-export type InfrastructureClaim = Omit<InfrastructureNode, "lead" | "country" | "serverCountry" | "via" | "sites" | "contacts"> & { contact?: string };
+export type InfrastructureClaim = Omit<InfrastructureNode, "lead" | "country" | "serverCountry" | "via" | "originHost" | "sites" | "contacts"> & { contact?: string };
 
 /** Services that only warn or block; they hold no records about the operator. */
 const NOT_INFRASTRUCTURE = /^(?:netcraft|netcraft_mail|google_safe_browsing|manual_unroutable|historical:)/;
@@ -75,10 +80,12 @@ export function routeInfrastructure(route: Pick<AbuseProviderRoute, "providerReg
 		const label = unescaped(text(snapshot.providerLabel));
 		const networks = Array.isArray(snapshot.networks) ? snapshot.networks.map(record) : [];
 		const networkCountry = holderCountry(label) ?? networks.map((network) => holderCountry(text(network.holder))).find(Boolean);
+		const domain = text(snapshot.originalDomain)?.toLowerCase();
 		return {
 			role: "hosting",
 			name: label ?? unescaped(route.providerDisplayName)!,
 			resources: networks.map((network) => network.asn).filter((asn): asn is number => typeof asn === "number").map((asn) => `AS${asn}`),
+			...(domain ? { hosts: [domain] } : {}),
 			...(networkCountry ? { networkCountry } : {}),
 			...(contact ? { contact } : {}),
 		};
@@ -197,6 +204,7 @@ export function mergeInfrastructure(claims: ReadonlyArray<{ site: string; claim:
 		const node = nodes.get(key) ?? { role: claim.role, name: claimNodeName(claim), ...(lead ? { lead } : {}), resources: [], contacts: [], sites: [] };
 		if (!node.networkCountry && claim.networkCountry) node.networkCountry = claim.networkCountry;
 		for (const resource of claim.resources) if (!node.resources.includes(resource)) node.resources.push(resource);
+		if (claim.hosts?.length) node.hosts = [...new Set([...node.hosts ?? [], ...claim.hosts])];
 		if (claim.contact && !node.contacts.includes(claim.contact)) node.contacts.push(claim.contact);
 		if (!node.sites.includes(site)) node.sites.push(site);
 		const holderCountry = node.lead?.country ?? node.networkCountry;
@@ -209,39 +217,66 @@ export function mergeInfrastructure(claims: ReadonlyArray<{ site: string; claim:
 		.sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role) || b.sites.length - a.sites.length || a.name.localeCompare(b.name));
 }
 
+/** The host Cloudflare named for this host name or for another name of the same domain. */
+function disclosedOrigin(host: string, hosts: readonly InfrastructureNode[]): InfrastructureNode | undefined {
+	const domain = registrableDomain(host) ?? host;
+	return hosts.find((candidate) => candidate.hosts?.some((named) => named === host || (registrableDomain(named) ?? named) === domain));
+}
+
 /**
- * A server that receives the entered data is known only by its host name:
- * resolve it. Behind a CDN its address says nothing about the origin, so
- * the CDN, which knows the origin, becomes the record holder.
+ * A server that receives the entered data is known only by its host name.
+ * When Cloudflare already named the host of that domain, the collector's
+ * server is there. Otherwise resolve it: behind a CDN its address says
+ * nothing about the origin, so the CDN, which knows the origin, becomes the
+ * record holder.
  */
-async function locateCollector(node: InfrastructureNode, lookup: NetworkLookup): Promise<InfrastructureNode> {
+async function locateCollector(node: InfrastructureNode, hosts: readonly InfrastructureNode[], lookup: NetworkLookup): Promise<InfrastructureNode> {
+	const origin = disclosedOrigin(node.name.toLowerCase(), hosts);
+	if (origin) {
+		return {
+			...node,
+			via: "Cloudflare",
+			originHost: origin.name,
+			...(origin.country ? { country: origin.country } : {}),
+			...(origin.networkCountry ? { networkCountry: origin.networkCountry } : {}),
+		};
+	}
 	const ips = (await lookup.resolve(node.name)).slice(0, 4);
 	if (!ips.length) return node;
 	const cdn = (await lookup.asns(ips[0]!)).map((asn) => CDN_ASNS.get(asn)).find(Boolean);
 	const resolved = { ...node, resources: [...new Set([...node.resources, ...ips])] };
-	if (!cdn) return resolved;
+	if (!cdn) return locateNode(resolved, lookup);
 	const lead = providerLead(cdn);
 	return { ...resolved, via: cdn, ...(lead ? { lead, country: lead.country } : {}) };
+}
+
+function isCollector(node: InfrastructureNode): boolean {
+	return node.role === "exfiltration" && !node.resources.length && HOST.test(node.name);
 }
 
 /**
  * Fill in what the takedown records did not say: the network's registered
  * country and, for a host or a data collector not behind a CDN, where its
- * server stands.
+ * server stands. Data collectors come last, so they can point to the hosts
+ * Cloudflare named.
  */
 export async function locateInfrastructure(nodes: readonly InfrastructureNode[], lookup: NetworkLookup = PUBLIC_NETWORK_LOOKUP): Promise<InfrastructureNode[]> {
-	return Promise.all(nodes.map(async (original) => {
-		const node = original.role === "exfiltration" && !original.resources.length && HOST.test(original.name) ? await locateCollector(original, lookup) : original;
-		const [first] = node.resources;
-		const ip = node.resources.find((resource) => IP.test(resource));
-		const locatable = (node.role === "hosting" || node.role === "exfiltration") && !node.via && ip;
-		const [networkCountry, serverCountry] = await Promise.all([
-			node.networkCountry ?? (first ? lookup.registered(first) : undefined),
-			locatable ? lookup.located(ip) : undefined,
-		]);
-		const country = node.lead?.country ?? networkCountry;
-		return { ...node, ...(networkCountry ? { networkCountry } : {}), ...(serverCountry ? { serverCountry } : {}), ...(country ? { country } : {}) };
-	}));
+	const located = await Promise.all(nodes.map((node) => (isCollector(node) ? node : locateNode(node, lookup))));
+	const hosts = located.filter((node) => node.role === "hosting");
+	return Promise.all(located.map((node) => (isCollector(node) ? locateCollector(node, hosts, lookup) : node)));
+}
+
+/** The registered country of a node's first resource and, for a server not behind a CDN, its location. */
+async function locateNode(node: InfrastructureNode, lookup: NetworkLookup): Promise<InfrastructureNode> {
+	const [first] = node.resources;
+	const ip = node.resources.find((resource) => IP.test(resource));
+	const locatable = (node.role === "hosting" || node.role === "exfiltration") && !node.via && ip;
+	const [networkCountry, serverCountry] = await Promise.all([
+		node.networkCountry ?? (first ? lookup.registered(first) : undefined),
+		locatable ? lookup.located(ip) : undefined,
+	]);
+	const country = node.lead?.country ?? networkCountry;
+	return { ...node, ...(networkCountry ? { networkCountry } : {}), ...(serverCountry ? { serverCountry } : {}), ...(country ? { country } : {}) };
 }
 
 type Language = keyof Bilingual;
@@ -256,14 +291,21 @@ export const ROLE_LABEL: Readonly<Record<InfrastructureRole, Bilingual>> = {
 };
 
 const WORDS = {
-	de: { site: "Seite", sites: "Seiten", server: "Server in", network: "Netz registriert in", abuse: "Abuse-Kontakt", via: "hinter", unknown: "Staat nicht ermittelt", direct: "Eigene Anzeige vor Ort möglich" },
-	en: { site: "site", sites: "sites", server: "server in", network: "network registered in", abuse: "abuse contact", via: "behind", unknown: "State not determined", direct: "A complaint of our own is possible there" },
+	de: { site: "Seite", sites: "Seiten", server: "Server in", network: "Netz registriert in", abuse: "Abuse-Kontakt", via: "hinter", origin: "Server laut Cloudflare bei", unknown: "Staat nicht ermittelt", direct: "Eigene Anzeige vor Ort möglich" },
+	en: { site: "site", sites: "sites", server: "server in", network: "network registered in", abuse: "abuse contact", via: "behind", origin: "server, as Cloudflare named it, at", unknown: "State not determined", direct: "A complaint of our own is possible there" },
 } as const;
+
+/** How a node is named: a collector behind a CDN keeps its own name, followed by the CDN and, if known, the origin's host. */
+export function nodeHolder(node: InfrastructureNode, language: Language): string {
+	const words = WORDS[language];
+	if (node.originHost) return `${node.name} (${words.via} ${node.via}; ${words.origin} ${node.originHost})`;
+	if (node.via) return `${node.name} (${words.via} ${node.lead?.holder[language] ?? node.via})`;
+	return node.lead?.holder[language] ?? node.name;
+}
 
 function nodeLine(node: InfrastructureNode, language: Language): string {
 	const words = WORDS[language];
-	// A collector behind a CDN keeps its own name; the CDN is named as the holder of its origin.
-	const holder = node.via ? `${node.name} (${words.via} ${node.lead?.holder[language] ?? node.via})` : node.lead?.holder[language] ?? node.name;
+	const holder = nodeHolder(node, language);
 	const details = [
 		plural(node.sites.length, words.site, words.sites),
 		...node.resources.length ? [node.resources.join(", ")] : [],
