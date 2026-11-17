@@ -1,6 +1,8 @@
 import { publicCampaignUrl } from "../campaign/urls";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
-import type { Dossier, DossierIndicator, DossierSite } from "./dossier";
+import sanitizeFilename from "sanitize-filename";
+
+import type { Dossier, DossierIndicator, DossierMail, DossierSite } from "./dossier";
 import { plural, record, text, utc } from "./format";
 import { infrastructureLines } from "./infrastructure";
 
@@ -12,6 +14,27 @@ import { infrastructureLines } from "./infrastructure";
  */
 
 export const fieldLabel = (field: string) => CANARY_FIELD_LABEL[field as CanaryField] ?? field;
+
+/** A mail's file in the site's correspondence folder: position, time, direction and provider, so the folder sorts chronologically. */
+export function correspondenceFileName(mail: DossierMail, position: number): string {
+	const time = mail.occurredAt.slice(0, 16).replace(/[-:]/g, "").replace("T", "-");
+	const provider = sanitizeFilename(mail.provider).replace(/\s+/g, "-").slice(0, 40) || "provider";
+	return `${String(position + 1).padStart(3, "0")}-${time}-${mail.direction === "outbound" ? "sent" : "received"}-${provider}.${mail.raw ? "eml" : "txt"}`;
+}
+
+/** The site's correspondence in order, with the SHA-256 of each original. */
+export function correspondenceIndexText(site: DossierSite): string {
+	const lines = [
+		`Correspondence with providers about ${site.url}, oldest first. Each .eml file is the message exactly as it was sent or received; a .txt file holds only the text where no original was stored.`,
+		"",
+		...site.correspondence.map((mail, position) => {
+			const direction = mail.direction === "outbound" ? `sent to ${mail.to.join(", ") || mail.provider}` : `received from ${mail.from ?? mail.provider}`;
+			const hash = mail.raw ? `, SHA-256 ${mail.raw.sha256}` : "";
+			return `${position + 1}. ${utc(mail.occurredAt)}, ${direction} (${mail.provider}): ${mail.subject ?? "(no subject)"}\n   ${correspondenceFileName(mail, position)}${hash}`;
+		}),
+	];
+	return `${lines.join("\n")}\n`;
+}
 
 /** One indicator as a sentence an investigator can act on. */
 export function describeIndicatorEnglish(indicator: DossierIndicator): string {
@@ -102,6 +125,7 @@ export function siteAnalysisText(site: DossierSite): string {
 		? "The full visit record (visit-record.json: every value typed and every request with its body and the server's answer; visit-protocol.txt: the same as a dated chronology) is in this folder, covered by visit-manifest.json and its RFC 3161 timestamp."
 		: "This visit predates the full visit record (kept for visits from 17 Nov 2026 on): what is above is the summary the case kept at the time.");
 	lines.push("", "Takedown reports", ...(site.reports.length ? site.reports.map((report) => `  ${reportLine(report)}`) : ["  None yet."]));
+	if (site.correspondence.length) lines.push(`  The ${plural(site.correspondence.length, "mail", "mails")} with the providers are in correspondence/ (index.txt lists them).`);
 	return `${lines.join("\n")}\n`;
 }
 

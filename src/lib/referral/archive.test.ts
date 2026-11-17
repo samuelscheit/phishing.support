@@ -32,6 +32,7 @@ const dossier: Dossier = {
 		visit: { outcome: "completed", actions: [{ kind: "input_text", text: "Typed into \"E-Mail\"" }, { kind: "click", text: "Clicked \"Weiter\"" }] },
 		reportText: "The page impersonates DHL and asks for a password.",
 		reports: [{ provider: "Hostinger International Ltd.", target: "dhl-a.com", channel: "email", contact: "abuse@hostinger.com", status: "acknowledged", reportedAt: "2026-11-10T09:00:00.000Z" }],
+		correspondence: [],
 		evidence: [
 			{ artifactId: "1", name: "website.mhtml", kind: "website_mhtml", sha256: sha(mhtml), size: mhtml.length },
 			{ artifactId: "2", name: "website.png", kind: "website_png", sha256: sha(png), size: png.length },
@@ -100,6 +101,36 @@ describe("dossier archive", () => {
 		const files = await entries(await buildDossierArchive({ ...dossier, sites: [site] }, { loadArtifact: async (id) => ({ blob: blobs.get(id.toString())! }) }));
 		expect(files.get("evidence/001-dhl-a.com/website.mhtml")!.toString()).toBe(mhtml.toString());
 		expect(files.get("evidence/001-dhl-a.com/website.10.mhtml")!.toString()).toBe(older.toString());
+	});
+
+	test("ships each mail with the providers byte for byte, in order, with an index; a mail without an original as its text", async () => {
+		const sent = Buffer.from("From: report@phishing.support\r\nTo: abuse@hostinger.com\r\nSubject: Phishing\r\n\r\nPlease take it down.");
+		const reply = Buffer.from("From: abuse@hostinger.com\r\nSubject: Re: Phishing\r\n\r\nSuspended.");
+		const site = { ...dossier.sites[0]!, evidence: [], correspondence: [
+			{ reportId: "70", direction: "outbound" as const, occurredAt: "2026-11-10T09:00:00.000Z", provider: "Hostinger International Ltd.", from: "report@phishing.support", to: ["abuse@hostinger.com"], subject: "Phishing", raw: { artifactId: "81", sha256: sha(sent), size: sent.length } },
+			{ reportId: "70", direction: "inbound" as const, occurredAt: "2026-11-10T11:30:00.000Z", provider: "Hostinger International Ltd.", from: "abuse@hostinger.com", to: ["report@phishing.support"], subject: "Re: Phishing", raw: { artifactId: "82", sha256: sha(reply), size: reply.length } },
+			{ reportId: "70", direction: "inbound" as const, occurredAt: "2026-11-11T08:00:00.000Z", provider: "Hostinger International Ltd.", from: "abuse@hostinger.com", to: [], text: "Closed." },
+			{ reportId: "70", direction: "inbound" as const, occurredAt: "2026-11-12T08:00:00.000Z", provider: "Hostinger International Ltd.", to: [], raw: { artifactId: "83", sha256: "0".repeat(64), size: 3 } },
+		] };
+		const mails = new Map([["81", sent], ["82", reply], ["83", Buffer.from("bad")]]);
+		const files = await entries(await buildDossierArchive({ ...dossier, sites: [site] }, {
+			loadArtifact: async () => undefined,
+			loadMail: async (reportId, artifactId) => (reportId === 70n ? { blob: mails.get(artifactId.toString())! } : undefined),
+		}));
+		const folder = "evidence/001-dhl-a.com/correspondence";
+		expect([...files.keys()].filter((name) => name.startsWith(folder)).sort()).toEqual([
+			`${folder}/001-20261110-0900-sent-Hostinger-International-Ltd.eml`,
+			`${folder}/002-20261110-1130-received-Hostinger-International-Ltd.eml`,
+			`${folder}/003-20261111-0800-received-Hostinger-International-Ltd.txt`,
+			`${folder}/index.txt`,
+		]);
+		expect(files.get(`${folder}/001-20261110-0900-sent-Hostinger-International-Ltd.eml`)!.equals(sent)).toBe(true);
+		expect(files.get(`${folder}/003-20261111-0800-received-Hostinger-International-Ltd.txt`)!.toString()).toBe("Closed.");
+		const index = files.get(`${folder}/index.txt`)!.toString();
+		expect(index).toContain("1. 2026-11-10 09:00 UTC, sent to abuse@hostinger.com (Hostinger International Ltd.): Phishing");
+		expect(index).toContain(`SHA-256 ${sha(reply)}`);
+		expect(files.get("missing-files.txt")!.toString()).toContain("004-20261112-0800-received-Hostinger-International-Ltd.eml: the stored bytes do not match the recorded SHA-256");
+		expect(files.get("evidence/001-dhl-a.com/analysis.txt")!.toString()).toContain("The 4 mails with the providers are in correspondence/");
 	});
 
 	test("names a file that is no longer stored", async () => {

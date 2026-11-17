@@ -20,6 +20,21 @@ export type DossierProviderReport = {
 
 export type DossierEvidenceFile = { artifactId: string; name: string; kind: string; sha256: string; size: number; archivedAt?: string };
 
+/** One mail to or from a provider about the site; the archive carries it as the original .eml. */
+export type DossierMail = {
+	reportId: string;
+	direction: "inbound" | "outbound";
+	occurredAt: string;
+	provider: string;
+	from?: string;
+	to: string[];
+	subject?: string;
+	/** The stored original message, when there is one. */
+	raw?: { artifactId: string; sha256: string; size: number };
+	/** The message text, only when no original is stored. */
+	text?: string;
+};
+
 /** Where the page sent the synthetic values our visit entered. */
 export type DossierDataDestination = { url: string; method: string; fields: string[]; sameSite: boolean };
 
@@ -54,6 +69,8 @@ export type DossierSite = {
 	reportText?: string;
 	impersonates: string[];
 	reports: DossierProviderReport[];
+	/** Every mail exchanged with providers about the site, oldest first; never the authorities'. */
+	correspondence: DossierMail[];
 	evidence: DossierEvidenceFile[];
 	indicators: Array<Pick<CampaignIndicator, "kind" | "value" | "links" | "evidence">>;
 };
@@ -91,6 +108,8 @@ export type DossierDependencies = {
 	listTargets?: typeof AbuseRepository.listTargets;
 	listRuns?: typeof AbuseRepository.listProviderRunsForReport;
 	listArtifacts?: typeof ArtifactsEntity.listForSubmission;
+	listMail?: typeof AbuseRepository.listMailForReport;
+	listReportArtifacts?: typeof AbuseRepository.listArtifactMetadata;
 	/** Network lookups for buildReferralDossier; RIPEstat and DNS by default. */
 	lookupNetwork?: NetworkLookup;
 	now?: () => Date;
@@ -181,6 +200,8 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 	const listTargets = dependencies.listTargets ?? AbuseRepository.listTargets;
 	const listRuns = dependencies.listRuns ?? AbuseRepository.listProviderRunsForReport;
 	const listArtifacts = dependencies.listArtifacts ?? ArtifactsEntity.listForSubmission;
+	const listMail = dependencies.listMail ?? AbuseRepository.listMailForReport;
+	const listReportArtifacts = dependencies.listReportArtifacts ?? AbuseRepository.listArtifactMetadata;
 	const members = await listMembers(campaignId);
 
 	const sites: DossierSite[] = [];
@@ -188,12 +209,29 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 	for (const member of members) {
 		const submission = await loadSubmission(member.submissionId);
 		const reports: DossierProviderReport[] = [];
+		const correspondence: DossierMail[] = [];
 		const impersonates = new Set<string>();
 		let reportText: string | undefined;
 		for (const report of await listReports(member.submissionId)) {
 			if (report.legalBrandUrl) impersonates.add(hostOf(report.legalBrandUrl));
 			if (!report.idempotencyKey && report.description) reportText = report.description;
-			const [routes, targets, runs] = await Promise.all([listRoutes(report.id), listTargets(report.id), listRuns(report.id)]);
+			const [routes, targets, runs, mails, artifacts] = await Promise.all([listRoutes(report.id), listTargets(report.id), listRuns(report.id), listMail(report.id), listReportArtifacts(report.id)]);
+			const providerRoutes = new Map(routes.filter((route) => !isAuthorityRoute(route)).map((route) => [route.id, route]));
+			for (const mail of mails) {
+				const route = providerRoutes.get(mail.routeId);
+				if (!route) continue;
+				const raw = mail.rawArtifactId === null ? undefined : artifacts.find((artifact) => artifact.id === mail.rawArtifactId);
+				correspondence.push({
+					reportId: report.id.toString(),
+					direction: mail.direction,
+					occurredAt: mail.occurredAt.toISOString(),
+					provider: route.providerDisplayName,
+					...(mail.fromAddress ? { from: mail.fromAddress } : {}),
+					to: mail.toAddresses,
+					...(mail.subject ? { subject: mail.subject } : {}),
+					...(raw ? { raw: { artifactId: raw.id.toString(), sha256: raw.sha256, size: raw.size } } : mail.textBody ? { text: mail.textBody } : {}),
+				});
+			}
 			for (const route of routes) {
 				if (isAuthorityRoute(route) || isPreservationRoute(route)) continue;
 				const claim = routeInfrastructure(route);
@@ -239,6 +277,7 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 			...(reportText ? { reportText } : {}),
 			impersonates: [...new Set([...impersonates, ...(verdict?.impersonates ? [verdict.impersonates.name] : [])])].sort(),
 			reports,
+			correspondence: correspondence.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)),
 			evidence,
 			indicators: member.indicators.map(({ kind, value, links, evidence: indicatorEvidence }) => ({ kind, value, links, evidence: indicatorEvidence })),
 		});

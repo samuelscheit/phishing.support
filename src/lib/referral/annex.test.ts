@@ -13,6 +13,7 @@ const site = (url: string, firstSeenAt: string) => ({
 	dns: { a: [], aaaa: [], cname: [], ns: [] },
 	dataDestinations: [],
 	reports: [],
+	correspondence: [],
 	evidence: [],
 	indicators: [],
 });

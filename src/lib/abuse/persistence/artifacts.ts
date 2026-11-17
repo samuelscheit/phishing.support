@@ -50,7 +50,7 @@ export async function listRouteArtifacts(routeId: bigint, kinds?: string[]): Pro
 export async function listArtifactMetadata(reportId: bigint) {
 	const db = await getDb();
 	return db
-		.select({ id: abuseArtifacts.id, name: abuseArtifacts.name, kind: abuseArtifacts.kind, mimeType: abuseArtifacts.mimeType, size: abuseArtifacts.size })
+		.select({ id: abuseArtifacts.id, name: abuseArtifacts.name, kind: abuseArtifacts.kind, mimeType: abuseArtifacts.mimeType, size: abuseArtifacts.size, sha256: abuseArtifacts.sha256 })
 		.from(abuseArtifacts)
 		.where(eq(abuseArtifacts.reportId, reportId))
 		.orderBy(asc(abuseArtifacts.createdAt), asc(abuseArtifacts.id))
