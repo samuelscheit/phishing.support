@@ -58,6 +58,7 @@ describe("dossier archive", () => {
 		const blobs = new Map<string, Buffer>([["1", mhtml], ["2", png], ["3", Buffer.from("{}")], ["4", png]]);
 		const files = await entries(await buildDossierArchive(dossier, { loadArtifact: async (id) => ({ blob: blobs.get(id.toString())! }) }));
 		expect([...files.keys()].sort()).toEqual([
+			"annexes/CY-Cyprus.txt",
 			"dossier.json",
 			"dossier.txt",
 			"evidence/001-dhl-a.com/....escape.tsr",

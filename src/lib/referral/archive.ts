@@ -3,6 +3,7 @@ import sanitizeFilename from "sanitize-filename";
 
 import { ArtifactsEntity } from "../db/entities";
 import type { Dossier } from "./dossier";
+import { countryAnnexes } from "./annex";
 import { dossierText, indicatorsCsv, siteAnalysisText, sitesCsv } from "./archive_text";
 
 export type DossierArchiveDependencies = {
@@ -30,6 +31,7 @@ export async function buildDossierArchive(dossier: Dossier, dependencies: Dossie
 	await add("dossier.txt", Buffer.from(dossierText(dossier), "utf8"));
 	for (const attachment of dossierAttachments(dossier)) await add(attachment.name, attachment.content);
 	await add("dossier.json", Buffer.from(JSON.stringify(dossier, null, 2), "utf8"));
+	for (const annex of countryAnnexes(dossier)) await add(annex.fileName, Buffer.from(annex.text, "utf8"));
 	const missing: string[] = [];
 	for (const [index, site] of dossier.sites.entries()) {
 		const folder = `evidence/${String(index + 1).padStart(3, "0")}-${sanitizeFilename(site.host) || site.submissionId}`;

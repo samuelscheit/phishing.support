@@ -3,6 +3,7 @@ import { publicCampaignUrl } from "../campaign/urls";
 import type { Authority } from "./authorities";
 import type { Complainant } from "./complainant";
 import type { Dossier, DossierSite } from "./dossier";
+import { countryAnnexes } from "./annex";
 import { infrastructureLines } from "./infrastructure";
 import { germanDate, germanDateTime, indicatorLines, siteLine } from "./render";
 
@@ -92,6 +93,7 @@ export function complaintDraft(context: DraftContext & { authority: Authority })
 		"Ermittlungsansätze und Datensicherung",
 		"Die Anbieter haben die Seiten teils schon gesperrt; nach einer Sperrung löschen sie Konto-, Zahlungs- und Zugriffsdaten oft binnen Tagen. Wir haben jeden Anbieter gebeten, die Daten aufzubewahren, können eine Sicherung aber nicht erzwingen. Wir regen an, die Daten bei folgenden Anbietern zu sichern. Sie sind nach dem Staat geordnet, in dem das Unternehmen sitzt, das die Kundendaten hält; dazu die Instrumente, die dort greifen:",
 		...infrastructureLines(dossier.infrastructure, "de"),
+		...annexSentence(dossier),
 		"",
 		...evidenceParagraph(context.download),
 		"",
@@ -103,6 +105,13 @@ export function complaintDraft(context: DraftContext & { authority: Authority })
 		...signature(complainant),
 	].join("\n");
 	return { subject, body };
+}
+
+/** Points the authority to the per-state annexes in the archive, when there are any. */
+function annexSentence(dossier: Dossier): string[] {
+	const annexes = countryAnnexes(dossier);
+	if (!annexes.length) return [];
+	return ["", `Für ${annexes.length === 1 ? "den ausländischen Staat liegt" : `jeden der ${annexes.length} ausländischen Staaten liegt`} im ZIP-Archiv ein englischer Anhang (${annexes.map((annex) => annex.fileName).join(", ")}): die Infrastruktur dort mit allen Kennungen und Zeiträumen, vorausgefüllte Angaben für ein Sicherungsersuchen nach Art. 29 Budapest-Konvention und, für EU-Staaten, für eine Europäische Herausgabeanordnung, sowie der Wortlaut der Straftatbestände auf Deutsch und Englisch.`];
 }
 
 /** New sites of a campaign already reported, sent to the same authority under its file number. */
@@ -123,6 +132,7 @@ export function supplementDraft(context: DraftContext & { authority: Authority; 
 		"",
 		"Ermittlungsansätze und Datensicherung, nach Staaten",
 		...infrastructureLines(dossier.infrastructure, "de"),
+		...annexSentence(dossier),
 		"",
 		...evidenceParagraph(context.download),
 		"",

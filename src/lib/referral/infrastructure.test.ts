@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { countryRoutes, directComplaint } from "./countries";
-import { indicatorInfrastructure, infrastructureLines, locateInfrastructure, mergeInfrastructure, routeInfrastructure, type CountryLookup, type InfrastructureClaim } from "./infrastructure";
+import { indicatorInfrastructure, infrastructureLines, locateInfrastructure, mergeInfrastructure, routeInfrastructure, type InfrastructureClaim, type NetworkLookup } from "./infrastructure";
 
 type Route = Parameters<typeof routeInfrastructure>[0];
 
@@ -51,11 +51,13 @@ const cloudzy = route({
 	resolutionSnapshot: { target: "153.75.90.37", allocationOwner: { name: "AE-CLOUDZY-19910923" }, ipRdap: { data: { country: "AE" } } },
 });
 
-function fakeLookup(registered: Record<string, string>, located: Record<string, string>) {
+function fakeLookup(registered: Record<string, string>, located: Record<string, string>, hosts: Record<string, string[]> = {}, asns: Record<string, number[]> = {}) {
 	const asked: string[] = [];
-	const lookup: CountryLookup = {
+	const lookup: NetworkLookup = {
 		registered: async (resource) => (asked.push(`registered:${resource}`), registered[resource]),
 		located: async (ip) => (asked.push(`located:${ip}`), located[ip]),
+		resolve: async (host) => (asked.push(`resolve:${host}`), hosts[host] ?? []),
+		asns: async (ip) => (asked.push(`asns:${ip}`), asns[ip] ?? []),
 	};
 	return { lookup, asked };
 }
@@ -166,8 +168,33 @@ describe("locateInfrastructure", () => {
 	});
 
 	test("a failed lookup leaves the state unknown", async () => {
-		const [node] = await locateInfrastructure(mergeInfrastructure([{ site: "https://a.example/", claim: claim(interserver) }]), { registered: async () => undefined, located: async () => undefined });
+		const [node] = await locateInfrastructure(mergeInfrastructure([{ site: "https://a.example/", claim: claim(interserver) }]), fakeLookup({}, {}).lookup);
 		expect(node!.country).toBeUndefined();
+	});
+
+	test("a data collector is resolved; behind Cloudflare, Cloudflare holds the records about its origin", async () => {
+		const collectors = mergeInfrastructure([
+			{ site: "https://a.example/", claim: { role: "exfiltration", name: "api.bitflowpay.com", resources: [] } },
+			{ site: "https://b.example/", claim: { role: "exfiltration", name: "collect.example.net", resources: [] } },
+			{ site: "https://c.example/", claim: { role: "exfiltration", name: "unresolvable.example", resources: [] } },
+			{ site: "https://d.example/", claim: { role: "exfiltration", name: "Telegram", resources: [] } },
+		]);
+		const { lookup, asked } = fakeLookup(
+			{ "104.21.1.1": "US", "198.51.100.7": "NL" },
+			{ "198.51.100.7": "DE" },
+			{ "api.bitflowpay.com": ["104.21.1.1", "172.67.1.1"], "collect.example.net": ["198.51.100.7"] },
+			{ "104.21.1.1": [13335], "198.51.100.7": [64500] },
+		);
+		const byName = new Map((await locateInfrastructure(collectors, lookup)).map((node) => [node.name, node]));
+		expect(byName.get("api.bitflowpay.com")).toMatchObject({ via: "Cloudflare", country: "US", resources: ["104.21.1.1", "172.67.1.1"] });
+		expect(byName.get("api.bitflowpay.com")!.serverCountry).toBeUndefined();
+		expect(byName.get("collect.example.net")).toMatchObject({ country: "NL", networkCountry: "NL", serverCountry: "DE", resources: ["198.51.100.7"] });
+		expect(byName.get("collect.example.net")!.via).toBeUndefined();
+		expect(byName.get("unresolvable.example")!.country).toBeUndefined();
+		// A service named by the platform is never resolved.
+		expect(asked).not.toContain("resolve:Telegram");
+		expect(asked).not.toContain("located:104.21.1.1");
+		expect(infrastructureLines([byName.get("api.bitflowpay.com")!], "de")).toContain("  - Empfänger der Eingaben: api.bitflowpay.com (hinter Cloudflare, Inc.) (1 Seite; 104.21.1.1, 172.67.1.1)");
 	});
 });
 

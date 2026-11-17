@@ -1,4 +1,7 @@
-import { locatedCountry, registeredCountry } from "../network/ripestat";
+import dns from "node:dns/promises";
+
+import { retryWithTimeout } from "../network/bounded_fetch";
+import { locatedCountry, originAsns, registeredCountry } from "../network/ripestat";
 import type { AbuseProviderRoute } from "../abuse/schema";
 import { countryName, countryRoutes, directComplaint, type Bilingual } from "./countries";
 import { plural, record, text } from "./format";
@@ -22,6 +25,8 @@ export type InfrastructureNode = {
 	country?: string;
 	networkCountry?: string;
 	serverCountry?: string;
+	/** The CDN in front of the node, which then holds the records about its origin. */
+	via?: string;
 	/** Server addresses or AS numbers behind the node, as `192.0.2.1` or `AS64500`. */
 	resources: string[];
 	contacts: string[];
@@ -29,7 +34,7 @@ export type InfrastructureNode = {
 };
 
 /** What one takedown route says about the infrastructure, before country lookups. */
-export type InfrastructureClaim = Omit<InfrastructureNode, "lead" | "country" | "serverCountry" | "sites" | "contacts"> & { contact?: string };
+export type InfrastructureClaim = Omit<InfrastructureNode, "lead" | "country" | "serverCountry" | "via" | "sites" | "contacts"> & { contact?: string };
 
 /** Services that only warn or block; they hold no records about the operator. */
 const NOT_INFRASTRUCTURE = /^(?:netcraft|netcraft_mail|google_safe_browsing|manual_unroutable|historical:)/;
@@ -128,29 +133,47 @@ export function indicatorInfrastructure(indicator: { kind: string; value: string
 	return undefined;
 }
 
-export type CountryLookup = { registered: (resource: string) => Promise<string | undefined>; located: (ip: string) => Promise<string | undefined> };
+/** Public network facts the takedown records lack. */
+export type NetworkLookup = {
+	registered: (resource: string) => Promise<string | undefined>;
+	located: (ip: string) => Promise<string | undefined>;
+	/** The IPv4 addresses a host name resolves to. */
+	resolve: (host: string) => Promise<string[]>;
+	/** The AS numbers announcing an IP address. */
+	asns: (ip: string) => Promise<number[]>;
+};
 
-const countryCache = new Map<string, Promise<string | undefined>>();
+const lookupCache = new Map<string, Promise<unknown>>();
 
-function cachedCountry(key: string, lookup: () => Promise<string | undefined>): Promise<string | undefined> {
-	const cached = countryCache.get(key);
-	if (cached) return cached;
-	// A failed lookup leaves the country unknown and is asked again next time.
+function cached<T>(key: string, lookup: () => Promise<T>, fallback: T): Promise<T> {
+	const hit = lookupCache.get(key);
+	if (hit) return hit as Promise<T>;
+	// A failed lookup leaves the fact unknown and is asked again next time.
 	const pending = lookup().catch(() => {
-		countryCache.delete(key);
-		return undefined;
+		lookupCache.delete(key);
+		return fallback;
 	});
-	countryCache.set(key, pending);
+	lookupCache.set(key, pending);
 	return pending;
 }
 
-/** RIPEstat, each resource asked once per process: registrations and locations change rarely. */
-export const RIPESTAT_COUNTRIES: CountryLookup = {
-	registered: (resource) => cachedCountry(`registered:${resource}`, () => registeredCountry(resource)),
-	located: (ip) => cachedCountry(`located:${ip}`, () => locatedCountry(ip)),
+/** RIPEstat and DNS, each question asked once per process: these facts change rarely. */
+export const PUBLIC_NETWORK_LOOKUP: NetworkLookup = {
+	registered: (resource) => cached(`registered:${resource}`, () => registeredCountry(resource), undefined),
+	located: (ip) => cached(`located:${ip}`, () => locatedCountry(ip), undefined),
+	resolve: (host) => cached(`resolve:${host}`, () => retryWithTimeout(() => dns.resolve4(host), { label: `DNS lookup for ${host}`, timeoutMs: 5_000, attempts: 2, retryDelayMs: 200 }), []),
+	asns: (ip) => cached(`asns:${ip}`, () => originAsns(ip), []),
 };
 
 const IP = /^(?:\d{1,3}\.){3}\d{1,3}$|:/;
+const HOST = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
+/** CDNs whose address says nothing about the origin; the CDN holds the records about it. */
+const CDN_ASNS: ReadonlyMap<number, string> = new Map([[13335, "Cloudflare"]]);
+
+/** The node name a claim ends up under: the known record holder, else the claim's own name. */
+export function claimNodeName(claim: InfrastructureClaim): string {
+	return providerLead(claim.name, mailboxDomain(claim.contact))?.holder.en ?? claim.name;
+}
 
 /**
  * Which claims name the same provider: a known record holder, else the
@@ -171,7 +194,7 @@ export function mergeInfrastructure(claims: ReadonlyArray<{ site: string; claim:
 	for (const { site, claim } of claims) {
 		const lead = providerLead(claim.name, mailboxDomain(claim.contact));
 		const key = nodeKey(claim, lead);
-		const node = nodes.get(key) ?? { role: claim.role, name: lead?.holder.en ?? claim.name, ...(lead ? { lead } : {}), resources: [], contacts: [], sites: [] };
+		const node = nodes.get(key) ?? { role: claim.role, name: claimNodeName(claim), ...(lead ? { lead } : {}), resources: [], contacts: [], sites: [] };
 		if (!node.networkCountry && claim.networkCountry) node.networkCountry = claim.networkCountry;
 		for (const resource of claim.resources) if (!node.resources.includes(resource)) node.resources.push(resource);
 		if (claim.contact && !node.contacts.includes(claim.contact)) node.contacts.push(claim.contact);
@@ -187,16 +210,34 @@ export function mergeInfrastructure(claims: ReadonlyArray<{ site: string; claim:
 }
 
 /**
- * Fill in what the takedown records did not say: the network's registered
- * country and, for a host (never a CDN), where its server stands.
+ * A server that receives the entered data is known only by its host name:
+ * resolve it. Behind a CDN its address says nothing about the origin, so
+ * the CDN, which knows the origin, becomes the record holder.
  */
-export async function locateInfrastructure(nodes: readonly InfrastructureNode[], lookup: CountryLookup = RIPESTAT_COUNTRIES): Promise<InfrastructureNode[]> {
-	return Promise.all(nodes.map(async (node) => {
+async function locateCollector(node: InfrastructureNode, lookup: NetworkLookup): Promise<InfrastructureNode> {
+	const ips = (await lookup.resolve(node.name)).slice(0, 4);
+	if (!ips.length) return node;
+	const cdn = (await lookup.asns(ips[0]!)).map((asn) => CDN_ASNS.get(asn)).find(Boolean);
+	const resolved = { ...node, resources: [...new Set([...node.resources, ...ips])] };
+	if (!cdn) return resolved;
+	const lead = providerLead(cdn);
+	return { ...resolved, via: cdn, ...(lead ? { lead, country: lead.country } : {}) };
+}
+
+/**
+ * Fill in what the takedown records did not say: the network's registered
+ * country and, for a host or a data collector not behind a CDN, where its
+ * server stands.
+ */
+export async function locateInfrastructure(nodes: readonly InfrastructureNode[], lookup: NetworkLookup = PUBLIC_NETWORK_LOOKUP): Promise<InfrastructureNode[]> {
+	return Promise.all(nodes.map(async (original) => {
+		const node = original.role === "exfiltration" && !original.resources.length && HOST.test(original.name) ? await locateCollector(original, lookup) : original;
 		const [first] = node.resources;
 		const ip = node.resources.find((resource) => IP.test(resource));
+		const locatable = (node.role === "hosting" || node.role === "exfiltration") && !node.via && ip;
 		const [networkCountry, serverCountry] = await Promise.all([
 			node.networkCountry ?? (first ? lookup.registered(first) : undefined),
-			node.role === "hosting" && ip ? lookup.located(ip) : undefined,
+			locatable ? lookup.located(ip) : undefined,
 		]);
 		const country = node.lead?.country ?? networkCountry;
 		return { ...node, ...(networkCountry ? { networkCountry } : {}), ...(serverCountry ? { serverCountry } : {}), ...(country ? { country } : {}) };
@@ -205,7 +246,7 @@ export async function locateInfrastructure(nodes: readonly InfrastructureNode[],
 
 type Language = keyof Bilingual;
 
-const ROLE_LABEL: Readonly<Record<InfrastructureRole, Bilingual>> = {
+export const ROLE_LABEL: Readonly<Record<InfrastructureRole, Bilingual>> = {
 	hosting: { de: "Hoster", en: "Host" },
 	cdn: { de: "CDN/Proxy", en: "CDN/proxy" },
 	registrar: { de: "Registrar", en: "Registrar" },
@@ -215,13 +256,14 @@ const ROLE_LABEL: Readonly<Record<InfrastructureRole, Bilingual>> = {
 };
 
 const WORDS = {
-	de: { site: "Seite", sites: "Seiten", server: "Server in", network: "Netz registriert in", abuse: "Abuse-Kontakt", unknown: "Staat nicht ermittelt", direct: "Eigene Anzeige vor Ort möglich" },
-	en: { site: "site", sites: "sites", server: "server in", network: "network registered in", abuse: "abuse contact", unknown: "State not determined", direct: "A complaint of our own is possible there" },
+	de: { site: "Seite", sites: "Seiten", server: "Server in", network: "Netz registriert in", abuse: "Abuse-Kontakt", via: "hinter", unknown: "Staat nicht ermittelt", direct: "Eigene Anzeige vor Ort möglich" },
+	en: { site: "site", sites: "sites", server: "server in", network: "network registered in", abuse: "abuse contact", via: "behind", unknown: "State not determined", direct: "A complaint of our own is possible there" },
 } as const;
 
 function nodeLine(node: InfrastructureNode, language: Language): string {
 	const words = WORDS[language];
-	const holder = node.lead?.holder[language] ?? node.name;
+	// A collector behind a CDN keeps its own name; the CDN is named as the holder of its origin.
+	const holder = node.via ? `${node.name} (${words.via} ${node.lead?.holder[language] ?? node.via})` : node.lead?.holder[language] ?? node.name;
 	const details = [
 		plural(node.sites.length, words.site, words.sites),
 		...node.resources.length ? [node.resources.join(", ")] : [],
@@ -229,7 +271,7 @@ function nodeLine(node: InfrastructureNode, language: Language): string {
 		...node.networkCountry && node.networkCountry !== node.country ? [`${words.network} ${countryName(node.networkCountry)[language]}`] : [],
 		...node.contacts.length ? [`${words.abuse} ${node.contacts.join(", ")}`] : [],
 	];
-	const facts = node.lead ? ` – ${node.lead.facts[language]}` : "";
+	const facts = node.lead && !node.via ? ` – ${node.lead.facts[language]}` : "";
 	return `  - ${ROLE_LABEL[node.role][language]}: ${holder}${facts} (${details.join("; ")})`;
 }
 

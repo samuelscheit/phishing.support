@@ -5,7 +5,7 @@ import { ArtifactsEntity, SubmissionsEntity } from "../db/entities";
 import type { Submission } from "../db/schema";
 import { describeDataEntryField } from "../website_types";
 import { isAuthorityRoute, isPreservationRoute } from "./routes";
-import { indicatorInfrastructure, locateInfrastructure, mergeInfrastructure, routeInfrastructure, type CountryLookup, type InfrastructureClaim, type InfrastructureNode } from "./infrastructure";
+import { indicatorInfrastructure, locateInfrastructure, mergeInfrastructure, routeInfrastructure, type InfrastructureClaim, type InfrastructureNode, type NetworkLookup } from "./infrastructure";
 
 /** One provider a site was reported to, and what became of the report. */
 export type DossierProviderReport = {
@@ -91,8 +91,8 @@ export type DossierDependencies = {
 	listTargets?: typeof AbuseRepository.listTargets;
 	listRuns?: typeof AbuseRepository.listProviderRunsForReport;
 	listArtifacts?: typeof ArtifactsEntity.listForSubmission;
-	/** Country lookups for buildReferralDossier; RIPEstat by default. */
-	lookupCountry?: CountryLookup;
+	/** Network lookups for buildReferralDossier; RIPEstat and DNS by default. */
+	lookupNetwork?: NetworkLookup;
 	now?: () => Date;
 };
 
@@ -292,5 +292,5 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
  */
 export async function buildReferralDossier(campaignId: bigint, dependencies: DossierDependencies = {}): Promise<Dossier> {
 	const dossier = await buildDossier(campaignId, dependencies);
-	return { ...dossier, infrastructure: await locateInfrastructure(dossier.infrastructure, dependencies.lookupCountry) };
+	return { ...dossier, infrastructure: await locateInfrastructure(dossier.infrastructure, dependencies.lookupNetwork) };
 }

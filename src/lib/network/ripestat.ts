@@ -46,6 +46,14 @@ export async function registeredCountry(resource: string, dependencies: RipeStat
 	return parsed.success ? onlyCountry(parsed.data.located_resources.map((entry) => entry.location)) : undefined;
 }
 
+const networkInfoSchema = z.object({ asns: z.array(z.union([z.string(), z.number()])) }).passthrough();
+
+/** The AS numbers that announce an IP address. */
+export async function originAsns(ip: string, dependencies: RipeStatDependencies = {}): Promise<number[]> {
+	const parsed = networkInfoSchema.safeParse(await ripeStatData("network-info", { resource: ip }, dependencies));
+	return parsed.success ? parsed.data.asns.map(Number).filter((asn) => Number.isSafeInteger(asn) && asn > 0) : [];
+}
+
 /** Where MaxMind's GeoLite database places an IP address; meaningless for anycast CDN addresses. */
 export async function locatedCountry(ip: string, dependencies: RipeStatDependencies = {}): Promise<string | undefined> {
 	const parsed = locatedSchema.safeParse(await ripeStatData("maxmind-geo-lite", { resource: ip }, dependencies));

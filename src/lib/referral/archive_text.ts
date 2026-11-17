@@ -1,7 +1,7 @@
 import { publicCampaignUrl } from "../campaign/urls";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
 import type { Dossier, DossierIndicator, DossierSite } from "./dossier";
-import { plural, record, text } from "./format";
+import { plural, record, text, utc } from "./format";
 import { infrastructureLines } from "./infrastructure";
 
 /**
@@ -11,12 +11,7 @@ import { infrastructureLines } from "./infrastructure";
  * authorities carry their own German text (drafts.ts).
  */
 
-function utc(iso: string): string {
-	const date = new Date(iso);
-	return Number.isNaN(date.getTime()) ? iso : `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
-
-const fieldLabel = (field: string) => CANARY_FIELD_LABEL[field as CanaryField] ?? field;
+export const fieldLabel = (field: string) => CANARY_FIELD_LABEL[field as CanaryField] ?? field;
 
 /** One indicator as a sentence an investigator can act on. */
 export function describeIndicatorEnglish(indicator: DossierIndicator): string {
