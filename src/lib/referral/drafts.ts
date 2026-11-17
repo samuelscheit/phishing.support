@@ -17,14 +17,21 @@ type DraftContext = {
 	download: { url: string; expiresAt: Date };
 };
 
+const SERVICE = new URL(serviceIdentity.url).host;
+
+/**
+ * Mails speak for phishing.support as an organization ("wir"); the person
+ * who signs is named as the complainant and contact, because an authority
+ * answers only a natural person. No legal form is claimed.
+ */
 function signature(complainant: Complainant): string[] {
 	return [
 		"Mit freundlichen Grüßen",
 		"",
 		complainant.name,
+		SERVICE,
 		...complainant.addressLines,
 		...(complainant.phone ? [`Telefon: ${complainant.phone}`] : []),
-		`Betreiber von ${new URL(serviceIdentity.url).host}`,
 	];
 }
 
@@ -50,7 +57,7 @@ function evidenceParagraph(download: DraftContext["download"]): string[] {
 		"Beweismittel",
 		"Für jede Website liegen ein MHTML-Mitschnitt, ein Bildschirmfoto mit eingeblendeter URL und Uhrzeit, ein Manifest mit den SHA-256-Prüfsummen aller Dateien und ein RFC-3161-Zeitstempel einer unabhängigen Zeitstempelstelle über dieses Manifest vor. Die Prüfsummen stehen in der Anlage Websites.csv; die Dateien selbst können Sie hier als ZIP-Archiv herunterladen:",
 		download.url,
-		`(Der Link ist bis ${germanDate(download.expiresAt.toISOString())} gültig. Auf Wunsch übermittle ich die Dateien auch auf anderem Weg.)`,
+		`(Der Link ist bis ${germanDate(download.expiresAt.toISOString())} gültig. Auf Wunsch übermitteln wir die Dateien auch auf anderem Weg.)`,
 	];
 }
 
@@ -67,25 +74,25 @@ export function complaintDraft(context: DraftContext & { authority: Authority })
 	const body = [
 		"Sehr geehrte Damen und Herren,",
 		"",
-		"hiermit erstatte ich Strafanzeige gegen Unbekannt wegen des Verdachts des Computerbetrugs und seiner Vorbereitung (§ 263a Abs. 1 und 3 StGB), der Fälschung beweiserheblicher Daten (§ 269 StGB), des Ausspähens und Abfangens von Daten (§§ 202a, 202b StGB) sowie aller weiteren in Betracht kommenden Straftaten.",
+		`hiermit erstatten wir für ${SERVICE} Strafanzeige gegen Unbekannt wegen des Verdachts des Computerbetrugs und seiner Vorbereitung (§ 263a Abs. 1 und 3 StGB), der Fälschung beweiserheblicher Daten (§ 269 StGB), des Ausspähens und Abfangens von Daten (§§ 202a, 202b StGB) sowie aller weiteren in Betracht kommenden Straftaten. Anzeigeerstatter und Ansprechpartner ist der Unterzeichnende.`,
 		"",
 		"Sachverhalt",
-		`Ich betreibe den Dienst ${new URL(serviceIdentity.url).host}. Er nimmt Meldungen zu Phishing-Seiten an, sichert die Seiten als Beweis und meldet sie den Hostern, Registraren und CDN-Anbietern zur Sperrung. Die folgenden Websites werden nach den unten genannten Merkmalen von denselben Tätern betrieben. ${campaignSummary(dossier, sites)}`,
+		`${SERVICE} nimmt Meldungen zu Phishing-Seiten an, sichert die Seiten als Beweis und meldet sie den Hostern, Registraren und CDN-Anbietern zur Sperrung. Die folgenden Websites werden nach den unten genannten Merkmalen von denselben Tätern betrieben. ${campaignSummary(dossier, sites)}`,
 		"",
-		"Bei der Prüfung wurden ausschließlich synthetische, eigens erzeugte Werte eingegeben; Daten von Opfern wurden weder abgerufen noch verwendet.",
+		"Bei unserer Prüfung wurden ausschließlich synthetische, eigens erzeugte Werte eingegeben; Daten von Opfern wurden weder abgerufen noch verwendet.",
 		"",
 		...(linking.length ? ["Verbindende Merkmale", ...linking, ""] : []),
 		"Websites",
 		...siteList(sites),
 		"",
 		"Ermittlungsansätze und Datensicherung",
-		"Die Anbieter haben die Seiten teils schon gesperrt; nach einer Sperrung löschen sie Konto-, Zahlungs- und Zugriffsdaten oft binnen Tagen. Ich habe jeden Anbieter gebeten, die Daten aufzubewahren, kann eine Sicherung aber nicht erzwingen. Ich rege an, die Daten bei folgenden Anbietern zu sichern:",
+		"Die Anbieter haben die Seiten teils schon gesperrt; nach einer Sperrung löschen sie Konto-, Zahlungs- und Zugriffsdaten oft binnen Tagen. Wir haben jeden Anbieter gebeten, die Daten aufzubewahren, können eine Sicherung aber nicht erzwingen. Wir regen an, die Daten bei folgenden Anbietern zu sichern:",
 		...providerLines(dossier.providers),
 		"",
 		...evidenceParagraph(context.download),
 		"",
 		"Weiteres Vorgehen",
-		`Bitte teilen Sie mir das Aktenzeichen mit. Neue Websites derselben Kampagne würde ich als Nachtrag zu diesem Verfahren übersenden; bitte nennen Sie mir dafür, wenn möglich, eine Ansprechperson oder eine Adresse. Antworten auf diese E-Mail erreichen mich direkt. Sollte die Anzeige bei ${authority.name} nicht richtig sein, bitte ich um Weiterleitung an die zuständige Stelle.`,
+		`Bitte teilen Sie uns das Aktenzeichen mit. Neue Websites derselben Kampagne würden wir als Nachtrag zu diesem Verfahren übersenden; bitte nennen Sie uns dafür, wenn möglich, eine Ansprechperson oder eine Adresse. Antworten auf diese E-Mail erreichen uns direkt. Sollte die Anzeige bei ${authority.name} nicht richtig sein, bitten wir um Weiterleitung an die zuständige Stelle.`,
 		"",
 		"Anlagen: Websites.csv (alle Websites mit Prüfsummen der Beweisdateien), Merkmale.csv (alle Merkmale mit Fundstellen)",
 		"",
@@ -97,14 +104,14 @@ export function complaintDraft(context: DraftContext & { authority: Authority })
 /** New sites of a campaign already reported, sent to the same authority under its file number. */
 export function supplementDraft(context: DraftContext & { authority: Authority; caseReference?: string; newSites: readonly DossierSite[]; complaintSentAt?: string }): ReferralDraft {
 	const { dossier, complainant, newSites } = context;
-	const reference = context.caseReference ? `Az. ${context.caseReference}` : `meiner Anzeige vom ${context.complaintSentAt ? germanDate(context.complaintSentAt) : "(Datum)"}`;
+	const reference = context.caseReference ? `Az. ${context.caseReference}` : `unserer Anzeige vom ${context.complaintSentAt ? germanDate(context.complaintSentAt) : "(Datum)"}`;
 	const newUrls = new Set(newSites.map((site) => site.url));
 	const newIndicators = dossier.indicators.filter((indicator) => indicator.sites.some((url) => newUrls.has(url)));
 	const subject = `Nachtrag zu ${reference} – ${newSites.length === 1 ? "1 weitere Website" : `${newSites.length} weitere Websites`} der Phishing-Kampagne [${context.caseTag}]`;
 	const body = [
 		"Sehr geehrte Damen und Herren,",
 		"",
-		`zu ${reference} übersende ich ${newSites.length === 1 ? "eine weitere Website" : `${newSites.length} weitere Websites`} derselben Kampagne. ${campaignSummary(dossier, newSites)} Die Kampagne umfasst damit ${dossier.sites.length} Websites.`,
+		`zu ${reference} übersenden wir ${newSites.length === 1 ? "eine weitere Website" : `${newSites.length} weitere Websites`} derselben Kampagne. ${campaignSummary(dossier, newSites)} Die Kampagne umfasst damit ${dossier.sites.length} Websites.`,
 		"",
 		...(newIndicators.length ? ["Merkmale, die die neuen Websites mit der Kampagne verbinden", ...indicatorLines(newIndicators), ""] : []),
 		"Neue Websites",
@@ -157,7 +164,7 @@ export function preservationNoticeDraft(params: {
 		"",
 		"Regards,",
 		params.complainant.name,
-		`${new URL(serviceIdentity.url).host}`,
+		SERVICE,
 	].join("\n");
 	return { subject, body };
 }

@@ -4,7 +4,7 @@ Status: phases 1 and 2 implemented, 2026-11-17. Research basis: [criminal-referr
 
 Decisions taken with the operator:
 
-- **Complainant:** the operator in person, with postal address (`REFERRAL_COMPLAINANT_*`).
+- **Complainant:** mails speak for phishing.support as an organization ("wir"), with no legal form claimed. The operator signs as the named complainant and contact, with postal address (`REFERRAL_COMPLAINANT_*`), because an authority answers only a natural person.
 - **Approval:** every mail to an authority or provider is approved individually; nothing is sent automatically.
 - **Exfiltration channels:** reported to their platform immediately as before; also included in the dossier.
 - **Authorities:** Bavarian, for a complainant in 85609 Aschheim (Landkreis München). The first choice is the Zentralstelle Cybercrime Bayern, which takes informal mails; the alternatives are the LKA ZAC and the Staatsanwaltschaft München I. The StA München I advises against e-mail because the justice network blocks some of it.

@@ -137,7 +137,8 @@ describe("criminal referral of a campaign", () => {
 		const draft = route.resolutionSnapshot.approvalDraft as { subject: string; body: string; allowedUrls: string[] };
 		expect(draft.subject).toBe(`Strafanzeige gegen Unbekannt – Phishing-Kampagne mit 3 Websites (www.dhl.de) [${abuseCaseTag(route.reportId)}]`);
 		for (const expected of [
-			"hiermit erstatte ich Strafanzeige gegen Unbekannt",
+			"hiermit erstatten wir für phishing.support Strafanzeige gegen Unbekannt",
+			"Anzeigeerstatter und Ansprechpartner ist der Unterzeichnende.",
 			"§ 263a Abs. 1 und 3 StGB",
 			"https://dhl-paket-zustellung.com/login",
 			"https://dhl-sendung-pruefen.net/login",
@@ -149,7 +150,7 @@ describe("criminal referral of a campaign", () => {
 			"Telegram (Telegram FZ-LLC, VAE)",
 			"Registrar Example Registrar Ltd",
 			"https://phishing.support/api/dossier/",
-			"Samuel Scheit\nMusterstraße 1\n85609 Aschheim",
+			"Samuel Scheit\nphishing.support\nMusterstraße 1\n85609 Aschheim",
 		]) expect(draft.body).toContain(expected);
 		expect(draft.allowedUrls).toContain("https://paket-dhl-info.org/login");
 
