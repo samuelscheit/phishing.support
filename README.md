@@ -30,43 +30,110 @@ CDP capability; the application retains only the report workflow and evidence
 logic.
 
 Browser Fabric runs one private `fabric-cdp-relay` for the Phishing Support
-trust boundary. It is an internal transport bridge for Puppeteer, Patchright,
-and the local dynamic Skyvern companion. The relay owns the per-principal Basic
+trust boundary. It is an internal transport bridge for Rebrowser Puppeteer,
+Patchright and the browser task agent. The relay owns the per-principal Basic
 credential for both the narrow browser-session lifecycle API and WebSocket
-upgrade, so the application receives no Fabric credential. The app and Skyvern receive only an opaque route such as
+upgrade, so the application receives no Fabric credential. Every CDP client
+receives only an opaque route such as
 `ws://fabric-cdp-relay:8085/v1/cdp/browser-session_<id>`; the relay looks up
 the short-lived Fabric capability through the authenticated Fabric edge and never exposes it, a raw browser
 port, VNC, or a caller-selected upstream.
 
-The local `skyvern` service remains only because this service has dynamic,
-persisted provider forms, uploads, verification-code workflows, and output
-contracts that are not static Fabric manifests. It never owns Chromium,
-profiles, egress, or CDP. A dynamic task obtains its browser through the relay;
-the opaque Fabric browser-session ID is retained next to the task solely for
-heartbeat/release/cancel reconciliation.
+Every session uses Fabric's one browser runtime, `chrome`, and asks for the
+headful recipe `recipe_chrome@1` (Chrome on a private X display): phishing kits
+and provider forms cloak headless browsers. That recipe uses Fabric's
+`default` profile family and its `challenge_captcha-solver@1` challenge set
+(the Turnstile/DataDome guardian, plus reCAPTCHA v2 solving only when Death by
+Captcha or Anti-Captcha credentials are configured in Fabric). Fabric selects
+the challenge set through the recipe, not per session: another set (for example
+`challenge_manual-handoff@1`) needs a deployment-catalog recipe that names it,
+set as `FABRIC_RECIPE_REF`.
 
-The deployment requires all of the following values and secrets:
+Only `FABRIC_API_URL` and `FABRIC_PROJECT` are required; every reference
+defaults to a Fabric built-in and is validated at startup (versioned refs must
+name their version, `name@1`):
 
 ```text
 FABRIC_API_URL=http://fabric-cdp-relay:8085/v1
 FABRIC_PROJECT=project_...
-FABRIC_PHISHING_PROFILE_REF=profile_...
-FABRIC_PHISHING_RECIPE_REF=recipe_rebrowser-phishing@1
-FABRIC_PHISHING_ARTIFACT_POLICY_REF=artifact-policy_standard-30-days@1
-FABRIC_PHISHING_TTL_SECONDS=900
+FABRIC_BROWSER_RUNTIME=chrome
+FABRIC_PROFILE_REF=profile_default
+FABRIC_RECIPE_REF=recipe_chrome@1
+FABRIC_ARTIFACT_POLICY_REF=artifact-policy_standard-30-days@1
+FABRIC_TTL_SECONDS=900
 ```
 
 Egress is split per browser session. Sessions that open attacker-controlled
 phishing pages (the default) use `FABRIC_PHISHING_EGRESS_POLICY_REF`, default
-`egress_tor-egress@1` (Tor). Sessions that talk to abuse portals and provider
-dashboards (Skyvern portal tasks, Cloudflare reporting) request the `reporting`
-egress and use `FABRIC_REPORTING_EGRESS_POLICY_REF`, default
-`egress_direct-egress@1` (direct). Both variables are optional overrides:
+`egress_tor@1` (Tor). Sessions that talk to abuse portals and provider
+dashboards (provider-form tasks, Cloudflare reporting) use
+`FABRIC_REPORTING_EGRESS_POLICY_REF`, default `egress_direct@1`. A page that
+cloaks Tor and datacenter visitors is captured again through
+`FABRIC_RESIDENTIAL_EGRESS_POLICY_REF`, default `egress_residential@1`.
+
+Fabric has no residential built-in: the residential exit is a policy of the
+Fabric deployment catalog (`FABRIC_CATALOG_FILE`, see Fabric's
+`docs/catalog.md`) plus an egress-sidecar entry whose listener forwards to the
+operator's exit (for example a Tailscale exit node behind an HTTP proxy):
+
+```json
+{
+  "version": 1,
+  "egressPolicies": [
+    {
+      "name": "residential",
+      "routes": {
+        "document": { "kind": "proxy", "proxyRef": "residential", "protocol": "http" },
+        "api": { "kind": "proxy", "proxyRef": "residential", "protocol": "http" },
+        "websocket": { "kind": "proxy", "proxyRef": "residential", "protocol": "http" },
+        "static_asset": { "kind": "proxy", "proxyRef": "residential", "protocol": "http" },
+        "browser_download": { "kind": "proxy", "proxyRef": "residential", "protocol": "http" }
+      }
+    }
+  ]
+}
+```
+
+with the sidecar entry `{ "ref": "egress_residential@1", "defaultListenerId": "residential" }`
+and a `residential` listener whose upstream secret names that exit.
+
+### Browser task agent
+
+Site visits and provider abuse forms are driven by the browser task agent
+(`@browser-fabric/task-agent`, installed from the `browser-fabric` git
+dependency): an LLM that works a Chrome tab over raw CDP until its goal is
+done and finishes with a result checked against a JSON schema. It runs inside
+this application; a site visit attaches it to the capture's own Fabric browser
+and tab (the capture's second relay connection), and a provider form leases its
+own disposable browser on the reporting egress, released when the task ends and
+cancelled when it is interrupted.
 
 ```text
-FABRIC_PHISHING_EGRESS_POLICY_REF=egress_tor-egress@1
-FABRIC_REPORTING_EGRESS_POLICY_REF=egress_direct-egress@1
+PHISHING_TASK_MODEL=openai/gpt-5.5        # or anthropic/<model>; default openai/$OPENAI_MODEL
+ANTHROPIC_API_KEY=...                     # only for anthropic/<model>
+ABUSE_PORTAL_TASK_MAX_STEPS=40            # model turns of a provider-form task
+ABUSE_PORTAL_TASK_TIMEOUT_MS=480000       # must end before ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS
+SITE_VISIT_TASK_MAX_STEPS=60              # model turns of a site visit
 ```
+
+`openai/<model>` reuses `OPENAI_API_KEY` and `OPENAI_API_BASE_URL` (an
+OpenAI-compatible endpoint such as OpenRouter, where `<model>` may itself contain
+a slash: `openai/anthropic/claude-sonnet-4.5`). The credential-shaped synthetic
+values of a visit (password, card number, one-time code) are passed as
+`{{secret:NAME}}` placeholders: they reach the page and the network recording
+but never the model, its step log, or the stored record. File uploads are
+disabled: the agent's upload action names files on the machine running it, which
+a remote Fabric browser cannot read, and no flow uploads evidence.
+
+A provider-form task is durable at one boundary: its run moves to
+`task_started`, with the Fabric session ID, before the agent touches the
+provider's page. A finished task settles the route: a `done` result whose
+submission contract (`src/lib/abuse/portal/output_validation.ts`) passes is
+`submitted`; a result that fails the contract, or an agent asking for something
+it does not have (a login, a verification code) is `needs_human`; anything else
+is `failed`. A run found in `task_started` after a restart or a fenced job is
+`unknown_external_state` and its browser is cancelled, because the form may
+have been submitted.
 
 Do not add the Fabric principal password, `BROWSER_REMOTE_DEBUGGING_URL`, Chrome/Xvfb,
 VNC/noVNC, a local profile volume, or a capability-bearing CDP URL back to this
@@ -117,13 +184,13 @@ also presents their certificate.
 Every report goes through one durable reporting worker:
 
 - A **website** confirmed as phishing becomes a report targeting the captured host, with the URL and archive screenshot as evidence.
-- A website confirmed as credential theft or payment fraud also queues a controlled **credential-destination probe**. Skyvern fills at most three form stages with unique synthetic values while an application-owned CDP recorder captures requests over the same Tor-egress Fabric session. An endpoint becomes reportable only when it actually receives a probe value; unrelated third parties and same-site requests are excluded. Telegram bots and Discord webhooks are modeled as service accounts rather than falsely reporting the shared service's registrar or hosting network. Telegram receives an abuse email after a read-only `getMe` identity lookup; Discord evidence is retained as `needs_human` because its supported report flows do not accept webhooks. Attacker-owned collector domains use the normal registrar/hosting resolver.
+- A reported website is **visited** the way its victim would go through it: the browser task agent enters only unique synthetic values (at most ten form submissions) while an application-owned CDP recorder captures requests and downloads over the same Tor-egress Fabric session. An endpoint becomes reportable only when it actually receives a probe value; unrelated third parties and same-site requests are excluded. Telegram bots and Discord webhooks are modeled as service accounts rather than falsely reporting the shared service's registrar or hosting network. Telegram receives an abuse email after a read-only `getMe` identity lookup; Discord evidence is retained as `needs_human` because its supported report flows do not accept webhooks. Attacker-owned collector domains use the normal registrar/hosting resolver.
 - An **email** confirmed as phishing becomes a report with two targets: the message itself (filed with Netcraft's mail API) and the public IP of the first external `Received` hop, whose RDAP/WHOIS abuse contact receives the recipient-redacted `.eml`. Every linked page is analyzed as its own website submission.
 - The **public form** at `/abuse-reporting` reports domains or IPs directly and asks for the reporter's name and email. The `POST /api/abuse/reports` API it uses accepts `reporterName` and `reporterContactEmail` as optional fields; an integration that sends neither files the report as Phishing Support alone.
 
 The resolver turns each target into provider routes (registrar/hosting abuse mailboxes, Cloudflare, NameSilo, Tencent, Google Safe Browsing, Netcraft). Each route is submitted, retried, or settled independently; the submission page's Reports tab shows every route with its sent report and provider replies. A report counts as submitted when at least one provider confirmed it, so one unreachable provider never hides the others.
 
-Probe sessions explicitly request two external CDP connections: one bounded recorder and one Skyvern client. Every other Fabric session remains single-client. Network captures are capped at 2,000 requests, 256 KiB per value, and 10 MiB total. The optional `EXFILTRATION_SKYVERN_MAX_STEPS` setting defaults to 80.
+Capture sessions explicitly request two external CDP connections: the capture's own client and the visiting agent. Every other Fabric session remains single-client. Network captures are capped at 2,000 requests, 256 KiB per value, and 10 MiB total.
 
 Providers always see the service identity defined in `src/lib/constants.ts` (Phishing Support, `support@phishing.support`, `https://phishing.support`); it is code, not configuration, because routes pin the provider definitions that embed it. When a public report names its submitter, the name and/or email appear only in the report text as the original reporter, and Cloudflare additionally receives the submitter's country when known.
 
