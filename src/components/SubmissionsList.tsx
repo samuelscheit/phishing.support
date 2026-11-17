@@ -6,11 +6,12 @@ import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/web_lib/util";
 import { formatDistanceToNow } from "date-fns";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Layers } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_SUBMISSION_FILTERS, isSubmissionFilter, type SubmissionFilter } from "@/lib/submissions/filters";
 import type { SubmissionCard as SubmissionCardData, SubmissionCardPage } from "@/lib/submissions/list";
+import { groupByCampaign, type SubmissionListItem } from "@/lib/submissions/campaign_groups";
 
 const PREVIEW_ROWS = 3;
 const FILTERS_STORAGE_KEY = "phishing-support:submission-filters";
@@ -88,6 +89,55 @@ function SubmissionCard({ submission, obscured = false }: { submission: Submissi
 	);
 }
 
+type ListItem = SubmissionListItem;
+
+function hostOf(title: string): string {
+	try {
+		return new URL(title).hostname;
+	} catch {
+		return title;
+	}
+}
+
+function CampaignCard({ item, obscured = false }: { item: Extract<ListItem, { type: "campaign" }>; obscured?: boolean }) {
+	const hosts = [...new Set(item.titles.map(hostOf))];
+	return (
+		<Link
+			href={`/campaigns/${item.campaignId}`}
+			aria-hidden={obscured || undefined}
+			tabIndex={obscured ? -1 : undefined}
+			className={cn(
+				"block h-full min-w-0 transition-[filter,opacity] duration-500 ease-out",
+				obscured && "pointer-events-none select-none opacity-35 blur-sm"
+			)}
+		>
+			<Card className="hover:bg-accent transition-colors cursor-pointer h-full w-full border-primary/30">
+				<CardContent className="py-4 space-y-2 min-w-0">
+					<div className="flex justify-between items-start gap-2">
+						<span className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/5 px-2 py-0.5 text-xs font-medium text-primary">
+							<Layers className="h-3.5 w-3.5" />
+							Campaign · {item.siteCount} sites
+						</span>
+						<span className="text-xs text-muted-foreground whitespace-nowrap">
+							{formatDistanceToNow(new Date(item.newest.createdAt), { addSuffix: true })}
+						</span>
+					</div>
+					<CardTitle className="text-lg truncate min-w-0">{hosts[0]}</CardTitle>
+					<p className="truncate text-xs text-muted-foreground">
+						{item.siteCount > 1 ? `and ${item.siteCount - 1} more ${item.siteCount === 2 ? "site" : "sites"} by the same operator` : ""}
+					</p>
+				</CardContent>
+			</Card>
+		</Link>
+	);
+}
+
+function ListTile({ item, obscured }: { item: ListItem; obscured?: boolean }) {
+	return item.type === "campaign"
+		? <CampaignCard item={item} obscured={obscured} />
+		: <SubmissionCard submission={item.submission} obscured={obscured} />;
+}
+
 async function fetchPage(filters: readonly SubmissionFilter[], cursor?: string): Promise<SubmissionCardPage> {
 	const query = new URLSearchParams({ status: filters.join(",") });
 	if (cursor) query.set("cursor", cursor);
@@ -124,12 +174,13 @@ export function SubmissionsList() {
 	const [expanded, setExpanded] = useState(false);
 	const sentinel = useRef<HTMLDivElement>(null);
 	const submissions = mergePages(newest, older);
+	const items = groupByCampaign(submissions);
 	const columnCount = useGridColumnCount();
 	const previewSubmissionCount = columnCount * PREVIEW_ROWS;
-	const hasMoreSubmissions = submissions.length > previewSubmissionCount;
+	const hasMoreSubmissions = items.length > previewSubmissionCount;
 	const isCollapsed = hasMoreSubmissions && !expanded;
-	const visibleSubmissions = isCollapsed ? submissions.slice(0, previewSubmissionCount) : submissions;
-	const obscuredSubmissions = isCollapsed ? submissions.slice(previewSubmissionCount) : [];
+	const visibleItems = isCollapsed ? items.slice(0, previewSubmissionCount) : items;
+	const obscuredItems = isCollapsed ? items.slice(previewSubmissionCount) : [];
 
 	useEffect(() => setFilters(storedFilters()), []);
 
@@ -233,17 +284,13 @@ export function SubmissionsList() {
 			{header}
 			<div id="recent-submissions-list" aria-busy={switching} className={cn("transition-opacity duration-200", switching && "opacity-50")}>
 				<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-					{visibleSubmissions.map((submission) => (
-						<SubmissionCard key={submission.id} submission={submission} />
-					))}
+					{visibleItems.map((item) => <ListTile key={item.key} item={item} />)}
 				</div>
 
 				{isCollapsed && (
 					<div className="relative mt-4 h-24 overflow-hidden">
 						<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-							{obscuredSubmissions.map((submission) => (
-								<SubmissionCard key={submission.id} submission={submission} obscured />
-							))}
+							{obscuredItems.map((item) => <ListTile key={item.key} item={item} obscured />)}
 						</div>
 
 						<div className="pointer-events-none absolute inset-0 z-10 flex items-end justify-center bg-gradient-to-t from-background via-background/90 to-transparent pb-4">

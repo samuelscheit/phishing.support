@@ -16,15 +16,20 @@ import type { ExtractedIndicator } from "../campaign/indicators";
 import { ingestFetchedMail } from "../imap/ingest";
 import { approveReferralMail, discardReferralMail, preparePreservationNotices, prepareComplaint, prepareSupplement, ReferralError, saveReferralDraft, setReferralCaseReference, type ReferralDependencies } from "./service";
 import { getCampaignOverview } from "./overview";
+import { getPublicCampaign } from "../campaign/public_view";
+import { listSubmissionCards } from "../submissions/list";
+import { groupByCampaign } from "../submissions/campaign_groups";
 
 useTemporaryDatabase();
 
-const environmentNames = ["SMTP_FROM", "REPLY_DOMAIN"] as const;
+const environmentNames = ["SMTP_FROM", "REPLY_DOMAIN", "OPENAI_API_KEY"] as const;
 const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [name, process.env[name]]));
 
 beforeEach(() => {
 	process.env.SMTP_FROM = "support@phishing.support";
 	process.env.REPLY_DOMAIN = "phishing.support";
+	// A reply's classification must not depend on a model; the file number is read without one.
+	delete process.env.OPENAI_API_KEY;
 });
 
 afterAll(() => {
@@ -150,6 +155,7 @@ describe("criminal referral of a campaign", () => {
 			"Telegram (Telegram FZ-LLC, VAE)",
 			"Registrar Example Registrar Ltd",
 			"https://phishing.support/api/dossier/",
+			`Eine laufend aktualisierte Übersicht aller Websites der Kampagne mit dem Stand der Sperrungen: https://phishing.support/campaigns/${campaignId.toString()}`,
 			"Samuel Scheit\nphishing.support\nMusterstraße 1\n85609 Aschheim",
 		]) expect(draft.body).toContain(expected);
 		expect(draft.allowedUrls).toContain("https://paket-dhl-info.org/login");
@@ -162,6 +168,44 @@ describe("criminal referral of a campaign", () => {
 
 		await expect(prepareComplaint(campaignId, "by-zcb", dependencies)).rejects.toThrow(ReferralError);
 		await expect(prepareSupplement(campaignId, "by-zcb", dependencies)).rejects.toThrow("No complaint");
+	});
+
+	test("the public campaign page shows the sites and what links them, never a bot's token, a chat or a payment account", async () => {
+		const campaignId = await campaignWithThreeSites();
+		await reportedSite(15n, "dhl-iban-zahlung.com");
+		const iban: ExtractedIndicator = { kind: "payment_receiver", value: "iban:DE89370400440532013000", links: true, evidence: { receiverKind: "iban", receiver: "DE89370400440532013000" } };
+		await CampaignRepository.recordIndicators(15n, [telegram("7001"), iban]);
+		await CampaignRepository.recordIndicators(13n, [kit("a".repeat(64)), iban]);
+		const campaign = await getPublicCampaign(campaignId);
+		expect(campaign?.sites.map((site) => site.url)).toEqual([
+			"https://dhl-paket-zustellung.com/login",
+			"https://dhl-sendung-pruefen.net/login",
+			"https://paket-dhl-info.org/login",
+			"https://dhl-iban-zahlung.com/login",
+		]);
+		expect(campaign?.sites[0]?.takedown).toEqual([{ provider: "Hostinger International Ltd.", status: "awaiting_provider_reply" }]);
+		expect(campaign?.links).toEqual([
+			{ kind: "exfiltration_backend", label: "The same Telegram bot receives what visitors enter", siteCount: 3 },
+			{ kind: "payment_receiver", label: "The same payment account is named to visitors", siteCount: 2 },
+			{ kind: "kit_fingerprint", label: `The same kit file (SHA-256 ${"a".repeat(64)})`, siteCount: 2 },
+		]);
+		const published = JSON.stringify(campaign);
+		for (const secret of ["AAEsecret", "7001", "-100200300", "dhl_paket_bot", "DE89370400440532013000", "api.telegram.org"]) expect(published).not.toContain(secret);
+		expect(await getPublicCampaign(999n)).toBeUndefined();
+	});
+
+	test("the public list shows a site's campaign when the campaign has other sites", async () => {
+		await campaignWithThreeSites();
+		await reportedSite(16n, "unrelated-solo.com");
+		await CampaignRepository.recordIndicators(16n, [telegram("9999")]);
+		const page = await listSubmissionCards();
+		const campaignOf = (id: string) => page.submissions.find((card) => card.id === id)?.campaign;
+		expect(campaignOf("11")).toMatchObject({ siteCount: 3 });
+		expect(campaignOf("13")).toEqual(campaignOf("11"));
+		// A campaign of one is shown as its single site.
+		expect(campaignOf("16")).toBeUndefined();
+		const items = groupByCampaign(page.submissions);
+		expect(items.map((item) => item.type === "campaign" ? `campaign:${item.siteCount}:${item.titles.length}` : item.submission.id)).toEqual(["16", "campaign:3:3"]);
 	});
 
 	test("refuses to approve a text the sender would refuse, and keeps the draft", async () => {
@@ -233,7 +277,7 @@ describe("criminal referral of a campaign", () => {
 		expect(draft.subject).toBe(`Nachtrag zu Az. 401 UJs 12345/26 – 1 weitere Website der Phishing-Kampagne [${abuseCaseTag(supplement.reportId)}]`);
 		expect(draft.body).toContain("https://dhl-zoll-gebuehr.com/login");
 		expect(draft.body).not.toContain("https://dhl-paket-zustellung.com/login\n");
-		expect(draft.body).toContain("Die Kampagne umfasst damit 4 Websites.");
+		expect(draft.body).toContain(`Die Kampagne umfasst damit 4 Websites; die Übersicht aller Websites: https://phishing.support/campaigns/${campaignId.toString()}`);
 		expect(draft.body).toContain("Sie gibt sich als www.dhl.de aus.");
 		expect(draft.body).toMatch(/Die Website wurde am \d\d\.\d\d\.\d{4}, \d\d:\d\d Uhr erfasst\./);
 		expect(draft.body).toMatch(/Hostinger International Ltd\.: gemeldet am \d\d\.\d\d\.\d{4}, Antwort ausstehend/);

@@ -6,6 +6,7 @@ import { getDb } from "./index";
 import {
     analysisRuns,
     artifacts,
+    campaignMembers,
     mailIngest,
     type MailIngestRoute,
     submissions,
@@ -161,8 +162,11 @@ export class SubmissionsEntity {
 				status: submissions.status,
 				createdAt: submissions.createdAt,
 				title: sql<string | null>`coalesce(json_extract(${submissions.data}, '$.website.url'), nullif(json_extract(${submissions.data}, '$.email.subject'), ''), ${submissions.dedupeKey})`,
+				campaignId: campaignMembers.campaignId,
+				campaignSize: sql<number | null>`(select count(*) from campaign_members as peers where peers.campaign_id = ${campaignMembers.campaignId})`,
 			})
 			.from(submissions)
+			.leftJoin(campaignMembers, eq(campaignMembers.submissionId, submissions.id))
 			.where(and(
 				before
 					? or(lt(submissions.createdAt, before.createdAt), and(eq(submissions.createdAt, before.createdAt), lt(submissions.id, before.id)))

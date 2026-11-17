@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { SubmissionsEntity } from "@/lib/db/entities";
+import { CampaignRepository } from "@/lib/campaign/repository";
 import { GUIDES } from "@/lib/seo/guides";
 import { absoluteUrl } from "@/lib/seo/site";
 
@@ -17,9 +18,16 @@ const STATIC_PAGES: Array<{ path: string; priority: number; changeFrequency: Met
 const MAX_SITEMAP_URLS = 50_000;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-	const submissions = await SubmissionsEntity.listSitemapEntries(MAX_SITEMAP_URLS - STATIC_PAGES.length);
+	const campaigns = await CampaignRepository.listCampaigns(1_000);
+	const submissions = await SubmissionsEntity.listSitemapEntries(MAX_SITEMAP_URLS - STATIC_PAGES.length - campaigns.length);
 	return [
 		...STATIC_PAGES.map(({ path, priority, changeFrequency }) => ({ url: absoluteUrl(path), priority, changeFrequency })),
+		...campaigns.map(({ campaign }) => ({
+			url: absoluteUrl(`/campaigns/${campaign.id.toString()}`),
+			lastModified: campaign.updatedAt,
+			changeFrequency: "daily" as const,
+			priority: 0.7,
+		})),
 		...submissions.map((submission) => ({
 			url: absoluteUrl(`/submissions/${submission.id.toString()}`),
 			lastModified: submission.updatedAt ?? submission.createdAt,

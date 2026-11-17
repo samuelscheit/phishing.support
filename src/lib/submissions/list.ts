@@ -12,6 +12,8 @@ export type SubmissionCard = {
 	status: SubmissionStatus;
 	createdAt: string;
 	title: string;
+	/** The campaign the site belongs to, when it has other sites; the list shows them as one card. */
+	campaign?: { id: string; siteCount: number };
 };
 
 export type SubmissionCardPage = {
@@ -67,6 +69,7 @@ export async function listSubmissionCards(params: { cursor?: string | null; limi
 			status: row.status,
 			createdAt: row.createdAt.toISOString(),
 			title: row.title ?? row.id.toString(),
+			...(row.campaignId !== null && Number(row.campaignSize) > 1 ? { campaign: { id: row.campaignId.toString(), siteCount: Number(row.campaignSize) } } : {}),
 		})),
 		...(rows.length > limit && last ? { nextCursor: encodeCursor(last) } : {}),
 		...(counts ? { counts } : {}),

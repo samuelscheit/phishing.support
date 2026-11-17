@@ -1,4 +1,5 @@
 import { serviceIdentity } from "../constants";
+import { publicCampaignUrl } from "../campaign/urls";
 import type { Authority } from "./authorities";
 import type { Complainant } from "./complainant";
 import type { Dossier, DossierSite } from "./dossier";
@@ -81,6 +82,8 @@ export function complaintDraft(context: DraftContext & { authority: Authority })
 		"",
 		"Bei unserer Prüfung wurden ausschließlich synthetische, eigens erzeugte Werte eingegeben; Daten von Opfern wurden weder abgerufen noch verwendet.",
 		"",
+		`Eine laufend aktualisierte Übersicht aller Websites der Kampagne mit dem Stand der Sperrungen: ${publicCampaignUrl(dossier.campaignId)}`,
+		"",
 		...(linking.length ? ["Verbindende Merkmale", ...linking, ""] : []),
 		"Websites",
 		...siteList(sites),
@@ -111,7 +114,7 @@ export function supplementDraft(context: DraftContext & { authority: Authority; 
 	const body = [
 		"Sehr geehrte Damen und Herren,",
 		"",
-		`zu ${reference} übersenden wir ${newSites.length === 1 ? "eine weitere Website" : `${newSites.length} weitere Websites`} derselben Kampagne. ${campaignSummary(dossier, newSites)} Die Kampagne umfasst damit ${dossier.sites.length} Websites.`,
+		`zu ${reference} übersenden wir ${newSites.length === 1 ? "eine weitere Website" : `${newSites.length} weitere Websites`} derselben Kampagne. ${campaignSummary(dossier, newSites)} Die Kampagne umfasst damit ${dossier.sites.length} Websites; die Übersicht aller Websites: ${publicCampaignUrl(dossier.campaignId)}`,
 		"",
 		...(newIndicators.length ? ["Merkmale, die die neuen Websites mit der Kampagne verbinden", ...indicatorLines(newIndicators), ""] : []),
 		"Neue Websites",

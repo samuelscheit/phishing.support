@@ -1,5 +1,6 @@
 import type { Dossier, DossierIndicator, DossierProvider, DossierSite } from "./dossier";
 import { GENERIC_LEAD } from "./provider_leads";
+import { publicCampaignUrl } from "../campaign/urls";
 
 const BERLIN = new Intl.DateTimeFormat("de-DE", {
 	timeZone: "Europe/Berlin",
@@ -152,7 +153,7 @@ export function dossierText(dossier: Dossier): string {
 	return [
 		`Dossier Phishing-Kampagne ${dossier.campaignId} (phishing.support), erstellt ${germanDateTime(dossier.generatedAt)}`,
 		"",
-		`${plural(dossier.sites.length, "Website", "Websites")}, erfasst zwischen ${germanDateTime(dossier.firstSeenAt)} und ${germanDateTime(dossier.lastSeenAt)}.`,
+		`${plural(dossier.sites.length, "Website", "Websites")}, erfasst zwischen ${germanDateTime(dossier.firstSeenAt)} und ${germanDateTime(dossier.lastSeenAt)}. Laufend aktualisierte Übersicht: ${publicCampaignUrl(dossier.campaignId)}`,
 		dossier.impersonates.length ? `Imitierte Marken/Dienste: ${dossier.impersonates.join(", ")}.` : "",
 		dossier.dataRequested.length ? `Abgefragte Daten: ${dossier.dataRequested.join(", ")}.` : "",
 		"",
