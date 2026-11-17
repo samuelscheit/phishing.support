@@ -23,10 +23,20 @@ describe("campaign clustering", () => {
 		expect(result.merged.size).toBe(0);
 	});
 
-	test("a site alone with a strong indicator is a campaign of one; a site without one is none", () => {
+	test("a site alone with a strong indicator is a campaign of one; so is a confirmed site without any", () => {
 		const result = assignCampaigns({ links: [link(7n, "bot:solo")], existing: new Map(), newId: ids(1n) });
 		expect([...result.membership]).toEqual([[7n, 1n]]);
-		expect(result.membership.has(8n)).toBe(false);
+		const withSites = assignCampaigns({ links: [link(7n, "bot:solo"), link(9n, "bot:solo")], sites: [7n, 8n, 9n], existing: new Map([[8n, 40n]]), newId: ids(1n) });
+		expect(withSites.membership.get(7n)).toBe(withSites.membership.get(9n)!);
+		// A site without a linking indicator keeps the campaign of one it already had.
+		expect(withSites.membership.get(8n)).toBe(40n);
+		expect(withSites.created).toEqual([1n]);
+	});
+
+	test("a site that gains a link leaves its campaign of one for the other's campaign", () => {
+		const result = assignCampaigns({ links: [link(1n, "kit:x"), link(2n, "kit:x")], sites: [1n, 2n], existing: new Map([[1n, 10n], [2n, 20n]]), newId: ids(900n) });
+		expect([...result.membership.values()]).toEqual([10n, 10n]);
+		expect([...result.merged]).toEqual([[20n, 10n]]);
 	});
 
 	test("a growing campaign keeps its id; a new site joins it", () => {

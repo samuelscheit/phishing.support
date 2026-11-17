@@ -131,11 +131,14 @@ describe("campaign grouping on record", () => {
 		const campaign = await CampaignRepository.campaignForSubmission(1n);
 		expect(await CampaignRepository.campaignForSubmission(2n)).toBe(campaign!);
 		expect(await CampaignRepository.campaignForSubmission(3n)).toBe(campaign!);
-		// d has its own kit file, so it is a campaign of one; e has only a library.
+		// d has its own kit file and e only a library, so neither links to the others: each is a campaign of one.
 		const solo = await CampaignRepository.campaignForSubmission(4n);
 		expect(solo).toBeDefined();
 		expect(solo).not.toBe(campaign!);
-		expect(await CampaignRepository.campaignForSubmission(5n)).toBeUndefined();
+		const unlinked = await CampaignRepository.campaignForSubmission(5n);
+		expect(unlinked).toBeDefined();
+		expect([campaign, solo]).not.toContain(unlinked);
+		expect((await CampaignRepository.listMembers(unlinked!)).map((member) => member.url)).toEqual(["https://e-kit-test.com/"]);
 
 		const members = await CampaignRepository.listMembers(campaign!);
 		expect(members.map((member) => member.url)).toEqual(["https://a-kit-test.com/", "https://b-kit-test.com/", "https://c-kit-test.com/"]);

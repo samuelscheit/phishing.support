@@ -43,8 +43,14 @@ function recluster(tx: any): void {
 		.all() as Array<{ submissionId: bigint; kind: string; value: string }>;
 	const existingRows = tx.select().from(campaignMembers).all() as Array<{ submissionId: bigint; campaignId: bigint; joinedAt: Date }>;
 	const existing = new Map(existingRows.map((row) => [row.submissionId, row.campaignId]));
+	// Every reported website is a confirmed site, and every site with indicators on record was one.
+	const sites = [
+		...(tx.select({ id: submissions.id }).from(submissions).where(and(eq(submissions.kind, "website"), eq(submissions.status, "reported"))).all() as Array<{ id: bigint }>).map((row) => row.id),
+		...(tx.selectDistinct({ id: campaignIndicators.submissionId }).from(campaignIndicators).all() as Array<{ id: bigint }>).map((row) => row.id),
+	];
 	const assignment = assignCampaigns({
 		links: links.map((link) => ({ submissionId: link.submissionId, key: `${link.kind}:${link.value}` })),
+		sites: [...new Set(sites)],
 		existing,
 		newId: generateId,
 	});

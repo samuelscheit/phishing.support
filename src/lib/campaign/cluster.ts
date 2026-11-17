@@ -7,7 +7,7 @@
 export type ClusterLink = { submissionId: bigint; key: string };
 
 export type ClusterAssignment = {
-	/** Campaign id per submission; submissions with no linking indicator have none. */
+	/** Campaign id per submission. */
 	membership: Map<bigint, bigint>;
 	/** Campaigns that lost all their members to another one: old id → id that absorbed it. */
 	merged: Map<bigint, bigint>;
@@ -39,7 +39,9 @@ class DisjointSet {
 }
 
 /**
- * Assign every submission with a linking indicator to a campaign.
+ * Assign every confirmed site to a campaign: sites that share a linking
+ * indicator form one, and a site that shares none is a campaign of its own,
+ * so every site can be referred to an authority.
  * `existing` is the current membership; every member of a group moves to the
  * group's oldest existing campaign (ids are time-ordered snowflakes), and a
  * group without one gets `newId()`. A campaign left without members by this
@@ -47,12 +49,15 @@ class DisjointSet {
  */
 export function assignCampaigns(params: {
 	links: readonly ClusterLink[];
+	/** Every confirmed site, also those without a linking indicator. */
+	sites?: readonly bigint[];
 	existing: ReadonlyMap<bigint, bigint>;
 	newId: () => bigint;
 }): ClusterAssignment {
 	const sets = new DisjointSet();
 	const firstByKey = new Map<string, bigint>();
-	const linked = new Set<bigint>();
+	const linked = new Set<bigint>(params.sites ?? []);
+	for (const site of linked) sets.find(site);
 	for (const link of params.links) {
 		linked.add(link.submissionId);
 		sets.find(link.submissionId);
@@ -86,8 +91,8 @@ export function assignCampaigns(params: {
 		for (const member of members) membership.set(member, campaignId);
 		for (const absorbed of previous) if (absorbed !== campaignId && !merged.has(absorbed)) merged.set(absorbed, campaignId);
 	}
-	// A campaign whose members all lost their linking indicators keeps no
-	// members; it is not merged anywhere and simply ends up empty.
+	// A campaign whose members are no longer confirmed sites keeps no members;
+	// it is not merged anywhere and simply ends up empty.
 	for (const [absorbed, into] of merged) {
 		if ([...membership.values()].includes(absorbed)) merged.delete(absorbed);
 		else merged.set(absorbed, into);
