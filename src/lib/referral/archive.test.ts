@@ -71,6 +71,18 @@ describe("dossier archive", () => {
 		expect(JSON.parse(files.get("Dossier.json")!.toString()).campaignId).toBe("42");
 	});
 
+	test("keeps every capture of a site captured again: the newest under its name, earlier ones with their id", async () => {
+		const older = Buffer.from("MIME-Version: 1.0\r\n\r\nfirst capture");
+		const site = { ...dossier.sites[0]!, evidence: [
+			{ artifactId: "10", name: "website.mhtml", kind: "website_mhtml", sha256: sha(older), size: older.length },
+			{ artifactId: "20", name: "website.mhtml", kind: "website_mhtml", sha256: sha(mhtml), size: mhtml.length },
+		] };
+		const blobs = new Map([["10", older], ["20", mhtml]]);
+		const files = await entries(await buildDossierArchive({ ...dossier, sites: [site] }, { loadArtifact: async (id) => ({ blob: blobs.get(id.toString())! }) }));
+		expect(files.get("Beweise/001-dhl-a.com/website.mhtml")!.toString()).toBe(mhtml.toString());
+		expect(files.get("Beweise/001-dhl-a.com/website.10.mhtml")!.toString()).toBe(older.toString());
+	});
+
 	test("names a file that is no longer stored", async () => {
 		const files = await entries(await buildDossierArchive({ ...dossier, sites: [{ ...dossier.sites[0]!, evidence: [dossier.sites[0]!.evidence[0]!] }] }, { loadArtifact: async () => undefined }));
 		expect(files.get("Fehlende-Dateien.txt")!.toString()).toContain("website.mhtml: nicht mehr gespeichert");

@@ -33,7 +33,10 @@ export async function buildDossierArchive(dossier: Dossier, dependencies: Dossie
 	const missing: string[] = [];
 	for (const [index, site] of dossier.sites.entries()) {
 		const folder = `Beweise/${String(index + 1).padStart(3, "0")}-${sanitizeFilename(site.host) || site.submissionId}`;
-		for (const file of site.evidence) {
+		const used = new Set<string>();
+		// A case captured again keeps every capture: a repeated name gets its artifact id, the newest keeps the plain name.
+		const newestFirst = [...site.evidence].sort((a, b) => (BigInt(b.artifactId) > BigInt(a.artifactId) ? 1 : -1));
+		for (const file of newestFirst) {
 			const artifact = await loadArtifact(BigInt(file.artifactId));
 			const bytes = artifact ? Buffer.from(artifact.blob) : undefined;
 			const hash = bytes ? new Bun.CryptoHasher("sha256").update(bytes).digest("hex") : undefined;
@@ -41,7 +44,10 @@ export async function buildDossierArchive(dossier: Dossier, dependencies: Dossie
 				missing.push(`${folder}/${file.name}: ${bytes ? "gespeicherte Bytes passen nicht zur Prüfsumme" : "nicht mehr gespeichert"}`);
 				continue;
 			}
-			await add(`${folder}/${sanitizeFilename(file.name) || file.artifactId}`, bytes);
+			const name = sanitizeFilename(file.name) || file.artifactId;
+			const unique = used.has(name) ? name.replace(/(\.[^.]*)?$/, (extension) => `.${file.artifactId}${extension}`) : name;
+			used.add(unique);
+			await add(`${folder}/${unique}`, bytes);
 		}
 	}
 	if (missing.length) await add("Fehlende-Dateien.txt", Buffer.from(`${missing.join("\n")}\n`, "utf8"));
