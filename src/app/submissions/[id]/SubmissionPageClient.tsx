@@ -139,12 +139,16 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	// Only the email image shown beside the facts is left out of the files; a website's screenshots are files.
 	const artifacts = submission?.artifacts.filter((x) => x !== emailScreenshot) || [];
 	const websiteArchiveDate = formatUtcDateTime(websiteMhtml?.archivedAt ?? websiteMhtml?.createdAt);
-	// Each page of the visit with its screenshot: the pages it moved on from, then the analyzed one.
-	const visitPages: SiteVisitPage[] = [...websiteNavigation.filter(isFlowStepHop), ...websiteNavigation.filter((hop) => hop.contentCaptured)].map((hop, step) => {
+	// Each page of the visit with its screenshot: the pages it moved on from, the analyzed one, then those after it.
+	const laterPages = submission?.data.kind === "website" ? submission.data.website?.laterPages ?? [] : [];
+	const visitPages: SiteVisitPage[] = [
+		...[...websiteNavigation.filter(isFlowStepHop), ...websiteNavigation.filter((hop) => hop.contentCaptured)].map((hop, step) => ({ url: hop.url, step })),
+		...laterPages,
+	].map(({ url, step }) => {
 		const names = websiteCaptureFileNames(step);
 		// The plain screenshot: the stamped copy's banner belongs to the evidence files, not the viewer.
 		const shot = latestArtifactNamed(submissionArtifacts, names.screenshot) ?? latestArtifactNamed(submissionArtifacts, names.stampedScreenshot);
-		return { url: hop.url, ...(shot ? { screenshotId: String(shot.id) } : {}) };
+		return { url, ...(shot ? { screenshotId: String(shot.id) } : {}) };
 	});
 
 	const sanitizeHtmlForIframe = (rawHtml: string): string => {

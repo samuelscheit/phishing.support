@@ -268,6 +268,8 @@ type WebsiteVisitResult = {
 	inconclusive?: string;
 	/** Set when the visit's flow went on to another site before showing anything reportable on this one. */
 	handedOff?: boolean;
+	/** Pages after the judged one, kept as evidence only. */
+	laterPages?: Array<{ url: string; step: number }>;
 };
 
 /**
@@ -367,10 +369,12 @@ async function visitWebsite(params: {
 				: undefined;
 			// The verdict needs no later page, but the evidence does: the form the values were
 			// typed into and the pages after it show what the site took and where it went.
+			const laterPages: Array<{ url: string; step: number }> = [];
 			for (const later of archives.slice(position + 1)) {
 				await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive: later, evidence: await websiteEvidence(submissionId, url, later, dependencies) });
+				laterPages.push({ url: later.url, step: analyzedCaptureStep(later.navigationHops) });
 			}
-			return { ...base, archive, capturedHop, classification: classified.classification, assessments, pages: narrativePages(position), ...(inconclusive ? { inconclusive } : {}) };
+			return { ...base, archive, capturedHop, classification: classified.classification, assessments, pages: narrativePages(position), ...(inconclusive ? { inconclusive } : {}), ...(laterPages.length ? { laterPages } : {}) };
 		}
 	}
 	throw new Error("A visit always has the captured page.");
@@ -676,7 +680,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
-				website: { url, whois, ...capturedWebsiteData(archive), siteAssessments, visit },
+				website: { url, whois, ...capturedWebsiteData(archive), siteAssessments, visit, ...(visited.laterPages ? { laterPages: visited.laterPages } : {}) },
 			},
 		});
 

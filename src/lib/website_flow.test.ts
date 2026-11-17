@@ -384,6 +384,8 @@ describe("a visit through a multi-page kit", () => {
 		expect(names).toEqual(expect.arrayContaining(["website-step3.mhtml", "website-step3-stamped.png", "evidence-step3-manifest.json"]));
 		const manifest = JSON.parse((await ArtifactsEntity.get((await ArtifactsEntity.listForSubmission(id)).find(({ name }) => name === "evidence-step3-manifest.json")!.id))!.blob.toString("utf8"));
 		expect(manifest.capture.capturedUrl).toBe(RECOVERY);
+		// The case names it, so the visit's page viewer shows it after the judged page.
+		expect(websiteData(await SubmissionsEntity.get(id))?.laterPages).toEqual([{ url: RECOVERY, step: 2 }]);
 	});
 
 	test("a visit that did not finish leaves a case with nothing reportable inconclusive, retried from the submitted URL; a later visit that finishes reports it", async () => {

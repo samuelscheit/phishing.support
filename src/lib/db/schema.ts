@@ -34,6 +34,8 @@ export type WebsiteSubmissionData = {
 	/** Per-response navigation provenance; document content belongs only to contentCaptured hop. */
 	navigationHops?: WebsiteNavigationHop[];
 	siteAssessments?: WebsiteSiteAssessment[];
+	/** Pages the visit reached after the judged one, kept as evidence (the form the values went into, the pages after it); `step` names their capture files. */
+	laterPages?: Array<{ url: string; step: number }>;
 	/** Submission that analyzes the host this site redirected to; its id as a decimal string. */
 	redirectSubmissionId?: string;
 	/** How the capture handled the submitted page's scripted jump to another site. */
