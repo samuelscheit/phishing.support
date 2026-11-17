@@ -6,13 +6,11 @@ FROM oven/bun:1.4.2-debian AS deps
 WORKDIR /app
 
 # System deps needed for some native modules during install (kept in build
-# stage), and git for the browser-fabric git dependency. The lockfile names it
-# by SSH (developers clone it with their key); the image clones the public
-# repository anonymously over HTTPS instead.
+# stage). The browser-fabric dependency (github:samuelscheit/browser, public) is
+# fetched as a GitHub tarball and needs no git.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates \
-  && rm -rf /var/lib/apt/lists/* \
-  && git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile

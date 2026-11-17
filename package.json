@@ -79,7 +79,7 @@
 		"@zip.js/zip.js": "2.24.0",
 		"asn1js": "3.1.0",
 		"axios": "1.20.0",
-		"browser-fabric": "git+ssh://git@github.com/samuelscheit/browser.git#89b2ad858a6aabdc5df0a00be8cb6b46aa708fed",
+		"browser-fabric": "github:samuelscheit/browser#918045703f748b4bc21ada0560e687f8122a082d",
 		"class-variance-authority": "0.7.1",
 		"clsx": "2.1.1",
 		"cmdk": "1.1.1",
