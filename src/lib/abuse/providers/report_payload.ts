@@ -1,4 +1,5 @@
 import { hostBelongsToTarget, normalizePublicHttpUrl } from "../security";
+import { PRESERVATION_REQUEST_SHORT } from "../preservation";
 
 export function compactProviderText(value: string): string {
 	return value
@@ -244,7 +245,14 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 	}
 }
 
+/** Fit the narrative, then add the preservation ask when the field has room for it. */
 function fitNarrative(parts: readonly string[], maximumLength: number): string {
+	const narrative = fitNarrativeParts(parts, maximumLength);
+	const withPreservation = `${narrative} ${PRESERVATION_REQUEST_SHORT}`;
+	return withPreservation.length <= maximumLength ? withPreservation : narrative;
+}
+
+function fitNarrativeParts(parts: readonly string[], maximumLength: number): string {
 	const full = parts.filter(Boolean).join(" ").trim();
 	if (full.length <= maximumLength) return full;
 

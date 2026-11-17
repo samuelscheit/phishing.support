@@ -311,6 +311,12 @@ function inlineFrames(dom: HTMLElement, depth = 0): void {
 	}
 }
 
+/** What a visitor reads on a stored MHTML capture. */
+export async function mhtmlVisitorText(mhtml: Buffer): Promise<string> {
+	const { data } = await convert(mhtml, { enableScripts: false, fetchMissingResources: false });
+	return capturedDocumentContent(data).text;
+}
+
 /** Sanitized HTML and visitor-readable text of a captured document, with its frames shown in place. */
 
 export function capturedDocumentContent(documentHtml: string): { html: string; text: string } {

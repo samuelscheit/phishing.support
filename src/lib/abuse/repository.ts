@@ -21,6 +21,7 @@ import {
 	settleEmailDelivery,
 } from "./persistence/email_delivery";
 import { appendEvent, listEvents } from "./persistence/events";
+import { approveDraftedRoute, getCampaignReport, listRoutesWithCaseReference, saveApprovalDraft, setCaseReference } from "./persistence/approvals";
 import {
 	claimNextJob,
 	completeJob,
@@ -193,4 +194,9 @@ export const AbuseRepository = {
 	appendEvent,
 	recomputeReportStatus,
 	getPublicStatus,
+	saveApprovalDraft,
+	approveDraftedRoute,
+	setCaseReference,
+	getCampaignReport,
+	listRoutesWithCaseReference,
 };

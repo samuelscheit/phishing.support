@@ -47,6 +47,12 @@ export async function resolveReport(reportId: bigint, resolveTarget: AbuseTarget
 	if (lookupFailures.length > 0 && retryCount < RESOLUTION_LOOKUP_RETRIES) throw new IncompleteResolutionError(lookupFailures);
 	for (const { target, resolved } of resolutions) await saveResolvedTarget(reportId, target.id, resolved);
 	await AbuseRepository.recomputeReportStatus(reportId);
+	// A confirmed site's report, or a backend report the investigation added to
+	// it, is what its campaign is built from: group the site again with what it now shows.
+	const submissionId = input.report.submissionId;
+	if (submissionId !== null) {
+		await AbuseRepository.enqueueJob({ jobType: "link_campaign", reportId, payload: { submissionId: submissionId.toString() }, dedupeKey: `campaign-link:${submissionId.toString()}` });
+	}
 }
 
 /**

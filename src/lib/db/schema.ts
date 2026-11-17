@@ -193,3 +193,4 @@ export type MailIngest = InferSelectModel<typeof mailIngest>;
 // The reporting aggregate lives in the abuse schema. Re-exporting it keeps
 // one migration history for both schemas.
 export * from "../abuse/schema";
+export * from "../campaign/schema";

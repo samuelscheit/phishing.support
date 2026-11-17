@@ -127,6 +127,26 @@ Probe sessions explicitly request two external CDP connections: one bounded reco
 
 Providers always see the service identity defined in `src/lib/constants.ts` (Phishing Support, `support@phishing.support`, `https://phishing.support`); it is code, not configuration, because routes pin the provider definitions that embed it. When a public report names its submitter, the name and/or email appear only in the report text as the original reporter, and Cloudflare additionally receives the submitter's country when known.
 
+## Campaigns and criminal referrals
+
+Takedown alone does not stop an operator, and a single phishing site with an unknown operator is closed by any prosecutor. Authorities act on a case that ties many sites to one operator, so every confirmed website is grouped into a **campaign** by what only one operator has: the Telegram bot, Discord webhook or collector host its visit sent the synthetic values to, an IBAN or crypto address the page names (checksums verified), or a script/hidden-frame file of the kit itself. A kit file counts only when it is at least 1 KiB, not served from a top-ranked site, and not a published library file (checked by SHA-256 against jsDelivr). The server IP is recorded but never links sites. Grouping runs after every report resolution; `/operator/campaigns` can rebuild all campaigns.
+
+A campaign page (`/operator/campaigns/<id>`, behind HTTP Basic auth with `OPERATOR_PASSWORD`) drafts, for one authority at a time:
+
+- a **criminal complaint against persons unknown**, with every site, its takedown reports, the linking indicators, how an investigator reaches each provider's records, a signed download link for the evidence archive, and `Websites.csv`/`Merkmale.csv` attached;
+- a **supplement** with only the sites the authority has not received, under its file number;
+- once a file number exists, a **preservation notice** to each provider mailbox the sites were reported to.
+
+Nothing is sent without the operator approving that mail; an approved mail is sent exactly as approved, through the normal durable email route, and replies are correlated to it. A reply that names exactly one file number (Aktenzeichen, Tagebuch- or Vorgangsnummer) sets it; otherwise the operator chooses or types it (letters by post). Every takedown report asks the provider to suspend rather than delete and keep account, payment and access-log data for 90 days. Research and design: `docs/research/criminal-referral-routes.md`, `docs/design/criminal-referral.md`.
+
+```text
+OPERATOR_PASSWORD=<at least 16 characters>
+REFERRAL_COMPLAINANT_NAME=<full name of the complainant>
+REFERRAL_COMPLAINANT_ADDRESS=<street; postcode city>
+REFERRAL_COMPLAINANT_PHONE=<optional>
+REFERRAL_LINK_SECRET=<at least 32 random characters>
+```
+
 ## Mail configuration
 
 The service uses one mailbox for everything:

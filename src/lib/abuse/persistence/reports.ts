@@ -49,6 +49,11 @@ export async function createReport(params: {
 	 * `releaseInvestigatedReport` starts resolution once the evidence is in.
 	 */
 	investigation?: { payload: Record<string, unknown> };
+	/**
+	 * A criminal referral of a campaign: its routes are drafted for the
+	 * operator's approval instead of resolved, so no first job is queued.
+	 */
+	campaignId?: bigint;
 }): Promise<CreatedAbuseReport> {
 	const db = await getDb();
 	const { request, reporter } = params;
@@ -85,6 +90,7 @@ export async function createReport(params: {
 				.values({
 					id: reportId,
 					submissionId: params.submissionId,
+					campaignId: params.campaignId,
 					trackingTokenHash,
 					idempotencyKey,
 					requestPayloadHash: request.requestPayloadHash,
@@ -143,6 +149,13 @@ export async function createReport(params: {
 				});
 			}
 
+			recordEvent(tx, {
+				reportId,
+				eventType: "report.accepted",
+				data: { targetCount: targetIds.size, evidenceCount: request.evidence.length },
+			});
+			if (params.campaignId !== undefined) return { reportId, trackingToken, created: true };
+
 			const jobId = generateId();
 			const firstJob = params.investigation
 				? { jobType: "investigate_report" as const, payload: params.investigation.payload, dedupeKey: `investigate:${reportId.toString()}` }
@@ -160,11 +173,6 @@ export async function createReport(params: {
 					updatedAt: timestamp,
 				})
 				.run();
-			recordEvent(tx, {
-				reportId,
-				eventType: "report.accepted",
-				data: { targetCount: targetIds.size, evidenceCount: request.evidence.length },
-			});
 			recordEvent(tx, { reportId, jobId, eventType: "job.queued", data: { jobType: firstJob.jobType } });
 
 			return { reportId, trackingToken, created: true };

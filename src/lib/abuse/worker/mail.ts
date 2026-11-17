@@ -3,6 +3,10 @@ import { isGenericFormEscalationEnabled } from "../providers/generic_form";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { AbuseRepository } from "../repository";
 import { contactRoute } from "../resolver/routes";
+import { abuseCaseTag } from "../mail/correlation";
+import { caseReferenceCandidates } from "../../referral/case_reference";
+import { isAuthorityRoute, isPreservationRoute } from "../../referral/routes";
+import type { AbuseMailMessage, AbuseProviderRoute } from "../schema";
 
 export async function classifyReply(messageId: bigint): Promise<void> {
 	const message = await AbuseRepository.getMailMessage(messageId);
@@ -25,6 +29,10 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 		// A permanent rejection (5.x.x) means the mailbox will never accept the
 		// report; move on to the target's next published abuse contact.
 		if (settled && status !== "4") await routeToNextContact(route.id);
+		return;
+	}
+	if (isAuthorityRoute(route) || isPreservationRoute(route)) {
+		await classifyReferralReply(message, route);
 		return;
 	}
 	const result = await classifyProviderReply({ text: message.textBody ?? "", from: message.fromAddress ?? undefined });
@@ -73,6 +81,34 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 	else if (result.classification === "bounce") {
 		await settleBounce(message.id, route);
 	}
+}
+
+/**
+ * A reply to a criminal referral or a preservation notice is read by the
+ * operator, never acted on by a provider workflow: it is classified for the
+ * record and closes the wait. An authority's reply that names exactly one
+ * file number of its own sets the route's case reference; several are kept
+ * as candidates for the operator to choose from.
+ */
+async function classifyReferralReply(message: AbuseMailMessage, route: AbuseProviderRoute): Promise<void> {
+	const text = message.textBody ?? "";
+	const result = await classifyProviderReply({ text, from: message.fromAddress ?? undefined });
+	await AbuseRepository.setMailClassification(message.id, result.classification, [], result.rationale);
+	if (isAuthorityRoute(route)) {
+		const candidates = caseReferenceCandidates(`${message.subject ?? ""}\n${text}`, [abuseCaseTag(route.reportId)]);
+		await AbuseRepository.appendEvent({
+			reportId: route.reportId,
+			routeId: route.id,
+			eventType: "referral.reply_received",
+			data: { messageId: message.id.toString(), classification: result.classification, caseReferenceCandidates: candidates.map((candidate) => candidate.value) },
+		});
+		if (candidates.length === 1 && !route.caseReference) await AbuseRepository.setCaseReference(route.id, candidates[0]!.value, `reply:${message.id.toString()}`);
+		// Any answer from the authority, a transfer to another office included, is a receipt.
+		await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: "awaiting_provider_reply", to: "acknowledged" });
+		return;
+	}
+	const to = result.classification === "rejected" || result.classification === "not_monitored" ? "provider_rejected" : result.classification === "acknowledged" ? "acknowledged" : undefined;
+	if (to) await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: "awaiting_provider_reply", to });
 }
 
 /**

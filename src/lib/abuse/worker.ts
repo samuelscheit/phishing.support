@@ -26,6 +26,7 @@ import { releaseAfterFailedInvestigation, runReportInvestigation } from "../inve
 import { setInvestigationStatus } from "../investigation/status";
 import { followUpProviderDecision, readDecisionFollowUpPayload } from "./followup/decision";
 import { startSamplePurgeSchedule } from "../exfiltration/downloads/sample_purge_job";
+import { linkSubmissionToCampaign } from "../campaign/link";
 
 const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;
@@ -58,6 +59,8 @@ const CONTROL_JOB_TYPES = [
 	// Read-only provider API calls, kept apart from browser and SMTP work.
 	"poll_provider_correspondence",
 	"find_provider_receipt",
+	// Reads stored evidence and asks jsDelivr whether a kit file is a library.
+	"link_campaign",
 ] as const satisfies readonly AbuseJobType[];
 
 /** Jobs that may cross an external provider side-effect boundary. */
@@ -519,6 +522,9 @@ export class AbuseWorker {
 				return;
 			case "watch_redirector":
 				await watchRedirector({ job, signal });
+				return;
+			case "link_campaign":
+				await linkSubmissionToCampaign(parseJobBigInt(job.payload?.submissionId, "payload.submissionId"));
 				return;
 			default:
 				throw new Error(`Unsupported abuse job type ${job.jobType}.`);

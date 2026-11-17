@@ -62,6 +62,14 @@ services:
       # Reproduces the tracking token of a retried public API report that
       # carries an idempotency key; only the token's hash is stored.
       ABUSE_TRACKING_TOKEN_SECRET: ${ABUSE_TRACKING_TOKEN_SECRET:?Set ABUSE_TRACKING_TOKEN_SECRET to at least 32 random bytes}
+      # The operator area (/operator) and the person who signs criminal
+      # referrals; an authority answers only a named complainant. The link
+      # secret signs the evidence-archive links authorities receive.
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:-}
+      REFERRAL_COMPLAINANT_NAME: ${REFERRAL_COMPLAINANT_NAME:-}
+      REFERRAL_COMPLAINANT_ADDRESS: ${REFERRAL_COMPLAINANT_ADDRESS:-}
+      REFERRAL_COMPLAINANT_PHONE: ${REFERRAL_COMPLAINANT_PHONE:-}
+      REFERRAL_LINK_SECRET: ${REFERRAL_LINK_SECRET:-}
       EXFILTRATION_SKYVERN_MAX_STEPS: ${EXFILTRATION_SKYVERN_MAX_STEPS:-80}
       # Browser Fabric is mandatory for every browser operation. The app talks
       # only to its private authenticated relay; Fabric owns the API credential,

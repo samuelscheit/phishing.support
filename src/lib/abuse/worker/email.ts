@@ -8,6 +8,7 @@ import {
 	verifiedEmailProviderPayload,
 } from "../mail";
 import { serviceIdentity } from "../../constants";
+import { approvalDraftOf } from "../persistence/approvals";
 import { AbuseRepository } from "../repository";
 import { errorText, RetryableDeliveryError, routeContext, UnknownExternalStateError, type WorkerServices } from "./shared";
 
@@ -39,8 +40,9 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices): P
 		...target.observedUrls,
 		...(report.legalBrandUrl ? [report.legalBrandUrl] : []),
 		...(caseUrl ? [caseUrl] : []),
+		...(approvalDraftOf(route)?.allowedUrls ?? []),
 	];
-	const routeArtifacts = await AbuseRepository.listRouteArtifacts(route.id, ["origin_host_evidence"]);
+	const routeArtifacts = await AbuseRepository.listRouteArtifacts(route.id, ["origin_host_evidence", "referral_attachment"]);
 	const attachments = [...routeArtifacts, ...evidenceArtifacts]
 		.filter((artifact, index, all) => all.findIndex((candidate) => candidate.id === artifact.id) === index)
 		.slice(0, 15)

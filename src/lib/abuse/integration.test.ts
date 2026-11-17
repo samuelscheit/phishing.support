@@ -103,7 +103,8 @@ describe("abuse persistence boundary", () => {
 		for (const table of expectedTables) {
 			const foreignKeys = client.query(`PRAGMA foreign_key_list(${table})`).all() as Array<{ table: string; from: string }>;
 			const outside = foreignKeys.filter((foreignKey) => !foreignKey.table.startsWith("abuse_"));
-			expect(outside.map((foreignKey) => `${foreignKey.from}->${foreignKey.table}`), table).toEqual(table === "abuse_reports" ? ["submission_id->submissions"] : []);
+			// A report is owned by a submission, or, as a criminal referral, by a campaign.
+			expect(outside.map((foreignKey) => `${foreignKey.from}->${foreignKey.table}`).sort(), table).toEqual(table === "abuse_reports" ? ["campaign_id->campaigns", "submission_id->submissions"] : []);
 		}
 
 		await resetDatabaseForTesting();

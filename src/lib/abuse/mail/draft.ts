@@ -9,6 +9,8 @@ import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
 import { createOriginHostEmailDraft } from "../origin/draft";
 import { humanizeOrganization, recipientGreeting } from "./shared";
 import { refangText } from "../../malware/defang";
+import { PRESERVATION_REQUEST } from "../preservation";
+import { approvalDraftOf } from "../persistence/approvals";
 
 const MAX_DESCRIPTION_INPUT = 12_000;
 const MAX_SUMMARY_LENGTH = 1_200;
@@ -363,6 +365,8 @@ function bodyFor(params: {
 			? "Please investigate the sending account or server and take any appropriate mitigation action under your abuse policy. Reply to this email if further information is required."
 			: "Please investigate the relevant domain or account and take any appropriate mitigation action under your abuse policy. Reply to this email if further information is required.",
 		"",
+		PRESERVATION_REQUEST,
+		"",
 		"Regards,",
 		"The phishing.support team",
 	].join("\n");
@@ -376,6 +380,9 @@ function bodyFor(params: {
  * evidence summary and falls back safely when unavailable.
  */
 export async function createAbuseEmailDraft(input: DraftInput, dependencies: AbuseEmailDraftDependencies = {}): Promise<AbuseEmailDraft> {
+	// A mail the operator approved is sent exactly as approved.
+	const approved = approvalDraftOf(input.route);
+	if (approved) return { subject: approved.subject, body: approved.body, recipientLabel: approved.recipientLabel };
 	const originHostDraft = createOriginHostEmailDraft(input);
 	if (originHostDraft) return originHostDraft;
 	const recipientLabel = abuseEmailRecipientLabel({ route: input.route, recipient: input.recipient });

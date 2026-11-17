@@ -2,6 +2,7 @@ import { InferSelectModel, sql } from "drizzle-orm";
 import { blob, index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "../db/sqlite_types";
 import { submissions } from "../db/schema";
+import { campaigns } from "../campaign/schema";
 
 export const abuseReportStatuses = [
 	/** Accepted, and evidence about the reported site is still being collected; no provider has been contacted. */
@@ -22,8 +23,11 @@ export const abuseReportStatuses = [
 ] as const;
 export type AbuseReportStatus = (typeof abuseReportStatuses)[number];
 
-/** `email` targets the phishing message itself; its routes need the stored message evidence. */
-export const abuseTargetTypes = ["domain", "ip", "email", "service_account"] as const;
+/**
+ * `email` targets the phishing message itself; its routes need the stored message evidence.
+ * `campaign` is a criminal referral's subject: every site of one campaign, reported to an authority.
+ */
+export const abuseTargetTypes = ["domain", "ip", "email", "service_account", "campaign"] as const;
 export type AbuseTargetType = (typeof abuseTargetTypes)[number];
 
 export const abuseTargetStatuses = ["pending", "resolved", "no_route", "failed"] as const;
@@ -33,6 +37,10 @@ export const abuseRouteTypes = ["email", "provider_submission", "manual_unroutab
 export type AbuseRouteType = (typeof abuseRouteTypes)[number];
 
 export const abuseRouteStatuses = [
+	/** A drafted mail the operator must approve before it is sent; criminal referrals start here. */
+	"awaiting_approval",
+	/** The operator decided a drafted mail is not sent. */
+	"discarded",
 	"resolving",
 	"verified",
 	"queued",
@@ -90,6 +98,7 @@ export const abuseJobTypes = [
 	"discover_kit_siblings",
 	"analyze_kit_sibling",
 	"watch_redirector",
+	"link_campaign",
 ] as const;
 export type AbuseJobType = (typeof abuseJobTypes)[number];
 
@@ -117,6 +126,8 @@ export const abuseReports = sqliteTable(
 	{
 		id: sqliteBigint("id").primaryKey(),
 		submissionId: sqliteBigint("submission_id").references(() => submissions.id, { onDelete: "cascade" }),
+		/** The campaign a criminal referral reports; such a report has no submission. */
+		campaignId: sqliteBigint("campaign_id").references(() => campaigns.id, { onDelete: "cascade" }),
 		trackingTokenHash: text("tracking_token_hash").notNull(),
 		idempotencyKey: text("idempotency_key"),
 		requestPayloadHash: text("request_payload_hash").notNull(),
@@ -144,6 +155,8 @@ export const abuseReports = sqliteTable(
 		uniqueIndex("abuse_reports_tracking_token_hash_unique").on(table.trackingTokenHash),
 		uniqueIndex("abuse_reports_idempotency_key_unique").on(table.idempotencyKey),
 		index("abuse_reports_submission_idx").on(table.submissionId),
+		// One referral report per campaign; its routes are the mails to every recipient.
+		uniqueIndex("abuse_reports_campaign_unique").on(table.campaignId),
 		index("abuse_reports_status_updated_idx").on(table.status, table.updatedAt),
 	]
 );
@@ -196,6 +209,8 @@ export const abuseProviderRoutes = sqliteTable(
 		resolutionSnapshot: text("resolution_snapshot", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
 		verificationResult: text("verification_result", { mode: "json" }).$type<Record<string, unknown>>(),
 		serviceIdentity: text("service_identity", { mode: "json" }).$type<Record<string, unknown>>(),
+		/** The authority's file number for the case this route reported (Aktenzeichen, Tagebuchnummer). */
+		caseReference: text("case_reference"),
 		status: text("status", { enum: abuseRouteStatuses }).notNull().default("resolving"),
 		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
 		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),

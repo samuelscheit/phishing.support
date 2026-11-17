@@ -14,6 +14,7 @@ export const IMMUTABLE_ROUTE_STATUSES = new Set<AbuseRouteStatus>([
 	"failed",
 	"needs_human",
 	"unknown_external_state",
+	"discarded",
 ]);
 
 /** Outcomes that cannot be settled again by a provider-run callback. */
@@ -45,12 +46,16 @@ export function aggregateReportStatus(routeStatuses: AbuseRouteStatus[]): AbuseR
 	if (routeStatuses.includes("verified")) return "verifying";
 	if (routeStatuses.includes("resolving")) return "resolving";
 
-	const actionable = routeStatuses.filter((status) => status !== "no_route");
+	// A drafted mail waiting for approval is not a failed delivery, and a
+	// discarded one was never meant to be sent; neither counts against the
+	// routes that were delivered.
+	const actionable = routeStatuses.filter((status) => !["no_route", "discarded", "awaiting_approval"].includes(status));
 	const delivered = actionable.filter((status) => DELIVERED_ROUTE_STATUSES.has(status));
 	if (delivered.length > 0) {
 		if (delivered.length < actionable.length) return "partially_submitted";
 		return delivered.includes("awaiting_provider_reply") ? "waiting_provider" : "submitted";
 	}
+	if (routeStatuses.includes("awaiting_approval")) return "needs_human";
 	if (actionable.length === 0) return "no_route";
 	if (actionable.includes("needs_human")) return "needs_human";
 	if (actionable.every((status) => status === "insufficient_evidence")) return "insufficient_evidence";

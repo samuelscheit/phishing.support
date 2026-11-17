@@ -1,0 +1,163 @@
+import { serviceIdentity } from "../constants";
+import type { Authority } from "./authorities";
+import type { Complainant } from "./complainant";
+import type { Dossier, DossierSite } from "./dossier";
+import { germanDate, germanDateTime, indicatorLines, providerLines, siteLine } from "./render";
+
+/** Sites listed in a mail body; the attached CSV always has all of them. */
+export const MAX_SITES_IN_MAIL = 25;
+
+export type ReferralDraft = { subject: string; body: string };
+
+type DraftContext = {
+	dossier: Dossier;
+	complainant: Complainant;
+	/** The case tag every mail of the referral report carries, e.g. `PS-0a1b2c3d`. */
+	caseTag: string;
+	download: { url: string; expiresAt: Date };
+};
+
+function signature(complainant: Complainant): string[] {
+	return [
+		"Mit freundlichen Grüßen",
+		"",
+		complainant.name,
+		...complainant.addressLines,
+		...(complainant.phone ? [`Telefon: ${complainant.phone}`] : []),
+		`Betreiber von ${new URL(serviceIdentity.url).host}`,
+	];
+}
+
+function siteList(sites: readonly DossierSite[]): string[] {
+	const listed = sites.slice(0, MAX_SITES_IN_MAIL).map(siteLine);
+	const rest = sites.length - listed.length;
+	return rest > 0 ? [...listed, `… und ${rest} weitere in der Anlage Websites.csv.`] : listed;
+}
+
+function campaignSummary(dossier: Dossier, sites: readonly DossierSite[]): string {
+	const one = sites.length === 1;
+	const brands = dossier.impersonates.length ? ` ${one ? "Sie gibt" : "Sie geben"} sich als ${dossier.impersonates.join(", ")} aus.` : "";
+	const data = dossier.dataRequested.length ? ` Besucher sollen dort ${dossier.dataRequested.join(", ")} eingeben.` : "";
+	const firstSeen = sites.map((site) => site.firstSeenAt).sort();
+	const when = one
+		? `Die Website wurde am ${germanDateTime(firstSeen[0] ?? dossier.firstSeenAt)} erfasst.`
+		: `Die ${sites.length} Websites wurden zwischen ${germanDateTime(firstSeen[0] ?? dossier.firstSeenAt)} und ${germanDateTime(firstSeen.at(-1) ?? dossier.lastSeenAt)} erfasst.`;
+	return `${when}${brands}${data}`;
+}
+
+function evidenceParagraph(download: DraftContext["download"]): string[] {
+	return [
+		"Beweismittel",
+		"Für jede Website liegen ein MHTML-Mitschnitt, ein Bildschirmfoto mit eingeblendeter URL und Uhrzeit, ein Manifest mit den SHA-256-Prüfsummen aller Dateien und ein RFC-3161-Zeitstempel einer unabhängigen Zeitstempelstelle über dieses Manifest vor. Die Prüfsummen stehen in der Anlage Websites.csv; die Dateien selbst können Sie hier als ZIP-Archiv herunterladen:",
+		download.url,
+		`(Der Link ist bis ${germanDate(download.expiresAt.toISOString())} gültig. Auf Wunsch übermittle ich die Dateien auch auf anderem Weg.)`,
+	];
+}
+
+/**
+ * The criminal complaint against persons unknown for one campaign. Every
+ * fact in it comes from the dossier; the text names no suspect and claims no
+ * damage that was not observed.
+ */
+export function complaintDraft(context: DraftContext & { authority: Authority }): ReferralDraft {
+	const { dossier, complainant, authority } = context;
+	const sites = dossier.sites;
+	const linking = indicatorLines(dossier.indicators);
+	const subject = `Strafanzeige gegen Unbekannt – Phishing-Kampagne mit ${sites.length === 1 ? "1 Website" : `${sites.length} Websites`}${dossier.impersonates.length ? ` (${dossier.impersonates.slice(0, 3).join(", ")})` : ""} [${context.caseTag}]`;
+	const body = [
+		"Sehr geehrte Damen und Herren,",
+		"",
+		"hiermit erstatte ich Strafanzeige gegen Unbekannt wegen des Verdachts des Computerbetrugs und seiner Vorbereitung (§ 263a Abs. 1 und 3 StGB), der Fälschung beweiserheblicher Daten (§ 269 StGB), des Ausspähens und Abfangens von Daten (§§ 202a, 202b StGB) sowie aller weiteren in Betracht kommenden Straftaten.",
+		"",
+		"Sachverhalt",
+		`Ich betreibe den Dienst ${new URL(serviceIdentity.url).host}. Er nimmt Meldungen zu Phishing-Seiten an, sichert die Seiten als Beweis und meldet sie den Hostern, Registraren und CDN-Anbietern zur Sperrung. Die folgenden Websites werden nach den unten genannten Merkmalen von denselben Tätern betrieben. ${campaignSummary(dossier, sites)}`,
+		"",
+		"Bei der Prüfung wurden ausschließlich synthetische, eigens erzeugte Werte eingegeben; Daten von Opfern wurden weder abgerufen noch verwendet.",
+		"",
+		...(linking.length ? ["Verbindende Merkmale", ...linking, ""] : []),
+		"Websites",
+		...siteList(sites),
+		"",
+		"Ermittlungsansätze und Datensicherung",
+		"Die Anbieter haben die Seiten teils schon gesperrt; nach einer Sperrung löschen sie Konto-, Zahlungs- und Zugriffsdaten oft binnen Tagen. Ich habe jeden Anbieter gebeten, die Daten aufzubewahren, kann eine Sicherung aber nicht erzwingen. Ich rege an, die Daten bei folgenden Anbietern zu sichern:",
+		...providerLines(dossier.providers),
+		"",
+		...evidenceParagraph(context.download),
+		"",
+		"Weiteres Vorgehen",
+		`Bitte teilen Sie mir das Aktenzeichen mit. Neue Websites derselben Kampagne würde ich als Nachtrag zu diesem Verfahren übersenden; bitte nennen Sie mir dafür, wenn möglich, eine Ansprechperson oder eine Adresse. Antworten auf diese E-Mail erreichen mich direkt. Sollte die Anzeige bei ${authority.name} nicht richtig sein, bitte ich um Weiterleitung an die zuständige Stelle.`,
+		"",
+		"Anlagen: Websites.csv (alle Websites mit Prüfsummen der Beweisdateien), Merkmale.csv (alle Merkmale mit Fundstellen)",
+		"",
+		...signature(complainant),
+	].join("\n");
+	return { subject, body };
+}
+
+/** New sites of a campaign already reported, sent to the same authority under its file number. */
+export function supplementDraft(context: DraftContext & { authority: Authority; caseReference?: string; newSites: readonly DossierSite[]; complaintSentAt?: string }): ReferralDraft {
+	const { dossier, complainant, newSites } = context;
+	const reference = context.caseReference ? `Az. ${context.caseReference}` : `meiner Anzeige vom ${context.complaintSentAt ? germanDate(context.complaintSentAt) : "(Datum)"}`;
+	const newUrls = new Set(newSites.map((site) => site.url));
+	const newIndicators = dossier.indicators.filter((indicator) => indicator.sites.some((url) => newUrls.has(url)));
+	const subject = `Nachtrag zu ${reference} – ${newSites.length === 1 ? "1 weitere Website" : `${newSites.length} weitere Websites`} der Phishing-Kampagne [${context.caseTag}]`;
+	const body = [
+		"Sehr geehrte Damen und Herren,",
+		"",
+		`zu ${reference} übersende ich ${newSites.length === 1 ? "eine weitere Website" : `${newSites.length} weitere Websites`} derselben Kampagne. ${campaignSummary(dossier, newSites)} Die Kampagne umfasst damit ${dossier.sites.length} Websites.`,
+		"",
+		...(newIndicators.length ? ["Merkmale, die die neuen Websites mit der Kampagne verbinden", ...indicatorLines(newIndicators), ""] : []),
+		"Neue Websites",
+		...siteList(newSites),
+		"",
+		"Ermittlungsansätze und Datensicherung",
+		...providerLines(dossier.providers),
+		"",
+		...evidenceParagraph(context.download),
+		"",
+		"Anlagen: Websites.csv (alle Websites der Kampagne), Merkmale.csv",
+		"",
+		...signature(complainant),
+	].join("\n");
+	return { subject, body };
+}
+
+/**
+ * Ask a provider to keep the records of the sites we reported to it, now
+ * that an authority has the case. Only an authority can compel this; the
+ * notice gives the provider the file number and a lawful reason to keep the
+ * data until the authority's request arrives. It asks for nothing to be
+ * disclosed to us.
+ */
+export function preservationNoticeDraft(params: {
+	recipient: string;
+	recipientLabel: string;
+	authority: Authority;
+	caseReference: string;
+	sites: readonly DossierSite[];
+	complainant: Complainant;
+	caseTag: string;
+}): ReferralDraft {
+	const { sites } = params;
+	const subject = `Data preservation request – criminal case ${params.caseReference} – ${sites.length === 1 ? sites[0]!.host : `${sites.length} phishing sites`} [${params.caseTag}]`;
+	const reported = sites.map((site) => {
+		const report = site.reports.find((candidate) => candidate.contact?.toLowerCase() === params.recipient.toLowerCase());
+		return `- ${site.url}${report?.reportedAt ? ` (reported to you on ${report.reportedAt.slice(0, 10)}${report.confirmationId ? `, ticket ${report.confirmationId}` : ""})` : ""}`;
+	});
+	const body = [
+		`Hello ${params.recipientLabel} team,`,
+		"",
+		`We reported the phishing ${sites.length === 1 ? "site" : "sites"} below to you for takedown. A criminal complaint about the campaign behind ${sites.length === 1 ? "it" : "them"} is now pending with the German authority ${params.authority.name} under file number ${params.caseReference}.`,
+		"",
+		...reported,
+		"",
+		"Please preserve every record you hold about the accounts behind these sites for at least 90 days: account and subscriber data, payment records, login and access logs with IP addresses, and the hosted content or a server image. Please suspend rather than delete. A request from law enforcement will reach you through the official channels.",
+		"",
+		"We are not asking you to disclose any of these records to us. Please reply to confirm that the data is preserved.",
+		"",
+		"Regards,",
+		params.complainant.name,
+		`${new URL(serviceIdentity.url).host}`,
+	].join("\n");
+	return { subject, body };
+}
