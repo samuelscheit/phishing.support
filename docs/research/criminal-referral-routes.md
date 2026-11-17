@@ -65,7 +65,7 @@ Above that sit **relationships**, which are a human step but the documented orig
 
 - **Binding instruments** are for authorities only:
   - US 18 USC 2703(f): 90 + 90 days.
-  - EU e-Evidence European Preservation Order: in force since 2026-08-18, 60 + 30 days, sent by prosecutors through e-CODEX.
+  - EU e-Evidence European Preservation Order: in force since 2026-08-18, 60 + 30 days, sent by prosecutors through e-CODEX. **Correction (2026-11-17):** the Commission's readiness table of 6 Nov 2026 lists Germany as ready to issue production orders only, not preservation orders; preservation still runs through the BKA's 24/7 point. See [cross-border-investigation-instruments.md](cross-border-investigation-instruments.md).
   - Budapest Convention Art. 16 and 29, through the 24/7 network.
   - The German Sicherungsanordnung (BT-Drs. 21/6581) is **not in force** and would cover only telecom traffic data. Today German hosters are reached only through §§ 94/95 StPO and the TDDDG.
 - **Provider practice:**

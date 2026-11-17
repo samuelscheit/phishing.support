@@ -42,9 +42,10 @@ Je Kampagne eine Strafanzeige gegen Unbekannt. Sie enthält:
 
 - alle Seiten mit Zeitpunkt, Registrar, Hoster und Stand der Sperrung;
 - die Merkmale, die die Seiten verbinden: identische Programmdateien, derselbe Telegram-Bot oder Sammelserver, an den die Eingaben gehen, dieselben Zahlungsempfänger;
-- für jeden Anbieter, welche Konto-, Zahlungs- und Zugriffsdaten dort liegen und auf welchem Weg sie sich sichern lassen, etwa über die Europäische Sicherungsanordnung oder ein Ersuchen nach US-Recht.
+- für jeden Anbieter, welche Konto-, Zahlungs- und Zugriffsdaten dort liegen, welches Unternehmen sie vertraglich hält und auf welchem Weg sie sich erreichen lassen, etwa über eine Europäische Herausgabeanordnung (VO (EU) 2023/1543) an den EU-Adressaten des Anbieters oder über ein Sicherungsersuchen der 24/7-Kontaktstelle;
+- nach Ländern geordnet, wo die Infrastruktur steht (Server, Vertragspartner, Netzbetreiber) und welche Instrumente dort greifen.
 
-Die Täter sitzen fast immer im Ausland; das Dossier soll die nötigen Ersuchen erleichtern. Neue Seiten derselben Kampagne würden wir als Nachtrag unter Ihrem Aktenzeichen schicken.
+Die Täter sitzen fast immer im Ausland; das Dossier soll die nötigen Ersuchen erleichtern. Den echten Hoster hinter Cloudflare erfahren wir oft aus Cloudflares Antwort auf unsere Meldung; darunter sind auffällig häufig Hoster in Großbritannien, St. Kitts und Nevis oder Malaysia, die sich auf solche Kunden spezialisiert zu haben scheinen. Neue Seiten derselben Kampagne würden wir als Nachtrag unter Ihrem Aktenzeichen schicken.
 
 Jede Seite sichern wir automatisiert mit einem eigenen Browser:
 
@@ -62,7 +63,9 @@ Wir rufen dabei nur öffentlich erreichbare Inhalte ab. Wo wir prüfen, wohin ei
 3. Können Sie uns eine Ansprechperson oder ein Funktionspostfach für Anzeigen und Nachträge nennen?
 4. Wir lassen Seiten sofort sperren, um Opfer zu schützen. Damit erfahren die Täter auch, dass sie entdeckt sind. Sollen wir bei Kampagnen, zu denen ein Verfahren läuft, Meldungen an Anbieter auf Ihren Wunsch zurückhalten oder mit Ihnen abstimmen?
 5. In welcher Form sollen die Beweismittel kommen? Vorgesehen sind CSV-Anhänge mit allen Seiten und Prüfsummen sowie ein ZIP-Archiv über einen zeitlich begrenzten Download-Link. Falls Ihr Netz solche Links oder Anhänge sperrt, nennen Sie uns bitte einen anderen Weg.
-6. Sollen wir die Anbieter um vorsorgliche Datensicherung bitten, sobald ein Aktenzeichen vorliegt, mit Hinweis auf das Verfahren? Oder veranlassen Sie das selbst?
+6. Sollen wir die Anbieter um vorsorgliche Datensicherung bitten, sobald ein Aktenzeichen vorliegt, mit Hinweis auf das Verfahren? Oder veranlassen Sie das selbst? Manche Anbieter löschen Kundendaten schon 30 Tage nach Vertragsende.
+7. Nutzen Sie bei Kampagnen, deren Infrastruktur in mehreren Staaten liegt, Eurojust oder gemeinsame Ermittlungsgruppen (JIT), oder geben Sie Verfahren an den Staat des Hosters ab (Anzeige zum Zwecke der Strafverfolgung, Nr. 145 ff. RiVASt)? Uns geht es darum, dass die Behörden vor Ort die Kunden- und Zahlungsdaten der Hoster mit eigenen Anordnungen erheben können.
+8. Wäre Ihnen ein vorbereiteter Anhang je Staat hilfreich: in Englisch, mit der dort gelegenen Infrastruktur, dem Zeitraum, dem Vertragspartner des Anbieters und den Angaben, die eine Europäische Herausgabeanordnung oder ein Sicherungsersuchen über die 24/7-Kontaktstelle braucht? Wenn ja, in welcher Form, und sollen wir zusätzlich maschinenlesbare Indikatoren (CSV, MISP/STIX) mitliefern?
 
 Wir haben uns mit diesem Anliegen bisher an keine andere Behörde gewandt. Gern stellen wir den Dienst auch in einem kurzen Telefonat vor.
 
