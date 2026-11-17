@@ -118,14 +118,14 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			expect(recording.agent.actions.map((action) => action.kind)).toEqual(["thought", "type", "type", "click", "thought", "click", "click", "done"]);
 			expect(recording.agent.actions.find((action) => action.kind === "click")?.text).toStartWith("clicked e");
 
-			// The password never reached the model, the action log, or the live view: only its placeholder did.
+			// The password never reached the model: only its placeholder did.
 			expect(model.seen()).not.toContain(canaries.password);
 			expect(model.seen()).toContain("{{secret:password}}");
-			expect(JSON.stringify(recording.agent)).not.toContain(canaries.password);
-			expect(JSON.stringify(live.filter((event) => event.type !== "browser.frame"))).not.toContain(canaries.password);
-			// The evidence says what was entered where and when: the element's ref, the value as the
-			// agent typed it (the secret as its placeholder), and the time its step acted.
-			expect(recording.agent.actions).toContainEqual({ id: "1.2", kind: "type", text: "typed into e2; its value is now (secret entered)", selector: "e2", value: "{{secret:password}}", at: expect.any(String) });
+			// The evidence and the live log say what was entered where and when: the element's ref, the
+			// synthetic value the browser typed (a secret with the placeholder the agent typed it as), and the time its step acted.
+			const typedPassword = { id: "1.2", kind: "type", text: `typed into e2; its value is now ${JSON.stringify(canaries.password)}`, selector: "e2", value: canaries.password, typedAs: "{{secret:password}}", at: expect.any(String) };
+			expect(recording.agent.actions).toContainEqual(typedPassword);
+			expect(live).toContainEqual({ type: "browser.action", kind: "type", text: typedPassword.text });
 			expect(recording.agent.actions).toContainEqual(expect.objectContaining({ id: "1.1", kind: "type", selector: "e1", value: canaries.email }));
 			const times = recording.agent.actions.map((action) => action.at!);
 			expect(times.every((at) => !Number.isNaN(Date.parse(at)))).toBe(true);

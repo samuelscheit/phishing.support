@@ -4,7 +4,8 @@ import { AnalysisRunsEntity, ArtifactsEntity, SubmissionsEntity } from "../db/en
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { reportConfirmedWebsiteAbuse } from "../abuse/submission_reports";
 import { getRetryableSubmission } from "./retry";
-import { createWebsiteSubmission, resumePendingWebsiteAnalyses, SubmissionRetryError, retryFailedWebsiteAnalysis, websiteSubmissionUrl } from "./website";
+import { retryInterruptedWebsiteAnalysis } from "../website_ai";
+import { createWebsiteSubmission, resumePendingWebsiteAnalyses, runDueWebsiteAutoRetries, SubmissionRetryError, retryFailedWebsiteAnalysis, websiteSubmissionUrl } from "./website";
 
 useTemporaryDatabase();
 
@@ -114,6 +115,35 @@ describe("retryFailedWebsiteAnalysis", () => {
 		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({
 			submission: { id, status: "failed" },
 		});
+
+		// A restart's cut-off visit is due for the automatic retry, which visits the site again.
+		await retryInterruptedWebsiteAnalysis(id);
+		const queued = await SubmissionsEntity.get(id);
+		expect(queued?.info).toStartWith("The server restarted during the visit. Retrying automatically at");
+		expect(queued?.data.kind === "website" && queued.data.website.autoRetry).toMatchObject({ attempts: 1, reason: "The server restarted during the visit." });
+		expect(await SubmissionsEntity.listDueWebsiteAutoRetries(new Date(Date.now() + 11 * 60_000))).toEqual([{ id }]);
+		const started: string[] = [];
+		await expect(runDueWebsiteAutoRetries({ now: new Date(Date.now() + 11 * 60_000), startAnalysis: async (options) => { started.push(options.url); } })).resolves.toBe(1);
+		expect(started).toEqual(["https://interrupted.example.test"]);
+	});
+
+	test("a restart's cut-off visit of a case that already reported is not visited again", async () => {
+		const id = await SubmissionsEntity.create({
+			id: 5n,
+			kind: "website",
+			data: { kind: "website", website: { url: "http://85.215.226.226/meta/help" } },
+			dedupeKey: "website-retry-interrupted-reported",
+			status: "failed",
+		});
+		await reportConfirmedWebsiteAbuse({ submissionId: id, urls: ["http://85.215.226.226/meta/help/"], analysisText: "Credential page.", reporter: {}, finding: { finding: "phishing", phishingBasis: "credential_theft" } });
+		await retryInterruptedWebsiteAnalysis(id);
+		const started: string[] = [];
+		await expect(runDueWebsiteAutoRetries({ now: new Date(Date.now() + 11 * 60_000), startAnalysis: async (options) => { started.push(options.url); } })).resolves.toBe(0);
+		expect(started).toEqual([]);
+		// The refused retry is cleared, so it takes no sweep slot again.
+		const left = await SubmissionsEntity.get(id);
+		expect(left?.status).toBe("failed");
+		expect(left?.data.kind === "website" && left.data.website.autoRetry).toBeFalsy();
 	});
 });
 

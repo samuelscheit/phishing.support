@@ -59,20 +59,6 @@ function carried(request: CapturedNetworkRequest, values: ExfiltrationCanaries):
 	return matchedCanaries(request, values).filter((field) => field !== "marker");
 }
 
-const SECRET_PLACEHOLDER = /^\{\{secret:(\w+)\}\}$/;
-
-/**
- * An action with the value it actually put into the page. The agent's log is
- * redacted and keeps a secret as its `{{secret:NAME}}` placeholder; the
- * browser typed the synthetic value of that name, which the record states
- * next to the placeholder it was typed as.
- */
-function entered(action: VisitAgentAction, values: ExfiltrationCanaries): VisitAgentAction & { typedAs?: string } {
-	const name = action.value?.match(SECRET_PLACEHOLDER)?.[1];
-	const value = name && name in values ? values[name as keyof ExfiltrationCanaries] : undefined;
-	return value ? { ...action, value, typedAs: action.value } : action;
-}
-
 function time(value: string | Date): string {
 	return (typeof value === "string" ? value : value.toISOString()).replace("T", " ").replace("Z", " UTC");
 }
@@ -82,7 +68,7 @@ function protocol(facts: VisitEvidenceFacts, recordSha256: string): string {
 	type Entry = { at: string; text: string };
 	const entries: Entry[] = [];
 	for (const page of facts.pages) entries.push({ at: page.shownFrom.toISOString(), text: `Page shown: ${page.url}` });
-	for (const action of facts.actions.map((action) => entered(action, facts.syntheticValues))) {
+	for (const action of facts.actions) {
 		if (!action.at) continue;
 		const value = action.value ? ` value ${JSON.stringify(action.value)}${action.typedAs ? ` (typed as ${action.typedAs})` : ""}` : "";
 		entries.push({ at: action.at, text: `Agent ${action.kind}: ${action.text}${value}${action.selector ? ` [element ${action.selector}]` : ""}` });
@@ -132,7 +118,7 @@ export async function buildVisitEvidence(facts: VisitEvidenceFacts, dependencies
 		endedAt: facts.endedAt.toISOString(),
 		environment: facts.environment,
 		syntheticValues: facts.syntheticValues,
-		actions: facts.actions.map((action) => entered(action, facts.syntheticValues)),
+		actions: facts.actions,
 		pages: facts.pages.map((page) => ({ url: page.url, shownFrom: page.shownFrom.toISOString(), ...(page.shownUntil ? { shownUntil: page.shownUntil.toISOString() } : {}) })),
 		requests: facts.requests.map((request) => ({ ...request, carries: carried(request, facts.syntheticValues) })),
 		backends: facts.backends,

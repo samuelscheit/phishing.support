@@ -779,6 +779,21 @@ async function failWebsiteAnalysis(submissionId: bigint, failure: {
 	});
 }
 
+/**
+ * A website visit the server's restart cut off: queued for the automatic
+ * retry like a browser-service failure. The retry boundary still refuses a
+ * case that reached reporting, so nothing is reported twice.
+ */
+export async function retryInterruptedWebsiteAnalysis(submissionId: bigint): Promise<void> {
+	const submission = await SubmissionsEntity.get(submissionId);
+	if (submission?.data.kind !== "website") return;
+	const reason = "The server restarted during the visit.";
+	await failWebsiteAnalysis(submissionId, {
+		info: reason,
+		retry: { attempts: submission.data.website.autoRetry?.attempts ?? 0, reason, exhausted: (visits) => `It was cut off ${visits} times; retry to visit the site again.` },
+	});
+}
+
 /** A failed run: retried automatically when the browser service (not the site) failed. */
 async function recordWebsiteAnalysisFailure(submissionId: bigint, error: unknown, attempts: number): Promise<void> {
 	const reason = errorText(error);

@@ -24,6 +24,8 @@ export type PublicCampaignSite = {
 	thumbnailUrl?: string;
 	screenshotUrl?: string;
 	asks: string[];
+	/** Every page the visit captured, in the order shown: the landing page, the forms, the pages after them. */
+	steps: Array<{ step: number; screenshotUrl: string; stampedUrl?: string }>;
 	/** Why the page was judged phishing: the page's own words and the fields it collects with. */
 	verdict?: { finding: string; basis?: string; quote?: string; impersonates?: string; fields: string[] };
 	/** Where the synthetic values our visit entered went. */
@@ -167,6 +169,13 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 		const facts = siteFacts.get(site.submissionId);
 		const evidence = latestEvidence(site);
 		const screenshot = evidence.find((file) => file.name === "website-stamped.png") ?? evidence.find((file) => file.name === "website.png");
+		const steps = evidence.flatMap((file) => {
+			const match = file.name.match(/^website(?:-step(\d+))?\.png$/);
+			if (!match) return [];
+			const step = match[1] ? Number(match[1]) : 1;
+			const stamped = evidence.find((other) => other.name === file.name.replace(/\.png$/, "-stamped.png"));
+			return [{ step, screenshotUrl: artifactUrl(file.artifactId), ...(stamped ? { stampedUrl: artifactUrl(stamped.artifactId) } : {}) }];
+		}).sort((a, b) => a.step - b.step);
 		const reports = site.reports.map((report) => ({
 			provider: report.provider,
 			channel: report.channel === "email" ? report.contact ?? "email" : report.channel === "form" ? "web form / API" : "none",
@@ -182,6 +191,7 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 			...(facts?.language ? { language: facts.language } : {}),
 			...(facts?.thumbnailArtifactId ? { thumbnailUrl: artifactUrl(facts.thumbnailArtifactId.toString()) } : {}),
 			...(screenshot ? { screenshotUrl: artifactUrl(screenshot.artifactId) } : {}),
+			steps,
 			asks: [...new Set(site.dataDestinations.flatMap((destination) => destination.fields))].map((field) => CANARY_FIELD_LABEL[field as CanaryField] ?? field),
 			...(site.verdict ? { verdict: {
 				finding: site.verdict.finding,

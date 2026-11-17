@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 
 import { getDb } from "../db";
-import { SubmissionsEntity } from "../db/entities";
+import { ArtifactsEntity, SubmissionsEntity } from "../db/entities";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "../abuse/contracts";
 import { sendAbuseEmailRoute } from "../abuse/mail";
@@ -182,7 +182,17 @@ describe("criminal referral of a campaign", () => {
 		await CampaignRepository.recordIndicators(15n, [telegram("7001"), iban, wallet]);
 		await CampaignRepository.recordIndicators(13n, [kit("a".repeat(64)), iban, wallet]);
 		await CampaignRepository.saveSiteFacts(11n, { language: "de", thumbnailArtifactId: 4242n });
+		// The visit's pages, saved out of order: the landing page, then the form after it, with its stamped copy.
+		const shot = async (name: string, kind: string) => (await ArtifactsEntity.saveBuffer({ submissionId: 11n, name, kind, mimeType: "image/png", buffer: Buffer.from(name) })).toString();
+		const form = await shot("website-step2.png", "website_png");
+		const formStamped = await shot("website-step2-stamped.png", "website_evidence");
+		const landing = await shot("website.png", "website_png");
 		const campaign = (await getPublicCampaign(campaignId))!;
+		expect(campaign.sites[0]!.steps).toEqual([
+			{ step: 1, screenshotUrl: `/api/artifacts/${landing}` },
+			{ step: 2, screenshotUrl: `/api/artifacts/${form}`, stampedUrl: `/api/artifacts/${formStamped}` },
+		]);
+		expect(campaign.sites[1]!.steps).toEqual([]);
 
 		// Without a written heading, the fixed wording describes the campaign.
 		expect(campaign.title).toBe("Phishing campaign impersonating www.dhl.de");

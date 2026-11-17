@@ -1,14 +1,30 @@
 import { agentGaveUp, browserTaskModel, runTask, type ChatModel, type StepLog } from "../browser_task/agent";
 import { redactedErrorText } from "../error_text";
+import type { ExfiltrationCanaries } from "../exfiltration/types";
 import type { SiteVisitTask } from "./task";
 
 /**
  * One thing the agent did or concluded, as the live log and the visit record
  * show it. `selector` is the agent's ref of the element it acted on, `value`
- * what it typed or chose (synthetic values only; secrets stay
- * `{{secret:NAME}}` placeholders), `at` when its step acted.
+ * what it typed or chose (synthetic values only), `typedAs` the
+ * `{{secret:NAME}}` placeholder it typed a secret as, `at` when its step acted.
  */
-export type VisitAgentAction = { id: string; kind: string; text: string; selector?: string; value?: string; at?: string };
+export type VisitAgentAction = { id: string; kind: string; text: string; selector?: string; value?: string; typedAs?: string; at?: string };
+
+const SECRET_PLACEHOLDER = /^\{\{secret:(\w+)\}\}$/;
+
+/**
+ * The action with the synthetic value it put into the page. The agent's log
+ * is redacted: a secret is its `{{secret:NAME}}` placeholder and the text says
+ * "(secret entered)". The browser typed this visit's synthetic value of that
+ * name, which belongs to no one, so the record and the live log state it.
+ */
+export function revealSyntheticSecret(action: VisitAgentAction, values: ExfiltrationCanaries): VisitAgentAction {
+	const name = action.value?.match(SECRET_PLACEHOLDER)?.[1];
+	const value = name && Object.hasOwn(values, name) ? values[name as keyof ExfiltrationCanaries] : undefined;
+	if (!value) return action;
+	return { ...action, text: action.text.replace("(secret entered)", JSON.stringify(value)), value, typedAs: action.value };
+}
 
 export type VisitAgentState =
 	| { state: "completed"; output: unknown }

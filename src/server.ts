@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 
 import { SubmissionsEntity } from "./lib/db/entities";
 import { resumePendingWebsiteAnalyses, startWebsiteAutoRetries } from "./lib/submissions/website";
+import { retryInterruptedWebsiteAnalysis } from "./lib/website_ai";
 import { startAbuseWorker, stopAbuseWorker } from "./lib/abuse/worker";
 import { startMailboxListener, stopMailboxListener } from "./lib/imap/listener";
 
@@ -23,11 +24,12 @@ const handler = app.getRequestHandler();
 await app.prepare();
 
 // If the process previously crashed/restarted, we may have submissions stuck in `running`.
-// Mark them as failed so they can be retried or inspected.
+// Mark them as failed; a website visit cut off this way is queued for the automatic retry.
 try {
 	const failed = await SubmissionsEntity.failAllRunning();
+	for (const { id } of failed) await retryInterruptedWebsiteAnalysis(id);
 	if (failed.length > 0) {
-		console.warn(`Marked ${failed.length} running submissions as failed on startup.`);
+		console.warn(`Marked ${failed.length} running submissions as failed on startup; website visits are retried automatically.`);
 	}
 } catch (err) {
 	console.error("Failed to mark running submissions as failed on startup:", err);

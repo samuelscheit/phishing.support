@@ -171,6 +171,22 @@ function SiteDetail({ campaign, index, onStep }: { campaign: PublicCampaign; ind
 						{site.screenshotUrl && <> <a href={site.screenshotUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">Full capture with address and time</a></>}
 					</p>
 				</div>
+				{site.steps.length > 1 && (
+					<div>
+						<h3 className="mb-1 text-sm font-semibold">The visit, page by page</h3>
+						<p className="mb-3 text-xs text-muted-foreground">Our browser walked the site as a victim would, with made-up data. Each page it reached, in order; open one for the capture with address and time.</p>
+						<ol className="flex snap-x gap-2 overflow-x-auto pb-2">
+							{site.steps.map((step) => (
+								<li key={step.step} className="w-32 shrink-0 snap-start">
+									<a href={step.stampedUrl ?? step.screenshotUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-md border hover:ring-2 hover:ring-primary/40">
+										<img src={step.screenshotUrl} alt={`Page ${step.step} of the visit to ${site.host}`} loading="lazy" className="h-24 w-full bg-muted object-cover object-top" />
+									</a>
+									<span className="mt-1 block text-xs text-muted-foreground">Page {step.step}</span>
+								</li>
+							))}
+						</ol>
+					</div>
+				)}
 				{site.verdict && (
 					<div className="space-y-2 rounded-lg border bg-muted/30 p-4 text-sm">
 						<h3 className="font-semibold">Why it is phishing</h3>

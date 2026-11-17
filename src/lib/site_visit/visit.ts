@@ -4,7 +4,7 @@ import { errorText } from "../error_text";
 import { ExfiltrationNetworkRecorder } from "../exfiltration/recorder";
 import type { CapturedNetworkRequest, ExfiltrationCanaries } from "../exfiltration/types";
 import { interceptDownloads, type DownloadedFile, type DownloadInterceptor, type FailedDownload } from "../website_download";
-import type { VisitAgent, VisitAgentAction, VisitAgentState } from "./agent";
+import { revealSyntheticSecret, type VisitAgent, type VisitAgentAction, type VisitAgentState } from "./agent";
 import { buildSiteVisitTask, visitAgentReport, VISIT_BUDGET_MS, type VisitAgentReport } from "./task";
 
 /**
@@ -159,7 +159,8 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 				cdpEndpoint: params.agentAddress,
 				targetId: targetInfo.targetId,
 				signal: stopped,
-				onAction: (action) => {
+				onAction: (logged) => {
+					const action = revealSyntheticSecret(logged, params.canaries);
 					actions.push(action);
 					live({ type: "browser.action", kind: action.kind, text: action.text });
 				},

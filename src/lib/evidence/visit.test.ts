@@ -15,8 +15,8 @@ const facts: VisitEvidenceFacts = {
 	syntheticValues: values,
 	actions: [
 		{ id: "2.1", kind: "type", text: `typed into e3 its value is now ${JSON.stringify(values.email)}`, selector: "e3", value: values.email, at: "2026-11-15T00:32:51.100Z" },
-		// The agent's log keeps a secret as its placeholder; the record states the value the browser typed for it.
-		{ id: "2.2", kind: "type", text: "typed into e4 its value is now (secret entered)", selector: "e4", value: "{{secret:password}}", at: "2026-11-15T00:32:53.400Z" },
+		// A secret as the visit keeps it: the value the browser typed, with the placeholder the agent typed it as.
+		{ id: "2.2", kind: "type", text: `typed into e4 its value is now ${JSON.stringify(values.password)}`, selector: "e4", value: values.password, typedAs: "{{secret:password}}", at: "2026-11-15T00:32:53.400Z" },
 		{ id: "3.1", kind: "click", text: 'clicked e5 "Weitermachen"', selector: "e5", at: "2026-11-15T00:32:54.000Z" },
 	],
 	pages: [{ url: "https://policy-trust-assurance.onrender.com/help", shownFrom: new Date("2026-11-15T00:32:40.000Z") }],
@@ -70,7 +70,7 @@ describe("the visit as evidence", () => {
 		// The chronology reads in time order: typing, clicking, then the request that carried both values.
 		expect(text).toContain("Visiting agent: Browser Fabric task agent, outcome completed");
 		const typedEmail = text.indexOf(`value ${JSON.stringify(values.email)} [element e3]`);
-		expect(text).toContain(`Agent type: typed into e4 its value is now (secret entered) value ${JSON.stringify(values.password)} (typed as {{secret:password}}) [element e4]`);
+		expect(text).toContain(`Agent type: typed into e4 its value is now ${JSON.stringify(values.password)} value ${JSON.stringify(values.password)} (typed as {{secret:password}}) [element e4]`);
 		const clicked = text.indexOf('Agent click: clicked e5 "Weitermachen"');
 		const sent = text.indexOf("Request POST https://policy-trust-assurance.onrender.com/api/send carried the synthetic email address, password, sent from https://policy-trust-assurance.onrender.com/help. Answer: HTTP 200 at 2026-11-15 00:32:54.480 UTC.");
 		expect(typedEmail).toBeGreaterThan(0);
