@@ -18,7 +18,7 @@ const dossier: Dossier = {
 	impersonates: ["www.dhl.de"],
 	dataRequested: ["Passwort"],
 	requestedFields: ["password"],
-	providers: [{ name: "Hostinger International Ltd.", siteCount: 1, contacts: ["abuse@hostinger.com"] }],
+	infrastructure: [{ role: "hosting", name: "Hostinger International Ltd.", country: "CY", resources: [], contacts: ["abuse@hostinger.com"], sites: ["https://dhl-a.com/"] }],
 	indicators: [{ kind: "exfiltration_backend", value: "telegram-bot:7001", links: true, evidence: { backendKind: "telegram_bot", telegram: { token: "7001:AAE", chatId: "-1" } }, sites: ["https://dhl-a.com/"] }],
 	sites: [{
 		submissionId: "11",

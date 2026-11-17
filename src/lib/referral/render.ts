@@ -1,6 +1,6 @@
 /** The German wording of the complaint mails to German authorities; the evidence archive has its own English texts (archive_text.ts). */
-import type { DossierIndicator, DossierProvider, DossierSite } from "./dossier";
-import { GENERIC_LEAD } from "./provider_leads";
+import type { DossierIndicator, DossierSite } from "./dossier";
+import { plural, record, text } from "./format";
 
 const BERLIN = new Intl.DateTimeFormat("de-DE", {
 	timeZone: "Europe/Berlin",
@@ -21,18 +21,6 @@ export function germanDateTime(iso: string): string {
 export function germanDate(iso: string): string {
 	const date = new Date(iso);
 	return Number.isNaN(date.getTime()) ? iso : BERLIN_DAY.format(date);
-}
-
-function plural(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
-}
-
-function text(value: unknown): string | undefined {
-	return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function record(value: unknown): Record<string, unknown> {
-	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 const RECEIVER_LABEL: Readonly<Record<string, string>> = { iban: "IBAN", bitcoin: "Bitcoin-Adresse", tron: "TRON-Adresse", ethereum: "Ethereum-Adresse" };
@@ -102,12 +90,4 @@ export function siteLine(site: DossierSite, index: number): string {
 	const registrar = site.registrar ? `, Registrar ${site.registrar}` : "";
 	const reports = site.reports.length ? site.reports.map(reportLine).join("; ") : "noch keine Meldung";
 	return `${index + 1}. ${site.url}\n   erfasst ${germanDateTime(site.firstSeenAt)}${registered}${registrar}\n   Sperrmeldungen: ${reports}`;
-}
-
-export function providerLines(providers: readonly DossierProvider[]): string[] {
-	const lines = providers.map((provider) => {
-		const lead = provider.lead ? `${provider.lead.provider}: ${provider.lead.lead}` : `${provider.name}: ${GENERIC_LEAD}`;
-		return `- ${lead} (${plural(provider.siteCount, "Seite", "Seiten")}${provider.contacts.length ? `; Abuse-Kontakt ${provider.contacts.join(", ")}` : ""})`;
-	});
-	return [...new Set(lines)];
 }

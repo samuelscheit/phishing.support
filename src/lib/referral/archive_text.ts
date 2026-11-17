@@ -1,7 +1,8 @@
 import { publicCampaignUrl } from "../campaign/urls";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
 import type { Dossier, DossierIndicator, DossierSite } from "./dossier";
-import { GENERIC_LEAD_EN } from "./provider_leads";
+import { plural, record, text } from "./format";
+import { infrastructureLines } from "./infrastructure";
 
 /**
  * The evidence archive's own texts, in English for every reader: the
@@ -13,18 +14,6 @@ import { GENERIC_LEAD_EN } from "./provider_leads";
 function utc(iso: string): string {
 	const date = new Date(iso);
 	return Number.isNaN(date.getTime()) ? iso : `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
-
-function plural(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
-}
-
-function record(value: unknown): Record<string, unknown> {
-	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function text(value: unknown): string | undefined {
-	return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 const fieldLabel = (field: string) => CANARY_FIELD_LABEL[field as CanaryField] ?? field;
@@ -174,8 +163,8 @@ export function dossierText(dossier: Dossier): string {
 		"Sites (each folder under evidence/ holds the site's analysis.txt and its evidence files)",
 		...dossier.sites.map((site, index) => `  ${index + 1}. ${site.url}, first seen ${utc(site.firstSeenAt)}${site.verdict?.quote ? `: "${site.verdict.quote}"` : ""}`),
 		"",
-		"Where investigators find the providers' records",
-		...[...new Set(dossier.providers.map((provider) => `  - ${provider.lead?.providerEn ?? provider.name}: ${provider.lead?.leadEn ?? GENERIC_LEAD_EN}${provider.contacts.length ? ` (abuse contact ${provider.contacts.join(", ")})` : ""}`))],
+		"Where investigators find the providers' records, by state",
+		...infrastructureLines(dossier.infrastructure, "en").map((line) => `  ${line}`),
 		"",
 		"Evidence per capture: the MHTML archive, the screenshot, the screenshot with address and time stamped in, a manifest naming every file by SHA-256, and an RFC 3161 timestamp token over the manifest from an independent authority (verify with: openssl ts -verify -data <manifest> -in <token> -CAfile <authority chain>). Hashes are also in sites.csv.",
 	];

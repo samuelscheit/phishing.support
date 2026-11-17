@@ -5,7 +5,7 @@ import { ArtifactsEntity, SubmissionsEntity } from "../db/entities";
 import type { Submission } from "../db/schema";
 import { describeDataEntryField } from "../website_types";
 import { isAuthorityRoute, isPreservationRoute } from "./routes";
-import { GENERIC_LEAD, providerLead, type ProviderLead } from "./provider_leads";
+import { indicatorInfrastructure, locateInfrastructure, mergeInfrastructure, routeInfrastructure, type CountryLookup, type InfrastructureClaim, type InfrastructureNode } from "./infrastructure";
 
 /** One provider a site was reported to, and what became of the report. */
 export type DossierProviderReport = {
@@ -67,13 +67,6 @@ export type DossierIndicator = {
 	sites: string[];
 };
 
-export type DossierProvider = {
-	name: string;
-	siteCount: number;
-	contacts: string[];
-	lead?: ProviderLead;
-};
-
 export type Dossier = {
 	campaignId: string;
 	generatedAt: string;
@@ -81,7 +74,8 @@ export type Dossier = {
 	lastSeenAt: string;
 	sites: DossierSite[];
 	indicators: DossierIndicator[];
-	providers: DossierProvider[];
+	/** Every provider holding records about the operator, with its role and states. */
+	infrastructure: InfrastructureNode[];
 	impersonates: string[];
 	/** What the sites asked visitors to enter, as the visits' synthetic values showed, in German. */
 	dataRequested: string[];
@@ -97,6 +91,8 @@ export type DossierDependencies = {
 	listTargets?: typeof AbuseRepository.listTargets;
 	listRuns?: typeof AbuseRepository.listProviderRunsForReport;
 	listArtifacts?: typeof ArtifactsEntity.listForSubmission;
+	/** Country lookups for buildReferralDossier; RIPEstat by default. */
+	lookupCountry?: CountryLookup;
 	now?: () => Date;
 };
 
@@ -188,6 +184,7 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 	const members = await listMembers(campaignId);
 
 	const sites: DossierSite[] = [];
+	const claims: Array<{ site: string; claim: InfrastructureClaim }> = [];
 	for (const member of members) {
 		const submission = await loadSubmission(member.submissionId);
 		const reports: DossierProviderReport[] = [];
@@ -199,6 +196,8 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 			const [routes, targets, runs] = await Promise.all([listRoutes(report.id), listTargets(report.id), listRuns(report.id)]);
 			for (const route of routes) {
 				if (isAuthorityRoute(route) || isPreservationRoute(route)) continue;
+				const claim = routeInfrastructure(route);
+				if (claim) claims.push({ site: member.url, claim });
 				const run = runs.filter((candidate) => candidate.routeId === route.id).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
 				reports.push({
 					provider: route.providerDisplayName,
@@ -258,24 +257,11 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 	const indicators = [...indicatorMap.values()].sort((a, b) =>
 		kindOrder.indexOf(a.kind) - kindOrder.indexOf(b.kind) || b.sites.length - a.sites.length || a.value.localeCompare(b.value));
 
-	const providerMap = new Map<string, { sites: Set<string>; contacts: Set<string> }>();
-	const addProvider = (name: string, site: string, contact?: string) => {
-		const entry = providerMap.get(name) ?? { sites: new Set<string>(), contacts: new Set<string>() };
-		entry.sites.add(site);
-		if (contact) entry.contacts.add(contact);
-		providerMap.set(name, entry);
-	};
-	for (const site of sites) for (const report of site.reports) addProvider(report.provider, site.url, report.contact);
 	for (const indicator of indicators) {
-		if (indicator.kind !== "exfiltration_backend") continue;
-		const backendKind = indicator.evidence.backendKind;
-		if (backendKind === "telegram_bot") for (const site of indicator.sites) addProvider("Telegram", site);
-		if (backendKind === "discord_webhook") for (const site of indicator.sites) addProvider("Discord", site);
+		const claim = indicatorInfrastructure(indicator);
+		if (claim) for (const site of indicator.sites) claims.push({ site, claim });
 	}
-	const providers = [...providerMap].map(([name, entry]) => {
-		const lead = providerLead(name);
-		return { name, siteCount: entry.sites.size, contacts: [...entry.contacts].sort(), ...(lead ? { lead } : {}) };
-	}).sort((a, b) => b.siteCount - a.siteCount || a.name.localeCompare(b.name));
+	const infrastructure = mergeInfrastructure(claims);
 
 	const dataRequested = new Set<string>();
 	const requestedFields = [
@@ -293,11 +279,18 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 		lastSeenAt: seen.at(-1) ?? now.toISOString(),
 		sites,
 		indicators,
-		providers,
+		infrastructure,
 		impersonates: [...new Set(sites.flatMap((site) => site.impersonates))].sort(),
 		dataRequested: [...dataRequested],
 		requestedFields: fieldNames,
 	};
 }
 
-export { GENERIC_LEAD };
+/**
+ * The dossier an authority receives: as buildDossier, with every state of the
+ * infrastructure looked up. Views that show no infrastructure use buildDossier.
+ */
+export async function buildReferralDossier(campaignId: bigint, dependencies: DossierDependencies = {}): Promise<Dossier> {
+	const dossier = await buildDossier(campaignId, dependencies);
+	return { ...dossier, infrastructure: await locateInfrastructure(dossier.infrastructure, dependencies.lookupCountry) };
+}

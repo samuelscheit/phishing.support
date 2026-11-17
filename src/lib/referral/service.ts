@@ -10,7 +10,7 @@ import { authorityById, type Authority } from "./authorities";
 import { dossierAttachments } from "./archive";
 import { configuredComplainant, type Complainant } from "./complainant";
 import { dossierDownloadUrl } from "./download_link";
-import { buildDossier, type Dossier, type DossierDependencies } from "./dossier";
+import { buildReferralDossier, type Dossier, type DossierDependencies } from "./dossier";
 import { complaintDraft, preservationNoticeDraft, supplementDraft, type ReferralDraft } from "./drafts";
 import {
 	authorityIdOf,
@@ -155,7 +155,7 @@ export async function prepareComplaint(campaignId: bigint, authorityId: string, 
 	const authority = requireAuthority(authorityId);
 	const complainant = (dependencies.complainant ?? configuredComplainant)();
 	const current = await currentCampaign(campaignId);
-	const dossier = await buildDossier(current, dependencies.dossier);
+	const dossier = await buildReferralDossier(current, dependencies.dossier);
 	if (!dossier.sites.length) throw new ReferralError("The campaign has no sites.");
 	const { reportId, targetId } = await ensureReferralReport(current);
 	const routes = await referralRoutes(reportId);
@@ -206,7 +206,7 @@ export async function prepareSupplement(campaignId: bigint, authorityId: string,
 	if (routes.some((route) => authorityIdOf(route) === authority.id && route.status === "awaiting_approval")) {
 		throw new ReferralError(`A mail to ${authority.name} still waits for approval; approve or discard it first.`);
 	}
-	const dossier = await buildDossier(current, dependencies.dossier);
+	const dossier = await buildReferralDossier(current, dependencies.dossier);
 	const newSites = unreportedSites(dossier, routes, authority.id);
 	if (!newSites.length) throw new ReferralError(`${authority.name} has received every site of this campaign.`);
 	const download = dossierDownloadUrl(current, (dependencies.now ?? (() => new Date()))(), dependencies.env);
@@ -252,7 +252,7 @@ export async function preparePreservationNotices(campaignId: bigint, dependencie
 		.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
 	if (!withReference?.caseReference) throw new ReferralError("No authority has given this campaign a file number yet.");
 	const authority = requireAuthority(authorityIdOf(withReference)!);
-	const dossier = await buildDossier(current, dependencies.dossier);
+	const dossier = await buildReferralDossier(current, dependencies.dossier);
 	const byRecipient = new Map<string, { label: string; sites: typeof dossier.sites }>();
 	for (const site of dossier.sites) {
 		for (const report of site.reports) {

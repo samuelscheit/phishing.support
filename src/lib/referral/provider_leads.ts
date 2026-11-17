@@ -1,115 +1,196 @@
+import type { Bilingual } from "./countries";
+
 /**
- * How an investigator reaches the records a provider keeps about a phishing
- * customer, from each provider's own law-enforcement guidance (sources in
- * docs/research/criminal-referral-routes.md). Shown in the dossier so the
- * authority can secure the data before the provider deletes it: in German
- * for the complaint mails, in English for the evidence archive.
+ * What an investigator needs to know about one provider's records: which
+ * company holds them (often not the one in the server's country), where it
+ * sits, and what the provider itself publishes about access and deletion.
+ * The legal instruments follow from the holder's country (countries.ts).
+ * Sources: each provider's own page, collected in docs/research/.
  */
 export type ProviderLead = {
-	provider: string;
-	/** What data exists and which instrument reaches it, in German. */
-	lead: string;
-	providerEn: string;
-	leadEn: string;
+	/** The company that holds the customer records, as investigators address it. */
+	holder: Bilingual;
+	/** ISO country of that company. */
+	country: string;
+	/** Provider-specific facts: what data exists, its contact for authorities, how long it keeps it. */
+	facts: Bilingual;
 	source?: string;
 };
 
 const LEADS: ReadonlyArray<{ pattern: RegExp } & ProviderLead> = [
 	{
 		pattern: /cloudflare/i,
-		provider: "Cloudflare, Inc. (USA)",
-		lead: "CDN/Proxy, kein Hoster der Inhalte. Kundenkonto, Zahlungsdaten und Ursprungsserver (Origin-IP) des Kontos über Ersuchen an lawenforcement@cloudflare.com; Bestandsdaten nach US-Recht per Subpoena, Sicherung über das 24/7-Netz bzw. 18 U.S.C. § 2703(f).",
-		providerEn: "Cloudflare, Inc. (USA)",
-		leadEn: "CDN/proxy, not the host of the content. The account, its payment data and its origin server through a request to lawenforcement@cloudflare.com; subscriber data by US subpoena, preservation through the 24/7 network or 18 U.S.C. § 2703(f).",
+		holder: { de: "Cloudflare, Inc.", en: "Cloudflare, Inc." },
+		country: "US",
+		facts: {
+			de: "CDN/Proxy, kein Hoster der Inhalte. Hält Kundenkonto, Zahlungsdaten und den Ursprungsserver (Origin) des Kontos; Behördenkontakt lawenforcement@cloudflare.com. Ob Cloudflare einen EU-Adressaten nach der E-Evidence-Verordnung benannt hat, ist nicht geprüft.",
+			en: "CDN/proxy, not the host of the content. Holds the account, its payment data and the account's origin server; law-enforcement contact lawenforcement@cloudflare.com. Whether Cloudflare designated an EU addressee under the e-Evidence Regulation is unverified.",
+		},
 		source: "https://www.cloudflare.com/trust-hub/law-enforcement/",
 	},
 	{
-		pattern: /hostinger/i,
-		provider: "Hostinger (Litauen/EU)",
-		lead: "Eigenes Sicherungsverfahren für Ermittlungsbehörden (Ersuchen auf Behördenbriefkopf). Kundendaten werden 30 Tage nach Vertragsende gelöscht; Kontodaten nach einer Sperrung wegen Missbrauchs bis zu 1 Jahr. EU-Anbieter: Europäische Sicherungsanordnung nach VO (EU) 2023/1543 möglich.",
-		providerEn: "Hostinger (Lithuania, EU)",
-		leadEn: "Has its own preservation process for law enforcement (request on agency letterhead). Customer data is deleted 30 days after the contract ends; account data after an abuse suspension is kept up to a year. EU provider: a European Preservation Order under Regulation (EU) 2023/1543 applies.",
+		// The registrar entity, before the hosting brand below.
+		pattern: /hostinger operations/i,
+		holder: { de: "HOSTINGER operations, UAB (Registrar)", en: "HOSTINGER operations, UAB (registrar)" },
+		country: "LT",
+		facts: {
+			de: "Registrar; Registrierungsdaten nach ICANN-Vertrag bis 2 Jahre nach Ende der Registrierung.",
+			en: "Registrar; under its ICANN contract it keeps registration data up to 2 years after a registration ends.",
+		},
 		source: "https://www.hostinger.com/legal/abuse-policy",
 	},
 	{
+		pattern: /hostinger/i,
+		holder: { de: "Hostinger International Ltd, Larnaka (Vertragspartner für Kunden in der EU)", en: "Hostinger International Ltd, Larnaca (contracting party for customers in the EU)" },
+		country: "CY",
+		facts: {
+			de: "Infrastruktur und Betrieb in Litauen, Vertragspartner je nach Kundenland: Zypern (EU), Hostinger UK Ltd (Großbritannien), HOSTINGER PTE LTD (Singapur). Nimmt Herausgabe- und Sicherungsanordnungen an; löscht Kundendaten 30 Tage nach Vertragsende, Kontodaten nach einer Sperrung wegen Missbrauchs nach bis zu 1 Jahr.",
+			en: "Infrastructure and operations in Lithuania; the contracting party depends on the customer's country: Cyprus (EU), Hostinger UK Ltd (UK), HOSTINGER PTE LTD (Singapore). Accepts production and preservation orders; deletes customer data 30 days after the contract ends, account data after an abuse suspension after up to a year.",
+		},
+		source: "https://www.hostinger.com/legal/universal-terms-of-service-agreement",
+	},
+	{
 		pattern: /digitalocean/i,
-		provider: "DigitalOcean, LLC (USA)",
-		lead: "Sichert Kontodaten auf Ersuchen nach 18 U.S.C. § 2703(f) für 90 Tage (einmal verlängerbar). Serverinhalte (Droplets) werden beim Löschen sofort vernichtet.",
-		providerEn: "DigitalOcean, LLC (USA)",
-		leadEn: "Preserves account data for 90 days (renewable once) on an 18 U.S.C. § 2703(f) request. Server content (droplets) is destroyed immediately on deletion.",
+		holder: { de: "DigitalOcean, LLC", en: "DigitalOcean, LLC" },
+		country: "US",
+		facts: {
+			de: "Sichert Kontodaten auf Ersuchen 90 Tage (einmal verlängerbar); Serverinhalte (Droplets) werden beim Löschen sofort vernichtet.",
+			en: "Preserves account data for 90 days on request (renewable once); server content (droplets) is destroyed immediately on deletion.",
+		},
 		source: "https://www.digitalocean.com/legal/law-enforcement-guidelines",
 	},
 	{
 		pattern: /github/i,
-		provider: "GitHub, Inc. (USA)",
-		lead: "Sichert Daten auf förmliches Ersuchen einer Strafverfolgungsbehörde für 90 Tage.",
-		providerEn: "GitHub, Inc. (USA)",
-		leadEn: "Preserves data for 90 days on a formal law-enforcement request.",
+		holder: { de: "GitHub, Inc.", en: "GitHub, Inc." },
+		country: "US",
+		facts: { de: "Sichert Daten auf förmliches Ersuchen einer Strafverfolgungsbehörde 90 Tage.", en: "Preserves data for 90 days on a formal law-enforcement request." },
 		source: "https://docs.github.com/en/site-policy/other-site-policies/guidelines-for-legal-requests-of-user-data",
 	},
 	{
 		pattern: /google|firebase|blogspot/i,
-		provider: "Google LLC (USA)",
-		lead: "Sicherungs- und Herausgabeersuchen über das Law Enforcement Request System (LERS) von Google.",
-		providerEn: "Google LLC (USA)",
-		leadEn: "Preservation and disclosure requests through Google's Law Enforcement Request System (LERS).",
+		holder: { de: "Google LLC", en: "Google LLC" },
+		country: "US",
+		facts: { de: "Sicherungs- und Herausgabeersuchen über das Law Enforcement Request System (LERS).", en: "Preservation and disclosure requests through the Law Enforcement Request System (LERS)." },
 		source: "https://lers.google.com/",
 	},
 	{
 		pattern: /namecheap/i,
-		provider: "Namecheap, Inc. (USA)",
-		lead: "Registrar. Registrierungs- und Zahlungsdaten über legal@namecheap.com; ausländische Behörden nach eigener Angabe über Rechtshilfe. Nach ICANN-Vertrag bewahrt der Registrar Registrierungsdaten bis 2 Jahre nach Ende der Registrierung auf.",
-		providerEn: "Namecheap, Inc. (USA)",
-		leadEn: "Registrar. Registration and payment data through legal@namecheap.com; foreign agencies through mutual legal assistance, as it states. Under its ICANN contract it keeps registration data up to 2 years after a registration ends.",
+		holder: { de: "Namecheap, Inc.", en: "Namecheap, Inc." },
+		country: "US",
+		facts: {
+			de: "Registrar. Registrierungs- und Zahlungsdaten über legal@namecheap.com; ausländische Behörden nach eigener Angabe über Rechtshilfe. Registrierungsdaten bis 2 Jahre nach Ende der Registrierung (ICANN-Vertrag).",
+			en: "Registrar. Registration and payment data through legal@namecheap.com; foreign agencies through mutual legal assistance, as it states. Registration data up to 2 years after a registration ends (ICANN contract).",
+		},
 		source: "https://www.namecheap.com/legal/general/domain-registration-data-disclosure-policy-guide/",
 	},
 	{
 		pattern: /hetzner/i,
-		provider: "Hetzner Online GmbH (Deutschland)",
-		lead: "Beantwortet nur Ersuchen deutscher (bzw. für Helsinki finnischer) Behörden: Herausgabeverlangen nach § 95 StPO, Bestandsdaten nach § 100j StPO / TDDDG.",
-		providerEn: "Hetzner Online GmbH (Germany)",
-		leadEn: "Answers only German authorities (Finnish ones for Helsinki): production orders under § 95 StPO, subscriber data under § 100j StPO / TDDDG.",
+		holder: { de: "Hetzner Online GmbH", en: "Hetzner Online GmbH" },
+		country: "DE",
+		facts: { de: "Beantwortet nur Ersuchen deutscher (für Helsinki finnischer) Behörden.", en: "Answers only German authorities (Finnish ones for Helsinki)." },
 		source: "https://docs.hetzner.com/general/company-and-policy/data-protection-at-hetzner/",
 	},
 	{
 		pattern: /ovh/i,
-		provider: "OVH SAS (Frankreich/EU)",
-		lead: "Ersuchen über die Rechtsabteilung in Roubaix; als EU-Anbieter Europäische Sicherungs- und Herausgabeanordnung nach VO (EU) 2023/1543.",
-		providerEn: "OVH SAS (France, EU)",
-		leadEn: "Requests through its legal department in Roubaix; as an EU provider, European Preservation and Production Orders under Regulation (EU) 2023/1543.",
+		holder: { de: "OVH SAS, Roubaix", en: "OVH SAS, Roubaix" },
+		country: "FR",
+		facts: { de: "Ersuchen über die Rechtsabteilung in Roubaix.", en: "Requests through its legal department in Roubaix." },
 		source: "https://us.ovhcloud.com/legal/faqs/legal-law-enforcement/",
 	},
 	{
 		pattern: /render/i,
-		provider: "Render Services, Inc. (USA)",
-		lead: "Hoster der Seiten (onrender.com). Kontodaten, Zahlungsdaten und Zugriffsprotokolle über ein Ersuchen nach US-Recht; Sicherung über das 24/7-Netz bzw. 18 U.S.C. § 2703(f).",
-		providerEn: "Render Services, Inc. (USA)",
-		leadEn: "Hosts the pages (onrender.com). Account, payment and access-log data through a US legal request; preservation through the 24/7 network or 18 U.S.C. § 2703(f).",
+		holder: { de: "Render Services, Inc.", en: "Render Services, Inc." },
+		country: "US",
+		facts: { de: "Hoster der Seiten (onrender.com); hält Konto-, Zahlungs- und Zugriffsdaten. Die Subdomain unter onrender.com identifiziert das Kundenkonto.", en: "Hosts the pages (onrender.com); holds account, payment and access-log data. The onrender.com subdomain identifies the customer account." },
+	},
+	{
+		pattern: /\b20i\b/i,
+		holder: { de: "20i Ltd", en: "20i Ltd" },
+		country: "GB",
+		facts: { de: "Bewahrt Hosting-Daten nur 30 Tage, Sicherungskopien 12 Monate auf.", en: "Keeps web-hosting data for only 30 days, backups for 12 months." },
+		source: "https://www.20i.com/legal/20i-ltd-privacy-policy",
+	},
+	{
+		pattern: /alibaba|aliyun/i,
+		holder: { de: "Alibaba Cloud (Singapore) Private Limited bzw. die EU-Gesellschaft für Kunden in der EU", en: "Alibaba Cloud (Singapore) Private Limited, or the EU entity for customers in the EU" },
+		country: "SG",
+		facts: { de: "Die internationale Alibaba Cloud ist meist keine chinesische Infrastruktur im Rechtssinn; Vertragspartner zuerst prüfen. Ist es eine EU-Gesellschaft, greift die Europäische Herausgabeanordnung.", en: "Alibaba Cloud International is usually not Chinese infrastructure in law; check the contracting entity first. If it is an EU entity, a European Production Order applies." },
+		source: "https://www.alibabacloud.com/help/faq-detail/42427.htm",
+	},
+	{
+		pattern: /eranet/i,
+		holder: { de: "Eranet International Limited (Registrar)", en: "Eranet International Limited (registrar)" },
+		country: "HK",
+		facts: { de: "Registrar mit Sitz in Hongkong; es gilt Hongkonger, nicht chinesisches Recht.", en: "Registrar based in Hong Kong; Hong Kong law applies, not PRC law." },
+		source: "https://www.iana.org/assignments/registrar-ids/registrar-ids.xhtml",
+	},
+	{
+		pattern: /tucows/i,
+		holder: { de: "Tucows Domains Inc. (Registrar)", en: "Tucows Domains Inc. (registrar)" },
+		country: "CA",
+		facts: { de: "Registrar mit Sitz in Kanada.", en: "Registrar based in Canada." },
+	},
+	{
+		pattern: /godaddy/i,
+		holder: { de: "GoDaddy.com, LLC", en: "GoDaddy.com, LLC" },
+		country: "US",
+		facts: { de: "Registrar und Hoster mit Sitz in den USA.", en: "Registrar and host based in the USA." },
+	},
+	{
+		pattern: /namesilo/i,
+		holder: { de: "NameSilo, LLC (Registrar)", en: "NameSilo, LLC (registrar)" },
+		country: "US",
+		facts: { de: "Registrar mit Sitz in den USA.", en: "Registrar based in the USA." },
+	},
+	{
+		pattern: /dynadot/i,
+		holder: { de: "Dynadot Inc (Registrar)", en: "Dynadot Inc (registrar)" },
+		country: "US",
+		facts: { de: "Registrar mit Sitz in den USA.", en: "Registrar based in the USA." },
+	},
+	{
+		pattern: /gname/i,
+		holder: { de: "Gname.com Pte. Ltd. (Registrar)", en: "Gname.com Pte. Ltd. (registrar)" },
+		country: "SG",
+		facts: { de: "Registrar mit Sitz in Singapur.", en: "Registrar based in Singapore." },
+	},
+	{
+		pattern: /publicdomainregistry|\bPDR Ltd/i,
+		holder: { de: "PDR Ltd. d/b/a PublicDomainRegistry.com (Registrar)", en: "PDR Ltd. d/b/a PublicDomainRegistry.com (registrar)" },
+		country: "IN",
+		facts: { de: "Registrar mit Sitz in Indien.", en: "Registrar based in India." },
+	},
+	{
+		pattern: /registrar\.eu|hosting concepts|realtime register/i,
+		holder: { de: "Hosting Concepts B.V. d/b/a Registrar.eu (Registrar)", en: "Hosting Concepts B.V. d/b/a Registrar.eu (registrar)" },
+		country: "NL",
+		facts: { de: "Registrar mit Sitz in den Niederlanden (Realtime-Register-Gruppe).", en: "Registrar based in the Netherlands (Realtime Register group)." },
 	},
 	{
 		pattern: /telegram/i,
-		provider: "Telegram (Telegram FZ-LLC, VAE)",
-		lead: "Gibt seit 09/2024 IP-Adresse und Telefonnummer eines Kontos auf gerichtliche Anordnung heraus, die einen Tatverdächtigen benennt. Bot-ID, Bot-Name und Chat-ID unter den verbindenden Merkmalen identifizieren das empfangende Konto.",
-		providerEn: "Telegram (Telegram FZ-LLC, UAE)",
-		leadEn: "Since 09/2024 discloses an account's IP address and phone number on a court order that names a suspect. The bot ID, bot name and chat ID under the linking indicators identify the receiving account.",
+		holder: { de: "Telegram FZ-LLC", en: "Telegram FZ-LLC" },
+		country: "AE",
+		facts: {
+			de: "Gibt seit 09/2024 IP-Adresse und Telefonnummer eines Kontos auf gerichtliche Anordnung heraus, die einen Tatverdächtigen benennt. Bot-ID, Bot-Name und Chat-ID unter den verbindenden Merkmalen identifizieren das empfangende Konto.",
+			en: "Since 09/2024 discloses an account's IP address and phone number on a court order that names a suspect. The bot ID, bot name and chat ID under the linking indicators identify the receiving account.",
+		},
 	},
 	{
 		pattern: /discord/i,
-		provider: "Discord Inc. (USA)",
-		lead: "Sicherungs- und Herausgabeersuchen von Strafverfolgungsbehörden über das Behördenverfahren von Discord; Webhook-ID und Kanal-ID unter den verbindenden Merkmalen identifizieren den empfangenden Server.",
-		providerEn: "Discord Inc. (USA)",
-		leadEn: "Preservation and disclosure requests through Discord's law-enforcement process; the webhook ID and channel ID under the linking indicators identify the receiving server.",
+		holder: { de: "Discord Inc.", en: "Discord Inc." },
+		country: "US",
+		facts: {
+			de: "Sicherungs- und Herausgabeersuchen über das Behördenverfahren von Discord; Webhook-ID und Kanal-ID unter den verbindenden Merkmalen identifizieren den empfangenden Server.",
+			en: "Preservation and disclosure requests through Discord's law-enforcement process; the webhook ID and channel ID under the linking indicators identify the receiving server.",
+		},
 	},
 ];
 
-/** The lead for a provider name as the resolver recorded it, if one is known. */
-export function providerLead(providerName: string): ProviderLead | undefined {
-	const found = LEADS.find((lead) => lead.pattern.test(providerName));
+/** The lead for any name the case recorded for a provider (display name, mailbox, network name), if one is known. */
+export function providerLead(...names: Array<string | undefined>): ProviderLead | undefined {
+	const haystack = names.filter(Boolean).join(" ");
+	const found = LEADS.find((lead) => lead.pattern.test(haystack));
 	if (!found) return undefined;
 	const { pattern: _pattern, ...lead } = found;
 	return lead;
 }
-
-/** The instruments that reach a provider without a specific lead. */
-export const GENERIC_LEAD = "Anbieter mit Sitz in der EU: Europäische Sicherungs- und Herausgabeanordnung (VO (EU) 2023/1543, seit 18.08.2026). Anbieter in den USA: Sicherungsersuchen nach 18 U.S.C. § 2703(f) über das 24/7-Netz der Budapest-Konvention. Anbieter in Deutschland: Herausgabeverlangen nach § 95 StPO, Bestandsdaten nach § 100j StPO.";
-export const GENERIC_LEAD_EN = "Providers in the EU: European Preservation and Production Orders (Regulation (EU) 2023/1543, applicable since 18 Aug 2026). Providers in the USA: preservation requests under 18 U.S.C. § 2703(f) through the Budapest Convention's 24/7 network. Providers in Germany: production orders under § 95 StPO, subscriber data under § 100j StPO.";

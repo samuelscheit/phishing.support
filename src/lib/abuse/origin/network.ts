@@ -2,19 +2,17 @@ import dns from "node:dns/promises";
 
 import { z } from "zod";
 
-import { fetchJson, retryWithTimeout, type FetchImplementation } from "../../network/bounded_fetch";
+import { retryWithTimeout, type FetchImplementation } from "../../network/bounded_fetch";
+import { ripeStatData } from "../../network/ripestat";
 import { isPublicIp, normalizeDomain, registrableDomain } from "../security";
 import { normalizeMailbox } from "../mail/shared";
 import { throwIfAborted } from "../worker/shared";
 import { mapConcurrent } from "./concurrency";
 import { errorSummary } from "../../error_text";
 
-const RIPESTAT = "https://stat.ripe.net/data";
-const SOURCE_APP = "phishing-support";
 const MAX_CANDIDATE_ASNS = 24;
 const MAX_DNS_ADDRESSES = 24;
 
-const responseSchema = z.object({ status: z.string(), data: z.unknown() }).passthrough();
 const searchSchema = z.object({
 	categories: z.array(z.object({
 		category: z.string(),
@@ -54,22 +52,6 @@ function asnNumber(value: unknown): number | undefined {
 	return Number.isSafeInteger(asn) && asn > 0 && asn <= 4_294_967_295 ? asn : undefined;
 }
 
-async function ripeData(
-	endpoint: string,
-	parameters: Record<string, string>,
-	dependencies: OriginNetworkDependencies,
-): Promise<unknown> {
-	const query = new URLSearchParams({ ...parameters, sourceapp: SOURCE_APP });
-	const response = await fetchJson<unknown>(`${RIPESTAT}/${endpoint}/data.json?${query}`, { method: "GET", headers: { Accept: "application/json" } }, {
-		fetch: dependencies.fetch,
-		timeoutMs: 12_000,
-		attempts: 2,
-		maxResponseBytes: 4 * 1024 * 1024,
-	});
-	const envelope = responseSchema.safeParse(response);
-	if (!envelope.success || envelope.data.status !== "ok") throw new Error(`RIPEstat ${endpoint} returned an invalid response.`);
-	return envelope.data.data;
-}
 
 async function boundedDns<T>(label: string, operation: () => Promise<T>): Promise<T> {
 	return retryWithTimeout(operation, { label, timeoutMs: 5_000, attempts: 2, retryDelayMs: 200 });
@@ -102,7 +84,7 @@ export async function resolveOriginHostNetworks(
 	try {
 		const registrable = registrableDomain(mailboxDomain) ?? mailboxDomain;
 		const term = registrable.split(".")[0]!;
-		const parsed = searchSchema.safeParse(await ripeData("searchcomplete", { resource: term, limit: "20" }, dependencies));
+		const parsed = searchSchema.safeParse(await ripeStatData("searchcomplete", { resource: term, limit: "20" }, dependencies));
 		if (!parsed.success) throw new Error("RIPEstat search response was malformed.");
 		for (const category of parsed.data.categories) {
 			if (category.category.toLowerCase() !== "asns") continue;
@@ -138,7 +120,7 @@ export async function resolveOriginHostNetworks(
 	const networkCandidates = await mapConcurrent(discoveredIps, 4, async ({ ip, source }) => {
 		try {
 			throwIfAborted(signal);
-			const parsed = networkInfoSchema.safeParse(await ripeData("network-info", { resource: ip }, dependencies));
+			const parsed = networkInfoSchema.safeParse(await ripeStatData("network-info", { resource: ip }, dependencies));
 			if (!parsed.success) throw new Error("RIPEstat network-info response was malformed.");
 			return parsed.data.asns.map(asnNumber).filter((asn): asn is number => Boolean(asn)).map((asn) => ({ asn, source }));
 		} catch (error) {
@@ -151,12 +133,12 @@ export async function resolveOriginHostNetworks(
 	const validated = await mapConcurrent([...candidates], 4, async ([asn, sources]) => {
 		try {
 			throwIfAborted(signal);
-			const contacts = abuseContactsSchema.safeParse(await ripeData("abuse-contact-finder", { resource: `AS${asn}` }, dependencies));
+			const contacts = abuseContactsSchema.safeParse(await ripeStatData("abuse-contact-finder", { resource: `AS${asn}` }, dependencies));
 			if (!contacts.success) throw new Error("RIPEstat abuse-contact response was malformed.");
 			if (!contacts.data.abuse_contacts.map(normalizeMailbox).includes(recipient)) return undefined;
 			const [overviewResult, prefixesResult] = await Promise.all([
-				ripeData("as-overview", { resource: `AS${asn}` }, dependencies),
-				ripeData("announced-prefixes", { resource: `AS${asn}` }, dependencies),
+				ripeStatData("as-overview", { resource: `AS${asn}` }, dependencies),
+				ripeStatData("announced-prefixes", { resource: `AS${asn}` }, dependencies),
 			]);
 			const overview = overviewSchema.safeParse(overviewResult);
 			const prefixes = prefixesSchema.safeParse(prefixesResult);

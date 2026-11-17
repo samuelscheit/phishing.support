@@ -3,7 +3,8 @@ import { publicCampaignUrl } from "../campaign/urls";
 import type { Authority } from "./authorities";
 import type { Complainant } from "./complainant";
 import type { Dossier, DossierSite } from "./dossier";
-import { germanDate, germanDateTime, indicatorLines, providerLines, siteLine } from "./render";
+import { infrastructureLines } from "./infrastructure";
+import { germanDate, germanDateTime, indicatorLines, siteLine } from "./render";
 
 /** Sites listed in a mail body; the attached CSV always has all of them. */
 export const MAX_SITES_IN_MAIL = 25;
@@ -89,8 +90,8 @@ export function complaintDraft(context: DraftContext & { authority: Authority })
 		...siteList(sites),
 		"",
 		"Ermittlungsansätze und Datensicherung",
-		"Die Anbieter haben die Seiten teils schon gesperrt; nach einer Sperrung löschen sie Konto-, Zahlungs- und Zugriffsdaten oft binnen Tagen. Wir haben jeden Anbieter gebeten, die Daten aufzubewahren, können eine Sicherung aber nicht erzwingen. Wir regen an, die Daten bei folgenden Anbietern zu sichern:",
-		...providerLines(dossier.providers),
+		"Die Anbieter haben die Seiten teils schon gesperrt; nach einer Sperrung löschen sie Konto-, Zahlungs- und Zugriffsdaten oft binnen Tagen. Wir haben jeden Anbieter gebeten, die Daten aufzubewahren, können eine Sicherung aber nicht erzwingen. Wir regen an, die Daten bei folgenden Anbietern zu sichern. Sie sind nach dem Staat geordnet, in dem das Unternehmen sitzt, das die Kundendaten hält; dazu die Instrumente, die dort greifen:",
+		...infrastructureLines(dossier.infrastructure, "de"),
 		"",
 		...evidenceParagraph(context.download),
 		"",
@@ -120,8 +121,8 @@ export function supplementDraft(context: DraftContext & { authority: Authority; 
 		"Neue Websites",
 		...siteList(newSites),
 		"",
-		"Ermittlungsansätze und Datensicherung",
-		...providerLines(dossier.providers),
+		"Ermittlungsansätze und Datensicherung, nach Staaten",
+		...infrastructureLines(dossier.infrastructure, "de"),
 		"",
 		...evidenceParagraph(context.download),
 		"",
