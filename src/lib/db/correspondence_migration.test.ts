@@ -37,6 +37,29 @@ test("status records move to route-scoped keys; provider messages and other mail
 	]);
 });
 
+test("analysis runs that 0001 gave the literal text 'tokens_used' get an unknown count; real counts stay", () => {
+	const directory = mkdtempSync(join(tmpdir(), "phishing-reporter-tokens-test-"));
+	temporaryDirectories.push(directory);
+	const database = new Database(join(directory, "tokens.sqlite"), { safeIntegers: true });
+	// 0000's analysis_runs had no tokens_used column, which is how 0001 copied the literal.
+	applySqlMigration(database, "0000_amused_kat_farrell.sql");
+	database.query("INSERT INTO submissions (id, kind, data, dedupe_key, status, created_at, updated_at) VALUES (1, 'website', '{}', 'k', 'reported', 1, 1)").run();
+	database.query("INSERT INTO analysis_runs (id, submission_id, status, created_at) VALUES (268849339848200197, 1, 'completed', 1)").run();
+	// Drizzle's migrator runs a migration in a transaction, where its foreign_keys pragma does nothing.
+	database.exec("BEGIN");
+	applySqlMigration(database, "0001_workable_shen.sql");
+	database.exec("COMMIT");
+	expect(database.query("SELECT tokens_used FROM analysis_runs").get()).toEqual({ tokens_used: "tokens_used" });
+	database.query("INSERT INTO analysis_runs (id, submission_id, status, tokens_used, created_at) VALUES (2, 1, 'completed', 1234, 1)").run();
+	database.query("INSERT INTO analysis_runs (id, submission_id, status, created_at) VALUES (3, 1, 'running', 1)").run();
+	applySqlMigration(database, "0017_repair_tokens_used_literal.sql");
+	expect(database.query("SELECT CAST(id AS TEXT) AS id, tokens_used FROM analysis_runs ORDER BY id").all()).toEqual([
+		{ id: "2", tokens_used: 1234n },
+		{ id: "268849339848200197", tokens_used: null },
+		{ id: "3", tokens_used: null },
+	]);
+});
+
 /** Builds a populated pre-correspondence database from the actual old migrations. */
 function createLegacyDatabase() {
 	const directory = mkdtempSync(join(tmpdir(), "phishing-reporter-migration-test-"));
