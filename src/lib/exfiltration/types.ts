@@ -19,7 +19,8 @@ export type CapturedNetworkRequest = {
 	/** The headers that show how the data was sent: content type, origin, referrer. */
 	requestHeaders?: Record<string, string>;
 	/** The server's answer, when one arrived while the visit was recorded. */
-	response?: { status: number; statusText?: string; receivedAt: string; remoteAddress?: string; mimeType?: string };
+	/** The server's answer. No address: the browser reaches sites through an egress proxy, so the peer it sees is the proxy. */
+	response?: { status: number; statusText?: string; receivedAt: string; mimeType?: string };
 };
 
 export type ExfiltrationBackend = {

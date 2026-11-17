@@ -15,7 +15,7 @@ const facts: VisitEvidenceFacts = {
 	syntheticValues: values,
 	actions: [
 		{ id: "2.1", kind: "type", text: `typed into e3 its value is now ${JSON.stringify(values.email)}`, selector: "e3", value: values.email, at: "2026-11-15T00:32:51.100Z" },
-		// The agent's log keeps a secret as its placeholder; the values list above says what it stood for.
+		// The agent's log keeps a secret as its placeholder; the record states the value the browser typed for it.
 		{ id: "2.2", kind: "type", text: "typed into e4 its value is now (secret entered)", selector: "e4", value: "{{secret:password}}", at: "2026-11-15T00:32:53.400Z" },
 		{ id: "3.1", kind: "click", text: 'clicked e5 "Weitermachen"', selector: "e5", at: "2026-11-15T00:32:54.000Z" },
 	],
@@ -29,7 +29,7 @@ const facts: VisitEvidenceFacts = {
 			postData: JSON.stringify({ email: values.email, password: values.password }),
 			documentUrl: "https://policy-trust-assurance.onrender.com/help",
 			requestHeaders: { "content-type": "application/json" },
-			response: { status: 200, receivedAt: "2026-11-15T00:32:54.480Z", remoteAddress: "216.24.57.16" },
+			response: { status: 200, receivedAt: "2026-11-15T00:32:54.480Z" },
 		},
 	],
 	backends: [],
@@ -60,8 +60,9 @@ describe("the visit as evidence", () => {
 		const parsed = JSON.parse(record!.bytes.toString());
 		expect(parsed.syntheticValues).toEqual(values);
 		expect(parsed.actions[0]).toEqual(facts.actions[0]);
+		expect(parsed.actions[1]).toMatchObject({ value: values.password, typedAs: "{{secret:password}}" });
 		expect(parsed.requests.map((request: { method: string; carries: string[] }) => [request.method, request.carries])).toEqual([["GET", []], ["POST", ["email", "password"]]]);
-		expect(parsed.requests[1]).toMatchObject({ postData: facts.requests[1]!.postData, response: { status: 200, remoteAddress: "216.24.57.16" } });
+		expect(parsed.requests[1]).toMatchObject({ postData: facts.requests[1]!.postData, response: { status: 200 } });
 
 		const text = protocol!.bytes.toString();
 		expect(text).toContain("They were generated for this visit only and belong to no person");
@@ -69,9 +70,9 @@ describe("the visit as evidence", () => {
 		// The chronology reads in time order: typing, clicking, then the request that carried both values.
 		expect(text).toContain("Visiting agent: Browser Fabric task agent, outcome completed");
 		const typedEmail = text.indexOf(`value ${JSON.stringify(values.email)} [element e3]`);
-		expect(text).toContain('Agent type: typed into e4 its value is now (secret entered) value "{{secret:password}}" [element e4]');
+		expect(text).toContain(`Agent type: typed into e4 its value is now (secret entered) value ${JSON.stringify(values.password)} (typed as {{secret:password}}) [element e4]`);
 		const clicked = text.indexOf('Agent click: clicked e5 "Weitermachen"');
-		const sent = text.indexOf("Request POST https://policy-trust-assurance.onrender.com/api/send carried the synthetic email address, password, sent from https://policy-trust-assurance.onrender.com/help. Answer: HTTP 200 from 216.24.57.16 at 2026-11-15 00:32:54.480 UTC.");
+		const sent = text.indexOf("Request POST https://policy-trust-assurance.onrender.com/api/send carried the synthetic email address, password, sent from https://policy-trust-assurance.onrender.com/help. Answer: HTTP 200 at 2026-11-15 00:32:54.480 UTC.");
 		expect(typedEmail).toBeGreaterThan(0);
 		expect(clicked).toBeGreaterThan(typedEmail);
 		expect(sent).toBeGreaterThan(clicked);

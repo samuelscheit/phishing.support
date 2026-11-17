@@ -72,7 +72,7 @@ export class ExfiltrationNetworkRecorder {
 			return;
 		}
 		this.sessions.add(session);
-		type CdpResponse = { status: number; statusText?: string; remoteIPAddress?: string; mimeType?: string };
+		type CdpResponse = { status: number; statusText?: string; mimeType?: string };
 		const pending = new Map<string, CapturedNetworkRequest>();
 		/** The server's answer to a recorded request; a redirect answers it as well as a final response. */
 		const answer = (requestId: string, response: CdpResponse) => {
@@ -83,7 +83,6 @@ export class ExfiltrationNetworkRecorder {
 				status: response.status,
 				...(response.statusText ? { statusText: response.statusText } : {}),
 				receivedAt: new Date().toISOString(),
-				...(response.remoteIPAddress ? { remoteAddress: response.remoteIPAddress } : {}),
 				...(response.mimeType ? { mimeType: response.mimeType } : {}),
 			};
 		};
