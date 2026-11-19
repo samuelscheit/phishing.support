@@ -65,7 +65,9 @@ async function siteAnalyses(submissionIds: readonly string[]): Promise<string[]>
 
 /** What a campaign's heading may say, from its dossier and its sites' languages; without the analyses. */
 export function factsFromDossier(dossier: Dossier, languages: ReadonlyArray<string | null | undefined>): CampaignFacts {
-	const kinds = new Set(dossier.indicators.filter((indicator) => indicator.links && indicator.sites.length > 1).map((indicator) => indicator.kind));
+	// A page fingerprint ties the sites by what they show, not by code they run.
+	const kinds = new Set(dossier.indicators.filter((indicator) => indicator.links && indicator.sites.length > 1)
+		.map((indicator) => (["page_document", "page_structure"].includes(String(indicator.evidence.fileKind)) ? "page" : indicator.kind)));
 	return {
 		siteCount: dossier.sites.length,
 		firstSeenAt: dossier.firstSeenAt,
@@ -77,6 +79,7 @@ export function factsFromDossier(dossier: Dossier, languages: ReadonlyArray<stri
 		providers: [...new Set(dossier.sites.flatMap((site) => site.reports.map((report) => report.provider)))],
 		links: [
 			...(kinds.has("kit_fingerprint") ? ["same_code" as const] : []),
+			...(kinds.has("page") ? ["same_page" as const] : []),
 			...(kinds.has("exfiltration_backend") ? ["same_backend" as const] : []),
 			...(kinds.has("payment_receiver") ? ["same_payment_account" as const] : []),
 		],

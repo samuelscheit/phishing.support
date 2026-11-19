@@ -20,7 +20,7 @@ const linking = {
 	loadPageTexts: async () => [{ name: "website.mhtml", text: "Sign in to your mailbox to read the document waiting for you from the shared drive today." }],
 	libraryFor: async () => undefined,
 	loadPopularDomains: async () => new Set<string>(),
-	loadPageDocument: async () => undefined,
+	loadPageFingerprints: async () => ({}),
 	saveThumbnail: async () => undefined,
 } as LinkDependencies;
 

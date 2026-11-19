@@ -7,7 +7,7 @@ import { fetchJson, type FetchImplementation } from "../network/bounded_fetch";
 import { mhtmlVisitorText } from "../website_archive";
 import { latestArtifactNamed, websiteCaptureFileNames } from "../website_capture_files";
 import type { ExfiltrationBackend } from "../exfiltration/types";
-import { loadPageDocumentFingerprint } from "./page_document";
+import { loadPageFingerprints, type PageFingerprints } from "./page_document";
 import { paymentReceivers } from "./payment";
 import type { CampaignIndicatorEvidence, CampaignIndicatorKind } from "./schema";
 
@@ -27,8 +27,8 @@ export type IndicatorDependencies = {
 	/** The published library a kit file's bytes are, or undefined when none is. */
 	libraryFor?: (sha256: string) => Promise<string | undefined>;
 	loadPopularDomains?: () => Promise<PopularDomains>;
-	/** The reported page's document with its own address masked (page_document.ts). */
-	loadPageDocument?: (submissionId: bigint, siteUrl: string) => Promise<{ sha256: string; size: number } | undefined>;
+	/** The reported page's body and structure (page_document.ts). */
+	loadPageFingerprints?: (submissionId: bigint, siteUrl: string) => Promise<PageFingerprints>;
 };
 
 /** The identity two sites must share to have reached the same operator through one backend. */
@@ -161,11 +161,10 @@ export async function extractIndicators(submissionId: bigint, dependencies: Indi
 		}
 	}
 
-	// The page itself: a kit deployed under many domains serves the same document on each.
-	const document = await (dependencies.loadPageDocument ?? loadPageDocumentFingerprint)(submissionId, website.url);
-	if (document) {
-		add({ kind: "kit_fingerprint", value: document.sha256, links: true, evidence: { fileKind: "page_document", url: website.url, size: document.size } });
-	}
+	// The page itself: a kit deployed under many domains serves the same body, or one template's structure, on each.
+	const page = await (dependencies.loadPageFingerprints ?? loadPageFingerprints)(submissionId, website.url);
+	if (page.body) add({ kind: "kit_fingerprint", value: page.body.sha256, links: true, evidence: { fileKind: "page_document", url: website.url, size: page.body.size } });
+	if (page.structure) add({ kind: "kit_fingerprint", value: page.structure.sha256, links: true, evidence: { fileKind: "page_structure", url: website.url, size: page.structure.size, tags: page.structure.tags } });
 
 	for (const rdap of website.whois?.ip_rdaps ?? []) {
 		if (!rdap.ip) continue;

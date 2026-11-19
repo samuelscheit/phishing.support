@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Copy, Download, Fingerprint, LayoutGrid, Rows3, Send, Timer, Wallet } from "lucide-react";
+import { ArrowLeft, ArrowRight, Copy, Download, Fingerprint, LayoutGrid, LayoutTemplate, Rows3, Send, Timer, Wallet } from "lucide-react";
 
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { LANGUAGE_NAMES } from "@/lib/campaign/language";
@@ -14,6 +14,7 @@ const PREVIEW_SITES = 3;
 const REASON_ICON: Record<PublicCampaignReason["kind"], typeof Send> = {
 	same_code: Fingerprint,
 	same_page: Fingerprint,
+	same_structure: LayoutTemplate,
 	same_backend: Send,
 	same_payment_account: Wallet,
 	same_pattern: Timer,

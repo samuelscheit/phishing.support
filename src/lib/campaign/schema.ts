@@ -9,7 +9,7 @@ import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "../db/sqlite_types
  *
  * - `exfiltration_backend`: where the site sent the synthetic values a visit entered (a Telegram bot, a Discord webhook, a collector host).
  * - `payment_receiver`: an account the page asks visitors to pay (IBAN, crypto wallet).
- * - `kit_fingerprint`: the SHA-256 of a script or hidden-frame document of the kit itself, not of a public library.
+ * - `kit_fingerprint`: the SHA-256 of a script or hidden-frame document of the kit itself, not of a public library, or of the reported page's body or tag structure (`fileKind` `page_document`, `page_structure`).
  * - `origin_ip`: the server behind the site; it describes the infrastructure but never links sites, because shared hosting puts unrelated operators on one address.
  */
 export const campaignIndicatorKinds = ["exfiltration_backend", "payment_receiver", "kit_fingerprint", "origin_ip"] as const;

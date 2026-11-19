@@ -27,7 +27,7 @@ const linking: LinkDependencies = {
 	loadPageTexts: async () => [],
 	libraryFor: async () => undefined,
 	loadPopularDomains: async () => new Set(),
-	loadPageDocument: async () => undefined,
+	loadPageFingerprints: async () => ({}),
 	saveThumbnail: async () => undefined,
 } as LinkDependencies;
 

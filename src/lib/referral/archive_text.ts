@@ -61,6 +61,7 @@ export function describeIndicatorEnglish(indicator: DossierIndicator): string {
 	}
 	if (indicator.kind === "kit_fingerprint") {
 		const library = text(evidence.library) ? `; a published library file (${evidence.library}), so it links nothing` : "";
+		if (evidence.fileKind === "page_structure") return `Identical page template (the same ${evidence.tags ?? "?"} HTML elements in the same order, text and attributes left out; SHA-256 ${indicator.value}) ${reach}.`;
 		if (evidence.fileKind === "page_document") return `Identical page body (HTML, ${evidence.size ?? "?"} bytes; the page's own address masked; SHA-256 ${indicator.value}) ${reach}.`;
 		return `Identical kit file (${evidence.fileKind === "hidden_frame" ? "hidden frame document" : "script"}, ${evidence.size ?? "?"} bytes, SHA-256 ${indicator.value}) ${reach}${library}.`;
 	}

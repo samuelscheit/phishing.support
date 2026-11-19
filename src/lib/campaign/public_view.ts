@@ -36,7 +36,7 @@ export type PublicCampaignSite = {
 	takedown: "confirmed" | "reported" | "problem" | "none";
 };
 
-export type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_backend" | "same_payment_account" | "same_pattern"; title: string; text: string };
+export type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_payment_account" | "same_pattern"; title: string; text: string };
 
 export type PublicCampaign = {
 	campaignId: string;
@@ -139,16 +139,23 @@ function reasons(dossier: Dossier, stats: { platform?: string; durationMinutes: 
 	const shared = dossier.indicators.filter((indicator) => indicator.links && indicator.sites.length > 1);
 	const all = dossier.sites.length;
 	const result: PublicCampaignReason[] = [];
-	const isPage = (indicator: (typeof shared)[number]) => indicator.evidence.fileKind === "page_document";
-	const kit = shared.filter((indicator) => indicator.kind === "kit_fingerprint" && !isPage(indicator));
-	const page = shared.filter((indicator) => indicator.kind === "kit_fingerprint" && isPage(indicator));
+	const fingerprints = (fileKinds: readonly string[], include: boolean) => shared.filter((indicator) => indicator.kind === "kit_fingerprint" && fileKinds.includes(String(indicator.evidence.fileKind)) === include);
+	const reach = (indicators: typeof shared) => Math.max(0, ...indicators.map((indicator) => indicator.sites.length));
+	/** "Every page serves" or "3 of the 5 pages serve". */
+	const subject = (indicators: typeof shared, singular: string, plural: string) => reach(indicators) === all ? `Every page ${singular}` : `${reach(indicators)} of the ${all} pages ${plural}`;
+	const page = fingerprints(["page_document"], true);
 	if (page.length) {
-		const widest = Math.max(...page.map((indicator) => indicator.sites.length));
-		result.push({ kind: "same_page", title: "Same page", text: `${widest === all ? "Every page serves" : `${widest} of the ${all} pages serve`} the same page body, byte for byte apart from its own address. A copied design would not match this exactly.` });
+		result.push({ kind: "same_page", title: "Same page", text: `${subject(page, "serves", "serve")} the same page body, byte for byte apart from its own address. A copied design would not match this exactly.` });
 	}
+	// A template only adds to an identical body where it reaches pages whose words differ.
+	const structure = fingerprints(["page_structure"], true);
+	if (structure.length && reach(structure) > reach(page)) {
+		const widest = structure.reduce((best, indicator) => (indicator.sites.length > best.sites.length ? indicator : best));
+		result.push({ kind: "same_structure", title: "Same template", text: `${subject(structure, "is", "are")} built from the same template: the same ${Number(widest.evidence.tags)} HTML elements in the same order; only the words differ.` });
+	}
+	const kit = fingerprints(["page_document", "page_structure"], false);
 	if (kit.length) {
-		const widest = Math.max(...kit.map((indicator) => indicator.sites.length));
-		result.push({ kind: "same_code", title: "Same code", text: `${widest === all ? "Every page runs" : `${widest} of the ${all} pages run`} the same program ${kit.length === 1 ? "file" : `files (${kit.length})`}, byte for byte. A copied design would not match this exactly, and none of these files is a public library.` });
+		result.push({ kind: "same_code", title: "Same code", text: `${subject(kit, "runs", "run")} the same program ${kit.length === 1 ? "file" : `files (${kit.length})`}, byte for byte. A copied design would not match this exactly, and none of these files is a public library.` });
 	}
 	const backend = shared.filter((indicator) => indicator.kind === "exfiltration_backend");
 	if (backend.length) {
@@ -274,7 +281,9 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 			kitFiles: dossier.indicators.filter((indicator) => indicator.kind === "kit_fingerprint" && indicator.links).map((indicator) => {
 				let path = String(indicator.evidence.url ?? "");
 				try {
-					path = indicator.evidence.fileKind === "page_document" ? "the page body (own address masked)" : new URL(path).pathname;
+					path = indicator.evidence.fileKind === "page_document" ? "the page body (own address masked)"
+						: indicator.evidence.fileKind === "page_structure" ? "the page's template (its HTML elements in order)"
+						: new URL(path).pathname;
 				} catch {
 					// Keep what was stored.
 				}

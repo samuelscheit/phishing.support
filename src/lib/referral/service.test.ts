@@ -17,6 +17,7 @@ import { ingestFetchedMail } from "../imap/ingest";
 import { approveReferralMail, discardReferralMail, preparePreservationNotices, prepareComplaint, prepareSupplement, ReferralError, saveReferralDraft, setReferralCaseReference, type ReferralDependencies } from "./service";
 import { getCampaignOverview } from "./overview";
 import { buildDossier } from "./dossier";
+import { factsFromDossier } from "../campaign/link";
 import { describeIndicatorEnglish } from "./archive_text";
 import { describeIndicator } from "./render";
 import { getPublicCampaign } from "../campaign/public_view";
@@ -254,6 +255,32 @@ describe("criminal referral of a campaign", () => {
 		const indicator = (await buildDossier(campaignId)).indicators.find((entry) => entry.value === body)!;
 		expect(describeIndicatorEnglish(indicator)).toStartWith(`Identical page body (HTML, 27657 bytes; the page's own address masked; SHA-256 ${body})`);
 		expect(describeIndicator(indicator)).toStartWith(`Identischer Seiteninhalt (HTML-Body, 27657 Byte; die eigene Adresse der Seite ausgeblendet; SHA-256 ${body})`);
+		// The heading says they show the same page, not that they run the same code.
+		expect(factsFromDossier(await buildDossier(campaignId), []).links).toEqual(["same_page"]);
+	});
+
+	test("pages built from one template are named as such; an identical body among them is named too, and the template only where it reaches further", async () => {
+		const template = "d".repeat(64);
+		const body = "e".repeat(64);
+		const hosts = ["dua.windswise.com", "lima.eliteedgemodeling.com", "tujuh.vilapoucajapan.com", "sembilan.lgswm.com"];
+		for (const [index, host] of hosts.entries()) {
+			const id = BigInt(41 + index);
+			await reportedSite(id, host);
+			await CampaignRepository.recordIndicators(id, [
+				{ kind: "kit_fingerprint", value: template, links: true, evidence: { fileKind: "page_structure", url: `https://${host}/894655`, size: 7_355, tags: 66 } },
+				...(index < 2 ? [{ kind: "kit_fingerprint" as const, value: body, links: true, evidence: { fileKind: "page_document", url: `https://${host}/894655`, size: 7_355 } }] : []),
+			]);
+		}
+		const campaignId = (await CampaignRepository.campaignForSubmission(41n))!;
+		const campaign = (await getPublicCampaign(campaignId))!;
+		expect(campaign.reasons.map((reason) => [reason.kind, reason.text])).toEqual([
+			["same_page", "2 of the 4 pages serve the same page body, byte for byte apart from its own address. A copied design would not match this exactly."],
+			["same_structure", "Every page is built from the same template: the same 66 HTML elements in the same order; only the words differ."],
+		]);
+		expect(campaign.technical.kitFiles.find((file) => file.sha256 === template)).toEqual({ sha256: template, size: 7_355, path: "the page's template (its HTML elements in order)", siteCount: 4 });
+		const indicator = (await buildDossier(campaignId)).indicators.find((entry) => entry.value === template)!;
+		expect(describeIndicatorEnglish(indicator)).toStartWith(`Identical page template (the same 66 HTML elements in the same order, text and attributes left out; SHA-256 ${template}) (4 sites)`);
+		expect(describeIndicator(indicator)).toStartWith(`Identische Seitenvorlage (dieselben 66 HTML-Elemente in derselben Reihenfolge, ohne Text und Attribute; SHA-256 ${template}) (4 Seiten)`);
 	});
 
 	test("the public list shows every phishing site as its campaign's card, a campaign of one included", async () => {
