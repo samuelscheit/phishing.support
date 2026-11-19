@@ -473,7 +473,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 									</CardContent>
 								</Card>
 							) : null}
-							<SubmissionReports submissionId={id} reports={reports} />
+							<SubmissionReports reports={reports} />
 						</TabsContent>
 						{submission.kind === "website" && websiteNavigation.length > 0 ? (
 							<TabsContent value="navigation" className="space-y-2 mt-4">

@@ -4,6 +4,7 @@ import { prepareNetcraftSubmission, submitNetcraftSubmission } from "./submissio
 import { makeNetcraftReason } from "./payload";
 import { reconcileNetcraftProviderRun } from "./reconcile";
 import { NETCRAFT_INBOUND_MAIL } from "./inbound";
+import { fetchNetcraftCorrespondence, NETCRAFT_REVIEW_VERDICTS } from "./correspondence";
 
 /** Supplemental Netcraft route for every report with one or more observed URLs. */
 export const netcraftProvider: ProviderSubmissionProvider = {
@@ -19,6 +20,8 @@ export const netcraftProvider: ProviderSubmissionProvider = {
 	}),
 	inboundMail: NETCRAFT_INBOUND_MAIL,
 	submit: submitNetcraftSubmission,
+	fetchCorrespondence: (context) => fetchNetcraftCorrespondence(context),
+	reviewVerdicts: NETCRAFT_REVIEW_VERDICTS,
 };
 
 export { NETCRAFT_PROVIDER } from "./definition";

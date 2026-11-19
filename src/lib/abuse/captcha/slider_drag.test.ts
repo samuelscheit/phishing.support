@@ -176,7 +176,11 @@ describe.skipIf(!chromiumAvailable)("GNAME's code request in a real browser", ()
 
 	test("a slider that refuses every drag is tried three times, then the request fails without a code", async () => {
 		await onForm({ slider: true, refuse: true }, async (page) => {
-			await expect(requestGnameCodeOnPage(page, "support@phishing.support")).rejects.toThrow("GNAME's slider did not pass after 3 drags, so no code was sent.");
+			// Awaited directly: `expect(promise).rejects` (bun 1.4.4) moves on before a promise this slow (three drags, ~16 s)
+			// settles, and the page then closes under the drags still running.
+			const error = await requestGnameCodeOnPage(page, "support@phishing.support").then(() => undefined, (rejection: unknown) => rejection);
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).message).toBe("GNAME's slider did not pass after 3 drags, so no code was sent.");
 			expect(await page.evaluate(() => (window as unknown as { tracks: unknown[] }).tracks)).toHaveLength(3);
 			expect(await page.evaluate(() => (window as unknown as { sends: unknown[] }).sends)).toHaveLength(1);
 		});

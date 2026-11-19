@@ -22,19 +22,28 @@ export async function pollProviderCorrespondence(params: { routeId: bigint; jobI
 	if (!provider?.fetchCorrespondence || !run?.confirmationId) return;
 
 	const correspondence = await provider.fetchCorrespondence({ confirmationId: run.confirmationId, ...(signal ? { signal } : {}) });
+	const status = correspondence.status;
+	const verdict = status && provider.reviewVerdicts?.[status.state];
+	// Every change of review state is one record, a return to an earlier state too:
+	// the latest record is the verdict in effect.
+	const records = (await AbuseRepository.listMailForReport(route.reportId))
+		.filter((message) => message.routeId === route.id && message.correlationKey?.startsWith(`provider-api:${route.providerRegistryKey}:status:`))
+		.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+	const subject = status && `Report status: ${status.state}`;
+	const changed = status && records.at(-1)?.subject !== subject;
 	const stored = await AbuseRepository.recordProviderCorrespondence({
 		route,
 		messages: [
 			...correspondence.messages.map((message) => ({ ...message, from: provider.definition.displayName })),
-			...(correspondence.status
+			...(status && changed
 				? [{
-					// One record per route and distinct review state keeps the status history;
-					// the id is unique per provider, so it names the route.
-					id: `status:${route.id.toString()}:${correspondence.status.state}`,
-					subject: `Report status: ${correspondence.status.state}`,
-					body: correspondence.status.detail ?? "",
+					// The id is unique per provider, so it names the route; a state seen before also names when it returned.
+					id: `status:${route.id.toString()}:${status.state}${records.some((record) => record.subject === subject) ? `:${Date.now()}` : ""}`,
+					subject: subject!,
+					body: status.detail ?? "",
 					sentAt: new Date(),
 					from: provider.definition.displayName,
+					...(verdict ? { classification: verdict } : {}),
 				}]
 				: []),
 		],
@@ -55,7 +64,7 @@ export async function pollProviderCorrespondence(params: { routeId: bigint; jobI
 	}
 
 	const elapsed = Date.now() - run.createdAt.getTime();
-	if (elapsed < CORRESPONDENCE_POLL_WINDOW_MS) await queueCorrespondencePoll(route, { delayMs: nextCorrespondencePollDelayMs(elapsed), successorOf: params.jobId });
+	if (!correspondence.final && elapsed < CORRESPONDENCE_POLL_WINDOW_MS) await queueCorrespondencePoll(route, { delayMs: nextCorrespondencePollDelayMs(elapsed), successorOf: params.jobId });
 }
 
 /**

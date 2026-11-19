@@ -32,6 +32,7 @@ export const cloudflareProvider: ProviderSubmissionProvider = {
 	// correspondence; its notification mails are not attached a second time.
 	inboundMail: { senderDomains: ["cloudflare.com"] },
 	fetchCorrespondence: (context) => fetchCloudflareCorrespondence(context),
+	reviewVerdicts: { accepted: "acknowledged", denied: "rejected" },
 };
 
 export { CLOUDFLARE_PROVIDER } from "./definition";

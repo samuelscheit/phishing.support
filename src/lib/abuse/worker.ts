@@ -30,6 +30,7 @@ import { startSamplePurgeSchedule } from "../exfiltration/downloads/sample_purge
 import { describeCampaignIfChanged } from "../campaign/link";
 import { searchCampaignKits } from "../campaign/kit_search";
 import { enqueueRulesSweep, linkSiteToCampaign } from "../campaign/sweep";
+import { ensureLivenessChecks, runLivenessCheck } from "../liveness/schedule";
 import { sleep } from "../sleep";
 
 const DEFAULT_LEASE_MS = 90_000;
@@ -47,6 +48,8 @@ const DEFAULT_SWEEP_JOB_TIMEOUT_MS = 20 * 60_000;
 const INVESTIGATION_JOB_TIMEOUT_MS = 15 * 60_000;
 /** A follow-up's agent may recheck and walk the site several times; one walk alone may take 20 minutes. */
 const FOLLOW_UP_JOB_TIMEOUT_MS = 60 * 60_000;
+/** One site check: DNS, RDAP, and a visit of up to nine requests of 15 seconds each. */
+const LIVENESS_JOB_TIMEOUT_MS = 5 * 60_000;
 const MAX_JOB_TIMEOUT_MS = 60 * 60_000;
 const MAX_RETRIES = 8;
 
@@ -100,11 +103,19 @@ const LINK_JOB_TYPES = ["link_campaign"] as const satisfies readonly AbuseJobTyp
  */
 const DISCOVERY_JOB_TYPES = ["search_campaign_kits", "analyze_kit_sibling"] as const satisfies readonly AbuseJobType[];
 
+/**
+ * Site checks run on their schedule after each report, hundreds a day. A slot
+ * of their own keeps each on time instead of behind provider and browser
+ * work, and keeps that work from waiting behind them.
+ */
+const LIVENESS_JOB_TYPES = ["check_site_liveness"] as const satisfies readonly AbuseJobType[];
+
 const CONTROL_JOB_FILTER: JobClaimFilter = { jobTypes: CONTROL_JOB_TYPES };
 const EXTERNAL_JOB_FILTER: JobClaimFilter = { jobTypes: EXTERNAL_JOB_TYPES };
 const SWEEP_JOB_FILTER: JobClaimFilter = { jobTypes: SWEEP_JOB_TYPES };
 const LINK_JOB_FILTER: JobClaimFilter = { jobTypes: LINK_JOB_TYPES };
 const DISCOVERY_JOB_FILTER: JobClaimFilter = { jobTypes: DISCOVERY_JOB_TYPES };
+const LIVENESS_JOB_FILTER: JobClaimFilter = { jobTypes: LIVENESS_JOB_TYPES };
 
 /** The longest any error may ask a job to wait before its next attempt. */
 const MAX_RETRY_AFTER_MS = 60 * 60_000;
@@ -255,6 +266,7 @@ export class AbuseWorker {
 		await ensureCorrespondencePolls();
 		await ensureReceiptLookups();
 		await ensureOriginHostDisclosureJobs();
+		await ensureLivenessChecks();
 		// Every confirmed site is linked again once whenever the campaign rules change.
 		await enqueueRulesSweep();
 		// Provider/browser work gets its own lane. A stuck CAPTCHA or browser can
@@ -266,6 +278,7 @@ export class AbuseWorker {
 			this.runLoop(SWEEP_JOB_FILTER, this.sweepJobTimeoutMs),
 			this.runLoop(LINK_JOB_FILTER, this.externalJobTimeoutMs),
 			this.runLoop(DISCOVERY_JOB_FILTER, this.externalJobTimeoutMs),
+			this.runLoop(LIVENESS_JOB_FILTER, LIVENESS_JOB_TIMEOUT_MS),
 		];
 		this.stopSamplePurge = startSamplePurgeSchedule();
 	}
@@ -435,9 +448,9 @@ export class AbuseWorker {
 			}
 			return;
 		}
-		if (["report_origin_host", "link_campaign", "describe_campaign", "search_campaign_kits", "analyze_kit_sibling", "watch_redirector"].includes(job.jobType)) {
-			// Infrastructure, campaigns and kit discovery are supplementary follow-up. Failure must
-			// not turn a successfully submitted phishing report into a reporting failure.
+		if (["report_origin_host", "link_campaign", "describe_campaign", "search_campaign_kits", "analyze_kit_sibling", "watch_redirector", "check_site_liveness"].includes(job.jobType)) {
+			// Infrastructure, campaigns, kit discovery and site checks are supplementary follow-up.
+			// Failure must not turn a successfully submitted phishing report into a reporting failure.
 			await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
 			return;
 		}
@@ -518,6 +531,9 @@ export class AbuseWorker {
 				return;
 			case "describe_campaign":
 				await describeCampaignIfChanged(parseJobBigInt(job.payload?.campaignId, "payload.campaignId"));
+				return;
+			case "check_site_liveness":
+				await runLivenessCheck({ jobId: job.id, targetId: parseJobBigInt(job.payload?.targetId, "payload.targetId"), dependencies: signal ? { signal } : {} });
 				return;
 			default:
 				throw new Error(`Unsupported abuse job type ${job.jobType}.`);

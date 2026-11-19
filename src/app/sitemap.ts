@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { CampaignRepository } from "@/lib/campaign/repository";
+import { providerDataset } from "@/lib/provider_stats/repository";
 import { GUIDES } from "@/lib/seo/guides";
 import { absoluteUrl } from "@/lib/seo/site";
 
@@ -11,6 +12,8 @@ const STATIC_PAGES: Array<{ path: string; priority: number; changeFrequency: Met
 	{ path: "/", priority: 1, changeFrequency: "hourly" },
 	...GUIDES.map(({ slug }) => ({ path: `/${slug}`, priority: 0.9, changeFrequency: "monthly" as const })),
 	{ path: "/abuse-reporting", priority: 0.8, changeFrequency: "monthly" },
+	{ path: "/providers", priority: 0.8, changeFrequency: "daily" },
+	{ path: "/reports", priority: 0.6, changeFrequency: "hourly" },
 	{ path: "/info", priority: 0.5, changeFrequency: "monthly" },
 	{ path: "/impressum", priority: 0.2, changeFrequency: "yearly" },
 	{ path: "/datenschutz", priority: 0.2, changeFrequency: "yearly" },
@@ -21,9 +24,11 @@ const MAX_SITEMAP_URLS = 50_000;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 	const campaigns = await CampaignRepository.listCampaigns(1_000);
-	const submissions = await SubmissionsEntity.listSitemapEntries(MAX_SITEMAP_URLS - STATIC_PAGES.length - campaigns.length);
+	const providers = [...new Set((await providerDataset()).records.map((record) => record.organisation.slug))];
+	const submissions = await SubmissionsEntity.listSitemapEntries(MAX_SITEMAP_URLS - STATIC_PAGES.length - campaigns.length - providers.length);
 	return [
 		...STATIC_PAGES.map(({ path, priority, changeFrequency }) => ({ url: absoluteUrl(path), priority, changeFrequency })),
+		...providers.map((slug) => ({ url: absoluteUrl(`/providers/${slug}`), changeFrequency: "daily" as const, priority: 0.6 })),
 		...campaigns.map(({ campaign }) => ({
 			url: absoluteUrl(`/campaigns/${campaign.id.toString()}`),
 			lastModified: campaign.updatedAt,

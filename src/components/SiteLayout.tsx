@@ -17,7 +17,7 @@ export function SiteFooter() {
 	return (
 		<footer className="border-t bg-background/50 mt-12">
 			<div className="container mx-auto flex flex-col gap-4 px-4 py-6 sm:flex-row sm:items-start sm:justify-between">
-				<p className="text-sm text-muted-foreground">© {new Date().getFullYear()} Phishing Support</p>
+				<p className="shrink-0 text-sm text-muted-foreground">© {new Date().getFullYear()} Phishing Support</p>
 				<nav aria-label="Guides and information">
 					<ul className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
 						{GUIDES.map(({ slug, label }) => (
@@ -30,6 +30,16 @@ export function SiteFooter() {
 						<li>
 							<Link href="/abuse-reporting" className="text-muted-foreground hover:text-primary hover:underline">
 								Abuse reporting
+							</Link>
+						</li>
+						<li>
+							<Link href="/providers" className="text-muted-foreground hover:text-primary hover:underline">
+								Provider statistics
+							</Link>
+						</li>
+						<li>
+							<Link href="/reports" className="text-muted-foreground hover:text-primary hover:underline">
+								All reports
 							</Link>
 						</li>
 						<li>

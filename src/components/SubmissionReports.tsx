@@ -45,10 +45,10 @@ const reportStatusText: Record<string, string> = {
 	canceled: "The report was canceled.",
 };
 
-function ArtifactLink({ submissionId, artifact, fallback }: { submissionId: string; artifact?: SubmissionReportArtifact; fallback: string }) {
+function ArtifactLink({ reportId, artifact, fallback }: { reportId: string; artifact?: SubmissionReportArtifact; fallback: string }) {
 	if (!artifact) return null;
 	return (
-		<a href={`/api/submissions/${submissionId}/report-artifacts/${artifact.id}`} className="inline-flex max-w-full items-center gap-1 text-xs text-primary hover:underline">
+		<a href={`/api/reports/${reportId}/artifacts/${artifact.id}`} className="inline-flex max-w-full items-center gap-1 text-xs text-primary hover:underline">
 			<Download className="h-3.5 w-3.5 shrink-0" />
 			{artifact.name || fallback}
 		</a>
@@ -83,7 +83,7 @@ function messageTitle(message: SubmissionReportMessage): string {
 	return "Reply received";
 }
 
-function MessageItem({ submissionId, message, artifacts }: { submissionId: string; message: SubmissionReportMessage; artifacts: Map<string, SubmissionReportArtifact> }) {
+function MessageItem({ reportId, message, artifacts }: { reportId: string; message: SubmissionReportMessage; artifacts: Map<string, SubmissionReportArtifact> }) {
 	const outbound = message.direction === "outbound";
 	const bounce = message.kind === "bounce" || message.classification === "bounce";
 	const update = message.kind === "notification" || message.kind === "provider_api";
@@ -110,8 +110,8 @@ function MessageItem({ submissionId, message, artifacts }: { submissionId: strin
 				{message.textBody ? <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded border bg-background p-3 font-sans text-sm">{message.textBody}</pre> : null}
 				{outbound && message.replyAddress ? <div className="mt-3 space-y-1 text-xs"><div className="text-muted-foreground">Generated Reply-To</div><CopyReplyAddress replyAddress={message.replyAddress} /></div> : null}
 				<div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
-					<ArtifactLink submissionId={submissionId} artifact={message.rawArtifactId ? artifacts.get(String(message.rawArtifactId)) : undefined} fallback="Raw message (.eml)" />
-					{message.attachmentArtifactIds.map((id, index) => <ArtifactLink key={id} submissionId={submissionId} artifact={artifacts.get(String(id))} fallback={`Attachment ${index + 1}`} />)}
+					<ArtifactLink reportId={reportId} artifact={message.rawArtifactId ? artifacts.get(String(message.rawArtifactId)) : undefined} fallback="Raw message (.eml)" />
+					{message.attachmentArtifactIds.map((id, index) => <ArtifactLink key={id} reportId={reportId} artifact={artifacts.get(String(id))} fallback={`Attachment ${index + 1}`} />)}
 				</div>
 			</div>
 		</div>
@@ -140,7 +140,8 @@ function DecisionFollowUpItem({ followUp }: { followUp: DecisionFollowUpSummary 
 	);
 }
 
-function RouteCard({ submissionId, route, artifacts }: { submissionId: string; route: SubmissionReportRoute; artifacts: Map<string, SubmissionReportArtifact> }) {
+/** One provider route of a report: its status, the report sent, and the whole correspondence. */
+export function RouteCard({ reportId, route, artifacts }: { reportId: string; route: SubmissionReportRoute; artifacts: Map<string, SubmissionReportArtifact> }) {
 	const confirmed = route.status === "submitted" || route.status === "acknowledged";
 	const failed = ["unknown_external_state", "provider_rejected", "failed", "delivery_failed", "needs_human", "insufficient_evidence", "no_route"].includes(route.status);
 	const mail = route.routeType === "email";
@@ -176,7 +177,7 @@ function RouteCard({ submissionId, route, artifacts }: { submissionId: string; r
 				{route.messages.length || route.decisionFollowUps.length ? (
 					<div>
 						{[
-							...route.messages.map((message) => ({ at: new Date(message.occurredAt).getTime(), node: <MessageItem key={`m${String(message.id)}`} submissionId={submissionId} message={message} artifacts={artifacts} /> })),
+							...route.messages.map((message) => ({ at: new Date(message.occurredAt).getTime(), node: <MessageItem key={`m${String(message.id)}`} reportId={reportId} message={message} artifacts={artifacts} /> })),
 							...route.decisionFollowUps.map((followUp, index) => ({ at: new Date(followUp.occurredAt).getTime(), node: <DecisionFollowUpItem key={`d${index}`} followUp={followUp} /> })),
 						].sort((a, b) => a.at - b.at).map(({ node }) => node)}
 					</div>
@@ -187,7 +188,8 @@ function RouteCard({ submissionId, route, artifacts }: { submissionId: string; r
 	);
 }
 
-function ReportGroup({ submissionId, report, index }: { submissionId: string; report: SubmissionReport; index: number }) {
+function ReportGroup({ report, index }: { report: SubmissionReport; index: number }) {
+	const reportId = String(report.id);
 	const artifacts = new Map(report.artifacts.map((artifact) => [String(artifact.id), artifact]));
 	const evidence = report.artifacts.filter((artifact) => artifact.kind === "user_evidence_original");
 	return (
@@ -204,20 +206,20 @@ function ReportGroup({ submissionId, report, index }: { submissionId: string; re
 						<div>Accepted: {formatDate(report.createdAt)}</div>
 						<div>Last update: {formatDate(report.updatedAt)}</div>
 					</div>
-					{evidence.length ? <div className="flex flex-wrap gap-x-4 gap-y-2"><span className="text-xs text-muted-foreground">Evidence:</span>{evidence.map((artifact) => <ArtifactLink key={String(artifact.id)} submissionId={submissionId} artifact={artifact} fallback="Evidence" />)}</div> : null}
+					{evidence.length ? <div className="flex flex-wrap gap-x-4 gap-y-2"><span className="text-xs text-muted-foreground">Evidence:</span>{evidence.map((artifact) => <ArtifactLink key={String(artifact.id)} reportId={reportId} artifact={artifact} fallback="Evidence" />)}</div> : null}
 				</CardContent>
 			</Card>
-			{report.routes.map((route) => <RouteCard key={String(route.id)} submissionId={submissionId} route={route} artifacts={artifacts} />)}
+			{report.routes.map((route) => <RouteCard key={String(route.id)} reportId={reportId} route={route} artifacts={artifacts} />)}
 		</div>
 	);
 }
 
 /** Reports tab: the primary phishing case followed by each independently routed backend case. */
-export function SubmissionReports({ submissionId, reports }: { submissionId: string; reports: SubmissionReport[] }) {
+export function SubmissionReports({ reports }: { reports: SubmissionReport[] }) {
 	if (reports.length === 0) return <div className="py-10 text-center text-muted-foreground">No reports yet.</div>;
 	return (
 		<div className="space-y-8">
-			{reports.map((report, index) => <ReportGroup key={String(report.id)} submissionId={submissionId} report={report} index={index} />)}
+			{reports.map((report, index) => <ReportGroup key={String(report.id)} report={report} index={index} />)}
 		</div>
 	);
 }

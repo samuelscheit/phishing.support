@@ -98,6 +98,8 @@ export const abuseJobTypes = [
 	"watch_redirector",
 	"link_campaign",
 	"describe_campaign",
+	/** Visit a reported site on its schedule after the report and record whether it is still up. */
+	"check_site_liveness",
 ] as const;
 export type AbuseJobType = (typeof abuseJobTypes)[number];
 

@@ -199,19 +199,27 @@ export async function fetchNetcraftSubmissionStatus(params: {
 	uuid: string;
 	fetch?: NetcraftFetch;
 }): Promise<NetcraftSubmissionStatus> {
-	const uuid = normalizeSubmissionId(params.uuid);
-	if (!uuid) throw new Error("Netcraft returned an invalid submission UUID.");
-	const request = params.fetch ?? fetch;
-	const status = parseSubmissionStatus(
-		await fetchNetcraftJson(request, netcraftSubmissionUrl(uuid), "submission-status"),
-		uuid,
-	);
-	if (!status) throw new Error("Netcraft submission-status response did not match the reviewed schema.");
+	const status = await fetchNetcraftSubmissionState(params);
 	const urls = parseSubmissionUrls(
-		await fetchNetcraftJson(request, netcraftSubmissionUrlsUrl(uuid), "submission-URLs"),
+		await fetchNetcraftJson(params.fetch ?? fetch, netcraftSubmissionUrlsUrl(status.uuid), "submission-URLs"),
 	);
 	if (!urls) throw new Error("Netcraft submission-URLs response did not match the reviewed schema.");
 	return { ...status, urls };
+}
+
+/** Read a submission's review state alone; a mail submission has no URL list to read. */
+export async function fetchNetcraftSubmissionState(params: {
+	uuid: string;
+	fetch?: NetcraftFetch;
+}): Promise<Omit<NetcraftSubmissionStatus, "urls">> {
+	const uuid = normalizeSubmissionId(params.uuid);
+	if (!uuid) throw new Error("Netcraft returned an invalid submission UUID.");
+	const status = parseSubmissionStatus(
+		await fetchNetcraftJson(params.fetch ?? fetch, netcraftSubmissionUrl(uuid), "submission-status"),
+		uuid,
+	);
+	if (!status) throw new Error("Netcraft submission-status response did not match the reviewed schema.");
+	return status;
 }
 
 /**

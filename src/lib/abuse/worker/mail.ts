@@ -1,5 +1,6 @@
 import { classifyProviderReply, extractVerifiedProviderLinks } from "../mail/reply";
 import { isGenericFormEscalationEnabled } from "../providers/generic_form";
+import { getProviderSubmissionProvider } from "../providers";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { AbuseRepository } from "../repository";
 import { contactRoute } from "../resolver/routes";
@@ -14,9 +15,11 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 	const route = await AbuseRepository.getRoute(message.routeId);
 	if (!route) return;
 	if (message.kind === "notification") {
-		// A provider status update about a report it accepted is part of the
-		// case record; it never changes the route by itself.
-		await AbuseRepository.setMailClassification(message.id, "acknowledged", [], "provider_notification");
+		// A provider status update about a report it received is part of the
+		// case record; it never changes the route by itself. Its classification
+		// is the decision it states, or receipt.
+		const verdict = getProviderSubmissionProvider(route.providerRegistryKey)?.inboundMail?.verdictOf?.(message.textBody ?? "");
+		await AbuseRepository.setMailClassification(message.id, verdict ?? "acknowledged", [], "provider_notification");
 		return;
 	}
 	if (message.kind === "bounce") {

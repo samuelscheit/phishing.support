@@ -1,3 +1,4 @@
+import { artifactResponse } from "@/lib/abuse/artifact_response";
 import { AbuseRepository } from "@/lib/abuse/repository";
 import { operatorHandler, parseId } from "@/lib/referral/http";
 
@@ -11,13 +12,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ arti
 		const reportId = parseId(new URL(request.url).searchParams.get("report") ?? "");
 		const artifact = artifactId !== undefined && reportId !== undefined ? await AbuseRepository.getArtifact(reportId, artifactId) : undefined;
 		if (!artifact || artifact.kind !== "referral_attachment") return new Response("Not found", { status: 404 });
-		return new Response(artifact.blob as unknown as BodyInit, {
-			headers: {
-				"content-type": `${artifact.mimeType}; charset=utf-8`,
-				"content-disposition": `attachment; filename="${artifact.name.replace(/[\r\n"\\]/g, "_")}"`,
-				"cache-control": "private, no-store",
-				"x-content-type-options": "nosniff",
-			},
-		});
+		return artifactResponse(artifact, { access: "private", charset: "utf-8" });
 	});
 }

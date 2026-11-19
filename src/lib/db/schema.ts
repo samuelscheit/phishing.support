@@ -206,3 +206,4 @@ export type MailIngest = InferSelectModel<typeof mailIngest>;
 // one migration history for both schemas.
 export * from "../abuse/schema";
 export * from "../campaign/schema";
+export * from "../liveness/schema";

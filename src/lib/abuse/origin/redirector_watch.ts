@@ -1,7 +1,7 @@
 import { parse } from "node-html-parser";
 import { z } from "zod";
 
-import { userAgent as DESKTOP_USER_AGENT } from "../../constants";
+import { browserRequestHeaders } from "../../constants";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { errorSummary } from "../../error_text";
 import { readResponseBody } from "../../network/bounded_fetch";
@@ -110,7 +110,7 @@ export async function checkRedirector(url: string, dependencies: RedirectorCheck
 			const answer = await fetchThroughPublicRedirects(current, {
 				...dependencies,
 				subject: "redirector",
-				headers: { "user-agent": DESKTOP_USER_AGENT, accept: "text/html,application/xhtml+xml,*/*;q=0.8", "accept-language": "en-US,en;q=0.9" },
+				headers: { ...browserRequestHeaders },
 				maxRedirects: HTTP_REDIRECTS_PER_PAGE,
 				timeoutMs: CHECK_TIMEOUT_MS,
 			});

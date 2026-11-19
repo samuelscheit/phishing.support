@@ -121,6 +121,10 @@ describe("Cloudflare correspondence polling", () => {
 		const followUps = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, route.id)).all().filter((job) => job.jobType === "follow_up_provider_decision");
 		expect(followUps).toHaveLength(1);
 		expect(followUps[0]).toMatchObject({ payload: { state: "denied", detail: "no_abuse_found" }, dedupeKey: `decision-follow-up:${route.id.toString()}:denied` });
+		// The denial is recorded as the provider's rejection; its emails stay unclassified.
+		const mail = (await AbuseRepository.listMailForReport(route.reportId)).filter((message) => message.routeId === route.id);
+		expect(mail.map(({ subject, classification }) => ({ subject, classification }))).toContainEqual({ subject: "Report status: denied", classification: "rejected" });
+		expect(mail.filter((message) => message.subject !== "Report status: denied").every((message) => message.classification === null)).toBe(true);
 	});
 
 	test("records Cloudflare's emails and status once, then schedules the next hourly read", async () => {
@@ -135,10 +139,10 @@ describe("Cloudflare correspondence polling", () => {
 		await pollProviderCorrespondence({ routeId: route.id, jobId: first!.id });
 		await pollProviderCorrespondence({ routeId: route.id, jobId: first!.id });
 		const mail = (await AbuseRepository.listMailForReport(reportId)).filter((message) => message.routeId === route.id);
-		expect(mail.map(({ kind, subject }) => ({ kind, subject }))).toEqual([
-			{ kind: "provider_api", subject: "ddfb9a8d1137a9e7: Abuse Report Confirmation" },
-			{ kind: "provider_api", subject: "[ddfb9a8d1137a9e7]: Response to your Phishing report" },
-			{ kind: "provider_api", subject: "Report status: accepted" },
+		expect(mail.map(({ kind, subject, classification }) => ({ kind, subject, classification }))).toEqual([
+			{ kind: "provider_api", subject: "ddfb9a8d1137a9e7: Abuse Report Confirmation", classification: null },
+			{ kind: "provider_api", subject: "[ddfb9a8d1137a9e7]: Response to your Phishing report", classification: null },
+			{ kind: "provider_api", subject: "Report status: accepted", classification: "acknowledged" },
 		]);
 		const queued = (await pollJobs(route.id)).filter((job) => job.id !== first!.id);
 		expect(queued).toHaveLength(1);
@@ -163,6 +167,26 @@ describe("Cloudflare correspondence polling", () => {
 			const statuses = (await AbuseRepository.listMailForReport(reportId)).filter((message) => message.routeId === route.id && message.subject === "Report status: accepted");
 			expect(statuses.map(({ correlationKey }) => correlationKey)).toEqual([`provider-api:cloudflare:status:${route.id.toString()}:accepted`]);
 		}
+	});
+
+	test("every change of review state is recorded, a return to an earlier one too, and the latest is the verdict", async () => {
+		Object.assign(process.env, environment);
+		await sqliteCloudflareSessionStore.writeSession(cloudflareSessionKey(cloudflareApiConfig(environment)), session);
+		let state = "accepted";
+		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? { result: { emails: [] }, success: true } : { ...detail, result: { ...detail.result, status: state } })) as typeof fetch;
+		const { reportId, route } = await submittedCloudflareRoute();
+		for (const next of ["accepted", "accepted", "denied", "denied", "accepted"]) {
+			state = next;
+			await pollProviderCorrespondence({ routeId: route.id, jobId: 1n });
+		}
+		const statuses = (await AbuseRepository.listMailForReport(reportId)).filter((message) => message.routeId === route.id).sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+		expect(statuses.map(({ subject, classification }) => [subject, classification])).toEqual([
+			["Report status: accepted", "acknowledged"],
+			["Report status: denied", "rejected"],
+			["Report status: accepted", "acknowledged"],
+		]);
+		expect(statuses[0]!.correlationKey).toBe(`provider-api:cloudflare:status:${route.id.toString()}:accepted`);
+		expect(statuses[2]!.correlationKey).toMatch(new RegExp(`^provider-api:cloudflare:status:${route.id.toString()}:accepted:\\d+$`));
 	});
 
 	test("reads soon after submitting, then hourly", () => {

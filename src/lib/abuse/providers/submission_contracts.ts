@@ -1,5 +1,5 @@
 import type { AccountIdentifierExtractor } from "../followup/account_identifiers";
-import type { AbuseTargetType } from "../schema";
+import type { AbuseMailClassification, AbuseTargetType } from "../schema";
 
 /**
  * Immutable provider metadata that generic direct-submission infrastructure
@@ -125,6 +125,8 @@ export type ProviderCorrespondence = {
 	messages: ProviderCorrespondenceMessage[];
 	/** Review state, for example `accepted` or `denied`, with the provider's reason. */
 	status?: { state: string; detail?: string };
+	/** The provider says the review is over (Netcraft's `pending: false`): no further reads are needed. */
+	final?: boolean;
 };
 
 /** Mail a provider sends to the service mailbox about reports it received. */
@@ -137,6 +139,11 @@ export type ProviderInboundMail = {
 	 * mail is not attached to a case a second time.
 	 */
 	confirmationIds?(text: string): string[];
+	/**
+	 * The decision a notification states, when it states one ("no threats
+	 * were found"). A notification without one is a receipt: acknowledged.
+	 */
+	verdictOf?(text: string): AbuseMailClassification | undefined;
 };
 
 /** A composed answer to a provider's review decision, with its evidence files. */
@@ -221,6 +228,12 @@ export type ProviderSubmissionProvider = {
 	 * receipt. The worker polls it for a bounded period after submission.
 	 */
 	fetchCorrespondence?(context: { confirmationId: string; signal?: AbortSignal }): Promise<ProviderCorrespondence>;
+	/**
+	 * What each review state `fetchCorrespondence` reports means for the
+	 * report, in the same terms as a classified mail reply. A state without an
+	 * entry (`processing`, `submitted`) is no decision yet.
+	 */
+	readonly reviewVerdicts?: Readonly<Record<string, AbuseMailClassification>>;
 	/** Provider entry point that consumes the ephemeral preflight state, when needed. */
 	submitPrepared?(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess>;
 };

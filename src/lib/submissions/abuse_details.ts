@@ -58,6 +58,8 @@ export type SubmissionReportArtifact = { id: bigint; name: string; kind: string;
 
 export type SubmissionReport = {
 	id: bigint;
+	/** The website or email case the report was made from; null for reports made through the API. */
+	submissionId: bigint | null;
 	description: string;
 	allegationCategory?: string;
 	status: string;
@@ -160,6 +162,7 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 
 	return {
 		id: report.id,
+		submissionId: report.submissionId,
 		description: report.description,
 		allegationCategory: report.allegationCategory,
 		status: report.status,
@@ -205,6 +208,12 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 			}),
 		artifacts,
 	};
+}
+
+/** The given reports with their provider routes and correspondence, in the order asked for; unknown ids are left out. */
+export async function getReportsByIds(reportIds: readonly bigint[]): Promise<SubmissionReport[]> {
+	const reports = await Promise.all(reportIds.map((id) => AbuseRepository.getReport(id)));
+	return Promise.all(reports.filter((report) => report !== undefined).map(hydrateSubmissionReport));
 }
 
 /** Every report owned by a submission, with its provider routes and correspondence. */

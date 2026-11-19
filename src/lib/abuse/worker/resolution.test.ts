@@ -379,7 +379,7 @@ describe("a resolution whose lookups failed", () => {
 		const routes = await AbuseRepository.listRoutes(created.reportId);
 		expect(routes.map((route) => route.providerDisplayName).sort()).toEqual(["Netcraft", "Render Abuse Contact"]);
 		const db = await getDb();
-		expect(db.select().from(abuseJobs).where(eq(abuseJobs.reportId, created.reportId)).all().map((job) => job.jobType).filter((type) => type !== "resolve_report").sort()).toEqual(["send_email", "submit_provider"]);
+		expect(db.select().from(abuseJobs).where(eq(abuseJobs.reportId, created.reportId)).all().map((job) => job.jobType).filter((type) => type !== "resolve_report").sort()).toEqual(["check_site_liveness", "send_email", "submit_provider"]);
 	});
 
 	test("keeps what it found once the retries are spent, so the report still goes out", async () => {

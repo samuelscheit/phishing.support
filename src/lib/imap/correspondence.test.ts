@@ -344,6 +344,25 @@ describe("provider notifications", () => {
 		expect(update).toMatchObject({ kind: "notification" });
 		await classifyReply(update!.id);
 		expect(await AbuseRepository.getRoute(netcraft.route.id)).toMatchObject({ status: "submitted" });
+		expect(await AbuseRepository.getMailMessage(update!.id)).toMatchObject({ classification: "acknowledged" });
+	});
+
+	test("Netcraft's finding of no threats is recorded as its rejection, without changing the route", async () => {
+		const netcraft = await netcraftRoute("lFQ9vJzdwxWau2LTPeu665VWSCpxiFGV");
+		await ingestFetchedMail({
+			uid: 578,
+			source: eml([
+				...icloudReceived("netcraft.com"),
+				"From: report-updates@netcraft.com",
+				"To: support@phishing.support",
+				"Subject: We've finished analysing your submission",
+				"Message-ID: <20261101055953.1234565C@notothen.netcraft.com>",
+			], "The submission you made to report.netcraft.com on 01-Nov-2026 at 05:57 UTC has been automatically analysed, and no threats were found.\r\n   1. https://report.netcraft.com/submission/lFQ9vJzdwxWau2LTPeu665VWSCpxiFGV"),
+		}, config, { createIntakeSubmission: noIntake });
+		const [update] = (await AbuseRepository.listMailForReport(netcraft.reportId)).filter((message) => message.routeId === netcraft.route.id);
+		await classifyReply(update!.id);
+		expect(await AbuseRepository.getMailMessage(update!.id)).toMatchObject({ kind: "notification", classification: "rejected", disposition: "provider_notification" });
+		expect(await AbuseRepository.getRoute(netcraft.route.id)).toMatchObject({ status: "submitted" });
 	});
 
 	test("Cloudflare's notification mail is left to its API correspondence", async () => {

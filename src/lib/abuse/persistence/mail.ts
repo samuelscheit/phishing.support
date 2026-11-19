@@ -326,7 +326,7 @@ export async function findBouncedOutboundRoute(messageIds: string[]): Promise<Ab
  */
 export async function recordProviderCorrespondence(params: {
 	route: AbuseProviderRoute;
-	messages: Array<{ id: string; subject: string; body: string; recipient?: string; sentAt: Date; from: string }>;
+	messages: Array<{ id: string; subject: string; body: string; recipient?: string; sentAt: Date; from: string; classification?: AbuseMailClassification }>;
 }): Promise<Array<{ id: bigint; providerMessageId: string }>> {
 	const db = await getDb();
 	return db.transaction((tx) => {
@@ -349,6 +349,7 @@ export async function recordProviderCorrespondence(params: {
 				subject: message.subject,
 				textBody: message.body,
 				correlationKey,
+				classification: message.classification ?? null,
 				processingAttempts: 0,
 				occurredAt: message.sentAt,
 				createdAt: timestamp,

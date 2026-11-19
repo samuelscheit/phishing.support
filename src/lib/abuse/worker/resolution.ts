@@ -1,3 +1,4 @@
+import { scheduleLivenessChecks } from "../../liveness/schedule";
 import { AbuseRepository } from "../repository";
 import type { AbuseTargetResolver } from "./shared";
 import type { ResolvedAbuseTarget } from "../resolver";
@@ -67,6 +68,7 @@ export async function saveResolvedTarget(reportId: bigint, targetId: bigint, res
 		resolverSnapshot: resolved.resolverSnapshot,
 		disposition: resolved.disposition,
 	});
+	if (resolved.status === "resolved") await scheduleLivenessChecks(targetId);
 	for (const routeInput of resolved.routes) {
 		const route = await AbuseRepository.upsertResolvedRoute(targetId, routeInput);
 		if (route.status !== "verified") continue;

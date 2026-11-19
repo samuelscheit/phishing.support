@@ -24,6 +24,8 @@ export const eranetProvider: ProviderSubmissionProvider = {
 	// Eranet answers in its portal; its mails only say that the status changed.
 	inboundMail: { senderDomains: ["eranet.com"] },
 	fetchCorrespondence: (context) => fetchEranetCorrespondence(context),
+	// "Submitted" and "material auditing" are its queue; "processing" means it confirmed the abuse.
+	reviewVerdicts: { "supplement required": "needs_more_information", processing: "acknowledged", "process completed": "acknowledged" },
 	// "Supplement required": Eranet could not confirm the abuse from the report and waits on more material.
 	decisionFollowUp: {
 		contestedStates: ["supplement required"],
