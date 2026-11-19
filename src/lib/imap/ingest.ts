@@ -1,6 +1,7 @@
 import { simpleParser } from "mailparser";
 
-import { MailIngestEntity, SubmissionsEntity } from "@/lib/db/entities";
+import { MailIngestEntity } from "@/lib/db/entities/mail_ingest";
+import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { matchProviderReply, storeProviderReply } from "@/lib/abuse/reply_ingest";
 import { normalizeMailbox } from "@/lib/abuse/mail/shared";
 import { extractEmlsFromIncomingMessage } from "@/lib/mail_forwarded";

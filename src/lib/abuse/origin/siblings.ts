@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { SubmissionsEntity } from "../../db/entities";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 import type { WebsiteHiddenFrame, WebsiteKitResource } from "../../website_types";
 import { normalizeDomain, normalizePublicHttpUrl } from "../security";
 import { throwIfAborted } from "../worker/shared";

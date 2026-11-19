@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 
 import { getDb } from "../../db";
-import { SubmissionsEntity } from "../../db/entities";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 import { submissions } from "../../db/schema";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import type { AnalyzeWebsiteOptions } from "../../website_ai";

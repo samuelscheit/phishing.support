@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { AnalysisClient } from "./analysis_run";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "./browser/fabric";
-import { SubmissionsEntity } from "./db/entities";
+import { SubmissionsEntity } from "./db/entities/submissions";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { scriptedVisitSession } from "./site_visit/test_helpers";
 import { websiteSubmissionDedupeKey } from "./submissions/website";

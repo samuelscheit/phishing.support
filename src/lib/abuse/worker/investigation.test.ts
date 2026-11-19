@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 
-import { SubmissionsEntity } from "../../db/entities";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { reportConfirmedWebsiteAbuse } from "../submission_reports";

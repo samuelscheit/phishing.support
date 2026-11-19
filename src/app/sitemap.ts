@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { SubmissionsEntity } from "@/lib/db/entities";
+import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { CampaignRepository } from "@/lib/campaign/repository";
 import { GUIDES } from "@/lib/seo/guides";
 import { absoluteUrl } from "@/lib/seo/site";

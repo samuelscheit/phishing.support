@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { AnalysisRunsEntity, SubmissionsEntity } from "./db/entities";
+import { AnalysisRunsEntity } from "./db/entities/analysis_runs";
+import { SubmissionsEntity } from "./db/entities/submissions";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { type AnalysisClient, runStreamedAnalysisRun } from "./analysis_run";
 

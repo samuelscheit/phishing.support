@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { ArtifactsEntity, SubmissionsEntity } from "../db/entities";
+import { ArtifactsEntity } from "../db/entities/artifacts";
+import { SubmissionsEntity } from "../db/entities/submissions";
 import type { Submission } from "../db/schema";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import type { ExfiltrationBackend } from "../exfiltration/types";

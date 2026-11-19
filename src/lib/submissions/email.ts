@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
-import { ArtifactsEntity, SubmissionsEntity } from "@/lib/db/entities";
+import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
+import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { generateId } from "@/lib/db/ids";
 import { analyzeMail } from "@/lib/mail_ai";
 import type { ReporterMetadata } from "@/lib/request_metadata";

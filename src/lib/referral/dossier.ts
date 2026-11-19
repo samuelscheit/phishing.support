@@ -1,7 +1,8 @@
 import { AbuseRepository } from "../abuse/repository";
 import { CampaignRepository, type CampaignMemberView } from "../campaign/repository";
 import type { CampaignIndicator } from "../campaign/schema";
-import { ArtifactsEntity, SubmissionsEntity } from "../db/entities";
+import { ArtifactsEntity } from "../db/entities/artifacts";
+import { SubmissionsEntity } from "../db/entities/submissions";
 import type { Submission } from "../db/schema";
 import { describeDataEntryField } from "../website_types";
 import { hostOf } from "../website_site";

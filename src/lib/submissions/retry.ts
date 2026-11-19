@@ -1,5 +1,6 @@
 import { AbuseRepository } from "@/lib/abuse/repository";
-import { AnalysisRunsEntity, SubmissionsEntity } from "@/lib/db/entities";
+import { AnalysisRunsEntity } from "@/lib/db/entities/analysis_runs";
+import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import type { SubmissionKind } from "@/lib/db/schema";
 
 /** A user-facing validation error for a retry that cannot safely be queued. */

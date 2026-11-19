@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { parse } from "node-html-parser";
 
 import type { BrowserIdentity } from "../../browser/page";
-import { ArtifactsEntity } from "../../db/entities";
+import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { buildWebsiteEvidence } from "../../evidence/package";
 import type { timestampEvidence } from "../../evidence/timestamp";
 import { extractPasteCommands } from "../../malware/paste_commands";

@@ -8,7 +8,8 @@ import { buildWebsiteEvidence, type WebsiteEvidencePackage } from "./evidence/pa
 import { buildVisitEvidence } from "./evidence/visit";
 import { WEBSITE_DEVICE_LABEL, type WebsiteRevisit } from "./website_types";
 import type { timestampEvidence } from "./evidence/timestamp";
-import { SubmissionsEntity, ArtifactsEntity } from "./db/entities";
+import { SubmissionsEntity } from "./db/entities/submissions";
+import { ArtifactsEntity } from "./db/entities/artifacts";
 import type { WebsiteSubmissionData } from "./db/schema";
 import { getInfo } from "./website_info";
 import { runStreamedAnalysisRun, type AnalysisClient } from "./analysis_run";

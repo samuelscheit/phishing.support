@@ -1,4 +1,4 @@
-import { SubmissionsEntity } from "@/lib/db/entities";
+import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import type { SubmissionKind, SubmissionStatus } from "@/lib/db/schema";
 import { SUBMISSION_FILTER_NAMES, SUBMISSION_FILTERS, submissionFilterOf, type SubmissionFilter } from "./filters";
 

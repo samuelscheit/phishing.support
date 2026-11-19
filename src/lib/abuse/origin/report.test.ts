@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 
-import { ArtifactsEntity, SubmissionsEntity } from "../../db/entities";
+import { ArtifactsEntity } from "../../db/entities/artifacts";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { createAbuseEmailDraft } from "../mail/draft";

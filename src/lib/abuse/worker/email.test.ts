@@ -5,7 +5,7 @@ import { validateAbuseReportRequest } from "../contracts";
 import { createAbuseEmailDraft, type AbuseEmailDraft } from "../mail/draft";
 import { sendAbuseEmailRoute } from "../mail/send";
 import { AbuseRepository } from "../repository";
-import { SubmissionsEntity } from "../../db/entities";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 import { emailRoute } from "../resolver/routes";
 import { reportConfirmedEmailPhishing } from "../submission_reports";
 import { sendEmail } from "./email";

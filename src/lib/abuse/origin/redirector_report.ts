@@ -1,4 +1,4 @@
-import { SubmissionsEntity } from "../../db/entities";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 import type { ReporterMetadata } from "../../request_metadata";
 import { hasPathTenants, websiteSite } from "../../website_site";
 import type { ReportableWebsiteFinding } from "../../website_types";

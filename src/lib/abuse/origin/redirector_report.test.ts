@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 
 import { getDb } from "../../db";
-import { SubmissionsEntity } from "../../db/entities";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { runReportInvestigation, type InvestigationDependencies } from "../../investigation/run";
 import { readInvestigationJobPayload } from "../../investigation/payload";

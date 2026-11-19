@@ -1,5 +1,6 @@
 import { AbuseRepository } from "../abuse/repository";
-import { ArtifactsEntity, SubmissionsEntity } from "../db/entities";
+import { ArtifactsEntity } from "../db/entities/artifacts";
+import { SubmissionsEntity } from "../db/entities/submissions";
 import { buildDossier, type Dossier, type DossierDependencies } from "../referral/dossier";
 import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "../website_capture_files";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";

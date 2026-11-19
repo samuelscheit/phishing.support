@@ -4,7 +4,8 @@ import sharp from "sharp";
 
 import type { AnalysisClient } from "./analysis_run";
 import { AbuseRepository } from "./abuse/repository";
-import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
+import { ArtifactsEntity } from "./db/entities/artifacts";
+import { SubmissionsEntity } from "./db/entities/submissions";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { retryFailedWebsiteAnalysis, websiteSubmissionDedupeKey } from "./submissions/website";
 import { capturedDocumentContent } from "./website_archive/text";

@@ -1,4 +1,4 @@
-import { SubmissionsEntity } from "../db/entities";
+import { SubmissionsEntity } from "../db/entities/submissions";
 import type { WebsiteSubmissionData } from "../db/schema";
 import { errorSummary } from "../error_text";
 import { isUrlscanBusy, searchUrlscan, urlscanDom, urlscanResponses, type UrlscanDependencies } from "../abuse/origin/urlscan";

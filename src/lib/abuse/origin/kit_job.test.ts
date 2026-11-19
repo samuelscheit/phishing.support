@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { SubmissionsEntity } from "../../db/entities";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import type { WebsiteSiteAssessment } from "../../website_types";
 import { validateAbuseReportRequest } from "../contracts";

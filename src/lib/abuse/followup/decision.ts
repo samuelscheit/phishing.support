@@ -1,5 +1,5 @@
 import { reporterBrowserIdentity } from "../../browser/reporter_identity";
-import { SubmissionsEntity } from "../../db/entities";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 import { errorText as describeError } from "../../error_text";
 import { abuseEmailCaseUrl } from "../mail/draft";
 import { sendAbuseEmailRoute } from "../mail/send";

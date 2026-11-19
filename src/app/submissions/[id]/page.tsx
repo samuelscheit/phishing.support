@@ -1,5 +1,5 @@
 import type { Metadata, ResolvingMetadata } from "next";
-import { SubmissionsEntity } from "@/lib/db/entities";
+import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { getSubmissionDetails } from "@/lib/submissions/details";
 import { notFound } from "next/navigation";
 import { SubmissionPageClient } from "./SubmissionPageClient";

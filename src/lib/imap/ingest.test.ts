@@ -2,7 +2,8 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 
 import { getDb } from "../db";
-import { MailIngestEntity, SubmissionsEntity } from "../db/entities";
+import { MailIngestEntity } from "../db/entities/mail_ingest";
+import { SubmissionsEntity } from "../db/entities/submissions";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "../abuse/contracts";
 import { sendAbuseEmailRoute } from "../abuse/mail/send";

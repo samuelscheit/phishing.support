@@ -3,7 +3,7 @@ import type OpenAI from "openai";
 
 import { analysisRetryDelayMs, describeAnalysisError, isRetryableAnalysisError } from "./analysis_retry";
 import { AnalysisStreamAttemptError, logAndPersistStream } from "./artifact";
-import { AnalysisRunsEntity } from "./db/entities";
+import { AnalysisRunsEntity } from "./db/entities/analysis_runs";
 import type { AnalysisRunKind } from "./db/schema";
 import { sleep } from "./sleep";
 import { getOpenAIClient } from "./openai_client";

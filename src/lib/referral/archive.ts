@@ -2,7 +2,7 @@ import { Uint8ArrayReader, ZipWriter } from "@zip.js/zip.js";
 import sanitizeFilename from "sanitize-filename";
 
 import { AbuseRepository } from "../abuse/repository";
-import { ArtifactsEntity } from "../db/entities";
+import { ArtifactsEntity } from "../db/entities/artifacts";
 import type { Dossier } from "./dossier";
 import { countryAnnexes } from "./annex";
 import { correspondenceFileName, correspondenceIndexText, dossierText, indicatorsCsv, siteAnalysisText, sitesCsv } from "./archive_text";

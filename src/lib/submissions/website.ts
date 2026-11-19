@@ -1,4 +1,5 @@
-import { ArtifactsEntity, SubmissionsEntity } from "@/lib/db/entities";
+import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
+import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { generateId } from "@/lib/db/ids";
 import { analyzeWebsite, type AnalyzeWebsiteOptions } from "@/lib/website_ai";
 import type { ReporterMetadata } from "@/lib/request_metadata";

@@ -1,7 +1,7 @@
 import next from "next";
 import { createServer } from "node:http";
 
-import { SubmissionsEntity } from "./lib/db/entities";
+import { SubmissionsEntity } from "./lib/db/entities/submissions";
 import { startWebsiteAutoRetries } from "./lib/submissions/website";
 import { retryInterruptedWebsiteAnalysis } from "./lib/website_ai";
 import { startAbuseWorker, stopAbuseWorker } from "./lib/abuse/worker";

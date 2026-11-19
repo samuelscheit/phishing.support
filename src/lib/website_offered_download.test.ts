@@ -3,7 +3,7 @@ import { Uint8ArrayReader, Uint8ArrayWriter, ZipWriter } from "@zip.js/zip.js";
 
 import type { AnalysisClient } from "./analysis_run";
 import { AbuseRepository } from "./abuse/repository";
-import { SubmissionsEntity } from "./db/entities";
+import { SubmissionsEntity } from "./db/entities/submissions";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { websiteSubmissionDedupeKey } from "./submissions/website";
 import { capturedDocumentContent } from "./website_archive/text";

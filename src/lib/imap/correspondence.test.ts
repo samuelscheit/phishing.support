@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { simpleParser } from "mailparser";
 
 import { getDb } from "../db";
-import { SubmissionsEntity } from "../db/entities";
+import { SubmissionsEntity } from "../db/entities/submissions";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "../abuse/contracts";
 import { sendAbuseEmailRoute } from "../abuse/mail/send";

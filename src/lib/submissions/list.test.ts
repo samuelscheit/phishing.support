@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { SubmissionsEntity } from "@/lib/db/entities";
+import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { useTemporaryDatabase } from "@/lib/db/test_helpers";
 import { GET } from "@/app/api/submissions/route";
 import { NextRequest } from "next/server";

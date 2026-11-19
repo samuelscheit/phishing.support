@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { SubmissionsEntity } from "./db/entities";
+import { SubmissionsEntity } from "./db/entities/submissions";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { getMailWebsiteUrls } from "./mail";
 import { handOffMailLinks, parseMail } from "./mail_ai";

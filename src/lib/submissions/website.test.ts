@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { AnalysisRunsEntity, ArtifactsEntity, SubmissionsEntity } from "../db/entities";
+import { AnalysisRunsEntity } from "../db/entities/analysis_runs";
+import { ArtifactsEntity } from "../db/entities/artifacts";
+import { SubmissionsEntity } from "../db/entities/submissions";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { reportConfirmedWebsiteAbuse } from "../abuse/submission_reports";
 import { getRetryableSubmission } from "./retry";

@@ -1,4 +1,4 @@
-import { SubmissionsEntity } from "../db/entities";
+import { SubmissionsEntity } from "../db/entities/submissions";
 import type { WebsiteSubmissionData } from "../db/schema";
 
 /** Record where a website case's pre-report investigation stands; it never changes the verdict. */

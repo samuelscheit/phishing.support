@@ -1,4 +1,5 @@
-import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
+import { ArtifactsEntity } from "./db/entities/artifacts";
+import { SubmissionsEntity } from "./db/entities/submissions";
 import { runStreamedAnalysisRun } from "./analysis_run";
 import { publishEvent } from "./event/event_transport";
 import { simpleParser } from "mailparser";

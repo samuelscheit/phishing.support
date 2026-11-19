@@ -1,5 +1,7 @@
 import { CampaignRepository } from "@/lib/campaign/repository";
-import { AnalysisRunsEntity, ArtifactsEntity, SubmissionsEntity } from "@/lib/db/entities";
+import { AnalysisRunsEntity } from "@/lib/db/entities/analysis_runs";
+import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
+import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import type { AnalysisRun, Artifact, Submission } from "@/lib/db/schema";
 import { getReportsForSubmission, type SubmissionReport } from "./abuse_details";
 

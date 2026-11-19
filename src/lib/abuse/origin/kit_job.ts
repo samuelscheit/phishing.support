@@ -1,4 +1,4 @@
-import { SubmissionsEntity } from "../../db/entities";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 import { createWebsiteSubmission } from "../../submissions/website";
 import { analyzeWebsite } from "../../website_ai";
 import { normalizePublicHttpUrl } from "../security";

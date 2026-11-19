@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import sharp from "sharp";
 
-import { SubmissionsEntity } from "../db/entities";
+import { SubmissionsEntity } from "../db/entities/submissions";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { sendAbuseEmailRoute } from "../abuse/mail/send";
 import { AbuseRepository } from "../abuse/repository";

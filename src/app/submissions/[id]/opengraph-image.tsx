@@ -1,4 +1,4 @@
-import { SubmissionsEntity } from "@/lib/db/entities";
+import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { shareCard, SHARE_CARD_SIZE } from "@/lib/seo/share_card";
 import { submissionSeo } from "@/lib/seo/submission";
 

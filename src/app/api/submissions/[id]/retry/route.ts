@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { SubmissionRetryError, retryFailedEmailAnalysis } from "@/lib/submissions/email";
 import { retryFailedWebsiteAnalysis } from "@/lib/submissions/website";
-import { SubmissionsEntity } from "@/lib/db/entities";
+import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 
 export const runtime = "nodejs";
 

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { SubmissionsEntity } from "../db/entities";
+import { SubmissionsEntity } from "../db/entities/submissions";
 import { AbuseRepository } from "../abuse/repository";
 import type { AbuseJob } from "../abuse/schema";
 import { throwIfAborted } from "../abuse/worker/shared";

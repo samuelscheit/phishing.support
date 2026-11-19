@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { serviceIdentity } from "../../../constants";
-import { SubmissionsEntity } from "../../../db/entities";
+import { SubmissionsEntity } from "../../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { AbuseRepository } from "../../repository";
 import { resolveAbuseTarget } from "../../resolver";

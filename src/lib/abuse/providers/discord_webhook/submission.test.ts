@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
-import { SubmissionsEntity } from "../../../db/entities";
+import { SubmissionsEntity } from "../../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { reportExfiltrationBackend } from "../../../exfiltration/reporting";
 import type { ExfiltrationBackend } from "../../../exfiltration/types";

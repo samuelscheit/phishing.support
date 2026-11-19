@@ -1,7 +1,8 @@
 import { AbuseRepository } from "../abuse/repository";
 import { kitFingerprints } from "../abuse/origin/siblings";
 import { isPopularSite, loadPopularDomains, type PopularDomains } from "../abuse/origin/popular_domains";
-import { SubmissionsEntity, ArtifactsEntity } from "../db/entities";
+import { SubmissionsEntity } from "../db/entities/submissions";
+import { ArtifactsEntity } from "../db/entities/artifacts";
 import type { Submission } from "../db/schema";
 import { fetchJson, type FetchImplementation } from "../network/bounded_fetch";
 import { mhtmlVisitorText } from "../website_archive/text";

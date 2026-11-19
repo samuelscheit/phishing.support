@@ -2,7 +2,7 @@ import { parse } from "node-html-parser";
 import { z } from "zod";
 
 import { userAgent as DESKTOP_USER_AGENT } from "../../constants";
-import { SubmissionsEntity } from "../../db/entities";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 import { errorSummary } from "../../error_text";
 import { readResponseBody } from "../../network/bounded_fetch";
 import { fetchThroughPublicRedirects, PublicRedirectError, type PublicRedirectDependencies } from "../../network/public_redirects";
