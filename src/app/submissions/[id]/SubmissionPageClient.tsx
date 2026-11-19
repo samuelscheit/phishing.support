@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ExternalLink, Mail, Globe, ShieldAlert } from "lucide-react";
+import { ArrowRight, ExternalLink, Mail, Globe, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import type { Artifact } from "@/lib/db/schema";
 import type { SubmissionDetail as ApiSubmissionDetail } from "@/lib/submissions/details";
@@ -47,6 +47,22 @@ function hostOfUrl(url: string): string {
 
 function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "kind">) {
 	return artifact.kind.startsWith("website_");
+}
+
+/**
+ * The way from a case to its campaign's page, which tells a visitor what to do
+ * and lists the group's other sites; `#host` makes that page name this site.
+ */
+function CampaignLink({ campaign, host }: { campaign: NonNullable<SubmissionDetail["campaign"]>; host?: string }) {
+	const several = campaign.siteCount > 1;
+	return (
+		<section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+			<p className="min-w-0 text-sm font-semibold">{several ? `One of ${campaign.siteCount} fake sites from the same group` : "A fake site"}</p>
+			<Link href={`/campaigns/${campaign.id}${host ? `#${host}` : ""}`} className="inline-flex shrink-0 items-center gap-2 rounded-xl border bg-background px-4 py-2.5 text-sm font-medium shadow-sm transition-colors hover:bg-accent">
+				{several ? `See all ${campaign.siteCount} sites and what to do` : "What to do"}<ArrowRight className="size-4" />
+			</Link>
+		</section>
+	);
 }
 
 export function SubmissionPageClient({ id, initialSubmission }: { id: string; initialSubmission?: SubmissionDetail | null }) {
@@ -302,6 +318,8 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 					</div>
 				</div>
 			</header>
+
+			{submission.campaign ? <CampaignLink campaign={submission.campaign} host={submission.data.kind === "website" ? hostOfUrl(submission.data.website.url) : undefined} /> : null}
 
 			<div className="grid items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
 				<div className="min-w-0 space-y-6">

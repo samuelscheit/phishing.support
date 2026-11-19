@@ -1,3 +1,4 @@
+import { CampaignRepository } from "@/lib/campaign/repository";
 import { AnalysisRunsEntity, ArtifactsEntity, SubmissionsEntity } from "@/lib/db/entities";
 import type { AnalysisRun, Artifact, Submission } from "@/lib/db/schema";
 import { getReportsForSubmission, type SubmissionReport } from "./abuse_details";
@@ -11,7 +12,15 @@ export type SubmissionDetail = Submission & {
 	/** Primary and discovered-backend reports, each with provider routes and replies. */
 	reports: SubmissionReport[];
 	artifacts: SubmissionArtifact[];
+	/** The campaign the site belongs to: its public page tells a visitor what to do and lists the group's other sites. */
+	campaign?: { id: string; siteCount: number };
 };
+
+async function campaignOf(submissionId: bigint): Promise<SubmissionDetail["campaign"]> {
+	const campaignId = await CampaignRepository.campaignForSubmission(submissionId);
+	if (campaignId === undefined) return undefined;
+	return { id: campaignId.toString(), siteCount: await CampaignRepository.memberCount(campaignId) };
+}
 
 export async function getSubmissionDetails(id: string): Promise<SubmissionDetail | undefined> {
 	let submissionId: bigint;
@@ -24,10 +33,11 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 	const submission = await SubmissionsEntity.get(submissionId);
 	if (!submission) return undefined;
 
-	const [analysisRuns, reports, artifacts] = await Promise.all([
+	const [analysisRuns, reports, artifacts, campaign] = await Promise.all([
 		AnalysisRunsEntity.listForSubmission(submissionId),
 		getReportsForSubmission(submissionId),
 		ArtifactsEntity.listForSubmission(submissionId),
+		campaignOf(submissionId),
 	]);
-	return { ...submission, analysisRuns, reports, artifacts };
+	return { ...submission, analysisRuns, reports, artifacts, ...(campaign ? { campaign } : {}) };
 }

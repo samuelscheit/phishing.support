@@ -236,20 +236,23 @@ function SiteDetail({ campaign, index, onStep }: { campaign: PublicCampaign; ind
 	);
 }
 
-function TechnicalRecord({ campaign }: { campaign: PublicCampaign }) {
+/** `embedded`: inside a section that already names it, so without its own heading. */
+export function TechnicalRecord({ campaign, embedded = false }: { campaign: PublicCampaign; embedded?: boolean }) {
 	const { technical } = campaign;
 	return (
 		<section className="space-y-6">
-			<div>
-				<h2 className="text-xl font-semibold">Technical record</h2>
-				<p className="text-sm text-muted-foreground">Everything we recorded about this campaign, for investigators, providers and researchers. Every value can be checked against the evidence files below.</p>
-			</div>
+			{!embedded && (
+				<div>
+					<h2 className="text-xl font-semibold">Technical record</h2>
+					<p className="text-sm text-muted-foreground">Everything we recorded about this campaign, for investigators, providers and researchers. Every value can be checked against the evidence files below.</p>
+				</div>
+			)}
 
 			<div className="space-y-2">
 				<h3 className="font-semibold">Where the entered data goes</h3>
 				<p className="text-sm text-muted-foreground">Observed when our browser filled the pages&apos; forms with synthetic values. Each page&apos;s visit record (<span className="font-mono text-xs">visit-record.json</span>, timestamped) documents every value entered and every request that carried one.</p>
 				{technical.destinations.length ? (
-					<TableShell head={["Destination", "Method", "Values received", "Pages"]}>
+					<TableShell head={["Destination", "Method", "Values received", "Sites"]}>
 						{technical.destinations.map((destination) => (
 							<tr key={`${destination.method} ${destination.endpoint}`}>
 								<td className="break-all font-mono text-xs">{destination.endpoint}{destination.sameSite && <span className="ml-2 rounded bg-muted px-1.5 py-0.5 font-sans text-[11px] font-semibold">same site</span>}</td>
@@ -262,14 +265,14 @@ function TechnicalRecord({ campaign }: { campaign: PublicCampaign }) {
 				) : <p className="text-sm text-muted-foreground">No page sent the values anywhere while we watched.</p>}
 				{technical.backends.map((backend) => (
 					<div key={backend.label + backend.details[0]?.[1]} className="rounded-xl border bg-card p-4">
-						<p className="mb-2 font-medium">{backend.label} <span className="text-sm font-normal text-muted-foreground">· {backend.siteCount} pages</span></p>
+						<p className="mb-2 font-medium">{backend.label} <span className="text-sm font-normal text-muted-foreground">· {plural(backend.siteCount, "site", "sites")}</span></p>
 						<dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-1 text-sm">
 							{backend.details.map(([name, value]) => <div key={name} className="contents"><dt className="text-muted-foreground">{name}</dt><dd className="break-all font-mono text-xs leading-5">{value}</dd></div>)}
 						</dl>
 					</div>
 				))}
 				{technical.payments.length > 0 && (
-					<TableShell head={["Payment account", "Kind", "Pages"]}>
+					<TableShell head={["Payment account", "Kind", "Sites"]}>
 						{technical.payments.map((payment) => <tr key={payment.value}><td className="break-all font-mono text-xs">{payment.value}</td><td>{payment.kind === "iban" ? "IBAN" : payment.kind}</td><td>{payment.siteCount}</td></tr>)}
 					</TableShell>
 				)}
@@ -277,9 +280,9 @@ function TechnicalRecord({ campaign }: { campaign: PublicCampaign }) {
 
 			{technical.kitFiles.length > 0 && (
 				<div className="space-y-2">
-					<h3 className="font-semibold">Kit files shared by the pages</h3>
-					<p className="text-sm text-muted-foreground">Identical bytes on several pages. None of them is a published library (checked against jsDelivr).</p>
-					<TableShell head={["SHA-256", "Size", "File", "Pages"]}>
+					<h3 className="font-semibold">Kit files shared by the sites</h3>
+					<p className="text-sm text-muted-foreground">Identical bytes on several sites. None of them is a published library (checked against jsDelivr).</p>
+					<TableShell head={["SHA-256", "Size", "File", "Sites"]}>
 						{technical.kitFiles.map((file) => (
 							<tr key={file.sha256}><td><Hash value={file.sha256} /></td><td className="whitespace-nowrap">{kb(file.size)}</td><td className="break-all font-mono text-xs">{file.path}</td><td>{file.siteCount} / {campaign.sites.length}</td></tr>
 						))}
@@ -290,27 +293,36 @@ function TechnicalRecord({ campaign }: { campaign: PublicCampaign }) {
 			{(technical.dns.length > 0 || technical.abuseContacts.length > 0) && (
 				<div className="space-y-2">
 					<h3 className="font-semibold">Infrastructure</h3>
-					<TableShell head={["Record", "Value", "Pages"]}>
-						{technical.dns.map((record) => <tr key={`${record.record}-${record.value}`}><td>{record.record}</td><td className="break-all font-mono text-xs">{record.value}</td><td>{record.siteCount}</td></tr>)}
-						{technical.abuseContacts.map((contact) => <tr key={contact}><td>Abuse contact</td><td className="font-mono text-xs">{contact}</td><td /></tr>)}
-					</TableShell>
+					{technical.dns.length > 0 && (
+						<TableShell head={["Record", "Value", "Sites"]}>
+							{technical.dns.map((record) => <tr key={`${record.record}-${record.value}`}><td>{record.record}</td><td className="break-all font-mono text-xs">{record.value}</td><td>{record.siteCount}</td></tr>)}
+						</TableShell>
+					)}
+					{technical.abuseContacts.length > 0 && (
+						<>
+							<h4 className="pt-2 text-sm font-semibold">Abuse contacts</h4>
+							<ul className="columns-1 gap-6 break-all font-mono text-xs leading-6 sm:columns-2">{technical.abuseContacts.map((contact) => <li key={contact}>{contact}</li>)}</ul>
+						</>
+					)}
 				</div>
 			)}
 
 			<div className="space-y-2">
-				<h3 className="font-semibold">Per page: reports and evidence files</h3>
+				<h3 className="font-semibold">Per site: reports and evidence files</h3>
 				<p className="text-sm text-muted-foreground">Each capture is an MHTML archive, a screenshot, the screenshot with address and time stamped in, a manifest of SHA-256 hashes, and an RFC 3161 timestamp token over that manifest from an independent authority.</p>
 				{campaign.sites.map((site, index) => (
-					<details key={site.submissionId} className="group rounded-xl border bg-card" open={index === 0}>
+					// Embedded in a card already, the sites are plain rows instead of cards of their own, all closed.
+					<details key={site.submissionId} className={cn("group", embedded ? "border-b first-of-type:border-t" : "rounded-xl border bg-card")} open={!embedded && index === 0}>
 						<summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-sm [&::-webkit-details-marker]:hidden">
 							<span className="min-w-0"><Host site={site} platform={campaign.platform} /></span>
 							<span className="shrink-0 text-muted-foreground">{plural(site.reports.length, "report", "reports")} · {plural(site.evidence.length, "file", "files")} <span className="inline-block transition-transform group-open:rotate-180">▾</span></span>
 						</summary>
 						<div className="space-y-3 border-t p-4">
 							{site.reports.length > 0 && (
-								<TableShell head={["Reported to", "Channel", "When", "State", "Ticket"]}>
-									{site.reports.map((report) => (
-										<tr key={`${report.provider}-${report.channel}`}><td>{report.provider}</td><td className="break-all font-mono text-xs">{report.channel}</td><td className="whitespace-nowrap">{report.reportedAt ? formatUtcDateTime(report.reportedAt) : "–"}</td><td><Pill tone={REPORT_STATE[report.state].tone}>{REPORT_STATE[report.state].label}</Pill></td><td className="break-all font-mono text-xs">{report.ticket ?? "–"}</td></tr>
+								<TableShell head={["Reported to", "State", "When", "Channel", "Ticket"]}>
+									{site.reports.map((report, index) => (
+										// A site can be reported twice through one channel (a retry), so the position keeps rows apart.
+										<tr key={`${index}:${report.provider}-${report.channel}`}><td>{report.provider}</td><td><Pill tone={REPORT_STATE[report.state].tone}>{REPORT_STATE[report.state].label}</Pill></td><td className="whitespace-nowrap">{report.reportedAt ? formatUtcDateTime(report.reportedAt) : "–"}</td><td className="whitespace-nowrap font-mono text-xs">{report.channel}</td><td className="break-all font-mono text-xs">{report.ticket ?? "–"}</td></tr>
 									))}
 								</TableShell>
 							)}
@@ -331,7 +343,7 @@ function TechnicalRecord({ campaign }: { campaign: PublicCampaign }) {
 function TableShell({ head, children }: { head: string[]; children: React.ReactNode }) {
 	return (
 		<div className="overflow-x-auto rounded-xl border bg-card">
-			<table className="w-full text-sm [&_td]:border-t [&_td]:px-3 [&_td]:py-2 [&_td]:align-middle [&_th]:px-3 [&_th]:py-2">
+			<table className="w-full min-w-[36rem] text-sm [&_td]:border-t [&_td]:px-3 [&_td]:py-2 [&_td]:align-middle [&_th]:px-3 [&_th]:py-2">
 				<thead className="bg-muted/50 text-left text-xs text-muted-foreground"><tr>{head.map((name, index) => <th key={index} className="font-semibold">{name}</th>)}</tr></thead>
 				<tbody>{children}</tbody>
 			</table>
