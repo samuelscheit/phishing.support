@@ -10,7 +10,7 @@ import { abuseJobs } from "../abuse/schema";
 import type { WebsiteKitResource } from "../website_types";
 import type { LinkDependencies } from "./link";
 import { CampaignRepository } from "./repository";
-import { enqueueCampaignSweep, linkSiteToCampaign } from "./sweep";
+import { CAMPAIGN_RULES_VERSION, enqueueCampaignSweep, enqueueRulesSweep, linkSiteToCampaign } from "./sweep";
 
 useTemporaryDatabase();
 
@@ -56,6 +56,31 @@ describe("the campaign sweep", () => {
 		// Another label, such as an operator's sweep, queues them again.
 		await enqueueCampaignSweep("manual-2026-11-21", now);
 		expect(await jobs("link_campaign")).toHaveLength(4);
+	});
+
+	test("a rules sweep drops the jobs an older rules sweep still has waiting, never the ones that ran or a site's own link", async () => {
+		await site(1n, "first-rules-test.com");
+		await site(2n, "second-rules-test.com");
+		const now = new Date("2026-11-20T00:00:00Z");
+		await enqueueCampaignSweep(`rules-v${CAMPAIGN_RULES_VERSION - 2}`, now);
+		await enqueueCampaignSweep(`rules-v${CAMPAIGN_RULES_VERSION - 1}`, now);
+		await enqueueCampaignSweep("manual-2026-11-19", now);
+		const reportId = (await AbuseRepository.getReportForSubmission(1n))!.id;
+		await AbuseRepository.enqueueJob({ jobType: "link_campaign", reportId, payload: { submissionId: "1" }, dedupeKey: "campaign-link:1" });
+		// One job of the oldest sweep already ran.
+		const db = await getDb();
+		const [ran] = (await jobs("link_campaign")).filter((job) => job.dedupeKey === `campaign-link:rules-v${CAMPAIGN_RULES_VERSION - 2}:1`);
+		db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.id, ran!.id)).run();
+
+		expect(await enqueueRulesSweep()).toBe(2);
+		expect((await jobs("link_campaign")).map((job) => `${job.dedupeKey} ${job.status}`).sort()).toEqual([
+			"campaign-link:1 queued",
+			"campaign-link:manual-2026-11-19:1 queued",
+			"campaign-link:manual-2026-11-19:2 queued",
+			`campaign-link:rules-v${CAMPAIGN_RULES_VERSION - 2}:1 completed`,
+			`campaign-link:rules-v${CAMPAIGN_RULES_VERSION}:1 queued`,
+			`campaign-link:rules-v${CAMPAIGN_RULES_VERSION}:2 queued`,
+		]);
 	});
 
 	test("a site is linked, described and searched; urlscan failing is recorded and leaves it linked, urlscan busy puts the backfill off", async () => {

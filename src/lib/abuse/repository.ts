@@ -25,6 +25,7 @@ import { approveDraftedRoute, getCampaignReport, listRoutesWithCaseReference, sa
 import {
 	claimNextJob,
 	completeJob,
+	discardQueuedJobs,
 	enqueueJob,
 	enqueueJobOnce,
 	failJob,
@@ -154,6 +155,7 @@ export const AbuseRepository = {
 	getArtifact,
 	enqueueJob,
 	enqueueJobOnce,
+	discardQueuedJobs,
 	hasJob,
 	claimNextJob,
 	renewJobLease,

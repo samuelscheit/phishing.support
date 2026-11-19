@@ -37,8 +37,15 @@ export async function enqueueCampaignSweep(label: string, now = new Date()): Pro
 	return queued;
 }
 
-/** The sweep the current rules ask for; a start that already queued it queues nothing. */
-export function enqueueRulesSweep(): Promise<number> {
+const RULES_SWEEP = "campaign-link:rules-v";
+
+/**
+ * The sweep the current rules ask for; a start that already queued it queues
+ * nothing. An older rules sweep still waiting is dropped: the new one links
+ * every site again anyway.
+ */
+export async function enqueueRulesSweep(): Promise<number> {
+	await AbuseRepository.discardQueuedJobs(RULES_SWEEP, `${RULES_SWEEP}${CAMPAIGN_RULES_VERSION}:`);
 	return enqueueCampaignSweep(`rules-v${CAMPAIGN_RULES_VERSION}`);
 }
 

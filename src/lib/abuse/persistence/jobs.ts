@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, lte, ne, or } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, like, lte, ne, notLike, or } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { generateId } from "../../db/ids";
@@ -62,6 +62,19 @@ export async function enqueueJob(params: {
 		},
 		{ behavior: "immediate" }
 	);
+}
+
+/**
+ * Drop the jobs still waiting under a dedupe-key prefix, except those under
+ * `keep`: work a newer batch makes pointless (an older sweep's relinks once
+ * the rules changed again). Running and finished jobs stay on record.
+ */
+export async function discardQueuedJobs(prefix: string, keep: string): Promise<number> {
+	const db = await getDb();
+	return db.delete(abuseJobs)
+		.where(and(eq(abuseJobs.status, "queued"), like(abuseJobs.dedupeKey, `${prefix}%`), notLike(abuseJobs.dedupeKey, `${keep}%`)))
+		.returning({ id: abuseJobs.id })
+		.all().length;
 }
 
 /** Whether any job, in any state, was ever queued under this dedupe key. */

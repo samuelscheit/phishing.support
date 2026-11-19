@@ -83,17 +83,25 @@ const EXTERNAL_JOB_TYPES = [
 const SWEEP_JOB_TYPES = ["report_origin_host"] as const satisfies readonly AbuseJobType[];
 
 /**
- * Campaign and kit discovery: linking a site (urlscan for kit files a capture
- * did not record, jsDelivr for libraries), searching a campaign's kit on
- * urlscan, and the full browser analysis of each site it turns up. A sweep
- * queues hundreds of these and a search up to a hundred analyses; one slot
- * of their own keeps them from delaying the reports being delivered.
+ * Linking a site into its campaign (urlscan for kit files a capture did not
+ * record, jsDelivr for libraries): seconds each. A slot of its own, so a site
+ * just reported joins its campaign at once instead of waiting hours behind
+ * the browser analyses of discovery.
  */
-const DISCOVERY_JOB_TYPES = ["link_campaign", "search_campaign_kits", "analyze_kit_sibling"] as const satisfies readonly AbuseJobType[];
+const LINK_JOB_TYPES = ["link_campaign"] as const satisfies readonly AbuseJobType[];
+
+/**
+ * Kit discovery: searching a campaign's kit on urlscan and the full browser
+ * analysis of each site it turns up, minutes each. A search queues up to a
+ * hundred analyses; one slot of their own keeps them from delaying the
+ * reports being delivered and the linking of reported sites.
+ */
+const DISCOVERY_JOB_TYPES = ["search_campaign_kits", "analyze_kit_sibling"] as const satisfies readonly AbuseJobType[];
 
 const CONTROL_JOB_FILTER: JobClaimFilter = { jobTypes: CONTROL_JOB_TYPES };
 const EXTERNAL_JOB_FILTER: JobClaimFilter = { jobTypes: EXTERNAL_JOB_TYPES };
 const SWEEP_JOB_FILTER: JobClaimFilter = { jobTypes: SWEEP_JOB_TYPES };
+const LINK_JOB_FILTER: JobClaimFilter = { jobTypes: LINK_JOB_TYPES };
 const DISCOVERY_JOB_FILTER: JobClaimFilter = { jobTypes: DISCOVERY_JOB_TYPES };
 
 /** The longest any error may ask a job to wait before its next attempt. */
@@ -254,6 +262,7 @@ export class AbuseWorker {
 			...Array.from({ length: this.controlConcurrency }, () => this.runLoop(CONTROL_JOB_FILTER, this.controlJobTimeoutMs)),
 			...Array.from({ length: this.externalConcurrency }, () => this.runLoop(EXTERNAL_JOB_FILTER, this.externalJobTimeoutMs)),
 			this.runLoop(SWEEP_JOB_FILTER, this.sweepJobTimeoutMs),
+			this.runLoop(LINK_JOB_FILTER, this.externalJobTimeoutMs),
 			this.runLoop(DISCOVERY_JOB_FILTER, this.externalJobTimeoutMs),
 		];
 		this.stopSamplePurge = startSamplePurgeSchedule();
