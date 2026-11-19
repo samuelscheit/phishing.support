@@ -11,7 +11,7 @@ import { formatUtcDateTime } from "@/lib/date_time";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { recursiveAbuseContact } from "../web_lib/util";
+import { recursiveAbuseContact } from "@/lib/rdap_abuse_contact";
 
 function safeFormatDate(value?: string) {
 	if (!value) return null;
