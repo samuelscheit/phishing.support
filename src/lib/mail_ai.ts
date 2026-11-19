@@ -4,6 +4,7 @@ import { publishEvent } from "./event/event_transport";
 import { simpleParser } from "mailparser";
 import { analyzeHeaders, getAddressesText, getMailImage, getMailWebsiteUrls } from "./mail";
 import { getInfo } from "./website_info";
+import { cleanPrivateInformation, isServiceAddress } from "./mail_redaction";
 import * as toon from "@toon-format/toon";
 import { reportConfirmedEmailPhishing } from "./abuse/submission_reports";
 import { smtpSender, smtpTransport } from "./mail_config";
@@ -31,210 +32,6 @@ export function buildMailEvidence(mail: MailData, analysisText?: string) {
 async function emitStep(streamId: bigint | string | undefined, step: string, progress: number) {
 	if (!streamId) return;
 	await publishEvent(`run:${streamId}`, { type: "analysis.step", step, progress });
-}
-
-function escapeRegExp(value: string) {
-	return value.replaceAll(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
-}
-
-function quotedPrintableEncodedWord(value: string) {
-	return Array.from(Buffer.from(value, "utf-8"))
-		.map((byte) => {
-			const char = String.fromCharCode(byte);
-			if (/^[A-Za-z0-9!*+\-/]$/.test(char)) return char;
-			if (char === " ") return "_";
-			return `=${byte.toString(16).toUpperCase().padStart(2, "0")}`;
-		})
-		.join("");
-}
-
-function mimeEncodedWordVariants(value: string) {
-	const base64 = Buffer.from(value, "utf-8").toString("base64");
-	const quotedPrintable = quotedPrintableEncodedWord(value);
-	return [
-		`=?utf-8?B?${base64}?=`,
-		`=?UTF-8?B?${base64}?=`,
-		`=?utf-8?b?${base64}?=`,
-		`=?UTF-8?b?${base64}?=`,
-		`=?utf-8?Q?${quotedPrintable}?=`,
-		`=?UTF-8?Q?${quotedPrintable}?=`,
-		`=?utf-8?q?${quotedPrintable}?=`,
-		`=?UTF-8?q?${quotedPrintable}?=`,
-	];
-}
-
-function extractEmails(value: string | undefined) {
-	return value?.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
-}
-
-function extractFormattedNames(value: string | undefined) {
-	if (!value) return [];
-	const names: string[] = [];
-	for (const line of value.split(/\r?\n/)) {
-		const match = /^"(.+)"\s*<[^>]*>$/.exec(line.trim());
-		if (match?.[1]) names.push(match[1]);
-	}
-	return names;
-}
-
-const DELIVERY_RECIPIENT_HEADERS = new Set([
-	"to",
-	"cc",
-	"bcc",
-	"delivered-to",
-	"x-original-to",
-	"x-delivered-to",
-	"envelope-to",
-	"x-envelope-to",
-	"x-forwarded-to",
-	"x-rcpt-to",
-	"original-recipient",
-	"final-recipient",
-]);
-
-function extractDeliveryHeaderEmails(eml: string | undefined, senderAddress?: string) {
-	if (!eml) return [];
-	const headerEnd = eml.search(/\r?\n\r?\n/);
-	const rawHeaders = (headerEnd >= 0 ? eml.slice(0, headerEnd) : eml).replace(/\r?\n[ \t]+/g, " ");
-	const senderLower = senderAddress?.trim().toLowerCase();
-	const found: string[] = [];
-
-	for (const line of rawHeaders.split(/\r?\n/)) {
-		const colonIndex = line.indexOf(":");
-		if (colonIndex <= 0) continue;
-		const key = line.slice(0, colonIndex).trim().toLowerCase();
-		const value = line.slice(colonIndex + 1);
-		if (DELIVERY_RECIPIENT_HEADERS.has(key)) {
-			found.push(...extractEmails(value));
-		} else if (key === "received" || key === "x-received") {
-			for (const match of value.matchAll(/\bfor\s+<?([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})>?/gi)) {
-				if (match[1]) found.push(match[1]);
-			}
-		}
-	}
-
-	return found.filter((email) => {
-		const lower = email.toLowerCase();
-		return lower !== senderLower && !lower.endsWith("@phishing.support");
-	});
-}
-
-function redactionTerms(mail: MailData) {
-	const hopRecipients =
-		mail.headers?.routing?.totalHops?.flatMap((hop) =>
-			typeof hop?.for === "string" ? extractEmails(hop.for) : [],
-		) ?? [];
-
-	return Array.from(
-		new Set(
-			[
-				mail.to_object?.address,
-				mail.to_object?.name,
-				...extractEmails(mail.to),
-				...extractEmails(mail.cc),
-				...extractEmails(mail.bcc),
-				...extractFormattedNames(mail.to),
-				...extractFormattedNames(mail.cc),
-				...extractFormattedNames(mail.bcc),
-				...hopRecipients,
-				...extractDeliveryHeaderEmails(mail.eml, mail.from_object?.address),
-			]
-				.map((x) => x?.trim())
-				.filter(
-					(x): x is string =>
-						x !== undefined &&
-						x.length > 3 &&
-						x.toLowerCase() !== "[redacted]" &&
-						x.toLowerCase() !== "redacted",
-				),
-		),
-	);
-}
-
-function emailRedactionVariants(email: string): Array<{ text: string; caseSensitive?: boolean }> {
-	const atIndex = email.lastIndexOf("@");
-	const local = atIndex > 0 ? email.slice(0, atIndex) : "";
-	const domain = atIndex > 0 ? email.slice(atIndex + 1) : "";
-	const base64 = Buffer.from(email, "utf-8").toString("base64");
-	const base64Unpadded = base64.replace(/=+$/, "");
-	const base64Url = Buffer.from(email, "utf-8").toString("base64url");
-	const verpAndEncoded =
-		local && domain
-			? [
-					`${local}=3D${domain}`,
-					`${local}=3d${domain}`,
-					`${domain}=3D${local}`,
-					`${domain}=3d${local}`,
-					`${local}=${domain}`,
-					`${domain}=${local}`,
-					`${local}=40${domain}`,
-					`${local}%40${domain}`,
-				]
-			: [];
-	return [
-		...mimeEncodedWordVariants(email).map((text) => ({ text })),
-		{ text: email },
-		...verpAndEncoded.map((text) => ({ text })),
-		{ text: encodeURIComponent(email) },
-		...(base64Unpadded.length >= 8
-			? [
-					{ text: base64, caseSensitive: true },
-					{ text: base64Url, caseSensitive: true },
-					{ text: base64Unpadded, caseSensitive: true },
-				]
-			: []),
-	];
-}
-
-function redactString(value: string, terms: string[]) {
-	let cleaned = value;
-	for (const term of terms) {
-		if (term.includes("@")) {
-			for (const variant of emailRedactionVariants(term)) {
-				if (!variant.text) continue;
-				const escaped = escapeRegExp(variant.text);
-				cleaned = cleaned.replace(new RegExp(escaped, variant.caseSensitive ? "g" : "gi"), "[redacted]");
-			}
-		} else {
-			const qpBody = quotedPrintableEncodedWord(term).replaceAll("_", " ");
-			const escapedQuoted = term.replaceAll(/([\\()"'])/g, "\\$1");
-			const directVariants = [
-				...mimeEncodedWordVariants(term),
-				...(qpBody !== term ? [qpBody] : []),
-				...(escapedQuoted !== term ? [escapedQuoted] : []),
-			];
-			for (const variant of directVariants) {
-				if (!variant) continue;
-				const escaped = escapeRegExp(variant);
-				cleaned = cleaned.replace(new RegExp(escaped, "gi"), "[redacted]");
-			}
-			const escaped = escapeRegExp(term);
-			cleaned = cleaned.replace(new RegExp(`(^|[^\\p{L}\\p{N}_])(${escaped})(?=$|[^\\p{L}\\p{N}_])`, "giu"), "$1[redacted]");
-		}
-	}
-	return cleaned;
-}
-
-function recursiveClean(node: any, info: string[]): any {
-	if (Array.isArray(node)) {
-		return node.map((x) => recursiveClean(x, info));
-	} else if (node && typeof node === "object") {
-		const cleaned: any = {};
-		for (const [key, value] of Object.entries(node)) {
-			if (value !== undefined && value !== null) {
-				cleaned[key] = recursiveClean(value, info);
-			}
-		}
-		return cleaned;
-	} else if (typeof node === "string") {
-		return redactString(node, info);
-	} else {
-		return node;
-	}
-}
-
-export function cleanPrivateInformation(mail: MailData) {
-	return recursiveClean(mail, redactionTerms(mail)) as MailData;
 }
 
 export type ParseMailDependencies = {
@@ -307,59 +104,7 @@ export async function handOffMailLinks(params: {
 	return linked;
 }
 
-export async function analyzeMail(
-	emlContent: string,
-	stream_id: bigint,
-	options: { reuseEvidenceArtifacts?: boolean } = {}
-) {
-	try {
-		const originalMail = await parseMail(emlContent);
-		const mail = cleanPrivateInformation(originalMail);
-
-		await emitStep(stream_id, "start", 0);
-		await SubmissionsEntity.update(stream_id, { status: "running", data: { kind: "email", email: mail } });
-
-		let screenshotPng: Buffer | undefined;
-		if (options.reuseEvidenceArtifacts) {
-			const stored = (await ArtifactsEntity.listForSubmission(stream_id)).find((artifact) => artifact.kind === "screenshot");
-			screenshotPng = stored ? (await ArtifactsEntity.get(stored.id))?.blob : undefined;
-		} else {
-			try {
-				const image = await getMailImage(mail);
-				screenshotPng = image;
-				await ArtifactsEntity.saveBuffer({
-					submissionId: stream_id,
-					name: "mail.png",
-					kind: "screenshot",
-					mimeType: "image/png",
-					buffer: image,
-				});
-			} catch {
-				// Screenshot generation is supplementary evidence and must not block analysis.
-			}
-		}
-
-		if (!options.reuseEvidenceArtifacts) {
-			await ArtifactsEntity.saveBuffer({
-				submissionId: stream_id,
-				name: "mail.eml",
-				kind: "eml",
-				mimeType: "message/rfc822",
-				buffer: Buffer.from(mail.eml, "utf-8"),
-			});
-		}
-
-		await emitStep(stream_id, "analysis_run", 30);
-
-		const { result: analysis } = await runStreamedAnalysisRun({
-			submissionId: stream_id,
-			analysisKind: "analysis",
-			options: {
-				model: defaultResponseModel,
-				input: [
-					{
-						role: "system",
-						content: `You are an expert email phishing analyst. Your task is to determine whether the email below is phishing, malicious, or legitimate.
+const ANALYSIS_SYSTEM_PROMPT = `You are an expert email phishing analyst. Your task is to determine whether the email below is phishing, malicious, or legitimate.
 
 Your analysis must include:
 1) Brand impersonation check
@@ -375,129 +120,200 @@ Your analysis must include:
 	- Reply-To mismatch
 	- Received chain anomalies, unusual sending IP/ASN or geolocation (if inferable)
 4) Content red flags:
-	- credential collection, payment request, QR codes, fake invoices, “verify account”, “unusual activity”, etc.`,
-					},
-					{
-						role: "user",
-						content: `analyze this email:
-${toon.encode({ ...mail, eml: undefined })}`,
-					},
-				],
-				reasoning: defaultReasoning,
-				tools: [{ type: "web_search" }],
-				stream: true,
-			},
+	- credential collection, payment request, QR codes, fake invoices, “verify account”, “unusual activity”, etc.`;
+
+const CLASSIFICATION_SYSTEM_PROMPT = `Classify the email from the supplied evidence. Answer {"phishing":true} if the email is phishing, credential theft, payment fraud, delivery-scam abuse, malicious, or strongly impersonates a trusted brand. Answer {"phishing":false} only when the evidence supports a legitimate/benign email. Do not treat SPF/DKIM/DMARC pass as proof of legitimacy when the authenticated domain itself is unrelated to the impersonated brand. Provide no other text.`;
+
+type ReporterNotification = { subject: string; body: string };
+
+/**
+ * The mail screenshot and the raw EML are evidence artifacts. A re-run reuses
+ * the stored screenshot instead of re-rendering the mail; a fresh run renders
+ * it (best effort, since a missing screenshot must not block analysis) and
+ * stores both.
+ */
+async function collectEvidenceArtifacts(submissionId: bigint, mail: MailData, reuseEvidenceArtifacts: boolean): Promise<Buffer | undefined> {
+	if (reuseEvidenceArtifacts) {
+		const stored = (await ArtifactsEntity.listForSubmission(submissionId)).find((artifact) => artifact.kind === "screenshot");
+		return stored ? (await ArtifactsEntity.get(stored.id))?.blob : undefined;
+	}
+
+	let screenshotPng: Buffer | undefined;
+	try {
+		screenshotPng = await getMailImage(mail);
+		await ArtifactsEntity.saveBuffer({
+			submissionId,
+			name: "mail.png",
+			kind: "screenshot",
+			mimeType: "image/png",
+			buffer: screenshotPng,
 		});
+	} catch {
+		// Screenshot generation is supplementary evidence and must not block analysis.
+	}
 
-		await emitStep(stream_id, "structured_response", 70);
+	await ArtifactsEntity.saveBuffer({
+		submissionId,
+		name: "mail.eml",
+		kind: "eml",
+		mimeType: "message/rfc822",
+		buffer: Buffer.from(mail.eml, "utf-8"),
+	});
+	return screenshotPng;
+}
 
-		const { result: structuredResponse } = await runStreamedAnalysisRun({
-			submissionId: stream_id,
-			analysisKind: "classification",
-			options: {
-				stream: true,
-				model: defaultResponseModel,
-				input: [
-					{
-						role: "system",
-						content: `Classify the email from the supplied evidence. Answer {"phishing":true} if the email is phishing, credential theft, payment fraud, delivery-scam abuse, malicious, or strongly impersonates a trusted brand. Answer {"phishing":false} only when the evidence supports a legitimate/benign email. Do not treat SPF/DKIM/DMARC pass as proof of legitimacy when the authenticated domain itself is unrelated to the impersonated brand. Provide no other text.`,
-					},
-					{
-						role: "user",
-						content: `Evidence:
-${buildMailEvidence(mail, analysis.output_text)}`,
-					},
-				],
-				text: {
-					format: {
-						type: "json_schema",
-						name: "PhishingResult",
-						schema: {
-							type: "object",
-							properties: {
-								phishing: { type: "boolean" },
-							},
-							required: ["phishing"],
-							additionalProperties: false,
+/** The first model run: a free-form web-searching analysis of the mail. */
+async function runMailAnalysis(submissionId: bigint, mail: MailData): Promise<string> {
+	const { result } = await runStreamedAnalysisRun({
+		submissionId,
+		analysisKind: "analysis",
+		options: {
+			model: defaultResponseModel,
+			input: [
+				{ role: "system", content: ANALYSIS_SYSTEM_PROMPT },
+				{ role: "user", content: `analyze this email:\n${toon.encode({ ...mail, eml: undefined })}` },
+			],
+			reasoning: defaultReasoning,
+			tools: [{ type: "web_search" }],
+			stream: true,
+		},
+	});
+	return result.output_text;
+}
+
+/** The second model run: a strict yes/no verdict derived from the mail and the analysis. */
+async function classifyMailAsPhishing(submissionId: bigint, mail: MailData, analysisText: string): Promise<boolean> {
+	const { result } = await runStreamedAnalysisRun({
+		submissionId,
+		analysisKind: "classification",
+		options: {
+			stream: true,
+			model: defaultResponseModel,
+			input: [
+				{ role: "system", content: CLASSIFICATION_SYSTEM_PROMPT },
+				{ role: "user", content: `Evidence:\n${buildMailEvidence(mail, analysisText)}` },
+			],
+			text: {
+				format: {
+					type: "json_schema",
+					name: "PhishingResult",
+					schema: {
+						type: "object",
+						properties: {
+							phishing: { type: "boolean" },
 						},
-						strict: true,
+						required: ["phishing"],
+						additionalProperties: false,
 					},
-					verbosity: "low",
+					strict: true,
 				},
+				verbosity: "low",
 			},
-		});
-		const { phishing } = structuredResponse.output_parsed || ({} as { phishing: boolean });
-		if (typeof phishing !== "boolean") {
-			throw new Error(`Failed to classify email phishing result: ${structuredResponse.output_text}`);
-		}
+		},
+	});
+	const { phishing } = result.output_parsed || ({} as { phishing?: unknown });
+	if (typeof phishing !== "boolean") {
+		throw new Error(`Failed to classify email phishing result: ${result.output_text}`);
+	}
+	return phishing;
+}
 
-		const date = mail.date ? new Date(mail.date).toLocaleString("en-US", { timeZone: "UTC" }) : undefined;
-		const submissionSubject = `"${mail.from_object?.name || mail.from_object?.address}" ${date ? "from " + date : ""}`;
-		let to = originalMail.to_object?.address;
+/** Files the provider reports and opens a case for every linked website. */
+async function reportConfirmedPhishing(params: { submissionId: bigint; mail: MailData; analysisText: string; screenshotPng?: Buffer }) {
+	const { submissionId, mail } = params;
+	const submission = await SubmissionsEntity.get(submissionId);
+	const reporter = {
+		reporterIp: submission?.reporterIp ?? undefined,
+		reporterCountry: submission?.reporterCountry ?? undefined,
+		reporterHeaders: submission?.reporterHeaders ?? undefined,
+	};
+	await reportConfirmedEmailPhishing({
+		submissionId,
+		analysisText: params.analysisText,
+		redactedEml: mail.eml,
+		sendingIp: mail.headers.routing.originatingIp,
+		screenshotPng: params.screenshotPng,
+		reporter,
+	});
+	const linkedWebsites = await handOffMailLinks({ mail, submissionId, reporter });
+	await SubmissionsEntity.update(submissionId, { status: "reported", info: undefined, data: { kind: "email", email: { ...mail, linkedWebsites } } });
+}
 
-		if (to?.endsWith("@phishing.support")) {
-			to = undefined;
-		}
+function reporterNotification(phishing: boolean, mail: MailData, submissionId: bigint): ReporterNotification {
+	const date = mail.date ? new Date(mail.date).toLocaleString("en-US", { timeZone: "UTC" }) : undefined;
+	const submissionSubject = `"${mail.from_object?.name || mail.from_object?.address}" ${date ? "from " + date : ""}`;
 
-		if (phishing) {
-			await emitStep(stream_id, "reporting", 90);
-			const submission = await SubmissionsEntity.get(stream_id);
-			const reporter = {
-				reporterIp: submission?.reporterIp ?? undefined,
-				reporterCountry: submission?.reporterCountry ?? undefined,
-				reporterHeaders: submission?.reporterHeaders ?? undefined,
-			};
-			await reportConfirmedEmailPhishing({
-				submissionId: stream_id,
-				analysisText: analysis.output_text,
-				redactedEml: mail.eml,
-				sendingIp: mail.headers.routing.originatingIp,
-				screenshotPng,
-				reporter,
-			});
-			const linkedWebsites = await handOffMailLinks({ mail, submissionId: stream_id, reporter });
-			await SubmissionsEntity.update(stream_id, { status: "reported", info: undefined, data: { kind: "email", email: { ...mail, linkedWebsites } } });
-			var subject = `Phishing Reported - ${submissionSubject}`;
-			var body = [
+	if (phishing) {
+		return {
+			subject: `Phishing Reported - ${submissionSubject}`,
+			body: [
 				`Thank you very much for your report!`,
 				"",
 				`We have analyzed the email you provided and determined that it is indeed a phishing attempt.`,
 				"",
 				`Your submission is being reported to the email providers and hosting services involved.`,
-				`You can follow each report at: ${serviceIdentity.url}/submissions/${stream_id}`,
+				`You can follow each report at: ${serviceIdentity.url}/submissions/${submissionId}`,
 				"",
 				`Thank you for helping to combat phishing!`,
 				`Your ${serviceIdentity.name} Team`,
-			].join("\n");
+			].join("\n"),
+		};
+	}
+
+	return {
+		subject: `Not Phishing - ${submissionSubject}`,
+		body: [
+			`Thank you for your report. We analyzed the email you provided and determined that it is not a phishing attempt.`,
+			"",
+			`As a result, we have marked this submission as invalid.`,
+			`You can view details at: ${serviceIdentity.url}/submissions/${submissionId}`,
+			"",
+			`If you believe this is an error, please feel free to reach out to us at ${serviceIdentity.mailbox}.`,
+			"",
+			`Thank you for helping to combat phishing!`,
+			`Your ${serviceIdentity.name} Team`,
+		].join("\n"),
+	};
+}
+
+/** Tells the reporter the verdict. Best effort: a failed notification must not fail the analysis. */
+async function notifyReporter(submissionId: bigint, to: string | undefined, { subject, body }: ReporterNotification) {
+	try {
+		const from = `${serviceIdentity.name} <${smtpSender()}>`;
+		console.log(`Sending reporter notification email to ${to} from ${from} for submission ${submissionId}. Subject: ${subject} Body: ${body}`);
+		if (to) await smtpTransport()?.sendMail({ from, to, subject, text: body });
+	} catch (err) {
+		console.error("Failed to send reporter notification email:", err);
+	}
+}
+
+export async function analyzeMail(emlContent: string, stream_id: bigint, options: { reuseEvidenceArtifacts?: boolean } = {}) {
+	try {
+		const originalMail = await parseMail(emlContent);
+		const mail = cleanPrivateInformation(originalMail);
+
+		await emitStep(stream_id, "start", 0);
+		await SubmissionsEntity.update(stream_id, { status: "running", data: { kind: "email", email: mail } });
+
+		const screenshotPng = await collectEvidenceArtifacts(stream_id, mail, options.reuseEvidenceArtifacts ?? false);
+
+		await emitStep(stream_id, "analysis_run", 30);
+		const analysisText = await runMailAnalysis(stream_id, mail);
+
+		await emitStep(stream_id, "structured_response", 70);
+		const phishing = await classifyMailAsPhishing(stream_id, mail, analysisText);
+
+		if (phishing) {
+			await emitStep(stream_id, "reporting", 90);
+			await reportConfirmedPhishing({ submissionId: stream_id, mail, analysisText, screenshotPng });
 		} else {
 			await markSubmissionInvalid(stream_id);
-
-			var subject = `Not Phishing - ${submissionSubject}`;
-			var body = [
-				`Thank you for your report. We analyzed the email you provided and determined that it is not a phishing attempt.`,
-				"",
-				`As a result, we have marked this submission as invalid.`,
-				`You can view details at: ${serviceIdentity.url}/submissions/${stream_id}`,
-				"",
-				`If you believe this is an error, please feel free to reach out to us at ${serviceIdentity.mailbox}.`,
-				"",
-				`Thank you for helping to combat phishing!`,
-				`Your ${serviceIdentity.name} Team`,
-			].join("\n");
 		}
 
-		// Send a brief notification back to the reporter with the result and a link
-		try {
-			const from = `${serviceIdentity.name} <${smtpSender()}>`;
-			console.log(
-				`Sending reporter notification email to ${to} from ${from} for submission ${stream_id}. Subject: ${subject} Body: ${body}`
-			);
-			if (to && subject && body) {
-				await smtpTransport()?.sendMail({ from, to, subject, text: body });
-			}
-		} catch (err) {
-			console.error("Failed to send reporter notification email:", err);
-		}
+		// A mail addressed to the service itself has no reporter mailbox to answer.
+		const reporterAddress = originalMail.to_object?.address;
+		const to = reporterAddress && !isServiceAddress(reporterAddress) ? reporterAddress : undefined;
+		await notifyReporter(stream_id, to, reporterNotification(phishing, mail, stream_id));
 
 		await emitStep(stream_id, "completed", 100);
 	} catch (error) {

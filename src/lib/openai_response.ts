@@ -1,7 +1,30 @@
-export function extractResponseOutputText(response: { output_text?: string | null; output?: any[] }) {
-	const messageTexts = (response.output ?? [])
-		.filter((item) => item?.type === "message")
-		.flatMap((message) => message.content ?? [])
+import { asRecord, isRecord, type JsonRecord } from "./values";
+
+/**
+ * The content parts of every assistant message in a Responses API `output`,
+ * one array per message. Reasoning, tool-call and other non-message items carry
+ * no answer text and are skipped. Every reader of a response's text starts here
+ * so they agree on what the answer is.
+ */
+export function responseMessageContents(output: unknown): JsonRecord[][] {
+	if (!Array.isArray(output)) return [];
+	const messages: JsonRecord[][] = [];
+	for (const item of output) {
+		const message = asRecord(item);
+		if (message?.type !== "message" || !Array.isArray(message.content)) continue;
+		messages.push(message.content.filter(isRecord));
+	}
+	return messages;
+}
+
+/** Content parts of all assistant messages, flattened. */
+export function responseContentParts(output: unknown): JsonRecord[] {
+	return responseMessageContents(output).flat();
+}
+
+/** The answer text of a completed response; throws when the model refused or returned an unknown part. */
+export function extractResponseOutputText(response: { output_text?: string | null; output?: unknown }) {
+	const messageTexts = responseContentParts(response.output)
 		.map((content) => {
 			if (content.type === "output_text") return content.text;
 			if (content.type === "refusal") throw new Error(`Model refused to answer: ${content.refusal}`);

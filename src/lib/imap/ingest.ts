@@ -31,7 +31,7 @@ async function ingestIntake(params: {
 }) {
 	const sourcePrefix = `imap:${encodeURIComponent(params.config.mailbox)}:${params.config.uidValidity}:${params.uid}`;
 	if (await SubmissionsEntity.findIdBySourcePrefix(sourcePrefix)) return;
-	const emls = await extractEmlsFromIncomingMessage(params.parsed, params.config.intakeAddress);
+	const emls = await extractEmlsFromIncomingMessage(params.parsed);
 	for (let index = 0; index < emls.length; index++) {
 		await params.createIntakeSubmission(emls[index]!, {
 			source: `${sourcePrefix}${emls.length > 1 ? `:att${index + 1}` : ""}`,

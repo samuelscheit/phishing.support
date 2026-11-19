@@ -1,6 +1,7 @@
 /** Shared, browser-safe helpers for the analysis event reducer. */
 
 import { countSearchQueries } from "./analysis_stream_query_count";
+import { responseContentParts } from "./openai_response";
 
 export type AnalysisStreamEvent = Readonly<Record<string, unknown>>;
 
@@ -269,36 +270,23 @@ export function reasoningTextFromItem(item: Record<string, unknown> | null): Arr
 	return result;
 }
 
+/** Joins one kind of message content part (its `field`) across a response's output. */
+function joinedContent(output: unknown, type: "output_text" | "refusal", field: "text" | "refusal"): string {
+	const pieces = responseContentParts(output)
+		.filter((content) => content.type === type)
+		.map((content) => stringValue(content[field]) ?? "");
+	return bounded(pieces.join(""), MAX_OUTPUT_TEXT);
+}
+
 export function responseOutputText(value: unknown): string {
 	const response = record(value);
 	const output = response?.output;
 	if (!Array.isArray(output)) return boundedText(response?.output_text, MAX_OUTPUT_TEXT) ?? "";
-	const pieces: string[] = [];
-	for (const itemValue of output) {
-		const item = record(itemValue);
-		if (item?.type !== "message" || !Array.isArray(item.content)) continue;
-		for (const contentValue of item.content) {
-			const content = record(contentValue);
-			if (content?.type === "output_text") pieces.push(stringValue(content.text) ?? "");
-		}
-	}
-	return bounded(pieces.join(""), MAX_OUTPUT_TEXT);
+	return joinedContent(output, "output_text", "text");
 }
 
 export function refusalTextFromResponse(value: unknown): string {
-	const response = record(value);
-	const output = response?.output;
-	if (!Array.isArray(output)) return "";
-	const pieces: string[] = [];
-	for (const itemValue of output) {
-		const item = record(itemValue);
-		if (item?.type !== "message" || !Array.isArray(item.content)) continue;
-		for (const contentValue of item.content) {
-			const content = record(contentValue);
-			if (content?.type === "refusal") pieces.push(stringValue(content.refusal) ?? "");
-		}
-	}
-	return bounded(pieces.join(""), MAX_OUTPUT_TEXT);
+	return joinedContent(record(value)?.output, "refusal", "refusal");
 }
 
 export function outputTextFromContentPart(event: AnalysisStreamEvent): string {

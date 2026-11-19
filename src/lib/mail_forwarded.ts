@@ -1,107 +1,113 @@
 import MailAddressParser from "nodemailer/lib/addressparser";
 import MailComposer from "nodemailer/lib/mail-composer";
-import parse, { HTMLElement } from "node-html-parser";
+import type Mail from "nodemailer/lib/mailer";
 import { Parser } from "htmlparser2";
-import { ChildNode, DomHandler } from "domhandler";
+import { type ChildNode, DomHandler, hasChildren, isTag, isText } from "domhandler";
 import render from "dom-serializer";
-import { AddressObject, ParsedMail, simpleParser } from "mailparser";
+import { type AddressObject, type Attachment, type ParsedMail, simpleParser } from "mailparser";
 
-function searchRecursive(nodes: ChildNode[], predicate: (node: ChildNode) => any): ChildNode | null {
+function normalizeNewlines(value: string): string {
+	return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function parseHtmlDom(html: string): Promise<ChildNode[]> {
+	return new Promise((resolve, reject) => {
+		const handler = new DomHandler((error, dom) => (error ? reject(error) : resolve(dom)));
+		const parser = new Parser(handler);
+		parser.write(html);
+		parser.end();
+	});
+}
+
+/** Depth-first search for the first node (document order) the predicate accepts. */
+function searchRecursive(nodes: ChildNode[], predicate: (node: ChildNode) => boolean): ChildNode | null {
 	for (const node of nodes) {
-		const result = predicate(node);
-		if (result) return result as any;
-
-		if ("children" in node && node.children) {
+		if (predicate(node)) return node;
+		if (hasChildren(node)) {
 			const found = searchRecursive(node.children, predicate);
 			if (found) return found;
 		}
 	}
-
 	return null;
 }
 
-function recursiveReverseSearch(node: ChildNode, predicate: (node: ChildNode) => any): any {
-	if (!node) return null;
-
-	const result = predicate(node);
-	if (result) return result as any;
-
-	if ("prev" in node && node.prev) {
-		const found = recursiveReverseSearch(node.prev, predicate);
-		if (found) return found;
-	}
-
-	if ("parent" in node && node.parent) {
-		return recursiveReverseSearch(node.parent, predicate);
+/**
+ * Empties the text of `node`, of its previous siblings and, level by level, of
+ * every ancestor and the siblings before it. Only the nodes themselves are
+ * blanked, not the descendants of those siblings.
+ */
+function blankTextBefore(node: ChildNode): void {
+	for (let level: ChildNode | null = node; level; level = level.parent) {
+		for (let sibling: ChildNode | null = level; sibling; sibling = sibling.prev) {
+			if ("data" in sibling) sibling.data = "";
+		}
 	}
 }
 
 function getNodeText(node: ChildNode): string {
-	if (!node) return "";
-	if ("data" in node && typeof (node as any).data === "string") return (node as any).data;
-	if ("children" in node && Array.isArray((node as any).children)) {
-		return ((node as any).children as ChildNode[]).map(getNodeText).join("");
-	}
+	if ("data" in node) return node.data;
+	if (hasChildren(node)) return node.children.map(getNodeText).join("");
 	return "";
 }
 
-function isElement(node: ChildNode): boolean {
-	return !!node && typeof (node as any).type === "string" && (node as any).type === "tag";
-}
-
 function elementHasClass(node: ChildNode, className: string): boolean {
-	if (!isElement(node)) return false;
-	const attribs = (node as any).attribs as Record<string, string> | undefined;
-	const raw = attribs?.class;
+	if (!isTag(node)) return false;
+	const raw = node.attribs.class;
 	if (!raw) return false;
 	return raw.split(/\s+/g).includes(className);
 }
 
 function isTrivialHtmlNode(node: ChildNode): boolean {
-	if (!node) return true;
 	// Whitespace text node
-	if ((node as any).type === "text") {
-		return getNodeText(node).trim().length === 0;
-	}
-	if (!isElement(node)) return false;
-	const name = String((node as any).name || "").toLowerCase();
+	if (isText(node)) return node.data.trim().length === 0;
+	if (!isTag(node)) return false;
+	const name = node.name.toLowerCase();
 	if (name === "br") return true;
 	// Gmail sometimes inserts empty <u></u> between header and body
 	if (name === "u") return getNodeText(node).trim().length === 0;
 	return false;
 }
 
-function nextNonTrivialSibling(node: ChildNode | null | undefined): ChildNode | null {
-	let cur = node as any;
-	while (cur && cur.next) {
+function nextNonTrivialSibling(node: ChildNode | null): ChildNode | null {
+	let cur = node;
+	while (cur?.next) {
 		cur = cur.next;
-		if (!isTrivialHtmlNode(cur)) return cur as ChildNode;
+		if (!isTrivialHtmlNode(cur)) return cur;
 	}
 	return null;
 }
 
-function findClosestForwardHeaderContainer(node: ChildNode | null | undefined): ChildNode | null {
-	let cur = node as any;
-	while (cur) {
-		if (elementHasClass(cur, "gmail_attr")) return cur as ChildNode;
-		cur = cur.parent;
+function findClosestForwardHeaderContainer(node: ChildNode): ChildNode | null {
+	for (let cur: ChildNode | null = node; cur; cur = cur.parent) {
+		if (elementHasClass(cur, "gmail_attr")) return cur;
 	}
 	return null;
 }
 
-function findTopLevelAncestor(node: ChildNode | null | undefined): ChildNode | null {
-	let cur = node as any;
-	if (!cur) return null;
-	while (cur && cur.parent) cur = cur.parent;
-	return cur as ChildNode;
+function findTopLevelAncestor(node: ChildNode): ChildNode {
+	let cur = node;
+	while (cur.parent) cur = cur.parent;
+	return cur;
 }
 
 function nodeLooksLikeForwardHeaderLine(node: ChildNode): boolean {
-	const text = getNodeText(node).replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\s+/g, " ").trim();
+	const text = getNodeText(node).replace(/\s+/g, " ").trim();
 	if (!text) return false;
 	// Header lines are usually short; this reduces false positives in long HTML bodies.
 	if (text.length > 800) return false;
 	return /^(from|von|to|an|subject|betreff|date|datum|sent|gesendet|cc|bcc)\s*:/i.test(text);
+}
+
+function renderNodes(nodes: ChildNode[]): string {
+	return render(nodes, { decodeEntities: true });
+}
+
+/** Renders `start` and its following siblings, or null when there is no start node. */
+function renderFromSibling(start: ChildNode | null): string | null {
+	const siblings = start?.parent?.children;
+	if (!start || !siblings) return null;
+	const idx = siblings.indexOf(start);
+	return idx >= 0 ? renderNodes(siblings.slice(idx)) : null;
 }
 
 function splitAfterForwardHeaders(nodes: ChildNode[], startAt: number): string | null {
@@ -124,44 +130,36 @@ function splitAfterForwardHeaders(nodes: ChildNode[], startAt: number): string |
 	if (!sawAnyNonTrivial) return null;
 	if (headerCount < 2) return null;
 	if (i >= nodes.length) return null;
-	return render(nodes.slice(i), { decodeEntities: true });
+	return renderNodes(nodes.slice(i));
 }
 
 function trySplitFromContainer(container: ChildNode, markerNode: ChildNode): string | null {
-	if (!("children" in container) || !Array.isArray((container as any).children)) return null;
-	const kids = (container as any).children as ChildNode[];
-	if (kids.length === 0) return null;
+	if (!hasChildren(container) || container.children.length === 0) return null;
+	const kids = container.children;
 
 	// Find the topmost child within container that still contains markerNode
-	let topChild: ChildNode | null = markerNode;
-	let cur: any = markerNode;
-	while (cur && cur.parent && cur.parent !== container) {
-		cur = cur.parent;
-	}
-	if (cur && cur.parent === container) topChild = cur as ChildNode;
+	let topChild = markerNode;
+	let cur = markerNode;
+	while (cur.parent && cur.parent !== container) cur = cur.parent;
+	if (cur.parent === container) topChild = cur;
 
-	const idx = topChild ? kids.indexOf(topChild) : -1;
+	const idx = kids.indexOf(topChild);
 	if (idx < 0) return null;
 	return splitAfterForwardHeaders(kids, idx);
 }
 
 function trySplitAfterMarkerInAncestors(markerNode: ChildNode): string | null {
-	let cur: any = markerNode;
-	while (cur) {
-		const parent = cur.parent as any;
-		if (parent && Array.isArray(parent.children)) {
-			const siblings = parent.children as ChildNode[];
-			const idx = siblings.indexOf(cur as ChildNode);
-			if (idx >= 0) {
-				// Case A: marker node itself is already a header line (e.g., first "From:" div)
-				const splitAtMarker = splitAfterForwardHeaders(siblings, idx);
-				if (splitAtMarker) return splitAtMarker;
-				// Case B: marker node is "Begin forwarded message" and headers come after it
-				const splitAfterMarker = splitAfterForwardHeaders(siblings, idx + 1);
-				if (splitAfterMarker) return splitAfterMarker;
-			}
-		}
-		cur = parent;
+	for (let cur: ChildNode | null = markerNode; cur; cur = cur.parent) {
+		const siblings = cur.parent?.children;
+		if (!siblings) continue;
+		const idx = siblings.indexOf(cur);
+		if (idx < 0) continue;
+		// Case A: marker node itself is already a header line (e.g., first "From:" div)
+		const splitAtMarker = splitAfterForwardHeaders(siblings, idx);
+		if (splitAtMarker) return splitAtMarker;
+		// Case B: marker node is "Begin forwarded message" and headers come after it
+		const splitAfterMarker = splitAfterForwardHeaders(siblings, idx + 1);
+		if (splitAfterMarker) return splitAfterMarker;
 	}
 	return null;
 }
@@ -181,33 +179,16 @@ export async function extractForwardedHtmlBody(parsed: Pick<ParsedMail, "html">)
 		/^(Subject|Betreff):\s*/i,
 	];
 
-	const dom = await new Promise<ChildNode[]>((resolve, reject) => {
-		const handler = new DomHandler((error, dom) => {
-			if (error) {
-				reject(error);
-			} else {
-				resolve(dom);
-			}
-		});
+	const dom = await parseHtmlDom(html);
 
-		const parser = new Parser(handler);
-		parser.write(html);
-		parser.end();
-	});
-
-	const markerNode = searchRecursive(dom, (node) => {
-		const data = getNodeText(node);
-		if (!data) return false;
-		const lines = data.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-		for (const line of lines) {
-			const trimmed = line.trim();
-			if (!trimmed) continue;
-			for (const re of forwardedMarkers) {
-				if (re.test(trimmed)) return node;
-			}
-		}
-		return false;
-	});
+	const markerNode = searchRecursive(dom, (node) =>
+		normalizeNewlines(getNodeText(node))
+			.split("\n")
+			.some((line) => {
+				const trimmed = line.trim();
+				return trimmed !== "" && forwardedMarkers.some((re) => re.test(trimmed));
+			}),
+	);
 
 	if (!markerNode) {
 		// No obvious marker; return original HTML as-is.
@@ -217,58 +198,45 @@ export async function extractForwardedHtmlBody(parsed: Pick<ParsedMail, "html">)
 	// Gmail forwarded messages: headers live in <div class="gmail_attr"> ... </div>, body follows.
 	const gmailHeader = findClosestForwardHeaderContainer(markerNode);
 	if (gmailHeader) {
-		const start = nextNonTrivialSibling(gmailHeader);
-		if (start && (start as any).parent && Array.isArray((start as any).parent.children)) {
-			const siblings = (start as any).parent.children as ChildNode[];
-			const idx = siblings.indexOf(start);
-			if (idx >= 0) {
-				return render(siblings.slice(idx), { decodeEntities: true });
-			}
-		}
+		const afterGmailHeader = renderFromSibling(nextNonTrivialSibling(gmailHeader));
+		if (afterGmailHeader !== null) return afterGmailHeader;
 	}
 
 	// iCloud / Apple Mail forwarding style: multiple "From/Subject/Date/To" divs, then the actual HTML body.
 	// Try to skip that header block either at the root level or inside a container.
 	const top = findTopLevelAncestor(markerNode);
-	if (top) {
-		const rootIdx = dom.indexOf(top);
-		if (rootIdx >= 0) {
-			const split = splitAfterForwardHeaders(dom, rootIdx);
-			if (split) return split;
-		}
-		const splitInContainer = trySplitFromContainer(top, markerNode);
-		if (splitInContainer) return splitInContainer;
+	const rootIdx = dom.indexOf(top);
+	if (rootIdx >= 0) {
+		const split = splitAfterForwardHeaders(dom, rootIdx);
+		if (split) return split;
 	}
+	const splitInContainer = trySplitFromContainer(top, markerNode);
+	if (splitInContainer) return splitInContainer;
 	const splitFromAncestors = trySplitAfterMarkerInAncestors(markerNode);
 	if (splitFromAncestors) return splitFromAncestors;
 
 	// Generic fallback: take the next meaningful sibling after the marker text node.
-	let start: ChildNode | null = nextNonTrivialSibling(markerNode);
-	let climb: any = markerNode;
-	while (!start && climb && climb.parent) {
+	let start = nextNonTrivialSibling(markerNode);
+	let climb: ChildNode | null = markerNode;
+	while (!start && climb?.parent) {
 		start = nextNonTrivialSibling(climb);
 		climb = climb.parent;
 	}
-
-	if (start && (start as any).parent && Array.isArray((start as any).parent.children)) {
-		const siblings = (start as any).parent.children as ChildNode[];
-		const idx = siblings.indexOf(start);
-		if (idx >= 0) {
-			return render(siblings.slice(idx), { decodeEntities: true });
-		}
-	}
+	const afterMarker = renderFromSibling(start);
+	if (afterMarker !== null) return afterMarker;
 
 	// Last resort: return everything from the marker onward by blanking what came before.
-	recursiveReverseSearch(markerNode, (node) => {
-		if ("data" in node && typeof (node as any).data === "string") {
-			(node as any).data = "";
-		}
-	});
-	return render(dom, { decodeEntities: true });
+	blankTextBefore(markerNode);
+	return renderNodes(dom);
 }
 
-export async function extractForwardedText(parsed: ParsedMail) {
-	const text = (parsed.text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+/**
+ * The forwarded part of a plain-text body: everything from the first
+ * forward/reply header on, or the unquoted text when it is mostly a quote.
+ */
+export function extractForwardedText(plainText: string | undefined): string {
+	const text = normalizeNewlines(plainText ?? "");
+	if (!text.trim()) return "";
 
 	const forwardedMarkers = [
 		/^-{2,}\s*Forwarded message\s*-{2,}$/i,
@@ -282,83 +250,38 @@ export async function extractForwardedText(parsed: ParsedMail) {
 		/^Subject:\s+/i,
 	];
 
-	if (parsed.html) {
-		const dom = await new Promise<ChildNode[]>((resolve, reject) => {
-			const handler = new DomHandler((error, dom) => {
-				if (error) {
-					reject(error);
-				} else {
-					resolve(dom);
-				}
-			});
+	const lines = text.split("\n");
 
-			const parser = new Parser(handler);
-			parser.write(parsed.html as string);
-			parser.end();
-		});
+	let startIndex = -1;
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i].trim();
+		if (!line) continue;
+		const forwardMarker = forwardedMarkers.findIndex((re) => re.test(line));
+		if (forwardMarker !== -1) {
+			startIndex = i;
 
-		let found = searchRecursive(dom, (node) => {
-			if ("data" in node && typeof node.data === "string") {
-				const textContent = node.data.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-				for (const line of textContent) {
-					for (const re of forwardedMarkers) {
-						if (re.test(line.trim())) {
-							return node;
-						}
-					}
-				}
+			// "Forwarded message" / "Begin forwarded message" lines are not part of the mail itself.
+			if (forwardMarker === 0 || forwardMarker === 1) {
+				startIndex++;
 			}
 
-			return false;
-		});
-
-		if (found) {
-			recursiveReverseSearch(found, (node) => {
-				if ("data" in node && typeof node.data === "string") {
-					node.data = "";
-				}
-			});
-
-			const rendered = render(dom, { decodeEntities: true });
-			return rendered;
+			break;
 		}
 	}
 
-	if (text.trim()) {
-		const lines = text.split("\n");
-
-		let startIndex = -1;
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i].trim();
-			if (!line) continue;
-			const forwardMarker = forwardedMarkers.findIndex((re) => re.test(line));
-			if (forwardMarker !== -1) {
-				startIndex = i;
-
-				if (forwardMarker === 0 || forwardMarker === 1) {
-					startIndex++;
-				}
-
-				break;
-			}
-		}
-
-		if (startIndex >= 0) {
-			return lines.slice(startIndex).join("\n").trim();
-		}
-
-		const quoted = lines.map((l) => l.replace(/^\s*>\s?/, "")).filter((l) => l.trim().length > 0);
-
-		// If it looks mostly like quoted content, prefer that
-		const quotedCount = lines.filter((l) => /^\s*>/.test(l)).length;
-		if (quotedCount >= Math.max(5, Math.floor(lines.length * 0.3))) {
-			return quoted.join("\n").trim();
-		}
-
-		return text.trim();
+	if (startIndex >= 0) {
+		return lines.slice(startIndex).join("\n").trim();
 	}
 
-	return "";
+	const quoted = lines.map((l) => l.replace(/^\s*>\s?/, "")).filter((l) => l.trim().length > 0);
+
+	// If it looks mostly like quoted content, prefer that
+	const quotedCount = lines.filter((l) => /^\s*>/.test(l)).length;
+	if (quotedCount >= Math.max(5, Math.floor(lines.length * 0.3))) {
+		return quoted.join("\n").trim();
+	}
+
+	return text.trim();
 }
 
 function bufferToUtf8String(value: unknown): string {
@@ -430,7 +353,18 @@ function parseMailAddressToObject(address: AddressObject | AddressObject[] | und
 	return undefined;
 }
 
-export async function extractEmlsFromIncomingMessage(parsed: ParsedMail, listenAddress: string): Promise<string[]> {
+/** A parsed attachment in the shape the composer rebuilds it from, keeping its MIME headers and raw content. */
+function composerAttachment(attachment: Attachment): Mail.Attachment {
+	const { contentDisposition } = attachment;
+	return {
+		...attachment,
+		contentDisposition: contentDisposition === "attachment" || contentDisposition === "inline" ? contentDisposition : undefined,
+		headers: Object.fromEntries(attachment.headers.entries()),
+		raw: attachment.content,
+	};
+}
+
+export async function extractEmlsFromIncomingMessage(parsed: ParsedMail): Promise<string[]> {
 	const emls: string[] = [];
 
 	for (const att of parsed.attachments ?? []) {
@@ -463,20 +397,16 @@ export async function extractEmlsFromIncomingMessage(parsed: ParsedMail, listenA
 
 	// No .eml attachments found → synthesize from forwarded/quoted message body
 	try {
-		const forwardedText = await extractForwardedText({
-			text: parsed.text,
-		} as any);
-		const forwardedHtml = await extractForwardedHtmlBody({
-			html: parsed.html,
-		});
+		const forwardedText = extractForwardedText(parsed.text);
+		const forwardedHtml = await extractForwardedHtmlBody(parsed);
 
 		const mail = await simpleParser(forwardedText);
 
 		let from = mail.from;
 
-		const von = mail.headers.get("von") as string | undefined;
+		const von = mail.headers.get("von");
 
-		if (!from && von) {
+		if (!from && typeof von === "string") {
 			const addresses = MailAddressParser(von, { flatten: true });
 			const [address] = addresses;
 			from = {
@@ -494,19 +424,15 @@ export async function extractEmlsFromIncomingMessage(parsed: ParsedMail, listenA
 			subject: parsed.subject?.replace("Fwd:", "").replace("FW:", "").trim() || mail.subject || "(no subject)",
 			text: mail.text || undefined,
 			html: forwardedHtml || undefined,
-			attachments: (mail.attachments || parsed.attachments).map((x) => ({
-				...x,
-				contentDisposition: x.contentDisposition as any,
-				headers: Object.fromEntries(x.headers.entries()) as any,
-				raw: x.content,
-			})),
+			attachments: (mail.attachments || parsed.attachments).map(composerAttachment),
 		})
 			.compile()
 			.build();
 
-		// return [forwardedText];
 		return [composed.toString()];
-	} catch {}
+	} catch {
+		// Not a recognizable forward either; the caller treats it as no analyzable mail.
+	}
 
 	return [];
 }

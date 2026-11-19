@@ -1,5 +1,6 @@
 /** Reduce Responses API events into the small activity model shown to readers. */
 
+import { responseMessageContents } from "./openai_response";
 import type { AnalysisEntryStatus, AnalysisStreamEvent, AnalysisStreamState } from "./analysis_stream_events_support";
 import {
 	MAX_OUTPUT_TEXT,
@@ -316,24 +317,20 @@ export function markAnalysisStreamOpen(state: AnalysisStreamState): AnalysisStre
 	return { ...state, connection: "connected", error: null };
 }
 
-type OutputContent = { type?: string; text?: string; refusal?: string };
-type OutputItem = { type?: string; content?: OutputContent[] };
-
 /** Extract the human-readable assistant response from persisted output items. */
-export function extractOutputText(output?: Array<OutputItem>): string | null {
-	if (!Array.isArray(output) || output.length === 0) return null;
-	const parts: string[] = [];
-	for (const item of output) {
-		if (item?.type !== "message" || !Array.isArray(item.content)) continue;
-		const chunk = item.content
+export function extractOutputText(output?: unknown[]): string | null {
+	const messages = responseMessageContents(output).map((contents) =>
+		contents
 			.map((content) => {
-				if (content.type === "output_text") return content.text || "";
+				if (content.type === "output_text") return typeof content.text === "string" ? content.text : "";
 				if (content.type === "refusal") return content.refusal ? `Refusal: ${content.refusal}` : "Refusal";
 				return "";
 			})
-			.join("");
-		if (chunk.trim()) parts.push(chunk);
-	}
-	const text = parts.join("\n\n").trim();
+			.join(""),
+	);
+	const text = messages
+		.filter((message) => message.trim())
+		.join("\n\n")
+		.trim();
 	return text || null;
 }

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { cleanPrivateInformation, parseMail } from "./mail_ai";
+import { parseMail } from "./mail_ai";
+import { cleanPrivateInformation } from "./mail_redaction";
 import type { WhoISInfo } from "./website_info";
 
 const noOriginInfo: WhoISInfo = { ip_rdaps: [] };

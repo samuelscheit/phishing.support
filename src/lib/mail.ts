@@ -2,7 +2,7 @@ import { simpleParser, type AddressObject } from "mailparser";
 import { parse } from "node-html-parser";
 import { getBrowser } from "./browser/";
 import { analyzeSMTPHeadersFromRaw } from "@bernierllc/smtp-analyzer";
-import { MailData } from "./mail_ai";
+import type { MailData } from "./mail_ai";
 import { isPrivateIpAddress } from "./ip_address";
 import { sleep } from "./sleep";
 
@@ -57,11 +57,11 @@ export function getMailWebsiteUrls(mail: Pick<MailData, "html" | "text">): strin
 
 export async function getMailImage(result: MailData) {
 	const browser = await getBrowser();
-	const page = await browser.newPage();
 
 	try {
 		if (!result.html) throw new Error("No HTML content found");
 
+		const page = await browser.newPage();
 		await page.setViewport({ width: 1080, height: 720 });
 
 		await page.setContent(result.html, {
@@ -77,13 +77,12 @@ export async function getMailImage(result: MailData) {
 			captureBeyondViewport: true,
 			type: "png",
 		});
-		await browser.close();
 		return Buffer.from(screenshot);
 	} catch (error) {
-		await browser.close();
-
 		console.error("Error processing HTML content:", error);
 		throw error;
+	} finally {
+		await browser.close();
 	}
 }
 
@@ -114,7 +113,6 @@ type ReceivedHop = {
 	fromIp: string;
 	byHost: string;
 	withProto: string;
-	// raw: string;
 };
 
 function parseReceived(lines: string[]): ReceivedHop[] {
@@ -130,7 +128,6 @@ function parseReceived(lines: string[]): ReceivedHop[] {
 			fromIp: ipMatch?.[1] ?? "",
 			byHost: byMatch?.[1] ?? "",
 			withProto: withMatch?.[1] ?? "",
-			// raw: compact,
 		};
 	});
 }
@@ -139,7 +136,7 @@ export function analyzeHeaders(headers: string) {
 	const result = analyzeSMTPHeadersFromRaw(headers);
 	if (!result.success || !result.data) throw new Error(result.error);
 
-	const headersMap = new Map();
+	const headersMap: HeaderMap = new Map();
 
 	const headerLines = headers.split(/\r?\n/);
 	headerLines.forEach((line) => {
@@ -147,17 +144,8 @@ export function analyzeHeaders(headers: string) {
 		if (sepIndex > 0) {
 			const key = line.slice(0, sepIndex).trim().toLowerCase();
 			const value = line.slice(sepIndex + 1).trim();
-			if (headersMap.has(key)) {
-				const existing = headersMap.get(key);
-				if (Array.isArray(existing)) {
-					existing.push(value);
-					headersMap.set(key, existing);
-				} else {
-					headersMap.set(key, [existing, value]);
-				}
-			} else {
-				headersMap.set(key, value);
-			}
+			const existing = headersMap.get(key);
+			headersMap.set(key, existing === undefined ? value : [existing, value].flat());
 		}
 	});
 
@@ -175,22 +163,19 @@ export function analyzeHeaders(headers: string) {
 		[...hops].reverse().find((hop) => hop.fromIp) ??
 		[...hops].reverse().find((hop) => hop.fromHost);
 
-	result.data.routing.totalHops.forEach((x) => {
-		// @ts-ignore
-		delete x.raw;
-	});
-	delete result.data.authentication.rawHeader;
-	const signature = result.data.securityHeaders.dkimSignature;
-	delete result.data.securityHeaders.receivedSpf;
-	delete result.data.securityHeaders.dkimSignature;
+	// Raw hop lines, the raw header block and the SPF/DKIM header values are
+	// bulky and already summarised by the parsed fields, so they are dropped.
+	const totalHops = result.data.routing.totalHops.map(({ raw, ...hop }) => hop);
+	const { rawHeader, ...authentication } = result.data.authentication;
+	const { receivedSpf, dkimSignature: signature, ...securityHeaders } = result.data.securityHeaders;
 
 	const originatingIp = sourceHop?.fromIp || undefined;
 	const originatingServer = sourceHop?.fromHost || undefined;
 
 	return {
 		authentication: {
-			...result.data.authentication,
-			...result.data.securityHeaders,
+			...authentication,
+			...securityHeaders,
 			dmarc: {
 				policy: dmarcPolicy[0] || "",
 				info: dmarcInfo[0] || "",
@@ -203,31 +188,9 @@ export function analyzeHeaders(headers: string) {
 		},
 		routing: {
 			...result.data.routing,
+			totalHops,
 			originatingIp,
 			originatingServer,
 		},
 	};
-
-	// return {
-	// 	identifiers: {
-	// 		returnPath: getHeaderValues(headers, "return-path")[0] || "",
-	// 		messageId: getHeaderValues(headers, "message-id")[0] || "",
-	// 		subject: getHeaderValues(headers, "subject")[0] || "",
-	// 		date: getHeaderValues(headers, "date")[0] || "",
-	// 	},
-	// 	client: {
-	// 		mailer: getHeaderValues(headers, "x-mailer")[0] || "",
-	// 	},
-	// 	auth: {
-	// 		results: parseAuthResults(authResults),
-	// 		receivedSpf: receivedSpf[0] || "",
-	// 		dmarcPolicy: dmarcPolicy[0] || "",
-	// 		dmarcInfo: dmarcInfo[0] || "",
-	// 	},
-	// 	received: {
-	// 		hops,
-	// 		sourceIp: sourceHop?.fromIp || "",
-	// 		sourceHost: sourceHop?.fromHost || "",
-	// 	},
-	// };
 }
