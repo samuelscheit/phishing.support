@@ -47,7 +47,7 @@ describe("the website case analysis", () => {
 			pages: [{ url: "https://kit.example/", title: "Verify", text: "Verify your email" }, { url: "https://kit.example/signin", text: `Enter password ${"x".repeat(5_000)}` }],
 			visit: {
 				outcome: "completed",
-				report: { submissionsAttempted: 2, downloadsStarted: 0, asksForPhone: false, blockedByChallenge: false, stoppedReason: "The sign-in page showed an error." },
+				report: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "The sign-in page showed an error." },
 				actions: [{ kind: "input_text", text: "Enter the synthetic email" }],
 				dataSent: [{ url: "https://api.telegram.org/bot1:x/sendMessage", method: "POST", fields: ["email", "password"], sameSite: false }],
 				downloadFailures: [],

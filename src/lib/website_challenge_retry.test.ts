@@ -49,7 +49,7 @@ function captured(options: ArchiveWebsiteOptions, shown: Shown, egress: FabricEg
 			...(report ? {
 				session: scriptedVisitSession({
 					...(walk ? { steps: [page(walk.to, "challenge", undefined)] } : {}),
-					agent: { report: { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, blockedByChallenge: report.blocked, stoppedReason: report.blocked ? "Cloudflare Turnstile remained after waiting." : "The sign-in asks for an account." } },
+					agent: { report: { asksForPhone: false, blockedByChallenge: report.blocked, stoppedReason: report.blocked ? "Cloudflare Turnstile remained after waiting." : "The sign-in asks for an account." } },
 				}),
 			} : {}),
 		};

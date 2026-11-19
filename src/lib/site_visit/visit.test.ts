@@ -4,7 +4,7 @@ import puppeteer from "rebrowser-puppeteer-core";
 import { createExfiltrationCanaries } from "../exfiltration/canaries";
 import type { ExfiltrationCanaries } from "../exfiltration/types";
 import { archiveWebsite } from "../website_archive";
-import type { ChatModel } from "../browser_task/agent";
+import type { ChatModel, ChatRequest } from "../browser_task/agent";
 import { chromiumAvailable, chromiumExecutable, refIn, ScriptedModel, StalledModel, type ScriptedTurn } from "../browser_task/test_helpers";
 import { stepActions, taskAgentVisit, type VisitAgent } from "./agent";
 import type { SiteVisitLiveEvent } from "./visit";
@@ -63,7 +63,7 @@ function kitWalk(canaries: ExfiltrationCanaries): ScriptedTurn[] {
 			return { text: "The verify page offers a verifier.", calls: [{ name: "click", arguments: { ref: refIn(page, 'button "Get Verifier"') } }] };
 		},
 		(page) => ({ calls: [{ name: "click", arguments: { ref: refIn(page, 'button "Download Verifier.zip"') } }] }),
-		() => ({ calls: [{ name: "done", arguments: { result: { submissionsAttempted: 1, downloadsStarted: 1, asksForPhone: false, blockedByChallenge: false, stoppedReason: "Downloaded the verifier." }, summary: "Done." } }] }),
+		() => ({ calls: [{ name: "done", arguments: { result: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Downloaded the verifier." }, summary: "Done." } }] }),
 	];
 }
 
@@ -106,6 +106,57 @@ function serveNewTabKit() {
 	return { server, posts, seenAs, url: `http://127.0.0.1:${server.port}/` };
 }
 
+/**
+ * A kit behind its own text CAPTCHA, as signin.aws.awsamzon.info had
+ * (production case 381760952304931861): the email form posts to the kit, a
+ * "Making sure its you" page draws a code only into a canvas (no text in the
+ * DOM) and checks the answer on the server, issuing a new code after a wrong
+ * one, and only then asks for the password.
+ */
+function serveCaptchaKit() {
+	const codes = ["dgmn62", "k7q4zp"];
+	let current = 0;
+	const answers: string[] = [];
+	const posts: string[] = [];
+	const captchaPage = (error = "") => html(`<h1>Making sure its you</h1><canvas id="c" width="220" height="70"></canvas>
+<script>const g=document.getElementById("c").getContext("2d");g.font="bold 40px serif";g.fillText(${JSON.stringify(codes[current])},20,50);</script>
+<form method="POST" action="/verify"><label>Type the characters as shown above <input name="captcha"></label>${error ? `<p>${error}</p>` : ""}<button>I'm not a robot</button></form>`, "AWS Sign-In");
+	const server = Bun.serve({
+		port: 0,
+		fetch: async (request) => {
+			const { pathname } = new URL(request.url);
+			if (pathname === "/signin" && request.method === "POST") {
+				posts.push(await request.text());
+				return Response.redirect("/captcha", 302);
+			}
+			if (pathname === "/captcha") return captchaPage();
+			if (pathname === "/verify" && request.method === "POST") {
+				const answer = new URLSearchParams(await request.text()).get("captcha") ?? "";
+				answers.push(answer);
+				if (answer !== codes[current]) {
+					current = Math.min(current + 1, codes.length - 1);
+					return captchaPage("Captcha is incorrect");
+				}
+				return Response.redirect("/password", 302);
+			}
+			if (pathname === "/password") return html(`<h1>Root user sign in</h1><form method="POST" action="/collect"><input type="password" name="password" placeholder="Password"><button>Sign in</button></form>`, "AWS Sign-In");
+			if (pathname === "/collect" && request.method === "POST") {
+				posts.push(await request.text());
+				return html("<h1>Signed in</h1>", "AWS Console");
+			}
+			return html(`<h1>Sign in</h1><form method="POST" action="/signin"><input name="email" placeholder="Email address"><button>Next</button></form>`, "AWS Sign-In");
+		},
+	});
+	return { server, posts, answers, codes, url: `http://127.0.0.1:${server.port}/` };
+}
+
+/** Whether the newest observation of a request came with a screenshot of the page. */
+const sawScreenshot = (request: ChatRequest) => {
+	const last = request.messages.at(-1);
+	const parts = last?.role === "user" ? last.content : last?.role === "tool" ? last.results.flatMap((result) => result.content) : [];
+	return parts.some((part) => part.type === "image" && part.data.length > 1_000);
+};
+
 class FailingModel implements ChatModel {
 	readonly id = "test/failing";
 	async complete(): Promise<never> {
@@ -122,7 +173,9 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: launch });
 		try {
 			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event) });
-			expect(recording.agent).toMatchObject({ outcome: "completed", report: { submissionsAttempted: 1, downloadsStarted: 1, stoppedReason: "Downloaded the verifier." } });
+			expect(recording.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "Downloaded the verifier." } });
+			// The agent reports only what the recording cannot know; what it submitted and downloaded is counted from the recording.
+			expect(recording.agent.report).toEqual({ asksForPhone: false, blockedByChallenge: false, stoppedReason: "Downloaded the verifier." });
 
 			// The agent continued on the captured tab: its first observation is the captured sign-in page.
 			expect(model.seen()).toContain(`The browser is already on its page (${url})`);
@@ -209,7 +262,7 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			(page) => ({ calls: [{ name: "click", arguments: { ref: refIn(page, 'button "Back to the document"') } }] }),
 			(page) => {
 				expect(page).toContain("Invoice 4711");
-				return { calls: [{ name: "done", arguments: { result: { submissionsAttempted: 1, downloadsStarted: 1, asksForPhone: false, blockedByChallenge: false, stoppedReason: "Signed in and downloaded the invoice." }, summary: "Done." } }] };
+				return { calls: [{ name: "done", arguments: { result: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Signed in and downloaded the invoice." }, summary: "Done." } }] };
 			},
 		]);
 		const live: SiteVisitLiveEvent[] = [];
@@ -259,7 +312,7 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 		const model = new ScriptedModel([
 			(page) => ({ calls: [{ name: "click", arguments: { ref: refIn(page, 'link "Open document"') } }] }),
 			// Done the moment the tab is shown: no quiet period passes on it before the walk ends.
-			() => ({ calls: [{ name: "done", arguments: { result: { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, blockedByChallenge: false, stoppedReason: "Opened the document." }, summary: "Done." } }] }),
+			() => ({ calls: [{ name: "done", arguments: { result: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Opened the document." }, summary: "Done." } }] }),
 		]);
 		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: launch });
 		try {
@@ -304,7 +357,7 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: launch });
 		try {
 			const gaveUp = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new ScriptedModel([() => ({ calls: [{ name: "fail", arguments: { reason: "The form rejected the password three times." } }] })])) });
-			expect(gaveUp.agent).toMatchObject({ outcome: "completed", report: { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, stoppedReason: "The form rejected the password three times." } });
+			expect(gaveUp.agent).toMatchObject({ outcome: "completed", report: { asksForPhone: false, stoppedReason: "The form rejected the password three times." } });
 			const asks = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new ScriptedModel([() => ({ calls: [{ name: "needs_input", arguments: { question: "The site wants a code sent to a real phone." } }] })])) });
 			expect(asks.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "The site wants a code sent to a real phone." } });
 			const scroll: ScriptedTurn = () => ({ calls: [{ name: "scroll", arguments: { direction: "down" } }] });
@@ -315,6 +368,63 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			} finally {
 				delete process.env.SITE_VISIT_TASK_MAX_STEPS;
 			}
+		} finally {
+			await archive.session?.close();
+			server.stop(true);
+		}
+	}, 60_000);
+
+	test("the agent sees each page as a screenshot and gets past a kit's own text CAPTCHA, retrying a rejected answer, to the password step", async () => {
+		const { server, posts, answers, codes, url } = serveCaptchaKit();
+		const canaries = createExfiltrationCanaries();
+		const captchaTurn = (answer: string): ScriptedTurn => (page, request) => {
+			expect(page).toContain("Making sure its you");
+			// The code is only drawn: the page's text does not hold it, only the screenshot shows it.
+			for (const code of codes) expect(page).not.toContain(code);
+			expect(sawScreenshot(request)).toBeTrue();
+			return {
+				calls: [
+					{ name: "type", arguments: { ref: refIn(page, "textbox"), text: answer } },
+					{ name: "click", arguments: { ref: refIn(page, `button "I'm not a robot"`) } },
+				],
+			};
+		};
+		const model = new ScriptedModel([
+			(page) => ({
+				calls: [
+					{ name: "type", arguments: { ref: refIn(page, 'textbox "Email address"'), text: canaries.email } },
+					{ name: "click", arguments: { ref: refIn(page, 'button "Next"') } },
+				],
+			}),
+			captchaTurn("dgrnn62"),
+			(page, request) => {
+				expect(page).toContain("Captcha is incorrect");
+				return captchaTurn(codes[1]!)(page, request);
+			},
+			(page) => ({
+				calls: [
+					{ name: "type", arguments: { ref: refIn(page, 'textbox "Password"'), text: "{{secret:password}}" } },
+					{ name: "click", arguments: { ref: refIn(page, 'button "Sign in"') } },
+				],
+			}),
+			(page) => {
+				expect(page).toContain("Signed in");
+				return { calls: [{ name: "done", arguments: { result: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Signed in after the CAPTCHA." }, summary: "Done." } }] };
+			},
+		]);
+		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: launch });
+		try {
+			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model) });
+			expect(recording.agent).toMatchObject({ outcome: "completed", report: { blockedByChallenge: false, stoppedReason: "Signed in after the CAPTCHA." } });
+			// The goal has the agent solve the CAPTCHA itself, never hand it back.
+			expect(model.seen()).toContain("Solve every CAPTCHA or human check yourself");
+			expect(model.requests.every(sawScreenshot)).toBeTrue();
+			expect(answers).toEqual(["dgrnn62", codes[1]]);
+			// Past the CAPTCHA, the kit's password collector received the synthetic password, and the recording shows it.
+			expect(posts.map((body) => [...new URLSearchParams(body).keys()])).toEqual([["email"], ["password"]]);
+			expect(new URLSearchParams(posts[1]).get("password")).toBe(canaries.password);
+			expect(recording.requests.find((request) => request.method === "POST" && request.url === `${url}collect`)).toBeDefined();
+			expect(model.seen()).not.toContain(canaries.password);
 		} finally {
 			await archive.session?.close();
 			server.stop(true);

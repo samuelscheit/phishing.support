@@ -57,7 +57,7 @@ export type WebsiteVisitRecord = {
 	/** `completed`: the agent finished; `failed`: it failed or could not start; `timed_out`: the visit's budget ended it. */
 	outcome: "completed" | "failed" | "timed_out";
 	failure?: string;
-	report?: { submissionsAttempted: number; downloadsStarted: number; asksForPhone: boolean; blockedByChallenge: boolean; stoppedReason: string };
+	report?: { asksForPhone: boolean; blockedByChallenge: boolean; stoppedReason: string };
 	actions: Array<{ kind: string; text: string }>;
 	dataSent: VisitDataSent[];
 	downloadFailures: Array<{ url: string; reason: string }>;

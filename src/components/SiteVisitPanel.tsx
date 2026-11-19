@@ -206,10 +206,11 @@ export function SiteVisitTimeline({ running, visit, offeredDownload, live: { ent
 	}, [entries.length]);
 	const thirdParty = useMemo(() => (visit?.dataSent ?? []).filter((sent) => !sent.sameSite), [visit]);
 	if (!running && !visit) return null;
-	const submitted = visit?.report?.submissionsAttempted;
+	// Counted from the network recording, never from the agent's own account.
+	const sent = visit?.dataSent.length;
 	const summary = [
 		running ? "Running" : visit?.outcome === "completed" ? "Finished" : visit?.outcome === "timed_out" ? "Ran out of time" : "Did not finish",
-		typeof submitted === "number" ? `${submitted} form${submitted === 1 ? "" : "s"} submitted` : undefined,
+		sent === undefined ? undefined : sent ? `made-up data sent in ${sent} request${sent === 1 ? "" : "s"}` : "no made-up data sent",
 		pageCount ? `${pageCount} page${pageCount === 1 ? "" : "s"}` : undefined,
 	].filter(Boolean).join(" · ");
 	const note = visit?.report?.stoppedReason ?? visit?.failure;

@@ -79,7 +79,7 @@ const DOWNLOAD = { url: "https://rbxcore.pro/Game-Copier.zip", fileName: "Game-C
 function scenario(params: { classification: Answer; visit?: ScriptedVisit }) {
 	const prompts: Array<{ kind: string; prompt: string }> = [];
 	const visits: WebsiteVisitParams[] = [];
-	const session = scriptedVisitSession(params.visit ?? { downloads: [DOWNLOAD], agent: { report: { submissionsAttempted: 0, downloadsStarted: 1, asksForPhone: false, blockedByChallenge: false, stoppedReason: "Downloaded Game-Copier.zip." } } }, visits);
+	const session = scriptedVisitSession(params.visit ?? { downloads: [DOWNLOAD], agent: { report: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Downloaded Game-Copier.zip." } } }, visits);
 	const dependencies: WebsiteAnalysisDependencies = {
 		getInfo: async () => ({ ip_rdaps: [] }),
 		analysisClient: model(params.classification, prompts),
@@ -125,7 +125,7 @@ describe("a page whose harm is the file it offers", () => {
 			inspection: { format: "browser_extension", browserExtension: { name: "Game Copier", hostPermissions: ["<all_urls>"] } },
 		});
 		expect(data?.providerWarning).toEqual({ provider: "Cloudflare", warning: "Suspected Malware" });
-		expect(data?.visit).toMatchObject({ outcome: "completed", report: { downloadsStarted: 1 } });
+		expect(data?.visit).toMatchObject({ outcome: "completed", report: { stoppedReason: "Downloaded Game-Copier.zip." } });
 		expect(data?.siteAssessments?.[0]).toMatchObject({ finding: "malware", evidenceQuote: QUOTE, offeredDownload: { fileName: "Game-Copier.zip", sha256: data!.offeredDownload!.sha256 } });
 
 		const report = await AbuseRepository.getReportForSubmission(id);

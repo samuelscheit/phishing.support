@@ -302,7 +302,7 @@ describe("a visit through a multi-page kit", () => {
 				// …and the sign-in page's script posts the password to the kit's bot.
 				{ timestamp: "2026-11-15T10:00:01.500Z", url: bot, method: "POST", postData: JSON.stringify({ chat_id: "-100777", text: `pass: ${canaries.password}` }) },
 			],
-			agent: { report: { submissionsAttempted: 2, downloadsStarted: 0, asksForPhone: false, blockedByChallenge: false, stoppedReason: "The sign-in page showed an error after the password." } },
+			agent: { report: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "The sign-in page showed an error after the password." } },
 		});
 
 		await analyzeWebsite({ submissionId: id, url: GATE }, dependencies({ answers: GATE_ANSWERS, captures: [], modelCalls, capture: () => visit.archive }));

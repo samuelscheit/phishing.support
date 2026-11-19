@@ -103,8 +103,6 @@ export function visitNarrativeEvidence(context: WebsiteNarrativeContext): string
 			agent: {
 				outcome: visit.outcome,
 				stopped_because: visit.report?.stoppedReason ?? visit.failure,
-				forms_submitted: visit.report?.submissionsAttempted,
-				downloads_started: visit.report?.downloadsStarted,
 				actions: visit.actions.slice(0, 40).map((action) => action.text),
 			},
 		})}`);
