@@ -250,6 +250,7 @@ function archiveBrowserFixture(options: {
 							].join("\r\n"),
 						};
 					},
+					detach: async () => undefined,
 				}),
 			}),
 			evaluate: async (callback: () => unknown) => {
@@ -826,6 +827,14 @@ describe("cloaking", () => {
 			{ hopUrl: url, redirectTo: kitUrl, contentCaptured: false },
 			{ hopUrl: kitUrl, redirectTo: undefined, contentCaptured: true },
 		]);
+	});
+
+	test("a capture over one route uses only that route: where it is sent is the page, with no cloaking check", async () => {
+		const fixture = cloakerFixture(() => kitUrl);
+		const archive = await archiveWebsite({ url, egress: "residential" }, { ...settle, getBrowser: fixture.getBrowser });
+		expect(fixture.leasedEgress).toEqual(["residential"]);
+		expect(archive).toMatchObject({ url: kitUrl, route: "residential exit", egress: "residential" });
+		expect(archive.cloaking).toBeUndefined();
 	});
 
 	test("the same scripted destination for every route captures it and leaves the verdict to the destination", async () => {

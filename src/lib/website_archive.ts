@@ -1,10 +1,11 @@
-import { createHash } from "node:crypto";
-
-import { type Frame, type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
+import { type Frame, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
 import sharp from "sharp";
 import { getDomain } from "tldts";
 
 import { getBrowser, getBrowserPage, type BrowserIdentity } from "./browser";
+import { presentIdentityToNewTab, presentIdentityToPage } from "./browser/page";
+import { observedPuppeteerResponse, observeSessionResponses } from "./browser/tab_traffic";
+import type { TabSetup, VisitorTab } from "./browser/visitor_tabs";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "./browser/fabric";
 import { sleep } from "./utils";
 import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteProviderWarning } from "./website_types";
@@ -13,7 +14,8 @@ import type { ExfiltrationCanaries } from "./exfiltration/types";
 import type { VisitAgent } from "./site_visit/agent";
 import { runSiteVisit, type SiteVisitLiveEvent, type SiteVisitRecording } from "./site_visit/visit";
 import { passProviderWarning } from "./website_provider_warning";
-import { hiddenFrames, recordFrameTraffic } from "./website_hidden_frames";
+import { hiddenFrames, recordFrameTraffic, type FrameTrafficRecorder } from "./website_hidden_frames";
+import { actionResultHops, documentNavigationHops, isDocumentAnswer, isNetworkDocument, recordTab, type TabRecording } from "./website_tab_recording";
 import { CAPTCHA_PROVIDER_FRAME } from "./human_check";
 import { isSameWebsite, websiteSite } from "./website_site";
 // @ts-ignore
@@ -51,6 +53,8 @@ export type WebsiteArchiveResult = {
 	archivedAt: Date;
 	/** The network route the live capture used, for example "Tor exit"; absent for MHTML. */
 	route?: string;
+	/** The Fabric egress of a live capture; `route` is how it reads. */
+	egress?: FabricEgress;
 	screenshotPng?: Buffer;
 	mhtml: Buffer;
 	html: Buffer;
@@ -101,39 +105,6 @@ export type WebsiteVisitParams = {
 };
 
 const WEBSITE_NAVIGATION_TIMEOUT_MS = 30_000;
-const KIT_RESOURCE_TYPES = new Set(["script", "stylesheet"]);
-const MAX_KIT_RESOURCES = 40;
-const MAX_KIT_RESOURCE_BYTES = 2 * 1024 * 1024;
-
-/**
- * Record the hash of every script and stylesheet response body, from any
- * host, exactly as received. These are the bytes urlscan.io hashes; the MHTML
- * snapshot cannot provide them because it omits scripts and rewrites CSS.
- * A loader kit serves its real code from a separate backend host, so those
- * files are kept too; sibling discovery judges each one by its rarity.
- */
-function recordKitResources(page: Page): { settled: () => Promise<WebsiteKitResource[]> } {
-	const pending: Array<Promise<WebsiteKitResource | undefined>> = [];
-	page.on("response", (response) => {
-		const request = response.request();
-		if (pending.length >= MAX_KIT_RESOURCES || !KIT_RESOURCE_TYPES.has(request.resourceType()) || response.status() !== 200) return;
-		pending.push((async () => {
-			const body = await response.buffer();
-			if (body.byteLength === 0 || body.byteLength > MAX_KIT_RESOURCE_BYTES) return undefined;
-			return {
-				url: response.url(),
-				mimeType: (response.headers()["content-type"] ?? "").split(";", 1)[0]!.trim().toLowerCase() || request.resourceType(),
-				size: body.byteLength,
-				sha256: createHash("sha256").update(body).digest("hex"),
-			};
-		})().catch(() => undefined));
-	});
-	return {
-		// Once per hash: the same file under a second URL identifies nothing new.
-		settled: async () => (await Promise.all(pending)).filter((resource, index, all): resource is WebsiteKitResource =>
-			Boolean(resource) && all.findIndex((other) => other?.sha256 === resource!.sha256) === index),
-	};
-}
 
 export type ArchiveWebsiteOptions = {
 	/** Raw MHTML (decoded bytes). It is parsed locally; Fabric browsers never receive an app-local file:// URL. */
@@ -163,6 +134,11 @@ export type ArchiveWebsiteOptions = {
 	 * caller can act on the captured page in the same visit; the caller closes it.
 	 */
 	keepSession?: boolean;
+	/**
+	 * Capture over this route only, without the fallbacks across routes: the
+	 * visit a CAPTCHA or browser check blocked is repeated from another network.
+	 */
+	egress?: FabricEgress;
 };
 
 /** Read a top-level MHTML header; MIME-part headers must never override capture metadata. */
@@ -368,55 +344,6 @@ export type WebsiteVerificationGate = {
 	/** The control's own caption, e.g. "I'm not a robot". */
 	label: string;
 };
-
-export function navigationHopsFromResponse(
-	response: HTTPResponse | null,
-	finalUrl: string,
-): WebsiteNavigationHop[] {
-	const finalRequest = response?.request();
-	const requests = finalRequest ? [...finalRequest.redirectChain(), finalRequest] : [];
-	if (requests.length === 0) {
-		const { hostname } = new URL(finalUrl);
-		return [{ index: 0, url: finalUrl, hostname, status: response?.status() ?? null, contentCaptured: true }];
-	}
-
-	const hops = requests.map((request: HTTPRequest, index) => {
-		const responseForHop = request === finalRequest ? response : request.response();
-		const hopUrl = request.url();
-		const { hostname } = new URL(hopUrl);
-		const status = responseForHop?.status() ?? null;
-		const headers = responseForHop?.headers() ?? {};
-		const location = status !== null && status >= 300 && status < 400 ? headers.location : undefined;
-		let redirectTo: string | undefined;
-		if (location) {
-			try {
-				redirectTo = new URL(location, hopUrl).toString();
-			} catch {
-				// Keep malformed redirect destinations out of the navigation record.
-			}
-		}
-
-		return {
-			index,
-			url: hopUrl,
-			hostname,
-			status,
-			...(redirectTo ? { redirectTo } : {}),
-			...(headers["content-type"] ? { contentType: headers["content-type"] } : {}),
-			contentCaptured: false,
-		};
-	});
-
-	const matchingCapturedIndex = hops.findLastIndex((hop) => hop.url === finalUrl);
-	if (matchingCapturedIndex >= 0) hops[matchingCapturedIndex]!.contentCaptured = true;
-	else {
-		const { hostname } = new URL(finalUrl);
-		const previousHop = hops.at(-1);
-		if (previousHop && !previousHop.redirectTo) previousHop.redirectTo = finalUrl;
-		hops.push({ index: hops.length, url: finalUrl, hostname, status: null, contentCaptured: true });
-	}
-	return hops;
-}
 
 /**
  * Egress routes tried for a live capture, in order. Tor keeps the reporting
@@ -696,11 +623,6 @@ async function waitForRevealedForm(page: Page, settleMs: number): Promise<void> 
 	await settleRendering(page, Math.max(WEBSITE_RENDER_IDLE_MS, deadline - Date.now()));
 }
 
-/** A response a site sent over the network, not one Chromium made itself (chrome-error://, blob:). */
-function isNetworkDocument(response: HTTPResponse): boolean {
-	return /^https?:/i.test(response.url());
-}
-
 /**
  * The http(s) address a captured main-frame document belongs to. Kits that
  * fetch their real page and swap it in through `location.replace(blob:...)`
@@ -713,34 +635,6 @@ function documentAddress(pageUrl: string, loadedUrl: string): string | undefined
 	if (/^https?:$/i.test(page.protocol)) return page.toString();
 	if (page.protocol === "blob:" && page.origin === new URL(loadedUrl).origin) return loadedUrl;
 	return undefined;
-}
-
-/**
- * Hops of every main-frame document the visit passed through, in order. Each
- * document but the last sent the visitor on by script, so its last hop points
- * at the next document's first request; only the last document is captured.
- */
-function documentNavigationHops(documents: readonly HTTPResponse[], capturedDocumentUrl: string): WebsiteNavigationHop[] {
-	if (documents.length === 0) return navigationHopsFromResponse(null, capturedDocumentUrl);
-	return documents.flatMap((response, position) => {
-		const next = documents[position + 1];
-		if (!next) return navigationHopsFromResponse(response, capturedDocumentUrl);
-		const hops = navigationHopsFromResponse(response, response.url()).map((hop) => ({ ...hop, contentCaptured: false }));
-		const last = hops.at(-1);
-		if (last && !last.redirectTo) last.redirectTo = next.request().redirectChain()[0]?.url() ?? next.url();
-		return hops;
-	}).map((hop, index) => ({ ...hop, index }));
-}
-
-/**
- * Hops of what a page action opened: the documents that arrived after it (a
- * POST answered by a redirect, then the next page), or the same document again
- * when the kit swapped in its next step without navigating.
- */
-function actionResultHops(arrived: readonly HTTPResponse[], current: HTTPResponse | undefined, capturedDocumentUrl: string): WebsiteNavigationHop[] {
-	if (arrived.length) return documentNavigationHops(arrived, capturedDocumentUrl);
-	const { redirectTo: _, ...hop } = navigationHopsFromResponse(current ?? null, capturedDocumentUrl).at(-1)!;
-	return [{ ...hop, index: 0, contentCaptured: true }];
 }
 
 /** Attempts at a screenshot that shows what the page has rendered. */
@@ -807,6 +701,17 @@ async function capturePaintedScreenshot(page: Page, timeoutMs = SCREENSHOT_TIMEO
 	return screenshot;
 }
 
+/** A tab of a live capture: what was recorded of it, and where the step before it ended. */
+type CaptureTab = {
+	recording: TabRecording;
+	/** Its frames' traffic, recorded once puppeteer has its page. */
+	frameTraffic?: FrameTrafficRecorder;
+	/** The address the captured tab loaded, until a document says otherwise. */
+	loadedUrl?: string;
+	/** Its documents before this index belong to steps already recorded. */
+	stepFrom: number;
+};
+
 /** A live capture: the captured page, and the open browser the flow can keep acting in. */
 type LiveCapture = { archive: WebsiteArchiveResult; session: WebsitePageSession };
 
@@ -830,27 +735,19 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 		// as well: both must see the same tab.
 		const context = browser.defaultBrowserContext();
 		const [existing] = await context.pages();
-		const { page, userAgent } = await getBrowserPage(existing ?? await context.newPage(), device, options.visitor);
+		const { page, userAgent, identity } = await getBrowserPage(existing ?? await context.newPage(), device, options.visitor);
 
-		const kitResources = recordKitResources(page);
-		const frameTraffic = recordFrameTraffic(page);
+		// The captured tab's documents: the submitted page, where its script sent
+		// the visitor (even from its <head>, before the navigation resolves), what
+		// a clicked verification gate navigated to, and what each page action opened.
+		const captured: CaptureTab = { recording: recordTab(), frameTraffic: recordFrameTraffic(page), loadedUrl: url, stepFrom: 0 };
 		// The last final (non-redirect) main-frame document response, so a
 		// document that replaces an error interstitial is seen with its status.
 		let latestDocumentResponse = null as HTTPResponse | null;
-		// Every successful main-frame document the visit passed through, in order:
-		// the submitted page, where its script sent the visitor (even from its
-		// <head>, before the navigation resolves), what a clicked verification
-		// gate navigated to, and what each page action opened. An HTTP error
-		// document (a bot check that reloads into the real page) is replaced, not
-		// passed through.
-		const documents: HTTPResponse[] = [];
 		page.on("response", (response) => {
-			const request = response.request();
-			const status = response.status();
-			if (request.isNavigationRequest() && request.frame() === page.mainFrame() && (status < 300 || status >= 400) && isNetworkDocument(response)) {
-				latestDocumentResponse = response;
-				if (response.ok()) documents.push(response);
-			}
+			const observed = observedPuppeteerResponse(page, response);
+			captured.recording.observe(observed);
+			if (isDocumentAnswer(observed)) latestDocumentResponse = response;
 		});
 
 		// Navigation completes once the document exists; a stalled image or
@@ -870,7 +767,7 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 		// A kit that swaps in its blob: page before DOMContentLoaded makes the
 		// navigation resolve with that blob: document; the site's own response is
 		// the document the visitor loaded.
-		if (navigationResponse && !isNetworkDocument(navigationResponse)) navigationResponse = latestDocumentResponse;
+		if (navigationResponse && !isNetworkDocument(navigationResponse.url())) navigationResponse = latestDocumentResponse;
 		let providerWarning: WebsiteProviderWarning | undefined;
 		if (navigationResponse && !navigationResponse.ok()) {
 			providerWarning = await passProviderWarning(page, { humanCheckMs: dependencies.humanCheckMs, captchaProviderFrame: dependencies.captchaProviderFrame });
@@ -892,7 +789,7 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 		// A navigation the page started that ended in an HTTP error or a network
 		// failure leaves Chromium's own error document (chrome-error://) in the
 		// main frame. That is not a site: the destination was unreachable.
-		const loadedUrl = (scriptNavigation ?? navigationResponse)?.url() ?? url;
+		const loadedUrl = captured.loadedUrl = (scriptNavigation ?? navigationResponse)?.url() ?? url;
 		if (!documentAddress(page.url(), loadedUrl)) {
 			const failed = latestDocumentResponse !== navigationResponse ? latestDocumentResponse : null;
 			throw new WebsiteUnreachableError(egress, failed
@@ -903,23 +800,25 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 		await settleRendering(page, renderSettleMs);
 		const verificationGate = await passVerificationGate(page, renderSettleMs);
 
-		/** The page as it stands: screenshot, MHTML, and the hops that led to it. */
-		const snapshot = async (hopsTo: (capturedDocumentUrl: string) => WebsiteNavigationHop[]): Promise<WebsiteArchiveResult> => {
-			const documentUrl = documents.at(-1)?.url() ?? loadedUrl;
-			const screenshotUrl = documentAddress(page.url(), documentUrl);
-			const screenshotBytes = await capturePaintedScreenshot(page, dependencies.screenshotTimeoutMs);
-			const cdp = await page.target().createCDPSession();
+		/** A tab's page as it stands: screenshot, MHTML, and the hops that led to it. */
+		const snapshot = async (shown: Page, tab: CaptureTab, hopsTo: (capturedDocumentUrl: string) => WebsiteNavigationHop[]): Promise<WebsiteArchiveResult> => {
+			const documentUrl = tab.recording.documents.at(-1)?.url ?? tab.loadedUrl ?? shown.url();
+			const screenshotUrl = documentAddress(shown.url(), documentUrl);
+			const screenshotBytes = await capturePaintedScreenshot(shown, dependencies.screenshotTimeoutMs);
+			const cdp = await shown.target().createCDPSession();
 			const resolvedMhtml = Buffer.from((await cdp.send("Page.captureSnapshot", { format: "mhtml" })).data, "utf-8");
-			const documentHtml = await page.evaluate(() => document.documentElement.outerHTML).catch(() => undefined);
-			const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? documentAddress(page.url(), documentUrl) ?? page.url();
+			await cdp.detach().catch(() => undefined);
+			const documentHtml = await shown.evaluate(() => document.documentElement.outerHTML).catch(() => undefined);
+			const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? documentAddress(shown.url(), documentUrl) ?? shown.url();
 			const capturedDocument = await archiveMhtmlSnapshot({ url, archivedUrl: capturedDocumentUrl, navigationHops: hopsTo(capturedDocumentUrl), mhtmlSnapshot: resolvedMhtml });
-			const frames = await hiddenFrames(page, frameTraffic, userAgent);
+			const frames = tab.frameTraffic ? await hiddenFrames(shown, tab.frameTraffic, userAgent) : [];
 			return {
 				...capturedDocument,
 				route: FABRIC_EGRESS_LABEL[egress],
+				egress,
 				screenshotPng: screenshotBytes && screenshotUrl === capturedDocumentUrl ? Buffer.from(screenshotBytes) : undefined,
 				...(documentHtml ? { documentHtml } : {}),
-				kitResources: await kitResources.settled(),
+				kitResources: await tab.recording.kitResources(),
 				...(frames.length ? { hiddenFrames: frames } : {}),
 				...(device !== "desktop" ? { device } : {}),
 				userAgent,
@@ -928,11 +827,27 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 			};
 		};
 
-		// Each step of a visit holds the documents that arrived since the step before.
-		let stepFrom = 0;
 		const visit = async (params: WebsiteVisitParams) => {
 			if (!open) throw new Error("The capture's browser is already closed.");
-			stepFrom = documents.length;
+			// Each step of a visit holds the documents its tab received since that tab's step before.
+			captured.stepFrom = captured.recording.documents.length;
+			const opened = new Map<string, CaptureTab>();
+			/**
+			 * A tab the site opened is recorded from its first request, as the visitor's own browser shows it.
+			 * Its frames' traffic is recorded once puppeteer has its page, so a frame of its first load is
+			 * listed as hidden without the code it ran.
+			 */
+			const recordOpenedTab: TabSetup = async (tab) => {
+				if (!tab.opener) return;
+				const recorded: CaptureTab = { recording: recordTab(), stepFrom: 0 };
+				opened.set(tab.targetId, recorded);
+				observeSessionResponses(tab.session, tab.targetId, recorded.recording.observe);
+				await presentIdentityToNewTab(tab.session, identity);
+				void tab.pageReady.then(async (shown) => {
+					recorded.frameTraffic = recordFrameTraffic(shown);
+					await presentIdentityToPage(shown, identity);
+				}).catch(() => undefined);
+			};
 			return runSiteVisit({
 				browser,
 				page,
@@ -940,10 +855,13 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 				userAgent,
 				url: page.url(),
 				...params,
-				snapshot: () => {
-					const from = stepFrom;
-					stepFrom = documents.length;
-					return snapshot((capturedDocumentUrl) => actionResultHops(documents.slice(from), documents.at(-1), capturedDocumentUrl));
+				tabSetup: recordOpenedTab,
+				snapshot: (tab: VisitorTab) => {
+					const recorded = opened.get(tab.targetId) ?? captured;
+					const { documents } = recorded.recording;
+					const from = recorded.stepFrom;
+					recorded.stepFrom = documents.length;
+					return snapshot(tab.page!, recorded, (capturedDocumentUrl) => actionResultHops(documents.slice(from), documents.at(-1), capturedDocumentUrl));
 				},
 				...(dependencies.visitBudgetMs ? { budgetMs: dependencies.visitBudgetMs } : {}),
 				...(dependencies.visitPollMs ? { pollMs: dependencies.visitPollMs } : {}),
@@ -951,7 +869,7 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 			});
 		};
 
-		const archive = await snapshot((capturedDocumentUrl) => documentNavigationHops(documents, capturedDocumentUrl));
+		const archive = await snapshot(page, captured, (capturedDocumentUrl) => documentNavigationHops(captured.recording.documents, capturedDocumentUrl));
 		return { archive, session: { visit, close } };
 	} catch (error) {
 		await close();
@@ -986,6 +904,16 @@ export async function archiveWebsite(options: ArchiveWebsiteOptions, dependencie
 		return options.keepSession && session ? { ...result, session } : result;
 	};
 	try {
+		if (options.egress) {
+			// One route, no fallbacks. A single route cannot tell a decoy from the site's
+			// real destination; like the cloaking check, where it goes is taken as the page.
+			try {
+				return keep(await capture(options.egress));
+			} catch (error) {
+				if (error instanceof WebsiteUnreachableError) throw new WebsiteCaptureFailedError([error]);
+				throw error;
+			}
+		}
 		const failures: WebsiteUnreachableError[] = [];
 		let decoy: { archive: WebsiteArchiveResult; site: string; egress: FabricEgress } | undefined;
 		for (const egress of WEBSITE_CAPTURE_EGRESS) {

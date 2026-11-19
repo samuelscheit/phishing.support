@@ -63,8 +63,47 @@ function kitWalk(canaries: ExfiltrationCanaries): ScriptedTurn[] {
 			return { text: "The verify page offers a verifier.", calls: [{ name: "click", arguments: { ref: refIn(page, 'button "Get Verifier"') } }] };
 		},
 		(page) => ({ calls: [{ name: "click", arguments: { ref: refIn(page, 'button "Download Verifier.zip"') } }] }),
-		() => ({ calls: [{ name: "done", arguments: { result: { submissionsAttempted: 1, downloadsStarted: 1, asksForPhone: false, stoppedReason: "Downloaded the verifier." }, summary: "Done." } }] }),
+		() => ({ calls: [{ name: "done", arguments: { result: { submissionsAttempted: 1, downloadsStarted: 1, asksForPhone: false, blockedByChallenge: false, stoppedReason: "Downloaded the verifier." }, summary: "Done." } }] }),
 	];
+}
+
+/**
+ * A shared-note lure whose every step opens a new tab, as thunknotes.com's
+ * "AVAA ASIAKIRJA" did (production case 381535952033550429): the note links
+ * to the document with target=_blank (through a redirect), the document offers
+ * its file in yet another tab and opens its sign-in with window.open, and the
+ * sign-in's last page closes itself, back to the document.
+ */
+function serveNewTabKit() {
+	const posts: string[] = [];
+	/** Who the new tab said it was: its first request's User-Agent header, and what its first script read. */
+	const seenAs: string[] = [];
+	const server = Bun.serve({
+		port: 0,
+		fetch: async (request) => {
+			const { pathname, searchParams } = new URL(request.url);
+			if (pathname === "/d/abc") return Response.redirect("/document", 302);
+			if (pathname === "/seen") {
+				seenAs.push(`script: ${searchParams.get("platform")} ${searchParams.get("width")}x${searchParams.get("height")}`);
+				return new Response("");
+			}
+			if (pathname === "/document") {
+				seenAs.push(`header: ${request.headers.get("user-agent")}`);
+				return html(`<h1>Invoice 4711</h1><p>2 pages awaiting review.</p><script src="/viewer.js"></script>
+<script>fetch("/seen?platform=" + navigator.platform + "&width=" + screen.width + "&height=" + screen.height)</script>
+<a href="/Invoice-4711.zip" target="_blank">Download the invoice</a> <button onclick="window.open('/signin')">Sign in to view</button>`, "Document viewer");
+			}
+			if (pathname === "/viewer.js") return new Response("window.viewer = 1;", { headers: { "content-type": "application/javascript" } });
+			if (pathname === "/Invoice-4711.zip") return new Response(ZIP, { headers: { "content-type": "application/zip" } });
+			if (pathname === "/signin") return html(`<h1>Sign in to view the document</h1><form method="POST" action="/collect"><input name="email" placeholder="Email"><input type="password" name="password" placeholder="Password"><button>Sign in</button></form>`, "Sign in");
+			if (pathname === "/collect" && request.method === "POST") {
+				posts.push(await request.text());
+				return html(`<h1>Signed in</h1><button onclick="window.close()">Back to the document</button>`, "Signed in");
+			}
+			return html(`<h1>EG-Trading Oy</h1><p>You have a new document awaiting review.</p><a href="/d/abc" target="_blank">Open document</a>`, "Shared note");
+		},
+	});
+	return { server, posts, seenAs, url: `http://127.0.0.1:${server.port}/` };
 }
 
 class FailingModel implements ChatModel {
@@ -130,6 +169,104 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			const times = recording.agent.actions.map((action) => action.at!);
 			expect(times.every((at) => !Number.isNaN(Date.parse(at)))).toBe(true);
 			expect(times).toEqual([...times].sort());
+		} finally {
+			await archive.session?.close();
+			server.stop(true);
+		}
+	}, 60_000);
+
+	test("follows the walk into every tab the site opens: a target=_blank link, a file in a new tab, window.open, and back when that tab closes", async () => {
+		const { server, posts, seenAs, url } = serveNewTabKit();
+		const canaries = createExfiltrationCanaries();
+		const model = new ScriptedModel([
+			(page) => ({ calls: [{ name: "click", arguments: { ref: refIn(page, 'link "Open document"') } }] }),
+			(page) => {
+				expect(page).toContain("Invoice 4711");
+				return { calls: [{ name: "click", arguments: { ref: refIn(page, 'link "Download the invoice"') } }] };
+			},
+			// The file's tab may still show empty; the agent waits, as it does on a page still loading.
+			() => ({ calls: [{ name: "wait", arguments: { seconds: 1 } }] }),
+			(page) => {
+				// The tab that only delivered the file was closed, as Chrome closes it: the agent is back on the document.
+				expect(page).toContain("Invoice 4711");
+				return { calls: [{ name: "click", arguments: { ref: refIn(page, 'button "Sign in to view"') } }] };
+			},
+			(page) => {
+				expect(page).toContain("Sign in to view the document");
+				return {
+					calls: [
+						{ name: "type", arguments: { ref: refIn(page, 'textbox "Email"'), text: canaries.email } },
+						{ name: "type", arguments: { ref: refIn(page, 'textbox "Password"'), text: "{{secret:password}}" } },
+						{ name: "click", arguments: { ref: refIn(page, 'button "Sign in"') } },
+					],
+				};
+			},
+			// A model's turn takes seconds: the signed-in page stays long enough to be a step.
+			(page) => {
+				expect(page).toContain("Signed in");
+				return { calls: [{ name: "wait", arguments: { seconds: 1 } }] };
+			},
+			(page) => ({ calls: [{ name: "click", arguments: { ref: refIn(page, 'button "Back to the document"') } }] }),
+			(page) => {
+				expect(page).toContain("Invoice 4711");
+				return { calls: [{ name: "done", arguments: { result: { submissionsAttempted: 1, downloadsStarted: 1, asksForPhone: false, blockedByChallenge: false, stoppedReason: "Signed in and downloaded the invoice." }, summary: "Done." } }] };
+			},
+		]);
+		const live: SiteVisitLiveEvent[] = [];
+		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: launch });
+		try {
+			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event) });
+			expect(recording.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "Signed in and downloaded the invoice." } });
+			const steps = recording.steps.map(({ step }) => step);
+			expect(steps.map((step) => step.url)).toEqual([`${url}document`, `${url}signin`, `${url}collect`, `${url}document`]);
+
+			// The document opened in a new tab is a step of its own: its screenshot, text, the redirect
+			// that led to it, and the script its first load ran, all recorded from the tab's first request.
+			const [document, signin, signedIn, backToDocument] = steps;
+			expect(document!.text.toString()).toContain("Invoice 4711");
+			expect(document!.screenshotPng?.byteLength).toBeGreaterThan(1_000);
+			expect(document!.navigationHops.map(({ url: hopUrl, status, contentCaptured }) => ({ hopUrl, status, contentCaptured }))).toEqual([
+				{ hopUrl: `${url}d/abc`, status: 302, contentCaptured: false },
+				{ hopUrl: `${url}document`, status: 200, contentCaptured: true },
+			]);
+			expect(document!.kitResources).toEqual([expect.objectContaining({ url: `${url}viewer.js`, mimeType: "application/javascript" })]);
+			expect(signin!.navigationHops.map(({ url: hopUrl, status }) => ({ hopUrl, status }))).toEqual([{ hopUrl: `${url}signin`, status: 200 }]);
+			expect(signedIn!.text.toString()).toContain("Signed in");
+			// Closing the sign-in tab returns to the document's tab, whose page is the same document.
+			expect(backToDocument!.navigationHops.map(({ url: hopUrl, contentCaptured }) => ({ hopUrl, contentCaptured }))).toEqual([{ hopUrl: `${url}document`, contentCaptured: true }]);
+
+			// The file its link opened in another tab was taken there, never saved.
+			expect(recording.downloads).toEqual([expect.objectContaining({ url: `${url}Invoice-4711.zip`, fileName: "Invoice-4711.zip", bytes: ZIP })]);
+			// The network record holds every tab's requests from its first one: the document's
+			// redirect, and the sign-in that carried the synthetic password.
+			expect(recording.requests.map((request) => `${request.method} ${request.url}`)).toEqual(expect.arrayContaining([`GET ${url}d/abc`, `GET ${url}document`, `GET ${url}viewer.js`, `GET ${url}signin`, `POST ${url}collect`]));
+			expect(new URLSearchParams(posts[0]).get("password")).toBe(canaries.password);
+			expect(new URLSearchParams(recording.requests.find((request) => request.method === "POST")?.postData).get("password")).toBe(canaries.password);
+
+			// The new tab is the visit's Windows desktop from its first request and its first script, never Linux Chromium.
+			expect(seenAs).toEqual([expect.stringMatching(/^header: Mozilla\/5\.0 \(Windows NT 10\.0; Win64; x64\)/), "script: Win32 1920x1080"]);
+			// The live view shows the tab the agent is on.
+			expect(live.some((event) => event.type === "browser.frame" && event.url === `${url}signin`)).toBeTrue();
+			expect(live).toContainEqual({ type: "browser.download", fileName: "Invoice-4711.zip", url: `${url}Invoice-4711.zip` });
+		} finally {
+			await archive.session?.close();
+			server.stop(true);
+		}
+	}, 90_000);
+
+	test("a walk that ends right after opening a tab ends on that tab: its page is the visit's last step", async () => {
+		const { server, url } = serveNewTabKit();
+		const model = new ScriptedModel([
+			(page) => ({ calls: [{ name: "click", arguments: { ref: refIn(page, 'link "Open document"') } }] }),
+			// Done the moment the tab is shown: no quiet period passes on it before the walk ends.
+			() => ({ calls: [{ name: "done", arguments: { result: { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, blockedByChallenge: false, stoppedReason: "Opened the document." }, summary: "Done." } }] }),
+		]);
+		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: launch });
+		try {
+			const recording = await archive.session!.visit({ canaries: createExfiltrationCanaries(), agent: taskAgentVisit(() => model) });
+			expect(recording.agent).toMatchObject({ outcome: "completed" });
+			expect(recording.steps.map(({ step }) => step.url)).toEqual([`${url}document`]);
+			expect(recording.steps[0]!.step.text.toString()).toContain("Invoice 4711");
 		} finally {
 			await archive.session?.close();
 			server.stop(true);

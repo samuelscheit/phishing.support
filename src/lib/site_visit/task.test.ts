@@ -44,7 +44,9 @@ describe("the site visit task", () => {
 
 	test("lets the browser guardian clear checkbox CAPTCHAs and never solves a challenge itself", () => {
 		expect(goal).toContain("reCAPTCHA v2 or Cloudflare Turnstile checkbox is cleared automatically by the browser's guardian");
-		expect(goal).toContain("still present after waiting (such as hCaptcha or an image puzzle)");
+		// The guardian may need its whole click budget over Tor; the agent waits that long before giving up.
+		expect(goal).toContain("it can take up to 45 seconds over a slow network, so wait for it that long");
+		expect(goal).toContain("a Turnstile or \"verify you are human\" check that did not clear; set blockedByChallenge");
 		expect(goal).not.toMatch(/\bsolve (?:the |a |any )?(?:captcha|challenge)/i);
 	});
 
@@ -78,8 +80,11 @@ describe("the site visit task", () => {
 	});
 
 	test("reads the agent's report; anything else is no report", () => {
-		const report = { submissionsAttempted: 2, downloadsStarted: 0, asksForPhone: false, stoppedReason: "The site showed a confirmation." };
+		const report = { submissionsAttempted: 2, downloadsStarted: 0, asksForPhone: false, blockedByChallenge: true, stoppedReason: "The site showed a confirmation." };
 		expect(visitAgentReport(report)).toEqual(report);
+		// A report without the flag is no challenge.
+		const { blockedByChallenge: _, ...withoutFlag } = report;
+		expect(visitAgentReport(withoutFlag)?.blockedByChallenge).toBe(false);
 		expect(visitAgentReport({ ...report, stoppedReason: "x".repeat(400) })?.stoppedReason).toHaveLength(300);
 		expect(visitAgentReport({ stoppedReason: 7 })).toBeUndefined();
 		expect(visitAgentReport(null)).toBeUndefined();

@@ -1,5 +1,6 @@
 import type { Browser, CDPSession, Target } from "rebrowser-puppeteer-core";
 
+import { sendBeforeRun } from "../browser/cdp";
 import type { CapturedNetworkRequest } from "./types";
 
 const MAX_CAPTURE_COUNT = 2_000;
@@ -39,6 +40,7 @@ export class ExfiltrationNetworkRecorder {
 	private readonly attachedTargets = new Set<string>();
 	private capturedBytes = 0;
 	private browser?: Browser;
+	private stopped = false;
 	private targetHandler?: (target: Target) => void;
 
 	async start(browser: Browser): Promise<void> {
@@ -50,6 +52,8 @@ export class ExfiltrationNetworkRecorder {
 	}
 
 	private push(request: CapturedNetworkRequest): boolean {
+		// A session its owner holds may still report after the recording ended.
+		if (this.stopped) return false;
 		if (this.requests.length >= MAX_CAPTURE_COUNT) return false;
 		const size = Buffer.byteLength(JSON.stringify(request));
 		if (this.capturedBytes + size > MAX_CAPTURE_BYTES) return false;
@@ -63,15 +67,32 @@ export class ExfiltrationNetworkRecorder {
 		if (this.attachedTargets.has(targetId)) return;
 		if (!NETWORK_TARGET_TYPES.has(cdpTargetType(target))) return;
 		this.attachedTargets.add(targetId);
-		let session: CDPSession;
+		let session: CDPSession | undefined;
 		try {
 			session = await target.createCDPSession();
+			this.record(session);
 			await session.send("Network.enable", { maxPostDataSize: MAX_VALUE_BYTES });
 		} catch {
+			await session?.detach().catch(() => undefined);
 			this.attachedTargets.delete(targetId);
 			return;
 		}
 		this.sessions.add(session);
+	}
+
+	/**
+	 * Record a tab on a session its owner holds, typically a new tab before it
+	 * ran its first request: puppeteer reports such a target only once that
+	 * request is under way. The owner detaches the session.
+	 */
+	attachSession(targetId: string, session: CDPSession): void {
+		if (this.attachedTargets.has(targetId)) return;
+		this.attachedTargets.add(targetId);
+		this.record(session);
+		sendBeforeRun(session, "Network.enable", { maxPostDataSize: MAX_VALUE_BYTES });
+	}
+
+	private record(session: CDPSession): void {
 		type CdpResponse = { status: number; statusText?: string; mimeType?: string };
 		const pending = new Map<string, CapturedNetworkRequest>();
 		/** The server's answer to a recorded request; a redirect answers it as well as a final response. */
@@ -135,6 +156,7 @@ export class ExfiltrationNetworkRecorder {
 	}
 
 	async stop(): Promise<CapturedNetworkRequest[]> {
+		this.stopped = true;
 		if (this.browser && this.targetHandler) {
 			this.browser.off("targetcreated", this.targetHandler);
 			this.browser.off("targetchanged", this.targetHandler);

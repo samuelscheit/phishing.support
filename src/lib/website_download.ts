@@ -1,5 +1,7 @@
 import type { CDPSession, Page } from "rebrowser-puppeteer-core";
 
+import { sendBeforeRun } from "./browser/cdp";
+
 /**
  * Every file a visit downloads, taken without the browser ever saving or
  * opening it: a download response is held at the network layer, its body
@@ -18,7 +20,7 @@ export type DownloadedFile = { url: string; fileName: string; contentType?: stri
 export type FailedDownload = { url: string; reason: string };
 
 type Header = { name: string; value: string };
-type PausedResponse = { requestId: string; request: { url: string }; responseStatusCode?: number; responseHeaders?: Header[] };
+type PausedResponse = { requestId: string; frameId?: string; request: { url: string }; responseStatusCode?: number; responseHeaders?: Header[] };
 
 function header(headers: readonly Header[] | undefined, name: string): string | undefined {
 	return headers?.find((candidate) => candidate.name.toLowerCase() === name)?.value;
@@ -60,7 +62,16 @@ async function readInPage(page: Page, url: string): Promise<{ bytes: Buffer; con
 	return { bytes: Buffer.from(read.base64!, "base64"), ...(read.type ? { contentType: read.type } : {}) };
 }
 
-export type DownloadInterceptor = {
+/**
+ * A tab whose downloads are taken: its raw CDP session, its main frame's id
+ * (the tab's target id), and its page once it has one (to read a file its
+ * script built).
+ */
+export type DownloadTab = { targetId: string; session: CDPSession; page?: Page };
+
+export type DownloadInterceptor<Tab extends DownloadTab> = {
+	/** Take the downloads of one more tab; the tab must not have run yet for none to slip past. */
+	attach(tab: Tab): Promise<void>;
 	files(): DownloadedFile[];
 	failures(): FailedDownload[];
 	/** Resolves once every download that has started is read or failed. */
@@ -68,11 +79,13 @@ export type DownloadInterceptor = {
 };
 
 /**
- * Hold every document response of one tab at the network layer: pages pass
- * on, a download is read and aborted. The tab's own CDP session is used, so
- * the agent driving the tab sees the download fail rather than complete.
+ * Hold every document response of the visit's tabs at the network layer:
+ * pages pass on, a download is read and aborted. Each tab's own CDP session
+ * is used, so the agent driving it sees the download fail rather than
+ * complete. `taken` hears of each tab that delivered a file, and whether
+ * the tab's main frame had shown a page of its own before.
  */
-export async function interceptDownloads(page: Page, cdp: CDPSession, userAgent: string): Promise<DownloadInterceptor> {
+export function interceptDownloads<Tab extends DownloadTab>(userAgent: string, taken: (tab: Tab, showedPage: boolean) => void = () => undefined): DownloadInterceptor<Tab> {
 	const files: DownloadedFile[] = [];
 	const failures: FailedDownload[] = [];
 	const pending = new Set<Promise<unknown>>();
@@ -81,12 +94,44 @@ export async function interceptDownloads(page: Page, cdp: CDPSession, userAgent:
 		void work.finally(() => pending.delete(work));
 	};
 	const full = () => files.length + failures.length >= MAX_DOWNLOADS;
+	let denied = false;
 
-	cdp.on("Fetch.requestPaused", (paused: PausedResponse) => track((async () => {
-		if (!isDownloadResponse(paused) || full()) {
-			await cdp.send("Fetch.continueRequest", { requestId: paused.requestId }).catch(() => undefined);
-			return;
-		}
+	const attach = async (tab: Tab) => {
+		const cdp = tab.session;
+		let showedPage = false;
+		cdp.on("Fetch.requestPaused", (paused: PausedResponse) => track((async () => {
+			if (!isDownloadResponse(paused) || full()) {
+				if (paused.frameId === tab.targetId) showedPage = true;
+				await cdp.send("Fetch.continueRequest", { requestId: paused.requestId }).catch(() => undefined);
+				return;
+			}
+			await takeResponse(cdp, paused);
+			taken(tab, showedPage);
+		})()));
+		cdp.on("Page.downloadWillBegin", (event: { url: string; suggestedFilename: string }) => {
+			if (!/^(?:blob|data):/i.test(event.url) || full()) return;
+			track((async () => {
+				const url = event.url.slice(0, 300);
+				try {
+					if (!tab.page) throw new Error("the tab that built the file has no page to read it from");
+					const read = await readInPage(tab.page, event.url);
+					if ("tooLarge" in read) failures.push({ url, reason: `the file is ${read.tooLarge} bytes, more than the ${MAX_DOWNLOAD_BYTES} bytes a visit reads` });
+					else files.push({ url, fileName: downloadFileName(event.url, undefined, event.suggestedFilename), ...read, userAgent, observedAt: new Date() });
+				} catch (error) {
+					failures.push({ url, reason: error instanceof Error ? error.message : String(error) });
+				}
+			})());
+		});
+		// The tab may be held before it runs: it answers Page only once it does; Fetch is the browser's own.
+		sendBeforeRun(cdp, "Page.enable");
+		await cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*", resourceType: "Document", requestStage: "Response" }] });
+		if (denied) return;
+		denied = true;
+		// A file built by script would otherwise be saved; nothing reaches the browser's disk.
+		await cdp.send("Browser.setDownloadBehavior", { behavior: "deny", eventsEnabled: true }).catch(() => undefined);
+	};
+
+	const takeResponse = async (cdp: CDPSession, paused: PausedResponse) => {
 		try {
 			const length = Number(header(paused.responseHeaders, "content-length"));
 			if (length > MAX_DOWNLOAD_BYTES) {
@@ -108,25 +153,10 @@ export async function interceptDownloads(page: Page, cdp: CDPSession, userAgent:
 		}
 		// The browser never saves the file.
 		await cdp.send("Fetch.failRequest", { requestId: paused.requestId, errorReason: "Aborted" }).catch(() => undefined);
-	})()));
-	cdp.on("Page.downloadWillBegin", (event: { url: string; suggestedFilename: string }) => {
-		if (!/^(?:blob|data):/i.test(event.url) || full()) return;
-		track((async () => {
-			const url = event.url.slice(0, 300);
-			try {
-				const read = await readInPage(page, event.url);
-				if ("tooLarge" in read) failures.push({ url, reason: `the file is ${read.tooLarge} bytes, more than the ${MAX_DOWNLOAD_BYTES} bytes a visit reads` });
-				else files.push({ url, fileName: downloadFileName(event.url, undefined, event.suggestedFilename), ...read, userAgent, observedAt: new Date() });
-			} catch (error) {
-				failures.push({ url, reason: error instanceof Error ? error.message : String(error) });
-			}
-		})());
-	});
-	await cdp.send("Page.enable");
-	await cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*", resourceType: "Document", requestStage: "Response" }] });
-	// A file built by script would otherwise be saved; nothing reaches the browser's disk.
-	await cdp.send("Browser.setDownloadBehavior", { behavior: "deny", eventsEnabled: true }).catch(() => undefined);
+	};
+
 	return {
+		attach,
 		files: () => [...files],
 		failures: () => [...failures],
 		settled: async () => {

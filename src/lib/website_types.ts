@@ -12,14 +12,24 @@ export type WebsiteNavigationHop = {
 	 * script). The page was captured as an earlier step of the case.
 	 */
 	visitorStep?: { submitted: CanaryField[] };
-	/**
-	 * Set when the page turned desktop visitors away to a phone (a QR code, a
-	 * link to copy, "not available on desktop") and the capture opened it
-	 * again as that phone; `redirectTo` is the page the phone was shown.
-	 */
-	revisitedAs?: WebsiteMobileDevice;
+	/** Set when the capture opened the page again; `redirectTo` is the page it was shown then. */
+	revisit?: WebsiteRevisit;
 	contentCaptured: boolean;
 };
+
+/** Why and how the capture opened a page of the visit again. */
+export type WebsiteRevisit =
+	/** The page turned desktop visitors away to a phone (a QR code, a link to copy, "not available on desktop"): opened again as that phone. */
+	| { reason: "phone"; device: WebsiteMobileDevice }
+	/** A CAPTCHA or browser check still blocked the visit after waiting, as it does for the network the visit came from: opened again from `route`. */
+	| { reason: "challenge"; route: string };
+
+/** How a person reads a revisit: what made the capture open the page again, and how it did. */
+export function revisitWording(revisit: WebsiteRevisit): { cause: string; opened: string } {
+	return revisit.reason === "phone"
+		? { cause: "it turns desktop visitors away to a phone", opened: `as ${WEBSITE_DEVICE_LABEL[revisit.device]}` }
+		: { cause: "a CAPTCHA or browser check blocked our visit from the network it first came from", opened: `from the ${revisit.route}` };
+}
 
 /** The synthetic values a visit enters, by name. */
 export type CanaryField = "email" | "password" | "phone" | "cardNumber" | "oneTimeCode";
@@ -47,15 +57,15 @@ export type WebsiteVisitRecord = {
 	/** `completed`: the agent finished; `failed`: it failed or could not start; `timed_out`: the visit's budget ended it. */
 	outcome: "completed" | "failed" | "timed_out";
 	failure?: string;
-	report?: { submissionsAttempted: number; downloadsStarted: number; asksForPhone: boolean; stoppedReason: string };
+	report?: { submissionsAttempted: number; downloadsStarted: number; asksForPhone: boolean; blockedByChallenge: boolean; stoppedReason: string };
 	actions: Array<{ kind: string; text: string }>;
 	dataSent: VisitDataSent[];
 	downloadFailures: Array<{ url: string; reason: string }>;
 };
 
-/** Whether the visit moved on from this hop to a later page: the agent went on, or it was opened again as a phone. */
+/** Whether the visit moved on from this hop to a later page: the agent went on, or the page was opened again. */
 export function isFlowStepHop(hop: WebsiteNavigationHop): boolean {
-	return Boolean(hop.visitorStep || hop.revisitedAs);
+	return Boolean(hop.visitorStep || hop.revisit);
 }
 
 /** The browser a capture presents: a Windows desktop, or a phone a mobile-only kit asks for. */

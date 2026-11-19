@@ -34,7 +34,7 @@ export function scriptedVisitSession(script: ScriptedVisit = {}, visits: Website
 				requests: (script.requests?.(params.canaries) ?? []).map((request) => ({ ...request, timestamp: request.timestamp || lastShown.toISOString() })),
 				downloads: (script.downloads ?? []).map((file) => ({ ...file, observedAt: lastShown })),
 				downloadFailures: [],
-				agent: { outcome: "completed", actions: [], report: { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, stoppedReason: "The flow ended." }, ...script.agent },
+				agent: { outcome: "completed", actions: [], report: { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, blockedByChallenge: false, stoppedReason: "The flow ended." }, ...script.agent },
 			};
 			return recording;
 		},

@@ -98,6 +98,8 @@ export function taskAgentVisit(model: () => ChatModel = () => browserTaskModel()
 				resultSchema: run.task.resultSchema,
 				maxSteps: run.task.maxSteps,
 				secrets: run.task.secrets,
+				// The tabs the site opened stay: the visit records the page the walk ended on after it ends.
+				keepTab: true,
 				// The visit's own budget ends the walk through `signal`.
 				timeoutMs: 24 * 60 * 60_000,
 				signal: run.signal,
@@ -111,7 +113,7 @@ export function taskAgentVisit(model: () => ChatModel = () => browserTaskModel()
 		// The agent ending the walk itself (the flow ended, blocked the synthetic data, or asked
 		// for something it could not give) is a finished visit; its reason is its report.
 		if (agentGaveUp(result) || result.status === "needs_input") {
-			return { state: "completed", output: { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, stoppedReason: (result.question ?? result.summary).slice(0, 300) } };
+			return { state: "completed", output: { submissionsAttempted: 0, downloadsStarted: 0, asksForPhone: false, blockedByChallenge: false, stoppedReason: (result.question ?? result.summary).slice(0, 300) } };
 		}
 		return { state: "failed", reason: redactedErrorText(`${result.status}: ${result.summary}`).slice(0, 500) };
 	};

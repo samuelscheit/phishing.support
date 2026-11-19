@@ -18,7 +18,7 @@ import type { SubmissionDetail as ApiSubmissionDetail } from "@/lib/submissions/
 import { formatUtcDateTime } from "@/lib/date_time";
 import { cn } from "../../../web_lib/util";
 import { selectDisplayAnalysisRuns } from "@/lib/analysis_run_view";
-import { CANARY_FIELD_LABEL, describeDataEntryField, isFlowStepHop, WEBSITE_DEVICE_LABEL, type WebsitePhishingBasis } from "@/lib/website_types";
+import { CANARY_FIELD_LABEL, describeDataEntryField, isFlowStepHop, revisitWording, type WebsitePhishingBasis } from "@/lib/website_types";
 import { SiteVisitBrowser, SiteVisitTimeline, useLiveVisit, type SiteVisitPage } from "@/components/SiteVisitPanel";
 import { websiteSiteName } from "@/lib/website_site";
 import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website_capture_files";
@@ -474,7 +474,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 													<div className="min-w-0 space-y-1">
 														<div className="font-mono text-xs">{hop.url}</div>
 														<div className="text-xs text-muted-foreground">
-															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured and analyzed" : hop.visitorStep ? " · Page captured, the visit moved on" : hop.revisitedAs ? " · Page captured, it turns desktops away to a phone" : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
+															HTTP {hop.status ?? "unknown"}{hop.contentCaptured ? " · Page captured and analyzed" : hop.visitorStep ? " · Page captured, the visit moved on" : hop.revisit ? ` · Page captured, ${revisitWording(hop.revisit).cause}` : hop.status !== null && hop.status >= 300 && hop.status < 400 ? " · redirect response only" : " · left by script"}
 														</div>
 														{hop.visitorStep && hop.redirectTo ? (
 															<div className="text-xs text-muted-foreground">
@@ -482,8 +482,8 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 																	? <>The visit entered the made-up {hop.visitorStep.submitted.map((field) => CANARY_FIELD_LABEL[field]).join(", ")} here; it then showed {hop.redirectTo}</>
 																	: <>The visit moved on to {hop.redirectTo}</>}
 															</div>
-														) : hop.revisitedAs && hop.redirectTo ? (
-															<div className="text-xs text-muted-foreground">Opened again as {WEBSITE_DEVICE_LABEL[hop.revisitedAs]}, it shows {hop.redirectTo}</div>
+														) : hop.revisit && hop.redirectTo ? (
+															<div className="text-xs text-muted-foreground">Opened again {revisitWording(hop.revisit).opened}, it shows {hop.redirectTo}</div>
 														) : hop.redirectTo ? <div className="text-xs text-muted-foreground">Redirects to {hop.redirectTo}</div> : null}
 														{verificationGate && hop.contentCaptured ? (
 															<div className="text-xs text-muted-foreground">Behind the page's own “{verificationGate.label}” gate, clicked to reveal it</div>

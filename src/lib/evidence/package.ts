@@ -88,7 +88,7 @@ export async function buildWebsiteEvidence(
 			capturedUrl: facts.capturedUrl,
 			capturedAt: facts.capturedAt.toISOString(),
 			route: facts.route,
-			navigation: facts.navigationHops.map(({ index, url, status, redirectTo, visitorStep, revisitedAs, contentCaptured }) => ({ index, url, status, redirectTo, visitorStep, revisitedAs, contentCaptured })),
+			navigation: facts.navigationHops.map(({ index, url, status, redirectTo, visitorStep, revisit, contentCaptured }) => ({ index, url, status, redirectTo, visitorStep, revisit, contentCaptured })),
 		},
 		files,
 		hashAlgorithm: "SHA-256",

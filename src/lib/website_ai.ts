@@ -1,10 +1,10 @@
 import { reporterBrowserIdentity } from "./browser/reporter_identity";
-import { fabricBrowserConfigFromEnvironment } from "./browser/fabric";
+import { FABRIC_EGRESS_LABEL, fabricBrowserConfigFromEnvironment, type FabricEgress } from "./browser/fabric";
 import { archiveWebsite, isBrowserInfrastructureFailure, type ArchiveWebsiteOptions, type WebsitePageSession, type WebsiteVerificationGate } from "./website_archive";
 import { errorText } from "./error_text";
 import { buildWebsiteEvidence, type WebsiteEvidencePackage } from "./evidence/package";
 import { buildVisitEvidence } from "./evidence/visit";
-import { WEBSITE_DEVICE_LABEL } from "./website_types";
+import { WEBSITE_DEVICE_LABEL, type WebsiteRevisit } from "./website_types";
 import type { timestampEvidence } from "./evidence/timestamp";
 import { SubmissionsEntity, ArtifactsEntity } from "./db/entities";
 import type { WebsiteSubmissionData } from "./db/schema";
@@ -288,15 +288,21 @@ async function visitWebsite(params: {
 	archive: WebsiteCapture;
 	dependencies: WebsiteAnalysisDependencies;
 	capture: (options: ArchiveWebsiteOptions) => Promise<WebsiteCapture>;
-	/** The phone revisit that led to this capture, when it is one. */
-	revisit?: { hops: WebsiteNavigationHop[]; from: WebsiteNavigationHop };
+	/** The revisit that led to this capture, when it is one: the earlier visit's hops, the page it opened again, and why. */
+	revisit?: { hops: WebsiteNavigationHop[]; from: WebsiteNavigationHop; revisit: WebsiteRevisit };
+	/** A visit before this one was blocked by a challenge and opened again from another network; it is not repeated twice. */
+	challengeRetried?: boolean;
+	/** The network every later capture of the visit uses: the one a challenge let through. */
+	egress?: FabricEgress;
 }): Promise<WebsiteVisitResult> {
 	const { submissionId, url, whois, dependencies, capture } = params;
 	const first = params.archive;
 	const device = first.device ? { device: first.device } : {};
+	const route = params.egress ? { egress: params.egress } : {};
 	await emitStep(submissionId, "site_visit", 45);
 	// A page from a stored capture is loaded live first: the visit walks the live site.
-	const session = first.session ?? (await capture({ url: first.url, ...device })).session;
+	const walked = first.session ? first : await capture({ url: first.url, ...device, ...route });
+	const { session } = walked;
 	const canaries = createExfiltrationCanaries();
 	const agent = dependencies.visitAgent ?? taskAgentVisit();
 	const empty: SiteVisitRecording<WebsiteCapture> = { startedAt: new Date(), steps: [], requests: [], downloads: [], downloadFailures: [], agent: { outcome: "failed", failure: "The page could not be loaded live for the visit.", actions: [] } };
@@ -361,11 +367,33 @@ async function visitWebsite(params: {
 			// A site that turns desktops away shows the phone something else.
 			if (!isReportable(classified.classification) && asksForPhone && !first.device) {
 				await emitStep(submissionId, "revisit_as_phone", 72);
-				const phone = await capture({ url: first.url, device: "iphone" });
-				return visitWebsite({ ...params, archive: phone, revisit: { hops: archive.navigationHops, from: capturedHop } });
+				const phone = await capture({ url: first.url, device: "iphone", ...route });
+				return visitWebsite({ ...params, archive: phone, revisit: { hops: archive.navigationHops, from: capturedHop, revisit: { reason: "phone", device: "iphone" } } });
 			}
-			const inconclusive = !isReportable(classified.classification) && recording.agent.outcome !== "completed"
-				? recording.agent.failure ?? "The visiting agent did not finish the site's flow."
+			// A challenge that would not clear for this network may let the residential exit through.
+			// A capture that already came from there was decoyed or turned away everywhere else.
+			const challenge = !isReportable(classified.classification) ? recording.agent.report?.blockedByChallenge : false;
+			let unreached: string | undefined;
+			if (challenge && !params.challengeRetried && walked.egress !== CHALLENGE_RETRY_EGRESS) {
+				await emitStep(submissionId, "revisit_from_other_exit", 72);
+				// One capture browser at a time: the residential exit is a single connection.
+				await session?.close();
+				const retried = await capture({ url: first.url, ...device, egress: CHALLENGE_RETRY_EGRESS }).catch((error: unknown) => {
+					// The other network failing, whatever the reason, leaves the blocked visit's result.
+					console.warn(`Revisiting ${first.url} from the ${FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS]} failed: ${errorText(error)}`);
+					unreached = errorText(error);
+					return undefined;
+				});
+				if (retried) {
+					// The page reopened is the one the visit started at, which the blocked page was reached from.
+					const reopened = { ...capturedHop, url: first.url };
+					return visitWebsite({ ...params, archive: retried, challengeRetried: true, egress: CHALLENGE_RETRY_EGRESS, revisit: { hops: archive.navigationHops, from: reopened, revisit: { reason: "challenge", route: FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS] } } });
+				}
+			}
+			// A visit that did not get past the site's challenge saw nothing of the site behind it.
+			const inconclusive = isReportable(classified.classification) ? undefined
+				: recording.agent.outcome !== "completed" ? recording.agent.failure ?? "The visiting agent did not finish the site's flow."
+				: challenge ? challengeInconclusive(recording.agent.report!.stoppedReason, { retried: params.challengeRetried === true, unreached })
 				: undefined;
 			// The verdict needs no later page, but the evidence does: the form the values were
 			// typed into and the pages after it show what the site took and where it went.
@@ -385,9 +413,22 @@ function pageTitle(html: Buffer): string | undefined {
 	return html.toString("utf-8").match(/<title[^>]*>([^<]{1,200})<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim() || undefined;
 }
 
-/** The desktop navigation, its last page marked as opened again on a phone, before the phone's own hops. */
-function continuedRevisit(revisit: { hops: WebsiteNavigationHop[]; from: WebsiteNavigationHop }): WebsiteNavigationHop[] {
-	return revisit.hops.map((hop) => (hop.index === revisit.from.index ? { ...hop, contentCaptured: false, redirectTo: hop.url, revisitedAs: "iphone" as const } : hop));
+/**
+ * The earlier visit's navigation, the page it ended on marked with why it was
+ * opened again and which page was (`from.url`), before the revisit's own hops.
+ */
+function continuedRevisit(revisit: { hops: WebsiteNavigationHop[]; from: WebsiteNavigationHop; revisit: WebsiteRevisit }): WebsiteNavigationHop[] {
+	return revisit.hops.map((hop) => (hop.index === revisit.from.index ? { ...hop, contentCaptured: false, redirectTo: revisit.from.url, revisit: revisit.revisit } : hop));
+}
+
+/** The network a visit a challenge blocked is repeated from: challenges trust a residential address most. */
+const CHALLENGE_RETRY_EGRESS: FabricEgress = "residential";
+
+/** Why a visit a challenge blocked has no verdict: every network was blocked, or the other one never reached the page. */
+function challengeInconclusive(stoppedReason: string, attempt: { retried: boolean; unreached?: string }): string {
+	const blocked = `a CAPTCHA or browser check blocked it (${stoppedReason})`;
+	if (attempt.unreached) return `${blocked}, and the ${FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS]} could not open the page again (${attempt.unreached}).`;
+	return attempt.retried ? `${blocked} from the ${FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS]} as well.` : `${blocked}.`;
 }
 
 /**

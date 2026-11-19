@@ -130,9 +130,9 @@ describe("a mobile-only drive-by exploit kit (production case 377486973465530391
 		expect(submission?.status).toBe("reported");
 		expect(submission?.info).toBe(`Malware distribution confirmed at ${PAGE}; its evidence is being collected before the report is sent.`);
 		expect(website?.device).toBe("iphone");
-		expect(website?.navigationHops?.map(({ index, url, redirectTo, revisitedAs, contentCaptured }) => ({ index, url, redirectTo, revisitedAs, contentCaptured }))).toEqual([
-			{ index: 0, url: PAGE, redirectTo: PAGE, revisitedAs: "iphone", contentCaptured: false },
-			{ index: 1, url: PAGE, redirectTo: undefined, revisitedAs: undefined, contentCaptured: true },
+		expect(website?.navigationHops?.map(({ index, url, redirectTo, revisit, contentCaptured }) => ({ index, url, redirectTo, revisit, contentCaptured }))).toEqual([
+			{ index: 0, url: PAGE, redirectTo: PAGE, revisit: { reason: "phone", device: "iphone" }, contentCaptured: false },
+			{ index: 1, url: PAGE, redirectTo: undefined, revisit: undefined, contentCaptured: true },
 		]);
 		expect(website?.siteAssessments?.at(-1)).toMatchObject({ finding: "malware", hiddenFrame: { ref: "frame1", url: CORUNA_FRAME_URL } });
 		expect(website?.hiddenFrames?.[0]?.userAgent).toBe(IPHONE_USER_AGENT);
@@ -154,7 +154,7 @@ describe("a mobile-only drive-by exploit kit (production case 377486973465530391
 		expect(report?.description.split("\n")).toEqual([
 			"The page attacks its visitors' devices without any action from them (a drive-by exploit): a frame on it that no visitor can see runs an exploit loader, and what the visitor sees is only a decoy.",
 			"The page turns desktop visitors away to a phone; it was captured as Safari on an iPhone (iOS 18.6.2).",
-			`Visitors reach the page through the site's own earlier pages: opening ${PAGE} on a phone (Safari on an iPhone (iOS 18.6.2)), since it turns desktop visitors away.`,
+			`Visitors reach the page through the site's own earlier pages: opening ${PAGE} again as Safari on an iPhone (iOS 18.6.2), since it turns desktop visitors away to a phone.`,
 			`The hidden frame is https://92haoyun.icu/gooll/gooll.html (hidden by 0×0 size; its document is ${CORUNA_LOADER.length} bytes, SHA-256 ${"c".repeat(64)}).`,
 			"Its code reads the visitor's operating system version from the browser (iPhone OS, CPU OS) to choose what to load.",
 			"Its code downloads further code and runs it.",
@@ -192,7 +192,7 @@ describe("a mobile-only drive-by exploit kit (production case 377486973465530391
 		const { submission, website } = await analyze(377486973465530393n, { desktop: { ...NOTHING, mobileHandoff: true }, iphone: NOTHING });
 		expect(submission?.status).toBe("invalid");
 		expect(website?.device).toBe("iphone");
-		expect(website?.navigationHops?.[0]?.revisitedAs).toBe("iphone");
+		expect(website?.navigationHops?.[0]?.revisit).toEqual({ reason: "phone", device: "iphone" });
 	});
 
 	test("a page captured as a phone is never handed off again, and its links are opened as that phone", async () => {

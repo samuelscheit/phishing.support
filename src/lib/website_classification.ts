@@ -14,6 +14,7 @@ import {
 	describeDataEntryField,
 	isFlowStepHop,
 	WEBSITE_DEVICE_LABEL,
+	revisitWording,
 	type CanaryField,
 	type VisitDataSent,
 	type WebsiteDataEntryField,
@@ -262,7 +263,7 @@ export function buildWebsiteReportEvidence(
 	const capturedUrl = hops.find((hop) => hop.contentCaptured)?.url;
 	const steps = hops.filter(isFlowStepHop)
 		// A click that left the visitor on the same page (opening a dialog) passes no earlier page.
-		.filter((hop, index, all) => hop.revisitedAs || hop.visitorStep?.submitted.length || hop.url !== (all[index + 1]?.url ?? capturedUrl));
+		.filter((hop, index, all) => hop.revisit || hop.visitorStep?.submitted.length || hop.url !== (all[index + 1]?.url ?? capturedUrl));
 	const frame = classifiedHiddenFrame(classification, capture.hiddenFrames);
 	const download = finding === "malware" && !frame ? capture.offeredDownload : undefined;
 	const quotedFile = classification.offeredDownload && download && evidenceQuote ? quotedDownloadFile(download, evidenceQuote) : undefined;
@@ -281,8 +282,8 @@ export function buildWebsiteReportEvidence(
 			? `It was captured with the browser of the person who reported it, User-Agent "${capture.reporterUserAgent}"; such pages show their content only to the platforms they target, so open it with that User-Agent to see what we saw.`
 			: undefined,
 		steps.length
-			? `Visitors reach the page through the site's own earlier pages: ${steps.map((hop) => (hop.revisitedAs
-				? `opening ${hop.url} on a phone (${WEBSITE_DEVICE_LABEL[hop.revisitedAs]}), since it turns desktop visitors away`
+			? `Visitors reach the page through the site's own earlier pages: ${steps.map((hop) => (hop.revisit
+				? `opening ${hop.url} again ${revisitWording(hop.revisit).opened}, since ${revisitWording(hop.revisit).cause}`
 				: hop.visitorStep?.submitted.length
 					? `${hop.url}, where our visit entered a synthetic ${canaryFieldList(hop.visitorStep.submitted)} and submitted`
 					: hop.url)).join(", then ")}.`
@@ -505,7 +506,10 @@ export function websiteMobileHandoff(value: unknown): boolean {
 
 /** How the visitor reached the classified page from the earlier page of the visit. */
 export function arrivalStatement(arrival: WebsiteNavigationHop): string {
-	if (arrival.revisitedAs) return `The page turned desktop visitors away to a phone, so it was opened again as ${WEBSITE_DEVICE_LABEL[arrival.revisitedAs]}.`;
+	if (arrival.revisit) {
+		const { cause, opened } = revisitWording(arrival.revisit);
+		return `Since ${cause}, it was opened again ${opened}.`;
+	}
 	const submitted = arrival.visitorStep?.submitted ?? [];
 	return submitted.length
 		? `The visitor reaches this page from ${arrival.url}, an earlier page of the same visit, after entering the synthetic ${canaryFieldList(submitted)} there and submitting; wherever this page shows those values, they are the visit's, not a real visitor's.`

@@ -1,5 +1,6 @@
 import type { Browser, CDPSession, Page } from "rebrowser-puppeteer-core";
 
+import { VisitorTabs, type TabSetup, type VisitorTab } from "../browser/visitor_tabs";
 import { errorText } from "../error_text";
 import { ExfiltrationNetworkRecorder } from "../exfiltration/recorder";
 import type { CapturedNetworkRequest, ExfiltrationCanaries } from "../exfiltration/types";
@@ -12,8 +13,9 @@ import { buildSiteVisitTask, visitAgentReport, VISIT_BUDGET_MS, type VisitAgentR
  * capture has loaded the page, then an agent walks the site in that same
  * browser and tab, entering only synthetic values, while the visit records
  * what the evidence needs: each page it reaches, every request (where the
- * synthetic values go), and every file it downloads. The agent only moves;
- * what it reports about itself is never evidence.
+ * synthetic values go), and every file it downloads. The agent follows the
+ * site into every tab it opens, and so does the recording. The agent only
+ * moves; what it reports about itself is never evidence.
  */
 
 /** Pages recorded per visit beyond the first; a site that changes forever cannot hold it open. */
@@ -21,6 +23,8 @@ const MAX_STEPS = 12;
 const POLL_MS = 1_000;
 /** A page change is recorded once the page has stayed the same this long. */
 const STEP_QUIET_MS = 2_000;
+/** How long the final step waits for a tab the walk opened last to have its page. */
+const FINAL_TAB_WAIT_MS = 5_000;
 /** Screencast frames published per second at most. */
 const LIVE_FRAMES_PER_SECOND = 3;
 
@@ -61,8 +65,10 @@ export type SiteVisitParams<Step> = {
 	agent: VisitAgent;
 	/** Extra instructions for the visiting agent, on top of the walk itself. */
 	instructions?: string;
-	/** Record the page as it stands as the visit's next step. */
-	snapshot: () => Promise<Step>;
+	/** Prepares each tab the site opens before it runs, on top of the visit's own recording. */
+	tabSetup?: TabSetup;
+	/** Record the tab's page as it stands as the visit's next step. */
+	snapshot: (tab: VisitorTab) => Promise<Step>;
 	live?: (event: SiteVisitLiveEvent) => void;
 	budgetMs?: number;
 	signal?: AbortSignal;
@@ -80,15 +86,37 @@ async function pageState(page: Page): Promise<{ url: string; text: string; title
 /** The tab's screen, as frames for the live view: a few per second, small. */
 async function startScreencast(cdp: CDPSession, page: Page, live: (event: SiteVisitLiveEvent) => void): Promise<() => Promise<void>> {
 	let last = 0;
-	cdp.on("Page.screencastFrame", (frame: { data: string; sessionId: number }) => {
+	const onFrame = (frame: { data: string; sessionId: number }) => {
 		void cdp.send("Page.screencastFrameAck", { sessionId: frame.sessionId }).catch(() => undefined);
 		const now = Date.now();
 		if (now - last < 1_000 / LIVE_FRAMES_PER_SECOND) return;
 		last = now;
 		live({ type: "browser.frame", jpeg: frame.data, url: page.url() });
-	});
+	};
+	cdp.on("Page.screencastFrame", onFrame);
 	await cdp.send("Page.startScreencast", { format: "jpeg", quality: 55, maxWidth: 960, maxHeight: 720, everyNthFrame: 2 });
-	return () => cdp.send("Page.stopScreencast").then(() => undefined, () => undefined);
+	return async () => {
+		cdp.off("Page.screencastFrame", onFrame);
+		await cdp.send("Page.stopScreencast").catch(() => undefined);
+	};
+}
+
+/** The live view of whichever tab the visitor is on: it moves along when the agent follows the site into another tab. */
+function followingScreencast(tabs: VisitorTabs, live: (event: SiteVisitLiveEvent) => void) {
+	let shown: VisitorTab | undefined;
+	let stop: (() => Promise<void>) | undefined;
+	return {
+		async follow() {
+			const tab = tabs.active();
+			if (tab === shown || !tab.page) return;
+			await stop?.();
+			shown = tab;
+			stop = await startScreencast(tab.session, tab.page, live).catch(() => undefined);
+		},
+		async stop() {
+			await stop?.();
+		},
+	};
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -113,23 +141,34 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 	const startedAt = new Date();
 	const network = new ExfiltrationNetworkRecorder();
 	await network.start(browser);
-	const cdp = await page.target().createCDPSession();
-	let downloads: DownloadInterceptor | undefined;
-	let stopScreencast: (() => Promise<void>) | undefined;
+	let tabs: VisitorTabs | undefined;
+	let screencast: ReturnType<typeof followingScreencast> | undefined;
 	const steps: SiteVisitRecording<Step>["steps"] = [];
 	const actions: VisitAgentAction[] = [];
 	const agentOutcome: SiteVisitAgentOutcome = { outcome: "failed", actions };
+	// A tab the site opened only to deliver a file is closed once it did, as Chrome closes it.
+	const downloads: DownloadInterceptor<VisitorTab> = interceptDownloads<VisitorTab>(params.userAgent, (tab, showedPage) => {
+		if (tab.opener && !showedPage) void tabs?.close(tab);
+	});
 	try {
-		downloads = await interceptDownloads(page, cdp, params.userAgent);
-		stopScreencast = await startScreencast(cdp, page, live).catch(() => undefined);
+		tabs = await VisitorTabs.start(browser, page, [
+			// Every request of a tab the site opens, from its first, and every file any tab downloads.
+			(tab) => network.attachSession(tab.targetId, tab.session),
+			(tab) => downloads.attach(tab),
+			...(params.tabSetup ? [params.tabSetup] : []),
+		]);
+		const visitorTabs = tabs;
+		screencast = followingScreencast(visitorTabs, live);
+		await screencast.follow();
 
 		let recorded = await pageState(page);
 		let pending: { url: string; text: string; since: number } | undefined;
 		let announcedDownloads = 0;
-		/** Record the page once it has changed and then stayed the same for the quiet period. */
+		/** Record the visitor's tab once its page has changed and then stayed the same for the quiet period. */
 		const recordStep = async (force = false) => {
 			if (steps.length >= MAX_STEPS) return;
-			const state = await pageState(page);
+			const tab = visitorTabs.active();
+			const state = tab.page ? await pageState(tab.page) : undefined;
 			if (!state || (state.url === recorded?.url && state.text === recorded?.text)) {
 				pending = undefined;
 				return;
@@ -141,23 +180,22 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 			if (!force && Date.now() - pending!.since < quietMs) return;
 			pending = undefined;
 			recorded = state;
-			const step = await params.snapshot();
+			const step = await params.snapshot(tab);
 			steps.push({ step, observedAt: new Date() });
 			live({ type: "browser.step", index: steps.length, url: state.url, title: state.title });
 		};
 		const announceDownloads = () => {
-			for (const file of downloads!.files().slice(announcedDownloads)) live({ type: "browser.download", fileName: file.fileName, url: file.url });
-			announcedDownloads = downloads!.files().length;
+			for (const file of downloads.files().slice(announcedDownloads)) live({ type: "browser.download", fileName: file.fileName, url: file.url });
+			announcedDownloads = downloads.files().length;
 		};
 
 		let walk: Promise<VisitAgentState> | undefined;
 		try {
 			const task = buildSiteVisitTask(params.url, params.canaries, undefined, params.instructions);
-			const { targetInfo } = await cdp.send("Target.getTargetInfo");
 			walk = agent({
 				task,
 				cdpEndpoint: params.agentAddress,
-				targetId: targetInfo.targetId,
+				targetId: visitorTabs.first.targetId,
 				signal: stopped,
 				onAction: (logged) => {
 					const action = revealSyntheticSecret(logged, params.canaries);
@@ -174,6 +212,7 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 			void walk.then((state) => { ended = state; });
 			while (!ended && !stopped.aborted) {
 				await Promise.race([sleep(pollMs, stopped), walk]);
+				await screencast.follow();
 				await recordStep();
 				announceDownloads();
 			}
@@ -190,7 +229,9 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 				agentOutcome.failure = state.reason;
 			}
 		}
-		// The page the walk ended on is a step of its own, whatever the quiet period.
+		// The page the walk ended on is a step of its own, whatever the quiet period,
+		// also when the walk ended right after opening a tab puppeteer has no page for yet.
+		await tabs.settled(FINAL_TAB_WAIT_MS);
 		await recordStep(true);
 		await downloads.settled();
 		announceDownloads();
@@ -204,8 +245,8 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 		};
 	} finally {
 		await network.stop().catch(() => undefined);
-		await stopScreencast?.();
-		await cdp.send("Fetch.disable").catch(() => undefined);
-		await cdp.detach().catch(() => undefined);
+		await screencast?.stop();
+		for (const tab of tabs?.tabs() ?? []) await tab.session.send("Fetch.disable").catch(() => undefined);
+		await tabs?.stop();
 	}
 }

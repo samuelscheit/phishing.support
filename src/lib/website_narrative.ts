@@ -14,7 +14,7 @@ import {
 } from "./website_classification";
 import type { WhoISInfo } from "./website_info";
 import { offeredDownloadEvidence } from "./website_offered_download";
-import { WEBSITE_DEVICE_LABEL, type WebsiteKitResource, type WebsiteVisitRecord } from "./website_types";
+import { revisitWording, type WebsiteKitResource, type WebsiteVisitRecord } from "./website_types";
 
 /**
  * The case analysis of a reported website, written for a person: what the
@@ -139,7 +139,7 @@ export function buildWebsiteAnalysisInput(archive: WebsiteEvidenceArchive, conte
 					text: `Submitted URL: ${archive.requestedUrl}
 ${infrastructureEvidence(context.whois, context.capturedAt)}
 Navigation hops, recorded individually: HTTP redirect responses, pages whose own script sent the visitor on (an HTTP 2xx status with redirect_to), pages the visit moved on from as a victim would (visitor_step), and pages opened again as a phone:
-${toon.encode(archive.navigationHops.map(({ index, url, status, redirectTo, visitorStep, revisitedAs, contentCaptured }) => ({ index, url, status, redirect_to: redirectTo, visitor_step: visitorStep ? (visitorStep.submitted.length ? `sent the synthetic ${canaryFieldList(visitorStep.submitted)}` : "moved on") : revisitedAs ? `opened again as ${WEBSITE_DEVICE_LABEL[revisitedAs]}` : undefined, analyzed_page: contentCaptured })))}
+${toon.encode(archive.navigationHops.map(({ index, url, status, redirectTo, visitorStep, revisit, contentCaptured }) => ({ index, url, status, redirect_to: redirectTo, visitor_step: visitorStep ? (visitorStep.submitted.length ? `sent the synthetic ${canaryFieldList(visitorStep.submitted)}` : "moved on") : revisit ? `opened again ${revisitWording(revisit).opened}` : undefined, analyzed_page: contentCaptured })))}
 ${visitNarrativeEvidence(context)}
 The analyzed page is ${archive.url}:
 ${archive.verificationGate ? `It first showed only its own human-verification control (${JSON.stringify(archive.verificationGate.label)}), drawn by the page itself; the capture clicked it, as a visitor would.\n` : ""}${capturedDeviceStatement(archive)}<website_text>

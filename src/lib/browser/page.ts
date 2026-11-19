@@ -3,6 +3,7 @@ import type { Browser, BrowserContext, CDPSession, Page, Protocol } from "rebrow
 import { sleep } from "../utils";
 import type { WebsiteDevice } from "../website_types";
 import { getBrowser } from "./browser";
+import { sendBeforeRun } from "./cdp";
 
 /**
  * A desktop browser as a visitor has it: a 1920×1080 screen, a window below
@@ -91,14 +92,46 @@ async function presentIdentity(page: Page, identity: BrowserIdentity): Promise<s
 	await cdp.send("Emulation.setUserAgentOverride", identity.override);
 	// On the page's own session: a script added through the side session never runs.
 	if (!userAgentMetadata) await page.evaluateOnNewDocument(NO_CLIENT_HINTS);
-	await (identity.screen === "desktop" ? useDesktopWindow(cdp) : useTouchScreen(cdp, identity.screen));
+	await presentScreen(cdp, identity, (method, params) => cdp.send(method, params as never));
 	return userAgent;
 }
 
-async function useDesktopWindow(cdp: CDPSession): Promise<void> {
+/**
+ * Present the identity to a tab the site opened, on the raw session that
+ * holds it before its first request: the overrides of the tab that opened it
+ * do not carry over, and a new tab showing Linux Chromium gives the visit
+ * away. Being the session the tab starts with, its script does run.
+ * Once puppeteer has the tab's page, `presentIdentityToPage` covers the
+ * workers and frames it attaches later.
+ */
+export async function presentIdentityToNewTab(session: CDPSession, identity: BrowserIdentity): Promise<void> {
+	sendBeforeRun(session, "Network.setUserAgentOverride", identity.override);
+	sendBeforeRun(session, "Emulation.setUserAgentOverride", identity.override);
+	if (!identity.override.userAgentMetadata) {
+		sendBeforeRun(session, "Page.enable");
+		sendBeforeRun(session, "Page.addScriptToEvaluateOnNewDocument", { source: NO_CLIENT_HINTS });
+	}
+	await presentScreen(session, identity, async (method, params) => sendBeforeRun(session, method, params as never));
+}
+
+/** The identity on puppeteer's page of a tab whose session already presents it, for its later workers and frames. */
+export async function presentIdentityToPage(page: Page, identity: BrowserIdentity): Promise<void> {
+	const { userAgent, userAgentMetadata, platform } = identity.override;
+	await page.setUserAgent({ userAgent, userAgentMetadata, platform });
+}
+
+/** Sends a command the page itself answers: awaited on a running tab, only sent to a held one. */
+type PageCommand = (method: "Emulation.setDeviceMetricsOverride" | "Emulation.setTouchEmulationEnabled", params: Protocol.Emulation.SetDeviceMetricsOverrideRequest | Protocol.Emulation.SetTouchEmulationEnabledRequest) => Promise<unknown>;
+
+function presentScreen(cdp: CDPSession, identity: BrowserIdentity, send: PageCommand): Promise<void> {
+	return identity.screen === "desktop" ? useDesktopWindow(cdp, send) : useTouchScreen(send, identity.screen);
+}
+
+async function useDesktopWindow(cdp: CDPSession, send: PageCommand): Promise<void> {
+	// The window is the browser's own: it answers for a held tab too.
 	const { windowId } = await cdp.send("Browser.getWindowForTarget");
 	await cdp.send("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal", ...DESKTOP_WINDOW } });
-	await cdp.send("Emulation.setDeviceMetricsOverride", {
+	await send("Emulation.setDeviceMetricsOverride", {
 		width: DESKTOP_WINDOW.width,
 		height: DESKTOP_WINDOW.height - BROWSER_TOOLBAR_HEIGHT,
 		deviceScaleFactor: 1,
@@ -108,9 +141,9 @@ async function useDesktopWindow(cdp: CDPSession): Promise<void> {
 	});
 }
 
-async function useTouchScreen(cdp: CDPSession, screen: TouchScreen): Promise<void> {
-	await cdp.send("Emulation.setDeviceMetricsOverride", { ...screen, screenWidth: screen.width, screenHeight: screen.height });
-	await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+async function useTouchScreen(send: PageCommand, screen: TouchScreen): Promise<void> {
+	await send("Emulation.setDeviceMetricsOverride", { ...screen, screenWidth: screen.width, screenHeight: screen.height });
+	await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
 }
 
 /**
@@ -148,5 +181,5 @@ export async function getBrowserPage(existingPage?: Page, device: WebsiteDevice 
 	const identity = device === "iphone" ? IPHONE_IDENTITY : visitor ?? { override: windowsDesktopIdentity(await browser.version()), screen: "desktop" as const };
 	const userAgent = await presentIdentity(page, identity);
 
-	return { page, context, browser, userAgent };
+	return { page, context, browser, userAgent, identity };
 }
