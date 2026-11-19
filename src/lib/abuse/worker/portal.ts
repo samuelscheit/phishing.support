@@ -12,7 +12,8 @@ import { stableJson } from "../security";
 import { agentGaveUp, type BrowserTask, type TaskResult } from "../../browser_task/agent";
 import { runFabricBrowserTask } from "../../browser_task/fabric";
 import { redactedErrorText } from "../../error_text";
-import { envInt, routeContext, storedBrowserTask, throwIfAborted, UnknownExternalStateError, type WorkerServices } from "./shared";
+import { routeContext, storedBrowserTask, throwIfAborted, UnknownExternalStateError, type WorkerServices } from "./shared";
+import { envInt } from "../../env";
 import { asRecord } from "../../values";
 
 /**

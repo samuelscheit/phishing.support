@@ -41,11 +41,6 @@ export function throwIfAborted(signal: AbortSignal | undefined): void {
 	throw new Error("Abuse job was canceled before the external operation completed.");
 }
 
-export function envInt(name: string, fallback: number): number {
-	const value = Number.parseInt(process.env[name] ?? "", 10);
-	return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
 export function idFrom(value: bigint | null | undefined, name: string): bigint {
 	if (value === null || value === undefined) throw new Error(`Abuse job is missing ${name}.`);
 	return value;

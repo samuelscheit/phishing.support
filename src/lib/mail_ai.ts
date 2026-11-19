@@ -9,7 +9,6 @@ import { cleanPrivateInformation, isServiceAddress } from "./mail_redaction";
 import * as toon from "@toon-format/toon";
 import { reportConfirmedEmailPhishing } from "./abuse/submission_reports";
 import { smtpSender, smtpTransport } from "./mail_config";
-import { markSubmissionInvalid } from "./submissions/state";
 import { createWebsiteSubmission } from "./submissions/website";
 import { defaultReasoning, defaultResponseModel } from "./openai_client";
 import { serviceIdentity } from "./constants";
@@ -308,7 +307,7 @@ export async function analyzeMail(emlContent: string, stream_id: bigint, options
 			await emitStep(stream_id, "reporting", 90);
 			await reportConfirmedPhishing({ submissionId: stream_id, mail, analysisText, screenshotPng });
 		} else {
-			await markSubmissionInvalid(stream_id);
+			await SubmissionsEntity.update(stream_id, { status: "invalid" });
 		}
 
 		// A mail addressed to the service itself has no reporter mailbox to answer.

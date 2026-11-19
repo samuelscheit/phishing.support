@@ -6,13 +6,8 @@ import { startWebsiteAutoRetries } from "./lib/submissions/website";
 import { retryInterruptedWebsiteAnalysis } from "./lib/website_ai";
 import { startAbuseWorker, stopAbuseWorker } from "./lib/abuse/worker";
 import { startMailboxListener, stopMailboxListener } from "./lib/imap/listener";
+import { envInt } from "./lib/env";
 
-function envInt(name: string, defaultValue: number): number {
-	const raw = process.env[name];
-	if (!raw) return defaultValue;
-	const value = Number.parseInt(raw, 10);
-	return Number.isFinite(value) ? value : defaultValue;
-}
 
 const dev = process.env.NODE_ENV !== "production";
 const port = envInt("PORT", 3000);
