@@ -67,7 +67,16 @@ async function readInPage(page: Page, url: string): Promise<{ bytes: Buffer; con
  * (the tab's target id), and its page once it has one (to read a file its
  * script built).
  */
-export type DownloadTab = { targetId: string; session: CDPSession; page?: Page };
+export type DownloadTab = {
+	targetId: string;
+	session: CDPSession;
+	page?: Page;
+	/** Settings its first page must have applied before it is let through (a new tab's identity). */
+	beforeFirstPage?: readonly Promise<unknown>[];
+};
+
+/** How long a first page waits for its tab's settings; a tab whose browser never answers still loads. */
+const SETTINGS_WAIT_MS = 5_000;
 
 export type DownloadInterceptor<Tab extends DownloadTab> = {
 	/** Take the downloads of one more tab; the tab must not have run yet for none to slip past. */
@@ -101,7 +110,11 @@ export function interceptDownloads<Tab extends DownloadTab>(userAgent: string, t
 		let showedPage = false;
 		cdp.on("Fetch.requestPaused", (paused: PausedResponse) => track((async () => {
 			if (!isDownloadResponse(paused) || full()) {
-				if (paused.frameId === tab.targetId) showedPage = true;
+				if (paused.frameId === tab.targetId && !showedPage) {
+					showedPage = true;
+					// The tab runs by now, so the settings it was given while held are answered.
+					await Promise.race([Promise.all(tab.beforeFirstPage ?? []), new Promise((resolve) => setTimeout(resolve, SETTINGS_WAIT_MS))]);
+				}
 				await cdp.send("Fetch.continueRequest", { requestId: paused.requestId }).catch(() => undefined);
 				return;
 			}

@@ -19,6 +19,12 @@ export type VisitorTab = {
 	page?: Page;
 	/** Resolves with the page once it exists. */
 	pageReady: Promise<Page>;
+	/**
+	 * Answers of commands sent while the tab was held that its first page
+	 * must have applied before it is shown: the screen size reaches the page
+	 * on its own path, after its first script under load.
+	 */
+	beforeFirstPage: Promise<unknown>[];
 	closed: boolean;
 };
 
@@ -79,7 +85,7 @@ export class VisitorTabs {
 			await control.detach().catch(() => undefined);
 			throw error;
 		});
-		const first: VisitorTab = { targetId: targetIdOf(page.target()), session, page, pageReady: Promise.resolve(page), closed: false };
+		const first: VisitorTab = { targetId: targetIdOf(page.target()), session, page, pageReady: Promise.resolve(page), beforeFirstPage: [], closed: false };
 		const tabs = new VisitorTabs(browser, control, first);
 		try {
 			browser.on("targetcreated", tabs.#onTargetCreated);
@@ -146,19 +152,19 @@ export class VisitorTabs {
 			return;
 		}
 		const page = this.#page(targetInfo.targetId);
-		const tab: VisitorTab = { targetId: targetInfo.targetId, session, opener, pageReady: page.promise, closed: false };
+		const tab: VisitorTab = { targetId: targetInfo.targetId, session, opener, pageReady: page.promise, beforeFirstPage: [], closed: false };
 		void page.promise.then((ready) => { tab.page = ready; });
 		// A tab an earlier visit of this browser opened already has its page.
 		const known = this.browser.targets().find((target) => targetIdOf(target) === targetInfo.targetId);
 		if (known) this.#onTargetCreated(known);
 		this.#register(tab);
 		try {
-			sendBeforeRun(session, "Network.enable");
+			void sendBeforeRun(session, "Network.enable");
 			for (const setup of this.#setups) await Promise.resolve(setup(tab)).catch(() => undefined);
 		} finally {
 			// Held until here: the tab runs its first request only now. A tab whose first
 			// request turned into a download answers this only once it is gone.
-			sendBeforeRun(session, "Runtime.runIfWaitingForDebugger");
+			void sendBeforeRun(session, "Runtime.runIfWaitingForDebugger");
 		}
 	}
 

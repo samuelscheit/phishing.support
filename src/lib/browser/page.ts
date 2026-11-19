@@ -104,14 +104,15 @@ async function presentIdentity(page: Page, identity: BrowserIdentity): Promise<s
  * Once puppeteer has the tab's page, `presentIdentityToPage` covers the
  * workers and frames it attaches later.
  */
-export async function presentIdentityToNewTab(session: CDPSession, identity: BrowserIdentity): Promise<void> {
-	sendBeforeRun(session, "Network.setUserAgentOverride", identity.override);
-	sendBeforeRun(session, "Emulation.setUserAgentOverride", identity.override);
+export async function presentIdentityToNewTab(tab: { session: CDPSession; beforeFirstPage: Promise<unknown>[] }, identity: BrowserIdentity): Promise<void> {
+	const send = (...command: Parameters<CDPSession["send"]>) => { tab.beforeFirstPage.push(sendBeforeRun(tab.session, ...command)); };
+	send("Network.setUserAgentOverride", identity.override);
+	send("Emulation.setUserAgentOverride", identity.override);
 	if (!identity.override.userAgentMetadata) {
-		sendBeforeRun(session, "Page.enable");
-		sendBeforeRun(session, "Page.addScriptToEvaluateOnNewDocument", { source: NO_CLIENT_HINTS });
+		send("Page.enable");
+		send("Page.addScriptToEvaluateOnNewDocument", { source: NO_CLIENT_HINTS });
 	}
-	await presentScreen(session, identity, async (method, params) => sendBeforeRun(session, method, params as never));
+	await presentScreen(tab.session, identity, async (method, params) => send(method, params as never));
 }
 
 /** The identity on puppeteer's page of a tab whose session already presents it, for its later workers and frames. */

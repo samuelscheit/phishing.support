@@ -842,7 +842,7 @@ async function openLiveCapture(options: ArchiveWebsiteOptions, egress: FabricEgr
 				const recorded: CaptureTab = { recording: recordTab(), stepFrom: 0 };
 				opened.set(tab.targetId, recorded);
 				observeSessionResponses(tab.session, tab.targetId, recorded.recording.observe);
-				await presentIdentityToNewTab(tab.session, identity);
+				await presentIdentityToNewTab(tab, identity);
 				void tab.pageReady.then(async (shown) => {
 					recorded.frameTraffic = recordFrameTraffic(shown);
 					await presentIdentityToPage(shown, identity);
