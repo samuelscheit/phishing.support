@@ -633,10 +633,15 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 							{analyzedAssessment?.collectionFields?.length ? (
 								<p className="mt-2 text-xs text-muted-foreground">Asks for {analyzedAssessment.collectionFields.map((field) => `“${describeDataEntryField(field)}”`).join(", ")}</p>
 							) : null}
-							<div className="mt-3 flex items-center justify-between gap-2 border-t border-destructive/15 pt-3 text-xs">
-								<span className="text-muted-foreground">Being reported to the responsible providers.</span>
-								<button type="button" onClick={() => setTab("reports")} className="shrink-0 font-medium text-primary hover:underline">{reportCount} report{reportCount === 1 ? "" : "s"} →</button>
-							</div>
+							{/* A confirmed site with no report: its case was confirmed from evidence collected elsewhere, after the site was gone; its info says why. */}
+							{reportCount ? (
+								<div className="mt-3 flex items-center justify-between gap-2 border-t border-destructive/15 pt-3 text-xs">
+									<span className="text-muted-foreground">Being reported to the responsible providers.</span>
+									<button type="button" onClick={() => setTab("reports")} className="shrink-0 font-medium text-primary hover:underline">{reportCount} report{reportCount === 1 ? "" : "s"} →</button>
+								</div>
+							) : (
+								<p className="mt-3 border-t border-destructive/15 pt-3 text-xs text-muted-foreground whitespace-pre-wrap">{submission.info || "No report was sent."}</p>
+							)}
 						</section>
 					) : null}
 
