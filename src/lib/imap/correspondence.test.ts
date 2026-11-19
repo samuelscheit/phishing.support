@@ -6,7 +6,7 @@ import { getDb } from "../db";
 import { SubmissionsEntity } from "../db/entities";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "../abuse/contracts";
-import { sendAbuseEmailRoute } from "../abuse/mail";
+import { sendAbuseEmailRoute } from "../abuse/mail/send";
 import { abuseCaseTag, authenticatedSender, canonicalSubject, deliveryFailure, subjectRepeats } from "../abuse/mail/correlation";
 import { AbuseRepository } from "../abuse/repository";
 import { abuseJobs } from "../abuse/schema";

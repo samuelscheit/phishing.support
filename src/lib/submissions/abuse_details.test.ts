@@ -3,7 +3,7 @@ import sharp from "sharp";
 
 import { SubmissionsEntity } from "../db/entities";
 import { useTemporaryDatabase } from "../db/test_helpers";
-import { sendAbuseEmailRoute } from "../abuse/mail";
+import { sendAbuseEmailRoute } from "../abuse/mail/send";
 import { AbuseRepository } from "../abuse/repository";
 import { reportConfirmedEmailPhishing, reportConfirmedWebsiteAbuse } from "../abuse/submission_reports";
 import { getSubmissionDetails } from "./details";

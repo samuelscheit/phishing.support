@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-	classifyProviderReply,
-	extractUnambiguousVerificationCode,
-	resolveVerifiedProviderLink,
-} from "./mail";
+import { classifyProviderReply, resolveVerifiedProviderLink } from "./mail/reply";
+import { extractUnambiguousVerificationCode } from "./mail/shared";
 
 function response(status: number, location?: string): Response {
 	return new Response(null, {

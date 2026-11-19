@@ -1,7 +1,8 @@
 import { reporterBrowserIdentity } from "../../browser/reporter_identity";
 import { SubmissionsEntity } from "../../db/entities";
 import { errorText as describeError } from "../../error_text";
-import { abuseEmailCaseUrl, sendAbuseEmailRoute } from "../mail";
+import { abuseEmailCaseUrl } from "../mail/draft";
+import { sendAbuseEmailRoute } from "../mail/send";
 import { getProviderSubmissionProvider } from "../providers";
 import { ProviderSubmissionRejectedError, type DecisionAnswerChannel } from "../providers/submission_contracts";
 import { AbuseRepository } from "../repository";

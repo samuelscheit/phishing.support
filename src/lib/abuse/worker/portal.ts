@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { resolveVerifiedProviderLink } from "../mail";
+import { resolveVerifiedProviderLink } from "../mail/reply";
 import { isGenericFormEscalationEnabled } from "../providers/generic_form";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { serviceIdentity } from "../../constants";

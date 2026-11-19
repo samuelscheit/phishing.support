@@ -8,7 +8,7 @@ import { POST as createReportRoute } from "../../app/api/abuse/reports/route";
 import { getDb, resetDatabaseForTesting } from "../db";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "./contracts";
-import { sendAbuseEmailRoute } from "./mail";
+import { sendAbuseEmailRoute } from "./mail/send";
 import { AbuseRepository, aggregateReportStatus } from "./repository";
 import { abuseArtifacts, abuseJobs, abuseMailMessages } from "./schema";
 import { sha256Hex } from "./security";

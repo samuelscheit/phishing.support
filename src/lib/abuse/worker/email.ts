@@ -1,12 +1,6 @@
-import {
-	abuseEmailCaseUrl,
-	createAbuseEmailDraft,
-	isSafeEmailDeliveryFailure,
-	readVerifiedEmailDraft,
-	sendAbuseEmailRoute,
-	type AbuseEmailDraft,
-	verifiedEmailProviderPayload,
-} from "../mail";
+import { abuseEmailCaseUrl, createAbuseEmailDraft, readVerifiedEmailDraft, type AbuseEmailDraft, verifiedEmailProviderPayload } from "../mail/draft";
+import { isSafeEmailDeliveryFailure } from "../mail/types";
+import { sendAbuseEmailRoute } from "../mail/send";
 import { serviceIdentity } from "../../constants";
 import { approvalDraftOf } from "../persistence/approvals";
 import { AbuseRepository } from "../repository";

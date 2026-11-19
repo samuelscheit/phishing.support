@@ -4,7 +4,7 @@ import sharp from "sharp";
 
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { validateAbuseReportRequest } from "../contracts";
-import type { sendAbuseEmailRoute } from "../mail";
+import type { sendAbuseEmailRoute } from "../mail/send";
 import { ProviderSubmissionRejectedError, type DecisionAnswer, type ProviderSubmissionProvider } from "../providers/submission_contracts";
 import { AbuseRepository } from "../repository";
 import { UnknownExternalStateError } from "../worker/shared";

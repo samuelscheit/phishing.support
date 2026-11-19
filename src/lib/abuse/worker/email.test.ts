@@ -2,7 +2,8 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { validateAbuseReportRequest } from "../contracts";
-import { createAbuseEmailDraft, sendAbuseEmailRoute, type AbuseEmailDraft } from "../mail";
+import { createAbuseEmailDraft, type AbuseEmailDraft } from "../mail/draft";
+import { sendAbuseEmailRoute } from "../mail/send";
 import { AbuseRepository } from "../repository";
 import { SubmissionsEntity } from "../../db/entities";
 import { emailRoute } from "../resolver/routes";

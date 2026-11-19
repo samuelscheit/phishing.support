@@ -1,4 +1,4 @@
-import { classifyProviderReply, extractVerifiedProviderLinks } from "../mail";
+import { classifyProviderReply, extractVerifiedProviderLinks } from "../mail/reply";
 import { isGenericFormEscalationEnabled } from "../providers/generic_form";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { AbuseRepository } from "../repository";
