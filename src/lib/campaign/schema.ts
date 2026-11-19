@@ -7,14 +7,21 @@ import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "../db/sqlite_types
 /**
  * What a confirmed site shows about who runs it.
  *
- * - `exfiltration_backend`: where the site sent the synthetic values a visit entered (a Telegram bot, a Discord webhook, a collector host).
+ * - `operator_server`: a server only the operator controls, whatever it did for the site (`evidence.roles`): received the synthetic values a visit entered, or delivered the malware a page makes visitors run or download. A Telegram bot (`telegram-bot:<id>`), a Discord webhook (`discord-webhook:<id>`) or a host (`host:<name>`); a public platform's host is recorded but links nothing.
  * - `payment_receiver`: an account the page asks visitors to pay (IBAN, crypto wallet).
  * - `kit_fingerprint`: the SHA-256 of a script or hidden-frame document of the kit itself, not of a public library, or of the reported page's body or tag structure (`fileKind` `page_document`, `page_structure`).
- * - `payload_host`: the server that delivers the malware a page makes visitors run or download (`payload-host:<host>`), not a public file host.
  * - `origin_ip`: the server behind the site; it describes the infrastructure but never links sites, because shared hosting puts unrelated operators on one address.
  */
-export const campaignIndicatorKinds = ["exfiltration_backend", "payment_receiver", "payload_host", "kit_fingerprint", "origin_ip"] as const;
+export const campaignIndicatorKinds = ["operator_server", "payment_receiver", "kit_fingerprint", "origin_ip"] as const;
 export type CampaignIndicatorKind = (typeof campaignIndicatorKinds)[number];
+
+/** What an operator server did for a site: receive what visitors entered, or deliver the malware they were made to run or download. */
+export type OperatorServerRole = "receives_data" | "delivers_malware";
+
+/** The roles an operator server's evidence names. */
+export function operatorServerRoles(evidence: Record<string, unknown>): OperatorServerRole[] {
+	return Array.isArray(evidence.roles) ? evidence.roles.filter((role): role is OperatorServerRole => role === "receives_data" || role === "delivers_malware") : [];
+}
 
 /** A set of confirmed sites linked by at least one indicator only one operator has. */
 export const campaigns = sqliteTable(

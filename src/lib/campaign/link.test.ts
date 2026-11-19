@@ -86,7 +86,7 @@ describe("campaign indicators", () => {
 		]);
 		const indicators = await extractIndicators(1n, fixtures({ a: { submission, backends: [botBackend("7001")], text: "Zahlung an DE89 3704 0044 0532 0130 00" } }));
 		expect(indicators.map(({ kind, value, links }) => ({ kind, value, links }))).toEqual([
-			{ kind: "exfiltration_backend", value: "telegram-bot:7001", links: true },
+			{ kind: "operator_server", value: "telegram-bot:7001", links: true },
 			{ kind: "payment_receiver", value: "iban:DE89370400440532013000", links: true },
 			{ kind: "kit_fingerprint", value: KIT, links: true },
 			{ kind: "kit_fingerprint", value: JQUERY, links: false },
@@ -105,10 +105,10 @@ describe("campaign indicators", () => {
 			{ url: "https://raw.githubusercontent.com/someone/repo/main/stage.sh", sha256: "f".repeat(64), sizeBytes: 900 },
 		] }, offeredDownload: { pageUrl: "https://paneo.work/", url: "https://paneo.work/Paneo.dmg", fileName: "Paneo.dmg", contentType: "application/x-apple-diskimage", sizeBytes: 9_000, sha256: "d".repeat(64), userAgent: "test" } } } as Submission["data"];
 		const indicators = await extractIndicators(1n, { ...fixtures({ a: { submission: paneo } }), loadPopularDomains: async () => new Set(["githubusercontent.com"]) });
-		expect(indicators.filter((indicator) => indicator.kind === "payload_host").map(({ value, links, evidence }) => ({ value, links, via: evidence.via }))).toEqual([
-			{ value: "payload-host:keychainagent.pro", links: true, via: "pasted_command" },
-			{ value: "payload-host:raw.githubusercontent.com", links: false, via: "pasted_command" },
-			{ value: "payload-host:paneo.work", links: true, via: "offered_download" },
+		expect(indicators.filter((indicator) => indicator.kind === "operator_server").map(({ value, links, evidence }) => ({ value, links, via: (evidence.delivered as { via: string }).via }))).toEqual([
+			{ value: "host:keychainagent.pro", links: true, via: "pasted_command" },
+			{ value: "host:raw.githubusercontent.com", links: false, via: "pasted_command" },
+			{ value: "host:paneo.work", links: true, via: "offered_download" },
 		]);
 	});
 
@@ -120,7 +120,7 @@ describe("campaign indicators", () => {
 		expect(backendIndicatorValue(botBackend("123"))).toBe("telegram-bot:123");
 		expect(backendIndicatorValue({ ...botBackend("123"), telegram: { token: "456:AAE" } })).toBe("telegram-bot:456");
 		expect(backendIndicatorValue({ ...botBackend("1"), kind: "discord_webhook", telegram: undefined, discord: { webhookId: "999", token: "t" } })).toBe("discord-webhook:999");
-		expect(backendIndicatorValue({ ...botBackend("1"), kind: "domain", telegram: undefined, hostname: "Collect.Example" })).toBe("collector-host:collect.example");
+		expect(backendIndicatorValue({ ...botBackend("1"), kind: "domain", telegram: undefined, hostname: "Collect.Example" })).toBe("host:collect.example");
 		expect(backendIndicatorValue({ ...botBackend("1"), telegram: { token: "not-a-token" } })).toBeUndefined();
 	});
 
@@ -160,7 +160,7 @@ describe("campaign grouping on record", () => {
 		const members = await CampaignRepository.listMembers(campaign!);
 		expect(members.map((member) => member.url)).toEqual(["https://a-kit-test.com/", "https://b-kit-test.com/", "https://c-kit-test.com/"]);
 		const [summary] = (await CampaignRepository.listCampaigns()).filter((entry) => entry.campaign.id === campaign);
-		expect(summary).toMatchObject({ memberCount: 3, linkingIndicators: { exfiltration_backend: 1, kit_fingerprint: 1 } });
+		expect(summary).toMatchObject({ memberCount: 3, linkingIndicators: { operator_server: 1, kit_fingerprint: 1 } });
 	});
 
 	test("sites whose only link is the kit's page body, under many domains and with differing <head>s, form one campaign; another page does not join", async () => {
@@ -199,6 +199,41 @@ describe("campaign grouping on record", () => {
 		const campaign = await CampaignRepository.campaignForSubmission(1n);
 		expect(await CampaignRepository.campaignForSubmission(2n)).toBe(campaign!);
 		expect(await CampaignRepository.campaignForSubmission(3n)).not.toBe(campaign!);
+	});
+
+	test("one server links its sites whatever it did for each: receiving one site's data, delivering another's malware; a public platform links nothing", async () => {
+		const collector = (host: string): ExfiltrationBackend => ({ ...botBackend("1"), kind: "domain", key: `domain:${host}`, telegram: undefined, hostname: host, endpointUrl: `https://${host}/e` });
+		const delivering = (id: bigint, host: string, payloadUrl: string) => {
+			const submission = website(id, host);
+			submission.data = { kind: "website", website: { url: `https://${host}/`, investigation: { status: "completed", updatedAt: "2026-11-19T14:13:04.934Z", payloads: [{ url: payloadUrl, sha256: "c".repeat(64) }] } } } as Submission["data"];
+			return submission;
+		};
+		const sites = {
+			gmail: { submission: website(1n, "impresspaper-test.com"), backends: [collector("vigilant009.example")] },
+			mac: { submission: delivering(2n, "paneo-test.work", "https://vigilant009.example/stage2") },
+			// Both use a public platform: the platform's host is on record but ties nobody.
+			formA: { submission: website(3n, "form-a-test.com"), backends: [collector("script.google.com")] },
+			formB: { submission: delivering(4n, "form-b-test.com", "https://script.google.com/macros/s/x/exec") },
+		};
+		await store(...Object.values(sites).map((site) => site.submission));
+		const dependencies = { ...fixtures(sites), loadPopularDomains: async () => new Set(["google.com"]) };
+		for (const id of [1n, 2n, 3n, 4n]) await linkSubmissionToCampaign(id, dependencies);
+
+		const campaign = await CampaignRepository.campaignForSubmission(1n);
+		expect(await CampaignRepository.campaignForSubmission(2n)).toBe(campaign!);
+		const [server] = (await extractIndicators(1n, dependencies)).filter((indicator) => indicator.kind === "operator_server");
+		expect(server).toMatchObject({ value: "host:vigilant009.example", links: true, evidence: { roles: ["receives_data"], endpointUrl: "https://vigilant009.example/e" } });
+		expect((await extractIndicators(2n, dependencies)).find((indicator) => indicator.kind === "operator_server")).toMatchObject({ value: "host:vigilant009.example", links: true, evidence: { roles: ["delivers_malware"], delivered: { url: "https://vigilant009.example/stage2", via: "pasted_command" } } });
+		expect((await extractIndicators(3n, dependencies)).find((indicator) => indicator.kind === "operator_server")).toMatchObject({ value: "host:script.google.com", links: false });
+		expect(await CampaignRepository.campaignForSubmission(3n)).not.toBe(await CampaignRepository.campaignForSubmission(4n));
+	});
+
+	test("a site whose one server both receives its data and delivers its malware has one indicator naming both", async () => {
+		const submission = website(1n, "both-test.com");
+		submission.data = { kind: "website", website: { url: "https://both-test.com/", investigation: { status: "completed", updatedAt: "2026-11-19T14:13:04.934Z", payloads: [{ url: "https://kit-server.example/stage2", sha256: "c".repeat(64) }] } } } as Submission["data"];
+		const backend: ExfiltrationBackend = { ...botBackend("1"), kind: "domain", key: "domain:kit-server.example", telegram: undefined, hostname: "kit-server.example", endpointUrl: "https://kit-server.example/collect" };
+		const servers = (await extractIndicators(1n, fixtures({ a: { submission, backends: [backend] } }))).filter((indicator) => indicator.kind === "operator_server");
+		expect(servers).toEqual([{ kind: "operator_server", value: "host:kit-server.example", links: true, evidence: expect.objectContaining({ roles: ["receives_data", "delivers_malware"], endpointUrl: "https://kit-server.example/collect", delivered: expect.objectContaining({ url: "https://kit-server.example/stage2" }) }) }]);
 	});
 
 	test("a site that bridges two campaigns merges them into the older; the merged id leads to the survivor", async () => {

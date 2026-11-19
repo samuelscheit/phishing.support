@@ -28,7 +28,7 @@ const dossier: Dossier = {
 	requestedFields: ["email", "password"],
 	sites: [site("https://dhl-a.com/", "2026-11-10T08:00:00.000Z"), site("https://dhl-b.com/", "2026-11-12T08:00:00.000Z")],
 	indicators: [
-		{ kind: "exfiltration_backend", value: "telegram-bot:7001", links: true, evidence: { backendKind: "telegram_bot", telegram: { chatId: "-100" } }, sites: ["https://dhl-a.com/", "https://dhl-b.com/"] },
+		{ kind: "operator_server", value: "telegram-bot:7001", links: true, evidence: { roles: ["receives_data"], backendKind: "telegram_bot", telegram: { chatId: "-100" } }, sites: ["https://dhl-a.com/", "https://dhl-b.com/"] },
 		{ kind: "payment_receiver", value: "iban:LT121000011101001000", links: true, evidence: { receiverKind: "iban", receiver: "LT121000011101001000" }, sites: ["https://dhl-b.com/"] },
 	],
 	infrastructure: [
@@ -46,7 +46,7 @@ const dossier: Dossier = {
 		},
 		{ role: "payment", name: "IBAN LT121000011101001000", country: "LT", networkCountry: "LT", resources: [], contacts: [], sites: ["https://dhl-b.com/"] },
 		{ role: "hosting", name: "living-bots.net (SYNLINQ)", country: "DE", resources: ["45.88.108.231"], contacts: [], sites: ["https://dhl-a.com/"] },
-		{ role: "exfiltration", name: "collect.unknown.example", resources: [], contacts: [], sites: ["https://dhl-a.com/"] },
+		{ role: "operator_server", name: "collect.unknown.example", resources: [], contacts: [], sites: ["https://dhl-a.com/"] },
 	],
 };
 

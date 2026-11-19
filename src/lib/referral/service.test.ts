@@ -53,10 +53,10 @@ const dependencies: ReferralDependencies = {
 /** The secret half of a bot token, as long as real ones are. */
 const TOKEN_SECRET = "AAEsecretSecretSecretSecretSecret0123";
 const telegram = (botId: string): ExtractedIndicator => ({
-	kind: "exfiltration_backend",
+	kind: "operator_server",
 	value: `telegram-bot:${botId}`,
 	links: true,
-	evidence: { backendKind: "telegram_bot", endpointUrl: `https://api.telegram.org/bot${botId}:${TOKEN_SECRET}/sendMessage`, method: "POST", observedAt: "2026-11-10T08:00:00.000Z", matchedFields: ["email", "password"], telegram: { token: `${botId}:${TOKEN_SECRET}`, botId, username: "dhl_paket_bot", chatId: "-100200300" } },
+	evidence: { roles: ["receives_data"], backendKind: "telegram_bot", endpointUrl: `https://api.telegram.org/bot${botId}:${TOKEN_SECRET}/sendMessage`, method: "POST", observedAt: "2026-11-10T08:00:00.000Z", matchedFields: ["email", "password"], telegram: { token: `${botId}:${TOKEN_SECRET}`, botId, username: "dhl_paket_bot", chatId: "-100200300" } },
 });
 const kit = (sha: string): ExtractedIndicator => ({ kind: "kit_fingerprint", value: sha, links: true, evidence: { fileKind: "script", url: "https://kit.example/app.js", size: 18_000 } });
 
@@ -160,7 +160,7 @@ describe("criminal referral of a campaign", () => {
 			"Zypern (CY):\n  EU-Staat: Europäische Herausgabeanordnung (VO (EU) 2023/1543) direkt an den Anbieter.",
 			"  - Anbieter: Hostinger International Ltd, Larnaka (Vertragspartner für Kunden in der EU) – Infrastruktur und Betrieb in Litauen",
 			"Vereinigte Arabische Emirate (AE):",
-			"  - Empfänger der Eingaben: Telegram FZ-LLC – Gibt seit 09/2024",
+			"  - Server der Betreiber (empfängt Eingaben oder liefert Schadsoftware): Telegram FZ-LLC – Gibt seit 09/2024",
 			"Registrar Example Registrar Ltd",
 			"https://phishing.support/api/dossier/",
 			`Eine laufend aktualisierte Übersicht aller Websites der Kampagne mit dem Stand der Sperrungen: https://phishing.support/campaigns/${campaignId.toString()}`,
@@ -260,20 +260,20 @@ describe("criminal referral of a campaign", () => {
 	});
 
 	test("sites whose malware comes from one server are named as such, and the referral texts name the server", async () => {
-		const server: ExtractedIndicator = { kind: "payload_host", value: "payload-host:keychainagent.pro", links: true, evidence: { url: "https://keychainagent.pro/wksxgj/wZZLR9xY29o4", sha256: "e".repeat(64), via: "pasted_command" } };
+		const server: ExtractedIndicator = { kind: "operator_server", value: "host:keychainagent.pro", links: true, evidence: { roles: ["delivers_malware"], delivered: { url: "https://keychainagent.pro/wksxgj/wZZLR9xY29o4", sha256: "e".repeat(64), via: "pasted_command" } } };
 		for (const [index, host] of ["paneo.work", "macmorrow.app"].entries()) {
 			await reportedSite(BigInt(51 + index), host);
 			await CampaignRepository.recordIndicators(BigInt(51 + index), [server]);
 		}
 		const campaignId = (await CampaignRepository.campaignForSubmission(51n))!;
 		expect((await getPublicCampaign(campaignId))!.reasons).toEqual([
-			{ kind: "same_malware_server", title: "Same malware server", text: "Every page gets visitors to run or download malware from the same server (keychainagent.pro). Only whoever runs it decides what it delivers." },
+			{ kind: "same_backend", title: "Same server", text: "Every page uses a server only its operator controls: the malware visitors are made to run or download comes from the same server (keychainagent.pro)." },
 		]);
 		const dossier = await buildDossier(campaignId);
-		const indicator = dossier.indicators.find((entry) => entry.kind === "payload_host")!;
-		expect(describeIndicatorEnglish(indicator)).toBe(`Malware server keychainagent.pro delivers what visitors are made to run (2 sites), e.g. https://keychainagent.pro/wksxgj/wZZLR9xY29o4 (SHA-256 ${"e".repeat(64)}).`);
-		expect(describeIndicator(indicator)).toBe(`Schadsoftware-Server keychainagent.pro liefert, was Besucher ausführen sollen (2 Seiten), z. B. https://keychainagent.pro/wksxgj/wZZLR9xY29o4 (SHA-256 ${"e".repeat(64)}).`);
-		expect(factsFromDossier(dossier, []).links).toEqual(["same_malware_server"]);
+		const indicator = dossier.indicators.find((entry) => entry.kind === "operator_server")!;
+		expect(describeIndicatorEnglish(indicator)).toBe(`Server keychainagent.pro delivers the malware visitors are made to run, e.g. https://keychainagent.pro/wksxgj/wZZLR9xY29o4 (SHA-256 ${"e".repeat(64)}) (2 sites).`);
+		expect(describeIndicator(indicator)).toBe(`Server keychainagent.pro liefert die Schadsoftware, die Besucher ausführen sollen, z. B. https://keychainagent.pro/wksxgj/wZZLR9xY29o4 (SHA-256 ${"e".repeat(64)}) (2 Seiten).`);
+		expect(factsFromDossier(dossier, []).links).toEqual(["same_backend"]);
 	});
 
 	test("pages built from one template are named as such; an identical body among them is named too, and the template only where it reaches further", async () => {

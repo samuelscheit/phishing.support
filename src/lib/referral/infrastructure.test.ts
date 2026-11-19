@@ -94,8 +94,8 @@ describe("routeInfrastructure", () => {
 	});
 
 	test("a webhook account is where the entered data goes", () => {
-		expect(routeInfrastructure(route({ providerRegistryKey: "discord_webhook", providerDisplayName: "Discord webhook deletion" }))?.role).toBe("exfiltration");
-		expect(routeInfrastructure(route({ providerRegistryKey: "email:discord.com", providerDisplayName: "Discord Trust & Safety", resolverProvenance: { source: "service_account_registry" } }))?.role).toBe("exfiltration");
+		expect(routeInfrastructure(route({ providerRegistryKey: "discord_webhook", providerDisplayName: "Discord webhook deletion" }))?.role).toBe("operator_server");
+		expect(routeInfrastructure(route({ providerRegistryKey: "email:discord.com", providerDisplayName: "Discord Trust & Safety", resolverProvenance: { source: "service_account_registry" } }))?.role).toBe("operator_server");
 	});
 
 	test("a route of unknown provenance stays a provider without a role", () => {
@@ -105,8 +105,8 @@ describe("routeInfrastructure", () => {
 
 describe("indicatorInfrastructure", () => {
 	test("exfiltration services and the IBAN's country", () => {
-		expect(indicatorInfrastructure({ kind: "exfiltration_backend", value: "telegram-bot:7001", evidence: { backendKind: "telegram_bot" } })).toEqual({ role: "exfiltration", name: "Telegram", resources: [] });
-		expect(indicatorInfrastructure({ kind: "exfiltration_backend", value: "collector-host:api.bitflowpay.com", evidence: { backendKind: "domain" } })).toEqual({ role: "exfiltration", name: "api.bitflowpay.com", resources: [] });
+		expect(indicatorInfrastructure({ kind: "operator_server", value: "telegram-bot:7001", evidence: { roles: ["receives_data"], backendKind: "telegram_bot" } })).toEqual({ role: "operator_server", name: "Telegram", resources: [] });
+		expect(indicatorInfrastructure({ kind: "operator_server", value: "host:api.bitflowpay.com", evidence: { roles: ["receives_data"], backendKind: "domain" } })).toEqual({ role: "operator_server", name: "api.bitflowpay.com", resources: [] });
 		expect(indicatorInfrastructure({ kind: "payment_receiver", value: "iban:LT121000011101001000", evidence: { receiverKind: "iban", receiver: "LT121000011101001000" } }))
 			.toEqual({ role: "payment", name: "IBAN LT121000011101001000", resources: [], networkCountry: "LT" });
 		// A wallet has no state.
@@ -178,20 +178,20 @@ describe("locateInfrastructure", () => {
 		const nodes = await locateInfrastructure(mergeInfrastructure([
 			{ site: "https://assistdeparments-x.com/", claim: claim(skn) },
 			// Another name of the same registrable domain.
-			{ site: "https://assistdeparments-x.com/", claim: { role: "exfiltration", name: "api.assistdeparments-x.com", resources: [] } },
+			{ site: "https://assistdeparments-x.com/", claim: { role: "operator_server", name: "api.assistdeparments-x.com", resources: [] } },
 		]), lookup);
-		const collector = nodes.find((node) => node.role === "exfiltration")!;
+		const collector = nodes.find((node) => node.role === "operator_server")!;
 		expect(collector).toMatchObject({ via: "Cloudflare", originHost: "SKN-NETWORK-1 - SKN Subnet & Telecom Ltd, KN", country: "KN" });
 		expect(asked.filter((question) => question.includes("assistdeparments"))).toEqual([]);
-		expect(infrastructureLines(nodes, "de")).toContain("  - Empfänger der Eingaben: api.assistdeparments-x.com (hinter Cloudflare; Server laut Cloudflare bei SKN-NETWORK-1 - SKN Subnet & Telecom Ltd, KN) (1 Seite)");
+		expect(infrastructureLines(nodes, "de")).toContain("  - Server der Betreiber (empfängt Eingaben oder liefert Schadsoftware): api.assistdeparments-x.com (hinter Cloudflare; Server laut Cloudflare bei SKN-NETWORK-1 - SKN Subnet & Telecom Ltd, KN) (1 Seite)");
 	});
 
 	test("a data collector is resolved; behind Cloudflare, Cloudflare holds the records about its origin", async () => {
 		const collectors = mergeInfrastructure([
-			{ site: "https://a.example/", claim: { role: "exfiltration", name: "api.bitflowpay.com", resources: [] } },
-			{ site: "https://b.example/", claim: { role: "exfiltration", name: "collect.example.net", resources: [] } },
-			{ site: "https://c.example/", claim: { role: "exfiltration", name: "unresolvable.example", resources: [] } },
-			{ site: "https://d.example/", claim: { role: "exfiltration", name: "Telegram", resources: [] } },
+			{ site: "https://a.example/", claim: { role: "operator_server", name: "api.bitflowpay.com", resources: [] } },
+			{ site: "https://b.example/", claim: { role: "operator_server", name: "collect.example.net", resources: [] } },
+			{ site: "https://c.example/", claim: { role: "operator_server", name: "unresolvable.example", resources: [] } },
+			{ site: "https://d.example/", claim: { role: "operator_server", name: "Telegram", resources: [] } },
 		]);
 		const { lookup, asked } = fakeLookup(
 			{ "104.21.1.1": "US", "198.51.100.7": "NL" },
@@ -208,7 +208,7 @@ describe("locateInfrastructure", () => {
 		// A service named by the platform is never resolved.
 		expect(asked).not.toContain("resolve:Telegram");
 		expect(asked).not.toContain("located:104.21.1.1");
-		expect(infrastructureLines([byName.get("api.bitflowpay.com")!], "de")).toContain("  - Empfänger der Eingaben: api.bitflowpay.com (hinter Cloudflare, Inc.) (1 Seite; 104.21.1.1, 172.67.1.1)");
+		expect(infrastructureLines([byName.get("api.bitflowpay.com")!], "de")).toContain("  - Server der Betreiber (empfängt Eingaben oder liefert Schadsoftware): api.bitflowpay.com (hinter Cloudflare, Inc.) (1 Seite; 104.21.1.1, 172.67.1.1)");
 	});
 });
 
@@ -216,7 +216,7 @@ describe("infrastructureLines", () => {
 	const nodes = mergeInfrastructure([
 		{ site: "https://a.example/", claim: claim(hostingerHosting) },
 		{ site: "https://a.example/", claim: claim(hostingerRegistrar) },
-		{ site: "https://a.example/", claim: { role: "exfiltration", name: "api.bitflowpay.com", resources: [] } },
+		{ site: "https://a.example/", claim: { role: "operator_server", name: "api.bitflowpay.com", resources: [] } },
 	]);
 
 	test("groups by state with that state's instruments; unknown states come last", () => {
@@ -226,7 +226,7 @@ describe("infrastructureLines", () => {
 		expect(lines.some((line) => line.startsWith("  - Hoster: Hostinger International Ltd, Larnaka") && line.includes("Netz registriert in Litauen") && line.includes("Abuse-Kontakt abuse@hostinger.com"))).toBe(true);
 		expect(lines).toContain(`  Eigene Anzeige vor Ort möglich: ${directComplaint("LT")!.de}`);
 		expect(lines.at(-2)).toBe("Staat nicht ermittelt:");
-		expect(lines.at(-1)).toBe("  - Empfänger der Eingaben: api.bitflowpay.com (1 Seite)");
+		expect(lines.at(-1)).toBe("  - Server der Betreiber (empfängt Eingaben oder liefert Schadsoftware): api.bitflowpay.com (1 Seite)");
 	});
 
 	test("speaks English for the archive", () => {

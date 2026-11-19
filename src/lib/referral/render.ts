@@ -1,4 +1,5 @@
 /** The German wording of the complaint mails to German authorities; the evidence archive has its own English texts (archive_text.ts). */
+import { operatorServerRoles } from "../campaign/schema";
 import type { DossierIndicator, DossierSite } from "./dossier";
 import { plural, record, text } from "./format";
 
@@ -29,7 +30,7 @@ const RECEIVER_LABEL: Readonly<Record<string, string>> = { iban: "IBAN", bitcoin
 export function describeIndicator(indicator: DossierIndicator): string {
 	const evidence = indicator.evidence;
 	const reach = `(${plural(indicator.sites.length, "Seite", "Seiten")})`;
-	if (indicator.kind === "exfiltration_backend") {
+	if (indicator.kind === "operator_server") {
 		const observed = text(evidence.observedAt) ? `, beobachtet am ${germanDateTime(evidence.observedAt as string)}` : "";
 		if (evidence.backendKind === "telegram_bot") {
 			const telegram = record(evidence.telegram);
@@ -44,14 +45,17 @@ export function describeIndicator(indicator: DossierIndicator): string {
 			const ids = [text(discord.guildId) ? `Server-ID ${discord.guildId}` : undefined, text(discord.channelId) ? `Kanal-ID ${discord.channelId}` : undefined].filter(Boolean).join(", ");
 			return `Discord-Webhook ${indicator.value.replace(/^discord-webhook:/, "")}${ids ? ` (${ids})` : ""} empfängt die Eingaben der Besucher ${reach}${observed}.`;
 		}
-		return `Sammelserver ${indicator.value.replace(/^collector-host:/, "")} empfängt die Eingaben der Besucher ${reach}${text(evidence.endpointUrl) ? ` über ${evidence.method ?? "POST"} ${evidence.endpointUrl}` : ""}${observed}.`;
+		const roles = operatorServerRoles(evidence);
+		const delivered = record(evidence.delivered);
+		const does = [
+			roles.includes("receives_data") && `empfängt die Eingaben der Besucher${text(evidence.endpointUrl) ? ` über ${evidence.method ?? "POST"} ${evidence.endpointUrl}` : ""}${observed}`,
+			roles.includes("delivers_malware") && `liefert die Schadsoftware, die Besucher ${delivered.via === "offered_download" ? "herunterladen" : "ausführen"} sollen${text(delivered.url) ? `, z. B. ${delivered.url}` : ""}${text(delivered.sha256) ? ` (SHA-256 ${delivered.sha256})` : ""}`,
+		].filter(Boolean).join(" und ");
+		return `Server ${indicator.value.replace(/^host:/, "")} ${does} ${reach}.`;
 	}
 	if (indicator.kind === "payment_receiver") {
 		const kind = text(evidence.receiverKind) ?? "";
 		return `${RECEIVER_LABEL[kind] ?? "Zahlungsempfänger"} ${text(evidence.receiver) ?? indicator.value} wird Besuchern als Zahlungsziel genannt ${reach}.`;
-	}
-	if (indicator.kind === "payload_host") {
-		return `Schadsoftware-Server ${indicator.value.replace(/^payload-host:/, "")} liefert, was Besucher ${evidence.via === "offered_download" ? "herunterladen" : "ausführen"} sollen ${reach}${text(evidence.url) ? `, z. B. ${evidence.url}` : ""}${text(evidence.sha256) ? ` (SHA-256 ${evidence.sha256})` : ""}.`;
 	}
 	if (indicator.kind === "kit_fingerprint") {
 		if (evidence.fileKind === "page_structure") return `Identische Seitenvorlage (dieselben ${evidence.tags ?? "?"} HTML-Elemente in derselben Reihenfolge, ohne Text und Attribute; SHA-256 ${indicator.value}) ${reach}.`;

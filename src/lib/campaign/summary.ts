@@ -21,7 +21,7 @@ export type CampaignFacts = {
 	/** Hosting providers the sites were reported to. */
 	providers: string[];
 	/** Kinds of indicator that tie the sites together. */
-	links: Array<"same_code" | "same_page" | "same_backend" | "same_payment_account" | "same_malware_server">;
+	links: Array<"same_code" | "same_page" | "same_backend" | "same_payment_account">;
 	/** The analyses of a few sites, as stored; untrusted page text may be quoted in them. */
 	analyses: string[];
 };
@@ -66,8 +66,7 @@ function span(minutes: number): string {
 const LINK_PHRASE: Record<CampaignFacts["links"][number], string> = {
 	same_code: "run identical code",
 	same_page: "show the same page",
-	same_malware_server: "deliver malware from the same server",
-	same_backend: "send what visitors enter to the same place",
+	same_backend: "rely on the same server of their operator",
 	same_payment_account: "name the same payment account",
 };
 

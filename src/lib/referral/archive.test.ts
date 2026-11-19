@@ -19,7 +19,7 @@ const dossier: Dossier = {
 	dataRequested: ["Passwort"],
 	requestedFields: ["password"],
 	infrastructure: [{ role: "hosting", name: "Hostinger International Ltd.", country: "CY", resources: [], contacts: ["abuse@hostinger.com"], sites: ["https://dhl-a.com/"] }],
-	indicators: [{ kind: "exfiltration_backend", value: "telegram-bot:7001", links: true, evidence: { backendKind: "telegram_bot", telegram: { token: "7001:AAE", chatId: "-1" } }, sites: ["https://dhl-a.com/"] }],
+	indicators: [{ kind: "operator_server", value: "telegram-bot:7001", links: true, evidence: { roles: ["receives_data"], backendKind: "telegram_bot", telegram: { token: "7001:AAE", chatId: "-1" } }, sites: ["https://dhl-a.com/"] }],
 	sites: [{
 		submissionId: "11",
 		url: "https://dhl-a.com/",
@@ -39,7 +39,7 @@ const dossier: Dossier = {
 			{ artifactId: "3", name: "evidence-manifest.json", kind: "website_evidence", sha256: "0".repeat(64), size: 2 },
 			{ artifactId: "4", name: "../../escape.tsr", kind: "website_evidence", sha256: sha(png), size: png.length },
 		],
-		indicators: [{ kind: "exfiltration_backend", value: "telegram-bot:7001", links: true, evidence: {} }],
+		indicators: [{ kind: "operator_server", value: "telegram-bot:7001", links: true, evidence: {} }],
 	}],
 };
 

@@ -13,8 +13,9 @@ import { CampaignRepository } from "./repository";
  * 2: the reported page's body (own address masked) links sites that serve the same kit page.
  * 3: the reported page's tag structure links pages built from one template; a provider's browser check links nothing.
  * 4: the server that delivers a page's malware (a pasted command's payload, an offered file) links its sites.
+ * 5: one operator-server indicator for every server only the operator controls, whatever it did: a host that delivers malware to one site and receives data from another links both; a public platform's host links nothing.
  */
-export const CAMPAIGN_RULES_VERSION = 4;
+export const CAMPAIGN_RULES_VERSION = 5;
 /** Sites of a sweep are linked this far apart: each may ask urlscan for its kit files. */
 const SWEEP_SPACING_MS = 20_000;
 /** Sites of one campaign arrive in bursts: it is described once the burst settles. */

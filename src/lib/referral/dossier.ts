@@ -292,7 +292,7 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 			indicatorMap.set(key, entry);
 		}
 	}
-	const kindOrder = ["exfiltration_backend", "payment_receiver", "payload_host", "kit_fingerprint", "origin_ip"];
+	const kindOrder = ["operator_server", "payment_receiver", "kit_fingerprint", "origin_ip"];
 	const indicators = [...indicatorMap.values()].sort((a, b) =>
 		kindOrder.indexOf(a.kind) - kindOrder.indexOf(b.kind) || b.sites.length - a.sites.length || a.value.localeCompare(b.value));
 

@@ -1,3 +1,4 @@
+import { operatorServerRoles } from "../campaign/schema";
 import { publicCampaignUrl } from "../campaign/urls";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
 import sanitizeFilename from "sanitize-filename";
@@ -40,7 +41,7 @@ export function correspondenceIndexText(site: DossierSite): string {
 export function describeIndicatorEnglish(indicator: DossierIndicator): string {
 	const evidence = indicator.evidence;
 	const reach = `(${plural(indicator.sites.length, "site", "sites")})`;
-	if (indicator.kind === "exfiltration_backend") {
+	if (indicator.kind === "operator_server") {
 		const observed = text(evidence.observedAt) ? `, observed ${utc(String(evidence.observedAt))}` : "";
 		if (evidence.backendKind === "telegram_bot") {
 			const telegram = record(evidence.telegram);
@@ -54,13 +55,16 @@ export function describeIndicatorEnglish(indicator: DossierIndicator): string {
 			const ids = [text(discord.guildId) && `server ID ${discord.guildId}`, text(discord.channelId) && `channel ID ${discord.channelId}`, text(discord.token) && `token ${discord.token}`].filter(Boolean).join(", ");
 			return `Discord webhook ${indicator.value.replace(/^discord-webhook:/, "")}${ids ? ` (${ids})` : ""} receives what visitors enter ${reach}${observed}.`;
 		}
-		return `Collector server ${indicator.value.replace(/^collector-host:/, "")} receives what visitors enter ${reach}${text(evidence.endpointUrl) ? ` via ${evidence.method ?? "POST"} ${evidence.endpointUrl}` : ""}${observed}.`;
+		const roles = operatorServerRoles(evidence);
+		const delivered = record(evidence.delivered);
+		const does = [
+			roles.includes("receives_data") && `receives what visitors enter${text(evidence.endpointUrl) ? ` via ${evidence.method ?? "POST"} ${evidence.endpointUrl}` : ""}${observed}`,
+			roles.includes("delivers_malware") && `delivers the malware visitors are made to ${delivered.via === "offered_download" ? "download" : "run"}${text(delivered.url) ? `, e.g. ${delivered.url}` : ""}${text(delivered.sha256) ? ` (SHA-256 ${delivered.sha256})` : ""}`,
+		].filter(Boolean).join(" and ");
+		return `Server ${indicator.value.replace(/^host:/, "")} ${does} ${reach}.`;
 	}
 	if (indicator.kind === "payment_receiver") {
 		return `Payment account ${text(evidence.receiver) ?? indicator.value} (${text(evidence.receiverKind) ?? "account"}) is named to visitors ${reach}.`;
-	}
-	if (indicator.kind === "payload_host") {
-		return `Malware server ${indicator.value.replace(/^payload-host:/, "")} delivers what visitors are made to ${evidence.via === "offered_download" ? "download" : "run"} ${reach}${text(evidence.url) ? `, e.g. ${evidence.url}` : ""}${text(evidence.sha256) ? ` (SHA-256 ${evidence.sha256})` : ""}.`;
 	}
 	if (indicator.kind === "kit_fingerprint") {
 		const library = text(evidence.library) ? `; a published library file (${evidence.library}), so it links nothing` : "";

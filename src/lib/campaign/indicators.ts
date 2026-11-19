@@ -10,7 +10,7 @@ import { hasPathTenants } from "../website_site";
 import type { ExfiltrationBackend } from "../exfiltration/types";
 import { loadPageFingerprints, type PageFingerprints } from "./page_document";
 import { paymentReceivers } from "./payment";
-import type { CampaignIndicatorEvidence, CampaignIndicatorKind } from "./schema";
+import type { CampaignIndicatorEvidence, CampaignIndicatorKind, OperatorServerRole } from "./schema";
 
 export type ExtractedIndicator = {
 	kind: CampaignIndicatorKind;
@@ -32,14 +32,14 @@ export type IndicatorDependencies = {
 	loadPageFingerprints?: (submissionId: bigint, siteUrl: string) => Promise<PageFingerprints>;
 };
 
-/** The identity two sites must share to have reached the same operator through one backend. */
+/** The identity two sites share when they use the same server of their operator: a Telegram bot, a Discord webhook, or a host. */
 export function backendIndicatorValue(backend: ExfiltrationBackend): string | undefined {
 	if (backend.kind === "telegram_bot") {
 		const botId = backend.telegram?.botId ?? backend.telegram?.token.split(":", 1)[0];
 		return botId && /^\d{1,20}$/.test(botId) ? `telegram-bot:${botId}` : undefined;
 	}
 	if (backend.kind === "discord_webhook") return backend.discord?.webhookId ? `discord-webhook:${backend.discord.webhookId}` : undefined;
-	return backend.hostname ? `collector-host:${backend.hostname.toLowerCase()}` : undefined;
+	return backend.hostname ? `host:${backend.hostname.toLowerCase()}` : undefined;
 }
 
 async function loadReportedBackends(submissionId: bigint) {
@@ -103,8 +103,11 @@ async function cachedLibraryFor(sha256: string): Promise<string | undefined> {
 }
 
 /**
- * Everything one confirmed site shows about its operator. Exfiltration
- * backends and payment receivers always link sites. A kit file links them
+ * Everything one confirmed site shows about its operator. A server only the
+ * operator controls links sites, whatever it did for them (received the
+ * entered data, delivered the malware): a Telegram bot, a Discord webhook,
+ * or a host that is not a public platform anyone can put files or forms on.
+ * Payment receivers always link sites. A kit file links them
  * only when it is the kit's own code: a script or hidden frame of at least
  * 1 KiB, not served from a top-ranked site (a CDN, the copied brand), and
  * not a published library file. The server address is recorded for the
@@ -120,38 +123,40 @@ export async function extractIndicators(submissionId: bigint, dependencies: Indi
 		if (!indicators.has(key)) indicators.set(key, indicator);
 	};
 
-	for (const { backend, observedAt, reportId } of await (dependencies.loadBackends ?? loadReportedBackends)(submissionId)) {
-		const value = backendIndicatorValue(backend);
-		if (!value) continue;
-		add({
-			kind: "exfiltration_backend",
-			value,
-			links: true,
-			evidence: {
-				backendKind: backend.kind,
-				endpointUrl: backend.endpointUrl,
-				method: backend.method,
-				observedAt,
-				matchedFields: backend.matchedCanaries,
-				reportId,
-				...(backend.telegram ? { telegram: backend.telegram } : {}),
-				...(backend.discord ? { discord: backend.discord } : {}),
-			},
-		});
-	}
-
-	for (const page of await (dependencies.loadPageTexts ?? loadCapturedPageTexts)(submissionId)) {
-		for (const receiver of paymentReceivers(page.text)) {
-			add({ kind: "payment_receiver", value: `${receiver.kind}:${receiver.value}`, links: true, evidence: { receiverKind: receiver.kind, receiver: receiver.value, page: page.name } });
-		}
-	}
-
 	let popularDomains: PopularDomains | undefined;
 	const popularSites = async () => (popularDomains ??= await (dependencies.loadPopularDomains ?? loadPopularDomains)());
 
-	// The server that hands visitors the malware: what a pasted command fetches
-	// (only payloads the investigation actually received) and the file a page
-	// offers. A file host anyone can upload to (GitHub, Dropbox) links nothing.
+	// One host may play both roles for a site; its evidence then names both.
+	const operatorServer = async (value: string, role: OperatorServerRole, evidence: CampaignIndicatorEvidence) => {
+		const existing = indicators.get(`operator_server:${value}`);
+		if (existing) {
+			const roles = existing.evidence.roles as OperatorServerRole[];
+			if (!roles.includes(role)) roles.push(role);
+			for (const [key, entry] of Object.entries(evidence)) existing.evidence[key] ??= entry;
+			return;
+		}
+		const host = value.startsWith("host:") ? value.slice("host:".length) : undefined;
+		const shared = host !== undefined && (hasPathTenants(host) || isPopularSite(host, await popularSites()));
+		add({ kind: "operator_server", value, links: !shared, evidence: { roles: [role], ...evidence } });
+	};
+
+	for (const { backend, observedAt, reportId } of await (dependencies.loadBackends ?? loadReportedBackends)(submissionId)) {
+		const value = backendIndicatorValue(backend);
+		if (!value) continue;
+		await operatorServer(value, "receives_data", {
+			backendKind: backend.kind,
+			endpointUrl: backend.endpointUrl,
+			method: backend.method,
+			observedAt,
+			matchedFields: backend.matchedCanaries,
+			reportId,
+			...(backend.telegram ? { telegram: backend.telegram } : {}),
+			...(backend.discord ? { discord: backend.discord } : {}),
+		});
+	}
+
+	// What a pasted command fetches (only payloads the investigation actually
+	// received) and the file a page offers.
 	const deliveries = [
 		...(website.investigation?.payloads ?? []).filter((payload) => payload.sha256).map((payload) => ({ url: payload.url, sha256: payload.sha256, via: "pasted_command" })),
 		...(website.offeredDownload ? [{ url: website.offeredDownload.url, sha256: website.offeredDownload.sha256, via: "offered_download" }] : []),
@@ -163,8 +168,13 @@ export async function extractIndicators(submissionId: bigint, dependencies: Indi
 		} catch {
 			continue;
 		}
-		const shared = hasPathTenants(host) || isPopularSite(host, await popularSites());
-		add({ kind: "payload_host", value: `payload-host:${host}`, links: !shared, evidence: { url: delivery.url, sha256: delivery.sha256, via: delivery.via } });
+		await operatorServer(`host:${host}`, "delivers_malware", { delivered: delivery });
+	}
+
+	for (const page of await (dependencies.loadPageTexts ?? loadCapturedPageTexts)(submissionId)) {
+		for (const receiver of paymentReceivers(page.text)) {
+			add({ kind: "payment_receiver", value: `${receiver.kind}:${receiver.value}`, links: true, evidence: { receiverKind: receiver.kind, receiver: receiver.value, page: page.name } });
+		}
 	}
 
 	const fingerprints = kitFingerprints(website).filter((fingerprint) => fingerprint.kind !== "stylesheet");

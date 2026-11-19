@@ -17,7 +17,7 @@ import { providerLead, type ProviderLead } from "./provider_leads";
  * - `networkCountry`: where the network is registered (RIR delegation);
  * - `serverCountry`: where the server is located (geolocation; never for a CDN).
  */
-export type InfrastructureRole = "hosting" | "cdn" | "registrar" | "exfiltration" | "payment" | "provider";
+export type InfrastructureRole = "hosting" | "cdn" | "registrar" | "operator_server" | "payment" | "provider";
 
 export type InfrastructureNode = {
 	role: InfrastructureRole;
@@ -97,7 +97,7 @@ export function routeInfrastructure(route: Pick<AbuseProviderRoute, "providerReg
 	}
 
 	if (source === "service_account_registry" || key === "discord_webhook") {
-		return { role: "exfiltration", name: route.providerDisplayName, resources: [], ...(contact ? { contact } : {}) };
+		return { role: "operator_server", name: route.providerDisplayName, resources: [], ...(contact ? { contact } : {}) };
 	}
 
 	if (source && NETWORK_SOURCES.has(source)) {
@@ -124,13 +124,12 @@ export function routeInfrastructure(route: Pick<AbuseProviderRoute, "providerReg
 	return { role: "provider", name: route.providerDisplayName, resources: [], ...(contact ? { contact } : {}) };
 }
 
-/** The infrastructure an indicator names: the exfiltration service or the bank behind an IBAN. */
+/** The infrastructure an indicator names: the operator's server (or the messaging service behind it) or the bank behind an IBAN. */
 export function indicatorInfrastructure(indicator: { kind: string; value: string; evidence: Record<string, unknown> }): InfrastructureClaim | undefined {
-	if (indicator.kind === "exfiltration_backend") {
-		if (indicator.evidence.backendKind === "telegram_bot") return { role: "exfiltration", name: "Telegram", resources: [] };
-		if (indicator.evidence.backendKind === "discord_webhook") return { role: "exfiltration", name: "Discord", resources: [] };
-		const host = indicator.value.replace(/^collector-host:/, "");
-		return { role: "exfiltration", name: host, resources: [] };
+	if (indicator.kind === "operator_server") {
+		if (indicator.value.startsWith("telegram-bot:")) return { role: "operator_server", name: "Telegram", resources: [] };
+		if (indicator.value.startsWith("discord-webhook:")) return { role: "operator_server", name: "Discord", resources: [] };
+		return { role: "operator_server", name: indicator.value.replace(/^host:/, ""), resources: [] };
 	}
 	if (indicator.kind === "payment_receiver" && indicator.evidence.receiverKind === "iban") {
 		const iban = text(indicator.evidence.receiver) ?? indicator.value.replace(/^iban:/, "");
@@ -211,7 +210,7 @@ export function mergeInfrastructure(claims: ReadonlyArray<{ site: string; claim:
 		if (holderCountry) node.country = holderCountry;
 		nodes.set(key, node);
 	}
-	const roleOrder: InfrastructureRole[] = ["hosting", "exfiltration", "payment", "cdn", "registrar", "provider"];
+	const roleOrder: InfrastructureRole[] = ["hosting", "operator_server", "payment", "cdn", "registrar", "provider"];
 	return [...nodes.values()]
 		.map((node) => ({ ...node, contacts: [...node.contacts].sort() }))
 		.sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role) || b.sites.length - a.sites.length || a.name.localeCompare(b.name));
@@ -230,7 +229,7 @@ function disclosedOrigin(host: string, hosts: readonly InfrastructureNode[]): In
  * nothing about the origin, so the CDN, which knows the origin, becomes the
  * record holder.
  */
-async function locateCollector(node: InfrastructureNode, hosts: readonly InfrastructureNode[], lookup: NetworkLookup): Promise<InfrastructureNode> {
+async function locateOperatorHost(node: InfrastructureNode, hosts: readonly InfrastructureNode[], lookup: NetworkLookup): Promise<InfrastructureNode> {
 	const origin = disclosedOrigin(node.name.toLowerCase(), hosts);
 	if (origin) {
 		return {
@@ -250,8 +249,9 @@ async function locateCollector(node: InfrastructureNode, hosts: readonly Infrast
 	return { ...resolved, via: cdn, ...(lead ? { lead, country: lead.country } : {}) };
 }
 
-function isCollector(node: InfrastructureNode): boolean {
-	return node.role === "exfiltration" && !node.resources.length && HOST.test(node.name);
+/** An operator's own host (not Telegram or Discord), whose network is still to be found. */
+function isOperatorHost(node: InfrastructureNode): boolean {
+	return node.role === "operator_server" && !node.resources.length && HOST.test(node.name);
 }
 
 /**
@@ -261,16 +261,16 @@ function isCollector(node: InfrastructureNode): boolean {
  * Cloudflare named.
  */
 export async function locateInfrastructure(nodes: readonly InfrastructureNode[], lookup: NetworkLookup = PUBLIC_NETWORK_LOOKUP): Promise<InfrastructureNode[]> {
-	const located = await Promise.all(nodes.map((node) => (isCollector(node) ? node : locateNode(node, lookup))));
+	const located = await Promise.all(nodes.map((node) => (isOperatorHost(node) ? node : locateNode(node, lookup))));
 	const hosts = located.filter((node) => node.role === "hosting");
-	return Promise.all(located.map((node) => (isCollector(node) ? locateCollector(node, hosts, lookup) : node)));
+	return Promise.all(located.map((node) => (isOperatorHost(node) ? locateOperatorHost(node, hosts, lookup) : node)));
 }
 
 /** The registered country of a node's first resource and, for a server not behind a CDN, its location. */
 async function locateNode(node: InfrastructureNode, lookup: NetworkLookup): Promise<InfrastructureNode> {
 	const [first] = node.resources;
 	const ip = node.resources.find((resource) => IP.test(resource));
-	const locatable = (node.role === "hosting" || node.role === "exfiltration") && !node.via && ip;
+	const locatable = (node.role === "hosting" || node.role === "operator_server") && !node.via && ip;
 	const [networkCountry, serverCountry] = await Promise.all([
 		node.networkCountry ?? (first ? lookup.registered(first) : undefined),
 		locatable ? lookup.located(ip) : undefined,
@@ -285,7 +285,7 @@ export const ROLE_LABEL: Readonly<Record<InfrastructureRole, Bilingual>> = {
 	hosting: { de: "Hoster", en: "Host" },
 	cdn: { de: "CDN/Proxy", en: "CDN/proxy" },
 	registrar: { de: "Registrar", en: "Registrar" },
-	exfiltration: { de: "Empfänger der Eingaben", en: "Receives the entered data" },
+	operator_server: { de: "Server der Betreiber (empfängt Eingaben oder liefert Schadsoftware)", en: "Operator's server (receives entered data or delivers malware)" },
 	payment: { de: "Zahlungsempfänger", en: "Payment receiver" },
 	provider: { de: "Anbieter", en: "Provider" },
 };

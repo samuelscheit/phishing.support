@@ -1,9 +1,11 @@
 import { getDomain } from "tldts";
 
 import { buildDossier, type Dossier, type DossierDependencies, type DossierSite } from "../referral/dossier";
+import { record, text } from "../referral/format";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
 import { factsFromDossier } from "./link";
 import { CampaignRepository } from "./repository";
+import { operatorServerRoles, type OperatorServerRole } from "./schema";
 import { fallbackDescription } from "./summary";
 
 /**
@@ -36,7 +38,7 @@ export type PublicCampaignSite = {
 	takedown: "confirmed" | "reported" | "problem" | "none";
 };
 
-export type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_payment_account" | "same_malware_server" | "same_pattern"; title: string; text: string };
+export type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_payment_account" | "same_pattern"; title: string; text: string };
 
 export type PublicCampaign = {
 	campaignId: string;
@@ -118,8 +120,6 @@ function count<T>(items: readonly T[], key: (item: T) => string[]): Array<[strin
 }
 
 function backendDetails(evidence: Record<string, unknown>, value: string): { kind: string; label: string; details: Array<[string, string]> } {
-	const record = (entry: unknown) => (entry && typeof entry === "object" ? entry as Record<string, unknown> : {});
-	const text = (entry: unknown) => (typeof entry === "string" && entry ? entry : undefined);
 	if (evidence.backendKind === "telegram_bot") {
 		const telegram = record(evidence.telegram);
 		const details: Array<[string, string | undefined]> = [["Bot ID", value.replace(/^telegram-bot:/, "")], ["Bot username", text(telegram.username) && `@${telegram.username}`], ["Chat ID", text(telegram.chatId)], ["Token", text(telegram.token)], ["Endpoint", text(evidence.endpointUrl)]];
@@ -130,8 +130,17 @@ function backendDetails(evidence: Record<string, unknown>, value: string): { kin
 		const details: Array<[string, string | undefined]> = [["Webhook ID", value.replace(/^discord-webhook:/, "")], ["Server ID", text(discord.guildId)], ["Channel ID", text(discord.channelId)], ["Webhook name", text(discord.name)], ["Token", text(discord.token)], ["Endpoint", text(evidence.endpointUrl)]];
 		return { kind: "discord_webhook", label: "Discord webhook", details: details.filter((entry): entry is [string, string] => Boolean(entry[1])) };
 	}
-	const details: Array<[string, string | undefined]> = [["Host", value.replace(/^collector-host:/, "")], ["Endpoint", text(evidence.endpointUrl)]];
-	return { kind: "collector_host", label: "Collector server", details: details.filter((entry): entry is [string, string] => Boolean(entry[1])) };
+	const roles = operatorServerRoles(evidence);
+	const delivered = record(evidence.delivered);
+	const details: Array<[string, string | undefined]> = [
+		["Host", value.replace(/^host:/, "")],
+		["Receives", roles.includes("receives_data") ? "what visitors enter" : undefined],
+		["Endpoint", text(evidence.endpointUrl)],
+		["Delivers", roles.includes("delivers_malware") ? `malware visitors are made to ${delivered.via === "offered_download" ? "download" : "run"}` : undefined],
+		["Malware URL", text(delivered.url)],
+		["Malware SHA-256", text(delivered.sha256)],
+	];
+	return { kind: "server", label: "Server", details: details.filter((entry): entry is [string, string] => Boolean(entry[1])) };
 }
 
 /** Why the sites are one operator's, in plain words, from the indicators that hold. */
@@ -157,15 +166,16 @@ function reasons(dossier: Dossier, stats: { platform?: string; durationMinutes: 
 	if (kit.length) {
 		result.push({ kind: "same_code", title: "Same code", text: `${subject(kit, "runs", "run")} the same program ${kit.length === 1 ? "file" : `files (${kit.length})`}, byte for byte. A copied design would not match this exactly, and none of these files is a public library.` });
 	}
-	const backend = shared.filter((indicator) => indicator.kind === "exfiltration_backend");
-	if (backend.length) {
-		const names = backend.map((indicator) => backendDetails(indicator.evidence, indicator.value).label.toLowerCase());
-		result.push({ kind: "same_backend", title: "Same receiver", text: `What visitors enter goes to the same ${[...new Set(names)].join(" and ")} from ${Math.max(...backend.map((indicator) => indicator.sites.length))} pages. Only whoever controls it receives the stolen data.` });
-	}
-	const malwareServers = shared.filter((indicator) => indicator.kind === "payload_host");
-	if (malwareServers.length) {
-		const hosts = malwareServers.map((indicator) => indicator.value.replace(/^payload-host:/, ""));
-		result.push({ kind: "same_malware_server", title: "Same malware server", text: `${subject(malwareServers, "gets", "get")} visitors to run or download malware from the same server (${hosts.join(", ")}). Only whoever runs it decides what it delivers.` });
+	const servers = shared.filter((indicator) => indicator.kind === "operator_server");
+	if (servers.length) {
+		const doing = (role: OperatorServerRole) => servers.filter((indicator) => operatorServerRoles(indicator.evidence).includes(role));
+		const names = (indicators: typeof servers) => [...new Set(indicators.map((indicator) => backendDetails(indicator.evidence, indicator.value).label.toLowerCase()))].join(" and ");
+		const hosts = (indicators: typeof servers) => indicators.map((indicator) => indicator.value.replace(/^host:/, "")).join(", ");
+		const uses = [
+			doing("receives_data").length && `what visitors enter goes to the same ${names(doing("receives_data"))}`,
+			doing("delivers_malware").length && `the malware visitors are made to run or download comes from the same server (${hosts(doing("delivers_malware"))})`,
+		].filter(Boolean).join(", and ");
+		result.push({ kind: "same_backend", title: "Same server", text: `${subject(servers, "uses", "use")} a server only its operator controls: ${uses}.` });
 	}
 	if (shared.some((indicator) => indicator.kind === "payment_receiver")) {
 		result.push({ kind: "same_payment_account", title: "Same payment account", text: "The pages ask visitors to pay into the same account." });
@@ -274,7 +284,7 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 		reasons: reasons(dossier, stats),
 		technical: {
 			destinations: [...destinations.values()],
-			backends: shared.filter((indicator) => indicator.kind === "exfiltration_backend").map((indicator) => ({
+			backends: shared.filter((indicator) => indicator.kind === "operator_server").map((indicator) => ({
 				...backendDetails(indicator.evidence, indicator.value),
 				siteCount: indicator.sites.length,
 			})),

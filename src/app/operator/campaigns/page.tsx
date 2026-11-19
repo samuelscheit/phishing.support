@@ -9,9 +9,8 @@ import { RebuildCampaignsButton } from "./RebuildCampaignsButton";
 export const dynamic = "force-dynamic";
 
 const INDICATOR_LABEL: Record<string, string> = {
-	exfiltration_backend: "data drop",
+	operator_server: "operator server",
 	payment_receiver: "payment receiver",
-	payload_host: "malware server",
 	kit_fingerprint: "kit file",
 };
 

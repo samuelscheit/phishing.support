@@ -43,9 +43,8 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const INDICATOR_LABEL: Record<string, string> = {
-	exfiltration_backend: "Data drop",
+	operator_server: "Operator server",
 	payment_receiver: "Payment receiver",
-	payload_host: "Malware server",
 	kit_fingerprint: "Kit file",
 	origin_ip: "Server",
 };
