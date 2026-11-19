@@ -13,6 +13,7 @@ const PREVIEW_SITES = 3;
 
 const REASON_ICON: Record<PublicCampaignReason["kind"], typeof Send> = {
 	same_code: Fingerprint,
+	same_page: Fingerprint,
 	same_backend: Send,
 	same_payment_account: Wallet,
 	same_pattern: Timer,

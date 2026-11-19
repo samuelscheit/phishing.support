@@ -51,6 +51,7 @@ export function describeIndicator(indicator: DossierIndicator): string {
 		return `${RECEIVER_LABEL[kind] ?? "Zahlungsempfänger"} ${text(evidence.receiver) ?? indicator.value} wird Besuchern als Zahlungsziel genannt ${reach}.`;
 	}
 	if (indicator.kind === "kit_fingerprint") {
+		if (evidence.fileKind === "page_document") return `Identischer Seiteninhalt (HTML-Body, ${evidence.size ?? "?"} Byte; die eigene Adresse der Seite ausgeblendet; SHA-256 ${indicator.value}) ${reach}.`;
 		const file = evidence.fileKind === "hidden_frame" ? "verborgenes Frame-Dokument" : "Skript";
 		return `Identische Kit-Datei (${file}, ${evidence.size ?? "?"} Byte, SHA-256 ${indicator.value}) ${reach}.`;
 	}

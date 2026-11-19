@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { SubmissionsEntity } from "../db/entities";
+import { ArtifactsEntity, SubmissionsEntity } from "../db/entities";
 import type { Submission } from "../db/schema";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import type { ExfiltrationBackend } from "../exfiltration/types";
@@ -9,6 +9,7 @@ import { backendIndicatorValue, extractIndicators, lookupPublishedLibrary } from
 import { describeCampaignIfChanged, linkSubmissionToCampaign, type LinkDependencies } from "./link";
 import type { DescribeDependencies } from "./summary";
 import { CampaignRepository } from "./repository";
+import { kitCapture } from "./test_mhtml";
 
 useTemporaryDatabase();
 
@@ -144,6 +145,29 @@ describe("campaign grouping on record", () => {
 		expect(members.map((member) => member.url)).toEqual(["https://a-kit-test.com/", "https://b-kit-test.com/", "https://c-kit-test.com/"]);
 		const [summary] = (await CampaignRepository.listCampaigns()).filter((entry) => entry.campaign.id === campaign);
 		expect(summary).toMatchObject({ memberCount: 3, linkingIndicators: { exfiltration_backend: 1, kit_fingerprint: 1 } });
+	});
+
+	test("sites whose only link is the kit's page body, under many domains and with differing <head>s, form one campaign; another page does not join", async () => {
+		// Production: 161 Vietnamese "TikTok coin" sites behind Cloudflare, with no backend, payment receiver or kit file captured, were 161 campaigns of one.
+		const hosts = ["napxu.saobangmedia.shop", "napxu.trungdungmedia.sbs", "deposit-dawn-hood.trycloudflare.com", "other-kit-test.com"];
+		const sites = Object.fromEntries(hosts.map((host, index) => [host, { submission: website(BigInt(index + 1), host) }]));
+		await store(...Object.values(sites).map((site) => site.submission));
+		for (const [index, host] of hosts.entries()) {
+			const mhtml = kitCapture(host, `part-${index}`, {
+				head: index === 1 ? `<link rel="canonical" href="https://${host}/">` : "",
+				base64: index === 2,
+				filler: host === "other-kit-test.com" ? "y".repeat(3_000) : undefined,
+			});
+			await ArtifactsEntity.saveBuffer({ submissionId: BigInt(index + 1), name: "website.mhtml", kind: "website_capture", mimeType: "multipart/related", buffer: mhtml });
+		}
+		const dependencies = fixtures(sites);
+		for (const id of [1n, 2n, 3n, 4n]) await linkSubmissionToCampaign(id, dependencies);
+
+		const campaign = await CampaignRepository.campaignForSubmission(1n);
+		expect((await CampaignRepository.listMembers(campaign!)).map((member) => member.url)).toEqual(hosts.slice(0, 3).map((host) => `https://${host}/`));
+		expect(await CampaignRepository.campaignForSubmission(4n)).not.toBe(campaign!);
+		const [summary] = (await CampaignRepository.listCampaigns()).filter((entry) => entry.campaign.id === campaign);
+		expect(summary).toMatchObject({ memberCount: 3, linkingIndicators: { kit_fingerprint: 1 } });
 	});
 
 	test("a site that bridges two campaigns merges them into the older; the merged id leads to the survivor", async () => {

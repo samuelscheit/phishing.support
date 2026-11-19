@@ -16,6 +16,9 @@ import type { ExtractedIndicator } from "../campaign/indicators";
 import { ingestFetchedMail } from "../imap/ingest";
 import { approveReferralMail, discardReferralMail, preparePreservationNotices, prepareComplaint, prepareSupplement, ReferralError, saveReferralDraft, setReferralCaseReference, type ReferralDependencies } from "./service";
 import { getCampaignOverview } from "./overview";
+import { buildDossier } from "./dossier";
+import { describeIndicatorEnglish } from "./archive_text";
+import { describeIndicator } from "./render";
 import { getPublicCampaign } from "../campaign/public_view";
 import { listSubmissionCards } from "../submissions/list";
 import { groupByCampaign } from "../submissions/campaign_groups";
@@ -231,6 +234,26 @@ describe("criminal referral of a campaign", () => {
 		expect(campaign).toMatchObject({ platform: "onrender.com", domainCount: 1, durationMinutes: 30, typicalIntervalMinutes: 10 });
 		expect(campaign.reasons.find((reason) => reason.kind === "same_pattern")?.text).toBe("4 pages on onrender.com within 30 minutes, a new one about every 10 minutes.");
 		expect(campaign.reasons.find((reason) => reason.kind === "same_code")?.text).toContain("Every page runs the same program file, byte for byte.");
+	});
+
+	test("sites that serve one page body are named as the same page, and the record and referral texts say what was compared", async () => {
+		const body = "c".repeat(64);
+		const page = (host: string): ExtractedIndicator => ({ kind: "kit_fingerprint", value: body, links: true, evidence: { fileKind: "page_document", url: `https://${host}/`, size: 27_657 } });
+		for (const [index, host] of ["napxu.saobangmedia.shop", "napxu.trungdungmedia.sbs", "shopxu.thuysimedia.online"].entries()) {
+			const id = BigInt(31 + index);
+			await reportedSite(id, host);
+			await CampaignRepository.recordIndicators(id, [page(host)]);
+		}
+		const campaignId = (await CampaignRepository.campaignForSubmission(31n))!;
+		const campaign = (await getPublicCampaign(campaignId))!;
+		expect(campaign.sites).toHaveLength(3);
+		expect(campaign.reasons.map((reason) => reason.kind)).toEqual(["same_page"]);
+		expect(campaign.reasons[0]!.text).toBe("Every page serves the same page body, byte for byte apart from its own address. A copied design would not match this exactly.");
+		expect(campaign.technical.kitFiles).toEqual([{ sha256: body, size: 27_657, path: "the page body (own address masked)", siteCount: 3 }]);
+
+		const indicator = (await buildDossier(campaignId)).indicators.find((entry) => entry.value === body)!;
+		expect(describeIndicatorEnglish(indicator)).toStartWith(`Identical page body (HTML, 27657 bytes; the page's own address masked; SHA-256 ${body})`);
+		expect(describeIndicator(indicator)).toStartWith(`Identischer Seiteninhalt (HTML-Body, 27657 Byte; die eigene Adresse der Seite ausgeblendet; SHA-256 ${body})`);
 	});
 
 	test("the public list shows every phishing site as its campaign's card, a campaign of one included", async () => {

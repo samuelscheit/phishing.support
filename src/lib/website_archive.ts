@@ -18,7 +18,6 @@ import { hiddenFrames, recordFrameTraffic, type FrameTrafficRecorder } from "./w
 import { actionResultHops, documentNavigationHops, isDocumentAnswer, isNetworkDocument, recordTab, type TabRecording } from "./website_tab_recording";
 import { CAPTCHA_PROVIDER_FRAME } from "./human_check";
 import { isSameWebsite, websiteSite } from "./website_site";
-// @ts-ignore
 import { convert } from "mhtml-to-html";
 import parse, { HTMLElement } from "node-html-parser";
 import { errorText } from "./error_text";

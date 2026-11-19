@@ -36,7 +36,7 @@ export type PublicCampaignSite = {
 	takedown: "confirmed" | "reported" | "problem" | "none";
 };
 
-export type PublicCampaignReason = { kind: "same_code" | "same_backend" | "same_payment_account" | "same_pattern"; title: string; text: string };
+export type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_backend" | "same_payment_account" | "same_pattern"; title: string; text: string };
 
 export type PublicCampaign = {
 	campaignId: string;
@@ -139,7 +139,13 @@ function reasons(dossier: Dossier, stats: { platform?: string; durationMinutes: 
 	const shared = dossier.indicators.filter((indicator) => indicator.links && indicator.sites.length > 1);
 	const all = dossier.sites.length;
 	const result: PublicCampaignReason[] = [];
-	const kit = shared.filter((indicator) => indicator.kind === "kit_fingerprint");
+	const isPage = (indicator: (typeof shared)[number]) => indicator.evidence.fileKind === "page_document";
+	const kit = shared.filter((indicator) => indicator.kind === "kit_fingerprint" && !isPage(indicator));
+	const page = shared.filter((indicator) => indicator.kind === "kit_fingerprint" && isPage(indicator));
+	if (page.length) {
+		const widest = Math.max(...page.map((indicator) => indicator.sites.length));
+		result.push({ kind: "same_page", title: "Same page", text: `${widest === all ? "Every page serves" : `${widest} of the ${all} pages serve`} the same page body, byte for byte apart from its own address. A copied design would not match this exactly.` });
+	}
 	if (kit.length) {
 		const widest = Math.max(...kit.map((indicator) => indicator.sites.length));
 		result.push({ kind: "same_code", title: "Same code", text: `${widest === all ? "Every page runs" : `${widest} of the ${all} pages run`} the same program ${kit.length === 1 ? "file" : `files (${kit.length})`}, byte for byte. A copied design would not match this exactly, and none of these files is a public library.` });
@@ -268,7 +274,7 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 			kitFiles: dossier.indicators.filter((indicator) => indicator.kind === "kit_fingerprint" && indicator.links).map((indicator) => {
 				let path = String(indicator.evidence.url ?? "");
 				try {
-					path = new URL(path).pathname;
+					path = indicator.evidence.fileKind === "page_document" ? "the page body (own address masked)" : new URL(path).pathname;
 				} catch {
 					// Keep what was stored.
 				}
