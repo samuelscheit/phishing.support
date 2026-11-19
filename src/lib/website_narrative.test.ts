@@ -19,7 +19,7 @@ const WHOIS = {
 describe("the website case analysis", () => {
 	test("asks for the same sections as the email analysis, judged by the classifier's own rules", () => {
 		const page = { requestedUrl: "https://rbxcore.pro/game-copier/", url: "https://rbxcore.pro/game-copier/", hostname: "rbxcore.pro", navigationHops: [{ index: 0, url: "https://rbxcore.pro/game-copier/", hostname: "rbxcore.pro", status: 200, contentCaptured: true }], html: Buffer.from("<html><head><title>RBXCore</title></head></html>"), text: Buffer.from("Game to Studio. One export.") };
-		const [system, user] = buildWebsiteAnalysisInput(page, { whois: WHOIS, capturedAt: new Date("2026-11-14T22:04:45Z") });
+		const [system, user] = buildWebsiteAnalysisInput(page, { finding: "No reportable phishing or malware evidence was found.", whois: WHOIS, capturedAt: new Date("2026-11-14T22:04:45Z") });
 		for (const section of ["**Verdict**", "**Brand impersonation**", "**Domain and hosting**", "**The visit, step by step**", "**Where the data went**", "**The offered file**", "**Evasion and kit techniques**", "**Indicators of compromise**"]) {
 			expect(system.content as string).toContain(section);
 		}
@@ -28,6 +28,17 @@ describe("the website case analysis", () => {
 		const text = (user.content as Array<{ text?: string }>)[0]!.text!;
 		expect(text).toContain("age_when_captured: 13 days");
 		expect(text).toContain("The analyzed page is https://rbxcore.pro/game-copier/:");
+	});
+
+	test("explains the case's decided finding instead of judging the site again", () => {
+		const page = { requestedUrl: "https://nova-staking.com/", url: "https://nova-staking.com/account", hostname: "nova-staking.com", navigationHops: [{ index: 0, url: "https://nova-staking.com/account", hostname: "nova-staking.com", status: 200, contentCaptured: true }], html: Buffer.from("<html></html>"), text: Buffer.from("Текущий пароль") };
+		const finding = "The page impersonates Orbit and asks visitors for a password, sign-in details, a verification code, or identity details, or leads them to a step that does.";
+		const [system, user] = buildWebsiteAnalysisInput(page, { finding });
+		const text = (user.content as Array<{ text?: string }>)[0]!.text!;
+		expect(text.startsWith(`<case_finding>\n${finding}\n</case_finding>\n`)).toBe(true);
+		expect(system.content as string).toContain("never contradict, weaken, or replace it with a verdict of your own");
+		expect(system.content as string).toContain("you do not judge the site again");
+		expect(system.content as string).not.toContain("or neither, exactly as the definitions above decide");
 	});
 
 	test("compacts the registration and hosting facts, with the domain's age when it was captured", () => {

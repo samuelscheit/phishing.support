@@ -105,6 +105,13 @@ export function capturedHostNavigation(hops: WebsiteNavigationHop[], capturedHop
 }
 
 
+/** The case's verdict when the analyzed page shows nothing reportable. */
+function unreportedVerdict({ finding, rejectedClaim }: WebsiteSiteClassification, url: string): string {
+	if (finding === "prank_or_troll") return `The captured destination ${url} was classified as a prank or troll page, not phishing or malware; no report was created.`;
+	if (rejectedClaim) return `The classifier's finding for ${url} was not corroborated by the captured page: ${rejectedClaim}. No report was created.`;
+	return `No reportable phishing or malware evidence was found at the captured destination ${url}; no report was created.`;
+}
+
 /** The reported finding of a corroborated classification. */
 function reportableFinding(classification: WebsiteSiteClassification): ReportableWebsiteFinding {
 	if (classification.finding === "malware") return { finding: "malware" };
@@ -717,20 +724,30 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			return submissionId;
 		}
 
+		// Decided once, before the narrative: it explains this finding and never judges the site again.
+		const siteAssessments = visited.assessments;
+		const reportableSite = reportableWebsiteHop(archive.navigationHops, siteAssessments, archive);
+		const commands = extractPasteCommands(archive.text.toString("utf-8"));
+		const findingCapture = { commands, navigationHops: archive.navigationHops, hiddenFrames: archive.hiddenFrames, device: archive.device, providerWarning: archive.providerWarning, offeredDownload: archive.offeredDownload, dataDrops: visited.dataDrops };
+		const inconclusive = reportableSite ? undefined : visited.inconclusive
+			&& `Inconclusive: the visit could not finish the site's flow: ${visited.inconclusive} The last page it reached, ${archive.url}, shows nothing reportable by itself; no verdict or report was made.`;
+		const caseFinding = reportableSite
+			? `${buildWebsiteReportEvidence(capturedClassification, findingCapture)}\nThe site is reported to the responsible providers.`
+			: inconclusive ?? unreportedVerdict(capturedClassification, archive.url);
+
 		await emitStep(submissionId, "analysis_run", 75);
 		await runStreamedAnalysisRun({
 			submissionId,
 			analysisKind: "analysis",
 			options: {
 				model: defaultResponseModel,
-				input: buildWebsiteAnalysisInput(archive, { whois, pages: visited.pages, visit, kitResources: archive.kitResources, capturedAt: archive.archivedAt }),
+				input: buildWebsiteAnalysisInput(archive, { finding: caseFinding, whois, pages: visited.pages, visit, kitResources: archive.kitResources, capturedAt: archive.archivedAt }),
 				reasoning: defaultReasoning,
 				tools: [{ type: "web_search" }],
 				stream: true,
 			},
 		}, { client: dependencies.analysisClient });
 
-		const siteAssessments = visited.assessments;
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
@@ -738,18 +755,16 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			},
 		});
 
-		const reportableSite = reportableWebsiteHop(archive.navigationHops, siteAssessments, archive);
 		if (reportableSite) {
 			const finding = reportableFinding(capturedClassification);
 			const label = finding.finding === "malware" ? "Malware distribution" : "Phishing";
 			await emitStep(submissionId, "reporting", 90);
 			const reportUrls = websiteReportUrls(archive.navigationHops, reportableSite);
-			const commands = extractPasteCommands(archive.text.toString("utf-8"));
 			const accessGate = await reportAccessGate(submissionId, reportableSite.url, archive.userAgent, dependencies.bareVisit);
 			await reportConfirmedWebsiteAbuse({
 				submissionId,
 				urls: reportUrls,
-				analysisText: buildWebsiteReportEvidence(capturedClassification, { commands, navigationHops: archive.navigationHops, hiddenFrames: archive.hiddenFrames, device: archive.device, ...(visitor ? { reporterUserAgent: visitor.override.userAgent } : {}), providerWarning: archive.providerWarning, offeredDownload: archive.offeredDownload, dataDrops: visited.dataDrops, accessGate, caseUrl: abuseEmailCaseUrl(submissionId) }),
+				analysisText: buildWebsiteReportEvidence(capturedClassification, { ...findingCapture, ...(visitor ? { reporterUserAgent: visitor.override.userAgent } : {}), accessGate, caseUrl: abuseEmailCaseUrl(submissionId) }),
 				...(archive.userAgent ? { userAgent: archive.userAgent } : {}),
 				screenshots: await capturedPageScreenshots(submissionId, analyzedCaptureStep(archive.navigationHops)),
 				reporter: { reporterIp, reporterCountry, reporterHeaders },
@@ -767,23 +782,17 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 					? `${label} confirmed at ${reportableSite.url}; its evidence is being collected before the report is sent.`
 					: `${label} confirmed at ${reportableSite.url}; evidence for it and the ${reportUrls.length - 1} URL${reportUrls.length === 2 ? "" : "s"} on ${websiteSite(reportableSite.url)} that lead${reportUrls.length === 2 ? "s" : ""} to it is being collected before the report is sent.`,
 			});
-		} else if (visited.inconclusive) {
+		} else if (visited.inconclusive && inconclusive) {
 			// The visit did not finish, so the last page it reached is no verdict on the site.
 			await failWebsiteAnalysis(submissionId, {
-				info: `Inconclusive: the visit could not finish the site's flow: ${visited.inconclusive} The last page it reached, ${archive.url}, shows nothing reportable by itself; no verdict or report was made.`,
+				info: inconclusive,
 				data: { unfinishedFlow: visited.inconclusive },
 				retry: { attempts: priorAttempts, reason: visited.inconclusive, exhausted: (visits: number) => `The visit stopped there ${visits} times; retry to visit the site again.` },
 			});
 			await emitStep(submissionId, "failed", 100);
 			return submissionId;
 		} else {
-			const { finding, rejectedClaim } = capturedClassification;
-			const verdict = finding === "prank_or_troll"
-				? `The captured destination ${archive.url} was classified as a prank or troll page, not phishing or malware; no report was created.`
-				: rejectedClaim
-					? `The classifier's finding for ${archive.url} was not corroborated by the captured page: ${rejectedClaim}. No report was created.`
-					: `No reportable phishing or malware evidence was found at the captured destination ${archive.url}; no report was created.`;
-			await SubmissionsEntity.update(submissionId, { status: "invalid", info: verdict });
+			await SubmissionsEntity.update(submissionId, { status: "invalid", info: caseFinding });
 		}
 
 		await emitStep(submissionId, "completed", 100);
