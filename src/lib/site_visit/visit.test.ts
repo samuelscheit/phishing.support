@@ -150,6 +150,29 @@ function serveCaptchaKit() {
 	return { server, posts, answers, codes, url: `http://127.0.0.1:${server.port}/` };
 }
 
+/**
+ * A kit that smuggles its page in, as solatclock.com did (production case
+ * 381783517136165791): the served page builds the sign-in form in the
+ * browser and navigates to it as a `blob:` document, which then posts to the
+ * kit's collector.
+ */
+function serveBlobKit() {
+	const posts: string[] = [];
+	const form = `<title>Sign in - Google Accounts</title><h1>Sign in</h1><form method="POST" action="${"ORIGIN"}/collect"><input name="email" placeholder="Email or phone"><button>Next</button></form>`;
+	const server = Bun.serve({
+		port: 0,
+		fetch: async (request) => {
+			const { pathname, origin } = new URL(request.url);
+			if (pathname === "/collect" && request.method === "POST") {
+				posts.push(await request.text());
+				return html("<h1>Wrong password</h1>", "Google");
+			}
+			return html(`<script>location.href = URL.createObjectURL(new Blob([${JSON.stringify(form.replace("ORIGIN", origin))}], { type: "text/html" }));</script>`, "Loading");
+		},
+	});
+	return { server, posts, url: `http://127.0.0.1:${server.port}/wp-blog.html` };
+}
+
 /** Whether the newest observation of a request came with a screenshot of the page. */
 const sawScreenshot = (request: ChatRequest) => {
 	const last = request.messages.at(-1);
@@ -425,6 +448,34 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			expect(new URLSearchParams(posts[1]).get("password")).toBe(canaries.password);
 			expect(recording.requests.find((request) => request.method === "POST" && request.url === `${url}collect`)).toBeDefined();
 			expect(model.seen()).not.toContain(canaries.password);
+		} finally {
+			await archive.session?.close();
+			server.stop(true);
+		}
+	}, 60_000);
+
+	test("walks a kit that replaced itself with a blob page it built in the browser, and records what that page sent", async () => {
+		const { server, posts, url } = serveBlobKit();
+		const canaries = createExfiltrationCanaries();
+		const model = new ScriptedModel([
+			(page) => {
+				expect(page).toContain("blob:http://127.0.0.1:");
+				return {
+					calls: [
+						{ name: "type", arguments: { ref: refIn(page, 'textbox "Email or phone"'), text: canaries.email } },
+						{ name: "click", arguments: { ref: refIn(page, 'button "Next"') } },
+					],
+				};
+			},
+			() => ({ calls: [{ name: "done", arguments: { result: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "The kit rejected the email." }, summary: "Done." } }] }),
+		]);
+		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: launch });
+		try {
+			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model) });
+			expect(recording.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "The kit rejected the email." } });
+			expect(model.seen()).toContain("The browser is already on its page (blob:http://127.0.0.1:");
+			expect(posts.map((body) => new URLSearchParams(body).get("email"))).toEqual([canaries.email]);
+			expect(recording.requests.filter((request) => request.method === "POST").map((request) => request.url)).toEqual([url.replace("wp-blog.html", "collect")]);
 		} finally {
 			await archive.session?.close();
 			server.stop(true);

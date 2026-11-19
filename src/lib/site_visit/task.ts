@@ -52,7 +52,9 @@ export function buildSiteVisitTask(
 	instructions?: string,
 ): SiteVisitTask {
 	const url = new URL(pageUrl);
-	if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("A site visit needs a credential-free HTTP URL.");
+	// A kit that smuggles its page in as a blob (`blob:https://site/<uuid>`) is still on the site's own web origin.
+	const origin = url.protocol === "blob:" ? new URL(url.pathname) : url;
+	if (!["http:", "https:"].includes(origin.protocol) || origin.username || origin.password || url.username || url.password) throw new Error("A site visit needs a credential-free HTTP URL.");
 	const secrets = { password: canaries.password, cardNumber: canaries.cardNumber, oneTimeCode: canaries.oneTimeCode };
 	const syntheticValues = {
 		email: canaries.email,

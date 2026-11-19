@@ -62,6 +62,13 @@ describe("the site visit task", () => {
 	test("refuses a URL with credentials or another scheme, and bounds the step limit", () => {
 		expect(() => buildSiteVisitTask("https://user:pass@phish.example/", canaries, 80)).toThrow("credential-free HTTP URL");
 		expect(() => buildSiteVisitTask("file:///etc/passwd", canaries, 80)).toThrow("credential-free HTTP URL");
+		expect(() => buildSiteVisitTask("data:text/html,<h1>Sign in</h1>", canaries, 80)).toThrow("credential-free HTTP URL");
+		expect(() => buildSiteVisitTask("blob:null/2f1d", canaries, 80)).toThrow();
+		expect(() => buildSiteVisitTask("blob:file:///2f1d", canaries, 80)).toThrow("credential-free HTTP URL");
+		expect(() => buildSiteVisitTask("blob:https://user:pass@phish.example/2f1d", canaries, 80)).toThrow("credential-free HTTP URL");
+		// A kit that replaced itself with a page it built in the browser (production case 381783517136165791) is still visited.
+		expect(buildSiteVisitTask("blob:https://solatclock.com/d23bb6f3-711d-487f-a2bb-308e4305ce77#", canaries, 80).goal)
+			.toContain("The browser is already on its page (blob:https://solatclock.com/d23bb6f3-711d-487f-a2bb-308e4305ce77#)");
 		expect(visitMaxSteps(undefined)).toBe(60);
 		expect(visitMaxSteps(" 40 ")).toBe(40);
 		expect(() => visitMaxSteps("0")).toThrow("SITE_VISIT_TASK_MAX_STEPS must be a whole number from 1 to 150.");
