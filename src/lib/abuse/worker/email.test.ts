@@ -155,19 +155,28 @@ describe("email worker draft boundary", () => {
 		expect(await AbuseRepository.getReport(created.reportId)).toMatchObject({ status: "waiting_provider" });
 	});
 
-	test("the resend after our relay refused the report sends the stored draft with bare hosts instead of live URLs", async () => {
+	test("the resend after our relay refused the report is drafted anew, live URLs included", async () => {
 		const { created, route } = await setupRoute();
-		const draft: AbuseEmailDraft = {
+		// The refused draft predates the case tag and the hosting address; the provider never saw it.
+		const refused: AbuseEmailDraft = {
 			subject: "[Phishing Support] Abuse report for example.com",
 			body: "Hello Provider Example LLC Abuse Team,\n\nObserved URLs:\n- https://login.example.com/collect\n\nRegards,\nThe phishing.support team",
 			recipientLabel: "Provider Example LLC",
 		};
+		const current: AbuseEmailDraft = {
+			subject: "[Phishing Support] [PS-0123456789ab] Abuse report for example.com",
+			body: "Hello Provider Example LLC Abuse Team,\n\nTarget: example.com\nHosting IP address: 192.0.2.10 (example.com resolved to 192.0.2.10 on 2026-11-19)\nObserved URLs:\n- https://login.example.com/collect\n\nRegards,\nThe phishing.support team",
+			recipientLabel: "Provider Example LLC",
+		};
+		const drafts = [refused, current];
 		const sentBodies: string[] = [];
+		const sentSubjects: string[] = [];
 		const services = {
 			markUnknownExternal: async () => undefined,
-			createDraft: async () => draft,
+			createDraft: async () => drafts.shift()!,
 			send: async (params: { body: string; runId: bigint; reportId: bigint; routeId: bigint; recipient: string; subject: string; correlationKey: string }) => {
 				sentBodies.push(params.body);
+				sentSubjects.push(params.subject);
 				if (sentBodies.length > 1) return { messageId: 1002n, status: "sent" as const, rfcMessageId: "<resend@phishing.support>" };
 				const messageId = await AbuseRepository.createOutboundMail({
 					reportId: params.reportId, routeId: params.routeId, runId: params.runId, fromAddress: "support@phishing.support", toAddresses: [params.recipient],
@@ -179,11 +188,15 @@ describe("email worker draft boundary", () => {
 			},
 		};
 		await expect(sendEmail(route.id, services)).rejects.toThrow("CS101");
-		await sendEmail(route.id, services, { withoutLiveUrls: true });
+		await sendEmail(route.id, services, { redraft: true });
+		expect(drafts).toEqual([]);
+		expect(sentSubjects).toEqual([refused.subject, current.subject]);
+		expect(sentBodies[1]).toContain("Hosting IP address: 192.0.2.10");
+		// The run now holds the draft that was sent, for any later retry.
+		const run = await AbuseRepository.getProviderRunByCorrelationKey(`email-run:${route.id.toString()}`);
+		expect((run!.providerPayload as { email: AbuseEmailDraft }).email).toEqual(current);
 		expect(sentBodies[0]).toContain("https://login.example.com/collect");
-		expect(sentBodies[1]).toContain("- login.example.com\n");
-		expect(sentBodies[1]).not.toContain("https://login.example.com");
-		expect(sentBodies[1]).toContain(`https://phishing.support/reports/${created.reportId.toString()}`);
+		expect(sentBodies[1]).toContain("- https://login.example.com/collect\n");
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "awaiting_provider_reply" });
 	});
 

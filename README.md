@@ -247,18 +247,19 @@ REFERRAL_LINK_SECRET=<at least 32 random characters>
 
 ## Mail configuration
 
-The service uses one mailbox for everything:
+Reports leave through our own relay, Postfix with DKIM on respond5 ([docker/mailer](docker/mailer/docker-compose.yml)); one mailbox receives everything:
 
 ```text
-SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS
-SMTP_FROM=support@phishing.support      # authenticated sender of every report
+SMTP_HOST=phishing-mailer SMTP_PORT=587 SMTP_SECURE=false  # the relay on dokploy-network
+SMTP_USER=reports@phishing.support SMTP_PASS=<MAILER_SASL_USERS password>
+SMTP_FROM=support@phishing.support      # visible and envelope sender of every report
 IMAP_HOST, IMAP_PORT, IMAP_SECURE, IMAP_USER, IMAP_PASS
 IMAP_MAILBOXES=phishing.report,phishing.support  # every folder that receives intake mail or provider replies
 IMAP_LISTEN_ADDRESS=report@phishing.support
 REPLY_DOMAIN=phishing.support           # must equal the IMAP_LISTEN_ADDRESS domain
 ```
 
-Each abuse email uses `SMTP_FROM` as its visible sender and a new opaque `Reply-To` such as `abuse-<48 hex>@phishing.support`, unique to one route. `REPLY_DOMAIN` must deliver into one of `IMAP_MAILBOXES` (for iCloud Custom Email Domain, enable **Allow All Incoming Emails**; see Apple's [catch-all guide](https://support.apple.com/guide/icloud/allow-all-incoming-emails-mm9e3ee0680f/icloud)). Do not substitute plus-addressing.
+Each abuse email uses `SMTP_FROM` as its visible sender and a new opaque `Reply-To` such as `abuse-<48 hex>@phishing.support`, unique to one route. Bounces go to the envelope sender, so they reach the IMAP mailbox like any reply. iCloud's own SMTP refused reports carrying live phishing URLs (`550 5.7.1 [CS101]`), which is why reports do not go out through the mailbox provider. A refusal by the relay itself is detected (`src/lib/abuse/mail/relay_refusal.ts`) and retried once per relay: changing `SMTP_HOST` resends every report the old relay refused last. `REPLY_DOMAIN` must deliver into one of `IMAP_MAILBOXES` (for iCloud Custom Email Domain, enable **Allow All Incoming Emails**; see Apple's [catch-all guide](https://support.apple.com/guide/icloud/allow-all-incoming-emails-mm9e3ee0680f/icloud)). Do not substitute plus-addressing.
 
 Every abuse email subject carries a case tag such as `[PS-50a7a280104d]`, because most helpdesks answer from their own address without `In-Reply-To`. The mailbox listener watches every folder and routes each message exactly once, strongest evidence first:
 

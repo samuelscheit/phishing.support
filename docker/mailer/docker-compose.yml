@@ -1,0 +1,54 @@
+# Outbound mail relay for abuse reports (Dokploy compose "mailer" in the
+# phishing.support project, on respond5).
+#
+# Reports go straight from here to the provider's MX: no third-party content
+# filter sits in the path. iCloud's outbound filter refused reports that carry
+# live phishing URLs (550 5.7.1 [CS101]); see src/lib/abuse/mail/relay_refusal.ts.
+# iCloud still receives every reply and bounce (MX, IMAP_*): DSNs go to the
+# envelope sender support@phishing.support.
+#
+# DNS (Cloudflare, DNS only): A mail.phishing.support -> respond5's IPv4, PTR
+# of that IPv4 -> mail.phishing.support (Contabo panel), SPF includes the
+# IPv4, DKIM selector `ps1` signed by rspamd (public key: docker exec
+# <container> cat /var/lib/rspamd/dkim/phishing.support.ps1.txt), DMARC p=none.
+#
+# The app reaches it on dokploy-network as phishing-mailer:587 with the SASL
+# user below (SMTP_USER/SMTP_PASS). mynetworks is loopback only, so no other
+# container on the shared network can relay without that login.
+services:
+  postfix:
+    image: boky/postfix:v5.2.1
+    restart: unless-stopped
+    environment:
+      ALLOWED_SENDER_DOMAINS: phishing.support
+      POSTFIX_myhostname: mail.phishing.support
+      POSTFIX_mynetworks: 127.0.0.0/8
+      # The image defaults to `permit` and only checks the sender domain, and
+      # its sender restrictions admit mynetworks alone.
+      POSTFIX_smtpd_relay_restrictions: permit_mynetworks,permit_sasl_authenticated,reject
+      POSTFIX_smtpd_sender_restrictions: permit_mynetworks,permit_sasl_authenticated,reject
+      POSTFIX_inet_protocols: ipv4
+      POSTFIX_message_size_limit: "52428800"
+      # The app connects over the host-internal overlay network: no STARTTLS
+      # with the image's self-signed certificate, which clients reject.
+      POSTFIX_smtpd_tls_security_level: none
+      # Opportunistic TLS to every recipient MX.
+      POSTFIX_smtp_tls_security_level: may
+      SMTPD_SASL_USERS: ${MAILER_SASL_USERS:?Set MAILER_SASL_USERS=user@phishing.support:password}
+      DKIM_AUTOGENERATE: "true"
+      DKIM_SELECTOR: ps1
+    volumes:
+      - dkim:/var/lib/rspamd/dkim
+      - spool:/var/spool/postfix
+    networks:
+      dokploy-network:
+        aliases:
+          - phishing-mailer
+
+volumes:
+  dkim:
+  spool:
+
+networks:
+  dokploy-network:
+    external: true

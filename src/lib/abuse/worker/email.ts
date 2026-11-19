@@ -1,7 +1,7 @@
 import { abuseEmailCaseUrl, createAbuseEmailDraft, readVerifiedEmailDraft, type AbuseEmailDraft, verifiedEmailProviderPayload } from "../mail/draft";
 import { isSafeEmailDeliveryFailure } from "../mail/types";
-import { bodyWithoutLiveUrls } from "../mail/relay_refusal";
 import { sendAbuseEmailRoute } from "../mail/send";
+import { smtpRelay } from "../../mail_config";
 import { serviceIdentity } from "../../constants";
 import { approvalDraftOf } from "../persistence/approvals";
 import { AbuseRepository } from "../repository";
@@ -9,26 +9,33 @@ import { errorText, RetryableDeliveryError, routeContext, UnknownExternalStateEr
 import { DAY_MS } from "../../duration";
 import { isDown } from "../../liveness/layer";
 import { listSiteChecksForTargets } from "../../liveness/repository";
-import { RELAY_RESEND_PAYLOAD } from "./mail";
+import type { AbuseProviderRoute } from "../schema";
 
 /**
- * Queue the one resend of every report our relay refused once, unless its site
- * is already down: for refusals settled before resends existed, and for any
- * whose resend job was lost. Once per route, ever.
+ * A report our relay refused (mail/relay_refusal.ts) never reached the
+ * provider. It is sent once more through each relay (`SMTP_HOST`), unless its
+ * site is already down: right after a refusal, since a filtering relay may
+ * accept the next attempt, and once the relay changes, for every route whose
+ * last attempt the old relay refused. A relay that refuses it twice ends it
+ * until the relay changes.
  */
+export async function queueRelayResend(route: AbuseProviderRoute): Promise<void> {
+	const relay = smtpRelay();
+	if (!relay) return;
+	const latest = (await listSiteChecksForTargets([route.targetId])).at(-1);
+	if (latest && isDown(latest.state)) return;
+	await AbuseRepository.enqueueJobOnce({
+		jobType: "send_email",
+		reportId: route.reportId,
+		routeId: route.id,
+		payload: { retryReason: "relay_refused", relay },
+		dedupeKey: `relay-resend:${route.id.toString()}:${relay}`,
+	});
+}
+
+/** At worker start: the resend due through the current relay of every route a relay refused. */
 export async function ensureRelayRefusalResends(): Promise<void> {
-	for (const { route, refusals } of await AbuseRepository.listRelayRefusedRoutes()) {
-		if (refusals > 1) continue;
-		const latest = (await listSiteChecksForTargets([route.targetId])).at(-1);
-		if (latest && isDown(latest.state)) continue;
-		await AbuseRepository.enqueueJobOnce({
-			jobType: "send_email",
-			reportId: route.reportId,
-			routeId: route.id,
-			payload: { ...RELAY_RESEND_PAYLOAD },
-			dedupeKey: `relay-resend:${route.id.toString()}`,
-		});
-	}
+	for (const route of await AbuseRepository.listRelayRefusedRoutes()) await queueRelayResend(route);
 }
 
 type EmailWorkerServices = Pick<WorkerServices, "markUnknownExternal"> & {
@@ -38,11 +45,11 @@ type EmailWorkerServices = Pick<WorkerServices, "markUnknownExternal"> & {
 	send?: typeof sendAbuseEmailRoute;
 };
 
-/** How a send job sends: `withoutLiveUrls` is the resend after our relay refused the report (mail/relay_refusal.ts). */
-export type SendEmailOptions = { withoutLiveUrls?: boolean };
+/** How a send job sends: `redraft` is the resend after our relay refused the report (queueRelayResend). */
+export type SendEmailOptions = { redraft?: boolean };
 
 export function readSendEmailPayload(payload: Record<string, unknown> | null | undefined): SendEmailOptions {
-	return payload?.withoutLiveUrls === true ? { withoutLiveUrls: true } : {};
+	return payload?.retryReason === "relay_refused" ? { redraft: true } : {};
 }
 
 export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, options: SendEmailOptions = {}): Promise<void> {
@@ -75,7 +82,9 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 		.map((artifact) => ({ filename: artifact.name, mimeType: artifact.mimeType, content: artifact.blob }));
 	let draft: AbuseEmailDraft | undefined;
 	let providerPayload: Record<string, unknown>;
-	if (route.status === "delivery_failed") {
+	// A resend after our relay refused the report is drafted anew: the provider never received the
+	// first one, and a report drafted before the case tag and hosting address existed went out without them.
+	if (route.status === "delivery_failed" && !options.redraft) {
 		const existing = await AbuseRepository.getProviderRunByCorrelationKey(correlationKey);
 		const persisted = existing && readVerifiedEmailDraft(existing.providerPayload, {
 			recipient: route.verifiedEmail,
@@ -114,9 +123,9 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 	});
 	if (!delivery) return;
 	const run = delivery.run;
-	// A delivery retry uses the immutable first-attempt draft, including its
-	// model-produced summary. Never regenerate recipient-facing prose after a
-	// durable report attempt has begun.
+	// A delivery retry uses the draft the run holds: the first attempt's for a
+	// plain retry, so recipient-facing prose is never regenerated once a
+	// provider may have read it.
 	const persistedDraft = readVerifiedEmailDraft(run.providerPayload, {
 		recipient: route.verifiedEmail,
 		description: report.description,
@@ -150,7 +159,7 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 			reportId: report.id,
 			recipient: route.verifiedEmail,
 			subject: persistedDraft.subject,
-			body: options.withoutLiveUrls ? bodyWithoutLiveUrls(persistedDraft.body, report.id) : persistedDraft.body,
+			body: persistedDraft.body,
 			attachments,
 			correlationKey,
 			replyAddress: retryReplyAddress,

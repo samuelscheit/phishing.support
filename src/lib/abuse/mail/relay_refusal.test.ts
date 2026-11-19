@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { bodyWithoutLiveUrls, isRelayRefusal, reportPageUrl } from "./relay_refusal";
+import { isRelayRefusal } from "./relay_refusal";
 
 const dsn = (remote: string) => `Reporting-MTA: dns; outbound.ms.icloud.com\nFinal-Recipient: rfc822; abuse@registrar.eu\nAction: failed\nStatus: 5.7.1\nRemote-MTA: dns; ${remote}\nDiagnostic-Code: smtp; 550 5.7.1 [CS101] Message rejected due to local policy`;
 
@@ -18,44 +18,6 @@ describe("isRelayRefusal", () => {
 
 	test("the production notice, flattened to one line as it is stored", () => {
 		expect(isRelayRefusal("<abuse@registrar.eu>: host 127.0.0.1[127.0.0.1] said: 550 5.7.1 [CS101] Message rejected due to local policy (in reply to end of DATA command) Reporting-MTA: dns; outbound.ms.icloud.com X-Postfix-Queue-ID: 40AAF180027E Final-Recipient: rfc822; *****@************ Original-Recipient: rfc822;abuse@registrar.eu Action: failed Status: 5.7.1 Remote-MTA: dns; 127.0.0.1 Diagnostic-Code: smtp; 550 5.7.1 [CS101] Message rejected")).toBe(true);
-	});
-});
-
-describe("bodyWithoutLiveUrls", () => {
-	const body = [
-		"Hello Registrar.eu Abuse Team,",
-		"",
-		"Target: mediasolpharma.com",
-		"Observed URLs:",
-		"- https://mediasolpharma.com/read.html",
-		"Impersonated/legitimate brand reference: https://accounts.google.com/",
-		"Case details: https://phishing.support/submissions/381813325303911613",
-		"",
-		"Captured evidence indicates that https://mediasolpharma.com/read.html?u=a@b.c impersonates Google (see http://a9.micro-waves.com/e).",
-		"",
-		"Regards,",
-		"The phishing.support team",
-	].join("\n");
-
-	test("every live address but ours becomes its bare host, and a note before the sign-off names the report's page", () => {
-		const text = bodyWithoutLiveUrls(body, 42n);
-		expect(text).not.toMatch(/https?:\/\/(?!phishing\.support)/);
-		expect(text).toContain("- mediasolpharma.com\n");
-		expect(text).toContain("brand reference: accounts.google.com");
-		expect(text).toContain("indicates that mediasolpharma.com impersonates Google (see a9.micro-waves.com).");
-		expect(text).toContain("Case details: https://phishing.support/submissions/381813325303911613");
-		expect(text).toMatch(new RegExp(`listed on the report's page: ${reportPageUrl(42n).replaceAll(".", "\\.")}\\n\\nRegards,\\nThe phishing\\.support team$`));
-		// Nothing is obfuscated: spam filters score that.
-		expect(text).not.toMatch(/\[\.\]|hxxp/);
-	});
-
-	test("a body without foreign live addresses is left as it is", () => {
-		const own = "Case details: https://phishing.support/reports/7\n\nRegards,\nThe phishing.support team";
-		expect(bodyWithoutLiveUrls(own, 7n)).toBe(own);
-	});
-
-	test("without a sign-off the note goes at the end", () => {
-		expect(bodyWithoutLiveUrls("See https://evil.example/x", 3n)).toBe(`See evil.example\n\nThe full addresses are left out of this email because our mail relay refused it with them; they are listed on the report's page: ${reportPageUrl(3n)}\n`);
 	});
 });
 

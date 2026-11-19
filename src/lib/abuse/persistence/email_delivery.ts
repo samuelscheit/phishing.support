@@ -55,10 +55,11 @@ export async function beginEmailDelivery(params: {
 				// exact correlation/reply identity while making this local attempt
 				// visibly active again before another MIME message is persisted.
 				tx.update(abuseProviderRuns)
-					.set({ executionStatus: "starting", failureReason: null, updatedAt: timestamp })
+					.set({ providerPayload: params.providerPayload, payloadHash: hashStableJson(params.providerPayload), executionStatus: "starting", failureReason: null, updatedAt: timestamp })
 					.where(eq(abuseProviderRuns.id, existing.id))
 					.run();
-				run = { ...existing, executionStatus: "starting", failureReason: null, updatedAt: timestamp };
+				// The payload is the stored one for a plain retry, a new draft for the resend after our relay refused it.
+				run = { ...existing, providerPayload: params.providerPayload, payloadHash: hashStableJson(params.providerPayload), executionStatus: "starting", failureReason: null, updatedAt: timestamp };
 			} else {
 				const id = generateId();
 				tx.insert(abuseProviderRuns)
@@ -253,8 +254,8 @@ export async function settleCorrelatedEmailBounce(params: {
 	retryAfterMs?: number;
 	/** Resend only after a temporary failure; a permanent rejection would bounce again. */
 	retry?: boolean;
-	/** Why and how the resend goes out, for the send job (e.g. `{ retryReason: "relay_refused", withoutLiveUrls: true }`). */
-	retryPayload?: Record<string, unknown>;
+	/** Why the route failed: a provider's bounce unless our relay refused the report. */
+	reason?: "provider_bounce" | "relay_refused";
 }): Promise<{ settled: boolean; routeId?: bigint; runId?: bigint; outboundMessageId?: bigint }> {
 	const db = await getDb();
 	return db.transaction(
@@ -325,7 +326,7 @@ export async function settleCorrelatedEmailBounce(params: {
 				routeId: route.id,
 				runId: run.id,
 				eventType: "route.status_changed",
-				data: { from: route.status, to: "delivery_failed", reason: params.retryPayload?.retryReason ?? "provider_bounce", inboundMessageId: inbound.id.toString() },
+				data: { from: route.status, to: "delivery_failed", reason: params.reason ?? "provider_bounce", inboundMessageId: inbound.id.toString() },
 			});
 
 			const dedupeKey = `email-retry:${route.id.toString()}:${inbound.id.toString()}`;
@@ -347,7 +348,7 @@ export async function settleCorrelatedEmailBounce(params: {
 						jobType: "send_email",
 						reportId: route.reportId,
 						routeId: route.id,
-						payload: { retryReason: "provider_bounce", ...params.retryPayload, bouncedOutboundMessageId: outbound.id.toString(), inboundMessageId: inbound.id.toString() },
+						payload: { retryReason: "provider_bounce", bouncedOutboundMessageId: outbound.id.toString(), inboundMessageId: inbound.id.toString() },
 						dedupeKey,
 						status: "queued",
 						retryCount: 0,
@@ -363,7 +364,7 @@ export async function settleCorrelatedEmailBounce(params: {
 					runId: run.id,
 					jobId,
 					eventType: "job.queued",
-					data: { jobType: "send_email", reason: params.retryPayload?.retryReason ?? "provider_bounce", inboundMessageId: inbound.id.toString() },
+					data: { jobType: "send_email", reason: "provider_bounce", inboundMessageId: inbound.id.toString() },
 				});
 			}
 			recomputeReportStatusInTransaction(tx, route.reportId, {
@@ -377,22 +378,23 @@ export async function settleCorrelatedEmailBounce(params: {
 }
 
 /**
- * Mail routes our relay refused (mail/relay_refusal.ts) that wait in
- * `delivery_failed` with no send queued, and how often the relay refused
- * them: the resend after the first refusal is due, a second ends it.
+ * Mail routes that wait in `delivery_failed` with no send queued because our
+ * relay refused their last attempt (mail/relay_refusal.ts), not because a
+ * provider bounced it.
  */
-export async function listRelayRefusedRoutes(): Promise<Array<{ route: AbuseProviderRoute; refusals: number }>> {
+export async function listRelayRefusedRoutes(): Promise<AbuseProviderRoute[]> {
 	const db = await getDb();
 	const routes = db.select().from(abuseProviderRoutes)
 		.where(and(eq(abuseProviderRoutes.routeType, "email"), eq(abuseProviderRoutes.status, "delivery_failed")))
 		.all();
 	if (!routes.length) return [];
 	const ids = routes.map((route) => route.id);
-	const refusals = Map.groupBy(
-		db.select({ routeId: abuseMailMessages.routeId }).from(abuseMailMessages)
-			.where(and(inArray(abuseMailMessages.routeId, ids), eq(abuseMailMessages.classification, "relay_refused")))
-			.all(),
-		(message) => message.routeId,
+	const lastBounce = new Map(
+		db.select({ routeId: abuseMailMessages.routeId, classification: abuseMailMessages.classification }).from(abuseMailMessages)
+			.where(and(inArray(abuseMailMessages.routeId, ids), inArray(abuseMailMessages.classification, ["relay_refused", "bounce"])))
+			.orderBy(abuseMailMessages.createdAt, abuseMailMessages.id)
+			.all()
+			.map((message) => [message.routeId, message.classification]),
 	);
 	const pending = new Set(
 		db.select({ routeId: abuseJobs.routeId }).from(abuseJobs)
@@ -400,8 +402,5 @@ export async function listRelayRefusedRoutes(): Promise<Array<{ route: AbuseProv
 			.all()
 			.map((job) => job.routeId),
 	);
-	return routes.flatMap((route) => {
-		const count = refusals.get(route.id)?.length ?? 0;
-		return count && !pending.has(route.id) ? [{ route, refusals: count }] : [];
-	});
+	return routes.filter((route) => lastBounce.get(route.id) === "relay_refused" && !pending.has(route.id));
 }

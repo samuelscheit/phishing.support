@@ -40,6 +40,11 @@ export function smtpTransport(): MailTransport | undefined {
 	return transport;
 }
 
+/** The relay every report leaves through (`SMTP_HOST`), or undefined when SMTP is not configured. */
+export function smtpRelay(): string | undefined {
+	return process.env.SMTP_HOST?.trim().toLowerCase() || undefined;
+}
+
 /** The authenticated sender mailbox (`SMTP_FROM`, which may include a display name). */
 export function smtpSender(): string {
 	const configured = process.env.SMTP_FROM?.trim();
