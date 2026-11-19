@@ -27,6 +27,7 @@ import { taskAgentVisit, type VisitAgent } from "./site_visit/agent";
 import { visitNavigation, visitPages, type VisitPage } from "./site_visit/evidence";
 import type { SiteVisitRecording } from "./site_visit/visit";
 import { buildWebsiteAnalysisInput, type NarrativeVisitPage } from "./website_narrative";
+import { isWebPage } from "./web_page";
 import {
 	buildWebsiteClassificationInput,
 	buildWebsiteReportEvidence,
@@ -216,6 +217,10 @@ function mergedKitResources(...captures: WebsiteCapture[]): WebsiteKitResource[]
 
 
 async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigationHop, archive: WebsiteEvidenceArchive, dependencies: WebsiteAnalysisDependencies) {
+	// A script, stylesheet or data file shown as text is not a page anyone is lured by; its source names paths, not deceptions.
+	if (!isWebPage(hop.contentType)) {
+		return { classification: { finding: "insufficient_evidence", rejectedClaim: `the captured address serves a file (${hop.contentType}), not a web page a visitor is shown` } satisfies WebsiteSiteClassification, mobileHandoff: false };
+	}
 	const { result } = await runStreamedAnalysisRun({
 		submissionId,
 		analysisKind: "classification",

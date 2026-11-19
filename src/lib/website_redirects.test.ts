@@ -107,6 +107,28 @@ async function waitForStatus(id: bigint, statuses: string[]) {
 	throw new Error(`Submission ${id} did not reach ${statuses.join("/")}.`);
 }
 
+describe("a submitted address that serves a file, not a page", () => {
+	test("a kit's script shown as text is never classified or reported, however much its source names a login", async () => {
+		// Production case 381800243735303166: the kit-sibling search submitted become.vigilant009.com/gmail/js/start.js,
+		// and the classifier "quoted" `const lg = \`${root}/gmail-login\`;` as phishing page text.
+		const url = "https://become.vigilant009.com/gmail/js/start.js";
+		const source = "const root = location.origin;\nconst lg = `${root}/gmail-login`;\nfetch(lg).then((r) => r.text()).then((html) => document.write(html));";
+		const archive = { ...archiveOf([{ ...hop(0, url, 200), contentType: "text/javascript; charset=utf-8" }]), html: Buffer.from(`<html><body><pre>${source}</pre></body></html>`), text: Buffer.from(source) };
+		const requests: Array<{ text?: { format?: unknown } }> = [];
+		const recording = scriptedModel(["The address serves a JavaScript file."]);
+		const analysisClient = { responses: { create: async (options: { text?: { format?: unknown } }) => { requests.push(options); return recording.responses.create(options as never); } } } as unknown as AnalysisClient;
+		const id = await websiteSubmission(381800243735303166n, url);
+
+		await analyzeWebsite({ submissionId: id, url }, { ...dependencies(archive), analysisClient });
+
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("invalid");
+		expect(submission?.info).toBe(`The classifier's finding for ${url} was not corroborated by the captured page: the captured address serves a file (text/javascript; charset=utf-8), not a web page a visitor is shown. No report was created.`);
+		expect(requests.filter((request) => request.text?.format)).toEqual([]);
+		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
+	});
+});
+
 describe("website redirects", () => {
 	test("an IP-hosted kit reached through a same-host http→https redirect is reported with both URLs", async () => {
 		const httpUrl = "http://85.215.226.225/Netflix/Home/login.php";

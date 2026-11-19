@@ -25,8 +25,11 @@ const RESOURCES: WebsiteKitResource[] = [
 	{ url: "https://login.example.com/index.js?again", mimeType: "application/javascript", size: 58_737, sha256: SCRIPT },
 ];
 
+/** A scan's page as urlscan reports it: a domain's sign-in page, unless given. */
+type ScannedPage = string | { domain: string; url: string; mimeType: string };
+
 /** urlscan answers per hash; like urlscan, one page holds at most 100 results and `has_more` flags the rest. */
-function urlscan(domainsByHash: Record<string, string[]>) {
+function urlscan(domainsByHash: Record<string, ScannedPage[]>) {
 	const queries: URL[] = [];
 	const fetch = async (url: string) => {
 		const requested = new URL(url);
@@ -35,7 +38,7 @@ function urlscan(domainsByHash: Record<string, string[]>) {
 		const size = Math.min(Number(requested.searchParams.get("size")), 100);
 		const all = domainsByHash[hashQuery] ?? [];
 		const domains = all.slice(0, size);
-		return new Response(JSON.stringify({ has_more: all.length > size, results: domains.map((domain) => ({ page: { domain, url: `https://${domain}/signin` } })) }), { status: 200 });
+		return new Response(JSON.stringify({ has_more: all.length > size, results: domains.map((page) => ({ page: typeof page === "string" ? { domain: page, url: `https://${page}/signin`, mimeType: "text/html" } : page })) }), { status: 200 });
 	};
 	return { fetch, queries };
 }
@@ -106,6 +109,31 @@ describe("kit sibling discovery", () => {
 		expect(result.errors).toEqual([
 			`urlscan ${LIBRARY.slice(0, 12)}: seen on more than 99 domains, treated as a shared library`,
 			`urlscan ${STYLE.slice(0, 12)}: seen on more than 25 domains, treated as a shared library`,
+		]);
+	});
+
+	test("a domain whose scan was of the kit's script itself is opened at its root, not at the script", async () => {
+		// Production case 381800243735303166: urlscan's scan of become.vigilant009.com was of /gmail/js/start.js, which was then reported as a "page".
+		const { fetch } = urlscan({
+			[SCRIPT]: [
+				"login.example.com",
+				{ domain: "become.vigilant009.com", url: "https://become.vigilant009.com/gmail/js/start.js", mimeType: "text/javascript" },
+				{ domain: "xhtml.example.net", url: "https://xhtml.example.net/login", mimeType: "application/xhtml+xml" },
+				{ domain: "untyped.example.net", url: "https://untyped.example.net/login", mimeType: "" },
+				{ domain: "data.example.net", url: "https://data.example.net/api/config.json", mimeType: "application/json; charset=utf-8" },
+			],
+		});
+		const result = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "login.example.com" }, {
+			apiKey: "test-key",
+			loadKitCapture: async () => ({ kitResources: RESOURCES.slice(0, 1) }),
+			fetch,
+			loadPopularDomains: noPopularDomains,
+		});
+		expect(result.candidates.map(({ domain, url }) => [domain, url])).toEqual([
+			["become.vigilant009.com", "https://become.vigilant009.com/"],
+			["xhtml.example.net", "https://xhtml.example.net/login"],
+			["untyped.example.net", "https://untyped.example.net/login"],
+			["data.example.net", "https://data.example.net/"],
 		]);
 	});
 

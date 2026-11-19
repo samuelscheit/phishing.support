@@ -32,7 +32,7 @@ const searchResponseSchema = z.object({
 	has_more: z.boolean().optional(),
 	results: z.array(z.object({
 		_id: z.string().optional(),
-		page: z.object({ domain: z.string().optional(), url: z.string().optional() }).passthrough().optional(),
+		page: z.object({ domain: z.string().optional(), url: z.string().optional(), mimeType: z.string().optional() }).passthrough().optional(),
 		task: z.object({ domain: z.string().optional(), url: z.string().optional(), time: z.string().optional() }).passthrough().optional(),
 	}).passthrough()),
 }).passthrough();

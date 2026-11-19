@@ -10,6 +10,7 @@ import { MAX_KIT_FINGERPRINTS } from "./snapshot";
 import { isPopularSite, loadPopularDomains, type PopularDomains } from "./popular_domains";
 import { certificateCovers, presentedCertificate, type OriginServer, type PresentedCertificate, type TlsProbe } from "./sweep";
 import { errorSummary } from "../../error_text";
+import { isWebPage } from "../../web_page";
 import { isUrlscanBusy, searchUrlscan, type UrlscanDependencies } from "./urlscan";
 
 const MAX_CANDIDATES = 100;
@@ -195,7 +196,8 @@ export async function searchKitHashes(params: {
 		for (const result of results.results) {
 			const domain = normalizeDomain(result.page?.domain ?? result.task?.domain ?? "");
 			if (!domain || domains.has(domain)) continue;
-			const suppliedUrl = normalizePublicHttpUrl(result.page?.url ?? result.task?.url ?? "");
+			// A scan of the kit's script itself (…/js/start.js) shows the file, not the page that loads it: open the domain instead.
+			const suppliedUrl = isWebPage(result.page?.mimeType) ? normalizePublicHttpUrl(result.page?.url ?? result.task?.url ?? "") : undefined;
 			domains.set(domain, suppliedUrl && new URL(suppliedUrl).hostname === domain ? suppliedUrl : `https://${domain}/`);
 		}
 		// More pages than the one requested means more domains than it could hold.
