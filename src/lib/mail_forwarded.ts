@@ -404,9 +404,11 @@ export async function extractEmlsFromIncomingMessage(parsed: ParsedMail): Promis
 
 		let from = mail.from;
 
-		const von = mail.headers.get("von");
+		// A German client's "Von:" line; repeated, the parser hands a list, whose first sender counts.
+		const vonHeader = mail.headers.get("von");
+		const von = Array.isArray(vonHeader) ? vonHeader.filter((value): value is string => typeof value === "string").join(", ") : vonHeader;
 
-		if (!from && typeof von === "string") {
+		if (!from && typeof von === "string" && von) {
 			const addresses = MailAddressParser(von, { flatten: true });
 			const [address] = addresses;
 			from = {
