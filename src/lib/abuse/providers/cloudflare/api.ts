@@ -1,10 +1,11 @@
-import { recordValue } from "../../worker/shared";
+
 import type { ProviderCorrespondence, ProviderCorrespondenceMessage, ProviderSubmissionSuccess } from "../submission_contracts";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import type { CloudflareReportPayload } from "./report";
 import { getCloudflareSession, type CloudflareLoginConfig, type CloudflareSession } from "./session";
+import { asRecord } from "../../../values";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_CHARS = 100_000;
@@ -35,7 +36,7 @@ function stringField(value: unknown): string | undefined {
 
 function responseJson(rawBody: string): Record<string, unknown> | undefined {
 	try {
-		return recordValue(JSON.parse(rawBody.slice(0, MAX_RESPONSE_CHARS)));
+		return asRecord(JSON.parse(rawBody.slice(0, MAX_RESPONSE_CHARS)));
 	} catch {
 		return undefined;
 	}
@@ -75,7 +76,7 @@ export function parseCloudflareApiResponse(
 ): ProviderSubmissionSuccess {
 	const body = rawBody.slice(0, MAX_RESPONSE_CHARS);
 	const json = responseJson(body);
-	const errors = Array.isArray(json?.errors) ? json.errors.map(recordValue) : [];
+	const errors = Array.isArray(json?.errors) ? json.errors.map(asRecord) : [];
 	if (status === 403 && (String(json?.err_code) === "9300" || errors.some((error) => String(error?.code) === "9300"))) {
 		throw new CloudflareSessionExpiredError();
 	}
@@ -179,7 +180,7 @@ export async function findSubmittedCloudflareReport(params: CloudflareRequestCon
 }): Promise<string | undefined> {
 	const url = `${CLOUDFLARE_PROVIDER.apiBaseUrl}/accounts/${params.config.accountId}/abuse-reports/submitted?search=${encodeURIComponent(params.target)}&per_page=50`;
 	const listed = await cloudflareDashboardRequest(params, { url, method: "GET" }, parseCloudflareRead);
-	const reports = Array.isArray(listed.reports) ? listed.reports.map(recordValue) : [];
+	const reports = Array.isArray(listed.reports) ? listed.reports.map(asRecord) : [];
 	const candidates = reports.filter((report) => {
 		const id = stringField(report?.id);
 		const created = Date.parse(stringField(report?.cdate) ?? "");
@@ -245,13 +246,13 @@ function submittedReportUrl(accountId: string, reportId: string, suffix = ""): s
 /** A successful read of Cloudflare's documented submitted-report API. */
 function parseCloudflareRead(status: number, rawBody: string): Record<string, unknown> {
 	const json = responseJson(rawBody);
-	const errors = Array.isArray(json?.errors) ? json.errors.map(recordValue) : [];
+	const errors = Array.isArray(json?.errors) ? json.errors.map(asRecord) : [];
 	if (status === 403 && (String(json?.err_code) === "9300" || errors.some((error) => String(error?.code) === "9300"))) throw new CloudflareSessionExpiredError();
 	if (status < 200 || status >= 300 || json?.success !== true) {
 		const detail = errors.map((error) => stringField(error?.message)).filter(Boolean).join("; ") || rawBody.slice(0, 300);
 		throw new Error(`Cloudflare submitted-report read failed with HTTP ${status}: ${detail}`);
 	}
-	const result = recordValue(json.result);
+	const result = asRecord(json.result);
 	if (!result) throw new Error("Cloudflare submitted-report read returned no result.");
 	return { ...result, result_info: json.result_info };
 }
@@ -284,7 +285,7 @@ export async function fetchCloudflareSubmittedReport(params: CloudflareRequestCo
 			{ url: submittedReportUrl(params.config.accountId, params.reportId, `/emails?page=${page}&per_page=100`), method: "GET" },
 			parseCloudflareRead,
 		);
-		for (const email of Array.isArray(result.emails) ? result.emails.map(recordValue) : []) {
+		for (const email of Array.isArray(result.emails) ? result.emails.map(asRecord) : []) {
 			const id = stringField(email?.id);
 			const sentAt = stringField(email?.sent_at);
 			if (!id || !sentAt || Number.isNaN(Date.parse(sentAt))) continue;
@@ -296,7 +297,7 @@ export async function fetchCloudflareSubmittedReport(params: CloudflareRequestCo
 				sentAt: new Date(sentAt),
 			});
 		}
-		const totalPages = Number(recordValue(result.result_info)?.total_pages ?? 1);
+		const totalPages = Number(asRecord(result.result_info)?.total_pages ?? 1);
 		if (!Number.isFinite(totalPages) || page >= totalPages) break;
 	}
 	const state = stringField(report.status);

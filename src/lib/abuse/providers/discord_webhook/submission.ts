@@ -1,4 +1,4 @@
-import { recordValue, routeContext } from "../../worker/shared";
+import { routeContext } from "../../worker/shared";
 import { providerDefinitionMatchesPin } from "../definition";
 import {
 	ProviderSubmissionRejectedError,
@@ -7,6 +7,8 @@ import {
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
 import { DISCORD_WEBHOOK_PROVIDER, DISCORD_WEBHOOK_URL } from "./definition";
+import { sleep } from "../../../sleep";
+import { asRecord } from "../../../values";
 
 export type DiscordWebhookPayload = {
 	adapter: "discord_webhook_delete_v1";
@@ -36,9 +38,9 @@ export function discordWebhookOf(observedUrls: readonly string[], normalizedTarg
 }
 
 function storedPayload(value: unknown): DiscordWebhookPayload | undefined {
-	const payload = recordValue(value);
-	const definition = payload && recordValue(payload.definition);
-	const webhook = payload && recordValue(payload.webhook);
+	const payload = asRecord(value);
+	const definition = payload && asRecord(payload.definition);
+	const webhook = payload && asRecord(payload.webhook);
 	if (payload?.adapter !== "discord_webhook_delete_v1"
 		|| definition?.version !== DISCORD_WEBHOOK_PROVIDER.version || definition.contentHash !== DISCORD_WEBHOOK_PROVIDER.contentHash
 		|| typeof webhook?.id !== "string" || !/^\d{17,20}$/.test(webhook.id) || typeof webhook.token !== "string" || !/^[\w-]{20,100}$/.test(webhook.token)) {
@@ -68,7 +70,7 @@ export async function prepareDiscordWebhookDeletion(context: ProviderSubmissionC
 }
 
 async function discordError(response: Response): Promise<{ code?: number; message?: string; retryAfterMs?: number }> {
-	const body = recordValue(await response.json().catch(() => undefined));
+	const body = asRecord(await response.json().catch(() => undefined));
 	const retryAfter = typeof body?.retry_after === "number" ? body.retry_after : Number(response.headers.get("retry-after"));
 	return {
 		...(typeof body?.code === "number" ? { code: body.code } : {}),
@@ -88,7 +90,7 @@ export async function submitDiscordWebhookDeletion(context: ProviderSubmissionCo
 	if (!payload) throw new ProviderSubmissionRejectedError("The stored Discord webhook payload is malformed.");
 	const { id, token } = payload.webhook;
 	const fetcher = dependencies.fetch ?? fetch;
-	const sleep = dependencies.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+	const wait = dependencies.sleep ?? sleep;
 	const submittedTargets = [`discord-webhook:${id}`];
 	let lastFailure = "";
 	for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -102,7 +104,7 @@ export async function submitDiscordWebhookDeletion(context: ProviderSubmissionCo
 		} catch (error) {
 			if (context.signal?.aborted) throw error;
 			lastFailure = `the request failed (${error instanceof Error ? error.message : String(error)})`;
-			await sleep(SERVER_ERROR_BACKOFF_MS[attempt] ?? SERVER_ERROR_BACKOFF_MS.at(-1)!);
+			await wait(SERVER_ERROR_BACKOFF_MS[attempt] ?? SERVER_ERROR_BACKOFF_MS.at(-1)!);
 			continue;
 		}
 		if (response.status === 204) {
@@ -114,12 +116,12 @@ export async function submitDiscordWebhookDeletion(context: ProviderSubmissionCo
 		}
 		if (response.status === 429) {
 			lastFailure = "Discord rate-limited the request";
-			await sleep(Math.min(error.retryAfterMs ?? 1_000, MAX_RATE_LIMIT_WAIT_MS));
+			await wait(Math.min(error.retryAfterMs ?? 1_000, MAX_RATE_LIMIT_WAIT_MS));
 			continue;
 		}
 		if (response.status >= 500) {
 			lastFailure = `Discord answered HTTP ${response.status}`;
-			await sleep(SERVER_ERROR_BACKOFF_MS[attempt] ?? SERVER_ERROR_BACKOFF_MS.at(-1)!);
+			await wait(SERVER_ERROR_BACKOFF_MS[attempt] ?? SERVER_ERROR_BACKOFF_MS.at(-1)!);
 			continue;
 		}
 		throw new ProviderSubmissionRejectedError(`Discord refused to delete webhook ${id}: HTTP ${response.status}${error.code ? ` (code ${error.code})` : ""}${error.message ? `: ${error.message}` : ""}.`);

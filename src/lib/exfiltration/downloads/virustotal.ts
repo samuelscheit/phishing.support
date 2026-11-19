@@ -1,4 +1,5 @@
 import type { LookupResult } from "./policy";
+import { sleep } from "../../sleep";
 
 /** Official VirusTotal v3 API base. Every call sends the key in the `x-apikey` header. */
 const VIRUSTOTAL_API = "https://www.virustotal.com/api/v3";
@@ -74,7 +75,7 @@ export async function awaitVirusTotalVerdict(params: {
 }): Promise<LookupResult> {
 	const provider = "virustotal" as const;
 	if (!params.apiKey?.trim()) return { provider, state: "not_configured" };
-	const pause = params.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+	const pause = params.sleep ?? sleep;
 	const deadline = Date.now() + (params.waitMs ?? ANALYSIS_WAIT_MS);
 	while (Date.now() < deadline) {
 		params.signal?.throwIfAborted();

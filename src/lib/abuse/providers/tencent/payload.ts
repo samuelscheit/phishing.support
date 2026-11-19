@@ -1,6 +1,6 @@
 import type { AbuseArtifact } from "../../schema";
 import { normalizeDomain, registrableDomain } from "../../security";
-import { recordValue } from "../../worker/shared";
+
 import {
 	isIntactProviderEvidenceImageArtifact,
 	selectProviderEvidenceImageArtifact,
@@ -10,6 +10,7 @@ import {
 } from "../evidence_image";
 import { buildProviderReportNarrative } from "../report_payload";
 import { TENCENT_PROVIDER } from "./definition";
+import { asRecord } from "../../../values";
 
 const maximumExplanationLength = 400;
 export const TENCENT_EVIDENCE_CONTRACT = {
@@ -156,10 +157,10 @@ function validTencentScreenshotReference(value: unknown): value is TencentScreen
 
 /** Read only a payload previously built by this provider before its submission marker. */
 export function storedTencentSubmissionPayload(value: unknown): TencentSubmissionPayload | undefined {
-	const payload = recordValue(value);
-	const definition = payload && recordValue(payload.definition);
-	const target = payload && recordValue(payload.target);
-	const report = payload && recordValue(payload.report);
+	const payload = asRecord(value);
+	const definition = payload && asRecord(payload.definition);
+	const target = payload && asRecord(payload.target);
+	const report = payload && asRecord(payload.report);
 	if (!payload || payload.adapter !== "tencent_cloud_dns_abuse_v1" || payload.providerNarrativeVersion !== 1
 		|| !definition || definition.version !== TENCENT_PROVIDER.version || definition.contentHash !== TENCENT_PROVIDER.contentHash
 		|| !target || typeof target.normalizedTarget !== "string" || typeof target.observedUrl !== "string" || typeof target.registrableDomain !== "string"

@@ -1,15 +1,5 @@
-import type { JsonRecord } from "./types";
-
-export function asRecord(value: unknown): JsonRecord | undefined {
-	return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : undefined;
-}
-
 export function asArray(value: unknown): unknown[] {
 	return Array.isArray(value) ? value : [];
-}
-
-export function text(value: unknown): string | undefined {
-	return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 export function uniqueStrings(values: Array<string | undefined>): string[] {

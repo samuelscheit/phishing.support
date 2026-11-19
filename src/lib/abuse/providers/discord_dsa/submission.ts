@@ -3,7 +3,7 @@ import type { Page } from "rebrowser-puppeteer-core";
 import { getBrowser } from "../../../browser";
 import { serviceIdentity } from "../../../constants";
 import { abuseEmailCaseUrl } from "../../mail/draft";
-import { recordValue, routeContext } from "../../worker/shared";
+import { routeContext } from "../../worker/shared";
 import { providerDefinitionMatchesPin } from "../definition";
 import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
 import {
@@ -15,6 +15,7 @@ import {
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
 import { DISCORD_DSA_PROVIDER } from "./definition";
+import { asRecord } from "../../../values";
 
 /** What one notice says: the server, why, and who files it. */
 export type DiscordDsaReport = {
@@ -60,8 +61,8 @@ function webhookEvidence(artifacts: ReadonlyArray<{ name: string; mimeType: stri
 	} catch {
 		return undefined;
 	}
-	const evidence = recordValue(parsed);
-	const discord = recordValue(recordValue(evidence?.backend)?.discord);
+	const evidence = asRecord(parsed);
+	const discord = asRecord(asRecord(evidence?.backend)?.discord);
 	if (typeof evidence?.pageUrl !== "string" || typeof evidence.observedAt !== "string" || typeof discord?.webhookId !== "string") return undefined;
 	return {
 		pageUrl: evidence.pageUrl,
@@ -93,10 +94,10 @@ export function discordDsaDescription(evidence: WebhookEvidence, caseUrl: string
 }
 
 function storedPayload(value: unknown): DiscordDsaPayload | undefined {
-	const payload = recordValue(value);
-	const definition = payload && recordValue(payload.definition);
-	const report = payload && recordValue(payload.report);
-	const reporter = report && recordValue(report.reporter);
+	const payload = asRecord(value);
+	const definition = payload && asRecord(payload.definition);
+	const report = payload && asRecord(payload.report);
+	const reporter = report && asRecord(report.reporter);
 	if (payload?.adapter !== "discord_dsa_notice_v1"
 		|| definition?.version !== DISCORD_DSA_PROVIDER.version || definition.contentHash !== DISCORD_DSA_PROVIDER.contentHash
 		|| typeof report?.serverId !== "string" || !/^\d{17,20}$/.test(report.serverId)

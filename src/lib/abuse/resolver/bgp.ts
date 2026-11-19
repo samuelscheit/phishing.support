@@ -1,4 +1,5 @@
-import { asArray, asRecord } from "./records";
+import { asRecord } from "../../values";
+import { asArray } from "./records";
 import type { JsonRecord } from "./types";
 
 /** Extract unique, valid origin ASNs from the RIPE network-info response. */

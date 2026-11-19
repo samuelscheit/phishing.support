@@ -2,10 +2,7 @@ import { ImapFlow, type FetchMessageObject } from "imapflow";
 
 import { imapConfig, replyDomain, type ImapConfig } from "../mail_config";
 import { ingestFetchedMail } from "./ingest";
-
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
+import { sleep } from "../sleep";
 
 function noConnection(error: unknown): boolean {
 	return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "NoConnection");

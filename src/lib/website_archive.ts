@@ -7,7 +7,7 @@ import { presentIdentityToNewTab, presentIdentityToPage } from "./browser/page";
 import { observedPuppeteerResponse, observeSessionResponses } from "./browser/tab_traffic";
 import type { TabSetup, VisitorTab } from "./browser/visitor_tabs";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "./browser/fabric";
-import { sleep } from "./utils";
+import { sleep } from "./sleep";
 import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteProviderWarning } from "./website_types";
 import { agentAddressOf } from "./browser/browser";
 import type { ExfiltrationCanaries } from "./exfiltration/types";

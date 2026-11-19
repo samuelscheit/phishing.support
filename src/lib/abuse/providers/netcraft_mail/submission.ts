@@ -2,7 +2,7 @@ import { NetcraftSubmissionRejectedError, parseNetcraftSubmissionResponse, type 
 import { serviceIdentity } from "../../../constants";
 import { normalizeMailbox } from "../../mail/shared";
 import { sha256Hex } from "../../security";
-import { recordValue, routeContext } from "../../worker/shared";
+import { routeContext } from "../../worker/shared";
 import { providerDefinitionMatchesPin } from "../definition";
 import {
 	ProviderSubmissionRejectedError,
@@ -11,6 +11,7 @@ import {
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
 import { NETCRAFT_MAIL_PROVIDER } from "./definition";
+import { asRecord } from "../../../values";
 
 export type NetcraftMailSubmissionPayload = {
 	adapter: "netcraft_report_mail_v3";
@@ -45,10 +46,10 @@ function messageArtifact(evidence: Awaited<ReturnType<typeof routeContext>>["evi
 }
 
 export function storedNetcraftMailPayload(value: unknown): NetcraftMailSubmissionPayload | undefined {
-	const payload = recordValue(value);
-	const definition = payload && recordValue(payload.definition);
-	const message = payload && recordValue(payload.message);
-	const report = payload && recordValue(payload.report);
+	const payload = asRecord(value);
+	const definition = payload && asRecord(payload.definition);
+	const message = payload && asRecord(payload.message);
+	const report = payload && asRecord(payload.report);
 	if (payload?.adapter !== "netcraft_report_mail_v3"
 		|| definition?.version !== NETCRAFT_MAIL_PROVIDER.version || definition.contentHash !== NETCRAFT_MAIL_PROVIDER.contentHash
 		|| typeof message?.artifactId !== "string" || typeof message.sha256 !== "string" || typeof message.bytes !== "number"

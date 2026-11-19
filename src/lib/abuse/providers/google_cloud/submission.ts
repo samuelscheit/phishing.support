@@ -4,7 +4,7 @@ import { getBrowser, getBrowserPage } from "../../../browser";
 import { solveDeathByCaptchaToken } from "../../captcha/death_by_captcha";
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
-import { recordValue, routeContext } from "../../worker/shared";
+import { routeContext } from "../../worker/shared";
 import { providerDefinitionMatchesPin } from "../definition";
 import type {
 	ProviderSubmissionContext,
@@ -18,6 +18,7 @@ import {
 	storedGoogleCloudSubmissionPayload,
 	type GoogleCloudSubmissionPayload,
 } from "./payload";
+import { asRecord } from "../../../values";
 
 const CANCELED = "Google Cloud abuse report submission was canceled.";
 const FORM_READY_TIMEOUT_MS = 45_000;
@@ -135,7 +136,7 @@ export type GoogleCloudSubmitAnswer =
 export async function readGoogleCloudSubmitResponse(response: Pick<HTTPResponse, "status" | "text">): Promise<GoogleCloudSubmitAnswer> {
 	const body = await response.text().catch(() => "");
 	// Google prefixes JSON API responses with an anti-hijacking line.
-	const json = recordValue((() => {
+	const json = asRecord((() => {
 		try {
 			return JSON.parse(body.replace(/^\)\]\}'[^\n]*\n/, "")) as unknown;
 		} catch {
@@ -177,7 +178,7 @@ async function submitOnce(page: Page, step: <T>(operation: Promise<T>) => Promis
 		const notification = await formNotification(page);
 		throw new Error(`Google Cloud abuse form sent no readable answer${notification ? ` ("${notification}")` : ""}: ${error instanceof Error ? error.message : String(error)}`);
 	});
-	const sent = recordValue((() => {
+	const sent = asRecord((() => {
 		try {
 			return JSON.parse(response.request().postData() ?? "") as unknown;
 		} catch {

@@ -1,4 +1,4 @@
-import { defaultResponseModel } from "../../utils";
+import { defaultResponseModel } from "../../openai_client";
 import { isIP } from "node:net";
 
 import { configuredAbuseOpenAI, responseOutputText } from "../ai";

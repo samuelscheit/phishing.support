@@ -1,6 +1,7 @@
 import type { CDPSession, Page } from "rebrowser-puppeteer-core";
 
 import { sendBeforeRun } from "./browser/cdp";
+import { sleep } from "./sleep";
 
 /**
  * Every file a visit downloads, taken without the browser ever saving or
@@ -113,7 +114,7 @@ export function interceptDownloads<Tab extends DownloadTab>(userAgent: string, t
 				if (paused.frameId === tab.targetId && !showedPage) {
 					showedPage = true;
 					// The tab runs by now, so the settings it was given while held are answered.
-					await Promise.race([Promise.all(tab.beforeFirstPage ?? []), new Promise((resolve) => setTimeout(resolve, SETTINGS_WAIT_MS))]);
+					await Promise.race([Promise.all(tab.beforeFirstPage ?? []), sleep(SETTINGS_WAIT_MS)]);
 				}
 				await cdp.send("Fetch.continueRequest", { requestId: paused.requestId }).catch(() => undefined);
 				return;

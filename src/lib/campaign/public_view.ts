@@ -1,7 +1,7 @@
 import { getDomain } from "tldts";
 
 import { buildDossier, type Dossier, type DossierDependencies, type DossierSite } from "../referral/dossier";
-import { record, text } from "../referral/format";
+import { record, text } from "../values";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
 import { factsFromDossier } from "./link";
 import { CampaignRepository } from "./repository";

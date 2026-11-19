@@ -5,9 +5,10 @@ import { abuseEmailCaseUrl, sendAbuseEmailRoute } from "../mail";
 import { getProviderSubmissionProvider } from "../providers";
 import { ProviderSubmissionRejectedError, type DecisionAnswerChannel } from "../providers/submission_contracts";
 import { AbuseRepository } from "../repository";
-import { recordValue, UnknownExternalStateError } from "../worker/shared";
+import { UnknownExternalStateError } from "../worker/shared";
 import { runDecisionAgent, type DecisionAgentModel, type DecisionAgentOutcome, type DecisionAgentStep } from "./agent";
 import { caseCaptureNames, type AttachableFile, type DecisionToolDependencies } from "./tools";
+import { asRecord } from "../../values";
 
 const MAX_MESSAGE_TEXT = 6_000;
 
@@ -55,7 +56,7 @@ export async function followUpProviderDecision(
 	const correlationKey = `decision-follow-up:${route.id.toString()}:${params.state}`;
 	const mail = await AbuseRepository.listMailForReport(route.reportId);
 	if (mail.some((message) => message.direction === "outbound" && message.correlationKey === correlationKey)) return "skipped";
-	if ((await AbuseRepository.listEvents(route.reportId)).some((event) => event.routeId === route.id && event.eventType === "provider_decision.not_answered" && recordValue(event.data)?.state === params.state)) return "skipped";
+	if ((await AbuseRepository.listEvents(route.reportId)).some((event) => event.routeId === route.id && event.eventType === "provider_decision.not_answered" && asRecord(event.data)?.state === params.state)) return "skipped";
 
 	const { channel } = followUp;
 	const recipient = channel.kind === "email" ? channel.replyAddress : channel.name;
@@ -217,7 +218,7 @@ async function answerThroughForm(answer: Answer & { channel: Extract<DecisionAns
 
 /** Read a queued follow-up's payload. */
 export function readDecisionFollowUpPayload(payload: unknown): { state: string; detail?: string } {
-	const record = recordValue(payload) ?? {};
+	const record = asRecord(payload) ?? {};
 	if (typeof record.state !== "string" || !record.state) throw new Error("Decision follow-up job is missing payload.state.");
 	return { state: record.state, ...(typeof record.detail === "string" && record.detail ? { detail: record.detail } : {}) };
 }

@@ -29,6 +29,7 @@ import { startSamplePurgeSchedule } from "../exfiltration/downloads/sample_purge
 import { describeCampaignIfChanged } from "../campaign/link";
 import { searchCampaignKits } from "../campaign/kit_search";
 import { enqueueRulesSweep, linkSiteToCampaign } from "../campaign/sweep";
+import { sleep } from "../sleep";
 
 const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;
@@ -281,10 +282,10 @@ export class AbuseWorker {
 		while (!this.stopped) {
 			try {
 				const processed = await this.processOne(filter, timeoutMs);
-				if (!processed) await new Promise((resolve) => setTimeout(resolve, this.pollMs));
+				if (!processed) await sleep(this.pollMs);
 			} catch (error) {
 				console.error("Abuse worker loop error:", error);
-				await new Promise((resolve) => setTimeout(resolve, this.pollMs));
+				await sleep(this.pollMs);
 			}
 		}
 	}

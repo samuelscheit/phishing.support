@@ -1,6 +1,6 @@
 import { AbuseInputError, assertPublicDnsHost } from "../security";
 import { retryWithTimeout } from "../../network/bounded_fetch";
-import { asRecord } from "./records";
+import { asRecord } from "../../values";
 import type { JsonRecord, ResolverDependencies } from "./types";
 import { defaultRdapLocator, type RdapObject } from "../../network/rdap_bootstrap";
 

@@ -1,6 +1,6 @@
 import type { AbuseArtifact } from "../../schema";
 import { normalizeDomain } from "../../security";
-import { recordValue } from "../../worker/shared";
+
 import {
 	selectProviderEvidenceImageArtifact,
 	storedProviderEvidenceImageReference,
@@ -9,6 +9,7 @@ import {
 } from "../evidence_image";
 import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
 import { ERANET_PROVIDER } from "./definition";
+import { asRecord } from "../../../values";
 
 export const ERANET_EVIDENCE_CONTRACT = {
 	acceptedMimeTypes: ERANET_PROVIDER.evidence.acceptedMimeTypes,
@@ -85,10 +86,10 @@ export function buildEranetSubmissionPayload(params: {
 }
 
 export function storedEranetSubmissionPayload(value: unknown): EranetSubmissionPayload | undefined {
-	const payload = recordValue(value);
-	const definition = payload && recordValue(payload.definition);
-	const target = payload && recordValue(payload.target);
-	const report = payload && recordValue(payload.report);
+	const payload = asRecord(value);
+	const definition = payload && asRecord(payload.definition);
+	const target = payload && asRecord(payload.target);
+	const report = payload && asRecord(payload.report);
 	if (!payload || payload.adapter !== "eranet_phishing_report_v1" || payload.providerNarrativeVersion !== 1
 		|| definition?.version !== ERANET_PROVIDER.version || definition?.contentHash !== ERANET_PROVIDER.contentHash
 		|| typeof target?.domain !== "string" || typeof target.observedUrl !== "string"

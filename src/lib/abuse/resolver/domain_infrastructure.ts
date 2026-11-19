@@ -5,6 +5,7 @@ import type { ResolvedRouteInput } from "../route_contracts";
 import { resolveIpTarget } from "./ip";
 import type { JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
 import { errorText } from "../../error_text";
+import { isRecord } from "../../values";
 
 const MAX_INFRASTRUCTURE_IPS = 16;
 
@@ -18,10 +19,6 @@ export type DomainInfrastructureResolution = {
 	snapshot: JsonRecord;
 	lookupFailures: string[];
 };
-
-function isRecord(value: unknown): value is JsonRecord {
-	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 /**
  * Resolve only the public addresses that can identify hosting infrastructure.

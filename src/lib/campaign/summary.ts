@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { configuredAbuseOpenAI, responseOutputText } from "../abuse/ai";
-import { defaultResponseModel } from "../utils";
+import { defaultResponseModel } from "../openai_client";
 import { LANGUAGE_NAMES } from "./language";
 
 const MAX_TITLE = 90;

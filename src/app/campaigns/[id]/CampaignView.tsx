@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { LANGUAGE_NAMES } from "@/lib/campaign/language";
 import type { PublicCampaign, PublicCampaignReason, PublicCampaignSite, PublicReportState } from "@/lib/campaign/public_view";
 import { formatUtcDateTime } from "@/lib/date_time";
+import { plural } from "@/lib/values";
 import { cn } from "@/web_lib/util";
 
 const PREVIEW_SITES = 3;
@@ -114,9 +115,6 @@ function tileTime(campaign: PublicCampaign, iso: string): string {
 	return sameDay ? `${iso.slice(11, 16)} UTC` : iso.slice(0, 10);
 }
 
-function plural(count: number, one: string, many: string): string {
-	return `${count} ${count === 1 ? one : many}`;
-}
 
 function Timeline({ campaign, onOpen }: { campaign: PublicCampaign; onOpen: (index: number) => void }) {
 	const start = Date.parse(campaign.firstSeenAt);

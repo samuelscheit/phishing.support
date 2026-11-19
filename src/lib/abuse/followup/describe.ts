@@ -1,3 +1,5 @@
+import { asRecord as record, text } from "../../values";
+
 /**
  * What a provider-decision follow-up did, as the case page tells it: whether
  * the agent answered and why, from the event `followup/decision.ts` recorded.
@@ -10,14 +12,6 @@ export type DecisionFollowUpSummary = {
 	explanation: string;
 	occurredAt: Date;
 };
-
-function record(value: unknown): Record<string, unknown> | undefined {
-	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-}
-
-function text(value: unknown): string | undefined {
-	return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
 
 /** A short decision code names the decision; a long remark (Eranet's) is told by the explanation, so its state names it. */
 const MAX_DECISION_LABEL = 40;

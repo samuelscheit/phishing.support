@@ -1,5 +1,6 @@
 import { fetchJson, RequestTimeoutError, type FetchImplementation } from "../network/bounded_fetch";
 import { errorText } from "../error_text";
+import { asRecord } from "../values";
 
 export const NETCRAFT_REPORT_URLS_URL = "https://report.netcraft.com/api/v3/report/urls";
 export const NETCRAFT_REPORT_MAIL_URL = "https://report.netcraft.com/api/v3/report/mail";
@@ -51,10 +52,6 @@ export class NetcraftSubmissionRejectedError extends Error {
 	}
 }
 
-function recordValue(value: unknown): Record<string, unknown> | undefined {
-	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-}
-
 function normalizeSubmissionId(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const uuid = value.trim();
@@ -93,7 +90,7 @@ export function netcraftSubmissionIdFromDiagnostic(value: string): string | unde
 }
 
 function parsedReportedResponse(value: unknown): { uuid: string; message?: string } | undefined {
-	const record = recordValue(value);
+	const record = asRecord(value);
 	const uuid = record ? normalizeSubmissionId(record.uuid) : undefined;
 	if (!record || !uuid || (record.message !== undefined && typeof record.message !== "string")) {
 		return undefined;
@@ -131,7 +128,7 @@ function integerFlag(value: unknown): number | undefined {
 }
 
 function parseSubmissionStatus(value: unknown, uuid: string): Omit<NetcraftSubmissionStatus, "urls"> | undefined {
-	const record = recordValue(value);
+	const record = asRecord(value);
 	if (!record || typeof record.state !== "string" || !record.state.trim() || record.state.trim().length > NETCRAFT_STATUS_MAX_STATE_LENGTH) return undefined;
 	if (record.uuid !== undefined && normalizeSubmissionId(record.uuid) !== uuid) return undefined;
 	if (record.warnings !== undefined && (!Array.isArray(record.warnings) || record.warnings.length > 0)) return undefined;
@@ -150,11 +147,11 @@ function parseSubmissionStatus(value: unknown, uuid: string): Omit<NetcraftSubmi
 }
 
 function parseSubmissionUrls(value: unknown): NetcraftSubmissionUrlStatus[] | undefined {
-	const record = recordValue(value);
+	const record = asRecord(value);
 	if (!record || !Array.isArray(record.urls) || record.urls.length === 0) return undefined;
 	const urls: NetcraftSubmissionUrlStatus[] = [];
 	for (const item of record.urls) {
-		const entry = recordValue(item);
+		const entry = asRecord(item);
 		if (!entry || typeof entry.url !== "string" || !entry.url.trim() || entry.url.trim().length > NETCRAFT_STATUS_MAX_URL_LENGTH) return undefined;
 		if (entry.url_state !== undefined && (typeof entry.url_state !== "string" || entry.url_state.trim().length > NETCRAFT_STATUS_MAX_STATE_LENGTH)) return undefined;
 		urls.push({ url: entry.url.trim(), ...(typeof entry.url_state === "string" ? { state: entry.url_state.trim() } : {}) });

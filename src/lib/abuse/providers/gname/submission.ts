@@ -4,7 +4,7 @@ import { getBrowser } from "../../../browser";
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { AbuseRepository } from "../../repository";
 import { dragSliderToEnd } from "../../captcha/slider_drag";
-import { recordValue, routeContext } from "../../worker/shared";
+import { routeContext } from "../../worker/shared";
 import { providerDefinitionMatchesPin } from "../definition";
 import { providerEvidenceImageArtifactMatches } from "../evidence_image";
 import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
@@ -24,6 +24,8 @@ import {
 	storedGnameSubmissionPayload,
 	type GnameSubmissionPayload,
 } from "./payload";
+import { asRecord } from "../../../values";
+import { sleep } from "../../../sleep";
 
 /**
  * GNAME's API answers HTTP 200 with `code` 1 on success (sometimes the string
@@ -72,7 +74,7 @@ function failure(response: GnameResponse): string {
 function parsedResponse(path: string, status: number, text: string): GnameResponse {
 	let parsed: GnameResponse | undefined;
 	try {
-		parsed = recordValue(JSON.parse(text)) as GnameResponse | undefined;
+		parsed = asRecord(JSON.parse(text)) as GnameResponse | undefined;
 	} catch {
 		parsed = undefined;
 	}
@@ -111,13 +113,13 @@ export async function requestGnameCodeOnPage(page: Page, email: string): Promise
 				return response;
 			}
 			if (await sliderShown()) break;
-			await new Promise((resolve) => setTimeout(resolve, 250));
+			await sleep(250);
 		}
 		if (!(await sliderShown())) break;
 		if (attempt === SLIDER_ATTEMPTS) break;
 		await dragSliderToEnd(page, GNAME_PROVIDER.slider);
 		// A passed slider closes; a refused one resets its handle for another try.
-		await new Promise((resolve) => setTimeout(resolve, 2_000));
+		await sleep(2_000);
 	}
 	const response = await answer();
 	if (response && !("error" in response)) return response;
@@ -230,7 +232,7 @@ export async function prepareGnameExternalSubmission(context: ProviderSubmission
 	const session = await (dependencies.openSession ?? openGnameBrowserSession)(payload.report.kind);
 	try {
 		const uploaded = await session.upload(lx, { filename: payload.evidence.filename, mimeType: payload.evidence.mimeType, base64: Buffer.from(artifact.blob).toString("base64") });
-		const path = recordValue(uploaded.data)?.path;
+		const path = asRecord(uploaded.data)?.path;
 		if (!gnameSucceeded(uploaded) || typeof path !== "string" || !path) throw new Error(`GNAME screenshot upload failed: ${failure(uploaded)}`);
 		const requestedAt = (dependencies.now ?? (() => new Date()))();
 		const sent = await session.requestCode(GNAME_PROVIDER.reporter.email);
@@ -262,7 +264,7 @@ export function gnameComplaintBody(payload: GnameSubmissionPayload, code: string
 
 function domainRefusals(data: unknown): string {
 	if (!Array.isArray(data)) return "";
-	const refusals = data.map((entry) => recordValue(entry)).filter((entry): entry is Record<string, unknown> => Boolean(entry))
+	const refusals = data.map((entry) => asRecord(entry)).filter((entry): entry is Record<string, unknown> => Boolean(entry))
 		.map((entry) => `${String(entry.ym ?? "")}: ${String(entry.msg ?? "")}`);
 	return refusals.length ? ` (${refusals.join("; ")})` : "";
 }

@@ -1,6 +1,6 @@
 import type { Page } from "rebrowser-puppeteer-core";
 
-import { sleep } from "./utils";
+import { sleep } from "./sleep";
 import { waitForHumanCheck, type HumanCheckOptions } from "./human_check";
 import type { WebsiteProviderWarning } from "./website_types";
 

@@ -2,6 +2,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 
 import { imapConfig } from "../../mail_config";
+import { sleep } from "../../sleep";
 
 /**
  * The verification-code mail a provider's form sends before it accepts a
@@ -83,7 +84,7 @@ export function mailedCodeReader(spec: MailedCodeSpec): MailedCodeReader {
 						lock.release();
 					}
 				}
-				await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+				await sleep(POLL_MS);
 			}
 			throw new Error(`${spec.provider}'s verification code did not arrive in time.`);
 		} finally {

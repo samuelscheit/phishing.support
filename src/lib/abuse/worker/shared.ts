@@ -5,6 +5,7 @@ import type { resolveAbuseTarget } from "../resolver";
 import type { BrowserTask, ChatModel } from "../../browser_task/agent";
 import type { FabricCdpSessionAcquirer } from "../../browser_task/fabric";
 import { errorText as describeError } from "../../error_text";
+import { asRecord } from "../../values";
 
 export type UnknownExternalStateParams = {
 	routeId: bigint;
@@ -78,13 +79,9 @@ export class UnknownExternalStateError extends Error {
 /** An SMTP rejection before a durable provider acceptance is safe to retry. */
 export class RetryableDeliveryError extends Error {}
 
-export function recordValue(value: unknown): Record<string, unknown> | undefined {
-	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-}
-
 /** Read only a task shape that this service itself persisted before running it. */
 export function storedBrowserTask(value: unknown): BrowserTask | undefined {
-	const task = recordValue(value);
+	const task = asRecord(value);
 	if (
 		!task
 		|| typeof task.goal !== "string"
@@ -92,7 +89,7 @@ export function storedBrowserTask(value: unknown): BrowserTask | undefined {
 		|| typeof task.startUrl !== "string"
 		|| !Number.isInteger(task.maxSteps)
 		|| (task.maxSteps as number) < 1
-		|| !recordValue(task.resultSchema)
+		|| !asRecord(task.resultSchema)
 	) {
 		return undefined;
 	}
@@ -102,7 +99,7 @@ export function storedBrowserTask(value: unknown): BrowserTask | undefined {
 	} catch {
 		return undefined;
 	}
-	return { goal: task.goal, startUrl: task.startUrl, maxSteps: task.maxSteps as number, resultSchema: recordValue(task.resultSchema)! };
+	return { goal: task.goal, startUrl: task.startUrl, maxSteps: task.maxSteps as number, resultSchema: asRecord(task.resultSchema)! };
 }
 
 export async function routeContext(routeId: bigint) {

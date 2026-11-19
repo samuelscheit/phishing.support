@@ -15,6 +15,7 @@ import {
 	isFabricBrowserSessionId,
 } from "../fabric/session";
 import { asError, errorText } from "../error_text";
+import { sleep } from "../sleep";
 
 export type FabricScalar = string | number | boolean | null;
 type FabricEnvironment = Readonly<Record<string, string | undefined>>;
@@ -347,7 +348,7 @@ export async function connectThroughRelay<T>(
 ): Promise<T> {
 	const waitMs = options.waitMs ?? RELAY_CAPACITY_WAIT_MS;
 	const retryMs = options.retryMs ?? RELAY_CAPACITY_RETRY_MS;
-	const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+	const wait = options.sleep ?? sleep;
 	const deadline = Date.now() + waitMs;
 	let lastHeartbeat = Date.now();
 	for (;;) {
@@ -358,7 +359,7 @@ export async function connectThroughRelay<T>(
 			const error = asError(thrown);
 			if (!isRelayCapacityError(error) || Date.now() >= deadline) throw error;
 		}
-		await sleep(retryMs);
+		await wait(retryMs);
 		if (Date.now() - lastHeartbeat >= SESSION_HEARTBEAT_MS) {
 			lastHeartbeat = Date.now();
 			await heartbeat().catch(() => undefined);

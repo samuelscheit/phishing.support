@@ -1,6 +1,6 @@
 import type { AbuseArtifact } from "../schema";
 import { sha256Hex } from "../security";
-import { recordValue } from "../worker/shared";
+import { asRecord } from "../../values";
 
 export type ProviderEvidenceImageMimeType = "image/gif" | "image/jpeg" | "image/png" | "image/tiff";
 
@@ -125,7 +125,7 @@ export function storedProviderEvidenceImageReference<MimeType extends ProviderEv
 	contract: ProviderEvidenceImageContract<MimeType>,
 ): ProviderEvidenceImageReference<MimeType> | undefined {
 	assertContract(contract);
-	const reference = recordValue(value);
+	const reference = asRecord(value);
 	if (!reference
 		|| typeof reference.artifactId !== "string" || !/^\d+$/.test(reference.artifactId)
 		|| typeof reference.name !== "string" || reference.name.length === 0 || reference.name.length > 255

@@ -5,7 +5,7 @@ import type {
 	ProviderSubmissionPreflight,
 } from "../submission_contracts";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
-import { recordValue, routeContext } from "../../worker/shared";
+import { routeContext } from "../../worker/shared";
 
 import type { ProviderCorrespondence } from "../submission_contracts";
 import {
@@ -19,6 +19,7 @@ import {
 } from "./api";
 import { getCloudflareSession, type CloudflareSession } from "./session";
 import { buildCloudflareReportPayload, type CloudflareReportPayload } from "./report";
+import { asRecord } from "../../../values";
 
 type CloudflareSubmissionPayload = {
 	adapter: "cloudflare_abuse_api_v1";
@@ -35,7 +36,7 @@ export type CloudflareSubmissionDependencies = {
 
 function parseStoredPayload(value: Record<string, unknown>): CloudflareSubmissionPayload | undefined {
 	if (value.adapter !== "cloudflare_abuse_api_v1" || value.providerNarrativeVersion !== 1 || typeof value.target !== "string" || !value.target) return undefined;
-	const report = recordValue(value.report);
+	const report = asRecord(value.report);
 	if (!report
 		|| typeof report.name !== "string"
 		|| typeof report.email !== "string"

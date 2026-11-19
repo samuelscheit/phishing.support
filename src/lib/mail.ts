@@ -4,7 +4,7 @@ import { getBrowser } from "./browser/";
 import { analyzeSMTPHeadersFromRaw } from "@bernierllc/smtp-analyzer";
 import { MailData } from "./mail_ai";
 import { isPrivateIpAddress } from "./ip_address";
-import { sleep } from "./utils";
+import { sleep } from "./sleep";
 
 export function getAddressesText(obj: AddressObject[] | AddressObject | undefined): string {
 	if (!obj) return "";

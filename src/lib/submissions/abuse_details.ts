@@ -4,10 +4,7 @@ import { getProviderSubmissionProvider } from "@/lib/abuse/providers/submission_
 import { buildProviderReportNarrative } from "@/lib/abuse/providers/report_payload";
 import type { AbuseMailClassification, AbuseReport } from "@/lib/abuse/schema";
 import { describeDecisionFollowUp, type DecisionFollowUpSummary } from "@/lib/abuse/followup/describe";
-
-function recordValue(value: unknown): Record<string, unknown> | undefined {
-	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-}
+import { asRecord } from "../values";
 
 function nonEmptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value : undefined;
@@ -84,7 +81,7 @@ function providerReportBody(params: {
 	allegationCategory?: string;
 	legalBrandUrl?: string | null;
 }): { body: string; bodySource: "prepared" | "preview" | "historical" } {
-	const payload = recordValue(params.providerPayload);
+	const payload = asRecord(params.providerPayload);
 	// Only a provider-specific narrative (v1) or a migrated record's own text is
 	// shown verbatim. Older payloads used an analysis excerpt as their text.
 	if (payload?.adapter === "historical_report") {
@@ -92,8 +89,8 @@ function providerReportBody(params: {
 		if (body) return { body, bodySource: "historical" };
 	}
 	if (payload?.providerNarrativeVersion === 1) {
-		const report = recordValue(payload.report);
-		const form = recordValue(payload.form);
+		const report = asRecord(payload.report);
+		const form = asRecord(payload.form);
 		const prepared = [report?.reason, report?.explanation, form?.justification].map(nonEmptyString).find(Boolean);
 		if (prepared) return { body: prepared, bodySource: "prepared" };
 	}

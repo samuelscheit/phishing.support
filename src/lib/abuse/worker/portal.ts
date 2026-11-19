@@ -12,7 +12,8 @@ import { stableJson } from "../security";
 import { agentGaveUp, type BrowserTask, type TaskResult } from "../../browser_task/agent";
 import { runFabricBrowserTask } from "../../browser_task/fabric";
 import { redactedErrorText } from "../../error_text";
-import { envInt, recordValue, routeContext, storedBrowserTask, throwIfAborted, UnknownExternalStateError, type WorkerServices } from "./shared";
+import { envInt, routeContext, storedBrowserTask, throwIfAborted, UnknownExternalStateError, type WorkerServices } from "./shared";
+import { asRecord } from "../../values";
 
 /**
  * Wall-clock limit of one provider-form task. It must end before the
@@ -60,7 +61,7 @@ type Settlement = Omit<Parameters<typeof AbuseRepository.settleProviderRun>[0], 
 
 function settlement(result: TaskResult, providerPayload: Record<string, unknown>): Settlement {
 	if (result.status === "done") {
-		const output = recordValue(result.result) ?? {};
+		const output = asRecord(result.result) ?? {};
 		const contract = validateGenericProviderFormOutput({ output, providerPayload });
 		if (contract.passed) {
 			return {
@@ -153,7 +154,7 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 		};
 	} else {
 		const priorRun = await AbuseRepository.getLatestProviderRunForRoute(route.id);
-		const priorPayload = priorRun && recordValue(priorRun.providerPayload);
+		const priorPayload = priorRun && asRecord(priorRun.providerPayload);
 		if (!priorRun || !priorPayload || priorPayload.adapter !== "generic_verified_provider_form") {
 			const message = "A running generic provider-form route has no valid durable task payload.";
 			await worker.markUnknownExternal({ routeId: route.id, error: message, reason: "generic_portal_run_missing" });
@@ -197,7 +198,7 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "generic_portal_run_state_invalid" });
 			throw new UnknownExternalStateError(message);
 		}
-		const task = storedBrowserTask(recordValue(run.providerPayload)?.task);
+		const task = storedBrowserTask(asRecord(run.providerPayload)?.task);
 		if (!task) {
 			const message = "The generic provider-form task could not be recovered from durable storage.";
 			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "generic_portal_payload_invalid" });
@@ -229,7 +230,7 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 		// An aborted run stopped mid-task: the worker fences it as unknown.
 		throwIfAborted(worker.signal);
 		const settled = await AbuseRepository.getProviderRun(run.id);
-		const settledPayload = recordValue(settled?.providerPayload) ?? run.providerPayload;
+		const settledPayload = asRecord(settled?.providerPayload) ?? run.providerPayload;
 		await AbuseRepository.saveArtifact({
 			reportId: run.reportId,
 			routeId: run.routeId,

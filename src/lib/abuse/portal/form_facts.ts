@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { defaultResponseModel } from "../../utils";
+import { defaultResponseModel } from "../../openai_client";
 import { configuredAbuseOpenAI, responseOutputText } from "../ai";
 import { hostBelongsToTarget, normalizePublicHttpUrl, registrableDomain } from "../security";
 

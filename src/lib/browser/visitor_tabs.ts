@@ -1,6 +1,7 @@
 import type { Browser, CDPSession, Page, Target } from "rebrowser-puppeteer-core";
 
 import { sendBeforeRun } from "./cdp";
+import { sleep } from "../sleep";
 
 /**
  * The tabs of one visit: the captured tab, and every tab a visited tab opens
@@ -40,8 +41,6 @@ export type TabSetup = (tab: VisitorTab) => Promise<void> | void;
 const CLOSE_ATTEMPTS = 5;
 /** How long a close is given to be confirmed before it is asked for again. */
 const CLOSE_CONFIRM_MS = 500;
-
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 type AttachedEvent = { sessionId: string; waitingForDebugger: boolean; targetInfo: { targetId: string; type: string; openerId?: string } };
 

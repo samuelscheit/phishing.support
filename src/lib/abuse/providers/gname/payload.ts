@@ -1,6 +1,6 @@
 import type { AbuseArtifact } from "../../schema";
 import { normalizeDomain } from "../../security";
-import { recordValue } from "../../worker/shared";
+
 import {
 	selectProviderEvidenceImageArtifact,
 	storedProviderEvidenceImageReference,
@@ -9,6 +9,7 @@ import {
 } from "../evidence_image";
 import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
 import { GNAME_PROVIDER, type GnameComplaintKind } from "./definition";
+import { asRecord } from "../../../values";
 
 export const GNAME_EVIDENCE_CONTRACT = {
 	acceptedMimeTypes: GNAME_PROVIDER.evidence.acceptedMimeTypes,
@@ -85,10 +86,10 @@ export function buildGnameSubmissionPayload(params: {
 }
 
 export function storedGnameSubmissionPayload(value: unknown): GnameSubmissionPayload | undefined {
-	const payload = recordValue(value);
-	const definition = payload && recordValue(payload.definition);
-	const target = payload && recordValue(payload.target);
-	const report = payload && recordValue(payload.report);
+	const payload = asRecord(value);
+	const definition = payload && asRecord(payload.definition);
+	const target = payload && asRecord(payload.target);
+	const report = payload && asRecord(payload.report);
 	if (!payload || payload.adapter !== "gname_abuse_complaint_v1" || payload.providerNarrativeVersion !== 1
 		|| definition?.version !== GNAME_PROVIDER.version || definition?.contentHash !== GNAME_PROVIDER.contentHash
 		|| typeof target?.domain !== "string" || typeof target.observedUrl !== "string"

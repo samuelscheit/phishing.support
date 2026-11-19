@@ -1,7 +1,7 @@
 /** The German wording of the complaint mails to German authorities; the evidence archive has its own English texts (archive_text.ts). */
 import { operatorServerRoles } from "../campaign/schema";
 import type { DossierIndicator, DossierSite } from "./dossier";
-import { plural, record, text } from "./format";
+import { plural, record, text } from "../values";
 
 const BERLIN = new Intl.DateTimeFormat("de-DE", {
 	timeZone: "Europe/Berlin",

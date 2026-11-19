@@ -9,7 +9,7 @@ import { reportConfirmedEmailPhishing } from "./abuse/submission_reports";
 import { smtpSender, smtpTransport } from "./mail_config";
 import { markSubmissionInvalid } from "./submissions/state";
 import { createWebsiteSubmission } from "./submissions/website";
-import { defaultReasoning, defaultResponseModel } from "./utils";
+import { defaultReasoning, defaultResponseModel } from "./openai_client";
 import { serviceIdentity } from "./constants";
 import { errorText } from "./error_text";
 import type { EmailSubmissionData } from "./db/schema";

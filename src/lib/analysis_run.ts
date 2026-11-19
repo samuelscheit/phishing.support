@@ -5,7 +5,8 @@ import { analysisRetryDelayMs, describeAnalysisError, isRetryableAnalysisError }
 import { AnalysisStreamAttemptError, logAndPersistStream } from "./artifact";
 import { AnalysisRunsEntity } from "./db/entities";
 import type { AnalysisRunKind } from "./db/schema";
-import { getOpenAIClient, sleep } from "./utils";
+import { sleep } from "./sleep";
+import { getOpenAIClient } from "./openai_client";
 import { publishEvent } from "./event/event_transport";
 
 const MAX_ANALYSIS_ATTEMPTS = Math.max(1, Number.parseInt(process.env.OPENAI_ANALYSIS_MAX_ATTEMPTS ?? "3", 10) || 3);

@@ -1,3 +1,5 @@
+import { sleep } from "../sleep";
+
 /**
  * Bounded fetch primitives for evidence collection.  A failed third-party
  * service must never hold an analysis worker indefinitely: every attempt has
@@ -69,10 +71,6 @@ function settings(options: BoundedRequestOptions) {
 		retryDelayMs: Math.max(0, Number.isFinite(options.retryDelayMs) ? Math.floor(options.retryDelayMs!) : DEFAULT_RETRY_DELAY_MS),
 		maxResponseBytes: positiveInteger(options.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES),
 	};
-}
-
-function sleep(milliseconds: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function isRetryable(error: unknown): boolean {

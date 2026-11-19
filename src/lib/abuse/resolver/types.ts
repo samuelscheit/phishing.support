@@ -2,7 +2,9 @@ import type { ResolvedRouteInput } from "../route_contracts";
 import type { AbuseTargetType } from "../schema";
 import type { RdapLocator } from "../../network/rdap_bootstrap";
 
-export type JsonRecord = Record<string, unknown>;
+import type { JsonRecord } from "../../values";
+
+export type { JsonRecord };
 
 export type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 

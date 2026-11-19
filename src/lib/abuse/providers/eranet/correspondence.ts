@@ -1,6 +1,7 @@
-import { recordValue } from "../../worker/shared";
+
 import type { ProviderCorrespondence } from "../submission_contracts";
 import { ERANET_PROVIDER } from "./definition";
+import { asRecord } from "../../../values";
 
 export type EranetFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -31,11 +32,11 @@ export async function fetchEranetCorrespondence(
 	const text = await response.text();
 	let body: Record<string, unknown> | undefined;
 	try {
-		body = recordValue(JSON.parse(text));
+		body = asRecord(JSON.parse(text));
 	} catch {
 		body = undefined;
 	}
-	const record = recordValue(body?.Data);
+	const record = asRecord(body?.Data);
 	if (!response.ok || !record) throw new Error(`Eranet complaint lookup for ${context.confirmationId} failed with HTTP ${response.status}: ${text.slice(0, 300)}`);
 	if (record.order_no !== context.confirmationId) throw new Error(`Eranet answered the lookup for ${context.confirmationId} with another complaint.`);
 	const state = typeof record.status === "number" ? ERANET_STATES[record.status - 1] : undefined;

@@ -1,9 +1,10 @@
 import { isIP } from "node:net";
 
 import { domainMatchesOrIsSubdomain, normalizePublicHost } from "../../security";
-import { recordValue } from "../../worker/shared";
+
 import { buildProviderReportNarrative, normalizeObservedUrlForTarget, truncateProviderText } from "../report_payload";
 import { GOOGLE_CLOUD_PROVIDER, GOOGLE_CLOUD_SERVICES, type GoogleCloudService } from "./definition";
+import { asRecord } from "../../../values";
 
 export type GoogleCloudSubmissionPayload = {
 	adapter: "google_cloud_abuse_report_v1";
@@ -124,10 +125,10 @@ export function buildGoogleCloudSubmissionPayload(params: {
 
 /** Read only an immutable draft produced by this provider. */
 export function storedGoogleCloudSubmissionPayload(value: unknown): GoogleCloudSubmissionPayload | undefined {
-	const payload = recordValue(value);
-	const definition = payload && recordValue(payload.definition);
-	const target = payload && recordValue(payload.target);
-	const report = payload && recordValue(payload.report);
+	const payload = asRecord(value);
+	const definition = payload && asRecord(payload.definition);
+	const target = payload && asRecord(payload.target);
+	const report = payload && asRecord(payload.report);
 	if (!payload || payload.adapter !== "google_cloud_abuse_report_v1" || payload.providerNarrativeVersion !== 1
 		|| !definition || definition.version !== GOOGLE_CLOUD_PROVIDER.version || definition.contentHash !== GOOGLE_CLOUD_PROVIDER.contentHash
 		|| !target || typeof target.normalizedTarget !== "string" || !Array.isArray(target.observedUrls) || target.observedUrls.length === 0

@@ -4,7 +4,8 @@ import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
 import sanitizeFilename from "sanitize-filename";
 
 import type { Dossier, DossierIndicator, DossierMail, DossierSite } from "./dossier";
-import { plural, record, text, utc } from "./format";
+import { plural, record, text } from "../values";
+import { utc } from "./format";
 import { infrastructureLines } from "./infrastructure";
 
 /**

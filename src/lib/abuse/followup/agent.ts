@@ -1,6 +1,6 @@
 import type OpenAI from "openai";
 
-import { defaultResponseModel, getOpenAIClient } from "../../utils";
+import { defaultResponseModel, getOpenAIClient } from "../../openai_client";
 import { DECISION_TOOL_DEFINITIONS, runDecisionTool, type DecisionToolContext, type DecisionToolDependencies } from "./tools";
 
 /** What the agent decided: an answer exactly as it wrote it, or why it sent none. */

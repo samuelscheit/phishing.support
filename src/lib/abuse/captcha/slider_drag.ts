@@ -1,5 +1,7 @@
 import type { Page } from "rebrowser-puppeteer-core";
 
+import { sleep as pause } from "../../sleep";
+
 /** One mouse step of a drag: where the pointer goes, relative to where it was pressed, and how long it takes. */
 export type SliderStep = { dx: number; dy: number; delayMs: number };
 
@@ -36,8 +38,6 @@ export function sliderTrack(distance: number, random: RandomSource = Math.random
 	steps[steps.length - 1]!.dx = distance;
 	return steps;
 }
-
-const pause = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 /**
  * Drag a slider's handle to the far end of its rail with a human track:

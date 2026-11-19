@@ -5,7 +5,7 @@ import {
 	normalizePublicHttpUrl,
 	registrableDomain,
 } from "../../security";
-import { recordValue } from "../../worker/shared";
+
 import {
 	selectProviderEvidenceImageArtifact,
 	storedProviderEvidenceImageReference,
@@ -14,6 +14,7 @@ import {
 } from "../evidence_image";
 import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
 import { NAMESILO_PROVIDER } from "./definition";
+import { asRecord } from "../../../values";
 
 export const NAMESILO_EVIDENCE_CONTRACT = {
 	acceptedMimeTypes: NAMESILO_PROVIDER.evidence.acceptedMimeTypes,
@@ -113,10 +114,10 @@ export function buildNameSiloSubmissionPayload(params: {
 
 /** Read only a payload previously constructed by this provider. */
 export function storedNameSiloSubmissionPayload(value: unknown): NameSiloSubmissionPayload | undefined {
-	const payload = recordValue(value);
-	const definition = payload && recordValue(payload.definition);
-	const target = payload && recordValue(payload.target);
-	const report = payload && recordValue(payload.report);
+	const payload = asRecord(value);
+	const definition = payload && asRecord(payload.definition);
+	const target = payload && asRecord(payload.target);
+	const report = payload && asRecord(payload.report);
 	const evidence = payload && storedProviderEvidenceImageReference(payload.evidence, NAMESILO_EVIDENCE_CONTRACT);
 	if (!payload || payload.adapter !== "namesilo_phishing_report_v1" || payload.providerNarrativeVersion !== 1
 		|| !definition || definition.version !== NAMESILO_PROVIDER.version || definition.contentHash !== NAMESILO_PROVIDER.contentHash

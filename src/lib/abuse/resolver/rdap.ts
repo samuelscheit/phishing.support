@@ -1,7 +1,8 @@
 import { isIP } from "node:net";
 
 import { isPublicIp, normalizeDomain } from "../security";
-import { asArray, asRecord, normalizeMailbox, text, uniqueStrings } from "./records";
+import { asRecord, text } from "../../values";
+import { asArray, normalizeMailbox, uniqueStrings } from "./records";
 import type { AbuseMailbox, JsonRecord } from "./types";
 
 function vcardValues(entity: JsonRecord): JsonRecord {

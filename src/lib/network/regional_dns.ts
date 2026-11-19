@@ -1,6 +1,8 @@
 import { fetchJson, withTimeout, type FetchImplementation } from "./bounded_fetch";
 import { isIP } from "node:net";
 import { errorText } from "../error_text";
+import { sleep } from "../sleep";
+import { asRecord, finiteNumber as number, text as string } from "../values";
 
 const GLOBALPING_MEASUREMENTS_URL = "https://api.globalping.io/v1/measurements";
 const DEFAULT_COUNTRIES = ["BR", "DE", "JP", "US"] as const;
@@ -68,24 +70,8 @@ export type RegionalDnsDependencies = {
 	totalTimeoutMs?: number;
 };
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-}
-
-function string(value: unknown): string | undefined {
-	return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function number(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
 function uniqueStrings(values: Iterable<string>): string[] {
 	return [...new Set([...values].map((value) => value.trim()).filter(Boolean))];
-}
-
-function sleep(milliseconds: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function normalizeCountries(countries: readonly string[] | undefined): string[] {

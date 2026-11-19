@@ -4,13 +4,14 @@ import { abuseCaseTag } from "./correlation";
 import { configuredAbuseOpenAI, responseOutputText } from "../ai";
 import { normalizePublicHttpUrl } from "../security";
 import { serviceIdentity } from "../../constants";
-import { defaultResponseModel } from "../../utils";
+import { defaultResponseModel } from "../../openai_client";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
 import { createOriginHostEmailDraft } from "../origin/draft";
 import { humanizeOrganization, recipientGreeting } from "./shared";
 import { refangText } from "../../malware/defang";
 import { PRESERVATION_REQUEST } from "../preservation";
 import { approvalDraftOf } from "../persistence/approvals";
+import { asRecord } from "../../values";
 
 const MAX_DESCRIPTION_INPUT = 12_000;
 const MAX_SUMMARY_LENGTH = 1_200;
@@ -79,10 +80,6 @@ type DraftInput = {
 	attachmentNames?: string[];
 	attachmentMimeTypes?: string[];
 };
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-}
 
 function cleanText(value: unknown, maximum: number): string | undefined {
 	if (typeof value !== "string") return undefined;

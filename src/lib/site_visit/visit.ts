@@ -7,6 +7,7 @@ import type { CapturedNetworkRequest, ExfiltrationCanaries } from "../exfiltrati
 import { interceptDownloads, type DownloadedFile, type DownloadInterceptor, type FailedDownload } from "../website_download";
 import { revealSyntheticSecret, type VisitAgent, type VisitAgentAction, type VisitAgentState } from "./agent";
 import { buildSiteVisitTask, visitAgentReport, VISIT_BUDGET_MS, type VisitAgentReport } from "./task";
+import { sleep } from "../sleep";
 
 /**
  * One visit of a reported site, the way its victim goes through it: the
@@ -117,13 +118,6 @@ function followingScreencast(tabs: VisitorTabs, live: (event: SiteVisitLiveEvent
 			await stop?.();
 		},
 	};
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-	return new Promise((resolve) => {
-		const timer = setTimeout(resolve, ms);
-		signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
-	});
 }
 
 /**

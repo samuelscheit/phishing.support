@@ -1,7 +1,7 @@
 import { getBrowser } from "../../../browser";
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { AbuseRepository } from "../../repository";
-import { recordValue, routeContext } from "../../worker/shared";
+import { routeContext } from "../../worker/shared";
 import { providerDefinitionMatchesPin } from "../definition";
 import { providerEvidenceImageArtifactMatches } from "../evidence_image";
 import type {
@@ -20,6 +20,7 @@ import {
 	storedEranetSubmissionPayload,
 	type EranetSubmissionPayload,
 } from "./payload";
+import { asRecord } from "../../../values";
 
 /** A file sent through the form's upload endpoint. */
 export type EranetUpload = { type: string; filename: string; mimeType: string; base64: string };
@@ -74,7 +75,7 @@ export async function openEranetBrowserSession(): Promise<EranetSession> {
 				}, `${apiPath}/${path}`, body);
 				let parsed: EranetResponse | undefined;
 				try {
-					parsed = recordValue(JSON.parse(result.text)) as EranetResponse | undefined;
+					parsed = asRecord(JSON.parse(result.text)) as EranetResponse | undefined;
 				} catch {
 					parsed = undefined;
 				}

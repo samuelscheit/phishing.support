@@ -6,6 +6,7 @@ import {
 	isExactAllowedFinalUrl,
 	normalizeAllowedDomains,
 } from "./provider_contract";
+import { asRecord } from "../../values";
 
 export type ProviderFormOutputContract = {
 	passed: boolean;
@@ -49,11 +50,6 @@ const GENERIC_PROVIDER_FORM_OUTPUT_KEYS = [
 	"irreversible_actions",
 ] as const;
 
-function recordValue(value: unknown): Record<string, unknown> | undefined {
-	return value && typeof value === "object" && !Array.isArray(value)
-		? value as Record<string, unknown>
-		: undefined;
-}
 
 function stringArray(value: unknown): string[] | undefined {
 	return Array.isArray(value) && value.every((item) => typeof item === "string")
@@ -77,7 +73,7 @@ export function validateProviderFormOutputContract(params: {
 	output: unknown;
 	policy: ProviderFormOutputPolicy;
 }): ProviderFormOutputContract {
-	const output = recordValue(params.output);
+	const output = asRecord(params.output);
 	if (!output) return contractFailure("form_contract_output_invalid");
 	const allowedKeys = new Set(params.policy.allowedOutputKeys);
 	if (Object.keys(output).some((key) => !allowedKeys.has(key))) return contractFailure("unexpected_extraction_output");
@@ -145,8 +141,8 @@ export function validateGenericProviderFormOutput(params: {
 	output: unknown;
 	providerPayload: unknown;
 }): ProviderFormOutputContract {
-	const payload = recordValue(params.providerPayload);
-	const immutableContract = payload && recordValue(payload.contract);
+	const payload = asRecord(params.providerPayload);
+	const immutableContract = payload && asRecord(payload.contract);
 	if (!immutableContract) return contractFailure("immutable_output_contract_missing");
 	const target = typeof immutableContract.target === "string" ? immutableContract.target : undefined;
 	const observedUrls = stringArray(immutableContract.observedUrls);

@@ -6,18 +6,13 @@
  */
 
 import { countSearchQueries } from "../analysis_stream_query_count";
-
-type JsonRecord = Record<string, unknown>;
+import { asRecord, type JsonRecord } from "../values";
 
 const MAX_TEXT = 8_000;
 const MAX_OUTPUT_TEXT = 160_000;
 const MAX_LIST = 24;
 /** A live screencast frame, base64 JPEG; a frame past this is dropped rather than cut. */
 const MAX_BROWSER_FRAME = 600_000;
-
-function asRecord(value: unknown): JsonRecord | null {
-	return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
-}
 
 function asString(value: unknown, max = MAX_TEXT): string | undefined {
 	if (typeof value === "bigint") return value.toString();

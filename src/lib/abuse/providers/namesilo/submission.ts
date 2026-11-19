@@ -3,7 +3,7 @@ import { userAgent } from "../../../constants";
 import { AbuseRepository } from "../../repository";
 import type { ProviderFormFacts } from "../../portal/form_facts";
 import { deriveProviderFormFacts } from "../../portal/form_facts";
-import { recordValue, routeContext } from "../../worker/shared";
+import { routeContext } from "../../worker/shared";
 import { providerDefinitionMatchesPin } from "../definition";
 import {
 	providerEvidenceImageArtifactMatches,
@@ -25,6 +25,7 @@ import {
 	storedNameSiloSubmissionPayload,
 	type NameSiloSubmissionPayload,
 } from "./payload";
+import { asRecord } from "../../../values";
 
 type NameSiloFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -68,7 +69,7 @@ export type NameSiloSubmissionDependencies = {
 
 function parseJsonRecord(body: string): Record<string, unknown> | undefined {
 	try {
-		return recordValue(JSON.parse(body));
+		return asRecord(JSON.parse(body));
 	} catch {
 		return undefined;
 	}
@@ -99,7 +100,7 @@ export async function parseNameSiloSessionResponse(
 	const body = await response.text();
 	if (!response.ok) throw new Error(`NameSilo CSRF session failed with HTTP ${response.status}: ${body.slice(0, 500)}`);
 	const json = parseJsonRecord(body);
-	const data = json && recordValue(json.data);
+	const data = json && asRecord(json.data);
 	const csrfToken = data?.xsrfToken;
 	const expirationTime = data?.expirationTime;
 	if (json?.result !== "success"
@@ -130,7 +131,7 @@ async function fetchNameSiloSession(
 }
 
 function storedPreflightState(preflight: ProviderSubmissionPreflight | undefined): NameSiloPreflightState | undefined {
-	const state = preflight && recordValue(preflight.state);
+	const state = preflight && asRecord(preflight.state);
 	if (!state
 		|| typeof state.csrfToken !== "string" || state.csrfToken.length === 0 || state.csrfToken.length > 2_048 || /[\r\n\0]/.test(state.csrfToken)
 		|| typeof state.cookieHeader !== "string" || state.cookieHeader.length === 0 || state.cookieHeader.length > 8_192 || /[\r\n\0]/.test(state.cookieHeader)

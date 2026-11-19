@@ -1,7 +1,7 @@
 import { sha256Hex } from "../security";
 import { originAsns } from "./bgp";
 import { fetchRdapRecord, safeJsonFetch } from "./http";
-import { asRecord, text } from "./records";
+import { asRecord, text } from "../../values";
 import {
 	dedupeMailboxes,
 	entityOrganization,

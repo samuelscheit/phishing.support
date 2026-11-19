@@ -1,10 +1,11 @@
+import { sleep } from "../../sleep";
+
 const DEATH_BY_CAPTCHA_ENDPOINT = "https://api.dbcapi.me/api";
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const POLL_INTERVALS_MS = [1_000, 1_000, 2_000, 3_000, 2_000, 2_000, 3_000, 2_000, 2_000] as const;
 const DEFAULT_POLL_INTERVAL_MS = 3_000;
 
-const defaultSleep = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 /** Narrow enough for provider tests without requiring a browser-specific fetch implementation. */
 export type DeathByCaptchaFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -145,7 +146,7 @@ export async function solveDeathByCaptchaToken(params: {
 
 	const credentials = getDeathByCaptchaCredentials(params.credentials);
 	const fetcher = params.fetch ?? fetch;
-	const pause = params.sleep ?? defaultSleep;
+	const pause = params.sleep ?? sleep;
 	const now = params.now ?? Date.now;
 	const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("Death by Captcha timeout must be positive.");
