@@ -36,7 +36,7 @@ export type PublicCampaignSite = {
 	takedown: "confirmed" | "reported" | "problem" | "none";
 };
 
-export type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_payment_account" | "same_pattern"; title: string; text: string };
+export type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_payment_account" | "same_malware_server" | "same_pattern"; title: string; text: string };
 
 export type PublicCampaign = {
 	campaignId: string;
@@ -161,6 +161,11 @@ function reasons(dossier: Dossier, stats: { platform?: string; durationMinutes: 
 	if (backend.length) {
 		const names = backend.map((indicator) => backendDetails(indicator.evidence, indicator.value).label.toLowerCase());
 		result.push({ kind: "same_backend", title: "Same receiver", text: `What visitors enter goes to the same ${[...new Set(names)].join(" and ")} from ${Math.max(...backend.map((indicator) => indicator.sites.length))} pages. Only whoever controls it receives the stolen data.` });
+	}
+	const malwareServers = shared.filter((indicator) => indicator.kind === "payload_host");
+	if (malwareServers.length) {
+		const hosts = malwareServers.map((indicator) => indicator.value.replace(/^payload-host:/, ""));
+		result.push({ kind: "same_malware_server", title: "Same malware server", text: `${subject(malwareServers, "gets", "get")} visitors to run or download malware from the same server (${hosts.join(", ")}). Only whoever runs it decides what it delivers.` });
 	}
 	if (shared.some((indicator) => indicator.kind === "payment_receiver")) {
 		result.push({ kind: "same_payment_account", title: "Same payment account", text: "The pages ask visitors to pay into the same account." });

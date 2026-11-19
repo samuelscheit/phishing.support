@@ -59,6 +59,9 @@ export function describeIndicatorEnglish(indicator: DossierIndicator): string {
 	if (indicator.kind === "payment_receiver") {
 		return `Payment account ${text(evidence.receiver) ?? indicator.value} (${text(evidence.receiverKind) ?? "account"}) is named to visitors ${reach}.`;
 	}
+	if (indicator.kind === "payload_host") {
+		return `Malware server ${indicator.value.replace(/^payload-host:/, "")} delivers what visitors are made to ${evidence.via === "offered_download" ? "download" : "run"} ${reach}${text(evidence.url) ? `, e.g. ${evidence.url}` : ""}${text(evidence.sha256) ? ` (SHA-256 ${evidence.sha256})` : ""}.`;
+	}
 	if (indicator.kind === "kit_fingerprint") {
 		const library = text(evidence.library) ? `; a published library file (${evidence.library}), so it links nothing` : "";
 		if (evidence.fileKind === "page_structure") return `Identical page template (the same ${evidence.tags ?? "?"} HTML elements in the same order, text and attributes left out; SHA-256 ${indicator.value}) ${reach}.`;

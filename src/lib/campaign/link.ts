@@ -82,6 +82,7 @@ export function factsFromDossier(dossier: Dossier, languages: ReadonlyArray<stri
 			...(kinds.has("page") ? ["same_page" as const] : []),
 			...(kinds.has("exfiltration_backend") ? ["same_backend" as const] : []),
 			...(kinds.has("payment_receiver") ? ["same_payment_account" as const] : []),
+			...(kinds.has("payload_host") ? ["same_malware_server" as const] : []),
 		],
 		analyses: [],
 	};

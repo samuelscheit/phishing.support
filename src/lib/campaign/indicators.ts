@@ -6,6 +6,7 @@ import type { Submission } from "../db/schema";
 import { fetchJson, type FetchImplementation } from "../network/bounded_fetch";
 import { mhtmlVisitorText } from "../website_archive";
 import { latestArtifactNamed, websiteCaptureFileNames } from "../website_capture_files";
+import { hasPathTenants } from "../website_site";
 import type { ExfiltrationBackend } from "../exfiltration/types";
 import { loadPageFingerprints, type PageFingerprints } from "./page_document";
 import { paymentReceivers } from "./payment";
@@ -145,9 +146,30 @@ export async function extractIndicators(submissionId: bigint, dependencies: Indi
 		}
 	}
 
+	let popularDomains: PopularDomains | undefined;
+	const popularSites = async () => (popularDomains ??= await (dependencies.loadPopularDomains ?? loadPopularDomains)());
+
+	// The server that hands visitors the malware: what a pasted command fetches
+	// (only payloads the investigation actually received) and the file a page
+	// offers. A file host anyone can upload to (GitHub, Dropbox) links nothing.
+	const deliveries = [
+		...(website.investigation?.payloads ?? []).filter((payload) => payload.sha256).map((payload) => ({ url: payload.url, sha256: payload.sha256, via: "pasted_command" })),
+		...(website.offeredDownload ? [{ url: website.offeredDownload.url, sha256: website.offeredDownload.sha256, via: "offered_download" }] : []),
+	];
+	for (const delivery of deliveries) {
+		let host: string;
+		try {
+			host = new URL(delivery.url).hostname.toLowerCase();
+		} catch {
+			continue;
+		}
+		const shared = hasPathTenants(host) || isPopularSite(host, await popularSites());
+		add({ kind: "payload_host", value: `payload-host:${host}`, links: !shared, evidence: { url: delivery.url, sha256: delivery.sha256, via: delivery.via } });
+	}
+
 	const fingerprints = kitFingerprints(website).filter((fingerprint) => fingerprint.kind !== "stylesheet");
 	if (fingerprints.length) {
-		const popular = await (dependencies.loadPopularDomains ?? loadPopularDomains)();
+		const popular = await popularSites();
 		for (const fingerprint of fingerprints) {
 			const servedFrom = new URL(fingerprint.url).hostname;
 			if (isPopularSite(servedFrom, popular)) continue;

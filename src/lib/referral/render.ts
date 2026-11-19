@@ -50,6 +50,9 @@ export function describeIndicator(indicator: DossierIndicator): string {
 		const kind = text(evidence.receiverKind) ?? "";
 		return `${RECEIVER_LABEL[kind] ?? "Zahlungsempfänger"} ${text(evidence.receiver) ?? indicator.value} wird Besuchern als Zahlungsziel genannt ${reach}.`;
 	}
+	if (indicator.kind === "payload_host") {
+		return `Schadsoftware-Server ${indicator.value.replace(/^payload-host:/, "")} liefert, was Besucher ${evidence.via === "offered_download" ? "herunterladen" : "ausführen"} sollen ${reach}${text(evidence.url) ? `, z. B. ${evidence.url}` : ""}${text(evidence.sha256) ? ` (SHA-256 ${evidence.sha256})` : ""}.`;
+	}
 	if (indicator.kind === "kit_fingerprint") {
 		if (evidence.fileKind === "page_structure") return `Identische Seitenvorlage (dieselben ${evidence.tags ?? "?"} HTML-Elemente in derselben Reihenfolge, ohne Text und Attribute; SHA-256 ${indicator.value}) ${reach}.`;
 		if (evidence.fileKind === "page_document") return `Identischer Seiteninhalt (HTML-Body, ${evidence.size ?? "?"} Byte; die eigene Adresse der Seite ausgeblendet; SHA-256 ${indicator.value}) ${reach}.`;

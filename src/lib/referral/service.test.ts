@@ -259,6 +259,23 @@ describe("criminal referral of a campaign", () => {
 		expect(factsFromDossier(await buildDossier(campaignId), []).links).toEqual(["same_page"]);
 	});
 
+	test("sites whose malware comes from one server are named as such, and the referral texts name the server", async () => {
+		const server: ExtractedIndicator = { kind: "payload_host", value: "payload-host:keychainagent.pro", links: true, evidence: { url: "https://keychainagent.pro/wksxgj/wZZLR9xY29o4", sha256: "e".repeat(64), via: "pasted_command" } };
+		for (const [index, host] of ["paneo.work", "macmorrow.app"].entries()) {
+			await reportedSite(BigInt(51 + index), host);
+			await CampaignRepository.recordIndicators(BigInt(51 + index), [server]);
+		}
+		const campaignId = (await CampaignRepository.campaignForSubmission(51n))!;
+		expect((await getPublicCampaign(campaignId))!.reasons).toEqual([
+			{ kind: "same_malware_server", title: "Same malware server", text: "Every page gets visitors to run or download malware from the same server (keychainagent.pro). Only whoever runs it decides what it delivers." },
+		]);
+		const dossier = await buildDossier(campaignId);
+		const indicator = dossier.indicators.find((entry) => entry.kind === "payload_host")!;
+		expect(describeIndicatorEnglish(indicator)).toBe(`Malware server keychainagent.pro delivers what visitors are made to run (2 sites), e.g. https://keychainagent.pro/wksxgj/wZZLR9xY29o4 (SHA-256 ${"e".repeat(64)}).`);
+		expect(describeIndicator(indicator)).toBe(`Schadsoftware-Server keychainagent.pro liefert, was Besucher ausführen sollen (2 Seiten), z. B. https://keychainagent.pro/wksxgj/wZZLR9xY29o4 (SHA-256 ${"e".repeat(64)}).`);
+		expect(factsFromDossier(dossier, []).links).toEqual(["same_malware_server"]);
+	});
+
 	test("pages built from one template are named as such; an identical body among them is named too, and the template only where it reaches further", async () => {
 		const template = "d".repeat(64);
 		const body = "e".repeat(64);

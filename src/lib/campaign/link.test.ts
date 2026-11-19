@@ -96,6 +96,22 @@ describe("campaign indicators", () => {
 		expect(indicators[0]!.evidence).toMatchObject({ telegram: { token: "7001:AAEsecret", chatId: "-1001" }, matchedFields: ["email", "password"] });
 	});
 
+	test("takes the server that delivers a page's malware: a payload a pasted command fetched, an offered file; never a public file host or a payload never received", async () => {
+		// Production: paneo.work and macmorrow.app both had visitors paste a command fetching from keychainagent.pro/wksxgj/….
+		const paneo = website(1n, "paneo.work");
+		paneo.data = { kind: "website", website: { ...(paneo.data.kind === "website" ? paneo.data.website : { url: "" }), investigation: { status: "completed", updatedAt: "2026-11-02T22:20:41.685Z", payloads: [
+			{ url: "https://keychainagent.pro/wksxgj/wZZLR9xY29o4", sha256: "e".repeat(64), sizeBytes: 137_293, verdict: "virustotal: malicious" },
+			{ url: "https://unreachable-stage.example/x", error: "fetch failed" },
+			{ url: "https://raw.githubusercontent.com/someone/repo/main/stage.sh", sha256: "f".repeat(64), sizeBytes: 900 },
+		] }, offeredDownload: { pageUrl: "https://paneo.work/", url: "https://paneo.work/Paneo.dmg", fileName: "Paneo.dmg", contentType: "application/x-apple-diskimage", sizeBytes: 9_000, sha256: "d".repeat(64), userAgent: "test" } } } as Submission["data"];
+		const indicators = await extractIndicators(1n, { ...fixtures({ a: { submission: paneo } }), loadPopularDomains: async () => new Set(["githubusercontent.com"]) });
+		expect(indicators.filter((indicator) => indicator.kind === "payload_host").map(({ value, links, evidence }) => ({ value, links, via: evidence.via }))).toEqual([
+			{ value: "payload-host:keychainagent.pro", links: true, via: "pasted_command" },
+			{ value: "payload-host:raw.githubusercontent.com", links: false, via: "pasted_command" },
+			{ value: "payload-host:paneo.work", links: true, via: "offered_download" },
+		]);
+	});
+
 	test("an email submission or an unknown one shows nothing", async () => {
 		expect(await extractIndicators(99n, fixtures({}))).toEqual([]);
 	});
@@ -168,6 +184,21 @@ describe("campaign grouping on record", () => {
 		expect(await CampaignRepository.campaignForSubmission(4n)).not.toBe(campaign!);
 		const [summary] = (await CampaignRepository.listCampaigns()).filter((entry) => entry.campaign.id === campaign);
 		expect(summary).toMatchObject({ memberCount: 3, linkingIndicators: { kit_fingerprint: 1 } });
+	});
+
+	test("sites whose malware comes from one server form one campaign", async () => {
+		const withPayload = (id: bigint, host: string, path: string) => {
+			const submission = website(id, host);
+			submission.data = { kind: "website", website: { url: `https://${host}/`, investigation: { status: "completed", updatedAt: "2026-11-16T13:21:06.132Z", payloads: [{ url: `https://keychainagent.pro/wksxgj/${path}`, sha256: path.repeat(64).slice(0, 64) }] } } } as Submission["data"];
+			return { submission };
+		};
+		const sites = { paneo: withPayload(1n, "paneo.work", "a"), macmorrow: withPayload(2n, "macmorrow.app", "b"), other: { submission: website(3n, "other-kit-test.com") } };
+		await store(...Object.values(sites).map((site) => site.submission));
+		const dependencies = fixtures(sites);
+		for (const id of [1n, 2n, 3n]) await linkSubmissionToCampaign(id, dependencies);
+		const campaign = await CampaignRepository.campaignForSubmission(1n);
+		expect(await CampaignRepository.campaignForSubmission(2n)).toBe(campaign!);
+		expect(await CampaignRepository.campaignForSubmission(3n)).not.toBe(campaign!);
 	});
 
 	test("a site that bridges two campaigns merges them into the older; the merged id leads to the survivor", async () => {
