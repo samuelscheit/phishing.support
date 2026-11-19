@@ -8,6 +8,8 @@ import { validateAbuseReportRequest } from "../abuse/contracts";
 import { AbuseRepository } from "../abuse/repository";
 import { abuseJobs, type AbuseJob } from "../abuse/schema";
 import type { WebsiteKitResource, WebsiteSiteAssessment } from "../website_types";
+import { analyzeKitSibling } from "../abuse/origin/kit_job";
+import { websiteSubmissionDedupeKey } from "../submissions/website";
 import { armCampaignKitSearch, searchableKitFingerprints, searchCampaignKits } from "./kit_search";
 import { linkSubmissionToCampaign, type LinkDependencies } from "./link";
 import { CampaignRepository } from "./repository";
@@ -18,6 +20,8 @@ const KIT = "a".repeat(64);
 const SHARED = "b".repeat(64);
 const SIBLING_ONLY = "c".repeat(64);
 const STYLE = "d".repeat(64);
+const PLATFORM_FILE = "e".repeat(64);
+const PLATFORM_HOST = "assets.builder-test.org";
 const PHISHING: WebsiteSiteAssessment[] = [{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in" }];
 
 const script = (host: string, sha256: string, size = 40_000): WebsiteKitResource => ({ url: `https://${host}/app.js`, mimeType: "application/javascript", size, sha256 });
@@ -26,6 +30,7 @@ const linking: LinkDependencies = {
 	loadBackends: async () => [],
 	loadPageTexts: async () => [],
 	libraryFor: async () => undefined,
+	isPlatformHost: async (host: string) => host === PLATFORM_HOST,
 	loadPopularDomains: async () => new Set(),
 	loadPageFingerprints: async () => ({}),
 	saveThumbnail: async () => undefined,
@@ -95,8 +100,8 @@ describe("a campaign's kit search", () => {
 		expect(queries).toEqual([`hash:${KIT} AND date:>now-90d`]);
 		const analyses = await analysisJobs();
 		expect(analyses.map(({ payload, reportId }) => ({ payload, reportId }))).toEqual([
-			{ payload: { url: "https://new-one-test.com/login" }, reportId: original.reportId },
-			{ payload: { url: "https://new-two-test.com/login" }, reportId: original.reportId },
+			{ payload: { url: "https://new-one-test.com/login", hashes: [KIT] }, reportId: original.reportId },
+			{ payload: { url: "https://new-two-test.com/login", hashes: [KIT] }, reportId: original.reportId },
 		]);
 		expect(analyses[1]!.nextAttemptAt.getTime() - analyses[0]!.nextAttemptAt.getTime()).toBe(30_000);
 		expect(await searchEvents(original.reportId)).toEqual([{
@@ -137,6 +142,45 @@ describe("a campaign's kit search", () => {
 		const { fetch } = urlscan({ [KIT]: ["quota-test.com", "landing-quota-test.com"] });
 		await searchCampaignKits({ job: next }, { fetch, apiKey: "test", loadPopularDomains: noPopularSites, now: () => new Date("2026-11-20T09:00:00Z") });
 		expect((await analysisJobs()).filter(({ reportId }) => reportId === original.reportId)).toEqual([]);
+	});
+
+	test("a site builder's file the seed was built with finds only the builder's other sites on the seed's own domain", async () => {
+		const original = await site(61n, "outlook.builder-test.online", [script(PLATFORM_HOST, PLATFORM_FILE)]);
+		expect(await armCampaignKitSearch(original.campaignId)).toBe(true);
+		const { fetch, queries } = urlscan({ [PLATFORM_FILE]: ["outlook.builder-test.online", "mail.builder-test.online", "pizzeria-customer-test.it"] });
+		await searchCampaignKits({ job: await queuedSearch() }, { fetch, apiKey: "test", loadPopularDomains: noPopularSites });
+		expect(queries).toEqual([`hash:${PLATFORM_FILE} AND page.apexDomain:builder-test.online AND date:>now-90d`]);
+		expect((await analysisJobs()).map(({ payload }) => payload)).toEqual([{ url: "https://mail.builder-test.online/login", hashes: [PLATFORM_FILE] }]);
+		expect((await searchEvents(original.reportId))[0]).toMatchObject({ fingerprints: [{ sha256: PLATFORM_FILE, scope: "builder-test.online" }] });
+	});
+
+	test("a kit file whose found sites were all harmless is retired: never searched again, its queued sites never opened; one confirmed site keeps it", async () => {
+		const original = await site(81n, "retire-test.com", [script("retire-test.com", KIT)]);
+		const found = async (index: number, status: "invalid" | "reported" | "failed") => {
+			const url = `https://found-${index}-retire-test.net/`;
+			await SubmissionsEntity.create({ id: BigInt(9_000 + index), kind: "website", data: { kind: "website", website: { url } }, dedupeKey: websiteSubmissionDedupeKey(url), status });
+			await AbuseRepository.enqueueJobOnce({ jobType: "analyze_kit_sibling", reportId: original.reportId, payload: { url, hashes: [KIT] }, dedupeKey: `analyze-kit-sibling:${index}` });
+		};
+		const members = () => CampaignRepository.listMembers(original.campaignId);
+		// Sites that could not be opened say nothing about the file.
+		for (let index = 0; index < 7; index += 1) await found(index, "invalid");
+		for (let index = 7; index < 12; index += 1) await found(index, "failed");
+		expect((await searchableKitFingerprints(await members())).map(({ sha256 }) => sha256)).toEqual([KIT]);
+		await found(12, "invalid");
+		expect(await searchableKitFingerprints(await members())).toEqual([]);
+		expect(await armCampaignKitSearch(original.campaignId)).toBe(false);
+
+		// A site queued before the file was retired is not opened, and the case records why.
+		let opened = false;
+		const skipped = await analyzeKitSibling({ reportId: original.reportId, url: "https://queued-retire-test.net/", hashes: [KIT] }, { analyzeWebsite: async () => { opened = true; return undefined; } });
+		expect({ skipped, opened }).toEqual({ skipped: undefined, opened: false });
+		expect((await AbuseRepository.listEvents(original.reportId)).filter(({ eventType }) => eventType === "kit_siblings.skipped").map(({ data }) => data)).toEqual([{ url: "https://queued-retire-test.net/", retiredHashes: [KIT] }]);
+		// Found through another, live file too, it is opened.
+		await analyzeKitSibling({ reportId: original.reportId, url: "https://queued-retire-test.net/", hashes: [KIT, SHARED] }, { analyzeWebsite: async () => { opened = true; return undefined; } });
+		expect(opened).toBe(true);
+
+		await found(13, "reported");
+		expect((await searchableKitFingerprints(await members())).map(({ sha256 }) => sha256)).toEqual([KIT]);
 	});
 
 	test("a search armed for a campaign that stopped growing counts as quiet since its newest site", async () => {

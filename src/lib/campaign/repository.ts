@@ -6,7 +6,7 @@ import { submissions, type Submission } from "../db/schema";
 import { assignCampaigns } from "./cluster";
 import type { VisitorGuidance } from "./guidance";
 import type { ExtractedIndicator } from "./indicators";
-import { campaignIndicators, campaignMembers, campaigns, campaignSiteFacts, kitHashChecks, type Campaign, type CampaignIndicator } from "./schema";
+import { campaignIndicators, campaignMembers, campaigns, campaignSiteFacts, kitHashChecks, kitHostChecks, type Campaign, type CampaignIndicator } from "./schema";
 
 export type CampaignMemberView = {
 	submissionId: bigint;
@@ -95,6 +95,18 @@ export const CampaignRepository = {
 		await db.insert(kitHashChecks)
 			.values({ sha256, library: library ?? null, checkedAt: new Date() })
 			.onConflictDoUpdate({ target: kitHashChecks.sha256, set: { library: library ?? null, checkedAt: new Date() } });
+	},
+
+	async getKitHostCheck(host: string) {
+		const db = await getDb();
+		return db.select().from(kitHostChecks).where(eq(kitHostChecks.host, host)).get();
+	},
+
+	async saveKitHostCheck(host: string, platform: boolean) {
+		const db = await getDb();
+		await db.insert(kitHostChecks)
+			.values({ host, platform, checkedAt: new Date() })
+			.onConflictDoUpdate({ target: kitHostChecks.host, set: { platform, checkedAt: new Date() } });
 	},
 
 	/**

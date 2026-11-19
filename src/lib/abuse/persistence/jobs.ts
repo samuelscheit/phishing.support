@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, like, lte, ne, notLike, or } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, like, lte, ne, notLike, or, sql } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { generateId } from "../../db/ids";
@@ -75,6 +75,16 @@ export async function discardQueuedJobs(prefix: string, keep: string): Promise<n
 		.where(and(eq(abuseJobs.status, "queued"), like(abuseJobs.dedupeKey, `${prefix}%`), notLike(abuseJobs.dedupeKey, `${keep}%`)))
 		.returning({ id: abuseJobs.id })
 		.all().length;
+}
+
+/** The address of every kit-sibling analysis a kit file's search queued, in any state. */
+export async function listKitSiblingAnalysisUrls(sha256: string): Promise<string[]> {
+	const db = await getDb();
+	return db.select({ url: sql<string>`json_extract(${abuseJobs.payload}, '$.url')` })
+		.from(abuseJobs)
+		.where(and(eq(abuseJobs.jobType, "analyze_kit_sibling"), sql`exists (select 1 from json_each(${abuseJobs.payload}, '$.hashes') where value = ${sha256})`))
+		.all()
+		.map(({ url }) => url);
 }
 
 /** Whether any job, in any state, was ever queued under this dedupe key. */

@@ -22,6 +22,7 @@ const CDN_SCRIPT = "3".repeat(64);
 const STYLE = "4".repeat(64);
 const SMALL = "5".repeat(64);
 const OTHER_KIT = "6".repeat(64);
+const PLATFORM_FILE = "7".repeat(64);
 
 const resource = (url: string, sha256: string, mimeType = "application/javascript", size = 20_000): WebsiteKitResource => ({ url, sha256, mimeType, size });
 
@@ -66,6 +67,7 @@ function fixtures(sites: Record<string, { submission: Submission; backends?: Exf
 		loadBackends: async (id) => (byId.get(id)?.backends ?? []).map((backend) => ({ backend, observedAt: backend.request.timestamp, reportId: "1" })),
 		loadPageTexts: async (id) => byId.get(id)?.text ? [{ name: "website.mhtml", text: byId.get(id)!.text! }] : [],
 		libraryFor: async (sha256) => sha256 === JQUERY ? "gh:jquery/jquery@3.7.1/dist/jquery.min.js" : undefined,
+		isPlatformHost: async () => false,
 		loadPopularDomains: async () => new Set(["jsdelivr.net", "dhl.de"]),
 		saveThumbnail: async () => undefined,
 		...heading,
@@ -79,6 +81,30 @@ async function store(...submissions: Submission[]) {
 }
 
 describe("campaign indicators", () => {
+	test("a site builder's files link nothing and keep the site's search to its own registrable domain; the site's own and a backend's files link (production case 374590782784409610)", async () => {
+		const submission = website(7n, "microsoftoutlook.builder-test.online", [
+			resource("https://builder-test.org/componenti/mainPushHF.js", PLATFORM_FILE, "application/javascript", 205_929),
+			resource("https://backend-test.net/gmail/js/start.js", OTHER_KIT, "application/javascript", 3_280),
+			resource("https://microsoftoutlook.builder-test.online/own.js", KIT),
+		]);
+		const checked: string[] = [];
+		const indicators = await extractIndicators(7n, {
+			...fixtures({ a: { submission } }),
+			isPlatformHost: async (host) => {
+				checked.push(host);
+				return host === "builder-test.org";
+			},
+		});
+		// The site's own host serves only that site's files: it is never asked about.
+		expect(checked.sort()).toEqual(["backend-test.net", "builder-test.org"]);
+		const files = indicators.filter(({ kind }) => kind === "kit_fingerprint").map(({ value, links, evidence }) => ({ value, links, platform: evidence.platform, scope: evidence.scope }));
+		expect(files).toEqual([
+			{ value: PLATFORM_FILE, links: false, platform: "builder-test.org", scope: "builder-test.online" },
+			{ value: KIT, links: true, platform: undefined, scope: undefined },
+			{ value: OTHER_KIT, links: true, platform: undefined, scope: undefined },
+		]);
+	});
+
 	test("takes backends, payment receivers, the kit's own code and the server; never libraries, CDN files, stylesheets or tiny files", async () => {
 		const submission = website(1n, "phish-kit-test.com", [
 			resource("https://phish-kit-test.com/assets/app.js", KIT),

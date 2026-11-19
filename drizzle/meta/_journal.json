@@ -162,6 +162,13 @@
       "when": 1795108120809,
       "tag": "0022_relay_refusals",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1795123691548,
+      "tag": "0023_kit_host_checks",
+      "breakpoints": true
     }
   ]
 }

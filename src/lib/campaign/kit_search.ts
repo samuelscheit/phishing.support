@@ -4,7 +4,7 @@ import { SubmissionsEntity } from "../db/entities/submissions";
 import { AbuseRepository } from "../abuse/repository";
 import type { AbuseJob } from "../abuse/schema";
 import { throwIfAborted } from "../abuse/worker/shared";
-import { isKitSiblingSeed } from "../abuse/origin/kit_job";
+import { isKitSiblingSeed, retiredKitHashes } from "../abuse/origin/kit_job";
 import { isUrlscanBusy, urlscanRetryAfterMs } from "../abuse/origin/urlscan";
 import { errorSummary } from "../error_text";
 import { searchKitHashes, type KitFingerprint, type KitFingerprintKind, type SiblingDiscoveryDependencies } from "../abuse/origin/siblings";
@@ -55,20 +55,25 @@ async function memberHosts(members: readonly CampaignMemberView[]): Promise<stri
 }
 
 /**
- * The files a campaign is searched by: its sites' own code that links them.
- * A file only a site found by an earlier search holds is not searched (that
- * let one search drift from kit to kit across unrelated sites); a file two
- * confirmed sites share, or an original report's site holds, is.
+ * The files a campaign is searched by: its sites' own code that links them,
+ * and a platform's file the site was built with, within the site's own
+ * registrable domain. A file only a site found by an earlier search holds
+ * is not searched (that let one search drift from kit to kit across
+ * unrelated sites); a file two confirmed sites share, or an original
+ * report's site holds, is. A file whose found sites were all harmless is
+ * retired (`retiredKitHashes`).
  */
 export async function searchableKitFingerprints(members: readonly CampaignMemberView[]): Promise<KitFingerprint[]> {
 	const holders = new Map<string, { fingerprint: KitFingerprint; sites: Set<bigint> }>();
 	for (const member of members) {
 		for (const indicator of member.indicators) {
-			const evidence = indicator.evidence as { fileKind?: string; url?: string; size?: number };
-			if (indicator.kind !== "kit_fingerprint" || !indicator.links || !SEARCHABLE_KINDS.has(evidence.fileKind as KitFingerprintKind) || !evidence.url) continue;
-			const entry = holders.get(indicator.value) ?? { fingerprint: { sha256: indicator.value, kind: evidence.fileKind as KitFingerprintKind, url: evidence.url, size: evidence.size ?? 0 }, sites: new Set<bigint>() };
+			const evidence = indicator.evidence as { fileKind?: string; url?: string; size?: number; scope?: string };
+			if (indicator.kind !== "kit_fingerprint" || !(indicator.links || evidence.scope) || !SEARCHABLE_KINDS.has(evidence.fileKind as KitFingerprintKind) || !evidence.url) continue;
+			const key = `${indicator.value}@${evidence.scope ?? ""}`;
+			const fingerprint: KitFingerprint = { sha256: indicator.value, kind: evidence.fileKind as KitFingerprintKind, url: evidence.url, size: evidence.size ?? 0, ...(evidence.scope ? { scope: evidence.scope } : {}) };
+			const entry = holders.get(key) ?? { fingerprint, sites: new Set<bigint>() };
 			entry.sites.add(member.submissionId);
-			holders.set(indicator.value, entry);
+			holders.set(key, entry);
 		}
 	}
 	const seeds = new Map<bigint, boolean>();
@@ -81,7 +86,11 @@ export async function searchableKitFingerprints(members: readonly CampaignMember
 		}
 		if (original || sites.size >= 2) searchable.push(fingerprint);
 	}
-	return searchable.sort((a, b) => b.size - a.size || a.sha256.localeCompare(b.sha256)).slice(0, MAX_HASHES_PER_SEARCH);
+	const retired = await retiredKitHashes(searchable.map(({ sha256 }) => sha256));
+	return searchable
+		.filter(({ sha256 }) => !retired.has(sha256))
+		.sort((a, b) => b.size - a.size || a.sha256.localeCompare(b.sha256) || (a.scope ?? "").localeCompare(b.scope ?? ""))
+		.slice(0, MAX_HASHES_PER_SEARCH);
 }
 
 /** The report a campaign's search belongs to: its first original site's, else its first site's that has one. */
@@ -170,7 +179,7 @@ export async function searchCampaignKits(params: { job: AbuseJob; signal?: Abort
 		await AbuseRepository.enqueueJobOnce({
 			jobType: "analyze_kit_sibling",
 			reportId: job.reportId,
-			payload: { url: candidate.url },
+			payload: { url: candidate.url, hashes: candidate.matchingHashes },
 			dedupeKey: analysisDedupeKey(websiteSubmissionDedupeKey(candidate.url)),
 			nextAttemptAt: new Date(now.getTime() + index * ANALYSIS_SPACING_MS),
 		});
@@ -181,7 +190,7 @@ export async function searchCampaignKits(params: { job: AbuseJob; signal?: Abort
 	const quietFor = now.getTime() - Date.parse(lastNewAt);
 	const ended = quietFor >= QUIET_END_MS ? `nothing new in ${Math.round(QUIET_END_MS / DAY_MS)} days` : undefined;
 	await event({
-		fingerprints: fingerprints.map(({ sha256, url, size }) => ({ sha256, url, size })),
+		fingerprints: fingerprints.map(({ sha256, url, size, scope }) => ({ sha256, url, size, ...(scope ? { scope } : {}) })),
 		candidates: fresh.map(({ domain }) => domain),
 		errors: found.errors,
 		checks,

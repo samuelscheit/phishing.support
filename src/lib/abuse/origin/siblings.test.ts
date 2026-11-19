@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 
 import { CORUNA_FRAME_URL, CORUNA_LOADER } from "../../malware/coruna_loader.fixture";
 import type { WebsiteHiddenFrame, WebsiteKitResource } from "../../website_types";
-import { discoverSiblingDomains, findKitSiblingCandidates, kitFingerprints } from "./siblings";
+import { discoverSiblingDomains, findKitSiblingCandidates, isPlatformHost, kitFingerprints, searchKitHashes } from "./siblings";
 
 const hash = (character: string) => character.repeat(64);
 const SCRIPT = hash("a");
@@ -46,6 +46,42 @@ function urlscan(domainsByHash: Record<string, ScannedPage[]>) {
 const noPopularDomains = async () => new Set<string>();
 
 const manyDomains = (count: number, prefix: string) => Array.from({ length: count }, (_, index) => `${prefix}-${index}.example.org`);
+
+describe("a site builder's files (production case 374590782784409610, a phishing page built with Flazio)", () => {
+	/** urlscan's answer to a host query: the page domains that loaded something from it. */
+	function hostScan(domains: string[], hasMore = false) {
+		const queries: URL[] = [];
+		const fetch = async (url: string) => {
+			queries.push(new URL(url));
+			return new Response(JSON.stringify({ has_more: hasMore, results: domains.map((domain) => ({ page: { domain } })) }), { status: 200 });
+		};
+		return { fetch, queries };
+	}
+
+	test("a host pages on more domains than a kit file may be on load files from is a platform; a kit's backend is not", async () => {
+		const platform = hostScan(manyDomains(100, "customer"));
+		expect(await isPlatformHost("builder.example.org", { apiKey: "test-key", fetch: platform.fetch })).toBe(true);
+		expect(platform.queries[0]!.searchParams.get("q")).toBe("domain:builder.example.org AND date:>now-90d");
+		expect(platform.queries[0]!.searchParams.get("size")).toBe("100");
+		expect(platform.queries[0]!.searchParams.get("collapse")).toBe("page.domain.keyword");
+		// The Gmail loader's backend served its own host and the one front page scanned.
+		expect(await isPlatformHost("backend.example.net", { apiKey: "test-key", fetch: hostScan(["backend.example.net", "storage.googleapis.com"]).fetch })).toBe(false);
+		// Exactly the limit is still a kit's reach; more pages than one answer holds is not.
+		expect(await isPlatformHost("busy-kit.example.net", { apiKey: "test-key", fetch: hostScan(manyDomains(99, "front")).fetch })).toBe(false);
+		expect(await isPlatformHost("cdn.example.org", { apiKey: "test-key", fetch: hostScan(manyDomains(10, "x"), true).fetch })).toBe(true);
+	});
+
+	test("a platform file is searched only within the reported site's registrable domain", async () => {
+		// urlscan's scope is trusted no further than the domains it answers with.
+		const { fetch, queries } = urlscan({ [SCRIPT]: ["microsoftoutlook.builder-test.online", "mail.builder-test.online", "deep.tenant.builder-test.online", "customer-shop.example.it"] });
+		const result = await searchKitHashes({
+			fingerprints: [{ sha256: SCRIPT, kind: "script", url: "https://builder-assets.example.org/mainPushHF.js", size: 205_929, scope: "builder-test.online" }],
+			knownDomains: ["microsoftoutlook.builder-test.online"],
+		}, { apiKey: "test-key", fetch, loadPopularDomains: noPopularDomains });
+		expect(queries.map((query) => query.searchParams.get("q"))).toEqual([`hash:${SCRIPT} AND page.apexDomain:builder-test.online AND date:>now-90d`]);
+		expect(result.candidates.map(({ domain }) => domain)).toEqual(["mail.builder-test.online", "deep.tenant.builder-test.online"]);
+	});
+});
 
 describe("kit sibling discovery", () => {
 	test("never fingerprints the files Cloudflare serves on every site behind it", () => {

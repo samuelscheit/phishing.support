@@ -1,5 +1,8 @@
+import { getDomain } from "tldts";
+
 import { AbuseRepository } from "../abuse/repository";
-import { kitFingerprints } from "../abuse/origin/siblings";
+import { isPlatformHost, kitFingerprints } from "../abuse/origin/siblings";
+import { DAY_MS } from "../duration";
 import { isPopularSite, loadPopularDomains, type PopularDomains } from "../abuse/origin/popular_domains";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { ArtifactsEntity } from "../db/entities/artifacts";
@@ -28,6 +31,8 @@ export type IndicatorDependencies = {
 	loadPageTexts?: (submissionId: bigint) => Promise<Array<{ name: string; text: string }>>;
 	/** The published library a kit file's bytes are, or undefined when none is. */
 	libraryFor?: (sha256: string) => Promise<string | undefined>;
+	/** Whether a host other than the site's that serves it kit files is a platform's asset host. */
+	isPlatformHost?: (host: string) => Promise<boolean>;
 	loadPopularDomains?: () => Promise<PopularDomains>;
 	/** The reported page's body and structure (page_document.ts). */
 	loadPageFingerprints?: (submissionId: bigint, siteUrl: string) => Promise<PageFingerprints>;
@@ -103,6 +108,18 @@ async function cachedLibraryFor(sha256: string): Promise<string | undefined> {
 	return library;
 }
 
+/** A platform stays one, an operator's host rarely becomes one: the answer is reused for a month. */
+const PLATFORM_RECHECK_MS = 30 * DAY_MS;
+
+async function cachedPlatformHost(host: string): Promise<boolean> {
+	const { CampaignRepository } = await import("./repository");
+	const cached = await CampaignRepository.getKitHostCheck(host);
+	if (cached && Date.now() - cached.checkedAt.getTime() < PLATFORM_RECHECK_MS) return cached.platform;
+	const platform = await isPlatformHost(host);
+	await CampaignRepository.saveKitHostCheck(host, platform);
+	return platform;
+}
+
 /**
  * Everything one confirmed site shows about its operator. A server only the
  * operator controls links sites, whatever it did for them (received the
@@ -110,9 +127,11 @@ async function cachedLibraryFor(sha256: string): Promise<string | undefined> {
  * or a host that is not a public platform anyone can put files or forms on.
  * Payment receivers always link sites. A kit file links them
  * only when it is the kit's own code: a script or hidden frame of at least
- * 1 KiB, not served from a top-ranked site (a CDN, the copied brand), and
- * not a published library file. The server address is recorded for the
- * dossier but never links.
+ * 1 KiB, not served from a top-ranked site (a CDN, the copied brand), not a
+ * published library file, and not served by a platform the site was built
+ * on (a site builder's scripts are on every site built with it). A platform
+ * file names the site's registrable domain as the scope its kit search keeps
+ * to. The server address is recorded for the dossier but never links.
  */
 export async function extractIndicators(submissionId: bigint, dependencies: IndicatorDependencies = {}): Promise<ExtractedIndicator[]> {
 	const submission = await (dependencies.loadSubmission ?? SubmissionsEntity.get)(submissionId);
@@ -181,15 +200,23 @@ export async function extractIndicators(submissionId: bigint, dependencies: Indi
 	const fingerprints = kitFingerprints(website).filter((fingerprint) => fingerprint.kind !== "stylesheet");
 	if (fingerprints.length) {
 		const popular = await popularSites();
+		const siteHost = new URL(website.url).hostname;
 		for (const fingerprint of fingerprints) {
 			const servedFrom = new URL(fingerprint.url).hostname;
 			if (isPopularSite(servedFrom, popular)) continue;
 			const library = await (dependencies.libraryFor ?? cachedLibraryFor)(fingerprint.sha256);
+			const platform = library === undefined && servedFrom !== siteHost && await (dependencies.isPlatformHost ?? cachedPlatformHost)(servedFrom);
 			add({
 				kind: "kit_fingerprint",
 				value: fingerprint.sha256,
-				links: library === undefined,
-				evidence: { fileKind: fingerprint.kind, url: fingerprint.url, size: fingerprint.size, ...(library ? { library } : {}) },
+				links: library === undefined && !platform,
+				evidence: {
+					fileKind: fingerprint.kind,
+					url: fingerprint.url,
+					size: fingerprint.size,
+					...(library ? { library } : {}),
+					...(platform ? { platform: servedFrom, scope: getDomain(siteHost) ?? siteHost } : {}),
+				},
 			});
 		}
 	}

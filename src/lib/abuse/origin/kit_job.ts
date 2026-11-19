@@ -1,5 +1,5 @@
 import { SubmissionsEntity } from "../../db/entities/submissions";
-import { createWebsiteSubmission } from "../../submissions/website";
+import { createWebsiteSubmission, websiteSubmissionDedupeKey } from "../../submissions/website";
 import { analyzeWebsite } from "../../website_ai";
 import { normalizePublicHttpUrl } from "../security";
 import { AbuseRepository } from "../repository";
@@ -48,18 +48,56 @@ async function discoveredBySiblingSearch(source: string | null | undefined): Pro
 }
 
 /**
+ * Sites a kit file found that the analysis judged harmless, with none
+ * confirmed, after which the file is retired: it is a platform's or a
+ * framework's (a Next.js chunk on two dozen unrelated sites), not a kit's.
+ * A kit's own file finds some sites already taken down or cloaked, so it
+ * takes several harmless ones in a row; a single confirmed site keeps it.
+ */
+const RETIRE_AFTER_HARMLESS = 8;
+
+/** Of these kit files, those whose found sites so far were all harmless (`RETIRE_AFTER_HARMLESS`). */
+export async function retiredKitHashes(hashes: readonly string[]): Promise<Set<string>> {
+	const retired = new Set<string>();
+	for (const hash of new Set(hashes)) {
+		let harmless = 0;
+		let confirmed = false;
+		for (const url of await AbuseRepository.listKitSiblingAnalysisUrls(hash)) {
+			const id = await SubmissionsEntity.findIdByDedupeKey(websiteSubmissionDedupeKey(url));
+			const status = id === undefined ? undefined : (await SubmissionsEntity.get(id))?.status;
+			if (status === "reported") {
+				confirmed = true;
+				break;
+			}
+			if (status === "invalid") harmless += 1;
+		}
+		if (!confirmed && harmless >= RETIRE_AFTER_HARMLESS) retired.add(hash);
+	}
+	return retired;
+}
+
+/**
  * Run one normal analysis inside this job. Waiting for it keeps sibling
  * captures inside the worker lane's concurrency; a detached analysis let
- * dozens of browser captures start at once and exhaust the relay.
+ * dozens of browser captures start at once and exhaust the relay. A site
+ * found only through kit files retired since it was queued is not opened.
  */
 export async function analyzeKitSibling(
-	params: { reportId: bigint; url: unknown; signal?: AbortSignal },
+	params: { reportId: bigint; url: unknown; hashes?: unknown; signal?: AbortSignal },
 	dependencies: KitSiblingAnalysisDependencies = {},
 ): Promise<bigint | undefined> {
 	const report = await AbuseRepository.getReport(params.reportId);
 	if (!report?.submissionId || typeof params.url !== "string") return undefined;
 	const url = normalizePublicHttpUrl(params.url);
 	if (!url) throw new Error("Kit sibling job contains an invalid public URL.");
+	const hashes = Array.isArray(params.hashes) ? params.hashes.filter((hash): hash is string => typeof hash === "string") : [];
+	if (hashes.length) {
+		const retired = await retiredKitHashes(hashes);
+		if (hashes.every((hash) => retired.has(hash))) {
+			await AbuseRepository.appendEvent({ reportId: report.id, eventType: "kit_siblings.skipped", data: { url, retiredHashes: hashes } });
+			return undefined;
+		}
+	}
 	throwIfAborted(params.signal);
 	let analysis: Promise<unknown> | undefined;
 	const submissionId = await createWebsiteSubmission({

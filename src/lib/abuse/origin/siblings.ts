@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { getDomain } from "tldts";
+
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import type { WebsiteHiddenFrame, WebsiteKitResource } from "../../website_types";
 import { normalizeDomain, normalizePublicHttpUrl } from "../security";
@@ -42,6 +44,12 @@ export type KitFingerprint = {
 	kind: KitFingerprintKind;
 	url: string;
 	size: number;
+	/**
+	 * A platform's file (see `isPlatformHost`) is searched only on this
+	 * registrable domain, the reported site's: there it finds the platform's
+	 * other tenant sites the operator set up, elsewhere only its customers.
+	 */
+	scope?: string;
 };
 
 /**
@@ -88,6 +96,21 @@ export type SiblingDiscoveryDependencies = UrlscanDependencies & {
 };
 
 const isCode = (kind: KitFingerprintKind) => kind !== "stylesheet";
+
+/**
+ * Whether pages on more domains than one kit file may be on load files from
+ * this host: a site builder's or hosting platform's asset host (flazio.org
+ * serves every Flazio site), whose files every customer site shares. An
+ * operator's backend serves only its own few domains (a loader kit's host
+ * reached 39), so its files stay the kit's. A platform whose customers are
+ * rarely scanned keeps each file version under the hash rarity limit, which
+ * is why the host itself is counted.
+ */
+export async function isPlatformHost(host: string, dependencies: UrlscanDependencies = {}): Promise<boolean> {
+	const results = await searchUrlscan(`domain:${host} AND date:>now-90d`, MAX_SCRIPT_HASH_DOMAINS + 1, dependencies, { collapse: "page.domain.keyword" });
+	const domains = new Set(results.results.map((result) => normalizeDomain(result.page?.domain ?? "")).filter(Boolean));
+	return Boolean(results.has_more) || domains.size > MAX_SCRIPT_HASH_DOMAINS;
+}
 
 /**
  * A file the CDN in front of a site serves on the site's own host
@@ -186,7 +209,8 @@ export async function searchKitHashes(params: {
 		let results: Awaited<ReturnType<typeof searchUrlscan>>;
 		try {
 			// One past the rarity limit is enough to tell a kit file from a shared one.
-			results = await searchUrlscan(`hash:${fingerprint.sha256} AND date:>now-90d`, maxHashDomains(fingerprint.kind) + 1, dependencies, { collapse: "page.domain.keyword" });
+			const scope = fingerprint.scope ? ` AND page.apexDomain:${fingerprint.scope}` : "";
+			results = await searchUrlscan(`hash:${fingerprint.sha256}${scope} AND date:>now-90d`, maxHashDomains(fingerprint.kind) + 1, dependencies, { collapse: "page.domain.keyword" });
 		} catch (error) {
 			if (isUrlscanBusy(error)) throw error;
 			errors.push(`urlscan ${fingerprint.sha256.slice(0, 12)}: ${errorSummary(error)}`);
@@ -195,7 +219,7 @@ export async function searchKitHashes(params: {
 		const domains = new Map<string, string>();
 		for (const result of results.results) {
 			const domain = normalizeDomain(result.page?.domain ?? result.task?.domain ?? "");
-			if (!domain || domains.has(domain)) continue;
+			if (!domain || domains.has(domain) || fingerprint.scope && getDomain(domain) !== fingerprint.scope) continue;
 			// A scan of the kit's script itself (…/js/start.js) shows the file, not the page that loads it: open the domain instead.
 			const suppliedUrl = isWebPage(result.page?.mimeType) ? normalizePublicHttpUrl(result.page?.url ?? result.task?.url ?? "") : undefined;
 			domains.set(domain, suppliedUrl && new URL(suppliedUrl).hostname === domain ? suppliedUrl : `https://${domain}/`);

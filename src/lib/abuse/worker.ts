@@ -522,7 +522,7 @@ export class AbuseWorker {
 				await searchCampaignKits({ job, signal });
 				return;
 			case "analyze_kit_sibling":
-				await analyzeKitSibling({ reportId: idFrom(job.reportId, "reportId"), url: job.payload?.url, signal });
+				await analyzeKitSibling({ reportId: idFrom(job.reportId, "reportId"), url: job.payload?.url, hashes: job.payload?.hashes, signal });
 				return;
 			case "watch_redirector":
 				await watchRedirector({ job, signal });

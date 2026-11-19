@@ -113,6 +113,13 @@ export const kitHashChecks = sqliteTable("kit_hash_checks", {
 	checkedAt: sqliteTimestamp("checked_at").notNull(),
 });
 
+/** Whether a host kit files are served from is a platform's (`isPlatformHost`), checked again after a while. */
+export const kitHostChecks = sqliteTable("kit_host_checks", {
+	host: text("host").primaryKey(),
+	platform: int("platform", { mode: "boolean" }).notNull(),
+	checkedAt: sqliteTimestamp("checked_at").notNull(),
+});
+
 export type Campaign = InferSelectModel<typeof campaigns>;
 export type CampaignMember = InferSelectModel<typeof campaignMembers>;
 export type CampaignIndicator = InferSelectModel<typeof campaignIndicators>;

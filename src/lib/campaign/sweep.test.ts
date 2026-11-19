@@ -19,6 +19,7 @@ const linking = {
 	loadBackends: async () => [],
 	loadPageTexts: async () => [{ name: "website.mhtml", text: "Sign in to your mailbox to read the document waiting for you from the shared drive today." }],
 	libraryFor: async () => undefined,
+	isPlatformHost: async () => false,
 	loadPopularDomains: async () => new Set<string>(),
 	loadPageFingerprints: async () => ({}),
 	saveThumbnail: async () => undefined,
