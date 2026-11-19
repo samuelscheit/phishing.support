@@ -4,6 +4,7 @@ import type { CampaignIndicator } from "../campaign/schema";
 import { ArtifactsEntity, SubmissionsEntity } from "../db/entities";
 import type { Submission } from "../db/schema";
 import { describeDataEntryField } from "../website_types";
+import { hostOf } from "../website_site";
 import { isAuthorityRoute, isPreservationRoute } from "./routes";
 import { indicatorInfrastructure, locateInfrastructure, mergeInfrastructure, routeInfrastructure, type InfrastructureClaim, type InfrastructureNode, type NetworkLookup } from "./infrastructure";
 
@@ -125,13 +126,6 @@ const FIELD_LABELS: Readonly<Record<string, string>> = {
 	oneTimeCode: "Einmalcode (TAN/OTP)",
 };
 
-function hostOf(url: string): string {
-	try {
-		return new URL(url).hostname;
-	} catch {
-		return url;
-	}
-}
 
 function registrarName(submission: Submission | undefined): string | undefined {
 	if (submission?.data.kind !== "website") return undefined;

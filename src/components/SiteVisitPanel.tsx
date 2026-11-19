@@ -5,6 +5,7 @@ import { CheckSquare, Download, Flag, Globe, Keyboard, ListChecks, MousePointerC
 
 import { cn } from "../web_lib/util";
 import { CANARY_FIELD_LABEL, type CanaryField, type WebsiteOfferedDownload, type WebsiteVisitRecord } from "@/lib/website_types";
+import { hostOf } from "@/lib/website_site";
 
 /** One page of the visit, with its screenshot when the case kept one. */
 export type SiteVisitPage = { url: string; screenshotId?: string };
@@ -21,13 +22,6 @@ function fieldList(fields: readonly CanaryField[]): string {
 	return labels.length < 2 ? labels.join("") : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
 }
 
-function hostOf(url: string): string {
-	try {
-		return new URL(url).host;
-	} catch {
-		return url;
-	}
-}
 
 /** The live screen and log of a visit while it runs, from the case's event stream. */
 function useLiveVisit(submissionId: string, enabled: boolean) {

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_SUBMISSION_FILTERS, isSubmissionFilter, type SubmissionFilter } from "@/lib/submissions/filters";
 import type { SubmissionCard as SubmissionCardData, SubmissionCardPage } from "@/lib/submissions/list";
 import { groupByCampaign, type SubmissionListItem } from "@/lib/submissions/campaign_groups";
+import { hostOf } from "@/lib/website_site";
 
 const PREVIEW_ROWS = 3;
 const FILTERS_STORAGE_KEY = "phishing-support:submission-filters";
@@ -91,13 +92,6 @@ function SubmissionCard({ submission, obscured = false }: { submission: Submissi
 
 type ListItem = SubmissionListItem;
 
-function hostOf(title: string): string {
-	try {
-		return new URL(title).hostname;
-	} catch {
-		return title;
-	}
-}
 
 function CampaignCard({ item, obscured = false }: { item: Extract<ListItem, { type: "campaign" }>; obscured?: boolean }) {
 	const hosts = [...new Set(item.titles.map(hostOf))];
