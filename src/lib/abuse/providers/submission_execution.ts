@@ -15,6 +15,7 @@ import {
 import { throwIfAborted } from "../worker/shared";
 import { errorText as describeError } from "../../error_text";
 import { isRecord } from "../../values";
+import { MINUTE_MS, HOUR_MS, DAY_MS } from "../../duration";
 
 export type ProviderSubmissionExecutionResult =
 	| { outcome: "submitted"; runId: bigint }
@@ -428,7 +429,7 @@ export async function executeProviderSubmission(params: {
 }
 
 /** How long, and how often, a submitted report's provider correspondence is read. */
-export const CORRESPONDENCE_POLL_WINDOW_MS = 30 * 24 * 60 * 60_000;
+export const CORRESPONDENCE_POLL_WINDOW_MS = 30 * DAY_MS;
 export const CORRESPONDENCE_POLL_INTERVAL_MS = 60 * 60_000;
 /**
  * Reads soon after submitting, measured from it, before the hourly ones.
@@ -449,7 +450,7 @@ export function nextCorrespondencePollDelayMs(sinceSubmittedMs: number): number 
  * measured from the submission. A provider can list a report minutes after
  * storing it; after the last lookup the route stays for a person.
  */
-const RECEIPT_LOOKUPS_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 60 * 60_000, 24 * 60 * 60_000] as const;
+const RECEIPT_LOOKUPS_MS = [MINUTE_MS, 5 * MINUTE_MS, 30 * MINUTE_MS, 2 * HOUR_MS, DAY_MS] as const;
 
 /** How long until the next receipt lookup, or undefined once the schedule is over. */
 export function nextReceiptLookupDelayMs(sinceSubmittedMs: number): number | undefined {

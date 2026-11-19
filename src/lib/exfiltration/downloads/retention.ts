@@ -1,3 +1,5 @@
+import { DAY_MS } from "../../duration";
+
 /**
  * Retention for stored malware samples. Pure decisions over timestamps, so the
  * TTL boundary is testable without a clock or a filesystem.
@@ -9,11 +11,11 @@ export const MAX_SAMPLE_RETENTION_DAYS = 90;
 
 export function sampleRetentionMs(value: string | undefined): number {
 	const trimmed = value?.trim();
-	if (!trimmed) return DEFAULT_SAMPLE_RETENTION_DAYS * 86_400_000;
+	if (!trimmed) return DEFAULT_SAMPLE_RETENTION_DAYS * DAY_MS;
 	if (!/^\d+$/.test(trimmed)) throw new Error("SAMPLE_RETENTION_DAYS must be a whole number of days.");
 	const days = Number(trimmed);
 	if (days < 1 || days > MAX_SAMPLE_RETENTION_DAYS) throw new Error(`SAMPLE_RETENTION_DAYS must be from 1 to ${MAX_SAMPLE_RETENTION_DAYS}.`);
-	return days * 86_400_000;
+	return days * DAY_MS;
 }
 
 /** A sample is expired once its retention window has fully elapsed; the boundary instant is still retained. */

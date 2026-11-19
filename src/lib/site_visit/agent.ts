@@ -2,6 +2,7 @@ import { agentGaveUp, browserTaskModel, runTask, type ChatModel, type StepLog } 
 import { redactedErrorText } from "../error_text";
 import type { ExfiltrationCanaries } from "../exfiltration/types";
 import type { SiteVisitTask } from "./task";
+import { DAY_MS } from "../duration";
 
 /**
  * One thing the agent did or concluded, as the live log and the visit record
@@ -103,7 +104,7 @@ export function taskAgentVisit(model: () => ChatModel = () => browserTaskModel()
 				// The tabs the site opened stay: the visit records the page the walk ended on after it ends.
 				keepTab: true,
 				// The visit's own budget ends the walk through `signal`.
-				timeoutMs: 24 * 60 * 60_000,
+				timeoutMs: DAY_MS,
 				signal: run.signal,
 				model: model(),
 				onStep: (step) => { for (const action of stepActions(step, new Date().toISOString())) run.onAction(action); },

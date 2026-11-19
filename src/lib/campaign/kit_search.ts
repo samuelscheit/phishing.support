@@ -10,6 +10,7 @@ import { errorSummary } from "../error_text";
 import { searchKitHashes, type KitFingerprint, type KitFingerprintKind, type SiblingDiscoveryDependencies } from "../abuse/origin/siblings";
 import { websiteSubmissionDedupeKey } from "../submissions/website";
 import { CampaignRepository, type CampaignMemberView } from "./repository";
+import { DAY_MS } from "../duration";
 
 /**
  * The kit search of one campaign: its sites' own kit files are looked up on
@@ -19,7 +20,6 @@ import { CampaignRepository, type CampaignMemberView } from "./repository";
  * it stayed quiet for two months; a site that joins it starts it again.
  */
 
-const DAY_MS = 86_400_000;
 /** A campaign that found a new site within this long is searched daily, otherwise weekly. */
 const ACTIVE_FOR_MS = 14 * DAY_MS;
 /** A campaign that found nothing new for this long is no longer searched. */

@@ -5,6 +5,7 @@ import { serviceIdentity } from "../../constants";
 import { approvalDraftOf } from "../persistence/approvals";
 import { AbuseRepository } from "../repository";
 import { errorText, RetryableDeliveryError, routeContext, UnknownExternalStateError, type WorkerServices } from "./shared";
+import { DAY_MS } from "../../duration";
 
 type EmailWorkerServices = Pick<WorkerServices, "markUnknownExternal"> & {
 	/** Injectable for deterministic worker tests; production uses the canonical draft builder. */
@@ -155,7 +156,7 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices): P
 			outcome: "sent",
 		});
 		if (settled) {
-			await AbuseRepository.enqueueJob({ jobType: "monitor_provider_reply", reportId: report.id, routeId: route.id, runId: run.id, payload: {}, dedupeKey: `monitor:${run.id.toString()}`, nextAttemptAt: new Date(Date.now() + 24 * 60 * 60_000) });
+			await AbuseRepository.enqueueJob({ jobType: "monitor_provider_reply", reportId: report.id, routeId: route.id, runId: run.id, payload: {}, dedupeKey: `monitor:${run.id.toString()}`, nextAttemptAt: new Date(Date.now() + DAY_MS) });
 		} else {
 			const [currentRun, currentRoute] = await Promise.all([
 				AbuseRepository.getProviderRun(run.id),

@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { serviceIdentity } from "../constants";
+import { DAY_MS } from "../duration";
 
 /**
  * A link an authority can open without an account to download a campaign's
@@ -44,6 +45,6 @@ export function verifyDossierToken(token: string, now: Date = new Date(), env: R
 }
 
 export function dossierDownloadUrl(campaignId: bigint, now: Date = new Date(), env: Record<string, string | undefined> = process.env): { url: string; expiresAt: Date } {
-	const expiresAt = new Date(now.getTime() + DOSSIER_LINK_DAYS * 24 * 60 * 60_000);
+	const expiresAt = new Date(now.getTime() + DOSSIER_LINK_DAYS * DAY_MS);
 	return { url: `${serviceIdentity.url}/api/dossier/${createDossierToken(campaignId, expiresAt, env)}`, expiresAt };
 }

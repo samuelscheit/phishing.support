@@ -4,6 +4,7 @@ import { z } from "zod";
 import { fetchJson, fetchText, type FetchImplementation } from "../../network/bounded_fetch";
 import { hasPathTenants } from "../../website_site";
 import { normalizeDomain } from "../security";
+import { DAY_MS } from "../../duration";
 
 /**
  * The Tranco research list ranks registrable domains by popularity across
@@ -17,7 +18,7 @@ const trancoDownloadUrl = (listId: string, count: number) => `https://tranco-lis
 /** Deep enough for regional banks and carriers that clones copy; a kit on a hijacked site this popular is rare. */
 export const POPULAR_DOMAIN_COUNT = 100_000;
 /** Tranco publishes one list a day. */
-const POPULAR_DOMAINS_TTL_MS = 24 * 60 * 60_000;
+const POPULAR_DOMAINS_TTL_MS = DAY_MS;
 /** 100,000 `rank,domain` lines are about 2 MB. */
 const MAX_LIST_BYTES = 8 * 1024 * 1024;
 

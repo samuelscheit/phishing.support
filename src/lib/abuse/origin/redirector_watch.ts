@@ -15,6 +15,7 @@ import type { AbuseJob } from "../schema";
 import { normalizePublicHttpUrl } from "../security";
 import { throwIfAborted } from "../worker/shared";
 import { redirectParentId } from "./kit_job";
+import { DAY_MS } from "../../duration";
 
 /**
  * A redirector is the link a campaign hands out (in its emails, its ads)
@@ -23,11 +24,11 @@ import { redirectParentId } from "./kit_job";
  * visitors to x-com.email, then to assistdeparments-x.com. A watch visits the
  * redirector once a day and reports each new host it leads to.
  */
-export const REDIRECTOR_WATCH_INTERVAL_MS = 24 * 60 * 60_000;
+export const REDIRECTOR_WATCH_INTERVAL_MS = DAY_MS;
 /** Consecutive daily checks on which neither route reached the redirector before the watch ends. */
 export const REDIRECTOR_WATCH_MAX_MISSES = 3;
 /** A redirector that leads nowhere new for this long has been abandoned. */
-export const REDIRECTOR_WATCH_QUIET_MS = 30 * 24 * 60 * 60_000;
+export const REDIRECTOR_WATCH_QUIET_MS = 30 * DAY_MS;
 /**
  * Every this many checks the browser visits even when the cheap check saw a
  * known host: a cloaker may show a plain HTTP client a decoy it never
@@ -285,7 +286,7 @@ export async function watchRedirector(
 	const ended = next.misses >= REDIRECTOR_WATCH_MAX_MISSES
 		? `nothing reached the redirector on ${next.misses} daily checks in a row`
 		: now.getTime() - Date.parse(next.lastNewAt) >= REDIRECTOR_WATCH_QUIET_MS
-			? `the redirector led nowhere new in ${Math.round(REDIRECTOR_WATCH_QUIET_MS / 86_400_000)} days`
+			? `the redirector led nowhere new in ${Math.round(REDIRECTOR_WATCH_QUIET_MS / DAY_MS)} days`
 			: undefined;
 
 	await AbuseRepository.appendEvent({

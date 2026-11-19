@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
 
 import { fetchJson } from "./bounded_fetch";
+import { DAY_MS } from "../duration";
 
 /**
  * Finds the authoritative RDAP server for a domain, IP address, or AS number
@@ -20,7 +21,7 @@ type BootstrapService = { entries: string[]; servers: string[] };
 
 const BOOTSTRAP_BASE_URL = "https://data.iana.org/rdap/";
 /** IANA asks clients to cache the registries; they change a few times a month. */
-const REFRESH_MS = 24 * 60 * 60_000;
+const REFRESH_MS = DAY_MS;
 
 /** The services of one bootstrap registry: `[[entries], [server URLs]]` pairs. */
 export function parseBootstrap(json: unknown): BootstrapService[] {

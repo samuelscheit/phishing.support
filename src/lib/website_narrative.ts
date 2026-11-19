@@ -15,6 +15,7 @@ import {
 import type { WhoISInfo } from "./website_info";
 import { offeredDownloadEvidence } from "./website_offered_download";
 import { revisitWording, type WebsiteKitResource, type WebsiteVisitRecord } from "./website_types";
+import { DAY_MS } from "./duration";
 
 /**
  * The case analysis of a reported website, written for a person: what the
@@ -54,7 +55,7 @@ Write in English, keep the page's own wording in quotes in its original language
 function age(registered: string | undefined, capturedAt: Date | undefined): string | undefined {
 	const at = registered ? Date.parse(registered) : Number.NaN;
 	if (!Number.isFinite(at) || !capturedAt) return undefined;
-	const days = Math.floor((capturedAt.getTime() - at) / 86_400_000);
+	const days = Math.floor((capturedAt.getTime() - at) / DAY_MS);
 	return days < 0 ? undefined : `${days} day${days === 1 ? "" : "s"}`;
 }
 

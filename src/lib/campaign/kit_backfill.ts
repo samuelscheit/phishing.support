@@ -6,6 +6,7 @@ import { capturedDocumentContent } from "../website_archive";
 import { analyzedCaptureStep, websiteCaptureFileNames } from "../website_capture_files";
 import type { WebsiteKitResource } from "../website_types";
 import { loadCapturedPageTexts } from "./indicators";
+import { DAY_MS } from "../duration";
 
 /**
  * Kit files for a site captured before captures recorded them. The capture
@@ -22,7 +23,7 @@ const MIN_TEXT_MATCH = 0.6;
 /** A page with fewer word triples than this is too short to tell apart from another. */
 const MIN_SHINGLES = 20;
 /** A site urlscan had nothing for is asked again after this long: new scans may have appeared. */
-const RECHECK_AFTER_MS = 30 * 86_400_000;
+const RECHECK_AFTER_MS = 30 * DAY_MS;
 const KIT_TYPES = new Set(["script", "stylesheet"]);
 
 export type KitBackfillDependencies = UrlscanDependencies & {
