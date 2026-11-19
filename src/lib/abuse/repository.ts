@@ -16,6 +16,7 @@ import {
 } from "./persistence/artifacts";
 import {
 	beginEmailDelivery,
+	listRelayRefusedRoutes,
 	recoverEmailPreparationFailure,
 	settleCorrelatedEmailBounce,
 	settleEmailDelivery,
@@ -147,6 +148,7 @@ export const AbuseRepository = {
 	settleEmailDelivery,
 	recoverEmailPreparationFailure,
 	settleCorrelatedEmailBounce,
+	listRelayRefusedRoutes,
 	saveArtifact,
 	saveRouteArtifactOnce,
 	listArtifacts,

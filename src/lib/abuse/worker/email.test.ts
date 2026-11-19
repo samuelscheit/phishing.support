@@ -155,6 +155,38 @@ describe("email worker draft boundary", () => {
 		expect(await AbuseRepository.getReport(created.reportId)).toMatchObject({ status: "waiting_provider" });
 	});
 
+	test("the resend after our relay refused the report sends the stored draft with bare hosts instead of live URLs", async () => {
+		const { created, route } = await setupRoute();
+		const draft: AbuseEmailDraft = {
+			subject: "[Phishing Support] Abuse report for example.com",
+			body: "Hello Provider Example LLC Abuse Team,\n\nObserved URLs:\n- https://login.example.com/collect\n\nRegards,\nThe phishing.support team",
+			recipientLabel: "Provider Example LLC",
+		};
+		const sentBodies: string[] = [];
+		const services = {
+			markUnknownExternal: async () => undefined,
+			createDraft: async () => draft,
+			send: async (params: { body: string; runId: bigint; reportId: bigint; routeId: bigint; recipient: string; subject: string; correlationKey: string }) => {
+				sentBodies.push(params.body);
+				if (sentBodies.length > 1) return { messageId: 1002n, status: "sent" as const, rfcMessageId: "<resend@phishing.support>" };
+				const messageId = await AbuseRepository.createOutboundMail({
+					reportId: params.reportId, routeId: params.routeId, runId: params.runId, fromAddress: "support@phishing.support", toAddresses: [params.recipient],
+					subject: params.subject, textBody: params.body, messageId: "<refused@phishing.support>", replyAddress: "abuse-relay@phishing.support",
+					correlationKey: params.correlationKey, rawArtifactId: 1n, attachmentArtifactIds: [],
+				});
+				await AbuseRepository.settleOutboundMail({ messageId, status: "failed", error: "550 5.7.1 [CS101] Message rejected due to local policy" });
+				return { messageId, status: "failed" as const, error: "550 5.7.1 [CS101] Message rejected due to local policy", rfcMessageId: "<refused@phishing.support>" };
+			},
+		};
+		await expect(sendEmail(route.id, services)).rejects.toThrow("CS101");
+		await sendEmail(route.id, services, { withoutLiveUrls: true });
+		expect(sentBodies[0]).toContain("https://login.example.com/collect");
+		expect(sentBodies[1]).toContain("- login.example.com\n");
+		expect(sentBodies[1]).not.toContain("https://login.example.com");
+		expect(sentBodies[1]).toContain(`https://phishing.support/reports/${created.reportId.toString()}`);
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "awaiting_provider_reply" });
+	});
+
 	test("fails closed instead of completing a stale job while an email route is still running", async () => {
 		const { created, route } = await setupRoute();
 		const draft: AbuseEmailDraft = {

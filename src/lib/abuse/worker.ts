@@ -9,7 +9,7 @@ import {
 	executeProviderSubmission,
 	getProviderSubmissionProvider,
 } from "./providers";
-import { sendEmail } from "./worker/email";
+import { ensureRelayRefusalResends, readSendEmailPayload, sendEmail } from "./worker/email";
 import { ensureCorrespondencePolls, pollProviderCorrespondence } from "./worker/correspondence";
 import { ensureReceiptLookups, findProviderReceipt } from "./worker/receipt";
 import { ensureOriginHostDisclosureJobs } from "./origin/disclosure";
@@ -267,6 +267,7 @@ export class AbuseWorker {
 		await ensureReceiptLookups();
 		await ensureOriginHostDisclosureJobs();
 		await ensureLivenessChecks();
+		await ensureRelayRefusalResends();
 		// Every confirmed site is linked again once whenever the campaign rules change.
 		await enqueueRulesSweep();
 		// Provider/browser work gets its own lane. A stuck CAPTCHA or browser can
@@ -488,7 +489,7 @@ export class AbuseWorker {
 				await resolveReport(idFrom(job.reportId, "reportId"), this.resolveTarget, job.retryCount);
 				return;
 			case "send_email":
-				await sendEmail(idFrom(job.routeId, "routeId"), this.servicesFor(signal));
+				await sendEmail(idFrom(job.routeId, "routeId"), this.servicesFor(signal), readSendEmailPayload(job.payload));
 				return;
 			case "run_portal":
 				await this.runPortal(job, signal);

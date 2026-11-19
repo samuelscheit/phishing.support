@@ -110,8 +110,10 @@ export function routeOutcomeOf(facts: RouteFacts): RouteOutcome {
 	const sentOutbound = messages.filter((message) => message.direction === "outbound" && message.status === "sent");
 	const inbound = messages
 		.filter((message) => message.direction === "inbound")
-		// A poll that found no verdict recorded our reading, not a provider answer.
-		.filter((message) => !(message.correlationKey && STATUS_RECORD.test(message.correlationKey) && !message.classification));
+		// A poll that found no verdict recorded our reading, not a provider answer;
+		// a refusal by our own relay means the provider never saw the report.
+		.filter((message) => !(message.correlationKey && STATUS_RECORD.test(message.correlationKey) && !message.classification))
+		.filter((message) => message.classification !== "relay_refused");
 	const bounces = inbound.filter(isBounce);
 	const replies = inbound.filter((message) => !isBounce(message));
 	const changedTo = (statuses: readonly string[]) => facts.statusChanges.filter((change) => statuses.includes(change.to)).map((change) => change.at).sort((a, b) => a.getTime() - b.getTime())[0];
@@ -127,7 +129,12 @@ export function routeOutcomeOf(facts: RouteFacts): RouteOutcome {
 		outbound: sentOutbound.length,
 	};
 
-	const deliveredAt = earliest(report?.occurredAt, changedTo(["submitted", "awaiting_provider_reply"]), replies[0]?.occurredAt, bounces[0]?.occurredAt);
+	// A mail route reached the provider when a report went out and stayed out: a refused or
+	// failed send leaves no `sent` report. Only a route with no outbound record at all
+	// (migrated threads) is taken at its status history's word.
+	const hasOutbound = messages.some((message) => message.direction === "outbound");
+	const filedAt = facts.routeType === "email" && hasOutbound ? undefined : changedTo(["submitted", "awaiting_provider_reply"]);
+	const deliveredAt = earliest(report?.occurredAt, filedAt, replies[0]?.occurredAt, bounces[0]?.occurredAt);
 	// A route without any history is a record migrated from before events existed: its status is all there is.
 	const undelivered = UNDELIVERED_AS[facts.status];
 	if (!deliveredAt && (facts.statusChanges.length || undelivered !== "delivered")) {

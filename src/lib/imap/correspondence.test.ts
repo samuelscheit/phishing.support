@@ -11,6 +11,7 @@ import { abuseCaseTag, authenticatedSender, canonicalSubject, deliveryFailure, s
 import { AbuseRepository } from "../abuse/repository";
 import { abuseJobs } from "../abuse/schema";
 import { classifyReply } from "../abuse/worker/mail";
+import { ensureRelayRefusalResends, readSendEmailPayload } from "../abuse/worker/email";
 import { ingestFetchedMail, type MailIngestConfig } from "./ingest";
 
 useTemporaryDatabase();
@@ -203,7 +204,8 @@ describe("helpdesk replies without threading headers", () => {
 });
 
 describe("delivery-status notifications", () => {
-	function icloudBounce(outbound: { messageId: string | null; replyAddress: string | null }, recipient: string, status: string) {
+	/** A delivery status notification iCloud returns; `hop` is the server that refused and what it said. */
+	function icloudDsn(outbound: { messageId: string | null; replyAddress: string | null }, recipient: string, status: string, hop: { remote: string; diagnostic: string }) {
 		const boundary = "bounce-boundary";
 		return Buffer.from([
 			...icloudReceived("icloud.com"),
@@ -218,7 +220,7 @@ describe("delivery-status notifications", () => {
 			`--${boundary}`,
 			"Content-Type: text/plain",
 			"",
-			`<${recipient}>: host 127.0.0.1 said: ${status} Message rejected due to local policy`,
+			`<${recipient}>: host ${hop.remote} said: ${hop.diagnostic}`,
 			`--${boundary}`,
 			"Content-Type: message/delivery-status",
 			"",
@@ -227,7 +229,8 @@ describe("delivery-status notifications", () => {
 			`Original-Recipient: rfc822;${recipient}`,
 			"Action: failed",
 			`Status: ${status.replace(/^(\d)(\d\d)$/, "$1.7.1")}`,
-			`Diagnostic-Code: smtp; ${status} 5.7.1 [CS101] Message rejected due to local policy`,
+			`Remote-MTA: dns; ${hop.remote}`,
+			`Diagnostic-Code: smtp; ${hop.diagnostic}`,
 			`--${boundary}`,
 			"Content-Type: text/rfc822-headers",
 			"",
@@ -238,6 +241,16 @@ describe("delivery-status notifications", () => {
 			`--${boundary}--`,
 			"",
 		].join("\r\n"));
+	}
+
+	/** The recipient's own server refused the report. */
+	function icloudBounce(outbound: { messageId: string | null; replyAddress: string | null }, recipient: string, status: string) {
+		return icloudDsn(outbound, recipient, status, { remote: `mx.${recipient.split("@")[1]}`, diagnostic: `${status} ${status[0]}.1.1 <${recipient}>: Recipient address rejected` });
+	}
+
+	/** iCloud's outbound filter refused the report before it left (production, 2026-11-19). */
+	function icloudRelayRefusal(outbound: { messageId: string | null; replyAddress: string | null }, recipient: string) {
+		return icloudDsn(outbound, recipient, "550", { remote: "127.0.0.1", diagnostic: "550 5.7.1 [CS101] Message rejected due to local policy; if you feel that your email was rejected in error, please forward a copy to icloudadmin@apple.com. Txn ID 62c2a436-70f7-4c0e-b64b-2469afc3b0fa" });
 	}
 
 	test("parses who rejected which of our messages", async () => {
@@ -297,6 +310,43 @@ describe("delivery-status notifications", () => {
 		const [bounce] = await inbound(sent.reportId);
 		await classifyReply(bounce!.id);
 		expect((await AbuseRepository.listRoutes(sent.reportId)).map((route) => route.verifiedEmail)).toEqual(["abuse@greylist2.example"]);
+	});
+
+	test("a refusal by our own relay is resent once without live URLs, never moves to another contact, and a second refusal ends it", async () => {
+		const sent = await sentReport("relay-refused.example.com", "abuse@relay-refused.example", undefined, undefined, {
+			email: "abuse@relay-refused.example",
+			source: "domain_rdap",
+			fallbackContacts: [{ email: "support@other-desk.example", source: "registrar_rdap" }],
+		});
+		await ingestFetchedMail({ uid: 590, source: icloudRelayRefusal(sent.outbound, "abuse@relay-refused.example") }, config, { createIntakeSubmission: noIntake });
+		const [refusal] = await inbound(sent.reportId);
+		await classifyReply(refusal!.id);
+		expect(await AbuseRepository.getMailMessage(refusal!.id)).toMatchObject({ kind: "bounce", classification: "relay_refused", disposition: "relay_refusal" });
+		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
+		// The provider's mailbox is not dead: no other contact is tried.
+		expect((await AbuseRepository.listRoutes(sent.reportId)).map((route) => route.verifiedEmail)).toEqual(["abuse@relay-refused.example"]);
+		const sends = () => (getDb()).then((db) => db.select().from(abuseJobs).where(eq(abuseJobs.routeId, sent.route.id)).all().filter((job) => job.jobType === "send_email"));
+		const [resend] = await sends();
+		expect(resend).toMatchObject({ status: "queued", payload: { retryReason: "relay_refused", withoutLiveUrls: true } });
+		expect(readSendEmailPayload(resend!.payload)).toEqual({ withoutLiveUrls: true });
+
+		// The resend goes out and is refused again: that is the end of it.
+		const retry = await AbuseRepository.beginEmailDelivery({ routeId: sent.route.id, providerPayload: { source: "test" }, correlationKey: `test-mail:${sent.route.id.toString()}` });
+		await sendAbuseEmailRoute({
+			reportId: sent.reportId, routeId: sent.route.id, runId: retry!.run.id, recipient: "abuse@relay-refused.example",
+			subject: "resend", body: "relay-refused.example.com", correlationKey: retry!.run.correlationKey,
+			transport: { sendMail: async () => ({ messageId: "smtp-test-2" }) },
+		});
+		await AbuseRepository.settleEmailDelivery({ runId: retry!.run.id, expectedRunStatus: "starting", expectedRouteStatus: "running", outcome: "sent" });
+		const second = (await AbuseRepository.listMailForReport(sent.reportId)).filter((message) => message.direction === "outbound" && message.status === "sent").at(-1)!;
+		await ingestFetchedMail({ uid: 591, source: icloudRelayRefusal(second, "abuse@relay-refused.example") }, config, { createIntakeSubmission: noIntake });
+		const refusals = (await inbound(sent.reportId)).filter((message) => message.kind === "bounce");
+		await classifyReply(refusals.at(-1)!.id);
+		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
+		expect((await sends()).map((job) => job.id)).toEqual([resend!.id]);
+		// A restart queues nothing either: two refusals are final.
+		await ensureRelayRefusalResends();
+		expect((await sends()).map((job) => job.id)).toEqual([resend!.id]);
 	});
 
 	test("a temporary failure queues one resend with the same identity", async () => {

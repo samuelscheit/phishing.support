@@ -112,6 +112,8 @@ export const abuseMailClassifications = [
 	"needs_more_information",
 	"rejected",
 	"bounce",
+	/** Our own mail relay refused to send the report (see mail/relay_refusal.ts): the provider never saw it. */
+	"relay_refused",
 	"ambiguous",
 ] as const;
 export type AbuseMailClassification = (typeof abuseMailClassifications)[number];

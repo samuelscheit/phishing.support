@@ -77,6 +77,7 @@ function CopyReplyAddress({ replyAddress }: { replyAddress: string }) {
 /** What each stored message is, as the case timeline shows it. */
 function messageTitle(message: SubmissionReportMessage): string {
 	if (message.direction === "outbound") return message.decisionReply ? "Reply sent" : "Report sent";
+	if (message.classification === "relay_refused") return "Refused by our mail relay";
 	if (message.kind === "bounce" || message.classification === "bounce") return "Delivery failed";
 	if (message.kind === "notification") return "Provider update";
 	if (message.kind === "provider_api") return "Provider message";

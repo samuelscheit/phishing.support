@@ -1,11 +1,35 @@
 import { abuseEmailCaseUrl, createAbuseEmailDraft, readVerifiedEmailDraft, type AbuseEmailDraft, verifiedEmailProviderPayload } from "../mail/draft";
 import { isSafeEmailDeliveryFailure } from "../mail/types";
+import { bodyWithoutLiveUrls } from "../mail/relay_refusal";
 import { sendAbuseEmailRoute } from "../mail/send";
 import { serviceIdentity } from "../../constants";
 import { approvalDraftOf } from "../persistence/approvals";
 import { AbuseRepository } from "../repository";
 import { errorText, RetryableDeliveryError, routeContext, UnknownExternalStateError, type WorkerServices } from "./shared";
 import { DAY_MS } from "../../duration";
+import { isDown } from "../../liveness/layer";
+import { listSiteChecksForTargets } from "../../liveness/repository";
+import { RELAY_RESEND_PAYLOAD } from "./mail";
+
+/**
+ * Queue the one resend of every report our relay refused once, unless its site
+ * is already down: for refusals settled before resends existed, and for any
+ * whose resend job was lost. Once per route, ever.
+ */
+export async function ensureRelayRefusalResends(): Promise<void> {
+	for (const { route, refusals } of await AbuseRepository.listRelayRefusedRoutes()) {
+		if (refusals > 1) continue;
+		const latest = (await listSiteChecksForTargets([route.targetId])).at(-1);
+		if (latest && isDown(latest.state)) continue;
+		await AbuseRepository.enqueueJobOnce({
+			jobType: "send_email",
+			reportId: route.reportId,
+			routeId: route.id,
+			payload: { ...RELAY_RESEND_PAYLOAD },
+			dedupeKey: `relay-resend:${route.id.toString()}`,
+		});
+	}
+}
 
 type EmailWorkerServices = Pick<WorkerServices, "markUnknownExternal"> & {
 	/** Injectable for deterministic worker tests; production uses the canonical draft builder. */
@@ -14,7 +38,14 @@ type EmailWorkerServices = Pick<WorkerServices, "markUnknownExternal"> & {
 	send?: typeof sendAbuseEmailRoute;
 };
 
-export async function sendEmail(routeId: bigint, worker: EmailWorkerServices): Promise<void> {
+/** How a send job sends: `withoutLiveUrls` is the resend after our relay refused the report (mail/relay_refusal.ts). */
+export type SendEmailOptions = { withoutLiveUrls?: boolean };
+
+export function readSendEmailPayload(payload: Record<string, unknown> | null | undefined): SendEmailOptions {
+	return payload?.withoutLiveUrls === true ? { withoutLiveUrls: true } : {};
+}
+
+export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, options: SendEmailOptions = {}): Promise<void> {
 	const { route, report, target, evidenceArtifacts } = await routeContext(routeId);
 	if (route.routeType !== "email" || !route.verifiedEmail) return;
 	if (route.status === "running") {
@@ -119,7 +150,7 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices): P
 			reportId: report.id,
 			recipient: route.verifiedEmail,
 			subject: persistedDraft.subject,
-			body: persistedDraft.body,
+			body: options.withoutLiveUrls ? bodyWithoutLiveUrls(persistedDraft.body, report.id) : persistedDraft.body,
 			attachments,
 			correlationKey,
 			replyAddress: retryReplyAddress,

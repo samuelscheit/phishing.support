@@ -84,6 +84,27 @@ describe("routeOutcomeOf", () => {
 		expect(real).toMatchObject({ verdict: "acknowledged", decisionAt: at(30), overturnedByFollowUp: true });
 	});
 
+	test("a report our own relay refused never reached the provider, whatever its route status said meanwhile", () => {
+		const refused = { ...reply(0.01, "relay_refused", "bounce") };
+		const outcome = routeOutcomeOf(facts({
+			status: "delivery_failed",
+			messages: [{ ...sent(0), status: "failed" }, refused],
+			statusChanges: [{ to: "awaiting_provider_reply", at: at(0) }, { to: "delivery_failed", at: at(0.01) }],
+		}));
+		expect(outcome).toMatchObject({ verdict: "not_delivered", inbound: 0 });
+		// Its resend went out: delivered from then on, unanswered.
+		const resent = routeOutcomeOf(facts({
+			status: "awaiting_provider_reply",
+			messages: [{ ...sent(0), status: "failed" }, refused, sent(1, "email-run:1")],
+			statusChanges: [{ to: "awaiting_provider_reply", at: at(0) }, { to: "delivery_failed", at: at(0.01) }, { to: "awaiting_provider_reply", at: at(1) }],
+		}));
+		expect(resent).toMatchObject({ verdict: "no_reply", sentAt: at(1), followUps: 0 });
+	});
+
+	test("a mail route without any outbound record is taken at its status history", () => {
+		expect(routeOutcomeOf(facts({ status: "awaiting_provider_reply", statusChanges: [{ to: "awaiting_provider_reply", at: at(2) }] }))).toMatchObject({ verdict: "no_reply", sentAt: at(2) });
+	});
+
 	test("the decision is when the final verdict first stood", () => {
 		expect(routeOutcomeOf(facts({ messages: [sent(0), reply(1, "acknowledged"), reply(2, "rejected"), reply(3, "rejected")] })).decisionAt).toEqual(at(2));
 	});
