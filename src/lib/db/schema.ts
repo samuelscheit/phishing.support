@@ -4,6 +4,7 @@ import { WhoISInfo } from "../website_info";
 import { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
 import { MailData } from "../mail_ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
+import type { WebsiteAccessGate } from "../website_access_gate";
 import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteSiteAssessment, WebsiteVisitRecord } from "../website_types";
 
 export const submissionKind = ["email", "website"] as const;
@@ -40,6 +41,8 @@ export type WebsiteSubmissionData = {
 	redirectSubmissionId?: string;
 	/** How the capture handled the submitted page's scripted jump to another site. */
 	cloaking?: WebsiteCloaking;
+	/** How visitors got into the reported page, when it is not shown to everyone who opens it; set when the report is filed. */
+	accessGate?: WebsiteAccessGate;
 	/** Set when the captured page sat behind the kit's own "I'm not a robot" gate, which the capture clicked through. */
 	verificationGate?: { label: string };
 	/** Scripts and stylesheets, from any host, received by the live capture; absent for uploaded or retained MHTML. */

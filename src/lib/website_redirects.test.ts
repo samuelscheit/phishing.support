@@ -84,6 +84,8 @@ function dependencies(archive: WebsiteArchiveResult, archiveCalls: ArchiveCall[]
 		analysisClient: phishingModel(),
 		// Never reach a real time-stamping authority from a test.
 		timestampEvidence: async () => undefined,
+		// A gated page's direct visit answers with the page itself.
+		bareVisit: { fetch: (async () => new Response("ok")) as typeof fetch, assertPublicHost: async () => {} },
 		// A handed-over capture is parsed from its MHTML; the fake returns the
 		// same evidence with the provenance it was given.
 		archiveWebsite: async (options) => {
@@ -407,6 +409,35 @@ describe("scripted jumps every route followed to the same site", () => {
 		expect(website?.navigationHops).toEqual(archive.navigationHops);
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
 		expect(await AbuseRepository.getReportForSubmission(childId)).toBeUndefined();
+	});
+
+	test("a page reached only through an entry's one-time link is reported with how to reach it and what a direct visit gets", async () => {
+		// Production case 381727464776274088: Cloudflare opened lbbvw.com/ without the session and found nothing.
+		const entry = "https://f24ac216.37b963ba383fc01de7edcef8.workers.dev/";
+		const ticket = "https://lbbvw.com/?dataXX0=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1cmwiOiJodHRwczovL2xiYnZ3LmNvbS8iLCJkb21haW4iOiJsYmJ2dy5jb20iLCJrZXkiOiJTUlZ3UWJuZjAzb2QiLCJxcmMiOm51bGwsImlhdCI6MTc5NTA3ODA2MCwiZXhwIjoxNzk1MDc4MTgwfQ.qAQe7AM6yZdPpNWwd5ao1NTlafcHGAFeYM_Ue6L02qA";
+		const page = "https://lbbvw.com/";
+		const id = await websiteSubmission(70n, entry);
+		const archive = archiveOf([{ ...hop(0, entry, 200, entry), visitorStep: { submitted: [] } }, hop(1, entry, 302, ticket), hop(2, ticket, 302, page), hop(3, page, 200)]);
+		const bareRequests: string[] = [];
+		const decoy = (async (input: URL | RequestInfo) => {
+			bareRequests.push(String(input));
+			return String(input) === page ? new Response(null, { status: 302, headers: { location: "https://href.li/?https://example.com" } }) : new Response("ok");
+		}) as typeof fetch;
+
+		await analyzeWebsite({ submissionId: id, url: entry }, { ...dependencies(archive), bareVisit: { fetch: decoy, assertPublicHost: async () => {} } });
+
+		const parent = await SubmissionsEntity.get(id);
+		const childId = BigInt(parent!.data.kind === "website" ? parent!.data.website.redirectSubmissionId! : "0");
+		expect((await waitForStatus(childId, ["reported", "failed", "invalid"])).status).toBe("reported");
+		const report = await AbuseRepository.getReportForSubmission(childId);
+		expect(report!.description).toContain(`Victims are sent to ${entry}, a link on another site, which first has them pass a check page of its own and then forwards each of them to lbbvw.com.`);
+		expect(report!.description).toContain("one-time link whose token is valid for only 2 minutes");
+		expect(report!.description).toContain(`Opened without that session, ${page} sends visitors to https://href.li/?https://example.com`);
+		expect(report!.description).toContain(`To see the page, follow ${entry} in a browser and continue straight through; our capture of what victims see, with screenshots, is at `);
+		// Kept with the case for answers to providers; the page was requested once, without a session.
+		const child = await SubmissionsEntity.get(childId);
+		expect(child?.data.kind === "website" ? child.data.website.accessGate : undefined).toMatchObject({ entryUrl: entry, entryStep: true, ticket: { lifetimeSeconds: 120 }, bareVisit: { url: page, reachedUrl: "https://href.li/?https://example.com" } });
+		expect(bareRequests).toEqual([page, "https://href.li/?https://example.com"]);
 	});
 
 	test("a phishing destination keeps the submitted case redirected to the reported case", async () => {

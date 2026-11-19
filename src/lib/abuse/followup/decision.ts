@@ -10,6 +10,7 @@ import { UnknownExternalStateError } from "../worker/shared";
 import { runDecisionAgent, type DecisionAgentModel, type DecisionAgentOutcome, type DecisionAgentStep } from "./agent";
 import { caseCaptureNames, type AttachableFile, type DecisionToolDependencies } from "./tools";
 import { asRecord } from "../../values";
+import { accessGateOf, arrivalChain } from "../../website_access_gate";
 
 const MAX_MESSAGE_TEXT = 6_000;
 
@@ -68,6 +69,9 @@ export async function followUpProviderDecision(
 	const caseUrl = abuseEmailCaseUrl(input.report.submissionId);
 	const attachable = new Map<string, AttachableFile>(input.evidenceArtifacts.map((artifact) => [artifact.name, { filename: artifact.name, mimeType: artifact.mimeType, content: Buffer.from(artifact.blob) }]));
 	const visitor = reporterBrowserIdentity(input.report.requesterHeaders ?? undefined);
+	// From the link first submitted: a case handed off from a redirecting site starts at its entry.
+	const arrival = submissionId === undefined ? [] : await arrivalChain(submissionId);
+	const capturedUrl = website && (arrival.find((hop) => hop.contentCaptured)?.url ?? website.archiveUrl ?? website.url);
 
 	const context = {
 		now: (dependencies.now ?? (() => new Date()))().toISOString(),
@@ -95,7 +99,9 @@ export async function followUpProviderDecision(
 				findings: (website.siteAssessments ?? []).filter((assessment) => assessment.finding === "phishing" || assessment.finding === "malware"),
 				cloaking: website.cloaking ?? null,
 				device: website.device ?? null,
-				navigation: (website.navigationHops ?? []).map(({ url, status, redirectTo }) => ({ url, status, redirectTo: redirectTo ?? null })),
+				navigation: arrival.map(({ url, status, redirectTo, visitorStep }) => ({ url, status, redirectTo: redirectTo ?? null, ...(visitorStep ? { passedPageOfItsOwn: true } : {}) })),
+				// Cases reported before the gate was kept with them have it read from their arrival.
+				accessGate: website.accessGate ?? (capturedUrl ? accessGateOf(arrival, capturedUrl) : undefined) ?? null,
 				visit: website.visit?.report ?? null,
 			} : {}),
 		},

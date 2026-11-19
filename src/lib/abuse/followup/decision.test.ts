@@ -13,6 +13,7 @@ import type { WebsiteArchiveResult, WebsiteVisitParams } from "../../website_arc
 import { scriptedVisitSession } from "../../site_visit/test_helpers";
 import type { DecisionAgentModel } from "./agent";
 import { followUpProviderDecision } from "./decision";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 
 useTemporaryDatabase();
 
@@ -72,9 +73,9 @@ function scripted(...turns: Array<Array<Record<string, unknown>>>) {
 }
 const call = (name: string, args: Record<string, unknown>, id = name) => ({ type: "function_call", call_id: id, name, arguments: JSON.stringify(args) });
 
-async function deniedRoute(target: string, observedUrl: string) {
+async function deniedRoute(target: string, observedUrl: string, submissionId?: bigint) {
 	const request = await validateAbuseReportRequest({ targets: [target], allegationCategory: "malware", description: "The page tells visitors to paste a command that installs a stealer.", observedUrls: [{ target, urls: [observedUrl] }] });
-	const report = await AbuseRepository.createReport({ request, reporter: { reporterHeaders: { "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36" } } });
+	const report = await AbuseRepository.createReport({ request, ...(submissionId !== undefined ? { submissionId } : {}), reporter: { reporterHeaders: { "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36" } } });
 	const [reportTarget] = await AbuseRepository.listTargets(report.reportId);
 	const route = await AbuseRepository.upsertResolvedRoute(reportTarget!.id, {
 		routeKey: "provider_submission:cloudflare:contact", providerRegistryKey: "cloudflare", providerDisplayName: "Cloudflare Abuse",
@@ -95,6 +96,38 @@ function recordingSend() {
 const tools = { capture: async ({ url }: { url: string }) => liveCapture(url), fetch: payloadHost, assertPublicHost: async () => {}, timestamp: async () => undefined };
 
 describe("provider decision follow-up agent", () => {
+	test("a page behind an entry's one-time link reaches the agent with the entry, the token's lifetime and the whole arrival", async () => {
+		// Production case 381727464776274088: Cloudflare opened lbbvw.com/ without the session, saw the decoy and
+		// denied; the agent then rechecked lbbvw.com/ itself, reached example.com and agreed. It never saw the entry.
+		const entry = "https://f24ac216.37b963ba383fc01de7edcef8.workers.dev/";
+		const ticket = "https://lbbvw.com/?dataXX0=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1cmwiOiJodHRwczovL2xiYnZ3LmNvbS8iLCJkb21haW4iOiJsYmJ2dy5jb20iLCJrZXkiOiJTUlZ3UWJuZjAzb2QiLCJxcmMiOm51bGwsImlhdCI6MTc5NTA3ODA2MCwiZXhwIjoxNzk1MDc4MTgwfQ.qAQe7AM6yZdPpNWwd5ao1NTlafcHGAFeYM_Ue6L02qA";
+		const page = "https://lbbvw.com/";
+		const hop = (index: number, url: string, status: number, redirectTo?: string) => ({ index, url, hostname: new URL(url).hostname, status, ...(redirectTo ? { redirectTo } : {}), contentCaptured: !redirectTo });
+		await SubmissionsEntity.create({ id: 900n, kind: "website", dedupeKey: "entry", status: "redirected", data: { kind: "website", website: { url: entry, redirectSubmissionId: "901", navigationHops: [{ ...hop(0, entry, 200, entry), visitorStep: { submitted: [] } }, hop(1, entry, 302, ticket), hop(2, ticket, 302, page), hop(3, page, 200)] } } });
+		// Reported before the gate was kept with the case: it is read from the arrival.
+		await SubmissionsEntity.create({ id: 901n, kind: "website", source: "redirect:900", dedupeKey: "lbbvw", status: "reported", data: { kind: "website", website: { url: ticket, archiveUrl: page, navigationHops: [hop(0, ticket, 302, page), hop(1, page, 200)] } } });
+		const { route } = await deniedRoute("lbbvw.com", page, 901n);
+		const { model, inputs } = scripted([call("do_not_answer", { reason: "scripted" })]);
+
+		await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "no_abuse_found" }, { model, tools });
+
+		const context = JSON.parse(((inputs[0]![0] as { content: Array<{ text: string }> }).content[0]!).text);
+		expect(context.case.navigation).toEqual([
+			{ url: entry, status: 200, redirectTo: entry, passedPageOfItsOwn: true },
+			{ url: entry, status: 302, redirectTo: ticket },
+			{ url: ticket, status: 302, redirectTo: page },
+			{ url: page, status: 200, redirectTo: null },
+		]);
+		expect(context.case.accessGate).toEqual({ entryUrl: entry, entryStep: true, ticket: { url: ticket, issuedAt: "2026-11-19T08:47:40.000Z", expiresAt: "2026-11-19T08:49:40.000Z", lifetimeSeconds: 120 } });
+
+		// A gate kept at report time, with its direct visit, is what the agent gets.
+		const kept = { entryUrl: entry, entryStep: true, bareVisit: { url: page, reachedUrl: "https://href.li/?https://example.com", checkedAt: "2026-11-19T08:51:00.000Z" } };
+		await SubmissionsEntity.setWebsiteField(901n, "accessGate", kept);
+		const again = scripted([call("do_not_answer", { reason: "scripted" })]);
+		await followUpProviderDecision({ routeId: route.id, state: "denied again" }, { model: again.model, tools, providerFor: () => ({ decisionFollowUp: { addressee: "Cloudflare", contestedStates: ["denied again"], channel: { kind: "email", replyAddress: "abusereply@cloudflare.com", subject: (id: string) => `[${id}]` } } }) as never });
+		expect(JSON.parse(((again.inputs[0]![0] as { content: Array<{ text: string }> }).content[0]!).text).case.accessGate).toEqual(kept);
+	});
+
 	test("investigates with its tools, then sends its own answer exactly as written, with the screenshot it chose", async () => {
 		const { reportId, route } = await deniedRoute("paneo.work", "https://paneo.work/");
 		const { sent, send } = recordingSend();

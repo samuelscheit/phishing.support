@@ -205,7 +205,7 @@ export class SubmissionsEntity {
 	 * Set one field of a website submission's data in place, so a slow job
 	 * never writes back what others changed meanwhile.
 	 */
-	static async setWebsiteField(id: bigint, field: "urlscanKit", value: unknown) {
+	static async setWebsiteField(id: bigint, field: "urlscanKit" | "accessGate", value: unknown) {
 		const db = await getDb();
 		await db
 			.update(submissions)

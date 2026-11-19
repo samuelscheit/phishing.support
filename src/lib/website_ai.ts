@@ -24,6 +24,8 @@ import type { LookupResult } from "./exfiltration/downloads/policy";
 import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "./website_capture_files";
 import { extractPasteCommands } from "./malware/paste_commands";
 import { isSameWebsite, websiteSite } from "./website_site";
+import { accessGateOf, arrivalChain, checkBareVisit, type BareVisitDependencies } from "./website_access_gate";
+import { abuseEmailCaseUrl } from "./abuse/mail/draft";
 import { createExfiltrationCanaries } from "./exfiltration/canaries";
 import { discoverExfiltrationBackends } from "./exfiltration/analysis";
 import type { CapturedNetworkRequest, ExfiltrationBackend, ExfiltrationCanaries } from "./exfiltration/types";
@@ -496,6 +498,8 @@ export type WebsiteAnalysisDependencies = {
 	downloadLookups?: (sha256: string) => Promise<LookupResult[]>;
 	/** The agent that walks the site; the browser task agent in production. */
 	visitAgent?: VisitAgent;
+	/** The request that checks what a gated page shows a visitor without its session. */
+	bareVisit?: BareVisitDependencies;
 };
 
 /** Capture retries after a browser-service failure: 5 s, 15 s, then 45 s. */
@@ -741,10 +745,11 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			await emitStep(submissionId, "reporting", 90);
 			const reportUrls = websiteReportUrls(archive.navigationHops, reportableSite);
 			const commands = extractPasteCommands(archive.text.toString("utf-8"));
+			const accessGate = await reportAccessGate(submissionId, reportableSite.url, archive.userAgent, dependencies.bareVisit);
 			await reportConfirmedWebsiteAbuse({
 				submissionId,
 				urls: reportUrls,
-				analysisText: buildWebsiteReportEvidence(capturedClassification, { commands, navigationHops: archive.navigationHops, hiddenFrames: archive.hiddenFrames, device: archive.device, ...(visitor ? { reporterUserAgent: visitor.override.userAgent } : {}), providerWarning: archive.providerWarning, offeredDownload: archive.offeredDownload, dataDrops: visited.dataDrops }),
+				analysisText: buildWebsiteReportEvidence(capturedClassification, { commands, navigationHops: archive.navigationHops, hiddenFrames: archive.hiddenFrames, device: archive.device, ...(visitor ? { reporterUserAgent: visitor.override.userAgent } : {}), providerWarning: archive.providerWarning, offeredDownload: archive.offeredDownload, dataDrops: visited.dataDrops, accessGate, caseUrl: abuseEmailCaseUrl(submissionId) }),
 				...(archive.userAgent ? { userAgent: archive.userAgent } : {}),
 				screenshots: await capturedPageScreenshots(submissionId, analyzedCaptureStep(archive.navigationHops)),
 				reporter: { reporterIp, reporterCountry, reporterHeaders },
@@ -792,6 +797,20 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 	}
 
 	return submissionId;
+}
+
+/**
+ * The gate in front of a page about to be reported, with what a visitor
+ * without its session gets now, kept with the case for the report and for
+ * answers to providers. A page reached directly is not requested again.
+ */
+async function reportAccessGate(submissionId: bigint, capturedUrl: string, userAgent: string | undefined, dependencies?: BareVisitDependencies) {
+	const gate = accessGateOf(await arrivalChain(submissionId), capturedUrl);
+	if (!gate) return undefined;
+	const bareVisit = await checkBareVisit(capturedUrl, userAgent, dependencies);
+	const accessGate = bareVisit ? { ...gate, bareVisit } : gate;
+	await SubmissionsEntity.setWebsiteField(submissionId, "accessGate", accessGate);
+	return accessGate;
 }
 
 /** Automatic re-queues of a failure another visit can change: 10 minutes apart, at most 3 times. */

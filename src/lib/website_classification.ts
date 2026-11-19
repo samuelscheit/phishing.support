@@ -8,6 +8,7 @@ import { defangCommand } from "./malware/defang";
 import { hasExploitSignals } from "./malware/exploit_loader";
 import { normalizePublicHttpUrl } from "./abuse/security";
 import { isSameWebsite } from "./website_site";
+import { accessGateStatements, type WebsiteAccessGate } from "./website_access_gate";
 import { offeredDownloadEvidence, offeredDownloadSource, offeredDownloadStatements, quotedDownloadFile, OFFERED_DOWNLOAD_INSTRUCTIONS } from "./website_offered_download";
 import {
 	CANARY_FIELD_LABEL,
@@ -256,6 +257,10 @@ export function buildWebsiteReportEvidence(
 		offeredDownload?: WebsiteOfferedDownload;
 		/** Requests of the whole visit that sent synthetic values to another site. */
 		dataDrops?: readonly VisitDataSent[];
+		/** How visitors get into the page when it is not shown to everyone who opens it. */
+		accessGate?: WebsiteAccessGate;
+		/** Our public case page, where the capture's screenshots are. */
+		caseUrl?: string;
 	} = {},
 ): string {
 	const { finding, phishingBasis, evidenceQuote, collectionFields } = classification;
@@ -276,6 +281,8 @@ export function buildWebsiteReportEvidence(
 		classification.impersonatedBrand
 			? `${classification.impersonatedBrand.name}'s official website is ${classification.impersonatedBrand.officialUrl}; the reported site is not part of it.`
 			: undefined,
+		// Before the rest: a reviewer who opens the reported URL directly sees only the decoy, and providers cut long reports.
+		...(capturedUrl ? accessGateStatements(capture.accessGate, capturedUrl, capture.caseUrl) : []),
 		capture.providerWarning ? `${capture.providerWarning.provider} already shows its "${capture.providerWarning.warning}" warning before the site.` : undefined,
 		capture.device && capture.device !== "desktop" ? `The page turns desktop visitors away to a phone; it was captured as ${WEBSITE_DEVICE_LABEL[capture.device]}.` : undefined,
 		capture.reporterUserAgent && (!capture.device || capture.device === "desktop")
