@@ -7,6 +7,7 @@
  * through the private per-application relay; the Fabric credential stays in
  * that Browser Fabric-owned process.
  */
+import type { Browser as PatchrightBrowser, BrowserContext as PatchrightContext } from "patchright";
 import type { Browser as PuppeteerBrowser } from "rebrowser-puppeteer-core";
 
 import {
@@ -104,8 +105,8 @@ export interface FabricCdpSession {
 
 export interface FabricPatchrightSession {
 	id: string;
-	browser: any;
-	context: any;
+	browser: PatchrightBrowser;
+	context: PatchrightContext;
 	release(): Promise<void>;
 	cancel(): Promise<void>;
 }
@@ -375,14 +376,60 @@ function startSessionHeartbeat(config: FabricBrowserConfig, sessionId: string): 
 	return () => clearInterval(timer);
 }
 
-async function allowInsecureCertificates(browser: any): Promise<void> {
-	if (typeof browser?.newBrowserCDPSession !== "function") return;
+/** A connected CDP client plus how to drop its own transport when the lease ends. */
+interface FabricClientConnection<T> {
+	value: T;
+	/** Best-effort: a lost client transport must not block Fabric's lease transition. */
+	disconnect?: () => Promise<unknown>;
+}
+
+interface FabricLease<T> {
+	id: string;
+	value: T;
+	release(): Promise<void>;
+	cancel(): Promise<void>;
+}
+
+/**
+ * The one lifecycle every Fabric client shares: acquire a session, connect a
+ * client to it (cancelling the session if that fails), heartbeat the lease,
+ * and finish it exactly once with `release` (work done) or `cancel` (outcome
+ * unknown). Finishing stops the heartbeat, drops the client transport, then
+ * tells Fabric.
+ */
+async function leaseFabricSession<T>(
+	config: FabricBrowserConfig,
+	metadata: Record<string, FabricScalar>,
+	options: FabricSessionOptions,
+	connect: (sessionId: string) => Promise<FabricClientConnection<T>>,
+): Promise<FabricLease<T>> {
+	const sessionId = await acquireFabricSession(config, metadata, options);
+	let client: FabricClientConnection<T>;
+	try {
+		client = await connect(sessionId);
+	} catch (error) {
+		await sessionAction(config, sessionId, "cancel").catch(() => undefined);
+		throw error;
+	}
+	const stopHeartbeat = startSessionHeartbeat(config, sessionId);
+	let finished = false;
+	const finish = async (action: "release" | "cancel") => {
+		if (finished) return;
+		finished = true;
+		stopHeartbeat();
+		await client.disconnect?.().catch(() => undefined);
+		await sessionAction(config, sessionId, action).catch(() => undefined);
+	};
+	return { id: sessionId, value: client.value, release: () => finish("release"), cancel: () => finish("cancel") };
+}
+
+async function allowInsecureCertificates(browser: PatchrightBrowser): Promise<void> {
 	const cdp = await browser.newBrowserCDPSession();
 	try {
 		await cdp.send("Security.setIgnoreCertificateErrors", { ignore: true });
 	} finally {
 		try {
-			await cdp.detach?.();
+			await cdp.detach();
 		} catch {
 			// Detaching the short-lived setup session is best-effort.
 		}
@@ -405,23 +452,10 @@ export async function acquireFabricCdpSession(
 	options: Pick<FabricSessionOptions, "egress"> = {},
 	config: FabricBrowserConfig = requiredConfig(),
 ): Promise<FabricCdpSession> {
-	const sessionId = await acquireFabricSession(config, metadata, { ...options, leaseMode: "clone" });
-	let cdpEndpoint: string;
-	try {
-		cdpEndpoint = fabricRelayEndpoint(sessionId);
-	} catch (error) {
-		await sessionAction(config, sessionId, "cancel").catch(() => undefined);
-		throw error;
-	}
-	const stopHeartbeat = startSessionHeartbeat(config, sessionId);
-	let finished = false;
-	const finish = async (action: "release" | "cancel") => {
-		if (finished) return;
-		finished = true;
-		stopHeartbeat();
-		await sessionAction(config, sessionId, action).catch(() => undefined);
-	};
-	return { id: sessionId, cdpEndpoint, release: () => finish("release"), cancel: () => finish("cancel") };
+	const lease = await leaseFabricSession(config, metadata, { ...options, leaseMode: "clone" }, async (sessionId) => ({
+		value: fabricRelayEndpoint(sessionId),
+	}));
+	return { id: lease.id, cdpEndpoint: lease.value, release: lease.release, cancel: lease.cancel };
 }
 
 /**
@@ -433,12 +467,15 @@ export async function cancelFabricBrowserSession(sessionId: string): Promise<voi
 	await sessionAction(requiredConfig(), sessionId, "cancel");
 }
 
+/** Patchright keeps its CDP client transport on a private `_connection`; it has no public disconnect. */
+type PatchrightClientInternals = { _connection?: { close?: () => void } };
+
 /** Disconnect only this Patchright CDP client; never send Browser.close to Fabric Chromium. */
-export async function disconnectFabricPatchrightClient(browser: any): Promise<void> {
-	// Patchright exposes no public disconnect. Its private connection owns this
-	// client transport; calling Browser.close would instead terminate the
-	// Fabric-owned remote Chromium process before its durable lease transition.
-	const connection = browser?._connection;
+export async function disconnectFabricPatchrightClient(browser: object): Promise<void> {
+	// Calling Browser.close would terminate the Fabric-owned remote Chromium
+	// process before its durable lease transition; closing the transport only
+	// drops this client.
+	const connection = (browser as PatchrightClientInternals)._connection;
 	if (!connection || typeof connection.close !== "function") {
 		throw new Error("Patchright did not expose a disconnectable CDP client transport");
 	}
@@ -451,37 +488,19 @@ export async function acquireFabricPuppeteerBrowser(
 	options: FabricSessionOptions = {},
 ): Promise<{ browser: PuppeteerBrowser; sessionId: string; release(): Promise<void> }> {
 	const config = requiredConfig();
-	const sessionId = await acquireFabricSession(config, metadata, options);
-	let browser: PuppeteerBrowser;
-	try {
+	const lease = await leaseFabricSession(config, metadata, options, async (sessionId) => {
 		const module = await import("rebrowser-puppeteer-core");
-		browser = await connectThroughRelay(
+		const browser = await connectThroughRelay(
 			() => module.connect({ browserWSEndpoint: fabricRelayEndpoint(sessionId), acceptInsecureCerts: true }),
 			() => sessionAction(config, sessionId, "heartbeat"),
 		);
-	} catch (error) {
-		await sessionAction(config, sessionId, "cancel").catch(() => undefined);
-		throw error;
-	}
-
-	const disconnect = browser.disconnect.bind(browser);
-	const stopHeartbeat = startSessionHeartbeat(config, sessionId);
-	let finished = false;
-	const release = async () => {
-		if (finished) return;
-		finished = true;
-		stopHeartbeat();
-		try {
-			await disconnect();
-		} catch {
-			// A lost client transport still requires Fabric's lease transition.
-		}
-		await sessionAction(config, sessionId, "release").catch(() => undefined);
-	};
+		return { value: browser, disconnect: browser.disconnect.bind(browser) };
+	});
+	const { value: browser, release } = lease;
 	(browser as unknown as { close: () => Promise<void> }).close = release;
 	(browser as unknown as { disconnect: () => Promise<void> }).disconnect = release;
 	browser.once?.("disconnected", () => { void release(); });
-	return { browser, sessionId, release };
+	return { browser, sessionId: lease.id, release };
 }
 
 /** Connect Patchright to Fabric's relay; Patchright close is disconnect + Fabric release. */
@@ -490,39 +509,22 @@ export async function acquireFabricPatchrightSession(
 	options: FabricSessionOptions = {},
 ): Promise<FabricPatchrightSession> {
 	const config = requiredConfig();
-	const sessionId = await acquireFabricSession(config, metadata, options);
-	let browser: any;
-	try {
+	const lease = await leaseFabricSession(config, metadata, options, async (sessionId) => {
 		const { chromium } = await import("patchright");
-		browser = await connectThroughRelay(
+		const browser = await connectThroughRelay(
 			() => chromium.connectOverCDP(fabricRelayEndpoint(sessionId)),
 			() => sessionAction(config, sessionId, "heartbeat"),
 		);
-		await allowInsecureCertificates(browser);
-		const context = browser.contexts()[0];
-		if (!context) throw new Error("Fabric browser did not expose its leased profile context");
-
-		const stopHeartbeat = startSessionHeartbeat(config, sessionId);
-		let finished = false;
-		const finish = async (action: "release" | "cancel") => {
-			if (finished) return;
-			finished = true;
-			stopHeartbeat();
+		try {
+			await allowInsecureCertificates(browser);
+			const context = browser.contexts()[0];
+			if (!context) throw new Error("Fabric browser did not expose its leased profile context");
+			return { value: { browser, context }, disconnect: () => disconnectFabricPatchrightClient(browser) };
+		} catch (error) {
 			await disconnectFabricPatchrightClient(browser).catch(() => undefined);
-			await sessionAction(config, sessionId, action).catch(() => undefined);
-		};
-		(browser as { close: () => Promise<void> }).close = () => finish("release");
-		return {
-			id: sessionId,
-			browser,
-			context,
-			release: () => finish("release"),
-			cancel: () => finish("cancel"),
-		};
-	} catch (error) {
-		if (browser) await disconnectFabricPatchrightClient(browser).catch(() => undefined);
-		await sessionAction(config, sessionId, "cancel").catch(() => undefined);
-		if (error instanceof Error && error.message === "Fabric browser did not expose its leased profile context") throw error;
-		throw error;
-	}
+			throw error;
+		}
+	});
+	lease.value.browser.close = lease.release;
+	return { id: lease.id, ...lease.value, release: lease.release, cancel: lease.cancel };
 }

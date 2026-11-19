@@ -198,7 +198,7 @@ async function loginWithFabric(config: CloudflareLoginConfig, signal: AbortSigna
 		throw new CloudflareLoginError(`no browser was available (${errorSummary(error)})`);
 	});
 	try {
-		return await loginWithContext(fabric.context as BrowserContext, config, signal);
+		return await loginWithContext(fabric.context, config, signal);
 	} finally {
 		await boundedCleanup(fabric.release());
 	}
