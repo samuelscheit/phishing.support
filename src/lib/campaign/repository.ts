@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
-import { getDb } from "../db";
+import { getDb, type Transaction } from "../db";
 import { generateId } from "../db/ids";
 import { submissions, type Submission } from "../db/schema";
 import { assignCampaigns } from "./cluster";
@@ -35,18 +35,18 @@ function websiteUrl(submission: Pick<Submission, "data">): string {
  * keep the oldest campaign id of their group; merged and emptied campaigns
  * are marked, never deleted, because referrals were filed under them.
  */
-function recluster(tx: any): void {
+function recluster(tx: Transaction): void {
 	const links = tx
 		.select({ submissionId: campaignIndicators.submissionId, kind: campaignIndicators.kind, value: campaignIndicators.value })
 		.from(campaignIndicators)
 		.where(eq(campaignIndicators.links, true))
-		.all() as Array<{ submissionId: bigint; kind: string; value: string }>;
-	const existingRows = tx.select().from(campaignMembers).all() as Array<{ submissionId: bigint; campaignId: bigint; joinedAt: Date }>;
+		.all();
+	const existingRows = tx.select().from(campaignMembers).all();
 	const existing = new Map(existingRows.map((row) => [row.submissionId, row.campaignId]));
 	// Every reported website is a confirmed site, and every site with indicators on record was one.
 	const sites = [
-		...(tx.select({ id: submissions.id }).from(submissions).where(and(eq(submissions.kind, "website"), eq(submissions.status, "reported"))).all() as Array<{ id: bigint }>).map((row) => row.id),
-		...(tx.selectDistinct({ id: campaignIndicators.submissionId }).from(campaignIndicators).all() as Array<{ id: bigint }>).map((row) => row.id),
+		...tx.select({ id: submissions.id }).from(submissions).where(and(eq(submissions.kind, "website"), eq(submissions.status, "reported"))).all().map((row) => row.id),
+		...tx.selectDistinct({ id: campaignIndicators.submissionId }).from(campaignIndicators).all().map((row) => row.id),
 	];
 	const assignment = assignCampaigns({
 		links: links.map((link) => ({ submissionId: link.submissionId, key: `${link.kind}:${link.value}` })),

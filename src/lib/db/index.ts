@@ -1,5 +1,7 @@
 import { mkdirSync } from "node:fs";
+import type { ExtractTablesWithRelations } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
+import type { SQLiteTransaction } from "drizzle-orm/sqlite-core";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -64,6 +66,12 @@ async function initializeDatabase() {
 }
 
 let databasePromise: ReturnType<typeof initializeDatabase> | undefined;
+
+export type AppDatabase = Awaited<ReturnType<typeof initializeDatabase>>;
+/** The transaction `db.transaction` hands its callback: what persistence helpers that run inside one write take. */
+export type Transaction = SQLiteTransaction<"sync", void, Record<string, never>, ExtractTablesWithRelations<Record<string, never>>>;
+/** Either: for a helper that works inside a transaction or on its own. */
+export type DbExecutor = AppDatabase | Transaction;
 
 export function getDb() {
 	databasePromise ??= initializeDatabase();

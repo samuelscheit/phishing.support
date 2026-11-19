@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { serviceIdentity } from "../../constants";
-import { getDb } from "../../db";
+import { getDb, type Transaction } from "../../db";
 import { generateId } from "../../db/ids";
 import { abuseCaseTag, subjectRepeats } from "../mail/correlation";
 import { abuseJobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports, type AbuseMailClassification, type AbuseProviderRoute } from "../schema";
@@ -18,7 +18,7 @@ class DuplicateInboundMailError extends Error {
  * message's classification attempt, so duplicate IMAP delivery must not
  * create a second classifier run.
  */
-function ensureInboundReplyClassificationInTransaction(tx: any, message: {
+function ensureInboundReplyClassificationInTransaction(tx: Transaction, message: {
 	id: bigint;
 	reportId: bigint;
 	routeId: bigint;
@@ -235,7 +235,7 @@ export async function findCorrelatedInboundRoute(params: { recipients: string[];
  * helpdesks that answer from another address, its registrable domain. Only
  * routes that actually received our mail are candidates.
  */
-function emailedRoutesForSender(tx: any, sender: string, reportIds?: bigint[]) {
+function emailedRoutesForSender(tx: Transaction, sender: string, reportIds?: bigint[]) {
 	const domain = registrableDomain(sender.slice(sender.lastIndexOf("@") + 1));
 	const filters = [eq(abuseMailMessages.direction, "outbound"), inArray(abuseMailMessages.status, ["sent", "failed"])];
 	if (reportIds) filters.push(inArray(abuseMailMessages.reportId, reportIds));
@@ -249,7 +249,7 @@ function emailedRoutesForSender(tx: any, sender: string, reportIds?: bigint[]) {
 	return domain ? outbound.filter((message) => message.toAddresses.some((recipient) => registrableDomain(recipient.slice(recipient.lastIndexOf("@") + 1)) === domain)) : [];
 }
 
-function soleRoute(tx: any, routeIds: Iterable<bigint>): AbuseProviderRoute | undefined {
+function soleRoute(tx: Transaction, routeIds: Iterable<bigint>): AbuseProviderRoute | undefined {
 	const unique = [...new Set(routeIds)];
 	return unique.length === 1 ? tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, unique[0])).get() : undefined;
 }

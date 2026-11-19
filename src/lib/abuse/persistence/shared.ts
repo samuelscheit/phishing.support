@@ -1,3 +1,4 @@
+import type { DbExecutor } from "../../db";
 import { generateId } from "../../db/ids";
 import { abuseArtifacts, abuseEvents } from "../schema";
 import { sha256Hex } from "../security";
@@ -36,13 +37,13 @@ export function artifactValues(params: ArtifactValuesParams) {
 	};
 }
 
-export function insertArtifact(tx: any, params: ArtifactValuesParams): bigint {
+export function insertArtifact(tx: DbExecutor, params: ArtifactValuesParams): bigint {
 	const values = artifactValues(params);
 	tx.insert(abuseArtifacts).values(values).run();
 	return values.id;
 }
 
-export function recordEvent(tx: any, params: {
+export function recordEvent(tx: DbExecutor, params: {
 	reportId: bigint;
 	eventType: string;
 	data?: Record<string, unknown>;

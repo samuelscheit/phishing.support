@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 
-import { getDb } from "../../db";
+import { getDb, type Transaction } from "../../db";
 import { generateId } from "../../db/ids";
 import type { ReporterMetadata } from "../../request_metadata";
 import type { ValidatedAbuseReportRequest } from "../contracts";
@@ -24,7 +24,7 @@ import {
 import { listArtifacts } from "./artifacts";
 import { insertArtifact, now, recordEvent } from "./shared";
 
-function selectExistingIdempotentReport(tx: any, idempotencyKey: string) {
+function selectExistingIdempotentReport(tx: Transaction, idempotencyKey: string) {
 	return tx
 		.select({ id: abuseReports.id, requestPayloadHash: abuseReports.requestPayloadHash, trackingTokenHash: abuseReports.trackingTokenHash })
 		.from(abuseReports)

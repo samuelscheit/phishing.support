@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 
-import { getDb } from "../../db";
+import { getDb, type Transaction } from "../../db";
 import { abuseProviderRoutes, abuseReports, type AbuseReportStatus, type AbuseRouteStatus } from "../schema";
 import { recordEvent, now } from "./shared";
 import { aggregateReportStatus } from "./state";
@@ -11,7 +11,7 @@ import { aggregateReportStatus } from "./state";
  * worker cannot write an aggregate calculated from an obsolete snapshot.
  */
 export function recomputeReportStatusInTransaction(
-	tx: any,
+	tx: Transaction,
 	reportId: bigint,
 	data: Record<string, unknown> = {},
 ): AbuseReportStatus | undefined {
