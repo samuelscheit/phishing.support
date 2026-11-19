@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 
 import { normalizeMailbox } from "./abuse/mail/shared";
+import type { DeliveryStatusRequest } from "./abuse/mail/types";
 import { normalizeDomain } from "./abuse/security";
 
 /**
@@ -20,7 +21,7 @@ function envPort(name: string, fallback: number): number {
 }
 
 export type MailTransport = {
-	sendMail(options: { raw: Buffer; envelope: { from: string; to: string[] } } | { from: string; to: string; subject: string; text: string }): Promise<{ messageId?: string }>;
+	sendMail(options: { raw: Buffer; envelope: { from: string; to: string[] }; dsn: DeliveryStatusRequest } | { from: string; to: string; subject: string; text: string; envelope: { from: string; to: string[] } }): Promise<{ messageId?: string }>;
 };
 
 let transport: MailTransport | null | undefined;
@@ -52,6 +53,24 @@ export function smtpSender(): string {
 	const mailbox = normalizeMailbox(configured.match(/<([^<>]+)>/)?.[1] ?? configured);
 	if (!mailbox) throw new Error("SMTP_FROM must contain one valid mailbox.");
 	return mailbox;
+}
+
+/**
+ * The envelope sender of every mail (`SMTP_RETURN_PATH`), where bounces go:
+ * the relay's own bounce address, since the iCloud mailbox refuses the relay's
+ * bounces (imap/maildir.ts). Defaults to SMTP_FROM.
+ */
+export function smtpReturnPath(): string {
+	const configured = process.env.SMTP_RETURN_PATH?.trim();
+	if (!configured) return smtpSender();
+	const mailbox = normalizeMailbox(configured);
+	if (!mailbox) throw new Error("SMTP_RETURN_PATH must be one valid mailbox.");
+	return mailbox;
+}
+
+/** The Maildir the relay files bounces into (`RELAY_BOUNCE_MAILDIR`), or undefined. */
+export function relayBounceMaildir(): string | undefined {
+	return process.env.RELAY_BOUNCE_MAILDIR?.trim() || undefined;
 }
 
 /** Domain for generated Reply-To and Message-ID identities. It must deliver into one of IMAP_MAILBOXES. */

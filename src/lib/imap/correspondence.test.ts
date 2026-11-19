@@ -13,17 +13,22 @@ import { abuseJobs } from "../abuse/schema";
 import { classifyReply } from "../abuse/worker/mail";
 import { ensureRelayRefusalResends, readSendEmailPayload } from "../abuse/worker/email";
 import { ingestFetchedMail, type MailIngestConfig } from "./ingest";
+import { ingestMaildir, maildirUid } from "./maildir";
+import { mkdtemp, mkdir, readdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 useTemporaryDatabase();
 
 const config: MailIngestConfig = { mailbox: "phishing.support", uidValidity: 1700000000, intakeAddress: "report@phishing.support" };
-const environmentNames = ["SMTP_FROM", "REPLY_DOMAIN", "SMTP_HOST"] as const;
+const environmentNames = ["SMTP_FROM", "REPLY_DOMAIN", "SMTP_HOST", "SMTP_RETURN_PATH"] as const;
 const originalEnvironment = Object.fromEntries(environmentNames.map((name) => [name, process.env[name]]));
 
 beforeEach(() => {
 	process.env.SMTP_FROM = "support@phishing.support";
 	process.env.REPLY_DOMAIN = "phishing.support";
 	process.env.SMTP_HOST = "smtp.mail.me.com";
+	delete process.env.SMTP_RETURN_PATH;
 });
 
 afterAll(() => {
@@ -88,13 +93,16 @@ async function sentReport(target: string, recipient: string, subject?: string, s
 		subject: subject ?? `[Phishing Support] [${abuseCaseTag(report.reportId)}] Abuse report for ${target}`,
 		body: `Case details: https://phishing.support/submissions/${(submissionId ?? report.reportId).toString()}`,
 		correlationKey: delivery.run.correlationKey,
-		transport: { sendMail: async () => ({ messageId: "smtp-test" }) },
+		transport: { sendMail: async (message) => { submissions.push({ envelopeFrom: message.envelope.from, from: message.raw.toString("utf8").match(/^From: (.+)$/m)?.[1]?.trim(), dsn: message.dsn }); return { messageId: "smtp-test" }; } },
 	});
 	await AbuseRepository.settleEmailDelivery({ runId: delivery.run.id, expectedRunStatus: "starting", expectedRouteStatus: "running", outcome: "sent" });
 	const outbound = await AbuseRepository.getOutboundMailForRun(delivery.run.id);
 	if (!outbound?.messageId) throw new Error("Test outbound message was not persisted.");
 	return { reportId: report.reportId, route, outbound, tag: abuseCaseTag(report.reportId) };
 }
+
+/** What each report sent by `sentReport` handed the relay: envelope sender, From header, notice request. */
+const submissions: Array<{ envelopeFrom: string; from?: string; dsn: unknown }> = [];
 
 async function inbound(reportId: bigint) {
 	return (await AbuseRepository.listMailForReport(reportId)).filter((message) => message.direction === "inbound");
@@ -276,6 +284,17 @@ describe("delivery-status notifications", () => {
 		return icloudDsn(outbound, recipient, "550", { remote: "127.0.0.1", diagnostic: "550 5.7.1 [CS101] Message rejected due to local policy; if you feel that your email was rejected in error, please forward a copy to icloudadmin@apple.com. Txn ID 62c2a436-70f7-4c0e-b64b-2469afc3b0fa" });
 	}
 
+	test("every report asks the relay for failure notices with its headers only, sent to the return path", async () => {
+		submissions.length = 0;
+		await sentReport("dsn-request.example.com", "abuse@dsn-request.example");
+		process.env.SMTP_RETURN_PATH = "Bounces@Mail.Phishing.Support";
+		await sentReport("return-path.example.com", "abuse@dsn-request.example");
+		expect(submissions).toEqual([
+			{ envelopeFrom: "support@phishing.support", from: "support@phishing.support", dsn: { ret: "HDRS", notify: "FAILURE" } },
+			{ envelopeFrom: "bounces@mail.phishing.support", from: "support@phishing.support", dsn: { ret: "HDRS", notify: "FAILURE" } },
+		]);
+	});
+
 	test("parses who rejected which of our messages", async () => {
 		const parsed = await simpleParser(icloudBounce({ messageId: "<abuse-d984c10d2a49288f@phishing.support>", replyAddress: "abuse-ef16@phishing.support" }, "iarpoc@newfold.com", "550"));
 		expect(deliveryFailure(parsed)).toMatchObject({ recipients: ["iarpoc@newfold.com"], messageIds: ["<abuse-d984c10d2a49288f@phishing.support>"] });
@@ -335,18 +354,21 @@ describe("delivery-status notifications", () => {
 		expect((await AbuseRepository.listRoutes(sent.reportId)).map((route) => route.verifiedEmail)).toEqual(["abuse@greylist2.example"]);
 	});
 
-	async function relayRefusedReport(domain: string, recipient: string) {
+	type Outbound = { messageId: string | null; replyAddress: string | null };
+
+	/** A report to `recipient` (with a fallback contact) whose first attempt `refusal` answered. */
+	async function refusedReport(domain: string, recipient: string, refusal: (outbound: Outbound) => Buffer) {
 		const sent = await sentReport(domain, recipient, undefined, undefined, {
 			email: recipient,
 			source: "domain_rdap",
 			fallbackContacts: [{ email: "support@other-desk.example", source: "registrar_rdap" }],
 		});
-		await ingestFetchedMail({ uid: nextUid++, source: icloudRelayRefusal(sent.outbound, recipient) }, config, { createIntakeSubmission: noIntake });
-		const [refusal] = await inbound(sent.reportId);
-		await classifyReply(refusal!.id);
+		await ingestFetchedMail({ uid: nextUid++, source: refusal(sent.outbound) }, config, { createIntakeSubmission: noIntake });
+		const [first] = await inbound(sent.reportId);
+		await classifyReply(first!.id);
 		const sends = () => getDb().then((db) => db.select().from(abuseJobs).where(eq(abuseJobs.routeId, sent.route.id)).all().filter((job) => job.jobType === "send_email"));
 		/** The queued resend goes out (its job done) and `answer` comes back for it. */
-		const resendAnswered = async (answer: (outbound: { messageId: string | null; replyAddress: string | null }) => Buffer) => {
+		const resendAnswered = async (answer: (outbound: Outbound) => Buffer) => {
 			const db = await getDb();
 			db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.routeId, sent.route.id)).run();
 			const retry = await AbuseRepository.beginEmailDelivery({ routeId: sent.route.id, providerPayload: { source: "test" }, correlationKey: `test-mail:${sent.route.id.toString()}:${nextUid}` });
@@ -360,9 +382,53 @@ describe("delivery-status notifications", () => {
 			await ingestFetchedMail({ uid: nextUid++, source: answer(outbound) }, config, { createIntakeSubmission: noIntake });
 			await classifyReply((await inbound(sent.reportId)).filter((message) => message.kind === "bounce").at(-1)!.id);
 		};
-		return { ...sent, refusal: refusal!, sends, resendAnswered };
+		return { ...sent, refusal: first!, sends, resendAnswered };
 	}
+	const relayRefusedReport = (domain: string, recipient: string) => refusedReport(domain, recipient, (outbound) => icloudRelayRefusal(outbound, recipient));
 	let nextUid = 590;
+
+	test("a server refusing the attached phishing mail gets the report once more with it as text; a second refusal is the mailbox's", async () => {
+		const recipient = "abuse@attachment-desk.example";
+		const attachmentRefusal = (outbound: Outbound) => icloudDsn(outbound, recipient, "550", { remote: "mx.attachment-desk.example", diagnostic: "550 Attached file 'phishing-email.eml' has disallowed extension" });
+		const sent = await refusedReport("attachment-refused.example.com", recipient, attachmentRefusal);
+		expect(await AbuseRepository.getMailMessage(sent.refusal.id)).toMatchObject({ classification: "bounce", disposition: "attachment_refusal" });
+		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
+		expect((await AbuseRepository.listRoutes(sent.reportId)).map((route) => route.verifiedEmail)).toEqual([recipient]);
+		const [resend] = await sent.sends();
+		expect(resend).toMatchObject({ status: "queued", payload: { retryReason: "attachment_refused" } });
+		expect(readSendEmailPayload(resend!.payload)).toEqual({ attachedMessagesAsText: true });
+
+		await sent.resendAnswered(attachmentRefusal);
+		expect((await inbound(sent.reportId)).map((message) => message.disposition)).toEqual(["attachment_refusal", "delivery_status_notification"]);
+		expect((await sent.sends()).map((job) => job.id)).toEqual([resend!.id]);
+		expect((await AbuseRepository.listRoutes(sent.reportId)).map((route) => route.verifiedEmail)).toEqual([recipient, "support@other-desk.example"]);
+	});
+
+	test("a bounce our relay files into its Maildir settles the report; every message leaves new/ once handled, and a rerun changes nothing", async () => {
+		const recipient = "abuse@maildir-desk.example";
+		const sent = await sentReport("maildir-bounce.example.com", recipient);
+		const dir = await mkdtemp(path.join(tmpdir(), "relay-bounces-"));
+		await mkdir(path.join(dir, "new"));
+		await writeFile(path.join(dir, "new", "1795112712.V801I2M3.mail.phishing.support"), icloudBounce(sent.outbound, recipient, "550"));
+		await writeFile(path.join(dir, "new", "1795112713.V801I4M5.mail.phishing.support"), eml(["From: someone@spam.example", "To: bounces@mail.phishing.support", "Subject: hello", "Message-Id: <unrelated@spam.example>"], "Nothing to do with any report."));
+		await ingestMaildir(dir, config.intakeAddress);
+		const [bounce] = await inbound(sent.reportId);
+		expect(bounce).toMatchObject({ kind: "bounce" });
+		await classifyReply(bounce!.id);
+		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
+		expect(await readdir(path.join(dir, "new"))).toEqual([]);
+		expect((await readdir(path.join(dir, "cur"))).sort()).toEqual(["1795112712.V801I2M3.mail.phishing.support:2,S", "1795112713.V801I4M5.mail.phishing.support:2,S"]);
+		await ingestMaildir(dir, config.intakeAddress);
+		expect(await inbound(sent.reportId)).toHaveLength(1);
+	});
+
+	test("a missing Maildir is no error, and a file's stand-in UID is a stable safe integer", async () => {
+		await ingestMaildir(path.join(tmpdir(), "no-such-relay-maildir"), config.intakeAddress);
+		const uid = maildirUid("1795112712.V801I2M3.mail.phishing.support");
+		expect(Number.isSafeInteger(uid) && uid > 0).toBe(true);
+		expect(maildirUid("1795112712.V801I2M3.mail.phishing.support")).toBe(uid);
+		expect(maildirUid("1795112712.V801I2M4.mail.phishing.support")).not.toBe(uid);
+	});
 
 	test("a refusal by our own relay never moves to another contact; the relay gets one resend, freshly drafted, and a second refusal ends it", async () => {
 		const sent = await relayRefusedReport("relay-refused.example.com", "abuse@relay-refused.example");

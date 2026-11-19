@@ -1,5 +1,6 @@
 import { classifyProviderReply, extractVerifiedProviderLinks } from "../mail/reply";
 import { isRelayRefusal } from "../mail/relay_refusal";
+import { isAttachmentRefusal } from "../mail/attachment_policy";
 import { isGenericFormEscalationEnabled } from "../providers/generic_form";
 import { getProviderSubmissionProvider } from "../providers";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
@@ -35,6 +36,25 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 			const settled = await AbuseRepository.getRoute(route.id);
 			if (settled?.status === "delivery_failed") await queueRelayResend(settled);
 			return;
+		}
+		if (status === "5" && isAttachmentRefusal(message.textBody ?? "")) {
+			// The server refused the attached phishing mail, not the mailbox: the report goes
+			// once more with it attached as text. A second such refusal is the mailbox's.
+			const earlier = (await AbuseRepository.listMailForReport(route.reportId))
+				.some((other) => other.routeId === route.id && other.id !== message.id && other.disposition === "attachment_refusal");
+			if (!earlier) {
+				await AbuseRepository.setMailClassification(message.id, "bounce", [], "attachment_refusal");
+				if (await settleBounce(message.id, route, { retry: false, failureReason })) {
+					await AbuseRepository.enqueueJobOnce({
+						jobType: "send_email",
+						reportId: route.reportId,
+						routeId: route.id,
+						payload: { retryReason: "attachment_refused" },
+						dedupeKey: `attachment-resend:${route.id.toString()}`,
+					});
+				}
+				return;
+			}
 		}
 		await AbuseRepository.setMailClassification(message.id, "bounce", [], "delivery_status_notification");
 		const settled = await settleBounce(message.id, route, {

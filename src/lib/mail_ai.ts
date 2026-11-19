@@ -8,7 +8,7 @@ import { getInfo } from "./website_info";
 import { cleanPrivateInformation, isServiceAddress } from "./mail_redaction";
 import * as toon from "@toon-format/toon";
 import { reportConfirmedEmailPhishing } from "./abuse/submission_reports";
-import { smtpSender, smtpTransport } from "./mail_config";
+import { smtpReturnPath, smtpSender, smtpTransport } from "./mail_config";
 import { createWebsiteSubmission } from "./submissions/website";
 import { defaultReasoning, defaultResponseModel } from "./openai_client";
 import { serviceIdentity } from "./constants";
@@ -281,7 +281,7 @@ async function notifyReporter(submissionId: bigint, to: string | undefined, { su
 	try {
 		const from = `${serviceIdentity.name} <${smtpSender()}>`;
 		console.log(`Sending reporter notification email to ${to} from ${from} for submission ${submissionId}. Subject: ${subject} Body: ${body}`);
-		if (to) await smtpTransport()?.sendMail({ from, to, subject, text: body });
+		if (to) await smtpTransport()?.sendMail({ from, to, subject, text: body, envelope: { from: smtpReturnPath(), to: [to] } });
 	} catch (err) {
 		console.error("Failed to send reporter notification email:", err);
 	}

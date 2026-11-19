@@ -6,6 +6,7 @@ import { startWebsiteAutoRetries } from "./lib/submissions/website";
 import { retryInterruptedWebsiteAnalysis } from "./lib/website_ai";
 import { startAbuseWorker, stopAbuseWorker } from "./lib/abuse/worker";
 import { startMailboxListener, stopMailboxListener } from "./lib/imap/listener";
+import { startRelayBounceIntake, stopRelayBounceIntake } from "./lib/imap/maildir";
 import { envInt } from "./lib/env";
 
 
@@ -45,6 +46,7 @@ try {
 }
 try {
 	if (!startMailboxListener()) console.warn("IMAP is not configured; mail intake and provider replies are disabled.");
+	if (!startRelayBounceIntake()) console.warn("RELAY_BOUNCE_MAILDIR is not set; bounces of reports are not read.");
 } catch (err) {
 	console.error("Mailbox listener failed to start:", err);
 }
@@ -63,6 +65,7 @@ const shutdown = async (signal: string) => {
 	console.log(`Received ${signal}, shutting down...`);
 	stopWebsiteAutoRetries();
 	await stopMailboxListener();
+	await stopRelayBounceIntake();
 	await stopAbuseWorker();
 	server.close(() => {
 		// no-op

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 import MailComposer from "nodemailer/lib/mail-composer";
 
-import { replyDomain, smtpSender, smtpTransport } from "../../mail_config";
+import { replyDomain, smtpReturnPath, smtpSender, smtpTransport } from "../../mail_config";
 import { AbuseRepository } from "../repository";
 import { attachmentFilename } from "./shared";
 import {
@@ -10,9 +10,18 @@ import {
 	type AbuseMailSendResult,
 	type AbuseMailTransport,
 	type CanonicalAbuseMail,
+	type DeliveryStatusRequest,
 	SafeEmailDeliveryFailure,
 } from "./types";
 import { errorText } from "../../error_text";
+
+/**
+ * A failure notice carries only the report's headers: a notice quoting the
+ * report's phishing URLs and attachments is itself refused by the mailbox
+ * it returns to (iCloud, `554 5.7.1 [HM08]`, 2026-11-19), and its bounce
+ * would be lost. Success and delay notices are not wanted.
+ */
+const FAILURE_NOTICE_HEADERS_ONLY: DeliveryStatusRequest = { ret: "HDRS", notify: "FAILURE" };
 
 const HEADER_BREAK = /[\r\n\u0000]/;
 const MAILBOX = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
@@ -186,7 +195,7 @@ export async function sendAbuseEmailRoute(params: {
 
 	let result: { messageId?: string };
 	try {
-		result = await transport.sendMail({ raw: mail.rawMime, envelope: { from: mail.from, to: mail.to } });
+		result = await transport.sendMail({ raw: mail.rawMime, envelope: { from: smtpReturnPath(), to: mail.to }, dsn: FAILURE_NOTICE_HEADERS_ONLY });
 	} catch (error) {
 		const message = errorText(error);
 		if (isKnownSmtpRejection(error)) {

@@ -1,32 +1,52 @@
-# Outbound mail relay for abuse reports (Dokploy compose "mailer" in the
-# phishing.support project, on respond5).
+# Mail relay for abuse reports (Dokploy compose "mailer" in the phishing.support
+# project, on respond5).
 #
-# Reports go straight from here to the provider's MX: no third-party content
-# filter sits in the path. iCloud's outbound filter refused reports that carry
-# live phishing URLs (550 5.7.1 [CS101]); see src/lib/abuse/mail/relay_refusal.ts.
-# iCloud still receives every reply and bounce (MX, IMAP_*): DSNs go to the
-# envelope sender support@phishing.support.
+# Outbound: reports go straight from here to each provider's MX, with no
+# third-party content filter in the path. iCloud's outbound filter refused
+# reports carrying live phishing URLs (550 5.7.1 [CS101]); see
+# src/lib/abuse/mail/relay_refusal.ts. The app reaches the relay on
+# dokploy-network as phishing-mailer:587 with the SASL user below
+# (SMTP_USER/SMTP_PASS); nothing relays without that login.
 #
-# DNS (Cloudflare, DNS only): A mail.phishing.support -> respond5's IPv4, PTR
-# of that IPv4 -> mail.phishing.support (Contabo panel), SPF includes the
-# IPv4, DKIM selector `ps1` signed by rspamd (public key: docker exec
-# <container> cat /var/lib/rspamd/dkim/phishing.support.ps1.txt), DMARC p=none.
+# Bounces: reports carry the envelope sender bounces@mail.phishing.support
+# (SMTP_RETURN_PATH). Notices this relay writes itself, and late ones that
+# provider servers send to the MX of mail.phishing.support (this relay, port
+# 25), are filed into the Maildir relay-bounces/ on the app's data volume,
+# which the app reads (RELAY_BOUNCE_MAILDIR, src/lib/imap/maildir.ts). They
+# cannot go to the iCloud mailbox: iCloud refuses every delivery status
+# notification from this relay (554 5.7.1 [HM08]), signed or not. Replies
+# still go to iCloud (Reply-To, MX of phishing.support).
 #
-# The app reaches it on dokploy-network as phishing-mailer:587 with the SASL
-# user below (SMTP_USER/SMTP_PASS). mynetworks is loopback only, so no other
-# container on the shared network can relay without that login.
+# DNS (Cloudflare, DNS only): A and MX mail.phishing.support -> respond5's
+# IPv4, PTR of that IPv4 -> mail.phishing.support (Contabo panel), SPF of
+# phishing.support includes the IPv4 and mail.phishing.support has
+# `v=spf1 a -all`, DKIM selector `ps1` signed by rspamd (public key: docker
+# exec <container> cat /var/lib/rspamd/dkim/phishing.support.ps1.txt), DMARC
+# p=none.
 services:
   postfix:
     image: boky/postfix:v5.2.1
     restart: unless-stopped
+    ports:
+      - "25:25"
     environment:
-      ALLOWED_SENDER_DOMAINS: phishing.support
+      ALLOWED_SENDER_DOMAINS: phishing.support mail.phishing.support
       POSTFIX_myhostname: mail.phishing.support
       POSTFIX_mynetworks: 127.0.0.0/8
-      # The image defaults to `permit` and only checks the sender domain, and
-      # its sender restrictions admit mynetworks alone.
-      POSTFIX_smtpd_relay_restrictions: permit_mynetworks,permit_sasl_authenticated,reject
-      POSTFIX_smtpd_sender_restrictions: permit_mynetworks,permit_sasl_authenticated,reject
+      # Anyone may deliver to the two local addresses below; only SASL clients
+      # relay. The image's defaults admit mynetworks alone, then `permit`.
+      POSTFIX_smtpd_client_restrictions: permit
+      POSTFIX_smtpd_sender_restrictions: permit
+      POSTFIX_smtpd_relay_restrictions: permit_mynetworks,permit_sasl_authenticated,reject_unauth_destination
+      POSTFIX_smtpd_recipient_restrictions: reject_non_fqdn_recipient,permit
+      POSTFIX_virtual_mailbox_domains: mail.phishing.support
+      POSTFIX_virtual_mailbox_maps: "inline:{ bounces@mail.phishing.support=relay-bounces/, postmaster@mail.phishing.support=relay-bounces/ }"
+      POSTFIX_virtual_mailbox_base: /var/mail/app-data
+      # A fixed unprivileged owner of the Maildir; the app reads it as root.
+      POSTFIX_virtual_uid_maps: static:5000
+      POSTFIX_virtual_gid_maps: static:5000
+      # Must be at least message_size_limit, or virtual(8) refuses to start.
+      POSTFIX_virtual_mailbox_limit: "0"
       POSTFIX_inet_protocols: ipv4
       POSTFIX_message_size_limit: "52428800"
       # The app connects over the host-internal overlay network: no STARTTLS
@@ -40,6 +60,8 @@ services:
     volumes:
       - dkim:/var/lib/rspamd/dkim
       - spool:/var/spool/postfix
+      # The app's data volume (/app/data there): bounces land in relay-bounces/.
+      - app-data:/var/mail/app-data
     networks:
       dokploy-network:
         aliases:
@@ -48,6 +70,9 @@ services:
 volumes:
   dkim:
   spool:
+  app-data:
+    external: true
+    name: phishing_reporter_data
 
 networks:
   dokploy-network:

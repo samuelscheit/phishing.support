@@ -28,7 +28,7 @@ afterAll(() => {
 	else process.env.REPLY_DOMAIN = originalAbuseReplyDomain;
 });
 
-async function setupRoute() {
+async function setupRoute(recipient = "abuse@provider.example") {
 	const request = await validateAbuseReportRequest({
 		targets: ["example.com"],
 		allegationCategory: "phishing",
@@ -41,17 +41,53 @@ async function setupRoute() {
 	const [target] = await AbuseRepository.listTargets(created.reportId);
 	if (!target) throw new Error("Target was not created.");
 	const route = await AbuseRepository.upsertResolvedRoute(target.id, {
-		routeKey: "email:abuse@provider.example",
-		providerRegistryKey: "email:provider.example",
+		routeKey: `email:${recipient}`,
+		providerRegistryKey: `email:${recipient.split("@")[1]}`,
 		providerDisplayName: "Provider Abuse Desk",
 		routeType: "email",
-		verifiedEmail: "abuse@provider.example",
+		verifiedEmail: recipient,
 		resolverProvenance: { source: "test" },
 		resolutionSnapshot: { registrar: { identity: { organization: "Provider Example LLC" } } },
 		status: "verified",
 	});
 	return { created, route };
 }
+
+describe("attached phishing mail", () => {
+	async function sentAttachments(recipient: string, options: { attachedMessagesAsText?: boolean } = {}) {
+		const { created, route } = await setupRoute(recipient);
+		await AbuseRepository.saveArtifact({ reportId: created.reportId, routeId: route.id, name: "phishing-email.eml", kind: "referral_attachment", mimeType: "message/rfc822", buffer: Buffer.from("Subject: lure\r\n\r\nhttps://login.example.com/collect") });
+		await AbuseRepository.saveArtifact({ reportId: created.reportId, routeId: route.id, name: "website.png", kind: "referral_attachment", mimeType: "image/png", buffer: Buffer.from("png") });
+		const sent: Array<{ filename: string; mimeType: string }> = [];
+		const names: string[][] = [];
+		await sendEmail(route.id, {
+			markUnknownExternal: async () => undefined,
+			createDraft: async (input) => {
+				names.push(input.attachmentNames ?? []);
+				return { subject: "[Phishing Support] Abuse report for example.com", body: "Hello,\n\nA report.\n\nRegards,\nThe phishing.support team", recipientLabel: "Provider" };
+			},
+			send: async (params) => {
+				sent.push(...(params.attachments ?? []).map(({ filename, mimeType }) => ({ filename, mimeType })));
+				return { messageId: 998n, status: "sent", rfcMessageId: "<attachments@phishing.support>" };
+			},
+		}, options);
+		return { sent: sent.sort((a, b) => a.filename.localeCompare(b.filename)), names: names.flat().sort() };
+	}
+
+	test("goes as an attached message to an ordinary mailbox", async () => {
+		expect((await sentAttachments("abuse@provider.example")).sent).toEqual([{ filename: "phishing-email.eml", mimeType: "message/rfc822" }, { filename: "website.png", mimeType: "image/png" }]);
+	});
+
+	test("goes as text to a server known to refuse attached messages, and the draft names the text file", async () => {
+		const { sent, names } = await sentAttachments("abuse@hostzealot.com");
+		expect(sent).toEqual([{ filename: "phishing-email.eml.txt", mimeType: "text/plain" }, { filename: "website.png", mimeType: "image/png" }]);
+		expect(names).toEqual(["phishing-email.eml.txt", "website.png"]);
+	});
+
+	test("goes as text on the resend after a server refused it", async () => {
+		expect((await sentAttachments("abuse@provider.example", { attachedMessagesAsText: true })).sent[0]).toEqual({ filename: "phishing-email.eml.txt", mimeType: "text/plain" });
+	});
+});
 
 describe("email worker draft boundary", () => {
 	test("persists and sends the provider-facing draft rather than the stored analysis", async () => {

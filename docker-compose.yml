@@ -21,6 +21,9 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-support@phishing.support}
+      # Envelope sender kept by the relay, which files bounces into the Maildir below.
+      SMTP_RETURN_PATH: ${SMTP_RETURN_PATH:-}
+      RELAY_BOUNCE_MAILDIR: ${RELAY_BOUNCE_MAILDIR:-}
       IMAP_HOST: ${IMAP_HOST:-}
       IMAP_PORT: ${IMAP_PORT:-993}
       IMAP_SECURE: ${IMAP_SECURE:-true}

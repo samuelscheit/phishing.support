@@ -1,5 +1,6 @@
 import { abuseEmailCaseUrl, createAbuseEmailDraft, readVerifiedEmailDraft, type AbuseEmailDraft, verifiedEmailProviderPayload } from "../mail/draft";
 import { isSafeEmailDeliveryFailure } from "../mail/types";
+import { attachedMessagesAsText, refusesAttachedMessages } from "../mail/attachment_policy";
 import { sendAbuseEmailRoute } from "../mail/send";
 import { smtpRelay } from "../../mail_config";
 import { serviceIdentity } from "../../constants";
@@ -45,11 +46,17 @@ type EmailWorkerServices = Pick<WorkerServices, "markUnknownExternal"> & {
 	send?: typeof sendAbuseEmailRoute;
 };
 
-/** How a send job sends: `redraft` is the resend after our relay refused the report (queueRelayResend). */
-export type SendEmailOptions = { redraft?: boolean };
+/**
+ * How a send job sends: `redraft` is the resend after our relay refused the
+ * report (queueRelayResend), `attachedMessagesAsText` the resend after the
+ * recipient's server refused the attached phishing mail (mail/attachment_policy.ts).
+ */
+export type SendEmailOptions = { redraft?: boolean; attachedMessagesAsText?: boolean };
 
 export function readSendEmailPayload(payload: Record<string, unknown> | null | undefined): SendEmailOptions {
-	return payload?.retryReason === "relay_refused" ? { redraft: true } : {};
+	if (payload?.retryReason === "relay_refused") return { redraft: true };
+	if (payload?.retryReason === "attachment_refused") return { attachedMessagesAsText: true };
+	return {};
 }
 
 export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, options: SendEmailOptions = {}): Promise<void> {
@@ -76,10 +83,11 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 		...(approvalDraftOf(route)?.allowedUrls ?? []),
 	];
 	const routeArtifacts = await AbuseRepository.listRouteArtifacts(route.id, ["origin_host_evidence", "referral_attachment"]);
-	const attachments = [...routeArtifacts, ...evidenceArtifacts]
+	const evidence = [...routeArtifacts, ...evidenceArtifacts]
 		.filter((artifact, index, all) => all.findIndex((candidate) => candidate.id === artifact.id) === index)
 		.slice(0, 15)
 		.map((artifact) => ({ filename: artifact.name, mimeType: artifact.mimeType, content: artifact.blob }));
+	const attachments = options.attachedMessagesAsText || refusesAttachedMessages(route.verifiedEmail) ? attachedMessagesAsText(evidence) : evidence;
 	let draft: AbuseEmailDraft | undefined;
 	let providerPayload: Record<string, unknown>;
 	// A resend after our relay refused the report is drafted anew: the provider never received the

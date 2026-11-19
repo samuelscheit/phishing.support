@@ -25,8 +25,11 @@ export type AbuseMailAttachment = {
 	content: Buffer;
 };
 
+/** The delivery status notification asked of the relay (RFC 3461): on failure only, with the report's headers but not its body. */
+export type DeliveryStatusRequest = { ret: "HDRS"; notify: "FAILURE" };
+
 export type AbuseMailTransport = {
-	sendMail(params: { raw: Buffer; envelope: { from: string; to: string[] } }): Promise<{ messageId?: string }>;
+	sendMail(params: { raw: Buffer; envelope: { from: string; to: string[] }; dsn: DeliveryStatusRequest }): Promise<{ messageId?: string }>;
 };
 
 export type AbuseMailSendResult = {
