@@ -118,6 +118,27 @@ describe("helpdesk replies without threading headers", () => {
 		expect(await inbound(other.reportId)).toEqual([]);
 	});
 
+	test("Contabo's ticket reply from contabo.com attaches to the report we mailed to contabo.de; another company's TLD twin does not", async () => {
+		// 2026-11-19: Contabo answered abuse@contabo.de reports from no-reply@contabo.com without threading headers.
+		const sent = await sentReport("usc1.contabostorage.com", "abuse@contabo.de");
+		const other = await sentReport("other.contabostorage.com", "abuse@contabo.de");
+		const reply = (uid: number, domain: string) => ingestFetchedMail({
+			uid,
+			source: eml([
+				...icloudReceived(domain),
+				"To: support@phishing.support",
+				`Subject: [Ticket#2026111910007915] Re: ${sent.outbound.subject}`,
+				`From: Contabo <no-reply@${domain}>`,
+				`Message-Id: <1795109408.49436.${uid}@ticketsystem.${domain}>`,
+			], "Dear Sir or Madam, we could not find a domain or an IP address which we can assign to Contabo products."),
+		}, config, { createIntakeSubmission: noIntake });
+		expect(await reply(610, "contabo.com")).toMatchObject({ route: "reply", reason: "stored_provider_reply" });
+		expect(await inbound(sent.reportId)).toMatchObject([{ kind: "reply", fromAddress: "no-reply@contabo.com" }]);
+		expect(await inbound(other.reportId)).toEqual([]);
+		// The same name is not enough on its own: a sender we never mailed under any TLD stays unmatched.
+		expect(await reply(611, "contabo-support.com")).toMatchObject({ route: "ignored", reason: "no_report_match" });
+	});
+
 	test("a reply that only quotes our case URL attaches to that case", async () => {
 		const sent = await sentReport("quote-only.com", "abuse@regtons.com", "Abuse report", 373042876772257865n);
 		await sentReport("unrelated.com", "abuse@regtons.com");

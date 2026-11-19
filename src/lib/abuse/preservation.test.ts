@@ -9,7 +9,7 @@ describe("every takedown report asks the provider to preserve the records", () =
 		const draft = await createAbuseEmailDraft({
 			report: { id: 1n, allegationCategory: "phishing", description: "Credential phishing page.", legalBrandUrl: null, submissionId: null, reporterName: null, reporterContactEmail: null },
 			target: { normalizedTarget: "phish-kit-test.com", observedUrls: ["https://phish-kit-test.com/login"] },
-			route: { providerDisplayName: "Example Hosting", resolverProvenance: {}, resolutionSnapshot: {} },
+			route: { createdAt: new Date("2026-11-19T00:00:00Z"), providerDisplayName: "Example Hosting", resolverProvenance: {}, resolutionSnapshot: {} },
 			recipient: "abuse@example-hosting.com",
 		}, { generateSummary: async () => "The page collects passwords." });
 		const action = draft.body.indexOf("Please investigate the relevant domain");
@@ -24,7 +24,7 @@ describe("every takedown report asks the provider to preserve the records", () =
 		const draft = await createAbuseEmailDraft({
 			report: { id: 1n, allegationCategory: "phishing", description: "x", legalBrandUrl: null, submissionId: null, reporterName: null, reporterContactEmail: null },
 			target: { normalizedTarget: "campaign:1", observedUrls: [] },
-			route: { providerDisplayName: "ZCB", resolverProvenance: {}, resolutionSnapshot: { approvalDraft: approved } },
+			route: { createdAt: new Date("2026-11-19T00:00:00Z"), providerDisplayName: "ZCB", resolverProvenance: {}, resolutionSnapshot: { approvalDraft: approved } },
 			recipient: "cybercrime@gensta-ba.bayern.de",
 		}, { generateSummary: async () => { throw new Error("must not be asked"); } });
 		expect(draft).toEqual({ subject: "Strafanzeige", body: "Sehr geehrte Damen und Herren, …", recipientLabel: "ZCB" });

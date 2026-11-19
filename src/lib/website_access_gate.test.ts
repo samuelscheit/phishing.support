@@ -71,9 +71,9 @@ describe("access gate of a reported page", () => {
 		expect(bareVisit).toEqual({ url: PAGE, reachedUrl: "https://href.li/?https://example.com", checkedAt: "2026-11-19T08:51:00.000Z" });
 		expect(bareVisitLeftSite({ bareVisit: bareVisit! })).toBe(true);
 		const open = async () => new Response("<html>login</html>", { status: 200 });
-		expect(bareVisitLeftSite({ bareVisit: (await checkBareVisit(PAGE, undefined, { fetch: open as typeof fetch, assertPublicHost: async () => {}, now }))! })).toBe(false);
+		expect(bareVisitLeftSite({ bareVisit: (await checkBareVisit(PAGE, undefined, { fetch: open as unknown as typeof fetch, assertPublicHost: async () => {}, now }))! })).toBe(false);
 		const down = async () => { throw new TypeError("fetch failed"); };
-		expect(await checkBareVisit(PAGE, undefined, { fetch: down as typeof fetch, assertPublicHost: async () => {}, now })).toBeUndefined();
+		expect(await checkBareVisit(PAGE, undefined, { fetch: down as unknown as typeof fetch, assertPublicHost: async () => {}, now })).toBeUndefined();
 	});
 
 	test("the report says how victims reach the page, what a direct visit gets, and how to see it, before anything a provider may cut", () => {

@@ -232,8 +232,11 @@ export async function findCorrelatedInboundRoute(params: { recipients: string[];
 
 /**
  * Routes whose outbound abuse email went to `sender`'s mailbox or, for
- * helpdesks that answer from another address, its registrable domain. Only
- * routes that actually received our mail are candidates.
+ * helpdesks that answer from another address, its registrable domain, or
+ * else the same organization under another TLD (Contabo takes reports at
+ * abuse@contabo.de and answers from no-reply@contabo.com). Only routes that
+ * actually received our mail are candidates; the reply must still name the
+ * report by case tag, case URL or our exact subject.
  */
 function emailedRoutesForSender(tx: Transaction, sender: string, reportIds?: bigint[]) {
 	const domain = registrableDomain(sender.slice(sender.lastIndexOf("@") + 1));
@@ -246,7 +249,17 @@ function emailedRoutesForSender(tx: Transaction, sender: string, reportIds?: big
 		.all();
 	const exact = outbound.filter((message) => message.toAddresses.includes(sender));
 	if (exact.length > 0) return exact;
-	return domain ? outbound.filter((message) => message.toAddresses.some((recipient) => registrableDomain(recipient.slice(recipient.lastIndexOf("@") + 1)) === domain)) : [];
+	if (!domain) return [];
+	const recipientDomains = (message: { toAddresses: string[] }) => message.toAddresses.map((recipient) => registrableDomain(recipient.slice(recipient.lastIndexOf("@") + 1)));
+	const sameDomain = outbound.filter((message) => recipientDomains(message).includes(domain));
+	if (sameDomain.length > 0) return sameDomain;
+	const organization = domainOrganization(domain);
+	return outbound.filter((message) => recipientDomains(message).some((recipient) => recipient !== undefined && domainOrganization(recipient) === organization));
+}
+
+/** The name a registrable domain carries under its public suffix: `contabo` of contabo.de and contabo.com. */
+function domainOrganization(registrable: string): string {
+	return registrable.slice(0, registrable.indexOf("."));
 }
 
 function soleRoute(tx: Transaction, routeIds: Iterable<bigint>): AbuseProviderRoute | undefined {

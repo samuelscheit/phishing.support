@@ -85,7 +85,7 @@ function dependencies(archive: WebsiteArchiveResult, archiveCalls: ArchiveCall[]
 		// Never reach a real time-stamping authority from a test.
 		timestampEvidence: async () => undefined,
 		// A gated page's direct visit answers with the page itself.
-		bareVisit: { fetch: (async () => new Response("ok")) as typeof fetch, assertPublicHost: async () => {} },
+		bareVisit: { fetch: (async () => new Response("ok")) as unknown as typeof fetch, assertPublicHost: async () => {} },
 		// A handed-over capture is parsed from its MHTML; the fake returns the
 		// same evidence with the provenance it was given.
 		archiveWebsite: async (options) => {

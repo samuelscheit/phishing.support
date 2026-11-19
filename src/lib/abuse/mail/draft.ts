@@ -75,7 +75,7 @@ export type AbuseEmailDraftDependencies = {
 type DraftInput = {
 	report: Pick<AbuseReport, "id" | "allegationCategory" | "description" | "legalBrandUrl" | "submissionId" | "reporterName" | "reporterContactEmail">;
 	target: Pick<AbuseTarget, "normalizedTarget" | "observedUrls">;
-	route: Pick<AbuseProviderRoute, "providerDisplayName" | "resolverProvenance" | "resolutionSnapshot">;
+	route: Pick<AbuseProviderRoute, "providerDisplayName" | "resolverProvenance" | "resolutionSnapshot" | "createdAt">;
 	recipient: string;
 	attachmentNames?: string[];
 	attachmentMimeTypes?: string[];
@@ -321,9 +321,30 @@ function cleanAttachmentNames(names: readonly string[] | undefined): string[] {
 	return [...unique].slice(0, 15);
 }
 
+/**
+ * For a hoster reached through the address a domain resolved to: that
+ * address, when, and the network it belongs to. Hosting providers file abuse
+ * by IP; a report naming only a hostname is closed unread (Contabo,
+ * 2026-11-19: "we could not find a domain or an IP address which we can
+ * assign to Contabo products").
+ */
+export function hostingAddressLine(route: DraftInput["route"]): string | undefined {
+	const provenance = asRecord(route.resolverProvenance);
+	if (provenance?.source !== "domain_infrastructure_ip") return undefined;
+	const ip = valueAt(provenance, ["originatingIp"]);
+	const domain = valueAt(provenance, ["originatingDomain"]);
+	if (!ip || !domain) return undefined;
+	const resolved = asRecord(provenance.dnsResolution)?.publicAddresses;
+	const addresses = Array.isArray(resolved) && resolved.every((value) => typeof value === "string") && resolved.includes(ip) ? resolved as string[] : [ip];
+	const snapshot = asRecord(route.resolutionSnapshot);
+	const network = valueAt(snapshot, ["ipResolution", "allocationOwner", "name"]) ?? valueAt(snapshot, ["ipResolution", "allocationOwner", "organization"]);
+	return `Hosting IP address: ${ip} (${domain} resolved to ${addresses.join(", ")} on ${route.createdAt.toISOString().slice(0, 10)}${network ? `; network ${network}` : ""})`;
+}
+
 function bodyFor(params: {
 	allegationCategory: string;
 	target: string;
+	hostingAddress?: string;
 	observedUrls: string[];
 	legalBrandUrl?: string | null;
 	caseUrl?: string;
@@ -344,7 +365,7 @@ function bodyFor(params: {
 		: "No file attachment was available for this report; the target and any observed URL are included above.";
 	const brandReference = params.legalBrandUrl ? `Impersonated/legitimate brand reference: ${params.legalBrandUrl}` : undefined;
 	const caseReference = params.caseUrl ? `Case details: ${params.caseUrl}` : undefined;
-	const detailLines = [`Target: ${params.target}`, "Observed URLs:", observedUrls, brandReference, caseReference, params.reporterAttribution].filter((line): line is string => Boolean(line)).join("\n");
+	const detailLines = [`Target: ${params.target}`, params.hostingAddress, "Observed URLs:", observedUrls, brandReference, caseReference, params.reporterAttribution].filter((line): line is string => Boolean(line)).join("\n");
 	const body = [
 		recipientGreeting(params.recipientLabel),
 		"",
@@ -416,6 +437,7 @@ export async function createAbuseEmailDraft(input: DraftInput, dependencies: Abu
 		body: bodyFor({
 			allegationCategory: category,
 			target: input.target.normalizedTarget,
+			hostingAddress: hostingAddressLine(input.route),
 			observedUrls,
 			legalBrandUrl,
 			caseUrl,

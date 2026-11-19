@@ -28,6 +28,7 @@ const target = {
 };
 
 const hostingerRoute = {
+	createdAt: new Date("2026-11-19T00:00:00Z"),
 	providerDisplayName: "Abuse team",
 	resolverProvenance: {
 		email: "abuse@hostinger.com",
@@ -43,6 +44,32 @@ const hostingerRoute = {
 };
 
 describe("abuse email drafts", () => {
+	test("a hoster found through the domain's address is told the address, when it was resolved and whose network it is", async () => {
+		// Contabo closed 2026-11-19 reports that named only usc1.contabostorage.com: "we could not find a domain or an IP address which we can assign to Contabo products".
+		const contaboRoute = {
+			createdAt: new Date("2026-09-23T22:01:51Z"),
+			providerDisplayName: "Contabo Abuse Department",
+			resolverProvenance: {
+				source: "domain_infrastructure_ip",
+				originatingDomain: "usc1.contabostorage.com",
+				originatingIp: "209.126.15.85",
+				dnsResolution: { publicAddresses: ["209.126.15.85", "209.126.15.84"] },
+				ipRouteProvenance: { email: "abuse@contabo.de", source: "ip_rdap", entityName: "Contabo Abuse Department" },
+			},
+			resolutionSnapshot: { source: "domain_infrastructure_ip", infrastructureIp: "209.126.15.85", ipResolution: { allocationOwner: { handle: "NET-209-126-0-0-1", name: "CONTA-48" } } },
+		};
+		const draft = await createAbuseEmailDraft({
+			report,
+			target: { normalizedTarget: "usc1.contabostorage.com", observedUrls: ["https://usc1.contabostorage.com/5fe87cf9ddb142a2a7aa0826593db858:mineede/pdfsteff.html"] },
+			route: contaboRoute,
+			recipient: "abuse@contabo.de",
+		}, { generateSummary: async () => "The hosted page imitates a document-sharing sign-in." });
+		expect(draft.body).toContain("Target: usc1.contabostorage.com\nHosting IP address: 209.126.15.85 (usc1.contabostorage.com resolved to 209.126.15.85, 209.126.15.84 on 2026-09-23; network CONTA-48)\nObserved URLs:");
+		// A registrar is not told an address it does not host.
+		const registrar = await createAbuseEmailDraft({ report, target, route: hostingerRoute, recipient: "abuse@hostinger.com" }, { generateSummary: async () => "x" });
+		expect(registrar.body).not.toContain("Hosting IP address");
+	});
+
 	test("turns analysis evidence into a recipient-specific Hostinger complaint instead of pasting it", async () => {
 		const draft = await createAbuseEmailDraft({
 			report,
@@ -215,7 +242,7 @@ describe("abuse email drafts", () => {
 
 	test("falls back to the mailbox domain only when resolver provenance has no provider identity", () => {
 		expect(abuseEmailRecipientLabel({
-			route: { providerDisplayName: "Abuse team", resolverProvenance: {}, resolutionSnapshot: {} },
+			route: { createdAt: new Date("2026-11-19T00:00:00Z"), providerDisplayName: "Abuse team", resolverProvenance: {}, resolutionSnapshot: {} },
 			recipient: "abuse@example-host.test",
 		})).toBe("example-host.test");
 	});
