@@ -1,11 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import sharp from "sharp";
-import { and, eq } from "drizzle-orm";
 
 import type { AnalysisClient } from "./analysis_run";
 import { AbuseRepository } from "./abuse/repository";
-import { abuseJobs } from "./abuse/schema";
-import { getDb } from "./db";
+import { isKitSiblingSeed } from "./abuse/origin/kit_job";
 import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { createWebsiteSubmission, runDueWebsiteAutoRetries, websiteSubmissionDedupeKey } from "./submissions/website";
@@ -183,8 +181,8 @@ describe("website redirects", () => {
 		expect(targets.map(({ normalizedTarget, observedUrls }) => ({ normalizedTarget, observedUrls }))).toEqual([
 			{ normalizedTarget: "login-netflix.example.com", observedUrls: [kitPage, kitStart] },
 		]);
-		const discovery = await (await getDb()).select().from(abuseJobs).where(and(eq(abuseJobs.reportId, report!.id), eq(abuseJobs.jobType, "discover_kit_siblings"))).all();
-		expect(discovery).toHaveLength(1);
+		// Its campaign's kit search may start from it: an original report's site.
+		expect(await isKitSiblingSeed(childId)).toBe(true);
 	});
 
 	test("a redirect to a host that already has a case links the existing case instead of duplicating it", async () => {

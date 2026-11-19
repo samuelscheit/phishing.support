@@ -163,13 +163,27 @@ or rejected fresh session requires human intervention. Success requires both
 `result: "success"` and an `abuse_rand` receipt. The public bearer-token API is
 not used because this account lacks its abuse-reports entitlement.
 
-Every confirmed website report hashes same-host scripts, stylesheets, and image
-assets from its retained MHTML and searches urlscan.io for exact matches. One
-script/stylesheet hash is sufficient; image-only candidates must match at least
-two assets. Each candidate opens as a normal website submission, and the
-ordinary capture and classifier still decide whether it is reportable. `URLSCAN_API_KEY` enables
-authenticated search quota; if absent, the same bounded search uses urlscan.io's
-anonymous quota.
+Every confirmed site is linked into its campaign (`link_campaign`) by what
+only its operator has: exfiltration backends, payment receivers, and the kit's
+own code (scripts and hidden-frame documents the live capture received, at
+least 1 KiB, not a CDN or published library file). A site captured before
+captures recorded those files gets them from a urlscan.io scan of the site
+whose page text matches our analyzed page (a down, parked or replaced site's
+later scans do not); Cloudflare's `/cdn-cgi/` files never count. Each campaign
+is then searched on urlscan.io for further copies of that code
+(`search_campaign_kits`, in a worker lane of its own): daily while it finds new
+sites, weekly after 14 quiet days, and no longer after 60; a site linked into a
+campaign whose search ended starts it again. Only code an original report's
+site holds, or two confirmed sites share, is searched, and the search skips a
+hash urlscan shows on more domains than one kit plausibly runs on (a shared
+library). urlscan's quota running out puts a backfill or search off until it
+resets; it never ends one. Each new domain opens as a normal website submission, and the
+ordinary capture and classifier still decide whether it is reportable. Every
+confirmed site is linked again once when `CAMPAIGN_RULES_VERSION`
+(`src/lib/campaign/sweep.ts`) is raised, and on `POST
+/api/operator/campaigns/rebuild`. `URLSCAN_API_KEY` enables the authenticated
+quota (1,000 searches a day); without it the same bounded searches use
+urlscan.io's anonymous quota.
 
 When Cloudflare explicitly names a hosting-provider abuse mailbox in a reply,
 the worker additionally validates matching ASNs through RIPEstat, performs a

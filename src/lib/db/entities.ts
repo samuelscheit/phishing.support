@@ -250,6 +250,25 @@ export class SubmissionsEntity {
 			.limit(limit);
 	}
 
+	/**
+	 * Set one field of a website submission's data in place, so a slow job
+	 * never writes back what others changed meanwhile.
+	 */
+	static async setWebsiteField(id: bigint, field: "urlscanKit", value: unknown) {
+		const db = await getDb();
+		await db
+			.update(submissions)
+			.set({ data: sql`json_set(${submissions.data}, ${`$.website.${field}`}, json(${JSON.stringify(value)}))`, updatedAt: nowDate() })
+			.where(eq(submissions.id, id));
+	}
+
+	/** The submission a dedupe key already belongs to, e.g. a website's site. */
+	static async findIdByDedupeKey(dedupeKey: string): Promise<bigint | undefined> {
+		const db = await getDb();
+		const [row] = await db.select({ id: submissions.id }).from(submissions).where(eq(submissions.dedupeKey, dedupeKey)).limit(1);
+		return row?.id;
+	}
+
     /**
      * Finds a submission created from a given source.
      * Useful for sources like `imap:<account>:<mailbox>:<uidValidity>:<uid>` that may also create derived submissions like

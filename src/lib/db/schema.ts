@@ -44,6 +44,16 @@ export type WebsiteSubmissionData = {
 	verificationGate?: { label: string };
 	/** Scripts and stylesheets, from any host, received by the live capture; absent for uploaded or retained MHTML. */
 	kitResources?: WebsiteKitResource[];
+	/**
+	 * For a capture that recorded no kit files: those of a urlscan.io scan of the
+	 * site whose page showed the same text as ours (`scan`), or none when no scan
+	 * matched; `checkedAt` is when urlscan was asked.
+	 */
+	urlscanKit?: {
+		checkedAt: string;
+		scan?: { id: string; url: string; scannedAt: string; textMatch: number };
+		resources: WebsiteKitResource[];
+	};
 	/** Frames of the analyzed page no visitor can see, with the code they loaded; absent for uploaded MHTML. */
 	hiddenFrames?: WebsiteHiddenFrame[];
 	/** The phone the analyzed page was captured as, when it turned desktops away. */

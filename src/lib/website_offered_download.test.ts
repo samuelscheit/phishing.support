@@ -79,7 +79,7 @@ const DOWNLOAD = { url: "https://rbxcore.pro/Game-Copier.zip", fileName: "Game-C
 function scenario(params: { classification: Answer; visit?: ScriptedVisit }) {
 	const prompts: Array<{ kind: string; prompt: string }> = [];
 	const visits: WebsiteVisitParams[] = [];
-	const session = scriptedVisitSession(params.visit ?? { downloads: [DOWNLOAD], agent: { report: { submissionsAttempted: 0, downloadsStarted: 1, asksForPhone: false, stoppedReason: "Downloaded Game-Copier.zip." } } }, visits);
+	const session = scriptedVisitSession(params.visit ?? { downloads: [DOWNLOAD], agent: { report: { submissionsAttempted: 0, downloadsStarted: 1, asksForPhone: false, blockedByChallenge: false, stoppedReason: "Downloaded Game-Copier.zip." } } }, visits);
 	const dependencies: WebsiteAnalysisDependencies = {
 		getInfo: async () => ({ ip_rdaps: [] }),
 		analysisClient: model(params.classification, prompts),

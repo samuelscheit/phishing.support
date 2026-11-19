@@ -6,7 +6,7 @@ import { useTemporaryDatabase } from "../db/test_helpers";
 import type { ExfiltrationBackend } from "../exfiltration/types";
 import type { WebsiteKitResource } from "../website_types";
 import { backendIndicatorValue, extractIndicators, lookupPublishedLibrary } from "./indicators";
-import { describeCampaignIfChanged, linkSubmissionToCampaign, rebuildCampaigns, type LinkDependencies } from "./link";
+import { describeCampaignIfChanged, linkSubmissionToCampaign, type LinkDependencies } from "./link";
 import type { DescribeDependencies } from "./summary";
 import { CampaignRepository } from "./repository";
 
@@ -169,7 +169,7 @@ describe("campaign grouping on record", () => {
 		expect((await CampaignRepository.listCampaigns()).map((entry) => entry.campaign.id)).toEqual([survivor]);
 	});
 
-	test("a rebuild from scratch gives the same grouping and keeps campaign ids", async () => {
+	test("linking every site again gives the same grouping and keeps campaign ids", async () => {
 		const sites = {
 			a: { submission: website(1n, "a-kit-test.com"), backends: [botBackend("7001")] },
 			b: { submission: website(2n, "b-kit-test.com"), backends: [botBackend("7001")] },
@@ -180,10 +180,7 @@ describe("campaign grouping on record", () => {
 		for (const id of [1n, 2n, 3n]) await linkSubmissionToCampaign(id, dependencies);
 		const before = await Promise.all([1n, 2n, 3n].map((id) => CampaignRepository.campaignForSubmission(id)));
 
-		const result = await rebuildCampaigns(dependencies);
-		// The first rebuild describes both campaigns; a second one finds nothing changed.
-		expect(result).toEqual({ linked: 3, described: 2, failed: [] });
-		expect((await rebuildCampaigns(dependencies)).described).toBe(0);
+		for (const id of [3n, 1n, 2n]) await linkSubmissionToCampaign(id, dependencies);
 		expect(await Promise.all([1n, 2n, 3n].map((id) => CampaignRepository.campaignForSubmission(id)))).toEqual(before);
 	});
 
@@ -220,13 +217,12 @@ describe("campaign grouping on record", () => {
 		expect(await describeCampaignIfChanged(999n, dependencies)).toBe(false);
 	});
 
-	test("a site whose extraction fails keeps what is on record and is reported", async () => {
+	test("a site whose extraction fails keeps what is on record, and the failure surfaces", async () => {
 		const sites = { a: { submission: website(1n, "a-kit-test.com"), backends: [botBackend("7001")] } };
 		await store(sites.a.submission);
 		await linkSubmissionToCampaign(1n, fixtures(sites));
 		const campaign = await CampaignRepository.campaignForSubmission(1n);
-		const result = await rebuildCampaigns({ ...fixtures(sites), loadBackends: async () => { throw new Error("database busy"); } });
-		expect(result.failed).toEqual([{ submissionId: "1", error: "database busy" }]);
+		await expect(linkSubmissionToCampaign(1n, { ...fixtures(sites), loadBackends: async () => { throw new Error("database busy"); } })).rejects.toThrow("database busy");
 		expect(await CampaignRepository.campaignForSubmission(1n)).toBe(campaign!);
 	});
 });

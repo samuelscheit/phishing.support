@@ -1,9 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { z } from "zod";
-
 import { SubmissionsEntity } from "../../db/entities";
-import { fetchJson, RequestStatusError, RequestTimeoutError, type FetchImplementation } from "../../network/bounded_fetch";
 import type { WebsiteHiddenFrame, WebsiteKitResource } from "../../website_types";
 import { normalizeDomain, normalizePublicHttpUrl } from "../security";
 import { throwIfAborted } from "../worker/shared";
@@ -13,6 +10,7 @@ import { MAX_KIT_FINGERPRINTS } from "./snapshot";
 import { isPopularSite, loadPopularDomains, type PopularDomains } from "./popular_domains";
 import { certificateCovers, presentedCertificate, type OriginServer, type PresentedCertificate, type TlsProbe } from "./sweep";
 import { errorSummary } from "../../error_text";
+import { isUrlscanBusy, searchUrlscan, type UrlscanDependencies } from "./urlscan";
 
 const MAX_CANDIDATES = 100;
 /** Below this, a file is too generic (a tracking snippet, a one-line loader) to identify a kit. */
@@ -32,17 +30,8 @@ const MIN_RESOURCE_BYTES = 1_024;
  */
 const MAX_SCRIPT_HASH_DOMAINS = 99;
 const MAX_STYLESHEET_HASH_DOMAINS = 25;
-const URLSCAN_SEARCH_URL = "https://urlscan.io/api/v1/search/";
 const SCRIPT_MIME_TYPES = new Set(["text/javascript", "application/javascript", "application/x-javascript", "script"]);
 const KIT_MIME_TYPES = new Set([...SCRIPT_MIME_TYPES, "text/css", "stylesheet"]);
-
-const urlscanResponseSchema = z.object({
-	has_more: z.boolean().optional(),
-	results: z.array(z.object({
-		page: z.object({ domain: z.string().optional(), url: z.string().optional() }).passthrough().optional(),
-		task: z.object({ domain: z.string().optional(), url: z.string().optional() }).passthrough().optional(),
-	}).passthrough()),
-}).passthrough();
 
 /** `script` and `hidden_frame` are the kit's code; a stylesheet alone never identifies it. */
 export type KitFingerprintKind = "script" | "stylesheet" | "hidden_frame";
@@ -54,8 +43,15 @@ export type KitFingerprint = {
 	size: number;
 };
 
-/** What a capture recorded that can identify its kit. */
-export type KitCapture = { kitResources?: readonly WebsiteKitResource[]; hiddenFrames?: readonly WebsiteHiddenFrame[] };
+/**
+ * What a capture recorded that can identify its kit, and for a capture that
+ * recorded no files, those of a urlscan scan whose page matched it.
+ */
+export type KitCapture = {
+	kitResources?: readonly WebsiteKitResource[];
+	hiddenFrames?: readonly WebsiteHiddenFrame[];
+	urlscanKit?: { resources: readonly WebsiteKitResource[] };
+};
 
 export type ConfirmedSiblingDomain = {
 	domain: string;
@@ -84,15 +80,20 @@ export type SiblingDiscoveryResult = {
 	errors: string[];
 };
 
-export type SiblingDiscoveryDependencies = {
-	fetch?: FetchImplementation;
-	apiKey?: string;
+export type SiblingDiscoveryDependencies = UrlscanDependencies & {
 	loadKitCapture?: (submissionId: bigint) => Promise<KitCapture | undefined>;
 	loadPopularDomains?: () => Promise<PopularDomains>;
 	probe?: TlsProbe;
 };
 
 const isCode = (kind: KitFingerprintKind) => kind !== "stylesheet";
+
+/**
+ * A file the CDN in front of a site serves on the site's own host
+ * (Cloudflare's `/cdn-cgi/` scripts: Rocket Loader, email decoding, its
+ * challenge): the same bytes on every site behind it, never the kit's.
+ */
+const isCdnInjectedFile = (url: string) => new URL(url).pathname.startsWith("/cdn-cgi/");
 const maxHashDomains = (kind: KitFingerprintKind) => isCode(kind) ? MAX_SCRIPT_HASH_DOMAINS : MAX_STYLESHEET_HASH_DOMAINS;
 
 /**
@@ -125,9 +126,9 @@ export function kitFingerprints(capture: KitCapture): KitFingerprint[] {
 		if (fingerprint.size < MIN_RESOURCE_BYTES || !/^[a-f0-9]{64}$/.test(fingerprint.sha256) || fingerprints.has(fingerprint.sha256)) return;
 		fingerprints.set(fingerprint.sha256, fingerprint);
 	};
-	for (const resource of capture.kitResources ?? []) {
+	for (const resource of [...capture.kitResources ?? [], ...capture.urlscanKit?.resources ?? []]) {
 		const url = normalizePublicHttpUrl(resource.url);
-		if (!url || !KIT_MIME_TYPES.has(resource.mimeType)) continue;
+		if (!url || !KIT_MIME_TYPES.has(resource.mimeType) || isCdnInjectedFile(url)) continue;
 		add({ sha256: resource.sha256, kind: SCRIPT_MIME_TYPES.has(resource.mimeType) ? "script" : "stylesheet", url, size: resource.size });
 	}
 	for (const frame of capture.hiddenFrames ?? []) {
@@ -145,61 +146,48 @@ async function loadSubmissionKitCapture(submissionId: bigint): Promise<KitCaptur
 	return submission?.data.kind === "website" ? submission.data.website : undefined;
 }
 
-async function searchUrlscan(fingerprint: KitFingerprint, apiKey: string | undefined, dependencies: SiblingDiscoveryDependencies) {
-	const query = new URLSearchParams({
-		q: `hash:${fingerprint.sha256} AND date:>now-90d`,
-		// One past the rarity limit is enough to tell a kit file from a shared one.
-		size: String(maxHashDomains(fingerprint.kind) + 1),
-		collapse: "page.domain.keyword",
-	});
-	const response = await fetchJson<unknown>(`${URLSCAN_SEARCH_URL}?${query}`, {
-		method: "GET",
-		headers: {
-			Accept: "application/json",
-			...(apiKey ? { "API-Key": apiKey } : {}),
-			"User-Agent": "phishing.support-origin-discovery/1.0 (+https://phishing.support)",
-		},
-	}, {
-		fetch: dependencies.fetch,
-		timeoutMs: 15_000,
-		attempts: 2,
-		retryDelayMs: 1_000,
-		maxResponseBytes: 4 * 1024 * 1024,
-	});
-	const parsed = urlscanResponseSchema.safeParse(response);
-	if (!parsed.success) throw new Error("urlscan returned an invalid search response.");
-	return parsed.data;
-}
-
 /**
- * Find domains serving an exact copy of the kit's own files. A hash counts
- * only when it is rare on urlscan, and a candidate must share at least one
- * piece of code: stylesheets alone are too often reused across unrelated
- * templates.
+ * Find domains serving an exact copy of the kit's own files. A capture that
+ * recorded nothing to search says so.
  */
 export async function findKitSiblingCandidates(params: {
 	submissionId: bigint;
 	originalDomain: string;
 	signal?: AbortSignal;
 }, dependencies: SiblingDiscoveryDependencies = {}): Promise<KitSiblingSearchResult> {
-	const errors: string[] = [];
-	const apiKey = dependencies.apiKey ?? process.env.URLSCAN_API_KEY;
-	if (!apiKey) errors.push("URLSCAN_API_KEY is not configured; urlscan discovery used the anonymous quota.");
 	const capture = await (dependencies.loadKitCapture ?? loadSubmissionKitCapture)(params.submissionId);
-	if (!capture?.kitResources?.length && !capture?.hiddenFrames?.length) return { fingerprints: [], candidates: [], errors: ["The capture recorded no scripts, stylesheets, or hidden frames."] };
-	const fingerprints = kitFingerprints(capture);
-	if (!fingerprints.some(({ kind }) => isCode(kind))) return { fingerprints, candidates: [], errors: [...errors, "The capture recorded no script or hidden frame large enough to identify a kit."] };
+	const fingerprints = capture ? kitFingerprints(capture) : [];
+	if (!fingerprints.length) return { fingerprints, candidates: [], errors: ["The capture recorded no scripts, stylesheets, or hidden frames."] };
+	const found = await searchKitHashes({ fingerprints, knownDomains: [params.originalDomain], signal: params.signal }, dependencies);
+	return { fingerprints, ...found };
+}
 
-	const original = normalizeDomain(params.originalDomain);
+/**
+ * Find domains serving an exact copy of these kit files, apart from the
+ * known ones. A hash counts only when it is rare on urlscan, and a candidate
+ * must share at least one piece of code: stylesheets alone are too often
+ * reused across unrelated templates.
+ */
+export async function searchKitHashes(params: {
+	fingerprints: readonly KitFingerprint[];
+	knownDomains: readonly string[];
+	signal?: AbortSignal;
+}, dependencies: SiblingDiscoveryDependencies = {}): Promise<Omit<KitSiblingSearchResult, "fingerprints">> {
+	const errors: string[] = [];
+	if (!(dependencies.apiKey ?? process.env.URLSCAN_API_KEY)) errors.push("URLSCAN_API_KEY is not configured; urlscan discovery used the anonymous quota.");
+	if (!params.fingerprints.some(({ kind }) => isCode(kind))) return { candidates: [], errors: [...errors, "The capture recorded no script or hidden frame large enough to identify a kit."] };
+
+	const known = new Set(params.knownDomains.map((domain) => normalizeDomain(domain)));
 	const candidates = new Map<string, { url: string; hashes: Set<string> }>();
 	const codeHashes = new Set<string>();
-	for (const fingerprint of fingerprints) {
+	for (const fingerprint of params.fingerprints) {
 		throwIfAborted(params.signal);
 		let results: Awaited<ReturnType<typeof searchUrlscan>>;
 		try {
-			results = await searchUrlscan(fingerprint, apiKey, dependencies);
+			// One past the rarity limit is enough to tell a kit file from a shared one.
+			results = await searchUrlscan(`hash:${fingerprint.sha256} AND date:>now-90d`, maxHashDomains(fingerprint.kind) + 1, dependencies, { collapse: "page.domain.keyword" });
 		} catch (error) {
-			if (error instanceof RequestTimeoutError || error instanceof RequestStatusError && (error.status === 429 || error.status >= 500)) throw error;
+			if (isUrlscanBusy(error)) throw error;
 			errors.push(`urlscan ${fingerprint.sha256.slice(0, 12)}: ${errorSummary(error)}`);
 			continue;
 		}
@@ -217,7 +205,7 @@ export async function findKitSiblingCandidates(params: {
 		}
 		if (isCode(fingerprint.kind)) codeHashes.add(fingerprint.sha256);
 		for (const [domain, url] of domains) {
-			if (domain === original || candidates.size >= MAX_CANDIDATES && !candidates.has(domain)) continue;
+			if (known.has(domain) || candidates.size >= MAX_CANDIDATES && !candidates.has(domain)) continue;
 			const candidate = candidates.get(domain) ?? { url, hashes: new Set<string>() };
 			candidate.hashes.add(fingerprint.sha256);
 			candidates.set(domain, candidate);
@@ -232,7 +220,7 @@ export async function findKitSiblingCandidates(params: {
 	const popular = sharingCode.length ? await (dependencies.loadPopularDomains ?? loadPopularDomains)() : undefined;
 	const brands = sharingCode.filter(({ domain }) => popular && isPopularSite(domain, popular));
 	if (brands.length) errors.push(`${brands.map(({ domain }) => domain).join(", ")}: a top-ranked site (Tranco), the original the kit copied files from, not a sibling`);
-	return { fingerprints, candidates: sharingCode.filter((candidate) => !brands.includes(candidate)), errors };
+	return { candidates: sharingCode.filter((candidate) => !brands.includes(candidate)), errors };
 }
 
 /** Find domains sharing captured kit bytes and prove they answer on the swept origin. */

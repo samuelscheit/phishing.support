@@ -64,6 +64,12 @@ export async function enqueueJob(params: {
 	);
 }
 
+/** Whether any job, in any state, was ever queued under this dedupe key. */
+export async function hasJob(dedupeKey: string): Promise<boolean> {
+	const db = await getDb();
+	return Boolean(db.select({ id: abuseJobs.id }).from(abuseJobs).where(eq(abuseJobs.dedupeKey, dedupeKey)).get());
+}
+
 /**
  * Enqueue a lifecycle job exactly once, including across completed and failed
  * executions. This is for immutable source events such as a provider message;

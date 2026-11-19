@@ -1,14 +1,9 @@
 import { SubmissionsEntity } from "../../db/entities";
 import { createWebsiteSubmission } from "../../submissions/website";
 import { analyzeWebsite } from "../../website_ai";
-import { normalizeDomain, normalizePublicHttpUrl } from "../security";
+import { normalizePublicHttpUrl } from "../security";
 import { AbuseRepository } from "../repository";
 import { throwIfAborted } from "../worker/shared";
-import { findKitSiblingCandidates, type KitSiblingSearchResult } from "./siblings";
-
-export type KitSiblingJobDependencies = {
-	findCandidates?: typeof findKitSiblingCandidates;
-};
 
 export type KitSiblingAnalysisDependencies = {
 	analyzeWebsite?: typeof analyzeWebsite;
@@ -50,57 +45,6 @@ async function discoveredBySiblingSearch(source: string | null | undefined): Pro
 	}
 	// An implausibly long redirect chain is not trusted as an original report.
 	return true;
-}
-
-export async function enqueueKitSiblingDiscovery(reportId: bigint, submissionId: bigint): Promise<void> {
-	if (!await isKitSiblingSeed(submissionId)) return;
-	await AbuseRepository.enqueueJobOnce({
-		jobType: "discover_kit_siblings",
-		reportId,
-		payload: { submissionId: submissionId.toString() },
-		dedupeKey: `discover-kit-siblings:${reportId.toString()}`,
-	});
-}
-
-/** Search urlscan for a confirmed kit; normal analysis decides whether candidates are reportable. */
-export async function discoverKitSiblings(
-	params: { reportId: bigint; signal?: AbortSignal },
-	dependencies: KitSiblingJobDependencies = {},
-): Promise<KitSiblingSearchResult> {
-	const report = await AbuseRepository.getReport(params.reportId);
-	if (!report?.submissionId || !await isKitSiblingSeed(report.submissionId)) return { fingerprints: [], candidates: [], errors: [] };
-	const targets = await AbuseRepository.listTargets(report.id);
-	const originalDomain = targets.map(({ normalizedTarget, targetType }) => targetType === "domain" ? normalizeDomain(normalizedTarget) : undefined)
-		.find((domain): domain is string => Boolean(domain));
-	if (!originalDomain) return { fingerprints: [], candidates: [], errors: ["Website report has no domain target."] };
-	throwIfAborted(params.signal);
-	const result = await (dependencies.findCandidates ?? findKitSiblingCandidates)({
-		submissionId: report.submissionId,
-		originalDomain,
-		signal: params.signal,
-	});
-	for (const [index, candidate] of result.candidates.entries()) {
-		throwIfAborted(params.signal);
-		await AbuseRepository.enqueueJobOnce({
-			jobType: "analyze_kit_sibling",
-			reportId: report.id,
-			payload: { url: candidate.url },
-			dedupeKey: `analyze-kit-sibling:${report.id.toString()}:${candidate.domain}`,
-			nextAttemptAt: new Date(Date.now() + index * 30_000),
-		});
-	}
-	// A search that found nothing must say why; a silent "completed" hid a
-	// capture that recorded no searchable file at all.
-	await AbuseRepository.appendEvent({
-		reportId: report.id,
-		eventType: "kit_siblings.discovered",
-		data: {
-			fingerprints: result.fingerprints.map(({ sha256, url, size }) => ({ sha256, url, size })),
-			candidates: result.candidates.map(({ domain }) => domain),
-			errors: result.errors,
-		},
-	});
-	return result;
 }
 
 /**

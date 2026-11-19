@@ -14,7 +14,7 @@ import { ensureCorrespondencePolls, pollProviderCorrespondence } from "./worker/
 import { ensureReceiptLookups, findProviderReceipt } from "./worker/receipt";
 import { ensureOriginHostDisclosureJobs } from "./origin/disclosure";
 import { reportOriginHostJob } from "./origin/report";
-import { analyzeKitSibling, discoverKitSiblings } from "./origin/kit_job";
+import { analyzeKitSibling } from "./origin/kit_job";
 import { watchRedirector } from "./origin/redirector_watch";
 import { classifyReply, monitorProviderReply } from "./worker/mail";
 import { runGenericProviderPortal } from "./worker/portal";
@@ -26,7 +26,9 @@ import { releaseAfterFailedInvestigation, runReportInvestigation } from "../inve
 import { setInvestigationStatus } from "../investigation/status";
 import { followUpProviderDecision, readDecisionFollowUpPayload } from "./followup/decision";
 import { startSamplePurgeSchedule } from "../exfiltration/downloads/sample_purge_job";
-import { describeCampaignIfChanged, linkSubmissionToCampaign } from "../campaign/link";
+import { describeCampaignIfChanged } from "../campaign/link";
+import { searchCampaignKits } from "../campaign/kit_search";
+import { enqueueRulesSweep, linkSiteToCampaign } from "../campaign/sweep";
 
 const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;
@@ -59,8 +61,6 @@ const CONTROL_JOB_TYPES = [
 	// Read-only provider API calls, kept apart from browser and SMTP work.
 	"poll_provider_correspondence",
 	"find_provider_receipt",
-	// Reads stored evidence and asks jsDelivr whether a kit file is a library.
-	"link_campaign",
 ] as const satisfies readonly AbuseJobType[];
 
 /** Jobs that may cross an external provider side-effect boundary. */
@@ -70,8 +70,6 @@ const EXTERNAL_JOB_TYPES = [
 	"submit_provider",
 	"investigate_report",
 	"follow_up_provider_decision",
-	"discover_kit_siblings",
-	"analyze_kit_sibling",
 	"watch_redirector",
 	// Writes a campaign's public title and summary with the model.
 	"describe_campaign",
@@ -84,9 +82,19 @@ const EXTERNAL_JOB_TYPES = [
  */
 const SWEEP_JOB_TYPES = ["report_origin_host"] as const satisfies readonly AbuseJobType[];
 
+/**
+ * Campaign and kit discovery: linking a site (urlscan for kit files a capture
+ * did not record, jsDelivr for libraries), searching a campaign's kit on
+ * urlscan, and the full browser analysis of each site it turns up. A sweep
+ * queues hundreds of these and a search up to a hundred analyses; one slot
+ * of their own keeps them from delaying the reports being delivered.
+ */
+const DISCOVERY_JOB_TYPES = ["link_campaign", "search_campaign_kits", "analyze_kit_sibling"] as const satisfies readonly AbuseJobType[];
+
 const CONTROL_JOB_FILTER: JobClaimFilter = { jobTypes: CONTROL_JOB_TYPES };
 const EXTERNAL_JOB_FILTER: JobClaimFilter = { jobTypes: EXTERNAL_JOB_TYPES };
 const SWEEP_JOB_FILTER: JobClaimFilter = { jobTypes: SWEEP_JOB_TYPES };
+const DISCOVERY_JOB_FILTER: JobClaimFilter = { jobTypes: DISCOVERY_JOB_TYPES };
 
 /** The longest any error may ask a job to wait before its next attempt. */
 const MAX_RETRY_AFTER_MS = 60 * 60_000;
@@ -237,6 +245,8 @@ export class AbuseWorker {
 		await ensureCorrespondencePolls();
 		await ensureReceiptLookups();
 		await ensureOriginHostDisclosureJobs();
+		// Every confirmed site is linked again once whenever the campaign rules change.
+		await enqueueRulesSweep();
 		// Provider/browser work gets its own lane. A stuck CAPTCHA or browser can
 		// therefore never consume the capacity reserved for resolution,
 		// reconciliation, and inbound correspondence jobs.
@@ -244,6 +254,7 @@ export class AbuseWorker {
 			...Array.from({ length: this.controlConcurrency }, () => this.runLoop(CONTROL_JOB_FILTER, this.controlJobTimeoutMs)),
 			...Array.from({ length: this.externalConcurrency }, () => this.runLoop(EXTERNAL_JOB_FILTER, this.externalJobTimeoutMs)),
 			this.runLoop(SWEEP_JOB_FILTER, this.sweepJobTimeoutMs),
+			this.runLoop(DISCOVERY_JOB_FILTER, this.externalJobTimeoutMs),
 		];
 		this.stopSamplePurge = startSamplePurgeSchedule();
 	}
@@ -413,9 +424,9 @@ export class AbuseWorker {
 			}
 			return;
 		}
-		if (["report_origin_host", "discover_kit_siblings", "analyze_kit_sibling", "watch_redirector"].includes(job.jobType)) {
-			// Infrastructure and kit discovery are supplementary follow-up. Failure must not turn
-			// a successfully submitted phishing report into a reporting failure.
+		if (["report_origin_host", "link_campaign", "describe_campaign", "search_campaign_kits", "analyze_kit_sibling", "watch_redirector"].includes(job.jobType)) {
+			// Infrastructure, campaigns and kit discovery are supplementary follow-up. Failure must
+			// not turn a successfully submitted phishing report into a reporting failure.
 			await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
 			return;
 		}
@@ -482,8 +493,8 @@ export class AbuseWorker {
 			case "report_origin_host":
 				await reportOriginHostJob(job, idFrom(job.reportId, "reportId"), signal);
 				return;
-			case "discover_kit_siblings":
-				await discoverKitSiblings({ reportId: idFrom(job.reportId, "reportId"), signal });
+			case "search_campaign_kits":
+				await searchCampaignKits({ job, signal });
 				return;
 			case "analyze_kit_sibling":
 				await analyzeKitSibling({ reportId: idFrom(job.reportId, "reportId"), url: job.payload?.url, signal });
@@ -491,20 +502,9 @@ export class AbuseWorker {
 			case "watch_redirector":
 				await watchRedirector({ job, signal });
 				return;
-			case "link_campaign": {
-				const campaignId = await linkSubmissionToCampaign(parseJobBigInt(job.payload?.submissionId, "payload.submissionId"));
-				// Sites of one campaign arrive in bursts: describe it once the burst settles.
-				if (campaignId !== undefined) {
-					await AbuseRepository.enqueueJob({
-						jobType: "describe_campaign",
-						reportId: idFrom(job.reportId, "reportId"),
-						payload: { campaignId: campaignId.toString() },
-						dedupeKey: `campaign-describe:${campaignId.toString()}`,
-						nextAttemptAt: new Date(Date.now() + 5 * 60_000),
-					});
-				}
+			case "link_campaign":
+				await linkSiteToCampaign({ submissionId: parseJobBigInt(job.payload?.submissionId, "payload.submissionId"), reportId: idFrom(job.reportId, "reportId") });
 				return;
-			}
 			case "describe_campaign":
 				await describeCampaignIfChanged(parseJobBigInt(job.payload?.campaignId, "payload.campaignId"));
 				return;

@@ -93,7 +93,7 @@ export const abuseJobTypes = [
 	"investigate_report",
 	"follow_up_provider_decision",
 	"report_origin_host",
-	"discover_kit_siblings",
+	"search_campaign_kits",
 	"analyze_kit_sibling",
 	"watch_redirector",
 	"link_campaign",

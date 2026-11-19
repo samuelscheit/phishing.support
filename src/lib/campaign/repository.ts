@@ -114,12 +114,6 @@ export const CampaignRepository = {
 		}, { behavior: "immediate" });
 	},
 
-	/** Regroup every campaign from the indicators on record. */
-	async recluster(): Promise<void> {
-		const db = await getDb();
-		db.transaction((tx) => recluster(tx), { behavior: "immediate" });
-	},
-
 	async getCampaign(campaignId: bigint): Promise<Campaign | undefined> {
 		const db = await getDb();
 		return db.select().from(campaigns).where(eq(campaigns.id, campaignId)).get();
@@ -233,18 +227,7 @@ export const CampaignRepository = {
 			.where(eq(campaigns.id, campaignId));
 	},
 
-	/** Current campaigns whose title and summary describe another number of sites than they now have. */
-	async listCampaignsNeedingDescription(): Promise<bigint[]> {
-		const db = await getDb();
-		return db
-			.select({ id: campaigns.id })
-			.from(campaigns)
-			.where(and(isNull(campaigns.mergedInto), sql`coalesce(${campaigns.summarySiteCount}, -1) <> (select count(*) from campaign_members where campaign_members.campaign_id = ${campaigns.id})`, sql`exists (select 1 from campaign_members where campaign_members.campaign_id = ${campaigns.id})`))
-			.all()
-			.map((row) => row.id);
-	},
-
-	/** Website submissions confirmed as phishing, oldest first, for a full rebuild. */
+	/** Website submissions confirmed as phishing, oldest first, for a sweep over every site. */
 	async listReportedWebsiteSubmissionIds(): Promise<bigint[]> {
 		const db = await getDb();
 		return db

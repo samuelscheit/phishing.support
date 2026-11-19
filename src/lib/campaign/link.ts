@@ -1,6 +1,5 @@
 import { AbuseRepository } from "../abuse/repository";
 import { ArtifactsEntity, SubmissionsEntity } from "../db/entities";
-import { errorText } from "../error_text";
 import { buildDossier, type Dossier, type DossierDependencies } from "../referral/dossier";
 import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "../website_capture_files";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
@@ -112,28 +111,4 @@ export async function describeCampaignIfChanged(campaignId: bigint, dependencies
 	const description = await describeCampaign(facts, dependencies);
 	await CampaignRepository.saveDescription(current, { title: description.title, summary: description.summary, siteCount: facts.siteCount });
 	return true;
-}
-
-/**
- * Extract the indicators of every confirmed website again, regroup all
- * campaigns and describe those whose sites changed. A site whose extraction
- * fails keeps what is on record.
- */
-export async function rebuildCampaigns(dependencies: LinkDependencies & DescribeDependencies = {}): Promise<{ linked: number; described: number; failed: Array<{ submissionId: string; error: string }> }> {
-	const failed: Array<{ submissionId: string; error: string }> = [];
-	let linked = 0;
-	for (const submissionId of await CampaignRepository.listReportedWebsiteSubmissionIds()) {
-		try {
-			await linkSubmissionToCampaign(submissionId, dependencies);
-			linked += 1;
-		} catch (error) {
-			failed.push({ submissionId: submissionId.toString(), error: errorText(error) });
-		}
-	}
-	await CampaignRepository.recluster();
-	let described = 0;
-	for (const campaignId of await CampaignRepository.listCampaignsNeedingDescription()) {
-		if (await describeCampaignIfChanged(campaignId, dependencies).catch(() => false)) described += 1;
-	}
-	return { linked, described, failed };
 }

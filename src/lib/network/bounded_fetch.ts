@@ -37,10 +37,25 @@ export class RequestStatusError extends Error {
 	constructor(
 		readonly status: number,
 		readonly url: string,
+		/** When the server said it can be asked again (`Retry-After`, urlscan's `X-Rate-Limit-Reset-After`). */
+		readonly retryAfterMs?: number,
 	) {
 		super(`Request to ${new URL(url).hostname} failed with HTTP ${status}.`);
 		this.name = "RequestStatusError";
 	}
+}
+
+/** How long a refusing server asks to be left alone, in milliseconds, when it says so. */
+function retryAfterMs(headers: Headers): number | undefined {
+	for (const name of ["retry-after", "x-rate-limit-reset-after"]) {
+		const value = headers.get(name)?.trim();
+		if (!value) continue;
+		const seconds = Number(value);
+		if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+		const at = Date.parse(value);
+		if (Number.isFinite(at)) return Math.max(0, at - Date.now());
+	}
+	return undefined;
 }
 
 function positiveInteger(value: number | undefined, fallback: number): number {
@@ -133,7 +148,7 @@ async function fetchDecoded<T>(url: string, init: RequestInit, options: BoundedR
 			return await withAttemptDeadline(async (signal) => {
 				const response = await fetchImplementation(url, { ...init, signal });
 				if (response.status === 404) return undefined;
-				if (!response.ok) throw new RequestStatusError(response.status, url);
+				if (!response.ok) throw new RequestStatusError(response.status, url, retryAfterMs(response.headers));
 				return decode(await readResponseBody(response, config.maxResponseBytes));
 			}, config.timeoutMs, `Request to ${new URL(url).hostname}`);
 		} catch (error) {

@@ -45,6 +45,14 @@ const noPopularDomains = async () => new Set<string>();
 const manyDomains = (count: number, prefix: string) => Array.from({ length: count }, (_, index) => `${prefix}-${index}.example.org`);
 
 describe("kit sibling discovery", () => {
+	test("never fingerprints the files Cloudflare serves on every site behind it", () => {
+		expect(kitFingerprints({ kitResources: [
+			{ url: "https://login.example.com/cdn-cgi/scripts/7d0fa10a/cloudflare-static/rocket-loader.min.js", mimeType: "application/javascript", size: 11_000, sha256: hash("7") },
+			{ url: "https://login.example.com/cdn-cgi/challenge-platform/scripts/jsd/main.js", mimeType: "application/javascript", size: 30_000, sha256: hash("8") },
+			{ url: "https://login.example.com/index.js", mimeType: "application/javascript", size: 58_737, sha256: SCRIPT },
+		] }).map(({ sha256 }) => sha256)).toEqual([SCRIPT]);
+	});
+
 	test("fingerprints every host's scripts and stylesheets, scripts first", () => {
 		expect(kitFingerprints({ kitResources: RESOURCES })).toEqual([
 			{ sha256: LIBRARY, kind: "script", url: "https://cdn.example.net/jquery.min.js", size: 90_000 },
