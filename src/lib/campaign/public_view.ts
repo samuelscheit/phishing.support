@@ -3,10 +3,15 @@ import { getDomain } from "tldts";
 import { buildDossier, type Dossier, type DossierDependencies, type DossierSite } from "../referral/dossier";
 import { record, text } from "../values";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
+import { campaignBrand, sameBrand, type GuidancePurpose, type VisitorGuidance } from "./guidance";
+import { campaignVisitorKinds, type VisitorKind } from "./kinds";
 import { factsFromDossier } from "./link";
 import { CampaignRepository } from "./repository";
 import { operatorServerRoles, type OperatorServerRole } from "./schema";
 import { fallbackDescription } from "./summary";
+
+export type { GuidancePurpose } from "./guidance";
+export type { VisitorKind } from "./kinds";
 
 /**
  * Everything the public page of a campaign shows, derived from stored data
@@ -25,6 +30,8 @@ export type PublicCampaignSite = {
 	language?: string;
 	thumbnailUrl?: string;
 	screenshotUrl?: string;
+	/** The analyzed page's screenshot is one flat colour, useless as a picture. */
+	blankCapture: boolean;
 	asks: string[];
 	/** Every page the visit captured, in the order shown: the landing page, the forms, the pages after them. */
 	steps: Array<{ step: number; screenshotUrl: string; stampedUrl?: string }>;
@@ -36,6 +43,23 @@ export type PublicCampaignSite = {
 	evidence: Array<{ name: string; size: number; sha256: string; url: string }>;
 	/** The furthest any provider got: confirmed, reported, or not reported yet. */
 	takedown: "confirmed" | "reported" | "problem" | "none";
+};
+
+export type PublicCampaignVisitor = {
+	/** The impersonated brand, when the analyses name one. */
+	brand?: {
+		name: string;
+		/** As recorded by the site analysis. */
+		officialUrl: string;
+		/** Registrable domain of officialUrl, e.g. "google.com". */
+		domain: string;
+		/** The brand's real sign-in host, only when it lies on `domain`, e.g. "accounts.google.com". */
+		signInHost?: string;
+		/** Validated https URLs on `domain` (or its subdomains), per purpose; absent purposes are omitted. */
+		links: Partial<Record<GuidancePurpose, string>>;
+	};
+	/** Never empty: falls back to ["email", "password"] for a sign-in page with unknown fields. */
+	kinds: VisitorKind[];
 };
 
 export type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_payment_account" | "same_pattern"; title: string; text: string };
@@ -57,6 +81,8 @@ export type PublicCampaign = {
 	languages: string[];
 	sites: PublicCampaignSite[];
 	reasons: PublicCampaignReason[];
+	/** What a visitor who typed something into the pages should do. */
+	visitor: PublicCampaignVisitor;
 	technical: {
 		destinations: Array<{ endpoint: string; method: string; fields: string[]; sameSite: boolean; siteCount: number }>;
 		backends: Array<{ kind: string; label: string; details: Array<[string, string]>; siteCount: number }>;
@@ -67,7 +93,6 @@ export type PublicCampaign = {
 	};
 };
 
-const DELIVERED = new Set(["submitted", "acknowledged", "awaiting_provider_reply"]);
 const STATE: Record<string, PublicReportState> = {
 	submitted: "accepted",
 	awaiting_provider_reply: "awaiting",
@@ -186,6 +211,16 @@ function reasons(dossier: Dossier, stats: { platform?: string; durationMinutes: 
 	return result;
 }
 
+/** The brand the sites impersonate with the stored guidance made for it, and what visitors may have typed. */
+function visitorOf(dossier: Dossier, stored: VisitorGuidance | null): PublicCampaignVisitor {
+	const brand = campaignBrand(dossier);
+	const guidance = brand && sameBrand(stored?.brand, brand) ? stored! : undefined;
+	return {
+		...(brand ? { brand: { ...brand, ...(guidance?.signInHost ? { signInHost: guidance.signInHost } : {}), links: guidance?.links ?? {} } } : {}),
+		kinds: campaignVisitorKinds(dossier, guidance?.kinds),
+	};
+}
+
 export async function getPublicCampaign(campaignId: bigint, dependencies: DossierDependencies = {}): Promise<PublicCampaign | undefined> {
 	const campaign = await CampaignRepository.getCampaign(campaignId);
 	if (!campaign) return undefined;
@@ -219,6 +254,7 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 			...(facts?.language ? { language: facts.language } : {}),
 			...(facts?.thumbnailArtifactId ? { thumbnailUrl: artifactUrl(facts.thumbnailArtifactId.toString()) } : {}),
 			...(screenshot ? { screenshotUrl: artifactUrl(screenshot.artifactId) } : {}),
+			blankCapture: facts?.blankCapture ?? false,
 			steps,
 			asks: [...new Set(site.dataDestinations.flatMap((destination) => destination.fields))].map((field) => CANARY_FIELD_LABEL[field as CanaryField] ?? field),
 			...(site.verdict ? { verdict: {
@@ -277,11 +313,12 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 		lastSeenAt: dossier.lastSeenAt,
 		...stats,
 		domainCount: domains.size,
-		reportedCount: dossier.sites.filter((site) => site.reports.some((report) => DELIVERED.has(report.status))).length,
-		confirmedCount: dossier.sites.filter((site) => site.reports.some((report) => report.status === "acknowledged")).length,
+		reportedCount: sites.filter((site) => site.takedown === "confirmed" || site.takedown === "reported").length,
+		confirmedCount: sites.filter((site) => site.takedown === "confirmed").length,
 		languages: [...new Set(sites.map((site) => site.language).filter((language): language is string => Boolean(language)))],
 		sites,
 		reasons: reasons(dossier, stats),
+		visitor: visitorOf(dossier, campaign.visitorGuidance),
 		technical: {
 			destinations: [...destinations.values()],
 			backends: shared.filter((indicator) => indicator.kind === "operator_server").map((indicator) => ({

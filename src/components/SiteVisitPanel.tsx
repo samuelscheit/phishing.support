@@ -6,6 +6,7 @@ import { CheckSquare, Download, Flag, Globe, Keyboard, ListChecks, MousePointerC
 import { cn } from "../web_lib/util";
 import { CANARY_FIELD_LABEL, type CanaryField, type WebsiteOfferedDownload, type WebsiteVisitRecord } from "@/lib/website_types";
 import { hostOf } from "@/lib/website_site";
+import { Address } from "./Address";
 
 /** One page of the visit, with its screenshot when the case kept one. */
 export type SiteVisitPage = { url: string; screenshotId?: string };
@@ -89,7 +90,7 @@ export function SiteVisitBrowser({ running, pages, live: { frame }, fallbackUrl,
 					<span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/30" />
 				</div>
 				<div className="min-w-0 flex-1 truncate rounded-md bg-background px-2.5 py-1 font-mono text-xs" title={url}>
-					<AddressText url={url} />
+					<Address url={url} />
 				</div>
 				{live ? (
 					<span className="flex items-center gap-1.5 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">
@@ -141,15 +142,6 @@ export function SiteVisitBrowser({ running, pages, live: { frame }, fallbackUrl,
 	);
 }
 
-/** An address as a browser shows it: the host stands out, the rest is muted. */
-function AddressText({ url }: { url: string }) {
-	try {
-		const parsed = new URL(url);
-		return <><span className="text-muted-foreground">{parsed.protocol}//</span><span className="text-foreground">{parsed.host}</span><span className="text-muted-foreground">{parsed.pathname === "/" && !parsed.search ? "" : parsed.pathname + parsed.search + parsed.hash}</span></>;
-	} catch {
-		return <span className="text-muted-foreground">{url || "about:blank"}</span>;
-	}
-}
 
 function pathOf(url: string): string {
 	try {

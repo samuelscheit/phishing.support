@@ -82,6 +82,11 @@ export function fallbackDescription(facts: CampaignFacts): CampaignDescription {
 	return { title: title.slice(0, MAX_TITLE), summary: summary.slice(0, MAX_SUMMARY) };
 }
 
+/** The facts as a model gets them: a few analyses, each cut short. */
+export function boundedFacts(facts: CampaignFacts): CampaignFacts {
+	return { ...facts, analyses: facts.analyses.slice(0, MAX_ANALYSES).map((analysis) => analysis.slice(0, MAX_ANALYSIS_CHARS)) };
+}
+
 async function generateWithModel(facts: CampaignFacts): Promise<unknown> {
 	const client = configuredAbuseOpenAI();
 	if (!client) return undefined;
@@ -120,9 +125,8 @@ const UNSAFE = /https?:\/\/|www\.|[\w.+-]+@[\w-]+\.[\w.]+|\b\d{6,}:[A-Za-z0-9_-]
  * configured, fails, or answers with anything unsafe to publish.
  */
 export async function describeCampaign(facts: CampaignFacts, dependencies: DescribeDependencies = {}): Promise<CampaignDescription & { generated: boolean }> {
-	const bounded: CampaignFacts = { ...facts, analyses: facts.analyses.slice(0, MAX_ANALYSES).map((analysis) => analysis.slice(0, MAX_ANALYSIS_CHARS)) };
 	try {
-		const parsed = descriptionSchema.safeParse(await (dependencies.generate ?? generateWithModel)(bounded));
+		const parsed = descriptionSchema.safeParse(await (dependencies.generate ?? generateWithModel)(boundedFacts(facts)));
 		if (parsed.success && !UNSAFE.test(parsed.data.title) && !UNSAFE.test(parsed.data.summary)) return { ...parsed.data, generated: true };
 	} catch {
 		// A model outage must never leave a campaign without a heading.

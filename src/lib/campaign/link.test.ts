@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import sharp from "sharp";
 
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import type { Submission } from "../db/schema";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import type { ExfiltrationBackend } from "../exfiltration/types";
-import type { WebsiteKitResource } from "../website_types";
+import type { WebsiteKitResource, WebsiteSiteAssessment } from "../website_types";
+import type { GuidanceDependencies, GuidanceInput } from "./guidance";
 import { backendIndicatorValue, extractIndicators, lookupPublishedLibrary } from "./indicators";
 import { describeCampaignIfChanged, linkSubmissionToCampaign, type LinkDependencies } from "./link";
 import type { DescribeDependencies } from "./summary";
@@ -284,7 +286,7 @@ describe("campaign grouping on record", () => {
 		};
 		await store(...Object.values(sites).map((site) => site.submission));
 		const facts: Array<{ siteCount: number; languages: string[]; links: string[] }> = [];
-		const dependencies = { ...fixtures(sites), saveThumbnail: async (id: bigint) => id * 10n, generate: async (input: { siteCount: number; languages: string[]; links: string[] }) => {
+		const dependencies = { ...fixtures(sites), saveThumbnail: async (id: bigint) => ({ artifactId: id * 10n, blank: id === 2n }), generate: async (input: { siteCount: number; languages: string[]; links: string[] }) => {
 			facts.push({ siteCount: input.siteCount, languages: input.languages, links: input.links });
 			return { title: "Fake test notice campaign", summary: "Several look-alike test pages ask for passwords and send them to one bot, so one operator runs them." };
 		} };
@@ -292,8 +294,8 @@ describe("campaign grouping on record", () => {
 		await linkSubmissionToCampaign(2n, dependencies);
 		const campaign = (await CampaignRepository.campaignForSubmission(1n))!;
 		expect(await CampaignRepository.listSiteFacts([1n, 2n])).toEqual([
-			expect.objectContaining({ submissionId: 1n, language: "de", thumbnailArtifactId: 10n }),
-			expect.objectContaining({ submissionId: 2n, language: null, thumbnailArtifactId: 20n }),
+			expect.objectContaining({ submissionId: 1n, language: "de", thumbnailArtifactId: 10n, blankCapture: false }),
+			expect.objectContaining({ submissionId: 2n, language: null, thumbnailArtifactId: 20n, blankCapture: true }),
 		]);
 
 		expect(await describeCampaignIfChanged(campaign, dependencies)).toBe(true);
@@ -308,6 +310,39 @@ describe("campaign grouping on record", () => {
 		expect(await describeCampaignIfChanged(999n, dependencies)).toBe(false);
 	});
 
+	test("a site's preview is cut from its analyzed capture once, and whether the capture is blank is read again on every link", async () => {
+		const sites = { blank: { submission: website(1n, "samtjo-test.com"), backends: [botBackend("7001")] }, page: { submission: website(2n, "page-test.com"), backends: [botBackend("7001")] } };
+		await store(sites.blank.submission, sites.page.submission);
+		const capture = (submissionId: bigint, buffer: Buffer) => ArtifactsEntity.saveBuffer({ submissionId, name: "website.png", kind: "website_png", mimeType: "image/png", buffer });
+		const white = await sharp({ create: { width: 1905, height: 967, channels: 3, background: "#ffffff" } }).png().toBuffer();
+		const card = await sharp({ create: { width: 400, height: 300, channels: 3, background: "#2563eb" } }).png().toBuffer();
+		await capture(1n, white);
+		await capture(2n, await sharp(white).composite([{ input: card, left: 100, top: 100 }]).png().toBuffer());
+		// The real preview step, as production runs it.
+		const dependencies = { ...fixtures(sites), saveThumbnail: undefined };
+		await linkSubmissionToCampaign(1n, dependencies);
+		await linkSubmissionToCampaign(2n, dependencies);
+		const [blank, page] = await CampaignRepository.listSiteFacts([1n, 2n]);
+		expect(blank).toMatchObject({ blankCapture: true, thumbnailArtifactId: expect.any(BigInt) });
+		expect(page).toMatchObject({ blankCapture: false, thumbnailArtifactId: expect.any(BigInt) });
+		const previews = async (id: bigint) => (await ArtifactsEntity.listForSubmission(id)).filter((artifact) => artifact.name === "website-thumb.webp").length;
+		expect(await previews(1n)).toBe(1);
+
+		// A site linked before blank captures were recorded learns it on the next link, keeping its preview.
+		await CampaignRepository.saveSiteFacts(1n, { language: null, thumbnailArtifactId: blank!.thumbnailArtifactId, blankCapture: false });
+		await linkSubmissionToCampaign(1n, dependencies);
+		expect((await CampaignRepository.listSiteFacts([1n]))[0]).toMatchObject({ blankCapture: true, thumbnailArtifactId: blank!.thumbnailArtifactId });
+		expect(await previews(1n)).toBe(1);
+
+		// A newer capture gets a new preview and its own reading.
+		await capture(1n, await sharp(white).composite([{ input: card, left: 0, top: 0 }]).png().toBuffer());
+		await linkSubmissionToCampaign(1n, dependencies);
+		const [recaptured] = await CampaignRepository.listSiteFacts([1n]);
+		expect(recaptured).toMatchObject({ blankCapture: false });
+		expect(recaptured!.thumbnailArtifactId).not.toBe(blank!.thumbnailArtifactId);
+		expect(await previews(1n)).toBe(2);
+	});
+
 	test("a site whose extraction fails keeps what is on record, and the failure surfaces", async () => {
 		const sites = { a: { submission: website(1n, "a-kit-test.com"), backends: [botBackend("7001")] } };
 		await store(sites.a.submission);
@@ -315,5 +350,88 @@ describe("campaign grouping on record", () => {
 		const campaign = await CampaignRepository.campaignForSubmission(1n);
 		await expect(linkSubmissionToCampaign(1n, { ...fixtures(sites), loadBackends: async () => { throw new Error("database busy"); } })).rejects.toThrow("database busy");
 		expect(await CampaignRepository.campaignForSubmission(1n)).toBe(campaign!);
+	});
+});
+
+describe("a campaign's visitor guidance", () => {
+	const GOOGLE = { name: "Google", officialUrl: "https://www.google.com/" };
+	const assessed = (id: bigint, host: string, brand?: { name: string; officialUrl: string }): Submission => {
+		const submission = website(id, host);
+		const assessment: WebsiteSiteAssessment = { hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", collectionFields: [{ ref: "f1", control: "input[type=text]", placeholder: "Email or phone" }], ...(brand ? { impersonatedBrand: brand } : {}) };
+		if (submission.data.kind === "website") submission.data.website.siteAssessments = [assessment];
+		return submission;
+	};
+	const answer = {
+		signInHost: "accounts.google.com",
+		kinds: ["email", "password"],
+		links: { recover: "https://accounts.google.com/signin/recovery", devices: null, security: "https://myaccount.google.com/security", activity: null, forwarding: "https://evil.example/fwd" },
+	};
+
+	/** Scripted model calls, recording what each was asked. */
+	function scripted(guidance: () => Promise<unknown>) {
+		const calls = { heading: 0, guidance: [] as GuidanceInput[] };
+		const dependencies: DescribeDependencies & GuidanceDependencies = {
+			generate: async () => { calls.heading += 1; return heading.generate!({} as never); },
+			generateGuidance: async (input) => { calls.guidance.push(input); return guidance(); },
+			reachable: async () => true,
+		};
+		return { calls, dependencies };
+	}
+
+	async function campaignOf(bot: string, ...submissions: Submission[]) {
+		await store(...submissions);
+		const sites = Object.fromEntries(submissions.map((submission) => [submission.dedupeKey, { submission, backends: [botBackend(bot)] }]));
+		for (const submission of submissions) await linkSubmissionToCampaign(submission.id, fixtures(sites));
+		return (await CampaignRepository.campaignForSubmission(submissions[0]!.id))!;
+	}
+
+	test("is made with the description for the brand the sites impersonate, keeping only the brand's own pages, and not again while nothing changes", async () => {
+		const campaign = await campaignOf("7001", assessed(1n, "a-google-test.com", GOOGLE), assessed(2n, "b-google-test.com", GOOGLE));
+		const { calls, dependencies } = scripted(async () => answer);
+		expect(await describeCampaignIfChanged(campaign, dependencies)).toBe(true);
+		expect(calls.heading).toBe(1);
+		expect(calls.guidance).toHaveLength(1);
+		expect(calls.guidance[0]).toMatchObject({ brand: { ...GOOGLE, domain: "google.com" }, facts: { siteCount: 2, impersonates: ["Google"] } });
+		expect((await CampaignRepository.getCampaign(campaign))?.visitorGuidance).toEqual({
+			brand: { ...GOOGLE, domain: "google.com" },
+			signInHost: "accounts.google.com",
+			kinds: ["email", "password"],
+			links: { recover: "https://accounts.google.com/signin/recovery", security: "https://myaccount.google.com/security" },
+		});
+		expect(await describeCampaignIfChanged(campaign, dependencies)).toBe(false);
+		expect(calls).toMatchObject({ heading: 1, guidance: [expect.anything()] });
+	});
+
+	test("a campaign described before has guidance made on the next run without a new description; a failed model call is asked again", async () => {
+		const campaign = await campaignOf("7001", assessed(1n, "a-google-test.com", GOOGLE), assessed(2n, "b-google-test.com", GOOGLE));
+		const failing = scripted(async () => { throw new Error("model down"); });
+		expect(await describeCampaignIfChanged(campaign, failing.dependencies)).toBe(true);
+		expect((await CampaignRepository.getCampaign(campaign))?.visitorGuidance).toBeNull();
+
+		const working = scripted(async () => answer);
+		expect(await describeCampaignIfChanged(campaign, working.dependencies)).toBe(true);
+		expect(working.calls).toMatchObject({ heading: 0, guidance: [expect.anything()] });
+		expect((await CampaignRepository.getCampaign(campaign))?.visitorGuidance?.signInHost).toBe("accounts.google.com");
+		expect(await describeCampaignIfChanged(campaign, working.dependencies)).toBe(false);
+	});
+
+	test("is made anew when the sites' brand changes, and never without a brand", async () => {
+		const hosts = ["a-ms-test.com", "b-ms-test.com"];
+		const campaign = await campaignOf("7001", assessed(1n, hosts[0]!, GOOGLE), assessed(2n, hosts[1]!));
+		const { calls, dependencies } = scripted(async () => answer);
+		await describeCampaignIfChanged(campaign, dependencies);
+		const microsoft = { name: "Microsoft", officialUrl: "https://www.microsoft.com/" };
+		for (const [index, host] of hosts.entries()) await SubmissionsEntity.update(BigInt(index + 1), { data: assessed(BigInt(index + 1), host, microsoft).data });
+		expect(await describeCampaignIfChanged(campaign, dependencies)).toBe(true);
+		expect(calls.heading).toBe(1);
+		expect(calls.guidance.map((input) => input.brand.name)).toEqual(["Google", "Microsoft"]);
+		// The model named Google's pages for Microsoft: none lies on microsoft.com.
+		expect((await CampaignRepository.getCampaign(campaign))?.visitorGuidance).toEqual({ brand: { ...microsoft, domain: "microsoft.com" }, kinds: ["email", "password"], links: {} });
+
+		const unbranded = await campaignOf("8002", assessed(3n, "c-none-test.com"));
+		const other = scripted(async () => answer);
+		expect(await describeCampaignIfChanged(unbranded, other.dependencies)).toBe(true);
+		expect(other.calls).toMatchObject({ heading: 1, guidance: [] });
+		expect(await describeCampaignIfChanged(unbranded, other.dependencies)).toBe(false);
 	});
 });

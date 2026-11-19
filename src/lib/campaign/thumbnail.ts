@@ -4,6 +4,14 @@ import sharp from "sharp";
 const THUMBNAIL_WIDTH = 720;
 /** A page whose content is narrower than this after trimming keeps the whole capture. */
 const MIN_CONTENT_WIDTH = 240;
+/** A capture whose every channel varies less than this is one flat colour; a single line of text on it varies more. */
+const BLANK_MAX_STDEV = 2;
+
+/** Whether a capture shows nothing a visitor could recognize: one flat colour, as a page that never rendered leaves it. */
+export async function isBlankCapture(screenshot: Buffer): Promise<boolean> {
+	const { channels } = await sharp(screenshot).stats();
+	return channels.every((channel) => channel.stdev < BLANK_MAX_STDEV);
+}
 
 /**
  * Cut a page capture to what the page drew. Kits often draw a narrow card

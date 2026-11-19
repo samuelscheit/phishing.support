@@ -141,6 +141,13 @@
       "when": 1794923517140,
       "tag": "0019_replace_skyvern_with_task_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1795103476162,
+      "tag": "0020_campaign_visitor_guidance",
+      "breakpoints": true
     }
   ]
 }

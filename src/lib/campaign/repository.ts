@@ -4,6 +4,7 @@ import { getDb, type Transaction } from "../db";
 import { generateId } from "../db/ids";
 import { submissions, type Submission } from "../db/schema";
 import { assignCampaigns } from "./cluster";
+import type { VisitorGuidance } from "./guidance";
 import type { ExtractedIndicator } from "./indicators";
 import { campaignIndicators, campaignMembers, campaigns, campaignSiteFacts, kitHashChecks, type Campaign, type CampaignIndicator } from "./schema";
 
@@ -202,7 +203,7 @@ export const CampaignRepository = {
 		return summaries;
 	},
 
-	async saveSiteFacts(submissionId: bigint, facts: { language: string | null; thumbnailArtifactId: bigint | null }) {
+	async saveSiteFacts(submissionId: bigint, facts: { language: string | null; thumbnailArtifactId: bigint | null; blankCapture: boolean }) {
 		const db = await getDb();
 		const values = { submissionId, ...facts, updatedAt: new Date() };
 		await db.insert(campaignSiteFacts).values(values).onConflictDoUpdate({ target: campaignSiteFacts.submissionId, set: values });
@@ -225,6 +226,11 @@ export const CampaignRepository = {
 		await db.update(campaigns)
 			.set({ title: description.title, summary: description.summary, summarySiteCount: description.siteCount, summaryGeneratedAt: new Date() })
 			.where(eq(campaigns.id, campaignId));
+	},
+
+	async saveVisitorGuidance(campaignId: bigint, guidance: VisitorGuidance) {
+		const db = await getDb();
+		await db.update(campaigns).set({ visitorGuidance: guidance }).where(eq(campaigns.id, campaignId));
 	},
 
 	/** Website submissions confirmed as phishing, oldest first, for a sweep over every site. */

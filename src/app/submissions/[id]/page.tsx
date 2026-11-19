@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { SubmissionPageClient } from "./SubmissionPageClient";
 import { Submission } from "@/lib/db/schema";
 import { submissionSeo } from "@/lib/seo/submission";
+import { requestLocale } from "@/lib/i18n_server";
 
 export const dynamic = "force-dynamic";
 
@@ -37,10 +38,10 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 	};
 }
 
-export default async function SubmissionPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function SubmissionPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
 	const { id } = await params;
 	const initialSubmission = await getSubmissionDetails(id);
 	if (!initialSubmission) notFound();
 
-	return <SubmissionPageClient id={id} initialSubmission={initialSubmission} />;
+	return <SubmissionPageClient id={id} initialSubmission={initialSubmission} locale={await requestLocale((await searchParams).lang)} />;
 }

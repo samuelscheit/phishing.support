@@ -3,6 +3,7 @@ import { index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-c
 
 import { submissions } from "../db/schema";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "../db/sqlite_types";
+import type { VisitorGuidance } from "./guidance";
 
 /**
  * What a confirmed site shows about who runs it.
@@ -37,6 +38,8 @@ export const campaigns = sqliteTable(
 		/** How many sites the title and summary describe; a different count means they are rewritten. */
 		summarySiteCount: sqliteInteger("summary_site_count"),
 		summaryGeneratedAt: sqliteTimestamp("summary_generated_at"),
+		/** The impersonated brand's own account pages a visitor needs, validated to lie on the brand's domain; made for the brand it names. */
+		visitorGuidance: text("visitor_guidance", { mode: "json" }).$type<VisitorGuidance>(),
 		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
 		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
@@ -72,6 +75,8 @@ export const campaignSiteFacts = sqliteTable(
 		language: text("language"),
 		/** The trimmed screenshot artifact of the analyzed page. */
 		thumbnailArtifactId: sqliteBigint("thumbnail_artifact_id"),
+		/** The analyzed page's screenshot is one flat colour: nothing a visitor could recognize. */
+		blankCapture: int("blank_capture", { mode: "boolean" }).notNull().default(false),
 		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 );

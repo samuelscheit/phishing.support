@@ -12,6 +12,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowRight, ExternalLink, Mail, Globe, ShieldAlert } from "lucide-react";
+import { COPY as CAMPAIGN_COPY } from "@/app/campaigns/[id]/copy";
+import type { Locale } from "@/lib/i18n";
 import Link from "next/link";
 import type { Artifact } from "@/lib/db/schema";
 import type { SubmissionDetail as ApiSubmissionDetail } from "@/lib/submissions/details";
@@ -53,19 +55,19 @@ function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "kind">) {
  * The way from a case to its campaign's page, which tells a visitor what to do
  * and lists the group's other sites; `#host` makes that page name this site.
  */
-function CampaignLink({ campaign, host }: { campaign: NonNullable<SubmissionDetail["campaign"]>; host?: string }) {
-	const several = campaign.siteCount > 1;
+function CampaignLink({ campaign, host, locale }: { campaign: NonNullable<SubmissionDetail["campaign"]>; host?: string; locale: Locale }) {
+	const copy = CAMPAIGN_COPY[locale];
 	return (
-		<section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
-			<p className="min-w-0 text-sm font-semibold">{several ? `One of ${campaign.siteCount} fake sites from the same group` : "A fake site"}</p>
-			<Link href={`/campaigns/${campaign.id}${host ? `#${host}` : ""}`} className="inline-flex shrink-0 items-center gap-2 rounded-xl border bg-background px-4 py-2.5 text-sm font-medium shadow-sm transition-colors hover:bg-accent">
-				{several ? `See all ${campaign.siteCount} sites and what to do` : "What to do"}<ArrowRight className="size-4" />
+		<section lang={locale} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+			<p className="min-w-0 text-sm font-semibold">{copy.caseCard(campaign.siteCount)}</p>
+			<Link href={`/campaigns/${campaign.id}?lang=${locale}${host ? `#${host}` : ""}`} className="inline-flex shrink-0 items-center gap-2 rounded-xl border bg-background px-4 py-2.5 text-sm font-medium shadow-sm transition-colors hover:bg-accent">
+				{copy.caseCardButton(campaign.siteCount)}<ArrowRight className="size-4" />
 			</Link>
 		</section>
 	);
 }
 
-export function SubmissionPageClient({ id, initialSubmission }: { id: string; initialSubmission?: SubmissionDetail | null }) {
+export function SubmissionPageClient({ id, initialSubmission, locale }: { id: string; initialSubmission?: SubmissionDetail | null; locale: Locale }) {
 	const [submission, setSubmission] = useState<SubmissionDetail | null>(initialSubmission ?? null);
 	const [loading, setLoading] = useState(initialSubmission ? false : true);
 	const [websiteHtml, setWebsiteHtml] = useState<string | null>(null);
@@ -319,7 +321,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 				</div>
 			</header>
 
-			{submission.campaign ? <CampaignLink campaign={submission.campaign} host={submission.data.kind === "website" ? hostOfUrl(submission.data.website.url) : undefined} /> : null}
+			{submission.campaign ? <CampaignLink campaign={submission.campaign} host={submission.data.kind === "website" ? hostOfUrl(submission.data.website.url) : undefined} locale={locale} /> : null}
 
 			<div className="grid items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
 				<div className="min-w-0 space-y-6">

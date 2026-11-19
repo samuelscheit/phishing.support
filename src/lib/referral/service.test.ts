@@ -186,7 +186,7 @@ describe("criminal referral of a campaign", () => {
 		const wallet: ExtractedIndicator = { kind: "payment_receiver", value: "tron:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", links: true, evidence: { receiverKind: "tron", receiver: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t" } };
 		await CampaignRepository.recordIndicators(15n, [telegram("7001"), iban, wallet]);
 		await CampaignRepository.recordIndicators(13n, [kit("a".repeat(64)), iban, wallet]);
-		await CampaignRepository.saveSiteFacts(11n, { language: "de", thumbnailArtifactId: 4242n });
+		await CampaignRepository.saveSiteFacts(11n, { language: "de", thumbnailArtifactId: 4242n, blankCapture: false });
 		// The visit's pages, saved out of order: the landing page, then the form after it, with its stamped copy.
 		const shot = async (name: string, kind: string) => (await ArtifactsEntity.saveBuffer({ submissionId: 11n, name, kind, mimeType: "image/png", buffer: Buffer.from(name) })).toString();
 		const form = await shot("website-step2.png", "website_png");
