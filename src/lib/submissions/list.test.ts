@@ -70,23 +70,23 @@ describe("submission list pages", () => {
 
 	test("filters by status chip across pages, and counts every submission under its chip", async () => {
 		const base = Date.parse("2026-10-30T00:00:00Z");
-		const statuses = ["new", "queued", "running", "reported", "invalid", "invalid", "redirected", "failed", "reported", "invalid"] as const;
+		const statuses = ["running", "reported", "invalid", "invalid", "redirected", "failed", "reported", "invalid"] as const;
 		for (const [index, status] of statuses.entries()) {
 			await create(BigInt(300 + index), new Date(base + index), { kind: "website", website: { url: `https://s${index}.example.com/` } }, status);
 		}
-		const counts = { running: 3, phishing: 2, not_phishing: 3, redirects: 1, failed: 1 };
+		const counts = { running: 1, phishing: 2, not_phishing: 3, redirects: 1, failed: 1 };
 
 		// The default chips: what is being analyzed now and what was confirmed, newest first.
-		const first = await listSubmissionCards({ filters: ["running", "phishing"], limit: 3 });
-		expect(first.submissions.map(({ id, status }) => `${id}:${status}`)).toEqual(["308:reported", "303:reported", "302:running"]);
+		const first = await listSubmissionCards({ filters: ["running", "phishing"], limit: 2 });
+		expect(first.submissions.map(({ id, status }) => `${id}:${status}`)).toEqual(["306:reported", "301:reported"]);
 		expect(first.counts).toEqual(counts);
-		const second = await listSubmissionCards({ filters: ["running", "phishing"], limit: 3, cursor: first.nextCursor });
-		expect(second.submissions.map(({ id }) => id)).toEqual(["301", "300"]);
+		const second = await listSubmissionCards({ filters: ["running", "phishing"], limit: 2, cursor: first.nextCursor });
+		expect(second.submissions.map(({ id }) => id)).toEqual(["300"]);
 		expect(second.nextCursor).toBeUndefined();
 		// Older pages carry no counts; the newest page's refresh keeps them current.
 		expect(second.counts).toBeUndefined();
 
-		expect((await listSubmissionCards({ filters: ["failed", "redirects"] })).submissions.map(({ id }) => id)).toEqual(["307", "306"]);
+		expect((await listSubmissionCards({ filters: ["failed", "redirects"] })).submissions.map(({ id }) => id)).toEqual(["305", "304"]);
 		// No chip lists nothing, but still counts everything.
 		expect(await listSubmissionCards({ filters: [] })).toEqual({ submissions: [], counts });
 		// Without a filter, everything is listed.

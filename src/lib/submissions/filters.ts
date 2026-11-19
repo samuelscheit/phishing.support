@@ -5,7 +5,7 @@ import type { SubmissionStatus } from "@/lib/db/schema";
  * statuses it groups; every status belongs to exactly one chip.
  */
 export const SUBMISSION_FILTERS = {
-	running: ["new", "queued", "running"],
+	running: ["running"],
 	phishing: ["reported"],
 	not_phishing: ["invalid"],
 	redirects: ["redirected"],

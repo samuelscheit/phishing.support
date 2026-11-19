@@ -22,7 +22,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 		} else {
 			await retryFailedEmailAnalysis(submissionId);
 		}
-		return NextResponse.json({ ok: true, status: "queued" });
+		return NextResponse.json({ ok: true, status: "running" });
 	} catch (error) {
 		if (error instanceof SubmissionRetryError) return NextResponse.json({ error: error.message }, { status: 409 });
 		console.error("Failed to queue submission retry:", error);

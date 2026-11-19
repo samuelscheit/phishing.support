@@ -8,7 +8,7 @@ export function SubmissionStatus({ status, className }: { status?: string | null
 	const raw = (status || "").trim();
 	const key = raw.toLowerCase();
 
-	const isPending = key === "new" || key === "queued" || key === "running";
+	const isPending = key === "running";
 	const isReported = key === "reported";
 	const isInvalid = key === "invalid";
 	const isFailed = key === "failed";

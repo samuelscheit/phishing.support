@@ -39,7 +39,7 @@ describe("emailSubmissionDedupeKey", () => {
 		// The missing source artifact is rejected before claiming, so this test
 		// also verifies a failed row is not made unretryable by validation.
 		expect((await SubmissionsEntity.get(id))?.status).toBe("failed");
-		expect(await SubmissionsEntity.transitionStatus(id, "failed", "queued")).toBeTrue();
-		expect(await SubmissionsEntity.transitionStatus(id, "failed", "queued")).toBeFalse();
+		expect(await SubmissionsEntity.transitionStatus(id, "failed", "running")).toBeTrue();
+		expect(await SubmissionsEntity.transitionStatus(id, "failed", "running")).toBeFalse();
 	});
 });

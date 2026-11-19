@@ -267,9 +267,7 @@ export function createInitialAnalysisStreamState(status?: string, progressExpect
 				? "failed"
 				: normalized === "running"
 					? "running"
-					: ["new", "queued"].includes(normalized ?? "")
-						? "created"
-						: "idle";
+					: "idle";
 	return {
 		connection: "connecting",
 		runStatus,

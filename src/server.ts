@@ -2,7 +2,7 @@ import next from "next";
 import { createServer } from "node:http";
 
 import { SubmissionsEntity } from "./lib/db/entities";
-import { resumePendingWebsiteAnalyses, startWebsiteAutoRetries } from "./lib/submissions/website";
+import { startWebsiteAutoRetries } from "./lib/submissions/website";
 import { retryInterruptedWebsiteAnalysis } from "./lib/website_ai";
 import { startAbuseWorker, stopAbuseWorker } from "./lib/abuse/worker";
 import { startMailboxListener, stopMailboxListener } from "./lib/imap/listener";
@@ -34,14 +34,6 @@ try {
 } catch (err) {
 	console.error("Failed to mark running submissions as failed on startup:", err);
 }
-
-// Versions before the bounded lookup worker left a short `new`-state crash
-// window before they marked a website analysis running. Claim and resume only
-// those legacy/new or retry-queued website rows; regular active work remains
-// behind the explicit failed-analysis retry boundary above.
-void resumePendingWebsiteAnalyses().then((resumed) => {
-	if (resumed > 0) console.warn(`Resumed ${resumed} pending website analyses on startup.`);
-}).catch((err) => console.error("Failed to resume pending website analyses on startup:", err));
 
 // A capture that failed because the browser service was down is retried on
 // its own schedule rather than left failed.

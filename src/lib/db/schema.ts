@@ -10,7 +10,7 @@ export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
 
 /** `redirected`: the site led to another host, which is analyzed in its own submission. */
-export const submissionStatus = ["new", "queued", "running", "failed", "reported", "invalid", "redirected"] as const;
+export const submissionStatus = ["running", "failed", "reported", "invalid", "redirected"] as const;
 export type SubmissionStatus = (typeof submissionStatus)[number];
 
 export const analysisRunStatus = ["running", "completed", "failed"] as const;
@@ -92,7 +92,7 @@ export const submissions = sqliteTable(
 		source: text("source"),
 		data: text("data", { mode: "json" }).$type<SubmissionData>().notNull(),
 		dedupeKey: text("dedupe_key").notNull(),
-		status: text("status", { enum: submissionStatus }).notNull().default("new"),
+		status: text("status", { enum: submissionStatus }).notNull().default("running"),
 		info: text("info"),
 		/** Network and client metadata captured when the submission was made via HTTP. */
 		reporterIp: text("reporter_ip"),

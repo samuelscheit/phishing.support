@@ -521,7 +521,7 @@ describe("browser-service failures", () => {
 		// Due: re-queued through the normal retry boundary.
 		expect(await runDueWebsiteAutoRetries({ now: dueAt, startAnalysis })).toBe(1);
 		expect(started).toEqual([id]);
-		expect((await SubmissionsEntity.get(id))?.status).toBe("queued");
+		expect((await SubmissionsEntity.get(id))?.status).toBe("running");
 
 		// The second and third outages keep counting; the fourth gives up.
 		await run();

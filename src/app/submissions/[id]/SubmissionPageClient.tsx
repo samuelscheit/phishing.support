@@ -70,7 +70,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const offeredDownload = submission?.data.kind === "website" ? submission.data.website.offeredDownload : undefined;
 	const siteVisit = submission?.data.kind === "website" ? submission.data.website.visit : undefined;
 
-	const isRunning = ["new", "queued", "running"].includes(statusKey);
+	const isRunning = statusKey === "running";
 	const websiteNavigation = submission?.data.kind === "website" ? submission.data.website.navigationHops ?? [] : [];
 	const websiteAssessmentByHop = new Map(
 		(submission?.data.kind === "website" ? submission.data.website.siteAssessments ?? [] : [])
@@ -84,7 +84,7 @@ export function SubmissionPageClient({ id, initialSubmission }: { id: string; in
 	const reportCount = reports.reduce((count, report) => count + Math.max(1, report.routes.length), 0);
 
 	const [tab, setTab] = useState("runs");
-	const liveVisit = useLiveVisit(id, ["new", "queued", "running"].includes(statusKey) && submission?.kind === "website");
+	const liveVisit = useLiveVisit(id, isRunning && submission?.kind === "website");
 	// The page the finding rests on: the one whose content was captured and analyzed.
 	const analyzedHop = websiteNavigation.find((hop) => hop.contentCaptured);
 	const analyzedAssessment = analyzedHop ? websiteAssessmentByHop.get(analyzedHop.index) : undefined;

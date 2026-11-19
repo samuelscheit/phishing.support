@@ -134,9 +134,8 @@ describe("analysis SSE event projection", () => {
 		expect(state.runStatus).toBe("running");
 	});
 
-	test("shows queued submissions as starting until work begins", () => {
-		expect(createInitialAnalysisStreamState("queued").runStatus).toBe("created");
-		expect(createInitialAnalysisStreamState("new").runStatus).toBe("created");
+	test("treats unknown submission statuses as idle", () => {
+		expect(createInitialAnalysisStreamState("queued").runStatus).toBe("idle");
 	});
 
 	test("maps retries and failures to visible statuses", () => {

@@ -78,7 +78,8 @@ export class SubmissionsEntity {
                     source: params.source,
                     data: params.data,
                     dedupeKey: params.dedupeKey,
-                    status: params.status ?? "new",
+                    // Analysis starts right after insertion; a restart fails what is still running.
+                    status: params.status ?? "running",
                     info: params.info,
                     reporterIp: params.reporterIp,
                     reporterCountry: params.reporterCountry,
@@ -205,35 +206,6 @@ export class SubmissionsEntity {
         const [row] = await db.select().from(submissions).where(eq(submissions.id, id));
         return row;
     }
-
-	/**
-	 * Atomically claim legacy website rows that were persisted before the
-	 * analysis worker started.  Current submissions are created as `running`,
-	 * so `new` here is recovery state rather than a normal work queue.
-	 */
-	static async claimPendingWebsiteAnalysis(id: bigint): Promise<boolean> {
-		const db = await getDb();
-		const rows = await db
-			.update(submissions)
-			.set({ status: "running", info: "Resuming interrupted website analysis.", updatedAt: nowDate() })
-			.where(and(
-				eq(submissions.id, id),
-				eq(submissions.kind, "website"),
-				inArray(submissions.status, ["new", "queued"]),
-			))
-			.returning({ id: submissions.id });
-		return rows.length === 1;
-	}
-
-	static async listPendingWebsiteAnalyses(limit = 10) {
-		const db = await getDb();
-		return db
-			.select()
-			.from(submissions)
-			.where(and(eq(submissions.kind, "website"), inArray(submissions.status, ["new", "queued"])))
-			.orderBy(submissions.createdAt)
-			.limit(limit);
-	}
 
 	/** Failed website analyses whose automatic retry is due. */
 	static async listDueWebsiteAutoRetries(now: Date, limit = 10) {
