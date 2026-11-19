@@ -7,7 +7,7 @@ import { isKitSiblingSeed } from "./abuse/origin/kit_job";
 import { ArtifactsEntity, SubmissionsEntity } from "./db/entities";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { createWebsiteSubmission, runDueWebsiteAutoRetries, websiteSubmissionDedupeKey } from "./submissions/website";
-import type { WebsiteArchiveResult } from "./website_archive";
+import type { WebsiteArchiveResult } from "./website_archive/types";
 import { scriptedVisitSession } from "./site_visit/test_helpers";
 import { analyzeWebsite, capturedHostNavigation, websiteReportUrls, websiteSiteAssessments, type WebsiteAnalysisDependencies } from "./website_ai";
 import type { WebsiteNavigationHop } from "./website_types";

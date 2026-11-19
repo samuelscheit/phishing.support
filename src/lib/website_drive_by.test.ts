@@ -16,7 +16,7 @@ import { websiteSubmissionDedupeKey } from "./submissions/website";
 import { analyzeWebsite, reportableWebsiteHop, websiteSiteAssessments } from "./website_ai";
 import { buildWebsiteClassificationInput, buildWebsiteReportEvidence, validateWebsiteSiteClassification, websiteMobileHandoff } from "./website_classification";
 import { scriptedVisitSession } from "./site_visit/test_helpers";
-import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "./website_archive";
+import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "./website_archive/types";
 import type { WebsiteFrameRequest, WebsiteFrameResource, WebsiteHiddenFrame, WebsiteNavigationHop } from "./website_types";
 
 useTemporaryDatabase();

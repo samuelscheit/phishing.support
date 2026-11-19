@@ -9,7 +9,7 @@ import {
 	validateWebsiteSiteClassification,
 	WEBSITE_CLASSIFICATION_FORMAT,
 } from "./website_classification";
-import { capturedDocumentContent } from "./website_archive";
+import { capturedDocumentContent } from "./website_archive/text";
 import { extractPasteCommands } from "./malware/paste_commands";
 import type { WebsiteNavigationHop } from "./website_types";
 

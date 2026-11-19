@@ -4,7 +4,7 @@ import { isPopularSite, loadPopularDomains, type PopularDomains } from "../abuse
 import { SubmissionsEntity, ArtifactsEntity } from "../db/entities";
 import type { Submission } from "../db/schema";
 import { fetchJson, type FetchImplementation } from "../network/bounded_fetch";
-import { mhtmlVisitorText } from "../website_archive";
+import { mhtmlVisitorText } from "../website_archive/text";
 import { latestArtifactNamed, websiteCaptureFileNames } from "../website_capture_files";
 import { hasPathTenants } from "../website_site";
 import type { ExfiltrationBackend } from "../exfiltration/types";

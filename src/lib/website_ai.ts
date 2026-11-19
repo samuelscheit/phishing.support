@@ -1,6 +1,8 @@
 import { reporterBrowserIdentity } from "./browser/reporter_identity";
 import { FABRIC_EGRESS_LABEL, fabricBrowserConfigFromEnvironment, type FabricEgress } from "./browser/fabric";
-import { archiveWebsite, isBrowserInfrastructureFailure, type ArchiveWebsiteOptions, type WebsitePageSession, type WebsiteVerificationGate } from "./website_archive";
+import { archiveWebsite } from "./website_archive";
+import { isBrowserInfrastructureFailure } from "./website_archive/errors";
+import type { ArchiveWebsiteOptions, WebsitePageSession, WebsiteVerificationGate } from "./website_archive/types";
 import { errorText } from "./error_text";
 import { buildWebsiteEvidence, type WebsiteEvidencePackage } from "./evidence/package";
 import { buildVisitEvidence } from "./evidence/visit";

@@ -7,7 +7,8 @@ import { useTemporaryDatabase } from "./db/test_helpers";
 import { scriptedVisitSession } from "./site_visit/test_helpers";
 import { websiteSubmissionDedupeKey } from "./submissions/website";
 import { analyzeWebsite } from "./website_ai";
-import { BrowserInfrastructureError, WebsiteCaptureFailedError, WebsiteUnreachableError, type ArchiveWebsiteOptions, type WebsiteArchiveResult } from "./website_archive";
+import { BrowserInfrastructureError, WebsiteCaptureFailedError, WebsiteUnreachableError } from "./website_archive/errors";
+import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "./website_archive/types";
 
 useTemporaryDatabase();
 

@@ -3,11 +3,15 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import puppeteer, { type Browser, type BrowserContext, type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
 import sharp from "sharp";
-import type { FabricEgress } from "./browser/fabric";
-import { IPHONE_USER_AGENT } from "./browser/page";
-import type { WebsiteNavigationHop } from "./website_types";
+import type { FabricEgress } from "../browser/fabric";
+import { IPHONE_USER_AGENT } from "../browser/page";
+import type { WebsiteNavigationHop } from "../website_types";
 
-import { type WebsiteArchiveResult, archiveWebsite, BrowserInfrastructureError, capturedDocumentContent, getMhtmlArchiveDate, getMhtmlArchiveLocation, isBrowserInfrastructureFailure, WebsiteCaptureFailedError } from "./website_archive";
+import { archiveWebsite } from ".";
+import { BrowserInfrastructureError, isBrowserInfrastructureFailure, WebsiteCaptureFailedError } from "./errors";
+import { getMhtmlArchiveDate, getMhtmlArchiveLocation } from "./mhtml";
+import { capturedDocumentContent } from "./text";
+import type { WebsiteArchiveResult } from "./types";
 
 function mhtml(preamble: string, body = "content") {
 	return Buffer.from(`${preamble}\r\n\r\n${body}`, "latin1");

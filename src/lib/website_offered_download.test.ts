@@ -6,7 +6,8 @@ import { AbuseRepository } from "./abuse/repository";
 import { SubmissionsEntity } from "./db/entities";
 import { useTemporaryDatabase } from "./db/test_helpers";
 import { websiteSubmissionDedupeKey } from "./submissions/website";
-import { capturedDocumentContent, type WebsiteArchiveResult, type WebsitePageSession, type WebsiteVisitParams } from "./website_archive";
+import { capturedDocumentContent } from "./website_archive/text";
+import type { WebsiteArchiveResult, WebsitePageSession, WebsiteVisitParams } from "./website_archive/types";
 import { analyzeWebsite, type WebsiteAnalysisDependencies } from "./website_ai";
 import { scriptedVisitSession, type ScriptedVisit } from "./site_visit/test_helpers";
 

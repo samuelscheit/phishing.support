@@ -43,11 +43,6 @@ export function observedPuppeteerResponse(page: Page, response: HTTPResponse): O
 	};
 }
 
-/** Observe every response of the page through puppeteer. */
-export function observePageResponses(page: Page, observe: ResponseObserver): void {
-	page.on("response", (response) => observe(observedPuppeteerResponse(page, response)));
-}
-
 type CdpResponse = { url: string; status: number; headers?: Record<string, unknown> };
 
 /** How long a body is waited for: a snapshot reading kit resources must not hang on one. */

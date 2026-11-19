@@ -1,7 +1,7 @@
 import * as toon from "@toon-format/toon";
 import type { ResponseFormatTextJSONSchemaConfig } from "openai/resources/responses/responses.mjs";
 
-import type { WebsiteVerificationGate } from "./website_archive";
+import type { WebsiteVerificationGate } from "./website_archive/types";
 import { extractWebsiteDataEntryFields } from "./website_fields";
 import { extractPasteCommands, type PasteCommand } from "./malware/paste_commands";
 import { defangCommand } from "./malware/defang";

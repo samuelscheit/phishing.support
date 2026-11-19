@@ -10,7 +10,9 @@ import { fetchThroughPublicRedirects } from "../../network/public_redirects";
 import { createExfiltrationCanaries } from "../../exfiltration/canaries";
 import { taskAgentVisit, type VisitAgent } from "../../site_visit/agent";
 import { visitPages } from "../../site_visit/evidence";
-import { archiveWebsite, WebsiteCaptureFailedError, type WebsiteArchiveResult } from "../../website_archive";
+import { archiveWebsite } from "../../website_archive";
+import { WebsiteCaptureFailedError } from "../../website_archive/errors";
+import type { WebsiteArchiveResult } from "../../website_archive/types";
 import type { WebsiteDevice } from "../../website_types";
 import type { AccountIdentifierExtractor } from "./account_identifiers";
 
