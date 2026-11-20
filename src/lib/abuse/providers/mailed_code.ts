@@ -1,7 +1,7 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 
-import { imapConfig } from "../../mail_config";
+import { imapConfig } from "../../mail/config";
 import { sleep } from "../../sleep";
 
 /**

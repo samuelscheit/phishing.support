@@ -3,7 +3,7 @@ import puppeteer from "rebrowser-puppeteer-core";
 
 import { createExfiltrationCanaries } from "../exfiltration/canaries";
 import type { ExfiltrationCanaries } from "../exfiltration/types";
-import { archiveWebsite } from "../website_archive";
+import { archiveWebsite } from "../website/archive";
 import type { ChatModel, ChatRequest } from "../browser_task/agent";
 import { chromiumAvailable, chromiumExecutable, refIn, ScriptedModel, StalledModel, type ScriptedTurn } from "../browser_task/test_helpers";
 import { stepActions, taskAgentVisit, type VisitAgent } from "./agent";

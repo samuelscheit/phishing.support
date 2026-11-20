@@ -1,11 +1,11 @@
 import { InferSelectModel, sql } from "drizzle-orm";
 import { blob, index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { WhoISInfo } from "../website_info";
+import { WhoISInfo } from "../website/info";
 import { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
-import { MailData } from "../mail_ai";
+import { MailData } from "../mail/ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
-import type { WebsiteAccessGate } from "../website_access_gate";
-import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteSiteAssessment, WebsiteVisitRecord } from "../website_types";
+import type { WebsiteAccessGate } from "../website/access_gate";
+import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteSiteAssessment, WebsiteVisitRecord } from "../website/types";
 
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];

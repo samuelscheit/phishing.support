@@ -1,8 +1,8 @@
 import { matchedCanaries } from "../exfiltration/analysis";
 import type { CapturedNetworkRequest, ExfiltrationCanaries } from "../exfiltration/types";
-import type { DownloadedFile } from "../website_download";
-import { isSameWebsite } from "../website_site";
-import type { CanaryField, VisitDataSent, WebsiteNavigationHop } from "../website_types";
+import type { DownloadedFile } from "../website/download";
+import { isSameWebsite } from "../website/site";
+import type { CanaryField, VisitDataSent, WebsiteNavigationHop } from "../website/types";
 import type { SiteVisitRecording } from "./visit";
 
 /**

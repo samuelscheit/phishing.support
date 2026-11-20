@@ -11,7 +11,7 @@ import { runDecisionAgent, type DecisionAgentModel, type DecisionAgentOutcome, t
 import { checkReportedSites, reasonSaysContentGone, takedownConfirmed } from "./liveness";
 import { caseCaptureNames, type AttachableFile, type DecisionToolDependencies } from "./tools";
 import { asRecord } from "../../values";
-import { accessGateOf, arrivalChain } from "../../website_access_gate";
+import { accessGateOf, arrivalChain } from "../../website/access_gate";
 
 const MAX_MESSAGE_TEXT = 6_000;
 

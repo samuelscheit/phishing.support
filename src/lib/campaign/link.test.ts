@@ -6,7 +6,7 @@ import { SubmissionsEntity } from "../db/entities/submissions";
 import type { Submission } from "../db/schema";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import type { ExfiltrationBackend } from "../exfiltration/types";
-import type { WebsiteKitResource, WebsiteSiteAssessment } from "../website_types";
+import type { WebsiteKitResource, WebsiteSiteAssessment } from "../website/types";
 import type { GuidanceDependencies, GuidanceInput } from "./guidance";
 import { backendIndicatorValue, extractIndicators, lookupPublishedLibrary } from "./indicators";
 import { describeCampaignIfChanged, linkSubmissionToCampaign, type LinkDependencies } from "./link";

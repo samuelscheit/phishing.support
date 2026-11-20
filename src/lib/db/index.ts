@@ -5,8 +5,6 @@ import type { SQLiteTransaction } from "drizzle-orm/sqlite-core";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
-import { config } from "dotenv";
-
 /**
  * This application has several independently bundled server entry points
  * (the custom server, Next route handlers, and background listeners). Each
@@ -26,11 +24,6 @@ function configureSqlite(client: Database) {
 		PRAGMA synchronous = NORMAL;
 	`);
 }
-
-config({
-	path: join(process.cwd(), ".env"),
-	quiet: true,
-});
 
 function databaseFileName() {
 	const fileName = process.env.DB_FILE_NAME;

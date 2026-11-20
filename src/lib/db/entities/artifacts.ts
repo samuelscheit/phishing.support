@@ -4,7 +4,7 @@ import { getDb } from "../index";
 import { artifacts } from "../schema";
 import { generateId } from "../ids";
 import { websiteEvidenceFiles, type WebsiteEvidencePackage } from "../../evidence/package";
-import { websiteCaptureFileNames } from "../../website_capture_files";
+import { websiteCaptureFileNames } from "../../website/capture_files";
 
 export class ArtifactsEntity {
     static sha256Hex(buffer: Buffer): string {

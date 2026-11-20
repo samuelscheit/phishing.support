@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { queryDns } from "../website_info";
+import { queryDns } from "../website/info";
 
 describe("website DNS collection", () => {
 	test("keeps partial records when one DNS operation stalls", async () => {

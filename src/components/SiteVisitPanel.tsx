@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckSquare, Download, Flag, Globe, Keyboard, ListChecks, MousePointerClick, Send, ShieldAlert, Sparkles, Upload } from "lucide-react";
 
 import { cn } from "../web_lib/util";
-import { CANARY_FIELD_LABEL, type CanaryField, type WebsiteOfferedDownload, type WebsiteVisitRecord } from "@/lib/website_types";
-import { hostOf } from "@/lib/website_site";
+import { CANARY_FIELD_LABEL, type CanaryField, type WebsiteOfferedDownload, type WebsiteVisitRecord } from "@/lib/website/types";
+import { hostOf } from "@/lib/website/site";
 import { Address } from "./Address";
 
 /** One page of the visit, with its screenshot when the case kept one. */

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { imapConfig } from "../mail_config";
+import { imapConfig } from "../mail/config";
 import { addressedTo } from "./listener";
 
 const names = ["IMAP_HOST", "IMAP_USER", "IMAP_PASS", "IMAP_MAILBOXES", "IMAP_SHARED_MAILBOXES", "IMAP_LISTEN_ADDRESS", "REPLY_DOMAIN"] as const;

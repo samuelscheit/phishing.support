@@ -2,7 +2,7 @@ import { getDomain } from "tldts";
 import { z } from "zod";
 
 import { fetchJson, fetchText, type FetchImplementation } from "../../network/bounded_fetch";
-import { hasPathTenants } from "../../website_site";
+import { hasPathTenants } from "../../website/site";
 import { normalizeDomain } from "../security";
 import { DAY_MS } from "../../duration";
 

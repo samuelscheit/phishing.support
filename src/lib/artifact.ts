@@ -2,7 +2,7 @@ import { Stream } from "openai/streaming";
 import { ResponseStreamEvent } from "openai/resources/responses/responses.mjs";
 import { AnalysisRunsEntity } from "./db/entities/analysis_runs";
 import { publishEvent } from "./event/event_transport";
-import { extractResponseOutputText, parseResponseJson } from "./openai_response";
+import { extractResponseOutputText, parseResponseJson } from "./openai/response";
 import { errorText } from "./error_text";
 
 export class AnalysisStreamAttemptError extends Error {

@@ -5,7 +5,7 @@
  * arguments.
  */
 
-import { countSearchQueries } from "../analysis_stream_query_count";
+import { countSearchQueries } from "../analysis/stream_query_count";
 import { asRecord, type JsonRecord } from "../values";
 
 const MAX_TEXT = 8_000;

@@ -1,6 +1,6 @@
 import { ImapFlow, type FetchMessageObject } from "imapflow";
 
-import { imapConfig, replyDomain, type ImapConfig } from "../mail_config";
+import { imapConfig, replyDomain, type ImapConfig } from "../mail/config";
 import { ingestFetchedMail } from "./ingest";
 import { sleep } from "../sleep";
 

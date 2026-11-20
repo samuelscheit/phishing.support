@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 import MailComposer from "nodemailer/lib/mail-composer";
 
-import { replyDomain, smtpReturnPath, smtpSender, smtpTransport } from "../../mail_config";
+import { replyDomain, smtpReturnPath, smtpSender, smtpTransport } from "../../mail/config";
 import { AbuseRepository } from "../repository";
 import { attachmentFilename } from "./shared";
 import {

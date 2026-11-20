@@ -4,7 +4,7 @@ import { parse } from "mhtml-to-html";
 
 import { registrableDomain } from "../abuse/security";
 import { ArtifactsEntity } from "../db/entities/artifacts";
-import { latestArtifactNamed, websiteCaptureFileNames } from "../website_capture_files";
+import { latestArtifactNamed, websiteCaptureFileNames } from "../website/capture_files";
 
 /** Below this a page body is too generic (an error, parking or loader page) to tie two sites together. */
 const MIN_BODY_BYTES = 2_048;

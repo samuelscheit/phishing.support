@@ -1,6 +1,6 @@
 import type { Artifact } from "@/lib/db/schema";
 import type { SubmissionDetail } from "@/lib/submissions/details";
-import type { WebsitePhishingBasis } from "@/lib/website_types";
+import type { WebsitePhishingBasis } from "@/lib/website/types";
 
 export type WebsiteData = Extract<SubmissionDetail["data"], { kind: "website" }>["website"];
 export type NavigationHop = NonNullable<WebsiteData["navigationHops"]>[number];

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../db/test_helpers";
-import type { WebsiteSiteAssessment } from "../../website_types";
+import type { WebsiteSiteAssessment } from "../../website/types";
 import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
 import { analyzeKitSibling, isKitSiblingSeed } from "./kit_job";

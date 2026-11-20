@@ -4,7 +4,7 @@ import { simpleParser } from "mailparser";
 
 import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { SubmissionsEntity } from "../../db/entities/submissions";
-import { queryRDAPDomain } from "../../website_info";
+import { queryRDAPDomain } from "../../website/info";
 import { createWebsiteSubmission, type WebsiteSubmissionOptions } from "../../submissions/website";
 import { normalizeDomain, registrableDomain } from "../security";
 import { AbuseRepository } from "../repository";

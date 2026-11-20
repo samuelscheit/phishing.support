@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { getDomain } from "tldts";
 
 import { SubmissionsEntity } from "../../db/entities/submissions";
-import type { WebsiteHiddenFrame, WebsiteKitResource } from "../../website_types";
+import type { WebsiteHiddenFrame, WebsiteKitResource } from "../../website/types";
 import { normalizeDomain, normalizePublicHttpUrl } from "../security";
 import { throwIfAborted } from "../worker/shared";
 import { withoutCdnInjections } from "./cdn_injections";

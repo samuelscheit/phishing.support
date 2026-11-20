@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import type { DossierDependencies } from "../referral/dossier";
-import type { WebsiteSiteAssessment } from "../website_types";
+import type { WebsiteSiteAssessment } from "../website/types";
 import type { ExtractedIndicator } from "./indicators";
 import { getPublicCampaign } from "./public_view";
 import { CampaignRepository } from "./repository";

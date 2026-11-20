@@ -1,10 +1,10 @@
 import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { generateId } from "@/lib/db/ids";
-import { analyzeWebsite, type AnalyzeWebsiteOptions } from "@/lib/website_ai";
+import { analyzeWebsite, type AnalyzeWebsiteOptions } from "@/lib/website/ai";
 import type { ReporterMetadata } from "@/lib/request_metadata";
-import { websiteSite } from "@/lib/website_site";
-import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website_capture_files";
+import { websiteSite } from "@/lib/website/site";
+import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website/capture_files";
 import { getRetryableSubmission, SubmissionRetryError } from "./retry";
 
 export { SubmissionRetryError } from "./retry";

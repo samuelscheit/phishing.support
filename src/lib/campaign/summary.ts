@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-import { optionalOpenAIClient } from "../openai_client";
-import { optionalResponseText } from "../openai_response";
-import { defaultResponseModel } from "../openai_client";
+import { optionalOpenAIClient } from "../openai/client";
+import { optionalResponseText } from "../openai/response";
+import { defaultResponseModel } from "../openai/client";
 import { LANGUAGE_NAMES } from "./language";
 
 const MAX_TITLE = 90;

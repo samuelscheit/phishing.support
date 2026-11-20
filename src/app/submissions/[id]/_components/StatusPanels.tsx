@@ -1,7 +1,7 @@
 import { ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { describeDataEntryField } from "@/lib/website_types";
+import { describeDataEntryField } from "@/lib/website/types";
 import { hostOfUrl, type SiteAssessment } from "./helpers";
 
 const PANEL = "rounded-lg border bg-muted/30 p-4";

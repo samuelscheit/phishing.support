@@ -6,8 +6,8 @@ import { decodeImageEvidence, normalizeAbuseTarget, normalizeObservedUrl, type D
 import { AbuseInputError, hashStableJson, isPublicIp, sha256Hex } from "./security";
 import { setInvestigationStatus } from "../investigation/status";
 import { enqueueRedirectorWatch } from "./origin/redirector_watch";
-import { websiteSite } from "../website_site";
-import type { ReportableWebsiteFinding, WebsiteHiddenFrame, WebsiteOfferedDownload } from "../website_types";
+import { websiteSite } from "../website/site";
+import type { ReportableWebsiteFinding, WebsiteHiddenFrame, WebsiteOfferedDownload } from "../website/types";
 import type { PasteCommand } from "../malware/paste_commands";
 import type { InvestigationJobPayload } from "../investigation/payload";
 import type { CapturedNetworkRequest, ExfiltrationBackend, ExfiltrationCanaries } from "../exfiltration/types";

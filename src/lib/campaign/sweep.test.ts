@@ -7,7 +7,7 @@ import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "../abuse/contracts";
 import { AbuseRepository } from "../abuse/repository";
 import { abuseJobs } from "../abuse/schema";
-import type { WebsiteKitResource } from "../website_types";
+import type { WebsiteKitResource } from "../website/types";
 import type { LinkDependencies } from "./link";
 import { CampaignRepository } from "./repository";
 import { CAMPAIGN_RULES_VERSION, enqueueCampaignSweep, enqueueRulesSweep, linkSiteToCampaign } from "./sweep";

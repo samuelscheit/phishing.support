@@ -1,5 +1,5 @@
 import type { ExfiltrationBackend } from "../exfiltration/types";
-import type { ReportableWebsiteFinding, WebsiteDataUpload } from "../website_types";
+import type { ReportableWebsiteFinding, WebsiteDataUpload } from "../website/types";
 
 /** A command the page shows, as the investigation needs it: what to fetch and what runs it. */
 type InvestigationPasteCommand = {

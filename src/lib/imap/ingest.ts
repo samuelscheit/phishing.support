@@ -4,7 +4,7 @@ import { MailIngestEntity } from "@/lib/db/entities/mail_ingest";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { matchProviderReply, storeProviderReply } from "@/lib/abuse/reply_ingest";
 import { normalizeMailbox } from "@/lib/abuse/mail/shared";
-import { extractEmlsFromIncomingMessage } from "@/lib/mail_forwarded";
+import { extractEmlsFromIncomingMessage } from "@/lib/mail/forwarded";
 import { createEmailSubmissionFromEml, type EmailSubmissionOptions } from "@/lib/submissions/email";
 
 import { headerStrings, isSeen, recipients, type FetchedMail } from "./rfc";

@@ -14,7 +14,7 @@ import { AbuseRepository } from "../repository";
 import { AbuseWorker } from "../worker";
 import { IPHONE_USER_AGENT } from "../../browser/page";
 import { CORUNA_LOADER } from "../../malware/coruna_loader.fixture";
-import type { WebsiteHiddenFrame } from "../../website_types";
+import type { WebsiteHiddenFrame } from "../../website/types";
 
 useTemporaryDatabase();
 

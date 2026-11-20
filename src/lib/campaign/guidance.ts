@@ -1,9 +1,9 @@
 import { getDomain } from "tldts";
 import { z } from "zod";
 
-import { optionalOpenAIClient } from "../openai_client";
-import { optionalResponseText } from "../openai_response";
-import { defaultResponseModel } from "../openai_client";
+import { optionalOpenAIClient } from "../openai/client";
+import { optionalResponseText } from "../openai/response";
+import { defaultResponseModel } from "../openai/client";
 import type { Dossier } from "../referral/dossier";
 import { sortKinds, visitorKinds, type VisitorKind } from "./kinds";
 import { boundedFacts, type CampaignFacts } from "./summary";

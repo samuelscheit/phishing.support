@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 
 import { serviceIdentity } from "../constants";
-import { websiteCaptureFileNames } from "../website_capture_files";
-import type { WebsiteNavigationHop } from "../website_types";
+import { websiteCaptureFileNames } from "../website/capture_files";
+import type { WebsiteNavigationHop } from "../website/types";
 import { stampAddressBar } from "./address_bar";
 import { timestampEvidence, type EvidenceTimestamp } from "./timestamp";
 

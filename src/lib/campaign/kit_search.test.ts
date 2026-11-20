@@ -7,7 +7,7 @@ import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "../abuse/contracts";
 import { AbuseRepository } from "../abuse/repository";
 import { abuseJobs, type AbuseJob } from "../abuse/schema";
-import type { WebsiteKitResource, WebsiteSiteAssessment } from "../website_types";
+import type { WebsiteKitResource, WebsiteSiteAssessment } from "../website/types";
 import { analyzeKitSibling } from "../abuse/origin/kit_job";
 import { websiteSubmissionDedupeKey } from "../submissions/website";
 import { armCampaignKitSearch, searchableKitFingerprints, searchCampaignKits } from "./kit_search";

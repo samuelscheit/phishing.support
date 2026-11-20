@@ -2,7 +2,7 @@ import { abuseEmailCaseUrl, createAbuseEmailDraft, readVerifiedEmailDraft, type 
 import { isSafeEmailDeliveryFailure } from "../mail/types";
 import { attachedMessagesAsText, refusesAttachedMessages } from "../mail/attachment_policy";
 import { sendAbuseEmailRoute } from "../mail/send";
-import { smtpRelay } from "../../mail_config";
+import { smtpRelay } from "../../mail/config";
 import { serviceIdentity } from "../../constants";
 import { approvalDraftOf } from "../persistence/approvals";
 import { AbuseRepository } from "../repository";

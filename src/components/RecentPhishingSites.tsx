@@ -2,7 +2,7 @@ import { formatDistanceToNow } from "date-fns";
 import Link from "next/link";
 
 import { listSubmissionCards } from "@/lib/submissions/list";
-import { websiteSiteName } from "@/lib/website_site";
+import { websiteSiteName } from "@/lib/website/site";
 
 /** The newest websites confirmed as phishing, each linking to its case: real examples of what to look for. */
 export async function RecentPhishingSites({ count = 12 }: { count?: number }) {

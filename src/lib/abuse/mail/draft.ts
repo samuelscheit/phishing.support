@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { abuseCaseTag } from "./correlation";
 
-import { optionalOpenAIClient } from "../../openai_client";
-import { optionalResponseText } from "../../openai_response";
+import { optionalOpenAIClient } from "../../openai/client";
+import { optionalResponseText } from "../../openai/response";
 import { normalizePublicHttpUrl } from "../security";
 import { serviceIdentity } from "../../constants";
-import { defaultResponseModel } from "../../openai_client";
+import { defaultResponseModel } from "../../openai/client";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
 import { createOriginHostEmailDraft } from "../origin/draft";
 import { humanizeOrganization, recipientGreeting } from "./shared";

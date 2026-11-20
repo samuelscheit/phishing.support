@@ -3,7 +3,7 @@ import { simpleParser } from "mailparser";
 
 import type { AbuseArtifact, AbuseTargetType } from "../schema";
 import { normalizePublicHttpUrl } from "../security";
-import { getMailWebsiteUrls } from "../../mail";
+import { getMailWebsiteUrls } from "../../mail/parse";
 import { compactProviderText, truncateProviderText } from "./report_payload";
 
 /** The most links a provider form is shown from one email. */

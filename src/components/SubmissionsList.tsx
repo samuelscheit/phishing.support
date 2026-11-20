@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_SUBMISSION_FILTERS, isSubmissionFilter, type SubmissionFilter } from "@/lib/submissions/filters";
 import type { SubmissionCard as SubmissionCardData, SubmissionCardPage } from "@/lib/submissions/list";
 import { groupByCampaign, type SubmissionListItem } from "@/lib/submissions/campaign_groups";
-import { hostOf } from "@/lib/website_site";
+import { hostOf } from "@/lib/website/site";
 
 const PREVIEW_ROWS = 3;
 const FILTERS_STORAGE_KEY = "phishing-support:submission-filters";

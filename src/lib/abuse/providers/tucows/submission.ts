@@ -1,4 +1,4 @@
-import { imapConfig } from "../../../mail_config";
+import { imapConfig } from "../../../mail/config";
 import { asRecord } from "../../../values";
 import { captchaCredentialsProblem, solveCaptchaToken } from "../kit/captcha";
 import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";

@@ -4,8 +4,8 @@ import type { CampaignIndicator } from "../campaign/schema";
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import type { Submission } from "../db/schema";
-import { describeDataEntryField } from "../website_types";
-import { hostOf } from "../website_site";
+import { describeDataEntryField } from "../website/types";
+import { hostOf } from "../website/site";
 import { isAuthorityRoute, isPreservationRoute } from "./routes";
 import { indicatorInfrastructure, locateInfrastructure, mergeInfrastructure, routeInfrastructure, type InfrastructureClaim, type InfrastructureNode, type NetworkLookup } from "./infrastructure";
 

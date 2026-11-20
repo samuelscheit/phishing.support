@@ -1,8 +1,8 @@
-import { defaultResponseModel } from "../../openai_client";
+import { defaultResponseModel } from "../../openai/client";
 import { isIP } from "node:net";
 
-import { optionalOpenAIClient } from "../../openai_client";
-import { optionalResponseText } from "../../openai_response";
+import { optionalOpenAIClient } from "../../openai/client";
+import { optionalResponseText } from "../../openai/response";
 import { isVerifiedEmailRouteOriginAllowed } from "../providers/email";
 import { assertPublicDnsHost, normalizeDomain } from "../security";
 import { abuseReplyClassifications, abuseReplyClassificationSchema, type AbuseReplyClassification } from "./types";

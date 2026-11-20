@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { generateId } from "@/lib/db/ids";
-import { analyzeMail } from "@/lib/mail_ai";
+import { analyzeMail } from "@/lib/mail/ai";
 import type { ReporterMetadata } from "@/lib/request_metadata";
 
 import { getRetryableSubmission, SubmissionRetryError } from "./retry";

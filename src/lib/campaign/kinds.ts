@@ -1,5 +1,5 @@
 import type { Dossier } from "../referral/dossier";
-import type { CanaryField } from "../website_types";
+import type { CanaryField } from "../website/types";
 
 /** What a visitor may have typed into the campaign's pages, in the order the fake pages ask for it. */
 export const visitorKinds = ["email", "password", "code", "phone", "card", "payment", "personal"] as const;

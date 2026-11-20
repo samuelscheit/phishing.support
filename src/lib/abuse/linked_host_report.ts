@@ -1,6 +1,6 @@
 import { normalizeAbuseTarget, normalizeObservedUrl, type allegationCategories, type ValidatedAbuseReportRequest } from "./contracts";
 import { hashStableJson, sha256Hex, stableJson } from "./security";
-import { websiteSite } from "../website_site";
+import { websiteSite } from "../website/site";
 
 /** The confirmed page's stamped screenshot. Forms such as Eranet's and NameSilo's require an image. */
 export type PageScreenshot = { buffer: Buffer; mimeType: "image/png" | "image/jpeg" };

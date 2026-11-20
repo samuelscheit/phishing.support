@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useReducer } from "react";
-import { createInitialAnalysisStreamState } from "@/lib/analysis_stream_events";
+import { createInitialAnalysisStreamState } from "@/lib/analysis/stream_events";
 import { reducer } from "./stream_state";
 
 /** Subscribes to a run's event stream (and the submission's progress stream) and folds the events into the reader state. */

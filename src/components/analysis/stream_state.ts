@@ -5,7 +5,7 @@ import {
 	markAnalysisStreamOpen,
 	type AnalysisEntryStatus,
 	type AnalysisStreamState,
-} from "@/lib/analysis_stream_events";
+} from "@/lib/analysis/stream_events";
 
 export type StreamAction =
 	| { type: "reset"; status?: string; progressExpected?: boolean }

@@ -6,7 +6,7 @@ import { SubmissionsEntity } from "../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { runReportInvestigation, type InvestigationDependencies } from "../../investigation/run";
 import { readInvestigationJobPayload } from "../../investigation/payload";
-import type { WebsiteNavigationHop, WebsiteSiteAssessment } from "../../website_types";
+import type { WebsiteNavigationHop, WebsiteSiteAssessment } from "../../website/types";
 import { AbuseRepository } from "../repository";
 import { abuseJobs } from "../schema";
 import { reportConfirmedWebsiteAbuse } from "../submission_reports";

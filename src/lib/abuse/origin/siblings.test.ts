@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 
 import { CORUNA_FRAME_URL, CORUNA_LOADER } from "../../malware/coruna_loader.fixture";
-import type { WebsiteHiddenFrame, WebsiteKitResource } from "../../website_types";
+import type { WebsiteHiddenFrame, WebsiteKitResource } from "../../website/types";
 import { discoverSiblingDomains, findKitSiblingCandidates, isPlatformHost, kitFingerprints, searchKitHashes } from "./siblings";
 
 const hash = (character: string) => character.repeat(64);

@@ -1,5 +1,5 @@
 import { SubmissionsEntity } from "../../db/entities/submissions";
-import { describeDataEntryField, type WebsiteDataEntryField } from "../../website_types";
+import { describeDataEntryField, type WebsiteDataEntryField } from "../../website/types";
 import { AbuseRepository } from "../repository";
 import { kitCollectedData, type KitCollectedData, type OriginHostSnapshot } from "./snapshot";
 

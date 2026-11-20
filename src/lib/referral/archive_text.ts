@@ -1,6 +1,6 @@
 import { operatorServerRoles } from "../campaign/schema";
 import { publicCampaignUrl } from "../campaign/urls";
-import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
+import { CANARY_FIELD_LABEL, type CanaryField } from "../website/types";
 import sanitizeFilename from "sanitize-filename";
 
 import type { Dossier, DossierIndicator, DossierMail, DossierSite } from "./dossier";

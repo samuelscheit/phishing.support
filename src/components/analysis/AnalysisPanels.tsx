@@ -15,8 +15,8 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/web_lib/util";
-import { humanizeAnalysisStep, type AnalysisEntryStatus, type AnalysisStreamState } from "@/lib/analysis_stream_events";
-import type { ReaderTimelineEntry } from "@/lib/analysis_stream_view";
+import { humanizeAnalysisStep, type AnalysisEntryStatus, type AnalysisStreamState } from "@/lib/analysis/stream_events";
+import type { ReaderTimelineEntry } from "@/lib/analysis/stream_view";
 import { RUN_STATUS_STYLES, STATUS_LABELS, STATUS_STYLES, displayRunStatus, isTerminal, runStatusLabel } from "./stream_state";
 
 function ConnectionBadge({ state }: { state: AnalysisStreamState }) {
