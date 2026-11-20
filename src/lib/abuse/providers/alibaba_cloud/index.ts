@@ -26,7 +26,7 @@ export const alibabaCloudProvider: ProviderSubmissionProvider = {
 		legalBrandUrl: context.legalBrandUrl ?? null,
 	}),
 	prepareExternalSubmission: (context) => prepareAlibabaCloudExternalSubmission(context),
-	submit: (context) => submitAlibabaCloudSubmission(context, undefined),
+	submit: () => Promise.reject(new Error("Alibaba Cloud submits only from its prepared state.")),
 	submitPrepared: (context, preflight) => submitAlibabaCloudSubmission(context, preflight),
 	findSubmission: (context) => findAlibabaCloudSubmission(context),
 	fetchCorrespondence: (context) => fetchAlibabaCloudCorrespondence(context),

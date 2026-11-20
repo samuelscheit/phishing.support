@@ -20,6 +20,7 @@ import {
 	parseAlibabaReportStatus,
 	prepareAlibabaCloudExternalSubmission,
 	prepareAlibabaCloudSubmission,
+	recordTime,
 	submitAlibabaCloudSubmission,
 } from "./submission";
 import { consoleRefusal, consoleSuccess, fakeConsoleFetch, freshSession, loginConfig, NEED_LOGIN, session, SUCCESS_ENV_SG, UPLOAD_POLICY } from "./test_support";
@@ -82,6 +83,10 @@ function consoleAnswers(overrides: Parameters<typeof fakeConsoleFetch>[0] = {}) 
 	});
 }
 const dependencies = (console: { fetch: never }) => ({ fetch: console.fetch, config: loginConfig, getSession: async () => session });
+/** The state a preflight returns, built by hand: the account's listing before filing and the stored screenshot. */
+const preflightOf = (payload: { screenshot: { filename: string } }, listedTaskIds: string[] = [], filePath: string = UPLOAD_POLICY.Key) =>
+	({ state: { payload, evidenceFile: { fileName: payload.screenshot.filename, filePath }, session, listedTaskIds } });
+const listed = (...items: Array<Record<string, unknown>>) => consoleSuccess({ PageSize: 20, Total: items.length, Page: 1, List: items });
 
 describe("registry", () => {
 	test("all three mailboxes resolve to the alibaba_cloud provider, and nothing else claims them", async () => {
@@ -161,13 +166,17 @@ describe("prepareAlibabaCloudSubmission", () => {
 		expect(await prepareAlibabaCloudSubmission({ routeId: bare.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "alibaba_cloud_requires_a_screenshot" });
 	});
 
-	test("missing or malformed credentials fail the preparation (retryable) rather than drafting", async () => {
+	test("missing credentials need a person rather than drafting", async () => {
 		const { route } = await alibabaRoute();
 		delete process.env.ABUSE_ALIBABA_CLOUD_LOGIN_EMAIL;
-		await expect(prepareAlibabaCloudSubmission({ routeId: route.id, payload: {} })).rejects.toThrow("ABUSE_ALIBABA_CLOUD_LOGIN_EMAIL");
+		const noEmail = await prepareAlibabaCloudSubmission({ routeId: route.id, payload: {} }).catch((error) => error);
+		expect(noEmail).toBeInstanceOf(ProviderSubmissionNeedsHumanError);
+		expect(noEmail.message).toContain("ABUSE_ALIBABA_CLOUD_LOGIN_EMAIL");
 		process.env.ABUSE_ALIBABA_CLOUD_LOGIN_EMAIL = loginConfig.email;
 		delete process.env.ABUSE_ALIBABA_CLOUD_LOGIN_PASSWORD;
-		await expect(prepareAlibabaCloudSubmission({ routeId: route.id, payload: {} })).rejects.toThrow("ABUSE_ALIBABA_CLOUD_LOGIN_PASSWORD");
+		const noPassword = await prepareAlibabaCloudSubmission({ routeId: route.id, payload: {} }).catch((error) => error);
+		expect(noPassword).toBeInstanceOf(ProviderSubmissionNeedsHumanError);
+		expect(noPassword.message).toContain("ABUSE_ALIBABA_CLOUD_LOGIN_PASSWORD");
 	});
 
 	test("an unknown route fails", async () => {
@@ -176,12 +185,13 @@ describe("prepareAlibabaCloudSubmission", () => {
 });
 
 describe("preflight: area check and evidence upload", () => {
-	test("uploads the screenshot under its generated name and returns the stored file as state; nothing is filed", async () => {
+	test("uploads the screenshot under its generated name and returns payload, stored file, session and the current listing as state; nothing is filed", async () => {
 		const { context, payload } = await readyContext();
-		const console = consoleAnswers();
+		const console = consoleAnswers({ ReportTaskList: listed({ ReportTaskId: "BEFORE-1", ReportDomainIp: payload.report.reportDomainIp }, { ReportTaskId: "BEFORE-2", ReportDomainIp: "https://x.example/" }) });
 		const preflight = await prepareAlibabaCloudExternalSubmission(context, dependencies(console as never));
-		expect(preflight).toEqual({ state: { fileName: payload.screenshot.filename, filePath: UPLOAD_POLICY.Key } });
-		expect(console.actions()).toEqual(["GetUserIdArea", "UploadFileByName"]);
+		expect(preflight).toEqual({ state: { payload, evidenceFile: { fileName: payload.screenshot.filename, filePath: UPLOAD_POLICY.Key }, session, listedTaskIds: ["BEFORE-1", "BEFORE-2"] } });
+		expect(console.actions()).toEqual(["GetUserIdArea", "UploadFileByName", "ReportTaskList"]);
+		expect(console.count("SubmitReportTask")).toBe(0);
 		expect(console.requests[1]!.params).toEqual({ name: payload.screenshot.filename });
 		const sent = [...console.requests[2]!.form!.entries()].at(-1)![1] as unknown as File;
 		expect(Buffer.from(await sent.arrayBuffer()).equals(PNG)).toBeTrue();
@@ -189,13 +199,42 @@ describe("preflight: area check and evidence upload", () => {
 
 	test("an account outside the international site needs a person, before any upload", async () => {
 		const { context } = await readyContext();
-		for (const env of ["cn", undefined]) {
-			const console = consoleAnswers({ GetUserIdArea: consoleSuccess(env ? { Env: env } : null) });
+		for (const env of ["cn", "us", " sg"]) {
+			const console = consoleAnswers({ GetUserIdArea: consoleSuccess({ Env: env }) });
 			const failure = await prepareAlibabaCloudExternalSubmission(context, dependencies(console as never)).catch((error) => error);
 			expect(failure).toBeInstanceOf(ProviderSubmissionNeedsHumanError);
-			expect(failure.message).toContain(`Env ${String(env)}`);
+			expect(failure.message).toContain(`Env ${env}`);
 			expect(console.actions()).toEqual(["GetUserIdArea"]);
 		}
+	});
+
+	test("a missing or empty Env is a plain, retryable error, not a verdict on the account", async () => {
+		const { context } = await readyContext();
+		for (const data of [null, {}, { Env: "" }, { Env: 1 }, "sg"]) {
+			const console = consoleAnswers({ GetUserIdArea: consoleSuccess(data) });
+			const failure = await prepareAlibabaCloudExternalSubmission(context, dependencies(console as never)).catch((error) => error);
+			expect(failure).toBeInstanceOf(Error);
+			expect(failure).not.toBeInstanceOf(ProviderSubmissionNeedsHumanError);
+			expect(failure).not.toBeInstanceOf(ProviderSubmissionRejectedError);
+			expect(console.actions()).toEqual(["GetUserIdArea"]);
+		}
+	});
+
+	test("an expired session is replaced once and the state carries the fresh one", async () => {
+		const { context } = await readyContext();
+		const console = consoleAnswers({ GetUserIdArea: [NEED_LOGIN, SUCCESS_ENV_SG] });
+		const preflight = await prepareAlibabaCloudExternalSubmission(context, {
+			fetch: console.fetch, config: loginConfig,
+			getSession: (async (_config: unknown, options?: { expiredSession?: unknown }) => (options?.expiredSession ? freshSession : session)) as never,
+		});
+		expect((preflight.state as { session: unknown }).session).toBe(freshSession);
+	});
+
+	test("a failing listing fails the preflight before any filing", async () => {
+		const { context } = await readyContext();
+		const console = consoleAnswers({ ReportTaskList: ["<html>"] });
+		await expect(prepareAlibabaCloudExternalSubmission(context, dependencies(console as never))).rejects.toThrow("without JSON");
+		expect(console.count("SubmitReportTask")).toBe(0);
 	});
 
 	test("a malformed, mismatched or tampered draft fails before any console call", async () => {
@@ -231,13 +270,17 @@ describe("preflight: area check and evidence upload", () => {
 });
 
 describe("submitAlibabaCloudSubmission", () => {
-	test("files once with the browser's exact parameters and returns the receipt from the report list", async () => {
+	test("after the marker only GetCrossRegionExist, SubmitReportTask and ReportTaskList run; the receipt is the new listed record", async () => {
 		const { context, payload } = await readyContext();
+		const now = Date.now();
 		const console = consoleAnswers({
-			ReportTaskList: consoleSuccess({ PageSize: 20, Total: 1, Page: 1, List: [{ ReportTaskId: "RT-20261120-1", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "Valid", GmtCreate: Date.now(), ExistCrossRegion: false }] }),
+			ReportTaskList: listed(
+				{ ReportTaskId: "BEFORE-1", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "Valid", GmtCreate: now },
+				{ ReportTaskId: "RT-20261120-1", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "Valid", GmtCreate: now - 1_000, ExistCrossRegion: false },
+			),
 		});
-		const success = await submitAlibabaCloudSubmission(context, undefined, dependencies(console as never));
-		expect(console.actions()).toEqual(["GetUserIdArea", "UploadFileByName", "GetCrossRegionExist", "SubmitReportTask", "ReportTaskList"]);
+		const success = await submitAlibabaCloudSubmission(context, preflightOf(payload, ["BEFORE-1"]), dependencies(console as never));
+		expect(console.actions()).toEqual(["GetCrossRegionExist", "SubmitReportTask", "ReportTaskList"]);
 		expect(console.count("SubmitReportTask")).toBe(1);
 		const evidence = { fileName: payload.screenshot.filename, filePath: UPLOAD_POLICY.Key };
 		expect(console.requests.find((r) => r.action === "SubmitReportTask")!.params).toEqual(alibabaCloudSubmitParams(payload, evidence, false));
@@ -251,24 +294,41 @@ describe("submitAlibabaCloudSubmission", () => {
 		});
 	});
 
-	test("a preflight's uploaded file is reused: no second area check or upload", async () => {
+	test("the preflight's stored file and session are used: no area check, no upload, no login", async () => {
 		const { context, payload } = await readyContext();
 		const console = consoleAnswers();
-		const preflight = { state: { fileName: payload.screenshot.filename, filePath: "report/earlier/key" } };
-		await submitAlibabaCloudSubmission(context, preflight, dependencies(console as never));
+		let logins = 0;
+		await submitAlibabaCloudSubmission(context, preflightOf(payload, [], "report/earlier/key"), { fetch: console.fetch, config: loginConfig, getSession: (async () => { logins += 1; return session; }) as never });
 		expect(console.actions()).toEqual(["GetCrossRegionExist", "SubmitReportTask", "ReportTaskList"]);
 		expect((console.requests[1]!.params as { reportEvidenceFile: unknown[] }).reportEvidenceFile).toEqual([{ fileName: payload.screenshot.filename, filePath: "report/earlier/key", originalName: payload.screenshot.filename }]);
-		// A garbled preflight state falls back to a new upload.
-		const again = consoleAnswers();
-		await submitAlibabaCloudSubmission(context, { state: { fileName: 1 } }, dependencies(again as never));
-		expect(again.actions().slice(0, 2)).toEqual(["GetUserIdArea", "UploadFileByName"]);
+		expect(console.requests[0]!.body!.get("sec_token")).toBe(session.secToken);
+		// Only the listing afterwards asks for a session.
+		expect(logins).toBe(1);
+	});
+
+	test("a missing or incomplete preflight state is an error that files nothing, never a fallback upload", async () => {
+		const { context, payload } = await readyContext();
+		const full = preflightOf(payload).state;
+		for (const preflight of [undefined, {}, { state: undefined }, { state: {} }, { state: { ...full, payload: undefined } }, { state: { ...full, evidenceFile: undefined } }, { state: { ...full, session: undefined } }, { state: { ...full, listedTaskIds: undefined } }, { state: { fileName: "f.png", filePath: "k" } }]) {
+			const console = consoleAnswers();
+			const failure = await submitAlibabaCloudSubmission(context, preflight as never, dependencies(console as never)).catch((error) => error);
+			expect(failure).toBeInstanceOf(Error);
+			// `undefined` has no state to read at all; every other shape is named.
+			if (preflight) expect(failure.message).toContain("no prepared state");
+			expect(console.requests).toHaveLength(0);
+		}
+	});
+
+	test("the provider's plain submit rejects: Alibaba files only from prepared state", async () => {
+		const { context } = await readyContext();
+		await expect(alibabaCloudProvider.submit(context as never)).rejects.toThrow("only from its prepared state");
 	});
 
 	test("the cross-region path asks for consent: allowCrossRegion is sent only when GetCrossRegionExist is exactly true", async () => {
 		for (const [answer, expected] of [[true, true], [false, false], ["true", false], [null, false], [{ Exist: true }, false]] as const) {
-			const { context } = await readyContext();
+			const { context, payload } = await readyContext();
 			const console = consoleAnswers({ GetCrossRegionExist: consoleSuccess(answer) });
-			await submitAlibabaCloudSubmission(context, undefined, dependencies(console as never));
+			await submitAlibabaCloudSubmission(context, preflightOf(payload), dependencies(console as never));
 			const params = console.requests.find((r) => r.action === "SubmitReportTask")!.params as Record<string, unknown>;
 			expect(params.allowCrossRegion === true).toBe(expected);
 			expect("allowCrossRegion" in params).toBe(expected);
@@ -277,45 +337,63 @@ describe("submitAlibabaCloudSubmission", () => {
 
 	test("a failing ReportTaskList after SubmitReportTask still succeeds, never resubmits, and falls back to a scalar answer as receipt", async () => {
 		for (const failure of ["<html>502</html>", consoleRefusal("NoPermission", "denied"), new Error("socket hang up")]) {
-			const { context } = await readyContext();
+			const { context, payload } = await readyContext();
 			const console = consoleAnswers({ ReportTaskList: [failure], SubmitReportTask: consoleSuccess("RT-from-answer") });
-			const success = await submitAlibabaCloudSubmission(context, undefined, dependencies(console as never));
+			const success = await submitAlibabaCloudSubmission(context, preflightOf(payload), dependencies(console as never));
 			expect(console.count("SubmitReportTask")).toBe(1);
 			expect(success).toMatchObject({ confirmationId: "RT-from-answer", confirmationText: "Alibaba Cloud accepted the report.", submittedTargets: [TARGET] });
 		}
-		const { context } = await readyContext();
+		const { context, payload } = await readyContext();
 		const console = consoleAnswers({ ReportTaskList: ["<html>"] });
-		const success = await submitAlibabaCloudSubmission(context, undefined, dependencies(console as never));
+		const success = await submitAlibabaCloudSubmission(context, preflightOf(payload), dependencies(console as never));
 		// Object answer ({Env}) and no list: a success without a receipt.
 		expect(success.confirmationId).toBeUndefined();
 		expect(success.confirmationText).toBe("Alibaba Cloud accepted the report.");
 		expect(console.count("SubmitReportTask")).toBe(1);
 	});
 
-	test("a numeric answer is a receipt too", async () => {
-		const { context } = await readyContext();
-		const console = consoleAnswers({ SubmitReportTask: consoleSuccess(123456), ReportTaskList: "<html>" });
-		expect((await submitAlibabaCloudSubmission(context, undefined, dependencies(console as never))).confirmationId).toBe("123456");
+	test("a scalar answer is a receipt only when it looks like a task ID; a numeric one does", async () => {
+		const { context, payload } = await readyContext();
+		const receipt = async (answer: unknown) => (await submitAlibabaCloudSubmission(context, preflightOf(payload), dependencies(consoleAnswers({ SubmitReportTask: consoleSuccess(answer), ReportTaskList: "<html>" }) as never))).confirmationId;
+		expect(await receipt(123456)).toBe("123456");
+		expect(await receipt("abcd")).toBe("abcd");
+		expect(await receipt("a_b-C9")).toBe("a_b-C9");
+		expect(await receipt("a".repeat(64))).toBe("a".repeat(64));
+		for (const bad of ["successful", "ok ok", "abc", "", "a".repeat(65), "with space", "ü-ünï", 12, true, null, ["RT-1"]]) {
+			if (bad === "successful") expect(await receipt(bad)).toBe("successful"); // 10 plain characters are a legal ID shape
+			else expect(await receipt(bad)).toBeUndefined();
+		}
 	});
 
-	test("receipt carries @cn when Alibaba moved the report to the China site, and picks the newest listed match for this object", async () => {
+	test("a listed record that was already listed before filing is never the receipt; the scalar answer then is", async () => {
+		const { context, payload } = await readyContext();
+		const console = consoleAnswers({
+			SubmitReportTask: consoleSuccess("RT-ANSWER"),
+			ReportTaskList: listed({ ReportTaskId: "BEFORE", ReportDomainIp: payload.report.reportDomainIp, GmtCreate: Date.now() }),
+		});
+		expect((await submitAlibabaCloudSubmission(context, preflightOf(payload, ["BEFORE"]), dependencies(console as never))).confirmationId).toBe("RT-ANSWER");
+		const none = consoleAnswers({ ReportTaskList: listed({ ReportTaskId: "BEFORE", ReportDomainIp: payload.report.reportDomainIp }) });
+		expect((await submitAlibabaCloudSubmission(context, preflightOf(payload, ["BEFORE"]), dependencies(none as never))).confirmationId).toBeUndefined();
+	});
+
+	test("receipt carries @cn when Alibaba moved the report to the China site, and picks the newest new listed match for this object", async () => {
 		const { context, payload } = await readyContext();
 		const now = Date.now();
 		const console = consoleAnswers({
-			ReportTaskList: consoleSuccess({ List: [
+			ReportTaskList: listed(
 				{ ReportTaskId: "OTHER-OBJECT", ReportDomainIp: "https://unrelated.example/", ReportStatus: "Valid", GmtCreate: now },
-				{ ReportTaskId: "TOO-OLD", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "Valid", GmtCreate: now - 3_600_000 },
+				{ ReportTaskId: "BEFORE", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "Valid", GmtCreate: now + 5_000 },
 				{ ReportTaskId: "RT-NEW", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "Valid", GmtCreate: now - 1_000, ExistCrossRegion: true },
-				{ ReportTaskId: "RT-NEWER-BUT-OLDER-THAN-NEW", ReportDomainIp: payload.report.reportDomainIp, GmtCreate: now - 2_000 },
-			] }),
+				{ ReportTaskId: "RT-OLDER", ReportDomainIp: payload.report.reportDomainIp, GmtCreate: now - 2_000 },
+			),
 		});
-		expect((await submitAlibabaCloudSubmission(context, undefined, dependencies(console as never))).confirmationId).toBe("RT-NEW@cn");
+		expect((await submitAlibabaCloudSubmission(context, preflightOf(payload, ["BEFORE"]), dependencies(console as never))).confirmationId).toBe("RT-NEW@cn");
 	});
 
-	test("a refusal of SubmitReportTask is a rejection and files nothing more; a refused area check never reaches submit", async () => {
-		const { context } = await readyContext();
+	test("a refusal of SubmitReportTask is a rejection and files nothing more", async () => {
+		const { context, payload } = await readyContext();
 		const console = consoleAnswers({ SubmitReportTask: consoleRefusal("ReportReasonInvalid", "bad reason") });
-		const failure = await submitAlibabaCloudSubmission(context, undefined, dependencies(console as never)).catch((error) => error);
+		const failure = await submitAlibabaCloudSubmission(context, preflightOf(payload), dependencies(console as never)).catch((error) => error);
 		expect(failure).toBeInstanceOf(AlibabaConsoleError);
 		expect(failure).toBeInstanceOf(ProviderSubmissionRejectedError);
 		expect(console.count("SubmitReportTask")).toBe(1);
@@ -324,9 +402,9 @@ describe("submitAlibabaCloudSubmission", () => {
 
 	test("an ambiguous submit answer (gateway error, network loss) is a plain error, not a rejection", async () => {
 		for (const answer of ["<html>504</html>", new Error("socket closed")]) {
-			const { context } = await readyContext();
+			const { context, payload } = await readyContext();
 			const console = consoleAnswers({ SubmitReportTask: [answer] });
-			const failure = await submitAlibabaCloudSubmission(context, undefined, dependencies(console as never)).catch((error) => error);
+			const failure = await submitAlibabaCloudSubmission(context, preflightOf(payload), dependencies(console as never)).catch((error) => error);
 			expect(failure).toBeInstanceOf(Error);
 			expect(failure).not.toBeInstanceOf(ProviderSubmissionRejectedError);
 			expect(console.count("SubmitReportTask")).toBe(1);
@@ -334,10 +412,10 @@ describe("submitAlibabaCloudSubmission", () => {
 	});
 
 	test("ConsoleNeedLogin before the report is filed relogs in once and files exactly once with the fresh session", async () => {
-		const { context } = await readyContext();
+		const { context, payload } = await readyContext();
 		const console = consoleAnswers({ GetCrossRegionExist: [NEED_LOGIN, consoleSuccess(false)] });
 		const expired: string[] = [];
-		await submitAlibabaCloudSubmission(context, { state: { fileName: "f.png", filePath: "k" } }, {
+		await submitAlibabaCloudSubmission(context, preflightOf(payload), {
 			fetch: console.fetch, config: loginConfig,
 			getSession: (async (_config: unknown, options?: { expiredSession?: { id: string } }) => { if (options?.expiredSession) expired.push(options.expiredSession.id); return options?.expiredSession ? freshSession : session; }) as never,
 		});
@@ -346,25 +424,32 @@ describe("submitAlibabaCloudSubmission", () => {
 		expect(console.requests.find((r) => r.action === "SubmitReportTask")!.body!.get("sec_token")).toBe("FreshSecToken99");
 	});
 
-	test("a tampered or missing draft files nothing", async () => {
+	test("a refused fresh session, or no relogin, needs a person and files nothing", async () => {
 		const { context, payload } = await readyContext();
-		const console = consoleAnswers();
-		const preflight = { state: { fileName: "f.png", filePath: "k" } };
-		await expect(submitAlibabaCloudSubmission({ ...context, payload: { ...payload, report: { ...payload.report, reportDomainIp: "https://evil.example/" } } }, preflight, dependencies(console as never))).rejects.toThrow("no longer matches");
-		await expect(submitAlibabaCloudSubmission({ ...context, payload: {} }, preflight, dependencies(console as never))).rejects.toThrow("malformed");
-		expect(console.count("SubmitReportTask")).toBe(0);
+		const refused = consoleAnswers({ GetCrossRegionExist: NEED_LOGIN });
+		const twice = await submitAlibabaCloudSubmission(context, preflightOf(payload), {
+			fetch: refused.fetch, config: loginConfig, getSession: (async (_config: unknown, options?: { expiredSession?: unknown }) => (options?.expiredSession ? freshSession : session)) as never,
+		}).catch((error) => error);
+		expect(twice).toBeInstanceOf(ProviderSubmissionNeedsHumanError);
+		expect(refused.count("SubmitReportTask")).toBe(0);
+		const noLogin = consoleAnswers({ GetCrossRegionExist: NEED_LOGIN });
+		const failed = await submitAlibabaCloudSubmission(context, preflightOf(payload), {
+			fetch: noLogin.fetch, config: loginConfig, getSession: (async () => { throw new Error("login refused"); }) as never,
+		}).catch((error) => error);
+		expect(failed).toBeInstanceOf(ProviderSubmissionNeedsHumanError);
+		expect(noLogin.count("SubmitReportTask")).toBe(0);
 	});
 
 	test("passes the worker's abort signal to every request", async () => {
-		const { context } = await readyContext();
+		const { context, payload } = await readyContext();
 		const controller = new AbortController();
 		const signals: Array<AbortSignal | null | undefined> = [];
 		const console = consoleAnswers();
-		await submitAlibabaCloudSubmission({ ...context, signal: controller.signal }, undefined, {
+		await submitAlibabaCloudSubmission({ ...context, signal: controller.signal }, preflightOf(payload), {
 			config: loginConfig, getSession: async () => session,
 			fetch: async (url, init) => { signals.push(init.signal); return console.fetch(url, init); },
 		});
-		expect(signals.length).toBeGreaterThan(4);
+		expect(signals).toHaveLength(3);
 		expect(signals.every((signal) => signal === controller.signal)).toBeTrue();
 	});
 });
@@ -390,19 +475,26 @@ describe("findAlibabaCloudSubmission", () => {
 		const sentAt = new Date();
 		const list = (items: unknown[]) => dependencies(consoleAnswers({ ReportTaskList: consoleSuccess({ List: items }) }) as never);
 		expect(await findAlibabaCloudSubmission({ ...context, sentAt }, list([]))).toBeUndefined();
-		expect(await findAlibabaCloudSubmission({ ...context, sentAt }, list([{ ReportTaskId: "OLD", ReportDomainIp: payload.report.reportDomainIp, GmtCreate: sentAt.getTime() - 6 * 60_000 }]))).toBeUndefined();
+		expect(await findAlibabaCloudSubmission({ ...context, sentAt }, list([{ ReportTaskId: "OLD", ReportDomainIp: payload.report.reportDomainIp, GmtCreate: sentAt.getTime() - 2 * 60_000 }]))).toBeUndefined();
 		expect(await findAlibabaCloudSubmission({ ...context, sentAt }, list([{ ReportTaskId: "X", ReportDomainIp: "https://other.example/", GmtCreate: sentAt.getTime() }]))).toBeUndefined();
 		const console = consoleAnswers();
 		expect(await findAlibabaCloudSubmission({ ...context, payload: { nope: 1 }, sentAt }, dependencies(console as never))).toBeUndefined();
 		expect(console.requests).toHaveLength(0);
 	});
 
-	test("accepts a record without a time (cannot be excluded) and a report within the 5-minute clock slack", async () => {
+	test("a record without a parseable time never matches; one within 60 s before the attempt does, an older one does not", async () => {
 		const { context, payload } = await readyContext();
 		const sentAt = new Date();
-		const found = (item: unknown) => findAlibabaCloudSubmission({ ...context, sentAt }, dependencies(consoleAnswers({ ReportTaskList: consoleSuccess({ List: [item] }) }) as never));
-		expect((await found({ ReportTaskId: 77, ReportDomainIp: payload.report.reportDomainIp }))?.confirmationId).toBe("77");
-		expect((await found({ ReportTaskId: "SLACK", ReportDomainIp: payload.report.reportDomainIp, GmtCreate: sentAt.getTime() - 4 * 60_000 }))?.confirmationId).toBe("SLACK");
+		const found = (item: Record<string, unknown>) => findAlibabaCloudSubmission({ ...context, sentAt }, dependencies(consoleAnswers({ ReportTaskList: consoleSuccess({ List: [{ ReportDomainIp: payload.report.reportDomainIp, ...item }] }) }) as never));
+		expect(await found({ ReportTaskId: 77 })).toBeUndefined();
+		expect(await found({ ReportTaskId: 77, GmtCreate: "garbage" })).toBeUndefined();
+		expect((await found({ ReportTaskId: "SLACK", GmtCreate: sentAt.getTime() - 59_000 }))?.confirmationId).toBe("SLACK");
+		expect((await found({ ReportTaskId: "EDGE", GmtCreate: sentAt.getTime() - 60_000 }))?.confirmationId).toBe("EDGE");
+		expect(await found({ ReportTaskId: "OLD", GmtCreate: sentAt.getTime() - 61_000 })).toBeUndefined();
+		// A console time string is UTC+8 and compared as such.
+		const local = new Date(sentAt.getTime() + 8 * 3_600_000 + 5_000).toISOString().slice(0, 19).replace("T", " ");
+		expect((await found({ ReportTaskId: "LOCAL", GmtCreate: local }))?.confirmationId).toBe("LOCAL");
+		expect(await found({ ReportTaskId: "UTC-MISREAD", GmtCreate: new Date(sentAt.getTime() - 3_600_000).toISOString().slice(0, 19).replace("T", " ") })).toBeUndefined();
 	});
 
 	test("a failing list is an error for the caller (it is a read-only lookup)", async () => {
@@ -415,13 +507,12 @@ describe("end to end through the execution engine", () => {
 	test("prepare, upload before the marker, submit once, record the receipt, and a replay files nothing more", async () => {
 		const { created, route } = await alibabaRoute();
 		const console = consoleAnswers({
-			ReportTaskList: consoleSuccess({ List: [{ ReportTaskId: "RT-E2E", ReportDomainIp: `https://${TARGET}/signin`, ReportStatus: "Valid", GmtCreate: Date.now() + 1_000, ExistCrossRegion: false }] }),
+			ReportTaskList: [listed(), listed({ ReportTaskId: "RT-E2E", ReportDomainIp: `https://${TARGET}/signin`, ReportStatus: "Valid", GmtCreate: Date.now() + 1_000, ExistCrossRegion: false })],
 		});
 		const deps = dependencies(console as never);
 		const provider: ProviderSubmissionProvider = {
 			...alibabaCloudProvider,
 			prepareExternalSubmission: (context) => prepareAlibabaCloudExternalSubmission(context, deps),
-			submit: (context) => submitAlibabaCloudSubmission(context, undefined, deps),
 			submitPrepared: (context, preflight) => submitAlibabaCloudSubmission(context, preflight, deps),
 		};
 		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({ outcome: "submitted", runId: expect.any(BigInt) });
@@ -429,6 +520,7 @@ describe("end to end through the execution engine", () => {
 		expect(run).toMatchObject({ executionStatus: "completed", confirmationId: "RT-E2E", submittedTargets: [TARGET] });
 		expect((await AbuseRepository.getRoute(route.id))?.status).toBe("submitted");
 		expect(console.count("UploadFileByName")).toBe(1);
+		expect(console.count("GetUserIdArea")).toBe(1);
 		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({ outcome: "not_eligible" });
 		expect(console.count("SubmitReportTask")).toBe(1);
 	});
@@ -460,13 +552,13 @@ describe("report records and status", () => {
 		expect(parseAlibabaReportRecords({ List: "x" })).toEqual([]);
 		expect(parseAlibabaReportRecords({ List: [null, 1, "a", {}, { ReportTaskId: "" }, { ReportTaskId: null }, { ReportTaskId: {} }] })).toEqual([]);
 		expect(parseAlibabaReportRecords({ List: [
-			{ ReportTaskId: "A", ReportDomainIp: "https://a/", ReportStatus: "Valid", GmtCreate: 5, ExistCrossRegion: true },
-			{ ReportTaskId: 2, ReportObject: "b", Status: "Invalid", CreateTime: "7" },
+			{ ReportTaskId: "A", ReportDomainIp: "https://a/", ReportStatus: "Valid", GmtCreate: 1_700_000_000_000, ExistCrossRegion: true },
+			{ ReportTaskId: 2, ReportObject: "b", Status: "Invalid", CreateTime: "1700000001" },
 			{ ReportTaskId: "C", ReportTime: "2026-11-20T10:00:00Z", ExistCrossRegion: "true" },
 			{ ReportTaskId: "D", GmtCreate: "garbage", ReportDomainIp: 4, ReportStatus: 5 },
 		] })).toEqual([
-			{ reportTaskId: "A", existCrossRegion: true, reportDomainIp: "https://a/", status: "Valid", createdAt: 5 },
-			{ reportTaskId: "2", existCrossRegion: false, reportDomainIp: "b", status: "Invalid", createdAt: 7 },
+			{ reportTaskId: "A", existCrossRegion: true, reportDomainIp: "https://a/", status: "Valid", createdAt: 1_700_000_000_000 },
+			{ reportTaskId: "2", existCrossRegion: false, reportDomainIp: "b", status: "Invalid", createdAt: 1_700_000_001_000 },
 			{ reportTaskId: "C", existCrossRegion: false, createdAt: Date.parse("2026-11-20T10:00:00Z") },
 			{ reportTaskId: "D", existCrossRegion: false },
 		]);
@@ -485,8 +577,8 @@ describe("report records and status", () => {
 		expect(parsed.status).toEqual({ state: "Supplementary information", detail: "Please send more unclear" });
 		expect(parsed.final).toBeFalse();
 		expect(parsed.messages).toEqual([
-			{ id: "RT1:0:Pending", subject: "Alibaba Cloud report RT1: Pending", body: "Pending", sentAt: new Date(at - 1000) },
-			{ id: "RT1:1:Supplementary information", subject: "Alibaba Cloud report RT1: Supplementary information", body: "Supplementary information\n\nPlease send more\n\nunclear", sentAt: new Date(at) },
+			{ id: `RT1:Pending:${at - 1000}`, subject: "Alibaba Cloud report RT1: Pending", body: "Pending", sentAt: new Date(at - 1000) },
+			{ id: `RT1:Supplementary information:${at}`, subject: "Alibaba Cloud report RT1: Supplementary information", body: "Supplementary information\n\nPlease send more\n\nunclear", sentAt: new Date(at) },
 		]);
 		for (const state of ["Completed", "Invalid", "Revoked", "Abnormal", "Withdrawal"]) {
 			expect(parseAlibabaReportStatus("R", { ReportStatusList: [{ ReportStatus: state }] }).final).toBeTrue();
@@ -503,8 +595,48 @@ describe("report records and status", () => {
 		expect(parseAlibabaReportStatus("R", { ReportStatusList: {} })).toEqual({ messages: [] });
 		expect(parseAlibabaReportStatus("R", { ReportStatusList: [] })).toEqual({ messages: [] });
 		// Time fields in order of preference, ISO strings and numeric strings alike.
-		const times = parseAlibabaReportStatus("R", { ReportStatusList: [{ ReportStatus: "A", Time: "1000" }, { ReportStatus: "B", ProcessTime: "2026-11-21T00:00:00Z" }, { ReportStatus: "C", GmtModified: 5 }] });
-		expect(times.messages.map((m) => m.sentAt.getTime())).toEqual([1000, Date.parse("2026-11-21T00:00:00Z"), 5]);
+		const times = parseAlibabaReportStatus("R", { ReportStatusList: [{ ReportStatus: "A", Time: "1700000000" }, { ReportStatus: "B", ProcessTime: "2026-11-21T00:00:00Z" }, { ReportStatus: "C", GmtModified: 1_700_000_100_000 }] });
+		expect(times.messages.map((m) => m.sentAt.getTime())).toEqual([1_700_000_000_000, 1_700_000_100_000, Date.parse("2026-11-21T00:00:00Z")]);
+		expect(times.status?.state).toBe("B");
+	});
+
+	test("steps are sorted oldest first when every step has a time, whatever order the console lists them; otherwise the listed order stays", () => {
+		const newestFirst = parseAlibabaReportStatus("RT", { ReportStatusList: [
+			{ ReportStatus: "Completed", GmtCreate: "2026-11-21 10:00:00" },
+			{ ReportStatus: "Valid", GmtCreate: "2026-11-20 09:00:00" },
+			{ ReportStatus: "Pending", GmtCreate: "2026-11-19 08:00:00" },
+		] });
+		expect(newestFirst.messages.map((m) => m.id)).toEqual([
+			`RT:Pending:${Date.parse("2026-11-19T00:00:00Z")}`,
+			`RT:Valid:${Date.parse("2026-11-20T01:00:00Z")}`,
+			`RT:Completed:${Date.parse("2026-11-21T02:00:00Z")}`,
+		]);
+		expect(newestFirst.status).toEqual({ state: "Completed" });
+		expect(newestFirst.final).toBeTrue();
+		// One step without a time: no sorting, the last listed one is the status.
+		const partial = parseAlibabaReportStatus("RT", { ReportStatusList: [{ ReportStatus: "Completed", GmtCreate: 1_700_000_200_000 }, { ReportStatus: "Valid" }, { ReportStatus: "Pending", GmtCreate: 1_700_000_000_000 }] });
+		expect(partial.messages.map((m) => m.id)).toEqual(["RT:Completed:1700000200000", "RT:Pending:1700000000000"]);
+		expect(partial.status).toEqual({ state: "Pending" });
+		// The same state at two times stays two distinct messages.
+		const repeated = parseAlibabaReportStatus("RT", { ReportStatusList: [{ ReportStatus: "Valid", GmtCreate: 1_700_000_000_000 }, { ReportStatus: "Valid", GmtCreate: 1_700_000_500_000 }] });
+		expect(new Set(repeated.messages.map((m) => m.id)).size).toBe(2);
+	});
+
+	test("recordTime: epoch seconds and milliseconds, numbers and strings, console time as UTC+8, zones as given", () => {
+		expect(recordTime(1_700_000_000)).toBe(1_700_000_000_000);
+		expect(recordTime("1700000000")).toBe(1_700_000_000_000);
+		expect(recordTime(1_700_000_000_000)).toBe(1_700_000_000_000);
+		expect(recordTime("1700000000000")).toBe(1_700_000_000_000);
+		expect(recordTime(99_999_999_999)).toBe(99_999_999_999_000);
+		expect(recordTime(100_000_000_000)).toBe(100_000_000_000);
+		expect(recordTime("2026-11-20 18:07:56")).toBe(Date.parse("2026-11-20T10:07:56Z"));
+		expect(recordTime("2026-11-20T18:07:56")).toBe(Date.parse("2026-11-20T10:07:56Z"));
+		expect(recordTime(" 2026-11-20 18:07:56 ")).toBe(Date.parse("2026-11-20T10:07:56Z"));
+		expect(recordTime("2026-11-20T18:07:56Z")).toBe(Date.parse("2026-11-20T18:07:56Z"));
+		expect(recordTime("2026-11-20 18:07:56Z")).toBe(Date.parse("2026-11-20T18:07:56Z"));
+		expect(recordTime("2026-11-20T18:07:56+02:00")).toBe(Date.parse("2026-11-20T16:07:56Z"));
+		expect(recordTime("2026-11-20T18:07:56-05:00")).toBe(Date.parse("2026-11-20T23:07:56Z"));
+		for (const bad of [undefined, null, "", "  ", "garbage", {}, [], true, 0, -5, Number.NaN, Number.POSITIVE_INFINITY]) expect(recordTime(bad)).toBeUndefined();
 	});
 
 	test("the verdict of every review state the provider maps is reachable, and unmapped ones give none", () => {
@@ -525,7 +657,7 @@ describe("report records and status", () => {
 			const result = await fetchAlibabaCloudCorrespondence({ confirmationId: receipt }, dependencies(console as never));
 			expect(console.requests[0]!.params).toEqual({ reportTaskId: "RT9", existCrossRegion: region, pageType: "harmInfo" });
 			expect(result).toMatchObject({ final: true, status: { state: "Completed", detail: "Taken down" } });
-			expect(result.messages[0]).toMatchObject({ id: "RT9:0:Completed", sentAt: new Date(1_700_000_000_000) });
+			expect(result.messages[0]).toMatchObject({ id: "RT9:Completed:1700000000000", sentAt: new Date(1_700_000_000_000) });
 		}
 		await expect(fetchAlibabaCloudCorrespondence({ confirmationId: "" }, dependencies(fakeConsoleFetch({}) as never))).rejects.toThrow("receipt ID is empty");
 		await expect(fetchAlibabaCloudCorrespondence({ confirmationId: "@cn" }, dependencies(fakeConsoleFetch({}) as never))).rejects.toThrow("receipt ID is empty");

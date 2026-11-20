@@ -61,6 +61,8 @@ export function mailedCodeReader(spec: MailedCodeSpec): MailedCodeReader {
 		const deadline = Date.now() + spec.waitMs;
 		const client = new ImapFlow({ host: config.host, port: config.port, secure: config.secure, auth: { user: config.user, pass: config.pass }, logger: false, disableAutoIdle: true });
 		await client.connect();
+		// Per mailbox, the highest UID already read: each poll after the first reads only newer mail.
+		const seen = new Map<string, number>();
 		try {
 			while (Date.now() < deadline) {
 				signal?.throwIfAborted();
@@ -68,9 +70,14 @@ export function mailedCodeReader(spec: MailedCodeSpec): MailedCodeReader {
 				for (const mailbox of [...config.mailboxes, ...config.sharedMailboxes]) {
 					const lock = await client.getMailboxLock(mailbox, { readOnly: true });
 					try {
-						const uids = await client.search({ since: new Date(requestedAt.getTime() - 60_000) }, { uid: true });
+						const last = seen.get(mailbox);
+						const found = await client.search(last === undefined ? { since: new Date(requestedAt.getTime() - 60_000) } : { uid: `${last + 1}:*` }, { uid: true });
+						// "n:*" always matches the newest message, even one already read.
+						const uids = (found || []).filter((uid) => last === undefined || uid > last);
+						if (uids.length > 0) seen.set(mailbox, Math.max(last ?? 0, ...uids));
+						else if (last === undefined) seen.set(mailbox, 0);
 						const candidates: number[] = [];
-						if (uids && uids.length > 0) for await (const message of client.fetch(uids, { envelope: true }, { uid: true })) {
+						if (uids.length > 0) for await (const message of client.fetch(uids, { envelope: true }, { uid: true })) {
 							const at = message.envelope?.date ? new Date(message.envelope.date).getTime() : 0;
 							if (at < requestedAt.getTime() - 5_000 || at > requestedAt.getTime() + spec.maxAgeMs) continue;
 							if (senderMatches(spec, message.envelope?.from?.[0]?.address ?? "")) candidates.push(message.uid);

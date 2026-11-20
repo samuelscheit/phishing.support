@@ -11,7 +11,7 @@ import {
 	type ProviderSubmissionPreparation,
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
-import { withAlibabaConsole, type AlibabaConsole, type AlibabaConsoleDependencies } from "./api";
+import { withAlibabaConsole, type AlibabaConsole, type AlibabaConsoleDependencies as AlibabaCloudSubmissionDependencies } from "./api";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import {
 	ALIBABA_CLOUD_EVIDENCE_CONTRACT,
@@ -21,9 +21,18 @@ import {
 	storedAlibabaCloudSubmissionPayload,
 	type AlibabaCloudSubmissionPayload,
 } from "./payload";
-import { alibabaCloudLoginConfig } from "./session";
+import { alibabaCloudLoginConfig, type AlibabaCloudSession } from "./session";
 
 type EvidenceFile = { fileName: string; filePath: string };
+
+/** Everything the one post-marker request needs, prepared and verified before the marker. Held in memory only. */
+type AlibabaPreflight = {
+	payload: AlibabaCloudSubmissionPayload;
+	evidenceFile: EvidenceFile;
+	session: AlibabaCloudSession;
+	/** The account's listed task IDs right before filing: the receipt is the new one. */
+	listedTaskIds: string[];
+};
 
 const { pageType, consoleOrigin } = ALIBABA_CLOUD_PROVIDER;
 /** The account's report list, where a filed report shows up. */
@@ -52,7 +61,12 @@ export async function prepareAlibabaCloudSubmission(context: ProviderSubmissionC
 	const screenshot = selectAlibabaCloudScreenshot(evidenceArtifacts);
 	if (!screenshot) return { outcome: "insufficient_evidence", reason: "alibaba_cloud_requires_a_screenshot" };
 	// The account credentials are runtime secrets: validate them, never store them in the draft.
-	alibabaCloudLoginConfig();
+	// The mailboxes now belong to this form, so without an account the report waits for a person.
+	try {
+		alibabaCloudLoginConfig();
+	} catch (error) {
+		throw new ProviderSubmissionNeedsHumanError(error instanceof Error ? error.message : String(error));
+	}
 	const payload = buildAlibabaCloudSubmissionPayload({ ...reportInput(report, target), screenshot });
 	if (!payload) return { outcome: "insufficient_evidence", reason: "alibaba_cloud_report_payload_invalid" };
 	return { outcome: "ready", payload };
@@ -77,42 +91,54 @@ async function verifiedDraft(context: ProviderSubmissionContext): Promise<{ payl
 	return { payload, screenshot: artifact.blob };
 }
 
-export type AlibabaCloudSubmissionDependencies = AlibabaConsoleDependencies;
+export type { AlibabaCloudSubmissionDependencies };
 
 /**
- * Get a session and upload the screenshot before the durable marker. Neither
- * files a report: an upload only stores a file the report can then name.
+ * Verify the draft, get a session and upload the screenshot, all before the
+ * durable marker. None of it files a report: an upload only stores a file the
+ * report can then name.
  */
 export async function prepareAlibabaCloudExternalSubmission(
 	context: ProviderSubmissionContext,
 	dependencies: AlibabaCloudSubmissionDependencies = {},
 ): Promise<ProviderSubmissionPreflight> {
 	const { payload, screenshot } = await verifiedDraft(context);
-	const evidenceFile = await withAlibabaConsole(async (console) => {
+	const state = await withAlibabaConsole(async (console, session): Promise<AlibabaPreflight> => {
 		// The international console files reports only for an international (sg) account.
-		const area = asRecord(await console.call("GetUserIdArea"));
-		if (area?.Env !== "sg") throw new ProviderSubmissionNeedsHumanError(`The Alibaba Cloud reporting account is not an international (sg) account (Env ${String(area?.Env)}).`);
+		const env = asRecord(await console.call("GetUserIdArea"))?.Env;
+		if (typeof env !== "string" || !env) throw new Error("Alibaba Cloud GetUserIdArea named no account region.");
+		if (env !== "sg") throw new ProviderSubmissionNeedsHumanError(`The Alibaba Cloud reporting account is not an international (sg) account (Env ${env}).`);
 		const fileName = payload.screenshot.filename;
-		return { fileName, filePath: await console.upload({ name: fileName, mimeType: payload.screenshot.mimeType, bytes: screenshot }) } satisfies EvidenceFile;
+		const filePath = await console.upload({ name: fileName, mimeType: payload.screenshot.mimeType, bytes: screenshot });
+		const listedTaskIds = (await listRecords(console)).map((record) => record.reportTaskId);
+		return { payload, evidenceFile: { fileName, filePath }, session, listedTaskIds };
 	}, { ...dependencies, ...(context.signal ? { signal: context.signal } : {}) });
-	return { state: evidenceFile };
+	return { state };
 }
 
-function storedEvidenceFile(state: unknown): EvidenceFile | undefined {
-	const record = asRecord(state);
-	return record && typeof record.fileName === "string" && typeof record.filePath === "string" ? { fileName: record.fileName, filePath: record.filePath } : undefined;
+function preflightState(preflight: ProviderSubmissionPreflight): AlibabaPreflight {
+	const state = preflight.state as Partial<AlibabaPreflight> | undefined;
+	if (!state?.payload || !state.evidenceFile || !state.session || !state.listedTaskIds) throw new Error("The Alibaba Cloud submission has no prepared state.");
+	return state as AlibabaPreflight;
 }
+
+/** A task ID as the console names reports; anything else is not a receipt. */
+const REPORT_TASK_ID = /^[A-Za-z0-9_-]{4,64}$/;
 
 /** One entry of the account's report list. */
 export type AlibabaReportRecord = { reportTaskId: string; existCrossRegion: boolean; reportDomainIp?: string; status?: string; createdAt?: number };
 
-function recordTime(value: unknown): number | undefined {
-	if (typeof value === "number" && Number.isFinite(value)) return value;
-	if (typeof value === "string" && value) {
-		const time = /^\d+$/.test(value) ? Number(value) : Date.parse(value);
-		return Number.isFinite(time) ? time : undefined;
-	}
-	return undefined;
+/**
+ * A console time: epoch seconds or milliseconds, or a date string. A string
+ * without a zone ("2026-11-20 18:07:56") is Alibaba's console time, UTC+8.
+ */
+export function recordTime(value: unknown): number | undefined {
+	const epoch = typeof value === "number" ? value : typeof value === "string" && /^\d{10}(?:\d{3})?$/.test(value) ? Number(value) : undefined;
+	if (epoch !== undefined) return Number.isFinite(epoch) && epoch > 0 ? (epoch < 1e11 ? epoch * 1000 : epoch) : undefined;
+	if (typeof value !== "string" || !value.trim()) return undefined;
+	const text = value.trim().replace(" ", "T");
+	const time = Date.parse(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text) ? text : `${text}+08:00`);
+	return Number.isFinite(time) ? time : undefined;
 }
 
 /** Read `ReportTaskList`'s `List` defensively: only entries with a task ID count. */
@@ -136,11 +162,21 @@ export function parseAlibabaReportRecords(data: unknown): AlibabaReportRecord[] 
 	});
 }
 
-/** The newest listed report for this draft's object, filed no earlier than `since`. */
-async function findRecord(console: AlibabaConsole, payload: AlibabaCloudSubmissionPayload, since: Date): Promise<AlibabaReportRecord | undefined> {
-	const records = parseAlibabaReportRecords(await console.call("ReportTaskList", { pageType, page: 1, pageSize: 20 }));
+async function listRecords(console: AlibabaConsole): Promise<AlibabaReportRecord[]> {
+	return parseAlibabaReportRecords(await console.call("ReportTaskList", { pageType, page: 1, pageSize: 20 }));
+}
+
+/**
+ * The report this filing created: a listed task for the same object that was
+ * not listed right before it. When the answer was lost there is no such list,
+ * so only a report whose own time says it was filed since then counts.
+ */
+function matchRecord(records: readonly AlibabaReportRecord[], payload: AlibabaCloudSubmissionPayload, filed: { before: readonly string[] } | { since: Date }): AlibabaReportRecord | undefined {
 	return records
-		.filter((record) => record.reportDomainIp === payload.report.reportDomainIp && (record.createdAt === undefined || record.createdAt >= since.getTime() - 5 * 60_000))
+		.filter((record) => record.reportDomainIp === payload.report.reportDomainIp)
+		.filter((record) => "before" in filed
+			? !filed.before.includes(record.reportTaskId)
+			: record.createdAt !== undefined && record.createdAt >= filed.since.getTime() - 60_000)
 		.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0];
 }
 
@@ -149,26 +185,24 @@ function confirmationIdOf(record: AlibabaReportRecord): string {
 	return record.existCrossRegion ? `${record.reportTaskId}@cn` : record.reportTaskId;
 }
 
-/** File the report from its durable draft and the uploaded screenshot. */
+/** File the report from the prepared draft and uploaded screenshot: the only work after the durable marker. */
 export async function submitAlibabaCloudSubmission(
 	context: ProviderSubmissionContext,
-	preflight: ProviderSubmissionPreflight | undefined,
+	preflight: ProviderSubmissionPreflight,
 	dependencies: AlibabaCloudSubmissionDependencies = {},
 ): Promise<ProviderSubmissionSuccess> {
-	const sentAt = new Date();
-	const options = { ...dependencies, ...(context.signal ? { signal: context.signal } : {}) };
-	const evidenceFile = storedEvidenceFile(preflight?.state) ?? storedEvidenceFile((await prepareAlibabaCloudExternalSubmission(context, dependencies)).state);
-	const { payload } = await verifiedDraft(context);
+	const { payload, evidenceFile, session, listedTaskIds } = preflightState(preflight);
+	const options = { ...dependencies, session, ...(context.signal ? { signal: context.signal } : {}) };
 	const answer = await withAlibabaConsole(async (console) => {
 		// The form asks this first: a resource of a China-site customer is
 		// reviewed there, which needs the reporter's consent to transfer it.
 		const crossRegion = await console.call("GetCrossRegionExist", { reportDomainIp: payload.report.reportDomainIp, pageType });
-		return console.call("SubmitReportTask", alibabaCloudSubmitParams(payload, evidenceFile!, crossRegion === true));
+		return console.call("SubmitReportTask", alibabaCloudSubmitParams(payload, evidenceFile, crossRegion === true));
 	}, options);
 	// The report is filed. Its task ID comes from the report list; a failed
 	// lookup leaves the success without one rather than risking a resubmission.
-	const record = await withAlibabaConsole((console) => findRecord(console, payload, sentAt), options).catch(() => undefined);
-	const answered = typeof answer === "string" || typeof answer === "number" ? String(answer) : undefined;
+	const record = await withAlibabaConsole(async (console) => matchRecord(await listRecords(console), payload, { before: listedTaskIds }), { ...dependencies, ...(context.signal ? { signal: context.signal } : {}) }).catch(() => undefined);
+	const answered = (typeof answer === "string" || typeof answer === "number") && REPORT_TASK_ID.test(String(answer)) ? String(answer) : undefined;
 	const confirmationId = record ? confirmationIdOf(record) : answered;
 	return {
 		...(confirmationId ? { confirmationId } : {}),
@@ -185,7 +219,7 @@ export async function findAlibabaCloudSubmission(
 ): Promise<ProviderSubmissionSuccess | undefined> {
 	const payload = storedAlibabaCloudSubmissionPayload(context.payload);
 	if (!payload) return undefined;
-	const record = await withAlibabaConsole((console) => findRecord(console, payload, context.sentAt), { ...dependencies, ...(context.signal ? { signal: context.signal } : {}) });
+	const record = await withAlibabaConsole(async (console) => matchRecord(await listRecords(console), payload, { since: context.sentAt }), { ...dependencies, ...(context.signal ? { signal: context.signal } : {}) });
 	if (!record) return undefined;
 	return {
 		confirmationId: confirmationIdOf(record),
@@ -201,7 +235,7 @@ const FINAL_STATES = new Set(["Completed", "Invalid", "Revoked", "Abnormal", "Wi
 /** Read `GetReportStatus`'s steps: each is one state the report reached, with Alibaba's note. */
 export function parseAlibabaReportStatus(reportTaskId: string, data: unknown): ProviderCorrespondence {
 	const list = asRecord(data)?.ReportStatusList;
-	const steps = (Array.isArray(list) ? list : []).flatMap((value, index) => {
+	const listed = (Array.isArray(list) ? list : []).flatMap((value) => {
 		const step = asRecord(value);
 		const state = step?.ReportStatus;
 		if (!step || typeof state !== "string" || !state) return [];
@@ -209,12 +243,14 @@ export function parseAlibabaReportStatus(reportTaskId: string, data: unknown): P
 		const notes = [step.Remark, step.Reason, step.Description, step.Result, step.ReplyContent]
 			.filter((note): note is string => typeof note === "string" && note.trim().length > 0)
 			.map((note) => note.trim());
-		return [{ index, state, at, notes }];
+		return [{ state, at, notes }];
 	});
+	// Oldest first whatever order the console lists them in, when every step has a time.
+	const steps = listed.every((step) => step.at !== undefined) ? [...listed].sort((a, b) => a.at! - b.at!) : listed;
 	const last = steps.at(-1);
 	return {
 		messages: steps.filter((step) => step.at !== undefined).map((step) => ({
-			id: `${reportTaskId}:${step.index}:${step.state}`,
+			id: `${reportTaskId}:${step.state}:${step.at}`,
 			subject: `Alibaba Cloud report ${reportTaskId}: ${step.state}`,
 			body: [step.state, ...step.notes].join("\n\n"),
 			sentAt: new Date(step.at!),

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { ProviderSubmissionRejectedError } from "../submission_contracts";
+import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { AlibabaConsoleError, AlibabaNeedLoginError, readConsoleAnswer, withAlibabaConsole, type AlibabaFetch } from "./api";
 import { consoleRefusal, consoleSuccess, fakeConsoleFetch, freshSession, loginConfig, MISSING_PAGE, NEED_LOGIN, OSS_HOST, session, SUCCESS_ENV_SG, UPLOAD_POLICY } from "./test_support";
 
@@ -9,8 +9,21 @@ describe("readConsoleAnswer", () => {
 		expect(readConsoleAnswer("GetUserIdArea", 200, SUCCESS_ENV_SG)).toEqual({ Env: "sg" });
 		expect(readConsoleAnswer("GetCrossRegionExist", 200, consoleSuccess(false))).toBe(false);
 		expect(readConsoleAnswer("ReportTaskList", 200, consoleSuccess({ PageSize: 20, Total: 0, List: [], Page: 1 }))).toEqual({ PageSize: 20, Total: 0, List: [], Page: 1 });
-		// An envelope without an inner Code is still a success.
-		expect(readConsoleAnswer("X", 200, `{"code":"200","data":{"Data":"abc"}}`)).toBe("abc");
+		// An envelope without an inner Code is a success only with Success:true.
+		expect(readConsoleAnswer("X", 200, `{"code":"200","data":{"Data":"abc","Success":true}}`)).toBe("abc");
+	});
+
+	test("a 200 without Success:true is never a success, whatever else it carries", () => {
+		for (const body of [`{"code":"200","data":{"Data":"abc"}}`, `{"code":"200","data":{"Data":"abc","Success":"true"}}`, `{"code":"200","data":{"Code":"200","Success":false,"Data":1}}`, `{"code":"200","data":{"Code":"500","Success":true,"Data":1}}`]) {
+			let caught: unknown;
+			try {
+				readConsoleAnswer("X", 200, body);
+			} catch (error) {
+				caught = error;
+			}
+			expect(caught).toBeInstanceOf(Error);
+			expect(caught).not.toBeInstanceOf(ProviderSubmissionRejectedError);
+		}
 	});
 
 	test("ConsoleNeedLogin, in the outer or the inner code, is the explicit login-expired signal", () => {
@@ -45,8 +58,37 @@ describe("readConsoleAnswer", () => {
 		const body = `{"code":"200","data":{"Code":"ReportDuplicated","Message":"already reported","Success":false}}`;
 		expect(() => readConsoleAnswer("SubmitReportTask", 200, body)).toThrow(AlibabaConsoleError);
 		expect(() => readConsoleAnswer("SubmitReportTask", 200, body)).toThrow("ReportDuplicated (already reported)");
-		// Success:false with both codes 200 is still a refusal, never a success.
-		expect(() => readConsoleAnswer("SubmitReportTask", 200, `{"code":"200","data":{"Code":"200","Success":false,"Message":"no"}}`)).toThrow(AlibabaConsoleError);
+		// Success:false with both codes 200 names nothing: ambiguous, never a success or a refusal.
+		const unnamed = `{"code":"200","data":{"Code":"200","Success":false,"Message":"no"}}`;
+		expect(() => readConsoleAnswer("SubmitReportTask", 200, unnamed)).toThrow("gave no usable answer");
+		expect(() => readConsoleAnswer("SubmitReportTask", 200, unnamed)).not.toThrow(AlibabaConsoleError);
+		// An inner code without Success:false is not a refusal either.
+		expect(() => readConsoleAnswer("A", 200, `{"code":"200","data":{"Code":"ReportDuplicated"}}`)).not.toThrow(AlibabaConsoleError);
+	});
+
+	test("an outer code refuses only when named, non-transient and 4xx by httpStatusCode, else by the HTTP status", () => {
+		const body = (code: string, httpStatusCode?: string | number) => JSON.stringify({ code, ...(httpStatusCode === undefined ? {} : { httpStatusCode }), message: "m" });
+		// JSON field wins; without it the HTTP status decides.
+		expect(() => readConsoleAnswer("A", 200, body("NoPermission", "403"))).toThrow(AlibabaConsoleError);
+		expect(() => readConsoleAnswer("A", 200, body("NoPermission", 403))).toThrow(AlibabaConsoleError);
+		expect(() => readConsoleAnswer("A", 400, body("NoPermission"))).toThrow(AlibabaConsoleError);
+		expect(() => readConsoleAnswer("A", 400, body("NoPermission", "500"))).not.toThrow(AlibabaConsoleError);
+		expect(() => readConsoleAnswer("A", 500, body("NoPermission"))).not.toThrow(AlibabaConsoleError);
+		expect(() => readConsoleAnswer("A", 200, body("NoPermission"))).not.toThrow(AlibabaConsoleError);
+		expect(() => readConsoleAnswer("A", 200, body("NoPermission", "302"))).not.toThrow(AlibabaConsoleError);
+		// Transient and numeric codes stay ambiguous even under 4xx.
+		for (const code of ["Throttling.User", "ServiceUnavailable", "InternalError", "SystemBusy", "RequestTimeout", "FlowControl", "429", "400"]) {
+			let caught: unknown;
+			try {
+				readConsoleAnswer("A", 400, body(code, "400"));
+			} catch (error) {
+				caught = error;
+			}
+			expect(caught).toBeInstanceOf(Error);
+			expect(caught).not.toBeInstanceOf(ProviderSubmissionRejectedError);
+		}
+		// An inner transient code under Success:false is ambiguous too.
+		expect(() => readConsoleAnswer("A", 200, `{"code":"200","data":{"Code":"Throttling","Success":false}}`)).not.toThrow(AlibabaConsoleError);
 	});
 
 	test("anything that is not a console answer stays an ambiguous plain Error", () => {
@@ -62,7 +104,7 @@ describe("readConsoleAnswer", () => {
 			expect(caught).not.toBeInstanceOf(AlibabaNeedLoginError);
 		}
 		expect(() => readConsoleAnswer("A", 502, "<html>")).toThrow("answered HTTP 502 without JSON");
-		expect(() => readConsoleAnswer("A", 200, "{}")).toThrow("unrecognized answer");
+		expect(() => readConsoleAnswer("A", 200, "{}")).toThrow("gave no usable answer");
 	});
 
 	test("a success code without any data is not a confirmation", () => {
@@ -133,10 +175,13 @@ describe("withAlibabaConsole", () => {
 		expect(console.requests[1]!.headers.cookie).toContain("ticket-value");
 	});
 
-	test("a second ConsoleNeedLogin propagates with no third login or call", async () => {
+	test("a second ConsoleNeedLogin needs a person, with no third login or call", async () => {
 		const login = sessions();
 		const console = fakeConsoleFetch({ GetUserIdArea: NEED_LOGIN });
-		await expect(withAlibabaConsole((api) => api.call("GetUserIdArea"), { fetch: console.fetch, config: loginConfig, getSession: login.getSession })).rejects.toBeInstanceOf(AlibabaNeedLoginError);
+		const caught: Error = await withAlibabaConsole((api) => api.call("GetUserIdArea"), { fetch: console.fetch, config: loginConfig, getSession: login.getSession }).catch((error: unknown) => error as Error) as Error;
+		expect(caught).toBeInstanceOf(ProviderSubmissionNeedsHumanError);
+		expect(caught).not.toBeInstanceOf(AlibabaNeedLoginError);
+		expect(caught.message).toContain("freshly logged-in session (GetUserIdArea)");
 		expect(login.calls).toHaveLength(2);
 		expect(console.count("GetUserIdArea")).toBe(2);
 	});
@@ -151,14 +196,32 @@ describe("withAlibabaConsole", () => {
 		}
 	});
 
-	test("a supplied session is used without logging in; a failed relogin propagates its own error", async () => {
+	test("a supplied session is used for the first attempt instead of getSession", async () => {
+		const login = sessions();
+		const console = fakeConsoleFetch({ A: [SUCCESS_ENV_SG] });
+		await withAlibabaConsole((api) => api.call("A"), { fetch: console.fetch, config: loginConfig, session, getSession: login.getSession });
+		expect(login.calls).toHaveLength(0);
+		expect(console.requests[0]!.body!.get("sec_token")).toBe(session.secToken);
+	});
+
+	test("a failed relogin needs a person and keeps the login's reason; an abort during it propagates as is", async () => {
 		const console = fakeConsoleFetch({ A: [NEED_LOGIN] });
 		let logins = 0;
-		await expect(withAlibabaConsole((api) => api.call("A"), {
+		const caught: Error = await withAlibabaConsole((api) => api.call("A"), {
 			fetch: console.fetch, config: loginConfig, session,
 			getSession: (async () => { logins += 1; throw new Error("login refused"); }) as never,
-		})).rejects.toThrow("login refused");
+		}).catch((error: unknown) => error as Error) as Error;
+		expect(caught).toBeInstanceOf(ProviderSubmissionNeedsHumanError);
+		expect(caught.message).toContain("login refused");
 		expect(logins).toBe(1);
+		expect(console.count("A")).toBe(1);
+
+		const controller = new AbortController();
+		const aborted = new Error("aborted");
+		await expect(withAlibabaConsole((api) => api.call("A"), {
+			fetch: fakeConsoleFetch({ A: [NEED_LOGIN] }).fetch, config: loginConfig, session, signal: controller.signal,
+			getSession: (async () => { controller.abort(); throw aborted; }) as never,
+		})).rejects.toBe(aborted);
 	});
 
 	test("missing credentials fail before any session or request", async () => {
@@ -228,9 +291,9 @@ describe("evidence upload", () => {
 		for (const data of [null, "policy", []]) await expect(run({ UploadFileByName: consoleSuccess(data) }).result).rejects.toThrow("no usable upload policy");
 	});
 
-	test("a non-2xx answer from the storage is an upload error carrying status and body, never the key", async () => {
+	test("a non-2xx answer from the storage is an upload error carrying status and the <Code> only, never the body or key", async () => {
 		const fetch: AlibabaFetch = async (url) => url === OSS_HOST
-			? new Response("<Error><Code>AccessDenied</Code></Error>", { status: 403 })
+			? new Response("<Error><Code>AccessDenied</Code><Message>secret</Message><OSSAccessKeyId>STS.NTestAccessId</OSSAccessKeyId></Error>", { status: 403 })
 			: new Response(consoleSuccess(UPLOAD_POLICY));
 		let caught: unknown;
 		try {
@@ -239,7 +302,12 @@ describe("evidence upload", () => {
 			caught = error;
 		}
 		expect((caught as Error).message).toContain("HTTP 403");
-		expect((caught as Error).message).toContain("AccessDenied");
+		expect((caught as Error).message).toBe("Alibaba Cloud's evidence storage refused the upload with HTTP 403 (AccessDenied).");
+		expect((caught as Error).message).not.toContain("STS.");
+		expect((caught as Error).message).not.toContain(UPLOAD_POLICY.Key);
+		// A body without a <Code> adds nothing.
+		const bare: AlibabaFetch = async (url) => url === OSS_HOST ? new Response("<html>nope</html>", { status: 502 }) : new Response(consoleSuccess(UPLOAD_POLICY));
+		await expect(withAlibabaConsole((api) => api.upload(file), { fetch: bare, config: loginConfig, getSession: async () => session })).rejects.toThrow("HTTP 502.");
 		// Storage errors are not provider rejections of a report.
 		expect(caught).not.toBeInstanceOf(ProviderSubmissionRejectedError);
 	});

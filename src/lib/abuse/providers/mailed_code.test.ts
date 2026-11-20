@@ -4,6 +4,7 @@ import { ALIBABA_CLOUD_PROVIDER } from "./alibaba_cloud/definition";
 import { mailedCodeFrom, mailedCodeReader, type MailedCodeSpec } from "./mailed_code";
 
 const realImapflow = await import("imapflow");
+const realSleep = await import("../../sleep");
 
 type FakeMessage = { uid: number; date?: Date; from: string; subject: string; html?: string; text?: string };
 
@@ -15,6 +16,9 @@ const server = {
 	locks: [] as Array<{ folder: string; readOnly?: boolean; released: boolean }>,
 	loggedOut: 0,
 	connected: 0,
+	/** Runs when the reader sleeps between polls, which the tests shorten to a few milliseconds. */
+	onSleep: undefined as undefined | ((poll: number) => void),
+	sleeps: 0,
 };
 
 function rfc822(message: FakeMessage): Buffer {
@@ -35,7 +39,12 @@ class FakeImapFlow {
 	}
 	async search(query: Record<string, unknown>) {
 		server.searches.push({ folder: this.folder, query });
-		return (server.folders[this.folder] ?? []).map((message) => message.uid);
+		const uids = (server.folders[this.folder] ?? []).map((message) => message.uid);
+		if (typeof query.uid !== "string") return uids;
+		// IMAP's "n:*" range always includes the newest message, even when n is past it.
+		const from = Number(query.uid.split(":")[0]);
+		const matching = uids.filter((uid) => uid >= from);
+		return matching.length > 0 || uids.length === 0 ? matching : [Math.max(...uids)];
 	}
 	async *fetch(uids: number[], query: { source?: boolean }) {
 		if (query.source) server.sourceFetches.push(uids);
@@ -51,10 +60,12 @@ const saved: Record<string, string | undefined> = {};
 
 beforeAll(() => {
 	mock.module("imapflow", () => ({ ...realImapflow, ImapFlow: FakeImapFlow }));
+	mock.module("../../sleep", () => ({ ...realSleep, sleep: async () => { server.sleeps += 1; server.onSleep?.(server.sleeps); await new Promise((resolve) => setTimeout(resolve, 5)); } }));
 	for (const [name, value] of Object.entries(environment)) { saved[name] = process.env[name]; process.env[name] = value; }
 });
 afterAll(() => {
 	mock.module("imapflow", () => realImapflow);
+	mock.module("../../sleep", () => realSleep);
 	for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
 });
 beforeEach(() => {
@@ -64,6 +75,8 @@ beforeEach(() => {
 	server.locks = [];
 	server.loggedOut = 0;
 	server.connected = 0;
+	server.onSleep = undefined;
+	server.sleeps = 0;
 });
 
 const alibaba = ALIBABA_CLOUD_PROVIDER.codeMail;
@@ -197,6 +210,40 @@ describe("mailedCodeReader against the mailbox", () => {
 			process.env.IMAP_HOST = host;
 		}
 	});
+
+	test("after the first poll each mailbox is searched for newer UIDs only, and a code arriving later is picked up", async () => {
+		server.folders.INBOX = [code(4, { from: "promo@evil.example" })];
+		server.folders.Shared = [code(10, { subject: "Welcome", html: "<p>Welcome</p>" })];
+		// The code mail lands after the first poll came up empty.
+		server.onSleep = (poll) => { if (poll === 2) server.folders.INBOX!.push(code(5, { date: at(20_000), html: "Please enter the code to verify your account. 565656" })); };
+		await expect(mailedCodeReader({ ...spec, waitMs: 5_000 })(requestedAt)).resolves.toBe("565656");
+		const inbox = server.searches.filter((search) => search.folder === "INBOX").map((search) => search.query);
+		expect(inbox).toEqual([{ since: at(-60_000) }, { uid: "5:*" }, { uid: "5:*" }]);
+		const shared = server.searches.filter((search) => search.folder === "Shared").map((search) => search.query);
+		expect(shared).toEqual([{ since: at(-60_000) }, { uid: "11:*" }]);
+		// The first poll downloaded the shared welcome mail (uid 10); it is never fetched again, nor is uid 4 (wrong sender).
+		expect(server.sourceFetches).toEqual([[10], [5]]);
+	}, 15_000);
+
+	test("the \"n:*\" quirk: the already-read newest UID the server returns is ignored", async () => {
+		server.folders.INBOX = [code(7, { from: "promo@evil.example" })];
+		await expect(mailedCodeReader({ ...spec, waitMs: 100 })(requestedAt)).rejects.toThrow("did not arrive in time");
+		const queries = server.searches.filter((search) => search.folder === "INBOX").map((search) => search.query);
+		expect(queries.length).toBeGreaterThan(2);
+		expect(Object.keys(queries[0]!)).toEqual(["since"]);
+		expect(queries.slice(1).every((query) => query.uid === "8:*")).toBeTrue();
+		// The fake server answers [7] to "8:*", as IMAP does; the reader never fetches it again.
+		expect(server.sourceFetches).toEqual([]);
+	}, 15_000);
+
+	test("a mailbox empty on the first poll is searched from UID 1 afterwards", async () => {
+		server.folders.INBOX = [];
+		await expect(mailedCodeReader({ ...spec, waitMs: 100 })(requestedAt)).rejects.toThrow("did not arrive in time");
+		const queries = server.searches.filter((search) => search.folder === "INBOX").map((search) => search.query);
+		expect(Object.keys(queries[0]!)).toEqual(["since"]);
+		expect(queries.length).toBeGreaterThan(2);
+		expect(queries.slice(1).every((query) => query.uid === "1:*")).toBeTrue();
+	}, 15_000);
 
 	test("a spec with several sender domains matches any of them", async () => {
 		server.folders.INBOX = [code(1, { from: "noreply@mail.other-sender.com", subject: "Verification code", html: "Please enter the code to verify your account. 777777" })];

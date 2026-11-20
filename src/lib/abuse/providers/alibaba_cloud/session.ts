@@ -72,6 +72,13 @@ function onConsole(page: Page): boolean {
 
 export type AlibabaLoginDependencies = { readCode?: MailedCodeReader; clock?: () => number };
 
+/** The first line of a browser error, without the login's typed values: enough to tell a timeout from a detached frame. */
+export function browserReason(error: unknown, config: AlibabaCloudLoginConfig): string {
+	let line = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 160);
+	for (const secret of [config.password, config.email]) if (secret) line = line.split(secret).join("[redacted]");
+	return line.replace(/\s+/g, " ").trim() || "no reason given";
+}
+
 /**
  * Log in through Alibaba's login page: the password form in its
  * passport.alibabacloud.com frame, then, from a browser it does not know, the
@@ -93,24 +100,27 @@ export async function loginWithContext(
 	try {
 		await step(page.goto(ALIBABA_CLOUD_PROVIDER.loginUrl, { waitUntil: "domcontentloaded", timeout: remaining() }));
 		stage = "the login form did not appear";
-		let form: Frame | undefined;
-		while (!(form = frameOf(page, "/mini_login.htm")) && clock() < deadline) await step(page.waitForTimeout(250));
-		if (!form) throw new Error(stage);
-		await step(form.fill("#fm-login-id", config.email, { timeout: remaining() }));
-		await step(form.fill("#fm-login-password", config.password, { timeout: remaining() }));
+		// The login page loads and reloads its form frame on its own, so each
+		// action finds the frame again instead of holding one that may be gone.
+		const form = page.frameLocator("iframe#alibaba-login-box");
+		await step(form.locator("#fm-login-id").fill(config.email, { timeout: remaining() }));
+		await step(form.locator("#fm-login-password").fill(config.password, { timeout: remaining() }));
 		stage = "the login button could not be pressed";
-		await step(form.click("#fm-login-submit", { timeout: remaining() }));
+		// Sign-in replaces the form frame at once (identity check or console):
+		// waiting for the click's own navigation would fail on the detached frame.
+		await step(form.locator("#fm-login-submit").click({ timeout: remaining(), noWaitAfter: true }));
 
 		stage = "the login page neither opened the console nor asked for the mailed code";
 		let verify: Frame | undefined;
 		while (!onConsole(page) && !(verify = frameOf(page, "/identity_verify.htm")) && clock() < deadline) {
-			const refusal = await form.evaluate(() => {
+			const refusal = await (frameOf(page, "/mini_login.htm")?.evaluate(() => {
 				const message = document.querySelector(".login-error-msg, .fm-error, [class*='error'] .msg");
 				const slider = document.querySelector("#nocaptcha, .nc-container, #baxia-dialog-content");
 				return { message: (message as HTMLElement | null)?.innerText.trim() ?? "", slider: Boolean(slider && (slider as HTMLElement).offsetParent) };
-			}).catch(() => ({ message: "", slider: false }));
+			}) ?? Promise.resolve(undefined)).catch(() => undefined) ?? { message: "", slider: false };
 			if (refusal.slider) throw new Error((stage = "Alibaba asked for a slider check"));
-			if (refusal.message) throw new Error((stage = `Alibaba refused the sign-in ("${refusal.message.slice(0, 120)}")`));
+			// The page's text can echo the typed login; name only that it refused.
+			if (refusal.message) throw new Error((stage = "Alibaba refused the sign-in"));
 			await step(page.waitForTimeout(500));
 		}
 		if (verify) {
@@ -135,8 +145,9 @@ export async function loginWithContext(
 	} catch (error) {
 		const timedOut = signal.reason instanceof DOMException && signal.reason.name === "TimeoutError";
 		if (error instanceof OperationCanceledError && !timedOut) throw error;
-		// Browser errors can echo typed values; surface only the step.
-		throw new ProviderLoginError(PROVIDER, `${stage}${timedOut ? ` within ${ALIBABA_LOGIN_TIMEOUT_MS / 1000} s` : ""}`);
+		// Name the step and the browser's reason, with the typed values cut out.
+		const own = error instanceof Error && error.message === stage;
+		throw new ProviderLoginError(PROVIDER, `${stage}${timedOut ? ` within ${ALIBABA_LOGIN_TIMEOUT_MS / 1000} s` : own ? "" : ` (${browserReason(error, config)})`}`);
 	} finally {
 		await boundedCleanup(page.close());
 	}
