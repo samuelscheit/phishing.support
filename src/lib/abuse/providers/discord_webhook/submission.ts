@@ -35,7 +35,7 @@ export function discordWebhookOf(observedUrls: readonly string[], normalizedTarg
 	return undefined;
 }
 
-const draft = createDraft({
+export const discordWebhookDraft = createDraft({
 	definition: DISCORD_WEBHOOK_PROVIDER,
 	reasonPrefix: "discord_webhook",
 	targetTypes: ["service_account"],
@@ -47,7 +47,7 @@ const draft = createDraft({
 	targetOf: ({ webhook }) => `discord-webhook:${webhook.id}`,
 });
 
-export const prepareDiscordWebhookDeletion = draft.prepare;
+export const prepareDiscordWebhookDeletion = discordWebhookDraft.prepare;
 
 async function discordError(response: Response): Promise<{ code?: number; message?: string; retryAfterMs?: number }> {
 	const body = asRecord(await response.json().catch(() => undefined));
@@ -66,7 +66,7 @@ async function discordError(response: Response): Promise<{ code?: number; messag
  * already gone counts as done; a token Discord no longer accepts is a refusal.
  */
 export async function submitDiscordWebhookDeletion(context: ProviderSubmissionContext, dependencies: DiscordWebhookDependencies = {}): Promise<ProviderSubmissionSuccess> {
-	const { payload } = await draft.verify(context);
+	const payload = discordWebhookDraft.stored(context);
 	const { id, token } = payload.webhook;
 	const fetcher = dependencies.fetch ?? fetch;
 	const wait = dependencies.sleep ?? sleep;

@@ -1,12 +1,12 @@
 import { defineProvider } from "../kit/provider";
 import { TENCENT_PROVIDER } from "./definition";
 import { makeTencentExplanation } from "./payload";
-import { prepareTencentSubmission, submitTencentSubmission } from "./submission";
+import { prepareTencentExternalSubmission, tencentDraft, submitTencentSubmission } from "./submission";
 
 /** Tencent owns its DNS-abuse mailbox selection, evidence rules, and HTTP form. */
 export const tencentProvider = defineProvider({
 	definition: TENCENT_PROVIDER,
-	prepare: prepareTencentSubmission,
+	draft: tencentDraft,
 	preview: (context) => makeTencentExplanation({
 		target: context.target,
 		observedUrl: context.observedUrls[0],
@@ -14,5 +14,5 @@ export const tencentProvider = defineProvider({
 		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),
-	submit: (context) => submitTencentSubmission(context),
+	external: { prepare: prepareTencentExternalSubmission, submit: submitTencentSubmission },
 });

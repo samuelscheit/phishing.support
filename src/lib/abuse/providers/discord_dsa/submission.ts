@@ -20,7 +20,7 @@ export type DiscordDsaDependencies = RouteDeps & {
 	environment?: Readonly<Record<string, string | undefined>>;
 };
 
-const draft = createDraft({
+export const discordDsaDraft = createDraft({
 	definition: DISCORD_DSA_PROVIDER,
 	reasonPrefix: "discord_dsa",
 	targetTypes: ["service_account"],
@@ -44,7 +44,7 @@ const draft = createDraft({
 });
 
 /** Pin the notice before the marker. */
-export const prepareDiscordDsaSubmission = draft.prepare;
+export const prepareDiscordDsaSubmission = discordDsaDraft.prepare;
 
 /**
  * Before the marker: have Discord mail its key, read it, and fill every step
@@ -52,7 +52,7 @@ export const prepareDiscordDsaSubmission = draft.prepare;
  * here is a safe retry.
  */
 export async function prepareDiscordDsaExternalSubmission(context: ProviderSubmissionContext, dependencies: DiscordDsaDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload } = await draft.verify(context, dependencies);
+	const { payload } = await discordDsaDraft.verify(context, dependencies);
 	return withPreflight(() => (dependencies.openSession ?? openDiscordDsaSession)(), async (session) => {
 		const requestedAt = (dependencies.now ?? (() => new Date()))();
 		await session.requestCode(payload.report.reporter.email);
@@ -63,8 +63,8 @@ export async function prepareDiscordDsaExternalSubmission(context: ProviderSubmi
 }
 
 /** The one irreversible step: "Submit Report" on the filled summary. */
-export async function submitDiscordDsaSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined, dependencies: DiscordDsaDependencies = {}): Promise<ProviderSubmissionSuccess> {
-	const { payload } = await draft.verify(context, dependencies);
+export async function submitDiscordDsaSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
+	const payload = discordDsaDraft.stored(context);
 	const session = preparedState<DiscordDsaSession>(preflight, (candidate) => !!candidate.submit, "Discord DSA submission requires the filled form from its preflight.");
 	const answer = await session.submit();
 	if (!/report submitted/i.test(answer)) throw new ProviderSubmissionRejectedError(`Discord did not confirm the report: ${snippet(answer)}`);

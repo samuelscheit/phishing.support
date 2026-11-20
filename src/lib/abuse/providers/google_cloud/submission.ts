@@ -4,7 +4,7 @@ import { getBrowser, getBrowserPage } from "../../../browser";
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
 import { createDraft, type RouteData } from "../kit/draft";
-import { solveCaptchaToken } from "../kit/captcha";
+import { solveRecaptchaV2 } from "../kit/captcha";
 import { jsonRecord } from "../kit/http";
 import { snippet } from "../kit/text";
 import { emailOriginOf } from "../email_origin";
@@ -33,11 +33,7 @@ export type GoogleCloudSubmissionDependencies = {
 };
 
 /** Solve the checkbox reCAPTCHA the form falls back to. */
-const solveGoogleCloudCaptcha = (signal?: AbortSignal) => solveCaptchaToken({
-	type: GOOGLE_CLOUD_PROVIDER.captcha.type,
-	parametersField: "token_params",
-	parameters: { googlekey: GOOGLE_CLOUD_PROVIDER.captcha.siteKey, pageurl: GOOGLE_CLOUD_PROVIDER.reportPageUrl },
-}, signal);
+export const solveGoogleCloudCaptcha = (signal?: AbortSignal) => solveRecaptchaV2(GOOGLE_CLOUD_PROVIDER.captcha, GOOGLE_CLOUD_PROVIDER.reportPageUrl, signal);
 
 async function openReportingPage(): Promise<GoogleCloudFormSession> {
 	const browser = await getBrowser("reporting");
@@ -67,7 +63,7 @@ async function reportInput(data: RouteData): Promise<GoogleCloudReportInput & { 
 	};
 }
 
-const draft = createDraft({
+export const googleCloudDraft = createDraft({
 	definition: GOOGLE_CLOUD_PROVIDER,
 	reasonPrefix: "google_cloud",
 	targetTypes: ["domain", "ip", "service_account", "campaign"],
@@ -80,7 +76,7 @@ const draft = createDraft({
 });
 
 /** Check the route and build the durable draft before any provider call. */
-export const prepareGoogleCloudSubmission = (context: ProviderSubmissionContext) => draft.prepare(context);
+export const prepareGoogleCloudSubmission = (context: ProviderSubmissionContext) => googleCloudDraft.prepare(context);
 
 /**
  * Set a field's value and fire the events the form's own script listens for.
@@ -200,7 +196,7 @@ export async function submitGoogleCloudSubmission(
 	context: ProviderSubmissionContext,
 	dependencies: GoogleCloudSubmissionDependencies = {},
 ): Promise<ProviderSubmissionSuccess> {
-	const { payload } = await draft.verify(context);
+	const payload = googleCloudDraft.stored(context);
 
 	const signal = context.signal;
 	const sessionPromise = (dependencies.openPage ?? openReportingPage)();

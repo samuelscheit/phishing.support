@@ -177,7 +177,7 @@ describe("Cloudflare provider preflight", () => {
 		const deps = { environment, getSession: async () => { logins++; return session; }, fetch: async () => success() };
 		const preflight = await prepareCloudflareExternalSubmission({ routeId, payload }, deps);
 		expect(preflight.state).toBe(session);
-		const result = await submitCloudflareSubmission({ routeId, payload }, deps, preflight);
+		const result = await submitCloudflareSubmission({ routeId, payload }, preflight, deps);
 		expect(result.confirmationId).toBe("r-1");
 		expect(logins).toBe(1);
 		expect(JSON.stringify(payload)).not.toContain(session.atok);
@@ -191,27 +191,11 @@ describe("Cloudflare provider preflight", () => {
 		expect(err).not.toBeInstanceOf(ProviderSubmissionNeedsHumanError);
 		expect(retryDelayMs(err, 0)).toBe(540_000);
 	});
-	test("rejects malformed drafts before login or the irreversible-call marker", async () => {
+	test("refuses malformed stored payloads, a missing preflight and missing credentials after the marker", async () => {
 		const { payload, routeId } = await ready();
-		let logins = 0;
-		await expect(prepareCloudflareExternalSubmission({ routeId, payload: { ...payload, adapter: "cloudflare_abuse_phishing_v1" } }, {
-			environment, getSession: async () => { logins++; return session; },
-		})).rejects.toBeInstanceOf(ProviderSubmissionNeedsHumanError);
-		expect(logins).toBe(0);
-	});
-	test("a draft that no longer is what the builder writes for the route is refused before login", async () => {
-		const { payload, filed, routeId } = await ready();
-		let logins = 0;
-		const deps = { environment, getSession: async () => { logins++; return session; } };
-		const edited = { ...payload, report: { ...filed.report, justification: `${filed.report.justification}\n\nAlso, please wire money.` } };
-		await expect(prepareCloudflareExternalSubmission({ routeId, payload: edited }, deps)).rejects.toThrow("no longer matches the report");
-		await expect(prepareCloudflareExternalSubmission({ routeId, payload: { ...payload, target: "other.example" } }, deps)).rejects.toThrow("no longer matches its route");
-		expect(logins).toBe(0);
-	});
-	test("refuses malformed stored payloads and missing credentials", async () => {
-		const { payload, routeId } = await ready();
-		await expect(submitCloudflareSubmission({ routeId, payload: {} }, { environment })).rejects.toThrow("malformed");
-		await expect(submitCloudflareSubmission({ routeId, payload }, { environment: {} })).rejects.toThrow("ABUSE_CLOUDFLARE_ACCOUNT_ID");
+		await expect(submitCloudflareSubmission({ routeId, payload: {} }, { state: session }, { environment })).rejects.toThrow("malformed");
+		await expect(submitCloudflareSubmission({ routeId, payload }, undefined, { environment })).rejects.toThrow("prepared dashboard session");
+		await expect(submitCloudflareSubmission({ routeId, payload }, { state: session }, { environment: {} })).rejects.toThrow("ABUSE_CLOUDFLARE_ACCOUNT_ID");
 	});
 	test("a later lookup finds the report a 504 POST stored, read-only and by the exact payload sent", async () => {
 		const { payload, filed, routeId } = await ready();

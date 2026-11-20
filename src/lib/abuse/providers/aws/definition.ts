@@ -48,4 +48,3 @@ export const AWS_PROVIDER = definePinned({
 	},
 });
 
-export type AwsProviderDefinition = typeof AWS_PROVIDER;

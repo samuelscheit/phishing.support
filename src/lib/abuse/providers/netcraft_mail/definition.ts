@@ -15,4 +15,3 @@ export const NETCRAFT_MAIL_PROVIDER = definePinned({
 	maximumMessageBytes: MAX_REPORTED_EMAIL_BYTES,
 });
 
-export type NetcraftMailProviderDefinition = typeof NETCRAFT_MAIL_PROVIDER;

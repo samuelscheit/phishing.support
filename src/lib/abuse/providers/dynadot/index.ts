@@ -1,7 +1,7 @@
 import { defineProvider, registrarPreview } from "../kit/provider";
 import { DYNADOT_PROVIDER } from "./definition";
 import { dynadotReportUrls, makeDynadotComments } from "./payload";
-import { prepareDynadotExternalSubmission, prepareDynadotSubmission, submitDynadotSubmission } from "./submission";
+import { prepareDynadotExternalSubmission, dynadotDraft, submitDynadotSubmission } from "./submission";
 
 /**
  * Dynadot's abuse mailbox is not monitored; the route files the report through
@@ -10,7 +10,7 @@ import { prepareDynadotExternalSubmission, prepareDynadotSubmission, submitDynad
  */
 export const dynadotProvider = defineProvider({
 	definition: DYNADOT_PROVIDER,
-	prepare: (context) => prepareDynadotSubmission(context),
+	draft: dynadotDraft,
 	preview: registrarPreview({ urls: dynadotReportUrls, make: makeDynadotComments }),
 	external: { prepare: (context) => prepareDynadotExternalSubmission(context), submit: submitDynadotSubmission },
 	inbound: { messageKind: "reply", senderDomains: ["dynadot.com"] },

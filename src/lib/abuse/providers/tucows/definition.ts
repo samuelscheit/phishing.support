@@ -52,4 +52,3 @@ export const TUCOWS_PROVIDER = definePinned({
 	reporter: { name: serviceIdentity.name, email: serviceIdentity.mailbox, organization: serviceIdentity.name, role: "it_security" as const },
 });
 
-export type TucowsProviderDefinition = typeof TUCOWS_PROVIDER;

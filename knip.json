@@ -1,0 +1,12 @@
+{
+	"$schema": "https://unpkg.com/knip@5/schema.json",
+	"ignore": [".claude/**", ".pi/**"],
+	"ignoreBinaries": ["openssl"],
+	"workspaces": {
+		".": {},
+		"tools/cloudflare-origin-probe": {
+			"entry": ["worker.js", "probe.mjs", "cloudflare.config.ts", "*.test.js"],
+			"project": ["**/*.{js,mjs,ts}"]
+		}
+	}
+}

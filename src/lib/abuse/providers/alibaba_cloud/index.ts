@@ -5,7 +5,7 @@ import {
 	fetchAlibabaCloudCorrespondence,
 	findAlibabaCloudSubmission,
 	prepareAlibabaCloudExternalSubmission,
-	prepareAlibabaCloudSubmission,
+	alibabaCloudDraft,
 	submitAlibabaCloudSubmission,
 } from "./submission";
 
@@ -16,7 +16,7 @@ import {
  */
 export const alibabaCloudProvider = defineProvider({
 	definition: ALIBABA_CLOUD_PROVIDER,
-	prepare: prepareAlibabaCloudSubmission,
+	draft: alibabaCloudDraft,
 	preview: (context) => makeAlibabaCloudReportReason({
 		target: context.target,
 		observedUrls: context.observedUrls,

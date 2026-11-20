@@ -8,7 +8,7 @@ const DEFAULT_POLL_INTERVAL_MS = 3_000;
 
 
 /** Narrow enough for provider tests without requiring a browser-specific fetch implementation. */
-export type DeathByCaptchaFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type DeathByCaptchaFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export type DeathByCaptchaCredentials = {
 	username: string;

@@ -3,12 +3,13 @@ import type { ProviderSubmissionProvider } from "../submission_contracts";
 
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import { buildCloudflareReportPreview } from "./report";
-import { fetchCloudflareCorrespondence, findCloudflareSubmission, prepareCloudflareExternalSubmission, prepareCloudflareSubmission, submitCloudflareSubmission } from "./submission";
+import { cloudflareDraft, fetchCloudflareCorrespondence, findCloudflareSubmission, prepareCloudflareExternalSubmission, submitCloudflareSubmission } from "./submission";
 
 /** The sole executable owner of Cloudflare's authenticated abuse-report API contract. */
 export const cloudflareProvider: ProviderSubmissionProvider = {
 	definition: CLOUDFLARE_PROVIDER,
-	prepareSubmission: (context) => prepareCloudflareSubmission(context),
+	prepareSubmission: cloudflareDraft.prepare,
+	verifyDraft: cloudflareDraft.verify,
 	buildReportPreview: buildCloudflareReportPreview,
 	// Cloudflare's decision mail: "please send an email to abusereply@cloudflare.com with
 	// the report identification number included in the subject line".
@@ -24,8 +25,9 @@ export const cloudflareProvider: ProviderSubmissionProvider = {
 		accountIdentifiers: extractTurnstileSitekeys,
 	},
 	prepareExternalSubmission: (context) => prepareCloudflareExternalSubmission(context),
-	submit: (context) => submitCloudflareSubmission(context),
-	submitPrepared: (context, preflight) => submitCloudflareSubmission(context, {}, preflight),
+	// The executor always calls submitPrepared: the dashboard session lives in the preflight.
+	submit: (context) => submitCloudflareSubmission(context, undefined),
+	submitPrepared: submitCloudflareSubmission,
 	findSubmission: (context) => findCloudflareSubmission(context),
 	// The submitted-report API is the authoritative record of Cloudflare's
 	// correspondence; its notification mails are not attached a second time.

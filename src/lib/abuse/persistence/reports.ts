@@ -241,7 +241,7 @@ export async function getReport(reportId: bigint): Promise<AbuseReport | undefin
 	return db.select().from(abuseReports).where(eq(abuseReports.id, reportId)).get();
 }
 
-export async function getReportByTrackingTokenHash(trackingTokenHash: string): Promise<AbuseReport | undefined> {
+async function getReportByTrackingTokenHash(trackingTokenHash: string): Promise<AbuseReport | undefined> {
 	const db = await getDb();
 	return db.select().from(abuseReports).where(eq(abuseReports.trackingTokenHash, trackingTokenHash)).get();
 }

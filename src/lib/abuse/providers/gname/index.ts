@@ -1,12 +1,13 @@
 import type { ProviderReportPreviewContext, ProviderSubmissionProvider } from "../submission_contracts";
 import { GNAME_PROVIDER } from "./definition";
 import { makeGnameDescription } from "./payload";
-import { prepareGnameExternalSubmission, prepareGnameSubmission, submitGnameSubmission } from "./submission";
+import { gnameDraft, prepareGnameExternalSubmission, submitGnameSubmission } from "./submission";
 
 /** GNAME (IANA 1923 and its sibling accreditations) takes abuse complaints through its own form, gated by a slider and a mailed code. */
 export const gnameProvider: ProviderSubmissionProvider = {
 	definition: GNAME_PROVIDER,
-	prepareSubmission: prepareGnameSubmission,
+	prepareSubmission: gnameDraft.prepare,
+	verifyDraft: gnameDraft.verify,
 	buildReportPreview: (context: ProviderReportPreviewContext) => makeGnameDescription({
 		target: context.target,
 		observedUrl: context.observedUrls[0],
@@ -16,7 +17,7 @@ export const gnameProvider: ProviderSubmissionProvider = {
 	prepareExternalSubmission: prepareGnameExternalSubmission,
 	// The executor always calls submitPrepared: the code lives in the preflight's browser session.
 	submit: (context) => submitGnameSubmission(context, undefined),
-	submitPrepared: (context, preflight) => submitGnameSubmission(context, preflight),
+	submitPrepared: submitGnameSubmission,
 	// GNAME mails its case number when it receives and when it settles a complaint.
 	inboundMail: {
 		senderDomains: ["gname.com"],

@@ -1,3 +1,4 @@
+import { deadline } from "../kit/http";
 import { TUCOWS_PROVIDER } from "./definition";
 
 export type TucowsFetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -53,7 +54,7 @@ export function createTucowsSession(fetchImplementation: TucowsFetch, signal?: A
 			...init,
 			headers,
 			redirect: "manual",
-			signal: AbortSignal.any([AbortSignal.timeout(TUCOWS_PROVIDER.timeoutMs), ...(signal ? [signal] : [])]),
+			signal: deadline(TUCOWS_PROVIDER.timeoutMs, signal),
 		});
 		for (const line of response.headers.getSetCookie()) {
 			const pair = line.split(";", 1)[0]!;

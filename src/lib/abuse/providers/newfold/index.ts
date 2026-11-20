@@ -1,7 +1,7 @@
 import { defineProvider, registrarPreview } from "../kit/provider";
 import { NEWFOLD_PROVIDER } from "./definition";
 import { makeNewfoldComments, newfoldReportUrls } from "./payload";
-import { prepareNewfoldExternalSubmission, prepareNewfoldSubmission, submitNewfoldSubmission } from "./submission";
+import { prepareNewfoldExternalSubmission, newfoldDraft, submitNewfoldSubmission } from "./submission";
 
 /**
  * Newfold's abuse mailboxes are not monitored; the route files the report
@@ -11,7 +11,7 @@ import { prepareNewfoldExternalSubmission, prepareNewfoldSubmission, submitNewfo
  */
 export const newfoldProvider = defineProvider({
 	definition: NEWFOLD_PROVIDER,
-	prepare: (context) => prepareNewfoldSubmission(context),
+	draft: newfoldDraft,
 	preview: registrarPreview({ urls: newfoldReportUrls, make: makeNewfoldComments }),
 	external: { prepare: (context) => prepareNewfoldExternalSubmission(context), submit: submitNewfoldSubmission },
 	// The confirmation mail's sender is not documented; Newfold's own and its brands' domains are the best guess.

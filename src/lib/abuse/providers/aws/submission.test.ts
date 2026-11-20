@@ -11,7 +11,9 @@ import { awsProvider } from "./index";
 import { AWS_PROVIDER } from "./definition";
 import { providerResponseId, reportReference } from "../report_reference";
 import { storedAwsSubmissionPayload } from "./payload";
-import { prepareAwsSubmission, submitAwsSubmission, verifiedAwsDraft } from "./submission";
+import { awsDraft, prepareAwsSubmission, submitAwsSubmission } from "./submission";
+
+const verifiedAwsDraft = async (context: Parameters<typeof awsDraft.verify>[0]) => (await awsDraft.verify(context)).payload;
 
 useTemporaryDatabase();
 

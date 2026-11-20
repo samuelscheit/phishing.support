@@ -1,6 +1,6 @@
 import { defineProvider } from "../kit/provider";
 import { NETCRAFT_PROVIDER } from "./definition";
-import { prepareNetcraftSubmission, submitNetcraftSubmission } from "./submission";
+import { netcraftDraft, submitNetcraftSubmission } from "./submission";
 import { makeNetcraftReason } from "./payload";
 import { NETCRAFT_INBOUND_MAIL } from "./inbound";
 import { fetchNetcraftCorrespondence, NETCRAFT_REVIEW_VERDICTS } from "./correspondence";
@@ -8,7 +8,7 @@ import { fetchNetcraftCorrespondence, NETCRAFT_REVIEW_VERDICTS } from "./corresp
 /** Supplemental Netcraft route for every report with one or more observed URLs. */
 export const netcraftProvider = defineProvider({
 	definition: NETCRAFT_PROVIDER,
-	prepare: prepareNetcraftSubmission,
+	draft: netcraftDraft,
 	preview: (context) => makeNetcraftReason({
 		target: context.target,
 		observedUrls: context.observedUrls,

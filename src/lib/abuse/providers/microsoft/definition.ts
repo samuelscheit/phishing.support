@@ -48,4 +48,3 @@ export const MICROSOFT_PROVIDER = definePinned({
 	},
 });
 
-export type MicrosoftProviderDefinition = typeof MICROSOFT_PROVIDER;

@@ -1,5 +1,5 @@
 import { setRecaptchaResponse, type BrowserFormField, type BrowserFormFile, type BrowserFormScripting, type BrowserFormSession } from "../browser_form";
-import { captchaCredentialsPresent, solveCaptchaToken } from "../kit/captcha";
+import { captchaCredentialsProblem, solveRecaptchaV2 } from "../kit/captcha";
 import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
 import { formOpener, preparedState, withPreflight } from "../kit/session";
@@ -40,7 +40,7 @@ export type NewfoldPreflightState = {
 	file: BrowserFormFile | undefined;
 };
 
-const draft = createDraft({
+export const newfoldDraft = createDraft({
 	definition: PROVIDER,
 	reasonPrefix: "newfold",
 	targetTypes: ["domain"],
@@ -52,16 +52,10 @@ const draft = createDraft({
 });
 
 /** Check the route and build the durable draft before any provider call. */
-export const prepareNewfoldSubmission = draft.prepare;
-/** The stored draft, checked against its route and rebuilt from the current report around its stored screenshot. */
-export const verifiedNewfoldDraft = draft.verify;
+export const prepareNewfoldSubmission = newfoldDraft.prepare;
 
 /** Solve the form's reCAPTCHA v2 checkbox (datacenter egress gets the image challenge, so no widget click is tried). */
-const solveNewfoldCaptcha = (signal: AbortSignal | undefined) => solveCaptchaToken({
-	type: PROVIDER.captcha.type,
-	parametersField: "token_params",
-	parameters: { googlekey: PROVIDER.captcha.siteKey, pageurl: PROVIDER.captcha.pageUrl },
-}, signal);
+export const solveNewfoldCaptcha = (signal: AbortSignal | undefined) => solveRecaptchaV2(PROVIDER.captcha, PROVIDER.captcha.pageUrl, signal);
 
 /**
  * Before the marker: open the form past Cloudflare's check, check the page
@@ -71,11 +65,11 @@ const solveNewfoldCaptcha = (signal: AbortSignal | undefined) => solveCaptchaTok
  * opened and a person is asked.
  */
 export async function prepareNewfoldExternalSubmission(context: ProviderSubmissionContext, dependencies: NewfoldDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await draft.verify(context, dependencies);
+	const { payload, data } = await newfoldDraft.verify(context, dependencies);
 	const file = payload.evidence
 		? (await loadEvidenceFile({ reference: payload.evidence, contract: NEWFOLD_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Newfold", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) })).file
 		: undefined;
-	if (!(dependencies.hasCaptchaCredentials ?? captchaCredentialsPresent)()) {
+	if (!(dependencies.hasCaptchaCredentials ?? (() => captchaCredentialsProblem() === undefined))()) {
 		throw new ProviderSubmissionNeedsHumanError("Newfold's abuse form needs a solved reCAPTCHA and DEATHBYCAPTCHA_USERNAME/DEATHBYCAPTCHA_PASSWORD are not set; nothing was filed.");
 	}
 	return withPreflight(() => (dependencies.openForm ?? formOpener(PROVIDER, "newfold-report", { url: PROVIDER.formUrl, formSelector: PROVIDER.formSelector }))(context.signal), async (session): Promise<NewfoldPreflightState> => {

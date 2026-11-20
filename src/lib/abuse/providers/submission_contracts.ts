@@ -190,6 +190,14 @@ export type ProviderSubmissionProvider = {
 	 * handler.
 	 */
 	prepareSubmission?(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation>;
+	/**
+	 * Prove the stored draft is still exactly what the provider builds from the
+	 * current route and report; it throws when it is not. The executor runs it
+	 * for every provider before any preflight and before the marker, so a drift
+	 * ends the attempt where nothing was filed. After the marker a provider only
+	 * reads its stored payload and sends its one request.
+	 */
+	verifyDraft?(context: ProviderSubmissionContext): Promise<unknown>;
 	/** Build the provider-owned preview shown before a durable run exists. */
 	buildReportPreview?(context: ProviderReportPreviewContext): string | undefined;
 	/**

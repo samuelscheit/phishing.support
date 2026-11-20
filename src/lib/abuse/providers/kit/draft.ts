@@ -38,7 +38,7 @@ export function reportInputOf({ route, report, target }: RouteData): ReportInput
 	};
 }
 
-export const insufficient = (reason: string) => ({ outcome: "insufficient_evidence", reason }) as const;
+const insufficient = (reason: string) => ({ outcome: "insufficient_evidence", reason }) as const;
 
 export type DraftSpec<Payload, Input, Deps extends RouteDeps> = {
 	definition: ProviderSubmissionDefinition;
@@ -64,7 +64,8 @@ export type DraftSpec<Payload, Input, Deps extends RouteDeps> = {
  * The pre-marker half of a direct provider: `prepare` checks the route and
  * builds the durable draft; `verify` re-reads that draft before anything
  * crosses the provider boundary and proves it is still exactly what the
- * builder produces from the current route and report.
+ * builder produces from the current route and report. The executor runs
+ * `verify` before the marker; after it `stored` is all a submit may read.
  */
 export function createDraft<Payload, Input, Deps extends RouteDeps = RouteDeps>(spec: DraftSpec<Payload, Input, Deps>) {
 	const displayName = spec.label ?? spec.definition.displayName;
@@ -81,9 +82,14 @@ export function createDraft<Payload, Input, Deps extends RouteDeps = RouteDeps>(
 		return payload ? { outcome: "ready", payload: payload as Record<string, unknown> } : insufficient(`${spec.reasonPrefix}_report_payload_invalid`);
 	}
 
-	async function verify(context: ProviderSubmissionContext, dependencies = {} as Deps): Promise<{ payload: Payload; data: RouteData }> {
+	function stored(context: ProviderSubmissionContext): Payload {
 		const payload = spec.read(context.payload);
 		if (!payload) throw new Error(`The persisted ${displayName} submission payload is malformed.`);
+		return payload;
+	}
+
+	async function verify(context: ProviderSubmissionContext, dependencies = {} as Deps): Promise<{ payload: Payload; data: RouteData }> {
+		const payload = stored(context);
 		const data = await loadRoute(context, dependencies);
 		if (!routeIsOurs(spec.definition, data.route) || data.target.normalizedTarget !== spec.targetOf(payload)) {
 			throw new Error(`The persisted ${displayName} payload no longer matches its route.`);
@@ -93,5 +99,5 @@ export function createDraft<Payload, Input, Deps extends RouteDeps = RouteDeps>(
 		return { payload, data };
 	}
 
-	return { prepare, verify };
+	return { prepare, verify, stored };
 }

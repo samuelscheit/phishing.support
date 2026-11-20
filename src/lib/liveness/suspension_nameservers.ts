@@ -5,7 +5,7 @@
  * sources are listed; a nameserver matches when it is one of these domains or
  * a host below it.
  */
-export const SUSPENSION_NAMESERVER_DOMAINS: readonly string[] = [
+const SUSPENSION_NAMESERVER_DOMAINS: readonly string[] = [
 	// Observed in production 2026-11-20: nodeagent.pro, suspended 13:38 UTC after a Cloudflare report;
 	// registry RDAP (Identity Digital) showed ns1/ns2.domain-suspended.com and only "client transfer prohibited".
 	"domain-suspended.com",

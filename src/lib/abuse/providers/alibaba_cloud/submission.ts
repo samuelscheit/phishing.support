@@ -34,7 +34,7 @@ const { pageType, consoleOrigin } = ALIBABA_CLOUD_PROVIDER;
 /** The account's report list, where a filed report shows up. */
 const REPORT_RECORDS_URL = `${consoleOrigin}/#/reportRecord/${pageType}`;
 
-const draft = createDraft({
+export const alibabaCloudDraft = createDraft({
 	definition: ALIBABA_CLOUD_PROVIDER,
 	reasonPrefix: "alibaba_cloud",
 	targetTypes: ["domain", "ip"],
@@ -66,11 +66,11 @@ const draft = createDraft({
 });
 
 /** Check the route and build the durable draft before any provider call. */
-export const prepareAlibabaCloudSubmission = draft.prepare;
+export const prepareAlibabaCloudSubmission = alibabaCloudDraft.prepare;
 
 /** The stored draft, checked against its route and rebuilt from the current report; with its screenshot's bytes. */
 async function verifiedDraft(context: ProviderSubmissionContext) {
-	const { payload, data } = await draft.verify(context);
+	const { payload, data } = await alibabaCloudDraft.verify(context);
 	const { bytes } = await loadEvidenceFile({ reference: payload.screenshot, contract: ALIBABA_CLOUD_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Alibaba Cloud screenshot" });
 	return { payload, screenshot: bytes };
 }

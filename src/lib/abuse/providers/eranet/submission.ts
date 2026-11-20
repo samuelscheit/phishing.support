@@ -82,7 +82,7 @@ export function errorOf(body: EranetResponse): string | undefined {
 	return typeof error === "string" && error ? error : undefined;
 }
 
-const draft = createDraft({
+export const eranetDraft = createDraft({
 	definition: ERANET_PROVIDER,
 	reasonPrefix: "eranet",
 	targetTypes: ["domain"],
@@ -103,7 +103,7 @@ const draft = createDraft({
 });
 
 /** Build the pinned draft before the marker; nothing is sent to Eranet here. */
-export const prepareEranetSubmission = draft.prepare;
+export const prepareEranetSubmission = eranetDraft.prepare;
 
 /**
  * Before the marker: upload the screenshot and obtain the mailed code. An
@@ -111,7 +111,7 @@ export const prepareEranetSubmission = draft.prepare;
  * a safe retry.
  */
 export async function prepareEranetExternalSubmission(context: ProviderSubmissionContext, dependencies: EranetDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await draft.verify(context, dependencies);
+	const { payload, data } = await eranetDraft.verify(context, dependencies);
 	const { bytes } = await loadEvidenceFile({ reference: payload.evidence, contract: ERANET_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Eranet", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) });
 	return withPreflight(() => (dependencies.openSession ?? openEranetBrowserSession)(), async (session) => {
 		const files = [{ filename: payload.evidence.filename, mimeType: payload.evidence.mimeType, content: bytes }];
@@ -171,8 +171,8 @@ function complaintBody(payload: EranetSubmissionPayload, state: EranetPreflightS
 }
 
 /** The one irreversible call: CreateComplaint with the pinned draft and the preflight code. */
-export async function submitEranetSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined, dependencies: EranetDependencies = {}): Promise<ProviderSubmissionSuccess> {
-	const { payload } = await draft.verify(context, dependencies);
+export async function submitEranetSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
+	const payload = eranetDraft.stored(context);
 	const state = preparedState<EranetPreflightState>(preflight, (candidate) => !!candidate.session && typeof candidate.code === "string" && /^\d{6}$/.test(candidate.code) && Array.isArray(candidate.screenshots), "Eranet submission requires a prepared verification code and its browser session.");
 	const created = await state.session.call("CreateComplaint", { json: complaintBody(payload, state) });
 	const error = errorOf(created);

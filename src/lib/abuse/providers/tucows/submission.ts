@@ -36,13 +36,13 @@ export type TucowsDependencies = RouteDeps & {
 type TucowsPreflightState = { session: TucowsSession; payload: TucowsSubmissionPayload; screenshot: Buffer; csrfToken: string };
 
 /** Solve the Turnstile widget of the wizard's first step. */
-const solveTucowsCaptcha = (signal?: AbortSignal) => solveCaptchaToken({
+export const solveTucowsCaptcha = (signal?: AbortSignal) => solveCaptchaToken({
 	type: TUCOWS_PROVIDER.captcha.type,
 	parametersField: "turnstile_params",
 	parameters: { sitekey: TUCOWS_PROVIDER.captcha.siteKey, pageurl: TUCOWS_PROVIDER.captcha.pageUrl },
 }, signal);
 
-const draft = createDraft({
+export const tucowsDraft = createDraft({
 	definition: TUCOWS_PROVIDER,
 	label: "Tucows",
 	reasonPrefix: "tucows",
@@ -59,11 +59,11 @@ const draft = createDraft({
 });
 
 /** Check the route and build the durable draft before any provider call. */
-export const prepareTucowsSubmission = draft.prepare;
+export const prepareTucowsSubmission = tucowsDraft.prepare;
 
 /** The stored draft, checked against its route and rebuilt from the current report; with its screenshot's bytes. */
 export async function verifiedTucowsDraft(context: ProviderSubmissionContext, dependencies: TucowsDependencies = {}): Promise<{ payload: TucowsSubmissionPayload; screenshot: Buffer }> {
-	const { payload, data } = await draft.verify(context, dependencies);
+	const { payload, data } = await tucowsDraft.verify(context, dependencies);
 	const { bytes } = await loadEvidenceFile({ reference: payload.evidence, contract: TUCOWS_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Tucows", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) });
 	return { payload, screenshot: bytes };
 }

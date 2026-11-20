@@ -10,9 +10,6 @@ export function captchaCredentialsProblem(): string | undefined {
 	}
 }
 
-/** Whether the captcha service can be paid at all. */
-export const captchaCredentialsPresent = () => captchaCredentialsProblem() === undefined;
-
 /** Solve one captcha through Death by Captcha; `parameters` are the page's site key and URL under the provider's own names. */
 export function solveCaptchaToken(
 	spec: { type: number; parametersField: string; parameters: Record<string, unknown> },
@@ -20,3 +17,10 @@ export function solveCaptchaToken(
 ): Promise<string> {
 	return solveDeathByCaptchaToken({ ...spec, ...(signal ? { signal } : {}) });
 }
+
+/** The reCAPTCHA v2 checkbox of `pageUrl`, whose pinned definition names its site key. */
+export const solveRecaptchaV2 = (captcha: { type: number; siteKey: string }, pageUrl: string, signal?: AbortSignal) => solveCaptchaToken({
+	type: captcha.type,
+	parametersField: "token_params",
+	parameters: { googlekey: captcha.siteKey, pageurl: pageUrl },
+}, signal);

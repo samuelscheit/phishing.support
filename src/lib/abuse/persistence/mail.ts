@@ -536,7 +536,7 @@ export async function getMailMessage(messageId: bigint) {
 	return db.select().from(abuseMailMessages).where(eq(abuseMailMessages.id, messageId)).get();
 }
 
-export async function getInboundMailByImap(params: { mailbox: string; uidValidity: number; uid: number }) {
+async function getInboundMailByImap(params: { mailbox: string; uidValidity: number; uid: number }) {
 	const db = await getDb();
 	return db
 		.select()

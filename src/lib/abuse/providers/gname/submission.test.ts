@@ -28,7 +28,7 @@ function pngArtifact(id: bigint, bytes: Buffer = PNG, name = "website.png"): Abu
 const artifact = pngArtifact(77n);
 
 const submit = (context: Parameters<typeof submitGnameSubmission>[0], preflight: Parameters<typeof submitGnameSubmission>[1]) =>
-	submitGnameSubmission(context, preflight, { loadRouteContext: routeContext(), getArtifact: async () => artifact });
+	submitGnameSubmission(context, preflight);
 
 const SUBMISSION = 377486973465530391n;
 const CASE_PAGE = `https://phishing.support/submissions/${SUBMISSION.toString()}`;

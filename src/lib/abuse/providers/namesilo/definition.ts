@@ -30,4 +30,3 @@ export const NAMESILO_PROVIDER = definePinned({
 	},
 });
 
-export type NameSiloProviderDefinition = typeof NAMESILO_PROVIDER;

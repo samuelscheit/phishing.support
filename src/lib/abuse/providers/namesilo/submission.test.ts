@@ -207,15 +207,15 @@ describe("NameSilo phishing report submission", () => {
 				captchaSolver: async () => "captcha-token",
 				now: () => 1_000_000,
 			}),
-			submit: (context) => submitNameSiloSubmission(context),
+			submit: (context) => submitNameSiloSubmission(context, undefined),
 			submitPrepared: async (context, preflight) => {
 				expect(await AbuseRepository.getProviderRun(context.runId!)).toMatchObject({ executionStatus: "submission_started" });
-				return submitNameSiloSubmission(context, {
+				return submitNameSiloSubmission(context, preflight, {
 					fetch: async (input, init) => {
 						requests.push({ url: String(input), init });
 						return new Response(JSON.stringify({ result: "success", message: null, data: null }));
 					},
-				}, preflight);
+				});
 			},
 		};
 

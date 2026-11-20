@@ -168,6 +168,89 @@ describe("provider submission execution boundary", () => {
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "submitted" });
 	});
 
+	test("verifies the draft before the preflight and the marker, so a draft that no longer holds sends and marks nothing", async () => {
+		const order: string[] = [];
+		const provider = testProvider({
+			verifyDraft: async (context) => { order.push(`verify:${(await AbuseRepository.getProviderRun(context.runId!))?.executionStatus}`); },
+			prepareExternalSubmission: async () => { order.push("preflight"); return { state: {} }; },
+			submitPrepared: async (context) => { order.push(`submit:${(await AbuseRepository.getProviderRun(context.runId!))?.executionStatus}`); return { submittedTargets: ["example.com"] }; },
+		});
+		const { route } = await createProviderRoute(provider);
+		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toMatchObject({ outcome: "submitted" });
+		expect(order).toEqual(["verify:starting", "preflight", "submit:submission_started"]);
+
+		// Without a way to rebuild the draft a failed verification is an ordinary retryable error before the marker.
+		let sent = 0;
+		const unrepairable = testProvider({
+			verifyDraft: async () => { throw new Error("The persisted draft no longer matches the report."); },
+			submit: async () => { sent += 1; return { submittedTargets: ["example.com"] }; },
+		});
+		delete (unrepairable as { prepareSubmission?: unknown }).prepareSubmission;
+		const second = await createProviderRoute(unrepairable);
+		await expect(executeProviderSubmission({ routeId: second.route.id, provider: unrepairable })).rejects.toThrow("no longer matches the report");
+		expect(sent).toBe(0);
+		expect(await AbuseRepository.getRoute(second.route.id)).toMatchObject({ status: "running" });
+		expect(await AbuseRepository.listProviderRunsForReport(second.route.reportId)).toMatchObject([{ executionStatus: "starting" }]);
+	});
+
+	test("refreshes an interrupted pre-marker draft that no longer verifies, never after the marker", async () => {
+		const stale = { adapter: "test_provider", narrativeVersion: 2 };
+		const current = { adapter: "test_provider", narrativeVersion: 3 };
+		const provider = testProvider({
+			prepareSubmission: async () => ({ outcome: "ready", payload: stale }),
+			verifyDraft: async () => undefined,
+			prepareExternalSubmission: async () => { throw new Error("temporary provider preflight outage"); },
+		});
+		const { route } = await createProviderRoute(provider);
+		await expect(executeProviderSubmission({ routeId: route.id, provider })).rejects.toThrow("temporary provider preflight outage");
+		const [interrupted] = await AbuseRepository.listProviderRunsForReport(route.reportId);
+		expect(interrupted).toMatchObject({ executionStatus: "starting", providerPayload: stale });
+
+		let refreshCalls = 0;
+		const recovered = testProvider({
+			prepareSubmission: async (context) => {
+				refreshCalls += 1;
+				expect(context.runId).toBe(interrupted!.id);
+				return { outcome: "ready", payload: current };
+			},
+			verifyDraft: async (context) => { if (context.payload.narrativeVersion !== 3) throw new Error("The persisted draft no longer matches the report."); },
+			submit: async (context) => {
+				expect(context.payload).toEqual(current);
+				return { submittedTargets: ["example.com"] };
+			},
+		});
+		await expect(executeProviderSubmission({ routeId: route.id, provider: recovered })).resolves.toMatchObject({ outcome: "submitted" });
+		expect(refreshCalls).toBe(1);
+		expect(await AbuseRepository.getProviderRun(interrupted!.id)).toMatchObject({ executionStatus: "completed", providerPayload: current });
+
+		// A run that passed the marker is never verified, rebuilt or replaced.
+		const marked = await createProviderRoute(provider);
+		const execution = await AbuseRepository.beginProviderExecution({
+			routeId: marked.route.id,
+			providerPayload: stale,
+			correlationKey: `provider-submission:${provider.definition.key}:${marked.route.id.toString()}`,
+			expectedStatus: "verified",
+		});
+		expect(await AbuseRepository.prepareProviderSubmission(execution!.run.id)).toBeTrue();
+		await expect(executeProviderSubmission({ routeId: marked.route.id, provider: recovered })).rejects.toBeInstanceOf(ProviderSubmissionUnknownExternalStateError);
+		expect(refreshCalls).toBe(1);
+		expect(await AbuseRepository.getProviderRun(execution!.run.id)).toMatchObject({ providerPayload: stale });
+	});
+
+	test("a refreshed draft that is refused settles the run for good, still before the marker", async () => {
+		const provider = testProvider({
+			verifyDraft: async () => { throw new Error("drifted"); },
+			prepareExternalSubmission: async () => { throw new Error("must not be reached"); },
+		});
+		const first = provider.prepareSubmission!;
+		let prepares = 0;
+		provider.prepareSubmission = async (context) => (prepares++ === 0 ? first(context) : { outcome: "insufficient_evidence", reason: "the evidence is gone" });
+		const { route } = await createProviderRoute(provider);
+		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({ outcome: "insufficient_evidence", reason: "the evidence is gone" });
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "insufficient_evidence" });
+		expect(await AbuseRepository.listProviderRunsForReport(route.reportId)).toMatchObject([{ executionStatus: "failed", failureReason: "the evidence is gone" }]);
+	});
+
 	test("settles insufficient evidence before creating a run or crossing the provider boundary", async () => {
 		let submitted = false;
 		const provider = testProvider({

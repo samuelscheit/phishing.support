@@ -59,4 +59,3 @@ export const DYNADOT_PROVIDER = definePinned({
 	reporter: serviceReporter,
 });
 
-export type DynadotProviderDefinition = typeof DYNADOT_PROVIDER;

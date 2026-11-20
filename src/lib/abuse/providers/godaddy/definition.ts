@@ -51,4 +51,3 @@ export const GODADDY_PROVIDER = definePinned({
 	reporter: serviceReporter,
 });
 
-export type GoDaddyProviderDefinition = typeof GODADDY_PROVIDER;

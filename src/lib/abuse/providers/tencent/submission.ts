@@ -1,10 +1,13 @@
 import { fetch as proxyFetch } from "netbun";
 
-import { captchaCredentialsPresent, solveCaptchaToken } from "../kit/captcha";
+import { captchaCredentialsProblem, solveCaptchaToken } from "../kit/captcha";
 import { createDraft, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { jsonRecord } from "../kit/http";
+import { preparedState } from "../kit/session";
+import { snippet } from "../kit/text";
 import { getProviderProxy, type ProviderProxy } from "../proxy";
-import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
+import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { TENCENT_PROVIDER } from "./definition";
 import {
 	buildTencentSubmissionPayload,
@@ -35,14 +38,8 @@ export type TencentSubmissionDependencies = RouteDeps & {
 };
 
 function parseTencentCloudResponseJson(body: string): TencentCloudSubmissionResponse | undefined {
-	let value: unknown;
-	try {
-		value = JSON.parse(body);
-	} catch {
-		return undefined;
-	}
-	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-	const response = value as Record<string, unknown>;
+	const response = jsonRecord(body);
+	if (!response) return undefined;
 	const data = response.data;
 	if (typeof response.code !== "number" || (data !== undefined && (!data || typeof data !== "object" || Array.isArray(data)))) return undefined;
 	const detail = data as Record<string, unknown> | undefined;
@@ -80,7 +77,7 @@ export async function parseTencentCloudSubmissionResponse(
 		if (json && (json.code !== 0 || json.data?.code !== "0")) {
 			throw new ProviderSubmissionRejectedError(`Tencent Cloud abuse report rejected: ${tencentResponseDetail(json)}`);
 		}
-		throw new Error(`Tencent Cloud abuse report submission failed with HTTP ${response.status}: ${body.slice(0, 500)}`);
+		throw new Error(`Tencent Cloud abuse report submission failed with HTTP ${response.status}: ${snippet(body, 500)}`);
 	}
 	if (!json) throw new Error("Tencent Cloud abuse report submission returned malformed JSON.");
 	if (json.code !== 0 || json.data?.code !== "0") {
@@ -121,7 +118,7 @@ export function buildTencentCloudHttpPayload(params: {
 	};
 }
 
-const draft = createDraft({
+export const tencentDraft = createDraft({
 	definition: TENCENT_PROVIDER,
 	reasonPrefix: "tencent",
 	targetTypes: ["domain"],
@@ -134,7 +131,7 @@ const draft = createDraft({
 		// Both settings are runtime secrets: validated here, never kept in the stored payload, and only once the draft is otherwise possible.
 		if (!stored && observedUrl && screenshot) {
 			getProviderProxy("Tencent Cloud abuse reporting");
-			if (!captchaCredentialsPresent()) throw new Error("Tencent Cloud abuse reporting requires DEATHBYCAPTCHA_USERNAME and DEATHBYCAPTCHA_PASSWORD.");
+			if (captchaCredentialsProblem()) throw new Error("Tencent Cloud abuse reporting requires DEATHBYCAPTCHA_USERNAME and DEATHBYCAPTCHA_PASSWORD.");
 		}
 		return {
 			target: target.normalizedTarget,
@@ -150,26 +147,17 @@ const draft = createDraft({
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
 
-/** Check the route and build the durable draft before any provider call; configuration problems surface here, never as a false unknown external state. */
-export const prepareTencentSubmission = draft.prepare;
-
 /** The stored draft, checked against its route and rebuilt from the current report; with its screenshot's bytes. */
-export async function verifiedTencentDraft(context: ProviderSubmissionContext, dependencies: RouteDeps = {}) {
-	const { payload, data } = await draft.verify(context, dependencies);
+async function verifiedTencentDraft(context: ProviderSubmissionContext, dependencies: RouteDeps = {}) {
+	const { payload, data } = await tencentDraft.verify(context, dependencies);
 	const { bytes } = await loadEvidenceFile({ reference: payload.screenshot, contract: TENCENT_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Tencent screenshot" });
 	return { payload, bytes };
 }
 
 /** Validate the exact token shape Tencent's form expects from the solver. */
 export function parseTencentCaptchaSolution(value: string): TencentCaptcha {
-	let result: unknown;
-	try {
-		result = JSON.parse(value);
-	} catch {
-		throw new Error("Tencent CAPTCHA solver returned malformed JSON.");
-	}
-	if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("Tencent CAPTCHA solver returned an invalid result.");
-	const captcha = result as Record<string, unknown>;
+	const captcha = jsonRecord(value);
+	if (!captcha) throw new Error("Tencent CAPTCHA solver returned malformed JSON.");
 	if (captcha.ret !== 0 || typeof captcha.ticket !== "string" || !captcha.ticket.trim() || typeof captcha.randstr !== "string" || !captcha.randstr.trim()) {
 		throw new Error("Tencent CAPTCHA solving failed.");
 	}
@@ -177,21 +165,34 @@ export function parseTencentCaptchaSolution(value: string): TencentCaptcha {
 }
 
 /** The documented type-23 Tencent token flow through the proxy the form is filed from. */
-const solveTencentCaptcha = async (proxy: ProviderProxy, signal?: AbortSignal) => parseTencentCaptchaSolution(await solveCaptchaToken({
+export const solveTencentCaptcha = async (proxy: ProviderProxy, signal?: AbortSignal) => parseTencentCaptchaSolution(await solveCaptchaToken({
 	type: TENCENT_PROVIDER.captcha.type,
 	parametersField: "tencent_params",
 	parameters: { proxy: proxy.url, proxytype: proxy.captchaType, appid: TENCENT_PROVIDER.captcha.appId, pageurl: TENCENT_PROVIDER.reportPageUrl },
 }, signal));
 
-/** Perform the one Tencent provider request from the durable, pinned draft. */
-export async function submitTencentSubmission(
+/** What the one filing request needs, kept in memory from before the marker. */
+type TencentPreflightState = { payload: TencentSubmissionPayload; screenshot: Buffer; proxy: ProviderProxy; captcha: TencentCaptcha };
+
+/** Before the marker: the verified draft with its screenshot, the proxy the form is filed from and the solved token captcha. */
+export async function prepareTencentExternalSubmission(
 	context: ProviderSubmissionContext,
 	dependencies: TencentSubmissionDependencies = {},
-): Promise<ProviderSubmissionSuccess> {
+): Promise<ProviderSubmissionPreflight> {
 	const { payload, bytes } = await verifiedTencentDraft(context, dependencies);
 	const proxy = (dependencies.proxy ?? (() => getProviderProxy("Tencent Cloud abuse reporting")))();
 	const captcha = await (dependencies.captchaSolver ?? ((candidate) => solveTencentCaptcha(candidate, context.signal)))(proxy);
-	const requestPayload = buildTencentCloudHttpPayload({ payload, websiteScreenshot: bytes, captcha });
+	return { state: { payload, screenshot: bytes, proxy, captcha } satisfies TencentPreflightState };
+}
+
+/** The one Tencent provider request, from the preflight's verified draft and solved captcha. */
+export async function submitTencentSubmission(
+	context: ProviderSubmissionContext,
+	preflight: ProviderSubmissionPreflight | undefined,
+	dependencies: Pick<TencentSubmissionDependencies, "fetch"> = {},
+): Promise<ProviderSubmissionSuccess> {
+	const { payload, screenshot, proxy, captcha } = preparedState<TencentPreflightState>(preflight, (state) => !!state.payload && !!state.captcha && !!state.proxy, "Tencent submission requires its prepared draft, proxy and solved captcha.");
+	const requestPayload = buildTencentCloudHttpPayload({ payload, websiteScreenshot: screenshot, captcha });
 	const request = dependencies.fetch ?? (proxyFetch as TencentProxyFetch);
 	const response = await request(TENCENT_PROVIDER.submissionUrl, {
 		headers: {

@@ -53,4 +53,3 @@ export const PUBLIC_DOMAIN_REGISTRY_PROVIDER = definePinned({
 	reporter: serviceReporter,
 });
 
-export type PublicDomainRegistryProviderDefinition = typeof PUBLIC_DOMAIN_REGISTRY_PROVIDER;

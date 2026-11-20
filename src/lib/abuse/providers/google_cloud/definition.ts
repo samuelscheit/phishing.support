@@ -32,4 +32,3 @@ export const GOOGLE_CLOUD_PROVIDER = definePinned({
 	},
 });
 
-export type GoogleCloudProviderDefinition = typeof GOOGLE_CLOUD_PROVIDER;

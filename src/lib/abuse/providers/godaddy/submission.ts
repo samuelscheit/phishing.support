@@ -26,7 +26,7 @@ export type GoDaddyPreflightState =
 	| { channel: "api"; credentials: GoDaddyApiCredentials; fetch?: GoDaddyFetch }
 	| { channel: "portal"; session: GoDaddyFormSession; token: string; rendered: Awaited<ReturnType<BrowserFormSession["readFormFields"]>> };
 
-const draft = createDraft({
+export const goDaddyDraft = createDraft({
 	definition: PROVIDER,
 	reasonPrefix: "godaddy",
 	targetTypes: ["domain"],
@@ -38,9 +38,7 @@ const draft = createDraft({
 });
 
 /** Check the route and build the durable draft before any provider call. */
-export const prepareGoDaddySubmission = draft.prepare;
-/** The stored draft, checked against its route and rebuilt from the current report. */
-export const verifiedGoDaddyDraft = draft.verify;
+export const prepareGoDaddySubmission = goDaddyDraft.prepare;
 
 /**
  * Before the marker, none of which files anything: decide the channel. With an
@@ -50,7 +48,7 @@ export const verifiedGoDaddyDraft = draft.verify;
  * the page's own script. Every failure is a safe retry (the browser is closed).
  */
 export async function prepareGoDaddyExternalSubmission(context: ProviderSubmissionContext, dependencies: GoDaddyDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload } = await draft.verify(context, dependencies);
+	const { payload } = await goDaddyDraft.verify(context, dependencies);
 	const credentials = goDaddyApiCredentials(dependencies.environment);
 	const fetchDependency = dependencies.fetch ? { fetch: dependencies.fetch } : {};
 	if (credentials && await goDaddyApiEnabled(credentials, { ...fetchDependency, ...(context.signal ? { signal: context.signal } : {}) })) {

@@ -1,6 +1,7 @@
 import type { Page } from "rebrowser-puppeteer-core";
 
 import { getBrowser } from "../../../browser";
+import { snippet } from "../kit/text";
 import { DISCORD_DSA_PROVIDER } from "./definition";
 import type { DiscordDsaReport } from "./payload";
 
@@ -24,7 +25,7 @@ async function waitForText(page: Page, text: string, step: string): Promise<void
 	try {
 		await page.waitForFunction((wanted) => document.body.innerText.includes(wanted), { timeout: 30_000 }, text);
 	} catch {
-		throw new Error(`Discord's report form did not show "${text}" ${step}; it showed: ${(await pageText(page)).slice(0, 300)}`);
+		throw new Error(`Discord's report form did not show "${text}" ${step}; it showed: ${snippet(await pageText(page))}`);
 	}
 }
 
@@ -49,7 +50,7 @@ async function clickText(page: Page, text: string, selector = "button, [role=opt
 		target?.setAttribute("data-ps-click", "");
 		return Boolean(target);
 	}, text, selector);
-	if (!marked) throw new Error(`Discord's report form has no "${text}" to click; it showed: ${(await pageText(page)).slice(0, 300)}`);
+	if (!marked) throw new Error(`Discord's report form has no "${text}" to click; it showed: ${snippet(await pageText(page))}`);
 	await page.click("[data-ps-click]");
 }
 

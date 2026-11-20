@@ -45,4 +45,3 @@ export const ERANET_PROVIDER = definePinned({
 	},
 });
 
-export type EranetProviderDefinition = typeof ERANET_PROVIDER;

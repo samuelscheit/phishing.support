@@ -37,7 +37,7 @@ export type PublicDomainRegistryPreflightState = {
 	uploads: string[];
 };
 
-const draft = createDraft({
+export const publicDomainRegistryDraft = createDraft({
 	definition: PROVIDER,
 	reasonPrefix: "publicdomainregistry",
 	targetTypes: ["domain"],
@@ -49,9 +49,7 @@ const draft = createDraft({
 });
 
 /** Check the route and build the durable draft before any provider call. */
-export const preparePublicDomainRegistrySubmission = draft.prepare;
-/** The stored draft, checked against its route and rebuilt from the current report around its stored screenshot. */
-export const verifiedPublicDomainRegistryDraft = draft.verify;
+export const preparePublicDomainRegistrySubmission = publicDomainRegistryDraft.prepare;
 
 /** The uploader's `{success, data: {path, file}}`: the path the feedback names the file by. */
 export function uploadedPath(answer: BrowserFormResponse): string {
@@ -85,7 +83,7 @@ function uploadFields(nonce: string, file: { filename: string; mimeType: string;
  * retry (the browser is closed first).
  */
 export async function preparePublicDomainRegistryExternalSubmission(context: ProviderSubmissionContext, dependencies: PublicDomainRegistryDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await draft.verify(context, dependencies);
+	const { payload, data } = await publicDomainRegistryDraft.verify(context, dependencies);
 	const file = payload.evidence
 		? (await loadEvidenceFile({ reference: payload.evidence, contract: PUBLIC_DOMAIN_REGISTRY_EVIDENCE_CONTRACT, reportId: data.report.id, label: "PublicDomainRegistry", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) })).file
 		: undefined;

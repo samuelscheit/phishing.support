@@ -31,4 +31,3 @@ export const TENCENT_PROVIDER = definePinned({
 	},
 });
 
-export type TencentProviderDefinition = typeof TENCENT_PROVIDER;

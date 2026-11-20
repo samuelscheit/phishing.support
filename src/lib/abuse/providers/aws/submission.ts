@@ -1,6 +1,6 @@
-import { asRecord } from "../../../values";
 import { emailOriginOf } from "../email_origin";
 import { createDraft, reportInputOf, type RouteData } from "../kit/draft";
+import { asRecord } from "../../../values";
 import { deadline, failUnlessFiled } from "../kit/http";
 import { snippet } from "../kit/text";
 import type { ProviderSubmissionContext, ProviderSubmissionSuccess } from "../submission_contracts";
@@ -21,7 +21,7 @@ async function reportInput(data: RouteData): Promise<AwsReportInput & { captured
 	return { ...reportInputOf(data), capturedAt: report.createdAt, ...(emailOrigin ? { emailOrigin } : {}) };
 }
 
-const draft = createDraft({
+export const awsDraft = createDraft({
 	definition: AWS_PROVIDER,
 	label: "AWS",
 	reasonPrefix: "aws",
@@ -36,16 +36,14 @@ const draft = createDraft({
 });
 
 /** Check the route and build the durable draft before any provider call. */
-export const prepareAwsSubmission = (context: ProviderSubmissionContext) => draft.prepare(context);
-/** The stored draft, checked against its route and rebuilt from the current report. */
-export const verifiedAwsDraft = async (context: ProviderSubmissionContext) => (await draft.verify(context)).payload;
+export const prepareAwsSubmission = (context: ProviderSubmissionContext) => awsDraft.prepare(context);
 
 /**
  * File the report: the only work after the durable marker. A refusal naming
  * a bad request means nothing was filed; anything else leaves it ambiguous.
  */
 export async function submitAwsSubmission(context: ProviderSubmissionContext, dependencies: AwsSubmissionDependencies = {}): Promise<ProviderSubmissionSuccess> {
-	const payload = await verifiedAwsDraft(context);
+	const payload = awsDraft.stored(context);
 	const send = dependencies.fetch ?? fetch;
 	const response = await send(AWS_PROVIDER.endpoint, {
 		method: "POST",
@@ -62,7 +60,8 @@ export async function submitAwsSubmission(context: ProviderSubmissionContext, de
 		throw new Error(`AWS answered the report with a body that is not JSON: ${snippet(text)}`);
 	}
 	// The form counts any truthy answer body as filed (axios' `response.data`,
-	// its `.then(({ data }) => data && redirectSuccess(…))`); null, false, 0 or "" is not.
+	// its `.then(({ data }) => data && redirectSuccess(…))`), an array or a string too, so jsonRecord does not fit;
+	// null, false, 0 or "" is not.
 	if (!answer) throw new Error(`AWS answered the report with an empty body: ${snippet(text)}`);
 	const id = providerResponseId(asRecord(answer)?.data ?? answer);
 	return {

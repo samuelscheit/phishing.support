@@ -1,4 +1,5 @@
 import { asRecord } from "../../../values";
+import { deadline, jsonRecord } from "../kit/http";
 import { snippet } from "../kit/text";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
@@ -24,7 +25,6 @@ export function goDaddyApiCredentials(environment: Readonly<Record<string, strin
 const defaultFetch: GoDaddyFetch = (url, init) => fetch(url, init);
 
 async function call(credentials: GoDaddyApiCredentials, path: string, init: { method: "GET" | "POST"; body?: unknown }, dependencies: GoDaddyApiDependencies): Promise<{ status: number; text: string; json: unknown }> {
-	const signals = [AbortSignal.timeout(PROVIDER.api.timeoutMs), ...(dependencies.signal ? [dependencies.signal] : [])];
 	const answer = await (dependencies.fetch ?? defaultFetch)(`${PROVIDER.api.baseUrl}${path}`, {
 		method: init.method,
 		headers: {
@@ -33,16 +33,10 @@ async function call(credentials: GoDaddyApiCredentials, path: string, init: { me
 			...(init.body === undefined ? {} : { "content-type": "application/json" }),
 		},
 		...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
-		signal: AbortSignal.any(signals),
+		signal: deadline(PROVIDER.api.timeoutMs, dependencies.signal),
 	});
 	const text = await answer.text();
-	let json: unknown;
-	try {
-		json = JSON.parse(text);
-	} catch {
-		json = undefined;
-	}
-	return { status: answer.status, text, json };
+	return { status: answer.status, text, json: jsonRecord(text) };
 }
 
 function apiMessage(json: unknown, text: string): string {

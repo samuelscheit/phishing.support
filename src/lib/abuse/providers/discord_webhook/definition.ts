@@ -15,4 +15,3 @@ export const DISCORD_WEBHOOK_PROVIDER = definePinned({
 	apiBase: "https://discord.com/api/v10",
 });
 
-export type DiscordWebhookProviderDefinition = typeof DISCORD_WEBHOOK_PROVIDER;

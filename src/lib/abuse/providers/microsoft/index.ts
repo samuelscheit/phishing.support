@@ -1,7 +1,7 @@
 import { defineProvider, PREVIEW_REFERENCE } from "../kit/provider";
 import { MICROSOFT_PROVIDER } from "./definition";
 import { makeMicrosoftNotes, microsoftReportUrls } from "./payload";
-import { prepareMicrosoftSubmission, submitMicrosoftSubmission } from "./submission";
+import { microsoftDraft, submitMicrosoftSubmission } from "./submission";
 
 /**
  * abuse@ and cert@microsoft.com are unmonitored; the route files the report
@@ -11,7 +11,7 @@ import { prepareMicrosoftSubmission, submitMicrosoftSubmission } from "./submiss
  */
 export const microsoftProvider = defineProvider({
 	definition: MICROSOFT_PROVIDER,
-	prepare: prepareMicrosoftSubmission,
+	draft: microsoftDraft,
 	preview: (context) => {
 		const urls = microsoftReportUrls(context.target, context.observedUrls);
 		return urls ? makeMicrosoftNotes({

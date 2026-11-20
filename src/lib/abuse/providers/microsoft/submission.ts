@@ -1,7 +1,6 @@
-import { asRecord } from "../../../values";
 import { emailOriginOf } from "../email_origin";
 import { createDraft, reportInputOf, type RouteData } from "../kit/draft";
-import { deadline, failUnlessFiled } from "../kit/http";
+import { deadline, failUnlessFiled, jsonRecord } from "../kit/http";
 import { snippet } from "../kit/text";
 import type { ProviderSubmissionContext, ProviderSubmissionSuccess } from "../submission_contracts";
 import { providerResponseId } from "../report_reference";
@@ -21,7 +20,7 @@ async function reportInput(data: RouteData): Promise<MicrosoftReportInput> {
 	return { ...reportInputOf(data), capturedAt: report.createdAt, ...(emailOrigin ? { emailOrigin } : {}) };
 }
 
-const draft = createDraft({
+export const microsoftDraft = createDraft({
 	definition: MICROSOFT_PROVIDER,
 	label: "Microsoft",
 	reasonPrefix: "microsoft",
@@ -36,9 +35,7 @@ const draft = createDraft({
 });
 
 /** Check the route and build the durable draft before any provider call. */
-export const prepareMicrosoftSubmission = (context: ProviderSubmissionContext) => draft.prepare(context);
-/** The stored draft, checked against its route and rebuilt from the current report. */
-export const verifiedMicrosoftDraft = async (context: ProviderSubmissionContext) => (await draft.verify(context)).payload;
+export const prepareMicrosoftSubmission = (context: ProviderSubmissionContext) => microsoftDraft.prepare(context);
 
 /**
  * File the report: the only work after the durable marker. HTTP 400 is the
@@ -48,7 +45,7 @@ export const verifiedMicrosoftDraft = async (context: ProviderSubmissionContext)
  * leaves it ambiguous.
  */
 export async function submitMicrosoftSubmission(context: ProviderSubmissionContext, dependencies: MicrosoftSubmissionDependencies = {}): Promise<ProviderSubmissionSuccess> {
-	const payload = await verifiedMicrosoftDraft(context);
+	const payload = microsoftDraft.stored(context);
 	const send = dependencies.fetch ?? fetch;
 	const response = await send(MICROSOFT_PROVIDER.endpoint, {
 		method: "POST",
@@ -64,13 +61,8 @@ export async function submitMicrosoftSubmission(context: ProviderSubmissionConte
 	});
 	const text = await response.text();
 	failUnlessFiled("Microsoft", response, snippet(text), [400]);
-	let answer: unknown;
-	try {
-		answer = text.trim() ? JSON.parse(text) : undefined;
-	} catch {
-		answer = undefined;
-	}
-	const id = providerResponseId(asRecord(answer)?.data ?? answer);
+	const answer = jsonRecord(text);
+	const id = providerResponseId(answer?.data ?? answer);
 	return {
 		// Our reference is the receipt, as for every provider: mail that quotes it attaches to this run.
 		confirmationId: payload.report.reference,

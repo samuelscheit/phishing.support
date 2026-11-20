@@ -3,7 +3,7 @@ import { reportReferencesIn } from "../report_reference";
 import { fetchGoDaddyCorrespondence, GODADDY_REVIEW_VERDICTS } from "./correspondence";
 import { GODADDY_PROVIDER } from "./definition";
 import { goDaddyReportUrls, makeGoDaddyInfo } from "./payload";
-import { prepareGoDaddyExternalSubmission, prepareGoDaddySubmission, submitGoDaddySubmission } from "./submission";
+import { prepareGoDaddyExternalSubmission, goDaddyDraft, submitGoDaddySubmission } from "./submission";
 
 /** GoDaddy's case ids (`DCU…`) as its mail and API write them. */
 export function goDaddyConfirmationIds(text: string): string[] {
@@ -20,7 +20,7 @@ export function goDaddyConfirmationIds(text: string): string[] {
  */
 export const goDaddyProvider = defineProvider({
 	definition: GODADDY_PROVIDER,
-	prepare: (context) => prepareGoDaddySubmission(context),
+	draft: goDaddyDraft,
 	preview: registrarPreview({ urls: goDaddyReportUrls, make: makeGoDaddyInfo }),
 	external: { prepare: (context) => prepareGoDaddyExternalSubmission(context), submit: (context, preflight) => submitGoDaddySubmission(context, preflight) },
 	fetchCorrespondence: (context) => fetchGoDaddyCorrespondence(context),

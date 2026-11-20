@@ -171,7 +171,7 @@ async function openGnameBrowserSession(kind: GnameComplaintKind): Promise<GnameS
 	}
 }
 
-const draft = createDraft({
+export const gnameDraft = createDraft({
 	definition: GNAME_PROVIDER,
 	reasonPrefix: "gname",
 	targetTypes: ["domain"],
@@ -192,7 +192,7 @@ const draft = createDraft({
 });
 
 /** Build the pinned draft before the marker; nothing is sent to GNAME here. */
-export const prepareGnameSubmission = draft.prepare;
+export const prepareGnameSubmission = gnameDraft.prepare;
 
 /**
  * Before the marker: upload the screenshot, pass the slider, and read the
@@ -200,7 +200,7 @@ export const prepareGnameSubmission = draft.prepare;
  * failure here is a safe retry.
  */
 export async function prepareGnameExternalSubmission(context: ProviderSubmissionContext, dependencies: GnameDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await draft.verify(context, dependencies);
+	const { payload, data } = await gnameDraft.verify(context, dependencies);
 	const { bytes } = await loadEvidenceFile({ reference: payload.evidence, contract: GNAME_EVIDENCE_CONTRACT, reportId: data.report.id, label: "GNAME", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) });
 	const { lx } = GNAME_PROVIDER.complaintTypes[payload.report.kind];
 	return withPreflight(() => (dependencies.openSession ?? openGnameBrowserSession)(payload.report.kind), async (session) => {
@@ -239,8 +239,8 @@ function domainRefusals(data: unknown): string {
 }
 
 /** The one irreversible call: `lyts_add` with the pinned draft and the preflight's code and upload. */
-export async function submitGnameSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined, dependencies: GnameDependencies = {}): Promise<ProviderSubmissionSuccess> {
-	const { payload } = await draft.verify(context, dependencies);
+export async function submitGnameSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
+	const payload = gnameDraft.stored(context);
 	const state = preparedState<GnamePreflightState>(preflight, (candidate) => !!candidate.session && typeof candidate.code === "string" && !!candidate.code && Array.isArray(candidate.pics) && candidate.pics.length > 0, "GNAME submission requires a prepared verification code, an uploaded screenshot, and its browser session.");
 	const created = await state.session.post("/request/lyts_add", gnameComplaintBody(payload, state.code, state.pics));
 	// GNAME names every refusal; a named refusal filed nothing.

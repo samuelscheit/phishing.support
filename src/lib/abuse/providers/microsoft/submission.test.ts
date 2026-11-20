@@ -11,7 +11,9 @@ import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { MICROSOFT_PROVIDER } from "./definition";
 import { microsoftProvider } from "./index";
 import { storedMicrosoftSubmissionPayload } from "./payload";
-import { prepareMicrosoftSubmission, submitMicrosoftSubmission, verifiedMicrosoftDraft } from "./submission";
+import { microsoftDraft, prepareMicrosoftSubmission, submitMicrosoftSubmission } from "./submission";
+
+const verifiedMicrosoftDraft = async (context: Parameters<typeof microsoftDraft.verify>[0]) => (await microsoftDraft.verify(context)).payload;
 
 useTemporaryDatabase();
 

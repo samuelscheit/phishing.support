@@ -34,7 +34,7 @@ export type DynadotPreflightState = {
 	files: BrowserFormFile[];
 };
 
-const draft = createDraft({
+export const dynadotDraft = createDraft({
 	definition: PROVIDER,
 	reasonPrefix: "dynadot",
 	targetTypes: ["domain"],
@@ -46,9 +46,7 @@ const draft = createDraft({
 });
 
 /** Check the route and build the durable draft before any provider call. */
-export const prepareDynadotSubmission = draft.prepare;
-/** The stored draft, checked against its route and rebuilt from the current report around its stored screenshot. */
-export const verifiedDynadotDraft = draft.verify;
+export const prepareDynadotSubmission = dynadotDraft.prepare;
 
 /** The inputs the phishing form must render for this submission to mean what the draft says. */
 const REQUIRED_INPUTS = [PROVIDER.fields.name, PROVIDER.fields.email, PROVIDER.fields.emailConfirmation, PROVIDER.fields.phone, PROVIDER.fields.domain, PROVIDER.fields.officialWebsite, PROVIDER.fields.proxyLocations, PROVIDER.fields.domainPath, PROVIDER.fields.comments];
@@ -60,7 +58,7 @@ const REQUIRED_INPUTS = [PROVIDER.fields.name, PROVIDER.fields.email, PROVIDER.f
  * closed first).
  */
 export async function prepareDynadotExternalSubmission(context: ProviderSubmissionContext, dependencies: DynadotDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await draft.verify(context, dependencies);
+	const { payload, data } = await dynadotDraft.verify(context, dependencies);
 	const files = payload.evidence
 		? [(await loadEvidenceFile({ reference: payload.evidence, contract: DYNADOT_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Dynadot", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) })).file]
 		: [];

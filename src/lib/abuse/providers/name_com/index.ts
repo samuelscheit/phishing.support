@@ -2,7 +2,7 @@ import { defineProvider, registrarPreview } from "../kit/provider";
 import { reportReferencesIn } from "../report_reference";
 import { NAME_COM_PROVIDER } from "./definition";
 import { makeNameComAdditional, nameComReportUrls } from "./payload";
-import { prepareNameComExternalSubmission, prepareNameComSubmission, submitNameComSubmission } from "./submission";
+import { prepareNameComExternalSubmission, nameComDraft, submitNameComSubmission } from "./submission";
 
 /** Zendesk's request mails name the ticket as "[Request #12345]". */
 export function nameComConfirmationIds(text: string): string[] {
@@ -17,7 +17,7 @@ export function nameComConfirmationIds(text: string): string[] {
  */
 export const nameComProvider = defineProvider({
 	definition: NAME_COM_PROVIDER,
-	prepare: (context) => prepareNameComSubmission(context),
+	draft: nameComDraft,
 	preview: registrarPreview({ urls: nameComReportUrls, make: makeNameComAdditional }),
 	external: { prepare: (context) => prepareNameComExternalSubmission(context), submit: submitNameComSubmission },
 	inbound: { messageKind: "reply", senderDomains: ["name.com"], confirmationIds: nameComConfirmationIds },

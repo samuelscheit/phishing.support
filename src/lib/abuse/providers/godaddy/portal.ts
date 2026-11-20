@@ -1,4 +1,5 @@
 import { asRecord } from "../../../values";
+import { deadline, jsonRecord } from "../kit/http";
 import { snippet } from "../kit/text";
 import { providerResponseId } from "../report_reference";
 import type { BrowserFormField } from "../browser_form";
@@ -89,9 +90,9 @@ export function interpretPortalAnswer(answer: { status: number; text: string; js
 	if (answer.status >= 200 && answer.status < 300 && success && Array.isArray(json?.fail)) {
 		if (success.length > 0) {
 			const caseId = success.map(caseIdIn).find((id) => id !== undefined) ?? caseIdIn(json);
-			return { ...(caseId ? { caseId } : {}), text: `GoDaddy's Legal Portal accepted the report${fail.length ? ` (it refused: ${fail.join("; ").slice(0, 300)})` : ""}` };
+			return { ...(caseId ? { caseId } : {}), text: `GoDaddy's Legal Portal accepted the report${fail.length ? ` (it refused: ${snippet(fail.join("; "))})` : ""}` };
 		}
-		if (fail.length > 0) throw new ProviderSubmissionRejectedError(`GoDaddy's Legal Portal refused the report: ${fail.join("; ").slice(0, 300)}`);
+		if (fail.length > 0) throw new ProviderSubmissionRejectedError(`GoDaddy's Legal Portal refused the report: ${snippet(fail.join("; "))}`);
 	}
 	if ((answer.status === 400 || answer.status === 422) && error && success?.length === 0 && Array.isArray(json?.fail) && fail.length === 0) {
 		if (/captcha|recaptcha|verif/i.test(error)) throw new ProviderSubmissionNeedsHumanError(`GoDaddy's Legal Portal did not accept the reCAPTCHA token: ${error}`);
@@ -106,21 +107,14 @@ export type PortalFetch = (url: string, init: RequestInit) => Promise<Pick<Respo
 
 /** The public case lookup: undefined when GoDaddy has no such claim; a 429 or anything unexpected throws. */
 export async function fetchPortalCaseStatus(caseId: string, dependencies: { fetch?: PortalFetch; signal?: AbortSignal } = {}): Promise<PortalCaseStatus> {
-	const signal = AbortSignal.any([AbortSignal.timeout(PORTAL.timeoutMs), ...(dependencies.signal ? [dependencies.signal] : [])]);
 	const answer = await (dependencies.fetch ?? ((url, init) => fetch(url, init)))(PORTAL.caseStatusUrl, {
 		method: "POST",
 		headers: { "content-type": "application/json", accept: "application/json", [PORTAL.requestHeader.name]: PORTAL.requestHeader.value },
 		body: JSON.stringify({ caseId }),
-		signal,
+		signal: deadline(PORTAL.timeoutMs, dependencies.signal),
 	});
 	const text = await answer.text();
-	let json: unknown;
-	try {
-		json = JSON.parse(text);
-	} catch {
-		json = undefined;
-	}
-	const record = asRecord(json);
+	const record = jsonRecord(text);
 	if (answer.status === 200 && typeof record?.status === "string" && record.status.trim()) {
 		const state = record.status.trim().toLowerCase();
 		return { state, final: state === "closed" };

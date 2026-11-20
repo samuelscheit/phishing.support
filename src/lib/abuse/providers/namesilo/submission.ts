@@ -3,10 +3,11 @@ import { userAgent } from "../../../constants";
 import { asRecord } from "../../../values";
 import type { ProviderFormFacts } from "../../portal/form_facts";
 import { deriveProviderFormFacts } from "../../portal/form_facts";
-import { captchaCredentialsPresent, solveCaptchaToken } from "../kit/captcha";
+import { captchaCredentialsProblem, solveRecaptchaV2 } from "../kit/captcha";
 import { createDraft, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
 import { jsonRecord } from "../kit/http";
+import { snippet } from "../kit/text";
 import { providerEvidenceImageBytesMatch } from "../evidence_image";
 import {
 	ProviderSubmissionRejectedError,
@@ -29,8 +30,11 @@ type NameSiloSession = {
 	cookieHeader: string;
 };
 
+/** What the one filing request needs, kept in memory from before the marker: the verified draft with its screenshot's bytes, the session and the solved captcha. */
 type NameSiloPreflightState = NameSiloSession & {
 	captchaToken: string;
+	payload: NameSiloSubmissionPayload;
+	evidenceBytes: Buffer;
 };
 
 type NameSiloResult = {
@@ -45,7 +49,7 @@ type NameSiloFactsExtractor = (input: {
 	legalBrandUrl?: string;
 }) => Promise<ProviderFormFacts>;
 
-export type NameSiloPreparationDependencies = RouteDeps & {
+type NameSiloPreparationDependencies = RouteDeps & {
 	deriveFacts?: NameSiloFactsExtractor;
 };
 
@@ -83,7 +87,7 @@ export async function parseNameSiloSessionResponse(
 	now: () => number = Date.now,
 ): Promise<NameSiloSession> {
 	const body = await response.text();
-	if (!response.ok) throw new Error(`NameSilo CSRF session failed with HTTP ${response.status}: ${body.slice(0, 500)}`);
+	if (!response.ok) throw new Error(`NameSilo CSRF session failed with HTTP ${response.status}: ${snippet(body, 500)}`);
 	const json = jsonRecord(body);
 	const data = json && asRecord(json.data);
 	const csrfToken = data?.xsrfToken;
@@ -120,7 +124,8 @@ function storedPreflightState(preflight: ProviderSubmissionPreflight | undefined
 	if (!state
 		|| typeof state.csrfToken !== "string" || state.csrfToken.length === 0 || state.csrfToken.length > 2_048 || /[\r\n\0]/.test(state.csrfToken)
 		|| typeof state.cookieHeader !== "string" || state.cookieHeader.length === 0 || state.cookieHeader.length > 8_192 || /[\r\n\0]/.test(state.cookieHeader)
-		|| typeof state.captchaToken !== "string" || state.captchaToken.length === 0 || state.captchaToken.length > 32_768 || /[\r\n\0]/.test(state.captchaToken)) {
+		|| typeof state.captchaToken !== "string" || state.captchaToken.length === 0 || state.captchaToken.length > 32_768 || /[\r\n\0]/.test(state.captchaToken)
+		|| !asRecord(state.payload) || !Buffer.isBuffer(state.evidenceBytes)) {
 		return undefined;
 	}
 	return state as NameSiloPreflightState;
@@ -174,13 +179,13 @@ export async function parseNameSiloSubmissionResponse(
 		: undefined;
 	if (!response.ok) {
 		if (parsed?.result === "error") {
-			throw new ProviderSubmissionRejectedError(`NameSilo phishing report rejected: ${parsed.message?.trim().slice(0, 500) || "The provider rejected the report."}`);
+			throw new ProviderSubmissionRejectedError(`NameSilo phishing report rejected: ${snippet(parsed.message ?? "", 500) || "The provider rejected the report."}`);
 		}
-		throw new Error(`NameSilo phishing report submission failed with HTTP ${response.status}: ${body.slice(0, 500)}`);
+		throw new Error(`NameSilo phishing report submission failed with HTTP ${response.status}: ${snippet(body, 500)}`);
 	}
 	if (!parsed) throw new Error("NameSilo phishing report submission returned malformed JSON.");
 	if (parsed.result === "error") {
-		throw new ProviderSubmissionRejectedError(`NameSilo phishing report rejected: ${parsed.message?.trim().slice(0, 500) || "The provider rejected the report."}`);
+		throw new ProviderSubmissionRejectedError(`NameSilo phishing report rejected: ${snippet(parsed.message ?? "", 500) || "The provider rejected the report."}`);
 	}
 	return parsed;
 }
@@ -217,7 +222,7 @@ async function nameSiloRealWebsite(
 	return facts.brandOfficialWebsite;
 }
 
-const draft = createDraft({
+export const nameSiloDraft = createDraft({
 	definition: NAMESILO_PROVIDER,
 	reasonPrefix: "namesilo",
 	targetTypes: ["domain"],
@@ -228,7 +233,7 @@ const draft = createDraft({
 		const observedUrl = stored?.target.observedUrl ?? target.observedUrls[0];
 		const evidence = evidenceReferenceOf(NAMESILO_EVIDENCE_CONTRACT, evidenceArtifacts, stored);
 		// Nothing is paid for or derived until the draft has its URL and screenshot.
-		if (!stored && observedUrl && evidence && !captchaCredentialsPresent()) throw new Error("NameSilo phishing reporting requires DEATHBYCAPTCHA_USERNAME and DEATHBYCAPTCHA_PASSWORD.");
+		if (!stored && observedUrl && evidence && captchaCredentialsProblem()) throw new Error("NameSilo phishing reporting requires DEATHBYCAPTCHA_USERNAME and DEATHBYCAPTCHA_PASSWORD.");
 		const realWebsite = stored ? stored.report.realWebsite : observedUrl && evidence ? await nameSiloRealWebsite(report, target.normalizedTarget, dependencies) : undefined;
 		return { target: target.normalizedTarget, observedUrl: observedUrl ?? "", description: report.description, allegationCategory: report.allegationCategory, realWebsite: realWebsite ?? "", evidence };
 	},
@@ -241,48 +246,44 @@ const draft = createDraft({
 });
 
 /** Prepare the immutable NameSilo draft and fail closed on missing evidence. */
-export const prepareNameSiloSubmission = draft.prepare;
+export const prepareNameSiloSubmission = nameSiloDraft.prepare;
 
 /** The stored draft, checked against its route and rebuilt from the current report; with its screenshot's bytes. */
-export async function verifiedNameSiloDraft(context: ProviderSubmissionContext, dependencies: NameSiloSubmissionDependencies = {}) {
-	const { payload, data } = await draft.verify(context, dependencies);
+async function verifiedNameSiloDraft(context: ProviderSubmissionContext, dependencies: NameSiloSubmissionDependencies = {}) {
+	const { payload, data } = await nameSiloDraft.verify(context, dependencies);
 	const { bytes } = await loadEvidenceFile({ reference: payload.evidence, contract: NAMESILO_EVIDENCE_CONTRACT, reportId: data.report.id, label: "NameSilo", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) });
 	return { payload, bytes };
 }
 
-/** Fetch CSRF state and solve reCAPTCHA before the irreversible marker. */
+/** Before the marker: the verified draft and its screenshot, the CSRF session and the solved reCAPTCHA. */
 export async function prepareNameSiloExternalSubmission(
 	context: ProviderSubmissionContext,
-	dependencies: NameSiloPreflightDependencies & RouteDeps = {},
+	dependencies: NameSiloPreflightDependencies & NameSiloSubmissionDependencies = {},
 ): Promise<ProviderSubmissionPreflight> {
-	await draft.verify(context, dependencies);
+	const { payload, bytes } = await verifiedNameSiloDraft(context, dependencies);
 	const fetcher = dependencies.fetch ?? fetch;
 	const [session, captchaToken] = await Promise.all([
 		fetchNameSiloSession(fetcher, context.signal, dependencies.now ?? Date.now),
 		(dependencies.captchaSolver ?? solveNameSiloCaptcha)(context.signal),
 	]);
-	const state: NameSiloPreflightState = { ...session, captchaToken };
+	const state: NameSiloPreflightState = { ...session, captchaToken, payload, evidenceBytes: bytes };
 	if (!storedPreflightState({ state })) throw new Error("NameSilo preflight returned invalid ephemeral state.");
 	return { state };
 }
 
 /** Solve the exact reCAPTCHA v2 token requested by NameSilo's public form. */
-const solveNameSiloCaptcha = (signal?: AbortSignal) => solveCaptchaToken({
-	type: NAMESILO_PROVIDER.captcha.type,
-	parametersField: "token_params",
-	parameters: { googlekey: NAMESILO_PROVIDER.captcha.siteKey, pageurl: NAMESILO_PROVIDER.reportPageUrl },
-}, signal);
+export const solveNameSiloCaptcha = (signal?: AbortSignal) => solveRecaptchaV2(NAMESILO_PROVIDER.captcha, NAMESILO_PROVIDER.reportPageUrl, signal);
 
-/** Perform the one provider POST from its pinned draft and preflight session. */
+/** The one provider POST, from the preflight's verified draft and session. */
 export async function submitNameSiloSubmission(
 	context: ProviderSubmissionContext,
-	dependencies: NameSiloSubmissionDependencies = {},
-	preflight?: ProviderSubmissionPreflight,
+	preflight: ProviderSubmissionPreflight | undefined,
+	dependencies: Pick<NameSiloSubmissionDependencies, "fetch"> = {},
 ): Promise<ProviderSubmissionSuccess> {
-	const { payload, bytes } = await verifiedNameSiloDraft(context, dependencies);
 	const ephemeral = storedPreflightState(preflight);
 	if (!ephemeral) throw new Error("NameSilo submission requires prepared CSRF and CAPTCHA state.");
-	const form = buildNameSiloHttpPayload({ payload, evidenceBytes: bytes, captchaToken: ephemeral.captchaToken });
+	const { payload } = ephemeral;
+	const form = buildNameSiloHttpPayload({ payload, evidenceBytes: ephemeral.evidenceBytes, captchaToken: ephemeral.captchaToken });
 	const response = await (dependencies.fetch ?? fetch)(NAMESILO_PROVIDER.submissionUrl, {
 		method: "POST",
 		redirect: "error",

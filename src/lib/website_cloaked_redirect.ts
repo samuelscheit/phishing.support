@@ -73,7 +73,7 @@ export async function handOffRedirectedCapture(params: {
 	await settleCloakedRedirect(submissionId);
 }
 
-export function decoyDestinationClause(url: string): string {
+function decoyDestinationClause(url: string): string {
 	return `If it shows nothing reportable, ${url} is treated as a cloaker that turned every route away.`;
 }
 
@@ -87,7 +87,7 @@ export function decoyDestinationClause(url: string): string {
  * the page leads its real visitors; the submitted case then fails as suspected
  * cloaking so a retry visits it again.
  */
-export async function settleCloakedRedirect(submissionId: bigint): Promise<void> {
+async function settleCloakedRedirect(submissionId: bigint): Promise<void> {
 	const submission = await SubmissionsEntity.get(submissionId);
 	const website = submission?.status === "redirected" && submission.data.kind === "website" ? submission.data.website : undefined;
 	if (!website?.cloaking || !website.redirectSubmissionId) return;

@@ -3,7 +3,11 @@
 -- Removed features: Skyvern reconciliation, kit sibling discovery, and events no code emits any more.
 DELETE FROM `abuse_jobs` WHERE `job_type` IN ('reconcile_skyvern_run', 'discover_kit_siblings');--> statement-breakpoint
 DELETE FROM `abuse_artifacts` WHERE `kind` = 'skyvern_extracted_output';--> statement-breakpoint
-DELETE FROM `abuse_events` WHERE `event_type` LIKE 'provider_run.skyvern_%' OR `event_type` IN ('provider_run.draft_refanged', 'report.evidence_rewritten', 'route.operator_reset', 'provider_run.reconciled_failure');--> statement-breakpoint
+-- A Skyvern event of a route that still waits for a person (needs_human, unknown_external_state) or for work stays: it is that route's only record of what the old task did.
+DELETE FROM `abuse_events` WHERE (`event_type` LIKE 'provider_run.skyvern_%' AND NOT EXISTS (
+	SELECT 1 FROM `abuse_provider_routes` `r` WHERE `r`.`id` = `abuse_events`.`route_id`
+		AND `r`.`status` NOT IN ('submitted', 'acknowledged', 'provider_rejected', 'delivery_failed', 'insufficient_evidence', 'no_route', 'failed', 'discarded')))
+	OR `event_type` IN ('provider_run.draft_refanged', 'report.evidence_rewritten', 'route.operator_reset', 'provider_run.reconciled_failure');--> statement-breakpoint
 DELETE FROM `artifacts` WHERE `kind` IN ('website_html', 'website_text', 'mail_png');--> statement-breakpoint
 
 -- Routes recorded by the first report importer carried a `historical:` registry-key prefix.

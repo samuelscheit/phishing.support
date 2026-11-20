@@ -1,7 +1,7 @@
 import { defineProvider, PREVIEW_REFERENCE } from "../kit/provider";
 import { AWS_PROVIDER } from "./definition";
 import { awsReportUrls, makeAwsComments } from "./payload";
-import { prepareAwsSubmission, submitAwsSubmission } from "./submission";
+import { awsDraft, submitAwsSubmission } from "./submission";
 
 /**
  * AWS's abuse mailboxes answer with a pointer to its web form; the route files
@@ -10,7 +10,7 @@ import { prepareAwsSubmission, submitAwsSubmission } from "./submission";
  */
 export const awsProvider = defineProvider({
 	definition: AWS_PROVIDER,
-	prepare: prepareAwsSubmission,
+	draft: awsDraft,
 	preview: (context) => {
 		const urls = awsReportUrls(context.target, context.observedUrls);
 		return urls ? makeAwsComments({

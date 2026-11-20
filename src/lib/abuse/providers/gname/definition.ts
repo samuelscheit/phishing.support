@@ -62,4 +62,3 @@ export const GNAME_PROVIDER = definePinned({
 	reporter: serviceReporter,
 });
 
-export type GnameProviderDefinition = typeof GNAME_PROVIDER;

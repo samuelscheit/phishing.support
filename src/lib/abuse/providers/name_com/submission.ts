@@ -38,7 +38,7 @@ export type NameComPreflightState = {
 	file: BrowserFormFile | null;
 };
 
-const draft = createDraft({
+export const nameComDraft = createDraft({
 	definition: PROVIDER,
 	reasonPrefix: "name_com",
 	targetTypes: ["domain"],
@@ -50,8 +50,7 @@ const draft = createDraft({
 });
 
 /** Check the route and build the durable draft before any provider call. */
-export const prepareNameComSubmission = draft.prepare;
-export const verifiedNameComDraft = draft.verify;
+export const prepareNameComSubmission = nameComDraft.prepare;
 
 /** The headers of Name.com's CSRF handshake: the token is the SHA-256 of `Start + Time + Start`. */
 export function csrfHandshakeHeaders(start: string, time: string, referrer: string): Record<string, string> {
@@ -85,7 +84,7 @@ export function captchaAccepted(answer: BrowserFormResponse): boolean {
  * ticket, so every failure is a safe retry (the browser is closed first).
  */
 export async function prepareNameComExternalSubmission(context: ProviderSubmissionContext, dependencies: NameComDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await draft.verify(context, dependencies);
+	const { payload, data } = await nameComDraft.verify(context, dependencies);
 	const file = payload.evidence
 		? (await loadEvidenceFile({ reference: payload.evidence, contract: NAME_COM_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Name.com", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) })).file
 		: null;

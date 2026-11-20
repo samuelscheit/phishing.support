@@ -50,4 +50,3 @@ export const ALIBABA_CLOUD_PROVIDER = definePinned({
 	reporter: { name: serviceIdentity.name, email: serviceIdentity.mailbox, area: serviceIdentity.countryName },
 });
 
-export type AlibabaCloudProviderDefinition = typeof ALIBABA_CLOUD_PROVIDER;

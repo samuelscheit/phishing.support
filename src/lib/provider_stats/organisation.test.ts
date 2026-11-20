@@ -68,7 +68,6 @@ describe("roleOf", () => {
 		expect(roleOf(route("domain_whois"), "domain", unknown)).toBe("registrar");
 		expect(roleOf(route("domain_infrastructure_ip"), "domain", unknown)).toBe("host");
 		expect(roleOf(route("ip_rdap"), "ip", unknown)).toBe("host");
-		expect(roleOf(route("ripe_abuse_c"), "ip", unknown)).toBe("host");
 		expect(roleOf(route("cloudflare_origin_disclosure"), "domain", unknown)).toBe("host");
 		expect(roleOf(route("service_account_registry"), "service_account", unknown)).toBe("platform");
 		expect(roleOf(route("authority_registry"), "campaign", unknown)).toBe("authority");

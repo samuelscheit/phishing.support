@@ -6,6 +6,8 @@ import { CLOUDFLARE_PROVIDER } from "./definition";
 import type { CloudflareReportPayload } from "./report";
 import { getCloudflareSession, type CloudflareLoginConfig, type CloudflareSession } from "./session";
 import { asRecord } from "../../../values";
+import { deadline, jsonRecord } from "../kit/http";
+import { snippet } from "../kit/text";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_CHARS = 100_000;
@@ -32,14 +34,6 @@ export function cloudflareReportsUrl(accountId: string): string {
 
 function stringField(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function responseJson(rawBody: string): Record<string, unknown> | undefined {
-	try {
-		return asRecord(JSON.parse(rawBody.slice(0, MAX_RESPONSE_CHARS)));
-	} catch {
-		return undefined;
-	}
 }
 
 /** Build the exact dashboard abuse_phishing request body. */
@@ -75,12 +69,12 @@ export function parseCloudflareApiResponse(
 	context: { accountId: string; target: string },
 ): ProviderSubmissionSuccess {
 	const body = rawBody.slice(0, MAX_RESPONSE_CHARS);
-	const json = responseJson(body);
+	const json = jsonRecord(body);
 	const errors = Array.isArray(json?.errors) ? json.errors.map(asRecord) : [];
 	if (status === 403 && (String(json?.err_code) === "9300" || errors.some((error) => String(error?.code) === "9300"))) {
 		throw new CloudflareSessionExpiredError();
 	}
-	const detail = stringField(json?.msg) ?? (errors.map((error) => stringField(error?.message)).filter(Boolean).join("; ") || body.slice(0, 500));
+	const detail = stringField(json?.msg) ?? (errors.map((error) => stringField(error?.message)).filter(Boolean).join("; ") || snippet(body, 500));
 	if (status >= 400 && status < 500) {
 		throw new ProviderSubmissionRejectedError(`Cloudflare abuse report was rejected with HTTP ${status}: ${detail}`);
 	}
@@ -124,11 +118,10 @@ async function cloudflareDashboardRequest<T>(
 	const fetchImplementation = context.fetch ?? globalThis.fetch;
 	const send = async (session: CloudflareSession) => {
 		context.signal?.throwIfAborted();
-		const deadline = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 		const response = await fetchImplementation(request.url, {
 			method: request.method,
 			redirect: "error",
-			signal: context.signal ? AbortSignal.any([context.signal, deadline]) : deadline,
+			signal: deadline(REQUEST_TIMEOUT_MS, context.signal),
 			headers: {
 				accept: "application/json",
 				...(request.body === undefined ? {} : { "content-type": "application/json" }),
@@ -245,11 +238,11 @@ function submittedReportUrl(accountId: string, reportId: string, suffix = ""): s
 
 /** A successful read of Cloudflare's documented submitted-report API. */
 function parseCloudflareRead(status: number, rawBody: string): Record<string, unknown> {
-	const json = responseJson(rawBody);
+	const json = jsonRecord(rawBody.slice(0, MAX_RESPONSE_CHARS));
 	const errors = Array.isArray(json?.errors) ? json.errors.map(asRecord) : [];
 	if (status === 403 && (String(json?.err_code) === "9300" || errors.some((error) => String(error?.code) === "9300"))) throw new CloudflareSessionExpiredError();
 	if (status < 200 || status >= 300 || json?.success !== true) {
-		const detail = errors.map((error) => stringField(error?.message)).filter(Boolean).join("; ") || rawBody.slice(0, 300);
+		const detail = errors.map((error) => stringField(error?.message)).filter(Boolean).join("; ") || snippet(rawBody);
 		throw new Error(`Cloudflare submitted-report read failed with HTTP ${status}: ${detail}`);
 	}
 	const result = asRecord(json.result);

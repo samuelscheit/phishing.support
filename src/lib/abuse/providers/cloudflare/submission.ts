@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 import { createDraft, type RouteDeps } from "../kit/draft";
+import { preparedState } from "../kit/session";
 import { payloadEnvelope, storedReader } from "../kit/stored";
 import {
-	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
 	type ProviderCorrespondence,
 	type ProviderSubmissionContext,
@@ -51,7 +51,7 @@ export type CloudflareSubmissionDependencies = RouteDeps & {
 	environment?: Readonly<Record<string, string | undefined>>;
 };
 
-const draft = createDraft({
+export const cloudflareDraft = createDraft({
 	definition: CLOUDFLARE_PROVIDER,
 	reasonPrefix: "cloudflare",
 	targetTypes: ["domain"],
@@ -87,7 +87,7 @@ const draft = createDraft({
 });
 
 /** Build Cloudflare's immutable report before the durable provider marker. */
-export const prepareCloudflareSubmission = draft.prepare;
+export const prepareCloudflareSubmission = cloudflareDraft.prepare;
 
 /**
  * Login before the durable irreversible-call marker; session secrets stay
@@ -99,10 +99,6 @@ export async function prepareCloudflareExternalSubmission(
 	context: ProviderSubmissionContext,
 	dependencies: CloudflareSubmissionDependencies = {},
 ): Promise<ProviderSubmissionPreflight> {
-	if (!storedCloudflareSubmissionPayload(context.payload)) {
-		throw new ProviderSubmissionNeedsHumanError("The persisted Cloudflare provider payload is malformed; review the draft before submitting.");
-	}
-	await draft.verify(context, dependencies);
 	const config = cloudflareApiConfig(dependencies.environment);
 	return { state: await (dependencies.getSession ?? getCloudflareSession)(config, { signal: context.signal }) };
 }
@@ -110,14 +106,14 @@ export async function prepareCloudflareExternalSubmission(
 /** Submit one already-persisted Cloudflare report through the dashboard API. */
 export async function submitCloudflareSubmission(
 	context: ProviderSubmissionContext,
+	preflight: ProviderSubmissionPreflight | undefined,
 	dependencies: CloudflareSubmissionDependencies = {},
-	preflight?: ProviderSubmissionPreflight,
 ): Promise<ProviderSubmissionSuccess> {
-	const { payload } = await draft.verify(context, dependencies);
-	const prepared = preflight ?? await prepareCloudflareExternalSubmission(context, dependencies);
+	const payload = cloudflareDraft.stored(context);
+	const session = preparedState<CloudflareSession>(preflight, (state) => !!state, "Cloudflare submission requires its prepared dashboard session.");
 	return submitCloudflareAbuseReport({
 		config: cloudflareApiConfig(dependencies.environment),
-		session: prepared.state as CloudflareSession,
+		session,
 		...(dependencies.getSession ? { getSession: dependencies.getSession } : {}),
 		report: payload.report,
 		target: payload.target,

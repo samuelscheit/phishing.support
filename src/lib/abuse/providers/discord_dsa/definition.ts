@@ -33,4 +33,3 @@ export const DISCORD_DSA_PROVIDER = definePinned({
 	legalBasis: "Stealing account credentials is computer fraud and data espionage (StGB §202a, §263a; EU Directive 2013/40/EU).",
 });
 
-export type DiscordDsaProviderDefinition = typeof DISCORD_DSA_PROVIDER;

@@ -1,6 +1,7 @@
 import { userAgent } from "../../../constants";
 import { asRecord } from "../../../values";
 import { jsonRecord } from "../kit/http";
+import { snippet } from "../kit/text";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import { alibabaCloudLoginConfig, alibabaCloudSessions, type AlibabaCloudLoginConfig, type AlibabaCloudSession } from "./session";
@@ -49,7 +50,7 @@ const TRANSIENT_CODE = /throttl|busy|unavailable|internal|timeout|flowcontrol|^\
  */
 export function readConsoleAnswer(action: string, status: number, body: string): unknown {
 	const json = jsonRecord(body);
-	if (!json) throw new Error(`Alibaba Cloud ${action} answered HTTP ${status} without JSON: ${body.slice(0, 300)}`);
+	if (!json) throw new Error(`Alibaba Cloud ${action} answered HTTP ${status} without JSON: ${snippet(body)}`);
 	const data = asRecord(json.data);
 	const code = typeof json.code === "string" ? json.code : undefined;
 	const innerCode = typeof data?.Code === "string" ? data.Code : undefined;
@@ -61,7 +62,7 @@ export function readConsoleAnswer(action: string, status: number, body: string):
 	const inner = innerCode && innerCode !== "200" && data?.Success === false ? innerCode : undefined;
 	const refusal = inner ?? outer;
 	if (refusal && !TRANSIENT_CODE.test(refusal)) throw new AlibabaConsoleError(action, refusal, message);
-	throw new Error(`Alibaba Cloud ${action} gave no usable answer (HTTP ${status}): ${body.slice(0, 300)}`);
+	throw new Error(`Alibaba Cloud ${action} gave no usable answer (HTTP ${status}): ${snippet(body)}`);
 }
 
 function sessionConsole(session: AlibabaCloudSession, request: AlibabaFetch, signal?: AbortSignal): AlibabaConsole {

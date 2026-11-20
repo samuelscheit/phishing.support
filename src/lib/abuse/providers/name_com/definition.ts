@@ -62,4 +62,3 @@ export const NAME_COM_PROVIDER = definePinned({
 	reporter: { ...reporterNames(serviceIdentity.name), email: serviceIdentity.mailbox },
 });
 
-export type NameComProviderDefinition = typeof NAME_COM_PROVIDER;

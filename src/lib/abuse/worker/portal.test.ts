@@ -299,7 +299,7 @@ describe.skipIf(!chromiumAvailable)("the generic provider-form flow (real Chromi
 		expect((await AbuseRepository.getProviderRun(run.id))?.providerPayload.__fabricBrowserSessionId).toBe("browser-session_crashed");
 	}, 60_000);
 
-	// A real model files the report: PHISHING_TASK_LIVE=1 with the app's model configuration (PHISHING_TASK_MODEL, OPENAI_API_KEY, …).
+	// A real model files the report: PHISHING_TASK_LIVE=1 with the app's model configuration (OPENAI_MODEL, OPENAI_API_KEY, …).
 	test.skipIf(process.env.PHISHING_TASK_LIVE !== "1")("a real model files the report through the fixture form", async () => {
 		submissions.length = 0;
 		const { route, run } = await portalRoute("/report", 15);

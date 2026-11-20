@@ -43,7 +43,11 @@ type Rest = Pick<ProviderSubmissionProvider, "fetchCorrespondence" | "findSubmis
  */
 export function defineProvider(spec: Rest & {
 	definition: ProviderSubmissionDefinition;
-	prepare: (context: ProviderSubmissionContext) => Promise<ProviderSubmissionPreparation>;
+	/** `createDraft`'s pre-marker pair: the executor prepares with it and verifies with it before the marker. */
+	draft: {
+		prepare: (context: ProviderSubmissionContext) => Promise<ProviderSubmissionPreparation>;
+		verify: (context: ProviderSubmissionContext) => Promise<unknown>;
+	};
 	preview?: ProviderSubmissionProvider["buildReportPreview"];
 	external?: {
 		prepare: (context: ProviderSubmissionContext) => Promise<ProviderSubmissionPreflight>;
@@ -53,12 +57,13 @@ export function defineProvider(spec: Rest & {
 	submit?: ProviderSubmissionProvider["submit"];
 	inbound?: Omit<ProviderInboundMail, "confirmationIds"> & Partial<Pick<ProviderInboundMail, "confirmationIds">>;
 }): ProviderSubmissionProvider {
-	const { prepare, preview, external, submit, inbound, ...rest } = spec;
+	const { draft, preview, external, submit, inbound, ...rest } = spec;
 	const submitCall = external ? (context: ProviderSubmissionContext) => external.submit(context, undefined) : submit;
 	if (!submitCall) throw new Error(`${spec.definition.key} has no submit call.`);
 	return {
 		...rest,
-		prepareSubmission: prepare,
+		prepareSubmission: draft.prepare,
+		verifyDraft: draft.verify,
 		...(preview ? { buildReportPreview: preview } : {}),
 		...(external ? { prepareExternalSubmission: external.prepare, submitPrepared: external.submit } : {}),
 		submit: submitCall,

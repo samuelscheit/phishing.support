@@ -80,7 +80,7 @@ describe("Eranet abuse form", () => {
 		expect(codeRequests).toEqual([new Date("2026-11-03T00:00:00Z")]);
 
 		// The code is valid only inside the session that requested it, so submit reuses it.
-		const success = await submitEranetSubmission({ routeId: 5n, payload }, preflight, { loadRouteContext: routeContext(), getArtifact: async () => artifact });
+		const success = await submitEranetSubmission({ routeId: 5n, payload }, preflight);
 		expect(api.calls.map((call) => call.path)).toEqual(["UploadFile", "GetEmailCode", "CreateComplaint"]);
 		expect(api.calls[2]!.json).toMatchObject({
 			Email: "support@phishing.support",
@@ -102,11 +102,10 @@ describe("Eranet abuse form", () => {
 	test("a named Eranet error is a known rejection, and a code that never arrives stops before the marker", async () => {
 		const prepared = await prepareEranetSubmission({ routeId: 5n, payload: {} }, { loadRouteContext: routeContext() });
 		const payload = (prepared as { payload: Record<string, unknown> }).payload;
-		const deps = { loadRouteContext: routeContext(), getArtifact: async () => artifact };
 		const rejecting = eranetApi({ CreateComplaint: () => ({ error: "VerifyCode.NotFound.Code" }) });
-		await expect(submitEranetSubmission({ routeId: 5n, payload }, { state: { session: rejecting.session, code: "123456", screenshots: [] } }, deps))
+		await expect(submitEranetSubmission({ routeId: 5n, payload }, { state: { session: rejecting.session, code: "123456", screenshots: [] } }))
 			.rejects.toBeInstanceOf(ProviderSubmissionRejectedError);
-		await expect(submitEranetSubmission({ routeId: 5n, payload }, { state: { code: "123456", screenshots: [] } }, deps))
+		await expect(submitEranetSubmission({ routeId: 5n, payload }, { state: { code: "123456", screenshots: [] } }))
 			.rejects.toThrow("browser session");
 
 		const silent = eranetApi({ UploadFile: () => ({ Data: { filename: "uploads/abc.png" } }), GetEmailCode: () => ({}) });

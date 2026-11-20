@@ -83,4 +83,3 @@ export const NEWFOLD_PROVIDER = definePinned({
 	reporter: { firstName, lastName: lastNameParts.join(" ") || firstName, email: serviceIdentity.mailbox },
 });
 
-export type NewfoldProviderDefinition = typeof NEWFOLD_PROVIDER;

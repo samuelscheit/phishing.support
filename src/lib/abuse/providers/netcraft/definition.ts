@@ -19,4 +19,3 @@ export const NETCRAFT_PROVIDER = definePinned({
 	maximumReasonLength: 10_000,
 });
 
-export type NetcraftProviderDefinition = typeof NETCRAFT_PROVIDER;

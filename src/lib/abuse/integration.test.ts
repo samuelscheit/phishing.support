@@ -99,8 +99,6 @@ describe("abuse persistence boundary", () => {
 		];
 		const tables = client.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
 		expect(tables.map((row) => row.name)).toEqual(expect.arrayContaining(expectedTables));
-		// The Skyvern webhook ledger is gone with Skyvern.
-		expect(tables.map((row) => row.name)).not.toContain("abuse_webhook_events");
 		for (const table of expectedTables) {
 			const foreignKeys = client.query(`PRAGMA foreign_key_list(${table})`).all() as Array<{ table: string; from: string }>;
 			const outside = foreignKeys.filter((foreignKey) => !foreignKey.table.startsWith("abuse_"));

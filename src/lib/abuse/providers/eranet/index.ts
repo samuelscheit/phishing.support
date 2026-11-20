@@ -3,12 +3,13 @@ import { fetchEranetCorrespondence } from "./correspondence";
 import { submitEranetSupplement } from "./supplement";
 import { ERANET_PROVIDER } from "./definition";
 import { makeEranetDescription } from "./payload";
-import { prepareEranetExternalSubmission, prepareEranetSubmission, submitEranetSubmission } from "./submission";
+import { eranetDraft, prepareEranetExternalSubmission, submitEranetSubmission } from "./submission";
 
 /** Eranet (IANA 1868) takes abuse reports through its own form, gated by a mailed code. */
 export const eranetProvider: ProviderSubmissionProvider = {
 	definition: ERANET_PROVIDER,
-	prepareSubmission: prepareEranetSubmission,
+	prepareSubmission: eranetDraft.prepare,
+	verifyDraft: eranetDraft.verify,
 	buildReportPreview: (context: ProviderReportPreviewContext) => makeEranetDescription({
 		target: context.target,
 		observedUrl: context.observedUrls[0],
@@ -19,7 +20,7 @@ export const eranetProvider: ProviderSubmissionProvider = {
 	prepareExternalSubmission: prepareEranetExternalSubmission,
 	// The executor always calls submitPrepared: the code lives in the preflight's browser session.
 	submit: (context) => submitEranetSubmission(context, undefined),
-	submitPrepared: (context, preflight) => submitEranetSubmission(context, preflight),
+	submitPrepared: submitEranetSubmission,
 	// Eranet answers in its portal; its mails only say that the status changed.
 	inboundMail: { senderDomains: ["eranet.com"] },
 	fetchCorrespondence: (context) => fetchEranetCorrespondence(context),

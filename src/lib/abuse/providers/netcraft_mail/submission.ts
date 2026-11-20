@@ -5,8 +5,9 @@ import { serviceIdentity } from "../../../constants";
 import { normalizeMailbox } from "../../mail/shared";
 import { sha256Hex } from "../../security";
 import { createDraft } from "../kit/draft";
+import { preparedState } from "../kit/session";
 import { payloadEnvelope, storedReader } from "../kit/stored";
-import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
+import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { NETCRAFT_MAIL_PROVIDER } from "./definition";
 
 const envelope = payloadEnvelope(NETCRAFT_MAIL_PROVIDER, "netcraft_report_mail_v3");
@@ -41,7 +42,7 @@ export function netcraftMailMessage(raw: string): string {
 	return `From: Unknown sender <unknown-sender@invalid>${newline}${withoutFrom}`;
 }
 
-const draft = createDraft({
+export const netcraftMailDraft = createDraft({
 	definition: NETCRAFT_MAIL_PROVIDER,
 	reasonPrefix: "netcraft_mail",
 	targetTypes: ["email"],
@@ -70,15 +71,20 @@ const draft = createDraft({
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
 
-export const prepareNetcraftMailSubmission = draft.prepare;
+/** Before the marker: verify the draft and read the message it pins, as Netcraft takes it. */
+export async function prepareNetcraftMailExternalSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreflight> {
+	const { payload, data } = await netcraftMailDraft.verify(context);
+	const artifact = data.evidenceArtifacts.find((item) => item.id.toString() === payload.message.artifactId)!;
+	return { state: netcraftMailMessage(artifact.blob.toString("utf-8")) };
+}
 
 export async function submitNetcraftMailSubmission(
 	context: ProviderSubmissionContext,
+	preflight: ProviderSubmissionPreflight | undefined,
 	dependencies: NetcraftMailSubmissionDependencies = {},
 ): Promise<ProviderSubmissionSuccess> {
-	const { payload, data } = await draft.verify(context);
-	const artifact = data.evidenceArtifacts.find((item) => item.id.toString() === payload.message.artifactId)!;
-	const message = netcraftMailMessage(artifact.blob.toString("utf-8"));
+	const payload = netcraftMailDraft.stored(context);
+	const message = preparedState<string>(preflight, (state) => typeof state === "string", "Netcraft mail submission requires its prepared message.");
 	const response = await (dependencies.fetch ?? globalThis.fetch)(NETCRAFT_MAIL_PROVIDER.reportMailUrl, {
 		method: "POST",
 		redirect: "error",

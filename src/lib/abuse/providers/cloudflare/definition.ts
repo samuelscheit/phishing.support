@@ -14,4 +14,3 @@ export const CLOUDFLARE_PROVIDER = definePinned({
 
 /** Reviewed API contract and route-selection metadata for Cloudflare. */
 
-export type CloudflareProviderDefinition = typeof CLOUDFLARE_PROVIDER;

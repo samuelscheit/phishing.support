@@ -1,4 +1,5 @@
 import { AbuseRepository } from "../repository";
+import { hashStableJson } from "../security";
 
 import { providerDefinitionMatchesPin } from "./kit/pin";
 
@@ -76,7 +77,7 @@ async function markUnknownExternal(params: { routeId: bigint; runId?: bigint; er
 	throw new ProviderSubmissionUnknownExternalStateError(params.error);
 }
 
-type KnownFailureStatus = "provider_rejected" | "needs_human";
+type KnownFailureStatus = "provider_rejected" | "needs_human" | "insufficient_evidence";
 
 /** Settle an explicit, known provider failure as a terminal route status. */
 async function settleKnownFailure(params: {
@@ -87,6 +88,7 @@ async function settleKnownFailure(params: {
 }): Promise<ProviderSubmissionExecutionResult> {
 	const { status } = params;
 	if (params.runId === undefined) {
+		if (status === "insufficient_evidence") return settleInsufficientEvidence(params.routeId, params.reason);
 		const changed = await AbuseRepository.transitionRouteStatus({
 			routeId: params.routeId,
 			from: ["queued", "verified"],
@@ -117,7 +119,7 @@ async function settleKnownFailure(params: {
 		});
 	}
 	if (settled || (await AbuseRepository.getRoute(params.routeId))?.status === status) {
-		return { outcome: status, runId: params.runId, reason: params.reason };
+		return status === "insufficient_evidence" ? { outcome: status, reason: params.reason } : { outcome: status, runId: params.runId, reason: params.reason };
 	}
 	return markUnknownExternal({
 		routeId: params.routeId,
@@ -128,10 +130,29 @@ async function settleKnownFailure(params: {
 }
 
 /** Map a provider's explicit known-failure error to its terminal settlement, if it is one. */
-function knownFailureStatus(error: unknown): KnownFailureStatus | undefined {
+function knownFailureStatus(error: unknown): "provider_rejected" | "needs_human" | undefined {
 	if (error instanceof ProviderSubmissionRejectedError) return "provider_rejected";
 	if (error instanceof ProviderSubmissionNeedsHumanError) return "needs_human";
 	return undefined;
+}
+
+/**
+ * The pre-marker draft of a run that never reached its marker, built again
+ * from the current route and report. Its refusals settle the run for good.
+ */
+async function refreshDraft(provider: ProviderSubmissionProvider, route: { id: bigint }, context: ProviderSubmissionContext): Promise<{ payload: Record<string, unknown> } | ProviderSubmissionExecutionResult> {
+	const settle = (status: KnownFailureStatus, reason: string) => settleKnownFailure({ routeId: route.id, runId: context.runId!, status, reason });
+	let preparation: ProviderSubmissionPreparation;
+	try {
+		preparation = await provider.prepareSubmission!(context);
+		throwIfAborted(context.signal);
+	} catch (error) {
+		const status = knownFailureStatus(error);
+		if (status) return settle(status, errorText(error));
+		throw error;
+	}
+	if (!isPreparation(preparation)) return settle("needs_human", "provider_submission_preparation_invalid");
+	return preparation.outcome === "insufficient_evidence" ? settle("insufficient_evidence", preparation.reason) : { payload: preparation.payload };
 }
 
 async function settleInsufficientEvidence(routeId: bigint, reason: string): Promise<ProviderSubmissionExecutionResult> {
@@ -260,12 +281,31 @@ export async function executeProviderSubmission(params: {
 		});
 	}
 
-	const context: ProviderSubmissionContext = {
+	let context: ProviderSubmissionContext = {
 		routeId: route.id,
 		runId: run.id,
 		payload: durablePayload,
 		...(params.signal ? { signal: params.signal } : {}),
 	};
+	if (params.provider.verifyDraft) {
+		// Only work that cannot file anything runs before the marker, and this
+		// is the check that the stored draft is still what the provider builds.
+		// A run that never passed the marker may have been interrupted before
+		// its report or narrative changed: build the draft again and replace it.
+		// A run that passed the marker never gets here.
+		try {
+			await params.provider.verifyDraft(context);
+		} catch (error) {
+			if (!params.provider.prepareSubmission) throw error;
+			const refreshed = await refreshDraft(params.provider, route, context);
+			if (!("payload" in refreshed)) return refreshed;
+			if (hashStableJson(durablePayload) !== hashStableJson(refreshed.payload)) {
+				await AbuseRepository.updateProviderRun(run.id, { providerPayload: refreshed.payload, payloadHash: hashStableJson(refreshed.payload) }, "provider_run.draft_refreshed");
+			}
+			context = { ...context, payload: refreshed.payload };
+		}
+		throwIfAborted(params.signal);
+	}
 	let preflight: ProviderSubmissionPreflight | undefined;
 	if (params.provider.prepareExternalSubmission) {
 		// This hook is deliberately before the durable provider-call marker. A

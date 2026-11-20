@@ -29,7 +29,7 @@ import { challengeInconclusive, CHALLENGE_RETRY_EGRESS, continuedRevisit } from 
 import type { WebsiteAnalysisDependencies, WebsiteCapture } from "./website_analysis_types";
 
 /** Every page's kit files, once per hash. */
-export function mergedKitResources(...captures: WebsiteCapture[]): WebsiteKitResource[] {
+function mergedKitResources(...captures: WebsiteCapture[]): WebsiteKitResource[] {
 	return captures.flatMap((capture) => capture.kitResources ?? [])
 		.filter((resource, index, all) => all.findIndex((other) => other.sha256 === resource.sha256) === index);
 }

@@ -48,7 +48,7 @@ export function reportUrls(host: string, observedUrls: readonly string[], rules:
 }
 
 /** The `Reported URLs` block of a free-text field. */
-export const urlBlock = (urls: readonly string[]) => `Reported URLs:\n${urls.map((url) => `- ${url}`).join("\n")}`;
+const urlBlock = (urls: readonly string[]) => `Reported URLs:\n${urls.map((url) => `- ${url}`).join("\n")}`;
 
 export type NarrativeInput = Pick<ReportInput, "target" | "description" | "allegationCategory" | "legalBrandUrl"> & {
 	observedUrls: readonly string[];

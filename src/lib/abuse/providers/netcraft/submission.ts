@@ -46,7 +46,7 @@ export async function parseNetcraftSubmissionResponse(
 	}
 }
 
-const draft = createDraft({
+export const netcraftDraft = createDraft({
 	definition: NETCRAFT_PROVIDER,
 	reasonPrefix: "netcraft",
 	targetTypes: ["domain", "ip", "service_account", "campaign"],
@@ -66,14 +66,14 @@ const draft = createDraft({
 });
 
 /** Validate target evidence and service identity before the irreversible request. */
-export const prepareNetcraftSubmission = draft.prepare;
+export const prepareNetcraftSubmission = netcraftDraft.prepare;
 
 /** Submit one immutable Netcraft payload after generic execution marks its boundary. */
 export async function submitNetcraftSubmission(
 	context: ProviderSubmissionContext,
 	dependencies: NetcraftSubmissionDependencies = {},
 ): Promise<ProviderSubmissionSuccess> {
-	const { payload } = await draft.verify(context);
+	const payload = netcraftDraft.stored(context);
 	const request: NetcraftFetch = dependencies.fetch ?? globalThis.fetch;
 	const response = await request(NETCRAFT_PROVIDER.reportUrlsUrl, {
 		method: "POST",

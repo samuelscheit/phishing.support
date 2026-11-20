@@ -76,7 +76,7 @@ function provider(dependencies: DiscordDsaDependencies): ProviderSubmissionProvi
 		prepareSubmission: (context) => prepareDiscordDsaSubmission(context, { environment: REPORTER, ...dependencies }),
 		prepareExternalSubmission: (context) => prepareDiscordDsaExternalSubmission(context, { environment: REPORTER, ...dependencies }),
 		submit: () => Promise.reject(new Error("prepared submit only")),
-		submitPrepared: (context, preflight) => submitDiscordDsaSubmission(context, preflight, { environment: REPORTER }),
+		submitPrepared: (context, preflight) => submitDiscordDsaSubmission(context, preflight),
 	};
 }
 

@@ -3,7 +3,7 @@ import { PUBLIC_DOMAIN_REGISTRY_PROVIDER } from "./definition";
 import { makePublicDomainRegistryComplaint, publicDomainRegistryReportUrls } from "./payload";
 import {
 	preparePublicDomainRegistryExternalSubmission,
-	preparePublicDomainRegistrySubmission,
+	publicDomainRegistryDraft,
 	submitPublicDomainRegistrySubmission,
 } from "./submission";
 
@@ -15,7 +15,7 @@ import {
  */
 export const publicDomainRegistryProvider = defineProvider({
 	definition: PUBLIC_DOMAIN_REGISTRY_PROVIDER,
-	prepare: (context) => preparePublicDomainRegistrySubmission(context),
+	draft: publicDomainRegistryDraft,
 	preview: registrarPreview({ urls: publicDomainRegistryReportUrls, make: makePublicDomainRegistryComplaint }),
 	external: { prepare: (context) => preparePublicDomainRegistryExternalSubmission(context), submit: submitPublicDomainRegistrySubmission },
 	// PDR's ticket mail's sender is not documented; the site's own domain is the best guess.

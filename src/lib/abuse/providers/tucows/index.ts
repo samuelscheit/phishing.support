@@ -1,7 +1,7 @@
 import { defineProvider, PREVIEW_REFERENCE } from "../kit/provider";
 import { TUCOWS_PROVIDER } from "./definition";
 import { makeTucowsDescription, tucowsBrand, tucowsReportUrls } from "./payload";
-import { prepareTucowsExternalSubmission, prepareTucowsSubmission, submitTucowsSubmission } from "./submission";
+import { prepareTucowsExternalSubmission, tucowsDraft, submitTucowsSubmission } from "./submission";
 
 /**
  * Tucows (and its Enom brand) no longer read their abuse mailboxes; the route
@@ -11,7 +11,7 @@ import { prepareTucowsExternalSubmission, prepareTucowsSubmission, submitTucowsS
  */
 export const tucowsProvider = defineProvider({
 	definition: TUCOWS_PROVIDER,
-	prepare: (context) => prepareTucowsSubmission(context),
+	draft: tucowsDraft,
 	preview: (context) => {
 		const urls = tucowsReportUrls(context.target, context.observedUrls);
 		if (urls.length === 0 || context.allegationCategory === "malware" || !tucowsBrand(context.description, context.legalBrandUrl)) return undefined;
