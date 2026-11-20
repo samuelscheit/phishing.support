@@ -21,7 +21,6 @@ useTemporaryDatabase();
 const ENVIRONMENT: Record<string, string> = {
 	DEATHBYCAPTCHA_USERNAME: "test-user",
 	DEATHBYCAPTCHA_PASSWORD: "test-password",
-	PROXY_URL: "socks5://proxy.example:1080",
 	ABUSE_CLOUDFLARE_ACCOUNT_ID: "a".repeat(32),
 	ABUSE_CLOUDFLARE_LOGIN_EMAIL: "reporter@example.org",
 	ABUSE_CLOUDFLARE_LOGIN_PASSWORD: "password",

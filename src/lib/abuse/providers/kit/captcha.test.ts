@@ -6,14 +6,9 @@ import { NAMESILO_PROVIDER } from "../namesilo/definition";
 import { solveNameSiloCaptcha } from "../namesilo/submission";
 import { NEWFOLD_PROVIDER } from "../newfold/definition";
 import { solveNewfoldCaptcha } from "../newfold/submission";
-import type { ProviderProxy } from "./proxy";
-import { TENCENT_PROVIDER } from "../tencent/definition";
-import { solveTencentCaptcha } from "../tencent/submission";
 import { TUCOWS_PROVIDER } from "../tucows/definition";
 import { solveTucowsCaptcha } from "../tucows/submission";
 import { captchaCredentialsProblem } from "./captcha";
-
-const PROXY: ProviderProxy = { url: "socks5://proxy.example:1080", browser: {} as ProviderProxy["browser"], captchaType: "SOCKS5" };
 
 /** What each provider asks Death by Captcha to solve: the type, the field its parameters travel in, and the parameters. */
 const REQUESTS: Array<{ name: string; solve: () => Promise<unknown>; expected: { type: string; field: string; parameters: Record<string, string> } }> = [
@@ -36,15 +31,6 @@ const REQUESTS: Array<{ name: string; solve: () => Promise<unknown>; expected: {
 		name: "Tucows Turnstile",
 		solve: () => solveTucowsCaptcha(),
 		expected: { type: "12", field: "turnstile_params", parameters: { sitekey: TUCOWS_PROVIDER.captcha.siteKey, pageurl: TUCOWS_PROVIDER.captcha.pageUrl } },
-	},
-	{
-		name: "Tencent token captcha through the proxy",
-		solve: () => solveTencentCaptcha(PROXY),
-		expected: {
-			type: "23",
-			field: "tencent_params",
-			parameters: { proxy: PROXY.url, proxytype: "SOCKS5", appid: TENCENT_PROVIDER.captcha.appId, pageurl: TENCENT_PROVIDER.reportPageUrl },
-		},
 	},
 ];
 
@@ -78,7 +64,7 @@ describe("captcha solver requests", () => {
 			expect(JSON.parse(String(form.get(expected.field)))).toEqual(expected.parameters);
 			expect(form.get("username")).toBe("test-user");
 			// No parameter travels under another provider's field name.
-			for (const other of ["token_params", "turnstile_params", "tencent_params"]) if (other !== expected.field) expect(form.get(other)).toBeNull();
+			for (const other of ["token_params", "turnstile_params"]) if (other !== expected.field) expect(form.get(other)).toBeNull();
 		});
 	}
 });

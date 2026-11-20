@@ -130,8 +130,9 @@ have been submitted.
 
 Do not add the Fabric principal password, `BROWSER_REMOTE_DEBUGGING_URL`, Chrome/Xvfb,
 VNC/noVNC, a local profile volume, or a capability-bearing CDP URL back to this
-deployment. Tencent's direct non-browser provider route may still require its
-explicit `PROXY_URL` and `DEATHBYCAPTCHA_*` configuration; those values are not
+deployment. Tencent files from a direct Fabric browser and solves its slider
+itself. The HTTP-filing providers (Tucows, Newfold, NameSilo, Google Cloud) may
+still require explicit `DEATHBYCAPTCHA_*` configuration; those values are not
 browser configuration and are never sent to Fabric session metadata.
 
 ## Cloudflare abuse reports
