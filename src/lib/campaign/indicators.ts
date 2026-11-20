@@ -12,6 +12,7 @@ import { mhtmlVisitorText } from "../website_archive/text";
 import { latestArtifactNamed, websiteCaptureFileNames } from "../website_capture_files";
 import { hasPathTenants } from "../website_site";
 import type { ExfiltrationBackend } from "../exfiltration/types";
+import { deliveryCommandsOf } from "./delivery";
 import { loadPageFingerprints, type PageFingerprints } from "./page_document";
 import { paymentReceivers } from "./payment";
 import type { CampaignIndicatorEvidence, CampaignIndicatorKind, OperatorServerRole } from "./schema";
@@ -194,6 +195,9 @@ export async function extractIndicators(submissionId: bigint, dependencies: Indi
 	for (const page of await (dependencies.loadPageTexts ?? loadCapturedPageTexts)(submissionId)) {
 		for (const receiver of paymentReceivers(page.text)) {
 			add({ kind: "payment_receiver", value: `${receiver.kind}:${receiver.value}`, links: true, evidence: { receiverKind: receiver.kind, receiver: receiver.value, page: page.name } });
+		}
+		for (const command of deliveryCommandsOf(page.text)) {
+			add({ kind: "delivery_command", value: command.value, links: command.links, evidence: { template: command.template, shown: command.shown, interpreters: command.interpreters, page: page.name } });
 		}
 	}
 

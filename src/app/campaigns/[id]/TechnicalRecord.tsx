@@ -113,6 +113,13 @@ function TechnicalRecord({ campaign }: { campaign: PublicCampaign }) {
 						</dl>
 					</div>
 				))}
+				{technical.deliveries.map((delivery) => (
+					<div key={delivery.template} className="rounded-xl border bg-card p-4">
+						<p className="mb-2 font-medium">Command visitors are made to paste <span className="text-sm font-normal text-muted-foreground">· {plural(delivery.siteCount, "site", "sites")}</span></p>
+						<p className="mb-1 text-sm text-muted-foreground">Same steps on every site; the server, the path and the decoy name differ.</p>
+						<pre className="whitespace-pre-wrap break-all font-mono text-xs leading-5">{delivery.template}</pre>
+					</div>
+				))}
 				{technical.payments.length > 0 && (
 					<TableShell head={["Payment account", "Kind", "Sites"]}>
 						{technical.payments.map((payment) => <tr key={payment.value}><td className="break-all font-mono text-xs">{payment.value}</td><td>{payment.kind === "iban" ? "IBAN" : payment.kind}</td><td>{payment.siteCount}</td></tr>)}

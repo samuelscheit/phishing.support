@@ -1,5 +1,6 @@
 import { getDomain } from "tldts";
 
+import { defangCommand } from "../malware/defang";
 import { buildDossier, type Dossier, type DossierDependencies, type DossierSite } from "../referral/dossier";
 import { record, text } from "../values";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
@@ -62,7 +63,7 @@ export type PublicCampaignVisitor = {
 	kinds: VisitorKind[];
 };
 
-export type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_payment_account" | "same_pattern"; title: string; text: string };
+export type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_delivery" | "same_payment_account" | "same_pattern"; title: string; text: string };
 
 export type PublicCampaign = {
 	campaignId: string;
@@ -87,6 +88,8 @@ export type PublicCampaign = {
 		destinations: Array<{ endpoint: string; method: string; fields: string[]; sameSite: boolean; siteCount: number }>;
 		backends: Array<{ kind: string; label: string; details: Array<[string, string]>; siteCount: number }>;
 		payments: Array<{ kind: string; value: string; siteCount: number }>;
+		/** The commands the pages make visitors paste, as one template shared by the sites (URLs, encoded blobs and decoy text blanked out; operators defanged). */
+		deliveries: Array<{ template: string; siteCount: number }>;
 		kitFiles: Array<{ sha256: string; size: number; path: string; siteCount: number }>;
 		dns: Array<{ record: string; value: string; siteCount: number }>;
 		abuseContacts: string[];
@@ -201,6 +204,10 @@ function reasons(dossier: Dossier, stats: { platform?: string; durationMinutes: 
 			doing("delivers_malware").length && `the malware visitors are made to run or download comes from the same server (${hosts(doing("delivers_malware"))})`,
 		].filter(Boolean).join(", and ");
 		result.push({ kind: "same_backend", title: "Same server", text: `${subject(servers, "uses", "use")} a server only its operator controls: ${uses}.` });
+	}
+	const deliveries = shared.filter((indicator) => indicator.kind === "delivery_command");
+	if (deliveries.length) {
+		result.push({ kind: "same_delivery", title: "Same command", text: `${subject(deliveries, "makes", "make")} visitors paste the same command: the same steps, flags and interpreter, whichever server and decoy app name it names.` });
 	}
 	if (shared.some((indicator) => indicator.kind === "payment_receiver")) {
 		result.push({ kind: "same_payment_account", title: "Same payment account", text: "The pages ask visitors to pay into the same account." });
@@ -330,6 +337,10 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 				value: String(indicator.evidence.receiver ?? indicator.value.replace(/^[a-z]+:/, "")),
 				siteCount: indicator.sites.length,
 			})),
+			deliveries: shared.filter((indicator) => indicator.kind === "delivery_command").map((indicator) => ({
+				template: defangCommand(String(indicator.evidence.template ?? "")),
+				siteCount: indicator.sites.length,
+			})).sort((a, b) => b.siteCount - a.siteCount),
 			kitFiles: dossier.indicators.filter((indicator) => indicator.kind === "kit_fingerprint" && indicator.links).map((indicator) => {
 				let path = String(indicator.evidence.url ?? "");
 				try {

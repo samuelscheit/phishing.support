@@ -1,6 +1,7 @@
 /** The German wording of the complaint mails to German authorities; the evidence archive has its own English texts (archive_text.ts). */
 import { operatorServerRoles } from "../campaign/schema";
 import type { DossierIndicator, DossierSite } from "./dossier";
+import { defangCommand } from "../malware/defang";
 import { plural, record, text } from "../values";
 
 const BERLIN = new Intl.DateTimeFormat("de-DE", {
@@ -56,6 +57,9 @@ export function describeIndicator(indicator: DossierIndicator): string {
 	if (indicator.kind === "payment_receiver") {
 		const kind = text(evidence.receiverKind) ?? "";
 		return `${RECEIVER_LABEL[kind] ?? "Zahlungsempfänger"} ${text(evidence.receiver) ?? indicator.value} wird Besuchern als Zahlungsziel genannt ${reach}.`;
+	}
+	if (indicator.kind === "delivery_command") {
+		return `Identischer Befehl, den Besucher einfügen und ausführen sollen (Server, Pfad und Köder-Name verschieden; Vorlage ${JSON.stringify(defangCommand(text(evidence.template) ?? ""))}; SHA-256 ${indicator.value}) ${reach}.`;
 	}
 	if (indicator.kind === "kit_fingerprint") {
 		if (evidence.fileKind === "page_structure") return `Identische Seitenvorlage (dieselben ${evidence.tags ?? "?"} HTML-Elemente in derselben Reihenfolge, ohne Text und Attribute; SHA-256 ${indicator.value}) ${reach}.`;

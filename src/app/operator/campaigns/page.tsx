@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 const INDICATOR_LABEL: Record<string, string> = {
 	operator_server: "operator server",
 	payment_receiver: "payment receiver",
+	delivery_command: "delivery command",
 	kit_fingerprint: "kit file",
 };
 

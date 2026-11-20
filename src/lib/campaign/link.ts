@@ -91,6 +91,7 @@ export function factsFromDossier(dossier: Dossier, languages: ReadonlyArray<stri
 			...(kinds.has("kit_fingerprint") ? ["same_code" as const] : []),
 			...(kinds.has("page") ? ["same_page" as const] : []),
 			...(kinds.has("operator_server") ? ["same_backend" as const] : []),
+			...(kinds.has("delivery_command") ? ["same_delivery" as const] : []),
 			...(kinds.has("payment_receiver") ? ["same_payment_account" as const] : []),
 		],
 		analyses: [],

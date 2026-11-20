@@ -45,6 +45,7 @@ const STATUS_LABEL: Record<string, string> = {
 const INDICATOR_LABEL: Record<string, string> = {
 	operator_server: "Operator server",
 	payment_receiver: "Payment receiver",
+	delivery_command: "Delivery command",
 	kit_fingerprint: "Kit file",
 	origin_ip: "Server",
 };

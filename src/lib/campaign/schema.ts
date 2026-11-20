@@ -10,10 +10,11 @@ import type { VisitorGuidance } from "./guidance";
  *
  * - `operator_server`: a server only the operator controls, whatever it did for the site (`evidence.roles`): received the synthetic values a visit entered, or delivered the malware a page makes visitors run or download. A Telegram bot (`telegram-bot:<id>`), a Discord webhook (`discord-webhook:<id>`) or a host (`host:<name>`); a public platform's host is recorded but links nothing.
  * - `payment_receiver`: an account the page asks visitors to pay (IBAN, crypto wallet).
+ * - `delivery_command`: the SHA-256 of the template of the command a page makes visitors paste (`evidence.template`): every layer, decoded, with URLs, encoded blobs and printed decoy text blanked out, so a rotated payload host or app name leaves it unchanged. Only a command with an encoded layer, a decoy or several statements links sites; a bare one-liner is shared by unrelated actors.
  * - `kit_fingerprint`: the SHA-256 of a script or hidden-frame document of the kit itself, not of a public library, or of the reported page's body or tag structure (`fileKind` `page_document`, `page_structure`).
  * - `origin_ip`: the server behind the site; it describes the infrastructure but never links sites, because shared hosting puts unrelated operators on one address.
  */
-export const campaignIndicatorKinds = ["operator_server", "payment_receiver", "kit_fingerprint", "origin_ip"] as const;
+export const campaignIndicatorKinds = ["operator_server", "payment_receiver", "delivery_command", "kit_fingerprint", "origin_ip"] as const;
 export type CampaignIndicatorKind = (typeof campaignIndicatorKinds)[number];
 
 /** What an operator server did for a site: receive what visitors entered, or deliver the malware they were made to run or download. */

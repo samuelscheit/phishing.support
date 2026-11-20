@@ -4,6 +4,7 @@ import { CANARY_FIELD_LABEL, type CanaryField } from "../website_types";
 import sanitizeFilename from "sanitize-filename";
 
 import type { Dossier, DossierIndicator, DossierMail, DossierSite } from "./dossier";
+import { defangCommand } from "../malware/defang";
 import { plural, record, text } from "../values";
 import { utc } from "./format";
 import { infrastructureLines } from "./infrastructure";
@@ -66,6 +67,9 @@ export function describeIndicatorEnglish(indicator: DossierIndicator): string {
 	}
 	if (indicator.kind === "payment_receiver") {
 		return `Payment account ${text(evidence.receiver) ?? indicator.value} (${text(evidence.receiverKind) ?? "account"}) is named to visitors ${reach}.`;
+	}
+	if (indicator.kind === "delivery_command") {
+		return `Identical command visitors are made to paste and run (server, path and decoy name differ; template ${JSON.stringify(defangCommand(text(evidence.template) ?? ""))}; SHA-256 ${indicator.value}) ${reach}.`;
 	}
 	if (indicator.kind === "kit_fingerprint") {
 		const library = text(evidence.library) ? `; a published library file (${evidence.library}), so it links nothing` : "";
