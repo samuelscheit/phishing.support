@@ -23,7 +23,7 @@ import {
 	recordTime,
 	submitAlibabaCloudSubmission,
 } from "./submission";
-import { consoleRefusal, consoleSuccess, fakeConsoleFetch, freshSession, loginConfig, NEED_LOGIN, session, SUCCESS_ENV_SG, UPLOAD_POLICY } from "./test_support";
+import { consoleRefusal, consoleTime, consoleSuccess, fakeConsoleFetch, freshSession, loginConfig, NEED_LOGIN, session, SUCCESS_ENV_SG, UPLOAD_POLICY } from "./test_support";
 
 useTemporaryDatabase();
 
@@ -275,8 +275,8 @@ describe("submitAlibabaCloudSubmission", () => {
 		const now = Date.now();
 		const console = consoleAnswers({
 			ReportTaskList: listed(
-				{ ReportTaskId: "BEFORE-1", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "Valid", GmtCreate: now },
-				{ ReportTaskId: "RT-20261120-1", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "Valid", GmtCreate: now - 1_000, ExistCrossRegion: false },
+				{ ReportTaskId: "BEFORE-1", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "举报成立", GmtCreated: consoleTime(now) },
+				{ ReportTaskId: "RT-20261120-1", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "举报成立", GmtCreated: consoleTime(now - 1_000), ExistCrossRegion: false },
 			),
 		});
 		const success = await submitAlibabaCloudSubmission(context, preflightOf(payload, ["BEFORE-1"]), dependencies(console as never));
@@ -369,7 +369,7 @@ describe("submitAlibabaCloudSubmission", () => {
 		const { context, payload } = await readyContext();
 		const console = consoleAnswers({
 			SubmitReportTask: consoleSuccess("RT-ANSWER"),
-			ReportTaskList: listed({ ReportTaskId: "BEFORE", ReportDomainIp: payload.report.reportDomainIp, GmtCreate: Date.now() }),
+			ReportTaskList: listed({ ReportTaskId: "BEFORE", ReportDomainIp: payload.report.reportDomainIp, GmtCreated: consoleTime(Date.now()) }),
 		});
 		expect((await submitAlibabaCloudSubmission(context, preflightOf(payload, ["BEFORE"]), dependencies(console as never))).confirmationId).toBe("RT-ANSWER");
 		const none = consoleAnswers({ ReportTaskList: listed({ ReportTaskId: "BEFORE", ReportDomainIp: payload.report.reportDomainIp }) });
@@ -381,10 +381,10 @@ describe("submitAlibabaCloudSubmission", () => {
 		const now = Date.now();
 		const console = consoleAnswers({
 			ReportTaskList: listed(
-				{ ReportTaskId: "OTHER-OBJECT", ReportDomainIp: "https://unrelated.example/", ReportStatus: "Valid", GmtCreate: now },
-				{ ReportTaskId: "BEFORE", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "Valid", GmtCreate: now + 5_000 },
-				{ ReportTaskId: "RT-NEW", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "Valid", GmtCreate: now - 1_000, ExistCrossRegion: true },
-				{ ReportTaskId: "RT-OLDER", ReportDomainIp: payload.report.reportDomainIp, GmtCreate: now - 2_000 },
+				{ ReportTaskId: "OTHER-OBJECT", ReportDomainIp: "https://unrelated.example/", ReportStatus: "举报成立", GmtCreated: consoleTime(now) },
+				{ ReportTaskId: "BEFORE", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "举报成立", GmtCreated: consoleTime(now + 5_000) },
+				{ ReportTaskId: "RT-NEW", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "举报成立", GmtCreated: consoleTime(now - 1_000), ExistCrossRegion: true },
+				{ ReportTaskId: "RT-OLDER", ReportDomainIp: payload.report.reportDomainIp, GmtCreated: consoleTime(now - 2_000) },
 			),
 		});
 		expect((await submitAlibabaCloudSubmission(context, preflightOf(payload, ["BEFORE"]), dependencies(console as never))).confirmationId).toBe("RT-NEW@cn");
@@ -457,9 +457,9 @@ describe("submitAlibabaCloudSubmission", () => {
 describe("findAlibabaCloudSubmission", () => {
 	test("finds a report whose answer was lost, by its object and filing time, read-only", async () => {
 		const { context, payload } = await readyContext();
-		const sentAt = new Date();
+		const sentAt = new Date(Math.floor(Date.now() / 1000) * 1000);
 		const console = consoleAnswers({
-			ReportTaskList: consoleSuccess({ List: [{ ReportTaskId: "RT-LOST", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "Supplementary information", GmtCreate: String(sentAt.getTime() + 5_000), ExistCrossRegion: true }] }),
+			ReportTaskList: consoleSuccess({ List: [{ ReportTaskId: "RT-LOST", ReportDomainIp: payload.report.reportDomainIp, ReportStatus: "补充资料", GmtCreated: consoleTime(sentAt.getTime() + 5_000), ExistCrossRegion: true }] }),
 		});
 		expect(await findAlibabaCloudSubmission({ ...context, sentAt }, dependencies(console as never))).toEqual({
 			confirmationId: "RT-LOST@cn",
@@ -475,8 +475,8 @@ describe("findAlibabaCloudSubmission", () => {
 		const sentAt = new Date();
 		const list = (items: unknown[]) => dependencies(consoleAnswers({ ReportTaskList: consoleSuccess({ List: items }) }) as never);
 		expect(await findAlibabaCloudSubmission({ ...context, sentAt }, list([]))).toBeUndefined();
-		expect(await findAlibabaCloudSubmission({ ...context, sentAt }, list([{ ReportTaskId: "OLD", ReportDomainIp: payload.report.reportDomainIp, GmtCreate: sentAt.getTime() - 2 * 60_000 }]))).toBeUndefined();
-		expect(await findAlibabaCloudSubmission({ ...context, sentAt }, list([{ ReportTaskId: "X", ReportDomainIp: "https://other.example/", GmtCreate: sentAt.getTime() }]))).toBeUndefined();
+		expect(await findAlibabaCloudSubmission({ ...context, sentAt }, list([{ ReportTaskId: "OLD", ReportDomainIp: payload.report.reportDomainIp, GmtCreated: consoleTime(sentAt.getTime() - 2 * 60_000) }]))).toBeUndefined();
+		expect(await findAlibabaCloudSubmission({ ...context, sentAt }, list([{ ReportTaskId: "X", ReportDomainIp: "https://other.example/", GmtCreated: consoleTime(sentAt.getTime()) }]))).toBeUndefined();
 		const console = consoleAnswers();
 		expect(await findAlibabaCloudSubmission({ ...context, payload: { nope: 1 }, sentAt }, dependencies(console as never))).toBeUndefined();
 		expect(console.requests).toHaveLength(0);
@@ -484,17 +484,16 @@ describe("findAlibabaCloudSubmission", () => {
 
 	test("a record without a parseable time never matches; one within 60 s before the attempt does, an older one does not", async () => {
 		const { context, payload } = await readyContext();
-		const sentAt = new Date();
+		const sentAt = new Date(Math.floor(Date.now() / 1000) * 1000);
 		const found = (item: Record<string, unknown>) => findAlibabaCloudSubmission({ ...context, sentAt }, dependencies(consoleAnswers({ ReportTaskList: consoleSuccess({ List: [{ ReportDomainIp: payload.report.reportDomainIp, ...item }] }) }) as never));
-		expect(await found({ ReportTaskId: 77 })).toBeUndefined();
-		expect(await found({ ReportTaskId: 77, GmtCreate: "garbage" })).toBeUndefined();
-		expect((await found({ ReportTaskId: "SLACK", GmtCreate: sentAt.getTime() - 59_000 }))?.confirmationId).toBe("SLACK");
-		expect((await found({ ReportTaskId: "EDGE", GmtCreate: sentAt.getTime() - 60_000 }))?.confirmationId).toBe("EDGE");
-		expect(await found({ ReportTaskId: "OLD", GmtCreate: sentAt.getTime() - 61_000 })).toBeUndefined();
-		// A console time string is UTC+8 and compared as such.
-		const local = new Date(sentAt.getTime() + 8 * 3_600_000 + 5_000).toISOString().slice(0, 19).replace("T", " ");
-		expect((await found({ ReportTaskId: "LOCAL", GmtCreate: local }))?.confirmationId).toBe("LOCAL");
-		expect(await found({ ReportTaskId: "UTC-MISREAD", GmtCreate: new Date(sentAt.getTime() - 3_600_000).toISOString().slice(0, 19).replace("T", " ") })).toBeUndefined();
+		expect(await found({ ReportTaskId: "77" })).toBeUndefined();
+		expect(await found({ ReportTaskId: "77", GmtCreated: "garbage" })).toBeUndefined();
+		expect((await found({ ReportTaskId: "SLACK", GmtCreated: consoleTime(sentAt.getTime() - 59_000) }))?.confirmationId).toBe("SLACK");
+		expect((await found({ ReportTaskId: "EDGE", GmtCreated: consoleTime(sentAt.getTime() - 60_000) }))?.confirmationId).toBe("EDGE");
+		expect(await found({ ReportTaskId: "OLD", GmtCreated: consoleTime(sentAt.getTime() - 61_000) })).toBeUndefined();
+		// A console time is UTC+8: read as UTC it would be 8 hours too early.
+		const utcMisread = new Date(sentAt.getTime() + 5_000).toISOString().slice(0, 19).replace("T", " ");
+		expect(await found({ ReportTaskId: "UTC-MISREAD", GmtCreated: utcMisread })).toBeUndefined();
 	});
 
 	test("a failing list is an error for the caller (it is a read-only lookup)", async () => {
@@ -507,7 +506,7 @@ describe("end to end through the execution engine", () => {
 	test("prepare, upload before the marker, submit once, record the receipt, and a replay files nothing more", async () => {
 		const { created, route } = await alibabaRoute();
 		const console = consoleAnswers({
-			ReportTaskList: [listed(), listed({ ReportTaskId: "RT-E2E", ReportDomainIp: `https://${TARGET}/signin`, ReportStatus: "Valid", GmtCreate: Date.now() + 1_000, ExistCrossRegion: false })],
+			ReportTaskList: [listed(), listed({ ReportTaskId: "RT-E2E", ReportDomainIp: `https://${TARGET}/signin`, ReportStatus: "已创建", GmtCreated: consoleTime(Date.now() + 1_000), ExistCrossRegion: false })],
 		});
 		const deps = dependencies(console as never);
 		const provider: ProviderSubmissionProvider = {
@@ -547,78 +546,112 @@ describe("end to end through the execution engine", () => {
 });
 
 describe("report records and status", () => {
-	test("parseAlibabaReportRecords keeps only entries with a task ID and reads the alternative field names", () => {
+	const REAL_RECORD = { ExistCrossRegion: false, TypeReport: "Phishing Scams", ErrorStatus: 0, GmtCreated: "2026-11-20 18:24:26", ReportStatus: "已创建", ReportTaskId: "202611205170266473080", ReportDomainIp: "https://darksword.helicha.com/" };
+	const REAL_STATUS = { ReportStatusList: [{ CreateTime: "2026-11-20 18:24:26", ReportStatus: "已创建" }, { CreateTime: "2026-11-20 18:25:03", ReportStatus: "处理中" }] };
+	const step = (state: string, at?: string) => ({ ReportStatus: state, ...(at ? { CreateTime: at } : {}) });
+
+	test("parseAlibabaReportRecords reads the real console list: UTC+8 time, translated state, cross-region flag", () => {
+		expect(parseAlibabaReportRecords({ PageSize: 20, Total: 1, List: [REAL_RECORD], Page: 1 })).toEqual([
+			{ reportTaskId: "202611205170266473080", existCrossRegion: false, reportDomainIp: "https://darksword.helicha.com/", status: "Created", createdAt: Date.parse("2026-11-20T10:24:26Z") },
+		]);
+		expect(parseAlibabaReportRecords({ List: [{ ...REAL_RECORD, ExistCrossRegion: true }] })[0]!.existCrossRegion).toBeTrue();
+	});
+
+	test("parseAlibabaReportRecords keeps only entries with a task ID and drops malformed fields", () => {
 		expect(parseAlibabaReportRecords(undefined)).toEqual([]);
 		expect(parseAlibabaReportRecords({ List: "x" })).toEqual([]);
 		expect(parseAlibabaReportRecords({ List: [null, 1, "a", {}, { ReportTaskId: "" }, { ReportTaskId: null }, { ReportTaskId: {} }] })).toEqual([]);
 		expect(parseAlibabaReportRecords({ List: [
-			{ ReportTaskId: "A", ReportDomainIp: "https://a/", ReportStatus: "Valid", GmtCreate: 1_700_000_000_000, ExistCrossRegion: true },
-			{ ReportTaskId: 2, ReportObject: "b", Status: "Invalid", CreateTime: "1700000001" },
-			{ ReportTaskId: "C", ReportTime: "2026-11-20T10:00:00Z", ExistCrossRegion: "true" },
-			{ ReportTaskId: "D", GmtCreate: "garbage", ReportDomainIp: 4, ReportStatus: 5 },
+			{ ReportTaskId: 2, ExistCrossRegion: "true" },
+			{ ReportTaskId: "D", GmtCreated: "garbage", ReportDomainIp: 4, ReportStatus: 5 },
 		] })).toEqual([
-			{ reportTaskId: "A", existCrossRegion: true, reportDomainIp: "https://a/", status: "Valid", createdAt: 1_700_000_000_000 },
-			{ reportTaskId: "2", existCrossRegion: false, reportDomainIp: "b", status: "Invalid", createdAt: 1_700_000_001_000 },
-			{ reportTaskId: "C", existCrossRegion: false, createdAt: Date.parse("2026-11-20T10:00:00Z") },
+			{ reportTaskId: "2", existCrossRegion: false },
 			{ reportTaskId: "D", existCrossRegion: false },
 		]);
+	});
+
+	test("the old guessed field names are not read", () => {
+		expect(parseAlibabaReportRecords({ List: [{ ReportTaskId: "A", ReportObject: "b", Status: "Valid", GmtCreate: 1_700_000_000_000, CreateTime: "1700000001", ReportTime: "1700000002" }] }))
+			.toEqual([{ reportTaskId: "A", existCrossRegion: false }]);
+		const parsed = parseAlibabaReportStatus("R", { ReportStatusList: [{ ReportStatus: "已创建", Time: 1, ProcessTime: 2, GmtModified: 3, GmtCreate: 4 }] });
+		expect(parsed).toEqual({ messages: [], status: { state: "Created" }, final: false });
 	});
 
 	test("the live empty ReportTaskList parses to nothing", () => {
 		expect(parseAlibabaReportRecords({ PageSize: 20, Total: 0, List: [], Page: 1 })).toEqual([]);
 	});
 
-	test("parseAlibabaReportStatus: the last step is the status, final states end polling, notes become detail and messages", () => {
-		const at = Date.parse("2026-11-21T08:00:00Z");
-		const parsed = parseAlibabaReportStatus("RT1", { ReportStatusList: [
-			{ ReportStatus: "Pending", GmtCreate: at - 1000 },
-			{ ReportStatus: "Supplementary information", GmtCreate: at, Remark: " Please send more ", Reason: "unclear", Result: "" },
-		] });
-		expect(parsed.status).toEqual({ state: "Supplementary information", detail: "Please send more unclear" });
+	test("REPORT_STATES translates every Chinese state; unknown labels pass through unchanged", () => {
+		const expected: Record<string, string> = {
+			已创建: "Created", 待认领: "Assigning", 处理中: "Processing", 自动化审理中: "Automated review", 补充资料: "Supplementary information",
+			暂不处理: "Abnormal", 已完结: "Completed", 举报成立: "Valid", 已撤诉: "Withdrawal", 已撤销: "Revoked", 通知整改: "Notify rectification", 举报不成立: "Invalid",
+		};
+		for (const [chinese, english] of Object.entries(expected)) {
+			expect(parseAlibabaReportStatus("R", { ReportStatusList: [step(chinese)] }).status).toEqual({ state: english });
+			expect(parseAlibabaReportRecords({ List: [{ ReportTaskId: "A", ReportStatus: chinese }] })[0]!.status).toBe(english);
+		}
+		expect(parseAlibabaReportStatus("R", { ReportStatusList: [step(" 全新状态 ")] }).status).toEqual({ state: "全新状态" });
+		expect(parseAlibabaReportRecords({ List: [{ ReportTaskId: "A", ReportStatus: "Brand new" }] })[0]!.status).toBe("Brand new");
+	});
+
+	test("parseAlibabaReportStatus reads the real steps: last is the status, polling goes on, messages at UTC+8 times", () => {
+		const parsed = parseAlibabaReportStatus("202611205170266473080", REAL_STATUS);
+		const created = Date.parse("2026-11-20T10:24:26Z");
+		const processing = Date.parse("2026-11-20T10:25:03Z");
+		expect(parsed.status).toEqual({ state: "Processing" });
 		expect(parsed.final).toBeFalse();
 		expect(parsed.messages).toEqual([
-			{ id: `RT1:Pending:${at - 1000}`, subject: "Alibaba Cloud report RT1: Pending", body: "Pending", sentAt: new Date(at - 1000) },
-			{ id: `RT1:Supplementary information:${at}`, subject: "Alibaba Cloud report RT1: Supplementary information", body: "Supplementary information\n\nPlease send more\n\nunclear", sentAt: new Date(at) },
+			{ id: `202611205170266473080:Created:${created}`, subject: "Alibaba Cloud report 202611205170266473080: Created", body: "Created", sentAt: new Date(created) },
+			{ id: `202611205170266473080:Processing:${processing}`, subject: "Alibaba Cloud report 202611205170266473080: Processing", body: "Processing", sentAt: new Date(processing) },
 		]);
-		for (const state of ["Completed", "Invalid", "Revoked", "Abnormal", "Withdrawal"]) {
-			expect(parseAlibabaReportStatus("R", { ReportStatusList: [{ ReportStatus: state }] }).final).toBeTrue();
+	});
+
+	test("notes, when a step has them, become detail and message body", () => {
+		const at = "2026-11-21 16:00:00";
+		const parsed = parseAlibabaReportStatus("RT1", { ReportStatusList: [{ ...step("补充资料", at), Remark: " Please send more ", Reason: "unclear", Result: "" }] });
+		expect(parsed.status).toEqual({ state: "Supplementary information", detail: "Please send more unclear" });
+		expect(parsed.messages[0]).toMatchObject({ body: "Supplementary information\n\nPlease send more\n\nunclear", sentAt: new Date("2026-11-21T08:00:00Z") });
+	});
+
+	test("final states end polling, the others do not, and only the translated name counts", () => {
+		for (const state of ["已完结", "举报不成立", "已撤销", "暂不处理", "已撤诉"]) {
+			expect(parseAlibabaReportStatus("R", { ReportStatusList: [step(state)] }).final).toBeTrue();
 		}
-		for (const state of ["Valid", "Notify rectification", "Pending", "Supplementary information", "completed"]) {
-			expect(parseAlibabaReportStatus("R", { ReportStatusList: [{ ReportStatus: state }] }).final).toBeFalse();
+		for (const state of ["举报成立", "通知整改", "已创建", "处理中", "自动化审理中", "补充资料", "待认领", "completed"]) {
+			expect(parseAlibabaReportStatus("R", { ReportStatusList: [step(state)] }).final).toBeFalse();
 		}
 	});
 
 	test("steps without a time yield a status but no message; garbage steps are skipped; nothing parsed has no status", () => {
-		const parsed = parseAlibabaReportStatus("R", { ReportStatusList: [null, "x", { ReportStatus: "" }, { ReportStatus: 4 }, { ReportStatus: "Valid" }] });
+		const parsed = parseAlibabaReportStatus("R", { ReportStatusList: [null, "x", { ReportStatus: "" }, { ReportStatus: 4 }, step("举报成立")] });
 		expect(parsed).toEqual({ messages: [], status: { state: "Valid" }, final: false });
 		expect(parseAlibabaReportStatus("R", undefined)).toEqual({ messages: [] });
 		expect(parseAlibabaReportStatus("R", { ReportStatusList: {} })).toEqual({ messages: [] });
 		expect(parseAlibabaReportStatus("R", { ReportStatusList: [] })).toEqual({ messages: [] });
-		// Time fields in order of preference, ISO strings and numeric strings alike.
-		const times = parseAlibabaReportStatus("R", { ReportStatusList: [{ ReportStatus: "A", Time: "1700000000" }, { ReportStatus: "B", ProcessTime: "2026-11-21T00:00:00Z" }, { ReportStatus: "C", GmtModified: 1_700_000_100_000 }] });
-		expect(times.messages.map((m) => m.sentAt.getTime())).toEqual([1_700_000_000_000, 1_700_000_100_000, Date.parse("2026-11-21T00:00:00Z")]);
-		expect(times.status?.state).toBe("B");
+		const times = parseAlibabaReportStatus("R", { ReportStatusList: [step("已创建", "1700000000"), step("处理中", "2026-11-21T00:00:00Z"), step("已完结", "2026-11-21 08:00:00")] });
+		expect(times.messages.map((m) => m.sentAt.getTime())).toEqual([1_700_000_000_000, Date.parse("2026-11-21T00:00:00Z"), Date.parse("2026-11-21T00:00:00Z")]);
+		expect(times.status?.state).toBe("Completed");
 	});
 
 	test("steps are sorted oldest first when every step has a time, whatever order the console lists them; otherwise the listed order stays", () => {
 		const newestFirst = parseAlibabaReportStatus("RT", { ReportStatusList: [
-			{ ReportStatus: "Completed", GmtCreate: "2026-11-21 10:00:00" },
-			{ ReportStatus: "Valid", GmtCreate: "2026-11-20 09:00:00" },
-			{ ReportStatus: "Pending", GmtCreate: "2026-11-19 08:00:00" },
+			step("已完结", "2026-11-21 10:00:00"),
+			step("举报成立", "2026-11-20 09:00:00"),
+			step("处理中", "2026-11-19 08:00:00"),
 		] });
 		expect(newestFirst.messages.map((m) => m.id)).toEqual([
-			`RT:Pending:${Date.parse("2026-11-19T00:00:00Z")}`,
+			`RT:Processing:${Date.parse("2026-11-19T00:00:00Z")}`,
 			`RT:Valid:${Date.parse("2026-11-20T01:00:00Z")}`,
 			`RT:Completed:${Date.parse("2026-11-21T02:00:00Z")}`,
 		]);
 		expect(newestFirst.status).toEqual({ state: "Completed" });
 		expect(newestFirst.final).toBeTrue();
 		// One step without a time: no sorting, the last listed one is the status.
-		const partial = parseAlibabaReportStatus("RT", { ReportStatusList: [{ ReportStatus: "Completed", GmtCreate: 1_700_000_200_000 }, { ReportStatus: "Valid" }, { ReportStatus: "Pending", GmtCreate: 1_700_000_000_000 }] });
-		expect(partial.messages.map((m) => m.id)).toEqual(["RT:Completed:1700000200000", "RT:Pending:1700000000000"]);
-		expect(partial.status).toEqual({ state: "Pending" });
+		const partial = parseAlibabaReportStatus("RT", { ReportStatusList: [step("已完结", "2026-11-21 10:00:00"), step("举报成立"), step("处理中", "2026-11-19 08:00:00")] });
+		expect(partial.messages.map((m) => m.id)).toEqual([`RT:Completed:${Date.parse("2026-11-21T02:00:00Z")}`, `RT:Processing:${Date.parse("2026-11-19T00:00:00Z")}`]);
+		expect(partial.status).toEqual({ state: "Processing" });
 		// The same state at two times stays two distinct messages.
-		const repeated = parseAlibabaReportStatus("RT", { ReportStatusList: [{ ReportStatus: "Valid", GmtCreate: 1_700_000_000_000 }, { ReportStatus: "Valid", GmtCreate: 1_700_000_500_000 }] });
+		const repeated = parseAlibabaReportStatus("RT", { ReportStatusList: [step("举报成立", "2026-11-20 09:00:00"), step("举报成立", "2026-11-20 09:10:00")] });
 		expect(new Set(repeated.messages.map((m) => m.id)).size).toBe(2);
 	});
 
@@ -641,30 +674,34 @@ describe("report records and status", () => {
 
 	test("the verdict of every review state the provider maps is reachable, and unmapped ones give none", () => {
 		const verdicts = alibabaCloudProvider.reviewVerdicts!;
-		expect(verdicts.Pending).toBeUndefined();
-		for (const state of ["Revoked", "Withdrawal"]) expect(verdicts[state]).toBeUndefined();
+		for (const state of ["Created", "Processing", "Automated review", "Assigning", "Revoked", "Withdrawal"]) expect(verdicts[state]).toBeUndefined();
+		// The verdicts are keyed by the English names the Chinese states translate to.
+		const chinese: Record<string, string> = { 举报成立: "Valid", 通知整改: "Notify rectification", 已完结: "Completed", 补充资料: "Supplementary information", 举报不成立: "Invalid", 暂不处理: "Abnormal" };
+		for (const [label, english] of Object.entries(chinese)) {
+			expect(verdicts[english]).toBeDefined();
+			expect(parseAlibabaReportStatus("R", { ReportStatusList: [step(label)] }).status?.state).toBe(english);
+		}
 		// Every final state with a verdict is terminal in the parser.
-		for (const state of ["Completed", "Invalid", "Abnormal"]) {
-			expect(verdicts[state]).toBeDefined();
-			expect(parseAlibabaReportStatus("R", { ReportStatusList: [{ ReportStatus: state }] }).final).toBeTrue();
+		for (const label of ["已完结", "举报不成立", "暂不处理"]) {
+			expect(parseAlibabaReportStatus("R", { ReportStatusList: [step(label)] }).final).toBeTrue();
 		}
 	});
 
 	test("fetchAlibabaCloudCorrespondence asks GetReportStatus for the task, with the region from the receipt suffix", async () => {
-		const answer = consoleSuccess({ ReportStatusList: [{ ReportStatus: "Completed", GmtCreate: 1_700_000_000_000, Remark: "Taken down" }] });
+		const answer = consoleSuccess({ ReportStatusList: [{ ReportStatus: "已完结", CreateTime: "2026-11-20 18:25:03", Remark: "Taken down" }] });
 		for (const [receipt, region] of [["RT9", false], ["RT9@cn", true], ["RT9@xx", false]] as const) {
 			const console = fakeConsoleFetch({ GetReportStatus: answer });
 			const result = await fetchAlibabaCloudCorrespondence({ confirmationId: receipt }, dependencies(console as never));
 			expect(console.requests[0]!.params).toEqual({ reportTaskId: "RT9", existCrossRegion: region, pageType: "harmInfo" });
 			expect(result).toMatchObject({ final: true, status: { state: "Completed", detail: "Taken down" } });
-			expect(result.messages[0]).toMatchObject({ id: "RT9:Completed:1700000000000", sentAt: new Date(1_700_000_000_000) });
+			expect(result.messages[0]).toMatchObject({ id: `RT9:Completed:${Date.parse("2026-11-20T10:25:03Z")}`, sentAt: new Date("2026-11-20T10:25:03Z") });
 		}
 		await expect(fetchAlibabaCloudCorrespondence({ confirmationId: "" }, dependencies(fakeConsoleFetch({}) as never))).rejects.toThrow("receipt ID is empty");
 		await expect(fetchAlibabaCloudCorrespondence({ confirmationId: "@cn" }, dependencies(fakeConsoleFetch({}) as never))).rejects.toThrow("receipt ID is empty");
 	});
 
 	test("polling relogs in once on an expired session and surfaces refusals", async () => {
-		const answer = consoleSuccess({ ReportStatusList: [{ ReportStatus: "Valid", GmtCreate: 5 }] });
+		const answer = consoleSuccess({ ReportStatusList: [{ ReportStatus: "举报成立", CreateTime: "2026-11-20 18:25:03" }] });
 		const console = fakeConsoleFetch({ GetReportStatus: [NEED_LOGIN, answer] });
 		let logins = 0;
 		const result = await fetchAlibabaCloudCorrespondence({ confirmationId: "RT1" }, { fetch: console.fetch, config: loginConfig, getSession: (async () => (++logins === 1 ? session : freshSession)) as never });

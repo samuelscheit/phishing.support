@@ -125,6 +125,32 @@ function preflightState(preflight: ProviderSubmissionPreflight): AlibabaPrefligh
 /** A task ID as the console names reports; anything else is not a receipt. */
 const REPORT_TASK_ID = /^[A-Za-z0-9_-]{4,64}$/;
 
+/**
+ * The console names a report's state in Chinese whatever the account's
+ * language; these are its own English names for them (its translation table,
+ * `infr.reportRecord.enum.*`), which `reviewVerdicts` maps.
+ */
+const REPORT_STATES: Readonly<Record<string, string>> = {
+	已创建: "Created",
+	待认领: "Assigning",
+	处理中: "Processing",
+	// Not in the console's table; seen on 2026-11-20 right after filing.
+	自动化审理中: "Automated review",
+	补充资料: "Supplementary information",
+	暂不处理: "Abnormal",
+	已完结: "Completed",
+	举报成立: "Valid",
+	已撤诉: "Withdrawal",
+	已撤销: "Revoked",
+	通知整改: "Notify rectification",
+	举报不成立: "Invalid",
+};
+
+function reportState(value: unknown): string | undefined {
+	if (typeof value !== "string" || !value.trim()) return undefined;
+	return REPORT_STATES[value.trim()] ?? value.trim();
+}
+
 /** One entry of the account's report list. */
 export type AlibabaReportRecord = { reportTaskId: string; existCrossRegion: boolean; reportDomainIp?: string; status?: string; createdAt?: number };
 
@@ -149,14 +175,15 @@ export function parseAlibabaReportRecords(data: unknown): AlibabaReportRecord[] 
 		const item = asRecord(value);
 		const id = item?.ReportTaskId;
 		if (!item || (typeof id !== "string" && typeof id !== "number") || String(id).length === 0) return [];
-		const domainIp = item.ReportDomainIp ?? item.ReportObject;
-		const status = item.ReportStatus ?? item.Status;
-		const created = recordTime(item.GmtCreate ?? item.CreateTime ?? item.ReportTime);
+		const domainIp = item.ReportDomainIp;
+		// 2026-11-20: {ExistCrossRegion, TypeReport, ErrorStatus, GmtCreated:"2026-11-20 18:24:26", ReportStatus:"已创建", ReportTaskId, ReportDomainIp}
+		const status = reportState(item.ReportStatus);
+		const created = recordTime(item.GmtCreated);
 		return [{
 			reportTaskId: String(id),
 			existCrossRegion: item.ExistCrossRegion === true,
 			...(typeof domainIp === "string" ? { reportDomainIp: domainIp } : {}),
-			...(typeof status === "string" ? { status } : {}),
+			...(status ? { status } : {}),
 			...(created !== undefined ? { createdAt: created } : {}),
 		}];
 	});
@@ -236,10 +263,11 @@ const FINAL_STATES = new Set(["Completed", "Invalid", "Revoked", "Abnormal", "Wi
 export function parseAlibabaReportStatus(reportTaskId: string, data: unknown): ProviderCorrespondence {
 	const list = asRecord(data)?.ReportStatusList;
 	const listed = (Array.isArray(list) ? list : []).flatMap((value) => {
+		// 2026-11-20: {CreateTime:"2026-11-20 18:25:03", ReportStatus:"处理中"}, oldest first.
 		const step = asRecord(value);
-		const state = step?.ReportStatus;
-		if (!step || typeof state !== "string" || !state) return [];
-		const at = recordTime(step.GmtCreate ?? step.Time ?? step.ProcessTime ?? step.GmtModified);
+		const state = reportState(step?.ReportStatus);
+		if (!step || !state) return [];
+		const at = recordTime(step.CreateTime);
 		const notes = [step.Remark, step.Reason, step.Description, step.Result, step.ReplyContent]
 			.filter((note): note is string => typeof note === "string" && note.trim().length > 0)
 			.map((note) => note.trim());

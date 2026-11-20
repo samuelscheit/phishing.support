@@ -69,3 +69,8 @@ export function fakeConsoleFetch(answers: Record<string, Array<string | Response
 	};
 	return { fetch, requests, actions: () => requests.filter((request) => request.action).map((request) => request.action!) , count: (action: string) => requests.filter((request) => request.action === action).length };
 }
+
+/** A time as the console writes it: UTC+8 without a zone, whole seconds. */
+export function consoleTime(epochMs: number): string {
+	return new Date(Math.floor(epochMs / 1000) * 1000 + 8 * 3_600_000).toISOString().slice(0, 19).replace("T", " ");
+}
