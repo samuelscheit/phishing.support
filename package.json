@@ -55,7 +55,7 @@
 		"@toon-format/toon": "4.1.1",
 		"@zip.js/zip.js": "2.24.0",
 		"asn1js": "3.1.0",
-		"browser-fabric": "github:samuelscheit/browser#dd908daf21e88a8d2c9e59ee045abc323895634e",
+		"browser-fabric": "github:samuelscheit/browser#495b84019f6991c33f0f90ed875d615e4943ec20",
 		"class-variance-authority": "0.7.1",
 		"clsx": "2.1.1",
 		"date-fns": "4.4.0",

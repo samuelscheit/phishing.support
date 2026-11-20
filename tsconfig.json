@@ -22,7 +22,7 @@
 		],
 		"paths": {
 			"@/*": ["./src/*"],
-			"@browser-fabric/worker-runtime": ["./node_modules/browser-fabric/packages/worker-runtime/src/cdp-connection.ts"]
+			"@browser-fabric/worker-runtime/cdp-connection": ["./node_modules/browser-fabric/packages/worker-runtime/src/cdp-connection.ts"]
 		}
 	},
 	"include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts", "**/*.mts"],
