@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 
 import { asRecord } from "../../../util/values";
-import type { BrowserFormField, BrowserFormResponse, BrowserFormSession } from "../browser_form";
-import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
-import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import type { BrowserFormField, BrowserFormResponse, BrowserFormSession } from "../kit/browser_form";
+import { createDraft, type VerifiedOf, reportInputOf, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { formOpener, preparedState, withPreflight } from "../kit/session";
 import { snippet } from "../../../util/text";
 import {
@@ -24,7 +24,7 @@ import {
 export type PublicDomainRegistryDependencies = RouteDeps & {
 	/** The browser on the form with the challenge passed; tests inject a fake. */
 	openForm?: (signal: AbortSignal | undefined) => Promise<BrowserFormSession>;
-	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
+	getArtifact?: EvidenceDependencies["getArtifact"];
 };
 
 /** What the preflight leaves for the one request after the marker. */
@@ -47,9 +47,6 @@ export const publicDomainRegistryDraft = createDraft({
 	build: buildPublicDomainRegistrySubmissionPayload,
 	targetOf: (payload) => payload.target.domain,
 });
-
-/** Check the route and build the durable draft before any provider call. */
-export const preparePublicDomainRegistrySubmission = publicDomainRegistryDraft.prepare;
 
 /** The uploader's `{success, data: {path, file}}`: the path the feedback names the file by. */
 export function uploadedPath(answer: BrowserFormResponse): string {
@@ -82,10 +79,9 @@ function uploadFields(nonce: string, file: { filename: string; mimeType: string;
  * anti-spam fields. None of it files a report, so every failure is a safe
  * retry (the browser is closed first).
  */
-export async function preparePublicDomainRegistryExternalSubmission(context: ProviderSubmissionContext, dependencies: PublicDomainRegistryDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await publicDomainRegistryDraft.verify(context, dependencies);
+export async function preparePublicDomainRegistryExternalSubmission(context: ProviderSubmissionContext, { payload, data }: VerifiedOf<typeof publicDomainRegistryDraft>, dependencies: PublicDomainRegistryDependencies = {}): Promise<ProviderSubmissionPreflight> {
 	const file = payload.evidence
-		? (await loadEvidenceFile({ reference: payload.evidence, contract: PUBLIC_DOMAIN_REGISTRY_EVIDENCE_CONTRACT, reportId: data.report.id, label: "PublicDomainRegistry", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) })).file
+		? (await evidenceFileOf(PUBLIC_DOMAIN_REGISTRY_EVIDENCE_CONTRACT, "PublicDomainRegistry", payload.evidence, data, dependencies)).file
 		: undefined;
 	return withPreflight(() => (dependencies.openForm ?? formOpener(PROVIDER, "publicdomainregistry-report", { url: PROVIDER.formUrl, formSelector: PROVIDER.formSelector }))(context.signal), async (session): Promise<PublicDomainRegistryPreflightState> => {
 		const uploads: string[] = [];
@@ -126,7 +122,7 @@ export function feedbackFields(payload: PublicDomainRegistrySubmissionPayload, s
 const NOTHING_FILED = new Set(["validation_failed", "aborted", "acceptance_missing", "init_failed"]);
 
 /** The one irreversible request: Contact Form 7's feedback with the pinned draft and the preflight's page state. */
-export async function submitPublicDomainRegistrySubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
+export async function submitPublicDomainRegistrySubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess> {
 	const payload = storedPublicDomainRegistrySubmissionPayload(context.payload);
 	if (!payload) throw new Error("The persisted PublicDomainRegistry submission payload is malformed.");
 	const state = preparedState<PublicDomainRegistryPreflightState>(

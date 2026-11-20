@@ -177,36 +177,47 @@ export type DecisionAnswerChannel =
 		submit(answer: DecisionAnswer, markSending: () => Promise<void>): Promise<void>;
 	};
 
+/** How a provider files its complaint: one request, or a preflight before the marker and the request after it. */
+export type ProviderSubmissionFiling =
+	| {
+		/** The irreversible call. */
+		submit(context: ProviderSubmissionContext): Promise<ProviderSubmissionSuccess>;
+	}
+	| {
+		/**
+		 * Prepare ephemeral state without crossing the provider's complaint
+		 * boundary. This runs after the durable run exists but before its
+		 * `submission_started` marker; `verified` is what `verifyDraft` returned
+		 * for this attempt. Failures remain safely retryable.
+		 */
+		prepareExternalSubmission(context: ProviderSubmissionContext, verified: unknown): Promise<ProviderSubmissionPreflight>;
+		/** The irreversible call, consuming the preflight. */
+		submitPrepared(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess>;
+	};
+
 /**
  * A direct provider integration. Generic code selects it from the registry
  * and invokes it, but never branches on provider names or request details.
  */
-export type ProviderSubmissionProvider = {
+export type ProviderSubmissionProvider = ProviderSubmissionFiling & {
 	readonly definition: ProviderSubmissionDefinition;
 	/**
-	 * Optional pre-marker validation and payload construction. It must not make
-	 * an irreversible provider request; generic execution writes the durable
-	 * marker immediately before calling the provider's irreversible submit
-	 * handler.
+	 * Pre-marker validation and payload construction. It must not make an
+	 * irreversible provider request; generic execution writes the durable
+	 * marker immediately before calling the provider's irreversible call.
 	 */
-	prepareSubmission?(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation>;
+	prepareSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation>;
 	/**
 	 * Prove the stored draft is still exactly what the provider builds from the
 	 * current route and report; it throws when it is not. The executor runs it
-	 * for every provider before any preflight and before the marker, so a drift
-	 * ends the attempt where nothing was filed. After the marker a provider only
-	 * reads its stored payload and sends its one request.
+	 * once per attempt before any preflight and before the marker, so a drift
+	 * ends the attempt where nothing was filed, and hands the result to the
+	 * preflight. After the marker a provider only reads its stored payload and
+	 * sends its one request.
 	 */
-	verifyDraft?(context: ProviderSubmissionContext): Promise<unknown>;
+	verifyDraft(context: ProviderSubmissionContext): Promise<unknown>;
 	/** Build the provider-owned preview shown before a durable run exists. */
 	buildReportPreview?(context: ProviderReportPreviewContext): string | undefined;
-	/**
-	 * Prepare ephemeral state without crossing the provider's complaint
-	 * boundary. This runs after the durable run exists but before its
-	 * `submission_started` marker. Failures remain safely retryable.
-	 */
-	prepareExternalSubmission?(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreflight>;
-	submit(context: ProviderSubmissionContext): Promise<ProviderSubmissionSuccess>;
 	/**
 	 * Read-only: find the report a submission filed when its answer was lost
 	 * (a gateway timeout, a dropped connection), by the immutable payload it
@@ -241,6 +252,4 @@ export type ProviderSubmissionProvider = {
 	 * entry (`processing`, `submitted`) is no decision yet.
 	 */
 	readonly reviewVerdicts?: Readonly<Record<string, AbuseMailClassification>>;
-	/** Provider entry point that consumes the ephemeral preflight state, when needed. */
-	submitPrepared?(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess>;
 };

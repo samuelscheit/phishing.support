@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { AbuseRepository } from "@/lib/abuse/repository";
-import { isTrackingToken } from "@/lib/abuse/security";
+import { isTrackingToken } from "@/lib/abuse/security/security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

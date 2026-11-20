@@ -1,5 +1,5 @@
 import { defineProvider, registrarPreview } from "../kit/provider";
-import { reportReferencesIn } from "../report_reference";
+import { reportReferencesIn } from "../kit/report_reference";
 import { fetchGoDaddyCorrespondence, GODADDY_REVIEW_VERDICTS } from "./correspondence";
 import { GODADDY_PROVIDER } from "./definition";
 import { goDaddyReportUrls, makeGoDaddyInfo } from "./payload";
@@ -22,8 +22,8 @@ export const goDaddyProvider = defineProvider({
 	definition: GODADDY_PROVIDER,
 	draft: goDaddyDraft,
 	preview: registrarPreview({ urls: goDaddyReportUrls, make: makeGoDaddyInfo }),
-	external: { prepare: (context) => prepareGoDaddyExternalSubmission(context), submit: (context, preflight) => submitGoDaddySubmission(context, preflight) },
-	fetchCorrespondence: (context) => fetchGoDaddyCorrespondence(context),
+	external: { prepare: prepareGoDaddyExternalSubmission, submit: submitGoDaddySubmission },
+	fetchCorrespondence: fetchGoDaddyCorrespondence,
 	reviewVerdicts: GODADDY_REVIEW_VERDICTS,
 	inbound: { messageKind: "reply", senderDomains: ["godaddy.com"], confirmationIds: goDaddyConfirmationIds },
 });

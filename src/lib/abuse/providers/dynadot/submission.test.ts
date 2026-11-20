@@ -3,25 +3,19 @@ import { describe, expect, test } from "bun:test";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { contactRoute } from "../../resolver/routes";
 import type { AbuseArtifact } from "../../schema";
-import { BrowserFormError, type BrowserFormChoiceSession, type BrowserFormField, type BrowserFormResponse } from "../browser_form";
-import { DESCRIPTION as description, formAnswer as answer, pngArtifact as png, PNG, readyDraft, TARGET } from "../kit/testing";
-import { reportReference } from "../report_reference";
+import { BrowserFormError, type BrowserFormChoiceSession, type BrowserFormField, type BrowserFormResponse } from "../kit/browser_form";
+import { DESCRIPTION as description, formAnswer as answer, pngArtifact as png, PNG, readyDraft, TARGET, verifiedPrepare } from "../kit/testing";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { DYNADOT_PROVIDER as PROVIDER } from "./definition";
 import { dynadotProvider } from "./index";
 import { storedDynadotSubmissionPayload } from "./payload";
-import {
-	prepareDynadotExternalSubmission,
-	prepareDynadotSubmission,
-	submissionFields,
-	submitDynadotSubmission,
-	type DynadotDependencies,
-	type DynadotPreflightState,
-} from "./submission";
+import { prepareDynadotExternalSubmission as rawPrepareDynadotExternalSubmission, dynadotDraft, submissionFields, submitDynadotSubmission, type DynadotDependencies, type DynadotPreflightState } from "./submission";
+
+const prepareDynadotExternalSubmission = verifiedPrepare(dynadotDraft, rawPrepareDynadotExternalSubmission);
 
 useTemporaryDatabase();
 
-const readyContext = () => readyDraft({ mailbox: "abuse@dynadot.com", providerName: "Dynadot" }, prepareDynadotSubmission, storedDynadotSubmissionPayload);
+const readyContext = () => readyDraft({ mailbox: "abuse@dynadot.com", providerName: "Dynadot" }, dynadotDraft.prepare, storedDynadotSubmissionPayload);
 
 const INPUTS: BrowserFormField[] = ["full_name_2", "email_2", "email2_2", "phone_2", "domains_2", "official_website_2", "proxy_locations_2", "domain_path_2", "comments_2"].map((name) => [name, ""]);
 
@@ -80,10 +74,9 @@ describe("registry", () => {
 	});
 });
 
-describe("prepareDynadotSubmission (temporary database)", () => {
-	test("drafts a ready payload keyed by the route's reference", async () => {
+describe("dynadotDraft.prepare (temporary database)", () => {
+	test("drafts the domain, its path and the official website", async () => {
 		const { payload, created, route } = await readyContext();
-		expect(payload.report.trackingId).toBe(reportReference(created.reportId, route.id));
 		expect(payload).toMatchObject({ target: { domain: TARGET }, evidence: null, report: { domainPath: `https://${TARGET}/signin`, officialWebsite: "https://www.examplebank.com/" } });
 	});
 
@@ -103,7 +96,7 @@ describe("prepareDynadotSubmission (temporary database)", () => {
 describe("prepareDynadotExternalSubmission", () => {
 	const draftWith = async (evidenceArtifacts: AbuseArtifact[]) => {
 		const route = fakeRoute({ evidenceArtifacts });
-		const prepared = await prepareDynadotSubmission({ routeId: 5n, payload: {} }, { loadRouteContext: route });
+		const prepared = await dynadotDraft.prepare({ routeId: 5n, payload: {} }, { loadRouteContext: route });
 		if (prepared.outcome !== "ready") throw new Error("not ready");
 		return { payload: prepared.payload, route };
 	};
@@ -259,10 +252,8 @@ describe("submitDynadotSubmission", () => {
 
 	test("never runs without the preflight's session and token, or on a malformed draft", async () => {
 		const { context, fake, preflight } = await prepared();
-		await expect(submitDynadotSubmission(context, undefined)).rejects.toThrow("requires its prepared browser session");
 		await expect(submitDynadotSubmission(context, { state: { ...preflight.state, token: "" } })).rejects.toThrow("requires its prepared browser session");
 		await expect(submitDynadotSubmission({ ...context, payload: { ...context.payload, adapter: "x" } }, preflight)).rejects.toThrow("malformed");
 		expect(fake.calls).toEqual([]);
-		await expect(dynadotProvider.submit(context)).rejects.toThrow("requires its prepared browser session");
 	});
 });

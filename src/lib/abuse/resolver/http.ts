@@ -1,4 +1,4 @@
-import { AbuseInputError, assertPublicDnsHost } from "../security";
+import { AbuseInputError, assertPublicDnsHost } from "../security/security";
 import { retryWithTimeout } from "../../network/bounded_fetch";
 import { asRecord } from "../../util/values";
 import type { JsonRecord, ResolverDependencies } from "./types";

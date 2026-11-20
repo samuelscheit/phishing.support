@@ -5,7 +5,7 @@ import type { AbuseProviderRoute } from "./schema";
 import { persistInboundAbuseMail, type InboundMailKind } from "./mail/inbound";
 import { authenticatedSender, caseSubmissionIdsIn, caseTagsIn, deliveryFailure } from "./mail/correlation";
 import { listProviderSubmissionProviders } from "./providers";
-import { registrableDomain } from "./security";
+import { registrableDomain } from "./security/security";
 import { AbuseRepository } from "./repository";
 
 export type ProviderReplyMatch =

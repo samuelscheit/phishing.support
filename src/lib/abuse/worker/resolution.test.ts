@@ -6,7 +6,7 @@ import { useTemporaryDatabase } from "../../db/test_helpers";
 import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
 import { abuseJobs } from "../schema";
-import { AbuseWorker } from "../worker";
+import { AbuseWorker } from "./";
 import { IncompleteResolutionError, RESOLUTION_LOOKUP_RETRIES, resolveReport } from "./resolution";
 
 useTemporaryDatabase();

@@ -1,4 +1,4 @@
-import type { RDAPAbuseContact, RDAPEntity } from "../website/info";
+import type { RDAPAbuseContact, RDAPEntity } from "../website/info/info";
 
 /**
  * The first abuse contact in an RDAP entity tree (the registrar, a network),

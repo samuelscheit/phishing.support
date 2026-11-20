@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { deriveProviderFormFacts } from "./form_facts";
-import { buildGenericProviderFormTask } from "./task";
+import { buildGenericProviderFormTask } from "./form_task";
 
 /** The analysis stored for production's Swiss Capital loan-scam report. */
 const swissCapitalAnalysis = "## Verdict: **Likely phishing / fraudulent loan website**\nThe site `https://swisscapitalloans.sc-sec.online/` impersonates **Swiss Capital**.\nProbable legitimate site: **https://swisscapitalcorp.com/**";

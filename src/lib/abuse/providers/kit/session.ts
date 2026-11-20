@@ -1,4 +1,4 @@
-import { openBrowserForm } from "../browser_form";
+import { openBrowserForm } from "./browser_form";
 import type { ProviderSubmissionPreflight } from "../submission_contracts";
 
 /** The default way a form provider opens its page: a real Chrome on the form with the challenge passed. */
@@ -31,8 +31,8 @@ export async function withPreflight<S extends { close(): Promise<void> }, State>
 }
 
 /** The state the preflight left for the irreversible request, or the provider's "requires its prepared …" error. */
-export function preparedState<State>(preflight: ProviderSubmissionPreflight | undefined, isComplete: (state: State) => boolean, message: string): State {
-	const state = preflight?.state as State | undefined;
+export function preparedState<State>(preflight: ProviderSubmissionPreflight, isComplete: (state: State) => boolean, message: string): State {
+	const state = preflight.state as State | undefined;
 	if (!state || !isComplete(state)) throw new Error(message);
 	return state;
 }

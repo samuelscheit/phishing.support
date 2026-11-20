@@ -23,5 +23,5 @@ export const microsoftProvider = defineProvider({
 			trackingId: PREVIEW_REFERENCE,
 		}, urls) : undefined;
 	},
-	submit: (context) => submitMicrosoftSubmission(context),
+	submit: submitMicrosoftSubmission,
 });

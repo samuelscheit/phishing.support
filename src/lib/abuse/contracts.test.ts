@@ -8,7 +8,7 @@ import {
 	normalizeAbuseTarget,
 	validateAbuseReportRequest,
 } from "./contracts";
-import { AbuseInputError, isPublicIp, normalizeDomain } from "./security";
+import { AbuseInputError, isPublicIp, normalizeDomain } from "./security/security";
 
 const baseRequest = {
 	targets: ["example.com"],

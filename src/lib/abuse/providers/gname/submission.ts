@@ -5,11 +5,11 @@ import { sleep } from "../../../util/sleep";
 import { asRecord, parseJsonRecord } from "../../../util/values";
 import { dragSliderToEnd } from "../../captcha/slider_drag";
 import { abuseEmailCaseUrl } from "../../mail/draft";
-import { createDraft, type RouteDeps } from "../kit/draft";
-import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { createDraft, type VerifiedOf, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { preparedState, withPreflight } from "../kit/session";
 import { snippet } from "../../../util/text";
-import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
+import { mailedCodeReader, type MailedCodeReader } from "../kit/mailed_code";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { GNAME_PROVIDER, type GnameComplaintKind } from "./definition";
 import {
@@ -46,7 +46,7 @@ export type GnameSession = {
 export type GnameDependencies = RouteDeps & {
 	openSession?: (kind: GnameComplaintKind) => Promise<GnameSession>;
 	readCode?: MailedCodeReader;
-	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
+	getArtifact?: EvidenceDependencies["getArtifact"];
 	now?: () => Date;
 };
 
@@ -190,17 +190,13 @@ export const gnameDraft = createDraft({
 	targetOf: (payload) => payload.target.domain,
 });
 
-/** Build the pinned draft before the marker; nothing is sent to GNAME here. */
-export const prepareGnameSubmission = gnameDraft.prepare;
-
 /**
  * Before the marker: upload the screenshot, pass the slider, and read the
  * mailed code. An uploaded file and a sent code file no complaint, so every
  * failure here is a safe retry.
  */
-export async function prepareGnameExternalSubmission(context: ProviderSubmissionContext, dependencies: GnameDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await gnameDraft.verify(context, dependencies);
-	const { bytes } = await loadEvidenceFile({ reference: payload.evidence, contract: GNAME_EVIDENCE_CONTRACT, reportId: data.report.id, label: "GNAME", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) });
+export async function prepareGnameExternalSubmission(context: ProviderSubmissionContext, { payload, data }: VerifiedOf<typeof gnameDraft>, dependencies: GnameDependencies = {}): Promise<ProviderSubmissionPreflight> {
+	const { bytes } = await evidenceFileOf(GNAME_EVIDENCE_CONTRACT, "GNAME", payload.evidence, data, dependencies);
 	const { lx } = GNAME_PROVIDER.complaintTypes[payload.report.kind];
 	return withPreflight(() => (dependencies.openSession ?? openGnameBrowserSession)(payload.report.kind), async (session) => {
 		const uploaded = await session.upload(lx, { filename: payload.evidence.filename, mimeType: payload.evidence.mimeType, base64: bytes.toString("base64") });
@@ -238,7 +234,7 @@ function domainRefusals(data: unknown): string {
 }
 
 /** The one irreversible call: `lyts_add` with the pinned draft and the preflight's code and upload. */
-export async function submitGnameSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
+export async function submitGnameSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess> {
 	const payload = gnameDraft.stored(context);
 	const state = preparedState<GnamePreflightState>(preflight, (candidate) => !!candidate.session && typeof candidate.code === "string" && !!candidate.code && Array.isArray(candidate.pics) && candidate.pics.length > 0, "GNAME submission requires a prepared verification code, an uploaded screenshot, and its browser session.");
 	const created = await state.session.post("/request/lyts_add", gnameComplaintBody(payload, state.code, state.pics));

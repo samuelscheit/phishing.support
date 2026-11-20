@@ -28,10 +28,7 @@
 	"include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts", "**/*.mts"],
 	"exclude": [
 		"node_modules",
-		"investigation/**",
-		"output/**",
 		"tools/**",
-		".playwright-cli/**",
 		"**/*.test.ts",
 		"**/*.test.tsx",
 		"src/lib/db/test_helpers.ts"

@@ -6,7 +6,7 @@ import { NAMESILO_PROVIDER } from "../namesilo/definition";
 import { solveNameSiloCaptcha } from "../namesilo/submission";
 import { NEWFOLD_PROVIDER } from "../newfold/definition";
 import { solveNewfoldCaptcha } from "../newfold/submission";
-import type { ProviderProxy } from "../proxy";
+import type { ProviderProxy } from "./proxy";
 import { TENCENT_PROVIDER } from "../tencent/definition";
 import { solveTencentCaptcha } from "../tencent/submission";
 import { TUCOWS_PROVIDER } from "../tucows/definition";

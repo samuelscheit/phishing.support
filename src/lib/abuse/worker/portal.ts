@@ -4,7 +4,7 @@ import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { serviceIdentity } from "../../network/service_identity";
 import { deriveProviderFormFacts } from "../portal/form_facts";
 import { validateGenericProviderFormOutput } from "../portal/output_validation";
-import { buildGenericProviderFormTask } from "../portal/task";
+import { buildGenericProviderFormTask } from "../portal/form_task";
 import { AbuseRepository } from "../repository";
 import { agentGaveUp, type BrowserTask, type TaskResult } from "../../browser/task/agent";
 import { runFabricBrowserTask } from "../../browser/task/fabric";

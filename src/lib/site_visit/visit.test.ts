@@ -6,7 +6,7 @@ import { archiveWebsite } from "../website/archive";
 import type { ChatModel, ChatRequest } from "../browser/task/agent";
 import { chromiumAvailable, launchTestChromium, refIn, ScriptedModel, StalledModel, type ScriptedTurn } from "../browser/task/test_helpers";
 import { stepActions, taskAgentVisit, type VisitAgent } from "./agent";
-import { VISIT_MAX_STEPS } from "./task";
+import { VISIT_MAX_STEPS } from "./visit_task";
 import type { SiteVisitLiveEvent } from "./visit";
 
 const fast = { scriptNavigationSettleMs: 20, renderSettleMs: 800, visitPollMs: 150, visitStepQuietMs: 400 } as const;

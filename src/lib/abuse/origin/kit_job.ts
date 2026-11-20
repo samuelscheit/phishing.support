@@ -1,7 +1,7 @@
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { createWebsiteSubmission, websiteSubmissionDedupeKey } from "../../submissions/website";
-import { analyzeWebsite } from "../../website/ai";
-import { normalizePublicHttpUrl } from "../security";
+import { analyzeWebsite } from "../../website/analysis/ai";
+import { normalizePublicHttpUrl } from "../security/security";
 import { AbuseRepository } from "../repository";
 import { throwIfAborted } from "../worker/shared";
 

@@ -1,11 +1,11 @@
 import { z } from "zod";
 
-import { normalizeDomain } from "../../security";
+import { normalizeDomain } from "../../security/security";
 import type { ReportInput } from "../kit/draft";
 import { evidenceContract } from "../kit/evidence";
 import { field, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
 import { listedFreeText } from "../kit/text";
-import { isReportReference } from "../report_reference";
+import { isReportReference } from "../kit/report_reference";
 import { PUBLIC_DOMAIN_REGISTRY_PROVIDER as PROVIDER } from "./definition";
 
 export const PUBLIC_DOMAIN_REGISTRY_EVIDENCE_CONTRACT = evidenceContract("publicdomainregistry_report", PROVIDER.evidence);

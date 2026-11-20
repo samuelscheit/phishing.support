@@ -8,12 +8,8 @@ import { executeProviderSubmission } from "../submission_execution";
 import type { ProviderSubmissionProvider } from "../submission_contracts";
 import { NETCRAFT_PROVIDER } from "./definition";
 import { buildNetcraftSubmissionPayload } from "./payload";
-import {
-	netcraftSubmissionUrl,
-	parseNetcraftSubmissionResponse,
-	prepareNetcraftSubmission,
-	submitNetcraftSubmission,
-} from "./submission";
+import { netcraftSubmissionUrl, parseNetcraftSubmissionResponse, netcraftDraft, submitNetcraftSubmission } from "./submission";
+import { defineProvider } from "../kit/provider";
 
 useTemporaryDatabase();
 
@@ -107,9 +103,9 @@ describe("Netcraft v3 submission response", () => {
 		let requestUrl: string | undefined;
 		let requestBody: Record<string, unknown> | undefined;
 		let requestInit: RequestInit | undefined;
-		const provider: ProviderSubmissionProvider = {
+		const provider = defineProvider({
 			definition: NETCRAFT_PROVIDER,
-			prepareSubmission: prepareNetcraftSubmission,
+			draft: netcraftDraft,
 			submit: async (context) => submitNetcraftSubmission(context, {
 				fetch: async (input, init) => {
 					requestUrl = String(input);
@@ -124,7 +120,7 @@ describe("Netcraft v3 submission response", () => {
 					}));
 				},
 			}),
-		};
+		});
 
 		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({
 			outcome: "submitted",

@@ -2,7 +2,7 @@ import { AbuseRepository } from "../abuse/repository";
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { buildDossier, type Dossier, type DossierDependencies } from "../referral/dossier";
-import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "../website/capture_files";
+import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "../website/visit/capture_files";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website/types";
 import { campaignBrand, guideVisitor, sameBrand, type GuidanceDependencies } from "./guidance";
 import { extractIndicators, loadCapturedPageTexts, type IndicatorDependencies } from "./indicators";

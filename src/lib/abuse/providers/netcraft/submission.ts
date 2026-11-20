@@ -61,9 +61,6 @@ export const netcraftDraft = createDraft({
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
 
-/** Validate target evidence and service identity before the irreversible request. */
-export const prepareNetcraftSubmission = netcraftDraft.prepare;
-
 /** Submit one immutable Netcraft payload after generic execution marks its boundary. */
 export async function submitNetcraftSubmission(
 	context: ProviderSubmissionContext,

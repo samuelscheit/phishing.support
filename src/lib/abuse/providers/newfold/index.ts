@@ -13,7 +13,7 @@ export const newfoldProvider = defineProvider({
 	definition: NEWFOLD_PROVIDER,
 	draft: newfoldDraft,
 	preview: registrarPreview({ urls: newfoldReportUrls, make: makeNewfoldComments }),
-	external: { prepare: (context) => prepareNewfoldExternalSubmission(context), submit: submitNewfoldSubmission },
+	external: { prepare: prepareNewfoldExternalSubmission, submit: submitNewfoldSubmission },
 	// The confirmation mail's sender is not documented; Newfold's own and its brands' domains are the best guess.
 	inbound: { messageKind: "reply", senderDomains: ["newfold.com", "bluehost.com", "hostgator.com", "web.com", "networksolutions.com", "register.com", "domain.com"] },
 });

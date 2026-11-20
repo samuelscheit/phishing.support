@@ -1,6 +1,6 @@
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import type { ReporterMetadata } from "../../http/reporter_headers";
-import { hasPathTenants, websiteSite } from "../../website/site";
+import { hasPathTenants, websiteSite } from "../../website/info/site";
 import type { ReportableWebsiteFinding } from "../../website/types";
 import type { ValidatedAbuseReportRequest } from "../contracts";
 import { linkedHostRequest, type PageScreenshot } from "../linked_host_report";

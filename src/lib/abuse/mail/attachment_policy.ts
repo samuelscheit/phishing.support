@@ -1,4 +1,4 @@
-import { registrableDomain } from "../security";
+import { registrableDomain } from "../security/security";
 import type { AbuseMailAttachment } from "./types";
 
 /**

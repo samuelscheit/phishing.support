@@ -8,7 +8,7 @@ import { contactRoute } from "../../resolver/routes";
 import { reportConfirmedEmailPhishing } from "../../submission_reports";
 import { emailOriginOf, parseEmailOrigin, receivedHopOf } from "../email_origin";
 import { buildGoogleCloudSubmissionPayload, storedGoogleCloudSubmissionPayload } from "./payload";
-import { prepareGoogleCloudSubmission } from "./submission";
+import { googleCloudDraft } from "./submission";
 
 useTemporaryDatabase();
 
@@ -143,7 +143,7 @@ describe("Google Cloud report for an IP that sent a phishing email", () => {
 			await SubmissionsEntity.create({ id: submissionId, kind: "email", data: { kind: "email" }, dedupeKey: "google-email-origin" });
 			return (await reportConfirmedEmailPhishing({ submissionId, analysisText: analysis, redactedEml: eml, sendingIp: IP, reporter: {} })).reportId;
 		});
-		const preparation = await prepareGoogleCloudSubmission({ routeId: route.id, payload: {} });
+		const preparation = await googleCloudDraft.prepare({ routeId: route.id, payload: {} });
 		if (preparation.outcome !== "ready") throw new Error(`Expected ready, got ${preparation.reason}`);
 		const payload = storedGoogleCloudSubmissionPayload(preparation.payload);
 		expect(payload?.report.abuseDetails).toContain(`Abusive IP address: ${IP}`);
@@ -157,6 +157,6 @@ describe("Google Cloud report for an IP that sent a phishing email", () => {
 			const request = await validateAbuseReportRequest({ targets: [IP], allegationCategory: "phishing", description: analysis });
 			return (await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } })).reportId;
 		});
-		await expect(prepareGoogleCloudSubmission({ routeId: route.id, payload: {} })).resolves.toEqual({ outcome: "insufficient_evidence", reason: "google_cloud_requires_an_observed_url" });
+		await expect(googleCloudDraft.prepare({ routeId: route.id, payload: {} })).resolves.toEqual({ outcome: "insufficient_evidence", reason: "google_cloud_requires_an_observed_url" });
 	});
 });

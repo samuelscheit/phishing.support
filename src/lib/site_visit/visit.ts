@@ -4,9 +4,9 @@ import { VisitorTabs, type TabSetup, type VisitorTab } from "../browser/visitor_
 import { errorText } from "../util/error_text";
 import { ExfiltrationNetworkRecorder } from "../exfiltration/recorder";
 import type { CapturedNetworkRequest, ExfiltrationCanaries } from "../exfiltration/types";
-import { interceptDownloads, type DownloadedFile, type DownloadInterceptor, type FailedDownload } from "../website/download";
+import { interceptDownloads, type DownloadedFile, type DownloadInterceptor, type FailedDownload } from "../website/visit/download";
 import { revealSyntheticSecret, type VisitAgent, type VisitAgentAction, type VisitAgentState } from "./agent";
-import { buildSiteVisitTask, visitAgentReport, VISIT_BUDGET_MS, type VisitAgentReport } from "./task";
+import { buildSiteVisitTask, visitAgentReport, VISIT_BUDGET_MS, type VisitAgentReport } from "./visit_task";
 import { sleep } from "../util/sleep";
 
 /**

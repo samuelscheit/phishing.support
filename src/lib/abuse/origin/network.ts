@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { retryWithTimeout } from "../../network/bounded_fetch";
 import { ripeStatData } from "../../network/ripestat";
-import { isPublicIp, normalizeDomain, registrableDomain } from "../security";
+import { isPublicIp, normalizeDomain, registrableDomain } from "../security/security";
 import { normalizeMailbox } from "../mail/shared";
 import { throwIfAborted } from "../worker/shared";
 import { mapConcurrent } from "./concurrency";

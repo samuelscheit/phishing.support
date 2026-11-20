@@ -3,7 +3,7 @@ import { getDb } from "../index";
 import { artifacts } from "../schema";
 import { generateId } from "../ids";
 import { websiteEvidenceFiles, type WebsiteEvidencePackage } from "../../evidence/package";
-import { websiteCaptureFileNames } from "../../website/capture_files";
+import { websiteCaptureFileNames } from "../../website/visit/capture_files";
 import { sha256Hex } from "../../util/hash";
 
 export class ArtifactsEntity {

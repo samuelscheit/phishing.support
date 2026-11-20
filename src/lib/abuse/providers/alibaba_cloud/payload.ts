@@ -1,11 +1,11 @@
 import { z } from "zod";
 
-import { normalizePublicHost, normalizePublicHttpUrl } from "../../security";
+import { normalizePublicHost, normalizePublicHttpUrl } from "../../security/security";
 import { evidenceContract } from "../kit/evidence";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
 import { providerNarrative } from "../kit/text";
-import { storedProviderEvidenceImageReference } from "../evidence_image";
-import { normalizeObservedUrlForTarget } from "../report_payload";
+import { storedProviderEvidenceImageReference } from "../kit/evidence";
+import { normalizeObservedUrlForTarget } from "../kit/report_payload";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 
 export const ALIBABA_CLOUD_EVIDENCE_CONTRACT = evidenceContract("alibaba_cloud_report", ALIBABA_CLOUD_PROVIDER.evidence);

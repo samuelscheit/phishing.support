@@ -1,10 +1,5 @@
-import {
-	CORRESPONDENCE_POLL_WINDOW_MS,
-	getProviderSubmissionProvider,
-	listProviderSubmissionProviders,
-	queueCorrespondencePoll,
-} from "../providers";
-import { nextCorrespondencePollDelayMs } from "../providers/submission_execution";
+import { getProviderSubmissionProvider, listProviderSubmissionProviders } from "../providers";
+import { CORRESPONDENCE_POLL_WINDOW_MS, nextCorrespondencePollDelayMs, queueCorrespondencePoll } from "./schedule";
 import { AbuseRepository } from "../repository";
 import { enqueueOriginHostDisclosures } from "../origin/disclosure";
 

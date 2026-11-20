@@ -13,6 +13,8 @@ function testProvider(
 	const definitionWithoutHash = { key, displayName: key, version: "test", exactMailboxes, supplemental, supplementalTargets };
 	return {
 		definition: { ...definitionWithoutHash, contentHash: hashStableJson(definitionWithoutHash) },
+		prepareSubmission: async () => ({ outcome: "ready", payload: {} }),
+		verifyDraft: async () => undefined,
 		submit: async () => ({ submittedTargets: ["example.com"] }),
 	};
 }

@@ -4,10 +4,10 @@ import { asRecord, parseJsonRecord } from "../../../util/values";
 import type { ProviderFormFacts } from "../../portal/form_facts";
 import { deriveProviderFormFacts } from "../../portal/form_facts";
 import { captchaCredentialsProblem, solveRecaptchaV2 } from "../kit/captcha";
-import { createDraft, type RouteDeps } from "../kit/draft";
-import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { createDraft, type RouteDeps, type VerifiedOf } from "../kit/draft";
+import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { snippet } from "../../../util/text";
-import { providerEvidenceImageBytesMatch } from "../evidence_image";
+import { providerEvidenceImageBytesMatch } from "../kit/evidence";
 import {
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionContext,
@@ -59,7 +59,7 @@ export type NameSiloPreflightDependencies = {
 
 export type NameSiloSubmissionDependencies = RouteDeps & {
 	fetch?: FetchLike;
-	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
+	getArtifact?: EvidenceDependencies["getArtifact"];
 };
 
 function cookieHeader(headers: Headers): string | undefined {
@@ -117,7 +117,7 @@ async function fetchNameSiloSession(
 	return parseNameSiloSessionResponse(response, now);
 }
 
-function storedPreflightState(preflight: ProviderSubmissionPreflight | undefined): NameSiloPreflightState | undefined {
+function storedPreflightState(preflight: ProviderSubmissionPreflight): NameSiloPreflightState | undefined {
 	const state = preflight && asRecord(preflight.state);
 	if (!state
 		|| typeof state.csrfToken !== "string" || state.csrfToken.length === 0 || state.csrfToken.length > 2_048 || /[\r\n\0]/.test(state.csrfToken)
@@ -243,22 +243,13 @@ export const nameSiloDraft = createDraft({
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
 
-/** Prepare the immutable NameSilo draft and fail closed on missing evidence. */
-export const prepareNameSiloSubmission = nameSiloDraft.prepare;
-
-/** The stored draft, checked against its route and rebuilt from the current report; with its screenshot's bytes. */
-async function verifiedNameSiloDraft(context: ProviderSubmissionContext, dependencies: NameSiloSubmissionDependencies = {}) {
-	const { payload, data } = await nameSiloDraft.verify(context, dependencies);
-	const { bytes } = await loadEvidenceFile({ reference: payload.evidence, contract: NAMESILO_EVIDENCE_CONTRACT, reportId: data.report.id, label: "NameSilo", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) });
-	return { payload, bytes };
-}
-
 /** Before the marker: the verified draft and its screenshot, the CSRF session and the solved reCAPTCHA. */
 export async function prepareNameSiloExternalSubmission(
 	context: ProviderSubmissionContext,
+	{ payload, data }: VerifiedOf<typeof nameSiloDraft>,
 	dependencies: NameSiloPreflightDependencies & NameSiloSubmissionDependencies = {},
 ): Promise<ProviderSubmissionPreflight> {
-	const { payload, bytes } = await verifiedNameSiloDraft(context, dependencies);
+	const { bytes } = await evidenceFileOf(NAMESILO_EVIDENCE_CONTRACT, "NameSilo", payload.evidence, data, dependencies);
 	const fetcher = dependencies.fetch ?? fetch;
 	const [session, captchaToken] = await Promise.all([
 		fetchNameSiloSession(fetcher, context.signal, dependencies.now ?? Date.now),
@@ -275,7 +266,7 @@ export const solveNameSiloCaptcha = (signal?: AbortSignal) => solveRecaptchaV2(N
 /** The one provider POST, from the preflight's verified draft and session. */
 export async function submitNameSiloSubmission(
 	context: ProviderSubmissionContext,
-	preflight: ProviderSubmissionPreflight | undefined,
+	preflight: ProviderSubmissionPreflight,
 	dependencies: Pick<NameSiloSubmissionDependencies, "fetch"> = {},
 ): Promise<ProviderSubmissionSuccess> {
 	const ephemeral = storedPreflightState(preflight);

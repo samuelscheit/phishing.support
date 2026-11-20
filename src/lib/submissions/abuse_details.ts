@@ -1,7 +1,7 @@
 import { AbuseRepository } from "@/lib/abuse/repository";
-import { safePublicError } from "@/lib/abuse/security";
+import { safePublicError } from "@/lib/abuse/security/security";
 import { getProviderSubmissionProvider } from "@/lib/abuse/providers/submission_registry_default";
-import { buildProviderReportNarrative } from "@/lib/abuse/providers/report_payload";
+import { buildProviderReportNarrative } from "@/lib/abuse/providers/kit/report_payload";
 import type { AbuseMailClassification, AbuseReport } from "@/lib/abuse/schema";
 import { describeDecisionFollowUp, type DecisionFollowUpSummary } from "@/lib/abuse/followup/describe";
 import { asRecord } from "../util/values";

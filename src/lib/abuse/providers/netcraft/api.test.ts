@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-	fetchNetcraftSubmissionStatus,
-	netcraftSubmissionIdFromDiagnostic,
+	fetchNetcraftSubmissionState,
 	netcraftSubmissionUrl,
-	netcraftSubmissionUrlsUrl,
 	parseNetcraftSubmissionResponse,
 } from "./api";
 
@@ -53,69 +51,27 @@ describe("Netcraft submission receipt parsing", () => {
 		expect(() => netcraftSubmissionUrl("lFQ9vJzdwxWau2LTPeu665VWSCpxiFGV/")).toThrow("invalid submission UUID");
 	});
 
-	test("extracts only a validated receipt ID from raw or escaped diagnostics", () => {
-		const opaque = "lFQ9vJzdwxWau2LTPeu665VWSCpxiFGV";
-		expect(netcraftSubmissionIdFromDiagnostic(`Netcraft response: {"message":"Successfully reported","uuid":"${opaque}"}`)).toBe(opaque);
-		expect(netcraftSubmissionIdFromDiagnostic(`serialized error: {\\"uuid\\":\\"${opaque}\\"}`)).toBe(opaque);
-		expect(netcraftSubmissionIdFromDiagnostic('response: {"uuid":"https://attacker.example/"}')).toBeUndefined();
-		expect(netcraftSubmissionIdFromDiagnostic('response: {"message":"accepted"}')).toBeUndefined();
-	});
-
-	test("reads a bounded submission status and URL list without making a write request", async () => {
+	test("reads a bounded submission state without making a write request", async () => {
 		const opaque = "lFQ9vJzdwxWau2LTPeu665VWSCpxiFGV";
 		const requests: Array<{ url: string; init?: RequestInit }> = [];
-		const result = await fetchNetcraftSubmissionStatus({
+		const result = await fetchNetcraftSubmissionState({
 			uuid: opaque,
 			fetch: async (url, init) => {
 				requests.push({ url: String(url), init });
-				if (String(url) === netcraftSubmissionUrl(opaque)) {
-					return new Response(JSON.stringify({
-						state: "processing",
-						pending: 0,
-						has_urls: 1,
-						last_update: 1_788_177_992,
-					}));
-				}
-				if (String(url) === netcraftSubmissionUrlsUrl(opaque)) {
-					return new Response(JSON.stringify({
-						filtered_count: 1,
-						total_count: 1,
-						urls: [{ url: "https://shop.hd-media.space/", url_state: "processing" }],
-					}));
-				}
-				return new Response("unexpected URL", { status: 500 });
+				return new Response(JSON.stringify({ state: "processing", pending: 0, has_urls: 1, last_update: 1_788_177_992 }));
 			},
 		});
 
-		expect(result).toEqual({
-			uuid: opaque,
-			state: "processing",
-			pending: false,
-			hasUrls: true,
-			lastUpdate: 1_788_177_992,
-			urls: [{ url: "https://shop.hd-media.space/", state: "processing" }],
-		});
-		expect(requests).toHaveLength(2);
+		expect(result).toEqual({ uuid: opaque, state: "processing", pending: false, hasUrls: true, lastUpdate: 1_788_177_992 });
+		expect(requests.map(({ url }) => url)).toEqual([netcraftSubmissionUrl(opaque)]);
 		expect(requests.every(({ init }) => init?.method === "GET" && init?.redirect === "error")).toBeTrue();
 	});
 
-	test("fails closed when a status response is malformed or its URL list is empty", async () => {
+	test("fails closed when a state response is malformed", async () => {
 		const opaque = "lFQ9vJzdwxWau2LTPeu665VWSCpxiFGV";
-		await expect(fetchNetcraftSubmissionStatus({
-			uuid: opaque,
-			fetch: async () => new Response(JSON.stringify({ state: "processing", pending: 0, has_urls: 1 })),
-		})).rejects.toThrow("submission-URLs response did not match");
-		await expect(fetchNetcraftSubmissionStatus({
-			uuid: opaque,
-			fetch: async () => new Response("not json"),
-		})).rejects.toThrow("submission-status request returned malformed JSON");
-		await expect(fetchNetcraftSubmissionStatus({
-			uuid: opaque,
-			fetch: async () => new Response(JSON.stringify({ state: "processing", pending: 0, has_urls: 1, uuid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" })),
-		})).rejects.toThrow("submission-status response did not match");
-		await expect(fetchNetcraftSubmissionStatus({
-			uuid: opaque,
-			fetch: async () => new Response(JSON.stringify({ state: "processing", pending: 0, has_urls: 1, warnings: ["provider warning"] })),
-		})).rejects.toThrow("submission-status response did not match");
+		const read = (body: Response) => fetchNetcraftSubmissionState({ uuid: opaque, fetch: async () => body });
+		await expect(read(new Response("not json"))).rejects.toThrow("submission-status request returned malformed JSON");
+		await expect(read(new Response(JSON.stringify({ state: "processing", pending: 0, has_urls: 1, uuid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" })))).rejects.toThrow("submission-status response did not match");
+		await expect(read(new Response(JSON.stringify({ state: "processing", pending: 0, has_urls: 1, warnings: ["provider warning"] })))).rejects.toThrow("submission-status response did not match");
 	});
 });

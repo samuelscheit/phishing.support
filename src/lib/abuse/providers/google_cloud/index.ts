@@ -15,5 +15,5 @@ export const googleCloudProvider = defineProvider({
 		capturedAt: new Date(),
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),
-	submit: (context) => submitGoogleCloudSubmission(context),
+	submit: submitGoogleCloudSubmission,
 });

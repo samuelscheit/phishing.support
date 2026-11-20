@@ -1,5 +1,5 @@
 import { defineProvider, registrarPreview } from "../kit/provider";
-import { reportReferencesIn } from "../report_reference";
+import { reportReferencesIn } from "../kit/report_reference";
 import { NAME_COM_PROVIDER } from "./definition";
 import { makeNameComAdditional, nameComReportUrls } from "./payload";
 import { prepareNameComExternalSubmission, nameComDraft, submitNameComSubmission } from "./submission";
@@ -19,6 +19,6 @@ export const nameComProvider = defineProvider({
 	definition: NAME_COM_PROVIDER,
 	draft: nameComDraft,
 	preview: registrarPreview({ urls: nameComReportUrls, make: makeNameComAdditional }),
-	external: { prepare: (context) => prepareNameComExternalSubmission(context), submit: submitNameComSubmission },
+	external: { prepare: prepareNameComExternalSubmission, submit: submitNameComSubmission },
 	inbound: { messageKind: "reply", senderDomains: ["name.com"], confirmationIds: nameComConfirmationIds },
 });

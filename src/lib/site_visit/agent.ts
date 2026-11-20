@@ -1,7 +1,7 @@
 import { agentGaveUp, browserTaskModel, runTask, type ChatModel, type StepLog } from "../browser/task/agent";
 import { redactedErrorText } from "../util/error_text";
 import type { ExfiltrationCanaries } from "../exfiltration/types";
-import type { SiteVisitTask } from "./task";
+import type { SiteVisitTask } from "./visit_task";
 import { DAY_MS } from "../util/date_time";
 import { squash } from "../util/text";
 

@@ -1,6 +1,6 @@
 import { convert } from "mhtml-to-html";
 
-import { isSameWebsite, websiteSite } from "../site";
+import { isSameWebsite, websiteSite } from "../info/site";
 import { capturedDocumentContent } from "./text";
 import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "./types";
 

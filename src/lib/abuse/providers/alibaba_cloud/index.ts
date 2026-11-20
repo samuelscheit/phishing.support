@@ -24,15 +24,9 @@ export const alibabaCloudProvider = defineProvider({
 		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		legalBrandUrl: context.legalBrandUrl ?? null,
 	}),
-	external: {
-		prepare: (context) => prepareAlibabaCloudExternalSubmission(context),
-		submit: async (context, preflight) => {
-			if (!preflight) throw new Error("Alibaba Cloud submits only from its prepared state.");
-			return submitAlibabaCloudSubmission(context, preflight);
-		},
-	},
-	findSubmission: (context) => findAlibabaCloudSubmission(context),
-	fetchCorrespondence: (context) => fetchAlibabaCloudCorrespondence(context),
+	external: { prepare: prepareAlibabaCloudExternalSubmission, submit: submitAlibabaCloudSubmission },
+	findSubmission: findAlibabaCloudSubmission,
+	fetchCorrespondence: fetchAlibabaCloudCorrespondence,
 	reviewVerdicts: {
 		Valid: "acknowledged",
 		"Notify rectification": "acknowledged",

@@ -1,5 +1,5 @@
 import { asRecord } from "../../../util/values";
-import { createDraft } from "../kit/draft";
+import { createDraft, type VerifiedOf } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
 import {
 	ProviderSubmissionNeedsHumanError,
@@ -65,16 +65,6 @@ export const alibabaCloudDraft = createDraft({
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
 
-/** Check the route and build the durable draft before any provider call. */
-export const prepareAlibabaCloudSubmission = alibabaCloudDraft.prepare;
-
-/** The stored draft, checked against its route and rebuilt from the current report; with its screenshot's bytes. */
-async function verifiedDraft(context: ProviderSubmissionContext) {
-	const { payload, data } = await alibabaCloudDraft.verify(context);
-	const { bytes } = await loadEvidenceFile({ reference: payload.screenshot, contract: ALIBABA_CLOUD_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Alibaba Cloud screenshot" });
-	return { payload, screenshot: bytes };
-}
-
 export type { AlibabaCloudSubmissionDependencies };
 
 /**
@@ -84,9 +74,10 @@ export type { AlibabaCloudSubmissionDependencies };
  */
 export async function prepareAlibabaCloudExternalSubmission(
 	context: ProviderSubmissionContext,
+	{ payload, data }: VerifiedOf<typeof alibabaCloudDraft>,
 	dependencies: AlibabaCloudSubmissionDependencies = {},
 ): Promise<ProviderSubmissionPreflight> {
-	const { payload, screenshot } = await verifiedDraft(context);
+	const { bytes: screenshot } = await loadEvidenceFile({ reference: payload.screenshot, contract: ALIBABA_CLOUD_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Alibaba Cloud screenshot" });
 	const state = await withAlibabaConsole(async (console, session): Promise<AlibabaPreflight> => {
 		// The international console files reports only for an international (sg) account.
 		const env = asRecord(await console.call("GetUserIdArea"))?.Env;

@@ -13,9 +13,8 @@ export function agentAddressOf(browser: Browser): string | undefined {
 /**
  * Return a lease-scoped CDP client for a Fabric-owned browser.
  *
- * Browser creation used to be scattered across this application and its Docker
- * image. Keeping one Fabric-only entry point makes the manager the sole owner
- * of Chromium, the persistent profile, the egress namespace, and teardown.
+ * The one Fabric-only entry point makes the manager the sole owner of
+ * Chromium, the persistent profile, the egress namespace, and teardown.
  */
 export async function getBrowser(egress: FabricEgress = "phishing"): Promise<Browser> {
 	// A clone of the reviewed Fabric profile provides a disposable volume while

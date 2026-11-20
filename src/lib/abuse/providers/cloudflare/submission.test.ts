@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
 import { useTemporaryDatabase } from "../../../db/test_helpers";
-import { readyDraft } from "../kit/testing";
+import { readyDraft, verifiedPrepare } from "../kit/testing";
 
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { buildCloudflareApiBody, cloudflareApiConfig, cloudflareReportsUrl, CloudflareSessionExpiredError, parseCloudflareApiResponse, submitCloudflareAbuseReport } from "./api";
 import type { CloudflareReportPayload } from "./report";
-import { retryDelayMs } from "../../worker";
+import { retryDelayMs } from "../../worker/retry";
 import { ProviderLoginUnavailableError } from "../login_session/session";
-import { findCloudflareSubmission, prepareCloudflareExternalSubmission, prepareCloudflareSubmission, storedCloudflareSubmissionPayload, submitCloudflareSubmission } from "./submission";
+import { findCloudflareSubmission, prepareCloudflareExternalSubmission as rawPrepareCloudflareExternalSubmission, cloudflareDraft, storedCloudflareSubmissionPayload, submitCloudflareSubmission } from "./submission";
+
+const prepareCloudflareExternalSubmission = verifiedPrepare(cloudflareDraft, rawPrepareCloudflareExternalSubmission);
 
 useTemporaryDatabase();
 
@@ -168,7 +170,7 @@ describe("Cloudflare dashboard API", () => {
 describe("Cloudflare provider preflight", () => {
 	/** A stored draft and its route, drafted from a real report. */
 	async function ready() {
-		const { payload, route } = await readyDraft({ mailbox: "abuse@cloudflare.com", providerName: "Cloudflare" }, (ctx) => prepareCloudflareSubmission(ctx, { environment }), storedCloudflareSubmissionPayload);
+		const { payload, route } = await readyDraft({ mailbox: "abuse@cloudflare.com", providerName: "Cloudflare" }, (ctx) => cloudflareDraft.prepare(ctx, { environment }), storedCloudflareSubmissionPayload);
 		return { payload: payload as unknown as Record<string, unknown>, filed: payload, routeId: route.id };
 	}
 	test("logs in before the marker and consumes ephemeral session state", async () => {
@@ -191,10 +193,9 @@ describe("Cloudflare provider preflight", () => {
 		expect(err).not.toBeInstanceOf(ProviderSubmissionNeedsHumanError);
 		expect(retryDelayMs(err, 0)).toBe(540_000);
 	});
-	test("refuses malformed stored payloads, a missing preflight and missing credentials after the marker", async () => {
+	test("refuses malformed stored payloads and missing credentials after the marker", async () => {
 		const { payload, routeId } = await ready();
 		await expect(submitCloudflareSubmission({ routeId, payload: {} }, { state: session }, { environment })).rejects.toThrow("malformed");
-		await expect(submitCloudflareSubmission({ routeId, payload }, undefined, { environment })).rejects.toThrow("prepared dashboard session");
 		await expect(submitCloudflareSubmission({ routeId, payload }, { state: session }, { environment: {} })).rejects.toThrow("ABUSE_CLOUDFLARE_ACCOUNT_ID");
 	});
 	test("a later lookup finds the report a 504 POST stored, read-only and by the exact payload sent", async () => {

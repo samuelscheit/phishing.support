@@ -1,7 +1,7 @@
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import { serviceIdentity } from "../../../network/service_identity";
-import { normalizePublicHttpUrl } from "../../security";
-import { allegationLabel, boundedEvidence, normalizeObservedUrlForTarget } from "../report_payload";
+import { normalizePublicHttpUrl } from "../../security/security";
+import { allegationLabel, boundedEvidence, normalizeObservedUrlForTarget } from "../kit/report_payload";
 import type { ProviderReportPreviewContext } from "../submission_contracts";
 
 export type CloudflareReportInput = {

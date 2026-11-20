@@ -12,9 +12,9 @@ import {
 	type ProviderSubmissionSuccess,
 } from "./submission_contracts";
 import { throwIfAborted } from "../worker/shared";
+import { nextCorrespondencePollDelayMs, nextReceiptLookupDelayMs, queueCorrespondencePoll, queueReceiptLookup } from "../worker/schedule";
 import { boundedErrorText } from "../../util/error_text";
 import { isRecord } from "../../util/values";
-import { MINUTE_MS, HOUR_MS, DAY_MS } from "../../util/date_time";
 import { hashStableJson } from "../../util/hash";
 
 export type ProviderSubmissionExecutionResult =
@@ -75,7 +75,10 @@ async function markUnknownExternal(params: { routeId: bigint; runId?: bigint; er
 
 type KnownFailureStatus = "provider_rejected" | "needs_human" | "insufficient_evidence";
 
-/** Settle an explicit, known provider failure as a terminal route status. */
+/**
+ * Settle an explicit, known provider failure as a terminal route status: the
+ * run's too once there is one, else only the route, which is still queued or verified.
+ */
 async function settleKnownFailure(params: {
 	routeId: bigint;
 	runId?: bigint;
@@ -83,18 +86,17 @@ async function settleKnownFailure(params: {
 	reason: string;
 }): Promise<ProviderSubmissionExecutionResult> {
 	const { status } = params;
+	const result: ProviderSubmissionExecutionResult = status === "insufficient_evidence" || params.runId === undefined
+		? { outcome: status, reason: params.reason }
+		: { outcome: status, runId: params.runId, reason: params.reason };
 	if (params.runId === undefined) {
-		if (status === "insufficient_evidence") return settleInsufficientEvidence(params.routeId, params.reason);
 		const changed = await AbuseRepository.transitionRouteStatus({
 			routeId: params.routeId,
 			from: ["queued", "verified"],
 			to: status,
 			data: { reason: params.reason },
 		});
-		if (changed || (await AbuseRepository.getRoute(params.routeId))?.status === status) {
-			return { outcome: status, reason: params.reason };
-		}
-		return { outcome: "not_eligible" };
+		return changed || (await AbuseRepository.getRoute(params.routeId))?.status === status ? result : { outcome: "not_eligible" };
 	}
 
 	let settled: boolean;
@@ -114,9 +116,7 @@ async function settleKnownFailure(params: {
 			reason: `${status}_settlement_failed`,
 		});
 	}
-	if (settled || (await AbuseRepository.getRoute(params.routeId))?.status === status) {
-		return status === "insufficient_evidence" ? { outcome: status, reason: params.reason } : { outcome: status, runId: params.runId, reason: params.reason };
-	}
+	if (settled || (await AbuseRepository.getRoute(params.routeId))?.status === status) return result;
 	return markUnknownExternal({
 		routeId: params.routeId,
 		runId: params.runId,
@@ -133,14 +133,19 @@ function knownFailureStatus(error: unknown): "provider_rejected" | "needs_human"
 }
 
 /**
- * The pre-marker draft of a run that never reached its marker, built again
- * from the current route and report. Its refusals settle the run for good.
+ * Build the draft from the current route and report, before any marker: the
+ * first attempt's (no run yet) and a run's that never reached its marker.
+ * Whatever the provider refuses, or returns malformed, settles for good with
+ * its reason; any other error is retryable, nothing irreversible happened.
  */
-async function refreshDraft(provider: ProviderSubmissionProvider, route: { id: bigint }, context: ProviderSubmissionContext): Promise<{ payload: Record<string, unknown> } | ProviderSubmissionExecutionResult> {
-	const settle = (status: KnownFailureStatus, reason: string) => settleKnownFailure({ routeId: route.id, runId: context.runId!, status, reason });
+async function prepareDraft(
+	provider: ProviderSubmissionProvider,
+	context: ProviderSubmissionContext,
+): Promise<{ payload: Record<string, unknown> } | ProviderSubmissionExecutionResult> {
+	const settle = (status: KnownFailureStatus, reason: string) => settleKnownFailure({ routeId: context.routeId, ...(context.runId === undefined ? {} : { runId: context.runId }), status, reason });
 	let preparation: ProviderSubmissionPreparation;
 	try {
-		preparation = await provider.prepareSubmission!(context);
+		preparation = await provider.prepareSubmission(context);
 		throwIfAborted(context.signal);
 	} catch (error) {
 		const status = knownFailureStatus(error);
@@ -149,19 +154,6 @@ async function refreshDraft(provider: ProviderSubmissionProvider, route: { id: b
 	}
 	if (!isPreparation(preparation)) return settle("needs_human", "provider_submission_preparation_invalid");
 	return preparation.outcome === "insufficient_evidence" ? settle("insufficient_evidence", preparation.reason) : { payload: preparation.payload };
-}
-
-async function settleInsufficientEvidence(routeId: bigint, reason: string): Promise<ProviderSubmissionExecutionResult> {
-	const changed = await AbuseRepository.transitionRouteStatus({
-		routeId,
-		from: ["queued", "verified"],
-		to: "insufficient_evidence",
-		data: { reason },
-	});
-	if (changed || (await AbuseRepository.getRoute(routeId))?.status === "insufficient_evidence") {
-		return { outcome: "insufficient_evidence", reason };
-	}
-	return { outcome: "not_eligible" };
 }
 
 /**
@@ -205,36 +197,9 @@ export async function executeProviderSubmission(params: {
 
 	let preparedPayload: Record<string, unknown> = {};
 	if (route.status === "queued" || route.status === "verified") {
-		if (params.provider.prepareSubmission) {
-			let preparation: ProviderSubmissionPreparation;
-			try {
-				preparation = await params.provider.prepareSubmission({
-					routeId: route.id,
-				payload: {},
-				...(params.signal ? { signal: params.signal } : {}),
-				});
-				throwIfAborted(params.signal);
-			} catch (error) {
-				const status = knownFailureStatus(error);
-				if (status) return settleKnownFailure({ routeId: route.id, status, reason: boundedErrorText(error) });
-				// Nothing irreversible has happened, so ordinary preparation errors
-				// remain retryable by the durable job.
-				throw error;
-			}
-			if (!isPreparation(preparation)) {
-				await AbuseRepository.transitionRouteStatus({
-					routeId: route.id,
-					from: ["queued", "verified"],
-					to: "needs_human",
-					data: { reason: "provider_submission_preparation_invalid" },
-				});
-				return { outcome: "not_eligible" };
-			}
-			if (preparation.outcome === "insufficient_evidence") {
-				return settleInsufficientEvidence(route.id, preparation.reason);
-			}
-			preparedPayload = preparation.payload;
-		}
+		const prepared = await prepareDraft(params.provider, { routeId: route.id, payload: {}, ...(params.signal ? { signal: params.signal } : {}) });
+		if (!("payload" in prepared)) return prepared;
+		preparedPayload = prepared.payload;
 	} else if (route.status !== "running") {
 		return { outcome: "not_eligible" };
 	}
@@ -283,37 +248,38 @@ export async function executeProviderSubmission(params: {
 		payload: durablePayload,
 		...(params.signal ? { signal: params.signal } : {}),
 	};
-	if (params.provider.verifyDraft) {
-		// Only work that cannot file anything runs before the marker, and this
-		// is the check that the stored draft is still what the provider builds.
-		// A run that never passed the marker may have been interrupted before
-		// its report or narrative changed: build the draft again and replace it.
-		// A run that passed the marker never gets here.
-		try {
-			await params.provider.verifyDraft(context);
-		} catch (error) {
-			if (!params.provider.prepareSubmission) throw error;
-			const refreshed = await refreshDraft(params.provider, route, context);
-			if (!("payload" in refreshed)) return refreshed;
-			if (hashStableJson(durablePayload) !== hashStableJson(refreshed.payload)) {
-				await AbuseRepository.updateProviderRun(run.id, { providerPayload: refreshed.payload, payloadHash: hashStableJson(refreshed.payload) }, "provider_run.draft_refreshed");
-			}
-			context = { ...context, payload: refreshed.payload };
+	// Only work that cannot file anything runs before the marker, and this is
+	// the check that the stored draft is still what the provider builds. A run
+	// that never passed the marker may have been interrupted before its report
+	// or narrative changed: build the draft again and replace it. A run that
+	// passed the marker never gets here.
+	let verified: unknown;
+	try {
+		verified = await params.provider.verifyDraft(context);
+	} catch (error) {
+		const refreshed = await prepareDraft(params.provider, context);
+		if (!("payload" in refreshed)) return refreshed;
+		if (hashStableJson(durablePayload) !== hashStableJson(refreshed.payload) && !(await AbuseRepository.replaceStartingDraft(run.id, refreshed.payload))) {
+			throw error;
 		}
-		throwIfAborted(params.signal);
+		context = { ...context, payload: refreshed.payload };
+		verified = await params.provider.verifyDraft(context);
 	}
+	throwIfAborted(params.signal);
+
+	const { provider } = params;
 	let preflight: ProviderSubmissionPreflight | undefined;
-	if (params.provider.prepareExternalSubmission) {
-		// This hook is deliberately before the durable provider-call marker. A
-		// solver/browser failure cannot have filed the complaint, so the worker
-		// may retry the same durable run instead of incorrectly fencing it as an
-		// ambiguous provider submission. Providers must clean up partially-created
-		// ephemeral state if their hook itself rejects.
+	let file: () => Promise<ProviderSubmissionSuccess>;
+	if ("prepareExternalSubmission" in provider) {
+		// Before the durable provider-call marker: a solver/browser failure
+		// cannot have filed the complaint, so the worker may retry the same
+		// durable run instead of fencing it as an ambiguous submission.
+		// Providers clean up the partial ephemeral state if their hook rejects.
+		let prepared: ProviderSubmissionPreflight;
 		try {
-			preflight = await params.provider.prepareExternalSubmission(context);
+			prepared = await provider.prepareExternalSubmission(context, verified);
 			throwIfAborted(params.signal);
 		} catch (error) {
-			await disposePreflight(preflight);
 			// An explicit auth/session failure happens before the marker, so no
 			// complaint was filed; settle it for a person instead of retrying.
 			if (error instanceof ProviderSubmissionNeedsHumanError) {
@@ -321,10 +287,10 @@ export async function executeProviderSubmission(params: {
 			}
 			throw error;
 		}
-	}
-	if (preflight && !params.provider.submitPrepared) {
-		await disposePreflight(preflight);
-		throw new Error(`Provider ${params.provider.definition.key} returned preflight state without a prepared submit handler.`);
+		preflight = prepared;
+		file = () => provider.submitPrepared(context, prepared);
+	} else {
+		file = () => provider.submit(context);
 	}
 
 	let markerAcquired: boolean;
@@ -346,9 +312,7 @@ export async function executeProviderSubmission(params: {
 
 	let success: ProviderSubmissionSuccess;
 	try {
-		success = preflight
-			? await params.provider.submitPrepared!(context, preflight)
-			: await params.provider.submit(context);
+		success = await file();
 	} catch (error) {
 		await disposePreflight(preflight);
 		const status = knownFailureStatus(error);
@@ -399,60 +363,5 @@ export async function executeProviderSubmission(params: {
 		runId: run.id,
 		error: "Provider submission completed but its durable settlement could not be recorded.",
 		reason: "provider_submission_settlement_conflict",
-	});
-}
-
-/** How long, and how often, a submitted report's provider correspondence is read. */
-export const CORRESPONDENCE_POLL_WINDOW_MS = 30 * DAY_MS;
-const CORRESPONDENCE_POLL_INTERVAL_MS = 60 * 60_000;
-/**
- * Reads soon after submitting, measured from it, before the hourly ones.
- * Cloudflare emails its receipt and the hosting provider it names within
- * seconds; a read right at submission found nothing and the next came an
- * hour later, holding back the follow-up with that host.
- */
-const CORRESPONDENCE_EARLY_POLLS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
-
-/** How long after a read the next one is due, by the time since the report was submitted. */
-export function nextCorrespondencePollDelayMs(sinceSubmittedMs: number): number {
-	const early = CORRESPONDENCE_EARLY_POLLS_MS.find((offset) => offset > sinceSubmittedMs);
-	return early === undefined ? CORRESPONDENCE_POLL_INTERVAL_MS : early - Math.max(0, sinceSubmittedMs);
-}
-
-/**
- * When a submission whose answer was lost is looked for at its provider,
- * measured from the submission. A provider can list a report minutes after
- * storing it; after the last lookup the route stays for a person.
- */
-const RECEIPT_LOOKUPS_MS = [MINUTE_MS, 5 * MINUTE_MS, 30 * MINUTE_MS, 2 * HOUR_MS, DAY_MS] as const;
-
-/** How long until the next receipt lookup, or undefined once the schedule is over. */
-export function nextReceiptLookupDelayMs(sinceSubmittedMs: number): number | undefined {
-	const next = RECEIPT_LOOKUPS_MS.find((offset) => offset > sinceSubmittedMs);
-	return next === undefined ? undefined : next - Math.max(0, sinceSubmittedMs);
-}
-
-/** Queue the next receipt lookup for an ambiguous run; one pending lookup per run. */
-export async function queueReceiptLookup(route: { id: bigint; reportId: bigint }, runId: bigint, options: { delayMs: number; successorOf?: bigint }): Promise<void> {
-	await AbuseRepository.enqueueJob({
-		jobType: "find_provider_receipt",
-		reportId: route.reportId,
-		routeId: route.id,
-		runId,
-		dedupeKey: `find-provider-receipt:${runId.toString()}`,
-		nextAttemptAt: new Date(Date.now() + options.delayMs),
-		...(options.successorOf === undefined ? {} : { successorOf: options.successorOf }),
-	});
-}
-
-/** Queue the next correspondence read for a route; one pending poll per route. */
-export async function queueCorrespondencePoll(route: { id: bigint; reportId: bigint }, options: { delayMs?: number; successorOf?: bigint } = {}): Promise<void> {
-	await AbuseRepository.enqueueJob({
-		jobType: "poll_provider_correspondence",
-		reportId: route.reportId,
-		routeId: route.id,
-		dedupeKey: `poll-provider-correspondence:${route.id.toString()}`,
-		nextAttemptAt: new Date(Date.now() + (options.delayMs ?? 0)),
-		...(options.successorOf === undefined ? {} : { successorOf: options.successorOf }),
 	});
 }

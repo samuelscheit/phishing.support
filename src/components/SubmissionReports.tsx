@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { SubmissionReport, SubmissionReportArtifact, SubmissionReportMessage, SubmissionReportRoute } from "@/lib/submissions/details";
 import type { DecisionFollowUpSummary } from "@/lib/abuse/followup/describe";
-import { describeProviderReportStatus } from "@/lib/abuse/provider_status";
+import { describeProviderReportStatus } from "@/lib/abuse/status/provider_status";
 import { formatUtcDateTime } from "@/lib/util/date_time";
 import { cn } from "@/lib/util/cn";
 

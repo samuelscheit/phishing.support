@@ -11,7 +11,7 @@ import { payloadEvidence, payloadVerdictSentence, type PayloadEvidence } from ".
 import { reportDataDrop, reportPayloadHost, type PayloadDelivery } from "../malware/payload_host_report";
 import type { ReporterMetadata } from "../http/reporter_headers";
 import { defangCommand } from "../malware/defang";
-import { isSameWebsite } from "../website/site";
+import { isSameWebsite } from "../website/info/site";
 import type { InvestigationJobPayload } from "./payload";
 import { setInvestigationStatus } from "./status";
 

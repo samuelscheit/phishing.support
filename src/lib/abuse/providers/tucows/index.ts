@@ -23,7 +23,7 @@ export const tucowsProvider = defineProvider({
 			trackingId: PREVIEW_REFERENCE,
 		}, urls);
 	},
-	external: { prepare: (context) => prepareTucowsExternalSubmission(context), submit: submitTucowsSubmission },
+	external: { prepare: prepareTucowsExternalSubmission, submit: submitTucowsSubmission },
 	// Case acknowledgements from Tucows' Freshdesk desk.
 	inbound: { messageKind: "reply", senderDomains: ["tucows.com"] },
 });

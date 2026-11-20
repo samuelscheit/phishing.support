@@ -1,5 +1,5 @@
 import type { AbuseMailClassification } from "../../schema";
-import { isReportReference } from "../report_reference";
+import { isReportReference } from "../kit/report_reference";
 import type { ProviderCorrespondence } from "../submission_contracts";
 import { fetchGoDaddyTicket, goDaddyApiCredentials, type GoDaddyApiDependencies } from "./api";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";

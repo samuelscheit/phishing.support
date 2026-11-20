@@ -1,6 +1,6 @@
-import { normalizePublicHttpUrl } from "../../security";
+import { normalizePublicHttpUrl } from "../../security/security";
 import { snippet, truncateAtWord } from "../../../util/text";
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget, type ProviderReportProfile } from "../report_payload";
+import { buildProviderReportNarrative, normalizeObservedUrlForTarget, type ProviderReportProfile } from "./report_payload";
 import type { ReportInput } from "./draft";
 
 /** The visible text of an HTML answer, as a snippet. */

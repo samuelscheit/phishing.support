@@ -11,7 +11,7 @@ import { extractPasteCommands } from "../../malware/paste_commands";
 import { readInvestigationJobPayload } from "../../investigation/payload";
 import { abuseArtifacts, abuseJobs } from "../schema";
 import { AbuseRepository } from "../repository";
-import { AbuseWorker } from "../worker";
+import { AbuseWorker } from "./";
 import { IPHONE_USER_AGENT } from "../../browser/page";
 import { CORUNA_LOADER } from "../../malware/coruna_loader.fixture";
 import type { WebsiteHiddenFrame } from "../../website/types";

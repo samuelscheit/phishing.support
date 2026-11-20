@@ -79,9 +79,6 @@ export const cloudflareDraft = createDraft({
 	targetOf: (payload) => payload.target,
 });
 
-/** Build Cloudflare's immutable report before the durable provider marker. */
-export const prepareCloudflareSubmission = cloudflareDraft.prepare;
-
 /**
  * Login before the durable irreversible-call marker; session secrets stay
  * ephemeral. A failed login sent nothing, so it is an ordinary retryable
@@ -90,6 +87,7 @@ export const prepareCloudflareSubmission = cloudflareDraft.prepare;
  */
 export async function prepareCloudflareExternalSubmission(
 	context: ProviderSubmissionContext,
+	_verified: unknown,
 	dependencies: CloudflareSubmissionDependencies = {},
 ): Promise<ProviderSubmissionPreflight> {
 	const config = cloudflareApiConfig(dependencies.environment);
@@ -99,7 +97,7 @@ export async function prepareCloudflareExternalSubmission(
 /** Submit one already-persisted Cloudflare report through the dashboard API. */
 export async function submitCloudflareSubmission(
 	context: ProviderSubmissionContext,
-	preflight: ProviderSubmissionPreflight | undefined,
+	preflight: ProviderSubmissionPreflight,
 	dependencies: CloudflareSubmissionDependencies = {},
 ): Promise<ProviderSubmissionSuccess> {
 	const payload = cloudflareDraft.stored(context);

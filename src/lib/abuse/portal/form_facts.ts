@@ -3,7 +3,7 @@ import { z } from "zod";
 import { defaultResponseModel } from "../../openai/client";
 import { optionalOpenAIClient } from "../../openai/client";
 import { optionalResponseText } from "../../openai/response";
-import { hostBelongsToTarget, normalizePublicHttpUrl, registrableDomain } from "../security";
+import { hostBelongsToTarget, normalizePublicHttpUrl, registrableDomain } from "../security/security";
 
 const MAX_ANALYSIS_INPUT = 24_000;
 

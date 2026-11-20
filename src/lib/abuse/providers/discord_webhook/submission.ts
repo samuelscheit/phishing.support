@@ -47,7 +47,6 @@ export const discordWebhookDraft = createDraft({
 	targetOf: ({ webhook }) => `discord-webhook:${webhook.id}`,
 });
 
-export const prepareDiscordWebhookDeletion = discordWebhookDraft.prepare;
 
 async function discordError(response: Response): Promise<{ code?: number; message?: string; retryAfterMs?: number }> {
 	const body = asRecord(await response.json().catch(() => undefined));

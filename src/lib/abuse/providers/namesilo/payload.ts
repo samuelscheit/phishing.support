@@ -1,11 +1,11 @@
 import { z } from "zod";
 
-import { hostBelongsToTarget, normalizeDomain, normalizePublicHttpUrl, registrableDomain } from "../../security";
+import { hostBelongsToTarget, normalizeDomain, normalizePublicHttpUrl, registrableDomain } from "../../security/security";
 import { evidenceContract } from "../kit/evidence";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
 import { providerNarrative } from "../kit/text";
-import { storedProviderEvidenceImageReference } from "../evidence_image";
-import { normalizeObservedUrlForTarget } from "../report_payload";
+import { storedProviderEvidenceImageReference } from "../kit/evidence";
+import { normalizeObservedUrlForTarget } from "../kit/report_payload";
 import { NAMESILO_PROVIDER } from "./definition";
 
 export const NAMESILO_EVIDENCE_CONTRACT = evidenceContract("namesilo_report", NAMESILO_PROVIDER.evidence);

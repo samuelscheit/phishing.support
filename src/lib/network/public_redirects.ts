@@ -1,4 +1,4 @@
-import { assertPublicDnsHost } from "../abuse/security";
+import { assertPublicDnsHost } from "../abuse/security/security";
 import { urlHostname } from "./url";
 import { deadline } from "../util/async";
 import { type FetchLike } from "../http/fetch";

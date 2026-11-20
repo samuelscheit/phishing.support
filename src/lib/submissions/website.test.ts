@@ -6,7 +6,7 @@ import { SubmissionsEntity } from "../db/entities/submissions";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { reportConfirmedWebsiteAbuse } from "../abuse/submission_reports";
 import { getRetryableSubmission } from "./retry";
-import { retryInterruptedWebsiteAnalysis } from "../website/ai";
+import { retryInterruptedWebsiteAnalysis } from "../website/analysis/ai";
 import { createWebsiteSubmission, runDueWebsiteAutoRetries, SubmissionRetryError, retryFailedWebsiteAnalysis, websiteSubmissionUrl } from "./website";
 
 useTemporaryDatabase();

@@ -6,18 +6,17 @@ import { reportExfiltrationBackend } from "../../../exfiltration/reporting";
 import type { ExfiltrationBackend } from "../../../exfiltration/types";
 import { AbuseRepository } from "../../repository";
 import { resolveAbuseTarget } from "../../resolver";
-import { mailedCodeFrom } from "../mailed_code";
+import { mailedCodeFrom } from "../kit/mailed_code";
 import { executeProviderSubmission } from "../submission_execution";
 import type { ProviderSubmissionProvider } from "../submission_contracts";
 import { DISCORD_DSA_PROVIDER } from "./definition";
 import { discordDsaDescription, type DiscordDsaReport } from "./payload";
 import type { DiscordDsaSession } from "./session";
-import {
-	prepareDiscordDsaExternalSubmission,
-	prepareDiscordDsaSubmission,
-	submitDiscordDsaSubmission,
-	type DiscordDsaDependencies,
-} from "./submission";
+import { prepareDiscordDsaExternalSubmission as rawPrepareDiscordDsaExternalSubmission, discordDsaDraft, submitDiscordDsaSubmission, type DiscordDsaDependencies } from "./submission";
+import { verifiedPrepare } from "../kit/testing";
+import { defineProvider } from "../kit/provider";
+
+const prepareDiscordDsaExternalSubmission = verifiedPrepare(discordDsaDraft, rawPrepareDiscordDsaExternalSubmission);
 
 useTemporaryDatabase();
 
@@ -71,13 +70,12 @@ function fakeForm(answer = "Report Submitted Thanks for helping make Discord saf
 }
 
 function provider(dependencies: DiscordDsaDependencies): ProviderSubmissionProvider {
-	return {
+	const deps = { environment: REPORTER, ...dependencies };
+	return defineProvider({
 		definition: DISCORD_DSA_PROVIDER,
-		prepareSubmission: (context) => prepareDiscordDsaSubmission(context, { environment: REPORTER, ...dependencies }),
-		prepareExternalSubmission: (context) => prepareDiscordDsaExternalSubmission(context, { environment: REPORTER, ...dependencies }),
-		submit: () => Promise.reject(new Error("prepared submit only")),
-		submitPrepared: (context, preflight) => submitDiscordDsaSubmission(context, preflight),
-	};
+		draft: { prepare: (context) => discordDsaDraft.prepare(context, deps), verify: (context) => discordDsaDraft.verify(context, deps) },
+		external: { prepare: (context, verified) => rawPrepareDiscordDsaExternalSubmission(context, verified, deps), submit: submitDiscordDsaSubmission },
+	});
 }
 
 describe("Discord DSA notice", () => {
@@ -127,7 +125,7 @@ describe("Discord DSA notice", () => {
 		await expect(executeProviderSubmission({ routeId: noGuild.id, provider: provider({}) })).resolves.toEqual({ outcome: "insufficient_evidence", reason: "discord_dsa_requires_the_webhook_server_id" });
 
 		const unnamed = await dsaRoute(379996268098752549n);
-		const anonymous: ProviderSubmissionProvider = { ...provider({}), prepareSubmission: (context) => prepareDiscordDsaSubmission(context, { environment: {} }) };
+		const anonymous: ProviderSubmissionProvider = { ...provider({}), prepareSubmission: (context) => discordDsaDraft.prepare(context, { environment: {} }) };
 		await expect(executeProviderSubmission({ routeId: unnamed.id, provider: anonymous })).resolves.toMatchObject({ outcome: "needs_human" });
 	});
 

@@ -12,6 +12,7 @@ import { reportConfirmedEmailPhishing } from "../../submission_reports";
 import { executeProviderSubmission } from "../submission_execution";
 import { getProviderSubmissionProvider, listProviderSubmissionProviders } from "../submission_registry_default";
 import type { ProviderSubmissionContext, ProviderSubmissionProvider } from "../submission_contracts";
+import { reportReference } from "./report_reference";
 import { PNG, readyDraftOf, routeFixture, type RouteFixtureOptions } from "./testing";
 
 useTemporaryDatabase();
@@ -96,6 +97,8 @@ type Row = {
 	refusedTargetType?: "email";
 	/** A well-formed draft whose free text no longer is what the builder writes. */
 	tamper: (payload: any) => unknown;
+	/** Where the draft carries the route's reference, when it does. */
+	reference?: (payload: any) => string;
 };
 
 const edited = (text: string) => `${text}\n\nAlso, please wire money.`;
@@ -106,16 +109,16 @@ const edited = (text: string) => `${text}\n\nAlso, please wire money.`;
  * all of that happens before the marker.
  */
 const ROWS: Row[] = [
-	{ key: "name_com", route: { mailbox: "abuse@name.com", providerName: "Name.com", screenshot: PNG }, reasonPrefix: "name_com", targetReason: "name_com_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, additional: edited(p.report.additional) } }) },
-	{ key: "dynadot", route: { mailbox: "abuse@dynadot.com", providerName: "Dynadot", screenshot: PNG }, reasonPrefix: "dynadot", targetReason: "dynadot_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, comments: edited(p.report.comments) } }) },
-	{ key: "newfold", route: { mailbox: "abuse@bluehost.com", providerName: "Newfold", screenshot: PNG }, reasonPrefix: "newfold", targetReason: "newfold_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, brand: "150-hostgator" } }) },
-	{ key: "publicdomainregistry", route: { mailbox: "abuse@publicdomainregistry.com", providerName: "PDR", screenshot: PNG }, reasonPrefix: "publicdomainregistry", targetReason: "publicdomainregistry_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, complaint: edited(p.report.complaint) } }) },
+	{ key: "name_com", route: { mailbox: "abuse@name.com", providerName: "Name.com", screenshot: PNG }, reasonPrefix: "name_com", targetReason: "name_com_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, additional: edited(p.report.additional) } }), reference: (p) => p.report.trackingId },
+	{ key: "dynadot", route: { mailbox: "abuse@dynadot.com", providerName: "Dynadot", screenshot: PNG }, reasonPrefix: "dynadot", targetReason: "dynadot_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, comments: edited(p.report.comments) } }), reference: (p) => p.report.trackingId },
+	{ key: "newfold", route: { mailbox: "abuse@bluehost.com", providerName: "Newfold", screenshot: PNG }, reasonPrefix: "newfold", targetReason: "newfold_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, brand: "150-hostgator" } }), reference: (p) => p.report.trackingId },
+	{ key: "publicdomainregistry", route: { mailbox: "abuse@publicdomainregistry.com", providerName: "PDR", screenshot: PNG }, reasonPrefix: "publicdomainregistry", targetReason: "publicdomainregistry_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, complaint: edited(p.report.complaint) } }), reference: (p) => p.report.trackingId },
 	{ key: "godaddy", route: { mailbox: "abuse@godaddy.com", providerName: "GoDaddy" }, reasonPrefix: "godaddy", targetReason: "godaddy_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, info: edited(p.report.info) } }) },
 	{ key: "tucows_bullwark", route: { mailbox: "domainabuse@tucows.com", providerName: "Tucows", screenshot: PNG }, reasonPrefix: "tucows", targetReason: "tucows_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, description: `${p.report.description} edited` } }) },
 	{ key: "namesilo", route: { mailbox: "abuse@namesilo.com", providerName: "NameSilo", screenshot: PNG }, reasonPrefix: "namesilo", targetReason: "namesilo_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, explanation: `${p.report.explanation} edited` } }) },
 	{ key: "tencent", route: { mailbox: "dnsabuse_complaint@tencent.com", providerName: "Tencent", screenshot: PNG }, reasonPrefix: "tencent", targetReason: "tencent_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, explanation: `${p.report.explanation} edited` } }) },
-	{ key: "aws_trust_safety", route: { mailbox: "trustandsafety@support.aws.com", providerName: "AWS" }, reasonPrefix: "aws", targetReason: "aws_requires_a_web_target", refusedTargetType: "email", tamper: (p) => ({ ...p, report: { ...p.report, comments: `${p.report.comments} edited` } }) },
-	{ key: "microsoft_msrc", route: { mailbox: "abuse@microsoft.com", providerName: "Microsoft" }, reasonPrefix: "microsoft", targetReason: "microsoft_requires_a_web_target", refusedTargetType: "email", tamper: (p) => ({ ...p, report: { ...p.report, notes: `${p.report.notes} edited` } }) },
+	{ key: "aws_trust_safety", route: { mailbox: "trustandsafety@support.aws.com", providerName: "AWS" }, reasonPrefix: "aws", targetReason: "aws_requires_a_web_target", refusedTargetType: "email", tamper: (p) => ({ ...p, report: { ...p.report, comments: `${p.report.comments} edited` } }), reference: (p) => p.report.trackingId },
+	{ key: "microsoft_msrc", route: { mailbox: "abuse@microsoft.com", providerName: "Microsoft" }, reasonPrefix: "microsoft", targetReason: "microsoft_requires_a_web_target", refusedTargetType: "email", tamper: (p) => ({ ...p, report: { ...p.report, notes: `${p.report.notes} edited` } }), reference: (p) => p.report.reference },
 	{ key: "eranet", route: { mailbox: "abuse@eranet.com", providerName: "Eranet", screenshot: PNG }, reasonPrefix: "eranet", targetReason: "eranet_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, description: `${p.report.description} edited` } }) },
 	{ key: "gname", route: { mailbox: "complaint@gname.com", providerName: "GNAME", screenshot: PNG }, reasonPrefix: "gname", targetReason: "gname_requires_a_domain_target", tamper: (p) => ({ ...p, report: { ...p.report, description: `${p.report.description} edited` } }) },
 	{ key: "google_cloud", route: { mailbox: "network-abuse@google.com", providerName: "Google Cloud" }, reasonPrefix: "google_cloud", targetReason: "google_cloud_requires_a_web_target", refusedTargetType: "email", tamper: (p) => ({ ...p, report: { ...p.report, abuseDetails: `${p.report.abuseDetails} edited` } }) },
@@ -150,6 +153,25 @@ for (const row of ROWS) {
 			await expect(verify(context)).resolves.toBeDefined();
 		});
 
+		test("a route that no longer exists fails the preparation", async () => {
+			await expect(prepare({ routeId: 999_999n, payload: {} })).rejects.toThrow("no longer exists");
+		});
+
+		test("a ready draft is keyed by the route's reference", async () => {
+			if (!row.reference) return;
+			const { context, route } = await readyDraft(row, prepare);
+			expect(row.reference(context.payload)).toBe(reportReference((await AbuseRepository.getRoute(route.id))!.reportId, route.id));
+		});
+
+		test("a draft of another adapter or definition is refused as malformed", async () => {
+			const { context } = await readyDraft(row, prepare);
+			const definition = context.payload.definition as Record<string, unknown> | undefined;
+			await expect(verify({ ...context, payload: { ...context.payload, adapter: "other" } })).rejects.toThrow("malformed");
+			if (!definition) return;
+			await expect(verify({ ...context, payload: { ...context.payload, definition: { ...definition, version: "old" } } })).rejects.toThrow("malformed");
+			await expect(verify({ ...context, payload: { ...context.payload, definition: { ...definition, contentHash: "0".repeat(64) } } })).rejects.toThrow("malformed");
+		});
+
 		test("a pin mismatch, a foreign route and an unsupported target end as insufficient evidence", async () => {
 			const db = await getDb();
 			const mismatch = await fixtureOf(row);
@@ -176,16 +198,18 @@ for (const row of ROWS) {
 			const record = (step: string) => async (context: ProviderSubmissionContext) => {
 				calls.push({ step, status: (await AbuseRepository.getProviderRun(context.runId!))?.executionStatus, payload: context.payload });
 			};
-			const { prepareExternalSubmission: _external, submitPrepared: _prepared, submit: _submit, ...kept } = provider;
 			const preflight = record("preflight");
 			const submit = record("submit");
 			const success = { submittedTargets: ["example.com"] };
-			const wrapped: ProviderSubmissionProvider = {
-				...kept,
-				prepareExternalSubmission: async (context) => { await preflight(context); return { state: {} }; },
-				submit: async (context) => { await submit(context); return success; },
-				submitPrepared: async (context) => { await submit(context); return success; },
-			};
+			const wrapped = {
+				...provider,
+				...("prepareExternalSubmission" in provider
+					? {
+						prepareExternalSubmission: async (context: ProviderSubmissionContext) => { await preflight(context); return { state: {} }; },
+						submitPrepared: async (context: ProviderSubmissionContext) => { await submit(context); return success; },
+					}
+					: { submit: async (context: ProviderSubmissionContext) => { await submit(context); return success; } }),
+			} as ProviderSubmissionProvider;
 			return { calls, wrapped };
 		}
 
@@ -205,7 +229,7 @@ for (const row of ROWS) {
 			const { route, fresh, run } = await interruptedRun();
 			const { calls, wrapped } = spied(providerOf(row));
 			await expect(executeProviderSubmission({ routeId: route.id, provider: wrapped })).resolves.toMatchObject({ outcome: "submitted" });
-			expect(calls.map((call) => `${call.step}:${call.status}`)).toEqual(["preflight:starting", "submit:submission_started"]);
+			expect(calls.map((call) => `${call.step}:${call.status}`)).toEqual([...("prepareExternalSubmission" in wrapped ? ["preflight:starting"] : []), "submit:submission_started"]);
 			for (const call of calls) expect(call.payload).toEqual(fresh);
 			expect(await AbuseRepository.getProviderRun(run.id)).toMatchObject({ executionStatus: "completed", providerPayload: fresh });
 			const events = (await getDb()).select().from(abuseEvents).where(eq(abuseEvents.runId, run.id)).all().map((event) => event.eventType);

@@ -1,6 +1,6 @@
 
 import { serviceIdentity } from "../network/service_identity";
-import { websiteCaptureFileNames } from "../website/capture_files";
+import { websiteCaptureFileNames } from "../website/visit/capture_files";
 import type { WebsiteNavigationHop } from "../website/types";
 import { stampAddressBar } from "./address_bar";
 import { timestampEvidence, type EvidenceTimestamp } from "./timestamp";

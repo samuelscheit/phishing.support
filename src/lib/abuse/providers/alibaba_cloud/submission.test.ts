@@ -13,17 +13,12 @@ import { AlibabaConsoleError } from "./api";
 import { alibabaCloudProvider } from "./index";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import { alibabaCloudSubmitParams, storedAlibabaCloudSubmissionPayload } from "./payload";
-import {
-	fetchAlibabaCloudCorrespondence,
-	findAlibabaCloudSubmission,
-	parseAlibabaReportRecords,
-	parseAlibabaReportStatus,
-	prepareAlibabaCloudExternalSubmission,
-	prepareAlibabaCloudSubmission,
-	recordTime,
-	submitAlibabaCloudSubmission,
-} from "./submission";
+import { fetchAlibabaCloudCorrespondence, findAlibabaCloudSubmission, parseAlibabaReportRecords, parseAlibabaReportStatus, prepareAlibabaCloudExternalSubmission as rawPrepareAlibabaCloudExternalSubmission, alibabaCloudDraft, recordTime, submitAlibabaCloudSubmission } from "./submission";
 import { consoleRefusal, consoleTime, consoleSuccess, fakeConsoleFetch, freshSession, loginConfig, NEED_LOGIN, session, SUCCESS_ENV_SG, UPLOAD_POLICY } from "./test_support";
+import { verifiedPrepare } from "../kit/testing";
+import { defineProvider } from "../kit/provider";
+
+const prepareAlibabaCloudExternalSubmission = verifiedPrepare(alibabaCloudDraft, rawPrepareAlibabaCloudExternalSubmission);
 
 useTemporaryDatabase();
 
@@ -64,7 +59,7 @@ async function alibabaRoute(options: { target?: string; allegationCategory?: "ph
 
 async function readyContext(options: Parameters<typeof alibabaRoute>[0] = {}) {
 	const fixture = await alibabaRoute(options);
-	const preparation = await prepareAlibabaCloudSubmission({ routeId: fixture.route.id, payload: {} });
+	const preparation = await alibabaCloudDraft.prepare({ routeId: fixture.route.id, payload: {} });
 	if (preparation.outcome !== "ready") throw new Error(`expected ready, got ${JSON.stringify(preparation)}`);
 	const payload = storedAlibabaCloudSubmissionPayload(preparation.payload);
 	if (!payload) throw new Error("expected a stored payload");
@@ -107,7 +102,7 @@ describe("registry", () => {
 
 	test("the provider wires every handler and review verdicts for Alibaba's review states", () => {
 		expect(alibabaCloudProvider.definition).toBe(ALIBABA_CLOUD_PROVIDER);
-		for (const handler of ["prepareSubmission", "prepareExternalSubmission", "submit", "submitPrepared", "findSubmission", "fetchCorrespondence", "buildReportPreview"] as const) expect(typeof alibabaCloudProvider[handler]).toBe("function");
+		for (const handler of ["prepareSubmission", "verifyDraft", "prepareExternalSubmission", "submitPrepared", "findSubmission", "fetchCorrespondence", "buildReportPreview"]) expect(typeof (alibabaCloudProvider as Record<string, unknown>)[handler]).toBe("function");
 		expect(alibabaCloudProvider.reviewVerdicts).toEqual({
 			Valid: "acknowledged",
 			"Notify rectification": "acknowledged",
@@ -124,7 +119,7 @@ describe("registry", () => {
 	});
 });
 
-describe("prepareAlibabaCloudSubmission", () => {
+describe("alibabaCloudDraft.prepare", () => {
 	test("drafts a ready, secret-free payload from the route's report", async () => {
 		const { payload } = await readyContext();
 		expect(storedAlibabaCloudSubmissionPayload(JSON.parse(JSON.stringify(payload)))).toEqual(payload);
@@ -140,40 +135,37 @@ describe("prepareAlibabaCloudSubmission", () => {
 	test("a pin mismatch, a non-web target and a missing screenshot all end the route as insufficient evidence", async () => {
 		const mismatch = await alibabaRoute();
 		(await getDb()).update(abuseProviderRoutes).set({ providerDefinitionHash: "0".repeat(64) }).where(eq(abuseProviderRoutes.id, mismatch.route.id)).run();
-		expect(await prepareAlibabaCloudSubmission({ routeId: mismatch.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "alibaba_cloud_provider_definition_pin_mismatch" });
+		expect(await alibabaCloudDraft.prepare({ routeId: mismatch.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "alibaba_cloud_provider_definition_pin_mismatch" });
 
 		const wrongVersion = await alibabaRoute();
 		(await getDb()).update(abuseProviderRoutes).set({ providerDefinitionVersion: "1999-01-01" }).where(eq(abuseProviderRoutes.id, wrongVersion.route.id)).run();
-		expect(await prepareAlibabaCloudSubmission({ routeId: wrongVersion.route.id, payload: {} })).toMatchObject({ reason: "alibaba_cloud_provider_definition_pin_mismatch" });
+		expect(await alibabaCloudDraft.prepare({ routeId: wrongVersion.route.id, payload: {} })).toMatchObject({ reason: "alibaba_cloud_provider_definition_pin_mismatch" });
 
 		const otherProvider = await alibabaRoute();
 		(await getDb()).update(abuseProviderRoutes).set({ providerRegistryKey: "gname" }).where(eq(abuseProviderRoutes.id, otherProvider.route.id)).run();
-		expect(await prepareAlibabaCloudSubmission({ routeId: otherProvider.route.id, payload: {} })).toMatchObject({ reason: "alibaba_cloud_provider_definition_pin_mismatch" });
+		expect(await alibabaCloudDraft.prepare({ routeId: otherProvider.route.id, payload: {} })).toMatchObject({ reason: "alibaba_cloud_provider_definition_pin_mismatch" });
 
 		const email = await alibabaRoute();
 		(await getDb()).update(abuseTargets).set({ targetType: "email" }).where(eq(abuseTargets.id, email.targetId)).run();
-		expect(await prepareAlibabaCloudSubmission({ routeId: email.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "alibaba_cloud_requires_a_web_target" });
+		expect(await alibabaCloudDraft.prepare({ routeId: email.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "alibaba_cloud_requires_a_web_target" });
 
 		const bare = await alibabaRoute({ screenshot: false });
-		expect(await prepareAlibabaCloudSubmission({ routeId: bare.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "alibaba_cloud_requires_a_screenshot" });
+		expect(await alibabaCloudDraft.prepare({ routeId: bare.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "alibaba_cloud_requires_a_screenshot" });
 	});
 
 	test("missing credentials need a person rather than drafting", async () => {
 		const { route } = await alibabaRoute();
 		delete process.env.ABUSE_ALIBABA_CLOUD_LOGIN_EMAIL;
-		const noEmail = await prepareAlibabaCloudSubmission({ routeId: route.id, payload: {} }).catch((error) => error);
+		const noEmail = await alibabaCloudDraft.prepare({ routeId: route.id, payload: {} }).catch((error) => error);
 		expect(noEmail).toBeInstanceOf(ProviderSubmissionNeedsHumanError);
 		expect(noEmail.message).toContain("ABUSE_ALIBABA_CLOUD_LOGIN_EMAIL");
 		process.env.ABUSE_ALIBABA_CLOUD_LOGIN_EMAIL = loginConfig.email;
 		delete process.env.ABUSE_ALIBABA_CLOUD_LOGIN_PASSWORD;
-		const noPassword = await prepareAlibabaCloudSubmission({ routeId: route.id, payload: {} }).catch((error) => error);
+		const noPassword = await alibabaCloudDraft.prepare({ routeId: route.id, payload: {} }).catch((error) => error);
 		expect(noPassword).toBeInstanceOf(ProviderSubmissionNeedsHumanError);
 		expect(noPassword.message).toContain("ABUSE_ALIBABA_CLOUD_LOGIN_PASSWORD");
 	});
 
-	test("an unknown route fails", async () => {
-		await expect(prepareAlibabaCloudSubmission({ routeId: 999_999n, payload: {} })).rejects.toThrow("no longer exists");
-	});
 });
 
 describe("preflight: area check and evidence upload", () => {
@@ -309,11 +301,6 @@ describe("submitAlibabaCloudSubmission", () => {
 			if (preflight) expect(failure.message).toContain("no prepared state");
 			expect(console.requests).toHaveLength(0);
 		}
-	});
-
-	test("the provider's plain submit rejects: Alibaba files only from prepared state", async () => {
-		const { context } = await readyContext();
-		await expect(alibabaCloudProvider.submit(context as never)).rejects.toThrow("only from its prepared state");
 	});
 
 	test("the cross-region path asks for consent: allowCrossRegion is sent only when GetCrossRegionExist is exactly true", async () => {
@@ -519,10 +506,10 @@ describe("end to end through the execution engine", () => {
 	test("a console refusal settles the route as rejected; a non-sg account waits for a person", async () => {
 		const refused = await alibabaRoute();
 		const refusing = dependencies(consoleAnswers({ SubmitReportTask: consoleRefusal("ReportReasonInvalid") }) as never);
-		const asProvider = (deps: ReturnType<typeof dependencies>): ProviderSubmissionProvider => ({
-			...alibabaCloudProvider,
-			prepareExternalSubmission: (context) => prepareAlibabaCloudExternalSubmission(context, deps),
-			submitPrepared: (context, preflight) => submitAlibabaCloudSubmission(context, preflight, deps),
+		const asProvider = (deps: ReturnType<typeof dependencies>) => defineProvider({
+			definition: ALIBABA_CLOUD_PROVIDER,
+			draft: alibabaCloudDraft,
+			external: { prepare: (context, verified) => rawPrepareAlibabaCloudExternalSubmission(context, verified, deps), submit: (context, preflight) => submitAlibabaCloudSubmission(context, preflight, deps) },
 		});
 		await expect(executeProviderSubmission({ routeId: refused.route.id, provider: asProvider(refusing) })).resolves.toMatchObject({ outcome: "provider_rejected" });
 

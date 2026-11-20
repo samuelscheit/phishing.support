@@ -1,12 +1,12 @@
 import { isIP } from "node:net";
 import { z } from "zod";
 
-import { normalizePublicHost } from "../../security";
+import { normalizePublicHost } from "../../security/security";
 import { emailOriginFactLines, type EmailOrigin } from "../email_origin";
 import type { ReportInput } from "../kit/draft";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
 import { composeFreeText, isReportUrl, providerNarrative, reportUrls, type UrlRules } from "../kit/text";
-import { isReportReference } from "../report_reference";
+import { isReportReference } from "../kit/report_reference";
 import { MICROSOFT_PROVIDER } from "./definition";
 
 const envelope = payloadEnvelope(MICROSOFT_PROVIDER, "microsoft_msrc_report_v1");

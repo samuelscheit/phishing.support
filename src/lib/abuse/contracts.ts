@@ -4,7 +4,7 @@ import sharp from "sharp";
 import { z } from "zod";
 
 import type { AbuseTargetType } from "./schema";
-import { AbuseInputError, hostBelongsToTarget, normalizePublicHost, normalizePublicHttpUrl } from "./security";
+import { AbuseInputError, hostBelongsToTarget, normalizePublicHost, normalizePublicHttpUrl } from "./security/security";
 import { hashStableJson, sha256Hex } from "../util/hash";
 
 const MAX_TARGETS_PER_REPORT = 100;

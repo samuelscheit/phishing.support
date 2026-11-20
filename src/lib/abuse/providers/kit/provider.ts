@@ -1,16 +1,17 @@
-import { normalizeDomain } from "../../security";
-import { reportReferencesIn } from "../report_reference";
+import { normalizeDomain } from "../../security/security";
+import { reportReferencesIn } from "./report_reference";
 import type {
 	ProviderInboundMail,
 	ProviderReportPreviewContext,
 	ProviderSubmissionContext,
 	ProviderSubmissionDefinition,
+	ProviderSubmissionFiling,
 	ProviderSubmissionPreflight,
 	ProviderSubmissionPreparation,
 	ProviderSubmissionProvider,
 	ProviderSubmissionSuccess,
 } from "../submission_contracts";
-import type { ReportInput } from "./draft";
+import type { ReportInput, Verified } from "./draft";
 
 /** Every preview carries this stand-in for the route's reference. */
 export const PREVIEW_REFERENCE = "PS-000000000000-R0";
@@ -36,37 +37,50 @@ export function registrarPreview(rules: {
 
 type Rest = Pick<ProviderSubmissionProvider, "fetchCorrespondence" | "findSubmission" | "reviewVerdicts" | "decisionFollowUp">;
 
+type Filing<Payload> =
+	| {
+		/** The irreversible call of a provider without a preflight. */
+		submit: (context: ProviderSubmissionContext) => Promise<ProviderSubmissionSuccess>;
+		external?: undefined;
+	}
+	| {
+		/** The provider's preflight before the marker, given what the executor verified, and the irreversible call that consumes it. */
+		external: {
+			prepare: (context: ProviderSubmissionContext, verified: Verified<Payload>) => Promise<ProviderSubmissionPreflight>;
+			submit: (context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight) => Promise<ProviderSubmissionSuccess>;
+		};
+		submit?: undefined;
+	};
+
 /**
- * Wire a direct provider: a browser or form provider's `external` pair fills
- * `prepareExternalSubmission`, `submit` and `submitPrepared` (the executor
- * always calls the latter), and the mail defaults are what registrar replies are.
+ * Wire a direct provider from its draft pair and its filing; the mail
+ * defaults are what registrar replies are.
  */
-export function defineProvider(spec: Rest & {
+export function defineProvider<Payload>(spec: Rest & Filing<Payload> & {
 	definition: ProviderSubmissionDefinition;
 	/** `createDraft`'s pre-marker pair: the executor prepares with it and verifies with it before the marker. */
 	draft: {
 		prepare: (context: ProviderSubmissionContext) => Promise<ProviderSubmissionPreparation>;
-		verify: (context: ProviderSubmissionContext) => Promise<unknown>;
+		verify: (context: ProviderSubmissionContext) => Promise<Verified<Payload>>;
 	};
 	preview?: ProviderSubmissionProvider["buildReportPreview"];
-	external?: {
-		prepare: (context: ProviderSubmissionContext) => Promise<ProviderSubmissionPreflight>;
-		submit: (context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined) => Promise<ProviderSubmissionSuccess>;
-	};
-	/** The irreversible call of a provider without a preflight. */
-	submit?: ProviderSubmissionProvider["submit"];
-	inbound?: Omit<ProviderInboundMail, "confirmationIds"> & Partial<Pick<ProviderInboundMail, "confirmationIds">>;
+	/** `confirmationIds: null` when the provider's API is the authoritative record, so its mail is not attached a second time. */
+	inbound?: Omit<ProviderInboundMail, "confirmationIds"> & { confirmationIds?: ProviderInboundMail["confirmationIds"] | null };
 }): ProviderSubmissionProvider {
 	const { draft, preview, external, submit, inbound, ...rest } = spec;
-	const submitCall = external ? (context: ProviderSubmissionContext) => external.submit(context, undefined) : submit;
-	if (!submitCall) throw new Error(`${spec.definition.key} has no submit call.`);
+	const filing: ProviderSubmissionFiling = external
+		? { prepareExternalSubmission: (context, verified) => external.prepare(context, verified as Verified<Payload>), submitPrepared: external.submit }
+		: { submit: submit! };
 	return {
 		...rest,
+		...filing,
 		prepareSubmission: draft.prepare,
 		verifyDraft: draft.verify,
 		...(preview ? { buildReportPreview: preview } : {}),
-		...(external ? { prepareExternalSubmission: external.prepare, submitPrepared: external.submit } : {}),
-		submit: submitCall,
-		...(inbound ? { inboundMail: { confirmationIds: reportReferencesIn, ...inbound } } : {}),
+		...(inbound ? { inboundMail: inboundMailOf(inbound) } : {}),
 	};
+}
+
+function inboundMailOf({ confirmationIds, ...mail }: NonNullable<Parameters<typeof defineProvider>[0]["inbound"]>): ProviderInboundMail {
+	return { ...mail, ...(confirmationIds === null ? {} : { confirmationIds: confirmationIds ?? reportReferencesIn }) };
 }

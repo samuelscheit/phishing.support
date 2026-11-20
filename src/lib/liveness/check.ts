@@ -5,7 +5,7 @@ import type { InferInsertModel } from "drizzle-orm";
 
 import { fetchRdapRecord } from "../abuse/resolver/http";
 import type { ResolverDependencies } from "../abuse/resolver/types";
-import { registrableDomain } from "../abuse/security";
+import { registrableDomain } from "../abuse/security/security";
 import { browserRequestHeaders } from "../network/service_identity";
 import { errorSummary } from "../util/error_text";
 import { asRecord } from "../util/values";

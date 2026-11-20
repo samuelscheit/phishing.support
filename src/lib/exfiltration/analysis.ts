@@ -1,4 +1,4 @@
-import { normalizeDomain } from "../abuse/security";
+import { normalizeDomain } from "../abuse/security/security";
 import type { CapturedNetworkRequest, ExfiltrationBackend, ExfiltrationCanaries } from "./types";
 
 const TELEGRAM_ENDPOINT = /^\/bot([^/]+)\/(?:sendMessage|sendPhoto|sendDocument|sendMediaGroup|sendVideo|sendAudio|sendVoice|sendAnimation)(?:\/|$)/i;

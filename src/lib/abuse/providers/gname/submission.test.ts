@@ -1,24 +1,18 @@
 import { describe, expect, test } from "bun:test";
 
 import type { AbuseArtifact } from "../../schema";
-import { mailedCodeFrom } from "../mailed_code";
+import { mailedCodeFrom } from "../kit/mailed_code";
 import { getProviderSubmissionProviderForMailbox, getProviderSubmissionProviderForRegistrarId } from "../submission_registry_default";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { GNAME_PROVIDER } from "./definition";
 import { gnameProvider } from "./index";
-import { selectProviderEvidenceImageArtifact } from "../evidence_image";
+import { selectProviderEvidenceImageArtifact } from "../kit/evidence";
 import { buildGnameSubmissionPayload, GNAME_EVIDENCE_CONTRACT, gnameComplaintKind, gnameDomainEntry, storedGnameSubmissionPayload } from "./payload";
-import {
-	gnameComplaintBody,
-	prepareGnameExternalSubmission,
-	prepareGnameSubmission,
-	submitGnameSubmission,
-	type GnameDependencies,
-	type GnameResponse,
-	type GnameSession,
-	type GnameUpload,
-} from "./submission";
+import { gnameComplaintBody, prepareGnameExternalSubmission as rawPrepareGnameExternalSubmission, gnameDraft, submitGnameSubmission, type GnameDependencies, type GnameResponse, type GnameSession, type GnameUpload } from "./submission";
 import { sha256Hex } from "../../../util/hash";
+import { verifiedPrepare } from "../kit/testing";
+
+const prepareGnameExternalSubmission = verifiedPrepare(gnameDraft, rawPrepareGnameExternalSubmission);
 
 // A minimal valid PNG: the evidence contract checks the magic bytes and digest.
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
@@ -80,7 +74,7 @@ const UPLOADED = () => ({ code: 1, msg: "", data: { path: "/upload/lyts/20261108
 const CODE_SENT = () => ({ code: "1", msg: "An e-mail has been sent to your email address support@phishing.support, please check it.", data: "" });
 
 async function readyPayload(options: Parameters<typeof routeContext>[0] = {}) {
-	const prepared = await prepareGnameSubmission({ routeId: 5n, payload: {} }, { loadRouteContext: routeContext(options) });
+	const prepared = await gnameDraft.prepare({ routeId: 5n, payload: {} }, { loadRouteContext: routeContext(options) });
 	if (prepared.outcome !== "ready") throw new Error(`not ready: ${prepared.reason}`);
 	return prepared.payload;
 }
@@ -166,7 +160,7 @@ describe("GNAME abuse complaint form", () => {
 	});
 
 	test("nothing is drafted without an observed URL, a screenshot under 2 MB, or the definition the route was pinned to", async () => {
-		const prepare = (options: Parameters<typeof routeContext>[0]) => prepareGnameSubmission({ routeId: 5n, payload: {} }, { loadRouteContext: routeContext(options) });
+		const prepare = (options: Parameters<typeof routeContext>[0]) => gnameDraft.prepare({ routeId: 5n, payload: {} }, { loadRouteContext: routeContext(options) });
 		expect(await prepare({ observedUrls: [] })).toEqual({ outcome: "insufficient_evidence", reason: "gname_requires_an_observed_url" });
 		expect(await prepare({ evidenceArtifacts: [] })).toEqual({ outcome: "insufficient_evidence", reason: "gname_requires_a_screenshot" });
 		const oversized = Buffer.concat([PNG, Buffer.alloc(2 * 1024 * 1024)]);
@@ -197,8 +191,8 @@ describe("GNAME abuse complaint form", () => {
 	test("submit never runs without the preflight's session, code, and uploaded screenshot", async () => {
 		const payload = await readyPayload();
 		const api = gnameApi({ post: () => ({ code: 1, data: "GN1" }) });
-		for (const state of [undefined, { code: "a1", pics: ["/p.png"] }, { session: api.session, code: "", pics: ["/p.png"] }, { session: api.session, code: "a1", pics: [] }]) {
-			await expect(submit({ routeId: 5n, payload }, state ? { state } : undefined)).rejects.toThrow("prepared verification code");
+		for (const state of [{ code: "a1", pics: ["/p.png"] }, { session: api.session, code: "", pics: ["/p.png"] }, { session: api.session, code: "a1", pics: [] }]) {
+			await expect(submit({ routeId: 5n, payload }, { state })).rejects.toThrow("prepared verification code");
 		}
 		expect(api.calls).toEqual([]);
 		await expect(submit({ routeId: 5n, payload: { ...payload, adapter: "eranet_phishing_report_v1" } }, { state: { session: api.session, code: "a1", pics: ["/p.png"] } }))

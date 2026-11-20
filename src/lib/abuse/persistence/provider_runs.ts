@@ -81,20 +81,23 @@ export async function getLatestActiveProviderRunForRoute(routeId: bigint): Promi
 		.get();
 }
 
-export async function updateProviderRun(runId: bigint, values: Partial<typeof abuseProviderRuns.$inferInsert>, eventType = "provider_run.updated"): Promise<void> {
+/**
+ * Replace the draft of a run that has not reached its marker. Returns false
+ * when the run left `starting`, so a draft is never rewritten under a marker.
+ */
+export async function replaceStartingDraft(runId: bigint, payload: Record<string, unknown>): Promise<boolean> {
 	const db = await getDb();
-	db.transaction(
+	return db.transaction(
 		(tx) => {
-			const run = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, runId)).get();
-			if (!run) return;
-			tx.update(abuseProviderRuns).set({ ...values, updatedAt: now() }).where(eq(abuseProviderRuns.id, runId)).run();
-			recordEvent(tx, {
-				reportId: run.reportId,
-				routeId: run.routeId,
-				runId,
-				eventType,
-				data: Object.fromEntries(Object.entries(values).filter(([key]) => !["providerPayload"].includes(key))),
-			});
+			const run = tx
+				.update(abuseProviderRuns)
+				.set({ providerPayload: payload, payloadHash: hashStableJson(payload), updatedAt: now() })
+				.where(and(eq(abuseProviderRuns.id, runId), eq(abuseProviderRuns.executionStatus, "starting")))
+				.returning()
+				.get();
+			if (!run) return false;
+			recordEvent(tx, { reportId: run.reportId, routeId: run.routeId, runId, eventType: "provider_run.draft_refreshed", data: { payloadHash: run.payloadHash } });
+			return true;
 		},
 		{ behavior: "immediate" }
 	);

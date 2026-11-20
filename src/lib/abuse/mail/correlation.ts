@@ -2,7 +2,7 @@ import type { ParsedMail } from "mailparser";
 
 import { serviceIdentity } from "../../network/service_identity";
 import { flattenAddresses, headerStrings } from "../../imap/rfc";
-import { registrableDomain } from "../security";
+import { registrableDomain } from "../security/security";
 import { normalizeMailbox } from "./shared";
 
 const CASE_TAG_PREFIX = "PS-";

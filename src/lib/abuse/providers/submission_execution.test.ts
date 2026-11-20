@@ -45,9 +45,10 @@ function testProvider(overrides: Partial<ProviderSubmissionProvider> = {}): Prov
 			contentHash: hashStableJson(definitionWithoutHash),
 		},
 		prepareSubmission: async () => ({ outcome: "ready", payload: { adapter: "test_provider", target: "example.com" } }),
+		verifyDraft: async () => undefined,
 		submit: async () => ({ submittedTargets: ["example.com"] }),
 		...overrides,
-	};
+	} as ProviderSubmissionProvider;
 }
 
 async function createProviderRoute(provider: ProviderSubmissionProvider, params: { version?: string; contentHash?: string; status?: "queued" | "verified" } = {}) {
@@ -179,13 +180,12 @@ describe("provider submission execution boundary", () => {
 		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toMatchObject({ outcome: "submitted" });
 		expect(order).toEqual(["verify:starting", "preflight", "submit:submission_started"]);
 
-		// Without a way to rebuild the draft a failed verification is an ordinary retryable error before the marker.
+		// A draft that still fails verification after it was rebuilt is an ordinary retryable error before the marker.
 		let sent = 0;
 		const unrepairable = testProvider({
 			verifyDraft: async () => { throw new Error("The persisted draft no longer matches the report."); },
 			submit: async () => { sent += 1; return { submittedTargets: ["example.com"] }; },
 		});
-		delete (unrepairable as { prepareSubmission?: unknown }).prepareSubmission;
 		const second = await createProviderRoute(unrepairable);
 		await expect(executeProviderSubmission({ routeId: second.route.id, provider: unrepairable })).rejects.toThrow("no longer matches the report");
 		expect(sent).toBe(0);

@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { getDb } from "../../../db";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
-import { routeFixture } from "../kit/testing";
+import { routeFixture, verifiedPrepare } from "../kit/testing";
 import { AbuseRepository } from "../../repository";
 import { abuseArtifacts, abuseTargets } from "../../schema";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError, type ProviderSubmissionProvider } from "../submission_contracts";
@@ -12,7 +12,10 @@ import { TUCOWS_PROVIDER } from "./definition";
 import { tucowsProvider } from "./index";
 import { storedTucowsSubmissionPayload } from "./payload";
 import { hiddenCsrfToken, metaCsrfToken } from "./session";
-import { prepareTucowsExternalSubmission, prepareTucowsSubmission, submitTucowsSubmission, tucowsCaseId, verifiedTucowsDraft, type TucowsDependencies } from "./submission";
+import { prepareTucowsExternalSubmission as rawPrepareTucowsExternalSubmission, tucowsDraft, submitTucowsSubmission, tucowsCaseId, type TucowsDependencies } from "./submission";
+import { defineProvider } from "../kit/provider";
+
+const prepareTucowsExternalSubmission = verifiedPrepare(tucowsDraft, rawPrepareTucowsExternalSubmission);
 
 useTemporaryDatabase();
 
@@ -36,7 +39,7 @@ const tucowsRoute = (options: { target?: string; allegationCategory?: "phishing"
 
 async function readyContext(options: Parameters<typeof tucowsRoute>[0] = {}) {
 	const fixture = await tucowsRoute(options);
-	const preparation = await prepareTucowsSubmission({ routeId: fixture.route.id, payload: {} });
+	const preparation = await tucowsDraft.prepare({ routeId: fixture.route.id, payload: {} });
 	if (preparation.outcome !== "ready") throw new Error(`expected ready, got ${JSON.stringify(preparation)}`);
 	const payload = storedTucowsSubmissionPayload(preparation.payload);
 	if (!payload) throw new Error("expected a stored payload");
@@ -142,7 +145,7 @@ describe("page tokens", () => {
 	});
 });
 
-describe("prepareTucowsSubmission", () => {
+describe("tucowsDraft.prepare", () => {
 	test("builds the pinned draft with the screenshot, our reference", async () => {
 		const { payload, created, route } = await readyContext();
 		expect(payload.report).toMatchObject({ offendingDomain: TARGET, brandName: "Example Bank", brandDomain: "examplebank.com", url: `https://${TARGET}/signin` });
@@ -169,28 +172,24 @@ describe("prepareTucowsSubmission", () => {
 	});
 
 	test("ends the route as insufficient evidence when the form cannot take the report", async () => {
-		expect(await prepareTucowsSubmission({ routeId: (await tucowsRoute({ screenshot: false })).route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "tucows_requires_a_screenshot" });
-		expect(await prepareTucowsSubmission({ routeId: (await tucowsRoute({ legalBrandUrl: null })).route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "tucows_requires_a_brand_domain" });
-		expect(await prepareTucowsSubmission({ routeId: (await tucowsRoute({ allegationCategory: "malware" })).route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "tucows_files_phishing_only" });
+		expect(await tucowsDraft.prepare({ routeId: (await tucowsRoute({ screenshot: false })).route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "tucows_requires_a_screenshot" });
+		expect(await tucowsDraft.prepare({ routeId: (await tucowsRoute({ legalBrandUrl: null })).route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "tucows_requires_a_brand_domain" });
+		expect(await tucowsDraft.prepare({ routeId: (await tucowsRoute({ allegationCategory: "malware" })).route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "tucows_files_phishing_only" });
 	});
 
-	test("an unknown route fails", async () => {
-		await expect(prepareTucowsSubmission({ routeId: 999_999n, payload: {} })).rejects.toThrow("no longer exists");
-	});
 });
 
-describe("verifiedTucowsDraft", () => {
+describe("the draft verified before the preflight", () => {
 	test("rejects a malformed, retargeted, stale or tampered-evidence draft", async () => {
 		const { context, payload, route, targetId, created } = await readyContext();
-		await expect(verifiedTucowsDraft({ routeId: route.id, payload: {} })).rejects.toThrow("malformed");
-		await expect(verifiedTucowsDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, description: `${payload.report.description} edited` } } as never })).rejects.toThrow("no longer matches the report");
-		await expect(verifiedTucowsDraft({ routeId: route.id, payload: { ...payload, target: { normalizedTarget: "other.example.com" } } as never })).rejects.toThrow("no longer matches its route");
-		await expect(verifiedTucowsDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, reference: "PS-000000000000-R1" } } as never })).rejects.toThrow("no longer matches the report");
-		expect((await verifiedTucowsDraft(context)).screenshot.equals(PNG)).toBeTrue();
+		await expect(tucowsDraft.verify({ routeId: route.id, payload: {} })).rejects.toThrow("malformed");
+		await expect(tucowsDraft.verify({ routeId: route.id, payload: { ...payload, report: { ...payload.report, description: `${payload.report.description} edited` } } as never })).rejects.toThrow("no longer matches the report");
+		await expect(tucowsDraft.verify({ routeId: route.id, payload: { ...payload, target: { normalizedTarget: "other.example.com" } } as never })).rejects.toThrow("no longer matches its route");
+		await expect(tucowsDraft.verify({ routeId: route.id, payload: { ...payload, report: { ...payload.report, reference: "PS-000000000000-R1" } } as never })).rejects.toThrow("no longer matches the report");
 		(await getDb()).update(abuseArtifacts).set({ blob: Buffer.concat([PNG, Buffer.from("x")]) }).where(eq(abuseArtifacts.reportId, created.reportId)).run();
-		await expect(verifiedTucowsDraft(context)).rejects.toThrow("no longer matches its immutable reference");
+		await expect(prepareTucowsExternalSubmission(context, deps(wizard()))).rejects.toThrow("no longer matches its immutable reference");
 		(await getDb()).update(abuseTargets).set({ observedUrls: [`https://${TARGET}/changed`] }).where(eq(abuseTargets.id, targetId)).run();
-		await expect(verifiedTucowsDraft(context)).rejects.toThrow("no longer matches the report");
+		await expect(tucowsDraft.verify(context)).rejects.toThrow("no longer matches the report");
 	});
 });
 
@@ -401,7 +400,6 @@ describe("submitTucowsSubmission", () => {
 
 	test("without its prepared wizard session nothing is sent", async () => {
 		const { context } = await readyContext();
-		await expect(submitTucowsSubmission(context, undefined)).rejects.toThrow("prepared wizard session");
 		await expect(submitTucowsSubmission(context, { state: {} })).rejects.toThrow("prepared wizard session");
 		await expect(submitTucowsSubmission(context, { state: { session: {}, payload: {}, csrfToken: "x", screenshot: "not a buffer" } })).rejects.toThrow("prepared wizard session");
 	});
@@ -433,10 +431,11 @@ describe("tucowsCaseId", () => {
 describe("executed through the worker's marker", () => {
 	function asProvider(server: ReturnType<typeof wizard>): ProviderSubmissionProvider {
 		const dependencies = deps(server);
-		return {
-			...tucowsProvider,
-			prepareExternalSubmission: (context) => prepareTucowsExternalSubmission(context, dependencies),
-		};
+		return defineProvider({
+			definition: TUCOWS_PROVIDER,
+			draft: tucowsDraft,
+			external: { prepare: (context, verified) => rawPrepareTucowsExternalSubmission(context, verified, dependencies), submit: submitTucowsSubmission },
+		});
 	}
 
 	test("submits once and settles the route with the case id; a second execution files nothing", async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { reportReferencesIn } from "../report_reference";
+import { reportReferencesIn } from "../kit/report_reference";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
 import { buildGoDaddySubmissionPayload, goDaddyBrand, goDaddyReportUrls, storedGoDaddySubmissionPayload, type GoDaddyReportInput } from "./payload";
 

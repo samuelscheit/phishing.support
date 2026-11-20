@@ -3,31 +3,22 @@ import { describe, expect, test } from "bun:test";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { contactRoute } from "../../resolver/routes";
 import type { AbuseArtifact } from "../../schema";
-import { BrowserFormError, type BrowserFormField, type BrowserFormResponse } from "../browser_form";
-import { DESCRIPTION as description, formAnswer as answer, pngArtifact as png, PNG, readyDraft, TARGET } from "../kit/testing";
-import { reportReference } from "../report_reference";
+import { BrowserFormError, type BrowserFormField, type BrowserFormResponse } from "../kit/browser_form";
+import { DESCRIPTION as description, formAnswer as answer, pngArtifact as png, PNG, readyDraft, TARGET, verifiedPrepare } from "../kit/testing";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { NAME_COM_PROVIDER as PROVIDER } from "./definition";
 import { nameComConfirmationIds, nameComProvider } from "./index";
 import { storedNameComSubmissionPayload } from "./payload";
-import {
-	captchaAccepted,
-	csrfHandshakeHeaders,
-	csrfToken,
-	prepareNameComExternalSubmission,
-	prepareNameComSubmission,
-	submitNameComSubmission,
-	ticketFields,
-	type NameComPreflightState,
-	type NameComSession,
-} from "./submission";
+import { captchaAccepted, csrfHandshakeHeaders, csrfToken, prepareNameComExternalSubmission as rawPrepareNameComExternalSubmission, nameComDraft, submitNameComSubmission, ticketFields, type NameComPreflightState, type NameComSession } from "./submission";
 import { sha256Hex } from "../../../util/hash";
+
+const prepareNameComExternalSubmission = verifiedPrepare(nameComDraft, rawPrepareNameComExternalSubmission);
 
 useTemporaryDatabase();
 
 const TOKEN = "a".repeat(128);
 
-const readyContext = () => readyDraft({ mailbox: "abuse@name.com", providerName: "Name.com" }, prepareNameComSubmission, storedNameComSubmissionPayload);
+const readyContext = () => readyDraft({ mailbox: "abuse@name.com", providerName: "Name.com" }, nameComDraft.prepare, storedNameComSubmissionPayload);
 
 const CSRF_OK = { status: 200, text: '{"meta":null}', json: undefined, headers: { "x-csrf-token-auth": TOKEN } };
 const VERIFY_OK = { ...answer({ meta: null, message: [], data: { account: { supportFormRecaptcha: true } } }), headers: {} };
@@ -106,10 +97,9 @@ describe("registry", () => {
 	});
 });
 
-describe("prepareNameComSubmission (temporary database)", () => {
-	test("drafts a ready payload keyed by the route's reference, led by it and the domain's URLs", async () => {
+describe("nameComDraft.prepare (temporary database)", () => {
+	test("drafts the additional text led by the reference and the domain's URLs", async () => {
 		const { payload, created, route } = await readyContext();
-		expect(payload.report.trackingId).toBe(reportReference(created.reportId, route.id));
 		expect(payload.report.additional.startsWith(`Reference: ${payload.report.trackingId}\n\nReported URLs:\n- https://${TARGET}/signin`)).toBeTrue();
 	});
 
@@ -159,7 +149,7 @@ describe("CSRF handshake helpers", () => {
 describe("prepareNameComExternalSubmission", () => {
 	const draftWith = async (evidenceArtifacts: AbuseArtifact[]) => {
 		const route = fakeRoute(TARGET, evidenceArtifacts);
-		const prepared = await prepareNameComSubmission({ routeId: 5n, payload: {} }, { loadRouteContext: route });
+		const prepared = await nameComDraft.prepare({ routeId: 5n, payload: {} }, { loadRouteContext: route });
 		if (prepared.outcome !== "ready") throw new Error("not ready");
 		return { payload: prepared.payload, route };
 	};
@@ -315,10 +305,8 @@ describe("submitNameComSubmission", () => {
 
 	test("never runs without the preflight's session and CSRF token, or on a malformed draft", async () => {
 		const { context, fake, preflight } = await prepared();
-		await expect(submitNameComSubmission(context, undefined)).rejects.toThrow("requires its prepared browser session");
 		await expect(submitNameComSubmission(context, { state: { ...preflight.state, csrf: "" } })).rejects.toThrow("requires its prepared browser session");
 		await expect(submitNameComSubmission({ ...context, payload: { ...context.payload, adapter: "x" } }, preflight)).rejects.toThrow("malformed");
 		expect(fake.calls).toEqual([]);
-		await expect(nameComProvider.submit(context)).rejects.toThrow("requires its prepared browser session");
 	});
 });

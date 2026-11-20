@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { selectProviderEvidenceImageArtifact } from "../evidence_image";
+import { selectProviderEvidenceImageArtifact } from "../kit/evidence";
 import { DESCRIPTION as description, PNG, pngArtifact as artifact } from "../kit/testing";
-import { reportReferencesIn } from "../report_reference";
+import { reportReferencesIn } from "../kit/report_reference";
 import { DYNADOT_PROVIDER as PROVIDER } from "./definition";
 import {
 	buildDynadotSubmissionPayload,
@@ -114,9 +114,6 @@ describe("stored payload", () => {
 
 	test("anything else is refused", () => {
 		const mutations: Array<[string, (payload: Record<string, any>) => void]> = [
-			["adapter", (payload) => { payload.adapter = "other"; }],
-			["definition version", (payload) => { payload.definition.version = "old"; }],
-			["definition hash", (payload) => { payload.definition.contentHash = "0".repeat(64); }],
 			["domain not normalized", (payload) => { payload.target.domain = "Login-Example-Phish.com"; }],
 			["ip domain", (payload) => { payload.target.domain = "203.0.113.7"; }],
 			["tracking id", (payload) => { payload.report.trackingId = "PS-xyz-R1"; }],

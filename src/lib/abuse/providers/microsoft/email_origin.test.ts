@@ -9,7 +9,7 @@ import { reportConfirmedEmailPhishing } from "../../submission_reports";
 import { parseEmailOrigin } from "../email_origin";
 import { MICROSOFT_PROVIDER } from "./definition";
 import { buildMicrosoftSubmissionPayload, makeMicrosoftEmailNotes, microsoftRequestBody, storedMicrosoftSubmissionPayload } from "./payload";
-import { prepareMicrosoftSubmission, submitMicrosoftSubmission } from "./submission";
+import { microsoftDraft, submitMicrosoftSubmission } from "./submission";
 
 useTemporaryDatabase();
 
@@ -173,7 +173,7 @@ describe("MSRC submission of a phishing email's sending IP", () => {
 			await SubmissionsEntity.create({ id: submissionId, kind: "email", data: { kind: "email" }, dedupeKey: "msrc-email-origin" });
 			return (await reportConfirmedEmailPhishing({ submissionId, analysisText: analysis, redactedEml: eml, sendingIp: IP, reporter: {} })).reportId;
 		});
-		const preparation = await prepareMicrosoftSubmission({ routeId: route.id, payload: {} });
+		const preparation = await microsoftDraft.prepare({ routeId: route.id, payload: {} });
 		if (preparation.outcome !== "ready") throw new Error(`Expected ready, got ${preparation.reason}`);
 		const payload = storedMicrosoftSubmissionPayload(preparation.payload)!;
 		expect(payload.report).toMatchObject({ threatType: "IP Address", incidentType: "Spam", sourceIp: IP, observedAt: "2026-11-19T09:00:01.000Z" });
@@ -197,7 +197,7 @@ describe("MSRC submission of a phishing email's sending IP", () => {
 			const request = await validateAbuseReportRequest({ targets: [IP], allegationCategory: "phishing", description: analysis });
 			return (await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } })).reportId;
 		});
-		await expect(prepareMicrosoftSubmission({ routeId: route.id, payload: {} })).resolves.toEqual({ outcome: "insufficient_evidence", reason: "microsoft_requires_an_observed_url_or_the_phishing_email" });
+		await expect(microsoftDraft.prepare({ routeId: route.id, payload: {} })).resolves.toEqual({ outcome: "insufficient_evidence", reason: "microsoft_requires_an_observed_url_or_the_phishing_email" });
 	});
 
 	test("an IP with an observed URL is still reported as a site", async () => {
@@ -205,7 +205,7 @@ describe("MSRC submission of a phishing email's sending IP", () => {
 			const request = await validateAbuseReportRequest({ targets: [IP], allegationCategory: "phishing", description: analysis, observedUrls: [{ target: IP, urls: [`https://${IP}/login`] }] });
 			return (await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } })).reportId;
 		});
-		const preparation = await prepareMicrosoftSubmission({ routeId: route.id, payload: {} });
+		const preparation = await microsoftDraft.prepare({ routeId: route.id, payload: {} });
 		if (preparation.outcome !== "ready") throw new Error(`Expected ready, got ${preparation.reason}`);
 		expect(storedMicrosoftSubmissionPayload(preparation.payload)?.report).toMatchObject({ threatType: "URL", incidentType: "Phishing", urls: [`https://${IP}/login`] });
 	});

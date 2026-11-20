@@ -7,10 +7,10 @@ import { AbuseRepository } from "../../repository";
 import { contactRoute } from "../../resolver/routes";
 import { reportConfirmedEmailPhishing } from "../../submission_reports";
 import { parseEmailOrigin } from "../email_origin";
-import { reportReference } from "../report_reference";
+import { reportReference } from "../kit/report_reference";
 import { AWS_PROVIDER } from "./definition";
 import { awsEmailHeader, awsRequestBody, buildAwsSubmissionPayload, makeAwsEmailComments, storedAwsSubmissionPayload } from "./payload";
-import { prepareAwsSubmission, submitAwsSubmission } from "./submission";
+import { awsDraft, submitAwsSubmission } from "./submission";
 
 useTemporaryDatabase();
 
@@ -231,7 +231,7 @@ describe("AWS submission of a phishing email's sending IP", () => {
 			await SubmissionsEntity.create({ id: submissionId, kind: "email", data: { kind: "email" }, dedupeKey: "aws-email-origin" });
 			return (await reportConfirmedEmailPhishing({ submissionId, analysisText: analysis, redactedEml: eml, sendingIp: IP, reporter: {} })).reportId;
 		});
-		const preparation = await prepareAwsSubmission({ routeId: route.id, payload: {} });
+		const preparation = await awsDraft.prepare({ routeId: route.id, payload: {} });
 		if (preparation.outcome !== "ready") throw new Error(`Expected ready, got ${preparation.reason}`);
 		const payload = storedAwsSubmissionPayload(preparation.payload)!;
 		expect(payload.report).toMatchObject({ abuseGroup: "email", abuseType: "spam_send", urls: [LINK, OTHER_LINK], emailHeader: FORM_HEADER });
@@ -256,7 +256,7 @@ describe("AWS submission of a phishing email's sending IP", () => {
 			const request = await validateAbuseReportRequest({ targets: [IP], allegationCategory: "phishing", description: analysis });
 			return (await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } })).reportId;
 		});
-		await expect(prepareAwsSubmission({ routeId: route.id, payload: {} })).resolves.toEqual({ outcome: "insufficient_evidence", reason: "aws_requires_an_observed_url_or_the_phishing_email" });
+		await expect(awsDraft.prepare({ routeId: route.id, payload: {} })).resolves.toEqual({ outcome: "insufficient_evidence", reason: "aws_requires_an_observed_url_or_the_phishing_email" });
 	});
 
 	test("an IP with an observed URL is still reported as a site", async () => {
@@ -264,7 +264,7 @@ describe("AWS submission of a phishing email's sending IP", () => {
 			const request = await validateAbuseReportRequest({ targets: [IP], allegationCategory: "phishing", description: analysis, observedUrls: [{ target: IP, urls: [`https://${IP}/login`] }] });
 			return (await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } })).reportId;
 		});
-		const preparation = await prepareAwsSubmission({ routeId: route.id, payload: {} });
+		const preparation = await awsDraft.prepare({ routeId: route.id, payload: {} });
 		if (preparation.outcome !== "ready") throw new Error(`Expected ready, got ${preparation.reason}`);
 		expect(storedAwsSubmissionPayload(preparation.payload)?.report).toMatchObject({ abuseGroup: "web_content", abuseType: "phishing", urls: [`https://${IP}/login`] });
 	});

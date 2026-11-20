@@ -2,8 +2,8 @@ import { getDomain } from "tldts";
 import { z } from "zod";
 
 import { fetchJson, fetchText } from "../../network/bounded_fetch";
-import { hasPathTenants } from "../../website/site";
-import { normalizeDomain } from "../security";
+import { hasPathTenants } from "../../website/info/site";
+import { normalizeDomain } from "../security/security";
 import { DAY_MS } from "../../util/date_time";
 import { type FetchLike } from "../../http/fetch";
 

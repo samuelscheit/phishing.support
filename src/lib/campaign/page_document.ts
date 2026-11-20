@@ -1,9 +1,9 @@
 
 import { parse } from "mhtml-to-html";
 
-import { registrableDomain } from "../abuse/security";
+import { registrableDomain } from "../abuse/security/security";
 import { ArtifactsEntity } from "../db/entities/artifacts";
-import { latestArtifactNamed, websiteCaptureFileNames } from "../website/capture_files";
+import { latestArtifactNamed, websiteCaptureFileNames } from "../website/visit/capture_files";
 import { sha256Hex } from "../util/hash";
 
 /** Below this a page body is too generic (an error, parking or loader page) to tie two sites together. */

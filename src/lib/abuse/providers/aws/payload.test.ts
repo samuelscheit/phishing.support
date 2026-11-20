@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { AWS_PROVIDER } from "./definition";
 import { awsEventTimestamp, awsReportUrls, awsRequestBody, buildAwsSubmissionPayload, storedAwsSubmissionPayload, type AwsReportInput } from "./payload";
-import { reportReference, reportReferencesIn } from "../report_reference";
+import { reportReference, reportReferencesIn } from "../kit/report_reference";
 import { providerDefinitionHasValidHash } from "../kit/pin";
 
 const TRACKING_ID = "PS-8fc84cc01019-R381763380685313515";

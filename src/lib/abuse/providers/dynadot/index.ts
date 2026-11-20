@@ -12,6 +12,6 @@ export const dynadotProvider = defineProvider({
 	definition: DYNADOT_PROVIDER,
 	draft: dynadotDraft,
 	preview: registrarPreview({ urls: dynadotReportUrls, make: makeDynadotComments }),
-	external: { prepare: (context) => prepareDynadotExternalSubmission(context), submit: submitDynadotSubmission },
+	external: { prepare: prepareDynadotExternalSubmission, submit: submitDynadotSubmission },
 	inbound: { messageKind: "reply", senderDomains: ["dynadot.com"] },
 });

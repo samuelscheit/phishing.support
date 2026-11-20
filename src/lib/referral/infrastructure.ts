@@ -2,7 +2,7 @@ import dns from "node:dns/promises";
 
 import { retryWithTimeout } from "../network/bounded_fetch";
 import { locatedCountry, originAsns, registeredCountry } from "../network/ripestat";
-import { registrableDomain } from "../abuse/security";
+import { registrableDomain } from "../abuse/security/security";
 import type { AbuseProviderRoute } from "../abuse/schema";
 import { countryName, countryRoutes, directComplaint, type Bilingual } from "./countries";
 import { plural, record, text } from "../util/values";

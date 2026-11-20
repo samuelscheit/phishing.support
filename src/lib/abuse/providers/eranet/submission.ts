@@ -1,10 +1,10 @@
 import { getBrowser } from "../../../browser";
 import { abuseEmailCaseUrl } from "../../mail/draft";
-import { createDraft, type RouteDeps } from "../kit/draft";
-import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { createDraft, type VerifiedOf, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { snippet } from "../../../util/text";
 import { preparedState, withPreflight } from "../kit/session";
-import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
+import { mailedCodeReader, type MailedCodeReader } from "../kit/mailed_code";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { ERANET_PROVIDER } from "./definition";
 import {
@@ -33,7 +33,7 @@ export type EranetSession = {
 export type EranetDependencies = RouteDeps & {
 	openSession?: () => Promise<EranetSession>;
 	readCode?: MailedCodeReader;
-	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
+	getArtifact?: EvidenceDependencies["getArtifact"];
 	now?: () => Date;
 };
 
@@ -102,17 +102,13 @@ export const eranetDraft = createDraft({
 	targetOf: (payload) => payload.target.domain,
 });
 
-/** Build the pinned draft before the marker; nothing is sent to Eranet here. */
-export const prepareEranetSubmission = eranetDraft.prepare;
-
 /**
  * Before the marker: upload the screenshot and obtain the mailed code. An
  * uploaded file and a sent code file no complaint, so every failure here is
  * a safe retry.
  */
-export async function prepareEranetExternalSubmission(context: ProviderSubmissionContext, dependencies: EranetDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await eranetDraft.verify(context, dependencies);
-	const { bytes } = await loadEvidenceFile({ reference: payload.evidence, contract: ERANET_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Eranet", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) });
+export async function prepareEranetExternalSubmission(context: ProviderSubmissionContext, { payload, data }: VerifiedOf<typeof eranetDraft>, dependencies: EranetDependencies = {}): Promise<ProviderSubmissionPreflight> {
+	const { bytes } = await evidenceFileOf(ERANET_EVIDENCE_CONTRACT, "Eranet", payload.evidence, data, dependencies);
 	return withPreflight(() => (dependencies.openSession ?? openEranetBrowserSession)(), async (session) => {
 		const files = [{ filename: payload.evidence.filename, mimeType: payload.evidence.mimeType, content: bytes }];
 		const { screenshots, code } = await uploadAndRequestCode(session, ERANET_PROVIDER.evidence.uploadType, files, context.signal, dependencies);
@@ -171,7 +167,7 @@ function complaintBody(payload: EranetSubmissionPayload, state: EranetPreflightS
 }
 
 /** The one irreversible call: CreateComplaint with the pinned draft and the preflight code. */
-export async function submitEranetSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
+export async function submitEranetSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess> {
 	const payload = eranetDraft.stored(context);
 	const state = preparedState<EranetPreflightState>(preflight, (candidate) => !!candidate.session && typeof candidate.code === "string" && /^\d{6}$/.test(candidate.code) && Array.isArray(candidate.screenshots), "Eranet submission requires a prepared verification code and its browser session.");
 	const created = await state.session.call("CreateComplaint", { json: complaintBody(payload, state) });

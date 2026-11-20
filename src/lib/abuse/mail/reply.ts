@@ -4,7 +4,7 @@ import { isIP } from "node:net";
 import { optionalOpenAIClient } from "../../openai/client";
 import { optionalResponseText } from "../../openai/response";
 import { isVerifiedEmailRouteOriginAllowed } from "../providers/email";
-import { assertPublicDnsHost, normalizeDomain } from "../security";
+import { assertPublicDnsHost, normalizeDomain } from "../security/security";
 import { abuseReplyClassifications, abuseReplyClassificationSchema, type AbuseReplyClassification } from "./types";
 import { parseJson } from "../../util/values";
 import { type FetchLike } from "../../http/fetch";

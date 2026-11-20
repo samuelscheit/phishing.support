@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 
 import { asRecord } from "../../../util/values";
-import type { BrowserFormField, BrowserFormFile, BrowserFormRequestSession, BrowserFormResponse, BrowserFormSession } from "../browser_form";
-import { createDraft, reportInputOf, type RouteData, type RouteDeps } from "../kit/draft";
-import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import type { BrowserFormField, BrowserFormFile, BrowserFormRequestSession, BrowserFormResponse, BrowserFormSession } from "../kit/browser_form";
+import { createDraft, type VerifiedOf, reportInputOf, type RouteData, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { formOpener, preparedState, withPreflight } from "../kit/session";
 import { snippet } from "../../../util/text";
 import {
@@ -27,7 +27,7 @@ export type NameComSession = BrowserFormSession & BrowserFormRequestSession;
 export type NameComDependencies = RouteDeps & {
 	/** The browser on the form with the challenge passed; tests inject a fake. */
 	openForm?: (signal: AbortSignal | undefined) => Promise<NameComSession>;
-	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
+	getArtifact?: EvidenceDependencies["getArtifact"];
 };
 
 /** What the preflight leaves for the one request after the marker. */
@@ -49,9 +49,6 @@ export const nameComDraft = createDraft({
 	build: buildNameComSubmissionPayload,
 	targetOf: (payload) => payload.target.domain,
 });
-
-/** Check the route and build the durable draft before any provider call. */
-export const prepareNameComSubmission = nameComDraft.prepare;
 
 /** The headers of Name.com's CSRF handshake: the token is the SHA-256 of `Start + Time + Start`. */
 export function csrfHandshakeHeaders(start: string, time: string, referrer: string): Record<string, string> {
@@ -84,10 +81,9 @@ export function captchaAccepted(answer: BrowserFormResponse): boolean {
  * token to `verify_recaptcha` and read the screenshot. None of it files a
  * ticket, so every failure is a safe retry (the browser is closed first).
  */
-export async function prepareNameComExternalSubmission(context: ProviderSubmissionContext, dependencies: NameComDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await nameComDraft.verify(context, dependencies);
+export async function prepareNameComExternalSubmission(context: ProviderSubmissionContext, { payload, data }: VerifiedOf<typeof nameComDraft>, dependencies: NameComDependencies = {}): Promise<ProviderSubmissionPreflight> {
 	const file = payload.evidence
-		? (await loadEvidenceFile({ reference: payload.evidence, contract: NAME_COM_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Name.com", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) })).file
+		? (await evidenceFileOf(NAME_COM_EVIDENCE_CONTRACT, "Name.com", payload.evidence, data, dependencies)).file
 		: null;
 	return withPreflight(() => (dependencies.openForm ?? formOpener(PROVIDER, "name-com-report", { url: PROVIDER.formUrl, formSelector: PROVIDER.formSelector }))(context.signal), async (session): Promise<NameComPreflightState> => {
 		const ticked = await session.clickAll(PROVIDER.checkboxSelector);
@@ -150,7 +146,7 @@ const BOT_VERDICT = /captcha|robot|\bbot\b|spam|verif/i;
  * the preflight's session. Only a plain refusal (HTTP 400/422, `success: false`,
  * a message) proves nothing was filed; anything else may have created a ticket.
  */
-export async function submitNameComSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
+export async function submitNameComSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess> {
 	const payload = storedNameComSubmissionPayload(context.payload);
 	if (!payload) throw new Error("The persisted Name.com submission payload is malformed.");
 	const state = preparedState<NameComPreflightState>(

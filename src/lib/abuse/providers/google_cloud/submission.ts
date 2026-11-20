@@ -75,9 +75,6 @@ export const googleCloudDraft = createDraft({
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
 
-/** Check the route and build the durable draft before any provider call. */
-export const prepareGoogleCloudSubmission = (context: ProviderSubmissionContext) => googleCloudDraft.prepare(context);
-
 /**
  * Set a field's value and fire the events the form's own script listens for.
  * Typing is not used: the live form moves focus mid-typing (to its article

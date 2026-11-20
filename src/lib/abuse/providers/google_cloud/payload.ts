@@ -1,11 +1,11 @@
 import { isIP } from "node:net";
 import { z } from "zod";
 
-import { domainMatchesOrIsSubdomain, normalizePublicHost } from "../../security";
+import { domainMatchesOrIsSubdomain, normalizePublicHost } from "../../security/security";
 import { utcStamp, type EmailOrigin } from "../email_origin";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
 import { truncateAtWord } from "../../../util/text";
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
+import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../kit/report_payload";
 import { GOOGLE_CLOUD_PROVIDER, GOOGLE_CLOUD_SERVICES, type GoogleCloudService } from "./definition";
 
 const envelope = payloadEnvelope(GOOGLE_CLOUD_PROVIDER, "google_cloud_abuse_report_v1");

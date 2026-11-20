@@ -5,7 +5,7 @@ import { parse as parseDomain } from "tldts";
 import { Globe2, Network, Server } from "lucide-react";
 
 import type { RegionalDnsResolution } from "@/lib/network/regional_dns";
-import type { WhoISInfo } from "@/lib/website/info";
+import type { WhoISInfo } from "@/lib/website/info/info";
 import { formatUtcDateTime } from "@/lib/util/date_time";
 
 import { Badge } from "@/components/ui/badge";

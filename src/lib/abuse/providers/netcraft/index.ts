@@ -17,7 +17,7 @@ export const netcraftProvider = defineProvider({
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),
 	inbound: NETCRAFT_INBOUND_MAIL,
-	submit: (context) => submitNetcraftSubmission(context),
-	fetchCorrespondence: (context) => fetchNetcraftCorrespondence(context),
+	submit: submitNetcraftSubmission,
+	fetchCorrespondence: fetchNetcraftCorrespondence,
 	reviewVerdicts: NETCRAFT_REVIEW_VERDICTS,
 });

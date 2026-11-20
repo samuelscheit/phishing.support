@@ -1,5 +1,5 @@
 import { normalizeAbuseTarget, normalizeObservedUrl, type allegationCategories, type ValidatedAbuseReportRequest } from "./contracts";
-import { websiteSite } from "../website/site";
+import { websiteSite } from "../website/info/site";
 import { hashStableJson, sha256Hex, stableJson } from "../util/hash";
 
 /** The confirmed page's stamped screenshot. Forms such as Eranet's and NameSilo's require an image. */

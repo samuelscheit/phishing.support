@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { parseMail } from "./ai";
 import { cleanPrivateInformation } from "./redaction";
-import type { WhoISInfo } from "../website/info";
+import type { WhoISInfo } from "../website/info/info";
 
 const noOriginInfo: WhoISInfo = { ip_rdaps: [] };
 

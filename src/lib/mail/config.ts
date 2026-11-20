@@ -2,7 +2,7 @@ import nodemailer from "nodemailer";
 
 import { normalizeMailbox } from "../abuse/mail/shared";
 import type { DeliveryStatusRequest } from "../abuse/mail/types";
-import { normalizeDomain } from "../abuse/security";
+import { normalizeDomain } from "../abuse/security/security";
 
 /**
  * The service owns one mail account: SMTP_FROM sends every report and reporter

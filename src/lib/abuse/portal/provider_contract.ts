@@ -1,4 +1,4 @@
-import { domainMatchesOrIsSubdomain, normalizeDomain } from "../security";
+import { domainMatchesOrIsSubdomain, normalizeDomain } from "../security/security";
 
 export function boundedString(value: unknown, maximum: number, minimum = 0): value is string {
 	return typeof value === "string" && value.length >= minimum && value.length <= maximum;

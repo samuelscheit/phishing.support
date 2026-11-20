@@ -1,12 +1,12 @@
 import { z } from "zod";
 
-import { normalizeDomain, normalizePublicHttpUrl } from "../../security";
+import { normalizeDomain, normalizePublicHttpUrl } from "../../security/security";
 import type { ReportInput } from "../kit/draft";
 import { field, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
 import { composeFreeText, reportUrls, type UrlRules } from "../kit/text";
 import { truncateAtWord } from "../../../util/text";
-import { extractedBrandName } from "../report_payload";
-import { isReportReference } from "../report_reference";
+import { extractedBrandName } from "../kit/report_payload";
+import { isReportReference } from "../kit/report_reference";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
 import { bareHost } from "../../../network/url";
 

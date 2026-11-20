@@ -5,7 +5,7 @@ import { getDb, type Transaction } from "../../db";
 import { generateId } from "../../db/ids";
 import { abuseCaseTag, subjectRepeats } from "../mail/correlation";
 import { abuseJobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports, type AbuseMailClassification, type AbuseProviderRoute } from "../schema";
-import { registrableDomain } from "../security";
+import { registrableDomain } from "../security/security";
 import { insertArtifact, now, recordEvent } from "./shared";
 
 class DuplicateInboundMailError extends Error {

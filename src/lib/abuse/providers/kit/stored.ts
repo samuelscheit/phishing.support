@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-import { normalizeDomain, normalizePublicHttpUrl } from "../../security";
-import { storedProviderEvidenceImageReference, type ProviderEvidenceImageContract, type ProviderEvidenceImageMimeType, type ProviderEvidenceImageReference } from "../evidence_image";
-import { isReportReference } from "../report_reference";
+import { normalizeDomain, normalizePublicHttpUrl } from "../../security/security";
+import { storedProviderEvidenceImageReference, type ProviderEvidenceImageContract, type ProviderEvidenceImageMimeType, type ProviderEvidenceImageReference } from "./evidence";
+import { isReportReference } from "./report_reference";
 
 /**
  * `{adapter, definition: {version, contentHash}}` as

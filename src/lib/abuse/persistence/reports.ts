@@ -14,7 +14,7 @@ import {
 	type AbuseReport,
 	type AbuseReportStatus,
 } from "../schema";
-import { AbuseInputError, createIdempotentTrackingToken, createTrackingToken, hashTrackingToken } from "../security";
+import { AbuseInputError, createIdempotentTrackingToken, createTrackingToken, hashTrackingToken } from "../security/security";
 import { listArtifacts } from "./artifacts";
 import { insertArtifact, now, recordEvent } from "./shared";
 import { stableJson } from "../../util/hash";

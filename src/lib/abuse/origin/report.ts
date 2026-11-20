@@ -3,9 +3,9 @@ import { simpleParser } from "mailparser";
 
 import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { SubmissionsEntity } from "../../db/entities/submissions";
-import { queryRDAPDomain } from "../../website/info";
+import { queryRDAPDomain } from "../../website/info/info";
 import { createWebsiteSubmission, type WebsiteSubmissionOptions } from "../../submissions/website";
-import { normalizeDomain, registrableDomain } from "../security";
+import { normalizeDomain, registrableDomain } from "../security/security";
 import { AbuseRepository } from "../repository";
 import type { AbuseJob } from "../schema";
 import { parseJobBigInt, throwIfAborted } from "../worker/shared";

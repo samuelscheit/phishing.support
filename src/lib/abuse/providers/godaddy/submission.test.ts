@@ -1,24 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { contactRoute } from "../../resolver/routes";
-import { BrowserFormError, type BrowserFormField, type BrowserFormResponse } from "../browser_form";
-import { reportReference } from "../report_reference";
+import { BrowserFormError, type BrowserFormField, type BrowserFormResponse } from "../kit/browser_form";
+import { reportReference } from "../kit/report_reference";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { fetchGoDaddyCorrespondence } from "./correspondence";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
 import { goDaddyConfirmationIds, goDaddyProvider } from "./index";
 import { storedGoDaddySubmissionPayload } from "./payload";
 import { fetchPortalCaseStatus, interpretPortalAnswer, portalFields, recaptchaTokenProbe } from "./portal";
-import {
-	prepareGoDaddyExternalSubmission,
-	prepareGoDaddySubmission,
-	submitGoDaddySubmission,
-	type GoDaddyDependencies,
-	type GoDaddyFormSession,
-	type GoDaddyPreflightState,
-} from "./submission";
+import { prepareGoDaddyExternalSubmission as rawPrepareGoDaddyExternalSubmission, goDaddyDraft, submitGoDaddySubmission, type GoDaddyDependencies, type GoDaddyFormSession, type GoDaddyPreflightState } from "./submission";
 import { type AnswerFetch } from "../../../http/fetch";
-import { formAnswer } from "../kit/testing";
+import { formAnswer, verifiedPrepare } from "../kit/testing";
+
+const prepareGoDaddyExternalSubmission = verifiedPrepare(goDaddyDraft, rawPrepareGoDaddyExternalSubmission);
 
 const TARGET = "login-example-phish.com";
 const description = "The page asks visitors for a password, sign-in details, a verification code, or identity details. Brand: ExampleBank";
@@ -37,7 +32,7 @@ function fakeRoute(overrides: Partial<{ category: string; routeId: bigint; targe
 
 async function draft(category = "phishing") {
 	const loadRouteContext = fakeRoute({ category });
-	const prepared = await prepareGoDaddySubmission({ routeId: 5n, payload: {} }, { loadRouteContext });
+	const prepared = await goDaddyDraft.prepare({ routeId: 5n, payload: {} }, { loadRouteContext });
 	if (prepared.outcome !== "ready") throw new Error(`not ready: ${JSON.stringify(prepared)}`);
 	return { payload: storedGoDaddySubmissionPayload(prepared.payload)!, loadRouteContext };
 }
@@ -99,7 +94,7 @@ describe("registry", () => {
 	});
 });
 
-describe("prepareGoDaddySubmission", () => {
+describe("goDaddyDraft.prepare", () => {
 	test("drafts both observed URLs, the brand and the route's reference", async () => {
 		const { payload } = await draft();
 		expect(payload.report).toMatchObject({ trackingId: reportReference(9n, 5n), type: "PHISHING", brand: "ExampleBank", urls: [`https://${TARGET}/signin`, `https://${TARGET}/verify`] });
@@ -295,12 +290,10 @@ describe("submitGoDaddySubmission: portal channel", () => {
 
 	test("never runs without a prepared channel or on a malformed draft, and the entry points need the preflight", async () => {
 		const { context, fake, preflight } = await prepared();
-		await expect(submitGoDaddySubmission(context, undefined)).rejects.toThrow("requires its prepared channel");
 		await expect(submitGoDaddySubmission(context, { state: { ...preflight.state, token: "" } })).rejects.toThrow("requires its prepared channel");
 		await expect(submitGoDaddySubmission(context, { state: { channel: "other" } })).rejects.toThrow("requires its prepared channel");
 		await expect(submitGoDaddySubmission({ ...context, payload: { ...(context.payload as object), adapter: "x" } as never }, preflight)).rejects.toThrow("malformed");
 		expect(fake.calls).toEqual([]);
-		await expect(goDaddyProvider.submit(context)).rejects.toThrow("requires its prepared channel");
 	});
 
 	test("portalFields prefers the page's rendered hidden values over the defaults, never its type", async () => {

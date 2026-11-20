@@ -2,12 +2,15 @@ import { describe, expect, test } from "bun:test";
 
 import type { AbuseArtifact } from "../../schema";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
-import { selectProviderEvidenceImageArtifact } from "../evidence_image";
-import { mailedCodeFrom } from "../mailed_code";
+import { selectProviderEvidenceImageArtifact } from "../kit/evidence";
+import { mailedCodeFrom } from "../kit/mailed_code";
 import { ERANET_PROVIDER } from "./definition";
 import { buildEranetSubmissionPayload, ERANET_EVIDENCE_CONTRACT, eranetSubTypes, storedEranetSubmissionPayload } from "./payload";
-import { prepareEranetExternalSubmission, prepareEranetSubmission, submitEranetSubmission, type EranetDependencies, type EranetSession } from "./submission";
+import { prepareEranetExternalSubmission as rawPrepareEranetExternalSubmission, eranetDraft, submitEranetSubmission, type EranetDependencies, type EranetSession } from "./submission";
 import { sha256Hex } from "../../../util/hash";
+import { verifiedPrepare } from "../kit/testing";
+
+const prepareEranetExternalSubmission = verifiedPrepare(eranetDraft, rawPrepareEranetExternalSubmission);
 
 // A minimal valid PNG: the evidence contract checks the magic bytes and digest.
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
@@ -51,7 +54,7 @@ describe("Eranet abuse form", () => {
 	});
 
 	test("files a malware report: screenshot upload and mailed code before the marker, one CreateComplaint after it", async () => {
-		const prepared = await prepareEranetSubmission({ routeId: 5n, payload: {} }, { loadRouteContext: routeContext() });
+		const prepared = await eranetDraft.prepare({ routeId: 5n, payload: {} }, { loadRouteContext: routeContext() });
 		expect(prepared.outcome).toBe("ready");
 		const payload = (prepared as { payload: Record<string, unknown> }).payload;
 		expect(storedEranetSubmissionPayload(payload)).toMatchObject({
@@ -100,7 +103,7 @@ describe("Eranet abuse form", () => {
 	});
 
 	test("a named Eranet error is a known rejection, and a code that never arrives stops before the marker", async () => {
-		const prepared = await prepareEranetSubmission({ routeId: 5n, payload: {} }, { loadRouteContext: routeContext() });
+		const prepared = await eranetDraft.prepare({ routeId: 5n, payload: {} }, { loadRouteContext: routeContext() });
 		const payload = (prepared as { payload: Record<string, unknown> }).payload;
 		const rejecting = eranetApi({ CreateComplaint: () => ({ error: "VerifyCode.NotFound.Code" }) });
 		await expect(submitEranetSubmission({ routeId: 5n, payload }, { state: { session: rejecting.session, code: "123456", screenshots: [] } }))

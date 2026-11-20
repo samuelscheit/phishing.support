@@ -7,5 +7,5 @@ export const discordWebhookProvider = defineProvider({
 	definition: DISCORD_WEBHOOK_PROVIDER,
 	draft: discordWebhookDraft,
 	preview: () => "The phishing kit's Discord webhook is deleted through Discord's API with the token the kit itself carries, so it can no longer post what visitors type.",
-	submit: (context) => submitDiscordWebhookDeletion(context),
+	submit: submitDiscordWebhookDeletion,
 });

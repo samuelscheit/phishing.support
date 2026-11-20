@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { AbuseArtifact } from "../../schema";
-import { isIntactProviderEvidenceImageArtifact, selectProviderEvidenceImageArtifact } from "../evidence_image";
+import { isIntactProviderEvidenceImageArtifact, selectProviderEvidenceImageArtifact } from "../kit/evidence";
 import { providerDefinitionHasValidHash } from "../kit/pin";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { TENCENT_PROVIDER } from "./definition";

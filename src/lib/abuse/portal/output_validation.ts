@@ -1,4 +1,4 @@
-import { isPublicIp, normalizeDomain } from "../security";
+import { isPublicIp, normalizeDomain } from "../security/security";
 import {
 	boundedString,
 	exactAllowedHttpsUrl,

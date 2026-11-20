@@ -8,7 +8,7 @@ import { AbuseRepository } from "../../repository";
 import { abuseJobs, abuseProviderRuns } from "../../schema";
 import { ensureCorrespondencePolls, pollProviderCorrespondence } from "../../worker/correspondence";
 import { parseCloudflareOriginDisclosure } from "../../origin/disclosure";
-import { nextCorrespondencePollDelayMs } from "../submission_execution";
+import { nextCorrespondencePollDelayMs } from "../../worker/schedule";
 import { unescapeHtml } from "../../../util/html";
 import { cloudflareApiConfig } from "./api";
 import { cloudflareLoginSessions } from "./session";

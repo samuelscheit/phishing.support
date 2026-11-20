@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 
 import { SubmissionsEntity } from "./lib/db/entities/submissions";
 import { startWebsiteAutoRetries } from "./lib/submissions/website";
-import { retryInterruptedWebsiteAnalysis } from "./lib/website/ai";
+import { retryInterruptedWebsiteAnalysis } from "./lib/website/analysis/ai";
 import { startAbuseWorker, stopAbuseWorker } from "./lib/abuse/worker";
 import { startMailboxListener, stopMailboxListener } from "./lib/imap/listener";
 import { startRelayBounceIntake, stopRelayBounceIntake } from "./lib/imap/maildir";

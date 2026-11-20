@@ -139,10 +139,9 @@ describe("session helpers", () => {
 		expect(closed).toBe(1);
 	});
 
-	test("preparedState returns a complete state and refuses a missing or incomplete one with the provider's own message", () => {
+	test("preparedState returns a complete state and refuses an incomplete one with the provider's own message", () => {
 		const complete = (state: { code?: string }) => !!state.code;
 		expect(preparedState<{ code?: string }>({ state: { code: "123456" } }, complete, "needs a code")).toEqual({ code: "123456" });
-		expect(() => preparedState(undefined, complete, "needs a code")).toThrow("needs a code");
 		expect(() => preparedState({ state: undefined }, complete, "needs a code")).toThrow("needs a code");
 		expect(() => preparedState({ state: {} }, complete, "needs a code")).toThrow("needs a code");
 	});
@@ -168,40 +167,39 @@ describe("registrarPreview", () => {
 
 describe("defineProvider", () => {
 	const definition = definePinned({ key: "kit_test", displayName: "Kit Test", version: "v1", exactMailboxes: [], supplemental: false });
-	const draft = { prepare: async () => ({ outcome: "insufficient_evidence", reason: "x" }) as const, verify: async () => undefined };
+	const verified = { payload: { target: "x" }, data: {} as never };
+	const draft = { prepare: async () => ({ outcome: "insufficient_evidence", reason: "x" }) as const, verify: async () => verified };
 	const context: ProviderSubmissionContext = { routeId: 1n, payload: {} };
 	const success = { submittedTargets: ["x"] };
-
-	test("a provider without any submit call cannot be defined", () => {
-		expect(() => defineProvider({ definition, draft })).toThrow("kit_test has no submit call.");
-	});
 
 	test("the draft pair becomes the executor's prepare and verify, and a plain submit is the only call", async () => {
 		const provider = defineProvider({ definition, draft, submit: async () => success });
 		expect(provider.prepareSubmission).toBe(draft.prepare);
 		expect(provider.verifyDraft).toBe(draft.verify);
-		expect(provider.prepareExternalSubmission).toBeUndefined();
-		expect(provider.submitPrepared).toBeUndefined();
-		await expect(provider.submit(context)).resolves.toBe(success);
+		expect("prepareExternalSubmission" in provider || "submitPrepared" in provider).toBeFalse();
+		await expect("submit" in provider ? provider.submit(context) : undefined).resolves.toBe(success);
 	});
 
-	test("a form provider's external pair fills the preflight hooks, and the plain submit has no preflight", async () => {
+	test("a form provider's external pair is its preflight and the one call that consumes it, and the preflight is given what was verified", async () => {
 		const seen: unknown[] = [];
 		const provider = defineProvider({
 			definition,
 			draft,
-			external: { prepare: async () => ({ state: 1 }), submit: async (_context, preflight) => { seen.push(preflight); return success; } },
+			external: { prepare: async (_context, given) => { seen.push(given); return { state: 1 }; }, submit: async (_context, preflight) => { seen.push(preflight); return success; } },
 		});
-		expect(provider.prepareExternalSubmission).toBeDefined();
-		await provider.submit(context);
-		await provider.submitPrepared!(context, { state: 2 });
-		expect(seen).toEqual([undefined, { state: 2 }]);
+		expect("submit" in provider).toBeFalse();
+		if (!("prepareExternalSubmission" in provider)) throw new Error("expected an external provider");
+		await provider.prepareExternalSubmission(context, verified);
+		await provider.submitPrepared(context, { state: 2 });
+		expect(seen).toEqual([verified, { state: 2 }]);
 	});
 
-	test("inbound mail defaults to our references and may name its own matcher, never a default kind", () => {
+	test("inbound mail defaults to our references, may name its own matcher or none, and never has a default kind", () => {
 		const defaults = defineProvider({ definition, draft, submit: async () => success, inbound: { senderDomains: ["kit.example"] } });
 		expect(defaults.inboundMail!.confirmationIds!("see PS-000000000000-R0")).toEqual(["PS-000000000000-R0"]);
 		expect(defaults.inboundMail!.messageKind).toBeUndefined();
+		const apiOwned = defineProvider({ definition, draft, submit: async () => success, inbound: { senderDomains: ["kit.example"], confirmationIds: null } });
+		expect(apiOwned.inboundMail).toEqual({ senderDomains: ["kit.example"] });
 		const own = defineProvider({ definition, draft, submit: async () => success, inbound: { senderDomains: ["kit.example"], messageKind: "reply", confirmationIds: () => ["X"] } });
 		expect(own.inboundMail).toMatchObject({ messageKind: "reply" });
 		expect(own.inboundMail!.confirmationIds!("")).toEqual(["X"]);

@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 import { normalizeMailbox } from "../../mail/shared";
-import { normalizePublicHost } from "../../security";
+import { normalizePublicHost } from "../../security/security";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
 import { providerNarrative } from "../kit/text";
-import { normalizeObservedUrlForTarget } from "../report_payload";
+import { normalizeObservedUrlForTarget } from "../kit/report_payload";
 import { NETCRAFT_PROVIDER } from "./definition";
 
 const envelope = payloadEnvelope(NETCRAFT_PROVIDER, "netcraft_report_urls_v3");

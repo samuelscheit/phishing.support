@@ -1,10 +1,10 @@
 import { z } from "zod";
 
-import { normalizeDomain } from "../../security";
+import { normalizeDomain } from "../../security/security";
 import { evidenceContract } from "../kit/evidence";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
-import { storedProviderEvidenceImageReference } from "../evidence_image";
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
+import { storedProviderEvidenceImageReference } from "../kit/evidence";
+import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../kit/report_payload";
 import { ERANET_PROVIDER } from "./definition";
 
 export const ERANET_EVIDENCE_CONTRACT = evidenceContract("eranet_report", ERANET_PROVIDER.evidence);

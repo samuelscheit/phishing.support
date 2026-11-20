@@ -9,8 +9,9 @@ import { resolveAbuseTarget } from "../../resolver";
 import { executeProviderSubmission } from "../submission_execution";
 import type { ProviderSubmissionProvider } from "../submission_contracts";
 import { DISCORD_WEBHOOK_PROVIDER } from "./definition";
-import { discordWebhookOf, prepareDiscordWebhookDeletion, submitDiscordWebhookDeletion, type DiscordWebhookDependencies } from "./submission";
+import { discordWebhookOf, discordWebhookDraft, submitDiscordWebhookDeletion, type DiscordWebhookDependencies } from "./submission";
 import { jsonResponse } from "../kit/testing";
+import { defineProvider } from "../kit/provider";
 
 useTemporaryDatabase();
 
@@ -49,7 +50,7 @@ async function webhookRoutes(submissionId: bigint, endpointUrl?: string) {
 }
 
 function provider(dependencies: DiscordWebhookDependencies): ProviderSubmissionProvider {
-	return { definition: DISCORD_WEBHOOK_PROVIDER, prepareSubmission: prepareDiscordWebhookDeletion, submit: (context) => submitDiscordWebhookDeletion(context, { sleep: async () => {}, ...dependencies }) };
+	return defineProvider({ definition: DISCORD_WEBHOOK_PROVIDER, draft: discordWebhookDraft, submit: (context) => submitDiscordWebhookDeletion(context, { sleep: async () => {}, ...dependencies }) });
 }
 
 /** A fake Discord API answering each DELETE in turn; it records what was asked. */

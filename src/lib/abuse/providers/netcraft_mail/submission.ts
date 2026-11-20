@@ -3,7 +3,7 @@ import { z } from "zod";
 import { NetcraftSubmissionRejectedError, parseNetcraftSubmissionResponse } from "../netcraft/api";
 import { serviceIdentity } from "../../../network/service_identity";
 import { normalizeMailbox } from "../../mail/shared";
-import { createDraft } from "../kit/draft";
+import { createDraft, type VerifiedOf } from "../kit/draft";
 import { preparedState } from "../kit/session";
 import { payloadEnvelope, storedReader } from "../kit/stored";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
@@ -73,15 +73,14 @@ export const netcraftMailDraft = createDraft({
 });
 
 /** Before the marker: verify the draft and read the message it pins, as Netcraft takes it. */
-export async function prepareNetcraftMailExternalSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await netcraftMailDraft.verify(context);
+export async function prepareNetcraftMailExternalSubmission(_context: ProviderSubmissionContext, { payload, data }: VerifiedOf<typeof netcraftMailDraft>): Promise<ProviderSubmissionPreflight> {
 	const artifact = data.evidenceArtifacts.find((item) => item.id.toString() === payload.message.artifactId)!;
 	return { state: netcraftMailMessage(artifact.blob.toString("utf-8")) };
 }
 
 export async function submitNetcraftMailSubmission(
 	context: ProviderSubmissionContext,
-	preflight: ProviderSubmissionPreflight | undefined,
+	preflight: ProviderSubmissionPreflight,
 	dependencies: NetcraftMailSubmissionDependencies = {},
 ): Promise<ProviderSubmissionSuccess> {
 	const payload = netcraftMailDraft.stored(context);

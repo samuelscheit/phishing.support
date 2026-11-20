@@ -4,8 +4,8 @@ import { contactRoute } from "../../resolver/routes";
 import { providerSupplementalRoute } from "../submission_routes";
 import { getProviderSubmissionProvider } from "../submission_registry_default";
 import type { AbuseArtifact } from "../../schema";
-import type { BrowserFormResponse } from "../browser_form";
-import type { ProviderSubmissionContext, ProviderSubmissionPreparation } from "../submission_contracts";
+import type { BrowserFormResponse } from "./browser_form";
+import type { ProviderSubmissionContext, ProviderSubmissionPreflight, ProviderSubmissionPreparation } from "../submission_contracts";
 import { sha256Hex } from "../../../util/hash";
 
 /** Test support for the provider kit: fixtures every provider's tests share. */
@@ -84,4 +84,12 @@ export async function readyDraftOf<Payload, Fixture extends { route: { id: bigin
 	const payload = read(preparation.payload);
 	if (!payload) throw new Error("expected a stored payload");
 	return { ...fixture, payload, context: { routeId: fixture.route.id, payload: payload as unknown as Record<string, unknown> } };
+}
+
+/** A provider's preflight as the executor runs it: the draft is verified once, and the preflight receives that result. */
+export function verifiedPrepare<Verified, Dependencies>(
+	draft: { verify: (context: ProviderSubmissionContext, dependencies: never) => Promise<Verified> },
+	prepare: (context: ProviderSubmissionContext, verified: Verified, dependencies: Dependencies) => Promise<ProviderSubmissionPreflight>,
+) {
+	return async (context: ProviderSubmissionContext, dependencies = {} as Dependencies) => prepare(context, await draft.verify(context, dependencies as never), dependencies);
 }

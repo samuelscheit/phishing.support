@@ -22,7 +22,7 @@ export const awsProvider = defineProvider({
 			trackingId: PREVIEW_REFERENCE,
 		}, urls) : undefined;
 	},
-	submit: (context) => submitAwsSubmission(context),
+	submit: submitAwsSubmission,
 	// support.aws.com: "Your AWS Abuse Report [P01M7…]" from trustandsafety@support.aws.com.
 	inbound: { messageKind: "reply", senderDomains: ["aws.com"] },
 });

@@ -8,7 +8,7 @@ export const discordDsaProvider = defineProvider({
 	draft: discordDsaDraft,
 	preview: () => "A Digital Services Act notice is filed through discord.com/report about the server the phishing kit's webhook posts to, verified by a key Discord mails to the service mailbox.",
 	external: {
-		prepare: (context) => prepareDiscordDsaExternalSubmission(context),
+		prepare: prepareDiscordDsaExternalSubmission,
 		submit: submitDiscordDsaSubmission,
 	},
 });

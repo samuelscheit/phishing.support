@@ -1,6 +1,6 @@
 import ipaddr from "ipaddr.js";
 
-import { isPublicIp } from "../abuse/security";
+import { isPublicIp } from "../abuse/security/security";
 
 /**
  * Whether an address is private, special-use or malformed, so that

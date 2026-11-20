@@ -1,8 +1,8 @@
 import { abuseEmailCaseUrl } from "../../mail/draft";
-import { createDraft, type RouteDeps } from "../kit/draft";
+import { createDraft, type VerifiedOf, type RouteDeps } from "../kit/draft";
 import { snippet } from "../../../util/text";
 import { preparedState, withPreflight } from "../kit/session";
-import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
+import { mailedCodeReader, type MailedCodeReader } from "../kit/mailed_code";
 import {
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionContext,
@@ -43,16 +43,12 @@ export const discordDsaDraft = createDraft({
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
 
-/** Pin the notice before the marker. */
-export const prepareDiscordDsaSubmission = discordDsaDraft.prepare;
-
 /**
  * Before the marker: have Discord mail its key, read it, and fill every step
  * up to the summary. Nothing is filed until "Submit Report", so every failure
  * here is a safe retry.
  */
-export async function prepareDiscordDsaExternalSubmission(context: ProviderSubmissionContext, dependencies: DiscordDsaDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload } = await discordDsaDraft.verify(context, dependencies);
+export async function prepareDiscordDsaExternalSubmission(context: ProviderSubmissionContext, { payload }: VerifiedOf<typeof discordDsaDraft>, dependencies: DiscordDsaDependencies = {}): Promise<ProviderSubmissionPreflight> {
 	return withPreflight(() => (dependencies.openSession ?? openDiscordDsaSession)(), async (session) => {
 		const requestedAt = (dependencies.now ?? (() => new Date()))();
 		await session.requestCode(payload.report.reporter.email);
@@ -63,7 +59,7 @@ export async function prepareDiscordDsaExternalSubmission(context: ProviderSubmi
 }
 
 /** The one irreversible step: "Submit Report" on the filled summary. */
-export async function submitDiscordDsaSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
+export async function submitDiscordDsaSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess> {
 	const payload = discordDsaDraft.stored(context);
 	const session = preparedState<DiscordDsaSession>(preflight, (candidate) => !!candidate.submit, "Discord DSA submission requires the filled form from its preflight.");
 	const answer = await session.submit();

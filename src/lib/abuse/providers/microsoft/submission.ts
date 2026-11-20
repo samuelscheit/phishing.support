@@ -3,7 +3,7 @@ import { createDraft, reportInputOf, type RouteData } from "../kit/draft";
 import { failUnlessFiled } from "../kit/http";
 import { snippet } from "../../../util/text";
 import type { ProviderSubmissionContext, ProviderSubmissionSuccess } from "../submission_contracts";
-import { providerResponseId } from "../report_reference";
+import { providerResponseId } from "../kit/report_reference";
 import { MICROSOFT_PROVIDER } from "./definition";
 import { buildMicrosoftSubmissionPayload, microsoftRequestBody, storedMicrosoftSubmissionPayload, type MicrosoftReportInput } from "./payload";
 import { parseJsonRecord } from "../../../util/values";
@@ -35,9 +35,6 @@ export const microsoftDraft = createDraft({
 	build: buildMicrosoftSubmissionPayload,
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
-
-/** Check the route and build the durable draft before any provider call. */
-export const prepareMicrosoftSubmission = (context: ProviderSubmissionContext) => microsoftDraft.prepare(context);
 
 /**
  * File the report: the only work after the durable marker. HTTP 400 is the

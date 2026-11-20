@@ -3,7 +3,7 @@ import { SubmissionsEntity } from "../db/entities/submissions";
 import { runStreamedAnalysisRun } from "../analysis/run";
 import { simpleParser } from "mailparser";
 import { analyzeHeaders, getAddressesText, getMailImage, getMailWebsiteUrls } from "./parse";
-import { getInfo } from "../website/info";
+import { getInfo } from "../website/info/info";
 import { cleanPrivateInformation, isServiceAddress } from "./redaction";
 import * as toon from "@toon-format/toon";
 import { reportConfirmedEmailPhishing } from "../abuse/submission_reports";
@@ -14,7 +14,7 @@ import { serviceIdentity } from "../network/service_identity";
 import { errorText } from "../util/error_text";
 import type { EmailSubmissionData } from "../db/schema";
 import type { ReporterMetadata } from "../http/reporter_headers";
-import { emitStep } from "../website/progress";
+import { emitStep } from "../website/visit/progress";
 
 function buildMailEvidence(mail: MailData, analysisText?: string) {
 	return toon.encode({

@@ -1,7 +1,7 @@
 import { asRecord, parseJsonRecord } from "../../../util/values";
 import { snippet } from "../../../util/text";
-import { providerResponseId } from "../report_reference";
-import type { BrowserFormField } from "../browser_form";
+import { providerResponseId } from "../kit/report_reference";
+import type { BrowserFormField } from "../kit/browser_form";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
 import type { GoDaddySubmissionPayload } from "./payload";

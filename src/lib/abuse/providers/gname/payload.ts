@@ -1,10 +1,10 @@
 import { z } from "zod";
 
-import { normalizeDomain } from "../../security";
+import { normalizeDomain } from "../../security/security";
 import { evidenceContract } from "../kit/evidence";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
-import { storedProviderEvidenceImageReference } from "../evidence_image";
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
+import { storedProviderEvidenceImageReference } from "../kit/evidence";
+import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../kit/report_payload";
 import { GNAME_PROVIDER, type GnameComplaintKind } from "./definition";
 
 export const GNAME_EVIDENCE_CONTRACT = evidenceContract("gname_report", GNAME_PROVIDER.evidence);

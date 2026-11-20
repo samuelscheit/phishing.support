@@ -1,5 +1,5 @@
 import type { WebsiteArchiveResult, WebsitePageSession, WebsiteVisitParams } from "../website/archive/types";
-import type { DownloadedFile } from "../website/download";
+import type { DownloadedFile } from "../website/visit/download";
 import type { CapturedNetworkRequest, ExfiltrationCanaries } from "../exfiltration/types";
 import type { SiteVisitRecording } from "./visit";
 

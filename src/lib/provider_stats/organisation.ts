@@ -1,4 +1,4 @@
-import { registrableDomain } from "../abuse/security";
+import { registrableDomain } from "../abuse/security/security";
 import type { ProviderRole } from "./role";
 
 /**

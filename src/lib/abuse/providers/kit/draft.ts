@@ -1,12 +1,16 @@
 import type { AbuseTargetType } from "../../schema";
 import { abuseEmailCaseUrl, hostingAddressLine } from "../../mail/draft";
 import { routeContext } from "../../worker/shared";
-import { reportReference } from "../report_reference";
+import { reportReference } from "./report_reference";
 import type { ProviderSubmissionContext, ProviderSubmissionDefinition, ProviderSubmissionPreparation } from "../submission_contracts";
 import { routeIsOurs } from "./pin";
 import { stableJson } from "../../../util/hash";
 
 export type RouteData = Awaited<ReturnType<typeof routeContext>>;
+/** What `verify` proved: the stored draft, and the live route and report it still matches. */
+export type Verified<Payload> = { payload: Payload; data: RouteData };
+/** The `verify` result of a draft built by `createDraft`. */
+export type VerifiedOf<Draft extends { verify: (...args: never[]) => Promise<unknown> }> = Awaited<ReturnType<Draft["verify"]>>;
 export type RouteDeps = { loadRouteContext?: typeof routeContext };
 
 /** The inputs every web-form provider's builder takes from a route and its report. */
@@ -88,7 +92,7 @@ export function createDraft<Payload, Input, Deps extends RouteDeps = RouteDeps>(
 		return payload;
 	}
 
-	async function verify(context: ProviderSubmissionContext, dependencies = {} as Deps): Promise<{ payload: Payload; data: RouteData }> {
+	async function verify(context: ProviderSubmissionContext, dependencies = {} as Deps): Promise<Verified<Payload>> {
 		const payload = stored(context);
 		const data = await loadRoute(context, dependencies);
 		if (!routeIsOurs(spec.definition, data.route) || data.target.normalizedTarget !== spec.targetOf(payload)) {

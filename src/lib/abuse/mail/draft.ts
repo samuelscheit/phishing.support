@@ -3,7 +3,7 @@ import { abuseCaseTag } from "./correlation";
 
 import { optionalOpenAIClient } from "../../openai/client";
 import { optionalResponseText } from "../../openai/response";
-import { normalizePublicHttpUrl } from "../security";
+import { normalizePublicHttpUrl } from "../security/security";
 import { serviceIdentity } from "../../network/service_identity";
 import { defaultResponseModel } from "../../openai/client";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";

@@ -10,7 +10,7 @@ export const netcraftMailProvider = defineProvider({
 	draft: netcraftMailDraft,
 	preview: () => "The recipient-redacted original phishing email (RFC 822 source) is submitted to Netcraft's mail-report API.",
 	inbound: NETCRAFT_INBOUND_MAIL,
-	external: { prepare: prepareNetcraftMailExternalSubmission, submit: (context, preflight) => submitNetcraftMailSubmission(context, preflight) },
-	fetchCorrespondence: (context) => fetchNetcraftCorrespondence(context),
+	external: { prepare: prepareNetcraftMailExternalSubmission, submit: submitNetcraftMailSubmission },
+	fetchCorrespondence: fetchNetcraftCorrespondence,
 	reviewVerdicts: NETCRAFT_REVIEW_VERDICTS,
 });

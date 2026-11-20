@@ -1,11 +1,11 @@
 import { z } from "zod";
 
-import { normalizeDomain, normalizePublicHttpUrl } from "../../security";
+import { normalizeDomain, normalizePublicHttpUrl } from "../../security/security";
 import type { ReportInput } from "../kit/draft";
 import { evidenceContract } from "../kit/evidence";
 import { field, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
 import { listedFreeText } from "../kit/text";
-import { isReportReference } from "../report_reference";
+import { isReportReference } from "../kit/report_reference";
 import { DYNADOT_PROVIDER as PROVIDER } from "./definition";
 
 export const DYNADOT_EVIDENCE_CONTRACT = evidenceContract("dynadot_report", PROVIDER.evidence);

@@ -1,6 +1,6 @@
 import dns from "node:dns/promises";
 
-import { isPublicIp } from "../security";
+import { isPublicIp } from "../security/security";
 import type { ResolvedRouteInput } from "../route_contracts";
 import { resolveIpTarget } from "./ip";
 import type { JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";

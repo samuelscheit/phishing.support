@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { createAbuseEmailDraft } from "./mail/draft";
-import { buildProviderReportNarrative } from "./providers/report_payload";
+import { buildProviderReportNarrative } from "./providers/kit/report_payload";
 import { PRESERVATION_REQUEST, PRESERVATION_REQUEST_SHORT } from "./preservation";
 
 describe("every takedown report asks the provider to preserve the records", () => {

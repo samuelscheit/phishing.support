@@ -2,7 +2,7 @@ import dns from "node:dns/promises";
 import net from "node:net";
 import { isIP } from "node:net";
 
-import { AbuseInputError, assertPublicDnsHost, isPublicIp } from "../security";
+import { AbuseInputError, assertPublicDnsHost, isPublicIp } from "../security/security";
 import { retryWithTimeout } from "../../network/bounded_fetch";
 import type { ResolverDependencies } from "./types";
 import { errorText } from "../../util/error_text";

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { MAX_REQUEST_BYTES, validateAbuseReportRequest } from "@/lib/abuse/contracts";
-import { AbuseInputError } from "@/lib/abuse/security";
+import { AbuseInputError } from "@/lib/abuse/security/security";
 import { AbuseRepository } from "@/lib/abuse/repository";
 import { getReporterMetadata } from "@/lib/http/reporter_metadata";
 

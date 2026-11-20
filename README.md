@@ -259,7 +259,7 @@ captured requests is in `docs/providers/`.
 | Dynadot (`dynadot`) | abuse@dynadot.com; 472 | form behind Cloudflare + Turnstile, in a Fabric browser |
 | Name.com (`name_com`) | abuse@name.com; 625 | Zendesk form behind Cloudflare + Turnstile and a CSRF handshake, in a Fabric browser |
 
-- Browser forms share `providers/browser_form.ts`: a Fabric session on the
+- Browser forms share `providers/kit/browser_form.ts`: a Fabric session on the
   reporting egress that passes the Cloudflare challenge, waits for the
   self-solving Turnstile token (or takes a DeathByCaptcha reCAPTCHA token), and
   sends the filing request from inside the page so its clearance applies.

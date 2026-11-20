@@ -5,7 +5,7 @@ import { getDb } from "../../db";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { submissions } from "../../db/schema";
 import { useTemporaryDatabase } from "../../db/test_helpers";
-import type { AnalyzeWebsiteOptions } from "../../website/ai";
+import type { AnalyzeWebsiteOptions } from "../../website/analysis/ai";
 import type { WebsiteNavigationHop } from "../../website/types";
 import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";

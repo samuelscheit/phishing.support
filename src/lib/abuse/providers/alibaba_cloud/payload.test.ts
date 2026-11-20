@@ -1,4 +1,4 @@
-import { selectProviderEvidenceImageArtifact } from "../evidence_image";
+import { selectProviderEvidenceImageArtifact } from "../kit/evidence";
 import { describe, expect, test } from "bun:test";
 
 import type { AbuseArtifact } from "../../schema";

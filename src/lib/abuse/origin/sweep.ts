@@ -5,7 +5,7 @@ import tls from "node:tls";
 
 import ipaddr from "ipaddr.js";
 
-import { NON_PUBLIC_IPV4 } from "../security";
+import { NON_PUBLIC_IPV4 } from "../security/security";
 
 /** The largest IPv4 address space one host may be swept across. */
 export const MAX_SWEEP_ADDRESSES = 4_000_000;

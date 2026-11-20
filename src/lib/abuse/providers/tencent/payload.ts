@@ -1,10 +1,10 @@
 import { z } from "zod";
 
-import { normalizeDomain, registrableDomain } from "../../security";
+import { normalizeDomain, registrableDomain } from "../../security/security";
 import { evidenceContract } from "../kit/evidence";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
-import { storedProviderEvidenceImageReference } from "../evidence_image";
-import { buildProviderReportNarrative } from "../report_payload";
+import { storedProviderEvidenceImageReference } from "../kit/evidence";
+import { buildProviderReportNarrative } from "../kit/report_payload";
 import { TENCENT_PROVIDER } from "./definition";
 
 const maximumExplanationLength = 400;

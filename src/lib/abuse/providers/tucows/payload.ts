@@ -1,13 +1,13 @@
 import { z } from "zod";
 
-import { normalizePublicHost, normalizePublicHttpUrl } from "../../security";
+import { normalizePublicHost, normalizePublicHttpUrl } from "../../security/security";
 import type { ReportInput } from "../kit/draft";
 import { evidenceContract } from "../kit/evidence";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
 import { composeFreeText, reportUrls, type UrlRules } from "../kit/text";
-import { extractedBrandName } from "../report_payload";
-import { storedProviderEvidenceImageReference } from "../evidence_image";
-import { isReportReference } from "../report_reference";
+import { extractedBrandName } from "../kit/report_payload";
+import { storedProviderEvidenceImageReference } from "../kit/evidence";
+import { isReportReference } from "../kit/report_reference";
 import { TUCOWS_PROVIDER } from "./definition";
 import { bareHost } from "../../../network/url";
 

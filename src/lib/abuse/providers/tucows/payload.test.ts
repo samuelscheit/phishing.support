@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { providerDefinitionHasValidHash } from "../kit/pin";
-import { selectProviderEvidenceImageArtifact } from "../evidence_image";
-import { mailedCodeFrom } from "../mailed_code";
+import { selectProviderEvidenceImageArtifact } from "../kit/evidence";
+import { mailedCodeFrom } from "../kit/mailed_code";
 import type { AbuseArtifact } from "../../schema";
 import { TUCOWS_PROVIDER } from "./definition";
 import { buildTucowsSubmissionPayload, makeTucowsDescription, TUCOWS_EVIDENCE_CONTRACT, storedTucowsSubmissionPayload, tucowsBrand, tucowsReportUrls, type TucowsReportInput } from "./payload";

@@ -9,9 +9,9 @@ import { jsonResponse as json, readyDraft } from "../kit/testing";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { awsProvider } from "./index";
 import { AWS_PROVIDER } from "./definition";
-import { providerResponseId, reportReference } from "../report_reference";
+import { providerResponseId } from "../kit/report_reference";
 import { storedAwsSubmissionPayload } from "./payload";
-import { awsDraft, prepareAwsSubmission, submitAwsSubmission } from "./submission";
+import { awsDraft, submitAwsSubmission } from "./submission";
 
 const verifiedAwsDraft = async (context: Parameters<typeof awsDraft.verify>[0]) => (await awsDraft.verify(context)).payload;
 
@@ -29,7 +29,7 @@ const readyContext = (options: { target?: string; allegationCategory?: "phishing
 	allegationCategory: options.allegationCategory,
 	observedUrls: options.observedUrls,
 	provenance: options.resolverProvenance,
-}, prepareAwsSubmission, storedAwsSubmissionPayload);
+}, awsDraft.prepare, storedAwsSubmissionPayload);
 
 type Sent = { url: string; init: RequestInit };
 function fakeFetch(answer: Response | Error | (() => Response)) {
@@ -66,10 +66,9 @@ describe("registry", () => {
 
 });
 
-describe("prepareAwsSubmission", () => {
-	test("drafts a ready payload keyed by the route's reference", async () => {
+describe("awsDraft.prepare", () => {
+	test("drafts the target, its URLs and comments", async () => {
 		const { payload, created, route } = await readyContext();
-		expect(payload.report.trackingId).toBe(reportReference(created.reportId, route.id));
 		expect(payload).toMatchObject({ target: { normalizedTarget: TARGET }, report: { abuseType: "phishing", urls: [`https://${TARGET}/signin`] } });
 		expect(payload.report.comments).toContain(`Reference: ${payload.report.trackingId}`);
 		expect(payload.report.comments).toContain("Impersonated brand: https://www.examplebank.com/");
@@ -92,9 +91,6 @@ describe("prepareAwsSubmission", () => {
 		expect(hosted.payload.report.comments).toContain(`Hosting IP address: 34.102.117.75 (${TARGET} resolved to 34.102.117.75`);
 	});
 
-	test("an unknown route fails", async () => {
-		await expect(prepareAwsSubmission({ routeId: 999_999n, payload: {} })).rejects.toThrow("no longer exists");
-	});
 });
 
 describe("verifiedAwsDraft", () => {

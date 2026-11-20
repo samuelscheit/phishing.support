@@ -1,5 +1,5 @@
-import type { BrowserFormRequestSession, BrowserFormScripting, BrowserFormSession } from "../browser_form";
-import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
+import type { BrowserFormRequestSession, BrowserFormScripting, BrowserFormSession } from "../kit/browser_form";
+import { createDraft, type VerifiedOf, reportInputOf, type RouteDeps } from "../kit/draft";
 import { formOpener, withPreflight } from "../kit/session";
 import {
 	ProviderSubmissionNeedsHumanError,
@@ -38,9 +38,6 @@ export const goDaddyDraft = createDraft({
 	targetOf: (payload) => payload.target.domain,
 });
 
-/** Check the route and build the durable draft before any provider call. */
-export const prepareGoDaddySubmission = goDaddyDraft.prepare;
-
 /**
  * Before the marker, none of which files anything: decide the channel. With an
  * Abuse API key, a read probes whether GoDaddy enabled the reporter (401/403
@@ -48,8 +45,7 @@ export const prepareGoDaddySubmission = goDaddyDraft.prepare;
  * accepts the cookie banner and takes the invisible reCAPTCHA v3 token from
  * the page's own script. Every failure is a safe retry (the browser is closed).
  */
-export async function prepareGoDaddyExternalSubmission(context: ProviderSubmissionContext, dependencies: GoDaddyDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload } = await goDaddyDraft.verify(context, dependencies);
+export async function prepareGoDaddyExternalSubmission(context: ProviderSubmissionContext, { payload }: VerifiedOf<typeof goDaddyDraft>, dependencies: GoDaddyDependencies = {}): Promise<ProviderSubmissionPreflight> {
 	const credentials = goDaddyApiCredentials(dependencies.environment);
 	const fetchDependency = dependencies.fetch ? { fetch: dependencies.fetch } : {};
 	if (credentials && await goDaddyApiEnabled(credentials, { ...fetchDependency, ...(context.signal ? { signal: context.signal } : {}) })) {
@@ -72,7 +68,7 @@ export async function prepareGoDaddyExternalSubmission(context: ProviderSubmissi
 }
 
 /** The one irreversible request (the portal), or the API's tickets, one per URL, of the channel the preflight chose. */
-export async function submitGoDaddySubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined, dependencies: Pick<GoDaddyDependencies, "fetch"> = {}): Promise<ProviderSubmissionSuccess> {
+export async function submitGoDaddySubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight, dependencies: Pick<GoDaddyDependencies, "fetch"> = {}): Promise<ProviderSubmissionSuccess> {
 	const payload = storedGoDaddySubmissionPayload(context.payload);
 	if (!payload) throw new Error("The persisted GoDaddy submission payload is malformed.");
 	const state = preflight?.state as GoDaddyPreflightState | undefined;

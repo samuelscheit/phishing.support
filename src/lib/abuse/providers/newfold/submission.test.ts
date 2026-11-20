@@ -3,25 +3,19 @@ import { describe, expect, test } from "bun:test";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { contactRoute } from "../../resolver/routes";
 import type { AbuseArtifact } from "../../schema";
-import { BrowserFormError, type BrowserFormField, type BrowserFormResponse } from "../browser_form";
-import { DESCRIPTION as description, pngArtifact as png, PNG, readyDraft, TARGET } from "../kit/testing";
-import { reportReference } from "../report_reference";
+import { BrowserFormError, type BrowserFormField, type BrowserFormResponse } from "../kit/browser_form";
+import { DESCRIPTION as description, pngArtifact as png, PNG, readyDraft, TARGET, verifiedPrepare } from "../kit/testing";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { NEWFOLD_PROVIDER as PROVIDER } from "./definition";
 import { newfoldProvider } from "./index";
 import { storedNewfoldSubmissionPayload } from "./payload";
-import {
-	leadFields,
-	prepareNewfoldExternalSubmission,
-	prepareNewfoldSubmission,
-	submitNewfoldSubmission,
-	type NewfoldDependencies,
-	type NewfoldPreflightState,
-} from "./submission";
+import { leadFields, prepareNewfoldExternalSubmission as rawPrepareNewfoldExternalSubmission, newfoldDraft, submitNewfoldSubmission, type NewfoldDependencies, type NewfoldPreflightState } from "./submission";
+
+const prepareNewfoldExternalSubmission = verifiedPrepare(newfoldDraft, rawPrepareNewfoldExternalSubmission);
 
 useTemporaryDatabase();
 
-const readyContext = (mailbox = "abuse@bluehost.com") => readyDraft({ mailbox, providerName: "Newfold" }, prepareNewfoldSubmission, storedNewfoldSubmissionPayload);
+const readyContext = (mailbox = "abuse@bluehost.com") => readyDraft({ mailbox, providerName: "Newfold" }, newfoldDraft.prepare, storedNewfoldSubmissionPayload);
 
 const HIDDEN: BrowserFormField[] = PROVIDER.hiddenFields.map(([name, value]) => [name, value]);
 
@@ -90,17 +84,16 @@ describe("registry", () => {
 	});
 });
 
-describe("prepareNewfoldSubmission (temporary database)", () => {
-	test("drafts a ready payload keyed by the route's reference and brand by mailbox", async () => {
+describe("newfoldDraft.prepare (temporary database)", () => {
+	test("drafts the brand by mailbox", async () => {
 		const { payload, created, route } = await readyContext();
-		expect(payload.report.trackingId).toBe(reportReference(created.reportId, route.id));
 		expect(payload).toMatchObject({ target: { domain: TARGET }, report: { brand: "800-bluehost", url: `https://${TARGET}/signin` }, evidence: null });
 		expect((await readyContext("iarpoc@newfold.com")).payload.report.brand).toBe("100-other");
 		expect((await readyContext("domain.operations@web.com")).payload.report.brand).toBe("300-web.com");
 	});
 
 	test("the registrar ID that selected the route picks the brand", async () => {
-		const prepared = await prepareNewfoldSubmission({ routeId: 5n, payload: {} }, { loadRouteContext: fakeRoute({ resolverProvenance: { registrarId: 9 } }) });
+		const prepared = await newfoldDraft.prepare({ routeId: 5n, payload: {} }, { loadRouteContext: fakeRoute({ resolverProvenance: { registrarId: 9 } }) });
 		expect(prepared).toMatchObject({ outcome: "ready", payload: { report: { brand: "200-register.com" } } });
 	});
 
@@ -120,7 +113,7 @@ describe("prepareNewfoldSubmission (temporary database)", () => {
 describe("prepareNewfoldExternalSubmission", () => {
 	const draftWith = async (evidenceArtifacts: AbuseArtifact[]) => {
 		const route = fakeRoute({ evidenceArtifacts });
-		const prepared = await prepareNewfoldSubmission({ routeId: 5n, payload: {} }, { loadRouteContext: route });
+		const prepared = await newfoldDraft.prepare({ routeId: 5n, payload: {} }, { loadRouteContext: route });
 		if (prepared.outcome !== "ready") throw new Error("not ready");
 		return { payload: prepared.payload, route };
 	};
@@ -294,10 +287,8 @@ describe("submitNewfoldSubmission", () => {
 
 	test("never runs without the preflight's session and token, or on a malformed draft, and posts nothing then", async () => {
 		const { context, fake, preflight } = await prepared();
-		await expect(submitNewfoldSubmission(context, undefined)).rejects.toThrow("requires its prepared browser session");
 		await expect(submitNewfoldSubmission(context, { state: { ...preflight.state, token: "" } })).rejects.toThrow("requires its prepared browser session");
 		await expect(submitNewfoldSubmission({ ...context, payload: { ...context.payload, adapter: "x" } }, preflight)).rejects.toThrow("malformed");
 		expect(fake.calls).toEqual([]);
-		await expect(newfoldProvider.submit(context)).rejects.toThrow("requires its prepared browser session");
 	});
 });

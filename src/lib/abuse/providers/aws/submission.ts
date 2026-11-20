@@ -4,7 +4,7 @@ import { asRecord } from "../../../util/values";
 import { failUnlessFiled } from "../kit/http";
 import { snippet } from "../../../util/text";
 import type { ProviderSubmissionContext, ProviderSubmissionSuccess } from "../submission_contracts";
-import { providerResponseId } from "../report_reference";
+import { providerResponseId } from "../kit/report_reference";
 import { AWS_PROVIDER } from "./definition";
 import { awsRequestBody, buildAwsSubmissionPayload, storedAwsSubmissionPayload, type AwsReportInput } from "./payload";
 import { deadline } from "../../../util/async";
@@ -35,9 +35,6 @@ export const awsDraft = createDraft({
 	build: buildAwsSubmissionPayload,
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
-
-/** Check the route and build the durable draft before any provider call. */
-export const prepareAwsSubmission = (context: ProviderSubmissionContext) => awsDraft.prepare(context);
 
 /**
  * File the report: the only work after the durable marker. A refusal naming

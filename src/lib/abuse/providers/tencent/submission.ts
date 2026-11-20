@@ -5,7 +5,7 @@ import { createDraft, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
 import { preparedState } from "../kit/session";
 import { snippet } from "../../../util/text";
-import { getProviderProxy, type ProviderProxy } from "../proxy";
+import { getProviderProxy, type ProviderProxy } from "../kit/proxy";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { TENCENT_PROVIDER } from "./definition";
 import {
@@ -188,7 +188,7 @@ export async function prepareTencentExternalSubmission(
 /** The one Tencent provider request, from the preflight's verified draft and solved captcha. */
 export async function submitTencentSubmission(
 	context: ProviderSubmissionContext,
-	preflight: ProviderSubmissionPreflight | undefined,
+	preflight: ProviderSubmissionPreflight,
 	dependencies: Pick<TencentSubmissionDependencies, "fetch"> = {},
 ): Promise<ProviderSubmissionSuccess> {
 	const { payload, screenshot, proxy, captcha } = preparedState<TencentPreflightState>(preflight, (state) => !!state.payload && !!state.captcha && !!state.proxy, "Tencent submission requires its prepared draft, proxy and solved captcha.");

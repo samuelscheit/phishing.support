@@ -1,12 +1,12 @@
 import { z } from "zod";
 
-import { normalizeDomain } from "../../security";
+import { normalizeDomain } from "../../security/security";
 import { evidenceContract } from "../kit/evidence";
 import type { ReportInput } from "../kit/draft";
 import { field, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
 import { listedFreeText } from "../kit/text";
-import { isReportReference } from "../report_reference";
-import type { ProviderEvidenceImageReference } from "../evidence_image";
+import { isReportReference } from "../kit/report_reference";
+import type { ProviderEvidenceImageReference } from "../kit/evidence";
 import { NAME_COM_PROVIDER as PROVIDER } from "./definition";
 
 export const NAME_COM_EVIDENCE_CONTRACT = evidenceContract("name_com_report", PROVIDER.evidence);

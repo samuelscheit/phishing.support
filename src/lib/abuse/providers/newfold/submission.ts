@@ -1,7 +1,7 @@
-import { setRecaptchaResponse, type BrowserFormField, type BrowserFormFile, type BrowserFormScripting, type BrowserFormSession } from "../browser_form";
+import { setRecaptchaResponse, type BrowserFormField, type BrowserFormFile, type BrowserFormScripting, type BrowserFormSession } from "../kit/browser_form";
 import { captchaCredentialsProblem, solveRecaptchaV2 } from "../kit/captcha";
-import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
-import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { createDraft, type VerifiedOf, reportInputOf, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { formOpener, preparedState, withPreflight } from "../kit/session";
 import { snippet } from "../../../util/text";
 import {
@@ -29,7 +29,7 @@ export type NewfoldDependencies = RouteDeps & {
 	solveCaptcha?: (signal: AbortSignal | undefined) => Promise<string>;
 	/** Whether the captcha service can be paid at all; defaults to the DEATHBYCAPTCHA_* credentials being set. */
 	hasCaptchaCredentials?: () => boolean;
-	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
+	getArtifact?: EvidenceDependencies["getArtifact"];
 };
 
 /** What the preflight leaves for the one request after the marker. */
@@ -51,9 +51,6 @@ export const newfoldDraft = createDraft({
 	targetOf: (payload) => payload.target.domain,
 });
 
-/** Check the route and build the durable draft before any provider call. */
-export const prepareNewfoldSubmission = newfoldDraft.prepare;
-
 /** Solve the form's reCAPTCHA v2 checkbox (datacenter egress gets the image challenge, so no widget click is tried). */
 export const solveNewfoldCaptcha = (signal: AbortSignal | undefined) => solveRecaptchaV2(PROVIDER.captcha, PROVIDER.captcha.pageUrl, signal);
 
@@ -64,10 +61,9 @@ export const solveNewfoldCaptcha = (signal: AbortSignal | undefined) => solveRec
  * (the browser is closed first). Without captcha credentials nothing is
  * opened and a person is asked.
  */
-export async function prepareNewfoldExternalSubmission(context: ProviderSubmissionContext, dependencies: NewfoldDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await newfoldDraft.verify(context, dependencies);
+export async function prepareNewfoldExternalSubmission(context: ProviderSubmissionContext, { payload, data }: VerifiedOf<typeof newfoldDraft>, dependencies: NewfoldDependencies = {}): Promise<ProviderSubmissionPreflight> {
 	const file = payload.evidence
-		? (await loadEvidenceFile({ reference: payload.evidence, contract: NEWFOLD_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Newfold", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) })).file
+		? (await evidenceFileOf(NEWFOLD_EVIDENCE_CONTRACT, "Newfold", payload.evidence, data, dependencies)).file
 		: undefined;
 	if (!(dependencies.hasCaptchaCredentials ?? (() => captchaCredentialsProblem() === undefined))()) {
 		throw new ProviderSubmissionNeedsHumanError("Newfold's abuse form needs a solved reCAPTCHA and DEATHBYCAPTCHA_USERNAME/DEATHBYCAPTCHA_PASSWORD are not set; nothing was filed.");
@@ -123,7 +119,7 @@ function endedOnThankYou(finalUrl: string | undefined): boolean {
  * other page leaves it open whether the case exists. Cloudflare's block page
  * and a 413 never reach the servlet, so nothing was filed.
  */
-export async function submitNewfoldSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
+export async function submitNewfoldSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess> {
 	const payload = storedNewfoldSubmissionPayload(context.payload);
 	if (!payload) throw new Error("The persisted Newfold submission payload is malformed.");
 	const state = preparedState<NewfoldPreflightState>(

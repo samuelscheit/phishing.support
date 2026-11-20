@@ -1,10 +1,8 @@
 import {
 	getProviderSubmissionProvider,
 	listProviderSubmissionProviders,
-	nextReceiptLookupDelayMs,
-	queueCorrespondencePoll,
-	queueReceiptLookup,
 } from "../providers";
+import { nextReceiptLookupDelayMs, queueCorrespondencePoll, queueReceiptLookup } from "./schedule";
 import { AbuseRepository } from "../repository";
 
 /**

@@ -1,12 +1,12 @@
 import { z } from "zod";
 
 import { asRecord } from "../../../util/values";
-import { normalizeDomain } from "../../security";
+import { normalizeDomain } from "../../security/security";
 import type { ReportInput } from "../kit/draft";
 import { evidenceContract } from "../kit/evidence";
 import { field, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
 import { listedFreeText } from "../kit/text";
-import { isReportReference } from "../report_reference";
+import { isReportReference } from "../kit/report_reference";
 import { NEWFOLD_PROVIDER as PROVIDER } from "./definition";
 
 export const NEWFOLD_EVIDENCE_CONTRACT = evidenceContract("newfold_report", PROVIDER.evidence);

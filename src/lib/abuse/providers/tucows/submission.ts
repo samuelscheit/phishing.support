@@ -1,11 +1,11 @@
 import { imapConfig } from "../../../mail/config";
 import { asRecord, parseJsonRecord } from "../../../util/values";
 import { captchaCredentialsProblem, solveCaptchaToken } from "../kit/captcha";
-import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
-import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { createDraft, reportInputOf, type RouteDeps, type VerifiedOf } from "../kit/draft";
+import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { htmlText } from "../kit/text";
-import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
-import { reportReferencesIn } from "../report_reference";
+import { mailedCodeReader, type MailedCodeReader } from "../kit/mailed_code";
+import { reportReferencesIn } from "../kit/report_reference";
 import {
 	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
@@ -28,7 +28,7 @@ export type TucowsDependencies = RouteDeps & {
 	/** The Turnstile token for the first step. */
 	solveCaptcha?: (signal?: AbortSignal) => Promise<string>;
 	readCode?: MailedCodeReader;
-	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
+	getArtifact?: EvidenceDependencies["getArtifact"];
 	now?: () => Date;
 };
 
@@ -58,16 +58,6 @@ export const tucowsDraft = createDraft({
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
 
-/** Check the route and build the durable draft before any provider call. */
-export const prepareTucowsSubmission = tucowsDraft.prepare;
-
-/** The stored draft, checked against its route and rebuilt from the current report; with its screenshot's bytes. */
-export async function verifiedTucowsDraft(context: ProviderSubmissionContext, dependencies: TucowsDependencies = {}): Promise<{ payload: TucowsSubmissionPayload; screenshot: Buffer }> {
-	const { payload, data } = await tucowsDraft.verify(context, dependencies);
-	const { bytes } = await loadEvidenceFile({ reference: payload.evidence, contract: TUCOWS_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Tucows", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) });
-	return { payload, screenshot: bytes };
-}
-
 const snippet = htmlText;
 
 /**
@@ -91,11 +81,11 @@ async function advance(session: TucowsSession, step: string, from: string, field
  * and the registrar check. None of it files a report, so every failure is a
  * safe retry; a domain Tucows does not register ends the route for a person.
  */
-export async function prepareTucowsExternalSubmission(context: ProviderSubmissionContext, dependencies: TucowsDependencies = {}): Promise<ProviderSubmissionPreflight> {
+export async function prepareTucowsExternalSubmission(context: ProviderSubmissionContext, { payload, data }: VerifiedOf<typeof tucowsDraft>, dependencies: TucowsDependencies = {}): Promise<ProviderSubmissionPreflight> {
 	const captchaProblem = dependencies.solveCaptcha ? undefined : captchaCredentialsProblem();
 	if (captchaProblem) throw new ProviderSubmissionNeedsHumanError(`Tucows reporting needs a Turnstile solver: ${captchaProblem}`);
 	if (!dependencies.readCode && !imapConfig()) throw new ProviderSubmissionNeedsHumanError("Tucows reporting requires the IMAP mailbox to receive its verification code.");
-	const { payload, screenshot } = await verifiedTucowsDraft(context, dependencies);
+	const { bytes: screenshot } = await evidenceFileOf(TUCOWS_EVIDENCE_CONTRACT, "Tucows", payload.evidence, data, dependencies);
 	const session = createTucowsSession(dependencies.fetch ?? fetch, context.signal);
 
 	const first = await session.get("/report");
@@ -194,7 +184,7 @@ function filingForm(state: TucowsPreflightState): FormData {
  * request means nothing was filed; a redirect out of the wizard or a page
  * without the form means it was; anything else is ambiguous.
  */
-export async function submitTucowsSubmission(_context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
+export async function submitTucowsSubmission(_context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess> {
 	const state = preflight?.state as TucowsPreflightState | undefined;
 	if (!state?.session || !state.payload || !state.csrfToken || !Buffer.isBuffer(state.screenshot)) {
 		throw new Error("Tucows submission requires its prepared wizard session.");

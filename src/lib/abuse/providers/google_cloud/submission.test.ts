@@ -17,7 +17,8 @@ import {
 	googleCloudServiceForTarget,
 	storedGoogleCloudSubmissionPayload,
 } from "./payload";
-import { prepareGoogleCloudSubmission, readGoogleCloudSubmitResponse, submitGoogleCloudSubmission } from "./submission";
+import { googleCloudDraft, readGoogleCloudSubmitResponse, submitGoogleCloudSubmission } from "./submission";
+import { defineProvider } from "../kit/provider";
 
 useTemporaryDatabase();
 
@@ -184,9 +185,9 @@ function browserProvider(
 	timeouts?: { formReadyMs?: number; submitResponseMs?: number; confirmationMs?: number },
 	solveCaptcha: () => Promise<string> = async () => { throw new Error("No checkbox reCAPTCHA was expected."); },
 ): ProviderSubmissionProvider {
-	return {
+	return defineProvider({
 		definition: GOOGLE_CLOUD_PROVIDER,
-		prepareSubmission: prepareGoogleCloudSubmission,
+		draft: googleCloudDraft,
 		submit: (context) => submitGoogleCloudSubmission(context, {
 			reportPageUrl: form.url,
 			solveCaptcha,
@@ -196,7 +197,7 @@ function browserProvider(
 				return { page: await browser.newPage(), close: () => browser.close() };
 			},
 		}),
-	};
+	});
 }
 
 describe.skipIf(!chromiumAvailable)("Google Cloud abuse form, in a real browser", () => {

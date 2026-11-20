@@ -1,10 +1,10 @@
 import { asRecord } from "../../../util/values";
-import type { BrowserFormChoiceSession, BrowserFormField, BrowserFormFile, BrowserFormResponse } from "../browser_form";
-import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
-import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import type { BrowserFormChoiceSession, BrowserFormField, BrowserFormFile, BrowserFormResponse } from "../kit/browser_form";
+import { createDraft, type VerifiedOf, reportInputOf, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { formOpener, preparedState, withPreflight } from "../kit/session";
 import { snippet } from "../../../util/text";
-import { providerResponseId } from "../report_reference";
+import { providerResponseId } from "../kit/report_reference";
 import {
 	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
@@ -23,7 +23,7 @@ import {
 export type DynadotDependencies = RouteDeps & {
 	/** The browser on the form page with the challenge passed; tests inject a fake. */
 	openForm?: (signal: AbortSignal | undefined) => Promise<BrowserFormChoiceSession>;
-	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
+	getArtifact?: EvidenceDependencies["getArtifact"];
 };
 
 /** What the preflight leaves for the one request after the marker. */
@@ -45,9 +45,6 @@ export const dynadotDraft = createDraft({
 	targetOf: (payload) => payload.target.domain,
 });
 
-/** Check the route and build the durable draft before any provider call. */
-export const prepareDynadotSubmission = dynadotDraft.prepare;
-
 /** The inputs the phishing form must render for this submission to mean what the draft says. */
 const REQUIRED_INPUTS = [PROVIDER.fields.name, PROVIDER.fields.email, PROVIDER.fields.emailConfirmation, PROVIDER.fields.phone, PROVIDER.fields.domain, PROVIDER.fields.officialWebsite, PROVIDER.fields.proxyLocations, PROVIDER.fields.domainPath, PROVIDER.fields.comments];
 
@@ -57,10 +54,9 @@ const REQUIRED_INPUTS = [PROVIDER.fields.name, PROVIDER.fields.email, PROVIDER.f
  * None of it files a report, so every failure is a safe retry (the browser is
  * closed first).
  */
-export async function prepareDynadotExternalSubmission(context: ProviderSubmissionContext, dependencies: DynadotDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, data } = await dynadotDraft.verify(context, dependencies);
+export async function prepareDynadotExternalSubmission(context: ProviderSubmissionContext, { payload, data }: VerifiedOf<typeof dynadotDraft>, dependencies: DynadotDependencies = {}): Promise<ProviderSubmissionPreflight> {
 	const files = payload.evidence
-		? [(await loadEvidenceFile({ reference: payload.evidence, contract: DYNADOT_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Dynadot", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) })).file]
+		? [(await evidenceFileOf(DYNADOT_EVIDENCE_CONTRACT, "Dynadot", payload.evidence, data, dependencies)).file]
 		: [];
 	return withPreflight(() => (dependencies.openForm ?? formOpener(PROVIDER, "dynadot-report", { url: PROVIDER.formUrl, formSelector: PROVIDER.abuseTypeSelector }))(context.signal), async (session): Promise<DynadotPreflightState> => {
 		if (!await session.selectOption(PROVIDER.abuseTypeSelector, PROVIDER.abuseType)) throw new Error(`Dynadot's abuse form no longer offers the phishing type ${PROVIDER.abuseType}.`);
@@ -106,7 +102,7 @@ function validationErrors(answer: BrowserFormResponse): string[] | undefined {
  * with a `data` object and no validation errors (its exact shape was never
  * captured); anything else leaves it open whether Dynadot kept the report.
  */
-export async function submitDynadotSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
+export async function submitDynadotSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess> {
 	const payload = storedDynadotSubmissionPayload(context.payload);
 	if (!payload) throw new Error("The persisted Dynadot submission payload is malformed.");
 	const state = preparedState<DynadotPreflightState>(

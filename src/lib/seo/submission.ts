@@ -1,6 +1,6 @@
 import type { Submission } from "@/lib/db/schema";
 import { truncateAtWord } from "@/lib/util/text";
-import { websiteSiteName } from "@/lib/website/site";
+import { websiteSiteName } from "@/lib/website/info/site";
 import { utcDate } from "@/lib/util/date_time";
 
 /** What a submission's page tells search engines and share cards: who it is about and what was found. */

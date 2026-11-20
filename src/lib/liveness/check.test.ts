@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { AbuseInputError } from "../abuse/security";
+import { AbuseInputError } from "../abuse/security/security";
 import { checkSite, type SiteCheckDependencies, type SiteDnsResolver } from "./check";
 
 const NOW = new Date("2026-11-19T10:00:00.000Z");

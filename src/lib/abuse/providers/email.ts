@@ -1,4 +1,4 @@
-import { normalizeDomain, registrableDomain } from "../security";
+import { normalizeDomain, registrableDomain } from "../security/security";
 
 /** For an explicit abuse mailbox, its registrable provider domain is the verified web boundary. */
 export function verifiedDomainsForEmailRoute(email: string): string[] {

@@ -5,7 +5,7 @@ import { validateAbuseReportRequest } from "../../contracts";
 import { AbuseRepository } from "../../repository";
 import type { AbuseArtifact } from "../../schema";
 import { providerDefinitionHasValidHash } from "../kit/pin";
-import { selectProviderEvidenceImageArtifact } from "../evidence_image";
+import { selectProviderEvidenceImageArtifact } from "../kit/evidence";
 import { executeProviderSubmission } from "../submission_execution";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionProvider } from "../submission_contracts";
 import { NAMESILO_PROVIDER } from "./definition";
@@ -14,16 +14,12 @@ import {
 	NAMESILO_EVIDENCE_CONTRACT,
 	storedNameSiloSubmissionPayload,
 } from "./payload";
-import {
-	buildNameSiloHttpPayload,
-	parseNameSiloSessionResponse,
-	parseNameSiloSubmissionResponse,
-	prepareNameSiloExternalSubmission,
-	prepareNameSiloSubmission,
-	submitNameSiloSubmission,
-} from "./submission";
+import { buildNameSiloHttpPayload, parseNameSiloSessionResponse, parseNameSiloSubmissionResponse, prepareNameSiloExternalSubmission as rawPrepareNameSiloExternalSubmission, nameSiloDraft, submitNameSiloSubmission } from "./submission";
 import { sha256Hex } from "../../../util/hash";
-import { evidenceArtifact } from "../kit/testing";
+import { evidenceArtifact, verifiedPrepare } from "../kit/testing";
+import { defineProvider } from "../kit/provider";
+
+const prepareNameSiloExternalSubmission = verifiedPrepare(nameSiloDraft, rawPrepareNameSiloExternalSubmission);
 
 useTemporaryDatabase();
 
@@ -176,30 +172,32 @@ describe("NameSilo phishing report submission", () => {
 		});
 
 		const requests: Array<{ url: string; init?: RequestInit }> = [];
-		const provider: ProviderSubmissionProvider = {
+		const provider = defineProvider({
 			definition: NAMESILO_PROVIDER,
-			prepareSubmission: (context) => prepareNameSiloSubmission(context, {
-				deriveFacts: async () => ({ brandOfficialWebsite: "https://bank.example.org/online" }),
-			}),
-			prepareExternalSubmission: (context) => prepareNameSiloExternalSubmission(context, {
-				fetch: async (input, init) => {
-					requests.push({ url: String(input), init });
-					return csrfResponse();
-				},
-				captchaSolver: async () => "captcha-token",
-				now: () => 1_000_000,
-			}),
-			submit: (context) => submitNameSiloSubmission(context, undefined),
-			submitPrepared: async (context, preflight) => {
-				expect(await AbuseRepository.getProviderRun(context.runId!)).toMatchObject({ executionStatus: "submission_started" });
-				return submitNameSiloSubmission(context, preflight, {
+			draft: {
+				prepare: (context) => nameSiloDraft.prepare(context, { deriveFacts: async () => ({ brandOfficialWebsite: "https://bank.example.org/online" }) }),
+				verify: nameSiloDraft.verify,
+			},
+			external: {
+				prepare: (context, verified) => rawPrepareNameSiloExternalSubmission(context, verified, {
 					fetch: async (input, init) => {
 						requests.push({ url: String(input), init });
-						return new Response(JSON.stringify({ result: "success", message: null, data: null }));
+						return csrfResponse();
 					},
-				});
+					captchaSolver: async () => "captcha-token",
+					now: () => 1_000_000,
+				}),
+				submit: async (context, preflight) => {
+					expect(await AbuseRepository.getProviderRun(context.runId!)).toMatchObject({ executionStatus: "submission_started" });
+					return submitNameSiloSubmission(context, preflight, {
+						fetch: async (input, init) => {
+							requests.push({ url: String(input), init });
+							return new Response(JSON.stringify({ result: "success", message: null, data: null }));
+						},
+					});
+				},
 			},
-		};
+		});
 
 		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({
 			outcome: "submitted",
@@ -255,13 +253,11 @@ describe("NameSilo phishing report submission", () => {
 			status: "verified",
 		});
 		let preflightCalled = false;
-		const provider: ProviderSubmissionProvider = {
+		const provider = defineProvider({
 			definition: NAMESILO_PROVIDER,
-			prepareSubmission: (context) => prepareNameSiloSubmission(context, { deriveFacts: async () => ({}) }),
-			prepareExternalSubmission: async () => { preflightCalled = true; return { state: {} }; },
-			submit: async () => ({ submittedTargets: [] }),
-			submitPrepared: async () => ({ submittedTargets: [] }),
-		};
+			draft: { prepare: (context) => nameSiloDraft.prepare(context, { deriveFacts: async () => ({}) }), verify: nameSiloDraft.verify },
+			external: { prepare: async () => { preflightCalled = true; return { state: {} }; }, submit: async () => ({ submittedTargets: [] }) },
+		});
 		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({
 			outcome: "insufficient_evidence",
 			reason: "namesilo_requires_a_verified_brand_website",

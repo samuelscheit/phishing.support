@@ -3,27 +3,20 @@ import { describe, expect, test } from "bun:test";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { contactRoute } from "../../resolver/routes";
 import type { AbuseArtifact } from "../../schema";
-import { BrowserFormError, type BrowserFormField, type BrowserFormResponse, type BrowserFormSession } from "../browser_form";
-import { DESCRIPTION as description, formAnswer as answer, pngArtifact as png, PNG, readyDraft, TARGET } from "../kit/testing";
-import { reportReference } from "../report_reference";
+import { BrowserFormError, type BrowserFormField, type BrowserFormResponse, type BrowserFormSession } from "../kit/browser_form";
+import { DESCRIPTION as description, formAnswer as answer, pngArtifact as png, PNG, readyDraft, TARGET, verifiedPrepare } from "../kit/testing";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { PUBLIC_DOMAIN_REGISTRY_PROVIDER as PROVIDER } from "./definition";
 import { publicDomainRegistryProvider } from "./index";
 import { storedPublicDomainRegistrySubmissionPayload } from "./payload";
-import {
-	feedbackFields,
-	preparePublicDomainRegistryExternalSubmission,
-	preparePublicDomainRegistrySubmission,
-	submitPublicDomainRegistrySubmission,
-	uploadedPath,
-	type PublicDomainRegistryDependencies,
-	type PublicDomainRegistryPreflightState,
-} from "./submission";
+import { feedbackFields, preparePublicDomainRegistryExternalSubmission as rawPreparePublicDomainRegistryExternalSubmission, publicDomainRegistryDraft, submitPublicDomainRegistrySubmission, uploadedPath, type PublicDomainRegistryDependencies, type PublicDomainRegistryPreflightState } from "./submission";
+
+const preparePublicDomainRegistryExternalSubmission = verifiedPrepare(publicDomainRegistryDraft, rawPreparePublicDomainRegistryExternalSubmission);
 
 useTemporaryDatabase();
 
 const MAILBOXES = ["abuse-contact@publicdomainregistry.com", "abuse@publicdomainregistry.com"];
-const readyContext = () => readyDraft({ mailbox: MAILBOXES[0]!, providerName: "PDR" }, preparePublicDomainRegistrySubmission, storedPublicDomainRegistrySubmissionPayload);
+const readyContext = () => readyDraft({ mailbox: MAILBOXES[0]!, providerName: "PDR" }, publicDomainRegistryDraft.prepare, storedPublicDomainRegistrySubmissionPayload);
 
 const RENDERED: BrowserFormField[] = [
 	["_wpcf7", "643"], ["_wpcf7_version", "6.2.4.1"], ["_wpcf7_locale", "en_US"], ["_wpcf7_unit_tag", "wpcf7-f643-p645-o1"],
@@ -88,10 +81,9 @@ describe("registry", () => {
 	});
 });
 
-describe("preparePublicDomainRegistrySubmission (temporary database)", () => {
-	test("drafts a ready payload keyed by the route's reference", async () => {
+describe("publicDomainRegistryDraft.prepare (temporary database)", () => {
+	test("drafts the domain without a screenshot, its complaint led by the reference", async () => {
 		const { payload, created, route } = await readyContext();
-		expect(payload.report.trackingId).toBe(reportReference(created.reportId, route.id));
 		expect(payload).toMatchObject({ target: { domain: TARGET }, evidence: null });
 		expect(payload.report.complaint).toContain(`Reference: ${payload.report.trackingId}\n\nReported URLs:\n- https://${TARGET}/signin`);
 	});
@@ -110,7 +102,7 @@ describe("preparePublicDomainRegistrySubmission (temporary database)", () => {
 describe("preparePublicDomainRegistryExternalSubmission", () => {
 	const draftWith = async (evidenceArtifacts: AbuseArtifact[]) => {
 		const route = fakeRoute({ target: { domain: TARGET } }, { evidenceArtifacts });
-		const prepared = await preparePublicDomainRegistrySubmission({ routeId: 5n, payload: {} }, { loadRouteContext: route });
+		const prepared = await publicDomainRegistryDraft.prepare({ routeId: 5n, payload: {} }, { loadRouteContext: route });
 		if (prepared.outcome !== "ready") throw new Error("not ready");
 		return { payload: prepared.payload, route };
 	};
@@ -266,11 +258,9 @@ describe("submitPublicDomainRegistrySubmission", () => {
 
 	test("never runs without the preflight's session and token, or on a malformed draft, and reads nothing else from the database", async () => {
 		const { context, fake, preflight } = await prepared();
-		await expect(submitPublicDomainRegistrySubmission(context, undefined)).rejects.toThrow("requires its prepared browser session");
 		await expect(submitPublicDomainRegistrySubmission(context, { state: { ...preflight.state, token: "" } })).rejects.toThrow("requires its prepared browser session");
 		await expect(submitPublicDomainRegistrySubmission({ ...context, payload: { ...context.payload, adapter: "x" } }, preflight)).rejects.toThrow("malformed");
 		expect(fake.calls).toEqual([]);
 		// The provider's submit entry points are the same single request.
-		await expect(publicDomainRegistryProvider.submit(context)).rejects.toThrow("requires its prepared browser session");
 	});
 });

@@ -14,5 +14,5 @@ export const tencentProvider = defineProvider({
 		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),
-	external: { prepare: prepareTencentExternalSubmission, submit: submitTencentSubmission },
+	external: { prepare: (context) => prepareTencentExternalSubmission(context), submit: submitTencentSubmission },
 });

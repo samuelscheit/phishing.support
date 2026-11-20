@@ -5,7 +5,7 @@ import { useTemporaryDatabase } from "../../db/test_helpers";
 import { browserTaskModel, type ChatModel } from "../../browser/task/agent";
 import { chromiumAvailable, html, launchTestChromium, refIn, requestTexts, ScriptedModel, selfSignedCertificate, StalledModel, type ScriptedTurn } from "../../browser/task/test_helpers";
 import { validateAbuseReportRequest } from "../contracts";
-import { buildGenericProviderFormTask } from "../portal/task";
+import { buildGenericProviderFormTask } from "../portal/form_task";
 import { AbuseRepository } from "../repository";
 import { runGenericProviderPortal } from "./portal";
 import type { UnknownExternalStateParams, WorkerServices } from "./shared";

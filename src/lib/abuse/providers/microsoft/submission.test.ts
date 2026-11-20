@@ -6,12 +6,11 @@ import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { contactRoute } from "../../resolver/routes";
 import { abuseTargets } from "../../schema";
 import { jsonResponse as json, readyDraft } from "../kit/testing";
-import { reportReference } from "../report_reference";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { MICROSOFT_PROVIDER } from "./definition";
 import { microsoftProvider } from "./index";
 import { storedMicrosoftSubmissionPayload } from "./payload";
-import { microsoftDraft, prepareMicrosoftSubmission, submitMicrosoftSubmission } from "./submission";
+import { microsoftDraft, submitMicrosoftSubmission } from "./submission";
 
 const verifiedMicrosoftDraft = async (context: Parameters<typeof microsoftDraft.verify>[0]) => (await microsoftDraft.verify(context)).payload;
 
@@ -29,7 +28,7 @@ const readyContext = (options: { target?: string; allegationCategory?: "phishing
 	allegationCategory: options.allegationCategory,
 	observedUrls: options.observedUrls,
 	provenance: options.resolverProvenance,
-}, prepareMicrosoftSubmission, storedMicrosoftSubmissionPayload);
+}, microsoftDraft.prepare, storedMicrosoftSubmissionPayload);
 
 type Sent = { url: string; init: RequestInit };
 function fakeFetch(answer: Response | Error) {
@@ -65,10 +64,9 @@ describe("registry", () => {
 
 });
 
-describe("prepareMicrosoftSubmission", () => {
-	test("drafts a ready payload keyed by the route's reference", async () => {
+describe("microsoftDraft.prepare", () => {
+	test("drafts the target, its URLs and notes led by the reference", async () => {
 		const { payload, created, route } = await readyContext();
-		expect(payload.report.reference).toBe(reportReference(created.reportId, route.id));
 		expect(payload).toMatchObject({ target: { normalizedTarget: TARGET }, report: { incidentType: "Phishing", urls: [`https://${TARGET}/signin`] } });
 		expect(payload.report.notes.startsWith(`Reference: ${payload.report.reference}`)).toBeTrue();
 		expect(payload.report.notes).toContain("Impersonated brand: https://www.examplebank.com/");
@@ -92,9 +90,6 @@ describe("prepareMicrosoftSubmission", () => {
 		expect(hosted.payload.report.notes).toContain(`Hosting IP address: 20.50.1.2 (${TARGET} resolved to 20.50.1.2`);
 	});
 
-	test("an unknown route fails", async () => {
-		await expect(prepareMicrosoftSubmission({ routeId: 999_999n, payload: {} })).rejects.toThrow("no longer exists");
-	});
 });
 
 describe("verifiedMicrosoftDraft", () => {

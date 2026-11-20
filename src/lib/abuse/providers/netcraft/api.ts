@@ -10,7 +10,6 @@ export const NETCRAFT_SUBMISSION_URL_PREFIX = "https://report.netcraft.com/api/v
 const NETCRAFT_STATUS_REQUEST_TIMEOUT_MS = 15_000;
 const NETCRAFT_STATUS_MAX_BODY_BYTES = 256 * 1024;
 const NETCRAFT_STATUS_MAX_STATE_LENGTH = 64;
-const NETCRAFT_STATUS_MAX_URL_LENGTH = 8_192;
 
 // Netcraft's published schema marks the submission identifier as `format:
 // uuid`, while its own examples use a compact 32-hex representation. The live
@@ -28,19 +27,13 @@ export type NetcraftSubmissionReceipt = {
 	submissionUrl: string;
 };
 
-type NetcraftSubmissionUrlStatus = {
-	url: string;
-	state?: string;
-};
-
-/** Minimal, bounded status data used for a read-only reconciliation. */
-export type NetcraftSubmissionStatus = {
+/** A submission's review state, read without making another report. */
+export type NetcraftSubmissionState = {
 	uuid: string;
 	state: string;
 	pending: boolean;
 	hasUrls: boolean;
 	lastUpdate?: number;
-	urls: NetcraftSubmissionUrlStatus[];
 };
 
 /** An explicit 4xx response is a known provider outcome, unlike a lost response. */
@@ -72,22 +65,6 @@ export function netcraftSubmissionIdsFromText(text: string): string[] {
 		.filter((id): id is string => Boolean(id)))];
 }
 
-/** Extract a provider submission identifier from our bounded diagnostic text. */
-export function netcraftSubmissionIdFromDiagnostic(value: string): string | undefined {
-	if (typeof value !== "string") return undefined;
-	// Diagnostics are normally a raw JSON response, but some loggers escape
-	// quotes once more while serializing an Error. Accept either representation
-	// and still run the extracted value through the strict ID validator.
-	let normalized = value;
-	for (let pass = 0; pass < 3; pass++) {
-		const unescaped = normalized.replaceAll('\\"', '"');
-		if (unescaped === normalized) break;
-		normalized = unescaped;
-	}
-	const match = normalized.match(/["']uuid["']\s*:\s*["']([^"']+)["']/i);
-	return match ? normalizeSubmissionId(match[1]) : undefined;
-}
-
 function parsedReportedResponse(value: unknown): { uuid: string; message?: string } | undefined {
 	const record = asRecord(value);
 	const uuid = record ? normalizeSubmissionId(record.uuid) : undefined;
@@ -111,11 +88,6 @@ export function netcraftSubmissionUrl(uuid: string): string {
 	return new URL(normalized, NETCRAFT_SUBMISSION_URL_PREFIX).toString();
 }
 
-/** Construct the fixed URL-list endpoint from a validated submission ID. */
-export function netcraftSubmissionUrlsUrl(uuid: string): string {
-	return `${netcraftSubmissionUrl(uuid)}/urls`;
-}
-
 function booleanFlag(value: unknown): boolean | undefined {
 	if (value === true || value === 1 || value === "1") return true;
 	if (value === false || value === 0 || value === "0") return false;
@@ -126,7 +98,7 @@ function integerFlag(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined;
 }
 
-function parseSubmissionStatus(value: unknown, uuid: string): Omit<NetcraftSubmissionStatus, "urls"> | undefined {
+function parseSubmissionStatus(value: unknown, uuid: string): NetcraftSubmissionState | undefined {
 	const record = asRecord(value);
 	if (!record || typeof record.state !== "string" || !record.state.trim() || record.state.trim().length > NETCRAFT_STATUS_MAX_STATE_LENGTH) return undefined;
 	if (record.uuid !== undefined && normalizeSubmissionId(record.uuid) !== uuid) return undefined;
@@ -145,19 +117,6 @@ function parseSubmissionStatus(value: unknown, uuid: string): Omit<NetcraftSubmi
 	};
 }
 
-function parseSubmissionUrls(value: unknown): NetcraftSubmissionUrlStatus[] | undefined {
-	const record = asRecord(value);
-	if (!record || !Array.isArray(record.urls) || record.urls.length === 0) return undefined;
-	const urls: NetcraftSubmissionUrlStatus[] = [];
-	for (const item of record.urls) {
-		const entry = asRecord(item);
-		if (!entry || typeof entry.url !== "string" || !entry.url.trim() || entry.url.trim().length > NETCRAFT_STATUS_MAX_URL_LENGTH) return undefined;
-		if (entry.url_state !== undefined && (typeof entry.url_state !== "string" || entry.url_state.trim().length > NETCRAFT_STATUS_MAX_STATE_LENGTH)) return undefined;
-		urls.push({ url: entry.url.trim(), ...(typeof entry.url_state === "string" ? { state: entry.url_state.trim() } : {}) });
-	}
-	return urls;
-}
-
 async function fetchNetcraftJson(
 	request: FetchLike,
 	url: string,
@@ -165,9 +124,8 @@ async function fetchNetcraftJson(
 ): Promise<unknown> {
 	try {
 		// Reuse the shared streaming reader/deadline so a provider response cannot
-		// consume unbounded memory while `response.text()` waits for EOF. GETs are
-		// intentionally not retried here: reconciliation is an operator action and
-		// should make one auditable read per endpoint.
+		// consume unbounded memory while `response.text()` waits for EOF. A GET is
+		// not retried here: one auditable read per call.
 		return await fetchJson<unknown>(url, {
 			method: "GET",
 			redirect: "error",
@@ -189,28 +147,11 @@ async function fetchNetcraftJson(
 	}
 }
 
-/**
- * Read a Netcraft submission and its URL list without making another report.
- * This is intentionally separate from the POST parser so an operator can
- * repair a durable unknown-external-state run after a response-schema drift.
- */
-export async function fetchNetcraftSubmissionStatus(params: {
-	uuid: string;
-	fetch?: FetchLike;
-}): Promise<NetcraftSubmissionStatus> {
-	const status = await fetchNetcraftSubmissionState(params);
-	const urls = parseSubmissionUrls(
-		await fetchNetcraftJson(params.fetch ?? fetch, netcraftSubmissionUrlsUrl(status.uuid), "submission-URLs"),
-	);
-	if (!urls) throw new Error("Netcraft submission-URLs response did not match the reviewed schema.");
-	return { ...status, urls };
-}
-
-/** Read a submission's review state alone; a mail submission has no URL list to read. */
+/** Read a submission's review state: one auditable GET, never another report. */
 export async function fetchNetcraftSubmissionState(params: {
 	uuid: string;
 	fetch?: FetchLike;
-}): Promise<Omit<NetcraftSubmissionStatus, "urls">> {
+}): Promise<NetcraftSubmissionState> {
 	const uuid = normalizeSubmissionId(params.uuid);
 	if (!uuid) throw new Error("Netcraft returned an invalid submission UUID.");
 	const status = parseSubmissionStatus(
