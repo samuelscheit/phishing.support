@@ -80,8 +80,6 @@ export const JOB_POLICY: Readonly<Record<AbuseJobType, JobPolicy>> = {
 	check_site_liveness: { lane: "liveness", supplementary: true },
 };
 
-const LIVENESS_TIMEOUT_MS = 5 * MINUTE;
-
 /** The claim filter of a lane: exactly the job types the policy puts in it. */
 export function laneFilter(lane: JobLane): JobClaimFilter {
 	return { jobTypes: (Object.keys(JOB_POLICY) as AbuseJobType[]).filter((type) => JOB_POLICY[type].lane === lane) };
@@ -90,10 +88,12 @@ export function laneFilter(lane: JobLane): JobClaimFilter {
 /** Jobs that may cross an external provider side-effect boundary. */
 export const isExternalJob = (job: AbuseJob): boolean => JOB_POLICY[job.jobType].lane === "external";
 
+export type LaneTimeouts = { control: number; external: number; sweep: number; liveness: number };
+
 /** The execution deadline of a job: its lane's, but never below its own minimum. */
-export function jobTimeoutMs(jobType: AbuseJobType, lanes: { control: number; external: number; sweep: number }): number {
+export function jobTimeoutMs(jobType: AbuseJobType, lanes: LaneTimeouts): number {
 	const { lane, minTimeoutMs = 0 } = JOB_POLICY[jobType];
-	const laneTimeout = lane === "control" ? lanes.control : lane === "sweep" ? lanes.sweep : lane === "liveness" ? LIVENESS_TIMEOUT_MS : lanes.external;
+	const laneTimeout = lane === "control" ? lanes.control : lane === "sweep" ? lanes.sweep : lane === "liveness" ? lanes.liveness : lanes.external;
 	return Math.max(laneTimeout, minTimeoutMs);
 }
 

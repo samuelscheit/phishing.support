@@ -146,8 +146,7 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 	});
 	try {
 		tabs = await VisitorTabs.start(browser, page, [
-			// Every request of a tab the site opens, from its first, and every file any tab downloads.
-			(tab) => network.attachSession(tab.targetId, tab.session),
+			// Every file any tab downloads.
 			(tab) => downloads.attach(tab),
 			...(params.tabSetup ? [params.tabSetup] : []),
 		]);

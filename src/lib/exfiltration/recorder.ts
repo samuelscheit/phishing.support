@@ -1,4 +1,4 @@
-import type { Browser, CDPSession, Target } from "rebrowser-puppeteer-core";
+import type { Browser, CDPSession } from "rebrowser-puppeteer-core";
 
 import { sendBeforeRun } from "../browser/cdp";
 import type { CapturedNetworkRequest } from "./types";
@@ -21,17 +21,9 @@ const NETWORK_TARGET_TYPES = new Set(["page", "iframe", "worker", "service_worke
  * never kept. Only the Network domain is used: enabling Runtime on a page
  * is what anti-bot kits detect, and a kit that detects us hides its payload.
  */
+const AUTO_ATTACH = { autoAttach: true, waitForDebuggerOnStart: true, flatten: true } as const;
+type AttachedEvent = { sessionId: string; targetInfo: { targetId: string; type: string } };
 const KEPT_REQUEST_HEADERS = new Set(["content-type", "origin", "referer", "user-agent", "x-requested-with"]);
-
-/**
- * The raw CDP target type. Puppeteer's `Target.type()` folds out-of-process
- * iframes and dedicated workers into `"other"`, which hid every cross-origin
- * kit frame (e.g. a loader page framing `stop.relizedog.com`) from the recorder.
- */
-function cdpTargetType(target: Target): string {
-	const info = (target as unknown as { _getTargetInfo?: () => { type?: string } })._getTargetInfo?.();
-	return info?.type ?? target.type();
-}
 
 /** Records outbound payloads from every page/worker target while the visiting agent drives the browser. */
 export class ExfiltrationNetworkRecorder {
@@ -39,16 +31,45 @@ export class ExfiltrationNetworkRecorder {
 	private readonly sessions = new Set<CDPSession>();
 	private readonly attachedTargets = new Set<string>();
 	private capturedBytes = 0;
-	private browser?: Browser;
 	private stopped = false;
-	private targetHandler?: (target: Target) => void;
 
+	/**
+	 * Auto-attaches to every target of the browser, and recursively to each
+	 * target's children (out-of-process frames, workers). Each target is held
+	 * until its Network domain is enabled, so even a first script that posts
+	 * immediately is recorded.
+	 */
 	async start(browser: Browser): Promise<void> {
-		this.browser = browser;
-		this.targetHandler = (target) => { void this.attach(target); };
-		browser.on("targetcreated", this.targetHandler);
-		browser.on("targetchanged", this.targetHandler);
-		await Promise.all(browser.targets().map((target) => this.attach(target)));
+		const root = await browser.target().createCDPSession();
+		this.sessions.add(root);
+		this.followChildren(root);
+		await root.send("Target.setAutoAttach", AUTO_ATTACH);
+	}
+
+	/** Attach to every child target the session reports, existing and future. */
+	private followChildren(session: CDPSession): void {
+		session.on("Target.attachedToTarget", (event: AttachedEvent) => {
+			const child = session.connection()?.session(event.sessionId);
+			if (child) this.adopt(child, event);
+		});
+	}
+
+	private adopt(session: CDPSession, { targetInfo }: AttachedEvent): void {
+		const release = () => { void sendBeforeRun(session, "Runtime.runIfWaitingForDebugger"); };
+		if (this.stopped || this.attachedTargets.has(targetInfo.targetId) || !NETWORK_TARGET_TYPES.has(targetInfo.type)) {
+			// Not recorded: let it run, and drop the session this recorder holds.
+			release();
+			void session.detach().catch(() => undefined);
+			return;
+		}
+		this.attachedTargets.add(targetInfo.targetId);
+		this.sessions.add(session);
+		this.record(session);
+		this.followChildren(session);
+		// Commands a held target answers only once it runs are not awaited; they take effect in order, before it runs.
+		void sendBeforeRun(session, "Network.enable", { maxPostDataSize: MAX_VALUE_BYTES });
+		void sendBeforeRun(session, "Target.setAutoAttach", AUTO_ATTACH);
+		release();
 	}
 
 	private push(request: CapturedNetworkRequest): boolean {
@@ -60,36 +81,6 @@ export class ExfiltrationNetworkRecorder {
 		this.capturedBytes += size;
 		this.requests.push(request);
 		return true;
-	}
-
-	private async attach(target: Target): Promise<void> {
-		const targetId = (target as unknown as { _targetId?: string })._targetId ?? `${target.type()}:${target.url()}`;
-		if (this.attachedTargets.has(targetId)) return;
-		if (!NETWORK_TARGET_TYPES.has(cdpTargetType(target))) return;
-		this.attachedTargets.add(targetId);
-		let session: CDPSession | undefined;
-		try {
-			session = await target.createCDPSession();
-			this.record(session);
-			await session.send("Network.enable", { maxPostDataSize: MAX_VALUE_BYTES });
-		} catch {
-			await session?.detach().catch(() => undefined);
-			this.attachedTargets.delete(targetId);
-			return;
-		}
-		this.sessions.add(session);
-	}
-
-	/**
-	 * Record a tab on a session its owner holds, typically a new tab before it
-	 * ran its first request: puppeteer reports such a target only once that
-	 * request is under way. The owner detaches the session.
-	 */
-	attachSession(targetId: string, session: CDPSession): void {
-		if (this.attachedTargets.has(targetId)) return;
-		this.attachedTargets.add(targetId);
-		this.record(session);
-		sendBeforeRun(session, "Network.enable", { maxPostDataSize: MAX_VALUE_BYTES });
 	}
 
 	private record(session: CDPSession): void {
@@ -157,10 +148,6 @@ export class ExfiltrationNetworkRecorder {
 
 	async stop(): Promise<CapturedNetworkRequest[]> {
 		this.stopped = true;
-		if (this.browser && this.targetHandler) {
-			this.browser.off("targetcreated", this.targetHandler);
-			this.browser.off("targetchanged", this.targetHandler);
-		}
 		await Promise.all([...this.sessions].map((session) => session.detach().catch(() => undefined)));
 		this.sessions.clear();
 		return structuredClone(this.requests);

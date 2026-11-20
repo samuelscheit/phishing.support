@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import puppeteer, { type Browser } from "rebrowser-puppeteer-core";
 
 import { ExfiltrationNetworkRecorder } from "./recorder";
+import type { CapturedNetworkRequest } from "./types";
 
 /*
  * Real-Chrome checks of the recorder's CDP attachment. Two origins are cross-site
@@ -35,6 +36,12 @@ function kitCanary(frame: string): string {
  * test gets a limit that covers the wait plus the setup around it.
  */
 const FIRST_RUN_TEST_TIMEOUT_MS = 15_000;
+
+/** Wait up to a bounded deadline for a recorded request, rather than a fixed sleep: slow frames under load pass, a lost send still fails. */
+async function waitForCapture(recorder: ExfiltrationNetworkRecorder, matches: (request: CapturedNetworkRequest) => boolean): Promise<void> {
+	const deadline = Date.now() + 10_000;
+	while (!recorder.snapshot().some(matches) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+}
 
 beforeAll(async () => {
 	if (!chromiumAvailable) return;
@@ -86,7 +93,7 @@ describe.skipIf(!chromiumAvailable)("exfiltration recorder against real Chrome",
 		await recorder.start(browser! as never);
 		// Drive the frame after the recorder attached, as the visiting agent does during a visit.
 		await frames[0]!.evaluate(() => (window as unknown as { sendCanary: () => Promise<unknown> }).sendCanary());
-		await new Promise((resolve) => setTimeout(resolve, 1_000));
+		await waitForCapture(recorder, (request) => request.postData === kitCanary("existing"));
 		const captured = await recorder.stop();
 		expect(captured).toEqual(expect.arrayContaining([
 			expect.objectContaining({ url: `${collectorOrigin}/collect`, method: "POST", postData: kitCanary("existing") }),
@@ -104,11 +111,12 @@ describe.skipIf(!chromiumAvailable)("exfiltration recorder against real Chrome",
 			frame.src = url;
 			document.body.appendChild(frame);
 		}, `${kitOrigin}/kit?frame=late`);
-		await new Promise((resolve) => setTimeout(resolve, 1_500));
+		const frameDeadline = Date.now() + 10_000;
+		while (!page.frames().some((frame) => frame.url().includes("frame=late")) && Date.now() < frameDeadline) await new Promise((resolve) => setTimeout(resolve, 100));
 		const kitFrame = page.frames().find((frame) => frame.url().includes("frame=late"));
 		expect(kitFrame).toBeDefined();
 		await kitFrame!.evaluate(() => (window as unknown as { sendCanary: () => Promise<unknown> }).sendCanary());
-		await new Promise((resolve) => setTimeout(resolve, 1_000));
+		await waitForCapture(recorder, (request) => request.postData === kitCanary("late"));
 		const captured = await recorder.stop();
 		expect(captured.some((request) => request.postData === kitCanary("late"))).toBeTrue();
 		await page.close();
@@ -130,11 +138,10 @@ describe.skipIf(!chromiumAvailable)("exfiltration recorder against real Chrome",
 		// Wait for the canary the frame sends, up to a bounded deadline, rather than a fixed
 		// sleep: a slow frame under load then passes, and a genuinely lost send still fails.
 		const expectedCanary = kitCanary("firstrun");
-		const canaryCaptured = () => recorder.snapshot().some((request) => request.postData === expectedCanary && request.url.includes("/collect"));
-		const deadline = Date.now() + 10_000;
-		while (!canaryCaptured() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+		const matchesCanary = (request: CapturedNetworkRequest) => request.postData === expectedCanary && request.url.includes("/collect");
+		await waitForCapture(recorder, matchesCanary);
 		const captured = await recorder.stop();
-		expect(captured.some((request) => request.postData === expectedCanary && request.url.includes("/collect"))).toBeTrue();
+		expect(captured.some(matchesCanary)).toBeTrue();
 		await page.close();
 	}, FIRST_RUN_TEST_TIMEOUT_MS);
 });

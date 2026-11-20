@@ -278,7 +278,6 @@ export async function executeProviderSubmission(params: {
 		let prepared: ProviderSubmissionPreflight;
 		try {
 			prepared = await provider.prepareExternalSubmission(context, verified);
-			throwIfAborted(params.signal);
 		} catch (error) {
 			// An explicit auth/session failure happens before the marker, so no
 			// complaint was filed; settle it for a person instead of retrying.
@@ -295,6 +294,8 @@ export async function executeProviderSubmission(params: {
 
 	let markerAcquired: boolean;
 	try {
+		// Once prepared, any failure or abort before the marker releases the preflight's browser/lease.
+		throwIfAborted(params.signal);
 		markerAcquired = await AbuseRepository.prepareProviderSubmission(run.id);
 	} catch (error) {
 		await disposePreflight(preflight);

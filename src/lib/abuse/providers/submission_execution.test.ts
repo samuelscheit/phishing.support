@@ -461,4 +461,24 @@ describe("provider submission execution boundary", () => {
 		const [run] = await AbuseRepository.listProviderRunsForReport(route.reportId);
 		expect(run).toMatchObject({ executionStatus: "failed", failureReason: "Provider session expired; sign in again." });
 	});
+
+	test("disposes a prepared preflight exactly once when the run is aborted right after it, and never marks", async () => {
+		const controller = new AbortController();
+		let disposed = 0;
+		let submitCalls = 0;
+		const provider = testProvider({
+			prepareExternalSubmission: async () => {
+				controller.abort(new Error("worker deadline"));
+				return { state: {}, dispose: async () => { disposed += 1; } };
+			},
+			submitPrepared: async () => { submitCalls += 1; return { submittedTargets: ["example.com"] }; },
+		});
+		const { route } = await createProviderRoute(provider);
+
+		await expect(executeProviderSubmission({ routeId: route.id, provider, signal: controller.signal })).rejects.toThrow("worker deadline");
+		expect(disposed).toBe(1);
+		expect(submitCalls).toBe(0);
+		const [run] = await AbuseRepository.listProviderRunsForReport(route.reportId);
+		expect(run).toMatchObject({ executionStatus: "starting" });
+	});
 });

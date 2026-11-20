@@ -28,6 +28,7 @@ const MAX_LANE_CONCURRENCY = 16;
 const DEFAULT_CONTROL_JOB_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_EXTERNAL_JOB_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_SWEEP_JOB_TIMEOUT_MS = 20 * 60_000;
+const LIVENESS_JOB_TIMEOUT_MS = 5 * 60_000;
 const MAX_JOB_TIMEOUT_MS = 60 * 60_000;
 
 class JobExecutionTimeoutError extends Error {
@@ -192,7 +193,7 @@ export class AbuseWorker {
 			});
 		}, Math.max(1_000, Math.floor(this.leaseMs / 3)));
 		try {
-			await this.runJobWithDeadline(job, controller, jobTimeoutMs(job.jobType, { control: this.controlJobTimeoutMs, external: this.externalJobTimeoutMs, sweep: this.sweepJobTimeoutMs }));
+			await this.runJobWithDeadline(job, controller, jobTimeoutMs(job.jobType, { control: this.controlJobTimeoutMs, external: this.externalJobTimeoutMs, sweep: this.sweepJobTimeoutMs, liveness: LIVENESS_JOB_TIMEOUT_MS }));
 			await AbuseRepository.completeJob(job.id, this.owner);
 		} catch (error) {
 			await this.settleFailedJob(job, error);
