@@ -40,7 +40,7 @@
         "@zip.js/zip.js": "2.24.0",
         "asn1js": "3.1.0",
         "axios": "1.20.0",
-        "browser-fabric": "github:samuelscheit/browser#b4cb2ba8ae81091187a91485de039a33f193eb75",
+        "browser-fabric": "github:samuelscheit/browser#dd908daf21e88a8d2c9e59ee045abc323895634e",
         "class-variance-authority": "0.7.1",
         "clsx": "2.1.1",
         "cmdk": "1.1.1",
@@ -524,7 +524,7 @@
 
     "brace-expansion": ["brace-expansion@5.0.12", "", { "dependencies": { "balanced-match": "^4.0.2" } }, "sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ=="],
 
-    "browser-fabric": ["browser-fabric@github:samuelscheit/browser#b4cb2ba", { "dependencies": { "@types/pg": "8.23.1", "pg": "8.23.0", "ws": "8.21.3" } }, "samuelscheit-browser-b4cb2ba", "sha512-keT5dS1SyAFHhkZb37nrPXHNzcp5lat7QFsfhylAkVXClJj8vXUvNNpcae9T6+Abo4XPHg0GjHuV4LL6pEpVDg=="],
+    "browser-fabric": ["browser-fabric@github:samuelscheit/browser#dd908da", { "dependencies": { "@types/pg": "8.23.1", "pg": "8.23.0", "ws": "8.21.3" } }, "samuelscheit-browser-dd908da", "sha512-2+p35QvxgYA0HBriMBc2mQzJ6dVAy5DgpBlEuQMxpFW0wA3k4COTQpOqidysFvpMgtB0iA0DISq/o4hfVH1T1w=="],
 
     "buffer-equal-constant-time": ["buffer-equal-constant-time@1.0.1", "", {}, "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA=="],
 
