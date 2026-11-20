@@ -6,6 +6,7 @@ import { abuseEmailCaseUrl } from "../../mail/draft";
 import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
 import { routeContext } from "../../worker/shared";
 import { providerDefinitionMatchesPin } from "../definition";
+import { emailOriginOf } from "../email_origin";
 import type {
 	ProviderSubmissionContext,
 	ProviderSubmissionPreparation,
@@ -56,6 +57,13 @@ async function openReportingPage(): Promise<GoogleCloudFormSession> {
 	}
 }
 
+/** The report's inputs; an IP target that sent a phishing email also carries that email's origin. */
+async function reportInputsFor(routeData: Awaited<ReturnType<typeof routeContext>>) {
+	const { report, target, evidenceArtifacts } = routeData;
+	const emailOrigin = target.observedUrls.length === 0 ? await emailOriginOf({ target, evidenceArtifacts }) : undefined;
+	return { target: target.normalizedTarget, observedUrls: target.observedUrls, ...reportInputs(report), ...(emailOrigin ? { emailOrigin } : {}) };
+}
+
 function reportInputs(report: { description: string; allegationCategory: string; createdAt: Date; submissionId: bigint | null; legalBrandUrl: string | null }) {
 	const caseUrl = abuseEmailCaseUrl(report.submissionId);
 	return {
@@ -69,15 +77,17 @@ function reportInputs(report: { description: string; allegationCategory: string;
 
 /** Check the route and build the durable draft before any provider call. */
 export async function prepareGoogleCloudSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation> {
-	const { route, report, target } = await routeContext(context.routeId);
+	const routeData = await routeContext(context.routeId);
+	const { route, target } = routeData;
 	if (route.routeType !== "provider_submission" || route.providerRegistryKey !== GOOGLE_CLOUD_PROVIDER.key || target.targetType === "email") {
 		return { outcome: "insufficient_evidence", reason: "google_cloud_requires_a_web_target" };
 	}
 	if (!providerDefinitionMatchesPin(GOOGLE_CLOUD_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)) {
 		return { outcome: "insufficient_evidence", reason: "google_cloud_provider_definition_pin_mismatch" };
 	}
-	if (target.observedUrls.length === 0) return { outcome: "insufficient_evidence", reason: "google_cloud_requires_an_observed_url" };
-	const payload = buildGoogleCloudSubmissionPayload({ target: target.normalizedTarget, observedUrls: target.observedUrls, ...reportInputs(report) });
+	const inputs = await reportInputsFor(routeData);
+	if (target.observedUrls.length === 0 && !inputs.emailOrigin) return { outcome: "insufficient_evidence", reason: "google_cloud_requires_an_observed_url" };
+	const payload = buildGoogleCloudSubmissionPayload(inputs);
 	if (!payload) return { outcome: "insufficient_evidence", reason: "google_cloud_report_payload_invalid" };
 	return { outcome: "ready", payload };
 }
@@ -214,13 +224,14 @@ export async function submitGoogleCloudSubmission(
 ): Promise<ProviderSubmissionSuccess> {
 	const payload = storedGoogleCloudSubmissionPayload(context.payload);
 	if (!payload) throw new Error("The persisted Google Cloud submission payload is malformed.");
-	const { route, report, target } = await routeContext(context.routeId);
+	const routeData = await routeContext(context.routeId);
+	const { route, target } = routeData;
 	if (route.routeType !== "provider_submission" || route.providerRegistryKey !== GOOGLE_CLOUD_PROVIDER.key
 		|| !providerDefinitionMatchesPin(GOOGLE_CLOUD_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)
 		|| target.normalizedTarget !== payload.target.normalizedTarget) {
 		throw new Error("The persisted Google Cloud payload no longer matches its route.");
 	}
-	const expected = buildGoogleCloudSubmissionPayload({ target: target.normalizedTarget, observedUrls: target.observedUrls, ...reportInputs(report) });
+	const expected = buildGoogleCloudSubmissionPayload(await reportInputsFor(routeData));
 	if (!expected || JSON.stringify(expected) !== JSON.stringify(payload)) {
 		throw new Error("The persisted Google Cloud payload no longer matches the report evidence.");
 	}

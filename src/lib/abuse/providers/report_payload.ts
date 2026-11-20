@@ -118,6 +118,8 @@ type ProviderReportNarrativeInput = {
 	description: string;
 	legalBrandUrl?: string;
 	legalBrandLabel?: string;
+	/** What the evidence is: a captured page (default) or an email. */
+	source?: "page" | "email";
 	maximumLength: number;
 };
 
@@ -153,14 +155,25 @@ function safeNarrativeTarget(value: string | undefined, maximumCharacters = 255)
 	return target && target.length <= maximumCharacters ? target : "the reported target";
 }
 
+/**
+ * A brand field that says there is no brand: "None clearly stated", "Not
+ * identified", "Unknown", "N/A", "Generic", "Unbranded" and their German,
+ * French, Spanish, Italian and Dutch equivalents.
+ */
+const NO_BRAND = /^(?:none|no|not|nothing(?=\s+(?:identified|specific|clear|stated|named|found)|\s*$)|nil|n[./]?a|unknown|unclear|unspecified|unidentified|undetermined|undefined|generic|unbranded|without|keine?[nmrs]?|nicht|unbekannt|aucune?|pas|inconnue?|ninguna?|sin|desconocida?|nessuna?|nulla|sconosciuta?|niet|geen|onbekend)(?![\p{L}\p{N}])/iu;
+
 /** Extract only a short display label; never forward a model-generated URL or instruction. */
 export function extractedBrandName(description: string): string | undefined {
 	const genericLabels = new Set(["brand", "content", "page", "site", "text", "visual", "service", "website"]);
 	for (const pattern of BRAND_PATTERNS) {
 		const match = description.match(pattern);
 		if (!match?.[1]) continue;
-		const candidate = match[1]
-			.replace(/[*_`~]/g, "")
+		// The value is the field's first sentence; what follows is commentary.
+		const sentence = match[1].replace(/[*_`~]/g, "").split(/[.!?]+(?:\s|$)/)[0]!.trim();
+		// A field that says there is no brand ends the search: later patterns
+		// would grab unrelated words from the text after it.
+		if (NO_BRAND.test(sentence.replace(/^[\s"'“”‘’«»(\[-]+/, ""))) return undefined;
+		const candidate = sentence
 			.replace(/https?:\/\/\S+/gi, "")
 			.replace(/^the\s+/i, "")
 			.replace(/\s+/g, " ")
@@ -196,7 +209,7 @@ export function allegationLabel(allegationCategory: string | undefined): string 
 	return allegationCategory === "malware" ? "malware distribution" : "phishing";
 }
 
-function profileCopy(provider: ProviderReportProfile, target: string, observedUrlCount: number, allegation: string): { lead: string; action: string; urlContext: string } {
+function profileCopy(provider: ProviderReportProfile, target: string, observedUrlCount: number, allegation: string, source: "page" | "email"): { lead: string; action: string; urlContext: string } {
 	const urlContext = observedUrlCount === 1
 		? "The submitted form identifies one observed URL."
 		: observedUrlCount > 1
@@ -211,7 +224,9 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 			};
 		case "google_cloud":
 			return {
-				lead: `A ${allegation} page hosted on Google infrastructure at ${target} is being reported.`,
+				lead: source === "email"
+					? `A ${allegation} email sent from Google infrastructure at ${target} is being reported.`
+					: `A ${allegation} page hosted on Google infrastructure at ${target} is being reported.`,
 				action: "Please investigate the content and take action under the Google Cloud Acceptable Use Policy.",
 				urlContext,
 			};
@@ -366,7 +381,8 @@ export function buildProviderReportNarrative(params: ProviderReportNarrativeInpu
 
 	const provider = params.provider ?? "generic";
 	const target = safeNarrativeTarget(params.target, params.maximumLength <= 500 ? 240 : 255);
-	const copy = profileCopy(provider, target, params.observedUrls?.length ?? 0, allegationLabel(params.allegationCategory));
+	const source = params.source ?? "page";
+	const copy = profileCopy(provider, target, params.observedUrls?.length ?? 0, allegationLabel(params.allegationCategory), source);
 	if (params.allegationCategory === "malware") {
 		// A malware report's proof is its facts (the command, payload host, hash,
 		// and verdict), not phishing keywords; it names no impersonated brand.
@@ -381,8 +397,8 @@ export function buildProviderReportNarrative(params: ProviderReportNarrativeInpu
 	const indicators = detectedIndicators(description);
 	const selectedIndicators = params.maximumLength <= 500 ? indicators.slice(0, 2) : indicators;
 	const facts = brand
-		? `The captured page appears to impersonate ${brand} and contains ${joinIndicators(selectedIndicators)}.`
-		: `The captured evidence indicates ${joinIndicators(selectedIndicators)}.`;
+		? `The ${source === "email" ? "email" : "captured page"} appears to impersonate ${brand} and contains ${joinIndicators(selectedIndicators)}.`
+		: `The ${source === "email" ? "email" : "captured evidence"} indicates ${joinIndicators(selectedIndicators)}.`;
 	const referenceLabel = compactProviderText(params.legalBrandLabel ?? "Impersonated brand") || "Impersonated brand";
 	const reference = legalBrandUrl ? `${referenceLabel}: ${conciseProviderUrl(legalBrandUrl)}.` : "";
 

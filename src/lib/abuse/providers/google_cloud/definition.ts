@@ -31,7 +31,7 @@ export type GoogleCloudProviderDefinition = ProviderSubmissionDefinition & {
 const definitionWithoutHash = {
 	key: "google_cloud",
 	displayName: "Google Cloud Abuse Report",
-	version: "2026-10-31.2",
+	version: "2026-11-20.1",
 	exactMailboxes: ["network-abuse@google.com", "google-cloud-compliance@google.com"],
 	supplemental: false,
 	reportPageUrl: "https://support.google.com/code/contact/cloud_platform_report?hl=en",

@@ -1,7 +1,8 @@
 import { isIP } from "node:net";
 
-import { domainMatchesOrIsSubdomain, normalizePublicHost } from "../../security";
+import { domainMatchesOrIsSubdomain, normalizePublicHost, normalizePublicHttpUrl } from "../../security";
 
+import type { EmailOrigin } from "../email_origin";
 import { buildProviderReportNarrative, normalizeObservedUrlForTarget, truncateProviderText } from "../report_payload";
 import { GOOGLE_CLOUD_PROVIDER, GOOGLE_CLOUD_SERVICES, type GoogleCloudService } from "./definition";
 import { asRecord } from "../../../values";
@@ -16,6 +17,13 @@ export type GoogleCloudSubmissionPayload = {
 	target: {
 		normalizedTarget: string;
 		observedUrls: string[];
+	};
+	/** Set when the target is the IP that sent a phishing email, which has no observed URL of its own. */
+	emailOrigin?: {
+		/** The email's links, which are the abusive URLs. */
+		links: string[];
+		/** The UTC time the sending hop's Received header states. */
+		receivedAt?: string;
 	};
 	report: {
 		service: GoogleCloudService;
@@ -50,12 +58,7 @@ export function googleCloudAbuseDate(capturedAt: Date): string {
 	return `${month}/${day}/${capturedAt.getUTCFullYear()}`;
 }
 
-/**
- * Google asks for every abusive URL or IP address in the details field, and
- * for the date, time and time zone of the abuse. The URLs lead, so they
- * survive the 1,000-character limit; the narrative fills what remains.
- */
-export function makeGoogleCloudAbuseDetails(params: {
+type GoogleCloudReportInput = {
 	target?: string;
 	observedUrls: readonly string[];
 	description: string;
@@ -63,64 +66,129 @@ export function makeGoogleCloudAbuseDetails(params: {
 	capturedAt: Date;
 	caseUrl?: string;
 	legalBrandUrl?: string;
-}): string | undefined {
-	if (!params.target || params.observedUrls.length === 0) return undefined;
+	/** The email the target sent, when the target is an email's sending IP rather than a web host. */
+	emailOrigin?: EmailOrigin;
+};
+
+/** Narrative room the email-origin details keep free after the IP, the time and as many links as fit. */
+const EMAIL_NARRATIVE_RESERVE = 250;
+const NARRATIVE_MINIMUM = 80;
+
+function utcStamp(date: Date): string {
+	return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function narrativeFor(params: GoogleCloudReportInput, room: number, source: "page" | "email"): string | undefined {
+	if (room <= NARRATIVE_MINIMUM || !params.target) return undefined;
+	return buildProviderReportNarrative({
+		provider: "google_cloud",
+		target: params.target,
+		observedUrls: params.emailOrigin?.links ?? params.observedUrls,
+		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
+		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
+		source,
+		maximumLength: room,
+	});
+}
+
+/**
+ * An IP that sent a phishing email has no URL of its own: the form gets the
+ * address, the Received header that proves the hop and its time, the email's
+ * links and the case page, then the narrative.
+ */
+function makeEmailOriginAbuseDetails(params: GoogleCloudReportInput, origin: EmailOrigin): string | undefined {
+	const target = params.target;
+	if (!target || !isIP(target)) return undefined;
+	const maximum = GOOGLE_CLOUD_PROVIDER.abuseDetailsMaximumLength;
+	const head = [
+		`Abusive IP address: ${target} (first external Received hop of a phishing email sent from it)`,
+		origin.received ? `Received header: ${truncateProviderText(origin.received.line, 300)}` : undefined,
+	];
+	const tail = [
+		`Date and time of the abuse: ${utcStamp(origin.received?.at ?? params.capturedAt)} (UTC).`,
+		params.caseUrl ? `Evidence (email source, screenshot, analysis): ${params.caseUrl}` : undefined,
+	];
+	const fixed = [...head, ...tail].filter((line): line is string => Boolean(line));
+	const fit = (reserve: number) => {
+		let length = fixed.join("\n").length + "\nPhishing URLs in the email:".length;
+		const lines: string[] = [];
+		for (const link of origin.links) {
+			const next = length + `\n- ${link}`.length;
+			// A link too long for what is left is skipped; a shorter one may still fit.
+			if (next > maximum - reserve) continue;
+			length = next;
+			lines.push(`- ${link}`);
+		}
+		return lines;
+	};
+	const links = fit(EMAIL_NARRATIVE_RESERVE);
+	if (links.length === 0) links.push(...fit(0));
+	const block = [
+		...head,
+		links.length ? "Phishing URLs in the email:" : undefined,
+		...links,
+		...tail,
+	].filter((line): line is string => Boolean(line)).join("\n");
+	const narrative = narrativeFor(params, maximum - block.length - 2, "email");
+	if (params.legalBrandUrl !== undefined && maximum - block.length - 2 > NARRATIVE_MINIMUM && !narrative) return undefined;
+	const details = [block, narrative].filter(Boolean).join("\n\n");
+	return details.length <= maximum ? details : truncateProviderText(block, maximum);
+}
+
+/**
+ * Google asks for every abusive URL or IP address in the details field, and
+ * for the date, time and time zone of the abuse. The URLs lead, so they
+ * survive the 1,000-character limit; the narrative fills what remains.
+ */
+export function makeGoogleCloudAbuseDetails(params: GoogleCloudReportInput): string | undefined {
+	if (!params.target) return undefined;
+	if (params.emailOrigin) return makeEmailOriginAbuseDetails(params, params.emailOrigin);
+	if (params.observedUrls.length === 0) return undefined;
 	const maximum = GOOGLE_CLOUD_PROVIDER.abuseDetailsMaximumLength;
 	const urls = `Abusive URLs:\n${params.observedUrls.map((url) => `- ${url}`).join("\n")}`;
-	const observed = `Observed: ${params.capturedAt.toISOString().replace(/\.\d{3}Z$/, "Z")} (UTC).`;
+	const observed = `Observed: ${utcStamp(params.capturedAt)} (UTC).`;
 	const evidence = params.caseUrl ? `Evidence (screenshot, archived page, analysis): ${params.caseUrl}` : "";
 	const fixed = [urls, observed, evidence].filter(Boolean).join("\n");
 	const narrativeRoom = maximum - fixed.length - 2;
-	const narrative = narrativeRoom > 80
-		? buildProviderReportNarrative({
-			provider: "google_cloud",
-			target: params.target,
-			observedUrls: params.observedUrls,
-			description: params.description,
-			...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
-			...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
-			maximumLength: narrativeRoom,
-		})
-		: undefined;
-	if (params.legalBrandUrl !== undefined && narrativeRoom > 80 && !narrative) return undefined;
+	const narrative = narrativeFor(params, narrativeRoom, "page");
+	if (params.legalBrandUrl !== undefined && narrativeRoom > NARRATIVE_MINIMUM && !narrative) return undefined;
 	const details = [narrative, fixed].filter(Boolean).join("\n\n");
 	return details.length <= maximum ? details : truncateProviderText(urls, maximum);
 }
 
 /** Build the immutable form draft before the browser boundary. */
-export function buildGoogleCloudSubmissionPayload(params: {
-	target: string;
-	observedUrls: readonly string[];
-	description: string;
-	allegationCategory?: string;
-	capturedAt: Date;
-	caseUrl?: string;
-	legalBrandUrl?: string;
-}): GoogleCloudSubmissionPayload | undefined {
+export function buildGoogleCloudSubmissionPayload(params: GoogleCloudReportInput & { target: string }): GoogleCloudSubmissionPayload | undefined {
 	const target = normalizePublicHost(params.target);
 	if (!target) return undefined;
 	const observedUrls = [...new Set(params.observedUrls.map((url) => normalizeObservedUrlForTarget(url, target)).filter((url): url is string => Boolean(url)))];
-	const abuseDetails = makeGoogleCloudAbuseDetails({
-		target,
-		observedUrls,
-		description: params.description,
-		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
-		capturedAt: params.capturedAt,
-		...(params.caseUrl ? { caseUrl: params.caseUrl } : {}),
-		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
-	});
-	if (observedUrls.length === 0 || !abuseDetails) return undefined;
+	const emailOrigin = params.emailOrigin && isIP(target) ? params.emailOrigin : undefined;
+	if (params.emailOrigin && !emailOrigin) return undefined;
+	if (observedUrls.length === 0 && !emailOrigin) return undefined;
+	const abuseDetails = makeGoogleCloudAbuseDetails({ ...params, target, observedUrls, ...(emailOrigin ? { emailOrigin } : {}) });
+	if (!abuseDetails) return undefined;
 	return {
 		adapter: "google_cloud_abuse_report_v1",
 		providerNarrativeVersion: 1,
 		definition: { version: GOOGLE_CLOUD_PROVIDER.version, contentHash: GOOGLE_CLOUD_PROVIDER.contentHash },
 		target: { normalizedTarget: target, observedUrls },
+		...(emailOrigin ? { emailOrigin: { links: emailOrigin.links, ...(emailOrigin.received ? { receivedAt: emailOrigin.received.at.toISOString() } : {}) } } : {}),
 		report: {
 			service: googleCloudServiceForTarget(target),
-			abuseDate: googleCloudAbuseDate(params.capturedAt),
+			abuseDate: googleCloudAbuseDate(emailOrigin?.received?.at ?? params.capturedAt),
 			abuseDetails,
 		},
 	};
+}
+
+function storedEmailOrigin(value: unknown, target: string): GoogleCloudSubmissionPayload["emailOrigin"] {
+	const origin = asRecord(value);
+	if (!origin || !isIP(target) || !Array.isArray(origin.links)) return undefined;
+	const links = origin.links as unknown[];
+	if (links.some((link) => typeof link !== "string" || normalizePublicHttpUrl(link) !== link)) return undefined;
+	const receivedAt = origin.receivedAt;
+	if (receivedAt !== undefined && (typeof receivedAt !== "string" || !Number.isFinite(Date.parse(receivedAt)) || new Date(receivedAt).toISOString() !== receivedAt)) return undefined;
+	return { links: links as string[], ...(typeof receivedAt === "string" ? { receivedAt } : {}) };
 }
 
 /** Read only an immutable draft produced by this provider. */
@@ -131,7 +199,7 @@ export function storedGoogleCloudSubmissionPayload(value: unknown): GoogleCloudS
 	const report = payload && asRecord(payload.report);
 	if (!payload || payload.adapter !== "google_cloud_abuse_report_v1" || payload.providerNarrativeVersion !== 1
 		|| !definition || definition.version !== GOOGLE_CLOUD_PROVIDER.version || definition.contentHash !== GOOGLE_CLOUD_PROVIDER.contentHash
-		|| !target || typeof target.normalizedTarget !== "string" || !Array.isArray(target.observedUrls) || target.observedUrls.length === 0
+		|| !target || typeof target.normalizedTarget !== "string" || !Array.isArray(target.observedUrls)
 		|| !report || !GOOGLE_CLOUD_SERVICES.includes(report.service as GoogleCloudService)
 		|| typeof report.abuseDate !== "string" || !/^\d{2}\/\d{2}\/\d{4}$/.test(report.abuseDate)
 		|| typeof report.abuseDetails !== "string" || report.abuseDetails.trim().length === 0
@@ -140,6 +208,10 @@ export function storedGoogleCloudSubmissionPayload(value: unknown): GoogleCloudS
 	}
 	const normalizedTarget = normalizePublicHost(target.normalizedTarget);
 	if (!normalizedTarget || normalizedTarget !== target.normalizedTarget) return undefined;
+	const emailOrigin = storedEmailOrigin(payload.emailOrigin, normalizedTarget);
+	if (payload.emailOrigin !== undefined && !emailOrigin) return undefined;
+	// A draft names observed URLs, or is the origin of an email; never neither.
+	if (target.observedUrls.length === 0 && !emailOrigin) return undefined;
 	const stored = target.observedUrls as unknown[];
 	const observedUrls = stored.map((url) => typeof url === "string" ? normalizeObservedUrlForTarget(url, normalizedTarget) : undefined);
 	if (observedUrls.some((url, index) => !url || url !== stored[index])) return undefined;
@@ -149,6 +221,7 @@ export function storedGoogleCloudSubmissionPayload(value: unknown): GoogleCloudS
 		providerNarrativeVersion: 1,
 		definition: { version: GOOGLE_CLOUD_PROVIDER.version, contentHash: GOOGLE_CLOUD_PROVIDER.contentHash },
 		target: { normalizedTarget, observedUrls: observedUrls as string[] },
+		...(emailOrigin ? { emailOrigin } : {}),
 		report: { service: report.service as GoogleCloudService, abuseDate: report.abuseDate, abuseDetails: report.abuseDetails },
 	};
 }

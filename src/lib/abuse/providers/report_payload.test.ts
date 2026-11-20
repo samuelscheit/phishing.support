@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
 	buildProviderReportNarrative,
+	extractedBrandName,
 	normalizeObservedUrlForTarget,
 } from "./report_payload";
 import { normalizePublicHttpUrl } from "../security";
@@ -116,5 +117,92 @@ The page uses TikTok branding, a fake login popup, discounted Coin packages, and
 			legalBrandUrl: "javascript:alert(1)",
 			maximumLength: 1_000,
 		})).toBeUndefined();
+	});
+});
+
+const NARRATIVE = { provider: "google_cloud", target: "35.237.61.31", observedUrls: [], maximumLength: 1_000 } as const;
+const brandOf = (description: string) => extractedBrandName(description);
+
+describe("the impersonated brand extracted from an analysis", () => {
+	const production = [
+		"- **Claimed brand:** None clearly stated. “Memory Bank,” “Security Billing Center,” and “Privacy Protection Pro” are generic/inconsistent names—not a real, identified antivirus vendor.",
+		"- The email asks for a payment to renew an antivirus subscription.",
+	].join("\n");
+
+	test("a brand field that says there is no brand yields none, not the text after it", () => {
+		expect(brandOf(production)).toBeUndefined();
+		const narrative = buildProviderReportNarrative({ ...NARRATIVE, description: production, source: "email" });
+		expect(narrative).not.toContain("None clearly stated");
+		expect(narrative).not.toContain("Memory Bank");
+		expect(narrative).not.toContain("impersonate");
+	});
+
+	test.each([
+		"- **Brand:** None",
+		"Brand: None identified",
+		"**Impersonated brand:** Not stated",
+		"Impersonated brand: Not identified.",
+		"Claimed brand: No clear or specific brand.",
+		"Claimed brand: No specific brand is named; the sender uses generic wording",
+		"Brand: Unknown",
+		"Brand: unknown/unclear",
+		"Brand: N/A",
+		"Brand: n.a. — generic template",
+		"Brand: Generic (no real company)",
+		"Brand: Unbranded",
+		"Brand: Nothing identified",
+		"Brand: nothing",
+		"Brand: unspecified",
+		"Target brand: Not applicable",
+		"Brand: “None”",
+		"Brand: (none)",
+		"Marke: Keine erkennbare Marke",
+		"Marke: Nicht angegeben",
+		"Marque : Aucune marque identifiée",
+		"Brand: Ninguna",
+		"Brand: Nessuna",
+		"Brand: Geen",
+		"- **Service:** None. The page lists impersonating nobody in particular and impersonates PayPal later",
+	])("%s has no brand", (line) => {
+		expect(brandOf(line)).toBeUndefined();
+	});
+
+	test.each([
+		["- **Brand:** TikTok", "TikTok"],
+		["- **Claimed brand:** Microsoft Outlook. The domain is unrelated to Microsoft.", "Microsoft Outlook"],
+		["Impersonated brand: PayPal Holdings, Inc. is a payment provider", "PayPal Holdings Inc"],
+		["Likely impersonated brand: **Norton LifeLock** — phishing lure", "Norton LifeLock"],
+		["Brand: Nokia", "Nokia"],
+		["Brand: Notion", "Notion"],
+		["Brand: Nothing Phone", "Nothing Phone"],
+		["Brand: Amazon.com", "Amazon.com"],
+		["Target brand: Deutsche Bank!", "Deutsche Bank"],
+		["The page impersonates Commerzbank. It asks for a TAN.", "Commerzbank"],
+		["Brand: “Sparkasse” (savings bank)", "Sparkasse (savings bank)"],
+		["Brand: Unilever", "Unilever"],
+		["Brand: Genericode Software", "Genericode Software"],
+	])("%s is read as %s", (line, expected) => {
+		expect(brandOf(line)).toBe(expected);
+	});
+
+	test("a negated labeled brand is not rescued by a later, unrelated impersonation sentence", () => {
+		expect(brandOf("Brand: None\nThe mail impersonates a vendor that cannot be named.")).toBeUndefined();
+	});
+
+	test("a real brand stays the impersonation claim, whatever else follows", () => {
+		const narrative = buildProviderReportNarrative({ ...NARRATIVE, description: "- **Claimed brand:** Norton. Credential harvesting login page.", source: "page" });
+		expect(narrative).toContain("The captured page appears to impersonate Norton and contains");
+	});
+
+	test("the narrative names the email, not a page, when the evidence is an email", () => {
+		const description = "Impersonated brand: Norton. The email asks for payment.";
+		const email = buildProviderReportNarrative({ ...NARRATIVE, description, source: "email" });
+		expect(email).toContain("A phishing email sent from Google infrastructure at 35.237.61.31");
+		expect(email).toContain("The email appears to impersonate Norton");
+		expect(email).not.toContain("captured page");
+		expect(buildProviderReportNarrative({ ...NARRATIVE, description: "The email asks for payment.", source: "email" })).toContain("The email indicates a payment");
+		const page = buildProviderReportNarrative({ ...NARRATIVE, target: "sites.google.com", description });
+		expect(page).toContain("A phishing page hosted on Google infrastructure at sites.google.com");
+		expect(page).toContain("The captured page appears to impersonate Norton");
 	});
 });
