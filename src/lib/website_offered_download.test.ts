@@ -8,7 +8,8 @@ import { useTemporaryDatabase } from "./db/test_helpers";
 import { websiteSubmissionDedupeKey } from "./submissions/website";
 import { capturedDocumentContent } from "./website_archive/text";
 import type { WebsiteArchiveResult, WebsitePageSession, WebsiteVisitParams } from "./website_archive/types";
-import { analyzeWebsite, type WebsiteAnalysisDependencies } from "./website_ai";
+import { analyzeWebsite } from "./website_ai";
+import type { WebsiteAnalysisDependencies } from "./website_analysis_types";
 import { scriptedVisitSession, type ScriptedVisit } from "./site_visit/test_helpers";
 
 useTemporaryDatabase();

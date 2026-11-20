@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { buildProviderReportNarrative } from "./abuse/providers/report_payload";
-import { reportableWebsiteHop, websiteSiteAssessments } from "./website_ai";
+import { reportableWebsiteHop, websiteSiteAssessments } from "./website_report_hops";
 import { buildWebsiteAnalysisInput } from "./website_narrative";
 import {
 	buildWebsiteClassificationInput,
