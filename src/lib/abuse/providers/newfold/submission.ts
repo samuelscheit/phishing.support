@@ -1,5 +1,4 @@
-import { setRecaptchaResponse, type BrowserFormField, type BrowserFormFile, type BrowserFormScripting, type BrowserFormSession } from "../kit/browser_form";
-import { captchaCredentialsProblem, solveRecaptchaV2 } from "../kit/captcha";
+import type { BrowserFormField, BrowserFormFile, BrowserFormScripting, BrowserFormSession } from "../kit/browser_form";
 import { createDraft, type VerifiedOf, reportInputOf, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { formOpener, preparedState, withPreflight } from "../kit/session";
@@ -25,17 +24,13 @@ type FormSession = BrowserFormSession & BrowserFormScripting;
 export type NewfoldDependencies = RouteDeps & {
 	/** The browser on the form with Cloudflare's check passed; tests inject a fake. */
 	openForm?: (signal: AbortSignal | undefined) => Promise<FormSession>;
-	/** A solved reCAPTCHA v2 token for the form's page; defaults to Death by Captcha. */
-	solveCaptcha?: (signal: AbortSignal | undefined) => Promise<string>;
-	/** Whether the captcha service can be paid at all; defaults to the DEATHBYCAPTCHA_* credentials being set. */
-	hasCaptchaCredentials?: () => boolean;
 	getArtifact?: EvidenceDependencies["getArtifact"];
 };
 
 /** What the preflight leaves for the one request after the marker. */
 export type NewfoldPreflightState = {
 	session: FormSession;
-	/** The solved reCAPTCHA v2 token, already in the page's `g-recaptcha-response` textarea. */
+	/** The reCAPTCHA v2 token the browser's solver passed, read from the page's `g-recaptcha-response` field. */
 	token: string;
 	file: BrowserFormFile | undefined;
 };
@@ -51,31 +46,39 @@ export const newfoldDraft = createDraft({
 	targetOf: (payload) => payload.target.domain,
 });
 
-/** Solve the form's reCAPTCHA v2 checkbox (datacenter egress gets the image challenge, so no widget click is tried). */
-export const solveNewfoldCaptcha = (signal: AbortSignal | undefined) => solveRecaptchaV2(PROVIDER.captcha, PROVIDER.captcha.pageUrl, signal);
+/**
+ * Runs in the page: accept OneTrust's cookie banner and hide its container
+ * for good (it can come back late), so it never covers the reCAPTCHA widget
+ * the solver clicks. Whether there was a banner to accept.
+ */
+function dismissCookieBanner(banner: { accept: string; container: string }): boolean {
+	const accept = document.querySelector(banner.accept) as HTMLElement | null;
+	accept?.click();
+	const style = document.createElement("style");
+	style.textContent = `${banner.container} { display: none !important; }`;
+	document.head.append(style);
+	return accept !== null;
+}
 
 /**
  * Before the marker: open the form past Cloudflare's check, check the page
- * still renders the pinned hidden fields, solve the captcha and put its token
- * into the page. None of it files a report, so every failure is a safe retry
- * (the browser is closed first). Without captcha credentials nothing is
- * opened and a person is asked.
+ * still renders the pinned hidden fields, and wait for the browser's solver
+ * to pass the reCAPTCHA (datacenter egress gets the image grid) and read its
+ * token. None of it files a report, so every failure is a safe retry (the
+ * browser is closed first).
  */
 export async function prepareNewfoldExternalSubmission(context: ProviderSubmissionContext, { payload, data }: VerifiedOf<typeof newfoldDraft>, dependencies: NewfoldDependencies = {}): Promise<ProviderSubmissionPreflight> {
 	const file = payload.evidence
 		? (await evidenceFileOf(NEWFOLD_EVIDENCE_CONTRACT, "Newfold", payload.evidence, data, dependencies)).file
 		: undefined;
-	if (!(dependencies.hasCaptchaCredentials ?? (() => captchaCredentialsProblem() === undefined))()) {
-		throw new ProviderSubmissionNeedsHumanError("Newfold's abuse form needs a solved reCAPTCHA and DEATHBYCAPTCHA_USERNAME/DEATHBYCAPTCHA_PASSWORD are not set; nothing was filed.");
-	}
 	return withPreflight(() => (dependencies.openForm ?? formOpener(PROVIDER, "newfold-report", { url: PROVIDER.formUrl, formSelector: PROVIDER.formSelector }))(context.signal), async (session): Promise<NewfoldPreflightState> => {
 		const rendered = await session.readFormFields(PROVIDER.hiddenFieldPattern);
 		for (const [name, value] of PROVIDER.hiddenFields) {
 			if (rendered.find(([field]) => field === name)?.[1] !== value) throw new Error(`Newfold's form no longer renders ${name}=${value}.`);
 		}
-		// Last, so the token (valid for about two minutes) is fresh when the request goes out.
-		const token = await (dependencies.solveCaptcha ?? solveNewfoldCaptcha)(context.signal);
-		await setRecaptchaResponse(session, token, PROVIDER.displayName);
+		await session.evaluate(dismissCookieBanner, PROVIDER.cookieBanner);
+		// Last, and read the moment the solver says solved: the token lives about two minutes, and the request follows the marker at once.
+		const token = await session.waitForCaptchaToken(PROVIDER.captcha.kind);
 		return { session, token, file };
 	});
 }

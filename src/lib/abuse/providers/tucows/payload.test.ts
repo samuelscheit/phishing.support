@@ -32,7 +32,7 @@ describe("definition", () => {
 		expect(providerDefinitionHasValidHash(TUCOWS_PROVIDER)).toBeTrue();
 		expect(TUCOWS_PROVIDER.reporter).toEqual({ name: "Phishing Support", email: "support@phishing.support", organization: "Phishing Support", role: "it_security" });
 		expect(TUCOWS_PROVIDER.exactMailboxes).toEqual(["domainabuse@tucows.com", "abuse@enom.com"]);
-		expect(TUCOWS_PROVIDER.captcha).toMatchObject({ type: 12, siteKey: "0x4AAAAAADhWTmUwriZtddpv", pageUrl: "https://bullwark.tucows.com/report" });
+		expect(TUCOWS_PROVIDER.captcha).toEqual({ solver: "browser_fabric", kind: "turnstile", formSelector: 'form[action="/report"]' });
 	});
 
 	test("reads the code from Tucows' mail only, not a colour or a year", () => {

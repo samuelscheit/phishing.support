@@ -1,11 +1,11 @@
 import type { Page } from "patchright";
 
+import { waitForCaptchaOutcome } from "../../../browser/captcha_state";
 import { acquireFabricPatchrightSession, type FabricPatchrightSession } from "../../../browser/fabric";
 import { errorSummary } from "../../../util/error_text";
 import { OperationCanceledError, raceAbort } from "../../worker/cancellation";
 import { boundedCleanup } from "../login_session/session";
 import { TENCENT_PROVIDER } from "./definition";
-import { solveTencentSlider } from "./slider";
 
 /** What the form's fields take; the values of a verified draft. */
 export type TencentFormInput = {
@@ -30,7 +30,7 @@ type TencentFormResponse = { status: number; text: string };
  * that cannot file anything; `send` is the one request that does.
  */
 export type TencentFormSession = {
-	/** Fill the form, pass the slider, and catch (and abort) the request the page then makes. */
+	/** Fill the form, let the browser's solver pass the slider, and catch (and abort) the request the page then makes. */
 	captureRequest(input: TencentFormInput): Promise<TencentCapturedRequest>;
 	/** Send the caught request once from inside the page: same IP, same cookies. */
 	send(request: TencentCapturedRequest): Promise<TencentFormResponse>;
@@ -46,6 +46,8 @@ const FORM = {
 	loadTimeoutMs: 45_000,
 	stepTimeoutMs: 15_000,
 	requestTimeoutMs: 60_000,
+	/** From the submit click to the form's filing request: the slider showing up, the solver passing it (puzzles it refreshes included), the ticket. */
+	sliderTimeoutMs: 150_000,
 } as const;
 
 /** The only request that can file a report; the page's route aborts it until `send` lifts the guard. */
@@ -93,7 +95,9 @@ async function fillForm(page: Page, input: TencentFormInput): Promise<void> {
 /**
  * Open Tencent's DNS-abuse form in a Fabric Chrome over the direct egress.
  * The filing request is aborted by a route installed before anything is
- * submitted, so nothing the preflight does can file a report.
+ * submitted, so nothing the preflight does can file a report. The submit
+ * click opens Tencent's slide puzzle, which the browser's own solver passes;
+ * the form then makes its filing request, ticket included.
  */
 export async function openTencentForm(signal?: AbortSignal, dependencies: TencentBrowserDependencies = {}): Promise<TencentFormSession> {
 	const fabric = await (dependencies.acquire ?? acquire)(signal);
@@ -127,7 +131,8 @@ export async function openTencentForm(signal?: AbortSignal, dependencies: Tencen
 					await form.goto(TENCENT_PROVIDER.reportPageUrl, { waitUntil: "domcontentloaded", timeout: FORM.loadTimeoutMs });
 					await fillForm(form, input);
 					await form.locator(FORM.submit).click({ timeout: FORM.stepTimeoutMs });
-					await solveTencentSlider(form, { passed: () => captured !== undefined, ...(signal ? { signal } : {}) });
+					// The puzzle the click opens is the solver's: wait for the request the form sends once it passes.
+					await waitForCaptchaOutcome(form, () => captured !== undefined, { label: "Tencent Cloud's slider", timeoutMs: FORM.sliderTimeoutMs, ...(signal ? { signal } : {}) });
 				})(), signal, undefined, "Tencent Cloud browser form was canceled.");
 			} catch (error) {
 				if (error instanceof OperationCanceledError) throw error;

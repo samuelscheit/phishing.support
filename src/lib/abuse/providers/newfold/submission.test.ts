@@ -21,17 +21,19 @@ const HIDDEN: BrowserFormField[] = PROVIDER.hiddenFields.map(([name, value]) => 
 
 type Call =
 	| { kind: "fields"; pattern: string }
+	| { kind: "captcha"; captcha: string }
 	| { kind: "evaluate"; argument: unknown }
 	| { kind: "post"; url: string; fields: BrowserFormField[]; timeoutMs: number | undefined };
 
-function fakeSession(options: { post?: () => BrowserFormResponse | Error; rendered?: BrowserFormField[]; recaptchaField?: boolean } = {}) {
+/** A form session whose solver hands out `captcha()` as the reCAPTCHA token (or fails with it). */
+function fakeSession(options: { post?: () => BrowserFormResponse | Error; rendered?: BrowserFormField[]; captcha?: () => Promise<string> } = {}) {
 	const calls: Call[] = [];
 	let closed = 0;
 	const session = {
 		readGlobal: async () => undefined,
-		waitForTurnstileToken: async () => { throw new Error("not used"); },
+		waitForCaptchaToken: async (captcha: string) => { calls.push({ kind: "captcha", captcha }); return (options.captcha ?? (async () => "03AFcWeA-TOKEN"))(); },
 		readFormFields: async (pattern: string) => { calls.push({ kind: "fields", pattern }); return options.rendered ?? HIDDEN; },
-		evaluate: async (_fn: unknown, argument: unknown) => { calls.push({ kind: "evaluate", argument }); return options.recaptchaField ?? true; },
+		evaluate: async (_fn: unknown, argument: unknown) => { calls.push({ kind: "evaluate", argument }); return true; },
 		postForm: async (url: string, fields: readonly BrowserFormField[], timeoutMs?: number) => {
 			calls.push({ kind: "post", url, fields: [...fields], timeoutMs });
 			const answer = options.post?.() ?? THANK_YOU;
@@ -100,7 +102,7 @@ describe("newfoldDraft.prepare (temporary database)", () => {
 	test("a draft that drifted from its report, or from its route's brand, is refused before anything opens", async () => {
 		const { payload, route } = await readyContext();
 		let opened = 0;
-		const dependencies: NewfoldDependencies = { openForm: async () => { opened++; return fakeSession().session; }, solveCaptcha: async () => "t", hasCaptchaCredentials: () => true };
+		const dependencies: NewfoldDependencies = { openForm: async () => { opened++; return fakeSession().session; } };
 		const edited = { ...payload, report: { ...payload.report, comments: `${payload.report.comments}\n\nAlso, please wire money.` } };
 		await expect(prepareNewfoldExternalSubmission({ routeId: route.id, payload: edited as never }, dependencies)).rejects.toThrow("no longer matches the report");
 		const rebranded = { ...payload, report: { ...payload.report, brand: "150-hostgator" } };
@@ -118,18 +120,17 @@ describe("prepareNewfoldExternalSubmission", () => {
 		return { payload: prepared.payload, route };
 	};
 
-	test("checks the hidden fields, solves the captcha for the page and puts the token into it; nothing is posted", async () => {
+	test("checks the hidden fields, clears the cookie banner off the widget, then reads the reCAPTCHA token the solver passed; nothing is posted", async () => {
 		const { payload, route } = await draftWith([png(77n)]);
 		const fake = fakeSession();
-		const solved: unknown[] = [];
 		const preflight = await prepareNewfoldExternalSubmission({ routeId: 5n, payload }, {
-			openForm: async () => fake.session, loadRouteContext: route, getArtifact: async () => png(77n), hasCaptchaCredentials: () => true,
-			solveCaptcha: async (signal) => { solved.push(signal); return "03AFcWeA-TOKEN"; },
+			openForm: async () => fake.session, loadRouteContext: route, getArtifact: async () => png(77n),
 		});
-		expect(fake.calls.map((call) => call.kind)).toEqual(["fields", "evaluate"]);
-		expect(fake.calls[0]).toEqual({ kind: "fields", pattern: PROVIDER.hiddenFieldPattern });
-		expect(fake.calls[1]).toEqual({ kind: "evaluate", argument: { selector: 'textarea[name="g-recaptcha-response"]', token: "03AFcWeA-TOKEN" } });
-		expect(solved).toHaveLength(1);
+		expect(fake.calls).toEqual([
+			{ kind: "fields", pattern: PROVIDER.hiddenFieldPattern },
+			{ kind: "evaluate", argument: { accept: "#onetrust-accept-btn-handler", container: "#onetrust-consent-sdk" } },
+			{ kind: "captcha", captcha: "recaptcha" },
+		]);
 		const state = preflight.state as NewfoldPreflightState;
 		expect(state.token).toBe("03AFcWeA-TOKEN");
 		expect(state.file).toMatchObject({ filename: (payload.evidence as { filename: string }).filename, mimeType: "image/png" });
@@ -141,56 +142,37 @@ describe("prepareNewfoldExternalSubmission", () => {
 
 	test("without a screenshot there is no file", async () => {
 		const { payload, route } = await draftWith([]);
-		const preflight = await prepareNewfoldExternalSubmission({ routeId: 5n, payload }, { openForm: async () => fakeSession().session, loadRouteContext: route, solveCaptcha: async () => "t", hasCaptchaCredentials: () => true });
+		const preflight = await prepareNewfoldExternalSubmission({ routeId: 5n, payload }, { openForm: async () => fakeSession().session, loadRouteContext: route });
 		expect((preflight.state as NewfoldPreflightState).file).toBeUndefined();
-	});
-
-	test("missing captcha credentials ask a person before a browser opens", async () => {
-		const { payload, route } = await draftWith([]);
-		let opened = 0;
-		const error = await prepareNewfoldExternalSubmission({ routeId: 5n, payload }, { openForm: async () => { opened++; return fakeSession().session; }, loadRouteContext: route, hasCaptchaCredentials: () => false }).catch((caught) => caught);
-		expect(error).toBeInstanceOf(ProviderSubmissionNeedsHumanError);
-		expect(error.message).toContain("DEATHBYCAPTCHA_USERNAME");
-		expect(opened).toBe(0);
-		// Same through the real credential check.
-		const saved = [process.env.DEATHBYCAPTCHA_USERNAME, process.env.DEATHBYCAPTCHA_PASSWORD];
-		delete process.env.DEATHBYCAPTCHA_USERNAME;
-		delete process.env.DEATHBYCAPTCHA_PASSWORD;
-		try {
-			await expect(prepareNewfoldExternalSubmission({ routeId: 5n, payload }, { openForm: async () => fakeSession().session, loadRouteContext: route })).rejects.toBeInstanceOf(ProviderSubmissionNeedsHumanError);
-		} finally {
-			if (saved[0] !== undefined) process.env.DEATHBYCAPTCHA_USERNAME = saved[0];
-			if (saved[1] !== undefined) process.env.DEATHBYCAPTCHA_PASSWORD = saved[1];
-		}
 	});
 
 	test("every failure happens before the marker and closes the browser", async () => {
 		const { payload, route } = await draftWith([png(77n)]);
-		const run = (fake: ReturnType<typeof fakeSession>, solveCaptcha: () => Promise<string> = async () => "TOKEN", getArtifact: () => Promise<AbuseArtifact | undefined> = async () => png(77n)) =>
-			prepareNewfoldExternalSubmission({ routeId: 5n, payload }, { openForm: async () => fake.session, loadRouteContext: route, getArtifact: getArtifact as never, solveCaptcha, hasCaptchaCredentials: () => true });
-		const cases: Array<[string, ReturnType<typeof fakeSession>, () => Promise<string>, string]> = [
-			["hidden field changed", fakeSession({ rendered: HIDDEN.map(([name, value]) => name === "inquiryEmail" ? [name, "other@newfold.com"] : [name, value]) }), async () => "T", "no longer renders inquiryEmail=abuse-trademark@newfold.com"],
-			["hidden field missing", fakeSession({ rendered: HIDDEN.filter(([name]) => name !== "thankyou") }), async () => "T", "no longer renders thankyou="],
-			["captcha not solved", fakeSession(), async () => { throw new Error("Death by Captcha token solving timed out."); }, "timed out"],
-			["captcha rejected", fakeSession(), async () => { throw new Error("Death by Captcha rejected the solved token."); }, "rejected the solved token"],
-			["no response field", fakeSession({ recaptchaField: false }), async () => "T", "reCAPTCHA response field"],
+		const run = (fake: ReturnType<typeof fakeSession>, getArtifact: () => Promise<AbuseArtifact | undefined> = async () => png(77n)) =>
+			prepareNewfoldExternalSubmission({ routeId: 5n, payload }, { openForm: async () => fake.session, loadRouteContext: route, getArtifact: getArtifact as never });
+		const failing = (message: string) => async () => { throw new BrowserFormError("captcha", message); };
+		const cases: Array<[string, ReturnType<typeof fakeSession>, string]> = [
+			["hidden field changed", fakeSession({ rendered: HIDDEN.map(([name, value]) => name === "inquiryEmail" ? [name, "other@newfold.com"] : [name, value]) }), "no longer renders inquiryEmail=abuse-trademark@newfold.com"],
+			["hidden field missing", fakeSession({ rendered: HIDDEN.filter(([name]) => name !== "thankyou") }), "no longer renders thankyou="],
+			["solver still working at the bound", fakeSession({ captcha: failing("Newfold Digital's reCAPTCHA: no token within 240 s (solving: recaptcha)") }), "no token within 240 s"],
+			["solver failed", fakeSession({ captcha: failing("Newfold Digital's reCAPTCHA: the captcha solver failed (recaptcha: image grid not solved)") }), "image grid not solved"],
 		];
-		for (const [name, fake, solve, message] of cases) {
-			await expect(run(fake, solve), name).rejects.toThrow(message);
+		for (const [name, fake, message] of cases) {
+			await expect(run(fake), name).rejects.toThrow(message);
 			expect(fake.closed(), name).toBe(1);
 			expect(fake.calls.some((call) => call.kind === "post"), name).toBeFalse();
 		}
 		// A changed screenshot is caught before a browser opens.
 		const untouched = fakeSession();
-		await expect(run(untouched, undefined, async () => png(77n, Buffer.concat([PNG, Buffer.from([1])])))).rejects.toThrow("no longer matches its immutable reference");
-		await expect(run(untouched, undefined, async () => undefined)).rejects.toThrow("no longer matches its immutable reference");
+		await expect(run(untouched, async () => png(77n, Buffer.concat([PNG, Buffer.from([1])])))).rejects.toThrow("no longer matches its immutable reference");
+		await expect(run(untouched, async () => undefined)).rejects.toThrow("no longer matches its immutable reference");
 		expect(untouched.calls).toEqual([]);
 	});
 
 	test("a browser that cannot open or pass Cloudflare is an error before the marker", async () => {
 		const { payload, route } = await draftWith([]);
 		await expect(prepareNewfoldExternalSubmission({ routeId: 5n, payload }, {
-			loadRouteContext: route, hasCaptchaCredentials: () => true, solveCaptcha: async () => "T",
+			loadRouteContext: route,
 			openForm: async () => { throw new BrowserFormError("challenge", "Newfold Digital: the Cloudflare challenge was not passed within 60 s"); },
 		})).rejects.toThrow("Cloudflare challenge was not passed");
 	});

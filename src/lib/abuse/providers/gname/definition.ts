@@ -22,14 +22,15 @@ function range(start: number, end: number): number[] {
  * read from its page and `lyts.js` on 2026-11-07. GNAME's RDAP names
  * complaint@gname.com; the form is its documented channel and returns a
  * case number. A complaint needs a mailed code, and the code is sent only
- * after the form's behavioural slider passes. Phishing is "Set up phishing
+ * after the form's behavioural slider passes, which the browser's own solver
+ * does. Phishing is "Set up phishing
  * and fraud site" (category 2); the form has no malware type, so malware is
  * "Other issue" (category 4).
  */
 export const GNAME_PROVIDER = definePinned({
 	key: "gname",
 	displayName: "GNAME Abuse Complaint",
-	version: "2026-11-07.1",
+	version: "2026-11-22.1",
 	exactMailboxes: ["complaint@gname.com"],
 	registrarIds: [...GNAME_REGISTRAR_IDS],
 	supplemental: false,
@@ -38,8 +39,8 @@ export const GNAME_PROVIDER = definePinned({
 		phishing: { lx: 8, pageUrl: "https://www.gname.com/abuse/category/2", caption: "Set up phishing and fraud site", legalBrandUrl: true },
 		malware: { lx: 7, pageUrl: "https://www.gname.com/abuse/category/4", caption: "Other issue", legalBrandUrl: false },
 	},
-	/** The form's own slider before it mails a code: GnSliderVerify, scored at `/request/slideverify`. */
-	slider: { handle: ".gn-slide-bar", rail: ".gn-slide-rail" },
+	/** The form's own slider before it mails a code: GnSliderVerify, scored at `/request/slideverify`, passed by the browser's own solver. */
+	captcha: { solver: "browser_fabric" as const, kind: "gname_slider" as const },
 	codeMail: {
 		provider: "GNAME",
 		// gname.com/help/396.html: its system mail comes from gname@gname.net,

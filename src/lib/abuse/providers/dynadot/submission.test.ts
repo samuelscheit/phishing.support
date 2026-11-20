@@ -27,7 +27,7 @@ function fakeSession(options: { post?: () => BrowserFormResponse | Error; fields
 	const session: BrowserFormChoiceSession = {
 		selectOption: async (selector, value) => { calls.push({ kind: "select", selector, value }); return options.selected ?? true; },
 		readGlobal: async () => undefined,
-		waitForTurnstileToken: async (turnstile) => { calls.push({ kind: "turnstile", widgetSelector: turnstile?.widgetSelector }); return options.turnstile ? options.turnstile() : "0.TURNSTILE"; },
+		waitForCaptchaToken: async (_kind: string, turnstile?: { widgetSelector?: string }) => { calls.push({ kind: "turnstile", widgetSelector: turnstile?.widgetSelector }); return options.turnstile ? options.turnstile() : "0.TURNSTILE"; },
 		readFormFields: async (pattern, formSelector) => { calls.push({ kind: "fields", pattern, formSelector }); return options.fields ?? INPUTS; },
 		postForm: async (url, fields, timeoutMs, headers) => {
 			calls.push({ kind: "post", url, fields: [...fields], timeoutMs, headers: headers ? { ...headers } : undefined });
@@ -130,7 +130,7 @@ describe("prepareDynadotExternalSubmission", () => {
 		const { payload, route } = await draftWith([]);
 		const cases: Array<[string, ReturnType<typeof fakeSession>, string]> = [
 			["type not offered", fakeSession({ selected: false }), "no longer offers the phishing type 2"],
-			["token not issued", fakeSession({ turnstile: async () => { throw new BrowserFormError("turnstile", "Dynadot: Cloudflare Turnstile issued no token within 60 s"); } }), "issued no token"],
+			["token not issued", fakeSession({ turnstile: async () => { throw new BrowserFormError("captcha", "Dynadot's Cloudflare Turnstile: no token within 240 s (no captcha state)"); } }), "no token within 240 s"],
 			["input renamed", fakeSession({ fields: INPUTS.filter(([name]) => name !== "domain_path_2") }), "no longer renders domain_path_2"],
 			["form empty", fakeSession({ fields: [] }), "no longer renders full_name_2, email_2"],
 		];

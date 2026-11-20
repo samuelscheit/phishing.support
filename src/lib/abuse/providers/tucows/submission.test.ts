@@ -269,21 +269,21 @@ describe("the wizard before the marker", () => {
 		expect(error.message).toContain("abuse@registrar.example");
 	});
 
-	test("without a solver or a mailbox it asks for a person before touching Tucows", async () => {
+	test("without a mailbox it asks for a person before touching Tucows or opening a browser", async () => {
 		const { context } = await readyContext();
-		const saved = [process.env.DEATHBYCAPTCHA_USERNAME, process.env.DEATHBYCAPTCHA_PASSWORD, process.env.IMAP_HOST];
-		delete process.env.DEATHBYCAPTCHA_USERNAME;
+		const saved = process.env.IMAP_HOST;
 		delete process.env.IMAP_HOST;
 		try {
 			const server = wizard();
-			await expect(prepareTucowsExternalSubmission(context, { fetch: server.fetch, readCode: async () => "364971" })).rejects.toBeInstanceOf(ProviderSubmissionNeedsHumanError);
-			await expect(prepareTucowsExternalSubmission(context, { fetch: server.fetch, solveCaptcha: async () => "t" })).rejects.toThrow("IMAP mailbox");
+			let solved = 0;
+			const error = await prepareTucowsExternalSubmission(context, { fetch: server.fetch, solveCaptcha: async () => { solved++; return "t"; } }).catch((caught) => caught);
+			expect(error).toBeInstanceOf(ProviderSubmissionNeedsHumanError);
+			expect(error.message).toContain("IMAP mailbox");
 			expect(server.sent).toHaveLength(0);
+			expect(solved).toBe(0);
 		} finally {
-			for (const [name, value] of [["DEATHBYCAPTCHA_USERNAME", saved[0]], ["DEATHBYCAPTCHA_PASSWORD", saved[1]], ["IMAP_HOST", saved[2]]] as const) {
-				if (value === undefined) delete process.env[name];
-				else process.env[name] = value;
-			}
+			if (saved === undefined) delete process.env.IMAP_HOST;
+			else process.env.IMAP_HOST = saved;
 		}
 	});
 

@@ -433,8 +433,8 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 		try {
 			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model) });
 			expect(recording.agent).toMatchObject({ outcome: "completed", report: { blockedByChallenge: false, stoppedReason: "Signed in after the CAPTCHA." } });
-			// The goal has the agent solve the CAPTCHA itself, never hand it back.
-			expect(model.seen()).toContain("Solve every CAPTCHA or human check yourself");
+			// A page's own text CAPTCHA is the agent's to answer, never handed back.
+			expect(model.seen()).toContain("Only a distorted-text or arithmetic image the page draws itself is yours");
 			expect(model.requests.every(sawScreenshot)).toBeTrue();
 			expect(answers).toEqual(["dgrnn62", codes[1]]);
 			// Past the CAPTCHA, the kit's password collector received the synthetic password, and the recording shows it.

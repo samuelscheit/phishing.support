@@ -115,9 +115,11 @@ const CAPTCHA_REQUIRED = { status: 200, body: `{"header":[],"result":["REQUIRED_
  * Google's form as observed on 2026-10-31: the same field IDs, button,
  * endpoint and confirmation; an invisible reCAPTCHA token on each request;
  * and on `REQUIRED_RECAPTCHA` a checkbox widget whose token the next request
- * carries as `recaptcha_response`. Answers are served in order.
+ * carries as `recaptcha_response`. Answers are served in order. `solver`
+ * plays Browser Fabric's solver on that widget: it publishes its state on
+ * the top document and, once solved, leaves its token in the widget.
  */
-function googleCloudForm(answers: FormAnswer | FormAnswer[], captchaDelayMs = 300) {
+function googleCloudForm(answers: FormAnswer | FormAnswer[], captchaDelayMs = 300, solver: { token: string } | { failure: string } | { stuck: true } = { token: "solved-checkbox-token" }) {
 	const queue = Array.isArray(answers) ? [...answers] : [answers];
 	const posts: Array<Record<string, string>> = [];
 	const server = Bun.serve({
@@ -157,8 +159,23 @@ document.querySelector(".submit-button").addEventListener("click", async () => {
 		checkbox = true;
 		const frame = document.createElement("iframe");
 		frame.src = "about:blank";
-		document.querySelector(".g-recaptcha-v2").append(frame, Object.assign(document.createElement("textarea"), { name: "g-recaptcha-response" }));
+		const response = Object.assign(document.createElement("textarea"), { name: "g-recaptcha-response" });
+		document.querySelector(".g-recaptcha-v2").append(frame, response);
 		document.querySelector(".notification-area").textContent = "Complete the reCAPTCHA to continue";
+		const solver = ${JSON.stringify(solver)};
+		const root = document.documentElement;
+		setTimeout(() => root.setAttribute("data-captcha-state", "solving"), 100);
+		setTimeout(() => {
+			if (solver.stuck) return;
+			if (solver.failure) {
+				root.setAttribute("data-captcha-detail", solver.failure);
+				root.setAttribute("data-captcha-state", "failed");
+				return;
+			}
+			response.value = solver.token;
+			window.grecaptcha.getResponse = () => solver.token;
+			root.setAttribute("data-captcha-state", "solved");
+		}, 600);
 	} else document.querySelector(".notification-area").textContent = "There were problems sending your form.";
 });
 </script></body></html>`, { headers: { "content-type": "text/html" } });
@@ -182,15 +199,13 @@ async function googleCloudRoute() {
 
 function browserProvider(
 	form: { url: string },
-	timeouts?: { formReadyMs?: number; submitResponseMs?: number; confirmationMs?: number },
-	solveCaptcha: () => Promise<string> = async () => { throw new Error("No checkbox reCAPTCHA was expected."); },
+	timeouts?: { formReadyMs?: number; submitResponseMs?: number; confirmationMs?: number; checkboxMs?: number },
 ): ProviderSubmissionProvider {
 	return defineProvider({
 		definition: GOOGLE_CLOUD_PROVIDER,
 		draft: googleCloudDraft,
 		submit: (context) => submitGoogleCloudSubmission(context, {
 			reportPageUrl: form.url,
-			solveCaptcha,
 			...(timeouts ? { timeouts } : {}),
 			openPage: async () => {
 				const browser = await puppeteer.launch({ executablePath: chromiumExecutable, headless: true, args: ["--no-first-run"] });
@@ -238,15 +253,12 @@ describe.skipIf(!chromiumAvailable)("Google Cloud abuse form, in a real browser"
 		}
 	}, 60_000);
 
-	test("when Google asks for the checkbox reCAPTCHA, it is solved and the same form is sent once more", async () => {
+	test("when Google asks for the checkbox reCAPTCHA, the browser's solver passes it and the same form is sent once more", async () => {
 		const form = googleCloudForm([CAPTCHA_REQUIRED, ACCEPTED]);
-		let solves = 0;
 		try {
 			const { created, route } = await googleCloudRoute();
-			const provider = browserProvider(form, undefined, async () => { solves += 1; return "solved-checkbox-token"; });
-			await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toEqual({ outcome: "submitted", runId: expect.any(BigInt) });
+			await expect(executeProviderSubmission({ routeId: route.id, provider: browserProvider(form) })).resolves.toEqual({ outcome: "submitted", runId: expect.any(BigInt) });
 
-			expect(solves).toBe(1);
 			expect(form.posts).toHaveLength(2);
 			expect(form.posts[0]).toMatchObject({ recaptcha: "recaptcha-token", recaptchaCheckbox: "" });
 			expect(form.posts[1]).toMatchObject({ recaptchaCheckbox: "solved-checkbox-token" });
@@ -263,11 +275,29 @@ describe.skipIf(!chromiumAvailable)("Google Cloud abuse form, in a real browser"
 		const form = googleCloudForm(CAPTCHA_REQUIRED);
 		try {
 			const { route } = await googleCloudRoute();
-			const provider = browserProvider(form, undefined, async () => "rejected-token");
-			await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toMatchObject({ outcome: "provider_rejected" });
+			await expect(executeProviderSubmission({ routeId: route.id, provider: browserProvider(form) })).resolves.toMatchObject({ outcome: "provider_rejected" });
 			expect(form.posts).toHaveLength(2);
 		} finally {
 			form.server.stop(true);
+		}
+	}, 60_000);
+
+	test("a checkbox the solver fails on, or does not pass in time, goes to a person: Google created no case and nothing is resent", async () => {
+		const cases: Array<[{ failure: string } | { stuck: true }, { checkboxMs: number } | undefined, string]> = [
+			[{ failure: "recaptcha: image grid not solved" }, undefined, "Google Cloud's checkbox reCAPTCHA: the captcha solver failed (recaptcha: image grid not solved); Google created no case."],
+			[{ stuck: true }, { checkboxMs: 1_000 }, "Google Cloud's checkbox reCAPTCHA: no token within 1 s (solving); Google created no case."],
+		];
+		for (const [solver, timeouts, reason] of cases) {
+			const form = googleCloudForm(CAPTCHA_REQUIRED, 300, solver);
+			try {
+				const { route } = await googleCloudRoute();
+				const provider = browserProvider(form, timeouts);
+				await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toMatchObject({ outcome: "needs_human", reason });
+				expect(form.posts).toHaveLength(1);
+				expect((await AbuseRepository.getRoute(route.id))?.status).toBe("needs_human");
+			} finally {
+				form.server.stop(true);
+			}
 		}
 	}, 60_000);
 

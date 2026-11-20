@@ -60,7 +60,7 @@ export async function prepareDynadotExternalSubmission(context: ProviderSubmissi
 		: [];
 	return withPreflight(() => (dependencies.openForm ?? formOpener(PROVIDER, "dynadot-report", { url: PROVIDER.formUrl, formSelector: PROVIDER.abuseTypeSelector }))(context.signal), async (session): Promise<DynadotPreflightState> => {
 		if (!await session.selectOption(PROVIDER.abuseTypeSelector, PROVIDER.abuseType)) throw new Error(`Dynadot's abuse form no longer offers the phishing type ${PROVIDER.abuseType}.`);
-		const token = await session.waitForTurnstileToken({ widgetSelector: PROVIDER.turnstileWidgetSelector });
+		const token = await session.waitForCaptchaToken("turnstile", { widgetSelector: PROVIDER.turnstileWidgetSelector });
 		const rendered = await session.readFormFields(`^(${REQUIRED_INPUTS.join("|")})$`, PROVIDER.formSelector);
 		const missing = REQUIRED_INPUTS.filter((name) => !rendered.some(([field]) => field === name));
 		if (missing.length > 0) throw new Error(`Dynadot's phishing form no longer renders ${missing.join(", ")}.`);

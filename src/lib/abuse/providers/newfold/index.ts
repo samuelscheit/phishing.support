@@ -5,8 +5,8 @@ import { prepareNewfoldExternalSubmission, newfoldDraft, submitNewfoldSubmission
 
 /**
  * Newfold's abuse mailboxes are not monitored; the route files the report
- * through newfold.com/abuse from a real Chrome (reCAPTCHA solved through Death
- * by Captcha). The form shows no case ID; Newfold mails one to the reporter
+ * through newfold.com/abuse from a real Chrome (its reCAPTCHA passed by
+ * Browser Fabric's own solver). The form shows no case ID; Newfold mails one to the reporter
  * address, read as a reply and matched by our reference.
  */
 export const newfoldProvider = defineProvider({

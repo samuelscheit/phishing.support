@@ -9,14 +9,15 @@ import { definePinned } from "../kit/pin";
 export const TENCENT_PROVIDER = definePinned({
 	key: "tencent",
 	displayName: "Tencent Cloud Domain Abuse",
-	version: "2026-11-20.1",
+	version: "2026-11-22.1",
 	exactMailboxes: ["dnsabuse_complaint@tencent.com"],
 	supplemental: false,
 	reportPageUrl: "https://www.tencentcloud.com/report-platform/dnsabuse",
 	submissionUrl: "https://www.tencentcloud.com/main/ajax/reportDsaPlatform/createDomainReport",
-	/** The form's own slide puzzle (Tencent TCaptcha), solved in the browser that files the report. */
+	/** The form's own slide puzzle (Tencent TCaptcha), passed by the browser's own solver in the page that files. */
 	captcha: {
-		provider: "slider_puzzle" as const,
+		solver: "browser_fabric" as const,
+		kind: "tcaptcha" as const,
 		appId: "2070586963",
 	},
 	evidence: {

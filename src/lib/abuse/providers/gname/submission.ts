@@ -1,9 +1,8 @@
 import type { Page } from "rebrowser-puppeteer-core";
 
 import { getBrowser } from "../../../browser";
-import { sleep } from "../../../util/sleep";
+import { waitForCaptchaOutcome } from "../../../browser/captcha_state";
 import { asRecord, parseJsonRecord } from "../../../util/values";
-import { dragSliderToEnd } from "../../captcha/slider_drag";
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { createDraft, type VerifiedOf, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
@@ -38,7 +37,7 @@ export type GnameUpload = { filename: string; mimeType: string; base64: string }
 export type GnameSession = {
 	post(path: string, data: Record<string, unknown>): Promise<GnameResponse>;
 	upload(lx: number, file: GnameUpload): Promise<GnameResponse>;
-	/** Ask for the mailed code, passing the form's slider when it demands one. */
+	/** Ask for the mailed code; the browser's solver passes the form's slider when it demands one. */
 	requestCode(email: string): Promise<GnameResponse>;
 	close(): Promise<void>;
 };
@@ -52,8 +51,8 @@ export type GnameDependencies = RouteDeps & {
 
 type GnamePreflightState = { session: GnameSession; code: string; pics: string[] };
 
-const SLIDER_ATTEMPTS = 3;
-const CODE_RESPONSE_TIMEOUT_MS = 30_000;
+/** How long `send_email` may take to answer, the browser's solver passing its slider (refused tracks included) on the way. */
+const CODE_RESPONSE_TIMEOUT_MS = 120_000;
 
 function gnameSucceeded(response: GnameResponse): boolean {
 	return String(response.code) === "1";
@@ -73,11 +72,11 @@ type CodeWindow = { __gnameCode?: GnameResponse | { error: string } };
 
 /**
  * The form's own `send_email`: it posts, meets `-105001`, opens the slider,
- * and posts again with the slider's token. The drag happens here, a few
- * times if the widget refuses a track; the answer is whatever `send_email`
- * finally hands its callback.
+ * and posts again with the slider's token. The browser's solver drags the
+ * slider (again, if the widget refuses a track); the answer is whatever
+ * `send_email` finally hands its callback.
  */
-export async function requestGnameCodeOnPage(page: Page, email: string): Promise<GnameResponse> {
+async function requestGnameCodeOnPage(page: Page, email: string, timeoutMs = CODE_RESPONSE_TIMEOUT_MS): Promise<GnameResponse> {
 	await page.evaluate((address) => {
 		const target = window as unknown as CodeWindow & { send_email?: (element: Element, data: Record<string, string>, callback: (response: unknown) => void) => void };
 		target.__gnameCode = undefined;
@@ -89,28 +88,10 @@ export async function requestGnameCodeOnPage(page: Page, email: string): Promise
 			target.__gnameCode = response as GnameResponse;
 		});
 	}, email);
-	const answer = () => page.evaluate(() => (window as unknown as CodeWindow).__gnameCode);
-	const sliderShown = () => page.$eval(GNAME_PROVIDER.slider.handle, (element) => (element as HTMLElement).offsetParent !== null).catch(() => false);
-	for (let attempt = 0; attempt <= SLIDER_ATTEMPTS; attempt++) {
-		const deadline = Date.now() + CODE_RESPONSE_TIMEOUT_MS;
-		while (Date.now() < deadline) {
-			const response = await answer();
-			if (response) {
-				if ("error" in response) throw new Error(`GNAME's form could not request a code: ${response.error}`);
-				return response;
-			}
-			if (await sliderShown()) break;
-			await sleep(250);
-		}
-		if (!(await sliderShown())) break;
-		if (attempt === SLIDER_ATTEMPTS) break;
-		await dragSliderToEnd(page, GNAME_PROVIDER.slider);
-		// A passed slider closes; a refused one resets its handle for another try.
-		await sleep(2_000);
-	}
-	const response = await answer();
-	if (response && !("error" in response)) return response;
-	throw new Error(`GNAME's slider did not pass after ${SLIDER_ATTEMPTS} drags, so no code was sent.`);
+	let response: GnameResponse | { error: string } | undefined;
+	await waitForCaptchaOutcome(page, async () => (response = await page.evaluate(() => (window as unknown as CodeWindow).__gnameCode)) !== undefined, { label: "GNAME's code request", timeoutMs });
+	if (!response || "error" in response) throw new Error(`GNAME's form could not request a code: ${response?.error ?? "no answer"}`);
+	return response;
 }
 
 /** A Fabric browser page on the form for this complaint type, over the reporting egress. */

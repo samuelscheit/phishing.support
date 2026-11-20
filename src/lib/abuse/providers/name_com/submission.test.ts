@@ -43,7 +43,7 @@ function fakeSession(options: Options = {}) {
 	let closed = 0;
 	const session: NameComSession = {
 		clickAll: async (selector) => { calls.push({ kind: "click", selector }); return options.clicked ?? 3; },
-		waitForTurnstileToken: async (turnstile) => { calls.push({ kind: "turnstile", widget: turnstile?.widgetSelector }); return options.turnstile ? options.turnstile() : "0.TURNSTILE"; },
+		waitForCaptchaToken: async (_kind: string, turnstile?: { widgetSelector?: string }) => { calls.push({ kind: "turnstile", widget: turnstile?.widgetSelector }); return options.turnstile ? options.turnstile() : "0.TURNSTILE"; },
 		readGlobal: async (path) => { calls.push({ kind: "global", path }); return "https://www.name.com/"; },
 		request: async (init) => {
 			calls.push({ kind: "request", method: init.method, url: init.url, headers: init.headers as never, json: init.json });
@@ -191,7 +191,7 @@ describe("prepareNameComExternalSubmission", () => {
 		const cases: Array<[string, ReturnType<typeof fakeSession>, string]> = [
 			["two checkboxes", fakeSession({ clicked: 2 }), "has 2 consent checkboxes, not 3"],
 			["no checkboxes", fakeSession({ clicked: 0 }), "has 0 consent checkboxes"],
-			["no token", fakeSession({ turnstile: async () => { throw new BrowserFormError("turnstile", "Name.com: Cloudflare Turnstile issued no token within 60 s"); } }), "issued no token"],
+			["no token", fakeSession({ turnstile: async () => { throw new BrowserFormError("captcha", "Name.com's Cloudflare Turnstile: no token within 240 s (no captcha state)"); } }), "no token within 240 s"],
 			["csrf 400", fakeSession({ csrf: { status: 400, text: '{"data":[]}', json: undefined, headers: {} } }), "gave no token (HTTP 400)"],
 			["captcha refused", fakeSession({ verify: { ...answer({ message: ["bad"] }, 400), headers: {} } }), "did not accept the Turnstile token (HTTP 400)"],
 			["flag not set", fakeSession({ verify: { ...answer({ data: { account: { supportFormRecaptcha: false } } }), headers: {} } }), "did not accept the Turnstile token (HTTP 200)"],

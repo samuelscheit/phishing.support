@@ -30,7 +30,7 @@ function fakeSession(options: { post?: (url: string) => BrowserFormResponse | Er
 	let closed = 0;
 	const session: BrowserFormSession = {
 		readGlobal: async (path) => { calls.push({ kind: "global", path }); return "nonce" in options ? options.nonce : "a0dd4cf355"; },
-		waitForTurnstileToken: options.turnstile ? async () => { calls.push({ kind: "turnstile" }); return options.turnstile!(); } : async () => { calls.push({ kind: "turnstile" }); return "0.TURNSTILE"; },
+		waitForCaptchaToken: options.turnstile ? async () => { calls.push({ kind: "turnstile" }); return options.turnstile!(); } : async () => { calls.push({ kind: "turnstile" }); return "0.TURNSTILE"; },
 		readFormFields: async (pattern) => { calls.push({ kind: "fields", pattern }); return options.rendered ?? RENDERED; },
 		postForm: async (url, fields, timeoutMs) => {
 			calls.push({ kind: "post", url, fields: [...fields], timeoutMs });
@@ -147,7 +147,7 @@ describe("preparePublicDomainRegistryExternalSubmission", () => {
 			["upload refused", fakeSession({ post: () => answer({ success: false, data: "File type not allowed" }, 200) }), "upload was not accepted"],
 			["upload HTTP 403", fakeSession({ post: () => ({ status: 403, text: "<html>Just a moment</html>", json: undefined }) }), "upload was not accepted (HTTP 403): <html>Just a moment</html>"],
 			["upload path traversal", fakeSession({ post: () => answer({ success: true, data: { path: "../x", file: "a.png" } }) }), "upload was not accepted"],
-			["token not issued", fakeSession({ post: () => UPLOAD_OK, turnstile: async () => { throw new BrowserFormError("turnstile", "PublicDomainRegistry: Cloudflare Turnstile issued no token within 60 s"); } }), "issued no token"],
+			["token not issued", fakeSession({ post: () => UPLOAD_OK, turnstile: async () => { throw new BrowserFormError("captcha", "PublicDomainRegistry's Cloudflare Turnstile: no token within 240 s (no captcha state)"); } }), "no token within 240 s"],
 			["form id changed", fakeSession({ post: () => UPLOAD_OK, rendered: RENDERED.map(([name, value]) => name === "_wpcf7" ? [name, "999"] : [name, value]) }), "no longer Contact Form 7 form 643"],
 			["field missing", fakeSession({ post: () => UPLOAD_OK, rendered: RENDERED.filter(([name]) => name !== "_wpcf7_unit_tag") }), "no longer renders _wpcf7_unit_tag"],
 		];

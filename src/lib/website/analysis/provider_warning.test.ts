@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { archiveWebsite } from "../archive";
 import { chromiumAvailable, launchTestChromium } from "../../browser/task/test_helpers";
 
-const fast = { scriptNavigationSettleMs: 20, renderSettleMs: 1_000, humanCheckMs: 3_000 } as const;
+const fast = { scriptNavigationSettleMs: 20, renderSettleMs: 1_000, captchaGraceMs: 1_000 } as const;
 
 const html = (body: string, init: ResponseInit = {}, title = "RBXCore — Game Copier") => new Response(`<!DOCTYPE html><html><head><title>${title}</title></head><body>${body}</body></html>`, { ...init, headers: { "content-type": "text/html; charset=utf-8", ...init.headers } });
 
@@ -44,6 +44,30 @@ describe.skipIf(!chromiumAvailable)("a provider's warning page before the site, 
 			expect(archive.providerWarning).toEqual({ provider: "Cloudflare", warning: "Suspected Malware" });
 			expect(archive.text.toString()).toContain("Game to Studio. One export.");
 			expect(archive.navigationHops.at(-1)).toMatchObject({ url: `${origin}/game-copier/`, status: 200, contentCaptured: true });
+			expect(hits).toContain("/cdn-cgi/phish-bypass");
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+
+	test("a Turnstile the browser's solver takes long over is waited for, by its state, before the button is pressed", async () => {
+		// The solver's state shows at once, and the button unlocks only after the 5 s a locked button alone is waited for.
+		const solving = (path: string) => html(`<h2>Suspected Phishing</h2>
+<form action="/cdn-cgi/phish-bypass" method="GET"><input type="hidden" name="original_path" value="${path}">
+<button type="submit" id="bypass-button" disabled>Ignore & Proceed</button></form>
+<script>
+document.documentElement.setAttribute("data-captcha-state", "solving");
+document.documentElement.setAttribute("data-captcha-detail", "turnstile");
+setTimeout(() => { document.getElementById("bypass-button").disabled = false; document.documentElement.setAttribute("data-captcha-state", "solved"); }, 7_000);
+</script>`, { status: 403 }, "Suspected Phishing | Cloudflare");
+		const { server, hits, origin } = serve({
+			"/login/": (request) => (request.headers.get("cookie")?.includes("cf_bypass=1") ? html("<h1>Sign in</h1>") : solving("/login/")),
+			"/cdn-cgi/phish-bypass": (request) => new Response(null, { status: 302, headers: { location: new URL(request.url).searchParams.get("original_path")!, "set-cookie": "cf_bypass=1; path=/" } }),
+		});
+		try {
+			const archive = await archiveWebsite({ url: `${origin}/login/` }, { ...fast, getBrowser: () => launchTestChromium(), errorDocumentSettleMs: 5_000 });
+			expect(archive.providerWarning).toEqual({ provider: "Cloudflare", warning: "Suspected Phishing" });
+			expect(archive.text.toString()).toContain("Sign in");
 			expect(hits).toContain("/cdn-cgi/phish-bypass");
 		} finally {
 			server.stop(true);

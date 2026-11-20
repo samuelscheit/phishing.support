@@ -130,10 +130,16 @@ have been submitted.
 
 Do not add the Fabric principal password, `BROWSER_REMOTE_DEBUGGING_URL`, Chrome/Xvfb,
 VNC/noVNC, a local profile volume, or a capability-bearing CDP URL back to this
-deployment. Tencent files from a direct Fabric browser and solves its slider
-itself. The HTTP-filing providers (Tucows, Newfold, NameSilo, Google Cloud) may
-still require explicit `DEATHBYCAPTCHA_*` configuration; those values are not
-browser configuration and are never sent to Fabric session metadata.
+deployment. No captcha is solved in this app: Browser Fabric runs a solver
+(llm-captcha) in every browser it hands out, which passes Turnstile,
+reCAPTCHA v2, hCaptcha, Tencent's and Aliyun's sliders, GNAME's slider and
+kits' drag or hold checks, and publishes its progress on the top document as
+`<html data-captcha-state="solving|solved|failed" data-captcha-detail="…">`.
+`src/lib/browser/captcha_state.ts` waits on that state. Providers that file
+over HTTP behind a reCAPTCHA or Turnstile (Tucows, NameSilo) take the token
+from their form page in a Fabric browser before the durable marker
+(`providers/kit/captcha.ts`); Tencent, Newfold, GNAME, Google Cloud and the
+Alibaba Cloud login wait for the solver in the page that files or logs in.
 
 ## Cloudflare abuse reports
 
@@ -252,17 +258,17 @@ captured requests is in `docs/providers/`.
 
 | Provider | Mailboxes / registrar IDs | Channel |
 | --- | --- | --- |
-| Tucows / Enom (`tucows`) | domainabuse@tucows.com, abuse@enom.com; 48, 69 | bullwark.tucows.com: Turnstile (DeathByCaptcha), mailed code, multipart form, plain HTTP |
+| Tucows / Enom (`tucows`) | domainabuse@tucows.com, abuse@enom.com; 48, 69 | bullwark.tucows.com: Turnstile (Fabric browser preflight), mailed code, multipart form, plain HTTP |
 | PublicDomainRegistry (`publicdomainregistry`) | abuse-contact@, abuse@publicdomainregistry.com; 303 | WordPress form behind Cloudflare + Turnstile, in a Fabric browser |
 | Microsoft (`microsoft`) | abuse@microsoft.com, cert@microsoft.com | unauthenticated JSON API `api.msrc.microsoft.com/report/v3.0/abuse` |
 | GoDaddy (`godaddy`) | abuse@godaddy.com; 146 | Abuse API (`GODADDY_ABUSE_API_KEY`/`_SECRET`) once GoDaddy enables the key, otherwise the Legal Portal form (reCAPTCHA v3 in the page) |
-| Newfold: Bluehost, Web.com, Network Solutions, Register.com, Domain.com (`newfold`) | abuse@bluehost.com, abuse@unifiedlayer.com, iarpoc@newfold.com, net-eng-team@newfold.com, domain.operations@web.com; 2, 9, 886 | newfold.com/abuse behind Cloudflare, reCAPTCHA v2 via DeathByCaptcha |
+| Newfold: Bluehost, Web.com, Network Solutions, Register.com, Domain.com (`newfold`) | abuse@bluehost.com, abuse@unifiedlayer.com, iarpoc@newfold.com, net-eng-team@newfold.com, domain.operations@web.com; 2, 9, 886 | newfold.com/abuse behind Cloudflare, reCAPTCHA v2 passed by Fabric's solver in the filing page |
 | Dynadot (`dynadot`) | abuse@dynadot.com; 472 | form behind Cloudflare + Turnstile, in a Fabric browser |
 | Name.com (`name_com`) | abuse@name.com; 625 | Zendesk form behind Cloudflare + Turnstile and a CSRF handshake, in a Fabric browser |
 
 - Browser forms share `providers/kit/browser_form.ts`: a Fabric session on the
   reporting egress that passes the Cloudflare challenge, waits for the
-  self-solving Turnstile token (or takes a DeathByCaptcha reCAPTCHA token), and
+  Turnstile or reCAPTCHA token the browser's solver passed, and
   sends the filing request from inside the page so its clearance applies.
   Everything before the one filing request files nothing and is retried safely.
 - Every report's free text starts with `Reference: PS-<case tag>-R<route id>`

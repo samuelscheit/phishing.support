@@ -3,7 +3,7 @@ import { userAgent } from "../../../network/service_identity";
 import { asRecord, parseJsonRecord } from "../../../util/values";
 import type { ProviderFormFacts } from "../../portal/form_facts";
 import { deriveProviderFormFacts } from "../../portal/form_facts";
-import { captchaCredentialsProblem, solveRecaptchaV2 } from "../kit/captcha";
+import { captchaTokenFromPage } from "../kit/captcha";
 import { createDraft, type RouteDeps, type VerifiedOf } from "../kit/draft";
 import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { snippet } from "../../../util/text";
@@ -53,6 +53,7 @@ type NameSiloPreparationDependencies = RouteDeps & {
 
 export type NameSiloPreflightDependencies = {
 	fetch?: FetchLike;
+	/** The form's reCAPTCHA token; defaults to the form's own page in a Fabric browser. */
 	captchaSolver?: (signal?: AbortSignal) => Promise<string>;
 	now?: () => number;
 };
@@ -230,8 +231,7 @@ export const nameSiloDraft = createDraft({
 	input: async ({ report, target, evidenceArtifacts }, stored: NameSiloSubmissionPayload | undefined, dependencies: NameSiloPreparationDependencies) => {
 		const observedUrl = stored?.target.observedUrl ?? target.observedUrls[0];
 		const evidence = evidenceReferenceOf(NAMESILO_EVIDENCE_CONTRACT, evidenceArtifacts, stored);
-		// Nothing is paid for or derived until the draft has its URL and screenshot.
-		if (!stored && observedUrl && evidence && captchaCredentialsProblem()) throw new Error("NameSilo phishing reporting requires DEATHBYCAPTCHA_USERNAME and DEATHBYCAPTCHA_PASSWORD.");
+		// Nothing is derived until the draft has its URL and screenshot.
 		const realWebsite = stored ? stored.report.realWebsite : observedUrl && evidence ? await nameSiloRealWebsite(report, target.normalizedTarget, dependencies) : undefined;
 		return { target: target.normalizedTarget, observedUrl: observedUrl ?? "", description: report.description, allegationCategory: report.allegationCategory, realWebsite: realWebsite ?? "", evidence };
 	},
@@ -243,7 +243,11 @@ export const nameSiloDraft = createDraft({
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
 
-/** Before the marker: the verified draft and its screenshot, the CSRF session and the solved reCAPTCHA. */
+/**
+ * Before the marker: the verified draft and its screenshot, the CSRF session
+ * and then, last, the reCAPTCHA token (it lives about two minutes, and the
+ * filing request follows the marker at once).
+ */
 export async function prepareNameSiloExternalSubmission(
 	context: ProviderSubmissionContext,
 	{ payload, data }: VerifiedOf<typeof nameSiloDraft>,
@@ -251,17 +255,21 @@ export async function prepareNameSiloExternalSubmission(
 ): Promise<ProviderSubmissionPreflight> {
 	const { bytes } = await evidenceFileOf(NAMESILO_EVIDENCE_CONTRACT, "NameSilo", payload.evidence, data, dependencies);
 	const fetcher = dependencies.fetch ?? fetch;
-	const [session, captchaToken] = await Promise.all([
-		fetchNameSiloSession(fetcher, context.signal, dependencies.now ?? Date.now),
-		(dependencies.captchaSolver ?? solveNameSiloCaptcha)(context.signal),
-	]);
+	const session = await fetchNameSiloSession(fetcher, context.signal, dependencies.now ?? Date.now);
+	const captchaToken = await (dependencies.captchaSolver ?? solveNameSiloCaptcha)(context.signal);
 	const state: NameSiloPreflightState = { ...session, captchaToken, payload, evidenceBytes: bytes };
 	if (!storedPreflightState({ state })) throw new Error("NameSilo preflight returned invalid ephemeral state.");
 	return { state };
 }
 
-/** Solve the exact reCAPTCHA v2 token requested by NameSilo's public form. */
-export const solveNameSiloCaptcha = (signal?: AbortSignal) => solveRecaptchaV2(NAMESILO_PROVIDER.captcha, NAMESILO_PROVIDER.reportPageUrl, signal);
+/** The reCAPTCHA v2 token of NameSilo's public form, passed by the solver of a Fabric browser on that page. */
+const solveNameSiloCaptcha = (signal?: AbortSignal) => captchaTokenFromPage({
+	provider: NAMESILO_PROVIDER.displayName,
+	operation: "namesilo-report",
+	url: NAMESILO_PROVIDER.reportPageUrl,
+	formSelector: NAMESILO_PROVIDER.captcha.formSelector,
+	kind: NAMESILO_PROVIDER.captcha.kind,
+}, signal);
 
 /** The one provider POST, from the preflight's verified draft and session. */
 export async function submitNameSiloSubmission(

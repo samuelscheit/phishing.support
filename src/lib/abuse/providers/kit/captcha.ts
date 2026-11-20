@@ -1,26 +1,37 @@
-import { getDeathByCaptchaCredentials, solveDeathByCaptchaToken } from "../../captcha/death_by_captcha";
+import type { CaptchaKind } from "../../../browser/captcha_state";
+import { openBrowserForm, type BrowserFormDependencies } from "./browser_form";
 
-/** Why the captcha service cannot be paid (the DEATHBYCAPTCHA_* credentials are unusable), or undefined when it can. */
-export function captchaCredentialsProblem(): string | undefined {
+export type CaptchaTokenPage = {
+	/** The provider's name, for errors. */
+	provider: string;
+	/** Names the Fabric session. */
+	operation: string;
+	/** The provider's own form page, which renders the widget. */
+	url: string;
+	/** Present once the page has rendered past any Cloudflare check. */
+	formSelector: string;
+	kind: CaptchaKind;
+	widgetSelector?: string;
+	timeoutMs?: number;
+};
+
+/**
+ * A token for a provider that files over plain HTTP but gates a step on a
+ * reCAPTCHA or Turnstile widget: open the provider's form page in a Fabric
+ * Chrome on the reporting egress, let the browser's solver pass the widget,
+ * read the token from its response field and release the browser. It files
+ * nothing, so it runs in a preflight before the durable marker; the browser
+ * is released on every path. A reCAPTCHA token lives about two minutes, so
+ * the request that carries it must follow at once.
+ */
+export async function captchaTokenFromPage(page: CaptchaTokenPage, signal: AbortSignal | undefined, dependencies: BrowserFormDependencies = {}): Promise<string> {
+	const session = await openBrowserForm({ provider: page.provider, operation: page.operation, url: page.url, formSelector: page.formSelector, ...(signal ? { signal } : {}) }, dependencies);
 	try {
-		getDeathByCaptchaCredentials();
-		return undefined;
-	} catch (error) {
-		return error instanceof Error ? error.message : String(error);
+		return await session.waitForCaptchaToken(page.kind, {
+			...(page.widgetSelector ? { widgetSelector: page.widgetSelector } : {}),
+			...(page.timeoutMs ? { timeoutMs: page.timeoutMs } : {}),
+		});
+	} finally {
+		await session.close();
 	}
 }
-
-/** Solve one captcha through Death by Captcha; `parameters` are the page's site key and URL under the provider's own names. */
-export function solveCaptchaToken(
-	spec: { type: number; parametersField: string; parameters: Record<string, unknown> },
-	signal?: AbortSignal,
-): Promise<string> {
-	return solveDeathByCaptchaToken({ ...spec, ...(signal ? { signal } : {}) });
-}
-
-/** The reCAPTCHA v2 checkbox of `pageUrl`, whose pinned definition names its site key. */
-export const solveRecaptchaV2 = (captcha: { type: number; siteKey: string }, pageUrl: string, signal?: AbortSignal) => solveCaptchaToken({
-	type: captcha.type,
-	parametersField: "token_params",
-	parameters: { googlekey: captcha.siteKey, pageurl: pageUrl },
-}, signal);

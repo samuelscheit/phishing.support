@@ -14,7 +14,7 @@ export type GoogleCloudService = (typeof GOOGLE_CLOUD_SERVICES)[number];
 export const GOOGLE_CLOUD_PROVIDER = definePinned({
 	key: "google_cloud",
 	displayName: "Google Cloud Abuse Report",
-	version: "2026-11-20.1",
+	version: "2026-11-22.1",
 	exactMailboxes: ["network-abuse@google.com", "google-cloud-compliance@google.com"],
 	supplemental: false,
 	reportPageUrl: "https://support.google.com/code/contact/cloud_platform_report?hl=en",
@@ -22,9 +22,10 @@ export const GOOGLE_CLOUD_PROVIDER = definePinned({
 	submitEndpointPath: "/apis/cufinsert",
 	/** The checkbox reCAPTCHA the form falls back to when its invisible check does not pass. */
 	captcha: {
-		provider: "death_by_captcha" as const,
-		type: 4 as const,
-		siteKey: "6LdZHQYTAAAAAFnofYfPjNlXpxWAqTwfLh9d0zL2",
+		solver: "browser_fabric" as const,
+		kind: "recaptcha" as const,
+		/** The checkbox widget's own response field; the invisible check keeps another one. */
+		tokenSelector: ".g-recaptcha-v2 textarea[name='g-recaptcha-response']",
 	},
 	abuseDetailsMaximumLength: 1_000,
 	reporter: {

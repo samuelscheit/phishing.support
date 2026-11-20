@@ -16,7 +16,7 @@ const [firstName = "", ...lastNameParts] = serviceIdentity.name.split(" ");
 export const NEWFOLD_PROVIDER = definePinned({
 	key: "newfold",
 	displayName: "Newfold Digital",
-	version: "2026-11-21.1",
+	version: "2026-11-22.1",
 	exactMailboxes: ["abuse@bluehost.com", "abuse@unifiedlayer.com", "iarpoc@newfold.com", "net-eng-team@newfold.com", "domain.operations@web.com"],
 	registrarIds: [2, 9, 886],
 	supplemental: false,
@@ -66,7 +66,10 @@ export const NEWFOLD_PROVIDER = definePinned({
 	},
 	/** Brand by the IANA registrar ID that selected the route. */
 	brandByRegistrarId: { 2: "100-networksolutions.com", 9: "200-register.com", 886: "Domain.com" },
-	captcha: { type: 4 as const, siteKey: "6Lc2vj8lAAAAAF4yi77gg_-kxh2q4FyIBHUK9pES", pageUrl: "https://www.newfold.com/abuse" },
+	/** The form's reCAPTCHA v2 checkbox, passed by the browser's own solver in the page that files. */
+	captcha: { solver: "browser_fabric" as const, kind: "recaptcha" as const },
+	/** OneTrust's cookie banner, which covers the reCAPTCHA widget: its accept button, and the container hidden for good. */
+	cookieBanner: { accept: "#onetrust-accept-btn-handler", container: "#onetrust-consent-sdk" },
 	/** The page the servlet redirects to after it created the case (the `thankyou` hidden field). */
 	thankYouPath: "/thank-you",
 	commentsMaximumLength: 1_000,

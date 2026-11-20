@@ -88,7 +88,7 @@ export async function prepareNameComExternalSubmission(context: ProviderSubmissi
 	return withPreflight(() => (dependencies.openForm ?? formOpener(PROVIDER, "name-com-report", { url: PROVIDER.formUrl, formSelector: PROVIDER.formSelector }))(context.signal), async (session): Promise<NameComPreflightState> => {
 		const ticked = await session.clickAll(PROVIDER.checkboxSelector);
 		if (ticked !== PROVIDER.checkboxCount) throw new Error(`Name.com's form has ${ticked} consent checkboxes, not ${PROVIDER.checkboxCount}.`);
-		const token = await session.waitForTurnstileToken({ widgetSelector: PROVIDER.turnstileWidgetSelector });
+		const token = await session.waitForCaptchaToken("turnstile", { widgetSelector: PROVIDER.turnstileWidgetSelector });
 		const referrer = await session.readGlobal("document.referrer");
 		const handshake = await session.request({
 			method: "GET",

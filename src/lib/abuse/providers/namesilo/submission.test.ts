@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { validateAbuseReportRequest } from "../../contracts";
@@ -24,23 +24,6 @@ const prepareNameSiloExternalSubmission = verifiedPrepare(nameSiloDraft, rawPrep
 useTemporaryDatabase();
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9JH1EAAAAASUVORK5CYII=", "base64");
-const originalCredentials = {
-	username: process.env.DEATHBYCAPTCHA_USERNAME,
-	password: process.env.DEATHBYCAPTCHA_PASSWORD,
-};
-
-beforeEach(() => {
-	process.env.DEATHBYCAPTCHA_USERNAME = "test-user";
-	process.env.DEATHBYCAPTCHA_PASSWORD = "test-password";
-});
-
-afterAll(() => {
-	if (originalCredentials.username === undefined) delete process.env.DEATHBYCAPTCHA_USERNAME;
-	else process.env.DEATHBYCAPTCHA_USERNAME = originalCredentials.username;
-	if (originalCredentials.password === undefined) delete process.env.DEATHBYCAPTCHA_PASSWORD;
-	else process.env.DEATHBYCAPTCHA_PASSWORD = originalCredentials.password;
-});
-
 function payload() {
 	const evidence = selectProviderEvidenceImageArtifact([evidenceArtifact(png)], NAMESILO_EVIDENCE_CONTRACT);
 	if (!evidence) throw new Error("Expected valid NameSilo evidence.");
@@ -184,7 +167,11 @@ describe("NameSilo phishing report submission", () => {
 						requests.push({ url: String(input), init });
 						return csrfResponse();
 					},
-					captchaSolver: async () => "captcha-token",
+					captchaSolver: async () => {
+						// The token is taken last, after the CSRF session: it lives only about two minutes.
+						expect(requests.map(({ url }) => url)).toEqual([NAMESILO_PROVIDER.tokenUrl]);
+						return "captcha-token";
+					},
 					now: () => 1_000_000,
 				}),
 				submit: async (context, preflight) => {

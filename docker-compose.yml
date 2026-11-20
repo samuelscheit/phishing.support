@@ -36,10 +36,6 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.5}
-      # Death by Captcha solver for the providers that file over HTTP (Tucows,
-      # Newfold, NameSilo, Google Cloud); not used to launch a browser.
-      DEATHBYCAPTCHA_USERNAME: ${DEATHBYCAPTCHA_USERNAME:-}
-      DEATHBYCAPTCHA_PASSWORD: ${DEATHBYCAPTCHA_PASSWORD:-}
       # Patchright logs in through Fabric direct egress; cached dashboard
       # credentials authorize single-shot HTTP abuse-report submissions.
       ABUSE_CLOUDFLARE_ACCOUNT_ID: ${ABUSE_CLOUDFLARE_ACCOUNT_ID:-}

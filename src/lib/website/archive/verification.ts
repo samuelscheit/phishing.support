@@ -1,12 +1,17 @@
 import { type Frame, type Page } from "rebrowser-puppeteer-core";
 
-import { CAPTCHA_PROVIDER_FRAME } from "../../browser/human_check";
 import { sleep } from "../../util/sleep";
 import { WEBSITE_RENDER_IDLE_MS, settleRendering } from "./settle";
 import type { WebsiteVerificationGate } from "./types";
 
 /** How often a clicked verification gate is checked for the page it reveals. */
 const WEBSITE_GATE_POLL_MS = 250;
+
+/**
+ * Frames of real captcha services: Google reCAPTCHA, hCaptcha, and Cloudflare
+ * Turnstile. Browser Fabric's solver passes those; a kit's own gate never lives there.
+ */
+const CAPTCHA_PROVIDER_FRAME = /^https:\/\/(?:www\.)?(?:google\.com\/recaptcha\/|recaptcha\.net\/|[\w-]+\.hcaptcha\.com\/|hcaptcha\.com\/|challenges\.cloudflare\.com\/)/i;
 
 /** Marks the one gate control found, so it can be located again to click. */
 const GATE_ATTRIBUTE = "data-phishing-support-gate";

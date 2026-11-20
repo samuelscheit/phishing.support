@@ -192,8 +192,8 @@ describe("Tencent Cloud browser filing", () => {
 	test("a failure before the marker closes the browser and sends nothing", async () => {
 		const payload = await readyPayload();
 		const deps = { loadRouteContext: routeContext(), getArtifact: async () => screenshotArtifact() };
-		const failing = fakeTencentForm({ captureError: new Error("Tencent's slider did not pass after 6 puzzles") });
-		await expect(prepareTencentExternalSubmission({ routeId: 5n, payload }, { ...deps, open: failing.open })).rejects.toThrow("slider did not pass");
+		const failing = fakeTencentForm({ captureError: new Error("Tencent Cloud form could not be prepared: Tencent Cloud's slider was not solved (failed: tcaptcha: puzzle refused 3 times)") });
+		await expect(prepareTencentExternalSubmission({ routeId: 5n, payload }, { ...deps, open: failing.open })).rejects.toThrow("slider was not solved");
 		expect(failing.events).toEqual(["capture", "close"]);
 
 		// A page whose request differs from the draft is not filed either.

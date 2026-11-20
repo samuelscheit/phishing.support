@@ -180,7 +180,7 @@ type TencentPreflightState = { payload: TencentSubmissionPayload; request: Tence
 
 /**
  * Before the marker, with nothing filed: the verified draft is filled into
- * the live form in a browser, its slider puzzle is solved by image analysis,
+ * the live form in a browser, its slider puzzle is passed by the browser's solver,
  * and the form's own filing request, ticket included, is caught and aborted.
  * Any failure closes the browser.
  */

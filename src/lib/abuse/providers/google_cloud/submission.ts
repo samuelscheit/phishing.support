@@ -1,13 +1,13 @@
 import type { HTTPResponse, Page } from "rebrowser-puppeteer-core";
 
 import { getBrowser, getBrowserPage } from "../../../browser";
+import { CaptchaError, waitForCaptchaToken } from "../../../browser/captcha_state";
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
 import { createDraft, type RouteData } from "../kit/draft";
-import { solveRecaptchaV2 } from "../kit/captcha";
 import { snippet } from "../../../util/text";
 import { emailOriginOf } from "../email_origin";
-import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
+import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { GOOGLE_CLOUD_PROVIDER } from "./definition";
 import {
 	buildGoogleCloudSubmissionPayload,
@@ -21,19 +21,17 @@ const CANCELED = "Google Cloud abuse report submission was canceled.";
 const FORM_READY_TIMEOUT_MS = 45_000;
 const SUBMIT_RESPONSE_TIMEOUT_MS = 60_000;
 const CONFIRMATION_TIMEOUT_MS = 20_000;
+/** How long the browser's solver may take on the checkbox reCAPTCHA: its image rounds, then Fabric's DeathByCaptcha fallback. */
+const CHECKBOX_TIMEOUT_MS = 240_000;
 
 type GoogleCloudFormSession = { page: Page; close(): Promise<void> };
 
 export type GoogleCloudSubmissionDependencies = {
-	/** A page on the direct reporting egress; Google's form challenges Tor exits. */
+	/** A Fabric page on the direct reporting egress (Google's form challenges Tor exits), whose solver passes the checkbox reCAPTCHA. */
 	openPage?: () => Promise<GoogleCloudFormSession>;
 	reportPageUrl?: string;
-	timeouts?: Partial<{ formReadyMs: number; submitResponseMs: number; confirmationMs: number }>;
-	solveCaptcha?: (signal?: AbortSignal) => Promise<string>;
+	timeouts?: Partial<{ formReadyMs: number; submitResponseMs: number; confirmationMs: number; checkboxMs: number }>;
 };
-
-/** Solve the checkbox reCAPTCHA the form falls back to. */
-export const solveGoogleCloudCaptcha = (signal?: AbortSignal) => solveRecaptchaV2(GOOGLE_CLOUD_PROVIDER.captcha, GOOGLE_CLOUD_PROVIDER.reportPageUrl, signal);
 
 async function openReportingPage(): Promise<GoogleCloudFormSession> {
 	const browser = await getBrowser("reporting");
@@ -173,19 +171,21 @@ async function submitOnce(page: Page, step: <T>(operation: Promise<T>) => Promis
 }
 
 /**
- * Place a solved checkbox token where the form's own widget keeps it, so the
- * form's next request carries it as `recaptcha_response`.
+ * Wait for the browser's solver to pass the checkbox reCAPTCHA the form shows
+ * after `REQUIRED_RECAPTCHA`; the widget then holds the token the form's next
+ * request carries as `recaptcha_response`. Google created no case, so a
+ * solver that fails leaves nothing filed: a person takes it from there.
  */
-async function installCheckboxToken(page: Page, token: string): Promise<void> {
-	await page.waitForFunction(() => {
-		const recaptcha = (window as Window & { grecaptcha?: { getResponse?: unknown } }).grecaptcha;
-		return typeof recaptcha?.getResponse === "function" && document.querySelector(".g-recaptcha-v2 iframe") !== null;
-	}, { timeout: 20_000 });
-	await page.evaluate((value) => {
-		const recaptcha = (window as unknown as { grecaptcha: { getResponse: (widget?: unknown) => string } }).grecaptcha;
-		recaptcha.getResponse = () => value;
-		for (const field of document.querySelectorAll<HTMLTextAreaElement>(".g-recaptcha-v2 textarea[name='g-recaptcha-response']")) field.value = value;
-	}, token);
+async function waitForCheckbox(page: Page, timeoutMs: number, signal: AbortSignal | undefined): Promise<void> {
+	await waitForCaptchaToken(page, GOOGLE_CLOUD_PROVIDER.captcha.kind, {
+		label: "Google Cloud's checkbox reCAPTCHA",
+		tokenSelector: GOOGLE_CLOUD_PROVIDER.captcha.tokenSelector,
+		timeoutMs,
+		...(signal ? { signal } : {}),
+	}).catch((error: unknown) => {
+		if (error instanceof CaptchaError) throw new ProviderSubmissionNeedsHumanError(`${error.message}; Google created no case.`);
+		throw error;
+	});
 }
 
 /** Fill and send the form from its durable draft, then read Google's confirmation. */
@@ -203,7 +203,7 @@ export async function submitGoogleCloudSubmission(
 	const closeBrowser = () => { void session.close().catch(() => undefined); };
 	throwIfOperationCanceled(signal, CANCELED);
 	signal?.addEventListener("abort", closeBrowser, { once: true });
-	const timeouts = { formReadyMs: FORM_READY_TIMEOUT_MS, submitResponseMs: SUBMIT_RESPONSE_TIMEOUT_MS, confirmationMs: CONFIRMATION_TIMEOUT_MS, ...dependencies.timeouts };
+	const timeouts = { formReadyMs: FORM_READY_TIMEOUT_MS, submitResponseMs: SUBMIT_RESPONSE_TIMEOUT_MS, confirmationMs: CONFIRMATION_TIMEOUT_MS, checkboxMs: CHECKBOX_TIMEOUT_MS, ...dependencies.timeouts };
 	const step = <T>(operation: Promise<T>) => raceAbort(operation, signal, closeBrowser, CANCELED);
 	try {
 		const { page } = session;
@@ -217,9 +217,8 @@ export async function submitGoogleCloudSubmission(
 		let attempt = await submitOnce(page, step, timeouts.submitResponseMs);
 		if (attempt.answer.outcome === "captcha_required") {
 			// Google created no case and switched the form to its checkbox
-			// reCAPTCHA. Solve it and send the same form once more.
-			const token = await step((dependencies.solveCaptcha ?? solveGoogleCloudCaptcha)(signal));
-			await step(installCheckboxToken(page, token));
+			// reCAPTCHA. The browser's solver passes it; send the same form once more.
+			await step(waitForCheckbox(page, timeouts.checkboxMs, signal));
 			attempt = await submitOnce(page, step, timeouts.submitResponseMs);
 			if (attempt.answer.outcome === "captcha_required") {
 				throw new ProviderSubmissionRejectedError("Google Cloud abuse form rejected the solved reCAPTCHA; no case was created.");

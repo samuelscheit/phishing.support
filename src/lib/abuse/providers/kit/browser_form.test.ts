@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { BrowserFormError, openBrowserForm, type BrowserFormDependencies, type BrowserFormPage } from "./browser_form";
+import { captchaTokenFromPage } from "./captcha";
 import { OperationCanceledError } from "../../worker/cancellation";
 
-type FakeElement = { name?: string; type?: string; value?: string; scrolled?: boolean };
+type FakeElement = { name?: string; type?: string; value?: string; scrolled?: boolean; scrollIntoView?: (options: unknown) => void };
 
 /**
  * A page that runs the helper's in-page functions in this process against a
@@ -12,6 +13,8 @@ type FakeElement = { name?: string; type?: string; value?: string; scrolled?: bo
 class FakePage implements BrowserFormPage {
 	title = "Just a moment...";
 	elements = new Map<string, FakeElement | undefined>();
+	/** The attributes Browser Fabric's solver publishes on the top document. */
+	captcha: { "data-captcha-state"?: string; "data-captcha-detail"?: string } = {};
 	formElements: FakeElement[] = [];
 	closed = false;
 	gotos: { url: string; timeout: number }[] = [];
@@ -32,9 +35,14 @@ class FakePage implements BrowserFormPage {
 		if (this.evaluateError) throw this.evaluateError;
 		const document = {
 			get title() { return page.title; },
+			documentElement: { getAttribute: (name: "data-captcha-state" | "data-captcha-detail") => page.captcha[name] ?? null },
+			querySelectorAll: (selector: string) => [page.elements.get(selector)].filter(Boolean),
 			querySelector: (selector: string) => {
 				if (selector.startsWith("form#") || selector === "form.f") return page.elements.get("form") ?? null;
-				return page.elements.get(selector) ?? null;
+				const element = page.elements.get(selector);
+				// Every element of a real page can be scrolled to.
+				if (element && !element.scrollIntoView) element.scrollIntoView = () => undefined;
+				return element ?? null;
 			},
 		};
 		const page = this;
@@ -64,7 +72,7 @@ function harness(page = new FakePage(), overrides: Partial<BrowserFormDependenci
 		...overrides,
 	};
 	const open = (extra: Partial<Parameters<typeof openBrowserForm>[0]> = {}) => openBrowserForm({ provider: "PDR", operation: "pdr-report", url: "https://example.test/form/", formSelector: "form.f", challengeTimeoutMs: 5_000, ...extra }, dependencies);
-	return { page, state, open };
+	return { page, state, open, dependencies };
 }
 
 const originalFetch = globalThis.fetch;
@@ -153,25 +161,45 @@ describe("session", () => {
 
 	test("waits for the Turnstile token, scrolling the widget into view on every poll", async () => {
 		const { page, session } = await ready();
-		const widget: FakeElement & { scrollIntoView?: (options: unknown) => void } = {};
 		let scrolls = 0;
-		(widget as { scrollIntoView: () => void }).scrollIntoView = () => { scrolls++; };
 		const token: FakeElement = { value: "" };
-		page.elements.set(".cf-turnstile", widget);
+		page.elements.set(".cf-turnstile", { scrollIntoView: () => { scrolls++; } });
 		page.elements.set('input[name="cf-turnstile-response"]', token);
 		const before = page.evaluations;
 		page.onEvaluate = (calls) => { if (calls === before + 3) token.value = "0.TOKEN"; };
-		expect(await session.waitForTurnstileToken()).toBe("0.TOKEN");
+		expect(await session.waitForCaptchaToken("turnstile")).toBe("0.TOKEN");
 		expect(scrolls).toBe(3);
 	});
 
 	test("no token within the bound, and no widget at all, are told apart", async () => {
 		const { page, session } = await ready();
-		page.elements.set(".cf-turnstile", { scrollIntoView: () => undefined } as never);
+		page.elements.set(".cf-turnstile", { scrollIntoView: () => undefined });
 		page.elements.set('input[name="cf-turnstile-response"]', { value: "" });
-		await expect(session.waitForTurnstileToken({ timeoutMs: 2_000 })).rejects.toMatchObject({ stage: "turnstile", message: "PDR: Cloudflare Turnstile issued no token within 2 s" });
+		await expect(session.waitForCaptchaToken("turnstile", { timeoutMs: 2_000 })).rejects.toMatchObject({ stage: "captcha", message: "PDR's Cloudflare Turnstile: no token within 2 s (no captcha state)" });
 		page.elements.delete(".cf-turnstile");
-		await expect(session.waitForTurnstileToken({ timeoutMs: 1_000 })).rejects.toMatchObject({ stage: "turnstile", message: "PDR: the Turnstile widget (.cf-turnstile) is not on the page" });
+		await expect(session.waitForCaptchaToken("turnstile", { timeoutMs: 1_000 })).rejects.toMatchObject({ stage: "captcha", message: "PDR's Cloudflare Turnstile: the widget (.cf-turnstile) is not on the page" });
+	});
+
+	test("a reCAPTCHA token is taken only once the solver says solved, never a half-written one", async () => {
+		const { page, session } = await ready();
+		const token: FakeElement = { value: "" };
+		page.elements.set('textarea[name="g-recaptcha-response"]', token);
+		const before = page.evaluations;
+		page.onEvaluate = (calls) => {
+			const look = calls - before;
+			if (look === 1) page.captcha = { "data-captcha-state": "solving", "data-captcha-detail": "recaptcha" };
+			if (look === 3) token.value = "03AF-stale";
+			if (look === 5) Object.assign(token, { value: "03AF-TOKEN" }) && (page.captcha = { "data-captcha-state": "solved", "data-captcha-detail": "recaptcha" });
+		};
+		expect(await session.waitForCaptchaToken("recaptcha")).toBe("03AF-TOKEN");
+		expect(page.evaluations - before).toBe(5);
+	});
+
+	test("a solver that gives up is a captcha-stage error with its reason, without waiting out the bound", async () => {
+		const { page, session, state } = await ready();
+		page.captcha = { "data-captcha-state": "failed", "data-captcha-detail": "recaptcha: image grid not solved" };
+		await expect(session.waitForCaptchaToken("recaptcha")).rejects.toMatchObject({ stage: "captcha", message: "PDR's reCAPTCHA: the captcha solver failed (recaptcha: image grid not solved)" });
+		expect(state.clock).toBe(0);
 	});
 
 	test("reads the form's matching named fields, not files, checkboxes or other inputs", async () => {
@@ -220,6 +248,18 @@ describe("session", () => {
 		const file = body.get("upload") as File;
 		expect([file.name, file.type]).toEqual(["shot.png", "image/png"]);
 		expect(Buffer.from(await file.arrayBuffer())).toEqual(png);
+	});
+
+	test("reports the URL the page's fetch ended on after following a redirect", async () => {
+		const { session } = await ready();
+		const seen: RequestInit[] = [];
+		globalThis.fetch = (async (_url: string, init: RequestInit) => {
+			seen.push(init);
+			return { status: 200, url: "https://example.test/thank-you", text: async () => "<html>Thanks</html>" };
+		}) as never;
+		const answer = await session.postForm("https://example.test/bin/lead", [["a", "1"]]);
+		expect(answer).toEqual({ status: 200, text: "<html>Thanks</html>", json: undefined, url: "https://example.test/thank-you" });
+		expect(seen[0]!.redirect).toBeUndefined();
 	});
 
 	test("a non-JSON answer keeps its status and text; a failed request names the stage", async () => {
@@ -338,5 +378,51 @@ describe("clickAll and request (in-page controls and header-aware requests)", ()
 		const session = await opened({});
 		globalThis.fetch = (async () => { throw new TypeError("Failed to fetch"); }) as never;
 		await expect(session.request({ method: "GET", url: "https://example.test/csrf" })).rejects.toMatchObject({ stage: "request", message: "X: the request to /csrf failed (Failed to fetch)" });
+	});
+});
+
+describe("captchaTokenFromPage (the Fabric preflight of a provider that files over HTTP)", () => {
+	const spec = { provider: "NameSilo", operation: "namesilo-report", url: "https://example.test/phishing-report", formSelector: "form.f", kind: "recaptcha" as const };
+	const rendered = () => {
+		const fixture = harness();
+		fixture.page.title = "Phishing report";
+		fixture.page.elements.set("form", {});
+		return fixture;
+	};
+
+	test("opens the provider's page, returns the token the solver passed, and releases the browser", async () => {
+		const { page, state, dependencies } = rendered();
+		page.captcha = { "data-captcha-state": "solved", "data-captcha-detail": "recaptcha" };
+		page.elements.set('textarea[name="g-recaptcha-response"]', { value: "03AF-TOKEN" });
+		expect(await captchaTokenFromPage(spec, undefined, dependencies)).toBe("03AF-TOKEN");
+		expect(page.gotos.map(({ url }) => url)).toEqual([spec.url]);
+		expect([page.closed, state.released]).toEqual([true, 1]);
+	});
+
+	test("a solver that fails, or no token within the bound, still releases the browser", async () => {
+		const failed = rendered();
+		failed.page.captcha = { "data-captcha-state": "failed", "data-captcha-detail": "recaptcha: image grid not solved" };
+		await expect(captchaTokenFromPage(spec, undefined, failed.dependencies)).rejects.toMatchObject({ stage: "captcha", message: "NameSilo's reCAPTCHA: the captcha solver failed (recaptcha: image grid not solved)" });
+		expect([failed.page.closed, failed.state.released]).toEqual([true, 1]);
+
+		const slow = rendered();
+		slow.page.captcha = { "data-captcha-state": "solving", "data-captcha-detail": "recaptcha" };
+		await expect(captchaTokenFromPage({ ...spec, timeoutMs: 3_000 }, undefined, slow.dependencies)).rejects.toMatchObject({ stage: "captcha", message: "NameSilo's reCAPTCHA: no token within 3 s (solving: recaptcha)" });
+		expect([slow.page.closed, slow.state.released]).toEqual([true, 1]);
+	});
+
+	test("a page that never renders past Cloudflare releases the browser before any token is looked for", async () => {
+		const { page, state, dependencies } = harness();
+		await expect(captchaTokenFromPage({ ...spec, timeoutMs: 3_000 }, undefined, { ...dependencies })).rejects.toMatchObject({ stage: "challenge" });
+		expect([page.closed, state.released]).toEqual([true, 1]);
+	});
+
+	test("an abort while the solver works cancels the wait and releases the browser", async () => {
+		const { page, state, dependencies } = rendered();
+		page.captcha = { "data-captcha-state": "solving", "data-captcha-detail": "recaptcha" };
+		const controller = new AbortController();
+		page.onEvaluate = (calls) => { if (calls === 4) controller.abort(); };
+		await expect(captchaTokenFromPage(spec, controller.signal, dependencies)).rejects.toBeInstanceOf(OperationCanceledError);
+		expect([page.closed, state.released]).toEqual([true, 1]);
 	});
 });

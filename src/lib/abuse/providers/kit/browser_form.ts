@@ -1,3 +1,4 @@
+import { CaptchaError, waitForCaptchaToken, type CaptchaKind } from "../../../browser/captcha_state";
 import { acquireFabricPatchrightSession, type FabricPatchrightSession } from "../../../browser/fabric";
 import { errorSummary } from "../../../util/error_text";
 import { sleep, type Sleep } from "../../../util/sleep";
@@ -7,15 +8,16 @@ import { parseJson } from "../../../util/values";
 
 /**
  * A provider form that sits behind a Cloudflare managed challenge (and often a
- * Turnstile widget): plain HTTP cannot even load it, but a real Chrome from
- * Browser Fabric passes both on its own. This opens the form in such a
+ * captcha widget): plain HTTP cannot even load it, but a real Chrome from
+ * Browser Fabric passes both on its own (its solver handles the widget,
+ * `browser/captcha_state.ts`). This opens the form in such a
  * browser and lets the provider read the page and post requests from inside it,
  * so the page's cookies (`cf_clearance`), user agent and egress apply.
  *
  * Every stage that can fail names itself (`BrowserFormError.stage`), so a
  * caller that runs this before its durable marker can retry safely.
  */
-export type BrowserFormStage = "browser" | "load" | "challenge" | "form" | "turnstile" | "page" | "request";
+export type BrowserFormStage = "browser" | "load" | "challenge" | "form" | "captcha" | "page" | "request";
 
 export class BrowserFormError extends Error {
 	constructor(readonly stage: BrowserFormStage, message: string) {
@@ -50,15 +52,15 @@ export type BrowserFormOptions = {
 	loadTimeoutMs?: number;
 };
 
-type TurnstileOptions = { widgetSelector?: string; tokenSelector?: string; timeoutMs?: number };
+type CaptchaTokenOptions = { widgetSelector?: string; timeoutMs?: number };
 
 export type BrowserFormSession = {
 	/** The form's named inputs (hidden and honeypot ones too) whose name matches `namePattern`, as the page renders them. */
 	readFormFields(namePattern: string, formSelector?: string): Promise<BrowserFormField[]>;
 	/** A global of the page, by dotted path (`dnd_cf7_uploader.ajax_nonce`); undefined when absent. */
 	readGlobal(path: string): Promise<unknown>;
-	/** Scroll the Turnstile widget into view and wait for it to solve itself. */
-	waitForTurnstileToken(options?: TurnstileOptions): Promise<string>;
+	/** Wait until the browser's solver has passed the page's `kind` widget (scrolled into view meanwhile) and return its token. */
+	waitForCaptchaToken(kind: CaptchaKind, options?: CaptchaTokenOptions): Promise<string>;
 	/** POST multipart from inside the page; the answer's status, text and parsed JSON (undefined when it is none). */
 	postForm(url: string, fields: readonly BrowserFormField[], timeoutMs?: number, headers?: Readonly<Record<string, string>>): Promise<BrowserFormResponse>;
 	close(): Promise<void>;
@@ -79,13 +81,23 @@ export type BrowserFormDependencies = {
 const BROWSER_FORM_DEFAULTS = {
 	challengeTimeoutMs: 60_000,
 	loadTimeoutMs: 45_000,
-	turnstileTimeoutMs: 60_000,
+	/**
+	 * Turnstile passes in about 10 s; a reCAPTCHA v2 from a datacenter IP
+	 * often takes the solver's image rounds (~90 s) and then Fabric's
+	 * DeathByCaptcha fallback, so `solved` can come minutes in.
+	 */
+	captchaTimeoutMs: 240_000,
 	requestTimeoutMs: 60_000,
 	pollMs: 500,
 } as const;
 
-const TURNSTILE_WIDGET = ".cf-turnstile";
-const TURNSTILE_TOKEN = 'input[name="cf-turnstile-response"]';
+/**
+ * The widget, scrolled into view on every look so the solver can see and
+ * click it: Turnstile's container (it renders only once in view) and
+ * reCAPTCHA's checkbox frame (its container is often the page's own).
+ */
+const CAPTCHA_WIDGET: Record<CaptchaKind, string> = { turnstile: ".cf-turnstile", recaptcha: 'iframe[src*="/recaptcha/"][src*="/anchor"]' };
+const CAPTCHA_NAME: Record<CaptchaKind, string> = { turnstile: "Cloudflare Turnstile", recaptcha: "reCAPTCHA" };
 
 // The functions below run inside the page: no closures, one serializable argument.
 
@@ -93,13 +105,6 @@ function challengeProbe(selectors: { form: string }): { challenge: boolean; form
 	const challenge = /just a moment|attention required|checking your browser/i.test(document.title)
 		|| document.querySelector("#challenge-running, #challenge-stage, #challenge-form, #cf-challenge-running, .cf-browser-verification") !== null;
 	return { challenge, form: document.querySelector(selectors.form) !== null };
-}
-
-function turnstileProbe(selectors: { widget: string; token: string }): { widget: boolean; token: string } {
-	const widget = document.querySelector(selectors.widget);
-	widget?.scrollIntoView({ block: "center" });
-	const input = document.querySelector(selectors.token) as HTMLInputElement | null;
-	return { widget: widget !== null, token: input?.value ?? "" };
 }
 
 function formFieldsProbe(argument: { form: string; pattern: string }): [string, string][] {
@@ -215,22 +220,17 @@ export async function openBrowserForm(options: BrowserFormOptions, dependencies:
 	return {
 		readFormFields: (namePattern, formSelector) => run("page", "the form fields could not be read", form.evaluate(formFieldsProbe, { form: formSelector ?? options.formSelector, pattern: namePattern })),
 		readGlobal: (path) => run("page", `the page value ${path} could not be read`, form.evaluate(globalProbe, path)),
-		waitForTurnstileToken: async (turnstile = {}) => {
-			const timeoutMs = turnstile.timeoutMs ?? BROWSER_FORM_DEFAULTS.turnstileTimeoutMs;
-			const selectors = { widget: turnstile.widgetSelector ?? TURNSTILE_WIDGET, token: turnstile.tokenSelector ?? TURNSTILE_TOKEN };
-			let widget = false;
-			// The widget renders only once it is scrolled into view, so every poll scrolls again.
-			const result = await until(async () => {
-				const probe = await form.evaluate(turnstileProbe, selectors);
-				widget = probe.widget;
-				return probe.token ? probe.token : undefined;
-			}, timeoutMs);
-			if (result.value) return result.value;
-			const seconds = `${Math.round(timeoutMs / 1000)} s`;
-			throw new BrowserFormError("turnstile", widget
-				? `${provider}: Cloudflare Turnstile issued no token within ${seconds}`
-				: `${provider}: the Turnstile widget (${selectors.widget}) is not on the page`);
-		},
+		waitForCaptchaToken: (kind, captcha = {}) => step(waitForCaptchaToken(form, kind, {
+			label: `${provider}'s ${CAPTCHA_NAME[kind]}`,
+			timeoutMs: captcha.timeoutMs ?? BROWSER_FORM_DEFAULTS.captchaTimeoutMs,
+			widgetSelector: captcha.widgetSelector ?? CAPTCHA_WIDGET[kind],
+			pollMs: BROWSER_FORM_DEFAULTS.pollMs,
+			now,
+			sleep: wait,
+			...(signal ? { signal } : {}),
+		})).catch((error: unknown) => {
+			throw error instanceof CaptchaError ? new BrowserFormError("captcha", error.message) : error;
+		}),
 		selectOption: (selector, value) => run("page", `the option ${value} of ${selector} could not be chosen`, form.evaluate(selectProbe, { selector, value })),
 		postForm: async (url, fields, timeoutMs = BROWSER_FORM_DEFAULTS.requestTimeoutMs, headers) => {
 			const answer = await run("request", `the request to ${new URL(url).pathname} failed`, form.evaluate(postProbe, { url, fields: [...fields], timeoutMs, ...(headers ? { headers: { ...headers } } : {}) }));
@@ -297,27 +297,3 @@ async function requestProbe(argument: BrowserFormRequest & { timeoutMs: number }
 export type BrowserFormScripting = {
 	evaluate<Result, Argument>(pageFunction: (argument: Argument) => Result | Promise<Result>, argument: Argument): Promise<Result>;
 };
-
-/** The textarea reCAPTCHA v2 renders its token into; the form posts it as `g-recaptcha-response`. */
-const RECAPTCHA_RESPONSE_SELECTOR = 'textarea[name="g-recaptcha-response"]';
-
-function recaptchaResponseProbe(argument: { selector: string; token: string }): boolean {
-	const field = document.querySelector(argument.selector) as HTMLTextAreaElement | null;
-	if (!field) return false;
-	field.value = argument.token;
-	field.dispatchEvent(new Event("input", { bubbles: true }));
-	field.dispatchEvent(new Event("change", { bubbles: true }));
-	return true;
-}
-
-/**
- * Put a token solved elsewhere (a captcha service) into the page's reCAPTCHA
- * response textarea, as the widget itself would, so a form that reads or posts
- * the field from the page carries it. Throws a `BrowserFormError` of stage
- * `page` when the page has no such field.
- */
-export async function setRecaptchaResponse(session: BrowserFormScripting, token: string, provider: string): Promise<void> {
-	if (!(await session.evaluate(recaptchaResponseProbe, { selector: RECAPTCHA_RESPONSE_SELECTOR, token }))) {
-		throw new BrowserFormError("page", `${provider}: the reCAPTCHA response field (${RECAPTCHA_RESPONSE_SELECTOR}) is not on the page`);
-	}
-}

@@ -8,26 +8,22 @@ const MIB = 1024 * 1024;
  * Tucows Family of Registrars (Tucows, Enom, Ascio, EPAG, OpenSRS), captured
  * on 2026-11-20 (docs/providers/tucows.md). The mailboxes domainabuse@tucows.com
  * and abuse@enom.com answer "not monitored". Identity is a name and an email
- * confirmed by a mailed code; a Turnstile token gates that first step.
+ * confirmed by a mailed code; a Turnstile token gates that first step, taken
+ * from the wizard's own page in a Browser Fabric Chrome whose solver passes it.
  * IANA registrar IDs: 69 Tucows Domains Inc., 48 eNom.
  */
 export const TUCOWS_PROVIDER = definePinned({
 	key: "tucows_bullwark",
 	displayName: "Tucows Abuse Form",
-	version: "2026-11-20.1",
+	version: "2026-11-22.1",
 	exactMailboxes: ["domainabuse@tucows.com", "abuse@enom.com"],
 	registrarIds: [48, 69],
 	supplemental: false,
 	origin: "https://bullwark.tucows.com",
 	/** The wizard's first page: `/report`, then `/report/otp`, `/report/types`, `/report/form`. */
 	reportUrl: "https://bullwark.tucows.com/report",
-	/** The Cloudflare Turnstile widget on the first step, solved through Death by Captcha. */
-	captcha: {
-		provider: "death_by_captcha" as const,
-		type: 12 as const,
-		siteKey: "0x4AAAAAADhWTmUwriZtddpv",
-		pageUrl: "https://bullwark.tucows.com/report",
-	},
+	/** The Cloudflare Turnstile widget of `reportUrl`'s first step, passed by the browser's own solver; the form that holds it. */
+	captcha: { solver: "browser_fabric" as const, kind: "turnstile" as const, formSelector: 'form[action="/report"]' },
 	/** The verification-code mail the first step sends. */
 	codeMail: {
 		provider: "Tucows",

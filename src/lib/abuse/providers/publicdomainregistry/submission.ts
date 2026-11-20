@@ -91,7 +91,7 @@ export async function preparePublicDomainRegistryExternalSubmission(context: Pro
 			uploads.push(uploadedPath(await session.postForm(PROVIDER.uploadUrl, uploadFields(nonce, file, { folder: randomUUID(), token: randomUUID() }), PROVIDER.timeoutMs)));
 		}
 		// Last, so the token (valid for minutes) and Akismet's behaviour fields are fresh.
-		const token = await session.waitForTurnstileToken();
+		const token = await session.waitForCaptchaToken("turnstile");
 		const rendered = await session.readFormFields(PROVIDER.renderedFieldPattern);
 		const missing = PROVIDER.requiredRenderedFields.filter((name) => !rendered.some(([field, value]) => field === name && typeof value === "string" && value !== ""));
 		if (missing.length > 0) throw new Error(`PublicDomainRegistry's form no longer renders ${missing.join(", ")}.`);

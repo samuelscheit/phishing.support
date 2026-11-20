@@ -17,10 +17,8 @@ import { PNG, readyDraftOf, routeFixture, type RouteFixtureOptions } from "./tes
 
 useTemporaryDatabase();
 
-// Providers that pay a captcha solver, log in or sign a notice refuse to draft without their settings.
+// Providers that log in or sign a notice refuse to draft without their settings.
 const ENVIRONMENT: Record<string, string> = {
-	DEATHBYCAPTCHA_USERNAME: "test-user",
-	DEATHBYCAPTCHA_PASSWORD: "test-password",
 	ABUSE_CLOUDFLARE_ACCOUNT_ID: "a".repeat(32),
 	ABUSE_CLOUDFLARE_LOGIN_EMAIL: "reporter@example.org",
 	ABUSE_CLOUDFLARE_LOGIN_PASSWORD: "password",

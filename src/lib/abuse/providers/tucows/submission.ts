@@ -1,6 +1,6 @@
 import { imapConfig } from "../../../mail/config";
 import { asRecord, parseJsonRecord } from "../../../util/values";
-import { captchaCredentialsProblem, solveCaptchaToken } from "../kit/captcha";
+import { captchaTokenFromPage } from "../kit/captcha";
 import { createDraft, reportInputOf, type RouteDeps, type VerifiedOf } from "../kit/draft";
 import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { htmlText } from "../kit/text";
@@ -25,7 +25,7 @@ import { type FetchLike } from "../../../http/fetch";
 
 export type TucowsDependencies = RouteDeps & {
 	fetch?: FetchLike;
-	/** The Turnstile token for the first step. */
+	/** The Turnstile token for the first step; defaults to the wizard's own page in a Fabric browser. */
 	solveCaptcha?: (signal?: AbortSignal) => Promise<string>;
 	readCode?: MailedCodeReader;
 	getArtifact?: EvidenceDependencies["getArtifact"];
@@ -35,11 +35,13 @@ export type TucowsDependencies = RouteDeps & {
 /** Everything the one filing request needs, kept in memory from before the marker. */
 type TucowsPreflightState = { session: TucowsSession; payload: TucowsSubmissionPayload; screenshot: Buffer; csrfToken: string };
 
-/** Solve the Turnstile widget of the wizard's first step. */
-export const solveTucowsCaptcha = (signal?: AbortSignal) => solveCaptchaToken({
-	type: TUCOWS_PROVIDER.captcha.type,
-	parametersField: "turnstile_params",
-	parameters: { sitekey: TUCOWS_PROVIDER.captcha.siteKey, pageurl: TUCOWS_PROVIDER.captcha.pageUrl },
+/** The Turnstile token of the wizard's first step, passed by the solver of a Fabric browser on that page. */
+const solveTucowsCaptcha = (signal?: AbortSignal) => captchaTokenFromPage({
+	provider: TUCOWS_PROVIDER.displayName,
+	operation: "tucows-report",
+	url: TUCOWS_PROVIDER.reportUrl,
+	formSelector: TUCOWS_PROVIDER.captcha.formSelector,
+	kind: TUCOWS_PROVIDER.captcha.kind,
 }, signal);
 
 export const tucowsDraft = createDraft({
@@ -77,13 +79,12 @@ async function advance(session: TucowsSession, step: string, from: string, field
 }
 
 /**
- * Before the marker: Turnstile, the code request and its entry, the category,
+ * Before the marker: Turnstile (a Fabric browser on the first page, released
+ * before anything is posted), the code request and its entry, the category,
  * and the registrar check. None of it files a report, so every failure is a
  * safe retry; a domain Tucows does not register ends the route for a person.
  */
 export async function prepareTucowsExternalSubmission(context: ProviderSubmissionContext, { payload, data }: VerifiedOf<typeof tucowsDraft>, dependencies: TucowsDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const captchaProblem = dependencies.solveCaptcha ? undefined : captchaCredentialsProblem();
-	if (captchaProblem) throw new ProviderSubmissionNeedsHumanError(`Tucows reporting needs a Turnstile solver: ${captchaProblem}`);
 	if (!dependencies.readCode && !imapConfig()) throw new ProviderSubmissionNeedsHumanError("Tucows reporting requires the IMAP mailbox to receive its verification code.");
 	const { bytes: screenshot } = await evidenceFileOf(TUCOWS_EVIDENCE_CONTRACT, "Tucows", payload.evidence, data, dependencies);
 	const session = createTucowsSession(dependencies.fetch ?? fetch, context.signal);
