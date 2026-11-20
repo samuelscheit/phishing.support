@@ -8,8 +8,9 @@ import {
 	type ProviderSubmissionPreparation,
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
+import { providerResponseId, reportReference } from "../report_reference";
 import { AWS_PROVIDER } from "./definition";
-import { awsRequestBody, awsTrackingId, buildAwsSubmissionPayload, storedAwsSubmissionPayload, type AwsReportInput, type AwsSubmissionPayload } from "./payload";
+import { awsRequestBody, buildAwsSubmissionPayload, storedAwsSubmissionPayload, type AwsReportInput, type AwsSubmissionPayload } from "./payload";
 
 export type AwsSubmissionDependencies = {
 	fetch?: (url: string, init: RequestInit) => Promise<Response>;
@@ -28,7 +29,7 @@ function reportInput({ route, report, target }: Context): AwsReportInput {
 		description: report.description,
 		allegationCategory: report.allegationCategory,
 		legalBrandUrl: report.legalBrandUrl,
-		trackingId: awsTrackingId(report.id, route.id),
+		trackingId: reportReference(report.id, route.id),
 		...(caseUrl ? { caseUrl } : {}),
 		...(hostingLine ? { hostingLine } : {}),
 	};
@@ -62,22 +63,6 @@ export async function verifiedAwsDraft(context: ProviderSubmissionContext): Prom
 	return payload;
 }
 
-/** Keys AWS's answer might name its case under; the form's answer shape is not documented. */
-const ID_KEYS = ["caseId", "case_id", "caseNumber", "case_number", "displayId", "display_id", "ticketId", "ticket_id", "reportId", "report_id", "id"];
-const ID_PATTERN = /^[A-Za-z0-9_-]{4,64}$/;
-
-/** A case or ticket ID in the answer, when it names one; never required. */
-export function awsResponseId(data: unknown): string | undefined {
-	if (typeof data === "string" || typeof data === "number") return ID_PATTERN.test(String(data)) ? String(data) : undefined;
-	const record = asRecord(data);
-	if (!record) return undefined;
-	for (const key of ID_KEYS) {
-		const value = record[key];
-		if ((typeof value === "string" || typeof value === "number") && ID_PATTERN.test(String(value))) return String(value);
-	}
-	return undefined;
-}
-
 function snippet(body: string): string {
 	return body.replace(/\s+/g, " ").trim().slice(0, 300);
 }
@@ -108,7 +93,7 @@ export async function submitAwsSubmission(context: ProviderSubmissionContext, de
 	// The form counts any truthy answer body as filed (axios' `response.data`,
 	// its `.then(({ data }) => data && redirectSuccess(…))`); null, false, 0 or "" is not.
 	if (!answer) throw new Error(`AWS answered the report with an empty body: ${snippet(text)}`);
-	const id = awsResponseId(asRecord(answer)?.data ?? answer);
+	const id = providerResponseId(asRecord(answer)?.data ?? answer);
 	return {
 		confirmationId: payload.report.trackingId,
 		confirmationText: `AWS Trust & Safety accepted the report${id ? ` (${id})` : ""}`,

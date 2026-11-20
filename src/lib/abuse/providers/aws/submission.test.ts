@@ -10,8 +10,9 @@ import { abuseProviderRoutes, abuseTargets } from "../../schema";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { awsProvider } from "./index";
 import { AWS_PROVIDER } from "./definition";
-import { awsTrackingId, storedAwsSubmissionPayload } from "./payload";
-import { awsResponseId, prepareAwsSubmission, submitAwsSubmission, verifiedAwsDraft } from "./submission";
+import { providerResponseId, reportReference } from "../report_reference";
+import { storedAwsSubmissionPayload } from "./payload";
+import { prepareAwsSubmission, submitAwsSubmission, verifiedAwsDraft } from "./submission";
 
 useTemporaryDatabase();
 
@@ -89,7 +90,7 @@ describe("registry", () => {
 describe("prepareAwsSubmission", () => {
 	test("drafts a ready payload keyed by the route's reference", async () => {
 		const { payload, created, route } = await readyContext();
-		expect(payload.report.trackingId).toBe(awsTrackingId(created.reportId, route.id));
+		expect(payload.report.trackingId).toBe(reportReference(created.reportId, route.id));
 		expect(payload).toMatchObject({ target: { normalizedTarget: TARGET }, report: { abuseType: "phishing", urls: [`https://${TARGET}/signin`] } });
 		expect(payload.report.comments).toContain(`Reference: ${payload.report.trackingId}`);
 		expect(payload.report.comments).toContain("Impersonated brand: https://www.examplebank.com/");
@@ -189,14 +190,14 @@ describe("submitAwsSubmission", () => {
 	});
 
 	test("reads a case id from the answer defensively", () => {
-		expect(awsResponseId({ caseId: "179517163600449" })).toBe("179517163600449");
-		expect(awsResponseId({ data: { caseId: "179517163600449" } })).toBeUndefined();
-		expect(awsResponseId({ case_number: 179517163600449 })).toBe("179517163600449");
-		expect(awsResponseId("P01M7ABCDE")).toBe("P01M7ABCDE");
-		expect(awsResponseId({ id: "a b" })).toBeUndefined();
-		expect(awsResponseId({ caseId: { nested: 1 } })).toBeUndefined();
-		expect(awsResponseId(true)).toBeUndefined();
-		expect(awsResponseId(null)).toBeUndefined();
+		expect(providerResponseId({ caseId: "179517163600449" })).toBe("179517163600449");
+		expect(providerResponseId({ data: { caseId: "179517163600449" } })).toBeUndefined();
+		expect(providerResponseId({ case_number: 179517163600449 })).toBe("179517163600449");
+		expect(providerResponseId("P01M7ABCDE")).toBe("P01M7ABCDE");
+		expect(providerResponseId({ id: "a b" })).toBeUndefined();
+		expect(providerResponseId({ caseId: { nested: 1 } })).toBeUndefined();
+		expect(providerResponseId(true)).toBeUndefined();
+		expect(providerResponseId(null)).toBeUndefined();
 	});
 
 	test("a refused request means nothing was filed", async () => {

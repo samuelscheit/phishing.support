@@ -99,8 +99,15 @@ export type ProviderReportProfile =
 	| "tencent"
 	| "eranet"
 	| "gname"
+	| "name_com"
 	| "alibaba_cloud"
-	| "aws";
+	| "aws"
+	| "microsoft"
+	| "tucows"
+	| "publicdomainregistry"
+	| "newfold"
+	| "godaddy"
+	| "dynadot";
 
 type ProviderReportNarrativeInput = {
 	provider?: ProviderReportProfile;
@@ -147,7 +154,7 @@ function safeNarrativeTarget(value: string | undefined, maximumCharacters = 255)
 }
 
 /** Extract only a short display label; never forward a model-generated URL or instruction. */
-function extractedBrandName(description: string): string | undefined {
+export function extractedBrandName(description: string): string | undefined {
 	const genericLabels = new Set(["brand", "content", "page", "site", "text", "visual", "service", "website"]);
 	for (const pattern of BRAND_PATTERNS) {
 		const match = description.match(pattern);
@@ -248,6 +255,48 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 			return {
 				lead: `A suspected ${allegation} site using AWS resources is being reported for ${target}.`,
 				action: "Please investigate the reported AWS resource and suspend it under the AWS Acceptable Use Policy.",
+				urlContext,
+			};
+		case "microsoft":
+			return {
+				lead: `A suspected ${allegation} site hosted on Microsoft services is being reported for ${target}.`,
+				action: "Please investigate the reported Microsoft-hosted resource and act on it under the Microsoft Services Agreement and Acceptable Use Policy.",
+				urlContext,
+			};
+		case "tucows":
+			return {
+				lead: `A suspected ${allegation} domain report is being submitted to Tucows for ${target}.`,
+				action: "Please investigate the captured evidence and act on the domain under your registrar abuse policy.",
+				urlContext,
+			};
+		case "godaddy":
+			return {
+				lead: `A suspected ${allegation} site registered or hosted at GoDaddy is being reported for ${target}.`,
+				action: "Please investigate the reported site and act on it under the GoDaddy Universal Terms of Service and your registrar abuse policy.",
+				urlContext,
+			};
+		case "newfold":
+			return {
+				lead: `A suspected ${allegation} domain report is being submitted to Newfold Digital for ${target}.`,
+				action: "Please investigate the captured evidence and suspend the site or domain under your abuse policy.",
+				urlContext,
+			};
+		case "publicdomainregistry":
+			return {
+				lead: `A suspected ${allegation} domain report is being submitted to PublicDomainRegistry for ${target}.`,
+				action: "Please investigate the captured evidence and suspend the domain under your registrar abuse policy.",
+				urlContext,
+			};
+		case "dynadot":
+			return {
+				lead: `A suspected ${allegation} domain report is being submitted to Dynadot for ${target}.`,
+				action: "Please investigate the captured evidence and suspend the domain under your registrar abuse policy.",
+				urlContext,
+			};
+		case "name_com":
+			return {
+				lead: `A suspected ${allegation} domain report is being submitted to Name.com for ${target}.`,
+				action: "Please investigate the captured evidence and suspend the domain under your registrar abuse policy.",
 				urlContext,
 			};
 		default:

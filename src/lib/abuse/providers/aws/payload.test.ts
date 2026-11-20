@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { AWS_PROVIDER } from "./definition";
-import { awsEventTimestamp, awsReportUrls, awsRequestBody, awsTrackingId, awsTrackingIdsIn, buildAwsSubmissionPayload, storedAwsSubmissionPayload, type AwsReportInput } from "./payload";
+import { awsEventTimestamp, awsReportUrls, awsRequestBody, buildAwsSubmissionPayload, storedAwsSubmissionPayload, type AwsReportInput } from "./payload";
+import { reportReference, reportReferencesIn } from "../report_reference";
 import { providerDefinitionHasValidHash } from "../definition";
 
 const TRACKING_ID = "PS-8fc84cc01019-R381763380685313515";
@@ -24,15 +25,15 @@ describe("definition", () => {
 
 describe("tracking id", () => {
 	test("is the case tag and route, within the form's limit", () => {
-		expect(awsTrackingId(0x8fc84cc01019n, 381763380685313515n)).toBe(TRACKING_ID);
-		const longest = awsTrackingId(2n ** 64n - 1n, 2n ** 63n - 1n);
+		expect(reportReference(0x8fc84cc01019n, 381763380685313515n)).toBe(TRACKING_ID);
+		const longest = reportReference(2n ** 64n - 1n, 2n ** 63n - 1n);
 		expect(longest.length).toBeLessThanOrEqual(AWS_PROVIDER.trackingIdMaximumLength);
 		expect(longest).toMatch(/^PS-[0-9a-f]{12}-R\d+$/);
 	});
 
 	test("is found in quoted mail, any case, once", () => {
-		expect(awsTrackingIdsIn(`Your original report:\nReference: ${TRACKING_ID}\n> reference: ps-8FC84CC01019-r1 ${TRACKING_ID}`)).toEqual([TRACKING_ID, "PS-8fc84cc01019-R1"]);
-		expect(awsTrackingIdsIn("[PS-8fc84cc01019] no route; PS-123-R4; xPS-8fc84cc01019-R4")).toEqual([]);
+		expect(reportReferencesIn(`Your original report:\nReference: ${TRACKING_ID}\n> reference: ps-8FC84CC01019-r1 ${TRACKING_ID}`)).toEqual([TRACKING_ID, "PS-8fc84cc01019-R1"]);
+		expect(reportReferencesIn("[PS-8fc84cc01019] no route; PS-123-R4; xPS-8fc84cc01019-R4")).toEqual([]);
 	});
 });
 

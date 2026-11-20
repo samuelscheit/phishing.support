@@ -1,7 +1,7 @@
-import { abuseCaseTag } from "../../mail/correlation";
 import { normalizePublicHost, normalizePublicHttpUrl } from "../../security";
 import { asRecord } from "../../../values";
 import { buildProviderReportNarrative, normalizeObservedUrlForTarget, truncateProviderText } from "../report_payload";
+import { isReportReference } from "../report_reference";
 import { AWS_PROVIDER } from "./definition";
 
 /** The durable, secret-free draft: the form values the submission sends, besides the time of filing. */
@@ -32,18 +32,8 @@ export type AwsReportInput = {
 	hostingLine?: string;
 };
 
-/** Our reference for one route's report: the case tag (the one our mail uses) and the route. */
-export function awsTrackingId(reportId: bigint, routeId: bigint): string {
-	return `${abuseCaseTag(reportId)}-R${routeId.toString()}`;
-}
-
-/** Our references in untrusted text, as `awsTrackingId` writes them. */
-export function awsTrackingIdsIn(text: string): string[] {
-	return [...new Set([...text.matchAll(/\bPS-([0-9a-f]{12})-R(\d{1,20})\b/gi)].map((match) => `PS-${match[1]!.toLowerCase()}-R${match[2]!}`))];
-}
-
 function validTrackingId(value: unknown): value is string {
-	return typeof value === "string" && value.length <= AWS_PROVIDER.trackingIdMaximumLength && /^PS-[0-9a-f]{12}-R\d{1,20}$/.test(value);
+	return isReportReference(value, AWS_PROVIDER.trackingIdMaximumLength);
 }
 
 /** The form splits its URL field on whitespace, so a URL with any would become two. */

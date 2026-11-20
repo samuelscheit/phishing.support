@@ -248,6 +248,38 @@ captcha; the signed-in console form sends the same request).
   durable marker is ambiguous and is never retried. AWS has no API to look a
   report up, so status arrives only by that mail.
 
+## Registrar and host abuse forms
+
+These providers answer mail to their abuse mailbox with "not monitored, use our
+form" (seen in replies from 2026-10/11), so routes to those mailboxes, and
+for registrars to their IANA registrar ID, file through the form instead. Each
+is a pinned provider under `src/lib/abuse/providers/<name>/`; research with the
+captured requests is in `docs/providers/`.
+
+| Provider | Mailboxes / registrar IDs | Channel |
+| --- | --- | --- |
+| Tucows / Enom (`tucows`) | domainabuse@tucows.com, abuse@enom.com; 48, 69 | bullwark.tucows.com: Turnstile (DeathByCaptcha), mailed code, multipart form, plain HTTP |
+| PublicDomainRegistry (`publicdomainregistry`) | abuse-contact@, abuse@publicdomainregistry.com; 303 | WordPress form behind Cloudflare + Turnstile, in a Fabric browser |
+| Microsoft (`microsoft`) | abuse@microsoft.com, cert@microsoft.com | unauthenticated JSON API `api.msrc.microsoft.com/report/v3.0/abuse` |
+| GoDaddy (`godaddy`) | abuse@godaddy.com; 146 | Abuse API (`GODADDY_ABUSE_API_KEY`/`_SECRET`) once GoDaddy enables the key, otherwise the Legal Portal form (reCAPTCHA v3 in the page) |
+| Newfold: Bluehost, Web.com, Network Solutions, Register.com, Domain.com (`newfold`) | abuse@bluehost.com, abuse@unifiedlayer.com, iarpoc@newfold.com, net-eng-team@newfold.com, domain.operations@web.com; 2, 9, 886 | newfold.com/abuse behind Cloudflare, reCAPTCHA v2 via DeathByCaptcha |
+| Dynadot (`dynadot`) | abuse@dynadot.com; 472 | form behind Cloudflare + Turnstile, in a Fabric browser |
+| Name.com (`name_com`) | abuse@name.com; 625 | Zendesk form behind Cloudflare + Turnstile and a CSRF handshake, in a Fabric browser |
+
+- Browser forms share `providers/browser_form.ts`: a Fabric session on the
+  reporting egress that passes the Cloudflare challenge, waits for the
+  self-solving Turnstile token (or takes a DeathByCaptcha reCAPTCHA token), and
+  sends the filing request from inside the page so its clearance applies.
+  Everything before the one filing request files nothing and is retried safely.
+- Every report's free text starts with `Reference: PS-<case tag>-R<route id>`
+  (`providers/report_reference.ts`); it is the receipt unless the provider
+  returns its own case ID, so provider mail quoting it reaches its route as a
+  reply for the regular classifier.
+- A spam or captcha verdict from a form files nothing and settles the route as
+  `needs_human` rather than refused. Namecheap's Phishing Reports API and
+  GoDaddy's Abuse API were requested by mail on 2026-11-20 (GoDaddy account
+  757262365, credentials in the deployment environment).
+
 ## Reporting pipeline
 
 Every report goes through one durable reporting worker:

@@ -1,6 +1,7 @@
 import type { ProviderReportPreviewContext, ProviderSubmissionProvider } from "../submission_contracts";
 import { AWS_PROVIDER } from "./definition";
-import { awsReportUrls, awsTrackingIdsIn, makeAwsComments } from "./payload";
+import { reportReferencesIn } from "../report_reference";
+import { awsReportUrls, makeAwsComments } from "./payload";
 import { prepareAwsSubmission, submitAwsSubmission } from "./submission";
 
 /**
@@ -27,7 +28,7 @@ export const awsProvider: ProviderSubmissionProvider = {
 	inboundMail: {
 		// support.aws.com: "Your AWS Abuse Report [P01M7…]" from trustandsafety@support.aws.com.
 		senderDomains: ["aws.com"],
-		confirmationIds: awsTrackingIdsIn,
+		confirmationIds: reportReferencesIn,
 		messageKind: "reply",
 	},
 };

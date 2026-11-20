@@ -4,15 +4,22 @@ import { awsProvider } from "./aws";
 import { cloudflareProvider } from "./cloudflare";
 import { discordDsaProvider } from "./discord_dsa";
 import { discordWebhookProvider } from "./discord_webhook";
+import { dynadotProvider } from "./dynadot";
 import { eranetProvider } from "./eranet";
 import { gnameProvider } from "./gname";
+import { goDaddyProvider } from "./godaddy";
 import { googleCloudProvider } from "./google_cloud";
 import { nameSiloProvider } from "./namesilo";
+import { microsoftProvider } from "./microsoft";
+import { nameComProvider } from "./name_com";
 import { netcraftProvider } from "./netcraft";
 import { netcraftMailProvider } from "./netcraft_mail";
 import { createProviderSubmissionRegistry } from "./submission_registry";
 import type { ProviderSubmissionProvider } from "./submission_contracts";
 import { tencentProvider } from "./tencent";
+import { newfoldProvider } from "./newfold";
+import { publicDomainRegistryProvider } from "./publicdomainregistry";
+import { tucowsProvider } from "./tucows";
 
 /**
  * The one composition root for code-owned direct-submission providers. Generic
@@ -24,6 +31,7 @@ const registry = createProviderSubmissionRegistry([
 	tencentProvider,
 	alibabaCloudProvider,
 	awsProvider,
+	microsoftProvider,
 	nameSiloProvider,
 	eranetProvider,
 	gnameProvider,
@@ -32,6 +40,12 @@ const registry = createProviderSubmissionRegistry([
 	netcraftMailProvider,
 	discordWebhookProvider,
 	discordDsaProvider,
+	tucowsProvider,
+	publicDomainRegistryProvider,
+	newfoldProvider,
+	goDaddyProvider,
+	nameComProvider,
+	dynadotProvider,
 ]);
 
 export function listProviderSubmissionProviders(): readonly ProviderSubmissionProvider[] {
