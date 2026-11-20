@@ -3,6 +3,7 @@ import { parse } from "tldts";
 import { urlHostname } from "../network/public_redirects";
 import type { SiteCheckState } from "./schema";
 import { matchPageSignature, type SitePage } from "./signatures";
+import { suspensionNameserver } from "./suspension_nameservers";
 
 /** What DNS said about the visited host. An IP literal host is `resolved` to itself. */
 export type DnsObservation =
@@ -22,6 +23,8 @@ export type SiteObservation = {
 	dns: DnsObservation;
 	/** The registrable domain's RDAP status values; empty when unknown. */
 	domainStatuses: readonly string[];
+	/** The nameservers the registry delegates the registrable domain to; empty when unknown. */
+	nameservers?: readonly string[];
 	/** Absent when DNS already showed the name gone. */
 	http?: HttpObservation;
 };
@@ -52,6 +55,12 @@ export function siteOf(host: string): { site: string; platform?: string } {
  */
 export function classifySite(observation: SiteObservation): SiteVerdict {
 	const host = urlHostname(new URL(observation.url));
+	// The registry's word comes before what resolvers say: a suspended domain
+	// answers NXDOMAIN, SERVFAIL or, from a stale cache, its old address.
+	const hold = holdStatus(observation.domainStatuses);
+	if (hold) return { state: "domain_suspended", detail: `The registry lists the domain as ${hold}.` };
+	const suspension = suspensionNameserver(observation.nameservers ?? []);
+	if (suspension) return { state: "domain_suspended", detail: `The registry delegates the domain to the suspension nameserver ${suspension}.` };
 	if (observation.dns.outcome === "nxdomain") {
 		// A dangling CNAME or a platform tenant without its DNS name means the
 		// host deleted the site; the domain's own registration is untouched.
@@ -60,8 +69,6 @@ export function classifySite(observation: SiteObservation): SiteVerdict {
 		if (platform) return { state: "removed", detail: `The platform ${platform} no longer has ${host} (NXDOMAIN).` };
 		return { state: "domain_gone", detail: `${host} no longer resolves (NXDOMAIN).` };
 	}
-	const hold = holdStatus(observation.domainStatuses);
-	if (hold) return { state: "domain_suspended", detail: `The registry lists the domain as ${hold}.` };
 
 	const http = observation.http;
 	if (!http) return { state: "unreachable", detail: observation.dns.outcome === "failed" ? `DNS failed: ${observation.dns.error}` : "The site was not visited." };

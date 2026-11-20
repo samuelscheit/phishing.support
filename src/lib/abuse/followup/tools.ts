@@ -14,6 +14,7 @@ import { archiveWebsite } from "../../website_archive";
 import { WebsiteCaptureFailedError } from "../../website_archive/errors";
 import type { WebsiteArchiveResult } from "../../website_archive/types";
 import type { WebsiteDevice } from "../../website_types";
+import type { SiteCheckDependencies } from "../../liveness/check";
 import type { AccountIdentifierExtractor } from "./account_identifiers";
 
 /** A file the answer may attach: the case's evidence, or a screenshot a recheck took. */
@@ -42,6 +43,8 @@ export type DecisionToolDependencies = {
 	visitAgent?: VisitAgent;
 	/** The job's deadline; a visit stops when it fires. */
 	signal?: AbortSignal;
+	/** The liveness check run before the agent investigates a decision (DNS, RDAP and HTTP of the reported site). */
+	liveness?: SiteCheckDependencies;
 };
 
 const MAX_TEXT = 15_000;

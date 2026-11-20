@@ -38,7 +38,7 @@ function site(routes: Record<string, Route>) {
 }
 
 /** RDAP answering one status list for every domain, and recording the domains asked. */
-function rdap(statuses: string[] | Error) {
+function rdap(statuses: string[] | Error, nameservers: string[] = []) {
 	const asked: string[] = [];
 	return {
 		asked,
@@ -49,7 +49,7 @@ function rdap(statuses: string[] | Error) {
 			fetch: async (input: RequestInfo | URL) => {
 				asked.push(new URL(input.toString()).pathname.split("/").at(-1)!);
 				if (statuses instanceof Error) throw statuses;
-				return new Response(JSON.stringify({ objectClassName: "domain", ldhName: "kit-example.com", status: statuses }), { status: 200, headers: { "content-type": "application/rdap+json" } });
+				return new Response(JSON.stringify({ objectClassName: "domain", ldhName: "kit-example.com", status: statuses, nameservers: nameservers.map((ldhName) => ({ objectClassName: "nameserver", ldhName })) }), { status: 200, headers: { "content-type": "application/rdap+json" } });
 			},
 		},
 	};
@@ -110,6 +110,39 @@ describe("checkSite", () => {
 		expect(requests).toHaveLength(1);
 		// SERVFAIL may pass; it is asked twice.
 		expect(dns.calls.filter((call) => call.startsWith("A "))).toHaveLength(2);
+	});
+
+	// Production 2026-11-20, nodeagent.pro: suspended by the registrar after a Cloudflare report; the registry's
+	// RDAP shows only "client transfer prohibited" but delegates to ns1/ns2.domain-suspended.com, resolvers SERVFAIL.
+	describe("a registry delegation to a suspension nameserver", () => {
+		const PAYLOAD = "https://nodeagent.pro/ekgs7q/vjJlEWOTgJXq";
+		const suspended = rdap(["client transfer prohibited"], ["ns1.domain-suspended.com", "ns2.domain-suspended.com"]).dependencies;
+		const refused = Object.assign(new TypeError("ECONNREFUSED"), { code: "ECONNREFUSED" });
+
+		test("is domain_suspended while resolvers SERVFAIL", async () => {
+			const result = await checkSite(PAYLOAD, dependencies({ fetch: site({ [PAYLOAD]: refused }).fetch, dns: resolver({ a: "ESERVFAIL", aaaa: "ESERVFAIL" }), rdap: suspended }));
+			expect(result).toMatchObject({ state: "domain_suspended", detail: "The registry delegates the domain to the suspension nameserver ns1.domain-suspended.com.", domainStatuses: ["client transfer prohibited"] });
+		});
+
+		test("is domain_suspended when a stale resolver still answers the old address and the payload is served", async () => {
+			const { fetch } = site({ [PAYLOAD]: { status: 200, body: "var loader = 1;", headers: { "content-type": "application/octet-stream" } } });
+			expect(await checkSite(PAYLOAD, dependencies({ fetch, dns: resolver({ a: ["203.0.113.10"] }), rdap: suspended }))).toMatchObject({ state: "domain_suspended" });
+		});
+
+		test("is domain_suspended on NXDOMAIN, also for a registry hold", async () => {
+			const gone = resolver({ a: "ENOTFOUND", aaaa: "ENOTFOUND", cname: "ENOTFOUND" });
+			expect(await checkSite(PAYLOAD, dependencies({ fetch: site({}).fetch, dns: gone, rdap: suspended }))).toMatchObject({ state: "domain_suspended" });
+			expect(await checkSite(PAYLOAD, dependencies({ fetch: site({}).fetch, dns: gone, rdap: rdap(["server hold"]).dependencies }))).toMatchObject({ state: "domain_suspended", detail: "The registry lists the domain as server hold." });
+		});
+
+		test("matches hosts below the listed domains only, case-insensitively and with a trailing dot", async () => {
+			const ns = (...names: string[]) => rdap(["active"], names).dependencies;
+			const check = (names: string[]) => checkSite(PAYLOAD, dependencies({ fetch: site({ [PAYLOAD]: { status: 200, body: KIT } }).fetch, rdap: ns(...names) }));
+			expect((await check(["NS1.Verification-Hold.Suspended-Domain.com."])).state).toBe("domain_suspended");
+			expect((await check(["ns1.suspended-for.spam-and-abuse.com"])).state).toBe("domain_suspended");
+			expect((await check(["ns1.dns-suspended.com"])).state).toBe("domain_suspended");
+			expect((await check(["suspended-domain.com.evil.example", "andy.ns.cloudflare.com", "notdomain-suspended.com"])).state).toBe("online");
+		});
 	});
 
 	test("TLS failures and timeouts are unreachable with their cause", async () => {

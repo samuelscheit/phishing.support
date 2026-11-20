@@ -313,9 +313,13 @@ describe("the registrar layer", () => {
 		expect(classify({ body: KIT_PAGE, domainStatuses: ["client transfer prohibited", "client update prohibited", "active"] }).state).toBe("online");
 	});
 
-	test("a name that is gone outranks a hold", () => {
+	test("the registry's hold or suspension nameservers outrank what resolvers say: a suspended domain is not merely gone or unreachable", () => {
 		const gone = { outcome: "nxdomain" as const };
-		expect(classifySite({ url: SITE, dns: gone, domainStatuses: ["client hold"] })).toEqual({ state: "domain_gone", detail: "secure-login.kit-example.com no longer resolves (NXDOMAIN)." });
+		expect(classifySite({ url: SITE, dns: gone, domainStatuses: ["client hold"] })).toEqual({ state: "domain_suspended", detail: "The registry lists the domain as client hold." });
+		expect(classifySite({ url: SITE, dns: { outcome: "failed", error: "ESERVFAIL" }, domainStatuses: ["client transfer prohibited"], nameservers: ["ns1.domain-suspended.com"] }))
+			.toEqual({ state: "domain_suspended", detail: "The registry delegates the domain to the suspension nameserver ns1.domain-suspended.com." });
+		expect(classifySite({ url: SITE, dns: gone, domainStatuses: [], nameservers: ["ns2.domain-suspended.com"] }).state).toBe("domain_suspended");
+		expect(classifySite({ url: SITE, dns: gone, domainStatuses: [], nameservers: ["ns1.example.net"] }).state).toBe("domain_gone");
 	});
 
 	test("a host whose CNAME target or platform tenancy is gone was removed by its host", () => {

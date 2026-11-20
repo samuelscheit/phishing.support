@@ -11,6 +11,7 @@ import { UnknownExternalStateError } from "../worker/shared";
 import { capturedDocumentContent } from "../../website_archive/text";
 import type { WebsiteArchiveResult, WebsiteVisitParams } from "../../website_archive/types";
 import { scriptedVisitSession } from "../../site_visit/test_helpers";
+import type { SiteCheckDependencies } from "../../liveness/check";
 import type { DecisionAgentModel } from "./agent";
 import { followUpProviderDecision } from "./decision";
 import { SubmissionsEntity } from "../../db/entities/submissions";
@@ -93,7 +94,25 @@ function recordingSend() {
 	return { sent, send };
 }
 
-const tools = { capture: async ({ url }: { url: string }) => liveCapture(url), fetch: payloadHost, assertPublicHost: async () => {}, timestamp: async () => undefined };
+/** Liveness of a site that still resolves, is delegated normally and serves whoever asks. */
+function liveness(overrides: { nameservers?: string[]; dns?: "resolves" | "servfail"; fetch?: typeof fetch } = {}): SiteCheckDependencies {
+	const { nameservers = ["andy.ns.cloudflare.com"], dns = "resolves", fetch } = overrides;
+	const answer = async () => {
+		if (dns === "servfail") throw Object.assign(new Error("SERVFAIL"), { code: "ESERVFAIL" });
+		return ["203.0.113.10"];
+	};
+	return {
+		dns: { resolve4: answer, resolve6: async () => { throw Object.assign(new Error("ENODATA"), { code: "ENODATA" }); }, resolveCname: async () => [] },
+		rdap: {
+			rdapLocator: async (_object: string, value: string) => `https://rdap.registry.example/domain/${value}`,
+			assertPublicHost: async () => undefined,
+			httpRetryAttempts: 1,
+			fetch: async () => new Response(JSON.stringify({ objectClassName: "domain", status: ["client transfer prohibited"], nameservers: nameservers.map((ldhName) => ({ ldhName })) }), { status: 200, headers: { "content-type": "application/rdap+json" } }),
+		},
+		...(fetch ? { fetch } : {}),
+	};
+}
+const tools = { capture: async ({ url }: { url: string }) => liveCapture(url), fetch: payloadHost, assertPublicHost: async () => {}, timestamp: async () => undefined, liveness: liveness() };
 
 describe("provider decision follow-up agent", () => {
 	test("a page behind an entry's one-time link reaches the agent with the entry, the token's lifetime and the whole arrival", async () => {
@@ -235,6 +254,55 @@ describe("provider decision follow-up agent", () => {
 		const silent: DecisionAgentModel = async () => ({ output: [{ type: "message", content: [] }] });
 		await expect(followUpProviderDecision({ routeId: other.route.id, state: "denied" }, { model: silent, tools, send })).rejects.toThrow("did not decide");
 		expect(sent).toEqual([]);
+	});
+});
+
+describe("a decision that says the content is gone", () => {
+	// Production case 382161210906251264: nodeagent.pro served its payload only to curl; the registrar suspended
+	// the domain two minutes after the report, Cloudflare denied it as content_removed, and the follow-up then
+	// mailed "The content has not been removed" because a recheck still reached the old address.
+	const PAYLOAD = "https://nodeagent.pro/ekgs7q/vjJlEWOTgJXq";
+	const suspendedTools = { ...tools, liveness: liveness({ nameservers: ["ns1.domain-suspended.com", "ns2.domain-suspended.com"], dns: "servfail" }) };
+
+	test("a suspended domain confirms the decision: nothing is sent and the agent is never asked", async () => {
+		const { reportId, route } = await deniedRoute("nodeagent.pro", PAYLOAD);
+		const { sent, send } = recordingSend();
+		const never = scripted();
+		expect(await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "content_removed" }, { model: never.model, tools: suspendedTools, send })).toBe("skipped");
+		expect(never.inputs).toHaveLength(0);
+		expect(sent).toEqual([]);
+		const event = (await AbuseRepository.listEvents(reportId)).find((item) => item.eventType === "provider_decision.not_answered");
+		expect(event?.data).toMatchObject({ state: "denied", detail: "content_removed", confirmedByLiveness: true, liveness: [{ url: PAYLOAD, state: "domain_suspended" }] });
+		expect((event?.data as { reason: string }).reason).toContain("confirmed by our own check");
+		// Not asked again.
+		expect(await followUpProviderDecision({ routeId: route.id, state: "denied" }, { model: never.model, tools: suspendedTools, send })).toBe("skipped");
+	});
+
+	test("a stale recheck that still reaches the payload does not matter: the registry's suspension decides", async () => {
+		const { route } = await deniedRoute("nodeagent.pro", PAYLOAD);
+		const { sent, send } = recordingSend();
+		const stale = { ...tools, liveness: liveness({ nameservers: ["ns1.domain-suspended.com"], dns: "resolves", fetch: payloadHost }) };
+		expect(await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "The content is no longer visible." }, { model: scripted().model, tools: stale, send })).toBe("skipped");
+		expect(sent).toEqual([]);
+	});
+
+	test("a cloaked payload host that is still delegated and served to curl is still contested", async () => {
+		const { route } = await deniedRoute("nodeagent.pro", PAYLOAD);
+		const { sent, send } = recordingSend();
+		const served = { ...tools, liveness: liveness({ fetch: payloadHost }) };
+		const { model, inputs } = scripted([call("answer", { text: "Hello Cloudflare,\n\nThe payload is still served to curl.", attachments: [], summary: "Still served." })]);
+		expect(await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "content_removed" }, { model, tools: served, send })).toBe("sent");
+		expect(sent).toHaveLength(1);
+		// The agent got our own check: the browser's 404 is not a takedown, the delegation is normal.
+		const context = JSON.parse(((inputs[0]![0] as { content: Array<{ text: string }> }).content[0]!).text);
+		expect(context.liveness).toEqual([{ url: PAYLOAD, state: "removed", detail: "HTTP 404.", registryStatuses: ["client transfer prohibited"], resolvedAddresses: ["203.0.113.10"] }]);
+	});
+
+	test("a denial that does not say the content is gone is not confirmed by a takedown, but the agent sees the suspension", async () => {
+		const { route } = await deniedRoute("nodeagent.pro", PAYLOAD);
+		const { model, inputs } = scripted([call("do_not_answer", { reason: "Suspended." })]);
+		await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "no_abuse_found" }, { model, tools: suspendedTools });
+		expect(JSON.parse(((inputs[0]![0] as { content: Array<{ text: string }> }).content[0]!).text).liveness).toMatchObject([{ state: "domain_suspended" }]);
 	});
 });
 

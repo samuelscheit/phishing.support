@@ -8,6 +8,7 @@ import { ProviderSubmissionRejectedError, type DecisionAnswerChannel } from "../
 import { AbuseRepository } from "../repository";
 import { UnknownExternalStateError } from "../worker/shared";
 import { runDecisionAgent, type DecisionAgentModel, type DecisionAgentOutcome, type DecisionAgentStep } from "./agent";
+import { checkReportedSites, reasonSaysContentGone, takedownConfirmed } from "./liveness";
 import { caseCaptureNames, type AttachableFile, type DecisionToolDependencies } from "./tools";
 import { asRecord } from "../../values";
 import { accessGateOf, arrivalChain } from "../../website_access_gate";
@@ -60,6 +61,19 @@ export async function followUpProviderDecision(
 	if (mail.some((message) => message.direction === "outbound" && message.correlationKey === correlationKey)) return "skipped";
 	if ((await AbuseRepository.listEvents(route.reportId)).some((event) => event.routeId === route.id && event.eventType === "provider_decision.not_answered" && asRecord(event.data)?.state === params.state)) return "skipped";
 
+	// Our own look at the site, before anyone is contradicted: a provider that says the content is gone,
+	// about a site the registry or host took down, is right.
+	const liveness = await checkReportedSites(target, { ...dependencies.tools, ...(dependencies.signal ? { signal: dependencies.signal } : {}) });
+	if (reasonSaysContentGone(params.detail) && takedownConfirmed(liveness)) {
+		const reason = `The provider's decision is confirmed by our own check: ${liveness.map((check) => `${check.url} is ${check.state} (${check.detail})`).join("; ")}.`;
+		if (dependencies.dryRun) {
+			dependencies.dryRun({ outcome: { kind: "do_not_answer", reason }, steps: [], recipient: followUp.channel.kind === "email" ? followUp.channel.replyAddress : followUp.channel.name });
+			return "skipped";
+		}
+		await AbuseRepository.appendEvent({ reportId: route.reportId, routeId: route.id, eventType: "provider_decision.not_answered", data: { state: params.state, detail: params.detail ?? null, reason, confirmedByLiveness: true, liveness } });
+		return "skipped";
+	}
+
 	const { channel } = followUp;
 	const recipient = channel.kind === "email" ? channel.replyAddress : channel.name;
 	const subject = channel.kind === "email" ? channel.subject(run.confirmationId) : `Additional evidence for ${followUp.addressee} report ${run.confirmationId}`;
@@ -81,6 +95,8 @@ export async function followUpProviderDecision(
 			? { kind: "email", to: channel.replyAddress, subject }
 			: { kind: "form", name: channel.name, ...(channel.requirements ? { requirements: channel.requirements } : {}) },
 		decision: { state: params.state, reason: params.detail ?? null },
+		// Our own check of the reported URLs just now. A suspended or undelegated domain is down whatever a stale resolver still says.
+		liveness: liveness.map(({ url, state, detail, domainStatuses, resolvedAddresses }) => ({ url, state, detail, registryStatuses: domainStatuses, resolvedAddresses })),
 		report: {
 			receipt: run.confirmationId,
 			filedAt: run.createdAt.toISOString(),

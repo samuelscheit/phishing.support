@@ -8,6 +8,7 @@ import type { ResolverDependencies } from "../abuse/resolver/types";
 import { registrableDomain } from "../abuse/security";
 import { browserRequestHeaders } from "../constants";
 import { errorSummary } from "../error_text";
+import { asRecord } from "../values";
 import { readResponseBody, retryWithTimeout, withTimeout } from "../network/bounded_fetch";
 import { fetchThroughPublicRedirects, PublicRedirectError, urlHostname, type PublicFetch } from "../network/public_redirects";
 import { classifySite, siteOf, type DnsObservation, type HttpObservation } from "./classify";
@@ -78,21 +79,25 @@ async function observeDns(host: string, resolver: SiteDnsResolver): Promise<DnsO
 	return { outcome: "failed", error: [...new Set(errors.map((error) => errorCode(error) ?? errorSummary(error)))].join(", ") };
 }
 
+type RegistryObservation = { statuses: string[]; nameservers: string[] };
+const EMPTY_REGISTRY: RegistryObservation = { statuses: [], nameservers: [] };
+
 /**
- * The RDAP status values of the host's registrable domain. A platform
+ * The RDAP status values and delegated nameservers of the host's registrable domain. A platform
  * tenant's domain is the platform's, and an IP has none. RDAP is evidence
  * beside the visit, so its failure leaves the list empty.
  */
-async function observeDomainStatuses(host: string, rdap: ResolverDependencies): Promise<string[]> {
-	if (isIP(host) || siteOf(host).platform) return [];
+async function observeRegistry(host: string, rdap: ResolverDependencies): Promise<RegistryObservation> {
+	if (isIP(host) || siteOf(host).platform) return EMPTY_REGISTRY;
 	const domain = registrableDomain(host);
-	if (!domain) return [];
+	if (!domain) return EMPTY_REGISTRY;
 	try {
 		const record = await withTimeout(() => fetchRdapRecord("domain", domain, rdap), RDAP_TIMEOUT_MS, `RDAP lookup of ${domain}`);
-		const statuses = record?.status;
-		return Array.isArray(statuses) ? statuses.filter((status): status is string => typeof status === "string") : [];
+		const strings = (values: unknown): string[] => (Array.isArray(values) ? values.filter((value): value is string => typeof value === "string") : []);
+		const nameservers = Array.isArray(record?.nameservers) ? record.nameservers.flatMap((server) => strings([asRecord(server)?.ldhName])) : [];
+		return { statuses: strings(record?.status), nameservers };
 	} catch {
-		return [];
+		return EMPTY_REGISTRY;
 	}
 }
 
@@ -153,11 +158,11 @@ async function observeHttp(url: string, dependencies: SiteCheckDependencies): Pr
 export async function checkSite(url: string, dependencies: SiteCheckDependencies = {}): Promise<SiteCheckResult> {
 	const checkedAt = (dependencies.now ?? (() => new Date()))();
 	const host = urlHostname(new URL(url));
-	const domainStatuses = observeDomainStatuses(host, dependencies.rdap ?? {});
+	const registryObservation = observeRegistry(host, dependencies.rdap ?? {});
 	const dnsObservation = await observeDns(host, dependencies.dns ?? dns);
 	const http = dnsObservation.outcome === "nxdomain" ? undefined : await observeHttp(url, dependencies);
-	const statuses = await domainStatuses;
-	const verdict = classifySite({ url, dns: dnsObservation, domainStatuses: statuses, ...(http ? { http } : {}) });
+	const { statuses, nameservers } = await registryObservation;
+	const verdict = classifySite({ url, dns: dnsObservation, domainStatuses: statuses, nameservers, ...(http ? { http } : {}) });
 	return {
 		url,
 		state: verdict.state,
