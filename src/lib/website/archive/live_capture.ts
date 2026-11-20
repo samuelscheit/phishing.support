@@ -113,7 +113,7 @@ export async function openLiveCapture(options: ArchiveWebsiteOptions, egress: Fa
 		if (navigationResponse && !isNetworkDocument(navigationResponse.url())) navigationResponse = latestDocumentResponse;
 		let providerWarning: WebsiteProviderWarning | undefined;
 		if (navigationResponse && !navigationResponse.ok()) {
-			providerWarning = await passProviderWarning(page, { ...(dependencies.captchaGraceMs !== undefined ? { captchaGraceMs: dependencies.captchaGraceMs } : {}) });
+			providerWarning = await passProviderWarning(page);
 			const settled = await settleErrorDocument(page, () => latestDocumentResponse, dependencies.errorDocumentSettleMs ?? WEBSITE_ERROR_DOCUMENT_SETTLE_MS);
 			if (!settled) {
 				const title = squash(await page.title().catch(() => ""));

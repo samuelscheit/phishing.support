@@ -47,7 +47,7 @@ document.querySelector("form").addEventListener("submit", (event) => {
 			action: "createDomainReport",
 			payload: { captcha: { ret: 0, ticket: "t-1", randstr: "r-1" }, formData: { domain: field("domain"), url: field("url"), describe: field("describe"), category: [window.category], country_name: window.country } },
 		}) }).catch(() => undefined);
-	}, solver.afterMs ?? 300);
+	}, solver.afterMs ?? 1_500);
 });
 </script></body></html>`;
 

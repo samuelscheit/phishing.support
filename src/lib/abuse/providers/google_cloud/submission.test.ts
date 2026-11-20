@@ -164,7 +164,8 @@ document.querySelector(".submit-button").addEventListener("click", async () => {
 		document.querySelector(".notification-area").textContent = "Complete the reCAPTCHA to continue";
 		const solver = ${JSON.stringify(solver)};
 		const root = document.documentElement;
-		setTimeout(() => root.setAttribute("data-captcha-state", "solving"), 100);
+		// The solver's writes come after the wait's first look, as on the live form, where it takes seconds at least.
+		setTimeout(() => root.setAttribute("data-captcha-state", "solving"), 400);
 		setTimeout(() => {
 			if (solver.stuck) return;
 			if (solver.failure) {
@@ -175,7 +176,7 @@ document.querySelector(".submit-button").addEventListener("click", async () => {
 			response.value = solver.token;
 			window.grecaptcha.getResponse = () => solver.token;
 			root.setAttribute("data-captcha-state", "solved");
-		}, 600);
+		}, 1_200);
 	} else document.querySelector(".notification-area").textContent = "There were problems sending your form.";
 });
 </script></body></html>`, { headers: { "content-type": "text/html" } });
@@ -271,11 +272,14 @@ describe.skipIf(!chromiumAvailable)("Google Cloud abuse form, in a real browser"
 		}
 	}, 60_000);
 
-	test("a solved reCAPTCHA Google still refuses is a rejection, with no third request", async () => {
+	test("a solved reCAPTCHA Google still asks again for goes to a person, with no third request: nothing was filed and the report is fine", async () => {
 		const form = googleCloudForm(CAPTCHA_REQUIRED);
 		try {
 			const { route } = await googleCloudRoute();
-			await expect(executeProviderSubmission({ routeId: route.id, provider: browserProvider(form) })).resolves.toMatchObject({ outcome: "provider_rejected" });
+			await expect(executeProviderSubmission({ routeId: route.id, provider: browserProvider(form) })).resolves.toMatchObject({
+				outcome: "needs_human",
+				reason: "Google Cloud abuse form asked for the reCAPTCHA again after the solved one; no case was created.",
+			});
 			expect(form.posts).toHaveLength(2);
 		} finally {
 			form.server.stop(true);

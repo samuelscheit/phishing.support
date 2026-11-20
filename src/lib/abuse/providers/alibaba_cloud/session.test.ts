@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { captchaGlobals } from "../../../browser/captcha_test_support";
 import { ProviderLoginError } from "../login_session/session";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import { ALIBABA_SESSION_TTL_MS, alibabaCloudLoginConfig, browserReason, buildAlibabaCloudSession, consoleSecToken, loginWithContext, parseAlibabaCloudSession } from "./session";
@@ -120,13 +121,17 @@ describe("loginWithContext", () => {
 	function fakeLogin(behaviour: { fill?: (selector: string, value: string) => Promise<void>; click?: () => Promise<void>; frames?: () => unknown[]; afterClick?: "console" | "stay"; captcha?: () => Captcha } = {}) {
 		const calls: Calls = { frameLocators: [], fills: [], clicks: [], closed: 0 };
 		let url = "about:blank";
+		const globals = captchaGlobals();
 		const page = {
 			evaluate: async (pageFunction: (argument: unknown) => unknown, argument: unknown) => {
 				const captcha = behaviour.captcha?.() ?? {};
 				const attributes: Record<string, string | undefined> = { "data-captcha-state": captcha.state, "data-captcha-detail": captcha.detail };
-				const scoped = globalThis as { document?: unknown };
+				globals.sync(attributes);
+				const scoped = globalThis as { document?: unknown; window?: unknown; MutationObserver?: unknown };
 				scoped.document = { documentElement: { getAttribute: (name: string) => attributes[name] ?? null }, querySelector: () => null, querySelectorAll: () => [] };
-				try { return await pageFunction(argument); } finally { delete scoped.document; }
+				scoped.window = globals.window;
+				scoped.MutationObserver = globals.MutationObserver;
+				try { return await pageFunction(argument); } finally { delete scoped.document; delete scoped.window; delete scoped.MutationObserver; }
 			},
 			goto: async (target: string) => { url = target; },
 			frameLocator: (selector: string) => {
@@ -246,8 +251,21 @@ describe("loginWithContext", () => {
 		expect(fake.calls.closed).toBe(1);
 	});
 
+	test("a failed verdict an earlier slider left on the page does not end the login: the console still opens", async () => {
+		let looks = 0;
+		const fake = fakeLogin({
+			afterClick: "stay",
+			captcha: () => {
+				if (++looks === 3) fake.setUrl(`${origin}/`);
+				return { state: "failed", detail: "aliyun-nc: an earlier slider" };
+			},
+		});
+		expect((await login(fake.context)).secToken).toBe("Ak2GAMjWhLGnDwas6DsrS3");
+	});
+
 	test("a solver that gives up on the slider ends the login at once, naming its reason", async () => {
-		const fake = fakeLogin({ afterClick: "stay", captcha: () => ({ state: "failed", detail: "aliyun-nc: refused 3 drags" }) });
+		let looks = 0;
+		const fake = fakeLogin({ afterClick: "stay", captcha: () => (++looks < 3 ? { state: "solving", detail: "aliyun-nc" } : { state: "failed", detail: "aliyun-nc: refused 3 drags" }) });
 		const failure = await login(fake.context).catch((error) => error);
 		expect(failure).toBeInstanceOf(ProviderLoginError);
 		expect(failure.stage).toBe("the login page neither opened the console nor asked for the mailed code (Alibaba's sign-in: the captcha solver failed (aliyun-nc: refused 3 drags))");
@@ -279,10 +297,15 @@ describe("loginWithContext", () => {
 	test("a solver that gives up on the code request's slider ends the wait for the code, which would never come", async () => {
 		const verify = plainFrame(VERIFY, { click: async () => undefined, fill: async () => undefined });
 		let requested = false;
-		const fake = fakeLogin({ afterClick: "stay", frames: () => [verify], captcha: () => (requested ? { state: "failed", detail: "aliyun-nc: refused" } : {}) });
-		const failure = await login(fake.context, { readCode: () => { requested = true; return new Promise<string>(() => undefined); } }).catch((error) => error);
+		// The slider shows up with the code request and fails while the code is awaited.
+		let looksSince = 0;
+		const fake = fakeLogin({ afterClick: "stay", frames: () => [verify], captcha: () => (requested && ++looksSince > 1 ? { state: "failed", detail: "aliyun-nc: refused" } : {}) });
+		let reading: AbortSignal | undefined;
+		const failure = await login(fake.context, { readCode: (_since: Date, signal?: AbortSignal) => { requested = true; reading = signal; return new Promise<string>(() => undefined); } }).catch((error) => error);
 		expect(failure.stage).toBe("the mailed code did not arrive (Alibaba's code request: the captcha solver failed (aliyun-nc: refused))");
 		expect(fake.calls.closed).toBe(1);
+		// The mailbox is not polled on for a code that will never come.
+		expect(reading?.aborted).toBeTrue();
 	});
 	test("from an unknown browser the mailed code is requested, read and entered in the identity-check frame", async () => {
 		const actions: string[] = [];

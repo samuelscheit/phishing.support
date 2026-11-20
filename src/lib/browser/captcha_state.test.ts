@@ -2,41 +2,47 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import type { Browser, Page } from "rebrowser-puppeteer-core";
 
 import { OperationCanceledError } from "../abuse/worker/cancellation";
-import { CaptchaError, waitForCaptchaSolved, waitForCaptchaToken } from "./captcha_state";
+import { CaptchaError, waitForCaptchaOutcome, waitForCaptchaToken } from "./captcha_state";
 import { chromiumAvailable, html, launchTestChromium } from "./task/test_helpers";
 
-/** Plays the solver: sets the top document's captcha state at the given times (ms after load). */
+/** Plays the solver: sets the top document's captcha state at the given times (ms after load), with its window event. */
 const solver = (steps: Array<[ms: number, state: string, detail?: string]>, extra = "") => `<script>
-for (const [ms, state, detail] of ${JSON.stringify(steps)}) setTimeout(() => {
-	document.documentElement.setAttribute("data-captcha-state", state);
+window.setCaptcha = (state, detail) => {
 	if (detail) document.documentElement.setAttribute("data-captcha-detail", detail);
-}, ms);
+	document.documentElement.setAttribute("data-captcha-state", state);
+	window.dispatchEvent(new CustomEvent("captcha-state", { detail: { state, detail } }));
+};
+for (const [ms, state, detail] of ${JSON.stringify(steps)}) setTimeout(() => window.setCaptcha(state, detail), ms);
 ${extra}
 </script>`;
 
 const PAGES: Record<string, string> = {
-	"/solved": solver([[100, "solving", "tcaptcha"], [500, "solved", "tcaptcha"]]),
+	// The solver's writes come well after load, so the wait's first look (its baseline) precedes them even on a busy machine.
+	"/solved": solver([[600, "solving", "tcaptcha"], [1_000, "solved", "tcaptcha"]]),
 	"/none": "<p>No challenge here.</p>",
-	"/failed": solver([[100, "solving", "recaptcha"], [300, "failed", "recaptcha: image grid not solved"]]),
+	"/failed": solver([[600, "solving", "recaptcha"], [800, "failed", "recaptcha: image grid not solved"]]),
 	"/stuck": solver([[50, "solving", "tcaptcha"]]),
-	"/late": solver([[1_500, "solving", "gname"], [1_800, "solved", "gname"]]),
 	// The widget fills its field while the solver still works on it: only the solved state releases the token.
-	"/recaptcha": `<div class="g-recaptcha"><textarea name="g-recaptcha-response" style="display:none"></textarea></div>${solver([[100, "solving", "recaptcha"], [300, "solving", "recaptcha"], [700, "solved", "recaptcha"]], `
-setTimeout(() => { document.querySelector("textarea").value = "03AF-partial"; }, 300);
-setTimeout(() => { document.querySelector("textarea").value = "03AF-token"; }, 650);`)}`,
+	"/recaptcha": `<div class="g-recaptcha"><textarea name="g-recaptcha-response" style="display:none"></textarea></div>${solver([[600, "solving", "recaptcha"], [800, "solving", "recaptcha"], [1_200, "solved", "recaptcha"]], `
+setTimeout(() => { document.querySelector("textarea").value = "03AF-partial"; }, 800);
+setTimeout(() => { document.querySelector("textarea").value = "03AF-token"; }, 1_150);`)}`,
 	// Turnstile passes invisibly: a token and never a state.
 	"/turnstile": `<div style="height:3000px"></div><div class="cf-turnstile"><input type="hidden" name="cf-turnstile-response" value=""></div>
 <script>new IntersectionObserver((entries, observer) => { if (entries[0].isIntersecting) { setTimeout(() => { document.querySelector("[name=cf-turnstile-response]").value = "0.turnstile"; }, 200); observer.disconnect(); } }).observe(document.querySelector(".cf-turnstile"));</script>`,
 	"/empty-widget": `<div class="cf-turnstile"><input type="hidden" name="cf-turnstile-response" value=""></div>`,
-	// The challenge navigates to the page it guarded, which the solver marks solved.
+	// The challenge navigates to the page it guarded.
 	"/navigates": `<script>setTimeout(() => { location.href = "/solved"; }, 200);</script>`,
+	// One document, two challenges: the first already over when the test's wait begins.
+	"/earlier": `<textarea name="g-recaptcha-response"></textarea>${solver([[0, "failed", "recaptcha: earlier challenge"]])}`,
+	// A modal dialog: every evaluate on the page hangs until it is closed.
+	"/dialog": `<script>setTimeout(() => alert("Session expired"), 100);</script>`,
 };
 
 describe.skipIf(!chromiumAvailable)("the solver's captcha state on a real page", () => {
 	let server: ReturnType<typeof Bun.serve>;
 	let browser: Browser;
 	let page: Page;
-	beforeAll(async () => {
+	beforeAll(() => {
 		server = Bun.serve({ port: 0, fetch: (request) => {
 			const body = PAGES[new URL(request.url).pathname];
 			return body === undefined ? new Response("not found", { status: 404 }) : html(body);
@@ -51,52 +57,86 @@ describe.skipIf(!chromiumAvailable)("the solver's captcha state on a real page",
 	afterAll(() => { server?.stop(true); });
 	const open = (path: string) => page.goto(`http://127.0.0.1:${server.port}${path}`, { waitUntil: "domcontentloaded" });
 	const options = { label: "The test captcha", timeoutMs: 5_000, pollMs: 50 };
+	const solved = () => page.evaluate(() => document.documentElement.getAttribute("data-captcha-state") === "solved");
 
-	test("waits through solving and resolves true once solved", async () => {
+	test("an outcome wait carries on through solving and ends once the outcome holds", async () => {
 		await open("/solved");
 		const started = Date.now();
-		expect(await waitForCaptchaSolved(page, { ...options, graceMs: 2_000 })).toBe(true);
-		expect(Date.now() - started).toBeGreaterThanOrEqual(350);
-	});
-
-	test("a page that shows no challenge within the grace period resolves false", async () => {
-		await open("/none");
-		const started = Date.now();
-		expect(await waitForCaptchaSolved(page, { ...options, graceMs: 400 })).toBe(false);
+		await waitForCaptchaOutcome(page, solved, options);
 		expect(Date.now() - started).toBeGreaterThanOrEqual(400);
-		expect(Date.now() - started).toBeLessThan(2_000);
 	});
 
-	test("a challenge that appears within the grace period is waited for", async () => {
-		await open("/late");
-		expect(await waitForCaptchaSolved(page, { ...options, graceMs: 2_500 })).toBe(true);
+	test("with no captcha at all an outcome wait is a plain bounded wait", async () => {
+		await open("/none");
+		let looks = 0;
+		await waitForCaptchaOutcome(page, () => ++looks === 3, options);
+		await expect(waitForCaptchaOutcome(page, () => false, { ...options, timeoutMs: 300 })).rejects.toThrow("The test captcha: not done within 0 s (no captcha state)");
 	});
 
-	test("failed throws at once with the solver's reason", async () => {
+	test("a failed solve throws at once with the solver's reason", async () => {
 		await open("/failed");
-		const error = await waitForCaptchaSolved(page, { ...options, graceMs: 2_000 }).catch((caught: unknown) => caught);
+		const started = Date.now();
+		const error = await waitForCaptchaOutcome(page, () => false, options).catch((caught: unknown) => caught);
 		expect(error).toBeInstanceOf(CaptchaError);
 		expect(error).toMatchObject({ state: "failed", detail: "recaptcha: image grid not solved", message: "The test captcha: the captcha solver failed (recaptcha: image grid not solved)" });
+		expect(Date.now() - started).toBeLessThan(3_000);
 	});
 
 	test("still solving at the deadline throws, naming the state and the adapter", async () => {
 		await open("/stuck");
-		const error = await waitForCaptchaSolved(page, { ...options, timeoutMs: 600, graceMs: 100 }).catch((caught: unknown) => caught);
-		expect(error).toBeInstanceOf(CaptchaError);
-		expect((error as Error).message).toBe("The test captcha: the captcha was not solved within 1 s (solving: tcaptcha)");
+		await expect(waitForCaptchaOutcome(page, () => false, { ...options, timeoutMs: 600 })).rejects.toThrow("The test captcha: not done within 1 s (solving: tcaptcha)");
 	});
 
 	test("an aborted signal ends the wait as a cancellation", async () => {
 		await open("/stuck");
 		const controller = new AbortController();
 		setTimeout(() => controller.abort(), 200);
-		await expect(waitForCaptchaSolved(page, { ...options, signal: controller.signal })).rejects.toBeInstanceOf(OperationCanceledError);
+		await expect(waitForCaptchaOutcome(page, () => false, { ...options, signal: controller.signal })).rejects.toBeInstanceOf(OperationCanceledError);
 	});
 
 	test("a navigation during the wait is looked through, to the next page's state", async () => {
 		await open("/navigates");
-		expect(await waitForCaptchaSolved(page, { ...options, graceMs: 3_000 })).toBe(true);
+		await waitForCaptchaOutcome(page, () => solved().catch(() => false), options);
 		expect(page.url()).toEndWith("/solved");
+	});
+
+	test("a failed verdict an earlier challenge left on the document does not end a later wait", async () => {
+		await open("/earlier");
+		await page.waitForFunction(() => document.documentElement.getAttribute("data-captcha-state") === "failed");
+		let looks = 0;
+		await waitForCaptchaOutcome(page, () => ++looks === 4, options);
+		await expect(waitForCaptchaOutcome(page, () => false, { ...options, timeoutMs: 300 }))
+			.rejects.toThrow("The test captcha: not done within 0 s (no captcha state; before this wait: failed: recaptcha: earlier challenge)");
+	});
+
+	test("the next challenge on the same document is followed: its own failed verdict ends the wait, even with the same detail", async () => {
+		await open("/earlier");
+		await page.waitForFunction(() => document.documentElement.getAttribute("data-captcha-state") === "failed");
+		// The solver fails the next challenge with the very same words: only the write itself tells it apart.
+		setTimeout(() => void page.evaluate(() => (window as unknown as { setCaptcha(state: string, detail: string): void }).setCaptcha("failed", "recaptcha: earlier challenge")), 300);
+		const started = Date.now();
+		await expect(waitForCaptchaOutcome(page, () => false, options)).rejects.toMatchObject({ state: "failed", message: "The test captcha: the captcha solver failed (recaptcha: earlier challenge)" });
+		expect(Date.now() - started).toBeLessThan(2_000);
+	});
+
+	test("an earlier solved verdict hands out no token: the next challenge's is waited for", async () => {
+		await open("/earlier");
+		await page.evaluate(() => (window as unknown as { setCaptcha(state: string, detail: string): void }).setCaptcha("solved", "recaptcha"));
+		await page.evaluate(() => { document.querySelector("textarea")!.value = ""; });
+		setTimeout(() => void page.evaluate(() => {
+			const scoped = window as unknown as { setCaptcha(state: string, detail: string): void };
+			scoped.setCaptcha("solving", "recaptcha");
+			setTimeout(() => { document.querySelector("textarea")!.value = "03AF-second"; scoped.setCaptcha("solved", "recaptcha"); }, 300);
+		}), 300);
+		expect(await waitForCaptchaToken(page, "recaptcha", options)).toBe("03AF-second");
+	});
+
+	test("a page that stops answering (a modal dialog) cannot hold the wait past its deadline", async () => {
+		await open("/dialog");
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		const started = Date.now();
+		await expect(waitForCaptchaOutcome(page, () => false, { ...options, timeoutMs: 1_000 })).rejects.toBeInstanceOf(CaptchaError);
+		expect(Date.now() - started).toBeLessThan(2_500);
 	});
 
 	test("a reCAPTCHA token is read only once the solver says solved", async () => {

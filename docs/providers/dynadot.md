@@ -97,7 +97,7 @@ abuse_type=2
   4. Wait until `[name=cf-turnstile-response]` has a value (about 8 s). If Turnstile shows an interactive checkbox, click it, or fall back to a solver token.
   5. Either click `[name=save_form_2]` or `fetch()` the same multipart from `page.evaluate` (same cookies and headers). The submit is one request, so there is no need to reimplement the page.
   6. Read the response from `page.waitForResponse(/command=submit_abuse/)`: success = `validation_errors` empty. Optionally also check for the "Submission successful!" text.
-- DeathByCaptcha Turnstile support is unnecessary unless the auto-solve fails in production. If needed, pass the sitekey and page URL, and inject the token into the hidden `cf-turnstile-response` input (or the multipart).
+- Turnstile needs no service: it passes by itself, and Browser Fabric's solver (llm-captcha) passes it if it turns interactive; the route reads `cf-turnstile-response` once the token is there.
 - Risks:
   - Cloudflare may block datacenter or low-reputation egress (this run used `egress_direct@1`).
   - Turnstile may escalate to interactive.

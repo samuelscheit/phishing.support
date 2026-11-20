@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { archiveWebsite } from "../archive";
 import { chromiumAvailable, launchTestChromium } from "../../browser/task/test_helpers";
 
-const fast = { scriptNavigationSettleMs: 20, renderSettleMs: 1_000, captchaGraceMs: 1_000 } as const;
+const fast = { scriptNavigationSettleMs: 20, renderSettleMs: 1_000 } as const;
 
 const html = (body: string, init: ResponseInit = {}, title = "RBXCore — Game Copier") => new Response(`<!DOCTYPE html><html><head><title>${title}</title></head><body>${body}</body></html>`, { ...init, headers: { "content-type": "text/html; charset=utf-8", ...init.headers } });
 
@@ -50,8 +50,8 @@ describe.skipIf(!chromiumAvailable)("a provider's warning page before the site, 
 		}
 	}, 60_000);
 
-	test("a Turnstile the browser's solver takes long over is waited for, by its state, before the button is pressed", async () => {
-		// The solver's state shows at once, and the button unlocks only after the 5 s a locked button alone is waited for.
+	test("a Turnstile the browser's solver takes long over is waited for until the button it unlocks can be pressed", async () => {
+		// Well past the 5 s the capture once gave a locked button.
 		const solving = (path: string) => html(`<h2>Suspected Phishing</h2>
 <form action="/cdn-cgi/phish-bypass" method="GET"><input type="hidden" name="original_path" value="${path}">
 <button type="submit" id="bypass-button" disabled>Ignore & Proceed</button></form>

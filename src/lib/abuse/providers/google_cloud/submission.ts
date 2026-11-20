@@ -23,6 +23,8 @@ const SUBMIT_RESPONSE_TIMEOUT_MS = 60_000;
 const CONFIRMATION_TIMEOUT_MS = 20_000;
 /** How long the browser's solver may take on the checkbox reCAPTCHA: its image rounds, then Fabric's DeathByCaptcha fallback. */
 const CHECKBOX_TIMEOUT_MS = 240_000;
+/** The checkbox widget's frame, which the form adds under its `.g-recaptcha-v2` container. */
+const CHECKBOX_WIDGET = ".g-recaptcha-v2 iframe";
 
 type GoogleCloudFormSession = { page: Page; close(): Promise<void> };
 
@@ -180,6 +182,8 @@ async function waitForCheckbox(page: Page, timeoutMs: number, signal: AbortSigna
 	await waitForCaptchaToken(page, GOOGLE_CLOUD_PROVIDER.captcha.kind, {
 		label: "Google Cloud's checkbox reCAPTCHA",
 		tokenSelector: GOOGLE_CLOUD_PROVIDER.captcha.tokenSelector,
+		// Kept in view, so the solver can see and click it.
+		widgetSelector: CHECKBOX_WIDGET,
 		timeoutMs,
 		...(signal ? { signal } : {}),
 	}).catch((error: unknown) => {
@@ -221,7 +225,8 @@ export async function submitGoogleCloudSubmission(
 			await step(waitForCheckbox(page, timeouts.checkboxMs, signal));
 			attempt = await submitOnce(page, step, timeouts.submitResponseMs);
 			if (attempt.answer.outcome === "captcha_required") {
-				throw new ProviderSubmissionRejectedError("Google Cloud abuse form rejected the solved reCAPTCHA; no case was created.");
+				// Nothing was filed and the report itself is fine: a person can send it.
+				throw new ProviderSubmissionNeedsHumanError("Google Cloud abuse form asked for the reCAPTCHA again after the solved one; no case was created.");
 			}
 			if (attempt.sentToken !== "v2") throw new Error("The Google Cloud abuse form resent the report without the solved reCAPTCHA token.");
 		} else if (!attempt.sentToken) {

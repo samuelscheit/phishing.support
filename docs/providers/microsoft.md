@@ -71,7 +71,7 @@ No pre-submit token or upload call occurred without a file (only telemetry: `dc.
 
 ## Automation plan
 
-- Plain HTTP, no browser, no DBC, no mailed code: one `fetch` POST of the JSON above (optional `POST /report/v3.0/file` first for evidence screenshot). Use `source: "ReportApi"` as the documented API source (worth testing that the server accepts it unauthenticated; fall back to `CertPortalV2` which the anonymous portal uses). Send browser-like `origin`/`referer` and a fresh `request-id` uuid.
+- Plain HTTP, no browser, no captcha, no mailed code: one `fetch` POST of the JSON above (optional `POST /report/v3.0/file` first for evidence screenshot). Use `source: "ReportApi"` as the documented API source (worth testing that the server accepts it unauthenticated; fall back to `CertPortalV2` which the anonymous portal uses). Send browser-like `origin`/`referer` and a fresh `request-id` uuid.
 - Map: reporter name/email from our reporter profile, `date`/`time`/`timeZone` from detection time (UTC => `"+0000"`; confirm accepted), `urlList` = phishing URL(s) (<=10, one URL per item), `reportNotes` <= 2000 chars (truncate evidence summary), `anonymizeReport` decision (default true recommended to avoid sharing reporter contact with the Azure customer).
 - Risks: unpublished rate limits/429 on duplicates (dedupe per URL); unauthenticated endpoint may later gain captcha/auth (portal could change; keep a detect-and-fail path); no receipt ID means no later verification; timeZone value format for non-negative offsets unverified; API may silently drop reports for URLs not hosted on Microsoft (see below); file upload constraints unknown.
 - Feasibility: easy.

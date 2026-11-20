@@ -16,11 +16,11 @@ Mail is dead. `domainabuse@tucows.com` / `abuse@enom.com` auto-reply "not monito
 Bullwark (`bullwark.tucows.com`, Go-style server with Alpine.js front end, `Set-Cookie csrf_token` HttpOnly Secure SameSite=Strict, Ketch consent banner):
 
 - **No account.** "No account required." Identity = name + email, verified by a **6-digit mailed code**.
-- **Captcha: Cloudflare Turnstile** on step 1 only. Sitekey `0x4AAAAAADhWTmUwriZtddpv`, `data-size="flexible"`, response field `cf-turnstile-response` (794-char token, prefix `1.`). In the real remote Chrome it solved itself with no interaction in a few seconds (managed/non-interactive). CSP allows `challenges.cloudflare.com` only. Plain HTTP needs a Turnstile token: DeathByCaptcha already handles Turnstile (`death_by_captcha.ts` line ~135, used by the cloudflare provider).
+- **Captcha: Cloudflare Turnstile** on step 1 only. Sitekey `0x4AAAAAADhWTmUwriZtddpv`, `data-size="flexible"`, response field `cf-turnstile-response` (794-char token, prefix `1.`). In the real remote Chrome it solved itself with no interaction in a few seconds (managed/non-interactive). CSP allows `challenges.cloudflare.com` only. Plain HTTP needs a Turnstile token. Implemented: the token comes from the wizard's own page in a Browser Fabric Chrome, whose solver passes the widget (about 10 s); the HTTP step posts it (`providers/kit/captcha.ts`).
 - **Mailed code**: sender `noreply@bullwark.tucows.com`, subject `Your verification code`, text "Use the code below to verify your identity on the Tucows Domains abuse report form." then a bare 6-digit code (example `364971`), "Expires in 15 minutes". Arrived in ~10 s. Suitable for `mailed_code.ts`: `senderDomains: ["bullwark.tucows.com"]` (or `tucows.com`), `subjectPattern: "your verification code"`, `codePattern: "\\b(\\d{6})\\b"` (the copyright line has no 6-digit run; first 6-digit group in the body text is the code; verify against the HTML part, which has a 3053-char body). Resend: `POST /api/report/resend-otp` with header `X-CSRF-Token`, 60 s cooldown.
 - No captcha on later steps.
 
-Enom legacy form: no login; **image captcha** (`/captchautil/Captcha.aspx?annc=<id>`, JPEG 230 px wide, case-sensitive text, DeathByCaptcha image). Its answer is validated by an unauthenticated oracle: `GET /captchautil/validatecaptcha.aspx?cap=<hdnCaptcha>&ans=<answer>` returns `true`/`false` (wrong answer verified: `false`). Useful to confirm the solve before the real submit.
+Enom legacy form: no login; **image captcha** (`/captchautil/Captcha.aspx?annc=<id>`, JPEG 230 px wide, case-sensitive text; a text image, which neither this app nor Browser Fabric's solver handles). Its answer is validated by an unauthenticated oracle: `GET /captchautil/validatecaptcha.aspx?cap=<hdnCaptcha>&ans=<answer>` returns `true`/`false` (wrong answer verified: `false`). Useful to confirm the solve before the real submit.
 
 ## Fields
 
@@ -126,18 +126,18 @@ Not observed (it requires actually filing). From the docs only:
 Provider design: HTTP all the way except possibly Turnstile, no browser needed.
 
 1. `GET /report`: collect cookies (`csrf_token`, `_swb`), hidden `csrf_token`, meta CSRF.
-2. Solve Turnstile (sitekey `0x4AAAAAADhWTmUwriZtddpv`, page `https://bullwark.tucows.com/report`) via DeathByCaptcha; `POST /report` (urlencoded) with a stable reporter identity (`Phishing Support` / `support@phishing.support`, role `it_security`, organization `Phishing Support`). Record the request time.
+2. Take the Turnstile token (sitekey `0x4AAAAAADhWTmUwriZtddpv`) from `https://bullwark.tucows.com/report` in a Browser Fabric Chrome, whose solver passes it; `POST /report` (urlencoded) with a stable reporter identity (`Phishing Support` / `support@phishing.support`, role `it_security`, organization `Phishing Support`). Record the request time.
 3. Read the code with `mailedCodeReader` (spec above), `POST /report/otp`.
 4. `POST /report/types` with the phishing category id.
 5. `GET /report/form` (new CSRF), optional `validate-field` on `offending_domain` as a **registrar pre-check** (reuse its error: it names the real registrar abuse contact, so a non-Tucows domain can fall back to that contact instead of being filed here), optional `check-duplicate` to skip a domain with an active case (`hard:true` carries the reference).
 6. `POST /report/form` multipart with the fields above; evidence screenshot(s) as `file_upload` (required, so every report needs at least one file; 10 MiB each, 5 files, 20 MiB total; JPEG verified, PNG likely, untested).
 7. Parse the 2xx/303 result page for the case number.
 
-Enom-only fallback: `GET` the ASP.NET page, solve the image captcha (DeathByCaptcha), verify with the `validatecaptcha.aspx` oracle, POST multipart with scraped hidden fields. Simpler, but no confirmation is promised. Given bullwark accepts Enom domains, prefer bullwark for everything.
+Enom-only fallback: `GET` the ASP.NET page, solve the image captcha (it would need a text-image solver, which nothing here has), verify with the `validatecaptcha.aspx` oracle, POST multipart with scraped hidden fields. Simpler, but no confirmation is promised. Given bullwark accepts Enom domains, prefer bullwark for everything.
 
 Risks:
 
-- Turnstile token acceptance via DBC for this widget (`flexible`, non-interactive in Chrome) is unproven. A real Chrome gets a token automatically in seconds, so a browser fallback (open page, wait for `cf-turnstile-response`, then do the rest over HTTP with the cookies) is cheap if DBC fails. Tokens are single-use and bound to the page/IP; solve from the same egress.
+- Turnstile: a real Chrome gets a token in seconds, which is what the route does (open the page in Fabric, wait for `cf-turnstile-response`, then do the rest over HTTP). Tokens are single-use and may be bound to the page/IP; the Fabric browser uses the direct egress, the same host as the app's own requests.
 - One OTP mail per report (15-minute expiry, 60 s resend). Throttling of OTP requests/IP unknown. The session after step 3 can probably file multiple reports (the "Start over" button suggests one report per session: untested).
 - Evidence upload is mandatory; the server's allowed types/size are only enforced client-side to my knowledge.
 - Server may re-validate registrar (Tucows-only) at submit; client does `validate-field` blocking.

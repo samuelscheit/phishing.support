@@ -9,6 +9,7 @@ import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "
 import { snippet } from "../../../util/text";
 import { providerEvidenceImageBytesMatch } from "../kit/evidence";
 import {
+	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionContext,
 	type ProviderSubmissionPreflight,
@@ -26,7 +27,12 @@ import { type FetchLike } from "../../../http/fetch";
 type NameSiloSession = {
 	csrfToken: string;
 	cookieHeader: string;
+	/** When NameSilo stops honouring the CSRF token, in Unix seconds. */
+	expiresAt: number;
 };
+
+/** A session that would expire this soon is not used: the filing request still has the marker and its own round trip ahead. */
+const SESSION_MARGIN_MS = 30_000;
 
 /** What the one filing request needs, kept in memory from before the marker: the verified draft with its screenshot's bytes, the session and the solved captcha. */
 type NameSiloPreflightState = NameSiloSession & {
@@ -60,6 +66,7 @@ export type NameSiloPreflightDependencies = {
 
 export type NameSiloSubmissionDependencies = RouteDeps & {
 	fetch?: FetchLike;
+	now?: () => number;
 	getArtifact?: EvidenceDependencies["getArtifact"];
 };
 
@@ -98,7 +105,7 @@ export async function parseNameSiloSessionResponse(
 	}
 	const cookies = cookieHeader(response.headers);
 	if (!cookies) throw new Error("NameSilo CSRF session did not return the required cookies.");
-	return { csrfToken, cookieHeader: cookies };
+	return { csrfToken, cookieHeader: cookies, expiresAt: expirationTime };
 }
 
 async function fetchNameSiloSession(
@@ -118,9 +125,11 @@ async function fetchNameSiloSession(
 	return parseNameSiloSessionResponse(response, now);
 }
 
-function storedPreflightState(preflight: ProviderSubmissionPreflight): NameSiloPreflightState | undefined {
+/** The preflight's state, when it is whole and its CSRF session still has `SESSION_MARGIN_MS` to live. */
+function storedPreflightState(preflight: ProviderSubmissionPreflight, now: () => number): NameSiloPreflightState | undefined {
 	const state = preflight && asRecord(preflight.state);
 	if (!state
+		|| typeof state.expiresAt !== "number" || state.expiresAt * 1_000 - now() < SESSION_MARGIN_MS
 		|| typeof state.csrfToken !== "string" || state.csrfToken.length === 0 || state.csrfToken.length > 2_048 || /[\r\n\0]/.test(state.csrfToken)
 		|| typeof state.cookieHeader !== "string" || state.cookieHeader.length === 0 || state.cookieHeader.length > 8_192 || /[\r\n\0]/.test(state.cookieHeader)
 		|| typeof state.captchaToken !== "string" || state.captchaToken.length === 0 || state.captchaToken.length > 32_768 || /[\r\n\0]/.test(state.captchaToken)
@@ -244,9 +253,11 @@ export const nameSiloDraft = createDraft({
 });
 
 /**
- * Before the marker: the verified draft and its screenshot, the CSRF session
- * and then, last, the reCAPTCHA token (it lives about two minutes, and the
- * filing request follows the marker at once).
+ * Before the marker: the verified draft and its screenshot, the reCAPTCHA
+ * token (the solver may take minutes on it), and then, last, the CSRF
+ * session, so that neither has aged by the time the filing request follows
+ * the marker: the token lives about two minutes, and a session that would
+ * expire within `SESSION_MARGIN_MS` is refused here, where a retry is safe.
  */
 export async function prepareNameSiloExternalSubmission(
 	context: ProviderSubmissionContext,
@@ -254,11 +265,11 @@ export async function prepareNameSiloExternalSubmission(
 	dependencies: NameSiloPreflightDependencies & NameSiloSubmissionDependencies = {},
 ): Promise<ProviderSubmissionPreflight> {
 	const { bytes } = await evidenceFileOf(NAMESILO_EVIDENCE_CONTRACT, "NameSilo", payload.evidence, data, dependencies);
-	const fetcher = dependencies.fetch ?? fetch;
-	const session = await fetchNameSiloSession(fetcher, context.signal, dependencies.now ?? Date.now);
+	const now = dependencies.now ?? Date.now;
 	const captchaToken = await (dependencies.captchaSolver ?? solveNameSiloCaptcha)(context.signal);
+	const session = await fetchNameSiloSession(dependencies.fetch ?? fetch, context.signal, now);
 	const state: NameSiloPreflightState = { ...session, captchaToken, payload, evidenceBytes: bytes };
-	if (!storedPreflightState({ state })) throw new Error("NameSilo preflight returned invalid ephemeral state.");
+	if (!storedPreflightState({ state }, now)) throw new Error("NameSilo preflight returned invalid ephemeral state or a CSRF session about to expire.");
 	return { state };
 }
 
@@ -275,10 +286,11 @@ const solveNameSiloCaptcha = (signal?: AbortSignal) => captchaTokenFromPage({
 export async function submitNameSiloSubmission(
 	context: ProviderSubmissionContext,
 	preflight: ProviderSubmissionPreflight,
-	dependencies: Pick<NameSiloSubmissionDependencies, "fetch"> = {},
+	dependencies: Pick<NameSiloSubmissionDependencies, "fetch" | "now"> = {},
 ): Promise<ProviderSubmissionSuccess> {
-	const ephemeral = storedPreflightState(preflight);
-	if (!ephemeral) throw new Error("NameSilo submission requires prepared CSRF and CAPTCHA state.");
+	const ephemeral = storedPreflightState(preflight, dependencies.now ?? Date.now);
+	// Nothing has been sent: a person (or the next run) can take it from here.
+	if (!ephemeral) throw new ProviderSubmissionNeedsHumanError("NameSilo submission requires prepared CSRF and CAPTCHA state with a CSRF session that has not expired; nothing was sent.");
 	const { payload } = ephemeral;
 	const form = buildNameSiloHttpPayload({ payload, evidenceBytes: ephemeral.evidenceBytes, captchaToken: ephemeral.captchaToken });
 	const response = await (dependencies.fetch ?? fetch)(NAMESILO_PROVIDER.submissionUrl, {

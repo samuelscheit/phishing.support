@@ -7,7 +7,7 @@ import type { AbuseArtifact } from "../../schema";
 import { providerDefinitionHasValidHash } from "../kit/pin";
 import { selectProviderEvidenceImageArtifact } from "../kit/evidence";
 import { executeProviderSubmission } from "../submission_execution";
-import { ProviderSubmissionRejectedError, type ProviderSubmissionProvider } from "../submission_contracts";
+import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError, type ProviderSubmissionProvider } from "../submission_contracts";
 import { NAMESILO_PROVIDER } from "./definition";
 import {
 	buildNameSiloSubmissionPayload,
@@ -99,11 +99,36 @@ describe("NameSilo phishing report submission", () => {
 		await expect(parseNameSiloSessionResponse(csrfResponse(), () => 1_000_000)).resolves.toEqual({
 			csrfToken: "csrf-token",
 			cookieHeader: "PHPSESSID=session-value; _csrf-sec2=csrf-cookie",
+			expiresAt: 2_000,
 		});
 		await expect(parseNameSiloSessionResponse(csrfResponse({ includeCookies: false }), () => 1_000_000))
 			.rejects.toThrow("required cookies");
 		await expect(parseNameSiloSessionResponse(csrfResponse({ expirationTime: 999 }), () => 1_000_000))
 			.rejects.toThrow("malformed or expired");
+	});
+
+	test("the CSRF session is taken after the captcha, and one about to expire is refused before the marker and before sending", async () => {
+		const durable = payload();
+		const data = { report: { id: 99n } } as never;
+		const getArtifact = async () => evidenceArtifact(png);
+		const order: string[] = [];
+		const prepare = (expirationTime: number, now = 1_000_000) => rawPrepareNameSiloExternalSubmission({ routeId: 1n, payload: durable }, { payload: durable, data }, {
+			getArtifact,
+			now: () => now,
+			captchaSolver: async () => { order.push("captcha"); return "captcha-token"; },
+			fetch: async () => { order.push("session"); return csrfResponse({ expirationTime }); },
+		});
+		// 1,000 s now; a session to 1,020 s has 20 s left, under the 30 s margin.
+		await expect(prepare(1_020)).rejects.toThrow("CSRF session about to expire");
+		expect(order).toEqual(["captcha", "session"]);
+		const preflight = await prepare(1_031);
+		let posted = 0;
+		const send = (now: number) => submitNameSiloSubmission({ routeId: 1n, payload: durable }, preflight, { now: () => now, fetch: async () => { posted++; return new Response(JSON.stringify({ result: "success" })); } });
+		// Expired between the preflight and the request: nothing is sent, and it is a known failure.
+		await expect(send(1_002_000)).rejects.toBeInstanceOf(ProviderSubmissionNeedsHumanError);
+		expect(posted).toBe(0);
+		await expect(send(1_000_500)).resolves.toMatchObject({ confirmationText: "NameSilo accepted the phishing report." });
+		expect(posted).toBe(1);
 	});
 
 	test("treats only explicit provider errors as known rejections", async () => {
@@ -168,8 +193,8 @@ describe("NameSilo phishing report submission", () => {
 						return csrfResponse();
 					},
 					captchaSolver: async () => {
-						// The token is taken last, after the CSRF session: it lives only about two minutes.
-						expect(requests.map(({ url }) => url)).toEqual([NAMESILO_PROVIDER.tokenUrl]);
+						// The token comes first: the solver may take minutes, which the CSRF session must not spend.
+						expect(requests).toEqual([]);
 						return "captcha-token";
 					},
 					now: () => 1_000_000,
@@ -177,6 +202,7 @@ describe("NameSilo phishing report submission", () => {
 				submit: async (context, preflight) => {
 					expect(await AbuseRepository.getProviderRun(context.runId!)).toMatchObject({ executionStatus: "submission_started" });
 					return submitNameSiloSubmission(context, preflight, {
+						now: () => 1_000_000,
 						fetch: async (input, init) => {
 							requests.push({ url: String(input), init });
 							return new Response(JSON.stringify({ result: "success", message: null, data: null }));

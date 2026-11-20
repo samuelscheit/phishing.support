@@ -25,7 +25,7 @@ Phishing Support is an open-source tool to help automate the analysis, reporting
 
 Browser operations are mandatory Browser Fabric workloads. Phishing Support does
 not install, start, expose, or remotely debug Chromium. Fabric owns the browser
-process, browser profile, egress policy, Turnstile guardian, and the ephemeral
+process, browser profile, egress policy, captcha solver, and the ephemeral
 CDP capability; the application retains only the report workflow and evidence
 logic.
 
@@ -42,9 +42,13 @@ port, VNC, or a caller-selected upstream.
 Every session uses Fabric's one browser runtime, `chrome`, and asks for the
 headful recipe `recipe_chrome@1` (Chrome on a private X display): phishing kits
 and provider forms cloak headless browsers. That recipe uses Fabric's
-`default` profile family and its `challenge_captcha-solver@1` challenge set
-(the Turnstile/DataDome guardian, plus reCAPTCHA v2 solving only when Death by
-Captcha or Anti-Captcha credentials are configured in Fabric). Fabric selects
+`default` profile family and its `challenge_captcha-solver@1` challenge set:
+the llm-captcha guardian, which solves Turnstile, reCAPTCHA v2 (checkbox and
+image grid with a vision model, falling back to DeathByCaptcha configured
+inside Fabric), hCaptcha, Tencent TCaptcha, Aliyun and GNAME sliders, kits'
+drag-to-verify sliders, DataDome and press-and-hold checks, and publishes its
+progress as `data-captcha-state`/`data-captcha-detail` on the top document.
+This app holds no captcha credentials. Fabric selects
 the challenge set through the recipe, not per session: another set (for example
 `challenge_manual-handoff@1`) needs a deployment-catalog recipe that names it,
 set as `FABRIC_RECIPE_REF`.

@@ -145,10 +145,19 @@ export async function loginWithContext(
 			stage = "the mailed code did not arrive";
 			// The code request may meet the slider first: the code is read while its solver works, and its failure ends the wait.
 			const read = { done: false, code: "", error: undefined as unknown };
-			void (dependencies.readCode ?? mailedCodeReader(ALIBABA_CLOUD_PROVIDER.codeMail))(requestedAt, signal)
-				.then((code) => { read.code = code; }, (error: unknown) => { read.error = error ?? new Error("no code"); })
-				.finally(() => { read.done = true; });
-			await until("Alibaba's code request", () => read.done);
+			// The reader stops polling the mailbox with the login, and also when the solver's failure ends the wait.
+			const reading = new AbortController();
+			const stopReading = () => reading.abort();
+			signal.addEventListener("abort", stopReading, { once: true });
+			try {
+				void (dependencies.readCode ?? mailedCodeReader(ALIBABA_CLOUD_PROVIDER.codeMail))(requestedAt, reading.signal)
+					.then((code) => { read.code = code; }, (error: unknown) => { read.error = error ?? new Error("no code"); })
+					.finally(() => { read.done = true; });
+				await until("Alibaba's code request", () => read.done);
+			} finally {
+				signal.removeEventListener("abort", stopReading);
+				reading.abort();
+			}
 			if (read.error) throw read.error;
 			stage = "the mailed code was not accepted";
 			await step(verify.fill("#J_Checkcode", read.code, { timeout: remaining() }));

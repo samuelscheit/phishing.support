@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { BrowserFormError, openBrowserForm, type BrowserFormDependencies, type BrowserFormPage } from "./browser_form";
 import { captchaTokenFromPage } from "./captcha";
+import { captchaGlobals } from "../../../browser/captcha_test_support";
 import { OperationCanceledError } from "../../worker/cancellation";
 
 type FakeElement = { name?: string; type?: string; value?: string; scrolled?: boolean; scrollIntoView?: (options: unknown) => void };
@@ -15,6 +16,9 @@ class FakePage implements BrowserFormPage {
 	elements = new Map<string, FakeElement | undefined>();
 	/** The attributes Browser Fabric's solver publishes on the top document. */
 	captcha: { "data-captcha-state"?: string; "data-captcha-detail"?: string } = {};
+	/** The page's own globals, kept across looks as a real document keeps them. */
+	globals = captchaGlobals();
+	window = Object.assign(this.globals.window, { nonce: "abc123", nested: { value: 7, object: {} } });
 	formElements: FakeElement[] = [];
 	closed = false;
 	gotos: { url: string; timeout: number }[] = [];
@@ -49,14 +53,17 @@ class FakePage implements BrowserFormPage {
 		const form = { elements: this.formElements };
 		const documentWithForm = { ...document, querySelector: (selector: string) => selector === "form.f" ? (this.elements.has("form") ? form : null) : document.querySelector(selector) };
 		const scoped = globalThis as unknown as Record<string, unknown>;
-		const saved = { document: scoped.document, window: scoped.window };
+		const saved = { document: scoped.document, window: scoped.window, MutationObserver: scoped.MutationObserver };
+		this.globals.sync(this.captcha);
 		scoped.document = documentWithForm;
-		scoped.window = { nonce: "abc123", nested: { value: 7, object: {} } };
+		scoped.window = this.window;
+		scoped.MutationObserver = this.globals.MutationObserver;
 		try {
 			return await pageFunction(argument);
 		} finally {
 			scoped.document = saved.document;
 			scoped.window = saved.window;
+			scoped.MutationObserver = saved.MutationObserver;
 		}
 	}
 
@@ -197,9 +204,45 @@ describe("session", () => {
 
 	test("a solver that gives up is a captcha-stage error with its reason, without waiting out the bound", async () => {
 		const { page, session, state } = await ready();
-		page.captcha = { "data-captcha-state": "failed", "data-captcha-detail": "recaptcha: image grid not solved" };
+		const before = page.evaluations;
+		page.onEvaluate = (calls) => {
+			if (calls === before + 1) page.captcha = { "data-captcha-state": "solving", "data-captcha-detail": "recaptcha" };
+			if (calls === before + 3) page.captcha = { "data-captcha-state": "failed", "data-captcha-detail": "recaptcha: image grid not solved" };
+		};
 		await expect(session.waitForCaptchaToken("recaptcha")).rejects.toMatchObject({ stage: "captcha", message: "PDR's reCAPTCHA: the captcha solver failed (recaptcha: image grid not solved)" });
-		expect(state.clock).toBe(0);
+		expect(page.evaluations - before).toBe(3);
+		expect(state.clock).toBe(1_000);
+	});
+
+	test("a failed verdict already on the page when the wait begins is an earlier challenge's: the wait carries on to this one's token", async () => {
+		const { page, session } = await ready();
+		page.captcha = { "data-captcha-state": "failed", "data-captcha-detail": "recaptcha: earlier challenge" };
+		const token: FakeElement = { value: "" };
+		page.elements.set('textarea[name="g-recaptcha-response"]', token);
+		const before = page.evaluations;
+		page.onEvaluate = (calls) => {
+			if (calls === before + 3) page.captcha = { "data-captcha-state": "solving", "data-captcha-detail": "recaptcha" };
+			if (calls === before + 5) { token.value = "03AF-NEW"; page.captcha = { "data-captcha-state": "solved", "data-captcha-detail": "recaptcha" }; }
+		};
+		expect(await session.waitForCaptchaToken("recaptcha")).toBe("03AF-NEW");
+	});
+
+	test("an earlier failed verdict nothing follows is named at the deadline, not taken as this wait's answer", async () => {
+		const { page, session, state } = await ready();
+		page.captcha = { "data-captcha-state": "failed", "data-captcha-detail": "recaptcha: earlier challenge" };
+		page.elements.set('iframe[src*="/recaptcha/"][src*="/anchor"]', {});
+		await expect(session.waitForCaptchaToken("recaptcha", { timeoutMs: 3_000 })).rejects.toMatchObject({
+			stage: "captcha",
+			message: "PDR's reCAPTCHA: no token within 3 s (no captcha state; before this wait: failed: recaptcha: earlier challenge)",
+		});
+		expect(state.clock).toBe(3_000);
+	});
+
+	test("a token present at the deadline is returned, though the solver still says solving", async () => {
+		const { page, session } = await ready();
+		page.elements.set('textarea[name="g-recaptcha-response"]', { value: "03AF-LATE" });
+		page.onEvaluate = () => { page.captcha = { "data-captcha-state": "solving", "data-captcha-detail": "recaptcha" }; };
+		expect(await session.waitForCaptchaToken("recaptcha", { timeoutMs: 2_000 })).toBe("03AF-LATE");
 	});
 
 	test("reads the form's matching named fields, not files, checkboxes or other inputs", async () => {
@@ -401,7 +444,7 @@ describe("captchaTokenFromPage (the Fabric preflight of a provider that files ov
 
 	test("a solver that fails, or no token within the bound, still releases the browser", async () => {
 		const failed = rendered();
-		failed.page.captcha = { "data-captcha-state": "failed", "data-captcha-detail": "recaptcha: image grid not solved" };
+		failed.page.onEvaluate = (calls) => { if (calls > 2) failed.page.captcha = { "data-captcha-state": "failed", "data-captcha-detail": "recaptcha: image grid not solved" }; };
 		await expect(captchaTokenFromPage(spec, undefined, failed.dependencies)).rejects.toMatchObject({ stage: "captcha", message: "NameSilo's reCAPTCHA: the captcha solver failed (recaptcha: image grid not solved)" });
 		expect([failed.page.closed, failed.state.released]).toEqual([true, 1]);
 

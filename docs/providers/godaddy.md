@@ -94,20 +94,20 @@ The portal has no registrar/host selector: one report per URL/domain, GoDaddy ro
 
 ## Automation plan
 
-Plain HTTP, no browser needed except possibly to mint nothing (token is solver-supplied):
+Implemented as a Browser Fabric page on the portal (reCAPTCHA v3 has no challenge to solve: its token comes from the page itself):
 
-1. Solve reCAPTCHA v3 via DeathByCaptcha: `solveDeathByCaptchaToken` is generic over type; use the v3 type with `googlekey=6Lcds5YsAAAAAOxWlnaB1W5e1KIAmk2AhXuUpe97`, `pageurl=https://legalportal.godaddy.com/abuse/phishing`, `action=submit_abuse_report`, `min_score` ~0.7-0.9 (check which DBC token type/params it supports; must verify the accepted score threshold).
+1. In the real page, `grecaptcha.execute("6Lcds5YsAAAAAOxWlnaB1W5e1KIAmk2AhXuUpe97", { action: "submit_abuse_report" })` (`godaddy/portal.ts` `recaptchaTokenProbe`); the accepted score threshold is unverified.
 2. `POST /api/v1/submit/abuse` multipart exactly as above with `X-Portal-Request: 1` and a browser-like UA (Akamai in front). Use the existing proxy support.
 3. Parse JSON: success if `ok` and `fail` empty; take the case ID from the body if present, else from the confirmation mail.
 4. Status: `/api/v1/case-status` with a throttle (<=3/min), mapping `status === "Closed"` -> actioned.
 5. Preferred long-term: apply for an Abuse API key (abuseapisupport@godaddy.com) as a reporter identity of phishing.support; then `POST /v2/abuse/tickets` (JSON, no captcha, `u_number`, `closeReason`) replaces everything above. Provider can support both: API when `GODADDY_ABUSE_API_KEY/SECRET` is configured, portal form otherwise.
 
-Risks: reCAPTCHA v3 score may reject solver tokens (try score tiers; fallback: patchright browser executing `grecaptcha.execute(sitekey,{action:'submit_abuse_report'})` in the real page and POSTing from there); the response schema and case-ID mail are unverified until the first real submission (do that once with a true phishing URL and record it); one source per ticket and >5 URLs/domain counts as duplicate; Akamai bot rules on datacenter IPs; the portal is a Next.js app and the API is private (can change).
+Risks: the reCAPTCHA v3 score of a datacenter browser may be too low (no solver can raise it); the response schema and case-ID mail are unverified until the first real submission (do that once with a true phishing URL and record it); one source per ticket and >5 URLs/domain counts as duplicate; Akamai bot rules on datacenter IPs; the portal is a Next.js app and the API is private (can change).
 
 ## Open questions
 
 - Success response JSON shape and case-ID format/name; confirmation mail sender, subject, whether it is sent when `contact_email` is empty.
-- Which reCAPTCHA v3 score the server requires, and whether DBC tokens pass.
+- Which reCAPTCHA v3 score the server requires, and whether the Fabric browser's tokens reach it.
 - Whether the server enforces `X-Portal-Request`/Origin on submit, and its rate limit.
 - Whether an Abuse API key can be granted to phishing.support (onboarding criteria undocumented; contact abuseapisupport@godaddy.com; expect questions about report quality/volume).
 - Behaviour for non-GoDaddy hosted/registered domains (rejection text?).

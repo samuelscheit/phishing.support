@@ -38,7 +38,7 @@ export type GnameSession = {
 	post(path: string, data: Record<string, unknown>): Promise<GnameResponse>;
 	upload(lx: number, file: GnameUpload): Promise<GnameResponse>;
 	/** Ask for the mailed code; the browser's solver passes the form's slider when it demands one. */
-	requestCode(email: string): Promise<GnameResponse>;
+	requestCode(email: string, signal?: AbortSignal): Promise<GnameResponse>;
 	close(): Promise<void>;
 };
 
@@ -76,7 +76,7 @@ type CodeWindow = { __gnameCode?: GnameResponse | { error: string } };
  * slider (again, if the widget refuses a track); the answer is whatever
  * `send_email` finally hands its callback.
  */
-async function requestGnameCodeOnPage(page: Page, email: string, timeoutMs = CODE_RESPONSE_TIMEOUT_MS): Promise<GnameResponse> {
+async function requestGnameCodeOnPage(page: Page, email: string, signal: AbortSignal | undefined, timeoutMs = CODE_RESPONSE_TIMEOUT_MS): Promise<GnameResponse> {
 	await page.evaluate((address) => {
 		const target = window as unknown as CodeWindow & { send_email?: (element: Element, data: Record<string, string>, callback: (response: unknown) => void) => void };
 		target.__gnameCode = undefined;
@@ -89,7 +89,9 @@ async function requestGnameCodeOnPage(page: Page, email: string, timeoutMs = COD
 		});
 	}, email);
 	let response: GnameResponse | { error: string } | undefined;
-	await waitForCaptchaOutcome(page, async () => (response = await page.evaluate(() => (window as unknown as CodeWindow).__gnameCode)) !== undefined, { label: "GNAME's code request", timeoutMs });
+	// A look that fails (the page navigating under it) is no answer yet.
+	const answered = async () => (response = await page.evaluate(() => (window as unknown as CodeWindow).__gnameCode).catch(() => undefined)) !== undefined;
+	await waitForCaptchaOutcome(page, answered, { label: "GNAME's code request", timeoutMs, ...(signal ? { signal } : {}) });
 	if (!response || "error" in response) throw new Error(`GNAME's form could not request a code: ${response?.error ?? "no answer"}`);
 	return response;
 }
@@ -142,7 +144,7 @@ async function openGnameBrowserSession(kind: GnameComplaintKind): Promise<GnameS
 				}, lx, file);
 				return parsedResponse("lyts_upfile2", result.status, result.text);
 			},
-			requestCode: (email) => requestGnameCodeOnPage(page, email),
+			requestCode: (email, signal) => requestGnameCodeOnPage(page, email, signal),
 			close: () => browser.close().catch(() => undefined),
 		};
 	} catch (error) {
@@ -184,7 +186,7 @@ export async function prepareGnameExternalSubmission(context: ProviderSubmission
 		const path = asRecord(uploaded.data)?.path;
 		if (!gnameSucceeded(uploaded) || typeof path !== "string" || !path) throw new Error(`GNAME screenshot upload failed: ${failure(uploaded)}`);
 		const requestedAt = (dependencies.now ?? (() => new Date()))();
-		const sent = await session.requestCode(GNAME_PROVIDER.reporter.email);
+		const sent = await session.requestCode(GNAME_PROVIDER.reporter.email, context.signal);
 		if (!gnameSucceeded(sent)) throw new Error(`GNAME did not send its verification code: ${failure(sent)}`);
 		const code = await (dependencies.readCode ?? mailedCodeReader(GNAME_PROVIDER.codeMail))(requestedAt, context.signal);
 		return { session, code, pics: [path] } satisfies GnamePreflightState;

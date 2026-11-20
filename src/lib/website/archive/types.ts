@@ -116,8 +116,6 @@ export type WebsiteArchiveDependencies = {
 	scriptNavigationSettleMs?: number;
 	/** Test seam for the bounded wait on the captured document's own rendering requests. */
 	renderSettleMs?: number;
-	/** Test seam for how long a provider's warning page may show no captcha state before its button is tried. */
-	captchaGraceMs?: number;
 	/** Test seam for how long one screenshot may take before the page is captured without one. */
 	screenshotTimeoutMs?: number;
 	/** Test seams for a visit: its budget, how often it looks at the page, and how long a changed page must stay the same. */

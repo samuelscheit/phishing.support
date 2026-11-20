@@ -6,6 +6,7 @@
 		".": {},
 		"tools/cloudflare-origin-probe": {
 			"entry": ["worker.js", "probe.mjs", "cloudflare.config.ts", "*.test.js"],
+			"ignoreBinaries": ["cf"],
 			"project": ["**/*.{js,mjs,ts}"]
 		}
 	}
