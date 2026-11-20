@@ -144,9 +144,16 @@ function descriptionExcerpt(description: string): string {
 	return `${source.slice(0, half)}\n\n[description excerpt omitted]\n\n${source.slice(-half)}`;
 }
 
+/**
+ * The prose words of a text. URLs are left out: they are identifiers the
+ * report must repeat verbatim, and an encoded query alone splits into dozens
+ * of "words" (signin.amazonaws-us-gov.com, 2026-11-19: the observed URL the
+ * description and the body both name read as a copied 30-word passage).
+ */
 function wordSequence(value: string): string[] {
 	return value
 		.normalize("NFKC")
+		.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, " ")
 		.toLowerCase()
 		.replace(/[^\p{L}\p{N}]+/gu, " ")
 		.trim()

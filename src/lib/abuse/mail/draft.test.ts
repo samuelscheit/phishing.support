@@ -100,6 +100,16 @@ describe("abuse email drafts", () => {
 		expect(hasSubstantialCopiedPassage(longAnalysis, draft.body)).toBeFalse();
 	});
 
+	test("does not take a long URL that the description and the body both name for copied prose", () => {
+		const url = "https://signin.example-gov.com/oauth?client_id=arn%3Aaws%3Asignin%3A%3A%3Aconsole%2Fcanvas&code_challenge=PRGIO1RH-Ejp1-aavKQPRb784Jn5D4kWnvan7L5ENas&code_challenge_method=SHA-256&response_type=code&redirect_uri=https%3A%2F%2Fconsole.example-gov.com%2Fconsole%2Fhome%3Fca-oauth-flow-id%3Db94a%26hashArgs%3D%2523%26isauthcode%3Dtrue";
+		const description = `Visitors reach the page through ${url}, where our visit entered a synthetic password.`;
+		const body = `Hello Abuse Team,\n\nObserved URLs:\n- ${url}\n\nPlease investigate.`;
+		expect(hasSubstantialCopiedPassage(description, body)).toBeFalse();
+		// Prose copied word for word still counts, URL or not around it.
+		const prose = "the page impersonates a cloud provider and asks visitors for a password sign in details a verification code or identity details or leads them to a step that does so before it forwards them elsewhere";
+		expect(hasSubstantialCopiedPassage(`${prose} ${url}`, `Summary: ${prose}.`)).toBeTrue();
+	});
+
 	test("sends a summary with the hosts it names written plainly, never obfuscated", async () => {
 		// The openanonymity.chat report to Synlinq was rejected with 554 5.7.1 (2026-11-11): Rspamd scored
 		// "assistdeparments-x[.]com" as obfuscation (+5) and, undoing it, found the domain on Spamhaus DBL (+6.5).
