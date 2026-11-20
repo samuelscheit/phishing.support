@@ -324,6 +324,15 @@ const SESSION_HEARTBEAT_MS = 10_000;
 /** How long a client waits for a free relay connection before giving up on its session. */
 const RELAY_CAPACITY_WAIT_MS = 5 * 60_000;
 const RELAY_CAPACITY_RETRY_MS = 2_000;
+/**
+ * How long Patchright's CDP handshake may take after the relay's WebSocket
+ * opened: it attaches to every target of a browser that is still starting
+ * (and now runs the captcha solver too). Patchright's own default, 30 s, was
+ * measured too short on a loaded production host (2026-11-21: two of three
+ * handshakes timed out at 30 s, one took 14.7 s); Puppeteer's connect has no
+ * such bound.
+ */
+const PATCHRIGHT_CONNECT_TIMEOUT_MS = 120_000;
 
 /**
  * The relay refuses a WebSocket upgrade with HTTP 503 while all of its
@@ -510,7 +519,7 @@ export async function acquireFabricPatchrightSession(
 	const lease = await leaseFabricSession(config, metadata, options, async (sessionId) => {
 		const { chromium } = await import("patchright");
 		const browser = await connectThroughRelay(
-			() => chromium.connectOverCDP(fabricRelayEndpoint(sessionId)),
+			() => chromium.connectOverCDP(fabricRelayEndpoint(sessionId), { timeout: PATCHRIGHT_CONNECT_TIMEOUT_MS }),
 			() => sessionAction(config, sessionId, "heartbeat"),
 		);
 		try {

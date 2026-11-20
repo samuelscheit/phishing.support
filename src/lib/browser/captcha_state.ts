@@ -115,10 +115,25 @@ async function look(page: CaptchaPage, argument: ProbeArgument, ms: number): Pro
 }
 
 /**
+ * Whether a `failed` may still turn into `solved`. Fabric's guardian ends
+ * llm-captcha's own session on a reCAPTCHA v2 with its `failed`
+ * (`recaptcha-images: not solved in 8 rounds`) and then, when its recipe has
+ * a token provider, buys one token without another word: `solved`
+ * ("recaptcha: token") once it is in, or a `failed` naming the "token
+ * fallback" (captcha-guardian.ts `#settleRecaptcha`, seen live 2026-11-21).
+ * Without a provider it writes `failed` again at once. So such a `failed`
+ * is final only once it is written again or names the fallback.
+ */
+const awaitsTokenFallback = (snapshot: Pick<CaptchaSnapshot, "state" | "detail">) =>
+	snapshot.state === "failed" && /^recaptcha/i.test(snapshot.detail) && !/token fallback/i.test(snapshot.detail);
+
+/**
  * Look at the page until `settle` returns a value. Each look's state is the
  * solver's current word on this wait: a `solved` or `failed` that was already
  * on the document when the wait began reads as no state, a `solving` always
- * counts. A fresh `failed` throws at once; a look that throws (the page
+ * counts. A fresh `failed` throws at once, but for a reCAPTCHA one Fabric may
+ * still follow with its token fallback (`awaitsTokenFallback`), which reads
+ * as `solving` until Fabric writes again; a look that throws (the page
  * navigated mid-call) counts as nothing yet. At the deadline `expire` may
  * still answer from the last look, or the wait throws.
  */
@@ -134,6 +149,8 @@ async function watch<T>(
 	const wait = options.sleep ?? ((ms: number) => pause(ms, options.signal));
 	const started = now();
 	let baseline: Pick<CaptchaSnapshot, "document" | "changes"> | undefined;
+	/** Where the solver's provisional reCAPTCHA `failed` was first seen: its document and write count. */
+	let provisional: Pick<CaptchaSnapshot, "document" | "changes"> | undefined;
 	let last: CaptchaSnapshot | undefined;
 	for (;;) {
 		if (options.signal?.aborted) throw new OperationCanceledError(`Waiting for ${options.label} was canceled.`);
@@ -141,9 +158,14 @@ async function watch<T>(
 		if (seen) {
 			baseline ??= seen;
 			const fresh = seen.document !== baseline.document || seen.changes > baseline.changes;
-			const snapshot: CaptchaSnapshot = fresh || seen.state === "solving" || !seen.state
+			let snapshot: CaptchaSnapshot = fresh || seen.state === "solving" || !seen.state
 				? seen
 				: { ...seen, state: undefined, detail: "", earlier: `${seen.state}${seen.detail ? `: ${seen.detail}` : ""}` };
+			if (!awaitsTokenFallback(snapshot)) provisional = undefined;
+			else {
+				if (provisional?.document !== seen.document) provisional = seen;
+				if (seen.changes === provisional.changes) snapshot = { ...snapshot, state: "solving", detail: `${snapshot.detail}; waiting for Fabric's token fallback` };
+			}
 			last = snapshot;
 			if (snapshot.state === "failed") throw new CaptchaError(`${options.label}: the captcha solver failed${snapshot.detail ? ` (${snapshot.detail})` : ""}`, snapshot.state, snapshot.detail);
 			const settled = await settle(snapshot);

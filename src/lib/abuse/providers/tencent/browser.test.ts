@@ -32,6 +32,10 @@ const formPage = (solver: { passes: true; afterMs: number } | { failure: string 
 <a class="dropdown-link">Country</a><ul class="dropdown-menu"><li><a onclick="window.country='Germany'">Germany</a></li></ul>
 <input type="checkbox" name="privacyCheckbox1"><input type="checkbox" name="privacyCheckbox2">
 <button type="submit">Submit</button></form>
+<div class="eea-cookie-tip-container" style="position:fixed;inset:0;background:#fff;z-index:9">
+<div class="text-content">We use cookies that are necessary to provide the Tencent Cloud website.</div>
+<button class="button primary" onclick="window.cookies='accepted'">Accept all optional cookies</button>
+<button class="button primary" onclick="window.cookies='rejected'; document.body.insertAdjacentHTML('beforeend', '<div role=dialog class=tea-dialog style=&quot;position:fixed;inset:0;z-index:10;background:#eee&quot;>You have rejected optional cookies.</div>')">Reject all optional cookies</button></div>
 <script>
 const solver = ${JSON.stringify(solver)};
 document.querySelector("form").addEventListener("submit", (event) => {
@@ -45,6 +49,7 @@ document.querySelector("form").addEventListener("submit", (event) => {
 		const field = (name) => document.querySelector("[name=" + name + "]").value;
 		fetch("/main/ajax/reportDsaPlatform/createDomainReport", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
 			action: "createDomainReport",
+			cookieChoice: window.cookies,
 			payload: { captcha: { ret: 0, ticket: "t-1", randstr: "r-1" }, formData: { domain: field("domain"), url: field("url"), describe: field("describe"), category: [window.category], country_name: window.country } },
 		}) }).catch(() => undefined);
 	}, solver.afterMs ?? 1_500);
@@ -75,6 +80,8 @@ describe.skipIf(!chromiumAvailable)("Tencent's form in a real browser, its slide
 	test("the request the page sends once the solver passed the slider is caught and aborted; send replays it once", async () => {
 		const { session, reached, released } = await open({ passes: true, afterMs: 1_500 });
 		const caught = await session.captureRequest(INPUT);
+		// The cookie dialog that covered the whole form is gone, and no choice was made (declining opens a dialog of its own).
+		expect(JSON.parse(caught.body).cookieChoice).toBeUndefined();
 		expect(caught).toMatchObject({ url: "https://www.tencentcloud.com/main/ajax/reportDsaPlatform/createDomainReport", method: "POST", contentType: "application/json" });
 		expect(JSON.parse(caught.body)).toMatchObject({ payload: { captcha: { ret: 0, ticket: "t-1" }, formData: { domain: "phish.example", url: "https://phish.example/login", category: ["Phishing"], country_name: "Germany" } } });
 		// The page's own filing request never got past the guard.

@@ -39,6 +39,14 @@ export type TencentFormSession = {
 
 const FORM = {
 	ready: 'input[name="domain"]',
+	/**
+	 * Tencent's EEA cookie dialog, fixed over the bottom of the page: it covers
+	 * the privacy checkboxes (a click there lands on it; seen live 2026-11-21)
+	 * and the slider's popup. It is hidden for the whole document, as it may
+	 * also come late. None of its buttons is pressed: declining opens a
+	 * confirmation dialog of its own that covers the form's dropdowns.
+	 */
+	cookieBanner: ".eea-cookie-tip-container",
 	categoryDropdown: ".tea-dropdown__header",
 	countryDropdown: ".dropdown-link",
 	countryOption: ".dropdown-menu li a",
@@ -75,9 +83,14 @@ async function sendProbe(argument: { url: string; contentType: string; body: str
 	return { status: response.status, text: await response.text() };
 }
 
+async function hideCookieBanner(page: Page): Promise<void> {
+	await page.addStyleTag({ content: `${FORM.cookieBanner} { display: none !important; }` });
+}
+
 async function fillForm(page: Page, input: TencentFormInput): Promise<void> {
 	const timeout = FORM.stepTimeoutMs;
 	await page.waitForSelector(FORM.ready, { timeout: FORM.loadTimeoutMs });
+	await hideCookieBanner(page);
 	await page.fill('input[name="domain"]', input.domain, { timeout });
 	await page.fill('input[name="url"]', input.url, { timeout });
 	if (input.infringedUrl) await page.fill('input[name="infringedUrl"]', input.infringedUrl, { timeout });

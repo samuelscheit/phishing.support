@@ -20,7 +20,8 @@ const PAGES: Record<string, string> = {
 	// The solver's writes come well after load, so the wait's first look (its baseline) precedes them even on a busy machine.
 	"/solved": solver([[600, "solving", "tcaptcha"], [1_000, "solved", "tcaptcha"]]),
 	"/none": "<p>No challenge here.</p>",
-	"/failed": solver([[600, "solving", "recaptcha"], [800, "failed", "recaptcha: image grid not solved"]]),
+	// A final failure: not a reCAPTCHA, which Fabric's token fallback may still follow.
+	"/failed": solver([[600, "solving", "hcaptcha"], [800, "failed", "hcaptcha: image grid not solved"]]),
 	"/stuck": solver([[50, "solving", "tcaptcha"]]),
 	// The widget fills its field while the solver still works on it: only the solved state releases the token.
 	"/recaptcha": `<div class="g-recaptcha"><textarea name="g-recaptcha-response" style="display:none"></textarea></div>${solver([[600, "solving", "recaptcha"], [800, "solving", "recaptcha"], [1_200, "solved", "recaptcha"]], `
@@ -33,7 +34,7 @@ setTimeout(() => { document.querySelector("textarea").value = "03AF-token"; }, 1
 	// The challenge navigates to the page it guarded.
 	"/navigates": `<script>setTimeout(() => { location.href = "/solved"; }, 200);</script>`,
 	// One document, two challenges: the first already over when the test's wait begins.
-	"/earlier": `<textarea name="g-recaptcha-response"></textarea>${solver([[0, "failed", "recaptcha: earlier challenge"]])}`,
+	"/earlier": `<textarea name="g-recaptcha-response"></textarea>${solver([[0, "failed", "tcaptcha: earlier challenge"]])}`,
 	// A modal dialog: every evaluate on the page hangs until it is closed.
 	"/dialog": `<script>setTimeout(() => alert("Session expired"), 100);</script>`,
 };
@@ -78,7 +79,7 @@ describe.skipIf(!chromiumAvailable)("the solver's captcha state on a real page",
 		const started = Date.now();
 		const error = await waitForCaptchaOutcome(page, () => false, options).catch((caught: unknown) => caught);
 		expect(error).toBeInstanceOf(CaptchaError);
-		expect(error).toMatchObject({ state: "failed", detail: "recaptcha: image grid not solved", message: "The test captcha: the captcha solver failed (recaptcha: image grid not solved)" });
+		expect(error).toMatchObject({ state: "failed", detail: "hcaptcha: image grid not solved", message: "The test captcha: the captcha solver failed (hcaptcha: image grid not solved)" });
 		expect(Date.now() - started).toBeLessThan(3_000);
 	});
 
@@ -106,16 +107,16 @@ describe.skipIf(!chromiumAvailable)("the solver's captcha state on a real page",
 		let looks = 0;
 		await waitForCaptchaOutcome(page, () => ++looks === 4, options);
 		await expect(waitForCaptchaOutcome(page, () => false, { ...options, timeoutMs: 300 }))
-			.rejects.toThrow("The test captcha: not done within 0 s (no captcha state; before this wait: failed: recaptcha: earlier challenge)");
+			.rejects.toThrow("The test captcha: not done within 0 s (no captcha state; before this wait: failed: tcaptcha: earlier challenge)");
 	});
 
 	test("the next challenge on the same document is followed: its own failed verdict ends the wait, even with the same detail", async () => {
 		await open("/earlier");
 		await page.waitForFunction(() => document.documentElement.getAttribute("data-captcha-state") === "failed");
 		// The solver fails the next challenge with the very same words: only the write itself tells it apart.
-		setTimeout(() => void page.evaluate(() => (window as unknown as { setCaptcha(state: string, detail: string): void }).setCaptcha("failed", "recaptcha: earlier challenge")), 300);
+		setTimeout(() => void page.evaluate(() => (window as unknown as { setCaptcha(state: string, detail: string): void }).setCaptcha("failed", "tcaptcha: earlier challenge")), 300);
 		const started = Date.now();
-		await expect(waitForCaptchaOutcome(page, () => false, options)).rejects.toMatchObject({ state: "failed", message: "The test captcha: the captcha solver failed (recaptcha: earlier challenge)" });
+		await expect(waitForCaptchaOutcome(page, () => false, options)).rejects.toMatchObject({ state: "failed", message: "The test captcha: the captcha solver failed (tcaptcha: earlier challenge)" });
 		expect(Date.now() - started).toBeLessThan(2_000);
 	});
 
@@ -137,6 +138,51 @@ describe.skipIf(!chromiumAvailable)("the solver's captcha state on a real page",
 		const started = Date.now();
 		await expect(waitForCaptchaOutcome(page, () => false, { ...options, timeoutMs: 1_000 })).rejects.toBeInstanceOf(CaptchaError);
 		expect(Date.now() - started).toBeLessThan(2_500);
+	});
+
+	const setCaptcha = (state: string, detail: string) => page.evaluate((s, d) => (window as unknown as { setCaptcha(state: string, detail: string): void }).setCaptcha(s, d), state, detail);
+	const IMAGES_FAILED = "recaptcha-images: not solved in 8 rounds";
+
+	test("a reCAPTCHA failed after the image rounds waits for Fabric's token fallback, whose token ends the wait", async () => {
+		await open("/earlier");
+		await page.evaluate(() => { document.querySelector("textarea")!.value = ""; });
+		setTimeout(async () => {
+			await setCaptcha("solving", "recaptcha-checkbox");
+			await setCaptcha("failed", IMAGES_FAILED);
+			// The guardian buys a token in silence, then writes it and its verdict.
+			setTimeout(async () => {
+				await page.evaluate(() => { document.querySelector("textarea")!.value = "03AF-bought"; });
+				await setCaptcha("solved", "recaptcha: token");
+			}, 1_200);
+		}, 400);
+		expect(await waitForCaptchaToken(page, "recaptcha", options)).toBe("03AF-bought");
+	});
+
+	test("the token fallback's own failure ends the wait with its reason", async () => {
+		await open("/earlier");
+		setTimeout(async () => {
+			await setCaptcha("failed", IMAGES_FAILED);
+			setTimeout(() => void setCaptcha("failed", `${IMAGES_FAILED}; token fallback ERROR_ZERO_BALANCE`), 800);
+		}, 400);
+		const started = Date.now();
+		await expect(waitForCaptchaToken(page, "recaptcha", options)).rejects.toMatchObject({ state: "failed", detail: `${IMAGES_FAILED}; token fallback ERROR_ZERO_BALANCE` });
+		expect(Date.now() - started).toBeLessThan(3_000);
+	});
+
+	test("without a token provider Fabric writes the reCAPTCHA failed again, which ends the wait", async () => {
+		await open("/earlier");
+		setTimeout(async () => {
+			await setCaptcha("failed", IMAGES_FAILED);
+			setTimeout(() => void setCaptcha("failed", IMAGES_FAILED), 600);
+		}, 400);
+		await expect(waitForCaptchaOutcome(page, () => false, options)).rejects.toMatchObject({ state: "failed", detail: IMAGES_FAILED });
+	});
+
+	test("a reCAPTCHA failed nothing follows is named at the deadline as waiting for the fallback", async () => {
+		await open("/earlier");
+		setTimeout(() => void setCaptcha("failed", IMAGES_FAILED), 300);
+		await expect(waitForCaptchaOutcome(page, () => false, { ...options, timeoutMs: 1_500 }))
+			.rejects.toThrow(`The test captcha: not done within 2 s (solving: ${IMAGES_FAILED}; waiting for Fabric's token fallback)`);
 	});
 
 	test("a reCAPTCHA token is read only once the solver says solved", async () => {
@@ -163,6 +209,6 @@ describe.skipIf(!chromiumAvailable)("the solver's captcha state on a real page",
 
 	test("a failed solve ends the token wait too", async () => {
 		await open("/failed");
-		await expect(waitForCaptchaToken(page, "recaptcha", options)).rejects.toMatchObject({ state: "failed", detail: "recaptcha: image grid not solved" });
+		await expect(waitForCaptchaToken(page, "recaptcha", options)).rejects.toMatchObject({ state: "failed", detail: "hcaptcha: image grid not solved" });
 	});
 });

@@ -119,7 +119,7 @@ const CAPTCHA_REQUIRED = { status: 200, body: `{"header":[],"result":["REQUIRED_
  * plays Browser Fabric's solver on that widget: it publishes its state on
  * the top document and, once solved, leaves its token in the widget.
  */
-function googleCloudForm(answers: FormAnswer | FormAnswer[], captchaDelayMs = 300, solver: { token: string } | { failure: string } | { stuck: true } = { token: "solved-checkbox-token" }) {
+function googleCloudForm(answers: FormAnswer | FormAnswer[], captchaDelayMs = 300, solver: { token: string; afterFallback?: true } | { failure: string } | { stuck: true } = { token: "solved-checkbox-token" }) {
 	const queue = Array.isArray(answers) ? [...answers] : [answers];
 	const posts: Array<Record<string, string>> = [];
 	const server = Bun.serve({
@@ -173,9 +173,17 @@ document.querySelector(".submit-button").addEventListener("click", async () => {
 				root.setAttribute("data-captcha-state", "failed");
 				return;
 			}
-			response.value = solver.token;
-			window.grecaptcha.getResponse = () => solver.token;
-			root.setAttribute("data-captcha-state", "solved");
+			const pass = () => {
+				response.value = solver.token;
+				window.grecaptcha.getResponse = () => solver.token;
+				root.setAttribute("data-captcha-detail", solver.afterFallback ? "recaptcha: token" : "recaptcha-checkbox");
+				root.setAttribute("data-captcha-state", "solved");
+			};
+			if (!solver.afterFallback) return pass();
+			// As Fabric's guardian does: llm-captcha's own failed after its image rounds, then the bought token in silence.
+			root.setAttribute("data-captcha-detail", "recaptcha-images: not solved in 8 rounds");
+			root.setAttribute("data-captcha-state", "failed");
+			setTimeout(pass, 1_500);
 		}, 1_200);
 	} else document.querySelector(".notification-area").textContent = "There were problems sending your form.";
 });
@@ -286,9 +294,21 @@ describe.skipIf(!chromiumAvailable)("Google Cloud abuse form, in a real browser"
 		}
 	}, 60_000);
 
+	test("after the solver's image rounds fail, Fabric's token fallback is waited for and its token sent", async () => {
+		const form = googleCloudForm([CAPTCHA_REQUIRED, ACCEPTED], 300, { token: "bought-token", afterFallback: true });
+		try {
+			const { route } = await googleCloudRoute();
+			await expect(executeProviderSubmission({ routeId: route.id, provider: browserProvider(form) })).resolves.toMatchObject({ outcome: "submitted" });
+			expect(form.posts).toHaveLength(2);
+			expect(form.posts[1]).toMatchObject({ recaptchaCheckbox: "bought-token" });
+		} finally {
+			form.server.stop(true);
+		}
+	}, 60_000);
+
 	test("a checkbox the solver fails on, or does not pass in time, goes to a person: Google created no case and nothing is resent", async () => {
 		const cases: Array<[{ failure: string } | { stuck: true }, { checkboxMs: number } | undefined, string]> = [
-			[{ failure: "recaptcha: image grid not solved" }, undefined, "Google Cloud's checkbox reCAPTCHA: the captcha solver failed (recaptcha: image grid not solved); Google created no case."],
+			[{ failure: "recaptcha-images: not solved in 8 rounds; token fallback ERROR_ZERO_BALANCE" }, undefined, "Google Cloud's checkbox reCAPTCHA: the captcha solver failed (recaptcha-images: not solved in 8 rounds; token fallback ERROR_ZERO_BALANCE); Google created no case."],
 			[{ stuck: true }, { checkboxMs: 1_000 }, "Google Cloud's checkbox reCAPTCHA: no token within 1 s (solving); Google created no case."],
 		];
 		for (const [solver, timeouts, reason] of cases) {
