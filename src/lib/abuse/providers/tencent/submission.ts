@@ -1,12 +1,9 @@
-import { fetch as proxyFetch } from "netbun";
-
-import { captchaCredentialsProblem, solveCaptchaToken } from "../kit/captcha";
+import { withPreflight, preparedState } from "../kit/session";
 import { createDraft, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
-import { preparedState } from "../kit/session";
 import { snippet } from "../../../util/text";
-import { getProviderProxy, type ProviderProxy } from "../proxy";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
+import { openTencentForm, type TencentCapturedRequest, type TencentFormInput, type TencentFormSession } from "./browser";
 import { TENCENT_PROVIDER } from "./definition";
 import {
 	buildTencentSubmissionPayload,
@@ -14,7 +11,7 @@ import {
 	TENCENT_EVIDENCE_CONTRACT,
 	type TencentSubmissionPayload,
 } from "./payload";
-import { parseJsonRecord } from "../../../util/values";
+import { asRecord, parseJsonRecord } from "../../../util/values";
 
 /** Tencent's token CAPTCHA reply requires both ticket and randstr. */
 export type TencentCaptcha = { ret: 0; ticket: string; randstr: string; [key: string]: unknown };
@@ -29,12 +26,10 @@ type TencentCloudSubmissionResponse = {
 	};
 };
 
-type TencentProxyFetch = (input: string | URL | Request, init?: RequestInit & { proxy: string }) => Promise<Response>;
-
 export type TencentSubmissionDependencies = RouteDeps & {
-	proxy?: () => ProviderProxy;
-	captchaSolver?: (proxy: ProviderProxy) => Promise<TencentCaptcha>;
-	fetch?: TencentProxyFetch;
+	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
+	/** Opens the browser page on the form; the real one is a Fabric Chrome over the direct egress. */
+	open?: (signal: AbortSignal | undefined) => Promise<TencentFormSession>;
 };
 
 function parseTencentCloudResponseJson(body: string): TencentCloudSubmissionResponse | undefined {
@@ -128,11 +123,6 @@ export const tencentDraft = createDraft({
 	input: ({ report, target, evidenceArtifacts }, stored: TencentSubmissionPayload | undefined) => {
 		const observedUrl = stored?.target.observedUrl ?? target.observedUrls[0];
 		const screenshot = evidenceReferenceOf(TENCENT_EVIDENCE_CONTRACT, evidenceArtifacts, stored && { evidence: stored.screenshot });
-		// Both settings are runtime secrets: validated here, never kept in the stored payload, and only once the draft is otherwise possible.
-		if (!stored && observedUrl && screenshot) {
-			getProviderProxy("Tencent Cloud abuse reporting");
-			if (captchaCredentialsProblem()) throw new Error("Tencent Cloud abuse reporting requires DEATHBYCAPTCHA_USERNAME and DEATHBYCAPTCHA_PASSWORD.");
-		}
 		return {
 			target: target.normalizedTarget,
 			observedUrl: observedUrl ?? "",
@@ -148,73 +138,81 @@ export const tencentDraft = createDraft({
 });
 
 /** The stored draft, checked against its route and rebuilt from the current report; with its screenshot's bytes. */
-async function verifiedTencentDraft(context: ProviderSubmissionContext, dependencies: RouteDeps = {}) {
+async function verifiedTencentDraft(context: ProviderSubmissionContext, dependencies: TencentSubmissionDependencies = {}) {
 	const { payload, data } = await tencentDraft.verify(context, dependencies);
-	const { bytes } = await loadEvidenceFile({ reference: payload.screenshot, contract: TENCENT_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Tencent screenshot" });
+	const { bytes } = await loadEvidenceFile({ reference: payload.screenshot, contract: TENCENT_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Tencent screenshot", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) });
 	return { payload, bytes };
 }
 
-/** Validate the exact token shape Tencent's form expects from the solver. */
-export function parseTencentCaptchaSolution(value: string): TencentCaptcha {
-	const captcha = parseJsonRecord(value);
-	if (!captcha) throw new Error("Tencent CAPTCHA solver returned malformed JSON.");
-	if (captcha.ret !== 0 || typeof captcha.ticket !== "string" || !captcha.ticket.trim() || typeof captcha.randstr !== "string" || !captcha.randstr.trim()) {
-		throw new Error("Tencent CAPTCHA solving failed.");
-	}
-	return captcha as TencentCaptcha;
+/** The form values of a verified draft, as the page's fields take them. */
+function formInputOf(payload: TencentSubmissionPayload, screenshot: Buffer): TencentFormInput {
+	return {
+		domain: payload.target.registrableDomain,
+		url: payload.target.observedUrl,
+		...(payload.report.legalBrandUrl ? { infringedUrl: payload.report.legalBrandUrl } : {}),
+		category: payload.report.category,
+		describe: payload.report.explanation,
+		name: TENCENT_PROVIDER.reporter.name,
+		email: TENCENT_PROVIDER.reporter.email,
+		countryName: TENCENT_PROVIDER.reporter.countryName,
+		screenshot: { filename: payload.screenshot.filename, bytes: screenshot },
+	};
 }
 
-/** The documented type-23 Tencent token flow through the proxy the form is filed from. */
-export const solveTencentCaptcha = async (proxy: ProviderProxy, signal?: AbortSignal) => parseTencentCaptchaSolution(await solveCaptchaToken({
-	type: TENCENT_PROVIDER.captcha.type,
-	parametersField: "tencent_params",
-	parameters: { proxy: proxy.url, proxytype: proxy.captchaType, appid: TENCENT_PROVIDER.captcha.appId, pageurl: TENCENT_PROVIDER.reportPageUrl },
-}, signal));
+/**
+ * Why a request the page made is not the filing the draft calls for, if it is
+ * not: wrong endpoint, no passed captcha, or a body whose form values differ
+ * from the verified draft (the page's own form is what built it).
+ */
+export function tencentCapturedRequestProblem(request: TencentCapturedRequest, payload: TencentSubmissionPayload, screenshot: Buffer): string | undefined {
+	const url = new URL(request.url);
+	const endpoint = new URL(TENCENT_PROVIDER.submissionUrl);
+	if (request.method !== "POST" || url.origin !== endpoint.origin || url.pathname !== endpoint.pathname) return `it is a ${request.method} to ${url.origin}${url.pathname}`;
+	const body = parseJsonRecord(request.body);
+	const inner = asRecord(body?.payload);
+	const captcha = asRecord(inner?.captcha) as Partial<TencentCaptcha> | undefined;
+	if (body?.action !== "createDomainReport" || !captcha || captcha.ret !== 0 || typeof captcha.ticket !== "string" || !captcha.ticket.trim() || typeof captcha.randstr !== "string" || !captcha.randstr.trim()) return "its captcha ticket is missing";
+	const expected = buildTencentCloudHttpPayload({ payload, websiteScreenshot: screenshot, captcha: captcha as TencentCaptcha }) as { payload: { formData: unknown } };
+	if (JSON.stringify(sortedKeys(inner?.formData)) !== JSON.stringify(sortedKeys(expected.payload.formData))) return "its form values differ from the verified draft";
+	return undefined;
+}
+
+function sortedKeys(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(sortedKeys);
+	if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left < right ? -1 : 1).map(([key, entry]) => [key, sortedKeys(entry)]));
+	return value;
+}
 
 /** What the one filing request needs, kept in memory from before the marker. */
-type TencentPreflightState = { payload: TencentSubmissionPayload; screenshot: Buffer; proxy: ProviderProxy; captcha: TencentCaptcha };
+type TencentPreflightState = { payload: TencentSubmissionPayload; request: TencentCapturedRequest; session: TencentFormSession };
 
-/** Before the marker: the verified draft with its screenshot, the proxy the form is filed from and the solved token captcha. */
+/**
+ * Before the marker, with nothing filed: the verified draft is filled into
+ * the live form in a browser, its slider puzzle is solved by image analysis,
+ * and the form's own filing request, ticket included, is caught and aborted.
+ * Any failure closes the browser.
+ */
 export async function prepareTencentExternalSubmission(
 	context: ProviderSubmissionContext,
 	dependencies: TencentSubmissionDependencies = {},
 ): Promise<ProviderSubmissionPreflight> {
 	const { payload, bytes } = await verifiedTencentDraft(context, dependencies);
-	const proxy = (dependencies.proxy ?? (() => getProviderProxy("Tencent Cloud abuse reporting")))();
-	const captcha = await (dependencies.captchaSolver ?? ((candidate) => solveTencentCaptcha(candidate, context.signal)))(proxy);
-	return { state: { payload, screenshot: bytes, proxy, captcha } satisfies TencentPreflightState };
+	return withPreflight(() => (dependencies.open ?? openTencentForm)(context.signal), async (session): Promise<TencentPreflightState> => {
+		const request = await session.captureRequest(formInputOf(payload, bytes));
+		const problem = tencentCapturedRequestProblem(request, payload, bytes);
+		if (problem) throw new Error(`Tencent Cloud form's request was not sent: ${problem}.`);
+		return { payload, request, session };
+	});
 }
 
-/** The one Tencent provider request, from the preflight's verified draft and solved captcha. */
+/** The one Tencent provider request: the caught request, sent from the page that made it. */
 export async function submitTencentSubmission(
-	context: ProviderSubmissionContext,
+	_context: ProviderSubmissionContext,
 	preflight: ProviderSubmissionPreflight | undefined,
-	dependencies: Pick<TencentSubmissionDependencies, "fetch"> = {},
 ): Promise<ProviderSubmissionSuccess> {
-	const { payload, screenshot, proxy, captcha } = preparedState<TencentPreflightState>(preflight, (state) => !!state.payload && !!state.captcha && !!state.proxy, "Tencent submission requires its prepared draft, proxy and solved captcha.");
-	const requestPayload = buildTencentCloudHttpPayload({ payload, websiteScreenshot: screenshot, captcha });
-	const request = dependencies.fetch ?? (proxyFetch as TencentProxyFetch);
-	const response = await request(TENCENT_PROVIDER.submissionUrl, {
-		headers: {
-			accept: "application/json, text/plain, */*",
-			"accept-language": "en-US,en;q=0.9",
-			"content-type": "application/json",
-			priority: "u=1, i",
-			"sec-ch-ua": '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
-			"sec-ch-ua-mobile": "?0",
-			"sec-ch-ua-platform": '"macOS"',
-			"sec-fetch-dest": "empty",
-			"sec-fetch-mode": "cors",
-			"sec-fetch-site": "same-origin",
-			cookie: "intl_language=en; language=en",
-			Referer: TENCENT_PROVIDER.reportPageUrl,
-		},
-		body: JSON.stringify(requestPayload),
-		method: "POST",
-		proxy: proxy.url,
-		...(context.signal ? { signal: context.signal } : {}),
-	});
-	const result = await parseTencentCloudSubmissionResponse(response);
+	const { payload, request, session } = preparedState<TencentPreflightState>(preflight, (state) => !!state.payload && !!state.request && !!state.session, "Tencent submission requires its prepared draft and caught request.");
+	const { status, text } = await session.send(request);
+	const result = await parseTencentCloudSubmissionResponse({ ok: status >= 200 && status < 300, status, text: async () => text });
 	return {
 		confirmationText: result.msg?.trim() || "Tencent Cloud accepted the domain-abuse report.",
 		finalUrl: TENCENT_PROVIDER.reportPageUrl,

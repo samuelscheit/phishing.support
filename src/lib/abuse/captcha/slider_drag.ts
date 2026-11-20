@@ -49,15 +49,13 @@ export type DragMouse = {
 export type DragBox = { x: number; y: number; width: number; height: number };
 
 /**
- * Drag a handle to the far end of its rail with a human track, from their
- * boxes in page coordinates: approach the handle, press somewhere on it,
- * drag, hold, release.
+ * Drag a handle with a human track over the distance `distanceOf` returns:
+ * approach the handle, press somewhere on it, drag, hold, release.
  */
-export async function dragAcross(mouse: DragMouse, handleBox: DragBox, railBox: Pick<DragBox, "x" | "width">, random: RandomSource = Math.random): Promise<void> {
+export async function dragBy(mouse: DragMouse, handleBox: DragBox, distanceOf: () => number, random: RandomSource = Math.random): Promise<void> {
 	const startX = handleBox.x + handleBox.width * (0.35 + random() * 0.3);
 	const startY = handleBox.y + handleBox.height * (0.35 + random() * 0.3);
-	// Past the end by a few pixels: the widget clamps it, and a hand overshoots.
-	const distance = railBox.x + railBox.width - (handleBox.x + handleBox.width) + 3 + random() * 4;
+	const distance = distanceOf();
 
 	await mouse.move(startX - 30 - random() * 40, startY + 20 + random() * 30, { steps: 6 });
 	await mouse.move(startX, startY, { steps: 10 + Math.floor(random() * 6) });
@@ -69,6 +67,15 @@ export async function dragAcross(mouse: DragMouse, handleBox: DragBox, railBox: 
 	}
 	await pause(150 + random() * 200);
 	await mouse.up();
+}
+
+/**
+ * Drag a handle to the far end of its rail, from their boxes in page
+ * coordinates. It ends a few pixels past the end: the widget clamps it, and a
+ * hand overshoots.
+ */
+export function dragAcross(mouse: DragMouse, handleBox: DragBox, railBox: Pick<DragBox, "x" | "width">, random: RandomSource = Math.random): Promise<void> {
+	return dragBy(mouse, handleBox, () => railBox.x + railBox.width - (handleBox.x + handleBox.width) + 3 + random() * 4, random);
 }
 
 /** Drag a puppeteer page's slider handle to the far end of the rail that holds it. */

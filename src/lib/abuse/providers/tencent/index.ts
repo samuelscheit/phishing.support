@@ -3,7 +3,7 @@ import { TENCENT_PROVIDER } from "./definition";
 import { makeTencentExplanation } from "./payload";
 import { prepareTencentExternalSubmission, tencentDraft, submitTencentSubmission } from "./submission";
 
-/** Tencent owns its DNS-abuse mailbox selection, evidence rules, and HTTP form. */
+/** Tencent owns its DNS-abuse mailbox selection, evidence rules, and browser form. */
 export const tencentProvider = defineProvider({
 	definition: TENCENT_PROVIDER,
 	draft: tencentDraft,

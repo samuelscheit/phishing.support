@@ -10,7 +10,7 @@ import { listProviderSubmissionProviders } from "./submission_registry_default";
  */
 const PINS: Record<string, string[]> = {
 	cloudflare: ["2026-10-23.1", "41d1dde22e001f91f654927933bf6065055e7d5774d6b3b63c904b0d9072f47a"],
-	tencent: ["2026-08-14.1", "bebdee41c9e34d50b1427ca8272a8e9ed4e397e8a729987123c152dd5d7a1abf"],
+	tencent: ["2026-11-20.1", "920114a29c1d3c60ce41c45808b43b7d5d48cbf9e5ae6c4ebace2ce1049dca2a"],
 	alibaba_cloud: ["2026-11-20.1", "fadb0b6084ef6d0149ee261bd5dafb63432418189441d5e26d400615a9ccc77e"],
 	aws_trust_safety: ["2026-11-20.2", "b559067d377d2337813c0e8c146523f7212d402b7315ac729c5d2cd6007f2651"],
 	microsoft_msrc: ["2026-11-20.2", "30ebeaf8ab3f9eeae88192f4a6ae24c81ef47f176c65bca1faeb73c575834c14"],
