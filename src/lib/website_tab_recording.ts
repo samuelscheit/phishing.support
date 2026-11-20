@@ -29,7 +29,7 @@ export function isDocumentAnswer(response: Pick<ObservedResponse, "mainFrameNavi
 	return response.mainFrameNavigation && (status < 300 || status >= 400) && isNetworkDocument(response.url);
 }
 
-export function navigationDocument(response: ObservedResponse): NavigationDocument {
+function navigationDocument(response: ObservedResponse): NavigationDocument {
 	return { url: response.url, hops: [...response.redirects, { url: response.url, status: response.status, headers: response.headers }] };
 }
 
@@ -85,7 +85,7 @@ export function recordTab(): TabRecording {
 }
 
 /** The hops of one document: each redirect, then the document itself, marked as the captured content when it is. */
-export function navigationHops(document: NavigationDocument | null, finalUrl: string): WebsiteNavigationHop[] {
+function navigationHops(document: NavigationDocument | null, finalUrl: string): WebsiteNavigationHop[] {
 	const answers = document?.hops ?? [];
 	if (answers.length === 0) {
 		const { hostname } = new URL(finalUrl);

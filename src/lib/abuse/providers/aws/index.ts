@@ -33,4 +33,3 @@ export const awsProvider: ProviderSubmissionProvider = {
 	},
 };
 
-export { AWS_PROVIDER } from "./definition";

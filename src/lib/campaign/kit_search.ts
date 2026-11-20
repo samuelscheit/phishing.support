@@ -35,7 +35,7 @@ const stateSchema = z.object({
 	checks: z.number().int().nonnegative(),
 	lastNewAt: z.string().datetime(),
 });
-export type CampaignKitSearchState = z.infer<typeof stateSchema>;
+type CampaignKitSearchState = z.infer<typeof stateSchema>;
 
 const searchDedupeKey = (campaignId: bigint) => `campaign-kit-search:${campaignId.toString()}`;
 const analysisDedupeKey = (site: string) => `analyze-kit-sibling:${site}`;

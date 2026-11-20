@@ -6,7 +6,7 @@ import type { ProviderSubmissionDefinition } from "../submission_contracts";
 /** The complaint types this service files: the form's `lx` values. */
 export type GnameComplaintKind = "phishing" | "malware";
 
-export type GnameComplaintType = {
+type GnameComplaintType = {
 	/** The form's `lx`. */
 	lx: number;
 	/** The form page that offers the type. */

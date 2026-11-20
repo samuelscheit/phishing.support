@@ -21,7 +21,7 @@ import type { EvidenceFile } from "./package";
  * the manifest. Any later change to a file breaks its hash; the token
  * proves the manifest existed at the authority's time.
  */
-export const VISIT_EVIDENCE_FILES = {
+const VISIT_EVIDENCE_FILES = {
 	record: "visit-record.json",
 	protocol: "visit-protocol.txt",
 	manifest: "visit-manifest.json",

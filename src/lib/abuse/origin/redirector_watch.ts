@@ -26,15 +26,15 @@ import { DAY_MS } from "../../duration";
  */
 export const REDIRECTOR_WATCH_INTERVAL_MS = DAY_MS;
 /** Consecutive daily checks on which neither route reached the redirector before the watch ends. */
-export const REDIRECTOR_WATCH_MAX_MISSES = 3;
+const REDIRECTOR_WATCH_MAX_MISSES = 3;
 /** A redirector that leads nowhere new for this long has been abandoned. */
-export const REDIRECTOR_WATCH_QUIET_MS = 30 * DAY_MS;
+const REDIRECTOR_WATCH_QUIET_MS = 30 * DAY_MS;
 /**
  * Every this many checks the browser visits even when the cheap check saw a
  * known host: a cloaker may show a plain HTTP client a decoy it never
  * changes and send browsers to the new kit.
  */
-export const REDIRECTOR_WATCH_BROWSER_EVERY = 7;
+const REDIRECTOR_WATCH_BROWSER_EVERY = 7;
 
 const HTTP_REDIRECTS_PER_PAGE = 5;
 /** Pages that send the visitor on by markup or script, followed one after another. */
@@ -47,7 +47,7 @@ const MAX_PAGE_BYTES = 512 * 1024;
 const MAX_EVIDENCE_PAGE_CHARACTERS = 64 * 1024;
 
 /** The last page the redirector served on its own site: the one that sent the visitor on, or that stayed. */
-export type RedirectorPage = { url: string; status: number; html: string };
+type RedirectorPage = { url: string; status: number; html: string };
 
 /** Where the cheap check of a redirector ended. */
 export type RedirectorCheck = (
@@ -210,7 +210,7 @@ export async function enqueueRedirectorWatch(reportId: bigint, submissionId: big
 }
 
 /** What a browser visit of the redirector found, read back from the case it opened. */
-export type RedirectorVisit = { submissionId: bigint; status: string; destination?: string };
+type RedirectorVisit = { submissionId: bigint; status: string; destination?: string };
 
 export type RedirectorWatchDependencies = {
 	checkRedirector?: (url: string, dependencies: RedirectorCheckDependencies) => Promise<RedirectorCheck>;

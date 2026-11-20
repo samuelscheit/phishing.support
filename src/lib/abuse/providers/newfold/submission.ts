@@ -105,7 +105,7 @@ function captchaCredentialsPresent(): boolean {
 }
 
 /** Solve the form's reCAPTCHA v2 checkbox (datacenter egress gets the image challenge, so no widget click is tried). */
-export function solveNewfoldCaptcha(signal: AbortSignal | undefined): Promise<string> {
+function solveNewfoldCaptcha(signal: AbortSignal | undefined): Promise<string> {
 	return solveDeathByCaptchaToken({
 		type: PROVIDER.captcha.type,
 		parametersField: "token_params",

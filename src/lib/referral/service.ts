@@ -43,7 +43,7 @@ const LIVE_STATUSES = new Set([...SENT_STATUSES, "awaiting_approval"]);
 
 const URL_IN_TEXT = /https?:\/\/[^\s<>'"`]+/gi;
 
-export function urlsIn(text: string): string[] {
+function urlsIn(text: string): string[] {
 	return [...new Set((text.match(URL_IN_TEXT) ?? []).map((url) => url.replace(/[),.;!?]+$/, "")))];
 }
 

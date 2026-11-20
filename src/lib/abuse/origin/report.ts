@@ -124,7 +124,7 @@ async function originVerificationTargets(submissionId: bigint | null, domain: st
 	return [...targets.values()];
 }
 
-export function originHostEvidence(snapshot: OriginHostSnapshot): Buffer {
+function originHostEvidence(snapshot: OriginHostSnapshot): Buffer {
 	const certificateLines = (certificate: OriginHostSnapshot["servers"][number]["certificate"]) => [
 		`  names: ${certificate.names.join(", ")}`,
 		`  issuer: ${certificate.issuer}`,

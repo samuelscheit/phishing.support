@@ -26,7 +26,7 @@ const prefixesSchema = z.object({
 	prefixes: z.array(z.object({ prefix: z.string() }).passthrough()),
 }).passthrough();
 
-export type OriginHostNetwork = {
+type OriginHostNetwork = {
 	asn: number;
 	holder: string;
 	prefixes: string[];

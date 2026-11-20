@@ -3,7 +3,7 @@ import { Address } from "@/components/Address";
 import { cn } from "@/web_lib/util";
 
 /** The picture of a site: its trimmed capture when there is one, else the full capture. */
-export function pictureOf(site: PublicCampaignSite): string | undefined {
+function pictureOf(site: PublicCampaignSite): string | undefined {
 	return site.blankCapture ? undefined : site.thumbnailUrl ?? site.screenshotUrl;
 }
 

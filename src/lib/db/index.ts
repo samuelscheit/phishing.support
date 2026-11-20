@@ -67,7 +67,7 @@ async function initializeDatabase() {
 
 let databasePromise: ReturnType<typeof initializeDatabase> | undefined;
 
-export type AppDatabase = Awaited<ReturnType<typeof initializeDatabase>>;
+type AppDatabase = Awaited<ReturnType<typeof initializeDatabase>>;
 /** The transaction `db.transaction` hands its callback: what persistence helpers that run inside one write take. */
 export type Transaction = SQLiteTransaction<"sync", void, Record<string, never>, ExtractTablesWithRelations<Record<string, never>>>;
 /** Either: for a helper that works inside a transaction or on its own. */

@@ -20,7 +20,7 @@ export type EmailOrigin = {
 };
 
 /** The header block of an RFC 822 source: everything before the first blank line. */
-export function headerBlockOf(eml: string): string {
+function headerBlockOf(eml: string): string {
 	const text = eml.replace(/\r\n?/g, "\n");
 	const end = text.indexOf("\n\n");
 	return (end >= 0 ? text.slice(0, end) : text).replace(/^\n+/, "").trimEnd();

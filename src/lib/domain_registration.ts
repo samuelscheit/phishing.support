@@ -13,7 +13,7 @@ import { hasPathTenants } from "./website_site";
  * IANA registrar IDs as their RDAP records name them (amazon.com and
  * google.com: MarkMonitor 292; walmart.com: CSC 299; apple.com: Com Laude 470).
  */
-export const BRAND_PROTECTION_REGISTRARS: Readonly<Record<number, string>> = {
+const BRAND_PROTECTION_REGISTRARS: Readonly<Record<number, string>> = {
 	292: "MarkMonitor",
 	299: "CSC Corporate Domains",
 	470: "Com Laude",

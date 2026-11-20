@@ -27,4 +27,3 @@ export const microsoftProvider: ProviderSubmissionProvider = {
 	submit: (context) => submitMicrosoftSubmission(context),
 };
 
-export { MICROSOFT_PROVIDER } from "./definition";

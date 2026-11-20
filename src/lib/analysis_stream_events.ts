@@ -2,9 +2,6 @@
 
 export type {
 	AnalysisEntryStatus,
-	AnalysisRunStatus,
-	AnalysisConnectionStatus,
-	AnalysisStreamEvent,
 	AnalysisStreamState,
 	AnalysisTimelineEntry,
 } from "./analysis_stream_events_support";

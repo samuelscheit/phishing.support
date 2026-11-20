@@ -86,7 +86,7 @@ export function isFlowStepHop(hop: WebsiteNavigationHop): boolean {
 
 /** The browser a capture presents: a Windows desktop, or a phone a mobile-only kit asks for. */
 export type WebsiteDevice = "desktop" | WebsiteMobileDevice;
-export type WebsiteMobileDevice = "iphone";
+type WebsiteMobileDevice = "iphone";
 
 /** How a person reads the device a page was opened as. */
 export const WEBSITE_DEVICE_LABEL: Record<WebsiteDevice, string> = {

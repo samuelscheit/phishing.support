@@ -5,8 +5,6 @@ import type { AbuseProviderRoute } from "../abuse/schema";
  * the complaint and each supplement to an authority, and each preservation
  * notice to a provider. Replies correlate to the route they answer.
  */
-export const REFERRAL_ALLEGATION = "criminal_referral";
-
 export function authorityRegistryKey(authorityId: string): string {
 	return `authority:${authorityId}`;
 }

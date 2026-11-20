@@ -16,7 +16,7 @@ import type { DownloadCodeSignal, DownloadFormat, WebsiteOfferedDownload } from 
  */
 
 /** Hash lookups only; a file is never uploaded before the page is confirmed. */
-export async function defaultDownloadLookups(sha256: string, environment: Readonly<Record<string, string | undefined>> = process.env): Promise<LookupResult[]> {
+async function defaultDownloadLookups(sha256: string, environment: Readonly<Record<string, string | undefined>> = process.env): Promise<LookupResult[]> {
 	return Promise.all([
 		lookupMalwareBazaar({ sha256, authKey: environment.MALWAREBAZAAR_AUTH_KEY }),
 		lookupVirusTotal({ sha256, apiKey: environment.VIRUSTOTAL_API_KEY }),

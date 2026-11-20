@@ -8,9 +8,8 @@ import {
 } from "../providers";
 import type { ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
 
-export { extractRegistrarIdFromRdap } from "./rdap";
 export { parseExplicitWhoisAbuseMailboxes } from "./whois";
-export type { ResolverDependencies, ResolverTarget, ResolvedAbuseTarget } from "./types";
+export type { ResolverDependencies, ResolvedAbuseTarget } from "./types";
 
 /**
  * A reported email message has no registry or network owner of its own; its

@@ -26,4 +26,3 @@ export const nameSiloProvider: ProviderSubmissionProvider = {
 	submitPrepared: (context, preflight) => submitNameSiloSubmission(context, {}, preflight),
 };
 
-export { NAMESILO_PROVIDER } from "./definition";

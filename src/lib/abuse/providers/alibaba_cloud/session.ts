@@ -12,8 +12,8 @@ import { asRecord } from "../../../values";
 
 const PROVIDER = "Alibaba Cloud";
 /** A login waits up to three minutes for its mailed code. */
-export const ALIBABA_LOGIN_TIMEOUT_MS = 5 * 60_000;
-export const ALIBABA_LOGIN_FAILURE_TTL_MS = 15 * 60_000;
+const ALIBABA_LOGIN_TIMEOUT_MS = 5 * 60_000;
+const ALIBABA_LOGIN_FAILURE_TTL_MS = 15 * 60_000;
 /**
  * Alibaba issues the console login as browser-session cookies without an
  * expiry. The session is used until the console answers ConsoleNeedLogin,
@@ -250,7 +250,7 @@ async function loginWithFabric(config: AlibabaCloudLoginConfig, signal: AbortSig
 	}
 }
 
-export function createAlibabaCloudSessions(
+function createAlibabaCloudSessions(
 	login: (config: AlibabaCloudLoginConfig, signal: AbortSignal) => Promise<AlibabaCloudSession> = loginWithFabric,
 	overrides: Partial<LoginSessionDeps> = {},
 ): LoginSessions<AlibabaCloudLoginConfig, AlibabaCloudSession> {

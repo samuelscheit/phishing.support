@@ -119,7 +119,7 @@ export function awsEmailHeader(headers: string): string | undefined {
 }
 
 /** The email's links the form can hold: valid, deduplicated, at most ten. */
-export function awsEmailUrls(links: readonly string[]): string[] {
+function awsEmailUrls(links: readonly string[]): string[] {
 	return [...new Set(links.filter(validUrl))].slice(0, AWS_PROVIDER.maximumUrls);
 }
 

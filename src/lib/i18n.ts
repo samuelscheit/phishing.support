@@ -5,10 +5,10 @@
  */
 export const LOCALES = ["en", "de"] as const;
 export type Locale = (typeof LOCALES)[number];
-export const DEFAULT_LOCALE: Locale = "en";
+const DEFAULT_LOCALE: Locale = "en";
 export const LOCALE_COOKIE = "lang";
 
-export function isLocale(value: unknown): value is Locale {
+function isLocale(value: unknown): value is Locale {
 	return typeof value === "string" && (LOCALES as readonly string[]).includes(value);
 }
 
@@ -35,7 +35,7 @@ export function pickLocale(source: { query?: unknown; cookie?: string | null; ac
 }
 
 /** BCP 47 tag for dates and numbers in a locale. */
-export function intlTag(locale: Locale): string {
+function intlTag(locale: Locale): string {
 	return locale === "de" ? "de-DE" : "en-GB";
 }
 

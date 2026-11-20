@@ -43,9 +43,9 @@ export type TencentSubmissionPayload = {
 };
 
 /** The form's category options this service reports under; the form also offers Botnets, Pharming, Spam, Others. */
-export type TencentAbuseCategory = "Phishing" | "Malware";
+type TencentAbuseCategory = "Phishing" | "Malware";
 
-export function tencentCategory(allegationCategory: string | undefined): TencentAbuseCategory {
+function tencentCategory(allegationCategory: string | undefined): TencentAbuseCategory {
 	return allegationCategory === "malware" ? "Malware" : "Phishing";
 }
 

@@ -5,8 +5,8 @@
  */
 import { createModel, type ChatModel, type JsonSchema } from "browser-fabric/packages/task-agent/src/index";
 
-export { runTask, Secrets, validateSchema } from "browser-fabric/packages/task-agent/src/index";
-export type { ActionLog, ChatModel, ChatRequest, ChatResponse, JsonSchema, RunTaskOptions, StepLog, TaskResult, TaskStatus, ToolCall } from "browser-fabric/packages/task-agent/src/index";
+export { runTask, validateSchema } from "browser-fabric/packages/task-agent/src/index";
+export type { ChatModel, ChatRequest, ChatResponse, StepLog, TaskResult, ToolCall } from "browser-fabric/packages/task-agent/src/index";
 
 /** What a browser task is asked to do: everything but where it runs and with which model. */
 export type BrowserTask = {

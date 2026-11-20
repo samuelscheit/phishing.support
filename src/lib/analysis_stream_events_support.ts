@@ -38,8 +38,8 @@ export type AnalysisTimelineEntry =
 			status: AnalysisEntryStatus;
 	  };
 
-export type AnalysisRunStatus = "idle" | "created" | "running" | "retrying" | "completed" | "failed" | "incomplete";
-export type AnalysisConnectionStatus = "connecting" | "connected" | "closed" | "error";
+type AnalysisRunStatus = "idle" | "created" | "running" | "retrying" | "completed" | "failed" | "incomplete";
+type AnalysisConnectionStatus = "connecting" | "connected" | "closed" | "error";
 
 export type AnalysisStreamState = {
 	connection: AnalysisConnectionStatus;
@@ -55,14 +55,14 @@ export type AnalysisStreamState = {
 	processedEventKeys: string[];
 };
 
-export const MAX_ENTRIES = 500;
-export const MAX_PROCESSED_KEYS = 1_024;
+const MAX_ENTRIES = 500;
+const MAX_PROCESSED_KEYS = 1_024;
 export const MAX_REASONING_TEXT = 1_000;
 export const MAX_OUTPUT_TEXT = 160_000;
 
-export const TOOL_PHASES = new Set(["in_progress", "searching", "interpreting", "generating", "completed", "failed", "incomplete", "done"]);
+const TOOL_PHASES = new Set(["in_progress", "searching", "interpreting", "generating", "completed", "failed", "incomplete", "done"]);
 
-export const TOOL_ITEM_TYPES = new Set([
+const TOOL_ITEM_TYPES = new Set([
 	"web_search_call",
 	"file_search_call",
 	"code_interpreter_call",
@@ -163,7 +163,7 @@ export function statusFromPhase(phase: string | null | undefined): AnalysisEntry
 	return phase === "pending" ? "pending" : "active";
 }
 
-export function sequenceOf(event: AnalysisStreamEvent): number | undefined {
+function sequenceOf(event: AnalysisStreamEvent): number | undefined {
 	const sequence = numberValue(event.sequence_number);
 	return sequence === null ? undefined : sequence;
 }

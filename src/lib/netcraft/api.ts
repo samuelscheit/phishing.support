@@ -5,7 +5,6 @@ import { asRecord } from "../values";
 export const NETCRAFT_REPORT_URLS_URL = "https://report.netcraft.com/api/v3/report/urls";
 export const NETCRAFT_REPORT_MAIL_URL = "https://report.netcraft.com/api/v3/report/mail";
 export const NETCRAFT_SUBMISSION_URL_PREFIX = "https://report.netcraft.com/api/v3/submission/";
-export const NETCRAFT_MAXIMUM_MAIL_MESSAGE_BYTES = 20 * 1024 * 1024;
 const NETCRAFT_STATUS_REQUEST_TIMEOUT_MS = 15_000;
 const NETCRAFT_STATUS_MAX_BODY_BYTES = 256 * 1024;
 const NETCRAFT_STATUS_MAX_STATE_LENGTH = 64;
@@ -29,7 +28,7 @@ export type NetcraftSubmissionReceipt = {
 	submissionUrl: string;
 };
 
-export type NetcraftSubmissionUrlStatus = {
+type NetcraftSubmissionUrlStatus = {
 	url: string;
 	state?: string;
 };

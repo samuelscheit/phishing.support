@@ -43,7 +43,7 @@ type Context = Awaited<ReturnType<typeof routeContext>>;
 type TucowsPreflightState = { session: TucowsSession; payload: TucowsSubmissionPayload; screenshot: Buffer; csrfToken: string };
 
 /** Solve the Turnstile widget of the wizard's first step. */
-export async function solveTucowsCaptcha(signal?: AbortSignal): Promise<string> {
+async function solveTucowsCaptcha(signal?: AbortSignal): Promise<string> {
 	return solveDeathByCaptchaToken({
 		type: TUCOWS_PROVIDER.captcha.type,
 		parametersField: "turnstile_params",

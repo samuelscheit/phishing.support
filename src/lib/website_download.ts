@@ -11,7 +11,7 @@ import { sleep } from "./sleep";
  */
 
 /** A file larger than this is not read; a kit's stealer is small, and an installer this big is reported by size only. */
-export const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
 const MAX_DOWNLOADS = 5;
 
 /** The file, and the User-Agent of the visit that got it: a host may serve it only to that browser. */

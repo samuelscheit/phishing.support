@@ -40,4 +40,3 @@ export const alibabaCloudProvider: ProviderSubmissionProvider = {
 	},
 };
 
-export { ALIBABA_CLOUD_PROVIDER } from "./definition";

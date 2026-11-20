@@ -8,7 +8,7 @@ import { DAY_MS } from "../duration";
  * evidence archive. It names the campaign and an expiry and is signed with
  * `REFERRAL_LINK_SECRET`; nothing else grants access to the archive.
  */
-export const DOSSIER_LINK_DAYS = 365;
+const DOSSIER_LINK_DAYS = 365;
 
 export class DossierLinkSecretMissingError extends Error {
 	constructor() {

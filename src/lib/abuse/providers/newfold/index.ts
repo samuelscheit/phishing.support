@@ -40,4 +40,3 @@ export const newfoldProvider: ProviderSubmissionProvider = {
 	},
 };
 
-export { NEWFOLD_PROVIDER } from "./definition";

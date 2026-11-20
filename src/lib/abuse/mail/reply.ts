@@ -43,7 +43,7 @@ function parseClassifierJson(text: string): unknown {
  * into a system/developer instruction. Missing configuration, transport
  * errors, refusals, and schema violations all fail closed to `ambiguous`.
  */
-export async function classifyProviderReplyWithAI(params: { text: string; from?: string }): Promise<AbuseReplyClassification> {
+async function classifyProviderReplyWithAI(params: { text: string; from?: string }): Promise<AbuseReplyClassification> {
 	const body = params.text.slice(0, MAX_REPLY_CLASSIFICATION_INPUT);
 	const sender = (params.from ?? "").slice(0, 320);
 	try {

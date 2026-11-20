@@ -12,9 +12,9 @@ export type CloudflareSession = { id: string; atok: string; vses2: string; expir
 
 export type CloudflareLoginConfig = { accountId: string; email: string; password: string };
 
-export const CLOUDFLARE_DASHBOARD_URL = "https://dash.cloudflare.com";
+const CLOUDFLARE_DASHBOARD_URL = "https://dash.cloudflare.com";
 export const CLOUDFLARE_LOGIN_TIMEOUT_MS = 120_000;
-export const CLOUDFLARE_LOGIN_FAILURE_TTL_MS = 10 * 60_000;
+const CLOUDFLARE_LOGIN_FAILURE_TTL_MS = 10 * 60_000;
 /** Conservative lifetime when x-atok carries no parseable timestamp prefix. */
 export const CLOUDFLARE_DEFAULT_SESSION_TTL_MS = 5 * 60_000;
 const DASHBOARD_HOST = "dash.cloudflare.com";
@@ -129,7 +129,7 @@ export async function loginWithContext(
 	}
 }
 
-export async function loginWithFabric(config: CloudflareLoginConfig, signal: AbortSignal): Promise<CloudflareSession> {
+async function loginWithFabric(config: CloudflareLoginConfig, signal: AbortSignal): Promise<CloudflareSession> {
 	const launch = acquireFabricPatchrightSession({ operation: "cloudflare-dashboard-login" }, { egress: "reporting", leaseMode: "clone" });
 	const fabric = await raceAbort(launch, signal, () => {
 		void launch.then((late) => late.cancel().catch(() => undefined)).catch(() => undefined);

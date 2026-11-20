@@ -62,7 +62,7 @@ export type KitCapture = {
 	urlscanKit?: { resources: readonly WebsiteKitResource[] };
 };
 
-export type ConfirmedSiblingDomain = {
+type ConfirmedSiblingDomain = {
 	domain: string;
 	url: string;
 	matchingHashes: string[];
@@ -70,7 +70,7 @@ export type ConfirmedSiblingDomain = {
 	certificate: PresentedCertificate;
 };
 
-export type KitSiblingCandidate = {
+type KitSiblingCandidate = {
 	domain: string;
 	url: string;
 	matchingHashes: string[];

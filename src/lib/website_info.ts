@@ -154,7 +154,7 @@ export type RDAPEntity = {
 export type RDAPAbuseContact = RDAPVCard & { remarks: string };
 type RDAPCIDR = { v4prefix?: string; v6prefix?: string; length?: number };
 
-export type RDAPAutnumInfo = RDAPEntity & {
+type RDAPAutnumInfo = RDAPEntity & {
 	asn: number;
 	name?: string;
 	startAutnum?: number;
@@ -164,7 +164,7 @@ export type RDAPAutnumInfo = RDAPEntity & {
 	abuse: RDAPAbuseContact | null;
 };
 
-export type OriginASNInfo = {
+type OriginASNInfo = {
 	asn: number;
 	prefix?: string;
 	source: "ripe-stat";
@@ -348,7 +348,7 @@ export async function queryRDAPDomain(domain: string, dependencies: WebsiteInfoD
 	}
 }
 
-export async function queryOriginASNs(ip: string, dependencies: WebsiteInfoDependencies = {}): Promise<OriginASNInfo[]> {
+async function queryOriginASNs(ip: string, dependencies: WebsiteInfoDependencies = {}): Promise<OriginASNInfo[]> {
 	try {
 		const json = await fetchJson<{ data?: { asns?: unknown[]; prefix?: unknown } }>(
 			getRipeStatNetworkInfoUrl(ip),
@@ -363,7 +363,7 @@ export async function queryOriginASNs(ip: string, dependencies: WebsiteInfoDepen
 	}
 }
 
-export async function queryRDAPAutnum(asn: number, dependencies: WebsiteInfoDependencies = {}): Promise<RDAPAutnumInfo | undefined> {
+async function queryRDAPAutnum(asn: number, dependencies: WebsiteInfoDependencies = {}): Promise<RDAPAutnumInfo | undefined> {
 	try {
 		const json = await fetchRdap("autnum", String(asn), dependencies);
 		return json ? simplifyAutnum(json, asn) : undefined;

@@ -2,13 +2,13 @@ import { downloadPipelineConfigFromEnvironment } from "./pipeline";
 import { purgeExpiredSamples, type PurgeResult } from "./sample_purge";
 
 /** How often the purge runs. Retention is measured in days, so an hourly pass is ample. */
-export const SAMPLE_PURGE_INTERVAL_MS = 60 * 60_000;
+const SAMPLE_PURGE_INTERVAL_MS = 60 * 60_000;
 
 /**
  * Run one purge pass with the configured store root and retention. With no store
  * configured there is nothing to delete, and the pass returns without touching disk.
  */
-export async function runSamplePurge(now: Date = new Date()): Promise<PurgeResult> {
+async function runSamplePurge(now: Date = new Date()): Promise<PurgeResult> {
 	const config = downloadPipelineConfigFromEnvironment();
 	if (!config.storeRoot) return { removed: 0, kept: 0, skipped: 0 };
 	return purgeExpiredSamples({ root: config.storeRoot, now, retentionMs: config.retentionMs });

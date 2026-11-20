@@ -102,7 +102,7 @@ export function uploadedPath(answer: BrowserFormResponse): string {
 }
 
 /** The uploader's own request for one file, as the page's drag-and-drop widget makes it. */
-export function uploadFields(nonce: string, file: { filename: string; mimeType: string; base64: string }, ids: { folder: string; token: string }): BrowserFormField[] {
+function uploadFields(nonce: string, file: { filename: string; mimeType: string; base64: string }, ids: { folder: string; token: string }): BrowserFormField[] {
 	return [
 		["action", "dnd_codedropz_upload"],
 		["type", "click"],

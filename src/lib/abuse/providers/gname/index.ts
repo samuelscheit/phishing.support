@@ -25,4 +25,3 @@ export const gnameProvider: ProviderSubmissionProvider = {
 	},
 };
 
-export { GNAME_PROVIDER } from "./definition";

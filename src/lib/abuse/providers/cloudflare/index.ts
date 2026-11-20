@@ -35,5 +35,3 @@ export const cloudflareProvider: ProviderSubmissionProvider = {
 	reviewVerdicts: { accepted: "acknowledged", denied: "rejected" },
 };
 
-export { CLOUDFLARE_PROVIDER } from "./definition";
-export { buildCloudflareReportPayload, buildCloudflareReportPreview } from "./report";

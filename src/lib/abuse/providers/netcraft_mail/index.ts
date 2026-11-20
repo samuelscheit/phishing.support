@@ -15,4 +15,3 @@ export const netcraftMailProvider: ProviderSubmissionProvider = {
 	reviewVerdicts: NETCRAFT_REVIEW_VERDICTS,
 };
 
-export { NETCRAFT_MAIL_PROVIDER } from "./definition";

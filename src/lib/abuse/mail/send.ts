@@ -49,7 +49,7 @@ function createMessageId(): string {
 }
 
 /** Build the exact MIME bytes that will be handed to SMTP. */
-export async function buildCanonicalAbuseMail(params: {
+async function buildCanonicalAbuseMail(params: {
 	to: string[];
 	subject: string;
 	textBody: string;

@@ -12,7 +12,7 @@ const MAX_FRAME_RESOURCES = 40;
 /** Requests other than GET kept per frame. */
 const MAX_FRAME_REQUESTS = 20;
 /** A frame document's source as stored and given to the classifier. */
-export const MAX_HIDDEN_FRAME_SOURCE_CHARACTERS = 64 * 1024;
+const MAX_HIDDEN_FRAME_SOURCE_CHARACTERS = 64 * 1024;
 /** A script read for signals; exploit stages run to several hundred KB. */
 const MAX_CODE_BYTES = 2 * 1024 * 1024;
 const MAX_REQUEST_BODY_CHARACTERS = 2_000;

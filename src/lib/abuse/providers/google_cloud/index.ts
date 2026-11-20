@@ -20,4 +20,3 @@ export const googleCloudProvider: ProviderSubmissionProvider = {
 	submit: (context) => submitGoogleCloudSubmission(context),
 };
 
-export { GOOGLE_CLOUD_PROVIDER } from "./definition";

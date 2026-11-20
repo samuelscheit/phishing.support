@@ -64,7 +64,7 @@ export function SiteFooter() {
 	);
 }
 
-export function SiteLayout({ children }: { children: React.ReactNode }) {
+function SiteLayout({ children }: { children: React.ReactNode }) {
 	return (
 		<>
 			<SiteHeader />

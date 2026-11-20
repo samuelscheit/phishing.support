@@ -37,4 +37,3 @@ export const dynadotProvider: ProviderSubmissionProvider = {
 	},
 };
 
-export { DYNADOT_PROVIDER } from "./definition";

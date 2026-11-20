@@ -35,7 +35,7 @@ export const session: AlibabaCloudSession = {
 export const freshSession: AlibabaCloudSession = { ...session, id: "session-2", secToken: "FreshSecToken99" };
 export const loginConfig = { email: "support@phishing.support", password: "pw" };
 
-export type RecordedRequest = { url: string; method: string; headers: Record<string, string>; action?: string; params?: unknown; form?: FormData; body?: URLSearchParams };
+type RecordedRequest = { url: string; method: string; headers: Record<string, string>; action?: string; params?: unknown; form?: FormData; body?: URLSearchParams };
 
 /**
  * A fake of the console and its OSS bucket. `answers` maps an action to the

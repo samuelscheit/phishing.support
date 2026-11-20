@@ -24,7 +24,7 @@ export type DiscordDsaReport = {
 	reporter: { name: string; country: string; email: string };
 };
 
-export type DiscordDsaPayload = {
+type DiscordDsaPayload = {
 	adapter: "discord_dsa_notice_v1";
 	definition: { version: string; contentHash: string };
 	report: DiscordDsaReport;
@@ -232,7 +232,7 @@ async function typeInto(page: Page, index: number, value: string, selector = "in
 }
 
 /** A Fabric browser on discord.com/report, over the reporting egress. */
-export async function openDiscordDsaSession(): Promise<DiscordDsaSession> {
+async function openDiscordDsaSession(): Promise<DiscordDsaSession> {
 	const browser = await getBrowser("reporting");
 	try {
 		const page = await browser.defaultBrowserContext().newPage();

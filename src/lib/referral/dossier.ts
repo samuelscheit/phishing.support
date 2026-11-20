@@ -10,7 +10,7 @@ import { isAuthorityRoute, isPreservationRoute } from "./routes";
 import { indicatorInfrastructure, locateInfrastructure, mergeInfrastructure, routeInfrastructure, type InfrastructureClaim, type InfrastructureNode, type NetworkLookup } from "./infrastructure";
 
 /** One provider a site was reported to, and what became of the report. */
-export type DossierProviderReport = {
+type DossierProviderReport = {
 	provider: string;
 	target: string;
 	channel: "email" | "form" | "none";
@@ -20,7 +20,7 @@ export type DossierProviderReport = {
 	confirmationId?: string;
 };
 
-export type DossierEvidenceFile = { artifactId: string; name: string; kind: string; sha256: string; size: number; archivedAt?: string };
+type DossierEvidenceFile = { artifactId: string; name: string; kind: string; sha256: string; size: number; archivedAt?: string };
 
 /** One mail to or from a provider about the site; the archive carries it as the original .eml. */
 export type DossierMail = {
@@ -38,10 +38,10 @@ export type DossierMail = {
 };
 
 /** Where the page sent the synthetic values our visit entered. */
-export type DossierDataDestination = { url: string; method: string; fields: string[]; sameSite: boolean };
+type DossierDataDestination = { url: string; method: string; fields: string[]; sameSite: boolean };
 
 /** Why the site was judged phishing or malware: the classifier's finding on the reported page. */
-export type DossierVerdict = {
+type DossierVerdict = {
 	finding: string;
 	basis?: string;
 	/** The page's own words that show it, verbatim and in its language. */
@@ -53,7 +53,7 @@ export type DossierVerdict = {
 };
 
 /** The visit through the site as the case recorded it at the time. */
-export type DossierVisit = { outcome: string; failure?: string; actions: Array<{ kind: string; text: string }> };
+type DossierVisit = { outcome: string; failure?: string; actions: Array<{ kind: string; text: string }> };
 
 export type DossierSite = {
 	submissionId: string;

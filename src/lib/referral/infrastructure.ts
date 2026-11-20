@@ -164,7 +164,7 @@ function cached<T>(key: string, lookup: () => Promise<T>, fallback: T): Promise<
 }
 
 /** RIPEstat and DNS, each question asked once per process: these facts change rarely. */
-export const PUBLIC_NETWORK_LOOKUP: NetworkLookup = {
+const PUBLIC_NETWORK_LOOKUP: NetworkLookup = {
 	registered: (resource) => cached(`registered:${resource}`, () => registeredCountry(resource), undefined),
 	located: (ip) => cached(`located:${ip}`, () => locatedCountry(ip), undefined),
 	resolve: (host) => cached(`resolve:${host}`, () => retryWithTimeout(() => dns.resolve4(host), { label: `DNS lookup for ${host}`, timeoutMs: 5_000, attempts: 2, retryDelayMs: 200 }), []),

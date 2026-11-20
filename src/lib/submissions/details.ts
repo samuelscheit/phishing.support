@@ -7,7 +7,7 @@ import { getReportsForSubmission, type SubmissionReport } from "./abuse_details"
 
 export type { SubmissionReport, SubmissionReportArtifact, SubmissionReportMessage, SubmissionReportRoute } from "./abuse_details";
 
-export type SubmissionArtifact = Omit<Artifact, "blob" | "submissionId">;
+type SubmissionArtifact = Omit<Artifact, "blob" | "submissionId">;
 
 export type SubmissionDetail = Submission & {
 	analysisRuns: AnalysisRun[];

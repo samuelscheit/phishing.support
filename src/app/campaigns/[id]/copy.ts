@@ -303,7 +303,6 @@ const DE: Copy = {
 };
 
 export const COPY: Record<Locale, Copy> = { en: EN, de: DE };
-export type CampaignCopy = Copy;
 
 /** What the campaign's pages are after, which picks the headline. */
 export type Basis = "credentials" | "payment" | "other";

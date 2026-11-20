@@ -7,7 +7,7 @@ import { z } from "zod";
  */
 export const MAX_KIT_FINGERPRINTS = 64;
 
-export const certificateSchema = z.object({
+const certificateSchema = z.object({
 	names: z.array(z.string().max(253)).max(100),
 	notBefore: z.string().max(64),
 	notAfter: z.string().max(64),
@@ -15,14 +15,14 @@ export const certificateSchema = z.object({
 	fingerprint256: z.string().max(128),
 }).strict();
 
-export const originServerSchema = z.object({
+const originServerSchema = z.object({
 	ip: z.string().max(64),
 	asn: z.number().int().positive().optional(),
 	prefix: z.string().max(64).optional(),
 	certificate: certificateSchema,
 }).strict();
 
-export const originNetworkSchema = z.object({
+const originNetworkSchema = z.object({
 	asn: z.number().int().positive(),
 	holder: z.string().min(1).max(200),
 	prefixes: z.array(z.string().max(64)).max(2_048),

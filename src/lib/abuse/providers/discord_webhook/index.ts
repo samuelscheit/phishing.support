@@ -10,4 +10,3 @@ export const discordWebhookProvider: ProviderSubmissionProvider = {
 	submit: (context) => submitDiscordWebhookDeletion(context),
 };
 
-export { DISCORD_WEBHOOK_PROVIDER } from "./definition";

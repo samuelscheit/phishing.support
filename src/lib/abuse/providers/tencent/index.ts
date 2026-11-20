@@ -18,4 +18,3 @@ export const tencentProvider: ProviderSubmissionProvider = {
 	submit: submitTencentSubmission,
 };
 
-export { TENCENT_PROVIDER } from "./definition";

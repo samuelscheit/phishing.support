@@ -43,4 +43,3 @@ export const publicDomainRegistryProvider: ProviderSubmissionProvider = {
 	},
 };
 
-export { PUBLIC_DOMAIN_REGISTRY_PROVIDER } from "./definition";

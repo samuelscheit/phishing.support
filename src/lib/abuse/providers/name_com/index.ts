@@ -43,4 +43,3 @@ export const nameComProvider: ProviderSubmissionProvider = {
 	},
 };
 
-export { NAME_COM_PROVIDER } from "./definition";

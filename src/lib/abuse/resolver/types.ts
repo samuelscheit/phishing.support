@@ -6,7 +6,7 @@ import type { JsonRecord } from "../../values";
 
 export type { JsonRecord };
 
-export type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export type ResolverDependencies = {
 	/** Injectable for deterministic resolver tests. Production uses global fetch. */

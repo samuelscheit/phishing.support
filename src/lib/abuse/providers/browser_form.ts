@@ -49,7 +49,7 @@ export type BrowserFormOptions = {
 	loadTimeoutMs?: number;
 };
 
-export type TurnstileOptions = { widgetSelector?: string; tokenSelector?: string; timeoutMs?: number };
+type TurnstileOptions = { widgetSelector?: string; tokenSelector?: string; timeoutMs?: number };
 
 export type BrowserFormSession = {
 	/** The form's named inputs (hidden and honeypot ones too) whose name matches `namePattern`, as the page renders them. */
@@ -75,7 +75,7 @@ export type BrowserFormDependencies = {
 	sleep?: (ms: number) => Promise<void>;
 };
 
-export const BROWSER_FORM_DEFAULTS = {
+const BROWSER_FORM_DEFAULTS = {
 	challengeTimeoutMs: 60_000,
 	loadTimeoutMs: 45_000,
 	turnstileTimeoutMs: 60_000,
@@ -254,7 +254,7 @@ export async function openBrowserForm(options: BrowserFormOptions, dependencies:
 	};
 }
 
-export type BrowserFormRequest = {
+type BrowserFormRequest = {
 	method: "GET" | "POST";
 	url: string;
 	headers?: Readonly<Record<string, string>>;

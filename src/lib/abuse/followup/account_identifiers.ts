@@ -1,5 +1,5 @@
 /** An identifier in a kit's own pages that ties it to an account at a provider, e.g. a Cloudflare Turnstile sitekey. */
-export type ProviderAccountIdentifier = {
+type ProviderAccountIdentifier = {
 	kind: string;
 	label: string;
 	value: string;

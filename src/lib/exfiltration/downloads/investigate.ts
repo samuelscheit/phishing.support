@@ -17,7 +17,7 @@ export type DownloadEvidence = {
 };
 
 /** A submission made for one provider, with the provider's answer. */
-export type UploadOutcome =
+type UploadOutcome =
 	| { provider: VerdictProvider; state: "submitted"; analysisId: string }
 	| { provider: VerdictProvider; state: "not_attempted"; reason: string }
 	| { provider: VerdictProvider; state: "failed"; reason: string };

@@ -430,7 +430,7 @@ export async function executeProviderSubmission(params: {
 
 /** How long, and how often, a submitted report's provider correspondence is read. */
 export const CORRESPONDENCE_POLL_WINDOW_MS = 30 * DAY_MS;
-export const CORRESPONDENCE_POLL_INTERVAL_MS = 60 * 60_000;
+const CORRESPONDENCE_POLL_INTERVAL_MS = 60 * 60_000;
 /**
  * Reads soon after submitting, measured from it, before the hourly ones.
  * Cloudflare emails its receipt and the hosting provider it names within

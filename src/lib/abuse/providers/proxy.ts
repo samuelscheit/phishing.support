@@ -1,5 +1,5 @@
 
-export type BrowserProxy = {
+type BrowserProxy = {
 	server: string;
 	username?: string;
 	password?: string;

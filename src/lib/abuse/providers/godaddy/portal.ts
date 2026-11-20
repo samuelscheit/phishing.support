@@ -33,7 +33,7 @@ export async function recaptchaTokenProbe(argument: { siteKey: string; action: s
 }
 
 /** The form's hidden inputs: what the page rendered, else the portal's own defaults. */
-export function portalHiddenFields(rendered: readonly BrowserFormField[]): BrowserFormField[] {
+function portalHiddenFields(rendered: readonly BrowserFormField[]): BrowserFormField[] {
 	return PORTAL.hiddenFields.map(([name, fallback]): BrowserFormField => {
 		const value = rendered.find(([field]) => field === name)?.[1];
 		return [name, typeof value === "string" ? value : fallback];

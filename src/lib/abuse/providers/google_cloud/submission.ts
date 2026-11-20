@@ -26,7 +26,7 @@ const FORM_READY_TIMEOUT_MS = 45_000;
 const SUBMIT_RESPONSE_TIMEOUT_MS = 60_000;
 const CONFIRMATION_TIMEOUT_MS = 20_000;
 
-export type GoogleCloudFormSession = { page: Page; close(): Promise<void> };
+type GoogleCloudFormSession = { page: Page; close(): Promise<void> };
 
 export type GoogleCloudSubmissionDependencies = {
 	/** A page on the direct reporting egress; Google's form challenges Tor exits. */
@@ -37,7 +37,7 @@ export type GoogleCloudSubmissionDependencies = {
 };
 
 /** Solve the checkbox reCAPTCHA the form falls back to. */
-export async function solveGoogleCloudCaptcha(signal?: AbortSignal): Promise<string> {
+async function solveGoogleCloudCaptcha(signal?: AbortSignal): Promise<string> {
 	return solveDeathByCaptchaToken({
 		type: GOOGLE_CLOUD_PROVIDER.captcha.type,
 		parametersField: "token_params",

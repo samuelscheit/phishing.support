@@ -51,7 +51,7 @@ export function requestTexts(request: ChatRequest): string[] {
 }
 
 /** The newest observation in a request. */
-export function latestObservation(request: ChatRequest): string {
+function latestObservation(request: ChatRequest): string {
 	const observation = requestTexts(request).filter((text) => text.startsWith("Current page:")).at(-1);
 	if (!observation) throw new Error("no observation in request");
 	return observation;

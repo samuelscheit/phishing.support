@@ -2,7 +2,7 @@ import type { ExfiltrationBackend } from "../exfiltration/types";
 import type { ReportableWebsiteFinding, WebsiteDataUpload } from "../website_types";
 
 /** A command the page shows, as the investigation needs it: what to fetch and what runs it. */
-export type InvestigationPasteCommand = {
+type InvestigationPasteCommand = {
 	shown: string;
 	payloadUrls: string[];
 	interpreters: string[];
@@ -13,7 +13,7 @@ export type InvestigationPasteCommand = {
  * stages to fetch with the browser identity the loader was served to, and
  * where its code sends what it takes.
  */
-export type InvestigationExploitLoader = {
+type InvestigationExploitLoader = {
 	frameUrl: string;
 	userAgent: string;
 	stageUrls: string[];
@@ -25,7 +25,7 @@ export type InvestigationExploitLoader = {
  * investigation needs it: where to fetch it again, as which browser, and
  * how the visitor gets it.
  */
-export type InvestigationOfferedDownload = {
+type InvestigationOfferedDownload = {
 	url: string;
 	userAgent: string;
 	/** The page the visit downloaded it from. */

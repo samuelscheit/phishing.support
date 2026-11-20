@@ -74,7 +74,7 @@ export type ProviderStats = {
 /** Below this many delivered reports a provider's rates say little. */
 export const LOW_DATA_THRESHOLD = 5;
 
-export function minutesBetween(from: Date, to: Date): number {
+function minutesBetween(from: Date, to: Date): number {
 	return Math.max(0, Math.round((to.getTime() - from.getTime()) / 60_000));
 }
 

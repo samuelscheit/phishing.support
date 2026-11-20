@@ -31,14 +31,14 @@ type GlobalpingResult = {
 	};
 };
 
-export type RegionalDnsAnswer = {
+type RegionalDnsAnswer = {
 	name?: string;
 	value: string;
 	type?: string;
 	ttl?: number;
 };
 
-export type RegionalDnsResult = {
+type RegionalDnsResult = {
 	country: string;
 	continent?: string;
 	region?: string;

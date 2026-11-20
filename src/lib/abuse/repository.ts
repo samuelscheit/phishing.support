@@ -104,7 +104,6 @@ import {
 } from "./persistence/routes";
 
 export type { CreatedAbuseReport } from "./persistence/reports";
-export type { ResolvedRouteInput } from "./route_contracts";
 export { aggregateReportStatus } from "./persistence/state";
 
 export const AbuseRepository = {

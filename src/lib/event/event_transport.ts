@@ -1,27 +1,88 @@
+import { EventEmitter } from "events";
+
+/**
+ * Analysis progress events, published and subscribed within the one server
+ * process that runs both the analyses and the SSE streams.
+ */
 export type EventSubscriber = {
 	[Symbol.asyncIterator](): AsyncIterator<unknown>;
 	close(): void;
 };
 
-const isBunRuntime = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined" || true;
-let transportImplPromise: Promise<typeof import("./zmq") | typeof import("./ipc_transport") | typeof import("./same_process")> | null =
-	null;
+type EventEnvelope = {
+	topic: string;
+	data: unknown;
+};
 
-async function getTransportImpl() {
-	if (!transportImplPromise) {
-		transportImplPromise = isBunRuntime ? import("./same_process") : import("./zmq");
-	}
-	return transportImplPromise;
-}
+const MAX_EVENT_HISTORY = 500;
+const emitterKey = "__event_transport_emitter";
+const globalEmitter = globalThis as typeof globalThis & {
+	[emitterKey]?: EventEmitter;
+};
+
+const emitter = globalEmitter[emitterKey] ?? new EventEmitter();
+globalEmitter[emitterKey] = emitter;
+const eventHistory = new Map<string, Array<unknown>>();
 
 export async function publishEvent(topic: string, data: unknown) {
-	// console.log("Publishing event", topic, data);
-	// console.log("Publishing event", topic, data);
-	const { publishEvent: transportPublishEvent } = await getTransportImpl();
-	return transportPublishEvent(topic, data);
+	// Keep a bounded history per topic so late subscribers can catch up.
+	const history = eventHistory.get(topic) ?? [];
+	history.push(data);
+	if (history.length > MAX_EVENT_HISTORY) {
+		history.splice(0, history.length - MAX_EVENT_HISTORY);
+	}
+	eventHistory.set(topic, history);
+	emitter.emit("event", { topic, data } satisfies EventEnvelope);
 }
 
 export async function subscribeToEvents(topic: string): Promise<EventSubscriber> {
-	const { subscribeToEvents: transportSubscribeToEvents } = await getTransportImpl();
-	return transportSubscribeToEvents(topic);
+	const queue: Array<unknown> = [];
+	let pending: ((result: IteratorResult<unknown>) => void) | null = null;
+
+	const push = (payload: unknown) => {
+		if (pending) {
+			const resolve = pending;
+			pending = null;
+			resolve({ value: payload, done: false });
+			return;
+		}
+		queue.push(payload);
+	};
+
+	const onEvent = (message: EventEnvelope) => {
+		if (message.topic !== topic) return;
+		push(message.data);
+	};
+
+	const history = eventHistory.get(topic);
+	if (history?.length) {
+		for (const entry of history) {
+			queue.push(entry);
+		}
+	}
+
+	emitter.on("event", onEvent);
+
+	return {
+		[Symbol.asyncIterator]() {
+			return {
+				next() {
+					if (queue.length > 0) {
+						const value = queue.shift();
+						return Promise.resolve({ value, done: false });
+					}
+					return new Promise<IteratorResult<unknown>>((resolve) => {
+						pending = resolve;
+					});
+				},
+			};
+		},
+		close() {
+			emitter.off("event", onEvent);
+			if (pending) {
+				pending({ value: undefined, done: true });
+				pending = null;
+			}
+		},
+	};
 }

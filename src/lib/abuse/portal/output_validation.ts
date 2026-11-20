@@ -22,7 +22,7 @@ export type ProviderFormOutputContract = {
  * browser-task boundary only validates an immutable submission contract; it
  * never switches on a provider name or imports a concrete provider definition.
  */
-export type ProviderFormOutputPolicy = {
+type ProviderFormOutputPolicy = {
 	allowedOutputKeys: readonly string[];
 	expectedTargets: readonly string[];
 	expectedUrls: readonly string[];
@@ -69,7 +69,7 @@ function contractFailure(reason: string): ProviderFormOutputContract {
  * Concrete providers pass only code-owned policy values; their custom fields
  * and pinning rules remain in their own module.
  */
-export function validateProviderFormOutputContract(params: {
+function validateProviderFormOutputContract(params: {
 	output: unknown;
 	policy: ProviderFormOutputPolicy;
 }): ProviderFormOutputContract {

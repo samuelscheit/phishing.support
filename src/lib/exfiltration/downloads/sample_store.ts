@@ -18,7 +18,7 @@ export const MAX_STORED_SAMPLE_BYTES = 100 * 1024 * 1024;
  */
 export const SAMPLE_ARCHIVE_PASSWORD = "infected";
 /** The fixed entry name inside every sample archive. */
-export const SAMPLE_ENTRY_NAME = "sample.bin";
+const SAMPLE_ENTRY_NAME = "sample.bin";
 
 export type StoredSample = {
 	sha256: string;

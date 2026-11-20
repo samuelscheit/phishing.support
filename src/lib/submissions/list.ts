@@ -2,7 +2,7 @@ import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import type { SubmissionKind, SubmissionStatus } from "@/lib/db/schema";
 import { SUBMISSION_FILTER_NAMES, SUBMISSION_FILTERS, submissionFilterOf, type SubmissionFilter } from "./filters";
 
-export const SUBMISSION_PAGE_SIZE = 50;
+const SUBMISSION_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 
 /** What the public list shows for one submission. */

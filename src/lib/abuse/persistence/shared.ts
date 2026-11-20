@@ -19,7 +19,7 @@ export type ArtifactValuesParams = {
 	metadata?: Record<string, unknown>;
 };
 
-export function artifactValues(params: ArtifactValuesParams) {
+function artifactValues(params: ArtifactValuesParams) {
 	return {
 		id: generateId(),
 		reportId: params.reportId,

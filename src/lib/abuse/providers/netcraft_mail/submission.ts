@@ -13,7 +13,7 @@ import {
 import { NETCRAFT_MAIL_PROVIDER } from "./definition";
 import { asRecord } from "../../../values";
 
-export type NetcraftMailSubmissionPayload = {
+type NetcraftMailSubmissionPayload = {
 	adapter: "netcraft_report_mail_v3";
 	definition: { version: string; contentHash: string };
 	/** The reported message, pinned by hash; the bytes stay in the evidence artifact. */
@@ -45,7 +45,7 @@ function messageArtifact(evidence: Awaited<ReturnType<typeof routeContext>>["evi
 	return evidence.find((artifact) => artifact.mimeType === "message/rfc822");
 }
 
-export function storedNetcraftMailPayload(value: unknown): NetcraftMailSubmissionPayload | undefined {
+function storedNetcraftMailPayload(value: unknown): NetcraftMailSubmissionPayload | undefined {
 	const payload = asRecord(value);
 	const definition = payload && asRecord(payload.definition);
 	const message = payload && asRecord(payload.message);

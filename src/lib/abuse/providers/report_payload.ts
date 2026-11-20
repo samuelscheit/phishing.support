@@ -36,7 +36,7 @@ const INSTRUCTION_SENTENCE = [
 	/\b(?:mark|classify|treat|label)\s+(?:this|it|the\s+(?:page|site|url))\s+as\s+(?:safe|legitimate|benign|false\s+positive)\b/i,
 ];
 
-export function evidenceSentences(description: string): string[] {
+function evidenceSentences(description: string): string[] {
 	const seen = new Set<string>();
 	const sentences: string[] = [];
 	const lines = description
@@ -90,7 +90,7 @@ function conciseProviderUrl(value: string): string {
  * providers therefore receive a code-owned narrative assembled from a small
  * set of detected indicators rather than a slice of the model answer.
  */
-export type ProviderReportProfile =
+type ProviderReportProfile =
 	| "generic"
 	| "cloudflare"
 	| "google_cloud"

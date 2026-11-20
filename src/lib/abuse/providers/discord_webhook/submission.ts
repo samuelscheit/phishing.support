@@ -10,7 +10,7 @@ import { DISCORD_WEBHOOK_PROVIDER, DISCORD_WEBHOOK_URL } from "./definition";
 import { sleep } from "../../../sleep";
 import { asRecord } from "../../../values";
 
-export type DiscordWebhookPayload = {
+type DiscordWebhookPayload = {
 	adapter: "discord_webhook_delete_v1";
 	definition: { version: string; contentHash: string };
 	webhook: { id: string; token: string };

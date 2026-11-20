@@ -23,7 +23,7 @@ import {
 import { asRecord } from "../../../values";
 
 /** A file sent through the form's upload endpoint. */
-export type EranetUpload = { type: string; filename: string; mimeType: string; base64: string };
+type EranetUpload = { type: string; filename: string; mimeType: string; base64: string };
 
 /**
  * One visitor session on Eranet's form. The form accepts its mailed code only

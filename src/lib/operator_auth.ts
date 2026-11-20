@@ -5,7 +5,7 @@ import { timingSafeEqual } from "node:crypto";
  * authentication with `OPERATOR_PASSWORD`; any user name is accepted. Without
  * a configured password of at least 16 characters nobody gets in.
  */
-export const OPERATOR_REALM = "phishing.support operator";
+const OPERATOR_REALM = "phishing.support operator";
 
 export function isOperatorAuthorization(header: string | null | undefined, env: Record<string, string | undefined> = process.env): boolean {
 	const password = env.OPERATOR_PASSWORD;

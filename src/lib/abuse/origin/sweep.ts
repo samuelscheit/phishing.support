@@ -31,7 +31,7 @@ export type OriginServer = {
 };
 
 export type OriginSweepPrefix = { asn: number; prefix: string };
-export type OriginSweepRange = OriginSweepPrefix & { start: number; end: number };
+type OriginSweepRange = OriginSweepPrefix & { start: number; end: number };
 export type OriginSweepPlan = {
 	ranges: OriginSweepRange[];
 	addressCount: number;
@@ -69,7 +69,7 @@ export function capturedKitResponseMatches(
  * the domain's TLS handshake. CDN responses are excluded even if they happen
  * to retain a cached copy: they do not establish the disclosed host as origin.
  */
-export const servesCapturedKit: OriginVerifier = async (ip, domain, targets, timeoutMs) => {
+const servesCapturedKit: OriginVerifier = async (ip, domain, targets, timeoutMs) => {
 	for (const target of targets) {
 		const matched = await new Promise<boolean>((resolve) => {
 			let settled = false;

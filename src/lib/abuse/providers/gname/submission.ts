@@ -63,7 +63,7 @@ type GnamePreflightState = { session: GnameSession; code: string; pics: string[]
 const SLIDER_ATTEMPTS = 3;
 const CODE_RESPONSE_TIMEOUT_MS = 30_000;
 
-export function gnameSucceeded(response: GnameResponse): boolean {
+function gnameSucceeded(response: GnameResponse): boolean {
 	return String(response.code) === "1";
 }
 
@@ -127,7 +127,7 @@ export async function requestGnameCodeOnPage(page: Page, email: string): Promise
 }
 
 /** A Fabric browser page on the form for this complaint type, over the reporting egress. */
-export async function openGnameBrowserSession(kind: GnameComplaintKind): Promise<GnameSession> {
+async function openGnameBrowserSession(kind: GnameComplaintKind): Promise<GnameSession> {
 	const browser = await getBrowser("reporting");
 	try {
 		const page = await browser.defaultBrowserContext().newPage();

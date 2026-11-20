@@ -58,7 +58,7 @@ export type VerifiedEmailProviderPayload = {
 	email: AbuseEmailDraft;
 };
 
-export type AbuseEmailSummaryInput = {
+type AbuseEmailSummaryInput = {
 	allegationCategory: string;
 	description: string;
 	legalBrandUrl?: string | null;
@@ -307,7 +307,7 @@ export function abuseEmailCaseUrl(submissionId: bigint | null | undefined): stri
 }
 
 /** Name the public submitter inside the report; the sender stays the service identity. */
-export function reporterAttribution(report: Pick<AbuseReport, "reporterName" | "reporterContactEmail">): string | undefined {
+function reporterAttribution(report: Pick<AbuseReport, "reporterName" | "reporterContactEmail">): string | undefined {
 	const name = cleanText(report.reporterName, 200);
 	const email = cleanText(report.reporterContactEmail, 320);
 	const submitter = name && email ? `${name} <${email}>` : name || email;

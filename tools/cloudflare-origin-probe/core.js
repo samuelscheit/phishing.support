@@ -6,7 +6,7 @@ export function isIpv4(value) {
 	return octets.length === 4 && octets.every((octet) => /^(?:0|[1-9]\d{0,2})$/.test(octet) && Number(octet) <= 255);
 }
 
-export function suppliedToken(request) {
+function suppliedToken(request) {
 	return request.headers.get("x-origin-probe-token") ?? "";
 }
 

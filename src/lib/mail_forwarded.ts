@@ -164,7 +164,7 @@ function trySplitAfterMarkerInAncestors(markerNode: ChildNode): string | null {
 	return null;
 }
 
-export async function extractForwardedHtmlBody(parsed: Pick<ParsedMail, "html">): Promise<string> {
+async function extractForwardedHtmlBody(parsed: Pick<ParsedMail, "html">): Promise<string> {
 	const html = typeof parsed.html === "string" ? parsed.html : "";
 	if (!html.trim()) return "";
 
@@ -234,7 +234,7 @@ export async function extractForwardedHtmlBody(parsed: Pick<ParsedMail, "html">)
  * The forwarded part of a plain-text body: everything from the first
  * forward/reply header on, or the unquoted text when it is mostly a quote.
  */
-export function extractForwardedText(plainText: string | undefined): string {
+function extractForwardedText(plainText: string | undefined): string {
 	const text = normalizeNewlines(plainText ?? "");
 	if (!text.trim()) return "";
 

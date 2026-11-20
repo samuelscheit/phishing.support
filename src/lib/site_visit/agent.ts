@@ -31,7 +31,7 @@ export type VisitAgentState =
 	| { state: "completed"; output: unknown }
 	| { state: "failed"; reason: string };
 
-export type VisitAgentRun = {
+type VisitAgentRun = {
 	task: SiteVisitTask;
 	/** Browser-level CDP endpoint of the capture's browser (its second relay connection). */
 	cdpEndpoint: string;

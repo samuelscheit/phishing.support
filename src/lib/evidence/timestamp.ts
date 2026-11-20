@@ -8,7 +8,7 @@ import * as pkijs from "pkijs";
  * proves that the hashed evidence existed at the authority's time; it is
  * verifiable by anyone with `openssl ts -verify`.
  */
-export const TIMESTAMP_AUTHORITIES = [
+const TIMESTAMP_AUTHORITIES = [
 	{ name: "DigiCert", url: "http://timestamp.digicert.com" },
 	{ name: "FreeTSA", url: "https://freetsa.org/tsr" },
 ] as const;
@@ -31,7 +31,7 @@ export type EvidenceTimestamp = {
 export type TimestampFetch = (url: string, init: RequestInit) => Promise<Response>;
 
 /** The DER TimeStampReq for a SHA-256 digest, with a nonce and the authority's certificate requested. */
-export function timestampRequest(sha256: Buffer, nonce: Buffer): Buffer {
+function timestampRequest(sha256: Buffer, nonce: Buffer): Buffer {
 	const request = new pkijs.TimeStampReq({
 		version: 1,
 		messageImprint: new pkijs.MessageImprint({

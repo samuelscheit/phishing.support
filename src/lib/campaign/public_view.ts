@@ -63,7 +63,7 @@ export type PublicCampaignVisitor = {
 	kinds: VisitorKind[];
 };
 
-export type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_delivery" | "same_payment_account" | "same_pattern"; title: string; text: string };
+type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_delivery" | "same_payment_account" | "same_pattern"; title: string; text: string };
 
 export type PublicCampaign = {
 	campaignId: string;

@@ -14,7 +14,7 @@ import { isBlankCapture, pageThumbnail } from "./thumbnail";
 const THUMBNAIL_NAME = "website-thumb.webp";
 
 /** The stored preview of a site's analyzed page, and whether that page's capture is one flat colour. */
-export type SitePreview = { artifactId: bigint; blank: boolean };
+type SitePreview = { artifactId: bigint; blank: boolean };
 
 export type LinkDependencies = IndicatorDependencies & {
 	/** Store the trimmed screenshot of the analyzed page; tests skip it. */

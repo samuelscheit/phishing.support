@@ -6,11 +6,11 @@ import { z } from "zod";
 import type { AbuseTargetType } from "./schema";
 import { AbuseInputError, hashStableJson, hostBelongsToTarget, normalizePublicHost, normalizePublicHttpUrl, sha256Hex } from "./security";
 
-export const MAX_TARGETS_PER_REPORT = 100;
-export const MAX_OBSERVED_URLS_PER_TARGET = 100;
-export const MAX_EVIDENCE_ITEMS = 15;
+const MAX_TARGETS_PER_REPORT = 100;
+const MAX_OBSERVED_URLS_PER_TARGET = 100;
+const MAX_EVIDENCE_ITEMS = 15;
 export const MAX_EVIDENCE_BYTES_PER_ITEM = 5 * 1024 * 1024;
-export const MAX_EVIDENCE_BYTES_PER_REPORT = 20 * 1024 * 1024;
+const MAX_EVIDENCE_BYTES_PER_REPORT = 20 * 1024 * 1024;
 export const MAX_REQUEST_BYTES = 30 * 1024 * 1024;
 
 export const allegationCategories = ["phishing", "fraud", "malware", "impersonation", "copyright", "other"] as const;
@@ -30,7 +30,7 @@ const observedUrlsSchema = z
 	})
 	.strict();
 
-export const abuseReportRequestSchema = z
+const abuseReportRequestSchema = z
 	.object({
 		targets: z.array(z.string().min(1).max(253)).min(1).max(MAX_TARGETS_PER_REPORT),
 		allegationCategory: z.enum(allegationCategories),
@@ -44,8 +44,6 @@ export const abuseReportRequestSchema = z
 	})
 	.strict();
 
-export type AbuseReportRequest = z.infer<typeof abuseReportRequestSchema>;
-
 export type NormalizedAbuseTarget = {
 	ordinal: number;
 	originalInput: string;
@@ -55,7 +53,7 @@ export type NormalizedAbuseTarget = {
 	observedUrls: string[];
 };
 
-export type EvidenceMimeType = "image/jpeg" | "image/png" | "image/webp" | "message/rfc822" | "application/json";
+type EvidenceMimeType = "image/jpeg" | "image/png" | "image/webp" | "message/rfc822" | "application/json";
 
 export type DecodedEvidence = {
 	filename: string;

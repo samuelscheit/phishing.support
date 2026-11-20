@@ -31,10 +31,6 @@ import {
 } from "@/lib/analysis_stream_events";
 import { summarizeAnalysisEntries, type ReaderTimelineEntry } from "@/lib/analysis_stream_view";
 
-// Keep the extraction helper available to other analysis surfaces while the
-// timeline owns the SSE-specific rendering.
-export { extractOutputText } from "@/lib/analysis_stream_events";
-
 type OutputContent = { type?: string; text?: string; refusal?: string };
 export type OutputItem = { type?: string; content?: OutputContent[] };
 

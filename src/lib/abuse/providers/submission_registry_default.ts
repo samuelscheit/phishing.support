@@ -64,10 +64,6 @@ export function getProviderSubmissionProviderForRegistrarId(registrarId: number 
 	return registry.getForRegistrarId(registrarId);
 }
 
-export function listSupplementalProviderSubmissionProviders(): readonly ProviderSubmissionProvider[] {
-	return registry.listSupplemental();
-}
-
 export function listSupplementalProviderSubmissionProvidersForTarget(target: {
 	targetType: AbuseTargetType;
 	observedUrls: readonly string[];

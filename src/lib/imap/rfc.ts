@@ -2,7 +2,6 @@ import type { AddressObject, EmailAddress, ParsedMail } from "mailparser";
 
 import { normalizeMailbox } from "../abuse/mail/shared";
 
-export { normalizeMailbox } from "../abuse/mail/shared";
 
 type EnvelopeAddress = { address?: string | null };
 

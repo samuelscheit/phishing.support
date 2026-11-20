@@ -39,4 +39,3 @@ export const eranetProvider: ProviderSubmissionProvider = {
 	},
 };
 
-export { ERANET_PROVIDER } from "./definition";

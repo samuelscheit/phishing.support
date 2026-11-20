@@ -26,7 +26,7 @@ export function nextLivenessCheckAt(reportedAt: Date, lastCheckedAt: Date | unde
 }
 
 /** Queue the target's next check, or nothing once its schedule is done. A running check passes itself as `successorOf`. */
-export async function queueLivenessCheck(target: LivenessTarget, options: { successorOf?: bigint; now?: Date } = {}): Promise<AbuseJob | undefined> {
+async function queueLivenessCheck(target: LivenessTarget, options: { successorOf?: bigint; now?: Date } = {}): Promise<AbuseJob | undefined> {
 	const at = nextLivenessCheckAt(target.reportedAt, target.lastCheckedAt, options.now ?? new Date());
 	if (!at) return undefined;
 	return AbuseRepository.enqueueJob({

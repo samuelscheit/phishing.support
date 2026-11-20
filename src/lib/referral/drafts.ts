@@ -8,7 +8,7 @@ import { infrastructureLines } from "./infrastructure";
 import { germanDate, germanDateTime, indicatorLines, siteLine } from "./render";
 
 /** Sites listed in a mail body; the attached CSV always has all of them. */
-export const MAX_SITES_IN_MAIL = 25;
+const MAX_SITES_IN_MAIL = 25;
 
 export type ReferralDraft = { subject: string; body: string };
 

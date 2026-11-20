@@ -16,7 +16,7 @@ import { errorText } from "./error_text";
 import type { EmailSubmissionData } from "./db/schema";
 import type { ReporterMetadata } from "./request_metadata";
 
-export function buildMailEvidence(mail: MailData, analysisText?: string) {
+function buildMailEvidence(mail: MailData, analysisText?: string) {
 	return toon.encode({
 		from: mail.from,
 		subject: mail.subject,

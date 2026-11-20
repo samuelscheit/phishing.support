@@ -38,7 +38,7 @@ export const FABRIC_EGRESS_LABEL: Readonly<Record<FabricEgress, string>> = { phi
  * has no such built-in, so the deployment catalog must declare it (README,
  * "Browser Fabric catalog").
  */
-export const FABRIC_DEFAULTS = {
+const FABRIC_DEFAULTS = {
 	runtime: "chrome",
 	profileRef: "profile_default",
 	/** Headful Chrome on Xvfb: phishing kits and provider forms cloak headless browsers. */
@@ -75,7 +75,7 @@ export interface FabricBrowserConfig {
 	fetch?: FabricFetch;
 }
 
-export type FabricSessionStatus =
+type FabricSessionStatus =
 	| "queued"
 	| "allocating"
 	| "ready"
@@ -192,7 +192,6 @@ export function fabricBrowserConfigFromEnvironment(options: { environment?: Fabr
 	};
 }
 
-export { fabricBrowserSessionIdFromProviderPayload, isFabricBrowserSessionId } from "../fabric/session";
 
 function assertFabricBrowserSessionId(value: string): string {
 	if (!FABRIC_BROWSER_SESSION_ID_PATTERN.test(value)) throw new Error("Browser Fabric session ID is invalid");
@@ -331,7 +330,7 @@ const RELAY_CAPACITY_RETRY_MS = 2_000;
  * The relay refuses a WebSocket upgrade with HTTP 503 while all of its
  * connections are taken; CDP clients report that as a failed handshake.
  */
-export function isRelayCapacityError(error: unknown): boolean {
+function isRelayCapacityError(error: unknown): boolean {
 	const message = errorText(error);
 	return /Expected 101 status code|Unexpected server response: 503/i.test(message);
 }

@@ -55,7 +55,7 @@ export type WebsiteEvidenceArchive = {
 	dataSent?: VisitDataSent[];
 };
 
-export const WEBSITE_SITE_FINDINGS = ["phishing", "malware", "benign", "prank_or_troll", "insufficient_evidence"] as const;
+const WEBSITE_SITE_FINDINGS = ["phishing", "malware", "benign", "prank_or_troll", "insufficient_evidence"] as const;
 
 /**
  * Page text and HTML handed to the models. A page's harmful step is often at
@@ -154,7 +154,7 @@ export const WEBSITE_FINDING_CRITERIA = "A page is phishing when it impersonates
  * the domain and searches the brand's own documentation; a page someone else
  * built on the brand's platform stays what it shows.
  */
-export const BRAND_OWN_SITE_INSTRUCTIONS = "A brand's own page is not phishing: its real sign-in, console, account, or support page, also on a domain other than the brand's best-known one (a regional, government-cloud, or acquired domain). domain_registration, when given, is who holds the page's domain from its registry records: a brand-protection registrar (MarkMonitor, CSC, Com Laude) manages domains only for verified companies, and a registrant or nameservers of the brand's own company tie the domain to it; a platform_tenant is one customer's site on someone's platform, and that platform's registration says nothing about who made the page. Before you classify a page that shows a brand's sign-in or account flow as phishing on a domain that is not the brand's main one, search the web for the brand's official domains and its documentation of this host: when the brand itself uses this domain and the page is the brand's own service, the finding is benign. A form, survey, file share, document, site, or storage bucket that someone else made on a brand's platform, or a page on a platform_tenant, is judged by what it shows like any other page, even when the platform belongs to the brand it imitates.";
+const BRAND_OWN_SITE_INSTRUCTIONS = "A brand's own page is not phishing: its real sign-in, console, account, or support page, also on a domain other than the brand's best-known one (a regional, government-cloud, or acquired domain). domain_registration, when given, is who holds the page's domain from its registry records: a brand-protection registrar (MarkMonitor, CSC, Com Laude) manages domains only for verified companies, and a registrant or nameservers of the brand's own company tie the domain to it; a platform_tenant is one customer's site on someone's platform, and that platform's registration says nothing about who made the page. Before you classify a page that shows a brand's sign-in or account flow as phishing on a domain that is not the brand's main one, search the web for the brand's official domains and its documentation of this host: when the brand itself uses this domain and the page is the brand's own service, the finding is benign. A form, survey, file share, document, site, or storage bucket that someone else made on a brand's platform, or a page on a platform_tenant, is judged by what it shows like any other page, even when the platform belongs to the brand it imitates.";
 
 export function buildWebsiteClassificationInput(hop: WebsiteNavigationHop, archive: WebsiteEvidenceArchive, registration?: DomainRegistration) {
 	if (!hop.contentCaptured || hop.url !== archive.url) {
@@ -522,7 +522,7 @@ export function websiteMobileHandoff(value: unknown): boolean {
 }
 
 /** How the visitor reached the classified page from the earlier page of the visit. */
-export function arrivalStatement(arrival: WebsiteNavigationHop): string {
+function arrivalStatement(arrival: WebsiteNavigationHop): string {
 	if (arrival.revisit) {
 		const { cause, opened } = revisitWording(arrival.revisit);
 		return `Since ${cause}, it was opened again ${opened}.`;

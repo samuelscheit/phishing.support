@@ -14,7 +14,6 @@ import type { SiteVisitRecording } from "./visit";
 
 const CANARY_FIELDS: readonly CanaryField[] = ["email", "password", "phone", "cardNumber", "oneTimeCode"];
 
-export type { VisitDataSent };
 
 export type VisitPage<Archive> = {
 	archive: Archive;

@@ -48,4 +48,3 @@ export const goDaddyProvider: ProviderSubmissionProvider = {
 	},
 };
 
-export { GODADDY_PROVIDER } from "./definition";

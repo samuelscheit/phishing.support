@@ -18,7 +18,7 @@ const MAX_REPORT_DESCRIPTION_LENGTH = 30_000;
 export const MAX_REPORTED_EMAIL_BYTES = 20 * 1024 * 1024;
 
 /** The abuse target that stands for the reported phishing message itself. */
-export const EMAIL_MESSAGE_TARGET = "phishing-email";
+const EMAIL_MESSAGE_TARGET = "phishing-email";
 
 type SubmissionReportBase = {
 	submissionId: bigint;
@@ -146,7 +146,7 @@ function offeredDownloadEvidence(download: WebsiteOfferedDownload): DecodedEvide
  * Build the website report: the captured site's host, with its URLs as
  * observed evidence. On a shared host the URLs name the one tenant reported.
  */
-export async function buildWebsiteAbuseRequest(params: ConfirmedWebsiteAbuse): Promise<ValidatedAbuseReportRequest> {
+async function buildWebsiteAbuseRequest(params: ConfirmedWebsiteAbuse): Promise<ValidatedAbuseReportRequest> {
 	const observedUrls = [...new Set(params.urls.map((url) => normalizeObservedUrl(url.trim())))];
 	if (new Set(observedUrls.map(websiteSite)).size !== 1) throw new Error("A website report covers the URLs of exactly one captured site.");
 	return submissionRequest({
@@ -170,7 +170,7 @@ export async function buildWebsiteAbuseRequest(params: ConfirmedWebsiteAbuse): P
  * mail-aware providers receive it; the sending IP becomes a second target
  * whose resolver-derived abuse contact receives the redacted source.
  */
-export async function buildEmailPhishingRequest(params: ConfirmedEmailPhishing): Promise<ValidatedAbuseReportRequest> {
+async function buildEmailPhishingRequest(params: ConfirmedEmailPhishing): Promise<ValidatedAbuseReportRequest> {
 	const eml = Buffer.from(params.redactedEml, "utf-8");
 	if (eml.byteLength === 0) throw new Error("A confirmed email report requires the redacted message source.");
 	const targets: NormalizedAbuseTarget[] = [{

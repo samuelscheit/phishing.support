@@ -8,7 +8,7 @@ import { sortKinds, visitorKinds, type VisitorKind } from "./kinds";
 import { boundedFacts, type CampaignFacts } from "./summary";
 
 /** Account pages of the impersonated brand a visitor needs after typing something. */
-export const guidancePurposes = ["recover", "devices", "security", "activity", "forwarding"] as const;
+const guidancePurposes = ["recover", "devices", "security", "activity", "forwarding"] as const;
 export type GuidancePurpose = (typeof guidancePurposes)[number];
 
 /** The brand a campaign impersonates, as its sites' analyses name it. */

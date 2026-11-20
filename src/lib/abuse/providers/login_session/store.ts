@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { providerLoginSessions } from "../../schema";
 
-export type LoginSessionFailure = { message: string; until: number };
+type LoginSessionFailure = { message: string; until: number };
 
 /** A stored record: the session's JSON (validated by its provider before use) and the last login failure. */
 export type LoginSessionRecord = { session?: unknown; failure?: LoginSessionFailure };

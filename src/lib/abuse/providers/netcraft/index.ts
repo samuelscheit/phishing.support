@@ -24,5 +24,3 @@ export const netcraftProvider: ProviderSubmissionProvider = {
 	reviewVerdicts: NETCRAFT_REVIEW_VERDICTS,
 };
 
-export { NETCRAFT_PROVIDER } from "./definition";
-export { reconcileNetcraftProviderRun } from "./reconcile";

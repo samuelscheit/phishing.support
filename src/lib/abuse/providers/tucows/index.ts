@@ -37,4 +37,3 @@ export const tucowsProvider: ProviderSubmissionProvider = {
 	},
 };
 
-export { TUCOWS_PROVIDER } from "./definition";
