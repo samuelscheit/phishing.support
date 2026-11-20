@@ -88,3 +88,10 @@ Form text and docs scope MSRC abuse to content/attacks "originating from a Micro
 4. Real rate limit / duplicate detection window.
 5. Whether Microsoft sends any confirmation mail to `reporterEmail` (none documented).
 6. Whether reports for non-Microsoft-hosted URLs are triaged or discarded.
+
+## Email-origin IP (added 2026-11-20)
+
+- The developer table (`msrc.microsoft.com/report/developer`) lists `Spam` ("any unsolicited emails") for threat type `IP Address` only; `Phishing` is `URL` only. The swagger `AbuseReport` carries `ipAddressList[].sourceIp` (required per item in the portal bundle; ports are required only for Brute Force) and has no email-header field.
+- An `ip` target whose report holds the stored `message/rfc822` is therefore filed as `threatType: "IP Address"`, `incidentType: "Spam"`, `ipAddressList: [{ sourceIp }]`, no `urlList`; date/time/timeZone are the Received hop's UTC time (clamped to filing time), the Received line and the mail's links are in `reportNotes`.
+- A bare IP (no observed URL, no email) is `insufficient_evidence`: no `https://<ip>/` page is made up.
+- Unverified: whether the anonymous API accepts `IP Address`/`Spam` (nothing was submitted), and whether `Spam` reports are triaged for non-Microsoft addresses.

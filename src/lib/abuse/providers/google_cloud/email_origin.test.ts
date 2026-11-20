@@ -101,7 +101,7 @@ describe("Google Cloud report for an IP that sent a phishing email", () => {
 
 	test("falls back to the report time without a Received time, and keeps URLs when there are very many", () => {
 		const links = Array.from({ length: 20 }, (_, index) => `https://storage.googleapis.com/bucket-${index}/${"x".repeat(60)}`);
-		const payload = buildGoogleCloudSubmissionPayload({ target: IP, observedUrls: [], description: analysis, capturedAt, caseUrl: CASE, emailOrigin: { links } });
+		const payload = buildGoogleCloudSubmissionPayload({ target: IP, observedUrls: [], description: analysis, capturedAt, caseUrl: CASE, emailOrigin: { links, headers: "" } });
 		if (!payload) throw new Error("Expected a payload.");
 		expect(payload.report.abuseDate).toBe("11/20/2026");
 		expect(payload.report.abuseDetails).toContain("Date and time of the abuse: 2026-11-20T08:00:00Z (UTC).");
@@ -112,7 +112,7 @@ describe("Google Cloud report for an IP that sent a phishing email", () => {
 
 	test("skips a link too long for the field instead of dropping the rest", () => {
 		const links = [`https://storage.googleapis.com/b/${"y".repeat(700)}`, "https://example.org/second"];
-		const payload = buildGoogleCloudSubmissionPayload({ target: IP, observedUrls: [], description: analysis, capturedAt, caseUrl: CASE, emailOrigin: { links } });
+		const payload = buildGoogleCloudSubmissionPayload({ target: IP, observedUrls: [], description: analysis, capturedAt, caseUrl: CASE, emailOrigin: { links, headers: "" } });
 		expect(payload?.report.abuseDetails.length).toBeLessThanOrEqual(1_000);
 		expect(payload?.report.abuseDetails).not.toContain("yyyy");
 		expect(payload?.report.abuseDetails).toContain("- https://example.org/second");

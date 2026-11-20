@@ -55,9 +55,10 @@ describe("urls", () => {
 		expect(awsReportUrls("login-example-phish.com", [tooLong, exact])).toEqual([exact]);
 	});
 
-	test("an IP target keeps its URLs, and without one gets a root URL", () => {
+	test("an IP target keeps its URLs; without one there is no site to report, so no root URL is made up", () => {
 		expect(awsReportUrls("34.102.117.75", ["https://34.102.117.75/login"])).toEqual(["https://34.102.117.75/login"]);
-		expect(awsReportUrls("34.102.117.75", [])).toEqual(["https://34.102.117.75/"]);
+		expect(awsReportUrls("34.102.117.75", [])).toBeUndefined();
+		expect(awsReportUrls("2001:db8::1", [])).toBeUndefined();
 		expect(awsReportUrls("not a host", [])).toBeUndefined();
 	});
 });

@@ -37,7 +37,8 @@ describe("urls", () => {
 		const long = `https://x.azurewebsites.net/${"a".repeat(MICROSOFT_PROVIDER.urlMaximumLength)}`;
 		expect(microsoftReportUrls("x.azurewebsites.net", ["https://x.azurewebsites.net/a,b", "https://x.azurewebsites.net/a?x=1;y=2", "https://x.azurewebsites.net/a|b", long, "https://other.example/x", "javascript:alert(1)"])).toEqual(["https://x.azurewebsites.net/"]);
 		expect(microsoftReportUrls("x.azurewebsites.net", ["https://x.azurewebsites.net/ok"])).toEqual(["https://x.azurewebsites.net/ok"]);
-		expect(microsoftReportUrls("20.50.1.2", [])).toEqual(["https://20.50.1.2/"]);
+		expect(microsoftReportUrls("20.50.1.2", [])).toBeUndefined();
+		expect(microsoftReportUrls("20.50.1.2", ["https://20.50.1.2/login"])).toEqual(["https://20.50.1.2/login"]);
 		expect(microsoftReportUrls("not a host", [])).toBeUndefined();
 	});
 });
@@ -138,6 +139,6 @@ describe("request", () => {
 			timeZone: "+0000",
 			anonymizeReport: false,
 		});
-		expect(body.urlList.length).toBeLessThanOrEqual(10);
+		expect((body as { urlList: unknown[] }).urlList.length).toBeLessThanOrEqual(10);
 	});
 });

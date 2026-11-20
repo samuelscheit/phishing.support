@@ -2,7 +2,7 @@ import { isIP } from "node:net";
 
 import { domainMatchesOrIsSubdomain, normalizePublicHost, normalizePublicHttpUrl } from "../../security";
 
-import type { EmailOrigin } from "../email_origin";
+import { utcStamp, type EmailOrigin } from "../email_origin";
 import { buildProviderReportNarrative, normalizeObservedUrlForTarget, truncateProviderText } from "../report_payload";
 import { GOOGLE_CLOUD_PROVIDER, GOOGLE_CLOUD_SERVICES, type GoogleCloudService } from "./definition";
 import { asRecord } from "../../../values";
@@ -73,10 +73,6 @@ type GoogleCloudReportInput = {
 /** Narrative room the email-origin details keep free after the IP, the time and as many links as fit. */
 const EMAIL_NARRATIVE_RESERVE = 250;
 const NARRATIVE_MINIMUM = 80;
-
-function utcStamp(date: Date): string {
-	return date.toISOString().replace(/\.\d{3}Z$/, "Z");
-}
 
 function narrativeFor(params: GoogleCloudReportInput, room: number, source: "page" | "email"): string | undefined {
 	if (room <= NARRATIVE_MINIMUM || !params.target) return undefined;

@@ -9,6 +9,9 @@ export type MicrosoftProviderDefinition = ProviderSubmissionDefinition & {
 	origin: string;
 	formUrl: string;
 	threatType: "URL";
+	/** The API's `threatType` for an address; `Spam` is its only incident type for unsolicited email, and only for addresses. */
+	ipThreatType: "IP Address";
+	emailIncidentType: "Spam";
 	/** The API's `incidentType` per allegation (OpenAPI `AbuseIncidentType`). */
 	incidentTypes: { phishing: string; malware: string };
 	/** The value the anonymous portal sends; the API's `ReportApi` is untested unauthenticated. */
@@ -20,6 +23,8 @@ export type MicrosoftProviderDefinition = ProviderSubmissionDefinition & {
 	notesMaximumLength: number;
 	/** The report narrative's share of the notes; the rest holds the reference, hosting line and case page. */
 	narrativeMaximumLength: number;
+	emailNarrativeMaximumLength: number;
+	emailReceivedMaximumLength: number;
 	hostingLineMaximumLength: number;
 	referenceMaximumLength: number;
 	timeoutMs: number;
@@ -36,19 +41,24 @@ export type MicrosoftProviderDefinition = ProviderSubmissionDefinition & {
 const definitionWithoutHash = {
 	key: "microsoft_msrc",
 	displayName: "Microsoft MSRC Report Abuse",
-	version: "2026-11-20.1",
+	version: "2026-11-20.2",
 	exactMailboxes: ["abuse@microsoft.com", "cert@microsoft.com"],
 	supplemental: false,
 	endpoint: "https://api.msrc.microsoft.com/report/v3.0/abuse",
 	origin: "https://msrc.microsoft.com",
 	formUrl: "https://msrc.microsoft.com/report/abuse?ThreatType=URL&IncidentType=Phishing",
 	threatType: "URL" as const,
+	ipThreatType: "IP Address" as const,
+	emailIncidentType: "Spam" as const,
 	incidentTypes: { phishing: "Phishing", malware: "Malware" },
 	source: "CertPortalV2" as const,
 	maximumUrls: 10,
 	urlMaximumLength: 2_048,
 	notesMaximumLength: 2_000,
 	narrativeMaximumLength: 1_200,
+	/** The narrative of a report on an email's sending address leaves room for the Received header and links. */
+	emailNarrativeMaximumLength: 800,
+	emailReceivedMaximumLength: 300,
 	hostingLineMaximumLength: 300,
 	referenceMaximumLength: 50,
 	timeoutMs: 30_000,

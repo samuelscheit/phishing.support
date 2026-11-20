@@ -10,6 +10,12 @@ export type AwsProviderDefinition = ProviderSubmissionDefinition & {
 	formUrl: string;
 	abuseSource: "aws-owned-resource";
 	abuseGroup: "web_content";
+	/** The form's "Email" category, for the host that sent a phishing email. */
+	emailAbuseGroup: "email";
+	/** The email category offers only `spam_send` ("Sending email spam") and `spam-website`; the sender is the first. */
+	emailAbuseType: "spam_send";
+	/** The form's `email_header` ("Complete email header and body") holds at most this many characters. */
+	emailHeaderMaximumLength: number;
 	/** The form's "abuse type" per allegation. */
 	abuseTypes: { phishing: string; malware: string };
 	/** The form's URL field holds at most this many URLs, each of at most `urlMaximumLength` characters. */
@@ -34,7 +40,7 @@ const [firstName = serviceIdentity.name, ...lastName] = serviceIdentity.name.spl
 const definitionWithoutHash = {
 	key: "aws_trust_safety",
 	displayName: "AWS Trust & Safety",
-	version: "2026-11-20.1",
+	version: "2026-11-20.2",
 	exactMailboxes: ["trustandsafety@support.aws.com", "abuse@amazonaws.com"],
 	supplemental: false,
 	endpoint: "https://api.support.aws.amazon.com/v1/contacts/report-abuse-v2",
@@ -42,6 +48,9 @@ const definitionWithoutHash = {
 	formUrl: "https://support.aws.amazon.com/#/contacts/report-abuse",
 	abuseSource: "aws-owned-resource" as const,
 	abuseGroup: "web_content" as const,
+	emailAbuseGroup: "email" as const,
+	emailAbuseType: "spam_send" as const,
+	emailHeaderMaximumLength: 10_000,
 	abuseTypes: { phishing: "phishing", malware: "malware-website" },
 	maximumUrls: 10,
 	urlMaximumLength: 1_024,

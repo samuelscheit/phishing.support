@@ -268,13 +268,17 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 			};
 		case "aws":
 			return {
-				lead: `A suspected ${allegation} site using AWS resources is being reported for ${target}.`,
+				lead: source === "email"
+					? `A ${allegation} email sent from AWS infrastructure at ${target} is being reported.`
+					: `A suspected ${allegation} site using AWS resources is being reported for ${target}.`,
 				action: "Please investigate the reported AWS resource and suspend it under the AWS Acceptable Use Policy.",
 				urlContext,
 			};
 		case "microsoft":
 			return {
-				lead: `A suspected ${allegation} site hosted on Microsoft services is being reported for ${target}.`,
+				lead: source === "email"
+					? `A ${allegation} email sent from Microsoft infrastructure at ${target} is being reported.`
+					: `A suspected ${allegation} site hosted on Microsoft services is being reported for ${target}.`,
 				action: "Please investigate the reported Microsoft-hosted resource and act on it under the Microsoft Services Agreement and Acceptable Use Policy.",
 				urlContext,
 			};
