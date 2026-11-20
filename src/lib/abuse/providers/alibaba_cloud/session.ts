@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { BrowserContext, Frame, Page } from "patchright";
 
 import { acquireFabricPatchrightSession } from "../../../browser/fabric";
+import { dragAcross, type RandomSource } from "../../captcha/slider_drag";
 import { errorSummary } from "../../../error_text";
 import { OperationCanceledError, raceAbort } from "../../worker/cancellation";
 import { boundedCleanup, createLoginSessions, ProviderLoginError, type LoginSession, type LoginSessionDeps, type LoginSessions } from "../login_session/session";
@@ -70,7 +71,76 @@ function onConsole(page: Page): boolean {
 	return new URL(page.url()).origin === ALIBABA_CLOUD_PROVIDER.consoleOrigin;
 }
 
-export type AlibabaLoginDependencies = { readCode?: MailedCodeReader; clock?: () => number };
+/**
+ * Alibaba's "nocaptcha" slider. Its risk control (baxia) hooks the login's
+ * requests; when it wants a check it renders the slider into the form
+ * (`#baxiaNc`, or a punish frame) and, once it passes, replays the request
+ * itself, so the login carries on as if nothing happened.
+ */
+const SLIDER = {
+	rail: ".nc_scale",
+	handle: ".nc_scale .btn_slide",
+	/** "Verified": the drag passed; baxia removes the widget and replays the request. */
+	passed: ".nc_scale .btn_ok, [data-nc-lang='_yesTEXT']",
+	/**
+	 * "Oops... something's wrong. Please refresh and try again.(error:…)": the
+	 * drag was refused and the widget replaced its rail with this block, which
+	 * refreshes it when clicked. (Its ids carry literal backticks, `nc_1_refresh1`.)
+	 */
+	refused: ".nc_wrapper .errloading",
+	attempts: 3,
+} as const;
+
+type SliderState = { frame: Frame; state: "shown" | "passed" | "refused" };
+
+/** The first frame that shows a slider, and what it shows. */
+async function sliderState(page: Page): Promise<SliderState | undefined> {
+	for (const frame of page.frames()) {
+		const visible = (selector: string) => frame.locator(selector).first().isVisible().catch(() => false);
+		if (await visible(SLIDER.passed)) return { frame, state: "passed" };
+		if (await visible(SLIDER.refused)) return { frame, state: "refused" };
+		if (await visible(SLIDER.handle)) return { frame, state: "shown" };
+	}
+	return undefined;
+}
+
+/**
+ * Pass the slider the page shows, if any: drag it with a human track and,
+ * when Alibaba refuses the drag, refresh it and drag again, at most
+ * `SLIDER.attempts` drags. Returns whether a slider was shown.
+ */
+export async function passAlibabaSlider(page: Page, step: <T>(operation: Promise<T>) => Promise<T>, random: RandomSource = Math.random): Promise<boolean> {
+	let slider = await sliderState(page);
+	if (!slider) return false;
+	// Each drag may need one refresh before it: a widget that never changes still ends.
+	for (let drags = 0, rounds = 0; rounds <= SLIDER.attempts * 2; rounds++) {
+		if (slider.state === "passed") return true;
+		if (slider.state === "refused") {
+			if (drags >= SLIDER.attempts) throw new Error(`Alibaba's slider check did not pass after ${SLIDER.attempts} drags`);
+			await slider.frame.locator(SLIDER.refused).first().click({ timeout: 5_000, noWaitAfter: true }).catch(() => undefined);
+			await step(page.waitForTimeout(1_500));
+		} else {
+			if (drags >= SLIDER.attempts) throw new Error(`Alibaba's slider check did not pass after ${SLIDER.attempts} drags`);
+			drags++;
+			// The widget animates in; a box read mid-animation lands the press beside it.
+			await step(page.waitForTimeout(800 + random() * 600));
+			const [handleBox, railBox] = await step(Promise.all([
+				slider.frame.locator(SLIDER.handle).first().boundingBox(),
+				slider.frame.locator(SLIDER.rail).first().boundingBox(),
+			]));
+			if (!handleBox || !railBox) throw new Error("Alibaba's slider has no box to drag");
+			await step(dragAcross(page.mouse, handleBox, railBox, random));
+			await step(page.waitForTimeout(2_000));
+		}
+		const next = await sliderState(page);
+		// Gone after a drag: baxia accepted it and took the widget away.
+		if (!next) return true;
+		slider = next;
+	}
+	throw new Error(`Alibaba's slider check did not pass after ${SLIDER.attempts} drags`);
+}
+
+export type AlibabaLoginDependencies = { readCode?: MailedCodeReader; clock?: () => number; random?: RandomSource };
 
 /** The first line of a browser error, without the login's typed values: enough to tell a timeout from a detached frame. */
 export function browserReason(error: unknown, config: AlibabaCloudLoginConfig): string {
@@ -113,20 +183,28 @@ export async function loginWithContext(
 		stage = "the login page neither opened the console nor asked for the mailed code";
 		let verify: Frame | undefined;
 		while (!onConsole(page) && !(verify = frameOf(page, "/identity_verify.htm")) && clock() < deadline) {
-			const refusal = await (frameOf(page, "/mini_login.htm")?.evaluate(() => {
-				const message = document.querySelector(".login-error-msg, .fm-error, [class*='error'] .msg");
-				const slider = document.querySelector("#nocaptcha, .nc-container, #baxia-dialog-content");
-				return { message: (message as HTMLElement | null)?.innerText.trim() ?? "", slider: Boolean(slider && (slider as HTMLElement).offsetParent) };
-			}) ?? Promise.resolve(undefined)).catch(() => undefined) ?? { message: "", slider: false };
-			if (refusal.slider) throw new Error((stage = "Alibaba asked for a slider check"));
+			stage = "Alibaba's slider check did not pass";
+			if (await passAlibabaSlider(page, step, dependencies.random)) {
+				stage = "the login page neither opened the console nor asked for the mailed code";
+				continue;
+			}
+			stage = "the login page neither opened the console nor asked for the mailed code";
+			const refused = await (frameOf(page, "/mini_login.htm")?.evaluate(() => {
+				// "Your account name or password is incorrect." The block is always there, empty until a refusal.
+				return [...document.querySelectorAll(".form-error, .login-error-msg, .fm-error")].some((element) => (element as HTMLElement).innerText.trim().length > 0);
+			}) ?? Promise.resolve(false)).catch(() => false);
 			// The page's text can echo the typed login; name only that it refused.
-			if (refusal.message) throw new Error((stage = "Alibaba refused the sign-in"));
+			if (refused) throw new Error((stage = "Alibaba refused the sign-in"));
 			await step(page.waitForTimeout(500));
 		}
+		// The deadline passed with neither the console nor the identity check: that wait is what failed.
+		if (!verify && !onConsole(page)) throw new Error(stage);
 		if (verify) {
 			stage = "the mailed code could not be requested";
 			const requestedAt = new Date(clock());
 			await step(verify.click("#J_GetCode_Email", { timeout: remaining() }));
+			stage = "Alibaba's slider check before the mailed code did not pass";
+			await passAlibabaSlider(page, step, dependencies.random);
 			stage = "the mailed code did not arrive";
 			const code = await step((dependencies.readCode ?? mailedCodeReader(ALIBABA_CLOUD_PROVIDER.codeMail))(requestedAt, signal));
 			stage = "the mailed code was not accepted";
@@ -134,7 +212,11 @@ export async function loginWithContext(
 			await step(verify.click(".submit button", { timeout: remaining() }));
 		}
 		stage = "the console did not open after sign-in";
-		await step(page.waitForURL((url) => url.origin === ALIBABA_CLOUD_PROVIDER.consoleOrigin, { timeout: remaining() }));
+		while (!onConsole(page) && clock() < deadline) {
+			if (await passAlibabaSlider(page, step, dependencies.random)) continue;
+			await step(page.waitForTimeout(500));
+		}
+		if (!onConsole(page)) throw new Error(stage);
 		await step(page.waitForLoadState("domcontentloaded", { timeout: remaining() }));
 		stage = "the console page carried no CSRF token";
 		const secToken = consoleSecToken(await step(page.content()));

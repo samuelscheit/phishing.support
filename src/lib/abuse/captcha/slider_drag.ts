@@ -39,10 +39,39 @@ export function sliderTrack(distance: number, random: RandomSource = Math.random
 	return steps;
 }
 
+/** The pointer of a puppeteer or Playwright page: both move, press and release the same way. */
+export type DragMouse = {
+	move(x: number, y: number, options?: { steps?: number }): Promise<unknown>;
+	down(): Promise<unknown>;
+	up(): Promise<unknown>;
+};
+
+export type DragBox = { x: number; y: number; width: number; height: number };
+
 /**
- * Drag a slider's handle to the far end of its rail with a human track:
- * approach the handle, press somewhere on it, drag, hold, release.
+ * Drag a handle to the far end of its rail with a human track, from their
+ * boxes in page coordinates: approach the handle, press somewhere on it,
+ * drag, hold, release.
  */
+export async function dragAcross(mouse: DragMouse, handleBox: DragBox, railBox: Pick<DragBox, "x" | "width">, random: RandomSource = Math.random): Promise<void> {
+	const startX = handleBox.x + handleBox.width * (0.35 + random() * 0.3);
+	const startY = handleBox.y + handleBox.height * (0.35 + random() * 0.3);
+	// Past the end by a few pixels: the widget clamps it, and a hand overshoots.
+	const distance = railBox.x + railBox.width - (handleBox.x + handleBox.width) + 3 + random() * 4;
+
+	await mouse.move(startX - 30 - random() * 40, startY + 20 + random() * 30, { steps: 6 });
+	await mouse.move(startX, startY, { steps: 10 + Math.floor(random() * 6) });
+	await pause(180 + random() * 220);
+	await mouse.down();
+	for (const step of sliderTrack(distance, random)) {
+		await mouse.move(startX + step.dx, startY + step.dy);
+		await pause(step.delayMs);
+	}
+	await pause(150 + random() * 200);
+	await mouse.up();
+}
+
+/** Drag a puppeteer page's slider handle to the far end of the rail that holds it. */
 export async function dragSliderToEnd(page: Page, selectors: { handle: string; rail: string }, random: RandomSource = Math.random): Promise<void> {
 	const handle = await page.waitForSelector(selectors.handle, { visible: true, timeout: 20_000 });
 	if (!handle) throw new Error(`The slider handle ${selectors.handle} never appeared.`);
@@ -56,19 +85,5 @@ export async function dragSliderToEnd(page: Page, selectors: { handle: string; r
 	}, selectors.rail);
 	if (!handleBox) throw new Error("The slider handle has no box to press.");
 	if (!railBox) throw new Error(`The slider handle is not inside a rail ${selectors.rail}.`);
-	const startX = handleBox.x + handleBox.width * (0.35 + random() * 0.3);
-	const startY = handleBox.y + handleBox.height * (0.35 + random() * 0.3);
-	// Past the end by a few pixels: the widget clamps it, and a hand overshoots.
-	const distance = railBox.x + railBox.width - (handleBox.x + handleBox.width) + 3 + random() * 4;
-
-	await page.mouse.move(startX - 30 - random() * 40, startY + 20 + random() * 30, { steps: 6 });
-	await page.mouse.move(startX, startY, { steps: 10 + Math.floor(random() * 6) });
-	await pause(180 + random() * 220);
-	await page.mouse.down();
-	for (const step of sliderTrack(distance, random)) {
-		await page.mouse.move(startX + step.dx, startY + step.dy);
-		await pause(step.delayMs);
-	}
-	await pause(150 + random() * 200);
-	await page.mouse.up();
+	await dragAcross(page.mouse, handleBox, railBox, random);
 }

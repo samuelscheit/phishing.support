@@ -4,19 +4,8 @@ import { homedir } from "node:os";
 import puppeteer, { type Browser } from "rebrowser-puppeteer-core";
 
 import { requestGnameCodeOnPage } from "../providers/gname/submission";
-import { dragSliderToEnd, sliderTrack, type RandomSource } from "./slider_drag";
-
-/** A reproducible random source (mulberry32). */
-function seeded(seed: number): RandomSource {
-	let state = seed >>> 0;
-	return () => {
-		state = (state + 0x6d2b79f5) >>> 0;
-		let t = state;
-		t = Math.imul(t ^ (t >>> 15), t | 1);
-		t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-		return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
-	};
-}
+import { dragAcross, dragSliderToEnd, sliderTrack } from "./slider_drag";
+import { drags, expectHumanDrag, recordingMouse, seeded } from "./slider_test_support";
 
 describe("slider track", () => {
 	test("ends exactly at the distance, never steps back, and stays within a few pixels of the rail", () => {
@@ -62,6 +51,38 @@ describe("slider track", () => {
 		// A very short rail still ends on its end.
 		expect(sliderTrack(1, seeded(3)).at(-1)!.dx).toBe(1);
 	});
+});
+
+describe("dragAcross", () => {
+	const handle = { x: 120, y: 300, width: 40, height: 36 };
+	const rail = { x: 100, width: 300 };
+
+	test("makes a human track for every seed: presses inside the handle, never moves back, ends 3-7 px past the rail", async () => {
+		for (let seed = 1; seed <= 6; seed++) {
+			const mouse = recordingMouse();
+			await dragAcross(mouse, handle, rail, seeded(seed));
+			expect(mouse.events.filter((event) => event.type === "down")).toHaveLength(1);
+			expect(mouse.events.at(-1)!.type).toBe("up");
+			const [drag, ...rest] = drags(mouse.events);
+			expect(rest).toEqual([]);
+			expectHumanDrag(drag!, handle, rail);
+		}
+	}, 60_000);
+
+	test("a handle already at the rail's end still moves forward a few pixels", async () => {
+		const atEnd = { x: 360, y: 10, width: 40, height: 20 };
+		const mouse = recordingMouse();
+		await dragAcross(mouse, atEnd, { x: 100, width: 300 }, seeded(4));
+		expectHumanDrag(drags(mouse.events)[0]!, atEnd, { x: 100, width: 300 });
+	}, 10_000);
+
+	test("the same seed gives the same drag", async () => {
+		const first = recordingMouse();
+		const second = recordingMouse();
+		await dragAcross(first, handle, rail, seeded(9));
+		await dragAcross(second, handle, rail, seeded(9));
+		expect(second.events).toEqual(first.events);
+	}, 10_000);
 });
 
 const chromiumExecutable = process.env.PHISHING_TEST_CHROMIUM
