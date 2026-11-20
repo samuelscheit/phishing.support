@@ -1,7 +1,7 @@
 import type { WebsiteArchiveResult, WebsitePageSession, WebsiteVisitParams } from "../website_archive/types";
 import type { DownloadedFile } from "../website_download";
 import type { CapturedNetworkRequest, ExfiltrationCanaries } from "../exfiltration/types";
-import type { SiteVisitAgentOutcome, SiteVisitRecording } from "./visit";
+import type { SiteVisitRecording } from "./visit";
 
 /**
  * What a scripted visit does, for tests that drive the analysis without a
@@ -12,7 +12,7 @@ export type ScriptedVisit = {
 	steps?: WebsiteArchiveResult[];
 	requests?: (canaries: ExfiltrationCanaries) => CapturedNetworkRequest[];
 	downloads?: Array<Omit<DownloadedFile, "observedAt">>;
-	agent?: Partial<SiteVisitAgentOutcome>;
+	agent?: Partial<SiteVisitRecording<unknown>["agent"]>;
 };
 
 /**

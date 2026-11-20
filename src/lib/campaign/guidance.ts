@@ -1,7 +1,8 @@
 import { getDomain } from "tldts";
 import { z } from "zod";
 
-import { configuredAbuseOpenAI, responseOutputText } from "../abuse/ai";
+import { optionalOpenAIClient } from "../openai_client";
+import { optionalResponseText } from "../openai_response";
 import { defaultResponseModel } from "../openai_client";
 import type { Dossier } from "../referral/dossier";
 import { sortKinds, visitorKinds, type VisitorKind } from "./kinds";
@@ -147,7 +148,7 @@ const RESPONSE_SCHEMA = {
 } as const;
 
 async function generateWithModel(input: GuidanceInput): Promise<unknown> {
-	const client = configuredAbuseOpenAI();
+	const client = optionalOpenAIClient();
 	if (!client) return undefined;
 	const response = await client.responses.create({
 		model: defaultResponseModel,
@@ -175,7 +176,7 @@ async function generateWithModel(input: GuidanceInput): Promise<unknown> {
 		],
 		text: { format: { type: "json_schema", name: "VisitorGuidance", schema: RESPONSE_SCHEMA, strict: true } },
 	} as never);
-	const text = responseOutputText(response);
+	const text = optionalResponseText(response);
 	return text ? JSON.parse(text) : undefined;
 }
 

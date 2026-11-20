@@ -1,7 +1,6 @@
 import { isOperatorAuthorization, operatorChallenge } from "../operator_auth";
 import { errorText } from "../error_text";
 import { ComplainantNotConfiguredError } from "./complainant";
-import { DossierLinkSecretMissingError } from "./download_link";
 import { ReferralError } from "./service";
 
 export function parseId(value: string): bigint | undefined {
@@ -18,7 +17,7 @@ export async function operatorHandler(request: Request, handler: () => Promise<R
 	try {
 		return await handler();
 	} catch (error) {
-		if (error instanceof ReferralError || error instanceof ComplainantNotConfiguredError || error instanceof DossierLinkSecretMissingError) {
+		if (error instanceof ReferralError || error instanceof ComplainantNotConfiguredError) {
 			return Response.json({ error: error.message }, { status: 409 });
 		}
 		console.error("Operator action failed:", error);

@@ -36,7 +36,7 @@ export type SiteVisitLiveEvent =
 	| { type: "browser.action"; kind: string; text: string }
 	| { type: "browser.download"; fileName: string; url: string };
 
-export type SiteVisitAgentOutcome = {
+type SiteVisitAgentOutcome = {
 	/** `completed`: the agent finished; `failed`: it failed or could not start; `timed_out`: the visit's budget ended it. */
 	outcome: "completed" | "failed" | "timed_out";
 	report?: VisitAgentReport;

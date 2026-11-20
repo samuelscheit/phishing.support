@@ -47,8 +47,8 @@ export async function scheduleLivenessChecks(targetId: bigint): Promise<void> {
 
 /**
  * Queue the next check of every target whose schedule is not done and that
- * has none pending, so targets resolved before the checks existed, or whose
- * chain broke on a failed job, are checked too. Idempotent.
+ * has none pending, so a target whose chain broke on a failed job is checked
+ * again. Idempotent.
  */
 export async function ensureLivenessChecks(): Promise<void> {
 	const now = new Date();

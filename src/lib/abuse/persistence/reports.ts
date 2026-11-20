@@ -346,11 +346,6 @@ export async function getReportInput(reportId: bigint) {
 	return { report, targets, evidenceArtifacts: artifacts };
 }
 
-export async function setReportVerificationOutcome(reportId: bigint, verificationOutcome: Record<string, unknown>): Promise<void> {
-	const db = await getDb();
-	await db.update(abuseReports).set({ verificationOutcome, updatedAt: now() }).where(eq(abuseReports.id, reportId));
-}
-
 /**
  * Compare-and-set only the report-level phases that exist before a route
  * transition can derive the aggregate.  Route outcomes use

@@ -7,6 +7,7 @@ import { archiveWebsite } from "../website_archive";
 import type { ChatModel, ChatRequest } from "../browser_task/agent";
 import { chromiumAvailable, chromiumExecutable, refIn, ScriptedModel, StalledModel, type ScriptedTurn } from "../browser_task/test_helpers";
 import { stepActions, taskAgentVisit, type VisitAgent } from "./agent";
+import { VISIT_MAX_STEPS } from "./task";
 import type { SiteVisitLiveEvent } from "./visit";
 
 const launch = async () => puppeteer.launch({ executablePath: chromiumExecutable, headless: true, args: ["--no-first-run"] });
@@ -384,13 +385,8 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			const asks = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new ScriptedModel([() => ({ calls: [{ name: "needs_input", arguments: { question: "The site wants a code sent to a real phone." } }] })])) });
 			expect(asks.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "The site wants a code sent to a real phone." } });
 			const scroll: ScriptedTurn = () => ({ calls: [{ name: "scroll", arguments: { direction: "down" } }] });
-			process.env.SITE_VISIT_TASK_MAX_STEPS = "2";
-			try {
-				const looping = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new ScriptedModel([scroll, scroll])) });
-				expect(looping.agent).toMatchObject({ outcome: "failed", failure: "step_limit: Stopped after 2 steps without finishing." });
-			} finally {
-				delete process.env.SITE_VISIT_TASK_MAX_STEPS;
-			}
+			const looping = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new ScriptedModel(Array.from({ length: VISIT_MAX_STEPS }, () => scroll))) });
+			expect(looping.agent).toMatchObject({ outcome: "failed", failure: `step_limit: Stopped after ${VISIT_MAX_STEPS} steps without finishing.` });
 		} finally {
 			await archive.session?.close();
 			server.stop(true);

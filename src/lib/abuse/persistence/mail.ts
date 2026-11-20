@@ -562,10 +562,10 @@ export async function getInboundMailByMessageId(messageId: string) {
 		.get();
 }
 
-export async function setMailClassification(messageId: bigint, classification: AbuseMailClassification, extractedLinks: string[], disposition?: string): Promise<void> {
+export async function setMailClassification(messageId: bigint, classification: AbuseMailClassification, disposition?: string): Promise<void> {
 	const db = await getDb();
 	await db
 		.update(abuseMailMessages)
-		.set({ classification, extractedLinks, disposition, processingAttempts: sql`${abuseMailMessages.processingAttempts} + 1`, updatedAt: now() })
+		.set({ classification, disposition, processingAttempts: sql`${abuseMailMessages.processingAttempts} + 1`, updatedAt: now() })
 		.where(eq(abuseMailMessages.id, messageId));
 }

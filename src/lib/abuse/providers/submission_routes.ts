@@ -28,7 +28,6 @@ export function providerContactRoute(params: {
 			providerRegistryKey: provider.definition.key,
 		},
 		resolutionSnapshot: params.source.resolutionSnapshot,
-		verificationResult: { verified: true, method: "exact_provider_abuse_mailbox" },
 		status: "verified",
 	};
 }
@@ -54,7 +53,6 @@ export function providerRegistrarRoute(params: {
 			providerRegistryKey: provider.definition.key,
 		},
 		resolutionSnapshot: params.source.resolutionSnapshot,
-		verificationResult: { verified: true, method: "registrar_iana_id" },
 		status: "verified",
 	};
 }
@@ -78,7 +76,6 @@ export function providerSupplementalRoute(params: {
 			providerRegistryKey: provider.definition.key,
 		},
 		resolutionSnapshot: params.source.resolutionSnapshot,
-		verificationResult: { verified: true, method: "supplemental_provider_target_rule" },
 		status: "verified",
 	};
 }

@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { validateSchema } from "../../browser_task/agent";
 import { GENERIC_PROVIDER_FORM_ADAPTER, genericProviderFormAdapterHasValidHash } from "../providers/generic_form";
 import { validateGenericProviderFormOutput } from "./output_validation";
-import { buildGenericProviderFormTask, portalTaskMaxSteps } from "./task";
+import { buildGenericProviderFormTask } from "./task";
 
 const reporter = { name: "Phishing Support", organization: "Phishing Support", website: "https://phishing.support", email: "support@phishing.support" };
 
@@ -86,12 +86,6 @@ describe("the generic provider-form task", () => {
 		expect(() => task({ description: "   " })).toThrow("incomplete");
 		expect(genericProviderFormAdapterHasValidHash()).toBeTrue();
 		expect(genericProviderFormAdapterHasValidHash({ ...GENERIC_PROVIDER_FORM_ADAPTER, maxDescriptionLength: 50_000 })).toBeFalse();
-	});
-
-	test("reads its step limit from ABUSE_PORTAL_TASK_MAX_STEPS", () => {
-		expect(portalTaskMaxSteps(undefined)).toBe(40);
-		expect(portalTaskMaxSteps("12")).toBe(12);
-		expect(() => portalTaskMaxSteps("101")).toThrow("ABUSE_PORTAL_TASK_MAX_STEPS must be a whole number from 1 to 100.");
 	});
 
 	test("its result schema, which the agent enforces, admits a submission and a drift result, and nothing else", () => {

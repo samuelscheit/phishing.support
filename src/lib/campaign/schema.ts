@@ -38,7 +38,6 @@ export const campaigns = sqliteTable(
 		summary: text("summary"),
 		/** How many sites the title and summary describe; a different count means they are rewritten. */
 		summarySiteCount: sqliteInteger("summary_site_count"),
-		summaryGeneratedAt: sqliteTimestamp("summary_generated_at"),
 		/** The impersonated brand's own account pages a visitor needs, validated to lie on the brand's domain; made for the brand it names. */
 		visitorGuidance: text("visitor_guidance", { mode: "json" }).$type<VisitorGuidance>(),
 		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),

@@ -27,12 +27,25 @@ export const defaultReasoning = {
  * worker receives an analysis request without credentials.
  */
 export function getOpenAIClient(): OpenAI {
-	const apiKey = process.env.OPENAI_API_KEY?.trim();
-	if (!apiKey) throw new Error("OPENAI_API_KEY is required to run AI analysis.");
+	const client = buildClient();
+	if (!client) throw new Error("OPENAI_API_KEY is required to run AI analysis.");
+	return client;
+}
 
-	return new OpenAI({
-		apiKey,
-		baseURL: process.env.OPENAI_API_BASE_URL?.trim() || "https://api.openai.com/v1",
-		logLevel: process.env.OPENAI_VERBOSE === "true" ? "debug" : undefined,
-	});
+/** Bound on each optional call (report drafting, reply classification). */
+const OPTIONAL_CALL_TIMEOUT_MS = 45_000;
+
+/**
+ * A bounded client for report drafting and reply classification. Unlike the
+ * analyser, these calls are optional: a missing key yields no client and a
+ * failing model falls back to deterministic text instead of blocking a report.
+ */
+export function optionalOpenAIClient(): OpenAI | undefined {
+	return buildClient(OPTIONAL_CALL_TIMEOUT_MS);
+}
+
+function buildClient(timeout?: number): OpenAI | undefined {
+	const apiKey = process.env.OPENAI_API_KEY?.trim();
+	if (!apiKey) return undefined;
+	return new OpenAI({ apiKey, baseURL: process.env.OPENAI_API_BASE_URL?.trim() || "https://api.openai.com/v1", ...(timeout ? { timeout } : {}) });
 }

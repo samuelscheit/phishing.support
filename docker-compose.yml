@@ -31,28 +31,11 @@ services:
       IMAP_PASS: ${IMAP_PASS:-}
       IMAP_MAILBOXES: ${IMAP_MAILBOXES:-phishing.report,phishing.support}
       IMAP_LISTEN_ADDRESS: ${IMAP_LISTEN_ADDRESS:-report@phishing.support}
-      ABUSE_GENERIC_FORM_ESCALATION_ENABLED: ${ABUSE_GENERIC_FORM_ESCALATION_ENABLED:-false}
-      # The browser task agent (site visits, provider forms) runs in this
-      # process on a Fabric browser: openai/<model> uses the OpenAI settings
-      # below, anthropic/<model> ANTHROPIC_API_KEY. Unset: openai/$OPENAI_MODEL.
-      PHISHING_TASK_MODEL: ${PHISHING_TASK_MODEL:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ABUSE_PORTAL_TASK_MAX_STEPS: ${ABUSE_PORTAL_TASK_MAX_STEPS:-40}
-      ABUSE_PORTAL_TASK_TIMEOUT_MS: ${ABUSE_PORTAL_TASK_TIMEOUT_MS:-480000}
-      SITE_VISIT_TASK_MAX_STEPS: ${SITE_VISIT_TASK_MAX_STEPS:-60}
-      # Keep resolution/reconciliation capacity separate from slow
-      # CAPTCHA/browser work. A stalled provider must never starve intake.
-      ABUSE_WORKER_CONTROL_CONCURRENCY: ${ABUSE_WORKER_CONTROL_CONCURRENCY:-2}
-      ABUSE_WORKER_EXTERNAL_CONCURRENCY: ${ABUSE_WORKER_EXTERNAL_CONCURRENCY:-2}
-      ABUSE_WORKER_CONTROL_JOB_TIMEOUT_MS: ${ABUSE_WORKER_CONTROL_JOB_TIMEOUT_MS:-300000}
-      ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS: ${ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS:-600000}
-      ABUSE_WORKER_SWEEP_JOB_TIMEOUT_MS: ${ABUSE_WORKER_SWEEP_JOB_TIMEOUT_MS:-1200000}
-      # Analysis, report drafting, and reply classification share one model
-      # endpoint. .env is excluded from the image; values are injected at start.
+      # Analysis, report drafting, reply classification and the browser task
+      # agent (site visits, provider forms) share one model endpoint. .env is excluded from the image; values are injected at start.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.5}
-      OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-45000}
       # Tencent's direct provider route still uses its own explicit solver and
       # HTTP proxy boundary; these values are not used to launch a browser.
       DEATHBYCAPTCHA_USERNAME: ${DEATHBYCAPTCHA_USERNAME:-}
@@ -70,13 +53,11 @@ services:
       # carries an idempotency key; only the token's hash is stored.
       ABUSE_TRACKING_TOKEN_SECRET: ${ABUSE_TRACKING_TOKEN_SECRET:?Set ABUSE_TRACKING_TOKEN_SECRET to at least 32 random bytes}
       # The operator area (/operator) and the person who signs criminal
-      # referrals; an authority answers only a named complainant. The link
-      # secret signs the evidence-archive links authorities receive.
+      # referrals; an authority answers only a named complainant.
       OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:-}
       REFERRAL_COMPLAINANT_NAME: ${REFERRAL_COMPLAINANT_NAME:-}
       REFERRAL_COMPLAINANT_ADDRESS: ${REFERRAL_COMPLAINANT_ADDRESS:-}
       REFERRAL_COMPLAINANT_PHONE: ${REFERRAL_COMPLAINANT_PHONE:-}
-      REFERRAL_LINK_SECRET: ${REFERRAL_LINK_SECRET:-}
       # Browser Fabric is mandatory for every browser operation. The app talks
       # only to its private authenticated relay; Fabric owns the API credential,
       # Chromium, profiles, egress, and CDP capabilities. Unset refs use

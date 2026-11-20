@@ -23,7 +23,7 @@ function retryDiagnostic(error: unknown, attempts: number, emittedOutput: boolea
 }
 
 export async function runStreamedAnalysisRun(
-	params: { submissionId: bigint; options: ResponseCreateParamsStreaming; analysisKind?: AnalysisRunKind },
+	params: { submissionId: bigint; options: ResponseCreateParamsStreaming; analysisKind: AnalysisRunKind },
 	dependencies: { client?: AnalysisClient } = {},
 ) {
 	if (params.options.stream !== true) {
@@ -34,7 +34,7 @@ export async function runStreamedAnalysisRun(
 		? (params.options.input as Array<ResponseInputItem>)
 		: undefined;
 
-	const runId = await AnalysisRunsEntity.create(params.submissionId, inputForDb, params.analysisKind);
+	const runId = await AnalysisRunsEntity.create(params.submissionId, params.analysisKind, inputForDb);
 
 	const topics = [runId, params.submissionId];
 	const emit = (event: Record<string, unknown>) =>

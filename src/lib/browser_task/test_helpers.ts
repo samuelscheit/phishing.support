@@ -4,7 +4,8 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import puppeteer, { type Browser } from "rebrowser-puppeteer-core";
 
-import type { ChatModel, ChatRequest, ChatResponse, ToolCall } from "./agent";
+import type { ChatModel, ChatRequest } from "./agent";
+import type { ChatResponse, ToolCall } from "browser-fabric/packages/task-agent/src/index";
 
 /**
  * Test support for browser tasks: a real Chromium the test launches itself

@@ -111,7 +111,6 @@ describe("email worker draft boundary", () => {
 		const [run] = await AbuseRepository.listProviderRunsForReport(created.reportId);
 		expect(run?.providerPayload).toMatchObject({
 			kind: "verified_email_report",
-			version: 2,
 			email: draft,
 		});
 		expect(run?.providerPayload).not.toHaveProperty("description");
@@ -247,7 +246,6 @@ describe("email worker draft boundary", () => {
 			routeId: route.id,
 			providerPayload: {
 				kind: "verified_email_report",
-				version: 2,
 				target: "example.com",
 				observedUrls: ["https://login.example.com/collect"],
 				recipient: "abuse@provider.example",

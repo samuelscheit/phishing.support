@@ -149,7 +149,7 @@ describe("origin-host email draft", () => {
 		expect(email.body).not.toMatch(/\|\s*(?:z|ba)?sh\b/);
 		expect(email.body).not.toContain("https://apps.apple.com");
 		// The worker re-reads the stored draft with the case's allowed links before sending.
-		const payload = { kind: "verified_email_report", version: 2, target: "macmorrow.app", observedUrls: ["https://macmorrow.app/"], recipient: value.recipient, email };
+		const payload = { kind: "verified_email_report", target: "macmorrow.app", observedUrls: ["https://macmorrow.app/"], recipient: value.recipient, email };
 		expect(readVerifiedEmailDraft(payload, {
 			recipient: value.recipient,
 			description: "The page distributes malware.",

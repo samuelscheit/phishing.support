@@ -36,6 +36,14 @@ export function extractResponseOutputText(response: { output_text?: string | nul
 	return response.output_text ?? "";
 }
 
+/** The answer text of an optional model call: `output_text`, else every text part of the output; undefined when there is none, never a throw. */
+export function optionalResponseText(response: unknown): string | undefined {
+	if (!isRecord(response)) return undefined;
+	if (typeof response.output_text === "string" && response.output_text.trim()) return response.output_text;
+	const chunks = responseContentParts(response.output).map((part) => part.text).filter((text): text is string => typeof text === "string");
+	return chunks.join("\n").trim() || undefined;
+}
+
 export function parseResponseJson(response: { text?: unknown }, outputText: string) {
 	const trimmed = outputText.trim();
 	if (!trimmed) return null;

@@ -70,11 +70,6 @@ export class SubmissionsEntity {
         return row!.id;
     }
 
-    static async setStatus(id: bigint, status: SubmissionStatus, info?: string) {
-        const db = await getDb();
-        await db.update(submissions).set({ status, info, updatedAt: new Date() }).where(eq(submissions.id, id));
-    }
-
     /** Atomically claim a submission for a state transition. */
     static async transitionStatus(id: bigint, from: SubmissionStatus, to: SubmissionStatus, info?: string): Promise<boolean> {
         const db = await getDb();

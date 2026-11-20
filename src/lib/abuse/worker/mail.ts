@@ -1,7 +1,6 @@
 import { classifyProviderReply, extractVerifiedProviderLinks } from "../mail/reply";
 import { isRelayRefusal } from "../mail/relay_refusal";
 import { isAttachmentRefusal } from "../mail/attachment_policy";
-import { isGenericFormEscalationEnabled } from "../providers/generic_form";
 import { getProviderSubmissionProvider } from "../providers";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { AbuseRepository } from "../repository";
@@ -22,7 +21,7 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 		// case record; it never changes the route by itself. Its classification
 		// is the decision it states, or receipt.
 		const verdict = getProviderSubmissionProvider(route.providerRegistryKey)?.inboundMail?.verdictOf?.(message.textBody ?? "");
-		await AbuseRepository.setMailClassification(message.id, verdict ?? "acknowledged", [], "provider_notification");
+		await AbuseRepository.setMailClassification(message.id, verdict ?? "acknowledged", "provider_notification");
 		return;
 	}
 	if (message.kind === "bounce") {
@@ -31,7 +30,7 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 		if (isRelayRefusal(message.textBody ?? "")) {
 			// Our relay, not the provider, refused the report: its mailbox is not dead, so no
 			// other contact is tried. The relay gets one more attempt (queueRelayResend).
-			await AbuseRepository.setMailClassification(message.id, "relay_refused", [], "relay_refusal");
+			await AbuseRepository.setMailClassification(message.id, "relay_refused", "relay_refusal");
 			await settleBounce(message.id, route, { retry: false, reason: "relay_refused", failureReason });
 			const settled = await AbuseRepository.getRoute(route.id);
 			if (settled?.status === "delivery_failed") await queueRelayResend(settled);
@@ -43,7 +42,7 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 			const earlier = (await AbuseRepository.listMailForReport(route.reportId))
 				.some((other) => other.routeId === route.id && other.id !== message.id && other.disposition === "attachment_refusal");
 			if (!earlier) {
-				await AbuseRepository.setMailClassification(message.id, "bounce", [], "attachment_refusal");
+				await AbuseRepository.setMailClassification(message.id, "bounce", "attachment_refusal");
 				if (await settleBounce(message.id, route, { retry: false, failureReason })) {
 					await AbuseRepository.enqueueJobOnce({
 						jobType: "send_email",
@@ -56,7 +55,7 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 				return;
 			}
 		}
-		await AbuseRepository.setMailClassification(message.id, "bounce", [], "delivery_status_notification");
+		await AbuseRepository.setMailClassification(message.id, "bounce", "delivery_status_notification");
 		const settled = await settleBounce(message.id, route, {
 			retry: status === "4",
 			failureReason,
@@ -77,10 +76,10 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 			text: message.textBody ?? "",
 		})
 		: [];
-	await AbuseRepository.setMailClassification(message.id, result.classification, links, result.rationale);
+	await AbuseRepository.setMailClassification(message.id, result.classification, result.rationale);
 	if (result.classification === "acknowledged") {
 		await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: "awaiting_provider_reply", to: "acknowledged" });
-	} else if (result.classification === "not_monitored" && links.length > 0 && isGenericFormEscalationEnabled()) {
+	} else if (result.classification === "not_monitored" && links.length > 0) {
 		// A link only reaches this point after exact provider-origin and every
 		// redirect hop was revalidated. The generic task still gets only a
 		// code-owned prompt and immutable stored payload.
@@ -103,7 +102,7 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 			routeId: route.id,
 			from: "awaiting_provider_reply",
 			to: "provider_rejected",
-			data: { reason: links.length ? "generic_form_escalation_disabled" : "provider_mailbox_not_monitored_without_verified_form" },
+			data: { reason: "provider_mailbox_not_monitored_without_verified_form" },
 		});
 	} else if (result.classification === "needs_more_information") {
 		// No immutable route policy can currently determine which provider
@@ -128,7 +127,7 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 async function classifyReferralReply(message: AbuseMailMessage, route: AbuseProviderRoute): Promise<void> {
 	const text = message.textBody ?? "";
 	const result = await classifyProviderReply({ text, from: message.fromAddress ?? undefined });
-	await AbuseRepository.setMailClassification(message.id, result.classification, [], result.rationale);
+	await AbuseRepository.setMailClassification(message.id, result.classification, result.rationale);
 	if (isAuthorityRoute(route)) {
 		const candidates = caseReferenceCandidates(`${message.subject ?? ""}\n${text}`, [abuseCaseTag(route.reportId)]);
 		await AbuseRepository.appendEvent({

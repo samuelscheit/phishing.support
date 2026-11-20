@@ -18,7 +18,7 @@ export const analysisRunStatus = ["running", "completed", "failed"] as const;
 export type AnalysisRunStatus = (typeof analysisRunStatus)[number];
 
 /** Purpose of an analyzer run, used to keep machine-only classifications out of the user-facing report. */
-export const analysisRunKind = ["analysis", "classification", "report_draft", "unknown"] as const;
+export const analysisRunKind = ["analysis", "classification"] as const;
 export type AnalysisRunKind = (typeof analysisRunKind)[number];
 
 
@@ -129,7 +129,7 @@ export const analysisRuns = sqliteTable(
 			.notNull()
 			.references(() => submissions.id, { onDelete: "cascade" }),
 		status: text("status", { enum: analysisRunStatus }).notNull().default("running"),
-		analysisKind: text("analysis_kind", { enum: analysisRunKind }).notNull().default("unknown"),
+		analysisKind: text("analysis_kind", { enum: analysisRunKind }).notNull(),
 		input: text("input", { mode: "json" }).$type<Array<ResponseInputItem>>(),
 		output: text("output", { mode: "json" }).$type<Array<ResponseOutputItem>>(),
 		tokensUsed: sqliteInteger("tokens_used"),

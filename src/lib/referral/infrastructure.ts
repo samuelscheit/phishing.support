@@ -42,9 +42,9 @@ export type InfrastructureNode = {
 export type InfrastructureClaim = Omit<InfrastructureNode, "lead" | "country" | "serverCountry" | "via" | "originHost" | "sites" | "contacts"> & { contact?: string };
 
 /** Services that only warn or block; they hold no records about the operator. */
-const NOT_INFRASTRUCTURE = /^(?:netcraft|netcraft_mail|google_safe_browsing|manual_unroutable|historical:)/;
+const NOT_INFRASTRUCTURE = /^(?:netcraft|netcraft_mail|google_safe_browsing|manual_unroutable)/;
 const REGISTRAR_SOURCES = new Set(["domain_rdap", "registrar_rdap"]);
-const NETWORK_SOURCES = new Set(["domain_infrastructure_ip", "ip_rdap", "ripe_abuse_c", "manual_backfill"]);
+const NETWORK_SOURCES = new Set(["domain_infrastructure_ip", "ip_rdap"]);
 const COUNTRY_CODE = /^[A-Z]{2}$/;
 
 function country(value: unknown): string | undefined {

@@ -195,7 +195,7 @@ describe("submission report read model", () => {
 		});
 		const submitted = await AbuseRepository.beginProviderExecution({
 			routeId: submittedRoute.id,
-			providerPayload: { providerNarrativeVersion: 1, report: { explanation: "The submitted Google report explains the credential-harvesting evidence.", privateToken: "do-not-expose" } },
+			providerPayload: { report: { explanation: "The submitted Google report explains the credential-harvesting evidence.", privateToken: "do-not-expose" } },
 			correlationKey: `google-safe-browsing:${submissionId.toString()}`,
 			expectedStatus: "verified",
 		});
@@ -223,7 +223,7 @@ describe("submission report read model", () => {
 		});
 		const unresolved = await AbuseRepository.beginProviderExecution({
 			routeId: unresolvedRoute.id,
-			providerPayload: { providerNarrativeVersion: 1, form: { justification: "The Cloudflare report explains the impersonation evidence.", privateCookie: "do-not-expose" } },
+			providerPayload: { form: { justification: "The Cloudflare report explains the impersonation evidence.", privateCookie: "do-not-expose" } },
 			correlationKey: `cloudflare:${submissionId.toString()}`,
 			expectedStatus: "verified",
 		});
@@ -254,7 +254,7 @@ describe("submission report read model", () => {
 		expect(JSON.stringify(details)).not.toContain("do-not-expose");
 	});
 
-	test("shows a provider-specific preview instead of an unprepared or analysis-only draft", async () => {
+	test("shows a provider-specific preview instead of an unprepared draft or one without text", async () => {
 		const submissionId = 352342673387950095n;
 		const { report, target } = await createWebsiteReport(submissionId);
 		const persisted = await AbuseRepository.getReport(report.reportId);
@@ -276,15 +276,15 @@ describe("submission report read model", () => {
 
 		await AbuseRepository.beginProviderExecution({
 			routeId: route.id,
-			providerPayload: { report: { reason: persisted!.description }, privateField: "must-not-be-rendered" },
-			correlationKey: `analysis-only:${submissionId.toString()}`,
+			providerPayload: { privateField: "must-not-be-rendered" },
+			correlationKey: `no-text:${submissionId.toString()}`,
 			expectedStatus: "verified",
 		});
-		const analysisOnly = await getSubmissionDetails(submissionId.toString());
-		const historical = analysisOnly?.reports[0]?.routes.find((item) => item.provider === "Netcraft");
-		expect(historical).toMatchObject({ status: "running", bodySource: "historical" });
-		expect(historical?.body).not.toContain(persisted!.description);
-		expect(JSON.stringify(analysisOnly)).not.toContain("must-not-be-rendered");
+		const withoutText = await getSubmissionDetails(submissionId.toString());
+		const running = withoutText?.reports[0]?.routes.find((item) => item.provider === "Netcraft");
+		expect(running).toMatchObject({ status: "running", bodySource: "historical" });
+		expect(running?.body).not.toContain(persisted!.description);
+		expect(JSON.stringify(withoutText)).not.toContain("must-not-be-rendered");
 	});
 
 	test("files a confirmed email as one report: the message for mail providers and the sending IP for its abuse contact", async () => {

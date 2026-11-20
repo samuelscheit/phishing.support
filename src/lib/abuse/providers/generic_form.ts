@@ -56,8 +56,3 @@ export function genericProviderFormAdapterHasValidHash(definition: GenericProvid
 	const { contentHash, ...withoutHash } = definition;
 	return contentHash === hashStableJson(withoutHash);
 }
-
-/** Generic provider-form escalation is separately switchable. */
-export function isGenericFormEscalationEnabled(): boolean {
-	return process.env.ABUSE_GENERIC_FORM_ESCALATION_ENABLED === "true";
-}

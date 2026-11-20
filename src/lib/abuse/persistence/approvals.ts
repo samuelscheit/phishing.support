@@ -106,9 +106,3 @@ export async function getCampaignReport(campaignId: bigint) {
 	const db = await getDb();
 	return db.select().from(abuseReports).where(eq(abuseReports.campaignId, campaignId)).orderBy(asc(abuseReports.createdAt)).get();
 }
-
-/** Every route that carries an authority's file number. */
-export async function listRoutesWithCaseReference(reportId: bigint) {
-	const db = await getDb();
-	return db.select().from(abuseProviderRoutes).where(and(eq(abuseProviderRoutes.reportId, reportId), isNotNull(abuseProviderRoutes.caseReference))).all();
-}

@@ -54,7 +54,6 @@ describe("direct provider resolution and dispatch", () => {
 				providerDefinitionHash: "a".repeat(64),
 				resolverProvenance: { source: "direct_provider_resolution_test" },
 				resolutionSnapshot: { source: "direct_provider_resolution_test" },
-				verificationResult: { verified: true },
 				status: "verified",
 			}],
 		}));
@@ -347,7 +346,6 @@ describe("a resolution whose lookups failed", () => {
 		providerDefinitionHash: "a".repeat(64),
 		resolverProvenance: { source: "test" },
 		resolutionSnapshot: { source: "test" },
-		verificationResult: { verified: true },
 		status: "verified" as const,
 	};
 	const hostingRoute = {

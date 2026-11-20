@@ -1,7 +1,8 @@
 import { defaultResponseModel } from "../../openai_client";
 import { isIP } from "node:net";
 
-import { configuredAbuseOpenAI, responseOutputText } from "../ai";
+import { optionalOpenAIClient } from "../../openai_client";
+import { optionalResponseText } from "../../openai_response";
 import { isVerifiedEmailRouteOriginAllowed } from "../providers/email";
 import { assertPublicDnsHost, normalizeDomain } from "../security";
 import { abuseReplyClassifications, abuseReplyClassificationSchema, type AbuseReplyClassification } from "./types";
@@ -47,7 +48,7 @@ async function classifyProviderReplyWithAI(params: { text: string; from?: string
 	const body = params.text.slice(0, MAX_REPLY_CLASSIFICATION_INPUT);
 	const sender = (params.from ?? "").slice(0, 320);
 	try {
-		const client = configuredAbuseOpenAI();
+		const client = optionalOpenAIClient();
 		if (!client) return ambiguousReplyClassification("AI reply classifier is not configured.");
 		const response = await client.responses.create({
 			model: defaultResponseModel,
@@ -79,7 +80,7 @@ async function classifyProviderReplyWithAI(params: { text: string; from?: string
 				},
 			},
 		} as never);
-		const outputText = responseOutputText(response);
+		const outputText = optionalResponseText(response);
 		if (!outputText) return ambiguousReplyClassification("AI reply classifier returned no output.");
 		const parsed = abuseReplyClassificationSchema.safeParse(parseClassifierJson(outputText));
 		return parsed.success ? parsed.data : ambiguousReplyClassification("AI reply classifier returned an invalid schema.");

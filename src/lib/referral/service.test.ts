@@ -47,8 +47,6 @@ afterAll(() => {
 
 const dependencies: ReferralDependencies = {
 	complainant: () => ({ name: "Samuel Scheit", addressLines: ["Musterstraße 1", "85609 Aschheim"] }),
-	env: { REFERRAL_LINK_SECRET: "s".repeat(48) },
-	now: () => new Date("2026-11-17T09:00:00Z"),
 };
 
 /** The secret half of a bot token, as long as real ones are. */
@@ -163,7 +161,7 @@ describe("criminal referral of a campaign", () => {
 			"Vereinigte Arabische Emirate (AE):",
 			"  - Server der Betreiber (empfängt Eingaben oder liefert Schadsoftware): Telegram FZ-LLC – Gibt seit 09/2024",
 			"Registrar Example Registrar Ltd",
-			"https://phishing.support/api/dossier/",
+			`https://phishing.support/campaigns/${campaignId.toString()}/evidence.zip`,
 			`Eine laufend aktualisierte Übersicht aller Websites der Kampagne mit dem Stand der Sperrungen: https://phishing.support/campaigns/${campaignId.toString()}`,
 			"Samuel Scheit\nphishing.support\nMusterstraße 1\n85609 Aschheim",
 		]) expect(draft.body).toContain(expected);

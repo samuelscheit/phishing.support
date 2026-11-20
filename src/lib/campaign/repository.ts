@@ -236,7 +236,7 @@ export const CampaignRepository = {
 	async saveDescription(campaignId: bigint, description: { title: string; summary: string; siteCount: number }) {
 		const db = await getDb();
 		await db.update(campaigns)
-			.set({ title: description.title, summary: description.summary, summarySiteCount: description.siteCount, summaryGeneratedAt: new Date() })
+			.set({ title: description.title, summary: description.summary, summarySiteCount: description.siteCount })
 			.where(eq(campaigns.id, campaignId));
 	},
 

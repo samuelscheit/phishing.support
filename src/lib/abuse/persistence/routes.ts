@@ -69,8 +69,6 @@ export async function upsertResolvedRoute(targetId: bigint, input: ResolvedRoute
 						providerDefinitionHash: input.providerDefinitionHash,
 						resolverProvenance: input.resolverProvenance,
 						resolutionSnapshot: input.resolutionSnapshot,
-						verificationResult: input.verificationResult,
-						serviceIdentity: input.serviceIdentity,
 							status: input.status ?? existing.status,
 						updatedAt: timestamp,
 					})
@@ -93,8 +91,6 @@ export async function upsertResolvedRoute(targetId: bigint, input: ResolvedRoute
 					providerDefinitionHash: input.providerDefinitionHash,
 					resolverProvenance: input.resolverProvenance,
 					resolutionSnapshot: input.resolutionSnapshot,
-					verificationResult: input.verificationResult,
-					serviceIdentity: input.serviceIdentity,
 					status: input.status ?? "resolving",
 					createdAt: timestamp,
 					updatedAt: timestamp,
@@ -153,44 +149,6 @@ export async function transitionRouteStatus(params: {
 					routeId: route.id.toString(),
 				});
 			}
-			return true;
-		},
-		{ behavior: "immediate" },
-	);
-}
-
-/** Atomic route update for callers that do not need to name a predecessor. */
-
-export async function setRouteStatus(
-	routeId: bigint,
-	status: AbuseRouteStatus,
-	data: Record<string, unknown> = {},
-	expectedFrom?: AbuseRouteStatus | AbuseRouteStatus[],
-): Promise<boolean> {
-	const db = await getDb();
-	return db.transaction(
-		(tx) => {
-			const route = tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, routeId)).get();
-			if (!route || route.status === status || IMMUTABLE_ROUTE_STATUSES.has(route.status)) return false;
-			if (expectedFrom !== undefined) {
-				const expected = new Set(Array.isArray(expectedFrom) ? expectedFrom : [expectedFrom]);
-				if (!expected.has(route.status)) return false;
-			}
-			const updated = tx
-				.update(abuseProviderRoutes)
-				.set({ status, updatedAt: now() })
-				.where(and(eq(abuseProviderRoutes.id, routeId), eq(abuseProviderRoutes.status, route.status)))
-				.returning({ id: abuseProviderRoutes.id })
-				.get();
-			if (!updated) return false;
-			recordEvent(tx, {
-				reportId: route.reportId,
-				targetId: route.targetId,
-				routeId,
-				eventType: "route.status_changed",
-				data: { from: route.status, to: status, ...data },
-			});
-			recomputeReportStatusInTransaction(tx, route.reportId, { reason: "route_status_set", routeId: route.id.toString() });
 			return true;
 		},
 		{ behavior: "immediate" },
@@ -263,27 +221,6 @@ export async function markUnknownExternalState(params: {
 				reason: "unknown_external_state",
 				routeId: route.id.toString(),
 			});
-		},
-		{ behavior: "immediate" },
-	);
-}
-
-export async function setRouteVerification(
-	routeId: bigint,
-	verificationResult: Record<string, unknown>,
-	serviceIdentity?: Record<string, unknown>,
-	expectedStatus: AbuseRouteStatus = "resolving",
-): Promise<boolean> {
-	const db = await getDb();
-	return db.transaction(
-		(tx) => {
-			const route = tx.select({ status: abuseProviderRoutes.status }).from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, routeId)).get();
-			if (!route || route.status !== expectedStatus) return false;
-			tx.update(abuseProviderRoutes)
-				.set({ verificationResult, serviceIdentity, updatedAt: now() })
-				.where(and(eq(abuseProviderRoutes.id, routeId), eq(abuseProviderRoutes.status, expectedStatus)))
-				.run();
-			return true;
 		},
 		{ behavior: "immediate" },
 	);

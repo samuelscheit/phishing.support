@@ -108,17 +108,10 @@ and tab (the capture's second relay connection), and a provider form leases its
 own disposable browser on the reporting egress, released when the task ends and
 cancelled when it is interrupted.
 
-```text
-PHISHING_TASK_MODEL=openai/gpt-5.5        # or anthropic/<model>; default openai/$OPENAI_MODEL
-ANTHROPIC_API_KEY=...                     # only for anthropic/<model>
-ABUSE_PORTAL_TASK_MAX_STEPS=40            # model turns of a provider-form task
-ABUSE_PORTAL_TASK_TIMEOUT_MS=480000       # must end before ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS
-SITE_VISIT_TASK_MAX_STEPS=60              # model turns of a site visit
-```
-
-`openai/<model>` reuses `OPENAI_API_KEY` and `OPENAI_API_BASE_URL` (an
-OpenAI-compatible endpoint such as OpenRouter, where `<model>` may itself contain
-a slash: `openai/anthropic/claude-sonnet-4.5`). The credential-shaped synthetic
+The model is the app's own: `OPENAI_MODEL` with `OPENAI_API_KEY` and
+`OPENAI_API_BASE_URL` (an OpenAI-compatible endpoint such as OpenRouter, where
+the model id may itself contain a slash: `anthropic/claude-sonnet-4.5`). A
+provider-form task takes at most 40 model turns, a site visit 60. The credential-shaped synthetic
 values of a visit (password, card number, one-time code) are passed as
 `{{secret:NAME}}` placeholders: they reach the page and the network recording
 but never the model, its step log, or the stored record. File uploads are
@@ -318,7 +311,7 @@ Nothing is injected into the page; only CDP's Network domain is used, because en
 
 A campaign's operator page (`/operator/campaigns/<id>`, behind HTTP Basic auth with `OPERATOR_PASSWORD`) drafts, for one authority at a time:
 
-- a **criminal complaint against persons unknown**, with every site, its takedown reports, the linking indicators, how an investigator reaches each provider's records, a signed download link for the evidence archive, and `Websites.csv`/`Merkmale.csv` attached;
+- a **criminal complaint against persons unknown**, with every site, its takedown reports, the linking indicators, how an investigator reaches each provider's records, a link to the public evidence archive, and `Websites.csv`/`Merkmale.csv` attached;
 - a **supplement** with only the sites the authority has not received, under its file number;
 - once a file number exists, a **preservation notice** to each provider mailbox the sites were reported to.
 
@@ -329,7 +322,6 @@ OPERATOR_PASSWORD=<at least 16 characters>
 REFERRAL_COMPLAINANT_NAME=<full name of the complainant>
 REFERRAL_COMPLAINANT_ADDRESS=<street; postcode city>
 REFERRAL_COMPLAINANT_PHONE=<optional>
-REFERRAL_LINK_SECRET=<at least 32 random characters>
 ```
 
 ## Mail configuration
@@ -397,11 +389,9 @@ passages and unapproved URLs, and treated as untrusted data.
 
 The first draft is persisted in the provider run before SMTP and is reused
 unchanged only for a retry that is durably known to have failed before provider
-acceptance. Legacy/unverifiable drafts are stopped rather than resent, avoiding
-an accidental replay of an old analysis-only message. Drafting and reply
+acceptance. A draft that is not a verified, persisted report is stopped rather than resent. Drafting and reply
 classification use the analysis endpoint (`OPENAI_API_KEY`,
-`OPENAI_API_BASE_URL`, `OPENAI_MODEL`); `OPENAI_TIMEOUT_MS` bounds each call
-(5 seconds to 5 minutes, default 45 seconds). The deterministic template works
+`OPENAI_API_BASE_URL`, `OPENAI_MODEL`); each call is bounded to 45 seconds. The deterministic template works
 without an AI configuration.
 
 ## Analysis stream recovery

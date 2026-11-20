@@ -116,8 +116,6 @@ describe("routeOutcomeOf", () => {
 		expect(refused.sentAt).toBeUndefined();
 		// A mail route the provider refused by reply was delivered: the reply decides.
 		expect(routeOutcomeOf(facts({ status: "provider_rejected", messages: [reply(1, "not_monitored")], statusChanges: [{ to: "provider_rejected", at: at(1) }] })).verdict).toBe("not_monitored");
-		// A migrated rejection without any history is taken as the provider's.
-		expect(routeOutcomeOf(facts({ routeType: "provider_submission", status: "provider_rejected" })).verdict).toBe("rejected");
 	});
 
 	test("a route status without a classified message still decides", () => {
@@ -153,10 +151,6 @@ describe("routeOutcomeOf", () => {
 		for (const status of ["awaiting_approval", "resolving", "verified", "queued", "running", "escalating_to_portal"] as const) {
 			expect(routeOutcomeOf(facts({ status })).verdict).toBe("pending");
 		}
-	});
-
-	test("a migrated route without events or messages counts as sent when it was created", () => {
-		expect(routeOutcomeOf(facts({ routeType: "provider_submission", status: "submitted", createdAt: at(7) }))).toMatchObject({ verdict: "no_reply", sentAt: at(7) });
 	});
 
 	test("messages are read in time order whatever order they were stored in", () => {

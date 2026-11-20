@@ -22,7 +22,7 @@ import {
 	settleEmailDelivery,
 } from "./persistence/email_delivery";
 import { appendEvent, listEvents } from "./persistence/events";
-import { approveDraftedRoute, getCampaignReport, listRoutesWithCaseReference, saveApprovalDraft, setCaseReference } from "./persistence/approvals";
+import { approveDraftedRoute, getCampaignReport, saveApprovalDraft, setCaseReference } from "./persistence/approvals";
 import {
 	claimNextJob,
 	completeJob,
@@ -46,7 +46,6 @@ import {
 	findCorrelatedInboundRoute,
 	findReplyRouteForSender,
 	findRouteByConfirmationId,
-	getInboundMailByImap,
 	getInboundMailByMessageId,
 	getMailMessage,
 	getOutboundMailForRun,
@@ -81,7 +80,6 @@ import {
 	getReportForSubmission,
 	listReportsForSubmission,
 	getReportByTrackingToken,
-	getReportByTrackingTokenHash,
 	getReportInput,
 	getRoute,
 	getTarget,
@@ -90,14 +88,11 @@ import {
 	listTargets,
 	listUnresolvedProviderRuns,
 	upsertDerivedTarget,
-	setReportVerificationOutcome,
 	transitionReportStatus,
 } from "./persistence/reports";
 import { recomputeReportStatus } from "./persistence/report_status";
 import {
 	markUnknownExternalState,
-	setRouteStatus,
-	setRouteVerification,
 	setTargetResolution,
 	transitionRouteStatus,
 	upsertResolvedRoute,
@@ -110,7 +105,6 @@ export const AbuseRepository = {
 	createReport,
 	releaseInvestigatedReport,
 	getReport,
-	getReportByTrackingTokenHash,
 	getReportByTrackingToken,
 	getReportForSubmission,
 	listReportsForSubmission,
@@ -122,14 +116,11 @@ export const AbuseRepository = {
 	getRoute,
 	getTarget,
 	getReportInput,
-	setReportVerificationOutcome,
 	transitionReportStatus,
 	setTargetResolution,
 	upsertResolvedRoute,
 	transitionRouteStatus,
-	setRouteStatus,
 	markUnknownExternalState,
-	setRouteVerification,
 	createProviderRun,
 	getProviderRun,
 	getProviderRunByCorrelationKey,
@@ -184,7 +175,6 @@ export const AbuseRepository = {
 	recordProviderCorrespondence,
 	listProviderCorrespondence,
 	getMailMessage,
-	getInboundMailByImap,
 	getInboundMailByMessageId,
 	setMailClassification,
 	listEvents,
@@ -195,5 +185,4 @@ export const AbuseRepository = {
 	approveDraftedRoute,
 	setCaseReference,
 	getCampaignReport,
-	listRoutesWithCaseReference,
 };

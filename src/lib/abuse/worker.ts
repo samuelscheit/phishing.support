@@ -20,7 +20,6 @@ import { classifyReply, monitorProviderReply } from "./worker/mail";
 import { runGenericProviderPortal } from "./worker/portal";
 import { resolveReport } from "./worker/resolution";
 import { errorText, idFrom, parseJobBigInt, randomOwner, type WorkerServices } from "./worker/shared";
-import { envInt } from "../env";
 import type { JobClaimFilter } from "./persistence/jobs";
 import { readInvestigationJobPayload } from "../investigation/payload";
 import { releaseAfterFailedInvestigation, runReportInvestigation } from "../investigation/run";
@@ -182,7 +181,7 @@ export type AbuseWorkerOptions = {
 	sweepJobTimeoutMs?: number;
 	/** Deterministic test hook; production always dispatches through the provider registry. */
 	processJob?: (job: AbuseJob, signal?: AbortSignal) => Promise<void>;
-	/** Test hook: the model that drives browser tasks (production reads PHISHING_TASK_MODEL). */
+	/** Test hook: the model that drives browser tasks (production uses the app's OpenAI model). */
 	browserTaskModel?: () => ChatModel;
 	/** Test hook: the browser a browser task runs on (production leases a Fabric browser). */
 	acquireBrowserSession?: FabricCdpSessionAcquirer;
@@ -216,28 +215,13 @@ export class AbuseWorker {
 
 	constructor(options: AbuseWorkerOptions = {}) {
 		this.owner = options.owner ?? randomOwner();
-		this.leaseMs = options.leaseMs ?? envInt("ABUSE_WORKER_LEASE_MS", DEFAULT_LEASE_MS);
-		this.pollMs = options.pollMs ?? envInt("ABUSE_WORKER_POLL_MS", DEFAULT_POLL_MS);
-		this.controlConcurrency = boundedConcurrency(
-			options.controlConcurrency ?? envInt("ABUSE_WORKER_CONTROL_CONCURRENCY", DEFAULT_CONTROL_CONCURRENCY),
-			DEFAULT_CONTROL_CONCURRENCY,
-		);
-		this.externalConcurrency = boundedConcurrency(
-			options.externalConcurrency ?? envInt("ABUSE_WORKER_EXTERNAL_CONCURRENCY", DEFAULT_EXTERNAL_CONCURRENCY),
-			DEFAULT_EXTERNAL_CONCURRENCY,
-		);
-		this.controlJobTimeoutMs = boundedTimeout(
-			options.controlJobTimeoutMs ?? envInt("ABUSE_WORKER_CONTROL_JOB_TIMEOUT_MS", DEFAULT_CONTROL_JOB_TIMEOUT_MS),
-			DEFAULT_CONTROL_JOB_TIMEOUT_MS,
-		);
-		this.externalJobTimeoutMs = boundedTimeout(
-			options.externalJobTimeoutMs ?? envInt("ABUSE_WORKER_EXTERNAL_JOB_TIMEOUT_MS", DEFAULT_EXTERNAL_JOB_TIMEOUT_MS),
-			DEFAULT_EXTERNAL_JOB_TIMEOUT_MS,
-		);
-		this.sweepJobTimeoutMs = boundedTimeout(
-			options.sweepJobTimeoutMs ?? envInt("ABUSE_WORKER_SWEEP_JOB_TIMEOUT_MS", DEFAULT_SWEEP_JOB_TIMEOUT_MS),
-			DEFAULT_SWEEP_JOB_TIMEOUT_MS,
-		);
+		this.leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+		this.pollMs = options.pollMs ?? DEFAULT_POLL_MS;
+		this.controlConcurrency = boundedConcurrency(options.controlConcurrency ?? DEFAULT_CONTROL_CONCURRENCY, DEFAULT_CONTROL_CONCURRENCY);
+		this.externalConcurrency = boundedConcurrency(options.externalConcurrency ?? DEFAULT_EXTERNAL_CONCURRENCY, DEFAULT_EXTERNAL_CONCURRENCY);
+		this.controlJobTimeoutMs = boundedTimeout(options.controlJobTimeoutMs ?? DEFAULT_CONTROL_JOB_TIMEOUT_MS, DEFAULT_CONTROL_JOB_TIMEOUT_MS);
+		this.externalJobTimeoutMs = boundedTimeout(options.externalJobTimeoutMs ?? DEFAULT_EXTERNAL_JOB_TIMEOUT_MS, DEFAULT_EXTERNAL_JOB_TIMEOUT_MS);
+		this.sweepJobTimeoutMs = boundedTimeout(options.sweepJobTimeoutMs ?? DEFAULT_SWEEP_JOB_TIMEOUT_MS, DEFAULT_SWEEP_JOB_TIMEOUT_MS);
 		this.processJobOverride = options.processJob;
 		this.resolveTarget = options.resolveTarget ?? resolveAbuseTarget;
 		this.investigateReport = options.investigateReport ?? runReportInvestigation;

@@ -4,13 +4,13 @@ import type { ProviderRole } from "./role";
 /**
  * The company a provider route reaches, whatever channel it used: its page
  * address, its name, and for known companies the part they play when a route
- * does not say (routes migrated from before resolver provenance existed).
+ * does not say (routes without resolver provenance).
  */
 export type Organisation = { slug: string; name: string; role?: ProviderRole };
 
 /**
  * Companies reached through more than one channel or mailbox domain, keyed by
- * provider registry key (without a `historical:` prefix) or by the registrable
+ * provider registry key or by the registrable
  * domain of the abuse mailbox. Anything not listed is its own organisation,
  * named after its mailbox domain.
  */
@@ -73,7 +73,7 @@ export function slugify(value: string): string {
  * integrations by their registry key. Authorities are each their own.
  */
 export function organisationOf(route: { providerRegistryKey: string; providerDisplayName: string; verifiedEmail: string | null }): Organisation {
-	const key = route.providerRegistryKey.replace(/^historical:/, "");
+	const key = route.providerRegistryKey;
 	if (key.startsWith("authority:")) return { slug: slugify(key), name: route.providerDisplayName };
 	const known = byProviderKey.get(key);
 	if (known) return { slug: known.slug, name: known.name, role: known.role };

@@ -9,7 +9,6 @@ import { CampaignRepository } from "../campaign/repository";
 import { authorityById, type Authority } from "./authorities";
 import { dossierAttachments } from "./archive";
 import { configuredComplainant, type Complainant } from "./complainant";
-import { dossierDownloadUrl } from "./download_link";
 import { buildReferralDossier, type Dossier, type DossierDependencies } from "./dossier";
 import { complaintDraft, preservationNoticeDraft, supplementDraft, type ReferralDraft } from "./drafts";
 import {
@@ -33,8 +32,6 @@ export class ReferralError extends Error {
 export type ReferralDependencies = {
 	dossier?: DossierDependencies;
 	complainant?: () => Complainant;
-	now?: () => Date;
-	env?: Record<string, string | undefined>;
 };
 
 /** Route statuses of a referral mail that reached, or is on its way to, its recipient. */
@@ -162,8 +159,7 @@ export async function prepareComplaint(campaignId: bigint, authorityId: string, 
 	if (routes.some((route) => authorityIdOf(route) === authority.id && referralMailKind(route) === "complaint" && LIVE_STATUSES.has(route.status))) {
 		throw new ReferralError(`A complaint to ${authority.name} is already drafted or sent; send new sites as a supplement.`);
 	}
-	const download = dossierDownloadUrl(current, (dependencies.now ?? (() => new Date()))(), dependencies.env);
-	const draft = complaintDraft({ dossier, complainant, authority, caseTag: abuseCaseTag(reportId), download });
+	const draft = complaintDraft({ dossier, complainant, authority, caseTag: abuseCaseTag(reportId) });
 	return draftRoute({
 		reportId,
 		targetId,
@@ -209,14 +205,12 @@ export async function prepareSupplement(campaignId: bigint, authorityId: string,
 	const dossier = await buildReferralDossier(current, dependencies.dossier);
 	const newSites = unreportedSites(dossier, routes, authority.id);
 	if (!newSites.length) throw new ReferralError(`${authority.name} has received every site of this campaign.`);
-	const download = dossierDownloadUrl(current, (dependencies.now ?? (() => new Date()))(), dependencies.env);
 	const caseReference = caseReferenceFor(routes, authority.id);
 	const draft = supplementDraft({
 		dossier,
 		complainant,
 		authority,
 		caseTag: abuseCaseTag(reportId),
-		download,
 		newSites,
 		...(caseReference ? { caseReference } : {}),
 		complaintSentAt: (typeof complaint.resolutionSnapshot.approvedAt === "string" ? complaint.resolutionSnapshot.approvedAt : complaint.updatedAt.toISOString()),

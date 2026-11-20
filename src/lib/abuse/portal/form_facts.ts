@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 import { defaultResponseModel } from "../../openai_client";
-import { configuredAbuseOpenAI, responseOutputText } from "../ai";
+import { optionalOpenAIClient } from "../../openai_client";
+import { optionalResponseText } from "../../openai_response";
 import { hostBelongsToTarget, normalizePublicHttpUrl, registrableDomain } from "../security";
 
 const MAX_ANALYSIS_INPUT = 24_000;
@@ -42,7 +43,7 @@ const FACTS_RESPONSE_SCHEMA = {
 export type ProviderFormFactsExtractor = (input: { target: string; analysis: string }) => Promise<unknown>;
 
 async function extractWithAI(input: { target: string; analysis: string }): Promise<unknown> {
-	const client = configuredAbuseOpenAI();
+	const client = optionalOpenAIClient();
 	if (!client) return undefined;
 	const response = await client.responses.create({
 		model: defaultResponseModel,
@@ -66,7 +67,7 @@ async function extractWithAI(input: { target: string; analysis: string }): Promi
 		],
 		text: { format: { type: "json_schema", name: "ProviderFormFacts", schema: FACTS_RESPONSE_SCHEMA, strict: true } },
 	} as never);
-	const text = responseOutputText(response);
+	const text = optionalResponseText(response);
 	return text ? JSON.parse(text) : undefined;
 }
 

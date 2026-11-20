@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { abuseCaseTag } from "./correlation";
 
-import { configuredAbuseOpenAI, responseOutputText } from "../ai";
+import { optionalOpenAIClient } from "../../openai_client";
+import { optionalResponseText } from "../../openai_response";
 import { normalizePublicHttpUrl } from "../security";
 import { serviceIdentity } from "../../constants";
 import { defaultResponseModel } from "../../openai_client";
@@ -51,7 +52,6 @@ export type AbuseEmailDraft = {
 
 export type VerifiedEmailProviderPayload = {
 	kind: "verified_email_report";
-	version: 2;
 	target: string;
 	observedUrls: string[];
 	recipient: string;
@@ -213,7 +213,7 @@ function parseEmailSummary(text: string | undefined): string | undefined {
 
 async function generateEmailSummaryWithAI(input: AbuseEmailSummaryInput): Promise<string | undefined> {
 	try {
-		const client = configuredAbuseOpenAI();
+		const client = optionalOpenAIClient();
 		if (!client) return undefined;
 		const response = await client.responses.create({
 			model: defaultResponseModel,
@@ -255,7 +255,7 @@ async function generateEmailSummaryWithAI(input: AbuseEmailSummaryInput): Promis
 				},
 			},
 		} as never);
-		return parseEmailSummary(responseOutputText(response));
+		return parseEmailSummary(optionalResponseText(response));
 	} catch {
 		// A missing/failed model must never turn a routable abuse report into an
 		// SMTP failure. The deterministic template below remains factual.
@@ -466,7 +466,6 @@ export function verifiedEmailProviderPayload(params: {
 }): VerifiedEmailProviderPayload {
 	return {
 		kind: "verified_email_report",
-		version: 2,
 		target: params.target,
 		observedUrls: [...params.observedUrls],
 		recipient: params.recipient,
@@ -474,7 +473,7 @@ export function verifiedEmailProviderPayload(params: {
 	};
 }
 
-/** Read only a versioned payload created by this worker; legacy payloads are never sent verbatim. */
+/** Read only a payload created by this worker; a draft that does not validate is never sent verbatim. */
 export function readVerifiedEmailDraft(payload: unknown, params: {
 	recipient: string;
 	description: string;
@@ -483,7 +482,7 @@ export function readVerifiedEmailDraft(payload: unknown, params: {
 	allowedUrls?: string[];
 }): AbuseEmailDraft | undefined {
 	const record = asRecord(payload);
-	if (record?.kind !== "verified_email_report" || record.version !== 2 || record.recipient !== params.recipient) return undefined;
+	if (record?.kind !== "verified_email_report" || record.recipient !== params.recipient) return undefined;
 	if (typeof record.target !== "string" || !Array.isArray(record.observedUrls) || !record.observedUrls.every((value) => typeof value === "string")) return undefined;
 	if (params.target !== undefined && record.target !== params.target) return undefined;
 	if (params.observedUrls !== undefined) {

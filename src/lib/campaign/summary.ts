@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-import { configuredAbuseOpenAI, responseOutputText } from "../abuse/ai";
+import { optionalOpenAIClient } from "../openai_client";
+import { optionalResponseText } from "../openai_response";
 import { defaultResponseModel } from "../openai_client";
 import { LANGUAGE_NAMES } from "./language";
 
@@ -89,7 +90,7 @@ export function boundedFacts(facts: CampaignFacts): CampaignFacts {
 }
 
 async function generateWithModel(facts: CampaignFacts): Promise<unknown> {
-	const client = configuredAbuseOpenAI();
+	const client = optionalOpenAIClient();
 	if (!client) return undefined;
 	const response = await client.responses.create({
 		model: defaultResponseModel,
@@ -113,7 +114,7 @@ async function generateWithModel(facts: CampaignFacts): Promise<unknown> {
 		],
 		text: { format: { type: "json_schema", name: "CampaignDescription", schema: RESPONSE_SCHEMA, strict: true } },
 	} as never);
-	const text = responseOutputText(response);
+	const text = optionalResponseText(response);
 	return text ? JSON.parse(text) : undefined;
 }
 

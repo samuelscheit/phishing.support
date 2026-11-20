@@ -53,4 +53,4 @@ COPY --from=builder /app/src ./src
 
 EXPOSE 3000
 
-CMD ["bun", "/app/src/lib/server_start.ts"]
+CMD ["bun", "/app/src/server.ts"]

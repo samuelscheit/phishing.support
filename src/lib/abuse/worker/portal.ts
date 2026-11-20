@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 
 import { resolveVerifiedProviderLink } from "../mail/reply";
-import { isGenericFormEscalationEnabled } from "../providers/generic_form";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { serviceIdentity } from "../../constants";
 import { deriveProviderFormFacts } from "../portal/form_facts";
@@ -13,7 +12,6 @@ import { agentGaveUp, type BrowserTask, type TaskResult } from "../../browser_ta
 import { runFabricBrowserTask } from "../../browser_task/fabric";
 import { redactedErrorText } from "../../error_text";
 import { routeContext, storedBrowserTask, throwIfAborted, UnknownExternalStateError, type WorkerServices } from "./shared";
-import { envInt } from "../../env";
 import { asRecord } from "../../values";
 
 /**
@@ -21,7 +19,8 @@ import { asRecord } from "../../values";
  * external job's deadline (10 minutes by default) so a slow form settles as a
  * failed run instead of a fenced job.
  */
-const DEFAULT_PORTAL_TASK_TIMEOUT_MS = 8 * 60_000;
+const PORTAL_TASK_TIMEOUT_MS = 8 * 60_000;
+const PORTAL_TASK_LOCK_MS = 5 * 60_000;
 
 /**
  * Generic email-form portals do not share a provider-managed resource. They
@@ -104,10 +103,6 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 	// the exact immutable payload already persisted by that transition.
 	if (!["escalating_to_portal", "running"].includes(route.status)) return;
 	if (route.routeType !== "email" || !route.verifiedEmail) throw new Error("Generic portal escalation requires a verified email route.");
-	if (route.status === "escalating_to_portal" && !isGenericFormEscalationEnabled()) {
-		await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: "escalating_to_portal", to: "provider_rejected", data: { reason: "generic_form_escalation_disabled" } });
-		return;
-	}
 	let correlationKey: string;
 	let providerPayload: Record<string, unknown>;
 	if (route.status === "escalating_to_portal") {
@@ -166,16 +161,15 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 	}
 	const lockKey = portalTaskLockKey(route.id);
 	const lockOwner = `${worker.owner}:portal-task:${route.id.toString()}`;
-	const lockLeaseMs = envInt("ABUSE_PORTAL_TASK_LOCK_MS", 5 * 60_000);
-	if (!(await AbuseRepository.tryAcquireLock(lockKey, lockOwner, lockLeaseMs))) {
+	if (!(await AbuseRepository.tryAcquireLock(lockKey, lockOwner, PORTAL_TASK_LOCK_MS))) {
 		// A live worker owns this route's task. Its job either settles the run
 		// or leaves the durable task marker for a later recovery. Never turn
 		// that live ownership into a false ambiguity.
 		return;
 	}
 	const lockHeartbeat = setInterval(() => {
-		void AbuseRepository.renewLock(lockKey, lockOwner, lockLeaseMs);
-	}, Math.max(1_000, Math.floor(lockLeaseMs / 3)));
+		void AbuseRepository.renewLock(lockKey, lockOwner, PORTAL_TASK_LOCK_MS);
+	}, Math.max(1_000, Math.floor(PORTAL_TASK_LOCK_MS / 3)));
 	try {
 		// The model is local configuration. Resolve it before the run marker
 		// exists, so a missing key is an ordinary retryable failure, not an
@@ -218,7 +212,7 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 				routeId: route.id.toString(),
 				runId: run.id.toString(),
 			},
-			timeoutMs: envInt("ABUSE_PORTAL_TASK_TIMEOUT_MS", DEFAULT_PORTAL_TASK_TIMEOUT_MS),
+			timeoutMs: PORTAL_TASK_TIMEOUT_MS,
 			started: (fabricSessionId) => AbuseRepository.startBrowserTask({ runId: run.id, fabricSessionId }),
 			acquire: worker.acquireBrowserSession,
 			...(worker.signal ? { signal: worker.signal } : {}),

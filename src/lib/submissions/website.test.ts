@@ -46,9 +46,9 @@ describe("retryFailedWebsiteAnalysis", () => {
 			dedupeKey: "website-retry-latest-stage",
 			status: "failed",
 		});
-		const completedRun = await AnalysisRunsEntity.create(id);
+		const completedRun = await AnalysisRunsEntity.create(id, "analysis");
 		await AnalysisRunsEntity.complete(completedRun);
-		const failedRun = await AnalysisRunsEntity.create(id);
+		const failedRun = await AnalysisRunsEntity.create(id, "analysis");
 		await AnalysisRunsEntity.fail(failedRun);
 
 		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({
@@ -65,7 +65,7 @@ describe("retryFailedWebsiteAnalysis", () => {
 			dedupeKey: "website-retry-report-handoff",
 			status: "failed",
 		});
-		for (const _stage of ["analysis", "classification"]) await AnalysisRunsEntity.complete(await AnalysisRunsEntity.create(id));
+		for (const _stage of ["analysis", "classification"]) await AnalysisRunsEntity.complete(await AnalysisRunsEntity.create(id, "analysis"));
 
 		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({ submission: { id } });
 		await reportConfirmedWebsiteAbuse({ submissionId: id, urls: ["https://85.215.226.225/Netflix/Home/login.php"], analysisText: "Credential page.", reporter: {}, finding: { finding: "phishing", phishingBasis: "credential_theft" } });
@@ -108,7 +108,7 @@ describe("retryFailedWebsiteAnalysis", () => {
 			dedupeKey: "website-retry-interrupted-run",
 			status: "running",
 		});
-		const runId = await AnalysisRunsEntity.create(id, undefined, "analysis");
+		const runId = await AnalysisRunsEntity.create(id, "analysis");
 
 		await expect(SubmissionsEntity.failAllRunning()).resolves.toEqual([{ id }]);
 

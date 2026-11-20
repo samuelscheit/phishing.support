@@ -1,4 +1,4 @@
-import { taskStepLimit, type BrowserTask } from "../browser_task/agent";
+import type { BrowserTask } from "../browser_task/agent";
 import type { ExfiltrationCanaries } from "../exfiltration/types";
 
 /** Wall-clock budget of one site visit: the agent's walk through the site, from its first page to where the flow ends. */
@@ -10,10 +10,8 @@ const CHALLENGE_CLEAR_SECONDS = 45;
 /** Attempts at one CAPTCHA before the agent treats it as blocking. */
 const CHALLENGE_ATTEMPTS = 3;
 
-/** Parse the optional limit of the agent's model turns; each turn may batch several actions. */
-export function visitMaxSteps(value: string | undefined): number {
-	return taskStepLimit("SITE_VISIT_TASK_MAX_STEPS", value, 60, 150);
-}
+/** Model turns a visit may take; each turn may batch several actions. */
+export const VISIT_MAX_STEPS = 60;
 
 /**
  * The visit's task. The credential-shaped synthetic values (password, card
@@ -47,7 +45,7 @@ export type VisitAgentReport = {
 export function buildSiteVisitTask(
 	pageUrl: string,
 	canaries: ExfiltrationCanaries,
-	maxSteps: number = visitMaxSteps(process.env.SITE_VISIT_TASK_MAX_STEPS),
+	maxSteps: number = VISIT_MAX_STEPS,
 	/** What whoever asked for this visit wants done or looked at, on top of the walk itself. */
 	instructions?: string,
 ): SiteVisitTask {

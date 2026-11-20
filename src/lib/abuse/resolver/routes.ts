@@ -21,10 +21,6 @@ export function emailRoute(params: {
 		verifiedEmail: params.email,
 		resolverProvenance: params.provenance,
 		resolutionSnapshot: params.snapshot,
-		verificationResult: {
-			verified: true,
-			verifiedDomains: verifiedDomainsForEmailRoute(params.email),
-		},
 		status: "verified",
 	};
 }

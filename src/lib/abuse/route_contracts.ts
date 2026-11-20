@@ -16,7 +16,5 @@ export type ResolvedRouteInput = {
 	providerDefinitionHash?: string;
 	resolverProvenance: Record<string, unknown>;
 	resolutionSnapshot: Record<string, unknown>;
-	verificationResult?: Record<string, unknown>;
-	serviceIdentity?: Record<string, unknown>;
 	status?: AbuseRouteStatus;
 };

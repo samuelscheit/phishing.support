@@ -64,7 +64,7 @@ function fakeLookup(registered: Record<string, string>, located: Record<string, 
 
 describe("routeInfrastructure", () => {
 	test("warning services hold no records and are left out", () => {
-		for (const key of ["netcraft", "netcraft_mail", "google_safe_browsing", "historical:google_safe_browsing", "manual_unroutable"]) {
+		for (const key of ["netcraft", "netcraft_mail", "google_safe_browsing", "manual_unroutable"]) {
 			expect(routeInfrastructure(route({ providerRegistryKey: key }))).toBeUndefined();
 		}
 	});
@@ -87,7 +87,7 @@ describe("routeInfrastructure", () => {
 	test("a manually found origin keeps the holder and AS the operator recorded", () => {
 		const informaten = route({
 			verifiedEmail: "abuse@informaten.com",
-			resolverProvenance: { source: "ripe_abuse_c" },
+			resolverProvenance: { source: "ip_rdap" },
 			resolutionSnapshot: { target: "195.234.126.108", network: { asn: 203029, asName: "INFORMATEN", holder: "Alec Putzmann trading as Informaten GbR" } },
 		});
 		expect(routeInfrastructure(informaten)).toEqual({ role: "hosting", name: "Alec Putzmann trading as Informaten GbR", resources: ["195.234.126.108", "AS203029"], contact: "abuse@informaten.com" });
@@ -99,7 +99,7 @@ describe("routeInfrastructure", () => {
 	});
 
 	test("a route of unknown provenance stays a provider without a role", () => {
-		expect(routeInfrastructure(route({ resolverProvenance: { source: "migrated_legacy_provider_report" }, providerDisplayName: "abuse@legacy.example" }))).toEqual({ role: "provider", name: "abuse@legacy.example", resources: [] });
+		expect(routeInfrastructure(route({ resolverProvenance: {}, providerDisplayName: "abuse@legacy.example" }))).toEqual({ role: "provider", name: "abuse@legacy.example", resources: [] });
 	});
 });
 

@@ -7,12 +7,12 @@ const mail = (email: string, providerDisplayName = "Abuse-C Role") => ({ provide
 const integration = (providerRegistryKey: string, providerDisplayName = "Provider") => ({ providerRegistryKey, providerDisplayName, verifiedEmail: null });
 
 describe("organisationOf", () => {
-	test("groups every channel of one company: direct integration, historical record and abuse mailbox", () => {
+	test("groups every channel of one company: direct integration, older record and abuse mailbox", () => {
 		expect(organisationOf(integration("cloudflare", "Cloudflare Abuse"))).toEqual({ slug: "cloudflare", name: "Cloudflare", role: "cdn" });
-		expect(organisationOf(integration("historical:cloudflare_abuse"))).toMatchObject({ slug: "cloudflare" });
+		expect(organisationOf(integration("cloudflare_abuse"))).toMatchObject({ slug: "cloudflare" });
 		expect(organisationOf(mail("registrar-abuse@cloudflare.com", "Cloudflare, Inc."))).toMatchObject({ slug: "cloudflare" });
 		expect(organisationOf(integration("netcraft_mail"))).toMatchObject({ slug: "netcraft", role: "blocklist" });
-		expect(organisationOf(integration("historical:google_safe_browsing"))).toMatchObject({ slug: "google-safe-browsing" });
+		expect(organisationOf(integration("google_safe_browsing"))).toMatchObject({ slug: "google-safe-browsing" });
 	});
 
 	test("a mailbox on a subdomain or a sister domain belongs to the registrable domain's company", () => {
@@ -85,11 +85,11 @@ describe("roleOf", () => {
 	test("a blocklist is a blocklist whatever led to it", () => {
 		const netcraft = organisationOf(integration("netcraft"));
 		expect(roleOf(route("provider_supplemental_target_rule", "netcraft"), "domain", netcraft)).toBe("blocklist");
-		expect(roleOf(route("migrated_legacy_provider_report", "historical:google_safe_browsing"), "domain", organisationOf(integration("historical:google_safe_browsing")))).toBe("blocklist");
+		expect(roleOf(route("provider_supplemental_target_rule", "google_safe_browsing"), "domain", organisationOf(integration("google_safe_browsing")))).toBe("blocklist");
 	});
 
 	test("without provenance the target decides, then the company's known role", () => {
-		const legacy = route("migrated_legacy_provider_report");
+		const legacy = route(undefined);
 		expect(roleOf(legacy, "email", unknown)).toBe("email");
 		expect(roleOf(legacy, "ip", unknown)).toBe("host");
 		expect(roleOf(legacy, "service_account", unknown)).toBe("platform");

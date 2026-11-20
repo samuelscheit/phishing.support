@@ -3,14 +3,12 @@ import {
 	genericProviderFormAdapterHasValidHash,
 } from "../providers/generic_form";
 import { buildProviderReportNarrative } from "../providers/report_payload";
-import { taskStepLimit, type BrowserTask } from "../../browser_task/agent";
+import type { BrowserTask } from "../../browser_task/agent";
 import type { ProviderFormFacts } from "./form_facts";
 import { exactAllowedHttpsUrl, normalizeAllowedDomains } from "./provider_contract";
 
 /** Model turns a provider-form task may take (each turn can fill several fields). */
-export function portalTaskMaxSteps(value: string | undefined = process.env.ABUSE_PORTAL_TASK_MAX_STEPS): number {
-	return taskStepLimit("ABUSE_PORTAL_TASK_MAX_STEPS", value, 40, 100);
-}
+const PORTAL_TASK_MAX_STEPS = 40;
 
 /**
  * A deliberately narrow fallback for a provider which explicitly says its
@@ -82,7 +80,7 @@ export function buildGenericProviderFormTask(params: {
 			"If the form can only be sent after something you do not have (a login, an email or phone verification code, a CAPTCHA that stays after waiting), do not submit: call needs_input and say what is required.",
 			"After submitting, finish with the confirmation the provider shows: submitted_domains is [target] and submitted_urls is the payload's observedUrls exactly as submitted, final_submit_clicked=true, final_submit_control=\"provider_report_submit\", irreversible_actions=[\"provider_report_submit\"].",
 		].join("\n"),
-		maxSteps: params.maxSteps ?? portalTaskMaxSteps(),
+		maxSteps: params.maxSteps ?? PORTAL_TASK_MAX_STEPS,
 		resultSchema: definition.resultSchema,
 	};
 }

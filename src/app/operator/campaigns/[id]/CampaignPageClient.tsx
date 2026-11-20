@@ -259,7 +259,7 @@ export function CampaignPageClient({ overview }: { overview: CampaignOverview })
 					{overview.mergedInto && <p className="text-sm text-amber-700">Merged into <a className="underline" href={`/operator/campaigns/${overview.mergedInto}`}>campaign {overview.mergedInto}</a>; its referrals stay here.</p>}
 				</div>
 				<Button asChild variant="outline" size="sm">
-					<a href={`/api/operator/campaigns/${overview.campaignId}/dossier`}><Download />Dossier with evidence (ZIP)</a>
+					<a href={`/campaigns/${overview.campaignId}/evidence.zip`}><Download />Dossier with evidence (ZIP)</a>
 				</Button>
 			</div>
 

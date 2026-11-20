@@ -176,6 +176,13 @@
       "when": 1795167551395,
       "tag": "0024_provider_login_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1795187956137,
+      "tag": "0025_legacy_cleanup",
+      "breakpoints": true
     }
   ]
 }

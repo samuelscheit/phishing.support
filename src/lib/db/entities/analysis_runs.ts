@@ -11,7 +11,7 @@ function withoutInputImages(item: ResponseInputItem): ResponseInputItem {
 }
 
 export class AnalysisRunsEntity {
-    static async create(submissionId: bigint, input?: Array<ResponseInputItem>, analysisKind: AnalysisRunKind = "unknown") {
+    static async create(submissionId: bigint, analysisKind: AnalysisRunKind, input?: Array<ResponseInputItem>) {
         const db = await getDb();
         const id = generateId();
         await db.insert(analysisRuns).values([

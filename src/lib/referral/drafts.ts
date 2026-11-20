@@ -1,5 +1,5 @@
 import { serviceIdentity } from "../constants";
-import { publicCampaignUrl } from "../campaign/urls";
+import { publicCampaignUrl, publicEvidenceUrl } from "../campaign/urls";
 import type { Authority } from "./authorities";
 import type { Complainant } from "./complainant";
 import type { Dossier, DossierSite } from "./dossier";
@@ -17,7 +17,6 @@ type DraftContext = {
 	complainant: Complainant;
 	/** The case tag every mail of the referral report carries, e.g. `PS-0a1b2c3d`. */
 	caseTag: string;
-	download: { url: string; expiresAt: Date };
 };
 
 const SERVICE = new URL(serviceIdentity.url).host;
@@ -55,12 +54,12 @@ function campaignSummary(dossier: Dossier, sites: readonly DossierSite[]): strin
 	return `${when}${brands}${data}`;
 }
 
-function evidenceParagraph(download: DraftContext["download"]): string[] {
+function evidenceParagraph(dossier: Dossier): string[] {
 	return [
 		"Beweismittel",
 		"Für jede Website liegen ein MHTML-Mitschnitt, ein Bildschirmfoto mit eingeblendeter URL und Uhrzeit, ein Manifest mit den SHA-256-Prüfsummen aller Dateien und ein RFC-3161-Zeitstempel einer unabhängigen Zeitstempelstelle über dieses Manifest vor. Wo unser Browser die Seite mit synthetischen Werten durchlaufen hat, belegt ein ebenso zeitgestempeltes Besuchsprotokoll (visit-protocol.txt, visit-record.json), welcher Wert wann in welches Feld eingegeben wurde und welche Anfrage ihn wohin übertrug, mit vollständigem Inhalt und der Antwort des Servers. Die Prüfsummen stehen in der Anlage sites.csv. Das ZIP-Archiv enthält die Dateien und je Website eine Auswertung (analysis.txt: warum die Seite Phishing ist, was eingegeben und wohin es gesendet wurde); Archiv und Auswertungen sind englisch, damit sie auch Anbieter und ausländische Stellen lesen können. Herunterladen können Sie es hier:",
-		download.url,
-		`(Der Link ist bis ${germanDate(download.expiresAt.toISOString())} gültig. Auf Wunsch übermitteln wir die Dateien auch auf anderem Weg.)`,
+		publicEvidenceUrl(dossier.campaignId),
+		"(Auf Wunsch übermitteln wir die Dateien auch auf anderem Weg.)",
 	];
 }
 
@@ -95,7 +94,7 @@ export function complaintDraft(context: DraftContext & { authority: Authority })
 		...infrastructureLines(dossier.infrastructure, "de"),
 		...annexSentence(dossier),
 		"",
-		...evidenceParagraph(context.download),
+		...evidenceParagraph(context.dossier),
 		"",
 		"Weiteres Vorgehen",
 		`Bitte teilen Sie uns das Aktenzeichen mit. Neue Websites derselben Kampagne würden wir als Nachtrag zu diesem Verfahren übersenden; bitte nennen Sie uns dafür, wenn möglich, eine Ansprechperson oder eine Adresse. Antworten auf diese E-Mail erreichen uns direkt. Sollte die Anzeige bei ${authority.name} nicht richtig sein, bitten wir um Weiterleitung an die zuständige Stelle.`,
@@ -134,7 +133,7 @@ export function supplementDraft(context: DraftContext & { authority: Authority; 
 		...infrastructureLines(dossier.infrastructure, "de"),
 		...annexSentence(dossier),
 		"",
-		...evidenceParagraph(context.download),
+		...evidenceParagraph(context.dossier),
 		"",
 		"Anlagen: sites.csv (alle Websites der Kampagne), indicators.csv",
 		"",

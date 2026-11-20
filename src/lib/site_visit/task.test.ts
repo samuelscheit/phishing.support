@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ExfiltrationCanaries } from "../exfiltration/types";
-import { buildSiteVisitTask, MAX_FORM_SUBMISSIONS, visitAgentReport, visitMaxSteps } from "./task";
+import { buildSiteVisitTask, MAX_FORM_SUBMISSIONS, visitAgentReport, VISIT_MAX_STEPS } from "./task";
 
 const canaries: ExfiltrationCanaries = {
 	marker: "psprobe_0123456789abcdef",
@@ -69,10 +69,7 @@ describe("the site visit task", () => {
 		// A kit that replaced itself with a page it built in the browser (production case 381783517136165791) is still visited.
 		expect(buildSiteVisitTask("blob:https://solatclock.com/d23bb6f3-711d-487f-a2bb-308e4305ce77#", canaries, 80).goal)
 			.toContain("The browser is already on its page (blob:https://solatclock.com/d23bb6f3-711d-487f-a2bb-308e4305ce77#)");
-		expect(visitMaxSteps(undefined)).toBe(60);
-		expect(visitMaxSteps(" 40 ")).toBe(40);
-		expect(() => visitMaxSteps("0")).toThrow("SITE_VISIT_TASK_MAX_STEPS must be a whole number from 1 to 150.");
-		expect(() => visitMaxSteps("12abc")).toThrow("whole number");
+		expect(buildSiteVisitTask("https://phish.example/", canaries)).toMatchObject({ maxSteps: VISIT_MAX_STEPS });
 		expect(buildSiteVisitTask("https://phish.example/", canaries, 150)).toMatchObject({ maxSteps: 150 });
 	});
 

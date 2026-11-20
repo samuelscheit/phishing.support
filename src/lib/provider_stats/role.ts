@@ -26,7 +26,6 @@ const ROLE_BY_SOURCE: Readonly<Record<string, ProviderRole>> = {
 	ip_rdap: "host",
 	ip_whois: "host",
 	asn_rdap: "host",
-	ripe_abuse_c: "host",
 	// The origin server Cloudflare disclosed behind a proxied site.
 	cloudflare_origin_disclosure: "host",
 	service_account_registry: "platform",
@@ -47,7 +46,7 @@ export function roleOf(
 	organisation: Organisation,
 ): ProviderRole {
 	if (organisation.role === "blocklist") return "blocklist";
-	if (route.providerRegistryKey.replace(/^historical:/, "").startsWith("authority:")) return "authority";
+	if (route.providerRegistryKey.startsWith("authority:")) return "authority";
 	const source = typeof route.resolverProvenance.source === "string" ? route.resolverProvenance.source : undefined;
 	const bySource = source ? ROLE_BY_SOURCE[source] : undefined;
 	if (source === "domain_infrastructure_ip" && organisation.role === "cdn") return "cdn";

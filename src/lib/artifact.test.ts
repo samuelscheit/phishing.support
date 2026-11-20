@@ -15,7 +15,7 @@ async function createRun() {
 		data: { kind: "email" },
 		dedupeKey: `artifact-test-${Math.random()}`,
 	});
-	return { submissionId, runId: await AnalysisRunsEntity.create(submissionId) };
+	return { submissionId, runId: await AnalysisRunsEntity.create(submissionId, "analysis") };
 }
 
 describe("analysis stream consumption", () => {

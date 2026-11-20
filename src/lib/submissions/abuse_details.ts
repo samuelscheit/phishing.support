@@ -84,18 +84,13 @@ function providerReportBody(params: {
 	legalBrandUrl?: string | null;
 }): { body: string; bodySource: "prepared" | "preview" | "historical" } {
 	const payload = asRecord(params.providerPayload);
-	// Only a provider-specific narrative (v1) or a migrated record's own text is
-	// shown verbatim. Older payloads used an analysis excerpt as their text.
+	// A prepared provider text or a migrated record's own text is shown verbatim.
 	if (payload?.adapter === "historical_report") {
 		const body = nonEmptyString(payload.body);
 		if (body) return { body, bodySource: "historical" };
 	}
-	if (payload?.providerNarrativeVersion === 1) {
-		const report = asRecord(payload.report);
-		const form = asRecord(payload.form);
-		const prepared = [report?.reason, report?.explanation, form?.justification].map(nonEmptyString).find(Boolean);
-		if (prepared) return { body: prepared, bodySource: "prepared" };
-	}
+	const prepared = [asRecord(payload?.report)?.reason, asRecord(payload?.report)?.explanation, asRecord(payload?.form)?.justification].map(nonEmptyString).find(Boolean);
+	if (prepared) return { body: prepared, bodySource: "prepared" };
 
 	const provider = getProviderSubmissionProvider(params.providerRegistryKey);
 	const preview = provider?.buildReportPreview?.({

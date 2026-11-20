@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 
-import { agentGaveUp, browserTaskModel, taskStepLimit } from "./agent";
+import { agentGaveUp, browserTaskModel } from "./agent";
 
 type Captured = { path: string; headers: Record<string, string>; body: Record<string, unknown> };
 const captured: Captured[] = [];
@@ -27,38 +27,14 @@ describe("the browser task model", () => {
 		expect(browserTaskModel({ OPENAI_API_KEY: "sk-app" }).id).toBe("openai/gpt-5.5");
 	});
 
-	test("takes PHISHING_TASK_MODEL, whose OpenRouter-style id may itself contain a slash", async () => {
-		const model = browserTaskModel({ PHISHING_TASK_MODEL: " openai/anthropic/claude-sonnet-4.5 ", OPENAI_API_KEY: "sk-app", OPENAI_API_BASE_URL: `${base}/api/v1` });
+	test("an OpenRouter-style model id may itself contain a slash", async () => {
+		const model = browserTaskModel({ OPENAI_MODEL: " anthropic/claude-sonnet-4.5 ", OPENAI_API_KEY: "sk-app", OPENAI_API_BASE_URL: `${base}/api/v1` });
 		await model.complete(ask);
 		expect(captured.at(-1)).toMatchObject({ path: "/api/v1/chat/completions", body: { model: "anthropic/claude-sonnet-4.5" } });
 	});
 
-	test("uses Anthropic with its own key and endpoint", async () => {
-		const model = browserTaskModel({ PHISHING_TASK_MODEL: "anthropic/claude-sonnet-4-5", ANTHROPIC_API_KEY: "sk-ant", ANTHROPIC_BASE_URL: base, OPENAI_API_KEY: "sk-app" });
-		expect(model.id).toBe("anthropic/claude-sonnet-4-5");
-		await model.complete(ask);
-		expect(captured.at(-1)).toMatchObject({ path: "/v1/messages", headers: { "x-api-key": "sk-ant" }, body: { model: "claude-sonnet-4-5" } });
-		expect(captured.at(-1)?.headers.authorization).toBeUndefined();
-	});
-
 	test("refuses a configuration that cannot work, before any browser is leased", () => {
 		expect(() => browserTaskModel({})).toThrow("OPENAI_API_KEY is required for the browser task model.");
-		expect(() => browserTaskModel({ PHISHING_TASK_MODEL: "anthropic/claude-sonnet-4-5", OPENAI_API_KEY: "sk-app" })).toThrow("ANTHROPIC_API_KEY");
-		for (const spec of ["gpt-5.5", "google/gemini", "openai/", "openai/has space"]) {
-			expect(() => browserTaskModel({ PHISHING_TASK_MODEL: spec, OPENAI_API_KEY: "sk-app" })).toThrow("PHISHING_TASK_MODEL must be openai/<model> or anthropic/<model>.");
-		}
-	});
-});
-
-describe("step limits from the environment", () => {
-	test("default when unset, the value when in range, and a configuration error otherwise", () => {
-		expect(taskStepLimit("X_STEPS", undefined, 40, 100)).toBe(40);
-		expect(taskStepLimit("X_STEPS", "  ", 40, 100)).toBe(40);
-		expect(taskStepLimit("X_STEPS", " 12 ", 40, 100)).toBe(12);
-		expect(taskStepLimit("X_STEPS", "100", 40, 100)).toBe(100);
-		for (const value of ["0", "101", "-1", "1.5", "1e2", "twelve", "NaN"]) {
-			expect(() => taskStepLimit("X_STEPS", value, 40, 100)).toThrow("X_STEPS must be a whole number from 1 to 100.");
-		}
 	});
 });
 
