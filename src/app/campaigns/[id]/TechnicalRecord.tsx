@@ -11,10 +11,10 @@ import { useCopy } from "@/components/useCopy";
 import { ChevronDown, Copy, Download } from "lucide-react";
 
 import type { PublicCampaign, PublicCampaignSite, PublicReportState } from "@/lib/campaign/public_view";
-import { formatUtcDateTime } from "@/lib/date_time";
-import type { Locale } from "@/lib/i18n";
-import { plural } from "@/lib/values";
-import { cn } from "@/web_lib/util";
+import { formatUtcDateTime } from "@/lib/util/date_time";
+import type { Locale } from "@/lib/i18n/locale";
+import { plural } from "@/lib/util/values";
+import { cn } from "@/lib/util/cn";
 import { COPY } from "./copy";
 
 const TONE = {

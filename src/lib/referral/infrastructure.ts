@@ -5,7 +5,7 @@ import { locatedCountry, originAsns, registeredCountry } from "../network/ripest
 import { registrableDomain } from "../abuse/security";
 import type { AbuseProviderRoute } from "../abuse/schema";
 import { countryName, countryRoutes, directComplaint, type Bilingual } from "./countries";
-import { plural, record, text } from "../values";
+import { plural, record, text } from "../util/values";
 import { providerLead, type ProviderLead } from "./provider_leads";
 
 /**

@@ -1,4 +1,4 @@
-import { fetchNetcraftSubmissionState, type NetcraftFetch } from "../../../netcraft/api";
+import { fetchNetcraftSubmissionState, type NetcraftFetch } from "./api";
 import type { AbuseMailClassification } from "../../schema";
 import type { ProviderCorrespondence } from "../submission_contracts";
 

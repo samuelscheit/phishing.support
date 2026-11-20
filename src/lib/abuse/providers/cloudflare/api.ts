@@ -5,7 +5,7 @@ import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } fr
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import type { CloudflareReportPayload } from "./report";
 import { getCloudflareSession, type CloudflareLoginConfig, type CloudflareSession } from "./session";
-import { asRecord } from "../../../values";
+import { asRecord } from "../../../util/values";
 import { deadline, jsonRecord } from "../kit/http";
 import { snippet } from "../kit/text";
 

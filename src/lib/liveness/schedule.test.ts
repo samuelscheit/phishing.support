@@ -8,7 +8,7 @@ import { AbuseWorker } from "../abuse/worker";
 import { saveResolvedTarget } from "../abuse/worker/resolution";
 import { getDb } from "../db";
 import { useTemporaryDatabase } from "../db/test_helpers";
-import { DAY_MS, HOUR_MS } from "../duration";
+import { DAY_MS, HOUR_MS } from "../util/date_time";
 import type { SiteCheckDependencies } from "./check";
 import { listLivenessTargets, listSiteChecks, listSiteChecksForTargets, livenessJobKey, recordSiteCheck } from "./repository";
 import { ensureLivenessChecks, LIVENESS_CHECK_OFFSETS_MS, nextLivenessCheckAt, runLivenessCheck, scheduleLivenessChecks } from "./schedule";

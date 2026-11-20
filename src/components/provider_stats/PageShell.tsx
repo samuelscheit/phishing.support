@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { SiteFooter } from "@/components/SiteLayout";
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 
 const SECTIONS = [
 	{ href: "/providers", label: "Providers" },

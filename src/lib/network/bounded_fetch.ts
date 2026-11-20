@@ -1,4 +1,4 @@
-import { sleep } from "../sleep";
+import { sleep } from "../util/sleep";
 
 /**
  * Bounded fetch primitives for evidence collection.  A failed third-party

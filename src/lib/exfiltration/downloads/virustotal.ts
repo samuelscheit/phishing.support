@@ -1,5 +1,5 @@
 import type { LookupResult } from "./policy";
-import { sleep } from "../../sleep";
+import { sleep } from "../../util/sleep";
 
 /** Official VirusTotal v3 API base. Every call sends the key in the `x-apikey` header. */
 const VIRUSTOTAL_API = "https://www.virustotal.com/api/v3";

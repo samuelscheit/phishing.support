@@ -2,7 +2,7 @@
 import { operatorServerRoles } from "../campaign/schema";
 import type { DossierIndicator, DossierSite } from "./dossier";
 import { defangCommand } from "../malware/defang";
-import { plural, record, text } from "../values";
+import { plural, record, text } from "../util/values";
 
 const BERLIN = new Intl.DateTimeFormat("de-DE", {
 	timeZone: "Europe/Berlin",

@@ -14,9 +14,9 @@ import {
 	FABRIC_BROWSER_SESSION_ID_PATTERN,
 	fabricBrowserSessionIdFromProviderPayload,
 	isFabricBrowserSessionId,
-} from "../fabric/session";
-import { asError, errorText } from "../error_text";
-import { sleep } from "../sleep";
+} from "./fabric_session";
+import { asError, errorText } from "../util/error_text";
+import { sleep } from "../util/sleep";
 
 export type FabricScalar = string | number | boolean | null;
 type FabricEnvironment = Readonly<Record<string, string | undefined>>;

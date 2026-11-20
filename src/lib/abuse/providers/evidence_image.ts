@@ -1,6 +1,6 @@
 import type { AbuseArtifact } from "../schema";
 import { sha256Hex } from "../security";
-import { asRecord } from "../../values";
+import { asRecord } from "../../util/values";
 
 export type ProviderEvidenceImageMimeType = "image/gif" | "image/jpeg" | "image/png" | "image/tiff";
 

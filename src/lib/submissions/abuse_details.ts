@@ -4,7 +4,7 @@ import { getProviderSubmissionProvider } from "@/lib/abuse/providers/submission_
 import { buildProviderReportNarrative } from "@/lib/abuse/providers/report_payload";
 import type { AbuseMailClassification, AbuseReport } from "@/lib/abuse/schema";
 import { describeDecisionFollowUp, type DecisionFollowUpSummary } from "@/lib/abuse/followup/describe";
-import { asRecord } from "../values";
+import { asRecord } from "../util/values";
 
 function nonEmptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value : undefined;

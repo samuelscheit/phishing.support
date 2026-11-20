@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { LoaderCircle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 import { extractOutputText } from "@/lib/analysis/stream_events";
 import { summarizeAnalysisEntries } from "@/lib/analysis/stream_view";
 import { AnalysisHeader, FinalAnswer, TimelineEntryView } from "./analysis/AnalysisPanels";

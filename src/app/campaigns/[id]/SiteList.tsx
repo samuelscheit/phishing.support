@@ -5,8 +5,8 @@ import { AlertTriangle, ArrowRight, ArrowUp, ChevronDown, FileSearch } from "luc
 
 import { Collapsible } from "@/components/Collapsible";
 import type { PublicCampaign, PublicCampaignSite } from "@/lib/campaign/public_view";
-import { formatDate, type Locale } from "@/lib/i18n";
-import { cn } from "@/web_lib/util";
+import { formatDate, type Locale } from "@/lib/i18n/locale";
+import { cn } from "@/lib/util/cn";
 import { COPY } from "./copy";
 import { BrowserFrame, Thumb } from "./SitePicture";
 

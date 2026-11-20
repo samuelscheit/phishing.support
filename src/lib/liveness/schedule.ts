@@ -1,6 +1,6 @@
 import { AbuseRepository } from "../abuse/repository";
 import type { AbuseJob } from "../abuse/schema";
-import { DAY_MS, HOUR_MS } from "../duration";
+import { DAY_MS, HOUR_MS } from "../util/date_time";
 import { checkSite, type SiteCheckDependencies } from "./check";
 import { listLivenessTargets, livenessJobKey, recordSiteCheck, type LivenessTarget } from "./repository";
 

@@ -2,17 +2,17 @@ import crypto from "node:crypto";
 
 import { resolveVerifiedProviderLink } from "../mail/reply";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
-import { serviceIdentity } from "../../constants";
+import { serviceIdentity } from "../../network/service_identity";
 import { deriveProviderFormFacts } from "../portal/form_facts";
 import { validateGenericProviderFormOutput } from "../portal/output_validation";
 import { buildGenericProviderFormTask } from "../portal/task";
 import { AbuseRepository } from "../repository";
 import { stableJson } from "../security";
-import { agentGaveUp, type BrowserTask, type TaskResult } from "../../browser_task/agent";
-import { runFabricBrowserTask } from "../../browser_task/fabric";
-import { redactedErrorText } from "../../error_text";
+import { agentGaveUp, type BrowserTask, type TaskResult } from "../../browser/task/agent";
+import { runFabricBrowserTask } from "../../browser/task/fabric";
+import { redactedErrorText } from "../../util/error_text";
 import { routeContext, storedBrowserTask, throwIfAborted, UnknownExternalStateError, type WorkerServices } from "./shared";
-import { asRecord } from "../../values";
+import { asRecord } from "../../util/values";
 
 /**
  * Wall-clock limit of one provider-form task. It must end before the

@@ -7,11 +7,10 @@ import { retryInterruptedWebsiteAnalysis } from "./lib/website/ai";
 import { startAbuseWorker, stopAbuseWorker } from "./lib/abuse/worker";
 import { startMailboxListener, stopMailboxListener } from "./lib/imap/listener";
 import { startRelayBounceIntake, stopRelayBounceIntake } from "./lib/imap/maildir";
-import { envInt } from "./lib/env";
-
 
 const dev = process.env.NODE_ENV !== "production";
-const port = envInt("PORT", 3000);
+const parsedPort = Number.parseInt(process.env.PORT ?? "", 10);
+const port = parsedPort > 0 ? parsedPort : 3000;
 const hostname = process.env.HOSTNAME ?? (dev ? "localhost" : "0.0.0.0");
 
 const app = next({ dev, hostname, port, customServer: true });

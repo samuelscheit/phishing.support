@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createEmailSubmissionFromEml } from "@/lib/submissions/email";
-import { getReporterMetadata } from "@/lib/request_metadata";
+import { getReporterMetadata } from "@/lib/http/reporter_metadata";
 
 export async function POST(req: NextRequest) {
 	try {

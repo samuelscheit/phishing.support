@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { asRecord } from "../../../values";
+import { asRecord } from "../../../util/values";
 import type { BrowserFormField, BrowserFormFile, BrowserFormRequestSession, BrowserFormResponse, BrowserFormSession } from "../browser_form";
 import { createDraft, reportInputOf, type RouteData, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";

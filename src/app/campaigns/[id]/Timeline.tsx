@@ -8,8 +8,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { PublicCampaign, PublicCampaignSite } from "@/lib/campaign/public_view";
-import { formatDate, type Locale } from "@/lib/i18n";
-import { cn } from "@/web_lib/util";
+import { formatDate, type Locale } from "@/lib/i18n/locale";
+import { cn } from "@/lib/util/cn";
 import { COPY } from "./copy";
 import { DOT, LANE, placeDots } from "./timeline_layout";
 

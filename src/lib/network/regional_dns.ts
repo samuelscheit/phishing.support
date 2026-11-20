@@ -1,8 +1,8 @@
 import { fetchJson, withTimeout, type FetchImplementation } from "./bounded_fetch";
 import { isIP } from "node:net";
-import { errorText } from "../error_text";
-import { sleep } from "../sleep";
-import { asRecord, finiteNumber as number, text as string } from "../values";
+import { errorText } from "../util/error_text";
+import { sleep } from "../util/sleep";
+import { asRecord, finiteNumber as number, text as string } from "../util/values";
 
 const GLOBALPING_MEASUREMENTS_URL = "https://api.globalping.io/v1/measurements";
 const DEFAULT_COUNTRIES = ["BR", "DE", "JP", "US"] as const;

@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Browser } from "rebrowser-puppeteer-core";
 
 import { useTemporaryDatabase } from "../../db/test_helpers";
-import { browserTaskModel, type ChatModel } from "../../browser_task/agent";
-import { chromiumAvailable, html, launchTestChromium, refIn, requestTexts, ScriptedModel, selfSignedCertificate, StalledModel, type ScriptedTurn } from "../../browser_task/test_helpers";
+import { browserTaskModel, type ChatModel } from "../../browser/task/agent";
+import { chromiumAvailable, html, launchTestChromium, refIn, requestTexts, ScriptedModel, selfSignedCertificate, StalledModel, type ScriptedTurn } from "../../browser/task/test_helpers";
 import { validateAbuseReportRequest } from "../contracts";
 import { buildGenericProviderFormTask } from "../portal/task";
 import { AbuseRepository } from "../repository";

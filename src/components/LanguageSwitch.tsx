@@ -2,8 +2,8 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import { LOCALE_COOKIE, LOCALES, type Locale } from "@/lib/i18n";
-import { cn } from "@/web_lib/util";
+import { LOCALE_COOKIE, LOCALES, type Locale } from "@/lib/i18n/locale";
+import { cn } from "@/lib/util/cn";
 
 const LABEL: Record<Locale, string> = { en: "English", de: "Deutsch" };
 

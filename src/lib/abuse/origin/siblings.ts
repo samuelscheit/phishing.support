@@ -11,8 +11,8 @@ import { mapConcurrent } from "./concurrency";
 import { MAX_KIT_FINGERPRINTS } from "./snapshot";
 import { isPopularSite, loadPopularDomains, type PopularDomains } from "./popular_domains";
 import { certificateCovers, presentedCertificate, type OriginServer, type PresentedCertificate, type TlsProbe } from "./sweep";
-import { errorSummary } from "../../error_text";
-import { isWebPage } from "../../web_page";
+import { errorSummary } from "../../util/error_text";
+import { isWebPage } from "../../network/web_page";
 import { isUrlscanBusy, searchUrlscan, type UrlscanDependencies } from "./urlscan";
 
 const MAX_CANDIDATES = 100;

@@ -1,6 +1,6 @@
 import { AnalysisLogs } from "@/components/AnalysisLogs";
 import type { SubmissionDetail } from "@/lib/submissions/details";
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 
 export function RunsTab({ submission, runs, isRunning }: { submission: SubmissionDetail; runs: SubmissionDetail["analysisRuns"]; isRunning: boolean }) {
 	if (runs.length > 0) {

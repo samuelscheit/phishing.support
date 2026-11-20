@@ -1,4 +1,4 @@
-import { serviceIdentity } from "../constants";
+import { serviceIdentity } from "../network/service_identity";
 import { abuseCaseTag } from "../abuse/mail/correlation";
 import { readVerifiedEmailDraft, verifiedEmailProviderPayload } from "../abuse/mail/draft";
 import { approvalDraftOf, type ApprovalDraft } from "../abuse/persistence/approvals";

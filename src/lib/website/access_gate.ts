@@ -1,5 +1,5 @@
 import { SubmissionsEntity } from "../db/entities/submissions";
-import { errorSummary } from "../error_text";
+import { errorSummary } from "../util/error_text";
 import { fetchThroughPublicRedirects } from "../network/public_redirects";
 import { isSameWebsite, websiteSite } from "./site";
 import { isFlowStepHop, type WebsiteNavigationHop } from "./types";

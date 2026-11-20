@@ -2,7 +2,7 @@ import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { generateId } from "@/lib/db/ids";
 import { analyzeWebsite, type AnalyzeWebsiteOptions } from "@/lib/website/ai";
-import type { ReporterMetadata } from "@/lib/request_metadata";
+import type { ReporterMetadata } from "@/lib/http/reporter_headers";
 import { websiteSite } from "@/lib/website/site";
 import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website/capture_files";
 import { getRetryableSubmission, SubmissionRetryError } from "./retry";

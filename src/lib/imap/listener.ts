@@ -2,7 +2,7 @@ import { ImapFlow, type FetchMessageObject } from "imapflow";
 
 import { imapConfig, replyDomain, type ImapConfig } from "../mail/config";
 import { ingestFetchedMail } from "./ingest";
-import { sleep } from "../sleep";
+import { sleep } from "../util/sleep";
 
 function noConnection(error: unknown): boolean {
 	return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "NoConnection");

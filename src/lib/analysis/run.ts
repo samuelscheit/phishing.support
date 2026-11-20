@@ -2,10 +2,10 @@ import type { ResponseCreateParamsStreaming, ResponseInputItem } from "openai/re
 import type OpenAI from "openai";
 
 import { analysisRetryDelayMs, describeAnalysisError, isRetryableAnalysisError } from "./retry";
-import { AnalysisStreamAttemptError, logAndPersistStream } from "../artifact";
+import { AnalysisStreamAttemptError, logAndPersistStream } from "./stream_artifact";
 import { AnalysisRunsEntity } from "../db/entities/analysis_runs";
 import type { AnalysisRunKind } from "../db/schema";
-import { sleep } from "../sleep";
+import { sleep } from "../util/sleep";
 import { getOpenAIClient } from "../openai/client";
 import { publishEvent } from "../event/event_transport";
 

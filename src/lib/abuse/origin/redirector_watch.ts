@@ -1,9 +1,9 @@
 import { parse } from "node-html-parser";
 import { z } from "zod";
 
-import { browserRequestHeaders } from "../../constants";
+import { browserRequestHeaders } from "../../network/service_identity";
 import { SubmissionsEntity } from "../../db/entities/submissions";
-import { errorSummary } from "../../error_text";
+import { errorSummary } from "../../util/error_text";
 import { readResponseBody } from "../../network/bounded_fetch";
 import { fetchThroughPublicRedirects, PublicRedirectError, type PublicRedirectDependencies } from "../../network/public_redirects";
 import { createWebsiteSubmission } from "../../submissions/website";
@@ -15,7 +15,7 @@ import type { AbuseJob } from "../schema";
 import { normalizePublicHttpUrl } from "../security";
 import { throwIfAborted } from "../worker/shared";
 import { redirectParentId } from "./kit_job";
-import { DAY_MS } from "../../duration";
+import { DAY_MS } from "../../util/date_time";
 
 /**
  * A redirector is the link a campaign hands out (in its emails, its ads)

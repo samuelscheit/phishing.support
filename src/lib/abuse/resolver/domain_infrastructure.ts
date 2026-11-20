@@ -4,8 +4,8 @@ import { isPublicIp } from "../security";
 import type { ResolvedRouteInput } from "../route_contracts";
 import { resolveIpTarget } from "./ip";
 import type { JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
-import { errorText } from "../../error_text";
-import { isRecord } from "../../values";
+import { errorText } from "../../util/error_text";
+import { isRecord } from "../../util/values";
 
 const MAX_INFRASTRUCTURE_IPS = 16;
 

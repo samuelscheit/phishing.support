@@ -1,4 +1,4 @@
-import { NETCRAFT_REPORT_MAIL_URL } from "../../../netcraft/api";
+import { NETCRAFT_REPORT_MAIL_URL } from "../netcraft/api";
 import { definePinned } from "../kit/pin";
 import { MAX_REPORTED_EMAIL_BYTES } from "../../submission_reports";
 

@@ -1,6 +1,6 @@
 import { Address } from "@/components/Address";
 import type { PublicCampaignSite, PublicCampaignVisitor } from "@/lib/campaign/public_view";
-import type { Locale } from "@/lib/i18n";
+import type { Locale } from "@/lib/i18n/locale";
 import { COPY } from "./copy";
 
 /**

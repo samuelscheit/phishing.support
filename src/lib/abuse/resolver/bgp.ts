@@ -1,4 +1,4 @@
-import { asRecord } from "../../values";
+import { asRecord } from "../../util/values";
 import { asArray } from "./records";
 import type { JsonRecord } from "./types";
 

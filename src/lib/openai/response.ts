@@ -1,4 +1,4 @@
-import { asRecord, isRecord, type JsonRecord } from "../values";
+import { asRecord, isRecord, type JsonRecord } from "../util/values";
 
 /**
  * The content parts of every assistant message in a Responses API `output`,

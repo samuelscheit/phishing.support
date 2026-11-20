@@ -1,4 +1,4 @@
-import { serviceIdentity } from "../constants";
+import { serviceIdentity } from "../network/service_identity";
 
 /** The public page listing every site of a campaign. */
 export function publicCampaignUrl(campaignId: bigint | string): string {

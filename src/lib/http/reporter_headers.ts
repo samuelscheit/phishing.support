@@ -14,9 +14,16 @@ export type ReporterHeaders =
 	| null
 	| undefined;
 
+/**
+ * Metadata captured at the HTTP boundary for a submission.
+ *
+ * Internal submission sources (for example the IMAP listener) do not have a
+ * request and therefore leave these values unset.
+ */
 export type ReporterMetadata = {
-	reporterCountry?: string | null;
-	reporterHeaders?: ReporterHeaders;
+	reporterIp?: string;
+	reporterCountry?: string;
+	reporterHeaders?: Record<string, string>;
 };
 
 const userAgentHeaderNames = ["user-agent", "x-user-agent"] as const;
@@ -153,10 +160,19 @@ export function readableUserAgent(headersOrUserAgent: ReporterHeaders | string |
 	return browser ? `${browser} browser` : "Unknown device";
 }
 
-/** Normalize a country code for flag and display-name lookup. */
-export function normalizeCountryCode(country: string | null | undefined): string | undefined {
-	const code = country?.trim().toUpperCase();
-	return code && /^[A-Z]{2}$/.test(code) ? code : undefined;
+const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/;
+
+/**
+ * Normalize an ISO-3166 alpha-2 country code. Cloudflare uses `XX` for an
+ * unknown country and `T1` for Tor traffic; neither is useful as a country in
+ * the UI, so treat them as unavailable.
+ */
+export function normalizeCountryCode(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+
+	const code = value.trim().toUpperCase();
+	if (!COUNTRY_CODE_PATTERN.test(code) || code === "XX" || code === "T1") return undefined;
+	return code;
 }
 
 /** Convert an ISO 3166-1 alpha-2 code to its regional-indicator emoji flag. */

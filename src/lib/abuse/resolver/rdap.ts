@@ -1,7 +1,7 @@
 import { isIP } from "node:net";
 
 import { isPublicIp, normalizeDomain } from "../security";
-import { asRecord, text } from "../../values";
+import { asRecord, text } from "../../util/values";
 import { asArray, normalizeMailbox, uniqueStrings } from "./records";
 import type { AbuseMailbox, JsonRecord } from "./types";
 

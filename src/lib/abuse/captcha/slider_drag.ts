@@ -1,6 +1,6 @@
 import type { Page } from "rebrowser-puppeteer-core";
 
-import { sleep as pause } from "../../sleep";
+import { sleep as pause } from "../../util/sleep";
 
 /** One mouse step of a drag: where the pointer goes, relative to where it was pressed, and how long it takes. */
 export type SliderStep = { dx: number; dy: number; delayMs: number };

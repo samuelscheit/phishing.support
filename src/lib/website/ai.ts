@@ -6,7 +6,7 @@ import { ArtifactsEntity } from "../db/entities/artifacts";
 import { getInfo } from "./info";
 import { runStreamedAnalysisRun } from "../analysis/run";
 import { reportConfirmedWebsiteAbuse } from "../abuse/submission_reports";
-import type { ReporterMetadata } from "../request_metadata";
+import type { ReporterMetadata } from "../http/reporter_headers";
 import { defaultReasoning, defaultResponseModel } from "../openai/client";
 import { analyzedCaptureStep } from "./capture_files";
 import { extractPasteCommands } from "../malware/paste_commands";

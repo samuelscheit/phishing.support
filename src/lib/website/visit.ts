@@ -1,6 +1,6 @@
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "../browser/fabric";
 import type { ArchiveWebsiteOptions } from "./archive/types";
-import { errorText } from "../error_text";
+import { errorText } from "../util/error_text";
 import type { WebsiteCloakedDestination, WebsiteRevisit, VisitDataSent, WebsiteKitResource, WebsiteNavigationHop, WebsiteSiteAssessment, WebsiteSiteClassification, WebsiteVisitRecord } from "./types";
 import { cloakedDestination, WEBSITE_FLOW_EGRESS } from "./archive/cloaking";
 import { VISIT_BUDGET_MS } from "../site_visit/task";
@@ -19,7 +19,7 @@ import { taskAgentVisit } from "../site_visit/agent";
 import { visitNavigation, visitPages, type VisitPage } from "../site_visit/evidence";
 import type { SiteVisitRecording } from "../site_visit/visit";
 import type { NarrativeVisitPage } from "./narrative";
-import { isWebPage } from "../web_page";
+import { isWebPage } from "../network/web_page";
 import { lookupDomainRegistration } from "./domain_registration";
 import { buildWebsiteClassificationInput, validateWebsiteSiteClassification, websiteMobileHandoff, WEBSITE_CLASSIFICATION_FORMAT, type WebsiteEvidenceArchive } from "./classification";
 import { emitStep } from "./progress";

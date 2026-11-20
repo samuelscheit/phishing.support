@@ -3,12 +3,12 @@ import type { BrowserContext, Frame, Page } from "patchright";
 
 import { acquireFabricPatchrightSession } from "../../../browser/fabric";
 import { dragAcross, type RandomSource } from "../../captcha/slider_drag";
-import { errorSummary } from "../../../error_text";
+import { errorSummary } from "../../../util/error_text";
 import { OperationCanceledError, raceAbort } from "../../worker/cancellation";
 import { boundedCleanup, createLoginSessions, ProviderLoginError, type LoginSession, type LoginSessionDeps, type LoginSessions } from "../login_session/session";
 import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
-import { asRecord } from "../../../values";
+import { asRecord } from "../../../util/values";
 
 const PROVIDER = "Alibaba Cloud";
 /** A login waits up to three minutes for its mailed code. */

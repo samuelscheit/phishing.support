@@ -1,6 +1,6 @@
 import { getDomain } from "tldts";
 
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 
 /**
  * A web address as a careful reader should read it: only the registered

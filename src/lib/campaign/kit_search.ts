@@ -6,11 +6,11 @@ import type { AbuseJob } from "../abuse/schema";
 import { throwIfAborted } from "../abuse/worker/shared";
 import { isKitSiblingSeed, retiredKitHashes } from "../abuse/origin/kit_job";
 import { isUrlscanBusy, urlscanRetryAfterMs } from "../abuse/origin/urlscan";
-import { errorSummary } from "../error_text";
+import { errorSummary } from "../util/error_text";
 import { searchKitHashes, type KitFingerprint, type KitFingerprintKind, type SiblingDiscoveryDependencies } from "../abuse/origin/siblings";
 import { websiteSubmissionDedupeKey } from "../submissions/website";
 import { CampaignRepository, type CampaignMemberView } from "./repository";
-import { DAY_MS } from "../duration";
+import { DAY_MS } from "../util/date_time";
 
 /**
  * The kit search of one campaign: its sites' own kit files are looked up on

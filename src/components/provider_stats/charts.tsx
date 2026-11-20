@@ -1,7 +1,7 @@
 import type { Distribution, ProviderStats } from "@/lib/provider_stats/aggregate";
 import { percent } from "@/lib/provider_stats/aggregate";
 import { PROVIDER_VERDICTS } from "@/lib/provider_stats/route_outcome";
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 
 import { formatMinutes, VERDICT_FILL, VERDICT_LABEL } from "./labels";
 

@@ -4,7 +4,7 @@ import { abuseCaseTag } from "./correlation";
 import { optionalOpenAIClient } from "../../openai/client";
 import { optionalResponseText } from "../../openai/response";
 import { normalizePublicHttpUrl } from "../security";
-import { serviceIdentity } from "../../constants";
+import { serviceIdentity } from "../../network/service_identity";
 import { defaultResponseModel } from "../../openai/client";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
 import { createOriginHostEmailDraft } from "../origin/draft";
@@ -12,7 +12,7 @@ import { humanizeOrganization, recipientGreeting } from "./shared";
 import { refangText } from "../../malware/defang";
 import { PRESERVATION_REQUEST } from "../preservation";
 import { approvalDraftOf } from "../persistence/approvals";
-import { asRecord } from "../../values";
+import { asRecord } from "../../util/values";
 
 const MAX_DESCRIPTION_INPUT = 12_000;
 const MAX_SUMMARY_LENGTH = 1_200;

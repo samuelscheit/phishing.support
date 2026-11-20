@@ -1,8 +1,8 @@
 import { isBrowserInfrastructureFailure } from "./archive/errors";
-import { errorText } from "../error_text";
+import { errorText } from "../util/error_text";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import type { WebsiteSubmissionData } from "../db/schema";
-import { sleep } from "../sleep";
+import { sleep } from "../util/sleep";
 
 /** Capture retries after a browser-service failure: 5 s, 15 s, then 45 s. */
 export const BROWSER_BACKOFF_MS = [5_000, 15_000, 45_000] as const;

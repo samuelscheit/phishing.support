@@ -1,4 +1,4 @@
-import { netcraftSubmissionIdsFromText } from "../../../netcraft/api";
+import { netcraftSubmissionIdsFromText } from "./api";
 import type { AbuseMailClassification } from "../../schema";
 import type { ProviderInboundMail } from "../submission_contracts";
 

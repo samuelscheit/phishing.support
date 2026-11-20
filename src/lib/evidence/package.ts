@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { serviceIdentity } from "../constants";
+import { serviceIdentity } from "../network/service_identity";
 import { websiteCaptureFileNames } from "../website/capture_files";
 import type { WebsiteNavigationHop } from "../website/types";
 import { stampAddressBar } from "./address_bar";

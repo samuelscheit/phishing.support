@@ -1,13 +1,13 @@
 import type { Browser, CDPSession, Page } from "rebrowser-puppeteer-core";
 
 import { VisitorTabs, type TabSetup, type VisitorTab } from "../browser/visitor_tabs";
-import { errorText } from "../error_text";
+import { errorText } from "../util/error_text";
 import { ExfiltrationNetworkRecorder } from "../exfiltration/recorder";
 import type { CapturedNetworkRequest, ExfiltrationCanaries } from "../exfiltration/types";
 import { interceptDownloads, type DownloadedFile, type DownloadInterceptor, type FailedDownload } from "../website/download";
 import { revealSyntheticSecret, type VisitAgent, type VisitAgentAction, type VisitAgentState } from "./agent";
 import { buildSiteVisitTask, visitAgentReport, VISIT_BUDGET_MS, type VisitAgentReport } from "./task";
-import { sleep } from "../sleep";
+import { sleep } from "../util/sleep";
 
 /**
  * One visit of a reported site, the way its victim goes through it: the

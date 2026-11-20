@@ -1,9 +1,9 @@
 import { AbuseRepository } from "./repository";
 import { resolveAbuseTarget } from "./resolver";
 import { acquireFabricCdpSession, cancelFabricBrowserSession } from "../browser/fabric";
-import { browserTaskModel, type ChatModel } from "../browser_task/agent";
-import type { FabricCdpSessionAcquirer } from "../browser_task/fabric";
-import { fabricBrowserSessionIdFromProviderPayload } from "../fabric/session";
+import { browserTaskModel, type ChatModel } from "../browser/task/agent";
+import type { FabricCdpSessionAcquirer } from "../browser/task/fabric";
+import { fabricBrowserSessionIdFromProviderPayload } from "../browser/fabric_session";
 import type { AbuseJob, AbuseJobType } from "./schema";
 import {
 	executeProviderSubmission,
@@ -30,7 +30,7 @@ import { describeCampaignIfChanged } from "../campaign/link";
 import { searchCampaignKits } from "../campaign/kit_search";
 import { enqueueRulesSweep, linkSiteToCampaign } from "../campaign/sweep";
 import { ensureLivenessChecks, runLivenessCheck } from "../liveness/schedule";
-import { sleep } from "../sleep";
+import { sleep } from "../util/sleep";
 
 const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;

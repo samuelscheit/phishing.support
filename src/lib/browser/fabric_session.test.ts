@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import {
 	fabricBrowserSessionIdFromProviderPayload,
 	isFabricBrowserSessionId,
-} from "./session";
+} from "./fabric_session";
 
 test("Fabric browser lifecycle payloads retain only a valid opaque session ID", () => {
 	expect(isFabricBrowserSessionId("browser-session_valid_123")).toBeTrue();

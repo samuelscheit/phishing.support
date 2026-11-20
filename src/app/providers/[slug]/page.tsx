@@ -10,8 +10,8 @@ import { Figure, PageShell, Pagination } from "@/components/provider_stats/PageS
 import { LOW_DATA_THRESHOLD, percent, routeTakedownOf, type ProviderStats } from "@/lib/provider_stats/aggregate";
 import type { ProviderRole } from "@/lib/provider_stats/role";
 import { getProviderPage, isProviderSlug, pageOf, type ProviderRouteDetail } from "@/lib/provider_stats/views";
-import { plural } from "@/lib/values";
-import { cn } from "@/web_lib/util";
+import { plural } from "@/lib/util/values";
+import { cn } from "@/lib/util/cn";
 
 export const dynamic = "force-dynamic";
 

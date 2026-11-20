@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
-import { serviceIdentity } from "../../constants";
+import { serviceIdentity } from "../../network/service_identity";
 import { getDb, type Transaction } from "../../db";
 import { generateId } from "../../db/ids";
 import { abuseCaseTag, subjectRepeats } from "../mail/correlation";

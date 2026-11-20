@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 
 import { getDb, type Transaction } from "../../db";
 import { generateId } from "../../db/ids";
-import type { ReporterMetadata } from "../../request_metadata";
+import type { ReporterMetadata } from "../../http/reporter_headers";
 import type { ValidatedAbuseReportRequest } from "../contracts";
 import {
 	abuseJobs,

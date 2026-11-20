@@ -3,7 +3,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
-import { isOperatorAuthorization } from "@/lib/operator_auth";
+import { isOperatorAuthorization } from "@/lib/http/operator_auth";
 
 export const dynamic = "force-dynamic";
 

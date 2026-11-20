@@ -1,8 +1,8 @@
-import { agentGaveUp, browserTaskModel, runTask, type ChatModel, type StepLog } from "../browser_task/agent";
-import { redactedErrorText } from "../error_text";
+import { agentGaveUp, browserTaskModel, runTask, type ChatModel, type StepLog } from "../browser/task/agent";
+import { redactedErrorText } from "../util/error_text";
 import type { ExfiltrationCanaries } from "../exfiltration/types";
 import type { SiteVisitTask } from "./task";
-import { DAY_MS } from "../duration";
+import { DAY_MS } from "../util/date_time";
 
 /**
  * One thing the agent did or concluded, as the live log and the visit record

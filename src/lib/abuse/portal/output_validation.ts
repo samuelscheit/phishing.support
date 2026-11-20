@@ -6,7 +6,7 @@ import {
 	isExactAllowedFinalUrl,
 	normalizeAllowedDomains,
 } from "./provider_contract";
-import { asRecord } from "../../values";
+import { asRecord } from "../../util/values";
 
 export type ProviderFormOutputContract = {
 	passed: boolean;

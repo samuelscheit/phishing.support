@@ -1,7 +1,7 @@
 import type { BrowserContext, Page } from "patchright";
 
 import { acquireFabricPatchrightSession } from "../../../browser/fabric";
-import { errorSummary } from "../../../error_text";
+import { errorSummary } from "../../../util/error_text";
 import { OperationCanceledError, raceAbort } from "../../worker/cancellation";
 import { boundedCleanup, createLoginSessions, ProviderLoginError, type LoginSessionOptions } from "../login_session/session";
 

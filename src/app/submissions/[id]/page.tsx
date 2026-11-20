@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { SubmissionPageClient } from "./SubmissionPageClient";
 import { Submission } from "@/lib/db/schema";
 import { submissionSeo } from "@/lib/seo/submission";
-import { requestLocale } from "@/lib/i18n_server";
+import { requestLocale } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 

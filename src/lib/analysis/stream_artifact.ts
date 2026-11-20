@@ -1,9 +1,9 @@
 import { Stream } from "openai/streaming";
 import { ResponseStreamEvent } from "openai/resources/responses/responses.mjs";
-import { AnalysisRunsEntity } from "./db/entities/analysis_runs";
-import { publishEvent } from "./event/event_transport";
-import { extractResponseOutputText, parseResponseJson } from "./openai/response";
-import { errorText } from "./error_text";
+import { AnalysisRunsEntity } from "../db/entities/analysis_runs";
+import { publishEvent } from "../event/event_transport";
+import { extractResponseOutputText, parseResponseJson } from "../openai/response";
+import { errorText } from "../util/error_text";
 
 export class AnalysisStreamAttemptError extends Error {
 	readonly emittedOutput: boolean;
@@ -16,7 +16,7 @@ export class AnalysisStreamAttemptError extends Error {
 }
 
 /**
- * Consumes an OpenAI stream, logs it to stdout, publishes it to ZeroMQ,
+ * Consumes an OpenAI stream, logs it to stdout, publishes it on the in-process event bus,
  * and persists the final result to the analysis_runs table.
  */
 export async function logAndPersistStream(response: Stream<ResponseStreamEvent>, runId: bigint, topics?: (bigint | undefined)[]) {

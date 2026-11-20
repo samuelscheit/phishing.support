@@ -1,6 +1,6 @@
 import { type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
 
-import { sleep } from "../../sleep";
+import { sleep } from "../../util/sleep";
 
 /** How long an HTTP error document may take to replace itself, e.g. a JavaScript bot-check interstitial. */
 export const WEBSITE_ERROR_DOCUMENT_SETTLE_MS = 20_000;

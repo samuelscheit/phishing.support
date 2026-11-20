@@ -8,7 +8,7 @@ import { isPublicIp, normalizeDomain, registrableDomain } from "../security";
 import { normalizeMailbox } from "../mail/shared";
 import { throwIfAborted } from "../worker/shared";
 import { mapConcurrent } from "./concurrency";
-import { errorSummary } from "../../error_text";
+import { errorSummary } from "../../util/error_text";
 
 const MAX_CANDIDATE_ASNS = 24;
 const MAX_DNS_ADDRESSES = 24;

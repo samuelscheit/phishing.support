@@ -1,6 +1,6 @@
 import { acquireFabricPatchrightSession, type FabricPatchrightSession } from "../../browser/fabric";
-import { errorSummary } from "../../error_text";
-import { sleep } from "../../sleep";
+import { errorSummary } from "../../util/error_text";
+import { sleep } from "../../util/sleep";
 import { OperationCanceledError, raceAbort, throwIfOperationCanceled } from "../worker/cancellation";
 import { boundedCleanup } from "./login_session/session";
 

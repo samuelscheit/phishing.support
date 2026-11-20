@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, rename } from "node:fs/promises";
 import path from "node:path";
 
 import { imapConfig, relayBounceMaildir } from "../mail/config";
-import { sleep } from "../sleep";
+import { sleep } from "../util/sleep";
 import { ingestFetchedMail } from "./ingest";
 
 /**

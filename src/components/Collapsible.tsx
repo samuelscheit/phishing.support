@@ -3,7 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 
 /**
  * A list in a box that shows its first `rows` items whole and `peek` pixels

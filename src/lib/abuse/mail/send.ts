@@ -13,7 +13,7 @@ import {
 	type DeliveryStatusRequest,
 	SafeEmailDeliveryFailure,
 } from "./types";
-import { errorText } from "../../error_text";
+import { errorText } from "../../util/error_text";
 
 /**
  * A failure notice carries only the report's headers: a notice quoting the

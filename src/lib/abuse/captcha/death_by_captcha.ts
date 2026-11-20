@@ -1,4 +1,4 @@
-import { sleep } from "../../sleep";
+import { sleep } from "../../util/sleep";
 
 const DEATH_BY_CAPTCHA_ENDPOINT = "https://api.dbcapi.me/api";
 const DEFAULT_TIMEOUT_MS = 120_000;

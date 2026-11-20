@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, ArrowDown } from "lucide-react";
 
 import type { PublicCampaign, PublicCampaignSite } from "@/lib/campaign/public_view";
-import type { Locale } from "@/lib/i18n";
+import type { Locale } from "@/lib/i18n/locale";
 import { COPY } from "./copy";
 import { Recognise } from "./Recognise";
 import { SiteList, scrollToId } from "./SiteList";

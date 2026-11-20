@@ -6,7 +6,7 @@ import { FABRIC_EGRESS_LABEL, type FabricEgress } from "../../browser/fabric";
 import { presentIdentityToNewTab, presentIdentityToPage } from "../../browser/page";
 import { observedPuppeteerResponse, observeSessionResponses } from "../../browser/tab_traffic";
 import type { TabSetup, VisitorTab } from "../../browser/visitor_tabs";
-import { errorText } from "../../error_text";
+import { errorText } from "../../util/error_text";
 import { runSiteVisit } from "../../site_visit/visit";
 import { hiddenFrames, recordFrameTraffic, type FrameTrafficRecorder } from "../hidden_frames";
 import { passProviderWarning } from "../provider_warning";

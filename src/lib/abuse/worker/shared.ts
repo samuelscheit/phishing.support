@@ -2,10 +2,10 @@ import crypto from "node:crypto";
 
 import { AbuseRepository } from "../repository";
 import type { resolveAbuseTarget } from "../resolver";
-import type { BrowserTask, ChatModel } from "../../browser_task/agent";
-import type { FabricCdpSessionAcquirer } from "../../browser_task/fabric";
-import { errorText as describeError } from "../../error_text";
-import { asRecord } from "../../values";
+import type { BrowserTask, ChatModel } from "../../browser/task/agent";
+import type { FabricCdpSessionAcquirer } from "../../browser/task/fabric";
+import { errorText as describeError } from "../../util/error_text";
+import { asRecord } from "../../util/values";
 
 export type UnknownExternalStateParams = {
 	routeId: bigint;

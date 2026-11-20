@@ -1,7 +1,7 @@
 import { type Frame, type Page } from "rebrowser-puppeteer-core";
 
-import { CAPTCHA_PROVIDER_FRAME } from "../../human_check";
-import { sleep } from "../../sleep";
+import { CAPTCHA_PROVIDER_FRAME } from "../../browser/human_check";
+import { sleep } from "../../util/sleep";
 import { WEBSITE_RENDER_IDLE_MS, settleRendering } from "./settle";
 import type { WebsiteVerificationGate } from "./types";
 

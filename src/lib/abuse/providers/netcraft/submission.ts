@@ -5,8 +5,8 @@ import {
 	netcraftSubmissionUrl,
 	type NetcraftFetch,
 	parseNetcraftSubmissionResponse as parseNetcraftApiSubmissionResponse,
-} from "../../../netcraft/api";
-import { serviceIdentity } from "../../../constants";
+} from "./api";
+import { serviceIdentity } from "../../../network/service_identity";
 import { NETCRAFT_PROVIDER } from "./definition";
 import {
 	buildNetcraftReportUrlsBody,

@@ -6,7 +6,7 @@ import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { validateAbuseReportRequest } from "../../contracts";
 import { AbuseRepository } from "../../repository";
 import { abuseJobs } from "../../schema";
-import { netcraftSubmissionUrl, netcraftSubmissionUrlsUrl, type NetcraftFetch } from "../../../netcraft/api";
+import { netcraftSubmissionUrl, netcraftSubmissionUrlsUrl, type NetcraftFetch } from "./api";
 
 import { NETCRAFT_PROVIDER } from "./definition";
 import { reconcileNetcraftProviderRun } from "./reconcile";

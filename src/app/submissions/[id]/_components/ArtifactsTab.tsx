@@ -1,7 +1,7 @@
 import { ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { SubmissionDetail } from "@/lib/submissions/details";
-import { formatUtcDateTime } from "@/lib/date_time";
+import { formatUtcDateTime } from "@/lib/util/date_time";
 import { formatArtifactSize, isWebsiteArchiveArtifact } from "./helpers";
 
 export function ArtifactsTab({ artifacts }: { artifacts: SubmissionDetail["artifacts"] }) {

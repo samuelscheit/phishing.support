@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { MAX_REQUEST_BYTES, validateAbuseReportRequest } from "@/lib/abuse/contracts";
 import { AbuseInputError } from "@/lib/abuse/security";
 import { AbuseRepository } from "@/lib/abuse/repository";
-import { getReporterMetadata } from "@/lib/request_metadata";
+import { getReporterMetadata } from "@/lib/http/reporter_metadata";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

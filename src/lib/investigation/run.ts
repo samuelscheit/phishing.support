@@ -1,6 +1,6 @@
 import { reportRedirector } from "../abuse/origin/redirector_report";
 import { AbuseRepository } from "../abuse/repository";
-import { errorText } from "../error_text";
+import { errorText } from "../util/error_text";
 import { downloadPipelineConfigFromEnvironment, investigateSample, type DownloadPipelineConfig } from "../exfiltration/downloads/pipeline";
 import { awaitVirusTotalVerdict } from "../exfiltration/downloads/virustotal";
 import { enrichBackendIdentity } from "../exfiltration/identity";
@@ -9,7 +9,7 @@ import type { ExfiltrationBackend } from "../exfiltration/types";
 import { downloaderUserAgent, fetchPayload, type FetchedPayload } from "../malware/payload_fetch";
 import { payloadEvidence, payloadVerdictSentence, type PayloadEvidence } from "../malware/payload_evidence";
 import { reportDataDrop, reportPayloadHost, type PayloadDelivery } from "../malware/payload_host_report";
-import type { ReporterMetadata } from "../request_metadata";
+import type { ReporterMetadata } from "../http/reporter_headers";
 import { defangCommand } from "../malware/defang";
 import { isSameWebsite } from "../website/site";
 import type { InvestigationJobPayload } from "./payload";

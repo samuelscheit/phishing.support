@@ -1,5 +1,5 @@
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "../../browser/fabric";
-import { errorText } from "../../error_text";
+import { errorText } from "../../util/error_text";
 import { WebsiteCaptureFailedError, WebsiteUnreachableError } from "./errors";
 import { openLiveCapture, type LiveCapture } from "./live_capture";
 import { archiveMhtmlSnapshot } from "./mhtml";

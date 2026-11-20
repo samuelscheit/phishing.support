@@ -20,9 +20,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { formatUtcDateTime } from "@/lib/date_time";
+import { formatUtcDateTime } from "@/lib/util/date_time";
 import type { CampaignOverview, ReferralMailView } from "@/lib/referral/overview";
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 
 const KIND_LABEL: Record<string, string> = {
 	complaint: "Criminal complaint",

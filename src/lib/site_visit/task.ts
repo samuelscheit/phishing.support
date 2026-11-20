@@ -1,4 +1,4 @@
-import type { BrowserTask } from "../browser_task/agent";
+import type { BrowserTask } from "../browser/task/agent";
 import type { ExfiltrationCanaries } from "../exfiltration/types";
 
 /** Wall-clock budget of one site visit: the agent's walk through the site, from its first page to where the flow ends. */

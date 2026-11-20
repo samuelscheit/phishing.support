@@ -11,10 +11,10 @@ import { reportConfirmedEmailPhishing } from "../abuse/submission_reports";
 import { smtpReturnPath, smtpSender, smtpTransport } from "./config";
 import { createWebsiteSubmission } from "../submissions/website";
 import { defaultReasoning, defaultResponseModel } from "../openai/client";
-import { serviceIdentity } from "../constants";
-import { errorText } from "../error_text";
+import { serviceIdentity } from "../network/service_identity";
+import { errorText } from "../util/error_text";
 import type { EmailSubmissionData } from "../db/schema";
-import type { ReporterMetadata } from "../request_metadata";
+import type { ReporterMetadata } from "../http/reporter_headers";
 
 function buildMailEvidence(mail: MailData, analysisText?: string) {
 	return toon.encode({

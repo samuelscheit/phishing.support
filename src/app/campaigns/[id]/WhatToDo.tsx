@@ -4,8 +4,8 @@ import { ArrowRight, AtSign, CreditCard, ExternalLink, Eye, Hash, KeyRound, Land
 
 import { Collapsible } from "@/components/Collapsible";
 import type { PublicCampaignSite, PublicCampaignVisitor } from "@/lib/campaign/public_view";
-import type { Locale } from "@/lib/i18n";
-import { cn } from "@/web_lib/util";
+import type { Locale } from "@/lib/i18n/locale";
+import { cn } from "@/lib/util/cn";
 import { COPY, guideSteps, type Action, type Basis, type GuideStep, type StepKind, type Tone } from "./copy";
 import { BrowserFrame } from "./SitePicture";
 

@@ -1,6 +1,6 @@
 import type { Frame, Page } from "rebrowser-puppeteer-core";
 
-import { sleep } from "./sleep";
+import { sleep } from "../util/sleep";
 
 /**
  * Captcha widgets of real providers (reCAPTCHA, hCaptcha, Turnstile) beside a

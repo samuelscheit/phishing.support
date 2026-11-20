@@ -1,12 +1,12 @@
 import { SubmissionsEntity } from "../db/entities/submissions";
 import type { WebsiteSubmissionData } from "../db/schema";
-import { errorSummary } from "../error_text";
+import { errorSummary } from "../util/error_text";
 import { isUrlscanBusy, searchUrlscan, urlscanDom, urlscanResponses, type UrlscanDependencies } from "../abuse/origin/urlscan";
 import { capturedDocumentContent } from "../website/archive/text";
 import { analyzedCaptureStep, websiteCaptureFileNames } from "../website/capture_files";
 import type { WebsiteKitResource } from "../website/types";
 import { loadCapturedPageTexts } from "./indicators";
-import { DAY_MS } from "../duration";
+import { DAY_MS } from "../util/date_time";
 
 /**
  * Kit files for a site captured before captures recorded them. The capture

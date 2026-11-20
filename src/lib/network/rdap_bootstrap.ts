@@ -1,7 +1,7 @@
 import { isIP } from "node:net";
 
 import { fetchJson } from "./bounded_fetch";
-import { DAY_MS } from "../duration";
+import { DAY_MS } from "../util/date_time";
 
 /**
  * Finds the authoritative RDAP server for a domain, IP address, or AS number

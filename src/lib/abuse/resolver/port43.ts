@@ -5,7 +5,7 @@ import { isIP } from "node:net";
 import { AbuseInputError, assertPublicDnsHost, isPublicIp } from "../security";
 import { retryWithTimeout } from "../../network/bounded_fetch";
 import type { ResolverDependencies } from "./types";
-import { errorText } from "../../error_text";
+import { errorText } from "../../util/error_text";
 
 const MAX_WHOIS_BYTES = 1024 * 1024;
 const WHOIS_TIMEOUT_MS = 12_000;

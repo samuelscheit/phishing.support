@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { serviceIdentity } from "../../../constants";
+import { serviceIdentity } from "../../../network/service_identity";
 import { SubmissionsEntity } from "../../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { AbuseRepository } from "../../repository";
@@ -10,7 +10,7 @@ import { executeProviderSubmission } from "../submission_execution";
 import { NETCRAFT_MAIL_PROVIDER } from "./definition";
 import { netcraftMailDraft, netcraftMailMessage, prepareNetcraftMailExternalSubmission, submitNetcraftMailSubmission } from "./submission";
 import { defineProvider } from "../kit/provider";
-import type { NetcraftFetch } from "../../../netcraft/api";
+import type { NetcraftFetch } from "../netcraft/api";
 
 useTemporaryDatabase();
 

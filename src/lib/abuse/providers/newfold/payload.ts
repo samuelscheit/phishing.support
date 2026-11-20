@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { asRecord } from "../../../values";
+import { asRecord } from "../../../util/values";
 import { normalizeDomain } from "../../security";
 import type { ReportInput } from "../kit/draft";
 import { evidenceContract } from "../kit/evidence";

@@ -3,7 +3,7 @@ import {
 	genericProviderFormAdapterHasValidHash,
 } from "../providers/generic_form";
 import { buildProviderReportNarrative } from "../providers/report_payload";
-import type { BrowserTask } from "../../browser_task/agent";
+import type { BrowserTask } from "../../browser/task/agent";
 import type { ProviderFormFacts } from "./form_facts";
 import { exactAllowedHttpsUrl, normalizeAllowedDomains } from "./provider_contract";
 

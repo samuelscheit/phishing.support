@@ -3,8 +3,8 @@ import { parse } from "node-html-parser";
 import { getBrowser } from "../browser";
 import { analyzeSMTPHeadersFromRaw } from "@bernierllc/smtp-analyzer";
 import type { MailData } from "./ai";
-import { isPrivateIpAddress } from "../ip_address";
-import { sleep } from "../sleep";
+import { isPrivateIpAddress } from "../network/ip_address";
+import { sleep } from "../util/sleep";
 
 export function getAddressesText(obj: AddressObject[] | AddressObject | undefined): string {
 	if (!obj) return "";

@@ -8,7 +8,7 @@ import { extractEmlsFromIncomingMessage } from "@/lib/mail/forwarded";
 import { createEmailSubmissionFromEml, type EmailSubmissionOptions } from "@/lib/submissions/email";
 
 import { headerStrings, isSeen, recipients, type FetchedMail } from "./rfc";
-import { errorText } from "../error_text";
+import { errorText } from "../util/error_text";
 
 export type MailIngestConfig = {
 	mailbox: string;

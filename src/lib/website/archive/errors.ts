@@ -1,5 +1,5 @@
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "../../browser/fabric";
-import { errorText } from "../../error_text";
+import { errorText } from "../../util/error_text";
 
 /**
  * The browser service failed rather than the site: Fabric's relay was full or

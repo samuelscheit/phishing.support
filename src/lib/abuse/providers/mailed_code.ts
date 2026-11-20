@@ -2,7 +2,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 
 import { imapConfig } from "../../mail/config";
-import { sleep } from "../../sleep";
+import { sleep } from "../../util/sleep";
 
 /**
  * The verification-code mail a provider's form sends before it accepts a

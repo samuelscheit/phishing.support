@@ -1,31 +1,6 @@
 import { isIP } from "node:net";
 
-/**
- * Metadata captured at the HTTP boundary for a submission.
- *
- * Internal submission sources (for example the IMAP listener) do not have a
- * request and therefore leave these values unset.
- */
-export type ReporterMetadata = {
-	reporterIp?: string;
-	reporterCountry?: string;
-	reporterHeaders?: Record<string, string>;
-};
-
-const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/;
-
-/**
- * Normalize an ISO-3166 alpha-2 country code. Cloudflare uses `XX` for an
- * unknown country and `T1` for Tor traffic; neither is useful as a country in
- * the UI, so treat them as unavailable.
- */
-export function normalizeCountryCode(value: unknown): string | undefined {
-	if (typeof value !== "string") return undefined;
-
-	const code = value.trim().toUpperCase();
-	if (!COUNTRY_CODE_PATTERN.test(code) || code === "XX" || code === "T1") return undefined;
-	return code;
-}
+import { normalizeCountryCode, type ReporterMetadata } from "./reporter_headers";
 
 function normalizeForwardedIp(value: string): string | undefined {
 	let candidate = value.trim();

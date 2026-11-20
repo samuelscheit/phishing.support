@@ -4,7 +4,7 @@ import { SubmissionFilterChips } from "@/components/SubmissionFilterChips";
 import { SubmissionStatus } from "@/components/SubmissionStatus";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 import { formatDistanceToNow } from "date-fns";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";

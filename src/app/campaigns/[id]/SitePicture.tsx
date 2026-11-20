@@ -1,6 +1,6 @@
 import type { PublicCampaignSite } from "@/lib/campaign/public_view";
 import { Address } from "@/components/Address";
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 
 /** The picture of a site: its trimmed capture when there is one, else the full capture. */
 function pictureOf(site: PublicCampaignSite): string | undefined {

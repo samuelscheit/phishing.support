@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "../../db";
-import { isFabricBrowserSessionId } from "../../fabric/session";
+import { isFabricBrowserSessionId } from "../../browser/fabric_session";
 import { generateId } from "../../db/ids";
 import {
 	abuseJobs,

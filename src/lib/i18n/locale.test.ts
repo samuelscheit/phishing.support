@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { localeFromAcceptLanguage, pickLocale } from "./i18n";
+import { localeFromAcceptLanguage, pickLocale } from "./locale";
 
 describe("localeFromAcceptLanguage", () => {
 	test("takes the supported language with the highest quality", () => {

@@ -1,6 +1,6 @@
-import { serviceIdentity } from "../constants";
+import { serviceIdentity } from "../network/service_identity";
 import type { MailData } from "./ai";
-import { isRecord, type JsonRecord } from "../values";
+import { isRecord, type JsonRecord } from "../util/values";
 
 const serviceMailDomain = serviceIdentity.mailbox.slice(serviceIdentity.mailbox.lastIndexOf("@") + 1).toLowerCase();
 

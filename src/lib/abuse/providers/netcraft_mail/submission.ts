@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-import { NetcraftSubmissionRejectedError, parseNetcraftSubmissionResponse, type NetcraftFetch } from "../../../netcraft/api";
-import { serviceIdentity } from "../../../constants";
+import { NetcraftSubmissionRejectedError, parseNetcraftSubmissionResponse, type NetcraftFetch } from "../netcraft/api";
+import { serviceIdentity } from "../../../network/service_identity";
 import { normalizeMailbox } from "../../mail/shared";
 import { sha256Hex } from "../../security";
 import { createDraft } from "../kit/draft";

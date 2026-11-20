@@ -1,4 +1,4 @@
-import { NETCRAFT_REPORT_URLS_URL, NETCRAFT_SUBMISSION_URL_PREFIX } from "../../../netcraft/api";
+import { NETCRAFT_REPORT_URLS_URL, NETCRAFT_SUBMISSION_URL_PREFIX } from "./api";
 import { definePinned } from "../kit/pin";
 
 /** Code-owned contract for Netcraft Reporting API v3 URL submissions. */

@@ -2,7 +2,7 @@ import { ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { ExternalLinkConfirm } from "@/components/ExternalLinkConfirm";
 import { CANARY_FIELD_LABEL, describeDataEntryField, revisitWording } from "@/lib/website/types";
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 import { hopFindingLabel, type NavigationHop, type SiteAssessment, type WebsiteData } from "./helpers";
 
 function HopItem({ hop, assessment, website }: { hop: NavigationHop; assessment: SiteAssessment | undefined; website: WebsiteData }) {

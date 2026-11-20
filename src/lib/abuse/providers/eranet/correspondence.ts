@@ -1,7 +1,7 @@
 
 import type { ProviderCorrespondence } from "../submission_contracts";
 import { ERANET_PROVIDER } from "./definition";
-import { asRecord } from "../../../values";
+import { asRecord } from "../../../util/values";
 import { jsonRecord } from "../kit/http";
 import { snippet } from "../kit/text";
 

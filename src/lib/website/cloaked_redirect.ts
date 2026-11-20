@@ -1,6 +1,6 @@
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { createWebsiteSubmission } from "../submissions/website";
-import type { ReporterMetadata } from "../request_metadata";
+import type { ReporterMetadata } from "../http/reporter_headers";
 import { websiteSite } from "./site";
 import { capturedHostNavigation } from "./report_hops";
 import type { getInfo } from "./info";

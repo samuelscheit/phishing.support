@@ -3,7 +3,7 @@
 import * as React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 
 const TooltipProvider = TooltipPrimitive.Provider;
 

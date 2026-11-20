@@ -1,6 +1,6 @@
 import type { Browser, BrowserContext, CDPSession, Page, Protocol } from "rebrowser-puppeteer-core";
 
-import { sleep } from "../sleep";
+import { sleep } from "../util/sleep";
 import type { WebsiteDevice } from "../website/types";
 import { getBrowser } from "./browser";
 import { sendBeforeRun } from "./cdp";

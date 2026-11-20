@@ -2,7 +2,7 @@ import type { ResolvedRouteInput } from "../route_contracts";
 import type { AbuseTargetType } from "../schema";
 import type { RdapLocator } from "../../network/rdap_bootstrap";
 
-import type { JsonRecord } from "../../values";
+import type { JsonRecord } from "../../util/values";
 
 export type { JsonRecord };
 

@@ -1,8 +1,8 @@
 import type { Page } from "rebrowser-puppeteer-core";
 
 import { getBrowser } from "../../../browser";
-import { sleep } from "../../../sleep";
-import { asRecord } from "../../../values";
+import { sleep } from "../../../util/sleep";
+import { asRecord } from "../../../util/values";
 import { dragSliderToEnd } from "../../captcha/slider_drag";
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { createDraft, type RouteDeps } from "../kit/draft";

@@ -1,6 +1,6 @@
 import { abuseEmailCaseUrl } from "../../mail/draft";
-import { userAgent } from "../../../constants";
-import { asRecord } from "../../../values";
+import { userAgent } from "../../../network/service_identity";
+import { asRecord } from "../../../util/values";
 import type { ProviderFormFacts } from "../../portal/form_facts";
 import { deriveProviderFormFacts } from "../../portal/form_facts";
 import { captchaCredentialsProblem, solveRecaptchaV2 } from "../kit/captcha";

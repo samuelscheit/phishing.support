@@ -4,7 +4,7 @@ import { fetchRdapRecord, safeJsonFetch } from "../abuse/resolver/http";
 import { entityVcardText, extractRegistrarIdFromRdap, firstEntityWithRole, registrarRdapUrl } from "../abuse/resolver/rdap";
 import type { JsonRecord, ResolverDependencies } from "../abuse/resolver/types";
 import { registrableDomain } from "../abuse/security";
-import { errorText } from "../error_text";
+import { errorText } from "../util/error_text";
 import { hasPathTenants } from "./site";
 
 /**

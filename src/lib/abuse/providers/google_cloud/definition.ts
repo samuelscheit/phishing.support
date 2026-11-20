@@ -1,4 +1,4 @@
-import { serviceIdentity } from "../../../constants";
+import { serviceIdentity } from "../../../network/service_identity";
 import { definePinned } from "../kit/pin";
 
 /** The form's "Google Cloud Platform Service" radio values. */

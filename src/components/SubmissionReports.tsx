@@ -8,8 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import type { SubmissionReport, SubmissionReportArtifact, SubmissionReportMessage, SubmissionReportRoute } from "@/lib/submissions/details";
 import type { DecisionFollowUpSummary } from "@/lib/abuse/followup/describe";
 import { describeProviderReportStatus } from "@/lib/abuse/provider_status";
-import { formatUtcDateTime } from "@/lib/date_time";
-import { cn } from "@/web_lib/util";
+import { formatUtcDateTime } from "@/lib/util/date_time";
+import { cn } from "@/lib/util/cn";
 
 type DateValue = Date | string | number | null | undefined;
 

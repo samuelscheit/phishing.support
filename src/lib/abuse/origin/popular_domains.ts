@@ -4,7 +4,7 @@ import { z } from "zod";
 import { fetchJson, fetchText, type FetchImplementation } from "../../network/bounded_fetch";
 import { hasPathTenants } from "../../website/site";
 import { normalizeDomain } from "../security";
-import { DAY_MS } from "../../duration";
+import { DAY_MS } from "../../util/date_time";
 
 /**
  * The Tranco research list ranks registrable domains by popularity across

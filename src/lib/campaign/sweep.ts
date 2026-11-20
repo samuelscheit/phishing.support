@@ -1,6 +1,6 @@
 import { AbuseRepository } from "../abuse/repository";
 import { isUrlscanBusy, urlscanRetryAfterMs } from "../abuse/origin/urlscan";
-import { errorSummary } from "../error_text";
+import { errorSummary } from "../util/error_text";
 import { backfillKitResources, type KitBackfillDependencies } from "./kit_backfill";
 import { armCampaignKitSearch } from "./kit_search";
 import { linkSubmissionToCampaign, type LinkDependencies } from "./link";

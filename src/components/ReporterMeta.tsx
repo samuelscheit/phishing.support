@@ -1,17 +1,19 @@
 "use client";
 
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 import {
 	countryFlag,
 	countryName,
 	getReporterHeader,
 	hasReporterHeaders,
 	readableUserAgent,
-	type ReporterMetadata,
-} from "@/web_lib/reporter";
+	type ReporterHeaders,
+} from "@/lib/http/reporter_headers";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-type ReporterMetaProps = ReporterMetadata & {
+type ReporterMetaProps = {
+	reporterCountry?: string | null;
+	reporterHeaders?: ReporterHeaders;
 	className?: string;
 };
 

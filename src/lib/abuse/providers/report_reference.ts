@@ -1,5 +1,5 @@
 import { abuseCaseTag } from "../mail/correlation";
-import { asRecord } from "../../values";
+import { asRecord } from "../../util/values";
 
 /** Our reference for one route's report: the case tag (the one our mail uses) and the route. */
 export function reportReference(reportId: bigint, routeId: bigint): string {

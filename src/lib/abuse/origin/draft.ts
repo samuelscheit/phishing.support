@@ -1,4 +1,4 @@
-import { serviceIdentity } from "../../constants";
+import { serviceIdentity } from "../../network/service_identity";
 import type { AbuseProviderRoute, AbuseReport } from "../schema";
 import { abuseCaseTag } from "../mail/correlation";
 import type { AbuseEmailDraft } from "../mail/draft";

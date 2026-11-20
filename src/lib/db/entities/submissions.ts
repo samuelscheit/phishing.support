@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { getDb } from "../index";
 import { analysisRuns, campaignMembers, submissions, type SubmissionData, type SubmissionKind, type SubmissionStatus } from "../schema";
 import { generateId } from "../ids";
-import type { ReporterMetadata } from "../../request_metadata";
+import type { ReporterMetadata } from "../../http/reporter_headers";
 
 export class SubmissionsEntity {
     static async create(params: {

@@ -6,7 +6,7 @@ import {
 	getReporterUserAgent,
 	normalizeCountryCode,
 	readableUserAgent,
-} from "./reporter";
+} from "./reporter_headers";
 
 describe("reporter metadata formatting", () => {
 	test("reads headers case-insensitively, including array values", () => {
@@ -52,6 +52,12 @@ describe("reporter metadata formatting", () => {
 		expect(normalizeCountryCode(" de ")).toBe("DE");
 		expect(countryFlag("de")).toBe("🇩🇪");
 		expect(countryName("DE")).toBe("Germany");
+	});
+
+	test("rejects unknown country sentinels", () => {
+		expect(normalizeCountryCode("XX")).toBeUndefined();
+		expect(normalizeCountryCode("T1")).toBeUndefined();
+		expect(normalizeCountryCode("us")).toBe("US");
 	});
 
 	test("returns undefined for an invalid country code", () => {

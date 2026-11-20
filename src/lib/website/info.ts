@@ -4,11 +4,11 @@ import uniq from "lodash/uniq";
 import uniqBy from "lodash/uniqBy";
 import { parse } from "tldts";
 
-import { recursiveAbuseContact } from "../rdap_abuse_contact";
+import { recursiveAbuseContact } from "../network/rdap_abuse_contact";
 import { fetchJson, retryWithTimeout, type FetchImplementation } from "../network/bounded_fetch";
 import { resolveRegionalDns, type RegionalDnsDependencies, type RegionalDnsResolution } from "../network/regional_dns";
 import { defaultRdapLocator, type RdapLocator, type RdapObject } from "../network/rdap_bootstrap";
-import { errorText } from "../error_text";
+import { errorText } from "../util/error_text";
 
 const LOOKUP_TIMEOUT_MS = 5_000;
 const LOOKUP_ATTEMPTS = 2;

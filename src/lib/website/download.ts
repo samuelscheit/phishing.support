@@ -1,7 +1,7 @@
 import type { CDPSession, Page } from "rebrowser-puppeteer-core";
 
 import { sendBeforeRun } from "../browser/cdp";
-import { sleep } from "../sleep";
+import { sleep } from "../util/sleep";
 
 /**
  * Every file a visit downloads, taken without the browser ever saving or

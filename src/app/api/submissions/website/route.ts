@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getReporterMetadata } from "@/lib/request_metadata";
+import { getReporterMetadata } from "@/lib/http/reporter_metadata";
 import { createWebsiteSubmission } from "@/lib/submissions/website";
 
 export const runtime = "nodejs";

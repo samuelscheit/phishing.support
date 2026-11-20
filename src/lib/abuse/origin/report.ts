@@ -17,7 +17,7 @@ import { resolveOriginHostNetworks } from "./network";
 import { discoverSiblingDomains, kitFingerprints, type SiblingDiscoveryResult } from "./siblings";
 import { originSweepProgressSchema, readOriginHostSnapshot, type OriginHostSnapshot, type OriginSweepProgress } from "./snapshot";
 import { findOriginServers, MAX_ORIGIN_RESULTS, originSweepAddresses, planOriginSweep, SWEEP_SLICE_ADDRESSES, type OriginSweepPlan, type OriginVerificationTarget } from "./sweep";
-import { errorSummary } from "../../error_text";
+import { errorSummary } from "../../util/error_text";
 import { scheduleLivenessChecks } from "../../liveness/schedule";
 
 const ORIGIN_ROUTE_PROVIDER_KEY = "origin-host-email";

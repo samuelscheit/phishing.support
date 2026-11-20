@@ -7,7 +7,7 @@ import { Figure, PageShell } from "@/components/provider_stats/PageShell";
 import { LOW_DATA_THRESHOLD, percent, type ProviderStats } from "@/lib/provider_stats/aggregate";
 import { PROVIDER_VERDICTS } from "@/lib/provider_stats/route_outcome";
 import { getProviderOverview, type RoleOverview } from "@/lib/provider_stats/views";
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 
 export const dynamic = "force-dynamic";
 

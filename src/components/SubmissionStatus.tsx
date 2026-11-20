@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 import { CheckCircle2, CornerDownRight, Loader2, ShieldAlert, XCircle } from "lucide-react";
 
 export function SubmissionStatus({ status, className }: { status?: string | null; className?: string }) {

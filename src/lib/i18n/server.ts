@@ -1,6 +1,6 @@
 import { cookies, headers } from "next/headers";
 
-import { LOCALE_COOKIE, pickLocale, type Locale } from "./i18n";
+import { LOCALE_COOKIE, pickLocale, type Locale } from "./locale";
 
 /** The language of the current request, for a server component that got its `?lang=` from searchParams. */
 export async function requestLocale(query?: unknown): Promise<Locale> {

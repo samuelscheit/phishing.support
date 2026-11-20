@@ -1,6 +1,6 @@
 "use client";
 
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 import type { ComponentProps } from "react";
 import { memo } from "react";
 import { Streamdown } from "streamdown";

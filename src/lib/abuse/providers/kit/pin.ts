@@ -1,4 +1,4 @@
-import { serviceIdentity } from "../../../constants";
+import { serviceIdentity } from "../../../network/service_identity";
 import { hashStableJson } from "../../security";
 import type { ProviderSubmissionDefinition } from "../submission_contracts";
 

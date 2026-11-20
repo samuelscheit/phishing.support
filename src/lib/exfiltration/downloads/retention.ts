@@ -1,4 +1,4 @@
-import { DAY_MS } from "../../duration";
+import { DAY_MS } from "../../util/date_time";
 
 /**
  * Retention for stored malware samples. Pure decisions over timestamps, so the

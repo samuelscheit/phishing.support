@@ -2,7 +2,7 @@ import { getDomain } from "tldts";
 
 import { defangCommand } from "../malware/defang";
 import { buildDossier, type Dossier, type DossierDependencies, type DossierSite } from "../referral/dossier";
-import { record, text } from "../values";
+import { record, text } from "../util/values";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website/types";
 import { campaignBrand, sameBrand, type GuidancePurpose, type VisitorGuidance } from "./guidance";
 import { campaignVisitorKinds, type VisitorKind } from "./kinds";

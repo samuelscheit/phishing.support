@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-import { serviceIdentity } from "../../../constants";
-import { asRecord } from "../../../values";
+import { serviceIdentity } from "../../../network/service_identity";
+import { asRecord } from "../../../util/values";
 import { ProviderSubmissionNeedsHumanError } from "../submission_contracts";
 import { payloadEnvelope, storedReader } from "../kit/stored";
 import { DISCORD_DSA_PROVIDER } from "./definition";

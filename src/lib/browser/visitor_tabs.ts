@@ -1,7 +1,7 @@
 import type { Browser, CDPSession, Page, Target } from "rebrowser-puppeteer-core";
 
 import { sendBeforeRun } from "./cdp";
-import { sleep } from "../sleep";
+import { sleep } from "../util/sleep";
 
 /**
  * The tabs of one visit: the captured tab, and every tab a visited tab opens

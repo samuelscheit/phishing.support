@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { AnalysisRunsEntity } from "./db/entities/analysis_runs";
-import { ArtifactsEntity } from "./db/entities/artifacts";
-import { SubmissionsEntity } from "./db/entities/submissions";
-import { useTemporaryDatabase } from "./db/test_helpers";
-import { AnalysisStreamAttemptError, logAndPersistStream } from "./artifact";
+import { AnalysisRunsEntity } from "../db/entities/analysis_runs";
+import { ArtifactsEntity } from "../db/entities/artifacts";
+import { SubmissionsEntity } from "../db/entities/submissions";
+import { useTemporaryDatabase } from "../db/test_helpers";
+import { AnalysisStreamAttemptError, logAndPersistStream } from "./stream_artifact";
 
 useTemporaryDatabase();
 

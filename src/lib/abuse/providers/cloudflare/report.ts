@@ -1,5 +1,5 @@
 import { CLOUDFLARE_PROVIDER } from "./definition";
-import { serviceIdentity } from "../../../constants";
+import { serviceIdentity } from "../../../network/service_identity";
 import { normalizePublicHttpUrl } from "../../security";
 import { allegationLabel, boundedEvidence, normalizeObservedUrlForTarget } from "../report_payload";
 import type { ProviderReportPreviewContext } from "../submission_contracts";

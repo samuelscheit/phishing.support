@@ -6,7 +6,7 @@ import { PageShell, Pagination } from "@/components/provider_stats/PageShell";
 import { providerRoles } from "@/lib/provider_stats/role";
 import { routeVerdicts } from "@/lib/provider_stats/route_outcome";
 import { getReportFeed, pageOf, reportFilterOf, siteStateOf, type ReportFeedEntry, type ReportFilter } from "@/lib/provider_stats/views";
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 
 export const dynamic = "force-dynamic";
 

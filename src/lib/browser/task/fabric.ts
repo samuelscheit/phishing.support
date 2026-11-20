@@ -1,4 +1,4 @@
-import { acquireFabricCdpSession, type FabricEgress, type FabricScalar } from "../browser/fabric";
+import { acquireFabricCdpSession, type FabricEgress, type FabricScalar } from "../fabric";
 import { runTask, type BrowserTask, type ChatModel, type StepLog, type TaskResult } from "./agent";
 
 export type FabricCdpSessionAcquirer = (

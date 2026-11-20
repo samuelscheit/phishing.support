@@ -4,7 +4,7 @@ import { ALIBABA_CLOUD_PROVIDER } from "./alibaba_cloud/definition";
 import { mailedCodeFrom, mailedCodeReader, type MailedCodeSpec } from "./mailed_code";
 
 const realImapflow = await import("imapflow");
-const realSleep = await import("../../sleep");
+const realSleep = await import("../../util/sleep");
 
 type FakeMessage = { uid: number; date?: Date; from: string; subject: string; html?: string; text?: string };
 
@@ -60,12 +60,12 @@ const saved: Record<string, string | undefined> = {};
 
 beforeAll(() => {
 	mock.module("imapflow", () => ({ ...realImapflow, ImapFlow: FakeImapFlow }));
-	mock.module("../../sleep", () => ({ ...realSleep, sleep: async () => { server.sleeps += 1; server.onSleep?.(server.sleeps); await new Promise((resolve) => setTimeout(resolve, 5)); } }));
+	mock.module("../../util/sleep", () => ({ ...realSleep, sleep: async () => { server.sleeps += 1; server.onSleep?.(server.sleeps); await new Promise((resolve) => setTimeout(resolve, 5)); } }));
 	for (const [name, value] of Object.entries(environment)) { saved[name] = process.env[name]; process.env[name] = value; }
 });
 afterAll(() => {
 	mock.module("imapflow", () => realImapflow);
-	mock.module("../../sleep", () => realSleep);
+	mock.module("../../util/sleep", () => realSleep);
 	for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
 });
 beforeEach(() => {

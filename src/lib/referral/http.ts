@@ -1,5 +1,5 @@
-import { isOperatorAuthorization, operatorChallenge } from "../operator_auth";
-import { errorText } from "../error_text";
+import { isOperatorAuthorization, operatorChallenge } from "../http/operator_auth";
+import { errorText } from "../util/error_text";
 import { ComplainantNotConfiguredError } from "./complainant";
 import { ReferralError } from "./service";
 

@@ -1,8 +1,8 @@
 import type { Page } from "rebrowser-puppeteer-core";
 import sharp from "sharp";
 
-import { errorText } from "../../error_text";
-import { sleep } from "../../sleep";
+import { errorText } from "../../util/error_text";
+import { sleep } from "../../util/sleep";
 
 /** Attempts at a screenshot that shows what the page has rendered. */
 const SCREENSHOT_PAINT_ATTEMPTS = 4;

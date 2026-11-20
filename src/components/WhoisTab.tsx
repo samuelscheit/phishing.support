@@ -6,12 +6,12 @@ import { Globe2, Network, Server } from "lucide-react";
 
 import type { RegionalDnsResolution } from "@/lib/network/regional_dns";
 import type { WhoISInfo } from "@/lib/website/info";
-import { formatUtcDateTime } from "@/lib/date_time";
+import { formatUtcDateTime } from "@/lib/util/date_time";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { recursiveAbuseContact } from "@/lib/rdap_abuse_contact";
+import { recursiveAbuseContact } from "@/lib/network/rdap_abuse_contact";
 
 function safeFormatDate(value?: string) {
 	if (!value) return null;

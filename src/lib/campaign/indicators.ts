@@ -2,7 +2,7 @@ import { getDomain } from "tldts";
 
 import { AbuseRepository } from "../abuse/repository";
 import { isPlatformHost, kitFingerprints } from "../abuse/origin/siblings";
-import { DAY_MS } from "../duration";
+import { DAY_MS } from "../util/date_time";
 import { isPopularSite, loadPopularDomains, type PopularDomains } from "../abuse/origin/popular_domains";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { ArtifactsEntity } from "../db/entities/artifacts";

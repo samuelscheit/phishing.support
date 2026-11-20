@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CampaignRepository } from "@/lib/campaign/repository";
-import { formatUtcDateTime } from "@/lib/date_time";
+import { formatUtcDateTime } from "@/lib/util/date_time";
 import { RebuildCampaignsButton } from "./RebuildCampaignsButton";
 
 export const dynamic = "force-dynamic";

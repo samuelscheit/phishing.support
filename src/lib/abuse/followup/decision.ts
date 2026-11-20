@@ -1,6 +1,6 @@
 import { reporterBrowserIdentity } from "../../browser/reporter_identity";
 import { SubmissionsEntity } from "../../db/entities/submissions";
-import { errorText as describeError } from "../../error_text";
+import { errorText as describeError } from "../../util/error_text";
 import { abuseEmailCaseUrl } from "../mail/draft";
 import { sendAbuseEmailRoute } from "../mail/send";
 import { getProviderSubmissionProvider } from "../providers";
@@ -10,7 +10,7 @@ import { UnknownExternalStateError } from "../worker/shared";
 import { runDecisionAgent, type DecisionAgentModel, type DecisionAgentOutcome, type DecisionAgentStep } from "./agent";
 import { checkReportedSites, reasonSaysContentGone, takedownConfirmed } from "./liveness";
 import { caseCaptureNames, type AttachableFile, type DecisionToolDependencies } from "./tools";
-import { asRecord } from "../../values";
+import { asRecord } from "../../util/values";
 import { accessGateOf, arrivalChain } from "../../website/access_gate";
 
 const MAX_MESSAGE_TEXT = 6_000;

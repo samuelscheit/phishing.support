@@ -2,7 +2,7 @@ import { publicCampaignUrl } from "../campaign/urls";
 import { describeIndicatorEnglish, fieldLabel } from "./archive_text";
 import { countryName, countryRoutes, directComplaint, isEuMemberState } from "./countries";
 import type { Dossier } from "./dossier";
-import { plural } from "../values";
+import { plural } from "../util/values";
 import { utc } from "./format";
 import { claimNodeName, indicatorInfrastructure, nodeHolder, ROLE_LABEL, type InfrastructureNode } from "./infrastructure";
 import { OFFENCES, OFFENCES_TRANSLATION_SOURCE } from "./offences";

@@ -3,7 +3,7 @@ import {
 	netcraftSubmissionIdFromDiagnostic,
 	netcraftSubmissionUrl,
 	type NetcraftFetch,
-} from "../../../netcraft/api";
+} from "./api";
 import { AbuseRepository } from "../../repository";
 import { normalizeObservedUrlForTarget } from "../report_payload";
 

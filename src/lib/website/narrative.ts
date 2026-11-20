@@ -15,7 +15,7 @@ import {
 import type { WhoISInfo } from "./info";
 import { offeredDownloadEvidence } from "./offered_download";
 import { revisitWording, type WebsiteKitResource, type WebsiteVisitRecord } from "./types";
-import { DAY_MS } from "../duration";
+import { DAY_MS } from "../util/date_time";
 
 /**
  * The case analysis of a reported website, written for a person: what the

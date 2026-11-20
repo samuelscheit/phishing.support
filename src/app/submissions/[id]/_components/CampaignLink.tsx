@@ -1,7 +1,7 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { COPY as CAMPAIGN_COPY } from "@/app/campaigns/[id]/copy";
-import type { Locale } from "@/lib/i18n";
+import type { Locale } from "@/lib/i18n/locale";
 import type { SubmissionDetail } from "@/lib/submissions/details";
 
 /**

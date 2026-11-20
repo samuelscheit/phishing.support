@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { validateSchema } from "../../browser_task/agent";
+import { validateSchema } from "../../browser/task/agent";
 import { GENERIC_PROVIDER_FORM_ADAPTER, genericProviderFormAdapterHasValidHash } from "../providers/generic_form";
 import { validateGenericProviderFormOutput } from "./output_validation";
 import { buildGenericProviderFormTask } from "./task";

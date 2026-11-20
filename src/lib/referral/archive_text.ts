@@ -5,7 +5,7 @@ import sanitizeFilename from "sanitize-filename";
 
 import type { Dossier, DossierIndicator, DossierMail, DossierSite } from "./dossier";
 import { defangCommand } from "../malware/defang";
-import { plural, record, text } from "../values";
+import { plural, record, text } from "../util/values";
 import { utc } from "./format";
 import { infrastructureLines } from "./infrastructure";
 

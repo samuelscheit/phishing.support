@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { getClientIp, getReporterMetadata, normalizeCountryCode } from "./request_metadata";
+import { getClientIp, getReporterMetadata } from "./reporter_metadata";
 
 const originalFetch = globalThis.fetch;
 
@@ -113,11 +113,5 @@ describe("request reporter metadata", () => {
 			"x-real-ip": "192.0.2.44",
 			"user-agent": "Mozilla/5.0",
 		});
-	});
-
-	test("rejects unknown country sentinels", () => {
-		expect(normalizeCountryCode("XX")).toBeUndefined();
-		expect(normalizeCountryCode("T1")).toBeUndefined();
-		expect(normalizeCountryCode("us")).toBe("US");
 	});
 });

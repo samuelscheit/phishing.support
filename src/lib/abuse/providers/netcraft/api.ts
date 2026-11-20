@@ -1,6 +1,6 @@
-import { fetchJson, RequestTimeoutError, type FetchImplementation } from "../network/bounded_fetch";
-import { errorText } from "../error_text";
-import { asRecord } from "../values";
+import { fetchJson, RequestTimeoutError, type FetchImplementation } from "../../../network/bounded_fetch";
+import { errorText } from "../../../util/error_text";
+import { asRecord } from "../../../util/values";
 
 export const NETCRAFT_REPORT_URLS_URL = "https://report.netcraft.com/api/v3/report/urls";
 export const NETCRAFT_REPORT_MAIL_URL = "https://report.netcraft.com/api/v3/report/mail";

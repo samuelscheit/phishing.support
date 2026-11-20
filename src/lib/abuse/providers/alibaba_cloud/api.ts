@@ -1,5 +1,5 @@
-import { userAgent } from "../../../constants";
-import { asRecord } from "../../../values";
+import { userAgent } from "../../../network/service_identity";
+import { asRecord } from "../../../util/values";
 import { jsonRecord } from "../kit/http";
 import { snippet } from "../kit/text";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";

@@ -1,6 +1,6 @@
 "use client";
 
-import { cn } from "@/web_lib/util";
+import { cn } from "@/lib/util/cn";
 import { DEFAULT_SUBMISSION_FILTERS, SUBMISSION_FILTER_NAMES, type SubmissionFilter } from "@/lib/submissions/filters";
 
 /** Each chip in the colors of the status badge its submissions show. */

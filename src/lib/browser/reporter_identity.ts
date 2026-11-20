@@ -1,6 +1,6 @@
 import type { Protocol } from "rebrowser-puppeteer-core";
 
-import { getReporterHeader, getReporterUserAgent } from "../../web_lib/reporter";
+import { getReporterHeader, getReporterUserAgent } from "../http/reporter_headers";
 import { IPHONE_SCREEN, type BrowserIdentity, type TouchScreen } from "./page";
 
 /**

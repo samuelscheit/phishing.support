@@ -286,7 +286,7 @@ The resolver turns each target into provider routes (registrar/hosting abuse mai
 
 Capture sessions explicitly request two external CDP connections: the capture's own client and the visiting agent. Every other Fabric session remains single-client. Network captures are capped at 2,000 requests, 256 KiB per value, and 10 MiB total.
 
-Providers always see the service identity defined in `src/lib/constants.ts` (Phishing Support, `support@phishing.support`, `https://phishing.support`); it is code, not configuration, because routes pin the provider definitions that embed it. When a public report names its submitter, the name and/or email appear only in the report text as the original reporter, and Cloudflare additionally receives the submitter's country when known.
+Providers always see the service identity defined in `src/lib/network/service_identity.ts` (Phishing Support, `support@phishing.support`, `https://phishing.support`); it is code, not configuration, because routes pin the provider definitions that embed it. When a public report names its submitter, the name and/or email appear only in the report text as the original reporter, and Cloudflare additionally receives the submitter's country when known.
 
 ## Campaigns and criminal referrals
 

@@ -4,7 +4,7 @@
  * impersonated brand's validated account links; without a brand or a link
  * they fall back to wording that needs neither.
  */
-import type { Locale } from "@/lib/i18n";
+import type { Locale } from "@/lib/i18n/locale";
 import type { GuidancePurpose, PublicCampaignVisitor, VisitorKind } from "@/lib/campaign/public_view";
 
 export type Tone = "safe" | "warn" | "danger";

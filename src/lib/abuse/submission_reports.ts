@@ -1,6 +1,6 @@
 import { isIP } from "node:net";
 
-import type { ReporterMetadata } from "../request_metadata";
+import type { ReporterMetadata } from "../http/reporter_headers";
 import { AbuseRepository, type CreatedAbuseReport } from "./repository";
 import { decodeImageEvidence, normalizeAbuseTarget, normalizeObservedUrl, type DecodedEvidence, type NormalizedAbuseTarget, type ValidatedAbuseReportRequest } from "./contracts";
 import { AbuseInputError, hashStableJson, isPublicIp, sha256Hex } from "./security";
