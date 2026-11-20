@@ -172,11 +172,11 @@ describe("a campaign's kit search", () => {
 
 		// A site queued before the file was retired is not opened, and the case records why.
 		let opened = false;
-		const skipped = await analyzeKitSibling({ reportId: original.reportId, url: "https://queued-retire-test.net/", hashes: [KIT] }, { analyzeWebsite: async () => { opened = true; return undefined; } });
+		const skipped = await analyzeKitSibling({ reportId: original.reportId, url: "https://queued-retire-test.net/", hashes: [KIT] }, { analyzeWebsite: async () => { opened = true; return 1n; } });
 		expect({ skipped, opened }).toEqual({ skipped: undefined, opened: false });
 		expect((await AbuseRepository.listEvents(original.reportId)).filter(({ eventType }) => eventType === "kit_siblings.skipped").map(({ data }) => data)).toEqual([{ url: "https://queued-retire-test.net/", retiredHashes: [KIT] }]);
 		// Found through another, live file too, it is opened.
-		await analyzeKitSibling({ reportId: original.reportId, url: "https://queued-retire-test.net/", hashes: [KIT, SHARED] }, { analyzeWebsite: async () => { opened = true; return undefined; } });
+		await analyzeKitSibling({ reportId: original.reportId, url: "https://queued-retire-test.net/", hashes: [KIT, SHARED] }, { analyzeWebsite: async () => { opened = true; return 1n; } });
 		expect(opened).toBe(true);
 
 		await found(13, "reported");

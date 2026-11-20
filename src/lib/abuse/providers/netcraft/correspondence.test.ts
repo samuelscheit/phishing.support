@@ -89,7 +89,7 @@ describe("Netcraft correspondence polling", () => {
 
 	test("records each verdict once and reads again only while Netcraft is still analysing", async () => {
 		let body = { state: "processing", pending: true, has_urls: true, uuid: UUID };
-		globalThis.fetch = (async () => jsonResponse(body)) as typeof fetch;
+		globalThis.fetch = Object.assign(async () => jsonResponse(body), { preconnect: originalFetch.preconnect });
 		const { reportId, route } = await submittedNetcraftRoute();
 		await pollProviderCorrespondence({ routeId: route.id, jobId: 1n });
 		expect(await polls(route.id)).toHaveLength(1);

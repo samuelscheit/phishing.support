@@ -55,6 +55,7 @@ describe("the website case analysis", () => {
 
 	test("tells the whole visit: each page in order, the agent's account, and every request that carried the synthetic values", () => {
 		const evidence = visitNarrativeEvidence({
+			finding: "Phishing.",
 			pages: [{ url: "https://kit.example/", title: "Verify", text: "Verify your email" }, { url: "https://kit.example/signin", text: `Enter password ${"x".repeat(5_000)}` }],
 			visit: {
 				outcome: "completed",
@@ -71,6 +72,6 @@ describe("the website case analysis", () => {
 		expect(evidence).toContain("Hosts the site's scripts and stylesheets were loaded from: cdn.kit-assets.example.");
 		// Other pages are shortened; the analyzed page is given in full elsewhere.
 		expect(evidence.length).toBeLessThan(5_000);
-		expect(visitNarrativeEvidence({ visit: { outcome: "completed", actions: [], dataSent: [], downloadFailures: [] } })).toContain("No request during the visit carried the synthetic values off the page.");
+		expect(visitNarrativeEvidence({ finding: "Phishing.", visit: { outcome: "completed", actions: [], dataSent: [], downloadFailures: [] } })).toContain("No request during the visit carried the synthetic values off the page.");
 	});
 });

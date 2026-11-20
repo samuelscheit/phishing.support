@@ -153,7 +153,7 @@ describe("reporting a confirmed page's redirector", () => {
 		const outcome = await reportRedirector({ reportId: first.reportId, submissionId: 440000000000000002n, finding: X_LOGIN, reporter: { reporterCountry: "CH" }, pageScreenshot: async () => ({ buffer: SCREENSHOT, mimeType: "image/png" }) }, net.dependencies);
 		expect(outcome).toMatchObject({ kind: "reported", url: ROTATOR, report: { created: true } });
 		expect(net.checked).toEqual([ROTATOR]);
-		const linked = await AbuseRepository.getReport(outcome!.kind === "reported" ? outcome.report.reportId : 0n);
+		const linked = await AbuseRepository.getReport(outcome?.kind === "reported" ? outcome.report.reportId : 0n);
 		expect(linked).toMatchObject({ submissionId: 440000000000000002n, allegationCategory: "phishing" });
 		// The capture time is when the case that went through the redirector was opened.
 		const parent = await SubmissionsEntity.get(440000000000000001n);
@@ -206,10 +206,9 @@ describe("reporting a confirmed page's redirector", () => {
 		const net = offline();
 		const deps: Partial<InvestigationDependencies> = {
 			reportRedirector: (params) => reportRedirector(params, net.dependencies),
-			probe: async () => ({ requests: 1, backends: [], downloads: [], egress: "phishing" }),
 			now: () => new Date(CHECKED_AT),
 		};
-		await runReportInvestigation({ reportId: page.reportId, payload: readInvestigationJobPayload(job.payload), reporter: { reporterCountry: "CH" } }, () => ({}) as never, deps);
+		await runReportInvestigation({ reportId: page.reportId, payload: readInvestigationJobPayload(job.payload), reporter: { reporterCountry: "CH" } }, deps);
 
 		expect((await AbuseRepository.getReport(page.reportId))?.status).toBe("accepted");
 		const reports = await reportsOn(440000000000000032n);
@@ -221,7 +220,7 @@ describe("reporting a confirmed page's redirector", () => {
 		expect(events.map(({ eventType, data }) => [eventType, data])).toEqual([["redirector.reported", { url: ROTATOR, reportId: redirector.id.toString(), created: true }]]);
 
 		// A retried investigation finds the same report.
-		await runReportInvestigation({ reportId: page.reportId, payload: readInvestigationJobPayload(job.payload), reporter: {} }, () => ({}) as never, deps);
+		await runReportInvestigation({ reportId: page.reportId, payload: readInvestigationJobPayload(job.payload), reporter: {} }, deps);
 		expect(await reportsOn(440000000000000032n)).toHaveLength(2);
 	});
 });
