@@ -1,8 +1,8 @@
-import { ImapFlow } from "imapflow";
+import { ImapFlow, type ImapFlowOptions } from "imapflow";
 import { simpleParser } from "mailparser";
 
 import { imapConfig } from "../../../mail/config";
-import { sleep } from "../../../util/sleep";
+import { sleep as realSleep, type Sleep } from "../../../util/sleep";
 
 /**
  * The verification-code mail a provider's form sends before it accepts a
@@ -46,6 +46,12 @@ export function mailedCodeFrom(spec: MailedCodeSpec, mail: { from: string; subje
 	return new RegExp(spec.codePattern, "i").exec(text)?.[1];
 }
 
+/** The mailbox connection and the pause between polls; tests pass fakes instead of mocking modules. */
+export type MailedCodeIo = {
+	imap?: (options: ImapFlowOptions) => Pick<ImapFlow, "connect" | "getMailboxLock" | "search" | "fetch" | "logout">;
+	sleep?: Sleep;
+};
+
 /**
  * Wait for the code the provider mails after `requestedAt`. The mailbox is
  * opened read-only and searched by time only, so the IMAP listener's own
@@ -54,12 +60,14 @@ export function mailedCodeFrom(spec: MailedCodeSpec, mail: { from: string; subje
  * sender's full host, so a code from a subdomain (Alibaba Cloud's
  * system-sg@notice.alibabacloud.com) was never found by a search for its domain.
  */
-export function mailedCodeReader(spec: MailedCodeSpec): MailedCodeReader {
+export function mailedCodeReader(spec: MailedCodeSpec, io: MailedCodeIo = {}): MailedCodeReader {
+	const openImap = io.imap ?? ((options) => new ImapFlow(options));
+	const sleep = io.sleep ?? realSleep;
 	return async (requestedAt, signal) => {
 		const config = imapConfig();
 		if (!config) throw new Error(`${spec.provider} reporting requires the IMAP mailbox to receive its verification code.`);
 		const deadline = Date.now() + spec.waitMs;
-		const client = new ImapFlow({ host: config.host, port: config.port, secure: config.secure, auth: { user: config.user, pass: config.pass }, logger: false, disableAutoIdle: true });
+		const client = openImap({ host: config.host, port: config.port, secure: config.secure, auth: { user: config.user, pass: config.pass }, logger: false, disableAutoIdle: true });
 		await client.connect();
 		// Per mailbox, the highest UID already read: each poll after the first reads only newer mail.
 		const seen = new Map<string, number>();

@@ -1,10 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
 import { ALIBABA_CLOUD_PROVIDER } from "../alibaba_cloud/definition";
-import { mailedCodeFrom, mailedCodeReader, type MailedCodeSpec } from "./mailed_code";
-
-const realImapflow = await import("imapflow");
-const realSleep = await import("../../../util/sleep");
+import { mailedCodeFrom, mailedCodeReader, type MailedCodeIo, type MailedCodeSpec } from "./mailed_code";
 
 type FakeMessage = { uid: number; date?: Date; from: string; subject: string; html?: string; text?: string };
 
@@ -58,14 +55,16 @@ class FakeImapFlow {
 const environment = { IMAP_HOST: "imap.test", IMAP_USER: "u", IMAP_PASS: "p", IMAP_MAILBOXES: "INBOX", IMAP_SHARED_MAILBOXES: "Shared", IMAP_LISTEN_ADDRESS: "inbox@replies.example.com", REPLY_DOMAIN: "replies.example.com" };
 const saved: Record<string, string | undefined> = {};
 
+/** The fake mailbox and a short, counted pause; injected, so nothing leaks into other test files. */
+const io: MailedCodeIo = {
+	imap: (options) => new FakeImapFlow(options) as never,
+	sleep: async () => { server.sleeps += 1; server.onSleep?.(server.sleeps); await new Promise((resolve) => setTimeout(resolve, 5)); },
+};
+
 beforeAll(() => {
-	mock.module("imapflow", () => ({ ...realImapflow, ImapFlow: FakeImapFlow }));
-	mock.module("../../../util/sleep", () => ({ ...realSleep, sleep: async () => { server.sleeps += 1; server.onSleep?.(server.sleeps); await new Promise((resolve) => setTimeout(resolve, 5)); } }));
 	for (const [name, value] of Object.entries(environment)) { saved[name] = process.env[name]; process.env[name] = value; }
 });
 afterAll(() => {
-	mock.module("imapflow", () => realImapflow);
-	mock.module("../../../util/sleep", () => realSleep);
 	for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
 });
 beforeEach(() => {
@@ -131,7 +130,7 @@ describe("mailedCodeReader against the mailbox", () => {
 
 	test("finds a code mailed from a subdomain: the IMAP search is by time only, the sender is matched from the envelope", async () => {
 		server.folders.INBOX = [code(1)];
-		await expect(mailedCodeReader(spec)(requestedAt)).resolves.toBe("346070");
+		await expect(mailedCodeReader(spec, io)(requestedAt)).resolves.toBe("346070");
 		expect(server.searches).toHaveLength(1);
 		const [{ query }] = server.searches;
 		expect(Object.keys(query)).toEqual(["since"]);
@@ -147,13 +146,13 @@ describe("mailedCodeReader against the mailbox", () => {
 			code(2, { from: "friend@gmail.com", subject: "Verification code", html: "Please enter the code to verify your account. 111111" }),
 			code(3),
 		];
-		await expect(mailedCodeReader(spec)(requestedAt)).resolves.toBe("346070");
+		await expect(mailedCodeReader(spec, io)(requestedAt)).resolves.toBe("346070");
 		expect(server.sourceFetches).toEqual([[3]]);
 	});
 
 	test("a lookalike sender's code is never returned", async () => {
 		server.folders.INBOX = [code(1, { from: "system@alibabacloud.com.evil.example", html: "Please enter the code to verify your account. 666666" })];
-		await expect(mailedCodeReader({ ...spec, waitMs: 1 })(requestedAt)).rejects.toThrow("did not arrive in time");
+		await expect(mailedCodeReader({ ...spec, waitMs: 1 }, io)(requestedAt)).rejects.toThrow("did not arrive in time");
 		expect(server.sourceFetches).toEqual([]);
 		expect(server.loggedOut).toBe(1);
 	}, 15_000);
@@ -166,36 +165,36 @@ describe("mailedCodeReader against the mailbox", () => {
 			code(4, { date: at(alibaba.maxAgeMs + 1_000), html: "Please enter the code to verify your account. 400004" }),
 			code(5, { date: undefined, html: "Please enter the code to verify your account. 500005" }),
 		];
-		await expect(mailedCodeReader(spec)(requestedAt)).resolves.toBe("300003");
+		await expect(mailedCodeReader(spec, io)(requestedAt)).resolves.toBe("300003");
 		expect(server.sourceFetches).toEqual([[2, 3]]);
 	});
 
 	test("a mail that is the right sender but not a code mail is skipped for an older real one", async () => {
 		server.folders.INBOX = [code(1, { date: at(5_000) }), code(2, { date: at(30_000), subject: "Welcome to Alibaba Cloud", html: "<p>Welcome. Ticket 123456</p>" })];
-		await expect(mailedCodeReader(spec)(requestedAt)).resolves.toBe("346070");
+		await expect(mailedCodeReader(spec, io)(requestedAt)).resolves.toBe("346070");
 	});
 
 	test("also searches the shared folders, where a code no rule filed lands", async () => {
 		server.folders.INBOX = [];
 		server.folders.Shared = [code(9)];
-		await expect(mailedCodeReader(spec)(requestedAt)).resolves.toBe("346070");
+		await expect(mailedCodeReader(spec, io)(requestedAt)).resolves.toBe("346070");
 		expect(server.locks.map(({ folder, released }) => ({ folder, released }))).toEqual([{ folder: "INBOX", released: true }, { folder: "Shared", released: true }]);
 	});
 
 	test("reads a plain-text-only mail", async () => {
 		server.folders.INBOX = [code(1, { html: undefined, text: "Dear user: Please enter the code to verify your account. 424242 Note" })];
-		await expect(mailedCodeReader(spec)(requestedAt)).resolves.toBe("424242");
+		await expect(mailedCodeReader(spec, io)(requestedAt)).resolves.toBe("424242");
 	});
 
 	test("an empty mailbox waits and then reports the missing code, naming the provider", async () => {
-		await expect(mailedCodeReader({ ...spec, waitMs: 1 })(requestedAt)).rejects.toThrow("Alibaba Cloud's verification code did not arrive in time.");
+		await expect(mailedCodeReader({ ...spec, waitMs: 1 }, io)(requestedAt)).rejects.toThrow("Alibaba Cloud's verification code did not arrive in time.");
 		expect(server.loggedOut).toBe(1);
 	}, 15_000);
 
 	test("an aborted signal ends the wait with the abort reason, and the connection is closed", async () => {
 		const controller = new AbortController();
 		controller.abort(new Error("canceled by worker"));
-		await expect(mailedCodeReader(spec)(requestedAt, controller.signal)).rejects.toThrow("canceled by worker");
+		await expect(mailedCodeReader(spec, io)(requestedAt, controller.signal)).rejects.toThrow("canceled by worker");
 		expect(server.loggedOut).toBe(1);
 		expect(server.searches).toHaveLength(0);
 	});
@@ -204,7 +203,7 @@ describe("mailedCodeReader against the mailbox", () => {
 		const host = process.env.IMAP_HOST;
 		delete process.env.IMAP_HOST;
 		try {
-			await expect(mailedCodeReader(spec)(requestedAt)).rejects.toThrow("requires the IMAP mailbox");
+			await expect(mailedCodeReader(spec, io)(requestedAt)).rejects.toThrow("requires the IMAP mailbox");
 			expect(server.connected).toBe(0);
 		} finally {
 			process.env.IMAP_HOST = host;
@@ -216,7 +215,7 @@ describe("mailedCodeReader against the mailbox", () => {
 		server.folders.Shared = [code(10, { subject: "Welcome", html: "<p>Welcome</p>" })];
 		// The code mail lands after the first poll came up empty.
 		server.onSleep = (poll) => { if (poll === 2) server.folders.INBOX!.push(code(5, { date: at(20_000), html: "Please enter the code to verify your account. 565656" })); };
-		await expect(mailedCodeReader({ ...spec, waitMs: 5_000 })(requestedAt)).resolves.toBe("565656");
+		await expect(mailedCodeReader({ ...spec, waitMs: 5_000 }, io)(requestedAt)).resolves.toBe("565656");
 		const inbox = server.searches.filter((search) => search.folder === "INBOX").map((search) => search.query);
 		expect(inbox).toEqual([{ since: at(-60_000) }, { uid: "5:*" }, { uid: "5:*" }]);
 		const shared = server.searches.filter((search) => search.folder === "Shared").map((search) => search.query);
@@ -227,7 +226,7 @@ describe("mailedCodeReader against the mailbox", () => {
 
 	test("the \"n:*\" quirk: the already-read newest UID the server returns is ignored", async () => {
 		server.folders.INBOX = [code(7, { from: "promo@evil.example" })];
-		await expect(mailedCodeReader({ ...spec, waitMs: 100 })(requestedAt)).rejects.toThrow("did not arrive in time");
+		await expect(mailedCodeReader({ ...spec, waitMs: 100 }, io)(requestedAt)).rejects.toThrow("did not arrive in time");
 		const queries = server.searches.filter((search) => search.folder === "INBOX").map((search) => search.query);
 		expect(queries.length).toBeGreaterThan(2);
 		expect(Object.keys(queries[0]!)).toEqual(["since"]);
@@ -238,7 +237,7 @@ describe("mailedCodeReader against the mailbox", () => {
 
 	test("a mailbox empty on the first poll is searched from UID 1 afterwards", async () => {
 		server.folders.INBOX = [];
-		await expect(mailedCodeReader({ ...spec, waitMs: 100 })(requestedAt)).rejects.toThrow("did not arrive in time");
+		await expect(mailedCodeReader({ ...spec, waitMs: 100 }, io)(requestedAt)).rejects.toThrow("did not arrive in time");
 		const queries = server.searches.filter((search) => search.folder === "INBOX").map((search) => search.query);
 		expect(Object.keys(queries[0]!)).toEqual(["since"]);
 		expect(queries.length).toBeGreaterThan(2);
@@ -247,6 +246,6 @@ describe("mailedCodeReader against the mailbox", () => {
 
 	test("a spec with several sender domains matches any of them", async () => {
 		server.folders.INBOX = [code(1, { from: "noreply@mail.other-sender.com", subject: "Verification code", html: "Please enter the code to verify your account. 777777" })];
-		await expect(mailedCodeReader({ ...spec, senderDomains: ["alibabacloud.com", "other-sender.com"] })(requestedAt)).resolves.toBe("777777");
+		await expect(mailedCodeReader({ ...spec, senderDomains: ["alibabacloud.com", "other-sender.com"] }, io)(requestedAt)).resolves.toBe("777777");
 	});
 });
