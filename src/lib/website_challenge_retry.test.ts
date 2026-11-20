@@ -90,6 +90,7 @@ async function analyze(id: bigint, routes: { first: { egress: FabricEgress; show
 	await analyzeWebsite({ submissionId: id, url: PAGE }, {
 		getInfo: async () => ({ ip_rdaps: [] }),
 		analysisClient: model(prompts),
+		domainRegistration: async () => undefined,
 		timestampEvidence: async () => undefined,
 		browserBackoffMs: [1],
 		archiveWebsite: async (options) => {

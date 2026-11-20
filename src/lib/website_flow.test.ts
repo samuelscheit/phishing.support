@@ -140,6 +140,7 @@ function dependencies(params: {
 	return {
 		getInfo: async () => ({ ip_rdaps: [] }),
 		analysisClient: kitModel(params.answers ?? KIT_ANSWERS, params.modelCalls),
+		domainRegistration: async () => undefined,
 		timestampEvidence: async () => undefined,
 		browserBackoffMs: [1],
 		downloadLookups: async () => [],

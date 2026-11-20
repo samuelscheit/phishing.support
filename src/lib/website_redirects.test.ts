@@ -82,6 +82,7 @@ function dependencies(archive: WebsiteArchiveResult, archiveCalls: ArchiveCall[]
 	return {
 		getInfo: async () => ({ ip_rdaps: [] }),
 		analysisClient: phishingModel(),
+		domainRegistration: async () => undefined,
 		// Never reach a real time-stamping authority from a test.
 		timestampEvidence: async () => undefined,
 		// A gated page's direct visit answers with the page itself.
@@ -109,6 +110,37 @@ async function waitForStatus(id: bigint, statuses: string[]) {
 	}
 	throw new Error(`Submission ${id} did not reach ${statuses.join("/")}.`);
 }
+
+describe("a brand's own site on a domain other than its main one", () => {
+	test("the classifier is given who holds the domain and a web search, and its benign verdict reports nothing", async () => {
+		// Production case 381762485331432790: AWS GovCloud's own IAM sign-in was reported to AWS as an AWS lookalike.
+		const url = "https://signin.amazonaws-us-gov.com/oauth?client_id=arn%3Aaws-us-gov%3Asignin%3A%3A%3Aconsole%2Fcanvas";
+		const archive = archiveOf([hop(0, url, 200)]);
+		const requests: Array<{ tools?: unknown; input?: unknown; text?: { format?: unknown } }> = [];
+		const recording = benignModel();
+		const analysisClient = { responses: { create: async (options: typeof requests[number]) => { requests.push(options); return recording.responses.create(options as never); } } } as unknown as AnalysisClient;
+		const lookups: string[] = [];
+		const domainRegistration = async (hostname: string) => {
+			lookups.push(hostname);
+			return { domain: "amazonaws-us-gov.com", registrar: "MarkMonitor", brandProtectionRegistrar: true, registrant: "Amazon Technologies, Inc.", registered: "2012-08-13", nameservers: ["ns-1063.awsdns-04.org"] };
+		};
+		const id = await websiteSubmission(381762485331432790n, url);
+
+		await analyzeWebsite({ submissionId: id, url }, { ...dependencies(archive), analysisClient, domainRegistration });
+
+		const classification = requests.find((request) => request.text?.format);
+		expect(classification?.tools).toEqual([{ type: "web_search" }]);
+		const [system, user] = classification!.input as [{ content: string }, { content: Array<{ text: string }> }];
+		expect(system.content).toContain("A brand's own page is not phishing");
+		expect(system.content).toContain("search the web for the brand's official domains");
+		expect(user.content[0]!.text).toContain("domain_registration:");
+		expect(user.content[0]!.text).toContain("registrant: \"Amazon Technologies, Inc.\"");
+		expect(user.content[0]!.text).toContain("brandProtectionRegistrar: true");
+		expect(lookups).toEqual(["signin.amazonaws-us-gov.com"]);
+		expect((await SubmissionsEntity.get(id))?.status).toBe("invalid");
+		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
+	});
+});
 
 describe("a submitted address that serves a file, not a page", () => {
 	test("a kit's script shown as text is never classified or reported, however much its source names a login", async () => {

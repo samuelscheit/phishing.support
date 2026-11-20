@@ -84,6 +84,7 @@ function scenario(params: { classification: Answer; visit?: ScriptedVisit }) {
 	const dependencies: WebsiteAnalysisDependencies = {
 		getInfo: async () => ({ ip_rdaps: [] }),
 		analysisClient: model(params.classification, prompts),
+		domainRegistration: async () => undefined,
 		timestampEvidence: async () => undefined,
 		browserBackoffMs: [1],
 		archiveWebsite: async () => capture(session),

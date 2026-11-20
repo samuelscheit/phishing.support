@@ -34,6 +34,7 @@ import { visitNavigation, visitPages, type VisitPage } from "./site_visit/eviden
 import type { SiteVisitRecording } from "./site_visit/visit";
 import { buildWebsiteAnalysisInput, type NarrativeVisitPage } from "./website_narrative";
 import { isWebPage } from "./web_page";
+import { lookupDomainRegistration, type DomainRegistrationLookup } from "./domain_registration";
 import {
 	buildWebsiteClassificationInput,
 	buildWebsiteReportEvidence,
@@ -239,7 +240,9 @@ async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigation
 		analysisKind: "classification",
 		options: {
 			model: defaultResponseModel,
-			input: buildWebsiteClassificationInput(hop, archive),
+			input: buildWebsiteClassificationInput(hop, archive, await (dependencies.domainRegistration ?? lookupDomainRegistration)(new URL(hop.url).hostname)),
+			// The classifier checks a brand's official domains when the page's domain is not the one it knows.
+			tools: [{ type: "web_search" }],
 			text: { format: WEBSITE_CLASSIFICATION_FORMAT, verbosity: "low" },
 			stream: true,
 		},
@@ -507,6 +510,8 @@ export type WebsiteAnalysisDependencies = {
 	visitAgent?: VisitAgent;
 	/** The request that checks what a gated page shows a visitor without its session. */
 	bareVisit?: BareVisitDependencies;
+	/** Who holds the domain a page is on, for the classifier to tell a brand's own site from a lookalike. */
+	domainRegistration?: DomainRegistrationLookup;
 };
 
 /** Capture retries after a browser-service failure: 5 s, 15 s, then 45 s. */

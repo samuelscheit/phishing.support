@@ -68,6 +68,12 @@ export function explicitAbuseMailboxes(entity: unknown, source: AbuseMailbox["so
 	return result;
 }
 
+/** One text field of an entity's vCard (`org`, `fn`), as the record states it. */
+export function entityVcardText(entity: unknown, key: string): string | undefined {
+	const record = asRecord(entity);
+	return record ? text(vcardValues(record)[key]) : undefined;
+}
+
 export function firstEntityWithRole(root: unknown, role: string): JsonRecord | undefined {
 	const record = asRecord(root);
 	if (!record) return undefined;

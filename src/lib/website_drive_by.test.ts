@@ -107,6 +107,7 @@ async function analyze(id: bigint, answers: { desktop: Answer; iphone: Answer },
 	await analyzeWebsite({ submissionId: id, url: PAGE }, {
 		getInfo: async () => ({ ip_rdaps: [] }),
 		analysisClient: model(answers, prompts),
+		domainRegistration: async () => undefined,
 		timestampEvidence: async () => undefined,
 		browserBackoffMs: [1],
 		archiveWebsite: async (options) => {
