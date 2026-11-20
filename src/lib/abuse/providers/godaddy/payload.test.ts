@@ -90,7 +90,6 @@ describe("storedGoDaddySubmissionPayload", () => {
 	test("rejects every drift from the pinned shape", () => {
 		const mutations: Array<[string, (payload: Record<string, any>) => void]> = [
 			["adapter", (p) => { p.adapter = "x"; }],
-			["narrative version", (p) => { p.providerNarrativeVersion = 2; }],
 			["definition version", (p) => { p.definition.version = "old"; }],
 			["definition hash", (p) => { p.definition.contentHash = "0".repeat(64); }],
 			["domain not normalized", (p) => { p.target.domain = "Login-Example-Phish.com"; }],

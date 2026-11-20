@@ -1,8 +1,6 @@
-import type { ProviderReportPreviewContext, ProviderSubmissionProvider } from "../submission_contracts";
-import { reportReferencesIn } from "../report_reference";
+import { defineProvider, registrarPreview } from "../kit/provider";
 import { NEWFOLD_PROVIDER } from "./definition";
 import { makeNewfoldComments, newfoldReportUrls } from "./payload";
-import { normalizeDomain } from "../../security";
 import { prepareNewfoldExternalSubmission, prepareNewfoldSubmission, submitNewfoldSubmission } from "./submission";
 
 /**
@@ -11,32 +9,11 @@ import { prepareNewfoldExternalSubmission, prepareNewfoldSubmission, submitNewfo
  * by Captcha). The form shows no case ID; Newfold mails one to the reporter
  * address, read as a reply and matched by our reference.
  */
-export const newfoldProvider: ProviderSubmissionProvider = {
+export const newfoldProvider = defineProvider({
 	definition: NEWFOLD_PROVIDER,
-	prepareSubmission: (context) => prepareNewfoldSubmission(context),
-	shouldRefreshStartingPayload: (context) => context.payload.adapter !== "newfold_report_v1" || context.payload.providerNarrativeVersion !== 1,
-	buildReportPreview: (context: ProviderReportPreviewContext) => {
-		const domain = normalizeDomain(context.target);
-		const urls = domain ? newfoldReportUrls(domain, context.observedUrls) : [];
-		return domain && urls.length > 0 ? makeNewfoldComments({
-			target: domain,
-			observedUrls: context.observedUrls,
-			description: context.description,
-			...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
-			legalBrandUrl: context.legalBrandUrl ?? null,
-			trackingId: "PS-000000000000-R0",
-			brand: NEWFOLD_PROVIDER.defaultBrand,
-		}, urls) : undefined;
-	},
-	prepareExternalSubmission: (context) => prepareNewfoldExternalSubmission(context),
-	// The executor always calls submitPrepared: the page and captcha token live in the preflight's browser session.
-	submit: (context) => submitNewfoldSubmission(context, undefined),
-	submitPrepared: (context, preflight) => submitNewfoldSubmission(context, preflight),
-	inboundMail: {
-		// The confirmation mail's sender is not documented; Newfold's own and its brands' domains are the best guess.
-		senderDomains: ["newfold.com", "bluehost.com", "hostgator.com", "web.com", "networksolutions.com", "register.com", "domain.com"],
-		confirmationIds: reportReferencesIn,
-		messageKind: "reply",
-	},
-};
-
+	prepare: (context) => prepareNewfoldSubmission(context),
+	preview: registrarPreview({ urls: newfoldReportUrls, make: makeNewfoldComments }),
+	external: { prepare: (context) => prepareNewfoldExternalSubmission(context), submit: submitNewfoldSubmission },
+	// The confirmation mail's sender is not documented; Newfold's own and its brands' domains are the best guess.
+	inbound: { messageKind: "reply", senderDomains: ["newfold.com", "bluehost.com", "hostgator.com", "web.com", "networksolutions.com", "register.com", "domain.com"] },
+});

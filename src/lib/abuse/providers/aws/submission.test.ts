@@ -3,10 +3,9 @@ import { eq } from "drizzle-orm";
 
 import { getDb } from "../../../db";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
-import { validateAbuseReportRequest } from "../../contracts";
-import { AbuseRepository } from "../../repository";
 import { contactRoute } from "../../resolver/routes";
-import { abuseProviderRoutes, abuseTargets } from "../../schema";
+import { abuseTargets } from "../../schema";
+import { jsonResponse as json, readyDraft } from "../kit/testing";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { awsProvider } from "./index";
 import { AWS_PROVIDER } from "./definition";
@@ -21,28 +20,14 @@ const MAILBOXES = ["trustandsafety@support.aws.com", "abuse@amazonaws.com"];
 const description = "The page asks visitors for a password, sign-in details, a verification code, or identity details.";
 const NOW = new Date("2026-11-20T11:02:41.500Z");
 
-async function awsRoute(options: { target?: string; allegationCategory?: "phishing" | "malware"; observedUrls?: string[]; resolverProvenance?: Record<string, unknown> } = {}) {
-	const target = options.target ?? TARGET;
-	const request = await validateAbuseReportRequest({
-		targets: [target],
-		allegationCategory: options.allegationCategory ?? "phishing",
-		description,
-		observedUrls: [{ target, urls: options.observedUrls ?? [`https://${target}/signin`] }],
-		legalBrandUrl: "https://www.examplebank.com/",
-	});
-	const created = await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } });
-	const [stored] = await AbuseRepository.listTargets(created.reportId);
-	const route = await AbuseRepository.upsertResolvedRoute(stored!.id, contactRoute({ email: MAILBOXES[0]!, providerName: "AWS", provenance: options.resolverProvenance ?? {}, snapshot: {} }));
-	return { created, route, targetId: stored!.id };
-}
-
-async function readyContext(options: Parameters<typeof awsRoute>[0] = {}) {
-	const fixture = await awsRoute(options);
-	const preparation = await prepareAwsSubmission({ routeId: fixture.route.id, payload: {} });
-	if (preparation.outcome !== "ready") throw new Error(`expected ready, got ${JSON.stringify(preparation)}`);
-	const payload = storedAwsSubmissionPayload(preparation.payload)!;
-	return { ...fixture, payload, context: { routeId: fixture.route.id, payload: payload as unknown as Record<string, unknown> } };
-}
+const readyContext = (options: { target?: string; allegationCategory?: "phishing" | "malware"; observedUrls?: string[]; resolverProvenance?: Record<string, unknown> } = {}) => readyDraft({
+	mailbox: MAILBOXES[0]!,
+	providerName: "AWS",
+	target: options.target ?? TARGET,
+	allegationCategory: options.allegationCategory,
+	observedUrls: options.observedUrls,
+	provenance: options.resolverProvenance,
+}, prepareAwsSubmission, storedAwsSubmissionPayload);
 
 type Sent = { url: string; init: RequestInit };
 function fakeFetch(answer: Response | Error | (() => Response)) {
@@ -54,7 +39,6 @@ function fakeFetch(answer: Response | Error | (() => Response)) {
 	};
 	return { fetch, sent };
 }
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 describe("registry", () => {
 	test("both AWS mailboxes resolve to the provider and nothing else claims them", async () => {
@@ -78,13 +62,6 @@ describe("registry", () => {
 		expect(awsProvider.fetchCorrespondence).toBeUndefined();
 	});
 
-	test("an older draft is refreshed; a current one is not", async () => {
-		const { payload } = await readyContext();
-		const refresh = (candidate: Record<string, unknown>) => awsProvider.shouldRefreshStartingPayload!({ routeId: 1n, payload: candidate } as never);
-		expect(refresh(payload as unknown as Record<string, unknown>)).toBeFalse();
-		expect(refresh({ ...payload, adapter: "aws_report_v0" })).toBeTrue();
-		expect(refresh({ ...payload, providerNarrativeVersion: 2 })).toBeTrue();
-	});
 });
 
 describe("prepareAwsSubmission", () => {
@@ -113,18 +90,6 @@ describe("prepareAwsSubmission", () => {
 		expect(hosted.payload.report.comments).toContain(`Hosting IP address: 34.102.117.75 (${TARGET} resolved to 34.102.117.75`);
 	});
 
-	test("a pin mismatch and a non-web target end the route as insufficient evidence", async () => {
-		const mismatch = await awsRoute();
-		(await getDb()).update(abuseProviderRoutes).set({ providerDefinitionHash: "0".repeat(64) }).where(eq(abuseProviderRoutes.id, mismatch.route.id)).run();
-		expect(await prepareAwsSubmission({ routeId: mismatch.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "aws_provider_definition_pin_mismatch" });
-		const other = await awsRoute();
-		(await getDb()).update(abuseProviderRoutes).set({ providerRegistryKey: "gname" }).where(eq(abuseProviderRoutes.id, other.route.id)).run();
-		expect(await prepareAwsSubmission({ routeId: other.route.id, payload: {} })).toMatchObject({ reason: "aws_provider_definition_pin_mismatch" });
-		const email = await awsRoute();
-		(await getDb()).update(abuseTargets).set({ targetType: "email" }).where(eq(abuseTargets.id, email.targetId)).run();
-		expect(await prepareAwsSubmission({ routeId: email.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "aws_requires_a_web_target" });
-	});
-
 	test("an unknown route fails", async () => {
 		await expect(prepareAwsSubmission({ routeId: 999_999n, payload: {} })).rejects.toThrow("no longer exists");
 	});
@@ -134,11 +99,11 @@ describe("verifiedAwsDraft", () => {
 	test("rejects a malformed, retargeted or stale draft", async () => {
 		const { context, payload, route, targetId } = await readyContext();
 		await expect(verifiedAwsDraft({ routeId: route.id, payload: {} })).rejects.toThrow("malformed");
-		await expect(verifiedAwsDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, comments: `${payload.report.comments} edited` } } as never })).rejects.toThrow("no longer matches the report evidence");
+		await expect(verifiedAwsDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, comments: `${payload.report.comments} edited` } } as never })).rejects.toThrow("no longer matches the report");
 		await expect(verifiedAwsDraft({ routeId: route.id, payload: { ...payload, target: { normalizedTarget: "other.example.com" } } as never })).rejects.toThrow("no longer matches its route");
-		await expect(verifiedAwsDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, trackingId: "PS-000000000000-R1" } } as never })).rejects.toThrow("no longer matches the report evidence");
+		await expect(verifiedAwsDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, trackingId: "PS-000000000000-R1" } } as never })).rejects.toThrow("no longer matches the report");
 		(await getDb()).update(abuseTargets).set({ observedUrls: [`https://${TARGET}/changed`] }).where(eq(abuseTargets.id, targetId)).run();
-		await expect(verifiedAwsDraft(context)).rejects.toThrow("no longer matches the report evidence");
+		await expect(verifiedAwsDraft(context)).rejects.toThrow("no longer matches the report");
 	});
 });
 

@@ -90,7 +90,7 @@ function conciseProviderUrl(value: string): string {
  * providers therefore receive a code-owned narrative assembled from a small
  * set of detected indicators rather than a slice of the model answer.
  */
-type ProviderReportProfile =
+export type ProviderReportProfile =
 	| "generic"
 	| "cloudflare"
 	| "google_cloud"

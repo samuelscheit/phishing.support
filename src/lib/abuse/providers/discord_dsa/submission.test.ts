@@ -10,14 +10,13 @@ import { mailedCodeFrom } from "../mailed_code";
 import { executeProviderSubmission } from "../submission_execution";
 import type { ProviderSubmissionProvider } from "../submission_contracts";
 import { DISCORD_DSA_PROVIDER } from "./definition";
+import { discordDsaDescription, type DiscordDsaReport } from "./payload";
+import type { DiscordDsaSession } from "./session";
 import {
-	discordDsaDescription,
 	prepareDiscordDsaExternalSubmission,
 	prepareDiscordDsaSubmission,
 	submitDiscordDsaSubmission,
 	type DiscordDsaDependencies,
-	type DiscordDsaReport,
-	type DiscordDsaSession,
 } from "./submission";
 
 useTemporaryDatabase();
@@ -75,9 +74,9 @@ function provider(dependencies: DiscordDsaDependencies): ProviderSubmissionProvi
 	return {
 		definition: DISCORD_DSA_PROVIDER,
 		prepareSubmission: (context) => prepareDiscordDsaSubmission(context, { environment: REPORTER, ...dependencies }),
-		prepareExternalSubmission: (context) => prepareDiscordDsaExternalSubmission(context, dependencies),
+		prepareExternalSubmission: (context) => prepareDiscordDsaExternalSubmission(context, { environment: REPORTER, ...dependencies }),
 		submit: () => Promise.reject(new Error("prepared submit only")),
-		submitPrepared: submitDiscordDsaSubmission,
+		submitPrepared: (context, preflight) => submitDiscordDsaSubmission(context, preflight, { environment: REPORTER }),
 	};
 }
 

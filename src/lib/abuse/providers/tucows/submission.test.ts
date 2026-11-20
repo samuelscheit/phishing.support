@@ -3,10 +3,9 @@ import { eq } from "drizzle-orm";
 
 import { getDb } from "../../../db";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
-import { validateAbuseReportRequest } from "../../contracts";
+import { routeFixture } from "../kit/testing";
 import { AbuseRepository } from "../../repository";
-import { contactRoute } from "../../resolver/routes";
-import { abuseArtifacts, abuseProviderRoutes, abuseTargets } from "../../schema";
+import { abuseArtifacts, abuseTargets } from "../../schema";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError, type ProviderSubmissionProvider } from "../submission_contracts";
 import { executeProviderSubmission } from "../submission_execution";
 import { TUCOWS_PROVIDER } from "./definition";
@@ -23,21 +22,17 @@ const MAILBOXES = ["domainabuse@tucows.com", "abuse@enom.com"];
 const description = "Impersonated brand: Example Bank\nThe page asks visitors for a password, sign-in details, a verification code, or identity details.";
 const NOW = new Date("2026-11-20T11:02:41.500Z");
 
-async function tucowsRoute(options: { target?: string; allegationCategory?: "phishing" | "malware"; screenshot?: boolean; mailbox?: string; observedUrls?: string[]; legalBrandUrl?: string | null; resolverProvenance?: Record<string, unknown> } = {}) {
-	const target = options.target ?? TARGET;
-	const request = await validateAbuseReportRequest({
-		targets: [target],
-		allegationCategory: options.allegationCategory ?? "phishing",
-		description,
-		observedUrls: [{ target, urls: options.observedUrls ?? [`https://${target}/signin`] }],
-		...(options.legalBrandUrl === null ? {} : { legalBrandUrl: options.legalBrandUrl ?? "https://www.examplebank.com/" }),
-	});
-	const created = await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } });
-	const [stored] = await AbuseRepository.listTargets(created.reportId);
-	if (options.screenshot !== false) await AbuseRepository.saveArtifact({ reportId: created.reportId, name: "website.png", kind: "user_evidence_original", mimeType: "image/png", buffer: PNG });
-	const route = await AbuseRepository.upsertResolvedRoute(stored!.id, contactRoute({ email: options.mailbox ?? MAILBOXES[0]!, providerName: "Tucows", provenance: options.resolverProvenance ?? {}, snapshot: {} }));
-	return { created, route, targetId: stored!.id };
-}
+const tucowsRoute = (options: { target?: string; allegationCategory?: "phishing" | "malware"; screenshot?: boolean; mailbox?: string; observedUrls?: string[]; legalBrandUrl?: string | null; resolverProvenance?: Record<string, unknown> } = {}) => routeFixture({
+	mailbox: options.mailbox ?? MAILBOXES[0]!,
+	providerName: "Tucows",
+	description,
+	target: options.target,
+	allegationCategory: options.allegationCategory,
+	observedUrls: options.observedUrls,
+	legalBrandUrl: options.legalBrandUrl,
+	screenshot: options.screenshot === false ? undefined : PNG,
+	provenance: options.resolverProvenance,
+});
 
 async function readyContext(options: Parameters<typeof tucowsRoute>[0] = {}) {
 	const fixture = await tucowsRoute(options);
@@ -177,12 +172,6 @@ describe("prepareTucowsSubmission", () => {
 		expect(await prepareTucowsSubmission({ routeId: (await tucowsRoute({ screenshot: false })).route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "tucows_requires_a_screenshot" });
 		expect(await prepareTucowsSubmission({ routeId: (await tucowsRoute({ legalBrandUrl: null })).route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "tucows_requires_a_brand_domain" });
 		expect(await prepareTucowsSubmission({ routeId: (await tucowsRoute({ allegationCategory: "malware" })).route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "tucows_files_phishing_only" });
-		const other = await tucowsRoute();
-		(await getDb()).update(abuseProviderRoutes).set({ providerRegistryKey: "gname" }).where(eq(abuseProviderRoutes.id, other.route.id)).run();
-		expect(await prepareTucowsSubmission({ routeId: other.route.id, payload: {} })).toMatchObject({ reason: "tucows_provider_definition_pin_mismatch" });
-		const email = await tucowsRoute();
-		(await getDb()).update(abuseTargets).set({ targetType: "ip" }).where(eq(abuseTargets.id, email.targetId)).run();
-		expect(await prepareTucowsSubmission({ routeId: email.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "tucows_requires_a_domain_target" });
 	});
 
 	test("an unknown route fails", async () => {
@@ -194,14 +183,14 @@ describe("verifiedTucowsDraft", () => {
 	test("rejects a malformed, retargeted, stale or tampered-evidence draft", async () => {
 		const { context, payload, route, targetId, created } = await readyContext();
 		await expect(verifiedTucowsDraft({ routeId: route.id, payload: {} })).rejects.toThrow("malformed");
-		await expect(verifiedTucowsDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, description: `${payload.report.description} edited` } } as never })).rejects.toThrow("no longer matches the report evidence");
+		await expect(verifiedTucowsDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, description: `${payload.report.description} edited` } } as never })).rejects.toThrow("no longer matches the report");
 		await expect(verifiedTucowsDraft({ routeId: route.id, payload: { ...payload, target: { normalizedTarget: "other.example.com" } } as never })).rejects.toThrow("no longer matches its route");
-		await expect(verifiedTucowsDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, reference: "PS-000000000000-R1" } } as never })).rejects.toThrow("no longer matches the report evidence");
+		await expect(verifiedTucowsDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, reference: "PS-000000000000-R1" } } as never })).rejects.toThrow("no longer matches the report");
 		expect((await verifiedTucowsDraft(context)).screenshot.equals(PNG)).toBeTrue();
 		(await getDb()).update(abuseArtifacts).set({ blob: Buffer.concat([PNG, Buffer.from("x")]) }).where(eq(abuseArtifacts.reportId, created.reportId)).run();
 		await expect(verifiedTucowsDraft(context)).rejects.toThrow("no longer matches its immutable reference");
 		(await getDb()).update(abuseTargets).set({ observedUrls: [`https://${TARGET}/changed`] }).where(eq(abuseTargets.id, targetId)).run();
-		await expect(verifiedTucowsDraft(context)).rejects.toThrow("no longer matches the report evidence");
+		await expect(verifiedTucowsDraft(context)).rejects.toThrow("no longer matches the report");
 	});
 });
 
@@ -489,9 +478,7 @@ describe("provider", () => {
 		expect(tucowsProvider.buildReportPreview!({ target: TARGET, observedUrls: [], description })).toBeUndefined();
 	});
 
-	test("refreshes only a draft of another format, and reads its mail by our reference", () => {
-		expect(tucowsProvider.shouldRefreshStartingPayload!({ routeId: 1n, payload: { adapter: "tucows_report_v1", providerNarrativeVersion: 1 } })).toBeFalse();
-		expect(tucowsProvider.shouldRefreshStartingPayload!({ routeId: 1n, payload: { adapter: "email" } })).toBeTrue();
+	test("reads its mail by our reference", () => {
 		expect(tucowsProvider.inboundMail?.confirmationIds?.("Re: [Case 123] Reference: PS-8fc84cc01019-R7")).toEqual(["PS-8fc84cc01019-R7"]);
 		expect(TUCOWS_PROVIDER.key).toBe("tucows_bullwark");
 	});

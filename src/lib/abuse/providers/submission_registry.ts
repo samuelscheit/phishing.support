@@ -1,6 +1,6 @@
 import { abuseTargetTypes, type AbuseTargetType } from "../schema";
 import type { ProviderSubmissionProvider } from "./submission_contracts";
-import { providerDefinitionHasValidHash } from "./definition";
+import { providerDefinitionHasValidHash } from "./kit/pin";
 
 export type ProviderSubmissionRegistry = {
 	list(): readonly ProviderSubmissionProvider[];

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { providerDefinitionHasValidHash } from "../definition";
+import { providerDefinitionHasValidHash } from "../kit/pin";
 import { MICROSOFT_PROVIDER } from "./definition";
 import { buildMicrosoftSubmissionPayload, microsoftObservationTime, microsoftReportUrls, microsoftRequestBody, storedMicrosoftSubmissionPayload, type MicrosoftReportInput } from "./payload";
 
@@ -11,7 +11,7 @@ const input: MicrosoftReportInput = {
 	description: "The page asks visitors for a password, sign-in details, a verification code, or identity details.",
 	allegationCategory: "phishing",
 	legalBrandUrl: "https://www.examplebank.com/",
-	reference: REFERENCE,
+	trackingId: REFERENCE,
 	caseUrl: "https://phishing.support/submissions/42",
 	hostingLine: "Hosting IP address: 20.50.1.2 (login-example-phish.azurewebsites.net resolved to 20.50.1.2)",
 };
@@ -74,7 +74,7 @@ describe("buildMicrosoftSubmissionPayload", () => {
 	});
 
 	test("a bad reference, host or empty description yields no draft", () => {
-		expect(buildMicrosoftSubmissionPayload({ ...input, reference: "PS-1-R1" })).toBeUndefined();
+		expect(buildMicrosoftSubmissionPayload({ ...input, trackingId: "PS-1-R1" })).toBeUndefined();
 		expect(buildMicrosoftSubmissionPayload({ ...input, target: "not a host" })).toBeUndefined();
 		expect(buildMicrosoftSubmissionPayload({ ...input, description: "  " })).toBeUndefined();
 	});
@@ -90,7 +90,6 @@ describe("storedMicrosoftSubmissionPayload", () => {
 	test("rejects every deviation", () => {
 		const mutations: Array<(p: any) => void> = [
 			(p) => { p.adapter = "aws_report_v1"; },
-			(p) => { p.providerNarrativeVersion = 2; },
 			(p) => { p.definition.version = "old"; },
 			(p) => { p.definition.contentHash = "0".repeat(64); },
 			(p) => { p.target.normalizedTarget = 5; },

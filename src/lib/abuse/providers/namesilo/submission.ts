@@ -1,31 +1,26 @@
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { userAgent } from "../../../constants";
-import { AbuseRepository } from "../../repository";
+import { asRecord } from "../../../values";
 import type { ProviderFormFacts } from "../../portal/form_facts";
 import { deriveProviderFormFacts } from "../../portal/form_facts";
-import { routeContext } from "../../worker/shared";
-import { providerDefinitionMatchesPin } from "../definition";
+import { captchaCredentialsPresent, solveCaptchaToken } from "../kit/captcha";
+import { createDraft, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { jsonRecord } from "../kit/http";
+import { providerEvidenceImageBytesMatch } from "../evidence_image";
 import {
-	providerEvidenceImageArtifactMatches,
-	providerEvidenceImageBytesMatch,
-} from "../evidence_image";
-import type {
-	ProviderSubmissionContext,
-	ProviderSubmissionPreflight,
-	ProviderSubmissionPreparation,
-	ProviderSubmissionSuccess,
+	ProviderSubmissionRejectedError,
+	type ProviderSubmissionContext,
+	type ProviderSubmissionPreflight,
+	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
-import { ProviderSubmissionRejectedError } from "../submission_contracts";
-import { getNameSiloCaptchaCredentials, solveNameSiloCaptcha } from "./captcha";
 import { NAMESILO_PROVIDER } from "./definition";
 import {
 	buildNameSiloSubmissionPayload,
 	NAMESILO_EVIDENCE_CONTRACT,
-	selectNameSiloEvidenceArtifact,
 	storedNameSiloSubmissionPayload,
 	type NameSiloSubmissionPayload,
 } from "./payload";
-import { asRecord } from "../../../values";
 
 type NameSiloFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -50,8 +45,7 @@ type NameSiloFactsExtractor = (input: {
 	legalBrandUrl?: string;
 }) => Promise<ProviderFormFacts>;
 
-export type NameSiloPreparationDependencies = {
-	loadRouteContext?: typeof routeContext;
+export type NameSiloPreparationDependencies = RouteDeps & {
 	deriveFacts?: NameSiloFactsExtractor;
 };
 
@@ -61,19 +55,10 @@ export type NameSiloPreflightDependencies = {
 	now?: () => number;
 };
 
-export type NameSiloSubmissionDependencies = {
+export type NameSiloSubmissionDependencies = RouteDeps & {
 	fetch?: NameSiloFetch;
-	loadRouteContext?: typeof routeContext;
-	getArtifact?: typeof AbuseRepository.getArtifact;
+	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
 };
-
-function parseJsonRecord(body: string): Record<string, unknown> | undefined {
-	try {
-		return asRecord(JSON.parse(body));
-	} catch {
-		return undefined;
-	}
-}
 
 function cookieHeader(headers: Headers): string | undefined {
 	const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
@@ -99,7 +84,7 @@ export async function parseNameSiloSessionResponse(
 ): Promise<NameSiloSession> {
 	const body = await response.text();
 	if (!response.ok) throw new Error(`NameSilo CSRF session failed with HTTP ${response.status}: ${body.slice(0, 500)}`);
-	const json = parseJsonRecord(body);
+	const json = jsonRecord(body);
 	const data = json && asRecord(json.data);
 	const csrfToken = data?.xsrfToken;
 	const expirationTime = data?.expirationTime;
@@ -178,7 +163,7 @@ export async function parseNameSiloSubmissionResponse(
 	if (response.status === 403 && response.headers?.get("cf-mitigated") === "challenge") {
 		throw new ProviderSubmissionRejectedError("NameSilo's Cloudflare firewall blocked the report before it reached NameSilo (cf-mitigated: challenge); nothing was filed.");
 	}
-	const json = parseJsonRecord(body);
+	const json = jsonRecord(body);
 	const result = json?.result;
 	const message = json?.message;
 	const code = json?.code;
@@ -232,58 +217,61 @@ async function nameSiloRealWebsite(
 	return facts.brandOfficialWebsite;
 }
 
-/** Prepare the immutable NameSilo draft and fail closed on missing evidence. */
-export async function prepareNameSiloSubmission(
-	context: ProviderSubmissionContext,
-	dependencies: NameSiloPreparationDependencies = {},
-): Promise<ProviderSubmissionPreparation> {
-	const loadRouteContext = dependencies.loadRouteContext ?? routeContext;
-	const { route, report, target, evidenceArtifacts } = await loadRouteContext(context.routeId);
-	if (route.routeType !== "provider_submission" || route.providerRegistryKey !== NAMESILO_PROVIDER.key || target.targetType !== "domain") {
-		return { outcome: "insufficient_evidence", reason: "namesilo_requires_a_domain_target" };
-	}
-	if (!providerDefinitionMatchesPin(NAMESILO_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)) {
-		return { outcome: "insufficient_evidence", reason: "namesilo_provider_definition_pin_mismatch" };
-	}
-	const observedUrl = target.observedUrls[0];
-	if (!observedUrl) return { outcome: "insufficient_evidence", reason: "namesilo_requires_an_observed_url" };
-	const evidence = selectNameSiloEvidenceArtifact(evidenceArtifacts);
-	if (!evidence) return { outcome: "insufficient_evidence", reason: "namesilo_requires_a_valid_supported_evidence_image" };
+const draft = createDraft({
+	definition: NAMESILO_PROVIDER,
+	reasonPrefix: "namesilo",
+	targetTypes: ["domain"],
+	targetReason: "namesilo_requires_a_domain_target",
+	read: storedNameSiloSubmissionPayload,
+	// What the stored draft holds (its URL, its brand site, its screenshot) is not reselected.
+	input: async ({ report, target, evidenceArtifacts }, stored: NameSiloSubmissionPayload | undefined, dependencies: NameSiloPreparationDependencies) => {
+		const observedUrl = stored?.target.observedUrl ?? target.observedUrls[0];
+		const evidence = evidenceReferenceOf(NAMESILO_EVIDENCE_CONTRACT, evidenceArtifacts, stored);
+		// Nothing is paid for or derived until the draft has its URL and screenshot.
+		if (!stored && observedUrl && evidence && !captchaCredentialsPresent()) throw new Error("NameSilo phishing reporting requires DEATHBYCAPTCHA_USERNAME and DEATHBYCAPTCHA_PASSWORD.");
+		const realWebsite = stored ? stored.report.realWebsite : observedUrl && evidence ? await nameSiloRealWebsite(report, target.normalizedTarget, dependencies) : undefined;
+		return { target: target.normalizedTarget, observedUrl: observedUrl ?? "", description: report.description, allegationCategory: report.allegationCategory, realWebsite: realWebsite ?? "", evidence };
+	},
+	admit: ({ target }, input) => !input.observedUrl ? "namesilo_requires_an_observed_url"
+		: !input.evidence ? "namesilo_requires_a_valid_supported_evidence_image"
+		: !input.realWebsite ? "namesilo_requires_a_verified_brand_website"
+		: undefined,
+	build: buildNameSiloSubmissionPayload,
+	targetOf: (payload) => payload.target.normalizedTarget,
+});
 
-	getNameSiloCaptchaCredentials();
-	const realWebsite = await nameSiloRealWebsite(report, target.normalizedTarget, dependencies);
-	if (!realWebsite) {
-		return { outcome: "insufficient_evidence", reason: "namesilo_requires_a_verified_brand_website" };
-	}
-	const payload = buildNameSiloSubmissionPayload({
-		target: target.normalizedTarget,
-		observedUrl,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		realWebsite,
-		evidence,
-	});
-	if (!payload) return { outcome: "insufficient_evidence", reason: "namesilo_report_payload_invalid" };
-	return { outcome: "ready", payload };
+/** Prepare the immutable NameSilo draft and fail closed on missing evidence. */
+export const prepareNameSiloSubmission = draft.prepare;
+
+/** The stored draft, checked against its route and rebuilt from the current report; with its screenshot's bytes. */
+export async function verifiedNameSiloDraft(context: ProviderSubmissionContext, dependencies: NameSiloSubmissionDependencies = {}) {
+	const { payload, data } = await draft.verify(context, dependencies);
+	const { bytes } = await loadEvidenceFile({ reference: payload.evidence, contract: NAMESILO_EVIDENCE_CONTRACT, reportId: data.report.id, label: "NameSilo", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) });
+	return { payload, bytes };
 }
 
 /** Fetch CSRF state and solve reCAPTCHA before the irreversible marker. */
 export async function prepareNameSiloExternalSubmission(
 	context: ProviderSubmissionContext,
-	dependencies: NameSiloPreflightDependencies = {},
+	dependencies: NameSiloPreflightDependencies & RouteDeps = {},
 ): Promise<ProviderSubmissionPreflight> {
-	if (!storedNameSiloSubmissionPayload(context.payload)) {
-		throw new Error("The persisted NameSilo submission payload is malformed.");
-	}
+	await draft.verify(context, dependencies);
 	const fetcher = dependencies.fetch ?? fetch;
 	const [session, captchaToken] = await Promise.all([
 		fetchNameSiloSession(fetcher, context.signal, dependencies.now ?? Date.now),
-		(dependencies.captchaSolver ?? ((signal) => solveNameSiloCaptcha({ signal })))(context.signal),
+		(dependencies.captchaSolver ?? solveNameSiloCaptcha)(context.signal),
 	]);
 	const state: NameSiloPreflightState = { ...session, captchaToken };
 	if (!storedPreflightState({ state })) throw new Error("NameSilo preflight returned invalid ephemeral state.");
 	return { state };
 }
+
+/** Solve the exact reCAPTCHA v2 token requested by NameSilo's public form. */
+const solveNameSiloCaptcha = (signal?: AbortSignal) => solveCaptchaToken({
+	type: NAMESILO_PROVIDER.captcha.type,
+	parametersField: "token_params",
+	parameters: { googlekey: NAMESILO_PROVIDER.captcha.siteKey, pageurl: NAMESILO_PROVIDER.reportPageUrl },
+}, signal);
 
 /** Perform the one provider POST from its pinned draft and preflight session. */
 export async function submitNameSiloSubmission(
@@ -291,43 +279,10 @@ export async function submitNameSiloSubmission(
 	dependencies: NameSiloSubmissionDependencies = {},
 	preflight?: ProviderSubmissionPreflight,
 ): Promise<ProviderSubmissionSuccess> {
-	const payload = storedNameSiloSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted NameSilo submission payload is malformed.");
+	const { payload, bytes } = await verifiedNameSiloDraft(context, dependencies);
 	const ephemeral = storedPreflightState(preflight);
 	if (!ephemeral) throw new Error("NameSilo submission requires prepared CSRF and CAPTCHA state.");
-
-	const loadRouteContext = dependencies.loadRouteContext ?? routeContext;
-	const { route, report, target } = await loadRouteContext(context.routeId);
-	if (route.routeType !== "provider_submission" || route.providerRegistryKey !== NAMESILO_PROVIDER.key
-		|| !providerDefinitionMatchesPin(NAMESILO_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)
-		|| target.targetType !== "domain" || target.normalizedTarget !== payload.target.normalizedTarget
-		|| !target.observedUrls.includes(payload.target.observedUrl)) {
-		throw new Error("The persisted NameSilo submission payload no longer matches its route.");
-	}
-	const rebuilt = buildNameSiloSubmissionPayload({
-		target: target.normalizedTarget,
-		observedUrl: payload.target.observedUrl,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		realWebsite: payload.report.realWebsite,
-		evidence: payload.evidence,
-	});
-	if (!rebuilt || rebuilt.report.explanation !== payload.report.explanation) {
-		throw new Error("The persisted NameSilo submission draft no longer matches the report evidence.");
-	}
-
-	let artifactId: bigint;
-	try {
-		artifactId = BigInt(payload.evidence.artifactId);
-	} catch {
-		throw new Error("The persisted NameSilo evidence artifact ID is invalid.");
-	}
-	const artifact = await (dependencies.getArtifact ?? AbuseRepository.getArtifact)(report.id, artifactId);
-	if (!artifact || !providerEvidenceImageArtifactMatches(payload.evidence, artifact, NAMESILO_EVIDENCE_CONTRACT)) {
-		throw new Error("The persisted NameSilo evidence artifact no longer matches its immutable reference.");
-	}
-
-	const form = buildNameSiloHttpPayload({ payload, evidenceBytes: artifact.blob, captchaToken: ephemeral.captchaToken });
+	const form = buildNameSiloHttpPayload({ payload, evidenceBytes: bytes, captchaToken: ephemeral.captchaToken });
 	const response = await (dependencies.fetch ?? fetch)(NAMESILO_PROVIDER.submissionUrl, {
 		method: "POST",
 		redirect: "error",

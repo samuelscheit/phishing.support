@@ -1,32 +1,12 @@
 import { serviceIdentity } from "../../../constants";
-import { hashStableJson } from "../../security";
-import type { ProviderSubmissionDefinition } from "../submission_contracts";
+import { definePinned } from "../kit/pin";
 
 /**
  * Code-owned Tencent Cloud DNS-abuse form contract. Secrets and runtime proxy
  * settings intentionally do not belong in this immutable, route-pinned record.
  */
-export type TencentProviderDefinition = ProviderSubmissionDefinition & {
-	reportPageUrl: string;
-	submissionUrl: string;
-	captcha: {
-		provider: "death_by_captcha";
-		type: 23;
-		appId: string;
-	};
-	evidence: {
-		requiredMimeType: "image/png";
-		maximumBytes: number;
-	};
-	reporter: {
-		name: string;
-		email: string;
-		countryCode: string;
-		countryName: string;
-	};
-};
 
-const definitionWithoutHash = {
+export const TENCENT_PROVIDER = definePinned({
 	key: "tencent",
 	displayName: "Tencent Cloud Domain Abuse",
 	version: "2026-08-14.1",
@@ -49,9 +29,6 @@ const definitionWithoutHash = {
 		countryCode: serviceIdentity.countryCode,
 		countryName: serviceIdentity.countryName,
 	},
-};
-
-export const TENCENT_PROVIDER: TencentProviderDefinition = Object.freeze({
-	...definitionWithoutHash,
-	contentHash: hashStableJson(definitionWithoutHash),
 });
+
+export type TencentProviderDefinition = typeof TENCENT_PROVIDER;

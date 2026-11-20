@@ -1,48 +1,43 @@
+import { z } from "zod";
+
 import { normalizeMailbox } from "../../mail/shared";
 import { normalizePublicHost } from "../../security";
-
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
+import { field, payloadEnvelope, storedReader } from "../kit/stored";
+import { providerNarrative } from "../kit/text";
+import { normalizeObservedUrlForTarget } from "../report_payload";
 import { NETCRAFT_PROVIDER } from "./definition";
-import { asRecord } from "../../../values";
 
-export type NetcraftSubmissionPayload = {
-	adapter: "netcraft_report_urls_v3";
-	providerNarrativeVersion: 1;
-	definition: {
-		version: string;
-		contentHash: string;
-	};
-	target: {
-		normalizedTarget: string;
-		observedUrls: string[];
-	};
-	report: {
-		reporterEmail: string;
-		reason: string;
-	};
-};
+const envelope = payloadEnvelope(NETCRAFT_PROVIDER, "netcraft_report_urls_v3");
 
-export type NetcraftReportUrlsBody = {
-	email: string;
-	reason: string;
-	urls: Array<{ url: string }>;
-};
-
-function sameStrings(left: readonly string[], right: readonly string[]): boolean {
-	return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function normalizeObservedUrls(values: unknown, target: string): string[] | undefined {
-	if (!Array.isArray(values) || values.length === 0 || values.length > NETCRAFT_PROVIDER.maximumUrlsPerSubmission) return undefined;
+/** The observed URLs as the builder lists them: each normalised for the target, none twice, at most the API's limit. */
+function normalizeObservedUrls(values: readonly string[], target: string): string[] | undefined {
+	if (values.length === 0 || values.length > NETCRAFT_PROVIDER.maximumUrlsPerSubmission) return undefined;
 	const normalized: string[] = [];
 	for (const value of values) {
-		if (typeof value !== "string") return undefined;
 		const url = normalizeObservedUrlForTarget(value, target);
 		if (!url) return undefined;
 		if (!normalized.includes(url)) normalized.push(url);
 	}
 	return normalized;
 }
+
+/** Netcraft's durable, secret-free payload. */
+const payloadSchema = z.object({
+	...envelope.shape,
+	target: z.object({ normalizedTarget: z.string(), observedUrls: z.array(z.string()) }),
+	report: z.object({ reporterEmail: z.string().refine((email) => normalizeMailbox(email) === email), reason: field.text(NETCRAFT_PROVIDER.maximumReasonLength) }),
+}).refine(({ target }) => {
+	const observedUrls = normalizePublicHost(target.normalizedTarget) === target.normalizedTarget ? normalizeObservedUrls(target.observedUrls, target.normalizedTarget) : undefined;
+	return observedUrls !== undefined && observedUrls.length === target.observedUrls.length && observedUrls.every((url, index) => url === target.observedUrls[index]);
+});
+
+export type NetcraftSubmissionPayload = z.infer<typeof payloadSchema>;
+
+export type NetcraftReportUrlsBody = {
+	email: string;
+	reason: string;
+	urls: Array<{ url: string }>;
+};
 
 /** Build the concise report narrative accepted by Netcraft's v3 URL endpoint. */
 export function makeNetcraftReason(params: {
@@ -52,15 +47,7 @@ export function makeNetcraftReason(params: {
 	allegationCategory?: string;
 	legalBrandUrl?: string;
 }): string | undefined {
-	return buildProviderReportNarrative({
-		provider: "netcraft",
-		target: params.target,
-		observedUrls: params.observedUrls,
-		description: params.description,
-		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
-		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
-		maximumLength: NETCRAFT_PROVIDER.maximumReasonLength,
-	});
+	return providerNarrative("netcraft", { ...params, target: params.target ?? "", observedUrls: params.observedUrls ?? [] }, NETCRAFT_PROVIDER.maximumReasonLength);
 }
 
 /** Create Netcraft's durable, secret-free payload before the network boundary. */
@@ -76,51 +63,18 @@ export function buildNetcraftSubmissionPayload(params: {
 	const observedUrls = normalizedTarget ? normalizeObservedUrls(params.observedUrls, normalizedTarget) : undefined;
 	const reporterEmail = normalizeMailbox(params.reporterEmail);
 	const reason = makeNetcraftReason({
-		target: normalizedTarget,
-		observedUrls,
+		...(normalizedTarget ? { target: normalizedTarget } : {}),
+		...(observedUrls ? { observedUrls } : {}),
 		description: params.description,
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl === undefined ? {} : { legalBrandUrl: params.legalBrandUrl }),
 	});
 	if (!normalizedTarget || !observedUrls || !reporterEmail || !reason) return undefined;
-
-	return {
-		adapter: "netcraft_report_urls_v3",
-		providerNarrativeVersion: 1,
-		definition: { version: NETCRAFT_PROVIDER.version, contentHash: NETCRAFT_PROVIDER.contentHash },
-		target: { normalizedTarget, observedUrls },
-		report: { reporterEmail, reason },
-	};
+	return { ...envelope.stamp, target: { normalizedTarget, observedUrls }, report: { reporterEmail, reason } };
 }
 
 /** Read only a payload generated by the reviewed Netcraft adapter. */
-export function storedNetcraftSubmissionPayload(value: unknown): NetcraftSubmissionPayload | undefined {
-	const payload = asRecord(value);
-	const definition = payload && asRecord(payload.definition);
-	const target = payload && asRecord(payload.target);
-	const report = payload && asRecord(payload.report);
-	if (!payload || payload.adapter !== "netcraft_report_urls_v3" || payload.providerNarrativeVersion !== 1
-		|| !definition || definition.version !== NETCRAFT_PROVIDER.version || definition.contentHash !== NETCRAFT_PROVIDER.contentHash
-		|| !target || typeof target.normalizedTarget !== "string"
-		|| !report || typeof report.reporterEmail !== "string" || typeof report.reason !== "string"
-		|| report.reason.length === 0 || report.reason.length > NETCRAFT_PROVIDER.maximumReasonLength) {
-		return undefined;
-	}
-	const normalizedTarget = normalizePublicHost(target.normalizedTarget);
-	const observedUrls = normalizedTarget ? normalizeObservedUrls(target.observedUrls, normalizedTarget) : undefined;
-	const reporterEmail = normalizeMailbox(report.reporterEmail);
-	if (!normalizedTarget || normalizedTarget !== target.normalizedTarget || !observedUrls || !Array.isArray(target.observedUrls)
-		|| !sameStrings(observedUrls, target.observedUrls) || !reporterEmail || reporterEmail !== report.reporterEmail) {
-		return undefined;
-	}
-	return {
-		adapter: "netcraft_report_urls_v3",
-		providerNarrativeVersion: 1,
-		definition: { version: NETCRAFT_PROVIDER.version, contentHash: NETCRAFT_PROVIDER.contentHash },
-		target: { normalizedTarget, observedUrls },
-		report: { reporterEmail, reason: report.reason },
-	};
-}
+export const storedNetcraftSubmissionPayload = storedReader(payloadSchema);
 
 /** Transform the validated durable payload into Netcraft's documented JSON body. */
 export function buildNetcraftReportUrlsBody(payload: NetcraftSubmissionPayload): NetcraftReportUrlsBody {

@@ -1,5 +1,6 @@
 import { userAgent } from "../../../constants";
 import { asRecord } from "../../../values";
+import { jsonRecord } from "../kit/http";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import { alibabaCloudLoginConfig, alibabaCloudSessions, type AlibabaCloudLoginConfig, type AlibabaCloudSession } from "./session";
@@ -33,13 +34,7 @@ function cookieHeader(session: AlibabaCloudSession): string {
 	return session.cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
 }
 
-function parseJson(body: string): Record<string, unknown> | undefined {
-	try {
-		return asRecord(JSON.parse(body));
-	} catch {
-		return undefined;
-	}
-}
+
 
 /** Codes that name a passing condition on Alibaba's side, never a refusal of the request itself. */
 const TRANSIENT_CODE = /throttl|busy|unavailable|internal|timeout|flowcontrol|^\d+$/i;
@@ -53,7 +48,7 @@ const TRANSIENT_CODE = /throttl|busy|unavailable|internal|timeout|flowcontrol|^\
  * ambiguous, so a submission's own records settle it.
  */
 export function readConsoleAnswer(action: string, status: number, body: string): unknown {
-	const json = parseJson(body);
+	const json = jsonRecord(body);
 	if (!json) throw new Error(`Alibaba Cloud ${action} answered HTTP ${status} without JSON: ${body.slice(0, 300)}`);
 	const data = asRecord(json.data);
 	const code = typeof json.code === "string" ? json.code : undefined;

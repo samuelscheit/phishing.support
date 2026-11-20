@@ -1,4 +1,5 @@
 import { asRecord } from "../../../values";
+import { snippet } from "../kit/text";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
 import type { GoDaddyReportType } from "./payload";
@@ -42,10 +43,6 @@ async function call(credentials: GoDaddyApiCredentials, path: string, init: { me
 		json = undefined;
 	}
 	return { status: answer.status, text, json };
-}
-
-function snippet(text: string): string {
-	return text.replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
 function apiMessage(json: unknown, text: string): string {

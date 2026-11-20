@@ -5,13 +5,14 @@ import { validateAbuseReportRequest } from "../../contracts";
 import { AbuseRepository } from "../../repository";
 import type { AbuseArtifact } from "../../schema";
 import { sha256Hex } from "../../security";
-import { providerDefinitionHasValidHash } from "../definition";
+import { providerDefinitionHasValidHash } from "../kit/pin";
+import { selectProviderEvidenceImageArtifact } from "../evidence_image";
 import { executeProviderSubmission } from "../submission_execution";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionProvider } from "../submission_contracts";
 import { NAMESILO_PROVIDER } from "./definition";
 import {
 	buildNameSiloSubmissionPayload,
-	selectNameSiloEvidenceArtifact,
+	NAMESILO_EVIDENCE_CONTRACT,
 	storedNameSiloSubmissionPayload,
 } from "./payload";
 import {
@@ -63,7 +64,7 @@ function artifact(overrides: Partial<AbuseArtifact> = {}): AbuseArtifact {
 }
 
 function payload() {
-	const evidence = selectNameSiloEvidenceArtifact([artifact()]);
+	const evidence = selectProviderEvidenceImageArtifact([artifact()], NAMESILO_EVIDENCE_CONTRACT);
 	if (!evidence) throw new Error("Expected valid NameSilo evidence.");
 	const value = buildNameSiloSubmissionPayload({
 		target: "login.phishing.example.com",

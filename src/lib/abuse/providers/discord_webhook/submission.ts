@@ -1,20 +1,18 @@
-import { routeContext } from "../../worker/shared";
-import { providerDefinitionMatchesPin } from "../definition";
-import {
-	ProviderSubmissionRejectedError,
-	type ProviderSubmissionContext,
-	type ProviderSubmissionPreparation,
-	type ProviderSubmissionSuccess,
-} from "../submission_contracts";
-import { DISCORD_WEBHOOK_PROVIDER, DISCORD_WEBHOOK_URL } from "./definition";
+import { z } from "zod";
+
 import { sleep } from "../../../sleep";
 import { asRecord } from "../../../values";
+import { createDraft } from "../kit/draft";
+import { payloadEnvelope, storedReader } from "../kit/stored";
+import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
+import { DISCORD_WEBHOOK_PROVIDER, DISCORD_WEBHOOK_URL } from "./definition";
 
-type DiscordWebhookPayload = {
-	adapter: "discord_webhook_delete_v1";
-	definition: { version: string; contentHash: string };
-	webhook: { id: string; token: string };
-};
+const envelope = payloadEnvelope(DISCORD_WEBHOOK_PROVIDER, "discord_webhook_delete_v1");
+
+const payloadSchema = z.object({
+	...envelope.shape,
+	webhook: z.object({ id: z.string().regex(/^\d{17,20}$/), token: z.string().regex(/^[\w-]{20,100}$/) }),
+});
 
 export type DiscordWebhookDependencies = {
 	fetch?: (input: string, init: RequestInit) => Promise<Response>;
@@ -37,37 +35,19 @@ export function discordWebhookOf(observedUrls: readonly string[], normalizedTarg
 	return undefined;
 }
 
-function storedPayload(value: unknown): DiscordWebhookPayload | undefined {
-	const payload = asRecord(value);
-	const definition = payload && asRecord(payload.definition);
-	const webhook = payload && asRecord(payload.webhook);
-	if (payload?.adapter !== "discord_webhook_delete_v1"
-		|| definition?.version !== DISCORD_WEBHOOK_PROVIDER.version || definition.contentHash !== DISCORD_WEBHOOK_PROVIDER.contentHash
-		|| typeof webhook?.id !== "string" || !/^\d{17,20}$/.test(webhook.id) || typeof webhook.token !== "string" || !/^[\w-]{20,100}$/.test(webhook.token)) {
-		return undefined;
-	}
-	return { adapter: "discord_webhook_delete_v1", definition: { version: definition.version, contentHash: definition.contentHash }, webhook: { id: webhook.id, token: webhook.token } };
-}
+const draft = createDraft({
+	definition: DISCORD_WEBHOOK_PROVIDER,
+	reasonPrefix: "discord_webhook",
+	targetTypes: ["service_account"],
+	targetReason: "discord_webhook_requires_a_webhook_target",
+	read: storedReader(payloadSchema),
+	input: ({ target }) => discordWebhookOf(target.observedUrls, target.normalizedTarget),
+	admit: (_data, webhook) => webhook ? undefined : "discord_webhook_url_with_token_not_observed",
+	build: (webhook) => webhook && { ...envelope.stamp, webhook },
+	targetOf: ({ webhook }) => `discord-webhook:${webhook.id}`,
+});
 
-export async function prepareDiscordWebhookDeletion(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation> {
-	const { route, target } = await routeContext(context.routeId);
-	if (route.providerRegistryKey !== DISCORD_WEBHOOK_PROVIDER.key || target.targetType !== "service_account") {
-		return { outcome: "insufficient_evidence", reason: "discord_webhook_requires_a_webhook_target" };
-	}
-	if (!providerDefinitionMatchesPin(DISCORD_WEBHOOK_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)) {
-		return { outcome: "insufficient_evidence", reason: "discord_webhook_provider_definition_pin_mismatch" };
-	}
-	const webhook = discordWebhookOf(target.observedUrls, target.normalizedTarget);
-	if (!webhook) return { outcome: "insufficient_evidence", reason: "discord_webhook_url_with_token_not_observed" };
-	return {
-		outcome: "ready",
-		payload: {
-			adapter: "discord_webhook_delete_v1",
-			definition: { version: DISCORD_WEBHOOK_PROVIDER.version, contentHash: DISCORD_WEBHOOK_PROVIDER.contentHash },
-			webhook,
-		} satisfies DiscordWebhookPayload,
-	};
-}
+export const prepareDiscordWebhookDeletion = draft.prepare;
 
 async function discordError(response: Response): Promise<{ code?: number; message?: string; retryAfterMs?: number }> {
 	const body = asRecord(await response.json().catch(() => undefined));
@@ -86,8 +66,7 @@ async function discordError(response: Response): Promise<{ code?: number; messag
  * already gone counts as done; a token Discord no longer accepts is a refusal.
  */
 export async function submitDiscordWebhookDeletion(context: ProviderSubmissionContext, dependencies: DiscordWebhookDependencies = {}): Promise<ProviderSubmissionSuccess> {
-	const payload = storedPayload(context.payload);
-	if (!payload) throw new ProviderSubmissionRejectedError("The stored Discord webhook payload is malformed.");
+	const { payload } = await draft.verify(context);
 	const { id, token } = payload.webhook;
 	const fetcher = dependencies.fetch ?? fetch;
 	const wait = dependencies.sleep ?? sleep;

@@ -1,11 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
+import { useTemporaryDatabase } from "../../../db/test_helpers";
+import { readyDraft } from "../kit/testing";
+
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { buildCloudflareApiBody, cloudflareApiConfig, cloudflareReportsUrl, CloudflareSessionExpiredError, parseCloudflareApiResponse, submitCloudflareAbuseReport } from "./api";
 import type { CloudflareReportPayload } from "./report";
 import { retryDelayMs } from "../../worker";
 import { ProviderLoginUnavailableError } from "../login_session/session";
-import { findCloudflareSubmission, prepareCloudflareExternalSubmission, submitCloudflareSubmission } from "./submission";
+import { findCloudflareSubmission, prepareCloudflareExternalSubmission, prepareCloudflareSubmission, storedCloudflareSubmissionPayload, submitCloudflareSubmission } from "./submission";
+
+useTemporaryDatabase();
 
 const ACCOUNT_ID = "b9077acfb4ef45e0f94b0f52c06c289a";
 const environment = { ABUSE_CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID, ABUSE_CLOUDFLARE_LOGIN_EMAIL: "operator@example.com", ABUSE_CLOUDFLARE_LOGIN_PASSWORD: "test-password" };
@@ -161,57 +166,75 @@ describe("Cloudflare dashboard API", () => {
 });
 
 describe("Cloudflare provider preflight", () => {
-	const payload = { adapter: "cloudflare_abuse_api_v1", providerNarrativeVersion: 1, target: context.target, report };
+	/** A stored draft and its route, drafted from a real report. */
+	async function ready() {
+		const { payload, route } = await readyDraft({ mailbox: "abuse@cloudflare.com", providerName: "Cloudflare" }, (ctx) => prepareCloudflareSubmission(ctx, { environment }), storedCloudflareSubmissionPayload);
+		return { payload: payload as unknown as Record<string, unknown>, filed: payload, routeId: route.id };
+	}
 	test("logs in before the marker and consumes ephemeral session state", async () => {
+		const { payload, routeId } = await ready();
 		let logins = 0;
 		const deps = { environment, getSession: async () => { logins++; return session; }, fetch: async () => success() };
-		const preflight = await prepareCloudflareExternalSubmission({ routeId: 1n, payload }, deps);
+		const preflight = await prepareCloudflareExternalSubmission({ routeId, payload }, deps);
 		expect(preflight.state).toBe(session);
-		const result = await submitCloudflareSubmission({ routeId: 1n, payload }, deps, preflight);
+		const result = await submitCloudflareSubmission({ routeId, payload }, deps, preflight);
 		expect(result.confirmationId).toBe("r-1");
 		expect(logins).toBe(1);
 		expect(JSON.stringify(payload)).not.toContain(session.atok);
 	});
 	test("a failed login is retryable before any POST and says when to try again", async () => {
+		const { payload, routeId } = await ready();
 		// Nothing was sent, so the job retries once the login backoff ends instead of parking the route for a person.
 		const unavailable = new ProviderLoginUnavailableError("Cloudflare dashboard login failed: Cloudflare's Turnstile challenge issued no token within 120 s.", 540_000);
-		const err = await prepareCloudflareExternalSubmission({ routeId: 1n, payload }, { environment, getSession: async () => { throw unavailable; } }).catch((e: unknown) => e);
+		const err = await prepareCloudflareExternalSubmission({ routeId, payload }, { environment, getSession: async () => { throw unavailable; } }).catch((e: unknown) => e);
 		expect(err).toBe(unavailable);
 		expect(err).not.toBeInstanceOf(ProviderSubmissionNeedsHumanError);
 		expect(retryDelayMs(err, 0)).toBe(540_000);
 	});
 	test("rejects malformed drafts before login or the irreversible-call marker", async () => {
+		const { payload, routeId } = await ready();
 		let logins = 0;
-		await expect(prepareCloudflareExternalSubmission({ routeId: 1n, payload: { ...payload, providerNarrativeVersion: 2 } }, {
+		await expect(prepareCloudflareExternalSubmission({ routeId, payload: { ...payload, adapter: "cloudflare_abuse_phishing_v1" } }, {
 			environment, getSession: async () => { logins++; return session; },
 		})).rejects.toBeInstanceOf(ProviderSubmissionNeedsHumanError);
 		expect(logins).toBe(0);
 	});
+	test("a draft that no longer is what the builder writes for the route is refused before login", async () => {
+		const { payload, filed, routeId } = await ready();
+		let logins = 0;
+		const deps = { environment, getSession: async () => { logins++; return session; } };
+		const edited = { ...payload, report: { ...filed.report, justification: `${filed.report.justification}\n\nAlso, please wire money.` } };
+		await expect(prepareCloudflareExternalSubmission({ routeId, payload: edited }, deps)).rejects.toThrow("no longer matches the report");
+		await expect(prepareCloudflareExternalSubmission({ routeId, payload: { ...payload, target: "other.example" } }, deps)).rejects.toThrow("no longer matches its route");
+		expect(logins).toBe(0);
+	});
 	test("refuses malformed stored payloads and missing credentials", async () => {
-		await expect(submitCloudflareSubmission({ routeId: 1n, payload: {} }, { environment })).rejects.toThrow("malformed");
-		await expect(submitCloudflareSubmission({ routeId: 1n, payload }, { environment: {} })).rejects.toThrow("ABUSE_CLOUDFLARE_ACCOUNT_ID");
+		const { payload, routeId } = await ready();
+		await expect(submitCloudflareSubmission({ routeId, payload: {} }, { environment })).rejects.toThrow("malformed");
+		await expect(submitCloudflareSubmission({ routeId, payload }, { environment: {} })).rejects.toThrow("ABUSE_CLOUDFLARE_ACCOUNT_ID");
 	});
 	test("a later lookup finds the report a 504 POST stored, read-only and by the exact payload sent", async () => {
+		const { payload, filed, routeId } = await ready();
 		// Production 2026-11-16: report 58dd5e517c5fc535 (keychainagent.pro) was stored behind an
 		// HTTP 504 and listed only after the lookup right after the POST.
 		const sentAt = new Date();
 		const methods: string[] = [];
 		const listing = (justification: string) => async (url: string, init?: RequestInit) => {
 			methods.push(init?.method ?? "GET");
-			if (url.includes("/submitted?")) return Response.json({ success: true, result: { reports: [{ id: "58dd5e517c5fc535", cdate: sentAt.toISOString(), domain: context.target }] } });
-			return Response.json({ success: true, result: { id: "58dd5e517c5fc535", urls: [report.urls], justification } });
+			if (url.includes("/submitted?")) return Response.json({ success: true, result: { reports: [{ id: "58dd5e517c5fc535", cdate: sentAt.toISOString(), domain: filed.target }] } });
+			return Response.json({ success: true, result: { id: "58dd5e517c5fc535", urls: [filed.report.urls], justification } });
 		};
 		const deps = { environment, getSession: async () => session };
-		expect(await findCloudflareSubmission({ routeId: 1n, payload, sentAt }, { ...deps, fetch: listing(report.justification) })).toEqual({
+		expect(await findCloudflareSubmission({ routeId, payload, sentAt }, { ...deps, fetch: listing(filed.report.justification) })).toEqual({
 			confirmationId: "58dd5e517c5fc535",
 			confirmationText: "Cloudflare stored the abuse report; its answer to the request was lost, and the report was found in the account's submitted reports.",
 			finalUrl: `https://dash.cloudflare.com/${ACCOUNT_ID}/abuse-reports/submitted`,
-			submittedTargets: [context.target],
+			submittedTargets: [filed.target],
 		});
 		// Another report on the same domain is not ours.
-		expect(await findCloudflareSubmission({ routeId: 1n, payload, sentAt }, { ...deps, fetch: listing("another report") })).toBeUndefined();
+		expect(await findCloudflareSubmission({ routeId, payload, sentAt }, { ...deps, fetch: listing("another report") })).toBeUndefined();
 		expect(methods.every((method) => method === "GET")).toBeTrue();
 		// A malformed stored payload is never looked up.
-		expect(await findCloudflareSubmission({ routeId: 1n, payload: {}, sentAt }, { ...deps, fetch: async () => { throw new Error("must not read"); } })).toBeUndefined();
+		expect(await findCloudflareSubmission({ routeId, payload: {}, sentAt }, { ...deps, fetch: async () => { throw new Error("must not read"); } })).toBeUndefined();
 	});
 });

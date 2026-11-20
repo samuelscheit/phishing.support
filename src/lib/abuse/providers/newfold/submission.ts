@@ -1,17 +1,14 @@
-import { abuseEmailCaseUrl, hostingAddressLine } from "../../mail/draft";
-import { AbuseRepository } from "../../repository";
-import { getDeathByCaptchaCredentials, solveDeathByCaptchaToken } from "../../captcha/death_by_captcha";
-import { routeContext } from "../../worker/shared";
-import { openBrowserForm, setRecaptchaResponse, type BrowserFormField, type BrowserFormFile, type BrowserFormScripting, type BrowserFormSession } from "../browser_form";
-import { providerDefinitionMatchesPin } from "../definition";
-import { providerEvidenceImageArtifactMatches } from "../evidence_image";
-import { reportReference } from "../report_reference";
+import { setRecaptchaResponse, type BrowserFormField, type BrowserFormFile, type BrowserFormScripting, type BrowserFormSession } from "../browser_form";
+import { captchaCredentialsPresent, solveCaptchaToken } from "../kit/captcha";
+import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { formOpener, preparedState, withPreflight } from "../kit/session";
+import { snippet } from "../kit/text";
 import {
 	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionContext,
 	type ProviderSubmissionPreflight,
-	type ProviderSubmissionPreparation,
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
 import { NEWFOLD_PROVIDER as PROVIDER } from "./definition";
@@ -19,26 +16,21 @@ import {
 	buildNewfoldSubmissionPayload,
 	newfoldBrandForRoute,
 	NEWFOLD_EVIDENCE_CONTRACT,
-	selectNewfoldEvidenceArtifact,
 	storedNewfoldSubmissionPayload,
-	type NewfoldReportInput,
 	type NewfoldSubmissionPayload,
 } from "./payload";
 
 type FormSession = BrowserFormSession & BrowserFormScripting;
 
-export type NewfoldDependencies = {
+export type NewfoldDependencies = RouteDeps & {
 	/** The browser on the form with Cloudflare's check passed; tests inject a fake. */
 	openForm?: (signal: AbortSignal | undefined) => Promise<FormSession>;
 	/** A solved reCAPTCHA v2 token for the form's page; defaults to Death by Captcha. */
 	solveCaptcha?: (signal: AbortSignal | undefined) => Promise<string>;
 	/** Whether the captcha service can be paid at all; defaults to the DEATHBYCAPTCHA_* credentials being set. */
 	hasCaptchaCredentials?: () => boolean;
-	loadRouteContext?: typeof routeContext;
-	getArtifact?: typeof AbuseRepository.getArtifact;
+	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
 };
-
-type Context = Awaited<ReturnType<typeof routeContext>>;
 
 /** What the preflight leaves for the one request after the marker. */
 export type NewfoldPreflightState = {
@@ -48,71 +40,28 @@ export type NewfoldPreflightState = {
 	file: BrowserFormFile | undefined;
 };
 
-function reportInput({ route, report, target }: Context): NewfoldReportInput {
-	const hostingLine = hostingAddressLine(route);
-	const caseUrl = abuseEmailCaseUrl(report.submissionId);
-	return {
-		target: target.normalizedTarget,
-		observedUrls: target.observedUrls,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		legalBrandUrl: report.legalBrandUrl,
-		trackingId: reportReference(report.id, route.id),
-		brand: newfoldBrandForRoute(route),
-		...(caseUrl ? { caseUrl } : {}),
-		...(hostingLine ? { hostingLine } : {}),
-	};
-}
-
-function routeIsOurs(route: Context["route"]): boolean {
-	return route.routeType === "provider_submission" && route.providerRegistryKey === PROVIDER.key
-		&& providerDefinitionMatchesPin(PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash);
-}
+const draft = createDraft({
+	definition: PROVIDER,
+	reasonPrefix: "newfold",
+	targetTypes: ["domain"],
+	targetReason: "newfold_requires_a_domain_target",
+	read: storedNewfoldSubmissionPayload,
+	input: (data, stored?: NewfoldSubmissionPayload) => ({ ...reportInputOf(data), brand: newfoldBrandForRoute(data.route), evidence: evidenceReferenceOf(NEWFOLD_EVIDENCE_CONTRACT, data.evidenceArtifacts, stored) }),
+	build: buildNewfoldSubmissionPayload,
+	targetOf: (payload) => payload.target.domain,
+});
 
 /** Check the route and build the durable draft before any provider call. */
-export async function prepareNewfoldSubmission(context: ProviderSubmissionContext, dependencies: NewfoldDependencies = {}): Promise<ProviderSubmissionPreparation> {
-	const routeData = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (!routeIsOurs(routeData.route)) return { outcome: "insufficient_evidence", reason: "newfold_provider_definition_pin_mismatch" };
-	if (routeData.target.targetType !== "domain") return { outcome: "insufficient_evidence", reason: "newfold_requires_a_domain_target" };
-	const payload = buildNewfoldSubmissionPayload({ ...reportInput(routeData), evidence: selectNewfoldEvidenceArtifact(routeData.evidenceArtifacts) ?? null });
-	return payload ? { outcome: "ready", payload } : { outcome: "insufficient_evidence", reason: "newfold_report_payload_invalid" };
-}
-
+export const prepareNewfoldSubmission = draft.prepare;
 /** The stored draft, checked against its route and rebuilt from the current report around its stored screenshot. */
-export async function verifiedNewfoldDraft(context: ProviderSubmissionContext, dependencies: NewfoldDependencies = {}): Promise<{ payload: NewfoldSubmissionPayload; routeData: Context }> {
-	const payload = storedNewfoldSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted Newfold submission payload is malformed.");
-	const routeData = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (!routeIsOurs(routeData.route) || routeData.target.normalizedTarget !== payload.target.domain) {
-		throw new Error("The persisted Newfold payload no longer matches its route.");
-	}
-	const expected = buildNewfoldSubmissionPayload({ ...reportInput(routeData), evidence: payload.evidence });
-	if (!expected || JSON.stringify(expected) !== JSON.stringify(payload)) throw new Error("The persisted Newfold payload no longer matches the report evidence.");
-	return { payload, routeData };
-}
-
-function snippet(body: string): string {
-	return body.replace(/\s+/g, " ").trim().slice(0, 300);
-}
-
-function captchaCredentialsPresent(): boolean {
-	try {
-		getDeathByCaptchaCredentials();
-		return true;
-	} catch {
-		return false;
-	}
-}
+export const verifiedNewfoldDraft = draft.verify;
 
 /** Solve the form's reCAPTCHA v2 checkbox (datacenter egress gets the image challenge, so no widget click is tried). */
-function solveNewfoldCaptcha(signal: AbortSignal | undefined): Promise<string> {
-	return solveDeathByCaptchaToken({
-		type: PROVIDER.captcha.type,
-		parametersField: "token_params",
-		parameters: { googlekey: PROVIDER.captcha.siteKey, pageurl: PROVIDER.captcha.pageUrl },
-		...(signal ? { signal } : {}),
-	});
-}
+const solveNewfoldCaptcha = (signal: AbortSignal | undefined) => solveCaptchaToken({
+	type: PROVIDER.captcha.type,
+	parametersField: "token_params",
+	parameters: { googlekey: PROVIDER.captcha.siteKey, pageurl: PROVIDER.captcha.pageUrl },
+}, signal);
 
 /**
  * Before the marker: open the form past Cloudflare's check, check the page
@@ -122,26 +71,14 @@ function solveNewfoldCaptcha(signal: AbortSignal | undefined): Promise<string> {
  * opened and a person is asked.
  */
 export async function prepareNewfoldExternalSubmission(context: ProviderSubmissionContext, dependencies: NewfoldDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, routeData } = await verifiedNewfoldDraft(context, dependencies);
-	let file: BrowserFormFile | undefined;
-	if (payload.evidence) {
-		const artifact = await (dependencies.getArtifact ?? AbuseRepository.getArtifact)(routeData.report.id, BigInt(payload.evidence.artifactId));
-		if (!artifact || !providerEvidenceImageArtifactMatches(payload.evidence, artifact, NEWFOLD_EVIDENCE_CONTRACT)) {
-			throw new Error("The persisted Newfold evidence artifact no longer matches its immutable reference.");
-		}
-		file = { filename: payload.evidence.filename, mimeType: payload.evidence.mimeType, base64: Buffer.from(artifact.blob).toString("base64") };
-	}
+	const { payload, data } = await draft.verify(context, dependencies);
+	const file = payload.evidence
+		? (await loadEvidenceFile({ reference: payload.evidence, contract: NEWFOLD_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Newfold", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) })).file
+		: undefined;
 	if (!(dependencies.hasCaptchaCredentials ?? captchaCredentialsPresent)()) {
 		throw new ProviderSubmissionNeedsHumanError("Newfold's abuse form needs a solved reCAPTCHA and DEATHBYCAPTCHA_USERNAME/DEATHBYCAPTCHA_PASSWORD are not set; nothing was filed.");
 	}
-	const session = await (dependencies.openForm ?? ((signal) => openBrowserForm({
-		provider: PROVIDER.displayName,
-		operation: "newfold-report",
-		url: PROVIDER.formUrl,
-		formSelector: PROVIDER.formSelector,
-		...(signal ? { signal } : {}),
-	}) as Promise<FormSession>))(context.signal);
-	try {
+	return withPreflight(() => (dependencies.openForm ?? formOpener(PROVIDER, "newfold-report", { url: PROVIDER.formUrl, formSelector: PROVIDER.formSelector }))(context.signal), async (session): Promise<NewfoldPreflightState> => {
 		const rendered = await session.readFormFields(PROVIDER.hiddenFieldPattern);
 		for (const [name, value] of PROVIDER.hiddenFields) {
 			if (rendered.find(([field]) => field === name)?.[1] !== value) throw new Error(`Newfold's form no longer renders ${name}=${value}.`);
@@ -149,12 +86,8 @@ export async function prepareNewfoldExternalSubmission(context: ProviderSubmissi
 		// Last, so the token (valid for about two minutes) is fresh when the request goes out.
 		const token = await (dependencies.solveCaptcha ?? solveNewfoldCaptcha)(context.signal);
 		await setRecaptchaResponse(session, token, PROVIDER.displayName);
-		const state: NewfoldPreflightState = { session, token, file };
-		return { state, dispose: () => session.close() };
-	} catch (error) {
-		await session.close();
-		throw error;
-	}
+		return { session, token, file };
+	});
 }
 
 /** The servlet's multipart parts in the order the form's native submit sends them (docs/providers/newfold.md); the attachment is left out when there is none. */
@@ -199,10 +132,11 @@ function endedOnThankYou(finalUrl: string | undefined): boolean {
 export async function submitNewfoldSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
 	const payload = storedNewfoldSubmissionPayload(context.payload);
 	if (!payload) throw new Error("The persisted Newfold submission payload is malformed.");
-	const state = preflight?.state as NewfoldPreflightState | undefined;
-	if (!state?.session || typeof state.token !== "string" || !state.token) {
-		throw new Error("Newfold submission requires its prepared browser session and reCAPTCHA token.");
-	}
+	const state = preparedState<NewfoldPreflightState>(
+		preflight,
+		(prepared) => !!prepared.session && typeof prepared.token === "string" && !!prepared.token,
+		"Newfold submission requires its prepared browser session and reCAPTCHA token.",
+	);
 	const answer = await state.session.postForm(PROVIDER.leadUrl, leadFields(payload, state), PROVIDER.timeoutMs);
 	if (answer.status >= 200 && answer.status < 300 && endedOnThankYou(answer.url)) {
 		return {

@@ -41,7 +41,7 @@ async function createUnresolvedCase(options: { diagnosticId?: string; job?: bool
 	});
 	const run = await AbuseRepository.createProviderRun({
 		routeId: route.id,
-		providerPayload: { adapter: "netcraft_report_urls_v3", providerNarrativeVersion: 1 },
+		providerPayload: { adapter: "netcraft_report_urls_v3" },
 		correlationKey: `provider-submission:netcraft:reconcile:${created.reportId.toString()}`,
 		executionStatus: "unknown_external_state",
 	});

@@ -7,7 +7,8 @@ import { getProviderSubmissionProviderForMailbox, getProviderSubmissionProviderF
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { GNAME_PROVIDER } from "./definition";
 import { gnameProvider } from "./index";
-import { buildGnameSubmissionPayload, gnameComplaintKind, gnameDomainEntry, selectGnameEvidenceArtifact, storedGnameSubmissionPayload } from "./payload";
+import { selectProviderEvidenceImageArtifact } from "../evidence_image";
+import { buildGnameSubmissionPayload, GNAME_EVIDENCE_CONTRACT, gnameComplaintKind, gnameDomainEntry, storedGnameSubmissionPayload } from "./payload";
 import {
 	gnameComplaintBody,
 	prepareGnameExternalSubmission,
@@ -25,6 +26,9 @@ function pngArtifact(id: bigint, bytes: Buffer = PNG, name = "website.png"): Abu
 	return { id, reportId: 9n, name, kind: "user_evidence_original", mimeType: "image/png", sha256: sha256Hex(bytes), size: bytes.byteLength, blob: bytes, metadata: {}, createdAt: new Date() } as unknown as AbuseArtifact;
 }
 const artifact = pngArtifact(77n);
+
+const submit = (context: Parameters<typeof submitGnameSubmission>[0], preflight: Parameters<typeof submitGnameSubmission>[1]) =>
+	submitGnameSubmission(context, preflight, { loadRouteContext: routeContext(), getArtifact: async () => artifact });
 
 const SUBMISSION = 377486973465530391n;
 const CASE_PAGE = `https://phishing.support/submissions/${SUBMISSION.toString()}`;
@@ -118,7 +122,7 @@ describe("GNAME abuse complaint form", () => {
 		expect(api.calls[1]).toEqual({ kind: "code", email: "support@phishing.support" });
 		expect(codeRequests).toEqual([new Date("2026-11-07T20:30:00Z")]);
 
-		const success = await submitGnameSubmission({ routeId: 5n, payload }, preflight);
+		const success = await submit({ routeId: 5n, payload }, preflight);
 		const submitted = api.calls[2]!;
 		expect(submitted).toMatchObject({ kind: "post", path: "/request/lyts_add" });
 		const data = (submitted as { data: Record<string, unknown> }).data;
@@ -151,7 +155,7 @@ describe("GNAME abuse complaint form", () => {
 		expect(gnameComplaintBody(storedGnameSubmissionPayload(withoutBrand)!, "x", ["/p.png"])).toMatchObject({ lx: 8, wzdz: CASE_PAGE });
 
 		const api = gnameApi({ upload: UPLOADED, code: CODE_SENT });
-		await prepareGnameExternalSubmission({ routeId: 5n, payload: withBrand }, { openSession: api.openSession, loadRouteContext: routeContext({ allegationCategory: "phishing" }), getArtifact: async () => artifact, readCode: async () => "1234" });
+		await prepareGnameExternalSubmission({ routeId: 5n, payload: withBrand }, { openSession: api.openSession, loadRouteContext: routeContext({ allegationCategory: "phishing", legalBrandUrl: "https://www.okx.com/" }), getArtifact: async () => artifact, readCode: async () => "1234" });
 		expect(api.opened).toEqual(["phishing"]);
 		expect(api.calls[0]).toMatchObject({ kind: "upload", lx: 8 });
 	});
@@ -169,14 +173,14 @@ describe("GNAME abuse complaint form", () => {
 		expect(await prepare({ evidenceArtifacts: [pngArtifact(78n, oversized)] })).toEqual({ outcome: "insufficient_evidence", reason: "gname_requires_a_screenshot" });
 		expect(await prepare({ version: "2026-08-13.3" })).toEqual({ outcome: "insufficient_evidence", reason: "gname_provider_definition_pin_mismatch" });
 		// The first screenshot that fits is the one sent.
-		expect(selectGnameEvidenceArtifact([pngArtifact(78n, oversized), pngArtifact(79n)])?.artifactId).toBe("79");
+		expect(selectProviderEvidenceImageArtifact([pngArtifact(78n, oversized), pngArtifact(79n)], GNAME_EVIDENCE_CONTRACT)?.artifactId).toBe("79");
 	});
 
 	test("GNAME's named refusals are known rejections; its per-domain refusals are spelled out", async () => {
 		const payload = await readyPayload();
 		const reject = async (response: GnameResponse) => {
 			const api = gnameApi({ post: () => response });
-			return submitGnameSubmission({ routeId: 5n, payload }, { state: { session: api.session, code: "a1b2c3", pics: ["/p.png"] } });
+			return submit({ routeId: 5n, payload }, { state: { session: api.session, code: "a1b2c3", pics: ["/p.png"] } });
 		};
 		await expect(reject({ code: -1, msg: "Verification code error" })).rejects.toThrow(new ProviderSubmissionRejectedError("GNAME rejected the report: Verification code error (code -1)"));
 		await expect(reject({ code: -2, msg: "", data: [{ ym: "92haoyun.icu", msg: "The domain is not registered with GNAME" }] }))
@@ -185,19 +189,19 @@ describe("GNAME abuse complaint form", () => {
 
 		// An accepted complaint without a case number is still accepted.
 		const api = gnameApi({ post: () => ({ code: "1", msg: "ok" }) });
-		expect(await submitGnameSubmission({ routeId: 5n, payload }, { state: { session: api.session, code: "a1b2c3", pics: ["/p.png"] } }))
+		expect(await submit({ routeId: 5n, payload }, { state: { session: api.session, code: "a1b2c3", pics: ["/p.png"] } }))
 			.toMatchObject({ confirmationText: "GNAME accepted the complaint." });
-		expect((await submitGnameSubmission({ routeId: 5n, payload }, { state: { session: api.session, code: "a1b2c3", pics: ["/p.png"] } })).confirmationId).toBeUndefined();
+		expect((await submit({ routeId: 5n, payload }, { state: { session: api.session, code: "a1b2c3", pics: ["/p.png"] } })).confirmationId).toBeUndefined();
 	});
 
 	test("submit never runs without the preflight's session, code, and uploaded screenshot", async () => {
 		const payload = await readyPayload();
 		const api = gnameApi({ post: () => ({ code: 1, data: "GN1" }) });
 		for (const state of [undefined, { code: "a1", pics: ["/p.png"] }, { session: api.session, code: "", pics: ["/p.png"] }, { session: api.session, code: "a1", pics: [] }]) {
-			await expect(submitGnameSubmission({ routeId: 5n, payload }, state ? { state } : undefined)).rejects.toThrow("prepared verification code");
+			await expect(submit({ routeId: 5n, payload }, state ? { state } : undefined)).rejects.toThrow("prepared verification code");
 		}
 		expect(api.calls).toEqual([]);
-		await expect(submitGnameSubmission({ routeId: 5n, payload: { ...payload, adapter: "eranet_phishing_report_v1" } }, { state: { session: api.session, code: "a1", pics: ["/p.png"] } }))
+		await expect(submit({ routeId: 5n, payload: { ...payload, adapter: "eranet_phishing_report_v1" } }, { state: { session: api.session, code: "a1", pics: ["/p.png"] } }))
 			.rejects.toThrow("malformed");
 	});
 

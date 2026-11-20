@@ -1,4 +1,4 @@
-import type { ProviderReportPreviewContext, ProviderSubmissionProvider } from "../submission_contracts";
+import { defineProvider, PREVIEW_REFERENCE } from "../kit/provider";
 import { MICROSOFT_PROVIDER } from "./definition";
 import { makeMicrosoftNotes, microsoftReportUrls } from "./payload";
 import { prepareMicrosoftSubmission, submitMicrosoftSubmission } from "./submission";
@@ -9,11 +9,10 @@ import { prepareMicrosoftSubmission, submitMicrosoftSubmission } from "./submiss
  * status endpoint, so there is no inbound mail rule: the run's receipt is the
  * accepted request.
  */
-export const microsoftProvider: ProviderSubmissionProvider = {
+export const microsoftProvider = defineProvider({
 	definition: MICROSOFT_PROVIDER,
-	prepareSubmission: (context) => prepareMicrosoftSubmission(context),
-	shouldRefreshStartingPayload: (context) => context.payload.adapter !== "microsoft_msrc_report_v1" || context.payload.providerNarrativeVersion !== 1,
-	buildReportPreview: (context: ProviderReportPreviewContext) => {
+	prepare: prepareMicrosoftSubmission,
+	preview: (context) => {
 		const urls = microsoftReportUrls(context.target, context.observedUrls);
 		return urls ? makeMicrosoftNotes({
 			target: context.target,
@@ -21,9 +20,8 @@ export const microsoftProvider: ProviderSubmissionProvider = {
 			description: context.description,
 			...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 			legalBrandUrl: context.legalBrandUrl ?? null,
-			reference: "PS-000000000000-R0",
+			trackingId: PREVIEW_REFERENCE,
 		}, urls) : undefined;
 	},
 	submit: (context) => submitMicrosoftSubmission(context),
-};
-
+});

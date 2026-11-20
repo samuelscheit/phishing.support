@@ -1,20 +1,18 @@
-import type { ProviderReportPreviewContext, ProviderSubmissionProvider } from "../submission_contracts";
+import { defineProvider } from "../kit/provider";
 import { TENCENT_PROVIDER } from "./definition";
-import { prepareTencentSubmission, submitTencentSubmission } from "./submission";
 import { makeTencentExplanation } from "./payload";
+import { prepareTencentSubmission, submitTencentSubmission } from "./submission";
 
 /** Tencent owns its DNS-abuse mailbox selection, evidence rules, and HTTP form. */
-export const tencentProvider: ProviderSubmissionProvider = {
+export const tencentProvider = defineProvider({
 	definition: TENCENT_PROVIDER,
-	prepareSubmission: prepareTencentSubmission,
-	shouldRefreshStartingPayload: (context) => context.payload.providerNarrativeVersion !== 1,
-	buildReportPreview: (context: ProviderReportPreviewContext) => makeTencentExplanation({
+	prepare: prepareTencentSubmission,
+	preview: (context) => makeTencentExplanation({
 		target: context.target,
 		observedUrl: context.observedUrls[0],
 		description: context.description,
 		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),
-	submit: submitTencentSubmission,
-};
-
+	submit: (context) => submitTencentSubmission(context),
+});

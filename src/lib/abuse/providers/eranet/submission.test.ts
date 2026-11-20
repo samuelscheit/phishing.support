@@ -3,9 +3,10 @@ import { describe, expect, test } from "bun:test";
 import { sha256Hex } from "../../security";
 import type { AbuseArtifact } from "../../schema";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
+import { selectProviderEvidenceImageArtifact } from "../evidence_image";
 import { mailedCodeFrom } from "../mailed_code";
 import { ERANET_PROVIDER } from "./definition";
-import { buildEranetSubmissionPayload, eranetSubTypes, storedEranetSubmissionPayload } from "./payload";
+import { buildEranetSubmissionPayload, ERANET_EVIDENCE_CONTRACT, eranetSubTypes, storedEranetSubmissionPayload } from "./payload";
 import { prepareEranetExternalSubmission, prepareEranetSubmission, submitEranetSubmission, type EranetDependencies, type EranetSession } from "./submission";
 
 // A minimal valid PNG: the evidence contract checks the magic bytes and digest.
@@ -79,7 +80,7 @@ describe("Eranet abuse form", () => {
 		expect(codeRequests).toEqual([new Date("2026-11-03T00:00:00Z")]);
 
 		// The code is valid only inside the session that requested it, so submit reuses it.
-		const success = await submitEranetSubmission({ routeId: 5n, payload }, preflight);
+		const success = await submitEranetSubmission({ routeId: 5n, payload }, preflight, { loadRouteContext: routeContext(), getArtifact: async () => artifact });
 		expect(api.calls.map((call) => call.path)).toEqual(["UploadFile", "GetEmailCode", "CreateComplaint"]);
 		expect(api.calls[2]!.json).toMatchObject({
 			Email: "support@phishing.support",
@@ -99,20 +100,23 @@ describe("Eranet abuse form", () => {
 	});
 
 	test("a named Eranet error is a known rejection, and a code that never arrives stops before the marker", async () => {
-		const payload = buildEranetSubmissionPayload({ target: "keychainagent.pro", observedUrl: "https://keychainagent.pro/x", description: "The page distributes malware.", allegationCategory: "malware", website: "https://phishing.support/submissions/1" })!;
+		const prepared = await prepareEranetSubmission({ routeId: 5n, payload: {} }, { loadRouteContext: routeContext() });
+		const payload = (prepared as { payload: Record<string, unknown> }).payload;
+		const deps = { loadRouteContext: routeContext(), getArtifact: async () => artifact };
 		const rejecting = eranetApi({ CreateComplaint: () => ({ error: "VerifyCode.NotFound.Code" }) });
-		await expect(submitEranetSubmission({ routeId: 5n, payload }, { state: { session: rejecting.session, code: "123456", screenshots: [] } }))
+		await expect(submitEranetSubmission({ routeId: 5n, payload }, { state: { session: rejecting.session, code: "123456", screenshots: [] } }, deps))
 			.rejects.toBeInstanceOf(ProviderSubmissionRejectedError);
-		await expect(submitEranetSubmission({ routeId: 5n, payload }, { state: { code: "123456", screenshots: [] } }))
+		await expect(submitEranetSubmission({ routeId: 5n, payload }, { state: { code: "123456", screenshots: [] } }, deps))
 			.rejects.toThrow("browser session");
 
-		const silent = eranetApi({ GetEmailCode: () => ({}) });
+		const silent = eranetApi({ UploadFile: () => ({ Data: { filename: "uploads/abc.png" } }), GetEmailCode: () => ({}) });
 		await expect(prepareEranetExternalSubmission({ routeId: 5n, payload }, {
 			openSession: silent.openSession,
 			loadRouteContext: routeContext(),
+			getArtifact: async () => artifact,
 			readCode: async () => { throw new Error("Eranet's verification code did not arrive in time."); },
 		})).rejects.toThrow("did not arrive in time");
-		expect(silent.calls.map((call) => call.path)).toEqual(["GetEmailCode"]);
+		expect(silent.calls.map((call) => call.path)).toEqual(["UploadFile", "GetEmailCode"]);
 		// A failed preflight never leaks its browser.
 		expect(silent.closed()).toBe(1);
 	});
@@ -120,7 +124,7 @@ describe("Eranet abuse form", () => {
 	test("phishing reports file as phishing sites, and a stored draft from another definition is refused", () => {
 		expect(eranetSubTypes("phishing")).toEqual(["phishing_site"]);
 		expect(eranetSubTypes("malware")).toEqual(["other"]);
-		const payload = buildEranetSubmissionPayload({ target: "keychainagent.pro", observedUrl: "https://keychainagent.pro/x", description: "x".repeat(40), website: "https://brand.example/" })!;
+		const payload = buildEranetSubmissionPayload({ target: "keychainagent.pro", observedUrl: "https://keychainagent.pro/x", description: "x".repeat(40), website: "https://brand.example/", evidence: selectProviderEvidenceImageArtifact([artifact], ERANET_EVIDENCE_CONTRACT) ?? null })!;
 		expect(storedEranetSubmissionPayload({ ...payload, definition: { version: "old", contentHash: "x" } })).toBeUndefined();
 		expect(storedEranetSubmissionPayload({ ...payload, report: { ...payload.report, subTypes: ["porn"] } })).toBeUndefined();
 	});

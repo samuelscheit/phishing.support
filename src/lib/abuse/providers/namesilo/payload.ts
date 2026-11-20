@@ -1,56 +1,18 @@
-import type { AbuseArtifact } from "../../schema";
-import {
-	hostBelongsToTarget,
-	normalizeDomain,
-	normalizePublicHttpUrl,
-	registrableDomain,
-} from "../../security";
+import { z } from "zod";
 
-import {
-	selectProviderEvidenceImageArtifact,
-	storedProviderEvidenceImageReference,
-	type ProviderEvidenceImageContract,
-	type ProviderEvidenceImageReference,
-} from "../evidence_image";
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
+import { hostBelongsToTarget, normalizeDomain, normalizePublicHttpUrl, registrableDomain } from "../../security";
+import { evidenceContract } from "../kit/evidence";
+import { field, payloadEnvelope, storedReader } from "../kit/stored";
+import { providerNarrative } from "../kit/text";
+import { storedProviderEvidenceImageReference } from "../evidence_image";
+import { normalizeObservedUrlForTarget } from "../report_payload";
 import { NAMESILO_PROVIDER } from "./definition";
-import { asRecord } from "../../../values";
 
-export const NAMESILO_EVIDENCE_CONTRACT = {
-	acceptedMimeTypes: NAMESILO_PROVIDER.evidence.acceptedMimeTypes,
-	maximumBytes: NAMESILO_PROVIDER.evidence.maximumBytes,
-	filenamePrefix: "namesilo_report",
-} as const satisfies ProviderEvidenceImageContract;
+export const NAMESILO_EVIDENCE_CONTRACT = evidenceContract("namesilo_report", NAMESILO_PROVIDER.evidence);
 
-export type NameSiloEvidenceReference = ProviderEvidenceImageReference<
-	(typeof NAMESILO_PROVIDER.evidence.acceptedMimeTypes)[number]
->;
+const envelope = payloadEnvelope(NAMESILO_PROVIDER, "namesilo_phishing_report_v1");
 
-export type NameSiloSubmissionPayload = {
-	adapter: "namesilo_phishing_report_v1";
-	providerNarrativeVersion: 1;
-	definition: {
-		version: string;
-		contentHash: string;
-	};
-	target: {
-		normalizedTarget: string;
-		registrableDomain: string;
-		observedUrl: string;
-	};
-	report: {
-		realWebsite: string;
-		explanation: string;
-	};
-	evidence: NameSiloEvidenceReference;
-};
-
-export function selectNameSiloEvidenceArtifact(
-	artifacts: readonly AbuseArtifact[],
-): NameSiloEvidenceReference | undefined {
-	return selectProviderEvidenceImageArtifact(artifacts, NAMESILO_EVIDENCE_CONTRACT);
-}
-
+/** The impersonated brand's site: a public URL that is not the reported target or its registrable domain. */
 function normalizedRealWebsite(value: unknown, target: string): string | undefined {
 	if (typeof value !== "string" || value.length === 0 || value.length > 4_096) return undefined;
 	const normalized = normalizePublicHttpUrl(value, { domainOnly: true });
@@ -60,6 +22,19 @@ function normalizedRealWebsite(value: unknown, target: string): string | undefin
 	return normalized;
 }
 
+/** The durable, secret-free draft: the form values the submission sends. */
+const payloadSchema = z.object({
+	...envelope.shape,
+	target: z.object({ normalizedTarget: field.domain, registrableDomain: z.string(), observedUrl: z.string() }),
+	report: z.object({ realWebsite: field.brandUrl, explanation: field.text(NAMESILO_PROVIDER.maximumReportLength) }),
+	evidence: field.evidence(NAMESILO_EVIDENCE_CONTRACT),
+}).refine(({ target, report }) => registrableDomain(target.normalizedTarget) === target.registrableDomain
+	&& normalizeObservedUrlForTarget(target.observedUrl, target.normalizedTarget) === target.observedUrl
+	&& normalizedRealWebsite(report.realWebsite, target.normalizedTarget) === report.realWebsite);
+
+export type NameSiloSubmissionPayload = z.infer<typeof payloadSchema>;
+export type NameSiloEvidenceReference = NameSiloSubmissionPayload["evidence"];
+
 /** Build NameSilo's bounded free-text report without forwarding raw analysis. */
 export function makeNameSiloExplanation(params: {
 	target?: string;
@@ -68,15 +43,13 @@ export function makeNameSiloExplanation(params: {
 	allegationCategory?: string;
 	realWebsite?: string;
 }): string | undefined {
-	return buildProviderReportNarrative({
-		provider: "namesilo",
-		target: params.target,
+	return providerNarrative("namesilo", {
+		target: params.target ?? "",
 		observedUrls: params.observedUrl ? [params.observedUrl] : [],
 		description: params.description,
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
-		...(params.realWebsite ? { legalBrandUrl: params.realWebsite } : {}),
-		maximumLength: NAMESILO_PROVIDER.maximumReportLength,
-	});
+		legalBrandUrl: params.realWebsite ?? null,
+	}, NAMESILO_PROVIDER.maximumReportLength);
 }
 
 /** Create the durable, secret-free NameSilo draft before any provider call. */
@@ -86,26 +59,23 @@ export function buildNameSiloSubmissionPayload(params: {
 	description: string;
 	allegationCategory?: string;
 	realWebsite: string;
-	evidence: NameSiloEvidenceReference;
+	evidence: NameSiloEvidenceReference | null;
 }): NameSiloSubmissionPayload | undefined {
 	const target = normalizeDomain(params.target);
 	const observedUrl = target ? normalizeObservedUrlForTarget(params.observedUrl, target) : undefined;
 	const rootDomain = target ? registrableDomain(target) : undefined;
 	const realWebsite = target ? normalizedRealWebsite(params.realWebsite, target) : undefined;
 	const explanation = makeNameSiloExplanation({
-		target,
-		observedUrl,
+		...(target ? { target } : {}),
+		...(observedUrl ? { observedUrl } : {}),
 		description: params.description,
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
-		realWebsite,
+		...(realWebsite ? { realWebsite } : {}),
 	});
-	const evidence = storedProviderEvidenceImageReference(params.evidence, NAMESILO_EVIDENCE_CONTRACT);
+	const evidence = params.evidence && storedProviderEvidenceImageReference(params.evidence, NAMESILO_EVIDENCE_CONTRACT);
 	if (!target || !observedUrl || !rootDomain || !realWebsite || !explanation || !evidence) return undefined;
-
 	return {
-		adapter: "namesilo_phishing_report_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: NAMESILO_PROVIDER.version, contentHash: NAMESILO_PROVIDER.contentHash },
+		...envelope.stamp,
 		target: { normalizedTarget: target, registrableDomain: rootDomain, observedUrl },
 		report: { realWebsite, explanation },
 		evidence,
@@ -113,36 +83,4 @@ export function buildNameSiloSubmissionPayload(params: {
 }
 
 /** Read only a payload previously constructed by this provider. */
-export function storedNameSiloSubmissionPayload(value: unknown): NameSiloSubmissionPayload | undefined {
-	const payload = asRecord(value);
-	const definition = payload && asRecord(payload.definition);
-	const target = payload && asRecord(payload.target);
-	const report = payload && asRecord(payload.report);
-	const evidence = payload && storedProviderEvidenceImageReference(payload.evidence, NAMESILO_EVIDENCE_CONTRACT);
-	if (!payload || payload.adapter !== "namesilo_phishing_report_v1" || payload.providerNarrativeVersion !== 1
-		|| !definition || definition.version !== NAMESILO_PROVIDER.version || definition.contentHash !== NAMESILO_PROVIDER.contentHash
-		|| !target || typeof target.normalizedTarget !== "string" || typeof target.registrableDomain !== "string" || typeof target.observedUrl !== "string"
-		|| !report || typeof report.realWebsite !== "string" || typeof report.explanation !== "string"
-		|| report.explanation.trim().length === 0 || report.explanation.length > NAMESILO_PROVIDER.maximumReportLength
-		|| !evidence) {
-		return undefined;
-	}
-	const normalizedTarget = normalizeDomain(target.normalizedTarget);
-	const observedUrl = normalizedTarget ? normalizeObservedUrlForTarget(target.observedUrl, normalizedTarget) : undefined;
-	const rootDomain = normalizedTarget ? registrableDomain(normalizedTarget) : undefined;
-	const realWebsite = normalizedTarget ? normalizedRealWebsite(report.realWebsite, normalizedTarget) : undefined;
-	if (!normalizedTarget || normalizedTarget !== target.normalizedTarget
-		|| !observedUrl || observedUrl !== target.observedUrl
-		|| !rootDomain || rootDomain !== target.registrableDomain
-		|| !realWebsite || realWebsite !== report.realWebsite) {
-		return undefined;
-	}
-	return {
-		adapter: "namesilo_phishing_report_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: NAMESILO_PROVIDER.version, contentHash: NAMESILO_PROVIDER.contentHash },
-		target: { normalizedTarget, registrableDomain: rootDomain, observedUrl },
-		report: { realWebsite, explanation: report.explanation },
-		evidence,
-	};
-}
+export const storedNameSiloSubmissionPayload = storedReader(payloadSchema);

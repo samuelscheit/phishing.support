@@ -1,14 +1,11 @@
-import { AbuseRepository } from "../../repository";
-import { routeContext } from "../../worker/shared";
 import { asRecord } from "../../../values";
-import { providerDefinitionMatchesPin } from "../definition";
-import { providerEvidenceImageArtifactMatches } from "../evidence_image";
+import { createDraft } from "../kit/draft";
+import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
 import {
 	ProviderSubmissionNeedsHumanError,
 	type ProviderCorrespondence,
 	type ProviderSubmissionContext,
 	type ProviderSubmissionPreflight,
-	type ProviderSubmissionPreparation,
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
 import { withAlibabaConsole, type AlibabaConsole, type AlibabaConsoleDependencies as AlibabaCloudSubmissionDependencies } from "./api";
@@ -17,7 +14,6 @@ import {
 	ALIBABA_CLOUD_EVIDENCE_CONTRACT,
 	alibabaCloudSubmitParams,
 	buildAlibabaCloudSubmissionPayload,
-	selectAlibabaCloudScreenshot,
 	storedAlibabaCloudSubmissionPayload,
 	type AlibabaCloudSubmissionPayload,
 } from "./payload";
@@ -38,57 +34,45 @@ const { pageType, consoleOrigin } = ALIBABA_CLOUD_PROVIDER;
 /** The account's report list, where a filed report shows up. */
 const REPORT_RECORDS_URL = `${consoleOrigin}/#/reportRecord/${pageType}`;
 
-function reportInput(report: { description: string; allegationCategory: string; legalBrandUrl: string | null }, target: { normalizedTarget: string; observedUrls: string[] }) {
-	return {
-		target: target.normalizedTarget,
-		observedUrls: target.observedUrls,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		legalBrandUrl: report.legalBrandUrl,
-	};
-}
-
-function routeIsOurs(route: { routeType: string; providerRegistryKey: string; providerDefinitionVersion: string | null; providerDefinitionHash: string | null }): boolean {
-	return route.routeType === "provider_submission" && route.providerRegistryKey === ALIBABA_CLOUD_PROVIDER.key
-		&& providerDefinitionMatchesPin(ALIBABA_CLOUD_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash);
-}
+const draft = createDraft({
+	definition: ALIBABA_CLOUD_PROVIDER,
+	reasonPrefix: "alibaba_cloud",
+	targetTypes: ["domain", "ip"],
+	targetReason: "alibaba_cloud_requires_a_web_target",
+	read: storedAlibabaCloudSubmissionPayload,
+	input: ({ report, target, evidenceArtifacts }, stored: AlibabaCloudSubmissionPayload | undefined) => {
+		const screenshot = evidenceReferenceOf(ALIBABA_CLOUD_EVIDENCE_CONTRACT, evidenceArtifacts, stored && { evidence: stored.screenshot });
+		// The account credentials are runtime secrets: validate them, never store them in the draft.
+		// The mailboxes now belong to this form, so without an account the report waits for a person.
+		if (!stored && screenshot) {
+			try {
+				alibabaCloudLoginConfig();
+			} catch (error) {
+				throw new ProviderSubmissionNeedsHumanError(error instanceof Error ? error.message : String(error));
+			}
+		}
+		return {
+			target: target.normalizedTarget,
+			observedUrls: target.observedUrls,
+			description: report.description,
+			allegationCategory: report.allegationCategory,
+			legalBrandUrl: report.legalBrandUrl,
+			screenshot,
+		};
+	},
+	admit: (_data, input) => input.screenshot ? undefined : "alibaba_cloud_requires_a_screenshot",
+	build: buildAlibabaCloudSubmissionPayload,
+	targetOf: (payload) => payload.target.normalizedTarget,
+});
 
 /** Check the route and build the durable draft before any provider call. */
-export async function prepareAlibabaCloudSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation> {
-	const { route, report, target, evidenceArtifacts } = await routeContext(context.routeId);
-	if (!routeIsOurs(route)) return { outcome: "insufficient_evidence", reason: "alibaba_cloud_provider_definition_pin_mismatch" };
-	if (target.targetType !== "domain" && target.targetType !== "ip") return { outcome: "insufficient_evidence", reason: "alibaba_cloud_requires_a_web_target" };
-	const screenshot = selectAlibabaCloudScreenshot(evidenceArtifacts);
-	if (!screenshot) return { outcome: "insufficient_evidence", reason: "alibaba_cloud_requires_a_screenshot" };
-	// The account credentials are runtime secrets: validate them, never store them in the draft.
-	// The mailboxes now belong to this form, so without an account the report waits for a person.
-	try {
-		alibabaCloudLoginConfig();
-	} catch (error) {
-		throw new ProviderSubmissionNeedsHumanError(error instanceof Error ? error.message : String(error));
-	}
-	const payload = buildAlibabaCloudSubmissionPayload({ ...reportInput(report, target), screenshot });
-	if (!payload) return { outcome: "insufficient_evidence", reason: "alibaba_cloud_report_payload_invalid" };
-	return { outcome: "ready", payload };
-}
+export const prepareAlibabaCloudSubmission = draft.prepare;
 
-/** The stored draft, checked against its route and rebuilt from the current report. */
-async function verifiedDraft(context: ProviderSubmissionContext): Promise<{ payload: AlibabaCloudSubmissionPayload; screenshot: Buffer }> {
-	const payload = storedAlibabaCloudSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted Alibaba Cloud submission payload is malformed.");
-	const { route, report, target } = await routeContext(context.routeId);
-	if (!routeIsOurs(route) || target.normalizedTarget !== payload.target.normalizedTarget) {
-		throw new Error("The persisted Alibaba Cloud payload no longer matches its route.");
-	}
-	const expected = buildAlibabaCloudSubmissionPayload({ ...reportInput(report, target), screenshot: payload.screenshot });
-	if (!expected || JSON.stringify(expected) !== JSON.stringify(payload)) {
-		throw new Error("The persisted Alibaba Cloud payload no longer matches the report evidence.");
-	}
-	const artifact = await AbuseRepository.getArtifact(report.id, BigInt(payload.screenshot.artifactId));
-	if (!artifact || !providerEvidenceImageArtifactMatches(payload.screenshot, artifact, ALIBABA_CLOUD_EVIDENCE_CONTRACT)) {
-		throw new Error("The persisted Alibaba Cloud screenshot no longer matches its immutable reference.");
-	}
-	return { payload, screenshot: artifact.blob };
+/** The stored draft, checked against its route and rebuilt from the current report; with its screenshot's bytes. */
+async function verifiedDraft(context: ProviderSubmissionContext) {
+	const { payload, data } = await draft.verify(context);
+	const { bytes } = await loadEvidenceFile({ reference: payload.screenshot, contract: ALIBABA_CLOUD_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Alibaba Cloud screenshot" });
+	return { payload, screenshot: bytes };
 }
 
 export type { AlibabaCloudSubmissionDependencies };

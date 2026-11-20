@@ -1,32 +1,12 @@
 import { serviceIdentity } from "../../../constants";
-import { hashStableJson } from "../../security";
-import type { ProviderSubmissionDefinition } from "../submission_contracts";
-
-export type NameSiloProviderDefinition = ProviderSubmissionDefinition & {
-	reportPageUrl: string;
-	tokenUrl: string;
-	submissionUrl: string;
-	captcha: {
-		provider: "death_by_captcha";
-		type: 4;
-		siteKey: string;
-	};
-	evidence: {
-		acceptedMimeTypes: readonly ["image/jpeg", "image/png", "image/gif", "image/tiff"];
-		maximumBytes: number;
-	};
-	maximumReportLength: number;
-	reporter: {
-		email: string;
-	};
-};
+import { definePinned } from "../kit/pin";
 
 /**
  * Code-owned contract for NameSilo's dedicated phishing form. Runtime
  * credentials, CSRF tokens, cookies, and CAPTCHA solutions are deliberately
  * excluded from the route-pinned definition and durable provider payload.
  */
-const definitionWithoutHash = {
+export const NAMESILO_PROVIDER = definePinned({
 	key: "namesilo",
 	displayName: "NameSilo Phishing Report",
 	version: "2026-10-31.1",
@@ -48,9 +28,6 @@ const definitionWithoutHash = {
 	reporter: {
 		email: serviceIdentity.mailbox,
 	},
-};
-
-export const NAMESILO_PROVIDER: NameSiloProviderDefinition = Object.freeze({
-	...definitionWithoutHash,
-	contentHash: hashStableJson(definitionWithoutHash),
 });
+
+export type NameSiloProviderDefinition = typeof NAMESILO_PROVIDER;

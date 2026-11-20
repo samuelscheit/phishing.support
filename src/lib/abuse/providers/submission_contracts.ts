@@ -190,13 +190,6 @@ export type ProviderSubmissionProvider = {
 	 * handler.
 	 */
 	prepareSubmission?(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation>;
-	/**
-	 * Return true only when a `running/starting` durable payload predates the
-	 * provider's current, safe draft format. The executor may refresh only this
-	 * pre-marker state; it never rewrites a current draft or a request that has
-	 * reached `submission_started`.
-	 */
-	shouldRefreshStartingPayload?(context: ProviderSubmissionContext): boolean;
 	/** Build the provider-owned preview shown before a durable run exists. */
 	buildReportPreview?(context: ProviderReportPreviewContext): string | undefined;
 	/**

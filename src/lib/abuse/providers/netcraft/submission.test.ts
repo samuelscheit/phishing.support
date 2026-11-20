@@ -110,7 +110,6 @@ describe("Netcraft v3 submission response", () => {
 		const provider: ProviderSubmissionProvider = {
 			definition: NETCRAFT_PROVIDER,
 			prepareSubmission: prepareNetcraftSubmission,
-			shouldRefreshStartingPayload: (context) => context.payload.providerNarrativeVersion !== 1,
 			submit: async (context) => submitNetcraftSubmission(context, {
 				fetch: async (input, init) => {
 					requestUrl = String(input);

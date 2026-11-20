@@ -1,16 +1,9 @@
-import { hashStableJson } from "../../security";
 import { NETCRAFT_REPORT_URLS_URL, NETCRAFT_SUBMISSION_URL_PREFIX } from "../../../netcraft/api";
-import type { ProviderSubmissionDefinition } from "../submission_contracts";
+import { definePinned } from "../kit/pin";
 
 /** Code-owned contract for Netcraft Reporting API v3 URL submissions. */
-export type NetcraftProviderDefinition = ProviderSubmissionDefinition & {
-	reportUrlsUrl: string;
-	submissionUrlPrefix: string;
-	maximumUrlsPerSubmission: number;
-	maximumReasonLength: number;
-};
 
-const definitionWithoutHash = {
+export const NETCRAFT_PROVIDER = definePinned({
 	key: "netcraft",
 	displayName: "Netcraft",
 	version: "2026-10-27.1",
@@ -24,9 +17,6 @@ const definitionWithoutHash = {
 	submissionUrlPrefix: NETCRAFT_SUBMISSION_URL_PREFIX,
 	maximumUrlsPerSubmission: 1_000,
 	maximumReasonLength: 10_000,
-};
-
-export const NETCRAFT_PROVIDER: NetcraftProviderDefinition = Object.freeze({
-	...definitionWithoutHash,
-	contentHash: hashStableJson(definitionWithoutHash),
 });
+
+export type NetcraftProviderDefinition = typeof NETCRAFT_PROVIDER;

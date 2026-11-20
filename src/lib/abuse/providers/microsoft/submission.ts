@@ -1,17 +1,12 @@
-import { routeContext } from "../../worker/shared";
 import { asRecord } from "../../../values";
-import { abuseEmailCaseUrl, hostingAddressLine } from "../../mail/draft";
-import { providerDefinitionMatchesPin } from "../definition";
 import { emailOriginOf } from "../email_origin";
-import { providerResponseId, reportReference } from "../report_reference";
-import {
-	ProviderSubmissionRejectedError,
-	type ProviderSubmissionContext,
-	type ProviderSubmissionPreparation,
-	type ProviderSubmissionSuccess,
-} from "../submission_contracts";
+import { createDraft, reportInputOf, type RouteData } from "../kit/draft";
+import { deadline, failUnlessFiled } from "../kit/http";
+import { snippet } from "../kit/text";
+import type { ProviderSubmissionContext, ProviderSubmissionSuccess } from "../submission_contracts";
+import { providerResponseId } from "../report_reference";
 import { MICROSOFT_PROVIDER } from "./definition";
-import { buildMicrosoftSubmissionPayload, microsoftRequestBody, storedMicrosoftSubmissionPayload, type MicrosoftReportInput, type MicrosoftSubmissionPayload } from "./payload";
+import { buildMicrosoftSubmissionPayload, microsoftRequestBody, storedMicrosoftSubmissionPayload, type MicrosoftReportInput } from "./payload";
 
 export type MicrosoftSubmissionDependencies = {
 	fetch?: (url: string, init: RequestInit) => Promise<Response>;
@@ -19,61 +14,31 @@ export type MicrosoftSubmissionDependencies = {
 	now?: () => Date;
 };
 
-type Context = Awaited<ReturnType<typeof routeContext>>;
-
 /** The report's inputs; an IP target that sent a phishing email also carries that email's origin. */
-async function reportInput({ route, report, target, evidenceArtifacts }: Context): Promise<MicrosoftReportInput> {
+async function reportInput(data: RouteData): Promise<MicrosoftReportInput> {
+	const { target, evidenceArtifacts, report } = data;
 	const emailOrigin = target.observedUrls.length === 0 ? await emailOriginOf({ target, evidenceArtifacts }) : undefined;
-	const hostingLine = hostingAddressLine(route);
-	const caseUrl = abuseEmailCaseUrl(report.submissionId);
-	return {
-		target: target.normalizedTarget,
-		observedUrls: target.observedUrls,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		legalBrandUrl: report.legalBrandUrl,
-		reference: reportReference(report.id, route.id),
-		capturedAt: report.createdAt,
-		...(emailOrigin ? { emailOrigin } : {}),
-		...(caseUrl ? { caseUrl } : {}),
-		...(hostingLine ? { hostingLine } : {}),
-	};
+	return { ...reportInputOf(data), capturedAt: report.createdAt, ...(emailOrigin ? { emailOrigin } : {}) };
 }
 
-function routeIsOurs(route: Context["route"]): boolean {
-	return route.routeType === "provider_submission" && route.providerRegistryKey === MICROSOFT_PROVIDER.key
-		&& providerDefinitionMatchesPin(MICROSOFT_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash);
-}
+const draft = createDraft({
+	definition: MICROSOFT_PROVIDER,
+	label: "Microsoft",
+	reasonPrefix: "microsoft",
+	targetTypes: ["domain", "ip"],
+	targetReason: "microsoft_requires_a_web_target",
+	read: storedMicrosoftSubmissionPayload,
+	input: reportInput,
+	// An address no page was observed on, and no email came from, is not a site: nothing to report to MSRC.
+	admit: (data, input) => data.target.targetType === "ip" && !input.emailOrigin && data.target.observedUrls.length === 0 ? "microsoft_requires_an_observed_url_or_the_phishing_email" : undefined,
+	build: buildMicrosoftSubmissionPayload,
+	targetOf: (payload) => payload.target.normalizedTarget,
+});
 
 /** Check the route and build the durable draft before any provider call. */
-export async function prepareMicrosoftSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation> {
-	const routeData = await routeContext(context.routeId);
-	if (!routeIsOurs(routeData.route)) return { outcome: "insufficient_evidence", reason: "microsoft_provider_definition_pin_mismatch" };
-	if (routeData.target.targetType !== "domain" && routeData.target.targetType !== "ip") return { outcome: "insufficient_evidence", reason: "microsoft_requires_a_web_target" };
-	const input = await reportInput(routeData);
-	// An address no page was observed on, and no email came from, is not a site: nothing to report to MSRC.
-	if (routeData.target.targetType === "ip" && !input.emailOrigin && routeData.target.observedUrls.length === 0) return { outcome: "insufficient_evidence", reason: "microsoft_requires_an_observed_url_or_the_phishing_email" };
-	const payload = buildMicrosoftSubmissionPayload(input);
-	if (!payload) return { outcome: "insufficient_evidence", reason: "microsoft_report_payload_invalid" };
-	return { outcome: "ready", payload };
-}
-
+export const prepareMicrosoftSubmission = (context: ProviderSubmissionContext) => draft.prepare(context);
 /** The stored draft, checked against its route and rebuilt from the current report. */
-export async function verifiedMicrosoftDraft(context: ProviderSubmissionContext): Promise<MicrosoftSubmissionPayload> {
-	const payload = storedMicrosoftSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted Microsoft submission payload is malformed.");
-	const routeData = await routeContext(context.routeId);
-	if (!routeIsOurs(routeData.route) || routeData.target.normalizedTarget !== payload.target.normalizedTarget) {
-		throw new Error("The persisted Microsoft payload no longer matches its route.");
-	}
-	const expected = buildMicrosoftSubmissionPayload(await reportInput(routeData));
-	if (!expected || JSON.stringify(expected) !== JSON.stringify(payload)) throw new Error("The persisted Microsoft payload no longer matches the report evidence.");
-	return payload;
-}
-
-function snippet(body: string): string {
-	return body.replace(/\s+/g, " ").trim().slice(0, 300);
-}
+export const verifiedMicrosoftDraft = async (context: ProviderSubmissionContext) => (await draft.verify(context)).payload;
 
 /**
  * File the report: the only work after the durable marker. HTTP 400 is the
@@ -85,7 +50,6 @@ function snippet(body: string): string {
 export async function submitMicrosoftSubmission(context: ProviderSubmissionContext, dependencies: MicrosoftSubmissionDependencies = {}): Promise<ProviderSubmissionSuccess> {
 	const payload = await verifiedMicrosoftDraft(context);
 	const send = dependencies.fetch ?? fetch;
-	const signal = AbortSignal.any([AbortSignal.timeout(MICROSOFT_PROVIDER.timeoutMs), ...(context.signal ? [context.signal] : [])]);
 	const response = await send(MICROSOFT_PROVIDER.endpoint, {
 		method: "POST",
 		headers: {
@@ -96,11 +60,10 @@ export async function submitMicrosoftSubmission(context: ProviderSubmissionConte
 			"request-id": crypto.randomUUID(),
 		},
 		body: JSON.stringify(microsoftRequestBody(payload, (dependencies.now ?? (() => new Date()))())),
-		signal,
+		signal: deadline(MICROSOFT_PROVIDER.timeoutMs, context.signal),
 	});
 	const text = await response.text();
-	if (response.status === 400) throw new ProviderSubmissionRejectedError(`Microsoft refused the report (HTTP 400): ${snippet(text)}`);
-	if (!response.ok) throw new Error(`Microsoft answered the report with HTTP ${response.status}: ${snippet(text)}`);
+	failUnlessFiled("Microsoft", response, snippet(text), [400]);
 	let answer: unknown;
 	try {
 		answer = text.trim() ? JSON.parse(text) : undefined;

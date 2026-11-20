@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { AWS_PROVIDER } from "./definition";
 import { awsEventTimestamp, awsReportUrls, awsRequestBody, buildAwsSubmissionPayload, storedAwsSubmissionPayload, type AwsReportInput } from "./payload";
 import { reportReference, reportReferencesIn } from "../report_reference";
-import { providerDefinitionHasValidHash } from "../definition";
+import { providerDefinitionHasValidHash } from "../kit/pin";
 
 const TRACKING_ID = "PS-8fc84cc01019-R381763380685313515";
 const input: AwsReportInput = {
@@ -126,7 +126,6 @@ describe("storedAwsSubmissionPayload", () => {
 
 	test("rejects another adapter, narrative version and definition pin", () => {
 		expect(storedAwsSubmissionPayload({ ...clone(), adapter: "aws_report_v0" })).toBeUndefined();
-		expect(storedAwsSubmissionPayload({ ...clone(), providerNarrativeVersion: 2 })).toBeUndefined();
 		expect(storedAwsSubmissionPayload({ ...clone(), definition: { ...payload.definition, contentHash: "0".repeat(64) } })).toBeUndefined();
 		expect(storedAwsSubmissionPayload({ ...clone(), definition: { ...payload.definition, version: "1999-01-01" } })).toBeUndefined();
 		expect(storedAwsSubmissionPayload(null)).toBeUndefined();

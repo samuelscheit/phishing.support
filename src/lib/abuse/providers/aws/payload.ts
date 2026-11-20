@@ -1,100 +1,81 @@
 import { isIP } from "node:net";
+import { z } from "zod";
 
-import { normalizePublicHost, normalizePublicHttpUrl } from "../../security";
-import { asRecord } from "../../../values";
+import { normalizePublicHost } from "../../security";
 import { emailOriginFactLines, type EmailOrigin } from "../email_origin";
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget, truncateProviderText } from "../report_payload";
+import type { ReportInput } from "../kit/draft";
+import { field, payloadEnvelope, storedReader } from "../kit/stored";
+import { composeFreeText, isReportUrl, providerNarrative, reportUrls, type UrlRules } from "../kit/text";
+import { truncateProviderText } from "../report_payload";
 import { isReportReference } from "../report_reference";
 import { AWS_PROVIDER } from "./definition";
 
-/** The durable, secret-free draft: the form values the submission sends, besides the time of filing. */
-export type AwsSubmissionPayload = {
-	adapter: "aws_report_v1";
-	providerNarrativeVersion: 1;
-	definition: { version: string; contentHash: string };
-	target: { normalizedTarget: string };
-	report: {
-		/** `web_content` for a site; `email` for the IP that sent a phishing email. */
-		abuseGroup: AwsAbuseGroup;
-		abuseType: string;
-		/** The sites; for an email, its links (none or up to ten). */
-		urls: string[];
-		trackingId: string;
-		comments: string;
-		/** `email` only: the message's header block, as the form's `email_header`. */
-		emailHeader?: string;
-	};
+const envelope = payloadEnvelope(AWS_PROVIDER, "aws_report_v1");
+/** The form splits its URL field on whitespace, so a URL with any would become two. */
+const URL_RULES: UrlRules = { maximumLength: AWS_PROVIDER.urlMaximumLength, maximum: AWS_PROVIDER.maximumUrls };
+const unmarked = (value: string) => !/[<>]/.test(value);
+
+const common = {
+	trackingId: z.string().refine((value) => isReportReference(value, AWS_PROVIDER.trackingIdMaximumLength)),
+	urls: z.array(field.url(URL_RULES.maximumLength)).max(AWS_PROVIDER.maximumUrls),
+	comments: field.text(AWS_PROVIDER.commentsMaximumLength).refine(unmarked),
 };
 
-type AwsAbuseGroup = typeof AWS_PROVIDER.abuseGroup | typeof AWS_PROVIDER.emailAbuseGroup;
+/** The durable, secret-free draft: the form values the submission sends, besides the time of filing. */
+const payloadSchema = z.object({
+	...envelope.shape,
+	target: z.object({ normalizedTarget: z.string() }),
+	report: z.discriminatedUnion("abuseGroup", [
+		/** A site; `urls` are its pages. */
+		z.object({
+			...common,
+			abuseGroup: z.literal(AWS_PROVIDER.abuseGroup),
+			abuseType: z.string().refine((type) => (Object.values(AWS_PROVIDER.abuseTypes) as readonly string[]).includes(type)),
+			urls: common.urls.min(1),
+			emailHeader: z.undefined().optional(),
+		}),
+		/** The IP that sent a phishing email: its links (none or up to ten) and the message's header block, as the form's `email_header`. */
+		z.object({
+			...common,
+			abuseGroup: z.literal(AWS_PROVIDER.emailAbuseGroup),
+			abuseType: z.literal(AWS_PROVIDER.emailAbuseType),
+			emailHeader: z.string().refine((header) => header.trim().length > 0 && header.length <= AWS_PROVIDER.emailHeaderMaximumLength && unmarked(header)),
+		}),
+	]),
+}).refine((payload) => payload.report.abuseGroup !== AWS_PROVIDER.emailAbuseGroup || isIP(payload.target.normalizedTarget));
 
-export type AwsReportInput = {
-	target: string;
-	observedUrls: readonly string[];
-	description: string;
-	allegationCategory?: string;
-	legalBrandUrl?: string | null;
-	/** The reference AWS quotes back in its mail. */
-	trackingId: string;
-	/** The page with the screenshots, since the form takes no files. */
-	caseUrl?: string;
-	/** `hostingAddressLine` of the route, when the target resolved to this hoster's address. */
-	hostingLine?: string;
+export type AwsSubmissionPayload = z.infer<typeof payloadSchema>;
+
+/** `trackingId` is the reference AWS quotes back in its mail; the case page holds the screenshots, since the form takes no files. */
+export type AwsReportInput = ReportInput & {
 	/** Set when the target is the IP that sent the phishing email, which has no observed URL of its own. */
 	emailOrigin?: EmailOrigin;
 };
-
-function validTrackingId(value: unknown): value is string {
-	return isReportReference(value, AWS_PROVIDER.trackingIdMaximumLength);
-}
-
-/** The form splits its URL field on whitespace, so a URL with any would become two. */
-function validUrl(value: unknown): value is string {
-	return typeof value === "string" && value.length > 0 && value.length <= AWS_PROVIDER.urlMaximumLength && !/\s/.test(value) && normalizePublicHttpUrl(value) === value;
-}
 
 /** The observed URLs the form can hold, in order; the host's root when none is. */
 export function awsReportUrls(target: string, observedUrls: readonly string[]): string[] | undefined {
 	const host = normalizePublicHost(target);
 	if (!host) return undefined;
-	const urls = new Set<string>();
-	for (const value of observedUrls) {
-		const url = normalizeObservedUrlForTarget(value, host);
-		if (url && validUrl(url)) urls.add(url);
-		if (urls.size >= AWS_PROVIDER.maximumUrls) break;
-	}
-	if (urls.size > 0) return [...urls];
 	// An address that was never observed serving a page is not a site: no root URL is made up for it.
-	if (isIP(host)) return undefined;
-	const root = normalizePublicHttpUrl(`https://${host.includes(":") ? `[${host}]` : host}/`);
-	return root && validUrl(root) ? [root] : undefined;
+	const urls = reportUrls(host, observedUrls, { ...URL_RULES, rootFallback: !isIP(host) });
+	return urls.length > 0 ? urls : undefined;
 }
 
 /**
  * The form replaces angle brackets with full-width ones, so none is sent. The
- * reference leads so that AWS's case mail quotes it; the form takes no files,
- * so the case page is where AWS finds the screenshots.
+ * reference leads so that AWS's case mail quotes it; the narrative ends with
+ * the preservation request, which is not repeated.
  */
 export function makeAwsComments(input: AwsReportInput, urls: readonly string[]): string | undefined {
-	const legalBrandUrl = input.legalBrandUrl ? normalizePublicHttpUrl(input.legalBrandUrl, { domainOnly: true }) : undefined;
-	const narrative = buildProviderReportNarrative({
+	return composeFreeText({
 		provider: "aws",
-		target: input.target,
-		observedUrls: urls,
-		description: input.description,
-		...(input.allegationCategory ? { allegationCategory: input.allegationCategory } : {}),
-		...(legalBrandUrl ? { legalBrandUrl } : {}),
-		maximumLength: AWS_PROVIDER.narrativeMaximumLength,
-	});
-	if (!narrative) return undefined;
-	const comments = [
-		`Reference: ${input.trackingId}`,
-		narrative,
-		input.hostingLine ? truncateProviderText(input.hostingLine, 600) : undefined,
-		// The narrative ends with the preservation request; it is not repeated.
-		input.caseUrl ? `Case details and screenshots: ${input.caseUrl}` : undefined,
-	].filter((part): part is string => !!part).join("\n\n").replace(/[<>]/g, " ");
-	return comments.length <= AWS_PROVIDER.commentsMaximumLength ? comments : undefined;
+		input,
+		urls,
+		limit: AWS_PROVIDER.commentsMaximumLength,
+		before: [`Reference: ${input.trackingId}`],
+		hostingLimit: 600,
+		narrative: { maximum: AWS_PROVIDER.narrativeMaximumLength },
+	})?.replace(/[<>]/g, " ");
 }
 
 /** The form's own sanitising of `email_header` and `comments` (`sanitizeAbuseInput`): markup, event handlers and `javascript:` are defused. */
@@ -120,7 +101,7 @@ export function awsEmailHeader(headers: string): string | undefined {
 
 /** The email's links the form can hold: valid, deduplicated, at most ten. */
 function awsEmailUrls(links: readonly string[]): string[] {
-	return [...new Set(links.filter(validUrl))].slice(0, AWS_PROVIDER.maximumUrls);
+	return [...new Set(links.filter((link) => isReportUrl(link, URL_RULES)))].slice(0, AWS_PROVIDER.maximumUrls);
 }
 
 /**
@@ -130,18 +111,8 @@ function awsEmailUrls(links: readonly string[]): string[] {
  */
 export function makeAwsEmailComments(input: AwsReportInput, origin: EmailOrigin, capturedAt: Date): string | undefined {
 	if (!isIP(input.target)) return undefined;
-	const legalBrandUrl = input.legalBrandUrl ? normalizePublicHttpUrl(input.legalBrandUrl, { domainOnly: true }) : undefined;
 	const links = awsEmailUrls(origin.links);
-	const narrative = buildProviderReportNarrative({
-		provider: "aws",
-		target: input.target,
-		observedUrls: links,
-		description: input.description,
-		...(input.allegationCategory ? { allegationCategory: input.allegationCategory } : {}),
-		...(legalBrandUrl ? { legalBrandUrl } : {}),
-		source: "email",
-		maximumLength: AWS_PROVIDER.narrativeMaximumLength,
-	});
+	const narrative = providerNarrative("aws", { ...input, observedUrls: links, source: "email" }, AWS_PROVIDER.narrativeMaximumLength);
 	if (!narrative) return undefined;
 	const maximum = AWS_PROVIDER.commentsMaximumLength;
 	const compose = (listed: readonly string[]) => [
@@ -165,9 +136,7 @@ function buildAwsEmailPayload(input: AwsReportInput, target: string, origin: Ema
 	const comments = makeAwsEmailComments({ ...input, target }, origin, capturedAt);
 	if (!emailHeader || !comments) return undefined;
 	return {
-		adapter: "aws_report_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: AWS_PROVIDER.version, contentHash: AWS_PROVIDER.contentHash },
+		...envelope.stamp,
 		target: { normalizedTarget: target },
 		report: {
 			abuseGroup: AWS_PROVIDER.emailAbuseGroup,
@@ -183,16 +152,14 @@ function buildAwsEmailPayload(input: AwsReportInput, target: string, origin: Ema
 /** `capturedAt` stands in for the hop's time when no Received header states one. */
 export function buildAwsSubmissionPayload(input: AwsReportInput & { capturedAt?: Date }): AwsSubmissionPayload | undefined {
 	const normalizedTarget = normalizePublicHost(input.target);
-	if (!normalizedTarget || !validTrackingId(input.trackingId)) return undefined;
+	if (!normalizedTarget || !isReportReference(input.trackingId, AWS_PROVIDER.trackingIdMaximumLength)) return undefined;
 	if (input.emailOrigin) return buildAwsEmailPayload(input, normalizedTarget, input.emailOrigin, input.capturedAt ?? new Date());
 	const urls = awsReportUrls(normalizedTarget, input.observedUrls);
 	if (!urls) return undefined;
 	const comments = makeAwsComments({ ...input, target: normalizedTarget }, urls);
 	if (!comments) return undefined;
 	return {
-		adapter: "aws_report_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: AWS_PROVIDER.version, contentHash: AWS_PROVIDER.contentHash },
+		...envelope.stamp,
 		target: { normalizedTarget },
 		report: {
 			abuseGroup: AWS_PROVIDER.abuseGroup,
@@ -205,35 +172,7 @@ export function buildAwsSubmissionPayload(input: AwsReportInput & { capturedAt?:
 }
 
 /** Read a stored draft: only the exact shape this adapter writes, for the pinned definition. */
-export function storedAwsSubmissionPayload(value: unknown): AwsSubmissionPayload | undefined {
-	const payload = asRecord(value);
-	const definition = asRecord(payload?.definition);
-	const target = asRecord(payload?.target);
-	const report = asRecord(payload?.report);
-	if (!payload || payload.adapter !== "aws_report_v1" || payload.providerNarrativeVersion !== 1
-		|| definition?.version !== AWS_PROVIDER.version || definition.contentHash !== AWS_PROVIDER.contentHash
-		|| typeof target?.normalizedTarget !== "string" || !report
-		|| !validTrackingId(report.trackingId)
-		|| !Array.isArray(report.urls) || report.urls.length > AWS_PROVIDER.maximumUrls || !report.urls.every(validUrl)
-		|| typeof report.comments !== "string" || report.comments.length === 0 || report.comments.length > AWS_PROVIDER.commentsMaximumLength || /[<>]/.test(report.comments)) return undefined;
-	const base = {
-		adapter: "aws_report_v1" as const,
-		providerNarrativeVersion: 1 as const,
-		definition: { version: AWS_PROVIDER.version, contentHash: AWS_PROVIDER.contentHash },
-		target: { normalizedTarget: target.normalizedTarget },
-	};
-	const common = { trackingId: report.trackingId, comments: report.comments };
-	const urls = [...report.urls as string[]];
-	if (report.abuseGroup === AWS_PROVIDER.emailAbuseGroup) {
-		const header = report.emailHeader;
-		if (report.abuseType !== AWS_PROVIDER.emailAbuseType || !isIP(target.normalizedTarget)
-			|| typeof header !== "string" || header.trim().length === 0 || header.length > AWS_PROVIDER.emailHeaderMaximumLength || /[<>]/.test(header)) return undefined;
-		return { ...base, report: { abuseGroup: AWS_PROVIDER.emailAbuseGroup, abuseType: AWS_PROVIDER.emailAbuseType, urls, ...common, emailHeader: header } };
-	}
-	const abuseTypes: readonly unknown[] = Object.values(AWS_PROVIDER.abuseTypes);
-	if (report.abuseGroup !== AWS_PROVIDER.abuseGroup || !abuseTypes.includes(report.abuseType) || urls.length === 0 || report.emailHeader !== undefined) return undefined;
-	return { ...base, report: { abuseGroup: AWS_PROVIDER.abuseGroup, abuseType: report.abuseType as string, urls, ...common } };
-}
+export const storedAwsSubmissionPayload = storedReader(payloadSchema);
 
 /** The form's timestamp: the time of filing, to the minute, in UTC. */
 export function awsEventTimestamp(now: Date): string {

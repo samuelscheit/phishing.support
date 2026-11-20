@@ -1,11 +1,5 @@
-import { providerDefinitionMatchesPin } from "../definition";
-import type {
-	ProviderSubmissionContext,
-	ProviderSubmissionPreparation,
-	ProviderSubmissionSuccess,
-} from "../submission_contracts";
-import { ProviderSubmissionRejectedError } from "../submission_contracts";
-import { routeContext } from "../../worker/shared";
+import { createDraft } from "../kit/draft";
+import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
 import {
 	NetcraftSubmissionRejectedError,
 	netcraftSubmissionUrl,
@@ -52,65 +46,34 @@ export async function parseNetcraftSubmissionResponse(
 	}
 }
 
-/** Validate target evidence and service identity before the irreversible request. */
-export async function prepareNetcraftSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation> {
-	const { route, report, target } = await routeContext(context.routeId);
-	if (route.routeType !== "provider_submission" || route.providerRegistryKey !== NETCRAFT_PROVIDER.key
-		|| target.targetType === "email") {
-		return { outcome: "insufficient_evidence", reason: "netcraft_requires_a_web_target" };
-	}
-	if (!providerDefinitionMatchesPin(NETCRAFT_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)) {
-		return { outcome: "insufficient_evidence", reason: "netcraft_provider_definition_pin_mismatch" };
-	}
-	const payload = buildNetcraftSubmissionPayload({
+const draft = createDraft({
+	definition: NETCRAFT_PROVIDER,
+	reasonPrefix: "netcraft",
+	targetTypes: ["domain", "ip", "service_account", "campaign"],
+	targetReason: "netcraft_requires_a_web_target",
+	read: storedNetcraftSubmissionPayload,
+	input: ({ report, target }, stored: NetcraftSubmissionPayload | undefined) => ({
 		target: target.normalizedTarget,
 		observedUrls: target.observedUrls,
 		description: report.description,
 		allegationCategory: report.allegationCategory,
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
-		reporterEmail: serviceIdentity.mailbox,
-	});
-	if (!payload) return { outcome: "insufficient_evidence", reason: "netcraft_requires_valid_observed_urls_and_report_data" };
-	return { outcome: "ready", payload };
-}
+		// The reporter was pinned before the marker: a changed configuration must not turn a prepared report into a different submission.
+		reporterEmail: stored?.report.reporterEmail ?? serviceIdentity.mailbox,
+	}),
+	build: buildNetcraftSubmissionPayload,
+	targetOf: (payload) => payload.target.normalizedTarget,
+});
+
+/** Validate target evidence and service identity before the irreversible request. */
+export const prepareNetcraftSubmission = draft.prepare;
 
 /** Submit one immutable Netcraft payload after generic execution marks its boundary. */
 export async function submitNetcraftSubmission(
 	context: ProviderSubmissionContext,
 	dependencies: NetcraftSubmissionDependencies = {},
 ): Promise<ProviderSubmissionSuccess> {
-	const payload = storedNetcraftSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted Netcraft submission payload is malformed.");
-	const { route, report, target } = await routeContext(context.routeId);
-	const routeStillMatches = route.routeType === "provider_submission"
-		&& route.providerRegistryKey === NETCRAFT_PROVIDER.key
-		&& providerDefinitionMatchesPin(NETCRAFT_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)
-		&& target.targetType !== "email"
-		&& target.normalizedTarget === payload.target.normalizedTarget
-		&& target.observedUrls.length === payload.target.observedUrls.length
-		&& target.observedUrls.every((url, index) => url === payload.target.observedUrls[index]);
-	if (!routeStillMatches) throw new Error("The persisted Netcraft payload no longer matches its route.");
-
-	// The reporter email was validated and pinned before the marker. Do not
-	// re-read configuration here: an operator changing it must not turn an
-	// already-prepared report into a different external submission.
-	const expected = buildNetcraftSubmissionPayload({
-		target: target.normalizedTarget,
-		observedUrls: payload.target.observedUrls,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
-		reporterEmail: payload.report.reporterEmail,
-	});
-	if (!expected
-		|| expected.report.reason !== payload.report.reason
-		|| expected.report.reporterEmail !== payload.report.reporterEmail
-		|| expected.target.normalizedTarget !== payload.target.normalizedTarget
-		|| expected.target.observedUrls.length !== payload.target.observedUrls.length
-		|| expected.target.observedUrls.some((url, index) => url !== payload.target.observedUrls[index])) {
-		throw new Error("The persisted Netcraft payload no longer matches the report evidence.");
-	}
-
+	const { payload } = await draft.verify(context);
 	const request: NetcraftFetch = dependencies.fetch ?? globalThis.fetch;
 	const response = await request(NETCRAFT_PROVIDER.reportUrlsUrl, {
 		method: "POST",

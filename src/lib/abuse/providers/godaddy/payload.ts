@@ -1,57 +1,40 @@
+import { z } from "zod";
+
 import { normalizeDomain, normalizePublicHttpUrl } from "../../security";
-import { asRecord } from "../../../values";
-import { buildProviderReportNarrative, extractedBrandName, normalizeObservedUrlForTarget, truncateProviderText } from "../report_payload";
+import type { ReportInput } from "../kit/draft";
+import { field, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
+import { composeFreeText, reportUrls, type UrlRules } from "../kit/text";
+import { extractedBrandName, truncateProviderText } from "../report_payload";
 import { isReportReference } from "../report_reference";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
 
-export type GoDaddyReportType = "PHISHING" | "MALWARE";
+const envelope = payloadEnvelope(PROVIDER, "godaddy_report_v1");
+const URL_RULES: UrlRules = { minimumLength: 4, maximumLength: 2048, maximum: PROVIDER.api.maximumUrls };
 
 /** The durable, secret-free draft: what either channel files, before the channel is chosen. */
-export type GoDaddySubmissionPayload = {
-	adapter: "godaddy_report_v1";
-	providerNarrativeVersion: 1;
-	definition: { version: string; contentHash: string };
-	target: { domain: string };
-	report: {
+const payloadSchema = z.object({
+	...envelope.shape,
+	target: z.object({ domain: field.domain }),
+	report: z.object({
 		/** The reference leading `info`; GoDaddy's mail quotes it. */
-		trackingId: string;
-		type: GoDaddyReportType;
+		trackingId: field.reference,
+		type: z.enum(["PHISHING", "MALWARE"]),
 		/** The impersonated brand (GoDaddy's `target`). */
-		brand: string;
+		brand: field.text(PROVIDER.brandMaximumLength),
 		/** One ticket each through the API; one form for all through the portal. */
-		urls: string[];
-		info: string;
+		urls: z.array(field.url(URL_RULES.maximumLength, URL_RULES.minimumLength)).min(1).max(PROVIDER.api.maximumUrls).refine((urls) => new Set(urls).size === urls.length),
+		info: field.text(PROVIDER.infoMaximumLength),
 		/** The case page (the API's `infoUrl`), when the report has one. */
-		caseUrl: string | null;
-	};
-};
+		caseUrl: field.url(URL_RULES.maximumLength, URL_RULES.minimumLength).nullable(),
+	}),
+}).refine((payload) => leadsWithReference(payload.report.info, payload.report.trackingId));
 
-export type GoDaddyReportInput = {
-	target: string;
-	observedUrls: readonly string[];
-	description: string;
-	allegationCategory?: string;
-	legalBrandUrl?: string | null;
-	trackingId: string;
-	caseUrl?: string;
-	hostingLine?: string;
-};
-
-function validUrl(value: unknown): value is string {
-	return typeof value === "string" && value.length >= 4 && value.length <= 2048 && !/\s/.test(value) && normalizePublicHttpUrl(value) === value;
-}
+export type GoDaddySubmissionPayload = z.infer<typeof payloadSchema>;
+export type GoDaddyReportType = GoDaddySubmissionPayload["report"]["type"];
+export type GoDaddyReportInput = ReportInput;
 
 /** The domain's observed URLs, in order, up to what GoDaddy tolerates per domain; the root page when none. */
-export function goDaddyReportUrls(domain: string, observedUrls: readonly string[]): string[] {
-	const urls: string[] = [];
-	for (const value of observedUrls) {
-		const url = normalizeObservedUrlForTarget(value, domain);
-		if (url && validUrl(url) && !urls.includes(url) && urls.length < PROVIDER.api.maximumUrls) urls.push(url);
-	}
-	if (urls.length > 0) return urls;
-	const root = normalizePublicHttpUrl(`https://${domain}/`);
-	return root && validUrl(root) ? [root] : [];
-}
+export const goDaddyReportUrls = (domain: string, observedUrls: readonly string[]) => reportUrls(domain, observedUrls, URL_RULES);
 
 /** The brand named in the report: the analysis' label, else the legal brand's host, else a neutral word. */
 export function goDaddyBrand(description: string, legalBrandUrl: string | null | undefined): string {
@@ -62,26 +45,15 @@ export function goDaddyBrand(description: string, legalBrandUrl: string | null |
 }
 
 /** The free text both channels carry: the reference leads, the narrative gets the rest. */
-export function makeGoDaddyInfo(input: GoDaddyReportInput, urls: readonly string[]): string | undefined {
-	const legalBrandUrl = input.legalBrandUrl ? normalizePublicHttpUrl(input.legalBrandUrl, { domainOnly: true }) : undefined;
-	const before = [`Reference: ${input.trackingId}`];
-	const after = [
-		input.hostingLine ? truncateProviderText(input.hostingLine, PROVIDER.hostingLineMaximumLength) : undefined,
-		input.caseUrl ? `Case details and screenshots: ${input.caseUrl}` : undefined,
-	].filter((part): part is string => !!part);
-	const room = PROVIDER.infoMaximumLength - [...before, ...after].reduce((sum, part) => sum + part.length, 0) - 2 * (before.length + after.length + 1);
-	if (room < PROVIDER.narrativeMinimumLength) return undefined;
-	const narrative = buildProviderReportNarrative({
-		provider: "godaddy",
-		target: input.target,
-		observedUrls: urls,
-		description: input.description,
-		...(input.allegationCategory ? { allegationCategory: input.allegationCategory } : {}),
-		...(legalBrandUrl ? { legalBrandUrl } : {}),
-		maximumLength: room,
-	});
-	return narrative ? [...before, narrative, ...after].join("\n\n") : undefined;
-}
+export const makeGoDaddyInfo = (input: GoDaddyReportInput, urls: readonly string[]) => composeFreeText({
+	provider: "godaddy",
+	input,
+	urls,
+	limit: PROVIDER.infoMaximumLength,
+	before: [`Reference: ${input.trackingId}`],
+	hostingLimit: PROVIDER.hostingLineMaximumLength,
+	narrative: { minimum: PROVIDER.narrativeMinimumLength },
+});
 
 export function buildGoDaddySubmissionPayload(input: GoDaddyReportInput): GoDaddySubmissionPayload | undefined {
 	const domain = normalizeDomain(input.target);
@@ -91,9 +63,7 @@ export function buildGoDaddySubmissionPayload(input: GoDaddyReportInput): GoDadd
 	const info = makeGoDaddyInfo({ ...input, target: domain }, urls);
 	if (!info) return undefined;
 	return {
-		adapter: "godaddy_report_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: PROVIDER.version, contentHash: PROVIDER.contentHash },
+		...envelope.stamp,
 		target: { domain },
 		report: {
 			trackingId: input.trackingId,
@@ -107,26 +77,4 @@ export function buildGoDaddySubmissionPayload(input: GoDaddyReportInput): GoDadd
 }
 
 /** Read a stored draft: only the exact shape this adapter writes, for the pinned definition. */
-export function storedGoDaddySubmissionPayload(value: unknown): GoDaddySubmissionPayload | undefined {
-	const payload = asRecord(value);
-	const definition = asRecord(payload?.definition);
-	const target = asRecord(payload?.target);
-	const report = asRecord(payload?.report);
-	if (!payload || payload.adapter !== "godaddy_report_v1" || payload.providerNarrativeVersion !== 1
-		|| definition?.version !== PROVIDER.version || definition.contentHash !== PROVIDER.contentHash
-		|| typeof target?.domain !== "string" || normalizeDomain(target.domain) !== target.domain
-		|| !report || !isReportReference(report.trackingId) || (report.type !== "PHISHING" && report.type !== "MALWARE")
-		|| typeof report.brand !== "string" || report.brand.length === 0 || report.brand.length > PROVIDER.brandMaximumLength
-		|| !Array.isArray(report.urls) || report.urls.length === 0 || report.urls.length > PROVIDER.api.maximumUrls
-		|| !report.urls.every(validUrl) || new Set(report.urls).size !== report.urls.length
-		|| typeof report.info !== "string" || report.info.length === 0 || report.info.length > PROVIDER.infoMaximumLength
-		|| !report.info.startsWith(`Reference: ${report.trackingId}\n`)
-		|| (report.caseUrl !== null && !validUrl(report.caseUrl))) return undefined;
-	return {
-		adapter: "godaddy_report_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: PROVIDER.version, contentHash: PROVIDER.contentHash },
-		target: { domain: target.domain },
-		report: { trackingId: report.trackingId, type: report.type, brand: report.brand, urls: [...report.urls], info: report.info, caseUrl: report.caseUrl },
-	};
-}
+export const storedGoDaddySubmissionPayload = storedReader(payloadSchema);

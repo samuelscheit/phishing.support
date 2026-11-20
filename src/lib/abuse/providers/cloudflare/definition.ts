@@ -1,14 +1,6 @@
-import { hashStableJson } from "../../security";
-import type { ProviderSubmissionDefinition } from "../submission_contracts";
+import { definePinned } from "../kit/pin";
 
-export type CloudflareProviderDefinition = ProviderSubmissionDefinition & {
-	apiBaseUrl: string;
-	reportType: "abuse_phishing";
-	dashboardUrl: string;
-	maximumJustificationLength: number;
-};
-
-const definitionWithoutHash = {
+export const CLOUDFLARE_PROVIDER = definePinned({
 	key: "cloudflare",
 	displayName: "Cloudflare Abuse",
 	version: "2026-10-23.1",
@@ -18,10 +10,8 @@ const definitionWithoutHash = {
 	reportType: "abuse_phishing" as const,
 	dashboardUrl: "https://dash.cloudflare.com",
 	maximumJustificationLength: 3_000,
-};
+});
 
 /** Reviewed API contract and route-selection metadata for Cloudflare. */
-export const CLOUDFLARE_PROVIDER: CloudflareProviderDefinition = Object.freeze({
-	...definitionWithoutHash,
-	contentHash: hashStableJson(definitionWithoutHash),
-});
+
+export type CloudflareProviderDefinition = typeof CLOUDFLARE_PROVIDER;

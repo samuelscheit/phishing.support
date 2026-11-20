@@ -1,87 +1,19 @@
-import type { AbuseArtifact } from "../../schema";
-import { normalizeDomain, registrableDomain } from "../../security";
+import { z } from "zod";
 
-import {
-	isIntactProviderEvidenceImageArtifact,
-	selectProviderEvidenceImageArtifact,
-	storedProviderEvidenceImageReference,
-	type ProviderEvidenceImageContract,
-	type ProviderEvidenceImageReference,
-} from "../evidence_image";
+import { normalizeDomain, registrableDomain } from "../../security";
+import { evidenceContract } from "../kit/evidence";
+import { field, payloadEnvelope, storedReader } from "../kit/stored";
+import { storedProviderEvidenceImageReference } from "../evidence_image";
 import { buildProviderReportNarrative } from "../report_payload";
 import { TENCENT_PROVIDER } from "./definition";
-import { asRecord } from "../../../values";
 
 const maximumExplanationLength = 400;
-export const TENCENT_EVIDENCE_CONTRACT = {
-	acceptedMimeTypes: [TENCENT_PROVIDER.evidence.requiredMimeType],
-	maximumBytes: TENCENT_PROVIDER.evidence.maximumBytes,
-	filenamePrefix: "tencent_report",
-} as const satisfies ProviderEvidenceImageContract<"image/png">;
+export const TENCENT_EVIDENCE_CONTRACT = evidenceContract("tencent_report", { acceptedMimeTypes: [TENCENT_PROVIDER.evidence.requiredMimeType], maximumBytes: TENCENT_PROVIDER.evidence.maximumBytes });
 
-export type TencentScreenshotReference = ProviderEvidenceImageReference<"image/png">;
-
-export type TencentSubmissionPayload = {
-	adapter: "tencent_cloud_dns_abuse_v1";
-	providerNarrativeVersion: 1;
-	definition: {
-		version: string;
-		contentHash: string;
-	};
-	target: {
-		normalizedTarget: string;
-		observedUrl: string;
-		registrableDomain: string;
-	};
-	report: {
-		/** The form's category option, pinned with the narrative. */
-		category: TencentAbuseCategory;
-		explanation: string;
-		legalBrandUrl?: string;
-	};
-	screenshot: TencentScreenshotReference;
-};
+const envelope = payloadEnvelope(TENCENT_PROVIDER, "tencent_cloud_dns_abuse_v1");
 
 /** The form's category options this service reports under; the form also offers Botnets, Pharming, Spam, Others. */
-type TencentAbuseCategory = "Phishing" | "Malware";
-
-function tencentCategory(allegationCategory: string | undefined): TencentAbuseCategory {
-	return allegationCategory === "malware" ? "Malware" : "Phishing";
-}
-
-/** Keep Tencent's small description field provider-specific and deterministic. */
-export function makeTencentExplanation(params: {
-	target?: string;
-	observedUrl?: string;
-	description: string;
-	allegationCategory?: string;
-	legalBrandUrl?: string;
-}): string | undefined {
-	return buildProviderReportNarrative({
-		provider: "tencent",
-		target: params.target,
-		observedUrls: params.observedUrl ? [params.observedUrl] : [],
-		description: params.description,
-		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
-		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
-		maximumLength: maximumExplanationLength,
-	});
-}
-
-/** Verify the artifact bytes as well as their immutable metadata before use. */
-export function isIntactTencentScreenshotArtifact(
-	artifact: Pick<AbuseArtifact, "kind" | "mimeType" | "sha256" | "size" | "blob">,
-): boolean {
-	return isIntactProviderEvidenceImageArtifact(artifact, TENCENT_EVIDENCE_CONTRACT);
-}
-
-/**
- * Tencent accepts one PNG screenshot. Select only a report-owned original
- * artifact whose bytes and immutable metadata still agree with its hash.
- */
-export function selectTencentScreenshotArtifact(artifacts: readonly AbuseArtifact[]): TencentScreenshotReference | undefined {
-	return selectProviderEvidenceImageArtifact(artifacts, TENCENT_EVIDENCE_CONTRACT);
-}
+const tencentCategory = (allegationCategory: string | undefined) => allegationCategory === "malware" ? "Malware" as const : "Phishing" as const;
 
 function observedUrlForTarget(value: string, target: string): { observedUrl: string; registrableDomain: string } | undefined {
 	let url: URL;
@@ -115,6 +47,44 @@ function validLegalBrandUrl(value: unknown): string | undefined {
 	}
 }
 
+/** The durable, secret-free draft: the form values the submission sends. */
+const payloadSchema = z.object({
+	...envelope.shape,
+	target: z.object({ normalizedTarget: field.domain, observedUrl: z.string(), registrableDomain: z.string() }),
+	report: z.object({
+		/** The form's category option, pinned with the narrative. */
+		category: z.enum(["Phishing", "Malware"]),
+		explanation: field.text(maximumExplanationLength),
+		legalBrandUrl: z.string().refine((url) => validLegalBrandUrl(url) === url).optional(),
+	}),
+	screenshot: field.evidence(TENCENT_EVIDENCE_CONTRACT),
+}).refine(({ target }) => {
+	const observed = observedUrlForTarget(target.observedUrl, target.normalizedTarget);
+	return observed?.observedUrl === target.observedUrl && observed.registrableDomain === target.registrableDomain;
+});
+
+export type TencentSubmissionPayload = z.infer<typeof payloadSchema>;
+export type TencentScreenshotReference = TencentSubmissionPayload["screenshot"];
+
+/** Keep Tencent's small description field provider-specific and deterministic. */
+export function makeTencentExplanation(params: {
+	target?: string;
+	observedUrl?: string;
+	description: string;
+	allegationCategory?: string;
+	legalBrandUrl?: string;
+}): string | undefined {
+	return buildProviderReportNarrative({
+		provider: "tencent",
+		target: params.target,
+		observedUrls: params.observedUrl ? [params.observedUrl] : [],
+		description: params.description,
+		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
+		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
+		maximumLength: maximumExplanationLength,
+	});
+}
+
 /** Create the durable, secret-free Tencent report draft before any provider call. */
 export function buildTencentSubmissionPayload(params: {
 	target: string;
@@ -122,7 +92,7 @@ export function buildTencentSubmissionPayload(params: {
 	description: string;
 	allegationCategory?: string;
 	legalBrandUrl?: string;
-	screenshot: TencentScreenshotReference;
+	screenshot: TencentScreenshotReference | null;
 }): TencentSubmissionPayload | undefined {
 	const normalizedTarget = normalizeDomain(params.target);
 	const observed = normalizedTarget ? observedUrlForTarget(params.observedUrl, normalizedTarget) : undefined;
@@ -133,14 +103,12 @@ export function buildTencentSubmissionPayload(params: {
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
 	});
-	if (!normalizedTarget || !observed || !explanation || !validTencentScreenshotReference(params.screenshot)) return undefined;
+	if (!normalizedTarget || !observed || !explanation || !params.screenshot || !storedProviderEvidenceImageReference(params.screenshot, TENCENT_EVIDENCE_CONTRACT)) return undefined;
 	const legalBrandUrl = validLegalBrandUrl(params.legalBrandUrl);
 	if (params.legalBrandUrl !== undefined && !legalBrandUrl) return undefined;
 
 	return {
-		adapter: "tencent_cloud_dns_abuse_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: TENCENT_PROVIDER.version, contentHash: TENCENT_PROVIDER.contentHash },
+		...envelope.stamp,
 		target: {
 			normalizedTarget,
 			observedUrl: observed.observedUrl,
@@ -151,40 +119,5 @@ export function buildTencentSubmissionPayload(params: {
 	};
 }
 
-function validTencentScreenshotReference(value: unknown): value is TencentScreenshotReference {
-	return storedProviderEvidenceImageReference(value, TENCENT_EVIDENCE_CONTRACT) !== undefined;
-}
-
 /** Read only a payload previously built by this provider before its submission marker. */
-export function storedTencentSubmissionPayload(value: unknown): TencentSubmissionPayload | undefined {
-	const payload = asRecord(value);
-	const definition = payload && asRecord(payload.definition);
-	const target = payload && asRecord(payload.target);
-	const report = payload && asRecord(payload.report);
-	if (!payload || payload.adapter !== "tencent_cloud_dns_abuse_v1" || payload.providerNarrativeVersion !== 1
-		|| !definition || definition.version !== TENCENT_PROVIDER.version || definition.contentHash !== TENCENT_PROVIDER.contentHash
-		|| !target || typeof target.normalizedTarget !== "string" || typeof target.observedUrl !== "string" || typeof target.registrableDomain !== "string"
-		|| !report || (report.category !== "Phishing" && report.category !== "Malware")
-		|| typeof report.explanation !== "string" || report.explanation.trim().length === 0
-		|| report.explanation.length > maximumExplanationLength
-		|| (report.legalBrandUrl !== undefined && !validLegalBrandUrl(report.legalBrandUrl))
-		|| !validTencentScreenshotReference(payload.screenshot)) {
-		return undefined;
-	}
-	const normalizedTarget = normalizeDomain(target.normalizedTarget);
-	const observed = normalizedTarget ? observedUrlForTarget(target.observedUrl, normalizedTarget) : undefined;
-	if (!normalizedTarget || normalizedTarget !== target.normalizedTarget || !observed
-		|| observed.observedUrl !== target.observedUrl || observed.registrableDomain !== target.registrableDomain) return undefined;
-	return {
-		adapter: "tencent_cloud_dns_abuse_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: TENCENT_PROVIDER.version, contentHash: TENCENT_PROVIDER.contentHash },
-		target: { normalizedTarget, observedUrl: observed.observedUrl, registrableDomain: observed.registrableDomain },
-		report: {
-			category: report.category,
-			explanation: report.explanation,
-			...(report.legalBrandUrl === undefined ? {} : { legalBrandUrl: report.legalBrandUrl as string }),
-		},
-		screenshot: payload.screenshot,
-	};
-}
+export const storedTencentSubmissionPayload = storedReader(payloadSchema);

@@ -9,7 +9,6 @@ import { fetchCloudflareCorrespondence, findCloudflareSubmission, prepareCloudfl
 export const cloudflareProvider: ProviderSubmissionProvider = {
 	definition: CLOUDFLARE_PROVIDER,
 	prepareSubmission: (context) => prepareCloudflareSubmission(context),
-	shouldRefreshStartingPayload: (context) => context.payload.adapter !== "cloudflare_abuse_api_v1" || context.payload.providerNarrativeVersion !== 1,
 	buildReportPreview: buildCloudflareReportPreview,
 	// Cloudflare's decision mail: "please send an email to abusereply@cloudflare.com with
 	// the report identification number included in the subject line".

@@ -1,39 +1,31 @@
 import { randomUUID } from "node:crypto";
 
 import { asRecord } from "../../../values";
-import { abuseEmailCaseUrl, hostingAddressLine } from "../../mail/draft";
-import { AbuseRepository } from "../../repository";
-import { routeContext } from "../../worker/shared";
-import { openBrowserForm, type BrowserFormField, type BrowserFormResponse, type BrowserFormSession } from "../browser_form";
-import { providerDefinitionMatchesPin } from "../definition";
-import { providerEvidenceImageArtifactMatches } from "../evidence_image";
-import { reportReference } from "../report_reference";
+import type { BrowserFormField, BrowserFormResponse, BrowserFormSession } from "../browser_form";
+import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { formOpener, preparedState, withPreflight } from "../kit/session";
+import { snippet } from "../kit/text";
 import {
 	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionContext,
 	type ProviderSubmissionPreflight,
-	type ProviderSubmissionPreparation,
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
 import { PUBLIC_DOMAIN_REGISTRY_PROVIDER as PROVIDER } from "./definition";
 import {
 	buildPublicDomainRegistrySubmissionPayload,
 	PUBLIC_DOMAIN_REGISTRY_EVIDENCE_CONTRACT,
-	selectPublicDomainRegistryEvidenceArtifact,
 	storedPublicDomainRegistrySubmissionPayload,
-	type PublicDomainRegistryReportInput,
 	type PublicDomainRegistrySubmissionPayload,
 } from "./payload";
 
-export type PublicDomainRegistryDependencies = {
+export type PublicDomainRegistryDependencies = RouteDeps & {
 	/** The browser on the form with the challenge passed; tests inject a fake. */
 	openForm?: (signal: AbortSignal | undefined) => Promise<BrowserFormSession>;
-	loadRouteContext?: typeof routeContext;
-	getArtifact?: typeof AbuseRepository.getArtifact;
+	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
 };
-
-type Context = Awaited<ReturnType<typeof routeContext>>;
 
 /** What the preflight leaves for the one request after the marker. */
 export type PublicDomainRegistryPreflightState = {
@@ -45,51 +37,21 @@ export type PublicDomainRegistryPreflightState = {
 	uploads: string[];
 };
 
-function reportInput({ route, report, target }: Context): PublicDomainRegistryReportInput {
-	const hostingLine = hostingAddressLine(route);
-	const caseUrl = abuseEmailCaseUrl(report.submissionId);
-	return {
-		target: target.normalizedTarget,
-		observedUrls: target.observedUrls,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		legalBrandUrl: report.legalBrandUrl,
-		trackingId: reportReference(report.id, route.id),
-		...(caseUrl ? { caseUrl } : {}),
-		...(hostingLine ? { hostingLine } : {}),
-	};
-}
-
-function routeIsOurs(route: Context["route"]): boolean {
-	return route.routeType === "provider_submission" && route.providerRegistryKey === PROVIDER.key
-		&& providerDefinitionMatchesPin(PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash);
-}
+const draft = createDraft({
+	definition: PROVIDER,
+	reasonPrefix: "publicdomainregistry",
+	targetTypes: ["domain"],
+	targetReason: "publicdomainregistry_requires_a_domain_target",
+	read: storedPublicDomainRegistrySubmissionPayload,
+	input: (data, stored?: PublicDomainRegistrySubmissionPayload) => ({ ...reportInputOf(data), evidence: evidenceReferenceOf(PUBLIC_DOMAIN_REGISTRY_EVIDENCE_CONTRACT, data.evidenceArtifacts, stored) }),
+	build: buildPublicDomainRegistrySubmissionPayload,
+	targetOf: (payload) => payload.target.domain,
+});
 
 /** Check the route and build the durable draft before any provider call. */
-export async function preparePublicDomainRegistrySubmission(context: ProviderSubmissionContext, dependencies: PublicDomainRegistryDependencies = {}): Promise<ProviderSubmissionPreparation> {
-	const routeData = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (!routeIsOurs(routeData.route)) return { outcome: "insufficient_evidence", reason: "publicdomainregistry_provider_definition_pin_mismatch" };
-	if (routeData.target.targetType !== "domain") return { outcome: "insufficient_evidence", reason: "publicdomainregistry_requires_a_domain_target" };
-	const payload = buildPublicDomainRegistrySubmissionPayload({ ...reportInput(routeData), evidence: selectPublicDomainRegistryEvidenceArtifact(routeData.evidenceArtifacts) ?? null });
-	return payload ? { outcome: "ready", payload } : { outcome: "insufficient_evidence", reason: "publicdomainregistry_report_payload_invalid" };
-}
-
+export const preparePublicDomainRegistrySubmission = draft.prepare;
 /** The stored draft, checked against its route and rebuilt from the current report around its stored screenshot. */
-export async function verifiedPublicDomainRegistryDraft(context: ProviderSubmissionContext, dependencies: PublicDomainRegistryDependencies = {}): Promise<{ payload: PublicDomainRegistrySubmissionPayload; routeData: Context }> {
-	const payload = storedPublicDomainRegistrySubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted PublicDomainRegistry submission payload is malformed.");
-	const routeData = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (!routeIsOurs(routeData.route) || routeData.target.normalizedTarget !== payload.target.domain) {
-		throw new Error("The persisted PublicDomainRegistry payload no longer matches its route.");
-	}
-	const expected = buildPublicDomainRegistrySubmissionPayload({ ...reportInput(routeData), evidence: payload.evidence });
-	if (!expected || JSON.stringify(expected) !== JSON.stringify(payload)) throw new Error("The persisted PublicDomainRegistry payload no longer matches the report evidence.");
-	return { payload, routeData };
-}
-
-function snippet(body: string): string {
-	return body.replace(/\s+/g, " ").trim().slice(0, 300);
-}
+export const verifiedPublicDomainRegistryDraft = draft.verify;
 
 /** The uploader's `{success, data: {path, file}}`: the path the feedback names the file by. */
 export function uploadedPath(answer: BrowserFormResponse): string {
@@ -123,23 +85,11 @@ function uploadFields(nonce: string, file: { filename: string; mimeType: string;
  * retry (the browser is closed first).
  */
 export async function preparePublicDomainRegistryExternalSubmission(context: ProviderSubmissionContext, dependencies: PublicDomainRegistryDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, routeData } = await verifiedPublicDomainRegistryDraft(context, dependencies);
-	let file: { filename: string; mimeType: string; base64: string } | undefined;
-	if (payload.evidence) {
-		const artifact = await (dependencies.getArtifact ?? AbuseRepository.getArtifact)(routeData.report.id, BigInt(payload.evidence.artifactId));
-		if (!artifact || !providerEvidenceImageArtifactMatches(payload.evidence, artifact, PUBLIC_DOMAIN_REGISTRY_EVIDENCE_CONTRACT)) {
-			throw new Error("The persisted PublicDomainRegistry evidence artifact no longer matches its immutable reference.");
-		}
-		file = { filename: payload.evidence.filename, mimeType: payload.evidence.mimeType, base64: Buffer.from(artifact.blob).toString("base64") };
-	}
-	const session = await (dependencies.openForm ?? ((signal) => openBrowserForm({
-		provider: PROVIDER.displayName,
-		operation: "publicdomainregistry-report",
-		url: PROVIDER.formUrl,
-		formSelector: PROVIDER.formSelector,
-		...(signal ? { signal } : {}),
-	})))(context.signal);
-	try {
+	const { payload, data } = await draft.verify(context, dependencies);
+	const file = payload.evidence
+		? (await loadEvidenceFile({ reference: payload.evidence, contract: PUBLIC_DOMAIN_REGISTRY_EVIDENCE_CONTRACT, reportId: data.report.id, label: "PublicDomainRegistry", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) })).file
+		: undefined;
+	return withPreflight(() => (dependencies.openForm ?? formOpener(PROVIDER, "publicdomainregistry-report", { url: PROVIDER.formUrl, formSelector: PROVIDER.formSelector }))(context.signal), async (session): Promise<PublicDomainRegistryPreflightState> => {
 		const uploads: string[] = [];
 		if (file) {
 			const nonce = await session.readGlobal(PROVIDER.uploadNonceGlobal);
@@ -152,12 +102,8 @@ export async function preparePublicDomainRegistryExternalSubmission(context: Pro
 		const missing = PROVIDER.requiredRenderedFields.filter((name) => !rendered.some(([field, value]) => field === name && typeof value === "string" && value !== ""));
 		if (missing.length > 0) throw new Error(`PublicDomainRegistry's form no longer renders ${missing.join(", ")}.`);
 		if (rendered.find(([name]) => name === "_wpcf7")?.[1] !== PROVIDER.formId) throw new Error("PublicDomainRegistry's phishing form is no longer Contact Form 7 form 643.");
-		const state: PublicDomainRegistryPreflightState = { session, token, rendered, uploads };
-		return { state, dispose: () => session.close() };
-	} catch (error) {
-		await session.close();
-		throw error;
-	}
+		return { session, token, rendered, uploads };
+	});
 }
 
 /** The feedback request's parts: the page's fields first, then the form's inputs. */
@@ -185,14 +131,15 @@ const NOTHING_FILED = new Set(["validation_failed", "aborted", "acceptance_missi
 export async function submitPublicDomainRegistrySubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
 	const payload = storedPublicDomainRegistrySubmissionPayload(context.payload);
 	if (!payload) throw new Error("The persisted PublicDomainRegistry submission payload is malformed.");
-	const state = preflight?.state as PublicDomainRegistryPreflightState | undefined;
-	if (!state?.session || typeof state.token !== "string" || !state.token || !Array.isArray(state.rendered) || !Array.isArray(state.uploads)) {
-		throw new Error("PublicDomainRegistry submission requires its prepared browser session and Turnstile token.");
-	}
+	const state = preparedState<PublicDomainRegistryPreflightState>(
+		preflight,
+		(prepared) => !!prepared.session && typeof prepared.token === "string" && !!prepared.token && Array.isArray(prepared.rendered) && Array.isArray(prepared.uploads),
+		"PublicDomainRegistry submission requires its prepared browser session and Turnstile token.",
+	);
 	const answer = await state.session.postForm(PROVIDER.feedbackUrl, feedbackFields(payload, state), PROVIDER.timeoutMs);
 	const json = asRecord(answer.json);
 	const status = typeof json?.status === "string" ? json.status : undefined;
-	const message = typeof json?.message === "string" ? json.message.replace(/\s+/g, " ").trim().slice(0, 300) : "";
+	const message = typeof json?.message === "string" ? snippet(json.message) : "";
 	if (status === "mail_sent") {
 		return {
 			confirmationId: payload.report.trackingId,

@@ -2,6 +2,8 @@
 import type { ProviderCorrespondence } from "../submission_contracts";
 import { ERANET_PROVIDER } from "./definition";
 import { asRecord } from "../../../values";
+import { jsonRecord } from "../kit/http";
+import { snippet } from "../kit/text";
 
 export type EranetFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -30,14 +32,9 @@ export async function fetchEranetCorrespondence(
 		...(context.signal ? { signal: context.signal } : {}),
 	});
 	const text = await response.text();
-	let body: Record<string, unknown> | undefined;
-	try {
-		body = asRecord(JSON.parse(text));
-	} catch {
-		body = undefined;
-	}
+	const body = jsonRecord(text);
 	const record = asRecord(body?.Data);
-	if (!response.ok || !record) throw new Error(`Eranet complaint lookup for ${context.confirmationId} failed with HTTP ${response.status}: ${text.slice(0, 300)}`);
+	if (!response.ok || !record) throw new Error(`Eranet complaint lookup for ${context.confirmationId} failed with HTTP ${response.status}: ${snippet(text)}`);
 	if (record.order_no !== context.confirmationId) throw new Error(`Eranet answered the lookup for ${context.confirmationId} with another complaint.`);
 	const state = typeof record.status === "number" ? ERANET_STATES[record.status - 1] : undefined;
 	// The outcome once processed; while Eranet waits on us, what it asks for.

@@ -1,37 +1,44 @@
 import { isIP } from "node:net";
+import { z } from "zod";
 
-import { domainMatchesOrIsSubdomain, normalizePublicHost, normalizePublicHttpUrl } from "../../security";
-
+import { domainMatchesOrIsSubdomain, normalizePublicHost } from "../../security";
 import { utcStamp, type EmailOrigin } from "../email_origin";
+import { field, payloadEnvelope, storedReader } from "../kit/stored";
 import { buildProviderReportNarrative, normalizeObservedUrlForTarget, truncateProviderText } from "../report_payload";
 import { GOOGLE_CLOUD_PROVIDER, GOOGLE_CLOUD_SERVICES, type GoogleCloudService } from "./definition";
-import { asRecord } from "../../../values";
 
-export type GoogleCloudSubmissionPayload = {
-	adapter: "google_cloud_abuse_report_v1";
-	providerNarrativeVersion: 1;
-	definition: {
-		version: string;
-		contentHash: string;
-	};
-	target: {
-		normalizedTarget: string;
-		observedUrls: string[];
-	};
+const envelope = payloadEnvelope(GOOGLE_CLOUD_PROVIDER, "google_cloud_abuse_report_v1");
+
+const isoTime = z.string().refine((at) => Number.isFinite(Date.parse(at)) && new Date(at).toISOString() === at);
+
+/** The immutable form draft. */
+const payloadSchema = z.object({
+	...envelope.shape,
+	target: z.object({ normalizedTarget: z.string(), observedUrls: z.array(z.string()) }),
 	/** Set when the target is the IP that sent a phishing email, which has no observed URL of its own. */
-	emailOrigin?: {
+	emailOrigin: z.object({
 		/** The email's links, which are the abusive URLs. */
-		links: string[];
+		links: z.array(field.url(Number.MAX_SAFE_INTEGER)),
 		/** The UTC time the sending hop's Received header states. */
-		receivedAt?: string;
-	};
-	report: {
-		service: GoogleCloudService;
+		receivedAt: isoTime.optional(),
+	}).optional(),
+	report: z.object({
+		service: z.enum(GOOGLE_CLOUD_SERVICES),
 		/** MM/DD/YYYY, the form's own date format, in UTC. */
-		abuseDate: string;
-		abuseDetails: string;
-	};
-};
+		abuseDate: z.string().regex(/^\d{2}\/\d{2}\/\d{4}$/),
+		abuseDetails: field.text(GOOGLE_CLOUD_PROVIDER.abuseDetailsMaximumLength),
+	}),
+}).refine(({ target, emailOrigin, report }) => {
+	const { normalizedTarget, observedUrls } = target;
+	return normalizePublicHost(normalizedTarget) === normalizedTarget
+		// A draft names observed URLs, or is the origin of an email; never neither.
+		&& (!emailOrigin || isIP(normalizedTarget))
+		&& (observedUrls.length > 0 || emailOrigin !== undefined)
+		&& observedUrls.every((url) => normalizeObservedUrlForTarget(url, normalizedTarget) === url)
+		&& report.service === googleCloudServiceForTarget(normalizedTarget);
+});
+
+export type GoogleCloudSubmissionPayload = z.infer<typeof payloadSchema>;
 
 /** Hosts whose Google Cloud product is known from the name alone. */
 const SERVICE_BY_HOST: readonly { domain: string; service: GoogleCloudService }[] = [
@@ -58,7 +65,7 @@ export function googleCloudAbuseDate(capturedAt: Date): string {
 	return `${month}/${day}/${capturedAt.getUTCFullYear()}`;
 }
 
-type GoogleCloudReportInput = {
+export type GoogleCloudReportInput = {
 	target?: string;
 	observedUrls: readonly string[];
 	description: string;
@@ -164,9 +171,7 @@ export function buildGoogleCloudSubmissionPayload(params: GoogleCloudReportInput
 	const abuseDetails = makeGoogleCloudAbuseDetails({ ...params, target, observedUrls, ...(emailOrigin ? { emailOrigin } : {}) });
 	if (!abuseDetails) return undefined;
 	return {
-		adapter: "google_cloud_abuse_report_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: GOOGLE_CLOUD_PROVIDER.version, contentHash: GOOGLE_CLOUD_PROVIDER.contentHash },
+		...envelope.stamp,
 		target: { normalizedTarget: target, observedUrls },
 		...(emailOrigin ? { emailOrigin: { links: emailOrigin.links, ...(emailOrigin.received ? { receivedAt: emailOrigin.received.at.toISOString() } : {}) } } : {}),
 		report: {
@@ -177,47 +182,5 @@ export function buildGoogleCloudSubmissionPayload(params: GoogleCloudReportInput
 	};
 }
 
-function storedEmailOrigin(value: unknown, target: string): GoogleCloudSubmissionPayload["emailOrigin"] {
-	const origin = asRecord(value);
-	if (!origin || !isIP(target) || !Array.isArray(origin.links)) return undefined;
-	const links = origin.links as unknown[];
-	if (links.some((link) => typeof link !== "string" || normalizePublicHttpUrl(link) !== link)) return undefined;
-	const receivedAt = origin.receivedAt;
-	if (receivedAt !== undefined && (typeof receivedAt !== "string" || !Number.isFinite(Date.parse(receivedAt)) || new Date(receivedAt).toISOString() !== receivedAt)) return undefined;
-	return { links: links as string[], ...(typeof receivedAt === "string" ? { receivedAt } : {}) };
-}
-
 /** Read only an immutable draft produced by this provider. */
-export function storedGoogleCloudSubmissionPayload(value: unknown): GoogleCloudSubmissionPayload | undefined {
-	const payload = asRecord(value);
-	const definition = payload && asRecord(payload.definition);
-	const target = payload && asRecord(payload.target);
-	const report = payload && asRecord(payload.report);
-	if (!payload || payload.adapter !== "google_cloud_abuse_report_v1" || payload.providerNarrativeVersion !== 1
-		|| !definition || definition.version !== GOOGLE_CLOUD_PROVIDER.version || definition.contentHash !== GOOGLE_CLOUD_PROVIDER.contentHash
-		|| !target || typeof target.normalizedTarget !== "string" || !Array.isArray(target.observedUrls)
-		|| !report || !GOOGLE_CLOUD_SERVICES.includes(report.service as GoogleCloudService)
-		|| typeof report.abuseDate !== "string" || !/^\d{2}\/\d{2}\/\d{4}$/.test(report.abuseDate)
-		|| typeof report.abuseDetails !== "string" || report.abuseDetails.trim().length === 0
-		|| report.abuseDetails.length > GOOGLE_CLOUD_PROVIDER.abuseDetailsMaximumLength) {
-		return undefined;
-	}
-	const normalizedTarget = normalizePublicHost(target.normalizedTarget);
-	if (!normalizedTarget || normalizedTarget !== target.normalizedTarget) return undefined;
-	const emailOrigin = storedEmailOrigin(payload.emailOrigin, normalizedTarget);
-	if (payload.emailOrigin !== undefined && !emailOrigin) return undefined;
-	// A draft names observed URLs, or is the origin of an email; never neither.
-	if (target.observedUrls.length === 0 && !emailOrigin) return undefined;
-	const stored = target.observedUrls as unknown[];
-	const observedUrls = stored.map((url) => typeof url === "string" ? normalizeObservedUrlForTarget(url, normalizedTarget) : undefined);
-	if (observedUrls.some((url, index) => !url || url !== stored[index])) return undefined;
-	if (report.service !== googleCloudServiceForTarget(normalizedTarget)) return undefined;
-	return {
-		adapter: "google_cloud_abuse_report_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: GOOGLE_CLOUD_PROVIDER.version, contentHash: GOOGLE_CLOUD_PROVIDER.contentHash },
-		target: { normalizedTarget, observedUrls: observedUrls as string[] },
-		...(emailOrigin ? { emailOrigin } : {}),
-		report: { service: report.service as GoogleCloudService, abuseDate: report.abuseDate, abuseDetails: report.abuseDetails },
-	};
-}
+export const storedGoogleCloudSubmissionPayload = storedReader(payloadSchema);

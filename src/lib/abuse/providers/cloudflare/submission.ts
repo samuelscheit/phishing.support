@@ -1,13 +1,15 @@
-import type {
-	ProviderSubmissionContext,
-	ProviderSubmissionPreparation,
-	ProviderSubmissionSuccess,
-	ProviderSubmissionPreflight,
-} from "../submission_contracts";
-import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
-import { routeContext } from "../../worker/shared";
+import { z } from "zod";
 
-import type { ProviderCorrespondence } from "../submission_contracts";
+import { createDraft, type RouteDeps } from "../kit/draft";
+import { payloadEnvelope, storedReader } from "../kit/stored";
+import {
+	ProviderSubmissionNeedsHumanError,
+	ProviderSubmissionRejectedError,
+	type ProviderCorrespondence,
+	type ProviderSubmissionContext,
+	type ProviderSubmissionPreflight,
+	type ProviderSubmissionSuccess,
+} from "../submission_contracts";
 import {
 	cloudflareApiConfig,
 	cloudflareReceiptSuccess,
@@ -17,82 +19,75 @@ import {
 	type CloudflareApiFetch,
 	type CloudflareSessionProvider,
 } from "./api";
+import { CLOUDFLARE_PROVIDER } from "./definition";
+import { buildCloudflareReportPayload } from "./report";
 import { getCloudflareSession, type CloudflareSession } from "./session";
-import { buildCloudflareReportPayload, type CloudflareReportPayload } from "./report";
-import { asRecord } from "../../../values";
 
-type CloudflareSubmissionPayload = {
-	adapter: "cloudflare_abuse_api_v1";
-	providerNarrativeVersion: 1;
-	target: string;
-	report: CloudflareReportPayload;
-};
+const envelope = payloadEnvelope(CLOUDFLARE_PROVIDER, "cloudflare_abuse_api_v1");
+const aUrl = z.string().refine((value) => URL.canParse(value));
 
-export type CloudflareSubmissionDependencies = {
+/** The durable, secret-free draft: the dashboard API's form fields. */
+const payloadSchema = z.object({
+	...envelope.shape,
+	target: z.string().min(1),
+	report: z.object({
+		name: z.string(),
+		email: z.string(),
+		company: aUrl,
+		urls: aUrl,
+		justification: z.string(),
+		originalWork: z.string().optional(),
+		reportedCountry: z.string(),
+		reportedUserAgent: z.string().optional(),
+	}),
+});
+
+type CloudflareSubmissionPayload = z.infer<typeof payloadSchema>;
+export const storedCloudflareSubmissionPayload = storedReader(payloadSchema);
+
+export type CloudflareSubmissionDependencies = RouteDeps & {
 	fetch?: CloudflareApiFetch;
 	getSession?: CloudflareSessionProvider;
 	environment?: Readonly<Record<string, string | undefined>>;
 };
 
-function parseStoredPayload(value: Record<string, unknown>): CloudflareSubmissionPayload | undefined {
-	if (value.adapter !== "cloudflare_abuse_api_v1" || value.providerNarrativeVersion !== 1 || typeof value.target !== "string" || !value.target) return undefined;
-	const report = asRecord(value.report);
-	if (!report
-		|| typeof report.name !== "string"
-		|| typeof report.email !== "string"
-		|| typeof report.company !== "string"
-		|| typeof report.urls !== "string"
-		|| typeof report.justification !== "string"
-		|| typeof report.reportedCountry !== "string"
-		|| (report.originalWork !== undefined && typeof report.originalWork !== "string")
-		|| (report.reportedUserAgent !== undefined && typeof report.reportedUserAgent !== "string")) return undefined;
-	try {
-		new URL(report.urls);
-		new URL(report.company);
-	} catch {
-		return undefined;
-	}
-	return { adapter: "cloudflare_abuse_api_v1", providerNarrativeVersion: 1, target: value.target, report: report as unknown as CloudflareReportPayload };
-}
-
-/**
- * Build Cloudflare's immutable report before the durable provider marker.
- * Credentials are validated here too, so missing login settings are a retryable
- * configuration error rather than an ambiguous post-marker failure.
- */
-export async function prepareCloudflareSubmission(
-	context: ProviderSubmissionContext,
-	dependencies: CloudflareSubmissionDependencies = {},
-): Promise<ProviderSubmissionPreparation> {
-	const { report, target } = await routeContext(context.routeId);
-	if (report.allegationCategory !== "phishing" && report.allegationCategory !== "malware") {
-		throw new ProviderSubmissionRejectedError("Cloudflare's \"Phishing & Malware\" report can only receive phishing or malware allegations.");
-	}
-	if (target.targetType !== "domain") {
-		return { outcome: "insufficient_evidence", reason: "cloudflare_phishing_report_requires_domain_target" };
-	}
-	const observedUrl = target.observedUrls[0];
-	if (!observedUrl) return { outcome: "insufficient_evidence", reason: "cloudflare_phishing_report_requires_observed_url" };
-	cloudflareApiConfig(dependencies.environment);
-
-	return {
-		outcome: "ready",
-		payload: {
-			adapter: "cloudflare_abuse_api_v1",
-			providerNarrativeVersion: 1,
+const draft = createDraft({
+	definition: CLOUDFLARE_PROVIDER,
+	reasonPrefix: "cloudflare",
+	targetTypes: ["domain"],
+	targetReason: "cloudflare_phishing_report_requires_domain_target",
+	read: storedCloudflareSubmissionPayload,
+	input: ({ report, target }, stored: CloudflareSubmissionPayload | undefined, dependencies: CloudflareSubmissionDependencies) => {
+		if (report.allegationCategory !== "phishing" && report.allegationCategory !== "malware") {
+			throw new ProviderSubmissionRejectedError("Cloudflare's \"Phishing & Malware\" report can only receive phishing or malware allegations.");
+		}
+		const observedUrl = stored?.report.urls ?? target.observedUrls[0];
+		// Credentials are validated here too, so missing login settings are a retryable configuration error rather than an ambiguous post-marker failure.
+		if (!stored && observedUrl) cloudflareApiConfig(dependencies.environment);
+		return {
+			reportedCountry: report.requesterCountry,
 			target: target.normalizedTarget,
-			report: buildCloudflareReportPayload({
-				reportedCountry: report.requesterCountry,
-				target: target.normalizedTarget,
-				observedUrl,
-				description: report.description,
-				allegationCategory: report.allegationCategory,
-				legalBrandUrl: report.legalBrandUrl ?? undefined,
-				reportedUserAgent: report.reportedUserAgent ?? undefined,
-			}),
-		},
-	};
-}
+			observedUrl: observedUrl ?? "",
+			description: report.description,
+			allegationCategory: report.allegationCategory,
+			legalBrandUrl: report.legalBrandUrl ?? undefined,
+			reportedUserAgent: report.reportedUserAgent ?? undefined,
+		};
+	},
+	admit: (_data, input) => input.observedUrl ? undefined : "cloudflare_phishing_report_requires_observed_url",
+	// The report builder refuses what the form cannot take: no valid URL, brand or description.
+	build: (input) => {
+		try {
+			return { ...envelope.stamp, target: input.target, report: buildCloudflareReportPayload(input) };
+		} catch {
+			return undefined;
+		}
+	},
+	targetOf: (payload) => payload.target,
+});
+
+/** Build Cloudflare's immutable report before the durable provider marker. */
+export const prepareCloudflareSubmission = draft.prepare;
 
 /**
  * Login before the durable irreversible-call marker; session secrets stay
@@ -104,9 +99,10 @@ export async function prepareCloudflareExternalSubmission(
 	context: ProviderSubmissionContext,
 	dependencies: CloudflareSubmissionDependencies = {},
 ): Promise<ProviderSubmissionPreflight> {
-	if (!parseStoredPayload(context.payload)) {
+	if (!storedCloudflareSubmissionPayload(context.payload)) {
 		throw new ProviderSubmissionNeedsHumanError("The persisted Cloudflare provider payload is malformed; review the draft before submitting.");
 	}
+	await draft.verify(context, dependencies);
 	const config = cloudflareApiConfig(dependencies.environment);
 	return { state: await (dependencies.getSession ?? getCloudflareSession)(config, { signal: context.signal }) };
 }
@@ -117,8 +113,7 @@ export async function submitCloudflareSubmission(
 	dependencies: CloudflareSubmissionDependencies = {},
 	preflight?: ProviderSubmissionPreflight,
 ): Promise<ProviderSubmissionSuccess> {
-	const payload = parseStoredPayload(context.payload);
-	if (!payload) throw new Error("The persisted Cloudflare provider payload is malformed.");
+	const { payload } = await draft.verify(context, dependencies);
 	const prepared = preflight ?? await prepareCloudflareExternalSubmission(context, dependencies);
 	return submitCloudflareAbuseReport({
 		config: cloudflareApiConfig(dependencies.environment),
@@ -140,7 +135,7 @@ export async function findCloudflareSubmission(
 	context: ProviderSubmissionContext & { sentAt: Date },
 	dependencies: CloudflareSubmissionDependencies = {},
 ): Promise<ProviderSubmissionSuccess | undefined> {
-	const payload = parseStoredPayload(context.payload);
+	const payload = storedCloudflareSubmissionPayload(context.payload);
 	if (!payload) return undefined;
 	const config = cloudflareApiConfig(dependencies.environment);
 	const getSession = dependencies.getSession ?? getCloudflareSession;

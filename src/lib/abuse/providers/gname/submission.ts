@@ -1,31 +1,25 @@
 import type { Page } from "rebrowser-puppeteer-core";
 
 import { getBrowser } from "../../../browser";
-import { abuseEmailCaseUrl } from "../../mail/draft";
-import { AbuseRepository } from "../../repository";
+import { sleep } from "../../../sleep";
+import { asRecord } from "../../../values";
 import { dragSliderToEnd } from "../../captcha/slider_drag";
-import { routeContext } from "../../worker/shared";
-import { providerDefinitionMatchesPin } from "../definition";
-import { providerEvidenceImageArtifactMatches } from "../evidence_image";
+import { abuseEmailCaseUrl } from "../../mail/draft";
+import { createDraft, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { jsonRecord } from "../kit/http";
+import { preparedState, withPreflight } from "../kit/session";
+import { snippet } from "../kit/text";
 import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
-import type {
-	ProviderSubmissionContext,
-	ProviderSubmissionPreflight,
-	ProviderSubmissionPreparation,
-	ProviderSubmissionSuccess,
-} from "../submission_contracts";
-import { ProviderSubmissionRejectedError } from "../submission_contracts";
+import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { GNAME_PROVIDER, type GnameComplaintKind } from "./definition";
 import {
 	buildGnameSubmissionPayload,
 	gnameDomainEntry,
 	GNAME_EVIDENCE_CONTRACT,
-	selectGnameEvidenceArtifact,
 	storedGnameSubmissionPayload,
 	type GnameSubmissionPayload,
 } from "./payload";
-import { asRecord } from "../../../values";
-import { sleep } from "../../../sleep";
 
 /**
  * GNAME's API answers HTTP 200 with `code` 1 on success (sometimes the string
@@ -50,11 +44,10 @@ export type GnameSession = {
 	close(): Promise<void>;
 };
 
-export type GnameDependencies = {
+export type GnameDependencies = RouteDeps & {
 	openSession?: (kind: GnameComplaintKind) => Promise<GnameSession>;
 	readCode?: MailedCodeReader;
-	loadRouteContext?: typeof routeContext;
-	getArtifact?: typeof AbuseRepository.getArtifact;
+	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
 	now?: () => Date;
 };
 
@@ -72,13 +65,8 @@ function failure(response: GnameResponse): string {
 }
 
 function parsedResponse(path: string, status: number, text: string): GnameResponse {
-	let parsed: GnameResponse | undefined;
-	try {
-		parsed = asRecord(JSON.parse(text)) as GnameResponse | undefined;
-	} catch {
-		parsed = undefined;
-	}
-	if (status < 200 || status >= 300 || !parsed) throw new Error(`GNAME ${path} failed with HTTP ${status}: ${text.slice(0, 300)}`);
+	const parsed = jsonRecord(text) as GnameResponse | undefined;
+	if (status < 200 || status >= 300 || !parsed) throw new Error(`GNAME ${path} failed with HTTP ${status}: ${snippet(text)}`);
 	return parsed;
 }
 
@@ -183,37 +171,28 @@ async function openGnameBrowserSession(kind: GnameComplaintKind): Promise<GnameS
 	}
 }
 
-async function routeFor(context: ProviderSubmissionContext, dependencies: GnameDependencies) {
-	const loaded = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (loaded.route.routeType !== "provider_submission" || loaded.route.providerRegistryKey !== GNAME_PROVIDER.key || loaded.target.targetType !== "domain") {
-		throw new Error("GNAME reporting requires a domain target on its own route.");
-	}
-	return loaded;
-}
-
-/** Build the pinned draft before the marker; nothing is sent to GNAME here. */
-export async function prepareGnameSubmission(context: ProviderSubmissionContext, dependencies: GnameDependencies = {}): Promise<ProviderSubmissionPreparation> {
-	const { route, report, target, evidenceArtifacts } = await routeFor(context, dependencies);
-	if (!providerDefinitionMatchesPin(GNAME_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)) {
-		return { outcome: "insufficient_evidence", reason: "gname_provider_definition_pin_mismatch" };
-	}
-	const observedUrl = target.observedUrls[0];
-	if (!observedUrl) return { outcome: "insufficient_evidence", reason: "gname_requires_an_observed_url" };
-	// The imitated brand's site, or for a page that imitates none the case page holding the evidence.
-	const legalBrandUrl = report.legalBrandUrl ?? abuseEmailCaseUrl(report.submissionId);
-	if (!legalBrandUrl) return { outcome: "insufficient_evidence", reason: "gname_requires_a_reference_website" };
-	const evidence = selectGnameEvidenceArtifact(evidenceArtifacts);
-	if (!evidence) return { outcome: "insufficient_evidence", reason: "gname_requires_a_screenshot" };
-	const payload = buildGnameSubmissionPayload({
+const draft = createDraft({
+	definition: GNAME_PROVIDER,
+	reasonPrefix: "gname",
+	targetTypes: ["domain"],
+	targetReason: "gname_requires_a_domain_target",
+	read: storedGnameSubmissionPayload,
+	input: ({ report, target, evidenceArtifacts }, stored: GnameSubmissionPayload | undefined) => ({
 		target: target.normalizedTarget,
-		observedUrl,
+		observedUrl: stored?.target.observedUrl ?? target.observedUrls[0] ?? "",
 		description: report.description,
 		allegationCategory: report.allegationCategory,
-		legalBrandUrl,
-		evidence,
-	});
-	return payload ? { outcome: "ready", payload } : { outcome: "insufficient_evidence", reason: "gname_report_payload_invalid" };
-}
+		// The imitated brand's site, or for a page that imitates none the case page holding the evidence.
+		legalBrandUrl: report.legalBrandUrl ?? abuseEmailCaseUrl(report.submissionId) ?? "",
+		evidence: evidenceReferenceOf(GNAME_EVIDENCE_CONTRACT, evidenceArtifacts, stored),
+	}),
+	admit: (_data, input) => !input.observedUrl ? "gname_requires_an_observed_url" : !input.legalBrandUrl ? "gname_requires_a_reference_website" : !input.evidence ? "gname_requires_a_screenshot" : undefined,
+	build: buildGnameSubmissionPayload,
+	targetOf: (payload) => payload.target.domain,
+});
+
+/** Build the pinned draft before the marker; nothing is sent to GNAME here. */
+export const prepareGnameSubmission = draft.prepare;
 
 /**
  * Before the marker: upload the screenshot, pass the slider, and read the
@@ -221,29 +200,19 @@ export async function prepareGnameSubmission(context: ProviderSubmissionContext,
  * failure here is a safe retry.
  */
 export async function prepareGnameExternalSubmission(context: ProviderSubmissionContext, dependencies: GnameDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const payload = storedGnameSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted GNAME submission payload is malformed.");
-	const { report } = await routeFor(context, dependencies);
-	const artifact = await (dependencies.getArtifact ?? AbuseRepository.getArtifact)(report.id, BigInt(payload.evidence.artifactId));
-	if (!artifact || !providerEvidenceImageArtifactMatches(payload.evidence, artifact, GNAME_EVIDENCE_CONTRACT)) {
-		throw new Error("The persisted GNAME evidence artifact no longer matches its immutable reference.");
-	}
+	const { payload, data } = await draft.verify(context, dependencies);
+	const { bytes } = await loadEvidenceFile({ reference: payload.evidence, contract: GNAME_EVIDENCE_CONTRACT, reportId: data.report.id, label: "GNAME", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) });
 	const { lx } = GNAME_PROVIDER.complaintTypes[payload.report.kind];
-	const session = await (dependencies.openSession ?? openGnameBrowserSession)(payload.report.kind);
-	try {
-		const uploaded = await session.upload(lx, { filename: payload.evidence.filename, mimeType: payload.evidence.mimeType, base64: Buffer.from(artifact.blob).toString("base64") });
+	return withPreflight(() => (dependencies.openSession ?? openGnameBrowserSession)(payload.report.kind), async (session) => {
+		const uploaded = await session.upload(lx, { filename: payload.evidence.filename, mimeType: payload.evidence.mimeType, base64: bytes.toString("base64") });
 		const path = asRecord(uploaded.data)?.path;
 		if (!gnameSucceeded(uploaded) || typeof path !== "string" || !path) throw new Error(`GNAME screenshot upload failed: ${failure(uploaded)}`);
 		const requestedAt = (dependencies.now ?? (() => new Date()))();
 		const sent = await session.requestCode(GNAME_PROVIDER.reporter.email);
 		if (!gnameSucceeded(sent)) throw new Error(`GNAME did not send its verification code: ${failure(sent)}`);
 		const code = await (dependencies.readCode ?? mailedCodeReader(GNAME_PROVIDER.codeMail))(requestedAt, context.signal);
-		const state: GnamePreflightState = { session, code, pics: [path] };
-		return { state, dispose: () => session.close() };
-	} catch (error) {
-		await session.close();
-		throw error;
-	}
+		return { session, code, pics: [path] } satisfies GnamePreflightState;
+	});
 }
 
 /** `lyts_add`'s fields, as the form's submit handler sends them. */
@@ -270,13 +239,9 @@ function domainRefusals(data: unknown): string {
 }
 
 /** The one irreversible call: `lyts_add` with the pinned draft and the preflight's code and upload. */
-export async function submitGnameSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
-	const payload = storedGnameSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted GNAME submission payload is malformed.");
-	const state = preflight?.state as GnamePreflightState | undefined;
-	if (!state?.session || typeof state.code !== "string" || !state.code || !Array.isArray(state.pics) || state.pics.length === 0) {
-		throw new Error("GNAME submission requires a prepared verification code, an uploaded screenshot, and its browser session.");
-	}
+export async function submitGnameSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined, dependencies: GnameDependencies = {}): Promise<ProviderSubmissionSuccess> {
+	const { payload } = await draft.verify(context, dependencies);
+	const state = preparedState<GnamePreflightState>(preflight, (candidate) => !!candidate.session && typeof candidate.code === "string" && !!candidate.code && Array.isArray(candidate.pics) && candidate.pics.length > 0, "GNAME submission requires a prepared verification code, an uploaded screenshot, and its browser session.");
 	const created = await state.session.post("/request/lyts_add", gnameComplaintBody(payload, state.code, state.pics));
 	// GNAME names every refusal; a named refusal filed nothing.
 	if (!gnameSucceeded(created)) throw new ProviderSubmissionRejectedError(`GNAME rejected the report: ${failure(created)}${domainRefusals(created.data)}`);

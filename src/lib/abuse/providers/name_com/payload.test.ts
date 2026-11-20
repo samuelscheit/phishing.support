@@ -1,21 +1,19 @@
 import { describe, expect, test } from "bun:test";
 
-import { sha256Hex } from "../../security";
-import type { AbuseArtifact } from "../../schema";
+import { selectProviderEvidenceImageArtifact } from "../evidence_image";
+import { DESCRIPTION as description, PNG, pngArtifact as artifact } from "../kit/testing";
 import { reportReferencesIn } from "../report_reference";
 import { NAME_COM_PROVIDER as PROVIDER } from "./definition";
 import {
 	buildNameComSubmissionPayload,
 	nameComReportUrls,
-	selectNameComEvidenceArtifact,
+	NAME_COM_EVIDENCE_CONTRACT,
 	storedNameComSubmissionPayload,
 	type NameComReportInput,
 } from "./payload";
 
 const REFERENCE = "PS-8fc84cc01019-R7";
-const description = "The page asks visitors for a password, sign-in details, a verification code, or identity details.";
-const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32, 1)]);
-const artifact = (id: bigint, bytes = PNG, mimeType = "image/png") => ({ id, reportId: 1n, name: "shot.png", kind: "user_evidence_original", mimeType, sha256: sha256Hex(bytes), size: bytes.byteLength, blob: bytes, metadata: {}, createdAt: new Date() }) as unknown as AbuseArtifact;
+const select = (artifacts: Parameters<typeof selectProviderEvidenceImageArtifact>[0]) => selectProviderEvidenceImageArtifact(artifacts, NAME_COM_EVIDENCE_CONTRACT);
 
 function input(overrides: Partial<NameComReportInput> = {}): NameComReportInput {
 	return {
@@ -92,13 +90,13 @@ describe("complaint", () => {
 describe("screenshot", () => {
 	test("the first intact png/jpeg within 10 MB is selected; others are skipped", () => {
 		const oversized = Buffer.concat([PNG, Buffer.alloc(10_000_001)]);
-		expect(selectNameComEvidenceArtifact([artifact(1n, oversized), artifact(2n, Buffer.from("nope")), artifact(3n, PNG, "application/pdf"), artifact(4n)])?.artifactId).toBe("4");
-		expect(selectNameComEvidenceArtifact([])).toBeUndefined();
+		expect(select([artifact(1n, oversized), artifact(2n, Buffer.from("nope")), artifact(3n, PNG, "application/pdf"), artifact(4n)])?.artifactId).toBe("4");
+		expect(select([])).toBeUndefined();
 	});
 });
 
 describe("stored payload", () => {
-	const evidence = selectNameComEvidenceArtifact([artifact(9n)])!;
+	const evidence = select([artifact(9n)])!;
 	const stored = () => JSON.parse(JSON.stringify(buildNameComSubmissionPayload(input({ evidence }))!)) as Record<string, any>;
 
 	test("round-trips exactly, with or without a screenshot", () => {
@@ -112,7 +110,6 @@ describe("stored payload", () => {
 	test("anything else is refused", () => {
 		const mutations: Array<[string, (payload: Record<string, any>) => void]> = [
 			["adapter", (payload) => { payload.adapter = "other"; }],
-			["narrative version", (payload) => { payload.providerNarrativeVersion = 2; }],
 			["definition version", (payload) => { payload.definition.version = "old"; }],
 			["definition hash", (payload) => { payload.definition.contentHash = "0".repeat(64); }],
 			["domain not normalized", (payload) => { payload.target.domain = "Login-Example-Phish.com"; }],

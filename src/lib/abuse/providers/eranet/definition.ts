@@ -1,26 +1,5 @@
 import { serviceIdentity } from "../../../constants";
-import { hashStableJson } from "../../security";
-import type { MailedCodeSpec } from "../mailed_code";
-import type { ProviderSubmissionDefinition } from "../submission_contracts";
-
-export type EranetProviderDefinition = ProviderSubmissionDefinition & {
-	reportPageUrl: string;
-	apiBaseUrl: string;
-	/** The verification-code mail the form sends before it accepts a complaint. */
-	codeMail: MailedCodeSpec;
-	evidence: {
-		acceptedMimeTypes: readonly ["image/png", "image/jpeg", "image/gif"];
-		maximumBytes: number;
-		uploadType: "reportPageScreenshot";
-	};
-	maximumDescriptionLength: number;
-	/**
-	 * `contact` fills the form's required "Contact Information" field (sent as
-	 * `Phone`; empty is refused with `InvaildAbuseDomain.PhoneEmpty`). The
-	 * service has no phone line, so it names the service mailbox.
-	 */
-	reporter: { email: string; contactType: "E"; contact: string };
-};
+import { definePinned } from "../kit/pin";
 
 /**
  * Code-owned contract for Eranet's "Fraud & Phishing Report" form
@@ -30,7 +9,7 @@ export type EranetProviderDefinition = ProviderSubmissionDefinition & {
  * working abuse channel. The form mails a six-digit code to the reporter and
  * accepts the complaint only with it.
  */
-const definitionWithoutHash = {
+export const ERANET_PROVIDER = definePinned({
 	key: "eranet",
 	displayName: "Eranet Fraud & Phishing Report",
 	version: "2026-11-07.1",
@@ -39,6 +18,7 @@ const definitionWithoutHash = {
 	supplemental: false,
 	reportPageUrl: "https://www.eranet.com/panel/abuse/report/phishing-report/index",
 	apiBaseUrl: "https://www.eranet.com/api/domain/abuse",
+	/** The verification-code mail the form sends before it accepts a complaint. */
 	codeMail: {
 		provider: "Eranet",
 		senderDomains: ["noreply.eranet.com"],
@@ -53,14 +33,16 @@ const definitionWithoutHash = {
 		uploadType: "reportPageScreenshot" as const,
 	},
 	maximumDescriptionLength: 2_000,
+	/**
+	 * `contact` fills the form's required "Contact Information" field (sent as
+	 * `Phone`; empty is refused with `InvaildAbuseDomain.PhoneEmpty`). The
+	 * service has no phone line, so it names the service mailbox.
+	 */
 	reporter: {
 		email: serviceIdentity.mailbox,
 		contactType: "E" as const,
 		contact: serviceIdentity.mailbox,
 	},
-};
-
-export const ERANET_PROVIDER: EranetProviderDefinition = Object.freeze({
-	...definitionWithoutHash,
-	contentHash: hashStableJson(definitionWithoutHash),
 });
+
+export type EranetProviderDefinition = typeof ERANET_PROVIDER;

@@ -9,7 +9,6 @@ import { prepareEranetExternalSubmission, prepareEranetSubmission, submitEranetS
 export const eranetProvider: ProviderSubmissionProvider = {
 	definition: ERANET_PROVIDER,
 	prepareSubmission: prepareEranetSubmission,
-	shouldRefreshStartingPayload: (context) => context.payload.adapter !== "eranet_phishing_report_v1",
 	buildReportPreview: (context: ProviderReportPreviewContext) => makeEranetDescription({
 		target: context.target,
 		observedUrl: context.observedUrls[0],

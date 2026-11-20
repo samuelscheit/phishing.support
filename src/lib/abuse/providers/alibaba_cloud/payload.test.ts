@@ -1,15 +1,16 @@
+import { selectProviderEvidenceImageArtifact } from "../evidence_image";
 import { describe, expect, test } from "bun:test";
 
 import type { AbuseArtifact } from "../../schema";
 import { sha256Hex } from "../../security";
-import { providerDefinitionHasValidHash } from "../definition";
+import { providerDefinitionHasValidHash } from "../kit/pin";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import {
 	alibabaCloudSubmitParams,
 	alibabaReportObject,
 	buildAlibabaCloudSubmissionPayload,
 	makeAlibabaCloudReportReason,
-	selectAlibabaCloudScreenshot,
+	ALIBABA_CLOUD_EVIDENCE_CONTRACT,
 	storedAlibabaCloudSubmissionPayload,
 	type AlibabaCloudReportInput,
 	type AlibabaCloudSubmissionPayload,
@@ -22,7 +23,7 @@ function artifact(id: bigint, bytes: Buffer = PNG, overrides: Partial<AbuseArtif
 	return { id, reportId: 9n, name: "website.png", kind: "user_evidence_original", mimeType: "image/png", sha256: sha256Hex(bytes), size: bytes.byteLength, blob: bytes, metadata: {}, createdAt: new Date(), ...overrides } as unknown as AbuseArtifact;
 }
 
-const screenshot = selectAlibabaCloudScreenshot([artifact(77n)])!;
+const screenshot = selectProviderEvidenceImageArtifact([artifact(77n)], ALIBABA_CLOUD_EVIDENCE_CONTRACT)!;
 const description = "The page asks visitors for a password, sign-in details, a verification code, or identity details.";
 const target = "login-example-phish.com";
 const input: AlibabaCloudReportInput & { screenshot: typeof screenshot } = { target, observedUrls: [`https://${target}/signin`], description, allegationCategory: "phishing", legalBrandUrl: "https://www.examplebank.com/login", screenshot };
@@ -42,7 +43,8 @@ describe("Alibaba Cloud definition", () => {
 	});
 
 	test("a changed field changes the pinned hash", () => {
-		expect(providerDefinitionHasValidHash({ ...ALIBABA_CLOUD_PROVIDER, version: "changed" } as typeof ALIBABA_CLOUD_PROVIDER)).toBeFalse();
+		const changed = { ...ALIBABA_CLOUD_PROVIDER, version: "changed" };
+		expect(providerDefinitionHasValidHash(changed)).toBeFalse();
 	});
 });
 
@@ -50,17 +52,17 @@ describe("screenshot selection", () => {
 	test("takes the first intact PNG or JPEG original and names the file after artifact and hash", () => {
 		expect(screenshot).toMatchObject({ artifactId: "77", mimeType: "image/png", size: PNG.byteLength, sha256: sha256Hex(PNG) });
 		expect(screenshot.filename).toBe(`alibaba_cloud_report_77_${sha256Hex(PNG).slice(0, 12)}.png`);
-		expect(selectAlibabaCloudScreenshot([artifact(1n, JPEG, { mimeType: "image/jpeg" })])?.filename).toEndWith(".jpg");
-		expect(selectAlibabaCloudScreenshot([artifact(1n, PNG, { sha256: "0".repeat(64) }), artifact(2n)])?.artifactId).toBe("2");
+		expect(selectProviderEvidenceImageArtifact([artifact(1n, JPEG, { mimeType: "image/jpeg" })], ALIBABA_CLOUD_EVIDENCE_CONTRACT)?.filename).toEndWith(".jpg");
+		expect(selectProviderEvidenceImageArtifact([artifact(1n, PNG, { sha256: "0".repeat(64) }), artifact(2n)], ALIBABA_CLOUD_EVIDENCE_CONTRACT)?.artifactId).toBe("2");
 	});
 
 	test("refuses a GIF, a wrong signature, a derivative, an empty or oversized file", () => {
-		expect(selectAlibabaCloudScreenshot([])).toBeUndefined();
-		expect(selectAlibabaCloudScreenshot([artifact(1n, Buffer.from("GIF89a123"), { mimeType: "image/gif" })])).toBeUndefined();
-		expect(selectAlibabaCloudScreenshot([artifact(1n, Buffer.from("not an image"))])).toBeUndefined();
-		expect(selectAlibabaCloudScreenshot([artifact(1n, PNG, { kind: "derived" })])).toBeUndefined();
-		expect(selectAlibabaCloudScreenshot([artifact(1n, Buffer.alloc(0))])).toBeUndefined();
-		expect(selectAlibabaCloudScreenshot([artifact(1n, PNG, { size: PNG.byteLength + 1 })])).toBeUndefined();
+		expect(selectProviderEvidenceImageArtifact([], ALIBABA_CLOUD_EVIDENCE_CONTRACT)).toBeUndefined();
+		expect(selectProviderEvidenceImageArtifact([artifact(1n, Buffer.from("GIF89a123"), { mimeType: "image/gif" })], ALIBABA_CLOUD_EVIDENCE_CONTRACT)).toBeUndefined();
+		expect(selectProviderEvidenceImageArtifact([artifact(1n, Buffer.from("not an image"))], ALIBABA_CLOUD_EVIDENCE_CONTRACT)).toBeUndefined();
+		expect(selectProviderEvidenceImageArtifact([artifact(1n, PNG, { kind: "derived" })], ALIBABA_CLOUD_EVIDENCE_CONTRACT)).toBeUndefined();
+		expect(selectProviderEvidenceImageArtifact([artifact(1n, Buffer.alloc(0))], ALIBABA_CLOUD_EVIDENCE_CONTRACT)).toBeUndefined();
+		expect(selectProviderEvidenceImageArtifact([artifact(1n, PNG, { size: PNG.byteLength + 1 })], ALIBABA_CLOUD_EVIDENCE_CONTRACT)).toBeUndefined();
 	});
 });
 
@@ -111,7 +113,6 @@ describe("submission payload", () => {
 		const payload = build();
 		expect(payload).toMatchObject({
 			adapter: "alibaba_cloud_report_v1",
-			providerNarrativeVersion: 1,
 			definition: { version: ALIBABA_CLOUD_PROVIDER.version, contentHash: ALIBABA_CLOUD_PROVIDER.contentHash },
 			target: { normalizedTarget: target },
 			report: { typeReport: "Phishing Scams", reportDomainIp: `https://${target}/signin`, impactItem: "https://www.examplebank.com/login" },
@@ -162,7 +163,6 @@ describe("stored payload", () => {
 		const tampered: unknown[] = [
 			undefined, null, "payload", [], {},
 			{ ...payload, adapter: "other" },
-			{ ...payload, providerNarrativeVersion: 2 },
 			{ ...payload, definition: { ...payload.definition, version: "1999" } },
 			{ ...payload, definition: { ...payload.definition, contentHash: "0".repeat(64) } },
 			{ ...payload, definition: undefined },

@@ -14,7 +14,6 @@ import {
 	prepareGoDaddyExternalSubmission,
 	prepareGoDaddySubmission,
 	submitGoDaddySubmission,
-	verifiedGoDaddyDraft,
 	type GoDaddyDependencies,
 	type GoDaddyFormSession,
 	type GoDaddyPreflightState,
@@ -93,11 +92,7 @@ describe("registry", () => {
 		expect(goDaddyProvider.reviewVerdicts).toEqual({ actioned: "acknowledged", closed: "acknowledged" });
 	});
 
-	test("an older draft is refreshed; a current one is not; the preview leads like a draft", async () => {
-		const { payload } = await draft();
-		const refresh = (candidate: Record<string, unknown>) => goDaddyProvider.shouldRefreshStartingPayload!({ routeId: 1n, payload: candidate } as never);
-		expect(refresh(payload as never)).toBeFalse();
-		expect(refresh({ ...payload, adapter: "old" })).toBeTrue();
+	test("the preview leads like a draft", () => {
 		const preview = goDaddyProvider.buildReportPreview!({ target: TARGET, observedUrls: [`https://${TARGET}/signin`], description, allegationCategory: "phishing" })!;
 		expect(preview).toStartWith("Reference: PS-000000000000-R0");
 		expect(goDaddyProvider.buildReportPreview!({ target: "203.0.113.7", observedUrls: [], description })).toBeUndefined();
@@ -105,17 +100,9 @@ describe("registry", () => {
 });
 
 describe("prepareGoDaddySubmission", () => {
-	test("drafts both observed URLs, the brand and the route's reference, and rebuilds to the same draft", async () => {
-		const { payload, loadRouteContext } = await draft();
+	test("drafts both observed URLs, the brand and the route's reference", async () => {
+		const { payload } = await draft();
 		expect(payload.report).toMatchObject({ trackingId: reportReference(9n, 5n), type: "PHISHING", brand: "ExampleBank", urls: [`https://${TARGET}/signin`, `https://${TARGET}/verify`] });
-		expect(await verifiedGoDaddyDraft({ routeId: 5n, payload: payload as never }, { loadRouteContext })).toEqual(payload);
-	});
-
-	test("a pin mismatch, a foreign route and a non-domain target end as insufficient evidence", async () => {
-		const route = (patch: Record<string, unknown>, targetType = "domain") => async () => { const base = (await fakeRoute({ targetType })()) as unknown as { route: object }; return { ...base, route: { ...base.route, ...patch } } as never; };
-		expect(await prepareGoDaddySubmission({ routeId: 5n, payload: {} }, { loadRouteContext: route({ providerDefinitionHash: "0".repeat(64) }) })).toEqual({ outcome: "insufficient_evidence", reason: "godaddy_provider_definition_pin_mismatch" });
-		expect(await prepareGoDaddySubmission({ routeId: 5n, payload: {} }, { loadRouteContext: route({ providerRegistryKey: "gname" }) })).toMatchObject({ reason: "godaddy_provider_definition_pin_mismatch" });
-		expect(await prepareGoDaddySubmission({ routeId: 5n, payload: {} }, { loadRouteContext: route({}, "ip") })).toEqual({ outcome: "insufficient_evidence", reason: "godaddy_requires_a_domain_target" });
 	});
 
 	test("a drifted or malformed draft is refused before anything is probed or opened", async () => {

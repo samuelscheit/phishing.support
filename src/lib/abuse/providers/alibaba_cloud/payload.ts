@@ -1,39 +1,34 @@
-import type { AbuseArtifact } from "../../schema";
+import { z } from "zod";
+
 import { normalizePublicHost, normalizePublicHttpUrl } from "../../security";
-import { asRecord } from "../../../values";
-import {
-	selectProviderEvidenceImageArtifact,
-	storedProviderEvidenceImageReference,
-	type ProviderEvidenceImageContract,
-	type ProviderEvidenceImageReference,
-} from "../evidence_image";
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
+import { evidenceContract } from "../kit/evidence";
+import { field, payloadEnvelope, storedReader } from "../kit/stored";
+import { providerNarrative } from "../kit/text";
+import { storedProviderEvidenceImageReference } from "../evidence_image";
+import { normalizeObservedUrlForTarget } from "../report_payload";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 
-export const ALIBABA_CLOUD_EVIDENCE_CONTRACT = {
-	acceptedMimeTypes: ALIBABA_CLOUD_PROVIDER.evidence.acceptedMimeTypes,
-	maximumBytes: ALIBABA_CLOUD_PROVIDER.evidence.maximumBytes,
-	filenamePrefix: "alibaba_cloud_report",
-} as const satisfies ProviderEvidenceImageContract<"image/png" | "image/jpeg">;
+export const ALIBABA_CLOUD_EVIDENCE_CONTRACT = evidenceContract("alibaba_cloud_report", ALIBABA_CLOUD_PROVIDER.evidence);
 
-export type AlibabaCloudScreenshotReference = ProviderEvidenceImageReference<"image/png" | "image/jpeg">;
+const envelope = payloadEnvelope(ALIBABA_CLOUD_PROVIDER, "alibaba_cloud_report_v1");
 
 /** The durable, secret-free draft: exactly the form values the submission sends, besides the uploaded file's path. */
-export type AlibabaCloudSubmissionPayload = {
-	adapter: "alibaba_cloud_report_v1";
-	providerNarrativeVersion: 1;
-	definition: { version: string; contentHash: string };
-	target: { normalizedTarget: string };
-	report: {
-		typeReport: string;
+const payloadSchema = z.object({
+	...envelope.shape,
+	target: z.object({ normalizedTarget: z.string() }),
+	report: z.object({
+		typeReport: z.string().min(1),
 		/** "Report Object (URL/domain name/IP)": one item, at most 200 characters. */
-		reportDomainIp: string;
-		reportReason: string;
+		reportDomainIp: field.text(ALIBABA_CLOUD_PROVIDER.reportObjectMaximumLength),
+		reportReason: field.text(ALIBABA_CLOUD_PROVIDER.reportReasonMaximumLength),
 		/** "Victim (URL/domain name/IP)". */
-		impactItem: string;
-	};
-	screenshot: AlibabaCloudScreenshotReference;
-};
+		impactItem: z.string().min(1),
+	}),
+	screenshot: field.evidence(ALIBABA_CLOUD_EVIDENCE_CONTRACT),
+});
+
+export type AlibabaCloudSubmissionPayload = z.infer<typeof payloadSchema>;
+export type AlibabaCloudScreenshotReference = AlibabaCloudSubmissionPayload["screenshot"];
 
 export type AlibabaCloudReportInput = {
 	target: string;
@@ -59,32 +54,17 @@ export function alibabaReportObject(target: string, observedUrls: readonly strin
 }
 
 export function makeAlibabaCloudReportReason(input: AlibabaCloudReportInput): string | undefined {
-	const legalBrandUrl = input.legalBrandUrl ? normalizePublicHttpUrl(input.legalBrandUrl, { domainOnly: true }) : undefined;
-	return buildProviderReportNarrative({
-		provider: "alibaba_cloud",
-		target: input.target,
-		observedUrls: input.observedUrls,
-		description: input.description,
-		...(input.allegationCategory ? { allegationCategory: input.allegationCategory } : {}),
-		...(legalBrandUrl ? { legalBrandUrl } : {}),
-		maximumLength: ALIBABA_CLOUD_PROVIDER.reportReasonMaximumLength,
-	});
+	return providerNarrative("alibaba_cloud", input, ALIBABA_CLOUD_PROVIDER.reportReasonMaximumLength);
 }
 
-export function selectAlibabaCloudScreenshot(artifacts: readonly AbuseArtifact[]): AlibabaCloudScreenshotReference | undefined {
-	return selectProviderEvidenceImageArtifact(artifacts, ALIBABA_CLOUD_EVIDENCE_CONTRACT);
-}
-
-export function buildAlibabaCloudSubmissionPayload(input: AlibabaCloudReportInput & { screenshot: AlibabaCloudScreenshotReference }): AlibabaCloudSubmissionPayload | undefined {
+export function buildAlibabaCloudSubmissionPayload(input: AlibabaCloudReportInput & { screenshot: AlibabaCloudScreenshotReference | null }): AlibabaCloudSubmissionPayload | undefined {
 	const normalizedTarget = normalizePublicHost(input.target);
 	const reportDomainIp = normalizedTarget ? alibabaReportObject(normalizedTarget, input.observedUrls) : undefined;
 	const reportReason = makeAlibabaCloudReportReason(input);
-	if (!normalizedTarget || !reportDomainIp || !reportReason || !storedProviderEvidenceImageReference(input.screenshot, ALIBABA_CLOUD_EVIDENCE_CONTRACT)) return undefined;
+	if (!normalizedTarget || !reportDomainIp || !reportReason || !input.screenshot || !storedProviderEvidenceImageReference(input.screenshot, ALIBABA_CLOUD_EVIDENCE_CONTRACT)) return undefined;
 	const legalBrandUrl = input.legalBrandUrl ? normalizePublicHttpUrl(input.legalBrandUrl, { domainOnly: true }) : undefined;
 	return {
-		adapter: "alibaba_cloud_report_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: ALIBABA_CLOUD_PROVIDER.version, contentHash: ALIBABA_CLOUD_PROVIDER.contentHash },
+		...envelope.stamp,
 		target: { normalizedTarget },
 		report: {
 			typeReport: input.allegationCategory === "malware" ? ALIBABA_CLOUD_PROVIDER.reportTypes.malware : ALIBABA_CLOUD_PROVIDER.reportTypes.phishing,
@@ -97,32 +77,7 @@ export function buildAlibabaCloudSubmissionPayload(input: AlibabaCloudReportInpu
 }
 
 /** Read a stored draft: only the exact shape this adapter writes, for the pinned definition. */
-export function storedAlibabaCloudSubmissionPayload(value: unknown): AlibabaCloudSubmissionPayload | undefined {
-	const payload = asRecord(value);
-	const definition = asRecord(payload?.definition);
-	const target = asRecord(payload?.target);
-	const report = asRecord(payload?.report);
-	const screenshot = storedProviderEvidenceImageReference(payload?.screenshot, ALIBABA_CLOUD_EVIDENCE_CONTRACT);
-	if (!payload || payload.adapter !== "alibaba_cloud_report_v1" || payload.providerNarrativeVersion !== 1
-		|| definition?.version !== ALIBABA_CLOUD_PROVIDER.version || definition.contentHash !== ALIBABA_CLOUD_PROVIDER.contentHash
-		|| typeof target?.normalizedTarget !== "string" || !report || !screenshot
-		|| !["typeReport", "reportDomainIp", "reportReason", "impactItem"].every((field) => typeof report[field] === "string" && (report[field] as string).length > 0)
-		|| (report.reportDomainIp as string).length > ALIBABA_CLOUD_PROVIDER.reportObjectMaximumLength
-		|| (report.reportReason as string).length > ALIBABA_CLOUD_PROVIDER.reportReasonMaximumLength) return undefined;
-	return {
-		adapter: "alibaba_cloud_report_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: ALIBABA_CLOUD_PROVIDER.version, contentHash: ALIBABA_CLOUD_PROVIDER.contentHash },
-		target: { normalizedTarget: target.normalizedTarget },
-		report: {
-			typeReport: report.typeReport as string,
-			reportDomainIp: report.reportDomainIp as string,
-			reportReason: report.reportReason as string,
-			impactItem: report.impactItem as string,
-		},
-		screenshot,
-	};
-}
+export const storedAlibabaCloudSubmissionPayload = storedReader(payloadSchema);
 
 /** The SubmitReportTask parameters, as the form sends them for a website report. */
 export function alibabaCloudSubmitParams(payload: AlibabaCloudSubmissionPayload, evidenceFile: { fileName: string; filePath: string }, allowCrossRegion: boolean): Record<string, unknown> {

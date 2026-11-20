@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
 import type { AbuseArtifact } from "../../schema";
-import { providerDefinitionHasValidHash } from "../definition";
+import { isIntactProviderEvidenceImageArtifact, selectProviderEvidenceImageArtifact } from "../evidence_image";
+import { providerDefinitionHasValidHash } from "../kit/pin";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { TENCENT_PROVIDER } from "./definition";
 import {
 	buildTencentSubmissionPayload,
-	isIntactTencentScreenshotArtifact,
 	makeTencentExplanation,
-	selectTencentScreenshotArtifact,
+	TENCENT_EVIDENCE_CONTRACT,
 	storedTencentSubmissionPayload,
 } from "./payload";
-import { buildTencentCloudHttpPayload, parseTencentCloudSubmissionResponse } from "./submission";
+import { buildTencentCloudHttpPayload, parseTencentCaptchaSolution, parseTencentCloudSubmissionResponse } from "./submission";
 
 const screenshotBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9JH1EAAAAASUVORK5CYII=", "base64");
 
@@ -40,20 +40,19 @@ describe("Tencent Cloud abuse submission", () => {
 	});
 
 	test("selects only an intact PNG screenshot and sends the provider-required form fields", () => {
-		const screenshot = selectTencentScreenshotArtifact([screenshotArtifact()]);
+		const screenshot = selectProviderEvidenceImageArtifact([screenshotArtifact()], TENCENT_EVIDENCE_CONTRACT);
 		expect(screenshot).toBeDefined();
 		if (!screenshot) throw new Error("expected screenshot");
-		expect(isIntactTencentScreenshotArtifact(screenshotArtifact())).toBeTrue();
-		expect(selectTencentScreenshotArtifact([screenshotArtifact({ mimeType: "image/jpeg" })])).toBeUndefined();
-		expect(selectTencentScreenshotArtifact([screenshotArtifact({ sha256: "0".repeat(64) })])).toBeUndefined();
+		expect(isIntactProviderEvidenceImageArtifact(screenshotArtifact(), TENCENT_EVIDENCE_CONTRACT)).toBeTrue();
+		expect(selectProviderEvidenceImageArtifact([screenshotArtifact({ mimeType: "image/jpeg" })], TENCENT_EVIDENCE_CONTRACT)).toBeUndefined();
+		expect(selectProviderEvidenceImageArtifact([screenshotArtifact({ sha256: "0".repeat(64) })], TENCENT_EVIDENCE_CONTRACT)).toBeUndefined();
 		const alteredBytes = Buffer.from(screenshotBytes);
 		alteredBytes[0] = 0;
-		expect(isIntactTencentScreenshotArtifact(screenshotArtifact({ blob: alteredBytes, size: alteredBytes.byteLength }))).toBeFalse();
+		expect(isIntactProviderEvidenceImageArtifact(screenshotArtifact({ blob: alteredBytes, size: alteredBytes.byteLength }), TENCENT_EVIDENCE_CONTRACT)).toBeFalse();
 
 		const payload = buildTencentCloudHttpPayload({
 			payload: {
 				adapter: "tencent_cloud_dns_abuse_v1",
-				providerNarrativeVersion: 1,
 				definition: { version: TENCENT_PROVIDER.version, contentHash: TENCENT_PROVIDER.contentHash },
 				target: {
 					normalizedTarget: "login.phishing.example",
@@ -90,7 +89,7 @@ describe("Tencent Cloud abuse submission", () => {
 	});
 
 	test("round-trips the pinned provider-specific narrative without regenerating it from its own output", () => {
-		const screenshot = selectTencentScreenshotArtifact([screenshotArtifact()]);
+		const screenshot = selectProviderEvidenceImageArtifact([screenshotArtifact()], TENCENT_EVIDENCE_CONTRACT);
 		if (!screenshot) throw new Error("Expected an intact Tencent screenshot reference.");
 		const payload = buildTencentSubmissionPayload({
 			target: "phishing.example.com",
@@ -110,5 +109,14 @@ describe("Tencent Cloud abuse submission", () => {
 			.toThrow("Tencent Cloud abuse report submission returned malformed JSON.");
 		await expect(parseTencentCloudSubmissionResponse(new Response("upstream unavailable", { status: 502 }))).rejects
 			.toThrow("Tencent Cloud abuse report submission failed with HTTP 502");
+	});
+});
+
+describe("Tencent CAPTCHA solution", () => {
+	test("validates the exact Tencent token response", () => {
+		expect(parseTencentCaptchaSolution('{"ret":0,"ticket":"ticket-value","randstr":"abc"}')).toEqual({ ret: 0, ticket: "ticket-value", randstr: "abc" });
+		expect(() => parseTencentCaptchaSolution('{"ret":1}')).toThrow("Tencent CAPTCHA solving failed.");
+		expect(() => parseTencentCaptchaSolution('{"ret":0,"ticket":"ticket-value"}')).toThrow("Tencent CAPTCHA solving failed.");
+		expect(() => parseTencentCaptchaSolution("not json")).toThrow("Tencent CAPTCHA solver returned malformed JSON.");
 	});
 });

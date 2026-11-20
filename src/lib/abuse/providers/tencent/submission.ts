@@ -1,25 +1,20 @@
 import { fetch as proxyFetch } from "netbun";
 
-import { AbuseRepository } from "../../repository";
-import { providerDefinitionMatchesPin } from "../definition";
-import { providerEvidenceImageArtifactMatches } from "../evidence_image";
+import { captchaCredentialsPresent, solveCaptchaToken } from "../kit/captcha";
+import { createDraft, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
 import { getProviderProxy, type ProviderProxy } from "../proxy";
-import type {
-	ProviderSubmissionContext,
-	ProviderSubmissionPreparation,
-	ProviderSubmissionSuccess,
-} from "../submission_contracts";
-import { ProviderSubmissionRejectedError } from "../submission_contracts";
-import { routeContext } from "../../worker/shared";
-import { getTencentCaptchaCredentials, solveTencentCaptcha, type TencentCaptcha } from "./captcha";
+import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { TENCENT_PROVIDER } from "./definition";
 import {
 	buildTencentSubmissionPayload,
-	selectTencentScreenshotArtifact,
 	storedTencentSubmissionPayload,
 	TENCENT_EVIDENCE_CONTRACT,
 	type TencentSubmissionPayload,
 } from "./payload";
+
+/** Tencent's token CAPTCHA reply requires both ticket and randstr. */
+export type TencentCaptcha = { ret: 0; ticket: string; randstr: string; [key: string]: unknown };
 
 type TencentCloudSubmissionResponse = {
 	code: number;
@@ -33,7 +28,7 @@ type TencentCloudSubmissionResponse = {
 
 type TencentProxyFetch = (input: string | URL | Request, init?: RequestInit & { proxy: string }) => Promise<Response>;
 
-export type TencentSubmissionDependencies = {
+export type TencentSubmissionDependencies = RouteDeps & {
 	proxy?: () => ProviderProxy;
 	captchaSolver?: (proxy: ProviderProxy) => Promise<TencentCaptcha>;
 	fetch?: TencentProxyFetch;
@@ -126,82 +121,77 @@ export function buildTencentCloudHttpPayload(params: {
 	};
 }
 
-/**
- * Construct a provider-owned report draft before generic execution records an
- * irreversible submission marker. Configuration is intentionally validated
- * here so a missing proxy or DBC credential never turns into a false unknown
- * external state.
- */
-export async function prepareTencentSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation> {
-	const { route, report, target, evidenceArtifacts } = await routeContext(context.routeId);
-	if (route.routeType !== "provider_submission" || route.providerRegistryKey !== TENCENT_PROVIDER.key || target.targetType !== "domain") {
-		return { outcome: "insufficient_evidence", reason: "tencent_requires_a_domain_target" };
-	}
-	if (!providerDefinitionMatchesPin(TENCENT_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)) {
-		return { outcome: "insufficient_evidence", reason: "tencent_provider_definition_pin_mismatch" };
-	}
-	const observedUrl = target.observedUrls[0];
-	if (!observedUrl) return { outcome: "insufficient_evidence", reason: "tencent_requires_an_observed_url" };
-	const screenshot = selectTencentScreenshotArtifact(evidenceArtifacts);
-	if (!screenshot) return { outcome: "insufficient_evidence", reason: "tencent_requires_a_valid_png_screenshot" };
+const draft = createDraft({
+	definition: TENCENT_PROVIDER,
+	reasonPrefix: "tencent",
+	targetTypes: ["domain"],
+	targetReason: "tencent_requires_a_domain_target",
+	read: storedTencentSubmissionPayload,
+	// What the stored draft holds (its URL, its screenshot) is not reselected.
+	input: ({ report, target, evidenceArtifacts }, stored: TencentSubmissionPayload | undefined) => {
+		const observedUrl = stored?.target.observedUrl ?? target.observedUrls[0];
+		const screenshot = evidenceReferenceOf(TENCENT_EVIDENCE_CONTRACT, evidenceArtifacts, stored && { evidence: stored.screenshot });
+		// Both settings are runtime secrets: validated here, never kept in the stored payload, and only once the draft is otherwise possible.
+		if (!stored && observedUrl && screenshot) {
+			getProviderProxy("Tencent Cloud abuse reporting");
+			if (!captchaCredentialsPresent()) throw new Error("Tencent Cloud abuse reporting requires DEATHBYCAPTCHA_USERNAME and DEATHBYCAPTCHA_PASSWORD.");
+		}
+		return {
+			target: target.normalizedTarget,
+			observedUrl: observedUrl ?? "",
+			description: report.description,
+			allegationCategory: report.allegationCategory,
+			...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
+			screenshot,
+		};
+	},
+	admit: (_data, input) => !input.observedUrl ? "tencent_requires_an_observed_url" : !input.screenshot ? "tencent_requires_a_valid_png_screenshot" : undefined,
+	build: buildTencentSubmissionPayload,
+	targetOf: (payload) => payload.target.normalizedTarget,
+});
 
-	// Both settings are runtime secrets, so validate but never retain them in the
-	// payload that is stored with the provider run.
-	getProviderProxy("Tencent Cloud abuse reporting");
-	getTencentCaptchaCredentials();
-	const payload = buildTencentSubmissionPayload({
-		target: target.normalizedTarget,
-		observedUrl,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
-		screenshot,
-	});
-	if (!payload) return { outcome: "insufficient_evidence", reason: "tencent_report_payload_invalid" };
-	return { outcome: "ready", payload };
+/** Check the route and build the durable draft before any provider call; configuration problems surface here, never as a false unknown external state. */
+export const prepareTencentSubmission = draft.prepare;
+
+/** The stored draft, checked against its route and rebuilt from the current report; with its screenshot's bytes. */
+export async function verifiedTencentDraft(context: ProviderSubmissionContext, dependencies: RouteDeps = {}) {
+	const { payload, data } = await draft.verify(context, dependencies);
+	const { bytes } = await loadEvidenceFile({ reference: payload.screenshot, contract: TENCENT_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Tencent screenshot" });
+	return { payload, bytes };
 }
+
+/** Validate the exact token shape Tencent's form expects from the solver. */
+export function parseTencentCaptchaSolution(value: string): TencentCaptcha {
+	let result: unknown;
+	try {
+		result = JSON.parse(value);
+	} catch {
+		throw new Error("Tencent CAPTCHA solver returned malformed JSON.");
+	}
+	if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("Tencent CAPTCHA solver returned an invalid result.");
+	const captcha = result as Record<string, unknown>;
+	if (captcha.ret !== 0 || typeof captcha.ticket !== "string" || !captcha.ticket.trim() || typeof captcha.randstr !== "string" || !captcha.randstr.trim()) {
+		throw new Error("Tencent CAPTCHA solving failed.");
+	}
+	return captcha as TencentCaptcha;
+}
+
+/** The documented type-23 Tencent token flow through the proxy the form is filed from. */
+const solveTencentCaptcha = async (proxy: ProviderProxy, signal?: AbortSignal) => parseTencentCaptchaSolution(await solveCaptchaToken({
+	type: TENCENT_PROVIDER.captcha.type,
+	parametersField: "tencent_params",
+	parameters: { proxy: proxy.url, proxytype: proxy.captchaType, appid: TENCENT_PROVIDER.captcha.appId, pageurl: TENCENT_PROVIDER.reportPageUrl },
+}, signal));
 
 /** Perform the one Tencent provider request from the durable, pinned draft. */
 export async function submitTencentSubmission(
 	context: ProviderSubmissionContext,
 	dependencies: TencentSubmissionDependencies = {},
 ): Promise<ProviderSubmissionSuccess> {
-	const payload = storedTencentSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted Tencent submission payload is malformed.");
-	const { route, report, target } = await routeContext(context.routeId);
-	if (route.routeType !== "provider_submission" || route.providerRegistryKey !== TENCENT_PROVIDER.key
-		|| !providerDefinitionMatchesPin(TENCENT_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)
-		|| target.targetType !== "domain" || target.normalizedTarget !== payload.target.normalizedTarget
-		|| !target.observedUrls.includes(payload.target.observedUrl)) {
-		throw new Error("The persisted Tencent submission payload no longer matches its route.");
-	}
-	const expectedExplanation = payload.report.explanation;
-	const rebuilt = buildTencentSubmissionPayload({
-		target: target.normalizedTarget,
-		observedUrl: payload.target.observedUrl,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
-		screenshot: payload.screenshot,
-	});
-	if (!rebuilt || rebuilt.report.explanation !== expectedExplanation || rebuilt.report.category !== payload.report.category || rebuilt.report.legalBrandUrl !== payload.report.legalBrandUrl) {
-		throw new Error("The persisted Tencent submission draft no longer matches the report evidence.");
-	}
-
-	let screenshotId: bigint;
-	try {
-		screenshotId = BigInt(payload.screenshot.artifactId);
-	} catch {
-		throw new Error("The persisted Tencent screenshot artifact ID is invalid.");
-	}
-	const artifact = await AbuseRepository.getArtifact(report.id, screenshotId);
-	if (!artifact || !providerEvidenceImageArtifactMatches(payload.screenshot, artifact, TENCENT_EVIDENCE_CONTRACT)) {
-		throw new Error("The persisted Tencent screenshot artifact no longer matches its immutable reference.");
-	}
-
+	const { payload, bytes } = await verifiedTencentDraft(context, dependencies);
 	const proxy = (dependencies.proxy ?? (() => getProviderProxy("Tencent Cloud abuse reporting")))();
-	const captcha = await (dependencies.captchaSolver ?? ((candidate) => solveTencentCaptcha(candidate, { signal: context.signal })))(proxy);
-	const requestPayload = buildTencentCloudHttpPayload({ payload, websiteScreenshot: artifact.blob, captcha });
+	const captcha = await (dependencies.captchaSolver ?? ((candidate) => solveTencentCaptcha(candidate, context.signal)))(proxy);
+	const requestPayload = buildTencentCloudHttpPayload({ payload, websiteScreenshot: bytes, captcha });
 	const request = dependencies.fetch ?? (proxyFetch as TencentProxyFetch);
 	const response = await request(TENCENT_PROVIDER.submissionUrl, {
 		headers: {

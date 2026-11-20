@@ -1,41 +1,33 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { asRecord } from "../../../values";
-import { abuseEmailCaseUrl, hostingAddressLine } from "../../mail/draft";
-import { AbuseRepository } from "../../repository";
-import { routeContext } from "../../worker/shared";
-import { openBrowserForm, type BrowserFormField, type BrowserFormFile, type BrowserFormRequestSession, type BrowserFormResponse, type BrowserFormSession } from "../browser_form";
-import { providerDefinitionMatchesPin } from "../definition";
-import { providerEvidenceImageArtifactMatches } from "../evidence_image";
-import { reportReference } from "../report_reference";
+import type { BrowserFormField, BrowserFormFile, BrowserFormRequestSession, BrowserFormResponse, BrowserFormSession } from "../browser_form";
+import { createDraft, reportInputOf, type RouteData, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { formOpener, preparedState, withPreflight } from "../kit/session";
+import { snippet } from "../kit/text";
 import {
 	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionContext,
 	type ProviderSubmissionPreflight,
-	type ProviderSubmissionPreparation,
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
 import { NAME_COM_PROVIDER as PROVIDER } from "./definition";
 import {
 	buildNameComSubmissionPayload,
 	NAME_COM_EVIDENCE_CONTRACT,
-	selectNameComEvidenceArtifact,
 	storedNameComSubmissionPayload,
-	type NameComReportInput,
 	type NameComSubmissionPayload,
 } from "./payload";
 
 export type NameComSession = BrowserFormSession & BrowserFormRequestSession;
 
-export type NameComDependencies = {
+export type NameComDependencies = RouteDeps & {
 	/** The browser on the form with the challenge passed; tests inject a fake. */
 	openForm?: (signal: AbortSignal | undefined) => Promise<NameComSession>;
-	loadRouteContext?: typeof routeContext;
-	getArtifact?: typeof AbuseRepository.getArtifact;
+	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
 };
-
-type Context = Awaited<ReturnType<typeof routeContext>>;
 
 /** What the preflight leaves for the one request after the marker. */
 export type NameComPreflightState = {
@@ -46,51 +38,20 @@ export type NameComPreflightState = {
 	file: BrowserFormFile | null;
 };
 
-function reportInput({ route, report, target }: Context): NameComReportInput {
-	const hostingLine = hostingAddressLine(route);
-	const caseUrl = abuseEmailCaseUrl(report.submissionId);
-	return {
-		target: target.normalizedTarget,
-		observedUrls: target.observedUrls,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		legalBrandUrl: report.legalBrandUrl,
-		trackingId: reportReference(report.id, route.id),
-		...(caseUrl ? { caseUrl } : {}),
-		...(hostingLine ? { hostingLine } : {}),
-	};
-}
-
-function routeIsOurs(route: Context["route"]): boolean {
-	return route.routeType === "provider_submission" && route.providerRegistryKey === PROVIDER.key
-		&& providerDefinitionMatchesPin(PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash);
-}
+const draft = createDraft({
+	definition: PROVIDER,
+	reasonPrefix: "name_com",
+	targetTypes: ["domain"],
+	targetReason: "name_com_requires_a_domain_target",
+	read: storedNameComSubmissionPayload,
+	input: (data: RouteData, stored?: NameComSubmissionPayload) => ({ ...reportInputOf(data), evidence: evidenceReferenceOf(NAME_COM_EVIDENCE_CONTRACT, data.evidenceArtifacts, stored) }),
+	build: buildNameComSubmissionPayload,
+	targetOf: (payload) => payload.target.domain,
+});
 
 /** Check the route and build the durable draft before any provider call. */
-export async function prepareNameComSubmission(context: ProviderSubmissionContext, dependencies: NameComDependencies = {}): Promise<ProviderSubmissionPreparation> {
-	const routeData = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (!routeIsOurs(routeData.route)) return { outcome: "insufficient_evidence", reason: "name_com_provider_definition_pin_mismatch" };
-	if (routeData.target.targetType !== "domain") return { outcome: "insufficient_evidence", reason: "name_com_requires_a_domain_target" };
-	const payload = buildNameComSubmissionPayload({ ...reportInput(routeData), evidence: selectNameComEvidenceArtifact(routeData.evidenceArtifacts) ?? null });
-	return payload ? { outcome: "ready", payload } : { outcome: "insufficient_evidence", reason: "name_com_report_payload_invalid" };
-}
-
-/** The stored draft, checked against its route and rebuilt from the current report around its stored screenshot. */
-export async function verifiedNameComDraft(context: ProviderSubmissionContext, dependencies: NameComDependencies = {}): Promise<{ payload: NameComSubmissionPayload; routeData: Context }> {
-	const payload = storedNameComSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted Name.com submission payload is malformed.");
-	const routeData = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (!routeIsOurs(routeData.route) || routeData.target.normalizedTarget !== payload.target.domain) {
-		throw new Error("The persisted Name.com payload no longer matches its route.");
-	}
-	const expected = buildNameComSubmissionPayload({ ...reportInput(routeData), evidence: payload.evidence });
-	if (!expected || JSON.stringify(expected) !== JSON.stringify(payload)) throw new Error("The persisted Name.com payload no longer matches the report evidence.");
-	return { payload, routeData };
-}
-
-function snippet(body: string): string {
-	return body.replace(/\s+/g, " ").trim().slice(0, 300);
-}
+export const prepareNameComSubmission = draft.prepare;
+export const verifiedNameComDraft = draft.verify;
 
 /** The headers of Name.com's CSRF handshake: the token is the SHA-256 of `Start + Time + Start`. */
 export function csrfHandshakeHeaders(start: string, time: string, referrer: string): Record<string, string> {
@@ -124,23 +85,11 @@ export function captchaAccepted(answer: BrowserFormResponse): boolean {
  * ticket, so every failure is a safe retry (the browser is closed first).
  */
 export async function prepareNameComExternalSubmission(context: ProviderSubmissionContext, dependencies: NameComDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, routeData } = await verifiedNameComDraft(context, dependencies);
-	let file: BrowserFormFile | null = null;
-	if (payload.evidence) {
-		const artifact = await (dependencies.getArtifact ?? AbuseRepository.getArtifact)(routeData.report.id, BigInt(payload.evidence.artifactId));
-		if (!artifact || !providerEvidenceImageArtifactMatches(payload.evidence, artifact, NAME_COM_EVIDENCE_CONTRACT)) {
-			throw new Error("The persisted Name.com evidence artifact no longer matches its immutable reference.");
-		}
-		file = { filename: payload.evidence.filename, mimeType: payload.evidence.mimeType, base64: Buffer.from(artifact.blob).toString("base64") };
-	}
-	const session = await (dependencies.openForm ?? ((signal) => openBrowserForm({
-		provider: PROVIDER.displayName,
-		operation: "name-com-report",
-		url: PROVIDER.formUrl,
-		formSelector: PROVIDER.formSelector,
-		...(signal ? { signal } : {}),
-	})))(context.signal);
-	try {
+	const { payload, data } = await draft.verify(context, dependencies);
+	const file = payload.evidence
+		? (await loadEvidenceFile({ reference: payload.evidence, contract: NAME_COM_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Name.com", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) })).file
+		: null;
+	return withPreflight(() => (dependencies.openForm ?? formOpener(PROVIDER, "name-com-report", { url: PROVIDER.formUrl, formSelector: PROVIDER.formSelector }))(context.signal), async (session): Promise<NameComPreflightState> => {
 		const ticked = await session.clickAll(PROVIDER.checkboxSelector);
 		if (ticked !== PROVIDER.checkboxCount) throw new Error(`Name.com's form has ${ticked} consent checkboxes, not ${PROVIDER.checkboxCount}.`);
 		const token = await session.waitForTurnstileToken({ widgetSelector: PROVIDER.turnstileWidgetSelector });
@@ -160,12 +109,8 @@ export async function prepareNameComExternalSubmission(context: ProviderSubmissi
 			timeoutMs: PROVIDER.timeoutMs,
 		});
 		if (!captchaAccepted(verified)) throw new Error(`Name.com did not accept the Turnstile token (HTTP ${verified.status}): ${snippet(verified.text)}`);
-		const state: NameComPreflightState = { session, csrf, file };
-		return { state, dispose: () => session.close() };
-	} catch (error) {
-		await session.close();
-		throw error;
-	}
+		return { session, csrf, file };
+	});
 }
 
 /** The ticket request's parts, in the order the page's bundle appends them. */
@@ -208,13 +153,14 @@ const BOT_VERDICT = /captcha|robot|\bbot\b|spam|verif/i;
 export async function submitNameComSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
 	const payload = storedNameComSubmissionPayload(context.payload);
 	if (!payload) throw new Error("The persisted Name.com submission payload is malformed.");
-	const state = preflight?.state as NameComPreflightState | undefined;
-	if (!state?.session || typeof state.csrf !== "string" || !state.csrf || (state.file !== null && typeof state.file?.base64 !== "string")) {
-		throw new Error("Name.com submission requires its prepared browser session and CSRF token.");
-	}
+	const state = preparedState<NameComPreflightState>(
+		preflight,
+		(prepared) => !!prepared.session && typeof prepared.csrf === "string" && !!prepared.csrf && (prepared.file === null || typeof prepared.file?.base64 === "string"),
+		"Name.com submission requires its prepared browser session and CSRF token.",
+	);
 	const answer = await state.session.postForm(PROVIDER.submitUrl, ticketFields(payload, state.file), PROVIDER.timeoutMs, { [PROVIDER.csrfHeader]: state.csrf });
 	const body = answerBody(answer.json);
-	const message = typeof body?.message === "string" ? body.message.replace(/\s+/g, " ").trim().slice(0, 300) : "";
+	const message = typeof body?.message === "string" ? snippet(body.message) : "";
 	const id = caseId(body?.case_id);
 	if (answer.status === 200 && body?.success === true && id) {
 		return {

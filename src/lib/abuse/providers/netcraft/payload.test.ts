@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { providerDefinitionHasValidHash } from "../definition";
+import { providerDefinitionHasValidHash } from "../kit/pin";
 import { NETCRAFT_PROVIDER } from "./definition";
 import {
 	buildNetcraftReportUrlsBody,

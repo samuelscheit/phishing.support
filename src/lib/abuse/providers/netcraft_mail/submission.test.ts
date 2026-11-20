@@ -86,7 +86,7 @@ describe("Netcraft mail provider", () => {
 		if (prepared.outcome !== "ready") throw new Error("Expected a ready Netcraft mail payload.");
 		const tampered = { ...prepared.payload, message: { ...(prepared.payload.message as Record<string, unknown>), sha256: "0".repeat(64) } };
 		await expect(submitNetcraftMailSubmission({ routeId: route.id, payload: tampered }, { fetch: async () => { throw new Error("must not be called"); } }))
-			.rejects.toThrow("no longer matches its report evidence");
+			.rejects.toThrow("no longer matches the report");
 	});
 
 	test("never applies to a website report", async () => {

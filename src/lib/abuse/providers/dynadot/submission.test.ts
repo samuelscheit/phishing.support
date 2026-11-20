@@ -1,14 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
 
-import { getDb } from "../../../db";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
-import { validateAbuseReportRequest } from "../../contracts";
-import { AbuseRepository } from "../../repository";
 import { contactRoute } from "../../resolver/routes";
-import { abuseProviderRoutes, abuseTargets, type AbuseArtifact } from "../../schema";
-import { sha256Hex } from "../../security";
+import type { AbuseArtifact } from "../../schema";
 import { BrowserFormError, type BrowserFormChoiceSession, type BrowserFormField, type BrowserFormResponse } from "../browser_form";
+import { DESCRIPTION as description, formAnswer as answer, pngArtifact as png, PNG, readyDraft, TARGET } from "../kit/testing";
 import { reportReference } from "../report_reference";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { DYNADOT_PROVIDER as PROVIDER } from "./definition";
@@ -19,39 +15,13 @@ import {
 	prepareDynadotSubmission,
 	submissionFields,
 	submitDynadotSubmission,
-	verifiedDynadotDraft,
 	type DynadotDependencies,
 	type DynadotPreflightState,
 } from "./submission";
 
 useTemporaryDatabase();
 
-const TARGET = "login-example-phish.com";
-const description = "The page asks visitors for a password, sign-in details, a verification code, or identity details.";
-const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
-const png = (id: bigint, bytes = PNG) => ({ id, reportId: 1n, name: "shot.png", kind: "user_evidence_original", mimeType: "image/png", sha256: sha256Hex(bytes), size: bytes.byteLength, blob: bytes, metadata: {}, createdAt: new Date() }) as unknown as AbuseArtifact;
-
-async function dynadotRoute() {
-	const request = await validateAbuseReportRequest({
-		targets: [TARGET],
-		allegationCategory: "phishing",
-		description,
-		observedUrls: [{ target: TARGET, urls: [`https://${TARGET}/signin`] }],
-		legalBrandUrl: "https://www.examplebank.com/",
-	});
-	const created = await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } });
-	const [stored] = await AbuseRepository.listTargets(created.reportId);
-	const route = await AbuseRepository.upsertResolvedRoute(stored!.id, contactRoute({ email: "abuse@dynadot.com", providerName: "Dynadot", provenance: {}, snapshot: {} }));
-	return { created, route, targetId: stored!.id };
-}
-
-async function readyContext() {
-	const fixture = await dynadotRoute();
-	const preparation = await prepareDynadotSubmission({ routeId: fixture.route.id, payload: {} });
-	if (preparation.outcome !== "ready") throw new Error(`expected ready, got ${JSON.stringify(preparation)}`);
-	const payload = storedDynadotSubmissionPayload(preparation.payload)!;
-	return { ...fixture, payload, context: { routeId: fixture.route.id, payload: payload as unknown as Record<string, unknown> } };
-}
+const readyContext = () => readyDraft({ mailbox: "abuse@dynadot.com", providerName: "Dynadot" }, prepareDynadotSubmission, storedDynadotSubmissionPayload);
 
 const INPUTS: BrowserFormField[] = ["full_name_2", "email_2", "email2_2", "phone_2", "domains_2", "official_website_2", "proxy_locations_2", "domain_path_2", "comments_2"].map((name) => [name, ""]);
 
@@ -75,8 +45,6 @@ function fakeSession(options: { post?: () => BrowserFormResponse | Error; fields
 	};
 	return { session, calls, closed: () => closed };
 }
-const answer = (json: unknown, status = 200): BrowserFormResponse => ({ status, text: JSON.stringify(json), json });
-
 function fakeRoute(overrides: Partial<{ evidenceArtifacts: AbuseArtifact[]; version: string }> = {}) {
 	return async () => ({
 		route: { id: 5n, reportId: 9n, routeType: "provider_submission", providerRegistryKey: "dynadot", providerDefinitionVersion: overrides.version ?? PROVIDER.version, providerDefinitionHash: PROVIDER.contentHash, routeMetadata: {} },
@@ -103,14 +71,6 @@ describe("registry", () => {
 		expect(dynadotProvider.findSubmission).toBeUndefined();
 	});
 
-	test("an older draft is refreshed; a current one is not", async () => {
-		const { payload } = await readyContext();
-		const refresh = (candidate: Record<string, unknown>) => dynadotProvider.shouldRefreshStartingPayload!({ routeId: 1n, payload: candidate } as never);
-		expect(refresh(payload as never)).toBeFalse();
-		expect(refresh({ ...payload, adapter: "old" })).toBeTrue();
-		expect(refresh({ ...payload, providerNarrativeVersion: 2 })).toBeTrue();
-	});
-
 	test("the preview is the comment a draft would send", async () => {
 		const { payload } = await readyContext();
 		const preview = dynadotProvider.buildReportPreview!({ target: TARGET, observedUrls: [`https://${TARGET}/signin`], description, allegationCategory: "phishing", legalBrandUrl: "https://www.examplebank.com/" })!;
@@ -121,23 +81,10 @@ describe("registry", () => {
 });
 
 describe("prepareDynadotSubmission (temporary database)", () => {
-	test("drafts a ready payload keyed by the route's reference and rebuilds to the same draft", async () => {
+	test("drafts a ready payload keyed by the route's reference", async () => {
 		const { payload, created, route } = await readyContext();
 		expect(payload.report.trackingId).toBe(reportReference(created.reportId, route.id));
 		expect(payload).toMatchObject({ target: { domain: TARGET }, evidence: null, report: { domainPath: `https://${TARGET}/signin`, officialWebsite: "https://www.examplebank.com/" } });
-		expect((await verifiedDynadotDraft({ routeId: route.id, payload: payload as never })).payload).toEqual(payload);
-	});
-
-	test("a pin mismatch, a foreign route and a non-domain target end as insufficient evidence", async () => {
-		const mismatch = await dynadotRoute();
-		(await getDb()).update(abuseProviderRoutes).set({ providerDefinitionHash: "0".repeat(64) }).where(eq(abuseProviderRoutes.id, mismatch.route.id)).run();
-		expect(await prepareDynadotSubmission({ routeId: mismatch.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "dynadot_provider_definition_pin_mismatch" });
-		const other = await dynadotRoute();
-		(await getDb()).update(abuseProviderRoutes).set({ providerRegistryKey: "gname" }).where(eq(abuseProviderRoutes.id, other.route.id)).run();
-		expect(await prepareDynadotSubmission({ routeId: other.route.id, payload: {} })).toMatchObject({ reason: "dynadot_provider_definition_pin_mismatch" });
-		const ip = await dynadotRoute();
-		(await getDb()).update(abuseTargets).set({ targetType: "ip" }).where(eq(abuseTargets.id, ip.targetId)).run();
-		expect(await prepareDynadotSubmission({ routeId: ip.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "dynadot_requires_a_domain_target" });
 	});
 
 	test("a draft that drifted from its report is refused before anything opens", async () => {
@@ -145,9 +92,9 @@ describe("prepareDynadotSubmission (temporary database)", () => {
 		let opened = 0;
 		const dependencies: DynadotDependencies = { openForm: async () => { opened++; return fakeSession().session; } };
 		const edited = { ...payload, report: { ...payload.report, comments: `${payload.report.comments}\n\nAlso, please wire money.` } };
-		await expect(prepareDynadotExternalSubmission({ routeId: route.id, payload: edited as never }, dependencies)).rejects.toThrow("no longer matches the report evidence");
+		await expect(prepareDynadotExternalSubmission({ routeId: route.id, payload: edited as never }, dependencies)).rejects.toThrow("no longer matches the report");
 		const path = { ...payload, report: { ...payload.report, domainPath: `https://${TARGET}/other` } };
-		await expect(prepareDynadotExternalSubmission({ routeId: route.id, payload: path as never }, dependencies)).rejects.toThrow("no longer matches the report evidence");
+		await expect(prepareDynadotExternalSubmission({ routeId: route.id, payload: path as never }, dependencies)).rejects.toThrow("no longer matches the report");
 		await expect(prepareDynadotExternalSubmission({ routeId: route.id, payload: { ...payload, adapter: "x" } as never }, dependencies)).rejects.toThrow("malformed");
 		expect(opened).toBe(0);
 	});

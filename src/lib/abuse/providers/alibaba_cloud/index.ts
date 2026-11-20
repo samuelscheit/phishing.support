@@ -1,4 +1,4 @@
-import type { ProviderReportPreviewContext, ProviderSubmissionProvider } from "../submission_contracts";
+import { defineProvider } from "../kit/provider";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import { makeAlibabaCloudReportReason } from "./payload";
 import {
@@ -14,20 +14,23 @@ import {
  * log in; the route files the report in the Reporting Center with the
  * service's own Alibaba Cloud account instead.
  */
-export const alibabaCloudProvider: ProviderSubmissionProvider = {
+export const alibabaCloudProvider = defineProvider({
 	definition: ALIBABA_CLOUD_PROVIDER,
-	prepareSubmission: (context) => prepareAlibabaCloudSubmission(context),
-	shouldRefreshStartingPayload: (context) => context.payload.adapter !== "alibaba_cloud_report_v1" || context.payload.providerNarrativeVersion !== 1,
-	buildReportPreview: (context: ProviderReportPreviewContext) => makeAlibabaCloudReportReason({
+	prepare: prepareAlibabaCloudSubmission,
+	preview: (context) => makeAlibabaCloudReportReason({
 		target: context.target,
 		observedUrls: context.observedUrls,
 		description: context.description,
 		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		legalBrandUrl: context.legalBrandUrl ?? null,
 	}),
-	prepareExternalSubmission: (context) => prepareAlibabaCloudExternalSubmission(context),
-	submit: () => Promise.reject(new Error("Alibaba Cloud submits only from its prepared state.")),
-	submitPrepared: (context, preflight) => submitAlibabaCloudSubmission(context, preflight),
+	external: {
+		prepare: (context) => prepareAlibabaCloudExternalSubmission(context),
+		submit: async (context, preflight) => {
+			if (!preflight) throw new Error("Alibaba Cloud submits only from its prepared state.");
+			return submitAlibabaCloudSubmission(context, preflight);
+		},
+	},
 	findSubmission: (context) => findAlibabaCloudSubmission(context),
 	fetchCorrespondence: (context) => fetchAlibabaCloudCorrespondence(context),
 	reviewVerdicts: {
@@ -38,5 +41,4 @@ export const alibabaCloudProvider: ProviderSubmissionProvider = {
 		Invalid: "rejected",
 		Abnormal: "rejected",
 	},
-};
-
+});

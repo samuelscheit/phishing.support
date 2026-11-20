@@ -1,33 +1,5 @@
 import { serviceIdentity } from "../../../constants";
-import { hashStableJson } from "../../security";
-import type { MailedCodeSpec } from "../mailed_code";
-import type { ProviderSubmissionDefinition } from "../submission_contracts";
-
-export type AlibabaCloudProviderDefinition = ProviderSubmissionDefinition & {
-	/** The Reporting Center console whose OpenAPI the form calls (`/data/api.json`). */
-	consoleOrigin: string;
-	/** The console product the report actions belong to. */
-	apiProduct: string;
-	/** The form's page type: "Illegal Information Reporting". */
-	pageType: "harmInfo";
-	loginUrl: string;
-	/** The mail with the code Alibaba's login asks for from a new browser. */
-	codeMail: MailedCodeSpec;
-	/** The form's "Report Type" option per allegation; the values are the form's English labels. */
-	reportTypes: { phishing: string; malware: string };
-	carrier: string;
-	/** `reportDomainIp` holds one URL, domain or IP of at most this many characters. */
-	reportObjectMaximumLength: number;
-	reportReasonMaximumLength: number;
-	evidence: {
-		acceptedMimeTypes: readonly ["image/png", "image/jpeg"];
-		/** The form allows 50 MB; screenshots stay far below it. */
-		maximumBytes: number;
-	};
-	/** The "Victim (URL/domain name/IP)" field when the report names no impersonated brand URL. */
-	victimFallback: string;
-	reporter: { name: string; email: string; area: string };
-};
+import { definePinned } from "../kit/pin";
 
 /**
  * Code-owned contract for the Alibaba Cloud Reporting Center
@@ -37,7 +9,7 @@ export type AlibabaCloudProviderDefinition = ProviderSubmissionDefinition & {
  * mailboxes Alibaba names for people who cannot log in, and the hosting abuse
  * mailbox its IP space's RDAP records name, select this form instead of mail.
  */
-const definitionWithoutHash = {
+export const ALIBABA_CLOUD_PROVIDER = definePinned({
 	key: "alibaba_cloud",
 	displayName: "Alibaba Cloud Reporting Center",
 	version: "2026-11-20.1",
@@ -45,10 +17,14 @@ const definitionWithoutHash = {
 	// request to infosec@service.aliyun.com or domainabuse@service.aliyun.com."
 	exactMailboxes: ["domainabuse@service.aliyun.com", "infosec@service.aliyun.com", "abuse@alibaba-inc.com"],
 	supplemental: false,
+	/** The Reporting Center console whose OpenAPI the form calls (`/data/api.json`). */
 	consoleOrigin: "https://report.alibabacloud.com",
+	/** The console product the report actions belong to. */
 	apiProduct: "abusereport",
+	/** The form's page type: "Illegal Information Reporting". */
 	pageType: "harmInfo" as const,
 	loginUrl: "https://account.alibabacloud.com/login/login.htm?oauth_callback=https%3A%2F%2Freport.alibabacloud.com%2F",
+	/** The mail with the code Alibaba's login asks for from a new browser. */
 	codeMail: {
 		provider: "Alibaba Cloud",
 		// 2026-11-20: "Verification Code from Alibaba Group" from system-sg@notice.alibabacloud.com.
@@ -59,19 +35,19 @@ const definitionWithoutHash = {
 		maxAgeMs: 30 * 60_000,
 		waitMs: 3 * 60_000,
 	},
+	/** The form's "Report Type" option per allegation; the values are the form's English labels. */
 	reportTypes: { phishing: "Phishing Scams", malware: "Illegal Activities" },
 	carrier: "Website",
+	/** `reportDomainIp` holds one URL, domain or IP of at most this many characters. */
 	reportObjectMaximumLength: 200,
 	reportReasonMaximumLength: 1_000,
 	evidence: {
 		acceptedMimeTypes: ["image/png", "image/jpeg"] as const,
 		maximumBytes: 20 * 1024 * 1024,
 	},
+	/** The "Victim (URL/domain name/IP)" field when the report names no impersonated brand URL. */
 	victimFallback: "Visitors of the reported page (unknown individual victims)",
 	reporter: { name: serviceIdentity.name, email: serviceIdentity.mailbox, area: serviceIdentity.countryName },
-};
-
-export const ALIBABA_CLOUD_PROVIDER: AlibabaCloudProviderDefinition = Object.freeze({
-	...definitionWithoutHash,
-	contentHash: hashStableJson(definitionWithoutHash),
 });
+
+export type AlibabaCloudProviderDefinition = typeof ALIBABA_CLOUD_PROVIDER;

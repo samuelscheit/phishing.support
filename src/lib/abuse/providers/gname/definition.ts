@@ -1,36 +1,7 @@
-import { serviceIdentity } from "../../../constants";
-import { hashStableJson } from "../../security";
-import type { MailedCodeSpec } from "../mailed_code";
-import type { ProviderSubmissionDefinition } from "../submission_contracts";
+import { definePinned, serviceReporter } from "../kit/pin";
 
 /** The complaint types this service files: the form's `lx` values. */
 export type GnameComplaintKind = "phishing" | "malware";
-
-type GnameComplaintType = {
-	/** The form's `lx`. */
-	lx: number;
-	/** The form page that offers the type. */
-	pageUrl: string;
-	/** The form's caption for the type, as the report names it. */
-	caption: string;
-	/** Whether the form asks for the legitimate site a phishing page imitates (`wzdz`). */
-	legalBrandUrl: boolean;
-};
-
-export type GnameProviderDefinition = ProviderSubmissionDefinition & {
-	origin: string;
-	complaintTypes: Readonly<Record<GnameComplaintKind, GnameComplaintType>>;
-	/** The form's own slider before it mails a code: GnSliderVerify, scored at `/request/slideverify`. */
-	slider: { handle: string; rail: string };
-	codeMail: MailedCodeSpec;
-	evidence: {
-		acceptedMimeTypes: readonly ["image/png", "image/jpeg"];
-		maximumBytes: number;
-	};
-	/** `sm`: "1-1000 digits". */
-	maximumDescriptionLength: number;
-	reporter: { name: string; email: string };
-};
 
 /** Accredited GNAME registrar IDs, reviewed against IANA registrar data. */
 const GNAME_REGISTRAR_IDS = Object.freeze([
@@ -55,7 +26,7 @@ function range(start: number, end: number): number[] {
  * and fraud site" (category 2); the form has no malware type, so malware is
  * "Other issue" (category 4).
  */
-const definitionWithoutHash = {
+export const GNAME_PROVIDER = definePinned({
 	key: "gname",
 	displayName: "GNAME Abuse Complaint",
 	version: "2026-11-07.1",
@@ -67,6 +38,7 @@ const definitionWithoutHash = {
 		phishing: { lx: 8, pageUrl: "https://www.gname.com/abuse/category/2", caption: "Set up phishing and fraud site", legalBrandUrl: true },
 		malware: { lx: 7, pageUrl: "https://www.gname.com/abuse/category/4", caption: "Other issue", legalBrandUrl: false },
 	},
+	/** The form's own slider before it mails a code: GnSliderVerify, scored at `/request/slideverify`. */
 	slider: { handle: ".gn-slide-bar", rail: ".gn-slide-rail" },
 	codeMail: {
 		provider: "GNAME",
@@ -85,11 +57,9 @@ const definitionWithoutHash = {
 		acceptedMimeTypes: ["image/png", "image/jpeg"] as const,
 		maximumBytes: 2 * 1024 * 1024,
 	},
+	/** `sm`: "1-1000 digits". */
 	maximumDescriptionLength: 1_000,
-	reporter: { name: serviceIdentity.name, email: serviceIdentity.mailbox },
-};
-
-export const GNAME_PROVIDER: GnameProviderDefinition = Object.freeze({
-	...definitionWithoutHash,
-	contentHash: hashStableJson(definitionWithoutHash),
+	reporter: serviceReporter,
 });
+
+export type GnameProviderDefinition = typeof GNAME_PROVIDER;

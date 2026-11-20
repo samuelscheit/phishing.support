@@ -1,15 +1,13 @@
-import type { ProviderReportPreviewContext, ProviderSubmissionProvider } from "../submission_contracts";
+import { defineProvider } from "../kit/provider";
 import { GOOGLE_CLOUD_PROVIDER } from "./definition";
 import { makeGoogleCloudAbuseDetails } from "./payload";
 import { prepareGoogleCloudSubmission, submitGoogleCloudSubmission } from "./submission";
 
 /** Google Cloud's abuse mailboxes answer with this form; the route files the report there instead. */
-export const googleCloudProvider: ProviderSubmissionProvider = {
+export const googleCloudProvider = defineProvider({
 	definition: GOOGLE_CLOUD_PROVIDER,
-	prepareSubmission: prepareGoogleCloudSubmission,
-	shouldRefreshStartingPayload: (context) => context.payload.adapter !== "google_cloud_abuse_report_v1"
-		|| context.payload.providerNarrativeVersion !== 1,
-	buildReportPreview: (context: ProviderReportPreviewContext) => makeGoogleCloudAbuseDetails({
+	prepare: prepareGoogleCloudSubmission,
+	preview: (context) => makeGoogleCloudAbuseDetails({
 		target: context.target,
 		observedUrls: context.observedUrls,
 		description: context.description,
@@ -18,5 +16,4 @@ export const googleCloudProvider: ProviderSubmissionProvider = {
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),
 	submit: (context) => submitGoogleCloudSubmission(context),
-};
-
+});

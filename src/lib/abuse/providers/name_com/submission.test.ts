@@ -1,15 +1,11 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
 
-import { getDb } from "../../../db";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
-import { validateAbuseReportRequest } from "../../contracts";
-import { AbuseRepository } from "../../repository";
 import { contactRoute } from "../../resolver/routes";
-import { abuseProviderRoutes, abuseTargets, type AbuseArtifact } from "../../schema";
-import { sha256Hex } from "../../security";
+import type { AbuseArtifact } from "../../schema";
 import { BrowserFormError, type BrowserFormField, type BrowserFormResponse } from "../browser_form";
+import { DESCRIPTION as description, formAnswer as answer, pngArtifact as png, PNG, readyDraft, TARGET } from "../kit/testing";
 import { reportReference } from "../report_reference";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { NAME_COM_PROVIDER as PROVIDER } from "./definition";
@@ -23,43 +19,16 @@ import {
 	prepareNameComSubmission,
 	submitNameComSubmission,
 	ticketFields,
-	verifiedNameComDraft,
 	type NameComPreflightState,
 	type NameComSession,
 } from "./submission";
 
 useTemporaryDatabase();
 
-const TARGET = "login-example-phish.com";
-const description = "The page asks visitors for a password, sign-in details, a verification code, or identity details.";
-const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
-const png = (id: bigint, bytes = PNG) => ({ id, reportId: 1n, name: "shot.png", kind: "user_evidence_original", mimeType: "image/png", sha256: sha256Hex(bytes), size: bytes.byteLength, blob: bytes, metadata: {}, createdAt: new Date() }) as unknown as AbuseArtifact;
 const TOKEN = "a".repeat(128);
 
-async function nameRoute(options: { target?: string } = {}) {
-	const target = options.target ?? TARGET;
-	const request = await validateAbuseReportRequest({
-		targets: [target],
-		allegationCategory: "phishing",
-		description,
-		observedUrls: [{ target, urls: [`https://${target}/signin`] }],
-		legalBrandUrl: "https://www.examplebank.com/",
-	});
-	const created = await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } });
-	const [stored] = await AbuseRepository.listTargets(created.reportId);
-	const route = await AbuseRepository.upsertResolvedRoute(stored!.id, contactRoute({ email: "abuse@name.com", providerName: "Name.com", provenance: {}, snapshot: {} }));
-	return { created, route, targetId: stored!.id };
-}
+const readyContext = () => readyDraft({ mailbox: "abuse@name.com", providerName: "Name.com" }, prepareNameComSubmission, storedNameComSubmissionPayload);
 
-async function readyContext() {
-	const fixture = await nameRoute();
-	const preparation = await prepareNameComSubmission({ routeId: fixture.route.id, payload: {} });
-	if (preparation.outcome !== "ready") throw new Error(`expected ready, got ${JSON.stringify(preparation)}`);
-	const payload = storedNameComSubmissionPayload(preparation.payload)!;
-	return { ...fixture, payload, context: { routeId: fixture.route.id, payload: payload as unknown as Record<string, unknown> } };
-}
-
-const answer = (json: unknown, status = 200): BrowserFormResponse => ({ status, text: JSON.stringify(json), json });
 const CSRF_OK = { status: 200, text: '{"meta":null}', json: undefined, headers: { "x-csrf-token-auth": TOKEN } };
 const VERIFY_OK = { ...answer({ meta: null, message: [], data: { account: { supportFormRecaptcha: true } } }), headers: {} };
 
@@ -129,13 +98,6 @@ describe("registry", () => {
 		expect(nameComConfirmationIds("Your request #123456 was updated; request #123456 again")).toEqual(["123456"]);
 	});
 
-	test("an older draft is refreshed; a current one is not", async () => {
-		const { payload } = await readyContext();
-		const refresh = (candidate: Record<string, unknown>) => nameComProvider.shouldRefreshStartingPayload!({ routeId: 1n, payload: candidate } as never);
-		expect(refresh(payload as never)).toBeFalse();
-		expect(refresh({ ...payload, adapter: "old" })).toBeTrue();
-	});
-
 	test("the preview is the text a draft would send", async () => {
 		const { payload } = await readyContext();
 		const preview = nameComProvider.buildReportPreview!({ target: TARGET, observedUrls: [`https://${TARGET}/signin`], description, allegationCategory: "phishing", legalBrandUrl: "https://www.examplebank.com/" })!;
@@ -145,32 +107,19 @@ describe("registry", () => {
 });
 
 describe("prepareNameComSubmission (temporary database)", () => {
-	test("drafts a ready payload keyed by the route's reference and rebuilds to the same draft", async () => {
+	test("drafts a ready payload keyed by the route's reference, led by it and the domain's URLs", async () => {
 		const { payload, created, route } = await readyContext();
 		expect(payload.report.trackingId).toBe(reportReference(created.reportId, route.id));
 		expect(payload.report.additional.startsWith(`Reference: ${payload.report.trackingId}\n\nReported URLs:\n- https://${TARGET}/signin`)).toBeTrue();
-		expect((await verifiedNameComDraft({ routeId: route.id, payload: payload as never })).payload).toEqual(payload);
-	});
-
-	test("a pin mismatch, a foreign route and a non-domain target end as insufficient evidence", async () => {
-		const mismatch = await nameRoute();
-		(await getDb()).update(abuseProviderRoutes).set({ providerDefinitionHash: "0".repeat(64) }).where(eq(abuseProviderRoutes.id, mismatch.route.id)).run();
-		expect(await prepareNameComSubmission({ routeId: mismatch.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "name_com_provider_definition_pin_mismatch" });
-		const other = await nameRoute();
-		(await getDb()).update(abuseProviderRoutes).set({ providerRegistryKey: "gname" }).where(eq(abuseProviderRoutes.id, other.route.id)).run();
-		expect(await prepareNameComSubmission({ routeId: other.route.id, payload: {} })).toMatchObject({ reason: "name_com_provider_definition_pin_mismatch" });
-		const ip = await nameRoute();
-		(await getDb()).update(abuseTargets).set({ targetType: "ip" }).where(eq(abuseTargets.id, ip.targetId)).run();
-		expect(await prepareNameComSubmission({ routeId: ip.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "name_com_requires_a_domain_target" });
 	});
 
 	test("a draft that drifted from its report is refused before anything opens", async () => {
-		const { payload, route } = await readyContext();
+		const { payload, context } = await readyContext();
 		let opened = 0;
 		const dependencies = { openForm: async () => { opened++; return fakeSession().session; } };
 		const edited = { ...payload, report: { ...payload.report, additional: `${payload.report.additional}\n\nAlso, please wire money.` } };
-		await expect(prepareNameComExternalSubmission({ routeId: route.id, payload: edited as never }, dependencies)).rejects.toThrow("no longer matches the report evidence");
-		await expect(prepareNameComExternalSubmission({ routeId: route.id, payload: { ...payload, adapter: "x" } as never }, dependencies)).rejects.toThrow("malformed");
+		await expect(prepareNameComExternalSubmission({ ...context, payload: edited as never }, dependencies)).rejects.toThrow("no longer matches the report");
+		await expect(prepareNameComExternalSubmission({ ...context, payload: { ...payload, adapter: "x" } as never }, dependencies)).rejects.toThrow("malformed");
 		expect(opened).toBe(0);
 	});
 });

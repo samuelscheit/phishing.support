@@ -1,37 +1,29 @@
-import type { AbuseArtifact } from "../../schema";
-import { normalizeDomain } from "../../security";
+import { z } from "zod";
 
-import {
-	selectProviderEvidenceImageArtifact,
-	storedProviderEvidenceImageReference,
-	type ProviderEvidenceImageContract,
-	type ProviderEvidenceImageReference,
-} from "../evidence_image";
+import { normalizeDomain } from "../../security";
+import { evidenceContract } from "../kit/evidence";
+import { field, payloadEnvelope, storedReader } from "../kit/stored";
+import { storedProviderEvidenceImageReference } from "../evidence_image";
 import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
 import { ERANET_PROVIDER } from "./definition";
-import { asRecord } from "../../../values";
 
-export const ERANET_EVIDENCE_CONTRACT = {
-	acceptedMimeTypes: ERANET_PROVIDER.evidence.acceptedMimeTypes,
-	maximumBytes: ERANET_PROVIDER.evidence.maximumBytes,
-	filenamePrefix: "eranet_report",
-} as const satisfies ProviderEvidenceImageContract;
+export const ERANET_EVIDENCE_CONTRACT = evidenceContract("eranet_report", ERANET_PROVIDER.evidence);
 
-export type EranetEvidenceReference = ProviderEvidenceImageReference<(typeof ERANET_PROVIDER.evidence.acceptedMimeTypes)[number]>;
+const envelope = payloadEnvelope(ERANET_PROVIDER, "eranet_phishing_report_v1");
 
-/** The form's report-type checkboxes this service files under. */
-export type EranetSubType = "phishing_site" | "other";
+/** The durable, secret-free draft: the form values the submission sends. */
+const payloadSchema = z.object({
+	...envelope.shape,
+	target: z.object({ domain: field.domain, observedUrl: z.string() }),
+	/** The form's report-type checkboxes this service files under. */
+	report: z.object({ subTypes: z.array(z.enum(["phishing_site", "other"])), description: field.text(ERANET_PROVIDER.maximumDescriptionLength), website: z.string().min(1) }),
+	evidence: field.evidence(ERANET_EVIDENCE_CONTRACT),
+}).refine(({ target }) => normalizeObservedUrlForTarget(target.observedUrl, target.domain) === target.observedUrl);
 
-export type EranetSubmissionPayload = {
-	adapter: "eranet_phishing_report_v1";
-	providerNarrativeVersion: 1;
-	definition: { version: string; contentHash: string };
-	target: { domain: string; observedUrl: string };
-	report: { subTypes: EranetSubType[]; description: string; website: string };
-	evidence?: EranetEvidenceReference;
-};
+export type EranetSubmissionPayload = z.infer<typeof payloadSchema>;
+export type EranetEvidenceReference = EranetSubmissionPayload["evidence"];
 
-export function eranetSubTypes(allegationCategory: string | undefined): EranetSubType[] {
+export function eranetSubTypes(allegationCategory: string | undefined): EranetSubmissionPayload["report"]["subTypes"] {
 	return allegationCategory === "malware" ? ["other"] : ["phishing_site"];
 }
 
@@ -47,10 +39,6 @@ export function makeEranetDescription(params: { target?: string; observedUrl?: s
 	});
 }
 
-export function selectEranetEvidenceArtifact(artifacts: readonly AbuseArtifact[]): EranetEvidenceReference | undefined {
-	return selectProviderEvidenceImageArtifact(artifacts, ERANET_EVIDENCE_CONTRACT);
-}
-
 /**
  * The durable, secret-free Eranet draft. The form's required "legitimate
  * website" field names the impersonated brand's site, or for malware (which
@@ -63,7 +51,7 @@ export function buildEranetSubmissionPayload(params: {
 	allegationCategory?: string;
 	website: string;
 	legalBrandUrl?: string;
-	evidence?: EranetEvidenceReference;
+	evidence: EranetEvidenceReference | null;
 }): EranetSubmissionPayload | undefined {
 	const domain = normalizeDomain(params.target);
 	const observedUrl = domain ? normalizeObservedUrlForTarget(params.observedUrl, domain) : undefined;
@@ -74,38 +62,13 @@ export function buildEranetSubmissionPayload(params: {
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 	});
-	if (!domain || !observedUrl || !description || !params.website) return undefined;
+	if (!domain || !observedUrl || !description || !params.website || !params.evidence || !storedProviderEvidenceImageReference(params.evidence, ERANET_EVIDENCE_CONTRACT)) return undefined;
 	return {
-		adapter: "eranet_phishing_report_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: ERANET_PROVIDER.version, contentHash: ERANET_PROVIDER.contentHash },
+		...envelope.stamp,
 		target: { domain, observedUrl },
 		report: { subTypes: eranetSubTypes(params.allegationCategory), description, website: params.website },
-		...(params.evidence ? { evidence: params.evidence } : {}),
+		evidence: params.evidence,
 	};
 }
 
-export function storedEranetSubmissionPayload(value: unknown): EranetSubmissionPayload | undefined {
-	const payload = asRecord(value);
-	const definition = payload && asRecord(payload.definition);
-	const target = payload && asRecord(payload.target);
-	const report = payload && asRecord(payload.report);
-	if (!payload || payload.adapter !== "eranet_phishing_report_v1" || payload.providerNarrativeVersion !== 1
-		|| definition?.version !== ERANET_PROVIDER.version || definition?.contentHash !== ERANET_PROVIDER.contentHash
-		|| typeof target?.domain !== "string" || typeof target.observedUrl !== "string"
-		|| !report || !Array.isArray(report.subTypes) || !report.subTypes.every((type) => type === "phishing_site" || type === "other")
-		|| typeof report.description !== "string" || !report.description || report.description.length > ERANET_PROVIDER.maximumDescriptionLength
-		|| typeof report.website !== "string" || !report.website) {
-		return undefined;
-	}
-	const evidence = payload.evidence === undefined ? undefined : storedProviderEvidenceImageReference(payload.evidence, ERANET_EVIDENCE_CONTRACT);
-	if (payload.evidence !== undefined && !evidence) return undefined;
-	return {
-		adapter: "eranet_phishing_report_v1",
-		providerNarrativeVersion: 1,
-		definition: { version: ERANET_PROVIDER.version, contentHash: ERANET_PROVIDER.contentHash },
-		target: { domain: target.domain, observedUrl: target.observedUrl },
-		report: { subTypes: report.subTypes as EranetSubType[], description: report.description, website: report.website },
-		...(evidence ? { evidence } : {}),
-	};
-}
+export const storedEranetSubmissionPayload = storedReader(payloadSchema);

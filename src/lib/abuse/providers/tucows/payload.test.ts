@@ -1,17 +1,19 @@
 import { describe, expect, test } from "bun:test";
 
-import { providerDefinitionHasValidHash } from "../definition";
+import { providerDefinitionHasValidHash } from "../kit/pin";
+import { selectProviderEvidenceImageArtifact } from "../evidence_image";
 import { mailedCodeFrom } from "../mailed_code";
 import { sha256Hex } from "../../security";
 import type { AbuseArtifact } from "../../schema";
 import { TUCOWS_PROVIDER } from "./definition";
-import { buildTucowsSubmissionPayload, makeTucowsDescription, selectTucowsEvidenceArtifact, storedTucowsSubmissionPayload, tucowsBrand, tucowsReportUrls, type TucowsReportInput } from "./payload";
+import { buildTucowsSubmissionPayload, makeTucowsDescription, TUCOWS_EVIDENCE_CONTRACT, storedTucowsSubmissionPayload, tucowsBrand, tucowsReportUrls, type TucowsReportInput } from "./payload";
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("tucows-screenshot")]);
 const artifact = (overrides: Partial<AbuseArtifact> = {}) => ({
 	id: 12n, reportId: 3n, name: "website.png", kind: "user_evidence_original", mimeType: "image/png",
 	sha256: sha256Hex(PNG), size: PNG.byteLength, blob: PNG, metadata: {}, createdAt: new Date(), ...overrides,
 }) as unknown as AbuseArtifact;
+const selectTucowsEvidenceArtifact = (artifacts: Parameters<typeof selectProviderEvidenceImageArtifact>[0]) => selectProviderEvidenceImageArtifact(artifacts, TUCOWS_EVIDENCE_CONTRACT);
 const evidence = selectTucowsEvidenceArtifact([artifact()])!;
 
 const REFERENCE = "PS-8fc84cc01019-R42";
@@ -21,7 +23,7 @@ const input: TucowsReportInput = {
 	description: "Impersonated brand: Example Bank\nThe page asks visitors for a password and sign-in details.",
 	allegationCategory: "phishing",
 	legalBrandUrl: "https://www.examplebank.com/",
-	reference: REFERENCE,
+	trackingId: REFERENCE,
 	caseUrl: "https://phishing.support/submissions/42",
 	hostingLine: "Hosting IP address: 203.0.113.9 (login-example-phish.com resolved to 203.0.113.9 on 2026-11-20)",
 	evidence,
@@ -104,7 +106,7 @@ describe("buildTucowsSubmissionPayload", () => {
 	test("cannot be filed here: malware, no brand domain, bad reference, bad target, bad evidence", () => {
 		expect(buildTucowsSubmissionPayload({ ...input, allegationCategory: "malware" })).toBeUndefined();
 		expect(buildTucowsSubmissionPayload({ ...input, legalBrandUrl: null })).toBeUndefined();
-		expect(buildTucowsSubmissionPayload({ ...input, reference: "R1" })).toBeUndefined();
+		expect(buildTucowsSubmissionPayload({ ...input, trackingId: "R1" })).toBeUndefined();
 		expect(buildTucowsSubmissionPayload({ ...input, target: "not a host" })).toBeUndefined();
 		expect(buildTucowsSubmissionPayload({ ...input, evidence: { ...evidence, filename: "x.png" } })).toBeUndefined();
 		expect(buildTucowsSubmissionPayload({ ...input, description: "   " })).toBeUndefined();
@@ -131,7 +133,6 @@ describe("storedTucowsSubmissionPayload", () => {
 		expect(storedTucowsSubmissionPayload(null)).toBeUndefined();
 		expect(storedTucowsSubmissionPayload({})).toBeUndefined();
 		expect(bad((p) => { p.adapter = "aws_report_v1"; })).toBeUndefined();
-		expect(bad((p) => { p.providerNarrativeVersion = 2; })).toBeUndefined();
 		expect(bad((p) => { p.definition.version = "old"; })).toBeUndefined();
 		expect(bad((p) => { p.definition.contentHash = "0"; })).toBeUndefined();
 		expect(bad((p) => { p.target.normalizedTarget = 1; })).toBeUndefined();

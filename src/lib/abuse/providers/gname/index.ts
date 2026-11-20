@@ -7,7 +7,6 @@ import { prepareGnameExternalSubmission, prepareGnameSubmission, submitGnameSubm
 export const gnameProvider: ProviderSubmissionProvider = {
 	definition: GNAME_PROVIDER,
 	prepareSubmission: prepareGnameSubmission,
-	shouldRefreshStartingPayload: (context) => context.payload.adapter !== "gname_abuse_complaint_v1",
 	buildReportPreview: (context: ProviderReportPreviewContext) => makeGnameDescription({
 		target: context.target,
 		observedUrl: context.observedUrls[0],

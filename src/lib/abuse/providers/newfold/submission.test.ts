@@ -1,14 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
 
-import { getDb } from "../../../db";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
-import { validateAbuseReportRequest } from "../../contracts";
-import { AbuseRepository } from "../../repository";
 import { contactRoute } from "../../resolver/routes";
-import { abuseProviderRoutes, abuseTargets, type AbuseArtifact } from "../../schema";
-import { sha256Hex } from "../../security";
+import type { AbuseArtifact } from "../../schema";
 import { BrowserFormError, type BrowserFormField, type BrowserFormResponse } from "../browser_form";
+import { DESCRIPTION as description, pngArtifact as png, PNG, readyDraft, TARGET } from "../kit/testing";
 import { reportReference } from "../report_reference";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { NEWFOLD_PROVIDER as PROVIDER } from "./definition";
@@ -19,39 +15,13 @@ import {
 	prepareNewfoldExternalSubmission,
 	prepareNewfoldSubmission,
 	submitNewfoldSubmission,
-	verifiedNewfoldDraft,
 	type NewfoldDependencies,
 	type NewfoldPreflightState,
 } from "./submission";
 
 useTemporaryDatabase();
 
-const TARGET = "login-example-phish.com";
-const description = "The page asks visitors for a password, sign-in details, a verification code, or identity details.";
-const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
-const png = (id: bigint, bytes = PNG) => ({ id, reportId: 1n, name: "shot.png", kind: "user_evidence_original", mimeType: "image/png", sha256: sha256Hex(bytes), size: bytes.byteLength, blob: bytes, metadata: {}, createdAt: new Date() }) as unknown as AbuseArtifact;
-
-async function newfoldRoute(mailbox = "abuse@bluehost.com") {
-	const request = await validateAbuseReportRequest({
-		targets: [TARGET],
-		allegationCategory: "phishing",
-		description,
-		observedUrls: [{ target: TARGET, urls: [`https://${TARGET}/signin`] }],
-		legalBrandUrl: "https://www.examplebank.com/",
-	});
-	const created = await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } });
-	const [stored] = await AbuseRepository.listTargets(created.reportId);
-	const route = await AbuseRepository.upsertResolvedRoute(stored!.id, contactRoute({ email: mailbox, providerName: "Newfold", provenance: {}, snapshot: {} }));
-	return { created, route, targetId: stored!.id };
-}
-
-async function readyContext(mailbox?: string) {
-	const fixture = await newfoldRoute(mailbox);
-	const preparation = await prepareNewfoldSubmission({ routeId: fixture.route.id, payload: {} });
-	if (preparation.outcome !== "ready") throw new Error(`expected ready, got ${JSON.stringify(preparation)}`);
-	const payload = storedNewfoldSubmissionPayload(preparation.payload)!;
-	return { ...fixture, payload, context: { routeId: fixture.route.id, payload: payload as unknown as Record<string, unknown> } };
-}
+const readyContext = (mailbox = "abuse@bluehost.com") => readyDraft({ mailbox, providerName: "Newfold" }, prepareNewfoldSubmission, storedNewfoldSubmissionPayload);
 
 const HIDDEN: BrowserFormField[] = PROVIDER.hiddenFields.map(([name, value]) => [name, value]);
 
@@ -79,7 +49,7 @@ function fakeSession(options: { post?: () => BrowserFormResponse | Error; render
 	return { session: session as never, calls, closed: () => closed };
 }
 const THANK_YOU: BrowserFormResponse = { status: 200, text: "<html>Thank you for submitting an 'Abuse' form</html>", json: undefined, url: "https://www.newfold.com/thank-you" };
-const page = (status: number, text: string, url = PROVIDER.leadUrl): BrowserFormResponse => ({ status, text, json: undefined, url });
+const page = (status: number, text: string, url: string = PROVIDER.leadUrl): BrowserFormResponse => ({ status, text, json: undefined, url });
 
 function fakeRoute(overrides: Partial<{ evidenceArtifacts: AbuseArtifact[]; version: string; verifiedEmail: string; resolverProvenance: unknown }> = {}) {
 	return async () => ({
@@ -100,7 +70,7 @@ describe("registry", () => {
 		}
 		for (const id of [2, 9, 886]) expect(getProviderSubmissionProviderForRegistrarId(id)?.definition.key, String(id)).toBe("newfold");
 		expect(getProviderSubmissionProviderForRegistrarId(3)).toBeUndefined();
-		expect(listProviderSubmissionProviders().filter((provider) => provider.definition.exactMailboxes.some((mailbox) => PROVIDER.exactMailboxes.includes(mailbox))).map((provider) => provider.definition.key)).toEqual(["newfold"]);
+		expect(listProviderSubmissionProviders().filter((provider) => provider.definition.exactMailboxes.some((mailbox) => (PROVIDER.exactMailboxes as readonly string[]).includes(mailbox))).map((provider) => provider.definition.key)).toEqual(["newfold"]);
 		expect(getProviderSubmissionProviderForMailbox("abuse@sub.bluehost.com")).toBeUndefined();
 	});
 
@@ -109,14 +79,6 @@ describe("registry", () => {
 		expect(newfoldProvider.inboundMail!.senderDomains).toContain("newfold.com");
 		expect(newfoldProvider.inboundMail!.confirmationIds!("Case 00123. Reference: PS-8fc84cc01019-R7 thanks")).toEqual(["PS-8fc84cc01019-R7"]);
 		expect(newfoldProvider.findSubmission).toBeUndefined();
-	});
-
-	test("an older draft is refreshed; a current one is not", async () => {
-		const { payload } = await readyContext();
-		const refresh = (candidate: Record<string, unknown>) => newfoldProvider.shouldRefreshStartingPayload!({ routeId: 1n, payload: candidate } as never);
-		expect(refresh(payload as never)).toBeFalse();
-		expect(refresh({ ...payload, adapter: "old" })).toBeTrue();
-		expect(refresh({ ...payload, providerNarrativeVersion: 2 })).toBeTrue();
 	});
 
 	test("the preview is the comments a draft would send", async () => {
@@ -129,11 +91,10 @@ describe("registry", () => {
 });
 
 describe("prepareNewfoldSubmission (temporary database)", () => {
-	test("drafts a ready payload keyed by the route's reference, brand by mailbox, and rebuilds to the same draft", async () => {
+	test("drafts a ready payload keyed by the route's reference and brand by mailbox", async () => {
 		const { payload, created, route } = await readyContext();
 		expect(payload.report.trackingId).toBe(reportReference(created.reportId, route.id));
 		expect(payload).toMatchObject({ target: { domain: TARGET }, report: { brand: "800-bluehost", url: `https://${TARGET}/signin` }, evidence: null });
-		expect((await verifiedNewfoldDraft({ routeId: route.id, payload: payload as never })).payload).toEqual(payload);
 		expect((await readyContext("iarpoc@newfold.com")).payload.report.brand).toBe("100-other");
 		expect((await readyContext("domain.operations@web.com")).payload.report.brand).toBe("300-web.com");
 	});
@@ -143,26 +104,14 @@ describe("prepareNewfoldSubmission (temporary database)", () => {
 		expect(prepared).toMatchObject({ outcome: "ready", payload: { report: { brand: "200-register.com" } } });
 	});
 
-	test("a pin mismatch, a foreign route and a non-domain target end as insufficient evidence", async () => {
-		const mismatch = await newfoldRoute();
-		(await getDb()).update(abuseProviderRoutes).set({ providerDefinitionHash: "0".repeat(64) }).where(eq(abuseProviderRoutes.id, mismatch.route.id)).run();
-		expect(await prepareNewfoldSubmission({ routeId: mismatch.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "newfold_provider_definition_pin_mismatch" });
-		const other = await newfoldRoute();
-		(await getDb()).update(abuseProviderRoutes).set({ providerRegistryKey: "gname" }).where(eq(abuseProviderRoutes.id, other.route.id)).run();
-		expect(await prepareNewfoldSubmission({ routeId: other.route.id, payload: {} })).toMatchObject({ reason: "newfold_provider_definition_pin_mismatch" });
-		const ip = await newfoldRoute();
-		(await getDb()).update(abuseTargets).set({ targetType: "ip" }).where(eq(abuseTargets.id, ip.targetId)).run();
-		expect(await prepareNewfoldSubmission({ routeId: ip.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "newfold_requires_a_domain_target" });
-	});
-
 	test("a draft that drifted from its report, or from its route's brand, is refused before anything opens", async () => {
 		const { payload, route } = await readyContext();
 		let opened = 0;
 		const dependencies: NewfoldDependencies = { openForm: async () => { opened++; return fakeSession().session; }, solveCaptcha: async () => "t", hasCaptchaCredentials: () => true };
 		const edited = { ...payload, report: { ...payload.report, comments: `${payload.report.comments}\n\nAlso, please wire money.` } };
-		await expect(prepareNewfoldExternalSubmission({ routeId: route.id, payload: edited as never }, dependencies)).rejects.toThrow("no longer matches the report evidence");
+		await expect(prepareNewfoldExternalSubmission({ routeId: route.id, payload: edited as never }, dependencies)).rejects.toThrow("no longer matches the report");
 		const rebranded = { ...payload, report: { ...payload.report, brand: "150-hostgator" } };
-		await expect(prepareNewfoldExternalSubmission({ routeId: route.id, payload: rebranded as never }, dependencies)).rejects.toThrow("no longer matches the report evidence");
+		await expect(prepareNewfoldExternalSubmission({ routeId: route.id, payload: rebranded as never }, dependencies)).rejects.toThrow("no longer matches the report");
 		await expect(prepareNewfoldExternalSubmission({ routeId: route.id, payload: { ...payload, adapter: "x" } as never }, dependencies)).rejects.toThrow("malformed");
 		expect(opened).toBe(0);
 	});

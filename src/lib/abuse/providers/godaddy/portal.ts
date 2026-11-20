@@ -1,4 +1,5 @@
 import { asRecord } from "../../../values";
+import { snippet } from "../kit/text";
 import { providerResponseId } from "../report_reference";
 import type { BrowserFormField } from "../browser_form";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
@@ -64,10 +65,6 @@ export function portalFields(payload: GoDaddySubmissionPayload, state: { rendere
 
 function strings(value: unknown): string[] {
 	return Array.isArray(value) ? value.map((entry) => typeof entry === "string" ? entry : JSON.stringify(entry)).filter((entry) => entry.length > 0) : [];
-}
-
-function snippet(text: string): string {
-	return text.replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
 /** A case id in one entry of the answer's `success` list or in the answer itself; strings count only when they look like GoDaddy's. */

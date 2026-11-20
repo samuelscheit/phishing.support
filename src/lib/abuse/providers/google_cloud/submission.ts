@@ -1,25 +1,21 @@
 import type { HTTPResponse, Page } from "rebrowser-puppeteer-core";
 
 import { getBrowser, getBrowserPage } from "../../../browser";
-import { solveDeathByCaptchaToken } from "../../captcha/death_by_captcha";
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
-import { routeContext } from "../../worker/shared";
-import { providerDefinitionMatchesPin } from "../definition";
+import { createDraft, type RouteData } from "../kit/draft";
+import { solveCaptchaToken } from "../kit/captcha";
+import { jsonRecord } from "../kit/http";
+import { snippet } from "../kit/text";
 import { emailOriginOf } from "../email_origin";
-import type {
-	ProviderSubmissionContext,
-	ProviderSubmissionPreparation,
-	ProviderSubmissionSuccess,
-} from "../submission_contracts";
-import { ProviderSubmissionRejectedError } from "../submission_contracts";
+import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { GOOGLE_CLOUD_PROVIDER } from "./definition";
 import {
 	buildGoogleCloudSubmissionPayload,
 	storedGoogleCloudSubmissionPayload,
+	type GoogleCloudReportInput,
 	type GoogleCloudSubmissionPayload,
 } from "./payload";
-import { asRecord } from "../../../values";
 
 const CANCELED = "Google Cloud abuse report submission was canceled.";
 const FORM_READY_TIMEOUT_MS = 45_000;
@@ -37,14 +33,11 @@ export type GoogleCloudSubmissionDependencies = {
 };
 
 /** Solve the checkbox reCAPTCHA the form falls back to. */
-async function solveGoogleCloudCaptcha(signal?: AbortSignal): Promise<string> {
-	return solveDeathByCaptchaToken({
-		type: GOOGLE_CLOUD_PROVIDER.captcha.type,
-		parametersField: "token_params",
-		parameters: { googlekey: GOOGLE_CLOUD_PROVIDER.captcha.siteKey, pageurl: GOOGLE_CLOUD_PROVIDER.reportPageUrl },
-		...(signal ? { signal } : {}),
-	});
-}
+const solveGoogleCloudCaptcha = (signal?: AbortSignal) => solveCaptchaToken({
+	type: GOOGLE_CLOUD_PROVIDER.captcha.type,
+	parametersField: "token_params",
+	parameters: { googlekey: GOOGLE_CLOUD_PROVIDER.captcha.siteKey, pageurl: GOOGLE_CLOUD_PROVIDER.reportPageUrl },
+}, signal);
 
 async function openReportingPage(): Promise<GoogleCloudFormSession> {
 	const browser = await getBrowser("reporting");
@@ -58,39 +51,36 @@ async function openReportingPage(): Promise<GoogleCloudFormSession> {
 }
 
 /** The report's inputs; an IP target that sent a phishing email also carries that email's origin. */
-async function reportInputsFor(routeData: Awaited<ReturnType<typeof routeContext>>) {
-	const { report, target, evidenceArtifacts } = routeData;
+async function reportInput(data: RouteData): Promise<GoogleCloudReportInput & { target: string }> {
+	const { report, target, evidenceArtifacts } = data;
 	const emailOrigin = target.observedUrls.length === 0 ? await emailOriginOf({ target, evidenceArtifacts }) : undefined;
-	return { target: target.normalizedTarget, observedUrls: target.observedUrls, ...reportInputs(report), ...(emailOrigin ? { emailOrigin } : {}) };
-}
-
-function reportInputs(report: { description: string; allegationCategory: string; createdAt: Date; submissionId: bigint | null; legalBrandUrl: string | null }) {
 	const caseUrl = abuseEmailCaseUrl(report.submissionId);
 	return {
+		target: target.normalizedTarget,
+		observedUrls: target.observedUrls,
 		description: report.description,
 		allegationCategory: report.allegationCategory,
 		capturedAt: report.createdAt,
 		...(caseUrl ? { caseUrl } : {}),
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
+		...(emailOrigin ? { emailOrigin } : {}),
 	};
 }
 
+const draft = createDraft({
+	definition: GOOGLE_CLOUD_PROVIDER,
+	reasonPrefix: "google_cloud",
+	targetTypes: ["domain", "ip", "service_account", "campaign"],
+	targetReason: "google_cloud_requires_a_web_target",
+	read: storedGoogleCloudSubmissionPayload,
+	input: reportInput,
+	admit: (_data, input) => input.observedUrls.length === 0 && !input.emailOrigin ? "google_cloud_requires_an_observed_url" : undefined,
+	build: buildGoogleCloudSubmissionPayload,
+	targetOf: (payload) => payload.target.normalizedTarget,
+});
+
 /** Check the route and build the durable draft before any provider call. */
-export async function prepareGoogleCloudSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation> {
-	const routeData = await routeContext(context.routeId);
-	const { route, target } = routeData;
-	if (route.routeType !== "provider_submission" || route.providerRegistryKey !== GOOGLE_CLOUD_PROVIDER.key || target.targetType === "email") {
-		return { outcome: "insufficient_evidence", reason: "google_cloud_requires_a_web_target" };
-	}
-	if (!providerDefinitionMatchesPin(GOOGLE_CLOUD_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)) {
-		return { outcome: "insufficient_evidence", reason: "google_cloud_provider_definition_pin_mismatch" };
-	}
-	const inputs = await reportInputsFor(routeData);
-	if (target.observedUrls.length === 0 && !inputs.emailOrigin) return { outcome: "insufficient_evidence", reason: "google_cloud_requires_an_observed_url" };
-	const payload = buildGoogleCloudSubmissionPayload(inputs);
-	if (!payload) return { outcome: "insufficient_evidence", reason: "google_cloud_report_payload_invalid" };
-	return { outcome: "ready", payload };
-}
+export const prepareGoogleCloudSubmission = (context: ProviderSubmissionContext) => draft.prepare(context);
 
 /**
  * Set a field's value and fire the events the form's own script listens for.
@@ -146,19 +136,13 @@ export type GoogleCloudSubmitAnswer =
 export async function readGoogleCloudSubmitResponse(response: Pick<HTTPResponse, "status" | "text">): Promise<GoogleCloudSubmitAnswer> {
 	const body = await response.text().catch(() => "");
 	// Google prefixes JSON API responses with an anti-hijacking line.
-	const json = asRecord((() => {
-		try {
-			return JSON.parse(body.replace(/^\)\]\}'[^\n]*\n/, "")) as unknown;
-		} catch {
-			return undefined;
-		}
-	})());
+	const json = jsonRecord(body.replace(/^\)\]\}'[^\n]*\n/, ""));
 	const status = response.status();
 	if (status >= 400 && status < 500) {
-		throw new ProviderSubmissionRejectedError(`Google Cloud abuse form rejected the report with HTTP ${status}: ${body.slice(0, 300)}`);
+		throw new ProviderSubmissionRejectedError(`Google Cloud abuse form rejected the report with HTTP ${status}: ${snippet(body)}`);
 	}
 	if (status < 200 || status >= 300 || !json) {
-		throw new Error(`Google Cloud abuse form answered HTTP ${status} with an unreadable response: ${body.slice(0, 300)}`);
+		throw new Error(`Google Cloud abuse form answered HTTP ${status} with an unreadable response: ${snippet(body)}`);
 	}
 	const results = Array.isArray(json.result) ? json.result.filter((item): item is string => typeof item === "string") : [];
 	const [first] = results;
@@ -168,9 +152,9 @@ export async function readGoogleCloudSubmitResponse(response: Pick<HTTPResponse,
 	}
 	if (results.length > 0 && results.every((item) => item.split(":")[0] === "REQUIRED_RECAPTCHA")) return { outcome: "captcha_required" };
 	if (first?.startsWith("PERM_FAILURE") || (Array.isArray(json.submit_error) && json.submit_error.length > 0)) {
-		throw new ProviderSubmissionRejectedError(`Google Cloud abuse form refused the report: ${body.slice(0, 300)}`);
+		throw new ProviderSubmissionRejectedError(`Google Cloud abuse form refused the report: ${snippet(body)}`);
 	}
-	throw new Error(`Google Cloud abuse form gave an unrecognized answer: ${body.slice(0, 300)}`);
+	throw new Error(`Google Cloud abuse form gave an unrecognized answer: ${snippet(body)}`);
 }
 
 type SubmitAttempt = { answer: GoogleCloudSubmitAnswer; sentToken: "v3" | "v2" | undefined };
@@ -188,13 +172,7 @@ async function submitOnce(page: Page, step: <T>(operation: Promise<T>) => Promis
 		const notification = await formNotification(page);
 		throw new Error(`Google Cloud abuse form sent no readable answer${notification ? ` ("${notification}")` : ""}: ${error instanceof Error ? error.message : String(error)}`);
 	});
-	const sent = asRecord((() => {
-		try {
-			return JSON.parse(response.request().postData() ?? "") as unknown;
-		} catch {
-			return undefined;
-		}
-	})());
+	const sent = jsonRecord(response.request().postData() ?? "");
 	const sentToken = typeof sent?.recaptcha_response === "string" && sent.recaptcha_response ? "v2"
 		: typeof sent?.recaptcha_response_v3 === "string" && sent.recaptcha_response_v3 ? "v3"
 			: undefined;
@@ -222,19 +200,7 @@ export async function submitGoogleCloudSubmission(
 	context: ProviderSubmissionContext,
 	dependencies: GoogleCloudSubmissionDependencies = {},
 ): Promise<ProviderSubmissionSuccess> {
-	const payload = storedGoogleCloudSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted Google Cloud submission payload is malformed.");
-	const routeData = await routeContext(context.routeId);
-	const { route, target } = routeData;
-	if (route.routeType !== "provider_submission" || route.providerRegistryKey !== GOOGLE_CLOUD_PROVIDER.key
-		|| !providerDefinitionMatchesPin(GOOGLE_CLOUD_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash)
-		|| target.normalizedTarget !== payload.target.normalizedTarget) {
-		throw new Error("The persisted Google Cloud payload no longer matches its route.");
-	}
-	const expected = buildGoogleCloudSubmissionPayload(await reportInputsFor(routeData));
-	if (!expected || JSON.stringify(expected) !== JSON.stringify(payload)) {
-		throw new Error("The persisted Google Cloud payload no longer matches the report evidence.");
-	}
+	const { payload } = await draft.verify(context);
 
 	const signal = context.signal;
 	const sessionPromise = (dependencies.openPage ?? openReportingPage)();

@@ -1,4 +1,3 @@
-import { asRecord } from "../../../values";
 import { TUCOWS_PROVIDER } from "./definition";
 
 export type TucowsFetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -94,11 +93,3 @@ export function redirectPath(reply: TucowsReply): string | undefined {
 	}
 }
 
-/** A JSON answer as a record, when it is one. */
-export function jsonRecord(text: string): Record<string, unknown> | undefined {
-	try {
-		return asRecord(JSON.parse(text)) ?? undefined;
-	} catch {
-		return undefined;
-	}
-}

@@ -1,83 +1,46 @@
-import { abuseEmailCaseUrl, hostingAddressLine } from "../../mail/draft";
-import { routeContext } from "../../worker/shared";
-import { openBrowserForm, type BrowserFormRequestSession, type BrowserFormScripting, type BrowserFormSession } from "../browser_form";
-import { providerDefinitionMatchesPin } from "../definition";
-import { reportReference } from "../report_reference";
+import type { BrowserFormRequestSession, BrowserFormScripting, BrowserFormSession } from "../browser_form";
+import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
+import { formOpener, withPreflight } from "../kit/session";
 import {
 	ProviderSubmissionNeedsHumanError,
 	type ProviderSubmissionContext,
 	type ProviderSubmissionPreflight,
-	type ProviderSubmissionPreparation,
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
 import { fileGoDaddyTickets, goDaddyApiCredentials, goDaddyApiEnabled, type GoDaddyApiCredentials, type GoDaddyFetch } from "./api";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
-import {
-	buildGoDaddySubmissionPayload,
-	storedGoDaddySubmissionPayload,
-	type GoDaddyReportInput,
-	type GoDaddySubmissionPayload,
-} from "./payload";
+import { buildGoDaddySubmissionPayload, storedGoDaddySubmissionPayload } from "./payload";
 import { interpretPortalAnswer, portalFields, portalRenderedType, recaptchaTokenProbe } from "./portal";
 
 export type GoDaddyFormSession = BrowserFormSession & BrowserFormRequestSession & BrowserFormScripting;
 
-export type GoDaddyDependencies = {
+export type GoDaddyDependencies = RouteDeps & {
 	/** The browser on the Legal Portal form; tests inject a fake. */
 	openForm?: (signal: AbortSignal | undefined) => Promise<GoDaddyFormSession>;
-	loadRouteContext?: typeof routeContext;
 	environment?: Readonly<Record<string, string | undefined>>;
 	fetch?: GoDaddyFetch;
 };
-
-type Context = Awaited<ReturnType<typeof routeContext>>;
 
 /** The channel the preflight chose, with what its one filing request needs. Never persisted. */
 export type GoDaddyPreflightState =
 	| { channel: "api"; credentials: GoDaddyApiCredentials; fetch?: GoDaddyFetch }
 	| { channel: "portal"; session: GoDaddyFormSession; token: string; rendered: Awaited<ReturnType<BrowserFormSession["readFormFields"]>> };
 
-function reportInput({ route, report, target }: Context): GoDaddyReportInput {
-	const hostingLine = hostingAddressLine(route);
-	const caseUrl = abuseEmailCaseUrl(report.submissionId);
-	return {
-		target: target.normalizedTarget,
-		observedUrls: target.observedUrls,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		legalBrandUrl: report.legalBrandUrl,
-		trackingId: reportReference(report.id, route.id),
-		...(caseUrl ? { caseUrl } : {}),
-		...(hostingLine ? { hostingLine } : {}),
-	};
-}
-
-function routeIsOurs(route: Context["route"]): boolean {
-	return route.routeType === "provider_submission" && route.providerRegistryKey === PROVIDER.key
-		&& providerDefinitionMatchesPin(PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash);
-}
+const draft = createDraft({
+	definition: PROVIDER,
+	reasonPrefix: "godaddy",
+	targetTypes: ["domain"],
+	targetReason: "godaddy_requires_a_domain_target",
+	read: storedGoDaddySubmissionPayload,
+	input: reportInputOf,
+	build: buildGoDaddySubmissionPayload,
+	targetOf: (payload) => payload.target.domain,
+});
 
 /** Check the route and build the durable draft before any provider call. */
-export async function prepareGoDaddySubmission(context: ProviderSubmissionContext, dependencies: GoDaddyDependencies = {}): Promise<ProviderSubmissionPreparation> {
-	const routeData = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (!routeIsOurs(routeData.route)) return { outcome: "insufficient_evidence", reason: "godaddy_provider_definition_pin_mismatch" };
-	if (routeData.target.targetType !== "domain") return { outcome: "insufficient_evidence", reason: "godaddy_requires_a_domain_target" };
-	const payload = buildGoDaddySubmissionPayload(reportInput(routeData));
-	return payload ? { outcome: "ready", payload } : { outcome: "insufficient_evidence", reason: "godaddy_report_payload_invalid" };
-}
-
+export const prepareGoDaddySubmission = draft.prepare;
 /** The stored draft, checked against its route and rebuilt from the current report. */
-export async function verifiedGoDaddyDraft(context: ProviderSubmissionContext, dependencies: GoDaddyDependencies = {}): Promise<GoDaddySubmissionPayload> {
-	const payload = storedGoDaddySubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted GoDaddy submission payload is malformed.");
-	const routeData = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (!routeIsOurs(routeData.route) || routeData.target.normalizedTarget !== payload.target.domain) {
-		throw new Error("The persisted GoDaddy payload no longer matches its route.");
-	}
-	const expected = buildGoDaddySubmissionPayload(reportInput(routeData));
-	if (!expected || JSON.stringify(expected) !== JSON.stringify(payload)) throw new Error("The persisted GoDaddy payload no longer matches the report.");
-	return payload;
-}
+export const verifiedGoDaddyDraft = draft.verify;
 
 /**
  * Before the marker, none of which files anything: decide the channel. With an
@@ -87,7 +50,7 @@ export async function verifiedGoDaddyDraft(context: ProviderSubmissionContext, d
  * the page's own script. Every failure is a safe retry (the browser is closed).
  */
 export async function prepareGoDaddyExternalSubmission(context: ProviderSubmissionContext, dependencies: GoDaddyDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const payload = await verifiedGoDaddyDraft(context, dependencies);
+	const { payload } = await draft.verify(context, dependencies);
 	const credentials = goDaddyApiCredentials(dependencies.environment);
 	const fetchDependency = dependencies.fetch ? { fetch: dependencies.fetch } : {};
 	if (credentials && await goDaddyApiEnabled(credentials, { ...fetchDependency, ...(context.signal ? { signal: context.signal } : {}) })) {
@@ -97,14 +60,7 @@ export async function prepareGoDaddyExternalSubmission(context: ProviderSubmissi
 	if (payload.report.type !== "PHISHING") {
 		throw new ProviderSubmissionNeedsHumanError(`GoDaddy's Abuse API is not enabled for this reporter and its Legal Portal route files phishing only, not ${payload.report.type}.`);
 	}
-	const session = await (dependencies.openForm ?? ((signal) => openBrowserForm({
-		provider: PROVIDER.displayName,
-		operation: "godaddy-report",
-		url: PROVIDER.portal.formUrl,
-		formSelector: PROVIDER.portal.formSelector,
-		...(signal ? { signal } : {}),
-	})))(context.signal);
-	try {
+	return withPreflight(() => (dependencies.openForm ?? formOpener(PROVIDER, "godaddy-report", { url: PROVIDER.portal.formUrl, formSelector: PROVIDER.portal.formSelector }))(context.signal), async (session): Promise<GoDaddyPreflightState> => {
 		await session.clickAll(PROVIDER.portal.cookieBannerAccept);
 		const rendered = await session.readFormFields(PROVIDER.portal.renderedFieldPattern);
 		const renderedType = portalRenderedType(rendered);
@@ -112,11 +68,8 @@ export async function prepareGoDaddyExternalSubmission(context: ProviderSubmissi
 		// Last: a v3 token is valid for two minutes only.
 		const token = await session.evaluate(recaptchaTokenProbe, { siteKey: PROVIDER.portal.recaptcha.siteKey, action: PROVIDER.portal.recaptcha.action, timeoutMs: PROVIDER.portal.recaptcha.scriptTimeoutMs });
 		if (typeof token !== "string" || token.length < 20) throw new Error("GoDaddy's page returned no usable reCAPTCHA token.");
-		return { state: { channel: "portal", session, token, rendered } satisfies GoDaddyPreflightState, dispose: () => session.close() };
-	} catch (error) {
-		await session.close();
-		throw error;
-	}
+		return { channel: "portal", session, token, rendered };
+	});
 }
 
 /** The one irreversible request (the portal), or the API's tickets, one per URL, of the channel the preflight chose. */

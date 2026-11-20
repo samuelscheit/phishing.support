@@ -1,17 +1,12 @@
-import { routeContext } from "../../worker/shared";
 import { asRecord } from "../../../values";
-import { abuseEmailCaseUrl, hostingAddressLine } from "../../mail/draft";
-import { providerDefinitionMatchesPin } from "../definition";
 import { emailOriginOf } from "../email_origin";
-import {
-	ProviderSubmissionRejectedError,
-	type ProviderSubmissionContext,
-	type ProviderSubmissionPreparation,
-	type ProviderSubmissionSuccess,
-} from "../submission_contracts";
-import { providerResponseId, reportReference } from "../report_reference";
+import { createDraft, reportInputOf, type RouteData } from "../kit/draft";
+import { deadline, failUnlessFiled } from "../kit/http";
+import { snippet } from "../kit/text";
+import type { ProviderSubmissionContext, ProviderSubmissionSuccess } from "../submission_contracts";
+import { providerResponseId } from "../report_reference";
 import { AWS_PROVIDER } from "./definition";
-import { awsRequestBody, buildAwsSubmissionPayload, storedAwsSubmissionPayload, type AwsReportInput, type AwsSubmissionPayload } from "./payload";
+import { awsRequestBody, buildAwsSubmissionPayload, storedAwsSubmissionPayload, type AwsReportInput } from "./payload";
 
 export type AwsSubmissionDependencies = {
 	fetch?: (url: string, init: RequestInit) => Promise<Response>;
@@ -19,61 +14,31 @@ export type AwsSubmissionDependencies = {
 	now?: () => Date;
 };
 
-type Context = Awaited<ReturnType<typeof routeContext>>;
-
 /** The report's inputs; an IP target that sent a phishing email also carries that email's origin. */
-async function reportInput({ route, report, target, evidenceArtifacts }: Context): Promise<AwsReportInput & { capturedAt: Date }> {
+async function reportInput(data: RouteData): Promise<AwsReportInput & { capturedAt: Date }> {
+	const { target, evidenceArtifacts, report } = data;
 	const emailOrigin = target.observedUrls.length === 0 ? await emailOriginOf({ target, evidenceArtifacts }) : undefined;
-	const hostingLine = hostingAddressLine(route);
-	const caseUrl = abuseEmailCaseUrl(report.submissionId);
-	return {
-		target: target.normalizedTarget,
-		observedUrls: target.observedUrls,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		legalBrandUrl: report.legalBrandUrl,
-		trackingId: reportReference(report.id, route.id),
-		capturedAt: report.createdAt,
-		...(emailOrigin ? { emailOrigin } : {}),
-		...(caseUrl ? { caseUrl } : {}),
-		...(hostingLine ? { hostingLine } : {}),
-	};
+	return { ...reportInputOf(data), capturedAt: report.createdAt, ...(emailOrigin ? { emailOrigin } : {}) };
 }
 
-function routeIsOurs(route: Context["route"]): boolean {
-	return route.routeType === "provider_submission" && route.providerRegistryKey === AWS_PROVIDER.key
-		&& providerDefinitionMatchesPin(AWS_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash);
-}
+const draft = createDraft({
+	definition: AWS_PROVIDER,
+	label: "AWS",
+	reasonPrefix: "aws",
+	targetTypes: ["domain", "ip"],
+	targetReason: "aws_requires_a_web_target",
+	read: storedAwsSubmissionPayload,
+	input: reportInput,
+	// An address no page was observed on, and no email came from, is not a site: nothing to report to AWS.
+	admit: (data, input) => data.target.targetType === "ip" && !input.emailOrigin && data.target.observedUrls.length === 0 ? "aws_requires_an_observed_url_or_the_phishing_email" : undefined,
+	build: buildAwsSubmissionPayload,
+	targetOf: (payload) => payload.target.normalizedTarget,
+});
 
 /** Check the route and build the durable draft before any provider call. */
-export async function prepareAwsSubmission(context: ProviderSubmissionContext): Promise<ProviderSubmissionPreparation> {
-	const routeData = await routeContext(context.routeId);
-	if (!routeIsOurs(routeData.route)) return { outcome: "insufficient_evidence", reason: "aws_provider_definition_pin_mismatch" };
-	if (routeData.target.targetType !== "domain" && routeData.target.targetType !== "ip") return { outcome: "insufficient_evidence", reason: "aws_requires_a_web_target" };
-	const input = await reportInput(routeData);
-	// An address no page was observed on, and no email came from, is not a site: nothing to report to AWS.
-	if (routeData.target.targetType === "ip" && !input.emailOrigin && routeData.target.observedUrls.length === 0) return { outcome: "insufficient_evidence", reason: "aws_requires_an_observed_url_or_the_phishing_email" };
-	const payload = buildAwsSubmissionPayload(input);
-	if (!payload) return { outcome: "insufficient_evidence", reason: "aws_report_payload_invalid" };
-	return { outcome: "ready", payload };
-}
-
+export const prepareAwsSubmission = (context: ProviderSubmissionContext) => draft.prepare(context);
 /** The stored draft, checked against its route and rebuilt from the current report. */
-export async function verifiedAwsDraft(context: ProviderSubmissionContext): Promise<AwsSubmissionPayload> {
-	const payload = storedAwsSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted AWS submission payload is malformed.");
-	const routeData = await routeContext(context.routeId);
-	if (!routeIsOurs(routeData.route) || routeData.target.normalizedTarget !== payload.target.normalizedTarget) {
-		throw new Error("The persisted AWS payload no longer matches its route.");
-	}
-	const expected = buildAwsSubmissionPayload(await reportInput(routeData));
-	if (!expected || JSON.stringify(expected) !== JSON.stringify(payload)) throw new Error("The persisted AWS payload no longer matches the report evidence.");
-	return payload;
-}
-
-function snippet(body: string): string {
-	return body.replace(/\s+/g, " ").trim().slice(0, 300);
-}
+export const verifiedAwsDraft = async (context: ProviderSubmissionContext) => (await draft.verify(context)).payload;
 
 /**
  * File the report: the only work after the durable marker. A refusal naming
@@ -82,16 +47,14 @@ function snippet(body: string): string {
 export async function submitAwsSubmission(context: ProviderSubmissionContext, dependencies: AwsSubmissionDependencies = {}): Promise<ProviderSubmissionSuccess> {
 	const payload = await verifiedAwsDraft(context);
 	const send = dependencies.fetch ?? fetch;
-	const signal = AbortSignal.any([AbortSignal.timeout(AWS_PROVIDER.timeoutMs), ...(context.signal ? [context.signal] : [])]);
 	const response = await send(AWS_PROVIDER.endpoint, {
 		method: "POST",
 		headers: { "content-type": "application/json", accept: "application/json, text/plain, */*", origin: AWS_PROVIDER.origin },
 		body: JSON.stringify(awsRequestBody(payload, (dependencies.now ?? (() => new Date()))())),
-		signal,
+		signal: deadline(AWS_PROVIDER.timeoutMs, context.signal),
 	});
 	const text = await response.text();
-	if ([400, 413, 422].includes(response.status)) throw new ProviderSubmissionRejectedError(`AWS refused the report (HTTP ${response.status}): ${snippet(text)}`);
-	if (!response.ok) throw new Error(`AWS answered the report with HTTP ${response.status}: ${snippet(text)}`);
+	failUnlessFiled("AWS", response, snippet(text), [400, 413, 422]);
 	let answer: unknown;
 	try {
 		answer = JSON.parse(text);

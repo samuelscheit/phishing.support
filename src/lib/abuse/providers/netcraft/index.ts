@@ -1,26 +1,23 @@
-import type { ProviderReportPreviewContext, ProviderSubmissionProvider } from "../submission_contracts";
+import { defineProvider } from "../kit/provider";
 import { NETCRAFT_PROVIDER } from "./definition";
 import { prepareNetcraftSubmission, submitNetcraftSubmission } from "./submission";
 import { makeNetcraftReason } from "./payload";
-import { reconcileNetcraftProviderRun } from "./reconcile";
 import { NETCRAFT_INBOUND_MAIL } from "./inbound";
 import { fetchNetcraftCorrespondence, NETCRAFT_REVIEW_VERDICTS } from "./correspondence";
 
 /** Supplemental Netcraft route for every report with one or more observed URLs. */
-export const netcraftProvider: ProviderSubmissionProvider = {
+export const netcraftProvider = defineProvider({
 	definition: NETCRAFT_PROVIDER,
-	prepareSubmission: prepareNetcraftSubmission,
-	shouldRefreshStartingPayload: (context) => context.payload.providerNarrativeVersion !== 1,
-	buildReportPreview: (context: ProviderReportPreviewContext) => makeNetcraftReason({
+	prepare: prepareNetcraftSubmission,
+	preview: (context) => makeNetcraftReason({
 		target: context.target,
 		observedUrls: context.observedUrls,
 		description: context.description,
 		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),
-	inboundMail: NETCRAFT_INBOUND_MAIL,
-	submit: submitNetcraftSubmission,
+	inbound: NETCRAFT_INBOUND_MAIL,
+	submit: (context) => submitNetcraftSubmission(context),
 	fetchCorrespondence: (context) => fetchNetcraftCorrespondence(context),
 	reviewVerdicts: NETCRAFT_REVIEW_VERDICTS,
-};
-
+});

@@ -1,37 +1,30 @@
 import { asRecord } from "../../../values";
-import { abuseEmailCaseUrl, hostingAddressLine } from "../../mail/draft";
-import { AbuseRepository } from "../../repository";
-import { routeContext } from "../../worker/shared";
-import { openBrowserForm, type BrowserFormChoiceSession, type BrowserFormField, type BrowserFormFile, type BrowserFormResponse } from "../browser_form";
-import { providerDefinitionMatchesPin } from "../definition";
-import { providerEvidenceImageArtifactMatches } from "../evidence_image";
-import { providerResponseId, reportReference } from "../report_reference";
+import type { BrowserFormChoiceSession, BrowserFormField, BrowserFormFile, BrowserFormResponse } from "../browser_form";
+import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { formOpener, preparedState, withPreflight } from "../kit/session";
+import { snippet } from "../kit/text";
+import { providerResponseId } from "../report_reference";
 import {
 	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionContext,
 	type ProviderSubmissionPreflight,
-	type ProviderSubmissionPreparation,
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
 import { DYNADOT_PROVIDER as PROVIDER } from "./definition";
 import {
 	buildDynadotSubmissionPayload,
 	DYNADOT_EVIDENCE_CONTRACT,
-	selectDynadotEvidenceArtifact,
 	storedDynadotSubmissionPayload,
-	type DynadotReportInput,
 	type DynadotSubmissionPayload,
 } from "./payload";
 
-export type DynadotDependencies = {
+export type DynadotDependencies = RouteDeps & {
 	/** The browser on the form page with the challenge passed; tests inject a fake. */
 	openForm?: (signal: AbortSignal | undefined) => Promise<BrowserFormChoiceSession>;
-	loadRouteContext?: typeof routeContext;
-	getArtifact?: typeof AbuseRepository.getArtifact;
+	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
 };
-
-type Context = Awaited<ReturnType<typeof routeContext>>;
 
 /** What the preflight leaves for the one request after the marker. */
 export type DynadotPreflightState = {
@@ -41,51 +34,21 @@ export type DynadotPreflightState = {
 	files: BrowserFormFile[];
 };
 
-function reportInput({ route, report, target }: Context): DynadotReportInput {
-	const hostingLine = hostingAddressLine(route);
-	const caseUrl = abuseEmailCaseUrl(report.submissionId);
-	return {
-		target: target.normalizedTarget,
-		observedUrls: target.observedUrls,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		legalBrandUrl: report.legalBrandUrl,
-		trackingId: reportReference(report.id, route.id),
-		...(caseUrl ? { caseUrl } : {}),
-		...(hostingLine ? { hostingLine } : {}),
-	};
-}
-
-function routeIsOurs(route: Context["route"]): boolean {
-	return route.routeType === "provider_submission" && route.providerRegistryKey === PROVIDER.key
-		&& providerDefinitionMatchesPin(PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash);
-}
+const draft = createDraft({
+	definition: PROVIDER,
+	reasonPrefix: "dynadot",
+	targetTypes: ["domain"],
+	targetReason: "dynadot_requires_a_domain_target",
+	read: storedDynadotSubmissionPayload,
+	input: (data, stored?: DynadotSubmissionPayload) => ({ ...reportInputOf(data), evidence: evidenceReferenceOf(DYNADOT_EVIDENCE_CONTRACT, data.evidenceArtifacts, stored) }),
+	build: buildDynadotSubmissionPayload,
+	targetOf: (payload) => payload.target.domain,
+});
 
 /** Check the route and build the durable draft before any provider call. */
-export async function prepareDynadotSubmission(context: ProviderSubmissionContext, dependencies: DynadotDependencies = {}): Promise<ProviderSubmissionPreparation> {
-	const routeData = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (!routeIsOurs(routeData.route)) return { outcome: "insufficient_evidence", reason: "dynadot_provider_definition_pin_mismatch" };
-	if (routeData.target.targetType !== "domain") return { outcome: "insufficient_evidence", reason: "dynadot_requires_a_domain_target" };
-	const payload = buildDynadotSubmissionPayload({ ...reportInput(routeData), evidence: selectDynadotEvidenceArtifact(routeData.evidenceArtifacts) ?? null });
-	return payload ? { outcome: "ready", payload } : { outcome: "insufficient_evidence", reason: "dynadot_report_payload_invalid" };
-}
-
+export const prepareDynadotSubmission = draft.prepare;
 /** The stored draft, checked against its route and rebuilt from the current report around its stored screenshot. */
-export async function verifiedDynadotDraft(context: ProviderSubmissionContext, dependencies: DynadotDependencies = {}): Promise<{ payload: DynadotSubmissionPayload; routeData: Context }> {
-	const payload = storedDynadotSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted Dynadot submission payload is malformed.");
-	const routeData = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (!routeIsOurs(routeData.route) || routeData.target.normalizedTarget !== payload.target.domain) {
-		throw new Error("The persisted Dynadot payload no longer matches its route.");
-	}
-	const expected = buildDynadotSubmissionPayload({ ...reportInput(routeData), evidence: payload.evidence });
-	if (!expected || JSON.stringify(expected) !== JSON.stringify(payload)) throw new Error("The persisted Dynadot payload no longer matches the report evidence.");
-	return { payload, routeData };
-}
-
-function snippet(body: string): string {
-	return body.replace(/\s+/g, " ").trim().slice(0, 300);
-}
+export const verifiedDynadotDraft = draft.verify;
 
 /** The inputs the phishing form must render for this submission to mean what the draft says. */
 const REQUIRED_INPUTS = [PROVIDER.fields.name, PROVIDER.fields.email, PROVIDER.fields.emailConfirmation, PROVIDER.fields.phone, PROVIDER.fields.domain, PROVIDER.fields.officialWebsite, PROVIDER.fields.proxyLocations, PROVIDER.fields.domainPath, PROVIDER.fields.comments];
@@ -97,34 +60,18 @@ const REQUIRED_INPUTS = [PROVIDER.fields.name, PROVIDER.fields.email, PROVIDER.f
  * closed first).
  */
 export async function prepareDynadotExternalSubmission(context: ProviderSubmissionContext, dependencies: DynadotDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	const { payload, routeData } = await verifiedDynadotDraft(context, dependencies);
-	const files: BrowserFormFile[] = [];
-	if (payload.evidence) {
-		const artifact = await (dependencies.getArtifact ?? AbuseRepository.getArtifact)(routeData.report.id, BigInt(payload.evidence.artifactId));
-		if (!artifact || !providerEvidenceImageArtifactMatches(payload.evidence, artifact, DYNADOT_EVIDENCE_CONTRACT)) {
-			throw new Error("The persisted Dynadot evidence artifact no longer matches its immutable reference.");
-		}
-		files.push({ filename: payload.evidence.filename, mimeType: payload.evidence.mimeType, base64: Buffer.from(artifact.blob).toString("base64") });
-	}
-	const session = await (dependencies.openForm ?? ((signal) => openBrowserForm({
-		provider: PROVIDER.displayName,
-		operation: "dynadot-report",
-		url: PROVIDER.formUrl,
-		formSelector: PROVIDER.abuseTypeSelector,
-		...(signal ? { signal } : {}),
-	})))(context.signal);
-	try {
+	const { payload, data } = await draft.verify(context, dependencies);
+	const files = payload.evidence
+		? [(await loadEvidenceFile({ reference: payload.evidence, contract: DYNADOT_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Dynadot", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) })).file]
+		: [];
+	return withPreflight(() => (dependencies.openForm ?? formOpener(PROVIDER, "dynadot-report", { url: PROVIDER.formUrl, formSelector: PROVIDER.abuseTypeSelector }))(context.signal), async (session): Promise<DynadotPreflightState> => {
 		if (!await session.selectOption(PROVIDER.abuseTypeSelector, PROVIDER.abuseType)) throw new Error(`Dynadot's abuse form no longer offers the phishing type ${PROVIDER.abuseType}.`);
 		const token = await session.waitForTurnstileToken({ widgetSelector: PROVIDER.turnstileWidgetSelector });
 		const rendered = await session.readFormFields(`^(${REQUIRED_INPUTS.join("|")})$`, PROVIDER.formSelector);
 		const missing = REQUIRED_INPUTS.filter((name) => !rendered.some(([field]) => field === name));
 		if (missing.length > 0) throw new Error(`Dynadot's phishing form no longer renders ${missing.join(", ")}.`);
-		const state: DynadotPreflightState = { session, token, files };
-		return { state, dispose: () => session.close() };
-	} catch (error) {
-		await session.close();
-		throw error;
-	}
+		return { session, token, files };
+	});
 }
 
 /** The request's parts, in the order the page's own form handler builds them. */
@@ -164,10 +111,11 @@ function validationErrors(answer: BrowserFormResponse): string[] | undefined {
 export async function submitDynadotSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight | undefined): Promise<ProviderSubmissionSuccess> {
 	const payload = storedDynadotSubmissionPayload(context.payload);
 	if (!payload) throw new Error("The persisted Dynadot submission payload is malformed.");
-	const state = preflight?.state as DynadotPreflightState | undefined;
-	if (!state?.session || typeof state.token !== "string" || !state.token || !Array.isArray(state.files)) {
-		throw new Error("Dynadot submission requires its prepared browser session and Turnstile token.");
-	}
+	const state = preparedState<DynadotPreflightState>(
+		preflight,
+		(prepared) => !!prepared.session && typeof prepared.token === "string" && !!prepared.token && Array.isArray(prepared.files),
+		"Dynadot submission requires its prepared browser session and Turnstile token.",
+	);
 	const answer = await state.session.postForm(PROVIDER.submitUrl, submissionFields(payload, state), PROVIDER.timeoutMs, PROVIDER.headers);
 	const errors = validationErrors(answer);
 	if (errors && errors.length > 0) {

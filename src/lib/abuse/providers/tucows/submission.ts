@@ -1,111 +1,74 @@
-import { solveDeathByCaptchaToken, getDeathByCaptchaCredentials } from "../../captcha/death_by_captcha";
 import { imapConfig } from "../../../mail_config";
-import { abuseEmailCaseUrl, hostingAddressLine } from "../../mail/draft";
-import { AbuseRepository } from "../../repository";
-import { routeContext } from "../../worker/shared";
 import { asRecord } from "../../../values";
-import { providerDefinitionMatchesPin } from "../definition";
-import { providerEvidenceImageArtifactMatches } from "../evidence_image";
+import { captchaCredentialsProblem, solveCaptchaToken } from "../kit/captcha";
+import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
+import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
+import { jsonRecord } from "../kit/http";
+import { htmlText } from "../kit/text";
 import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
-import { reportReference, reportReferencesIn } from "../report_reference";
+import { reportReferencesIn } from "../report_reference";
 import {
 	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionContext,
 	type ProviderSubmissionPreflight,
-	type ProviderSubmissionPreparation,
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
 import { TUCOWS_PROVIDER } from "./definition";
 import {
 	buildTucowsSubmissionPayload,
-	selectTucowsEvidenceArtifact,
 	storedTucowsSubmissionPayload,
 	TUCOWS_EVIDENCE_CONTRACT,
-	type TucowsReportInput,
 	type TucowsSubmissionPayload,
 } from "./payload";
-import { createTucowsSession, hiddenCsrfToken, jsonRecord, metaCsrfToken, redirectPath, type TucowsFetch, type TucowsReply, type TucowsSession } from "./session";
+import { createTucowsSession, hiddenCsrfToken, metaCsrfToken, redirectPath, type TucowsFetch, type TucowsReply, type TucowsSession } from "./session";
 
-export type TucowsDependencies = {
+export type TucowsDependencies = RouteDeps & {
 	fetch?: TucowsFetch;
 	/** The Turnstile token for the first step. */
 	solveCaptcha?: (signal?: AbortSignal) => Promise<string>;
 	readCode?: MailedCodeReader;
-	loadRouteContext?: typeof routeContext;
-	getArtifact?: typeof AbuseRepository.getArtifact;
+	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
 	now?: () => Date;
 };
-
-type Context = Awaited<ReturnType<typeof routeContext>>;
 
 /** Everything the one filing request needs, kept in memory from before the marker. */
 type TucowsPreflightState = { session: TucowsSession; payload: TucowsSubmissionPayload; screenshot: Buffer; csrfToken: string };
 
 /** Solve the Turnstile widget of the wizard's first step. */
-async function solveTucowsCaptcha(signal?: AbortSignal): Promise<string> {
-	return solveDeathByCaptchaToken({
-		type: TUCOWS_PROVIDER.captcha.type,
-		parametersField: "turnstile_params",
-		parameters: { sitekey: TUCOWS_PROVIDER.captcha.siteKey, pageurl: TUCOWS_PROVIDER.captcha.pageUrl },
-		...(signal ? { signal } : {}),
-	});
-}
+const solveTucowsCaptcha = (signal?: AbortSignal) => solveCaptchaToken({
+	type: TUCOWS_PROVIDER.captcha.type,
+	parametersField: "turnstile_params",
+	parameters: { sitekey: TUCOWS_PROVIDER.captcha.siteKey, pageurl: TUCOWS_PROVIDER.captcha.pageUrl },
+}, signal);
 
-function reportInput({ route, report, target }: Context, evidence: TucowsReportInput["evidence"]): TucowsReportInput {
-	const hostingLine = hostingAddressLine(route);
-	const caseUrl = abuseEmailCaseUrl(report.submissionId);
-	return {
-		target: target.normalizedTarget,
-		observedUrls: target.observedUrls,
-		description: report.description,
-		allegationCategory: report.allegationCategory,
-		legalBrandUrl: report.legalBrandUrl,
-		reference: reportReference(report.id, route.id),
-		evidence,
-		...(caseUrl ? { caseUrl } : {}),
-		...(hostingLine ? { hostingLine } : {}),
-	};
-}
-
-function routeIsOurs(route: Context["route"]): boolean {
-	return route.routeType === "provider_submission" && route.providerRegistryKey === TUCOWS_PROVIDER.key
-		&& providerDefinitionMatchesPin(TUCOWS_PROVIDER, route.providerDefinitionVersion, route.providerDefinitionHash);
-}
+const draft = createDraft({
+	definition: TUCOWS_PROVIDER,
+	label: "Tucows",
+	reasonPrefix: "tucows",
+	targetTypes: ["domain"],
+	targetReason: "tucows_requires_a_domain_target",
+	read: storedTucowsSubmissionPayload,
+	input: (data, stored?: TucowsSubmissionPayload) => ({ ...reportInputOf(data), evidence: evidenceReferenceOf(TUCOWS_EVIDENCE_CONTRACT, data.evidenceArtifacts, stored) }),
+	admit: (data, input) => data.report.allegationCategory === "malware" ? "tucows_files_phishing_only"
+		: !data.report.legalBrandUrl ? "tucows_requires_a_brand_domain"
+		: !input.evidence ? "tucows_requires_a_screenshot"
+		: undefined,
+	build: buildTucowsSubmissionPayload,
+	targetOf: (payload) => payload.target.normalizedTarget,
+});
 
 /** Check the route and build the durable draft before any provider call. */
-export async function prepareTucowsSubmission(context: ProviderSubmissionContext, dependencies: TucowsDependencies = {}): Promise<ProviderSubmissionPreparation> {
-	const routeData = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (!routeIsOurs(routeData.route)) return { outcome: "insufficient_evidence", reason: "tucows_provider_definition_pin_mismatch" };
-	if (routeData.target.targetType !== "domain") return { outcome: "insufficient_evidence", reason: "tucows_requires_a_domain_target" };
-	if (routeData.report.allegationCategory === "malware") return { outcome: "insufficient_evidence", reason: "tucows_files_phishing_only" };
-	if (!routeData.report.legalBrandUrl) return { outcome: "insufficient_evidence", reason: "tucows_requires_a_brand_domain" };
-	const evidence = selectTucowsEvidenceArtifact(routeData.evidenceArtifacts);
-	if (!evidence) return { outcome: "insufficient_evidence", reason: "tucows_requires_a_screenshot" };
-	const payload = buildTucowsSubmissionPayload(reportInput(routeData, evidence));
-	return payload ? { outcome: "ready", payload } : { outcome: "insufficient_evidence", reason: "tucows_report_payload_invalid" };
-}
+export const prepareTucowsSubmission = draft.prepare;
 
 /** The stored draft, checked against its route and rebuilt from the current report; with its screenshot's bytes. */
 export async function verifiedTucowsDraft(context: ProviderSubmissionContext, dependencies: TucowsDependencies = {}): Promise<{ payload: TucowsSubmissionPayload; screenshot: Buffer }> {
-	const payload = storedTucowsSubmissionPayload(context.payload);
-	if (!payload) throw new Error("The persisted Tucows submission payload is malformed.");
-	const routeData = await (dependencies.loadRouteContext ?? routeContext)(context.routeId);
-	if (!routeIsOurs(routeData.route) || routeData.target.normalizedTarget !== payload.target.normalizedTarget) {
-		throw new Error("The persisted Tucows payload no longer matches its route.");
-	}
-	const expected = buildTucowsSubmissionPayload(reportInput(routeData, payload.evidence));
-	if (!expected || JSON.stringify(expected) !== JSON.stringify(payload)) throw new Error("The persisted Tucows payload no longer matches the report evidence.");
-	const artifact = await (dependencies.getArtifact ?? AbuseRepository.getArtifact)(routeData.report.id, BigInt(payload.evidence.artifactId));
-	if (!artifact || !providerEvidenceImageArtifactMatches(payload.evidence, artifact, TUCOWS_EVIDENCE_CONTRACT)) {
-		throw new Error("The persisted Tucows screenshot no longer matches its immutable reference.");
-	}
-	return { payload, screenshot: Buffer.from(artifact.blob) };
+	const { payload, data } = await draft.verify(context, dependencies);
+	const { bytes } = await loadEvidenceFile({ reference: payload.evidence, contract: TUCOWS_EVIDENCE_CONTRACT, reportId: data.report.id, label: "Tucows", ...(dependencies.getArtifact ? { getArtifact: dependencies.getArtifact } : {}) });
+	return { payload, screenshot: bytes };
 }
 
-function snippet(body: string): string {
-	return body.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
-}
+const snippet = htmlText;
 
 /**
  * One wizard step: post the page's own hidden CSRF token with the fields, expect
@@ -129,13 +92,8 @@ async function advance(session: TucowsSession, step: string, from: string, field
  * safe retry; a domain Tucows does not register ends the route for a person.
  */
 export async function prepareTucowsExternalSubmission(context: ProviderSubmissionContext, dependencies: TucowsDependencies = {}): Promise<ProviderSubmissionPreflight> {
-	if (!dependencies.solveCaptcha) {
-		try {
-			getDeathByCaptchaCredentials();
-		} catch (error) {
-			throw new ProviderSubmissionNeedsHumanError(`Tucows reporting needs a Turnstile solver: ${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
+	const captchaProblem = dependencies.solveCaptcha ? undefined : captchaCredentialsProblem();
+	if (captchaProblem) throw new ProviderSubmissionNeedsHumanError(`Tucows reporting needs a Turnstile solver: ${captchaProblem}`);
 	if (!dependencies.readCode && !imapConfig()) throw new ProviderSubmissionNeedsHumanError("Tucows reporting requires the IMAP mailbox to receive its verification code.");
 	const { payload, screenshot } = await verifiedTucowsDraft(context, dependencies);
 	const session = createTucowsSession(dependencies.fetch ?? fetch, context.signal);
@@ -203,7 +161,7 @@ export function tucowsCaseId(reply: { text: string; location?: string }, referen
 		const found = idFrom(json[key], ours) ?? idFrom(asRecord(json.data)?.[key], ours);
 		if (found) return found;
 	}
-	const text = reply.text.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+	const text = htmlText(reply.text, Number.POSITIVE_INFINITY);
 	for (const match of text.matchAll(/\b(?:case|ticket|reference|report)\s*(?:number|no\.?|id|#)?\s*(?:is|:|-)?\s*#?\s*([A-Za-z0-9][A-Za-z0-9_-]{3,39})\b/gi)) {
 		const found = idFrom(match[1], ours);
 		if (found) return found;

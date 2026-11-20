@@ -34,7 +34,7 @@ const eml = [
 const analysis = "- **Claimed brand:** Norton LifeLock. The email asks for a payment to renew an antivirus subscription and links to a page collecting card details.";
 const capturedAt = new Date("2026-11-20T08:00:00.000Z");
 const NOW = new Date("2026-11-20T11:02:41.500Z");
-const input = { target: IP, observedUrls: [], description: analysis, allegationCategory: "phishing", legalBrandUrl: "https://www.norton.com/", reference: REFERENCE, caseUrl: CASE, capturedAt };
+const input = { target: IP, observedUrls: [], description: analysis, allegationCategory: "phishing", legalBrandUrl: "https://www.norton.com/", trackingId: REFERENCE, caseUrl: CASE, capturedAt };
 
 describe("MSRC report for the IP that sent a phishing email", () => {
 	test("is threatType IP Address, incidentType Spam, the address as ipAddressList source, the links in the notes", async () => {
@@ -107,7 +107,7 @@ describe("MSRC report for the IP that sent a phishing email", () => {
 	test("is refused for a domain target and a malformed reference", async () => {
 		const emailOrigin = await parseEmailOrigin(eml, IP);
 		expect(buildMicrosoftSubmissionPayload({ ...input, target: "sender.example", emailOrigin })).toBeUndefined();
-		expect(buildMicrosoftSubmissionPayload({ ...input, reference: "nope", emailOrigin })).toBeUndefined();
+		expect(buildMicrosoftSubmissionPayload({ ...input, trackingId: "nope", emailOrigin })).toBeUndefined();
 	});
 
 	test("the website path is unchanged: URL threat, URLs, no IP fields", () => {

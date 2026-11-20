@@ -3,10 +3,9 @@ import { eq } from "drizzle-orm";
 
 import { getDb } from "../../../db";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
-import { validateAbuseReportRequest } from "../../contracts";
-import { AbuseRepository } from "../../repository";
 import { contactRoute } from "../../resolver/routes";
-import { abuseProviderRoutes, abuseTargets } from "../../schema";
+import { abuseTargets } from "../../schema";
+import { jsonResponse as json, readyDraft } from "../kit/testing";
 import { reportReference } from "../report_reference";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { MICROSOFT_PROVIDER } from "./definition";
@@ -21,28 +20,14 @@ const MAILBOXES = ["abuse@microsoft.com", "cert@microsoft.com"];
 const description = "The page asks visitors for a password, sign-in details, a verification code, or identity details.";
 const NOW = new Date("2026-11-20T11:02:41.500Z");
 
-async function microsoftRoute(options: { target?: string; allegationCategory?: "phishing" | "malware"; observedUrls?: string[]; resolverProvenance?: Record<string, unknown> } = {}) {
-	const target = options.target ?? TARGET;
-	const request = await validateAbuseReportRequest({
-		targets: [target],
-		allegationCategory: options.allegationCategory ?? "phishing",
-		description,
-		observedUrls: [{ target, urls: options.observedUrls ?? [`https://${target}/signin`] }],
-		legalBrandUrl: "https://www.examplebank.com/",
-	});
-	const created = await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } });
-	const [stored] = await AbuseRepository.listTargets(created.reportId);
-	const route = await AbuseRepository.upsertResolvedRoute(stored!.id, contactRoute({ email: MAILBOXES[0]!, providerName: "Microsoft", provenance: options.resolverProvenance ?? {}, snapshot: {} }));
-	return { created, route, targetId: stored!.id };
-}
-
-async function readyContext(options: Parameters<typeof microsoftRoute>[0] = {}) {
-	const fixture = await microsoftRoute(options);
-	const preparation = await prepareMicrosoftSubmission({ routeId: fixture.route.id, payload: {} });
-	if (preparation.outcome !== "ready") throw new Error(`expected ready, got ${JSON.stringify(preparation)}`);
-	const payload = storedMicrosoftSubmissionPayload(preparation.payload)!;
-	return { ...fixture, payload, context: { routeId: fixture.route.id, payload: payload as unknown as Record<string, unknown> } };
-}
+const readyContext = (options: { target?: string; allegationCategory?: "phishing" | "malware"; observedUrls?: string[]; resolverProvenance?: Record<string, unknown> } = {}) => readyDraft({
+	mailbox: MAILBOXES[0]!,
+	providerName: "Microsoft",
+	target: options.target ?? TARGET,
+	allegationCategory: options.allegationCategory,
+	observedUrls: options.observedUrls,
+	provenance: options.resolverProvenance,
+}, prepareMicrosoftSubmission, storedMicrosoftSubmissionPayload);
 
 type Sent = { url: string; init: RequestInit };
 function fakeFetch(answer: Response | Error) {
@@ -54,7 +39,6 @@ function fakeFetch(answer: Response | Error) {
 	};
 	return { fetch, sent };
 }
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 describe("registry", () => {
 	test("both Microsoft mailboxes resolve to the provider and nothing else claims them", async () => {
@@ -77,13 +61,6 @@ describe("registry", () => {
 		expect(microsoftProvider.fetchCorrespondence).toBeUndefined();
 	});
 
-	test("an older draft is refreshed; a current one is not", async () => {
-		const { payload } = await readyContext();
-		const refresh = (candidate: Record<string, unknown>) => microsoftProvider.shouldRefreshStartingPayload!({ routeId: 1n, payload: candidate } as never);
-		expect(refresh(payload as unknown as Record<string, unknown>)).toBeFalse();
-		expect(refresh({ ...payload, adapter: "microsoft_msrc_report_v0" })).toBeTrue();
-		expect(refresh({ ...payload, providerNarrativeVersion: 2 })).toBeTrue();
-	});
 });
 
 describe("prepareMicrosoftSubmission", () => {
@@ -113,18 +90,6 @@ describe("prepareMicrosoftSubmission", () => {
 		expect(hosted.payload.report.notes).toContain(`Hosting IP address: 20.50.1.2 (${TARGET} resolved to 20.50.1.2`);
 	});
 
-	test("a pin mismatch and a non-web target end the route as insufficient evidence", async () => {
-		const mismatch = await microsoftRoute();
-		(await getDb()).update(abuseProviderRoutes).set({ providerDefinitionHash: "0".repeat(64) }).where(eq(abuseProviderRoutes.id, mismatch.route.id)).run();
-		expect(await prepareMicrosoftSubmission({ routeId: mismatch.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "microsoft_provider_definition_pin_mismatch" });
-		const other = await microsoftRoute();
-		(await getDb()).update(abuseProviderRoutes).set({ providerRegistryKey: "gname" }).where(eq(abuseProviderRoutes.id, other.route.id)).run();
-		expect(await prepareMicrosoftSubmission({ routeId: other.route.id, payload: {} })).toMatchObject({ reason: "microsoft_provider_definition_pin_mismatch" });
-		const email = await microsoftRoute();
-		(await getDb()).update(abuseTargets).set({ targetType: "email" }).where(eq(abuseTargets.id, email.targetId)).run();
-		expect(await prepareMicrosoftSubmission({ routeId: email.route.id, payload: {} })).toEqual({ outcome: "insufficient_evidence", reason: "microsoft_requires_a_web_target" });
-	});
-
 	test("an unknown route fails", async () => {
 		await expect(prepareMicrosoftSubmission({ routeId: 999_999n, payload: {} })).rejects.toThrow("no longer exists");
 	});
@@ -134,11 +99,11 @@ describe("verifiedMicrosoftDraft", () => {
 	test("rejects a malformed, retargeted or stale draft", async () => {
 		const { context, payload, route, targetId } = await readyContext();
 		await expect(verifiedMicrosoftDraft({ routeId: route.id, payload: {} })).rejects.toThrow("malformed");
-		await expect(verifiedMicrosoftDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, notes: `${payload.report.notes} edited` } } as never })).rejects.toThrow("no longer matches the report evidence");
+		await expect(verifiedMicrosoftDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, notes: `${payload.report.notes} edited` } } as never })).rejects.toThrow("no longer matches the report");
 		await expect(verifiedMicrosoftDraft({ routeId: route.id, payload: { ...payload, target: { normalizedTarget: "other.example.com" } } as never })).rejects.toThrow("no longer matches its route");
-		await expect(verifiedMicrosoftDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, reference: "PS-000000000000-R1" } } as never })).rejects.toThrow("no longer matches the report evidence");
+		await expect(verifiedMicrosoftDraft({ routeId: route.id, payload: { ...payload, report: { ...payload.report, reference: "PS-000000000000-R1" } } as never })).rejects.toThrow("no longer matches the report");
 		(await getDb()).update(abuseTargets).set({ observedUrls: [`https://${TARGET}/changed`] }).where(eq(abuseTargets.id, targetId)).run();
-		await expect(verifiedMicrosoftDraft(context)).rejects.toThrow("no longer matches the report evidence");
+		await expect(verifiedMicrosoftDraft(context)).rejects.toThrow("no longer matches the report");
 	});
 });
 

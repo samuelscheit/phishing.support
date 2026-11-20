@@ -118,14 +118,6 @@ describe("registry", () => {
 		});
 	});
 
-	test("an older draft is refreshed; a current one is not", async () => {
-		const { payload } = await readyContext();
-		const refresh = (candidate: Record<string, unknown>) => alibabaCloudProvider.shouldRefreshStartingPayload!({ routeId: 1n, payload: candidate } as never);
-		expect(refresh(payload as unknown as Record<string, unknown>)).toBeFalse();
-		expect(refresh({ ...payload, adapter: "alibaba_cloud_report_v0" })).toBeTrue();
-		expect(refresh({ ...payload, providerNarrativeVersion: 2 })).toBeTrue();
-	});
-
 	test("the preview is the reason the draft stores", async () => {
 		const { payload } = await readyContext();
 		expect(alibabaCloudProvider.buildReportPreview!({ target: TARGET, observedUrls: [`https://${TARGET}/signin`], description, allegationCategory: "phishing", legalBrandUrl: "https://www.examplebank.com/" })).toBe(payload.report.reportReason);
@@ -242,8 +234,8 @@ describe("preflight: area check and evidence upload", () => {
 		const console = consoleAnswers();
 		const run = (candidate: Record<string, unknown>, routeId = context.routeId) => prepareAlibabaCloudExternalSubmission({ routeId, payload: candidate }, dependencies(console as never));
 		await expect(run({})).rejects.toThrow("malformed");
-		await expect(run({ ...payload, report: { ...payload.report, reportReason: "Totally different reason" } })).rejects.toThrow("no longer matches the report evidence");
-		await expect(run({ ...payload, report: { ...payload.report, impactItem: "https://other-bank.com/" } })).rejects.toThrow("no longer matches the report evidence");
+		await expect(run({ ...payload, report: { ...payload.report, reportReason: "Totally different reason" } })).rejects.toThrow("no longer matches the report");
+		await expect(run({ ...payload, report: { ...payload.report, impactItem: "https://other-bank.com/" } })).rejects.toThrow("no longer matches the report");
 		await expect(run({ ...payload, target: { normalizedTarget: "other-phish.com" } })).rejects.toThrow("no longer matches its route");
 		await expect(run({ ...payload, definition: { ...payload.definition, contentHash: "1".repeat(64) } })).rejects.toThrow("malformed");
 		await expect(run({ ...payload, screenshot: { ...payload.screenshot, artifactId: "99999", filename: `alibaba_cloud_report_99999_${payload.screenshot.sha256.slice(0, 12)}.png` } })).rejects.toThrow("no longer matches its immutable reference");
