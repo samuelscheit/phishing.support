@@ -6,7 +6,9 @@ import type { ArchiveWebsiteOptions, WebsitePageSession, WebsiteVerificationGate
 import { errorText } from "./error_text";
 import { buildWebsiteEvidence, type WebsiteEvidencePackage } from "./evidence/package";
 import { buildVisitEvidence } from "./evidence/visit";
-import { WEBSITE_DEVICE_LABEL, type WebsiteRevisit } from "./website_types";
+import { WEBSITE_DEVICE_LABEL, type WebsiteCloakedDestination, type WebsiteRevisit } from "./website_types";
+import { cloakedDestination, WEBSITE_FLOW_EGRESS } from "./website_archive/cloaking";
+import { VISIT_BUDGET_MS } from "./site_visit/task";
 import type { timestampEvidence } from "./evidence/timestamp";
 import { SubmissionsEntity } from "./db/entities/submissions";
 import { ArtifactsEntity } from "./db/entities/artifacts";
@@ -291,6 +293,8 @@ type WebsiteVisitResult = {
 	handedOff?: boolean;
 	/** Pages after the judged one, kept as evidence only. */
 	laterPages?: Array<{ url: string; step: number }>;
+	/** Set when the flow's destination answered every network tried with nothing and sent the visit back. */
+	cloakedDestination?: WebsiteCloakedDestination;
 };
 
 /**
@@ -315,12 +319,15 @@ async function visitWebsite(params: {
 	challengeRetried?: boolean;
 	/** The network every later capture of the visit uses: the one a challenge let through. */
 	egress?: FabricEgress;
+	/** The walks of this flow so far when its destination cloaked them: the networks that were turned away, those that could not be tried, and when the first walk began. */
+	cloaked?: { answered: FabricEgress[]; notTried: Array<{ network: string; reason: string }>; startedAt: number };
 }): Promise<WebsiteVisitResult> {
 	const { submissionId, url, whois, dependencies, capture } = params;
 	const first = params.archive;
 	const device = first.device ? { device: first.device } : {};
 	const route = params.egress ? { egress: params.egress } : {};
 	await emitStep(submissionId, "site_visit", 45);
+	const flowStartedAt = Date.now();
 	// A page from a stored capture is loaded live first: the visit walks the live site.
 	const walked = first.session ? first : await capture({ url: first.url, ...device, ...route });
 	const { session } = walked;
@@ -385,6 +392,35 @@ async function visitWebsite(params: {
 		assessments.push(...websiteSiteAssessments(archive.navigationHops.slice(assessments.length), capturedHop.index, classified.classification));
 		const last = position === archives.length - 1;
 		if (isReportable(classified.classification) || last) {
+			// A destination that answered empty and sent the visit back turned this network away:
+			// the whole flow is walked again through the others, the gate passed again in each.
+			const cloak = isReportable(classified.classification) ? undefined : cloakedDestination(visitNavigation(pages), url);
+			if (cloak) {
+				const answered = [...(params.cloaked?.answered ?? []), walked.egress ?? params.egress ?? WEBSITE_FLOW_EGRESS[0]!];
+				const notTried = [...(params.cloaked?.notTried ?? [])];
+				const startedAt = params.cloaked?.startedAt ?? flowStartedAt;
+				const reopened = { ...capturedHop, url: first.url };
+				for (const egress of WEBSITE_FLOW_EGRESS.filter((candidate) => !answered.includes(candidate) && !notTried.some(({ network }) => network === FABRIC_EGRESS_LABEL[candidate]))) {
+					const network = FABRIC_EGRESS_LABEL[egress];
+					if (Date.now() - startedAt >= (dependencies.cloakedFlowBudgetMs ?? VISIT_BUDGET_MS)) {
+						notTried.push({ network, reason: "the time budget for walking the flow again was used up" });
+						continue;
+					}
+					await emitStep(submissionId, "revisit_cloaked_destination", 72);
+					// One capture browser at a time: the residential exit is a single connection.
+					await session?.close();
+					const retried = await capture({ url: first.url, ...device, egress }).catch((error: unknown) => {
+						console.warn(`Walking ${first.url} again from the ${network} failed: ${errorText(error)}`);
+						notTried.push({ network, reason: errorText(error) });
+						return undefined;
+					});
+					if (retried) {
+						return visitWebsite({ ...params, archive: retried, egress, cloaked: { answered, notTried, startedAt }, revisit: { hops: archive.navigationHops, from: reopened, revisit: { reason: "destination_cloaked", route: network, site: cloak.site } } });
+					}
+				}
+				const record: WebsiteCloakedDestination = { host: cloak.host, site: cloak.site, answered: answered.map((egress) => FABRIC_EGRESS_LABEL[egress]), notTried };
+				return { ...base, archive, capturedHop, classification: classified.classification, assessments, pages: narrativePages(position), cloakedDestination: record };
+			}
 			// A site that turns desktops away shows the phone something else.
 			if (!isReportable(classified.classification) && asksForPhone && !first.device) {
 				await emitStep(submissionId, "revisit_as_phone", 72);
@@ -440,6 +476,12 @@ function pageTitle(html: Buffer): string | undefined {
  */
 function continuedRevisit(revisit: { hops: WebsiteNavigationHop[]; from: WebsiteNavigationHop; revisit: WebsiteRevisit }): WebsiteNavigationHop[] {
 	return revisit.hops.map((hop) => (hop.index === revisit.from.index ? { ...hop, contentCaptured: false, redirectTo: revisit.from.url, revisit: revisit.revisit } : hop));
+}
+
+/** What the case says when every network was turned away by the flow's destination. */
+function cloakedDestinationInfo(cloaked: WebsiteCloakedDestination): string {
+	const untried = cloaked.notTried.length ? ` ${cloaked.notTried.map(({ network, reason }) => `The ${network} could not be tried: ${reason}.`).join(" ")}` : "";
+	return `The site's flow leads to ${cloaked.host}, which answered every network we tried (${cloaked.answered.join(", ")}) with an empty response and sent the visit back; no report was created.${untried}`;
 }
 
 /** The network a visit a challenge blocked is repeated from: challenges trust a residential address most. */
@@ -508,6 +550,8 @@ export type WebsiteAnalysisDependencies = {
 	downloadLookups?: (sha256: string) => Promise<LookupResult[]>;
 	/** The agent that walks the site; the browser task agent in production. */
 	visitAgent?: VisitAgent;
+	/** How long after its first walk began a flow its destination cloaked may be walked again through another network. */
+	cloakedFlowBudgetMs?: number;
 	/** The request that checks what a gated page shows a visitor without its session. */
 	bareVisit?: BareVisitDependencies;
 	/** Who holds the domain a page is on, for the classifier to tell a brand's own site from a lookalike. */
@@ -738,6 +782,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			&& `Inconclusive: the visit could not finish the site's flow: ${visited.inconclusive} The last page it reached, ${archive.url}, shows nothing reportable by itself; no verdict or report was made.`;
 		const caseFinding = reportableSite
 			? `${buildWebsiteReportEvidence(capturedClassification, findingCapture)}\nThe site is reported to the responsible providers.`
+			: visited.cloakedDestination ? cloakedDestinationInfo(visited.cloakedDestination)
 			: inconclusive ?? unreportedVerdict(capturedClassification, archive.url);
 
 		await emitStep(submissionId, "analysis_run", 75);
@@ -756,7 +801,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
-				website: { url, whois, ...capturedWebsiteData(archive), siteAssessments, visit, ...(visited.laterPages ? { laterPages: visited.laterPages } : {}) },
+				website: { url, whois, ...capturedWebsiteData(archive), siteAssessments, visit, ...(visited.laterPages ? { laterPages: visited.laterPages } : {}), ...(visited.cloakedDestination ? { cloakedDestination: visited.cloakedDestination } : {}) },
 			},
 		});
 

@@ -22,13 +22,29 @@ export type WebsiteRevisit =
 	/** The page turned desktop visitors away to a phone (a QR code, a link to copy, "not available on desktop"): opened again as that phone. */
 	| { reason: "phone"; device: WebsiteMobileDevice }
 	/** A CAPTCHA or browser check still blocked the visit after waiting, as it does for the network the visit came from: opened again from `route`. */
-	| { reason: "challenge"; route: string };
+	| { reason: "challenge"; route: string }
+	/** The site the flow led to answered with nothing and sent the visit back, as a traffic filter does for a visitor it turns away: the whole flow is walked again from `route`. */
+	| { reason: "destination_cloaked"; route: string; site: string };
+
+export type WebsiteCloakedDestination = {
+	host: string;
+	site: string;
+	/** The networks the flow was walked through, each answered empty. */
+	answered: string[];
+	/** Networks that could not be tried, with why. */
+	notTried: Array<{ network: string; reason: string }>;
+};
 
 /** How a person reads a revisit: what made the capture open the page again, and how it did. */
 export function revisitWording(revisit: WebsiteRevisit): { cause: string; opened: string } {
-	return revisit.reason === "phone"
-		? { cause: "it turns desktop visitors away to a phone", opened: `as ${WEBSITE_DEVICE_LABEL[revisit.device]}` }
-		: { cause: "a CAPTCHA or browser check blocked our visit from the network it first came from", opened: `from the ${revisit.route}` };
+	switch (revisit.reason) {
+		case "phone":
+			return { cause: "it turns desktop visitors away to a phone", opened: `as ${WEBSITE_DEVICE_LABEL[revisit.device]}` };
+		case "challenge":
+			return { cause: "a CAPTCHA or browser check blocked our visit from the network it first came from", opened: `from the ${revisit.route}` };
+		case "destination_cloaked":
+			return { cause: `its flow led to ${revisit.site}, which answered with nothing and sent the visit back`, opened: `from the ${revisit.route}` };
+	}
 }
 
 /** The synthetic values a visit enters, by name. */

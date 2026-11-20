@@ -5,7 +5,7 @@ import { ResponseInputItem, ResponseOutputItem } from "openai/resources/response
 import { MailData } from "../mail_ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
 import type { WebsiteAccessGate } from "../website_access_gate";
-import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteSiteAssessment, WebsiteVisitRecord } from "../website_types";
+import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteSiteAssessment, WebsiteVisitRecord } from "../website_types";
 
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
@@ -71,6 +71,8 @@ export type WebsiteSubmissionData = {
 	autoRetry?: { attempts: number; nextAttemptAt: string; reason: string };
 	/** Why the capture could not finish the site's flow: the step it could not take. A retry visits the site again. */
 	unfinishedFlow?: string;
+	/** Set when the site's flow led to a site that answered every network tried with an empty response and sent the visit back: no verdict, no report. */
+	cloakedDestination?: WebsiteCloakedDestination;
 	/** Evidence collected after the verdict and before the report reaches any provider. */
 	investigation?: {
 		status: "queued" | "running" | "completed" | "failed";

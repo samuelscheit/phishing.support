@@ -127,6 +127,7 @@ export function humanizeAnalysisStep(value: string): string {
 		site_visit: "Walking the site as its victim would, with made-up data",
 		revisit_as_phone: "Opening the page again as an iPhone, since it turns desktops away",
 		revisit_from_other_exit: "Opening the page again from another network, since a CAPTCHA or browser check blocked the visit",
+		revisit_cloaked_destination: "Walking the site again from another network, since the site its flow leads to answered with nothing",
 		structured_response: "Confirming the result",
 		resolution: "Finding the right contacts",
 		reporting: "Preparing reports",
