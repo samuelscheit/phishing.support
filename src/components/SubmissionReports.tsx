@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCopy } from "@/components/useCopy";
 import { Bell, Check, CircleSlash, Copy, Download, ExternalLink, Mail, MessageSquareReply, OctagonAlert, Reply, Send } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -56,18 +56,9 @@ function ArtifactLink({ reportId, artifact, fallback }: { reportId: string; arti
 }
 
 function CopyReplyAddress({ replyAddress }: { replyAddress: string }) {
-	const [copied, setCopied] = useState(false);
-	const copy = async () => {
-		try {
-			await navigator.clipboard.writeText(replyAddress);
-			setCopied(true);
-			window.setTimeout(() => setCopied(false), 1_800);
-		} catch {
-			setCopied(false);
-		}
-	};
+	const { copied, copy } = useCopy();
 	return (
-		<button type="button" onClick={copy} title="Copy generated reply address" className="inline-flex max-w-full items-center gap-1 rounded border px-2 py-1 font-mono text-xs text-muted-foreground hover:bg-muted">
+		<button type="button" onClick={() => copy(replyAddress)} title="Copy generated reply address" className="inline-flex max-w-full items-center gap-1 rounded border px-2 py-1 font-mono text-xs text-muted-foreground hover:bg-muted">
 			<span className="truncate">{replyAddress}</span>
 			{copied ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" /> : <Copy className="h-3.5 w-3.5 shrink-0" />}
 		</button>

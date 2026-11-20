@@ -7,7 +7,7 @@
  * infrastructure and abuse contacts, and per site every report and every
  * timestamped evidence file. Every value can be checked against the files.
  */
-import { useState } from "react";
+import { useCopy } from "@/components/useCopy";
 import { ChevronDown, Copy, Download } from "lucide-react";
 
 import type { PublicCampaign, PublicCampaignSite, PublicReportState } from "@/lib/campaign/public_view";
@@ -59,7 +59,7 @@ function Host({ site, platform }: { site: Pick<PublicCampaignSite, "host">; plat
 }
 
 function Hash({ value }: { value: string }) {
-	const [copied, setCopied] = useState(false);
+	const { copied, copy } = useCopy(1_500);
 	return (
 		<span className="inline-flex items-center gap-1 font-mono text-xs" title={value}>
 			{value.slice(0, 16)}…{value.slice(-8)}
@@ -67,7 +67,7 @@ function Hash({ value }: { value: string }) {
 				type="button"
 				className="text-muted-foreground hover:text-foreground"
 				aria-label="Copy SHA-256"
-				onClick={() => void navigator.clipboard.writeText(value).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1_500); })}
+				onClick={() => void copy(value)}
 			>
 				{copied ? "✓" : <Copy className="size-3" />}
 			</button>

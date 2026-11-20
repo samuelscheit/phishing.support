@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useCopy } from "@/components/useCopy";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,22 +53,8 @@ export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" 
 			reader.readAsDataURL(f);
 		});
 
-	const copyEmail = async () => {
-		try {
-			if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
-				await navigator.clipboard.writeText(email);
-			} else {
-				const ta = document.createElement("textarea");
-				ta.value = email;
-				document.body.appendChild(ta);
-				ta.select();
-				document.execCommand("copy");
-				ta.remove();
-			}
-		} catch (err) {
-			console.error("copy failed", err);
-		}
-	};
+	const { copy } = useCopy();
+	const copyEmail = () => copy(email);
 
 	const handleUrlSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
