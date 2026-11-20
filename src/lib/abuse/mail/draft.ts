@@ -13,6 +13,7 @@ import { refangText } from "../../malware/defang";
 import { PRESERVATION_REQUEST } from "../preservation";
 import { approvalDraftOf } from "../persistence/approvals";
 import { asRecord } from "../../util/values";
+import { utcDate } from "../../util/date_time";
 
 const MAX_DESCRIPTION_INPUT = 12_000;
 const MAX_SUMMARY_LENGTH = 1_200;
@@ -345,7 +346,7 @@ export function hostingAddressLine(route: DraftInput["route"]): string | undefin
 	const addresses = Array.isArray(resolved) && resolved.every((value) => typeof value === "string") && resolved.includes(ip) ? resolved as string[] : [ip];
 	const snapshot = asRecord(route.resolutionSnapshot);
 	const network = valueAt(snapshot, ["ipResolution", "allocationOwner", "name"]) ?? valueAt(snapshot, ["ipResolution", "allocationOwner", "organization"]);
-	return `Hosting IP address: ${ip} (${domain} resolved to ${addresses.join(", ")} on ${route.createdAt.toISOString().slice(0, 10)}${network ? `; network ${network}` : ""})`;
+	return `Hosting IP address: ${ip} (${domain} resolved to ${addresses.join(", ")} on ${utcDate(route.createdAt)}${network ? `; network ${network}` : ""})`;
 }
 
 function bodyFor(params: {

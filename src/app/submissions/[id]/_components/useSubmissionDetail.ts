@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { SubmissionDetail } from "@/lib/submissions/details";
+import { postJson } from "@/lib/http/client";
 
 /** The submission, refreshed every three seconds, with the retry action. */
 export function useSubmissionDetail(id: string, initial: SubmissionDetail | null | undefined) {
@@ -30,9 +31,8 @@ export function useSubmissionDetail(id: string, initial: SubmissionDetail | null
 		setRetrying(true);
 		setRetryError(null);
 		try {
-			const response = await fetch(`/api/submissions/${id}/retry`, { method: "POST" });
-			const body = await response.json().catch(() => ({}));
-			if (!response.ok) throw new Error(body.error || `Retry failed (${response.status})`);
+			const queued = await postJson(`/api/submissions/${id}/retry`, undefined, "Retry failed");
+			if (!queued.ok) throw new Error(queued.error);
 			const refreshed = await fetch(`/api/submissions/${id}`);
 			if (refreshed.ok) setSubmission(await refreshed.json());
 		} catch (error) {

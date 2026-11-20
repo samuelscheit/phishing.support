@@ -26,9 +26,10 @@ import { InvestigationCard } from "./_components/InvestigationCard";
 import { NavigationTab } from "./_components/NavigationTab";
 import { RunsTab } from "./_components/RunsTab";
 import { FailedPanel, NotReportedPanel, RedirectedPanel, VerdictPanel } from "./_components/StatusPanels";
-import { hostOfUrl, verdictLabelOf } from "./_components/helpers";
+import { verdictLabelOf } from "./_components/helpers";
 import { useArchivedHtml } from "./_components/useArchivedHtml";
 import { useSubmissionDetail } from "./_components/useSubmissionDetail";
+import { hostOf } from "@/lib/network/url";
 
 function isEmlArtifact(a: SubmissionDetail["artifacts"][number]) {
 	const name = a.name?.toLowerCase();
@@ -145,7 +146,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 				</div>
 			</header>
 
-			{submission.campaign ? <CampaignLink campaign={submission.campaign} host={website ? hostOfUrl(website.url) : undefined} locale={locale} /> : null}
+			{submission.campaign ? <CampaignLink campaign={submission.campaign} host={website ? hostOf(website.url) : undefined} locale={locale} /> : null}
 
 			<div className="grid items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
 				<div className="min-w-0 space-y-6">

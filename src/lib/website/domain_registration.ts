@@ -6,6 +6,8 @@ import type { JsonRecord, ResolverDependencies } from "../abuse/resolver/types";
 import { registrableDomain } from "../abuse/security";
 import { errorText } from "../util/error_text";
 import { hasPathTenants } from "./site";
+import { canonicalHost } from "../network/url";
+import { utcDate } from "../util/date_time";
 
 /**
  * Registrars that manage domains only for verified companies, under
@@ -52,7 +54,7 @@ export type DomainRegistrationLookup = (hostname: string) => Promise<DomainRegis
  * tenants under a path (sites.google.com).
  */
 export function platformTenantSite(hostname: string): string | undefined {
-	const host = hostname.toLowerCase().replace(/\.$/, "");
+	const host = canonicalHost(hostname);
 	if (hasPathTenants(host)) return host;
 	const tenant = getDomain(host, { allowPrivateDomains: true });
 	return tenant && tenant !== registrableDomain(host) ? tenant : undefined;
@@ -64,7 +66,7 @@ function registrationDate(record: JsonRecord | undefined): string | undefined {
 		const entry = event as { eventAction?: unknown; eventDate?: unknown };
 		if (entry.eventAction !== "registration" || typeof entry.eventDate !== "string") continue;
 		const date = new Date(entry.eventDate);
-		if (Number.isFinite(date.getTime())) return date.toISOString().slice(0, 10);
+		if (Number.isFinite(date.getTime())) return utcDate(date);
 	}
 	return undefined;
 }
@@ -73,7 +75,7 @@ function nameserversOf(record: JsonRecord | undefined): string[] {
 	const list = Array.isArray(record?.nameservers) ? record.nameservers : [];
 	return list.flatMap((entry) => {
 		const name = (entry as { ldhName?: unknown }).ldhName;
-		return typeof name === "string" && name ? [name.toLowerCase().replace(/\.$/, "")] : [];
+		return typeof name === "string" && name ? [canonicalHost(name)] : [];
 	});
 }
 

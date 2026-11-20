@@ -10,6 +10,7 @@ import { factsFromDossier } from "./link";
 import { CampaignRepository } from "./repository";
 import { operatorServerRoles, type OperatorServerRole } from "./schema";
 import { fallbackDescription } from "./summary";
+import { minutesBetween } from "../util/date_time";
 
 export type { GuidancePurpose } from "./guidance";
 export type { VisitorKind } from "./kinds";
@@ -107,10 +108,6 @@ const STATE: Record<string, PublicReportState> = {
 };
 
 const artifactUrl = (id: string) => `/api/artifacts/${id}`;
-
-function minutes(from: string, to: string): number {
-	return Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 60_000));
-}
 
 function median(values: number[]): number | undefined {
 	if (!values.length) return undefined;
@@ -279,8 +276,8 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 	});
 
 	const times = [...new Set(sites.map((site) => site.firstSeenAt))].sort();
-	const gaps = times.slice(1).map((time, index) => minutes(times[index]!, time)).filter((gap) => gap > 0);
-	const durationMinutes = minutes(dossier.firstSeenAt, dossier.lastSeenAt);
+	const gaps = times.slice(1).map((time, index) => minutesBetween(times[index]!, time)).filter((gap) => gap > 0);
+	const durationMinutes = minutesBetween(dossier.firstSeenAt, dossier.lastSeenAt);
 	const typicalIntervalMinutes = sites.length >= 3 ? median(gaps) : undefined;
 	const domains = new Set(sites.map((site) => getDomain(site.host, { allowPrivateDomains: false }) ?? site.host));
 	const platform = domains.size === 1 && sites.every((site) => site.host !== [...domains][0]) ? [...domains][0] : undefined;

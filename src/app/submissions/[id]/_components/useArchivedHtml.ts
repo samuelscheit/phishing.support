@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { escapeHtml } from "@/lib/util/html";
 
 /** Wraps the body in a minimal doc to keep email styles from leaking. */
 function sanitizeHtmlForIframe(rawHtml: string): string {
@@ -24,10 +25,7 @@ async function emlToHtml(bytes: Uint8Array): Promise<string> {
 	const raw =
 		(parsed?.html as string | undefined) ||
 		(typeof parsed?.text === "string" && parsed.text.trim().length > 0
-			? `<!doctype html><html><head><meta charset="utf-8" /></head><body><pre style="white-space:pre-wrap; overflow-wrap:anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">${parsed.text
-					.replace(/&/g, "&amp;")
-					.replace(/</g, "&lt;")
-					.replace(/>/g, "&gt;")}</pre></body></html>`
+			? `<!doctype html><html><head><meta charset="utf-8" /></head><body><pre style="white-space:pre-wrap; overflow-wrap:anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">${escapeHtml(parsed.text)}</pre></body></html>`
 			: "");
 	if (!raw) throw new Error("No HTML/text content in EML");
 	return sanitizeHtmlForIframe(raw);

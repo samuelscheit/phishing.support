@@ -6,6 +6,7 @@ import { buildProviderReportNarrative } from "../providers/report_payload";
 import type { BrowserTask } from "../../browser/task/agent";
 import type { ProviderFormFacts } from "./form_facts";
 import { exactAllowedHttpsUrl, normalizeAllowedDomains } from "./provider_contract";
+import { utcDate } from "../../util/date_time";
 
 /** Model turns a provider-form task may take (each turn can fill several fields). */
 const PORTAL_TASK_MAX_STEPS = 40;
@@ -62,7 +63,7 @@ export function buildGenericProviderFormTask(params: {
 		reporterOrganization: params.reporter.organization,
 		reporterWebsite: params.reporter.website,
 		reporterContactEmail: params.reporter.email,
-		incidentDate: params.observedAt.toISOString().slice(0, 10),
+		incidentDate: utcDate(params.observedAt),
 		incidentTime: params.observedAt.toISOString().slice(11, 16),
 		incidentTimeZone: "UTC",
 		...params.analysisFacts,

@@ -2,7 +2,6 @@ import { serviceIdentity } from "../network/service_identity";
 import { abuseCaseTag } from "../abuse/mail/correlation";
 import { readVerifiedEmailDraft, verifiedEmailProviderPayload } from "../abuse/mail/draft";
 import { approvalDraftOf, type ApprovalDraft } from "../abuse/persistence/approvals";
-import { hashStableJson } from "../abuse/security";
 import { AbuseRepository } from "../abuse/repository";
 import type { AbuseProviderRoute } from "../abuse/schema";
 import { CampaignRepository } from "../campaign/repository";
@@ -21,6 +20,7 @@ import {
 	reportedSubmissionIds,
 	type ReferralMailKind,
 } from "./routes";
+import { hashStableJson } from "../util/hash";
 
 export class ReferralError extends Error {
 	constructor(message: string) {

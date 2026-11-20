@@ -23,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatUtcDateTime } from "@/lib/util/date_time";
 import type { CampaignOverview, ReferralMailView } from "@/lib/referral/overview";
 import { cn } from "@/lib/util/cn";
+import { postJson } from "@/lib/http/client";
 
 const KIND_LABEL: Record<string, string> = {
 	complaint: "Criminal complaint",
@@ -57,13 +58,6 @@ function statusClass(status: string): string {
 	return "border-slate-200 bg-slate-50 text-slate-700";
 }
 
-async function post(url: string, body: unknown): Promise<string | undefined> {
-	const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => undefined);
-	if (response?.ok) return undefined;
-	const answer = await response?.json().catch(() => undefined) as { error?: string } | undefined;
-	return answer?.error ?? "The request failed.";
-}
-
 function useAction() {
 	const router = useRouter();
 	const [busy, setBusy] = useState(false);
@@ -71,7 +65,8 @@ function useAction() {
 	const run = async (url: string, body: unknown) => {
 		setBusy(true);
 		setError(undefined);
-		const failure = await post(url, body);
+		const result = await postJson(url, body);
+		const failure = result.ok ? undefined : result.error;
 		setBusy(false);
 		if (failure) setError(failure);
 		else router.refresh();

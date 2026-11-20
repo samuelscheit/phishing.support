@@ -4,7 +4,6 @@ import { AbuseRepository } from "../repository";
 import type { resolveAbuseTarget } from "../resolver";
 import type { BrowserTask, ChatModel } from "../../browser/task/agent";
 import type { FabricCdpSessionAcquirer } from "../../browser/task/fabric";
-import { errorText as describeError } from "../../util/error_text";
 import { asRecord } from "../../util/values";
 
 export type UnknownExternalStateParams = {
@@ -27,10 +26,6 @@ export type WorkerServices = {
 };
 
 export type AbuseTargetResolver = typeof resolveAbuseTarget;
-
-export function errorText(error: unknown): string {
-	return describeError(error).slice(0, 2_000);
-}
 
 /** Throw a regular Error rather than relying on AbortSignal.reason support in
  * every runtime/provider SDK. This is used at every irreversible boundary. */

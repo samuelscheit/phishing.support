@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
-import { AlibabaConsoleError, AlibabaNeedLoginError, readConsoleAnswer, withAlibabaConsole, type AlibabaFetch } from "./api";
+import { AlibabaConsoleError, AlibabaNeedLoginError, readConsoleAnswer, withAlibabaConsole } from "./api";
 import { consoleRefusal, consoleSuccess, fakeConsoleFetch, freshSession, loginConfig, MISSING_PAGE, NEED_LOGIN, OSS_HOST, session, SUCCESS_ENV_SG, UPLOAD_POLICY } from "./test_support";
+import { type FetchLike } from "../../../http/fetch";
 
 describe("readConsoleAnswer", () => {
 	test("returns the inner Data of the console's success envelope, including falsy values", () => {
@@ -145,7 +146,7 @@ describe("console requests", () => {
 
 	test("an action name is URL-encoded and a request abort signal is passed on", async () => {
 		const seen: Array<{ url: string; signal?: AbortSignal | null }> = [];
-		const fetch: AlibabaFetch = async (url, init) => { seen.push({ url, signal: init.signal }); return new Response(consoleSuccess(1)); };
+		const fetch: FetchLike = async (url, init) => { seen.push({ url: String(url), signal: init?.signal }); return new Response(consoleSuccess(1)); };
 		const controller = new AbortController();
 		await withAlibabaConsole((api) => api.call("A&B"), { fetch, config: loginConfig, getSession: async () => session, signal: controller.signal });
 		expect(seen[0]!.url).toBe("https://report.alibabacloud.com/data/api.json?action=A%26B&product=abusereport");
@@ -292,7 +293,7 @@ describe("evidence upload", () => {
 	});
 
 	test("a non-2xx answer from the storage is an upload error carrying status and the <Code> only, never the body or key", async () => {
-		const fetch: AlibabaFetch = async (url) => url === OSS_HOST
+		const fetch: FetchLike = async (url) => url === OSS_HOST
 			? new Response("<Error><Code>AccessDenied</Code><Message>secret</Message><OSSAccessKeyId>STS.NTestAccessId</OSSAccessKeyId></Error>", { status: 403 })
 			: new Response(consoleSuccess(UPLOAD_POLICY));
 		let caught: unknown;
@@ -306,7 +307,7 @@ describe("evidence upload", () => {
 		expect((caught as Error).message).not.toContain("STS.");
 		expect((caught as Error).message).not.toContain(UPLOAD_POLICY.Key);
 		// A body without a <Code> adds nothing.
-		const bare: AlibabaFetch = async (url) => url === OSS_HOST ? new Response("<html>nope</html>", { status: 502 }) : new Response(consoleSuccess(UPLOAD_POLICY));
+		const bare: FetchLike = async (url) => url === OSS_HOST ? new Response("<html>nope</html>", { status: 502 }) : new Response(consoleSuccess(UPLOAD_POLICY));
 		await expect(withAlibabaConsole((api) => api.upload(file), { fetch: bare, config: loginConfig, getSession: async () => session })).rejects.toThrow("HTTP 502.");
 		// Storage errors are not provider rejections of a report.
 		expect(caught).not.toBeInstanceOf(ProviderSubmissionRejectedError);

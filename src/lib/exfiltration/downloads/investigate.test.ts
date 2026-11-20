@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,9 +6,10 @@ import path from "node:path";
 import { buildSampleArchive } from "./archive_adapter";
 import type { LookupResult } from "./policy";
 import { investigateDownload, type InvestigationDependencies } from "./investigate";
+import { sha256Hex } from "../../util/hash";
 
 const bytes = Buffer.from("synthetic-downloaded-file-for-investigation-tests");
-const sha256 = createHash("sha256").update(bytes).digest("hex");
+const sha256 = sha256Hex(bytes);
 const evidence = { bytes, remoteName: "Teams setup.exe", signature: "not_signed" as const };
 // The production AES builder: the store verifies every archive it writes by reading it back.
 const wrap = buildSampleArchive;
@@ -95,7 +95,7 @@ describe("download investigation storage", () => {
 describe("download investigation without any configured store", () => {
 	test("a verdict lookup still runs and the outcome is recorded when no store root is set", async () => {
 		const bytesHere = Buffer.from("no-store-path-sample");
-		const hash = createHash("sha256").update(bytesHere).digest("hex");
+		const hash = sha256Hex(bytesHere);
 		const seen: string[] = [];
 		const outcome = await investigateDownload(
 			{ bytes: bytesHere, remoteName: "a.exe", signature: "not_signed" },

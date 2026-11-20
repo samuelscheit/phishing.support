@@ -10,9 +10,11 @@ import { browserRequestHeaders } from "../network/service_identity";
 import { errorSummary } from "../util/error_text";
 import { asRecord } from "../util/values";
 import { readResponseBody, retryWithTimeout, withTimeout } from "../network/bounded_fetch";
-import { fetchThroughPublicRedirects, PublicRedirectError, urlHostname, type PublicFetch } from "../network/public_redirects";
+import { fetchThroughPublicRedirects, PublicRedirectError } from "../network/public_redirects";
 import { classifySite, siteOf, type DnsObservation, type HttpObservation } from "./classify";
 import type { siteChecks } from "./schema";
+import { urlHostname } from "../network/url";
+import { type FetchLike } from "../http/fetch";
 
 const DNS_TIMEOUT_MS = 5_000;
 const RDAP_TIMEOUT_MS = 30_000;
@@ -32,7 +34,7 @@ export type SiteCheckDependencies = {
 	dns?: SiteDnsResolver;
 	/** The domain's RDAP lookup, with the resolver's SSRF guard and bootstrap. */
 	rdap?: ResolverDependencies;
-	fetch?: PublicFetch;
+	fetch?: FetchLike;
 	/** Guards every HTTP hop; production refuses hosts that resolve to private addresses. */
 	assertPublicHost?: (hostname: string) => Promise<void>;
 	signal?: AbortSignal;

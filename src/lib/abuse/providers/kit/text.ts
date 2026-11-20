@@ -1,11 +1,7 @@
 import { normalizePublicHttpUrl } from "../../security";
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget, truncateProviderText, type ProviderReportProfile } from "../report_payload";
+import { snippet, truncateAtWord } from "../../../util/text";
+import { buildProviderReportNarrative, normalizeObservedUrlForTarget, type ProviderReportProfile } from "../report_payload";
 import type { ReportInput } from "./draft";
-
-/** A provider's answer, flattened to one short line for an error message. */
-export function snippet(text: string, maximum = 300): string {
-	return text.replace(/\s+/g, " ").trim().slice(0, maximum);
-}
 
 /** The visible text of an HTML answer, as a snippet. */
 export function htmlText(html: string, maximum = 300): string {
@@ -88,7 +84,7 @@ export function composeFreeText(params: {
 }): string | undefined {
 	const { input } = params;
 	const after = [
-		input.hostingLine ? truncateProviderText(input.hostingLine, params.hostingLimit) : undefined,
+		input.hostingLine ? truncateAtWord(input.hostingLine, params.hostingLimit) : undefined,
 		input.caseUrl ? `Case details and screenshots: ${input.caseUrl}` : undefined,
 	].filter((part): part is string => !!part);
 	let maximum: number;

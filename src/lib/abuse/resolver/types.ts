@@ -3,14 +3,13 @@ import type { AbuseTargetType } from "../schema";
 import type { RdapLocator } from "../../network/rdap_bootstrap";
 
 import type { JsonRecord } from "../../util/values";
+import { type FetchLike } from "../../http/fetch";
 
 export type { JsonRecord };
 
-type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
 export type ResolverDependencies = {
 	/** Injectable for deterministic resolver tests. Production uses global fetch. */
-	fetch?: FetchImplementation;
+	fetch?: FetchLike;
 	/** Bounds each HTTP response, including body reads. Production defaults to 12 seconds. */
 	httpTimeoutMs?: number;
 	/** Number of bounded RDAP/RIPE HTTP attempts. Defaults to two. */

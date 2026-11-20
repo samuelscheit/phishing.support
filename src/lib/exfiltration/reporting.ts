@@ -1,8 +1,8 @@
 import type { ReporterMetadata } from "../http/reporter_headers";
 import { AbuseRepository, type CreatedAbuseReport } from "../abuse/repository";
 import { normalizeAbuseTarget, normalizeObservedUrl, type NormalizedAbuseTarget, type ValidatedAbuseReportRequest } from "../abuse/contracts";
-import { hashStableJson, sha256Hex, stableJson } from "../abuse/security";
 import type { ExfiltrationBackend } from "./types";
+import { hashStableJson, sha256Hex, stableJson } from "../util/hash";
 
 function backendTarget(backend: ExfiltrationBackend): NormalizedAbuseTarget {
 	let normalizedTarget: string;

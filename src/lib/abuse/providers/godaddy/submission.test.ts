@@ -4,7 +4,6 @@ import { contactRoute } from "../../resolver/routes";
 import { BrowserFormError, type BrowserFormField, type BrowserFormResponse } from "../browser_form";
 import { reportReference } from "../report_reference";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
-import type { GoDaddyFetch } from "./api";
 import { fetchGoDaddyCorrespondence } from "./correspondence";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
 import { goDaddyConfirmationIds, goDaddyProvider } from "./index";
@@ -18,6 +17,8 @@ import {
 	type GoDaddyFormSession,
 	type GoDaddyPreflightState,
 } from "./submission";
+import { type AnswerFetch } from "../../../http/fetch";
+import { formAnswer } from "../kit/testing";
 
 const TARGET = "login-example-phish.com";
 const description = "The page asks visitors for a password, sign-in details, a verification code, or identity details. Brand: ExampleBank";
@@ -53,7 +54,7 @@ function fakeSession(options: { post?: BrowserFormResponse | Error; rendered?: B
 		evaluate: async (_fn: unknown, argument: unknown) => { calls.push({ kind: "evaluate", argument }); if (options.evaluateError) throw options.evaluateError; return "token" in options ? options.token : TOKEN; },
 		postForm: async (url: string, fields: readonly BrowserFormField[], timeoutMs?: number, headers?: unknown) => {
 			calls.push({ kind: "post", url, fields: [...fields], timeoutMs, headers });
-			const answer = options.post ?? answerOf({ success: ["x"], fail: [] });
+			const answer = options.post ?? formAnswer({ success: ["x"], fail: [] });
 			if (answer instanceof Error) throw answer;
 			return answer;
 		},
@@ -61,13 +62,12 @@ function fakeSession(options: { post?: BrowserFormResponse | Error; rendered?: B
 	} as unknown as GoDaddyFormSession;
 	return { session, calls, closed: () => closed };
 }
-const answerOf = (json: unknown, status = 200): BrowserFormResponse => ({ status, text: JSON.stringify(json), json });
 
 type FetchAnswer = { status: number; body?: unknown };
 function apiFetch(...answers: Array<FetchAnswer | Error>) {
 	const calls: Array<{ url: string; method: string; body: any }> = [];
-	const fetch: GoDaddyFetch = async (url, init) => {
-		calls.push({ url, method: init.method ?? "GET", body: init.body ? JSON.parse(init.body as string) : undefined });
+	const fetch: AnswerFetch = async (url, init = {}) => {
+		calls.push({ url: String(url), method: init.method ?? "GET", body: init.body ? JSON.parse(init.body as string) : undefined });
 		const answer = answers.shift() ?? new Error("unexpected call");
 		if (answer instanceof Error) throw answer;
 		return { status: answer.status, text: async () => answer.body === undefined ? "" : JSON.stringify(answer.body) };
@@ -181,7 +181,7 @@ describe("prepareGoDaddyExternalSubmission: the channel is chosen before the mar
 });
 
 describe("submitGoDaddySubmission: API channel", () => {
-	const state = (fetch: GoDaddyFetch): { state: GoDaddyPreflightState } => ({ state: { channel: "api", credentials: { key: "KEY", secret: "SECRET" }, fetch } });
+	const state = (fetch: AnswerFetch): { state: GoDaddyPreflightState } => ({ state: { channel: "api", credentials: { key: "KEY", secret: "SECRET" }, fetch } });
 
 	test("files one ticket per URL and settles on the first u_number, keeping the reference in the text", async () => {
 		const { payload } = await draft();
@@ -218,7 +218,7 @@ describe("submitGoDaddySubmission: portal channel", () => {
 	}
 
 	test("posts exactly the form's fields with the portal header, once, and settles on the portal's case id", async () => {
-		const { context, payload, fake, preflight } = await prepared(answerOf({ success: [{ caseId: "DCU12345678" }], fail: [] }));
+		const { context, payload, fake, preflight } = await prepared(formAnswer({ success: [{ caseId: "DCU12345678" }], fail: [] }));
 		const success = await submitGoDaddySubmission(context, preflight);
 		expect(success).toEqual({
 			confirmationId: "DCU12345678",
@@ -246,19 +246,19 @@ describe("submitGoDaddySubmission: portal channel", () => {
 	});
 
 	test("without a case id in the answer the reference is the confirmation (the id arrives by mail)", async () => {
-		const { context, payload, preflight } = await prepared(answerOf({ success: ["Report received"], fail: [] }));
+		const { context, payload, preflight } = await prepared(formAnswer({ success: ["Report received"], fail: [] }));
 		expect((await submitGoDaddySubmission(context, preflight)).confirmationId).toBe(payload.report.trackingId);
 	});
 
 	test("refusals that prove nothing was filed are rejected; a captcha verdict goes to a person", async () => {
 		for (const result of [
-			answerOf({ error: "Invalid source URL", success: [], fail: [] }, 400),
-			answerOf({ success: [], fail: ["https://a.com/ is not hosted or registered at GoDaddy"] }),
+			formAnswer({ error: "Invalid source URL", success: [], fail: [] }, 400),
+			formAnswer({ success: [], fail: ["https://a.com/ is not hosted or registered at GoDaddy"] }),
 		]) {
 			const { context, preflight } = await prepared(result);
 			expect(await submitGoDaddySubmission(context, preflight).catch((caught) => caught)).toBeInstanceOf(ProviderSubmissionRejectedError);
 		}
-		for (const result of [answerOf({ error: "Captcha verification is required", success: [], fail: [] }, 400), answerOf({ error: "reCAPTCHA verification failed", success: [], fail: [] }, 400)]) {
+		for (const result of [formAnswer({ error: "Captcha verification is required", success: [], fail: [] }, 400), formAnswer({ error: "reCAPTCHA verification failed", success: [], fail: [] }, 400)]) {
 			const { context, preflight } = await prepared(result);
 			expect(await submitGoDaddySubmission(context, preflight).catch((caught) => caught)).toBeInstanceOf(ProviderSubmissionNeedsHumanError);
 		}
@@ -267,13 +267,13 @@ describe("submitGoDaddySubmission: portal channel", () => {
 	test("everything else is ambiguous, never a rejection", async () => {
 		const results: Array<[string, BrowserFormResponse | Error]> = [
 			["akamai 403", { status: 403, text: "<html>Access Denied</html>", json: undefined }],
-			["429", answerOf({ error: "Too many requests" }, 429)],
+			["429", formAnswer({ error: "Too many requests" }, 429)],
 			["500", { status: 500, text: "boom", json: undefined }],
-			["200 both empty", answerOf({ success: [], fail: [] })],
-			["200 without lists", answerOf({ ok: true })],
+			["200 both empty", formAnswer({ success: [], fail: [] })],
+			["200 without lists", formAnswer({ ok: true })],
 			["200 non-JSON", { status: 200, text: "<html>", json: undefined }],
-			["500 with a refusal-looking body", answerOf({ error: "Invalid", success: [], fail: [] }, 500)],
-			["json null", answerOf(null)],
+			["500 with a refusal-looking body", formAnswer({ error: "Invalid", success: [], fail: [] }, 500)],
+			["json null", formAnswer(null)],
 			["request failed", new BrowserFormError("request", "GoDaddy: the request to /api/v1/submit/abuse failed (Failed to fetch)")],
 		];
 		for (const [name, result] of results) {
@@ -286,11 +286,11 @@ describe("submitGoDaddySubmission: portal channel", () => {
 	});
 
 	test("a partial success (some fail) still counts as filed and mentions the refusal", () => {
-		const accepted = interpretPortalAnswer(answerOf({ success: [{ case_id: "DCU12345678" }], fail: ["https://b.com/"] }));
+		const accepted = interpretPortalAnswer(formAnswer({ success: [{ case_id: "DCU12345678" }], fail: ["https://b.com/"] }));
 		expect(accepted).toEqual({ caseId: "DCU12345678", text: "GoDaddy's Legal Portal accepted the report (it refused: https://b.com/)" });
-		expect(interpretPortalAnswer(answerOf({ success: ["DCU12345678 created"], fail: [] })).caseId).toBe("DCU12345678");
-		expect(interpretPortalAnswer(answerOf({ success: [12345], fail: [] })).caseId).toBe("12345");
-		expect(interpretPortalAnswer(answerOf({ success: [42], fail: [] })).caseId).toBeUndefined();
+		expect(interpretPortalAnswer(formAnswer({ success: ["DCU12345678 created"], fail: [] })).caseId).toBe("DCU12345678");
+		expect(interpretPortalAnswer(formAnswer({ success: [12345], fail: [] })).caseId).toBe("12345");
+		expect(interpretPortalAnswer(formAnswer({ success: [42], fail: [] })).caseId).toBeUndefined();
 	});
 
 	test("never runs without a prepared channel or on a malformed draft, and the entry points need the preflight", async () => {

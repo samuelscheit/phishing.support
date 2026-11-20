@@ -13,7 +13,7 @@ import type { ChatResponse, ToolCall } from "browser-fabric/packages/task-agent/
  * the agent's turns by reading element refs from each observation.
  */
 
-export const chromiumExecutable = process.env.PHISHING_TEST_CHROMIUM
+const chromiumExecutable = process.env.PHISHING_TEST_CHROMIUM
 	?? `${homedir()}/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 export const chromiumAvailable = await Bun.file(chromiumExecutable).exists();
 

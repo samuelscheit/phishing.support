@@ -1,5 +1,4 @@
 import { AbuseRepository } from "../repository";
-import { hashStableJson } from "../security";
 
 import { providerDefinitionMatchesPin } from "./kit/pin";
 
@@ -13,9 +12,10 @@ import {
 	type ProviderSubmissionSuccess,
 } from "./submission_contracts";
 import { throwIfAborted } from "../worker/shared";
-import { errorText as describeError } from "../../util/error_text";
+import { boundedErrorText } from "../../util/error_text";
 import { isRecord } from "../../util/values";
 import { MINUTE_MS, HOUR_MS, DAY_MS } from "../../util/date_time";
+import { hashStableJson } from "../../util/hash";
 
 export type ProviderSubmissionExecutionResult =
 	| { outcome: "submitted"; runId: bigint }
@@ -36,10 +36,6 @@ export class ProviderSubmissionUnknownExternalStateError extends Error {
 		super(message);
 		this.name = "ProviderSubmissionUnknownExternalStateError";
 	}
-}
-
-function errorText(error: unknown): string {
-	return describeError(error).slice(0, 2_000);
 }
 
 function isPreparation(value: unknown): value is ProviderSubmissionPreparation {
@@ -114,7 +110,7 @@ async function settleKnownFailure(params: {
 		return markUnknownExternal({
 			routeId: params.routeId,
 			runId: params.runId,
-			error: `Provider ${status} could not be durably settled: ${errorText(error)}`,
+			error: `Provider ${status} could not be durably settled: ${boundedErrorText(error)}`,
 			reason: `${status}_settlement_failed`,
 		});
 	}
@@ -148,7 +144,7 @@ async function refreshDraft(provider: ProviderSubmissionProvider, route: { id: b
 		throwIfAborted(context.signal);
 	} catch (error) {
 		const status = knownFailureStatus(error);
-		if (status) return settle(status, errorText(error));
+		if (status) return settle(status, boundedErrorText(error));
 		throw error;
 	}
 	if (!isPreparation(preparation)) return settle("needs_human", "provider_submission_preparation_invalid");
@@ -220,7 +216,7 @@ export async function executeProviderSubmission(params: {
 				throwIfAborted(params.signal);
 			} catch (error) {
 				const status = knownFailureStatus(error);
-				if (status) return settleKnownFailure({ routeId: route.id, status, reason: errorText(error) });
+				if (status) return settleKnownFailure({ routeId: route.id, status, reason: boundedErrorText(error) });
 				// Nothing irreversible has happened, so ordinary preparation errors
 				// remain retryable by the durable job.
 				throw error;
@@ -321,7 +317,7 @@ export async function executeProviderSubmission(params: {
 			// An explicit auth/session failure happens before the marker, so no
 			// complaint was filed; settle it for a person instead of retrying.
 			if (error instanceof ProviderSubmissionNeedsHumanError) {
-				return settleKnownFailure({ routeId: route.id, runId: run.id, status: "needs_human", reason: errorText(error) });
+				return settleKnownFailure({ routeId: route.id, runId: run.id, status: "needs_human", reason: boundedErrorText(error) });
 			}
 			throw error;
 		}
@@ -356,14 +352,14 @@ export async function executeProviderSubmission(params: {
 	} catch (error) {
 		await disposePreflight(preflight);
 		const status = knownFailureStatus(error);
-		if (status) return settleKnownFailure({ routeId: route.id, runId: run.id, status, reason: errorText(error) });
-		await AbuseRepository.markUnknownExternalState({ routeId: route.id, runId: run.id, error: errorText(error), reason: "provider_submission_ambiguous" });
+		if (status) return settleKnownFailure({ routeId: route.id, runId: run.id, status, reason: boundedErrorText(error) });
+		await AbuseRepository.markUnknownExternalState({ routeId: route.id, runId: run.id, error: boundedErrorText(error), reason: "provider_submission_ambiguous" });
 		// The provider may have filed it anyway; its own records settle that later.
 		if (params.provider.findSubmission) {
 			await queueReceiptLookup(route, run.id, { delayMs: nextReceiptLookupDelayMs(0)! })
 				.catch((queueError: unknown) => console.warn(`Queueing the receipt lookup for route ${route.id.toString()} failed:`, queueError));
 		}
-		throw new ProviderSubmissionUnknownExternalStateError(errorText(error));
+		throw new ProviderSubmissionUnknownExternalStateError(boundedErrorText(error));
 	}
 	await disposePreflight(preflight);
 	if (!isSubmissionSuccess(success)) {
@@ -390,7 +386,7 @@ export async function executeProviderSubmission(params: {
 		return markUnknownExternal({
 			routeId: route.id,
 			runId: run.id,
-			error: `Provider submission completed but its durable settlement failed: ${errorText(error)}`,
+			error: `Provider submission completed but its durable settlement failed: ${boundedErrorText(error)}`,
 			reason: "provider_submission_settlement_failed",
 		});
 	}

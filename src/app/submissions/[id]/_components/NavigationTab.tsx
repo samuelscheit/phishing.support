@@ -4,6 +4,7 @@ import { ExternalLinkConfirm } from "@/components/ExternalLinkConfirm";
 import { CANARY_FIELD_LABEL, describeDataEntryField, revisitWording } from "@/lib/website/types";
 import { cn } from "@/lib/util/cn";
 import { hopFindingLabel, type NavigationHop, type SiteAssessment, type WebsiteData } from "./helpers";
+import { OfferedFile } from "@/components/OfferedFile";
 
 function HopItem({ hop, assessment, website }: { hop: NavigationHop; assessment: SiteAssessment | undefined; website: WebsiteData }) {
 	const { verificationGate, providerWarning, offeredDownload, redirectSubmissionId } = website;
@@ -34,7 +35,7 @@ function HopItem({ hop, assessment, website }: { hop: NavigationHop; assessment:
 					) : null}
 					{offeredDownload && hop.contentCaptured ? (
 						<div className="space-y-0.5 text-xs text-muted-foreground">
-							<div>Offers <span className="font-mono">{offeredDownload.fileName}</span> ({offeredDownload.sizeBytes.toLocaleString()} bytes), downloaded by the visit and inspected without running it</div>
+							<div>Offers <OfferedFile download={offeredDownload} />, downloaded by the visit and inspected without running it</div>
 							<div className="font-mono">SHA-256 {offeredDownload.sha256}</div>
 							{offeredDownload.inspection.browserExtension ? (
 								<div>Browser extension “{offeredDownload.inspection.browserExtension.name}” with permissions {[...offeredDownload.inspection.browserExtension.permissions, ...offeredDownload.inspection.browserExtension.hostPermissions].join(", ")}</div>

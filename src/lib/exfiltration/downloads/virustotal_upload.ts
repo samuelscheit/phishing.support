@@ -1,10 +1,9 @@
+import { type FetchLike } from "../../http/fetch";
 /** Official VirusTotal v3 upload endpoint, documented for files up to 32 MB. */
 const VIRUSTOTAL_UPLOAD_URL = "https://www.virustotal.com/api/v3/files";
 /** Largest file POST /files accepts. Larger files need a single-use upload URL, which is not implemented here. */
 export const VIRUSTOTAL_DIRECT_UPLOAD_LIMIT_BYTES = 32 * 1024 * 1024;
 const UPLOAD_TIMEOUT_MS = 120_000;
-
-type Fetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 export type VirusTotalUploadResult =
 	| { state: "submitted"; analysisId: string }
@@ -21,7 +20,7 @@ export async function uploadToVirusTotal(params: {
 	apiKey: string | undefined;
 	/** A safe leaf name we chose, not the remote file name. */
 	fileName: string;
-	fetch?: Fetch;
+	fetch?: FetchLike;
 }): Promise<VirusTotalUploadResult> {
 	if (!params.apiKey?.trim()) return { state: "not_attempted", reason: "not_configured" };
 	if (params.bytes.byteLength > VIRUSTOTAL_DIRECT_UPLOAD_LIMIT_BYTES) return { state: "not_attempted", reason: "too_large" };

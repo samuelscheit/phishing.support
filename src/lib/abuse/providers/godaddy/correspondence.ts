@@ -3,7 +3,8 @@ import { isReportReference } from "../report_reference";
 import type { ProviderCorrespondence } from "../submission_contracts";
 import { fetchGoDaddyTicket, goDaddyApiCredentials, type GoDaddyApiDependencies } from "./api";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
-import { fetchPortalCaseStatus, type PortalFetch } from "./portal";
+import { fetchPortalCaseStatus } from "./portal";
+import { type AnswerFetch } from "../../../http/fetch";
 
 /**
  * What GoDaddy's states mean for the report. The API's `closeReason`
@@ -24,7 +25,7 @@ export const GODADDY_REVIEW_VERDICTS: Readonly<Record<string, AbuseMailClassific
  */
 export async function fetchGoDaddyCorrespondence(
 	context: { confirmationId: string; signal?: AbortSignal },
-	dependencies: GoDaddyApiDependencies & { portalFetch?: PortalFetch } = {},
+	dependencies: GoDaddyApiDependencies & { portalFetch?: AnswerFetch } = {},
 ): Promise<ProviderCorrespondence> {
 	const caseId = context.confirmationId;
 	if (isReportReference(caseId) || !new RegExp(`^${PROVIDER.portal.casePattern}$`).test(caseId)) return { messages: [] };

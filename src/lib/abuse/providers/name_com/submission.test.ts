@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 
 import { useTemporaryDatabase } from "../../../db/test_helpers";
@@ -22,6 +21,7 @@ import {
 	type NameComPreflightState,
 	type NameComSession,
 } from "./submission";
+import { sha256Hex } from "../../../util/hash";
 
 useTemporaryDatabase();
 
@@ -130,7 +130,7 @@ describe("CSRF handshake helpers", () => {
 		expect(headers).toEqual({
 			time: "1763700000000",
 			start: "2f0c",
-			"x-csrf-token-auth": createHash("sha256").update("2f0c1763700000000" + "2f0c").digest("hex"),
+			"x-csrf-token-auth": sha256Hex("2f0c1763700000000" + "2f0c"),
 			"referrer-override": "https://www.name.com/",
 		});
 		expect(headers["x-csrf-token-auth"]).toMatch(/^[0-9a-f]{64}$/);
@@ -177,7 +177,7 @@ describe("prepareNameComExternalSubmission", () => {
 		const handshake = fake.calls[3] as Extract<Call, { kind: "request" }>;
 		expect([handshake.method, handshake.url]).toEqual(["GET", "https://www.name.com/csrf"]);
 		const headers = handshake.headers!;
-		expect(headers["x-csrf-token-auth"]).toBe(createHash("sha256").update(headers.start! + headers.time! + headers.start!).digest("hex"));
+		expect(headers["x-csrf-token-auth"]).toBe(sha256Hex(headers.start! + headers.time! + headers.start!));
 		expect(headers["referrer-override"]).toBe("https://www.name.com/");
 		expect(fake.calls[4]).toEqual({ kind: "request", method: "POST", url: PROVIDER.verifyCaptchaUrl, headers: { "x-csrf-token-auth": TOKEN }, json: { supportFormRecaptcha: "0.TURNSTILE" } });
 		expect(fake.calls.some((call) => call.kind === "post")).toBeFalse();

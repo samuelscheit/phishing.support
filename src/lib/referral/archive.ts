@@ -6,6 +6,7 @@ import { ArtifactsEntity } from "../db/entities/artifacts";
 import type { Dossier } from "./dossier";
 import { countryAnnexes } from "./annex";
 import { correspondenceFileName, correspondenceIndexText, dossierText, indicatorsCsv, siteAnalysisText, sitesCsv } from "./archive_text";
+import { sha256Hex } from "../util/hash";
 
 export type DossierArchiveDependencies = {
 	loadArtifact?: (artifactId: bigint) => Promise<{ blob: Uint8Array | Buffer } | undefined>;
@@ -13,9 +14,6 @@ export type DossierArchiveDependencies = {
 	loadMail?: (reportId: bigint, artifactId: bigint) => Promise<{ blob: Uint8Array | Buffer } | undefined>;
 };
 
-function sha256(bytes: Uint8Array): string {
-	return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
-}
 
 /** The small files every referral mail carries and every archive starts with. */
 export function dossierAttachments(dossier: Dossier): Array<{ name: string; mimeType: string; content: Buffer }> {
@@ -65,7 +63,7 @@ async function writeDossierArchive(writer: ZipWriter<unknown>, dossier: Dossier,
 		for (const file of newestFirst) {
 			const artifact = await loadArtifact(BigInt(file.artifactId));
 			const bytes = artifact ? Buffer.from(artifact.blob) : undefined;
-			const hash = bytes ? sha256(bytes) : undefined;
+			const hash = bytes ? sha256Hex(bytes) : undefined;
 			if (!bytes || hash !== file.sha256) {
 				missing.push(`${folder}/${file.name}: ${bytes ? "the stored bytes do not match the recorded SHA-256" : "no longer stored"}`);
 				continue;
@@ -86,7 +84,7 @@ async function writeDossierArchive(writer: ZipWriter<unknown>, dossier: Dossier,
 				}
 				const stored = await loadMail(BigInt(mail.reportId), BigInt(mail.raw.artifactId));
 				const bytes = stored ? Buffer.from(stored.blob) : undefined;
-				if (!bytes || sha256(bytes) !== mail.raw.sha256) {
+				if (!bytes || sha256Hex(bytes) !== mail.raw.sha256) {
 					missing.push(`${name}: ${bytes ? "the stored bytes do not match the recorded SHA-256" : "no longer stored"}`);
 					continue;
 				}

@@ -4,7 +4,8 @@ import { simpleParser } from "mailparser";
 import type { AbuseArtifact, AbuseTargetType } from "../schema";
 import { normalizePublicHttpUrl } from "../security";
 import { getMailWebsiteUrls } from "../../mail/parse";
-import { compactProviderText, truncateProviderText } from "./report_payload";
+import { truncateAtWord } from "../../util/text";
+import { compactProviderText } from "./report_payload";
 
 /** The most links a provider form is shown from one email. */
 const MAXIMUM_EMAIL_LINKS = 20;
@@ -26,13 +27,9 @@ function headerBlockOf(eml: string): string {
 	return (end >= 0 ? text.slice(0, end) : text).replace(/^\n+/, "").trimEnd();
 }
 
-function escapeRegExp(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /** The Received header that names `ip`, with the UTC time after its last semicolon. */
 export function receivedHopOf(receivedLines: readonly string[], ip: string): EmailOrigin["received"] {
-	const named = new RegExp(`(?<![\\w.:])${escapeRegExp(ip)}(?![\\w.:])`, "i");
+	const named = new RegExp(`(?<![\\w.:])${RegExp.escape(ip)}(?![\\w.:])`, "i");
 	for (const raw of receivedLines) {
 		const line = compactProviderText(raw.replace(/^received\s*:\s*/i, ""));
 		if (!named.test(line)) continue;
@@ -81,7 +78,7 @@ export function utcStamp(date: Date): string {
 export function emailOriginFactLines(ip: string, origin: EmailOrigin, fallback: Date, receivedMaximum = 600): string[] {
 	return [
 		`Sending IP address: ${ip} (first external Received hop of a phishing email sent from it)`,
-		origin.received ? `Received header: ${truncateProviderText(origin.received.line, receivedMaximum)}` : undefined,
+		origin.received ? `Received header: ${truncateAtWord(origin.received.line, receivedMaximum)}` : undefined,
 		`Date and time of the email: ${utcStamp(origin.received?.at ?? fallback)} (UTC)`,
 	].filter((line): line is string => Boolean(line));
 }

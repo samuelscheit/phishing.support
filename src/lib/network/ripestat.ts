@@ -1,13 +1,14 @@
 import { z } from "zod";
 
-import { fetchJson, type FetchImplementation } from "./bounded_fetch";
+import { fetchJson } from "./bounded_fetch";
+import { type FetchLike } from "../http/fetch";
 
 const RIPESTAT = "https://stat.ripe.net/data";
 const SOURCE_APP = "phishing-support";
 
 const envelopeSchema = z.object({ status: z.string(), data: z.unknown() }).passthrough();
 
-export type RipeStatDependencies = { fetch?: FetchImplementation };
+export type RipeStatDependencies = { fetch?: FetchLike };
 
 /** One RIPEstat data call; throws unless RIPEstat answers `ok`. */
 export async function ripeStatData(endpoint: string, parameters: Record<string, string>, dependencies: RipeStatDependencies = {}): Promise<unknown> {

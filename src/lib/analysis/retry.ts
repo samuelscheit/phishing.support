@@ -1,3 +1,5 @@
+import { asRecord } from "../util/values";
+
 /**
  * Retry policy for model analysis requests.
  *
@@ -29,10 +31,6 @@ type ErrorLike = {
 	error?: unknown;
 	cause?: unknown;
 };
-
-function asRecord(value: unknown): ErrorLike | undefined {
-	return value && typeof value === "object" ? (value as ErrorLike) : undefined;
-}
 
 function asStatus(value: unknown): number | undefined {
 	const status = typeof value === "number" ? value : Number(value);

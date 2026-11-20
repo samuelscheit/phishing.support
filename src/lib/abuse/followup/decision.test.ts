@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import sharp from "sharp";
 
 import { useTemporaryDatabase } from "../../db/test_helpers";
@@ -15,6 +14,7 @@ import type { SiteCheckDependencies } from "../../liveness/check";
 import type { DecisionAgentModel } from "./agent";
 import { followUpProviderDecision } from "./decision";
 import { SubmissionsEntity } from "../../db/entities/submissions";
+import { sha256Hex } from "../../util/hash";
 
 useTemporaryDatabase();
 
@@ -227,7 +227,7 @@ describe("provider decision follow-up agent", () => {
 			{ finalUrl: "https://paneo.work/install", screenshot: "visit-2.png" },
 		]);
 		expect(visit.pages[1].sentMadeUpData).toEqual([{ url: bot, method: "POST", fields: ["email"], sameSite: false }]);
-		expect(visit.pages[1].downloads).toEqual([{ url: "https://paneo.work/Paneo.dmg", fileName: "Paneo.dmg", contentType: "application/x-apple-diskimage", bytes: 3, sha256: createHash("sha256").update("dmg").digest("hex") }]);
+		expect(visit.pages[1].downloads).toEqual([{ url: "https://paneo.work/Paneo.dmg", fileName: "Paneo.dmg", contentType: "application/x-apple-diskimage", bytes: 3, sha256: sha256Hex("dmg") }]);
 		expect(sent[0]!.attachments!.map(({ filename }) => filename)).toEqual(["visit-2.png"]);
 	});
 

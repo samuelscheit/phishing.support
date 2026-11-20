@@ -98,6 +98,3 @@ export function formatPercent(value: number | undefined): string {
 	return value === undefined ? "—" : `${value} %`;
 }
 
-export function formatDay(date: Date): string {
-	return date.toISOString().slice(0, 10);
-}

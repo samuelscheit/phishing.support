@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { escapeHtml } from "../util/html";
 
 /** Height of the browser-style address bar drawn above a captured page. */
 const BAR_HEIGHT = 96;
@@ -16,10 +17,6 @@ export type AddressBarFacts = {
 	/** SHA-256 of the unmodified screenshot this bar is drawn above. */
 	screenshotSha256: string;
 };
-
-function escapeXml(value: string): string {
-	return value.replace(/[<>&'"]/g, (character) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" })[character]!);
-}
 
 /** Shorten a long URL in the middle so its host and its end both stay readable. */
 function fitUrl(url: string, maximumCharacters: number): string {
@@ -42,8 +39,8 @@ function addressBarSvg(width: number, facts: AddressBarFacts): string {
 <rect width="${width}" height="${BAR_HEIGHT}" fill="#dee1e6"/>
 <rect x="16" y="12" width="${width - 32}" height="40" rx="20" fill="#ffffff"/>
 ${scheme === "https" ? LOCK_ICON : WARNING_ICON}
-<text x="62" y="38" font-family="${MONO}" font-size="16" fill="#202124">${escapeXml(fitUrl(facts.url, urlCharacters))}</text>
-<text x="18" y="80" font-family="${FONT}" font-size="13" fill="#3c4043">${escapeXml(details)}</text>
+<text x="62" y="38" font-family="${MONO}" font-size="16" fill="#202124">${escapeHtml(fitUrl(facts.url, urlCharacters))}</text>
+<text x="18" y="80" font-family="${FONT}" font-size="13" fill="#3c4043">${escapeHtml(details)}</text>
 </svg>`;
 }
 

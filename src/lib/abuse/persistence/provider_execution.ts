@@ -1,11 +1,9 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { getDb } from "../../db";
-import { generateId } from "../../db/ids";
 import { abuseProviderRoutes, abuseProviderRuns, type AbuseProviderRun } from "../schema";
-import { hashStableJson } from "../security";
 import { recomputeReportStatusInTransaction } from "./report_status";
-import { now, recordEvent } from "./shared";
+import { claimRoute, insertProviderRun, now, recordEvent } from "./shared";
 
 export async function beginProviderExecution(params: {
 	routeId: bigint;
@@ -35,51 +33,9 @@ export async function beginProviderExecution(params: {
 				return { run: existing, created: false, resumed: true };
 			}
 			const timestamp = now();
-			const updated = tx
-				.update(abuseProviderRoutes)
-				.set({ status: "running", updatedAt: timestamp })
-				.where(and(eq(abuseProviderRoutes.id, route.id), eq(abuseProviderRoutes.status, params.expectedStatus)))
-				.returning({ id: abuseProviderRoutes.id })
-				.get();
-			if (!updated) return undefined;
-			recordEvent(tx, {
-				reportId: route.reportId,
-				targetId: route.targetId,
-				routeId: route.id,
-				eventType: "route.status_changed",
-				data: { from: route.status, to: "running", reason: "provider_execution_started" },
-			});
-			let run: AbuseProviderRun;
-			let created = false;
-			if (existing) {
-				run = existing;
-			} else {
-				const id = generateId();
-				tx.insert(abuseProviderRuns)
-					.values({
-						id,
-						reportId: route.reportId,
-						routeId: route.id,
-						providerPayload: params.providerPayload,
-						payloadHash: hashStableJson(params.providerPayload),
-						correlationKey: params.correlationKey,
-						attemptCount: 0,
-						executionStatus: "starting",
-						createdAt: timestamp,
-						updatedAt: timestamp,
-					})
-					.run();
-				recordEvent(tx, {
-					reportId: route.reportId,
-					targetId: route.targetId,
-					routeId: route.id,
-					runId: id,
-					eventType: "provider_run.created",
-					data: { payloadHash: hashStableJson(params.providerPayload), correlationKey: params.correlationKey },
-				});
-				run = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, id)).get()!;
-				created = true;
-			}
+			if (!claimRoute(tx, route, { expected: params.expectedStatus, reason: "provider_execution_started", timestamp })) return undefined;
+			const created = !existing;
+			const run = existing ?? insertProviderRun(tx, route, { providerPayload: params.providerPayload, correlationKey: params.correlationKey, executionStatus: "starting", timestamp });
 			recomputeReportStatusInTransaction(tx, route.reportId, {
 				reason: "provider_execution_started",
 				routeId: route.id.toString(),

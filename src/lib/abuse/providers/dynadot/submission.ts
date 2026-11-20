@@ -3,7 +3,7 @@ import type { BrowserFormChoiceSession, BrowserFormField, BrowserFormFile, Brows
 import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
 import { formOpener, preparedState, withPreflight } from "../kit/session";
-import { snippet } from "../kit/text";
+import { snippet } from "../../../util/text";
 import { providerResponseId } from "../report_reference";
 import {
 	ProviderSubmissionNeedsHumanError,

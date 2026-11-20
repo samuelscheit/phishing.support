@@ -1,12 +1,13 @@
 import { emailOriginOf } from "../email_origin";
 import { createDraft, reportInputOf, type RouteData } from "../kit/draft";
 import { asRecord } from "../../../util/values";
-import { deadline, failUnlessFiled } from "../kit/http";
-import { snippet } from "../kit/text";
+import { failUnlessFiled } from "../kit/http";
+import { snippet } from "../../../util/text";
 import type { ProviderSubmissionContext, ProviderSubmissionSuccess } from "../submission_contracts";
 import { providerResponseId } from "../report_reference";
 import { AWS_PROVIDER } from "./definition";
 import { awsRequestBody, buildAwsSubmissionPayload, storedAwsSubmissionPayload, type AwsReportInput } from "./payload";
+import { deadline } from "../../../util/async";
 
 export type AwsSubmissionDependencies = {
 	fetch?: (url: string, init: RequestInit) => Promise<Response>;
@@ -60,7 +61,7 @@ export async function submitAwsSubmission(context: ProviderSubmissionContext, de
 		throw new Error(`AWS answered the report with a body that is not JSON: ${snippet(text)}`);
 	}
 	// The form counts any truthy answer body as filed (axios' `response.data`,
-	// its `.then(({ data }) => data && redirectSuccess(…))`), an array or a string too, so jsonRecord does not fit;
+	// its `.then(({ data }) => data && redirectSuccess(…))`), an array or a string too, so a JSON-object reader does not fit;
 	// null, false, 0 or "" is not.
 	if (!answer) throw new Error(`AWS answered the report with an empty body: ${snippet(text)}`);
 	const id = providerResponseId(asRecord(answer)?.data ?? answer);

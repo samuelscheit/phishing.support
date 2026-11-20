@@ -12,6 +12,7 @@ import {
 	storedTencentSubmissionPayload,
 } from "./payload";
 import { buildTencentCloudHttpPayload, parseTencentCaptchaSolution, parseTencentCloudSubmissionResponse } from "./submission";
+import { sha256Hex } from "../../../util/hash";
 
 const screenshotBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9JH1EAAAAASUVORK5CYII=", "base64");
 
@@ -25,7 +26,7 @@ function screenshotArtifact(overrides: Partial<AbuseArtifact> = {}): AbuseArtifa
 		name: "website.png",
 		kind: "user_evidence_original",
 		mimeType: "image/png",
-		sha256: new Bun.CryptoHasher("sha256").update(screenshotBytes).digest("hex"),
+		sha256: sha256Hex(screenshotBytes),
 		size: screenshotBytes.byteLength,
 		metadata: { source: "test" },
 		blob: screenshotBytes,

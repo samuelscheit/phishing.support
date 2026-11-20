@@ -13,6 +13,7 @@ import { cloakedDestination } from "./archive/cloaking";
 import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "./archive/types";
 import type { CapturedNetworkRequest } from "../exfiltration/types";
 import type { WebsiteNavigationHop } from "./types";
+import { navigationHop } from "./test_helpers";
 
 useTemporaryDatabase();
 
@@ -30,7 +31,6 @@ const LANDING_TEXT = "Sign in to your account\nEmail\nPassword";
 
 type Answer = "cloaked" | "landing" | "unreachable";
 
-const hop = (index: number, url: string, status: number | null, extra: Partial<WebsiteNavigationHop> = {}): WebsiteNavigationHop => ({ index, url, hostname: new URL(url).hostname, status, contentType: "text/html", contentCaptured: false, ...extra });
 
 function page(url: string, text: string, navigationHops: WebsiteNavigationHop[], egress: FabricEgress, session?: WebsiteArchiveResult["session"]): WebsiteArchiveResult {
 	const html = `<html><body><p>${text}</p></body></html>`;
@@ -54,13 +54,13 @@ type Flow = (egress: FabricEgress) => { steps: WebsiteArchiveResult[]; requests?
 
 const afterGate = (answer: "cloaked" | "landing", egress: FabricEgress): WebsiteArchiveResult[] => [
 	answer === "cloaked"
-		? page(LURE, LURE_TEXT, [hop(0, TDS, 204, { redirectTo: LURE }), hop(1, LURE, 200, { contentCaptured: true })], egress)
-		: page(LANDING, LANDING_TEXT, [hop(0, LANDING, 200, { contentCaptured: true })], egress),
+		? page(LURE, LURE_TEXT, [navigationHop(0, TDS, { status: 204, redirectTo: LURE }), navigationHop(1, LURE, { status: 200, contentCaptured: true })], egress)
+		: page(LANDING, LANDING_TEXT, [navigationHop(0, LANDING, { status: 200, contentCaptured: true })], egress),
 ];
 
 function lure(options: ArchiveWebsiteOptions, egress: FabricEgress, flow: Flow): WebsiteArchiveResult {
 	const { steps, requests } = flow(egress);
-	return page(options.url, LURE_TEXT, [hop(0, options.url, 200, { contentCaptured: true })], egress, scriptedVisitSession({ steps, ...(requests ? { requests: () => requests } : {}) }));
+	return page(options.url, LURE_TEXT, [navigationHop(0, options.url, { status: 200, contentCaptured: true })], egress, scriptedVisitSession({ steps, ...(requests ? { requests: () => requests } : {}) }));
 }
 
 const NOTHING = { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false };
@@ -93,7 +93,7 @@ async function analyze(id: bigint, answers: { first: Flow; retries?: Partial<Rec
 		archiveWebsite: async (options) => {
 			captures.push(options);
 			// A hand-off's own case parses the retained capture.
-			if (options.mhtmlSnapshot) return page(options.archivedUrl ?? options.url, LANDING_TEXT, [hop(0, options.archivedUrl ?? options.url, 200, { contentCaptured: true })], "phishing");
+			if (options.mhtmlSnapshot) return page(options.archivedUrl ?? options.url, LANDING_TEXT, [navigationHop(0, options.archivedUrl ?? options.url, { status: 200, contentCaptured: true })], "phishing");
 			if (!options.egress) return lure(options, "phishing", answers.first);
 			const flow = answers.retries?.[options.egress];
 			if (!flow || flow === "unreachable") throw new WebsiteCaptureFailedError([new WebsiteUnreachableError(options.egress, "net::ERR_CONNECTION_CLOSED")]);
@@ -160,9 +160,9 @@ describe("a flow whose destination answers empty and sends the visit back", () =
 });
 
 describe("flows that are not cloaked by their destination", () => {
-	const sameSite204: Flow = (egress) => ({ steps: [page(LURE, LURE_TEXT, [hop(0, `${LURE}/beacon`, 204, { redirectTo: LURE }), hop(1, LURE, 200, { contentCaptured: true })], egress)] });
-	const sameSiteRedirect: Flow = (egress) => ({ steps: [page(LURE, LURE_TEXT, [hop(0, `${LURE}/go`, 302, { redirectTo: LURE }), hop(1, LURE, 200, { contentCaptured: true })], egress)] });
-	const otherSite302: Flow = (egress) => ({ steps: [page(LURE, LURE_TEXT, [hop(0, "https://bit.ly/abc", 302, { redirectTo: LURE }), hop(1, LURE, 200, { contentCaptured: true })], egress)] });
+	const sameSite204: Flow = (egress) => ({ steps: [page(LURE, LURE_TEXT, [navigationHop(0, `${LURE}/beacon`, { status: 204, redirectTo: LURE }), navigationHop(1, LURE, { status: 200, contentCaptured: true })], egress)] });
+	const sameSiteRedirect: Flow = (egress) => ({ steps: [page(LURE, LURE_TEXT, [navigationHop(0, `${LURE}/go`, { status: 302, redirectTo: LURE }), navigationHop(1, LURE, { status: 200, contentCaptured: true })], egress)] });
+	const otherSite302: Flow = (egress) => ({ steps: [page(LURE, LURE_TEXT, [navigationHop(0, "https://bit.ly/abc", { status: 302, redirectTo: LURE }), navigationHop(1, LURE, { status: 200, contentCaptured: true })], egress)] });
 	const beacon: Flow = (egress) => ({
 		steps: [],
 		requests: [{ url: "https://www.google-analytics.com/collect", method: "POST", status: 204, timestamp: "", headers: {}, resourceType: "xhr" } as unknown as CapturedNetworkRequest],
@@ -180,18 +180,18 @@ describe("flows that are not cloaked by their destination", () => {
 });
 
 describe("cloakedDestination", () => {
-	const lureHop = hop(0, LURE, 200, { redirectTo: TDS, visitorStep: { submitted: [] } });
+	const lureHop = navigationHop(0, LURE, { status: 200, redirectTo: TDS, visitorStep: { submitted: [] } });
 	test("recognizes the production hops", () => {
-		expect(cloakedDestination([lureHop, hop(1, TDS, 204, { redirectTo: LURE }), hop(2, LURE, 200, { contentCaptured: true })], LURE)).toEqual({ host: "www.solidfairhubhost.com", site: "solidfairhubhost.com" });
+		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 204, redirectTo: LURE }), navigationHop(2, LURE, { status: 200, contentCaptured: true })], LURE)).toEqual({ host: "www.solidfairhubhost.com", site: "solidfairhubhost.com" });
 	});
 	test("recognizes a 2xx that moves on at once, and an empty answer the flow ends on", () => {
-		expect(cloakedDestination([lureHop, hop(1, TDS, 200, { redirectTo: LURE })], LURE)?.site).toBe("solidfairhubhost.com");
-		expect(cloakedDestination([lureHop, hop(1, TDS, 204)], LURE)?.site).toBe("solidfairhubhost.com");
+		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 200, redirectTo: LURE })], LURE)?.site).toBe("solidfairhubhost.com");
+		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 204 })], LURE)?.site).toBe("solidfairhubhost.com");
 	});
 	test("ignores a destination that shows a page, a redirect chain, an empty answer that moves on elsewhere, and a 204 not reached from the submitted site", () => {
-		expect(cloakedDestination([lureHop, hop(1, TDS, 200, { contentCaptured: true })], LURE)).toBeUndefined();
-		expect(cloakedDestination([lureHop, hop(1, TDS, 302, { redirectTo: LURE })], LURE)).toBeUndefined();
-		expect(cloakedDestination([lureHop, hop(1, TDS, 204, { redirectTo: "https://news.example.com/" })], LURE)).toBeUndefined();
-		expect(cloakedDestination([hop(0, "https://short.example/x", 302, { redirectTo: TDS }), hop(1, TDS, 204, { redirectTo: LURE })], LURE)).toBeUndefined();
+		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 200, contentCaptured: true })], LURE)).toBeUndefined();
+		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 302, redirectTo: LURE })], LURE)).toBeUndefined();
+		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 204, redirectTo: "https://news.example.com/" })], LURE)).toBeUndefined();
+		expect(cloakedDestination([navigationHop(0, "https://short.example/x", { status: 302, redirectTo: TDS }), navigationHop(1, TDS, { status: 204, redirectTo: LURE })], LURE)).toBeUndefined();
 	});
 });

@@ -6,6 +6,8 @@ import { optionalResponseText } from "../../openai/response";
 import { isVerifiedEmailRouteOriginAllowed } from "../providers/email";
 import { assertPublicDnsHost, normalizeDomain } from "../security";
 import { abuseReplyClassifications, abuseReplyClassificationSchema, type AbuseReplyClassification } from "./types";
+import { parseJson } from "../../util/values";
+import { type FetchLike } from "../../http/fetch";
 
 const URL_PATTERN = /https:\/\/[^\s<>'"`]+/gi;
 const MAX_REPLY_CLASSIFICATION_INPUT = 120_000;
@@ -25,16 +27,13 @@ function ambiguousReplyClassification(rationale: string): AbuseReplyClassificati
 }
 
 function parseClassifierJson(text: string): unknown {
-	try {
-		return JSON.parse(text);
-	} catch {
-		// Some compatible OpenAI gateways wrap JSON in a markdown fence even
-		// when strict output was requested. Accept only a complete fenced JSON
-		// object; never attempt permissive substring extraction.
-		const fenced = text.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1];
-		if (!fenced) return undefined;
-		try { return JSON.parse(fenced); } catch { return undefined; }
-	}
+	const parsed = parseJson(text);
+	if (parsed !== undefined) return parsed;
+	// Some compatible OpenAI gateways wrap JSON in a markdown fence even
+	// when strict output was requested. Accept only a complete fenced JSON
+	// object; never attempt permissive substring extraction.
+	const fenced = text.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1];
+	return fenced ? parseJson(fenced) : undefined;
 }
 
 /**
@@ -117,7 +116,7 @@ export async function extractVerifiedProviderLinks(params: {
 	 */
 	verifiedDomains?: string[];
 	text: string;
-	fetch?: ProviderLinkFetch;
+	fetch?: FetchLike;
 	assertHost?: (hostname: string) => Promise<void>;
 }): Promise<string[]> {
 	const result: string[] = [];
@@ -136,7 +135,7 @@ export async function extractVerifiedProviderLinks(params: {
 export type VerifiedProviderLinkResolution = {
 	candidate: string;
 	verifiedDomains?: string[];
-	fetch?: ProviderLinkFetch;
+	fetch?: FetchLike;
 	assertHost?: (hostname: string) => Promise<void>;
 	maxRedirects?: number;
 };
@@ -146,8 +145,6 @@ export type VerifiedProviderLinkResolution = {
  * narrow makes the security boundary injectable without coupling it to Bun's
  * optional global-fetch extensions such as `preconnect`.
  */
-export type ProviderLinkFetch = (url: URL, init?: RequestInit) => Promise<Response>;
-
 /**
  * Resolve one provider-supplied link under the same boundary used by reply
  * extraction.  This is intentionally exported so the worker can repeat the

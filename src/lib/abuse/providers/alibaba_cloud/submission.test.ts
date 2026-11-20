@@ -439,7 +439,7 @@ describe("submitAlibabaCloudSubmission", () => {
 		const console = consoleAnswers();
 		await submitAlibabaCloudSubmission({ ...context, signal: controller.signal }, preflightOf(payload), {
 			config: loginConfig, getSession: async () => session,
-			fetch: async (url, init) => { signals.push(init.signal); return console.fetch(url, init); },
+			fetch: async (url, init) => { signals.push(init?.signal); return console.fetch(url, init); },
 		});
 		expect(signals).toHaveLength(3);
 		expect(signals.every((signal) => signal === controller.signal)).toBeTrue();

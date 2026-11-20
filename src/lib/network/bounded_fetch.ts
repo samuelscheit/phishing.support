@@ -1,4 +1,5 @@
 import { sleep } from "../util/sleep";
+import { type FetchLike } from "../http/fetch";
 
 /**
  * Bounded fetch primitives for evidence collection.  A failed third-party
@@ -8,10 +9,8 @@ import { sleep } from "../util/sleep";
  */
 
 /** All evidence clients use absolute string URLs, which keeps test adapters small and deterministic. */
-export type FetchImplementation = (input: string, init?: RequestInit) => Promise<Response>;
-
 export type BoundedRequestOptions = {
-	fetch?: FetchImplementation;
+	fetch?: FetchLike;
 	timeoutMs?: number;
 	attempts?: number;
 	retryDelayMs?: number;

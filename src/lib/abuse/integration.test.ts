@@ -11,7 +11,7 @@ import { validateAbuseReportRequest } from "./contracts";
 import { sendAbuseEmailRoute } from "./mail/send";
 import { AbuseRepository, aggregateReportStatus } from "./repository";
 import { abuseArtifacts, abuseJobs, abuseMailMessages } from "./schema";
-import { sha256Hex } from "./security";
+import { sha256Hex } from "../util/hash";
 
 useTemporaryDatabase();
 

@@ -3,7 +3,10 @@ import dns from "node:dns/promises";
 import { isIP } from "node:net";
 import { domainToASCII } from "node:url";
 
+import ipaddr from "ipaddr.js";
 import { getDomain, parse } from "tldts";
+import { sha256Hex } from "../util/hash";
+import { snippet } from "../util/text";
 
 /** A user-visible input failure that routes can safely return as a 4xx response. */
 export class AbuseInputError extends Error {
@@ -14,44 +17,6 @@ export class AbuseInputError extends Error {
 		super(message);
 		this.name = "AbuseInputError";
 	}
-}
-
-export function sha256Hex(value: string | Buffer): string {
-	return crypto.createHash("sha256").update(value).digest("hex");
-}
-
-/** Canonical JSON is used for immutable request/run hashes and never for display. */
-function stableJsonValue(value: unknown): string | undefined {
-	if (value === undefined) return undefined;
-	if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
-	if (typeof value === "number") {
-		// JSON.stringify turns non-finite numbers into null. Preserve that
-		// familiar JSON behavior while still producing a valid canonical value.
-		return Number.isFinite(value) ? JSON.stringify(value) : "null";
-	}
-	if (typeof value === "bigint") return JSON.stringify(value.toString());
-	if (typeof value !== "object") throw new TypeError(`Cannot create stable JSON for ${typeof value}.`);
-	if (Array.isArray(value)) return `[${value.map((item) => stableJsonValue(item) ?? "null").join(",")}]`;
-	if (value instanceof Date) return JSON.stringify(value.toJSON());
-	if (Buffer.isBuffer(value)) return JSON.stringify(value.toString("base64"));
-	const record = value as Record<string, unknown>;
-	const entries = Object.keys(record)
-		.sort()
-		.flatMap((key) => {
-			const encoded = stableJsonValue(record[key]);
-			// Match JSON.stringify: object properties whose value is undefined are
-			// omitted rather than emitting the invalid token `undefined`.
-			return encoded === undefined ? [] : [`${JSON.stringify(key)}:${encoded}`];
-		});
-	return `{${entries.join(",")}}`;
-}
-
-export function stableJson(value: unknown): string {
-	return stableJsonValue(value) ?? "null";
-}
-
-export function hashStableJson(value: unknown): string {
-	return sha256Hex(stableJson(value));
 }
 
 export function createTrackingToken(): string {
@@ -91,58 +56,17 @@ export function normalizeDomain(value: string): string | undefined {
 	return parsed.isIcann && parsed.domain ? domain : undefined;
 }
 
-function parseIpv4Bytes(value: string): Buffer | undefined {
-	const parts = value.split(".");
-	if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return undefined;
-	const bytes = parts.map(Number);
-	if (bytes.some((part) => part < 0 || part > 255)) return undefined;
-	return Buffer.from(bytes);
-}
-
-function parseIpv6Bytes(value: string): Buffer | undefined {
-	if (value.includes("%") || isIP(value) !== 6) return undefined;
-	let source = value.toLowerCase();
-	if (source.includes(".")) {
-		const separator = source.lastIndexOf(":");
-		if (separator === -1) return undefined;
-		const ipv4 = parseIpv4Bytes(source.slice(separator + 1));
-		if (!ipv4) return undefined;
-		const high = ipv4.readUInt16BE(0).toString(16);
-		const low = ipv4.readUInt16BE(2).toString(16);
-		source = `${source.slice(0, separator)}:${high}:${low}`;
-	}
-
-	const doubleColon = source.indexOf("::");
-	if (doubleColon !== -1 && source.indexOf("::", doubleColon + 1) !== -1) return undefined;
-	const head = doubleColon === -1 ? source.split(":") : source.slice(0, doubleColon).split(":").filter(Boolean);
-	const tail = doubleColon === -1 ? [] : source.slice(doubleColon + 2).split(":").filter(Boolean);
-	if (head.some((part) => !/^[0-9a-f]{1,4}$/.test(part)) || tail.some((part) => !/^[0-9a-f]{1,4}$/.test(part))) return undefined;
-	const zeros = 8 - head.length - tail.length;
-	if ((doubleColon === -1 && zeros !== 0) || (doubleColon !== -1 && zeros < 1)) return undefined;
-	const groups = [...head, ...Array(zeros).fill("0"), ...tail];
-	if (groups.length !== 8) return undefined;
-	const bytes = Buffer.alloc(16);
-	groups.forEach((group, index) => bytes.writeUInt16BE(Number.parseInt(group, 16), index * 2));
-	return bytes;
-}
-
-function ipBytes(value: string): Buffer | undefined {
-	return isIP(value) === 4 ? parseIpv4Bytes(value) : parseIpv6Bytes(value);
-}
-
-function isInCidr(value: string, base: string, prefixLength: number): boolean {
-	const target = ipBytes(value);
-	const network = ipBytes(base);
-	if (!target || !network || target.byteLength !== network.byteLength) return false;
-	let remaining = prefixLength;
-	for (let index = 0; index < target.byteLength; index++) {
-		if (remaining <= 0) return true;
-		const width = Math.min(8, remaining);
-		const mask = (0xff << (8 - width)) & 0xff;
-		if ((target[index] & mask) !== (network[index] & mask)) return false;
-		remaining -= width;
-	}
-	return true;
+/**
+ * A literal IP address as ipaddr.js parses it, or undefined. Node's `isIP`
+ * decides what is a literal (strict dotted decimal without leading zeros,
+ * so ipaddr.js never reads one as octal); a zone identifier names a local
+ * interface, not a portable public target, and fails closed.
+ */
+function parseIp(value: string): ipaddr.IPv4 | ipaddr.IPv6 | undefined {
+	if (value.includes("%")) return undefined;
+	const version = isIP(value);
+	if (version === 4) return ipaddr.IPv4.isValidFourPartDecimal(value) ? ipaddr.IPv4.parse(value) : undefined;
+	return version === 6 && ipaddr.IPv6.isValid(value) ? ipaddr.IPv6.parse(value) : undefined;
 }
 
 export const NON_PUBLIC_IPV4: ReadonlyArray<readonly [string, number]> = [
@@ -192,16 +116,13 @@ const NON_PUBLIC_IPV6: Array<[string, number]> = [
 
 /** Reject local, special-use, documentation, benchmark, and unroutable addresses. */
 export function isPublicIp(value: string): boolean {
-	const version = isIP(value);
-	// Node accepts IPv6 zone identifiers in `isIP()`, but those are scoped
-	// local interface addresses, not portable public targets.  Requiring our
-	// byte parser to succeed also makes every CIDR comparison fail closed.
-	if (!version || !ipBytes(value)) return false;
-	const blocked = version === 4 ? NON_PUBLIC_IPV4 : NON_PUBLIC_IPV6;
-	if (blocked.some(([base, prefix]) => isInCidr(value, base, prefix))) return false;
+	const address = parseIp(value);
+	if (!address) return false;
+	if (address instanceof ipaddr.IPv4) return !NON_PUBLIC_IPV4.some(([base, prefix]) => address.match(ipaddr.IPv4.parse(base), prefix));
+	if (NON_PUBLIC_IPV6.some(([base, prefix]) => address.match(ipaddr.IPv6.parse(base), prefix))) return false;
 	// IPv6 global-unicast space is 2000::/3. Anything outside it is local,
 	// multicast, experimental, or otherwise not a public Internet destination.
-	return version === 4 || isInCidr(value, "2000::", 3);
+	return address.match(ipaddr.IPv6.parse("2000::"), 3);
 }
 
 /**
@@ -274,6 +195,6 @@ export function safePublicError(status: string, detail?: string | null): string 
 	if (status === "delivery_failed") return "The provider report could not be delivered.";
 	if (status === "failed" || status === "unknown_external_state") return "The provider route did not complete safely.";
 	// A provider's own rejection text is its public answer to our report.
-	if (status === "provider_rejected") return detail.replace(/\s+/g, " ").trim().slice(0, 500);
+	if (status === "provider_rejected") return snippet(detail, 500);
 	return undefined;
 }

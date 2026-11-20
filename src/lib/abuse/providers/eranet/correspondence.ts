@@ -1,11 +1,9 @@
 
 import type { ProviderCorrespondence } from "../submission_contracts";
 import { ERANET_PROVIDER } from "./definition";
-import { asRecord } from "../../../util/values";
-import { jsonRecord } from "../kit/http";
-import { snippet } from "../kit/text";
-
-export type EranetFetch = (input: string, init?: RequestInit) => Promise<Response>;
+import { asRecord, parseJsonRecord } from "../../../util/values";
+import { snippet } from "../../../util/text";
+import { type FetchLike } from "../../../http/fetch";
 
 /**
  * Eranet's review stages, in the order its "Query Progress" page numbers them
@@ -22,7 +20,7 @@ const ERANET_STATES = ["submitted", "material auditing", "supplement required", 
  */
 export async function fetchEranetCorrespondence(
 	context: { confirmationId: string; signal?: AbortSignal },
-	dependencies: { fetch?: EranetFetch } = {},
+	dependencies: { fetch?: FetchLike } = {},
 ): Promise<ProviderCorrespondence> {
 	const response = await (dependencies.fetch ?? fetch)(`${ERANET_PROVIDER.apiBaseUrl}/DescribeInstanceByOrderNo`, {
 		method: "POST",
@@ -32,7 +30,7 @@ export async function fetchEranetCorrespondence(
 		...(context.signal ? { signal: context.signal } : {}),
 	});
 	const text = await response.text();
-	const body = jsonRecord(text);
+	const body = parseJsonRecord(text);
 	const record = asRecord(body?.Data);
 	if (!response.ok || !record) throw new Error(`Eranet complaint lookup for ${context.confirmationId} failed with HTTP ${response.status}: ${snippet(text)}`);
 	if (record.order_no !== context.confirmationId) throw new Error(`Eranet answered the lookup for ${context.confirmationId} with another complaint.`);

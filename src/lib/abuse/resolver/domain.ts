@@ -1,5 +1,4 @@
 import { getProviderSubmissionProviderForRegistrarId, providerRegistrarRoute } from "../providers";
-import { sha256Hex } from "../security";
 import { finalizeDomainRouteResolution, resolveDomainInfrastructure, type DomainInfrastructureResolution } from "./domain_infrastructure";
 import { fetchRdapRecord, safeJsonFetch } from "./http";
 import {
@@ -16,6 +15,7 @@ import { queryPort43 } from "./port43";
 import { parseExplicitWhoisAbuseMailboxes, parseWhoisNetworkMetadata } from "./whois";
 import type { AbuseMailbox, JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
 import { errorText } from "../../util/error_text";
+import { sha256Hex } from "../../util/hash";
 
 
 export async function resolveDomainTarget(target: ResolverTarget, dependencies: ResolverDependencies): Promise<ResolvedAbuseTarget> {

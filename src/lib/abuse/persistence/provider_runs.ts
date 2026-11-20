@@ -4,7 +4,6 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { isFabricBrowserSessionId } from "../../browser/fabric_session";
-import { generateId } from "../../db/ids";
 import {
 	abuseJobs,
 	abuseProviderRoutes,
@@ -13,10 +12,10 @@ import {
 	type AbuseRouteStatus,
 	type AbuseRunStatus,
 } from "../schema";
-import { hashStableJson } from "../security";
 import { recomputeReportStatusInTransaction } from "./report_status";
-import { now, recordEvent } from "./shared";
+import { insertProviderRun, now, recordEvent } from "./shared";
 import { FINAL_OR_BLOCKED_ROUTE_STATUSES } from "./state";
+import { hashStableJson } from "../../util/hash";
 
 export async function createProviderRun(params: {
 	routeId: bigint;
@@ -32,31 +31,7 @@ export async function createProviderRun(params: {
 			const correlationKey = params.correlationKey ?? crypto.randomBytes(24).toString("hex");
 			const existing = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.correlationKey, correlationKey)).get();
 			if (existing) return { ...existing, created: false };
-			const id = generateId();
-			const timestamp = now();
-			tx.insert(abuseProviderRuns)
-				.values({
-					id,
-					reportId: route.reportId,
-					routeId: route.id,
-					providerPayload: params.providerPayload,
-					payloadHash: hashStableJson(params.providerPayload),
-					correlationKey,
-					attemptCount: 0,
-					executionStatus: params.executionStatus ?? "pending",
-					createdAt: timestamp,
-					updatedAt: timestamp,
-				})
-				.run();
-			recordEvent(tx, {
-				reportId: route.reportId,
-				targetId: route.targetId,
-				routeId: route.id,
-				runId: id,
-				eventType: "provider_run.created",
-				data: { payloadHash: hashStableJson(params.providerPayload), correlationKey },
-			});
-			return { ...tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, id)).get()!, created: true };
+			return { ...insertProviderRun(tx, route, { providerPayload: params.providerPayload, correlationKey, executionStatus: params.executionStatus ?? "pending" }), created: true };
 		},
 		{ behavior: "immediate" }
 	);

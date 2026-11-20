@@ -5,6 +5,8 @@ import type { AbuseEmailDraft } from "../mail/draft";
 import { humanizeOrganization, recipientGreeting } from "../mail/shared";
 import { defangCommand } from "../../malware/defang";
 import { readOriginHostSnapshot, type KitCollectedData, type OriginHostSnapshot } from "./snapshot";
+import { formatUtcDateTime } from "../../util/date_time";
+import { andList } from "../../util/text";
 
 /** Domains listed in the body; the attached evidence always has all of them. */
 const MAX_DOMAINS_IN_BODY = 40;
@@ -17,17 +19,8 @@ function line(value: string): string {
 	return value.normalize("NFKC").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function utc(value: string | undefined): string | undefined {
-	const date = value ? new Date(value) : undefined;
-	return date && !Number.isNaN(date.getTime()) ? `${date.toISOString().slice(0, 16).replace("T", " ")} UTC` : undefined;
-}
-
 function issuerName(issuer: string): string {
 	return line(issuer.match(/(?:^|,\s*)O=([^,]+)/)?.[1] ?? issuer.match(/(?:^|,\s*)CN=([^,]+)/)?.[1] ?? issuer);
-}
-
-function list(values: readonly string[]): string {
-	return values.length <= 1 ? values.join("") : `${values.slice(0, -1).join(", ")} and ${values.at(-1)}`;
 }
 
 const SENSITIVE_DATA: readonly KitCollectedData[] = ["password", "one-time 2FA codes", "authenticator codes", "backup codes", "payment card details", "identity details"];
@@ -41,12 +34,12 @@ function stolenData(kit: OriginHostSnapshot["kit"]): string {
 	if (kit.abuse === "malware") return "delivers malware to visitors";
 	const sensitive = kit.collects.filter((item) => SENSITIVE_DATA.includes(item) && item !== "password");
 	const subject = kit.abuse === "payment_fraud" ? "payment details" : "account credentials";
-	return `steals ${subject}${sensitive.length ? `, including ${list(sensitive)}` : ""}`;
+	return `steals ${subject}${sensitive.length ? `, including ${andList(sensitive)}` : ""}`;
 }
 
 function certificateLine(domain: string, certificate: Certificate, registeredAt: string | undefined): string[] {
-	const issued = utc(certificate.notBefore);
-	const registered = utc(registeredAt);
+	const issued = formatUtcDateTime(certificate.notBefore);
+	const registered = formatUtcDateTime(registeredAt);
 	return [
 		`- ${domain}: ${issued ? `issued ${issued}` : "certificate"}${registered ? `, domain registered ${registered}` : ""}`,
 		`  SHA-256 ${certificate.fingerprint256}`,
@@ -86,7 +79,7 @@ function linkage(snapshot: OriginHostSnapshot): string[] {
 	const siblings = snapshot.siblings.slice(0, MAX_CERTIFICATES_IN_BODY - 1);
 	const deferred = snapshot.siblings.length - siblings.length;
 	return [
-		`How the ${snapshot.servers.length === 1 ? "server is" : "servers are"} tied to ${snapshot.siblings.length ? "these domains" : "this domain"} (observed ${utc(snapshot.scan.completedAt)}): a request pinned to ${where} returned a byte-identical captured ${snapshot.kit.abuse === "malware" ? "site" : "phishing-kit"} file (same SHA-256), and the TLS endpoint presents a certificate for ${snapshot.siblings.length ? "each domain" : "the domain"} from ${list(issuers)}:`,
+		`How the ${snapshot.servers.length === 1 ? "server is" : "servers are"} tied to ${snapshot.siblings.length ? "these domains" : "this domain"} (observed ${formatUtcDateTime(snapshot.scan.completedAt)}): a request pinned to ${where} returned a byte-identical captured ${snapshot.kit.abuse === "malware" ? "site" : "phishing-kit"} file (same SHA-256), and the TLS endpoint presents a certificate for ${snapshot.siblings.length ? "each domain" : "the domain"} from ${andList(issuers)}:`,
 		...certificateLine(snapshot.originalDomain, first.certificate, snapshot.originalDomainRegisteredAt),
 		...siblings.flatMap((sibling) => certificateLine(sibling.domain, sibling.certificate, sibling.registeredAt)),
 		...(deferred ? [`- the certificates of the other ${deferred} domains are in the attached evidence`] : []),
@@ -118,7 +111,7 @@ function kitSection(snapshot: OriginHostSnapshot): string[] {
 	if (kit.abuse === "malware") {
 		lines.push(`What the kit does: it pushes visitors to download, install or run something.${quote}`);
 	} else if (kit.collects.length) {
-		lines.push(`What the kit does: it asks victims for their ${list(kit.collects)}.${quote}`);
+		lines.push(`What the kit does: it asks victims for their ${andList(kit.collects)}.${quote}`);
 	} else if (quote) {
 		lines.push(`What the kit does:${quote}`);
 	}
@@ -148,7 +141,7 @@ function evidence(snapshot: OriginHostSnapshot, caseUrl: string | undefined, att
 	return [
 		"",
 		...(caseUrl ? [`Evidence (screenshot, archived page, analysis): ${caseUrl}`] : []),
-		...(described.length ? [`Attached: ${list(described)}.`] : []),
+		...(described.length ? [`Attached: ${andList(described)}.`] : []),
 	];
 }
 

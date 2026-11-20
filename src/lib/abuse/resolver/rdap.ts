@@ -4,6 +4,7 @@ import { isPublicIp, normalizeDomain } from "../security";
 import { asRecord, text } from "../../util/values";
 import { asArray, normalizeMailbox, uniqueStrings } from "./records";
 import type { AbuseMailbox, JsonRecord } from "./types";
+import { trimTrailingDot } from "../../network/url";
 
 function vcardValues(entity: JsonRecord): JsonRecord {
 	const card = asArray(entity.vcardArray);
@@ -124,7 +125,8 @@ export function extractRegistrarIdFromRdap(registrar: unknown): number | undefin
 }
 
 export function extractPort43(record: JsonRecord | undefined): string | undefined {
-	const server = text(record?.port43)?.replace(/\.$/, "");
+	const port43 = text(record?.port43);
+	const server = port43 && trimTrailingDot(port43);
 	if (!server || server.includes(":")) return undefined;
 	if (isIP(server)) return isPublicIp(server) ? server : undefined;
 	return normalizeDomain(server);

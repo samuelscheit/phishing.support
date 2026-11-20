@@ -1,12 +1,10 @@
 import { userAgent } from "../../../network/service_identity";
-import { asRecord } from "../../../util/values";
-import { jsonRecord } from "../kit/http";
-import { snippet } from "../kit/text";
+import { asRecord, parseJsonRecord } from "../../../util/values";
+import { snippet } from "../../../util/text";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import { alibabaCloudLoginConfig, alibabaCloudSessions, type AlibabaCloudLoginConfig, type AlibabaCloudSession } from "./session";
-
-export type AlibabaFetch = (input: string, init: RequestInit) => Promise<Response>;
+import { type FetchLike } from "../../../http/fetch";
 
 /** The console refused the call with a named error code (`MissingPage`, `NoPermission`). */
 export class AlibabaConsoleError extends ProviderSubmissionRejectedError {
@@ -49,7 +47,7 @@ const TRANSIENT_CODE = /throttl|busy|unavailable|internal|timeout|flowcontrol|^\
  * ambiguous, so a submission's own records settle it.
  */
 export function readConsoleAnswer(action: string, status: number, body: string): unknown {
-	const json = jsonRecord(body);
+	const json = parseJsonRecord(body);
 	if (!json) throw new Error(`Alibaba Cloud ${action} answered HTTP ${status} without JSON: ${snippet(body)}`);
 	const data = asRecord(json.data);
 	const code = typeof json.code === "string" ? json.code : undefined;
@@ -65,7 +63,7 @@ export function readConsoleAnswer(action: string, status: number, body: string):
 	throw new Error(`Alibaba Cloud ${action} gave no usable answer (HTTP ${status}): ${snippet(body)}`);
 }
 
-function sessionConsole(session: AlibabaCloudSession, request: AlibabaFetch, signal?: AbortSignal): AlibabaConsole {
+function sessionConsole(session: AlibabaCloudSession, request: FetchLike, signal?: AbortSignal): AlibabaConsole {
 	const { consoleOrigin, apiProduct } = ALIBABA_CLOUD_PROVIDER;
 	const headers = {
 		cookie: cookieHeader(session),
@@ -120,7 +118,7 @@ function sessionConsole(session: AlibabaCloudSession, request: AlibabaFetch, sig
 }
 
 export type AlibabaConsoleDependencies = {
-	fetch?: AlibabaFetch;
+	fetch?: FetchLike;
 	config?: AlibabaCloudLoginConfig;
 	getSession?: typeof alibabaCloudSessions.get;
 };
@@ -139,7 +137,7 @@ export async function withAlibabaConsole<T>(
 ): Promise<T> {
 	const config = options.config ?? alibabaCloudLoginConfig();
 	const getSession = options.getSession ?? alibabaCloudSessions.get;
-	const request = options.fetch ?? (globalThis.fetch as AlibabaFetch);
+	const request = options.fetch ?? (globalThis.fetch as FetchLike);
 	const session = options.session ?? await getSession(config, { ...(options.signal ? { signal: options.signal } : {}) });
 	try {
 		return await work(sessionConsole(session, request, options.signal), session);

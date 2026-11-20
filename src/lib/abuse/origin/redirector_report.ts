@@ -5,9 +5,9 @@ import type { ReportableWebsiteFinding } from "../../website/types";
 import type { ValidatedAbuseReportRequest } from "../contracts";
 import { linkedHostRequest, type PageScreenshot } from "../linked_host_report";
 import { AbuseRepository, type CreatedAbuseReport } from "../repository";
-import { sha256Hex } from "../security";
 import { isPopularSite, loadPopularDomains, type PopularDomains } from "./popular_domains";
 import { checkRedirector, redirectorOf, type RedirectorCheck, type RedirectorCheckDependencies, type RedirectorOf } from "./redirector_watch";
+import { sha256Hex } from "../../util/hash";
 
 /** What the confirmed destination showed, from its own case. */
 export type RedirectorDestination = { url: string; finding: ReportableWebsiteFinding; evidenceQuote?: string };

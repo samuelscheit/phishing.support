@@ -5,6 +5,7 @@ import { useTemporaryDatabase } from "../db/test_helpers";
 import { accessGateOf, accessGateStatements, arrivalChain, bareVisitLeftSite, checkBareVisit } from "./access_gate";
 import { buildWebsiteReportEvidence } from "./classification";
 import type { WebsiteNavigationHop } from "./types";
+import { navigationHop } from "./test_helpers";
 
 useTemporaryDatabase();
 
@@ -14,14 +15,13 @@ useTemporaryDatabase();
 const ENTRY = "https://f24ac216.37b963ba383fc01de7edcef8.workers.dev/";
 const TICKET = "https://lbbvw.com/?dataXX0=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1cmwiOiJodHRwczovL2xiYnZ3LmNvbS8iLCJkb21haW4iOiJsYmJ2dy5jb20iLCJrZXkiOiJTUlZ3UWJuZjAzb2QiLCJxcmMiOm51bGwsImlhdCI6MTc5NTA3ODA2MCwiZXhwIjoxNzk1MDc4MTgwfQ.qAQe7AM6yZdPpNWwd5ao1NTlafcHGAFeYM_Ue6L02qA";
 const PAGE = "https://lbbvw.com/";
-const hop = (index: number, url: string, status: number, extra: Partial<WebsiteNavigationHop> = {}): WebsiteNavigationHop => ({ index, url, hostname: new URL(url).hostname, status, contentCaptured: false, ...extra });
 const ROOT_HOPS = [
-	hop(0, ENTRY, 200, { redirectTo: ENTRY, visitorStep: { submitted: [] } }),
-	hop(1, ENTRY, 302, { redirectTo: TICKET }),
-	hop(2, TICKET, 302, { redirectTo: PAGE }),
-	hop(3, PAGE, 200, { contentCaptured: true }),
+	navigationHop(0, ENTRY, { status: 200, redirectTo: ENTRY, visitorStep: { submitted: [] } }),
+	navigationHop(1, ENTRY, { status: 302, redirectTo: TICKET }),
+	navigationHop(2, TICKET, { status: 302, redirectTo: PAGE }),
+	navigationHop(3, PAGE, { status: 200, contentCaptured: true }),
 ];
-const CASE_HOPS = [hop(0, TICKET, 302, { redirectTo: PAGE }), hop(1, PAGE, 200, { contentCaptured: true })];
+const CASE_HOPS = [navigationHop(0, TICKET, { status: 302, redirectTo: PAGE }), navigationHop(1, PAGE, { status: 200, contentCaptured: true })];
 
 async function redirectedCase(rootId: bigint, caseId: bigint, caseHops = CASE_HOPS) {
 	await SubmissionsEntity.create({ id: rootId, kind: "website", dedupeKey: `root-${rootId}`, status: "redirected", data: { kind: "website", website: { url: ENTRY, navigationHops: ROOT_HOPS, redirectSubmissionId: caseId.toString() } } });
@@ -41,7 +41,7 @@ describe("access gate of a reported page", () => {
 		await redirectedCase(1n, 2n);
 		expect((await arrivalChain(2n)).map(({ url }) => url)).toEqual([ENTRY, ENTRY, TICKET, PAGE]);
 		// The case's own visit went further than the entry's capture: its hops are kept.
-		await redirectedCase(3n, 4n, [...CASE_HOPS.slice(0, 1), hop(1, PAGE, 200, { visitorStep: { submitted: [] } }), hop(2, "https://lbbvw.com/verify", 200, { contentCaptured: true })]);
+		await redirectedCase(3n, 4n, [...CASE_HOPS.slice(0, 1), navigationHop(1, PAGE, { status: 200, visitorStep: { submitted: [] } }), navigationHop(2, "https://lbbvw.com/verify", { status: 200, contentCaptured: true })]);
 		expect((await arrivalChain(4n)).map(({ url }) => url)).toEqual([ENTRY, ENTRY, TICKET, PAGE, "https://lbbvw.com/verify"]);
 		await SubmissionsEntity.create({ id: 5n, kind: "website", dedupeKey: "direct", data: { kind: "website", website: { url: PAGE, navigationHops: CASE_HOPS } } });
 		expect((await arrivalChain(5n)).map(({ url }) => url)).toEqual([TICKET, PAGE]);
@@ -58,11 +58,11 @@ describe("access gate of a reported page", () => {
 	});
 
 	test("an open page has no gate: a direct visit, an ordinary query, a token-looking value that is no JWT", () => {
-		expect(accessGateOf([hop(0, PAGE, 200, { contentCaptured: true })], PAGE)).toBeUndefined();
-		expect(accessGateOf([hop(0, "https://kit.example/?utm_source=mail&id=42", 302, { redirectTo: "https://kit.example/login" }), hop(1, "https://kit.example/login", 200, { contentCaptured: true })], "https://kit.example/login")).toBeUndefined();
-		expect(accessGateOf([hop(0, "https://kit.example/?t=abc.def.ghi", 302, { redirectTo: "https://kit.example/login" }), hop(1, "https://kit.example/login", 200, { contentCaptured: true })], "https://kit.example/login")).toBeUndefined();
+		expect(accessGateOf([navigationHop(0, PAGE, { status: 200, contentCaptured: true })], PAGE)).toBeUndefined();
+		expect(accessGateOf([navigationHop(0, "https://kit.example/?utm_source=mail&id=42", { status: 302, redirectTo: "https://kit.example/login" }), navigationHop(1, "https://kit.example/login", { status: 200, contentCaptured: true })], "https://kit.example/login")).toBeUndefined();
+		expect(accessGateOf([navigationHop(0, "https://kit.example/?t=abc.def.ghi", { status: 302, redirectTo: "https://kit.example/login" }), navigationHop(1, "https://kit.example/login", { status: 200, contentCaptured: true })], "https://kit.example/login")).toBeUndefined();
 		// The captured page is the token URL itself: nothing moved on from it.
-		expect(accessGateOf([hop(0, TICKET, 200, { contentCaptured: true })], TICKET)).toBeUndefined();
+		expect(accessGateOf([navigationHop(0, TICKET, { status: 200, contentCaptured: true })], TICKET)).toBeUndefined();
 	});
 
 	test("a request without the session follows the site's redirects to its decoy; no answer is no check", async () => {

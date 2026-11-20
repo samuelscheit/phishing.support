@@ -1,5 +1,6 @@
 import { enqueueCampaignSweep } from "@/lib/campaign/sweep";
 import { operatorHandler } from "@/lib/referral/http";
+import { utcDate } from "@/lib/util/date_time";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: Request) {
 	return operatorHandler(request, async () => {
-		const sites = await enqueueCampaignSweep(`manual-${new Date().toISOString().slice(0, 10)}`);
+		const sites = await enqueueCampaignSweep(`manual-${utcDate(new Date())}`);
 		return Response.json({ state: "queued", sites }, { status: 202 });
 	});
 }

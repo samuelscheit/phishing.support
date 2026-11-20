@@ -2,14 +2,13 @@ import type { Page } from "rebrowser-puppeteer-core";
 
 import { getBrowser } from "../../../browser";
 import { sleep } from "../../../util/sleep";
-import { asRecord } from "../../../util/values";
+import { asRecord, parseJsonRecord } from "../../../util/values";
 import { dragSliderToEnd } from "../../captcha/slider_drag";
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { createDraft, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
-import { jsonRecord } from "../kit/http";
 import { preparedState, withPreflight } from "../kit/session";
-import { snippet } from "../kit/text";
+import { snippet } from "../../../util/text";
 import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { GNAME_PROVIDER, type GnameComplaintKind } from "./definition";
@@ -65,7 +64,7 @@ function failure(response: GnameResponse): string {
 }
 
 function parsedResponse(path: string, status: number, text: string): GnameResponse {
-	const parsed = jsonRecord(text) as GnameResponse | undefined;
+	const parsed = parseJsonRecord(text) as GnameResponse | undefined;
 	if (status < 200 || status >= 300 || !parsed) throw new Error(`GNAME ${path} failed with HTTP ${status}: ${snippet(text)}`);
 	return parsed;
 }

@@ -1,9 +1,8 @@
 import { imapConfig } from "../../../mail/config";
-import { asRecord } from "../../../util/values";
+import { asRecord, parseJsonRecord } from "../../../util/values";
 import { captchaCredentialsProblem, solveCaptchaToken } from "../kit/captcha";
 import { createDraft, reportInputOf, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
-import { jsonRecord } from "../kit/http";
 import { htmlText } from "../kit/text";
 import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
 import { reportReferencesIn } from "../report_reference";
@@ -21,10 +20,11 @@ import {
 	TUCOWS_EVIDENCE_CONTRACT,
 	type TucowsSubmissionPayload,
 } from "./payload";
-import { createTucowsSession, hiddenCsrfToken, metaCsrfToken, redirectPath, type TucowsFetch, type TucowsReply, type TucowsSession } from "./session";
+import { createTucowsSession, hiddenCsrfToken, metaCsrfToken, redirectPath, type TucowsReply, type TucowsSession } from "./session";
+import { type FetchLike } from "../../../http/fetch";
 
 export type TucowsDependencies = RouteDeps & {
-	fetch?: TucowsFetch;
+	fetch?: FetchLike;
 	/** The Turnstile token for the first step. */
 	solveCaptcha?: (signal?: AbortSignal) => Promise<string>;
 	readCode?: MailedCodeReader;
@@ -132,7 +132,7 @@ export async function prepareTucowsExternalSubmission(context: ProviderSubmissio
  */
 async function checkRegistrar(session: TucowsSession, domain: string, apiToken: string): Promise<void> {
 	const reply = await session.postJson("/api/user/validate-field", { field_name: "offending_domain", value: domain }, apiToken);
-	const answer = jsonRecord(reply.text);
+	const answer = parseJsonRecord(reply.text);
 	if (reply.status !== 200 || typeof answer?.valid !== "boolean") throw new Error(`Tucows' domain check failed (HTTP ${reply.status}): ${snippet(reply.text)}`);
 	if (!answer.valid) {
 		const error = typeof answer.error === "string" ? answer.error : "no reason given";
@@ -156,7 +156,7 @@ function idFrom(value: unknown, ours: ReadonlySet<string>): string | undefined {
  */
 export function tucowsCaseId(reply: { text: string; location?: string }, reference: string): string | undefined {
 	const ours = new Set([reference, ...reportReferencesIn(reply.text)]);
-	const json = jsonRecord(reply.text);
+	const json = parseJsonRecord(reply.text);
 	if (json) for (const key of ID_KEYS) {
 		const found = idFrom(json[key], ours) ?? idFrom(asRecord(json.data)?.[key], ours);
 		if (found) return found;

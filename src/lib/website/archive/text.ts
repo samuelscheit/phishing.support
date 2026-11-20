@@ -1,5 +1,6 @@
 import { convert } from "mhtml-to-html";
 import parse, { HTMLElement } from "node-html-parser";
+import { squash } from "../../util/text";
 
 const TEXT_ATTRIBUTES = ["placeholder", "aria-placeholder", "aria-label"] as const;
 const CAPTION_INPUT_TYPES = new Set(["button", "reset", "submit"]);
@@ -15,23 +16,18 @@ const CAPTION_INPUT_TYPES = new Set(["button", "reset", "submit"]);
 function inlineAttributeText(dom: HTMLElement): void {
 	for (const element of dom.querySelectorAll("[placeholder], [aria-placeholder], [aria-label], img[alt], input[value]")) {
 		const tag = element.tagName.toLowerCase();
-		const ownText = compactText(element.textContent);
+		const ownText = squash(element.textContent ?? "");
 		const captions = new Set([
 			...TEXT_ATTRIBUTES.map((attribute) => element.getAttribute(attribute)),
 			tag === "img" ? element.getAttribute("alt") : undefined,
 			tag === "input" && CAPTION_INPUT_TYPES.has(element.getAttribute("type")?.trim().toLowerCase() ?? "") ? element.getAttribute("value") : undefined,
-		].map(compactText).filter((caption) => caption && caption !== ownText));
+		].map((caption) => squash(caption ?? "")).filter((caption) => caption && caption !== ownText));
 		for (const caption of captions) {
 			const line = new HTMLElement("div", {}, "");
 			line.textContent = caption;
 			element.before(line);
 		}
 	}
-}
-
-/** A string with its whitespace runs collapsed to single spaces. */
-export function compactText(value: string | undefined): string {
-	return value?.replace(/\s+/g, " ").trim() ?? "";
 }
 
 /**

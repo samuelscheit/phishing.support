@@ -12,9 +12,9 @@ import { netcraftProvider } from ".";
 import { netcraftMailProvider } from "../netcraft_mail";
 import { fetchNetcraftCorrespondence, NETCRAFT_REVIEW_VERDICTS } from "./correspondence";
 import { NETCRAFT_INBOUND_MAIL, netcraftNotificationVerdict } from "./inbound";
+import { jsonResponse } from "../kit/testing";
 
 const UUID = "0123456789abcdef0123456789abcdef";
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
 describe("Netcraft correspondence", () => {
 	test("reads the submission's state alone, so a mail submission without URLs is read too", async () => {
@@ -22,7 +22,7 @@ describe("Netcraft correspondence", () => {
 		const result = await fetchNetcraftCorrespondence({ confirmationId: UUID }, {
 			fetch: (async (url: string) => {
 				requested.push(String(url));
-				return json({ state: "Malicious", pending: false, has_urls: false, uuid: UUID });
+				return jsonResponse({ state: "Malicious", pending: false, has_urls: false, uuid: UUID });
 			}) as never,
 		});
 		expect(result).toEqual({ messages: [], status: { state: "malicious" }, final: true });
@@ -30,13 +30,13 @@ describe("Netcraft correspondence", () => {
 	});
 
 	test("a submission still being analysed is read again", async () => {
-		const result = await fetchNetcraftCorrespondence({ confirmationId: UUID }, { fetch: (async () => json({ state: "processing", pending: true, has_urls: true, uuid: UUID })) as never });
+		const result = await fetchNetcraftCorrespondence({ confirmationId: UUID }, { fetch: (async () => jsonResponse({ state: "processing", pending: true, has_urls: true, uuid: UUID })) as never });
 		expect(result).toEqual({ messages: [], status: { state: "processing" }, final: false });
 	});
 
 	test("a malformed or failed status read throws, so the poll is retried rather than recording nothing", async () => {
-		await expect(fetchNetcraftCorrespondence({ confirmationId: UUID }, { fetch: (async () => json({ pending: false }, 200)) as never })).rejects.toThrow(/reviewed schema/);
-		await expect(fetchNetcraftCorrespondence({ confirmationId: UUID }, { fetch: (async () => json({}, 503)) as never })).rejects.toThrow();
+		await expect(fetchNetcraftCorrespondence({ confirmationId: UUID }, { fetch: (async () => jsonResponse({ pending: false }, 200)) as never })).rejects.toThrow(/reviewed schema/);
+		await expect(fetchNetcraftCorrespondence({ confirmationId: UUID }, { fetch: (async () => jsonResponse({}, 503)) as never })).rejects.toThrow();
 		await expect(fetchNetcraftCorrespondence({ confirmationId: "../../etc" })).rejects.toThrow(/invalid submission UUID/);
 	});
 
@@ -89,7 +89,7 @@ describe("Netcraft correspondence polling", () => {
 
 	test("records each verdict once and reads again only while Netcraft is still analysing", async () => {
 		let body = { state: "processing", pending: true, has_urls: true, uuid: UUID };
-		globalThis.fetch = (async () => json(body)) as typeof fetch;
+		globalThis.fetch = (async () => jsonResponse(body)) as typeof fetch;
 		const { reportId, route } = await submittedNetcraftRoute();
 		await pollProviderCorrespondence({ routeId: route.id, jobId: 1n });
 		expect(await polls(route.id)).toHaveLength(1);

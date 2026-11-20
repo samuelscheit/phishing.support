@@ -5,13 +5,14 @@ import { cache } from "react";
 
 import { RouteCard } from "@/components/SubmissionReports";
 import { Funnel, OutcomeBar, OutcomeLegend, StripPlot } from "@/components/provider_stats/charts";
-import { formatDay, formatMinutes, formatPercent, ROLE_LABEL, ROLE_MEASURE, SITE_STATE_LABEL, VERDICT_BADGE, VERDICT_LABEL } from "@/components/provider_stats/labels";
+import { formatMinutes, formatPercent, ROLE_LABEL, ROLE_MEASURE, SITE_STATE_LABEL, VERDICT_BADGE, VERDICT_LABEL } from "@/components/provider_stats/labels";
 import { Figure, PageShell, Pagination } from "@/components/provider_stats/PageShell";
 import { LOW_DATA_THRESHOLD, percent, routeTakedownOf, type ProviderStats } from "@/lib/provider_stats/aggregate";
 import type { ProviderRole } from "@/lib/provider_stats/role";
 import { getProviderPage, isProviderSlug, pageOf, type ProviderRouteDetail } from "@/lib/provider_stats/views";
 import { plural } from "@/lib/util/values";
 import { cn } from "@/lib/util/cn";
+import { utcDate } from "@/lib/util/date_time";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +63,7 @@ function RoleBlock({ stats }: { stats: ProviderStats }) {
 					<StripPlot distribution={stats.takedownMinutes} label="Time to takedown" />
 				</div>
 			</div>
-			<p className="text-xs text-muted-foreground">Reports from {formatDay(stats.firstReportAt)} to {formatDay(stats.lastReportAt)}.</p>
+			<p className="text-xs text-muted-foreground">Reports from {utcDate(stats.firstReportAt)} to {utcDate(stats.lastReportAt)}.</p>
 		</section>
 	);
 }
@@ -80,7 +81,7 @@ function RouteEntry({ detail }: { detail: ProviderRouteDetail }) {
 		<li className="rounded-xl border">
 			<details className="group">
 				<summary className="flex cursor-pointer list-none [&::-webkit-details-marker]:hidden flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 hover:bg-muted/30">
-					<span className="w-24 shrink-0 text-sm tabular-nums text-muted-foreground">{formatDay(record.reportedAt)}</span>
+					<span className="w-24 shrink-0 text-sm tabular-nums text-muted-foreground">{utcDate(record.reportedAt)}</span>
 					<span className="min-w-[12rem] flex-1 truncate font-mono text-sm">{record.target}</span>
 					<span className="text-xs text-muted-foreground">{ROLE_LABEL[record.role]}</span>
 					<span className={cn("rounded-full border px-2 py-0.5 text-xs", VERDICT_BADGE[record.outcome.verdict])}>{VERDICT_LABEL[record.outcome.verdict]}</span>

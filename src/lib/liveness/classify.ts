@@ -1,9 +1,9 @@
 import { parse } from "tldts";
 
-import { urlHostname } from "../network/public_redirects";
 import type { SiteCheckState } from "./schema";
 import { matchPageSignature, type SitePage } from "./signatures";
 import { suspensionNameserver } from "./suspension_nameservers";
+import { urlHostname } from "../network/url";
 
 /** What DNS said about the visited host. An IP literal host is `resolved` to itself. */
 export type DnsObservation =

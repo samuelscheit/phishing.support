@@ -7,6 +7,7 @@ import type { AbuseProviderRoute } from "../abuse/schema";
 import { countryName, countryRoutes, directComplaint, type Bilingual } from "./countries";
 import { plural, record, text } from "../util/values";
 import { providerLead, type ProviderLead } from "./provider_leads";
+import { unescapeHtml } from "../util/html";
 
 /**
  * The campaign's infrastructure as investigators need it: every provider
@@ -62,9 +63,7 @@ function mailboxDomain(contact: string | undefined): string | undefined {
 }
 
 /** Registry and Cloudflare texts arrive HTML-escaped ("Subnet &amp; Telecom"). */
-function unescaped(value: string | undefined): string | undefined {
-	return value?.replace(/&(amp|lt|gt|quot|#39);/g, (_, entity: string) => ({ amp: "&", lt: "<", gt: ">", quot: "\"", "#39": "'" })[entity]!);
-}
+const unescaped = (value: string | undefined) => value === undefined ? undefined : unescapeHtml(value);
 
 /** The infrastructure one takedown route was addressed to, or undefined for warning services. */
 export function routeInfrastructure(route: Pick<AbuseProviderRoute, "providerRegistryKey" | "providerDisplayName" | "verifiedEmail" | "resolverProvenance" | "resolutionSnapshot">): InfrastructureClaim | undefined {

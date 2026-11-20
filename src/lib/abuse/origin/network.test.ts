@@ -12,7 +12,8 @@ describe("origin host network attribution", () => {
 		const result = await resolveOriginHostNetworks("abusencc@interserver.net", undefined, {
 			resolveMx: async () => [{ exchange: "mx.interserver.net", priority: 10 }],
 			resolve4: async (host) => host.startsWith("mx.") ? ["66.23.231.189"] : ["104.20.17.90"],
-			fetch: async (url) => {
+			fetch: async (input) => {
+				const url = String(input);
 				requests.push(url);
 				const parsed = new URL(url);
 				const endpoint = parsed.pathname.split("/").at(-2);

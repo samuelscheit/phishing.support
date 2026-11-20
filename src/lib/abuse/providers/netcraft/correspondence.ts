@@ -1,6 +1,7 @@
-import { fetchNetcraftSubmissionState, type NetcraftFetch } from "./api";
+import { fetchNetcraftSubmissionState } from "./api";
 import type { AbuseMailClassification } from "../../schema";
 import type { ProviderCorrespondence } from "../submission_contracts";
+import { type FetchLike } from "../../../http/fetch";
 
 /**
  * Netcraft's verdict on a submission (report API v3: `processing`, `no
@@ -17,7 +18,7 @@ export const NETCRAFT_REVIEW_VERDICTS: Readonly<Record<string, AbuseMailClassifi
 /** Netcraft answers only through the submission's state; it sends no messages of its own here. */
 export async function fetchNetcraftCorrespondence(
 	context: { confirmationId: string; signal?: AbortSignal },
-	dependencies: { fetch?: NetcraftFetch } = {},
+	dependencies: { fetch?: FetchLike } = {},
 ): Promise<ProviderCorrespondence> {
 	const status = await fetchNetcraftSubmissionState({ uuid: context.confirmationId, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
 	return { messages: [], status: { state: status.state.toLowerCase() }, final: !status.pending };

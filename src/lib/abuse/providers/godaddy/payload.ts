@@ -4,9 +4,11 @@ import { normalizeDomain, normalizePublicHttpUrl } from "../../security";
 import type { ReportInput } from "../kit/draft";
 import { field, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
 import { composeFreeText, reportUrls, type UrlRules } from "../kit/text";
-import { extractedBrandName, truncateProviderText } from "../report_payload";
+import { truncateAtWord } from "../../../util/text";
+import { extractedBrandName } from "../report_payload";
 import { isReportReference } from "../report_reference";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
+import { bareHost } from "../../../network/url";
 
 const envelope = payloadEnvelope(PROVIDER, "godaddy_report_v1");
 const URL_RULES: UrlRules = { minimumLength: 4, maximumLength: 2048, maximum: PROVIDER.api.maximumUrls };
@@ -40,8 +42,8 @@ export const goDaddyReportUrls = (domain: string, observedUrls: readonly string[
 export function goDaddyBrand(description: string, legalBrandUrl: string | null | undefined): string {
 	const named = extractedBrandName(description);
 	const normalized = legalBrandUrl ? normalizePublicHttpUrl(legalBrandUrl, { domainOnly: true }) : undefined;
-	const host = normalized ? new URL(normalized).hostname.replace(/^www\./, "") : undefined;
-	return truncateProviderText(named ?? host ?? PROVIDER.unknownBrand, PROVIDER.brandMaximumLength);
+	const host = normalized ? bareHost(normalized) : undefined;
+	return truncateAtWord(named ?? host ?? PROVIDER.unknownBrand, PROVIDER.brandMaximumLength);
 }
 
 /** The free text both channels carry: the reference leads, the narrative gets the rest. */

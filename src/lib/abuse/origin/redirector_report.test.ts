@@ -12,6 +12,7 @@ import { abuseJobs } from "../schema";
 import { reportConfirmedWebsiteAbuse } from "../submission_reports";
 import { buildRedirectorRequest, reportRedirector, type RedirectorReportDependencies } from "./redirector_report";
 import type { RedirectorCheck, RedirectorOf } from "./redirector_watch";
+import { navigationHop } from "../../website/test_helpers";
 
 const ROTATOR = "https://openanonymity.chat/x/?ots-cmpgn-refer=TEST_REFERRER";
 const ROTATOR_PAGE = `<meta http-equiv="refresh" content="0;url=https://assistdeparments-x.com//"><script>window.location.replace("https://assistdeparments-x.com/");</script>`;
@@ -20,10 +21,9 @@ const CHECKED_AT = "2026-11-11T11:19:00.000Z";
 // A decodable 1×1 PNG: the destination's screenshot evidence.
 const SCREENSHOT = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
 
-const hop = (index: number, url: string, extra: Partial<WebsiteNavigationHop> = {}): WebsiteNavigationHop => ({ index, url, hostname: new URL(url).hostname, status: 200, contentCaptured: false, ...extra });
 
 /** Production case 378865704574652495: the redirector, submitted by hand, handed off to the X clone. */
-const ROTATOR_HOPS = [hop(0, ROTATOR, { redirectTo: "https://assistdeparments-x.com/" }), hop(1, "https://assistdeparments-x.com/", { contentCaptured: true })];
+const ROTATOR_HOPS = [navigationHop(0, ROTATOR, { redirectTo: "https://assistdeparments-x.com/" }), navigationHop(1, "https://assistdeparments-x.com/", { contentCaptured: true })];
 
 const REDIRECTOR: RedirectorOf = { url: ROTATOR, destinationUrl: "https://assistdeparments-x.com/", parent: { id: 378865704574652495n, createdAt: CAPTURED_AT, hops: ROTATOR_HOPS } };
 const STILL_FORWARDING: RedirectorCheck = {
@@ -161,15 +161,15 @@ describe("reporting a confirmed page's redirector", () => {
 		expect((await AbuseRepository.listTargets(linked!.id)).map(({ normalizedTarget }) => normalizedTarget)).toEqual(["openanonymity.chat"]);
 
 		// The watch's visit of the redirector later reached the next host.
-		const next = await confirmedThrough({ parent: 440000000000000003n, destination: 440000000000000004n }, [hop(0, ROTATOR, { redirectTo: "https://next-kit-host.com/" }), hop(1, "https://next-kit-host.com/", { contentCaptured: true })]);
+		const next = await confirmedThrough({ parent: 440000000000000003n, destination: 440000000000000004n }, [navigationHop(0, ROTATOR, { redirectTo: "https://next-kit-host.com/" }), navigationHop(1, "https://next-kit-host.com/", { contentCaptured: true })]);
 		const again = await reportRedirector({ reportId: next.reportId, submissionId: 440000000000000004n, finding: X_LOGIN, reporter: {}, pageScreenshot: async () => undefined }, offline().dependencies);
 		expect(again).toMatchObject({ kind: "reported", report: { reportId: linked!.id, created: false } });
 	});
 
 	test("leaves out a mail provider's click tracker, a shortener, and a redirector that is gone", async () => {
 		const tracker = await confirmedThrough({ parent: 440000000000000011n, destination: 440000000000000012n }, [
-			hop(0, "https://track.pstmrk.it/3s/kit", { status: 302, redirectTo: "https://kit-a-host.com/" }),
-			hop(1, "https://kit-a-host.com/", { contentCaptured: true }),
+			navigationHop(0, "https://track.pstmrk.it/3s/kit", { status: 302, redirectTo: "https://kit-a-host.com/" }),
+			navigationHop(1, "https://kit-a-host.com/", { contentCaptured: true }),
 		]);
 		const trackerNet = offline();
 		expect(await reportRedirector({ reportId: tracker.reportId, submissionId: 440000000000000012n, finding: X_LOGIN, reporter: {}, pageScreenshot: async () => undefined }, trackerNet.dependencies))
@@ -177,8 +177,8 @@ describe("reporting a confirmed page's redirector", () => {
 		expect(trackerNet.checked).toEqual([]);
 
 		const shortener = await confirmedThrough({ parent: 440000000000000013n, destination: 440000000000000014n }, [
-			hop(0, "https://bit.ly/3kitXyz", { status: 301, redirectTo: "https://kit-b-host.com/" }),
-			hop(1, "https://kit-b-host.com/", { contentCaptured: true }),
+			navigationHop(0, "https://bit.ly/3kitXyz", { status: 301, redirectTo: "https://kit-b-host.com/" }),
+			navigationHop(1, "https://kit-b-host.com/", { contentCaptured: true }),
 		]);
 		const shortenerNet = offline();
 		expect(await reportRedirector({ reportId: shortener.reportId, submissionId: 440000000000000014n, finding: X_LOGIN, reporter: {}, pageScreenshot: async () => undefined }, shortenerNet.dependencies))

@@ -1,7 +1,6 @@
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { runStreamedAnalysisRun } from "../analysis/run";
-import { publishEvent } from "../event/event_transport";
 import { simpleParser } from "mailparser";
 import { analyzeHeaders, getAddressesText, getMailImage, getMailWebsiteUrls } from "./parse";
 import { getInfo } from "../website/info";
@@ -15,6 +14,7 @@ import { serviceIdentity } from "../network/service_identity";
 import { errorText } from "../util/error_text";
 import type { EmailSubmissionData } from "../db/schema";
 import type { ReporterMetadata } from "../http/reporter_headers";
+import { emitStep } from "../website/progress";
 
 function buildMailEvidence(mail: MailData, analysisText?: string) {
 	return toon.encode({
@@ -27,11 +27,6 @@ function buildMailEvidence(mail: MailData, analysisText?: string) {
 		whois: mail.whois,
 		analysis: analysisText || undefined,
 	});
-}
-
-async function emitStep(streamId: bigint | string | undefined, step: string, progress: number) {
-	if (!streamId) return;
-	await publishEvent(`run:${streamId}`, { type: "analysis.step", step, progress });
 }
 
 export type ParseMailDependencies = {

@@ -1,3 +1,4 @@
+import { canonicalHost } from "../network/url";
 /**
  * Nameserver domains a registrar or registry delegates a suspended domain to.
  * A domain delegated there is down at the registry, whatever a resolver that
@@ -23,7 +24,7 @@ const SUSPENSION_NAMESERVER_DOMAINS: readonly string[] = [
 /** The first of the delegated nameservers that is a suspension nameserver. */
 export function suspensionNameserver(nameservers: readonly string[]): string | undefined {
 	return nameservers.find((nameserver) => {
-		const host = nameserver.toLowerCase().replace(/\.$/, "");
+		const host = canonicalHost(nameserver);
 		return SUSPENSION_NAMESERVER_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`));
 	});
 }

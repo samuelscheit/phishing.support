@@ -1,6 +1,6 @@
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { createDraft, type RouteDeps } from "../kit/draft";
-import { snippet } from "../kit/text";
+import { snippet } from "../../../util/text";
 import { preparedState, withPreflight } from "../kit/session";
 import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
 import {

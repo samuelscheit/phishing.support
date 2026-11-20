@@ -7,10 +7,11 @@ import {
 	type ProviderSubmissionPreflight,
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
-import { fileGoDaddyTickets, goDaddyApiCredentials, goDaddyApiEnabled, type GoDaddyApiCredentials, type GoDaddyFetch } from "./api";
+import { fileGoDaddyTickets, goDaddyApiCredentials, goDaddyApiEnabled, type GoDaddyApiCredentials } from "./api";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
 import { buildGoDaddySubmissionPayload, storedGoDaddySubmissionPayload } from "./payload";
 import { interpretPortalAnswer, portalFields, portalRenderedType, recaptchaTokenProbe } from "./portal";
+import { type AnswerFetch } from "../../../http/fetch";
 
 export type GoDaddyFormSession = BrowserFormSession & BrowserFormRequestSession & BrowserFormScripting;
 
@@ -18,12 +19,12 @@ export type GoDaddyDependencies = RouteDeps & {
 	/** The browser on the Legal Portal form; tests inject a fake. */
 	openForm?: (signal: AbortSignal | undefined) => Promise<GoDaddyFormSession>;
 	environment?: Readonly<Record<string, string | undefined>>;
-	fetch?: GoDaddyFetch;
+	fetch?: AnswerFetch;
 };
 
 /** The channel the preflight chose, with what its one filing request needs. Never persisted. */
 export type GoDaddyPreflightState =
-	| { channel: "api"; credentials: GoDaddyApiCredentials; fetch?: GoDaddyFetch }
+	| { channel: "api"; credentials: GoDaddyApiCredentials; fetch?: AnswerFetch }
 	| { channel: "portal"; session: GoDaddyFormSession; token: string; rendered: Awaited<ReturnType<BrowserFormSession["readFormFields"]>> };
 
 export const goDaddyDraft = createDraft({

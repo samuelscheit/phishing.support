@@ -3,9 +3,8 @@ import { fetch as proxyFetch } from "netbun";
 import { captchaCredentialsProblem, solveCaptchaToken } from "../kit/captcha";
 import { createDraft, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
-import { jsonRecord } from "../kit/http";
 import { preparedState } from "../kit/session";
-import { snippet } from "../kit/text";
+import { snippet } from "../../../util/text";
 import { getProviderProxy, type ProviderProxy } from "../proxy";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { TENCENT_PROVIDER } from "./definition";
@@ -15,6 +14,7 @@ import {
 	TENCENT_EVIDENCE_CONTRACT,
 	type TencentSubmissionPayload,
 } from "./payload";
+import { parseJsonRecord } from "../../../util/values";
 
 /** Tencent's token CAPTCHA reply requires both ticket and randstr. */
 export type TencentCaptcha = { ret: 0; ticket: string; randstr: string; [key: string]: unknown };
@@ -38,7 +38,7 @@ export type TencentSubmissionDependencies = RouteDeps & {
 };
 
 function parseTencentCloudResponseJson(body: string): TencentCloudSubmissionResponse | undefined {
-	const response = jsonRecord(body);
+	const response = parseJsonRecord(body);
 	if (!response) return undefined;
 	const data = response.data;
 	if (typeof response.code !== "number" || (data !== undefined && (!data || typeof data !== "object" || Array.isArray(data)))) return undefined;
@@ -156,7 +156,7 @@ async function verifiedTencentDraft(context: ProviderSubmissionContext, dependen
 
 /** Validate the exact token shape Tencent's form expects from the solver. */
 export function parseTencentCaptchaSolution(value: string): TencentCaptcha {
-	const captcha = jsonRecord(value);
+	const captcha = parseJsonRecord(value);
 	if (!captcha) throw new Error("Tencent CAPTCHA solver returned malformed JSON.");
 	if (captcha.ret !== 0 || typeof captcha.ticket !== "string" || !captcha.ticket.trim() || typeof captcha.randstr !== "string" || !captcha.randstr.trim()) {
 		throw new Error("Tencent CAPTCHA solving failed.");

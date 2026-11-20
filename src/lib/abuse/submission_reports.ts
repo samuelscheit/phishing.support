@@ -3,7 +3,7 @@ import { isIP } from "node:net";
 import type { ReporterMetadata } from "../http/reporter_headers";
 import { AbuseRepository, type CreatedAbuseReport } from "./repository";
 import { decodeImageEvidence, normalizeAbuseTarget, normalizeObservedUrl, type DecodedEvidence, type NormalizedAbuseTarget, type ValidatedAbuseReportRequest } from "./contracts";
-import { AbuseInputError, hashStableJson, isPublicIp, sha256Hex } from "./security";
+import { AbuseInputError, isPublicIp } from "./security";
 import { setInvestigationStatus } from "../investigation/status";
 import { enqueueRedirectorWatch } from "./origin/redirector_watch";
 import { websiteSite } from "../website/site";
@@ -11,7 +11,7 @@ import type { ReportableWebsiteFinding, WebsiteHiddenFrame, WebsiteOfferedDownlo
 import type { PasteCommand } from "../malware/paste_commands";
 import type { InvestigationJobPayload } from "../investigation/payload";
 import type { CapturedNetworkRequest, ExfiltrationBackend, ExfiltrationCanaries } from "../exfiltration/types";
-import { stableJson } from "./security";
+import { hashStableJson, sha256Hex, stableJson } from "../util/hash";
 
 const MAX_REPORT_DESCRIPTION_LENGTH = 30_000;
 /** Netcraft's documented raw-message limit, which is also the strictest mail-evidence consumer. */

@@ -2,13 +2,14 @@ import dns from "node:dns/promises";
 
 import { z } from "zod";
 
-import { retryWithTimeout, type FetchImplementation } from "../../network/bounded_fetch";
+import { retryWithTimeout } from "../../network/bounded_fetch";
 import { ripeStatData } from "../../network/ripestat";
 import { isPublicIp, normalizeDomain, registrableDomain } from "../security";
 import { normalizeMailbox } from "../mail/shared";
 import { throwIfAborted } from "../worker/shared";
 import { mapConcurrent } from "./concurrency";
 import { errorSummary } from "../../util/error_text";
+import { type FetchLike } from "../../http/fetch";
 
 const MAX_CANDIDATE_ASNS = 24;
 const MAX_DNS_ADDRESSES = 24;
@@ -41,7 +42,7 @@ export type OriginNetworkResolution = {
 };
 
 export type OriginNetworkDependencies = {
-	fetch?: FetchImplementation;
+	fetch?: FetchLike;
 	resolve4?: (hostname: string) => Promise<string[]>;
 	resolveMx?: (hostname: string) => Promise<Array<{ exchange: string; priority: number }>>;
 };

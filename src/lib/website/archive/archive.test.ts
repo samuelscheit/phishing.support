@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import puppeteer, { type Browser, type BrowserContext, type HTTPRequest, type HTTPResponse, type Page, TimeoutError } from "rebrowser-puppeteer-core";
 import sharp from "sharp";
@@ -12,6 +11,7 @@ import { BrowserInfrastructureError, isBrowserInfrastructureFailure, WebsiteCapt
 import { getMhtmlArchiveDate, getMhtmlArchiveLocation } from "./mhtml";
 import { capturedDocumentContent } from "./text";
 import type { WebsiteArchiveResult } from "./types";
+import { sha256Hex } from "../../util/hash";
 
 function mhtml(preamble: string, body = "content") {
 	return Buffer.from(`${preamble}\r\n\r\n${body}`, "latin1");
@@ -309,11 +309,10 @@ test("a live capture records the hashes of every host's scripts and stylesheets 
 		},
 	});
 	const archive = await archiveWebsite({ url }, { getBrowser: fixture.getBrowser, ...fast });
-	const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 	expect(archive.kitResources).toEqual([
-		{ url: "https://kit.example.com/index.js?v=2", mimeType: "application/javascript", size: Buffer.byteLength(script), sha256: sha256(script) },
-		{ url: "https://kit.example.com/res/style.css", mimeType: "text/css", size: Buffer.byteLength(style), sha256: sha256(style) },
-		{ url: "https://backend.example.net/gmail/js/start.js", mimeType: "application/javascript", size: 5, sha256: sha256("start") },
+		{ url: "https://kit.example.com/index.js?v=2", mimeType: "application/javascript", size: Buffer.byteLength(script), sha256: sha256Hex(script) },
+		{ url: "https://kit.example.com/res/style.css", mimeType: "text/css", size: Buffer.byteLength(style), sha256: sha256Hex(style) },
+		{ url: "https://backend.example.net/gmail/js/start.js", mimeType: "application/javascript", size: 5, sha256: sha256Hex("start") },
 	]);
 });
 
@@ -1572,7 +1571,7 @@ document.getElementById("who").textContent = phone ? "Opened on an iPhone." : "T
 			const gooll = frames[0]!;
 			// The document as received, scripts included: the MHTML would have none of it.
 			expect(gooll.source).toContain('/iPhone OS ([0-9_]+)/.exec(ua)');
-			expect(gooll.sha256).toBe(createHash("sha256").update(gooll.source).digest("hex"));
+			expect(gooll.sha256).toBe(sha256Hex(gooll.source));
 			expect(gooll.userAgent).toContain("Windows NT 10.0");
 			expect(gooll.signals).toEqual({
 				platformGate: ["iPhone OS"],

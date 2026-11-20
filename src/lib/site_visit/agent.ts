@@ -3,6 +3,7 @@ import { redactedErrorText } from "../util/error_text";
 import type { ExfiltrationCanaries } from "../exfiltration/types";
 import type { SiteVisitTask } from "./task";
 import { DAY_MS } from "../util/date_time";
+import { squash } from "../util/text";
 
 /**
  * One thing the agent did or concluded, as the live log and the visit record
@@ -73,7 +74,7 @@ function actionValue(args: Record<string, unknown>): string | undefined {
  */
 export function stepActions(step: StepLog, at: string): VisitAgentAction[] {
 	const actions: VisitAgentAction[] = [];
-	const thought = step.thought.replace(/\s+/g, " ").trim();
+	const thought = squash(step.thought);
 	if (thought) actions.push({ id: `${step.step}`, kind: "thought", text: thought.slice(0, MAX_ACTION_TEXT), at });
 	step.actions.forEach((action, index) => {
 		const outcome = action.output.split("\n")[0]!.trim();

@@ -1,8 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import { releaseLock, tryAcquireLock } from "../../persistence/locks";
 import { OperationCanceledError, raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
 import { sqliteLoginSessionStore, type LoginSessionStore } from "./store";
+import { sha256Hex } from "../../../util/hash";
+import { raceTimeout } from "../../../util/async";
 
 /**
  * A logged-in provider account session: whatever a provider needs to call its
@@ -101,7 +103,7 @@ export function createLoginSessions<C, S extends LoginSession>(spec: LoginSessio
 	const canceled = `${spec.provider} session request was canceled.`;
 	const inflight = new Map<string, Promise<S>>();
 
-	const key = (config: C) => `${spec.namespace}:${createHash("sha256").update(spec.account(config)).digest("hex").slice(0, 32)}`;
+	const key = (config: C) => `${spec.namespace}:${sha256Hex(spec.account(config)).slice(0, 32)}`;
 	const usable = (session: S | undefined): session is S => Boolean(session && session.expiresAt - spec.safetyMs > deps.now());
 
 	async function read(storeKey: string): Promise<{ session?: S; failure?: { message: string; until: number } }> {
@@ -177,10 +179,5 @@ export function createLoginSessions<C, S extends LoginSession>(spec: LoginSessio
 
 /** Resolve after `ms` even if `operation` never settles; bounds a login's browser cleanup. */
 export async function boundedCleanup(operation: Promise<unknown>, ms = 10_000): Promise<void> {
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	await Promise.race([
-		operation.catch(() => undefined),
-		new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); }),
-	]);
-	clearTimeout(timer);
+	await raceTimeout(operation, ms, () => new Error("cleanup timed out")).catch(() => undefined);
 }

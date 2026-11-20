@@ -1,3 +1,4 @@
+import { snippet } from "./text";
 /**
  * A readable description of anything thrown. WebSocket clients reject with an
  * `ErrorEvent` (puppeteer under Bun does), which is not an `Error` and
@@ -42,7 +43,12 @@ export function redactedErrorText(error: unknown): string {
 		.slice(0, 2_000);
 }
 
+/** The error text cut to `maximum` characters, for results the worker stores. */
+export function boundedErrorText(error: unknown, maximum = 2_000): string {
+	return errorText(error).slice(0, maximum);
+}
+
 /** One line of at most 500 characters, for error lists stored in snapshots and logs. */
 export function errorSummary(error: unknown): string {
-	return errorText(error).replace(/\s+/g, " ").slice(0, 500);
+	return snippet(errorText(error), 500);
 }

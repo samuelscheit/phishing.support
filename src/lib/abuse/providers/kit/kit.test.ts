@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
 import { PREVIEW_REFERENCE, defineProvider, registrarPreview } from "./provider";
-import { failUnlessFiled, deadline, jsonRecord } from "./http";
+import { failUnlessFiled } from "./http";
 import { preparedState, withPreflight } from "./session";
-import { composeFreeText, isReportUrl, reportUrls, snippet } from "./text";
+import { snippet } from "../../../util/text";
+import { composeFreeText, isReportUrl, reportUrls } from "./text";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext } from "../submission_contracts";
 import { definePinned } from "./pin";
+import { deadline } from "../../../util/async";
+import { parseJsonRecord } from "../../../util/values";
 
 const HOST = "phish.example.com";
 const url = (path: string) => `https://${HOST}/${path}`;
@@ -96,9 +99,9 @@ describe("failUnlessFiled", () => {
 });
 
 describe("http and text helpers", () => {
-	test("jsonRecord takes only a JSON object", () => {
-		expect(jsonRecord('{"a":1}')).toEqual({ a: 1 });
-		for (const text of ["[1]", "3", '"x"', "null", "not json", ""]) expect(jsonRecord(text), text).toBeUndefined();
+	test("parseJsonRecord takes only a JSON object", () => {
+		expect(parseJsonRecord('{"a":1}')).toEqual({ a: 1 });
+		for (const text of ["[1]", "3", '"x"', "null", "not json", ""]) expect(parseJsonRecord(text), text).toBeUndefined();
 	});
 
 	test("snippet flattens whitespace and keeps its cap", () => {

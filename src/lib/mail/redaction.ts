@@ -16,10 +16,6 @@ export function isServiceAddress(address: string): boolean {
  * known variant of each recipient term is replaced, not only the plain text.
  */
 
-function escapeRegExp(value: string) {
-	return value.replaceAll(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
-}
-
 function quotedPrintableEncodedWord(value: string) {
 	return Array.from(Buffer.from(value, "utf-8"))
 		.map((byte) => {
@@ -172,7 +168,7 @@ function redactString(value: string, terms: string[]) {
 		if (term.includes("@")) {
 			for (const variant of emailRedactionVariants(term)) {
 				if (!variant.text) continue;
-				const escaped = escapeRegExp(variant.text);
+				const escaped = RegExp.escape(variant.text);
 				cleaned = cleaned.replace(new RegExp(escaped, variant.caseSensitive ? "g" : "gi"), "[redacted]");
 			}
 		} else {
@@ -185,10 +181,10 @@ function redactString(value: string, terms: string[]) {
 			];
 			for (const variant of directVariants) {
 				if (!variant) continue;
-				const escaped = escapeRegExp(variant);
+				const escaped = RegExp.escape(variant);
 				cleaned = cleaned.replace(new RegExp(escaped, "gi"), "[redacted]");
 			}
-			const escaped = escapeRegExp(term);
+			const escaped = RegExp.escape(term);
 			cleaned = cleaned.replace(new RegExp(`(^|[^\\p{L}\\p{N}_])(${escaped})(?=$|[^\\p{L}\\p{N}_])`, "giu"), "$1[redacted]");
 		}
 	}

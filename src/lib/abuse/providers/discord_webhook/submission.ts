@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { sleep } from "../../../util/sleep";
+import { sleep, type Sleep } from "../../../util/sleep";
 import { asRecord } from "../../../util/values";
 import { createDraft } from "../kit/draft";
 import { payloadEnvelope, storedReader } from "../kit/stored";
@@ -16,7 +16,7 @@ const payloadSchema = z.object({
 
 export type DiscordWebhookDependencies = {
 	fetch?: (input: string, init: RequestInit) => Promise<Response>;
-	sleep?: (ms: number) => Promise<void>;
+	sleep?: Sleep;
 };
 
 /** Discord's error code for a webhook that does not exist (any more). */

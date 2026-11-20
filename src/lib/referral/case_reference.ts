@@ -1,3 +1,4 @@
+import { squash } from "../util/text";
 /**
  * The file number an authority gives a criminal complaint, read from its
  * reply. German prosecutors write an Aktenzeichen such as `401 UJs 12345/26`
@@ -38,7 +39,7 @@ export function caseReferenceCandidates(text: string, ownReferences: readonly st
 	const own = ownReferences.map((reference) => reference.toLowerCase()).filter(Boolean);
 	const found = new Map<string, CaseReferenceCandidate>();
 	const add = (value: string, label: string) => {
-		const normalized = value.replace(/\s+/g, " ").trim();
+		const normalized = squash(value);
 		if (normalized.length < 4 || !/\d/.test(normalized)) return;
 		if (own.some((reference) => normalized.toLowerCase().includes(reference) || reference.includes(normalized.toLowerCase()))) return;
 		const key = normalized.toLowerCase().replace(/\s+/g, "");

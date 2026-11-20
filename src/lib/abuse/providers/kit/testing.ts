@@ -4,9 +4,9 @@ import { contactRoute } from "../../resolver/routes";
 import { providerSupplementalRoute } from "../submission_routes";
 import { getProviderSubmissionProvider } from "../submission_registry_default";
 import type { AbuseArtifact } from "../../schema";
-import { sha256Hex } from "../../security";
 import type { BrowserFormResponse } from "../browser_form";
 import type { ProviderSubmissionContext, ProviderSubmissionPreparation } from "../submission_contracts";
+import { sha256Hex } from "../../../util/hash";
 
 /** Test support for the provider kit: fixtures every provider's tests share. */
 
@@ -14,9 +14,14 @@ export const TARGET = "login-example-phish.com";
 export const DESCRIPTION = "The page asks visitors for a password, sign-in details, a verification code, or identity details.";
 export const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
 
-/** An intact original screenshot artifact, as the report's evidence holds it. */
-export const pngArtifact = (id: bigint, bytes = PNG, mimeType = "image/png") =>
-	({ id, reportId: 1n, name: "shot.png", kind: "user_evidence_original", mimeType, sha256: sha256Hex(bytes), size: bytes.byteLength, blob: bytes, metadata: {}, createdAt: new Date() }) as unknown as AbuseArtifact;
+/** An original screenshot artifact as the report's evidence holds it: intact (digest and size of `bytes`) unless `overrides` break it. */
+export const evidenceArtifact = (bytes: Buffer = PNG, overrides: Partial<AbuseArtifact> = {}): AbuseArtifact => ({
+	id: 101n, reportId: 99n, targetId: null, routeId: null, runId: null, name: "website.png", kind: "user_evidence_original", mimeType: "image/png",
+	sha256: sha256Hex(bytes), size: bytes.byteLength, metadata: {}, blob: bytes, createdAt: new Date(), ...overrides,
+});
+
+/** An intact original screenshot artifact. */
+export const pngArtifact = (id: bigint, bytes = PNG, mimeType = "image/png") => evidenceArtifact(bytes, { id, reportId: 1n, name: "shot.png", mimeType });
 
 /** A browser form's answer carrying JSON. */
 export const formAnswer = (json: unknown, status = 200): BrowserFormResponse => ({ status, text: JSON.stringify(json), json });

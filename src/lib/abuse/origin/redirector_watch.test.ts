@@ -20,6 +20,7 @@ import {
 	type RedirectorWatchState,
 	watchRedirector,
 } from "./redirector_watch";
+import { navigationHop } from "../../website/test_helpers";
 
 const ROTATOR = "https://openanonymity.chat/x/?ots-cmpgn-refer=TEST_REFERRER";
 
@@ -175,28 +176,27 @@ describe("the cheap check of a redirector", () => {
 	});
 });
 
-const hop = (index: number, url: string, extra: Partial<WebsiteNavigationHop> = {}): WebsiteNavigationHop => ({ index, url, hostname: new URL(url).hostname, status: 200, contentCaptured: false, ...extra });
 
 /** The hops of the email link in case 378201607612928051. */
 const EMAIL_LINK_HOPS: WebsiteNavigationHop[] = [
-	hop(0, "https://tr.slicksalon.com/t/c/23701074", { status: 302, redirectTo: "https://track.pstmrk.it/3s/openanonymity.chat" }),
-	hop(1, "https://track.pstmrk.it/3s/openanonymity.chat", { status: 302, redirectTo: "https://openanonymity.chat/x?ots-cmpgn-refer=TEST_REFERRER" }),
-	hop(2, "https://openanonymity.chat/x?ots-cmpgn-refer=TEST_REFERRER", { status: 301, redirectTo: ROTATOR }),
-	hop(3, ROTATOR, { redirectTo: "https://x-com.email/" }),
-	hop(4, "https://x-com.email/", { contentCaptured: true }),
+	navigationHop(0, "https://tr.slicksalon.com/t/c/23701074", { status: 302, redirectTo: "https://track.pstmrk.it/3s/openanonymity.chat" }),
+	navigationHop(1, "https://track.pstmrk.it/3s/openanonymity.chat", { status: 302, redirectTo: "https://openanonymity.chat/x?ots-cmpgn-refer=TEST_REFERRER" }),
+	navigationHop(2, "https://openanonymity.chat/x?ots-cmpgn-refer=TEST_REFERRER", { status: 301, redirectTo: ROTATOR }),
+	navigationHop(3, ROTATOR, { redirectTo: "https://x-com.email/" }),
+	navigationHop(4, "https://x-com.email/", { contentCaptured: true }),
 ];
 
 describe("which page of a chain is the redirector", () => {
 	test("is the last page before the destination's site that sent the visitor on by itself", () => {
 		expect(redirectorHop(EMAIL_LINK_HOPS, "https://x-com.email/")?.url).toBe(ROTATOR);
 		// The destination's own redirects are part of the destination.
-		expect(redirectorHop([...EMAIL_LINK_HOPS.slice(0, 4), hop(4, "https://x-com.email/", { status: 302, redirectTo: "https://x-com.email/login" }), hop(5, "https://x-com.email/login")], "https://x-com.email/login")?.url).toBe(ROTATOR);
+		expect(redirectorHop([...EMAIL_LINK_HOPS.slice(0, 4), navigationHop(4, "https://x-com.email/", { status: 302, redirectTo: "https://x-com.email/login" }), navigationHop(5, "https://x-com.email/login")], "https://x-com.email/login")?.url).toBe(ROTATOR);
 	});
 
 	test("is none when the visitor had to act, or the chain never left the destination", () => {
-		expect(redirectorHop([hop(0, "https://landing.example/", { redirectTo: "https://kit.example/", visitorStep: { submitted: [] } }), hop(1, "https://kit.example/")], "https://kit.example/")).toBeUndefined();
-		expect(redirectorHop([hop(0, "https://landing.example/", { redirectTo: "https://kit.example/", visitorStep: { submitted: ["email"] } }), hop(1, "https://kit.example/")], "https://kit.example/")).toBeUndefined();
-		expect(redirectorHop([hop(0, "https://kit.example/")], "https://kit.example/")).toBeUndefined();
+		expect(redirectorHop([navigationHop(0, "https://landing.example/", { redirectTo: "https://kit.example/", visitorStep: { submitted: [] } }), navigationHop(1, "https://kit.example/")], "https://kit.example/")).toBeUndefined();
+		expect(redirectorHop([navigationHop(0, "https://landing.example/", { redirectTo: "https://kit.example/", visitorStep: { submitted: ["email"] } }), navigationHop(1, "https://kit.example/")], "https://kit.example/")).toBeUndefined();
+		expect(redirectorHop([navigationHop(0, "https://kit.example/")], "https://kit.example/")).toBeUndefined();
 		expect(redirectorHop(EMAIL_LINK_HOPS, "https://elsewhere.example/")).toBeUndefined();
 	});
 });

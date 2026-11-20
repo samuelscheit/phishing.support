@@ -1,13 +1,9 @@
-import {
-	fetchNetcraftSubmissionStatus,
-	netcraftSubmissionIdFromDiagnostic,
-	netcraftSubmissionUrl,
-	type NetcraftFetch,
-} from "./api";
+import { fetchNetcraftSubmissionStatus, netcraftSubmissionIdFromDiagnostic, netcraftSubmissionUrl } from "./api";
 import { AbuseRepository } from "../../repository";
 import { normalizeObservedUrlForTarget } from "../report_payload";
 
 import { NETCRAFT_PROVIDER } from "./definition";
+import { type FetchLike } from "../../../http/fetch";
 
 export type NetcraftProviderReconciliationResult =
 	| {
@@ -48,7 +44,7 @@ function confirmationText(state: string): string {
 export async function reconcileNetcraftProviderRun(params: {
 	runId: bigint;
 	submissionId: string;
-	fetch?: NetcraftFetch;
+	fetch?: FetchLike;
 }): Promise<NetcraftProviderReconciliationResult> {
 	let suppliedFinalUrl: string;
 	try {

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 
 import { ArtifactsEntity } from "../../db/entities/artifacts";
@@ -12,6 +11,7 @@ import { AbuseRepository } from "../repository";
 import { abuseArtifacts, abuseJobs } from "../schema";
 import { readOriginHostSnapshot, type KitCollectedData } from "./snapshot";
 import { reportOriginHost } from "./report";
+import { sha256Hex } from "../../util/hash";
 
 const CLOUDFLARE_RESPONSE = `Hello,
 
@@ -34,7 +34,7 @@ describe("origin-host report workflow", () => {
 			source: "https://login.example.com/",
 		});
 		const capturedCss = Buffer.from(".captured-kit { color: red; }\n".repeat(40));
-		const capturedCssSha256 = createHash("sha256").update(capturedCss).digest("hex");
+		const capturedCssSha256 = sha256Hex(capturedCss);
 		await ArtifactsEntity.saveBuffer({
 			submissionId,
 			name: "website.mhtml",

@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename } from "node:fs/promises";
 import path from "node:path";
 
 import { imapConfig, relayBounceMaildir } from "../mail/config";
 import { sleep } from "../util/sleep";
 import { ingestFetchedMail } from "./ingest";
+import { sha256Hex } from "../util/hash";
 
 /**
  * Bounces of our reports, which our relay files into a Maildir on the data
@@ -19,7 +19,7 @@ const POLL_MS = 15_000;
 
 /** A stable stand-in for an IMAP UID: 48 bits of the hash of the Maildir file's unique name. */
 export function maildirUid(name: string): number {
-	return Number.parseInt(createHash("sha256").update(name).digest("hex").slice(0, 12), 16);
+	return Number.parseInt(sha256Hex(name).slice(0, 12), 16);
 }
 
 /** Ingest every message in `dir`/new; one whose outcome is terminal moves to cur/, one to retry stays. */

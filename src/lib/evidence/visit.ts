@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 
 import { matchedCanaries } from "../exfiltration/analysis";
 import type { CapturedNetworkRequest, ExfiltrationBackend, ExfiltrationCanaries } from "../exfiltration/types";
@@ -6,6 +5,7 @@ import type { VisitAgentAction } from "../site_visit/agent";
 import { canonicalJson } from "./package";
 import { timestampEvidence, type EvidenceTimestamp } from "./timestamp";
 import type { EvidenceFile } from "./package";
+import { sha256Hex } from "../util/hash";
 
 /**
  * The record of one visit through a phishing site, kept so it can be used
@@ -43,7 +43,6 @@ export type VisitEvidenceFacts = {
 
 export type VisitEvidence = { files: EvidenceFile[]; timestamp?: EvidenceTimestamp };
 
-const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 const FIELD_NAMES: Record<keyof ExfiltrationCanaries, string> = {
 	marker: "marker",
@@ -123,7 +122,7 @@ export async function buildVisitEvidence(facts: VisitEvidenceFacts, dependencies
 		requests: facts.requests.map((request) => ({ ...request, carries: carried(request, facts.syntheticValues) })),
 		backends: facts.backends,
 	}), "utf8");
-	const recordSha = sha256(record);
+	const recordSha = sha256Hex(record);
 	const text = Buffer.from(protocol(facts, recordSha), "utf8");
 	const files: EvidenceFile[] = [
 		{ name: VISIT_EVIDENCE_FILES.record, mimeType: "application/json", bytes: record },
@@ -135,7 +134,7 @@ export async function buildVisitEvidence(facts: VisitEvidenceFacts, dependencies
 		submittedUrl: facts.submittedUrl,
 		visitStartedAt: facts.startedAt.toISOString(),
 		visitEndedAt: facts.endedAt.toISOString(),
-		files: files.map((file) => ({ name: file.name, sha256: sha256(file.bytes), size: file.bytes.byteLength })),
+		files: files.map((file) => ({ name: file.name, sha256: sha256Hex(file.bytes), size: file.bytes.byteLength })),
 	}), "utf8");
 	files.push({ name: VISIT_EVIDENCE_FILES.manifest, mimeType: "application/json", bytes: manifest });
 	const timestamp = await (dependencies.timestamp ?? timestampEvidence)(manifest);

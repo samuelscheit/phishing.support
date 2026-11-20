@@ -17,6 +17,7 @@ import { ingestMaildir, maildirUid } from "./maildir";
 import { mkdtemp, mkdir, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { inboundMail, noIntake } from "./test_helpers";
 
 useTemporaryDatabase();
 
@@ -38,10 +39,6 @@ afterAll(() => {
 		else process.env[name] = value;
 	}
 });
-
-const noIntake = async () => {
-	throw new Error("Intake must not run for this message.");
-};
 
 /** The header block iCloud prepends on delivery, with its own verdicts for `domain`. */
 function icloudReceived(domain: string, verdict: "pass" | "fail" = "pass"): string[] {
@@ -104,10 +101,6 @@ async function sentReport(target: string, recipient: string, subject?: string, s
 /** What each report sent by `sentReport` handed the relay: envelope sender, From header, notice request. */
 const submissions: Array<{ envelopeFrom: string; from?: string; dsn: unknown }> = [];
 
-async function inbound(reportId: bigint) {
-	return (await AbuseRepository.listMailForReport(reportId)).filter((message) => message.direction === "inbound");
-}
-
 describe("helpdesk replies without threading headers", () => {
 	test("Gransy's reply to support@ with a ticket-prefixed subject attaches to the case it names", async () => {
 		const sent = await sentReport("migrationqueuetrustdex.com", "abuse@regtons.com");
@@ -123,8 +116,8 @@ describe("helpdesk replies without threading headers", () => {
 			], "> Hello,\r\n> \r\n> Domain(s) suspended.\r\n> Abuse team Gransy s. r. o."),
 		}, config, { createIntakeSubmission: noIntake });
 		expect(result).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_provider_reply" });
-		expect(await inbound(sent.reportId)).toMatchObject([{ kind: "reply", fromAddress: "abuse@regtons.com" }]);
-		expect(await inbound(other.reportId)).toEqual([]);
+		expect(await inboundMail(sent.reportId)).toMatchObject([{ kind: "reply", fromAddress: "abuse@regtons.com" }]);
+		expect(await inboundMail(other.reportId)).toEqual([]);
 	});
 
 	test("Contabo's ticket reply from contabo.com attaches to the report we mailed to contabo.de; another company's TLD twin does not", async () => {
@@ -142,8 +135,8 @@ describe("helpdesk replies without threading headers", () => {
 			], "Dear Sir or Madam, we could not find a domain or an IP address which we can assign to Contabo products."),
 		}, config, { createIntakeSubmission: noIntake });
 		expect(await reply(610, "contabo.com")).toMatchObject({ route: "reply", reason: "stored_provider_reply" });
-		expect(await inbound(sent.reportId)).toMatchObject([{ kind: "reply", fromAddress: "no-reply@contabo.com" }]);
-		expect(await inbound(other.reportId)).toEqual([]);
+		expect(await inboundMail(sent.reportId)).toMatchObject([{ kind: "reply", fromAddress: "no-reply@contabo.com" }]);
+		expect(await inboundMail(other.reportId)).toEqual([]);
 		// The same name is not enough on its own: a sender we never mailed under any TLD stays unmatched.
 		expect(await reply(611, "contabo-support.com")).toMatchObject({ route: "ignored", reason: "no_report_match" });
 	});
@@ -162,7 +155,7 @@ describe("helpdesk replies without threading headers", () => {
 			], "> Case details: https://phishing.support/submissions/373042876772257865"),
 		}, config, { createIntakeSubmission: noIntake });
 		expect(result).toMatchObject({ route: "reply" });
-		expect(await inbound(sent.reportId)).toHaveLength(1);
+		expect(await inboundMail(sent.reportId)).toHaveLength(1);
 	});
 
 	test("legacy reports without a case tag match the authenticated sender plus our exact subject", async () => {
@@ -178,7 +171,7 @@ describe("helpdesk replies without threading headers", () => {
 			], "We removed the deployment."),
 		}, config, { createIntakeSubmission: noIntake });
 		expect(result).toMatchObject({ route: "reply" });
-		expect(await inbound(sent.reportId)).toHaveLength(1);
+		expect(await inboundMail(sent.reportId)).toHaveLength(1);
 	});
 
 	test("a forged sender is never trusted, even with our case tag", async () => {
@@ -196,7 +189,7 @@ describe("helpdesk replies without threading headers", () => {
 			], "Please follow these instructions."),
 		}, config, { createIntakeSubmission: noIntake });
 		expect(result).toEqual({ disposition: "terminal", route: "ignored", reason: "no_report_match" });
-		expect(await inbound(sent.reportId)).toEqual([]);
+		expect(await inboundMail(sent.reportId)).toEqual([]);
 	});
 
 	test("a sender we never emailed cannot claim a case by naming its tag", async () => {
@@ -212,7 +205,7 @@ describe("helpdesk replies without threading headers", () => {
 			], "Ticket resolved."),
 		}, config, { createIntakeSubmission: noIntake });
 		expect(result).toMatchObject({ route: "ignored" });
-		expect(await inbound(sent.reportId)).toEqual([]);
+		expect(await inboundMail(sent.reportId)).toEqual([]);
 	});
 
 	test("Hostinger's tracker reply with In-Reply-To keeps the strongest correlation", async () => {
@@ -229,7 +222,7 @@ describe("helpdesk replies without threading headers", () => {
 			], "Upon checking the reported URL, it seems that the URL is no longer accessible."),
 		}, config, { createIntakeSubmission: noIntake });
 		expect(result).toMatchObject({ route: "reply" });
-		expect(await inbound(sent.reportId)).toMatchObject([{ kind: "reply" }]);
+		expect(await inboundMail(sent.reportId)).toMatchObject([{ kind: "reply" }]);
 	});
 });
 
@@ -304,7 +297,7 @@ describe("delivery-status notifications", () => {
 		const sent = await sentReport("oxwitik.com", "iarpoc@newfold.com");
 		const result = await ingestFetchedMail({ uid: 538, source: icloudBounce(sent.outbound, "iarpoc@newfold.com", "550") }, config, { createIntakeSubmission: noIntake });
 		expect(result).toMatchObject({ route: "reply" });
-		const [bounce] = await inbound(sent.reportId);
+		const [bounce] = await inboundMail(sent.reportId);
 		expect(bounce).toMatchObject({ kind: "bounce", references: [sent.outbound.messageId] });
 		await classifyReply(bounce!.id);
 		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
@@ -321,7 +314,7 @@ describe("delivery-status notifications", () => {
 			fallbackContacts: [{ email: "support@helpdesk.example", source: "registrar_rdap", entityName: "Helpdesk" }, { email: "cs@helpdesk.example", source: "domain_whois" }],
 		});
 		await ingestFetchedMail({ uid: 540, source: icloudBounce(sent.outbound, "abuse@deadbox.example", "553") }, config, { createIntakeSubmission: noIntake });
-		const [bounce] = await inbound(sent.reportId);
+		const [bounce] = await inboundMail(sent.reportId);
 		await classifyReply(bounce!.id);
 		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
 
@@ -349,7 +342,7 @@ describe("delivery-status notifications", () => {
 			fallbackContacts: [{ email: "support@other.example", source: "registrar_rdap" }],
 		});
 		await ingestFetchedMail({ uid: 541, source: icloudBounce(sent.outbound, "abuse@greylist2.example", "451") }, config, { createIntakeSubmission: noIntake });
-		const [bounce] = await inbound(sent.reportId);
+		const [bounce] = await inboundMail(sent.reportId);
 		await classifyReply(bounce!.id);
 		expect((await AbuseRepository.listRoutes(sent.reportId)).map((route) => route.verifiedEmail)).toEqual(["abuse@greylist2.example"]);
 	});
@@ -364,7 +357,7 @@ describe("delivery-status notifications", () => {
 			fallbackContacts: [{ email: "support@other-desk.example", source: "registrar_rdap" }],
 		});
 		await ingestFetchedMail({ uid: nextUid++, source: refusal(sent.outbound) }, config, { createIntakeSubmission: noIntake });
-		const [first] = await inbound(sent.reportId);
+		const [first] = await inboundMail(sent.reportId);
 		await classifyReply(first!.id);
 		const sends = () => getDb().then((db) => db.select().from(abuseJobs).where(eq(abuseJobs.routeId, sent.route.id)).all().filter((job) => job.jobType === "send_email"));
 		/** The queued resend goes out (its job done) and `answer` comes back for it. */
@@ -380,7 +373,7 @@ describe("delivery-status notifications", () => {
 			await AbuseRepository.settleEmailDelivery({ runId: retry!.run.id, expectedRunStatus: "starting", expectedRouteStatus: "running", outcome: "sent" });
 			const outbound = (await AbuseRepository.listMailForReport(sent.reportId)).filter((message) => message.direction === "outbound" && message.status === "sent").at(-1)!;
 			await ingestFetchedMail({ uid: nextUid++, source: answer(outbound) }, config, { createIntakeSubmission: noIntake });
-			await classifyReply((await inbound(sent.reportId)).filter((message) => message.kind === "bounce").at(-1)!.id);
+			await classifyReply((await inboundMail(sent.reportId)).filter((message) => message.kind === "bounce").at(-1)!.id);
 		};
 		return { ...sent, refusal: first!, sends, resendAnswered };
 	}
@@ -399,7 +392,7 @@ describe("delivery-status notifications", () => {
 		expect(readSendEmailPayload(resend!.payload)).toEqual({ attachedMessagesAsText: true });
 
 		await sent.resendAnswered(attachmentRefusal);
-		expect((await inbound(sent.reportId)).map((message) => message.disposition)).toEqual(["attachment_refusal", "delivery_status_notification"]);
+		expect((await inboundMail(sent.reportId)).map((message) => message.disposition)).toEqual(["attachment_refusal", "delivery_status_notification"]);
 		expect((await sent.sends()).map((job) => job.id)).toEqual([resend!.id]);
 		expect((await AbuseRepository.listRoutes(sent.reportId)).map((route) => route.verifiedEmail)).toEqual([recipient, "support@other-desk.example"]);
 	});
@@ -412,14 +405,14 @@ describe("delivery-status notifications", () => {
 		await writeFile(path.join(dir, "new", "1795112712.V801I2M3.mail.phishing.support"), icloudBounce(sent.outbound, recipient, "550"));
 		await writeFile(path.join(dir, "new", "1795112713.V801I4M5.mail.phishing.support"), eml(["From: someone@spam.example", "To: bounces@mail.phishing.support", "Subject: hello", "Message-Id: <unrelated@spam.example>"], "Nothing to do with any report."));
 		await ingestMaildir(dir, config.intakeAddress);
-		const [bounce] = await inbound(sent.reportId);
+		const [bounce] = await inboundMail(sent.reportId);
 		expect(bounce).toMatchObject({ kind: "bounce" });
 		await classifyReply(bounce!.id);
 		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
 		expect(await readdir(path.join(dir, "new"))).toEqual([]);
 		expect((await readdir(path.join(dir, "cur"))).sort()).toEqual(["1795112712.V801I2M3.mail.phishing.support:2,S", "1795112713.V801I4M5.mail.phishing.support:2,S"]);
 		await ingestMaildir(dir, config.intakeAddress);
-		expect(await inbound(sent.reportId)).toHaveLength(1);
+		expect(await inboundMail(sent.reportId)).toHaveLength(1);
 	});
 
 	test("a missing Maildir is no error, and a file's stand-in UID is a stable safe integer", async () => {
@@ -441,7 +434,7 @@ describe("delivery-status notifications", () => {
 		expect(readSendEmailPayload(resend!.payload)).toEqual({ redraft: true });
 
 		await sent.resendAnswered((outbound) => icloudRelayRefusal(outbound, "abuse@relay-refused.example"));
-		expect((await inbound(sent.reportId)).map((message) => message.classification)).toEqual(["relay_refused", "relay_refused"]);
+		expect((await inboundMail(sent.reportId)).map((message) => message.classification)).toEqual(["relay_refused", "relay_refused"]);
 		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
 		expect((await sent.sends()).map((job) => job.id)).toEqual([resend!.id]);
 		// A restart through the same relay queues nothing either.
@@ -463,7 +456,7 @@ describe("delivery-status notifications", () => {
 	test("a report the provider bounced after a relay refusal is not resent when the relay changes", async () => {
 		const sent = await relayRefusedReport("relay-then-bounce.example.com", "abuse@relay-then-bounce.example");
 		await sent.resendAnswered((outbound) => icloudBounce(outbound, "abuse@relay-then-bounce.example", "550"));
-		expect((await inbound(sent.reportId)).map((message) => message.classification)).toEqual(["relay_refused", "bounce"]);
+		expect((await inboundMail(sent.reportId)).map((message) => message.classification)).toEqual(["relay_refused", "bounce"]);
 		process.env.SMTP_HOST = "phishing-mailer";
 		await ensureRelayRefusalResends();
 		expect((await sent.sends()).map((job) => job.payload?.relay)).toEqual(["smtp.mail.me.com"]);
@@ -472,7 +465,7 @@ describe("delivery-status notifications", () => {
 	test("a temporary failure queues one resend with the same identity", async () => {
 		const sent = await sentReport("greylisted.example.com", "abuse@greylist.example");
 		await ingestFetchedMail({ uid: 539, source: icloudBounce(sent.outbound, "abuse@greylist.example", "451") }, config, { createIntakeSubmission: noIntake });
-		const [bounce] = await inbound(sent.reportId);
+		const [bounce] = await inboundMail(sent.reportId);
 		await classifyReply(bounce!.id);
 		const resends = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, sent.route.id)).all().filter((job) => job.jobType === "send_email");
 		expect(resends).toHaveLength(1);
@@ -570,20 +563,20 @@ describe("provider notifications", () => {
 		expect(result).toMatchObject({ route: "reply", reason: "stored_provider_reply" });
 		const mail = (await AbuseRepository.listMailForReport(sent.reportId)).filter((message) => message.routeId === route.id);
 		expect(mail).toMatchObject([{ kind: "reply", direction: "inbound", fromAddress: "trustandsafety@support.aws.com" }]);
-		expect(await inbound(unrelated.reportId)).toEqual([]);
+		expect(await inboundMail(unrelated.reportId)).toEqual([]);
 	});
 
 	test("AWS's mail for a report we mailed to it before its form existed still matches by case tag", async () => {
 		const sent = await sentReport("aws-old.example.com", "trustandsafety@support.aws.com");
 		const result = await awsMail(602, `Thank you for your report.\r\n\r\nYour original report:\r\n[${sent.tag}] Abuse report for aws-old.example.com`);
 		expect(result).toMatchObject({ route: "reply", reason: "stored_provider_reply" });
-		expect(await inbound(sent.reportId)).toMatchObject([{ kind: "reply", routeId: sent.route.id }]);
+		expect(await inboundMail(sent.reportId)).toMatchObject([{ kind: "reply", routeId: sent.route.id }]);
 	});
 
 	test("AWS's mail naming nothing of ours attaches to nothing", async () => {
 		const sent = await sentReport("aws-none.example.com", "trustandsafety@support.aws.com");
 		await awsMail(603, "Your original report:\r\nReference: PS-ffffffffffff-R99999");
-		expect(await inbound(sent.reportId)).toEqual([]);
+		expect(await inboundMail(sent.reportId)).toEqual([]);
 	});
 
 	test("Cloudflare's notification mail is left to its API correspondence", async () => {

@@ -1,7 +1,7 @@
-import { deadline } from "../kit/http";
 import { TUCOWS_PROVIDER } from "./definition";
-
-export type TucowsFetch = (url: string, init: RequestInit) => Promise<Response>;
+import { unescapeHtml } from "../../../util/html";
+import { deadline } from "../../../util/async";
+import { type FetchLike } from "../../../http/fetch";
 
 /** One answer: the status, the redirect it names, and the body. */
 export type TucowsReply = { status: number; location?: string; text: string };
@@ -24,7 +24,7 @@ export function hiddenCsrfToken(html: string): string | undefined {
 		if (!/\bname\s*=\s*["']csrf_token["']/i.test(tag)) continue;
 		const value = /\bvalue\s*=\s*"([^"]*)"|\bvalue\s*=\s*'([^']*)'/i.exec(tag);
 		const token = value?.[1] ?? value?.[2];
-		if (token) return decodeEntities(token);
+		if (token) return unescapeHtml(token);
 	}
 	return undefined;
 }
@@ -35,16 +35,12 @@ export function metaCsrfToken(html: string): string | undefined {
 		if (!/\bname\s*=\s*["']csrf-token["']/i.test(tag)) continue;
 		const content = /\bcontent\s*=\s*"([^"]*)"|\bcontent\s*=\s*'([^']*)'/i.exec(tag);
 		const token = content?.[1] ?? content?.[2];
-		if (token) return decodeEntities(token);
+		if (token) return unescapeHtml(token);
 	}
 	return undefined;
 }
 
-function decodeEntities(value: string): string {
-	return value.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
-}
-
-export function createTucowsSession(fetchImplementation: TucowsFetch, signal?: AbortSignal): TucowsSession {
+export function createTucowsSession(fetchImplementation: FetchLike, signal?: AbortSignal): TucowsSession {
 	const cookies = new Map<string, string>();
 	const absolute = (path: string) => new URL(path, TUCOWS_PROVIDER.origin).toString();
 	async function send(path: string, init: { method: string; headers: Record<string, string>; body?: string | FormData }): Promise<TucowsReply> {

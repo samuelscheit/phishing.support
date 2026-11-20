@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
+import { postJson } from "@/lib/http/client";
 
 type EvidenceItem = {
 	filename: string;
@@ -125,14 +126,10 @@ export function AbuseReportForm() {
 				reporterContactEmail: reporterEmail.trim(),
 				evidence: files.length ? files : undefined,
 			};
-			const response = await fetch("/api/abuse/reports", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify(payload),
-			});
-			const result = (await response.json().catch(() => ({}))) as { statusUrl?: string; error?: string };
-			if (!response.ok || !result.statusUrl) throw new Error(result.error || "The report could not be accepted.");
-			setSubmittedUrl(result.statusUrl);
+			const result = await postJson<{ statusUrl?: string }>("/api/abuse/reports", payload, "The report could not be accepted.");
+			if (!result.ok) throw new Error(result.error);
+			if (!result.data.statusUrl) throw new Error("The report could not be accepted.");
+			setSubmittedUrl(result.data.statusUrl);
 		} catch (submissionError) {
 			setError(submissionError instanceof Error ? submissionError.message : "The report could not be accepted.");
 		} finally {

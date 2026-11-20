@@ -5,8 +5,7 @@ import { abuseEmailCaseUrl } from "../../mail/draft";
 import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
 import { createDraft, type RouteData } from "../kit/draft";
 import { solveRecaptchaV2 } from "../kit/captcha";
-import { jsonRecord } from "../kit/http";
-import { snippet } from "../kit/text";
+import { snippet } from "../../../util/text";
 import { emailOriginOf } from "../email_origin";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { GOOGLE_CLOUD_PROVIDER } from "./definition";
@@ -16,6 +15,7 @@ import {
 	type GoogleCloudReportInput,
 	type GoogleCloudSubmissionPayload,
 } from "./payload";
+import { parseJsonRecord } from "../../../util/values";
 
 const CANCELED = "Google Cloud abuse report submission was canceled.";
 const FORM_READY_TIMEOUT_MS = 45_000;
@@ -132,7 +132,7 @@ export type GoogleCloudSubmitAnswer =
 export async function readGoogleCloudSubmitResponse(response: Pick<HTTPResponse, "status" | "text">): Promise<GoogleCloudSubmitAnswer> {
 	const body = await response.text().catch(() => "");
 	// Google prefixes JSON API responses with an anti-hijacking line.
-	const json = jsonRecord(body.replace(/^\)\]\}'[^\n]*\n/, ""));
+	const json = parseJsonRecord(body.replace(/^\)\]\}'[^\n]*\n/, ""));
 	const status = response.status();
 	if (status >= 400 && status < 500) {
 		throw new ProviderSubmissionRejectedError(`Google Cloud abuse form rejected the report with HTTP ${status}: ${snippet(body)}`);
@@ -168,7 +168,7 @@ async function submitOnce(page: Page, step: <T>(operation: Promise<T>) => Promis
 		const notification = await formNotification(page);
 		throw new Error(`Google Cloud abuse form sent no readable answer${notification ? ` ("${notification}")` : ""}: ${error instanceof Error ? error.message : String(error)}`);
 	});
-	const sent = jsonRecord(response.request().postData() ?? "");
+	const sent = parseJsonRecord(response.request().postData() ?? "");
 	const sentToken = typeof sent?.recaptcha_response === "string" && sent.recaptcha_response ? "v2"
 		: typeof sent?.recaptcha_response_v3 === "string" && sent.recaptcha_response_v3 ? "v3"
 			: undefined;

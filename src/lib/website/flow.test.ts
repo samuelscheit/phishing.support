@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import sharp from "sharp";
 
@@ -20,6 +19,8 @@ import { scriptedVisitSession, type ScriptedVisit } from "../site_visit/test_hel
 import { reporterBrowserIdentity } from "../browser/reporter_identity";
 import type { WebsiteNavigationHop } from "./types";
 import { eq } from "drizzle-orm";
+import { sha256Hex } from "../util/hash";
+import { waitForStatus, websiteSubmission } from "./test_helpers";
 
 useTemporaryDatabase();
 
@@ -150,19 +151,6 @@ function dependencies(params: {
 			return params.capture ? params.capture(options) : visited(liveCapture(options.url)).archive;
 		},
 	};
-}
-
-async function websiteSubmission(id: bigint, url: string) {
-	return SubmissionsEntity.create({ id, kind: "website", data: { kind: "website", website: { url } }, dedupeKey: websiteSubmissionDedupeKey(url), status: "running", source: url });
-}
-
-async function waitForStatus(id: bigint, statuses: string[]) {
-	for (let attempt = 0; attempt < 200; attempt++) {
-		const submission = await SubmissionsEntity.get(id);
-		if (submission && statuses.includes(submission.status)) return submission;
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-	throw new Error(`Submission ${id} did not reach ${statuses.join("/")}.`);
 }
 
 function websiteData(submission: Awaited<ReturnType<typeof SubmissionsEntity.get>>) {
@@ -368,10 +356,9 @@ describe("a visit through a multi-page kit", () => {
 		expect(protocol).toContain(`  password: ${record.syntheticValues.password}`);
 		expect(protocol.indexOf(`Request POST ${GATE} carried the synthetic email address`)).toBeLessThan(protocol.indexOf(`Request POST ${bot} carried the synthetic password`));
 		const manifest = JSON.parse((await read("visit-manifest.json")).toString("utf8"));
-		const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 		expect(manifest.files).toEqual([
-			{ name: "visit-record.json", sha256: sha(await read("visit-record.json")), size: (await read("visit-record.json")).byteLength },
-			{ name: "visit-protocol.txt", sha256: sha(await read("visit-protocol.txt")), size: (await read("visit-protocol.txt")).byteLength },
+			{ name: "visit-record.json", sha256: sha256Hex(await read("visit-record.json")), size: (await read("visit-record.json")).byteLength },
+			{ name: "visit-protocol.txt", sha256: sha256Hex(await read("visit-protocol.txt")), size: (await read("visit-protocol.txt")).byteLength },
 		]);
 	});
 

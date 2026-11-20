@@ -6,3 +6,6 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 		signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
 	});
 }
+
+/** An injectable `sleep`, so tests and callers with their own clock can replace the wait. */
+export type Sleep = (ms: number) => Promise<void>;

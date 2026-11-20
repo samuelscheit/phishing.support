@@ -1,13 +1,12 @@
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { userAgent } from "../../../network/service_identity";
-import { asRecord } from "../../../util/values";
+import { asRecord, parseJsonRecord } from "../../../util/values";
 import type { ProviderFormFacts } from "../../portal/form_facts";
 import { deriveProviderFormFacts } from "../../portal/form_facts";
 import { captchaCredentialsProblem, solveRecaptchaV2 } from "../kit/captcha";
 import { createDraft, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
-import { jsonRecord } from "../kit/http";
-import { snippet } from "../kit/text";
+import { snippet } from "../../../util/text";
 import { providerEvidenceImageBytesMatch } from "../evidence_image";
 import {
 	ProviderSubmissionRejectedError,
@@ -22,8 +21,7 @@ import {
 	storedNameSiloSubmissionPayload,
 	type NameSiloSubmissionPayload,
 } from "./payload";
-
-type NameSiloFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+import { type FetchLike } from "../../../http/fetch";
 
 type NameSiloSession = {
 	csrfToken: string;
@@ -54,13 +52,13 @@ type NameSiloPreparationDependencies = RouteDeps & {
 };
 
 export type NameSiloPreflightDependencies = {
-	fetch?: NameSiloFetch;
+	fetch?: FetchLike;
 	captchaSolver?: (signal?: AbortSignal) => Promise<string>;
 	now?: () => number;
 };
 
 export type NameSiloSubmissionDependencies = RouteDeps & {
-	fetch?: NameSiloFetch;
+	fetch?: FetchLike;
 	getArtifact?: Parameters<typeof loadEvidenceFile>[0]["getArtifact"];
 };
 
@@ -88,7 +86,7 @@ export async function parseNameSiloSessionResponse(
 ): Promise<NameSiloSession> {
 	const body = await response.text();
 	if (!response.ok) throw new Error(`NameSilo CSRF session failed with HTTP ${response.status}: ${snippet(body, 500)}`);
-	const json = jsonRecord(body);
+	const json = parseJsonRecord(body);
 	const data = json && asRecord(json.data);
 	const csrfToken = data?.xsrfToken;
 	const expirationTime = data?.expirationTime;
@@ -103,7 +101,7 @@ export async function parseNameSiloSessionResponse(
 }
 
 async function fetchNameSiloSession(
-	fetcher: NameSiloFetch,
+	fetcher: FetchLike,
 	signal: AbortSignal | undefined,
 	now: () => number,
 ): Promise<NameSiloSession> {
@@ -168,7 +166,7 @@ export async function parseNameSiloSubmissionResponse(
 	if (response.status === 403 && response.headers?.get("cf-mitigated") === "challenge") {
 		throw new ProviderSubmissionRejectedError("NameSilo's Cloudflare firewall blocked the report before it reached NameSilo (cf-mitigated: challenge); nothing was filed.");
 	}
-	const json = jsonRecord(body);
+	const json = parseJsonRecord(body);
 	const result = json?.result;
 	const message = json?.message;
 	const code = json?.code;

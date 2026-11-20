@@ -14,6 +14,7 @@ import { analyzeWebsite } from "./ai";
 import type { WebsiteAnalysisDependencies } from "./analysis_types";
 import { capturedHostNavigation, websiteReportUrls, websiteSiteAssessments } from "./report_hops";
 import type { WebsiteNavigationHop } from "./types";
+import { waitForStatus, websiteSubmission } from "./test_helpers";
 
 useTemporaryDatabase();
 
@@ -98,19 +99,6 @@ function dependencies(archive: WebsiteArchiveResult, archiveCalls: ArchiveCall[]
 			return { ...archive, requestedUrl: options.url, url: options.archivedUrl!, hostname: new URL(options.archivedUrl!).hostname, navigationHops, screenshotPng: undefined, kitResources: options.kitResources };
 		},
 	};
-}
-
-async function websiteSubmission(id: bigint, url: string) {
-	return SubmissionsEntity.create({ id, kind: "website", data: { kind: "website", website: { url } }, dedupeKey: websiteSubmissionDedupeKey(url), status: "running", source: url });
-}
-
-async function waitForStatus(id: bigint, statuses: string[]) {
-	for (let attempt = 0; attempt < 200; attempt++) {
-		const submission = await SubmissionsEntity.get(id);
-		if (submission && statuses.includes(submission.status)) return submission;
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-	throw new Error(`Submission ${id} did not reach ${statuses.join("/")}.`);
 }
 
 describe("a brand's own site on a domain other than its main one", () => {

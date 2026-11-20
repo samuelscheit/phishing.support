@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { fetchEranetCorrespondence, type EranetFetch } from "./correspondence";
+import { fetchEranetCorrespondence } from "./correspondence";
+import { type FetchLike } from "../../../http/fetch";
 
 const RECEIPT = "900c40f7-944e-4944-a327-4b039439b8e4";
 
@@ -28,7 +29,7 @@ function record(overrides: Record<string, unknown> = {}) {
 
 function portal(body: unknown, status = 200) {
 	const requests: Array<{ url: string; init?: RequestInit }> = [];
-	const fetch: EranetFetch = async (url, init) => { requests.push({ url, init }); return new Response(JSON.stringify(body), { status }); };
+	const fetch: FetchLike = async (url, init) => { requests.push({ url: String(url), init }); return new Response(JSON.stringify(body), { status }); };
 	return { fetch, requests };
 }
 

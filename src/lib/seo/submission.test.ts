@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import type { Submission } from "@/lib/db/schema";
-import { submissionSeo, truncateText } from "./submission";
+import { truncateAtWord } from "../util/text";
+import { submissionSeo } from "./submission";
 
 const createdAt = new Date("2026-11-12T11:33:00Z");
 
@@ -57,10 +58,10 @@ describe("submission page SEO", () => {
 	});
 
 	test("text is cut at a word boundary without trailing punctuation", () => {
-		expect(truncateText("short", 10)).toBe("short");
-		expect(truncateText("one two three, four five", 16)).toBe("one two three…");
-		expect(truncateText("  spaced\n\nout   text  ", 40)).toBe("spaced out text");
+		expect(truncateAtWord("short", 10, { ellipsis: true })).toBe("short");
+		expect(truncateAtWord("one two three, four five", 16, { ellipsis: true })).toBe("one two three…");
+		expect(truncateAtWord("  spaced\n\nout   text  ", 40, { ellipsis: true })).toBe("spaced out text");
 		// A single long word is cut inside it rather than dropped.
-		expect(truncateText("a".repeat(30), 10)).toBe(`${"a".repeat(9)}…`);
+		expect(truncateAtWord("a".repeat(30), 10, { ellipsis: true })).toBe(`${"a".repeat(9)}…`);
 	});
 });

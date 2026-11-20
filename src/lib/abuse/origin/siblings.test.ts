@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { createHash } from "node:crypto";
 
 import { CORUNA_FRAME_URL, CORUNA_LOADER } from "../../malware/coruna_loader.fixture";
 import type { WebsiteHiddenFrame, WebsiteKitResource } from "../../website/types";
 import { discoverSiblingDomains, findKitSiblingCandidates, isPlatformHost, kitFingerprints, searchKitHashes } from "./siblings";
+import { sha256Hex } from "../../util/hash";
 
 const hash = (character: string) => character.repeat(64);
 const SCRIPT = hash("a");
@@ -285,12 +285,11 @@ describe("kit sibling discovery", () => {
 	});
 
 	describe("an exploit kit found through the loader in its hidden frame (production case 377486973465530391)", () => {
-		const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 		const ORIGIN_LOADER = Buffer.from(CORUNA_LOADER);
 		// Cloudflare in front of the seed adds its beacon line; the lure domains without Cloudflare serve the loader as is.
 		const SERVED_LOADER = Buffer.from(CORUNA_LOADER.replace("</body>", `<script defer src="https://static.cloudflareinsights.com/beacon.min.js/vcd15cbe7772f49c399c6a5babf22c1241717689176015" data-cf-beacon='{"token":"t"}' crossorigin="anonymous"></script>\n</body>`));
 		const frame = (document: Buffer, source = document.toString("utf8")): WebsiteHiddenFrame => ({
-			ref: "frame1", url: CORUNA_FRAME_URL, hiddenBy: "0×0 size", sha256: sha(document), size: document.byteLength, source,
+			ref: "frame1", url: CORUNA_FRAME_URL, hiddenBy: "0×0 size", sha256: sha256Hex(document), size: document.byteLength, source,
 			resources: [], sentRequests: [], signals: { platformGate: [], runsFetchedCode: false, stageUrls: [], dataUploads: [] }, userAgent: "ua",
 		});
 		// The fake-captcha lure the kit wraps itself in is on hundreds of unrelated domains.
@@ -300,13 +299,13 @@ describe("kit sibling discovery", () => {
 
 		test("a frame document is code: as received, and as its origin served it when the CDN inserted tags", () => {
 			expect(kitFingerprints({ hiddenFrames: [frame(SERVED_LOADER)] })).toEqual([
-				{ sha256: sha(SERVED_LOADER), kind: "hidden_frame", url: CORUNA_FRAME_URL, size: SERVED_LOADER.byteLength },
-				{ sha256: sha(ORIGIN_LOADER), kind: "hidden_frame", url: CORUNA_FRAME_URL, size: ORIGIN_LOADER.byteLength },
+				{ sha256: sha256Hex(SERVED_LOADER), kind: "hidden_frame", url: CORUNA_FRAME_URL, size: SERVED_LOADER.byteLength },
+				{ sha256: sha256Hex(ORIGIN_LOADER), kind: "hidden_frame", url: CORUNA_FRAME_URL, size: ORIGIN_LOADER.byteLength },
 			]);
 			// No CDN, one hash.
-			expect(kitFingerprints({ hiddenFrames: [frame(ORIGIN_LOADER)] }).map(({ sha256 }) => sha256)).toEqual([sha(ORIGIN_LOADER)]);
+			expect(kitFingerprints({ hiddenFrames: [frame(ORIGIN_LOADER)] }).map(({ sha256 }) => sha256)).toEqual([sha256Hex(ORIGIN_LOADER)]);
 			// A source the capture cut short cannot be re-hashed.
-			expect(kitFingerprints({ hiddenFrames: [frame(SERVED_LOADER, SERVED_LOADER.toString("utf8").slice(0, 2_000))] }).map(({ sha256 }) => sha256)).toEqual([sha(SERVED_LOADER)]);
+			expect(kitFingerprints({ hiddenFrames: [frame(SERVED_LOADER, SERVED_LOADER.toString("utf8").slice(0, 2_000))] }).map(({ sha256 }) => sha256)).toEqual([sha256Hex(SERVED_LOADER)]);
 			// A tracking pixel frame is too small to identify anything; a non-public frame URL is no evidence.
 			expect(kitFingerprints({ hiddenFrames: [frame(Buffer.from("<html><body></body></html>"))] })).toEqual([]);
 			expect(kitFingerprints({ hiddenFrames: [{ ...frame(ORIGIN_LOADER), url: "http://127.0.0.1/gooll.html" }] })).toEqual([]);
@@ -314,7 +313,7 @@ describe("kit sibling discovery", () => {
 
 		test("the lure domains are found through the loader's origin hash, though the shared lure script is on hundreds of sites", async () => {
 			const { fetch, queries } = urlscan({
-				[sha(ORIGIN_LOADER)]: [...FRONTS, "92haoyun.icu"],
+				[sha256Hex(ORIGIN_LOADER)]: [...FRONTS, "92haoyun.icu"],
 				[LURE_SCRIPT]: manyDomains(250, "captcha"),
 			});
 			const result = await findKitSiblingCandidates({ submissionId: 377486973465530391n, originalDomain: "92haoyun.icu" }, {
@@ -324,14 +323,14 @@ describe("kit sibling discovery", () => {
 				loadPopularDomains: noPopularDomains,
 			});
 			expect(result.candidates.map(({ domain }) => domain)).toEqual(FRONTS);
-			expect(result.candidates[0]).toEqual({ domain: "ktrced.top", url: "https://ktrced.top/signin", matchingHashes: [sha(ORIGIN_LOADER)] });
+			expect(result.candidates[0]).toEqual({ domain: "ktrced.top", url: "https://ktrced.top/signin", matchingHashes: [sha256Hex(ORIGIN_LOADER)] });
 			expect(result.errors).toContain(`urlscan ${LURE_SCRIPT.slice(0, 12)}: seen on more than 99 domains, treated as a shared library`);
 			// Every fingerprint is searched once, frames held to the script limit.
 			expect(queries.map((query) => query.searchParams.get("size"))).toEqual(["100", "100", "100"]);
 		});
 
 		test("a capture with only a hidden frame still searches", async () => {
-			const { fetch } = urlscan({ [sha(ORIGIN_LOADER)]: FRONTS });
+			const { fetch } = urlscan({ [sha256Hex(ORIGIN_LOADER)]: FRONTS });
 			const result = await findKitSiblingCandidates({ submissionId: 1n, originalDomain: "92haoyun.icu" }, {
 				apiKey: "test-key",
 				loadKitCapture: async () => ({ hiddenFrames: [frame(ORIGIN_LOADER)] }),

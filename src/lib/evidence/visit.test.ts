@@ -1,10 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 
 import { buildVisitEvidence, type VisitEvidenceFacts } from "./visit";
+import { sha256Hex } from "../util/hash";
 
 const values = { marker: "ps-7f3a", email: "ps-7f3a@mail.example", password: "Pw-7f3a-x", phone: "+15550107", cardNumber: "4111111111111111", oneTimeCode: "730215" };
-const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 const facts: VisitEvidenceFacts = {
 	caseId: "380153057440174080",
@@ -52,8 +51,8 @@ describe("the visit as evidence", () => {
 		expect(JSON.parse(manifest!.bytes.toString())).toMatchObject({
 			caseId: facts.caseId,
 			files: [
-				{ name: "visit-record.json", sha256: sha(record!.bytes), size: record!.bytes.byteLength },
-				{ name: "visit-protocol.txt", sha256: sha(protocol!.bytes), size: protocol!.bytes.byteLength },
+				{ name: "visit-record.json", sha256: sha256Hex(record!.bytes), size: record!.bytes.byteLength },
+				{ name: "visit-protocol.txt", sha256: sha256Hex(protocol!.bytes), size: protocol!.bytes.byteLength },
 			],
 		});
 
@@ -77,7 +76,7 @@ describe("the visit as evidence", () => {
 		expect(clicked).toBeGreaterThan(typedEmail);
 		expect(sent).toBeGreaterThan(clicked);
 		expect(text).toContain("Requests that carried a synthetic value: 1. Every other request the browser sent during the visit (1)");
-		expect(text).toContain(`SHA-256 of visit-record.json: ${sha(record!.bytes)}`);
+		expect(text).toContain(`SHA-256 of visit-record.json: ${sha256Hex(record!.bytes)}`);
 	});
 
 	test("without a reachable timestamp authority the record is still kept, without a token", async () => {
@@ -90,6 +89,6 @@ describe("the visit as evidence", () => {
 	test("the same visit gives the same record bytes, so its hash can be reproduced", async () => {
 		const none = { timestamp: async () => undefined };
 		const [first, second] = await Promise.all([buildVisitEvidence(facts, none), buildVisitEvidence(facts, none)]);
-		expect(sha(first.files[0]!.bytes)).toBe(sha(second.files[0]!.bytes));
+		expect(sha256Hex(first.files[0]!.bytes)).toBe(sha256Hex(second.files[0]!.bytes));
 	});
 });

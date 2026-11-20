@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
 import type { AbuseArtifact } from "../schema";
-import { sha256Hex } from "../security";
 import {
 	isIntactProviderEvidenceImageArtifact,
 	providerEvidenceImageArtifactMatches,
@@ -10,6 +9,8 @@ import {
 	storedProviderEvidenceImageReference,
 	type ProviderEvidenceImageContract,
 } from "./evidence_image";
+import { sha256Hex } from "../../util/hash";
+import { evidenceArtifact } from "./kit/testing";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9JH1EAAAAASUVORK5CYII=", "base64");
 const contract = {
@@ -18,24 +19,7 @@ const contract = {
 	filenamePrefix: "provider_report",
 } as const satisfies ProviderEvidenceImageContract;
 
-function artifact(overrides: Partial<AbuseArtifact> = {}): AbuseArtifact {
-	return {
-		id: 101n,
-		reportId: 99n,
-		targetId: null,
-		routeId: null,
-		runId: null,
-		name: "evidence.png",
-		kind: "user_evidence_original",
-		mimeType: "image/png",
-		sha256: sha256Hex(png),
-		size: png.byteLength,
-		metadata: {},
-		blob: png,
-		createdAt: new Date(),
-		...overrides,
-	};
-}
+const artifact = (overrides: Partial<AbuseArtifact> = {}) => evidenceArtifact(png, { name: "evidence.png", ...overrides });
 
 describe("shared provider evidence-image contract", () => {
 	test("recognizes every provider-supported signature and rejects mismatched declarations", () => {

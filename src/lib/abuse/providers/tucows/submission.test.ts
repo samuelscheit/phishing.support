@@ -259,7 +259,7 @@ describe("the wizard before the marker", () => {
 		const server = wizard();
 		await expect(prepareTucowsExternalSubmission(context, deps(server, { fetch: unexpected(server) }))).rejects.toThrow("domain check failed (HTTP 500)");
 		const garbage = wizard();
-		await expect(prepareTucowsExternalSubmission(context, deps(garbage, { fetch: async (url, init) => url.endsWith("/api/user/validate-field") ? Response.json({ nothing: 1 }) : garbage.fetch(url, init) }))).rejects.toThrow("domain check failed");
+		await expect(prepareTucowsExternalSubmission(context, deps(garbage, { fetch: async (url, init) => String(url).endsWith("/api/user/validate-field") ? Response.json({ nothing: 1 }) : garbage.fetch(String(url), init ?? {}) }))).rejects.toThrow("domain check failed");
 	});
 
 	test("a domain another registrar holds ends the route for a person, naming the registrar", async () => {

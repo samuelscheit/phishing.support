@@ -2,7 +2,6 @@ import { selectProviderEvidenceImageArtifact } from "../evidence_image";
 import { describe, expect, test } from "bun:test";
 
 import type { AbuseArtifact } from "../../schema";
-import { sha256Hex } from "../../security";
 import { providerDefinitionHasValidHash } from "../kit/pin";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import {
@@ -15,13 +14,13 @@ import {
 	type AlibabaCloudReportInput,
 	type AlibabaCloudSubmissionPayload,
 } from "./payload";
+import { sha256Hex } from "../../../util/hash";
+import { evidenceArtifact } from "../kit/testing";
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("alibaba")]);
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
 
-function artifact(id: bigint, bytes: Buffer = PNG, overrides: Partial<AbuseArtifact> = {}): AbuseArtifact {
-	return { id, reportId: 9n, name: "website.png", kind: "user_evidence_original", mimeType: "image/png", sha256: sha256Hex(bytes), size: bytes.byteLength, blob: bytes, metadata: {}, createdAt: new Date(), ...overrides } as unknown as AbuseArtifact;
-}
+const artifact = (id: bigint, bytes: Buffer = PNG, overrides: Partial<AbuseArtifact> = {}) => evidenceArtifact(bytes, { id, reportId: 9n, ...overrides });
 
 const screenshot = selectProviderEvidenceImageArtifact([artifact(77n)], ALIBABA_CLOUD_EVIDENCE_CONTRACT)!;
 const description = "The page asks visitors for a password, sign-in details, a verification code, or identity details.";

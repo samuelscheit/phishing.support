@@ -1,9 +1,8 @@
 import { getBrowser } from "../../../browser";
 import { abuseEmailCaseUrl } from "../../mail/draft";
-import { jsonRecord } from "../kit/http";
 import { createDraft, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
-import { snippet } from "../kit/text";
+import { snippet } from "../../../util/text";
 import { preparedState, withPreflight } from "../kit/session";
 import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
@@ -14,6 +13,7 @@ import {
 	storedEranetSubmissionPayload,
 	type EranetSubmissionPayload,
 } from "./payload";
+import { parseJsonRecord } from "../../../util/values";
 
 /** A file sent through the form's upload endpoint. */
 type EranetUpload = { type: string; filename: string; mimeType: string; base64: string };
@@ -65,7 +65,7 @@ export async function openEranetBrowserSession(): Promise<EranetSession> {
 					const response = await fetch(url, init);
 					return { status: response.status, text: await response.text() };
 				}, `${apiPath}/${path}`, body);
-				const parsed = jsonRecord(result.text) as EranetResponse | undefined;
+				const parsed = parseJsonRecord(result.text) as EranetResponse | undefined;
 				if (result.status < 200 || result.status >= 300 || !parsed) throw new Error(`Eranet ${path} failed with HTTP ${result.status}: ${snippet(result.text)}`);
 				return parsed;
 			},

@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { createHash } from "node:crypto";
 
 import { drags, expectHumanDrag, recordingMouse, seeded } from "../../captcha/slider_test_support";
 import { ProviderLoginError } from "../login_session/session";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import { ALIBABA_SESSION_TTL_MS, alibabaCloudLoginConfig, browserReason, buildAlibabaCloudSession, consoleSecToken, loginWithContext, parseAlibabaCloudSession, passAlibabaSlider } from "./session";
+import { sha256Hex } from "../../../util/hash";
 
 describe("consoleSecToken", () => {
 	test("reads the token from the console page's script", () => {
@@ -38,7 +38,7 @@ describe("buildAlibabaCloudSession", () => {
 
 	test("identifies the session by a hash of the ticket (never the ticket), keeps only name, value and domain, and expires after the bound", () => {
 		const session = buildAlibabaCloudSession(cookies, "Ak2GAMjWhLGnDwas6DsrS3", 1_000);
-		expect(session.id).toBe(createHash("sha256").update("ticket-1").digest("hex").slice(0, 32));
+		expect(session.id).toBe(sha256Hex("ticket-1").slice(0, 32));
 		expect(session.id).not.toContain("ticket-1");
 		expect(session.expiresAt).toBe(1_000 + ALIBABA_SESSION_TTL_MS);
 		expect(session.secToken).toBe("Ak2GAMjWhLGnDwas6DsrS3");

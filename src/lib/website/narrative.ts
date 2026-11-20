@@ -1,20 +1,10 @@
 import * as toon from "@toon-format/toon";
 
 import { extractPasteCommands } from "../malware/paste_commands";
-import {
-	canaryFieldList,
-	capturedDeviceStatement,
-	dataSentEvidence,
-	hiddenFrameEvidence,
-	MAX_HTML_EXCERPT_CHARACTERS,
-	pageText,
-	pasteCommandEvidence,
-	WEBSITE_FINDING_CRITERIA,
-	type WebsiteEvidenceArchive,
-} from "./classification";
+import { capturedDeviceStatement, dataSentEvidence, hiddenFrameEvidence, MAX_HTML_EXCERPT_CHARACTERS, pageText, pasteCommandEvidence, WEBSITE_FINDING_CRITERIA, type WebsiteEvidenceArchive } from "./classification";
 import type { WhoISInfo } from "./info";
 import { offeredDownloadEvidence } from "./offered_download";
-import { revisitWording, type WebsiteKitResource, type WebsiteVisitRecord } from "./types";
+import { revisitWording, type WebsiteKitResource, type WebsiteVisitRecord, canaryFieldList } from "./types";
 import { DAY_MS } from "../util/date_time";
 
 /**

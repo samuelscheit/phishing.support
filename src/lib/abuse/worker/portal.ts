@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 
 import { resolveVerifiedProviderLink } from "../mail/reply";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
@@ -7,12 +6,12 @@ import { deriveProviderFormFacts } from "../portal/form_facts";
 import { validateGenericProviderFormOutput } from "../portal/output_validation";
 import { buildGenericProviderFormTask } from "../portal/task";
 import { AbuseRepository } from "../repository";
-import { stableJson } from "../security";
 import { agentGaveUp, type BrowserTask, type TaskResult } from "../../browser/task/agent";
 import { runFabricBrowserTask } from "../../browser/task/fabric";
 import { redactedErrorText } from "../../util/error_text";
 import { routeContext, storedBrowserTask, throwIfAborted, UnknownExternalStateError, type WorkerServices } from "./shared";
 import { asRecord } from "../../util/values";
+import { stableJson, sha256Hex } from "../../util/hash";
 
 /**
  * Wall-clock limit of one provider-form task. It must end before the
@@ -135,7 +134,7 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 			observedAt: report.createdAt,
 			analysisFacts,
 		});
-		correlationKey = `generic-portal:${route.id.toString()}:${crypto.createHash("sha256").update(entryUrl.toString()).digest("hex").slice(0, 24)}`;
+		correlationKey = `generic-portal:${route.id.toString()}:${sha256Hex(entryUrl.toString()).slice(0, 24)}`;
 		providerPayload = {
 			adapter: "generic_verified_provider_form",
 			entryUrl: entryUrl.toString(),

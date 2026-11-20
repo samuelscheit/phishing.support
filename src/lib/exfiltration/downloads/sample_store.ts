@@ -1,11 +1,11 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { sha256Hex } from "../../abuse/security";
 import { containedSamplePath, sampleArchiveRelativePath, sanitizeRemoteFilename } from "./sample_paths";
 import { isSampleExpired } from "./retention";
 import { readProtectedArchive } from "./protected_archive";
+import { sha256Hex } from "../../util/hash";
 
 /** Largest sample the investigation will keep; larger files are recorded by hash only. */
 export const MAX_STORED_SAMPLE_BYTES = 100 * 1024 * 1024;
@@ -46,7 +46,7 @@ export async function storeSample(params: {
 	if (!path.isAbsolute(params.root)) throw new Error("The sample store root must be an absolute path.");
 	if (params.bytes.byteLength === 0) throw new Error("An empty download is not a sample.");
 	if (params.bytes.byteLength > MAX_STORED_SAMPLE_BYTES) throw new Error("The sample exceeds the storage limit and is not kept.");
-	const sha256 = createHash("sha256").update(params.bytes).digest("hex");
+	const sha256 = sha256Hex(params.bytes);
 	const relativePath = sampleArchiveRelativePath(sha256);
 	const finalPath = containedSamplePath(params.root, relativePath);
 	const displayName = sanitizeRemoteFilename(params.remoteName);

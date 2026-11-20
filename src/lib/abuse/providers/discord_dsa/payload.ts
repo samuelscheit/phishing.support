@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { serviceIdentity } from "../../../network/service_identity";
-import { asRecord } from "../../../util/values";
+import { asRecord, parseJson } from "../../../util/values";
 import { ProviderSubmissionNeedsHumanError } from "../submission_contracts";
 import { payloadEnvelope, storedReader } from "../kit/stored";
 import { DISCORD_DSA_PROVIDER } from "./definition";
@@ -32,13 +32,7 @@ export type WebhookEvidence = { pageUrl: string; observedAt: string; submissionI
 export function webhookEvidence(artifacts: ReadonlyArray<{ name: string; mimeType: string; blob: Buffer }>): WebhookEvidence | undefined {
 	const artifact = artifacts.find((candidate) => candidate.name === "exfiltration-evidence.json" && candidate.mimeType === "application/json");
 	if (!artifact) return undefined;
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(artifact.blob.toString("utf-8"));
-	} catch {
-		return undefined;
-	}
-	const evidence = asRecord(parsed);
+	const evidence = asRecord(parseJson(artifact.blob.toString("utf-8")));
 	const discord = asRecord(asRecord(evidence?.backend)?.discord);
 	if (typeof evidence?.pageUrl !== "string" || typeof evidence.observedAt !== "string" || typeof discord?.webhookId !== "string") return undefined;
 	return {

@@ -11,6 +11,7 @@ import { AbuseRepository } from "../abuse/repository";
 import { abuseJobs } from "../abuse/schema";
 import { ingestFetchedMail, type MailIngestConfig } from "./ingest";
 import type { FetchedMail } from "./rfc";
+import { inboundMail, noIntake } from "./test_helpers";
 
 useTemporaryDatabase();
 
@@ -61,10 +62,6 @@ function fetched(uid: number, source: Buffer, options: Partial<FetchedMail> = {}
 	return { uid, source, internalDate: new Date("2026-08-13T12:00:00.000Z"), ...options };
 }
 
-const noIntake = async () => {
-	throw new Error("Intake must not run for this message.");
-};
-
 /** A sent abuse email whose Reply-To and Message-ID identify exactly one route. */
 async function sentReport(target = "example.com") {
 	const request = await validateAbuseReportRequest({
@@ -105,10 +102,6 @@ async function sentReport(target = "example.com") {
 	return { report, route, replyAddress: outbound.replyAddress, outboundMessageId: outbound.messageId };
 }
 
-async function inboundMessages(reportId: bigint) {
-	return (await AbuseRepository.listMailForReport(reportId)).filter((message) => message.direction === "inbound");
-}
-
 describe("mailbox ingest", () => {
 	test("stores an already-seen provider reply by its Reply-To identity with raw MIME, attachment, and one classifier job", async () => {
 		const sent = await sentReport();
@@ -144,7 +137,7 @@ describe("mailbox ingest", () => {
 			Subject: "Re: Automated abuse report",
 		}, "The site was suspended.")), config, { createIntakeSubmission: noIntake });
 		expect(result).toMatchObject({ disposition: "terminal", route: "reply", reason: "stored_provider_reply" });
-		expect(await inboundMessages(sent.report.reportId)).toHaveLength(1);
+		expect(await inboundMail(sent.report.reportId)).toHaveLength(1);
 	});
 
 	test("deduplicates a repeated IMAP UID through the ledger and a repeated RFC Message-ID through the report", async () => {
@@ -153,7 +146,7 @@ describe("mailbox ingest", () => {
 		expect(await ingestFetchedMail(fetched(47, source), config)).toMatchObject({ route: "reply", reason: "stored_provider_reply" });
 		expect(await ingestFetchedMail(fetched(47, source), config)).toEqual({ disposition: "terminal", route: "reply", reason: "terminal_ledger_record" });
 		expect(await ingestFetchedMail(fetched(48, source), config)).toMatchObject({ route: "reply", reason: "duplicate_message_id" });
-		expect(await inboundMessages(sent.report.reportId)).toHaveLength(1);
+		expect(await inboundMail(sent.report.reportId)).toHaveLength(1);
 	});
 
 	test("attaches a message that names two reports to neither, and never treats it as intake", async () => {
@@ -166,8 +159,8 @@ describe("mailbox ingest", () => {
 			Subject: "Two reports",
 		}, "Which one?")), config, { createIntakeSubmission: noIntake });
 		expect(result).toEqual({ disposition: "terminal", route: "ignored", reason: "ambiguous_report_correlation" });
-		expect(await inboundMessages(first.report.reportId)).toEqual([]);
-		expect(await inboundMessages(second.report.reportId)).toEqual([]);
+		expect(await inboundMail(first.report.reportId)).toEqual([]);
+		expect(await inboundMail(second.report.reportId)).toEqual([]);
 	});
 
 	test("ignores mail that names only an unknown conversation or mailbox, and stores nothing", async () => {

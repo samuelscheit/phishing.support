@@ -4,9 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckSquare, Download, Flag, Globe, Keyboard, ListChecks, MousePointerClick, Send, ShieldAlert, Sparkles, Upload } from "lucide-react";
 
 import { cn } from "../lib/util/cn";
-import { CANARY_FIELD_LABEL, type CanaryField, type WebsiteOfferedDownload, type WebsiteVisitRecord } from "@/lib/website/types";
-import { hostOf } from "@/lib/website/site";
+import { canaryFieldList, type WebsiteOfferedDownload, type WebsiteVisitRecord } from "@/lib/website/types";
 import { Address } from "./Address";
+import { hostOf } from "@/lib/network/url";
+import { OfferedFile } from "@/components/OfferedFile";
 
 /** One page of the visit, with its screenshot when the case kept one. */
 export type SiteVisitPage = { url: string; screenshotId?: string };
@@ -17,11 +18,6 @@ type LiveEntry =
 	| { kind: "download"; fileName: string; url: string };
 
 const MAX_LIVE_ENTRIES = 200;
-
-function fieldList(fields: readonly CanaryField[]): string {
-	const labels = fields.map((field) => CANARY_FIELD_LABEL[field]);
-	return labels.length < 2 ? labels.join("") : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
-}
 
 
 /** The live screen and log of a visit while it runs, from the case's event stream. */
@@ -224,12 +220,12 @@ export function SiteVisitTimeline({ running, visit, offeredDownload, live: { ent
 				))}
 				{!running && thirdParty.map((sent, index) => (
 					<TimelineRow key={`sent-${index}`} icon={<Send className="h-3 w-3" />} tone="danger">
-						Sent the made-up {fieldList(sent.fields)} to <span className="font-mono">{sent.url.slice(0, 160)}</span>
+						Sent the made-up {canaryFieldList(sent.fields)} to <span className="font-mono">{sent.url.slice(0, 160)}</span>
 					</TimelineRow>
 				))}
 				{!running && offeredDownload ? (
 					<TimelineRow icon={<ShieldAlert className="h-3 w-3" />} tone="danger">
-						Downloaded <span className="font-mono">{offeredDownload.fileName}</span> ({offeredDownload.sizeBytes.toLocaleString()} bytes), inspected without running it
+						Downloaded <OfferedFile download={offeredDownload} />, inspected without running it
 					</TimelineRow>
 				) : null}
 				{running && entries.length === 0 ? <li className="py-2 text-xs text-muted-foreground">The agent is starting…</li> : null}

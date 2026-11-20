@@ -5,6 +5,7 @@ import { analyzeSMTPHeadersFromRaw } from "@bernierllc/smtp-analyzer";
 import type { MailData } from "./ai";
 import { isPrivateIpAddress } from "../network/ip_address";
 import { sleep } from "../util/sleep";
+import { squash } from "../util/text";
 
 export function getAddressesText(obj: AddressObject[] | AddressObject | undefined): string {
 	if (!obj) return "";
@@ -117,7 +118,7 @@ type ReceivedHop = {
 
 function parseReceived(lines: string[]): ReceivedHop[] {
 	return lines.map((line) => {
-		const compact = line.replace(/\s+/g, " ").trim();
+		const compact = squash(line);
 		const fromMatch = compact.match(/\bfrom\s+([^\s]+)\b/i);
 		const byMatch = compact.match(/\bby\s+([^\s]+)\b/i);
 		const withMatch = compact.match(/\bwith\s+([^\s;]+)\b/i);

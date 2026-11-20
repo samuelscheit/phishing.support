@@ -1,3 +1,5 @@
+import { andList } from "../util/text";
+
 export type WebsiteNavigationHop = {
 	index: number;
 	url: string;
@@ -58,6 +60,11 @@ export const CANARY_FIELD_LABEL: Record<CanaryField, string> = {
 	cardNumber: "card number",
 	oneTimeCode: "one-time code",
 };
+
+/** The labels of some synthetic values, as a sentence part: "email address and password". */
+export function canaryFieldList(fields: readonly CanaryField[]): string {
+	return andList(fields.map((field) => CANARY_FIELD_LABEL[field]));
+}
 
 /** One request through which a page sent synthetic values off while it was shown. */
 export type VisitDataSent = {

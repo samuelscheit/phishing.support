@@ -6,7 +6,7 @@
  */
 
 import { countSearchQueries } from "../analysis/stream_query_count";
-import { asRecord, type JsonRecord } from "../util/values";
+import { asRecord, type JsonRecord, finiteNumber } from "../util/values";
 
 const MAX_TEXT = 8_000;
 const MAX_OUTPUT_TEXT = 160_000;
@@ -18,10 +18,6 @@ function asString(value: unknown, max = MAX_TEXT): string | undefined {
 	if (typeof value === "bigint") return value.toString();
 	if (typeof value !== "string" || value.length === 0) return undefined;
 	return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
-}
-
-function asNumber(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function setIfDefined(target: JsonRecord, key: string, value: unknown): void {
@@ -113,14 +109,14 @@ export function projectSseEvent(value: unknown, depth = 0): JsonRecord {
 		setIfDefined(projected, key, asString(source[key], key === "error" || key === "message" ? 1_000 : 500));
 	}
 	for (const key of ["sequence_number", "output_index", "content_index", "summary_index", "progress", "attempt", "delayMs"]) {
-		setIfDefined(projected, key, asNumber(source[key]));
+		setIfDefined(projected, key, finiteNumber(source[key]));
 	}
 
 	// The visit's live view: the tab's screen, each recorded page, the agent's actions, and downloads.
 	if (type.startsWith("browser.")) {
 		if (typeof source.jpeg === "string" && source.jpeg.length <= MAX_BROWSER_FRAME && /^[A-Za-z0-9+/=]+$/.test(source.jpeg)) projected.jpeg = source.jpeg;
 		for (const key of ["url", "title", "kind", "text", "fileName"]) setIfDefined(projected, key, asString(source[key], 1_000));
-		setIfDefined(projected, "index", asNumber(source.index));
+		setIfDefined(projected, "index", finiteNumber(source.index));
 	}
 
 	if (type.startsWith("response.")) {

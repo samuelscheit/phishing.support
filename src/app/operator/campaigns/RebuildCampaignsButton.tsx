@@ -4,15 +4,16 @@ import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { postJson } from "@/lib/http/client";
 
 /** Start a full regrouping of every confirmed site; it runs on the server in the background. */
 export function RebuildCampaignsButton() {
 	const [state, setState] = useState<"idle" | "busy" | "started" | "running" | "failed">("idle");
 	const rebuild = async () => {
 		setState("busy");
-		const response = await fetch("/api/operator/campaigns/rebuild", { method: "POST" }).catch(() => undefined);
-		const body = response?.ok ? await response.json().catch(() => undefined) as { state?: string } | undefined : undefined;
-		setState(body?.state === "running" ? "running" : body?.state === "started" ? "started" : "failed");
+		const result = await postJson<{ state?: string }>("/api/operator/campaigns/rebuild");
+		const state = result.ok ? result.data?.state : undefined;
+		setState(state === "running" ? "running" : state === "started" ? "started" : "failed");
 	};
 	return (
 		<div className="flex items-center gap-3">

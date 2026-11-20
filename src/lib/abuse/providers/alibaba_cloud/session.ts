@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { BrowserContext, Frame, Page } from "patchright";
 
 import { acquireFabricPatchrightSession } from "../../../browser/fabric";
@@ -9,6 +8,8 @@ import { boundedCleanup, createLoginSessions, ProviderLoginError, type LoginSess
 import { mailedCodeReader, type MailedCodeReader } from "../mailed_code";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import { asRecord } from "../../../util/values";
+import { squash } from "../../../util/text";
+import { sha256Hex } from "../../../util/hash";
 
 const PROVIDER = "Alibaba Cloud";
 /** A login waits up to three minutes for its mailed code. */
@@ -48,7 +49,7 @@ export function buildAlibabaCloudSession(cookies: readonly AlibabaCookie[], secT
 	const ticket = cookies.find((cookie) => cookie.name === LOGIN_COOKIE)?.value;
 	if (!ticket) throw new Error("missing login ticket");
 	return {
-		id: createHash("sha256").update(ticket).digest("hex").slice(0, 32),
+		id: sha256Hex(ticket).slice(0, 32),
 		cookies: cookies.map(({ name, value, domain }) => ({ name, value, domain })),
 		secToken,
 		expiresAt: now + ALIBABA_SESSION_TTL_MS,
@@ -146,7 +147,7 @@ export type AlibabaLoginDependencies = { readCode?: MailedCodeReader; clock?: ()
 export function browserReason(error: unknown, config: AlibabaCloudLoginConfig): string {
 	let line = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 160);
 	for (const secret of [config.password, config.email]) if (secret) line = line.split(secret).join("[redacted]");
-	return line.replace(/\s+/g, " ").trim() || "no reason given";
+	return squash(line) || "no reason given";
 }
 
 /**

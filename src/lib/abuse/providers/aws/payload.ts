@@ -6,7 +6,7 @@ import { emailOriginFactLines, type EmailOrigin } from "../email_origin";
 import type { ReportInput } from "../kit/draft";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
 import { composeFreeText, isReportUrl, providerNarrative, reportUrls, type UrlRules } from "../kit/text";
-import { truncateProviderText } from "../report_payload";
+import { truncateAtWord } from "../../../util/text";
 import { isReportReference } from "../report_reference";
 import { AWS_PROVIDER } from "./definition";
 
@@ -120,7 +120,7 @@ export function makeAwsEmailComments(input: AwsReportInput, origin: EmailOrigin,
 		narrative,
 		emailOriginFactLines(input.target, origin, capturedAt).join("\n"),
 		listed.length ? `Phishing URLs in the email:\n${listed.map((url) => `- ${url}`).join("\n")}` : undefined,
-		input.hostingLine ? truncateProviderText(input.hostingLine, 600) : undefined,
+		input.hostingLine ? truncateAtWord(input.hostingLine, 600) : undefined,
 		input.caseUrl ? `Case details and screenshots: ${input.caseUrl}` : undefined,
 	].filter((part): part is string => !!part).join("\n\n").replace(/[<>]/g, " ");
 	// A link that does not fit is skipped, not cut; a shorter one may still fit.

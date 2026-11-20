@@ -1,6 +1,8 @@
-import { fetchJson, RequestTimeoutError, type FetchImplementation } from "../../../network/bounded_fetch";
+import { fetchJson, RequestTimeoutError } from "../../../network/bounded_fetch";
 import { errorText } from "../../../util/error_text";
 import { asRecord } from "../../../util/values";
+import { snippet } from "../../../util/text";
+import { type FetchLike } from "../../../http/fetch";
 
 export const NETCRAFT_REPORT_URLS_URL = "https://report.netcraft.com/api/v3/report/urls";
 export const NETCRAFT_REPORT_MAIL_URL = "https://report.netcraft.com/api/v3/report/mail";
@@ -19,8 +21,6 @@ const NETCRAFT_STATUS_MAX_URL_LENGTH = 8_192;
 const NETCRAFT_COMPACT_SUBMISSION_ID = /^[a-f0-9]{32}$/i;
 const NETCRAFT_HYPHENATED_SUBMISSION_ID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const NETCRAFT_OPAQUE_SUBMISSION_ID = /^[A-Za-z0-9]{32}$/;
-
-export type NetcraftFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export type NetcraftSubmissionReceipt = {
 	uuid: string;
@@ -101,7 +101,7 @@ function parsedReportedResponse(value: unknown): { uuid: string; message?: strin
 }
 
 function responseDetail(body: string): string {
-	return body.replace(/\s+/g, " ").trim().slice(0, 1_000) || "No further detail was returned.";
+	return snippet(body, 1_000) || "No further detail was returned.";
 }
 
 /** Construct Netcraft's fixed v3 status endpoint from a confirmed UUID only. */
@@ -159,7 +159,7 @@ function parseSubmissionUrls(value: unknown): NetcraftSubmissionUrlStatus[] | un
 }
 
 async function fetchNetcraftJson(
-	request: NetcraftFetch,
+	request: FetchLike,
 	url: string,
 	label: string,
 ): Promise<unknown> {
@@ -173,7 +173,7 @@ async function fetchNetcraftJson(
 			redirect: "error",
 			headers: { accept: "application/json" },
 		}, {
-			fetch: request as FetchImplementation,
+			fetch: request as FetchLike,
 			timeoutMs: NETCRAFT_STATUS_REQUEST_TIMEOUT_MS,
 			attempts: 1,
 			retryDelayMs: 0,
@@ -196,7 +196,7 @@ async function fetchNetcraftJson(
  */
 export async function fetchNetcraftSubmissionStatus(params: {
 	uuid: string;
-	fetch?: NetcraftFetch;
+	fetch?: FetchLike;
 }): Promise<NetcraftSubmissionStatus> {
 	const status = await fetchNetcraftSubmissionState(params);
 	const urls = parseSubmissionUrls(
@@ -209,7 +209,7 @@ export async function fetchNetcraftSubmissionStatus(params: {
 /** Read a submission's review state alone; a mail submission has no URL list to read. */
 export async function fetchNetcraftSubmissionState(params: {
 	uuid: string;
-	fetch?: NetcraftFetch;
+	fetch?: FetchLike;
 }): Promise<Omit<NetcraftSubmissionStatus, "urls">> {
 	const uuid = normalizeSubmissionId(params.uuid);
 	if (!uuid) throw new Error("Netcraft returned an invalid submission UUID.");

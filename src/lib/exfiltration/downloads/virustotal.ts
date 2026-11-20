@@ -1,12 +1,12 @@
 import type { LookupResult } from "./policy";
-import { sleep } from "../../util/sleep";
+import { sleep, type Sleep } from "../../util/sleep";
+import { deadline } from "../../util/async";
+import { type FetchLike } from "../../http/fetch";
 
 /** Official VirusTotal v3 API base. Every call sends the key in the `x-apikey` header. */
 const VIRUSTOTAL_API = "https://www.virustotal.com/api/v3";
 const LOOKUP_TIMEOUT_MS = 15_000;
 const SHA256 = /^[a-f0-9]{64}$/;
-
-type Fetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 /**
  * Hash lookup against the VirusTotal file report. Only a 200 with a verdict, or
@@ -17,7 +17,7 @@ type Fetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 export async function lookupVirusTotal(params: {
 	sha256: string;
 	apiKey: string | undefined;
-	fetch?: Fetch;
+	fetch?: FetchLike;
 	signal?: AbortSignal;
 }): Promise<LookupResult> {
 	const provider = "virustotal" as const;
@@ -28,7 +28,7 @@ export async function lookupVirusTotal(params: {
 		response = await (params.fetch ?? fetch)(`${VIRUSTOTAL_API}/files/${params.sha256}`, {
 			method: "GET",
 			headers: { "x-apikey": params.apiKey.trim(), accept: "application/json" },
-			signal: params.signal ? AbortSignal.any([params.signal, AbortSignal.timeout(LOOKUP_TIMEOUT_MS)]) : AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
+			signal: deadline(LOOKUP_TIMEOUT_MS, params.signal),
 		});
 	} catch {
 		return { provider, state: "unavailable", reason: "transport failure" };
@@ -68,21 +68,21 @@ export async function awaitVirusTotalVerdict(params: {
 	sha256: string;
 	analysisId: string;
 	apiKey: string | undefined;
-	fetch?: Fetch;
+	fetch?: FetchLike;
 	signal?: AbortSignal;
-	sleep?: (ms: number) => Promise<void>;
+	sleep?: Sleep;
 	waitMs?: number;
 }): Promise<LookupResult> {
 	const provider = "virustotal" as const;
 	if (!params.apiKey?.trim()) return { provider, state: "not_configured" };
 	const pause = params.sleep ?? sleep;
-	const deadline = Date.now() + (params.waitMs ?? ANALYSIS_WAIT_MS);
-	while (Date.now() < deadline) {
+	const stopAt = Date.now() + (params.waitMs ?? ANALYSIS_WAIT_MS);
+	while (Date.now() < stopAt) {
 		params.signal?.throwIfAborted();
 		try {
 			const response = await (params.fetch ?? fetch)(`${VIRUSTOTAL_API}/analyses/${encodeURIComponent(params.analysisId)}`, {
 				headers: { "x-apikey": params.apiKey.trim(), accept: "application/json" },
-				signal: params.signal ? AbortSignal.any([params.signal, AbortSignal.timeout(LOOKUP_TIMEOUT_MS)]) : AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
+				signal: deadline(LOOKUP_TIMEOUT_MS, params.signal),
 			});
 			const body = response.ok ? await response.json().catch(() => undefined) as { data?: { attributes?: { status?: unknown } } } | undefined : undefined;
 			if (body?.data?.attributes?.status === "completed") {

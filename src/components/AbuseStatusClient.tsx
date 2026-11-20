@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { formatUtcDateTime } from "@/lib/util/date_time";
 
 type RouteStatus = {
 	provider: string;
@@ -104,7 +105,7 @@ export function AbuseStatusClient({ trackingToken }: { trackingToken: string }) 
 					</div>
 					<span className="rounded-full bg-muted px-3 py-1 text-sm">Updates automatically</span>
 				</div>
-				{report && <p className="mt-4 text-sm text-muted-foreground">Last updated {new Date(report.updatedAt).toLocaleString()}</p>}
+				{report && <p className="mt-4 text-sm text-muted-foreground">Last updated {formatUtcDateTime(report.updatedAt)}</p>}
 			</div>
 
 			{error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-900">{error}</p>}

@@ -10,6 +10,7 @@ import { executeProviderSubmission } from "../submission_execution";
 import type { ProviderSubmissionProvider } from "../submission_contracts";
 import { DISCORD_WEBHOOK_PROVIDER } from "./definition";
 import { discordWebhookOf, prepareDiscordWebhookDeletion, submitDiscordWebhookDeletion, type DiscordWebhookDependencies } from "./submission";
+import { jsonResponse } from "../kit/testing";
 
 useTemporaryDatabase();
 
@@ -63,8 +64,6 @@ function discord(...answers: Array<Response | Error>) {
 	return { requests, fetch };
 }
 
-const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-
 describe("Discord webhook routes", () => {
 	test("a phishing kit's webhook is deleted through Discord's API and its server reported in a DSA notice, never by mail", async () => {
 		const routes = await webhookRoutes(379996268098752545n);
@@ -85,27 +84,27 @@ describe("Discord webhook routes", () => {
 
 	test("a webhook already gone counts as deleted", async () => {
 		const routes = await webhookRoutes(379996268098752546n);
-		const api = discord(json(404, { message: "Unknown Webhook", code: 10015 }));
+		const api = discord(jsonResponse({ message: "Unknown Webhook", code: 10015 }, 404));
 		await expect(executeProviderSubmission({ routeId: routes[0]!.id, provider: provider(api) })).resolves.toMatchObject({ outcome: "submitted" });
 	});
 
 	test("rate limits and Discord outages are retried in place; a refused token is a provider rejection", async () => {
 		const waits: number[] = [];
 		const retried = await webhookRoutes(379996268098752547n);
-		const api = discord(json(429, { message: "You are being rate limited.", retry_after: 1.5, global: false }), json(502, {}), new Error("socket hang up"), new Response(null, { status: 204 }));
+		const api = discord(jsonResponse({ message: "You are being rate limited.", retry_after: 1.5, global: false }, 429), jsonResponse({}, 502), new Error("socket hang up"), new Response(null, { status: 204 }));
 		await expect(executeProviderSubmission({ routeId: retried[0]!.id, provider: provider({ fetch: api.fetch, sleep: async (ms) => { waits.push(ms); } }) })).resolves.toMatchObject({ outcome: "submitted" });
 		expect(api.requests).toHaveLength(4);
 		expect(waits).toEqual([1500, 5000, 10000]);
 
 		const refused = await webhookRoutes(379996268098752548n);
-		const denied = discord(json(401, { message: "Invalid Webhook Token", code: 50027 }));
+		const denied = discord(jsonResponse({ message: "Invalid Webhook Token", code: 50027 }, 401));
 		await expect(executeProviderSubmission({ routeId: refused[0]!.id, provider: provider(denied) })).resolves.toMatchObject({ outcome: "provider_rejected" });
 		expect((await AbuseRepository.getRoute(refused[0]!.id))?.status).toBe("provider_rejected");
 	});
 
 	test("an outage that outlasts every attempt leaves the deletion ambiguous instead of claiming it", async () => {
 		const routes = await webhookRoutes(379996268098752549n);
-		const api = discord(json(503, {}), json(503, {}), json(503, {}), json(503, {}));
+		const api = discord(jsonResponse({}, 503), jsonResponse({}, 503), jsonResponse({}, 503), jsonResponse({}, 503));
 		await expect(executeProviderSubmission({ routeId: routes[0]!.id, provider: provider(api) })).rejects.toThrow("did not complete after 4 attempts: Discord answered HTTP 503");
 		expect(api.requests).toHaveLength(4);
 		expect((await AbuseRepository.getRoute(routes[0]!.id))?.status).toBe("unknown_external_state");

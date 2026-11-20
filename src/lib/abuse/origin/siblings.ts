@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 
 import { getDomain } from "tldts";
 
@@ -14,6 +13,7 @@ import { certificateCovers, presentedCertificate, type OriginServer, type Presen
 import { errorSummary } from "../../util/error_text";
 import { isWebPage } from "../../network/web_page";
 import { isUrlscanBusy, searchUrlscan, type UrlscanDependencies } from "./urlscan";
+import { sha256Hex } from "../../util/hash";
 
 const MAX_CANDIDATES = 100;
 /** Below this, a file is too generic (a tracking snippet, a one-line loader) to identify a kit. */
@@ -131,7 +131,7 @@ function frameDocumentHashes(frame: WebsiteHiddenFrame): Array<{ sha256: string;
 	const document = Buffer.from(frame.source, "utf8");
 	if (document.byteLength !== frame.size) return hashes;
 	const origin = withoutCdnInjections(document);
-	if (origin) hashes.push({ sha256: createHash("sha256").update(origin).digest("hex"), size: origin.byteLength });
+	if (origin) hashes.push({ sha256: sha256Hex(origin), size: origin.byteLength });
 	return hashes;
 }
 

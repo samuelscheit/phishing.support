@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import * as toon from "@toon-format/toon";
 
 import { lookupMalwareBazaar } from "../exfiltration/downloads/malwarebazaar";
@@ -7,6 +6,8 @@ import { lookupVirusTotal } from "../exfiltration/downloads/virustotal";
 import { downloadExcerptText, inspectDownload } from "../malware/download_inspection";
 import type { DownloadedFile } from "./download";
 import type { DownloadCodeSignal, DownloadFormat, WebsiteOfferedDownload } from "./types";
+import { squash } from "../util/text";
+import { sha256Hex } from "../util/hash";
 
 /**
  * The file a page offers, as evidence: the capture takes the page's own
@@ -29,7 +30,7 @@ export async function offeredDownloadOf(
 	pageUrl: string,
 	lookups: (sha256: string) => Promise<LookupResult[]> = defaultDownloadLookups,
 ): Promise<WebsiteOfferedDownload> {
-	const sha256 = createHash("sha256").update(file.bytes).digest("hex");
+	const sha256 = sha256Hex(file.bytes);
 	return {
 		pageUrl,
 		url: file.url,
@@ -122,7 +123,7 @@ export function offeredDownloadStatements(download: WebsiteOfferedDownload): str
 
 /** The excerpt a classification's quote came from, for naming its file. */
 export function quotedDownloadFile(download: WebsiteOfferedDownload, quote: string): string | undefined {
-	const normalized = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
+	const normalized = (value: string) => squash(value).toLowerCase();
 	const wanted = normalized(quote.split(" … ")[0] ?? quote);
 	return download.inspection.excerpts.find((excerpt) => normalized(excerpt.text).includes(wanted))?.file;
 }

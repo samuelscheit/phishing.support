@@ -7,6 +7,7 @@ import { presentIdentityToNewTab, presentIdentityToPage } from "../../browser/pa
 import { observedPuppeteerResponse, observeSessionResponses } from "../../browser/tab_traffic";
 import type { TabSetup, VisitorTab } from "../../browser/visitor_tabs";
 import { errorText } from "../../util/error_text";
+import { squash } from "../../util/text";
 import { runSiteVisit } from "../../site_visit/visit";
 import { hiddenFrames, recordFrameTraffic, type FrameTrafficRecorder } from "../hidden_frames";
 import { passProviderWarning } from "../provider_warning";
@@ -23,7 +24,6 @@ import {
 	settleRendering,
 	settleScriptNavigation,
 } from "./settle";
-import { compactText } from "./text";
 import type { ArchiveWebsiteOptions, WebsiteArchiveDependencies, WebsiteArchiveResult, WebsitePageSession, WebsiteVisitParams } from "./types";
 import { passVerificationGate } from "./verification";
 
@@ -116,7 +116,7 @@ export async function openLiveCapture(options: ArchiveWebsiteOptions, egress: Fa
 			providerWarning = await passProviderWarning(page, { humanCheckMs: dependencies.humanCheckMs, captchaProviderFrame: dependencies.captchaProviderFrame });
 			const settled = await settleErrorDocument(page, () => latestDocumentResponse, dependencies.errorDocumentSettleMs ?? WEBSITE_ERROR_DOCUMENT_SETTLE_MS);
 			if (!settled) {
-				const title = compactText(await page.title().catch(() => ""));
+				const title = squash(await page.title().catch(() => ""));
 				const status = latestDocumentResponse?.status() ?? navigationResponse.status();
 				throw new WebsiteUnreachableError(egress, `HTTP ${status}${title ? ` ("${title}")` : ""}`);
 			}

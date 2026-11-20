@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 
 import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
@@ -7,6 +6,7 @@ import { analyzeMail } from "@/lib/mail/ai";
 import type { ReporterMetadata } from "@/lib/http/reporter_headers";
 
 import { getRetryableSubmission, SubmissionRetryError } from "./retry";
+import { sha256Hex } from "../util/hash";
 
 export { SubmissionRetryError } from "./retry";
 
@@ -16,7 +16,7 @@ export type EmailSubmissionOptions = ReporterMetadata & {
 
 /** One exact source message is idempotent; unrelated mail from the same sender is not. */
 export function emailSubmissionDedupeKey(emlContent: string): string {
-	return `email:${createHash("sha256").update(emlContent, "utf-8").digest("hex")}`;
+	return `email:${sha256Hex(emlContent)}`;
 }
 
 export async function createEmailSubmissionFromEml(emlContent: string, options: EmailSubmissionOptions = {}): Promise<bigint> {

@@ -1,11 +1,13 @@
 import { emailOriginOf } from "../email_origin";
 import { createDraft, reportInputOf, type RouteData } from "../kit/draft";
-import { deadline, failUnlessFiled, jsonRecord } from "../kit/http";
-import { snippet } from "../kit/text";
+import { failUnlessFiled } from "../kit/http";
+import { snippet } from "../../../util/text";
 import type { ProviderSubmissionContext, ProviderSubmissionSuccess } from "../submission_contracts";
 import { providerResponseId } from "../report_reference";
 import { MICROSOFT_PROVIDER } from "./definition";
 import { buildMicrosoftSubmissionPayload, microsoftRequestBody, storedMicrosoftSubmissionPayload, type MicrosoftReportInput } from "./payload";
+import { parseJsonRecord } from "../../../util/values";
+import { deadline } from "../../../util/async";
 
 export type MicrosoftSubmissionDependencies = {
 	fetch?: (url: string, init: RequestInit) => Promise<Response>;
@@ -61,7 +63,7 @@ export async function submitMicrosoftSubmission(context: ProviderSubmissionConte
 	});
 	const text = await response.text();
 	failUnlessFiled("Microsoft", response, snippet(text), [400]);
-	const answer = jsonRecord(text);
+	const answer = parseJsonRecord(text);
 	const id = providerResponseId(answer?.data ?? answer);
 	return {
 		// Our reference is the receipt, as for every provider: mail that quotes it attaches to this run.

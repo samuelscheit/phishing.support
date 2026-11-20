@@ -1,7 +1,7 @@
 import type { Page } from "rebrowser-puppeteer-core";
 
 import { getBrowser } from "../../../browser";
-import { snippet } from "../kit/text";
+import { snippet } from "../../../util/text";
 import { DISCORD_DSA_PROVIDER } from "./definition";
 import type { DiscordDsaReport } from "./payload";
 

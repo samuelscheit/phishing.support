@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-import { fetchJson, fetchText, RequestStatusError, RequestTimeoutError, type FetchImplementation } from "../../network/bounded_fetch";
+import { fetchJson, fetchText, RequestStatusError, RequestTimeoutError } from "../../network/bounded_fetch";
+import { type FetchLike } from "../../http/fetch";
 
 /**
  * urlscan.io, read only: searching its scans, a scan's recorded requests and
@@ -24,7 +25,7 @@ export function urlscanRetryAfterMs(error: unknown): number {
 }
 
 export type UrlscanDependencies = {
-	fetch?: FetchImplementation;
+	fetch?: FetchLike;
 	apiKey?: string;
 };
 

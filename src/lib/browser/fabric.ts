@@ -16,7 +16,8 @@ import {
 	isFabricBrowserSessionId,
 } from "./fabric_session";
 import { asError, errorText } from "../util/error_text";
-import { sleep } from "../util/sleep";
+import { sleep, type Sleep } from "../util/sleep";
+import { type FetchLike } from "../http/fetch";
 
 export type FabricScalar = string | number | boolean | null;
 type FabricEnvironment = Readonly<Record<string, string | undefined>>;
@@ -59,8 +60,6 @@ export interface FabricSessionOptions {
 	/** Explicitly opt into a recorder plus one automation client. */
 	maxExternalConnections?: 1 | 2;
 }
-type FabricFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
 export interface FabricBrowserConfig {
 	baseUrl: string;
 	project: string;
@@ -72,7 +71,7 @@ export interface FabricBrowserConfig {
 	artifactPolicyRef: string;
 	ttlSeconds: number;
 	/** Test-only transport seam. Production uses the Basic-authenticated Fabric edge. */
-	fetch?: FabricFetch;
+	fetch?: FetchLike;
 }
 
 type FabricSessionStatus =
@@ -344,7 +343,7 @@ function isRelayCapacityError(error: unknown): boolean {
 export async function connectThroughRelay<T>(
 	connect: () => Promise<T>,
 	heartbeat: () => Promise<void>,
-	options: { waitMs?: number; retryMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+	options: { waitMs?: number; retryMs?: number; sleep?: Sleep } = {},
 ): Promise<T> {
 	const waitMs = options.waitMs ?? RELAY_CAPACITY_WAIT_MS;
 	const retryMs = options.retryMs ?? RELAY_CAPACITY_RETRY_MS;

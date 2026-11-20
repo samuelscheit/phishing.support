@@ -6,8 +6,8 @@ import type { ProviderRole } from "./role";
 import type { RouteOutcome } from "./route_outcome";
 import { overviewOf, providerDetailOf, reportFeedOf, reportFilterOf, pageOf, siteStateOf, PAGE_SIZE } from "./views";
 import type { ReportSummary } from "./repository";
+import { at } from "./test_helpers";
 
-const at = (hours: number) => new Date(Date.UTC(2026, 0, 1) + hours * 3_600_000);
 const outcome = (overrides: Partial<RouteOutcome> = {}): RouteOutcome => ({ verdict: "no_reply", sentAt: at(0), followUps: 0, unansweredDecisions: 0, overturnedByFollowUp: false, inbound: 0, outbound: 1, ...overrides });
 let nextId = 1n;
 const record = (overrides: Partial<ProviderRouteRecord> & { slug?: string; role?: ProviderRole } = {}): ProviderRouteRecord => {

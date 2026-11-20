@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import type { AbuseMailClassification } from "../abuse/schema";
 import { routeOutcomeOf, type RouteFacts, type RouteMessageFact } from "./route_outcome";
+import { at } from "./test_helpers";
 
-const at = (hours: number) => new Date(Date.UTC(2026, 0, 1) + hours * 3_600_000);
 const sent = (hours: number, correlationKey: string | null = "email-run:1"): RouteMessageFact => ({ direction: "outbound", kind: "report", status: "sent", classification: null, correlationKey, occurredAt: at(hours) });
 const reply = (hours: number, classification: AbuseMailClassification | null, kind = "reply"): RouteMessageFact => ({ direction: "inbound", kind, status: "received", classification, correlationKey: null, occurredAt: at(hours) });
 const facts = (overrides: Partial<RouteFacts>): RouteFacts => ({ routeType: "email", status: "awaiting_provider_reply", createdAt: at(-1), statusChanges: [], messages: [], unansweredDecisions: 0, ...overrides });

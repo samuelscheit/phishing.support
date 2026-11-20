@@ -3,16 +3,14 @@ import { describe, expect, test } from "bun:test";
 import { providerDefinitionHasValidHash } from "../kit/pin";
 import { selectProviderEvidenceImageArtifact } from "../evidence_image";
 import { mailedCodeFrom } from "../mailed_code";
-import { sha256Hex } from "../../security";
 import type { AbuseArtifact } from "../../schema";
 import { TUCOWS_PROVIDER } from "./definition";
 import { buildTucowsSubmissionPayload, makeTucowsDescription, TUCOWS_EVIDENCE_CONTRACT, storedTucowsSubmissionPayload, tucowsBrand, tucowsReportUrls, type TucowsReportInput } from "./payload";
+import { sha256Hex } from "../../../util/hash";
+import { evidenceArtifact } from "../kit/testing";
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("tucows-screenshot")]);
-const artifact = (overrides: Partial<AbuseArtifact> = {}) => ({
-	id: 12n, reportId: 3n, name: "website.png", kind: "user_evidence_original", mimeType: "image/png",
-	sha256: sha256Hex(PNG), size: PNG.byteLength, blob: PNG, metadata: {}, createdAt: new Date(), ...overrides,
-}) as unknown as AbuseArtifact;
+const artifact = (overrides: Partial<AbuseArtifact> = {}) => evidenceArtifact(PNG, { id: 12n, reportId: 3n, ...overrides });
 const selectTucowsEvidenceArtifact = (artifacts: Parameters<typeof selectProviderEvidenceImageArtifact>[0]) => selectProviderEvidenceImageArtifact(artifacts, TUCOWS_EVIDENCE_CONTRACT);
 const evidence = selectTucowsEvidenceArtifact([artifact()])!;
 

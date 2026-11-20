@@ -1,4 +1,4 @@
-import { normalizeDomain } from "../security";
+import { domainMatchesOrIsSubdomain, normalizeDomain } from "../security";
 
 export function boundedString(value: unknown, maximum: number, minimum = 0): value is string {
 	return typeof value === "string" && value.length >= minimum && value.length <= maximum;
@@ -22,11 +22,6 @@ export function normalizeAllowedDomains(value: unknown): string[] | undefined {
 	return normalized.length > 0 ? normalized : undefined;
 }
 
-function hostBelongsToAllowedDomain(hostname: string, allowedDomains: string[]): boolean {
-	const host = normalizeDomain(hostname);
-	return Boolean(host && allowedDomains.some((domain) => host === domain || host.endsWith(`.${domain}`)));
-}
-
 /**
  * Parse the only URL shape accepted in a completed provider output. Entry
  * URLs and final URLs use the same helper so a generic adapter cannot start
@@ -37,7 +32,7 @@ export function exactAllowedHttpsUrl(value: unknown, allowedDomains: string[]): 
 	try {
 		const url = new URL(value);
 		if (url.protocol !== "https:" || url.username || url.password || url.port || url.hash) return undefined;
-		if (!hostBelongsToAllowedDomain(url.hostname, allowedDomains)) return undefined;
+		if (!allowedDomains.some((domain) => domainMatchesOrIsSubdomain(url.hostname, domain))) return undefined;
 		const normalizedHost = normalizeDomain(url.hostname);
 		if (!normalizedHost) return undefined;
 		url.hostname = normalizedHost;

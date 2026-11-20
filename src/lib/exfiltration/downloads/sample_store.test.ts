@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,6 +6,7 @@ import path from "node:path";
 import { buildSampleArchive } from "./archive_adapter";
 import { readProtectedArchive } from "./protected_archive";
 import { MAX_STORED_SAMPLE_BYTES, SAMPLE_ARCHIVE_PASSWORD, sampleIsExpired, storeSample } from "./sample_store";
+import { sha256Hex } from "../../util/hash";
 
 let root: string;
 const now = new Date("2026-11-02T12:00:00.000Z");
@@ -34,7 +34,7 @@ function allFiles(dir: string): string[] {
 describe("sample store", () => {
 	test("stores the sample only inside its protected archive, named by its hash", async () => {
 		const bytes = Buffer.from("MZ-synthetic-sample-bytes-for-a-store-test");
-		const sha256 = createHash("sha256").update(bytes).digest("hex");
+		const sha256 = sha256Hex(bytes);
 		const stored = await storeSample({ root, bytes, remoteName: "Teams setup.exe", now, buildArchive: wrap });
 		expect(stored.sha256).toBe(sha256);
 		expect(stored.relativePath).toBe(`${sha256.slice(0, 2)}/${sha256}.zip`);
@@ -42,7 +42,7 @@ describe("sample store", () => {
 		const onDisk = readFileSync(path.join(root, stored.relativePath));
 		// The file opens with the documented password and yields exactly the sample bytes.
 		const opened = await readProtectedArchive(onDisk, SAMPLE_ARCHIVE_PASSWORD);
-		expect(createHash("sha256").update(opened.data).digest("hex")).toBe(sha256);
+		expect(sha256Hex(opened.data)).toBe(sha256);
 		// The sample is not readable from the file without that password.
 		expect(onDisk.includes(bytes)).toBeFalse();
 	});
@@ -79,7 +79,7 @@ describe("sample store", () => {
 	test("a failure after the temporary archive is written leaves neither a partial archive nor a temporary file", async () => {
 		// Make the final name a directory: the temporary file is written, then rename fails.
 		const bytes = Buffer.from("partial-write-check-payload");
-		const sha256 = createHash("sha256").update(bytes).digest("hex");
+		const sha256 = sha256Hex(bytes);
 		const shard = path.join(root, sha256.slice(0, 2));
 		mkdirSync(path.join(shard, `${sha256}.zip`), { recursive: true });
 		await expect(storeSample({ root, bytes, remoteName: "a", now, buildArchive: wrap })).rejects.toThrow();

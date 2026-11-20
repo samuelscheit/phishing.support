@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 
 import type { Frame, HTTPRequest, HTTPResponse, Page } from "rebrowser-puppeteer-core";
 
 import { exploitLoaderSignals, type FrameCode } from "../malware/exploit_loader";
 import type { WebsiteFrameRequest, WebsiteFrameResource, WebsiteHiddenFrame, WebsiteResourceInitiator } from "./types";
+import { sha256Hex } from "../util/hash";
 
 /** Frames kept per capture; a page needs only one to run its loader. */
 const MAX_HIDDEN_FRAMES = 6;
@@ -71,7 +71,7 @@ export function recordFrameTraffic(page: Page): FrameTrafficRecorder {
 				loadedBy: initiator,
 				status,
 				size: bytes?.byteLength ?? 0,
-				sha256: createHash("sha256").update(bytes ?? Buffer.alloc(0)).digest("hex"),
+				sha256: sha256Hex(bytes ?? Buffer.alloc(0)),
 			})),
 			code: body.then((bytes) => (bytes && CODE_TYPES.has(type) && bytes.byteLength <= MAX_CODE_BYTES ? { url: response.url(), text: bytes.toString("utf8"), markup: type === "document" } : undefined)),
 		});
@@ -152,7 +152,7 @@ export async function hiddenFrames(page: Page, recorder: FrameTrafficRecorder, u
 			ref: `frame${frames.length + 1}`,
 			url,
 			hiddenBy: reason,
-			sha256: createHash("sha256").update(documentBytes).digest("hex"),
+			sha256: sha256Hex(documentBytes),
 			size: documentBytes.byteLength,
 			source: source.slice(0, MAX_HIDDEN_FRAME_SOURCE_CHARACTERS),
 			resources,

@@ -2,7 +2,8 @@ import { ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { describeDataEntryField } from "@/lib/website/types";
-import { hostOfUrl, type SiteAssessment } from "./helpers";
+import { type SiteAssessment } from "./helpers";
+import { hostOf } from "@/lib/network/url";
 
 const PANEL = "rounded-lg border bg-muted/30 p-4";
 
@@ -18,7 +19,7 @@ export function VerdictPanel({ verdictLabel, assessment, reportCount, info, onSh
 				<p className="mt-2 text-sm">
 					Impersonates <span className="font-medium">{assessment.impersonatedBrand.name}</span>
 					<span className="text-muted-foreground"> · official site </span>
-					<span className="text-muted-foreground">{hostOfUrl(assessment.impersonatedBrand.officialUrl)}</span>
+					<span className="text-muted-foreground">{hostOf(assessment.impersonatedBrand.officialUrl)}</span>
 				</p>
 			) : null}
 			{assessment?.evidenceQuote ? (

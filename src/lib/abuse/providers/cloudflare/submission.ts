@@ -10,18 +10,11 @@ import {
 	type ProviderSubmissionPreflight,
 	type ProviderSubmissionSuccess,
 } from "../submission_contracts";
-import {
-	cloudflareApiConfig,
-	cloudflareReceiptSuccess,
-	fetchCloudflareSubmittedReport,
-	findSubmittedCloudflareReport,
-	submitCloudflareAbuseReport,
-	type CloudflareApiFetch,
-	type CloudflareSessionProvider,
-} from "./api";
+import { cloudflareApiConfig, cloudflareReceiptSuccess, fetchCloudflareSubmittedReport, findSubmittedCloudflareReport, submitCloudflareAbuseReport, type CloudflareSessionProvider } from "./api";
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import { buildCloudflareReportPayload } from "./report";
 import { getCloudflareSession, type CloudflareSession } from "./session";
+import { type FetchLike } from "../../../http/fetch";
 
 const envelope = payloadEnvelope(CLOUDFLARE_PROVIDER, "cloudflare_abuse_api_v1");
 const aUrl = z.string().refine((value) => URL.canParse(value));
@@ -46,7 +39,7 @@ type CloudflareSubmissionPayload = z.infer<typeof payloadSchema>;
 export const storedCloudflareSubmissionPayload = storedReader(payloadSchema);
 
 export type CloudflareSubmissionDependencies = RouteDeps & {
-	fetch?: CloudflareApiFetch;
+	fetch?: FetchLike;
 	getSession?: CloudflareSessionProvider;
 	environment?: Readonly<Record<string, string | undefined>>;
 };

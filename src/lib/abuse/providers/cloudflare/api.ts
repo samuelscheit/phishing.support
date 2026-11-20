@@ -5,15 +5,16 @@ import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } fr
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import type { CloudflareReportPayload } from "./report";
 import { getCloudflareSession, type CloudflareLoginConfig, type CloudflareSession } from "./session";
-import { asRecord } from "../../../util/values";
-import { deadline, jsonRecord } from "../kit/http";
-import { snippet } from "../kit/text";
+import { asRecord, parseJsonRecord, text } from "../../../util/values";
+import { snippet } from "../../../util/text";
+import { unescapeHtml } from "../../../util/html";
+import { deadline } from "../../../util/async";
+import { type FetchLike } from "../../../http/fetch";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_CHARS = 100_000;
 const ACCOUNT_ID_PATTERN = /^[a-f0-9]{32}$/i;
 
-export type CloudflareApiFetch = (input: string, init?: RequestInit) => Promise<Response>;
 export type CloudflareApiConfig = CloudflareLoginConfig;
 export type CloudflareSessionProvider = typeof getCloudflareSession;
 
@@ -30,10 +31,6 @@ export function cloudflareApiConfig(environment: Readonly<Record<string, string 
 
 export function cloudflareReportsUrl(accountId: string): string {
 	return `${CLOUDFLARE_PROVIDER.apiBaseUrl}/accounts/${accountId}/abuse-reports/${CLOUDFLARE_PROVIDER.reportType}`;
-}
-
-function stringField(value: unknown): string | undefined {
-	return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 /** Build the exact dashboard abuse_phishing request body. */
@@ -69,12 +66,12 @@ export function parseCloudflareApiResponse(
 	context: { accountId: string; target: string },
 ): ProviderSubmissionSuccess {
 	const body = rawBody.slice(0, MAX_RESPONSE_CHARS);
-	const json = jsonRecord(body);
+	const json = parseJsonRecord(body);
 	const errors = Array.isArray(json?.errors) ? json.errors.map(asRecord) : [];
 	if (status === 403 && (String(json?.err_code) === "9300" || errors.some((error) => String(error?.code) === "9300"))) {
 		throw new CloudflareSessionExpiredError();
 	}
-	const detail = stringField(json?.msg) ?? (errors.map((error) => stringField(error?.message)).filter(Boolean).join("; ") || snippet(body, 500));
+	const detail = text(json?.msg) ?? (errors.map((error) => text(error?.message)).filter(Boolean).join("; ") || snippet(body, 500));
 	if (status >= 400 && status < 500) {
 		throw new ProviderSubmissionRejectedError(`Cloudflare abuse report was rejected with HTTP ${status}: ${detail}`);
 	}
@@ -85,7 +82,7 @@ export function parseCloudflareApiResponse(
 	if (json.result === "error") {
 		throw new ProviderSubmissionRejectedError(`Cloudflare abuse report was rejected (${String(json.err_code ?? "unknown")}): ${detail}`);
 	}
-	const confirmationId = stringField(json.abuse_rand);
+	const confirmationId = text(json.abuse_rand);
 	if (json.result !== "success" || !confirmationId) {
 		throw new Error("Cloudflare abuse report did not include an explicit success confirmation and abuse_rand receipt.");
 	}
@@ -101,7 +98,7 @@ type CloudflareRequestContext = {
 	config: CloudflareApiConfig;
 	session: CloudflareSession;
 	signal?: AbortSignal;
-	fetch?: CloudflareApiFetch;
+	fetch?: FetchLike;
 	getSession?: CloudflareSessionProvider;
 };
 
@@ -175,17 +172,17 @@ export async function findSubmittedCloudflareReport(params: CloudflareRequestCon
 	const listed = await cloudflareDashboardRequest(params, { url, method: "GET" }, parseCloudflareRead);
 	const reports = Array.isArray(listed.reports) ? listed.reports.map(asRecord) : [];
 	const candidates = reports.filter((report) => {
-		const id = stringField(report?.id);
-		const created = Date.parse(stringField(report?.cdate) ?? "");
-		return id && SUBMITTED_REPORT_ID.test(id) && stringField(report?.domain) === params.target
+		const id = text(report?.id);
+		const created = Date.parse(text(report?.cdate) ?? "");
+		return id && SUBMITTED_REPORT_ID.test(id) && text(report?.domain) === params.target
 			&& Number.isFinite(created) && created >= params.sentAt.getTime() - RECEIPT_LOOKUP_SKEW_MS;
 	});
 	const matches: string[] = [];
 	for (const candidate of candidates) {
-		const id = stringField(candidate?.id)!;
+		const id = text(candidate?.id)!;
 		const detail = await cloudflareDashboardRequest(params, { url: submittedReportUrl(params.config.accountId, id), method: "GET" }, parseCloudflareRead);
 		const urls = Array.isArray(detail.urls) ? detail.urls.filter((item): item is string => typeof item === "string") : [];
-		if (urls.join("\n") === params.report.urls && stringField(detail.justification) === params.report.justification) matches.push(id);
+		if (urls.join("\n") === params.report.urls && text(detail.justification) === params.report.justification) matches.push(id);
 	}
 	return matches.length === 1 ? matches[0] : undefined;
 }
@@ -238,31 +235,16 @@ function submittedReportUrl(accountId: string, reportId: string, suffix = ""): s
 
 /** A successful read of Cloudflare's documented submitted-report API. */
 function parseCloudflareRead(status: number, rawBody: string): Record<string, unknown> {
-	const json = jsonRecord(rawBody.slice(0, MAX_RESPONSE_CHARS));
+	const json = parseJsonRecord(rawBody.slice(0, MAX_RESPONSE_CHARS));
 	const errors = Array.isArray(json?.errors) ? json.errors.map(asRecord) : [];
 	if (status === 403 && (String(json?.err_code) === "9300" || errors.some((error) => String(error?.code) === "9300"))) throw new CloudflareSessionExpiredError();
 	if (status < 200 || status >= 300 || json?.success !== true) {
-		const detail = errors.map((error) => stringField(error?.message)).filter(Boolean).join("; ") || snippet(rawBody);
+		const detail = errors.map((error) => text(error?.message)).filter(Boolean).join("; ") || snippet(rawBody);
 		throw new Error(`Cloudflare submitted-report read failed with HTTP ${status}: ${detail}`);
 	}
 	const result = asRecord(json.result);
 	if (!result) throw new Error("Cloudflare submitted-report read returned no result.");
 	return { ...result, result_info: json.result_info };
-}
-
-/**
- * Cloudflare's report emails are plain text with HTML escapes in them
- * ("SKN Subnet &amp; Telecom", "&#34;Email or username&#34;"), as Go's
- * html.EscapeString writes them. Unescaped once here, the text reads as sent
- * and the hosting provider it names is used as written.
- */
-export function unescapeCloudflareText(value: string): string {
-	const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: "\u00a0" };
-	return value.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|([a-z]{2,6}));/gi, (entity, decimal: string | undefined, hex: string | undefined, name: string | undefined) => {
-		const codePoint = decimal ? Number(decimal) : hex ? Number.parseInt(hex, 16) : undefined;
-		if (codePoint !== undefined) return codePoint > 0 && codePoint <= 0x10ffff && (codePoint < 0xd800 || codePoint > 0xdfff) ? String.fromCodePoint(codePoint) : entity;
-		return named[name!.toLowerCase()] ?? entity;
-	});
 }
 
 /**
@@ -279,21 +261,21 @@ export async function fetchCloudflareSubmittedReport(params: CloudflareRequestCo
 			parseCloudflareRead,
 		);
 		for (const email of Array.isArray(result.emails) ? result.emails.map(asRecord) : []) {
-			const id = stringField(email?.id);
-			const sentAt = stringField(email?.sent_at);
+			const id = text(email?.id);
+			const sentAt = text(email?.sent_at);
 			if (!id || !sentAt || Number.isNaN(Date.parse(sentAt))) continue;
 			messages.push({
 				id,
-				subject: unescapeCloudflareText(stringField(email?.subject) ?? ""),
-				body: typeof email?.body === "string" ? unescapeCloudflareText(email.body.slice(0, MAX_RESPONSE_CHARS)) : "",
-				...(stringField(email?.recipient) ? { recipient: stringField(email?.recipient) } : {}),
+				subject: unescapeHtml(text(email?.subject) ?? ""),
+				body: typeof email?.body === "string" ? unescapeHtml(email.body.slice(0, MAX_RESPONSE_CHARS)) : "",
+				...(text(email?.recipient) ? { recipient: text(email?.recipient) } : {}),
 				sentAt: new Date(sentAt),
 			});
 		}
 		const totalPages = Number(asRecord(result.result_info)?.total_pages ?? 1);
 		if (!Number.isFinite(totalPages) || page >= totalPages) break;
 	}
-	const state = stringField(report.status);
-	const detail = stringField(report.denial_reason);
+	const state = text(report.status);
+	const detail = text(report.denial_reason);
 	return { messages, ...(state ? { status: { state, ...(detail ? { detail } : {}) } } : {}) };
 }

@@ -1,11 +1,12 @@
-import { asRecord } from "../../../util/values";
-import { deadline, jsonRecord } from "../kit/http";
-import { snippet } from "../kit/text";
+import { asRecord, parseJsonRecord } from "../../../util/values";
+import { snippet } from "../../../util/text";
 import { providerResponseId } from "../report_reference";
 import type { BrowserFormField } from "../browser_form";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
 import type { GoDaddySubmissionPayload } from "./payload";
+import { deadline } from "../../../util/async";
+import { type AnswerFetch } from "../../../http/fetch";
 
 const PORTAL = PROVIDER.portal;
 
@@ -103,10 +104,8 @@ export function interpretPortalAnswer(answer: { status: number; text: string; js
 
 export type PortalCaseStatus = { state: string; final: boolean } | undefined;
 
-export type PortalFetch = (url: string, init: RequestInit) => Promise<Pick<Response, "status" | "text">>;
-
 /** The public case lookup: undefined when GoDaddy has no such claim; a 429 or anything unexpected throws. */
-export async function fetchPortalCaseStatus(caseId: string, dependencies: { fetch?: PortalFetch; signal?: AbortSignal } = {}): Promise<PortalCaseStatus> {
+export async function fetchPortalCaseStatus(caseId: string, dependencies: { fetch?: AnswerFetch; signal?: AbortSignal } = {}): Promise<PortalCaseStatus> {
 	const answer = await (dependencies.fetch ?? ((url, init) => fetch(url, init)))(PORTAL.caseStatusUrl, {
 		method: "POST",
 		headers: { "content-type": "application/json", accept: "application/json", [PORTAL.requestHeader.name]: PORTAL.requestHeader.value },
@@ -114,7 +113,7 @@ export async function fetchPortalCaseStatus(caseId: string, dependencies: { fetc
 		signal: deadline(PORTAL.timeoutMs, dependencies.signal),
 	});
 	const text = await answer.text();
-	const record = jsonRecord(text);
+	const record = parseJsonRecord(text);
 	if (answer.status === 200 && typeof record?.status === "string" && record.status.trim()) {
 		const state = record.status.trim().toLowerCase();
 		return { state, final: state === "closed" };

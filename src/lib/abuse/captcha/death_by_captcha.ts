@@ -1,4 +1,5 @@
-import { sleep } from "../../util/sleep";
+import { sleep, type Sleep } from "../../util/sleep";
+import { type FetchLike } from "../../http/fetch";
 
 const DEATH_BY_CAPTCHA_ENDPOINT = "https://api.dbcapi.me/api";
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -8,16 +9,14 @@ const DEFAULT_POLL_INTERVAL_MS = 3_000;
 
 
 /** Narrow enough for provider tests without requiring a browser-specific fetch implementation. */
-type DeathByCaptchaFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
 export type DeathByCaptchaCredentials = {
 	username: string;
 	password: string;
 };
 
 export type DeathByCaptchaSolverDependencies = {
-	fetch?: DeathByCaptchaFetch;
-	sleep?: (milliseconds: number) => Promise<void>;
+	fetch?: FetchLike;
+	sleep?: Sleep;
 	now?: () => number;
 	credentials?: Partial<DeathByCaptchaCredentials>;
 	/** Per-request network deadline; the overall solver timeout remains separate. */
@@ -67,7 +66,7 @@ function responseError(response: DeathByCaptchaResponse): string | undefined {
 
 async function request(
 	params: {
-		fetch: DeathByCaptchaFetch;
+		fetch: FetchLike;
 		path: string;
 		init?: RequestInit;
 		requestTimeoutMs: number;

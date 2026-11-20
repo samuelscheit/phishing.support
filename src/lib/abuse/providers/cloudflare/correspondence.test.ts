@@ -9,17 +9,18 @@ import { abuseJobs, abuseProviderRuns } from "../../schema";
 import { ensureCorrespondencePolls, pollProviderCorrespondence } from "../../worker/correspondence";
 import { parseCloudflareOriginDisclosure } from "../../origin/disclosure";
 import { nextCorrespondencePollDelayMs } from "../submission_execution";
-import { cloudflareApiConfig, unescapeCloudflareText } from "./api";
+import { unescapeHtml } from "../../../util/html";
+import { cloudflareApiConfig } from "./api";
 import { cloudflareLoginSessions } from "./session";
 import { sqliteLoginSessionStore } from "../login_session/store";
 import { fetchCloudflareCorrespondence } from "./submission";
+import { jsonResponse } from "../kit/testing";
 
 const ACCOUNT_ID = "b9077acfb4ef45e0f94b0f52c06c289a";
 const environment = { ABUSE_CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID, ABUSE_CLOUDFLARE_LOGIN_EMAIL: "operator@example.com", ABUSE_CLOUDFLARE_LOGIN_PASSWORD: "test-password" };
 const session = { id: "old-atok", atok: "old-atok", vses2: "cookie", expiresAt: Date.now() + 86_400_000 };
 const fresh = { ...session, id: "fresh-atok", atok: "fresh-atok" };
 const base = `https://dash.cloudflare.com/api/v4/accounts/${ACCOUNT_ID}/abuse-reports/submitted/ddfb9a8d1137a9e7`;
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
 /** The two emails production's report ddfb9a8d1137a9e7 received, as the API returned them. */
 const emailsPage = {
@@ -41,8 +42,8 @@ describe("Cloudflare submitted-report correspondence", () => {
 			environment,
 			getSession: async () => session,
 			fetch: async (url, init) => {
-				requests.push({ url, method: init?.method, atok: (init?.headers as Record<string, string>)["x-atok"] });
-				return json(url.includes("/emails") ? emailsPage : detail);
+				requests.push({ url: String(url), method: init?.method, atok: (init?.headers as Record<string, string>)["x-atok"] });
+				return jsonResponse(String(url).includes("/emails") ? emailsPage : detail);
 			},
 		});
 		expect(requests).toEqual([
@@ -62,8 +63,8 @@ describe("Cloudflare submitted-report correspondence", () => {
 			environment,
 			getSession: async (_config, options) => { logins++; return options?.expiredSession ? fresh : session; },
 			fetch: async (url, init) => (init?.headers as Record<string, string>)["x-atok"] === "old-atok"
-				? json({ result: "error", err_code: 9300 }, 403)
-				: json(url.includes("/emails") ? emailsPage : { ...detail, result: { ...detail.result, status: "denied", denial_reason: "Not phishing" } }),
+				? jsonResponse({ result: "error", err_code: 9300 }, 403)
+				: jsonResponse(String(url).includes("/emails") ? emailsPage : { ...detail, result: { ...detail.result, status: "denied", denial_reason: "Not phishing" } }),
 		});
 		expect(logins).toBe(2);
 		expect(result.status).toEqual({ state: "denied", detail: "Not phishing" });
@@ -114,7 +115,7 @@ describe("Cloudflare correspondence polling", () => {
 		Object.assign(process.env, environment);
 		await sqliteLoginSessionStore.writeSession(cloudflareLoginSessions.key(cloudflareApiConfig(environment)), session, session.expiresAt);
 		const denied = { ...detail, result: { ...detail.result, status: "denied", denial_reason: "no_abuse_found" } };
-		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? emailsPage : denied)) as typeof fetch;
+		globalThis.fetch = (async (url: string) => jsonResponse(String(url).includes("/emails") ? emailsPage : denied)) as typeof fetch;
 		const { route } = await submittedCloudflareRoute();
 		await pollProviderCorrespondence({ routeId: route.id, jobId: 1n });
 		await pollProviderCorrespondence({ routeId: route.id, jobId: 2n });
@@ -130,7 +131,7 @@ describe("Cloudflare correspondence polling", () => {
 	test("records Cloudflare's emails and status once, then schedules the next hourly read", async () => {
 		Object.assign(process.env, environment);
 		await sqliteLoginSessionStore.writeSession(cloudflareLoginSessions.key(cloudflareApiConfig(environment)), session, session.expiresAt);
-		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? emailsPage : detail)) as typeof fetch;
+		globalThis.fetch = (async (url: string) => jsonResponse(String(url).includes("/emails") ? emailsPage : detail)) as typeof fetch;
 		const { reportId, route } = await submittedCloudflareRoute();
 		await ensureCorrespondencePolls();
 		const [first] = await pollJobs(route.id);
@@ -157,7 +158,7 @@ describe("Cloudflare correspondence polling", () => {
 		// Eranet's "process completed" for keychainagent.pro was dropped the same way.
 		Object.assign(process.env, environment);
 		await sqliteLoginSessionStore.writeSession(cloudflareLoginSessions.key(cloudflareApiConfig(environment)), session, session.expiresAt);
-		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? emailsPage : detail)) as typeof fetch;
+		globalThis.fetch = (async (url: string) => jsonResponse(String(url).includes("/emails") ? emailsPage : detail)) as typeof fetch;
 		const first = await submittedCloudflareRoute();
 		const second = await submittedCloudflareRoute();
 		await pollProviderCorrespondence({ routeId: first.route.id, jobId: 1n });
@@ -173,7 +174,7 @@ describe("Cloudflare correspondence polling", () => {
 		Object.assign(process.env, environment);
 		await sqliteLoginSessionStore.writeSession(cloudflareLoginSessions.key(cloudflareApiConfig(environment)), session, session.expiresAt);
 		let state = "accepted";
-		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? { result: { emails: [] }, success: true } : { ...detail, result: { ...detail.result, status: state } })) as typeof fetch;
+		globalThis.fetch = (async (url: string) => jsonResponse(String(url).includes("/emails") ? { result: { emails: [] }, success: true } : { ...detail, result: { ...detail.result, status: state } })) as typeof fetch;
 		const { reportId, route } = await submittedCloudflareRoute();
 		for (const next of ["accepted", "accepted", "denied", "denied", "accepted"]) {
 			state = next;
@@ -214,7 +215,7 @@ describe("Cloudflare correspondence polling", () => {
 		const result = await fetchCloudflareCorrespondence({ confirmationId: "ddfb9a8d1137a9e7" }, {
 			environment,
 			getSession: async () => session,
-			fetch: async (url) => json(url.includes("/emails") ? page : detail),
+			fetch: async (url) => jsonResponse(String(url).includes("/emails") ? page : detail),
 		});
 		const [message] = result.messages;
 		expect(message!.subject).toBe("Response & review");
@@ -223,7 +224,7 @@ describe("Cloudflare correspondence polling", () => {
 		expect(message!.body).toEndWith(`Page text that shows it: "Email or username". <b> 'x' &unknown; &#0; &#xD800;`);
 		expect(parseCloudflareOriginDisclosure(message!.body)).toEqual({ recipient: "abuse@skntelecom.com", providerLabel: "SKN-NETWORK-1 - SKN Subnet & Telecom Ltd, KN" });
 		// Unescaped once: an escaped escape stays an escape.
-		expect(unescapeCloudflareText("&amp;amp; &amp;#34;")).toBe("&amp; &#34;");
+		expect(unescapeHtml("&amp;amp; &amp;#34;")).toBe("&amp; &#34;");
 	});
 
 	test("immediately queues one origin-host follow-up for a newly recorded disclosure", async () => {
@@ -238,7 +239,7 @@ describe("Cloudflare correspondence polling", () => {
 				}],
 			},
 		};
-		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? hostPage : detail)) as typeof fetch;
+		globalThis.fetch = (async (url: string) => jsonResponse(String(url).includes("/emails") ? hostPage : detail)) as typeof fetch;
 		const { reportId, route } = await submittedCloudflareRoute();
 		await ensureCorrespondencePolls();
 		const [first] = await pollJobs(route.id);

@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Link, Mail, Upload, Loader2 } from "lucide-react";
+import { postJson } from "@/lib/http/client";
 
 /** The report form; `defaultTab` opens it on the email or the website tab. */
 export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" | "url" }) {
@@ -71,15 +72,9 @@ export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" 
 				mhtml_base64 = await fileToDataUrl(websiteSnapshotFile);
 			}
 
-			const res = await fetch("/api/submissions/website", {
-				method: "POST",
-				body: JSON.stringify({ url, mhtml_base64 }),
-				headers: { "Content-Type": "application/json" },
-			});
-			const data = await res.json();
-			if (data.stream_id) {
-				router.push(`/submissions/${data.stream_id}`);
-			}
+			const result = await postJson<{ stream_id?: string }>("/api/submissions/website", { url, mhtml_base64 });
+			if (!result.ok) throw new Error(result.error);
+			if (result.data.stream_id) router.push(`/submissions/${result.data.stream_id}`);
 		} catch (err) {
 			console.error(err);
 		} finally {
@@ -96,14 +91,9 @@ export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" 
 			const formData = new FormData();
 			formData.append("file", file);
 
-			const res = await fetch("/api/submissions/email", {
-				method: "POST",
-				body: formData,
-			});
-			const data = await res.json();
-			if (data.stream_id) {
-				router.push(`/submissions/${data.stream_id}`);
-			}
+			const result = await postJson<{ stream_id?: string }>("/api/submissions/email", formData);
+			if (!result.ok) throw new Error(result.error);
+			if (result.data.stream_id) router.push(`/submissions/${result.data.stream_id}`);
 		} catch (err) {
 			console.error(err);
 		} finally {

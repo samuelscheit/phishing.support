@@ -1,18 +1,17 @@
 import type { ExfiltrationBackend } from "./types";
+import { deadline } from "../util/async";
+import { type FetchLike } from "../http/fetch";
 
-type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 const LOOKUP_TIMEOUT_MS = 12_000;
 
-async function boundedFetch(fetchImplementation: FetchImplementation, url: URL, signal?: AbortSignal): Promise<Response> {
-	const timeout = AbortSignal.timeout(LOOKUP_TIMEOUT_MS);
-	const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-	return fetchImplementation(url, { method: "GET", headers: { accept: "application/json" }, signal: combined });
+async function boundedFetch(fetchImplementation: FetchLike, url: URL, signal?: AbortSignal): Promise<Response> {
+	return fetchImplementation(url, { method: "GET", headers: { accept: "application/json" }, signal: deadline(LOOKUP_TIMEOUT_MS, signal) });
 }
 
 /** `getMe` reads only the bot's public identity; it never reads updates or changes bot state. */
 export async function enrichTelegramBot(
 	backend: ExfiltrationBackend,
-	fetchImplementation: FetchImplementation = globalThis.fetch,
+	fetchImplementation: FetchLike = globalThis.fetch,
 	signal?: AbortSignal,
 ): Promise<ExfiltrationBackend> {
 	if (!backend.telegram) return backend;
@@ -30,7 +29,7 @@ export async function enrichTelegramBot(
 /** Discord's documented GET-webhook operation returns metadata and performs no mutation. */
 export async function enrichDiscordWebhook(
 	backend: ExfiltrationBackend,
-	fetchImplementation: FetchImplementation = globalThis.fetch,
+	fetchImplementation: FetchLike = globalThis.fetch,
 	signal?: AbortSignal,
 ): Promise<ExfiltrationBackend> {
 	if (!backend.discord) return backend;
@@ -57,7 +56,7 @@ export async function enrichDiscordWebhook(
 
 export async function enrichBackendIdentity(
 	backend: ExfiltrationBackend,
-	fetchImplementation: FetchImplementation = globalThis.fetch,
+	fetchImplementation: FetchLike = globalThis.fetch,
 	signal?: AbortSignal,
 ): Promise<ExfiltrationBackend> {
 	if (backend.kind === "telegram_bot") return enrichTelegramBot(backend, fetchImplementation, signal);

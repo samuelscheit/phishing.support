@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 
 import { parse } from "mhtml-to-html";
 
 import { registrableDomain } from "../abuse/security";
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import { latestArtifactNamed, websiteCaptureFileNames } from "../website/capture_files";
+import { sha256Hex } from "../util/hash";
 
 /** Below this a page body is too generic (an error, parking or loader page) to tie two sites together. */
 const MIN_BODY_BYTES = 2_048;
@@ -27,11 +27,6 @@ export type PageFingerprints = {
 	structure?: { sha256: string; size: number; tags: number };
 };
 
-function escaped(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
 /**
  * The tags of a body in order, by name only: what a kit's template builds,
@@ -80,11 +75,11 @@ export function pageFingerprints(mhtml: Buffer, siteUrl: string): PageFingerprin
 	const size = Buffer.byteLength(body);
 	if (size >= MIN_BODY_BYTES) {
 		let masked = body.replace(/cid:[^"'\s)>]+/g, "cid:");
-		for (const name of new Set([host, registrableDomain(host) ?? host])) masked = masked.replace(new RegExp(escaped(name), "gi"), "{host}");
-		fingerprints.body = { sha256: sha256(masked), size };
+		for (const name of new Set([host, registrableDomain(host) ?? host])) masked = masked.replace(new RegExp(RegExp.escape(name), "gi"), "{host}");
+		fingerprints.body = { sha256: sha256Hex(masked), size };
 	}
 	const tags = bodyStructure(body);
-	if (tags.length >= MIN_STRUCTURE_TAGS) fingerprints.structure = { sha256: sha256(tags.join(" ")), size, tags: tags.length };
+	if (tags.length >= MIN_STRUCTURE_TAGS) fingerprints.structure = { sha256: sha256Hex(tags.join(" ")), size, tags: tags.length };
 	return fingerprints;
 }
 

@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { formatDay, ROLE_LABEL, ROLE_TITLE, SITE_STATE_LABEL, VERDICT_BADGE, VERDICT_LABEL } from "@/components/provider_stats/labels";
+import { ROLE_LABEL, ROLE_TITLE, SITE_STATE_LABEL, VERDICT_BADGE, VERDICT_LABEL } from "@/components/provider_stats/labels";
 import { PageShell, Pagination } from "@/components/provider_stats/PageShell";
 import { providerRoles } from "@/lib/provider_stats/role";
 import { routeVerdicts } from "@/lib/provider_stats/route_outcome";
 import { getReportFeed, pageOf, reportFilterOf, siteStateOf, type ReportFeedEntry, type ReportFilter } from "@/lib/provider_stats/views";
 import { cn } from "@/lib/util/cn";
+import { utcDate } from "@/lib/util/date_time";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +46,7 @@ function Entry({ entry }: { entry: ReportFeedEntry }) {
 	const delivered = entry.routes.filter((route) => route.outcome.verdict !== "not_delivered" && route.outcome.verdict !== "pending");
 	return (
 		<li className="grid gap-2 px-4 py-3 sm:grid-cols-[6.5rem_minmax(0,1fr)_9rem] sm:items-start hover:bg-muted/20">
-			<span className="text-sm tabular-nums text-muted-foreground">{formatDay(entry.createdAt)}</span>
+			<span className="text-sm tabular-nums text-muted-foreground">{utcDate(entry.createdAt)}</span>
 			<div className="min-w-0 space-y-2">
 				<Link href={href} className="block truncate font-mono text-sm hover:underline">{entry.targets.join(", ") || `Report ${entry.reportId}`}</Link>
 				{entry.routes.length ? (

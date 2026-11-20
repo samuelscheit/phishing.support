@@ -10,7 +10,7 @@ import { executeProviderSubmission } from "../submission_execution";
 import { NETCRAFT_MAIL_PROVIDER } from "./definition";
 import { netcraftMailDraft, netcraftMailMessage, prepareNetcraftMailExternalSubmission, submitNetcraftMailSubmission } from "./submission";
 import { defineProvider } from "../kit/provider";
-import type { NetcraftFetch } from "../netcraft/api";
+import { type FetchLike } from "../../../http/fetch";
 
 useTemporaryDatabase();
 
@@ -24,7 +24,7 @@ const bounce = [
 ].join("\r\n");
 
 /** The provider as the registry wires it, with Netcraft's answer replaced. */
-const providerAnswering = (fetch: NetcraftFetch) => defineProvider({
+const providerAnswering = (fetch: FetchLike) => defineProvider({
 	definition: NETCRAFT_MAIL_PROVIDER,
 	draft: netcraftMailDraft,
 	external: { prepare: prepareNetcraftMailExternalSubmission, submit: (context, preflight) => submitNetcraftMailSubmission(context, preflight, { fetch }) },

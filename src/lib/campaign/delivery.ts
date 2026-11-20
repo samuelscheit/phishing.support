@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 
 import { extractPasteCommands, type PasteCommand } from "../malware/paste_commands";
+import { sha256Hex } from "../util/hash";
 
 /**
  * The command a page makes visitors paste, as an operator's signature. An
@@ -48,7 +48,7 @@ export function deliveryCommand(command: PasteCommand): DeliveryCommand {
 	const layers = command.layers.map((layer) => templateOf(layer.text));
 	const template = layers.join("\n");
 	return {
-		value: createHash("sha256").update(template).digest("hex"),
+		value: sha256Hex(template),
 		template,
 		shown: command.shown,
 		interpreters: command.interpreters,

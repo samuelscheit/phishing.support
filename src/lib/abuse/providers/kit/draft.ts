@@ -1,10 +1,10 @@
 import type { AbuseTargetType } from "../../schema";
-import { stableJson } from "../../security";
 import { abuseEmailCaseUrl, hostingAddressLine } from "../../mail/draft";
 import { routeContext } from "../../worker/shared";
 import { reportReference } from "../report_reference";
 import type { ProviderSubmissionContext, ProviderSubmissionDefinition, ProviderSubmissionPreparation } from "../submission_contracts";
 import { routeIsOurs } from "./pin";
+import { stableJson } from "../../../util/hash";
 
 export type RouteData = Awaited<ReturnType<typeof routeContext>>;
 export type RouteDeps = { loadRouteContext?: typeof routeContext };

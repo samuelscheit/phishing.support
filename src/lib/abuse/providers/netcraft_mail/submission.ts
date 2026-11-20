@@ -1,14 +1,15 @@
 import { z } from "zod";
 
-import { NetcraftSubmissionRejectedError, parseNetcraftSubmissionResponse, type NetcraftFetch } from "../netcraft/api";
+import { NetcraftSubmissionRejectedError, parseNetcraftSubmissionResponse } from "../netcraft/api";
 import { serviceIdentity } from "../../../network/service_identity";
 import { normalizeMailbox } from "../../mail/shared";
-import { sha256Hex } from "../../security";
 import { createDraft } from "../kit/draft";
 import { preparedState } from "../kit/session";
 import { payloadEnvelope, storedReader } from "../kit/stored";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { NETCRAFT_MAIL_PROVIDER } from "./definition";
+import { sha256Hex } from "../../../util/hash";
+import { type FetchLike } from "../../../http/fetch";
 
 const envelope = payloadEnvelope(NETCRAFT_MAIL_PROVIDER, "netcraft_report_mail_v3");
 
@@ -22,7 +23,7 @@ const payloadSchema = z.object({
 
 type NetcraftMailSubmissionPayload = z.infer<typeof payloadSchema>;
 
-export type NetcraftMailSubmissionDependencies = { fetch?: NetcraftFetch };
+export type NetcraftMailSubmissionDependencies = { fetch?: FetchLike };
 
 const HEADER_END = /\r?\n\r?\n/;
 

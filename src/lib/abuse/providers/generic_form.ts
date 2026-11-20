@@ -1,4 +1,4 @@
-import { hashStableJson } from "../security";
+import { hashStableJson } from "../../util/hash";
 
 /**
  * The generic email-form adapter is not a named provider: it is an opt-in

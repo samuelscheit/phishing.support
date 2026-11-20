@@ -96,11 +96,3 @@ export function websiteSiteName(rawUrl: string | undefined): string | null {
 	}
 }
 
-/** A URL's hostname for display; what was given, when it is no URL. */
-export function hostOf(url: string): string {
-	try {
-		return new URL(url).hostname;
-	} catch {
-		return url;
-	}
-}

@@ -1,8 +1,9 @@
-import { fetchJson, withTimeout, type FetchImplementation } from "./bounded_fetch";
+import { fetchJson, withTimeout } from "./bounded_fetch";
 import { isIP } from "node:net";
 import { errorText } from "../util/error_text";
 import { sleep } from "../util/sleep";
 import { asRecord, finiteNumber as number, text as string } from "../util/values";
+import { type FetchLike } from "../http/fetch";
 
 const GLOBALPING_MEASUREMENTS_URL = "https://api.globalping.io/v1/measurements";
 const DEFAULT_COUNTRIES = ["BR", "DE", "JP", "US"] as const;
@@ -61,7 +62,7 @@ export type RegionalDnsResolution = {
 };
 
 export type RegionalDnsDependencies = {
-	fetch?: FetchImplementation;
+	fetch?: FetchLike;
 	timeoutMs?: number;
 	retryDelayMs?: number;
 	countries?: readonly string[];

@@ -7,7 +7,7 @@ import { isPopularSite, loadPopularDomains, type PopularDomains } from "../abuse
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import type { Submission } from "../db/schema";
-import { fetchJson, type FetchImplementation } from "../network/bounded_fetch";
+import { fetchJson } from "../network/bounded_fetch";
 import { mhtmlVisitorText } from "../website/archive/text";
 import { latestArtifactNamed, websiteCaptureFileNames } from "../website/capture_files";
 import { hasPathTenants } from "../website/site";
@@ -16,6 +16,7 @@ import { deliveryCommandsOf } from "./delivery";
 import { loadPageFingerprints, type PageFingerprints } from "./page_document";
 import { paymentReceivers } from "./payment";
 import type { CampaignIndicatorEvidence, CampaignIndicatorKind, OperatorServerRole } from "./schema";
+import { type FetchLike } from "../http/fetch";
 
 export type ExtractedIndicator = {
 	kind: CampaignIndicatorKind;
@@ -88,7 +89,7 @@ const JSDELIVR_HASH_LOOKUP = "https://data.jsdelivr.com/v1/lookup/hash/";
  * package. A kit that self-hosts jQuery shares that file with thousands of
  * unrelated sites, so such a file never links two sites.
  */
-export async function lookupPublishedLibrary(sha256: string, fetchImplementation?: FetchImplementation): Promise<string | undefined> {
+export async function lookupPublishedLibrary(sha256: string, fetchImplementation?: FetchLike): Promise<string | undefined> {
 	const found = await fetchJson<{ type?: string; name?: string; version?: string; file?: string }>(`${JSDELIVR_HASH_LOOKUP}${sha256}`, {
 		method: "GET",
 		headers: { Accept: "application/json", "User-Agent": "phishing.support-campaigns/1.0 (+https://phishing.support)" },

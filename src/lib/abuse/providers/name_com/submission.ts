@@ -1,11 +1,11 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import { asRecord } from "../../../util/values";
 import type { BrowserFormField, BrowserFormFile, BrowserFormRequestSession, BrowserFormResponse, BrowserFormSession } from "../browser_form";
 import { createDraft, reportInputOf, type RouteData, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, loadEvidenceFile } from "../kit/evidence";
 import { formOpener, preparedState, withPreflight } from "../kit/session";
-import { snippet } from "../kit/text";
+import { snippet } from "../../../util/text";
 import {
 	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
@@ -20,6 +20,7 @@ import {
 	storedNameComSubmissionPayload,
 	type NameComSubmissionPayload,
 } from "./payload";
+import { sha256Hex } from "../../../util/hash";
 
 export type NameComSession = BrowserFormSession & BrowserFormRequestSession;
 
@@ -57,7 +58,7 @@ export function csrfHandshakeHeaders(start: string, time: string, referrer: stri
 	return {
 		time,
 		start,
-		[PROVIDER.csrfHeader]: createHash("sha256").update(`${start}${time}${start}`).digest("hex"),
+		[PROVIDER.csrfHeader]: sha256Hex(`${start}${time}${start}`),
 		"referrer-override": referrer,
 	};
 }

@@ -2,6 +2,7 @@ import { createHash, webcrypto } from "node:crypto";
 
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
+import { type FetchLike } from "../http/fetch";
 
 /**
  * Independent RFC 3161 time-stamping authorities, tried in order. A token
@@ -27,8 +28,6 @@ export type EvidenceTimestamp = {
 	/** The DER-encoded TimeStampResp, as served by the authority. */
 	token: Buffer;
 };
-
-export type TimestampFetch = (url: string, init: RequestInit) => Promise<Response>;
 
 /** The DER TimeStampReq for a SHA-256 digest, with a nonce and the authority's certificate requested. */
 function timestampRequest(sha256: Buffer, nonce: Buffer): Buffer {
@@ -97,7 +96,7 @@ export async function verifyTimestampResponse(der: Buffer, content: Buffer, nonc
  */
 export async function timestampEvidence(
 	content: Buffer,
-	dependencies: { fetch?: TimestampFetch; authorities?: readonly { name: string; url: string }[] } = {},
+	dependencies: { fetch?: FetchLike; authorities?: readonly { name: string; url: string }[] } = {},
 ): Promise<EvidenceTimestamp | undefined> {
 	const fetcher = dependencies.fetch ?? fetch;
 	const sha256 = createHash("sha256").update(content).digest();

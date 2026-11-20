@@ -3,6 +3,7 @@ import sharp from "sharp";
 
 import { errorText } from "../../util/error_text";
 import { sleep } from "../../util/sleep";
+import { raceTimeout } from "../../util/async";
 
 /** Attempts at a screenshot that shows what the page has rendered. */
 const SCREENSHOT_PAINT_ATTEMPTS = 4;
@@ -38,9 +39,8 @@ class ScreenshotTimeoutError extends Error {}
 export async function capturePaintedScreenshot(page: Page, timeoutMs = SCREENSHOT_TIMEOUT_MS): Promise<Uint8Array | undefined> {
 	const capture = async (): Promise<Uint8Array | undefined> => {
 		const shot = page.screenshot({ fullPage: true, captureBeyondViewport: true, type: "png" });
-		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
-			return await Promise.race([shot, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ScreenshotTimeoutError()), timeoutMs); })]);
+			return await raceTimeout(shot, timeoutMs, () => new ScreenshotTimeoutError());
 		} catch (error) {
 			if (error instanceof ScreenshotTimeoutError) {
 				// The hung call may still settle later; nobody is waiting for it.
@@ -53,8 +53,6 @@ export async function capturePaintedScreenshot(page: Page, timeoutMs = SCREENSHO
 				return undefined;
 			}
 			throw error;
-		} finally {
-			clearTimeout(timer);
 		}
 	};
 	let screenshot = await capture();

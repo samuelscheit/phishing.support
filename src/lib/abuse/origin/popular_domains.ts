@@ -1,10 +1,11 @@
 import { getDomain } from "tldts";
 import { z } from "zod";
 
-import { fetchJson, fetchText, type FetchImplementation } from "../../network/bounded_fetch";
+import { fetchJson, fetchText } from "../../network/bounded_fetch";
 import { hasPathTenants } from "../../website/site";
 import { normalizeDomain } from "../security";
 import { DAY_MS } from "../../util/date_time";
+import { type FetchLike } from "../../http/fetch";
 
 /**
  * The Tranco research list ranks registrable domains by popularity across
@@ -25,7 +26,7 @@ const MAX_LIST_BYTES = 8 * 1024 * 1024;
 const latestListSchema = z.object({ list_id: z.string().regex(/^[A-Z0-9]{1,16}$/), available: z.boolean() }).passthrough();
 
 export type PopularDomains = ReadonlySet<string>;
-export type PopularDomainsDependencies = { fetch?: FetchImplementation; now?: () => number };
+export type PopularDomainsDependencies = { fetch?: FetchLike; now?: () => number };
 
 let cached: { loadedAt: number; domains: Promise<PopularDomains> } | undefined;
 

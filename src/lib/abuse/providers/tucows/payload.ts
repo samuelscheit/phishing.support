@@ -9,6 +9,7 @@ import { extractedBrandName } from "../report_payload";
 import { storedProviderEvidenceImageReference } from "../evidence_image";
 import { isReportReference } from "../report_reference";
 import { TUCOWS_PROVIDER } from "./definition";
+import { bareHost } from "../../../network/url";
 
 export const TUCOWS_EVIDENCE_CONTRACT = evidenceContract("tucows_report", TUCOWS_PROVIDER.evidence);
 
@@ -47,7 +48,7 @@ export const tucowsReportUrls = (target: string, observedUrls: readonly string[]
 export function tucowsBrand(description: string, legalBrandUrl: string | null | undefined): { name: string; domain: string } | undefined {
 	const brandUrl = legalBrandUrl ? normalizePublicHttpUrl(legalBrandUrl, { domainOnly: true }) : undefined;
 	if (!brandUrl) return undefined;
-	const domain = new URL(brandUrl).hostname.replace(/^www\./, "");
+	const domain = bareHost(brandUrl);
 	const labels = domain.split(".");
 	const label = labels.length > 1 ? labels[labels.length - 2]! : domain;
 	return { name: extractedBrandName(description) ?? `${label.charAt(0).toUpperCase()}${label.slice(1)}`, domain };

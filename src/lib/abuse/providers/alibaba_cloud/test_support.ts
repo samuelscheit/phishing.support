@@ -1,5 +1,5 @@
-import type { AlibabaFetch } from "./api";
 import type { AlibabaCloudSession } from "./session";
+import { type FetchLike } from "../../../http/fetch";
 
 /** Values captured from the live Alibaba console on 2026-11-20. */
 export const SUCCESS_ENV_SG = `{"code":"200","data":{"Message":"successful","Data":{"Env":"sg"},"Code":"200","Success":true},"httpStatusCode":"200","requestId":"A1B2","successResponse":true}`;
@@ -45,7 +45,8 @@ type RecordedRequest = { url: string; method: string; headers: Record<string, st
 export function fakeConsoleFetch(answers: Record<string, Array<string | Response | Error | ((params: unknown) => string)> | string>) {
 	const requests: RecordedRequest[] = [];
 	const counters = new Map<string, number>();
-	const fetch: AlibabaFetch = async (url, init) => {
+	const fetch: FetchLike = async (input, init = {}) => {
+		const url = String(input);
 		const headers = Object.fromEntries(Object.entries((init.headers ?? {}) as Record<string, string>));
 		const record: RecordedRequest = { url, method: init.method ?? "GET", headers };
 		requests.push(record);

@@ -18,14 +18,6 @@ export function formatArtifactSize(value: number | bigint | null | undefined) {
 	return (bytes / 1024).toFixed(1) + " KB";
 }
 
-export function hostOfUrl(url: string): string {
-	try {
-		return new URL(url).host;
-	} catch {
-		return url;
-	}
-}
-
 export function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "kind">) {
 	return artifact.kind.startsWith("website_");
 }

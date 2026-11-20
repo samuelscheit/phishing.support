@@ -1,15 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
-import { fetchGoDaddyTicket, fileGoDaddyTicket, fileGoDaddyTickets, goDaddyApiCredentials, goDaddyApiEnabled, type GoDaddyFetch } from "./api";
+import { fetchGoDaddyTicket, fileGoDaddyTicket, fileGoDaddyTickets, goDaddyApiCredentials, goDaddyApiEnabled } from "./api";
+import { type AnswerFetch } from "../../../http/fetch";
 
 const credentials = { key: "KEY", secret: "SECRET" };
 type Answer = { status: number; body?: unknown; raw?: string } | Error;
 
 function scripted(...answers: Answer[]) {
 	const calls: Array<{ url: string; method: string; headers: Record<string, string>; body: any }> = [];
-	const fetch: GoDaddyFetch = async (url, init) => {
-		calls.push({ url, method: init.method ?? "GET", headers: init.headers as Record<string, string>, body: init.body ? JSON.parse(init.body as string) : undefined });
+	const fetch: AnswerFetch = async (url, init = {}) => {
+		calls.push({ url: String(url), method: init.method ?? "GET", headers: init.headers as Record<string, string>, body: init.body ? JSON.parse(init.body as string) : undefined });
 		const answer = answers.shift() ?? new Error("unexpected call");
 		if (answer instanceof Error) throw answer;
 		const text = answer.raw ?? (answer.body === undefined ? "" : JSON.stringify(answer.body));

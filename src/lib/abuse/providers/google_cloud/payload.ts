@@ -4,7 +4,8 @@ import { z } from "zod";
 import { domainMatchesOrIsSubdomain, normalizePublicHost } from "../../security";
 import { utcStamp, type EmailOrigin } from "../email_origin";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget, truncateProviderText } from "../report_payload";
+import { truncateAtWord } from "../../../util/text";
+import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../report_payload";
 import { GOOGLE_CLOUD_PROVIDER, GOOGLE_CLOUD_SERVICES, type GoogleCloudService } from "./definition";
 
 const envelope = payloadEnvelope(GOOGLE_CLOUD_PROVIDER, "google_cloud_abuse_report_v1");
@@ -106,7 +107,7 @@ function makeEmailOriginAbuseDetails(params: GoogleCloudReportInput, origin: Ema
 	const maximum = GOOGLE_CLOUD_PROVIDER.abuseDetailsMaximumLength;
 	const head = [
 		`Abusive IP address: ${target} (first external Received hop of a phishing email sent from it)`,
-		origin.received ? `Received header: ${truncateProviderText(origin.received.line, 300)}` : undefined,
+		origin.received ? `Received header: ${truncateAtWord(origin.received.line, 300)}` : undefined,
 	];
 	const tail = [
 		`Date and time of the abuse: ${utcStamp(origin.received?.at ?? params.capturedAt)} (UTC).`,
@@ -136,7 +137,7 @@ function makeEmailOriginAbuseDetails(params: GoogleCloudReportInput, origin: Ema
 	const narrative = narrativeFor(params, maximum - block.length - 2, "email");
 	if (params.legalBrandUrl !== undefined && maximum - block.length - 2 > NARRATIVE_MINIMUM && !narrative) return undefined;
 	const details = [block, narrative].filter(Boolean).join("\n\n");
-	return details.length <= maximum ? details : truncateProviderText(block, maximum);
+	return details.length <= maximum ? details : truncateAtWord(block, maximum);
 }
 
 /**
@@ -157,7 +158,7 @@ export function makeGoogleCloudAbuseDetails(params: GoogleCloudReportInput): str
 	const narrative = narrativeFor(params, narrativeRoom, "page");
 	if (params.legalBrandUrl !== undefined && narrativeRoom > NARRATIVE_MINIMUM && !narrative) return undefined;
 	const details = [narrative, fixed].filter(Boolean).join("\n\n");
-	return details.length <= maximum ? details : truncateProviderText(urls, maximum);
+	return details.length <= maximum ? details : truncateAtWord(urls, maximum);
 }
 
 /** Build the immutable form draft before the browser boundary. */

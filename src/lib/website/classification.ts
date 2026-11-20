@@ -12,12 +12,11 @@ import type { DomainRegistration } from "./domain_registration";
 import { accessGateStatements, type WebsiteAccessGate } from "./access_gate";
 import { offeredDownloadEvidence, offeredDownloadSource, offeredDownloadStatements, quotedDownloadFile, OFFERED_DOWNLOAD_INSTRUCTIONS } from "./offered_download";
 import {
-	CANARY_FIELD_LABEL,
+	canaryFieldList,
 	describeDataEntryField,
 	isFlowStepHop,
 	WEBSITE_DEVICE_LABEL,
 	revisitWording,
-	type CanaryField,
 	type VisitDataSent,
 	type WebsiteDataEntryField,
 	type WebsiteDevice,
@@ -29,6 +28,8 @@ import {
 	type WebsiteSiteClassification,
 	type WebsiteSiteFinding,
 } from "./types";
+import { squash } from "../util/text";
+import { bareHost } from "../network/url";
 
 /**
  * How one recorded page is judged: the evidence the models read, the
@@ -126,12 +127,6 @@ export function capturedDeviceStatement(archive: Pick<WebsiteEvidenceArchive, "d
 			? `The page turned desktop visitors away to a phone, so it was opened again as ${WEBSITE_DEVICE_LABEL[archive.device]}; everything below is what that phone was shown.\n`
 			: "",
 	].join("");
-}
-
-/** How a person reads the synthetic values a request carried: `email address and password`. */
-export function canaryFieldList(fields: readonly CanaryField[]): string {
-	const labels = fields.map((field) => CANARY_FIELD_LABEL[field]);
-	return labels.length < 2 ? labels.join("") : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
 }
 
 /** Where the page sent the synthetic values the visit entered, for the models. */
@@ -384,12 +379,12 @@ function hasPageText(value: string): boolean {
  * page text on its own, and the report marks the gap between them.
  */
 export function verbatimEvidenceQuote(quote: string, normalizedPageText: string, source = "the captured page text"): string | { rejected: string } {
-	const joined = quote.replace(/\s+/g, " ").trim();
+	const joined = squash(quote);
 	if (!hasPageText(joined) || /[\u0000-\u001f\u007f]/.test(joined)) {
 		return { rejected: `its evidence quote contains no text from ${source}` };
 	}
 	if (normalizedPageText.includes(normalizedEvidence(joined))) return joined;
-	const lines = quote.split(/[\r\n]+/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
+	const lines = quote.split(/[\r\n]+/).map((line) => squash(line)).filter(Boolean);
 	if (lines.length > 1 && lines.every((line) => hasPageText(line) && normalizedPageText.includes(normalizedEvidence(line)))) {
 		return lines.join(QUOTE_GAP);
 	}
@@ -407,7 +402,7 @@ export function verbatimEvidenceQuote(quote: string, normalizedPageText: string,
 const MIN_DECODED_QUOTE_LENGTH = 16;
 
 function commandDecodingTo(quote: string, capturedPageText: string): string | undefined {
-	const wanted = normalizedEvidence(quote.replace(/\s+/g, " ").trim());
+	const wanted = normalizedEvidence(squash(quote));
 	// A fragment as short as "curl" or "zsh" names no payload.
 	if (wanted.length < MIN_DECODED_QUOTE_LENGTH || !hasPageText(wanted)) return undefined;
 	return extractPasteCommands(capturedPageText).find((command) => command.layers.slice(1).some((layer) => normalizedEvidence(layer.text).includes(wanted)))?.shown;
@@ -494,7 +489,7 @@ const MAX_BRAND_NAME_LENGTH = 80;
 /** The "official" site is the reported site, or a host the reported page sits under (a kit's own parent domain). */
 function isOwnSite(officialUrl: string, capturedPageUrl: string): boolean {
 	if (isSameWebsite(officialUrl, capturedPageUrl)) return true;
-	const official = new URL(officialUrl).hostname.replace(/^www\./, "");
+	const official = bareHost(officialUrl);
 	const captured = new URL(capturedPageUrl).hostname;
 	return captured === official || captured.endsWith(`.${official}`);
 }
@@ -507,7 +502,7 @@ function isOwnSite(officialUrl: string, capturedPageUrl: string): boolean {
  * unusable brand only drops the brand, never the finding.
  */
 function impersonatedBrand(result: { impersonatedBrand?: unknown; brandOfficialUrl?: unknown }, capturedPageUrl: string | undefined): { impersonatedBrand?: { name: string; officialUrl: string } } {
-	const name = typeof result.impersonatedBrand === "string" ? result.impersonatedBrand.replace(/\s+/g, " ").trim() : "";
+	const name = typeof result.impersonatedBrand === "string" ? squash(result.impersonatedBrand) : "";
 	const raw = typeof result.brandOfficialUrl === "string" ? result.brandOfficialUrl.trim() : "";
 	if (!name || name.length > MAX_BRAND_NAME_LENGTH || !raw) return {};
 	const officialUrl = normalizePublicHttpUrl(raw, { domainOnly: true });

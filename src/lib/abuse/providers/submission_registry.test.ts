@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { hashStableJson } from "../security";
 import type { ProviderSubmissionProvider } from "./submission_contracts";
 import { createProviderSubmissionRegistry } from "./submission_registry";
+import { hashStableJson } from "../../util/hash";
 
 function testProvider(
 	key: string,

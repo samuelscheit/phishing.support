@@ -1,16 +1,12 @@
-import crypto from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../index";
 import { artifacts } from "../schema";
 import { generateId } from "../ids";
 import { websiteEvidenceFiles, type WebsiteEvidencePackage } from "../../evidence/package";
 import { websiteCaptureFileNames } from "../../website/capture_files";
+import { sha256Hex } from "../../util/hash";
 
 export class ArtifactsEntity {
-    static sha256Hex(buffer: Buffer): string {
-        return crypto.createHash("sha256").update(buffer).digest("hex");
-    }
-
     static async saveBuffer(params: {
         submissionId?: bigint;
         name?: string;
@@ -31,7 +27,7 @@ export class ArtifactsEntity {
                     kind: params.kind,
                     archivedAt: params.archivedAt,
                     mimeType: params.mimeType,
-                    sha256: this.sha256Hex(params.buffer),
+                    sha256: sha256Hex(params.buffer),
                     size: params.buffer.byteLength,
                     blob: params.buffer,
                     createdAt: new Date(),

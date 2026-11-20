@@ -1,12 +1,11 @@
-import { createHash } from "node:crypto";
 
 import { serviceIdentity } from "../network/service_identity";
 import { websiteCaptureFileNames } from "../website/capture_files";
 import type { WebsiteNavigationHop } from "../website/types";
 import { stampAddressBar } from "./address_bar";
 import { timestampEvidence, type EvidenceTimestamp } from "./timestamp";
+import { sha256Hex } from "../util/hash";
 
-const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 export type EvidenceFile = { name: string; mimeType: string; bytes: Buffer };
 
@@ -59,7 +58,7 @@ export async function buildWebsiteEvidence(
 	facts: WebsiteCaptureFacts,
 	dependencies: { timestamp?: typeof timestampEvidence } = {},
 ): Promise<WebsiteEvidencePackage> {
-	const screenshotSha256 = facts.screenshotPng ? sha256(facts.screenshotPng) : undefined;
+	const screenshotSha256 = facts.screenshotPng ? sha256Hex(facts.screenshotPng) : undefined;
 	// A screenshot that does not decode is still recorded by hash; it only gets no address bar.
 	const stampedScreenshotPng = facts.screenshotPng && screenshotSha256
 		? await stampAddressBar(facts.screenshotPng, {
@@ -76,8 +75,8 @@ export async function buildWebsiteEvidence(
 	const names = websiteCaptureFileNames(facts.step);
 	const files: Array<{ name: string; mimeType: string; sha256: string; size: number }> = [
 		...(facts.screenshotPng ? [{ name: names.screenshot, mimeType: "image/png", sha256: screenshotSha256!, size: facts.screenshotPng.byteLength }] : []),
-		...(stampedScreenshotPng ? [{ name: names.stampedScreenshot, mimeType: "image/png", sha256: sha256(stampedScreenshotPng), size: stampedScreenshotPng.byteLength }] : []),
-		{ name: names.mhtml, mimeType: "text/mhtml", sha256: sha256(facts.mhtml), size: facts.mhtml.byteLength },
+		...(stampedScreenshotPng ? [{ name: names.stampedScreenshot, mimeType: "image/png", sha256: sha256Hex(stampedScreenshotPng), size: stampedScreenshotPng.byteLength }] : []),
+		{ name: names.mhtml, mimeType: "text/mhtml", sha256: sha256Hex(facts.mhtml), size: facts.mhtml.byteLength },
 	];
 	const manifest = Buffer.from(`${canonicalJson({
 		format: "phishing.support/evidence-manifest@1",

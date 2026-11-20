@@ -5,10 +5,12 @@ import uniqBy from "lodash/uniqBy";
 import { parse } from "tldts";
 
 import { recursiveAbuseContact } from "../network/rdap_abuse_contact";
-import { fetchJson, retryWithTimeout, type FetchImplementation } from "../network/bounded_fetch";
+import { fetchJson, retryWithTimeout } from "../network/bounded_fetch";
 import { resolveRegionalDns, type RegionalDnsDependencies, type RegionalDnsResolution } from "../network/regional_dns";
 import { defaultRdapLocator, type RdapLocator, type RdapObject } from "../network/rdap_bootstrap";
 import { errorText } from "../util/error_text";
+import { trimTrailingDot } from "../network/url";
+import { type FetchLike } from "../http/fetch";
 
 const LOOKUP_TIMEOUT_MS = 5_000;
 const LOOKUP_ATTEMPTS = 2;
@@ -26,7 +28,7 @@ type DnsResolver = {
 };
 
 export type WebsiteInfoDependencies = {
-	fetch?: FetchImplementation;
+	fetch?: FetchLike;
 	dns?: DnsResolver;
 	timeoutMs?: number;
 	retryAttempts?: number;
@@ -404,7 +406,7 @@ function normalizedTarget(domainOrIp: string): string {
 	try {
 		return new URL(domainOrIp).hostname;
 	} catch {
-		return domainOrIp.trim().replace(/\.$/, "");
+		return trimTrailingDot(domainOrIp.trim());
 	}
 }
 

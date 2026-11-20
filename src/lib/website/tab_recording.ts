@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
 
 import type { ObservedHop, ObservedResponse } from "../browser/tab_traffic";
 import type { WebsiteKitResource, WebsiteNavigationHop } from "./types";
+import { sha256Hex } from "../util/hash";
 
 /**
  * What a capture records of one tab while it is shown: each main-frame
@@ -52,7 +52,7 @@ function recordKitResources(): { observe: (response: ObservedResponse) => void; 
 					url: response.url,
 					mimeType: (response.headers["content-type"] ?? "").split(";", 1)[0]!.trim().toLowerCase() || response.resourceType,
 					size: body.byteLength,
-					sha256: createHash("sha256").update(body).digest("hex"),
+					sha256: sha256Hex(body),
 				};
 			})().catch(() => undefined));
 		},

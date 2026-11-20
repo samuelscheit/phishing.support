@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
 
 import { decideDownloadAction, type DownloadAction, type LookupResult, type SignatureState, type VerdictProvider } from "./policy";
 import { type StoredSample, storeSample } from "./sample_store";
+import { sha256Hex } from "../../util/hash";
 
 /**
  * Investigate one captured download. The order is fixed and every step can only
@@ -51,7 +51,7 @@ export type InvestigationOutcome = {
 export async function investigateDownload(evidence: DownloadEvidence, deps: InvestigationDependencies): Promise<InvestigationOutcome> {
 	if (evidence.bytes.byteLength === 0) throw new Error("An empty download is not investigated.");
 	// Step 1: the hash is computed locally, before any provider is contacted.
-	const sha256 = createHash("sha256").update(evidence.bytes).digest("hex");
+	const sha256 = sha256Hex(evidence.bytes);
 	// Step 2: verdict lookups happen before any decision that could upload.
 	const lookups = await deps.lookups(sha256);
 	// Step 3: the decision is pure; no upload is possible unless it returns "upload".

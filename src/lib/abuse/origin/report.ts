@@ -1,5 +1,4 @@
 import ipaddr from "ipaddr.js";
-import { createHash } from "node:crypto";
 import { simpleParser } from "mailparser";
 
 import { ArtifactsEntity } from "../../db/entities/artifacts";
@@ -19,6 +18,8 @@ import { originSweepProgressSchema, readOriginHostSnapshot, type OriginHostSnaps
 import { findOriginServers, MAX_ORIGIN_RESULTS, originSweepAddresses, planOriginSweep, SWEEP_SLICE_ADDRESSES, type OriginSweepPlan, type OriginVerificationTarget } from "./sweep";
 import { errorSummary } from "../../util/error_text";
 import { scheduleLivenessChecks } from "../../liveness/schedule";
+import { snippet } from "../../util/text";
+import { sha256Hex } from "../../util/hash";
 
 const ORIGIN_ROUTE_PROVIDER_KEY = "origin-host-email";
 const ORIGIN_EVIDENCE_KIND = "origin_host_evidence";
@@ -60,7 +61,7 @@ function holderName(holder: string): string {
 }
 
 function providerLabel(disclosed: string | undefined, networks: OriginSweepProgress["networks"], recipient: string): string {
-	if (disclosed?.trim()) return disclosed.replace(/\s+/g, " ").trim().slice(0, 200);
+	if (disclosed?.trim()) return snippet(disclosed, 200);
 	const holders = [...new Set(networks.map(({ holder }) => holderName(holder)))];
 	return holders.join(" / ").slice(0, 200) || recipient.split("@")[1]!;
 }
@@ -117,7 +118,7 @@ async function originVerificationTargets(submissionId: bigint | null, domain: st
 			}
 			if (url.hostname !== domain) continue;
 			const path = `${url.pathname}${url.search}`;
-			targets.set(path, { path, sha256: createHash("sha256").update(attachment.content).digest("hex") });
+			targets.set(path, { path, sha256: sha256Hex(attachment.content) });
 			if (targets.size >= MAX_VERIFICATION_TARGETS) return [...targets.values()];
 		}
 	}

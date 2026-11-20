@@ -1,4 +1,3 @@
-import { sha256Hex } from "../security";
 import { originAsns } from "./bgp";
 import { fetchRdapRecord, safeJsonFetch } from "./http";
 import { asRecord, text } from "../../util/values";
@@ -13,6 +12,7 @@ import { queryPort43 } from "./port43";
 import { parseExplicitWhoisAbuseMailboxes, parseWhoisNetworkMetadata } from "./whois";
 import type { AbuseMailbox, JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
 import { errorText } from "../../util/error_text";
+import { sha256Hex } from "../../util/hash";
 
 
 const RIPE_NETWORK_INFO_URL = "https://stat.ripe.net/data/network-info/data.json?resource=";

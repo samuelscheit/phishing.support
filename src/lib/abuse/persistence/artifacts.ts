@@ -2,8 +2,8 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { abuseArtifacts, type AbuseArtifact } from "../schema";
-import { sha256Hex } from "../security";
 import { insertArtifact, type ArtifactValuesParams } from "./shared";
+import { sha256Hex } from "../../util/hash";
 
 export async function saveArtifact(params: ArtifactValuesParams): Promise<bigint> {
 	const db = await getDb();

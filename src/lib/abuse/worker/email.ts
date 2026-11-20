@@ -6,7 +6,8 @@ import { smtpRelay } from "../../mail/config";
 import { serviceIdentity } from "../../network/service_identity";
 import { approvalDraftOf } from "../persistence/approvals";
 import { AbuseRepository } from "../repository";
-import { errorText, RetryableDeliveryError, routeContext, UnknownExternalStateError, type WorkerServices } from "./shared";
+import { boundedErrorText } from "../../util/error_text";
+import { RetryableDeliveryError, routeContext, UnknownExternalStateError, type WorkerServices } from "./shared";
 import { DAY_MS } from "../../util/date_time";
 import { isDown } from "../../liveness/layer";
 import { listSiteChecksForTargets } from "../../liveness/repository";
@@ -178,7 +179,7 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 		// safely retryable, but only after the claimed route/run are atomically
 		// returned to the known delivery-failed state. Do not let a normal job
 		// retry strand this route in `running`.
-		const failure = errorText(error);
+		const failure = boundedErrorText(error);
 		if (isSafeEmailDeliveryFailure(error) && await AbuseRepository.recoverEmailPreparationFailure({ runId: run.id, error: failure })) {
 			throw new RetryableDeliveryError(failure);
 		}

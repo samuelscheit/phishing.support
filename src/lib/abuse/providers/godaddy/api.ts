@@ -1,16 +1,15 @@
-import { asRecord } from "../../../util/values";
-import { deadline, jsonRecord } from "../kit/http";
-import { snippet } from "../kit/text";
+import { asRecord, parseJsonRecord } from "../../../util/values";
+import { snippet } from "../../../util/text";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
 import type { GoDaddyReportType } from "./payload";
-
-export type GoDaddyFetch = (url: string, init: RequestInit) => Promise<Pick<Response, "status" | "text">>;
+import { deadline } from "../../../util/async";
+import { type AnswerFetch } from "../../../http/fetch";
 
 export type GoDaddyApiCredentials = { key: string; secret: string };
 
 export type GoDaddyApiDependencies = {
-	fetch?: GoDaddyFetch;
+	fetch?: AnswerFetch;
 	environment?: Readonly<Record<string, string | undefined>>;
 	signal?: AbortSignal;
 };
@@ -22,7 +21,7 @@ export function goDaddyApiCredentials(environment: Readonly<Record<string, strin
 	return key && secret ? { key, secret } : undefined;
 }
 
-const defaultFetch: GoDaddyFetch = (url, init) => fetch(url, init);
+const defaultFetch: AnswerFetch = (url, init) => fetch(url, init);
 
 async function call(credentials: GoDaddyApiCredentials, path: string, init: { method: "GET" | "POST"; body?: unknown }, dependencies: GoDaddyApiDependencies): Promise<{ status: number; text: string; json: unknown }> {
 	const answer = await (dependencies.fetch ?? defaultFetch)(`${PROVIDER.api.baseUrl}${path}`, {
@@ -36,7 +35,7 @@ async function call(credentials: GoDaddyApiCredentials, path: string, init: { me
 		signal: deadline(PROVIDER.api.timeoutMs, dependencies.signal),
 	});
 	const text = await answer.text();
-	return { status: answer.status, text, json: jsonRecord(text) };
+	return { status: answer.status, text, json: parseJsonRecord(text) };
 }
 
 function apiMessage(json: unknown, text: string): string {

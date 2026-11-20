@@ -1,8 +1,9 @@
 import { acquireFabricPatchrightSession, type FabricPatchrightSession } from "../../browser/fabric";
 import { errorSummary } from "../../util/error_text";
-import { sleep } from "../../util/sleep";
+import { sleep, type Sleep } from "../../util/sleep";
 import { OperationCanceledError, raceAbort, throwIfOperationCanceled } from "../worker/cancellation";
 import { boundedCleanup } from "./login_session/session";
+import { parseJson } from "../../util/values";
 
 /**
  * A provider form that sits behind a Cloudflare managed challenge (and often a
@@ -72,7 +73,7 @@ export type BrowserFormChoiceSession = BrowserFormSession & {
 export type BrowserFormDependencies = {
 	acquire?: (signal: AbortSignal | undefined) => Promise<Pick<FabricPatchrightSession, "context" | "release" | "cancel">>;
 	now?: () => number;
-	sleep?: (ms: number) => Promise<void>;
+	sleep?: Sleep;
 };
 
 const BROWSER_FORM_DEFAULTS = {
@@ -139,14 +140,6 @@ async function postProbe(argument: { url: string; fields: BrowserFormField[]; ti
 	}
 	const response = await fetch(argument.url, { method: "POST", credentials: "include", headers: { accept: "application/json, */*;q=0.1", ...argument.headers }, body, signal: AbortSignal.timeout(argument.timeoutMs) });
 	return { status: response.status, text: await response.text(), ...(response.url ? { url: response.url } : {}) };
-}
-
-function parseJson(text: string): unknown {
-	try {
-		return JSON.parse(text);
-	} catch {
-		return undefined;
-	}
 }
 
 async function acquireSession(options: BrowserFormOptions): Promise<Pick<FabricPatchrightSession, "context" | "release" | "cancel">> {

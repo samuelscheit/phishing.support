@@ -1,14 +1,10 @@
 import { assertPublicDnsHost } from "../abuse/security";
-
-/** The host as `isIP` and DNS take it: WHATWG URLs keep IPv6 literals in brackets. */
-export function urlHostname(url: URL): string {
-	return url.hostname.replace(/^\[|\]$/g, "");
-}
-
-export type PublicFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
+import { urlHostname } from "./url";
+import { deadline } from "../util/async";
+import { type FetchLike } from "../http/fetch";
 
 export type PublicRedirectDependencies = {
-	fetch?: PublicFetch;
+	fetch?: FetchLike;
 	assertPublicHost?: (hostname: string) => Promise<void>;
 	signal?: AbortSignal;
 };
@@ -55,7 +51,7 @@ export async function fetchThroughPublicRedirects(url: string, options: PublicRe
 			}
 			urls.push(current.toString());
 			await assertPublicHost(urlHostname(current));
-			const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(options.timeoutMs)]) : AbortSignal.timeout(options.timeoutMs);
+			const signal = deadline(options.timeoutMs, options.signal);
 			const response = await fetchImplementation(current, { redirect: "manual", headers: options.headers, signal });
 			if (response.status < 300 || response.status >= 400) return { response, urls };
 			const location = response.headers.get("location");

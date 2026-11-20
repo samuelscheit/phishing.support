@@ -1,14 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "@zip.js/zip.js";
 
 import { dossierArchive } from "./archive";
 import type { Dossier } from "./dossier";
 import { dossierText, siteAnalysisText } from "./archive_text";
+import { sha256Hex } from "../util/hash";
 
 const mhtml = Buffer.from("MIME-Version: 1.0\r\n\r\ncaptured page");
 const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
-const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 const dossier: Dossier = {
 	campaignId: "42",
@@ -34,10 +33,10 @@ const dossier: Dossier = {
 		reports: [{ provider: "Hostinger International Ltd.", target: "dhl-a.com", channel: "email", contact: "abuse@hostinger.com", status: "acknowledged", reportedAt: "2026-11-10T09:00:00.000Z" }],
 		correspondence: [],
 		evidence: [
-			{ artifactId: "1", name: "website.mhtml", kind: "website_mhtml", sha256: sha(mhtml), size: mhtml.length },
-			{ artifactId: "2", name: "website.png", kind: "website_png", sha256: sha(png), size: png.length },
+			{ artifactId: "1", name: "website.mhtml", kind: "website_mhtml", sha256: sha256Hex(mhtml), size: mhtml.length },
+			{ artifactId: "2", name: "website.png", kind: "website_png", sha256: sha256Hex(png), size: png.length },
 			{ artifactId: "3", name: "evidence-manifest.json", kind: "website_evidence", sha256: "0".repeat(64), size: 2 },
-			{ artifactId: "4", name: "../../escape.tsr", kind: "website_evidence", sha256: sha(png), size: png.length },
+			{ artifactId: "4", name: "../../escape.tsr", kind: "website_evidence", sha256: sha256Hex(png), size: png.length },
 		],
 		indicators: [{ kind: "operator_server", value: "telegram-bot:7001", links: true, evidence: {} }],
 	}],
@@ -61,7 +60,7 @@ async function entries(archive: ReadableStream<Uint8Array>) {
 /** A site whose evidence is `count` page captures with the given ids, sized and hashed as `blob`. */
 function siteWithCaptures(count: number, blob: Buffer) {
 	return { ...dossier.sites[0]!, evidence: Array.from({ length: count }, (_, index) => (
-		{ artifactId: String(index + 1), name: `page-${index + 1}.mhtml`, kind: "website_mhtml", sha256: sha(blob), size: blob.length }
+		{ artifactId: String(index + 1), name: `page-${index + 1}.mhtml`, kind: "website_mhtml", sha256: sha256Hex(blob), size: blob.length }
 	)) };
 }
 
@@ -81,7 +80,7 @@ describe("dossier archive", () => {
 			"missing-files.txt",
 			"sites.csv",
 		]);
-		expect(sha(files.get("evidence/001-dhl-a.com/website.mhtml")!)).toBe(sha(mhtml));
+		expect(sha256Hex(files.get("evidence/001-dhl-a.com/website.mhtml")!)).toBe(sha256Hex(mhtml));
 		// The manifest's stored bytes do not match its recorded hash, so it is named, not shipped.
 		expect(files.get("missing-files.txt")!.toString()).toContain("evidence-manifest.json: the stored bytes do not match the recorded SHA-256");
 		expect(files.get("dossier.txt")!.toString()).toBe(dossierText(dossier));
@@ -105,8 +104,8 @@ describe("dossier archive", () => {
 	test("keeps every capture of a site captured again: the newest under its name, earlier ones with their id", async () => {
 		const older = Buffer.from("MIME-Version: 1.0\r\n\r\nfirst capture");
 		const site = { ...dossier.sites[0]!, evidence: [
-			{ artifactId: "10", name: "website.mhtml", kind: "website_mhtml", sha256: sha(older), size: older.length },
-			{ artifactId: "20", name: "website.mhtml", kind: "website_mhtml", sha256: sha(mhtml), size: mhtml.length },
+			{ artifactId: "10", name: "website.mhtml", kind: "website_mhtml", sha256: sha256Hex(older), size: older.length },
+			{ artifactId: "20", name: "website.mhtml", kind: "website_mhtml", sha256: sha256Hex(mhtml), size: mhtml.length },
 		] };
 		const blobs = new Map([["10", older], ["20", mhtml]]);
 		const files = await entries(dossierArchive({ ...dossier, sites: [site] }, { loadArtifact: async (id) => ({ blob: blobs.get(id.toString())! }) }));
@@ -118,8 +117,8 @@ describe("dossier archive", () => {
 		const sent = Buffer.from("From: report@phishing.support\r\nTo: abuse@hostinger.com\r\nSubject: Phishing\r\n\r\nPlease take it down.");
 		const reply = Buffer.from("From: abuse@hostinger.com\r\nSubject: Re: Phishing\r\n\r\nSuspended.");
 		const site = { ...dossier.sites[0]!, evidence: [], correspondence: [
-			{ reportId: "70", direction: "outbound" as const, occurredAt: "2026-11-10T09:00:00.000Z", provider: "Hostinger International Ltd.", from: "report@phishing.support", to: ["abuse@hostinger.com"], subject: "Phishing", raw: { artifactId: "81", sha256: sha(sent), size: sent.length } },
-			{ reportId: "70", direction: "inbound" as const, occurredAt: "2026-11-10T11:30:00.000Z", provider: "Hostinger International Ltd.", from: "abuse@hostinger.com", to: ["report@phishing.support"], subject: "Re: Phishing", raw: { artifactId: "82", sha256: sha(reply), size: reply.length } },
+			{ reportId: "70", direction: "outbound" as const, occurredAt: "2026-11-10T09:00:00.000Z", provider: "Hostinger International Ltd.", from: "report@phishing.support", to: ["abuse@hostinger.com"], subject: "Phishing", raw: { artifactId: "81", sha256: sha256Hex(sent), size: sent.length } },
+			{ reportId: "70", direction: "inbound" as const, occurredAt: "2026-11-10T11:30:00.000Z", provider: "Hostinger International Ltd.", from: "abuse@hostinger.com", to: ["report@phishing.support"], subject: "Re: Phishing", raw: { artifactId: "82", sha256: sha256Hex(reply), size: reply.length } },
 			{ reportId: "70", direction: "inbound" as const, occurredAt: "2026-11-11T08:00:00.000Z", provider: "Hostinger International Ltd.", from: "abuse@hostinger.com", to: [], text: "Closed." },
 			{ reportId: "70", direction: "inbound" as const, occurredAt: "2026-11-12T08:00:00.000Z", provider: "Hostinger International Ltd.", to: [], raw: { artifactId: "83", sha256: "0".repeat(64), size: 3 } },
 		] };
@@ -139,7 +138,7 @@ describe("dossier archive", () => {
 		expect(files.get(`${folder}/003-20261111-0800-received-Hostinger-International-Ltd.txt`)!.toString()).toBe("Closed.");
 		const index = files.get(`${folder}/index.txt`)!.toString();
 		expect(index).toContain("1. 2026-11-10 09:00 UTC, sent to abuse@hostinger.com (Hostinger International Ltd.): Phishing");
-		expect(index).toContain(`SHA-256 ${sha(reply)}`);
+		expect(index).toContain(`SHA-256 ${sha256Hex(reply)}`);
 		expect(files.get("missing-files.txt")!.toString()).toContain("004-20261112-0800-received-Hostinger-International-Ltd.eml: the stored bytes do not match the recorded SHA-256");
 		expect(files.get("evidence/001-dhl-a.com/analysis.txt")!.toString()).toContain("The 4 mails with the providers are in correspondence/");
 	});
@@ -148,8 +147,8 @@ describe("dossier archive", () => {
 		const page = Buffer.from("<html>".padEnd(4096, "a"));
 		const image = Buffer.from(Array.from({ length: 4096 }, (_, index) => (index * 7919) % 251));
 		const site = { ...dossier.sites[0]!, evidence: [
-			{ artifactId: "1", name: "website.mhtml", kind: "website_mhtml", sha256: sha(page), size: page.length },
-			{ artifactId: "2", name: "website-stamped.PNG", kind: "website_evidence", sha256: sha(image), size: image.length },
+			{ artifactId: "1", name: "website.mhtml", kind: "website_mhtml", sha256: sha256Hex(page), size: page.length },
+			{ artifactId: "2", name: "website-stamped.PNG", kind: "website_evidence", sha256: sha256Hex(image), size: image.length },
 		] };
 		const blobs = new Map([["1", page], ["2", image]]);
 		const files = await zipEntries(dossierArchive({ ...dossier, sites: [site] }, { loadArtifact: async (id) => ({ blob: blobs.get(id.toString())! }) }));

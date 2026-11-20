@@ -2,6 +2,7 @@ import { isIP } from "node:net";
 
 import { fetchJson } from "./bounded_fetch";
 import { DAY_MS } from "../util/date_time";
+import { canonicalHost } from "./url";
 
 /**
  * Finds the authoritative RDAP server for a domain, IP address, or AS number
@@ -68,7 +69,7 @@ function prefixMatch(address: { value: bigint; bits: number }, cidr: string): nu
 /** The servers of the most specific service that covers `value`. */
 export function bootstrapServers(file: BootstrapFile, services: readonly BootstrapService[], value: string): string[] | undefined {
 	if (file === "dns") {
-		const labels = value.toLowerCase().replace(/\.$/, "").split(".");
+		const labels = canonicalHost(value).split(".");
 		// The longest matching label suffix wins (an entry may be a multi-label zone).
 		for (let start = 0; start < labels.length; start++) {
 			const zone = labels.slice(start).join(".");
@@ -106,7 +107,7 @@ function bootstrapFile(object: RdapObject, value: string): BootstrapFile {
 function recordUrl(servers: readonly string[], object: RdapObject, value: string): string | undefined {
 	const base = servers.find((server) => server.startsWith("https://"));
 	if (!base) return undefined;
-	const key = object === "domain" ? encodeURIComponent(value.toLowerCase().replace(/\.$/, "")) : value;
+	const key = object === "domain" ? encodeURIComponent(canonicalHost(value)) : value;
 	return `${base.endsWith("/") ? base : `${base}/`}${object}/${key}`;
 }
 

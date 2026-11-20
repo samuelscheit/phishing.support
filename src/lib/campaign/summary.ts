@@ -4,6 +4,8 @@ import { optionalOpenAIClient } from "../openai/client";
 import { optionalResponseText } from "../openai/response";
 import { defaultResponseModel } from "../openai/client";
 import { LANGUAGE_NAMES } from "./language";
+import { minutesBetween } from "../util/date_time";
+import { andList } from "../util/text";
 
 const MAX_TITLE = 90;
 const MAX_SUMMARY = 700;
@@ -49,15 +51,6 @@ const RESPONSE_SCHEMA = {
 	required: ["title", "summary"],
 } as const;
 
-function list(values: readonly string[]): string {
-	if (values.length <= 1) return values[0] ?? "";
-	return `${values.slice(0, -1).join(", ")} and ${values.at(-1)}`;
-}
-
-function minutesBetween(from: string, to: string): number {
-	return Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 60_000));
-}
-
 function span(minutes: number): string {
 	if (minutes < 120) return `${minutes} minutes`;
 	if (minutes < 72 * 60) return `${Math.round(minutes / 60)} hours`;
@@ -76,9 +69,9 @@ const LINK_PHRASE: Record<CampaignFacts["links"][number], string> = {
 export function fallbackDescription(facts: CampaignFacts): CampaignDescription {
 	const brand = facts.impersonates[0];
 	const title = brand ? `Phishing campaign impersonating ${brand}` : `Phishing campaign with ${facts.siteCount} sites`;
-	const asks = facts.dataRequested.length ? ` They ask visitors for their ${list(facts.dataRequested)}.` : "";
-	const languages = facts.languages.length > 1 ? ` The pages speak the visitor's language; we saw ${list(facts.languages.map((code) => LANGUAGE_NAMES[code] ?? code))}.` : "";
-	const ties = facts.links.length ? `, and they ${list(facts.links.map((link) => LINK_PHRASE[link]))}, so we treat them as the work of one operator` : "";
+	const asks = facts.dataRequested.length ? ` They ask visitors for their ${andList(facts.dataRequested)}.` : "";
+	const languages = facts.languages.length > 1 ? ` The pages speak the visitor's language; we saw ${andList(facts.languages.map((code) => LANGUAGE_NAMES[code] ?? code))}.` : "";
+	const ties = facts.links.length ? `, and they ${andList(facts.links.map((link) => LINK_PHRASE[link]))}, so we treat them as the work of one operator` : "";
 	const when = facts.siteCount > 1 ? ` went online within ${span(minutesBetween(facts.firstSeenAt, facts.lastSeenAt))}` : " was found";
 	const summary = `${facts.siteCount} phishing ${facts.siteCount === 1 ? "page" : "pages"}${brand ? ` impersonating ${brand}` : ""}${when}${ties}.${asks}${languages}`;
 	return { title: title.slice(0, MAX_TITLE), summary: summary.slice(0, MAX_SUMMARY) };

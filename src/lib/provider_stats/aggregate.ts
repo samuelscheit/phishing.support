@@ -3,6 +3,7 @@ import type { Takedown } from "../liveness/layer";
 import type { Organisation } from "./organisation";
 import type { ProviderRole } from "./role";
 import { PROVIDER_VERDICTS, routeVerdicts, type RouteOutcome, type RouteVerdict } from "./route_outcome";
+import { minutesBetween } from "../util/date_time";
 
 /** One provider route with everything the statistics need. */
 export type ProviderRouteRecord = {
@@ -73,10 +74,6 @@ export type ProviderStats = {
 
 /** Below this many delivered reports a provider's rates say little. */
 export const LOW_DATA_THRESHOLD = 5;
-
-function minutesBetween(from: Date, to: Date): number {
-	return Math.max(0, Math.round((to.getTime() - from.getTime()) / 60_000));
-}
 
 /** Quartiles by the nearest-rank method: every value shown is one that happened. */
 export function distributionOf(values: readonly number[]): Distribution {

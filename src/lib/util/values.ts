@@ -20,6 +20,20 @@ export function record(value: unknown): JsonRecord {
 	return isRecord(value) ? value : {};
 }
 
+/** The parsed JSON, or undefined when the text is no JSON. */
+export function parseJson(text: string): unknown {
+	try {
+		return JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+}
+
+/** A JSON object in text (an HTTP body), or undefined when the text is no JSON object. */
+export function parseJsonRecord(text: string): JsonRecord | undefined {
+	return asRecord(parseJson(text));
+}
+
 /** A non-empty string, trimmed, or undefined. */
 export function text(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;

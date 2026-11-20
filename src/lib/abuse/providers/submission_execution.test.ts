@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
-import { hashStableJson } from "../security";
 import {
 	executeProviderSubmission,
 	ProviderSubmissionUnknownExternalStateError,
@@ -18,6 +17,7 @@ import { findProviderReceipt } from "../worker/receipt";
 import { getDb } from "../../db";
 import { abuseJobs, abuseProviderRuns } from "../schema";
 import { and, eq } from "drizzle-orm";
+import { hashStableJson } from "../../util/hash";
 
 useTemporaryDatabase();
 

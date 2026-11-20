@@ -1,6 +1,6 @@
 import { serviceIdentity } from "../../../network/service_identity";
-import { hashStableJson } from "../../security";
 import type { ProviderSubmissionDefinition } from "../submission_contracts";
+import { hashStableJson } from "../../../util/hash";
 
 /** The reporter every provider form is filed under. */
 export const serviceReporter = { name: serviceIdentity.name, email: serviceIdentity.mailbox } as const;

@@ -1,20 +1,5 @@
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 
-/** The provider's own timeout plus the worker's cancellation signal. */
-export function deadline(timeoutMs: number, signal?: AbortSignal): AbortSignal {
-	return AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]);
-}
-
-/** A JSON object in an HTTP body, or undefined when the body is no JSON object. */
-export function jsonRecord(text: string): Record<string, unknown> | undefined {
-	try {
-		const value: unknown = JSON.parse(text);
-		return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-	} catch {
-		return undefined;
-	}
-}
-
 /** The provider named a bad request: nothing was filed. `detail` is a snippet of its answer. */
 const refused = (provider: string, status: number, detail: string) => new ProviderSubmissionRejectedError(`${provider} refused the report (HTTP ${status}): ${detail}`);
 

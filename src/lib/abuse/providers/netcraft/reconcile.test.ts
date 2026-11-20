@@ -6,10 +6,11 @@ import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { validateAbuseReportRequest } from "../../contracts";
 import { AbuseRepository } from "../../repository";
 import { abuseJobs } from "../../schema";
-import { netcraftSubmissionUrl, netcraftSubmissionUrlsUrl, type NetcraftFetch } from "./api";
+import { netcraftSubmissionUrl, netcraftSubmissionUrlsUrl } from "./api";
 
 import { NETCRAFT_PROVIDER } from "./definition";
 import { reconcileNetcraftProviderRun } from "./reconcile";
+import { type FetchLike } from "../../../http/fetch";
 
 useTemporaryDatabase();
 
@@ -68,7 +69,7 @@ async function createUnresolvedCase(options: { diagnosticId?: string; job?: bool
 	return { ...created, target, route, run, job };
 }
 
-function mockedReceiptFetch(expectedUrl: string, options: { mismatch?: boolean; extra?: boolean } = {}): { fetch: NetcraftFetch; calls: string[] } {
+function mockedReceiptFetch(expectedUrl: string, options: { mismatch?: boolean; extra?: boolean } = {}): { fetch: FetchLike; calls: string[] } {
 	const calls: string[] = [];
 	return {
 		calls,

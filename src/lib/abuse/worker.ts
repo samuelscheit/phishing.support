@@ -19,7 +19,8 @@ import { watchRedirector } from "./origin/redirector_watch";
 import { classifyReply, monitorProviderReply } from "./worker/mail";
 import { runGenericProviderPortal } from "./worker/portal";
 import { resolveReport } from "./worker/resolution";
-import { errorText, idFrom, parseJobBigInt, randomOwner, type WorkerServices } from "./worker/shared";
+import { boundedErrorText } from "../util/error_text";
+import { idFrom, parseJobBigInt, randomOwner, type WorkerServices } from "./worker/shared";
 import type { JobClaimFilter } from "./persistence/jobs";
 import { readInvestigationJobPayload } from "../investigation/payload";
 import { releaseAfterFailedInvestigation, runReportInvestigation } from "../investigation/run";
@@ -320,7 +321,7 @@ export class AbuseWorker {
 				await this.handleInterruptedJob(job, error.message, "job_execution_timeout", true);
 				return true;
 			}
-			const message = errorText(error);
+			const message = boundedErrorText(error);
 			if (job.unknownExternalState || (error as { unknownExternalState?: unknown })?.unknownExternalState === true) {
 				await AbuseRepository.markJobUnknownExternalState({ jobId: job.id, owner: this.owner, error: message });
 			} else if (isNonRetryableError(error)) {
@@ -544,7 +545,7 @@ export class AbuseWorker {
 		} catch (error) {
 			// The worker decides finality: a retryable failure is queued again, and a
 			// terminal one releases the report on its single terminal path.
-			await setInvestigationStatus(report.submissionId, { status: "queued", lastError: errorText(error), updatedAt: new Date().toISOString() });
+			await setInvestigationStatus(report.submissionId, { status: "queued", lastError: boundedErrorText(error), updatedAt: new Date().toISOString() });
 			throw error;
 		}
 	}

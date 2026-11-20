@@ -1,5 +1,7 @@
 import type { Submission } from "@/lib/db/schema";
+import { truncateAtWord } from "@/lib/util/text";
 import { websiteSiteName } from "@/lib/website/site";
+import { utcDate } from "@/lib/util/date_time";
 
 /** What a submission's page tells search engines and share cards: who it is about and what was found. */
 export type SubmissionSeo = {
@@ -16,15 +18,6 @@ const VERDICT_STATUSES = new Set<Submission["status"]>(["reported", "invalid", "
 
 /** Search engines show about 160 characters of a description. */
 const DESCRIPTION_LENGTH = 160;
-
-/** `text` cut at a word boundary to fit `length`, with an ellipsis when cut. */
-export function truncateText(text: string, length: number): string {
-	const clean = text.replace(/\s+/g, " ").trim();
-	if (clean.length <= length) return clean;
-	const cut = clean.slice(0, length - 1);
-	const space = cut.lastIndexOf(" ");
-	return `${(space > length * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.–—-]+$/, "")}…`;
-}
 
 function websiteVerdict(submission: Submission): Pick<SubmissionSeo, "verdict" | "tone"> & { phrase: string } {
 	const website = submission.data.kind === "website" ? submission.data.website : undefined;
@@ -71,15 +64,15 @@ export function submissionSeo(submission: Submission): SubmissionSeo {
 		? websiteSiteName(submission.data.kind === "website" ? submission.data.website?.url : undefined) ?? "Website"
 		: (submission.data.kind === "email" && submission.data.email?.subject?.trim()) || "Email without a subject";
 	const { verdict, tone, phrase } = isWebsite ? websiteVerdict(submission) : emailVerdict(submission);
-	const named = isWebsite ? subject : `The email “${truncateText(subject, 70)}”`;
-	const checked = `Checked on ${submission.createdAt.toISOString().slice(0, 10)} by Phishing Support.`;
+	const named = isWebsite ? subject : `The email “${truncateAtWord(subject, 70, { ellipsis: true })}”`;
+	const checked = `Checked on ${utcDate(submission.createdAt)} by Phishing Support.`;
 	// Only a finished verdict's text says what was found; a failure's is a technical error.
 	const finding = VERDICT_STATUSES.has(submission.status) ? (submission.info ?? "") : "";
 	return {
 		subject,
 		verdict,
 		tone,
-		title: isWebsite ? `Is ${subject} a scam? ${verdict}` : `“${truncateText(subject, 60)}” – ${verdict}`,
-		description: truncateText(`${named} ${phrase}. ${checked} ${finding}`, DESCRIPTION_LENGTH),
+		title: isWebsite ? `Is ${subject} a scam? ${verdict}` : `“${truncateAtWord(subject, 60, { ellipsis: true })}” – ${verdict}`,
+		description: truncateAtWord(`${named} ${phrase}. ${checked} ${finding}`, DESCRIPTION_LENGTH, { ellipsis: true }),
 	};
 }

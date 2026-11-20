@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { parse } from "node-html-parser";
 
 import type { BrowserIdentity } from "../../browser/page";
@@ -16,6 +15,7 @@ import type { WebsiteArchiveResult } from "../../website/archive/types";
 import type { WebsiteDevice } from "../../website/types";
 import type { SiteCheckDependencies } from "../../liveness/check";
 import type { AccountIdentifierExtractor } from "./account_identifiers";
+import { sha256Hex } from "../../util/hash";
 
 /** A file the answer may attach: the case's evidence, or a screenshot a recheck took. */
 export type AttachableFile = { filename: string; mimeType: string; content: Buffer };
@@ -191,7 +191,7 @@ async function visitSite(url: string, device: "case" | "iphone", instructions: s
 			pages.push({
 				...await describePage(page.archive, "visit", context, dependencies),
 				sentMadeUpData: page.dataSent.map(({ url: sentTo, method, fields, sameSite }) => ({ url: sentTo, method, fields, sameSite })),
-				downloads: page.downloads.map((file) => ({ url: file.url, fileName: file.fileName, contentType: file.contentType ?? null, bytes: file.bytes.byteLength, sha256: createHash("sha256").update(file.bytes).digest("hex") })),
+				downloads: page.downloads.map((file) => ({ url: file.url, fileName: file.fileName, contentType: file.contentType ?? null, bytes: file.bytes.byteLength, sha256: sha256Hex(file.bytes) })),
 			});
 		}
 		return {
@@ -287,7 +287,7 @@ async function fetchUrl(url: string, userAgent: string, dependencies: DecisionTo
 		contentType: contentType || null,
 		bytes: body.byteLength,
 		truncated,
-		sha256: truncated ? null : createHash("sha256").update(body).digest("hex"),
+		sha256: truncated ? null : sha256Hex(body),
 		bodyStart: textual ? body.toString("utf8").slice(0, 8_000) : null,
 	};
 }

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 
-import { sha256Hex } from "../../security";
 import type { AbuseArtifact } from "../../schema";
 import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { selectProviderEvidenceImageArtifact } from "../evidence_image";
@@ -8,6 +7,7 @@ import { mailedCodeFrom } from "../mailed_code";
 import { ERANET_PROVIDER } from "./definition";
 import { buildEranetSubmissionPayload, ERANET_EVIDENCE_CONTRACT, eranetSubTypes, storedEranetSubmissionPayload } from "./payload";
 import { prepareEranetExternalSubmission, prepareEranetSubmission, submitEranetSubmission, type EranetDependencies, type EranetSession } from "./submission";
+import { sha256Hex } from "../../../util/hash";
 
 // A minimal valid PNG: the evidence contract checks the magic bytes and digest.
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);

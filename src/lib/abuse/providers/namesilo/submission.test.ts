@@ -4,7 +4,6 @@ import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { validateAbuseReportRequest } from "../../contracts";
 import { AbuseRepository } from "../../repository";
 import type { AbuseArtifact } from "../../schema";
-import { sha256Hex } from "../../security";
 import { providerDefinitionHasValidHash } from "../kit/pin";
 import { selectProviderEvidenceImageArtifact } from "../evidence_image";
 import { executeProviderSubmission } from "../submission_execution";
@@ -23,6 +22,8 @@ import {
 	prepareNameSiloSubmission,
 	submitNameSiloSubmission,
 } from "./submission";
+import { sha256Hex } from "../../../util/hash";
+import { evidenceArtifact } from "../kit/testing";
 
 useTemporaryDatabase();
 
@@ -44,27 +45,8 @@ afterAll(() => {
 	else process.env.DEATHBYCAPTCHA_PASSWORD = originalCredentials.password;
 });
 
-function artifact(overrides: Partial<AbuseArtifact> = {}): AbuseArtifact {
-	return {
-		id: 101n,
-		reportId: 99n,
-		targetId: null,
-		routeId: null,
-		runId: null,
-		name: "website.png",
-		kind: "user_evidence_original",
-		mimeType: "image/png",
-		sha256: sha256Hex(png),
-		size: png.byteLength,
-		metadata: {},
-		blob: png,
-		createdAt: new Date(),
-		...overrides,
-	};
-}
-
 function payload() {
-	const evidence = selectProviderEvidenceImageArtifact([artifact()], NAMESILO_EVIDENCE_CONTRACT);
+	const evidence = selectProviderEvidenceImageArtifact([evidenceArtifact(png)], NAMESILO_EVIDENCE_CONTRACT);
 	if (!evidence) throw new Error("Expected valid NameSilo evidence.");
 	const value = buildNameSiloSubmissionPayload({
 		target: "login.phishing.example.com",

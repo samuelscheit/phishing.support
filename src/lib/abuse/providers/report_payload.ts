@@ -1,19 +1,9 @@
 import { hostBelongsToTarget, normalizePublicHttpUrl } from "../security";
+import { squash, truncateAtWord } from "../../util/text";
 import { PRESERVATION_REQUEST_SHORT } from "../preservation";
 
 export function compactProviderText(value: string): string {
-	return value
-		.normalize("NFKC")
-		.replace(/[\u0000-\u001F\u007F]/g, " ")
-		.replace(/\s+/g, " ")
-		.trim();
-}
-
-export function truncateProviderText(value: string, maximum: number): string {
-	if (value.length <= maximum) return value;
-	const bounded = value.slice(0, maximum);
-	const separator = bounded.lastIndexOf(" ");
-	return (separator >= Math.floor(maximum * 0.6) ? bounded.slice(0, separator) : bounded).trim();
+	return squash(value.normalize("NFKC").replace(/[\u0000-\u001F\u007F]/g, " "));
 }
 
 /** Normalize an observed URL and bind it to the domain or IP target that owns it. */
@@ -70,7 +60,7 @@ export function boundedEvidence(description: string, maximum: number): string | 
 			result = result ? `${result} ${sentence}` : sentence;
 			continue;
 		}
-		const partial = truncateProviderText(sentence, remaining);
+		const partial = truncateAtWord(sentence, remaining);
 		if (partial.length >= 20) result = result ? `${result} ${partial}` : partial;
 		break;
 	}
@@ -350,7 +340,7 @@ function fitNarrativeParts(parts: readonly string[], maximumLength: number): str
 	const action = parts.at(-1) ?? "Please investigate the reported activity.";
 	const selected = [lead];
 	if ([lead, action].filter(Boolean).join(" ").length > maximumLength) {
-		return truncateProviderText([lead, action].filter(Boolean).join(" "), maximumLength);
+		return truncateAtWord([lead, action].filter(Boolean).join(" "), maximumLength);
 	}
 	for (const candidate of [facts, urlContext, reference]) {
 		if (!candidate) continue;

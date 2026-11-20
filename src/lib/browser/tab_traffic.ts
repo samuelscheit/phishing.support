@@ -1,4 +1,5 @@
 import type { CDPSession, HTTPResponse, Page } from "rebrowser-puppeteer-core";
+import { raceTimeout } from "../util/async";
 
 /** One answer of a request chain: a redirect, or the final response. */
 export type ObservedHop = { url: string; status: number | null; headers: Record<string, string> };
@@ -81,13 +82,7 @@ export function observeSessionResponses(session: CDPSession, mainFrameId: string
 			redirects: [...request.redirects],
 			body: async () => {
 				// A load cut off by a detached session or a closed tab never reports its end.
-				let timer: ReturnType<typeof setTimeout> | undefined;
-				const cutOff = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("the response never finished loading")), BODY_TIMEOUT_MS); });
-				try {
-					await Promise.race([request.loaded.promise, cutOff]);
-				} finally {
-					clearTimeout(timer);
-				}
+				await raceTimeout(request.loaded.promise, BODY_TIMEOUT_MS, () => new Error("the response never finished loading"));
 				const { body, base64Encoded } = await session.send("Network.getResponseBody", { requestId: event.requestId });
 				return Buffer.from(body, base64Encoded ? "base64" : "utf8");
 			},
