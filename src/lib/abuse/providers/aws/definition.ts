@@ -1,0 +1,65 @@
+import { serviceIdentity } from "../../../constants";
+import { hashStableJson } from "../../security";
+import type { ProviderSubmissionDefinition } from "../submission_contracts";
+
+export type AwsProviderDefinition = ProviderSubmissionDefinition & {
+	/** The abuse form's API; the page at `formUrl` posts the same request unauthenticated. */
+	endpoint: string;
+	/** The `origin` the form's own requests carry. */
+	origin: string;
+	formUrl: string;
+	abuseSource: "aws-owned-resource";
+	abuseGroup: "web_content";
+	/** The form's "abuse type" per allegation. */
+	abuseTypes: { phishing: string; malware: string };
+	/** The form's URL field holds at most this many URLs, each of at most `urlMaximumLength` characters. */
+	maximumUrls: number;
+	urlMaximumLength: number;
+	commentsMaximumLength: number;
+	/** The report narrative's share of the comments; the rest holds the reference, case page and preservation request. */
+	narrativeMaximumLength: number;
+	trackingIdMaximumLength: number;
+	timeoutMs: number;
+	reporter: { firstName: string; lastName: string; email: string; phone: string; organization: string; description: string };
+};
+
+const [firstName = serviceIdentity.name, ...lastName] = serviceIdentity.name.split(" ");
+
+/**
+ * Code-owned contract for AWS's public abuse web form ("Report abuse" in the
+ * AWS Support Center). AWS answers mail to its abuse mailboxes with "please
+ * consider submitting future reports via our new web forms"; the form needs no
+ * login, captcha or cookies, so the route posts the same JSON it does.
+ */
+const definitionWithoutHash = {
+	key: "aws_trust_safety",
+	displayName: "AWS Trust & Safety",
+	version: "2026-11-20.1",
+	exactMailboxes: ["trustandsafety@support.aws.com", "abuse@amazonaws.com"],
+	supplemental: false,
+	endpoint: "https://api.support.aws.amazon.com/v1/contacts/report-abuse-v2",
+	origin: "https://support.aws.amazon.com",
+	formUrl: "https://support.aws.amazon.com/#/contacts/report-abuse",
+	abuseSource: "aws-owned-resource" as const,
+	abuseGroup: "web_content" as const,
+	abuseTypes: { phishing: "phishing", malware: "malware-website" },
+	maximumUrls: 10,
+	urlMaximumLength: 1_024,
+	commentsMaximumLength: 10_000,
+	narrativeMaximumLength: 3_000,
+	trackingIdMaximumLength: 50,
+	timeoutMs: 30_000,
+	reporter: {
+		firstName,
+		lastName: lastName.join(" "),
+		email: serviceIdentity.mailbox,
+		phone: "",
+		organization: serviceIdentity.name,
+		description: "independent-researcher",
+	},
+};
+
+export const AWS_PROVIDER: AwsProviderDefinition = Object.freeze({
+	...definitionWithoutHash,
+	contentHash: hashStableJson(definitionWithoutHash),
+});

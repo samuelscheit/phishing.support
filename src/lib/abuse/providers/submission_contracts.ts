@@ -134,6 +134,12 @@ export type ProviderInboundMail = {
 	/** Registrable domains of the authenticated notification senders. */
 	readonly senderDomains: readonly string[];
 	/**
+	 * What a matched message is: a machine "notification" (a receipt, the
+	 * default) or a human "reply" that the regular reply classifier reads,
+	 * because it can ask for more information.
+	 */
+	readonly messageKind?: "notification" | "reply";
+	/**
 	 * The provider receipt IDs a notification names. Absent when the
 	 * provider's API is the authoritative correspondence source, so its
 	 * mail is not attached to a case a second time.

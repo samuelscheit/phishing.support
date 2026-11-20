@@ -227,6 +227,27 @@ ABUSE_ALIBABA_CLOUD_LOGIN_EMAIL=<Alibaba Cloud international account email>
 ABUSE_ALIBABA_CLOUD_LOGIN_PASSWORD=<its password>
 ```
 
+## AWS abuse reports
+
+AWS answers mail to `trustandsafety@support.aws.com` (and `abuse@amazonaws.com`)
+with a pointer to its web form, so routes to them file the report through the
+form's API instead: one unauthenticated JSON `POST` to
+`api.support.aws.amazon.com/v1/contacts/report-abuse-v2` (no login, cookies or
+captcha; the signed-in console form sends the same request).
+
+- One `web_content_events` entry per observed URL (at most 10, each at most 1024
+  characters), timestamped at filing time to the minute; `phishing` or
+  `malware-website` as the abuse type. The form takes no files, so the comments
+  link the case page with the screenshots, and never contain `<` or `>`.
+- The reporter is the service identity. The `tracking_id` is
+  `PS-<case tag>-R<route id>`, also the run's receipt: AWS's case mail
+  ("Your AWS Abuse Report [P01M7…]", from `trustandsafety@support.aws.com`)
+  quotes the comments, so it names the route. That mail is a human reply that
+  can ask for more information, and goes through the regular reply classifier.
+- A 400, 413 or 422 means nothing was filed; any other failure after the
+  durable marker is ambiguous and is never retried. AWS has no API to look a
+  report up, so status arrives only by that mail.
+
 ## Reporting pipeline
 
 Every report goes through one durable reporting worker:
@@ -236,7 +257,7 @@ Every report goes through one durable reporting worker:
 - An **email** confirmed as phishing becomes a report with two targets: the message itself (filed with Netcraft's mail API) and the public IP of the first external `Received` hop, whose RDAP/WHOIS abuse contact receives the recipient-redacted `.eml`. Every linked page is analyzed as its own website submission.
 - The **public form** at `/abuse-reporting` reports domains or IPs directly and asks for the reporter's name and email. The `POST /api/abuse/reports` API it uses accepts `reporterName` and `reporterContactEmail` as optional fields; an integration that sends neither files the report as Phishing Support alone.
 
-The resolver turns each target into provider routes (registrar/hosting abuse mailboxes, Cloudflare, Alibaba Cloud, NameSilo, Tencent, Google Safe Browsing, Netcraft). Each route is submitted, retried, or settled independently; the submission page's Reports tab shows every route with its sent report and provider replies. A report counts as submitted when at least one provider confirmed it, so one unreachable provider never hides the others.
+The resolver turns each target into provider routes (registrar/hosting abuse mailboxes, Cloudflare, Alibaba Cloud, AWS, NameSilo, Tencent, Google Safe Browsing, Netcraft). Each route is submitted, retried, or settled independently; the submission page's Reports tab shows every route with its sent report and provider replies. A report counts as submitted when at least one provider confirmed it, so one unreachable provider never hides the others.
 
 Capture sessions explicitly request two external CDP connections: the capture's own client and the visiting agent. Every other Fabric session remains single-client. Network captures are capped at 2,000 requests, 256 KiB per value, and 10 MiB total.
 

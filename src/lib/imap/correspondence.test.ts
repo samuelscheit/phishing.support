@@ -535,6 +535,57 @@ describe("provider notifications", () => {
 		expect(await AbuseRepository.getRoute(netcraft.route.id)).toMatchObject({ status: "submitted" });
 	});
 
+	async function awsMail(uid: number, body: string, subject = "Your AWS Abuse Report [P01M7ZZZZZ]") {
+		return ingestFetchedMail({
+			uid,
+			source: eml([
+				...icloudReceived("aws.com"),
+				'From: "AWS Trust & Safety" <trustandsafety@support.aws.com>',
+				"To: support@phishing.support",
+				`Subject: ${subject}`,
+				`Message-ID: <aws-${uid}@support.aws.com>`,
+			], body),
+		}, config, { createIntakeSubmission: noIntake });
+	}
+
+	test("AWS's case mail naming our reference is a reply on that route, read by the reply classifier", async () => {
+		const sent = await sentReport("aws-target.example.com", "abuse@unused.example");
+		const [target] = await AbuseRepository.listTargets(sent.reportId);
+		const route = await AbuseRepository.upsertResolvedRoute(target!.id, {
+			routeKey: "provider:aws_trust_safety",
+			providerRegistryKey: "aws_trust_safety",
+			providerDisplayName: "AWS Trust & Safety",
+			routeType: "provider_submission",
+			resolverProvenance: { source: "test" },
+			resolutionSnapshot: { source: "test" },
+			status: "verified",
+		});
+		const reference = `${sent.tag}-R${route.id.toString()}`;
+		const run = await AbuseRepository.createProviderRun({ routeId: route.id, providerPayload: {}, correlationKey: `aws:${route.id.toString()}` });
+		await AbuseRepository.settleProviderRun({ runId: run.id, executionStatus: "completed", routeStatus: "submitted", confirmationId: reference, submittedTargets: ["aws-target.example.com"] });
+		// A second report's route must not receive it.
+		const unrelated = await sentReport("aws-other.example.com", "abuse@unused.example");
+
+		const result = await awsMail(601, `Hello,\r\nCase number: 179517163600449\r\nPlease send us the full URL.\r\n\r\nYour original report:\r\nReference: ${reference}`);
+		expect(result).toMatchObject({ route: "reply", reason: "stored_provider_reply" });
+		const mail = (await AbuseRepository.listMailForReport(sent.reportId)).filter((message) => message.routeId === route.id);
+		expect(mail).toMatchObject([{ kind: "reply", direction: "inbound", fromAddress: "trustandsafety@support.aws.com" }]);
+		expect(await inbound(unrelated.reportId)).toEqual([]);
+	});
+
+	test("AWS's mail for a report we mailed to it before its form existed still matches by case tag", async () => {
+		const sent = await sentReport("aws-old.example.com", "trustandsafety@support.aws.com");
+		const result = await awsMail(602, `Thank you for your report.\r\n\r\nYour original report:\r\n[${sent.tag}] Abuse report for aws-old.example.com`);
+		expect(result).toMatchObject({ route: "reply", reason: "stored_provider_reply" });
+		expect(await inbound(sent.reportId)).toMatchObject([{ kind: "reply", routeId: sent.route.id }]);
+	});
+
+	test("AWS's mail naming nothing of ours attaches to nothing", async () => {
+		const sent = await sentReport("aws-none.example.com", "trustandsafety@support.aws.com");
+		await awsMail(603, "Your original report:\r\nReference: PS-ffffffffffff-R99999");
+		expect(await inbound(sent.reportId)).toEqual([]);
+	});
+
 	test("Cloudflare's notification mail is left to its API correspondence", async () => {
 		const result = await ingestFetchedMail({
 			uid: 553,

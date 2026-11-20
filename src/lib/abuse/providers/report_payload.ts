@@ -99,7 +99,8 @@ export type ProviderReportProfile =
 	| "tencent"
 	| "eranet"
 	| "gname"
-	| "alibaba_cloud";
+	| "alibaba_cloud"
+	| "aws";
 
 type ProviderReportNarrativeInput = {
 	provider?: ProviderReportProfile;
@@ -241,6 +242,12 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 			return {
 				lead: `A suspected ${allegation} site using Alibaba Cloud services is being reported for ${target}.`,
 				action: "Please investigate the reported resource and suspend the service under the Alibaba Cloud acceptable use policy.",
+				urlContext,
+			};
+		case "aws":
+			return {
+				lead: `A suspected ${allegation} site using AWS resources is being reported for ${target}.`,
+				action: "Please investigate the reported AWS resource and suspend it under the AWS Acceptable Use Policy.",
 				urlContext,
 			};
 		default:

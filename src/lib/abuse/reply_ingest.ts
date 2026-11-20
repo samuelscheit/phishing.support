@@ -22,7 +22,8 @@ export type ProviderReplyMatch =
 
 /**
  * Mail from a direct provider's authenticated notification domain belongs to
- * the route whose receipt it names. A provider without receipt matching reads
+ * the route whose receipt it names; one that names none falls through to the
+ * regular reply matching. A provider without receipt matching reads
  * its correspondence from its API, so its mail is not attached again.
  */
 async function matchProviderNotification(sender: string, text: string): Promise<ProviderReplyMatch | undefined> {
@@ -35,7 +36,11 @@ async function matchProviderNotification(sender: string, text: string): Promise<
 		providerRegistryKeys: matchers.map((provider) => provider.definition.key),
 		confirmationIds: [...new Set(matchers.flatMap((provider) => provider.inboundMail!.confirmationIds!(text)))],
 	});
-	return route ? { kind: "reply", route, mailKind: "notification" } : { kind: "none" };
+	// A mail naming no receipt of ours (a reply to a report mailed before the
+	// provider had a form) is matched like any other reply.
+	if (!route) return undefined;
+	const messageKind = matchers.find((provider) => provider.definition.key === route.providerRegistryKey)?.inboundMail?.messageKind;
+	return { kind: "reply", route, mailKind: messageKind ?? "notification" };
 }
 
 /**

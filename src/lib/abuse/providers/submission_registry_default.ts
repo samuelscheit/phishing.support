@@ -1,5 +1,6 @@
 import type { AbuseTargetType } from "../schema";
 import { alibabaCloudProvider } from "./alibaba_cloud";
+import { awsProvider } from "./aws";
 import { cloudflareProvider } from "./cloudflare";
 import { discordDsaProvider } from "./discord_dsa";
 import { discordWebhookProvider } from "./discord_webhook";
@@ -22,6 +23,7 @@ const registry = createProviderSubmissionRegistry([
 	cloudflareProvider,
 	tencentProvider,
 	alibabaCloudProvider,
+	awsProvider,
 	nameSiloProvider,
 	eranetProvider,
 	gnameProvider,
