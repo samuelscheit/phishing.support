@@ -4,14 +4,14 @@ import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } fr
 import { buildCloudflareApiBody, cloudflareApiConfig, cloudflareReportsUrl, CloudflareSessionExpiredError, parseCloudflareApiResponse, submitCloudflareAbuseReport } from "./api";
 import type { CloudflareReportPayload } from "./report";
 import { retryDelayMs } from "../../worker";
-import { CloudflareLoginUnavailableError } from "./session";
+import { ProviderLoginUnavailableError } from "../login_session/session";
 import { findCloudflareSubmission, prepareCloudflareExternalSubmission, submitCloudflareSubmission } from "./submission";
 
 const ACCOUNT_ID = "b9077acfb4ef45e0f94b0f52c06c289a";
 const environment = { ABUSE_CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID, ABUSE_CLOUDFLARE_LOGIN_EMAIL: "operator@example.com", ABUSE_CLOUDFLARE_LOGIN_PASSWORD: "test-password" };
 const config = { accountId: ACCOUNT_ID, email: "operator@example.com", password: "test-password" };
-const session = { atok: "old-atok", vses2: "test-cookie", expiresAt: Date.now() + 86_400_000 };
-const fresh = { ...session, atok: "fresh-atok", vses2: "fresh-cookie" };
+const session = { id: "old-atok", atok: "old-atok", vses2: "test-cookie", expiresAt: Date.now() + 86_400_000 };
+const fresh = { ...session, id: "fresh-atok", atok: "fresh-atok", vses2: "fresh-cookie" };
 const report: CloudflareReportPayload = {
 	name: "Phishing Support", email: "support@phishing.support", company: "https://phishing.support/",
 	urls: "https://phishing.example/collect", justification: "The page harvests credentials.",
@@ -174,7 +174,7 @@ describe("Cloudflare provider preflight", () => {
 	});
 	test("a failed login is retryable before any POST and says when to try again", async () => {
 		// Nothing was sent, so the job retries once the login backoff ends instead of parking the route for a person.
-		const unavailable = new CloudflareLoginUnavailableError("Cloudflare dashboard login failed: Cloudflare's Turnstile challenge issued no token within 120 s.", 540_000);
+		const unavailable = new ProviderLoginUnavailableError("Cloudflare dashboard login failed: Cloudflare's Turnstile challenge issued no token within 120 s.", 540_000);
 		const err = await prepareCloudflareExternalSubmission({ routeId: 1n, payload }, { environment, getSession: async () => { throw unavailable; } }).catch((e: unknown) => e);
 		expect(err).toBe(unavailable);
 		expect(err).not.toBeInstanceOf(ProviderSubmissionNeedsHumanError);

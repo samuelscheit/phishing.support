@@ -1,67 +1,27 @@
-import { createHash, randomUUID } from "node:crypto";
 import type { BrowserContext, Page } from "patchright";
 
 import { acquireFabricPatchrightSession } from "../../../browser/fabric";
 import { errorSummary } from "../../../error_text";
-import { releaseLock, tryAcquireLock } from "../../persistence/locks";
-import { OperationCanceledError, raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
-import { sqliteCloudflareSessionStore, type CloudflareSession, type CloudflareSessionStore } from "./session-store";
+import { OperationCanceledError, raceAbort } from "../../worker/cancellation";
+import { boundedCleanup, createLoginSessions, ProviderLoginError, type LoginSessionOptions } from "../login_session/session";
 
-export type { CloudflareSession } from "./session-store";
+const PROVIDER = "Cloudflare dashboard";
+
+/** `id` is the x-atok token: it tells a refused session from its replacement. */
+export type CloudflareSession = { id: string; atok: string; vses2: string; expiresAt: number };
 
 export type CloudflareLoginConfig = { accountId: string; email: string; password: string };
 
 export const CLOUDFLARE_DASHBOARD_URL = "https://dash.cloudflare.com";
 export const CLOUDFLARE_LOGIN_TIMEOUT_MS = 120_000;
-/**
- * After a failed login nobody logs in again for this long; every caller in
- * that window gets the failure, with the time left to wait. Each real login
- * risks the account's lockout, and a login that just failed (a Turnstile
- * Cloudflare would not pass, a browser service at capacity) rarely passes
- * seconds later. A shorter window let waiting jobs replay one failure until
- * their retries were spent: 195 failed jobs in an hour on 2026-11-09.
- */
 export const CLOUDFLARE_LOGIN_FAILURE_TTL_MS = 10 * 60_000;
 /** Conservative lifetime when x-atok carries no parseable timestamp prefix. */
 export const CLOUDFLARE_DEFAULT_SESSION_TTL_MS = 5 * 60_000;
-/** Upper bound for releasing the page and browser lease after a login. */
-export const CLOUDFLARE_CLEANUP_TIMEOUT_MS = 10_000;
 const DASHBOARD_HOST = "dash.cloudflare.com";
 /** Treat a session as expired slightly early so a request never races expiry. */
 export const CLOUDFLARE_SESSION_SAFETY_MS = 60_000;
-const LOCK_LEASE_MS = CLOUDFLARE_LOGIN_TIMEOUT_MS + 30_000;
-const LOCK_POLL_MS = 1_000;
-const loginErrorMessage = "Cloudflare dashboard login failed.";
 
-/** A login that failed at a named step. The message never carries browser error text, which can echo typed values. */
-export class CloudflareLoginError extends Error {
-	constructor(readonly stage: string) {
-		super(`${loginErrorMessage.slice(0, -1)}: ${stage}.`);
-		this.name = "CloudflareLoginError";
-	}
-}
-
-/** No session for now: the last login failed, and the next may be tried in `retryAfterMs`. */
-export class CloudflareLoginUnavailableError extends Error {
-	constructor(message: string, readonly retryAfterMs: number) {
-		super(message);
-		this.name = "CloudflareLoginUnavailableError";
-	}
-}
-
-export type CloudflareSessionOptions = { signal?: AbortSignal; expiredSession?: CloudflareSession };
-
-export type CloudflareLoginFn = (config: CloudflareLoginConfig, signal: AbortSignal) => Promise<CloudflareSession>;
-
-export type CloudflareSessionDeps = {
-	store: CloudflareSessionStore;
-	login: CloudflareLoginFn;
-	tryAcquireLock: (key: string, owner: string, leaseMs: number) => Promise<boolean>;
-	releaseLock: (key: string, owner: string) => Promise<void>;
-	now: () => number;
-	sleep: (ms: number, signal: AbortSignal) => Promise<void>;
-	lockWaitMs: number;
-};
+export type CloudflareSessionOptions = LoginSessionOptions<CloudflareSession>;
 
 /**
  * Derive the expiry from the x-atok timestamp prefix (10-digit seconds or
@@ -78,7 +38,7 @@ export function parseAtokExpiry(atok: string): number | undefined {
 export function buildCloudflareSession(atok: string, vses2: string, now: number): CloudflareSession {
 	const parsed = parseAtokExpiry(atok);
 	if (parsed !== undefined && parsed - CLOUDFLARE_SESSION_SAFETY_MS <= now) throw new Error("Cloudflare issued an already expired session.");
-	return { atok, vses2, expiresAt: parsed ?? now + CLOUDFLARE_DEFAULT_SESSION_TTL_MS };
+	return { id: atok, atok, vses2, expiresAt: parsed ?? now + CLOUDFLARE_DEFAULT_SESSION_TTL_MS };
 }
 
 /** Remove the OneTrust dialog, which can sit above the login form and challenge frame. */
@@ -88,16 +48,6 @@ async function dismissConsentBanner(page: Page): Promise<void> {
 	}).catch(() => undefined);
 }
 
-/** Resolve after `ms` even if `operation` never settles; used to bound cleanup. */
-async function boundedCleanup(operation: Promise<unknown>, ms = CLOUDFLARE_CLEANUP_TIMEOUT_MS): Promise<void> {
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	await Promise.race([
-		operation.catch(() => undefined),
-		new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); }),
-	]);
-	clearTimeout(timer);
-}
-
 function isDashboardUrl(value: string): boolean {
 	try {
 		const url = new URL(value);
@@ -105,15 +55,6 @@ function isDashboardUrl(value: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-function isUsable(session: CloudflareSession | undefined, now: number): session is CloudflareSession {
-	return Boolean(session && session.atok && session.vses2 && session.expiresAt - CLOUDFLARE_SESSION_SAFETY_MS > now);
-}
-
-/** Cache and lock keys are hashed so neither the email nor password is persisted as a key. */
-export function cloudflareSessionKey(config: CloudflareLoginConfig): string {
-	return createHash("sha256").update(`${config.accountId}\0${config.email.toLowerCase()}`).digest("hex").slice(0, 32);
 }
 
 /** Drive the dashboard login form, then capture x-atok from dashboard requests and the vses2 cookie. */
@@ -180,7 +121,7 @@ export async function loginWithContext(
 		if (error instanceof OperationCanceledError && !timedOut) throw error;
 		// Browser errors can echo typed values or tokens; surface only the step,
 		// and the sign-in answer's status when Cloudflare refused it.
-		throw new CloudflareLoginError(loginStatus !== undefined && loginStatus >= 400
+		throw new ProviderLoginError(PROVIDER, loginStatus !== undefined && loginStatus >= 400
 			? `Cloudflare refused the sign-in (HTTP ${loginStatus})`
 			: `${stage}${timedOut ? ` within ${CLOUDFLARE_LOGIN_TIMEOUT_MS / 1000} s` : ""}`);
 	} finally {
@@ -188,14 +129,14 @@ export async function loginWithContext(
 	}
 }
 
-async function loginWithFabric(config: CloudflareLoginConfig, signal: AbortSignal): Promise<CloudflareSession> {
+export async function loginWithFabric(config: CloudflareLoginConfig, signal: AbortSignal): Promise<CloudflareSession> {
 	const launch = acquireFabricPatchrightSession({ operation: "cloudflare-dashboard-login" }, { egress: "reporting", leaseMode: "clone" });
 	const fabric = await raceAbort(launch, signal, () => {
 		void launch.then((late) => late.cancel().catch(() => undefined)).catch(() => undefined);
 	}, "Cloudflare dashboard login was canceled.").catch((error: unknown) => {
 		if (error instanceof OperationCanceledError) throw error;
 		// No credential has been typed yet; the browser service's own answer is safe to keep.
-		throw new CloudflareLoginError(`no browser was available (${errorSummary(error)})`);
+		throw new ProviderLoginError(PROVIDER, `no browser was available (${errorSummary(error)})`);
 	});
 	try {
 		return await loginWithContext(fabric.context, config, signal);
@@ -204,105 +145,24 @@ async function loginWithFabric(config: CloudflareLoginConfig, signal: AbortSigna
 	}
 }
 
-function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const canceled = () => new OperationCanceledError("Cloudflare session wait was canceled.");
-		if (signal.aborted) return reject(canceled());
-		const onAbort = () => { clearTimeout(timer); reject(canceled()); };
-		const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, ms);
-		signal.addEventListener("abort", onAbort, { once: true });
-	});
+function parseCloudflareSession(value: unknown): CloudflareSession | undefined {
+	const v = value as Partial<CloudflareSession> | null;
+	return v && typeof v.id === "string" && typeof v.atok === "string" && v.atok && typeof v.vses2 === "string" && v.vses2 && typeof v.expiresAt === "number"
+		? { id: v.id, atok: v.atok, vses2: v.vses2, expiresAt: v.expiresAt } : undefined;
 }
 
-const defaultDeps: CloudflareSessionDeps = {
-	store: sqliteCloudflareSessionStore,
+export const cloudflareLoginSessions = createLoginSessions<CloudflareLoginConfig, CloudflareSession>({
+	provider: PROVIDER,
+	namespace: "cloudflare-dashboard",
+	account: (config) => `${config.accountId}\0${config.email.toLowerCase()}`,
 	login: loginWithFabric,
-	tryAcquireLock,
-	releaseLock,
-	now: Date.now,
-	sleep: defaultSleep,
-	lockWaitMs: CLOUDFLARE_LOGIN_TIMEOUT_MS,
-};
+	parse: parseCloudflareSession,
+	loginTimeoutMs: CLOUDFLARE_LOGIN_TIMEOUT_MS,
+	failureTtlMs: CLOUDFLARE_LOGIN_FAILURE_TTL_MS,
+	safetyMs: CLOUDFLARE_SESSION_SAFETY_MS,
+});
 
-const inflight = new Map<string, Promise<CloudflareSession>>();
-
-/**
- * Return a valid dashboard session: cached when usable, otherwise one login
- * (single flight in-process and across processes via abuse_locks) persisted
- * for reuse. When `expiredSession` matches the cached token, the cache is
- * invalidated and exactly one relogin happens; if another caller already
- * refreshed it, that fresh session is returned instead.
- */
-export async function getCloudflareSession(
-	config: CloudflareLoginConfig,
-	options: CloudflareSessionOptions = {},
-	overrides: Partial<CloudflareSessionDeps> = {},
-): Promise<CloudflareSession> {
-	const deps = { ...defaultDeps, ...overrides };
-	const key = cloudflareSessionKey(config);
-	throwIfOperationCanceled(options.signal, "Cloudflare session request was canceled.");
-
-	const cached = await deps.store.read(key);
-	if (isUsable(cached.session, deps.now()) && cached.session.atok !== options.expiredSession?.atok) return cached.session;
-
-	// Callers share one flight but each keeps its own abort signal.
-	const flightKey = `${key}:${options.expiredSession?.atok ?? ""}`;
-	let flight = inflight.get(flightKey);
-	if (!flight) {
-		flight = refreshSession(config, key, options.expiredSession, deps).finally(() => inflight.delete(flightKey));
-		inflight.set(flightKey, flight);
-	}
-	return raceAbort(flight, options.signal, undefined, "Cloudflare session request was canceled.");
-}
-
-async function refreshSession(
-	config: CloudflareLoginConfig,
-	key: string,
-	expired: CloudflareSession | undefined,
-	deps: CloudflareSessionDeps,
-): Promise<CloudflareSession> {
-	const lockKey = `cloudflare-dashboard-login:${key}`;
-	const owner = `cloudflare-session:${process.pid}:${randomUUID()}`;
-	const waitDeadline = deps.now() + deps.lockWaitMs;
-	const waitSignal = AbortSignal.timeout(deps.lockWaitMs);
-
-	/** Fresh session or recent failure written by another process, if any. */
-	const settled = async (): Promise<CloudflareSession | undefined> => {
-		const record = await deps.store.read(key);
-		if (isUsable(record.session, deps.now()) && record.session.atok !== expired?.atok) return record.session;
-		if (record.failure && record.failure.until > deps.now()) throw new CloudflareLoginUnavailableError(record.failure.message, record.failure.until - deps.now());
-		return undefined;
-	};
-
-	for (;;) {
-		const existing = await settled();
-		if (existing) return existing;
-		if (await deps.tryAcquireLock(lockKey, owner, LOCK_LEASE_MS)) break;
-		if (deps.now() >= waitDeadline) throw new Error("Timed out waiting for another Cloudflare dashboard login.");
-		await deps.sleep(LOCK_POLL_MS, waitSignal).catch((error) => {
-			if (waitSignal.aborted) return;
-			throw error;
-		});
-	}
-
-	try {
-		const existing = await settled();
-		if (existing) return existing;
-		await deps.store.clear(key);
-		try {
-			const session = await deps.login(config, AbortSignal.timeout(CLOUDFLARE_LOGIN_TIMEOUT_MS));
-			await deps.store.writeSession(key, session);
-			return session;
-		} catch (error) {
-			// The login signal only fires on the 120s bound, so a cancel here is a timeout failure.
-			const message = error instanceof CloudflareLoginError ? error.message
-				: error instanceof OperationCanceledError ? new CloudflareLoginError(`the login did not finish within ${CLOUDFLARE_LOGIN_TIMEOUT_MS / 1000} s`).message
-					: loginErrorMessage;
-			const failure = { message, until: deps.now() + CLOUDFLARE_LOGIN_FAILURE_TTL_MS };
-			await deps.store.writeFailure(key, failure).catch(() => undefined);
-			throw new CloudflareLoginUnavailableError(failure.message, CLOUDFLARE_LOGIN_FAILURE_TTL_MS);
-		}
-	} finally {
-		await deps.releaseLock(lockKey, owner).catch(() => undefined);
-	}
+/** A valid dashboard session; see `LoginSessions.get`. */
+export function getCloudflareSession(config: CloudflareLoginConfig, options: CloudflareSessionOptions = {}): Promise<CloudflareSession> {
+	return cloudflareLoginSessions.get(config, options);
 }

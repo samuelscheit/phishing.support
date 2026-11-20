@@ -32,7 +32,9 @@ export type MailedCodeReader = (requestedAt: Date, signal?: AbortSignal) => Prom
 const POLL_MS = 5_000;
 
 function senderMatches(spec: MailedCodeSpec, from: string): boolean {
-	const domain = from.slice(from.lastIndexOf("@") + 1).toLowerCase();
+	const separator = from.lastIndexOf("@");
+	if (separator < 0) return false;
+	const domain = from.slice(separator + 1).toLowerCase();
 	return spec.senderDomains.some((sender) => domain === sender || domain.endsWith(`.${sender}`));
 }
 
@@ -46,8 +48,11 @@ export function mailedCodeFrom(spec: MailedCodeSpec, mail: { from: string; subje
 
 /**
  * Wait for the code the provider mails after `requestedAt`. The mailbox is
- * opened read-only and searched by sender and time, so the IMAP listener's
- * own bookkeeping is untouched; the newest matching code wins.
+ * opened read-only and searched by time only, so the IMAP listener's own
+ * bookkeeping is untouched; the newest matching code wins. The sender is
+ * matched here, from the envelope: iCloud's IMAP FROM search matches only a
+ * sender's full host, so a code from a subdomain (Alibaba Cloud's
+ * system-sg@notice.alibabacloud.com) was never found by a search for its domain.
  */
 export function mailedCodeReader(spec: MailedCodeSpec): MailedCodeReader {
 	return async (requestedAt, signal) => {
@@ -63,14 +68,17 @@ export function mailedCodeReader(spec: MailedCodeSpec): MailedCodeReader {
 				for (const mailbox of [...config.mailboxes, ...config.sharedMailboxes]) {
 					const lock = await client.getMailboxLock(mailbox, { readOnly: true });
 					try {
-						const since = new Date(requestedAt.getTime() - 60_000);
-						const uids = await client.search(spec.senderDomains.length === 1
-							? { from: spec.senderDomains[0], since }
-							: { since, or: spec.senderDomains.map((domain) => ({ from: domain })) }, { uid: true });
-						let newest: { at: number; code: string } | undefined;
-						for await (const message of client.fetch(uids || [], { envelope: true, source: true }, { uid: true })) {
+						const uids = await client.search({ since: new Date(requestedAt.getTime() - 60_000) }, { uid: true });
+						const candidates: number[] = [];
+						if (uids && uids.length > 0) for await (const message of client.fetch(uids, { envelope: true }, { uid: true })) {
 							const at = message.envelope?.date ? new Date(message.envelope.date).getTime() : 0;
-							if (at < requestedAt.getTime() - 5_000 || at > requestedAt.getTime() + spec.maxAgeMs || !message.source) continue;
+							if (at < requestedAt.getTime() - 5_000 || at > requestedAt.getTime() + spec.maxAgeMs) continue;
+							if (senderMatches(spec, message.envelope?.from?.[0]?.address ?? "")) candidates.push(message.uid);
+						}
+						let newest: { at: number; code: string } | undefined;
+						if (candidates.length > 0) for await (const message of client.fetch(candidates, { envelope: true, source: true }, { uid: true })) {
+							const at = message.envelope?.date ? new Date(message.envelope.date).getTime() : 0;
+							if (!message.source) continue;
 							const parsed = await simpleParser(message.source);
 							const code = mailedCodeFrom(spec, {
 								from: message.envelope?.from?.[0]?.address ?? "",

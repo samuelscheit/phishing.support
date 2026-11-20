@@ -98,7 +98,8 @@ export type ProviderReportProfile =
 	| "namesilo"
 	| "tencent"
 	| "eranet"
-	| "gname";
+	| "gname"
+	| "alibaba_cloud";
 
 type ProviderReportNarrativeInput = {
 	provider?: ProviderReportProfile;
@@ -234,6 +235,12 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 			return {
 				lead: `A suspected ${allegation === "phishing" ? "phishing or fraud" : allegation} domain report is being submitted to GNAME for ${target}.`,
 				action: "Please investigate the captured evidence and suspend the domain under your registrar abuse policy.",
+				urlContext,
+			};
+		case "alibaba_cloud":
+			return {
+				lead: `A suspected ${allegation} site using Alibaba Cloud services is being reported for ${target}.`,
+				action: "Please investigate the reported resource and suspend the service under the Alibaba Cloud acceptable use policy.",
 				urlContext,
 			};
 		default:

@@ -10,14 +10,14 @@ import { ensureCorrespondencePolls, pollProviderCorrespondence } from "../../wor
 import { parseCloudflareOriginDisclosure } from "../../origin/disclosure";
 import { nextCorrespondencePollDelayMs } from "../submission_execution";
 import { cloudflareApiConfig, unescapeCloudflareText } from "./api";
-import { cloudflareSessionKey } from "./session";
-import { sqliteCloudflareSessionStore } from "./session-store";
+import { cloudflareLoginSessions } from "./session";
+import { sqliteLoginSessionStore } from "../login_session/store";
 import { fetchCloudflareCorrespondence } from "./submission";
 
 const ACCOUNT_ID = "b9077acfb4ef45e0f94b0f52c06c289a";
 const environment = { ABUSE_CLOUDFLARE_ACCOUNT_ID: ACCOUNT_ID, ABUSE_CLOUDFLARE_LOGIN_EMAIL: "operator@example.com", ABUSE_CLOUDFLARE_LOGIN_PASSWORD: "test-password" };
-const session = { atok: "old-atok", vses2: "cookie", expiresAt: Date.now() + 86_400_000 };
-const fresh = { ...session, atok: "fresh-atok" };
+const session = { id: "old-atok", atok: "old-atok", vses2: "cookie", expiresAt: Date.now() + 86_400_000 };
+const fresh = { ...session, id: "fresh-atok", atok: "fresh-atok" };
 const base = `https://dash.cloudflare.com/api/v4/accounts/${ACCOUNT_ID}/abuse-reports/submitted/ddfb9a8d1137a9e7`;
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
@@ -112,7 +112,7 @@ describe("Cloudflare correspondence polling", () => {
 
 	test("a denied review queues exactly one decision follow-up, however often it is polled", async () => {
 		Object.assign(process.env, environment);
-		await sqliteCloudflareSessionStore.writeSession(cloudflareSessionKey(cloudflareApiConfig(environment)), session);
+		await sqliteLoginSessionStore.writeSession(cloudflareLoginSessions.key(cloudflareApiConfig(environment)), session, session.expiresAt);
 		const denied = { ...detail, result: { ...detail.result, status: "denied", denial_reason: "no_abuse_found" } };
 		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? emailsPage : denied)) as typeof fetch;
 		const { route } = await submittedCloudflareRoute();
@@ -129,7 +129,7 @@ describe("Cloudflare correspondence polling", () => {
 
 	test("records Cloudflare's emails and status once, then schedules the next hourly read", async () => {
 		Object.assign(process.env, environment);
-		await sqliteCloudflareSessionStore.writeSession(cloudflareSessionKey(cloudflareApiConfig(environment)), session);
+		await sqliteLoginSessionStore.writeSession(cloudflareLoginSessions.key(cloudflareApiConfig(environment)), session, session.expiresAt);
 		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? emailsPage : detail)) as typeof fetch;
 		const { reportId, route } = await submittedCloudflareRoute();
 		await ensureCorrespondencePolls();
@@ -156,7 +156,7 @@ describe("Cloudflare correspondence polling", () => {
 		// Cloudflare routes only the first to be accepted, denied or submitted got one, and
 		// Eranet's "process completed" for keychainagent.pro was dropped the same way.
 		Object.assign(process.env, environment);
-		await sqliteCloudflareSessionStore.writeSession(cloudflareSessionKey(cloudflareApiConfig(environment)), session);
+		await sqliteLoginSessionStore.writeSession(cloudflareLoginSessions.key(cloudflareApiConfig(environment)), session, session.expiresAt);
 		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? emailsPage : detail)) as typeof fetch;
 		const first = await submittedCloudflareRoute();
 		const second = await submittedCloudflareRoute();
@@ -171,7 +171,7 @@ describe("Cloudflare correspondence polling", () => {
 
 	test("every change of review state is recorded, a return to an earlier one too, and the latest is the verdict", async () => {
 		Object.assign(process.env, environment);
-		await sqliteCloudflareSessionStore.writeSession(cloudflareSessionKey(cloudflareApiConfig(environment)), session);
+		await sqliteLoginSessionStore.writeSession(cloudflareLoginSessions.key(cloudflareApiConfig(environment)), session, session.expiresAt);
 		let state = "accepted";
 		globalThis.fetch = (async (url: string) => json(String(url).includes("/emails") ? { result: { emails: [] }, success: true } : { ...detail, result: { ...detail.result, status: state } })) as typeof fetch;
 		const { reportId, route } = await submittedCloudflareRoute();
@@ -228,7 +228,7 @@ describe("Cloudflare correspondence polling", () => {
 
 	test("immediately queues one origin-host follow-up for a newly recorded disclosure", async () => {
 		Object.assign(process.env, environment);
-		await sqliteCloudflareSessionStore.writeSession(cloudflareSessionKey(cloudflareApiConfig(environment)), session);
+		await sqliteLoginSessionStore.writeSession(cloudflareLoginSessions.key(cloudflareApiConfig(environment)), session, session.expiresAt);
 		const hostPage = {
 			...emailsPage,
 			result: {

@@ -193,6 +193,40 @@ hash through the normal durable email route. Sibling domains found by the
 all-case search are included in that host report only after the swept origin
 also presents their certificate.
 
+Account logins of providers (Cloudflare's dashboard, Alibaba Cloud's Reporting
+Center) share one session machine (`src/lib/abuse/providers/login_session`):
+sessions are stored in `provider_login_sessions`, one login runs at a time
+across processes, and a failed login is not retried for a while so the account
+is never locked out.
+
+## Alibaba Cloud abuse reports
+
+Alibaba Cloud's abuse mailboxes (`domainabuse@service.aliyun.com`,
+`infosec@service.aliyun.com`, and `abuse@alibaba-inc.com` from its IP space's
+RDAP records) are its fallback for reporters who cannot log in. Routes to them
+file the report in the Reporting Center (`report.alibabacloud.com`, "Illegal
+Information Reporting") instead of mailing it. Every form there needs a logged-in
+Alibaba Cloud account, so:
+
+- Patchright logs in through Fabric's reporting egress. From a browser Alibaba
+  does not know, it mails a code to the account address, which is the service
+  mailbox; the login reads it over IMAP (`IMAP_*` must be configured).
+- The console's cookie jar and CSRF token (`SEC_TOKEN`) are stored as a login
+  session. Alibaba issues them as browser-session cookies, so a persistent
+  browser profile would lose them on every browser restart; the stored jar is
+  reused until the console answers `ConsoleNeedLogin`, which logs in once more.
+- The report itself is plain HTTP against the console API (`/data/api.json`,
+  product `abusereport`): the screenshot goes to Alibaba's OSS through
+  `UploadFileByName` before the durable submission marker, then
+  `GetCrossRegionExist` and `SubmitReportTask`. The task ID from
+  `ReportTaskList` is the receipt, and `GetReportStatus` is polled as the
+  report's correspondence.
+
+```text
+ABUSE_ALIBABA_CLOUD_LOGIN_EMAIL=<Alibaba Cloud international account email>
+ABUSE_ALIBABA_CLOUD_LOGIN_PASSWORD=<its password>
+```
+
 ## Reporting pipeline
 
 Every report goes through one durable reporting worker:
@@ -202,7 +236,7 @@ Every report goes through one durable reporting worker:
 - An **email** confirmed as phishing becomes a report with two targets: the message itself (filed with Netcraft's mail API) and the public IP of the first external `Received` hop, whose RDAP/WHOIS abuse contact receives the recipient-redacted `.eml`. Every linked page is analyzed as its own website submission.
 - The **public form** at `/abuse-reporting` reports domains or IPs directly and asks for the reporter's name and email. The `POST /api/abuse/reports` API it uses accepts `reporterName` and `reporterContactEmail` as optional fields; an integration that sends neither files the report as Phishing Support alone.
 
-The resolver turns each target into provider routes (registrar/hosting abuse mailboxes, Cloudflare, NameSilo, Tencent, Google Safe Browsing, Netcraft). Each route is submitted, retried, or settled independently; the submission page's Reports tab shows every route with its sent report and provider replies. A report counts as submitted when at least one provider confirmed it, so one unreachable provider never hides the others.
+The resolver turns each target into provider routes (registrar/hosting abuse mailboxes, Cloudflare, Alibaba Cloud, NameSilo, Tencent, Google Safe Browsing, Netcraft). Each route is submitted, retried, or settled independently; the submission page's Reports tab shows every route with its sent report and provider replies. A report counts as submitted when at least one provider confirmed it, so one unreachable provider never hides the others.
 
 Capture sessions explicitly request two external CDP connections: the capture's own client and the visiting agent. Every other Fabric session remains single-client. Network captures are capped at 2,000 requests, 256 KiB per value, and 10 MiB total.
 

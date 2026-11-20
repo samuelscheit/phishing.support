@@ -3,49 +3,16 @@ import { describe, expect, test } from "bun:test";
 import {
 	buildCloudflareSession,
 	CLOUDFLARE_DEFAULT_SESSION_TTL_MS,
-	CLOUDFLARE_LOGIN_FAILURE_TTL_MS,
 	CLOUDFLARE_LOGIN_TIMEOUT_MS,
 	CLOUDFLARE_SESSION_SAFETY_MS,
-	CloudflareLoginError,
-	CloudflareLoginUnavailableError,
-	cloudflareSessionKey,
-	getCloudflareSession,
 	loginWithContext,
 	parseAtokExpiry,
 	type CloudflareLoginConfig,
-	type CloudflareSession,
-	type CloudflareSessionDeps,
 } from "./session";
-import { createMemoryCloudflareSessionStore } from "./session-store";
+import { ProviderLoginError } from "../login_session/session";
 
 const config: CloudflareLoginConfig = { accountId: "acct", email: "Me@Example.test", password: "hunter2-secret" };
-const key = cloudflareSessionKey(config);
 const T0 = 1_800_000_000_000;
-
-function session(atok: string, expiresAt = T0 + 3_600_000): CloudflareSession {
-	return { atok, vses2: `vses-${atok}`, expiresAt };
-}
-
-function harness(overrides: Partial<CloudflareSessionDeps> = {}) {
-	const store = createMemoryCloudflareSessionStore();
-	const locks = new Map<string, string>();
-	const state = { time: T0, logins: 0 };
-	const deps: Partial<CloudflareSessionDeps> = {
-		store,
-		now: () => state.time,
-		sleep: async (ms) => { state.time += ms; },
-		tryAcquireLock: async (lockKey, owner) => {
-			if (locks.has(lockKey)) return false;
-			locks.set(lockKey, owner);
-			return true;
-		},
-		releaseLock: async (lockKey, owner) => { if (locks.get(lockKey) === owner) locks.delete(lockKey); },
-		lockWaitMs: 5_000,
-		login: async () => { state.logins += 1; return session(`new${state.logins}`); },
-		...overrides,
-	};
-	return { store, locks, state, deps };
-}
 
 describe("parseAtokExpiry", () => {
 	test("reads second and millisecond timestamp prefixes", () => {
@@ -69,150 +36,6 @@ describe("buildCloudflareSession", () => {
 	});
 	test("falls back to a conservative TTL for an unparseable prefix", () => {
 		expect(buildCloudflareSession("opaque-token", "v", T0).expiresAt).toBe(T0 + CLOUDFLARE_DEFAULT_SESSION_TTL_MS);
-	});
-});
-
-describe("getCloudflareSession", () => {
-	test("logs in once, persists, and serves later calls from cache", async () => {
-		const h = harness();
-		const first = await getCloudflareSession(config, {}, h.deps);
-		const second = await getCloudflareSession(config, {}, h.deps);
-		expect(second).toEqual(first);
-		expect(h.state.logins).toBe(1);
-		expect(h.store.records.get(key)?.session).toEqual(first);
-		expect(h.locks.size).toBe(0);
-	});
-
-	test("never uses credentials in the persisted key", () => {
-		expect(key).not.toContain("hunter2");
-		expect(key).not.toContain("example");
-	});
-
-	test("concurrent callers share a single login", async () => {
-		const h = harness({ login: async () => { h.state.logins += 1; await Promise.resolve(); return session("shared"); } });
-		const results = await Promise.all([1, 2, 3, 4].map(() => getCloudflareSession(config, {}, h.deps)));
-		expect(h.state.logins).toBe(1);
-		for (const r of results) expect(r.atok).toBe("shared");
-	});
-
-	test("treats a session inside the safety window as expired", async () => {
-		const h = harness();
-		h.store.records.set(key, { session: session("old", T0 + CLOUDFLARE_SESSION_SAFETY_MS - 1) });
-		const result = await getCloudflareSession(config, {}, h.deps);
-		expect(result.atok).toBe("new1");
-	});
-
-	test("expiredSession matching the cache invalidates and relogs in exactly once", async () => {
-		const h = harness();
-		const old = session("old");
-		h.store.records.set(key, { session: old });
-		const results = await Promise.all([
-			getCloudflareSession(config, { expiredSession: old }, h.deps),
-			getCloudflareSession(config, { expiredSession: old }, h.deps),
-		]);
-		expect(h.state.logins).toBe(1);
-		expect(results.map((r) => r.atok)).toEqual(["new1", "new1"]);
-		expect(h.store.records.get(key)?.session?.atok).toBe("new1");
-	});
-
-	test("expiredSession already replaced by another caller returns the fresh session without login", async () => {
-		const h = harness();
-		h.store.records.set(key, { session: session("fresh") });
-		const result = await getCloudflareSession(config, { expiredSession: session("old") }, h.deps);
-		expect(result.atok).toBe("fresh");
-		expect(h.state.logins).toBe(0);
-	});
-
-	test("waits for another process holding the lock and uses its result", async () => {
-		const h = harness();
-		h.locks.set(`cloudflare-dashboard-login:${key}`, "other");
-		const base = h.deps.sleep!;
-		let slept = 0;
-		h.deps.sleep = async (ms, signal) => {
-			await base(ms, signal);
-			slept += 1;
-			if (slept === 2) h.store.records.set(key, { session: session("from-other") });
-		};
-		const result = await getCloudflareSession(config, {}, h.deps);
-		expect(result.atok).toBe("from-other");
-		expect(h.state.logins).toBe(0);
-		expect(h.locks.get(`cloudflare-dashboard-login:${key}`)).toBe("other");
-	});
-
-	test("times out while waiting for a lock that never frees", async () => {
-		const h = harness();
-		h.locks.set(`cloudflare-dashboard-login:${key}`, "other");
-		await expect(getCloudflareSession(config, {}, h.deps)).rejects.toThrow("Timed out waiting");
-		expect(h.state.logins).toBe(0);
-	});
-
-	test("records a generic failure for the backoff window, says how long to wait, and does not stampede", async () => {
-		const h = harness({ login: async () => { h.state.logins += 1; throw new Error("boom token=SECRET-ATOK hunter2-secret"); } });
-		const err = await getCloudflareSession(config, {}, h.deps).catch((e: Error) => e);
-		expect(err).toBeInstanceOf(CloudflareLoginUnavailableError);
-		expect((err as Error).message).toBe("Cloudflare dashboard login failed.");
-		expect((err as CloudflareLoginUnavailableError).retryAfterMs).toBe(CLOUDFLARE_LOGIN_FAILURE_TTL_MS);
-		expect(JSON.stringify(h.store.records.get(key))).not.toContain("SECRET");
-		expect(h.locks.size).toBe(0);
-
-		// Callers inside the window get the failure and the time left, without a login.
-		h.state.time += 4 * 60_000;
-		const replayed = await getCloudflareSession(config, {}, h.deps).catch((e: CloudflareLoginUnavailableError) => e);
-		expect(replayed.retryAfterMs).toBe(CLOUDFLARE_LOGIN_FAILURE_TTL_MS - 4 * 60_000);
-		expect(h.state.logins).toBe(1);
-
-		h.state.time += CLOUDFLARE_LOGIN_FAILURE_TTL_MS;
-		await expect(getCloudflareSession(config, {}, h.deps)).rejects.toThrow("login failed");
-		expect(h.state.logins).toBe(2);
-	});
-
-	test("keeps the failed step for everyone the failure is replayed to", async () => {
-		const h = harness({ login: async () => { h.state.logins += 1; throw new CloudflareLoginError("Cloudflare's Turnstile challenge issued no token within 120 s"); } });
-		const message = "Cloudflare dashboard login failed: Cloudflare's Turnstile challenge issued no token within 120 s.";
-		await expect(getCloudflareSession(config, {}, h.deps)).rejects.toThrow(message);
-		expect(h.store.records.get(key)?.failure?.message).toBe(message);
-		await expect(getCloudflareSession(config, {}, h.deps)).rejects.toThrow(message);
-		expect(h.state.logins).toBe(1);
-	});
-
-	test("waits ten minutes after a failed login: at most six real logins an hour", () => {
-		expect(CLOUDFLARE_LOGIN_FAILURE_TTL_MS).toBe(10 * 60_000);
-	});
-
-	test("a successful login clears a prior failure", async () => {
-		const h = harness();
-		h.store.records.set(key, { failure: { message: "Cloudflare dashboard login failed.", until: T0 - 1 } });
-		await getCloudflareSession(config, {}, h.deps);
-		expect(h.store.records.get(key)?.failure).toBeUndefined();
-	});
-
-	test("an already-aborted signal rejects before any work", async () => {
-		const h = harness();
-		const controller = new AbortController();
-		controller.abort();
-		await expect(getCloudflareSession(config, { signal: controller.signal }, h.deps)).rejects.toThrow();
-		expect(h.state.logins).toBe(0);
-	});
-
-	test("aborting one caller does not cancel the shared login for others", async () => {
-		let release!: () => void;
-		const gate = new Promise<void>((resolve) => { release = resolve; });
-		const h = harness({ login: async () => { h.state.logins += 1; await gate; return session("slow"); } });
-		const controller = new AbortController();
-		const aborted = getCloudflareSession(config, { signal: controller.signal }, h.deps);
-		const other = getCloudflareSession(config, {}, h.deps);
-		await new Promise((r) => setTimeout(r, 5));
-		controller.abort();
-		await expect(aborted).rejects.toThrow();
-		release();
-		expect((await other).atok).toBe("slow");
-		expect(h.state.logins).toBe(1);
-	});
-
-	test("releases the lock when login throws", async () => {
-		const h = harness({ login: async () => { throw new Error("x"); } });
-		await getCloudflareSession(config, {}, h.deps).catch(() => undefined);
-		expect(h.locks.size).toBe(0);
 	});
 });
 
@@ -271,7 +94,7 @@ describe("loginWithContext", () => {
 	test("follows the login flow in order and captures atok + vses2", async () => {
 		const f = fakeContext({ atok: "1800003600-token", vses2: "cookie-value" });
 		const result = await loginWithContext(f.context, config, new AbortController().signal, () => T0);
-		expect(result).toEqual({ atok: "1800003600-token", vses2: "cookie-value", expiresAt: 1_800_003_600_000 });
+		expect(result).toEqual({ id: "1800003600-token", atok: "1800003600-token", vses2: "cookie-value", expiresAt: 1_800_003_600_000 });
 		const names = f.calls.map((c) => c[0]);
 		expect(names.indexOf("goto")).toBeLessThan(names.indexOf("fill"));
 		expect(names.indexOf("waitForFunction")).toBeLessThan(names.indexOf("click"));
@@ -320,7 +143,7 @@ describe("loginWithContext", () => {
 		const f = fakeContext({ vses2: "v" });
 		let time = T0;
 		const err = await loginWithContext(f.context, config, new AbortController().signal, () => (time += 40_000)).catch((e: Error) => e);
-		expect(err).toBeInstanceOf(CloudflareLoginError);
+		expect(err).toBeInstanceOf(ProviderLoginError);
 		expect((err as Error).message).toBe("Cloudflare dashboard login failed: the dashboard issued no session token.");
 		expect(f.isClosed()).toBe(true);
 	});
@@ -344,7 +167,7 @@ describe("loginWithContext", () => {
 		const controller = new AbortController();
 		setTimeout(() => controller.abort(new DOMException("The operation timed out.", "TimeoutError")), 5);
 		const err = await loginWithContext(f.context, config, controller.signal, () => T0).catch((e: Error) => e);
-		expect(err).toBeInstanceOf(CloudflareLoginError);
+		expect(err).toBeInstanceOf(ProviderLoginError);
 		expect((err as Error).message).toBe(`Cloudflare dashboard login failed: Cloudflare's Turnstile challenge issued no token within ${CLOUDFLARE_LOGIN_TIMEOUT_MS / 1000} s.`);
 		expect(f.isClosed()).toBe(true);
 	});
