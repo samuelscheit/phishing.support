@@ -1,4 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+
+import type { ImapConfig } from "../../../mail/config";
 
 import { ALIBABA_CLOUD_PROVIDER } from "../alibaba_cloud/definition";
 import { mailedCodeFrom, mailedCodeReader, type MailedCodeIo, type MailedCodeSpec } from "./mailed_code";
@@ -52,21 +54,14 @@ class FakeImapFlow {
 	}
 }
 
-const environment = { IMAP_HOST: "imap.test", IMAP_USER: "u", IMAP_PASS: "p", IMAP_MAILBOXES: "INBOX", IMAP_SHARED_MAILBOXES: "Shared", IMAP_LISTEN_ADDRESS: "inbox@replies.example.com", REPLY_DOMAIN: "replies.example.com" };
-const saved: Record<string, string | undefined> = {};
+const mailbox: ImapConfig = { host: "imap.test", port: 993, secure: true, user: "u", pass: "p", mailboxes: ["INBOX"], sharedMailboxes: ["Shared"], intakeAddress: "inbox@replies.example.com" };
 
-/** The fake mailbox and a short, counted pause; injected, so nothing leaks into other test files. */
+/** The mailbox settings, the fake mailbox and a short, counted pause; injected, so nothing leaks in or out. */
 const io: MailedCodeIo = {
+	config: () => mailbox,
 	imap: (options) => new FakeImapFlow(options) as never,
 	sleep: async () => { server.sleeps += 1; server.onSleep?.(server.sleeps); await new Promise((resolve) => setTimeout(resolve, 5)); },
 };
-
-beforeAll(() => {
-	for (const [name, value] of Object.entries(environment)) { saved[name] = process.env[name]; process.env[name] = value; }
-});
-afterAll(() => {
-	for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
-});
 beforeEach(() => {
 	server.folders = {};
 	server.searches = [];
@@ -200,14 +195,8 @@ describe("mailedCodeReader against the mailbox", () => {
 	});
 
 	test("without an IMAP mailbox configured it fails before connecting", async () => {
-		const host = process.env.IMAP_HOST;
-		delete process.env.IMAP_HOST;
-		try {
-			await expect(mailedCodeReader(spec, io)(requestedAt)).rejects.toThrow("requires the IMAP mailbox");
-			expect(server.connected).toBe(0);
-		} finally {
-			process.env.IMAP_HOST = host;
-		}
+		await expect(mailedCodeReader(spec, { ...io, config: () => undefined })(requestedAt)).rejects.toThrow("requires the IMAP mailbox");
+		expect(server.connected).toBe(0);
 	});
 
 	test("after the first poll each mailbox is searched for newer UIDs only, and a code arriving later is picked up", async () => {

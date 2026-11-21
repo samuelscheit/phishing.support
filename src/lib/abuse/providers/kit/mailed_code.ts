@@ -1,7 +1,7 @@
 import { ImapFlow, type ImapFlowOptions } from "imapflow";
 import { simpleParser } from "mailparser";
 
-import { imapConfig } from "../../../mail/config";
+import { imapConfig, type ImapConfig } from "../../../mail/config";
 import { sleep as realSleep, type Sleep } from "../../../util/sleep";
 
 /**
@@ -46,8 +46,13 @@ export function mailedCodeFrom(spec: MailedCodeSpec, mail: { from: string; subje
 	return new RegExp(spec.codePattern, "i").exec(text)?.[1];
 }
 
-/** The mailbox connection and the pause between polls; tests pass fakes instead of mocking modules. */
+/**
+ * The mailbox settings, the connection and the pause between polls; tests pass fakes instead of
+ * mocking modules or changing the process environment, which work another test file left running
+ * can change under them.
+ */
 export type MailedCodeIo = {
+	config?: () => ImapConfig | undefined;
 	imap?: (options: ImapFlowOptions) => Pick<ImapFlow, "connect" | "getMailboxLock" | "search" | "fetch" | "logout">;
 	sleep?: Sleep;
 };
@@ -63,8 +68,9 @@ export type MailedCodeIo = {
 export function mailedCodeReader(spec: MailedCodeSpec, io: MailedCodeIo = {}): MailedCodeReader {
 	const openImap = io.imap ?? ((options) => new ImapFlow(options));
 	const sleep = io.sleep ?? realSleep;
+	const mailbox = io.config ?? imapConfig;
 	return async (requestedAt, signal) => {
-		const config = imapConfig();
+		const config = mailbox();
 		if (!config) throw new Error(`${spec.provider} reporting requires the IMAP mailbox to receive its verification code.`);
 		const deadline = Date.now() + spec.waitMs;
 		const client = openImap({ host: config.host, port: config.port, secure: config.secure, auth: { user: config.user, pass: config.pass }, logger: false, disableAutoIdle: true });
