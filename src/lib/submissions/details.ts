@@ -3,6 +3,7 @@ import { AnalysisRunsEntity } from "@/lib/db/entities/analysis_runs";
 import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import type { AnalysisRun, Artifact, Submission } from "@/lib/db/schema";
+import { withoutBackendSecrets } from "@/lib/exfiltration/secrets";
 import { getReportsForSubmission, type SubmissionReport } from "./abuse_details";
 
 export type { SubmissionReport, SubmissionReportArtifact, SubmissionReportMessage, SubmissionReportRoute } from "./abuse_details";
@@ -24,6 +25,7 @@ async function campaignOf(submissionId: bigint): Promise<SubmissionDetail["campa
 	return { id: campaignId.toString(), siteCount: await CampaignRepository.memberCount(campaignId) };
 }
 
+/** A case as its public page and API show it: data-drop credentials redacted, the stored case keeps them. */
 export async function getSubmissionDetails(id: string): Promise<SubmissionDetail | undefined> {
 	let submissionId: bigint;
 	try {
@@ -41,5 +43,5 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 		ArtifactsEntity.listForSubmission(submissionId),
 		campaignOf(submissionId),
 	]);
-	return { ...submission, analysisRuns, reports, artifacts, ...(campaign ? { campaign } : {}) };
+	return withoutBackendSecrets({ ...submission, analysisRuns, reports, artifacts, ...(campaign ? { campaign } : {}) });
 }

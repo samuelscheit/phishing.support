@@ -1,5 +1,6 @@
 import { getDomain } from "tldts";
 
+import { withoutBackendSecrets } from "../exfiltration/secrets";
 import { defangCommand } from "../malware/defang";
 import { buildDossier, type Dossier, type DossierDependencies, type DossierSite } from "../referral/dossier";
 import { record, text } from "../util/values";
@@ -310,7 +311,7 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 		? { title: campaign.title, summary: campaign.summary }
 		: fallbackDescription(factsFromDossier(dossier, [...siteFacts.values()].map((facts) => facts.language)));
 
-	return {
+	return withoutBackendSecrets({
 		campaignId: dossier.campaignId,
 		...description,
 		firstSeenAt: dossier.firstSeenAt,
@@ -352,5 +353,5 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 			dns: dnsRecords,
 			abuseContacts: [...new Set(dossier.sites.flatMap((site) => site.reports.map((report) => report.contact).filter((contact): contact is string => Boolean(contact))))].sort(),
 		},
-	};
+	});
 }

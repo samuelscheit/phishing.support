@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { subscribeToEvents } from "@/lib/event/event_transport";
 import { projectSseEvent } from "@/lib/event/sse_projection";
+import { withoutBackendSecrets } from "@/lib/exfiltration/secrets";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 					// Keep the browser stream semantic and bounded.  Internal Responses
 					// packets can contain encrypted reasoning and large tool payloads;
 					// the UI only needs the allow-listed projection.
-					const payload = JSON.stringify(projectSseEvent(msgData));
+					const payload = JSON.stringify(withoutBackendSecrets(projectSseEvent(msgData)));
 					controller.enqueue(`data: ${payload}\n\n`);
 
 					if (message) {
