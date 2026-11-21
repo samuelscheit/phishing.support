@@ -207,9 +207,9 @@ describe("session", () => {
 		const before = page.evaluations;
 		page.onEvaluate = (calls) => {
 			if (calls === before + 1) page.captcha = { "data-captcha-state": "solving", "data-captcha-detail": "recaptcha" };
-			if (calls === before + 3) page.captcha = { "data-captcha-state": "failed", "data-captcha-detail": "recaptcha-images: not solved in 8 rounds; token fallback ERROR_ZERO_BALANCE" };
+			if (calls === before + 3) page.captcha = { "data-captcha-state": "failed", "data-captcha-detail": "recaptcha: image grid not solved" };
 		};
-		await expect(session.waitForCaptchaToken("recaptcha")).rejects.toMatchObject({ stage: "captcha", message: "PDR's reCAPTCHA: the captcha solver failed (recaptcha-images: not solved in 8 rounds; token fallback ERROR_ZERO_BALANCE)" });
+		await expect(session.waitForCaptchaToken("recaptcha")).rejects.toMatchObject({ stage: "captcha", message: "PDR's reCAPTCHA: the captcha solver failed (recaptcha: image grid not solved)" });
 		expect(page.evaluations - before).toBe(3);
 		expect(state.clock).toBe(1_000);
 	});
@@ -444,8 +444,8 @@ describe("captchaTokenFromPage (the Fabric preflight of a provider that files ov
 
 	test("a solver that fails, or no token within the bound, still releases the browser", async () => {
 		const failed = rendered();
-		failed.page.onEvaluate = (calls) => { if (calls > 2) failed.page.captcha = { "data-captcha-state": "failed", "data-captcha-detail": "recaptcha-images: not solved in 8 rounds; token fallback ERROR_ZERO_BALANCE" }; };
-		await expect(captchaTokenFromPage(spec, undefined, failed.dependencies)).rejects.toMatchObject({ stage: "captcha", message: "NameSilo's reCAPTCHA: the captcha solver failed (recaptcha-images: not solved in 8 rounds; token fallback ERROR_ZERO_BALANCE)" });
+		failed.page.onEvaluate = (calls) => { if (calls > 2) failed.page.captcha = { "data-captcha-state": "failed", "data-captcha-detail": "recaptcha: image grid not solved" }; };
+		await expect(captchaTokenFromPage(spec, undefined, failed.dependencies)).rejects.toMatchObject({ stage: "captcha", message: "NameSilo's reCAPTCHA: the captcha solver failed (recaptcha: image grid not solved)" });
 		expect([failed.page.closed, failed.state.released]).toEqual([true, 1]);
 
 		const slow = rendered();

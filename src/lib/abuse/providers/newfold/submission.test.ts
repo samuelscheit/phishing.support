@@ -155,7 +155,7 @@ describe("prepareNewfoldExternalSubmission", () => {
 			["hidden field changed", fakeSession({ rendered: HIDDEN.map(([name, value]) => name === "inquiryEmail" ? [name, "other@newfold.com"] : [name, value]) }), "no longer renders inquiryEmail=abuse-trademark@newfold.com"],
 			["hidden field missing", fakeSession({ rendered: HIDDEN.filter(([name]) => name !== "thankyou") }), "no longer renders thankyou="],
 			["solver still working at the bound", fakeSession({ captcha: failing("Newfold Digital's reCAPTCHA: no token within 240 s (solving: recaptcha)") }), "no token within 240 s"],
-			["solver failed", fakeSession({ captcha: failing("Newfold Digital's reCAPTCHA: the captcha solver failed (recaptcha-images: not solved in 8 rounds; token fallback ERROR_ZERO_BALANCE)") }), "token fallback ERROR_ZERO_BALANCE"],
+			["solver failed", fakeSession({ captcha: failing("Newfold Digital's reCAPTCHA: the captcha solver failed (recaptcha: image grid not solved)") }), "image grid not solved"],
 		];
 		for (const [name, fake, message] of cases) {
 			await expect(run(fake), name).rejects.toThrow(message);

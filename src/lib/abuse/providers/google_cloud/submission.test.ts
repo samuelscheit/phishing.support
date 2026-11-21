@@ -180,9 +180,9 @@ document.querySelector(".submit-button").addEventListener("click", async () => {
 				root.setAttribute("data-captcha-state", "solved");
 			};
 			if (!solver.afterFallback) return pass();
-			// As Fabric's guardian does: llm-captcha's own failed after its image rounds, then the bought token in silence.
-			root.setAttribute("data-captcha-detail", "recaptcha-images: not solved in 8 rounds");
-			root.setAttribute("data-captcha-state", "failed");
+			// As Fabric's guardian does once the image rounds are over: still solving while it buys a token, then solved with it.
+			root.setAttribute("data-captcha-detail", "recaptcha: token fallback");
+			root.setAttribute("data-captcha-state", "solving");
 			setTimeout(pass, 1_500);
 		}, 1_200);
 	} else document.querySelector(".notification-area").textContent = "There were problems sending your form.";
@@ -294,7 +294,7 @@ describe.skipIf(!chromiumAvailable)("Google Cloud abuse form, in a real browser"
 		}
 	}, 60_000);
 
-	test("after the solver's image rounds fail, Fabric's token fallback is waited for and its token sent", async () => {
+	test("when the image rounds give no token, Fabric's token fallback is waited for and its token sent", async () => {
 		const form = googleCloudForm([CAPTCHA_REQUIRED, ACCEPTED], 300, { token: "bought-token", afterFallback: true });
 		try {
 			const { route } = await googleCloudRoute();
@@ -308,7 +308,7 @@ describe.skipIf(!chromiumAvailable)("Google Cloud abuse form, in a real browser"
 
 	test("a checkbox the solver fails on, or does not pass in time, goes to a person: Google created no case and nothing is resent", async () => {
 		const cases: Array<[{ failure: string } | { stuck: true }, { checkboxMs: number } | undefined, string]> = [
-			[{ failure: "recaptcha-images: not solved in 8 rounds; token fallback ERROR_ZERO_BALANCE" }, undefined, "Google Cloud's checkbox reCAPTCHA: the captcha solver failed (recaptcha-images: not solved in 8 rounds; token fallback ERROR_ZERO_BALANCE); Google created no case."],
+			[{ failure: "recaptcha: image grid not solved" }, undefined, "Google Cloud's checkbox reCAPTCHA: the captcha solver failed (recaptcha: image grid not solved); Google created no case."],
 			[{ stuck: true }, { checkboxMs: 1_000 }, "Google Cloud's checkbox reCAPTCHA: no token within 1 s (solving); Google created no case."],
 		];
 		for (const [solver, timeouts, reason] of cases) {
