@@ -3,6 +3,8 @@ import { createDraft, reportInputOf, type RouteData } from "../kit/draft";
 import { failUnlessFiled } from "../kit/http";
 import type { ProviderSubmissionContext, ProviderSubmissionSuccess } from "../submission_contracts";
 import { deadline } from "../../../util/async";
+import { browserUserAgent } from "../../../network/service_identity";
+import { fetchAs } from "../../../http/fetch";
 import { snippet } from "../../../util/text";
 import { DIGITALOCEAN_PROVIDER as PROVIDER } from "./definition";
 import { buildDigitalOceanSubmissionPayload, storedDigitalOceanSubmissionPayload, type DigitalOceanReportInput, type DigitalOceanSubmissionPayload } from "./payload";
@@ -61,7 +63,8 @@ export async function submitDigitalOceanSubmission(context: ProviderSubmissionCo
 	const payload = digitalOceanDraft.stored(context);
 	const body = new FormData();
 	for (const [name, value] of submissionFields(payload)) body.append(name, value);
-	const response = await (dependencies.fetch ?? fetch)(PROVIDER.endpoint, {
+	// The contact form's own request, so it goes out as that page's browser.
+	const response = await fetchAs(browserUserAgent, dependencies.fetch)(PROVIDER.endpoint, {
 		method: "POST",
 		headers: { accept: "application/json, text/plain, */*", origin: PROVIDER.origin, referer: `${PROVIDER.origin}/` },
 		body,

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { browserUserAgent } from "../../../network/service_identity";
 
 import { contactRoute } from "../../resolver/routes";
 import { BrowserFormError, type BrowserFormField, type BrowserFormResponse } from "../kit/browser_form";
@@ -354,7 +355,7 @@ describe("correspondence", () => {
 		const viaApiMiss = await fetchGoDaddyCorrespondence({ confirmationId: "DCU12345678" }, { environment: ENV, fetch: apiFetch({ status: 404 }).fetch, portalFetch });
 		expect(viaApiMiss).toEqual({ messages: [], status: { state: "closed" }, final: true });
 		expect(await fetchGoDaddyCorrespondence({ confirmationId: "DCU12345678" }, { environment: {}, portalFetch })).toEqual(viaApiMiss);
-		expect(bodies[0]).toMatchObject({ url: "https://legalportal.godaddy.com/api/v1/case-status", headers: { "X-Portal-Request": "1" }, body: JSON.stringify({ caseId: "DCU12345678" }) });
+		expect(bodies[0]).toMatchObject({ url: "https://legalportal.godaddy.com/api/v1/case-status", headers: { "X-Portal-Request": "1", "user-agent": browserUserAgent }, body: JSON.stringify({ caseId: "DCU12345678" }) });
 		expect(goDaddyProvider.reviewVerdicts!.closed).toBe("acknowledged");
 	});
 

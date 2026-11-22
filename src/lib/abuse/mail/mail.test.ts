@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { browserUserAgent } from "../../network/service_identity";
 
 import { classifyProviderReply, resolveVerifiedProviderLink } from "./reply";
 import { extractUnambiguousVerificationCode } from "./shared";
@@ -46,20 +47,21 @@ describe("abuse provider reply classification", () => {
 
 describe("verified provider-link resolution", () => {
 	test("accepts an HTTPS link on the verified provider origin and validates DNS before fetch", async () => {
-		const fetched: Array<{ url: string; method: string }> = [];
+		const fetched: Array<{ url: string; method: string; userAgent: string | null }> = [];
 		const asserted: string[] = [];
 		const resolved = await resolveVerifiedProviderLink({
 			candidate: "https://forms.provider.example.com/abuse?case=123",
 			verifiedDomains: ["provider.example.com"],
 			fetch: async (url, init) => {
-				fetched.push({ url: url.toString(), method: String(init?.method ?? "GET") });
+				fetched.push({ url: url.toString(), method: String(init?.method ?? "GET"), userAgent: new Headers(init?.headers).get("user-agent") });
 				return response(200);
 			},
 			assertHost: async (hostname) => { asserted.push(hostname); },
 		});
 		expect(resolved).toBe("https://forms.provider.example.com/abuse?case=123");
 		expect(asserted).toEqual(["forms.provider.example.com"]);
-		expect(fetched).toEqual([{ url: "https://forms.provider.example.com/abuse?case=123", method: "HEAD" }]);
+		// A mailed link is the provider's page for a person: it is checked as that person's browser.
+		expect(fetched).toEqual([{ url: "https://forms.provider.example.com/abuse?case=123", method: "HEAD", userAgent: browserUserAgent }]);
 	});
 
 	test("falls back from HEAD 405 to a bounded GET and follows only same-provider redirects", async () => {

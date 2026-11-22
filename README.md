@@ -434,6 +434,28 @@ provider response; it is not by itself a delivery failure. A slow provider
 preflight (for example, CAPTCHA solving) runs in its own worker slot and does
 not hold unrelated provider routes behind it.
 
+### Outbound client identity
+
+Every server-side request to a third party goes through `fetchAs(userAgent,
+fetch?)` (`src/lib/http/fetch.ts`), which sets one User-Agent from
+`src/lib/network/service_identity.ts`; Bun's default `Bun/…` is never sent,
+because a gateway can deny it before any handler runs (AWS did).
+
+- `browserUserAgent` (desktop Chrome) for endpoints a provider's web page
+  calls: the AWS, MSRC and DigitalOcean forms, the Tucows and NameSilo form
+  sessions, the Alibaba Cloud and Cloudflare dashboard APIs, Eranet's and
+  GoDaddy's portal lookups, and links a provider mails.
+- `serviceUserAgent` (`PhishingSupport/1 (+https://phishing.support)`) for
+  APIs meant for programs: Netcraft, GoDaddy's keyed API, RDAP and the IANA
+  bootstrap, RIPEstat, Globalping, urlscan, Tranco, jsDelivr, country.is,
+  Telegram, VirusTotal, MalwareBazaar and the time-stamping authorities
+  (every `bounded_fetch` client sends it). The XARF report part names it too.
+- `discordUserAgent` for Discord's API, which requires
+  `DiscordBot ($url, $versionNumber)`.
+
+Requests to a reported site are a different matter: they present the
+visitor's or a browser's headers on purpose (`browserRequestHeaders`).
+
 ### Provider-facing email drafts
 
 An abuse-mailbox route does **not** send the stored AI analysis as the

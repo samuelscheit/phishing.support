@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { browserUserAgent } from "../../../network/service_identity";
 
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { AlibabaConsoleError, AlibabaNeedLoginError, readConsoleAnswer, withAlibabaConsole } from "./api";
@@ -129,6 +130,7 @@ describe("console requests", () => {
 		expect(request).toMatchObject({ url: "https://report.alibabacloud.com/data/api.json?action=GetUserIdArea&product=abusereport", method: "POST" });
 		expect(request!.headers).toMatchObject({
 			cookie: "login_aliyunid_ticket=ticket-value; cna=cna-value",
+			"user-agent": browserUserAgent,
 			"content-type": "application/x-www-form-urlencoded",
 			origin: "https://report.alibabacloud.com",
 			referer: "https://report.alibabacloud.com/",
@@ -269,6 +271,8 @@ describe("evidence upload", () => {
 		expect(Buffer.from(await sent.arrayBuffer()).equals(file.bytes)).toBeTrue();
 		// The storage bucket is not the console: no session cookie is sent to it.
 		expect(upload.headers.cookie).toBeUndefined();
+		// The console page uploads it, so the browser's User-Agent goes with it.
+		expect(upload.headers["user-agent"]).toBe(browserUserAgent);
 	});
 
 	test("accepts a trailing slash on the host and refuses every other host before uploading anything", async () => {

@@ -1,6 +1,6 @@
 import { createReport } from "@xarf/xarf";
 
-import { serviceIdentity } from "../../network/service_identity";
+import { serviceIdentity, serviceUserAgent } from "../../network/service_identity";
 import { sha256Hex } from "../../util/hash";
 import { normalizePublicHttpUrl } from "../security/security";
 import type { AbuseMailAttachment } from "./types";
@@ -100,7 +100,7 @@ export function buildXarfReport(input: XarfReportInput): Record<string, unknown>
 export function xarfMailParts(report: Record<string, unknown>) {
 	return [
 		{
-			content: `Feedback-Type: xarf\r\nUser-Agent: ${serviceIdentity.name.replace(/\s+/g, "")}/1\r\nVersion: 1\r\n`,
+			content: `Feedback-Type: xarf\r\nUser-Agent: ${serviceUserAgent}\r\nVersion: 1\r\n`,
 			contentType: "message/feedback-report",
 			contentDisposition: "inline" as const,
 		},

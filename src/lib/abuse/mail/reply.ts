@@ -7,7 +7,8 @@ import { isVerifiedEmailRouteOriginAllowed } from "../providers/email";
 import { assertPublicDnsHost, normalizeDomain } from "../security/security";
 import { abuseReplyClassifications, abuseReplyClassificationSchema, type AbuseReplyClassification } from "./types";
 import { parseJson } from "../../util/values";
-import { type FetchLike } from "../../http/fetch";
+import { fetchAs, type FetchLike } from "../../http/fetch";
+import { browserUserAgent } from "../../network/service_identity";
 
 const URL_PATTERN = /https:\/\/[^\s<>'"`]+/gi;
 const MAX_REPLY_CLASSIFICATION_INPUT = 120_000;
@@ -155,7 +156,8 @@ export async function resolveVerifiedProviderLink(params: VerifiedProviderLinkRe
 	const verifiedDomains = params.verifiedDomains?.map((domain) => normalizeDomain(domain)).filter((domain): domain is string => Boolean(domain)) ?? [];
 	if (verifiedDomains.length === 0) return undefined;
 	const allowed = (url: URL) => isVerifiedEmailRouteOriginAllowed(verifiedDomains, url);
-	const fetchImplementation = params.fetch ?? fetch;
+	// A link a provider mailed for a person to open: its portal answers a browser.
+	const fetchImplementation = fetchAs(browserUserAgent, params.fetch);
 	const assertHost = params.assertHost ?? assertPublicDnsHost;
 	const maxRedirects = params.maxRedirects ?? 3;
 	let current: URL;

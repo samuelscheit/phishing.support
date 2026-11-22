@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { browserUserAgent } from "../../../network/service_identity";
 
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { contactRoute } from "../../resolver/routes";
@@ -156,7 +157,7 @@ describe("submitDigitalOceanSubmission", () => {
 		const { url, init } = fake.sent[0]!;
 		expect(url).toBe("https://inbound.digitalocean.com/contact_forms/abuse_reports");
 		expect(init.method).toBe("POST");
-		expect(init.headers).toEqual({ accept: "application/json, text/plain, */*", origin: "https://www.digitalocean.com", referer: "https://www.digitalocean.com/" });
+		expect(init.headers).toEqual({ accept: "application/json, text/plain, */*", origin: "https://www.digitalocean.com", referer: "https://www.digitalocean.com/", "user-agent": browserUserAgent });
 		expect(init.signal).toBeInstanceOf(AbortSignal);
 		const form = init.body as FormData;
 		expect([...form.entries()]).toEqual(submissionFields(payload));

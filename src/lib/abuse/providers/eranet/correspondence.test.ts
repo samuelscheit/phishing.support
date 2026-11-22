@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { browserUserAgent } from "../../../network/service_identity";
 
 import { fetchEranetCorrespondence } from "./correspondence";
 import { type FetchLike } from "../../../http/fetch";
@@ -42,7 +43,7 @@ describe("Eranet correspondence", () => {
 		});
 		expect(requests).toHaveLength(1);
 		expect(requests[0]!.url).toBe("https://www.eranet.com/api/domain/abuse/DescribeInstanceByOrderNo");
-		expect(requests[0]!.init).toMatchObject({ method: "POST", redirect: "error" });
+		expect(requests[0]!.init).toMatchObject({ method: "POST", redirect: "error", headers: { "user-agent": browserUserAgent } });
 		expect(JSON.parse(String(requests[0]!.init?.body))).toEqual({ OrderNo: RECEIPT, Email: "support@phishing.support" });
 	});
 

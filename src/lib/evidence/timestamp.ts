@@ -2,7 +2,8 @@ import { createHash, webcrypto } from "node:crypto";
 
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
-import { type FetchLike } from "../http/fetch";
+import { fetchAs, type FetchLike } from "../http/fetch";
+import { serviceUserAgent } from "../network/service_identity";
 
 /**
  * Independent RFC 3161 time-stamping authorities, tried in order. A token
@@ -98,7 +99,7 @@ export async function timestampEvidence(
 	content: Buffer,
 	dependencies: { fetch?: FetchLike; authorities?: readonly { name: string; url: string }[] } = {},
 ): Promise<EvidenceTimestamp | undefined> {
-	const fetcher = dependencies.fetch ?? fetch;
+	const fetcher = fetchAs(serviceUserAgent, dependencies.fetch);
 	const sha256 = createHash("sha256").update(content).digest();
 	for (const authority of dependencies.authorities ?? TIMESTAMP_AUTHORITIES) {
 		const nonce = Buffer.from(webcrypto.getRandomValues(new Uint8Array(8)));

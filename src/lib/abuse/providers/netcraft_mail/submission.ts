@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { NetcraftSubmissionRejectedError, parseNetcraftSubmissionResponse } from "../netcraft/api";
-import { serviceIdentity } from "../../../network/service_identity";
+import { serviceIdentity, serviceUserAgent } from "../../../network/service_identity";
 import { normalizeMailbox } from "../../mail/shared";
 import { createDraft, type VerifiedOf } from "../kit/draft";
 import { preparedState } from "../kit/session";
@@ -9,7 +9,7 @@ import { payloadEnvelope, storedReader } from "../kit/stored";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { NETCRAFT_MAIL_PROVIDER } from "./definition";
 import { sha256Hex } from "../../../util/hash";
-import { type FetchLike } from "../../../http/fetch";
+import { fetchAs, type FetchLike } from "../../../http/fetch";
 
 const envelope = payloadEnvelope(NETCRAFT_MAIL_PROVIDER, "netcraft_report_mail_v3");
 
@@ -85,7 +85,7 @@ export async function submitNetcraftMailSubmission(
 ): Promise<ProviderSubmissionSuccess> {
 	const payload = netcraftMailDraft.stored(context);
 	const message = preparedState<string>(preflight, (state) => typeof state === "string", "Netcraft mail submission requires its prepared message.");
-	const response = await (dependencies.fetch ?? globalThis.fetch)(NETCRAFT_MAIL_PROVIDER.reportMailUrl, {
+	const response = await fetchAs(serviceUserAgent, dependencies.fetch)(NETCRAFT_MAIL_PROVIDER.reportMailUrl, {
 		method: "POST",
 		redirect: "error",
 		...(context.signal ? { signal: context.signal } : {}),

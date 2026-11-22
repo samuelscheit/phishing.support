@@ -64,7 +64,6 @@ function headers(dependencies: UrlscanDependencies): Record<string, string> {
 	return {
 		Accept: "application/json",
 		...(apiKey ? { "API-Key": apiKey } : {}),
-		"User-Agent": "phishing.support-origin-discovery/1.0 (+https://phishing.support)",
 	};
 }
 

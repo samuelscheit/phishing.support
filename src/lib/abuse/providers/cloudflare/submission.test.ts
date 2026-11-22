@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { browserUserAgent } from "../../../network/service_identity";
 
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { readyDraft, verifiedPrepare } from "../kit/testing";
@@ -137,7 +138,7 @@ describe("Cloudflare dashboard API", () => {
 			expect(url).toBe(cloudflareReportsUrl(ACCOUNT_ID));
 			expect(init).toMatchObject({ method: "POST", redirect: "error", headers: {
 				"content-type": "application/json", "x-atok": session.atok, cookie: `vses2=${session.vses2}`,
-				"x-cross-site-security": "dash", referer: "https://dash.cloudflare.com/",
+				"x-cross-site-security": "dash", referer: "https://dash.cloudflare.com/", "user-agent": browserUserAgent,
 			} });
 			expect(init?.headers).not.toHaveProperty("authorization");
 			expect(JSON.parse(String(init?.body))).toEqual(buildCloudflareApiBody(report));

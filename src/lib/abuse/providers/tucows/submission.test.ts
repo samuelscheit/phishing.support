@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { browserUserAgent } from "../../../network/service_identity";
 import { eq } from "drizzle-orm";
 
 import { getDb } from "../../../db";
@@ -216,6 +217,8 @@ describe("the wizard before the marker", () => {
 		// Session cookies travel on every request after the first answer.
 		expect(server.sent[0]!.headers.cookie).toBeUndefined();
 		for (const request of server.sent.slice(1)) expect(request.headers.cookie).toBe("_swb=swb-session; csrf_token=cookie-csrf");
+		// Every step is the report page's own request, sent as its browser.
+		expect(server.sent.every((request) => request.headers["user-agent"] === browserUserAgent)).toBeTrue();
 		expect(server.sent.some((request) => request.path === "/report/form" && request.method === "POST")).toBeFalse();
 	});
 

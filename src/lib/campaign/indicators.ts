@@ -92,7 +92,7 @@ const JSDELIVR_HASH_LOOKUP = "https://data.jsdelivr.com/v1/lookup/hash/";
 export async function lookupPublishedLibrary(sha256: string, fetchImplementation?: FetchLike): Promise<string | undefined> {
 	const found = await fetchJson<{ type?: string; name?: string; version?: string; file?: string }>(`${JSDELIVR_HASH_LOOKUP}${sha256}`, {
 		method: "GET",
-		headers: { Accept: "application/json", "User-Agent": "phishing.support-campaigns/1.0 (+https://phishing.support)" },
+		headers: { Accept: "application/json" },
 	}, { fetch: fetchImplementation, timeoutMs: 10_000, attempts: 2, retryDelayMs: 1_000, maxResponseBytes: 64 * 1024 });
 	// 404: no published package has these bytes.
 	if (found === undefined) return undefined;

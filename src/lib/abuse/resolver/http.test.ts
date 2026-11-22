@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { serviceUserAgent } from "../../network/service_identity";
 
 import { safeJsonFetch } from "./http";
 
@@ -10,8 +11,10 @@ describe("resolver HTTP client", () => {
 			assertPublicHost: async (host) => {
 				assertedHosts.push(host);
 			},
-			fetch: async (input) => {
+			fetch: async (input, init) => {
 				requestedUrls.push(String(input));
+				// RDAP servers are told which program asks, on every hop.
+				expect(new Headers(init?.headers).get("user-agent")).toBe(serviceUserAgent);
 				if (requestedUrls.length === 1) {
 					return new Response(null, {
 						status: 302,

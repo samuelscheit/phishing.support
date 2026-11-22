@@ -1,4 +1,5 @@
-import { type FetchLike } from "../../http/fetch";
+import { fetchAs, type FetchLike } from "../../http/fetch";
+import { serviceUserAgent } from "../../network/service_identity";
 import { VIRUSTOTAL_API } from "../../network/virustotal";
 /** Official VirusTotal v3 upload endpoint, documented for files up to 32 MB. */
 const VIRUSTOTAL_UPLOAD_URL = `${VIRUSTOTAL_API}/files`;
@@ -29,7 +30,7 @@ export async function uploadToVirusTotal(params: {
 	form.append("file", new Blob([new Uint8Array(params.bytes)], { type: "application/octet-stream" }), params.fileName);
 	let response: Response;
 	try {
-		response = await (params.fetch ?? fetch)(VIRUSTOTAL_UPLOAD_URL, {
+		response = await fetchAs(serviceUserAgent, params.fetch)(VIRUSTOTAL_UPLOAD_URL, {
 			method: "POST",
 			headers: { "x-apikey": params.apiKey.trim(), accept: "application/json" },
 			body: form,

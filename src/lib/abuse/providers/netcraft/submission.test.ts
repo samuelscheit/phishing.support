@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { serviceUserAgent } from "../../../network/service_identity";
 
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { validateAbuseReportRequest } from "../../contracts";
@@ -157,6 +158,7 @@ describe("Netcraft v3 submission response", () => {
 		expect(requestInit?.redirect).toBe("error");
 		expect(new Headers(requestInit?.headers).get("content-type")).toBe("application/json");
 		expect(new Headers(requestInit?.headers).get("accept")).toBe("application/json");
+		expect(new Headers(requestInit?.headers).get("user-agent")).toBe(serviceUserAgent);
 		expect(requestBody).toMatchObject({
 			email: "support@phishing.support",
 			urls: [

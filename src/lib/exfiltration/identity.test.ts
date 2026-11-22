@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { discordUserAgent, serviceUserAgent } from "../network/service_identity";
 
 import { enrichDiscordWebhook, enrichTelegramBot } from "./identity";
 import type { ExfiltrationBackend } from "./types";
@@ -12,6 +13,7 @@ describe("read-only shared-service identity lookups", () => {
 		const enriched = await enrichTelegramBot(backend, async (input, init) => {
 			called = String(input);
 			expect(init?.method).toBe("GET");
+			expect(new Headers(init?.headers).get("user-agent")).toBe(serviceUserAgent);
 			return Response.json({ ok: true, result: { id: 9007199254740991, username: "collector_bot" } });
 		});
 		expect(new URL(called).pathname).toEndWith("/getMe");
@@ -23,6 +25,7 @@ describe("read-only shared-service identity lookups", () => {
 		const enriched = await enrichDiscordWebhook(backend, async (input, init) => {
 			expect(String(input)).toContain("/api/v10/webhooks/42/opaque123");
 			expect(init?.method).toBe("GET");
+			expect(new Headers(init?.headers).get("user-agent")).toBe(discordUserAgent);
 			return Response.json({ guild_id: "7", channel_id: "8", name: "exfil" });
 		});
 		expect(enriched.discord).toMatchObject({ guildId: "7", channelId: "8", name: "exfil" });

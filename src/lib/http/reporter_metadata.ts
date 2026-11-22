@@ -1,6 +1,8 @@
 import { isIP } from "node:net";
 
 import { normalizeCountryCode, type ReporterMetadata } from "./reporter_headers";
+import { fetchAs } from "./fetch";
+import { serviceUserAgent } from "../network/service_identity";
 
 function normalizeForwardedIp(value: string): string | undefined {
 	let candidate = value.trim();
@@ -62,7 +64,7 @@ function requestHeaders(req: Request): Record<string, string> {
 async function lookupCountryCode(ip: string): Promise<string | undefined> {
 	try {
 		const timeout = typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(3000) : undefined;
-		const response = await fetch(`https://api.country.is/${encodeURIComponent(ip)}`, {
+		const response = await fetchAs(serviceUserAgent)(`https://api.country.is/${encodeURIComponent(ip)}`, {
 			headers: { accept: "application/json" },
 			signal: timeout,
 		});

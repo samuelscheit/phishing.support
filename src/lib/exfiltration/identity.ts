@@ -1,23 +1,24 @@
 import type { ExfiltrationBackend } from "./types";
 import { deadline } from "../util/async";
-import { type FetchLike } from "../http/fetch";
+import { fetchAs, type FetchLike } from "../http/fetch";
+import { discordUserAgent, serviceUserAgent } from "../network/service_identity";
 
 const LOOKUP_TIMEOUT_MS = 12_000;
 
-async function boundedFetch(fetchImplementation: FetchLike, url: URL, signal?: AbortSignal): Promise<Response> {
-	return fetchImplementation(url, { method: "GET", headers: { accept: "application/json" }, signal: deadline(LOOKUP_TIMEOUT_MS, signal) });
+async function boundedFetch(userAgent: string, fetchImplementation: FetchLike | undefined, url: URL, signal?: AbortSignal): Promise<Response> {
+	return fetchAs(userAgent, fetchImplementation)(url, { method: "GET", headers: { accept: "application/json" }, signal: deadline(LOOKUP_TIMEOUT_MS, signal) });
 }
 
 /** `getMe` reads only the bot's public identity; it never reads updates or changes bot state. */
 export async function enrichTelegramBot(
 	backend: ExfiltrationBackend,
-	fetchImplementation: FetchLike = globalThis.fetch,
+	fetchImplementation?: FetchLike,
 	signal?: AbortSignal,
 ): Promise<ExfiltrationBackend> {
 	if (!backend.telegram) return backend;
 	if (!/^\d{1,20}:[A-Za-z0-9_-]{8,256}$/.test(backend.telegram.token)) return backend;
 	const url = new URL(`https://api.telegram.org/bot${backend.telegram.token}/getMe`);
-	const response = await boundedFetch(fetchImplementation, url, signal);
+	const response = await boundedFetch(serviceUserAgent, fetchImplementation, url, signal);
 	if (!response.ok) return backend;
 	const body = await response.json().catch(() => undefined) as { ok?: unknown; result?: { id?: unknown; username?: unknown } } | undefined;
 	if (body?.ok !== true || !body.result) return backend;
@@ -29,13 +30,13 @@ export async function enrichTelegramBot(
 /** Discord's documented GET-webhook operation returns metadata and performs no mutation. */
 export async function enrichDiscordWebhook(
 	backend: ExfiltrationBackend,
-	fetchImplementation: FetchLike = globalThis.fetch,
+	fetchImplementation?: FetchLike,
 	signal?: AbortSignal,
 ): Promise<ExfiltrationBackend> {
 	if (!backend.discord) return backend;
 	if (!/^\d{1,20}$/.test(backend.discord.webhookId) || !/^[A-Za-z0-9._-]{8,256}$/.test(backend.discord.token)) return backend;
 	const url = new URL(`https://discord.com/api/v10/webhooks/${backend.discord.webhookId}/${backend.discord.token}`);
-	const response = await boundedFetch(fetchImplementation, url, signal);
+	const response = await boundedFetch(discordUserAgent, fetchImplementation, url, signal);
 	if (!response.ok) return backend;
 	const body = await response.json().catch(() => undefined) as { guild_id?: unknown; channel_id?: unknown; name?: unknown } | undefined;
 	if (!body) return backend;
@@ -56,7 +57,7 @@ export async function enrichDiscordWebhook(
 
 export async function enrichBackendIdentity(
 	backend: ExfiltrationBackend,
-	fetchImplementation: FetchLike = globalThis.fetch,
+	fetchImplementation?: FetchLike,
 	signal?: AbortSignal,
 ): Promise<ExfiltrationBackend> {
 	if (backend.kind === "telegram_bot") return enrichTelegramBot(backend, fetchImplementation, signal);

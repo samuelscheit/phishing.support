@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { serviceUserAgent } from "../../../network/service_identity";
 
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { fetchGoDaddyTicket, fileGoDaddyTicket, fileGoDaddyTickets, goDaddyApiCredentials, goDaddyApiEnabled } from "./api";
@@ -32,7 +33,7 @@ describe("goDaddyApiEnabled", () => {
 	test("a read with the sso-key header: 200 enabled, 401/403 not enabled, anything else an error", async () => {
 		const ok = scripted({ status: 200, body: [] });
 		expect(await goDaddyApiEnabled(credentials, { fetch: ok.fetch })).toBeTrue();
-		expect(ok.calls[0]).toMatchObject({ url: "https://api.godaddy.com/v2/abuse/tickets?limit=1", method: "GET", headers: { authorization: "sso-key KEY:SECRET" } });
+		expect(ok.calls[0]).toMatchObject({ url: "https://api.godaddy.com/v2/abuse/tickets?limit=1", method: "GET", headers: { authorization: "sso-key KEY:SECRET", "user-agent": serviceUserAgent } });
 		for (const status of [401, 403]) expect(await goDaddyApiEnabled(credentials, { fetch: scripted({ status, body: { message: "Unable to complete your request at this time" } }).fetch })).toBeFalse();
 		for (const status of [429, 500, 503, 404]) await expect(goDaddyApiEnabled(credentials, { fetch: scripted({ status }).fetch })).rejects.toThrow(`HTTP ${status}`);
 		await expect(goDaddyApiEnabled(credentials, { fetch: scripted(new Error("socket hang up")).fetch })).rejects.toThrow("socket hang up");
@@ -45,7 +46,7 @@ describe("fileGoDaddyTicket", () => {
 	test("posts the documented body and returns the u_number", async () => {
 		const { fetch, calls } = scripted({ status: 201, body: { u_number: "DCU12345678" } });
 		expect(await fileGoDaddyTicket(credentials, ticket, { fetch })).toEqual({ kind: "filed", ticketId: "DCU12345678" });
-		expect(calls[0]).toMatchObject({ url: "https://api.godaddy.com/v2/abuse/tickets", method: "POST", headers: { "content-type": "application/json", authorization: "sso-key KEY:SECRET" }, body: ticket });
+		expect(calls[0]).toMatchObject({ url: "https://api.godaddy.com/v2/abuse/tickets", method: "POST", headers: { "content-type": "application/json", authorization: "sso-key KEY:SECRET", "user-agent": serviceUserAgent }, body: ticket });
 	});
 
 	test("bounds the free text and target to the API's limits", async () => {

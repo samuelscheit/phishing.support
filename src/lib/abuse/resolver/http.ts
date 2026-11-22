@@ -1,5 +1,7 @@
 import { AbuseInputError, assertPublicDnsHost } from "../security/security";
 import { retryWithTimeout } from "../../network/bounded_fetch";
+import { fetchAs } from "../../http/fetch";
+import { serviceUserAgent } from "../../network/service_identity";
 import { asRecord } from "../../util/values";
 import type { JsonRecord, ResolverDependencies } from "./types";
 import { defaultRdapLocator, type RdapObject } from "../../network/rdap_bootstrap";
@@ -60,7 +62,7 @@ function timeoutMs(dependencies: ResolverDependencies): number {
 }
 
 async function requestJson(url: URL, dependencies: ResolverDependencies): Promise<JsonRequestResult> {
-	const fetchImplementation = dependencies.fetch ?? fetch;
+	const fetchImplementation = fetchAs(serviceUserAgent, dependencies.fetch);
 	const controller = new AbortController();
 	let timeout: ReturnType<typeof setTimeout> | undefined;
 	const deadline = new Promise<never>((_, reject) => {

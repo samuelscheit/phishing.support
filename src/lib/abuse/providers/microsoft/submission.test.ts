@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { browserUserAgent } from "../../../network/service_identity";
 import { eq } from "drizzle-orm";
 
 import { getDb } from "../../../db";
@@ -120,7 +121,8 @@ describe("submitMicrosoftSubmission", () => {
 		expect(url).toBe("https://api.msrc.microsoft.com/report/v3.0/abuse");
 		expect(init.method).toBe("POST");
 		const headers = init.headers as Record<string, string>;
-		expect(headers).toMatchObject({ "content-type": "application/json", origin: "https://msrc.microsoft.com", referer: "https://msrc.microsoft.com/" });
+		// The portal's own request, sent as its browser.
+		expect(headers).toMatchObject({ "content-type": "application/json", origin: "https://msrc.microsoft.com", referer: "https://msrc.microsoft.com/", "user-agent": browserUserAgent });
 		expect(headers["request-id"]).toMatch(/^[0-9a-f-]{36}$/);
 		expect(Object.keys(headers).map((key) => key.toLowerCase())).not.toContain("authorization");
 		expect(init.signal).toBeInstanceOf(AbortSignal);

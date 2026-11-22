@@ -11,7 +11,7 @@ import { awsProvider } from "./index";
 import { AWS_PROVIDER } from "./definition";
 import { providerResponseId } from "../kit/report_reference";
 import { storedAwsSubmissionPayload } from "./payload";
-import { userAgent } from "../../../network/service_identity";
+import { browserUserAgent } from "../../../network/service_identity";
 import { API_GATEWAY_FORBIDDEN_BODY, AWS_REQUEST_LIMIT_BODY, awsDraft, isApiGatewayDenial, submitAwsSubmission } from "./submission";
 
 const verifiedAwsDraft = async (context: Parameters<typeof awsDraft.verify>[0]) => (await awsDraft.verify(context)).payload;
@@ -122,9 +122,7 @@ describe("submitAwsSubmission", () => {
 		expect(url).toBe("https://api.support.aws.amazon.com/v1/contacts/report-abuse-v2");
 		expect(init.method).toBe("POST");
 		// API Gateway denies any client that is not a desktop browser (403); the form page's own headers pass.
-		expect(init.headers).toEqual({ "content-type": "application/json", accept: "application/json, text/plain, */*", origin: "https://support.aws.amazon.com", referer: "https://support.aws.amazon.com/", "user-agent": userAgent });
-		expect(userAgent).toMatch(/^Mozilla\/5\.0 \(.+\) AppleWebKit\/.+ Chrome\/[\d.]+ Safari\/[\d.]+$/);
-		expect(userAgent).not.toContain("Headless");
+		expect(init.headers).toEqual({ "content-type": "application/json", accept: "application/json, text/plain, */*", origin: "https://support.aws.amazon.com", referer: "https://support.aws.amazon.com/", "user-agent": browserUserAgent });
 		expect(init.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(String(init.body))).toEqual({
 			content: {

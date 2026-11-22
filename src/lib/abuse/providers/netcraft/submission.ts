@@ -1,7 +1,7 @@
 import { createDraft } from "../kit/draft";
 import { ProviderSubmissionDuplicateError, ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { isNetcraftDuplicateAnswer, NetcraftDuplicateSubmissionError, NetcraftSubmissionRejectedError, netcraftSubmissionUrl, parseNetcraftSubmissionResponse as parseNetcraftApiSubmissionResponse } from "./api";
-import { serviceIdentity } from "../../../network/service_identity";
+import { serviceIdentity, serviceUserAgent } from "../../../network/service_identity";
 import { NETCRAFT_PROVIDER } from "./definition";
 import {
 	buildNetcraftReportUrlsBody,
@@ -9,7 +9,7 @@ import {
 	storedNetcraftSubmissionPayload,
 	type NetcraftSubmissionPayload,
 } from "./payload";
-import { type FetchLike } from "../../../http/fetch";
+import { fetchAs, type FetchLike } from "../../../http/fetch";
 
 export type NetcraftSubmissionDependencies = {
 	fetch?: FetchLike;
@@ -86,8 +86,7 @@ export async function submitNetcraftSubmission(
 	dependencies: NetcraftSubmissionDependencies = {},
 ): Promise<ProviderSubmissionSuccess> {
 	const payload = netcraftDraft.stored(context);
-	const request: FetchLike = dependencies.fetch ?? globalThis.fetch;
-	const response = await request(NETCRAFT_PROVIDER.reportUrlsUrl, {
+	const response = await fetchAs(serviceUserAgent, dependencies.fetch)(NETCRAFT_PROVIDER.reportUrlsUrl, {
 		method: "POST",
 		redirect: "error",
 		...(context.signal ? { signal: context.signal } : {}),

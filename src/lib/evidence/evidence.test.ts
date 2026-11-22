@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { serviceUserAgent } from "../network/service_identity";
 import { createHash } from "node:crypto";
 
 import * as asn1js from "asn1js";
@@ -36,6 +37,8 @@ async function testAuthority(options: { lieAboutDigest?: boolean } = {}) {
 	const genTime = new Date("2026-10-31T09:55:04Z");
 
 	const fetch = async (_url: string, init: RequestInit) => {
+		// Time-stamping authorities are told which program asks.
+		expect(new Headers(init.headers).get("user-agent")).toBe(serviceUserAgent);
 		const body = init.body as Uint8Array;
 		const request = pkijs.TimeStampReq.fromBER(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer);
 		const digest = options.lieAboutDigest ? sha256(Buffer.from("something else")) : request.messageImprint.hashedMessage.valueBlock.valueHexView;

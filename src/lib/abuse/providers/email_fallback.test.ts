@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { parse } from "@xarf/xarf";
+import { serviceUserAgent } from "../../network/service_identity";
 import { simpleParser } from "mailparser";
 
 import { useTemporaryDatabase } from "../../db/test_helpers";
@@ -68,7 +69,7 @@ describe("email fallback", () => {
 		expect(raw).toMatch(/^Content-Type: multipart\/report; report-type=feedback-report;/m);
 		const mail = await simpleParser(raw);
 		expect(mail.text?.trim()).toBe("Hello DigitalOcean Abuse Team,\n\nA report.");
-		expect(raw).toContain("Content-Type: message/feedback-report\r\nContent-Transfer-Encoding: 7bit\r\nContent-Disposition: inline\r\n\r\nFeedback-Type: xarf\r\nUser-Agent: PhishingSupport/1\r\nVersion: 1");
+		expect(raw).toContain(`Content-Type: message/feedback-report\r\nContent-Transfer-Encoding: 7bit\r\nContent-Disposition: inline\r\n\r\nFeedback-Type: xarf\r\nUser-Agent: ${serviceUserAgent}\r\nVersion: 1`);
 		expect(raw).toContain("Content-Type: application/json; name=xarf.json\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename=xarf.json");
 		// The evidence rides inside the report, not beside it.
 		expect(mail.attachments.map(({ filename }) => filename).filter(Boolean)).toEqual(["xarf.json"]);

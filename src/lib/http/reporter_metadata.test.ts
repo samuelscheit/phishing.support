@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { serviceUserAgent } from "../network/service_identity";
 import { getClientIp, getReporterMetadata } from "./reporter_metadata";
 
 const originalFetch = globalThis.fetch;
@@ -71,8 +72,10 @@ describe("request reporter metadata", () => {
 
 	test("derives country from country.is when no edge country header exists", async () => {
 		let requestedUrl: string | undefined;
-		globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+		let requestedUserAgent: string | null | undefined;
+		globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
 			requestedUrl = String(input);
+			requestedUserAgent = new Headers(init?.headers).get("user-agent");
 			return new Response(JSON.stringify({ country: "gb" }), {
 				status: 200,
 				headers: { "content-type": "application/json" },
@@ -89,6 +92,8 @@ describe("request reporter metadata", () => {
 		const metadata = await getReporterMetadata(request);
 
 		expect(requestedUrl).toBe("https://api.country.is/198.51.100.25");
+		// country.is is asked as the service, never with the reporter's own User-Agent.
+		expect(requestedUserAgent).toBe(serviceUserAgent);
 		expect(metadata.reporterIp).toBe("198.51.100.25");
 		expect(metadata.reporterCountry).toBe("GB");
 	});

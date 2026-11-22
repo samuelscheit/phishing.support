@@ -1,7 +1,8 @@
 import { TUCOWS_PROVIDER } from "./definition";
 import { unescapeHtml } from "../../../util/html";
 import { deadline } from "../../../util/async";
-import { type FetchLike } from "../../../http/fetch";
+import { fetchAs, type FetchLike } from "../../../http/fetch";
+import { browserUserAgent } from "../../../network/service_identity";
 
 /** One answer: the status, the redirect it names, and the body. */
 export type TucowsReply = { status: number; location?: string; text: string };
@@ -40,13 +41,15 @@ export function metaCsrfToken(html: string): string | undefined {
 	return undefined;
 }
 
-export function createTucowsSession(fetchImplementation: FetchLike, signal?: AbortSignal): TucowsSession {
+/** The report form's own requests, as that page's browser would send them, keeping the cookies it sets. */
+export function createTucowsSession(fetchImplementation: FetchLike | undefined, signal?: AbortSignal): TucowsSession {
+	const request = fetchAs(browserUserAgent, fetchImplementation);
 	const cookies = new Map<string, string>();
 	const absolute = (path: string) => new URL(path, TUCOWS_PROVIDER.origin).toString();
 	async function send(path: string, init: { method: string; headers: Record<string, string>; body?: string | FormData }): Promise<TucowsReply> {
 		const headers: Record<string, string> = { ...init.headers, origin: TUCOWS_PROVIDER.origin, referer: TUCOWS_PROVIDER.reportUrl };
 		if (cookies.size > 0) headers.cookie = [...cookies].map(([name, value]) => `${name}=${value}`).join("; ");
-		const response = await fetchImplementation(absolute(path), {
+		const response = await request(absolute(path), {
 			...init,
 			headers,
 			redirect: "manual",

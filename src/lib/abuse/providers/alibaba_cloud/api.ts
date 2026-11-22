@@ -1,10 +1,10 @@
-import { userAgent } from "../../../network/service_identity";
+import { browserUserAgent } from "../../../network/service_identity";
 import { asRecord, parseJsonRecord } from "../../../util/values";
 import { snippet } from "../../../util/text";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import { alibabaCloudLoginConfig, alibabaCloudSessions, type AlibabaCloudLoginConfig, type AlibabaCloudSession } from "./session";
-import { type FetchLike } from "../../../http/fetch";
+import { fetchAs, type FetchLike } from "../../../http/fetch";
 
 /** The console refused the call with a named error code (`MissingPage`, `NoPermission`). */
 export class AlibabaConsoleError extends ProviderSubmissionRejectedError {
@@ -67,7 +67,6 @@ function sessionConsole(session: AlibabaCloudSession, request: FetchLike, signal
 	const { consoleOrigin, apiProduct } = ALIBABA_CLOUD_PROVIDER;
 	const headers = {
 		cookie: cookieHeader(session),
-		"user-agent": userAgent,
 		accept: "application/json, text/plain, */*",
 		"accept-language": "en-US,en;q=0.9",
 		origin: consoleOrigin,
@@ -137,7 +136,8 @@ export async function withAlibabaConsole<T>(
 ): Promise<T> {
 	const config = options.config ?? alibabaCloudLoginConfig();
 	const getSession = options.getSession ?? alibabaCloudSessions.get;
-	const request = options.fetch ?? (globalThis.fetch as FetchLike);
+	// The console's and its evidence storage's requests, as the console page's browser sends them.
+	const request = fetchAs(browserUserAgent, options.fetch);
 	const session = options.session ?? await getSession(config, { ...(options.signal ? { signal: options.signal } : {}) });
 	try {
 		return await work(sessionConsole(session, request, options.signal), session);

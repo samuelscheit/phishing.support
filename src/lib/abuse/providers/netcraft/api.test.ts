@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { serviceUserAgent } from "../../../network/service_identity";
 
 import {
 	fetchNetcraftSubmissionState,
@@ -65,6 +66,7 @@ describe("Netcraft submission receipt parsing", () => {
 		expect(result).toEqual({ uuid: opaque, state: "processing", pending: false, hasUrls: true, lastUpdate: 1_788_177_992 });
 		expect(requests.map(({ url }) => url)).toEqual([netcraftSubmissionUrl(opaque)]);
 		expect(requests.every(({ init }) => init?.method === "GET" && init?.redirect === "error")).toBeTrue();
+		expect(requests.map(({ init }) => new Headers(init?.headers).get("user-agent"))).toEqual([serviceUserAgent]);
 	});
 
 	test("fails closed when a state response is malformed", async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { serviceIdentity } from "../../../network/service_identity";
+import { serviceIdentity, serviceUserAgent } from "../../../network/service_identity";
 import { SubmissionsEntity } from "../../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { AbuseRepository } from "../../repository";
@@ -52,9 +52,9 @@ describe("Netcraft mail provider", () => {
 
 	test("is the only route for the email target and submits the stored message once", async () => {
 		const route = await emailRoute(bounce);
-		const requests: Array<{ url: string; body: { email: string; message: string } }> = [];
+		const requests: Array<{ url: string; userAgent: string | null; body: { email: string; message: string } }> = [];
 		const provider = providerAnswering(async (input, init) => {
-			requests.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+			requests.push({ url: String(input), userAgent: new Headers(init?.headers).get("user-agent"), body: JSON.parse(String(init?.body)) });
 			return new Response(JSON.stringify({ message: "Successfully reported", uuid: "cccccccccccccccccccccccccccccccc" }));
 		});
 		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toMatchObject({ outcome: "submitted" });
@@ -62,6 +62,7 @@ describe("Netcraft mail provider", () => {
 		expect(requests).toHaveLength(1);
 		expect(requests[0]).toEqual({
 			url: NETCRAFT_MAIL_PROVIDER.reportMailUrl,
+			userAgent: serviceUserAgent,
 			body: { email: serviceIdentity.mailbox, message: `From: Unknown sender <unknown-sender@invalid>\r\n${bounce}` },
 		});
 		const [run] = await AbuseRepository.listProviderRunsForReport(route.reportId);

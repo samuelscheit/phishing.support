@@ -9,7 +9,8 @@ import { providerResponseId } from "../kit/report_reference";
 import { AWS_PROVIDER } from "./definition";
 import { awsRequestBody, buildAwsSubmissionPayload, storedAwsSubmissionPayload, type AwsReportInput } from "./payload";
 import { deadline } from "../../../util/async";
-import { userAgent } from "../../../network/service_identity";
+import { browserUserAgent } from "../../../network/service_identity";
+import { fetchAs } from "../../../http/fetch";
 
 export type AwsSubmissionDependencies = {
 	fetch?: (url: string, init: RequestInit) => Promise<Response>;
@@ -70,10 +71,10 @@ export const apiGatewayDenial = (detail: string) => new ProviderSubmissionReject
  */
 export async function submitAwsSubmission(context: ProviderSubmissionContext, dependencies: AwsSubmissionDependencies = {}): Promise<ProviderSubmissionSuccess> {
 	const payload = awsDraft.stored(context);
-	const send = dependencies.fetch ?? fetch;
+	const send = fetchAs(browserUserAgent, dependencies.fetch);
 	const response = await send(AWS_PROVIDER.endpoint, {
 		method: "POST",
-		headers: { "content-type": "application/json", accept: "application/json, text/plain, */*", origin: AWS_PROVIDER.origin, referer: `${AWS_PROVIDER.origin}/`, "user-agent": userAgent },
+		headers: { "content-type": "application/json", accept: "application/json, text/plain, */*", origin: AWS_PROVIDER.origin, referer: `${AWS_PROVIDER.origin}/` },
 		body: JSON.stringify(awsRequestBody(payload, (dependencies.now ?? (() => new Date()))())),
 		signal: deadline(AWS_PROVIDER.timeoutMs, context.signal),
 	});

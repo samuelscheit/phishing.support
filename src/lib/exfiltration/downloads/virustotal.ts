@@ -1,7 +1,8 @@
 import type { LookupResult } from "./policy";
 import { sleep, type Sleep } from "../../util/sleep";
 import { deadline } from "../../util/async";
-import { type FetchLike } from "../../http/fetch";
+import { fetchAs, type FetchLike } from "../../http/fetch";
+import { serviceUserAgent } from "../../network/service_identity";
 import { VIRUSTOTAL_API } from "../../network/virustotal";
 
 const LOOKUP_TIMEOUT_MS = 15_000;
@@ -24,7 +25,7 @@ export async function lookupVirusTotal(params: {
 	if (!SHA256.test(params.sha256)) return { provider, state: "unavailable", reason: "invalid SHA-256" };
 	let response: Response;
 	try {
-		response = await (params.fetch ?? fetch)(`${VIRUSTOTAL_API}/files/${params.sha256}`, {
+		response = await fetchAs(serviceUserAgent, params.fetch)(`${VIRUSTOTAL_API}/files/${params.sha256}`, {
 			method: "GET",
 			headers: { "x-apikey": params.apiKey.trim(), accept: "application/json" },
 			signal: deadline(LOOKUP_TIMEOUT_MS, params.signal),
@@ -79,7 +80,7 @@ export async function awaitVirusTotalVerdict(params: {
 	while (Date.now() < stopAt) {
 		params.signal?.throwIfAborted();
 		try {
-			const response = await (params.fetch ?? fetch)(`${VIRUSTOTAL_API}/analyses/${encodeURIComponent(params.analysisId)}`, {
+			const response = await fetchAs(serviceUserAgent, params.fetch)(`${VIRUSTOTAL_API}/analyses/${encodeURIComponent(params.analysisId)}`, {
 				headers: { "x-apikey": params.apiKey.trim(), accept: "application/json" },
 				signal: deadline(LOOKUP_TIMEOUT_MS, params.signal),
 			});

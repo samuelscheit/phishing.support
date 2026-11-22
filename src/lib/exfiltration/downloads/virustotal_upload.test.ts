@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { serviceUserAgent } from "../../network/service_identity";
 
 import { uploadToVirusTotal, VIRUSTOTAL_DIRECT_UPLOAD_LIMIT_BYTES } from "./virustotal_upload";
 
@@ -22,6 +23,7 @@ describe("VirusTotal upload", () => {
 		});
 		expect(url).toBe("https://www.virustotal.com/api/v3/files");
 		expect(headers["x-apikey"]).toBe("vt-key");
+		expect(headers["user-agent"]).toBe(serviceUserAgent);
 		expect(form?.has("file")).toBeTrue();
 		const sent = form?.get("file") as File;
 		expect(sent.name).toBe("sample-0f3c.bin");

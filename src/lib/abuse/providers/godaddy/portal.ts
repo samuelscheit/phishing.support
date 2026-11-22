@@ -6,7 +6,8 @@ import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } fr
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
 import type { GoDaddySubmissionPayload } from "./payload";
 import { deadline } from "../../../util/async";
-import { type AnswerFetch } from "../../../http/fetch";
+import { fetchAs, type AnswerFetch } from "../../../http/fetch";
+import { browserUserAgent } from "../../../network/service_identity";
 
 const PORTAL = PROVIDER.portal;
 
@@ -106,7 +107,8 @@ export type PortalCaseStatus = { state: string; final: boolean } | undefined;
 
 /** The public case lookup: undefined when GoDaddy has no such claim; a 429 or anything unexpected throws. */
 export async function fetchPortalCaseStatus(caseId: string, dependencies: { fetch?: AnswerFetch; signal?: AbortSignal } = {}): Promise<PortalCaseStatus> {
-	const answer = await (dependencies.fetch ?? ((url, init) => fetch(url, init)))(PORTAL.caseStatusUrl, {
+	// The portal page's own lookup, so it goes out as that page's browser.
+	const answer = await fetchAs(browserUserAgent, dependencies.fetch)(PORTAL.caseStatusUrl, {
 		method: "POST",
 		headers: { "content-type": "application/json", accept: "application/json", [PORTAL.requestHeader.name]: PORTAL.requestHeader.value },
 		body: JSON.stringify({ caseId }),

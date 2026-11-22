@@ -9,7 +9,8 @@ import { asRecord, parseJsonRecord, text } from "../../../util/values";
 import { snippet } from "../../../util/text";
 import { unescapeHtml } from "../../../util/html";
 import { deadline } from "../../../util/async";
-import { type FetchLike } from "../../../http/fetch";
+import { fetchAs, type FetchLike } from "../../../http/fetch";
+import { browserUserAgent } from "../../../network/service_identity";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_CHARS = 100_000;
@@ -144,7 +145,8 @@ async function cloudflareDashboardRequest<T>(
 	request: { url: string; method: "GET" | "POST"; body?: unknown },
 	parse: (status: number, rawBody: string) => T,
 ): Promise<T> {
-	const fetchImplementation = context.fetch ?? globalThis.fetch;
+	// The dashboard's own API with the dashboard's login session, so it goes out as that page's browser.
+	const fetchImplementation = fetchAs(browserUserAgent, context.fetch);
 	const send = async (session: CloudflareSession) => {
 		context.signal?.throwIfAborted();
 		const response = await fetchImplementation(request.url, {

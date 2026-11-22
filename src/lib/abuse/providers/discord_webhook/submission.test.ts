@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { discordUserAgent } from "../../../network/service_identity";
 
 import { SubmissionsEntity } from "../../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
@@ -55,9 +56,9 @@ function provider(dependencies: DiscordWebhookDependencies): ProviderSubmissionP
 
 /** A fake Discord API answering each DELETE in turn; it records what was asked. */
 function discord(...answers: Array<Response | Error>) {
-	const requests: Array<{ url: string; method?: string }> = [];
+	const requests: Array<{ url: string; method?: string; userAgent: string | null }> = [];
 	const fetch = async (url: string, init: RequestInit) => {
-		requests.push({ url, method: init.method });
+		requests.push({ url, method: init.method, userAgent: new Headers(init.headers).get("user-agent") });
 		const answer = answers.shift() ?? new Response(null, { status: 204 });
 		if (answer instanceof Error) throw answer;
 		return answer;
@@ -75,7 +76,8 @@ describe("Discord webhook routes", () => {
 
 		const api = discord(new Response(null, { status: 204 }));
 		await expect(executeProviderSubmission({ routeId: routes[0]!.id, provider: provider(api) })).resolves.toMatchObject({ outcome: "submitted" });
-		expect(api.requests).toEqual([{ url: `https://discord.com/api/v10/webhooks/${WEBHOOK_ID}/${TOKEN}`, method: "DELETE" }]);
+		// Discord's API requires its `DiscordBot (url, version)` User-Agent.
+		expect(api.requests).toEqual([{ url: `https://discord.com/api/v10/webhooks/${WEBHOOK_ID}/${TOKEN}`, method: "DELETE", userAgent: discordUserAgent }]);
 		const route = await AbuseRepository.getRoute(routes[0]!.id);
 		expect(route?.status).toBe("submitted");
 		// It is deleted once; a replayed job does nothing.

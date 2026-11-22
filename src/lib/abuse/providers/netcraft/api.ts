@@ -141,7 +141,7 @@ function parseSubmissionStatus(value: unknown, uuid: string): NetcraftSubmission
 }
 
 async function fetchNetcraftJson(
-	request: FetchLike,
+	request: FetchLike | undefined,
 	url: string,
 	label: string,
 ): Promise<unknown> {
@@ -154,7 +154,7 @@ async function fetchNetcraftJson(
 			redirect: "error",
 			headers: { accept: "application/json" },
 		}, {
-			fetch: request as FetchLike,
+			fetch: request,
 			timeoutMs: NETCRAFT_STATUS_REQUEST_TIMEOUT_MS,
 			attempts: 1,
 			retryDelayMs: 0,
@@ -178,7 +178,7 @@ export async function fetchNetcraftSubmissionState(params: {
 	const uuid = normalizeSubmissionId(params.uuid);
 	if (!uuid) throw new Error("Netcraft returned an invalid submission UUID.");
 	const status = parseSubmissionStatus(
-		await fetchNetcraftJson(params.fetch ?? fetch, netcraftSubmissionUrl(uuid), "submission-status"),
+		await fetchNetcraftJson(params.fetch, netcraftSubmissionUrl(uuid), "submission-status"),
 		uuid,
 	);
 	if (!status) throw new Error("Netcraft submission-status response did not match the reviewed schema.");

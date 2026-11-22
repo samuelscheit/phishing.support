@@ -3,6 +3,8 @@ import { z } from "zod";
 import { sleep, type Sleep } from "../../../util/sleep";
 import { asRecord } from "../../../util/values";
 import { createDraft } from "../kit/draft";
+import { fetchAs } from "../../../http/fetch";
+import { discordUserAgent } from "../../../network/service_identity";
 import { payloadEnvelope, storedReader } from "../kit/stored";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { DISCORD_WEBHOOK_PROVIDER, DISCORD_WEBHOOK_URL } from "./definition";
@@ -67,7 +69,7 @@ async function discordError(response: Response): Promise<{ code?: number; messag
 export async function submitDiscordWebhookDeletion(context: ProviderSubmissionContext, dependencies: DiscordWebhookDependencies = {}): Promise<ProviderSubmissionSuccess> {
 	const payload = discordWebhookDraft.stored(context);
 	const { id, token } = payload.webhook;
-	const fetcher = dependencies.fetch ?? fetch;
+	const fetcher = fetchAs(discordUserAgent, dependencies.fetch);
 	const wait = dependencies.sleep ?? sleep;
 	const submittedTargets = [`discord-webhook:${id}`];
 	let lastFailure = "";
@@ -76,7 +78,6 @@ export async function submitDiscordWebhookDeletion(context: ProviderSubmissionCo
 		try {
 			response = await fetcher(`${DISCORD_WEBHOOK_PROVIDER.apiBase}/webhooks/${id}/${token}`, {
 				method: "DELETE",
-				headers: { "user-agent": "PhishingSupport (https://phishing.support, 1.0)" },
 				...(context.signal ? { signal: context.signal } : {}),
 			});
 		} catch (error) {

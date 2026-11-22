@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { serviceUserAgent } from "../../network/service_identity";
 
 import { lookupVirusTotal } from "./virustotal";
 
@@ -20,6 +21,7 @@ describe("VirusTotal hash lookup", () => {
 		});
 		expect(url).toBe(`https://www.virustotal.com/api/v3/files/${sha256}`);
 		expect(headers["x-apikey"]).toBe("vt-key");
+		expect(headers["user-agent"]).toBe(serviceUserAgent);
 	});
 
 	test("a missing key makes no request and is not_configured", async () => {

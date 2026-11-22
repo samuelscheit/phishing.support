@@ -1,5 +1,5 @@
 import { abuseEmailCaseUrl } from "../../mail/draft";
-import { userAgent } from "../../../network/service_identity";
+import { browserUserAgent } from "../../../network/service_identity";
 import { asRecord, parseJsonRecord } from "../../../util/values";
 import type { ProviderFormFacts } from "../../portal/form_facts";
 import { deriveProviderFormFacts } from "../../portal/form_facts";
@@ -22,7 +22,7 @@ import {
 	storedNameSiloSubmissionPayload,
 	type NameSiloSubmissionPayload,
 } from "./payload";
-import { type FetchLike } from "../../../http/fetch";
+import { fetchAs, type FetchLike } from "../../../http/fetch";
 
 type NameSiloSession = {
 	csrfToken: string;
@@ -109,17 +109,14 @@ export async function parseNameSiloSessionResponse(
 }
 
 async function fetchNameSiloSession(
-	fetcher: FetchLike,
+	fetcher: FetchLike | undefined,
 	signal: AbortSignal | undefined,
 	now: () => number,
 ): Promise<NameSiloSession> {
-	const response = await fetcher(NAMESILO_PROVIDER.tokenUrl, {
+	const response = await fetchAs(browserUserAgent, fetcher)(NAMESILO_PROVIDER.tokenUrl, {
 		method: "GET",
 		redirect: "error",
-		headers: {
-			accept: "application/json",
-			"user-agent": userAgent,
-		},
+		headers: { accept: "application/json" },
 		...(signal ? { signal } : {}),
 	});
 	return parseNameSiloSessionResponse(response, now);
@@ -267,7 +264,7 @@ export async function prepareNameSiloExternalSubmission(
 	const { bytes } = await evidenceFileOf(NAMESILO_EVIDENCE_CONTRACT, "NameSilo", payload.evidence, data, dependencies);
 	const now = dependencies.now ?? Date.now;
 	const captchaToken = await (dependencies.captchaSolver ?? solveNameSiloCaptcha)(context.signal);
-	const session = await fetchNameSiloSession(dependencies.fetch ?? fetch, context.signal, now);
+	const session = await fetchNameSiloSession(dependencies.fetch, context.signal, now);
 	const state: NameSiloPreflightState = { ...session, captchaToken, payload, evidenceBytes: bytes };
 	if (!storedPreflightState({ state }, now)) throw new Error("NameSilo preflight returned invalid ephemeral state or a CSRF session about to expire.");
 	return { state };
@@ -293,7 +290,7 @@ export async function submitNameSiloSubmission(
 	if (!ephemeral) throw new ProviderSubmissionNeedsHumanError("NameSilo submission requires prepared CSRF and CAPTCHA state with a CSRF session that has not expired; nothing was sent.");
 	const { payload } = ephemeral;
 	const form = buildNameSiloHttpPayload({ payload, evidenceBytes: ephemeral.evidenceBytes, captchaToken: ephemeral.captchaToken });
-	const response = await (dependencies.fetch ?? fetch)(NAMESILO_PROVIDER.submissionUrl, {
+	const response = await fetchAs(browserUserAgent, dependencies.fetch)(NAMESILO_PROVIDER.submissionUrl, {
 		method: "POST",
 		redirect: "error",
 		headers: {
@@ -301,7 +298,6 @@ export async function submitNameSiloSubmission(
 			cookie: ephemeral.cookieHeader,
 			origin: new URL(NAMESILO_PROVIDER.reportPageUrl).origin,
 			referer: NAMESILO_PROVIDER.reportPageUrl,
-			"user-agent": userAgent,
 			"x-csrf-token": ephemeral.csrfToken,
 		},
 		body: form,

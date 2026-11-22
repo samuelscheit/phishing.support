@@ -4,7 +4,8 @@ import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } fr
 import { GODADDY_PROVIDER as PROVIDER } from "./definition";
 import type { GoDaddyReportType } from "./payload";
 import { deadline } from "../../../util/async";
-import { type AnswerFetch } from "../../../http/fetch";
+import { fetchAs, type AnswerFetch } from "../../../http/fetch";
+import { serviceUserAgent } from "../../../network/service_identity";
 
 export type GoDaddyApiCredentials = { key: string; secret: string };
 
@@ -21,10 +22,9 @@ export function goDaddyApiCredentials(environment: Readonly<Record<string, strin
 	return key && secret ? { key, secret } : undefined;
 }
 
-const defaultFetch: AnswerFetch = (url, init) => fetch(url, init);
-
 async function call(credentials: GoDaddyApiCredentials, path: string, init: { method: "GET" | "POST"; body?: unknown }, dependencies: GoDaddyApiDependencies): Promise<{ status: number; text: string; json: unknown }> {
-	const answer = await (dependencies.fetch ?? defaultFetch)(`${PROVIDER.api.baseUrl}${path}`, {
+	// A keyed developer API: it is told which program calls it.
+	const answer = await fetchAs(serviceUserAgent, dependencies.fetch)(`${PROVIDER.api.baseUrl}${path}`, {
 		method: init.method,
 		headers: {
 			authorization: `sso-key ${credentials.key}:${credentials.secret}`,

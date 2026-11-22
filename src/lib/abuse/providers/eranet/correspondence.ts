@@ -3,7 +3,8 @@ import type { ProviderCorrespondence } from "../submission_contracts";
 import { ERANET_PROVIDER } from "./definition";
 import { asRecord, parseJsonRecord } from "../../../util/values";
 import { snippet } from "../../../util/text";
-import { type FetchLike } from "../../../http/fetch";
+import { fetchAs, type FetchLike } from "../../../http/fetch";
+import { browserUserAgent } from "../../../network/service_identity";
 
 /**
  * Eranet's review stages, in the order its "Query Progress" page numbers them
@@ -22,7 +23,8 @@ export async function fetchEranetCorrespondence(
 	context: { confirmationId: string; signal?: AbortSignal },
 	dependencies: { fetch?: FetchLike } = {},
 ): Promise<ProviderCorrespondence> {
-	const response = await (dependencies.fetch ?? fetch)(`${ERANET_PROVIDER.apiBaseUrl}/DescribeInstanceByOrderNo`, {
+	// The portal page's own lookup, so it goes out as that page's browser.
+	const response = await fetchAs(browserUserAgent, dependencies.fetch)(`${ERANET_PROVIDER.apiBaseUrl}/DescribeInstanceByOrderNo`, {
 		method: "POST",
 		headers: { Accept: "application/json", "Content-Type": "application/json; charset=utf-8" },
 		body: JSON.stringify({ OrderNo: context.confirmationId, Email: ERANET_PROVIDER.reporter.email }),

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { serviceUserAgent } from "../../network/service_identity";
 
 import { decideDownloadAction, type LookupResult } from "./policy";
 import { lookupMalwareBazaar } from "./malwarebazaar";
@@ -86,6 +87,7 @@ describe("MalwareBazaar hash lookup", () => {
 		expect(result).toEqual({ provider: "malwarebazaar", state: "not_found" });
 		expect(captured?.body).toBe(`query=get_info&hash=${sha256}`);
 		expect(captured?.headers["Auth-Key"]).toBe("key-123");
+		expect(captured?.headers["user-agent"]).toBe(serviceUserAgent);
 	});
 
 	test("a missing key is not_configured and makes no network request", async () => {

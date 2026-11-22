@@ -8,6 +8,8 @@ import { MICROSOFT_PROVIDER } from "./definition";
 import { buildMicrosoftSubmissionPayload, microsoftRequestBody, storedMicrosoftSubmissionPayload, type MicrosoftReportInput } from "./payload";
 import { parseJsonRecord } from "../../../util/values";
 import { deadline } from "../../../util/async";
+import { browserUserAgent } from "../../../network/service_identity";
+import { fetchAs } from "../../../http/fetch";
 
 export type MicrosoftSubmissionDependencies = {
 	fetch?: (url: string, init: RequestInit) => Promise<Response>;
@@ -45,7 +47,8 @@ export const microsoftDraft = createDraft({
  */
 export async function submitMicrosoftSubmission(context: ProviderSubmissionContext, dependencies: MicrosoftSubmissionDependencies = {}): Promise<ProviderSubmissionSuccess> {
 	const payload = microsoftDraft.stored(context);
-	const send = dependencies.fetch ?? fetch;
+	// The portal's own unauthenticated request, so it goes out as that page's browser.
+	const send = fetchAs(browserUserAgent, dependencies.fetch);
 	const response = await send(MICROSOFT_PROVIDER.endpoint, {
 		method: "POST",
 		headers: {

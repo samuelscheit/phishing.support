@@ -1,11 +1,14 @@
 import { sleep } from "../util/sleep";
-import { type FetchLike } from "../http/fetch";
+import { fetchAs, type FetchLike } from "../http/fetch";
+import { serviceUserAgent } from "./service_identity";
 
 /**
  * Bounded fetch primitives for evidence collection.  A failed third-party
  * service must never hold an analysis worker indefinitely: every attempt has
  * a real deadline (including body reads) and transient failures are retried a
- * finite number of times.
+ * finite number of times. Every client here is a service API meant for
+ * programs (RDAP, RIPEstat, urlscan, Netcraft, …), so requests carry the
+ * service's own User-Agent.
  */
 
 /** All evidence clients use absolute string URLs, which keeps test adapters small and deterministic. */
@@ -137,7 +140,7 @@ export async function readResponseBody(response: Response, maxBytes: number): Pr
  */
 async function fetchDecoded<T>(url: string, init: RequestInit, options: BoundedRequestOptions, decode: (body: Buffer) => T): Promise<T | undefined> {
 	const config = settings(options);
-	const fetchImplementation = options.fetch ?? fetch;
+	const fetchImplementation = fetchAs(serviceUserAgent, options.fetch);
 	let lastError: unknown;
 
 	for (let attempt = 1; attempt <= config.attempts; attempt++) {

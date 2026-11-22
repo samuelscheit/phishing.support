@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { browserUserAgent } from "../../../network/service_identity";
 
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { validateAbuseReportRequest } from "../../contracts";
@@ -223,6 +224,8 @@ describe("NameSilo phishing report submission", () => {
 		expect(requests[0]?.init?.redirect).toBe("error");
 		expect(requests[1]?.init?.redirect).toBe("error");
 		const headers = new Headers(requests[1]?.init?.headers);
+		// The token read and the filing both go out as the report page's browser.
+		expect(requests.map((entry) => new Headers(entry.init?.headers).get("user-agent"))).toEqual([browserUserAgent, browserUserAgent]);
 		expect(headers.get("x-csrf-token")).toBe("csrf-token");
 		expect(headers.get("cookie")).toBe("PHPSESSID=session-value; _csrf-sec2=csrf-cookie");
 		const form = requests[1]?.init?.body as FormData;

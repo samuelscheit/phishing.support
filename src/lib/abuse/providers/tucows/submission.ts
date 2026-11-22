@@ -87,7 +87,7 @@ async function advance(session: TucowsSession, step: string, from: string, field
 export async function prepareTucowsExternalSubmission(context: ProviderSubmissionContext, { payload, data }: VerifiedOf<typeof tucowsDraft>, dependencies: TucowsDependencies = {}): Promise<ProviderSubmissionPreflight> {
 	if (!dependencies.readCode && !imapConfig()) throw new ProviderSubmissionNeedsHumanError("Tucows reporting requires the IMAP mailbox to receive its verification code.");
 	const { bytes: screenshot } = await evidenceFileOf(TUCOWS_EVIDENCE_CONTRACT, "Tucows", payload.evidence, data, dependencies);
-	const session = createTucowsSession(dependencies.fetch ?? fetch, context.signal);
+	const session = createTucowsSession(dependencies.fetch, context.signal);
 
 	const first = await session.get("/report");
 	const firstCsrf = hiddenCsrfToken(first.text);
