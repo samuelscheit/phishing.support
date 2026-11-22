@@ -111,7 +111,7 @@ describe("the generic provider-form task", () => {
 		expect(goal).toContain(`"evidenceFiles":${JSON.stringify(evidence.map((file) => file.filename))}`);
 		expect(goal).toContain(`screenshots of the reported phishing page (${evidence[0]!.filename}, ${evidence[1]!.filename}); they are the only files you may attach.`);
 		expect(goal).toContain("attach them there with upload, naming each file exactly as listed");
-		expect(goal).toContain("Attach nothing anywhere else.");
+		expect(goal).toContain("then call upload on its \"Add file\" control or drop area. Check that the form lists the attached files before you submit. Attach nothing anywhere else.");
 		expect(goal).not.toContain("do not upload files");
 		// The original artifact names are not file names the agent can use.
 		expect(goal).not.toContain("lure-page.jpg");

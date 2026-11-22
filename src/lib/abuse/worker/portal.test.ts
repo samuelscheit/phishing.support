@@ -44,11 +44,17 @@ const FORM = `<h1>Report abuse</h1>
 	<button type="submit">Submit report</button>
 </form>`;
 
-/** A form like Squarespace's: the report is only accepted with a screenshot of the abusive page attached. */
+/**
+ * A form like Squarespace's (a Zendesk request form): the report is only
+ * accepted with a screenshot attached, and its file input is transparent,
+ * laid over an "Add file or drop files here" area.
+ */
 const EVIDENCE_FORM = `<h1>Report abuse</h1>
+<style>.upload-dropzone { position: relative; border: 1px dashed; padding: 12px; width: 420px } .upload-dropzone input { position: absolute; inset: 0; opacity: 0; width: 100% }</style>
 <form method="POST" action="/report-evidence" enctype="multipart/form-data">
 	<label>Domain <input name="domain" required></label>
-	<label>Screenshot of the abusive page <input type="file" name="screenshot" accept="image/*" required></label>
+	<label for="screenshot">Screenshot of the abusive page</label>
+	<div class="upload-dropzone"><input type="file" id="screenshot" name="screenshot" accept="image/*" required><span><a>Add file</a> or drop files here</span></div>
 	<button type="submit">Submit report</button>
 </form>`;
 
@@ -249,7 +255,7 @@ describe.skipIf(!chromiumAvailable)("the generic provider-form flow (real Chromi
 				expect(request.tools?.map((tool) => tool.name)).toContain("upload");
 				return { calls: [
 					{ name: "type", arguments: { ref: refIn(page, 'textbox "Domain"'), text: TARGET } },
-					{ name: "upload", arguments: { ref: refIn(page, "Screenshot of the abusive page"), path: filename } },
+					{ name: "upload", arguments: { ref: refIn(page, 'file-input "Screenshot of the abusive page"'), path: filename } },
 					{ name: "click", arguments: { ref: refIn(page, 'button "Submit report"') } },
 				] };
 			},

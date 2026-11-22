@@ -54,6 +54,30 @@ describe("the uploading connection", () => {
 		expect(String(sent[0]!.params.functionDeclaration)).toContain("DataTransfer");
 	});
 
+	test("answers a file chooser's DOM.setFileInputFiles by backend node: resolves the input in its session, sets the bytes there, releases the handle", async () => {
+		const { connection, sent } = recorder({ object: { objectId: "node-obj" } });
+		const wrapped = uploadingConnection(connection, files);
+		expect(await wrapped.send("DOM.setFileInputFiles", { files: ["/staged/shot.png"], backendNodeId: 42 }, "frame-session")).toEqual({});
+		expect(sent.map((command) => `${command.method} ${command.sessionId}`)).toEqual(["DOM.resolveNode frame-session", "Runtime.callFunctionOn frame-session", "Runtime.releaseObjectGroup frame-session"]);
+		expect(sent[0]!.params).toEqual({ backendNodeId: 42, objectGroup: "browser-task-uploads" });
+		expect(sent[1]!.params).toMatchObject({ objectId: "node-obj", arguments: [{ value: [{ filename: "shot.png", mimeType: "image/png", base64: PNG.bytes.toString("base64") }] }] });
+		expect(sent[2]!.params).toEqual({ objectGroup: "browser-task-uploads" });
+	});
+
+	test("releases the resolved input also when the page refuses the files", async () => {
+		const sent: string[] = [];
+		const connection = {
+			send: async (method: string) => {
+				sent.push(method);
+				if (method === "DOM.resolveNode") return { object: { objectId: "node-obj" } };
+				if (method === "Runtime.callFunctionOn") return { exceptionDetails: { exception: { description: "Error: this file input accepts one file" } } };
+				return {};
+			},
+		} as unknown as CdpConnection;
+		await expect(uploadingConnection(connection, files).send("DOM.setFileInputFiles", { files: ["/staged/shot.png"], backendNodeId: 7 }, "s")).rejects.toThrow("accepts one file");
+		expect(sent).toEqual(["DOM.resolveNode", "Runtime.callFunctionOn", "Runtime.releaseObjectGroup"]);
+	});
+
 	test("refuses paths that are not staged, an empty selection and a missing input, without touching the browser", async () => {
 		const { connection, sent } = recorder();
 		const wrapped = uploadingConnection(connection, files);

@@ -124,7 +124,11 @@ tool offered, and only for those files. The agent's upload names a path on the
 machine running it, which a remote Fabric browser cannot read, so the files are
 staged in a private directory here and the task's CDP connection answers
 `DOM.setFileInputFiles` itself, setting the staged bytes on the page's file
-input (`src/lib/browser/task/uploads.ts`). A generic provider-form run is given
+input (`src/lib/browser/task/uploads.ts`): the input the agent named (`objectId`),
+or the input of the file chooser its upload opened by clicking an "Add file"
+control or drop area (`backendNodeId`). A file input styled out of sight, as
+Zendesk's transparent one over its drop area, is listed by its label or the
+area holding it. A generic provider-form run is given
 the report's original PNG/JPEG screenshots (at most 3, 5 MiB each); their
 immutable references are in the run payload and their names in the task's
 report payload (`evidenceFiles`), and their bytes are re-verified against

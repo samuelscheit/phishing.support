@@ -30,7 +30,7 @@ function evidenceInstruction(evidence: readonly GenericProviderFormEvidence[]): 
 	}
 	return [
 		`The payload's evidenceFiles are screenshots of the reported phishing page (${evidence.map((file) => file.filename).join(", ")}); they are the only files you may attach.`,
-		"When this report form has a file field for a screenshot, attachment or evidence, attach them there with upload, naming each file exactly as listed (as many as the field accepts, in that order). Attach nothing anywhere else.",
+		"When this report form has a file field for a screenshot, attachment or evidence, attach them there with upload, naming each file exactly as listed (as many as the field accepts, in that order). The field may show no file input of its own: then call upload on its \"Add file\" control or drop area. Check that the form lists the attached files before you submit. Attach nothing anywhere else.",
 	].join(" ");
 }
 

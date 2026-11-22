@@ -14,17 +14,22 @@ const SET_FILES_TIMEOUT_MS = 60_000;
 /**
  * Files staged for one task. The task agent's `upload` tool accepts only real
  * paths inside its allowed upload directories and then asks the browser, with
- * `DOM.setFileInputFiles`, to read them from disk. A Fabric browser runs on
- * another machine, where those paths do not exist. So the files are staged in
- * a private directory here (for the agent's path policy), and the connection
- * the agent drives answers `DOM.setFileInputFiles` itself: it sets exactly the
- * staged bytes on the input in the page, as a user's file choice would.
+ * `DOM.setFileInputFiles`, to read them from disk: for the input it was given
+ * (`objectId`), or for the input of the file chooser its click on an "Add
+ * file" control or drop area opened (`backendNodeId`). A Fabric browser runs
+ * on another machine, where those paths do not exist. So the files are staged
+ * in a private directory here (for the agent's path policy), and the
+ * connection the agent drives answers `DOM.setFileInputFiles` itself: it sets
+ * exactly the staged bytes on that input in the page, as a user's file choice
+ * would.
  */
 export type StagedUploads = {
 	directory: string;
 	connection(endpoint: string): Promise<CdpConnection>;
 	dispose(): Promise<void>;
 };
+
+const OBJECT_GROUP = "browser-task-uploads";
 
 const SAFE_FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
@@ -88,16 +93,26 @@ export function uploadingConnection(connection: CdpConnection, files: ReadonlyMa
 			return { filename: file.filename, mimeType: file.mimeType, base64: file.bytes.toString("base64") };
 		});
 		if (staged.length === 0) throw new Error("upload names no files");
-		if (typeof params.objectId !== "string") throw new Error("upload needs the file input's object id");
-		const answer = await connection.send("Runtime.callFunctionOn", {
-			objectId: params.objectId,
-			functionDeclaration: setInputFiles.toString(),
-			arguments: [{ value: staged }],
-			returnByValue: true,
-			awaitPromise: false,
-		}, sessionId, Math.max(timeoutMs ?? 0, SET_FILES_TIMEOUT_MS)) as { exceptionDetails?: { exception?: { description?: string }; text?: string } };
-		if (answer.exceptionDetails) throw new Error(answer.exceptionDetails.exception?.description ?? answer.exceptionDetails.text ?? "setting the files failed");
-		return {};
+		const { objectId, backendNodeId } = params;
+		if (typeof objectId !== "string" && typeof backendNodeId !== "number") throw new Error("upload needs the file input's object id or backend node id");
+		try {
+			// A file chooser names its input by backend node: resolve it in the same session.
+			const input = typeof objectId === "string"
+				? objectId
+				: (await connection.send("DOM.resolveNode", { backendNodeId, objectGroup: OBJECT_GROUP }, sessionId) as { object: { objectId?: string } }).object.objectId;
+			if (!input) throw new Error("the file input is gone");
+			const answer = await connection.send("Runtime.callFunctionOn", {
+				objectId: input,
+				functionDeclaration: setInputFiles.toString(),
+				arguments: [{ value: staged }],
+				returnByValue: true,
+				awaitPromise: false,
+			}, sessionId, Math.max(timeoutMs ?? 0, SET_FILES_TIMEOUT_MS)) as { exceptionDetails?: { exception?: { description?: string }; text?: string } };
+			if (answer.exceptionDetails) throw new Error(answer.exceptionDetails.exception?.description ?? answer.exceptionDetails.text ?? "setting the files failed");
+			return {};
+		} finally {
+			if (typeof objectId !== "string") await connection.send("Runtime.releaseObjectGroup", { objectGroup: OBJECT_GROUP }, sessionId).catch(() => undefined);
+		}
 	};
 	return new Proxy(connection, {
 		get(target, property) {

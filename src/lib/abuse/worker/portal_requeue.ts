@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 
 import { getDb } from "../../db";
+import { agentGaveUp } from "../../browser/task/agent";
 import { asRecord } from "../../util/values";
 import { pageScreenshotEvidence } from "../linked_host_report";
 import { GENERIC_PROVIDER_FORM_EVIDENCE_CONTRACT } from "../portal/form_task";
@@ -26,29 +27,44 @@ function couldHaveSubmitted(action: { tool?: unknown; ok?: unknown; args?: unkno
 }
 
 /**
- * One-off operator repair: send a generic provider-form route back to its
- * form after a run that stopped because it had no screenshot to attach.
- *
- * It refuses unless the route is `needs_human` from exactly such a run: the
- * latest run is a generic provider-form run that failed with the agent's
- * `needs_input`, has no confirmation or submitted target, and its task record
- * shows no action that could have sent the form. An exfiltration-backend
- * report made before those reports carried the page's screenshot gets the
- * confirmed page's screenshot copied from its source report, so the new run
- * has something to attach. The route then re-enters `escalating_to_portal`
- * with a `run_portal` job for the same verified form, whose new run is
- * built from today's adapter (and evidence) under a fresh correlation key.
+ * The two ways the agent itself stops a generic-form run without submitting,
+ * as the worker settles them: `needs_input` (route `needs_human`) and its own
+ * `fail` (route `failed`).
  */
-export async function requeueGenericPortalAfterNeedsInput(routeId: bigint): Promise<GenericPortalRequeue> {
+const AGENT_STOPS = {
+	needs_human: { failurePrefix: "The agent needs input:", recorded: (record: Record<string, unknown>) => record.status === "needs_input" },
+	failed: { failurePrefix: "failed: ", recorded: (record: Record<string, unknown>) => Array.isArray(record.steps) && agentGaveUp(record as Parameters<typeof agentGaveUp>[0]) },
+} as const;
+
+/**
+ * One-off operator repair: send a generic provider-form route back to its
+ * form after a run the agent stopped without submitting, e.g. because it had
+ * no screenshot to attach, or could not reach the form's attachment control.
+ *
+ * It refuses unless the latest run is a generic provider-form run the agent
+ * itself stopped (`needs_input`, or its own `fail`), with no confirmation or
+ * submitted target, and whose task record shows no action that could have
+ * sent the form. A record that does show one (a successful click, key press
+ * or submitting type) is requeued only with `noSubmissionReview`: the
+ * operator's account of why none of them sent it, kept in the audit event.
+ * An exfiltration-backend report made before those reports carried the page's
+ * screenshot gets the confirmed page's screenshot copied from its source
+ * report, so the new run has something to attach. The route then re-enters
+ * `escalating_to_portal` with a `run_portal` job for the same verified form,
+ * whose new run is built from today's adapter (and evidence) under a fresh
+ * correlation key.
+ */
+export async function requeueGenericPortalRun(routeId: bigint, options: { noSubmissionReview?: string } = {}): Promise<GenericPortalRequeue> {
 	const route = await AbuseRepository.getRoute(routeId);
 	if (!route) return { requeued: false, reason: "route_missing" };
-	if (route.status !== "needs_human") return { requeued: false, reason: `route_status_${route.status}` };
+	if (route.status !== "needs_human" && route.status !== "failed") return { requeued: false, reason: `route_status_${route.status}` };
+	const stop = AGENT_STOPS[route.status];
 	const run = await AbuseRepository.getLatestProviderRunForRoute(route.id);
 	const payload = run && asRecord(run.providerPayload);
 	if (!run || payload?.adapter !== "generic_verified_provider_form" || !run.correlationKey.startsWith("generic-portal:")) {
 		return { requeued: false, reason: "latest_run_not_generic_portal" };
 	}
-	if (run.executionStatus !== "failed" || !run.failureReason?.startsWith("The agent needs input:")) return { requeued: false, reason: "latest_run_not_needs_input" };
+	if (run.executionStatus !== "failed" || !run.failureReason?.startsWith(stop.failurePrefix)) return { requeued: false, reason: "latest_run_not_agent_stop" };
 	if (run.confirmationId || run.confirmationText || (run.submittedTargets ?? []).length > 0) return { requeued: false, reason: "latest_run_reported_submission" };
 	const entryUrl = typeof payload.entryUrl === "string" ? payload.entryUrl : undefined;
 	if (!entryUrl) return { requeued: false, reason: "latest_run_entry_url_missing" };
@@ -61,18 +77,20 @@ export async function requeueGenericPortalAfterNeedsInput(routeId: bigint): Prom
 		record = undefined;
 	}
 	const steps = Array.isArray(record?.steps) ? record.steps : undefined;
-	if (record?.status !== "needs_input" || !steps) return { requeued: false, reason: "task_record_not_needs_input" };
+	if (!record || !steps || !stop.recorded(record)) return { requeued: false, reason: "task_record_not_agent_stop" };
 	const actions = steps.flatMap((step) => {
 		const list = asRecord(step)?.actions;
 		return Array.isArray(list) ? list.map((action) => asRecord(action) ?? {}) : [{ tool: "unknown", ok: true }];
 	});
-	if (actions.some(couldHaveSubmitted) || actions.some((action) => action.tool === "unknown")) return { requeued: false, reason: "task_record_shows_possible_submission" };
+	if (actions.some((action) => action.tool === "unknown")) return { requeued: false, reason: "task_record_shows_possible_submission" };
+	const noSubmissionReview = options.noSubmissionReview?.trim();
+	if (actions.some(couldHaveSubmitted) && !noSubmissionReview) return { requeued: false, reason: "task_record_shows_possible_submission" };
 
 	const backfilledArtifactId = await backfillSourceScreenshot(route.reportId);
 	const reopened = (await getDb()).transaction((tx) => {
 		const updated = tx.update(abuseProviderRoutes)
 			.set({ status: "escalating_to_portal", updatedAt: now() })
-			.where(and(eq(abuseProviderRoutes.id, route.id), eq(abuseProviderRoutes.status, "needs_human")))
+			.where(and(eq(abuseProviderRoutes.id, route.id), eq(abuseProviderRoutes.status, route.status)))
 			.returning({ id: abuseProviderRoutes.id })
 			.get();
 		if (!updated) return false;
@@ -82,7 +100,13 @@ export async function requeueGenericPortalAfterNeedsInput(routeId: bigint): Prom
 			routeId: route.id,
 			runId: run.id,
 			eventType: "route.status_changed",
-			data: { from: "needs_human", to: "escalating_to_portal", reason: "operator_requeue_generic_portal_needs_input", providerLink: entryUrl },
+			data: {
+				from: route.status,
+				to: "escalating_to_portal",
+				reason: "operator_requeue_generic_portal",
+				providerLink: entryUrl,
+				...(noSubmissionReview ? { noSubmissionReview } : {}),
+			},
 		});
 		recomputeReportStatusInTransaction(tx, route.reportId, { reason: "route_status_transition", routeId: route.id.toString() });
 		return true;

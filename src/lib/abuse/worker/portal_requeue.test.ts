@@ -11,7 +11,7 @@ import { validateAbuseReportRequest } from "../contracts";
 import { buildGenericProviderFormPayload } from "../portal/form_task";
 import { AbuseRepository } from "../repository";
 import { genericPortalCorrelationKey } from "./portal";
-import { requeueGenericPortalAfterNeedsInput } from "./portal_requeue";
+import { requeueGenericPortalRun } from "./portal_requeue";
 
 useTemporaryDatabase();
 
@@ -38,6 +38,19 @@ const NEEDS_INPUT_STEPS = [
 	{ step: 4, actions: [{ tool: "needs_input", ok: true, args: { question: QUESTION } }] },
 ];
 
+const GAVE_UP = "Unable to attach the required evidence screenshot: the form exposes only an unreferenced attachment drop area, with no usable file-input control. I did not submit the report.";
+
+/** Production's second Squarespace run: it dismissed the cookie banner, opened the form, filled it, clicked around the attachment area, tabbed, and gave up. */
+const GAVE_UP_STEPS = [
+	{ step: 3, actions: [{ tool: "click", ok: true, args: { ref: "e3", force: true } }] },
+	{ step: 5, actions: [{ tool: "click", ok: true, args: { ref: "e16", force: true } }] },
+	{ step: 6, actions: [{ tool: "type", ok: true, args: { ref: "e7", submit: false, text: "support@phishing.support" } }] },
+	{ step: 12, actions: [{ tool: "click", ok: true, args: { ref: "e16", force: true } }] },
+	{ step: 13, actions: [{ tool: "press", ok: true, args: { key: "Tab" } }] },
+	{ step: 40, actions: [{ tool: "fail", ok: true, args: { reason: GAVE_UP } }] },
+];
+const REVIEW = "Zendesk posts the form by navigation; the run ended on /requests/new and no confirmation mail arrived.";
+
 let submissionIds = 0n;
 
 /** The confirmed page's report with its screenshot, and the exfiltration report against the backend found on it (without one, as such reports used to be made). */
@@ -56,8 +69,13 @@ async function exfiltrationCase(options: { pageScreenshot?: boolean } = {}) {
 	return AbuseRepository.createReport({ request, reporter: {} });
 }
 
-/** A generic-form route settled `needs_human` by the agent's `needs_input`, with the task record the worker stores. */
-async function needsInputRoute(options: { steps?: unknown[]; recordStatus?: string; confirmationId?: string; reportId?: bigint } = {}) {
+/**
+ * A generic-form route the agent stopped, settled as the worker settles it,
+ * with the task record the worker stores: `needs_input` (route `needs_human`)
+ * or its own `fail` (route `failed`).
+ */
+async function stoppedRoute(options: { stop?: "needs_input" | "gave_up"; steps?: unknown[]; recordStatus?: string; confirmationId?: string; reportId?: bigint } = {}) {
+	const gaveUp = options.stop === "gave_up";
 	const reportId = options.reportId ?? (await exfiltrationCase()).reportId;
 	const [target] = await AbuseRepository.listTargets(reportId);
 	const route = await AbuseRepository.upsertResolvedRoute(target!.id, {
@@ -93,30 +111,37 @@ async function needsInputRoute(options: { steps?: unknown[]; recordStatus?: stri
 		name: `browser-task-${run.id.toString()}.json`,
 		kind: "browser_task_record",
 		mimeType: "application/json",
-		buffer: Buffer.from(stableJson({ status: options.recordStatus ?? "needs_input", summary: QUESTION, question: QUESTION, steps: options.steps ?? NEEDS_INPUT_STEPS }), "utf8"),
+		buffer: Buffer.from(stableJson(gaveUp
+			? { status: options.recordStatus ?? "failed", summary: GAVE_UP, steps: options.steps ?? GAVE_UP_STEPS }
+			: { status: options.recordStatus ?? "needs_input", summary: QUESTION, question: QUESTION, steps: options.steps ?? NEEDS_INPUT_STEPS }), "utf8"),
 	});
+	const routeStatus = gaveUp ? "failed" : "needs_human";
 	await AbuseRepository.settleProviderRun({
 		runId: run.id,
 		executionStatus: options.confirmationId ? "completed" : "failed",
-		routeStatus: "needs_human",
-		failureReason: `The agent needs input: ${QUESTION}`,
+		routeStatus,
+		failureReason: gaveUp ? `failed: ${GAVE_UP}` : `The agent needs input: ${QUESTION}`,
 		...(options.confirmationId ? { confirmationId: options.confirmationId } : {}),
-		routeData: { reason: "browser_task_needs_input" },
+		routeData: { reason: gaveUp ? "browser_task_gave_up" : "browser_task_needs_input" },
 	});
-	expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "needs_human" });
+	expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: routeStatus });
 	return { reportId, route, run, correlationKey };
 }
 
-describe("requeueing a generic provider-form route that stopped for a missing screenshot", () => {
+const requeueEvents = async (reportId: bigint) => (await AbuseRepository.listEvents(reportId))
+	.filter((event) => event.eventType === "route.status_changed" && event.data?.to === "escalating_to_portal" && event.data?.reason === "operator_requeue_generic_portal");
+
+describe("requeueing a generic provider-form route the agent stopped without submitting", () => {
 	test("sends the route back to the same verified form with the page's screenshot and a fresh run key", async () => {
-		const { reportId, route, run, correlationKey } = await needsInputRoute();
+		const { reportId, route, run, correlationKey } = await stoppedRoute();
 		expect(correlationKey).toMatch(/^generic-portal:\d+:[a-f0-9]{24}$/);
-		const outcome = await requeueGenericPortalAfterNeedsInput(route.id);
+		const outcome = await requeueGenericPortalRun(route.id);
 		if (!outcome.requeued) throw new Error(`not requeued: ${outcome.reason}`);
 		const { backfilledArtifactId } = outcome;
 		expect(backfilledArtifactId).toMatch(/^\d+$/);
 		expect(outcome).toMatchObject({ runId: run.id.toString(), entryUrl: ENTRY_URL });
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "escalating_to_portal" });
+		expect((await requeueEvents(reportId)).map((event) => event.data)).toEqual([{ from: "needs_human", to: "escalating_to_portal", reason: "operator_requeue_generic_portal", providerLink: ENTRY_URL }]);
 
 		const jobs = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, reportId)).all();
 		expect(jobs.filter((job) => job.jobType === "run_portal")).toHaveLength(1);
@@ -136,14 +161,43 @@ describe("requeueing a generic provider-form route that stopped for a missing sc
 		expect(execution!.run.id).not.toBe(run.id);
 
 		// It is one-off: a second call finds the route already back at the form.
-		expect(await requeueGenericPortalAfterNeedsInput(route.id)).toEqual({ requeued: false, reason: "route_status_running" });
+		expect(await requeueGenericPortalRun(route.id)).toEqual({ requeued: false, reason: "route_status_running" });
 		expect((await AbuseRepository.listArtifacts(reportId, ["user_evidence_original"])).filter((artifact) => artifact.mimeType === "image/png")).toHaveLength(1);
+	});
+
+	test("a run the agent gave up after clicking is requeued only with the operator's review, which the audit keeps", async () => {
+		const { reportId } = await exfiltrationCase({ pageScreenshot: true });
+		const { route, run, correlationKey } = await stoppedRoute({ stop: "gave_up", reportId });
+		expect(await requeueGenericPortalRun(route.id)).toEqual({ requeued: false, reason: "task_record_shows_possible_submission" });
+		expect(await requeueGenericPortalRun(route.id, { noSubmissionReview: "  " })).toEqual({ requeued: false, reason: "task_record_shows_possible_submission" });
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "failed" });
+
+		const outcome = await requeueGenericPortalRun(route.id, { noSubmissionReview: ` ${REVIEW} ` });
+		expect(outcome).toEqual({ requeued: true, runId: run.id.toString(), entryUrl: ENTRY_URL, jobId: expect.stringMatching(/^\d+$/) });
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "escalating_to_portal" });
+		expect((await requeueEvents(reportId)).map((event) => event.data)).toEqual([{ from: "failed", to: "escalating_to_portal", reason: "operator_requeue_generic_portal", providerLink: ENTRY_URL, noSubmissionReview: REVIEW }]);
+		expect(await genericPortalCorrelationKey(route, ENTRY_URL)).toBe(`${correlationKey}:2`);
+		expect(await requeueGenericPortalRun(route.id, { noSubmissionReview: REVIEW })).toEqual({ requeued: false, reason: "route_status_escalating_to_portal" });
+	});
+
+	test("a run the agent gave up without any possibly-submitting action needs no review", async () => {
+		const { route } = await stoppedRoute({ stop: "gave_up", steps: [GAVE_UP_STEPS[2], GAVE_UP_STEPS[5]] });
+		expect(await requeueGenericPortalRun(route.id)).toMatchObject({ requeued: true });
+	});
+
+	test.each([
+		["ended in an error rather than the agent's own fail", { stop: "gave_up" as const, steps: [{ step: 1, actions: [{ tool: "click", ok: false }] }] }],
+		["recorded another status", { stop: "gave_up" as const, recordStatus: "step_limit" }],
+	])("refuses a failed run that %s", async (_label, options) => {
+		const { route } = await stoppedRoute(options);
+		expect(await requeueGenericPortalRun(route.id, { noSubmissionReview: REVIEW })).toEqual({ requeued: false, reason: "task_record_not_agent_stop" });
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "failed" });
 	});
 
 	test("a report that already has its screenshot is requeued without a copy", async () => {
 		const { reportId } = await exfiltrationCase({ pageScreenshot: true });
-		const { route } = await needsInputRoute({ reportId });
-		const outcome = await requeueGenericPortalAfterNeedsInput(route.id);
+		const { route } = await stoppedRoute({ reportId });
+		const outcome = await requeueGenericPortalRun(route.id);
 		expect(outcome).toMatchObject({ requeued: true });
 		expect(outcome).not.toHaveProperty("backfilledArtifactId");
 		expect((await AbuseRepository.listArtifacts(reportId, ["user_evidence_original"])).map((artifact) => artifact.name)).toEqual(["exfiltration-evidence.json", "lure-page.png"]);
@@ -155,30 +209,35 @@ describe("requeueing a generic provider-form route that stopped for a missing sc
 		["typing that submits", [{ step: 1, actions: [{ tool: "type", ok: true, args: { ref: "e1", text: "x", submit: true } }] }]],
 		["a step without its actions", [{ step: 1 }]],
 	])("refuses a run whose record shows %s, which may have sent the form", async (_label, steps) => {
-		const { route } = await needsInputRoute({ steps });
-		expect(await requeueGenericPortalAfterNeedsInput(route.id)).toEqual({ requeued: false, reason: "task_record_shows_possible_submission" });
+		const { route } = await stoppedRoute({ steps });
+		expect(await requeueGenericPortalRun(route.id)).toEqual({ requeued: false, reason: "task_record_shows_possible_submission" });
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "needs_human" });
 	});
 
-	test("refuses a run that did not end in needs_input, or that reported a submission", async () => {
-		const done = await needsInputRoute({ recordStatus: "done" });
-		expect(await requeueGenericPortalAfterNeedsInput(done.route.id)).toEqual({ requeued: false, reason: "task_record_not_needs_input" });
-		const confirmed = await needsInputRoute({ confirmationId: "SQ-1" });
-		expect(await requeueGenericPortalAfterNeedsInput(confirmed.route.id)).toEqual({ requeued: false, reason: "latest_run_not_needs_input" });
+	test("a record with a step missing its actions is refused even with a review", async () => {
+		const { route } = await stoppedRoute({ steps: [{ step: 1 }] });
+		expect(await requeueGenericPortalRun(route.id, { noSubmissionReview: REVIEW })).toEqual({ requeued: false, reason: "task_record_shows_possible_submission" });
+	});
+
+	test("refuses a run that did not end in the agent's stop, or that reported a submission", async () => {
+		const done = await stoppedRoute({ recordStatus: "done" });
+		expect(await requeueGenericPortalRun(done.route.id)).toEqual({ requeued: false, reason: "task_record_not_agent_stop" });
+		const confirmed = await stoppedRoute({ confirmationId: "SQ-1" });
+		expect(await requeueGenericPortalRun(confirmed.route.id)).toEqual({ requeued: false, reason: "latest_run_not_agent_stop" });
 		expect(await AbuseRepository.getRoute(confirmed.route.id)).toMatchObject({ status: "needs_human" });
 	});
 
-	test("refuses a route that is missing, not needs_human, or whose latest run is not a generic form run", async () => {
-		expect(await requeueGenericPortalAfterNeedsInput(1n)).toEqual({ requeued: false, reason: "route_missing" });
+	test("refuses a route that is missing, neither needs_human nor failed, or whose latest run is not a generic form run", async () => {
+		expect(await requeueGenericPortalRun(1n)).toEqual({ requeued: false, reason: "route_missing" });
 		const { reportId } = await exfiltrationCase();
 		const [target] = await AbuseRepository.listTargets(reportId);
 		const route = await AbuseRepository.upsertResolvedRoute(target!.id, {
 			routeKey: "email:other.example", providerRegistryKey: "email:other.example", providerDisplayName: "Other", routeType: "email",
 			verifiedEmail: "abuse@other.example", resolverProvenance: { source: "t" }, resolutionSnapshot: { source: "t" }, status: "queued",
 		});
-		expect(await requeueGenericPortalAfterNeedsInput(route.id)).toEqual({ requeued: false, reason: "route_status_queued" });
+		expect(await requeueGenericPortalRun(route.id)).toEqual({ requeued: false, reason: "route_status_queued" });
 		const execution = await AbuseRepository.beginProviderExecution({ routeId: route.id, correlationKey: `email-run:${route.id.toString()}`, providerPayload: { adapter: "email" }, expectedStatus: "queued" });
 		await AbuseRepository.settleProviderRun({ runId: execution!.run.id, executionStatus: "failed", routeStatus: "needs_human", failureReason: "The agent needs input: x" });
-		expect(await requeueGenericPortalAfterNeedsInput(route.id)).toEqual({ requeued: false, reason: "latest_run_not_generic_portal" });
+		expect(await requeueGenericPortalRun(route.id)).toEqual({ requeued: false, reason: "latest_run_not_generic_portal" });
 	});
 });
