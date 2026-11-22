@@ -7,7 +7,8 @@ import {
 	extractPort43,
 	explicitAbuseMailboxes,
 } from "./rdap";
-import { contactChainProvenance, contactRoute, unroutableRoute } from "./routes";
+import { contactChainProvenance } from "./contact_chain";
+import { contactRoute, unroutableRoute } from "./routes";
 import { queryPort43 } from "./port43";
 import { parseExplicitWhoisAbuseMailboxes, parseWhoisNetworkMetadata } from "./whois";
 import type { AbuseMailbox, JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";

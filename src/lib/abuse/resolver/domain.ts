@@ -10,7 +10,8 @@ import {
 	firstEntityWithRole,
 	registrarRdapUrl,
 } from "./rdap";
-import { contactChainProvenance, contactRoute, unroutableRoute } from "./routes";
+import { contactChainProvenance } from "./contact_chain";
+import { contactRoute, unroutableRoute } from "./routes";
 import { queryPort43 } from "./port43";
 import { parseExplicitWhoisAbuseMailboxes, parseWhoisNetworkMetadata } from "./whois";
 import type { JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";

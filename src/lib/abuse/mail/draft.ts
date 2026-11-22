@@ -15,7 +15,7 @@ import { refangText } from "../../malware/defang";
 import { PRESERVATION_REQUEST } from "../preservation";
 import { approvalDraftOf } from "../persistence/approvals";
 import { asRecord } from "../../util/values";
-import { routeContact } from "../resolver/routes";
+import { routeContact } from "../resolver/contact_chain";
 import { utcDate } from "../../util/date_time";
 
 const MAX_DESCRIPTION_INPUT = 12_000;

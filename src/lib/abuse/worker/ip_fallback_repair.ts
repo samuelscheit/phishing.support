@@ -1,7 +1,7 @@
 import { deliveryReport } from "../mail/delivery_report";
 import { AbuseRepository } from "../repository";
 import { resolveIpTarget } from "../resolver/ip";
-import { fallbackContactsOf } from "../resolver/routes";
+import { fallbackContactsOf } from "../resolver/contact_chain";
 import type { ResolverDependencies } from "../resolver/types";
 import { asRecord, text } from "../../util/values";
 import { nextContactRoute, routeToNextContact } from "./mail";
