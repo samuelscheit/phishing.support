@@ -71,6 +71,7 @@ import {
 	settleProviderRun,
 	startBrowserTask,
 	replaceStartingDraft,
+	requeueNeverSentProviderRuns,
 } from "./persistence/provider_runs";
 import { getPublicStatus } from "./persistence/public_status";
 import {
@@ -129,6 +130,7 @@ export const AbuseRepository = {
 	getLatestProviderRunForRoute,
 	getLatestActiveProviderRunForRoute,
 	replaceStartingDraft,
+	requeueNeverSentProviderRuns,
 	settleProviderRun,
 	beginProviderExecution,
 	beginEmailDelivery,

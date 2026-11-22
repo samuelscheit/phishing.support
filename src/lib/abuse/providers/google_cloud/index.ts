@@ -1,7 +1,7 @@
 import { defineProvider } from "../kit/provider";
 import { GOOGLE_CLOUD_PROVIDER } from "./definition";
 import { makeGoogleCloudAbuseDetails } from "./payload";
-import { googleCloudDraft, submitGoogleCloudSubmission } from "./submission";
+import { googleCloudDraft, prepareGoogleCloudExternalSubmission, submitGoogleCloudSubmission } from "./submission";
 
 /** Google Cloud's abuse mailboxes answer with this form; the route files the report there instead. */
 export const googleCloudProvider = defineProvider({
@@ -15,5 +15,8 @@ export const googleCloudProvider = defineProvider({
 		capturedAt: new Date(),
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),
-	submit: submitGoogleCloudSubmission,
+	external: {
+		prepare: (context, verified) => prepareGoogleCloudExternalSubmission(context, verified),
+		submit: submitGoogleCloudSubmission,
+	},
 });

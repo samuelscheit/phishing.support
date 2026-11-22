@@ -17,8 +17,15 @@ import {
 	googleCloudServiceForTarget,
 	storedGoogleCloudSubmissionPayload,
 } from "./payload";
-import { googleCloudDraft, readGoogleCloudSubmitResponse, submitGoogleCloudSubmission } from "./submission";
+import {
+	googleCloudDraft,
+	prepareGoogleCloudExternalSubmission,
+	readGoogleCloudSubmitResponse,
+	submitGoogleCloudSubmission,
+	type GoogleCloudSubmissionDependencies,
+} from "./submission";
 import { defineProvider } from "../kit/provider";
+import { GOOGLE_CLOUD_BROWSER_NEVER_STARTED, requeueGoogleCloudRunsWhoseBrowserNeverStarted } from "./requeue_never_sent";
 
 useTemporaryDatabase();
 
@@ -100,6 +107,13 @@ describe("Google Cloud abuse report payload", () => {
 		await expect(readGoogleCloudSubmitResponse(response(400, "bad request"))).rejects.toMatchObject({ name: "ProviderSubmissionRejectedError" });
 		await expect(readGoogleCloudSubmitResponse(response(503, "unavailable"))).rejects.not.toMatchObject({ name: "ProviderSubmissionRejectedError" });
 		await expect(readGoogleCloudSubmitResponse(response(200, "<html>"))).rejects.toThrow("unreadable response");
+	});
+
+	test("the irreversible click refuses to run without the form its preflight prepared", async () => {
+		const context = { routeId: 1n, runId: 1n, payload: payload() as unknown as Record<string, unknown> };
+		for (const state of [undefined, {}, { session: {} }, { timeouts: {} }]) {
+			await expect(submitGoogleCloudSubmission(context, { state })).rejects.toThrow("Google Cloud submission requires its prepared form page.");
+		}
 	});
 });
 
@@ -206,22 +220,37 @@ async function googleCloudRoute() {
 	return { created, route };
 }
 
+/** A local headless Chrome; `browsers` records each launch and whether it was closed. */
+function launcher(browsers: Array<{ closed: boolean }> = [], onClose?: () => void): NonNullable<GoogleCloudSubmissionDependencies["openPage"]> {
+	return async () => {
+		const browser = await puppeteer.launch({ executablePath: chromiumExecutable, headless: true, args: ["--no-first-run"] });
+		const record = { closed: false };
+		browsers.push(record);
+		browser.on("disconnected", () => { record.closed = true; onClose?.(); });
+		return { page: await browser.newPage(), close: () => browser.close() };
+	};
+}
+
 function browserProvider(
 	form: { url: string },
-	timeouts?: { formReadyMs?: number; submitResponseMs?: number; confirmationMs?: number; checkboxMs?: number },
+	timeouts?: GoogleCloudSubmissionDependencies["timeouts"],
+	openPage: GoogleCloudSubmissionDependencies["openPage"] = launcher(),
 ): ProviderSubmissionProvider {
 	return defineProvider({
 		definition: GOOGLE_CLOUD_PROVIDER,
 		draft: googleCloudDraft,
-		submit: (context) => submitGoogleCloudSubmission(context, {
-			reportPageUrl: form.url,
-			...(timeouts ? { timeouts } : {}),
-			openPage: async () => {
-				const browser = await puppeteer.launch({ executablePath: chromiumExecutable, headless: true, args: ["--no-first-run"] });
-				return { page: await browser.newPage(), close: () => browser.close() };
-			},
-		}),
+		external: {
+			prepare: (context, verified) => prepareGoogleCloudExternalSubmission(context, verified, { reportPageUrl: form.url, openPage, ...(timeouts ? { timeouts } : {}) }),
+			submit: submitGoogleCloudSubmission,
+		},
 	});
+}
+
+/** The route's one run, still before its marker: the worker retries it as is. */
+async function expectRetryable(reportId: bigint, routeId: bigint) {
+	const [run] = await AbuseRepository.listProviderRunsForReport(reportId);
+	expect(run?.executionStatus).toBe("starting");
+	expect((await AbuseRepository.getRoute(routeId))?.status).toBe("running");
 }
 
 describe.skipIf(!chromiumAvailable)("Google Cloud abuse form, in a real browser", () => {
@@ -250,13 +279,124 @@ describe.skipIf(!chromiumAvailable)("Google Cloud abuse form, in a real browser"
 		}
 	}, 60_000);
 
-	test("a form whose reCAPTCHA never loads is never submitted", async () => {
+	test("a form whose reCAPTCHA never loads is never submitted: a plain retry with the browser closed, never 'maybe filed'", async () => {
 		const form = googleCloudForm(ACCEPTED, 60_000);
 		try {
-			const { route } = await googleCloudRoute();
-			const provider = browserProvider(form, { formReadyMs: 1_500 });
-			await executeProviderSubmission({ routeId: route.id, provider }).catch(() => undefined);
+			const { created, route } = await googleCloudRoute();
+			const browsers: Array<{ closed: boolean }> = [];
+			const provider = browserProvider(form, { formReadyMs: 1_500 }, launcher(browsers));
+			const failure = await executeProviderSubmission({ routeId: route.id, provider }).then(() => undefined, (error: unknown) => error);
+			expect(failure).toBeInstanceOf(Error);
+			expect(failure).not.toMatchObject({ name: "ProviderSubmissionUnknownExternalStateError" });
+			expect((failure as Error).message).toContain("Waiting failed");
 			expect(form.posts).toHaveLength(0);
+			expect(browsers).toEqual([{ closed: true }]);
+			await expectRetryable(created.reportId, route.id);
+		} finally {
+			form.server.stop(true);
+		}
+	}, 60_000);
+
+	test("a browser that fails to start (as on 2026-11-22) is a plain retry, and the retry files the report once", async () => {
+		const form = googleCloudForm(ACCEPTED);
+		try {
+			const { created, route } = await googleCloudRoute();
+			const crashed = browserProvider(form, undefined, async () => { throw new Error("Protocol error (Target.getBrowserContexts): Target closed"); });
+			await expect(executeProviderSubmission({ routeId: route.id, provider: crashed })).rejects.toThrow("Target.getBrowserContexts): Target closed");
+			await expectRetryable(created.reportId, route.id);
+
+			// The worker's retry resumes the same run, before its marker.
+			await expect(executeProviderSubmission({ routeId: route.id, provider: browserProvider(form) })).resolves.toMatchObject({ outcome: "submitted" });
+			expect(form.posts).toHaveLength(1);
+			const runs = await AbuseRepository.listProviderRunsForReport(created.reportId);
+			expect(runs.map((run) => run.executionStatus)).toEqual(["completed"]);
+		} finally {
+			form.server.stop(true);
+		}
+	}, 60_000);
+
+	test("a failure while filling the form closes the browser and sends nothing", async () => {
+		const form = googleCloudForm(ACCEPTED);
+		try {
+			const { created, route } = await googleCloudRoute();
+			const browsers: Array<{ closed: boolean }> = [];
+			const open = launcher(browsers);
+			// The page loses the service radio the payload picks: filling fails after the form was ready.
+			const broken = browserProvider(form, undefined, async () => {
+				const session = await open();
+				await session.page.evaluateOnNewDocument(() => {
+					document.addEventListener("DOMContentLoaded", () => document.querySelectorAll("input[type=radio]").forEach((radio) => radio.remove()));
+				});
+				return session;
+			});
+			await expect(executeProviderSubmission({ routeId: route.id, provider: broken })).rejects.toThrow("Google_Cloud_Platform_Service--n_a");
+			expect(form.posts).toHaveLength(0);
+			expect(browsers).toEqual([{ closed: true }]);
+			await expectRetryable(created.reportId, route.id);
+		} finally {
+			form.server.stop(true);
+		}
+	}, 60_000);
+
+	test("an abort during the preflight closes the browser, sends nothing and leaves the run retryable", async () => {
+		const form = googleCloudForm(ACCEPTED, 60_000);
+		try {
+			const { created, route } = await googleCloudRoute();
+			const browsers: Array<{ closed: boolean }> = [];
+			const controller = new AbortController();
+			const provider = browserProvider(form, undefined, launcher(browsers));
+			setTimeout(() => controller.abort(), 1_500);
+			await expect(executeProviderSubmission({ routeId: route.id, provider, signal: controller.signal })).rejects.toThrow("Google Cloud abuse report submission was canceled.");
+			expect(form.posts).toHaveLength(0);
+			// The abort closes it at once, not when the form-ready wait would have timed out.
+			await Bun.sleep(200);
+			expect(browsers).toEqual([{ closed: true }]);
+			await expectRetryable(created.reportId, route.id);
+		} finally {
+			form.server.stop(true);
+		}
+	}, 60_000);
+
+	test("an abort while the browser is still starting closes it once it arrives", async () => {
+		const form = googleCloudForm(ACCEPTED);
+		try {
+			const { created, route } = await googleCloudRoute();
+			const browsers: Array<{ closed: boolean }> = [];
+			const closed = Promise.withResolvers<void>();
+			const open = launcher(browsers, closed.resolve);
+			const controller = new AbortController();
+			const slow = browserProvider(form, undefined, async () => {
+				controller.abort();
+				return open();
+			});
+			await expect(executeProviderSubmission({ routeId: route.id, provider: slow, signal: controller.signal })).rejects.toThrow("Google Cloud abuse report submission was canceled.");
+			await closed.promise;
+			expect(browsers).toEqual([{ closed: true }]);
+			expect(form.posts).toHaveLength(0);
+			await expectRetryable(created.reportId, route.id);
+		} finally {
+			form.server.stop(true);
+		}
+	}, 60_000);
+
+	test("an abort after the click closes the browser and leaves the route for a person: the request may have been sent", async () => {
+		const form = googleCloudForm("never");
+		try {
+			const { created, route } = await googleCloudRoute();
+			const browsers: Array<{ closed: boolean }> = [];
+			const controller = new AbortController();
+			const provider = browserProvider(form, undefined, launcher(browsers));
+			const watching = (async () => {
+				while (form.posts.length === 0) await Bun.sleep(50);
+				controller.abort();
+			})();
+			await expect(executeProviderSubmission({ routeId: route.id, provider, signal: controller.signal })).rejects.toBeInstanceOf(Error);
+			await watching;
+			expect(form.posts).toHaveLength(1);
+			expect(browsers).toEqual([{ closed: true }]);
+			const [run] = await AbuseRepository.listProviderRunsForReport(created.reportId);
+			expect(run?.executionStatus).not.toBe("starting");
+			expect((await AbuseRepository.getRoute(route.id))?.status).not.toBe("running");
 		} finally {
 			form.server.stop(true);
 		}
@@ -325,11 +465,54 @@ describe.skipIf(!chromiumAvailable)("Google Cloud abuse form, in a real browser"
 		}
 	}, 60_000);
 
+	test("the one-off repair requeues only the routes whose browser provably never started, and their retry files once", async () => {
+		const form = googleCloudForm(ACCEPTED);
+		try {
+			// The old provider opened its browser after the marker: any failure there was "maybe filed".
+			const stuck = async (failure: string) => {
+				const created = await googleCloudRoute();
+				const job = await AbuseRepository.enqueueJob({ jobType: "submit_provider", reportId: created.created.reportId, routeId: created.route.id, dedupeKey: `provider-submit:${created.route.id.toString()}` });
+				expect((await AbuseRepository.claimNextJob("worker", 60_000, { jobTypes: ["submit_provider"] }))?.id).toBe(job.id);
+				const oldProvider = defineProvider({ definition: GOOGLE_CLOUD_PROVIDER, draft: googleCloudDraft, submit: async () => { throw new Error(failure); } });
+				await expect(executeProviderSubmission({ routeId: created.route.id, provider: oldProvider })).rejects.toMatchObject({ name: "ProviderSubmissionUnknownExternalStateError" });
+				await AbuseRepository.markJobUnknownExternalState({ jobId: job.id, owner: "worker", error: failure });
+				return { ...created, job };
+			};
+			const neverStarted = await stuck(GOOGLE_CLOUD_BROWSER_NEVER_STARTED);
+			const afterClick = await stuck(`Google Cloud abuse form sent no readable answer: ${GOOGLE_CLOUD_BROWSER_NEVER_STARTED}`);
+			const otherLaunch = await stuck("Protocol error (Target.getBrowserContexts): Target closed after navigation");
+
+			expect(await requeueGoogleCloudRunsWhoseBrowserNeverStarted()).toEqual([neverStarted.route.id]);
+			expect((await AbuseRepository.getRoute(neverStarted.route.id))?.status).toBe("queued");
+			const [run] = await AbuseRepository.listProviderRunsForReport(neverStarted.created.reportId);
+			expect(run).toMatchObject({ executionStatus: "starting", failureReason: null });
+			for (const other of [afterClick, otherLaunch]) {
+				expect((await AbuseRepository.getRoute(other.route.id))?.status).toBe("unknown_external_state");
+				const [otherRun] = await AbuseRepository.listProviderRunsForReport(other.created.reportId);
+				expect(otherRun?.executionStatus).toBe("unknown_external_state");
+			}
+			// Running it again changes nothing.
+			expect(await requeueGoogleCloudRunsWhoseBrowserNeverStarted()).toEqual([]);
+
+			// The queued job is the one the worker claims, and its run files the report once.
+			const claimed = await AbuseRepository.claimNextJob("worker-2", 60_000, { jobTypes: ["submit_provider"] });
+			expect(claimed?.id).toBe(neverStarted.job.id);
+			await expect(executeProviderSubmission({ routeId: neverStarted.route.id, provider: browserProvider(form) })).resolves.toMatchObject({ outcome: "submitted" });
+			expect(form.posts).toHaveLength(1);
+			const runs = await AbuseRepository.listProviderRunsForReport(neverStarted.created.reportId);
+			expect(runs.map((stored) => [stored.id, stored.executionStatus])).toEqual([[run!.id, "completed"]]);
+		} finally {
+			form.server.stop(true);
+		}
+	}, 60_000);
+
 	test("an explicit 4xx from the form is a rejection, never retried", async () => {
 		const form = googleCloudForm({ status: 400, body: `{"error":"invalid"}` });
 		try {
 			const { route } = await googleCloudRoute();
-			await expect(executeProviderSubmission({ routeId: route.id, provider: browserProvider(form) })).resolves.toMatchObject({ outcome: "provider_rejected" });
+			const browsers: Array<{ closed: boolean }> = [];
+			await expect(executeProviderSubmission({ routeId: route.id, provider: browserProvider(form, undefined, launcher(browsers)) })).resolves.toMatchObject({ outcome: "provider_rejected" });
+			expect(browsers).toEqual([{ closed: true }]);
 			expect(form.posts).toHaveLength(1);
 			expect((await AbuseRepository.getRoute(route.id))?.status).toBe("provider_rejected");
 		} finally {

@@ -21,7 +21,8 @@ export async function raceAbort<T>(
 	message?: string,
 ): Promise<T> {
 	if (!signal) return operation;
-	throwIfOperationCanceled(signal, message);
+	// An operation started under an already aborted signal is canceled the same
+	// way: its cleanup still runs, so whatever it opens late is released.
 	return new Promise<T>((resolve, reject) => {
 		let settled = false;
 		const onCanceled = () => {
@@ -51,5 +52,6 @@ export async function raceAbort<T>(
 				reject(error);
 			},
 		);
+		if (signal.aborted) onCanceled();
 	});
 }

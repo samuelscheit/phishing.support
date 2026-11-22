@@ -4,10 +4,17 @@ import { getBrowser, getBrowserPage } from "../../../browser";
 import { CaptchaError, waitForCaptchaToken } from "../../../browser/captcha_state";
 import { abuseEmailCaseUrl } from "../../mail/draft";
 import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
-import { createDraft, type RouteData } from "../kit/draft";
+import { createDraft, type RouteData, type VerifiedOf } from "../kit/draft";
+import { preparedState, withPreflight } from "../kit/session";
 import { snippet } from "../../../util/text";
 import { emailOriginOf } from "../email_origin";
-import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
+import {
+	ProviderSubmissionNeedsHumanError,
+	ProviderSubmissionRejectedError,
+	type ProviderSubmissionContext,
+	type ProviderSubmissionPreflight,
+	type ProviderSubmissionSuccess,
+} from "../submission_contracts";
 import { GOOGLE_CLOUD_PROVIDER } from "./definition";
 import {
 	buildGoogleCloudSubmissionPayload,
@@ -27,13 +34,17 @@ const CHECKBOX_TIMEOUT_MS = 240_000;
 const CHECKBOX_WIDGET = ".g-recaptcha-v2 iframe";
 
 type GoogleCloudFormSession = { page: Page; close(): Promise<void> };
+type GoogleCloudTimeouts = { formReadyMs: number; submitResponseMs: number; confirmationMs: number; checkboxMs: number };
 
 export type GoogleCloudSubmissionDependencies = {
 	/** A Fabric page on the direct reporting egress (Google's form challenges Tor exits), whose solver passes the checkbox reCAPTCHA. */
 	openPage?: () => Promise<GoogleCloudFormSession>;
 	reportPageUrl?: string;
-	timeouts?: Partial<{ formReadyMs: number; submitResponseMs: number; confirmationMs: number; checkboxMs: number }>;
+	timeouts?: Partial<GoogleCloudTimeouts>;
 };
+
+/** The filled form the preflight leaves for the irreversible click. Never persisted. */
+export type GoogleCloudPreflightState = { session: GoogleCloudFormSession; timeouts: GoogleCloudTimeouts };
 
 async function openReportingPage(): Promise<GoogleCloudFormSession> {
 	const browser = await getBrowser("reporting");
@@ -192,24 +203,38 @@ async function waitForCheckbox(page: Page, timeoutMs: number, signal: AbortSigna
 	});
 }
 
-/** Fill and send the form from its durable draft, then read Google's confirmation. */
-export async function submitGoogleCloudSubmission(
-	context: ProviderSubmissionContext,
-	dependencies: GoogleCloudSubmissionDependencies = {},
-): Promise<ProviderSubmissionSuccess> {
-	const payload = googleCloudDraft.stored(context);
+/** A session whose close runs once and never throws, so abort, a failed preflight and the executor's dispose may all call it. */
+function closingOnce(session: GoogleCloudFormSession): GoogleCloudFormSession {
+	let closing: Promise<void> | undefined;
+	return { page: session.page, close: () => (closing ??= session.close().catch(() => undefined)) };
+}
 
-	const signal = context.signal;
-	const sessionPromise = (dependencies.openPage ?? openReportingPage)();
-	const session = await raceAbort(sessionPromise, signal, () => {
-		void sessionPromise.then((late) => late.close().catch(() => undefined)).catch(() => undefined);
-	}, CANCELED);
-	const closeBrowser = () => { void session.close().catch(() => undefined); };
-	throwIfOperationCanceled(signal, CANCELED);
-	signal?.addEventListener("abort", closeBrowser, { once: true });
-	const timeouts = { formReadyMs: FORM_READY_TIMEOUT_MS, submitResponseMs: SUBMIT_RESPONSE_TIMEOUT_MS, confirmationMs: CONFIRMATION_TIMEOUT_MS, checkboxMs: CHECKBOX_TIMEOUT_MS, ...dependencies.timeouts };
-	const step = <T>(operation: Promise<T>) => raceAbort(operation, signal, closeBrowser, CANCELED);
-	try {
+/** Run `operation` unless `signal` aborts first; an abort closes the browser, so no later step can reach Google. */
+function abortableStep(session: GoogleCloudFormSession, signal: AbortSignal | undefined) {
+	return <T>(operation: Promise<T>) => raceAbort(operation, signal, () => { void session.close(); }, CANCELED);
+}
+
+/**
+ * Before the marker, none of which sends anything to Google: open the
+ * browser, load the form, wait until it and its invisible reCAPTCHA are ready
+ * and fill it from the durable draft. Every failure here (a browser that does
+ * not start, a form that never loads) is a plain retry; the browser is closed.
+ */
+export async function prepareGoogleCloudExternalSubmission(
+	context: ProviderSubmissionContext,
+	{ payload }: VerifiedOf<typeof googleCloudDraft>,
+	dependencies: GoogleCloudSubmissionDependencies = {},
+): Promise<ProviderSubmissionPreflight> {
+	const { signal } = context;
+	const timeouts: GoogleCloudTimeouts = { formReadyMs: FORM_READY_TIMEOUT_MS, submitResponseMs: SUBMIT_RESPONSE_TIMEOUT_MS, confirmationMs: CONFIRMATION_TIMEOUT_MS, checkboxMs: CHECKBOX_TIMEOUT_MS, ...dependencies.timeouts };
+	const open = async () => {
+		const opening = (dependencies.openPage ?? openReportingPage)().then(closingOnce);
+		return raceAbort(opening, signal, () => {
+			void opening.then((late) => late.close()).catch(() => undefined);
+		}, CANCELED);
+	};
+	return withPreflight(open, async (session): Promise<GoogleCloudPreflightState> => {
+		const step = abortableStep(session, signal);
 		const { page } = session;
 		await step(page.goto(dependencies.reportPageUrl ?? GOOGLE_CLOUD_PROVIDER.reportPageUrl, { waitUntil: "domcontentloaded" }));
 		await step(page.waitForSelector("#abuse_details", { visible: true, timeout: timeouts.formReadyMs }));
@@ -217,39 +242,53 @@ export async function submitGoogleCloudSubmission(
 		// before reCAPTCHA has loaded sends none, and Google discards the report.
 		await step(page.waitForFunction(() => typeof (window as Window & { grecaptcha?: { execute?: unknown } }).grecaptcha?.execute === "function", { timeout: timeouts.formReadyMs }));
 		await step(fillGoogleCloudForm(page, payload));
+		return { session, timeouts };
+	});
+}
 
-		let attempt = await submitOnce(page, step, timeouts.submitResponseMs);
+/**
+ * After the marker: click Submit on the prepared form and read Google's
+ * answer, sending it once more when Google asks for the checkbox reCAPTCHA.
+ * The executor disposes the preflight (closes the browser) afterwards.
+ */
+export async function submitGoogleCloudSubmission(context: ProviderSubmissionContext, preflight: ProviderSubmissionPreflight): Promise<ProviderSubmissionSuccess> {
+	const { session, timeouts } = preparedState<GoogleCloudPreflightState>(
+		preflight,
+		(state) => typeof state.session?.page === "object" && typeof state.timeouts === "object",
+		"Google Cloud submission requires its prepared form page.",
+	);
+	const payload = googleCloudDraft.stored(context);
+	const { signal } = context;
+	const step = abortableStep(session, signal);
+	const { page } = session;
+	throwIfOperationCanceled(signal, CANCELED);
+	let attempt = await submitOnce(page, step, timeouts.submitResponseMs);
+	if (attempt.answer.outcome === "captcha_required") {
+		// Google created no case and switched the form to its checkbox
+		// reCAPTCHA. The browser's solver passes it; send the same form once more.
+		await step(waitForCheckbox(page, timeouts.checkboxMs, signal));
+		attempt = await submitOnce(page, step, timeouts.submitResponseMs);
 		if (attempt.answer.outcome === "captcha_required") {
-			// Google created no case and switched the form to its checkbox
-			// reCAPTCHA. The browser's solver passes it; send the same form once more.
-			await step(waitForCheckbox(page, timeouts.checkboxMs, signal));
-			attempt = await submitOnce(page, step, timeouts.submitResponseMs);
-			if (attempt.answer.outcome === "captcha_required") {
-				// Nothing was filed and the report itself is fine: a person can send it.
-				throw new ProviderSubmissionNeedsHumanError("Google Cloud abuse form asked for the reCAPTCHA again after the solved one; no case was created.");
-			}
-			if (attempt.sentToken !== "v2") throw new Error("The Google Cloud abuse form resent the report without the solved reCAPTCHA token.");
-		} else if (!attempt.sentToken) {
-			throw new Error("The Google Cloud abuse form sent its report without a reCAPTCHA token.");
+			// Nothing was filed and the report itself is fine: a person can send it.
+			throw new ProviderSubmissionNeedsHumanError("Google Cloud abuse form asked for the reCAPTCHA again after the solved one; no case was created.");
 		}
-		const caseId = attempt.answer.outcome === "accepted" ? attempt.answer.caseId : undefined;
-		const confirmation = await step(page.waitForSelector(".confirmation-message__text", { visible: true, timeout: timeouts.confirmationMs }))
-			.then((element) => element?.evaluate((node) => (node as HTMLElement).innerText.trim()))
-			.catch(() => undefined);
-		if (!confirmation) {
-			// Google accepted the request but did not confirm a case: ambiguous, never replayed.
-			const notification = await formNotification(page);
-			throw new Error(`Google Cloud abuse form answered but showed no confirmation${notification ? ` ("${notification}")` : ""}.`);
-		}
-		return {
-			...(caseId ? { confirmationId: caseId } : {}),
-			confirmationText: confirmation,
-			finalUrl: page.url(),
-			submittedTargets: [payload.target.normalizedTarget],
-		};
-	} finally {
-		signal?.removeEventListener("abort", closeBrowser);
-		// Cleanup must never discard a confirmed submission.
-		await session.close().catch(() => undefined);
+		if (attempt.sentToken !== "v2") throw new Error("The Google Cloud abuse form resent the report without the solved reCAPTCHA token.");
+	} else if (!attempt.sentToken) {
+		throw new Error("The Google Cloud abuse form sent its report without a reCAPTCHA token.");
 	}
+	const caseId = attempt.answer.outcome === "accepted" ? attempt.answer.caseId : undefined;
+	const confirmation = await step(page.waitForSelector(".confirmation-message__text", { visible: true, timeout: timeouts.confirmationMs }))
+		.then((element) => element?.evaluate((node) => (node as HTMLElement).innerText.trim()))
+		.catch(() => undefined);
+	if (!confirmation) {
+		// Google accepted the request but did not confirm a case: ambiguous, never replayed.
+		const notification = await formNotification(page);
+		throw new Error(`Google Cloud abuse form answered but showed no confirmation${notification ? ` ("${notification}")` : ""}.`);
+	}
+	return {
+		...(caseId ? { confirmationId: caseId } : {}),
+		confirmationText: confirmation,
+		finalUrl: page.url(),
+		submittedTargets: [payload.target.normalizedTarget],
+	};
 }

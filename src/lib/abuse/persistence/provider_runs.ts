@@ -527,3 +527,66 @@ export async function startBrowserTask(params: { runId: bigint; fabricSessionId:
 		{ behavior: "immediate" },
 	);
 }
+
+/**
+ * Return routes stranded in `unknown_external_state` to `queued` when their
+ * run's own failure proves no request left: the failure reason must equal
+ * `neverSentFailure` exactly, a failure the provider can only raise before it
+ * opens its page. The run goes back to `starting` (the executor resumes it
+ * before its marker, with the same draft) and the route's unresolved
+ * `submit_provider` job is queued again. Any route that does not match
+ * exactly, or whose run is not its latest, is left untouched.
+ */
+export async function requeueNeverSentProviderRuns(params: {
+	providerRegistryKey: string;
+	neverSentFailure: string;
+	reason: string;
+}): Promise<bigint[]> {
+	const db = await getDb();
+	return db.transaction(
+		(tx) => {
+			const requeued: bigint[] = [];
+			const routes = tx.select().from(abuseProviderRoutes)
+				.where(and(eq(abuseProviderRoutes.providerRegistryKey, params.providerRegistryKey), eq(abuseProviderRoutes.status, "unknown_external_state")))
+				.all();
+			for (const route of routes) {
+				const run = tx.select().from(abuseProviderRuns)
+					.where(eq(abuseProviderRuns.routeId, route.id))
+					.orderBy(desc(abuseProviderRuns.createdAt), desc(abuseProviderRuns.id))
+					.limit(1)
+					.get();
+				if (!run || run.executionStatus !== "unknown_external_state" || run.failureReason !== params.neverSentFailure) continue;
+				const timestamp = now();
+				tx.update(abuseProviderRuns)
+					.set({ executionStatus: "starting", failureReason: null, updatedAt: timestamp })
+					.where(eq(abuseProviderRuns.id, run.id))
+					.run();
+				tx.update(abuseProviderRoutes)
+					.set({ status: "queued", updatedAt: timestamp })
+					.where(eq(abuseProviderRoutes.id, route.id))
+					.run();
+				const jobs = tx.select({ id: abuseJobs.id }).from(abuseJobs)
+					.where(and(eq(abuseJobs.routeId, route.id), eq(abuseJobs.jobType, "submit_provider"), eq(abuseJobs.status, "unknown_external_state")))
+					.all();
+				for (const job of jobs) {
+					tx.update(abuseJobs)
+						.set({ status: "queued", leaseOwner: null, leaseExpiresAt: null, unknownExternalState: false, lastError: null, nextAttemptAt: timestamp, updatedAt: timestamp })
+						.where(eq(abuseJobs.id, job.id))
+						.run();
+				}
+				recordEvent(tx, {
+					reportId: route.reportId,
+					targetId: route.targetId,
+					routeId: route.id,
+					runId: run.id,
+					eventType: "provider_run.requeued_never_sent",
+					data: { providerRegistryKey: params.providerRegistryKey, failureReason: params.neverSentFailure, jobIds: jobs.map((job) => job.id.toString()), reason: params.reason },
+				});
+				recomputeReportStatusInTransaction(tx, route.reportId, { reason: "provider_run_requeued_never_sent", routeId: route.id.toString() });
+				requeued.push(route.id);
+			}
+			return requeued;
+		},
+		{ behavior: "immediate" },
+	);
+}
