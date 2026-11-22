@@ -15,7 +15,7 @@ import {
 	fabricBrowserSessionIdFromProviderPayload,
 	isFabricBrowserSessionId,
 } from "./fabric_session";
-import { asError, errorText } from "../util/error_text";
+import { asError, errorSummary, errorText } from "../util/error_text";
 import { sleep, type Sleep } from "../util/sleep";
 import { type FetchLike } from "../http/fetch";
 
@@ -117,6 +117,29 @@ const TERMINAL_SESSION_STATUSES = new Set<FabricSessionStatus>([
 	"timed_out",
 ]);
 const SENSITIVE_METADATA_KEY = /(password|passphrase|secret|token|cookie|credential|authorization|proxy|otp|api[_-]?key)/i;
+
+/**
+ * No Fabric browser could be leased or connected. Nothing ran in a browser
+ * yet, so nothing reached any provider: the work is safe to run again once
+ * Fabric has a browser. Callers that wrap it keep it as the `cause`, so the
+ * worker recognizes it through any wrapper (`isBrowserUnavailable`).
+ */
+export class BrowserUnavailableError extends Error {
+	constructor(cause: unknown) {
+		super(`no browser was available (${errorSummary(cause)})`, { cause });
+		this.name = "BrowserUnavailableError";
+	}
+}
+
+/** Whether `error`, or any error in its `cause` chain, is a `BrowserUnavailableError`. */
+export function isBrowserUnavailable(error: unknown): boolean {
+	const seen = new Set<unknown>();
+	for (let current = error; current instanceof Error && !seen.has(current); current = current.cause) {
+		if (current instanceof BrowserUnavailableError) return true;
+		seen.add(current);
+	}
+	return false;
+}
 
 function requiredEnvironment(environment: FabricEnvironment, name: string): string {
 	const value = environment[name]?.trim();
@@ -321,8 +344,14 @@ async function acquireFabricSession(
 }
 
 const SESSION_HEARTBEAT_MS = 10_000;
-/** How long a client waits for a free relay connection before giving up on its session. */
-const RELAY_CAPACITY_WAIT_MS = 5 * 60_000;
+/**
+ * How long a client waits for a free relay connection before giving up on its
+ * session. Short: the worker reschedules a job without a browser
+ * (`BrowserUnavailableError`) without spending its attempts, and waiting here
+ * holds a worker slot; the control lane's 5-minute deadline must also leave
+ * room for the session, the handshake and the work itself.
+ */
+const RELAY_CAPACITY_WAIT_MS = 60_000;
 const RELAY_CAPACITY_RETRY_MS = 2_000;
 /**
  * How long Patchright's CDP handshake may take after the relay's WebSocket
@@ -336,11 +365,13 @@ const PATCHRIGHT_CONNECT_TIMEOUT_MS = 120_000;
 
 /**
  * The relay refuses a WebSocket upgrade with HTTP 503 while all of its
- * connections are taken; CDP clients report that as a failed handshake.
+ * connections are taken; CDP clients report that as a failed handshake, each
+ * in its own words: "Expected 101 status code" or "Unexpected server
+ * response: 503" (Rebrowser), "503 Service Unavailable" (Patchright).
  */
 function isRelayCapacityError(error: unknown): boolean {
 	const message = errorText(error);
-	return /Expected 101 status code|Unexpected server response: 503/i.test(message);
+	return /Expected 101 status code|Unexpected server response: 503|\b503 Service Unavailable\b/i.test(message);
 }
 
 /**
@@ -402,7 +433,8 @@ interface FabricLease<T> {
  * client to it (cancelling the session if that fails), heartbeat the lease,
  * and finish it exactly once with `release` (work done) or `cancel` (outcome
  * unknown). Finishing stops the heartbeat, drops the client transport, then
- * tells Fabric.
+ * tells Fabric. A session that cannot be acquired or connected is a
+ * `BrowserUnavailableError`.
  */
 async function leaseFabricSession<T>(
 	config: FabricBrowserConfig,
@@ -410,13 +442,15 @@ async function leaseFabricSession<T>(
 	options: FabricSessionOptions,
 	connect: (sessionId: string) => Promise<FabricClientConnection<T>>,
 ): Promise<FabricLease<T>> {
-	const sessionId = await acquireFabricSession(config, metadata, options);
+	const sessionId = await acquireFabricSession(config, metadata, options).catch((error: unknown) => {
+		throw new BrowserUnavailableError(error);
+	});
 	let client: FabricClientConnection<T>;
 	try {
 		client = await connect(sessionId);
 	} catch (error) {
 		await sessionAction(config, sessionId, "cancel").catch(() => undefined);
-		throw error;
+		throw new BrowserUnavailableError(error);
 	}
 	const stopHeartbeat = startSessionHeartbeat(config, sessionId);
 	let finished = false;
@@ -474,21 +508,6 @@ export async function cancelFabricBrowserSession(sessionId: string): Promise<voi
 	await sessionAction(requiredConfig(), sessionId, "cancel");
 }
 
-/** Patchright keeps its CDP client transport on a private `_connection`; it has no public disconnect. */
-type PatchrightClientInternals = { _connection?: { close?: () => void } };
-
-/** Disconnect only this Patchright CDP client; never send Browser.close to Fabric Chromium. */
-export async function disconnectFabricPatchrightClient(browser: object): Promise<void> {
-	// Calling Browser.close would terminate the Fabric-owned remote Chromium
-	// process before its durable lease transition; closing the transport only
-	// drops this client.
-	const connection = (browser as PatchrightClientInternals)._connection;
-	if (!connection || typeof connection.close !== "function") {
-		throw new Error("Patchright did not expose a disconnectable CDP client transport");
-	}
-	connection.close();
-}
-
 /** Connect Rebrowser to a Fabric relay and map close/disconnect to lease release. */
 export async function acquireFabricPuppeteerBrowser(
 	metadata: Record<string, FabricScalar> = {},
@@ -514,21 +533,29 @@ export async function acquireFabricPuppeteerBrowser(
 export async function acquireFabricPatchrightSession(
 	metadata: Record<string, FabricScalar> = {},
 	options: FabricSessionOptions = {},
+	config: FabricBrowserConfig = requiredConfig(),
 ): Promise<FabricPatchrightSession> {
-	const config = requiredConfig();
 	const lease = await leaseFabricSession(config, metadata, options, async (sessionId) => {
 		const { chromium } = await import("patchright");
 		const browser = await connectThroughRelay(
 			() => chromium.connectOverCDP(fabricRelayEndpoint(sessionId), { timeout: PATCHRIGHT_CONNECT_TIMEOUT_MS }),
 			() => sessionAction(config, sessionId, "heartbeat"),
 		);
+		// For a browser connected over CDP, Patchright's own close only closes
+		// this client's CDP WebSocket (its "browser process" is that transport);
+		// it sends no Browser.close to Fabric's Chromium. Keep it before close
+		// becomes the lease release below. Never close `browser._connection`:
+		// that is the process-wide in-process Patchright connection, and every
+		// later Patchright call would fail with its stored "Target page,
+		// context or browser has been closed" (2026-11-20/21 in production).
+		const disconnect = browser.close.bind(browser);
 		try {
 			await allowInsecureCertificates(browser);
 			const context = browser.contexts()[0];
 			if (!context) throw new Error("Fabric browser did not expose its leased profile context");
-			return { value: { browser, context }, disconnect: () => disconnectFabricPatchrightClient(browser) };
+			return { value: { browser, context }, disconnect };
 		} catch (error) {
-			await disconnectFabricPatchrightClient(browser).catch(() => undefined);
+			await disconnect().catch(() => undefined);
 			throw error;
 		}
 	});

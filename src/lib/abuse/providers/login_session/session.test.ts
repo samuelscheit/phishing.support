@@ -10,6 +10,7 @@ import {
 	type LoginSessionSpec,
 } from "./session";
 import { createMemoryLoginSessionStore } from "./store";
+import { BrowserUnavailableError, isBrowserUnavailable } from "../../../browser/fabric";
 
 type Config = { account: string };
 type Fake = LoginSession & { secret: string };
@@ -162,6 +163,24 @@ describe("createLoginSessions", () => {
 		expect(h.store.records.get(h.key)?.failure?.message).toBe(message);
 		await expect(h.sessions.get(config)).rejects.toThrow(message);
 		expect(state.logins).toBe(1);
+	});
+
+	test("a login without a browser is not the account's failure: nothing is stored, the next caller logs in, and the type reaches the worker", async () => {
+		const state = { logins: 0 };
+		const h = harness(async () => {
+			state.logins += 1;
+			if (state.logins === 1) throw new ProviderLoginError("Fake", "no browser was available", { cause: new BrowserUnavailableError(new Error("503 Service Unavailable")) });
+			return session("after-browser");
+		});
+		const error = await h.sessions.get(config).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(ProviderLoginError);
+		expect(isBrowserUnavailable(error)).toBeTrue();
+		expect(error).not.toBeInstanceOf(ProviderLoginUnavailableError);
+		expect(h.store.records.get(h.key)?.failure).toBeUndefined();
+		expect(h.locks.size).toBe(0);
+		// No backoff window: the very next call logs in.
+		expect((await h.sessions.get(config)).id).toBe("after-browser");
+		expect(state.logins).toBe(2);
 	});
 
 	test("a login cut off by its own deadline is reported as a timeout failure", async () => {

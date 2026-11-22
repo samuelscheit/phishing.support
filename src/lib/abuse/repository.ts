@@ -36,6 +36,7 @@ import {
 	recoverStaleJobs,
 	renewJobLease,
 	retryJob,
+	deferJob,
 } from "./persistence/jobs";
 import { releaseLock, renewLock, tryAcquireLock } from "./persistence/locks";
 import {
@@ -163,6 +164,7 @@ export const AbuseRepository = {
 	renewJobLease,
 	completeJob,
 	retryJob,
+	deferJob,
 	markJobUnknownExternalState,
 	failJob,
 	recoverStaleJobs,

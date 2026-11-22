@@ -189,7 +189,7 @@ async function loginWithFabric(config: AlibabaCloudLoginConfig, signal: AbortSig
 		void launch.then((late) => late.cancel().catch(() => undefined)).catch(() => undefined);
 	}, "Alibaba Cloud login was canceled.").catch((error: unknown) => {
 		if (error instanceof OperationCanceledError) throw error;
-		throw new ProviderLoginError(PROVIDER, `no browser was available (${errorSummary(error)})`);
+		throw new ProviderLoginError(PROVIDER, errorSummary(error), { cause: error });
 	});
 	try {
 		return await loginWithContext(fabric.context, config, signal);

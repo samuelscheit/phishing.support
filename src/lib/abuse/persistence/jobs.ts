@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, inArray, like, lte, ne, notLike, or, sql } from "drizzle-orm";
 
-import { getDb } from "../../db";
+import { getDb, type DbExecutor } from "../../db";
 import { generateId } from "../../db/ids";
 import {
 	abuseJobs,
@@ -10,7 +10,7 @@ import {
 } from "../schema";
 import { now, recordEvent } from "./shared";
 
-export async function enqueueJob(params: {
+type NewJob = {
 	jobType: AbuseJobType;
 	reportId: bigint;
 	routeId?: bigint;
@@ -18,6 +18,34 @@ export async function enqueueJob(params: {
 	payload?: Record<string, unknown>;
 	dedupeKey?: string;
 	nextAttemptAt?: Date;
+};
+
+/** Insert a queued job and its `job.queued` event inside the caller's transaction. */
+export function insertQueuedJob(tx: DbExecutor, params: NewJob, eventData: Record<string, unknown> = {}): AbuseJob {
+	const id = generateId();
+	const timestamp = now();
+	tx.insert(abuseJobs)
+		.values({
+			id,
+			jobType: params.jobType,
+			reportId: params.reportId,
+			routeId: params.routeId,
+			runId: params.runId,
+			payload: params.payload ?? {},
+			dedupeKey: params.dedupeKey,
+			status: "queued",
+			retryCount: 0,
+			nextAttemptAt: params.nextAttemptAt ?? timestamp,
+			unknownExternalState: false,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+		})
+		.run();
+	recordEvent(tx, { reportId: params.reportId, routeId: params.routeId, runId: params.runId, jobId: id, eventType: "job.queued", data: { jobType: params.jobType, ...eventData } });
+	return tx.select().from(abuseJobs).where(eq(abuseJobs.id, id)).get()!;
+}
+
+export async function enqueueJob(params: NewJob & {
 	/** The running job that queues its own successor; it does not count as a duplicate. */
 	successorOf?: bigint;
 }): Promise<AbuseJob> {
@@ -38,27 +66,8 @@ export async function enqueueJob(params: {
 					.get();
 				if (existing) return existing;
 			}
-			const id = generateId();
-			const timestamp = now();
-			tx.insert(abuseJobs)
-				.values({
-					id,
-					jobType: params.jobType,
-					reportId: params.reportId,
-					routeId: params.routeId,
-					runId: params.runId,
-					payload: params.payload ?? {},
-					dedupeKey: params.dedupeKey,
-					status: "queued",
-					retryCount: 0,
-					nextAttemptAt: params.nextAttemptAt ?? timestamp,
-					unknownExternalState: false,
-					createdAt: timestamp,
-					updatedAt: timestamp,
-				})
-				.run();
-			recordEvent(tx, { reportId: params.reportId, routeId: params.routeId, runId: params.runId, jobId: id, eventType: "job.queued", data: { jobType: params.jobType } });
-			return tx.select().from(abuseJobs).where(eq(abuseJobs.id, id)).get()!;
+			const { successorOf: _successorOf, ...job } = params;
+			return insertQueuedJob(tx, job);
 		},
 		{ behavior: "immediate" }
 	);
@@ -98,40 +107,12 @@ export async function hasJob(dedupeKey: string): Promise<boolean> {
  * executions. This is for immutable source events such as a provider message;
  * recurring jobs must continue to use `enqueueJob`'s active-only dedupe.
  */
-export async function enqueueJobOnce(params: Omit<Parameters<typeof enqueueJob>[0], "dedupeKey" | "successorOf"> & {
-	dedupeKey: string;
-}): Promise<AbuseJob> {
+export async function enqueueJobOnce(params: NewJob & { dedupeKey: string }): Promise<AbuseJob> {
 	const db = await getDb();
 	return db.transaction(
 		(tx) => {
 			const existing = tx.select().from(abuseJobs).where(eq(abuseJobs.dedupeKey, params.dedupeKey)).get();
-			if (existing) return existing;
-			const id = generateId();
-			const timestamp = now();
-			tx.insert(abuseJobs).values({
-				id,
-				jobType: params.jobType,
-				reportId: params.reportId,
-				routeId: params.routeId,
-				runId: params.runId,
-				payload: params.payload ?? {},
-				dedupeKey: params.dedupeKey,
-				status: "queued",
-				retryCount: 0,
-				nextAttemptAt: params.nextAttemptAt ?? timestamp,
-				unknownExternalState: false,
-				createdAt: timestamp,
-				updatedAt: timestamp,
-			}).run();
-			recordEvent(tx, {
-				reportId: params.reportId,
-				routeId: params.routeId,
-				runId: params.runId,
-				jobId: id,
-				eventType: "job.queued",
-				data: { jobType: params.jobType, lifetimeDedupe: true },
-			});
-			return tx.select().from(abuseJobs).where(eq(abuseJobs.id, id)).get()!;
+			return existing ?? insertQueuedJob(tx, params, { lifetimeDedupe: true });
 		},
 		{ behavior: "immediate" },
 	);
@@ -233,7 +214,22 @@ export async function completeJob(jobId: bigint, owner: string): Promise<void> {
 	);
 }
 
-export async function retryJob(params: { jobId: bigint; owner: string; error: string; afterMs: number }): Promise<void> {
+type RequeueParams = { jobId: bigint; owner: string; error: string; afterMs: number };
+
+/** Queue a failed job again; its failure spends one of its attempts. */
+export async function retryJob(params: RequeueParams): Promise<void> {
+	await requeueJob(params, "job.retried", 1);
+}
+
+/**
+ * Queue a job again that could not run because something it needs was not
+ * there yet (no browser): it did no work, so it spends none of its attempts.
+ */
+export async function deferJob(params: RequeueParams): Promise<void> {
+	await requeueJob(params, "job.deferred", 0);
+}
+
+async function requeueJob(params: RequeueParams, eventType: "job.retried" | "job.deferred", attempts: 0 | 1): Promise<void> {
 	const db = await getDb();
 	db.transaction(
 		(tx) => {
@@ -244,7 +240,7 @@ export async function retryJob(params: { jobId: bigint; owner: string; error: st
 					status: "queued",
 					leaseOwner: null,
 					leaseExpiresAt: null,
-					retryCount: job.retryCount + 1,
+					retryCount: job.retryCount + attempts,
 					nextAttemptAt: new Date(Date.now() + params.afterMs),
 					lastError: params.error,
 					updatedAt: now(),
@@ -256,8 +252,8 @@ export async function retryJob(params: { jobId: bigint; owner: string; error: st
 				routeId: job.routeId ?? undefined,
 				runId: job.runId ?? undefined,
 				jobId: job.id,
-				eventType: "job.retried",
-				data: { retryCount: job.retryCount + 1, error: params.error },
+				eventType,
+				data: { retryCount: job.retryCount + attempts, error: params.error },
 			});
 		},
 		{ behavior: "immediate" }

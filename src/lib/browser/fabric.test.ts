@@ -1,11 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
+import { chromiumAvailable, launchTestChromium } from "./task/test_helpers";
 import {
 	acquireFabricCdpSession,
+	acquireFabricPatchrightSession,
+	BrowserUnavailableError,
 	buildFabricBrowserSessionCreatePayload,
 	connectThroughRelay,
-	disconnectFabricPatchrightClient,
 	fabricBrowserConfigFromEnvironment,
+	isBrowserUnavailable,
 	fabricRelayEndpoint,
 	type FabricBrowserConfig,
 } from "./fabric";
@@ -209,7 +212,10 @@ describe("Phishing Support Browser Fabric boundary", () => {
 
 		test("surfaces Fabric's refusal (a recipe or policy the catalog does not have) without leasing anything", async () => {
 			const refused = fakeFabric({ create: { status: 422, body: { detail: "unknown browser recipe recipe_rebrowser-phishing@1" } } });
-			await expect(acquireFabricCdpSession({}, { egress: "reporting" }, refused.config)).rejects.toThrow("unknown browser recipe recipe_rebrowser-phishing@1");
+			const refusal = await acquireFabricCdpSession({}, { egress: "reporting" }, refused.config).catch((error: unknown) => error);
+			expect(refusal).toBeInstanceOf(BrowserUnavailableError);
+			expect((refusal as Error).message).toStartWith("no browser was available (");
+			expect((refusal as Error).message).toContain("unknown browser recipe recipe_rebrowser-phishing@1");
 			expect(refused.calls).toHaveLength(1);
 			const ended = fakeFabric({ create: { status: 201, body: { id: "browser-session_task", status: "failed" } } });
 			await expect(acquireFabricCdpSession({}, { egress: "reporting" }, ended.config)).rejects.toThrow("Browser Fabric session ended in failed");
@@ -230,19 +236,122 @@ describe("Phishing Support Browser Fabric boundary", () => {
 		expect(() => fabricRelayEndpoint("browser-session_phishing-test?cap=attacker", "http://fabric-cdp-relay:8085")).toThrow("session ID");
 	});
 
-	test("disconnects Patchright's client transport without issuing Browser.close to Fabric Chromium", async () => {
-		let remoteBrowserClose = 0;
-		let clientTransportClose = 0;
-		const browser = {
-			close: async () => { remoteBrowserClose += 1; },
-			_connection: {
-				close: () => { clientTransportClose += 1; },
-			},
-		};
+	describe("a missing browser is typed through any wrapper", () => {
+		test("finds BrowserUnavailableError anywhere in the cause chain, and nothing else", () => {
+			const missing = new BrowserUnavailableError(new Error("Expected 101 status code"));
+			expect(missing.message).toBe("no browser was available (Expected 101 status code)");
+			expect(isBrowserUnavailable(missing)).toBeTrue();
+			const login = new Error("Cloudflare dashboard login failed: no browser was available.", { cause: missing });
+			expect(isBrowserUnavailable(new Error("job failed", { cause: login }))).toBeTrue();
+			// The text alone never classifies: only the type does.
+			expect(isBrowserUnavailable(new Error("no browser was available (Expected 101 status code)"))).toBeFalse();
+			expect(isBrowserUnavailable(new Error("outer", { cause: "no browser was available" }))).toBeFalse();
+			for (const value of [undefined, null, "no browser was available", { cause: missing }]) expect(isBrowserUnavailable(value)).toBeFalse();
+		});
 
-		await disconnectFabricPatchrightClient(browser);
-		expect(clientTransportClose).toBe(1);
-		expect(remoteBrowserClose).toBe(0);
+		test("terminates on a cyclic cause chain", () => {
+			const a = new Error("a");
+			const b = new Error("b", { cause: a });
+			(a as { cause?: unknown }).cause = b;
+			expect(isBrowserUnavailable(a)).toBeFalse();
+		});
+	});
+
+	/**
+	 * Regression of 2026-11-20/21: releasing a lease closed Patchright's
+	 * process-wide in-process connection, so every later Patchright call in the
+	 * process failed with "connectOverCDP: connectOverCDP: … Target page,
+	 * context or browser has been closed" until a restart.
+	 */
+	describe.skipIf(!chromiumAvailable)("a Patchright lease through a relay to a real Chromium", () => {
+		const relayUrl = process.env.FABRIC_CDP_RELAY_URL;
+		let chromium: Awaited<ReturnType<typeof launchTestChromium>>;
+		let relay: ReturnType<typeof Bun.serve>;
+		let relayClientsClosed = 0;
+		const fabricCalls: string[] = [];
+		let sessions = 0;
+		const config = (): FabricBrowserConfig => ({
+			...fabricBrowserConfigFromEnvironment({ environment: environment() })!,
+			fetch: async (input, init) => {
+				const path = new URL(String(input)).pathname;
+				fabricCalls.push(`${init?.method ?? "GET"} ${path}`);
+				if (path === "/v1/browser-sessions") return Response.json({ id: `browser-session_lease${++sessions}`, status: "ready" }, { status: 201 });
+				return Response.json({ status: "released" });
+			},
+		});
+
+		beforeAll(async () => {
+			chromium = await launchTestChromium();
+			const upstreamUrl = chromium.wsEndpoint();
+			// The relay: one upstream CDP WebSocket per client, like Fabric's.
+			relay = Bun.serve<{ upstream?: WebSocket; pending: (string | Buffer)[] }>({
+				port: 0,
+				fetch(request, server) {
+					return server.upgrade(request, { data: { pending: [] } }) ? undefined : new Response("upgrade", { status: 400 });
+				},
+				websocket: {
+					open(client) {
+						const upstream = new WebSocket(upstreamUrl);
+						client.data.upstream = upstream;
+						upstream.onopen = () => { for (const message of client.data.pending.splice(0)) upstream.send(message); };
+						upstream.onmessage = (event) => client.send(event.data as string);
+						upstream.onclose = () => client.close();
+					},
+					message(client, message) {
+						const upstream = client.data.upstream!;
+						if (upstream.readyState === WebSocket.OPEN) upstream.send(message);
+						else client.data.pending.push(message);
+					},
+					close(client) {
+						relayClientsClosed += 1;
+						client.data.upstream?.close();
+					},
+				},
+			});
+			process.env.FABRIC_CDP_RELAY_URL = `http://127.0.0.1:${relay.port}`;
+		});
+		afterAll(async () => {
+			relay?.stop(true);
+			await chromium?.close();
+			if (relayUrl === undefined) delete process.env.FABRIC_CDP_RELAY_URL;
+			else process.env.FABRIC_CDP_RELAY_URL = relayUrl;
+		});
+
+		test("releasing one lease drops only its own client: the next lease in the process still connects, and Chromium lives on", async () => {
+			for (let lease = 1; lease <= 3; lease++) {
+				const session = await acquireFabricPatchrightSession({ operation: "test" }, { egress: "reporting", leaseMode: "clone" }, config());
+				const page = await session.context.newPage();
+				expect(await page.evaluate(() => 6 * 7)).toBe(42);
+				await page.close();
+				await session.browser.close(); // the lease release, as callers use it
+				await session.release();
+				// Released exactly once, its transport closed at the relay.
+				expect(fabricCalls.filter((call) => call.endsWith(`browser-session_lease${lease}/release`))).toHaveLength(1);
+				await Bun.sleep(50);
+				expect(relayClientsClosed).toBe(lease);
+			}
+			// The leased Chromium was never told Browser.close: only Fabric ends it.
+			expect(chromium.connected).toBeTrue();
+			expect((await chromium.pages()).length).toBeGreaterThan(0);
+		}, 60_000);
+
+		test("a relay that refuses the connection is a typed missing browser, and the lease is cancelled", async () => {
+			const closed = Bun.serve({ port: 0, fetch: () => new Response("no such session", { status: 404 }) });
+			process.env.FABRIC_CDP_RELAY_URL = `http://127.0.0.1:${closed.port}`;
+			try {
+				const error = await acquireFabricPatchrightSession({}, {}, config()).catch((thrown: unknown) => thrown);
+				expect(error).toBeInstanceOf(BrowserUnavailableError);
+				// One clean prefix: the message does not grow with each failed attempt.
+				expect((error as Error).message).not.toContain("connectOverCDP: connectOverCDP:");
+				expect(fabricCalls.at(-1)).toBe(`POST /v1/browser-sessions/browser-session_lease${sessions}/cancel`);
+			} finally {
+				closed.stop(true);
+				process.env.FABRIC_CDP_RELAY_URL = `http://127.0.0.1:${relay.port}`;
+			}
+			// …and a missing browser never poisons the next lease.
+			const session = await acquireFabricPatchrightSession({}, {}, config());
+			await session.release();
+		}, 240_000);
 	});
 
 	describe("relay capacity", () => {
@@ -312,6 +421,21 @@ describe("Phishing Support Browser Fabric boundary", () => {
 			).then(() => undefined, (error: unknown) => error);
 			expect(refused).toBeInstanceOf(Error);
 			expect((refused as Error).message).toBe("connect ECONNREFUSED 10.0.0.1:8085");
+		});
+
+		test("recognizes a full relay in Patchright's words", async () => {
+			let attempts = 0;
+			const browser = await connectThroughRelay(
+				async () => {
+					attempts++;
+					if (attempts < 3) throw new Error("connectOverCDP: WebSocket error: ws://fabric-relay-phishing:8085/v1/cdp/browser-session_abc 503 Service Unavailable\nCall log:\n  - <ws unexpected response> 503 Service Unavailable");
+					return "browser";
+				},
+				async () => undefined,
+				{ sleep: async () => undefined },
+			);
+			expect(browser).toBe("browser");
+			expect(attempts).toBe(3);
 		});
 
 		test("never retries a failure that is not the relay being full", async () => {

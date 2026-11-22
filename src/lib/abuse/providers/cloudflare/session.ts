@@ -136,7 +136,7 @@ async function loginWithFabric(config: CloudflareLoginConfig, signal: AbortSigna
 	}, "Cloudflare dashboard login was canceled.").catch((error: unknown) => {
 		if (error instanceof OperationCanceledError) throw error;
 		// No credential has been typed yet; the browser service's own answer is safe to keep.
-		throw new ProviderLoginError(PROVIDER, `no browser was available (${errorSummary(error)})`);
+		throw new ProviderLoginError(PROVIDER, errorSummary(error), { cause: error });
 	});
 	try {
 		return await loginWithContext(fabric.context, config, signal);

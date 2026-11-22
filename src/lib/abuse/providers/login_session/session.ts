@@ -5,6 +5,7 @@ import { OperationCanceledError, raceAbort, throwIfOperationCanceled } from "../
 import { sqliteLoginSessionStore, type LoginSessionStore } from "./store";
 import { sha256Hex } from "../../../util/hash";
 import { raceTimeout } from "../../../util/async";
+import { isBrowserUnavailable } from "../../../browser/fabric";
 
 /**
  * A logged-in provider account session: whatever a provider needs to call its
@@ -15,8 +16,8 @@ export type LoginSession = { readonly id: string; readonly expiresAt: number };
 
 /** A login that failed at a named step. The message never carries browser error text, which can echo typed values. */
 export class ProviderLoginError extends Error {
-	constructor(readonly provider: string, readonly stage: string) {
-		super(`${provider} login failed: ${stage}.`);
+	constructor(readonly provider: string, readonly stage: string, options?: ErrorOptions) {
+		super(`${provider} login failed: ${stage}.`, options);
 		this.name = "ProviderLoginError";
 	}
 }
@@ -145,6 +146,10 @@ export function createLoginSessions<C, S extends LoginSession>(spec: LoginSessio
 				await deps.store.writeSession(storeKey, session, session.expiresAt);
 				return session;
 			} catch (error) {
+				// No browser means no credential was typed: it says nothing about the
+				// account, so it is not stored as the account's login failure. The
+				// worker reschedules it on its own.
+				if (isBrowserUnavailable(error)) throw error;
 				// The login signal only fires on its timeout, so a cancel here is a timeout failure.
 				const message = error instanceof ProviderLoginError ? error.message
 					: error instanceof OperationCanceledError ? new ProviderLoginError(spec.provider, `the login did not finish within ${spec.loginTimeoutMs / 1000} s`).message

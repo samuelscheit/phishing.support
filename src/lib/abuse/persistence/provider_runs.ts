@@ -107,11 +107,19 @@ export async function replaceStartingDraft(runId: bigint, payload: Record<string
  * Atomically finish a direct-provider job whose local preflight exhausted all
  * retries before the irreversible submission marker was acquired.
  */
+/** Where a job that is given up leaves its route, and why. */
+export type JobGiveUp = { routeStatus: "failed" | "needs_human"; reason: string };
+
+/**
+ * Give up a `submit_provider` job whose run never passed its submission
+ * marker: the job fails, the run is settled failed, and the route goes to
+ * `routeStatus`. False when the job, route or run is not in that state.
+ */
 export async function failProviderSubmissionPreflight(params: {
 	jobId: bigint;
 	owner: string;
 	error: string;
-}): Promise<boolean> {
+} & JobGiveUp): Promise<boolean> {
 	const db = await getDb();
 	return db.transaction(
 		(tx) => {
@@ -171,7 +179,7 @@ export async function failProviderSubmissionPreflight(params: {
 			});
 
 			tx.update(abuseProviderRoutes)
-				.set({ status: "failed", updatedAt: timestamp })
+				.set({ status: params.routeStatus, updatedAt: timestamp })
 				.where(eq(abuseProviderRoutes.id, route.id))
 				.run();
 			recordEvent(tx, {
@@ -181,11 +189,11 @@ export async function failProviderSubmissionPreflight(params: {
 				runId: run.id,
 				jobId: job.id,
 				eventType: "route.status_changed",
-				data: { from: route.status, to: "failed", reason: "retry_exhausted", error: params.error },
+				data: { from: route.status, to: params.routeStatus, reason: params.reason, error: params.error },
 			});
 
 			recomputeReportStatusInTransaction(tx, route.reportId, {
-				reason: "provider_preflight_retry_exhausted",
+				reason: `provider_preflight_${params.reason}`,
 				routeId: route.id.toString(),
 			});
 			return true;

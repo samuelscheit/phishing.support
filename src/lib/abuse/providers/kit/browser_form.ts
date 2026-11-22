@@ -20,8 +20,8 @@ import { parseJson } from "../../../util/values";
 export type BrowserFormStage = "browser" | "load" | "challenge" | "form" | "captcha" | "page" | "request";
 
 export class BrowserFormError extends Error {
-	constructor(readonly stage: BrowserFormStage, message: string) {
-		super(message);
+	constructor(readonly stage: BrowserFormStage, message: string, options?: ErrorOptions) {
+		super(message, options);
 		this.name = "BrowserFormError";
 	}
 }
@@ -153,7 +153,8 @@ async function acquireSession(options: BrowserFormOptions): Promise<Pick<FabricP
 		void launch.then((late) => late.cancel().catch(() => undefined)).catch(() => undefined);
 	}, `${options.provider} browser form was canceled.`).catch((error: unknown) => {
 		if (error instanceof OperationCanceledError) throw error;
-		throw new BrowserFormError("browser", `${options.provider}: no browser was available (${errorSummary(error)})`);
+		// A missing browser stays the cause: the worker reschedules it without spending the job's attempts.
+		throw new BrowserFormError("browser", `${options.provider}: ${errorSummary(error)}`, { cause: error });
 	});
 }
 

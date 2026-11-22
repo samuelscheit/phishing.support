@@ -1,6 +1,7 @@
 import { AbuseRepository } from "../repository";
 import { resolveAbuseTarget } from "../resolver";
-import { acquireFabricCdpSession, cancelFabricBrowserSession } from "../../browser/fabric";
+import { acquireFabricCdpSession, cancelFabricBrowserSession, isBrowserUnavailable } from "../../browser/fabric";
+import type { JobGiveUp } from "../persistence/provider_runs";
 import { browserTaskModel, type ChatModel } from "../../browser/task/agent";
 import type { FabricCdpSessionAcquirer } from "../../browser/task/fabric";
 import { fabricBrowserSessionIdFromProviderPayload } from "../../browser/fabric_session";
@@ -18,7 +19,11 @@ import { enqueueRulesSweep } from "../../campaign/sweep";
 import { ensureLivenessChecks } from "../../liveness/schedule";
 import { sleep } from "../../util/sleep";
 import { isExternalJob, JOB_HANDLERS, JOB_LANES, JOB_POLICY, jobTimeoutMs, laneFilter, type JobLane } from "./jobs";
-import { MAX_RETRIES, retryDelayMs } from "./retry";
+import { BROWSER_WAIT_LIMIT_MS, browserWaitDelayMs, MAX_RETRIES, retryDelayMs } from "./retry";
+
+const RETRY_EXHAUSTED: JobGiveUp = { routeStatus: "failed", reason: "retry_exhausted" };
+/** A missing browser is never the route's failure: a person decides once the wait is over. */
+const BROWSER_UNAVAILABLE: JobGiveUp = { routeStatus: "needs_human", reason: "browser_unavailable" };
 
 const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;
@@ -211,6 +216,14 @@ export class AbuseWorker {
 		const message = boundedErrorText(error);
 		if (job.unknownExternalState || (error as { unknownExternalState?: unknown })?.unknownExternalState === true) {
 			await AbuseRepository.markJobUnknownExternalState({ jobId: job.id, owner: this.owner, error: message });
+		} else if (isBrowserUnavailable(error)) {
+			// Nothing ran without a browser, so the wait spends none of the job's attempts; it is bounded by the job's age instead.
+			const waitedMs = Date.now() - job.createdAt.getTime();
+			if (waitedMs >= BROWSER_WAIT_LIMIT_MS) {
+				await this.failRetryExhaustedJob(job, `${message} No browser for ${Math.round(waitedMs / 3_600_000)} h; a person must decide.`, BROWSER_UNAVAILABLE);
+			} else {
+				await AbuseRepository.deferJob({ jobId: job.id, owner: this.owner, error: message, afterMs: browserWaitDelayMs(waitedMs) });
+			}
 		} else if (isNonRetryableError(error) || job.retryCount >= MAX_RETRIES) {
 			// A typed verdict that repeating the same work cannot change fails now rather than spending the remaining retries.
 			await this.failRetryExhaustedJob(job, message);
@@ -301,7 +314,7 @@ export class AbuseWorker {
 		}
 	}
 
-	private async failRetryExhaustedJob(job: AbuseJob, error: string): Promise<void> {
+	private async failRetryExhaustedJob(job: AbuseJob, error: string, giveUp: JobGiveUp = RETRY_EXHAUSTED): Promise<void> {
 		if (JOB_POLICY[job.jobType].supplementary) {
 			// Evidence gathering, infrastructure, campaigns, kit discovery and site checks are supplementary:
 			// their failure must not turn a successfully submitted phishing report into a reporting failure.
@@ -317,6 +330,7 @@ export class AbuseWorker {
 			jobId: job.id,
 			owner: this.owner,
 			error,
+			...giveUp,
 		})) return;
 		await AbuseRepository.failJob({ jobId: job.id, owner: this.owner, error });
 		if (job.routeId) {
@@ -325,8 +339,8 @@ export class AbuseWorker {
 				await AbuseRepository.transitionRouteStatus({
 					routeId: route.id,
 					from: ["resolving", "verified", "queued", "running", "awaiting_provider_reply", "escalating_to_portal", "delivery_failed"],
-					to: "failed",
-					data: { reason: "retry_exhausted", error },
+					to: giveUp.routeStatus,
+					data: { reason: giveUp.reason, error },
 				});
 			}
 			return;
@@ -335,8 +349,8 @@ export class AbuseWorker {
 			await AbuseRepository.transitionReportStatus({
 				reportId: job.reportId,
 				from: ["accepted", "resolving", "verifying", "queued", "running", "waiting_provider"],
-				to: "failed",
-				data: { reason: "retry_exhausted", error },
+				to: giveUp.routeStatus,
+				data: { reason: giveUp.reason, error },
 			});
 		}
 	}
