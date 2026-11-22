@@ -6,7 +6,7 @@ import { createAbuseEmailDraft, type AbuseEmailDraft } from "../mail/draft";
 import { sendAbuseEmailRoute } from "../mail/send";
 import { AbuseRepository } from "../repository";
 import { SubmissionsEntity } from "../../db/entities/submissions";
-import { emailRoute } from "../resolver/routes";
+import { emailRoute } from "../providers";
 import { reportConfirmedEmailPhishing } from "../submission_reports";
 import { sendEmail } from "./email";
 import { resolveReport } from "./resolution";

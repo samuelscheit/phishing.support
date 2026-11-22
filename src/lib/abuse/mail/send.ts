@@ -5,6 +5,7 @@ import MailComposer from "nodemailer/lib/mail-composer";
 import { replyDomain, smtpReturnPath, smtpSender, smtpTransport } from "../../mail/config";
 import { AbuseRepository } from "../repository";
 import { attachmentFilename } from "./shared";
+import { XARF_CONTENT_TYPE, xarfMailParts } from "./xarf";
 import {
 	type AbuseMailAttachment,
 	type AbuseMailSendResult,
@@ -58,6 +59,8 @@ async function buildCanonicalAbuseMail(params: {
 	correlationKey?: string;
 	/** Reuse the route-owned reply address when retrying a known delivery failure. */
 	replyAddress?: string;
+	/** Send as an XARF report: the text, its feedback report and xarf.json, instead of the attachments. */
+	xarf?: Record<string, unknown>;
 }): Promise<CanonicalAbuseMail> {
 	const from = normalizedMailbox(params.from ?? smtpSender());
 	const to = [...new Set(params.to.map(normalizedMailbox))];
@@ -80,7 +83,7 @@ async function buildCanonicalAbuseMail(params: {
 		headers: {
 			"X-Abuse-Report-Correlation": correlationKey,
 		},
-		attachments: (params.attachments ?? []).map((attachment) => ({
+		attachments: params.xarf ? xarfMailParts(params.xarf) : (params.attachments ?? []).map((attachment) => ({
 			filename: attachmentFilename(attachment.filename),
 			content: attachment.content,
 			contentType: safeHeader("Attachment MIME type", attachment.mimeType),
@@ -88,6 +91,8 @@ async function buildCanonicalAbuseMail(params: {
 		disableFileAccess: true,
 		disableUrlAccess: true,
 	});
+	const root = composer.compile();
+	if (params.xarf) root.setHeader("Content-Type", XARF_CONTENT_TYPE);
 	return {
 		from,
 		to,
@@ -96,7 +101,7 @@ async function buildCanonicalAbuseMail(params: {
 		replyAddress: identity.address,
 		correlationKey,
 		messageId,
-		rawMime: await composer.compile().build(),
+		rawMime: await root.build(),
 	};
 }
 
@@ -124,9 +129,14 @@ export async function sendAbuseEmailRoute(params: {
 	transport?: AbuseMailTransport;
 	correlationKey: string;
 	replyAddress?: string;
+	/** The XARF report this mail carries instead of its attachments, which ride inside it. */
+	xarf?: Record<string, unknown>;
 }): Promise<AbuseMailSendResult> {
 	let mail: CanonicalAbuseMail;
 	let storedMessageId: bigint;
+	const sentAttachments = params.xarf
+		? [{ filename: "xarf.json", mimeType: "application/json", content: Buffer.from(JSON.stringify(params.xarf)) }]
+		: params.attachments ?? [];
 	try {
 		mail = await buildCanonicalAbuseMail({
 			to: [params.recipient],
@@ -135,6 +145,7 @@ export async function sendAbuseEmailRoute(params: {
 			attachments: params.attachments,
 			correlationKey: params.correlationKey,
 			replyAddress: params.replyAddress,
+			...(params.xarf ? { xarf: params.xarf } : {}),
 		});
 		const rawArtifactId = await AbuseRepository.saveArtifact({
 			reportId: params.reportId,
@@ -147,7 +158,7 @@ export async function sendAbuseEmailRoute(params: {
 			metadata: { messageId: mail.messageId, correlationKey: mail.correlationKey },
 		});
 		const attachmentArtifactIds = await Promise.all(
-			(params.attachments ?? []).map((attachment) =>
+			sentAttachments.map((attachment) =>
 				AbuseRepository.saveArtifact({
 					reportId: params.reportId,
 					routeId: params.routeId,

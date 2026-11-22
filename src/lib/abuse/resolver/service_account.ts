@@ -1,5 +1,5 @@
 import type { ResolvedAbuseTarget, ResolverTarget } from "./types";
-import { emailRoute } from "./routes";
+import { emailRoute } from "../providers";
 
 const TELEGRAM_BOT = /^telegram-bot:(\d{1,20})$/;
 const DISCORD_WEBHOOK = /^discord-webhook:(\d{1,20})$/;

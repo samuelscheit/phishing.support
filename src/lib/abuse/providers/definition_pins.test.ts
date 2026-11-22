@@ -28,6 +28,7 @@ const PINS: Record<string, string[]> = {
 	godaddy: ["2026-11-21.1", "195cf22a168ba2b73c147fb1468fdc9e622ea09e0b5046c1ae333f988f98901f"],
 	name_com: ["2026-11-21.1", "2aa129c1f1aac53bf5402c05313fb24dc0ff20628976fd984163f046f06b0ebc"],
 	dynadot: ["2026-11-21.1", "93d6034d8661a729f7ffdda67cb4d2152f37194fd29d7f937b95a635b61bc960"],
+	digitalocean: ["2026-11-22.1", "9a6126f037cc07fe983d64f106c3c4efdf757a3cb82281fc43c1366126fbcc83"],
 };
 
 test("every provider definition keeps its pinned version and content hash", () => {

@@ -1,29 +1,11 @@
 import {
+	emailRoute,
 	getProviderSubmissionProviderForMailbox,
 	providerContactRoute,
 	verifiedDomainsForEmailRoute,
 } from "../providers";
 import type { ResolvedRouteInput } from "../route_contracts";
 import type { JsonRecord } from "./types";
-
-export function emailRoute(params: {
-	email: string;
-	providerName: string;
-	provenance: JsonRecord;
-	snapshot: JsonRecord;
-}): ResolvedRouteInput {
-	const domain = params.email.slice(params.email.lastIndexOf("@") + 1);
-	return {
-		routeKey: `email:${params.email}`,
-		providerRegistryKey: `email:${domain}`,
-		providerDisplayName: params.providerName,
-		routeType: "email",
-		verifiedEmail: params.email,
-		resolverProvenance: params.provenance,
-		resolutionSnapshot: params.snapshot,
-		status: "verified",
-	};
-}
 
 /**
  * Resolve an explicit abuse mailbox once. A reviewed provider that owns the

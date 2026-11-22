@@ -1,5 +1,7 @@
-import { abuseEmailCaseUrl, createAbuseEmailDraft, readVerifiedEmailDraft, type AbuseEmailDraft, verifiedEmailProviderPayload } from "../mail/draft";
-import { isSafeEmailDeliveryFailure } from "../mail/types";
+import { abuseEmailCaseUrl, createAbuseEmailDraft, hostingAddress, readVerifiedEmailDraft, type AbuseEmailDraft, verifiedEmailProviderPayload } from "../mail/draft";
+import { isSafeEmailDeliveryFailure, ROUTE_MAIL_ATTACHMENT_KINDS } from "../mail/types";
+import { buildXarfReport } from "../mail/xarf";
+import { getProviderSubmissionProviderForMailbox } from "../providers";
 import { attachedMessagesAsText, refusesAttachedMessages } from "../mail/attachment_policy";
 import { sendAbuseEmailRoute } from "../mail/send";
 import { smtpRelay } from "../../mail/config";
@@ -83,7 +85,7 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 		...(caseUrl ? [caseUrl] : []),
 		...(approvalDraftOf(route)?.allowedUrls ?? []),
 	];
-	const routeArtifacts = await AbuseRepository.listRouteArtifacts(route.id, ["origin_host_evidence", "referral_attachment"]);
+	const routeArtifacts = await AbuseRepository.listRouteArtifacts(route.id, ROUTE_MAIL_ATTACHMENT_KINDS);
 	const evidence = [...routeArtifacts, ...evidenceArtifacts]
 		.filter((artifact, index, all) => all.findIndex((candidate) => candidate.id === artifact.id) === index)
 		.slice(0, 15)
@@ -125,6 +127,22 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 			email: draft,
 		});
 	}
+	// A mailbox whose provider names XARF as its mail format is run by tooling that reads nothing else.
+	const sourceIp = hostingAddress(route, target);
+	const xarf = getProviderSubmissionProviderForMailbox(route.verifiedEmail)?.definition.emailFallback?.format === "xarf"
+		? buildXarfReport({
+			reportId: crypto.randomUUID(),
+			allegationCategory: report.allegationCategory,
+			observedAt: report.createdAt,
+			target: target.normalizedTarget,
+			observedUrls: target.observedUrls,
+			...(sourceIp ? { sourceIp } : {}),
+			legalBrandUrl: report.legalBrandUrl,
+			description: draft.subject,
+			...(caseUrl ? { caseUrl } : {}),
+			evidence,
+		})
+		: undefined;
 	const delivery = await AbuseRepository.beginEmailDelivery({
 		routeId: route.id,
 		correlationKey,
@@ -172,6 +190,7 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 			attachments,
 			correlationKey,
 			replyAddress: retryReplyAddress,
+			...(xarf ? { xarf } : {}),
 		});
 	} catch (error) {
 		// MIME construction, local artifact persistence, and outbound-message

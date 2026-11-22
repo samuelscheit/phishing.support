@@ -23,6 +23,13 @@ export type ProviderSubmissionDefinition = {
 	/** Whether this provider should run in addition to the mailbox-selected one. */
 	readonly supplemental: boolean;
 	/**
+	 * Mail the provider's mailbox when its direct submission settles without
+	 * filing anything (refused, needs a person, or nothing to draft), in the
+	 * format its mailbox processes: `xarf` is an XARF v4 report
+	 * (multipart/report with xarf.json) for mailboxes run by XARF tooling.
+	 */
+	readonly emailFallback?: { readonly format: "plain" | "xarf" };
+	/**
 	 * Code-owned target rules for an independent supplemental submission. This
 	 * keeps provider-specific eligibility in provider definitions rather than
 	 * branching on a provider name in resolver code.

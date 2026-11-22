@@ -6,6 +6,7 @@ import { SubmissionsEntity } from "../../db/entities/submissions";
 import { queryRDAPDomain } from "../../website/info/info";
 import { createWebsiteSubmission, type WebsiteSubmissionOptions } from "../../submissions/website";
 import { normalizeDomain, registrableDomain } from "../security/security";
+import { getProviderSubmissionProviderForMailbox, providerContactRoute } from "../providers";
 import { AbuseRepository } from "../repository";
 import type { AbuseJob } from "../schema";
 import { parseJobBigInt, throwIfAborted } from "../worker/shared";
@@ -193,15 +194,10 @@ async function ensureDelivery(reportId: bigint, routeId: bigint, snapshot: Origi
 		});
 	}
 	const route = await AbuseRepository.getRoute(routeId);
-	if (route?.status === "verified") {
-		await AbuseRepository.enqueueJob({
-			jobType: "send_email",
-			reportId,
-			routeId,
-			payload: {},
-			dedupeKey: `email:${routeId.toString()}`,
-		});
-	}
+	if (route?.status !== "verified") return;
+	await AbuseRepository.enqueueJob(route.routeType === "provider_submission"
+		? { jobType: "submit_provider", reportId, routeId, payload: {}, dedupeKey: `provider-submit:${routeId.toString()}` }
+		: { jobType: "send_email", reportId, routeId, payload: {}, dedupeKey: `email:${routeId.toString()}` });
 }
 
 /**
@@ -311,7 +307,7 @@ async function completeOriginHostReport(params: {
 	// A staff-created or resolver-created route may already have reported this
 	// exact disclosed mailbox. Continue discovery so sibling cases are created,
 	// but never send a second complaint to the same recipient for one report.
-	const recipientAlreadyReported = params.reportRoutes.some((route) => route.routeType === "email" && route.verifiedEmail === disclosure.recipient);
+	const recipientAlreadyReported = params.reportRoutes.some((route) => route.verifiedEmail === disclosure.recipient);
 
 	let siblingDiscovery: SiblingDiscoveryResult = { fingerprints: [], candidateCount: 0, confirmed: [], errors: [] };
 	if (report.submissionId && await isKitSiblingSeed(report.submissionId)) {
@@ -406,20 +402,25 @@ async function completeOriginHostReport(params: {
 		})
 		: sourceTarget;
 	if (routeTarget !== sourceTarget) await scheduleLivenessChecks(routeTarget.id);
-	const route = await AbuseRepository.upsertResolvedRoute(routeTarget.id, {
-		routeKey: params.routeKey,
-		providerRegistryKey: ORIGIN_ROUTE_PROVIDER_KEY,
-		providerDisplayName: snapshot.providerLabel,
-		routeType: "email",
-		verifiedEmail: snapshot.recipient,
-		resolverProvenance: {
-			source: "cloudflare_origin_disclosure",
-			sourceMessageId: snapshot.sourceMessageId,
-			networkValidation: "ripestat_abuse_contact_exact_match",
-		},
-		resolutionSnapshot: snapshot,
-		status: "verified",
-	});
+	const resolverProvenance = {
+		source: "cloudflare_origin_disclosure",
+		sourceMessageId: snapshot.sourceMessageId,
+		networkValidation: "ripestat_abuse_contact_exact_match",
+	};
+	// A host whose mailbox a reviewed provider owns is reported through that provider (its form), like any resolved contact.
+	const provider = getProviderSubmissionProviderForMailbox(snapshot.recipient);
+	const route = await AbuseRepository.upsertResolvedRoute(routeTarget.id, provider
+		? { ...providerContactRoute({ provider, email: snapshot.recipient, source: { resolverProvenance, resolutionSnapshot: snapshot } }), routeKey: params.routeKey }
+		: {
+			routeKey: params.routeKey,
+			providerRegistryKey: ORIGIN_ROUTE_PROVIDER_KEY,
+			providerDisplayName: snapshot.providerLabel,
+			routeType: "email",
+			verifiedEmail: snapshot.recipient,
+			resolverProvenance,
+			resolutionSnapshot: snapshot,
+			status: "verified",
+		});
 	await ensureDelivery(report.id, route.id, snapshot);
 	await AbuseRepository.recomputeReportStatus(report.id);
 }

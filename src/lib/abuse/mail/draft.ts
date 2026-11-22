@@ -8,6 +8,7 @@ import { serviceIdentity } from "../../network/service_identity";
 import { defaultResponseModel } from "../../openai/client";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
 import { createOriginHostEmailDraft } from "../origin/draft";
+import { readOriginHostSnapshot } from "../origin/snapshot";
 import { humanizeOrganization, recipientGreeting } from "./shared";
 import { refangText } from "../../malware/defang";
 import { PRESERVATION_REQUEST } from "../preservation";
@@ -337,6 +338,12 @@ function cleanAttachmentNames(names: readonly string[] | undefined): string[] {
  * assign to Contabo products").
  */
 export function hostingAddressLine(route: DraftInput["route"]): string | undefined {
+	const origin = readOriginHostSnapshot(route.resolutionSnapshot);
+	if (origin) {
+		const [server] = origin.servers;
+		const report = origin.cloudflareReportId ? ` (Cloudflare report ${origin.cloudflareReportId})` : "";
+		return `Hosting: ${origin.originalDomain} is behind Cloudflare, and Cloudflare named ${origin.recipient} as its host${report}.${server ? ` Origin server ${server.ip}:443 returned byte-identical captured files and presents ${origin.originalDomain}'s certificate.` : ""}`;
+	}
 	const provenance = asRecord(route.resolverProvenance);
 	if (provenance?.source !== "domain_infrastructure_ip") return undefined;
 	const ip = valueAt(provenance, ["originatingIp"]);
@@ -347,6 +354,19 @@ export function hostingAddressLine(route: DraftInput["route"]): string | undefin
 	const snapshot = asRecord(route.resolutionSnapshot);
 	const network = valueAt(snapshot, ["ipResolution", "allocationOwner", "name"]) ?? valueAt(snapshot, ["ipResolution", "allocationOwner", "organization"]);
 	return `Hosting IP address: ${ip} (${domain} resolved to ${addresses.join(", ")} on ${utcDate(route.createdAt)}${network ? `; network ${network}` : ""})`;
+}
+
+/**
+ * The address the reported site is served from, when we know it: the target
+ * itself, the origin server a sweep proved, or the address the domain
+ * resolved to when the resolver reached the hoster through it.
+ */
+export function hostingAddress(route: Pick<AbuseProviderRoute, "resolverProvenance" | "resolutionSnapshot">, target: Pick<AbuseTarget, "normalizedTarget" | "targetType">): string | undefined {
+	if (target.targetType === "ip") return target.normalizedTarget;
+	const server = readOriginHostSnapshot(route.resolutionSnapshot)?.servers[0];
+	if (server) return server.ip;
+	const provenance = asRecord(route.resolverProvenance);
+	return provenance?.source === "domain_infrastructure_ip" ? valueAt(provenance, ["originatingIp"]) : undefined;
 }
 
 function bodyFor(params: {

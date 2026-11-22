@@ -1,4 +1,4 @@
-export { providerContactRoute, providerRegistrarRoute, providerSupplementalRoute } from "./submission_routes";
+export { emailRoute, providerContactRoute, providerRegistrarRoute, providerSupplementalRoute } from "./submission_routes";
 export {
 	getProviderSubmissionProvider,
 	getProviderSubmissionProviderForMailbox,

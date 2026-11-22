@@ -2,6 +2,7 @@ import type { AbuseTargetType } from "../schema";
 import { alibabaCloudProvider } from "./alibaba_cloud";
 import { awsProvider } from "./aws";
 import { cloudflareProvider } from "./cloudflare";
+import { digitalOceanProvider } from "./digitalocean";
 import { discordDsaProvider } from "./discord_dsa";
 import { discordWebhookProvider } from "./discord_webhook";
 import { dynadotProvider } from "./dynadot";
@@ -46,6 +47,7 @@ const registry = createProviderSubmissionRegistry([
 	goDaddyProvider,
 	nameComProvider,
 	dynadotProvider,
+	digitalOceanProvider,
 ]);
 
 export function listProviderSubmissionProviders(): readonly ProviderSubmissionProvider[] {

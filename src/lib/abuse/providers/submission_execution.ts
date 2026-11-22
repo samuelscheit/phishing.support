@@ -1,6 +1,7 @@
 import { AbuseRepository } from "../repository";
 
 import { providerDefinitionMatchesPin } from "./kit/pin";
+import { fallBackToEmail } from "./email_fallback";
 
 import {
 	ProviderSubmissionNeedsHumanError,
@@ -173,6 +174,12 @@ export async function executeProviderSubmission(params: {
 	/** Ephemeral job deadline; never persisted. */
 	signal?: AbortSignal;
 }): Promise<ProviderSubmissionExecutionResult> {
+	const result = await executeOnce(params);
+	await fallBackToEmail(params.provider, params.routeId, result.outcome);
+	return result;
+}
+
+async function executeOnce(params: Parameters<typeof executeProviderSubmission>[0]): Promise<ProviderSubmissionExecutionResult> {
 	throwIfAborted(params.signal);
 	const route = await AbuseRepository.getRoute(params.routeId);
 	if (!route || route.routeType !== "provider_submission" || route.providerRegistryKey !== params.provider.definition.key) {

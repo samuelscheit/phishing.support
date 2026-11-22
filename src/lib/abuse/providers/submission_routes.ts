@@ -1,6 +1,26 @@
 import type { ResolvedRouteInput } from "../route_contracts";
 import type { ProviderSubmissionProvider } from "./submission_contracts";
 
+/** A route that mails an explicit abuse mailbox. */
+export function emailRoute(params: {
+	email: string;
+	providerName: string;
+	provenance: Record<string, unknown>;
+	snapshot: Record<string, unknown>;
+}): ResolvedRouteInput {
+	const domain = params.email.slice(params.email.lastIndexOf("@") + 1);
+	return {
+		routeKey: `email:${params.email}`,
+		providerRegistryKey: `email:${domain}`,
+		providerDisplayName: params.providerName,
+		routeType: "email",
+		verifiedEmail: params.email,
+		resolverProvenance: params.provenance,
+		resolutionSnapshot: params.snapshot,
+		status: "verified",
+	};
+}
+
 export type ProviderRouteSource = {
 	resolverProvenance: Record<string, unknown>;
 	resolutionSnapshot: Record<string, unknown>;

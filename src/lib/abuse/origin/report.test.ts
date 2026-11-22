@@ -225,4 +225,40 @@ https://phishing.support`);
 		expect(await (await getDb()).select().from(abuseJobs).where(and(eq(abuseJobs.jobType, "send_email"), eq(abuseJobs.routeId, originRoute.id))).all()).toHaveLength(1);
 		expect(await (await getDb()).select().from(abuseArtifacts).where(eq(abuseArtifacts.routeId, originRoute.id)).all()).toHaveLength(1);
 	});
+
+	test("a host whose mailbox a reviewed provider owns is reported through its form, without a made-up address", async () => {
+		const request = await validateAbuseReportRequest({
+			targets: ["trk.example.run"],
+			allegationCategory: "phishing",
+			description: "Captured page requests account credentials.",
+			observedUrls: [{ target: "trk.example.run", urls: ["https://trk.example.run/gg/fkd"] }],
+			legalBrandUrl: "https://www.google.com/",
+		});
+		const created = await AbuseRepository.createReport({ request, reporter: {} });
+		const [sourceTarget] = await AbuseRepository.listTargets(created.reportId);
+		const cloudflareRoute = await AbuseRepository.upsertResolvedRoute(sourceTarget!.id, { routeKey: "provider:cloudflare", providerRegistryKey: "cloudflare", providerDisplayName: "Cloudflare Abuse", routeType: "provider_submission", resolverProvenance: {}, resolutionSnapshot: {}, status: "verified" });
+		const [stored] = await AbuseRepository.recordProviderCorrespondence({
+			route: cloudflareRoute,
+			messages: [{ id: "cf-do", subject: "[0123456789abcdef]: Response to your Phishing report", body: CLOUDFLARE_RESPONSE.replace("abuse@host.example", "abuse@digitalocean.com"), sentAt: new Date("2026-11-22T06:19:36.000Z"), from: "Cloudflare" }],
+		});
+		await reportOriginHost({ reportId: created.reportId, messageId: stored!.id }, {
+			resolveNetworks: async () => ({ recipient: "abuse@digitalocean.com", mailboxDomain: "digitalocean.com", networks: [{ asn: 14061, holder: "DIGITALOCEAN-ASN", prefixes: ["8.8.8.0/30"], discoverySources: ["registry_name_search"] }], errors: [] }),
+			findServers: async () => [],
+			kitFacts: async () => ({ collects: [], exfiltrationProbed: false, exfiltrationTargets: [] }),
+			registeredAt: async () => undefined,
+		});
+		const route = (await AbuseRepository.listRoutes(created.reportId)).find(({ routeKey }) => routeKey === "origin-host:abuse@digitalocean.com")!;
+		expect(route).toMatchObject({ routeType: "provider_submission", providerRegistryKey: "digitalocean", verifiedEmail: "abuse@digitalocean.com", targetId: sourceTarget!.id, status: "verified" });
+		expect(readOriginHostSnapshot(route.resolutionSnapshot)?.servers).toEqual([]);
+		const jobs = await (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, route.id)).all();
+		expect(jobs.map(({ jobType }) => jobType)).toEqual(["submit_provider"]);
+
+		const { digitalOceanDraft } = await import("../providers/digitalocean/submission");
+		const prepared = await digitalOceanDraft.prepare({ routeId: route.id, payload: {} });
+		expect(prepared.outcome).toBe("ready");
+		const { report } = (prepared as { payload: { report: Record<string, string> } }).payload;
+		expect(report).toMatchObject({ sourceIp: null, campaignTarget: "google.com", evidenceUrl: "https://trk.example.run/gg/fkd" });
+		expect(report.details).toContain("Hosting: trk.example.run is behind Cloudflare, and Cloudflare named abuse@digitalocean.com as its host (Cloudflare report 0123456789abcdef).");
+		expect(report.details).not.toContain("public IPv4 addresses");
+	});
 });

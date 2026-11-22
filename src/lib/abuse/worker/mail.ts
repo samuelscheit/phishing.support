@@ -1,7 +1,7 @@
 import { classifyProviderReply, extractVerifiedProviderLinks } from "../mail/reply";
 import { isRelayRefusal } from "../mail/relay_refusal";
 import { isAttachmentRefusal } from "../mail/attachment_policy";
-import { getProviderSubmissionProvider } from "../providers";
+import { getProviderSubmissionProvider, getProviderSubmissionProviderForMailbox } from "../providers";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { AbuseRepository } from "../repository";
 import { contactRoute } from "../resolver/routes";
@@ -70,7 +70,10 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 		return;
 	}
 	const result = await classifyProviderReply({ text: message.textBody ?? "", from: message.fromAddress ?? undefined });
-	const links = result.classification === "not_monitored"
+	// A mailbox a reviewed provider owns already has its code-owned form route; its
+	// "use our form" answer must not start a second filing by the generic browser agent.
+	const providerOwnsMailbox = !!route.verifiedEmail && !!getProviderSubmissionProviderForMailbox(route.verifiedEmail);
+	const links = result.classification === "not_monitored" && !providerOwnsMailbox
 		? await extractVerifiedProviderLinks({
 			verifiedDomains: route.verifiedEmail ? verifiedDomainsForEmailRoute(route.verifiedEmail) : undefined,
 			text: message.textBody ?? "",
@@ -97,6 +100,8 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 				dedupeKey: `generic-portal:${route.id.toString()}`,
 			});
 		}
+	} else if (result.classification === "not_monitored" && providerOwnsMailbox) {
+		// The reply is the provider's standard answer to mail; the report stays with it.
 	} else if (result.classification === "not_monitored") {
 		await AbuseRepository.transitionRouteStatus({
 			routeId: route.id,

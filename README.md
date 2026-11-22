@@ -269,6 +269,7 @@ captured requests is in `docs/providers/`.
 | Newfold: Bluehost, Web.com, Network Solutions, Register.com, Domain.com (`newfold`) | abuse@bluehost.com, abuse@unifiedlayer.com, iarpoc@newfold.com, net-eng-team@newfold.com, domain.operations@web.com; 2, 9, 886 | newfold.com/abuse behind Cloudflare, reCAPTCHA v2 passed by Fabric's solver in the filing page |
 | Dynadot (`dynadot`) | abuse@dynadot.com; 472 | form behind Cloudflare + Turnstile, in a Fabric browser |
 | Name.com (`name_com`) | abuse@name.com; 625 | Zendesk form behind Cloudflare + Turnstile and a CSRF handshake, in a Fabric browser |
+| DigitalOcean (`digitalocean`) | abuse@digitalocean.com | unauthenticated multipart POST `inbound.digitalocean.com/contact_forms/abuse_reports` (201 kept, 422 refused); Source IP only when known; XARF mail when the form does not file it |
 
 - Browser forms share `providers/kit/browser_form.ts`: a Fabric session on the
   reporting egress that passes the Cloudflare challenge, waits for the
@@ -279,6 +280,16 @@ captured requests is in `docs/providers/`.
   (`providers/report_reference.ts`); it is the receipt unless the provider
   returns its own case ID, so provider mail quoting it reaches its route as a
   reply for the regular classifier.
+- A provider definition with `emailFallback` still mails its mailbox when the
+  direct submission settles without filing (refused, `needs_human`, or nothing
+  to draft): a sibling `email-fallback:<route key>` email route with the same
+  snapshot and route files. `format: "xarf"` sends an XARF v4 report
+  (`src/lib/abuse/mail/xarf.ts`, validated with `@xarf/xarf`):
+  `multipart/report; report-type=feedback-report` with the text, a
+  `Feedback-Type: xarf` part and `xarf.json` carrying the evidence. A
+  "use our form" reply to a mailbox a provider owns never starts the generic
+  browser agent; Cloudflare origin-host disclosures to such a mailbox go
+  through the provider too.
 - A spam or captcha verdict from a form files nothing and settles the route as
   `needs_human` rather than refused. Namecheap's Phishing Reports API and
   GoDaddy's Abuse API were requested by mail on 2026-11-20 (GoDaddy account

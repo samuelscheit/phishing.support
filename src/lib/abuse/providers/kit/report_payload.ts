@@ -97,7 +97,8 @@ export type ProviderReportProfile =
 	| "publicdomainregistry"
 	| "newfold"
 	| "godaddy"
-	| "dynadot";
+	| "dynadot"
+	| "digitalocean";
 
 type ProviderReportNarrativeInput = {
 	provider?: ProviderReportProfile;
@@ -282,6 +283,12 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 			return {
 				lead: `A suspected ${allegation} site registered or hosted at GoDaddy is being reported for ${target}.`,
 				action: "Please investigate the reported site and act on it under the GoDaddy Universal Terms of Service and your registrar abuse policy.",
+				urlContext,
+			};
+		case "digitalocean":
+			return {
+				lead: `A suspected ${allegation} site hosted on DigitalOcean is being reported for ${target}.`,
+				action: "Please identify the Droplet or App Platform service behind it, suspend it, and preserve its disk, logs and account records for law enforcement.",
 				urlContext,
 			};
 		case "newfold":
