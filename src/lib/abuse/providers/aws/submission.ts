@@ -9,6 +9,7 @@ import { providerResponseId } from "../kit/report_reference";
 import { AWS_PROVIDER } from "./definition";
 import { awsRequestBody, buildAwsSubmissionPayload, storedAwsSubmissionPayload, type AwsReportInput } from "./payload";
 import { deadline } from "../../../util/async";
+import { userAgent } from "../../../network/service_identity";
 
 export type AwsSubmissionDependencies = {
 	fetch?: (url: string, init: RequestInit) => Promise<Response>;
@@ -37,6 +38,9 @@ export const awsDraft = createDraft({
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
 
+/** The handler's answer once this address reached its request limit; it files nothing. */
+export const AWS_REQUEST_LIMIT_BODY = '{"errorMessage":"You have reached your request limit, please try again later"}';
+
 /** API Gateway's own body for a request its authorizer, resource policy or WAF denied. */
 export const API_GATEWAY_FORBIDDEN_BODY = '{"message":"Forbidden"}';
 
@@ -44,10 +48,12 @@ export const API_GATEWAY_FORBIDDEN_BODY = '{"message":"Forbidden"}';
  * Whether API Gateway itself denied the request: a 403 typed
  * `ForbiddenException` (its `x-amzn-errortype`, optionally `:`-suffixed with
  * a URL) or carrying its exact default body. The gateway answers so before
- * any integration runs, so the report never reached AWS's handler. Since
- * 2026-11-20 it answers every request to the form's API so, even the form
- * page's own `retrieve-aws-ips` inside a real browser. Any other 403 (an
- * application error with its own body) stays ambiguous.
+ * any integration runs, so the report never reached AWS's handler. It denies
+ * every client whose User-Agent is not a desktop browser's (probed
+ * 2026-11-22: none, `Bun/…`, `curl`, `axios`, `node`, bare `Mozilla/5.0` and
+ * `HeadlessChrome` get 403; Chrome or Firefox reach the handler), which is
+ * why the request carries the service's browser User-Agent. Any other 403
+ * (an application error with its own body) stays ambiguous.
  */
 export function isApiGatewayDenial(response: Pick<Response, "status" | "headers">, text: string): boolean {
 	if (response.status !== 403) return false;
@@ -59,20 +65,21 @@ export const apiGatewayDenial = (detail: string) => new ProviderSubmissionReject
 
 /**
  * File the report: the only work after the durable marker. A refusal naming
- * a bad request, or API Gateway's denial, means nothing was filed; anything
- * else leaves it ambiguous.
+ * a bad request, API Gateway's denial, or the handler's request limit means
+ * nothing was filed; anything else leaves it ambiguous.
  */
 export async function submitAwsSubmission(context: ProviderSubmissionContext, dependencies: AwsSubmissionDependencies = {}): Promise<ProviderSubmissionSuccess> {
 	const payload = awsDraft.stored(context);
 	const send = dependencies.fetch ?? fetch;
 	const response = await send(AWS_PROVIDER.endpoint, {
 		method: "POST",
-		headers: { "content-type": "application/json", accept: "application/json, text/plain, */*", origin: AWS_PROVIDER.origin },
+		headers: { "content-type": "application/json", accept: "application/json, text/plain, */*", origin: AWS_PROVIDER.origin, referer: `${AWS_PROVIDER.origin}/`, "user-agent": userAgent },
 		body: JSON.stringify(awsRequestBody(payload, (dependencies.now ?? (() => new Date()))())),
 		signal: deadline(AWS_PROVIDER.timeoutMs, context.signal),
 	});
 	const text = await response.text();
 	if (isApiGatewayDenial(response, text)) throw apiGatewayDenial(snippet(text));
+	if (response.status === 429 && text.trim() === AWS_REQUEST_LIMIT_BODY) throw new ProviderSubmissionRejectedError(`AWS refused the report at its request limit (HTTP 429): ${snippet(text)}`);
 	failUnlessFiled("AWS", response, snippet(text), [400, 413, 422]);
 	let answer: unknown;
 	try {

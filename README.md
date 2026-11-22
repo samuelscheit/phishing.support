@@ -248,13 +248,18 @@ captcha; the signed-in console form sends the same request).
   ("Your AWS Abuse Report [P01M7…]", from `trustandsafety@support.aws.com`)
   quotes the comments, so it names the route. That mail is a human reply that
   can ask for more information, and goes through the regular reply classifier.
-- A 400, 413 or 422 means nothing was filed, and so does API Gateway's own
-  denial: a 403 typed `x-amzn-errortype: ForbiddenException` or with its exact
-  body `{"message":"Forbidden"}`, answered before any handler runs. Since
-  2026-11-20 the API denies every request so, even the form page's own calls in
-  a real browser. Any other failure after the durable marker is ambiguous and
-  is never retried. AWS has no API to look a report up, so status arrives only
-  by that mail.
+- The request carries the service's desktop-browser User-Agent and the form's
+  `referer`: API Gateway denies every other client (no UA, `Bun/…`, curl,
+  axios, bare `Mozilla/5.0`, `HeadlessChrome`) with
+  `403 {"message":"Forbidden"}` before any handler runs (probed 2026-11-22;
+  Bun's default UA caused the 2026-11-20 failures). No login is needed.
+- A 400, 413 or 422 means nothing was filed, and so do that 403 (typed
+  `x-amzn-errortype: ForbiddenException` or with that exact body) and the
+  handler's per-address limit,
+  `429 {"errorMessage":"You have reached your request limit, please try again later"}`.
+  Any other failure after the durable marker is ambiguous and is never
+  retried. AWS has no API to look a report up, so status arrives only by that
+  mail.
 - A report the form refused goes to the route's mailbox as a plain abuse mail
   (`emailFallback`). AWS's "use our web form" answer to it leaves that route
   awaiting a reply; it never starts the generic portal agent.

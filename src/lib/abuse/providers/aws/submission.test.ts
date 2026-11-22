@@ -11,7 +11,8 @@ import { awsProvider } from "./index";
 import { AWS_PROVIDER } from "./definition";
 import { providerResponseId } from "../kit/report_reference";
 import { storedAwsSubmissionPayload } from "./payload";
-import { API_GATEWAY_FORBIDDEN_BODY, awsDraft, isApiGatewayDenial, submitAwsSubmission } from "./submission";
+import { userAgent } from "../../../network/service_identity";
+import { API_GATEWAY_FORBIDDEN_BODY, AWS_REQUEST_LIMIT_BODY, awsDraft, isApiGatewayDenial, submitAwsSubmission } from "./submission";
 
 const verifiedAwsDraft = async (context: Parameters<typeof awsDraft.verify>[0]) => (await awsDraft.verify(context)).payload;
 
@@ -120,7 +121,10 @@ describe("submitAwsSubmission", () => {
 		const { url, init } = fake.sent[0]!;
 		expect(url).toBe("https://api.support.aws.amazon.com/v1/contacts/report-abuse-v2");
 		expect(init.method).toBe("POST");
-		expect(init.headers).toEqual({ "content-type": "application/json", accept: "application/json, text/plain, */*", origin: "https://support.aws.amazon.com" });
+		// API Gateway denies any client that is not a desktop browser (403); the form page's own headers pass.
+		expect(init.headers).toEqual({ "content-type": "application/json", accept: "application/json, text/plain, */*", origin: "https://support.aws.amazon.com", referer: "https://support.aws.amazon.com/", "user-agent": userAgent });
+		expect(userAgent).toMatch(/^Mozilla\/5\.0 \(.+\) AppleWebKit\/.+ Chrome\/[\d.]+ Safari\/[\d.]+$/);
+		expect(userAgent).not.toContain("Headless");
 		expect(init.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(String(init.body))).toEqual({
 			content: {
@@ -189,6 +193,9 @@ describe("submitAwsSubmission", () => {
 			expect(error, name).toBeInstanceOf(ProviderSubmissionRejectedError);
 			expect(error.message, name).toContain("API gateway denied the report before it was filed (HTTP 403)");
 		}
+		const limited = await submitAwsSubmission(context, { fetch: fakeFetch(new Response(AWS_REQUEST_LIMIT_BODY, { status: 429 })).fetch, now: () => NOW }).catch((caught) => caught);
+		expect(limited).toBeInstanceOf(ProviderSubmissionRejectedError);
+		expect(limited.message).toContain("request limit (HTTP 429)");
 		expect(isApiGatewayDenial(new Response(null, { status: 200, headers: { "x-amzn-errortype": "ForbiddenException" } }), API_GATEWAY_FORBIDDEN_BODY)).toBe(false);
 	});
 
@@ -198,7 +205,8 @@ describe("submitAwsSubmission", () => {
 			["an application's own 403", json({ message: "Forbidden", reason: "quota" }, 403)],
 			["a 403 of another error type", new Response("denied", { status: 403, headers: { "x-amzn-errortype": "AccessDeniedException" } })],
 			["API Gateway's type on another status", new Response(API_GATEWAY_FORBIDDEN_BODY, { status: 500, headers: { "x-amzn-errortype": "ForbiddenException" } })],
-			["429", json({ message: "Too many requests" }, 429)],
+			["another 429", json({ message: "Too many requests" }, 429)],
+			["the request-limit body on another status", new Response(AWS_REQUEST_LIMIT_BODY, { status: 500 })],
 			["500", json({ message: "boom" }, 500)],
 			["502", new Response("<html>bad gateway</html>", { status: 502 })],
 			["not JSON", new Response("<html>ok</html>", { status: 200 })],
