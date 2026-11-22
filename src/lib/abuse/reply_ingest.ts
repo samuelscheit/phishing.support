@@ -3,7 +3,8 @@ import type { ParsedMail } from "mailparser";
 import { headerStrings, messageBody, normalizeMessageId, references } from "../imap/rfc";
 import type { AbuseProviderRoute } from "./schema";
 import { persistInboundAbuseMail, type InboundMailKind } from "./mail/inbound";
-import { authenticatedSender, caseSubmissionIdsIn, caseTagsIn, deliveryFailure } from "./mail/correlation";
+import { authenticatedSender, caseSubmissionIdsIn, caseTagsIn } from "./mail/correlation";
+import { deliveryFailure } from "./mail/delivery_report";
 import { listProviderSubmissionProviders } from "./providers";
 import { registrableDomain } from "./security/security";
 import { AbuseRepository } from "./repository";
@@ -52,7 +53,9 @@ const TRUSTED_AUTHSERV_ID = "icloud.com";
 /**
  * Correlate inbound mail with a sent report, strongest evidence first:
  * 1. our generated Reply-To identity or one of our Message-IDs in
- *    In-Reply-To/References (a bounce names ours in its returned headers);
+ *    In-Reply-To/References (a bounce names ours in its returned headers),
+ *    a delivery report being a bounce even when it is threaded like a reply
+ *    (Exchange threads its non-delivery reports to the returned mail);
  * 2. an authenticated sender we emailed, plus our case tag or case URL;
  * 3. an authenticated sender we emailed, plus our exact original subject.
  * A message that names several routes attaches to none.
@@ -61,14 +64,15 @@ export async function matchProviderReply(parsed: ParsedMail, recipientAddresses:
 	const inReplyTo = normalizeMessageId(parsed.inReplyTo ?? headerStrings(parsed, "in-reply-to")[0]);
 	const messageReferences = references(parsed);
 	const correlation = await AbuseRepository.findCorrelatedInboundRoute({ recipients: recipientAddresses, inReplyTo, references: messageReferences });
-	if (correlation.route) return { kind: "reply", route: correlation.route, mailKind: "reply" };
-	if (correlation.matched) return { kind: "ambiguous" };
+	if (correlation.matched && !correlation.route) return { kind: "ambiguous" };
 
 	const bounce = deliveryFailure(parsed);
 	if (bounce) {
-		const route = await AbuseRepository.findBouncedOutboundRoute(bounce.messageIds);
-		return route ? { kind: "reply", route, mailKind: "bounce", bouncedMessageIds: bounce.messageIds } : { kind: "none" };
+		const bouncedMessageIds = [...new Set([...bounce.messageIds, ...[inReplyTo, ...messageReferences].filter((id): id is string => Boolean(id)).map((id) => id.toLowerCase())])];
+		const route = correlation.route ?? await AbuseRepository.findBouncedOutboundRoute(bounce.messageIds);
+		return route ? { kind: "reply", route, mailKind: "bounce", bouncedMessageIds } : { kind: "none" };
 	}
+	if (correlation.route) return { kind: "reply", route: correlation.route, mailKind: "reply" };
 
 	const sender = authenticatedSender(parsed, TRUSTED_AUTHSERV_ID);
 	const body = messageBody(parsed);

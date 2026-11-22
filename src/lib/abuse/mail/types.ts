@@ -5,7 +5,6 @@ export const abuseReplyClassifications = [
 	"not_monitored",
 	"needs_more_information",
 	"rejected",
-	"bounce",
 	"ambiguous",
 ] as const;
 

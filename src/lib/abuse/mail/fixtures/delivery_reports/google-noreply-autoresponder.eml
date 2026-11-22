@@ -1,0 +1,103 @@
+Return-path: <3kdHCahUKAJwJAPSKNG-67QOA+JKNALHUCKKCHA.8KI@listserv.bounces.google.com>
+Original-recipient: rfc822;support@phishing.support
+Received: from p00-icloudmta-smtpin-us-west-2a-100-percent-25 by p142-mailgateway-smtp-59cd74fc76-v4hdc (mailgateway 2638B134)
+	with SMTP id ed18af29-1233-4076-ade1-d1a1a7dd048e 
+	for <support@phishing.support>; Sun, 4 Oct 2026 22:22:14 GMT
+X-Apple-MoveToFolder: phishing.support 
+X-Apple-Action: MOVE_TO_FOLDER/phishing.support
+X-Apple-UUID: ed18af29-1233-4076-ade1-d1a1a7dd048e
+Received: from mail-yx1-f70.google.com (mail-yx1-f70.google.com [74.125.224.70])
+	by p00-icloudmta-smtpin-us-west-2a-100-percent-25 (Postfix) with ESMTPS id C1A66C000D9
+	for <support@phishing.support>; Sun, 04 Oct 2026 22:22:12 +0000 (UTC)
+X-ICL-RepId: 01a10902-acbc-7e03-b836-7b23df622bed
+X-ICL-Info: GAtbRVYDBVFFSlVHSwQEUVUKE0oWX1gHVQoPB0UHAkxES1NZSgICTEJJRhIcDQUJETElFhBlfSM/Diw2KGN9LDJUUEApf3dJPzIoNjR4YyE+MiU/OR4OKTw5Ch4LREUHBw9IFRdFWAEQCkgQF19RDhBXBRgVEFAGSB4JGB9cU0wWFgtXClMLEQAJFhgKRHYSHRAVHxFeUUwGDBYHF0JCQh0cChhFXVcLGVQfD0kdUFVFVwEYF1daB1saCRpYQEIQSBQHHhQdTxpEVABASB5RDRoeChJWU1kPVR0CSh9fWQUZHEgUF10WDxwdW0tIAAZSRUlWR0gABlJBQVERSQQGVEAdVhVLAgFaNR4JGB9cU0wWFgtJ
+X-ICL-Score: 2.33303303423
+Authentication-Results: bimi.icloud.com; bimi=none
+X-ARC-Info: policy=fail; arc=none; r1=-20; r2=0
+Authentication-Results: arc.icloud.com; arc=none
+Authentication-Results: dmarc.icloud.com; dmarc=pass header.from=google.com
+X-DMARC-Policy: v=DMARC1; p=reject; rua=mailto:mailauth-reports@google.com
+X-DMARC-Info: pass=pass; dmarc-policy=reject; s=r1; d=r1; pdomain=google.com
+Authentication-Results: dkim-verifier.icloud.com; dkim=pass header.d=google.com header.i=@google.com header.b=bzYhWW0M
+Received-SPF: pass (spf.icloud.com: domain of 3kdHCahUKAJwJAPSKNG-67QOA+JKNALHUCKKCHA.8KI@listserv.bounces.google.com designates 74.125.224.70 as permitted sender) receiver=spf.icloud.com; client-ip=74.125.224.70; helo=mail-yx1-f70.google.com; envelope-from=3kdHCahUKAJwJAPSKNG-67QOA+JKNALHUCKKCHA.8KI@listserv.bounces.google.com
+Authentication-Results: spf.icloud.com; spf=pass (spf.icloud.com: domain of 3kdHCahUKAJwJAPSKNG-67QOA+JKNALHUCKKCHA.8KI@listserv.bounces.google.com designates 74.125.224.70 as permitted sender) smtp.mailfrom=3kdHCahUKAJwJAPSKNG-67QOA+JKNALHUCKKCHA.8KI@listserv.bounces.google.com
+Received: by mail-yx1-f70.google.com with SMTP id 956f58d0204a3-676956fd276so1465461d50.1
+        for <support@phishing.support>; Sun, 04 Oct 2026 15:22:11 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=google.com; s=20251104; t=1791152531; x=1791757331; darn=phishing.support;
+        h=content-type:date:message-id:subject:to:from:references:in-reply-to
+         :auto-submitted:mime-version:from:to:cc:subject:date:message-id
+         :reply-to:content-type;
+        bh=GHtAfXaPcIl9BQuIMv2q8V5XaZVqKb25tz/Hdf8cgh0=;
+        b=bzYhWW0MDVl5rOSJV9tXvSbi6qBhk4665SlZnSbWO2HBu7H3mttAh7voGtInOy1Eug
+         8i2T7XJKo2TbNwBThjdcR7WgSgk3FxyRHAFTybBS69S8FIaEpkB6OxyK3FrUA2zvPFwc
+         2PHTeNdUOxKHSSXRSg822+iTmWzlAUbySlv56suoj28yDFP7xrsIcGCd5KU8CfFgix5v
+         wnlxpEi7RhPtdmsMdEqSOz1Ji/brG/dWbnOistQjEkmmaphpaZFqgOdAGcwLsgvQ+62u
+         m9WmATo8rBktz0jtkKMJZlpuU8EwVUdJYku/W/w2eblFvhLeF0YgTTd535OO/ePMhCyy
+         09NA==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20260707; t=1791152531; x=1791757331;
+        h=content-type:date:message-id:subject:to:from:references:in-reply-to
+         :auto-submitted:mime-version:x-gm-message-state:from:to:cc:subject
+         :date:message-id:reply-to:content-type;
+        bh=GHtAfXaPcIl9BQuIMv2q8V5XaZVqKb25tz/Hdf8cgh0=;
+        b=wWfWc/lusDbe0S9n2OJ57rrF3QoidJNA7AMkaDSLU1Llfd0cxMz0fI+nVrAh2mVqb2
+         6Q1UvZIMRld3P6CH3LeKAnJ3z2Pu6BlGFdhOfxrrZ2n9vBAegiIbZPoCD7UEnbfvFTEG
+         a+wM1VAa0dAU2kCRdcfYfz+5TJiKRRbcfNg4fTzXxlGV3uaHKp4jB/vbk077VfLkpU5k
+         cAl4Fkg7/V535g7yLtF4RJKNUpnfVv3+un8U1UiNdOUWvQnZX5ZtJcEZVT2jWCVLjMDS
+         4Agd/yYy/96b5tLiyoO17r+e8XFAhODiBez2lIL13FkiuzvKG598hX+KBBLxef3tGhd4
+         Tp4w==
+X-Gm-Message-State: AFq9FYJlOSUa8AkPlgfNCs050bHBdjGbWNe2hGmcTzR6BBlZaCou3q1/
+	KiHgncUBCYnbaEo5p5jmgy9q8XQXy7NI/NDz0FeUc1tDTLlB9rESffaaPgFTEsXFJSbp/VVg1nt
+	ip9nr0onjIwvfVDDgFP3rbPGHppaUrLcv6ajr6hVQogWiF943y5dYUu0bdT0to9t4Fu0=
+X-Received: by 2002:a05:690e:b83:b0:677:cdbf:425c with SMTP id 956f58d0204a3-677cdbf622dmr1213509d50.14.1791152529901;
+        Sun, 04 Oct 2026 15:22:09 -0700 (PDT)
+MIME-Version: 1.0
+Auto-Submitted: auto-replied
+In-Reply-To: <abuse-5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e@phishing.support>
+References: <abuse-5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e@phishing.support>
+From: network-abuse <network-abuse+noreply@google.com>
+To: <support@phishing.support>
+Subject: Re: [Phishing Support] Abuse report for share.google
+Message-ID: <000000000000487f14065d0b3278@google.com>
+Date: Sun, 04 Oct 2026 22:22:09 +0000
+Content-Type: text/plain; charset="UTF-8"
+X-MANTSH: 1TFkXBxwbEQpZRBdtb04bSFIZc0l6XBEKWU0XbktYQREKX1kXBxkRCl9NF21YT1M
+ RCllJFxpxGhAadwYTcRsfEBsYdwYHGxgGGhEKWV4XbGx5EQpDThdFH2VCe2dYSFpgS2Z5UxhLR
+ hlpRXhTXGReck5/XWEcfxEKWFwXGQQaBB8SBRsaGgQdGwQbHBoEExoQGx4aHxoRCl5ZF0IBYnN
+ dEQpNXBcHExsRCkxaF2lSZ01BaxEKRVkXb2sRCkxfF3oFBQUFBQUFBQVvEQpMRhdNa2NiTWsRC
+ kNaFx0eBBsYHwQYGB4EHRoRCkJeFxsRCkJcFxsRCl5OFxsRCkJLF29JWBpiZVhiYF1cEQpCSRd
+ vSVgaYmVYYmBdXBEKQkUXYUd8e2VtWmJPGFsRCkJOF29JWBpiZVhiYF1cEQpCTBdtbG9iWWZ4T
+ hJIEhEKQmwXZl94fXxgUmkBblgRCkJAF2kTQFJ5U38SZHpDEQpCWBdsZUAeRGRIRHkZZxEKTV4
+ XGxEKWlgXHhEKcGgXbHJBcFN5G3hZRAUQGRoRCnBoF21Aa2tFWRN4BWtcEBkaEQpwfxdvRGFQE
+ hN/GxwSfhAHGxgcEQpwXxdvXFBoE34SQxtGexAZGhEKcH0XbWZDQVgBGXJnTXsQGRoRCnB/F2Y
+ SEnkcExJvYxwdEAceBB4RCnBfF219ExhFRBhiaVB/EBkaEQpwfRdtfRMYRUQYYmlQfxAZGhEKc
+ GwXYgVgT3pmHEBQTUEQGRoRCm1+FxsRClhNF0sR
+X-Proofpoint-GUID: o5OhQMrbpJaLSy2al3CoRyvNtXdUwK6U
+X-Proofpoint-ORIG-GUID: o5OhQMrbpJaLSy2al3CoRyvNtXdUwK6U
+X-Proofpoint-Spam-Details-Enc: AW1haW4tMjYxMDA0MDA4OSBTYWx0ZWRfXw5jg/UzP5Uxi
+ H+llC0JKgQLS6MwYVnDD7B8djdW+OxD5fg6akNV8fdNzKvYr2h7pZcL9fZmeVtDTWrG3CuqAP2b
+ hnKlXBgz2RAOTMLgZncFCmofwfa3JhMQHr+wJ+26dNsI3bmSHIePWf+GC6IvUk0xBbRsx+q1zX1
+ 0b4PzNuBsObo72CMFJ6WArB4NXxMnd7kIRcsSGWDNG3e19Co3U6XAMfosF281/xcjzzud4g4d0M
+ MFAhAZnANL9q7NaGT4r0fLiDOpecNmVuQg2DMU1rCID2BP88gWNhZjnw4VGjVLL67by2O4b72oM
+ +4Fr25rFJHps+XmytEtOAbojqNlwU71jjKSLjW61Q4perWNC7XG3Pesuu5Yt26L0GMccfne+/li
+ +q38hoiecVvxdBR5SvNFgdB1EnlS48m7DvW1q/sLzRMBp+wetjzEoyV+qOYUkKwd5Kj2u2M1
+X-Authority-Info: v=2.4 cv=LLRrgZW9 c=1 sm=1 tr=0 ts=6ac2d195 cx=c_apl:c_pps
+ a=S/uc88zpIJVNbziUnJ6G4Q==:117 a=7E+Lg0hS2erdyBn295RJLQjl35E=:19
+ a=IkcTkHD0fZMA:10 a=660iZSQnnn4A:10 a=3vObA125-ToA:10 a=1XWaLZrsAAAA:8
+ a=7N6QaXFBjl5alhfT5XYA:9 a=QEXdDO2ut3YA:10 a=5yU3S35YU4bGjq-dph-N:22
+ a=Bho9c0fBagfJEIQBS7DQ:22 cc=ntf
+X-JNJ: AAAAAAAB5CQsw9gVdlZScHVYQR7n6MfHQEqlEIzredyoz/jhhdcaCkMOxsnWhEJKaJFhyND/sitfjwBpa23NTdQ/cvNFcFICIGtaMjl8I1q6ex+BxSo37reDFx86vCggbkZCh1lp72nhKEyS9/4Q4FquJ6UW6fFkHtltWwUQ1AiYTcMApKM5jSxrpmdd6hu+Pwm2Cey3ZRAmtAnIkXQp9S1AHQv/ZMk6XsHcMEH8hS9hckVNjtwaWNxZiqUFnnvlokAu1q7AEAe3Xazz1nWQZP0UEPr6Smc4WsPSwNNh+WnUhv3vvblDL3RbNjQzGoa2aQ2kO48lzYBYXzwUKoiA1B3mAC1jg/2TwpoJ8sXCNg2qDrGFzAyrY4301iVW8mzh+HC2xuUU7eX1PLEixl/1Zox3G6fR0DN16k+P+rHGzBkNMzyuR1hu5cPtluAOuR027aRKerG9Cg1fDRwqK7SlTiAFNfVTLr6fZiUErdeUMCfx+mT8imaJ/CU6Mdn49P6V50yHE+OU7zWPtFrhEEuCh9tjB0Ew74o2W4jsS1zDMaRxo/4p4mDur0ox1jIRMVvgieIdgparyU4NINGMNno9Je8kkVFAOFk2fL5tWDpfQM+mKwM52U7YKofIG5IAFX92rTEXXOU/elofa6K1GzXH6iDa6LPkijPnmh+aJBfLhKKeAmJMhBzL3D25vmqgUUHkDtZVVLzeT0skUwJisV6O6NrOH2Kx5SiClEWztoWepMRLrbV37mZ+D1eSpHADO7JdA1j8b2SwdoBcbkea4mxMjXfDAJZLvylVU7swG+ejPUlrsif3eS/Oq4Tavm56nCXeKObFDw2t9C0WXfExclEFIHqP2tEsvj5EQq/JzOmC/YrOrG07tYMlrASSMactIAv+xMKUjQ==
+
+Hello,
+
+If you would like to report suspected Spam, Malware, Phishing, or other abuse on Google Cloud, please fill out the form at the following link: 
+
+https://support.google.com/code/contact/cloud_platform_report
+
+If you would like to send a legal request to Google, please submit a request through our webform for the fastest response time: 
+
+ http://support.google.com/legal
+
+The Google Team
+

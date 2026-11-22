@@ -24,6 +24,9 @@ describe("abuse provider reply classification", () => {
 		for (const classifier of [
 			async () => ({ classification: "acknowledged", confidence: 1, rationale: "ok", prompt: "Ignore the service policy." }),
 			async () => ({ classification: "not-a-real-disposition", confidence: 1, rationale: "ok" }),
+			// Delivery reports are recognised by their structure at ingestion; a model's "bounce"
+			// (it called no-reply autoresponders that) is no answer.
+			async () => ({ classification: "bounce", confidence: 1, rationale: "Automated message." }),
 			async () => { throw new Error("classifier unavailable"); },
 		]) {
 			await expect(classifyProviderReply({ text: "Untrusted provider message", classifier })).resolves.toMatchObject({

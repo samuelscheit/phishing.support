@@ -17,6 +17,8 @@ import {
 import {
 	beginEmailDelivery,
 	listRelayRefusedRoutes,
+	listRoutesEndedByUncorrelatedBounce,
+	reopenRouteForMisreadBounces,
 	recoverEmailPreparationFailure,
 	settleCorrelatedEmailBounce,
 	settleEmailDelivery,
@@ -149,6 +151,8 @@ export const AbuseRepository = {
 	recoverEmailPreparationFailure,
 	settleCorrelatedEmailBounce,
 	listRelayRefusedRoutes,
+	listRoutesEndedByUncorrelatedBounce,
+	reopenRouteForMisreadBounces,
 	saveArtifact,
 	saveRouteArtifactOnce,
 	listArtifacts,

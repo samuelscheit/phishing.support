@@ -334,7 +334,7 @@ describe("abuse email lifecycle", () => {
 						attachments: [],
 					});
 					inboundMessageId = inbound.id;
-					expect(await AbuseRepository.settleCorrelatedEmailBounce({ inboundMessageId: inbound.id, retryAfterMs: 0 })).toMatchObject({ settled: true, runId: context.run.id });
+					expect(await AbuseRepository.settleCorrelatedEmailBounce({ inboundMessageId: inbound.id, retry: true, retryAfterMs: 0 })).toMatchObject({ settled: true, runId: context.run.id });
 					return { messageId: "smtp-accepted-before-bounce" };
 				},
 			},

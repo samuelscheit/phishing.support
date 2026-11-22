@@ -94,7 +94,8 @@ function earliest(...dates: Array<Date | undefined>): Date | undefined {
 	return known.length ? new Date(Math.min(...known.map((date) => date.getTime()))) : undefined;
 }
 
-const isBounce = (message: RouteMessageFact) => message.kind === "bounce" || message.classification === "bounce";
+/** Ingestion stores every delivery report as a bounce (abuse/mail/delivery_report.ts). */
+const isBounce = (message: RouteMessageFact) => message.kind === "bounce";
 
 /**
  * Derive one route's outcome from its status, its status history and its

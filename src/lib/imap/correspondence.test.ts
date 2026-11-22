@@ -7,11 +7,15 @@ import { SubmissionsEntity } from "../db/entities/submissions";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "../abuse/contracts";
 import { sendAbuseEmailRoute } from "../abuse/mail/send";
-import { abuseCaseTag, authenticatedSender, canonicalSubject, deliveryFailure, subjectRepeats } from "../abuse/mail/correlation";
+import { abuseCaseTag, authenticatedSender, canonicalSubject, subjectRepeats } from "../abuse/mail/correlation";
+import { deliveryFailure } from "../abuse/mail/delivery_report";
 import { AbuseRepository } from "../abuse/repository";
 import { abuseJobs } from "../abuse/schema";
 import { classifyReply } from "../abuse/worker/mail";
 import { ensureRelayRefusalResends, readSendEmailPayload } from "../abuse/worker/email";
+import { repairMisreadBounces } from "../abuse/worker/misread_bounces";
+import { persistInboundAbuseMail } from "../abuse/mail/inbound";
+import { deliveryReportFixture } from "../abuse/mail/fixtures/delivery_reports/fixture";
 import { ingestFetchedMail, type MailIngestConfig } from "./ingest";
 import { ingestMaildir, maildirUid } from "./maildir";
 import { mkdtemp, mkdir, readdir, writeFile } from "node:fs/promises";
@@ -288,9 +292,9 @@ describe("delivery-status notifications", () => {
 		]);
 	});
 
-	test("parses who rejected which of our messages", async () => {
+	test("parses which of our messages bounced", async () => {
 		const parsed = await simpleParser(icloudBounce({ messageId: "<abuse-d984c10d2a49288f@phishing.support>", replyAddress: "abuse-ef16@phishing.support" }, "iarpoc@newfold.com", "550"));
-		expect(deliveryFailure(parsed)).toMatchObject({ recipients: ["iarpoc@newfold.com"], messageIds: ["<abuse-d984c10d2a49288f@phishing.support>"] });
+		expect(deliveryFailure(parsed)).toEqual({ messageIds: ["<abuse-d984c10d2a49288f@phishing.support>"] });
 	});
 
 	test("a permanent rejection marks the route undeliverable without resending", async () => {
@@ -359,23 +363,29 @@ describe("delivery-status notifications", () => {
 		await ingestFetchedMail({ uid: nextUid++, source: refusal(sent.outbound) }, config, { createIntakeSubmission: noIntake });
 		const [first] = await inboundMail(sent.reportId);
 		await classifyReply(first!.id);
-		const sends = () => getDb().then((db) => db.select().from(abuseJobs).where(eq(abuseJobs.routeId, sent.route.id)).all().filter((job) => job.jobType === "send_email"));
-		/** The queued resend goes out (its job done) and `answer` comes back for it. */
+		const sends = () => sendJobs(sent.route.id);
+		/** The queued resend goes out and `answer` comes back for it. */
 		const resendAnswered = async (answer: (outbound: Outbound) => Buffer) => {
-			const db = await getDb();
-			db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.routeId, sent.route.id)).run();
-			const retry = await AbuseRepository.beginEmailDelivery({ routeId: sent.route.id, providerPayload: { source: "test" }, correlationKey: `test-mail:${sent.route.id.toString()}:${nextUid}` });
-			await sendAbuseEmailRoute({
-				reportId: sent.reportId, routeId: sent.route.id, runId: retry!.run.id, recipient,
-				subject: "resend", body: domain, correlationKey: retry!.run.correlationKey,
-				transport: { sendMail: async () => ({ messageId: `smtp-test-${nextUid}` }) },
-			});
-			await AbuseRepository.settleEmailDelivery({ runId: retry!.run.id, expectedRunStatus: "starting", expectedRouteStatus: "running", outcome: "sent" });
-			const outbound = (await AbuseRepository.listMailForReport(sent.reportId)).filter((message) => message.direction === "outbound" && message.status === "sent").at(-1)!;
-			await ingestFetchedMail({ uid: nextUid++, source: answer(outbound) }, config, { createIntakeSubmission: noIntake });
+			await ingestFetchedMail({ uid: nextUid++, source: answer(await resendReport(sent)) }, config, { createIntakeSubmission: noIntake });
 			await classifyReply((await inboundMail(sent.reportId)).filter((message) => message.kind === "bounce").at(-1)!.id);
 		};
 		return { ...sent, refusal: first!, sends, resendAnswered };
+	}
+
+	const sendJobs = (routeId: bigint) => getDb().then((db) => db.select().from(abuseJobs).where(eq(abuseJobs.routeId, routeId)).all().filter((job) => job.jobType === "send_email"));
+	let resends = 0;
+	/** The route's queued resend goes out (its job done): the new send's outbound mail. */
+	async function resendReport(sent: Awaited<ReturnType<typeof sentReport>>) {
+		const db = await getDb();
+		db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.routeId, sent.route.id)).run();
+		const retry = await AbuseRepository.beginEmailDelivery({ routeId: sent.route.id, providerPayload: { source: "test" }, correlationKey: `test-mail:${sent.route.id.toString()}:resend-${++resends}` });
+		await sendAbuseEmailRoute({
+			reportId: sent.reportId, routeId: sent.route.id, runId: retry!.run.id, recipient: sent.route.verifiedEmail!,
+			subject: "resend", body: "resend", correlationKey: retry!.run.correlationKey,
+			transport: { sendMail: async () => ({ messageId: `smtp-test-resend-${resends}` }) },
+		});
+		await AbuseRepository.settleEmailDelivery({ runId: retry!.run.id, expectedRunStatus: "starting", expectedRouteStatus: "running", outcome: "sent" });
+		return (await AbuseRepository.listMailForReport(sent.reportId)).filter((message) => message.direction === "outbound" && message.status === "sent").at(-1)!;
 	}
 	const relayRefusedReport = (domain: string, recipient: string) => refusedReport(domain, recipient, (outbound) => icloudRelayRefusal(outbound, recipient));
 	let nextUid = 590;
@@ -467,8 +477,164 @@ describe("delivery-status notifications", () => {
 		await ingestFetchedMail({ uid: 539, source: icloudBounce(sent.outbound, "abuse@greylist.example", "451") }, config, { createIntakeSubmission: noIntake });
 		const [bounce] = await inboundMail(sent.reportId);
 		await classifyReply(bounce!.id);
-		const resends = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, sent.route.id)).all().filter((job) => job.jobType === "send_email");
-		expect(resends).toHaveLength(1);
+		expect(await sendJobs(sent.route.id)).toHaveLength(1);
+	});
+
+	const NEXT_CONTACT = "support@next-desk.example";
+	/** A report to `recipient` whose target publishes one more abuse contact. */
+	const reportWithNextContact = (domain: string, recipient: string) =>
+		sentReport(domain, recipient, undefined, undefined, { email: recipient, source: "domain_rdap", fallbackContacts: [{ email: NEXT_CONTACT, source: "registrar_rdap" }] });
+	const contactsOf = async (reportId: bigint) => (await AbuseRepository.listRoutes(reportId)).map((route) => route.verifiedEmail);
+	const queuedSends = async (routeId: bigint) => (await sendJobs(routeId)).filter((job) => job.status === "queued");
+
+	test("Office 365's non-delivery report, threaded to our report like a reply, is a bounce: the dead mailbox fails once and the report moves on", async () => {
+		const recipient = "ip.abuse@isp-one.example";
+		const sent = await reportWithNextContact("o365-forwarded.example.com", recipient);
+		const result = await ingestFetchedMail({ uid: nextUid++, source: deliveryReportFixture("office365-forwarded-recipients-not-found.eml", sent.outbound) }, config, { createIntakeSubmission: noIntake });
+		expect(result).toMatchObject({ route: "reply" });
+		const [bounce] = await inboundMail(sent.reportId);
+		expect(bounce).toMatchObject({ kind: "bounce", inReplyTo: sent.outbound.messageId });
+		expect(bounce!.references).toContain(sent.outbound.messageId!);
+
+		await classifyReply(bounce!.id);
+		expect(await AbuseRepository.getMailMessage(bounce!.id)).toMatchObject({ classification: "bounce", disposition: "delivery_status_notification" });
+		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
+		expect((await AbuseRepository.getMailMessage(sent.outbound.id))?.error).toStartWith("smtp;550 5.4.1 Recipient address rejected: Access denied.");
+		// No resend to the dead mailbox: the report goes to the next contact instead.
+		expect(await sendJobs(sent.route.id)).toEqual([]);
+		expect(await contactsOf(sent.reportId)).toEqual([recipient, NEXT_CONTACT]);
+
+		// Its classification replayed after a worker restart changes nothing.
+		await classifyReply(bounce!.id);
+		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
+		expect(await contactsOf(sent.reportId)).toEqual([recipient, NEXT_CONTACT]);
+		expect(await sendJobs(sent.route.id)).toEqual([]);
+	});
+
+	test.each(["exim-permanent.eml", "gmail-failed-permanently.eml", "qmail-permanent.eml", "icloud-postfix-rejected.eml"])("%s: a permanent failure moves the report on to the next contact", async (name) => {
+		const slug = name.replace(/\W/g, "-");
+		const sent = await reportWithNextContact(`${slug}.example.com`, `abuse@${slug}.example`);
+		await ingestFetchedMail({ uid: nextUid++, source: deliveryReportFixture(name, sent.outbound) }, config, { createIntakeSubmission: noIntake });
+		const [bounce] = await inboundMail(sent.reportId);
+		expect(bounce).toMatchObject({ kind: "bounce" });
+		await classifyReply(bounce!.id);
+		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
+		expect(await sendJobs(sent.route.id)).toEqual([]);
+		expect(await contactsOf(sent.reportId)).toEqual([`abuse@${slug}.example`, NEXT_CONTACT]);
+	});
+
+	test.each(["gmail-delay-warning.eml", "postfix-temporary.eml"])("%s: a temporary failure resends to the same mailbox once", async (name) => {
+		const slug = name.replace(/\W/g, "-");
+		const sent = await reportWithNextContact(`${slug}.example.com`, `abuse@${slug}.example`);
+		await ingestFetchedMail({ uid: nextUid++, source: deliveryReportFixture(name, sent.outbound) }, config, { createIntakeSubmission: noIntake });
+		const [bounce] = await inboundMail(sent.reportId);
+		expect(bounce).toMatchObject({ kind: "bounce" });
+		await classifyReply(bounce!.id);
+		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
+		expect(await queuedSends(sent.route.id)).toHaveLength(1);
+		expect(await contactsOf(sent.reportId)).toEqual([`abuse@${slug}.example`]);
+	});
+
+	test("a notice about a send that already failed changes nothing once the report went out again; the resend's own failure still counts", async () => {
+		const recipient = "abuse@greylist-then-dead.example";
+		const sent = await reportWithNextContact("greylist-then-dead.example.com", recipient);
+		await ingestFetchedMail({ uid: nextUid++, source: icloudBounce(sent.outbound, recipient, "451") }, config, { createIntakeSubmission: noIntake });
+		const [greylisted] = await inboundMail(sent.reportId);
+		await classifyReply(greylisted!.id);
+		const resent = await resendReport(sent);
+		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "awaiting_provider_reply" });
+
+		// Production, 2026-11-20: a deploy restarted the worker mid-job, and the replayed
+		// classification of the first notice ended the route that was waiting on the resend.
+		await classifyReply(greylisted!.id);
+		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "awaiting_provider_reply" });
+		expect(await AbuseRepository.getMailMessage(resent.id)).toMatchObject({ status: "sent" });
+		expect(await queuedSends(sent.route.id)).toEqual([]);
+
+		await ingestFetchedMail({ uid: nextUid++, source: deliveryReportFixture("office365-forwarded-recipients-not-found.eml", resent) }, config, { createIntakeSubmission: noIntake });
+		await classifyReply((await inboundMail(sent.reportId)).find((message) => message.inReplyTo === resent.messageId)!.id);
+		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
+		expect(await contactsOf(sent.reportId)).toEqual([recipient, NEXT_CONTACT]);
+	});
+
+	test("a no-reply autoresponder threaded to our report stays a reply", async () => {
+		const sent = await sentReport("autoresponder.example.com", "network-abuse@cloud.example");
+		await ingestFetchedMail({ uid: nextUid++, source: deliveryReportFixture("google-noreply-autoresponder.eml", sent.outbound) }, config, { createIntakeSubmission: noIntake });
+		expect(await inboundMail(sent.reportId)).toMatchObject([{ kind: "reply", fromAddress: "network-abuse+noreply@google.com" }]);
+	});
+
+	describe("the one-off repair of routes a misread delivery report ended", () => {
+		/** `fixture` returned for `outbound`, stored the way ingestion stored Exchange's reports before: as a reply. */
+		async function storedAsReply(sent: Awaited<ReturnType<typeof sentReport>>, outbound: Outbound, fixture = "office365-forwarded-recipients-not-found.eml") {
+			const uid = nextUid++;
+			// Each report has its own Message-ID; ingestion drops a repeated one.
+			const rawMime = Buffer.from(deliveryReportFixture(fixture, outbound).toString("latin1").replace(/^Message-ID:\s*<[^>]+>/im, `Message-ID: <report-${uid}@mta.example>`), "latin1");
+			const { messageId } = await persistInboundAbuseMail({
+				kind: "reply", routeId: sent.route.id, reportId: sent.reportId, recipientAddresses: ["bounces@mail.phishing.support"],
+				rawMime, mailbox: "relay-bounces", uidValidity: 1, uid,
+			});
+			return messageId;
+		}
+		/** How a replayed classification of a stale notice ended the route. */
+		const endUncorrelated = (routeId: bigint) => AbuseRepository.transitionRouteStatus({ routeId, from: "awaiting_provider_reply", to: "provider_rejected", data: { reason: "uncorrelated_provider_bounce" } });
+		const repairsOf = async (...sent: Array<{ route: { id: bigint } }>) => (await repairMisreadBounces()).filter((repair) => sent.some((one) => one.route.id.toString() === repair.routeId));
+
+		test("settles the last send as permanently bounced, stores every report as a bounce, moves the report on, and finds nothing left on a rerun", async () => {
+			const recipient = "ip.abuse@misread.example";
+			const sent = await reportWithNextContact("misread-ndr.example.com", recipient);
+			// Before: the classifier's "bounce" failed each send and resent it ...
+			const first = await storedAsReply(sent, sent.outbound);
+			await AbuseRepository.settleCorrelatedEmailBounce({ inboundMessageId: first, retry: true });
+			const resent = await resendReport(sent);
+			const second = await storedAsReply(sent, resent);
+			// ... until a replayed classification of the first ended the route.
+			await endUncorrelated(sent.route.id);
+
+			expect(await repairsOf(sent)).toEqual([{ routeId: sent.route.id.toString(), verifiedEmail: recipient, result: "repaired", status: "delivery_failed", nextContact: NEXT_CONTACT }]);
+			expect((await inboundMail(sent.reportId)).map((message) => [message.id, message.kind, message.classification])).toEqual([[first, "bounce", "bounce"], [second, "bounce", "bounce"]]);
+			expect(await AbuseRepository.getMailMessage(resent.id)).toMatchObject({ status: "failed" });
+			expect(await queuedSends(sent.route.id)).toEqual([]);
+			const next = (await AbuseRepository.listRoutes(sent.reportId)).find((route) => route.verifiedEmail === NEXT_CONTACT)!;
+			expect(next.resolverProvenance).toMatchObject({ reason: "fallback_after_permanent_bounce", bouncedRouteId: sent.route.id.toString() });
+			expect((await sendJobs(next.id)).map((job) => job.status)).toEqual(["queued"]);
+			expect((await AbuseRepository.listEvents(sent.reportId)).filter((event) => event.routeId === sent.route.id && event.eventType === "route.status_changed").slice(-2).map((event) => event.data))
+				.toMatchObject([{ from: "provider_rejected", to: "awaiting_provider_reply", reason: "misread_bounce_reopened" }, { from: "awaiting_provider_reply", to: "delivery_failed" }]);
+
+			expect(await repairsOf(sent)).toEqual([]);
+			expect(await contactsOf(sent.reportId)).toEqual([recipient, NEXT_CONTACT]);
+		});
+
+		test("a target with no other contact: the route still fails as bounced, with nowhere to move on to", async () => {
+			const sent = await sentReport("misread-sole-contact.example.com", "ip.abuse@sole.example");
+			await storedAsReply(sent, sent.outbound);
+			await endUncorrelated(sent.route.id);
+			expect(await repairsOf(sent)).toEqual([{ routeId: sent.route.id.toString(), verifiedEmail: "ip.abuse@sole.example", result: "repaired", status: "delivery_failed" }]);
+			expect(await contactsOf(sent.reportId)).toEqual(["ip.abuse@sole.example"]);
+		});
+
+		test("leaves alone what no report permanently failed the last send of: a relay refusal, a stale notice, a delay warning", async () => {
+			const relay = await reportWithNextContact("legacy-relay.example.com", "abuse@legacy-relay.example");
+			await ingestFetchedMail({ uid: nextUid++, source: icloudRelayRefusal(relay.outbound, "abuse@legacy-relay.example") }, config, { createIntakeSubmission: noIntake });
+			await endUncorrelated(relay.route.id);
+
+			const stale = await reportWithNextContact("stale-notice.example.com", "abuse@stale-notice.example");
+			const old = await storedAsReply(stale, stale.outbound);
+			await AbuseRepository.settleCorrelatedEmailBounce({ inboundMessageId: old, retry: true });
+			await resendReport(stale);
+			await endUncorrelated(stale.route.id);
+
+			const delayed = await reportWithNextContact("delayed.example.com", "abuse@delayed.example");
+			await storedAsReply(delayed, delayed.outbound, "gmail-delay-warning.eml");
+			await endUncorrelated(delayed.route.id);
+
+			const skipped = (sent: typeof relay) => ({ routeId: sent.route.id.toString(), verifiedEmail: sent.route.verifiedEmail, result: "skipped", reason: "no_permanent_failure_of_last_send", status: "provider_rejected" } as const);
+			expect(await repairsOf(relay, stale, delayed)).toEqual([skipped(relay), skipped(stale), skipped(delayed)]);
+			for (const sent of [relay, stale, delayed]) {
+				expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "provider_rejected" });
+				expect(await contactsOf(sent.reportId)).toEqual([sent.route.verifiedEmail]);
+			}
+			expect((await inboundMail(stale.reportId)).map((message) => message.kind)).toEqual(["reply"]);
+		});
 	});
 });
 

@@ -1,8 +1,9 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { generateId } from "../../db/ids";
 import {
+	abuseEvents,
 	abuseJobs,
 	abuseMailMessages,
 	abuseProviderRoutes,
@@ -217,10 +218,10 @@ export async function settleCorrelatedEmailBounce(params: {
 	failureReason?: string;
 	retryAfterMs?: number;
 	/** Resend only after a temporary failure; a permanent rejection would bounce again. */
-	retry?: boolean;
+	retry: boolean;
 	/** Why the route failed: a provider's bounce unless our relay refused the report. */
 	reason?: "provider_bounce" | "relay_refused";
-}): Promise<{ settled: boolean; routeId?: bigint; runId?: bigint; outboundMessageId?: bigint }> {
+}): Promise<{ settled: boolean; routeId?: bigint; runId?: bigint; outboundMessageId?: bigint; stale?: true }> {
 	const db = await getDb();
 	return db.transaction(
 		(tx) => {
@@ -242,12 +243,15 @@ export async function settleCorrelatedEmailBounce(params: {
 				.limit(2)
 				.all();
 			if (matches.length !== 1) return { settled: false };
+			// From here the notice names exactly one send of this route: when that
+			// send is already settled, the notice is stale and must change nothing.
+			const stale = { settled: false, stale: true } as const;
 			const outbound = matches[0]!;
-			if (!outbound.runId) return { settled: false };
+			if (!outbound.runId) return stale;
 			const run = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, outbound.runId)).get();
-			if (!run || run.routeId !== inbound.routeId || !["starting", "delivered"].includes(run.executionStatus)) return { settled: false };
+			if (!run || run.routeId !== inbound.routeId || !["starting", "delivered"].includes(run.executionStatus)) return stale;
 			const route = tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, run.routeId)).get();
-			if (!route || !["running", "awaiting_provider_reply"].includes(route.status)) return { settled: false };
+			if (!route || !["running", "awaiting_provider_reply"].includes(route.status)) return stale;
 
 			const timestamp = now();
 			const error = (params.failureReason ?? "Provider bounce received.").slice(0, 2_000);
@@ -262,7 +266,7 @@ export async function settleCorrelatedEmailBounce(params: {
 				)
 				.returning({ id: abuseMailMessages.id })
 				.get();
-			if (!outboundUpdated) return { settled: false };
+			if (!outboundUpdated) return stale;
 			const runUpdated = tx
 				.update(abuseProviderRuns)
 				.set({ executionStatus: "failed", failureReason: error, updatedAt: timestamp })
@@ -304,7 +308,7 @@ export async function settleCorrelatedEmailBounce(params: {
 					),
 				)
 				.get();
-			if (params.retry !== false && !existingRetry) {
+			if (params.retry && !existingRetry) {
 				const jobId = generateId();
 				tx.insert(abuseJobs)
 					.values({
@@ -367,4 +371,64 @@ export async function listRelayRefusedRoutes(): Promise<AbuseProviderRoute[]> {
 			.map((job) => job.routeId),
 	);
 	return routes.filter((route) => lastBounce.get(route.id) === "relay_refused" && !pending.has(route.id));
+}
+
+/**
+ * Mail routes whose last status change ended them as `provider_rejected`
+ * because a bounce named none of their sends (worker/mail.ts settleBounce).
+ */
+export async function listRoutesEndedByUncorrelatedBounce(): Promise<AbuseProviderRoute[]> {
+	const db = await getDb();
+	const routes = db.select().from(abuseProviderRoutes)
+		.where(and(eq(abuseProviderRoutes.routeType, "email"), eq(abuseProviderRoutes.status, "provider_rejected")))
+		.all();
+	if (!routes.length) return [];
+	const lastChange = new Map(
+		db.select({ routeId: abuseEvents.routeId, data: abuseEvents.data }).from(abuseEvents)
+			.where(and(inArray(abuseEvents.routeId, routes.map((route) => route.id)), eq(abuseEvents.eventType, "route.status_changed")))
+			.orderBy(asc(abuseEvents.createdAt), asc(abuseEvents.id))
+			.all()
+			.map((event) => [event.routeId, event.data]),
+	);
+	return routes.filter((route) => {
+		const change = lastChange.get(route.id);
+		return change?.to === "provider_rejected" && change.reason === "uncorrelated_provider_bounce";
+	});
+}
+
+/**
+ * Store delivery reports that were taken for replies as the bounces they are
+ * (`references`: the sends each returned) and reopen their route, which a
+ * misread report ended as `provider_rejected`, so the bounce can be settled
+ * like any other. False when the route is no longer in that state.
+ */
+export async function reopenRouteForMisreadBounces(params: { routeId: bigint; bounces: Array<{ messageId: bigint; references: string[] }> }): Promise<boolean> {
+	const db = await getDb();
+	return db.transaction(
+		(tx) => {
+			const timestamp = now();
+			const route = tx.update(abuseProviderRoutes)
+				.set({ status: "awaiting_provider_reply", updatedAt: timestamp })
+				.where(and(eq(abuseProviderRoutes.id, params.routeId), eq(abuseProviderRoutes.status, "provider_rejected")))
+				.returning()
+				.get();
+			if (!route) return false;
+			for (const bounce of params.bounces) {
+				tx.update(abuseMailMessages)
+					.set({ kind: "bounce", references: bounce.references, classification: "bounce", disposition: "delivery_status_notification", updatedAt: timestamp })
+					.where(and(eq(abuseMailMessages.id, bounce.messageId), eq(abuseMailMessages.routeId, route.id), eq(abuseMailMessages.direction, "inbound")))
+					.run();
+			}
+			recordEvent(tx, {
+				reportId: route.reportId,
+				targetId: route.targetId,
+				routeId: route.id,
+				eventType: "route.status_changed",
+				data: { from: "provider_rejected", to: "awaiting_provider_reply", reason: "misread_bounce_reopened", inboundMessageIds: params.bounces.map((bounce) => bounce.messageId.toString()) },
+			});
+			recomputeReportStatusInTransaction(tx, route.reportId, { reason: "misread_bounce_reopened", routeId: route.id.toString() });
+			return true;
+		},
+		{ behavior: "immediate" },
+	);
 }

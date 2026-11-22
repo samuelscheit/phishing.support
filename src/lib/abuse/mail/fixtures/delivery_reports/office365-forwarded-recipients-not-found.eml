@@ -1,0 +1,1229 @@
+Return-Path: <>
+X-Original-To: bounces@mail.phishing.support
+Delivered-To: bounces@mail.phishing.support
+Received: from PNZPR01CU001.outbound.protection.outlook.com (mail-centralindiaazhn15011021.outbound.protection.outlook.com [52.102.196.21])
+	by mail.phishing.support (Postfix) with ESMTP id A04D3132000B
+	for <bounces@mail.phishing.support>; Fri, 20 Nov 2026 21:37:19 +0000 (UTC)
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=none;
+ b=QzcRVLFuAf9RFe9y+qL7N3w/N4MJKWuj6kXi2nDGHfOzf8+Fem9ylFj2fh8ZtxCzgXc7FRi0b6yXKvmqeVNDg0saqYyOqrQuzZG+Xd7jXjVf0TyBct/7YlZZgIcXL8ZNejGtisdIbaIHXBmNOGkD+gF4Nwqu97620+cQcEpTYGStQQ8FTUt50w13o7ZeRjmpGXiuDR4WBvQ/c+piKpPpr7Nz6ExeLRChd9a57ShiQgxcaHgH5ILg2X5g+ZhK6OVXKSiZO827ARsvo4/7B2/WfCZlldC5lVblbA7h4MD0pVN5FGRnUKt64YA2aziM5KwJQq52NoIi9LxZiuqOQ/i5KA==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector10001;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=dVOp2UMxyvqTdt6K/F51lZOPOGoVf5BpFJnk7nt0+a0=;
+ b=t3Blxs67IGPR6cst9FYuY/ng/EE+VYvgqOIsEy4XLPA8+qgc36/sml4frE8kDAIdd6KyM8HcaW4/Fi6+ePvdagZP7bENywRb3lrjmTfAvDWkPUGk72d3d06s1Y5U24BWNp86Jg+EDjdwZdEWgKlkQXmTmIIkYlT96zgFtpGLCjiKVKQhXUrlZxpBMX8pdLricIU2LwcmrdCdR8k/yf1XoM9/sKUqw4v4YhMxMcW9xRq0T8tcCXN61NIYue3qT+CGMQ8t74bMTaFlkkd5+NwOCXsIEARoH5tEQzGdYojgdtwMRTBAaBjYcA8oIcGGhwpQJJOUOWjXcIcq6nPzVBYCuw==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=none; dmarc=pass
+ action=none header.from=ispone.onmicrosoft.com; dkim=pass
+ header.d=ispone.onmicrosoft.com; arc=none
+MIME-Version: 1.0
+From: Microsoft Outlook
+	<MicrosoftExchange329e71ec88ae4615bbc36ab6ce41109e@ispone.onmicrosoft.com>
+To: <wifi_core+SRS=itvex=JJ=mail.phishing.support=bounces@isp-one.example>
+Date: Fri, 20 Nov 2026 21:37:17 +0000
+Content-Type: multipart/report; report-type=delivery-status;
+	boundary="93fe0732-fed9-4b74-8b2a-e0396a3d6f1e"
+X-MS-Exchange-Message-Is-Ndr:
+Content-Language: en-US
+Message-ID:
+ <c1270e14-69bc-4079-af36-2ef8e67260d8@HY0PR01MB711740.INDPRD01.PROD.OUTLOOK.COM>
+In-Reply-To:
+ <abuse-5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e@phishing.support>
+References:
+ <abuse-5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e@phishing.support>
+Subject: Undeliverable: [Phishing Support] [PS-2280014017ad] Abuse report for
+ phish-target.example
+Auto-Submitted: auto-replied
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: HY0PR01MB711740:EE_
+X-MS-Exchange-SenderADCheck: 1
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam:
+	BCL:0;ARA:13230040|50650200027|69100299015|7149299003|376014|7049299003|1930700014|6049299003|3109299003|61400799027|366016|32400700002|261026121527099003|10067099003|261009220027099003|261009221727099003|5023799004|11063799006|260925021911599003|260925021311599003|56012099006|260925022911599003|261022105027099003|261102123227099003|261009221227099003|261022075727099003|261009223327099003|261021123027099003|261022115727099003|261009223027099003|261021135927099003|261028144727099003|261021121427099003|261026140227099003|16102099003|18002099003|9143799003|22082099003|6133799003|13003099007|8096899003|4053099003|4076899003|12063799003|4133799003;
+X-Microsoft-Antispam-Message-Info:
+	4d52pUKP6y05ZDragQxqtKOey23X7pPAf2rACho2H2m85T6SilqjTXxSzTTPoeq/FxHYy9vhrarUvMkrfmHfwodBMzJtYe9/i/zUiGv28hPaQS6EVtPT4xsS3GA5lxKj4ojy3jVCBiIdLWiuj94T1d90FgTtbTKJCNYfZ90sOW92R+/bisNrxnzo/+UuvrYxUpVpwKYASVntfB02ra9Kt378c0ZzDTTj+NGqUealmfnsP9611lwj88MdPNmSLuoNktyX/ZZlHeufHN30+WVRcPYt9tCdLKwQP0dO9AZlHik1/lWAtvOd2YYrlNBaPwZny79SyMqK61BzjHOaqCSqv32Q7j8L4bhAVGFxIa5cyF4wrpWyrNt8YOynrk4nK4Nrcdung0IIRvZ3N6FsTPQTYCcGU6P4M5wywv/QkPBh9hEPI6kD6b+Xrj4a0qCXBCSMEdPYt8d2NeWlJB3ZFmaSmYhYPziNtgsf/5aAGmSnb5NvHIf5FI3kOdZ5UcwqBxpcKAN+wZ8CQ3t498fHaI3bptHUdGt4xJBzHz7CVWBpbG13qu3TgHkBaw0ZfCpUywE3wpNWPLo0sQhZe/HsiBMV+FVsSMVpWFVMuv4w7SXXnNe3b/ep/eUb0CpLSseAjrBeM6Z3HOmYRT3kjPYLWn+hlrdk93HaPySTtJJbQ879ZFt6VhkjE6sG4+J0cn+c5/N9rNs/MTLS4lj/3CwuhV/xalOC0W41rm7I6Cct2bM9iDgH2X7BfSmixnOrc/JKXekS/4K10B4+t9KxRzlsjZh6nQ==
+X-Forefront-Antispam-Report:
+	CIP:255.255.255.255;CTRY:;LANG:en;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:;PTR:;CAT:NONE;SFS:(13230040)(50650200027)(69100299015)(7149299003)(376014)(7049299003)(1930700014)(6049299003)(3109299003)(61400799027)(366016)(32400700002)(261026121527099003)(10067099003)(261009220027099003)(261009221727099003)(5023799004)(11063799006)(260925021911599003)(260925021311599003)(56012099006)(260925022911599003)(261022105027099003)(261102123227099003)(261009221227099003)(261022075727099003)(261009223327099003)(261021123027099003)(261022115727099003)(261009223027099003)(261021135927099003)(261028144727099003)(261021121427099003)(261026140227099003)(16102099003)(18002099003)(9143799003)(22082099003)(6133799003)(13003099007)(8096899003)(4053099003)(4076899003)(12063799003)(4133799003);DIR:OUT;SFP:1501;
+X-MS-Exchange-AntiSpam-MessageData-ChunkCount: 1
+X-MS-Exchange-AntiSpam-MessageData-0:
+	NTrK26QdNs98P6N4XwwumQRrVwPbG+AAS4dk7ibJv4EwhqF3O0bfbr74avfeCFeyy3h8ATzthtAzi/N5HJbf/ruXmvipxtbyZDjydXMqm3H3fXGZgBOwJrPit6gQv/RhB7WZQXayuBPiXTryWlz7/41Erx+MGsjeV3le+6Xipmk/tDb6S1J5xa6QytJ5B2BobkcN75Qi2osVxjzr9eahHXzBJX1A3kz/4/fgRjL13J/7ubbelTuYLuWGqBc/2oMr5yh/l388REcbeF5+TVeg9tyHcfdTHG6zVKNtr/ZVcEoAKHm0Nc4wiy8sFkpGIla9C3P+aZ8zq4Rfwv/gZDSrQw==
+X-OriginatorOrg: ispone.onmicrosoft.com
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 20 Nov 2026 21:37:17.6095
+ (UTC)
+X-MS-Exchange-CrossTenant-FromEntityHeader: Hosted
+X-MS-Exchange-CrossTenant-AuthSource:
+	HY0PR01MB711740.INDPRD01.PROD.OUTLOOK.COM
+X-MS-Exchange-CrossTenant-AuthAs: Internal
+X-MS-Exchange-CrossTenant-Network-Message-Id:
+	85ba5158-b9b4-49eb-15e2-08df474e733a
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: HY0PR01MB711740
+
+--93fe0732-fed9-4b74-8b2a-e0396a3d6f1e
+Content-Type: multipart/alternative; differences=Content-Type;
+	boundary="6d9cf038-f2f1-488a-bd32-c15489f85498"
+
+--6d9cf038-f2f1-488a-bd32-c15489f85498
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: quoted-printable
+
+[https://products.office.com/en-us/CMSImages/Office365Logo_Orange.png?versi=
+on=3Db8d100a9-0a8b-8e6a-88e1-ef488fee0470]
+Your message couldn't be delivered to multiple recipients.
+The recipients weren't found at forward-target.example.
+wifi_core+SRS=3Ditvex=3D. . .       Office 365      Multiple recipients
+Action Required                 Recipients
+Unknown To address
+Couldn't deliver the message to the following recipients:
+first.person@forward-target.example, second.person@forward-target.example, third.person@forward-target.example, fourth.person@forward-target.example, fifth.person@forward-target.example, sixth.person@forward-target.example
+
+How to Fix It
+The address might be misspelled or might not exist. Try one or more of the =
+following:
+
+  *   Retype the recipient's address, then resend the message - If you're u=
+sing Outlook, open this non-delivery report message and click Send Again fr=
+om the menu or ribbon. In Outlook on the web, select this message, and then=
+ click the "To send this message again, click here." link located just abov=
+e the message preview window. In the To or Cc line, delete and then retype =
+the entire recipient's address (ignore any address suggestions). After typi=
+ng the complete address, click Send to resend the message. If you're using =
+an email program other than Outlook or Outlook on the web, follow its stand=
+ard way for resending a message. Just be sure to delete and retype the reci=
+pient's entire address before resending it.
+  *   Remove the recipient from the recipient Auto-Complete List, then rese=
+nd the message - If you're using Outlook or Outlook on the web, follow the =
+steps in the "Remove the recipient from the recipient Auto-Complete List" s=
+ection of this article<https://go.microsoft.com/fwlink/?LinkId=3D532972>. T=
+hen resend the message. Be sure to delete and retype the recipient's entire=
+ address before clicking Send.
+  *   Contact the recipient by some other means, (by phone, for example) to=
+ confirm you're using the right address. Ask them if they've set up an emai=
+l forwarding rule that could be forwarding your message to an incorrect add=
+ress.
+
+If the problem continues, ask the recipient to tell their email admin about=
+ the problem, and give them the error (and the name of the server that repo=
+rted it) shown below. It's likely that only the recipient's email admin can=
+ fix this problem.
+
+Was this helpful? Send feedback to Microsoft<https://go.microsoft.com/fwlin=
+k/p/?LinkID=3D717197>.
+________________________________
+
+More Info for Email Admins
+Status code: 550 5.4.1
+
+This error occurred because a message was sent to an email address hosted b=
+y Office 365, but the address doesn't exist in the receiving organization's=
+ Office 365 directory. Directory Based Edge Blocking (DBEB) is enabled for =
+forward-target.example, and DBEB rejects messages addressed to recipients w=
+ho don't exist in the receiving organization's Office 365 directory. This e=
+rror is reported by the recipient domain's email server, but most often it =
+can be fixed by the person who sent the message. If the steps in the How to=
+ Fix It section above don't fix the problem, and you're the email admin for=
+ the recipient, try one or more of the following:
+
+Check that the email address exists and is correct - Confirm that the recip=
+ient address exists in your Office 365 directory, is correct, and is accept=
+ing messages.
+
+Synchronize your directories - Make sure directory synchronization is worki=
+ng correctly, and that the recipient's email address exists in both Office =
+365 and in your on-premises directory.
+
+Check for errant forwarding rules - Check for forwarding rules for the orig=
+inal recipient that might be trying to forward the message to an invalid ad=
+dress. Forwarding can be set up by an admin via mail flow rules or mailbox =
+forwarding address settings, or by the recipient via the Forwarding or Inbo=
+x Rules features.
+
+Make sure the recipient has a valid license - Make sure the recipient has a=
+n Office 365 license assigned to them. The recipient's email admin can use =
+the Office 365 admin center to assign a license to them (Users > Active Use=
+rs > Select the recipient > Assigned License > Edit).
+
+Make sure that mail flow settings and MX records are correct - Misconfigure=
+d mail flow or MX record settings can cause this error. Check your Office 3=
+65 mail flow settings to make sure your domain and any mail flow connectors=
+ are set up correctly. Also, work with your domain registrar to make sure t=
+he MX records for your domain are set up correctly.
+
+For more information and additional tips to fix this issue, see this articl=
+e<https://go.microsoft.com/fwlink/?LinkId=3D532972>.
+
+Original Message Details
+Created Date:   11/20/2026 9:37:10 PM
+Sender Address: wifi_core+SRS=3Ditvex=3DJJ=3Dmail.phishing.support=3Dbounce=
+s@isp-one.example
+Recipient Address:      first.person@forward-target.example, second.person@forward-target.example, . . .
+Subject:        [Phishing Support] [PS-2280014017ad] Abuse report for phish-target.example
+
+Error Details
+Error:  550 5.4.1 Recipient address rejected: Access denied. For more infor=
+mation see https://aka.ms/EXOSmtpErrors [SG1PEPF000082E7.apcprd02.prod.outl=
+ook.com 2026-11-20T21:37:17.513Z 08DF465DC36FD6DA]
+Message rejected by:    SG1PEPF000082E7.mail.protection.outlook.com
+
+Notification Details
+Sent by:        HY0PR01MB711740.INDPRD01.PROD.OUTLOOK.COM
+
+Message Hops
+HOP     TIME (UTC)      FROM    TO      WITH    RELAY TIME
+1       11/20/2026
+9:37:10 PM      [127.0.0.1]     mail.phishing.support   ESMTPA  *
+2       11/20/2026
+9:37:12 PM      mail.phishing.support   MA1PEPF00007262.mail.protection.out=
+look.com     Microsoft SMTP Server (version=3DTLS1_3, cipher=3DTLS_AES_256_=
+GCM_SHA384)   2 sec
+3       11/20/2026
+9:37:12 PM      MA1PEPF00007262.INDPRD01.PROD.OUTLOOK.COM       MA5P287CA02=
+97.outlook.office365.com     Microsoft SMTP Server (version=3DTLS1_3, ciphe=
+r=3DTLS_AES_256_GCM_SHA384)   *
+4       11/20/2026
+9:37:13 PM      MA5P287CA0297.INDP287.PROD.OUTLOOK.COM  HY0PR01MB711740.IND=
+PRD01.PROD.OUTLOOK.COM       Microsoft SMTP Server (version=3DTLS1_2, ciphe=
+r=3DTLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384)    1 sec
+
+Original Message Headers
+
+ARC-Seal: i=3D1; a=3Drsa-sha256; s=3Darcselector10001; d=3Dmicrosoft.com; c=
+v=3Dnone;
+ b=3Dviia6cuXajwmviYnA6eRVB4RfQIRtRPxMD/2G+yrEtIbjL6gMAX69fCzfCm9uqAANtpPr6=
+AIGXIUtz82+GyWq5JDvqr8fCfFSmOSpuEtnv4enmUSYn2phzsuatk4sRiuGjGTx6PLhqm7lbP9A=
+hUvsFMdGId8WWQcMvCM/2cyQi0N685SovVSgG2EOgDUVpOJoY20yQ1mVAtlbgbHwrD9IMDyBxL+=
+Cx33qNnISujjmwuaycJ1OQKME3VtWIpOIJROi6KQZMuuvVUXhHOpgvWjbY7135vKXGZa9Irzfj8=
+6PYS5KNRZaYOmimZdjf9K67QnkRRqMhox5w0TDiDQmiY7ow=3D=3D
+ARC-Message-Signature: i=3D1; a=3Drsa-sha256; c=3Drelaxed/relaxed; d=3Dmicr=
+osoft.com;
+ s=3Darcselector10001;
+ h=3DFrom:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-A=
+ntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Ex=
+change-AntiSpam-MessageData-1;
+ bh=3D+eN8HUuad8ejczxVyPEX4Yb+QsPkRJOK4e5GWChId68=3D;
+ b=3Dsv6Vvd6bszWbANssleJxwW8Qpknx0xZCY1wvheZjaQ/AyVg7SPJ6g1fhPPUzG06pkqcdGF=
+rWTqpZTymCFFhIrKJe9t7SdHfDmrhOk6KrIkRKIGY1Z8FLBc9ejvuStR4kpRp/3+RE5KozGcpKT=
+Fi3jPdeFI6KT7k574u5LR/S9JR4ZSb+OkWLu/2EXYVkBPSggvBOsQq1kHdup0GMeJZRsLqDoYl2=
+QHGUhbsyAP6IlCrqNRiJ/hnzvMatiD6zZ8Rp5TFoEQBRfE381C2uZEzQQdHDBhr2nTbIsjHAECx=
+zrxaMlQHnm2914oohO72g2rUCk8TPnlCNxxrdxX+r5bbNhw=3D=3D
+ARC-Authentication-Results: i=3D1; mx.microsoft.com 1; spf=3Dpass (sender i=
+p is
+ 109.199.115.133) smtp.rcpttodomain=3Disp-one.example
+ smtp.mailfrom=3Dmail.phishing.support; dmarc=3Dpass (p=3Dnone sp=3Dnone pc=
+t=3D100)
+ action=3Dnone header.from=3Dphishing.support; dkim=3Dpass (signature was v=
+erified)
+ header.d=3Dphishing.support; arc=3Dnone (0)
+Received: from MA5P287CA0297.INDP287.PROD.OUTLOOK.COM (2603:1096:a01:21e::1=
+2)
+ by HY0PR01MB711740.INDPRD01.PROD.OUTLOOK.COM (2603:1096:1c0:4::23) with
+ Microsoft SMTP Server (version=3DTLS1_2,
+ cipher=3DTLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.21.639.12; Fri, 20 N=
+ov
+ 2026 21:37:13 +0000
+Received: from MA1PEPF00007262.INDPRD01.PROD.OUTLOOK.COM
+ (2603:1096:a01:21e:cafe::9d) by MA5P287CA0297.outlook.office365.com
+ (2603:1096:a01:21e::12) with Microsoft SMTP Server (version=3DTLS1_3,
+ cipher=3DTLS_AES_256_GCM_SHA384) id 15.21.639.12 via Frontend Transport; F=
+ri,
+ 20 Nov 2026 21:37:12 +0000
+Authentication-Results: mx.microsoft.com 1; spf=3Dpass (sender IP is
+ 109.199.115.133) smtp.mailfrom=3Dmail.phishing.support; dkim=3Dpass (signa=
+ture
+ was verified) header.d=3Dphishing.support;dmarc=3Dpass action=3Dnone
+ header.from=3Dphishing.support;
+Received-SPF: Pass (protection.outlook.com: domain of mail.phishing.support
+ designates 109.199.115.133 as permitted sender)
+ receiver=3Dprotection.outlook.com; client-ip=3D109.199.115.133;
+ helo=3Dmail.phishing.support; pr=3DC
+Received: from mail.phishing.support (109.199.115.133) by
+ MA1PEPF00007262.mail.protection.outlook.com (10.167.242.4) with Microsoft
+ SMTP Server (version=3DTLS1_3, cipher=3DTLS_AES_256_GCM_SHA384) id 15.21.6=
+39.5
+ via Frontend Transport; Fri, 20 Nov 2026 21:37:12 +0000
+Received: from [127.0.0.1] (phishingsupport-frontend-lqxwh3.1.ngladkvxz9e9w=
+y0kw7vfol755.dokploy-network [10.0.1.99])
+        by mail.phishing.support (Postfix) with ESMTPA id 6CA39132000B
+        for <ip.abuse@isp-one.example>; Fri, 20 Nov 2026 21:37:10 +0000 (UTC)
+DKIM-Signature: v=3D1; a=3Drsa-sha256; c=3Drelaxed/relaxed; d=3Dphishing.su=
+pport;
+        s=3Dps1; t=3D1795210630; h=3Dfrom:from:reply-to:reply-to:subject:su=
+bject:date:date:
+         message-id:message-id:to:to:cc:mime-version:mime-version:
+         content-type:content-type; bh=3D+eN8HUuad8ejczxVyPEX4Yb+QsPkRJOK4e=
+5GWChId68=3D;
+        b=3DpeJZvx6XYq3bpXyLpHJTgHX6LOGCEYugFaBy1Y1+Pzd2ZXtIudvmJH2PdGCxtVF=
+KjPPIAd
+        9mWbATDPkBi68eNAZAbgRkpX7rO/3LjVatSzmW54Kw/iMAgZ1GyA4/Pj9spwSp7Hb4G=
+IOR
+        ZUloqGP1LirvpUhaqWwOKhdC5xlOKaz6OmvJ/klbQKu7sC/xLIoOfvYvf3elPRSy9H0=
+JY9
+        0ro5fXC+DVjnSsXEIB6Z6l5Sf162FauZ4/Er4SbCsVGiHeWXC/k3QSTb1FJnJYf1gsc=
+vX1
+        Tqy6m03PHWw3RIQ6GcAZaKYs4ioZUKEP4FOsTakRSnYTErjYBo5mWWq7m41itw=3D=
+=3D
+X-Abuse-Report-Correlation: email-run:100000000000000001
+From: support@phishing.support
+To: ip.abuse@isp-one.example
+Reply-To: abuse-7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a@phishing.s=
+upport
+Subject: [Phishing Support] [PS-2280014017ad] Abuse report for
+ phish-target.example
+Message-ID: <abuse-5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e@phishin=
+g.support>
+Date: Fri, 20 Nov 2026 21:37:10 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=3D"--_NmP-6beff961ac73278b-Part_1"
+Return-Path: bounces@mail.phishing.support
+X-EOPAttributedMessage: 0
+X-EOPTenantAttributedMessage: c120ec3b-2ab7-478b-8e04-3be3184eaa5f:0
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: MA1PEPF00007262:EE_|HY0PR01MB711740:EE_
+X-MS-Office365-Filtering-Correlation-Id: 159df4b9-49ef-46b9-3fb6-08df474e70=
+2b
+X-LD-Processed: c120ec3b-2ab7-478b-8e04-3be3184eaa5f,ExtAddr
+X-MS-Exchange-AtpMessageProperties: SA
+X-MS-Exchange-SenderADCheck: 0
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam:
+        BCL:0;ARA:13230040|704162011799003|376014|48200799018|6049299003|61=
+400799027|9140799003|261026121527099003|10067099003|11063799006|56012099006=
+|261021133027099003|261022105027099003|261102123227099003|26102207572709900=
+3|261021123027099003|261022115727099003|261021130227099003|2610221133270990=
+03|261009223027099003|5063699009|261021135927099003|261026135527099003|2610=
+28144727099003|261021121427099003|261026140227099003|261026130827099003|551=
+12099003|16102099003|18002099003|4053099003;
+X-Microsoft-Antispam-Message-Info:
+        Vro+BgVjxfyHoGAvwHUc7F+EC0D6rFisAfRhUEd+WzXefI+88JHdvU+2e3qkWAxWTaa=
+LqxJmsNGFNZKiPs8+E4n2dJaT6BEI+axZsGGuYp388VsxJ+96ua49nGz/wC7mOrcuS8lniBSUWd=
+WxEx6Ceop5pZOS3rCFH8I8FMDh/zBybfdUFFtuo4vLEU9iO4D2snl/3ZMf+izekul+QpFp2Zt6F=
+QaekHFcxVZd3M2XH5VhUiJV5EqSjBKAe5hAT4g2NOz0bZPXjPLVoBR2AtyeeE5Ud5sAJy7wonM1=
+5yZ1ZuOGtOKDwsf+y+zsyKxAg7/tVH2LxavKNpbnn5qg3js7GX69rF9G8vicKQzQlDKx/ZH1tqR=
+BzQ5e8koHOqOuGY1DvNTgoZGtb9fK/Bo5Da+20yx4tJ7r6PH1Nk4m/bamMTES/h0tMAwi+dQV4X=
+tQkCMEKKBkKleWtIyDQ9vTS94AuRzeQW90CiEaBy0ZnNzlqgHF64pCy0uuL/CqSZeWOyisAZ6Dp=
++DHXwTngr1F92l2tOoHrPb80cTTlMVw3ktDBvr5XexIA2YSyfZlBKg3CDccwqB6v/fn9oEasD9J=
+ssABKra0+sz4IZOzGfl+z/dFiS1wxHWthtAn0AkchRzTAor92aEUHNAnTibwED4447AAlhQFEMy=
+OF+tZjii0zslIWLyX7bjMc2zk30n8TUWWTI5ggv5gMyHuOdj1UYCSexkXw6l6gowj8ejK7XQYqs=
+C9Z+MLN+V2vLdjBWwDgDpZtDFT+4+gy/b3Y0jxUwXQXQfqinjWtBBn1j4xxPEt5q2X5jo2yJY4R=
+lU7K5FBSKznMsBqtiHe+ZiyfgWZOZrboo3P9A5bQklGMy6GtiDAq7ScRJggCUThxaLngOQRgrfw=
+8FAy8EDp/X0vTvYsx+ImA/Q8PQ=3D=3D
+X-Forefront-Antispam-Report:
+        CIP:109.199.115.133;CTRY:FR;LANG:en;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:m=
+ail.phishing.support;PTR:mail.phishing.support;CAT:NONE;SFS:(13230040)(7041=
+62011799003)(376014)(48200799018)(6049299003)(61400799027)(9140799003)(2610=
+26121527099003)(10067099003)(11063799006)(56012099006)(261021133027099003)(=
+261022105027099003)(261102123227099003)(261022075727099003)(261021123027099=
+003)(261022115727099003)(261021130227099003)(261022113327099003)(2610092230=
+27099003)(5063699009)(261021135927099003)(261026135527099003)(2610281447270=
+99003)(261021121427099003)(261026140227099003)(261026130827099003)(55112099=
+003)(16102099003)(18002099003)(4053099003);DIR:OUT;SFP:1102;
+X-MS-Exchange-AntiSpam-MessageData-ChunkCount: 1
+X-MS-Exchange-AntiSpam-MessageData-0:
+        wSATeGu+3FYdlWEjqt3b1SrNWU6L5AGunf0O2RAPVp0yxZExYomOOJdiBH729DHOe2K=
+VlumY9N+sfqu03JTcAVDq5eW0YaEcFELkm0GvF1VzEGJ2K2ZI3k22gAaHKIm8jgxIU5D6LLIoai=
+Jofxx9Y57L1DTdHGumtwv7A7YKBxu7FZtlph6pW4TxyIDxrfdkwfHCKd8UCIhL1QG3gs8ibDJYL=
+EaeYJqBY3VPNCDL+Yf2P3iBSns16xq8v+E0VdXWcLwqlYIxJwwC2UHLTo0TFACSp5qT5l2Zz5YZ=
+tYIdolspWoVxiBmZHd4OnfvIHOzhIPXEIjw68lplNeu7VlcQ3ESN8iASjjS3CVtbtljoNm8uhd7=
+PT2Luiq1t7OrtEX8hXocjJEsX1eqNmXKMT4RXe4XDVEqn4jR43Pah5aqfYopND9ziFUwom9mIHT=
+g4/l20
+X-ExternalRecipientOutboundConnectors: c120ec3b-2ab7-478b-8e04-3be3184eaa5f
+X-Auto-Response-Suppress: DR, OOF, AutoReply
+X-OriginatorOrg: ispone.onmicrosoft.com
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 20 Nov 2026 21:37:12.0943
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 159df4b9-49ef-46b9-3fb6-08df4=
+74e702b
+X-MS-Exchange-CrossTenant-Id: c120ec3b-2ab7-478b-8e04-3be3184eaa5f
+X-MS-Exchange-CrossTenant-AuthSource:
+        MA1PEPF00007262.INDPRD01.PROD.OUTLOOK.COM
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: Internet
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: HY0PR01MB711740
+
+
+--6d9cf038-f2f1-488a-bd32-c15489f85498
+Content-Type: text/html; charset="us-ascii"
+Content-Transfer-Encoding: quoted-printable
+
+<html>
+  <meta name=3D"viewport" content=3D"width=3Ddevice-width, initial-scale=3D=
+1" />
+  <head>
+    <title>
+          DSN
+        </title>
+  </head>
+  <body style=3D"        background-color: white;      ">
+    <table style=3D"        background-color: white;         max-width: 548=
+px;         color: black;         border-spacing: 0px 0px;         padding-=
+top: 0px;         padding-bottom: 0px;        border-collapse: collapse;   =
+   " width=3D"548" cellspacing=3D"0" cellpadding=3D"0">
+      <tbody>
+        <tr>
+          <td style=3D"        text-align: left;        padding-bottom: 20p=
+x;      ">
+            <img height=3D"28" width=3D"126" style=3D"        max-width: 10=
+0%;      " src=3D"https://products.office.com/en-us/CMSImages/Office365Logo=
+_Orange.png?version=3Db8d100a9-0a8b-8e6a-88e1-ef488fee0470" />
+          </td>
+        </tr>
+        <tr>
+          <td style=3D"        font-family: 'Segoe UI', Frutiger, Arial, sa=
+ns-serif;        font-size: 16px;         padding-bottom: 10px;         -ms=
+-text-size-adjust: 100%;        text-align: left;      ">Your message could=
+n't be delivered to multiple recipients.<br /></td>
+        </tr>
+        <tr>
+          <td style=3D"        font-family: 'Segoe UI', Frutiger, Arial, sa=
+ns-serif;         font-size: 24px;         padding-top: 0px;         paddin=
+g-bottom: 20px;         text-align: center;         -ms-text-size-adjust: 1=
+00%;      ">The recipients weren't found at <span style=3D"        color: #=
+0072c6;      ">forward-target.example</span>.<br /></td>
+        </tr>
+        <tr>
+          <td style=3D"        padding-bottom: 15px;         padding-left: =
+0px;         padding-right: 0px;         border-spacing: 0px 0px;      ">
+            <table style=3D"        max-width: 548px;         font-weight: =
+600;        border-spacing: 0px 0px;         padding-top: 0px;         padd=
+ing-bottom: 0px;        border-collapse: collapse;      ">
+              <tbody>
+                <tr>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        font-size: 15px;        font-weight: 600;        t=
+ext-align: left;        width: 181px;        -ms-text-size-adjust: 100%;   =
+     vertical-align: bottom;      ">
+                    <font color=3D"#ffffff">
+                      <span style=3D"color:#000000">wifi_core+SRS=3Ditvex=
+=3D. . .</span>
+                    </font>
+                  </td>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        font-size: 15px;        font-weight: 600;        t=
+ext-align: center;        width: 186px;        -ms-text-size-adjust: 100%; =
+       vertical-align: bottom;      ">
+                    <font color=3D"#ffffff">
+                      <span style=3D"color:#000000">Office 365</span>
+                    </font>
+                  </td>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;         -ms-text-size-adjust: 100%;         font-size: 15=
+px;         font-weight: 600;        text-align: right;         width: 181p=
+x;         vertical-align: bottom;      ">
+                    <font color=3D"#ffffff">
+                      <span style=3D"color:#000000">Multiple recipients</sp=
+an>
+                    </font>
+                  </td>
+                </tr>
+                <tr>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        font-weight: 400;        text-align: left;        padding-top: 0px=
+;        padding-bottom: 0px;        vertical-align: middle;        width: =
+181px;      ">
+                    <font color=3D"#ffffff">
+                      <span style=3D"        color: #c00000;      ">
+                        <b>Action Required</b>
+                      </span>
+                    </font>
+                  </td>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        font-weight: 400;        text-align: center;        padding-top: 0=
+px;        padding-bottom: 0px;        vertical-align: middle;        width=
+: 186px;      " />
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        font-weight: 400;        text-align: right;        padding-top: 0p=
+x;        padding-bottom: 0px;        vertical-align: middle;        width:=
+ 181px;      ">
+                    <font color=3D"#ffffff">
+                      <span style=3D"color:#000000">Recipients</span>
+                    </font>
+                  </td>
+                </tr>
+                <tr>
+                  <td colspan=3D"3" style=3D"        padding-top:0;        =
+padding-bottom:0;        padding-left:0;        padding-right:0      ">
+                    <table cellspacing=3D"0" cellpadding=3D"0" style=3D"   =
+     border-spacing: 0px 0px;        padding-top: 0px;        padding-botto=
+m: 0px;        padding-left: 0px;        padding-right: 0px;        border-=
+collapse: collapse;      ">
+                      <tbody>
+                        <tr height=3D"10">
+                          <td width=3D"180" height=3D"10" bgcolor=3D"#c0000=
+0" style=3D"        width: 180px;        line-height: 10px;        height: =
+10px;        font-size: 6px;        padding-top: 0;        padding-bottom: =
+0;        padding-left: 0;        padding-right: 0;      "><!--[if gte mso =
+15]>&nbsp;<![endif]--></td>
+                          <td width=3D"4" height=3D"10" bgcolor=3D"#ffffff"=
+ style=3D"        width: 4px;        line-height: 10px;        height: 10px=
+;        font-size: 6px;        padding-top: 0;        padding-bottom: 0;  =
+      padding-left: 0;        padding-right: 0;      "><!--[if gte mso 15]>=
+&nbsp;<![endif]--></td>
+                          <td width=3D"180" height=3D"10" bgcolor=3D"#ccccc=
+c" style=3D"        width: 180px;        line-height: 10px;        height: =
+10px;        font-size: 6px;        padding-top: 0;        padding-bottom: =
+0;        padding-left: 0;        padding-right: 0;      "><!--[if gte mso =
+15]>&nbsp;<![endif]--></td>
+                          <td width=3D"4" height=3D"10" bgcolor=3D"#ffffff"=
+ style=3D"        width: 4px;        line-height: 10px;        height: 10px=
+;        font-size: 6px;        padding-top: 0;        padding-bottom: 0;  =
+      padding-left: 0;        padding-right: 0;      "><!--[if gte mso 15]>=
+&nbsp;<![endif]--></td>
+                          <td width=3D"180" height=3D"10" bgcolor=3D"#ccccc=
+c" style=3D"        width: 180px;        line-height: 10px;        height: =
+10px;        font-size: 6px;        padding-top: 0;        padding-bottom: =
+0;        padding-left: 0;        padding-right: 0;      "><!--[if gte mso =
+15]>&nbsp;<![endif]--></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        text-align: left;        width: 181px;        line-height: 20px;  =
+      font-weight: 400;        padding-top: 0px;        padding-left: 0px; =
+       padding-right: 0px;        padding-bottom: 0px;      ">
+                    <font color=3D"#ffffff">
+                      <span style=3D"        color: #c00000;      ">Unknown=
+ To address</span>
+                    </font>
+                  </td>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        text-align: center;        width: 186px;        line-height: 20px;=
+        font-weight: 400;        padding-top: 0px;        padding-left: 0px=
+;        padding-right: 0px;        padding-bottom: 0px;      " />
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        text-align: right;        width: 181px;        line-height: 20px; =
+       font-weight: 400;        padding-top: 0px;        padding-left: 0px;=
+        padding-right: 0px;        padding-bottom: 0px;      " />
+                </tr>
+              </tbody>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style=3D"        font-family: 'Segoe UI', Frutiger, Arial, sa=
+ns-serif;        -ms-text-size-adjust: 100%;        font-size: 15px;       =
+ text-align: left;        font-weight: 400;      ">Couldn't deliver the mes=
+sage to the following recipients:</td>
+        </tr>
+        <tr>
+          <td style=3D"        font-family: 'Segoe UI', Frutiger, Arial, sa=
+ns-serif;        -ms-text-size-adjust: 100%;        font-size: 14px;       =
+ padding-top: 0px;        padding-bottom: 15px;        max-width: 548px;   =
+   ">first.person@forward-target.example, second.person@forward-target.example, third.person@forward-target.example, fourth.person@forward-target.example, fifth.person@forward-target.example, sixth.person@forward-target.example</td>
+        </tr>
+        <tr>
+          <td style=3D"        width: 100%;        padding-top: 0px;       =
+ padding-right: 10px;        padding-left: 10px;      ">
+            <br />
+            <table style=3D"        width: 100%;        padding-right: 0px;=
+        padding-left: 0px;        padding-top: 0px;        padding-bottom: =
+0px;        background-color: #f2f5fa;        margin-left: 0px;      ">
+              <tbody>
+                <tr>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 21px=
+;        font-weight: 500;        background-color: #f2f5fa;        padding=
+-top: 0px;        padding-bottom: 0px;        padding-left: 10px;        pa=
+dding-right: 10px;      ">How to Fix It</td>
+                </tr>
+                <tr>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 16px=
+;        font-weight: 400;        padding-top: 0px;        padding-bottom: =
+6px;        padding-left: 10px;        padding-right: 10px;        backgrou=
+nd-color: #f2f5fa;      ">The address might be misspelled or might not exis=
+t. Try one or more of the following:</td>
+                </tr>
+                <tr>
+                  <td style=3D"         padding-top: 0px;         padding-b=
+ottom: 0px;         padding-left: 0px;         padding-right: 0px;        b=
+order-spacing: 0px 0px;      ">
+                    <ul style=3D"        font-family: 'Segoe UI', Frutiger,=
+ Arial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 16=
+px;        font-weight: 400;        margin-left: 40px;        margin-bottom=
+: 5px;        background-color: #f2f5fa;        padding-top: 0px;        pa=
+dding-bottom: 0px;        padding-left: 6px;        padding-right: 6px;    =
+  ">
+                      <li>
+                        <b>Retype the recipient's address, then resend the =
+message -</b> If you're using Outlook, open this non-delivery report messag=
+e and click <b>Send Again</b> from the menu or ribbon. In Outlook on the we=
+b, select this message, and then click the "<b>To send this message again, =
+click here.</b>" link located just above the message preview window. In the=
+ To or Cc line, delete and then retype the entire recipient's address (igno=
+re any address suggestions). After typing the complete address, click <b>Se=
+nd</b> to resend the message. If you're using an email program other than O=
+utlook or Outlook on the web, follow its standard way for resending a messa=
+ge. Just be sure to delete and retype the recipient's entire address before=
+ resending it.</li>
+                      <li>
+                        <b>Remove the recipient from the recipient Auto-Com=
+plete List, then resend the message -</b> If you're using Outlook or Outloo=
+k on the web, follow the steps in the "Remove the recipient from the recipi=
+ent Auto-Complete List" section of <a href=3D"https://go.microsoft.com/fwli=
+nk/?LinkId=3D532972">this article</a>. Then resend the message. Be sure to =
+delete and retype the recipient's entire address before clicking <b>Send</b=
+>.</li>
+                      <li>
+                        <b>Contact the recipient by some other means,</b> (=
+by phone, for example) to confirm you're using the right address. Ask them =
+if they've set up an email forwarding rule that could be forwarding your me=
+ssage to an incorrect address.</li>
+                    </ul>
+                  </td>
+                </tr>
+                <tr>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 16px=
+;        font-weight: 400;        padding-top: 0px;        padding-bottom: =
+6px;        padding-left: 10px;        padding-right: 10px;        backgrou=
+nd-color: #f2f5fa;      ">If the problem continues, ask the recipient to te=
+ll their email admin about the problem, and give them the error (and the na=
+me of the server that reported it) shown below. It's likely that only the r=
+ecipient's email admin can fix this problem.</td>
+                </tr>
+              </tbody>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style=3D"        font-family: 'Segoe UI', Frutiger, Arial, sa=
+ns-serif;        -ms-text-size-adjust: 100%;        font-size: 14px;       =
+ font-weight: 400;        padding-top: 10px;        padding-bottom: 0px;   =
+     padding-bottom: 4px;      ">
+            <br />
+            <em>Was this helpful? <a href=3D"https://go.microsoft.com/fwlin=
+k/p/?LinkID=3D717197">Send feedback to Microsoft</a>.</em>
+          </td>
+        </tr>
+        <tr>
+          <td style=3D"        -ms-text-size-adjust: 100%;        font-size=
+: 0px;        line-height: 0px;        padding-top: 0px;        padding-bot=
+tom: 0px;      ">
+            <hr />
+          </td>
+        </tr>
+        <tr>
+          <td style=3D"        font-family: 'Segoe UI', Frutiger, Arial, sa=
+ns-serif;        -ms-text-size-adjust: 100%;        font-size: 21px;       =
+ font-weight: 500;      ">
+            <br />More Info for Email Admins</td>
+        </tr>
+        <tr>
+          <td style=3D"        font-family: 'Segoe UI', Frutiger, Arial, sa=
+ns-serif;        -ms-text-size-adjust: 100%;        font-size: 14px;      "=
+>
+            <em>Status code: 550 5.4.1</em>
+            <br />
+            <br />This error occurred because a message was sent to an emai=
+l address hosted by Office 365, but the address doesn't exist in the receiv=
+ing organization's Office 365 directory. Directory Based Edge Blocking (DBE=
+B) is enabled for forward-target.example, and DBEB rejects messages address=
+ed to recipients who don't exist in the receiving organization's Office 365=
+ directory. This error is reported by the recipient domain's email server, =
+but most often it can be fixed by the person who sent the message. If the s=
+teps in the <b>How to Fix It</b> section above don't fix the problem, and y=
+ou're the email admin for the recipient, try one or more of the following:<=
+br /><br /><b>Check that the email address exists and is correct - </b>Conf=
+irm that the recipient address exists in your Office 365 directory, is corr=
+ect, and is accepting messages.<br /><br /><b>Synchronize your directories =
+- </b>Make sure directory synchronization is working correctly, and that th=
+e recipient's email address exists in both Office 365 and in your on-premis=
+es directory.<br /><br /><b>Check for errant forwarding rules - </b>Check f=
+or forwarding rules for the original recipient that might be trying to forw=
+ard the message to an invalid address. Forwarding can be set up by an admin=
+ via mail flow rules or mailbox forwarding address settings, or by the reci=
+pient via the Forwarding or Inbox Rules features.<br /><br /><b>Make sure t=
+he recipient has a valid license - </b>Make sure the recipient has an Offic=
+e 365 license assigned to them. The recipient's email admin can use the Off=
+ice 365 admin center to assign a license to them (Users &gt; Active Users &=
+gt; Select the recipient &gt; Assigned License &gt; Edit).<br /><br /><b>Ma=
+ke sure that mail flow settings and MX records are correct - </b>Misconfigu=
+red mail flow or MX record settings can cause this error. Check your Office=
+ 365 mail flow settings to make sure your domain and any mail flow connecto=
+rs are set up correctly. Also, work with your domain registrar to make sure=
+ the MX records for your domain are set up correctly.<br /><br />For more i=
+nformation and additional tips to fix this issue, see <a href=3D"https://go=
+.microsoft.com/fwlink/?LinkId=3D532972">this article</a>.<br /><br /></td>
+        </tr>
+        <tr>
+          <td style=3D"        font-family: 'Segoe UI', Frutiger, Arial, sa=
+ns-serif;        -ms-text-size-adjust: 100%;        font-size: 17px;       =
+ font-weight: 500;      ">Original Message Details</td>
+        </tr>
+        <tr>
+          <td style=3D"        font-size: 14px;        line-height: 20px;  =
+      font-family: 'Segoe UI', Frutiger, Arial, sans-serif;        -ms-text=
+-size-adjust: 100%;        font-weight: 500;      ">
+            <table style=3D"        width: 100%;        border-collapse: co=
+llapse;        margin-left: 10px;      ">
+              <tbody>
+                <tr>
+                  <td valign=3D"top" style=3D"        font-family: 'Segoe U=
+I', Frutiger, Arial, sans-serif;        font-size: 14px;        -ms-text-si=
+ze-adjust: 100%;        white-space: nowrap;        font-weight: 500;      =
+  width: 140px;      ">Created Date:</td>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        font-weight: 400;      ">11/20/2026 9:37:10 PM</td>
+                </tr>
+                <tr>
+                  <td valign=3D"top" style=3D"        font-family: 'Segoe U=
+I', Frutiger, Arial, sans-serif;        font-size: 14px;        -ms-text-si=
+ze-adjust: 100%;        white-space: nowrap;        font-weight: 500;      =
+  width: 140px;      ">Sender Address:</td>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        font-weight: 400;      ">wifi_core+SRS=3Ditvex=3DJJ=3Dmail.phishin=
+g.support=3Dbounces@isp-one.example</td>
+                </tr>
+                <tr>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        font-size: 14px;        -ms-text-size-adjust: 100%=
+;        white-space: nowrap;        font-weight: 500;        width: 140px;=
+      ">Recipient Address:</td>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        font-weight: 400;      ">first.person@forward-target.example, second.person@forward-target.example, . . .</td>
+                </tr>
+                <tr>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        font-size: 14px;        -ms-text-size-adjust: 100%=
+;        white-space: nowrap;        font-weight: 500;        width: 140px;=
+      ">Subject:</td>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        font-weight: 400;      ">[Phishing Support] [PS-2280014017ad] Abus=
+e report for phish-target.example</td>
+                </tr>
+              </tbody>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style=3D"        font-family: 'Segoe UI', Frutiger, Arial, sa=
+ns-serif;        -ms-text-size-adjust: 100%;        font-size: 17px;       =
+ font-weight: 500;      ">
+            <br />Error Details</td>
+        </tr>
+        <tr>
+          <td style=3D"        font-size: 14px;        line-height: 20px;  =
+      font-family: 'Segoe UI', Frutiger, Arial, sans-serif;        -ms-text=
+-size-adjust: 100%;        font-weight: 500;      ">
+            <table style=3D"        width: 100%;        border-collapse: co=
+llapse;        margin-left: 10px;      ">
+              <tbody>
+                <tr>
+                  <td valign=3D"top" style=3D"        font-family: 'Segoe U=
+I', Frutiger, Arial, sans-serif;        font-size: 14px;        -ms-text-si=
+ze-adjust: 100%;        white-space: nowrap;        font-weight: 500;      =
+  width: 140px;      ">Error:</td>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        font-weight: 400;      ">
+                    <em>550 5.4.1 Recipient address rejected: Access denied=
+. For more information see https://aka.ms/EXOSmtpErrors [SG1PEPF000082E7.ap=
+cprd02.prod.outlook.com 2026-11-20T21:37:17.513Z 08DF465DC36FD6DA]</em>
+                  </td>
+                </tr>
+                <tr>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        font-size: 14px;        -ms-text-size-adjust: 100%=
+;        white-space: nowrap;        font-weight: 500;        width: 140px;=
+      ">Message rejected by:</td>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        font-weight: 400;      ">SG1PEPF000082E7.mail.protection.outlook.c=
+om</td>
+                </tr>
+              </tbody>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style=3D"        font-family: 'Segoe UI', Frutiger, Arial, sa=
+ns-serif;        -ms-text-size-adjust: 100%;        font-size: 17px;       =
+ font-weight: 500;      ">
+            <br />Notification Details</td>
+        </tr>
+        <tr>
+          <td style=3D"        font-size: 14px;        line-height: 20px;  =
+      font-family: 'Segoe UI', Frutiger, Arial, sans-serif;        -ms-text=
+-size-adjust: 100%;        font-weight: 500;      ">
+            <table style=3D"        width: 100%;        border-collapse: co=
+llapse;        margin-left: 10px;      ">
+              <tbody>
+                <tr>
+                  <td valign=3D"top" style=3D"        font-family: 'Segoe U=
+I', Frutiger, Arial, sans-serif;        font-size: 14px;        -ms-text-si=
+ze-adjust: 100%;        white-space: nowrap;        font-weight: 500;      =
+  width: 140px;      ">Sent by:</td>
+                  <td style=3D"        font-family: 'Segoe UI', Frutiger, A=
+rial, sans-serif;        -ms-text-size-adjust: 100%;        font-size: 14px=
+;        font-weight: 400;      ">
+                    <em>HY0PR01MB711740.INDPRD01.PROD.OUTLOOK.COM</em>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <br />
+    <table style=3D"width: 880px;" cellspacing=3D"0">
+      <tr>
+        <td colspan=3D"6" style=3D"        padding-top: 4px;        border-=
+bottom: 1px solid #999999;        padding-bottom: 4px;        line-height: =
+120%;        font-size: 17px;        font-family: 'Segoe UI', Frutiger, Ari=
+al, sans-serif;        -ms-text-size-adjust: 100%;        font-weight: 500;=
+      ">Message Hops</td>
+      </tr>
+      <tr>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        background-color: #f2f5fa;        border-bottom: 1p=
+x solid #999999;        white-space: nowrap;        padding: 8px;      ">HO=
+P</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        background-color: #f2f5fa;        border-bottom: 1p=
+x solid #999999;        white-space: nowrap;        padding: 8px;        wi=
+dth: 80px;      ">TIME (UTC)</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        background-color: #f2f5fa;        border-bottom: 1p=
+x solid #999999;        white-space: nowrap;        padding: 8px;      ">FR=
+OM</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        background-color: #f2f5fa;        border-bottom: 1p=
+x solid #999999;        white-space: nowrap;        padding: 8px;      ">TO=
+</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        background-color: #f2f5fa;        border-bottom: 1p=
+x solid #999999;        white-space: nowrap;        padding: 8px;      ">WI=
+TH</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        background-color: #f2f5fa;        border-bottom: 1p=
+x solid #999999;        white-space: nowrap;        padding: 8px;      ">RE=
+LAY TIME</td>
+      </tr>
+      <tr>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: center;      ">1</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;        width: 80px;      ">11/20/2026<br />9:3=
+7:10 PM</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">[127.0.0.1]</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">mail.phishing.support</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">ESMTPA</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">*</td>
+      </tr>
+      <tr>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: center;      ">2</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;        width: 80px;      ">11/20/2026<br />9:3=
+7:12 PM</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">mail.phishing.support</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">MA1PEPF00007262.mail.protection.outlook=
+.com</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">Microsoft SMTP Server (version=3DTLS1_3=
+, cipher=3DTLS_AES_256_GCM_SHA384)</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">2&nbsp;sec</td>
+      </tr>
+      <tr>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: center;      ">3</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;        width: 80px;      ">11/20/2026<br />9:3=
+7:12 PM</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">MA1PEPF00007262.INDPRD01.PROD.OUTLOOK.C=
+OM</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">MA5P287CA0297.outlook.office365.com</td=
+>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">Microsoft SMTP Server (version=3DTLS1_3=
+, cipher=3DTLS_AES_256_GCM_SHA384)</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">*</td>
+      </tr>
+      <tr>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: center;      ">4</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;        width: 80px;      ">11/20/2026<br />9:3=
+7:13 PM</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">MA5P287CA0297.INDP287.PROD.OUTLOOK.COM<=
+/td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">HY0PR01MB711740.INDPRD01.PROD.OUTLOOK.C=
+OM</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">Microsoft SMTP Server (version=3DTLS1_2=
+, cipher=3DTLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384)</td>
+        <td style=3D"        font-size: 12px;        font-family: 'Segoe UI=
+', Frutiger, Arial, sans-serif;        -ms-text-size-adjust: 100%;        f=
+ont-weight: 500;        border-bottom: 1px solid #999999;        padding: 8=
+px;        text-align: left;      ">1&nbsp;sec</td>
+      </tr>
+    </table>
+    <p style=3D"        font-family: 'Segoe UI', Frutiger, Arial, sans-seri=
+f;        -ms-text-size-adjust: 100%;        font-size: 17px;        font-w=
+eight: 500;        padding-top: 4px;        padding-bottom: 0;        margi=
+n-top: 19px;        margin-bottom: 5px;      ">Original Message Headers</p>
+    <pre style=3D"        color: gray;        white-space: pre;        padd=
+ing-top: 0;        margin-top: 5px;      ">ARC-Seal: i=3D1; a=3Drsa-sha256;=
+ s=3Darcselector10001; d=3Dmicrosoft.com; cv=3Dnone;
+ b=3Dviia6cuXajwmviYnA6eRVB4RfQIRtRPxMD/2G+yrEtIbjL6gMAX69fCzfCm9uqAANtpPr6=
+AIGXIUtz82+GyWq5JDvqr8fCfFSmOSpuEtnv4enmUSYn2phzsuatk4sRiuGjGTx6PLhqm7lbP9A=
+hUvsFMdGId8WWQcMvCM/2cyQi0N685SovVSgG2EOgDUVpOJoY20yQ1mVAtlbgbHwrD9IMDyBxL+=
+Cx33qNnISujjmwuaycJ1OQKME3VtWIpOIJROi6KQZMuuvVUXhHOpgvWjbY7135vKXGZa9Irzfj8=
+6PYS5KNRZaYOmimZdjf9K67QnkRRqMhox5w0TDiDQmiY7ow=3D=3D
+ARC-Message-Signature: i=3D1; a=3Drsa-sha256; c=3Drelaxed/relaxed; d=3Dmicr=
+osoft.com;
+ s=3Darcselector10001;
+ h=3DFrom:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-A=
+ntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Ex=
+change-AntiSpam-MessageData-1;
+ bh=3D+eN8HUuad8ejczxVyPEX4Yb+QsPkRJOK4e5GWChId68=3D;
+ b=3Dsv6Vvd6bszWbANssleJxwW8Qpknx0xZCY1wvheZjaQ/AyVg7SPJ6g1fhPPUzG06pkqcdGF=
+rWTqpZTymCFFhIrKJe9t7SdHfDmrhOk6KrIkRKIGY1Z8FLBc9ejvuStR4kpRp/3+RE5KozGcpKT=
+Fi3jPdeFI6KT7k574u5LR/S9JR4ZSb+OkWLu/2EXYVkBPSggvBOsQq1kHdup0GMeJZRsLqDoYl2=
+QHGUhbsyAP6IlCrqNRiJ/hnzvMatiD6zZ8Rp5TFoEQBRfE381C2uZEzQQdHDBhr2nTbIsjHAECx=
+zrxaMlQHnm2914oohO72g2rUCk8TPnlCNxxrdxX+r5bbNhw=3D=3D
+ARC-Authentication-Results: i=3D1; mx.microsoft.com 1; spf=3Dpass (sender i=
+p is
+ 109.199.115.133) smtp.rcpttodomain=3Disp-one.example
+ smtp.mailfrom=3Dmail.phishing.support; dmarc=3Dpass (p=3Dnone sp=3Dnone pc=
+t=3D100)
+ action=3Dnone header.from=3Dphishing.support; dkim=3Dpass (signature was v=
+erified)
+ header.d=3Dphishing.support; arc=3Dnone (0)
+Received: from MA5P287CA0297.INDP287.PROD.OUTLOOK.COM (2603:1096:a01:21e::1=
+2)
+ by HY0PR01MB711740.INDPRD01.PROD.OUTLOOK.COM (2603:1096:1c0:4::23) with
+ Microsoft SMTP Server (version=3DTLS1_2,
+ cipher=3DTLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.21.639.12; Fri, 20 N=
+ov
+ 2026 21:37:13 +0000
+Received: from MA1PEPF00007262.INDPRD01.PROD.OUTLOOK.COM
+ (2603:1096:a01:21e:cafe::9d) by MA5P287CA0297.outlook.office365.com
+ (2603:1096:a01:21e::12) with Microsoft SMTP Server (version=3DTLS1_3,
+ cipher=3DTLS_AES_256_GCM_SHA384) id 15.21.639.12 via Frontend Transport; F=
+ri,
+ 20 Nov 2026 21:37:12 +0000
+Authentication-Results: mx.microsoft.com 1; spf=3Dpass (sender IP is
+ 109.199.115.133) smtp.mailfrom=3Dmail.phishing.support; dkim=3Dpass (signa=
+ture
+ was verified) header.d=3Dphishing.support;dmarc=3Dpass action=3Dnone
+ header.from=3Dphishing.support;
+Received-SPF: Pass (protection.outlook.com: domain of mail.phishing.support
+ designates 109.199.115.133 as permitted sender)
+ receiver=3Dprotection.outlook.com; client-ip=3D109.199.115.133;
+ helo=3Dmail.phishing.support; pr=3DC
+Received: from mail.phishing.support (109.199.115.133) by
+ MA1PEPF00007262.mail.protection.outlook.com (10.167.242.4) with Microsoft
+ SMTP Server (version=3DTLS1_3, cipher=3DTLS_AES_256_GCM_SHA384) id 15.21.6=
+39.5
+ via Frontend Transport; Fri, 20 Nov 2026 21:37:12 +0000
+Received: from [127.0.0.1] (phishingsupport-frontend-lqxwh3.1.ngladkvxz9e9w=
+y0kw7vfol755.dokploy-network [10.0.1.99])
+	by mail.phishing.support (Postfix) with ESMTPA id 6CA39132000B
+	for &lt;ip.abuse@isp-one.example&gt;; Fri, 20 Nov 2026 21:37:10 +0000 (UTC)
+DKIM-Signature: v=3D1; a=3Drsa-sha256; c=3Drelaxed/relaxed; d=3Dphishing.su=
+pport;
+	s=3Dps1; t=3D1795210630; h=3Dfrom:from:reply-to:reply-to:subject:subject:d=
+ate:date:
+	 message-id:message-id:to:to:cc:mime-version:mime-version:
+	 content-type:content-type; bh=3D+eN8HUuad8ejczxVyPEX4Yb+QsPkRJOK4e5GWChId=
+68=3D;
+	b=3DpeJZvx6XYq3bpXyLpHJTgHX6LOGCEYugFaBy1Y1+Pzd2ZXtIudvmJH2PdGCxtVFKjPPIAd
+	9mWbATDPkBi68eNAZAbgRkpX7rO/3LjVatSzmW54Kw/iMAgZ1GyA4/Pj9spwSp7Hb4GIOR
+	ZUloqGP1LirvpUhaqWwOKhdC5xlOKaz6OmvJ/klbQKu7sC/xLIoOfvYvf3elPRSy9H0JY9
+	0ro5fXC+DVjnSsXEIB6Z6l5Sf162FauZ4/Er4SbCsVGiHeWXC/k3QSTb1FJnJYf1gscvX1
+	Tqy6m03PHWw3RIQ6GcAZaKYs4ioZUKEP4FOsTakRSnYTErjYBo5mWWq7m41itw=3D=3D
+X-Abuse-Report-Correlation: email-run:100000000000000001
+From: support@phishing.support
+To: ip.abuse@isp-one.example
+Reply-To: abuse-7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a@phishing.s=
+upport
+Subject: [Phishing Support] [PS-2280014017ad] Abuse report for
+ phish-target.example
+Message-ID: &lt;abuse-5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e@phis=
+hing.support&gt;
+Date: Fri, 20 Nov 2026 21:37:10 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=3D"--_NmP-6beff961ac73278b-Part_1"
+Return-Path: bounces@mail.phishing.support
+X-EOPAttributedMessage: 0
+X-EOPTenantAttributedMessage: c120ec3b-2ab7-478b-8e04-3be3184eaa5f:0
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: MA1PEPF00007262:EE_|HY0PR01MB711740:EE_
+X-MS-Office365-Filtering-Correlation-Id: 159df4b9-49ef-46b9-3fb6-08df474e70=
+2b
+X-LD-Processed: c120ec3b-2ab7-478b-8e04-3be3184eaa5f,ExtAddr
+X-MS-Exchange-AtpMessageProperties: SA
+X-MS-Exchange-SenderADCheck: 0
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam:
+	BCL:0;ARA:13230040|704162011799003|376014|48200799018|6049299003|614007990=
+27|9140799003|261026121527099003|10067099003|11063799006|56012099006|261021=
+133027099003|261022105027099003|261102123227099003|261022075727099003|26102=
+1123027099003|261022115727099003|261021130227099003|261022113327099003|2610=
+09223027099003|5063699009|261021135927099003|261026135527099003|26102814472=
+7099003|261021121427099003|261026140227099003|261026130827099003|5511209900=
+3|16102099003|18002099003|4053099003;
+X-Microsoft-Antispam-Message-Info:
+	Vro+BgVjxfyHoGAvwHUc7F+EC0D6rFisAfRhUEd+WzXefI+88JHdvU+2e3qkWAxWTaaLqxJmsN=
+GFNZKiPs8+E4n2dJaT6BEI+axZsGGuYp388VsxJ+96ua49nGz/wC7mOrcuS8lniBSUWdWxEx6Ce=
+op5pZOS3rCFH8I8FMDh/zBybfdUFFtuo4vLEU9iO4D2snl/3ZMf+izekul+QpFp2Zt6FQaekHFc=
+xVZd3M2XH5VhUiJV5EqSjBKAe5hAT4g2NOz0bZPXjPLVoBR2AtyeeE5Ud5sAJy7wonM15yZ1ZuO=
+GtOKDwsf+y+zsyKxAg7/tVH2LxavKNpbnn5qg3js7GX69rF9G8vicKQzQlDKx/ZH1tqRBzQ5e8k=
+oHOqOuGY1DvNTgoZGtb9fK/Bo5Da+20yx4tJ7r6PH1Nk4m/bamMTES/h0tMAwi+dQV4XtQkCMEK=
+KBkKleWtIyDQ9vTS94AuRzeQW90CiEaBy0ZnNzlqgHF64pCy0uuL/CqSZeWOyisAZ6Dp+DHXwTn=
+gr1F92l2tOoHrPb80cTTlMVw3ktDBvr5XexIA2YSyfZlBKg3CDccwqB6v/fn9oEasD9JssABKra=
+0+sz4IZOzGfl+z/dFiS1wxHWthtAn0AkchRzTAor92aEUHNAnTibwED4447AAlhQFEMyOF+tZji=
+i0zslIWLyX7bjMc2zk30n8TUWWTI5ggv5gMyHuOdj1UYCSexkXw6l6gowj8ejK7XQYqsC9Z+MLN=
++V2vLdjBWwDgDpZtDFT+4+gy/b3Y0jxUwXQXQfqinjWtBBn1j4xxPEt5q2X5jo2yJY4RlU7K5FB=
+SKznMsBqtiHe+ZiyfgWZOZrboo3P9A5bQklGMy6GtiDAq7ScRJggCUThxaLngOQRgrfw8FAy8ED=
+p/X0vTvYsx+ImA/Q8PQ=3D=3D
+X-Forefront-Antispam-Report:
+	CIP:109.199.115.133;CTRY:FR;LANG:en;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:mail.phi=
+shing.support;PTR:mail.phishing.support;CAT:NONE;SFS:(13230040)(70416201179=
+9003)(376014)(48200799018)(6049299003)(61400799027)(9140799003)(26102612152=
+7099003)(10067099003)(11063799006)(56012099006)(261021133027099003)(2610221=
+05027099003)(261102123227099003)(261022075727099003)(261021123027099003)(26=
+1022115727099003)(261021130227099003)(261022113327099003)(26100922302709900=
+3)(5063699009)(261021135927099003)(261026135527099003)(261028144727099003)(=
+261021121427099003)(261026140227099003)(261026130827099003)(55112099003)(16=
+102099003)(18002099003)(4053099003);DIR:OUT;SFP:1102;
+X-MS-Exchange-AntiSpam-MessageData-ChunkCount: 1
+X-MS-Exchange-AntiSpam-MessageData-0:
+	wSATeGu+3FYdlWEjqt3b1SrNWU6L5AGunf0O2RAPVp0yxZExYomOOJdiBH729DHOe2KVlumY9N=
++sfqu03JTcAVDq5eW0YaEcFELkm0GvF1VzEGJ2K2ZI3k22gAaHKIm8jgxIU5D6LLIoaiJofxx9Y=
+57L1DTdHGumtwv7A7YKBxu7FZtlph6pW4TxyIDxrfdkwfHCKd8UCIhL1QG3gs8ibDJYLEaeYJqB=
+Y3VPNCDL+Yf2P3iBSns16xq8v+E0VdXWcLwqlYIxJwwC2UHLTo0TFACSp5qT5l2Zz5YZtYIdols=
+pWoVxiBmZHd4OnfvIHOzhIPXEIjw68lplNeu7VlcQ3ESN8iASjjS3CVtbtljoNm8uhd7PT2Luiq=
+1t7OrtEX8hXocjJEsX1eqNmXKMT4RXe4XDVEqn4jR43Pah5aqfYopND9ziFUwom9mIHTg4/l20
+X-ExternalRecipientOutboundConnectors: c120ec3b-2ab7-478b-8e04-3be3184eaa5f
+X-Auto-Response-Suppress: DR, OOF, AutoReply
+X-OriginatorOrg: ispone.onmicrosoft.com
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 20 Nov 2026 21:37:12.0943
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 159df4b9-49ef-46b9-3fb6-08df4=
+74e702b
+X-MS-Exchange-CrossTenant-Id: c120ec3b-2ab7-478b-8e04-3be3184eaa5f
+X-MS-Exchange-CrossTenant-AuthSource:
+	MA1PEPF00007262.INDPRD01.PROD.OUTLOOK.COM
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: Internet
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: HY0PR01MB711740
+</pre>
+  </body>
+</html>=
+
+--6d9cf038-f2f1-488a-bd32-c15489f85498--
+
+--93fe0732-fed9-4b74-8b2a-e0396a3d6f1e
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns;HY0PR01MB711740.INDPRD01.PROD.OUTLOOK.COM
+Received-From-MTA: dns;mail.phishing.support
+Arrival-Date: Fri, 20 Nov 2026 21:37:13 +0000
+
+Final-Recipient: rfc822;first.person@forward-target.example
+Action: failed
+Status: 5.4.1
+Diagnostic-Code: smtp;550 5.4.1 Recipient address rejected: Access denied. For more information see https://aka.ms/EXOSmtpErrors [SG1PEPF000082E7.apcprd02.prod.outlook.com 2026-11-20T21:37:17.513Z 08DF465DC36FD6DA]
+Remote-MTA: dns;SG1PEPF000082E7.mail.protection.outlook.com
+
+Final-Recipient: rfc822;second.person@forward-target.example
+Action: failed
+Status: 5.4.1
+Diagnostic-Code: smtp;550 5.4.1 Recipient address rejected: Access denied. For more information see https://aka.ms/EXOSmtpErrors [SG1PEPF000082E7.apcprd02.prod.outlook.com 2026-11-20T21:37:17.519Z 08DF465DC36FD6DA]
+Remote-MTA: dns;SG1PEPF000082E7.mail.protection.outlook.com
+
+Final-Recipient: rfc822;third.person@forward-target.example
+Action: failed
+Status: 5.4.1
+Diagnostic-Code: smtp;550 5.4.1 Recipient address rejected: Access denied. For more information see https://aka.ms/EXOSmtpErrors [SG1PEPF000082E7.apcprd02.prod.outlook.com 2026-11-20T21:37:17.526Z 08DF465DC36FD6DA]
+Remote-MTA: dns;SG1PEPF000082E7.mail.protection.outlook.com
+
+Final-Recipient: rfc822;fourth.person@forward-target.example
+Action: failed
+Status: 5.4.1
+Diagnostic-Code: smtp;550 5.4.1 Recipient address rejected: Access denied. For more information see https://aka.ms/EXOSmtpErrors [SG1PEPF000082E7.apcprd02.prod.outlook.com 2026-11-20T21:37:17.531Z 08DF465DC36FD6DA]
+Remote-MTA: dns;SG1PEPF000082E7.mail.protection.outlook.com
+
+Final-Recipient: rfc822;fifth.person@forward-target.example
+Action: failed
+Status: 5.4.1
+Diagnostic-Code: smtp;550 5.4.1 Recipient address rejected: Access denied. For more information see https://aka.ms/EXOSmtpErrors [SG1PEPF000082E7.apcprd02.prod.outlook.com 2026-11-20T21:37:17.537Z 08DF465DC36FD6DA]
+Remote-MTA: dns;SG1PEPF000082E7.mail.protection.outlook.com
+
+Final-Recipient: rfc822;sixth.person@forward-target.example
+Action: failed
+Status: 5.4.1
+Diagnostic-Code: smtp;550 5.4.1 Recipient address rejected: Access denied. For more information see https://aka.ms/EXOSmtpErrors [SG1PEPF000082E7.apcprd02.prod.outlook.com 2026-11-20T21:37:17.543Z 08DF465DC36FD6DA]
+Remote-MTA: dns;SG1PEPF000082E7.mail.protection.outlook.com
+
+
+--93fe0732-fed9-4b74-8b2a-e0396a3d6f1e
+Content-Type: text/rfc822-headers
+
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=none;
+ b=viia6cuXajwmviYnA6eRVB4RfQIRtRPxMD/2G+yrEtIbjL6gMAX69fCzfCm9uqAANtpPr6AIGXIUtz82+GyWq5JDvqr8fCfFSmOSpuEtnv4enmUSYn2phzsuatk4sRiuGjGTx6PLhqm7lbP9AhUvsFMdGId8WWQcMvCM/2cyQi0N685SovVSgG2EOgDUVpOJoY20yQ1mVAtlbgbHwrD9IMDyBxL+Cx33qNnISujjmwuaycJ1OQKME3VtWIpOIJROi6KQZMuuvVUXhHOpgvWjbY7135vKXGZa9Irzfj86PYS5KNRZaYOmimZdjf9K67QnkRRqMhox5w0TDiDQmiY7ow==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector10001;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=+eN8HUuad8ejczxVyPEX4Yb+QsPkRJOK4e5GWChId68=;
+ b=sv6Vvd6bszWbANssleJxwW8Qpknx0xZCY1wvheZjaQ/AyVg7SPJ6g1fhPPUzG06pkqcdGFrWTqpZTymCFFhIrKJe9t7SdHfDmrhOk6KrIkRKIGY1Z8FLBc9ejvuStR4kpRp/3+RE5KozGcpKTFi3jPdeFI6KT7k574u5LR/S9JR4ZSb+OkWLu/2EXYVkBPSggvBOsQq1kHdup0GMeJZRsLqDoYl2QHGUhbsyAP6IlCrqNRiJ/hnzvMatiD6zZ8Rp5TFoEQBRfE381C2uZEzQQdHDBhr2nTbIsjHAECxzrxaMlQHnm2914oohO72g2rUCk8TPnlCNxxrdxX+r5bbNhw==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass (sender ip is
+ 109.199.115.133) smtp.rcpttodomain=isp-one.example
+ smtp.mailfrom=mail.phishing.support; dmarc=pass (p=none sp=none pct=100)
+ action=none header.from=phishing.support; dkim=pass (signature was verified)
+ header.d=phishing.support; arc=none (0)
+Received: from MA5P287CA0297.INDP287.PROD.OUTLOOK.COM (2603:1096:a01:21e::12)
+ by HY0PR01MB711740.INDPRD01.PROD.OUTLOOK.COM (2603:1096:1c0:4::23) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.21.639.12; Fri, 20 Nov
+ 2026 21:37:13 +0000
+Received: from MA1PEPF00007262.INDPRD01.PROD.OUTLOOK.COM
+ (2603:1096:a01:21e:cafe::9d) by MA5P287CA0297.outlook.office365.com
+ (2603:1096:a01:21e::12) with Microsoft SMTP Server (version=TLS1_3,
+ cipher=TLS_AES_256_GCM_SHA384) id 15.21.639.12 via Frontend Transport; Fri,
+ 20 Nov 2026 21:37:12 +0000
+Authentication-Results: mx.microsoft.com 1; spf=pass (sender IP is
+ 109.199.115.133) smtp.mailfrom=mail.phishing.support; dkim=pass (signature
+ was verified) header.d=phishing.support;dmarc=pass action=none
+ header.from=phishing.support;
+Received-SPF: Pass (protection.outlook.com: domain of mail.phishing.support
+ designates 109.199.115.133 as permitted sender)
+ receiver=protection.outlook.com; client-ip=109.199.115.133;
+ helo=mail.phishing.support; pr=C
+Received: from mail.phishing.support (109.199.115.133) by
+ MA1PEPF00007262.mail.protection.outlook.com (10.167.242.4) with Microsoft
+ SMTP Server (version=TLS1_3, cipher=TLS_AES_256_GCM_SHA384) id 15.21.639.5
+ via Frontend Transport; Fri, 20 Nov 2026 21:37:12 +0000
+Received: from [127.0.0.1] (phishingsupport-frontend-lqxwh3.1.ngladkvxz9e9wy0kw7vfol755.dokploy-network [10.0.1.99])
+	by mail.phishing.support (Postfix) with ESMTPA id 6CA39132000B
+	for <ip.abuse@isp-one.example>; Fri, 20 Nov 2026 21:37:10 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=phishing.support;
+	s=ps1; t=1795210630; h=from:from:reply-to:reply-to:subject:subject:date:date:
+	 message-id:message-id:to:to:cc:mime-version:mime-version:
+	 content-type:content-type; bh=+eN8HUuad8ejczxVyPEX4Yb+QsPkRJOK4e5GWChId68=;
+	b=peJZvx6XYq3bpXyLpHJTgHX6LOGCEYugFaBy1Y1+Pzd2ZXtIudvmJH2PdGCxtVFKjPPIAd
+	9mWbATDPkBi68eNAZAbgRkpX7rO/3LjVatSzmW54Kw/iMAgZ1GyA4/Pj9spwSp7Hb4GIOR
+	ZUloqGP1LirvpUhaqWwOKhdC5xlOKaz6OmvJ/klbQKu7sC/xLIoOfvYvf3elPRSy9H0JY9
+	0ro5fXC+DVjnSsXEIB6Z6l5Sf162FauZ4/Er4SbCsVGiHeWXC/k3QSTb1FJnJYf1gscvX1
+	Tqy6m03PHWw3RIQ6GcAZaKYs4ioZUKEP4FOsTakRSnYTErjYBo5mWWq7m41itw==
+X-Abuse-Report-Correlation: email-run:100000000000000001
+From: support@phishing.support
+To: ip.abuse@isp-one.example
+Reply-To: abuse-7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a@phishing.support
+Subject: [Phishing Support] [PS-2280014017ad] Abuse report for
+ phish-target.example
+Message-ID:
+ <abuse-5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e@phishing.support>
+Date: Fri, 20 Nov 2026 21:37:10 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="--_NmP-6beff961ac73278b-Part_1"
+Return-Path: bounces@mail.phishing.support
+X-EOPAttributedMessage: 0
+X-EOPTenantAttributedMessage: c120ec3b-2ab7-478b-8e04-3be3184eaa5f:0
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: MA1PEPF00007262:EE_|HY0PR01MB711740:EE_
+X-MS-Office365-Filtering-Correlation-Id: 159df4b9-49ef-46b9-3fb6-08df474e702b
+X-LD-Processed: c120ec3b-2ab7-478b-8e04-3be3184eaa5f,ExtAddr
+X-MS-Exchange-AtpMessageProperties: SA
+X-MS-Exchange-SenderADCheck: 0
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam:
+	BCL:0;ARA:13230040|704162011799003|376014|48200799018|6049299003|61400799027|9140799003|261026121527099003|10067099003|11063799006|56012099006|261021133027099003|261022105027099003|261102123227099003|261022075727099003|261021123027099003|261022115727099003|261021130227099003|261022113327099003|261009223027099003|5063699009|261021135927099003|261026135527099003|261028144727099003|261021121427099003|261026140227099003|261026130827099003|55112099003|16102099003|18002099003|4053099003;
+X-Microsoft-Antispam-Message-Info:
+	Vro+BgVjxfyHoGAvwHUc7F+EC0D6rFisAfRhUEd+WzXefI+88JHdvU+2e3qkWAxWTaaLqxJmsNGFNZKiPs8+E4n2dJaT6BEI+axZsGGuYp388VsxJ+96ua49nGz/wC7mOrcuS8lniBSUWdWxEx6Ceop5pZOS3rCFH8I8FMDh/zBybfdUFFtuo4vLEU9iO4D2snl/3ZMf+izekul+QpFp2Zt6FQaekHFcxVZd3M2XH5VhUiJV5EqSjBKAe5hAT4g2NOz0bZPXjPLVoBR2AtyeeE5Ud5sAJy7wonM15yZ1ZuOGtOKDwsf+y+zsyKxAg7/tVH2LxavKNpbnn5qg3js7GX69rF9G8vicKQzQlDKx/ZH1tqRBzQ5e8koHOqOuGY1DvNTgoZGtb9fK/Bo5Da+20yx4tJ7r6PH1Nk4m/bamMTES/h0tMAwi+dQV4XtQkCMEKKBkKleWtIyDQ9vTS94AuRzeQW90CiEaBy0ZnNzlqgHF64pCy0uuL/CqSZeWOyisAZ6Dp+DHXwTngr1F92l2tOoHrPb80cTTlMVw3ktDBvr5XexIA2YSyfZlBKg3CDccwqB6v/fn9oEasD9JssABKra0+sz4IZOzGfl+z/dFiS1wxHWthtAn0AkchRzTAor92aEUHNAnTibwED4447AAlhQFEMyOF+tZjii0zslIWLyX7bjMc2zk30n8TUWWTI5ggv5gMyHuOdj1UYCSexkXw6l6gowj8ejK7XQYqsC9Z+MLN+V2vLdjBWwDgDpZtDFT+4+gy/b3Y0jxUwXQXQfqinjWtBBn1j4xxPEt5q2X5jo2yJY4RlU7K5FBSKznMsBqtiHe+ZiyfgWZOZrboo3P9A5bQklGMy6GtiDAq7ScRJggCUThxaLngOQRgrfw8FAy8EDp/X0vTvYsx+ImA/Q8PQ==
+X-Forefront-Antispam-Report:
+	CIP:109.199.115.133;CTRY:FR;LANG:en;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:mail.phishing.support;PTR:mail.phishing.support;CAT:NONE;SFS:(13230040)(704162011799003)(376014)(48200799018)(6049299003)(61400799027)(9140799003)(261026121527099003)(10067099003)(11063799006)(56012099006)(261021133027099003)(261022105027099003)(261102123227099003)(261022075727099003)(261021123027099003)(261022115727099003)(261021130227099003)(261022113327099003)(261009223027099003)(5063699009)(261021135927099003)(261026135527099003)(261028144727099003)(261021121427099003)(261026140227099003)(261026130827099003)(55112099003)(16102099003)(18002099003)(4053099003);DIR:OUT;SFP:1102;
+X-MS-Exchange-AntiSpam-MessageData-ChunkCount: 1
+X-MS-Exchange-AntiSpam-MessageData-0:
+	wSATeGu+3FYdlWEjqt3b1SrNWU6L5AGunf0O2RAPVp0yxZExYomOOJdiBH729DHOe2KVlumY9N+sfqu03JTcAVDq5eW0YaEcFELkm0GvF1VzEGJ2K2ZI3k22gAaHKIm8jgxIU5D6LLIoaiJofxx9Y57L1DTdHGumtwv7A7YKBxu7FZtlph6pW4TxyIDxrfdkwfHCKd8UCIhL1QG3gs8ibDJYLEaeYJqBY3VPNCDL+Yf2P3iBSns16xq8v+E0VdXWcLwqlYIxJwwC2UHLTo0TFACSp5qT5l2Zz5YZtYIdolspWoVxiBmZHd4OnfvIHOzhIPXEIjw68lplNeu7VlcQ3ESN8iASjjS3CVtbtljoNm8uhd7PT2Luiq1t7OrtEX8hXocjJEsX1eqNmXKMT4RXe4XDVEqn4jR43Pah5aqfYopND9ziFUwom9mIHTg4/l20
+X-ExternalRecipientOutboundConnectors: c120ec3b-2ab7-478b-8e04-3be3184eaa5f
+X-Auto-Response-Suppress: DR, OOF, AutoReply
+X-OriginatorOrg: ispone.onmicrosoft.com
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 20 Nov 2026 21:37:12.0943
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 159df4b9-49ef-46b9-3fb6-08df474e702b
+X-MS-Exchange-CrossTenant-Id: c120ec3b-2ab7-478b-8e04-3be3184eaa5f
+X-MS-Exchange-CrossTenant-AuthSource:
+	MA1PEPF00007262.INDPRD01.PROD.OUTLOOK.COM
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: Internet
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: HY0PR01MB711740
+
+--93fe0732-fed9-4b74-8b2a-e0396a3d6f1e--

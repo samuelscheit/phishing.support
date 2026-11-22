@@ -405,8 +405,8 @@ Each abuse email uses `SMTP_FROM` as its visible sender and a new opaque `Reply-
 
 Every abuse email subject carries a case tag such as `[PS-50a7a280104d]`, because most helpdesks answer from their own address without `In-Reply-To`. The mailbox listener watches every folder and routes each message exactly once, strongest evidence first:
 
-1. A message addressed to one of our generated `Reply-To` identities, or whose `In-Reply-To`/`References` names one of our outbound `Message-ID`s, is stored on that route.
-2. A delivery-status notification is stored on the route whose outbound `Message-ID` it returned. A permanent rejection marks the email undeliverable; a temporary one resends it with the same identity.
+1. A delivery report (an RFC 3464 notification or an MTA's plain-text bounce, `src/lib/abuse/mail/delivery_report.ts`) is stored as a bounce on the route whose outbound `Message-ID` it returns or threads to; Exchange threads its non-delivery reports like replies. A permanent failure marks the email undeliverable and moves the report on to the target's next published abuse contact; a temporary one resends it with the same identity. A notice about a send that already failed changes nothing. The reply classifier never decides a bounce: to a model, a no-reply autoresponder reads like one.
+2. A message addressed to one of our generated `Reply-To` identities, or whose `In-Reply-To`/`References` names one of our outbound `Message-ID`s, is stored on that route.
 3. An authenticated notification from a direct provider (Netcraft) is stored on the route whose receipt ID it names. Cloudflare's correspondence is read from its submitted-report API instead (hourly for 30 days after submission), so its emails are not attached twice.
 4. A reply whose sender iCloud authenticated (DMARC, or an aligned DKIM/SPF pass) and which we emailed is stored on that sender's route when it names the case tag or case URL, or else repeats our exact subject.
 5. Otherwise, mail to `IMAP_LISTEN_ADDRESS` becomes an email submission (already-read intake mail is skipped).

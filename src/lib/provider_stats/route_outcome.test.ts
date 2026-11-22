@@ -134,8 +134,6 @@ describe("routeOutcomeOf", () => {
 		const outcome = routeOutcomeOf(facts({ status: "delivery_failed", messages: [sent(0), reply(0.01, "bounce", "bounce")] }));
 		expect(outcome).toMatchObject({ verdict: "bounced", sentAt: at(0), inbound: 1 });
 		expect(outcome.firstReplyAt).toBeUndefined();
-		// A bounce classified on a reply is no reply either.
-		expect(routeOutcomeOf(facts({ messages: [sent(0), reply(0.01, "bounce")] })).verdict).toBe("bounced");
 	});
 
 	test("a failed send is not the report, and our own failures are not the provider's", () => {

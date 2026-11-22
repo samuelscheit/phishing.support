@@ -6,6 +6,7 @@ import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { AbuseRepository } from "../repository";
 import { contactRoute } from "../resolver/routes";
 import { abuseCaseTag } from "../mail/correlation";
+import { deliveryReport } from "../mail/delivery_report";
 import { caseReferenceCandidates } from "../../referral/case_reference";
 import { queueRelayResend } from "./email";
 import { isAuthorityRoute, isPreservationRoute } from "../../referral/routes";
@@ -25,44 +26,7 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 		return;
 	}
 	if (message.kind === "bounce") {
-		const status = message.textBody?.match(/\bStatus:\s*([245])\.\d{1,3}\.\d{1,3}/i)?.[1];
-		const failureReason = message.textBody?.match(/\bDiagnostic-Code:\s*([^\n]+)/i)?.[1]?.trim().slice(0, 1_000) ?? "The recipient's mail server rejected the report.";
-		if (isRelayRefusal(message.textBody ?? "")) {
-			// Our relay, not the provider, refused the report: its mailbox is not dead, so no
-			// other contact is tried. The relay gets one more attempt (queueRelayResend).
-			await AbuseRepository.setMailClassification(message.id, "relay_refused", "relay_refusal");
-			await settleBounce(message.id, route, { retry: false, reason: "relay_refused", failureReason });
-			const settled = await AbuseRepository.getRoute(route.id);
-			if (settled?.status === "delivery_failed") await queueRelayResend(settled);
-			return;
-		}
-		if (status === "5" && isAttachmentRefusal(message.textBody ?? "")) {
-			// The server refused the attached phishing mail, not the mailbox: the report goes
-			// once more with it attached as text. A second such refusal is the mailbox's.
-			const earlier = (await AbuseRepository.listMailForReport(route.reportId))
-				.some((other) => other.routeId === route.id && other.id !== message.id && other.disposition === "attachment_refusal");
-			if (!earlier) {
-				await AbuseRepository.setMailClassification(message.id, "bounce", "attachment_refusal");
-				if (await settleBounce(message.id, route, { retry: false, failureReason })) {
-					await AbuseRepository.enqueueJobOnce({
-						jobType: "send_email",
-						reportId: route.reportId,
-						routeId: route.id,
-						payload: { retryReason: "attachment_refused" },
-						dedupeKey: `attachment-resend:${route.id.toString()}`,
-					});
-				}
-				return;
-			}
-		}
-		await AbuseRepository.setMailClassification(message.id, "bounce", "delivery_status_notification");
-		const settled = await settleBounce(message.id, route, {
-			retry: status === "4",
-			failureReason,
-		});
-		// A permanent rejection (5.x.x) means the mailbox will never accept the
-		// report; move on to the target's next published abuse contact.
-		if (settled && status !== "4") await routeToNextContact(route.id);
+		await settleDeliveryFailure(message, route);
 		return;
 	}
 	if (isAuthorityRoute(route) || isPreservationRoute(route)) {
@@ -117,9 +81,50 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 	} else if (result.classification === "rejected") {
 		await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: "awaiting_provider_reply", to: "provider_rejected" });
 	}
-	else if (result.classification === "bounce") {
-		await settleBounce(message.id, route);
+}
+
+/**
+ * A delivery report for the route's mail, which ingestion recognised by its
+ * structure (mail/delivery_report.ts), never by the reply classifier: an
+ * autoresponder reads like a bounce to a model but proves the mailbox works.
+ */
+async function settleDeliveryFailure(message: AbuseMailMessage, route: AbuseProviderRoute): Promise<void> {
+	const text = message.textBody ?? "";
+	const { outcome, diagnostic } = deliveryReport(text);
+	const failureReason = diagnostic ?? "The recipient's mail server rejected the report.";
+	if (isRelayRefusal(text)) {
+		// Our relay, not the provider, refused the report: its mailbox is not dead, so no
+		// other contact is tried. The relay gets one more attempt (queueRelayResend).
+		await AbuseRepository.setMailClassification(message.id, "relay_refused", "relay_refusal");
+		await settleBounce(message.id, route, { retry: false, reason: "relay_refused", failureReason });
+		const settled = await AbuseRepository.getRoute(route.id);
+		if (settled?.status === "delivery_failed") await queueRelayResend(settled);
+		return;
 	}
+	if (outcome === "permanent" && isAttachmentRefusal(text)) {
+		// The server refused the attached phishing mail, not the mailbox: the report goes
+		// once more with it attached as text. A second such refusal is the mailbox's.
+		const earlier = (await AbuseRepository.listMailForReport(route.reportId))
+			.some((other) => other.routeId === route.id && other.id !== message.id && other.disposition === "attachment_refusal");
+		if (!earlier) {
+			await AbuseRepository.setMailClassification(message.id, "bounce", "attachment_refusal");
+			if (await settleBounce(message.id, route, { retry: false, failureReason }) === "settled") {
+				await AbuseRepository.enqueueJobOnce({
+					jobType: "send_email",
+					reportId: route.reportId,
+					routeId: route.id,
+					payload: { retryReason: "attachment_refused" },
+					dedupeKey: `attachment-resend:${route.id.toString()}`,
+				});
+			}
+			return;
+		}
+	}
+	await AbuseRepository.setMailClassification(message.id, "bounce", "delivery_status_notification");
+	const settlement = await settleBounce(message.id, route, { retry: outcome === "temporary", failureReason });
+	// A permanent failure means the mailbox will never accept the report; move
+	// on to the target's next published abuse contact.
+	if (outcome === "permanent" && settlement !== "unchanged") await routeToNextContact(route.id);
 }
 
 /**
@@ -155,20 +160,26 @@ async function classifyReferralReply(message: AbuseMailMessage, route: AbuseProv
  * moves the run/route into its normal waiting state. Correlate and settle all
  * three records atomically so a late sender completion cannot restore
  * `awaiting_provider_reply` over the known delivery failure.
+ *
+ * `settled`: the bounced send failed. `uncorrelated`: the bounce names no
+ * send of the route, which it ends instead. `unchanged`: nothing changed,
+ * above all for a notice about a send that already failed (a second notice
+ * for it, or its classification replayed after a worker restart) while the
+ * route has moved on to a resend.
  */
-async function settleBounce(messageId: bigint, route: { id: bigint }, options: { retry?: boolean; failureReason?: string; reason?: "relay_refused" } = {}): Promise<boolean> {
+async function settleBounce(messageId: bigint, route: { id: bigint }, options: { retry: boolean; failureReason: string; reason?: "relay_refused" }): Promise<"settled" | "uncorrelated" | "unchanged"> {
 	const bounced = await AbuseRepository.settleCorrelatedEmailBounce({ inboundMessageId: messageId, ...options });
-	if (!bounced.settled) {
-		// A refusal by our own relay is no answer of the provider's, correlated or not.
-		const relay = options.reason === "relay_refused";
-		await AbuseRepository.transitionRouteStatus({
-			routeId: route.id,
-			from: "awaiting_provider_reply",
-			to: relay ? "delivery_failed" : "provider_rejected",
-			data: { reason: relay ? "uncorrelated_relay_refusal" : "uncorrelated_provider_bounce" },
-		});
-	}
-	return bounced.settled;
+	if (bounced.settled) return "settled";
+	if (bounced.stale) return "unchanged";
+	// A refusal by our own relay is no answer of the provider's, correlated or not.
+	const relay = options.reason === "relay_refused";
+	const ended = await AbuseRepository.transitionRouteStatus({
+		routeId: route.id,
+		from: "awaiting_provider_reply",
+		to: relay ? "delivery_failed" : "provider_rejected",
+		data: { reason: relay ? "uncorrelated_relay_refusal" : "uncorrelated_provider_bounce" },
+	});
+	return ended ? "uncorrelated" : "unchanged";
 }
 
 type FallbackContact = { email: string; source: string; entityName?: string };

@@ -1,0 +1,457 @@
+Return-path: <abuse@web.com>
+Original-recipient: rfc822;support@phishing.support
+Received: from p00-icloudmta-smtpin-us-west-1a-60-percent-14 by p142-mailgateway-smtp-df96b66fd-sw222 (mailgateway 2640B125)
+	with SMTP id 8ae392d5-c808-423d-abec-e9a37077a745 
+	for <support@phishing.support>; Tue, 20 Oct 2026 14:13:17 GMT
+X-Apple-MoveToFolder: phishing.support 
+X-Apple-Action: MOVE_TO_FOLDER/phishing.support
+X-Apple-UUID: 8ae392d5-c808-423d-abec-e9a37077a745
+Received: from BN8PR05CU002.outbound.protection.outlook.com (mail-eastus2azon11021122.outbound.protection.outlook.com [52.101.57.122])
+	by p00-icloudmta-smtpin-us-west-1a-60-percent-14 (Postfix) with ESMTPS id 75920180010F
+	for <support@phishing.support>; Tue, 20 Oct 2026 14:13:09 +0000 (UTC)
+X-ICL-RepId: 01a159a8-b1aa-718b-a4d0-4fb106091d62
+X-ICL-Info: GAtbRVYDBVFFSlVFSgMFUVUKE0oWX1gHVQoPB0UFBExESVdZTQcYU0dLRhIcDVcAAAoDNw9VVEwWFgtXHlQLABkMAx8XQ0JMFhYLVwpTCxEACRYYCkR2Eh0QFR8RXlFMBgwWBxdCQkIdHAoYRXJ4WiUrVkI7ZQZSR1cJAgxSWRcbHUgHCl9CBxYNDxgWHlkXARUJGBMeVQ0YWRYDCg1bAxwVSxIZQ0IXBksHDRdeB1NFS1dGSgIYDQANBBgNXlJMBQsJAx1TQgsaF0gYDURaDRoSSBQXXRYGEUQEGw1VXg0GDUgUF10WDxwdW0tOAVIDQhtTFhpRA1BBGlMWGgMOBkZNAxNLVFdTTBpTQTh0ZVclK1ZANXIHU01BXlkWUVsSBx1WQFZARA0RVwkCDFxZDR5XBRgVDg==
+X-ICL-Score: 2.33303322333
+Authentication-Results: bimi.icloud.com; bimi=skipped reason="insufficient dmarc"
+X-ARC-Info: policy=pass; arc=pass; id=mx.microsoft.com 1; r1=1; r2=1
+Authentication-Results: arc.icloud.com; arc=pass
+Authentication-Results: dmarc.icloud.com; dmarc=pass header.from=bluehost.com
+X-DMARC-Policy: v=DMARC1; p=none; pct=100; rua=mailto:re+r0nph73obnf@dmarc.postmarkapp.com; sp=none; aspf=r;
+X-DMARC-Info: pass=pass; dmarc-policy=none; s=r0; d=r1; pdomain=bluehost.com
+Authentication-Results: dkim-verifier.icloud.com; dkim=pass header.d=bluehost.com header.i=@bluehost.com header.b=ytjVf8I0
+Received-SPF: pass (spf.icloud.com: domain of abuse@web.com designates 52.101.57.122 as permitted sender) receiver=spf.icloud.com; client-ip=52.101.57.122; helo=BN8PR05CU002.outbound.protection.outlook.com; envelope-from=abuse@web.com
+Authentication-Results: spf.icloud.com; spf=pass (spf.icloud.com: domain of abuse@web.com designates 52.101.57.122 as permitted sender) smtp.mailfrom=abuse@web.com
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=none;
+ b=uUbwhW6AjqUTWLEppwKV5b2ulK2Qq0ZItfBlriuEeIfX0Zg1kFQsknD5cN+Yl5P3FzD4hQG7Lz3nRAA72SXLxI4UAOitUPwFDfJvN5arUk+5AkLO/aAoXfaWpMf0qAeFLtiAhfdOSDm6sUkM01kGLy7LSOvU4wvYPEzfvg9bUQ5RQCaoK6ZeWYeArNxvJk2D4Y3c3Na0Ozt3sWa51qegmiTmfZug8EpORE70JZCAumKyrMVv40Cl2OqmR+YeKWDr7SA2t3irv2CmsdS6tt9d5wsmM61c20FINuAsOwE9cFwVgfD+vfqUhE2uz7REaOR9XO3cKa5ZhT1wDXjauBA8og==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector10001;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=8h5MOuoOOb8ZLZF4x9etaXTZmNhZsQaBQ4ryHi1Uc5o=;
+ b=PICeZ9OCvWoENMOnn4iS2BvYsi/SuM/7rf+UU30pMQeG4FvEPrpg+rTW749fcjwHalDtjUwBwls2Y8RKIJHObZ801ZsE5IwwJzbEDrDuGpluAp0qVH1sJBgO85t1Ha/STYgpMLTtX94NLGrVsLWVMiMvFe3VLhTVS3uk9shFlLAQNjzcvgFWxxCy5bKa2c9WJrNvrdjGnnpcDXjzYGxUvXDHr/sYixMV03GgeFuaTvf5w/moYuvZPieIUOmR9Np3uULjMSi79JuhmBPU0EEfqXIWiwTL6ua5s8o5SUAV6DeNS9h2OY3Nd+mhB1ySSNLrLZvq+pLb4FeqbzjJ8D7/IQ==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass
+ smtp.mailfrom=web.com; dmarc=pass action=none header.from=bluehost.com;
+ dkim=pass header.d=bluehost.com; arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=bluehost.com;
+ s=selector1;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=8h5MOuoOOb8ZLZF4x9etaXTZmNhZsQaBQ4ryHi1Uc5o=;
+ b=ytjVf8I065PqnH5X9GWNgpgQXboiLvKGZp9p4gwSMeWYVwE6twlPsT1ZjGFjiZ6fTavsTVTzNm0JCzYOB6B0LYSoEg3+kCEz8PXSZQQxHOz0PBVtGFfjhF28p1UzUIjHlFhQ+/4F5UPTuKMgKu98Kj6+AkAn7/bxWjW6gm2EIwkBy2hyKT1h8JTcMZ7tnGcQkv1hR04Bh+ACDVxZRyA55Oh8BmOKibECfgE8G+1x+YEmQh5HYqlRWLCNEpT668ZeSryv0bSPup+zuxsA+J4PFDdsF3K9ei022CEvv1kVSi7EYjSs3QM7YsyxhMDJXKVPhF4+g/SEZAyMvcgpYQzjPg==
+Received: from DS5PR07MB11888.namprd07.prod.outlook.com (2603:10b6:8:340::14)
+ by PH0PR07MB9385.namprd07.prod.outlook.com (2603:10b6:510:16c::5) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.21.546.15; Tue, 20 Oct
+ 2026 14:13:04 +0000
+Received: from DS5PR07MB11888.namprd07.prod.outlook.com ([::1]) by
+ DS5PR07MB11888.namprd07.prod.outlook.com ([fe80::a7f3:9755:2177:f78f%3]) with
+ Microsoft SMTP Server id 15.21.0546.012; Tue, 20 Oct 2026 14:13:04 +0000
+From: Abuse <abuse@bluehost.com>
+To: "support@phishing.support" <support@phishing.support>
+Subject: RE: [Phishing Support] Abuse report for oxwitik.com
+Thread-Topic: [Phishing Support] Abuse report for oxwitik.com
+Thread-Index: AQHdYJ0fYdxMd7jUMkKGBgGq74GrkLcGeQR7
+Date: Tue, 20 Oct 2026 14:13:04 +0000
+Message-ID:
+ <61da7b5aba524c5ab38d34ed3da19c56@DS5PR07MB11888.namprd07.prod.outlook.com>
+References:
+ <abuse-5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e@phishing.support>
+In-Reply-To:
+ <abuse-15ea790e030efdf3fa05f706d7d5f3dc55293f9a8e38cd3e@phishing.support>
+X-MS-Has-Attach:
+X-Auto-Response-Suppress: All
+X-MS-Exchange-Inbox-Rules-Loop: abuse@bluehost.com
+X-MS-TNEF-Correlator:
+authentication-results: mx.microsoft.com 1; dkim=none (message not signed)
+ header.d=none;dmarc=none action=none header.from=bluehost.com;
+x-ms-exchange-parent-message-id:
+ <abuse-15ea790e030efdf3fa05f706d7d5f3dc55293f9a8e38cd3e@phishing.support>
+auto-submitted: auto-generated
+x-ms-exchange-generated-message-source: Mailbox Rules Agent
+x-ms-publictraffictype: Email
+x-ms-traffictypediagnostic: DS5PR07MB11888:EE_|PH0PR07MB9385:EE_
+x-ms-office365-filtering-correlation-id: 80611bfa-2693-4a80-89e7-08df2eb441f5
+x-ms-exchange-atpmessageproperties: SA
+x-ms-exchange-senderadcheck: 1
+x-ms-exchange-antispam-relay: 0
+x-microsoft-antispam:
+ BCL:0;ARA:13230040|23010399003|1800799024|10070799003|376014|366016|55112099003|5133699003|18002099003|22082099003|10067099003|8096899003|3023799007|12063799003|13003099007|11063799006|261009223027099003|56012099006;
+x-microsoft-antispam-message-info:
+ XZ3Obvz8okQbGncOCgtyBtLv+IgDdz9ZM9+qAIVUTlqSfHkB+oICw00mm2AEUR/rj73JjxFKEm9VIM42SvaxnatBF6IGM1pJ82r51iZ748boOyvKf+R0Wbfp1Ha2d0Vgsym+7L7FBowFZXDdq/pPZRLFDknjkWRex/2+AUmQzOpJsOpIevhdZSeFw6JMnu8kwel1UJlzW8yoWiAtnlUDkCrth8AkbO49Vc6KGqEOHhvt5kl9Tojdidenw0S9s46aydb2Th+bKMeZaveyY7Q0V0TwWUMgjSN/Kqv/KQZHcRM8tlsnH2nWN8jgl7EFjMtdO2pXafz+nWGQQ8Xk1fGWW6/QNzm7Idn1n63huAvlIAlSIElBxiWb3ph9CXea/+RLTVux0d2KPco8MctSoxsy1Epf+r4gV+kdHQVSYMfKmS4HTQnRSQzCbOcjl/LBrUaMsMh/7BXI9JfUEUf+wg6vvXlAFqsfTJEzDZXUwg5DizcccyFwZZeddxIfshHDPTTw1GzrNivkNg3B9DLOp925rgXYOKFhBjX3nCCeYLAAV//+8eq88BlzZJmaA9QXaOLD0eZxrOliEjE/sqPXQmv0xVlUyYPObFThJ2TTHMmO4pDRXjg5OEerUd6LNSwbkg56
+x-forefront-antispam-report:
+ CIP:255.255.255.255;CTRY:;LANG:en;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:DS5PR07MB11888.namprd07.prod.outlook.com;PTR:;CAT:NONE;SFS:(13230040)(23010399003)(1800799024)(10070799003)(376014)(366016)(55112099003)(5133699003)(18002099003)(22082099003)(10067099003)(8096899003)(3023799007)(12063799003)(13003099007)(11063799006)(261009223027099003)(56012099006);DIR:OUT;SFP:1102;
+x-ms-exchange-antispam-messagedata-chunkcount: 1
+x-ms-exchange-antispam-messagedata-0:
+ Qgoit9d2tjQstCiH5eJDZw/1ZOD5Kh4gEw4aF2Oh+ua9s8r/l7UIVZQ09+IrNRdATuFgFT111T9mpL7qhGtv9R0CQMIUVP3bD5JcdFOUMrpp6VXcGeQ2ejJUepXS65EdeSIVHhRA6khwYdI5ezYi5dvKwkFaa+I/JlnEjeByBoo1YqyhD+U/YDOFndnmVSar6GxrvqUo4WmagIQxi/cwrMtJ8ClPL+WFsX+PMmtXNezQyQ8F46ghooS5j2jujzxfWmLD972uad4waqZ6ZgszRE0o+8SskgG07cHU14SUVb9MQNlkSK3TUeyNvb/FfEXshpxVwcjER6cu/LZhURr7zhnxCTCeaZIfAMaVhtYpdU5/kNfhF+NQk914ShKVWuOMUvcbj9dSQtn9Bn5ejBAO0sR+LWljYC71rXl+cziKYaPm1OMit64BKN1hfoutxZ+N
+Content-Type: multipart/alternative;
+	boundary="_000_61da7b5aba524c5ab38d34ed3da19c56DS5PR07MB11888namprd07p_"
+MIME-Version: 1.0
+X-OriginatorOrg: bluehost.com
+X-MS-Exchange-CrossTenant-AuthAs: Internal
+X-MS-Exchange-CrossTenant-AuthSource: DS5PR07MB11888.namprd07.prod.outlook.com
+X-MS-Exchange-CrossTenant-Network-Message-Id: 80611bfa-2693-4a80-89e7-08df2eb441f5
+X-MS-Exchange-CrossTenant-originalarrivaltime: 20 Oct 2026 14:13:04.5222
+ (UTC)
+X-MS-Exchange-CrossTenant-fromentityheader: Hosted
+X-MS-Exchange-CrossTenant-id: d3008fd4-0d20-418b-bf30-4e70d910c727
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: PH0PR07MB9385
+X-MANTSH: 1TFkXGBoRCllEF20fSXpeGxobekETEQpZTRdkRURPEQpZSRcacRoQGncGGnEdGxA
+ dG3cGGBoGGhEKWV4XbGx5EQpDThd4Y0FIQEtteUgcE31wBxoHWk0fYVpefUxPSUBCZHNBWREKW
+ FwXGQQaBB8SBRsaGgQSGAQeGAQYExAbHhofGhEKXlkXQ254X3kRCk1cFxsaEhEKTFoXeG9NTWs
+ RCkVZF29rEQpMXxd6BQUFBQUFBQUFbxEKTEYXb01rY2JNaxEKQ1oXHxgEGxobBB8dBBsYGBEKQ
+ l4XGxEKRF4XGBEKQlwXGxEKXk4XGxEKQksXYnhfXUNkHUsbbH4RCkJJF2J4X11DZB1LG2x+EQp
+ CRRdreF9BSHl6HltDZhEKQk4XYnhfXUNkHUsbbH4RCkJMF21FG1gBcEFZYUBhEQpCbBdtbUdkY
+ E0fHGduGREKQkAXbUhecH9ZQmJzcB8RCkJYF2xlQB5EZEhEeRlnEQpNXhcbEQpaWBcbEQpwaBd
+ oZmJHYV1/Rn0BHhAZGhEKcGgXaXxCcGRJX19IWloQGRoRCnBoF2xiBVscSGhZTkwZEBkaEQpwa
+ BduT1lOY0FiZGdzexAZGhEKcGgXbUdvW0gBe1hYb2sQGRoRCnBoF2MeTX8YSWQFQUdCEBkaEQp
+ waBdsSWdZeUFEXWh5YxAZGhEKcGgXaHl9R2l8flJjHh8QGRoRCnB/F2FFSHlGWVodGW5nEBkaE
+ QpwXxdjf39IXkdtfUlyfBAZGhEKcH0Xb1h4bUFsXE1GREYQGRoRCnB/F2JFWh9TfFNzW1B5EB0
+ ZEQpwXxdhUxNHT01OaBNNRBAZGhEKcH0XYGBoH25mAUh+BR8QGRoRCnB9F29YeG1BbFxNRkRGE
+ BkaEQpwfRdvWHhtQWxcTUZERhAZGhEKcH0XY39/SF5HbX1JcnwQGRoRCnB9F2BgaB9uZgFIfgU
+ fEBkaEQpwfRdjf39IXkdtfUlyfBAZGhEKcH0XY39/SF5HbX1JcnwQGRoRCnBsF2hnRlN6aE1/c
+ lpOEB4SEQptfhcbEQpYTRdLEQ==
+X-Authority-Info: v=2.4 cv=Os5CCi/t c=1 sm=1 tr=0 ts=6ad776f7 cx=c_apl:c_pps
+ a=1dAPbmINT/BjSfFMotB1Dg==:117 a=vJm4sOL_AAAA:8
+ a=KWvOQs04uFl5JYH95pWQHK6vTCQ=:19 a=z/mQ4Ysz8XfWz/Q5cLBRGdckG28=:19
+ a=lCpzRmAYbLLaTzLvsPZ7Mbvzbb8=:19 a=xqWC_Br6kY4A:10 a=660iZSQnnn4A:10
+ a=GvIzoBfTT3wA:10 a=Ez2CbgTkAAAA:8 a=m9shYIPOAAAA:8 a=lVbKkTzLAAAA:8
+ a=Dzk847dSrmDhm06BsLkA:9 a=pILNOxqGKmIA:10 a=yMhMjlubAAAA:8 a=SSmOFEACAAAA:8
+ a=jzVSWr7opuA5gEfCcbAA:9 a=QKVip3LiIq1tTwz-:21 a=gKO2Hq4RSVkA:10
+ a=UiCQ7L4-1S4A:10 a=hTZeC7Yk6K0A:10 a=frz4AuCg-hUA:10
+ a=Rd-NJP1ja_hoNelCbHBG:22 a=xR-Psr1p5Zblciy2OuxS:22 a=S1KVPUBcMlJk6MLpXAFo:22
+X-Proofpoint-ORIG-GUID: RIkbjaGSb69WZ-0-pg5KptWfecjhNYks
+X-Proofpoint-GUID: RIkbjaGSb69WZ-0-pg5KptWfecjhNYks
+X-Proofpoint-Spam-Details-Enc: AW1haW4tMjYxMDIwMDA1NiBTYWx0ZWRfX3hBJhEf3KsRi
+ 6/MW72FIO9cgXy7ZsZmuR+KjoSpWg9OijEYNsYCu/Z2iKOyEcAVSzD7h+RNy/Sr1fVuAlzTIpus
+ DZqliwSGhPy83XJrWw2yMrJWjLNHYOljrl35hnksBlo9pSXi2k/dnCf5H7QS5cLdsLM+S8gY9H3
+ ud2qKk+fHlxEpWTEW1CoNzPdy6nECYbuqt35qbQGxtsJ7oZO8gPnQOjD4tObt2Ak2nkw3hfYAcb
+ IKPL/A/1JXx0qxqrUkee0bVbUvMD+v9tU5eUGma295vINsH9JXotrUOcHq1jt6KVxVep9XrCCho
+ TF6f5DRLXEEAh75SviWg5n7f9BFbELHu3NZsFMkcmaMdQo9/wxuGk/oFSP1EfRp1GOLI1qYv9wC
+ 5xbOo/WK9CyeL2YKLW+qCqr6BThMOolye9YhEJg7lAQ6dO7gE38=
+X-JNJ: AAAAAAABCFRPiMjbpZZE1mL0+G3QOQ3LFbz9BAtHfyGuxV3IQnnVee3L/f+3Qvmd7+eJp23qT9BjxTXTBvwU3Q6iqpmjc7vNOKcwU9H2uZCpYEEe9WU4e2zBzyi4M6U5K4Ww+aad3EfG90adZ5olHLguSOwAkB6CQU2T8nhSJDf7eS05L6MbdHZRoakPXPUkMvBF02A1v7IKXr+NZIFlq0/ew1IvOFjH98moJUGtqucNMahbDs35rd9kBCsH6kRZ+7441lhJyzm5bAqAGk2RuIAxtkQorCeVq564LXfxgZIbq1LdreEz0kAQoFuaLysMAsG7SicXY0OZwEAnrB14k+pp+m7BGLF8N4/cvqAAd+OXSpNnzDlgWTsYx3NJzM9XXVJuYxdI2/Ig+ehpvYmPhqtgG2ndJ8EeiMjuciBtVMPYocSsWoiiXU2iS6YRC3VG6GyUviiEYoBueRVvSF4YPx12v2SrLhJa+mbdsQc4Jc8xS3Mqx07KwCqTvzxBYJx2BaS9yWpYdMvjTqJyWRhkAnmyRcLxuUr3c9CZyZTOG93bWTPUwSOlvyn1fwJfeYSZyctHuMoQrHWHFNF1VMg3sxU2H01Uc76ihsZy0cGzXj1jhQ14Xn2kn9BSj53QyyQzTFGr+dfXVe1QOx4uj41hKMJAK5WgJ+yMp4JiY0jO2yJU2gdw2nZUkt6VpZFdPiFT//rL81T5p2mbTIMO3PZosNheS2D4bk4m7aHvZFE1eMbXe6TAyfwnsdUDw3UIdMT6Vctu61PNUS457LwNLbkm1XGpWeXBZVnWfkg3dp9PcN3QbDO6N2/uv0s3S2MVMipD5fiecCDrquGJopwrEauznCk=
+
+--_000_61da7b5aba524c5ab38d34ed3da19c56DS5PR07MB11888namprd07p_
+Content-Type: text/plain; charset="Windows-1252"
+Content-Transfer-Encoding: quoted-printable
+
+Hello,
+
+This is an automated email. Please do not reply as you will not receive a r=
+esponse. To report a violation of our Terms of Service or other abuse, plea=
+se refer to the instructions below:
+
+
+  *   Copyright or DMCA =96 This is a hosting provider issue. To identify t=
+he hosting provider of a website, please visit acidtool.com and enter the d=
+omain name. If the website is hosted by a Newfold brand, please submit usin=
+g our online reporting form https://newfold.com/abuse.
+
+
+  *   Phone calls / SMS and MMS =96 If you receive spam via your mobile/ ce=
+llular device, please contact the operator which was used to send the messa=
+ge.
+
+
+  *   Trademark Infringement / Dispute =96 As an ICANN accredited registrar=
+, we are bound by the terms of the Uniform Domain - Name Dispute Resolution=
+ Policy (UDRP). For more information regarding the policy including instruc=
+tions to file a UDRP dispute, please refer here: https://www.icann.org/reso=
+urces/pages/help/dndr/udrp-en or consult with counsel. We only act when req=
+uired under the UDRP or other applicable policies.
+
+
+  *   Law Enforcement =96 If you are a member of law enforcement authority,=
+ please submit your request to https://newfold.com/abuse.
+
+
+  *   Otherwise, if your complaint is regarding phishing, malware, botnets,=
+ pharming, spam (when used to deliver one of the previous issues) or any ot=
+her form of abuse, please submit using our online reporting form https://ne=
+wfold.com/abuse.
+
+
+Please do not reply to this email as replies will not be answered.
+
+
+Warm regards,
+The Newfold Digital Abuse Mitigation Team
+
+
+--_000_61da7b5aba524c5ab38d34ed3da19c56DS5PR07MB11888namprd07p_
+Content-Type: text/html; charset="Windows-1252"
+Content-Transfer-Encoding: quoted-printable
+
+<html xmlns:v=3D"urn:schemas-microsoft-com:vml" xmlns:o=3D"urn:schemas-micr=
+osoft-com:office:office" xmlns:w=3D"urn:schemas-microsoft-com:office:word" =
+xmlns:m=3D"http://schemas.microsoft.com/office/2004/12/omml" xmlns=3D"http:=
+//www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3DWindows-1=
+252">
+<meta name=3D"Generator" content=3D"Microsoft Word 15 (filtered medium)">
+<style><!--
+/* Font Definitions */
+@font-face
+	{font-family:Wingdings;
+	panose-1:5 0 0 0 0 0 0 0 0 0;}
+@font-face
+	{font-family:"Cambria Math";
+	panose-1:2 4 5 3 5 4 6 3 2 4;}
+@font-face
+	{font-family:Aptos;}
+/* Style Definitions */
+p.MsoNormal, li.MsoNormal, div.MsoNormal
+	{margin:0in;
+	font-size:11.0pt;
+	font-family:"Aptos",sans-serif;
+	mso-ligatures:standardcontextual;}
+a:link, span.MsoHyperlink
+	{mso-style-priority:99;
+	color:#467886;
+	text-decoration:underline;}
+span.EmailStyle17
+	{mso-style-type:personal-compose;
+	font-family:"Aptos",sans-serif;
+	color:windowtext;}
+.MsoChpDefault
+	{mso-style-type:export-only;
+	font-size:11.0pt;}
+@page WordSection1
+	{size:8.5in 11.0in;
+	margin:1.0in 1.0in 1.0in 1.0in;}
+div.WordSection1
+	{page:WordSection1;}
+/* List Definitions */
+@list l0
+	{mso-list-id:966159623;
+	mso-list-template-ids:-372061672;}
+@list l0:level1
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0B7;
+	mso-level-tab-stop:.5in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Symbol;}
+@list l0:level2
+	{mso-level-number-format:bullet;
+	mso-level-text:o;
+	mso-level-tab-stop:1.0in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:"Courier New";
+	mso-bidi-font-family:"Times New Roman";}
+@list l0:level3
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:1.5in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l0:level4
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:2.0in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l0:level5
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:2.5in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l0:level6
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:3.0in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l0:level7
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:3.5in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l0:level8
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:4.0in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l0:level9
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:4.5in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l1
+	{mso-list-id:2139562166;
+	mso-list-template-ids:1135913668;}
+@list l1:level1
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0B7;
+	mso-level-tab-stop:.5in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Symbol;}
+@list l1:level2
+	{mso-level-number-format:bullet;
+	mso-level-text:o;
+	mso-level-tab-stop:1.0in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:"Courier New";
+	mso-bidi-font-family:"Times New Roman";}
+@list l1:level3
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:1.5in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l1:level4
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:2.0in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l1:level5
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:2.5in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l1:level6
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:3.0in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l1:level7
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:3.5in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l1:level8
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:4.0in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+@list l1:level9
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:4.5in;
+	mso-level-number-position:left;
+	text-indent:-.25in;
+	mso-ansi-font-size:10.0pt;
+	font-family:Wingdings;}
+ol
+	{margin-bottom:0in;}
+ul
+	{margin-bottom:0in;}
+--></style><!--[if gte mso 9]><xml>
+<o:shapedefaults v:ext=3D"edit" spidmax=3D"1026" />
+</xml><![endif]--><!--[if gte mso 9]><xml>
+<o:shapelayout v:ext=3D"edit">
+<o:idmap v:ext=3D"edit" data=3D"1" />
+</o:shapelayout></xml><![endif]-->
+</head>
+<body lang=3D"EN-US" link=3D"#467886" vlink=3D"#96607D" style=3D"word-wrap:=
+break-word">
+<div class=3D"WordSection1">
+<p class=3D"MsoNormal">Hello,<o:p></o:p></p>
+<p class=3D"MsoNormal"><o:p>&nbsp;</o:p></p>
+<p class=3D"MsoNormal"><b>This is an automated email. Please do not reply a=
+s you will not receive a response.&nbsp;</b>To report a&nbsp;violation of o=
+ur Terms of Service or other abuse, please refer to the instructions below:=
+<br>
+<br>
+<o:p></o:p></p>
+<ul style=3D"margin-top:0in" type=3D"disc">
+<li class=3D"MsoNormal" style=3D"mso-list:l0 level1 lfo2">Copyright or DMCA=
+&nbsp;=96&nbsp;This is a hosting provider issue. To identify the&nbsp;hosti=
+ng provider of a&nbsp;website, please visit acidtool.com and enter the doma=
+in name. If the website is hosted&nbsp;by a Newfold brand, please
+ submit using our online reporting form&nbsp;<a href=3D"https://newfold.com=
+/abuse" title=3D"Original URL: https://newfold.com/abuse. Click or tap if y=
+ou trust this link.">https://newfold.com/abuse</a>.<br>
+<br>
+<br>
+<o:p></o:p></li><li class=3D"MsoNormal" style=3D"mso-list:l0 level1 lfo2">P=
+hone calls / SMS and MMS&nbsp;=96&nbsp;If you receive spam via your mobile/=
+ cellular device,&nbsp;please contact the operator which was used to send t=
+he message.<br>
+<br>
+<br>
+<o:p></o:p></li><li class=3D"MsoNormal" style=3D"mso-list:l0 level1 lfo2">T=
+rademark Infringement / Dispute&nbsp;=96&nbsp;As an ICANN accredited regist=
+rar, we are bound by&nbsp;the terms of the Uniform Domain&nbsp;-&nbsp;Name =
+Dispute Resolution Policy (UDRP). For more&nbsp;information regarding the p=
+olicy including
+ instructions to file a UDRP dispute, please&nbsp;refer here:&nbsp;<a href=
+=3D"https://www.icann.org/resources/pages/help/dndr/udrp-en" title=3D"Origi=
+nal URL: https://www.icann.org/resources/pages/help/dndr/udrp-en. Click or =
+tap if you trust this link.">https://www.icann.org/resources/pages/help/dnd=
+r/udrp-en</a>&nbsp;or
+ consult with&nbsp;counsel.&nbsp;We only act when required under&nbsp;the U=
+DRP or other applicable policies.<br>
+<br>
+<br>
+<o:p></o:p></li><li class=3D"MsoNormal" style=3D"mso-list:l0 level1 lfo2">L=
+aw Enforcement&nbsp;=96&nbsp;If you are a member of law enforcement authori=
+ty, please submit&nbsp;your request to&nbsp;<a href=3D"https://newfold.com/=
+abuse" title=3D"Original URL: https://newfold.com/abuse. Click or tap if yo=
+u trust this link.">https://newfold.com/abuse</a>.<br>
+<br>
+<br>
+<o:p></o:p></li><li class=3D"MsoNormal" style=3D"mso-list:l0 level1 lfo2">O=
+therwise, if your complaint is regarding phishing, malware, botnets, pharmi=
+ng, spam&nbsp;(when used to deliver one of the previous issues) or any othe=
+r form of abuse, please&nbsp;submit using our online reporting
+ form&nbsp;<a href=3D"https://newfold.com/abuse" title=3D"Original URL: htt=
+ps://newfold.com/abuse. Click or tap if you trust this link.">https://newfo=
+ld.com/abuse</a>.<o:p></o:p></li></ul>
+<p class=3D"MsoNormal"><br>
+<br>
+<o:p></o:p></p>
+<p class=3D"MsoNormal"><b>Please do not reply to this email as replies will=
+ not be answered.</b><o:p></o:p></p>
+<p class=3D"MsoNormal"><br>
+<br>
+<o:p></o:p></p>
+<p class=3D"MsoNormal">Warm regards,<o:p></o:p></p>
+<p class=3D"MsoNormal">The Newfold Digital Abuse&nbsp;Mitigation&nbsp;Team<=
+o:p></o:p></p>
+<p class=3D"MsoNormal"><o:p>&nbsp;</o:p></p>
+</div>
+</body>
+</html>
+
+--_000_61da7b5aba524c5ab38d34ed3da19c56DS5PR07MB11888namprd07p_--

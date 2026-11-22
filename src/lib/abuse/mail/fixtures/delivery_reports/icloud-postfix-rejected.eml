@@ -1,0 +1,140 @@
+Return-path: <>
+Original-recipient: rfc822;support@phishing.support
+Received: from p00-icloudmta-smtpin-us-east-1a-100-percent-18 by p142-mailgateway-smtp-649dcc9c75-hr6t7 (mailgateway 2632B98)
+	with SMTP id 7dddbab2-4a03-48e9-8501-0b3a030e99cc 
+	for <support@phishing.support>; Mon, 31 Aug 2026 14:34:38 GMT
+X-Apple-MoveToFolder: phishing.support 
+X-Apple-Action: MOVE_TO_FOLDER/phishing.support
+X-Apple-UUID: 7dddbab2-4a03-48e9-8501-0b3a030e99cc
+Received: from outbound.qs.icloud.com (unknown [100.106.193.100])
+	by p00-icloudmta-smtpin-us-east-1a-100-percent-18 (Postfix) with ESMTPS id E2B45C000F0
+	for <support@phishing.support>; Mon, 31 Aug 2026 14:34:34 +0000 (UTC)
+X-ICL-RepId: 01a0583e-53c4-7f40-a98e-c66ccb274e1c
+X-ICL-Info: GAtbQ1YEAlZFTVJFSwQEUFUKE0ocXVcQFlkVHggNB1JFV1dHTh4HW0ZXV0dIEFMGSAwIHBZfQQxVHwJKEVNaDQAdSBQXXRYQFkQVAghAWRABORYfEUNeCxseSAQNQEYNBw1GHx1cWV8aDBIVF0VYBlsIFVkRU1oNAB1IFBddFhIBC1ssSQAGTERJUFlJCQVMRElWKlhUUl8cGgoYDVQYARoURhoRVAteR0lUQUgIBVNETVVDSwQYU0NJIDNJCAZSRThVNxdFQgAaDAgTVkFFTBwaChgNVBgBGhRY
+X-ICL-Score: 4.44404423422
+X-Spam-Flag: yes
+X-Suspected-Spam: true
+Authentication-Results: bimi.icloud.com; bimi=skipped reason="insufficient dmarc"
+X-ARC-Info: policy=fail; arc=none; r1=-20; r2=0
+Authentication-Results: arc.icloud.com; arc=none
+Authentication-Results: dmarc.icloud.com; dmarc=fail header.from=icloud.com
+X-DMARC-Policy: v=DMARC1; p=quarantine; rua=mailto:d@rua.agari.com; ruf=mailto:d@ruf.agari.com;
+X-DMARC-Info: pass=fail; dmarc-policy=quarantine; s=r0; d=r0; pdomain=icloud.com
+Authentication-Results: dkim-verifier.icloud.com; dkim=fail reason="body hash did not verify" header.d=icloud.com header.i=@icloud.com header.b=NI4AdJts
+Received-SPF: softfail (spf.icloud.com: domain of transitioning postmaster@outbound.qs.icloud.com does not designate 100.106.193.100 as permitted sender) receiver=spf.icloud.com; client-ip=100.106.193.100; helo=outbound.qs.icloud.com; envelope-from=
+Authentication-Results: spf.icloud.com; spf=softfail (spf.icloud.com: domain of transitioning postmaster@outbound.qs.icloud.com does not designate 100.106.193.100 as permitted sender) smtp.helo=postmaster@outbound.qs.icloud.com
+Received: by outbound.qs.icloud.com (Postfix)
+	id 160FD18000A3; Mon, 31 Aug 2026 14:34:34 +0000 (UTC)
+Dkim-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=icloud.com; s=1a1hai; t=1788186874; x=1790778874; bh=Hec5da/E1n1EsZkTe6xJr+PycNIddFsfZ6Nbmdtzdto=; h=Date:From:Subject:To:MIME-Version:Content-Type:Message-Id:x-icloud-hme; b=NI4AdJtsVX0I/nOXkWCAOFeoY+QwQLd6fBboacv0C4+Cuwxr+h4TRpBGo4xB4DpWIJ4Y9n74nsmn/yYvkn+bCVDIMp/afvn4mCJW7k6d1OZslW7swQVWv4yIaqfBYq1j3NaNnexW3yh9alGR7TeskqXayV/RT8DSlub8EFe67xcPUOueaTlRlPasWEoayNtogKErIJnOxu/6xZCIaSR+OfgAZ7NPrD4L4wQ5Otiof6jIEoLNjd6PPPZLNvQFotAef1XqVfjYa2qlp7r99VmDrJZPLpagaVsG2kbfcqso4kU0mH8a/D8bgHuZo2BvJZhml0Iuz1jn/CZdpY2Cj+Y7SQ==
+Date: Mon, 31 Aug 2026 14:34:34 +0000 (UTC)
+From: Mail Delivery System <mailer-daemon@icloud.com>
+Subject: Undelivered Mail Returned to Sender
+To: support@phishing.support
+Auto-Submitted: auto-replied
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status;
+	boundary="BAC7E1800100.1788186874/outbound.qs.icloud.com"
+Content-Transfer-Encoding: 8bit
+Message-Id: <20260831143434.160FD18000A3@outbound.qs.icloud.com>
+X-MANTSH: 1TFkXBxsaGhkRCllEF2VYfh5dQ0sYW0lgEQpZTRdgX0RBEQpZSRcRClleF2NjeRE
+ KQ04XYH9Qcn1kTW5Yf35QUHpIR2xEQnNyGWJeE2JvZUBffWIRClhcFxkEGgQfEgUbGgQbHBgEG
+ RoEGBMQGx4aHxoRCl5ZF0JTUH19EQpNXBcaEQpMRhdNa2NrXWsRCkNaFxsaGgQbGhwEGxMZBBs
+ aGhEKQl4XGxEKQkUXYQV5bExwemdieE8RCkJOF2ZucFt+ZG4YYBxrEQpCTBd6fF0cUHtueWdPH
+ REKQmwXZn9MWWhTaUlrHXoRCkJAF2twYX9JRhleWmJHEQpCWBdsZUAeRGRIRHkZZxEKbX4XGhE
+ KWE0XSxE=
+X-Proofpoint-GUID: JUzXWNgDrUTzzPbmFnhYX3Ht9HEOjuWH
+X-Proofpoint-Spam-Details-Enc: AW1haW4tMjYwODMxMDEyNiBTYWx0ZWRfX+UMGD4/JfVXr
+ uiOy0r4ucaFBF2KMgJhtmQP8zQblfviuAKPC4v+JgO5URaaaVUSWsQO61v5u0AN1VT/7tsVmX6l
+ poRIto4Vxxk+1YIv61QIwPDw3/mas+NufrHvAlkNhHt24nhidW+CtggrHKwKruvl51v9TaWYD7n
+ 1mW1ecOlPAC9npC66uucHRbrAleQw43NCpFVGzNSkpR622t4tnSmkw1GoyOoguGcvqjgjkNSRv2
+ fxgs9r7wr7kQs7wzSwi/eAlGQKQPJcGIaUNdbdeNnhWxPE2eMWtzvocSs6rSGP2cBWd3j9W9eyV
+ FNp4Q6cnDlsaKQhFon+CJkQoBV7GT6bWceIvrpDryQyH9gksusfRGvngrjOeR4gkjDSDquV+cfn
+ 2HjrZjyaV/Zx5z4tHZogg0LBd8QwWwJi1YieTZnG5FWwgwWq0MxbxBztpip+NrqqCcaaBq/wrq9
+ ouUdKTf2UYGCaX5ZBSg==
+X-Proofpoint-ORIG-GUID: JUzXWNgDrUTzzPbmFnhYX3Ht9HEOjuWH
+X-Authority-Info: v=2.4 cv=Z+Hh3XRA c=1 sm=1 tr=0 ts=6a9590fb cx=c_apl:c_pps
+ a=uhEI16vY8hl9XyT8LAtx3Q==:117 a=Sv0fKeRqtYgA:10 a=x7bEGLp0ZPQA:10
+ a=spM0i47r7qUA:10 a=d55fECZfmm4A:10 a=vX-N2HuyvEP-EhXdXtwA:9 a=z-I949wyAAAA:8
+ a=Q4FMM76sAAAA:8 a=XjBLizYz9jFQnUk49ssA:9 a=QEXdDO2ut3YA:10 a=v3ZZPjhaAAAA:8
+ a=DFfKpchgKqw4D6-mq04A:9 a=f7g3CFGLjmAxJFOoyGbZT193Uiw=:19
+ a=57qmmJVQd-qrRGz7cR0A:9 a=4QCsGFTORtbwm4dlHg15:22 a=LHxYgTTVNTq1-UP8rXii:22
+ cc=bnc
+X-JNJ: AAAAAAABeRtNlVC9ejFMyjYAwMiM4BDDk5E7bu6A6qJQ6kxCq78IRZha5k++AQi2QgjsAU+l1rD8l6nqi3PwDP436I8z1lTcJNXE7V55gNTcO6w0nFdFhtqdXomt1QXa4jHEtwuAmyPp8k75BL+znqPXkTIqdil2ErK6TnxuoSdbpk9dURtiNQDMjVcMujcFGz4eyOhsrH1Pk9YhOW5pS7VueMUrAikUACNYmG5aDTyi8DiigEJYF3yYFqui/4Xl+o86NIyxVseU5iGKtBf1I+rvcetEcPQy9Ym3yIV2HD6HEZ1Ex3nVJI7dhSlOTXLYQVF7+HL/u0LSwgGRYYs0qdTBE1L7mJqWx4QTa++ykmQPwWl2HLeUImb09Yy9Tc37JUOMQNxdgYby6he2Xtm7euLjzDKTtLeIoqX1+0hugVSFufBImrFPxcorURn06YRu6iM6CyHJcryBKJhrKWQj6y8iZDjAU4HZd7K66k/siYT1XCINHs5YC8bUIY4IU7t2/MIFTcyl/EJhe4O8cKdGpw2ay7Ejf3T1Df0bp7wXRuAq+cLDJggQBCts9AzbIlh3dy+6xHCw9A43N5JWR3MZ5fb4SiOzQqRVlkhe+EanZnQsXcA1oEvtHJz8VX8HaNay8qtGjqQ6kB75lNjprQCxtumKACwwfI1bbG8UIDMWPwI5j+52JAQ5cXzMf2xJCBmxsvIEPdIeNNWiA9RVDiRSkDmFcZBFW4I6T2Dn9z2lLFyDLnYhiYME+khRE1Ocj54DS1iJnn9DuhKtzt5OXlrMq95HgHNtehWLij7Zvk8argnyws9wgHW+vyqzmdx1I0TCVUVtzZTJDRIEKQMnu6nbrtzHX/FFrj6duzUvwT6x4IHtxb/Q7jNzqPDE+Q6YkEHsWjLvBv40ZRaTUTdeEsumepnEC8BbGdlb7jLMh8CK8RM2sxXQ
+
+This is a MIME-encapsulated message.
+
+--BAC7E1800100.1788186874/outbound.qs.icloud.com
+Content-Description: Notification
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+This is a system-generated message to inform you that your email could not
+be delivered to one or more recipients. Details of the email and the error are as follows:
+
+
+<admin@hosting-one.example>: host mx1.mxfilter.net[2602:faa9:e1:6e6f:7370:616d:0:2]
+    said: 550 Message rejected as spam (score: 14.0) (in reply to end of DATA
+    command)
+
+--BAC7E1800100.1788186874/outbound.qs.icloud.com
+Content-Description: Delivery report
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; outbound.qs.icloud.com
+X-Postfix-Queue-ID: BAC7E1800100
+X-Postfix-Sender: rfc822; support@phishing.support
+Arrival-Date: Mon, 31 Aug 2026 14:34:24 +0000 (UTC)
+
+Final-Recipient: rfc822; *****@***********
+Original-Recipient: rfc822;admin@hosting-one.example
+Action: failed
+Status: 5.0.0
+Remote-MTA: dns; mx1.mxfilter.net
+Diagnostic-Code: smtp; 550 Message rejected as spam (score: 14.0)
+
+--BAC7E1800100.1788186874/outbound.qs.icloud.com
+Content-Description: Undelivered Message Headers
+Content-Type: text/rfc822-headers
+Content-Transfer-Encoding: 8bit
+
+Return-Path: <support@phishing.support>
+Received: from outbound.qs.icloud.com (unknown [127.0.0.2])
+	by p00-icloudmta-asmtp-us-east-2d-100-percent-9 (Postfix) with ESMTPS id BAC7E1800100
+	for <admin@hosting-one.example>; Mon, 31 Aug 2026 14:34:24 +0000 (UTC)
+X-ICL-RepId: 01a0583e-2c26-703b-808f-3a55d024b733
+X-ICL-Out-Info: HUtFAUMHWwJACUgBTUQeDx5WFlZNRAJCTQhICkMGUgteCEkGQwZYAVBcHA4eQhtCH0sMcx1fAkEYUBZUQ0QeQgBWCkdNUQ8PAFERQAVeBVVeSg1DHVgZRlBLGw5cFwNXHFZFXBhDCV0FVxwdHERFWxNVF0YJGQhdHRkIRx8KMANCDlYDQwdFAC0ZHFdQRwNbA1ERXQoZGEcASRdBGRcGWxQERFIPQhhXXQlIUl0CWQpIDhtVXAcIU0kLSVVfBl8ERA0dUlVWDwtHXRsAXQ9fU0cLTgdcVVNQEnkIWwREA1seXlZAGEcbXQJNRhMZThtXTVoNQBlYBm0UVhVSBFk=
+Dkim-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=phishing.support; s=sig1; t=1788186870; x=1790778870; bh=pOv+Z98+SZqk+dmUfHYCO0rRAUdT62nq5EKKUR/Kwbg=; h=From:To:Subject:Message-ID:Date:MIME-Version:Content-Type:x-icloud-hme; b=BQCg5asAfbbjhITU0LrHv6URXj4SrCdovUuNXDBllchMyRfCWxqKQYkwdz0ZJobNH6i1mjQzaD3rEneRJg5MBUVUJXG4OlsEUV5wmqiWOamx3h7VgIXpcb8ns3D9j5qxL67PZjyKA9UBSb2diMTUlr203aLvyp96YNq5SgSmSs7/dF+w/QIed4ELREYqSK7RWJGqefRjMXLNeheI7uFAyWHoXslwpFvo12oV0/YRgJ1/O25JjYgT2fDziqjrptBwFS7hhpAjEH87eLTajPlRxa1h8zvGk7vWRlLlaHbDnqCEy0uazMHDwEVnRCQqJY3G7rUfg2E4eCz/u8UIxMHEcQ==
+mail-alias-created-date: 1768184440213
+Received: from [127.0.0.1] (unknown [17.57.155.37])
+	by p00-icloudmta-asmtp-us-east-2d-100-percent-9 (Postfix) with ESMTPSA id A4811180012D
+	for <admin@hosting-one.example>; Mon, 31 Aug 2026 14:34:22 +0000 (UTC)
+X-Abuse-Report-Correlation: email-run:352823391150936075
+From: support@phishing.support
+To: admin@hosting-one.example
+Reply-To:
+ abuse-7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a@phishing.support
+Subject: [Phishing Support] Abuse report for
+ swisscapitalloans.sc-sec.online
+Message-ID:
+ <abuse-5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e@phishing.support>
+Date: Mon, 31 Aug 2026 14:34:21 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="--_NmP-3dd898aace0813dc-Part_1"
+X-Proofpoint-Spam-Details-Enc: AW1haW4tMjYwODMxMDEyNiBTYWx0ZWRfX42tMWNrP7/uY
+ m7dltbFPO86RILYq90qc2rEJ/SD8bIH9wInX0kgDJRoa5AVFB0NnMe32CNs8B0tAzvMQ04vYuy8
+ 2WB/iOOCKsQyIfDkwJnITJs7pzAbevjP3hk6nDP0aTLFPnCTm2zAzNhOAp9hU1k639SeQ8GrOSL
+ XBKBTNcod+vCeN709HVK1y2W+fg91bPrTKTCI3k704JTYPhqB85z3QgylLUixEhdI6QtSarFD+3
+ ibKUHqPVFkYToc9Wnmp5WJ4xQ2V76pDGfO5e/tYpspFz1LYJNHZx/uy7j/RRmHw9ulmZXzO0+44
+ skJB0DK5av4qAmuqfWa//ZisiKdcPrXT8FclcNdADhp3qnJpG+IX7ooEf/eBtQ=
+X-Proofpoint-GUID: -ecRMLb-zoKsD1a6l621upHAXidflsZs
+X-Proofpoint-ORIG-GUID: -ecRMLb-zoKsD1a6l621upHAXidflsZs
+X-Authority-Info-Out: v=2.4 cv=U6KfzOru c=1 sm=1 tr=0 ts=6a9590f4
+ cx=c_apl:c_pps:t_out a=bsP7O+dXZ5uKcj+dsLqiMw==:117
+ a=bsP7O+dXZ5uKcj+dsLqiMw==:17 a=Sv0fKeRqtYgA:10 a=g8TUdU_LZmEA:10
+ a=VkNPw1HP01LnGYTKEx00:22 a=V6YMhGOmAAAA:8 a=_voCZsvGAAAA:8
+ a=Cc_1R0nTiEbLdCg5CcUA:9 a=QEXdDO2ut3YA:10 a=HXjIzolwW10A:10
+ a=MiO52_FcD7Ww7FwBfRP3:22 a=j78Gz1iO0DckSff7alXV:22
+X-JNJ: AAAAAAABJhmWfoFV4s4VJqDikmJCooz8hp8Xr6QGkkf58Afjy9I2DgVp+wUzzkNpKCtZ+nUcN7fxQeHatzRDDuGb3WV61XndWxZiF295guYfgZH7VrWKSPBb/p1mBWBrVjOGZJbNXxNQBI8URmlSZI4v2jfVFgaJhn7YqozpIQ5kHKM/KCZQ5wglYot7Oe0O1bskA5IO5Xs3qa+ISLHKbnzLjUVaDqWjDZCRu2uSL7Gk7HnoAlvh6ZHzqFt9GNa8HnptuHSTshpdrBEm8jPnQFR9yH5zfxIIn3vUthzBIv2WaF2BCmMQ1YRbqz69KacveXVHG9+RKVr3qhoumxi7jMAnG+Mo6INXnMQ42UJ2JQ31dv9/NzfsLo6gmpVDDHOmZ84lTK0pxYRihNjspfD2fZoS0mjrDKxDRN8B/2YmQkQ+fJw8zC+IESypvV51ylH0meObGVPK8z6Vw+VhhNutGG5D070ng6X/CcvRhfLhMxcxNZ7YEJwjShxte80GxWgoeohPUjAOv32z9Wp+uVPKEEh4lIQNi2HdZdTWhx/jgQNO/ezAUf7fq/P2ioNEzQ5tDSaxk6lqZTzuweiooQJ/ia75n3yGoXR8wyq6FXgI0oaU/UrYMHSaMlqs3jJciu3tOMXQJ3iZUYY4oEKhdYe3CzLm7PemUthIOOClVZ5Um+oTXMZZSZXwRuPnrZG6N23/dbwFVZYVi5ilzuZCk008TcKXZt4mMtkrZYG/fci7l4VQITJ5J6+2RTtERM6ggREIxLfe5W9Y/TfuXHzl5XllqUcThzL9ESA+DA8glb1QCXNOWsOlY3JE+iRsRxY+1nDwihy3g5VqxWJD43qY9IdgA3rK2M2gdFdAsCBTTJAGO9gmmGwlbuZK+8M7C2zoXBreriY5tqzzLBRybjPvWEiXcHyHz5Cg8cjOFd7ADhELzzR0S/6p1JrFOUIQy7jS9TRXK6qBxX8tjzwMuhcsQOk11VlKmuXmmGG
+ bZPWjCKgdee9ftU47zR5O2PgODBv2xuzBmkNHighAjnEPnFdSenObH6tZkHoX4TX0zBuC2WeGFfd9QlLg8W/lLKfF2SRjwc6pCth+VeIYWLRHnp9lwHAxAusdu0Do3rYtlwbY+UyiCrEcGxuzif2h2fXLes0eku7AQ7F58hP9rqu8lDvU/2isNvw1cibrn2ffWEKd3ShQxv0y+fawkUdfTmaHWZKl/oY+6AUrVQbq2lNUxcnjLxOG/TCmL42H
+
+--BAC7E1800100.1788186874/outbound.qs.icloud.com--
