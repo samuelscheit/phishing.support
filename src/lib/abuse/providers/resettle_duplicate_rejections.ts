@@ -1,4 +1,5 @@
 import { AbuseRepository } from "../repository";
+import { normalizeDomain } from "../security/security";
 import { queueCorrespondencePoll, nextCorrespondencePollDelayMs } from "../worker/schedule";
 import { cloudflareProvider } from "./cloudflare";
 import { cloudflareApiConfig, cloudflareDuplicateOfRejection } from "./cloudflare/api";
@@ -13,6 +14,18 @@ type Recogniser = {
 	provider: ProviderSubmissionProvider;
 	duplicateOf(failureReason: string, payload: Record<string, unknown>): ProviderSubmissionDuplicateError | undefined;
 };
+
+/**
+ * The target of a run stored before drafts carried their definition pin
+ * (`cloudflare_abuse_api_v1` without `definition`, production 2026-11-19):
+ * every rejected duplicate in production has that shape, and the target is
+ * all the repair needs from it.
+ */
+function legacyCloudflareTarget(payload: Record<string, unknown>): string | undefined {
+	return payload.adapter === "cloudflare_abuse_api_v1" && payload.definition === undefined && typeof payload.target === "string"
+		? normalizeDomain(payload.target)
+		: undefined;
+}
 
 export type ResettledDuplicate = { routeId: bigint; providerRegistryKey: string; confirmationId?: string };
 
@@ -32,8 +45,8 @@ export async function resettleDuplicateRejections(
 		[cloudflareProvider.definition.key]: {
 			provider: cloudflareProvider,
 			duplicateOf: (reason, payload) => {
-				const stored = storedCloudflareSubmissionPayload(payload);
-				return stored && cloudflareDuplicateOfRejection(reason, { accountId: cloudflareApiConfig(environment).accountId, target: stored.target });
+				const target = storedCloudflareSubmissionPayload(payload)?.target ?? legacyCloudflareTarget(payload);
+				return target ? cloudflareDuplicateOfRejection(reason, { accountId: cloudflareApiConfig(environment).accountId, target }) : undefined;
 			},
 		},
 		[netcraftProvider.definition.key]: {

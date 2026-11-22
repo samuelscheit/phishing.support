@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+// The registry first: imported from a provider module, the abuse package's import cycle reaches the registry before that provider is initialised.
+import "./submission_registry_default";
 import { and, eq } from "drizzle-orm";
 
 import { getDb } from "../../db";
@@ -178,6 +180,23 @@ describe("resettling routes rejected for a duplicate answer", () => {
 		expect(events.map((event) => event.data)).toEqual([expect.objectContaining({ to: "submitted", confirmationId: "eeeeeeeeeeeeeee5", reconciliationReason: "provider_duplicate_answer" })]);
 
 		// Idempotent: a second run finds nothing left to change.
+		expect(await resettleDuplicateRejections(environment)).toEqual([]);
+	});
+
+	test("a run stored before drafts carried their pin (the production shape) is recognised by its target", async () => {
+		const fixture = await cloudflareFixture();
+		const legacy = { adapter: "cloudflare_abuse_api_v1", providerNarrativeVersion: 1, target: TARGET, report: { name: "Phishing Support", email: "support@phishing.support", company: "Phishing Support", urls: URL_A, justification: "x", reportedCountry: "DE" } };
+		const run = await AbuseRepository.createProviderRun({ routeId: fixture.route.id, providerPayload: legacy });
+		const reason = `Cloudflare abuse report was rejected with HTTP 400: You have already submitted this URL recently: ${URL_A}`;
+		await AbuseRepository.settleProviderRun({ runId: run.id, executionStatus: "failed", routeStatus: "provider_rejected", failureReason: reason, routeData: { reason } });
+		// A pinless payload of another adapter, or without a target, stays untouched.
+		const other = await cloudflareFixture();
+		const otherRun = await AbuseRepository.createProviderRun({ routeId: other.route.id, providerPayload: { ...legacy, target: 7 } });
+		await AbuseRepository.settleProviderRun({ runId: otherRun.id, executionStatus: "failed", routeStatus: "provider_rejected", failureReason: reason, routeData: { reason } });
+
+		expect(await resettleDuplicateRejections(environment)).toEqual([{ routeId: fixture.route.id, providerRegistryKey: CLOUDFLARE_PROVIDER.key }]);
+		expect(await latestRun(fixture.route.id)).toMatchObject({ executionStatus: "completed", confirmationText: `Cloudflare already had a recent report for ${URL_A}.`, submittedTargets: [TARGET] });
+		expect((await AbuseRepository.getRoute(other.route.id))?.status).toBe("provider_rejected");
 		expect(await resettleDuplicateRejections(environment)).toEqual([]);
 	});
 
