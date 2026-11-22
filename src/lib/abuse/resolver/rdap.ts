@@ -53,8 +53,7 @@ export function explicitAbuseMailboxes(entity: unknown, source: AbuseMailbox["so
 	const result: AbuseMailbox[] = [];
 	const roles = entityRoles(record);
 	if (roles.includes("abuse")) {
-		const card = vcardValues(record);
-		const emails = uniqueStrings([...scalarStrings(card.email), ...scalarStrings(record.email)].map((value) => normalizeMailbox(value)));
+		const emails = uniqueStrings([...markedEmailsFirst(record), ...scalarStrings(record.email)].map((value) => normalizeMailbox(value)));
 		for (const email of emails) {
 			result.push({
 				email,
@@ -67,6 +66,23 @@ export function explicitAbuseMailboxes(entity: unknown, source: AbuseMailbox["so
 	}
 	for (const child of asArray(record.entities)) result.push(...explicitAbuseMailboxes(child, source));
 	return result;
+}
+
+/**
+ * An entity's vCard emails, the one the registry marks as its abuse mailbox
+ * first: RIPE types it `abuse`, APNIC prefers it (`pref: 1`) over the IRT's
+ * plain `e-mail` (AS4755: ip.admin@ beside the abuse-mailbox 4755abuse@).
+ */
+function markedEmailsFirst(entity: JsonRecord): string[] {
+	const card = asArray(entity.vcardArray);
+	if (card[0] !== "vcard" || !Array.isArray(card[1])) return [];
+	const rank = (parameters: JsonRecord | undefined) => scalarStrings(parameters?.type).some((type) => type.toLowerCase() === "abuse") ? 0 : String(parameters?.pref ?? "") === "1" ? 1 : 2;
+	return (card[1] as unknown[])
+		.map(asArray)
+		.filter((entry) => text(entry[0])?.toLowerCase() === "email")
+		.map((entry, index) => ({ values: scalarStrings(entry[3]), rank: rank(asRecord(entry[1])), index }))
+		.sort((a, b) => a.rank - b.rank || a.index - b.index)
+		.flatMap((entry) => entry.values);
 }
 
 /** One text field of an entity's vCard (`org`, `fn`), as the record states it. */

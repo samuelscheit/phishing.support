@@ -220,7 +220,7 @@ export async function settleCorrelatedEmailBounce(params: {
 	/** Resend only after a temporary failure; a permanent rejection would bounce again. */
 	retry: boolean;
 	/** Why the route failed: a provider's bounce unless our relay refused the report. */
-	reason?: "provider_bounce" | "relay_refused";
+	reason?: "provider_bounce" | "relay_refused" | "delivery_retries_exhausted";
 }): Promise<{ settled: boolean; routeId?: bigint; runId?: bigint; outboundMessageId?: bigint; stale?: true }> {
 	const db = await getDb();
 	return db.transaction(
@@ -374,13 +374,14 @@ export async function listRelayRefusedRoutes(): Promise<AbuseProviderRoute[]> {
 }
 
 /**
- * Mail routes whose last status change ended them as `provider_rejected`
- * because a bounce named none of their sends (worker/mail.ts settleBounce).
+ * Mail routes in `status` whose last status change put them there for one of
+ * `reasons` (the event's `reason`), e.g. `provider_rejected` for
+ * `uncorrelated_provider_bounce`.
  */
-export async function listRoutesEndedByUncorrelatedBounce(): Promise<AbuseProviderRoute[]> {
+export async function listEmailRoutesByLastStatusChange(status: AbuseRouteStatus, reasons: readonly string[]): Promise<AbuseProviderRoute[]> {
 	const db = await getDb();
 	const routes = db.select().from(abuseProviderRoutes)
-		.where(and(eq(abuseProviderRoutes.routeType, "email"), eq(abuseProviderRoutes.status, "provider_rejected")))
+		.where(and(eq(abuseProviderRoutes.routeType, "email"), eq(abuseProviderRoutes.status, status)))
 		.all();
 	if (!routes.length) return [];
 	const lastChange = new Map(
@@ -392,7 +393,7 @@ export async function listRoutesEndedByUncorrelatedBounce(): Promise<AbuseProvid
 	);
 	return routes.filter((route) => {
 		const change = lastChange.get(route.id);
-		return change?.to === "provider_rejected" && change.reason === "uncorrelated_provider_bounce";
+		return change?.to === status && typeof change.reason === "string" && reasons.includes(change.reason);
 	});
 }
 

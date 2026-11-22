@@ -107,6 +107,8 @@ function attachInfrastructureRoute(params: {
 	dnsSnapshot: JsonRecord;
 	route: ResolvedRouteInput;
 }): ResolvedRouteInput {
+	// The address's fallback contacts belong to the route, not to its first contact.
+	const { fallbackContacts, ...contact } = params.route.resolverProvenance;
 	return {
 		...params.route,
 		resolverProvenance: {
@@ -114,7 +116,8 @@ function attachInfrastructureRoute(params: {
 			originatingDomain: params.domain,
 			originatingIp: params.ip,
 			dnsResolution: params.dnsSnapshot,
-			ipRouteProvenance: params.route.resolverProvenance,
+			ipRouteProvenance: contact,
+			...(fallbackContacts ? { fallbackContacts } : {}),
 		},
 		resolutionSnapshot: {
 			target: params.domain,

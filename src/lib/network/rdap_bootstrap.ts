@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { fetchJson } from "./bounded_fetch";
 import { DAY_MS } from "../util/date_time";
 import { canonicalHost } from "./url";
+import { addressBits } from "./ip_prefix";
 
 /**
  * Finds the authoritative RDAP server for a domain, IP address, or AS number
@@ -35,27 +36,6 @@ export function parseBootstrap(json: unknown): BootstrapService[] {
 	});
 }
 
-/** An IPv4 or IPv6 address as a number and its width in bits, or undefined when it is not one. */
-function addressBits(address: string): { value: bigint; bits: 32 | 128 } | undefined {
-	const version = isIP(address);
-	if (version === 4) {
-		return { value: address.split(".").reduce((sum, octet) => (sum << 8n) | BigInt(Number(octet)), 0n), bits: 32 };
-	}
-	if (version !== 6) return undefined;
-	let text = address.toLowerCase().split("%")[0]!;
-	// An embedded IPv4 tail (`::ffff:192.0.2.1`) becomes two hextets.
-	const v4 = text.match(/(\d+\.\d+\.\d+\.\d+)$/);
-	if (v4) {
-		const tail = addressBits(v4[1]!)!.value;
-		text = `${text.slice(0, -v4[1]!.length)}${(tail >> 16n).toString(16)}:${(tail & 0xffffn).toString(16)}`;
-	}
-	const [head, rest] = text.split("::") as [string, string | undefined];
-	const left = head ? head.split(":") : [];
-	const right = rest === undefined ? [] : rest ? rest.split(":") : [];
-	const groups = rest === undefined ? left : [...left, ...Array(8 - left.length - right.length).fill("0"), ...right];
-	return { value: groups.reduce((sum, group) => (sum << 16n) | BigInt(parseInt(group, 16)), 0n), bits: 128 };
-}
-
 /** The prefix length when `address` falls inside `cidr`, else -1. */
 function prefixMatch(address: { value: bigint; bits: number }, cidr: string): number {
 	const [network, lengthText] = cidr.split("/");
@@ -85,7 +65,8 @@ export function bootstrapServers(file: BootstrapFile, services: readonly Bootstr
 			return low !== undefined && asn >= low && asn <= high!;
 		}))?.servers;
 	}
-	const address = addressBits(value);
+	// An IP query is an address or a CIDR; its network address picks the server.
+	const address = addressBits(value.split("/")[0]!);
 	if (!address) return undefined;
 	let best: { length: number; servers: string[] } | undefined;
 	for (const service of services) {
@@ -100,7 +81,7 @@ export function bootstrapServers(file: BootstrapFile, services: readonly Bootstr
 function bootstrapFile(object: RdapObject, value: string): BootstrapFile {
 	if (object === "domain") return "dns";
 	if (object === "autnum") return "asn";
-	return isIP(value) === 6 ? "ipv6" : "ipv4";
+	return isIP(value.split("/")[0]!) === 6 ? "ipv6" : "ipv4";
 }
 
 /** The record's URL on the first HTTPS server; addresses and AS numbers go unescaped, as RFC 9082 writes them. */

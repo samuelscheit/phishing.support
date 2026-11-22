@@ -10,10 +10,10 @@ import {
 	firstEntityWithRole,
 	registrarRdapUrl,
 } from "./rdap";
-import { contactRoute, unroutableRoute } from "./routes";
+import { contactChainProvenance, contactRoute, unroutableRoute } from "./routes";
 import { queryPort43 } from "./port43";
 import { parseExplicitWhoisAbuseMailboxes, parseWhoisNetworkMetadata } from "./whois";
-import type { AbuseMailbox, JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
+import type { JsonRecord, ResolvedAbuseTarget, ResolverDependencies, ResolverTarget } from "./types";
 import { errorText } from "../../util/error_text";
 import { sha256Hex } from "../../util/hash";
 
@@ -145,22 +145,18 @@ async function resolveRegisteredDomain(
 
 	// One contact is reported to at a time. The others are its fallbacks, used
 	// in order when a mail server permanently rejects the mailbox.
-	const [primary, ...fallbacks] = contacts;
+	const primary = contacts[0]!;
 	return finalizeDomainRouteResolution({
 		resolverSnapshot: snapshot,
 		domainRoutes: [contactRoute({
-			email: primary!.email,
-			providerName: primary!.entityName ?? `Abuse contact for ${target.normalizedTarget}`,
-			provenance: { ...primary, ...(fallbacks.length ? { fallbackContacts: fallbacks.map(contactProvenance) } : {}) },
+			email: primary.email,
+			providerName: primary.entityName ?? `Abuse contact for ${target.normalizedTarget}`,
+			provenance: contactChainProvenance([primary, ...contacts.slice(1)]),
 			snapshot,
 		})],
 		infrastructureRoutes: infrastructure.routes,
 		baseStatus: "resolved",
 	});
-}
-
-function contactProvenance(contact: AbuseMailbox): JsonRecord {
-	return { email: contact.email, source: contact.source, ...(contact.entityName ? { entityName: contact.entityName } : {}) };
 }
 
 /** The registrar's own RDAP record for the domain, from the registry's `related` link. */

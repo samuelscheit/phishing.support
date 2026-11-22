@@ -15,6 +15,7 @@ import { refangText } from "../../malware/defang";
 import { PRESERVATION_REQUEST } from "../preservation";
 import { approvalDraftOf } from "../persistence/approvals";
 import { asRecord } from "../../util/values";
+import { routeContact } from "../resolver/routes";
 import { utcDate } from "../../util/date_time";
 
 const MAX_DESCRIPTION_INPUT = 12_000;
@@ -113,6 +114,10 @@ function valueAt(record: Record<string, unknown> | undefined, path: string[]): s
  * greeting for an explicit mailbox whose RDAP entity has no organization.
  */
 export function abuseEmailRecipientLabel(params: Pick<DraftInput, "route" | "recipient">): string {
+	// A fallback contact's own organization (an ASN's holder, an upstream)
+	// outranks the allocation owner the resolution snapshot names.
+	const contactOrganization = valueAt(routeContact(params.route.resolverProvenance), ["organization"]);
+	if (contactOrganization && !isGenericProviderLabel(contactOrganization)) return humanizeOrganization(contactOrganization);
 	const snapshots = [params.route.resolutionSnapshot, params.route.resolverProvenance];
 	const knownPaths = [
 		["registrar", "identity", "organization"],
@@ -365,6 +370,25 @@ export function hostingAddressLine(route: DraftInput["route"]): string | undefin
 }
 
 /**
+ * Why an upstream gets the report: the network it carries is its customer's,
+ * and that customer's own abuse mailboxes reject mail.
+ */
+function upstreamTransitLine(route: DraftInput["route"]): string | undefined {
+	const contact = routeContact(route.resolverProvenance);
+	const transit = asRecord(contact.transit);
+	const customerAsn = Number(transit?.customerAsn);
+	if (!transit || !Number.isSafeInteger(customerAsn)) return undefined;
+	const organization = valueAt(transit, ["customerOrganization"]);
+	const prefix = valueAt(transit, ["customerPrefix"]);
+	const bounced = Array.isArray(contact.bouncedEmails) ? contact.bouncedEmails.filter((email): email is string => typeof email === "string") : [];
+	const customer = `AS${customerAsn}${organization ? ` (${organization})` : ""}`;
+	return [
+		`Why you: the reported address is in ${prefix ? `${prefix}, announced by ` : ""}${customer}, your downstream customer, whose traffic you carry as its upstream transit provider.`,
+		bounced.length ? `Its published abuse ${bounced.length === 1 ? "mailbox" : "mailboxes"} ${bounced.join(", ")} ${bounced.length === 1 ? "rejects" : "reject"} mail, so please pass this report to your customer or act on it.` : undefined,
+	].filter(Boolean).join(" ");
+}
+
+/**
  * The address the reported site is served from, when we know it: the target
  * itself, the origin server a sweep or the DNS history proved, or the address
  * the domain resolved to when the resolver reached the hoster through it.
@@ -387,6 +411,7 @@ function bodyFor(params: {
 	allegationCategory: string;
 	target: string;
 	hostingAddress?: string;
+	upstreamTransit?: string;
 	observedUrls: string[];
 	legalBrandUrl?: string | null;
 	caseUrl?: string;
@@ -412,8 +437,9 @@ function bodyFor(params: {
 		recipientGreeting(params.recipientLabel),
 		"",
 		params.sentPhishingEmail
-			? `The phishing.support team is reporting a ${params.allegationCategory} email that was sent from ${params.target} to ${params.recipientLabel}. Public resolver data lists this address as the abuse contact for that sending infrastructure.`
-			: `The phishing.support team is reporting suspected ${params.allegationCategory} activity involving ${params.target} to ${params.recipientLabel}. Public resolver data lists this address as the abuse contact for the target.`,
+			? `The phishing.support team is reporting a ${params.allegationCategory} email that was sent from ${params.target} to ${params.recipientLabel}.${params.upstreamTransit ? "" : " Public resolver data lists this address as the abuse contact for that sending infrastructure."}`
+			: `The phishing.support team is reporting suspected ${params.allegationCategory} activity involving ${params.target} to ${params.recipientLabel}.${params.upstreamTransit ? "" : " Public resolver data lists this address as the abuse contact for the target."}`,
+		...(params.upstreamTransit ? ["", params.upstreamTransit] : []),
 		"",
 		detailLines,
 		"",
@@ -480,6 +506,7 @@ export async function createAbuseEmailDraft(input: DraftInput, dependencies: Abu
 			allegationCategory: category,
 			target: input.target.normalizedTarget,
 			hostingAddress: hostingAddressLine(input.route),
+			upstreamTransit: upstreamTransitLine(input.route),
 			observedUrls,
 			legalBrandUrl,
 			caseUrl,

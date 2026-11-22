@@ -4,7 +4,9 @@ import { isAttachmentRefusal } from "../mail/attachment_policy";
 import { getProviderSubmissionProvider, getProviderSubmissionProviderForMailbox } from "../providers";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { AbuseRepository } from "../repository";
-import { contactRoute } from "../resolver/routes";
+import { contactRoute, fallbackContactsOf, routeContact, withRouteContact } from "../resolver/routes";
+import { deliveryRetryDelayMs } from "./retry";
+import type { JsonRecord } from "../../util/values";
 import { abuseCaseTag } from "../mail/correlation";
 import { deliveryReport } from "../mail/delivery_report";
 import { caseReferenceCandidates } from "../../referral/case_reference";
@@ -121,10 +123,20 @@ async function settleDeliveryFailure(message: AbuseMailMessage, route: AbuseProv
 		}
 	}
 	await AbuseRepository.setMailClassification(message.id, "bounce", "delivery_status_notification");
-	const settlement = await settleBounce(message.id, route, { retry: outcome === "temporary", failureReason });
-	// A permanent failure means the mailbox will never accept the report; move
-	// on to the target's next published abuse contact.
-	if (outcome === "permanent" && settlement !== "unchanged") await routeToNextContact(route.id);
+	// A temporary failure is resent with backoff until its bound; past it, it
+	// counts as permanent.
+	const sends = (await AbuseRepository.listMailForReport(route.reportId))
+		.filter((other) => other.routeId === route.id && other.direction === "outbound")
+		.map((send) => send.createdAt);
+	const retryAfterMs = outcome === "temporary" ? deliveryRetryDelayMs(sends, new Date()) : undefined;
+	const settlement = retryAfterMs !== undefined
+		? await settleBounce(message.id, route, { retry: true, retryAfterMs, failureReason })
+		: await settleBounce(message.id, route, outcome === "temporary"
+			? { retry: false, reason: "delivery_retries_exhausted", failureReason: `${failureReason} (temporary failures over ${sends.length} sends; treated as permanent)` }
+			: { retry: false, failureReason });
+	// The mailbox will never accept the report; move on to the target's next
+	// published abuse contact.
+	if (retryAfterMs === undefined && settlement !== "unchanged") await routeToNextContact(route.id);
 }
 
 /**
@@ -167,7 +179,7 @@ async function classifyReferralReply(message: AbuseMailMessage, route: AbuseProv
  * for it, or its classification replayed after a worker restart) while the
  * route has moved on to a resend.
  */
-async function settleBounce(messageId: bigint, route: { id: bigint }, options: { retry: boolean; failureReason: string; reason?: "relay_refused" }): Promise<"settled" | "uncorrelated" | "unchanged"> {
+async function settleBounce(messageId: bigint, route: { id: bigint }, options: { retry: boolean; retryAfterMs?: number; failureReason: string; reason?: "relay_refused" | "delivery_retries_exhausted" }): Promise<"settled" | "uncorrelated" | "unchanged"> {
 	const bounced = await AbuseRepository.settleCorrelatedEmailBounce({ inboundMessageId: messageId, ...options });
 	if (bounced.settled) return "settled";
 	if (bounced.stale) return "unchanged";
@@ -182,45 +194,39 @@ async function settleBounce(messageId: bigint, route: { id: bigint }, options: {
 	return ended ? "uncorrelated" : "unchanged";
 }
 
-type FallbackContact = { email: string; source: string; entityName?: string };
-
-function fallbackContacts(provenance: Record<string, unknown>): FallbackContact[] {
-	const list = Array.isArray(provenance.fallbackContacts) ? provenance.fallbackContacts : [];
-	return list.flatMap((item): FallbackContact[] => {
-		const record = item && typeof item === "object" ? item as Record<string, unknown> : {};
-		return typeof record.email === "string" && typeof record.source === "string"
-			? [{ email: record.email, source: record.source, ...(typeof record.entityName === "string" ? { entityName: record.entityName } : {}) }]
-			: [];
-	});
-}
-
 /**
  * Report to the next published abuse contact after a mailbox permanently
- * rejected the report. The new route carries the remaining contacts, so a
- * chain of dead mailboxes is walked one bounce at a time; a contact that
- * already has a route on this target is skipped.
+ * rejected the report: the first of `contacts` (by default the bounced
+ * route's own fallbacks) without a route on this target yet. The new route is
+ * found the way the bounced one was, carries the remaining contacts, and
+ * records every mailbox that failed before it (`bouncedEmails`), so a chain
+ * of dead mailboxes is walked one bounce at a time and an upstream's mail can
+ * name them.
  */
-export async function routeToNextContact(bouncedRouteId: bigint): Promise<bigint | undefined> {
+export async function routeToNextContact(bouncedRouteId: bigint, contacts?: readonly JsonRecord[]): Promise<bigint | undefined> {
 	const bounced = await AbuseRepository.getRoute(bouncedRouteId);
 	if (!bounced || bounced.routeType !== "email") return undefined;
 	const existing = new Set((await AbuseRepository.listRoutes(bounced.reportId))
 		.filter((route) => route.targetId === bounced.targetId)
 		.map((route) => route.verifiedEmail?.toLowerCase())
 		.filter(Boolean));
-	const remaining = fallbackContacts(bounced.resolverProvenance).filter((contact) => !existing.has(contact.email.toLowerCase()));
+	const remaining = fallbackContactsOf({ fallbackContacts: contacts ?? bounced.resolverProvenance.fallbackContacts })
+		.filter((contact, index, all) => !existing.has(contact.email.toLowerCase()) && all.findIndex((other) => other.email.toLowerCase() === contact.email.toLowerCase()) === index);
 	const [next, ...rest] = remaining;
 	if (!next) return undefined;
+	const earlier = routeContact(bounced.resolverProvenance).bouncedEmails;
+	const bouncedEmails = [...new Set([...(Array.isArray(earlier) ? earlier.filter((email) => typeof email === "string") : []), ...(bounced.verifiedEmail ? [bounced.verifiedEmail] : [])])];
 	const target = await AbuseRepository.getTarget(bounced.targetId);
 	const routeInput = contactRoute({
 		email: next.email,
-		providerName: next.entityName ?? `Abuse contact for ${target?.normalizedTarget ?? "the target"}`,
-		provenance: {
-			email: next.email,
-			source: next.source,
-			reason: "fallback_after_permanent_bounce",
-			bouncedRouteId: bounced.id.toString(),
-			...(rest.length ? { fallbackContacts: rest } : {}),
-		},
+		providerName: (typeof next.organization === "string" ? next.organization : undefined)
+			?? (typeof next.entityName === "string" ? next.entityName : undefined)
+			?? `Abuse contact for ${target?.normalizedTarget ?? "the target"}`,
+		provenance: withRouteContact(
+			bounced.resolverProvenance,
+			{ ...next, reason: "fallback_after_permanent_bounce", bouncedRouteId: bounced.id.toString(), bouncedEmails },
+			rest,
+		),
 		snapshot: bounced.resolutionSnapshot,
 	});
 	const route = await AbuseRepository.upsertResolvedRoute(bounced.targetId, routeInput);
@@ -234,6 +240,11 @@ export async function routeToNextContact(bouncedRouteId: bigint): Promise<bigint
 	});
 	await AbuseRepository.recomputeReportStatus(route.reportId);
 	return route.id;
+}
+
+/** The route the report moved on to after `bounced`'s mailbox failed, if any. */
+export async function nextContactRoute(bounced: Pick<AbuseProviderRoute, "id" | "reportId">): Promise<AbuseProviderRoute | undefined> {
+	return (await AbuseRepository.listRoutes(bounced.reportId)).find((route) => routeContact(route.resolverProvenance).bouncedRouteId === bounced.id.toString());
 }
 
 export async function monitorProviderReply(routeId: bigint): Promise<void> {

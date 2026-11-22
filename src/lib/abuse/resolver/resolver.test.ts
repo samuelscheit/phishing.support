@@ -150,12 +150,151 @@ describe("abuse resolver", () => {
 		);
 
 		expect(result.routes.map((route) => route.verifiedEmail)).toEqual(["allocation@example.net"]);
+		expect(result.routes[0]?.resolverProvenance).toMatchObject({ email: "allocation@example.net", fallbackContacts: [{ email: "asn@example.net", source: "asn_rdap" }] });
 		expect(port43Calls).toBe(0);
 		expect(requestedUrls).toEqual([
 			`https://rdap.test/ip/${target}`,
 			`https://stat.ripe.net/data/network-info/data.json?resource=${target}`,
 			"https://rdap.test/autnum/402506",
+			"https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS402506",
 		]);
+	});
+
+	describe("an address's fallback contacts", () => {
+		const target = "14.194.139.244";
+		const DEAD = "ip.abuse@tatatel.co.in";
+		/** The registry tree, origin and upstream of 14.194.139.244 as APNIC and RIPEstat published them on 2026-11-22. */
+		function tataRecords(overrides: Record<string, Record<string, unknown> | undefined> = {}): Record<string, Record<string, unknown>> {
+			const records: Record<string, Record<string, unknown> | undefined> = {
+				[`https://rdap.test/ip/${target}`]: { handle: "14.194.128.0 - 14.194.191.255", startAddress: "14.194.128.0", endAddress: "14.194.191.255", entities: [abuseEntity(DEAD, "IRT-TATA-DOCOMO-IN")] },
+				"https://rdap.test/ip/14.194.128.0/17": { handle: "14.194.0.0 - 14.195.255.255", startAddress: "14.194.0.0", endAddress: "14.195.255.255", entities: [abuseEntity(DEAD, "IRT-TATA-DOCOMO-IN")] },
+				"https://rdap.test/ip/14.192.0.0/14": { handle: "14.0.0.0 - 14.255.255.255", startAddress: "14.0.0.0", endAddress: "14.255.255.255", entities: [abuseEntity("helpdesk@apnic.net", "IRT-APNIC-AP")] },
+				[`https://stat.ripe.net/data/network-info/data.json?resource=${target}`]: { data: { asns: ["45820"], prefix: "14.194.136.0/21" } },
+				"https://rdap.test/autnum/45820": { handle: "AS45820", name: "TTSL-ISP", entities: [abuseEntity(DEAD, "IRT-TTSLMEIS-IN"), { roles: ["registrant"], handle: "ORG-TD1-AP", vcardArray: ["vcard", [["fn", {}, "text", "TTSL-ISP DIVISION"]]] }] },
+				"https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS45820": { data: { neighbours: [
+					{ asn: 9498, type: "left", power: 7021 },
+					{ asn: 4755, type: "left", power: 68465 },
+					{ asn: 64512, type: "right", power: 999999 },
+				] } },
+				"https://rdap.test/autnum/4755": { handle: "AS4755", entities: [abuseEntity("4755abuse@tatacommunications.com", "IRT-TATACOMM-IN"), { roles: ["registrant"], vcardArray: ["vcard", [["fn", {}, "text", "Tata Communications Limited"]]] }] },
+				...overrides,
+			};
+			return Object.fromEntries(Object.entries(records).filter((entry): entry is [string, Record<string, unknown>] => entry[1] !== undefined));
+		}
+		const resolve = (records: Record<string, Record<string, unknown>>) => resolveAbuseTarget({ normalizedTarget: target, targetType: "ip", observedUrls: [] }, resolverWith(records));
+
+		test("14.194.139.244: every published contact is the dead mailbox, so the upstream transit provider is its one fallback", async () => {
+			const result = await resolve(tataRecords());
+			expect(result.status).toBe("resolved");
+			expect(result.routes).toHaveLength(1);
+			expect(result.routes[0]).toMatchObject({ verifiedEmail: DEAD, routeType: "email" });
+			expect(result.routes[0]?.resolverProvenance).toMatchObject({ email: DEAD, source: "ip_rdap" });
+			expect(result.routes[0]?.resolverProvenance.fallbackContacts).toEqual([{
+				email: "4755abuse@tatacommunications.com",
+				source: "upstream_asn_rdap",
+				entityName: "IRT-TATACOMM-IN",
+				organization: "Tata Communications Limited",
+				transit: { upstreamAsn: 4755, customerAsn: 45820, customerOrganization: "TTSL-ISP DIVISION", customerPrefix: "14.194.136.0/21" },
+			}]);
+			const snapshot = result.resolverSnapshot as Record<string, any>;
+			// The climb stops at APNIC's own 14.0.0.0/8, whose helpdesk is never a fallback.
+			expect(snapshot.parentObjects.objects.map((object: { query: string }) => object.query)).toEqual(["14.194.128.0/17"]);
+			expect(snapshot.upstreamTransit).toMatchObject([{ customerAsn: 45820, upstreamAsn: 4755 }]);
+		});
+
+		test("the mailbox a registry marks as the abuse mailbox comes before the entity's other emails", async () => {
+			const result = await resolve(tataRecords({
+				"https://rdap.test/autnum/4755": { entities: [{ roles: ["abuse"], handle: "IRT-TATACOMM-IN", vcardArray: ["vcard", [
+					["email", {}, "text", "ip.admin@tatacommunications.com"],
+					["email", { pref: "1" }, "text", "4755abuse@tatacommunications.com"],
+					["email", { type: ["work", "Abuse"] }, "text", "typed@tatacommunications.com"],
+				]] }] },
+			}));
+			expect((result.routes[0]!.resolverProvenance.fallbackContacts as Array<{ email: string }>).map((contact) => contact.email))
+				.toEqual(["typed@tatacommunications.com", "4755abuse@tatacommunications.com", "ip.admin@tatacommunications.com"]);
+		});
+
+		test("orders distinct contacts allocation, parent, origin ASN, upstream", async () => {
+			const result = await resolve(tataRecords({
+				"https://rdap.test/ip/14.194.128.0/17": { startAddress: "14.194.0.0", endAddress: "14.195.255.255", entities: [abuseEntity("abuse@parent.example")] },
+				"https://rdap.test/ip/14.192.0.0/14": { startAddress: "14.192.0.0", endAddress: "14.195.255.255", entities: [abuseEntity("abuse@grandparent.example"), abuseEntity("abuse@parent.example")] },
+				"https://rdap.test/ip/14.192.0.0/13": { startAddress: "14.0.0.0", endAddress: "14.255.255.255", entities: [abuseEntity("helpdesk@apnic.net")] },
+				"https://rdap.test/autnum/45820": { entities: [abuseEntity("abuse@origin.example")] },
+			}));
+			const provenance = result.routes[0]!.resolverProvenance;
+			expect(provenance.email).toBe(DEAD);
+			expect((provenance.fallbackContacts as Array<{ email: string }>).map((contact) => contact.email))
+				.toEqual(["abuse@parent.example", "abuse@grandparent.example", "abuse@origin.example", "4755abuse@tatacommunications.com"]);
+		});
+
+		test("a server that does not answer less-specific queries, or answers with the same object, ends the climb", async () => {
+			const notFound = await resolve(tataRecords({ "https://rdap.test/ip/14.194.128.0/17": undefined }));
+			expect((notFound.resolverSnapshot as Record<string, any>).parentObjects).toEqual({ objects: [] });
+			const same = await resolve(tataRecords({ "https://rdap.test/ip/14.194.128.0/17": { startAddress: "14.194.128.0", endAddress: "14.194.191.255", entities: [abuseEntity("abuse@loop.example")] } }));
+			expect((same.resolverSnapshot as Record<string, any>).parentObjects).toEqual({ objects: [] });
+			expect((same.routes[0]!.resolverProvenance.fallbackContacts as Array<{ email: string }>).map((contact) => contact.email)).not.toContain("abuse@loop.example");
+		});
+
+		test("reads at most four objects above the allocation", async () => {
+			const records = tataRecords();
+			// A tree that never reaches the registry: /15, /14, /13, /12, /11.
+			const levels = [
+				["14.194.128.0/17", "14.194.0.0", "14.195.255.255"],
+				["14.192.0.0/14", "14.192.0.0", "14.195.255.255"],
+				["14.192.0.0/13", "14.192.0.0", "14.199.255.255"],
+				["14.192.0.0/12", "14.192.0.0", "14.207.255.255"],
+				["14.192.0.0/11", "14.192.0.0", "14.223.255.255"],
+			] as const;
+			for (const [index, [query, start, end]] of levels.entries()) records[`https://rdap.test/ip/${query}`] = { startAddress: start, endAddress: end, entities: [abuseEntity(`abuse@level${index}.example`)] };
+			const result = await resolve(records);
+			expect((result.resolverSnapshot as Record<string, any>).parentObjects.objects).toHaveLength(4);
+			expect((result.routes[0]!.resolverProvenance.fallbackContacts as Array<{ email: string }>).map((contact) => contact.email).slice(0, 4))
+				.toEqual(["abuse@level0.example", "abuse@level1.example", "abuse@level2.example", "abuse@level3.example"]);
+		});
+
+		test("no upstream when RIPEstat sees none, the only one is the origin itself, or its lookup fails", async () => {
+			for (const neighbours of [undefined, { data: { neighbours: [] } }, { data: { neighbours: [{ asn: 45820, type: "left", power: 5 }] } }]) {
+				const result = await resolve(tataRecords({ "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS45820": neighbours }));
+				expect(result.routes[0]?.resolverProvenance).not.toHaveProperty("fallbackContacts");
+			}
+			const failing = await resolveAbuseTarget({ normalizedTarget: target, targetType: "ip", observedUrls: [] }, {
+				...resolverWith(tataRecords()),
+				httpRetryAttempts: 1,
+				fetch: async (input) => String(input).includes("asn-neighbours") ? new Response(null, { status: 500 }) : resolverWith(tataRecords()).fetch!(input),
+			});
+			expect(failing.routes[0]).toMatchObject({ verifiedEmail: DEAD });
+			expect((failing.resolverSnapshot as Record<string, any>).upstreamTransit[0].error).toBeString();
+		});
+
+		test("an upstream publishing only a registry mailbox adds nothing", async () => {
+			const result = await resolve(tataRecords({ "https://rdap.test/autnum/4755": { entities: [abuseEntity("abuse@ripe.net")] } }));
+			expect(result.routes[0]?.resolverProvenance).not.toHaveProperty("fallbackContacts");
+		});
+
+		test("when the allocation publishes no contact, the first fallback becomes the route", async () => {
+			const result = await resolve(tataRecords({
+				[`https://rdap.test/ip/${target}`]: { startAddress: "14.194.128.0", endAddress: "14.194.191.255", entities: [] },
+				"https://rdap.test/ip/14.194.128.0/17": { startAddress: "14.194.0.0", endAddress: "14.195.255.255", entities: [] },
+				"https://rdap.test/autnum/45820": { entities: [] },
+			}));
+			expect(result.routes[0]).toMatchObject({ verifiedEmail: "4755abuse@tatacommunications.com" });
+			expect(result.routes[0]?.resolverProvenance).toMatchObject({ source: "upstream_asn_rdap", transit: { customerAsn: 45820 } });
+		});
+
+		test("a hosting address's fallbacks belong to the domain's infrastructure route, beside its first contact", async () => {
+			const result = await resolveAbuseTarget(
+				{ normalizedTarget: "zealousvoice.com", targetType: "domain", observedUrls: [] },
+				resolverWith({ ...tataRecords(), "https://rdap.test/domain/zealousvoice.com": { entities: [] } }, async () => "", async () => [target]),
+			);
+			const route = result.routes.find((candidate) => candidate.verifiedEmail === DEAD)!;
+			expect(route.resolverProvenance).toMatchObject({
+				source: "domain_infrastructure_ip",
+				originatingIp: target,
+				ipRouteProvenance: { email: DEAD, source: "ip_rdap" },
+				fallbackContacts: [{ email: "4755abuse@tatacommunications.com" }],
+			});
+			expect(route.resolverProvenance.ipRouteProvenance).not.toHaveProperty("fallbackContacts");
+		});
 	});
 
 	test("does not fall through to BGP when the initial IP RDAP lookup is absent", async () => {

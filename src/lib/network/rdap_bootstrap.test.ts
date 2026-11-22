@@ -53,6 +53,13 @@ describe("finding the authoritative RDAP server", () => {
 		expect(await locate("ip", "10.0.0.1")).toBeUndefined();
 	});
 
+	test("a CIDR goes to the server of its network address, with its length in the path", async () => {
+		const { locate } = locatorWithRegistries();
+		expect(await locate("ip", "216.24.0.0/17")).toBe("https://rdap.more-specific.test/ip/216.24.0.0/17");
+		expect(await locate("ip", "2a01:4f8::/31")).toBe("https://rdap.db.ripe.net/ip/2a01:4f8::/31");
+		expect(await locate("ip", "10.0.0.0/7")).toBeUndefined();
+	});
+
 	test("an IPv6 address, compressed or with an IPv4 tail, keeps its colons in the path", async () => {
 		const { locate } = locatorWithRegistries();
 		expect(await locate("ip", "2606:4700::1")).toBe("https://rdap.arin.net/registry/ip/2606:4700::1");

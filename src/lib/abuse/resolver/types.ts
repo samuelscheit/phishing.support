@@ -49,8 +49,21 @@ export type ResolvedAbuseTarget = {
 
 export type AbuseMailbox = {
 	email: string;
-	source: "registrar_rdap" | "domain_rdap" | "domain_whois" | "ip_rdap" | "ip_whois" | "asn_rdap";
+	source: "registrar_rdap" | "domain_rdap" | "domain_whois" | "ip_rdap" | "ip_whois" | "parent_ip_rdap" | "asn_rdap" | "upstream_asn_rdap";
 	entityHandle?: string;
 	entityName?: string;
 	roles?: string[];
+	/** The organization that publishes the mailbox, when its record names one (an ASN's holder). */
+	organization?: string;
+	/** For an upstream's mailbox: whose traffic it carries. */
+	transit?: TransitRelation;
+};
+
+/** An upstream reached because its customer network's own abuse contacts failed. */
+type TransitRelation = {
+	upstreamAsn: number;
+	customerAsn: number;
+	customerOrganization?: string;
+	/** The announced prefix that holds the reported address. */
+	customerPrefix?: string;
 };

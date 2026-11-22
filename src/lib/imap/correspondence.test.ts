@@ -10,8 +10,12 @@ import { sendAbuseEmailRoute } from "../abuse/mail/send";
 import { abuseCaseTag, authenticatedSender, canonicalSubject, subjectRepeats } from "../abuse/mail/correlation";
 import { deliveryFailure } from "../abuse/mail/delivery_report";
 import { AbuseRepository } from "../abuse/repository";
-import { abuseJobs } from "../abuse/schema";
-import { classifyReply } from "../abuse/worker/mail";
+import { abuseJobs, abuseMailMessages } from "../abuse/schema";
+import { classifyReply, nextContactRoute, routeToNextContact } from "../abuse/worker/mail";
+import { repairIpRoutesWithoutFallback } from "../abuse/worker/ip_fallback_repair";
+import { createAbuseEmailDraft } from "../abuse/mail/draft";
+import type { ResolverDependencies } from "../abuse/resolver";
+import { testRdapLocator } from "../network/rdap_test_helpers";
 import { ensureRelayRefusalResends, readSendEmailPayload } from "../abuse/worker/email";
 import { repairMisreadBounces } from "../abuse/worker/misread_bounces";
 import { persistInboundAbuseMail } from "../abuse/mail/inbound";
@@ -561,6 +565,178 @@ describe("delivery-status notifications", () => {
 		const sent = await sentReport("autoresponder.example.com", "network-abuse@cloud.example");
 		await ingestFetchedMail({ uid: nextUid++, source: deliveryReportFixture("google-noreply-autoresponder.eml", sent.outbound) }, config, { createIntakeSubmission: noIntake });
 		expect(await inboundMail(sent.reportId)).toMatchObject([{ kind: "reply", fromAddress: "network-abuse+noreply@google.com" }]);
+	});
+
+	describe("a mailbox that keeps failing temporarily", () => {
+		const lastBounce = async (reportId: bigint) => (await inboundMail(reportId)).filter((message) => message.kind === "bounce").at(-1)!;
+		const lastStatusChange = async (reportId: bigint, routeId: bigint) => (await AbuseRepository.listEvents(reportId)).filter((event) => event.routeId === routeId && event.eventType === "route.status_changed").at(-1)?.data;
+
+		test("is resent with doubling waits until its sixth send fails, then the report moves on", async () => {
+			const recipient = "abuse@always-greylisted.example";
+			const sent = await reportWithNextContact("always-greylisted.example.com", recipient);
+			let outbound: Outbound = sent.outbound;
+			const waits: number[] = [];
+			for (let send = 1; send <= 6; send++) {
+				await ingestFetchedMail({ uid: nextUid++, source: icloudBounce(outbound, recipient, "451") }, config, { createIntakeSubmission: noIntake });
+				await classifyReply((await lastBounce(sent.reportId)).id);
+				expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
+				const queued = await queuedSends(sent.route.id);
+				if (send === 6) {
+					expect(queued).toEqual([]);
+					break;
+				}
+				expect(queued).toHaveLength(1);
+				waits.push(Math.round((queued[0]!.nextAttemptAt!.getTime() - queued[0]!.createdAt.getTime()) / 60_000));
+				expect(await contactsOf(sent.reportId)).toEqual([recipient]);
+				outbound = await resendReport(sent);
+			}
+			expect(waits).toEqual([15, 30, 60, 120, 240]);
+			expect(await contactsOf(sent.reportId)).toEqual([recipient, NEXT_CONTACT]);
+			expect(await lastStatusChange(sent.reportId, sent.route.id)).toMatchObject({ to: "delivery_failed", reason: "delivery_retries_exhausted" });
+			expect((await AbuseRepository.getMailMessage((await lastBounce(sent.reportId)).id))).toMatchObject({ classification: "bounce", disposition: "delivery_status_notification" });
+		});
+
+		test("three days after its first send, a temporary failure counts as permanent", async () => {
+			const recipient = "abuse@slow-queue.example";
+			const sent = await reportWithNextContact("slow-queue.example.com", recipient);
+			(await getDb()).update(abuseMailMessages).set({ createdAt: new Date(Date.now() - 3 * 24 * 60 * 60_000) }).where(eq(abuseMailMessages.id, sent.outbound.id)).run();
+			await ingestFetchedMail({ uid: nextUid++, source: icloudBounce(sent.outbound, recipient, "451") }, config, { createIntakeSubmission: noIntake });
+			await classifyReply((await lastBounce(sent.reportId)).id);
+			expect(await queuedSends(sent.route.id)).toEqual([]);
+			expect(await contactsOf(sent.reportId)).toEqual([recipient, NEXT_CONTACT]);
+			expect((await AbuseRepository.getMailMessage(sent.outbound.id))?.error).toContain("treated as permanent");
+		});
+
+		test("without another contact the route simply ends failed", async () => {
+			const recipient = "abuse@greylisted-alone.example";
+			const sent = await sentReport("greylisted-alone.example.com", recipient);
+			(await getDb()).update(abuseMailMessages).set({ createdAt: new Date(Date.now() - 4 * 24 * 60 * 60_000) }).where(eq(abuseMailMessages.id, sent.outbound.id)).run();
+			await ingestFetchedMail({ uid: nextUid++, source: icloudBounce(sent.outbound, recipient, "451") }, config, { createIntakeSubmission: noIntake });
+			await classifyReply((await lastBounce(sent.reportId)).id);
+			expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
+			expect(await queuedSends(sent.route.id)).toEqual([]);
+			expect(await contactsOf(sent.reportId)).toEqual([recipient]);
+		});
+	});
+
+	describe("a hosting address's contacts after its own mailbox is dead", () => {
+		const IP = "14.194.139.244";
+		const DEAD = "ip.abuse@tatatel.co.in";
+		const UPSTREAM = "4755abuse@tatacommunications.com";
+		const transit = { upstreamAsn: 4755, customerAsn: 45820, customerOrganization: "TTSL-ISP DIVISION", customerPrefix: "14.194.136.0/21" };
+		const infrastructureProvenance = (domain: string, fallbackContacts?: unknown[]) => ({
+			source: "domain_infrastructure_ip",
+			originatingDomain: domain,
+			originatingIp: IP,
+			dnsResolution: { publicAddresses: [IP] },
+			ipRouteProvenance: { email: DEAD, source: "ip_rdap", entityName: "IRT-TATA-DOCOMO-IN" },
+			...(fallbackContacts ? { fallbackContacts } : {}),
+		});
+		const bounceDead = async (sent: Awaited<ReturnType<typeof sentReport>>) => {
+			await ingestFetchedMail({ uid: nextUid++, source: deliveryReportFixture("office365-forwarded-recipients-not-found.eml", sent.outbound) }, config, { createIntakeSubmission: noIntake });
+			await classifyReply((await inboundMail(sent.reportId)).find((message) => message.kind === "bounce")!.id);
+		};
+
+		test("the upstream gets the report as the route found through the same address, told whose network it is and which mailbox bounced", async () => {
+			const sent = await sentReport("zealous-upstream.example.com", DEAD, undefined, undefined, infrastructureProvenance("zealous-upstream.example.com", [
+				{ email: UPSTREAM, source: "upstream_asn_rdap", entityName: "IRT-TATACOMM-IN", organization: "Tata Communications Limited", transit },
+			]));
+			await bounceDead(sent);
+			const next = (await AbuseRepository.listRoutes(sent.reportId)).find((route) => route.verifiedEmail === UPSTREAM)!;
+			expect(next).toMatchObject({ status: "verified", providerDisplayName: "Tata Communications Limited" });
+			expect(next.resolverProvenance).toEqual({
+				source: "domain_infrastructure_ip",
+				originatingDomain: "zealous-upstream.example.com",
+				originatingIp: IP,
+				dnsResolution: { publicAddresses: [IP] },
+				ipRouteProvenance: {
+					email: UPSTREAM, source: "upstream_asn_rdap", entityName: "IRT-TATACOMM-IN", organization: "Tata Communications Limited", transit,
+					reason: "fallback_after_permanent_bounce", bouncedRouteId: sent.route.id.toString(), bouncedEmails: [DEAD],
+				},
+			});
+			expect(await nextContactRoute(sent.route)).toMatchObject({ id: next.id });
+
+			const report = (await AbuseRepository.getReport(sent.reportId))!;
+			const [target] = await AbuseRepository.listTargets(sent.reportId);
+			const draft = await createAbuseEmailDraft({ report, target: target!, route: next, recipient: UPSTREAM }, { generateSummary: async () => undefined });
+			expect(draft.recipientLabel).toBe("Tata Communications Limited");
+			expect(draft.body).toContain("Why you: the reported address is in 14.194.136.0/21, announced by AS45820 (TTSL-ISP DIVISION), your downstream customer, whose traffic you carry as its upstream transit provider.");
+			expect(draft.body).toContain(`Its published abuse mailbox ${DEAD} rejects mail, so please pass this report to your customer or act on it.`);
+			expect(draft.body).toContain(`Hosting IP address: ${IP}`);
+			expect(draft.body).not.toContain("Public resolver data lists this address as the abuse contact");
+		});
+
+		test("a chain of dead mailboxes is walked one bounce at a time, each named to the next", async () => {
+			const sent = await sentReport("zealous-chain.example.com", DEAD, undefined, undefined, infrastructureProvenance("zealous-chain.example.com", [
+				{ email: "abuse@origin-asn.example", source: "asn_rdap" },
+				{ email: UPSTREAM, source: "upstream_asn_rdap", transit },
+			]));
+			await bounceDead(sent);
+			const origin = (await AbuseRepository.listRoutes(sent.reportId)).find((route) => route.verifiedEmail === "abuse@origin-asn.example")!;
+			expect(origin.resolverProvenance).toMatchObject({ fallbackContacts: [{ email: UPSTREAM }], ipRouteProvenance: { bouncedEmails: [DEAD] } });
+			await AbuseRepository.transitionRouteStatus({ routeId: origin.id, from: "verified", to: "delivery_failed" });
+			await routeToNextContact(origin.id);
+			const upstream = (await AbuseRepository.listRoutes(sent.reportId)).find((route) => route.verifiedEmail === UPSTREAM)!;
+			expect(upstream.resolverProvenance).not.toHaveProperty("fallbackContacts");
+			expect(upstream.resolverProvenance.ipRouteProvenance).toMatchObject({ bouncedRouteId: origin.id.toString(), bouncedEmails: [DEAD, "abuse@origin-asn.example"] });
+		});
+
+		describe("the one-off repair of IP routes that bounced with nowhere to go", () => {
+			const ASN_NEIGHBOURS = "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS45820";
+			/** 14.194.139.244 as APNIC and RIPEstat publish it (2026-11-22). */
+			const records: Record<string, unknown> = {
+				[`https://rdap.test/ip/${IP}`]: { startAddress: "14.194.128.0", endAddress: "14.194.191.255", entities: [{ roles: ["abuse"], handle: "IRT-TATA-DOCOMO-IN", vcardArray: ["vcard", [["email", {}, "text", DEAD]]] }] },
+				[`https://stat.ripe.net/data/network-info/data.json?resource=${IP}`]: { data: { asns: ["45820"], prefix: "14.194.136.0/21" } },
+				"https://rdap.test/autnum/45820": { entities: [{ roles: ["abuse"], vcardArray: ["vcard", [["email", {}, "text", DEAD]]] }, { roles: ["registrant"], vcardArray: ["vcard", [["fn", {}, "text", "TTSL-ISP DIVISION"]]] }] },
+				[ASN_NEIGHBOURS]: { data: { neighbours: [{ asn: 4755, type: "left", power: 68465 }] } },
+				"https://rdap.test/autnum/4755": { entities: [{ roles: ["abuse"], handle: "IRT-TATACOMM-IN", vcardArray: ["vcard", [["email", {}, "text", UPSTREAM]]] }, { roles: ["registrant"], vcardArray: ["vcard", [["fn", {}, "text", "Tata Communications Limited"]]] }] },
+			};
+			const dependencies = (overrides: Record<string, unknown> = {}): ResolverDependencies => ({
+				assertPublicHost: async () => undefined,
+				rdapLocator: testRdapLocator,
+				fetch: async (input) => {
+					const payload = { ...records, ...overrides }[String(input)];
+					return payload ? new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/rdap+json" } }) : new Response(null, { status: 404 });
+				},
+			});
+			const repairsOf = async (deps: ResolverDependencies, ...sent: Array<{ route: { id: bigint } }>) =>
+				(await repairIpRoutesWithoutFallback(deps)).filter((repair) => sent.some((one) => one.route.id.toString() === repair.routeId));
+
+			test("re-resolves the address and moves the report on to the upstream; a rerun changes nothing", async () => {
+				const sent = await sentReport("zealousvoice-repair.example.com", DEAD, undefined, undefined, infrastructureProvenance("zealousvoice-repair.example.com"));
+				await bounceDead(sent);
+				expect(await contactsOf(sent.reportId)).toEqual([DEAD]);
+
+				expect(await repairsOf(dependencies(), sent)).toEqual([{ routeId: sent.route.id.toString(), verifiedEmail: DEAD, ip: IP, result: "routed", nextContact: UPSTREAM }]);
+				const next = (await AbuseRepository.listRoutes(sent.reportId)).find((route) => route.verifiedEmail === UPSTREAM)!;
+				expect(next.resolverProvenance).toMatchObject({ originatingIp: IP, ipRouteProvenance: { transit: { customerAsn: 45820, upstreamAsn: 4755 }, bouncedEmails: [DEAD] } });
+				expect((await sendJobs(next.id)).map((job) => job.status)).toEqual(["queued"]);
+
+				expect(await repairsOf(dependencies(), sent)).toEqual([{ routeId: sent.route.id.toString(), verifiedEmail: DEAD, ip: IP, result: "skipped", reason: "already_routed_on", nextContact: UPSTREAM }]);
+				expect(await contactsOf(sent.reportId)).toEqual([DEAD, UPSTREAM]);
+			});
+
+			test("an address that publishes nothing new leaves the route as it was", async () => {
+				const sent = await sentReport("zealous-nothing.example.com", DEAD, undefined, undefined, infrastructureProvenance("zealous-nothing.example.com"));
+				await bounceDead(sent);
+				expect(await repairsOf(dependencies({ [ASN_NEIGHBOURS]: { data: { neighbours: [] } } }), sent))
+					.toEqual([{ routeId: sent.route.id.toString(), verifiedEmail: DEAD, ip: IP, result: "skipped", reason: "no_other_contact" }]);
+				expect(await contactsOf(sent.reportId)).toEqual([DEAD]);
+			});
+
+			test("leaves alone a domain's own contact and a route still resending after a temporary failure", async () => {
+				const domainRoute = await sentReport("dead-registrar.example.com", "abuse@dead-registrar.example", undefined, undefined, { email: "abuse@dead-registrar.example", source: "domain_rdap" });
+				await bounceDead(domainRoute);
+				const greylisted = await sentReport("zealous-greylisted.example.com", DEAD, undefined, undefined, infrastructureProvenance("zealous-greylisted.example.com"));
+				await ingestFetchedMail({ uid: nextUid++, source: icloudBounce(greylisted.outbound, DEAD, "451") }, config, { createIntakeSubmission: noIntake });
+				await classifyReply((await inboundMail(greylisted.reportId)).find((message) => message.kind === "bounce")!.id);
+				expect(await repairsOf(dependencies(), domainRoute, greylisted)).toEqual([
+					{ routeId: domainRoute.route.id.toString(), verifiedEmail: "abuse@dead-registrar.example", result: "skipped", reason: "not_ip_derived" },
+					{ routeId: greylisted.route.id.toString(), verifiedEmail: DEAD, ip: IP, result: "skipped", reason: "not_permanently_failed" },
+				]);
+				expect(await contactsOf(greylisted.reportId)).toEqual([DEAD]);
+			});
+		});
 	});
 
 	describe("the one-off repair of routes a misread delivery report ended", () => {

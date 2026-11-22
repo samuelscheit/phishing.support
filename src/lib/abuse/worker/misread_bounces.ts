@@ -4,7 +4,7 @@ import { deliveryFailure, deliveryReport } from "../mail/delivery_report";
 import { isRelayRefusal } from "../mail/relay_refusal";
 import { AbuseRepository } from "../repository";
 import type { AbuseMailMessage } from "../schema";
-import { classifyReply } from "./mail";
+import { classifyReply, nextContactRoute } from "./mail";
 
 export type MisreadBounceRepair = {
 	routeId: string;
@@ -36,7 +36,7 @@ export type MisreadBounceRepair = {
  */
 export async function repairMisreadBounces(): Promise<MisreadBounceRepair[]> {
 	const repairs: MisreadBounceRepair[] = [];
-	for (const route of await AbuseRepository.listRoutesEndedByUncorrelatedBounce()) {
+	for (const route of await AbuseRepository.listEmailRoutesByLastStatusChange("provider_rejected", ["uncorrelated_provider_bounce"])) {
 		const mail = (await AbuseRepository.listMailForReport(route.reportId))
 			.filter((message) => message.routeId === route.id)
 			.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
@@ -57,7 +57,7 @@ export async function repairMisreadBounces(): Promise<MisreadBounceRepair[]> {
 			continue;
 		}
 		await classifyReply(settling.message.id);
-		const next = (await AbuseRepository.listRoutes(route.reportId)).find((other) => other.resolverProvenance.bouncedRouteId === route.id.toString());
+		const next = await nextContactRoute(route);
 		repairs.push({
 			...outcome,
 			result: "repaired",
