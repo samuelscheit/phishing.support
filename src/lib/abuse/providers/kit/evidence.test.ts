@@ -6,6 +6,7 @@ import {
 	providerEvidenceImageArtifactMatches,
 	providerEvidenceImageHasExpectedMagic,
 	selectProviderEvidenceImageArtifact,
+	selectProviderEvidenceImageArtifacts,
 	storedProviderEvidenceImageReference,
 	type ProviderEvidenceImageContract,
 } from "./evidence";
@@ -22,6 +23,24 @@ const contract = {
 const artifact = (overrides: Partial<AbuseArtifact> = {}) => evidenceArtifact(png, { name: "evidence.png", ...overrides });
 
 describe("shared provider evidence-image contract", () => {
+	test("selects up to the limit of intact images, in order, each image once", () => {
+		const other = Buffer.concat([png, Buffer.from([0])]);
+		const third = Buffer.concat([png, Buffer.from([1])]);
+		const candidates = [
+			artifact({ id: 1n, mimeType: "image/gif" }),
+			artifact({ id: 2n }),
+			artifact({ id: 3n, name: "copy.png" }),
+			evidenceArtifact(other, { id: 4n, kind: "outbound_mail_attachment" }),
+			evidenceArtifact(other, { id: 5n }),
+			evidenceArtifact(third, { id: 6n }),
+		];
+		expect(selectProviderEvidenceImageArtifacts(candidates, contract, 2).map((reference) => reference.artifactId)).toEqual(["2", "5"]);
+		expect(selectProviderEvidenceImageArtifacts(candidates, contract, 5).map((reference) => reference.artifactId)).toEqual(["2", "5", "6"]);
+		expect(selectProviderEvidenceImageArtifacts([], contract, 3)).toEqual([]);
+		expect(selectProviderEvidenceImageArtifact(candidates, contract)?.artifactId).toBe("2");
+		for (const limit of [0, -1, 1.5, Number.NaN]) expect(() => selectProviderEvidenceImageArtifacts(candidates, contract, limit)).toThrow("limit is invalid");
+	});
+
 	test("recognizes every provider-supported signature and rejects mismatched declarations", () => {
 		expect(providerEvidenceImageHasExpectedMagic(Buffer.from("GIF89a payload"), "image/gif")).toBeTrue();
 		expect(providerEvidenceImageHasExpectedMagic(Buffer.from([0xff, 0xd8, 0xff, 0x00]), "image/jpeg")).toBeTrue();

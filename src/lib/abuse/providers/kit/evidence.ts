@@ -100,26 +100,42 @@ export function isIntactProviderEvidenceImageArtifact<MimeType extends ProviderE
 		&& sha256Hex(artifact.blob) === artifact.sha256.toLowerCase();
 }
 
-/** Select one intact original image and persist only an immutable byte reference. */
-export function selectProviderEvidenceImageArtifact<MimeType extends ProviderEvidenceImageMimeType>(
+/**
+ * Select up to `limit` intact original images, in artifact order, and persist
+ * only immutable byte references. The same image stored twice is selected once.
+ */
+export function selectProviderEvidenceImageArtifacts<MimeType extends ProviderEvidenceImageMimeType>(
 	artifacts: readonly AbuseArtifact[],
 	contract: ProviderEvidenceImageContract<MimeType>,
-): ProviderEvidenceImageReference<MimeType> | undefined {
+	limit: number,
+): ProviderEvidenceImageReference<MimeType>[] {
 	assertContract(contract);
+	if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Provider evidence-image limit is invalid.");
+	const selected: ProviderEvidenceImageReference<MimeType>[] = [];
 	for (const artifact of artifacts) {
+		if (selected.length === limit) break;
 		if (!isIntactProviderEvidenceImageArtifact(artifact, contract)) continue;
 		const artifactId = artifact.id.toString();
 		const sha256 = artifact.sha256.toLowerCase();
-		return {
+		if (selected.some((reference) => reference.sha256 === sha256)) continue;
+		selected.push({
 			artifactId,
 			name: artifact.name,
 			mimeType: artifact.mimeType,
 			sha256,
 			size: artifact.size,
 			filename: generatedFilename(contract, artifactId, sha256, artifact.mimeType),
-		};
+		});
 	}
-	return undefined;
+	return selected;
+}
+
+/** Select one intact original image and persist only an immutable byte reference. */
+export function selectProviderEvidenceImageArtifact<MimeType extends ProviderEvidenceImageMimeType>(
+	artifacts: readonly AbuseArtifact[],
+	contract: ProviderEvidenceImageContract<MimeType>,
+): ProviderEvidenceImageReference<MimeType> | undefined {
+	return selectProviderEvidenceImageArtifacts(artifacts, contract, 1)[0];
 }
 
 /** Read only an evidence reference previously built from the provider contract. */

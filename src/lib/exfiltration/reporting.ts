@@ -1,6 +1,7 @@
 import type { ReporterMetadata } from "../http/reporter_headers";
 import { AbuseRepository, type CreatedAbuseReport } from "../abuse/repository";
 import { normalizeAbuseTarget, normalizeObservedUrl, type NormalizedAbuseTarget, type ValidatedAbuseReportRequest } from "../abuse/contracts";
+import { pageScreenshotEvidence, type PageScreenshot } from "../abuse/linked_host_report";
 import type { ExfiltrationBackend } from "./types";
 import { hashStableJson, sha256Hex, stableJson } from "../util/hash";
 
@@ -52,6 +53,8 @@ export function buildExfiltrationBackendRequest(params: {
 	backend: ExfiltrationBackend;
 	pageUrl: string;
 	observedAt: Date;
+	/** The confirmed page's screenshot: provider forms often require one, and it shows what fed this backend. */
+	pageScreenshot?: PageScreenshot;
 }): ValidatedAbuseReportRequest {
 	const target = backendTarget(params.backend);
 	const reportDescription = description(params);
@@ -71,7 +74,10 @@ export function buildExfiltrationBackendRequest(params: {
 		allegationCategory: "phishing",
 		description: reportDescription,
 		observedUrls: [{ target: target.normalizedTarget, urls: target.observedUrls }],
-		evidence: [{ filename: "exfiltration-evidence.json", mimeType: "application/json", buffer: evidence, sha256: sha256Hex(evidence) }],
+		evidence: [
+			{ filename: "exfiltration-evidence.json", mimeType: "application/json", buffer: evidence, sha256: sha256Hex(evidence) },
+			...(params.pageScreenshot ? [pageScreenshotEvidence(params.pageScreenshot)] : []),
+		],
 		idempotencyKey,
 		requestPayloadHash: hashStableJson({ idempotencyKey, target, reportDescription, evidenceSha256: sha256Hex(evidence) }),
 	};
@@ -83,6 +89,7 @@ export async function reportExfiltrationBackend(params: {
 	backend: ExfiltrationBackend;
 	pageUrl: string;
 	observedAt: Date;
+	pageScreenshot?: PageScreenshot;
 	reporter: ReporterMetadata;
 }): Promise<CreatedAbuseReport> {
 	return AbuseRepository.createReport({

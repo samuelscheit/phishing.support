@@ -3,12 +3,16 @@ import { describe, expect, test } from "bun:test";
 import { validateSchema } from "../../browser/task/agent";
 import { GENERIC_PROVIDER_FORM_ADAPTER, genericProviderFormAdapterHasValidHash } from "../providers/generic_form";
 import { validateGenericProviderFormOutput } from "./output_validation";
-import { buildGenericProviderFormTask } from "./form_task";
+import { buildGenericProviderFormPayload, buildGenericProviderFormTask, GENERIC_PROVIDER_FORM_EVIDENCE_CONTRACT, storedGenericProviderFormEvidence, type GenericProviderFormEvidence } from "./form_task";
+import { selectProviderEvidenceImageArtifacts } from "../providers/kit/evidence";
+import { evidenceArtifact } from "../providers/kit/testing";
 
 const reporter = { name: "Phishing Support", organization: "Phishing Support", website: "https://phishing.support", email: "support@phishing.support" };
 
-function task(overrides: Partial<Parameters<typeof buildGenericProviderFormTask>[0]> = {}) {
-	return buildGenericProviderFormTask({
+type TaskParams = Parameters<typeof buildGenericProviderFormTask>[0];
+
+function params(overrides: Partial<TaskParams> = {}): TaskParams {
+	return {
 		entryUrl: "https://abuse.provider.example.com/report",
 		allowedDomains: ["provider.example.com"],
 		target: "example.com",
@@ -19,8 +23,21 @@ function task(overrides: Partial<Parameters<typeof buildGenericProviderFormTask>
 		reporter,
 		observedAt: new Date("2026-10-26T09:39:58Z"),
 		maxSteps: 30,
+		evidence: [],
 		...overrides,
-	});
+	} as TaskParams;
+}
+
+const task = (overrides: Partial<TaskParams> = {}) => buildGenericProviderFormTask(params(overrides));
+
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9JH1EAAAAASUVORK5CYII=", "base64");
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]);
+/** Screenshots selected the way the worker selects them. */
+function screenshots(): GenericProviderFormEvidence[] {
+	return selectProviderEvidenceImageArtifacts([
+		evidenceArtifact(PNG, { id: 11n, name: "website.png" }),
+		evidenceArtifact(JPEG, { id: 12n, name: "lure-page.jpg", mimeType: "image/jpeg" }),
+	], GENERIC_PROVIDER_FORM_EVIDENCE_CONTRACT, 3);
 }
 
 function genericProviderPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -74,8 +91,62 @@ describe("the generic provider-form task", () => {
 		expect(goal).toContain("Do not click account creation, purchase, payment, login, or unknown irreversible controls.");
 		expect(goal).toContain("Tick a consent or terms checkbox only when it belongs to this report form and the form requires it.");
 		expect(goal).toContain("call needs_input");
-		expect(goal).toContain("do not upload files");
 		for (const landmark of GENERIC_PROVIDER_FORM_ADAPTER.requiredSemanticLandmarks) expect(goal).toContain(landmark);
+	});
+
+	test("without screenshots it uploads nothing and asks a person when the form requires an attachment", () => {
+		const { goal } = task();
+		expect(goal).toContain('"evidenceFiles":[]');
+		expect(goal).toContain("No evidence file is available: do not upload files. If the form cannot be sent without an attachment, do not submit: call needs_input");
+		expect(goal).not.toContain("attach them there with upload");
+	});
+
+	test("with screenshots it names exactly those files, in the immutable payload and the code-owned upload rule", () => {
+		const evidence = screenshots();
+		expect(evidence.map((file) => file.filename)).toEqual([
+			`phishing_evidence_11_${evidence[0]!.sha256.slice(0, 12)}.png`,
+			`phishing_evidence_12_${evidence[1]!.sha256.slice(0, 12)}.jpg`,
+		]);
+		const { goal } = task({ evidence });
+		expect(goal).toContain(`"evidenceFiles":${JSON.stringify(evidence.map((file) => file.filename))}`);
+		expect(goal).toContain(`screenshots of the reported phishing page (${evidence[0]!.filename}, ${evidence[1]!.filename}); they are the only files you may attach.`);
+		expect(goal).toContain("attach them there with upload, naming each file exactly as listed");
+		expect(goal).toContain("Attach nothing anywhere else.");
+		expect(goal).not.toContain("do not upload files");
+		// The original artifact names are not file names the agent can use.
+		expect(goal).not.toContain("lure-page.jpg");
+	});
+
+	test("refuses more screenshots than the adapter allows", () => {
+		const [one] = screenshots();
+		expect(() => task({ evidence: Array.from({ length: GENERIC_PROVIDER_FORM_ADAPTER.evidence.maximumFiles + 1 }, () => one!) })).toThrow("exceeds the adapter's file limit");
+	});
+
+	test("the run payload records the task, its evidence references and the submission contract, and its evidence reads back", () => {
+		const evidence = screenshots();
+		const payload = buildGenericProviderFormPayload(params({ evidence }));
+		expect(payload).toMatchObject({
+			adapter: "generic_verified_provider_form",
+			adapterVersion: GENERIC_PROVIDER_FORM_ADAPTER.version,
+			entryUrl: "https://abuse.provider.example.com/report",
+			verifiedDomains: ["provider.example.com"],
+			evidence,
+			contract: { entryUrl: "https://abuse.provider.example.com/report", target: "example.com", observedUrls: ["https://login.example.com/collect"], allowedFinalDomains: ["provider.example.com"] },
+		});
+		// Stored as JSON and read back, the references are intact.
+		expect(storedGenericProviderFormEvidence(JSON.parse(JSON.stringify(payload.evidence)))).toEqual(evidence);
+		expect(storedGenericProviderFormEvidence([])).toEqual([]);
+	});
+
+	test("a stored evidence list that is missing, too long, or holds a forged reference is not trusted", () => {
+		const [png] = screenshots();
+		expect(storedGenericProviderFormEvidence(undefined)).toBeUndefined();
+		expect(storedGenericProviderFormEvidence({})).toBeUndefined();
+		expect(storedGenericProviderFormEvidence([png, png, png, png])).toBeUndefined();
+		expect(storedGenericProviderFormEvidence([{ ...png, filename: "../../etc/passwd" }])).toBeUndefined();
+		expect(storedGenericProviderFormEvidence([{ ...png, mimeType: "image/gif" }])).toBeUndefined();
+		expect(storedGenericProviderFormEvidence([{ ...png, size: GENERIC_PROVIDER_FORM_ADAPTER.evidence.maximumBytes + 1 }])).toBeUndefined();
+		expect(storedGenericProviderFormEvidence([png, { ...png, sha256: "0".repeat(64) }])).toBeUndefined();
 	});
 
 	test("refuses an entry URL outside the verified provider, an incomplete payload, and a tampered definition", () => {

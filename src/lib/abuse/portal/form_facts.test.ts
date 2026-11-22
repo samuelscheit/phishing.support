@@ -24,6 +24,7 @@ describe("provider form facts from the phishing analysis", () => {
 		const payload = buildGenericProviderFormTask({
 			entryUrl: "https://www.dynadot.com/community/contact",
 			allowedDomains: ["dynadot.com"],
+			evidence: [],
 			target: "swisscapitalloans.sc-sec.online",
 			allegationCategory: "phishing",
 			description: swissCapitalAnalysis,

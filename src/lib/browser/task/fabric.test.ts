@@ -6,6 +6,22 @@ import { chromiumAvailable, html, launchTestChromium, refIn, ScriptedModel, Stal
 
 const RESULT_SCHEMA = { type: "object", properties: { heading: { type: "string" } }, required: ["heading"], additionalProperties: false };
 
+/** A file input whose page reads what was chosen, as a provider form's upload would: name, type, size and SHA-256 of the bytes. */
+const UPLOAD_READER = `<h1>Evidence upload</h1>
+<label>Screenshots <input type="file" name="evidence" multiple></label>
+<label>Single <input type="file" name="single"></label>
+<p id="out">nothing chosen</p>
+<script>
+document.querySelector('[name=evidence]').addEventListener('change', async (event) => {
+	const parts = [];
+	for (const file of event.target.files) {
+		const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+		parts.push(file.name + ' ' + file.type + ' ' + file.size + ' ' + Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join(''));
+	}
+	document.getElementById('out').textContent = 'chosen: ' + parts.join(' | ');
+});
+</script>`;
+
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
 const requests: string[] = [];
@@ -18,6 +34,7 @@ beforeAll(async () => {
 			const { pathname } = new URL(request.url);
 			requests.push(pathname);
 			if (pathname === "/upload") return html(`<h1>Evidence upload</h1><label>Evidence <input type="file" name="evidence"></label>`);
+			if (pathname === "/upload-read") return html(UPLOAD_READER);
 			return html(`<h1>Fixture heading</h1><a href="/next">Next</a>`);
 		},
 	});
@@ -159,5 +176,51 @@ describe.skipIf(!chromiumAvailable)("a browser task on a leased Fabric browser (
 		expect(upload).toMatchObject({ tool: "upload", ok: false });
 		expect(upload?.output).toContain("file uploads are disabled");
 		expect(refusal).not.toContain("hosts");
+	}, 60_000);
+
+	test("attaches only the task's own files: their exact bytes reach the remote page's input, anything else is refused", async () => {
+		const { acquire, events } = lease();
+		const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(300_000, 7)]);
+		const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+		let shown = "";
+		// A file outside the staged set, a path escaping it, and two files on a single-file input are refused.
+		const attempt = (label: string, files: string[]) => (page: string) => ({ calls: [{ name: "upload", arguments: { ref: refIn(page, label), paths: files } }] });
+		const model = new ScriptedModel([
+			(page, request) => {
+				expect(request.tools?.map((tool) => tool.name)).toContain("upload");
+				return attempt("Screenshots", ["/etc/hosts"])(page);
+			},
+			attempt("Screenshots", ["../shot.png"]),
+			attempt("Single", ["shot.png", "shot.jpg"]),
+			attempt("Screenshots", ["shot.png", "shot.jpg"]),
+			(page) => {
+				shown = page;
+				return { calls: [{ name: "done", arguments: { result: { heading: "Evidence upload" }, summary: "Attached." } }] };
+			},
+		]);
+		const result = await runFabricBrowserTask({
+			task: { goal: "Attach the screenshots.", startUrl: `http://127.0.0.1:${server.port}/upload-read`, maxSteps: 6, resultSchema: RESULT_SCHEMA },
+			model,
+			egress: "reporting",
+			metadata: {},
+			timeoutMs: 30_000,
+			started: async () => true,
+			acquire,
+			files: [
+				{ filename: "shot.png", mimeType: "image/png", bytes: png },
+				{ filename: "shot.jpg", mimeType: "image/jpeg", bytes: jpeg },
+			],
+		});
+		const actions = result?.steps.slice(0, 4).map((step) => step.actions[0]!) ?? [];
+		expect(actions.map((action) => `${action.tool}:${action.ok}`)).toEqual(["upload:false", "upload:false", "upload:false", "upload:true"]);
+		expect(actions[0]?.output).toContain("outside the allowed directories");
+		expect(actions[1]?.output).toContain("does not exist");
+		expect(actions[2]?.output).toContain("accepts one file");
+		expect(shown).toContain(`chosen: shot.png image/png ${png.byteLength} ${new Bun.CryptoHasher("sha256").update(png).digest("hex")} | shot.jpg image/jpeg ${jpeg.byteLength} ${new Bun.CryptoHasher("sha256").update(jpeg).digest("hex")}`);
+		expect(events.at(-1)).toBe("release");
+		// The staged copies are gone once the task ends.
+		const staged = /Files under (\S+) can be attached/.exec(model.seen())?.[1];
+		expect(staged).toBeString();
+		expect(await Bun.file(`${staged}/shot.png`).exists()).toBeFalse();
 	}, 60_000);
 });

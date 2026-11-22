@@ -118,9 +118,19 @@ the model id may itself contain a slash: `anthropic/claude-sonnet-4.5`). A
 provider-form task takes at most 40 model turns, a site visit 60. The credential-shaped synthetic
 values of a visit (password, card number, one-time code) are passed as
 `{{secret:NAME}}` placeholders: they reach the page and the network recording
-but never the model, its step log, or the stored record. File uploads are
-disabled: the agent's upload action names files on the machine running it, which
-a remote Fabric browser cannot read, and no flow uploads evidence.
+but never the model, its step log, or the stored record. A task may be given
+files (`runFabricBrowserTask({ files })`): only then is the agent's `upload`
+tool offered, and only for those files. The agent's upload names a path on the
+machine running it, which a remote Fabric browser cannot read, so the files are
+staged in a private directory here and the task's CDP connection answers
+`DOM.setFileInputFiles` itself, setting the staged bytes on the page's file
+input (`src/lib/browser/task/uploads.ts`). A generic provider-form run is given
+the report's original PNG/JPEG screenshots (at most 3, 5 MiB each); their
+immutable references are in the run payload and their names in the task's
+report payload (`evidenceFiles`), and their bytes are re-verified against
+those references before the browser is leased. An exfiltration-backend report
+carries the confirmed page's screenshot (`lure-page.png`) like the other
+linked-host reports, since forms such as Squarespace's require one.
 
 A provider-form task is durable at one boundary: its run moves to
 `task_started`, with the Fabric session ID, before the agent touches the

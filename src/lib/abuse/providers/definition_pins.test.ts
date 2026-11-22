@@ -37,5 +37,5 @@ test("every provider definition keeps its pinned version and content hash", () =
 });
 
 test("the generic form adapter keeps its pinned hash", () => {
-	expect([GENERIC_PROVIDER_FORM_ADAPTER.version, GENERIC_PROVIDER_FORM_ADAPTER.contentHash]).toEqual(["2026-11-17.1", "368b62e0895f64f6d926cfc7367ee47c85752c091953c03ead6c23e2ffdaa092"]);
+	expect([GENERIC_PROVIDER_FORM_ADAPTER.version, GENERIC_PROVIDER_FORM_ADAPTER.contentHash]).toEqual(["2026-11-23.1", "fd60afcb3fe42b4b37072d4e8f3e0a687916d3214966ae9e52363eb8b8c3748c"]);
 });

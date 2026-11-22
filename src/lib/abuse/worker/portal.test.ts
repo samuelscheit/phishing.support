@@ -1,11 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Browser } from "rebrowser-puppeteer-core";
 
+import { eq } from "drizzle-orm";
+import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
+import { abuseArtifacts } from "../schema";
 import { browserTaskModel, type ChatModel } from "../../browser/task/agent";
 import { chromiumAvailable, html, launchTestChromium, refIn, requestTexts, ScriptedModel, selfSignedCertificate, StalledModel, type ScriptedTurn } from "../../browser/task/test_helpers";
 import { validateAbuseReportRequest } from "../contracts";
-import { buildGenericProviderFormTask } from "../portal/form_task";
+import { buildGenericProviderFormPayload, GENERIC_PROVIDER_FORM_EVIDENCE_CONTRACT } from "../portal/form_task";
+import { selectProviderEvidenceImageArtifacts } from "../providers/kit/evidence";
 import { AbuseRepository } from "../repository";
 import { runGenericProviderPortal } from "./portal";
 import type { UnknownExternalStateParams, WorkerServices } from "./shared";
@@ -24,6 +28,9 @@ const OBSERVED_URL = "https://login.example.com/collect";
 
 type Submission = Record<string, string>;
 const submissions: Submission[] = [];
+/** Files the evidence form received: field, name, type and bytes. */
+const uploads: Array<{ field: string; name: string; type: string; bytes: Buffer }> = [];
+const SCREENSHOT = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(200_000, 3)]);
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
 
@@ -37,6 +44,14 @@ const FORM = `<h1>Report abuse</h1>
 	<button type="submit">Submit report</button>
 </form>`;
 
+/** A form like Squarespace's: the report is only accepted with a screenshot of the abusive page attached. */
+const EVIDENCE_FORM = `<h1>Report abuse</h1>
+<form method="POST" action="/report-evidence" enctype="multipart/form-data">
+	<label>Domain <input name="domain" required></label>
+	<label>Screenshot of the abusive page <input type="file" name="screenshot" accept="image/*" required></label>
+	<button type="submit">Submit report</button>
+</form>`;
+
 beforeAll(async () => {
 	if (!chromiumAvailable) return;
 	server = Bun.serve({
@@ -44,6 +59,17 @@ beforeAll(async () => {
 		tls: selfSignedCertificate(HOST),
 		fetch: async (request) => {
 			const { pathname } = new URL(request.url);
+			if (pathname === "/report-evidence" && request.method === "POST") {
+				const form = await request.formData();
+				const fields: Submission = {};
+				for (const [field, value] of form.entries() as Iterable<[string, string | File]>) {
+					if (typeof value === "string") fields[field] = value;
+					else uploads.push({ field, name: value.name, type: value.type, bytes: Buffer.from(await value.arrayBuffer()) });
+				}
+				submissions.push(fields);
+				return new Response(null, { status: 303, headers: { location: "/confirmation" } });
+			}
+			if (pathname === "/report-evidence") return html(EVIDENCE_FORM, "Report abuse");
 			if (pathname === "/report" && request.method === "POST") {
 				submissions.push(Object.fromEntries(new URLSearchParams(await request.text())));
 				return new Response(null, { status: 303, headers: { location: "/confirmation" } });
@@ -61,7 +87,7 @@ afterAll(async () => {
 	server?.stop(true);
 });
 
-async function portalRoute(entryPath = "/report", maxSteps = 6) {
+async function portalRoute(entryPath = "/report", maxSteps = 6, screenshot?: Buffer) {
 	const request = await validateAbuseReportRequest({
 		targets: [TARGET],
 		allegationCategory: "phishing",
@@ -71,6 +97,14 @@ async function portalRoute(entryPath = "/report", maxSteps = 6) {
 	const created = await AbuseRepository.createReport({ request, reporter: { reporterIp: "8.8.8.8" } });
 	const [target] = await AbuseRepository.listTargets(created.reportId);
 	if (!target) throw new Error("Test report did not create its target.");
+	if (screenshot) {
+		await AbuseRepository.saveArtifact({ reportId: created.reportId, name: "website.png", kind: "user_evidence_original", mimeType: "image/png", buffer: screenshot });
+	}
+	const evidence = selectProviderEvidenceImageArtifacts(
+		await AbuseRepository.listArtifacts(created.reportId, ["user_evidence_original"]),
+		GENERIC_PROVIDER_FORM_EVIDENCE_CONTRACT,
+		3,
+	);
 	const route = await AbuseRepository.upsertResolvedRoute(target.id, {
 		routeKey: `email:${DOMAIN}`,
 		providerRegistryKey: `email:${DOMAIN}`,
@@ -83,7 +117,7 @@ async function portalRoute(entryPath = "/report", maxSteps = 6) {
 	});
 	expect(await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: "queued", to: "escalating_to_portal" })).toBeTrue();
 	const entryUrl = `https://${HOST}${entryPath}`;
-	const task = buildGenericProviderFormTask({
+	const providerPayload = buildGenericProviderFormPayload({
 		entryUrl,
 		allowedDomains: [DOMAIN],
 		target: TARGET,
@@ -93,21 +127,16 @@ async function portalRoute(entryPath = "/report", maxSteps = 6) {
 		reporter: { name: "Phishing Support", organization: "Phishing Support", website: "https://phishing.support", email: "support@phishing.support" },
 		observedAt: new Date("2026-11-17T08:00:00Z"),
 		maxSteps,
+		evidence,
 	});
 	const execution = await AbuseRepository.beginProviderExecution({
 		routeId: route.id,
 		correlationKey: `generic-portal:${route.id.toString()}:test`,
-		providerPayload: {
-			adapter: "generic_verified_provider_form",
-			entryUrl,
-			verifiedDomains: [DOMAIN],
-			task,
-			contract: { entryUrl, target: TARGET, observedUrls: [OBSERVED_URL], allowedFinalDomains: [DOMAIN] },
-		},
+		providerPayload,
 		expectedStatus: "escalating_to_portal",
 	});
 	if (!execution) throw new Error("Test portal route could not be claimed.");
-	return { reportId: created.reportId, route, run: execution.run };
+	return { reportId: created.reportId, route, run: execution.run, evidence };
 }
 
 function services(model: ChatModel | (() => ChatModel), options: { signal?: AbortSignal } = {}) {
@@ -204,6 +233,52 @@ describe.skipIf(!chromiumAvailable)("the generic provider-form flow (real Chromi
 		expect(stored.steps[0].actions.map((action: { tool: string; ok: boolean }) => `${action.tool}:${action.ok}`)).toEqual(["type:true", "select:true", "type:true", "type:true", "click:true", "click:true"]);
 		// The model's prompt is not evidence; only the run's outcome and steps are stored.
 		expect(JSON.stringify(stored)).not.toContain("Use only this immutable report payload");
+	}, 60_000);
+
+	test("attaches the report's screenshot when the form requires evidence, with the exact stored bytes", async () => {
+		submissions.length = 0;
+		uploads.length = 0;
+		const { route, run, evidence } = await portalRoute("/report-evidence", 6, SCREENSHOT);
+		expect(evidence).toHaveLength(1);
+		const filename = evidence[0]!.filename;
+		const model = new ScriptedModel([
+			(page, request) => {
+				const prompt = requestTexts(request).join("\n");
+				expect(prompt).toContain(`"evidenceFiles":["${filename}"]`);
+				expect(prompt).toContain("attach them there with upload");
+				expect(request.tools?.map((tool) => tool.name)).toContain("upload");
+				return { calls: [
+					{ name: "type", arguments: { ref: refIn(page, 'textbox "Domain"'), text: TARGET } },
+					{ name: "upload", arguments: { ref: refIn(page, "Screenshot of the abusive page"), path: filename } },
+					{ name: "click", arguments: { ref: refIn(page, 'button "Submit report"') } },
+				] };
+			},
+			finishWith(confirmed),
+		]);
+		const { worker, lease } = services(model);
+		await runGenericProviderPortal(route.id, {}, worker);
+		expect(submissions).toEqual([{ domain: TARGET }]);
+		expect(uploads).toHaveLength(1);
+		expect(uploads[0]).toMatchObject({ field: "screenshot", name: filename, type: "image/png" });
+		expect(uploads[0]!.bytes.equals(SCREENSHOT)).toBeTrue();
+		expect(lease.at(-1)).toBe("release");
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "submitted" });
+		expect((await AbuseRepository.getProviderRun(run.id))?.providerPayload.evidence).toEqual(evidence);
+	}, 60_000);
+
+	test("a screenshot changed after the run was built never reaches the provider or the browser", async () => {
+		const { route, run, evidence } = await portalRoute("/report-evidence", 6, SCREENSHOT);
+		const db = await getDb();
+		const tampered = Buffer.from(SCREENSHOT);
+		tampered[100] = 9;
+		db.update(abuseArtifacts).set({ blob: tampered }).where(eq(abuseArtifacts.id, BigInt(evidence[0]!.artifactId))).run();
+		const model = new ScriptedModel([]);
+		const { worker, lease } = services(model);
+		await expect(runGenericProviderPortal(route.id, {}, worker)).rejects.toThrow("no longer matches its immutable reference");
+		expect(lease).toEqual([]);
+		expect(model.requests).toEqual([]);
+		// Nothing started: the run stays retryable rather than ambiguous.
+		expect(await AbuseRepository.getProviderRun(run.id)).toMatchObject({ executionStatus: "starting" });
 	}, 60_000);
 
 	test("a form that only sends after a verification code goes to a person, without submitting", async () => {

@@ -178,13 +178,15 @@ describe("pre-report investigation", () => {
 			screenshots: [{ filename: "website.png", png: SCREENSHOT }],
 			visitCapture: { canaries: { marker: "m", email: "probe", password: "p", phone: "1", cardNumber: "4", oneTimeCode: "1" }, requests: [drop.request], backends: [drop] },
 		});
-		const reported: Array<{ backend: ExfiltrationBackend; observedAt: Date }> = [];
+		const reported: Array<{ backend: ExfiltrationBackend; observedAt: Date; screenshot?: Buffer }> = [];
 		const { deps } = offline({
 			enrich: async (backend) => ({ ...backend, method: "POST" }),
-			reportBackend: async (params) => { reported.push({ backend: params.backend, observedAt: params.observedAt }); return { reportId: 9_999n, created: true } as never; },
+			reportBackend: async (params) => { reported.push({ backend: params.backend, observedAt: params.observedAt, ...(params.pageScreenshot ? { screenshot: params.pageScreenshot.buffer } : {}) }); return { reportId: 9_999n, created: true } as never; },
 		});
 		await workerWith(deps, "investigation-drops").processOne({ jobTypes: ["investigate_report"] });
-		expect(reported).toEqual([{ backend: expect.objectContaining({ key: "domain:collector.example.net" }), observedAt: new Date("2026-11-15T10:00:01.000Z") }]);
+		// The backend's report carries the page's own screenshot: forms such as Squarespace's require one.
+		expect(reported).toEqual([{ backend: expect.objectContaining({ key: "domain:collector.example.net" }), observedAt: new Date("2026-11-15T10:00:01.000Z"), screenshot: expect.any(Buffer) }]);
+		expect(reported[0]!.screenshot!.equals(SCREENSHOT)).toBeTrue();
 		const released = await AbuseRepository.getReport(report.reportId);
 		expect(released?.status).toBe("accepted");
 		expect(released?.description).toContain("In our visit with synthetic data, the site sent what was entered to: collector.example.net.");

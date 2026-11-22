@@ -2,8 +2,18 @@ import { normalizeAbuseTarget, normalizeObservedUrl, type allegationCategories, 
 import { websiteSite } from "../website/info/site";
 import { hashStableJson, sha256Hex, stableJson } from "../util/hash";
 
-/** The confirmed page's stamped screenshot. Forms such as Eranet's and NameSilo's require an image. */
+/** The confirmed page's stamped screenshot. Forms such as Eranet's, NameSilo's and Squarespace's require an image. */
 export type PageScreenshot = { buffer: Buffer; mimeType: "image/png" | "image/jpeg" };
+
+/** The confirmed page's screenshot as evidence of a report against a host the page depends on. */
+export function pageScreenshotEvidence(screenshot: PageScreenshot): ValidatedAbuseReportRequest["evidence"][number] {
+	return {
+		filename: `lure-page.${screenshot.mimeType === "image/png" ? "png" : "jpg"}`,
+		mimeType: screenshot.mimeType,
+		buffer: screenshot.buffer,
+		sha256: sha256Hex(screenshot.buffer),
+	};
+}
 
 export type LinkedHostReport = {
 	/** The confirmed page's case; the linked report belongs to it. */
@@ -47,12 +57,7 @@ export function linkedHostRequest(params: LinkedHostReport): ValidatedAbuseRepor
 		observedUrls: [{ target: target.normalizedTarget, urls: [observedUrl] }],
 		evidence: [
 			{ filename: params.evidenceName, mimeType: "application/json", buffer: evidence, sha256: sha256Hex(evidence) },
-			...(params.pageScreenshot ? [{
-				filename: `lure-page.${params.pageScreenshot.mimeType === "image/png" ? "png" : "jpg"}`,
-				mimeType: params.pageScreenshot.mimeType,
-				buffer: params.pageScreenshot.buffer,
-				sha256: sha256Hex(params.pageScreenshot.buffer),
-			}] : []),
+			...(params.pageScreenshot ? [pageScreenshotEvidence(params.pageScreenshot)] : []),
 		],
 		idempotencyKey,
 		// Only what identifies the report: a retried investigation fetches again

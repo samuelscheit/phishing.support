@@ -205,11 +205,20 @@ export async function runReportInvestigation(
 	// of its own: a Telegram bot, a Discord webhook, a collector host. Reports
 	// are idempotent, so a retried job finds the ones it made.
 	const reportedDrops: ExfiltrationBackend[] = [];
+	const backendScreenshot = payload.dataDrops?.length ? await lureScreenshot() : undefined;
 	for (const backend of payload.dataDrops ?? []) {
 		signal?.throwIfAborted();
 		const enriched = await deps.enrich(backend, signal).catch(() => backend);
 		reportedDrops.push(enriched);
-		await deps.reportBackend({ submissionId, sourceReportId: reportId, backend: enriched, pageUrl: payload.pageUrl, observedAt: new Date(enriched.request.timestamp), reporter });
+		await deps.reportBackend({
+			submissionId,
+			sourceReportId: reportId,
+			backend: enriched,
+			pageUrl: payload.pageUrl,
+			observedAt: new Date(enriched.request.timestamp),
+			...(backendScreenshot ? { pageScreenshot: backendScreenshot } : {}),
+			reporter,
+		});
 	}
 
 	const findings = [...payloadFindings(payloads), ...dataDropFindings(reportedDrops)];

@@ -4,9 +4,11 @@ import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { serviceIdentity } from "../../network/service_identity";
 import { deriveProviderFormFacts } from "../portal/form_facts";
 import { validateGenericProviderFormOutput } from "../portal/output_validation";
-import { buildGenericProviderFormTask } from "../portal/form_task";
+import { buildGenericProviderFormPayload, GENERIC_PROVIDER_FORM_EVIDENCE_CONTRACT, storedGenericProviderFormEvidence } from "../portal/form_task";
+import { GENERIC_PROVIDER_FORM_ADAPTER } from "../providers/generic_form";
+import { loadEvidenceFile, selectProviderEvidenceImageArtifacts } from "../providers/kit/evidence";
 import { AbuseRepository } from "../repository";
-import { agentGaveUp, type BrowserTask, type TaskResult } from "../../browser/task/agent";
+import { agentGaveUp, type TaskResult } from "../../browser/task/agent";
 import { runFabricBrowserTask } from "../../browser/task/fabric";
 import { redactedErrorText } from "../../util/error_text";
 import { routeContext, storedBrowserTask, throwIfAborted, UnknownExternalStateError, type WorkerServices } from "./shared";
@@ -95,8 +97,19 @@ function settlement(result: TaskResult, providerPayload: Record<string, unknown>
 	};
 }
 
+/**
+ * Each escalation is its own run: a route a person sent back to the form
+ * after a run that never submitted gets a fresh key, while a replay of the
+ * same escalation (before its run exists) computes the same key again.
+ */
+export async function genericPortalCorrelationKey(route: { id: bigint; reportId: bigint }, entryUrl: string): Promise<string> {
+	const priorRuns = (await AbuseRepository.listProviderRunsForReport(route.reportId))
+		.filter((run) => run.routeId === route.id && run.correlationKey.startsWith("generic-portal:"));
+	return `generic-portal:${route.id.toString()}:${sha256Hex(entryUrl).slice(0, 24)}${priorRuns.length ? `:${priorRuns.length + 1}` : ""}`;
+}
+
 export async function runGenericProviderPortal(routeId: bigint, payload: Record<string, unknown>, worker: WorkerServices): Promise<void> {
-	const { route, report, target } = await routeContext(routeId);
+	const { route, report, target, evidenceArtifacts } = await routeContext(routeId);
 	// A public link can start this adapter only from the explicit
 	// not-monitored escalation transition. A `running` route is a replay of
 	// the exact immutable payload already persisted by that transition.
@@ -122,7 +135,8 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 			analysis: report.description,
 			...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
 		});
-		const task: BrowserTask = buildGenericProviderFormTask({
+		correlationKey = await genericPortalCorrelationKey(route, entryUrl.toString());
+		providerPayload = buildGenericProviderFormPayload({
 			entryUrl: entryUrl.toString(),
 			allowedDomains: verifiedDomains,
 			target: target.normalizedTarget,
@@ -133,20 +147,8 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 			reporter: { name: serviceIdentity.name, organization: serviceIdentity.name, website: serviceIdentity.url, email: serviceIdentity.mailbox },
 			observedAt: report.createdAt,
 			analysisFacts,
+			evidence: selectProviderEvidenceImageArtifacts(evidenceArtifacts, GENERIC_PROVIDER_FORM_EVIDENCE_CONTRACT, GENERIC_PROVIDER_FORM_ADAPTER.evidence.maximumFiles),
 		});
-		correlationKey = `generic-portal:${route.id.toString()}:${sha256Hex(entryUrl.toString()).slice(0, 24)}`;
-		providerPayload = {
-			adapter: "generic_verified_provider_form",
-			entryUrl: entryUrl.toString(),
-			verifiedDomains,
-			task,
-			contract: {
-				entryUrl: entryUrl.toString(),
-				target: target.normalizedTarget,
-				observedUrls: target.observedUrls,
-				allowedFinalDomains: verifiedDomains,
-			},
-		};
 	} else {
 		const priorRun = await AbuseRepository.getLatestProviderRunForRoute(route.id);
 		const priorPayload = priorRun && asRecord(priorRun.providerPayload);
@@ -192,15 +194,24 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "generic_portal_run_state_invalid" });
 			throw new UnknownExternalStateError(message);
 		}
-		const task = storedBrowserTask(asRecord(run.providerPayload)?.task);
-		if (!task) {
+		const storedPayload = asRecord(run.providerPayload);
+		const task = storedBrowserTask(storedPayload?.task);
+		const evidence = storedGenericProviderFormEvidence(storedPayload?.evidence);
+		if (!task || !evidence) {
 			const message = "The generic provider-form task could not be recovered from durable storage.";
 			await worker.markUnknownExternal({ routeId: route.id, runId: run.id, error: message, reason: "generic_portal_payload_invalid" });
 			throw new UnknownExternalStateError(message);
 		}
+		// The stored references are re-checked against the artifacts' bytes
+		// before they can cross to the provider; a changed artifact stops here.
+		const files = await Promise.all(evidence.map(async (reference) => {
+			const { bytes } = await loadEvidenceFile({ reference, contract: GENERIC_PROVIDER_FORM_EVIDENCE_CONTRACT, reportId: run.reportId, label: "generic provider-form" });
+			return { filename: reference.filename, mimeType: reference.mimeType, bytes };
+		}));
 		throwIfAborted(worker.signal);
 		const result = await runFabricBrowserTask({
 			task,
+			files,
 			model,
 			// Provider portals are reporting traffic: direct egress, never the Tor phishing exit.
 			egress: "reporting",

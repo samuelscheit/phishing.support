@@ -13,11 +13,13 @@ export type GenericProviderFormDefinition = {
 	/** JSON schema of the result the browser task agent must finish with. */
 	resultSchema: Record<string, unknown>;
 	maxDescriptionLength: number;
+	/** The report's screenshots the agent may attach when the form asks for evidence. */
+	evidence: { acceptedMimeTypes: readonly ("image/png" | "image/jpeg")[]; maximumBytes: number; maximumFiles: number };
 };
 
 const definitionWithoutHash = {
 	key: "generic_verified_provider_form" as const,
-	version: "2026-11-17.1",
+	version: "2026-11-23.1",
 	requiredSemanticLandmarks: [
 		"provider abuse-report form",
 		"target/domain/IP field",
@@ -45,6 +47,7 @@ const definitionWithoutHash = {
 		required: ["form_contract_passed", "confirmation_text", "final_url", "submitted_domains", "submitted_urls", "provider_errors", "form_drift", "final_submit_clicked", "final_submit_control", "irreversible_actions"],
 	},
 	maxDescriptionLength: 5_000,
+	evidence: { acceptedMimeTypes: ["image/png", "image/jpeg"] as const, maximumBytes: 5 * 1024 * 1024, maximumFiles: 3 },
 };
 
 export const GENERIC_PROVIDER_FORM_ADAPTER: GenericProviderFormDefinition = Object.freeze({
