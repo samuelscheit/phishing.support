@@ -207,6 +207,20 @@ hash through the normal durable email route. Sibling domains found by the
 all-case search are included in that host report only after the swept origin
 also presents their certificate.
 
+Before the sweep, the domain's passive-DNS history (`src/lib/network/passive_dns.ts`;
+VirusTotal's `resolutions`, one request per host for the domain, its site and
+the site's `www`, with `VIRUSTOTAL_API_KEY`) is checked: addresses inside the
+host's validated networks get the same certificate and kit-byte proof, and a
+match skips the sweep, so the report goes out in seconds. Addresses outside
+those networks (Cloudflare's own) are ignored. In-network addresses that no
+longer serve the site are kept in the snapshot and evidence as unverified
+history; the most recent one of the domain itself, last seen at most 14 days
+before Cloudflare named the host, is given as the source IP to hosts that
+file by address (DigitalOcean's form and XARF), labelled historical and
+unverified. A missing key, quota (4 requests a minute, 500 a day on the
+public key) or outage is recorded in the snapshot's errors and the sweep runs
+as before.
+
 Account logins of providers (Cloudflare's dashboard, Alibaba Cloud's Reporting
 Center) share one session machine (`src/lib/abuse/providers/login_session`):
 sessions are stored in `provider_login_sessions`, one login runs at a time

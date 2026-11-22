@@ -8,7 +8,8 @@ import { serviceIdentity } from "../../network/service_identity";
 import { defaultResponseModel } from "../../openai/client";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
 import { createOriginHostEmailDraft } from "../origin/draft";
-import { readOriginHostSnapshot } from "../origin/snapshot";
+import { originHostAddress, readOriginHostSnapshot } from "../origin/snapshot";
+import { passiveDnsSourceLabel } from "../../network/passive_dns";
 import { humanizeOrganization, recipientGreeting } from "./shared";
 import { refangText } from "../../malware/defang";
 import { PRESERVATION_REQUEST } from "../preservation";
@@ -340,9 +341,16 @@ function cleanAttachmentNames(names: readonly string[] | undefined): string[] {
 export function hostingAddressLine(route: DraftInput["route"]): string | undefined {
 	const origin = readOriginHostSnapshot(route.resolutionSnapshot);
 	if (origin) {
-		const [server] = origin.servers;
+		const address = originHostAddress(origin);
 		const report = origin.cloudflareReportId ? ` (Cloudflare report ${origin.cloudflareReportId})` : "";
-		return `Hosting: ${origin.originalDomain} is behind Cloudflare, and Cloudflare named ${origin.recipient} as its host${report}.${server ? ` Origin server ${server.ip}:443 returned byte-identical captured files and presents ${origin.originalDomain}'s certificate.` : ""}`;
+		const named = `Hosting: ${origin.originalDomain} is behind Cloudflare, and Cloudflare named ${origin.recipient} as its host${report}.`;
+		if (!address) return named;
+		if (address.verified) {
+			const history = origin.servers[0]!.discovery === "dns_history" ? ", found through the domain's DNS history," : "";
+			return `${named} Origin server ${address.ip}:443${history} returned byte-identical captured files and presents ${origin.originalDomain}'s certificate.`;
+		}
+		const { lastSeen, sources } = address.resolution;
+		return `${named} Historical address, unverified: before Cloudflare, ${origin.originalDomain} resolved to ${address.ip} in this host's network, last seen ${utcDate(new Date(lastSeen))} (passive DNS, ${sources.map(passiveDnsSourceLabel).join(", ")}); it no longer serves the site, so please check which customer held it then.`;
 	}
 	const provenance = asRecord(route.resolverProvenance);
 	if (provenance?.source !== "domain_infrastructure_ip") return undefined;
@@ -358,13 +366,19 @@ export function hostingAddressLine(route: DraftInput["route"]): string | undefin
 
 /**
  * The address the reported site is served from, when we know it: the target
- * itself, the origin server a sweep proved, or the address the domain
- * resolved to when the resolver reached the hoster through it.
+ * itself, the origin server a sweep or the DNS history proved, or the address
+ * the domain resolved to when the resolver reached the hoster through it.
+ *
+ * Without a proved origin, a recent historical address of the domain inside
+ * the named host's networks stands in (`originHostAddress`): a host such as
+ * DigitalOcean finds the customer only by address, and the hosting line
+ * labels it unverified with its last sighting, so the host checks who held it
+ * then rather than acting on whoever holds it now.
  */
 export function hostingAddress(route: Pick<AbuseProviderRoute, "resolverProvenance" | "resolutionSnapshot">, target: Pick<AbuseTarget, "normalizedTarget" | "targetType">): string | undefined {
 	if (target.targetType === "ip") return target.normalizedTarget;
-	const server = readOriginHostSnapshot(route.resolutionSnapshot)?.servers[0];
-	if (server) return server.ip;
+	const origin = readOriginHostSnapshot(route.resolutionSnapshot);
+	if (origin) return originHostAddress(origin)?.ip;
 	const provenance = asRecord(route.resolverProvenance);
 	return provenance?.source === "domain_infrastructure_ip" ? valueAt(provenance, ["originatingIp"]) : undefined;
 }

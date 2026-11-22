@@ -1,4 +1,3 @@
-import ipaddr from "ipaddr.js";
 import { simpleParser } from "mailparser";
 
 import { ArtifactsEntity } from "../../db/entities/artifacts";
@@ -13,10 +12,11 @@ import { parseJobBigInt, throwIfAborted } from "../worker/shared";
 import { parseCloudflareOriginDisclosure } from "./disclosure";
 import { capturedKitFacts } from "./kit_facts";
 import { isKitSiblingSeed } from "./kit_job";
-import { resolveOriginHostNetworks } from "./network";
+import { containingNetworkPrefix, resolveOriginHostNetworks } from "./network";
 import { discoverSiblingDomains, kitFingerprints, type SiblingDiscoveryResult } from "./siblings";
-import { originSweepProgressSchema, readOriginHostSnapshot, type OriginHostSnapshot, type OriginSweepProgress } from "./snapshot";
+import { MAX_HISTORICAL_RESOLUTIONS, originSweepProgressSchema, readOriginHostSnapshot, type HistoricalResolution, type OriginHostSnapshot, type OriginSweepProgress } from "./snapshot";
 import { findOriginServers, MAX_ORIGIN_RESULTS, originSweepAddresses, planOriginSweep, SWEEP_SLICE_ADDRESSES, type OriginSweepPlan, type OriginVerificationTarget } from "./sweep";
+import { passiveDnsHistory, passiveDnsSourceLabel, type PassiveDnsHistory } from "../../network/passive_dns";
 import { errorSummary } from "../../util/error_text";
 import { scheduleLivenessChecks } from "../../liveness/schedule";
 import { snippet } from "../../util/text";
@@ -36,24 +36,68 @@ export type OriginHostReportDependencies = {
 	createSiblingSubmission?: (options: WebsiteSubmissionOptions) => Promise<bigint>;
 	kitFacts?: typeof capturedKitFacts;
 	registeredAt?: (domain: string) => Promise<string | undefined>;
+	passiveDns?: typeof passiveDnsHistory;
 	/** Addresses one invocation sweeps before queueing its successor. */
 	sliceAddresses?: number;
 };
 
-function containingPrefix(ip: string, prefixes: OriginSweepPlan["selectedPrefixes"]) {
-	try {
-		const address = ipaddr.parse(ip);
-		return prefixes.find(({ prefix }) => {
-			try {
-				const cidr = ipaddr.parseCIDR(prefix);
-				return address.kind() === cidr[0].kind() && address.match(cidr);
-			} catch {
-				return false;
-			}
-		});
-	} catch {
-		return undefined;
+/**
+ * Before sweeping millions of addresses, check the few the domain (or its
+ * site) resolved to before it moved behind Cloudflare. Only addresses inside
+ * the host's validated networks are this host's; each must prove itself like
+ * a swept one (certificate and exact kit bytes). Those that do not are kept as
+ * unverified history: the site may have moved on from them.
+ */
+async function dnsHistoryProgress(params: {
+	domain: string;
+	networks: OriginSweepProgress["networks"];
+	errors: readonly string[];
+	verificationTargets: readonly OriginVerificationTarget[];
+	signal?: AbortSignal;
+}, dependencies: OriginHostReportDependencies): Promise<OriginSweepProgress> {
+	const errors = [...params.errors];
+	let history: PassiveDnsHistory = { hosts: [], sources: [], records: [], errors: [] };
+	// Without a validated network no address could be attributed to the host; save the lookup quota.
+	if (params.networks.length) {
+		try {
+			history = await (dependencies.passiveDns ?? passiveDnsHistory)(params.domain, { signal: params.signal });
+		} catch (error) {
+			throwIfAborted(params.signal);
+			errors.push(`passive DNS: ${errorSummary(error)}`);
+		}
 	}
+	errors.push(...history.errors);
+	const inNetwork = history.records.flatMap((record) => {
+		const network = containingNetworkPrefix(record.ip, params.networks);
+		return network ? [{ record, network }] : [];
+	});
+	const addresses = [...new Set(inNetwork.map(({ record }) => record.ip))];
+	let servers: OriginSweepProgress["servers"] = [];
+	if (addresses.length) {
+		try {
+			servers = (await (dependencies.findServers ?? findOriginServers)({
+				domain: params.domain,
+				addresses,
+				verificationTargets: params.verificationTargets,
+				signal: params.signal,
+			})).map((server) => ({ ...server, discovery: "dns_history" as const }));
+		} catch (error) {
+			throwIfAborted(params.signal);
+			errors.push(`DNS history check: ${errorSummary(error)}`);
+		}
+	}
+	const verified = new Set(servers.map(({ ip }) => ip));
+	return {
+		networks: params.networks,
+		offset: 0,
+		servers,
+		dnsHistory: { hosts: history.hosts, sources: history.sources, recordsFound: history.records.length },
+		historicalResolutions: inNetwork
+			.filter(({ record }) => !verified.has(record.ip))
+			.slice(0, MAX_HISTORICAL_RESOLUTIONS)
+			.map(({ record: { type: _type, ...record }, network }) => ({ ...record, ...network })),
+		errors: errors.slice(0, MAX_ERRORS),
+	};
 }
 
 /** RIPEstat holders read "AS-NAME - Organization, CC"; the AS name is what a host calls itself. */
@@ -126,6 +170,10 @@ async function originVerificationTargets(submissionId: bigint | null, domain: st
 	return [...targets.values()];
 }
 
+function historicalSighting(resolution: HistoricalResolution): string {
+	return `${resolution.firstSeen ? `first seen ${resolution.firstSeen}, ` : ""}last seen ${resolution.lastSeen} (${resolution.sources.map(passiveDnsSourceLabel).join(", ")})`;
+}
+
 function originHostEvidence(snapshot: OriginHostSnapshot): Buffer {
 	const certificateLines = (certificate: OriginHostSnapshot["servers"][number]["certificate"]) => [
 		`  names: ${certificate.names.join(", ")}`,
@@ -146,15 +194,25 @@ function originHostEvidence(snapshot: OriginHostSnapshot): Buffer {
 			? snapshot.networks.map((network) => `AS${network.asn} ${network.holder} (${network.prefixes.length} announced IPv4/IPv6 prefixes; matched through ${network.discoverySources.join(", ")})`)
 			: ["No ASN was validated against the disclosed abuse mailbox."]),
 		"",
-		`TLS sweep (completed ${snapshot.scan.completedAt}): ${snapshot.scan.addressesScanned} of ${snapshot.scan.totalAddresses} public IPv4 addresses${snapshot.scan.truncated ? " (capped)" : ""}`,
+		snapshot.dnsHistory.hosts.length
+			? `DNS history (passive DNS: ${snapshot.dnsHistory.sources.map(passiveDnsSourceLabel).join(", ")}) of ${snapshot.dnsHistory.hosts.join(", ")}: ${snapshot.dnsHistory.recordsFound} public addresses; those inside the validated networks were checked before any sweep`
+			: "DNS history: not consulted",
+		snapshot.servers.some(({ discovery }) => discovery === "dns_history")
+			? `TLS sweep: not run; the DNS history led to a verified origin server (${snapshot.scan.totalAddresses} public IPv4 addresses would have been swept)`
+			: `TLS sweep (completed ${snapshot.scan.completedAt}): ${snapshot.scan.addressesScanned} of ${snapshot.scan.totalAddresses} public IPv4 addresses${snapshot.scan.truncated ? " (capped)" : ""}`,
 		...snapshot.scan.selectedPrefixes.map(({ asn, prefix }) => `- AS${asn} ${prefix}`),
 		"",
 		"Servers returning exact captured kit bytes (and presenting the reported domain's certificate):",
 		...(snapshot.servers.length ? snapshot.servers.flatMap((server) => [
-			`- ${server.ip}${server.asn ? ` AS${server.asn}` : ""}${server.prefix ? ` ${server.prefix}` : ""}`,
+			`- ${server.ip}${server.asn ? ` AS${server.asn}` : ""}${server.prefix ? ` ${server.prefix}` : ""}; found through ${server.discovery === "dns_history" ? "the DNS history" : "the TLS sweep"}`,
 			...certificateLines(server.certificate),
 			`  check: openssl s_client -connect ${server.ip}:443 -servername ${snapshot.originalDomain}`,
-		]) : ["- none found within the scan"]),
+		]) : ["- none found"]),
+		...(snapshot.historicalResolutions.length ? [
+			"",
+			"Historical addresses inside the validated networks (UNVERIFIED: they did not serve the site when checked, and may since belong to another customer):",
+			...snapshot.historicalResolutions.map((resolution) => `- ${resolution.ip} AS${resolution.asn} ${resolution.prefix}: ${resolution.host} ${historicalSighting(resolution)}`),
+		] : []),
 		"",
 		"Captured kit:",
 		`- abuse: ${snapshot.kit.abuse ?? "unspecified"}`,
@@ -239,20 +297,27 @@ export async function reportOriginHost(params: {
 	}
 
 	throwIfAborted(params.signal);
+	const verificationTargets = await originVerificationTargets(report.submissionId, originalDomain);
 	let progress = params.progress;
 	if (!progress) {
+		let networks: OriginSweepProgress["networks"] = [];
+		let errors: string[];
 		try {
 			const resolution = await (dependencies.resolveNetworks ?? resolveOriginHostNetworks)(disclosure.recipient, params.signal);
-			progress = { networks: resolution.networks, offset: 0, servers: [], errors: resolution.errors.slice(0, MAX_ERRORS) };
+			networks = resolution.networks;
+			errors = resolution.errors;
 		} catch (error) {
-			progress = { networks: [], offset: 0, servers: [], errors: [`network attribution: ${errorSummary(error)}`] };
+			errors = [`network attribution: ${errorSummary(error)}`];
 		}
+		progress = await dnsHistoryProgress({ domain: originalDomain, networks, errors, verificationTargets, signal: params.signal }, dependencies);
 	}
 	const sweepPlan = planOriginSweep(progress.networks.flatMap((network) =>
 		network.prefixes.map((prefix) => ({ asn: network.asn, prefix }))
 	));
-	const verificationTargets = await originVerificationTargets(report.submissionId, originalDomain);
-	if (progress.offset < sweepPlan.addressCount) {
+	// An origin the domain's own DNS history led to is proved like a swept one;
+	// sweeping millions of addresses after it would only hold the report back.
+	const foundInHistory = progress.servers.some(({ discovery }) => discovery === "dns_history");
+	if (!foundInHistory && progress.offset < sweepPlan.addressCount) {
 		const slice = originSweepAddresses(sweepPlan, progress.offset, dependencies.sliceAddresses ?? SWEEP_SLICE_ADDRESSES);
 		const servers = [...progress.servers];
 		const errors = [...progress.errors];
@@ -263,13 +328,13 @@ export async function reportOriginHost(params: {
 				verificationTargets,
 				maxResults: MAX_ORIGIN_RESULTS - servers.length,
 				signal: params.signal,
-			}));
+			}).then((found) => found.map((server) => ({ ...server, discovery: "tls_sweep" as const }))));
 		} catch (error) {
 			throwIfAborted(params.signal);
 			errors.push(`TLS sweep at offset ${progress.offset}: ${errorSummary(error)}`);
 		}
 		const next: OriginSweepProgress = {
-			networks: progress.networks,
+			...progress,
 			offset: progress.offset + slice.length,
 			servers: servers.slice(0, MAX_ORIGIN_RESULTS),
 			errors: errors.slice(0, MAX_ERRORS),
@@ -357,9 +422,10 @@ async function completeOriginHostReport(params: {
 	originalDomainRegisteredAt ??= await registeredAt(originalDomain).catch(() => undefined);
 
 	const reportConfirmationId = cloudflareReportId(message.subject);
+	const verified = new Set(servers.map(({ ip }) => ip));
 	const snapshot: OriginHostSnapshot = {
 		kind: "cloudflare_origin_host",
-		version: 2,
+		version: 3,
 		recipient: disclosure.recipient,
 		providerLabel: providerLabel(disclosure.providerLabel, progress.networks, disclosure.recipient),
 		originalDomain,
@@ -372,13 +438,16 @@ async function completeOriginHostReport(params: {
 			addressesScanned: Math.min(progress.offset, sweepPlan.addressCount),
 			totalAddresses: sweepPlan.totalAddresses,
 			truncated: sweepPlan.truncated,
-			selectedPrefixes: sweepPlan.selectedPrefixes,
+			selectedPrefixes: progress.offset ? sweepPlan.selectedPrefixes : [],
 			completedAt: new Date().toISOString(),
 		},
 		servers: servers.map((server) => {
-			const network = containingPrefix(server.ip, sweepPlan.selectedPrefixes);
+			const network = containingNetworkPrefix(server.ip, progress.networks);
 			return { ...server, ...(network ? { asn: network.asn, prefix: network.prefix } : {}) };
 		}).sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true })),
+		dnsHistory: progress.dnsHistory,
+		// The sweep can prove an address history could not (it answered again); it is no longer history then.
+		historicalResolutions: progress.historicalResolutions.filter(({ ip }) => !verified.has(ip)),
 		kit,
 		fingerprints: siblingDiscovery.fingerprints,
 		siblingCandidateCount: siblingDiscovery.candidateCount,

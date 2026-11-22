@@ -1,6 +1,7 @@
 import { type FetchLike } from "../../http/fetch";
+import { VIRUSTOTAL_API } from "../../network/virustotal";
 /** Official VirusTotal v3 upload endpoint, documented for files up to 32 MB. */
-const VIRUSTOTAL_UPLOAD_URL = "https://www.virustotal.com/api/v3/files";
+const VIRUSTOTAL_UPLOAD_URL = `${VIRUSTOTAL_API}/files`;
 /** Largest file POST /files accepts. Larger files need a single-use upload URL, which is not implemented here. */
 export const VIRUSTOTAL_DIRECT_UPLOAD_LIMIT_BYTES = 32 * 1024 * 1024;
 const UPLOAD_TIMEOUT_MS = 120_000;

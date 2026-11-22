@@ -5,6 +5,7 @@ import type { AbuseEmailDraft } from "../mail/draft";
 import { humanizeOrganization, recipientGreeting } from "../mail/shared";
 import { defangCommand } from "../../malware/defang";
 import { readOriginHostSnapshot, type KitCollectedData, type OriginHostSnapshot } from "./snapshot";
+import { passiveDnsSourceLabel } from "../../network/passive_dns";
 import { formatUtcDateTime } from "../../util/date_time";
 import { andList } from "../../util/text";
 
@@ -51,6 +52,7 @@ function originIntro(snapshot: OriginHostSnapshot, domains: number): string[] {
 	if (servers.length === 0) {
 		return [
 			`Cloudflare named you as the host of the ${abuseNoun(snapshot.kit)} site ${snapshot.originalDomain}, which ${stolenData(snapshot.kit)}. Please find the service behind it, suspend it, and preserve its data for law enforcement.`,
+			...historicalAddresses(snapshot),
 		];
 	}
 	const subject = servers.length === 1 ? "A server in your network runs" : `${servers.length} servers in your network run`;
@@ -62,6 +64,22 @@ function originIntro(snapshot: OriginHostSnapshot, domains: number): string[] {
 			: ["Servers:", ...servers.map((server) => `- ${server.ip}${server.prefix || server.asn ? ` (${[server.prefix, server.asn ? `AS${server.asn}` : undefined].filter(Boolean).join(", ")})` : ""}`)].join("\n"),
 		"",
 		`Phishing domain${domains === 1 ? "" : "s"} served from ${servers.length === 1 ? "it" : "them"}:`,
+	];
+}
+
+const MAX_HISTORICAL_IN_BODY = 5;
+
+/** Unverified addresses in the host's networks the site resolved to before Cloudflare: leads, labelled as such. */
+function historicalAddresses(snapshot: OriginHostSnapshot): string[] {
+	const shown = snapshot.historicalResolutions.slice(0, MAX_HISTORICAL_IN_BODY);
+	if (!shown.length) return [];
+	const sources = [...new Set(shown.flatMap(({ sources }) => sources))].map(passiveDnsSourceLabel);
+	const hidden = snapshot.historicalResolutions.length - shown.length;
+	return [
+		"",
+		`Before it moved behind Cloudflare, the site resolved to ${shown.length === 1 ? "this address" : "these addresses"} in your network (passive DNS, ${andList(sources)}). ${shown.length === 1 ? "It no longer serves" : "They no longer serve"} the site, so this is unverified, but the customer who held ${shown.length === 1 ? "it" : "them"} then may be the one behind it:`,
+		...shown.map((resolution) => `- ${resolution.ip} (${resolution.host}, last seen ${formatUtcDateTime(resolution.lastSeen)})`),
+		...(hidden ? [`- and ${hidden} more, listed in the attached evidence`] : []),
 	];
 }
 
@@ -81,7 +99,9 @@ function linkage(snapshot: OriginHostSnapshot): string[] {
 		...(deferred ? [`- the certificates of the other ${deferred} domains are in the attached evidence`] : []),
 		...(shared ? [] : ["The other servers present certificates for the same domain; the attached evidence lists each fingerprint."]),
 		`You can check this with: openssl s_client -connect ${first.ip}:443 -servername ${snapshot.originalDomain}`,
-		`We found ${snapshot.servers.length === 1 ? "it" : "them"} by checking ${snapshot.scan.addressesScanned.toLocaleString("en-US")} public IPv4 addresses announced by ${snapshot.networks.map(({ asn }) => `AS${asn}`).join(", ") || "your network"} for both the certificate and captured kit bytes.`,
+		snapshot.servers.some(({ discovery }) => discovery === "dns_history")
+			? `We found ${snapshot.servers.length === 1 ? "it" : "them"} in ${snapshot.originalDomain}'s DNS history (passive DNS, ${andList(snapshot.dnsHistory.sources.map(passiveDnsSourceLabel))}): the address${snapshot.servers.length === 1 ? "" : "es"} it resolved to before it moved behind Cloudflare, checked for both the certificate and captured kit bytes.`
+			: `We found ${snapshot.servers.length === 1 ? "it" : "them"} by checking ${snapshot.scan.addressesScanned.toLocaleString("en-US")} public IPv4 addresses announced by ${snapshot.networks.map(({ asn }) => `AS${asn}`).join(", ") || "your network"} for both the certificate and captured kit bytes.`,
 	];
 }
 

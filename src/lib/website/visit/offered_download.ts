@@ -3,6 +3,7 @@ import * as toon from "@toon-format/toon";
 import { lookupMalwareBazaar } from "../../exfiltration/downloads/malwarebazaar";
 import type { LookupResult } from "../../exfiltration/downloads/policy";
 import { lookupVirusTotal } from "../../exfiltration/downloads/virustotal";
+import { virusTotalApiKey } from "../../network/virustotal";
 import { downloadExcerptText, inspectDownload } from "../../malware/download_inspection";
 import type { DownloadedFile } from "./download";
 import type { DownloadCodeSignal, DownloadFormat, WebsiteOfferedDownload } from "../types";
@@ -20,7 +21,7 @@ import { sha256Hex } from "../../util/hash";
 async function defaultDownloadLookups(sha256: string, environment: Readonly<Record<string, string | undefined>> = process.env): Promise<LookupResult[]> {
 	return Promise.all([
 		lookupMalwareBazaar({ sha256, authKey: environment.MALWAREBAZAAR_AUTH_KEY }),
-		lookupVirusTotal({ sha256, apiKey: environment.VIRUSTOTAL_API_KEY }),
+		lookupVirusTotal({ sha256, apiKey: virusTotalApiKey(environment) }),
 	]);
 }
 

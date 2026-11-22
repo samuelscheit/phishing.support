@@ -2,9 +2,8 @@ import type { LookupResult } from "./policy";
 import { sleep, type Sleep } from "../../util/sleep";
 import { deadline } from "../../util/async";
 import { type FetchLike } from "../../http/fetch";
+import { VIRUSTOTAL_API } from "../../network/virustotal";
 
-/** Official VirusTotal v3 API base. Every call sends the key in the `x-apikey` header. */
-const VIRUSTOTAL_API = "https://www.virustotal.com/api/v3";
 const LOOKUP_TIMEOUT_MS = 15_000;
 const SHA256 = /^[a-f0-9]{64}$/;
 

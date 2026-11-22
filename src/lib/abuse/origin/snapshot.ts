@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { passiveDnsSources } from "../../network/passive_dns";
+
 /**
  * Fingerprints kept per capture: every script and stylesheet a page loaded
  * (up to 40) and the document of every hidden frame. Code is kept first. The
@@ -15,11 +17,39 @@ const certificateSchema = z.object({
 	fingerprint256: z.string().max(128),
 }).strict();
 
+/** How a verified origin server was found: the network-wide TLS sweep, or an address the domain resolved to before. */
+const originDiscoveries = ["tls_sweep", "dns_history"] as const;
+
 const originServerSchema = z.object({
 	ip: z.string().max(64),
 	asn: z.number().int().positive().optional(),
 	prefix: z.string().max(64).optional(),
 	certificate: certificateSchema,
+	discovery: z.enum(originDiscoveries),
+}).strict();
+
+/**
+ * An address inside the host's networks that the domain (or its site) once
+ * resolved to, but that did not serve the site when checked: unverified.
+ */
+const historicalResolutionSchema = z.object({
+	host: z.string().max(253),
+	ip: z.string().max(64),
+	firstSeen: z.string().datetime().optional(),
+	lastSeen: z.string().datetime(),
+	sources: z.array(z.enum(passiveDnsSources)).min(1).max(passiveDnsSources.length),
+	asn: z.number().int().positive(),
+	prefix: z.string().max(64),
+}).strict();
+
+export const MAX_HISTORICAL_RESOLUTIONS = 32;
+
+const dnsHistorySchema = z.object({
+	/** The hosts passive DNS was asked about; none on snapshots from before it was. */
+	hosts: z.array(z.string().max(253)).max(8),
+	sources: z.array(z.enum(passiveDnsSources)).max(passiveDnsSources.length),
+	/** Public addresses any source returned, inside the host's networks or not. */
+	recordsFound: z.number().int().nonnegative(),
 }).strict();
 
 const originNetworkSchema = z.object({
@@ -43,7 +73,7 @@ export const kitCollectedData = [
 
 export const originHostSnapshotSchema = z.object({
 	kind: z.literal("cloudflare_origin_host"),
-	version: z.literal(2),
+	version: z.literal(3),
 	recipient: z.string().email().max(320),
 	providerLabel: z.string().min(1).max(200),
 	originalDomain: z.string().min(1).max(253),
@@ -60,6 +90,8 @@ export const originHostSnapshotSchema = z.object({
 		completedAt: z.string().datetime(),
 	}).strict(),
 	servers: z.array(originServerSchema).max(16),
+	dnsHistory: dnsHistorySchema,
+	historicalResolutions: z.array(historicalResolutionSchema).max(MAX_HISTORICAL_RESOLUTIONS),
 	kit: z.object({
 		/** What the confirmed site does to its visitors. */
 		abuse: z.enum(["credential_theft", "payment_fraud", "malware"]).optional(),
@@ -88,6 +120,7 @@ export const originHostSnapshotSchema = z.object({
 }).strict();
 
 export type OriginHostSnapshot = z.infer<typeof originHostSnapshotSchema>;
+export type HistoricalResolution = z.infer<typeof historicalResolutionSchema>;
 export type KitCollectedData = (typeof kitCollectedData)[number];
 
 export function readOriginHostSnapshot(value: unknown): OriginHostSnapshot | undefined {
@@ -95,11 +128,40 @@ export function readOriginHostSnapshot(value: unknown): OriginHostSnapshot | und
 	return parsed.success ? parsed.data : undefined;
 }
 
+/**
+ * How long after its last sighting an unverified address may still stand for
+ * the site. Cloud hosts hand a released address to the next customer within
+ * days; past this, a report naming it would reach a stranger.
+ */
+export const HISTORICAL_ADDRESS_MAX_AGE_DAYS = 14;
+
+/**
+ * The address a hoster should look the site up by: the first verified origin
+ * server, else the most recently seen historical address of the reported
+ * domain itself (not of its site or `www`) last seen no more than
+ * `HISTORICAL_ADDRESS_MAX_AGE_DAYS` before Cloudflare named the host. Every
+ * historical address is inside that host's validated networks.
+ */
+export function originHostAddress(snapshot: OriginHostSnapshot):
+	| { verified: true; ip: string }
+	| { verified: false; ip: string; resolution: HistoricalResolution }
+	| undefined {
+	const [server] = snapshot.servers;
+	if (server) return { verified: true, ip: server.ip };
+	const oldest = Date.parse(snapshot.observedAt) - HISTORICAL_ADDRESS_MAX_AGE_DAYS * 86_400_000;
+	const resolution = snapshot.historicalResolutions
+		.filter(({ host, lastSeen }) => host === snapshot.originalDomain && Date.parse(lastSeen) >= oldest)
+		.sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))[0];
+	return resolution ? { verified: false, ip: resolution.ip, resolution } : undefined;
+}
+
 /** Sweep state handed from one origin-host job slice to its successor. */
 export const originSweepProgressSchema = z.object({
 	networks: z.array(originNetworkSchema).max(24),
 	offset: z.number().int().nonnegative(),
 	servers: z.array(originServerSchema.omit({ asn: true, prefix: true })).max(16),
+	dnsHistory: dnsHistorySchema,
+	historicalResolutions: z.array(historicalResolutionSchema).max(MAX_HISTORICAL_RESOLUTIONS),
 	errors: z.array(z.string().max(500)).max(100),
 }).strict();
 

@@ -6,6 +6,7 @@ import { buildSampleArchive } from "./archive_adapter";
 import { investigateDownload, type InvestigationOutcome, type SubmitFile } from "./investigate";
 import type { LookupResult, VerdictProvider } from "./policy";
 import { sampleRetentionMs } from "./retention";
+import { virusTotalApiKey } from "../../network/virustotal";
 
 /**
  * Production wiring for one collected download. Configuration is read from the
@@ -35,7 +36,7 @@ export function downloadPipelineConfigFromEnvironment(environment: Readonly<Reco
 	return {
 		storeRoot,
 		malwareBazaarAuthKey: environment.MALWAREBAZAAR_AUTH_KEY?.trim() || undefined,
-		virusTotalApiKey: environment.VIRUSTOTAL_API_KEY?.trim() || undefined,
+		virusTotalApiKey: virusTotalApiKey(environment),
 		uploadPermitted,
 		retentionMs: sampleRetentionMs(environment.SAMPLE_RETENTION_DAYS),
 	};

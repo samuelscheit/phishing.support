@@ -1,5 +1,6 @@
 import dns from "node:dns/promises";
 
+import ipaddr from "ipaddr.js";
 import { z } from "zod";
 
 import { retryWithTimeout } from "../../network/bounded_fetch";
@@ -33,6 +34,22 @@ type OriginHostNetwork = {
 	prefixes: string[];
 	discoverySources: string[];
 };
+
+/** The most specific announced prefix of the host's networks that holds an address, IPv4 or IPv6. */
+export function containingNetworkPrefix(ip: string, networks: ReadonlyArray<Pick<OriginHostNetwork, "asn" | "prefixes">>): { asn: number; prefix: string } | undefined {
+	if (!ipaddr.isValid(ip)) return undefined;
+	const address = ipaddr.parse(ip);
+	let best: { asn: number; prefix: string; bits: number } | undefined;
+	for (const network of networks) {
+		for (const prefix of network.prefixes) {
+			if (!ipaddr.isValidCIDR(prefix)) continue;
+			const [base, bits] = ipaddr.parseCIDR(prefix);
+			if (base.kind() !== address.kind() || !address.match(base, bits)) continue;
+			if (!best || bits > best.bits) best = { asn: network.asn, prefix, bits };
+		}
+	}
+	return best && { asn: best.asn, prefix: best.prefix };
+}
 
 export type OriginNetworkResolution = {
 	recipient: string;
