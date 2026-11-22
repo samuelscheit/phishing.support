@@ -53,8 +53,8 @@ describe("abuse resolver", () => {
 							roles: ["registrar"],
 							publicIds: [{ type: "IANA Registrar ID", identifier: "999" }],
 							entities: [
-								{ roles: ["technical"], vcardArray: ["vcard", [["email", {}, "text", "technical@example.com"]]] },
-								abuseEntity("abuse@example.com", "REGISTRAR-ABUSE"),
+								{ roles: ["technical"], vcardArray: ["vcard", [["email", {}, "text", "technical@example-fixture.com"]]] },
+								abuseEntity("abuse@example-fixture.com", "REGISTRAR-ABUSE"),
 							],
 						},
 					],
@@ -64,9 +64,9 @@ describe("abuse resolver", () => {
 
 		expect(result.status).toBe("resolved");
 		expect(result.routes).toHaveLength(1);
-		expect(result.routes[0]).toMatchObject({ routeType: "email", verifiedEmail: "abuse@example.com", status: "verified" });
-		expect(result.routes.map((route) => route.verifiedEmail)).not.toContain("technical@example.com");
-		expect(result.routes[0]?.resolverProvenance).toMatchObject({ email: "abuse@example.com" });
+		expect(result.routes[0]).toMatchObject({ routeType: "email", verifiedEmail: "abuse@example-fixture.com", status: "verified" });
+		expect(result.routes.map((route) => route.verifiedEmail)).not.toContain("technical@example-fixture.com");
+		expect(result.routes[0]?.resolverProvenance).toMatchObject({ email: "abuse@example-fixture.com" });
 	});
 
 	test("falls back to authoritative port-43 abuse-mailbox data when RDAP has no explicit abuse role", async () => {
@@ -77,20 +77,20 @@ describe("abuse resolver", () => {
 				{
 					"https://rdap.test/domain/example.com": {
 						port43: "whois.example.net",
-						entities: [{ roles: ["registrar"], publicIds: [{ type: "IANA Registrar ID", identifier: "999" }], entities: [{ roles: ["technical"], email: "technical@example.com" }] }],
+						entities: [{ roles: ["registrar"], publicIds: [{ type: "IANA Registrar ID", identifier: "999" }], entities: [{ roles: ["technical"], email: "technical@example-fixture.com" }] }],
 					},
 				},
 				async (server, query) => {
 					queries.push([server, query]);
-					return "Registrar Abuse Contact Email: abuse@example.com\nEmail: technical@example.com\n";
+					return "Registrar Abuse Contact Email: abuse@example-fixture.com\nEmail: technical@example-fixture.com\n";
 				},
 			),
 		);
 
 		expect(queries).toEqual([["whois.example.net", "example.com"]]);
 		expect(result.routes).toHaveLength(1);
-		expect(result.routes[0]).toMatchObject({ verifiedEmail: "abuse@example.com", routeType: "email" });
-		expect(parseExplicitWhoisAbuseMailboxes("Email: ignored@example.com\nabuse-mailbox: USE@EXAMPLE.COM\n")).toEqual(["use@example.com"]);
+		expect(result.routes[0]).toMatchObject({ verifiedEmail: "abuse@example-fixture.com", routeType: "email" });
+		expect(parseExplicitWhoisAbuseMailboxes("Email: ignored@example-fixture.com\nabuse-mailbox: USE@EXAMPLE-FIXTURE.COM\n")).toEqual(["use@example-fixture.com"]);
 	});
 
 	test("uses the BGP-origin ASN RDAP fallback and preserves independent IP/WHOIS/ASN provenance", async () => {
@@ -102,7 +102,7 @@ describe("abuse resolver", () => {
 					[`https://rdap.test/ip/${target}`]: {
 						port43: "whois.example.net",
 						name: "Allocation owner",
-						entities: [{ roles: ["technical"], vcardArray: ["vcard", [["email", {}, "text", "noc@example.net"]]] }],
+						entities: [{ roles: ["technical"], vcardArray: ["vcard", [["email", {}, "text", "noc@example-fixture.net"]]] }],
 					},
 					[`https://stat.ripe.net/data/network-info/data.json?resource=${target}`]: {
 						data: { prefix: "154.201.78.0/24", asns: [402506] },
@@ -135,22 +135,22 @@ describe("abuse resolver", () => {
 				assertPublicHost: async () => undefined,
 				port43Query: async () => {
 					port43Calls++;
-					return "abuse-mailbox: whois@example.net";
+					return "abuse-mailbox: whois@example-fixture.net";
 				},
 				rdapLocator: testRdapLocator,
 				fetch: async (input) => {
 					const url = String(input);
 					requestedUrls.push(url);
-					if (url === `https://rdap.test/ip/${target}`) return rdapResponse({ entities: [abuseEntity("allocation@example.net")] });
+					if (url === `https://rdap.test/ip/${target}`) return rdapResponse({ entities: [abuseEntity("allocation@example-fixture.net")] });
 					if (url === `https://stat.ripe.net/data/network-info/data.json?resource=${target}`) return rdapResponse({ data: { asns: [402506] } });
-					if (url === "https://rdap.test/autnum/402506") return rdapResponse({ entities: [abuseEntity("asn@example.net")] });
+					if (url === "https://rdap.test/autnum/402506") return rdapResponse({ entities: [abuseEntity("asn@example-fixture.net")] });
 					return new Response(null, { status: 404 });
 				},
 			},
 		);
 
-		expect(result.routes.map((route) => route.verifiedEmail)).toEqual(["allocation@example.net"]);
-		expect(result.routes[0]?.resolverProvenance).toMatchObject({ email: "allocation@example.net", fallbackContacts: [{ email: "asn@example.net", source: "asn_rdap" }] });
+		expect(result.routes.map((route) => route.verifiedEmail)).toEqual(["allocation@example-fixture.net"]);
+		expect(result.routes[0]?.resolverProvenance).toMatchObject({ email: "allocation@example-fixture.net", fallbackContacts: [{ email: "asn@example-fixture.net", source: "asn_rdap" }] });
 		expect(port43Calls).toBe(0);
 		expect(requestedUrls).toEqual([
 			`https://rdap.test/ip/${target}`,
@@ -216,23 +216,23 @@ describe("abuse resolver", () => {
 
 		test("orders distinct contacts allocation, parent, origin ASN, upstream", async () => {
 			const result = await resolve(tataRecords({
-				"https://rdap.test/ip/14.194.128.0/17": { startAddress: "14.194.0.0", endAddress: "14.195.255.255", entities: [abuseEntity("abuse@parent.example")] },
-				"https://rdap.test/ip/14.192.0.0/14": { startAddress: "14.192.0.0", endAddress: "14.195.255.255", entities: [abuseEntity("abuse@grandparent.example"), abuseEntity("abuse@parent.example")] },
+				"https://rdap.test/ip/14.194.128.0/17": { startAddress: "14.194.0.0", endAddress: "14.195.255.255", entities: [abuseEntity("abuse@parent-fixture.net")] },
+				"https://rdap.test/ip/14.192.0.0/14": { startAddress: "14.192.0.0", endAddress: "14.195.255.255", entities: [abuseEntity("abuse@grandparent-fixture.net"), abuseEntity("abuse@parent-fixture.net")] },
 				"https://rdap.test/ip/14.192.0.0/13": { startAddress: "14.0.0.0", endAddress: "14.255.255.255", entities: [abuseEntity("helpdesk@apnic.net")] },
-				"https://rdap.test/autnum/45820": { entities: [abuseEntity("abuse@origin.example")] },
+				"https://rdap.test/autnum/45820": { entities: [abuseEntity("abuse@origin-fixture.net")] },
 			}));
 			const provenance = result.routes[0]!.resolverProvenance;
 			expect(provenance.email).toBe(DEAD);
 			expect((provenance.fallbackContacts as Array<{ email: string }>).map((contact) => contact.email))
-				.toEqual(["abuse@parent.example", "abuse@grandparent.example", "abuse@origin.example", "4755abuse@tatacommunications.com"]);
+				.toEqual(["abuse@parent-fixture.net", "abuse@grandparent-fixture.net", "abuse@origin-fixture.net", "4755abuse@tatacommunications.com"]);
 		});
 
 		test("a server that does not answer less-specific queries, or answers with the same object, ends the climb", async () => {
 			const notFound = await resolve(tataRecords({ "https://rdap.test/ip/14.194.128.0/17": undefined }));
 			expect((notFound.resolverSnapshot as Record<string, any>).parentObjects).toEqual({ objects: [] });
-			const same = await resolve(tataRecords({ "https://rdap.test/ip/14.194.128.0/17": { startAddress: "14.194.128.0", endAddress: "14.194.191.255", entities: [abuseEntity("abuse@loop.example")] } }));
+			const same = await resolve(tataRecords({ "https://rdap.test/ip/14.194.128.0/17": { startAddress: "14.194.128.0", endAddress: "14.194.191.255", entities: [abuseEntity("abuse@loop-fixture.net")] } }));
 			expect((same.resolverSnapshot as Record<string, any>).parentObjects).toEqual({ objects: [] });
-			expect((same.routes[0]!.resolverProvenance.fallbackContacts as Array<{ email: string }>).map((contact) => contact.email)).not.toContain("abuse@loop.example");
+			expect((same.routes[0]!.resolverProvenance.fallbackContacts as Array<{ email: string }>).map((contact) => contact.email)).not.toContain("abuse@loop-fixture.net");
 		});
 
 		test("reads at most four objects above the allocation", async () => {
@@ -245,11 +245,11 @@ describe("abuse resolver", () => {
 				["14.192.0.0/12", "14.192.0.0", "14.207.255.255"],
 				["14.192.0.0/11", "14.192.0.0", "14.223.255.255"],
 			] as const;
-			for (const [index, [query, start, end]] of levels.entries()) records[`https://rdap.test/ip/${query}`] = { startAddress: start, endAddress: end, entities: [abuseEntity(`abuse@level${index}.example`)] };
+			for (const [index, [query, start, end]] of levels.entries()) records[`https://rdap.test/ip/${query}`] = { startAddress: start, endAddress: end, entities: [abuseEntity(`abuse@level${index}-fixture.net`)] };
 			const result = await resolve(records);
 			expect((result.resolverSnapshot as Record<string, any>).parentObjects.objects).toHaveLength(4);
 			expect((result.routes[0]!.resolverProvenance.fallbackContacts as Array<{ email: string }>).map((contact) => contact.email).slice(0, 4))
-				.toEqual(["abuse@level0.example", "abuse@level1.example", "abuse@level2.example", "abuse@level3.example"]);
+				.toEqual(["abuse@level0-fixture.net", "abuse@level1-fixture.net", "abuse@level2-fixture.net", "abuse@level3-fixture.net"]);
 		});
 
 		test("no upstream when RIPEstat sees none, the only one is the origin itself, or its lookup fails", async () => {

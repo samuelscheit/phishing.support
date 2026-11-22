@@ -42,26 +42,26 @@ describe("registrar RDAP and contact fallbacks", () => {
 		const result = await resolveAbuseTarget(
 			{ normalizedTarget: "lure.example", targetType: "domain", observedUrls: [] },
 			resolverWith({
-				"https://rdap.test/domain/lure.example": registry("lure.example", 999, "abuse@registrar.example", "https://rdap.registrar.example/v1/domain/lure.example"),
-				"https://rdap.registrar.example/v1/domain/lure.example": { entities: [{ roles: ["registrar"], entities: [abuse("support@registrar-helpdesk.example")] }] },
+				"https://rdap.test/domain/lure.example": registry("lure.example", 999, "abuse@registrar-fixture.net", "https://rdap.registrar.example/v1/domain/lure.example"),
+				"https://rdap.registrar.example/v1/domain/lure.example": { entities: [{ roles: ["registrar"], entities: [abuse("support@registrar-helpdesk-fixture.net")] }] },
 			}, requested),
 		);
 		expect(requested).toContain("https://rdap.registrar.example/v1/domain/lure.example");
 		expect(result.routes.filter((route) => route.routeType === "email")).toHaveLength(1);
-		expect(result.routes[0]).toMatchObject({ routeType: "email", verifiedEmail: "support@registrar-helpdesk.example", status: "verified" });
+		expect(result.routes[0]).toMatchObject({ routeType: "email", verifiedEmail: "support@registrar-helpdesk-fixture.net", status: "verified" });
 		expect(result.routes[0]?.resolverProvenance).toMatchObject({
-			email: "support@registrar-helpdesk.example",
+			email: "support@registrar-helpdesk-fixture.net",
 			source: "registrar_rdap",
-			fallbackContacts: [{ email: "abuse@registrar.example", source: "domain_rdap" }],
+			fallbackContacts: [{ email: "abuse@registrar-fixture.net", source: "domain_rdap" }],
 		});
 	});
 
 	test("an unreachable registrar RDAP keeps the registry contact and records why", async () => {
 		const result = await resolveAbuseTarget(
 			{ normalizedTarget: "lure.example", targetType: "domain", observedUrls: [] },
-			resolverWith({ "https://rdap.test/domain/lure.example": registry("lure.example", 999, "abuse@registrar.example", "https://rdap.registrar.example/v1/domain/lure.example") }),
+			resolverWith({ "https://rdap.test/domain/lure.example": registry("lure.example", 999, "abuse@registrar-fixture.net", "https://rdap.registrar.example/v1/domain/lure.example") }),
 		);
-		expect(result.routes[0]).toMatchObject({ verifiedEmail: "abuse@registrar.example" });
+		expect(result.routes[0]).toMatchObject({ verifiedEmail: "abuse@registrar-fixture.net" });
 		expect(result.routes[0]?.resolverProvenance).not.toHaveProperty("fallbackContacts");
 		expect(result.resolverSnapshot).toMatchObject({ registrarRdap: { url: "https://rdap.registrar.example/v1/domain/lure.example", error: "not_found" } });
 	});
