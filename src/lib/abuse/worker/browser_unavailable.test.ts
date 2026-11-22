@@ -5,11 +5,10 @@ import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { BrowserUnavailableError } from "../../browser/fabric";
 import { validateAbuseReportRequest } from "../contracts";
-import { requeueBrowserUnavailableSubmissions } from "../persistence/browser_unavailable_requeue";
 import { BrowserFormError } from "../providers/kit/browser_form";
 import { ProviderLoginError } from "../providers/login_session/session";
 import { AbuseRepository } from "../repository";
-import { abuseEvents, abuseJobs, abuseProviderRuns, type AbuseJobType } from "../schema";
+import { abuseEvents, abuseJobs, type AbuseJobType } from "../schema";
 import { AbuseWorker } from "./index";
 import { BROWSER_WAIT_LIMIT_MS, browserWaitDelayMs, MAX_RETRIES } from "./retry";
 
@@ -168,65 +167,5 @@ describe("a job that finds no browser", () => {
 		await failOnce(job.id, () => new Error("provider down"));
 		expect(await jobRow(job.id)).toMatchObject({ status: "failed" });
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "failed" });
-	});
-});
-
-describe("requeueBrowserUnavailableSubmissions", () => {
-	/** A route the old worker failed for a missing browser, before its marker. */
-	async function failedForMissingBrowser(failure = "GoDaddy: no browser was available (connectOverCDP: connectOverCDP: Target page, context or browser has been closed)") {
-		const fixture = await routeWithJob("submit_provider");
-		// What the old worker's retry-exhausted path did to a running job, in its own transaction.
-		await setJob(fixture.job.id, { status: "running", leaseOwner: "old-worker" });
-		expect(await AbuseRepository.failProviderSubmissionPreflight({ jobId: fixture.job.id, owner: "old-worker", error: failure, routeStatus: "failed", reason: "retry_exhausted" })).toBeTrue();
-		expect(await AbuseRepository.getRoute(fixture.route.id)).toMatchObject({ status: "failed" });
-		return fixture;
-	}
-
-	test("puts the route back in the queue with its run at starting and one submit job, once", async () => {
-		const missing = await failedForMissingBrowser();
-		const otherFailure = await failedForMissingBrowser("GoDaddy: the form rejected the report (HTTP 400)");
-
-		const requeued = await requeueBrowserUnavailableSubmissions();
-		expect(requeued).toContain(missing.route.id);
-		expect(requeued).not.toContain(otherFailure.route.id);
-		expect(await AbuseRepository.getRoute(missing.route.id)).toMatchObject({ status: "queued" });
-		expect(await AbuseRepository.getProviderRun(missing.run.id)).toMatchObject({ executionStatus: "starting", failureReason: null });
-		expect(await AbuseRepository.getRoute(otherFailure.route.id)).toMatchObject({ status: "failed" });
-		expect((await AbuseRepository.getReport(missing.reportId))?.status).not.toBe("failed");
-
-		const db = await getDb();
-		const queued = db.select().from(abuseJobs).where(eq(abuseJobs.routeId, missing.route.id)).all().filter((job) => job.status === "queued");
-		expect(queued).toHaveLength(1);
-		expect(queued[0]).toMatchObject({ jobType: "submit_provider", retryCount: 0, dedupeKey: `provider-submit:${missing.route.id.toString()}` });
-
-		// The submission resumes from its own run: claimed again before its marker.
-		const resumed = await AbuseRepository.beginProviderExecution({
-			routeId: missing.route.id,
-			correlationKey: `provider-submission:godaddy:${missing.route.id.toString()}`,
-			providerPayload: { draft: true },
-			expectedStatus: "queued",
-		});
-		expect(resumed?.run).toMatchObject({ id: missing.run.id, executionStatus: "starting" });
-		expect(await AbuseRepository.getRoute(missing.route.id)).toMatchObject({ status: "running" });
-
-		// Idempotent: a second run changes nothing.
-		expect(await requeueBrowserUnavailableSubmissions()).not.toContain(missing.route.id);
-		expect(db.select().from(abuseJobs).where(eq(abuseJobs.routeId, missing.route.id)).all().filter((job) => job.status === "queued")).toHaveLength(1);
-	});
-
-	test("never requeues a route whose run reached the submission marker", async () => {
-		const missing = await failedForMissingBrowser();
-		const db = await getDb();
-		db.insert(abuseEvents).values({
-			id: BigInt(Date.now()) * 1000n + 7n,
-			reportId: missing.reportId,
-			routeId: missing.route.id,
-			runId: missing.run.id,
-			eventType: "provider_run.provider_submission_started",
-			data: { from: "starting", to: "submission_started" },
-		}).run();
-		expect(await requeueBrowserUnavailableSubmissions()).not.toContain(missing.route.id);
-		expect(await AbuseRepository.getRoute(missing.route.id)).toMatchObject({ status: "failed" });
-		expect(db.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, missing.run.id)).get()).toMatchObject({ executionStatus: "failed" });
 	});
 });

@@ -315,6 +315,10 @@ captured requests is in `docs/providers/`.
   Turnstile or reCAPTCHA token the browser's solver passed, and
   sends the filing request from inside the page so its clearance applies.
   Everything before the one filing request files nothing and is retried safely.
+  Patchright evaluates in an isolated world that shares the DOM but not the
+  page's JavaScript: only probes of the page's own script state (`readGlobal`,
+  `evaluate`, e.g. GoDaddy's `grecaptcha`, PublicDomainRegistry's upload
+  nonce) run in the page's world; DOM probes stay isolated.
 - Every report's free text starts with `Reference: PS-<case tag>-R<route id>`
   (`providers/report_reference.ts`); it is the receipt unless the provider
   returns its own case ID, so provider mail quoting it reaches its route as a

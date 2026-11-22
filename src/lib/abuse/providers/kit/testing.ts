@@ -4,11 +4,29 @@ import { contactRoute } from "../../resolver/routes";
 import { providerSupplementalRoute } from "../submission_routes";
 import { getProviderSubmissionProvider } from "../submission_registry_default";
 import type { AbuseArtifact } from "../../schema";
-import type { BrowserFormResponse } from "./browser_form";
+import type { BrowserFormDependencies, BrowserFormResponse } from "./browser_form";
+import { launchTestPatchright } from "../../../browser/task/test_helpers";
 import type { ProviderSubmissionContext, ProviderSubmissionPreflight, ProviderSubmissionPreparation } from "../submission_contracts";
 import { sha256Hex } from "../../../util/hash";
 
 /** Test support for the provider kit: fixtures every provider's tests share. */
+
+/**
+ * A real Patchright Chromium as the Fabric lease of `openBrowserForm`: each
+ * request whose path is a key of `pages` is answered with that HTML, every
+ * other request is aborted, so nothing leaves the machine. `close` ends the browser.
+ */
+export async function patchrightFormFixture(pages: Readonly<Record<string, string>>) {
+	const browser = await launchTestPatchright();
+	const context = await browser.newContext();
+	await context.route("**/*", (route) => {
+		const body = pages[new URL(route.request().url()).pathname];
+		return body === undefined ? route.abort() : route.fulfill({ contentType: "text/html", body });
+	});
+	let released = 0;
+	const acquire: NonNullable<BrowserFormDependencies["acquire"]> = async () => ({ context: context as never, release: async () => { released++; }, cancel: async () => undefined });
+	return { acquire, context, released: () => released, close: () => browser.close() };
+}
 
 export const TARGET = "login-example-phish.com";
 export const DESCRIPTION = "The page asks visitors for a password, sign-in details, a verification code, or identity details.";

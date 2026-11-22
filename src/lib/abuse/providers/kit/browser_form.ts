@@ -26,10 +26,14 @@ export class BrowserFormError extends Error {
 	}
 }
 
-/** What the helper needs of a browser page; patchright's `Page` satisfies it. */
+/**
+ * What the helper needs of a browser page; patchright's `Page` satisfies it.
+ * Patchright runs `evaluate` in an isolated world unless `isolatedContext` is
+ * false: it shares the DOM, but none of the page's own JavaScript globals.
+ */
 export interface BrowserFormPage {
 	goto(url: string, options: { waitUntil: "domcontentloaded"; timeout: number }): Promise<unknown>;
-	evaluate<Result, Argument>(pageFunction: (argument: Argument) => Result | Promise<Result>, argument: Argument): Promise<Result>;
+	evaluate<Result, Argument>(pageFunction: (argument: Argument) => Result | Promise<Result>, argument: Argument, options?: undefined, isolatedContext?: boolean): Promise<Result>;
 	close(): Promise<void>;
 }
 
@@ -57,7 +61,7 @@ type CaptchaTokenOptions = { widgetSelector?: string; timeoutMs?: number };
 export type BrowserFormSession = {
 	/** The form's named inputs (hidden and honeypot ones too) whose name matches `namePattern`, as the page renders them. */
 	readFormFields(namePattern: string, formSelector?: string): Promise<BrowserFormField[]>;
-	/** A global of the page, by dotted path (`dnd_cf7_uploader.ajax_nonce`); undefined when absent. */
+	/** A global of the page's own scripts, by dotted path (`dnd_cf7_uploader.ajax_nonce`); undefined when absent. */
 	readGlobal(path: string): Promise<unknown>;
 	/** Wait until the browser's solver has passed the page's `kind` widget (scrolled into view meanwhile) and return its token. */
 	waitForCaptchaToken(kind: CaptchaKind, options?: CaptchaTokenOptions): Promise<string>;
@@ -98,6 +102,14 @@ const BROWSER_FORM_DEFAULTS = {
  */
 const CAPTCHA_WIDGET: Record<CaptchaKind, string> = { turnstile: ".cf-turnstile", recaptcha: 'iframe[src*="/recaptcha/"][src*="/anchor"]' };
 const CAPTCHA_NAME: Record<CaptchaKind, string> = { turnstile: "Cloudflare Turnstile", recaptcha: "reCAPTCHA" };
+
+/**
+ * `isolatedContext` for a probe that needs the page's own JavaScript state (a
+ * global its scripts set, `grecaptcha`). Everything that reads or drives only
+ * the DOM keeps Patchright's default isolated world, which the page's scripts
+ * cannot observe.
+ */
+const PAGE_WORLD = false;
 
 // The functions below run inside the page: no closures, one serializable argument.
 
@@ -220,7 +232,7 @@ export async function openBrowserForm(options: BrowserFormOptions, dependencies:
 	const form = page;
 	return {
 		readFormFields: (namePattern, formSelector) => run("page", "the form fields could not be read", form.evaluate(formFieldsProbe, { form: formSelector ?? options.formSelector, pattern: namePattern })),
-		readGlobal: (path) => run("page", `the page value ${path} could not be read`, form.evaluate(globalProbe, path)),
+		readGlobal: (path) => run("page", `the page value ${path} could not be read`, form.evaluate(globalProbe, path, undefined, PAGE_WORLD)),
 		waitForCaptchaToken: (kind, captcha = {}) => step(waitForCaptchaToken(form, kind, {
 			label: `${provider}'s ${CAPTCHA_NAME[kind]}`,
 			timeoutMs: captcha.timeoutMs ?? BROWSER_FORM_DEFAULTS.captchaTimeoutMs,
@@ -237,7 +249,7 @@ export async function openBrowserForm(options: BrowserFormOptions, dependencies:
 			const answer = await run("request", `the request to ${new URL(url).pathname} failed`, form.evaluate(postProbe, { url, fields: [...fields], timeoutMs, ...(headers ? { headers: { ...headers } } : {}) }));
 			return { ...answer, json: parseJson(answer.text) };
 		},
-		evaluate: (pageFunction, argument) => run("page", "the page script failed", form.evaluate(pageFunction, argument)),
+		evaluate: (pageFunction, argument) => run("page", "the page script failed", form.evaluate(pageFunction, argument, undefined, PAGE_WORLD)),
 		clickAll: (selector) => run("page", `${selector} could not be clicked`, form.evaluate(clickAllProbe, selector)),
 		request: async (init) => {
 			const timeoutMs = init.timeoutMs ?? BROWSER_FORM_DEFAULTS.requestTimeoutMs;
@@ -292,8 +304,10 @@ async function requestProbe(argument: BrowserFormRequest & { timeoutMs: number }
 /**
  * Generic in-page script for forms whose protections the fixed helpers do not
  * cover (an invisible reCAPTCHA token, a cookie banner, a request with its own
- * headers). `pageFunction` runs inside the page: no closures, one serializable
- * argument and result. A failure is a `BrowserFormError` of stage `page`.
+ * headers). `pageFunction` runs inside the page, in its own JavaScript world
+ * (its globals, such as `grecaptcha`, are visible): no closures, one
+ * serializable argument and result. A failure is a `BrowserFormError` of
+ * stage `page`.
  */
 export type BrowserFormScripting = {
 	evaluate<Result, Argument>(pageFunction: (argument: Argument) => Result | Promise<Result>, argument: Argument): Promise<Result>;

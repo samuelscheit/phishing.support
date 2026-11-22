@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { browserUserAgent } from "../../../network/service_identity";
 
 import { contactRoute } from "../../resolver/routes";
-import { BrowserFormError, type BrowserFormField, type BrowserFormResponse } from "../kit/browser_form";
+import { BrowserFormError, openBrowserForm, type BrowserFormField, type BrowserFormResponse } from "../kit/browser_form";
+import { chromiumAvailable } from "../../../browser/task/test_helpers";
 import { reportReference } from "../kit/report_reference";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { fetchGoDaddyCorrespondence } from "./correspondence";
@@ -12,7 +13,7 @@ import { storedGoDaddySubmissionPayload } from "./payload";
 import { fetchPortalCaseStatus, interpretPortalAnswer, portalFields, recaptchaTokenProbe } from "./portal";
 import { prepareGoDaddyExternalSubmission as rawPrepareGoDaddyExternalSubmission, goDaddyDraft, submitGoDaddySubmission, type GoDaddyDependencies, type GoDaddyFormSession, type GoDaddyPreflightState } from "./submission";
 import { type AnswerFetch } from "../../../http/fetch";
-import { formAnswer, verifiedPrepare } from "../kit/testing";
+import { formAnswer, patchrightFormFixture, verifiedPrepare } from "../kit/testing";
 
 const prepareGoDaddyExternalSubmission = verifiedPrepare(goDaddyDraft, rawPrepareGoDaddyExternalSubmission);
 
@@ -326,6 +327,45 @@ describe("recaptchaTokenProbe (runs in the page)", () => {
 		await expect(recaptchaTokenProbe({ siteKey: "K", action: "a", timeoutMs: 2_000 })).rejects.toThrow("invalid site key");
 		scoped.window = { grecaptcha: { ready: () => undefined, execute: async () => "never" } };
 		await expect(recaptchaTokenProbe({ siteKey: "K", action: "a", timeoutMs: 1_000 })).rejects.toThrow("timed out");
+	});
+});
+
+/**
+ * The portal as production met it on 2026-11-22: the form renders first, the
+ * page's own script loads reCAPTCHA v3 a moment later. Patchright's default
+ * isolated world never saw `grecaptcha` there ("grecaptcha did not load").
+ */
+describe.skipIf(!chromiumAvailable)("the portal preflight on a real Patchright page", () => {
+	const PORTAL_PAGE = `<!doctype html><html><head><title>Legal Portal - Phishing</title></head><body>
+<button id="pw_accept">Accept</button>
+<form><input id="source-field" name="source"><input type="hidden" name="type" value="PHISHING"><input type="hidden" name="form_plid" value="1"></form>
+<script>
+document.getElementById("pw_accept").addEventListener("click", () => { window.accepted = true; });
+setTimeout(() => {
+	window.grecaptcha = {
+		ready: (callback) => setTimeout(callback, 50),
+		execute: (siteKey, options) => Promise.resolve("03AF-" + siteKey + "-" + options.action + (window.accepted ? "-accepted" : "")),
+	};
+}, 400);
+</script></body></html>`;
+	let fixture: Awaited<ReturnType<typeof patchrightFormFixture>> | undefined;
+	afterEach(async () => { await fixture?.close(); fixture = undefined; });
+
+	test("accepts the banner, then takes the token from the page's own late-loading grecaptcha", async () => {
+		fixture = await patchrightFormFixture({ [new URL(PROVIDER.portal.formUrl).pathname]: PORTAL_PAGE });
+		const { acquire } = fixture;
+		const { payload, loadRouteContext } = await draft();
+		const preflight = await prepareGoDaddyExternalSubmission({ routeId: 5n, payload }, {
+			loadRouteContext,
+			environment: {},
+			openForm: (signal) => openBrowserForm({ provider: "GoDaddy", operation: "godaddy-report", url: PROVIDER.portal.formUrl, formSelector: PROVIDER.portal.formSelector, ...(signal ? { signal } : {}) }, { acquire }),
+		});
+		const state = preflight.state as Extract<GoDaddyPreflightState, { channel: "portal" }>;
+		expect(state.channel).toBe("portal");
+		expect(state.token).toBe(`03AF-${PROVIDER.portal.recaptcha.siteKey}-${PROVIDER.portal.recaptcha.action}-accepted`);
+		expect(state.rendered).toEqual([["type", "PHISHING"], ["form_plid", "1"]]);
+		await preflight.dispose?.();
+		expect(fixture.released()).toBe(1);
 	});
 });
 

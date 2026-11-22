@@ -1,11 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chromium, type Browser } from "patchright";
+import type { Browser } from "patchright";
 
-import { chromiumAvailable } from "../../../browser/task/test_helpers";
+import { chromiumAvailable, launchTestPatchright } from "../../../browser/task/test_helpers";
 import { openTencentForm, type TencentFormInput } from "./browser";
-
-const chromiumExecutable = process.env.PHISHING_TEST_CHROMIUM
-	?? `${process.env.HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 
 const INPUT: TencentFormInput = {
 	domain: "phish.example",
@@ -62,7 +59,7 @@ describe.skipIf(!chromiumAvailable)("Tencent's form in a real browser, its slide
 
 	/** A browser whose every request is answered here: the form page, a fake filing answer, and nothing that leaves the machine. */
 	async function open(solver: Parameters<typeof formPage>[0]) {
-		browser = await chromium.launch({ executablePath: chromiumExecutable, headless: true });
+		browser = await launchTestPatchright();
 		const context = await browser.newContext();
 		const reached: string[] = [];
 		await context.route("**/*", async (route) => {

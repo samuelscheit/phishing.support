@@ -3,7 +3,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { BrowserFormError, openBrowserForm, type BrowserFormDependencies, type BrowserFormPage } from "./browser_form";
 import { captchaTokenFromPage } from "./captcha";
 import { captchaGlobals } from "../../../browser/captcha_test_support";
+import { chromiumAvailable } from "../../../browser/task/test_helpers";
 import { OperationCanceledError } from "../../worker/cancellation";
+import { patchrightFormFixture } from "./testing";
 
 type FakeElement = { name?: string; type?: string; value?: string; scrolled?: boolean; scrollIntoView?: (options: unknown) => void };
 
@@ -27,14 +29,17 @@ class FakePage implements BrowserFormPage {
 	onEvaluate: (calls: number) => void = () => undefined;
 	evaluations = 0;
 	evaluateError: Error | undefined;
+	/** Each in-page function by name, with the world Patchright would run it in. */
+	worlds: [name: string, world: "page" | "isolated"][] = [];
 
 	async goto(url: string, options: { waitUntil: "domcontentloaded"; timeout: number }) {
 		if (this.gotoError) throw this.gotoError;
 		this.gotos.push({ url, timeout: options.timeout });
 	}
 
-	async evaluate<R, A>(pageFunction: (argument: A) => R | Promise<R>, argument: A): Promise<R> {
+	async evaluate<R, A>(pageFunction: (argument: A) => R | Promise<R>, argument: A, _options?: undefined, isolatedContext?: boolean): Promise<R> {
 		this.evaluations++;
+		this.worlds.push([pageFunction.name, isolatedContext === false ? "page" : "isolated"]);
 		this.onEvaluate(this.evaluations);
 		if (this.evaluateError) throw this.evaluateError;
 		const document = {
@@ -268,6 +273,28 @@ describe("session", () => {
 		expect(await session.readGlobal("missing.deeper")).toBeUndefined();
 	});
 
+	test("only probes of the page's own script state run in its world; everything that reads or drives the DOM stays isolated", async () => {
+		const { page, session } = await ready();
+		globalThis.fetch = (async () => new Response("{}")) as unknown as typeof fetch;
+		page.worlds = [];
+		await session.readGlobal("nonce");
+		await session.evaluate(function pageScript() { return 1; }, undefined);
+		await session.readFormFields("^x$");
+		await session.postForm("https://example.test/post", []);
+		await session.request({ method: "GET", url: "https://example.test/get" });
+		await session.clickAll("label");
+		await session.selectOption("select", "a");
+		expect(page.worlds).toEqual([
+			["globalProbe", "page"],
+			["pageScript", "page"],
+			["formFieldsProbe", "isolated"],
+			["postProbe", "isolated"],
+			["requestProbe", "isolated"],
+			["clickAllProbe", "isolated"],
+			["selectProbe", "isolated"],
+		]);
+	});
+
 	test("posts multipart from the page with cookies, repeated names and files, and parses the JSON answer", async () => {
 		const { session } = await ready();
 		const seen: { url: string; init: RequestInit }[] = [];
@@ -467,5 +494,41 @@ describe("captchaTokenFromPage (the Fabric preflight of a provider that files ov
 		page.onEvaluate = (calls) => { if (calls === 4) controller.abort(); };
 		await expect(captchaTokenFromPage(spec, controller.signal, dependencies)).rejects.toBeInstanceOf(OperationCanceledError);
 		expect([page.closed, state.released]).toEqual([true, 1]);
+	});
+});
+
+/**
+ * Patchright runs `evaluate` in an isolated world by default: it shares the
+ * DOM but none of the page's JavaScript. In production that hid GoDaddy's
+ * `grecaptcha` and PublicDomainRegistry's `dnd_cf7_uploader` from the form
+ * session, though both pages had loaded them.
+ */
+describe.skipIf(!chromiumAvailable)("a real Patchright page: the page's own globals, and DOM probes the page cannot tamper with", () => {
+	const FORM = `<!doctype html><html><head><title>Report</title></head><body>
+<form class="f"><input name="nonce_field" value="from-dom"></form>
+<script>
+window.cfg = { nonce: "n-1", depth: { value: 7 } };
+// Only the page's own world sees this: a DOM probe in the isolated world must not.
+Document.prototype.querySelector = function () { return null; };
+</script></body></html>`;
+	let fixture: Awaited<ReturnType<typeof patchrightFormFixture>> | undefined;
+	afterEach(async () => { await fixture?.close(); fixture = undefined; });
+
+	test("readGlobal and evaluate see what the page's scripts set; the default world does not", async () => {
+		fixture = await patchrightFormFixture({ "/form": FORM });
+		const session = await openBrowserForm({ provider: "X", operation: "x", url: "https://forms.example/form", formSelector: "form.f", challengeTimeoutMs: 10_000 }, { acquire: fixture.acquire });
+		try {
+			expect(await session.readGlobal("cfg.nonce")).toBe("n-1");
+			expect(await session.readGlobal("cfg.depth.value")).toBe(7);
+			expect(await session.evaluate((path: string) => typeof (window as unknown as Record<string, unknown>)[path], "cfg")).toBe("object");
+			// The control: Patchright's default world on the very same page.
+			const [page] = fixture.context.pages();
+			expect(await page!.evaluate(() => typeof (window as unknown as { cfg?: unknown }).cfg)).toBe("undefined");
+			// The page broke querySelector in its own world; the form probes, isolated, still find the form.
+			expect(await session.readFormFields("^nonce_field$")).toEqual([["nonce_field", "from-dom"]]);
+		} finally {
+			await session.close();
+		}
+		expect(fixture.released()).toBe(1);
 	});
 });

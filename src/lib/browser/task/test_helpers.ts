@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { chromium as patchrightChromium, type Browser as PatchrightBrowser } from "patchright";
 import puppeteer, { type Browser } from "rebrowser-puppeteer-core";
 
 import type { ChatModel, ChatRequest } from "./agent";
@@ -25,6 +26,11 @@ export async function launchTestChromium(hosts: Record<string, number> = {}): Pr
 		headless: true,
 		args: ["--no-first-run", ...(rules ? [`--host-resolver-rules=${rules}`, "--ignore-certificate-errors"] : [])],
 	});
+}
+
+/** The same headless Chromium driven by Patchright, the client of the provider forms (its `evaluate` defaults to an isolated world). */
+export function launchTestPatchright(): Promise<PatchrightBrowser> {
+	return patchrightChromium.launch({ executablePath: chromiumExecutable, headless: true });
 }
 
 /** A self-signed certificate for a local HTTPS fixture (the browser ignores certificate errors). */
