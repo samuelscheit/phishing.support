@@ -35,7 +35,7 @@ export function registrarPreview(rules: {
 	};
 }
 
-type Rest = Pick<ProviderSubmissionProvider, "fetchCorrespondence" | "findSubmission" | "reviewVerdicts" | "decisionFollowUp">;
+type Rest = Pick<ProviderSubmissionProvider, "fetchCorrespondence" | "findSubmission" | "reportedUrls" | "reviewVerdicts" | "decisionFollowUp">;
 
 type Filing<Payload> =
 	| {

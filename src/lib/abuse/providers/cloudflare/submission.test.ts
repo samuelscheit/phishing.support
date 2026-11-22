@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { readyDraft, verifiedPrepare } from "../kit/testing";
 
-import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
-import { buildCloudflareApiBody, cloudflareApiConfig, cloudflareReportsUrl, CloudflareSessionExpiredError, parseCloudflareApiResponse, submitCloudflareAbuseReport } from "./api";
+import { ProviderSubmissionDuplicateError, ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
+import { buildCloudflareApiBody, cloudflareApiConfig, cloudflareDuplicateOfRejection, cloudflareReportsUrl, CloudflareSessionExpiredError, parseCloudflareApiResponse, submitCloudflareAbuseReport } from "./api";
 import type { CloudflareReportPayload } from "./report";
 import { retryDelayMs } from "../../worker/retry";
 import { ProviderLoginUnavailableError } from "../login_session/session";
@@ -67,6 +67,66 @@ describe("Cloudflare dashboard API", () => {
 		expect(() => parseCloudflareApiResponse(200, '{"result":"error","msg":"bad justification","err_code":"bad_just"}', context)).toThrow("bad justification");
 		try { parseCloudflareApiResponse(503, '{"result":"error","msg":"upstream"}', context); } catch (error) {
 			expect(error).not.toBeInstanceOf(ProviderSubmissionRejectedError);
+		}
+	});
+
+	test("reads exactly Cloudflare's duplicate answer as already reported, every other 4xx as a rejection", () => {
+		const duplicate = `You have already submitted this URL recently: ${report.urls}`;
+		for (const body of [{ result: "error", msg: duplicate }, { success: false, errors: [{ code: 1000, message: duplicate }] }]) {
+			const error = (() => { try { parseCloudflareApiResponse(400, JSON.stringify(body), context); } catch (caught) { return caught; } })();
+			expect(error).toBeInstanceOf(ProviderSubmissionDuplicateError);
+			expect(error).toMatchObject({
+				urls: [report.urls],
+				receipt: { confirmationText: `Cloudflare already had a recent report for ${report.urls}.`, finalUrl: `https://dash.cloudflare.com/${ACCOUNT_ID}/abuse-reports/submitted`, submittedTargets: [context.target] },
+			});
+		}
+		for (const [status, msg] of [
+			[400, "You have already submitted this URL recently"],
+			[400, "You have already submitted this URL recently: "],
+			[400, `Note: You have already submitted this URL recently: ${report.urls}`],
+			[400, `${duplicate} and another`],
+			[400, "You have already submitted this URL recently: not-a-url"],
+			[429, duplicate],
+			[403, duplicate],
+		] as const) {
+			const error = (() => { try { parseCloudflareApiResponse(status, JSON.stringify({ result: "error", msg }), context); } catch (caught) { return caught; } })();
+			expect(error).toBeInstanceOf(ProviderSubmissionRejectedError);
+			expect(error).not.toBeInstanceOf(ProviderSubmissionDuplicateError);
+		}
+		// A run rejected before duplicates were recognised, exactly as production recorded it.
+		expect(cloudflareDuplicateOfRejection(`Cloudflare abuse report was rejected with HTTP 400: ${duplicate}`, context)?.urls).toEqual([report.urls]);
+		for (const reason of [`Cloudflare abuse report was rejected with HTTP 429: ${duplicate}`, "Cloudflare abuse report was rejected with HTTP 400: bad justification", duplicate]) {
+			expect(cloudflareDuplicateOfRejection(reason, context)).toBeUndefined();
+		}
+	});
+
+	test("a duplicate answer adopts the account's newest earlier report of exactly that URL", async () => {
+		const requests: string[] = [];
+		const answer = (reports: { id: string; cdate: string; urls: string[] }[], listing = true) => async (url: string, init?: RequestInit) => {
+			requests.push(`${init?.method} ${url.replace(/^.*\/abuse-reports/, "")}`);
+			if (init?.method === "POST") return Response.json({ result: "error", msg: `You have already submitted this URL recently: ${report.urls}` }, { status: 400 });
+			if (!listing) throw new Error("listing unavailable");
+			if (url.includes("/submitted?")) return Response.json({ success: true, result: { reports: reports.map(({ id, cdate }) => ({ id, cdate, domain: context.target })) } });
+			const found = reports.find((candidate) => url.endsWith(candidate.id))!;
+			return Response.json({ success: true, result: { id: found.id, urls: found.urls, justification: "an older justification" } });
+		};
+		const reports = [
+			{ id: "1111111111111111", cdate: "2026-11-01T00:00:00Z", urls: [report.urls] },
+			{ id: "2222222222222222", cdate: "2026-11-10T00:00:00Z", urls: [report.urls] },
+			{ id: "3333333333333333", cdate: "2026-11-15T00:00:00Z", urls: ["https://phishing.example/other"] },
+		];
+		await expect(submitCloudflareAbuseReport({ config, session, report, target: context.target, fetch: answer(reports) })).resolves.toEqual({
+			confirmationId: "2222222222222222",
+			confirmationText: `Cloudflare already had a recent report for ${report.urls}. Its report 2222222222222222 in the account's submitted reports is this route's receipt.`,
+			finalUrl: `https://dash.cloudflare.com/${ACCOUNT_ID}/abuse-reports/submitted`,
+			submittedTargets: [context.target],
+		});
+		// Newest first, stopping at the first match: the oldest report is never read.
+		expect(requests.filter((request) => request.startsWith("POST"))).toHaveLength(1);
+		expect(requests.some((request) => request.endsWith("1111111111111111"))).toBeFalse();
+		// No report in the account, or no listing, leaves the duplicate for the executor to settle.
+		for (const fetch of [answer(reports.slice(2)), answer(reports, false)]) {
+			await expect(submitCloudflareAbuseReport({ config, session, report, target: context.target, fetch })).rejects.toBeInstanceOf(ProviderSubmissionDuplicateError);
 		}
 	});
 

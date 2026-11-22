@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { isFabricBrowserSessionId } from "../../browser/fabric_session";
@@ -289,10 +289,13 @@ async function settleUnresolvedProviderRun(params: {
 	runId: bigint;
 	providerRegistryKey: string;
 	reason: string;
+	/** The route's and run's status it is settled from: by default the unresolved one. */
+	from?: { route: AbuseRouteStatus; run: AbuseRunStatus };
 	outcome:
-		| { routeStatus: "submitted"; confirmationId: string; confirmationText?: string; finalUrl?: string; submittedTargets: string[] }
+		| { routeStatus: "submitted"; confirmationId?: string; confirmationText?: string; finalUrl?: string; submittedTargets: string[] }
 		| { routeStatus: "provider_rejected"; failureReason: string };
 }): Promise<boolean> {
+	const from = params.from ?? { route: "unknown_external_state", run: "unknown_external_state" };
 	const db = await getDb();
 	return db.transaction(
 		(tx) => {
@@ -300,7 +303,7 @@ async function settleUnresolvedProviderRun(params: {
 			if (!run) return false;
 			const route = tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, run.routeId)).get();
 			if (!route || route.providerRegistryKey !== params.providerRegistryKey) return false;
-			if (route.status !== "unknown_external_state" || run.executionStatus !== "unknown_external_state") return false;
+			if (route.status !== from.route || run.executionStatus !== from.run) return false;
 			// A route can only be repaired from its current unresolved run. If an
 			// older run somehow remains alongside a newer attempt, accepting the
 			// older evidence could settle the route for the wrong provider request.
@@ -327,7 +330,7 @@ async function settleUnresolvedProviderRun(params: {
 						updatedAt: timestamp,
 					}
 					: { executionStatus: "failed", failureReason: outcome.failureReason, updatedAt: timestamp })
-				.where(and(eq(abuseProviderRuns.id, run.id), eq(abuseProviderRuns.executionStatus, "unknown_external_state")))
+				.where(and(eq(abuseProviderRuns.id, run.id), eq(abuseProviderRuns.executionStatus, from.run)))
 				.run();
 			recordEvent(tx, {
 				reportId: run.reportId,
@@ -381,10 +384,10 @@ async function settleUnresolvedProviderRun(params: {
 			const routeUpdated = tx
 				.update(abuseProviderRoutes)
 				.set({ status: outcome.routeStatus, updatedAt: timestamp })
-				.where(and(eq(abuseProviderRoutes.id, route.id), eq(abuseProviderRoutes.status, "unknown_external_state")))
+				.where(and(eq(abuseProviderRoutes.id, route.id), eq(abuseProviderRoutes.status, from.route)))
 				.returning({ id: abuseProviderRoutes.id })
 				.get();
-			if (!routeUpdated) throw new Error("Provider reconciliation could not update the unresolved route.");
+			if (!routeUpdated) throw new Error("Provider reconciliation could not update the route.");
 			recordEvent(tx, {
 				reportId: route.reportId,
 				targetId: route.targetId,
@@ -429,6 +432,72 @@ export async function reconcileProviderRun(params: {
 			submittedTargets: params.submittedTargets,
 		},
 	});
+}
+
+/**
+ * Settle a route its provider wrongly settled as rejected (a duplicate answer
+ * read as a refusal) as submitted. Only the route's latest, failed run of a
+ * `provider_rejected` route moves; a repeat finds nothing to change.
+ */
+export async function resettleRejectedProviderRun(params: {
+	runId: bigint;
+	providerRegistryKey: string;
+	reason: string;
+	success: { confirmationId?: string; confirmationText?: string; finalUrl?: string; submittedTargets: string[] };
+}): Promise<boolean> {
+	if (params.success.submittedTargets.length === 0 || params.success.submittedTargets.some((target) => !target.trim())) {
+		throw new Error("A resettled provider run requires at least one submitted target.");
+	}
+	return settleUnresolvedProviderRun({
+		runId: params.runId,
+		providerRegistryKey: params.providerRegistryKey,
+		reason: params.reason,
+		from: { route: "provider_rejected", run: "failed" },
+		outcome: { routeStatus: "submitted", ...params.success },
+	});
+}
+
+/**
+ * Completed runs of one provider with a receipt whose payload names `url`,
+ * newest first: the candidates whose receipt a duplicate answer adopts. The
+ * payload text only preselects; the provider decides what a payload reported.
+ */
+export async function listReceiptRunsNamingUrl(params: { providerRegistryKey: string; url: string; excludeRunId?: bigint; limit?: number }): Promise<AbuseProviderRun[]> {
+	const db = await getDb();
+	const needle = JSON.stringify(params.url).slice(1, -1);
+	return db
+		.select({ run: abuseProviderRuns })
+		.from(abuseProviderRuns)
+		.innerJoin(abuseProviderRoutes, eq(abuseProviderRoutes.id, abuseProviderRuns.routeId))
+		.where(and(
+			eq(abuseProviderRoutes.providerRegistryKey, params.providerRegistryKey),
+			eq(abuseProviderRuns.executionStatus, "completed"),
+			isNotNull(abuseProviderRuns.confirmationId),
+			sql`instr(${abuseProviderRuns.providerPayload}, ${needle}) > 0`,
+			...(params.excludeRunId === undefined ? [] : [ne(abuseProviderRuns.id, params.excludeRunId)]),
+		))
+		.orderBy(desc(abuseProviderRuns.createdAt), desc(abuseProviderRuns.id))
+		.limit(params.limit ?? 50)
+		.all()
+		.map((row) => row.run);
+}
+
+/** Each `provider_rejected` route of these providers with its latest run, when that run failed. */
+export async function listRejectedProviderRuns(providerRegistryKeys: readonly string[]): Promise<{ routeId: bigint; reportId: bigint; providerRegistryKey: string; run: AbuseProviderRun }[]> {
+	if (providerRegistryKeys.length === 0) return [];
+	const db = await getDb();
+	const routes = await db
+		.select()
+		.from(abuseProviderRoutes)
+		.where(and(eq(abuseProviderRoutes.status, "provider_rejected"), inArray(abuseProviderRoutes.providerRegistryKey, [...providerRegistryKeys])))
+		.all();
+	const rejected = [];
+	for (const route of routes) {
+		const run = await db.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.routeId, route.id))
+			.orderBy(desc(abuseProviderRuns.createdAt), desc(abuseProviderRuns.id)).limit(1).get();
+		if (run?.executionStatus === "failed") rejected.push({ routeId: route.id, reportId: route.reportId, providerRegistryKey: route.providerRegistryKey, run });
+	}
+	return rejected;
 }
 
 /** Settle an unresolved run as rejected once it is proven the request never reached the provider. */

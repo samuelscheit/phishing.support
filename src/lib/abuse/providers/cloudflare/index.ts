@@ -3,7 +3,7 @@ import { defineProvider } from "../kit/provider";
 
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import { buildCloudflareReportPreview } from "./report";
-import { cloudflareDraft, fetchCloudflareCorrespondence, findCloudflareSubmission, prepareCloudflareExternalSubmission, submitCloudflareSubmission } from "./submission";
+import { cloudflareDraft, fetchCloudflareCorrespondence, findCloudflareSubmission, prepareCloudflareExternalSubmission, storedCloudflareSubmissionPayload, submitCloudflareSubmission } from "./submission";
 
 /** The sole executable owner of Cloudflare's authenticated abuse-report API contract. */
 export const cloudflareProvider = defineProvider({
@@ -26,6 +26,10 @@ export const cloudflareProvider = defineProvider({
 		accountIdentifiers: extractTurnstileSitekeys,
 	},
 	findSubmission: findCloudflareSubmission,
+	reportedUrls: (payload) => {
+		const stored = storedCloudflareSubmissionPayload(payload);
+		return stored ? [stored.report.urls] : [];
+	},
 	// The submitted-report API is the authoritative record of Cloudflare's
 	// correspondence; its notification mails are not attached a second time.
 	inbound: { senderDomains: ["cloudflare.com"], confirmationIds: null },

@@ -81,6 +81,24 @@ export class ProviderSubmissionRejectedError extends Error {
 }
 
 /**
+ * The provider refused the report as a duplicate of a recent one for the same
+ * URLs ("You have already submitted this URL recently"): the URLs are reported,
+ * usually by an earlier route of ours for the same site, so the route settles
+ * as submitted, never as a rejection. Generic execution adopts the receipt of
+ * an earlier run of the same provider that reported the URLs; `receipt` is
+ * what it records when there is none.
+ */
+export class ProviderSubmissionDuplicateError extends Error {
+	constructor(
+		readonly urls: readonly string[],
+		readonly receipt: ProviderSubmissionSuccess & { confirmationText: string },
+	) {
+		super(receipt.confirmationText);
+		this.name = "ProviderSubmissionDuplicateError";
+	}
+}
+
+/**
  * A provider cannot proceed automatically and needs a person (for example an
  * expired account session or a form that requires reauthentication). The
  * route settles terminally as `needs_human`; it is neither a provider
@@ -233,6 +251,11 @@ export type ProviderSubmissionProvider = ProviderSubmissionFiling & {
 	 * never submits a second time.
 	 */
 	findSubmission?(context: ProviderSubmissionContext & { sentAt: Date }): Promise<ProviderSubmissionSuccess | undefined>;
+	/**
+	 * The URLs a stored payload reported. A duplicate answer adopts the receipt
+	 * of an earlier run whose payload reported every duplicated URL.
+	 */
+	reportedUrls?(payload: Record<string, unknown>): readonly string[];
 	readonly inboundMail?: ProviderInboundMail;
 	/**
 	 * How to answer a review decision the provider reports through its API.

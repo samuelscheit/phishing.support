@@ -3,12 +3,12 @@ import { describe, expect, test } from "bun:test";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { validateAbuseReportRequest } from "../../contracts";
 import { AbuseRepository } from "../../repository";
-import { ProviderSubmissionRejectedError } from "../submission_contracts";
+import { ProviderSubmissionDuplicateError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { executeProviderSubmission } from "../submission_execution";
 import type { ProviderSubmissionProvider } from "../submission_contracts";
 import { NETCRAFT_PROVIDER } from "./definition";
 import { buildNetcraftSubmissionPayload } from "./payload";
-import { netcraftSubmissionUrl, parseNetcraftSubmissionResponse, netcraftDraft, submitNetcraftSubmission } from "./submission";
+import { netcraftDuplicateOfRejection, netcraftSubmissionUrl, parseNetcraftSubmissionResponse, netcraftDraft, submitNetcraftSubmission } from "./submission";
 import { defineProvider } from "../kit/provider";
 
 useTemporaryDatabase();
@@ -46,6 +46,32 @@ describe("Netcraft v3 submission response", () => {
 			new Response("Too many URLs", { status: 429 }),
 			payload(),
 		)).rejects.toBeInstanceOf(ProviderSubmissionRejectedError);
+	});
+
+	test("reads exactly Netcraft's duplicate answer as already reported, every other 4xx as a rejection", async () => {
+		const duplicate = '{"details":[{"message":"Duplicate of a recent submission"}],"error":"Bad Request","status":400}';
+		const error = await parseNetcraftSubmissionResponse(new Response(duplicate, { status: 400 }), payload()).catch((caught: unknown) => caught);
+		expect(error).toBeInstanceOf(ProviderSubmissionDuplicateError);
+		expect(error).toMatchObject({
+			urls: ["https://login.phishing.example.com/collect"],
+			receipt: { confirmationText: "Netcraft already had a recent submission for https://login.phishing.example.com/collect.", submittedTargets: ["phishing.example.com"] },
+		});
+		for (const [status, body] of [
+			[409, duplicate],
+			[400, '{"details":[{"message":"Duplicate of a recent submission"},{"message":"Invalid URL"}]}'],
+			[400, '{"details":[]}'],
+			[400, '{"details":[{"message":"duplicate of a recent submission"}]}'],
+			[400, '{"message":"Duplicate of a recent submission"}'],
+			[400, "Duplicate of a recent submission"],
+		] as const) {
+			const rejected = await parseNetcraftSubmissionResponse(new Response(body, { status }), payload()).catch((caught: unknown) => caught);
+			expect(rejected).toBeInstanceOf(ProviderSubmissionRejectedError);
+			expect(rejected).not.toBeInstanceOf(ProviderSubmissionDuplicateError);
+		}
+		// A run rejected before duplicates were recognised, exactly as production recorded it.
+		expect(netcraftDuplicateOfRejection(`Netcraft report was rejected with HTTP 400: ${duplicate}`, payload())?.urls).toEqual(["https://login.phishing.example.com/collect"]);
+		expect(netcraftDuplicateOfRejection(`Netcraft report was rejected with HTTP 409: ${duplicate}`, payload())).toBeUndefined();
+		expect(netcraftDuplicateOfRejection('Netcraft report was rejected with HTTP 400: {"error":"Invalid URLs"}', payload())).toBeUndefined();
 	});
 
 	test("fails closed for malformed success evidence and upstream failures", async () => {

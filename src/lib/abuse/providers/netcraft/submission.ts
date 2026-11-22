@@ -1,6 +1,6 @@
 import { createDraft } from "../kit/draft";
-import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
-import { NetcraftSubmissionRejectedError, netcraftSubmissionUrl, parseNetcraftSubmissionResponse as parseNetcraftApiSubmissionResponse } from "./api";
+import { ProviderSubmissionDuplicateError, ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
+import { isNetcraftDuplicateAnswer, NetcraftDuplicateSubmissionError, NetcraftSubmissionRejectedError, netcraftSubmissionUrl, parseNetcraftSubmissionResponse as parseNetcraftApiSubmissionResponse } from "./api";
 import { serviceIdentity } from "../../../network/service_identity";
 import { NETCRAFT_PROVIDER } from "./definition";
 import {
@@ -35,11 +35,30 @@ export async function parseNetcraftSubmissionResponse(
 			submittedTargets: [payload.target.normalizedTarget],
 		};
 	} catch (error) {
+		if (error instanceof NetcraftDuplicateSubmissionError) throw netcraftDuplicate(payload);
 		if (error instanceof NetcraftSubmissionRejectedError) {
 			throw new ProviderSubmissionRejectedError(error.message);
 		}
 		throw error;
 	}
+}
+
+/** Netcraft refuses a submission of URLs it has a recent submission for: they are reported. */
+function netcraftDuplicate(payload: NetcraftSubmissionPayload): ProviderSubmissionDuplicateError {
+	const urls = payload.target.observedUrls;
+	return new ProviderSubmissionDuplicateError(urls, {
+		confirmationText: `Netcraft already had a recent submission for ${urls.join(", ")}.`,
+		submittedTargets: [payload.target.normalizedTarget],
+	});
+}
+
+/**
+ * The duplicate a run settled `provider_rejected` with before duplicates were
+ * recognised, read from its failure reason.
+ */
+export function netcraftDuplicateOfRejection(failureReason: string, payload: NetcraftSubmissionPayload): ProviderSubmissionDuplicateError | undefined {
+	const match = /^Netcraft report was rejected with HTTP (\d{3}): ([\s\S]*)$/.exec(failureReason);
+	return match && isNetcraftDuplicateAnswer(Number(match[1]), match[2]!) ? netcraftDuplicate(payload) : undefined;
 }
 
 export const netcraftDraft = createDraft({

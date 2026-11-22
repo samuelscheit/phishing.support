@@ -44,6 +44,29 @@ export class NetcraftSubmissionRejectedError extends Error {
 	}
 }
 
+/** Netcraft's answer to URLs it has a recent submission for: they are reported. */
+export class NetcraftDuplicateSubmissionError extends NetcraftSubmissionRejectedError {
+	constructor(message: string) {
+		super(message);
+		this.name = "NetcraftDuplicateSubmissionError";
+	}
+}
+
+const DUPLICATE_MESSAGE = "Duplicate of a recent submission";
+
+/** Whether a 4xx answer is exactly Netcraft's duplicate answer: HTTP 400 whose every detail says so. */
+export function isNetcraftDuplicateAnswer(status: number, body: string): boolean {
+	if (status !== 400) return false;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(body);
+	} catch {
+		return false;
+	}
+	const details = asRecord(parsed)?.details;
+	return Array.isArray(details) && details.length > 0 && details.every((detail) => asRecord(detail)?.message === DUPLICATE_MESSAGE);
+}
+
 function normalizeSubmissionId(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const uuid = value.trim();
@@ -173,9 +196,8 @@ export async function parseNetcraftSubmissionResponse(
 	const body = await response.text();
 	if (!response.ok) {
 		if (response.status >= 400 && response.status < 500) {
-			throw new NetcraftSubmissionRejectedError(
-				"Netcraft report was rejected with HTTP " + response.status + ": " + responseDetail(body),
-			);
+			const message = "Netcraft report was rejected with HTTP " + response.status + ": " + responseDetail(body);
+			throw isNetcraftDuplicateAnswer(response.status, body) ? new NetcraftDuplicateSubmissionError(message) : new NetcraftSubmissionRejectedError(message);
 		}
 		throw new Error("Netcraft report submission failed with HTTP " + response.status + ": " + responseDetail(body));
 	}

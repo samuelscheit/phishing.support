@@ -1,6 +1,6 @@
 
 import type { ProviderCorrespondence, ProviderCorrespondenceMessage, ProviderSubmissionSuccess } from "../submission_contracts";
-import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
+import { ProviderSubmissionDuplicateError, ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import type { CloudflareReportPayload } from "./report";
@@ -59,7 +59,37 @@ export class CloudflareSessionExpiredError extends Error {
 	}
 }
 
-/** 4xx is a known rejection; server errors and missing receipts remain ambiguous. */
+/** Cloudflare's whole answer to a URL it has a recent report for, from this account or another. */
+const DUPLICATE_DETAIL = /^You have already submitted this URL recently: (\S+)$/;
+
+/** The URL a 4xx answer's detail says Cloudflare already has a recent report for. */
+function duplicateUrl(status: number, detail: string): string | undefined {
+	const url = status === 400 ? DUPLICATE_DETAIL.exec(detail)?.[1] : undefined;
+	return url && URL.canParse(url) ? url : undefined;
+}
+
+function cloudflareDuplicate(accountId: string, target: string, url: string): ProviderSubmissionDuplicateError {
+	return new ProviderSubmissionDuplicateError([url], {
+		confirmationText: `Cloudflare already had a recent report for ${url}.`,
+		finalUrl: `${CLOUDFLARE_PROVIDER.dashboardUrl}/${accountId}/abuse-reports/submitted`,
+		submittedTargets: [target],
+	});
+}
+
+/**
+ * The duplicate a run settled `provider_rejected` with before duplicates were
+ * recognised, read from its failure reason.
+ */
+export function cloudflareDuplicateOfRejection(failureReason: string, context: { accountId: string; target: string }): ProviderSubmissionDuplicateError | undefined {
+	const match = /^Cloudflare abuse report was rejected with HTTP (\d{3}): ([\s\S]*)$/.exec(failureReason);
+	const url = match && duplicateUrl(Number(match[1]), match[2]!);
+	return url ? cloudflareDuplicate(context.accountId, context.target, url) : undefined;
+}
+
+/**
+ * 4xx is a known rejection, except Cloudflare's duplicate answer: the URL is
+ * reported. Server errors and missing receipts remain ambiguous.
+ */
 export function parseCloudflareApiResponse(
 	status: number,
 	rawBody: string,
@@ -73,6 +103,8 @@ export function parseCloudflareApiResponse(
 	}
 	const detail = text(json?.msg) ?? (errors.map((error) => text(error?.message)).filter(Boolean).join("; ") || snippet(body, 500));
 	if (status >= 400 && status < 500) {
+		const duplicate = duplicateUrl(status, detail);
+		if (duplicate) throw cloudflareDuplicate(context.accountId, context.target, duplicate);
 		throw new ProviderSubmissionRejectedError(`Cloudflare abuse report was rejected with HTTP ${status}: ${detail}`);
 	}
 	if (status < 200 || status >= 300) {
@@ -158,6 +190,37 @@ async function cloudflareDashboardRequest<T>(
 const RECEIPT_LOOKUP_SKEW_MS = 60_000;
 
 /**
+ * The account's submitted reports for a domain, newest first, whose URLs are
+ * exactly `urls` (and justification, when given), created since `since` when
+ * given. At most `limit` matches are read in detail.
+ */
+async function matchingSubmittedReports(params: CloudflareRequestContext & {
+	target: string;
+	urls: string;
+	justification?: string;
+	since?: Date;
+	limit: number;
+}): Promise<string[]> {
+	const url = `${CLOUDFLARE_PROVIDER.apiBaseUrl}/accounts/${params.config.accountId}/abuse-reports/submitted?search=${encodeURIComponent(params.target)}&per_page=50`;
+	const listed = await cloudflareDashboardRequest(params, { url, method: "GET" }, parseCloudflareRead);
+	const reports = Array.isArray(listed.reports) ? listed.reports.map(asRecord) : [];
+	const candidates = reports
+		.map((report) => ({ id: text(report?.id), domain: text(report?.domain), created: Date.parse(text(report?.cdate) ?? "") }))
+		.filter((report): report is { id: string; domain: string; created: number } => !!report.id && SUBMITTED_REPORT_ID.test(report.id)
+			&& report.domain === params.target && Number.isFinite(report.created)
+			&& (!params.since || report.created >= params.since.getTime() - RECEIPT_LOOKUP_SKEW_MS))
+		.sort((a, b) => b.created - a.created);
+	const matches: string[] = [];
+	for (const { id } of candidates) {
+		if (matches.length >= params.limit) break;
+		const detail = await cloudflareDashboardRequest(params, { url: submittedReportUrl(params.config.accountId, id), method: "GET" }, parseCloudflareRead);
+		const urls = Array.isArray(detail.urls) ? detail.urls.filter((item): item is string => typeof item === "string") : [];
+		if (urls.join("\n") === params.urls && (params.justification === undefined || text(detail.justification) === params.justification)) matches.push(id);
+	}
+	return matches;
+}
+
+/**
  * Find the report a POST created when its answer was lost. The account's
  * submitted reports are searched by domain, limited to those created since the
  * POST, and a report counts only when its URLs and justification are exactly
@@ -168,23 +231,13 @@ export async function findSubmittedCloudflareReport(params: CloudflareRequestCon
 	target: string;
 	sentAt: Date;
 }): Promise<string | undefined> {
-	const url = `${CLOUDFLARE_PROVIDER.apiBaseUrl}/accounts/${params.config.accountId}/abuse-reports/submitted?search=${encodeURIComponent(params.target)}&per_page=50`;
-	const listed = await cloudflareDashboardRequest(params, { url, method: "GET" }, parseCloudflareRead);
-	const reports = Array.isArray(listed.reports) ? listed.reports.map(asRecord) : [];
-	const candidates = reports.filter((report) => {
-		const id = text(report?.id);
-		const created = Date.parse(text(report?.cdate) ?? "");
-		return id && SUBMITTED_REPORT_ID.test(id) && text(report?.domain) === params.target
-			&& Number.isFinite(created) && created >= params.sentAt.getTime() - RECEIPT_LOOKUP_SKEW_MS;
-	});
-	const matches: string[] = [];
-	for (const candidate of candidates) {
-		const id = text(candidate?.id)!;
-		const detail = await cloudflareDashboardRequest(params, { url: submittedReportUrl(params.config.accountId, id), method: "GET" }, parseCloudflareRead);
-		const urls = Array.isArray(detail.urls) ? detail.urls.filter((item): item is string => typeof item === "string") : [];
-		if (urls.join("\n") === params.report.urls && text(detail.justification) === params.report.justification) matches.push(id);
-	}
+	const matches = await matchingSubmittedReports({ ...params, urls: params.report.urls, justification: params.report.justification, since: params.sentAt, limit: 2 });
 	return matches.length === 1 ? matches[0] : undefined;
+}
+
+/** The account's newest earlier report of exactly this URL, whatever its justification and age. */
+export async function findEarlierCloudflareReport(params: CloudflareRequestContext & { target: string; url: string }): Promise<string | undefined> {
+	return (await matchingSubmittedReports({ ...params, urls: params.url, limit: 1 }))[0];
 }
 
 /**
@@ -205,6 +258,19 @@ export async function submitCloudflareAbuseReport(params: CloudflareRequestConte
 			(status, rawBody) => parseCloudflareApiResponse(status, rawBody, { accountId: params.config.accountId, target: params.target }),
 		);
 	} catch (error) {
+		if (error instanceof ProviderSubmissionDuplicateError) {
+			const url = error.urls[0]!;
+			const earlier = await findEarlierCloudflareReport({ ...params, url }).catch((lookupError: unknown) => {
+				console.warn(`Cloudflare submitted-report lookup after a duplicate answer for ${url} failed:`, lookupError);
+				return undefined;
+			});
+			if (!earlier) throw error;
+			return {
+				...error.receipt,
+				confirmationId: earlier,
+				confirmationText: `${error.receipt.confirmationText} Its report ${earlier} in the account's submitted reports is this route's receipt.`,
+			};
+		}
 		if (error instanceof ProviderSubmissionRejectedError || error instanceof ProviderSubmissionNeedsHumanError || error instanceof CloudflareSessionExpiredError) throw error;
 		const receipt = await findSubmittedCloudflareReport({ ...params, sentAt }).catch((lookupError: unknown) => {
 			console.warn(`Cloudflare submitted-report lookup after a failed POST for ${params.target} failed:`, lookupError);

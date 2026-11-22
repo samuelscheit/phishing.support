@@ -1,7 +1,7 @@
 import { defineProvider } from "../kit/provider";
 import { NETCRAFT_PROVIDER } from "./definition";
 import { netcraftDraft, submitNetcraftSubmission } from "./submission";
-import { makeNetcraftReason } from "./payload";
+import { makeNetcraftReason, storedNetcraftSubmissionPayload } from "./payload";
 import { NETCRAFT_INBOUND_MAIL } from "./inbound";
 import { fetchNetcraftCorrespondence, NETCRAFT_REVIEW_VERDICTS } from "./correspondence";
 
@@ -18,6 +18,7 @@ export const netcraftProvider = defineProvider({
 	}),
 	inbound: NETCRAFT_INBOUND_MAIL,
 	submit: submitNetcraftSubmission,
+	reportedUrls: (payload) => storedNetcraftSubmissionPayload(payload)?.target.observedUrls ?? [],
 	fetchCorrespondence: fetchNetcraftCorrespondence,
 	reviewVerdicts: NETCRAFT_REVIEW_VERDICTS,
 });

@@ -2,8 +2,10 @@ import { AbuseRepository } from "../repository";
 
 import { providerDefinitionMatchesPin } from "./kit/pin";
 import { fallBackToEmail } from "./email_fallback";
+import { duplicateReceipt } from "./duplicate_reports";
 
 import {
+	ProviderSubmissionDuplicateError,
 	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
 	type ProviderSubmissionContext,
@@ -323,6 +325,7 @@ async function executeOnce(params: Parameters<typeof executeProviderSubmission>[
 		success = await file();
 	} catch (error) {
 		await disposePreflight(preflight);
+		if (error instanceof ProviderSubmissionDuplicateError) return settleSuccess(route, run, params.provider, await duplicateReceipt(params.provider, error, run.id));
 		const status = knownFailureStatus(error);
 		if (status) return settleKnownFailure({ routeId: route.id, runId: run.id, status, reason: boundedErrorText(error) });
 		await AbuseRepository.markUnknownExternalState({ routeId: route.id, runId: run.id, error: boundedErrorText(error), reason: "provider_submission_ambiguous" });
@@ -334,6 +337,16 @@ async function executeOnce(params: Parameters<typeof executeProviderSubmission>[
 		throw new ProviderSubmissionUnknownExternalStateError(boundedErrorText(error));
 	}
 	await disposePreflight(preflight);
+	return settleSuccess(route, run, params.provider, success);
+}
+
+/** Record a provider-confirmed success (or a duplicate's receipt) and start reading its correspondence. */
+async function settleSuccess(
+	route: { id: bigint; reportId: bigint },
+	run: { id: bigint },
+	provider: ProviderSubmissionProvider,
+	success: ProviderSubmissionSuccess,
+): Promise<ProviderSubmissionExecutionResult> {
 	if (!isSubmissionSuccess(success)) {
 		return markUnknownExternal({
 			routeId: route.id,
@@ -363,7 +376,7 @@ async function executeOnce(params: Parameters<typeof executeProviderSubmission>[
 		});
 	}
 	if (settled || (await AbuseRepository.getRoute(route.id))?.status === "submitted") {
-		if (params.provider.fetchCorrespondence && success.confirmationId) await queueCorrespondencePoll(route, { delayMs: nextCorrespondencePollDelayMs(0) });
+		if (provider.fetchCorrespondence && success.confirmationId) await queueCorrespondencePoll(route, { delayMs: nextCorrespondencePollDelayMs(0) });
 		return { outcome: "submitted", runId: run.id };
 	}
 	return markUnknownExternal({
