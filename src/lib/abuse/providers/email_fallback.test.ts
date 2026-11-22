@@ -12,7 +12,7 @@ import { awsProvider } from "./aws";
 import { submitAwsSubmission } from "./aws/submission";
 import { PNG, routeFixture, TARGET } from "./kit/testing";
 import { executeProviderSubmission } from "./submission_execution";
-import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError, type ProviderSubmissionProvider } from "./submission_contracts";
+import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError, type ProviderSubmissionProvider, type ProviderSubmissionSuccess } from "./submission_contracts";
 
 useTemporaryDatabase();
 
@@ -27,7 +27,7 @@ afterAll(() => {
 });
 
 /** The DigitalOcean provider whose one request answers as `submit` does; nothing leaves the test. */
-const answering = (submit: ProviderSubmissionProvider["submit" & keyof ProviderSubmissionProvider]): ProviderSubmissionProvider => ({ ...digitalOceanProvider, submit } as ProviderSubmissionProvider);
+const answering = (submit: () => Promise<ProviderSubmissionSuccess>): ProviderSubmissionProvider => ({ ...digitalOceanProvider, submit } as ProviderSubmissionProvider);
 
 async function doRoute() {
 	const fixture = await routeFixture({ mailbox: "abuse@digitalocean.com", providerName: "DigitalOcean", screenshot: PNG, provenance: { source: "domain_infrastructure_ip", originatingIp: "164.90.1.2", originatingDomain: TARGET } });
