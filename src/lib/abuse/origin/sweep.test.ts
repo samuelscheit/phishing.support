@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { capturedKitResponseMatches, certificateCovers, findOriginServers, MAX_SWEEP_ADDRESSES, originSweepAddresses, planOriginSweep, type PresentedCertificate } from "./sweep";
+import { browserUserAgent } from "../../network/service_identity";
+import { capturedKitResponseMatches, certificateCovers, findOriginServers, MAX_SWEEP_ADDRESSES, originSweepAddresses, originVerificationHeaders, planOriginSweep, type PresentedCertificate } from "./sweep";
 
 const certificate: PresentedCertificate = {
 	names: ["login.example.com"],
@@ -11,6 +12,13 @@ const certificate: PresentedCertificate = {
 };
 
 describe("origin TLS sweep", () => {
+	test("asks a candidate origin for a captured file as the capturing browser, uncompressed", () => {
+		const headers = originVerificationHeaders("login.example.com");
+		expect(headers).toEqual({ Host: "login.example.com", "user-agent": browserUserAgent, "accept-language": "en-US,en;q=0.9", Accept: "*/*", Connection: "close" });
+		expect(headers["user-agent"]).not.toMatch(/Headless|Bun\//);
+		expect(Object.keys(headers).map((key) => key.toLowerCase())).not.toContain("accept-encoding");
+	});
+
 	test("matches exact names and one-label wildcards only", () => {
 		expect(certificateCovers(["login.example.com"], "LOGIN.EXAMPLE.COM")).toBe(true);
 		expect(certificateCovers(["*.example.com"], "login.example.com")).toBe(true);

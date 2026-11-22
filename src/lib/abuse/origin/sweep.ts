@@ -6,6 +6,7 @@ import tls from "node:tls";
 import ipaddr from "ipaddr.js";
 
 import { NON_PUBLIC_IPV4 } from "../security/security";
+import { browserRequestHeaders } from "../../network/service_identity";
 
 /** The largest IPv4 address space one host may be swept across. */
 export const MAX_SWEEP_ADDRESSES = 4_000_000;
@@ -51,6 +52,22 @@ export type OriginVerifier = (
 
 const MAX_VERIFICATION_BODY_BYTES = 2 * 1024 * 1024;
 
+/**
+ * The request a candidate origin gets for a captured file. The bytes were
+ * captured by a browser visit, so a kit that cloaks by client sees the same
+ * browser; no Accept-Encoding, so the body is hashed as served, uncompressed,
+ * like the capture's decoded bytes.
+ */
+export function originVerificationHeaders(domain: string): Record<string, string> {
+	return {
+		Host: domain,
+		"user-agent": browserRequestHeaders["user-agent"]!,
+		"accept-language": browserRequestHeaders["accept-language"]!,
+		Accept: "*/*",
+		Connection: "close",
+	};
+}
+
 export function capturedKitResponseMatches(
 	statusCode: number | undefined,
 	headers: IncomingHttpHeaders,
@@ -85,7 +102,7 @@ const servesCapturedKit: OriginVerifier = async (ip, domain, targets, timeoutMs)
 				servername: domain,
 				path: target.path,
 				method: "GET",
-				headers: { Host: domain, Accept: "*/*", Connection: "close" },
+				headers: originVerificationHeaders(domain),
 				rejectUnauthorized: false,
 				timeout: timeoutMs,
 			}, (response) => {
