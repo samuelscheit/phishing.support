@@ -72,7 +72,9 @@ describe("origin-host email draft", () => {
 		const { subject, body } = draft(snapshot());
 		expect(subject).toEndWith("Phishing abuse: credential phishing kit for login.example.com");
 		expect(body).toContain("Cloudflare named you as the host of the phishing site login.example.com, which steals account credentials.");
-		expect(body).toContain("We checked 256 public IPv4 addresses announced by your network (AS64500); none both presented login.example.com's certificate and returned an exact captured phishing-kit file");
+		expect(body).not.toContain("We checked");
+		expect(body).not.toContain("public IPv4 addresses");
+		expect(body).not.toContain("\n\n\n");
 		expect(body).toContain("1. Identify and suspend the service hosting login.example.com.");
 		expect(body).not.toContain("openssl");
 		expect(body).toContain("The hosting service therefore holds live victim credentials.");

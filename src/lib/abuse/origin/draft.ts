@@ -67,12 +67,8 @@ function originIntro(snapshot: OriginHostSnapshot, domains: number): string[] {
 
 function linkage(snapshot: OriginHostSnapshot): string[] {
 	const [first] = snapshot.servers;
-	if (!first) {
-		const scanned = snapshot.scan.addressesScanned;
-		return scanned
-			? [`We checked ${scanned.toLocaleString("en-US")} public IPv4 addresses announced by your network${snapshot.networks.length ? ` (${snapshot.networks.map(({ asn }) => `AS${asn}`).join(", ")})` : ""}; none both presented ${snapshot.originalDomain}'s certificate and returned an exact captured ${snapshot.kit.abuse === "malware" ? "site" : "phishing-kit"} file, so the site may run on a service outside those ranges.`]
-			: [];
-	}
+	// A sweep that found nothing proves nothing to the host; only a match is worth their time.
+	if (!first) return [];
 	const issuers = [...new Set([first.certificate, ...snapshot.siblings.map(({ certificate }) => certificate)].map(({ issuer }) => issuerName(issuer)))];
 	const shared = snapshot.servers.every(({ certificate }) => certificate.fingerprint256 === first.certificate.fingerprint256);
 	const where = snapshot.servers.length === 1 ? `${first.ip}:443` : shared ? `each of these servers on port 443` : "these servers on port 443";
@@ -185,7 +181,7 @@ export function createOriginHostEmailDraft(input: {
 				...(hiddenDomains ? [`- and ${hiddenDomains} more, listed in the attached evidence`] : []),
 				"",
 			]
-			: [""]),
+			: []),
 		...linkage(snapshot),
 		...kitSection(snapshot),
 		...cloudflareContext(snapshot),
