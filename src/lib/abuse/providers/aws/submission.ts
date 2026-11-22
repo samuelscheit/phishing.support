@@ -2,6 +2,7 @@ import { emailOriginOf } from "../email_origin";
 import { createDraft, reportInputOf, type RouteData } from "../kit/draft";
 import { asRecord } from "../../../util/values";
 import { failUnlessFiled } from "../kit/http";
+import { ProviderSubmissionRejectedError } from "../submission_contracts";
 import { snippet } from "../../../util/text";
 import type { ProviderSubmissionContext, ProviderSubmissionSuccess } from "../submission_contracts";
 import { providerResponseId } from "../kit/report_reference";
@@ -36,9 +37,30 @@ export const awsDraft = createDraft({
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
 
+/** API Gateway's own body for a request its authorizer, resource policy or WAF denied. */
+export const API_GATEWAY_FORBIDDEN_BODY = '{"message":"Forbidden"}';
+
+/**
+ * Whether API Gateway itself denied the request: a 403 typed
+ * `ForbiddenException` (its `x-amzn-errortype`, optionally `:`-suffixed with
+ * a URL) or carrying its exact default body. The gateway answers so before
+ * any integration runs, so the report never reached AWS's handler. Since
+ * 2026-11-20 it answers every request to the form's API so, even the form
+ * page's own `retrieve-aws-ips` inside a real browser. Any other 403 (an
+ * application error with its own body) stays ambiguous.
+ */
+export function isApiGatewayDenial(response: Pick<Response, "status" | "headers">, text: string): boolean {
+	if (response.status !== 403) return false;
+	return response.headers.get("x-amzn-errortype")?.split(":")[0]?.trim() === "ForbiddenException" || text.trim() === API_GATEWAY_FORBIDDEN_BODY;
+}
+
+/** The refusal for API Gateway's denial; `detail` is a snippet of its answer. */
+export const apiGatewayDenial = (detail: string) => new ProviderSubmissionRejectedError(`AWS's API gateway denied the report before it was filed (HTTP 403): ${detail}`);
+
 /**
  * File the report: the only work after the durable marker. A refusal naming
- * a bad request means nothing was filed; anything else leaves it ambiguous.
+ * a bad request, or API Gateway's denial, means nothing was filed; anything
+ * else leaves it ambiguous.
  */
 export async function submitAwsSubmission(context: ProviderSubmissionContext, dependencies: AwsSubmissionDependencies = {}): Promise<ProviderSubmissionSuccess> {
 	const payload = awsDraft.stored(context);
@@ -50,6 +72,7 @@ export async function submitAwsSubmission(context: ProviderSubmissionContext, de
 		signal: deadline(AWS_PROVIDER.timeoutMs, context.signal),
 	});
 	const text = await response.text();
+	if (isApiGatewayDenial(response, text)) throw apiGatewayDenial(snippet(text));
 	failUnlessFiled("AWS", response, snippet(text), [400, 413, 422]);
 	let answer: unknown;
 	try {

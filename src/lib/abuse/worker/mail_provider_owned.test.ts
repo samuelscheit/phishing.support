@@ -27,9 +27,12 @@ async function answeredRoute(email: string) {
 
 describe("a provider's \"use our form\" answer", () => {
 	test("never starts the generic browser agent on a mailbox a reviewed provider owns", async () => {
-		const { route, messageId } = await answeredRoute("abuse@digitalocean.com");
-		await classifyReply(messageId);
-		expect((await AbuseRepository.getRoute(route.id))?.status).toBe("awaiting_provider_reply");
+		// DigitalOcean's and AWS's mailboxes get mail only as their form's fallback; the answer ends there, no loop.
+		for (const mailbox of ["abuse@digitalocean.com", "trustandsafety@support.aws.com", "abuse@amazonaws.com"]) {
+			const { route, messageId } = await answeredRoute(mailbox);
+			await classifyReply(messageId);
+			expect((await AbuseRepository.getRoute(route.id))?.status, mailbox).toBe("awaiting_provider_reply");
+		}
 	});
 
 	test("still escalates any other mailbox to its verified form", async () => {

@@ -8,6 +8,8 @@ import { AbuseRepository } from "../repository";
 import { sendEmail } from "../worker/email";
 import { digitalOceanProvider } from "./digitalocean";
 import { dynadotProvider } from "./dynadot";
+import { awsProvider } from "./aws";
+import { submitAwsSubmission } from "./aws/submission";
 import { PNG, routeFixture, TARGET } from "./kit/testing";
 import { executeProviderSubmission } from "./submission_execution";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError, type ProviderSubmissionProvider } from "./submission_contracts";
@@ -102,6 +104,14 @@ describe("email fallback", () => {
 		const lost = await doRoute();
 		await executeProviderSubmission({ routeId: lost.route.id, provider: answering(async () => { throw new Error("socket hang up"); }) }).catch(() => undefined);
 		expect(await fallbackOf(lost.created.reportId)).toHaveLength(0);
+	});
+
+	test("AWS's API Gateway denial settles as refused and goes to AWS's mailbox", async () => {
+		const { created, route } = await routeFixture({ mailbox: "trustandsafety@support.aws.com", providerName: "AWS" });
+		const denied = async () => new Response('{"message":"Forbidden"}', { status: 403, headers: { "x-amzn-errortype": "ForbiddenException" } });
+		const provider = { ...awsProvider, submit: (context) => submitAwsSubmission(context, { fetch: denied }) } as ProviderSubmissionProvider;
+		expect((await executeProviderSubmission({ routeId: route.id, provider })).outcome).toBe("provider_rejected");
+		expect(await fallbackOf(created.reportId)).toMatchObject([{ routeType: "email", verifiedEmail: "trustandsafety@support.aws.com", status: "verified" }]);
 	});
 
 	test("a provider without an email fallback keeps its refusal", async () => {

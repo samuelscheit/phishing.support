@@ -12,9 +12,11 @@ const [firstName = serviceIdentity.name, ...lastName] = serviceIdentity.name.spl
 export const AWS_PROVIDER = definePinned({
 	key: "aws_trust_safety",
 	displayName: "AWS Trust & Safety",
-	version: "2026-11-20.2",
+	version: "2026-11-22.1",
 	exactMailboxes: ["trustandsafety@support.aws.com", "abuse@amazonaws.com"],
 	supplemental: false,
+	/** The form's API refuses every request since 2026-11-20 (API Gateway 403); a refused report still goes to the mailbox. */
+	emailFallback: { format: "plain" } as const,
 	/** The abuse form's API; the page at `formUrl` posts the same request unauthenticated. */
 	endpoint: "https://api.support.aws.amazon.com/v1/contacts/report-abuse-v2",
 	/** The `origin` the form's own requests carry. */

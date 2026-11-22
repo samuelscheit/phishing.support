@@ -11,7 +11,7 @@ import { awsProvider } from "./index";
 import { AWS_PROVIDER } from "./definition";
 import { providerResponseId } from "../kit/report_reference";
 import { storedAwsSubmissionPayload } from "./payload";
-import { awsDraft, submitAwsSubmission } from "./submission";
+import { API_GATEWAY_FORBIDDEN_BODY, awsDraft, isApiGatewayDenial, submitAwsSubmission } from "./submission";
 
 const verifiedAwsDraft = async (context: Parameters<typeof awsDraft.verify>[0]) => (await awsDraft.verify(context)).payload;
 
@@ -175,10 +175,29 @@ describe("submitAwsSubmission", () => {
 		expect(empty).toBeInstanceOf(ProviderSubmissionRejectedError);
 	});
 
+	test("API Gateway's denial means nothing was filed", async () => {
+		// Production 2026-11-20: every request, the form page's own too, answered so.
+		const { context } = await readyContext();
+		const denials: Array<[string, Response]> = [
+			["typed and bodied", new Response(API_GATEWAY_FORBIDDEN_BODY, { status: 403, headers: { "x-amzn-errortype": "ForbiddenException" } })],
+			["typed with a URL suffix", new Response("<html>denied</html>", { status: 403, headers: { "x-amzn-errortype": "ForbiddenException:http://internal.amazon.com/coral/com.amazon.coral.service/" } })],
+			["its body only", json({ message: "Forbidden" }, 403)],
+			["its body with whitespace", new Response(` ${API_GATEWAY_FORBIDDEN_BODY}\n`, { status: 403 })],
+		];
+		for (const [name, answer] of denials) {
+			const error = await submitAwsSubmission(context, { fetch: fakeFetch(answer).fetch, now: () => NOW }).catch((caught) => caught);
+			expect(error, name).toBeInstanceOf(ProviderSubmissionRejectedError);
+			expect(error.message, name).toContain("API gateway denied the report before it was filed (HTTP 403)");
+		}
+		expect(isApiGatewayDenial(new Response(null, { status: 200, headers: { "x-amzn-errortype": "ForbiddenException" } }), API_GATEWAY_FORBIDDEN_BODY)).toBe(false);
+	});
+
 	test("every other failure is ambiguous: a plain error, never a rejection", async () => {
 		const { context } = await readyContext();
 		const cases: Array<[string, Response | Error]> = [
-			["403", json({ message: "Forbidden" }, 403)],
+			["an application's own 403", json({ message: "Forbidden", reason: "quota" }, 403)],
+			["a 403 of another error type", new Response("denied", { status: 403, headers: { "x-amzn-errortype": "AccessDeniedException" } })],
+			["API Gateway's type on another status", new Response(API_GATEWAY_FORBIDDEN_BODY, { status: 500, headers: { "x-amzn-errortype": "ForbiddenException" } })],
 			["429", json({ message: "Too many requests" }, 429)],
 			["500", json({ message: "boom" }, 500)],
 			["502", new Response("<html>bad gateway</html>", { status: 502 })],

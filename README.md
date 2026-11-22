@@ -248,9 +248,19 @@ captcha; the signed-in console form sends the same request).
   ("Your AWS Abuse Report [P01M7…]", from `trustandsafety@support.aws.com`)
   quotes the comments, so it names the route. That mail is a human reply that
   can ask for more information, and goes through the regular reply classifier.
-- A 400, 413 or 422 means nothing was filed; any other failure after the
-  durable marker is ambiguous and is never retried. AWS has no API to look a
-  report up, so status arrives only by that mail.
+- A 400, 413 or 422 means nothing was filed, and so does API Gateway's own
+  denial: a 403 typed `x-amzn-errortype: ForbiddenException` or with its exact
+  body `{"message":"Forbidden"}`, answered before any handler runs. Since
+  2026-11-20 the API denies every request so, even the form page's own calls in
+  a real browser. Any other failure after the durable marker is ambiguous and
+  is never retried. AWS has no API to look a report up, so status arrives only
+  by that mail.
+- A report the form refused goes to the route's mailbox as a plain abuse mail
+  (`emailFallback`). AWS's "use our web form" answer to it leaves that route
+  awaiting a reply; it never starts the generic portal agent.
+- `repairAwsForbiddenRoutes()` (`src/lib/abuse/providers/aws/forbidden_repair.ts`)
+  settles routes left in `unknown_external_state` by that 403 before it was a
+  refusal as `provider_rejected` and mails them; rerunning it changes nothing.
 
 ## Registrar and host abuse forms
 
