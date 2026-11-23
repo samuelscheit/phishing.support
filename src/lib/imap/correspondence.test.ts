@@ -682,13 +682,13 @@ describe("delivery-status notifications", () => {
 		});
 
 		describe("the one-off repair of IP routes that bounced with nowhere to go", () => {
-			const ASN_NEIGHBOURS = "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS45820";
+			const BGP_STATE = "https://stat.ripe.net/data/bgp-state/data.json?resource=14.194.136.0%2F21";
 			/** 14.194.139.244 as APNIC and RIPEstat publish it (2026-11-22). */
 			const records: Record<string, unknown> = {
 				[`https://rdap.test/ip/${IP}`]: { startAddress: "14.194.128.0", endAddress: "14.194.191.255", entities: [{ roles: ["abuse"], handle: "IRT-TATA-DOCOMO-IN", vcardArray: ["vcard", [["email", {}, "text", DEAD]]] }] },
 				[`https://stat.ripe.net/data/network-info/data.json?resource=${IP}`]: { data: { asns: ["45820"], prefix: "14.194.136.0/21" } },
 				"https://rdap.test/autnum/45820": { entities: [{ roles: ["abuse"], vcardArray: ["vcard", [["email", {}, "text", DEAD]]] }, { roles: ["registrant"], vcardArray: ["vcard", [["fn", {}, "text", "TTSL-ISP DIVISION"]]] }] },
-				[ASN_NEIGHBOURS]: { data: { neighbours: [{ asn: 4755, type: "left", power: 68465 }] } },
+				[BGP_STATE]: { data: { bgp_state: [{ target_prefix: "14.194.136.0/21", path: [174, 6453, 4755, 45820] }] } },
 				"https://rdap.test/autnum/4755": { entities: [{ roles: ["abuse"], handle: "IRT-TATACOMM-IN", vcardArray: ["vcard", [["email", {}, "text", UPSTREAM]]] }, { roles: ["registrant"], vcardArray: ["vcard", [["fn", {}, "text", "Tata Communications Limited"]]] }] },
 			};
 			const dependencies = (overrides: Record<string, unknown> = {}): ResolverDependencies => ({
@@ -719,7 +719,7 @@ describe("delivery-status notifications", () => {
 			test("an address that publishes nothing new leaves the route as it was", async () => {
 				const sent = await sentReport("zealous-nothing.example.com", DEAD, undefined, undefined, infrastructureProvenance("zealous-nothing.example.com"));
 				await bounceDead(sent);
-				expect(await repairsOf(dependencies({ [ASN_NEIGHBOURS]: { data: { neighbours: [] } } }), sent))
+				expect(await repairsOf(dependencies({ [BGP_STATE]: { data: { bgp_state: [] } } }), sent))
 					.toEqual([{ routeId: sent.route.id.toString(), verifiedEmail: DEAD, ip: IP, result: "skipped", reason: "no_other_contact" }]);
 				expect(await contactsOf(sent.reportId)).toEqual([DEAD]);
 			});

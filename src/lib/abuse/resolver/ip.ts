@@ -18,7 +18,7 @@ import { enclosingPrefix, strictlyInside } from "../../network/ip_prefix";
 import { asArray } from "./records";
 
 const RIPE_NETWORK_INFO_URL = "https://stat.ripe.net/data/network-info/data.json?resource=";
-const RIPE_ASN_NEIGHBOURS_URL = "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS";
+const RIPE_BGP_STATE_URL = "https://stat.ripe.net/data/bgp-state/data.json?resource=";
 
 /** How many less-specific objects above the allocation are read; RIR trees are rarely deeper. */
 const MAX_PARENT_OBJECTS = 4;
@@ -97,18 +97,29 @@ async function parentObjects(allocation: JsonRecord, dependencies: ResolverDepen
 }
 
 /**
- * The origin's main transit provider: of the ASNs RIPEstat sees directly
- * upstream ("left") of it, the one in the most observed paths.
+ * The transit provider that carries `prefix` to its origin: of the routes
+ * RIPE's collectors hold for exactly that prefix, the network right before
+ * the origin (AS-path prepending collapsed) in most of them.
+ *
+ * Per prefix, not per origin network: one network sends different prefixes
+ * through different upstreams. AS53667 (FranTech) reaches most of the
+ * Internet through Hurricane Electric, but all 352 collector routes of its
+ * 198.251.81.0/24 pass AS1002 (Bytefilter); HE answered "We do not act as
+ * the upstream provider for 198.251.81.0/24" (2026-11-23).
  */
-async function dominantUpstream(asn: number, dependencies: ResolverDependencies): Promise<{ asn?: number; error?: string }> {
+async function prefixUpstream(prefix: string | undefined, origin: number, dependencies: ResolverDependencies): Promise<{ asn?: number; routes?: number; error?: string }> {
+	if (!prefix) return {};
 	try {
-		const data = asRecord((await safeJsonFetch(`${RIPE_ASN_NEIGHBOURS_URL}${asn}`, dependencies))?.data);
-		const upstreams = asArray(data?.neighbours).map(asRecord).flatMap((neighbour) => {
-			const upstream = Number(neighbour?.asn);
-			const power = Number(neighbour?.power);
-			return neighbour?.type === "left" && Number.isSafeInteger(upstream) && upstream > 0 && upstream !== asn && Number.isFinite(power) ? [{ asn: upstream, power }] : [];
-		});
-		return { asn: upstreams.sort((a, b) => b.power - a.power)[0]?.asn };
+		const data = asRecord((await safeJsonFetch(`${RIPE_BGP_STATE_URL}${encodeURIComponent(prefix)}`, dependencies))?.data);
+		const counts = new Map<number, number>();
+		for (const route of asArray(data?.bgp_state).map(asRecord)) {
+			if (route?.target_prefix !== prefix) continue;
+			const path = asArray(route.path).map(Number).filter((asn, index, all) => Number.isSafeInteger(asn) && asn > 0 && asn !== all[index - 1]);
+			const upstream = path.at(-1) === origin ? path.at(-2) : undefined;
+			if (upstream !== undefined) counts.set(upstream, (counts.get(upstream) ?? 0) + 1);
+		}
+		const [best] = [...counts].sort((a, b) => b[1] - a[1]);
+		return best ? { asn: best[0], routes: best[1] } : {};
 	} catch (error) {
 		return { error: errorText(error) };
 	}
@@ -117,8 +128,8 @@ async function dominantUpstream(asn: number, dependencies: ResolverDependencies)
 /**
  * Every published abuse contact for an address, in the order a report tries
  * them: the allocation's own (RDAP, else its port-43 WHOIS), then those of
- * the less-specific objects above it, then the BGP-origin ASN's, then the
- * origin's dominant upstream transit provider's. The first is reported to;
+ * the less-specific objects above it, then the BGP-origin ASN's, then that of
+ * the transit provider carrying the address's prefix to the origin. The first is reported to;
  * the rest are its fallbacks, used one at a time when a mailbox permanently
  * rejects the report (worker/mail.ts routeToNextContact).
  */
@@ -163,22 +174,22 @@ export async function resolveIpTarget(target: ResolverTarget, dependencies: Reso
 	const asnRdap: AsnRdapResult[] = [];
 	for (const asn of asns) asnRdap.push(await asnAbuseContacts(asn, "asn_rdap", dependencies));
 
-	const upstreams: Array<{ customerAsn: number; upstreamAsn?: number; error?: string; rdap?: AsnRdapResult }> = [];
+	const upstreams: Array<{ customerAsn: number; upstreamAsn?: number; routes?: number; error?: string; rdap?: AsnRdapResult }> = [];
 	for (const origin of asnRdap) {
-		const upstream = await dominantUpstream(origin.asn, dependencies);
-		if (!upstream.asn || asns.includes(upstream.asn)) {
+		const { asn: upstreamAsn, ...upstream } = await prefixUpstream(prefix, origin.asn, dependencies);
+		if (!upstreamAsn || asns.includes(upstreamAsn)) {
 			upstreams.push({ customerAsn: origin.asn, ...upstream });
 			continue;
 		}
-		const rdap = await asnAbuseContacts(upstream.asn, "upstream_asn_rdap", dependencies);
+		const rdap = await asnAbuseContacts(upstreamAsn, "upstream_asn_rdap", dependencies);
 		const customerOrganization = text(origin.organization?.organization);
 		rdap.explicitAbuseMailboxes = rdap.explicitAbuseMailboxes
 			.filter((mailbox) => !isRegistryMailbox(mailbox.email))
 			.map((mailbox) => ({
 				...mailbox,
-				transit: { upstreamAsn: upstream.asn!, customerAsn: origin.asn, ...(customerOrganization ? { customerOrganization } : {}), ...(prefix ? { customerPrefix: prefix } : {}) },
+				transit: { upstreamAsn, customerAsn: origin.asn, ...(customerOrganization ? { customerOrganization } : {}), ...(prefix ? { customerPrefix: prefix } : {}) },
 			}));
-		upstreams.push({ customerAsn: origin.asn, upstreamAsn: upstream.asn, rdap });
+		upstreams.push({ customerAsn: origin.asn, upstreamAsn, ...upstream, rdap });
 	}
 
 	const contacts = dedupeMailboxes([

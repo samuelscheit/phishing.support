@@ -32,6 +32,13 @@ function resolverWith(
 	};
 }
 
+const TATA_BGP_STATE = "https://stat.ripe.net/data/bgp-state/data.json?resource=14.194.136.0%2F21";
+
+/** A RIPEstat bgp-state answer: one collector route per AS path, each for `prefix`. */
+function bgpState(prefix: string, paths: number[][]) {
+	return { data: { bgp_state: paths.map((path, index) => ({ target_prefix: prefix, source_id: `00-collector-${index}`, path })) } };
+}
+
 function abuseEntity(email: string, handle = "ABUSE") {
 	return {
 		handle,
@@ -156,7 +163,6 @@ describe("abuse resolver", () => {
 			`https://rdap.test/ip/${target}`,
 			`https://stat.ripe.net/data/network-info/data.json?resource=${target}`,
 			"https://rdap.test/autnum/402506",
-			"https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS402506",
 		]);
 	});
 
@@ -171,11 +177,12 @@ describe("abuse resolver", () => {
 				"https://rdap.test/ip/14.192.0.0/14": { handle: "14.0.0.0 - 14.255.255.255", startAddress: "14.0.0.0", endAddress: "14.255.255.255", entities: [abuseEntity("helpdesk@apnic.net", "IRT-APNIC-AP")] },
 				[`https://stat.ripe.net/data/network-info/data.json?resource=${target}`]: { data: { asns: ["45820"], prefix: "14.194.136.0/21" } },
 				"https://rdap.test/autnum/45820": { handle: "AS45820", name: "TTSL-ISP", entities: [abuseEntity(DEAD, "IRT-TTSLMEIS-IN"), { roles: ["registrant"], handle: "ORG-TD1-AP", vcardArray: ["vcard", [["fn", {}, "text", "TTSL-ISP DIVISION"]]] }] },
-				"https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS45820": { data: { neighbours: [
-					{ asn: 9498, type: "left", power: 7021 },
-					{ asn: 4755, type: "left", power: 68465 },
-					{ asn: 64512, type: "right", power: 999999 },
-				] } },
+				[TATA_BGP_STATE]: bgpState("14.194.136.0/21", [
+					[174, 6453, 4755, 45820],
+					[3356, 4755, 4755, 45820, 45820],
+					[6939, 4755, 45820],
+					[2914, 9498, 45820],
+				]),
 				"https://rdap.test/autnum/4755": { handle: "AS4755", entities: [abuseEntity("4755abuse@tatacommunications.com", "IRT-TATACOMM-IN"), { roles: ["registrant"], vcardArray: ["vcard", [["fn", {}, "text", "Tata Communications Limited"]]] }] },
 				...overrides,
 			};
@@ -252,18 +259,50 @@ describe("abuse resolver", () => {
 				.toEqual(["abuse@level0-fixture.net", "abuse@level1-fixture.net", "abuse@level2-fixture.net", "abuse@level3-fixture.net"]);
 		});
 
-		test("no upstream when RIPEstat sees none, the only one is the origin itself, or its lookup fails", async () => {
-			for (const neighbours of [undefined, { data: { neighbours: [] } }, { data: { neighbours: [{ asn: 45820, type: "left", power: 5 }] } }]) {
-				const result = await resolve(tataRecords({ "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS45820": neighbours }));
+		test("no upstream when RIPEstat holds no route for the prefix, only the origin's own, only other prefixes' or origins', no prefix, or its lookup fails", async () => {
+			for (const state of [
+				undefined,
+				bgpState("14.194.136.0/21", []),
+				bgpState("14.194.136.0/21", [[45820], [45820, 45820]]),
+				bgpState("14.194.136.0/22", [[174, 4755, 45820]]),
+				bgpState("14.194.136.0/21", [[174, 4755, 64500]]),
+			]) {
+				const result = await resolve(tataRecords({ [TATA_BGP_STATE]: state }));
 				expect(result.routes[0]?.resolverProvenance).not.toHaveProperty("fallbackContacts");
 			}
+			const withoutPrefix = await resolve(tataRecords({ [`https://stat.ripe.net/data/network-info/data.json?resource=${target}`]: { data: { asns: ["45820"] } } }));
+			expect(withoutPrefix.routes[0]?.resolverProvenance).not.toHaveProperty("fallbackContacts");
 			const failing = await resolveAbuseTarget({ normalizedTarget: target, targetType: "ip", observedUrls: [] }, {
 				...resolverWith(tataRecords()),
 				httpRetryAttempts: 1,
-				fetch: async (input) => String(input).includes("asn-neighbours") ? new Response(null, { status: 500 }) : resolverWith(tataRecords()).fetch!(input),
+				fetch: async (input) => String(input).includes("bgp-state") ? new Response(null, { status: 500 }) : resolverWith(tataRecords()).fetch!(input),
 			});
 			expect(failing.routes[0]).toMatchObject({ verifiedEmail: DEAD });
 			expect((failing.resolverSnapshot as Record<string, any>).upstreamTransit[0].error).toBeString();
+		});
+
+		test("198.251.81.14: the upstream is the one carrying the address's own prefix, not the origin's best-connected neighbour", async () => {
+			// FranTech (AS53667) reaches most of the Internet through Hurricane Electric (AS6939), but its
+			// 198.251.81.0/24 only through Bytefilter (AS1002), as RIPEstat showed on 2026-11-23 (352 of 352 routes).
+			const ip = "198.251.81.14";
+			const records = {
+				[`https://rdap.test/ip/${ip}`]: { startAddress: "198.251.80.0", endAddress: "198.251.95.255", entities: [abuseEntity("admin@frantech.ca", "FDI19-ARIN")] },
+				[`https://stat.ripe.net/data/network-info/data.json?resource=${ip}`]: { data: { asns: ["53667"], prefix: "198.251.81.0/24" } },
+				"https://rdap.test/autnum/53667": { entities: [abuseEntity("admin@frantech.ca", "FDI19-ARIN")] },
+				"https://stat.ripe.net/data/bgp-state/data.json?resource=198.251.81.0%2F24": bgpState("198.251.81.0/24", [
+					[328840, 327727, 174, 137409, 1002, 53667],
+					[6939, 137409, 1002, 1002, 53667],
+					[3356, 1002, 53667, 53667],
+				]),
+				"https://rdap.test/autnum/1002": { entities: [abuseEntity("noc@bytefilter.com", "NOC"), { roles: ["registrant"], vcardArray: ["vcard", [["fn", {}, "text", "Bytefilter LLC"]]] }] },
+				"https://rdap.test/autnum/6939": { entities: [abuseEntity("abuse@he.net", "ABUSE1036-ARIN")] },
+			};
+			const result = await resolveAbuseTarget({ normalizedTarget: ip, targetType: "ip", observedUrls: [] }, resolverWith(records));
+			expect(result.routes[0]?.resolverProvenance).toMatchObject({
+				email: "admin@frantech.ca",
+				fallbackContacts: [{ email: "noc@bytefilter.com", source: "upstream_asn_rdap", organization: "Bytefilter LLC", transit: { upstreamAsn: 1002, customerAsn: 53667, customerPrefix: "198.251.81.0/24" } }],
+			});
+			expect((result.resolverSnapshot as Record<string, any>).upstreamTransit).toMatchObject([{ customerAsn: 53667, upstreamAsn: 1002, routes: 3 }]);
 		});
 
 		test("an upstream publishing only a registry mailbox adds nothing", async () => {
