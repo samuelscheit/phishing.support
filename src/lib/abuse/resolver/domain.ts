@@ -161,7 +161,7 @@ async function resolveRegisteredDomain(
 }
 
 /** The registrar's own RDAP record for the domain, from the registry's `related` link. */
-async function fetchRegistrarRdap(registryRecord: JsonRecord, dependencies: ResolverDependencies): Promise<{ url?: string; record?: JsonRecord; error?: string }> {
+export async function fetchRegistrarRdap(registryRecord: JsonRecord, dependencies: ResolverDependencies): Promise<{ url?: string; record?: JsonRecord; error?: string }> {
 	const url = registrarRdapUrl(registryRecord);
 	if (!url) return {};
 	try {

@@ -29,6 +29,12 @@ const ROLE_BY_SOURCE: Readonly<Record<string, ProviderRole>> = {
 	// The origin server Cloudflare disclosed behind a proxied site.
 	cloudflare_origin_disclosure: "host",
 	service_account_registry: "platform",
+	// The merchant or affiliate network of a deceptive funnel (abuse/funnel), and the vendor of its tracking platform.
+	security_txt: "platform",
+	website: "platform",
+	holder_rdap: "platform",
+	holder_whois: "platform",
+	platform_vendor: "platform",
 	authority_registry: "authority",
 	campaign_takedown_reports: "authority",
 };

@@ -119,6 +119,7 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 			recipient: route.verifiedEmail,
 			attachmentNames: attachments.map((attachment) => attachment.filename),
 			attachmentMimeTypes: attachments.map((attachment) => attachment.mimeType),
+			evidence: attachments,
 		});
 		providerPayload = verifiedEmailProviderPayload({
 			target: target.normalizedTarget,

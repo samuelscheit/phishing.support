@@ -18,6 +18,7 @@ function contactProvenance(contact: AbuseMailbox): JsonRecord {
 		...(contact.entityName ? { entityName: contact.entityName } : {}),
 		...(contact.organization ? { organization: contact.organization } : {}),
 		...(contact.transit ? { transit: contact.transit } : {}),
+		...(contact.foundAt ? { foundAt: contact.foundAt } : {}),
 	};
 }
 

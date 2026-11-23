@@ -1,6 +1,7 @@
 import type { ResolvedRouteInput } from "../route_contracts";
 import type { AbuseTargetType } from "../schema";
 import type { RdapLocator } from "../../network/rdap_bootstrap";
+import type { ContactSource } from "../funnel/contacts";
 
 import type { JsonRecord } from "../../util/values";
 import { type FetchLike } from "../../http/fetch";
@@ -49,7 +50,12 @@ export type ResolvedAbuseTarget = {
 
 export type AbuseMailbox = {
 	email: string;
-	source: "registrar_rdap" | "domain_rdap" | "domain_whois" | "ip_rdap" | "ip_whois" | "parent_ip_rdap" | "asn_rdap" | "upstream_asn_rdap";
+	source:
+		| "registrar_rdap" | "domain_rdap" | "domain_whois" | "ip_rdap" | "ip_whois" | "parent_ip_rdap" | "asn_rdap" | "upstream_asn_rdap"
+		// A business's own contact for a funnel report (abuse/funnel/contacts.ts).
+		| ContactSource;
+	/** The page or record that publishes the mailbox, when it is not the resolver's own lookup. */
+	foundAt?: string;
 	entityHandle?: string;
 	entityName?: string;
 	roles?: string[];
