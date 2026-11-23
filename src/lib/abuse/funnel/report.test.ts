@@ -15,6 +15,9 @@ import { FUNNEL_EVIDENCE_NAME, readFunnelFacts } from "./facts";
 import { FUNNEL_CASE_LINKED_EVENT, planFunnelReports, reportDeceptiveFunnel, type FunnelReportInput } from "./report";
 import { chainOf, CHECKOUT_TEXT, LURE_TEXT, PRODUCTION_URLS, productionChain, rdapDomain, web, ZATOS_HOME } from "./test_fixtures";
 import { DAY_MS } from "../../util/date_time";
+import { eq } from "drizzle-orm";
+import { getDb } from "../../db";
+import { abuseReports } from "../schema";
 import { RESOLUTION_LOOKUP_RETRIES, resolveReport, IncompleteResolutionError } from "../worker/resolution";
 import { FUNNEL_REPORT_WINDOW_DAYS } from "./dedupe";
 
@@ -124,6 +127,11 @@ describe("planFunnelReports", () => {
 		expect(() => plan({ chain: changedOffer })).toThrow("verbatim");
 	});
 
+	test("a verdict whose verbatim lure quotes are all too short to state a claim makes no report", () => {
+		const buttonOnly = { ...verdict, lureQuotes: [{ hopIndex: 3, url: PRODUCTION_URLS.lure, quote: "CONTINUE" }] };
+		expect(() => plan({ verdict: buttonOnly })).toThrow("substantial lure quote");
+	});
+
 	test("screenshots over the evidence limits are left out", () => {
 		const heavy = { ...chain, pages: chain.pages.map((page) => page.hopIndex === 3 ? { ...page, screenshot: { buffer: Buffer.alloc(6 * 1024 * 1024), mimeType: "image/png" as const } } : page) };
 		expect(plan({ chain: heavy }).planned[0]!.request.evidence.map(({ filename }) => filename)).toEqual([FUNNEL_EVIDENCE_NAME, "offer-page-8.png"]);
@@ -138,23 +146,24 @@ describe("planFunnelReports", () => {
 	});
 
 	test("a well-known network domain is reported only when its link format leaves no doubt", () => {
-		const medium = funnelOf(["https://lure.example/a", "https://go.bigsite.com/?a=777&c=1", "https://shopfixture.com/x?affid=777"]);
+		// TUNE's click path with only an affiliate and no offer is its format, not proof of it.
+		const medium = funnelOf(["https://lure.example/a", "https://go.bigsite.com/aff_c?aff_id=7777", "https://shopfixture.com/x?affid=7777"]);
 		expect(plan(medium, new Set(["bigsite.com"])).skipped).toEqual([{ site: "bigsite.com", role: "network", reason: "a well-known site (Tranco top list) whose links only resemble a tracking platform's" }]);
-		const high = funnelOf(["https://lure.example/a", "https://go.bigsite.com/?a=777&c=1&ckmxid=q", "https://shopfixture.com/x?affid=777"]);
+		const high = funnelOf(["https://lure.example/a", "https://go.bigsite.com/aff_c?aff_id=7777&offer_id=1", "https://shopfixture.com/x?affid=7777"]);
 		expect(plan(high, new Set(["bigsite.com"])).skipped).toEqual([]);
 	});
 
 	test("a platform guessed from the link format stays out of the target, so no vendor is asked, and the mail says so", () => {
-		const medium = funnelOf(["https://lure.example/a", "https://miamitrk.com/?a=15065&c=181082", "https://shopfixture.com/x?affid=15065"]);
+		const medium = funnelOf(["https://lure.example/a", "https://go2cloudfixture.com/aff_c?aff_id=15065", "https://shopfixture.com/x?affid=15065"]);
 		const { planned } = plan(medium);
-		expect(planned.map(({ request }) => request.targets[0]!.normalizedTarget)).toEqual(["affiliate:merchant:-:shopfixture.com:15065", "affiliate:network:-:miamitrk.com:15065"]);
-		expect(planned[1]!.request.description).toContain("through miamitrk.com (a link in CAKE's format)");
-		const draft = draftOf(medium, 1, websiteRoute("miamitrk.com"));
-		expect(draft.subject).toEndWith("Affiliate 15065 on miamitrk.com sends deceptive traffic to shopfixture.com");
-		expect(draft.body).toContain("is reporting affiliate 15065 on miamitrk.com (a link in CAKE's format)");
-		expect(draft.body).toContain("- miamitrk.com: a link in CAKE's format (affiliate network or program)");
-		expect(draft.body).toContain("[tracking link in CAKE's format]");
-		expect(draft.body).not.toContain("CAKE tracking");
+		expect(planned.map(({ request }) => request.targets[0]!.normalizedTarget)).toEqual(["affiliate:merchant:-:shopfixture.com:15065", "affiliate:network:-:go2cloudfixture.com:15065"]);
+		expect(planned[1]!.request.description).toContain("through go2cloudfixture.com (a link in TUNE (HasOffers)'s format)");
+		const draft = draftOf(medium, 1, websiteRoute("go2cloudfixture.com"));
+		expect(draft.subject).toEndWith("Affiliate 15065 on go2cloudfixture.com sends deceptive traffic to shopfixture.com");
+		expect(draft.body).toContain("is reporting affiliate 15065 on go2cloudfixture.com (a link in TUNE (HasOffers)'s format)");
+		expect(draft.body).toContain("- go2cloudfixture.com: a link in TUNE (HasOffers)'s format (affiliate network or program)");
+		expect(draft.body).toContain("[tracking link in TUNE (HasOffers)'s format]");
+		expect(draft.body).not.toContain("TUNE (HasOffers) tracking");
 	});
 
 	test("a merchant without its own affiliate ID hears which ID the network credits, and its target names none", () => {
@@ -322,6 +331,39 @@ describe("reportDeceptiveFunnel through the worker", () => {
 		const later = await newCase();
 		const afterWindow = await report(later, { now: () => new Date(Date.now() + (FUNNEL_REPORT_WINDOW_DAYS + 1) * DAY_MS) });
 		expect(afterWindow.map(({ kind }) => kind)).toEqual(["reported", "reported", "reported"]);
+	});
+
+	test("a report that reached nobody does not silence the next case", async () => {
+		const first = await newCase();
+		const firstReports = (await report(first)).map((outcome) => (outcome as { reportId: bigint }).reportId);
+		const db = await getDb();
+		await db.update(abuseReports).set({ status: "no_route" }).where(eq(abuseReports.id, firstReports[0]!));
+		const next = await report(await newCase());
+		expect(next.map(({ kind }) => kind)).toEqual(["reported", "linked", "linked"]);
+		expect((next[0] as { reportId: bigint }).reportId).not.toBe(firstReports[0]);
+	});
+
+	test("two cases finishing at once create one report per business and affiliate, the other is linked", async () => {
+		const [a, b] = await Promise.all([newCase(), newCase()]);
+		const [first, second] = await Promise.all([report(a), report(b)]);
+		const kinds = [...first!, ...second!].map(({ kind }) => kind).sort();
+		expect(kinds).toEqual(["linked", "linked", "linked", "reported", "reported", "reported"]);
+		const ids = new Set([...first!, ...second!].map((outcome) => (outcome as { reportId: bigint }).reportId));
+		expect(ids.size).toBe(3);
+	});
+
+	test("a stand-in recipient chosen while the network's site timed out is retried first, then mailed with what happened", async () => {
+		const reportId = ((await report(await newCase()))[2] as { reportId: bigint }).reportId;
+		const timingOut = web({ "https://miamitrk.com/": new Error("ETIMEDOUT"), "https://www.miamitrk.com/": new Error("ETIMEDOUT") });
+		const resolveTarget = (target: Parameters<typeof resolveAbuseTarget>[0]) => resolveAbuseTarget(target, timingOut);
+		await expect(resolveReport(reportId, resolveTarget, 0)).rejects.toBeInstanceOf(IncompleteResolutionError);
+		expect(await AbuseRepository.listRoutes(reportId)).toEqual([]);
+		await resolveReport(reportId, resolveTarget, RESOLUTION_LOOKUP_RETRIES);
+		const [route] = await AbuseRepository.listRoutes(reportId);
+		expect(route).toMatchObject({ verifiedEmail: "info@getcake.com", status: "verified" });
+		const mail = await sent(route!.id);
+		expect(mail.body).toContain("miamitrk.com did not answer when we looked for its operator's contact, so we are writing to CAKE");
+		expect(mail.body).not.toContain("publishes no contact");
 	});
 
 	test("lookups that keep failing end as a failed resolution without any mail", async () => {

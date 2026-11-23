@@ -292,6 +292,28 @@ describe("resolveFunnelPartyTarget", () => {
 		expect(parseFunnelPartyTarget("affiliate:network:affiliate_link:partnersfixture.com:A-77")).toBeUndefined();
 	});
 
+	test("a stand-in recipient while a lookup failed is resolved again before anything is sent", async () => {
+		// The network's own site timed out: the vendor is the route, but the worker resolves again first.
+		const network = await resolveFunnelPartyTarget(target("affiliate:network:cake:miamitrk.com:15065"), web({ "https://miamitrk.com/": new Error("ETIMEDOUT"), "https://www.miamitrk.com/": new Error("ETIMEDOUT") }));
+		expect(network.routes[0]).toMatchObject({ verifiedEmail: "info@getcake.com" });
+		expect(network.lookupFailures).toEqual(expect.arrayContaining([expect.stringContaining("https://miamitrk.com/")]));
+		// The merchant's home page timed out: the registrant's mailbox at another domain waits as well.
+		const merchant = await resolveFunnelPartyTarget(target("affiliate:merchant:-:shopfixture.com:1"), web({
+			"https://shopfixture.com/": new Error("socket hang up"),
+			"https://www.shopfixture.com/": new Error("socket hang up"),
+			"https://rdap.test/domain/shopfixture.com": rdapDomain("shopfixture.com", { email: "owner@gmail.com", org: "Shop Fixture GmbH" }),
+		}));
+		expect(merchant.routes[0]).toMatchObject({ verifiedEmail: "owner@gmail.com" });
+		expect(merchant.lookupFailures?.length).toBeGreaterThan(0);
+		// The business's own mailbox is sent at once, whatever else timed out.
+		const own = await resolveFunnelPartyTarget(target("affiliate:merchant:-:shopfixture.com:1"), web({
+			"https://shopfixture.com/": { body: `<a href="mailto:info@shopfixture.com">Info</a>` },
+			"https://shopfixture.com/contact": new Error("ETIMEDOUT"),
+		}));
+		expect(own.routes[0]).toMatchObject({ verifiedEmail: "info@shopfixture.com" });
+		expect(own.lookupFailures).toBeUndefined();
+	});
+
 	test("failed lookups without any contact are a failed resolution the worker repeats", async () => {
 		const resolved = await resolveFunnelPartyTarget(target("affiliate:merchant:-:shopfixture.com:1"), web({ "https://shopfixture.com/": new Error("socket hang up"), "https://www.shopfixture.com/": new Error("ETIMEDOUT") }));
 		expect(resolved).toMatchObject({ status: "failed", disposition: "funnel_contact_lookup_failed", routes: [{ status: "failed" }] });

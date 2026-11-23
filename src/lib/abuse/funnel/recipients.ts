@@ -225,6 +225,11 @@ export async function resolveFunnelPartyTarget(target: ResolverTarget, dependenc
 	}
 	const organization = (contact: SiteContact) => contact.source === "funnel_platform_vendor" ? vendor!.name : search.holder ?? party.site;
 	const mailbox = (contact: SiteContact): AbuseMailbox => ({ email: contact.email, source: contact.source, organization: organization(contact), foundAt: contact.foundAt });
+	// A stand-in (the vendor, or the holder's mailbox at another domain) is only
+	// chosen once the business's own pages could be searched: while a lookup
+	// fails, the worker resolves again (up to RESOLUTION_LOOKUP_RETRIES) before
+	// it keeps this route, and the mail then says the site did not answer.
+	const standIn = primary.source === "funnel_platform_vendor" || !isOwnMailbox(primary.email, party.site);
 	return {
 		status: "resolved",
 		resolverSnapshot: snapshot,
@@ -234,5 +239,6 @@ export async function resolveFunnelPartyTarget(target: ResolverTarget, dependenc
 			provenance: contactChainProvenance([mailbox(primary), ...rest.map(mailbox)]),
 			snapshot,
 		})],
+		...(standIn && search.failures.length ? { lookupFailures: search.failures } : {}),
 	};
 }

@@ -20,8 +20,13 @@ type IdentifierKind = "affiliate" | "offer" | "creative" | "campaign" | "sub" | 
 
 export type Confidence = "high" | "medium" | "low";
 
-/** One value a tracking URL carries, under the parameter (or path position) that carried it. */
-export type FunnelIdentifier = { kind: IdentifierKind; parameter: string; value: string };
+/**
+ * One value a tracking URL carries, under the parameter (or path position)
+ * that carried it. `confidence` is set on a generic parameter (`pid`,
+ * `aff`, `sub1`), which names what it says less surely than the link's own
+ * format; absent, the identifier is as sure as the link.
+ */
+export type FunnelIdentifier = { kind: IdentifierKind; parameter: string; value: string; confidence?: Confidence };
 
 export type TrackerMatch = {
 	platform: FunnelPlatform;
@@ -61,6 +66,10 @@ const CONFIDENCE_ORDER: Readonly<Record<Confidence, number>> = { high: 0, medium
 
 export function strongerConfidence(a: Confidence, b: Confidence): Confidence {
 	return CONFIDENCE_ORDER[a] <= CONFIDENCE_ORDER[b] ? a : b;
+}
+
+export function weakerConfidence(a: Confidence, b: Confidence): Confidence {
+	return CONFIDENCE_ORDER[a] >= CONFIDENCE_ORDER[b] ? a : b;
 }
 
 export function confidenceRank(confidence: Confidence): number {
@@ -127,7 +136,7 @@ function genericIdentifiers(url: URL, skip: ReadonlySet<string> = new Set()): Ar
 
 function match(params: Omit<TrackerMatch, "identifiers"> & { url: URL; identifiers: FunnelIdentifier[] }): TrackerMatch {
 	const consumed = new Set(params.identifiers.map((identifier) => identifier.parameter));
-	const rest = genericIdentifiers(params.url, consumed).map(({ confidence: _confidence, ...identifier }) => identifier);
+	const rest = genericIdentifiers(params.url, consumed);
 	return {
 		platform: params.platform,
 		role: params.role,
@@ -149,7 +158,8 @@ function isRootPath(url: URL): boolean {
  * affiliate ID, `c` the creative, `s1`–`s5` the affiliate's sub IDs). A CAKE
  * install answers a first click with a redirect to the same link plus
  * `ch-redir=1&ckmxid=…` (and `ckmguid`), seen in sandbox captures of CAKE
- * domains; those markers make the platform certain.
+ * domains; those markers make the platform certain. Without them the link is
+ * only a low-confidence guess: evidence, never a party.
  */
 function cake(url: URL, query: Query): TrackerMatch | undefined {
 	const affiliate = query.get("a");
@@ -161,7 +171,8 @@ function cake(url: URL, query: Query): TrackerMatch | undefined {
 		url,
 		platform: "cake",
 		role: "network",
-		confidence: markers.length ? "high" : "medium",
+		// `?a=<n>&c=<n>` on a root URL alone is too common a shape to name a network.
+		confidence: markers.length ? "high" : "low",
 		signals: [
 			`CAKE affiliate link parameters a=${affiliate}${creative ? `&c=${creative}` : ""}`,
 			...(markers.length ? [`CAKE click markers ${markers.join(", ")}`] : []),

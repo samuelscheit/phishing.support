@@ -5,6 +5,7 @@ import {
 	landingIdentifiers,
 	recogniseTracker,
 	strongerConfidence,
+	weakerConfidence,
 	type Confidence,
 	type FunnelIdentifier,
 	type FunnelPlatform,
@@ -140,9 +141,13 @@ function carriedValues(located: Located[]): CarriedValue[] {
 		.slice(0, MAX_CARRIED_VALUES);
 }
 
-/** A network tracker that can name its affiliate: a recognised network platform, at medium confidence or above. */
+/**
+ * A network tracker that can name its affiliate: a link the visit requested
+ * (a URL only carried in a parameter is evidence, never a party), of a
+ * recognised network platform, at medium confidence or above.
+ */
 function isNetworkTracker(tracker: TrackingHop): boolean {
-	return tracker.role === "network" && tracker.confidence !== "low";
+	return !tracker.carriedBy && tracker.role === "network" && tracker.confidence !== "low";
 }
 
 /**
@@ -187,18 +192,22 @@ export function extractFunnel(chain: Pick<FunnelChain, "hops" | "pages">): Funne
 
 	// The merchant is the last page shown, reached through an affiliate network's
 	// link, or through any tracker with an affiliate ID landing on it.
+	// Only the links between the last page of another site and the merchant's
+	// page delivered the visitor to it; a network link before the lure fed the lure.
 	const requestedTrackers = trackingHops.filter((tracker) => !tracker.carriedBy);
 	const lastPage = hops.findLast(({ hop }) => shown.has(hop.index) && kinds.get(hop.index) !== "tracker");
-	const trackersBefore = lastPage ? requestedTrackers.filter((tracker) => tracker.hopIndex < lastPage.hop.index) : [];
+	const lastLure = lastPage && hops.findLast(({ hop, site }) => hop.index < lastPage.hop.index && shown.has(hop.index) && kinds.get(hop.index) !== "tracker" && site !== lastPage.site);
+	const windowStart = lastLure?.hop.index ?? -1;
+	const delivering = lastPage ? requestedTrackers.filter((tracker) => tracker.hopIndex > windowStart && tracker.hopIndex < lastPage.hop.index) : [];
 	let merchant: FunnelMerchant | undefined;
-	if (lastPage && trackersBefore.length && !isPlatformHost(lastPage.url.hostname)) {
-		const lastTracker = trackersBefore.at(-1)!;
+	if (lastPage && delivering.length && !isPlatformHost(lastPage.url.hostname)) {
+		const lastTracker = delivering.at(-1)!;
 		const landing = hops.filter(({ hop, site }) => hop.index > lastTracker.hopIndex && hop.index <= lastPage.hop.index && site === lastPage.site);
 		const identifiers = landing
 			.flatMap(({ url }) => landingIdentifiers(url))
 			.filter((identifier, index, all) => all.findIndex((other) => other.parameter === identifier.parameter && other.value === identifier.value) === index);
 		const landingAffiliate = identifiers.some((identifier) => identifier.kind === "affiliate" && identifier.confidence !== "low");
-		if (trackersBefore.some(isNetworkTracker) || landingAffiliate) {
+		if (delivering.some(isNetworkTracker) || landingAffiliate) {
 			const first = landing[0] ?? lastPage;
 			merchant = { hopIndex: first.hop.index, url: first.url.toString(), hostname: first.url.hostname, site: lastPage.site, identifiers };
 			for (const { hop } of landing) kinds.set(hop.index, "merchant");
@@ -213,8 +222,10 @@ export function extractFunnel(chain: Pick<FunnelChain, "hops" | "pages">): Funne
 	const affiliateMap = new Map<string, FunnelAffiliate>();
 	for (const tracker of trackingHops.filter(isNetworkTracker)) {
 		for (const identifier of tracker.identifiers) {
-			if (identifier.kind !== "affiliate") continue;
-			mergeAffiliate(affiliateMap, { id: identifier.value, site: tracker.site, platform: tracker.platform, parameter: identifier.parameter, hopIndices: [tracker.hopIndex], confidence: tracker.confidence });
+			// A generic parameter on a platform's link (`pid`, `aff`) keeps its own, weaker confidence.
+			const confidence = identifier.confidence ? weakerConfidence(identifier.confidence, tracker.confidence) : tracker.confidence;
+			if (identifier.kind !== "affiliate" || confidence === "low") continue;
+			mergeAffiliate(affiliateMap, { id: identifier.value, site: tracker.site, platform: tracker.platform, parameter: identifier.parameter, hopIndices: [tracker.hopIndex], confidence });
 		}
 	}
 	for (const identifier of merchant?.identifiers ?? []) {
@@ -254,7 +265,7 @@ export function extractFunnel(chain: Pick<FunnelChain, "hops" | "pages">): Funne
 	if (merchant) {
 		const ownTracker = networkTrackers.find((tracker) => tracker.site === merchant.site);
 		const own = idsAt(merchant.site);
-		const deliveredBy = parties.findLast((party) => party.hopIndices.some((index) => index < merchant.hopIndex));
+		const deliveredBy = parties.findLast((party) => delivering.some((tracker) => isNetworkTracker(tracker) && tracker.site === party.site));
 		if (own.length || deliveredBy) {
 			parties.unshift({
 				role: "merchant",

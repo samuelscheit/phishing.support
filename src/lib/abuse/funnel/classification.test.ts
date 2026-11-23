@@ -186,7 +186,7 @@ describe("classifyDeceptiveFunnel", () => {
 		const model = scriptedModel([]);
 		const noTracker = chainOf(["https://lure.example/a", "https://shop.example/b"], { 0: LURE_TEXT, 1: CHECKOUT_TEXT });
 		expect((await classifyDeceptiveFunnel({ submissionId: 1n, chain: noTracker }, { client: model })).verdict).toEqual({ finding: "insufficient_evidence", rejectedClaim: "the chain reached no merchant page through a tracking link" });
-		const noLure = chainOf(["https://miamitrk.com/?a=1&c=2", "https://shop.example/x"], { 1: CHECKOUT_TEXT });
+		const noLure = chainOf(["https://miamitrk.com/?a=1&c=2&ckmxid=q", "https://shop.example/x"], { 1: CHECKOUT_TEXT });
 		expect((await classifyDeceptiveFunnel({ submissionId: 1n, chain: noLure }, { client: model })).verdict).toEqual({ finding: "insufficient_evidence", rejectedClaim: "the chain showed no page before the merchant page" });
 		expect(model.calls).toBe(0);
 	});

@@ -47,9 +47,12 @@ function contactSentence(route: FunnelDraftInput["route"], facts: FunnelFacts, v
 	const site = facts.party.site;
 	switch (contact.source) {
 		case "funnel_platform_vendor": {
+			const search = route.resolutionSnapshot.contactSearch as { failures?: unknown } | undefined;
 			const why = contact.reason === "fallback_after_permanent_bounce"
 				? `The mailboxes ${site} publishes did not accept our report`
-				: `We found no contact that the operator of ${site} publishes`;
+				: Array.isArray(search?.failures) && search.failures.length
+					? `${site} did not answer when we looked for its operator's contact`
+					: `We found no contact that the operator of ${site} publishes`;
 			return `${why}, so we are writing to ${vendorName ?? "you"} as the provider of its ${platformName(facts.party.platform) ?? "tracking"} platform: please act on this under your terms of service, or forward this report to your customer who runs ${site}.`;
 		}
 		case "funnel_security_txt":

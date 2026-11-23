@@ -154,7 +154,8 @@ function sentence(value: unknown): string | undefined {
 	return /\p{L}{2}/u.test(plain) ? truncateAtWord(plain, MAX_SENTENCE_LENGTH, { ellipsis: true }) : undefined;
 }
 
-function isSubstantial(quote: string): boolean {
+/** A quote that alone states a claim: 24+ characters and 3+ words, not a button label. */
+export function isSubstantialQuote(quote: string): boolean {
 	const words = normalizedEvidence(quote).split(" ").filter((word) => /\p{L}/u.test(word));
 	return quote.length >= MIN_SUBSTANTIAL_QUOTE_LENGTH && words.length >= MIN_SUBSTANTIAL_QUOTE_WORDS;
 }
@@ -197,13 +198,13 @@ export function validateDeceptiveFunnelClassification(value: unknown, chain: Fun
 	const lureQuotes = quotes
 		.filter((quote): quote is FunnelQuote => "quote" in quote)
 		.filter((quote, index, all) => all.findIndex((other) => normalizedEvidence(other.quote) === normalizedEvidence(quote.quote)) === index)
-		.sort((a, b) => Number(isSubstantial(b.quote)) - Number(isSubstantial(a.quote)))
+		.sort((a, b) => Number(isSubstantialQuote(b.quote)) - Number(isSubstantialQuote(a.quote)))
 		.slice(0, MAX_QUOTES);
 	if (!lureQuotes.length) {
 		const rejected = quotes.find((quote): quote is { rejected: string } => "rejected" in quote);
 		return uncorroborated(rejected?.rejected ?? "it quoted no lure page");
 	}
-	if (!isSubstantial(lureQuotes[0]!.quote)) return uncorroborated("its verbatim lure quotes are too short to state a claim");
+	if (!isSubstantialQuote(lureQuotes[0]!.quote)) return uncorroborated("its verbatim lure quotes are too short to state a claim");
 	const rawOffer = result.offerQuote && typeof result.offerQuote === "object" ? result.offerQuote as RawQuote : {};
 	const offer = corroboratedQuote(rawOffer, [merchant]);
 	if (!("quote" in offer)) return uncorroborated(`its offer quote is no evidence: ${offer.rejected}`);

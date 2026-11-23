@@ -6,8 +6,8 @@ import { MAX_EVIDENCE_BYTES_PER_ITEM, normalizeObservedUrl, type DecodedEvidence
 import { isPopularSite, loadPopularDomains, type PopularDomains } from "../origin/popular_domains";
 import { AbuseRepository } from "../repository";
 import type { FunnelChain, FunnelPage } from "./chain";
-import { quoteLines, type DeceptiveFunnelFinding, type FunnelQuote } from "./classification";
-import { findRecentFunnelReport, FUNNEL_REPORT_WINDOW_DAYS, funnelDedupeKey } from "./dedupe";
+import { isSubstantialQuote, quoteLines, type DeceptiveFunnelFinding, type FunnelQuote } from "./classification";
+import { findOpenFunnelReport, FUNNEL_REPORT_WINDOW_DAYS, funnelDedupeKey, withFunnelReportLock } from "./dedupe";
 import { DECEPTION_PHRASES } from "./deception";
 import type { FunnelExtraction, FunnelParty } from "./extract";
 import { FUNNEL_EVIDENCE_NAME, type FunnelFacts } from "./facts";
@@ -170,7 +170,9 @@ function skipReason(party: FunnelParty, extraction: FunnelExtraction, popular: P
 export function planFunnelReports(input: FunnelReportInput & { popularDomains: PopularDomains }): FunnelReportPlan {
 	const lureQuotes = verifiedQuotes(input.verdict.lureQuotes, input.chain.pages);
 	const [offerQuote] = verifiedQuotes([input.verdict.offerQuote], input.chain.pages);
-	if (!lureQuotes.length || !offerQuote) throw new Error("A deceptive funnel report needs its lure and offer quotes verbatim on the captured pages.");
+	if (!lureQuotes.some(({ quote }) => isSubstantialQuote(quote)) || !offerQuote) {
+		throw new Error("A deceptive funnel report needs a substantial lure quote and its offer quote verbatim on the captured pages.");
+	}
 	const observedUrls = [...new Set([...input.chain.hops].sort((a, b) => a.index - b.index).flatMap((hop) => [hop.url, ...(hop.redirectTo ? [hop.redirectTo] : [])]).map(normalizedUrl).filter((url): url is string => Boolean(url)))].slice(0, MAX_OBSERVED_URLS);
 	const shots = screenshots(input.chain, input.extraction);
 	const plan: FunnelReportPlan = { planned: [], skipped: [] };
@@ -243,14 +245,15 @@ export async function reportDeceptiveFunnel(input: FunnelReportInput & { reporte
 	const since = new Date((dependencies.now ?? (() => new Date()))().getTime() - FUNNEL_REPORT_WINDOW_DAYS * DAY_MS);
 	const outcomes: FunnelReportOutcome[] = plan.skipped.map(({ site, reason }) => ({ kind: "skipped", site, reason }));
 	for (const { party, dedupeKey, request } of plan.planned) {
-		const existing = await findRecentFunnelReport(dedupeKey, since);
-		if (existing && existing.submissionId !== input.submissionId) {
-			await linkCase(existing.id, input.submissionId, input.chain.startedAt);
-			outcomes.push({ kind: "linked", site: party.site, reportId: existing.id });
-			continue;
-		}
-		const report = await AbuseRepository.createReport({ request, reporter: input.reporter, submissionId: input.submissionId });
-		outcomes.push({ kind: "reported", site: party.site, reportId: report.reportId, created: report.created });
+		outcomes.push(await withFunnelReportLock(dedupeKey, `submission:${input.submissionId.toString()}`, async (): Promise<FunnelReportOutcome> => {
+			const open = await findOpenFunnelReport(dedupeKey, request.idempotencyKey!, since);
+			if (open) {
+				await linkCase(open.id, input.submissionId, input.chain.startedAt);
+				return { kind: "linked", site: party.site, reportId: open.id };
+			}
+			const report = await AbuseRepository.createReport({ request, reporter: input.reporter, submissionId: input.submissionId });
+			return { kind: "reported", site: party.site, reportId: report.reportId, created: report.created };
+		}));
 	}
 	return outcomes;
 }
