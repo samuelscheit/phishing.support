@@ -80,7 +80,7 @@ function model(): AnalysisClient {
 	} as unknown as AnalysisClient;
 }
 
-/** `first` is what the plain capture (Tor exit first) walks; `retries` what each other network's walk finds. */
+/** `first` is what the plain capture (residential exit first) walks; `retries` what each other network's walk finds. */
 async function analyze(id: bigint, answers: { first: Flow; retries?: Partial<Record<FabricEgress, Flow | "unreachable">> }, extra: Partial<WebsiteAnalysisDependencies> = {}) {
 	const captures: ArchiveWebsiteOptions[] = [];
 	await SubmissionsEntity.create({ id, kind: "website", data: { kind: "website", website: { url: LURE } }, dedupeKey: websiteSubmissionDedupeKey(`${LURE}#${id}`), status: "running", source: LURE });
@@ -94,7 +94,7 @@ async function analyze(id: bigint, answers: { first: Flow; retries?: Partial<Rec
 			captures.push(options);
 			// A hand-off's own case parses the retained capture.
 			if (options.mhtmlSnapshot) return page(options.archivedUrl ?? options.url, LANDING_TEXT, [navigationHop(0, options.archivedUrl ?? options.url, { status: 200, contentCaptured: true })], "phishing");
-			if (!options.egress) return lure(options, "phishing", answers.first);
+			if (!options.egress) return lure(options, "residential", answers.first);
 			const flow = answers.retries?.[options.egress];
 			if (!flow || flow === "unreachable") throw new WebsiteCaptureFailedError([new WebsiteUnreachableError(options.egress, "net::ERR_CONNECTION_CLOSED")]);
 			return lure(options, options.egress, flow);
@@ -110,8 +110,8 @@ const landing: Flow = (egress) => ({ steps: afterGate("landing", egress) });
 
 describe("a flow whose destination answers empty and sends the visit back", () => {
 	test("is walked again from the next network, and a destination that shows content there is handed off to its own case", async () => {
-		const { captures, submission, website } = await analyze(382166397712601140n, { first: cloaked, retries: { reporting: landing } });
-		expect(captures.map(({ url, egress }) => ({ url, egress }))).toEqual([{ url: LURE, egress: undefined }, { url: LURE, egress: "reporting" }]);
+		const { captures, submission, website } = await analyze(382166397712601140n, { first: cloaked, retries: { phishing: "unreachable", reporting: landing } });
+		expect(captures.map(({ url, egress }) => ({ url, egress }))).toEqual([{ url: LURE, egress: undefined }, { url: LURE, egress: "phishing" }, { url: LURE, egress: "reporting" }]);
 		expect(submission?.status).toBe("redirected");
 		expect(website?.redirectSubmissionId).toBeDefined();
 		expect(website?.cloakedDestination).toBeUndefined();
@@ -125,37 +125,37 @@ describe("a flow whose destination answers empty and sends the visit back", () =
 		expect(website?.navigationHops?.at(-1)?.url).toBe(LANDING);
 	});
 
-	test("goes on to the residential exit when the direct network is cloaked too, in the order Tor, direct, residential", async () => {
-		const { captures, submission } = await analyze(382166397712601141n, { first: cloaked, retries: { reporting: cloaked, residential: landing } });
-		expect(captures.map(({ egress }) => egress)).toEqual([undefined, "reporting", "residential"]);
+	test("goes on to the server IP when Tor is cloaked too, in the order residential, Tor, server IP", async () => {
+		const { captures, submission } = await analyze(382166397712601141n, { first: cloaked, retries: { phishing: cloaked, reporting: landing } });
+		expect(captures.map(({ egress }) => egress)).toEqual([undefined, "phishing", "reporting"]);
 		expect(submission?.status).toBe("redirected");
 	});
 
 	test("that no network gets past finishes plainly, records which networks answered empty, and creates no report", async () => {
-		const { captures, submission, website } = await analyze(382166397712601142n, { first: cloaked, retries: { reporting: cloaked, residential: cloaked } });
-		expect(captures.map(({ egress }) => egress)).toEqual([undefined, "reporting", "residential"]);
+		const { captures, submission, website } = await analyze(382166397712601142n, { first: cloaked, retries: { phishing: cloaked, reporting: cloaked } });
+		expect(captures.map(({ egress }) => egress)).toEqual([undefined, "phishing", "reporting"]);
 		expect(submission?.status).toBe("invalid");
-		expect(submission?.info).toBe("The site's flow leads to www.solidfairhubhost.com, which answered every network we tried (Tor exit, server IP, residential exit) with an empty response and sent the visit back; no report was created.");
+		expect(submission?.info).toBe("The site's flow leads to www.solidfairhubhost.com, which answered every network we tried (residential exit, Tor exit, server IP) with an empty response and sent the visit back; no report was created.");
 		expect(submission?.info).not.toContain("No reportable");
-		expect(website?.cloakedDestination).toEqual({ host: "www.solidfairhubhost.com", site: "solidfairhubhost.com", answered: ["Tor exit", "server IP", "residential exit"], notTried: [] });
+		expect(website?.cloakedDestination).toEqual({ host: "www.solidfairhubhost.com", site: "solidfairhubhost.com", answered: ["residential exit", "Tor exit", "server IP"], notTried: [] });
 		expect(website?.redirectSubmissionId).toBeUndefined();
 	});
 
 	test("names a network that could not be reached instead of claiming it answered", async () => {
-		const { submission, website } = await analyze(382166397712601143n, { first: cloaked, retries: { reporting: "unreachable", residential: cloaked } });
+		const { submission, website } = await analyze(382166397712601143n, { first: cloaked, retries: { phishing: cloaked, reporting: "unreachable" } });
 		expect(submission?.status).toBe("invalid");
-		expect(submission?.info).toContain("answered every network we tried (Tor exit, residential exit)");
+		expect(submission?.info).toContain("answered every network we tried (residential exit, Tor exit)");
 		expect(submission?.info).toContain("The server IP could not be tried: Failed to load page: net::ERR_CONNECTION_CLOSED via server IP.");
 		expect(website?.cloakedDestination?.notTried).toEqual([{ network: "server IP", reason: "Failed to load page: net::ERR_CONNECTION_CLOSED via server IP" }]);
 	});
 
 	test("is not walked again once the time budget is used up, and says so", async () => {
-		const { captures, submission, website } = await analyze(382166397712601144n, { first: cloaked, retries: { reporting: landing } }, { cloakedFlowBudgetMs: 0 });
+		const { captures, submission, website } = await analyze(382166397712601144n, { first: cloaked, retries: { phishing: landing } }, { cloakedFlowBudgetMs: 0 });
 		expect(captures).toHaveLength(1);
 		expect(submission?.status).toBe("invalid");
-		expect(website?.cloakedDestination?.answered).toEqual(["Tor exit"]);
-		expect(website?.cloakedDestination?.notTried.map(({ network }) => network)).toEqual(["server IP", "residential exit"]);
-		expect(submission?.info).toContain("The server IP could not be tried: the time budget for walking the flow again was used up.");
+		expect(website?.cloakedDestination?.answered).toEqual(["residential exit"]);
+		expect(website?.cloakedDestination?.notTried.map(({ network }) => network)).toEqual(["Tor exit", "server IP"]);
+		expect(submission?.info).toContain("The Tor exit could not be tried: the time budget for walking the flow again was used up.");
 	});
 });
 

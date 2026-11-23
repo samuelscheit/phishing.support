@@ -178,15 +178,13 @@ export type WebsiteHiddenFrame = {
 
 /**
  * How a capture handled a page whose own script sends visitors to another site.
- * `detected`: Tor/datacenter visitors and the residential exit reached
- * different sites; the archive holds the residential one. When that is
- * another site too, it may be just another decoy (a cloaker rotating decoy
- * sites per visit), so its verdict settles the submitted case like `uniform`. `uniform`: every
- * route, including the residential exit, was sent to the same site, which the
- * archive holds; a harmless destination then means the page cloaks against all
- * of them. `unresolved`: only the decoy could be captured.
+ * `scripted`: the residential exit was sent there, which the archive holds; it
+ * is either where the page leads victims or a decoy for every visitor, and the
+ * destination's verdict tells them apart. `unresolved`: the residential exit
+ * was unavailable and Tor or the server IP was sent there, possibly a decoy for
+ * scanners only.
  */
-export type WebsiteCloaking = { outcome: "detected" | "uniform" | "unresolved"; detail: string };
+export type WebsiteCloaking = { outcome: "scripted" | "unresolved"; detail: string };
 
 /** What a downloaded file is, from its own bytes rather than its name or served type. */
 export type DownloadFormat =

@@ -5,16 +5,15 @@ import type { WebsiteNavigationHop } from "../types";
 import type { WebsiteArchiveResult } from "./types";
 
 /**
- * Egress routes tried for a live capture, in order. Tor keeps the reporting
- * server's address away from attacker infrastructure, but Tor exits are widely
- * blocked, either with an HTTP error page or by dropping the connection; a page
- * that is unreachable over Tor is retried from the server's own direct exit.
- * Cloakers go further and answer Tor and datacenter visitors with a script
- * navigation to an unrelated decoy site; only then is the capture repeated from
- * the operator's residential exit, which exposes that connection's address.
+ * Egress routes tried for a live capture, in order; the first that reaches the
+ * page is kept. Cloakers answer Tor and datacenter visitors with a decoy (an
+ * error page, a redirect to an unrelated site, even another page on the same
+ * host), so the operator's residential exit, which sees what a victim sees, goes
+ * first. When it is unavailable, Tor keeps the reporting server's address away
+ * from attacker infrastructure; Tor exits are widely blocked, so a page that is
+ * unreachable over Tor is tried from the server's own direct exit last.
  */
-export const WEBSITE_CAPTURE_EGRESS: readonly FabricEgress[] = ["phishing", "reporting"];
-export const WEBSITE_CLOAKING_EGRESS: FabricEgress = "residential";
+export const WEBSITE_CAPTURE_EGRESS: readonly FabricEgress[] = ["residential", "phishing", "reporting"];
 
 /** Registrable domain (eTLD+1) of a URL, falling back to its hostname. */
 export function siteOf(url: string): string {
@@ -40,12 +39,6 @@ function isHttpRedirect(status: number | null): boolean {
 	return status !== null && status >= 300 && status < 400;
 }
 
-
-/**
- * Every network a flow cloaked by its destination is walked again through,
- * in the order the capture tries them (see WEBSITE_CAPTURE_EGRESS).
- */
-export const WEBSITE_FLOW_EGRESS: readonly FabricEgress[] = [...WEBSITE_CAPTURE_EGRESS, WEBSITE_CLOAKING_EGRESS];
 
 /**
  * The other site a visit's flow was sent to, when that site only answered

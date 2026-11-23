@@ -321,7 +321,7 @@ test("a followed link is opened with the page that showed it as the Referer, on 
 	const referrer = "https://kit.example.com/Access.html";
 	const fixture = archiveBrowserFixture({
 		goto: async ({ url: requested, egress }) => {
-			if (egress !== "residential") throw new Error(`net::ERR_CONNECTION_CLOSED at ${requested}`);
+			if (egress !== "reporting") throw new Error(`net::ERR_CONNECTION_CLOSED at ${requested}`);
 			return responseForNavigation(requested, 200, { contentType: "text/html" });
 		},
 	});
@@ -329,9 +329,9 @@ test("a followed link is opened with the page that showed it as the Referer, on 
 
 	expect(archive.url).toBe(url);
 	expect(fixture.navigationCalls.map(({ egress, referer }) => ({ egress, referer }))).toEqual([
+		{ egress: "residential", referer: referrer },
 		{ egress: "phishing", referer: referrer },
 		{ egress: "reporting", referer: referrer },
-		{ egress: "residential", referer: referrer },
 	]);
 });
 
@@ -356,8 +356,8 @@ test("website capture records every redirect response separately from the final 
 		{ ...fast, getBrowser: fixture.getBrowser },
 	);
 
-	expect(fixture.navigationCalls).toEqual([{ url: requestedUrl, egress: "phishing", waitUntil: "domcontentloaded", timeout: 30_000 }]);
-	expect(fixture.leasedEgress).toEqual(["phishing"]);
+	expect(fixture.navigationCalls).toEqual([{ url: requestedUrl, egress: "residential", waitUntil: "domcontentloaded", timeout: 30_000 }]);
+	expect(fixture.leasedEgress).toEqual(["residential"]);
 	// Requests are only observed (a hidden frame's uploads), never intercepted.
 	expect(fixture.interceptionEnabled).toBe(false);
 	expect(archive.requestedUrl).toBe(requestedUrl);
@@ -382,7 +382,7 @@ test("a blank screenshot of a page that shows text is taken again once the page 
 
 	expect(fixture.screenshotCount).toBe(3);
 	expect(archive.screenshotPng?.equals(PAINTED_PNG)).toBeTrue();
-	expect(archive.route).toBe("Tor exit");
+	expect(archive.route).toBe("residential exit");
 });
 
 test("a page that cannot be pictured is captured without a screenshot, not failed as a browser outage", async () => {
@@ -414,22 +414,47 @@ test("a page that stays blank is captured blank after a bounded number of attemp
 	expect(archive.screenshotPng?.equals(BLANK_PNG)).toBeTrue();
 });
 
-test("a navigation failure over Tor is retried from the server's direct exit", async () => {
+test("a navigation failure over the residential exit and Tor is retried from the server's direct exit", async () => {
 	const url = "https://www8-receitafazendagerador.com/Aplicacao/Mei/pgmei.app";
 	const fixture = archiveBrowserFixture({
 		pageUrl: url,
 		goto: async ({ egress }) => {
-			if (egress === "phishing") throw new Error(`net::ERR_TIMED_OUT at ${url}`);
+			if (egress !== "reporting") throw new Error(`net::ERR_TIMED_OUT at ${url}`);
 			return responseForNavigation(url, 200, { contentType: "text/html" });
 		},
 	});
 
 	const archive = await archiveWebsite({ url }, { ...fast, getBrowser: fixture.getBrowser });
 
-	expect(fixture.leasedEgress).toEqual(["phishing", "reporting"]);
-	expect(fixture.closeCount).toBe(2);
+	expect(fixture.leasedEgress).toEqual(["residential", "phishing", "reporting"]);
+	expect(fixture.closeCount).toBe(3);
 	expect(fixture.captureSnapshotCount).toBe(1);
 	expect(archive.url).toBe(url);
+	expect(archive.route).toBe("server IP");
+});
+
+test("a page the residential exit reaches is captured from it, and Tor and the server IP are never leased", async () => {
+	const fixture = archiveBrowserFixture();
+
+	const archive = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: fixture.getBrowser });
+
+	expect(fixture.leasedEgress).toEqual(["residential"]);
+	expect(archive.egress).toBe("residential");
+	expect(archive.cloaking).toBeUndefined();
+});
+
+test("an offline residential exit hands the capture to Tor", async () => {
+	const fixture = archiveBrowserFixture();
+	const getBrowser: typeof fixture.getBrowser = async (egress) => {
+		if (egress === "residential") throw new Error("residential exit is offline");
+		return fixture.getBrowser(egress);
+	};
+
+	const archive = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser });
+
+	expect(archive.egress).toBe("phishing");
+	expect(archive.route).toBe("Tor exit");
+	expect(archive.cloaking).toBeUndefined();
 });
 
 test("website capture reports the navigation failure of every egress, including the residential exit, and closes each lease", async () => {
@@ -440,15 +465,18 @@ test("website capture reports the navigation failure of every egress, including 
 	await expect(archiveWebsite(
 		{ url: "https://example.test/" },
 		{ ...fast, getBrowser: fixture.getBrowser },
-	)).rejects.toThrow("Failed to load page: Navigation timeout of 30000 ms exceeded via Tor exit; Navigation timeout of 30000 ms exceeded via server IP; Navigation timeout of 30000 ms exceeded via residential exit");
-	expect(fixture.leasedEgress).toEqual(["phishing", "reporting", "residential"]);
+	)).rejects.toThrow("Failed to load page: Navigation timeout of 30000 ms exceeded via residential exit; Navigation timeout of 30000 ms exceeded via Tor exit; Navigation timeout of 30000 ms exceeded via server IP");
+	expect(fixture.leasedEgress).toEqual(["residential", "phishing", "reporting"]);
 	expect(fixture.screenshotCount).toBe(0);
 	expect(fixture.captureSnapshotCount).toBe(0);
 	expect(fixture.closeCount).toBe(3);
 });
 
-test("a failure after the page loaded is not retried on another egress", async () => {
-	const fixture = archiveBrowserFixture();
+test("a failure after the page loaded over Tor is not retried on another egress", async () => {
+	const fixture = archiveBrowserFixture({ goto: async ({ egress, url }) => {
+		if (egress === "residential") throw new Error(`net::ERR_CONNECTION_CLOSED at ${url}`);
+		return responseForNavigation(url, 200, { contentType: "text/html" });
+	} });
 	const getBrowser: typeof fixture.getBrowser = async (egress) => {
 		const browser = await fixture.getBrowser(egress);
 		const context = browser.defaultBrowserContext();
@@ -458,8 +486,26 @@ test("a failure after the page loaded is not retried on another egress", async (
 	};
 
 	await expect(archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser })).rejects.toThrow("Protocol error (Page.captureScreenshot)");
-	expect(fixture.leasedEgress).toEqual(["phishing"]);
-	expect(fixture.closeCount).toBe(1);
+	expect(fixture.leasedEgress).toEqual(["residential", "phishing"]);
+	expect(fixture.closeCount).toBe(2);
+});
+
+test("any failure of the residential exit, even after the page loaded, falls through to Tor", async () => {
+	const fixture = archiveBrowserFixture();
+	const getBrowser: typeof fixture.getBrowser = async (egress) => {
+		const browser = await fixture.getBrowser(egress);
+		if (egress !== "residential") return browser;
+		const context = browser.defaultBrowserContext();
+		const newPage = context.newPage.bind(context);
+		context.newPage = async () => Object.assign(await newPage(), { screenshot: async () => { throw new Error("Protocol error (Page.captureScreenshot)"); } });
+		return Object.assign(browser, { defaultBrowserContext: () => context });
+	};
+
+	const archive = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser });
+
+	expect(archive.egress).toBe("phishing");
+	expect(fixture.leasedEgress).toEqual(["residential", "phishing"]);
+	expect(fixture.closeCount).toBe(2);
 });
 
 test("browser-service failures are told apart from a site that cannot be reached", async () => {
@@ -475,14 +521,14 @@ test("browser-service failures are told apart from a site that cannot be reached
 	const closed = archiveBrowserFixture({ goto: async () => { throw new Error("Protocol error (Page.navigate): Target closed"); } });
 	const closedError = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: closed.getBrowser }).then(() => undefined, (error: unknown) => error);
 	expect(isBrowserInfrastructureFailure(closedError)).toBe(true);
-	expect(closed.leasedEgress).toEqual(["phishing"]);
+	expect(closed.leasedEgress).toEqual(["residential", "phishing"]);
 
 	// A site that answers no route is final, even when a route's reason mentions a closed connection.
 	const blocked = archiveBrowserFixture({ goto: async () => { throw new Error("net::ERR_CONNECTION_CLOSED at https://example.test/"); } });
 	const blockedError = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: blocked.getBrowser }).then(() => undefined, (error: unknown) => error);
 	expect(blockedError).toBeInstanceOf(WebsiteCaptureFailedError);
 	expect(isBrowserInfrastructureFailure(blockedError)).toBe(false);
-	expect(blocked.leasedEgress).toEqual(["phishing", "reporting", "residential"]);
+	expect(blocked.leasedEgress).toEqual(["residential", "phishing", "reporting"]);
 });
 
 describe("rendering", () => {
@@ -522,7 +568,7 @@ describe("rendering", () => {
 
 		expect(archive.text.toString()).toContain("E-Mail-Adresse");
 		expect(fixture.networkIdleWaits).toEqual([{ idleTime: 20, concurrency: 2, timeout: 20 }]);
-		expect(fixture.leasedEgress).toEqual(["phishing"]);
+		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(fixture.screenshotCount).toBe(1);
 	});
 
@@ -533,9 +579,10 @@ describe("rendering", () => {
 		});
 
 		await expect(archiveWebsite({ url }, { ...fast, getBrowser: fixture.getBrowser })).rejects.toThrow("Target closed");
-		expect(fixture.leasedEgress).toEqual(["phishing"]);
+		// The residential exit's failure of any kind falls through; Tor's browser failure is thrown.
+		expect(fixture.leasedEgress).toEqual(["residential", "phishing"]);
 		expect(fixture.screenshotCount).toBe(0);
-		expect(fixture.closeCount).toBe(1);
+		expect(fixture.closeCount).toBe(2);
 	});
 
 	test("waits on the document a cloaker's script navigated to, not on the interstitial", async () => {
@@ -564,17 +611,17 @@ describe("rendering", () => {
 	});
 });
 
-test("an HTTP error over Tor is retried from the server's direct exit", async () => {
+test("an HTTP error from the residential exit and Tor is retried from the server's direct exit", async () => {
 	const url = "https://xfinityy111.weebly.com/";
 	const fixture = archiveBrowserFixture({
 		pageUrl: url,
-		goto: async ({ egress }) => responseForNavigation(url, egress === "phishing" ? 403 : 200, { contentType: "text/html" }),
+		goto: async ({ egress }) => responseForNavigation(url, egress === "reporting" ? 200 : 403, { contentType: "text/html" }),
 	});
 
 	const archive = await archiveWebsite({ url }, { ...fast, getBrowser: fixture.getBrowser, errorDocumentSettleMs: 20 });
 
-	expect(fixture.leasedEgress).toEqual(["phishing", "reporting"]);
-	expect(fixture.closeCount).toBe(2);
+	expect(fixture.leasedEgress).toEqual(["residential", "phishing", "reporting"]);
+	expect(fixture.closeCount).toBe(3);
 	expect(fixture.captureSnapshotCount).toBe(1);
 	expect(archive.url).toBe(url);
 	expect(archive.navigationHops).toEqual([
@@ -598,7 +645,7 @@ test("a bot-check interstitial that reloads into the real page is captured with 
 
 	const archive = await archiveWebsite({ url }, { ...fast, getBrowser: fixture.getBrowser, errorDocumentSettleMs: 2_000 });
 
-	expect(fixture.leasedEgress).toEqual(["phishing"]);
+	expect(fixture.leasedEgress).toEqual(["residential"]);
 	expect(fixture.captureSnapshotCount).toBe(1);
 	expect(archive.url).toBe(realUrl);
 	expect(archive.navigationHops).toEqual([
@@ -611,13 +658,13 @@ test("an HTTP error on every egress fails with each route's status and page titl
 	const url = "https://blocked.example/";
 	const fixture = archiveBrowserFixture({
 		pageUrl: url,
-		goto: async ({ egress }) => responseForNavigation(url, egress === "phishing" ? 403 : 503, { contentType: "text/html" }),
+		goto: async ({ egress }) => responseForNavigation(url, egress === "residential" ? 403 : 503, { contentType: "text/html" }),
 	});
 
 	await expect(archiveWebsite({ url }, { ...fast, getBrowser: fixture.getBrowser, errorDocumentSettleMs: 20 })).rejects.toThrow(
-		'Failed to load page: HTTP 403 ("Just a moment...") via Tor exit; HTTP 503 ("Just a moment...") via server IP; HTTP 503 ("Just a moment...") via residential exit',
+		'Failed to load page: HTTP 403 ("Just a moment...") via residential exit; HTTP 503 ("Just a moment...") via Tor exit; HTTP 503 ("Just a moment...") via server IP',
 	);
-	expect(fixture.leasedEgress).toEqual(["phishing", "reporting", "residential"]);
+	expect(fixture.leasedEgress).toEqual(["residential", "phishing", "reporting"]);
 	expect(fixture.captureSnapshotCount).toBe(0);
 	expect(fixture.closeCount).toBe(3);
 });
@@ -803,7 +850,7 @@ describe("cloaking", () => {
 
 		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
 
-		expect(fixture.leasedEgress).toEqual(["phishing"]);
+		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.url).toBe(`${url}/done`);
 		expect(archive.cloaking).toBeUndefined();
 		expect(archive.navigationHops).toEqual([
@@ -812,19 +859,18 @@ describe("cloaking", () => {
 		]);
 	});
 
-	test("a scripted jump to another site over Tor is repeated from the residential exit, which captures what a victim sees", async () => {
+	test("a scripted jump of the residential exit to another site is returned as scripted cloaking, and no other route is tried", async () => {
 		const fixture = cloakerFixture((egress) => (egress === "residential" ? kitUrl : decoyUrl));
 
 		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
 
-		// The server IP is not tried: a cloaker answering Tor with a decoy is
-		// already the signal, and the residential exit is the only route that helps.
-		expect(fixture.leasedEgress).toEqual(["phishing", "residential"]);
-		expect(fixture.closeCount).toBe(2);
+		// The residential exit sees what a victim sees; Tor and the server IP are never leased.
+		expect(fixture.leasedEgress).toEqual(["residential"]);
+		expect(fixture.closeCount).toBe(1);
 		expect(archive.url).toBe(kitUrl);
 		expect(archive.cloaking).toEqual({
-			outcome: "detected",
-			detail: `${url} sent the Tor exit to wikipedia.org but the residential exit to ledger-config.live`,
+			outcome: "scripted",
+			detail: `${url} sent the residential exit to ledger-config.live by script`,
 		});
 		expect(archive.navigationHops.map(({ url: hopUrl, redirectTo, contentCaptured }) => ({ hopUrl, redirectTo, contentCaptured }))).toEqual([
 			{ hopUrl: url, redirectTo: kitUrl, contentCaptured: false },
@@ -840,19 +886,19 @@ describe("cloaking", () => {
 		expect(archive.cloaking).toBeUndefined();
 	});
 
-	test("the same scripted destination for every route captures it and leaves the verdict to the destination", async () => {
+	test("a scripted jump to a decoy site is captured and leaves the verdict to the destination", async () => {
 		const fixture = cloakerFixture(() => decoyUrl);
 
 		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
 
 		// apple-condition.com (submission 376291398434951215): its cloakit check
-		// sent Tor and the residential exit alike to Wikipedia.
-		expect(fixture.leasedEgress).toEqual(["phishing", "residential"]);
-		expect(fixture.closeCount).toBe(2);
+		// sent the residential exit to Wikipedia.
+		expect(fixture.leasedEgress).toEqual(["residential"]);
+		expect(fixture.closeCount).toBe(1);
 		expect(archive.url).toBe(decoyUrl);
 		expect(archive.cloaking).toEqual({
-			outcome: "uniform",
-			detail: `${url} sent both the Tor exit and the residential exit to wikipedia.org by script`,
+			outcome: "scripted",
+			detail: `${url} sent the residential exit to wikipedia.org by script`,
 		});
 	});
 
@@ -861,16 +907,16 @@ describe("cloaking", () => {
 		// `location.replace` to a random news front page in its <head>, so the
 		// navigation resolved with the news site and the capture looked like a
 		// plain visit to it.
-		const rotation: Partial<Record<FabricEgress, string>> = { phishing: "https://www.reuters.com/", residential: "https://www.bbc.com/" };
+		const rotation: Partial<Record<FabricEgress, string>> = { residential: "https://www.bbc.com/" };
 		const fixture = cloakerFixture((egress) => rotation[egress], { jumpBeforeLoad: true });
 
 		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
 
-		expect(fixture.leasedEgress).toEqual(["phishing", "residential"]);
+		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.url).toBe("https://www.bbc.com/");
 		expect(archive.cloaking).toEqual({
-			outcome: "detected",
-			detail: `${url} sent the Tor exit to reuters.com but the residential exit to bbc.com`,
+			outcome: "scripted",
+			detail: `${url} sent the residential exit to bbc.com by script`,
 		});
 		expect(archive.navigationHops).toEqual([
 			{ index: 0, url, hostname: "lookup-lgr.to", status: 200, redirectTo: "https://www.bbc.com/", contentType: "text/html; charset=utf-8", contentCaptured: false },
@@ -878,26 +924,26 @@ describe("cloaking", () => {
 		]);
 	});
 
-	test("a jump before load to the same site for every route is uniform cloaking", async () => {
+	test("a jump before load to a decoy site is scripted cloaking of the residential exit", async () => {
 		const fixture = cloakerFixture(() => decoyUrl, { jumpBeforeLoad: true });
 
 		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
 
-		expect(fixture.leasedEgress).toEqual(["phishing", "residential"]);
+		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.url).toBe(decoyUrl);
-		expect(archive.cloaking?.outcome).toBe("uniform");
+		expect(archive.cloaking?.outcome).toBe("scripted");
 		expect(archive.navigationHops.map(({ url: hopUrl, redirectTo }) => ({ hopUrl, redirectTo }))).toEqual([
 			{ hopUrl: url, redirectTo: decoyUrl },
 			{ hopUrl: decoyUrl, redirectTo: undefined },
 		]);
 	});
 
-	test("a jump before load that stays on the submitted site is recorded as a hop and never triggers the residential exit", async () => {
+	test("a jump before load that stays on the submitted site is recorded as a hop and never counts as cloaking", async () => {
 		const fixture = cloakerFixture(() => `${url}/step-2`, { jumpBeforeLoad: true });
 
 		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
 
-		expect(fixture.leasedEgress).toEqual(["phishing"]);
+		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.cloaking).toBeUndefined();
 		expect(archive.url).toBe(`${url}/step-2`);
 		expect(archive.navigationHops.map(({ url: hopUrl, redirectTo, contentCaptured }) => ({ hopUrl, redirectTo, contentCaptured }))).toEqual([
@@ -906,25 +952,25 @@ describe("cloaking", () => {
 		]);
 	});
 
-	test("a scripted jump that stays on the submitted site never triggers the residential exit or a cloaking mark", async () => {
+	test("a scripted jump that stays on the submitted site never counts as cloaking", async () => {
 		const fixture = cloakerFixture(() => `${url}/step-2`);
 
 		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
 
-		expect(fixture.leasedEgress).toEqual(["phishing"]);
+		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.cloaking).toBeUndefined();
 	});
 
-	test("an offline residential exit leaves the decoy capture marked as unresolved cloaking", async () => {
+	test("a scripted jump over Tor after the residential exit failed is unresolved cloaking, and the server IP is not tried", async () => {
 		const fixture = cloakerFixture(() => decoyUrl, { residentialOnline: false });
 
 		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
 
-		expect(fixture.leasedEgress).toEqual(["phishing", "residential"]);
+		expect(fixture.leasedEgress).toEqual(["residential", "phishing"]);
 		expect(archive.url).toBe(decoyUrl);
 		expect(archive.cloaking).toEqual({
 			outcome: "unresolved",
-			detail: `${url} sent the Tor exit to wikipedia.org by script; the residential exit capture failed: net::ERR_PROXY_CONNECTION_FAILED via residential exit`,
+			detail: `${url} sent the Tor exit to wikipedia.org by script; net::ERR_PROXY_CONNECTION_FAILED via residential exit`,
 		});
 	});
 
@@ -951,28 +997,33 @@ describe("cloaking", () => {
 
 		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
 
-		expect(fixture.leasedEgress).toEqual(["phishing", "residential"]);
+		expect(fixture.leasedEgress).toEqual(["residential", "phishing"]);
 		expect(archive.url).toBe(decoyUrl);
 		expect(archive.cloaking).toEqual({
 			outcome: "unresolved",
-			detail: `${url} sent the Tor exit to wikipedia.org by script; the residential exit capture failed: the page sent the visitor to https://device.ledger-config.live/, which ended in HTTP 502 at ${deadUrl} via residential exit`,
+			detail: `${url} sent the Tor exit to wikipedia.org by script; the page sent the visitor to https://device.ledger-config.live/, which ended in HTTP 502 at ${deadUrl} via residential exit`,
 		});
 	});
 
-	test("a site unreachable over Tor and the server IP is tried once more from the residential exit", async () => {
+	test("a scripted jump over the server IP, reached only after residential and Tor failed, is unresolved cloaking naming both failures", async () => {
 		const fixture = archiveBrowserFixture({
-			pageUrl: kitUrl,
-			goto: async ({ egress }) => {
-				if (egress !== "residential") throw new Error(`net::ERR_CONNECTION_RESET at ${kitUrl}`);
-				return responseForNavigation(kitUrl, 200, { contentType: "text/html" });
+			pageUrl: url,
+			goto: async ({ egress, replaceDocument }) => {
+				if (egress === "residential") throw new Error(`net::ERR_CONNECTION_RESET at ${url}`);
+				if (egress === "phishing") throw new Error(`net::ERR_TIMED_OUT at ${url}`);
+				setTimeout(() => replaceDocument(responseForNavigation(decoyUrl, 200, { contentType: "text/html" })), 5);
+				return responseForNavigation(url, 200, { contentType: "text/html" });
 			},
 		});
 
-		const archive = await archiveWebsite({ url: kitUrl }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
 
-		expect(fixture.leasedEgress).toEqual(["phishing", "reporting", "residential"]);
-		expect(archive.url).toBe(kitUrl);
-		expect(archive.cloaking).toBeUndefined();
+		expect(fixture.leasedEgress).toEqual(["residential", "phishing", "reporting"]);
+		expect(archive.url).toBe(decoyUrl);
+		expect(archive.cloaking).toEqual({
+			outcome: "unresolved",
+			detail: `${url} sent the server IP to wikipedia.org by script; net::ERR_CONNECTION_RESET at ${url} via residential exit; net::ERR_TIMED_OUT at ${url} via Tor exit`,
+		});
 	});
 
 	test("a short link's HTTP redirects to a cloaker do not hide the cloaker's scripted jump", async () => {
@@ -997,15 +1048,15 @@ describe("cloaking", () => {
 
 		const archive = await archiveWebsite({ url: shortUrl }, { ...settle, getBrowser: fixture.getBrowser });
 
-		expect(fixture.leasedEgress).toEqual(["phishing", "residential"]);
+		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.url).toBe(ozonUrl);
 		expect(archive.cloaking).toEqual({
-			outcome: "detected",
-			detail: `${shortUrl} sent the Tor exit to fuckyou.gay but the residential exit to agenticive.com`,
+			outcome: "scripted",
+			detail: `${shortUrl} sent the residential exit to agenticive.com by script`,
 		});
 	});
 
-	test("an HTTP redirect to another site is the host's declared destination and never triggers the residential exit", async () => {
+	test("an HTTP redirect to another site is the host's declared destination and never counts as cloaking", async () => {
 		const fixture = archiveBrowserFixture({
 			pageUrl: kitUrl,
 			goto: async () => responseForNavigation(kitUrl, 200, { contentType: "text/html", redirects: [{ url, status: 302, location: kitUrl }] }),
@@ -1013,7 +1064,7 @@ describe("cloaking", () => {
 
 		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
 
-		expect(fixture.leasedEgress).toEqual(["phishing"]);
+		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.cloaking).toBeUndefined();
 	});
 });
@@ -1303,12 +1354,12 @@ document.getElementById("turnstile").addEventListener("click", () => { location.
 				expect.objectContaining({ index: 0, url, status: 200, redirectTo: decoyUrl, contentCaptured: false }),
 				expect.objectContaining({ index: 1, url: decoyUrl, status: 200, contentCaptured: true }),
 			]);
-			// Every route of this test browser reaches the same decoy.
+			// The residential exit is tried first and was sent to the decoy.
 			expect(archive.cloaking).toEqual({
-				outcome: "uniform",
-				detail: `${url} sent both the Tor exit and the residential exit to 127.0.0.1 by script`,
+				outcome: "scripted",
+				detail: `${url} sent the residential exit to 127.0.0.1 by script`,
 			});
-			expect(hits).toEqual(["/word/verify.workspace.php", "/word/verify.workspace.php"]);
+			expect(hits).toEqual(["/word/verify.workspace.php"]);
 		} finally {
 			cloaker.stop(true);
 			decoy.stop(true);

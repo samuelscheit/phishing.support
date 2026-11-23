@@ -213,7 +213,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 						<VerdictPanel verdictLabel={verdictLabelOf(analyzedAssessment)} assessment={analyzedAssessment} reportCount={reportCount} info={submission.info} onShowReports={() => setTab("reports")} />
 					) : null}
 					{isInvalidWebsite ? <NotReportedPanel info={submission.info} /> : null}
-					{statusKey === "redirected" ? <RedirectedPanel info={submission.info} cloaks={websiteCloaking?.outcome === "detected"} redirectSubmissionId={redirectSubmissionId} /> : null}
+					{statusKey === "redirected" ? <RedirectedPanel info={submission.info} redirectSubmissionId={redirectSubmissionId} /> : null}
 					{isFailed ? <FailedPanel info={submission.info} canRetry={canRetryAnalysis} retrying={retrying} retryError={retryError} retryHint={retryHint} onRetry={retryAnalysis} /> : null}
 					{website ? (
 						<SiteVisitTimeline running={isRunning} visit={website.visit} offeredDownload={offeredDownload} live={liveVisit} pageCount={visitPages.length} />

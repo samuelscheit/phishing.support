@@ -52,11 +52,9 @@ export async function handOffRedirectedCapture(params: {
 	const destination = websiteSite(capturedHop.url);
 	await SubmissionsEntity.update(submissionId, {
 		status: "redirected",
-		info: archive.cloaking?.outcome === "detected"
-			? `${url} cloaks: ${archive.cloaking.detail}. ${destination} is analyzed in its own case. ${decoyDestinationClause(url)}`
-			: archive.cloaking?.outcome === "uniform"
-				? `${archive.cloaking.detail}; that site is analyzed in its own case. ${decoyDestinationClause(url)}`
-				: `${url} ${via ? `sends visitors on to ${destination} through ${via}` : `redirects to ${destination}`}; that site is analyzed and reported in its own case.`,
+		info: archive.cloaking?.outcome === "scripted"
+			? `${archive.cloaking.detail}; that site is analyzed in its own case. If it shows nothing reportable, ${url} is treated as a cloaker that turned every route away.`
+			: `${url} ${via ? `sends visitors on to ${destination} through ${via}` : `redirects to ${destination}`}; that site is analyzed and reported in its own case.`,
 		data: {
 			kind: "website",
 			website: {
@@ -73,15 +71,10 @@ export async function handOffRedirectedCapture(params: {
 	await settleCloakedRedirect(submissionId);
 }
 
-function decoyDestinationClause(url: string): string {
-	return `If it shows nothing reportable, ${url} is treated as a cloaker that turned every route away.`;
-}
-
 /**
- * A cloaking page handed off to where it sent the residential exit waits on
- * that site's verdict. The residential exit reached either the same site as
- * Tor (`uniform`) or another one (`detected`): a kit on its own domain, or just
- * another decoy from a cloaker that picks a random news site per visit
+ * A page handed off to where its script sent the residential exit waits on
+ * that site's verdict: a kit on its own domain, or just a decoy from a cloaker
+ * that picks a random news site per visit
  * (docusign.alt3-doc3ea7-v2.sbs). A harmless destination (Wikipedia, a news
  * front page) is the decoy of a cloaker that turned every route away, not where
  * the page leads its real visitors; the submitted case then fails as suspected

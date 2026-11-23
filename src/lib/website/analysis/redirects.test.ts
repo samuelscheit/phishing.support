@@ -343,17 +343,17 @@ describe("cloaked websites", () => {
 	const decoyUrl = "https://www.wikipedia.org/";
 
 	test("a cloaker whose residential capture reached the kit hands that kit to its own case and says why", async () => {
-		const detail = `${cloakerUrl} sent the Tor exit to wikipedia.org but the residential exit to ledger-config.live`;
-		const archive = { ...archiveOf([hop(0, cloakerUrl, 200, kitUrl), hop(1, kitUrl, 200)]), cloaking: { outcome: "detected" as const, detail } };
+		const detail = `${cloakerUrl} sent the residential exit to ledger-config.live by script`;
+		const archive = { ...archiveOf([hop(0, cloakerUrl, 200, kitUrl), hop(1, kitUrl, 200)]), cloaking: { outcome: "scripted" as const, detail } };
 		const id = await websiteSubmission(374589286864916480n, cloakerUrl);
 
 		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, dependencies(archive));
 
 		const parent = await SubmissionsEntity.get(id);
 		expect(parent?.status).toBe("redirected");
-		expect(parent?.info).toBe(`${cloakerUrl} cloaks: ${detail}. device.ledger-config.live is analyzed in its own case. If it shows nothing reportable, ${cloakerUrl} is treated as a cloaker that turned every route away.`);
+		expect(parent?.info).toBe(`${detail}; that site is analyzed in its own case. If it shows nothing reportable, ${cloakerUrl} is treated as a cloaker that turned every route away.`);
 		const website = parent?.data.kind === "website" ? parent.data.website : undefined;
-		expect(website?.cloaking).toEqual({ outcome: "detected", detail });
+		expect(website?.cloaking).toEqual({ outcome: "scripted", detail });
 		const childId = BigInt(website?.redirectSubmissionId ?? "0");
 		expect((await waitForStatus(childId, ["reported", "failed", "invalid"])).status).toBe("reported");
 		expect((await SubmissionsEntity.get(id))?.status).toBe("redirected");
@@ -364,8 +364,8 @@ describe("cloaked websites", () => {
 		// visit with `location.replace` to a random news front page.
 		const submitted = "https://docusign.alt3-doc3ea7-v2.sbs/word/verify.workspace.php";
 		const residentialDecoy = "https://www.bbc.com/";
-		const detail = `${submitted} sent the Tor exit to reuters.com but the residential exit to bbc.com`;
-		const archive = { ...archiveOf([hop(0, submitted, 200, residentialDecoy), hop(1, residentialDecoy, 200)]), cloaking: { outcome: "detected" as const, detail } };
+		const detail = `${submitted} sent the residential exit to bbc.com by script`;
+		const archive = { ...archiveOf([hop(0, submitted, 200, residentialDecoy), hop(1, residentialDecoy, 200)]), cloaking: { outcome: "scripted" as const, detail } };
 		const id = await websiteSubmission(376813288618463354n, submitted);
 
 		await analyzeWebsite({ submissionId: id, url: submitted }, { ...dependencies(archive), analysisClient: benignModel() });
@@ -383,7 +383,7 @@ describe("cloaked websites", () => {
 	});
 
 	test("a decoy-only capture is kept as evidence but never classified or reported as not phishing", async () => {
-		const detail = `${cloakerUrl} sent the Tor exit to wikipedia.org by script, and the residential exit could not check what other visitors see (offline)`;
+		const detail = `${cloakerUrl} sent the Tor exit to wikipedia.org by script; Failed to load page: net::ERR_INTERNET_DISCONNECTED via residential exit`;
 		const archive = { ...archiveOf([hop(0, cloakerUrl, 200, decoyUrl), hop(1, decoyUrl, 200)]), cloaking: { outcome: "unresolved" as const, detail } };
 		let modelCalls = 0;
 		const deps = { ...dependencies(archive), analysisClient: { responses: { create: async () => { modelCalls++; throw new Error("must not classify a decoy"); } } } as unknown as AnalysisClient };
@@ -404,13 +404,13 @@ describe("cloaked websites", () => {
 	});
 });
 
-describe("scripted jumps every route followed to the same site", () => {
+describe("scripted jumps of the residential exit to another site", () => {
 	const cloakerUrl = "https://apple-condition.com/en/verification";
 	const decoyUrl = "https://www.wikipedia.org/";
 	const kitUrl = "https://login-netflix.example.com/signin";
 	const uniform = (destination: string, submitted = cloakerUrl) => ({
-		outcome: "uniform" as const,
-		detail: `${submitted} sent both the Tor exit and the residential exit to ${new URL(destination).hostname.replace(/^www\./, "")} by script`,
+		outcome: "scripted" as const,
+		detail: `${submitted} sent the residential exit to ${new URL(destination).hostname.replace(/^www\./, "")} by script`,
 	});
 	const uniformArchive = (destination: string, submitted = cloakerUrl) => ({ ...archiveOf([hop(0, submitted, 200, destination), hop(1, destination, 200)]), cloaking: uniform(destination, submitted) });
 
@@ -509,7 +509,7 @@ describe("scripted jumps every route followed to the same site", () => {
 
 		expect((await SubmissionsEntity.get(decoyId))?.status).toBe("invalid");
 		expect((await SubmissionsEntity.get(first))?.status).toBe("failed");
-		expect((await SubmissionsEntity.get(sibling))?.info).toStartWith(`Cloaking suspected: ${siblingUrl} sent both`);
+		expect((await SubmissionsEntity.get(sibling))?.info).toStartWith(`Cloaking suspected: ${siblingUrl} sent the residential exit`);
 		expect((await SubmissionsEntity.get(plain))?.status).toBe("redirected");
 	});
 
@@ -629,13 +629,13 @@ describe("browser-service failures", () => {
 			browserBackoffMs: [1, 1, 1],
 			archiveWebsite: async () => {
 				attempts++;
-				throw new Error('Failed to load page: HTTP 403 ("Attention Required! | Cloudflare") via Tor exit; HTTP 403 via server IP');
+				throw new Error('Failed to load page: HTTP 403 ("Attention Required! | Cloudflare") via residential exit; HTTP 403 via Tor exit; HTTP 403 via server IP');
 			},
 		});
 		const submission = (await SubmissionsEntity.get(id))!;
 		expect(attempts).toBe(1);
 		expect(submission.status).toBe("failed");
-		expect(submission.info).toBe('Failed to load page: HTTP 403 ("Attention Required! | Cloudflare") via Tor exit; HTTP 403 via server IP');
+		expect(submission.info).toBe('Failed to load page: HTTP 403 ("Attention Required! | Cloudflare") via residential exit; HTTP 403 via Tor exit; HTTP 403 via server IP');
 		expect(submission.data.kind === "website" ? submission.data.website.autoRetry : "not website").toBeUndefined();
 	});
 });

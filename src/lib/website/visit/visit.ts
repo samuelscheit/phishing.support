@@ -2,7 +2,7 @@ import { FABRIC_EGRESS_LABEL, type FabricEgress } from "../../browser/fabric";
 import type { ArchiveWebsiteOptions } from "../archive/types";
 import { errorText } from "../../util/error_text";
 import type { WebsiteCloakedDestination, WebsiteRevisit, VisitDataSent, WebsiteKitResource, WebsiteNavigationHop, WebsiteSiteAssessment, WebsiteSiteClassification, WebsiteVisitRecord } from "../types";
-import { cloakedDestination, WEBSITE_FLOW_EGRESS } from "../archive/cloaking";
+import { cloakedDestination, WEBSITE_CAPTURE_EGRESS } from "../archive/cloaking";
 import { VISIT_BUDGET_MS } from "../../site_visit/visit_task";
 import { ArtifactsEntity } from "../../db/entities/artifacts";
 import type { getInfo } from "../info/info";
@@ -197,11 +197,12 @@ export async function visitWebsite(params: {
 			// the whole flow is walked again through the others, the gate passed again in each.
 			const cloak = isReportable(classified.classification) ? undefined : cloakedDestination(visitNavigation(pages), url);
 			if (cloak) {
-				const answered = [...(params.cloaked?.answered ?? []), walked.egress ?? params.egress ?? WEBSITE_FLOW_EGRESS[0]!];
+				const answered = [...(params.cloaked?.answered ?? []), walked.egress ?? params.egress ?? WEBSITE_CAPTURE_EGRESS[0]!];
 				const notTried = [...(params.cloaked?.notTried ?? [])];
 				const startedAt = params.cloaked?.startedAt ?? flowStartedAt;
 				const reopened = { ...capturedHop, url: first.url };
-				for (const egress of WEBSITE_FLOW_EGRESS.filter((candidate) => !answered.includes(candidate) && !notTried.some(({ network }) => network === FABRIC_EGRESS_LABEL[candidate]))) {
+				// Every network the capture would try, in its order.
+				for (const egress of WEBSITE_CAPTURE_EGRESS.filter((candidate) => !answered.includes(candidate) && !notTried.some(({ network }) => network === FABRIC_EGRESS_LABEL[candidate]))) {
 					const network = FABRIC_EGRESS_LABEL[egress];
 					if (Date.now() - startedAt >= (dependencies.cloakedFlowBudgetMs ?? VISIT_BUDGET_MS)) {
 						notTried.push({ network, reason: "the time budget for walking the flow again was used up" });

@@ -53,10 +53,10 @@ export function NotReportedPanel({ info }: { info: string | null | undefined }) 
 	);
 }
 
-export function RedirectedPanel({ info, cloaks, redirectSubmissionId }: { info: string | null | undefined; cloaks: boolean; redirectSubmissionId: string | undefined }) {
+export function RedirectedPanel({ info, redirectSubmissionId }: { info: string | null | undefined; redirectSubmissionId: string | undefined }) {
 	return (
 		<div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
-			<div className="text-xs font-semibold text-amber-700 dark:text-amber-400">{cloaks ? "Cloaks: shows scanners a different site" : "Redirects to another site"}</div>
+			<div className="text-xs font-semibold text-amber-700 dark:text-amber-400">Redirects to another site</div>
 			<div className="mt-1 text-sm whitespace-pre-wrap">{info}</div>
 			{redirectSubmissionId ? (
 				<Link href={`/submissions/${redirectSubmissionId}`} className="mt-2 inline-block text-sm font-medium text-primary hover:underline">

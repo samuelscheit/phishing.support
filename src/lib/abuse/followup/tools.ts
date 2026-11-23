@@ -56,7 +56,7 @@ export const DECISION_TOOL_DEFINITIONS = [
 	{
 		type: "function",
 		name: "recheck_page",
-		description: "Open a URL in a real browser now, the way the case captured it (Tor first, then our server's address, then a residential connection when the site cloaks), presenting the reporter's browser. Returns where it ended, over which route, how the routes were answered, the text a visitor sees on load, the full document text after scripts ran (closed dialogs and hidden elements a button reveals included), any paste-and-run commands in the document decoded layer by layer, identifiers of accounts at the provider found in it, and the name of a stamped screenshot you may attach.",
+		description: "Open a URL in a real browser now, the way the case captured it (a residential connection first, then Tor, then our server's address), presenting the reporter's browser. Returns where it ended, over which route, how the routes were answered, the text a visitor sees on load, the full document text after scripts ran (closed dialogs and hidden elements a button reveals included), any paste-and-run commands in the document decoded layer by layer, identifiers of accounts at the provider found in it, and the name of a stamped screenshot you may attach.",
 		parameters: {
 			type: "object",
 			properties: {
