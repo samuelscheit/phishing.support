@@ -27,7 +27,8 @@ function base64Text(value: string): string | undefined {
 	return undefined;
 }
 
-function percentDecoded(value: string): string | undefined {
+/** The value percent-decoded once, or undefined when it is not valid percent-encoding. */
+export function percentDecoded(value: string): string | undefined {
 	try {
 		return decodeURIComponent(value);
 	} catch {

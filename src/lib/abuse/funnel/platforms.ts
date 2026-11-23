@@ -7,7 +7,7 @@
  * its parameter name only, never interpreted.
  */
 
-export type FunnelPlatform = "cake" | "everflow" | "tune" | "voluum" | "binom" | "keitaro" | "redtrack" | "affiliate_link";
+export type FunnelPlatform = "cake" | "everflow" | "tune" | "voluum" | "binom" | "keitaro" | "redtrack";
 
 /**
  * Who runs a tracking hop: an affiliate network's (or an advertiser's own
@@ -40,8 +40,22 @@ export const PLATFORM_NAMES: Readonly<Record<FunnelPlatform, string>> = {
 	binom: "Binom",
 	keitaro: "Keitaro",
 	redtrack: "RedTrack",
-	affiliate_link: "an affiliate tracking link",
 };
+
+/** The platform's name, for a stored platform key; undefined for anything else. */
+export function platformName(platform: string | undefined): string | undefined {
+	return platform && Object.hasOwn(PLATFORM_NAMES, platform) ? PLATFORM_NAMES[platform as FunnelPlatform] : undefined;
+}
+
+/**
+ * How a report names the platform of a tracking link: as a fact only when
+ * the link's format leaves no doubt; otherwise as the format it has.
+ */
+export function platformLabel(platform: string | undefined, confidence: Confidence | undefined): string | undefined {
+	const name = platformName(platform);
+	if (!name) return undefined;
+	return confidence === "high" ? name : `a link in ${name}'s format`;
+}
 
 const CONFIDENCE_ORDER: Readonly<Record<Confidence, number>> = { high: 0, medium: 1, low: 2 };
 
@@ -100,7 +114,7 @@ const GENERIC_PARAMETERS: ReadonlyArray<readonly [RegExp, IdentifierKind, Confid
 ];
 
 /** The identifiers of the commonly used parameter names, with how surely each names what it says. */
-export function genericIdentifiers(url: URL, skip: ReadonlySet<string> = new Set()): Array<FunnelIdentifier & { confidence: Confidence }> {
+function genericIdentifiers(url: URL, skip: ReadonlySet<string> = new Set()): Array<FunnelIdentifier & { confidence: Confidence }> {
 	const found: Array<FunnelIdentifier & { confidence: Confidence }> = [];
 	for (const [parameter, raw] of queryOf(url)) {
 		if (skip.has(parameter)) continue;
@@ -169,7 +183,9 @@ const EVERFLOW_PARAMETERS = ["sub1", "sub2", "sub3", "sub4", "sub5", "source_id"
  * offer ID 1"; the network decodes them with its API. Smart links are
  * `/cmp/<id>/<id>/`, whose segment order no documentation states. When a
  * network sends a click on to another offer it appends `__po`, `__ptid` and
- * related parameters (observed; undocumented), reported verbatim.
+ * related parameters (observed; undocumented), reported verbatim. Two
+ * upper-case path segments alone (a link shortener's code looks the same)
+ * are only a low-confidence guess, never enough to name a network.
  */
 function everflow(url: URL, query: Query): TrackerMatch | undefined {
 	const segments = url.pathname.split("/").filter(Boolean);
@@ -184,7 +200,7 @@ function everflow(url: URL, query: Query): TrackerMatch | undefined {
 		url,
 		platform: "everflow",
 		role: "network",
-		confidence: markers.length ? "high" : "medium",
+		confidence: markers.length ? "high" : "low",
 		signals: [
 			smartLink ? `Everflow smart link path /cmp/${segments[1]}/${segments[2]}/` : `Everflow tracking link path /${segments[0]}/${segments[1]}/ (affiliate/offer)`,
 			...(markers.length ? [`Everflow parameters ${markers.join(", ")}`] : []),

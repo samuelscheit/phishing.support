@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { AbuseMailAttachment } from "../mail/types";
+import { REPORTED_DECEPTION_KINDS } from "./deception";
 
 /**
  * The facts of one funnel report: what the recipient gets as its
@@ -12,6 +13,7 @@ export const FUNNEL_EVIDENCE_NAME = "funnel-evidence.json";
 
 const identifier = z.object({ kind: z.string(), parameter: z.string(), value: z.string() });
 const quote = z.object({ hopIndex: z.number().int(), url: z.string(), capturedAt: z.string(), quote: z.string() });
+const confidence = z.enum(["high", "medium", "low"]);
 
 const funnelFactsSchema = z.object({
 	kind: z.literal("deceptive_funnel"),
@@ -20,15 +22,20 @@ const funnelFactsSchema = z.object({
 		role: z.enum(["merchant", "network"]),
 		site: z.string(),
 		platform: z.string().optional(),
+		platformConfidence: confidence.optional(),
+		/** The ID this business knows the affiliate by; absent for a merchant that only learns it from `creditedBy`. */
 		affiliateId: z.string().optional(),
+		creditedBy: z.object({ site: z.string(), platform: z.string().optional(), platformConfidence: confidence.optional(), id: z.string() }).optional(),
 	}),
+	/** The affiliate networks of the chain that name the affiliate, each a party of its own report. */
+	networks: z.array(z.object({ site: z.string(), platform: z.string().optional(), platformConfidence: confidence.optional(), affiliateId: z.string() })),
 	recordedAt: z.string(),
 	deception: z.object({
-		kind: z.string(),
+		kind: z.enum(REPORTED_DECEPTION_KINDS),
 		claim: z.string(),
 		reality: z.string(),
 		lureQuotes: z.array(quote).min(1),
-		offerQuote: quote.optional(),
+		offerQuote: quote,
 	}),
 	merchant: z.object({ site: z.string(), url: z.string(), identifiers: z.array(identifier) }).optional(),
 	affiliates: z.array(z.object({
@@ -36,7 +43,7 @@ const funnelFactsSchema = z.object({
 		site: z.string(),
 		platform: z.string().optional(),
 		parameter: z.string(),
-		confidence: z.enum(["high", "medium", "low"]),
+		confidence,
 		matchedAt: z.array(z.string()),
 	})),
 	trackers: z.array(z.object({
@@ -46,7 +53,7 @@ const funnelFactsSchema = z.object({
 		url: z.string(),
 		platform: z.string(),
 		role: z.enum(["network", "affiliate_tracker"]),
-		confidence: z.enum(["high", "medium", "low"]),
+		confidence,
 		signals: z.array(z.string()),
 		identifiers: z.array(identifier),
 		carriedBy: z.object({ parameter: z.string(), encoding: z.string() }).optional(),

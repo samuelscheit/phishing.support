@@ -1,16 +1,14 @@
 import { serviceIdentity } from "../../network/service_identity";
 import { abuseCaseTag } from "../mail/correlation";
+import type { AbuseEmailDraft } from "../mail/draft";
 import type { AbuseMailAttachment } from "../mail/types";
 import { routeContact } from "../resolver/contact_chain";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
 import { parsedUrl } from "./chain";
-import { DECEPTION_KINDS, DECEPTION_PHRASES, type DeceptionKind } from "./deception";
+import { DECEPTION_PHRASES } from "./deception";
 import { FUNNEL_EVIDENCE_NAME, readFunnelFacts, type FunnelFacts } from "./facts";
-import { PLATFORM_NAMES, type FunnelPlatform } from "./platforms";
+import { platformLabel, platformName } from "./platforms";
 import { parseFunnelPartyTarget } from "./target";
-
-/** Same shape as mail/draft.ts's AbuseEmailDraft. */
-type FunnelEmailDraft = { subject: string; body: string; recipientLabel: string };
 
 export type FunnelDraftInput = {
 	report: Pick<AbuseReport, "id" | "submissionId">;
@@ -24,10 +22,6 @@ export type FunnelDraftInput = {
 const MAX_CHAIN_LINES = 40;
 const MAX_BODY_LENGTH = 20_000;
 
-function platformName(platform: string | undefined): string | undefined {
-	return platform && Object.hasOwn(PLATFORM_NAMES, platform) ? PLATFORM_NAMES[platform as FunnelPlatform] : undefined;
-}
-
 function identifierText({ kind, parameter, value }: { kind: string; parameter: string; value: string }): string {
 	return parameter === "path" ? `${kind} ${value} (in the link path)` : `${parameter}=${value}`;
 }
@@ -39,22 +33,34 @@ function urlText(value: string, allowed: ReadonlySet<string>): string {
 	return host ? `${host} (full URL in ${FUNNEL_EVIDENCE_NAME})` : `(URL in ${FUNNEL_EVIDENCE_NAME})`;
 }
 
+/** The affiliate as the recipient can look it up. */
+function affiliatePhrase(party: FunnelFacts["party"]): string {
+	if (party.affiliateId) return `affiliate ${party.affiliateId}`;
+	const credited = party.creditedBy!;
+	const platform = platformName(credited.platform);
+	return `the affiliate that ${credited.site}${platform && credited.platformConfidence === "high" ? ` (${platform})` : ""} credits as ${credited.id}`;
+}
+
 function contactSentence(route: FunnelDraftInput["route"], facts: FunnelFacts, vendorName: string | undefined): string {
 	const contact = routeContact(route.resolverProvenance);
 	const foundAt = typeof contact.foundAt === "string" ? parsedUrl(contact.foundAt)?.hostname : undefined;
-	const platform = platformName(facts.party.platform) ?? "tracking";
+	const site = facts.party.site;
 	switch (contact.source) {
-		case "platform_vendor":
-			return `The operator of ${facts.party.site} publishes no contact, so we are writing to ${vendorName ?? "you"} as the provider of its ${platform} platform: please act on this under your terms of service, or forward this report to your customer who runs ${facts.party.site}.`;
-		case "security_txt":
-			return `We are writing to the contact the security.txt of ${foundAt ?? facts.party.site} names.`;
-		case "website":
-			return `We are writing to the contact ${foundAt ?? facts.party.site} publishes.`;
-		case "holder_rdap":
-		case "holder_whois":
-			return `We are writing to the contact in the domain registration of ${facts.party.site}.`;
+		case "funnel_platform_vendor": {
+			const why = contact.reason === "fallback_after_permanent_bounce"
+				? `The mailboxes ${site} publishes did not accept our report`
+				: `We found no contact that the operator of ${site} publishes`;
+			return `${why}, so we are writing to ${vendorName ?? "you"} as the provider of its ${platformName(facts.party.platform) ?? "tracking"} platform: please act on this under your terms of service, or forward this report to your customer who runs ${site}.`;
+		}
+		case "funnel_security_txt":
+			return `We are writing to the contact the security.txt of ${foundAt ?? site} names.`;
+		case "funnel_website":
+			return `We are writing to the contact ${foundAt ?? site} publishes.`;
+		case "funnel_holder_rdap":
+		case "funnel_holder_whois":
+			return `We are writing to the contact in the domain registration of ${site}.`;
 		default:
-			return `We are writing to the contact we found for ${facts.party.site}.`;
+			return `We are writing to the contact we found for ${site}.`;
 	}
 }
 
@@ -64,21 +70,21 @@ function affiliateLines(facts: FunnelFacts): string[] {
 	return [...own, ...facts.affiliates.filter((affiliate) => !own.includes(affiliate))].map((affiliate) => {
 		const platform = platformName(affiliate.platform);
 		const matched = affiliate.matchedAt.length ? `; the same ID is the affiliate on ${affiliate.matchedAt.join(", ")}` : "";
-		const likely = affiliate.confidence === "high" ? "" : ` (${affiliate.confidence === "medium" ? "likely" : "possibly"} the affiliate ID)`;
-		return `- ${affiliate.id}: ${identifierText({ kind: "affiliate", parameter: affiliate.parameter, value: affiliate.id })} on ${affiliate.site}${platform ? ` (${platform})` : ""}${likely}${matched}`;
+		const likely = affiliate.confidence === "high" ? "" : " (likely the affiliate ID)";
+		return `- ${affiliate.id}: ${identifierText({ kind: "affiliate", parameter: affiliate.parameter, value: affiliate.id })} on ${affiliate.site}${platform ? ` (${platform} link format)` : ""}${likely}${matched}`;
 	});
 }
 
-/** One line per tracking host, with every value its links carried. */
+/** One line per tracking host, with every value its links carried; the platform named as a fact only when certain. */
 function trackerLines(facts: FunnelFacts): string[] {
 	const hosts = [...new Set(facts.trackers.map((tracker) => tracker.hostname))];
 	return hosts.map((hostname) => {
 		const trackers = facts.trackers.filter((tracker) => tracker.hostname === hostname);
-		const first = trackers[0]!;
+		const strongest = trackers.find((tracker) => tracker.confidence === "high") ?? trackers[0]!;
 		const values = [...new Set(trackers.flatMap((tracker) => tracker.identifiers.map(identifierText)))].join(", ");
-		const runner = first.role === "network" ? "affiliate network or program" : "the affiliate's own tracker";
-		const carried = trackers.every((tracker) => tracker.carriedBy) ? `, a link carried in the ${first.carriedBy!.parameter} of hop ${first.hopIndex + 1}` : "";
-		return `- ${hostname}: ${platformName(first.platform)} (${runner}${carried})${values ? `: ${values}` : ""}`;
+		const runner = strongest.role === "network" ? "affiliate network or program" : "the affiliate's own tracker";
+		const carried = trackers.every((tracker) => tracker.carriedBy) ? `, a link carried in the ${strongest.carriedBy!.parameter} of hop ${strongest.hopIndex + 1}` : "";
+		return `- ${hostname}: ${platformLabel(strongest.platform, strongest.confidence)} (${runner}${carried})${values ? `: ${values}` : ""}`;
 	});
 }
 
@@ -90,23 +96,26 @@ const KIND_LABEL: Readonly<Record<FunnelFacts["chain"][number]["kind"], string>>
 	redirect: "redirect",
 };
 
-function chainLines(facts: FunnelFacts, allowed: ReadonlySet<string>): string[] {
+function chainLines(facts: FunnelFacts, allowed: ReadonlySet<string>, limit: number): string[] {
 	const trackers = new Map(facts.trackers.filter((tracker) => !tracker.carriedBy).map((tracker) => [tracker.hopIndex, tracker]));
-	const lines = facts.chain.slice(0, MAX_CHAIN_LINES).map((hop) => {
+	const lines = facts.chain.slice(0, limit).map((hop) => {
 		const tracker = trackers.get(hop.index);
-		const label = tracker ? `${platformName(tracker.platform)} ${KIND_LABEL.tracker}` : KIND_LABEL[hop.kind];
+		const label = tracker
+			? tracker.confidence === "high" ? `${platformName(tracker.platform)} tracking link` : `tracking link in ${platformName(tracker.platform)}'s format`
+			: KIND_LABEL[hop.kind];
 		return `${hop.index + 1}. ${hop.at ?? "time not recorded"}  HTTP ${hop.status ?? "-"}  ${urlText(hop.url, allowed)}  [${label}]`;
 	});
-	const more = facts.chain.length - MAX_CHAIN_LINES;
+	const more = facts.chain.length - limit;
 	return more > 0 ? [...lines, `(${more} more hops in ${FUNNEL_EVIDENCE_NAME})`] : lines;
 }
 
 function requestLines(facts: FunnelFacts, affiliate: string, merchantSite: string | undefined): string[] {
 	if (facts.party.role === "merchant") {
+		const networks = facts.networks.map((network) => network.site);
 		return [
 			`- terminate ${affiliate} in your affiliate program, and refuse its traffic through any network or sub-affiliate;`,
-			"- withhold or claw back the commissions paid for this traffic, and refund the customers it brought in;",
-			"- tell the network that delivered the traffic (named above) that you terminated the affiliate;",
+			"- withhold or claw back the commissions paid for this traffic, and review the sales it brought in;",
+			...(networks.length ? [`- tell the network that delivered the traffic (${networks.join(", ")}) that you terminated the affiliate;`] : []),
 		];
 	}
 	return [
@@ -117,16 +126,29 @@ function requestLines(facts: FunnelFacts, affiliate: string, merchantSite: strin
 }
 
 /**
+ * The longest body that fits the limit: the chain is shortened first (the
+ * evidence file holds it whole), so the request and sign-off always remain;
+ * only a body that cannot fit even then is cut, at a line break.
+ */
+function bounded(compose: (chainLimit: number) => string, hops: number): string {
+	for (let limit = Math.min(hops, MAX_CHAIN_LINES); limit >= 0; limit--) {
+		const body = compose(limit);
+		if (body.length <= MAX_BODY_LENGTH) return body;
+	}
+	const cut = compose(0).slice(0, MAX_BODY_LENGTH);
+	return cut.slice(0, cut.lastIndexOf("\n")).trimEnd();
+}
+
+/**
  * The mail of a deceptive-funnel report, to the merchant or a network's
  * operator (or its platform vendor): the affiliate to terminate, the
  * tracking links and their identifiers, what the lure claimed against what
- * it was, with verbatim page text, and the whole chain with timestamps.
- * Undefined for any other report; a funnel report whose facts are missing
- * throws rather than mail something else.
+ * it was (our assessment, backed by verbatim page text), and the whole chain
+ * with timestamps. Undefined for any other report; a funnel report whose
+ * facts are missing throws rather than mail something else.
  */
-export function createFunnelEmailDraft(input: FunnelDraftInput): FunnelEmailDraft | undefined {
-	const party = parseFunnelPartyTarget(input.target.normalizedTarget);
-	if (!party) return undefined;
+export function createFunnelEmailDraft(input: FunnelDraftInput): AbuseEmailDraft | undefined {
+	if (!parseFunnelPartyTarget(input.target.normalizedTarget)) return undefined;
 	const facts = readFunnelFacts(input.evidence ?? []);
 	if (!facts) throw new Error(`The funnel report for ${input.target.normalizedTarget} carries no readable ${FUNNEL_EVIDENCE_NAME}; it is not mailed without its facts.`);
 	const allowed = new Set(input.target.observedUrls);
@@ -134,23 +156,21 @@ export function createFunnelEmailDraft(input: FunnelDraftInput): FunnelEmailDraf
 		? (input.route.resolutionSnapshot.platformVendor as { name?: unknown }).name
 		: undefined;
 	const vendorName = typeof vendor === "string" ? vendor : undefined;
-	const viaVendor = routeContact(input.route.resolverProvenance).source === "platform_vendor";
 	const label = input.route.providerDisplayName;
-	const affiliate = facts.party.affiliateId ? `affiliate ${facts.party.affiliateId}` : "the affiliate behind this traffic";
+	const affiliate = affiliatePhrase(facts.party);
 	const merchantSite = facts.merchant?.site;
-	const platform = platformName(facts.party.platform);
-	const deception = DECEPTION_KINDS.includes(facts.deception.kind as DeceptionKind) ? DECEPTION_PHRASES[facts.deception.kind as DeceptionKind] : DECEPTION_PHRASES.other_misrepresentation;
+	const platform = platformLabel(facts.party.platform, facts.party.platformConfidence);
+	const deception = DECEPTION_PHRASES[facts.deception.kind];
 	const recordedOn = facts.recordedAt.slice(0, 10);
 	const opening = facts.party.role === "merchant"
-		? `The phishing.support team, which analyses links people report as scams, is reporting ${affiliate}, which sends visitors to your offer on ${facts.party.site} through a deceptive funnel. On ${recordedOn} a link reported to us showed ${deception}, and its button led through affiliate tracking links to your offer.`
-		: `The phishing.support team, which analyses links people report as scams, is reporting ${affiliate} on ${facts.party.site}${platform ? `, a ${platform} tracking domain` : ""}, which sends visitors${merchantSite ? ` to ${merchantSite}` : ""} through a deceptive funnel. On ${recordedOn} a link reported to us showed ${deception}, and its button led through this tracking domain${merchantSite ? ` to the paid offer on ${merchantSite}` : ""}.`;
-	const lureQuotes = facts.deception.lureQuotes.map((quote) => `- ${JSON.stringify(quote.quote)} (${urlText(quote.url, allowed)}, captured ${quote.capturedAt})`);
-	const offerQuote = facts.deception.offerQuote;
+		? `The phishing.support team, which analyses links people report as scams, is reporting ${affiliate}, which sends visitors to your offer on ${facts.party.site} through a deceptive funnel. On ${recordedOn} a link reported to us showed what we assess as ${deception}; from there the visit continued through affiliate tracking links to your offer.`
+		: `The phishing.support team, which analyses links people report as scams, is reporting ${affiliate} on ${facts.party.site}${platform ? ` (${platform})` : ""}, which sends visitors${merchantSite ? ` to ${merchantSite}` : ""} through a deceptive funnel. On ${recordedOn} a link reported to us showed what we assess as ${deception}; from there the visit continued through this tracking domain${merchantSite ? ` to the paid offer on ${merchantSite}` : ""}.`;
+	const { lureQuotes, offerQuote } = facts.deception;
 	const carried = facts.carriedValues.map(({ value, seenAt }) => `- ${value}: ${seenAt.map(({ site, parameter }) => `${parameter} on ${site}`).join(", ")}`);
 	const attachmentNames = [...new Set(input.attachmentNames ?? [])];
 	const caseUrl = input.report.submissionId ? `${serviceIdentity.url}/submissions/${input.report.submissionId.toString()}` : undefined;
-	const body = [
-		viaVendor ? `Hello ${label} team,` : `Hello ${label} affiliate compliance team,`,
+	const compose = (chainLimit: number) => [
+		`Hello ${label} team,`,
 		"",
 		`${opening} ${contactSentence(input.route, facts, vendorName)}`,
 		"",
@@ -162,14 +182,14 @@ export function createFunnelEmailDraft(input: FunnelDraftInput): FunnelEmailDraf
 		...(facts.merchant?.identifiers.length ? [`- ${facts.merchant.site} landing page: ${facts.merchant.identifiers.map(identifierText).join(", ")}`] : []),
 		"",
 		"What the visitor was told, and what it was:",
-		`- The lure claimed: ${facts.deception.claim}`,
-		`- In reality: ${facts.deception.reality}`,
+		`- Our assessment of the lure: ${facts.deception.claim}`,
+		`- Our assessment of the offer: ${facts.deception.reality}`,
 		"- The lure page shows, verbatim in its original language:",
-		...lureQuotes.map((line) => `  ${line}`),
-		...(offerQuote ? [`- The offer page shows: ${JSON.stringify(offerQuote.quote)} (${urlText(offerQuote.url, allowed)}, captured ${offerQuote.capturedAt})`] : []),
+		...lureQuotes.map((quote) => `  - ${JSON.stringify(quote.quote)} (${urlText(quote.url, allowed)}, captured ${quote.capturedAt})`),
+		`- The offer page shows: ${JSON.stringify(offerQuote.quote)} (${urlText(offerQuote.url, allowed)}, captured ${offerQuote.capturedAt})`,
 		"",
-		`Redirect chain as our browser followed it (times in UTC):`,
-		...chainLines(facts, allowed),
+		"Redirect chain as our browser followed it (times in UTC):",
+		...chainLines(facts, allowed, chainLimit),
 		...(carried.length ? ["", "Values the chain carried from one business to the next:", ...carried] : []),
 		"",
 		"We ask you to:",
@@ -184,13 +204,13 @@ export function createFunnelEmailDraft(input: FunnelDraftInput): FunnelEmailDraf
 		"Regards,",
 		"The phishing.support team",
 	].join("\n");
-	const subjectAffiliate = facts.party.affiliateId ? `Affiliate ${facts.party.affiliateId}` : "An affiliate";
+	const subjectAffiliate = facts.party.affiliateId ? `Affiliate ${facts.party.affiliateId}` : `Affiliate credited as ${facts.party.creditedBy!.id} by ${facts.party.creditedBy!.site}`;
 	const subject = facts.party.role === "merchant"
 		? `${subjectAffiliate} sends deceptive traffic to ${facts.party.site}`
-		: `${subjectAffiliate} on ${facts.party.site}${platform ? ` (${platform})` : ""} sends deceptive traffic${merchantSite ? ` to ${merchantSite}` : ""}`;
+		: `${subjectAffiliate} on ${facts.party.site}${facts.party.platformConfidence === "high" && platformName(facts.party.platform) ? ` (${platformName(facts.party.platform)})` : ""} sends deceptive traffic${merchantSite ? ` to ${merchantSite}` : ""}`;
 	return {
 		subject: `[${serviceIdentity.name}] [${abuseCaseTag(input.report.id)}] ${subject}`,
-		body: body.slice(0, MAX_BODY_LENGTH).trim(),
+		body: bounded(compose, facts.chain.length),
 		recipientLabel: label,
 	};
 }

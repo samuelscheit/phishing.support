@@ -5,15 +5,16 @@ import type { FunnelPlatform } from "./platforms";
  * domain that publishes no contact is reported to the vendor, which knows
  * the customer behind the domain and can act under its own terms. Only
  * addresses the vendor itself publishes are listed, with where; a vendor
- * without one is searched like any site. Self-hosted trackers (Binom,
+ * without one is no fallback (TUNE publishes only sales@tune.com,
+ * tune.com/contact-us, checked 2026-11-23). Self-hosted trackers (Binom,
  * Keitaro) and the affiliate's own trackers have no vendor to ask.
  */
 export type PlatformVendor = {
 	name: string;
 	domain: string;
-	email?: string;
+	email: string;
 	/** Where the vendor publishes `email`. */
-	source?: string;
+	source: string;
 };
 
 export const FUNNEL_PLATFORM_VENDORS: Readonly<Partial<Record<FunnelPlatform, PlatformVendor>>> = {
@@ -29,6 +30,4 @@ export const FUNNEL_PLATFORM_VENDORS: Readonly<Partial<Record<FunnelPlatform, Pl
 		email: "info@getcake.com",
 		source: "the contact page getcake.com/contact (checked 2026-11-23)",
 	},
-	// TUNE publishes only sales@tune.com (tune.com/contact-us, checked 2026-11-23).
-	tune: { name: "TUNE", domain: "tune.com" },
 };

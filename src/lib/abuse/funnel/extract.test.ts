@@ -84,7 +84,7 @@ describe("recogniseTracker", () => {
 			{ kind: "other", parameter: "__ptid", value: "83df736cd5f44c7c9c591bcf5bd74bce" },
 			{ kind: "other", parameter: "__po", value: "864" },
 		]));
-		expect(recognise("https://www.tracking-domain.test/28KL6/2CTPL/")).toMatchObject({ platform: "everflow", confidence: "medium" });
+		expect(recognise("https://www.tracking-domain.test/28KL6/2CTPL/")).toMatchObject({ platform: "everflow", confidence: "low" });
 	});
 
 	test("Everflow: a smart link names its path without guessing which ID is which", () => {
@@ -150,16 +150,18 @@ describe("recogniseTracker", () => {
 });
 
 describe("extractFunnel", () => {
+	const parties = (urls: string[], shown: Record<number, string>) => extractFunnel(chainOf(urls, shown)).parties;
+
 	test("the production chain: Everflow → Voluum → lure → Voluum → wrapper → CAKE → Zatos checkout", () => {
 		const extraction = extractFunnel(productionChain());
 		expect(extraction.hopKinds.map(({ kind }) => kind)).toEqual(["tracker", "tracker", "tracker", "lure", "tracker", "redirector", "tracker", "tracker", "merchant"]);
-		expect(extraction.trackingHops.map(({ hopIndex, platform, role }) => [hopIndex, platform, role])).toEqual([
-			[0, "everflow", "network"],
-			[1, "everflow", "network"],
-			[2, "voluum", "affiliate_tracker"],
-			[4, "voluum", "affiliate_tracker"],
-			[6, "cake", "network"],
-			[7, "cake", "network"],
+		expect(extraction.trackingHops.map(({ hopIndex, platform, role, confidence }) => [hopIndex, platform, role, confidence])).toEqual([
+			[0, "everflow", "network", "high"],
+			[1, "everflow", "network", "high"],
+			[2, "voluum", "affiliate_tracker", "medium"],
+			[4, "voluum", "affiliate_tracker", "high"],
+			[6, "cake", "network", "medium"],
+			[7, "cake", "network", "high"],
 		]);
 		expect(extraction.redirectors).toEqual([{ hopIndex: 5, url: PRODUCTION_URLS.wrapper, site: "sdsecurenetwork.com", parameter: "target", encoding: "base64", target: PRODUCTION_URLS.cakeLink }]);
 		expect(extraction.merchant).toMatchObject({ hopIndex: 8, site: "zatos.com", hostname: "www.zatos.com", url: PRODUCTION_URLS.checkout });
@@ -171,12 +173,12 @@ describe("extractFunnel", () => {
 		]);
 		expect(extraction.parties).toEqual([
 			{ role: "merchant", site: "zatos.com", hostnames: ["www.zatos.com"], affiliateIds: ["15065"], hopIndices: [8] },
-			{ role: "network", site: "onlinesafetyall.com", hostnames: ["www.onlinesafetyall.com"], platform: "everflow", affiliateIds: ["6RNXHT"], hopIndices: [0, 1] },
-			{ role: "network", site: "miamitrk.com", hostnames: ["miamitrk.com"], platform: "cake", affiliateIds: ["15065"], hopIndices: [6, 7] },
+			{ role: "network", site: "onlinesafetyall.com", hostnames: ["www.onlinesafetyall.com"], platform: "everflow", platformConfidence: "high", affiliateIds: ["6RNXHT"], hopIndices: [0, 1] },
+			{ role: "network", site: "miamitrk.com", hostnames: ["miamitrk.com"], platform: "cake", platformConfidence: "high", affiliateIds: ["15065"], hopIndices: [6, 7] },
 		]);
 		const carried = new Map(extraction.carriedValues.map(({ value, seenAt }) => [value, seenAt.map(({ site, parameter }) => `${site}:${parameter}`)]));
-		expect(carried.get("3079")).toEqual(expect.arrayContaining(["onlinesafetyall.com:sub1", "wtrck.com:s3", "ultimateprizesearch.com:s3", "miamitrk.com:s3"]));
-		expect(carried.get("dke0kbl56rbr55umj7k6ku34")).toEqual(expect.arrayContaining(["miamitrk.com:s2", "zatos.com:sub2"]));
+		expect(carried.get("3079")).toEqual(["onlinesafetyall.com:sub1", "wtrck.com:s3", "ultimateprizesearch.com:s3", "miamitrk.com:s3"]);
+		expect(carried.get("dke0kbl56rbr55umj7k6ku34")).toEqual(["miamitrk.com:s2", "zatos.com:sub2"]);
 		expect(carried.has("128")).toBeFalse();
 	});
 
@@ -185,14 +187,13 @@ describe("extractFunnel", () => {
 		expect(extraction.merchant).toBeUndefined();
 		expect(extraction.trackingHops).toEqual([]);
 		expect(extraction.parties).toEqual([]);
-		expect(extraction.lurePageHops).toEqual([1]);
 		expect(extraction.hopKinds.map(({ kind }) => kind)).toEqual(["redirect", "lure"]);
 	});
 
 	test("a chain that ends on a tracker still names the network, but no merchant", () => {
 		const extraction = extractFunnel(chainOf(["https://lure.example/win", "https://miamitrk.com/?a=15065&c=181082"], { 0: "You won" }));
 		expect(extraction.merchant).toBeUndefined();
-		expect(extraction.parties).toEqual([{ role: "network", site: "miamitrk.com", hostnames: ["miamitrk.com"], platform: "cake", affiliateIds: ["15065"], hopIndices: [1] }]);
+		expect(extraction.parties).toEqual([{ role: "network", site: "miamitrk.com", hostnames: ["miamitrk.com"], platform: "cake", platformConfidence: "medium", affiliateIds: ["15065"], hopIndices: [1] }]);
 	});
 
 	test("a wrapper whose target the visit never reached still yields the tracker it carried", () => {
@@ -201,7 +202,7 @@ describe("extractFunnel", () => {
 		chain.hops[1]!.redirectTo = undefined;
 		const extraction = extractFunnel(chain);
 		expect(extraction.trackingHops).toEqual([expect.objectContaining({ hopIndex: 1, platform: "tune", url: target, carriedBy: { parameter: "url", encoding: "base64" } })]);
-		expect(extraction.parties).toEqual([{ role: "network", site: "n.example", hostnames: ["n.example"], platform: "tune", affiliateIds: ["4242"], hopIndices: [1] }]);
+		expect(extraction.parties).toEqual([{ role: "network", site: "n.example", hostnames: ["n.example"], platform: "tune", platformConfidence: "high", affiliateIds: ["4242"], hopIndices: [1] }]);
 		expect(extraction.redirectors[0]).toMatchObject({ hopIndex: 1, target });
 	});
 
@@ -211,31 +212,52 @@ describe("extractFunnel", () => {
 		expect(extractFunnel(chain).trackingHops).toEqual([expect.objectContaining({ platform: "cake", hopIndex: 1, carriedBy: { parameter: "Location", encoding: "location" } })]);
 	});
 
+	test("links on a page the visitor was shown are no part of the chain: a checkout's return_url names no network", () => {
+		const cart = `https://shop.example/checkout?affid=ABCD&return_url=${encodeURIComponent("https://n.example/aff_c?offer_id=1&aff_id=9999")}`;
+		const extraction = extractFunnel(chainOf(["https://lure.example/a", "https://miamitrk.com/?a=777&c=1&ckmxid=x", cart], { 0: LURE_TEXT, 2: CHECKOUT_TEXT }));
+		expect(extraction.trackingHops.map(({ site }) => site)).toEqual(["miamitrk.com"]);
+		expect(extraction.parties.map(({ site }) => site)).toEqual(["shop.example", "miamitrk.com"]);
+	});
+
 	test("several networks in one chain each become a party with their own affiliate", () => {
-		const extraction = extractFunnel(chainOf([
+		expect(parties([
 			"https://lure.example/survey",
 			"https://ef.example/2ABCD/3EFGH/?sub1=x9",
 			"https://n.example/aff_c?offer_id=11&aff_id=4242",
 			"https://shop.example/buy?aff_id=777",
-		], { 0: "Survey complete! Claim", 3: "Checkout" }));
-		expect(extraction.parties.map(({ role, site, platform, affiliateIds }) => [role, site, platform, affiliateIds])).toEqual([
+		], { 0: "Survey complete! Claim", 3: "Checkout" }).map(({ role, site, platform, affiliateIds }) => [role, site, platform, affiliateIds])).toEqual([
 			["merchant", "shop.example", undefined, ["777"]],
 			["network", "ef.example", "everflow", ["2ABCD"]],
 			["network", "n.example", "tune", ["4242"]],
 		]);
-		expect(extraction.affiliates.every(({ matchedAt }) => matchedAt.length === 0)).toBeTrue();
-		expect(extraction.affiliates.find(({ site }) => site === "shop.example")?.confidence).toBe("medium");
 	});
 
-	test("a merchant without an affiliate parameter is named with the affiliate of the network that delivered the visitor", () => {
-		const extraction = extractFunnel(chainOf(["https://lure.example/a", "https://miamitrk.com/?a=15065&c=1", "https://shop.example/checkout"], { 0: "Act now", 2: CHECKOUT_TEXT }));
-		expect(extraction.parties[0]).toEqual({ role: "merchant", site: "shop.example", hostnames: ["shop.example"], affiliateIds: ["15065"], hopIndices: [2] });
-		expect(extraction.merchant?.identifiers).toEqual([]);
+	test("a merchant without its own affiliate parameter is credited with the network's ID, never named by it", () => {
+		expect(parties(["https://lure.example/a", "https://miamitrk.com/?a=15065&c=1", "https://shop.example/checkout"], { 0: "Act now", 2: CHECKOUT_TEXT })[0]).toEqual({
+			role: "merchant",
+			site: "shop.example",
+			hostnames: ["shop.example"],
+			affiliateIds: [],
+			creditedBy: { site: "miamitrk.com", platform: "cake", platformConfidence: "medium", id: "15065" },
+			hopIndices: [2],
+		});
+	});
+
+	test("a product pid on the merchant's landing URL is no affiliate ID", () => {
+		const extraction = extractFunnel(chainOf(["https://lure.example/a", "https://miamitrk.com/?a=15065&c=1&ckmxid=q", "https://shop.example/product?pid=4471"], { 0: "Act now", 2: CHECKOUT_TEXT }));
+		expect(extraction.affiliates.map(({ id }) => id)).toEqual(["15065"]);
+		expect(extraction.parties[0]).toMatchObject({ role: "merchant", affiliateIds: [], creditedBy: { id: "15065" } });
+	});
+
+	test("a short ID that recurs on the next business is a coincidence, not a match", () => {
+		const extraction = extractFunnel(chainOf(["https://lure.example/a", "https://miamitrk.com/?a=12&c=1", "https://shop.example/x?affid=12"], { 0: "Act now", 2: "Shop" }));
+		expect(extraction.affiliates.map(({ site, confidence, matchedAt }) => [site, confidence, matchedAt])).toEqual([["miamitrk.com", "medium", []], ["shop.example", "medium", []]]);
 	});
 
 	test("a merchant running its own CAKE on a subdomain is one party, the merchant", () => {
-		const extraction = extractFunnel(chainOf(["https://lure.example/a", "https://track.shop.example/?a=55&c=2&ckmxid=q", "https://www.shop.example/checkout?affid=55"], { 0: LURE_TEXT, 2: CHECKOUT_TEXT }));
-		expect(extraction.parties).toEqual([{ role: "merchant", site: "shop.example", hostnames: ["track.shop.example", "www.shop.example"], platform: "cake", affiliateIds: ["55"], hopIndices: [1, 2] }]);
+		expect(parties(["https://lure.example/a", "https://track.shop.example/?a=55&c=2&ckmxid=q", "https://www.shop.example/checkout?affid=55"], { 0: LURE_TEXT, 2: CHECKOUT_TEXT })).toEqual([
+			{ role: "merchant", site: "shop.example", hostnames: ["track.shop.example", "www.shop.example"], platform: "cake", platformConfidence: "high", affiliateIds: ["55"], hopIndices: [1, 2] },
+		]);
 	});
 
 	test("a page shown on a URL that only looks like a tracker stays a page", () => {
@@ -243,12 +265,49 @@ describe("extractFunnel", () => {
 		expect(extraction.hopKinds.map(({ kind }) => kind)).toEqual(["lure", "tracker", "merchant"]);
 	});
 
-	test("an unknown redirect with an affiliate parameter is a low-confidence affiliate link", () => {
-		const extraction = extractFunnel(chainOf(["https://lure.example/a", "https://go.partners.example/r?affiliate_id=A-77&subid=z", "https://shop.example/x"], { 0: "Act now", 2: "Shop" }));
-		expect(extraction.trackingHops[0]).toMatchObject({ platform: "affiliate_link", role: "network", confidence: "low", site: "partners.example" });
-		expect(extraction.parties.map(({ site, affiliateIds }) => [site, affiliateIds])).toEqual([["shop.example", ["A-77"]], ["partners.example", ["A-77"]]]);
-		// A bare `pid` names too many other things to make a redirect an affiliate link.
-		expect(extractFunnel(chainOf(["https://lure.example/a", "https://r.example/?pid=5", "https://shop.example/x"], { 0: "a", 2: "b" })).trackingHops).toEqual([]);
+	test("generic affiliate parameters on a redirect never make a tracker or a party (paypal.com?partner_id=)", () => {
+		for (const redirect of ["https://www.paypal.com/signin?partner_id=ABC123", "https://go.partners.example/r?affiliate_id=A-77&subid=z", "https://r.example/?pid=5"]) {
+			const extraction = extractFunnel(chainOf(["https://lure.example/a", redirect, "https://shop.example/x"], { 0: "Act now", 2: "Shop" }));
+			expect(extraction.trackingHops).toEqual([]);
+			expect(extraction.merchant).toBeUndefined();
+			expect(extraction.parties).toEqual([]);
+		}
+	});
+
+	test("a lure that only passes the affiliate's own tracker into a big brand's page has no merchant", () => {
+		// Probe: lure → a UUID path read as Voluum → www.costco.com.
+		const extraction = extractFunnel(chainOf(["https://lure.example/a", "https://t.example/4df5378b-a236-4c67-b2d3-cbbb2e9d4b92", "https://www.costco.com/"], { 0: LURE_TEXT, 2: "Costco Wholesale" }));
+		expect(extraction.trackingHops.map(({ platform, confidence }) => [platform, confidence])).toEqual([["voluum", "medium"]]);
+		expect(extraction.merchant).toBeUndefined();
+		expect(extraction.parties).toEqual([]);
+	});
+
+	test("the affiliate's own tracker into a landing URL with an affiliate ID makes a merchant", () => {
+		const extraction = extractFunnel(chainOf(["https://lure.example/a", "https://t.example/click/1?cep=abc", "https://shop.example/x?affid=AB12"], { 0: LURE_TEXT, 2: CHECKOUT_TEXT }));
+		expect(extraction.parties).toEqual([{ role: "merchant", site: "shop.example", hostnames: ["shop.example"], affiliateIds: ["AB12"], hopIndices: [2] }]);
+	});
+
+	test("Everflow's path alone is a guess that names no network", () => {
+		const extraction = extractFunnel(chainOf(["https://lure.example/a", "https://sho.rt/AB12C/XY9Z1", "https://shop.example/x"], { 0: LURE_TEXT, 2: CHECKOUT_TEXT }));
+		expect(extraction.trackingHops.map(({ platform, confidence }) => [platform, confidence])).toEqual([["everflow", "low"]]);
+		expect(extraction.parties).toEqual([]);
+	});
+
+	test("a platform's tenants are their own sites, never the platform owner; a platform host is no party", () => {
+		const tenants = extractFunnel(chainOf([
+			"https://lure.example/a",
+			"https://track1.herokuapp.com/?a=5555&c=1&ckmxid=q",
+			"https://store1.myshopify.com/checkout?affid=5555",
+		], { 0: LURE_TEXT, 2: CHECKOUT_TEXT }));
+		expect(tenants.parties.map(({ role, site }) => [role, site])).toEqual([["merchant", "store1.myshopify.com"], ["network", "track1.herokuapp.com"]]);
+		expect(tenants.affiliates.find(({ site }) => site === "store1.myshopify.com")?.matchedAt).toEqual(["track1.herokuapp.com"]);
+		const two = extractFunnel(chainOf(["https://lure.example/a", "https://a1.pages.dev/?a=5555&c=1&ckmxid=q", "https://b2.pages.dev/checkout?affid=5555"], { 0: LURE_TEXT, 2: CHECKOUT_TEXT }));
+		expect(two.parties.map(({ site }) => site)).toEqual(["b2.pages.dev", "a1.pages.dev"]);
+		const pathTenant = extractFunnel(chainOf(["https://lure.example/a", "https://miamitrk.com/?a=15065&c=1&ckmxid=q", "https://sites.google.com/view/offer?affid=15065"], { 0: LURE_TEXT, 2: CHECKOUT_TEXT }));
+		expect(pathTenant.merchant).toBeUndefined();
+		expect(pathTenant.parties.map(({ site }) => site)).toEqual(["miamitrk.com"]);
+		const owner = extractFunnel(chainOf(["https://lure.example/a", "https://myshopify.com/?a=15065&c=1&ckmxid=q", "https://shop.example/x?affid=15065"], { 0: LURE_TEXT, 2: CHECKOUT_TEXT }));
+		expect(owner.parties.map(({ site }) => site)).toEqual(["shop.example"]);
 	});
 
 	test("hops come in any order and unparsable URLs are skipped", () => {

@@ -1,13 +1,10 @@
 import { unescapeHtml } from "../../util/html";
 import { normalizeMailbox } from "../resolver/records";
+import type { FunnelContactSource } from "../resolver/types";
 import { businessSite, parsedUrl } from "./chain";
+import { percentDecoded } from "./wrappers";
 
-/**
- * Where a business's contact was found: its security.txt, its own web
- * pages, the holder contacts of its domain registration (RDAP or WHOIS), or
- * the vendor of the tracking platform it runs.
- */
-export type ContactSource = "security_txt" | "website" | "holder_rdap" | "holder_whois" | "platform_vendor";
+export type ContactSource = FunnelContactSource;
 
 export type SiteContact = {
 	email: string;
@@ -60,18 +57,10 @@ export function securityTxtEmails(text: string): string[] {
 	const emails: string[] = [];
 	for (const match of text.matchAll(/^[ \t]*Contact[ \t]*:[ \t]*(\S+)/gim)) {
 		const value = match[1]!.replace(/^mailto:/i, "").replace(/\?.*$/, "");
-		const email = normalizeMailbox(safeDecode(value));
+		const email = normalizeMailbox(percentDecoded(value) ?? value);
 		if (email && !emails.includes(email)) emails.push(email);
 	}
 	return emails;
-}
-
-function safeDecode(value: string): string {
-	try {
-		return decodeURIComponent(value);
-	} catch {
-		return value;
-	}
 }
 
 /** Cloudflare's email obfuscation: the first byte is the XOR key of the rest. */
@@ -87,21 +76,19 @@ const EMAIL_IN_TEXT = /[a-z0-9._%+-]+@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)
 /** `name [at] shop [dot] com`, `name(at)shop.com`. */
 const OBFUSCATED_EMAIL = /([a-z0-9._%+-]+)\s*[[(]\s*at\s*[\])]\s*((?:[a-z0-9-]+\s*(?:[[(]\s*dot\s*[\])]|\.)\s*)+[a-z]{2,24})\b/gi;
 
-export type PageEmail = { email: string; /** Linked (`mailto:`) or deliberately hidden, rather than any text. */ explicit: boolean };
-
-/** Every mailbox a page publishes: `mailto:` links, Cloudflare-protected addresses, and addresses in its text. */
-export function htmlEmails(html: string): PageEmail[] {
-	const found = new Map<string, boolean>();
-	const add = (value: string | undefined, explicit: boolean) => {
+/** Every mailbox a page publishes: `mailto:` links, Cloudflare-protected addresses, `[at]` spellings and addresses in its text. */
+export function htmlEmails(html: string): string[] {
+	const found = new Set<string>();
+	const add = (value: string | undefined) => {
 		const email = normalizeMailbox(value);
-		if (email) found.set(email, (found.get(email) ?? false) || explicit);
+		if (email) found.add(email);
 	};
 	const text = unescapeHtml(html);
-	for (const match of text.matchAll(/mailto:([^"'?<>\s]+)/gi)) add(safeDecode(match[1]!), true);
-	for (const match of html.matchAll(/data-cfemail=["']([0-9a-f]+)["']|\/cdn-cgi\/l\/email-protection#([0-9a-f]+)/gi)) add(cloudflareEmail(match[1] ?? match[2]!), true);
-	for (const match of text.matchAll(OBFUSCATED_EMAIL)) add(`${match[1]}@${match[2]!.replace(/\s*[[(]\s*dot\s*[\])]\s*/gi, ".").replace(/\s+/g, "")}`, true);
-	for (const match of text.matchAll(EMAIL_IN_TEXT)) add(match[0], false);
-	return [...found].map(([email, explicit]) => ({ email, explicit }));
+	for (const match of text.matchAll(/mailto:([^"'?<>\s]+)/gi)) add(percentDecoded(match[1]!) ?? match[1]);
+	for (const match of html.matchAll(/data-cfemail=["']([0-9a-f]+)["']|\/cdn-cgi\/l\/email-protection#([0-9a-f]+)/gi)) add(cloudflareEmail(match[1] ?? match[2]!));
+	for (const match of text.matchAll(OBFUSCATED_EMAIL)) add(`${match[1]}@${match[2]!.replace(/\s*[[(]\s*dot\s*[\])]\s*/gi, ".").replace(/\s+/g, "")}`);
+	for (const match of text.matchAll(EMAIL_IN_TEXT)) add(match[0]);
+	return [...found];
 }
 
 /** Link targets of pages that name a business's contacts, most useful first. */
@@ -140,10 +127,14 @@ export function contactPageLinks(html: string, base: URL, site: string): string[
 	return links.sort((a, b) => a.kind - b.kind || a.order - b.order).map(({ url }) => url);
 }
 
-/** The holder's mailboxes and organization in a port-43 WHOIS answer (`Registrant Email:` …). */
+/**
+ * The holder's mailboxes and organization in a port-43 WHOIS answer
+ * (`Registrant Email:`, `Admin Email:`). The technical contact is usually
+ * the host or a reseller, not the holder, and is left out.
+ */
 export function whoisHolder(raw: string): { emails: string[]; organization?: string; name?: string } {
 	const emails: string[] = [];
-	for (const match of raw.matchAll(/^\s*(?:registrant|admin(?:istrative)?|tech(?:nical)?)(?:\s+contact)?\s+e-?mail\s*:\s*(\S+)\s*$/gim)) {
+	for (const match of raw.matchAll(/^\s*(?:registrant|admin(?:istrative)?)(?:\s+contact)?\s+e-?mail\s*:\s*(\S+)\s*$/gim)) {
 		const email = normalizeMailbox(match[1]);
 		if (email && !emails.includes(email)) emails.push(email);
 	}

@@ -38,13 +38,7 @@ describe("page parsing", () => {
 			<p>Partners: compliance [at] shopfixture [dot] com</p>
 			<p>Or write to legal&#64;shopfixture.com.</p>
 			<img src="/img/zatosLogo-v1@2x.png">`;
-		expect(htmlEmails(html)).toEqual([
-			{ email: "support@zatos.com", explicit: true },
-			{ email: "affiliates@shopfixture.com", explicit: true },
-			{ email: "compliance@shopfixture.com", explicit: true },
-			{ email: "legal@shopfixture.com", explicit: false },
-			{ email: "zatoslogo-v1@2x.png", explicit: false },
-		]);
+		expect(htmlEmails(html)).toEqual(["support@zatos.com", "affiliates@shopfixture.com", "compliance@shopfixture.com", "legal@shopfixture.com", "zatoslogo-v1@2x.png"]);
 	});
 
 	test("contact page links: the site's own (subdomains too), affiliate and contact pages first, no mailto/javascript/foreign links", () => {
@@ -74,9 +68,9 @@ describe("page parsing", () => {
 		expect(isPrivacyPlaceholder({ email: "owner@shopfixture.com", organization: "Shop Example GmbH" }, ["gandi.net"])).toBeFalse();
 	});
 
-	test("port-43 WHOIS holder: registrant, admin and tech mailboxes and organization", () => {
-		const raw = "Registrant Name: Redacted for Privacy Purposes\nRegistrant Organization: Privacy service provided by WITHHELD FOR PRIVACY LLC\nRegistrant Email: a1b2@withheldforprivacy.com\nAdmin Email: a1b2@withheldforprivacy.com\nTech Contact Email: hostmaster@shopfixture.com\n";
-		expect(whoisHolder(raw)).toEqual({ emails: ["a1b2@withheldforprivacy.com", "hostmaster@shopfixture.com"], organization: "Privacy service provided by WITHHELD FOR PRIVACY LLC", name: "Redacted for Privacy Purposes" });
+	test("port-43 WHOIS holder: registrant and admin mailboxes and organization, never the technical contact", () => {
+		const raw = "Registrant Name: Redacted for Privacy Purposes\nRegistrant Organization: Privacy service provided by WITHHELD FOR PRIVACY LLC\nRegistrant Email: a1b2@withheldforprivacy.com\nAdmin Email: owner@shopfixture.com\nTech Contact Email: hostmaster@hosterfixture.de\nTech Email: support@hosterfixture.de\n";
+		expect(whoisHolder(raw)).toEqual({ emails: ["a1b2@withheldforprivacy.com", "owner@shopfixture.com"], organization: "Privacy service provided by WITHHELD FOR PRIVACY LLC", name: "Redacted for Privacy Purposes" });
 	});
 });
 
@@ -111,7 +105,7 @@ describe("searchSiteContacts", () => {
 			"https://rdap.test/domain/zatos.com": rdapDomain("zatos.com", { email: "c5e0@withheldforprivacy.com", org: "Privacy service provided by Withheld for Privacy ehf", name: "Redacted for Privacy" }),
 		});
 		const search = await searchSiteContacts("zatos.com", deps);
-		expect(search.contacts).toEqual([{ email: "support@zatos.com", source: "website", foundAt: "https://help.zatos.com/knowledgebase/index-antivirus.php", rank: 3 }]);
+		expect(search.contacts).toEqual([{ email: "support@zatos.com", source: "funnel_website", foundAt: "https://help.zatos.com/knowledgebase/index-antivirus.php", rank: 3 }]);
 		expect(search.redacted).toBeTrue();
 		expect(search.holder).toBeUndefined();
 		expect(search.failures).toEqual([]);
@@ -128,18 +122,47 @@ describe("searchSiteContacts", () => {
 		});
 		const search = await searchSiteContacts("shopfixture.com", deps);
 		expect(search.contacts.map(({ email, source }) => [email, source])).toEqual([
-			["affiliate-compliance@shopfixture.com", "website"],
-			["security@shopfixture.com", "security_txt"],
-			["help@shopfixture.com", "website"],
-			["owner@shopfixture.com", "holder_rdap"],
+			["affiliate-compliance@shopfixture.com", "funnel_website"],
+			["security@shopfixture.com", "funnel_security_txt"],
+			["help@shopfixture.com", "funnel_website"],
+			["owner@shopfixture.com", "funnel_holder_rdap"],
 		]);
 		expect(search.holder).toBe("Shop Example GmbH");
 		expect(search.redacted).toBeFalse();
 	});
 
-	test("the business's own mailbox comes before a linked one of another domain with the same purpose", async () => {
-		const deps = web({ "https://shopfixture.com/": { body: `<a href="mailto:support@agencyfixture.com">Site by Agency</a> <a href="mailto:support@shopfixture.com">Support</a>` } });
-		expect((await searchSiteContacts("shopfixture.com", deps)).contacts.map(({ email }) => email)).toEqual(["support@shopfixture.com", "support@agencyfixture.com"]);
+	test("pages and security.txt count only with the business's own mailboxes: a linked agency, the FTC or a bug bounty platform are never recipients", async () => {
+		const deps = web({
+			"https://shopfixture.com/.well-known/security.txt": { type: "text/plain", body: "Contact: mailto:shopfixture@bugbountyfixture.com\n" },
+			"https://shopfixture.com/": { body: `<a href="mailto:compliance@agencyfixture.com">Site by Agency</a> <a href="/terms">Terms</a> <a href="mailto:info@shopfixture.com">Info</a>` },
+			"https://shopfixture.com/terms": { body: `Report fraud to the FTC: <a href="mailto:reportfraud@ftc.gov">reportfraud@ftc.gov</a>` },
+		});
+		expect((await searchSiteContacts("shopfixture.com", deps)).contacts.map(({ email }) => email)).toEqual(["info@shopfixture.com"]);
+	});
+
+	test("the domain's technical contact (its host or reseller) is no recipient, and an own-domain mailbox beats an abuse desk elsewhere", async () => {
+		const technicalOnly = web({
+			"https://rdap.test/domain/shopfixture.com": { body: JSON.stringify({ entities: [{ roles: ["technical"], vcardArray: ["vcard", [["email", {}, "text", "abuse@hosterfixture.de"]]] }] }) },
+		});
+		expect((await searchSiteContacts("shopfixture.com", technicalOnly)).contacts).toEqual([]);
+		const both = web({
+			"https://shopfixture.com/": { body: `<a href="mailto:info@shopfixture.com">Info</a>` },
+			"https://rdap.test/domain/shopfixture.com": rdapDomain("shopfixture.com", { email: "abuse@ownerfixture.de", org: "Shop Fixture GmbH" }),
+		});
+		expect((await searchSiteContacts("shopfixture.com", both)).contacts.map(({ email, source }) => [email, source])).toEqual([
+			["info@shopfixture.com", "funnel_website"],
+			["abuse@ownerfixture.de", "funnel_holder_rdap"],
+		]);
+	});
+
+	test("a platform tenant is searched on its own host only: never the platform's registration or security.txt", async () => {
+		const deps = web({
+			"https://store1.myshopify.com/": { body: `<a href="mailto:support@shopify.com">Shopify</a> <a href="mailto:hello@store1fixture.com">Write us</a>` },
+			"https://rdap.test/domain/myshopify.com": rdapDomain("myshopify.com", { email: "domains@shopify.com", org: "Shopify Inc." }),
+		});
+		const search = await searchSiteContacts("store1.myshopify.com", deps);
+		expect(search.contacts).toEqual([]);
+		expect(deps.requested).toEqual(expect.not.arrayContaining(["https://store1.myshopify.com/.well-known/security.txt", "https://rdap.test/domain/myshopify.com", "https://rdap.test/domain/store1.myshopify.com", "https://www.store1.myshopify.com/"]));
 	});
 
 	test("a soft-404 security.txt, foreign addresses in text, a page that moved to another site and a registrar forwarding mailbox are all ignored", async () => {
@@ -165,7 +188,7 @@ describe("searchSiteContacts", () => {
 			port43Query: async (server, query) => server === "whois.registrarfixture.com" && query === "shopfixture.com" ? "Registrant Organization: Shop Example Ltd\nRegistrant Email: legal@shopfixture.com\n" : "",
 		});
 		const search = await searchSiteContacts("shopfixture.com", open);
-		expect(search.contacts).toEqual([{ email: "legal@shopfixture.com", source: "holder_whois", foundAt: "WHOIS whois.registrarfixture.com", rank: 2 }]);
+		expect(search.contacts).toEqual([{ email: "legal@shopfixture.com", source: "funnel_holder_whois", foundAt: "WHOIS whois.registrarfixture.com", rank: 2 }]);
 		expect(search.holder).toBe("Shop Example Ltd");
 	});
 
@@ -221,10 +244,10 @@ describe("resolveFunnelPartyTarget", () => {
 			status: "verified",
 			resolverProvenance: {
 				email: "affiliates@shopfixture.com",
-				source: "website",
+				source: "funnel_website",
 				organization: "shopfixture.com",
 				foundAt: "https://shopfixture.com/",
-				fallbackContacts: [{ email: "support@shopfixture.com", source: "website", organization: "shopfixture.com", foundAt: "https://shopfixture.com/" }],
+				fallbackContacts: [{ email: "support@shopfixture.com", source: "funnel_website", organization: "shopfixture.com", foundAt: "https://shopfixture.com/" }],
 			},
 		})]);
 		expect(resolved.resolverSnapshot).toMatchObject({ funnelParty: { role: "merchant", site: "shopfixture.com", affiliateId: "777" } });
@@ -242,7 +265,7 @@ describe("resolveFunnelPartyTarget", () => {
 			"https://rdap.test/domain/miamitrk.com": rdapDomain("miamitrk.com", { email: "c1@withheldforprivacy.com", org: "Privacy service provided by Withheld for Privacy ehf" }),
 		});
 		const resolved = await resolveFunnelPartyTarget(target("affiliate:network:cake:miamitrk.com:15065"), deps);
-		expect(resolved.routes[0]).toMatchObject({ verifiedEmail: "info@getcake.com", providerDisplayName: "CAKE", resolverProvenance: { source: "platform_vendor", organization: "CAKE" } });
+		expect(resolved.routes[0]).toMatchObject({ verifiedEmail: "info@getcake.com", providerDisplayName: "CAKE", resolverProvenance: { source: "funnel_platform_vendor", organization: "CAKE" } });
 		expect(resolved.resolverSnapshot).toMatchObject({ platformVendor: { name: "CAKE", domain: "getcake.com" }, contactSearch: { redacted: true } });
 		expect(deps.requested.some((url) => url.includes("getcake.com"))).toBeFalse();
 	});
@@ -252,22 +275,21 @@ describe("resolveFunnelPartyTarget", () => {
 		const resolved = await resolveFunnelPartyTarget(target("affiliate:network:everflow:onlinesafetyall.com:6RNXHT"), deps);
 		expect(resolved.routes[0]).toMatchObject({
 			verifiedEmail: "compliance@onlinesafetyall.com",
-			resolverProvenance: { source: "website", fallbackContacts: [{ email: "support@everflow.io", source: "platform_vendor", organization: "Everflow" }] },
+			resolverProvenance: { source: "funnel_website", fallbackContacts: [{ email: "support@everflow.io", source: "funnel_platform_vendor", organization: "Everflow" }] },
 		});
 	});
 
-	test("a vendor that publishes no address is searched like any site; one that publishes only sales gives no route", async () => {
-		const deps = web({ "https://tune.com/": { body: `<a href="mailto:sales@tune.com">Sales</a>` } });
+	test("a vendor without a published address is no fallback, and its site is never searched", async () => {
+		const deps = web({ "https://tune.com/": { body: `<a href="mailto:compliance@tune.com">Compliance</a>` } });
 		const resolved = await resolveFunnelPartyTarget(target("affiliate:network:tune:go2cloudfixture.com:2002"), deps);
 		expect(resolved).toMatchObject({ status: "no_route", disposition: "no_network_contact" });
-		expect(deps.requested).toContain("https://tune.com/");
-		const answering = web({ "https://tune.com/": { body: `<a href="mailto:compliance@tune.com">Compliance</a>` } });
-		expect((await resolveFunnelPartyTarget(target("affiliate:network:tune:go2cloudfixture.com:2002"), answering)).routes[0]).toMatchObject({ verifiedEmail: "compliance@tune.com", providerDisplayName: "TUNE", resolverProvenance: { source: "platform_vendor" } });
+		expect(deps.requested.some((url) => url.includes("tune.com"))).toBeFalse();
 	});
 
-	test("a generic affiliate link without a platform has no vendor to fall back to", async () => {
-		const resolved = await resolveFunnelPartyTarget(target("affiliate:network:affiliate_link:partnersfixture.com:A-77"), web({}));
+	test("a network whose platform was only guessed (no platform in its target) has no vendor to fall back to", async () => {
+		const resolved = await resolveFunnelPartyTarget(target("affiliate:network:-:miamitrk.com:15065"), web({}));
 		expect(resolved).toMatchObject({ status: "no_route", disposition: "no_network_contact" });
+		expect(parseFunnelPartyTarget("affiliate:network:affiliate_link:partnersfixture.com:A-77")).toBeUndefined();
 	});
 
 	test("failed lookups without any contact are a failed resolution the worker repeats", async () => {

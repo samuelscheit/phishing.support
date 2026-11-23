@@ -30,11 +30,11 @@ const ROLE_BY_SOURCE: Readonly<Record<string, ProviderRole>> = {
 	cloudflare_origin_disclosure: "host",
 	service_account_registry: "platform",
 	// The merchant or affiliate network of a deceptive funnel (abuse/funnel), and the vendor of its tracking platform.
-	security_txt: "platform",
-	website: "platform",
-	holder_rdap: "platform",
-	holder_whois: "platform",
-	platform_vendor: "platform",
+	funnel_security_txt: "platform",
+	funnel_website: "platform",
+	funnel_holder_rdap: "platform",
+	funnel_holder_whois: "platform",
+	funnel_platform_vendor: "platform",
 	authority_registry: "authority",
 	campaign_takedown_reports: "authority",
 };

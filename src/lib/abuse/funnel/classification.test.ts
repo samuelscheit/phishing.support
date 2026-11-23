@@ -30,7 +30,8 @@ describe("validateDeceptiveFunnelClassification", () => {
 			finding: "deceptive_funnel",
 			deceptionKind: "fake_application",
 			lureClaim: "The visitor's application for financial assistance was pre-approved and needed one final step.",
-			reality: "A $19.98 per month antivirus subscription checkout at zatos.com.",
+			// The host the model named is gone: a report names only hosts the browser recorded.
+			reality: "A $19.98 per month antivirus subscription checkout.",
 			lureQuotes: [{ hopIndex: 3, url: chain.pages[0]!.url, quote: "Your Financial Assist … Complete the final step to submit your application." }],
 			offerQuote: { hopIndex: 8, url: chain.pages[1]!.url, quote: "$19.98/month" },
 		});
@@ -67,21 +68,44 @@ describe("validateDeceptiveFunnelClassification", () => {
 				{ pageRef: "page-3", quote: "You are one step away from receiving your assistance." },
 			],
 		}), chain, extraction);
-		expect(verdict.finding === "deceptive_funnel" && verdict.lureQuotes.map(({ quote }) => quote)).toEqual(["CONTINUE", "Your Financial Assist", "Application status: Pre-approved"]);
+		// Substantial quotes first; a button label is kept only beside them.
+		expect(verdict.finding === "deceptive_funnel" && verdict.lureQuotes.map(({ quote }) => quote)).toEqual(["Application status: Pre-approved", "You are one step away from receiving your assistance.", "CONTINUE"]);
 	});
 
-	test("an offer quote that is not on the merchant page is dropped, not fatal", () => {
-		const verdict = validateDeceptiveFunnelClassification(answer({ offerQuote: { pageRef: "page-8", quote: "Free forever" } }), chain, extraction);
-		expect(verdict).toMatchObject({ finding: "deceptive_funnel" });
-		expect("offerQuote" in verdict).toBeFalse();
-		expect("offerQuote" in validateDeceptiveFunnelClassification(answer({ offerQuote: { pageRef: "", quote: "" } }), chain, extraction)).toBeFalse();
+	test("button labels and headings alone are too short to state a claim", () => {
+		expect(validateDeceptiveFunnelClassification(answer({ lureQuotes: [{ pageRef: "page-3", quote: "CONTINUE" }, { pageRef: "page-3", quote: "Your Financial Assist" }] }), chain, extraction)).toEqual({
+			finding: "insufficient_evidence",
+			rejectedClaim: "its verbatim lure quotes are too short to state a claim",
+		});
 	});
 
-	test("the model's sentences lose any URL and stay bounded", () => {
-		const verdict = validateDeceptiveFunnelClassification(answer({ reality: `A subscription at https://www.zatos.com/special/av/ht/checkout.php for ${"very ".repeat(100)}much money.` }), chain, extraction);
-		expect(verdict.finding === "deceptive_funnel" && verdict.reality).not.toContain("https://");
-		expect(verdict.finding === "deceptive_funnel" && verdict.reality.length).toBeLessThanOrEqual(300);
-		expect(validateDeceptiveFunnelClassification(answer({ lureClaim: "https://lure.example/" }), chain, extraction)).toEqual({ finding: "insufficient_evidence", rejectedClaim: "it did not say what the lure claimed and what the visitor got" });
+	test("the offer quote is required and must be verbatim merchant page text", () => {
+		expect(validateDeceptiveFunnelClassification(answer({ offerQuote: { pageRef: "page-8", quote: "Free forever" } }), chain, extraction)).toEqual({
+			finding: "insufficient_evidence",
+			rejectedClaim: `its offer quote is no evidence: its evidence quote does not appear verbatim in the visible text of ${chain.pages[1]!.url}`,
+		});
+		expect(validateDeceptiveFunnelClassification(answer({ offerQuote: { pageRef: "", quote: "" } }), chain, extraction)).toMatchObject({ finding: "insufficient_evidence", rejectedClaim: expect.stringContaining("its offer quote is no evidence") });
+		expect(validateDeceptiveFunnelClassification(answer({ offerQuote: { pageRef: "page-3", quote: "Your Financial Assist" } }), chain, extraction)).toMatchObject({ finding: "insufficient_evidence" });
+	});
+
+	test("the model's sentences lose URLs, hosts, mailboxes and phone numbers, and stay bounded", () => {
+		const verdict = validateDeceptiveFunnelClassification(answer({
+			lureClaim: "The page said the application was approved; call +1 (800) 555-0199 or write to claims@assist-help.com.",
+			reality: `A subscription checkout at www.zatos.com via https://www.zatos.com/special/av/ht/checkout.php costing $19.98/month for ${"very ".repeat(100)}much money.`,
+		}), chain, extraction);
+		if (verdict.finding !== "deceptive_funnel") throw new Error("expected a deceptive funnel");
+		expect(verdict.lureClaim).toBe("The page said the application was approved; call or write.");
+		expect(verdict.reality).toStartWith("A subscription checkout costing $19.98/month for very");
+		expect(verdict.reality).not.toMatch(/zatos|https?:/);
+		expect(verdict.reality.length).toBeLessThanOrEqual(300);
+		expect(validateDeceptiveFunnelClassification(answer({ lureClaim: "https://lure.example/ zatos.com" }), chain, extraction)).toEqual({ finding: "insufficient_evidence", rejectedClaim: "it did not say what the lure claimed and what the visitor got" });
+	});
+
+	test("a misrepresentation of no recognised kind is not reported automatically", () => {
+		expect(validateDeceptiveFunnelClassification(answer({ deceptionKind: "other_misrepresentation" }), chain, extraction)).toEqual({
+			finding: "insufficient_evidence",
+			rejectedClaim: "a misrepresentation of no recognised kind is not reported automatically",
+		});
 	});
 
 	test("an unknown deception kind, and a chain without a merchant, are not a deceptive funnel", () => {
@@ -105,6 +129,8 @@ describe("buildDeceptiveFunnelClassificationInput", () => {
 		const [system, user] = input as Array<{ role: string; content: unknown }>;
 		expect(system!.role).toBe("system");
 		expect(String(system!.content)).toContain("verbatim");
+		expect(String(system!.content)).toContain("when the final page is the own site of the brand or company the lure names");
+		expect(String(system!.content)).toContain("write no URLs, domain names, email addresses or phone numbers");
 		const parts = user!.content as Array<{ type: string; text?: string; image_url?: string }>;
 		const texts = parts.filter((part) => part.type === "input_text").map((part) => part.text!).join("\n");
 		expect(texts).toContain("page_ref: page-3");

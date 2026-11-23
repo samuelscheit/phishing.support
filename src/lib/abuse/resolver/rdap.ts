@@ -91,13 +91,14 @@ export function entityVcardText(entity: unknown, key: string): string | undefine
 	return record ? text(vcardValues(record)[key]) : undefined;
 }
 
-const HOLDER_ROLES = new Set(["registrant", "administrative", "technical"]);
+/** The holder's own roles; a technical contact is usually the host or a reseller. */
+const HOLDER_ROLES = new Set(["registrant", "administrative"]);
 
 /** One contact the domain holder publishes in its record, as the record states it. */
 export type DomainHolderContact = { roles: string[]; emails: string[]; name?: string; organization?: string };
 
 /**
- * The registrant, administrative and technical contacts of a domain record,
+ * The registrant and administrative contacts of a domain record,
  * nested entities included. Unlike an abuse mailbox these are the holder's
  * own contacts, read only to reach the business behind a domain (the
  * merchant of an affiliate funnel); whether a value is a privacy service's
