@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
 	try {
-		const { url, mhtml_base64 } = (await req.json()) as { url?: string; mhtml_base64?: string };
+		const { url, mhtml_base64, rereport } = (await req.json()) as { url?: string; mhtml_base64?: string; rereport?: boolean };
 
 		if (!url) {
 			return NextResponse.json({ error: "URL is required" }, { status: 400 });
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
 		}
 
 		const reporter = await getReporterMetadata(req);
-		const stream_id = await createWebsiteSubmission({ url, mhtmlSnapshot, ...reporter });
+		const stream_id = await createWebsiteSubmission({ url, mhtmlSnapshot, rereport: rereport === true, ...reporter });
 
 		return NextResponse.json({ stream_id });
 	} catch (err) {

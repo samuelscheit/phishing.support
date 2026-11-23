@@ -19,6 +19,11 @@ export type WebsiteSubmissionOptions = ReporterMetadata
 		 * a site has one case.
 		 */
 		visit?: string;
+		/**
+		 * Opens a fresh case even when the site already has one, analyzed and
+		 * reported on its own (a reporter re-reporting a site by hand).
+		 */
+		rereport?: boolean;
 	};
 
 const AUTO_RETRY_POLL_MS = 60_000;
@@ -90,12 +95,12 @@ export async function createWebsiteSubmission(
 ): Promise<bigint> {
 	const streamId = generateId();
 	const url = websiteSubmissionUrl(options.url);
-	const { source, visit: _visit, ...analysisOptions } = options;
+	const { source, visit, rereport, ...analysisOptions } = options;
 
 	const existingId = await SubmissionsEntity.create({
 		kind: "website",
 		data: { kind: "website", website: { url } },
-		dedupeKey: websiteSubmissionDedupeKey(url, options.visit),
+		dedupeKey: websiteSubmissionDedupeKey(url, rereport ? `rereport-${streamId.toString()}` : visit),
 		// The worker starts immediately after insertion. Mark it running at the
 		// durable boundary so a process restart cannot leave a submission looking
 		// perpetually new while its first WHOIS lookup is in flight.

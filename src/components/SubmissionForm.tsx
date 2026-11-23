@@ -72,7 +72,9 @@ export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" 
 				mhtml_base64 = await fileToDataUrl(websiteSnapshotFile);
 			}
 
-			const result = await postJson<{ stream_id?: string }>("/api/submissions/website", { url, mhtml_base64 });
+			// The snapshot field is the reporter's expert mode: there a site that
+			// already has a case is analyzed and reported again in a new one.
+			const result = await postJson<{ stream_id?: string }>("/api/submissions/website", { url, mhtml_base64, rereport: showWebsiteSnapshotInput });
 			if (!result.ok) throw new Error(result.error);
 			if (result.data.stream_id) router.push(`/submissions/${result.data.stream_id}`);
 		} catch (err) {
@@ -158,7 +160,7 @@ export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" 
 							) : undefined}
 							<Button type="submit" className="w-full" disabled={isSubmitting}>
 								{isSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-								Report Website
+								{showWebsiteSnapshotInput ? "Report Website (again)" : "Report Website"}
 							</Button>
 						</form>
 					</TabsContent>

@@ -163,6 +163,25 @@ describe("createWebsiteSubmission", () => {
 		expect(submission?.source).toBe(pasted);
 	});
 
+	test("a site that already has a case keeps it, unless the reporter re-reports it, which opens and analyzes a fresh case each time", async () => {
+		const started: bigint[] = [];
+		const analyze = async ({ submissionId }: { submissionId: bigint }) => { started.push(submissionId); };
+		const original = await createWebsiteSubmission({ url: "https://kit.example/login" }, analyze);
+		await SubmissionsEntity.update(original, { status: "reported" });
+
+		expect(await createWebsiteSubmission({ url: "https://kit.example/other" }, analyze)).toBe(original);
+		expect(await createWebsiteSubmission({ url: "https://kit.example/login", rereport: false }, analyze)).toBe(original);
+
+		const first = await createWebsiteSubmission({ url: "https://kit.example/login", rereport: true }, analyze);
+		const second = await createWebsiteSubmission({ url: "https://kit.example/login", rereport: true }, analyze);
+		expect(new Set([original, first, second]).size).toBe(3);
+		expect(started).toEqual([original, first, second]);
+		expect((await SubmissionsEntity.get(first))?.dedupeKey).toBe(`website-kit.example#rereport-${first.toString()}`);
+		expect((await SubmissionsEntity.get(original))?.status).toBe("reported");
+		// A later ordinary report still lands on the site's original case.
+		expect(await createWebsiteSubmission({ url: "https://kit.example/" }, analyze)).toBe(original);
+	});
+
 	test("ordinary page addresses are kept as submitted", () => {
 		expect(websiteSubmissionUrl(" https://kit.example/c2222120?x=1 ")).toBe("https://kit.example/c2222120?x=1");
 		expect(websiteSubmissionUrl("http://85.215.226.225/Netflix/Home/login.php")).toBe("http://85.215.226.225/Netflix/Home/login.php");
