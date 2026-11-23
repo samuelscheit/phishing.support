@@ -91,6 +91,35 @@ export function entityVcardText(entity: unknown, key: string): string | undefine
 	return record ? text(vcardValues(record)[key]) : undefined;
 }
 
+/** The holder's own roles; a technical contact is usually the host or a reseller. */
+const HOLDER_ROLES = new Set(["registrant", "administrative"]);
+
+/** One contact the domain holder publishes in its record, as the record states it. */
+export type DomainHolderContact = { roles: string[]; emails: string[]; name?: string; organization?: string };
+
+/**
+ * The registrant and administrative contacts of a domain record,
+ * nested entities included. Unlike an abuse mailbox these are the holder's
+ * own contacts, read only to reach the business behind a domain (the
+ * merchant of an affiliate funnel); whether a value is a privacy service's
+ * placeholder is for the caller to judge.
+ */
+export function domainHolderContacts(root: unknown): DomainHolderContact[] {
+	const record = asRecord(root);
+	if (!record) return [];
+	const roles = entityRoles(record).filter((role) => HOLDER_ROLES.has(role));
+	const card = vcardValues(record);
+	const own: DomainHolderContact[] = roles.length
+		? [{
+			roles,
+			emails: uniqueStrings([...markedEmailsFirst(record), ...scalarStrings(record.email)].map((value) => normalizeMailbox(value))),
+			...(text(card.fn) ? { name: text(card.fn) } : {}),
+			...(text(card.org) ? { organization: text(card.org) } : {}),
+		}]
+		: [];
+	return [...own, ...asArray(record.entities).flatMap(domainHolderContacts)];
+}
+
 export function firstEntityWithRole(root: unknown, role: string): JsonRecord | undefined {
 	const record = asRecord(root);
 	if (!record) return undefined;

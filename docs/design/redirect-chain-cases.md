@@ -46,7 +46,7 @@ affiliate 15065.
 6. **Funnel reports go to the merchant and the affiliate network, fully
    automatically.** Affiliate ids and tracking platforms are extracted from
    the chain's tracker URLs (e.g. CAKE `?a=<affiliate>&c=<creative>`,
-   Everflow `/<offer>/<affiliate>/?sub1=`, TUNE/HasOffers `aff_id`,
+   Everflow `/<affiliate>/<offer>/?sub1=` (both IDs encoded), TUNE/HasOffers `aff_id`,
    merchant landing `affid=`). The recipients are the end merchant's
    compliance/affiliate/abuse contact and the operator of the tracking
    network, resolved automatically. The report names the affiliate ids,

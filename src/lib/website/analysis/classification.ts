@@ -354,7 +354,7 @@ export function normalizedEvidence(value: string): string {
 }
 
 /** Keeps an overlong quote as a verbatim prefix ending on a word boundary. */
-function boundedQuote(quote: string): string {
+export function boundedQuote(quote: string): string {
 	const characters = Array.from(quote);
 	if (characters.length <= MAX_EVIDENCE_QUOTE_LENGTH) return quote;
 	const prefix = characters.slice(0, MAX_EVIDENCE_QUOTE_LENGTH).join("");

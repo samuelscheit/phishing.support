@@ -47,9 +47,20 @@ export type ResolvedAbuseTarget = {
 	lookupFailures?: string[];
 };
 
+/**
+ * Where a deceptive funnel's recipient was found (abuse/funnel/recipients.ts):
+ * the business's security.txt, its own web pages, the holder contacts of its
+ * domain registration, or the vendor of the tracking platform it runs.
+ */
+export type FunnelContactSource = "funnel_security_txt" | "funnel_website" | "funnel_holder_rdap" | "funnel_holder_whois" | "funnel_platform_vendor";
+
 export type AbuseMailbox = {
 	email: string;
-	source: "registrar_rdap" | "domain_rdap" | "domain_whois" | "ip_rdap" | "ip_whois" | "parent_ip_rdap" | "asn_rdap" | "upstream_asn_rdap";
+	source:
+		| "registrar_rdap" | "domain_rdap" | "domain_whois" | "ip_rdap" | "ip_whois" | "parent_ip_rdap" | "asn_rdap" | "upstream_asn_rdap"
+		| FunnelContactSource;
+	/** The page or record that publishes the mailbox, when it is not the resolver's own lookup. */
+	foundAt?: string;
 	entityHandle?: string;
 	entityName?: string;
 	roles?: string[];

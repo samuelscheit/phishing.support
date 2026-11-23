@@ -8,6 +8,8 @@ import { serviceIdentity } from "../../network/service_identity";
 import { defaultResponseModel } from "../../openai/client";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
 import { createOriginHostEmailDraft } from "../origin/draft";
+import { createFunnelEmailDraft } from "../funnel/draft";
+import type { AbuseMailAttachment } from "./types";
 import { originHostAddress, readOriginHostSnapshot } from "../origin/snapshot";
 import { passiveDnsSourceLabel } from "../../network/passive_dns";
 import { humanizeOrganization, recipientGreeting } from "./shared";
@@ -83,6 +85,8 @@ type DraftInput = {
 	recipient: string;
 	attachmentNames?: string[];
 	attachmentMimeTypes?: string[];
+	/** The files the mail carries; a report drafted from its evidence (a deceptive funnel's facts) reads them. */
+	evidence?: readonly AbuseMailAttachment[];
 };
 
 function cleanText(value: unknown, maximum: number): string | undefined {
@@ -471,6 +475,8 @@ export async function createAbuseEmailDraft(input: DraftInput, dependencies: Abu
 	if (approved) return { subject: approved.subject, body: approved.body, recipientLabel: approved.recipientLabel };
 	const originHostDraft = createOriginHostEmailDraft(input);
 	if (originHostDraft) return originHostDraft;
+	const funnelDraft = createFunnelEmailDraft(input);
+	if (funnelDraft) return funnelDraft;
 	const recipientLabel = abuseEmailRecipientLabel({ route: input.route, recipient: input.recipient });
 	const caseUrl = abuseEmailCaseUrl(input.report.submissionId);
 	const observedUrls = normalizedBodyUrls(input.target.observedUrls);
