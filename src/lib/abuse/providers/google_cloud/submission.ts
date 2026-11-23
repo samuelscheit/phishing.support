@@ -44,7 +44,7 @@ export type GoogleCloudSubmissionDependencies = {
 };
 
 /** The filled form the preflight leaves for the irreversible click. Never persisted. */
-export type GoogleCloudPreflightState = { session: GoogleCloudFormSession; timeouts: GoogleCloudTimeouts };
+type GoogleCloudPreflightState = { session: GoogleCloudFormSession; timeouts: GoogleCloudTimeouts };
 
 async function openReportingPage(): Promise<GoogleCloudFormSession> {
 	const browser = await getBrowser("reporting");

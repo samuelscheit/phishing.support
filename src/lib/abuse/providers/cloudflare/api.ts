@@ -238,7 +238,7 @@ export async function findSubmittedCloudflareReport(params: CloudflareRequestCon
 }
 
 /** The account's newest earlier report of exactly this URL, whatever its justification and age. */
-export async function findEarlierCloudflareReport(params: CloudflareRequestContext & { target: string; url: string }): Promise<string | undefined> {
+async function findEarlierCloudflareReport(params: CloudflareRequestContext & { target: string; url: string }): Promise<string | undefined> {
 	return (await matchingSubmittedReports({ ...params, urls: params.url, limit: 1 }))[0];
 }
 
