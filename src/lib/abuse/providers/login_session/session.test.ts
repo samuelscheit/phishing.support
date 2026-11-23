@@ -1,15 +1,20 @@
 import { describe, expect, test } from "bun:test";
 
+import type { BrowserContext } from "patchright";
+
 import {
 	boundedCleanup,
 	createLoginSessions,
 	ProviderLoginError,
 	ProviderLoginUnavailableError,
+	withLoginBrowser,
+	type LoginBrowserSession,
 	type LoginSession,
 	type LoginSessionDeps,
 	type LoginSessionSpec,
 } from "./session";
 import { createMemoryLoginSessionStore } from "./store";
+import { OperationCanceledError } from "../../worker/cancellation";
 import { BrowserUnavailableError, isBrowserUnavailable } from "../../../browser/fabric";
 
 type Config = { account: string };
@@ -237,3 +242,79 @@ describe("boundedCleanup", () => {
 		await boundedCleanup(Promise.reject(new Error("x")), 1_000);
 	});
 });
+
+describe("withLoginBrowser", () => {
+	const fakeContext = {} as BrowserContext;
+
+	test("passes the acquired context to run and always releases the browser", async () => {
+		let released = 0;
+		let operationSeen = "";
+		const acquire = async (operation: string): Promise<LoginBrowserSession> => {
+			operationSeen = operation;
+			return { context: fakeContext, release: async () => { released += 1; }, cancel: async () => undefined };
+		};
+		const result = await withLoginBrowser("Fake", "fake-login", AbortSignal.timeout(5_000), async (ctx) => {
+			expect(ctx).toBe(fakeContext);
+			return "ok";
+		}, acquire);
+		expect(result).toBe("ok");
+		expect(operationSeen).toBe("fake-login");
+		expect(released).toBe(1);
+
+		await expect(withLoginBrowser("Fake", "fake-login", AbortSignal.timeout(5_000), async () => {
+			throw new Error("boom");
+		}, acquire)).rejects.toThrow("boom");
+		expect(released).toBe(2);
+	});
+
+	test("a login deadline firing during browser acquisition is classified as BrowserUnavailableError and cancels the late lease", async () => {
+		let resolveLate!: (session: LoginBrowserSession) => void;
+		const latePromise = new Promise<LoginBrowserSession>((resolve) => { resolveLate = resolve; });
+		let canceled = 0;
+		let ran = 0;
+		const h = harness((_config, signal) => withLoginBrowser("Fake", "fake-login", signal, async () => {
+			ran += 1;
+			return session("never");
+		}, () => latePromise));
+		const sessions = createLoginSessions({ ...h.spec, loginTimeoutMs: 25 }, h.deps);
+
+		const error = await sessions.get(config).catch((e: unknown) => e);
+		expect(ran).toBe(0);
+		expect(error).toBeInstanceOf(ProviderLoginError);
+		expect(error).not.toBeInstanceOf(ProviderLoginUnavailableError);
+		expect(isBrowserUnavailable(error)).toBeTrue();
+		expect(h.store.records.get(h.key)?.failure).toBeUndefined();
+
+		// A browser that finishes booting after the deadline is canceled immediately.
+		resolveLate({ context: fakeContext, release: async () => undefined, cancel: async () => { canceled += 1; } });
+		await new Promise((r) => setTimeout(r, 10));
+		expect(canceled).toBe(1);
+	});
+
+	test("a caller-initiated abort during browser acquisition rethrows OperationCanceledError, not BrowserUnavailableError", async () => {
+		const controller = new AbortController();
+		let canceled = 0;
+		let resolveLate!: (session: LoginBrowserSession) => void;
+		const latePromise = new Promise<LoginBrowserSession>((resolve) => { resolveLate = resolve; });
+		const pending = withLoginBrowser("Fake", "fake-login", controller.signal, async () => "never", () => latePromise);
+		controller.abort(new Error("caller stopped"));
+		const error = await pending.catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(OperationCanceledError);
+		expect(isBrowserUnavailable(error)).toBeFalse();
+
+		resolveLate({ context: fakeContext, release: async () => undefined, cancel: async () => { canceled += 1; } });
+		await new Promise((r) => setTimeout(r, 10));
+		expect(canceled).toBe(1);
+	});
+
+	test("preserves BrowserUnavailableError cause when acquire itself rejects", async () => {
+		const cause = new BrowserUnavailableError(new Error("503 Service Unavailable"));
+		const error = await withLoginBrowser("Fake", "fake-login", AbortSignal.timeout(5_000), async () => "never", async () => {
+			throw cause;
+		}).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(ProviderLoginError);
+		expect(isBrowserUnavailable(error)).toBeTrue();
+		expect((error as Error).cause).toBe(cause);
+	});
+});
+

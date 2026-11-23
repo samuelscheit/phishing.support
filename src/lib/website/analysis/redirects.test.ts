@@ -12,6 +12,7 @@ import type { WebsiteArchiveResult } from "../archive/types";
 import { scriptedVisitSession } from "../../site_visit/test_helpers";
 import { analyzeWebsite } from "./ai";
 import type { WebsiteAnalysisDependencies } from "./analysis_types";
+import { BROWSER_OUTAGE_RETRY_DELAYS_MS } from "./failure";
 import { capturedHostNavigation, websiteReportUrls, websiteSiteAssessments } from "../info/report_hops";
 import type { WebsiteNavigationHop } from "../types";
 import { waitForStatus, websiteSubmission } from "../test_helpers";
@@ -549,7 +550,9 @@ describe("browser-service failures", () => {
 		expect((await SubmissionsEntity.get(id))?.status).toBe("reported");
 	});
 
-	test("a lasting browser outage fails with a readable reason and is retried automatically, at most three times", async () => {
+	test("a lasting browser outage fails with a readable reason and retries progressively across 24 hours before giving up", async () => {
+		expect(BROWSER_OUTAGE_RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0)).toBe(24 * 60 * 60_000);
+		const totalRetries = BROWSER_OUTAGE_RETRY_DELAYS_MS.length;
 		const id = await websiteSubmission(374703356112802864n, url);
 		const failing = { ...dependencies(archiveOf([hop(0, url, 200)])), browserBackoffMs: [1], archiveWebsite: async () => { throw relayFull(); } };
 		const run = () => analyzeWebsite({ submissionId: id, url }, failing);
@@ -558,15 +561,17 @@ describe("browser-service failures", () => {
 			return { submission, autoRetry: submission.data.kind === "website" ? submission.data.website.autoRetry : undefined };
 		};
 
+		const beforeFirst = Date.now();
 		await run();
 		let { submission, autoRetry } = await autoRetryOf();
 		expect(submission.status).toBe("failed");
 		expect(submission.info).toStartWith("The browser service failed (Unexpected server response: 503). Retrying automatically at ");
-		expect(submission.info).toEndWith(" UTC (attempt 1 of 3).");
+		expect(submission.info).toEndWith(` UTC (attempt 1 of ${totalRetries}).`);
 		expect(submission.info).not.toContain("[object");
 		expect(autoRetry).toMatchObject({ attempts: 1, reason: "Unexpected server response: 503" });
 		const dueAt = new Date(autoRetry!.nextAttemptAt);
-		expect(dueAt.getTime() - Date.now()).toBeGreaterThan(9 * 60_000);
+		expect(dueAt.getTime() - beforeFirst).toBeGreaterThanOrEqual(BROWSER_OUTAGE_RETRY_DELAYS_MS[0]! - 5_000);
+		expect(dueAt.getTime() - beforeFirst).toBeLessThanOrEqual(BROWSER_OUTAGE_RETRY_DELAYS_MS[0]! + 60_000);
 
 		// Not due yet: nothing is started.
 		const started: bigint[] = [];
@@ -577,17 +582,23 @@ describe("browser-service failures", () => {
 		expect(started).toEqual([id]);
 		expect((await SubmissionsEntity.get(id))?.status).toBe("running");
 
-		// The second and third outages keep counting; the fourth gives up.
-		await run();
-		expect((await autoRetryOf()).autoRetry?.attempts).toBe(2);
-		await run();
-		expect((await autoRetryOf()).autoRetry?.attempts).toBe(3);
+		// Subsequent failures follow the progressive schedule until all 24h retries are exhausted.
+		for (let attempt = 2; attempt <= totalRetries; attempt++) {
+			const before = Date.now();
+			await run();
+			({ autoRetry } = await autoRetryOf());
+			expect(autoRetry?.attempts).toBe(attempt);
+			const expectedDelay = BROWSER_OUTAGE_RETRY_DELAYS_MS[attempt - 1]!;
+			const actualDelay = new Date(autoRetry!.nextAttemptAt).getTime() - before;
+			expect(actualDelay).toBeGreaterThanOrEqual(expectedDelay - 5_000);
+			expect(actualDelay).toBeLessThanOrEqual(expectedDelay + 60_000);
+		}
 		await run();
 		({ submission, autoRetry } = await autoRetryOf());
 		expect(submission.status).toBe("failed");
-		expect(submission.info).toBe("The browser service failed (Unexpected server response: 503). It failed 4 times in a row; retry once it has recovered.");
+		expect(submission.info).toBe(`The browser service failed (Unexpected server response: 503). It failed ${totalRetries + 1} times in a row; retry once it has recovered.`);
 		expect(autoRetry).toBeUndefined();
-		expect(await runDueWebsiteAutoRetries({ now: new Date(Date.now() + 24 * 60 * 60_000), startAnalysis })).toBe(0);
+		expect(await runDueWebsiteAutoRetries({ now: new Date(Date.now() + 48 * 60 * 60_000), startAnalysis })).toBe(0);
 	});
 
 	test("a due retry the retry boundary refuses, because the case was reported, is dropped instead of being refused on every pass", async () => {

@@ -1,10 +1,8 @@
 import type { BrowserContext, Frame, Page } from "patchright";
 
 import { waitForCaptchaOutcome } from "../../../browser/captcha_state";
-import { acquireFabricPatchrightSession } from "../../../browser/fabric";
-import { errorSummary } from "../../../util/error_text";
 import { OperationCanceledError, raceAbort } from "../../worker/cancellation";
-import { boundedCleanup, createLoginSessions, ProviderLoginError, type LoginSession, type LoginSessionDeps, type LoginSessions } from "../login_session/session";
+import { boundedCleanup, createLoginSessions, ProviderLoginError, withLoginBrowser, type LoginSession, type LoginSessionDeps, type LoginSessions } from "../login_session/session";
 import { mailedCodeReader, type MailedCodeReader } from "../kit/mailed_code";
 import { ALIBABA_CLOUD_PROVIDER } from "./definition";
 import { asRecord } from "../../../util/values";
@@ -183,19 +181,8 @@ export async function loginWithContext(
 	}
 }
 
-async function loginWithFabric(config: AlibabaCloudLoginConfig, signal: AbortSignal): Promise<AlibabaCloudSession> {
-	const launch = acquireFabricPatchrightSession({ operation: "alibaba-cloud-login" }, { egress: "reporting", leaseMode: "clone" });
-	const fabric = await raceAbort(launch, signal, () => {
-		void launch.then((late) => late.cancel().catch(() => undefined)).catch(() => undefined);
-	}, "Alibaba Cloud login was canceled.").catch((error: unknown) => {
-		if (error instanceof OperationCanceledError) throw error;
-		throw new ProviderLoginError(PROVIDER, errorSummary(error), { cause: error });
-	});
-	try {
-		return await loginWithContext(fabric.context, config, signal);
-	} finally {
-		await boundedCleanup(fabric.release());
-	}
+function loginWithFabric(config: AlibabaCloudLoginConfig, signal: AbortSignal): Promise<AlibabaCloudSession> {
+	return withLoginBrowser(PROVIDER, "alibaba-cloud-login", signal, (context) => loginWithContext(context, config, signal));
 }
 
 function createAlibabaCloudSessions(

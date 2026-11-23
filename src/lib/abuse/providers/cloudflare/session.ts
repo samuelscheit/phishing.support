@@ -1,9 +1,7 @@
 import type { BrowserContext, Page } from "patchright";
 
-import { acquireFabricPatchrightSession } from "../../../browser/fabric";
-import { errorSummary } from "../../../util/error_text";
 import { OperationCanceledError, raceAbort } from "../../worker/cancellation";
-import { boundedCleanup, createLoginSessions, ProviderLoginError, type LoginSessionOptions } from "../login_session/session";
+import { boundedCleanup, createLoginSessions, ProviderLoginError, withLoginBrowser, type LoginSessionOptions } from "../login_session/session";
 
 const PROVIDER = "Cloudflare dashboard";
 
@@ -129,20 +127,8 @@ export async function loginWithContext(
 	}
 }
 
-async function loginWithFabric(config: CloudflareLoginConfig, signal: AbortSignal): Promise<CloudflareSession> {
-	const launch = acquireFabricPatchrightSession({ operation: "cloudflare-dashboard-login" }, { egress: "reporting", leaseMode: "clone" });
-	const fabric = await raceAbort(launch, signal, () => {
-		void launch.then((late) => late.cancel().catch(() => undefined)).catch(() => undefined);
-	}, "Cloudflare dashboard login was canceled.").catch((error: unknown) => {
-		if (error instanceof OperationCanceledError) throw error;
-		// No credential has been typed yet; the browser service's own answer is safe to keep.
-		throw new ProviderLoginError(PROVIDER, errorSummary(error), { cause: error });
-	});
-	try {
-		return await loginWithContext(fabric.context, config, signal);
-	} finally {
-		await boundedCleanup(fabric.release());
-	}
+function loginWithFabric(config: CloudflareLoginConfig, signal: AbortSignal): Promise<CloudflareSession> {
+	return withLoginBrowser(PROVIDER, "cloudflare-dashboard-login", signal, (context) => loginWithContext(context, config, signal));
 }
 
 function parseCloudflareSession(value: unknown): CloudflareSession | undefined {

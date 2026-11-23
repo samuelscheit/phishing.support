@@ -25,9 +25,23 @@ export async function withBrowserBackoff<T>(capture: () => Promise<T>, delaysMs:
 	}
 }
 
-/** Automatic re-queues of a failure another visit can change: 10 minutes apart, at most 3 times. */
+/** Default automatic re-queues of a failure another visit can change: 10 minutes apart, at most 3 times. */
 const AUTO_RETRY_DELAY_MS = 10 * 60_000;
 const MAX_AUTO_RETRIES = 3;
+const DEFAULT_AUTO_RETRY_DELAYS_MS: readonly number[] = Array.from({ length: MAX_AUTO_RETRIES }, () => AUTO_RETRY_DELAY_MS);
+
+/**
+ * Automatic re-queues for a browser-service outage: progressive backoff
+ * spanning 24 hours (matching the abuse worker's `BROWSER_WAIT_LIMIT_MS`), so
+ * an hours-long Fabric outage recovers automatically without losing cases.
+ */
+export const BROWSER_OUTAGE_RETRY_DELAYS_MS: readonly number[] = [
+	5 * 60_000,
+	10 * 60_000,
+	15 * 60_000,
+	30 * 60_000,
+	...Array.from({ length: 23 }, () => 60 * 60_000),
+];
 
 /**
  * Fail the case with a readable reason. A failure another visit can change
@@ -38,13 +52,15 @@ const MAX_AUTO_RETRIES = 3;
 export async function failWebsiteAnalysis(submissionId: bigint, failure: {
 	info: string;
 	data?: Partial<WebsiteSubmissionData>;
-	retry?: { attempts: number; reason: string; exhausted: (visits: number) => string };
+	retry?: { attempts: number; reason: string; delaysMs?: readonly number[]; exhausted: (visits: number) => string };
 }): Promise<void> {
 	const submission = await SubmissionsEntity.get(submissionId);
 	const current = submission?.data.kind === "website" ? submission.data.website : undefined;
 	const website = current && { ...current, ...failure.data, autoRetry: undefined };
 	const { retry } = failure;
-	if (!website || !retry || retry.attempts >= MAX_AUTO_RETRIES) {
+	const delaysMs = retry?.delaysMs ?? DEFAULT_AUTO_RETRY_DELAYS_MS;
+	const delayMs = retry ? delaysMs[retry.attempts] : undefined;
+	if (!website || !retry || delayMs === undefined) {
 		await SubmissionsEntity.update(submissionId, {
 			status: "failed",
 			info: website && retry ? `${failure.info} ${retry.exhausted(retry.attempts + 1)}` : failure.info,
@@ -52,10 +68,10 @@ export async function failWebsiteAnalysis(submissionId: bigint, failure: {
 		});
 		return;
 	}
-	const nextAttemptAt = new Date(Date.now() + AUTO_RETRY_DELAY_MS);
+	const nextAttemptAt = new Date(Date.now() + delayMs);
 	await SubmissionsEntity.update(submissionId, {
 		status: "failed",
-		info: `${failure.info} Retrying automatically at ${nextAttemptAt.toISOString().slice(11, 16)} UTC (attempt ${retry.attempts + 1} of ${MAX_AUTO_RETRIES}).`,
+		info: `${failure.info} Retrying automatically at ${nextAttemptAt.toISOString().slice(11, 16)} UTC (attempt ${retry.attempts + 1} of ${delaysMs.length}).`,
 		data: { kind: "website", website: { ...website, autoRetry: { attempts: retry.attempts + 1, nextAttemptAt: nextAttemptAt.toISOString(), reason: retry.reason } } },
 	});
 }
@@ -64,6 +80,6 @@ export async function failWebsiteAnalysis(submissionId: bigint, failure: {
 export async function recordWebsiteAnalysisFailure(submissionId: bigint, error: unknown, attempts: number): Promise<void> {
 	const reason = errorText(error);
 	await failWebsiteAnalysis(submissionId, isBrowserInfrastructureFailure(error)
-		? { info: `The browser service failed (${reason}).`, retry: { attempts, reason, exhausted: (visits) => `It failed ${visits} times in a row; retry once it has recovered.` } }
+		? { info: `The browser service failed (${reason}).`, retry: { attempts, reason, delaysMs: BROWSER_OUTAGE_RETRY_DELAYS_MS, exhausted: (visits) => `It failed ${visits} times in a row; retry once it has recovered.` } }
 		: { info: reason });
 }

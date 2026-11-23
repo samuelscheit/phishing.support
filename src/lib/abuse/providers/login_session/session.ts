@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
+import type { BrowserContext } from "patchright";
 
 import { releaseLock, tryAcquireLock } from "../../persistence/locks";
 import { OperationCanceledError, raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
 import { sqliteLoginSessionStore, type LoginSessionStore } from "./store";
 import { sha256Hex } from "../../../util/hash";
 import { raceTimeout } from "../../../util/async";
-import { isBrowserUnavailable } from "../../../browser/fabric";
+import { errorSummary } from "../../../util/error_text";
+import { acquireFabricPatchrightSession, BrowserUnavailableError, isBrowserUnavailable } from "../../../browser/fabric";
 
 /**
  * A logged-in provider account session: whatever a provider needs to call its
@@ -186,3 +188,51 @@ export function createLoginSessions<C, S extends LoginSession>(spec: LoginSessio
 export async function boundedCleanup(operation: Promise<unknown>, ms = 10_000): Promise<void> {
 	await raceTimeout(operation, ms, () => new Error("cleanup timed out")).catch(() => undefined);
 }
+
+export type LoginBrowserSession = {
+	context: BrowserContext;
+	release(): Promise<void>;
+	cancel(): Promise<void>;
+};
+
+export type AcquireLoginBrowser = (operation: string) => Promise<LoginBrowserSession>;
+
+const defaultAcquireLoginBrowser: AcquireLoginBrowser = (operation) =>
+	acquireFabricPatchrightSession({ operation }, { egress: "reporting", leaseMode: "clone" });
+
+/**
+ * Lease a Fabric reporting browser for a provider login and always release it.
+ *
+ * If the login's own deadline fires before a browser is acquired (for instance
+ * `CLOUDFLARE_LOGIN_TIMEOUT_MS` racing `PATCHRIGHT_CONNECT_TIMEOUT_MS` during a
+ * Fabric outage), no credential was ever typed: wrap the timeout in
+ * `BrowserUnavailableError` so `createLoginSessions` skips account-level failure
+ * caching and the worker waits for Fabric instead of burning job retries.
+ */
+export async function withLoginBrowser<T>(
+	provider: string,
+	operation: string,
+	signal: AbortSignal,
+	run: (context: BrowserContext) => Promise<T>,
+	acquire: AcquireLoginBrowser = defaultAcquireLoginBrowser,
+): Promise<T> {
+	const launch = acquire(operation);
+	const fabric = await raceAbort(launch, signal, () => {
+		void launch.then((late) => late.cancel().catch(() => undefined)).catch(() => undefined);
+	}, `${provider} login was canceled.`).catch((error: unknown) => {
+		const timedOut = signal.reason instanceof DOMException && signal.reason.name === "TimeoutError";
+		if (error instanceof OperationCanceledError) {
+			if (!timedOut) throw error;
+			const unavailable = new BrowserUnavailableError(new Error("timed out waiting for a browser"));
+			throw new ProviderLoginError(provider, unavailable.message, { cause: unavailable });
+		}
+		// No credential has been typed yet; the browser service's own answer is safe to keep.
+		throw new ProviderLoginError(provider, errorSummary(error), { cause: error });
+	});
+	try {
+		return await run(fabric.context);
+	} finally {
+		await boundedCleanup(fabric.release());
+	}
+}
+
