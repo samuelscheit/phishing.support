@@ -11,7 +11,9 @@ import { runDecisionAgent, type DecisionAgentModel, type DecisionAgentOutcome, t
 import { checkReportedSites, reasonSaysContentGone, takedownConfirmed } from "./liveness";
 import { caseCaptureNames, type AttachableFile, type DecisionToolDependencies } from "./tools";
 import { asRecord } from "../../util/values";
-import { accessGateOf, arrivalChain } from "../../website/visit/access_gate";
+import { accessGateOf } from "../../website/visit/access_gate";
+import { analyzedPage } from "../../website/visit/capture_files";
+import { isSameWebsite } from "../../website/info/site";
 
 const MAX_MESSAGE_TEXT = 6_000;
 
@@ -83,9 +85,11 @@ export async function followUpProviderDecision(
 	const caseUrl = abuseEmailCaseUrl(input.report.submissionId);
 	const attachable = new Map<string, AttachableFile>(input.evidenceArtifacts.map((artifact) => [artifact.name, { filename: artifact.name, mimeType: artifact.mimeType, content: Buffer.from(artifact.blob) }]));
 	const visitor = reporterBrowserIdentity(input.report.requesterHeaders ?? undefined);
-	// From the link first submitted: a case handed off from a redirecting site starts at its entry.
-	const arrival = submissionId === undefined ? [] : await arrivalChain(submissionId);
-	const capturedUrl = website && (arrival.find((hop) => hop.contentCaptured)?.url ?? website.archiveUrl ?? website.url);
+	// The case's whole chain, from the link first submitted; the reported page is the first URL the report names.
+	const chain = website?.navigationHops ?? [];
+	const capturedUrl = website && (target.observedUrls[0] ?? analyzedPage(website)?.hop.url ?? website.url);
+	// The gate kept with the case, with its direct visit, is that of the page it was checked for; any other page's is read from the chain.
+	const keptGate = website?.accessGate?.bareVisit && website.accessGate.bareVisit.url === capturedUrl ? website.accessGate : undefined;
 
 	const context = {
 		now: (dependencies.now ?? (() => new Date()))().toISOString(),
@@ -111,13 +115,14 @@ export async function followUpProviderDecision(
 			url: caseUrl ?? null,
 			...(website ? {
 				submittedUrl: website.url,
-				capturedUrl: website.archiveUrl ?? null,
-				findings: (website.siteAssessments ?? []).filter((assessment) => assessment.finding === "phishing" || assessment.finding === "malware"),
+				capturedUrl: capturedUrl ?? null,
+				// The findings of the reported site; other sites of the chain have reports of their own.
+				findings: (website.siteAssessments ?? []).filter((assessment) => (assessment.finding === "phishing" || assessment.finding === "malware")
+					&& capturedUrl !== undefined && chain.some((hop) => hop.index === assessment.hopIndex && isSameWebsite(hop.url, capturedUrl))),
 				cloaking: website.cloaking ?? null,
 				device: website.device ?? null,
-				navigation: arrival.map(({ url, status, redirectTo, visitorStep }) => ({ url, status, redirectTo: redirectTo ?? null, ...(visitorStep ? { passedPageOfItsOwn: true } : {}) })),
-				// Cases reported before the gate was kept with them have it read from their arrival.
-				accessGate: website.accessGate ?? (capturedUrl ? accessGateOf(arrival, capturedUrl) : undefined) ?? null,
+				navigation: chain.map(({ url, status, redirectTo, visitorStep }) => ({ url, status, redirectTo: redirectTo ?? null, ...(visitorStep ? { passedPageOfItsOwn: true } : {}) })),
+				accessGate: keptGate ?? (capturedUrl ? accessGateOf(chain, capturedUrl) : undefined) ?? null,
 				visit: website.visit?.report ?? null,
 			} : {}),
 		},

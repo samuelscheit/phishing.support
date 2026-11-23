@@ -99,7 +99,7 @@ describe("kit files from urlscan for a capture that recorded none", () => {
 
 	test("only the analyzed page is matched, and the backfill writes only its own field", async () => {
 		// The visit moved on from a gate page; the analyzed page is its second step.
-		await oldSite(6n, { navigationHops: [{ index: 0, url: "https://exodus-test.com/", hostname: "exodus-test.com", status: 200, contentCaptured: false, visitorStep: { submitted: [] } }, { index: 1, url: "https://exodus-test.com/restore", hostname: "exodus-test.com", status: 200, contentCaptured: true }] });
+		await oldSite(6n, { analyzedHopIndex: 1, navigationHops: [{ index: 0, url: "https://exodus-test.com/", hostname: "exodus-test.com", status: 200, contentCaptured: false, visitorStep: { submitted: [] } }, { index: 1, url: "https://exodus-test.com/restore", hostname: "exodus-test.com", status: 200, contentCaptured: true }] });
 		const { fetch } = urlscan([{ id: "kit", html: KIT_HTML }]);
 		const pages = async () => [{ name: "website.mhtml", text: OUR_PAGE }, { name: "website-step2.mhtml", text: "Checking your browser before accessing the site. This process is automatic and you will be redirected shortly to the requested content." }];
 		expect(await backfillKitResources(6n, { fetch, apiKey: "test", loadPageTexts: pages })).toMatchObject({ kind: "no_match", reason: "no scan showed our page" });

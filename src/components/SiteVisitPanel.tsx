@@ -61,9 +61,11 @@ export { useLiveVisit };
  * `viewport` frames have the desktop viewport's 2:1 shape; a stored
  * screenshot takes its own height, up to most of the window, and scrolls.
  */
-export function SiteVisitBrowser({ running, pages, live: { frame }, fallbackUrl, openAction }: {
+export function SiteVisitBrowser({ running, pages, initialPage, live: { frame }, fallbackUrl, openAction }: {
 	running: boolean;
 	pages: SiteVisitPage[];
+	/** The page shown until another is picked: the one the case's verdict rests on; the last page by default. */
+	initialPage?: number;
 	live: LiveVisit;
 	/** The address shown before the visit reached any page: the submitted URL. */
 	fallbackUrl: string;
@@ -71,8 +73,9 @@ export function SiteVisitBrowser({ running, pages, live: { frame }, fallbackUrl,
 	openAction?: React.ReactNode;
 }) {
 	const [selected, setSelected] = useState<number | null>(null);
-	const shown = selected ?? pages.length - 1;
+	const shown = selected ?? (initialPage !== undefined && initialPage < pages.length ? initialPage : pages.length - 1);
 	const page = pages[shown];
+	const hosts = new Set(pages.map(({ url }) => hostOf(url)));
 	const live = running && Boolean(frame);
 	const url = live ? frame!.url : page?.url ?? fallbackUrl;
 	const fit = !live && page?.screenshotId ? "content" : "viewport";
@@ -118,6 +121,7 @@ export function SiteVisitBrowser({ running, pages, live: { frame }, fallbackUrl,
 						<li key={`${index}:${candidate.url}`} className="shrink-0">
 							<button
 								type="button"
+								title={candidate.url}
 								onClick={() => setSelected(index)}
 								aria-current={index === shown ? "step" : undefined}
 								className={cn("w-28 overflow-hidden rounded-md border text-left transition-[border-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", index === shown ? "border-primary ring-1 ring-primary" : "hover:border-foreground/30")}
@@ -128,7 +132,7 @@ export function SiteVisitBrowser({ running, pages, live: { frame }, fallbackUrl,
 										<img src={`/api/artifacts/${candidate.screenshotId}`} alt="" className="absolute inset-0 h-full w-full object-cover object-top" />
 									) : null}
 								</div>
-								<div className="truncate px-1.5 py-1 text-[10px] text-muted-foreground"><span className="font-medium text-foreground">{index + 1}</span> · {pathOf(candidate.url)}</div>
+								<div className="truncate px-1.5 py-1 text-[10px] text-muted-foreground"><span className="font-medium text-foreground">{index + 1}</span> · {pageLabel(candidate.url, hosts.size > 1)}</div>
 							</button>
 						</li>
 					))}
@@ -139,10 +143,12 @@ export function SiteVisitBrowser({ running, pages, live: { frame }, fallbackUrl,
 }
 
 
-function pathOf(url: string): string {
+/** A page's label in the strip: its path, led by its host when the visit passed several hosts. */
+function pageLabel(url: string, withHost: boolean): string {
 	try {
 		const parsed = new URL(url);
-		return parsed.pathname === "/" ? parsed.host : parsed.pathname;
+		if (parsed.pathname === "/") return parsed.host;
+		return withHost ? `${parsed.host.replace(/^www\./, "")}${parsed.pathname}` : parsed.pathname;
 	} catch {
 		return url;
 	}

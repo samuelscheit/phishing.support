@@ -42,9 +42,8 @@ describe("kit sibling jobs", () => {
 			migrated: await websiteCase(420000000000000004n, "casino.example.com"),
 			sibling: await websiteCase(420000000000000005n, "sibling.example.com", { source: "kit-sibling:420000000000000001:1", siteAssessments: CREDENTIAL_KIT }),
 			originSibling: await websiteCase(420000000000000006n, "origin.example.com", { source: "origin-sibling:420000000000000001:1", siteAssessments: CREDENTIAL_KIT }),
-			// A sibling that redirected keeps its lineage through the redirect hand-off.
-			redirectedSibling: await websiteCase(420000000000000007n, "landing.example.com", { source: "redirect:420000000000000005", siteAssessments: CREDENTIAL_KIT }),
-			redirectedOriginal: await websiteCase(420000000000000008n, "final.example.com", { source: "redirect:420000000000000001", siteAssessments: CREDENTIAL_KIT }),
+			// A redirector watch's visit is a case of its own whose chain may reach the kit: an original report.
+			watched: await websiteCase(420000000000000007n, "final.example.com", { source: "redirector-watch:1", siteAssessments: CREDENTIAL_KIT }),
 		};
 		const seeds = Object.fromEntries(await Promise.all(Object.entries(cases).map(async ([name, report]) => {
 			const reportRow = (await AbuseRepository.getReport(report.reportId))!;
@@ -59,8 +58,7 @@ describe("kit sibling jobs", () => {
 			migrated: false,
 			sibling: false,
 			originSibling: false,
-			redirectedSibling: false,
-			redirectedOriginal: true,
+			watched: true,
 		});
 	});
 

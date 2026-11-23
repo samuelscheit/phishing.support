@@ -13,9 +13,13 @@ import { scriptedVisitSession } from "../../site_visit/test_helpers";
 import { analyzeWebsite } from "./ai";
 import type { WebsiteAnalysisDependencies } from "./analysis_types";
 import { BROWSER_OUTAGE_RETRY_DELAYS_MS } from "./failure";
-import { capturedHostNavigation, websiteReportUrls, websiteSiteAssessments } from "../info/report_hops";
+import { chainSiteAssessments, websiteReportUrls } from "../info/report_hops";
 import type { WebsiteNavigationHop } from "../types";
 import { waitForStatus, websiteSubmission } from "../test_helpers";
+import { getDb } from "../../db";
+import { abuseJobs, abuseReports } from "../../abuse/schema";
+import { REPORT_JOIN_WINDOW_MS } from "../../abuse/persistence/reports";
+import { eq } from "drizzle-orm";
 
 useTemporaryDatabase();
 
@@ -155,6 +159,16 @@ describe("a submitted address that serves a file, not a page", () => {
 	});
 });
 
+/** The case's website data. */
+function websiteOf(submission: Awaited<ReturnType<typeof SubmissionsEntity.get>>) {
+	return submission?.data.kind === "website" ? submission.data.website : undefined;
+}
+
+/** Each hop's verdict, and the page it rests on. */
+function verdicts(submission: Awaited<ReturnType<typeof SubmissionsEntity.get>>) {
+	return websiteOf(submission)?.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }));
+}
+
 describe("website redirects", () => {
 	test("an IP-hosted kit reached through a same-host http→https redirect is reported with both URLs", async () => {
 		const httpUrl = "http://85.215.226.225/Netflix/Home/login.php";
@@ -167,10 +181,9 @@ describe("website redirects", () => {
 		const submission = await SubmissionsEntity.get(id);
 		expect(submission?.status).toBe("reported");
 		expect(submission?.info).toBe(`Phishing confirmed at ${httpsUrl}; evidence for it and the 1 URL on 85.215.226.225 that leads to it is being collected before the report is sent.`);
-		const website = submission?.data.kind === "website" ? submission.data.website : undefined;
-		expect(website?.siteAssessments?.map(({ hopIndex, finding }) => ({ hopIndex, finding }))).toEqual([
-			{ hopIndex: 0, finding: "phishing" },
-			{ hopIndex: 1, finding: "phishing" },
+		expect(verdicts(submission)).toEqual([
+			{ hopIndex: 0, finding: "phishing", judgedHopIndex: 1 },
+			{ hopIndex: 1, finding: "phishing", judgedHopIndex: 1 },
 		]);
 
 		const report = await AbuseRepository.getReportForSubmission(id);
@@ -180,7 +193,7 @@ describe("website redirects", () => {
 		]);
 	});
 
-	test("a capture that ends on another host opens that host's case and links it from the submitted one", async () => {
+	test("a capture that ends on another host is judged and reported in the submitted case, for the kit's host only", async () => {
 		const shortUrl = "https://bit.ly/netflix-help";
 		const kitStart = "http://login-netflix.example.com/";
 		const kitPage = "https://login-netflix.example.com/signin";
@@ -195,63 +208,33 @@ describe("website redirects", () => {
 
 		await analyzeWebsite({ submissionId: id, url: shortUrl }, dependencies(archive, archiveCalls));
 
-		const parent = await SubmissionsEntity.get(id);
-		expect(parent?.status).toBe("redirected");
-		expect(parent?.info).toBe(`${shortUrl} redirects to login-netflix.example.com; that site is analyzed and reported in its own case.`);
-		const parentWebsite = parent?.data.kind === "website" ? parent.data.website : undefined;
-		expect(parentWebsite?.navigationHops).toEqual(archive.navigationHops);
-		expect(parentWebsite?.siteAssessments).toBeUndefined();
-		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
-		// The capture moves to the destination's case; the redirecting one keeps no copy.
-		expect(await ArtifactsEntity.listForSubmission(id)).toEqual([]);
-
-		const childId = BigInt(parentWebsite!.redirectSubmissionId!);
-		const child = await waitForStatus(childId, ["reported", "failed", "invalid"]);
-		expect(child.status).toBe("reported");
-		expect(child.source).toBe(`redirect:${id}`);
-		const childWebsite = child.data.kind === "website" ? child.data.website : undefined;
-		expect(childWebsite?.url).toBe(kitStart);
-		expect(childWebsite?.navigationHops).toEqual([
-			{ ...hop(0, kitStart, 302, kitPage) },
-			{ ...hop(1, kitPage, 200) },
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("reported");
+		expect(submission?.info).toBe(`Phishing confirmed at ${kitPage}; evidence for it and the 1 URL on login-netflix.example.com that leads to it is being collected before the report is sent.`);
+		const website = websiteOf(submission);
+		expect(website?.navigationHops).toEqual(archive.navigationHops);
+		expect(website?.analyzedHopIndex).toBe(2);
+		expect(website?.archiveUrl).toBe(kitPage);
+		expect(website?.kitResources).toEqual(kitResources);
+		// The shortener only redirected: it showed no page of its own and never inherits the kit's verdict.
+		expect(verdicts(submission)).toEqual([
+			{ hopIndex: 0, finding: "insufficient_evidence", judgedHopIndex: undefined },
+			{ hopIndex: 1, finding: "phishing", judgedHopIndex: 2 },
+			{ hopIndex: 2, finding: "phishing", judgedHopIndex: 2 },
 		]);
+		// One capture, kept with the case that made it; no other case is opened.
+		expect(archiveCalls).toHaveLength(1);
+		expect((await ArtifactsEntity.listForSubmission(id)).map((artifact) => artifact.name).sort()).toEqual(["evidence-manifest.json", "visit-manifest.json", "visit-protocol.txt", "visit-record.json", "website-stamped.png", "website.mhtml", "website.png"]);
+		expect((await SubmissionsEntity.listCards({ limit: 10 })).map((card) => card.id)).toEqual([id]);
 
-		// The browser is not sent to the kit again: the parent's capture is reused.
-		expect(archiveCalls).toHaveLength(2);
-		expect(archiveCalls[1]).toMatchObject({ url: kitStart, archivedUrl: kitPage, mhtmlSnapshot: MHTML, kitResources });
-		// The kit's captured file hashes move with the capture, so its case can search for siblings.
-		expect(childWebsite?.kitResources).toEqual(kitResources);
-		// The capture moves with its evidence package (the stamped screenshot and the manifest) and the visit's record.
-		expect((await ArtifactsEntity.listForSubmission(childId)).map((artifact) => artifact.name).sort()).toEqual(["evidence-manifest.json", "visit-manifest.json", "visit-protocol.txt", "visit-record.json", "website-stamped.png", "website.mhtml", "website.png"]);
-
-		const report = await AbuseRepository.getReportForSubmission(childId);
-		const targets = await AbuseRepository.listTargets(report!.id);
+		const reports = await AbuseRepository.listReportsForSubmission(id);
+		expect(reports).toHaveLength(1);
+		const targets = await AbuseRepository.listTargets(reports[0]!.id);
 		expect(targets.map(({ normalizedTarget, observedUrls }) => ({ normalizedTarget, observedUrls }))).toEqual([
 			{ normalizedTarget: "login-netflix.example.com", observedUrls: [kitPage, kitStart] },
 		]);
 		// Its campaign's kit search may start from it: an original report's site.
-		expect(await isKitSiblingSeed(childId)).toBe(true);
-	});
-
-	test("a redirect to a host that already has a case links the existing case instead of duplicating it", async () => {
-		const kitPage = "https://kit.example.net/login";
-		const existingId = await SubmissionsEntity.create({
-			id: 50n,
-			kind: "website",
-			data: { kind: "website", website: { url: kitPage } },
-			dedupeKey: "website-kit.example.net",
-			status: "reported",
-		});
-		const archive = archiveOf([hop(0, "https://short.example.org/x", 302, kitPage), hop(1, kitPage, 200)]);
-		const archiveCalls: ArchiveCall[] = [];
-		const id = await websiteSubmission(2n, "https://short.example.org/x");
-
-		await analyzeWebsite({ submissionId: id, url: "https://short.example.org/x" }, dependencies(archive, archiveCalls));
-
-		const parent = await SubmissionsEntity.get(id);
-		expect(parent?.status).toBe("redirected");
-		expect(parent?.data.kind === "website" ? parent.data.website.redirectSubmissionId : undefined).toBe(existingId.toString());
-		expect(archiveCalls).toHaveLength(1);
+		expect(await isKitSiblingSeed(id)).toBe(true);
 	});
 
 	test("a second site on a shared host opens its own case and is reported on its own", async () => {
@@ -266,7 +249,7 @@ describe("website redirects", () => {
 		// The same site submitted again still lands on its own case.
 		expect(await createWebsiteSubmission({ url: "https://sites.google.com/view/Revert-Change/" }, async () => undefined)).toBe(id);
 
-		const submission = await waitForStatus(id, ["reported", "failed", "invalid", "redirected"]);
+		const submission = await waitForStatus(id, ["reported", "failed", "invalid"]);
 		expect(submission.status).toBe("reported");
 		expect(submission.info).toBe(`Phishing confirmed at ${page}; evidence for it and the 1 URL on sites.google.com/view/revert-change that leads to it is being collected before the report is sent.`);
 		const report = await AbuseRepository.getReportForSubmission(id);
@@ -276,58 +259,176 @@ describe("website redirects", () => {
 		]);
 	});
 
-	test("a redirect from one tenant of a shared host to another hands off to the other tenant's case", async () => {
+	test("a redirect from one tenant of a shared host to another judges each tenant as its own site", async () => {
 		const url = "https://sites.google.com/view/landing";
 		const kitPage = "https://sites.google.com/view/wallet-restore/home";
 		const id = await websiteSubmission(3n, url);
 
 		await analyzeWebsite({ submissionId: id, url }, dependencies(archiveOf([hop(0, url, 302, kitPage), hop(1, kitPage, 200)])));
 
-		const parent = await SubmissionsEntity.get(id);
-		expect(parent?.status).toBe("redirected");
-		expect(parent?.info).toBe(`${url} redirects to sites.google.com/view/wallet-restore; that site is analyzed and reported in its own case.`);
-		const child = await waitForStatus(BigInt(parent!.data.kind === "website" ? parent!.data.website.redirectSubmissionId! : "0"), ["reported", "failed", "invalid"]);
-		expect(child.status).toBe("reported");
-		expect(child.data.kind === "website" ? child.data.website.navigationHops?.map((hop) => hop.url) : undefined).toEqual([kitPage]);
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("reported");
+		expect(submission?.info).toBe(`Phishing confirmed at ${kitPage}; its evidence is being collected before the report is sent.`);
+		expect(verdicts(submission)).toEqual([
+			{ hopIndex: 0, finding: "insufficient_evidence", judgedHopIndex: undefined },
+			{ hopIndex: 1, finding: "phishing", judgedHopIndex: 1 },
+		]);
+		const report = await AbuseRepository.getReportForSubmission(id);
+		expect((await AbuseRepository.listTargets(report!.id)).map(({ normalizedTarget, observedUrls }) => ({ normalizedTarget, observedUrls }))).toEqual([
+			{ normalizedTarget: "sites.google.com", observedUrls: [kitPage] },
+		]);
+	});
+
+	test("a redirect to a harmless site is the host's declared destination: a verdict, never a cloaking suspicion", async () => {
+		const url = "https://short.example.org/wiki";
+		const decoy = "https://www.wikipedia.org/";
+		const id = await websiteSubmission(14n, url);
+
+		await analyzeWebsite({ submissionId: id, url }, { ...dependencies(archiveOf([hop(0, url, 302, decoy), hop(1, decoy, 200)])), analysisClient: benignModel() });
+
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("invalid");
+		expect(submission?.info).toBe(`No reportable phishing or malware evidence was found at the captured destination ${decoy}; no report was created.`);
+		expect(websiteOf(submission)?.cloaking).toBeUndefined();
+		expect(verdicts(submission)).toEqual([
+			{ hopIndex: 0, finding: "insufficient_evidence", judgedHopIndex: undefined },
+			{ hopIndex: 1, finding: "benign", judgedHopIndex: 1 },
+		]);
 	});
 });
 
-describe("same-host navigation", () => {
+describe("one report per site across cases", () => {
+	const kitPage = "https://kit.example.net/login";
+	const lure = (index: number) => `https://lure-${index}.example.org/x`;
+	const reachKit = (id: bigint, from: string) => analyzeWebsite({ submissionId: id, url: from }, dependencies(archiveOf([hop(0, from, 302, kitPage), hop(1, kitPage, 200)])));
+
+	test("a second case that reaches a site another case is reporting joins that report: one report, naming both cases", async () => {
+		const first = await websiteSubmission(20n, lure(1));
+		await reachKit(first, lure(1));
+		const report = await AbuseRepository.getReportForSubmission(first);
+		expect(report).toBeDefined();
+
+		const second = await websiteSubmission(21n, lure(2));
+		await reachKit(second, lure(2));
+
+		const submission = await SubmissionsEntity.get(second);
+		expect(submission?.status).toBe("reported");
+		expect(submission?.info).toBe(`Phishing confirmed at ${kitPage}; kit.example.net is already being reported in case ${first.toString()}, whose report now names this case too.`);
+		// The second case owns no report of its own; the first one's is linked to it and says so.
+		expect(await AbuseRepository.listReportsForSubmission(second)).toEqual([]);
+		expect((await AbuseRepository.listJoinedReportsForSubmission(second)).map(({ id }) => id)).toEqual([report!.id]);
+		expect(await AbuseRepository.listJoinedCases(report!.id)).toEqual([second]);
+		const joined = (await AbuseRepository.listEvents(report!.id)).filter((event) => event.eventType === "report.case_joined");
+		expect(joined.map(({ data }) => data)).toEqual([{ submissionId: second.toString(), urls: [kitPage] }]);
+		// Its redirector is watched under the shared report: another lure of the same kit.
+		const watches = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "watch_redirector")).all();
+		expect(watches.map(({ reportId, dedupeKey }) => ({ reportId, dedupeKey }))).toEqual([
+			{ reportId: report!.id, dedupeKey: `watch-redirector:${lure(1)}` },
+			{ reportId: report!.id, dedupeKey: `watch-redirector:${lure(2)}` },
+		]);
+
+		// A replayed analysis of either case adds nothing: no second report, link or event.
+		await reachKit(second, lure(2));
+		await reachKit(first, lure(1));
+		expect(await AbuseRepository.listJoinedCases(report!.id)).toEqual([second]);
+		expect((await AbuseRepository.listEvents(report!.id)).filter((event) => event.eventType === "report.case_joined")).toHaveLength(1);
+		expect(await AbuseRepository.listReportsForSubmission(first)).toHaveLength(1);
+	});
+
+	test("a site whose report never reached a provider, or was sent over a month ago, is reported anew", async () => {
+		const first = await websiteSubmission(30n, lure(1));
+		await reachKit(first, lure(1));
+		const report = (await AbuseRepository.getReportForSubmission(first))!;
+		const db = await getDb();
+
+		db.update(abuseReports).set({ status: "no_route" }).where(eq(abuseReports.id, report.id)).run();
+		const second = await websiteSubmission(31n, lure(2));
+		await reachKit(second, lure(2));
+		const secondReport = await AbuseRepository.getReportForSubmission(second);
+		expect(secondReport?.id).not.toBe(report.id);
+
+		db.update(abuseReports).set({ createdAt: new Date(Date.now() - REPORT_JOIN_WINDOW_MS - 60_000) }).where(eq(abuseReports.id, secondReport!.id)).run();
+		const third = await websiteSubmission(32n, lure(3));
+		await reachKit(third, lure(3));
+		expect((await AbuseRepository.getReportForSubmission(third))?.id).not.toBe(secondReport!.id);
+		expect(await AbuseRepository.listJoinedReportsForSubmission(third)).toEqual([]);
+	});
+
+	test("another tenant of the same shared host is another site: its own report", async () => {
+		const tenant = (name: string) => `https://sites.google.com/view/${name}/login`;
+		const first = await websiteSubmission(40n, tenant("one"));
+		await analyzeWebsite({ submissionId: first, url: tenant("one") }, dependencies(archiveOf([hop(0, tenant("one"), 200)])));
+		const second = await websiteSubmission(41n, tenant("two"));
+		await analyzeWebsite({ submissionId: second, url: tenant("two") }, dependencies(archiveOf([hop(0, tenant("two"), 200)])));
+
+		const [one, two] = await Promise.all([AbuseRepository.getReportForSubmission(first), AbuseRepository.getReportForSubmission(second)]);
+		expect(one && two && one.id !== two.id).toBe(true);
+		expect(await AbuseRepository.listJoinedReportsForSubmission(second)).toEqual([]);
+	});
+});
+
+describe("the sites of a chain", () => {
 	const hops = [
 		hop(0, "https://bit.ly/a", 301, "http://kit.example.com/"),
 		hop(1, "http://kit.example.com/", 302, "https://kit.example.com/"),
 		hop(2, "https://kit.example.com/", 302, "https://www.kit.example.com/login"),
 		hop(3, "https://www.kit.example.com/login", 200),
 	];
+	const phishing = { finding: "phishing" as const, phishingBasis: "credential_theft" as const, evidenceQuote: "Sign In" };
 
 	test("only an exact hostname counts as the same site", () => {
-		expect(capturedHostNavigation(hops, hops[3]!)).toEqual([{ ...hops[3]!, index: 0 }]);
 		expect(websiteReportUrls(hops, hops[3]!)).toEqual(["https://www.kit.example.com/login"]);
+		expect(chainSiteAssessments(hops, new Map([["www.kit.example.com", { judgedHopIndex: 3, classification: phishing }]])).map(({ hopIndex, finding }) => ({ hopIndex, finding }))).toEqual([
+			{ hopIndex: 0, finding: "insufficient_evidence" },
+			{ hopIndex: 1, finding: "insufficient_evidence" },
+			{ hopIndex: 2, finding: "insufficient_evidence" },
+			{ hopIndex: 3, finding: "phishing" },
+		]);
 	});
 
-	test("the trailing same-host run is re-indexed as if submitted directly", () => {
+	test("a site's redirect hops share its verdict and are reported with its page; other sites never inherit it", () => {
 		const sameHost = hops.slice(0, 3).concat({ ...hop(3, "https://kit.example.com/login", 200) });
-		expect(capturedHostNavigation(sameHost, sameHost[3]!).map(({ index, url }) => ({ index, url }))).toEqual([
-			{ index: 0, url: "http://kit.example.com/" },
-			{ index: 1, url: "https://kit.example.com/" },
-			{ index: 2, url: "https://kit.example.com/login" },
-		]);
 		expect(websiteReportUrls(sameHost, sameHost[3]!)).toEqual([
 			"https://kit.example.com/login",
 			"http://kit.example.com/",
 			"https://kit.example.com/",
 		]);
+		const assessments = chainSiteAssessments(sameHost, new Map([["kit.example.com", { judgedHopIndex: 3, classification: phishing }]]));
+		expect(assessments).toEqual([
+			{ hopIndex: 0, finding: "insufficient_evidence" },
+			{ ...phishing, hopIndex: 1, judgedHopIndex: 3 },
+			{ ...phishing, hopIndex: 2, judgedHopIndex: 3 },
+			{ ...phishing, hopIndex: 3, judgedHopIndex: 3 },
+		]);
 	});
 
-	test("same-host redirect hops share the captured finding; other hosts never inherit it", () => {
-		const sameHost = hops.slice(0, 3).concat({ ...hop(3, "https://kit.example.com/login", 200) });
-		const assessments = websiteSiteAssessments(sameHost, 3, { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign In" });
-		expect(assessments.map(({ hopIndex, finding }) => ({ hopIndex, finding }))).toEqual([
-			{ hopIndex: 0, finding: "insufficient_evidence" },
-			{ hopIndex: 1, finding: "phishing" },
-			{ hopIndex: 2, finding: "phishing" },
-			{ hopIndex: 3, finding: "phishing" },
+	test("every site of a multi-site chain keeps its own verdict: trackers, an interstitial and the destination", () => {
+		// The design's example: onlinesafetyall.com → wtrck.com → ultimateprizesearch.com (a page whose script moves on) → wtrck.com → sdsecurenetwork.com → miamitrk.com → zatos.com.
+		const chain = [
+			hop(0, "https://onlinesafetyall.com/", 302, "https://wtrck.com/a"),
+			hop(1, "https://wtrck.com/a", 302, "https://ultimateprizesearch.com/"),
+			{ ...hop(2, "https://ultimateprizesearch.com/", 200, "https://wtrck.com/b"), bodyCaptured: true },
+			hop(3, "https://wtrck.com/b", 302, "https://sdsecurenetwork.com/"),
+			hop(4, "https://sdsecurenetwork.com/", 302, "https://miamitrk.com/c"),
+			hop(5, "https://miamitrk.com/c", 302, "https://zatos.com/"),
+			hop(6, "https://zatos.com/", 200),
+		];
+		const benign = { finding: "benign" as const };
+		const assessments = chainSiteAssessments(chain, new Map([
+			["ultimateprizesearch.com", { judgedHopIndex: 2, classification: benign }],
+			["zatos.com", { judgedHopIndex: 6, classification: phishing }],
+		]));
+		expect(assessments.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([
+			{ hopIndex: 0, finding: "insufficient_evidence", judgedHopIndex: undefined },
+			// The tracker appears twice; it showed nothing either time.
+			{ hopIndex: 1, finding: "insufficient_evidence", judgedHopIndex: undefined },
+			{ hopIndex: 2, finding: "benign", judgedHopIndex: 2 },
+			{ hopIndex: 3, finding: "insufficient_evidence", judgedHopIndex: undefined },
+			{ hopIndex: 4, finding: "insufficient_evidence", judgedHopIndex: undefined },
+			{ hopIndex: 5, finding: "insufficient_evidence", judgedHopIndex: undefined },
+			{ hopIndex: 6, finding: "phishing", judgedHopIndex: 6 },
 		]);
+		expect(websiteReportUrls(chain, chain[6]!)).toEqual(["https://zatos.com/"]);
 	});
 });
 
@@ -342,24 +443,26 @@ describe("cloaked websites", () => {
 	const kitUrl = "https://device.ledger-config.live/en";
 	const decoyUrl = "https://www.wikipedia.org/";
 
-	test("a cloaker whose residential capture reached the kit hands that kit to its own case and says why", async () => {
+	test("a cloaker whose residential capture reached the kit has the kit reported in its own case, the jump kept as how it was reached", async () => {
 		const detail = `${cloakerUrl} sent the residential exit to ledger-config.live by script`;
 		const archive = { ...archiveOf([hop(0, cloakerUrl, 200, kitUrl), hop(1, kitUrl, 200)]), cloaking: { outcome: "scripted" as const, detail } };
 		const id = await websiteSubmission(374589286864916480n, cloakerUrl);
 
 		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, dependencies(archive));
 
-		const parent = await SubmissionsEntity.get(id);
-		expect(parent?.status).toBe("redirected");
-		expect(parent?.info).toBe(`${detail}; that site is analyzed in its own case. If it shows nothing reportable, ${cloakerUrl} is treated as a cloaker that turned every route away.`);
-		const website = parent?.data.kind === "website" ? parent.data.website : undefined;
-		expect(website?.cloaking).toEqual({ outcome: "scripted", detail });
-		const childId = BigInt(website?.redirectSubmissionId ?? "0");
-		expect((await waitForStatus(childId, ["reported", "failed", "invalid"])).status).toBe("reported");
-		expect((await SubmissionsEntity.get(id))?.status).toBe("redirected");
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("reported");
+		expect(submission?.info).toBe(`Phishing confirmed at ${kitUrl}; its evidence is being collected before the report is sent.`);
+		expect(websiteOf(submission)?.cloaking).toEqual({ outcome: "scripted", detail });
+		expect(verdicts(submission)).toEqual([
+			{ hopIndex: 0, finding: "insufficient_evidence", judgedHopIndex: undefined },
+			{ hopIndex: 1, finding: "phishing", judgedHopIndex: 1 },
+		]);
+		const report = await AbuseRepository.getReportForSubmission(id);
+		expect((await AbuseRepository.listTargets(report!.id)).map(({ normalizedTarget }) => normalizedTarget)).toEqual(["device.ledger-config.live"]);
 	});
 
-	test("a cloaker that sent the residential exit to another harmless site fails as suspected cloaking, not as a redirect", async () => {
+	test("a cloaker that sent the residential exit to another harmless site fails as suspected cloaking, decided in its own case", async () => {
 		// docusign.alt3-doc3ea7-v2.sbs (submission 376813288618463354) answers every
 		// visit with `location.replace` to a random news front page.
 		const submitted = "https://docusign.alt3-doc3ea7-v2.sbs/word/verify.workspace.php";
@@ -370,16 +473,17 @@ describe("cloaked websites", () => {
 
 		await analyzeWebsite({ submissionId: id, url: submitted }, { ...dependencies(archive), analysisClient: benignModel() });
 
-		const handedOff = await SubmissionsEntity.get(id);
-		const childId = BigInt(handedOff?.data.kind === "website" ? handedOff.data.website.redirectSubmissionId! : "0");
-		expect((await waitForStatus(childId, ["reported", "failed", "invalid"])).status).toBe("invalid");
-		const parent = await waitForStatus(id, ["failed"]);
-		expect(parent.info).toBe(`Cloaking suspected: ${detail}, which shows nothing reportable. No verdict or report was made from the decoy; retry to visit the site again.`);
-		const website = parent.data.kind === "website" ? parent.data.website : undefined;
-		expect(website?.cloaking).toEqual({ outcome: "unresolved", detail: `${detail}, which shows nothing reportable` });
-		expect(website?.redirectSubmissionId).toBe(childId.toString());
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("failed");
+		expect(submission?.info).toBe(`Cloaking suspected: ${detail}, which shows nothing reportable. No verdict or report was made from the decoy; retry to visit the site again.`);
+		expect(websiteOf(submission)?.cloaking).toEqual({ outcome: "unresolved", detail: `${detail}, which shows nothing reportable` });
+		// The decoy was judged where it was reached; no other case is opened for it.
+		expect(verdicts(submission)).toEqual([
+			{ hopIndex: 0, finding: "insufficient_evidence", judgedHopIndex: undefined },
+			{ hopIndex: 1, finding: "benign", judgedHopIndex: 1 },
+		]);
+		expect((await SubmissionsEntity.listCards({ limit: 10 })).map((card) => card.id)).toEqual([id]);
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
-		expect(await AbuseRepository.getReportForSubmission(childId)).toBeUndefined();
 	});
 
 	test("a decoy-only capture is kept as evidence but never classified or reported as not phishing", async () => {
@@ -394,9 +498,7 @@ describe("cloaked websites", () => {
 		const submission = await SubmissionsEntity.get(id);
 		expect(submission?.status).toBe("failed");
 		expect(submission?.info).toBe(`Cloaking suspected: ${detail}. No verdict or report was made from the decoy; retry to visit the site again.`);
-		const website = submission?.data.kind === "website" ? submission.data.website : undefined;
-		expect(website?.cloaking).toEqual({ outcome: "unresolved", detail });
-		expect(website?.redirectSubmissionId).toBeUndefined();
+		expect(websiteOf(submission)?.cloaking).toEqual({ outcome: "unresolved", detail });
 		expect(modelCalls).toBe(0);
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
 		// The decoy is kept with its evidence package, so it is documented like any capture.
@@ -414,24 +516,30 @@ describe("scripted jumps of the residential exit to another site", () => {
 	});
 	const uniformArchive = (destination: string, submitted = cloakerUrl) => ({ ...archiveOf([hop(0, submitted, 200, destination), hop(1, destination, 200)]), cloaking: uniform(destination, submitted) });
 
-	test("a harmless destination fails the submitted case as suspected cloaking, retryable, with the destination's case kept", async () => {
+	test("a harmless destination fails the submitted case as suspected cloaking, retryable, with the chain kept", async () => {
 		const archive = uniformArchive(decoyUrl);
 		const id = await websiteSubmission(376291398434951215n, cloakerUrl);
 
 		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, { ...dependencies(archive), analysisClient: benignModel() });
 
-		const handedOff = await SubmissionsEntity.get(id);
-		const childId = BigInt(handedOff?.data.kind === "website" ? handedOff.data.website.redirectSubmissionId! : "0");
-		expect((await waitForStatus(childId, ["reported", "failed", "invalid"])).status).toBe("invalid");
-		const parent = await waitForStatus(id, ["failed"]);
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("failed");
 		const detail = `${uniform(decoyUrl).detail}, which shows nothing reportable`;
-		expect(parent.info).toBe(`Cloaking suspected: ${detail}. No verdict or report was made from the decoy; retry to visit the site again.`);
-		const website = parent.data.kind === "website" ? parent.data.website : undefined;
-		expect(website?.cloaking).toEqual({ outcome: "unresolved", detail });
-		expect(website?.redirectSubmissionId).toBe(childId.toString());
-		expect(website?.navigationHops).toEqual(archive.navigationHops);
+		expect(submission?.info).toBe(`Cloaking suspected: ${detail}. No verdict or report was made from the decoy; retry to visit the site again.`);
+		expect(websiteOf(submission)?.cloaking).toEqual({ outcome: "unresolved", detail });
+		expect(websiteOf(submission)?.navigationHops).toEqual(archive.navigationHops);
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
-		expect(await AbuseRepository.getReportForSubmission(childId)).toBeUndefined();
+	});
+
+	test("another case's earlier verdict on the destination never decides this one: it is judged again where it was reached", async () => {
+		// The kit's own case found nothing when it was visited before.
+		await SubmissionsEntity.create({ id: 60n, kind: "website", data: { kind: "website", website: { url: kitUrl } }, dedupeKey: websiteSubmissionDedupeKey(kitUrl), status: "invalid" });
+		const id = await websiteSubmission(11n, cloakerUrl);
+
+		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, dependencies(uniformArchive(kitUrl)));
+
+		expect((await SubmissionsEntity.get(id))?.status).toBe("reported");
+		expect((await SubmissionsEntity.get(60n))?.status).toBe("invalid");
 	});
 
 	test("a page reached only through an entry's one-time link is reported with how to reach it and what a direct visit gets", async () => {
@@ -449,79 +557,29 @@ describe("scripted jumps of the residential exit to another site", () => {
 
 		await analyzeWebsite({ submissionId: id, url: entry }, { ...dependencies(archive), bareVisit: { fetch: decoy, assertPublicHost: async () => {} } });
 
-		const parent = await SubmissionsEntity.get(id);
-		const childId = BigInt(parent!.data.kind === "website" ? parent!.data.website.redirectSubmissionId! : "0");
-		expect((await waitForStatus(childId, ["reported", "failed", "invalid"])).status).toBe("reported");
-		const report = await AbuseRepository.getReportForSubmission(childId);
+		expect((await SubmissionsEntity.get(id))?.status).toBe("reported");
+		const report = await AbuseRepository.getReportForSubmission(id);
 		expect(report!.description).toContain(`Victims are sent to ${entry}, a link on another site, which first has them pass a check page of its own and then forwards each of them to lbbvw.com.`);
 		expect(report!.description).toContain("one-time link whose token is valid for only 2 minutes");
 		expect(report!.description).toContain(`Opened without that session, ${page} sends visitors to https://href.li/?https://example.com`);
 		expect(report!.description).toContain(`To see the page, follow ${entry} in a browser and continue straight through; our capture of what victims see, with screenshots, is at `);
 		// Kept with the case for answers to providers; the page was requested once, without a session.
-		const child = await SubmissionsEntity.get(childId);
-		expect(child?.data.kind === "website" ? child.data.website.accessGate : undefined).toMatchObject({ entryUrl: entry, entryStep: true, ticket: { lifetimeSeconds: 120 }, bareVisit: { url: page, reachedUrl: "https://href.li/?https://example.com" } });
+		expect(websiteOf(await SubmissionsEntity.get(id))?.accessGate).toMatchObject({ entryUrl: entry, entryStep: true, ticket: { lifetimeSeconds: 120 }, bareVisit: { url: page, reachedUrl: "https://href.li/?https://example.com" } });
 		expect(bareRequests).toEqual([page, "https://href.li/?https://example.com"]);
 	});
 
-	test("a phishing destination keeps the submitted case redirected to the reported case", async () => {
+	test("a phishing destination is reported in the submitted case, which keeps its scripted jump", async () => {
 		const id = await websiteSubmission(10n, cloakerUrl);
 
 		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, dependencies(uniformArchive(kitUrl)));
 
-		const parent = await SubmissionsEntity.get(id);
-		expect(parent?.status).toBe("redirected");
-		expect(parent?.info).toBe(`${uniform(kitUrl).detail}; that site is analyzed in its own case. If it shows nothing reportable, ${cloakerUrl} is treated as a cloaker that turned every route away.`);
-		const childId = BigInt(parent!.data.kind === "website" ? parent!.data.website.redirectSubmissionId! : "0");
-		expect((await waitForStatus(childId, ["reported", "failed", "invalid"])).status).toBe("reported");
-		const settled = await SubmissionsEntity.get(id);
-		expect(settled?.status).toBe("redirected");
-		expect(settled?.data.kind === "website" ? settled.data.website.cloaking : undefined).toEqual(uniform(kitUrl));
-	});
-
-	test("a destination whose case already found nothing fails the submitted case at once, without analyzing the decoy again", async () => {
-		await SubmissionsEntity.create({ id: 60n, kind: "website", data: { kind: "website", website: { url: decoyUrl } }, dedupeKey: websiteSubmissionDedupeKey(decoyUrl), status: "invalid" });
-		const archiveCalls: ArchiveCall[] = [];
-		const id = await websiteSubmission(11n, cloakerUrl);
-
-		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, dependencies(uniformArchive(decoyUrl), archiveCalls));
-
-		const parent = await SubmissionsEntity.get(id);
-		expect(parent?.status).toBe("failed");
-		expect(parent?.data.kind === "website" ? parent.data.website.cloaking?.outcome : undefined).toBe("unresolved");
-		expect(archiveCalls).toHaveLength(1);
-	});
-
-	test("a destination whose case is still running settles every case waiting on it once it finds nothing", async () => {
-		const decoyId = await SubmissionsEntity.create({ id: 61n, kind: "website", data: { kind: "website", website: { url: decoyUrl } }, dedupeKey: websiteSubmissionDedupeKey(decoyUrl), status: "running" });
-		const siblingUrl = "https://apple-conditions.com/en/verification";
-		const plainUrl = "https://short.example.org/wiki";
-		const first = await websiteSubmission(12n, cloakerUrl);
-		const sibling = await websiteSubmission(13n, siblingUrl);
-		const plain = await websiteSubmission(14n, plainUrl);
-
-		await analyzeWebsite({ submissionId: first, url: cloakerUrl }, dependencies(uniformArchive(decoyUrl)));
-		await analyzeWebsite({ submissionId: sibling, url: siblingUrl }, dependencies(uniformArchive(decoyUrl, siblingUrl)));
-		// An HTTP redirect is the host's declared destination, never a cloaking suspicion.
-		await analyzeWebsite({ submissionId: plain, url: plainUrl }, dependencies(archiveOf([hop(0, plainUrl, 302, decoyUrl), hop(1, decoyUrl, 200)])));
-		for (const id of [first, sibling, plain]) expect((await SubmissionsEntity.get(id))?.status).toBe("redirected");
-
-		await analyzeWebsite({ submissionId: decoyId, url: decoyUrl }, { ...dependencies(archiveOf([hop(0, decoyUrl, 200)])), analysisClient: benignModel() });
-
-		expect((await SubmissionsEntity.get(decoyId))?.status).toBe("invalid");
-		expect((await SubmissionsEntity.get(first))?.status).toBe("failed");
-		expect((await SubmissionsEntity.get(sibling))?.info).toStartWith(`Cloaking suspected: ${siblingUrl} sent the residential exit`);
-		expect((await SubmissionsEntity.get(plain))?.status).toBe("redirected");
-	});
-
-	test("a destination whose analysis fails leaves the submitted case redirected", async () => {
-		const decoyId = await SubmissionsEntity.create({ id: 62n, kind: "website", data: { kind: "website", website: { url: decoyUrl } }, dedupeKey: websiteSubmissionDedupeKey(decoyUrl), status: "running" });
-		const id = await websiteSubmission(15n, cloakerUrl);
-		await analyzeWebsite({ submissionId: id, url: cloakerUrl }, dependencies(uniformArchive(decoyUrl)));
-
-		await analyzeWebsite({ submissionId: decoyId, url: decoyUrl }, { ...dependencies(archiveOf([hop(0, decoyUrl, 200)])), archiveWebsite: async () => { throw new Error("site blocked every egress"); } });
-
-		expect((await SubmissionsEntity.get(decoyId))?.status).toBe("failed");
-		expect((await SubmissionsEntity.get(id))?.status).toBe("redirected");
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("reported");
+		expect(websiteOf(submission)?.cloaking).toEqual(uniform(kitUrl));
+		const report = await AbuseRepository.getReportForSubmission(id);
+		expect((await AbuseRepository.listTargets(report!.id)).map(({ normalizedTarget, observedUrls }) => ({ normalizedTarget, observedUrls }))).toEqual([
+			{ normalizedTarget: "login-netflix.example.com", observedUrls: [kitUrl] },
+		]);
 	});
 });
 

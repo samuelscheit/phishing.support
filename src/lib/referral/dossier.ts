@@ -117,7 +117,7 @@ export type DossierDependencies = {
 	now?: () => Date;
 };
 
-const EVIDENCE_KINDS = new Set(["website_mhtml", "website_png", "website_evidence"]);
+const EVIDENCE_KINDS = new Set(["website_mhtml", "website_png", "website_hop_body", "website_evidence"]);
 
 const FIELD_LABELS: Readonly<Record<string, string>> = {
 	email: "E-Mail-Adresse",

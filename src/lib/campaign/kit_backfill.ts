@@ -3,7 +3,7 @@ import type { WebsiteSubmissionData } from "../db/schema";
 import { errorSummary } from "../util/error_text";
 import { isUrlscanBusy, searchUrlscan, urlscanDom, urlscanResponses, type UrlscanDependencies } from "../abuse/origin/urlscan";
 import { capturedDocumentContent } from "../website/archive/text";
-import { analyzedCaptureStep, websiteCaptureFileNames } from "../website/visit/capture_files";
+import { analyzedPage, websiteCaptureFileNames } from "../website/visit/capture_files";
 import type { WebsiteKitResource } from "../website/types";
 import { loadCapturedPageTexts } from "./indicators";
 import { DAY_MS } from "../util/date_time";
@@ -71,7 +71,7 @@ export async function backfillKitResources(submissionId: bigint, dependencies: K
 
 	const save = (urlscanKit: NonNullable<WebsiteSubmissionData["urlscanKit"]>) => SubmissionsEntity.setWebsiteField(submissionId, "urlscanKit", urlscanKit);
 	// The page the case was judged on: an earlier step (a gate, a host's own interstitial) could match unrelated scans.
-	const analyzed = websiteCaptureFileNames(analyzedCaptureStep(website.navigationHops)).mhtml;
+	const analyzed = websiteCaptureFileNames(analyzedPage(website)?.step ?? 0).mhtml;
 	const ours = (await (dependencies.loadPageTexts ?? loadCapturedPageTexts)(submissionId)).find(({ name }) => name === analyzed)?.text;
 	const checkedAt = now.toISOString();
 	// Without our page's text no scan can be told to show it.

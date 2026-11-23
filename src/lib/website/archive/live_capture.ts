@@ -5,14 +5,15 @@ import { agentAddressOf } from "../../browser/browser";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "../../browser/fabric";
 import { presentIdentityToNewTab, presentIdentityToPage } from "../../browser/page";
 import { observedPuppeteerResponse, observeSessionResponses } from "../../browser/tab_traffic";
-import type { TabSetup, VisitorTab } from "../../browser/visitor_tabs";
+import { targetIdOf, type TabSetup, type VisitorTab } from "../../browser/visitor_tabs";
 import { errorText } from "../../util/error_text";
 import { squash } from "../../util/text";
 import { runSiteVisit } from "../../site_visit/visit";
 import { hiddenFrames, recordFrameTraffic, type FrameTrafficRecorder } from "../visit/hidden_frames";
 import { passProviderWarning } from "../analysis/provider_warning";
-import { actionResultHops, documentNavigationHops, isDocumentAnswer, isNetworkDocument, recordTab, type TabRecording } from "../visit/tab_recording";
-import type { WebsiteNavigationHop, WebsiteProviderWarning } from "../types";
+import { actionResultHops, documentNavigationHops, isDocumentAnswer, isNetworkDocument, recordTab, type CapturedChain, type TabRecording } from "../visit/tab_recording";
+import { interceptDocumentAnswers } from "../visit/document_bodies";
+import type { WebsiteProviderWarning } from "../types";
 import { BrowserInfrastructureError, isBrowserInfrastructureFailure, WebsiteUnreachableError } from "./errors";
 import { archiveMhtmlSnapshot, getMhtmlArchiveLocation } from "./mhtml";
 import { capturePaintedScreenshot } from "./screenshot";
@@ -64,9 +65,11 @@ export async function openLiveCapture(options: ArchiveWebsiteOptions, egress: Fa
 		throw new BrowserInfrastructureError(`Browser service unavailable: ${errorText(error)}`, { cause: error });
 	});
 	let open = true;
+	let stopAnswers: (() => Promise<void>) | undefined;
 	const close = async () => {
 		if (!open) return;
 		open = false;
+		await stopAnswers?.();
 		await browser.close();
 	};
 	try {
@@ -84,6 +87,14 @@ export async function openLiveCapture(options: ArchiveWebsiteOptions, egress: Fa
 		// the visitor (even from its <head>, before the navigation resolves), what
 		// a clicked verification gate navigated to, and what each page action opened.
 		const captured: CaptureTab = { recording: recordTab(), frameTraffic: recordFrameTraffic(page), loadedUrl: url, stepFrom: 0 };
+		// Every answer of the captured tab with when it arrived, and the body of every page, interstitials that navigate on at once included,
+		// for the whole capture and the visit after it. Without it the capture still holds the pages shown.
+		stopAnswers = await page.target().createCDPSession()
+			.then((session) => interceptDocumentAnswers(session, targetIdOf(page.target()), captured.recording.recordAnswer, identity.override))
+			.catch((error: unknown) => {
+				console.warn(`The document answers of ${url} cannot be recorded: ${errorText(error)}`);
+				return undefined;
+			});
 		// The last final (non-redirect) main-frame document response, so a
 		// document that replaces an error interstitial is seen with its status.
 		let latestDocumentResponse = null as HTTPResponse | null;
@@ -144,7 +155,7 @@ export async function openLiveCapture(options: ArchiveWebsiteOptions, egress: Fa
 		const verificationGate = await passVerificationGate(page, renderSettleMs);
 
 		/** A tab's page as it stands: screenshot, MHTML, and the hops that led to it. */
-		const snapshot = async (shown: Page, tab: CaptureTab, hopsTo: (capturedDocumentUrl: string) => WebsiteNavigationHop[]): Promise<WebsiteArchiveResult> => {
+		const snapshot = async (shown: Page, tab: CaptureTab, chainTo: (capturedDocumentUrl: string) => CapturedChain): Promise<WebsiteArchiveResult> => {
 			const documentUrl = tab.recording.documents.at(-1)?.url ?? tab.loadedUrl ?? shown.url();
 			const screenshotUrl = documentAddress(shown.url(), documentUrl);
 			const screenshotBytes = await capturePaintedScreenshot(shown, dependencies.screenshotTimeoutMs);
@@ -153,10 +164,13 @@ export async function openLiveCapture(options: ArchiveWebsiteOptions, egress: Fa
 			await cdp.detach().catch(() => undefined);
 			const documentHtml = await shown.evaluate(() => document.documentElement.outerHTML).catch(() => undefined);
 			const capturedDocumentUrl = getMhtmlArchiveLocation(resolvedMhtml) ?? documentAddress(shown.url(), documentUrl) ?? shown.url();
-			const capturedDocument = await archiveMhtmlSnapshot({ url, archivedUrl: capturedDocumentUrl, navigationHops: hopsTo(capturedDocumentUrl), mhtmlSnapshot: resolvedMhtml });
+			tab.recording.settleAnswers();
+			const chain = chainTo(capturedDocumentUrl);
+			const capturedDocument = await archiveMhtmlSnapshot({ url, archivedUrl: capturedDocumentUrl, navigationHops: chain.hops, mhtmlSnapshot: resolvedMhtml });
 			const frames = tab.frameTraffic ? await hiddenFrames(shown, tab.frameTraffic, userAgent) : [];
 			return {
 				...capturedDocument,
+				...(chain.bodies.length ? { hopBodies: chain.bodies } : {}),
 				route: FABRIC_EGRESS_LABEL[egress],
 				egress,
 				screenshotPng: screenshotBytes && screenshotUrl === capturedDocumentUrl ? Buffer.from(screenshotBytes) : undefined,
@@ -185,6 +199,8 @@ export async function openLiveCapture(options: ArchiveWebsiteOptions, egress: Fa
 				const recorded: CaptureTab = { recording: recordTab(), stepFrom: 0 };
 				opened.set(tab.targetId, recorded);
 				observeSessionResponses(tab.session, tab.targetId, recorded.recording.observe);
+				// The visit holds the tab's document responses already; it reads each page's body for this recording.
+				tab.recordDocumentAnswer = recorded.recording.recordAnswer;
 				await presentIdentityToNewTab(tab, identity);
 				void tab.pageReady.then(async (shown) => {
 					recorded.frameTraffic = recordFrameTraffic(shown);

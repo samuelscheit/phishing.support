@@ -10,8 +10,7 @@ import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, Website
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
 
-/** `redirected`: the site led to another host, which is analyzed in its own submission. */
-export const submissionStatus = ["running", "failed", "reported", "invalid", "redirected"] as const;
+export const submissionStatus = ["running", "failed", "reported", "invalid"] as const;
 export type SubmissionStatus = (typeof submissionStatus)[number];
 
 export const analysisRunStatus = ["running", "completed", "failed"] as const;
@@ -30,15 +29,18 @@ export type EmailSubmissionData = MailData & {
 export type WebsiteSubmissionData = {
 	whois?: WhoISInfo;
 	url: string;
-	/** Final URL whose page content was archived; it may differ from the submitted URL. */
+	/** URL of the page the case's verdict rests on (`analyzedHopIndex`); it may be on another site than the submitted URL. */
 	archiveUrl?: string;
-	/** Per-response navigation provenance; document content belongs only to contentCaptured hop. */
+	/**
+	 * The whole chain of the case, response by response, across every site it
+	 * passed: redirects, pages that sent the visitor on by script, pages the
+	 * visit moved on from, and the last page shown (`contentCaptured`).
+	 */
 	navigationHops?: WebsiteNavigationHop[];
+	/** The hop of the page the case's verdict rests on: its first reportable page, else the last page shown. */
+	analyzedHopIndex?: number;
+	/** One per hop: the verdict of the hop's site, which every hop of that site shares. */
 	siteAssessments?: WebsiteSiteAssessment[];
-	/** Pages the visit reached after the judged one, kept as evidence (the form the values went into, the pages after it); `step` names their capture files. */
-	laterPages?: Array<{ url: string; step: number }>;
-	/** Submission that analyzes the host this site redirected to; its id as a decimal string. */
-	redirectSubmissionId?: string;
 	/** How the capture handled the submitted page's scripted jump to another site. */
 	cloaking?: WebsiteCloaking;
 	/** How visitors got into the reported page, when it is not shown to everyone who opens it; set when the report is filed. */

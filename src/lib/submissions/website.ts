@@ -4,7 +4,7 @@ import { generateId } from "@/lib/db/ids";
 import { analyzeWebsite, type AnalyzeWebsiteOptions } from "@/lib/website/analysis/ai";
 import type { ReporterMetadata } from "@/lib/http/reporter_headers";
 import { websiteSite } from "@/lib/website/info/site";
-import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website/visit/capture_files";
+import { analyzedPage, latestArtifactNamed, navigationToPage, websiteCaptureFileNames } from "@/lib/website/visit/capture_files";
 import { getRetryableSubmission, SubmissionRetryError } from "./retry";
 
 export { SubmissionRetryError } from "./retry";
@@ -133,9 +133,11 @@ export async function retryFailedWebsiteAnalysis(
 	const url = submission.data.kind === "website" ? submission.data.website?.url : undefined;
 	if (!url) throw new SubmissionRetryError("The original website URL is unavailable.");
 
-	// The analyzed page is the last one the capture reached through the site's own links.
+	// The page the verdict rested on, with the chain as it stood when it was shown.
+	const websiteData = submission.data.kind === "website" ? submission.data.website : undefined;
+	const analyzed = websiteData ? analyzedPage(websiteData) : undefined;
 	const artifactList = await ArtifactsEntity.listForSubmission(submissionId);
-	const names = websiteCaptureFileNames(analyzedCaptureStep(submission.data.kind === "website" ? submission.data.website.navigationHops : undefined));
+	const names = websiteCaptureFileNames(analyzed?.step ?? 0);
 	const mhtmlArtifact = latestArtifactNamed(artifactList, names.mhtml);
 	const screenshotArtifact = latestArtifactNamed(artifactList, names.screenshot);
 
@@ -145,11 +147,10 @@ export async function retryFailedWebsiteAnalysis(
 	// page before the step it could not take, often a one-time gate URL that no
 	// longer loads; a retry must visit the site again from the submitted URL.
 	const retainedArchiveHasTrustedProvenance = Boolean(
-		submission.data.kind === "website"
-		&& submission.data.website.archiveUrl
-		&& submission.data.website.navigationHops?.length
-		&& submission.data.website.cloaking?.outcome !== "unresolved"
-		&& !submission.data.website.unfinishedFlow,
+		websiteData
+		&& analyzed
+		&& websiteData.cloaking?.outcome !== "unresolved"
+		&& !websiteData.unfinishedFlow,
 	);
 	if (mhtmlArtifact && retainedArchiveHasTrustedProvenance) {
 		const artifact = await ArtifactsEntity.get(mhtmlArtifact.id);
@@ -163,13 +164,12 @@ export async function retryFailedWebsiteAnalysis(
 	const claimed = await SubmissionsEntity.transitionStatus(submissionId, "failed", "running");
 	if (!claimed) throw new SubmissionRetryError("This submission is already being retried.");
 
-	const websiteData = submission.data.kind === "website" ? submission.data.website : undefined;
 	void startAnalysis({
 		submissionId,
 		url,
 		mhtmlSnapshot,
-		archivedUrl: websiteData?.archiveUrl,
-		navigationHops: websiteData?.navigationHops,
+		archivedUrl: analyzed?.hop.url,
+		navigationHops: analyzed ? navigationToPage(websiteData!.navigationHops!, analyzed.hop) : undefined,
 		trustMhtmlDocumentLocation: Boolean(mhtmlSnapshot),
 		verificationGate: mhtmlSnapshot ? websiteData?.verificationGate : undefined,
 		kitResources: mhtmlSnapshot ? websiteData?.kitResources : undefined,

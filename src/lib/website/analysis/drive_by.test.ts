@@ -15,7 +15,8 @@ import { CORUNA_FRAME_URL, CORUNA_HOST, CORUNA_LOADER, CORUNA_LOOT_URL, CORUNA_L
 import { exploitLoaderSignals } from "../../malware/exploit_loader";
 import { websiteSubmissionDedupeKey } from "../../submissions/website";
 import { analyzeWebsite } from "./ai";
-import { reportableWebsiteHop, websiteSiteAssessments } from "../info/report_hops";
+import { reportableWebsiteHop } from "../info/report_hops";
+import { judgedChain } from "../test_helpers";
 import { buildWebsiteClassificationInput, buildWebsiteReportEvidence, validateWebsiteSiteClassification, websiteMobileHandoff } from "./classification";
 import { scriptedVisitSession } from "../../site_visit/test_helpers";
 import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "../archive/types";
@@ -240,7 +241,7 @@ describe("drive-by classification", () => {
 
 	test("a stored drive-by finding is reportable only while the frame it cites still holds the quote", () => {
 		const classification = validate(DRIVE_BY);
-		const assessments = websiteSiteAssessments([hop], 0, classification);
+		const assessments = judgedChain([hop], 0, classification);
 		expect(reportableWebsiteHop([hop], assessments, archive)).toEqual(hop);
 		expect(reportableWebsiteHop([hop], assessments, { ...archive, hiddenFrames: [] })).toBeUndefined();
 		expect(reportableWebsiteHop([hop], assessments, { ...archive, hiddenFrames: [{ ...loaderFrame("iphone"), source: "<html></html>" }] })).toBeUndefined();

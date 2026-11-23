@@ -8,7 +8,6 @@ export const SUBMISSION_FILTERS = {
 	running: ["running"],
 	phishing: ["reported"],
 	not_phishing: ["invalid"],
-	redirects: ["redirected"],
 	failed: ["failed"],
 } as const satisfies Record<string, readonly SubmissionStatus[]>;
 

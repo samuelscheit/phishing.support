@@ -10,8 +10,7 @@ import { runStreamedAnalysisRun } from "../../analysis/run";
 import { publishEvent } from "../../event/event_transport";
 import { defaultResponseModel } from "../../openai/client";
 import { offeredDownloadOf } from "./offered_download";
-import { analyzedCaptureStep } from "./capture_files";
-import { isSameWebsite } from "../info/site";
+import { isSameWebsite, websiteSite } from "../info/site";
 import { createExfiltrationCanaries } from "../../exfiltration/canaries";
 import { discoverExfiltrationBackends } from "../../exfiltration/analysis";
 import type { CapturedNetworkRequest, ExfiltrationBackend, ExfiltrationCanaries } from "../../exfiltration/types";
@@ -23,7 +22,7 @@ import { isWebPage } from "../../network/web_page";
 import { lookupDomainRegistration } from "../info/domain_registration";
 import { buildWebsiteClassificationInput, validateWebsiteSiteClassification, websiteMobileHandoff, WEBSITE_CLASSIFICATION_FORMAT, type WebsiteEvidenceArchive } from "../analysis/classification";
 import { emitStep } from "./progress";
-import { capturedArchiveHop, isReportable, websiteSiteAssessments } from "../info/report_hops";
+import { capturedArchiveHop, chainSiteAssessments, isReportable } from "../info/report_hops";
 import { saveVisitEvidence, websiteEvidence } from "../analysis/evidence";
 import { challengeInconclusive, CHALLENGE_RETRY_EGRESS, continuedRevisit } from "./revisit";
 import type { WebsiteAnalysisDependencies, WebsiteCapture } from "../analysis/analysis_types";
@@ -74,38 +73,47 @@ function visitRecord(recording: SiteVisitRecording<unknown>, pages: ReadonlyArra
 const MAX_RECORDED_ACTIONS = 80;
 const MAX_RECORDED_DATA_SENT = 40;
 
-/** What one visit of the site found: the page whose verdict is the case's, and the evidence around it. */
-export type WebsiteVisitResult = {
+/** A site of the chain whose page was found reportable: that page, its hop and its verdict. */
+export type WebsiteChainSite = {
 	archive: WebsiteCapture;
 	capturedHop: WebsiteNavigationHop;
 	classification: WebsiteSiteClassification;
-	assessments: WebsiteSiteAssessment[];
-	/** Requests of the whole visit that sent synthetic values to another site. */
+	/** Requests that sent synthetic values to another site while a page of this site was shown. */
 	dataDrops: VisitDataSent[];
+};
+
+/** What one visit of the chain found: every site's verdict, the page the case's verdict rests on, and the evidence around it. */
+export type WebsiteVisitResult = {
+	/** The page the case's verdict rests on: the first reportable page, else the last page shown. */
+	archive: WebsiteCapture;
+	capturedHop: WebsiteNavigationHop;
+	classification: WebsiteSiteClassification;
+	/** The whole chain, response by response, through the last page shown. */
+	chain: WebsiteNavigationHop[];
+	/** One per hop of the chain: the verdict of its site. */
+	assessments: WebsiteSiteAssessment[];
+	/** Each site whose page was found reportable, in the order the visit reached them. */
+	reportable: WebsiteChainSite[];
 	backends: ExfiltrationBackend[];
 	requests: CapturedNetworkRequest[];
 	canaries: ExfiltrationCanaries;
 	record: WebsiteVisitRecord;
-	/** Every page the visit judged, in the order shown, for the narrative. */
+	/** Every page the visit showed, in order, for the narrative. */
 	pages: NarrativeVisitPage[];
 	/** Set when the visit could not finish and nothing it saw is reportable: no verdict, another visit may. */
 	inconclusive?: string;
-	/** Set when the visit's flow went on to another site before showing anything reportable on this one. */
-	handedOff?: boolean;
-	/** Pages after the judged one, kept as evidence only. */
-	laterPages?: Array<{ url: string; step: number }>;
 	/** Set when the flow's destination answered every network tried with nothing and sent the visit back. */
 	cloakedDestination?: WebsiteCloakedDestination;
 };
 
 /**
- * Walk the site with the visiting agent from the captured page, as its
- * victim would, then judge what the visit recorded: each page in the order
- * it was shown, with the synthetic values it sent off and the file it made
- * the visitor download. The first reportable page of the submitted site is
- * the case's finding. A flow that reaches another site before that belongs
- * to that site, exactly as a redirect does. A site that turns desktops away
- * is visited again as a phone.
+ * Walk the chain with the visiting agent from the captured page, as its
+ * victim would, across every site it leads to, then judge what the visit
+ * recorded: each page in the order it was shown, with the synthetic values it
+ * sent off and the file it made the visitor download. Each site's verdict is
+ * its first reportable page, else its last page shown; a site already found
+ * reportable is not judged again. A site that turns desktops away is visited
+ * again as a phone.
  */
 export async function visitWebsite(params: {
 	submissionId: bigint;
@@ -143,22 +151,26 @@ export async function visitWebsite(params: {
 	const record = visitRecord(recording, pages);
 	// A visit that walked the live site is evidence of how the values were entered and where they went.
 	if (session) await saveVisitEvidence({ submissionId, url, device: first.device, recording, pages, canaries, dependencies });
-	const dataDrops = pages.flatMap((page) => page.dataSent.filter((sent) => !sent.sameSite));
 	const backends = discoverExfiltrationBackends({ requests: recording.requests, canaries, pageUrl: url });
-	const base = { dataDrops, backends, requests: recording.requests, canaries, record };
+	const base = { backends, requests: recording.requests, canaries, record };
 
 	// Each page with the navigation that led to it, what it sent, and the file it delivered.
 	const lookups = dependencies.downloadLookups;
 	const prefix = params.revisit ? continuedRevisit(params.revisit) : [];
 	const archives: WebsiteCapture[] = [];
+	let hopsBefore = prefix.length;
 	for (const [position, page] of pages.entries()) {
 		const [file] = page.downloads;
 		const offeredDownload = file ? await offeredDownloadOf(file, page.archive.url, lookups) : undefined;
 		const navigation = visitNavigation(pages.slice(0, position + 1));
+		// The page's own hops follow every hop before it in the chain; their bodies keep their place.
+		const hopBodies = (page.archive.hopBodies ?? []).map(({ hopIndex, body }) => ({ hopIndex: hopIndex + hopsBefore, body }));
+		hopsBefore += page.archive.navigationHops.length;
 		archives.push({
 			...page.archive,
 			requestedUrl: first.requestedUrl,
 			navigationHops: [...prefix, ...navigation].map((hop, index) => ({ ...hop, index })),
+			...(hopBodies.length ? { hopBodies } : {}),
 			kitResources: mergedKitResources(...pages.slice(0, position + 1).map((shown) => shown.archive)),
 			...(first.cloaking ? { cloaking: first.cloaking } : {}),
 			...(first.providerWarning ? { providerWarning: first.providerWarning } : {}),
@@ -168,103 +180,112 @@ export async function visitWebsite(params: {
 		});
 	}
 
-	// The narrative reads every page shown up to the analyzed one.
-	const narrativePages = (until: number): NarrativeVisitPage[] => archives.slice(0, until + 1).map((page) => ({
+	// The narrative reads every page shown.
+	const narrativePages: NarrativeVisitPage[] = archives.map((page) => ({
 		url: page.url,
 		...(pageTitle(page.html) ? { title: pageTitle(page.html) } : {}),
 		text: page.text.toString("utf-8"),
 	}));
 
-	// Judge the pages in the order they were shown.
-	const assessments: WebsiteSiteAssessment[] = [];
+	// Judge the pages in the order they were shown, each site until one of its pages is reportable.
+	const verdicts = new Map<string, { position: number; capturedHop: WebsiteNavigationHop; classification: WebsiteSiteClassification }>();
 	let asksForPhone = recording.agent.report?.asksForPhone === true;
 	for (const [position, archive] of archives.entries()) {
 		const capturedHop = capturedArchiveHop(archive);
 		// Every page but the captured one is a step of the case with its own evidence
-		// package; a phone revisit's first page is a step too.
+		// package; a revisit's first page is a step too.
 		if (position > 0 || params.revisit) await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await websiteEvidence(submissionId, url, archive, dependencies) });
-		if (!isSameWebsite(capturedHop.url, url)) {
-			return { ...base, archive, capturedHop, classification: { finding: "insufficient_evidence" }, assessments, pages: narrativePages(position), handedOff: true };
-		}
+		const site = websiteSite(capturedHop.url);
+		const known = verdicts.get(site);
+		if (known && isReportable(known.classification)) continue;
 		await emitStep(submissionId, "classification", Math.min(70, 50 + position * 4));
 		const classified = await classifyCapturedPage(submissionId, capturedHop, archive, dependencies);
 		asksForPhone ||= classified.mobileHandoff;
-		// The page's own hops (a redirect on its site, then the page) share its finding.
-		assessments.push(...websiteSiteAssessments(archive.navigationHops.slice(assessments.length), capturedHop.index, classified.classification));
-		const last = position === archives.length - 1;
-		if (isReportable(classified.classification) || last) {
-			// A destination that answered empty and sent the visit back turned this network away:
-			// the whole flow is walked again through the others, the gate passed again in each.
-			const cloak = isReportable(classified.classification) ? undefined : cloakedDestination(visitNavigation(pages), url);
-			if (cloak) {
-				const answered = [...(params.cloaked?.answered ?? []), walked.egress ?? params.egress ?? WEBSITE_CAPTURE_EGRESS[0]!];
-				const notTried = [...(params.cloaked?.notTried ?? [])];
-				const startedAt = params.cloaked?.startedAt ?? flowStartedAt;
-				const reopened = { ...capturedHop, url: first.url };
-				// Every network the capture would try, in its order.
-				for (const egress of WEBSITE_CAPTURE_EGRESS.filter((candidate) => !answered.includes(candidate) && !notTried.some(({ network }) => network === FABRIC_EGRESS_LABEL[candidate]))) {
-					const network = FABRIC_EGRESS_LABEL[egress];
-					if (Date.now() - startedAt >= (dependencies.cloakedFlowBudgetMs ?? VISIT_BUDGET_MS)) {
-						notTried.push({ network, reason: "the time budget for walking the flow again was used up" });
-						continue;
-					}
-					await emitStep(submissionId, "revisit_cloaked_destination", 72);
-					// One capture browser at a time: the residential exit is a single connection.
-					await session?.close();
-					const retried = await capture({ url: first.url, ...device, egress }).catch((error: unknown) => {
-						console.warn(`Walking ${first.url} again from the ${network} failed: ${errorText(error)}`);
-						notTried.push({ network, reason: errorText(error) });
-						return undefined;
-					});
-					if (retried) {
-						return visitWebsite({ ...params, archive: retried, egress, cloaked: { answered, notTried, startedAt }, revisit: { hops: archive.navigationHops, from: reopened, revisit: { reason: "destination_cloaked", route: network, site: cloak.site } } });
-					}
-				}
-				const record: WebsiteCloakedDestination = { host: cloak.host, site: cloak.site, answered: answered.map((egress) => FABRIC_EGRESS_LABEL[egress]), notTried };
-				return { ...base, archive, capturedHop, classification: classified.classification, assessments, pages: narrativePages(position), cloakedDestination: record };
+		verdicts.set(site, { position, capturedHop, classification: classified.classification });
+	}
+
+	const chain = archives.at(-1)!.navigationHops;
+	const assessments = chainSiteAssessments(chain, new Map([...verdicts].map(([site, { capturedHop, classification }]) => [site, { judgedHopIndex: capturedHop.index, classification }])));
+	const reportable = [...verdicts.values()]
+		.filter(({ classification }) => isReportable(classification))
+		.sort((a, b) => a.position - b.position)
+		.map(({ position, capturedHop, classification }): WebsiteChainSite => ({
+			archive: archives[position]!,
+			capturedHop,
+			classification,
+			dataDrops: pages.flatMap((page) => (isSameWebsite(page.archive.url, capturedHop.url) ? page.dataSent.filter((sent) => !sent.sameSite) : [])),
+		}));
+	const judged = { ...base, chain, assessments, reportable, pages: narrativePages };
+	if (reportable.length) {
+		const [headline] = reportable;
+		return { ...judged, archive: headline!.archive, capturedHop: headline!.capturedHop, classification: headline!.classification };
+	}
+
+	// Nothing reportable: the last page shown is the case's.
+	const archive = archives.at(-1)!;
+	const capturedHop = capturedArchiveHop(archive);
+	const { classification } = verdicts.get(websiteSite(capturedHop.url))!;
+	// A destination that answered empty and sent the visit back turned this network away:
+	// the whole flow is walked again through the others, the gate passed again in each.
+	const cloak = cloakedDestination(visitNavigation(pages), url);
+	if (cloak) {
+		const answered = [...(params.cloaked?.answered ?? []), walked.egress ?? params.egress ?? WEBSITE_CAPTURE_EGRESS[0]!];
+		const notTried = [...(params.cloaked?.notTried ?? [])];
+		const startedAt = params.cloaked?.startedAt ?? flowStartedAt;
+		const reopened = { ...capturedHop, url: first.url };
+		// Every network the capture would try, in its order.
+		for (const egress of WEBSITE_CAPTURE_EGRESS.filter((candidate) => !answered.includes(candidate) && !notTried.some(({ network }) => network === FABRIC_EGRESS_LABEL[candidate]))) {
+			const network = FABRIC_EGRESS_LABEL[egress];
+			if (Date.now() - startedAt >= (dependencies.cloakedFlowBudgetMs ?? VISIT_BUDGET_MS)) {
+				notTried.push({ network, reason: "the time budget for walking the flow again was used up" });
+				continue;
 			}
-			// A site that turns desktops away shows the phone something else.
-			if (!isReportable(classified.classification) && asksForPhone && !first.device) {
-				await emitStep(submissionId, "revisit_as_phone", 72);
-				const phone = await capture({ url: first.url, device: "iphone", ...route });
-				return visitWebsite({ ...params, archive: phone, revisit: { hops: archive.navigationHops, from: capturedHop, revisit: { reason: "phone", device: "iphone" } } });
+			await emitStep(submissionId, "revisit_cloaked_destination", 72);
+			// One capture browser at a time: the residential exit is a single connection.
+			await session?.close();
+			const retried = await capture({ url: first.url, ...device, egress }).catch((error: unknown) => {
+				console.warn(`Walking ${first.url} again from the ${network} failed: ${errorText(error)}`);
+				notTried.push({ network, reason: errorText(error) });
+				return undefined;
+			});
+			if (retried) {
+				return visitWebsite({ ...params, archive: retried, egress, cloaked: { answered, notTried, startedAt }, revisit: { hops: chain, from: reopened, revisit: { reason: "destination_cloaked", route: network, site: cloak.site } } });
 			}
-			// A challenge that would not clear for this network may let the residential exit through.
-			// A capture that already came from there was decoyed or turned away everywhere else.
-			const challenge = !isReportable(classified.classification) ? recording.agent.report?.blockedByChallenge : false;
-			let unreached: string | undefined;
-			if (challenge && !params.challengeRetried && walked.egress !== CHALLENGE_RETRY_EGRESS) {
-				await emitStep(submissionId, "revisit_from_other_exit", 72);
-				// One capture browser at a time: the residential exit is a single connection.
-				await session?.close();
-				const retried = await capture({ url: first.url, ...device, egress: CHALLENGE_RETRY_EGRESS }).catch((error: unknown) => {
-					// The other network failing, whatever the reason, leaves the blocked visit's result.
-					console.warn(`Revisiting ${first.url} from the ${FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS]} failed: ${errorText(error)}`);
-					unreached = errorText(error);
-					return undefined;
-				});
-				if (retried) {
-					// The page reopened is the one the visit started at, which the blocked page was reached from.
-					const reopened = { ...capturedHop, url: first.url };
-					return visitWebsite({ ...params, archive: retried, challengeRetried: true, egress: CHALLENGE_RETRY_EGRESS, revisit: { hops: archive.navigationHops, from: reopened, revisit: { reason: "challenge", route: FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS] } } });
-				}
-			}
-			// A visit that did not get past the site's challenge saw nothing of the site behind it.
-			const inconclusive = isReportable(classified.classification) ? undefined
-				: recording.agent.outcome !== "completed" ? recording.agent.failure ?? "The visiting agent did not finish the site's flow."
-				: challenge ? challengeInconclusive(recording.agent.report!.stoppedReason, { retried: params.challengeRetried === true, unreached })
-				: undefined;
-			// The verdict needs no later page, but the evidence does: the form the values were
-			// typed into and the pages after it show what the site took and where it went.
-			const laterPages: Array<{ url: string; step: number }> = [];
-			for (const later of archives.slice(position + 1)) {
-				await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive: later, evidence: await websiteEvidence(submissionId, url, later, dependencies) });
-				laterPages.push({ url: later.url, step: analyzedCaptureStep(later.navigationHops) });
-			}
-			return { ...base, archive, capturedHop, classification: classified.classification, assessments, pages: narrativePages(position), ...(inconclusive ? { inconclusive } : {}), ...(laterPages.length ? { laterPages } : {}) };
+		}
+		const cloakedRecord: WebsiteCloakedDestination = { host: cloak.host, site: cloak.site, answered: answered.map((egress) => FABRIC_EGRESS_LABEL[egress]), notTried };
+		return { ...judged, archive, capturedHop, classification, cloakedDestination: cloakedRecord };
+	}
+	// A site that turns desktops away shows the phone something else.
+	if (asksForPhone && !first.device) {
+		await emitStep(submissionId, "revisit_as_phone", 72);
+		const phone = await capture({ url: first.url, device: "iphone", ...route });
+		return visitWebsite({ ...params, archive: phone, revisit: { hops: chain, from: capturedHop, revisit: { reason: "phone", device: "iphone" } } });
+	}
+	// A challenge that would not clear for this network may let the residential exit through.
+	// A capture that already came from there was decoyed or turned away everywhere else.
+	const challenge = recording.agent.report?.blockedByChallenge;
+	let unreached: string | undefined;
+	if (challenge && !params.challengeRetried && walked.egress !== CHALLENGE_RETRY_EGRESS) {
+		await emitStep(submissionId, "revisit_from_other_exit", 72);
+		// One capture browser at a time: the residential exit is a single connection.
+		await session?.close();
+		const retried = await capture({ url: first.url, ...device, egress: CHALLENGE_RETRY_EGRESS }).catch((error: unknown) => {
+			// The other network failing, whatever the reason, leaves the blocked visit's result.
+			console.warn(`Revisiting ${first.url} from the ${FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS]} failed: ${errorText(error)}`);
+			unreached = errorText(error);
+			return undefined;
+		});
+		if (retried) {
+			// The page reopened is the one the visit started at, which the blocked page was reached from.
+			const reopened = { ...capturedHop, url: first.url };
+			return visitWebsite({ ...params, archive: retried, challengeRetried: true, egress: CHALLENGE_RETRY_EGRESS, revisit: { hops: chain, from: reopened, revisit: { reason: "challenge", route: FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS] } } });
 		}
 	}
-	throw new Error("A visit always has the captured page.");
+	// A visit that did not get past the site's challenge saw nothing of the site behind it.
+	const inconclusive = recording.agent.outcome !== "completed" ? recording.agent.failure ?? "The visiting agent did not finish the site's flow."
+		: challenge ? challengeInconclusive(recording.agent.report!.stoppedReason, { retried: params.challengeRetried === true, unreached })
+		: undefined;
+	return { ...judged, archive, capturedHop, classification, ...(inconclusive ? { inconclusive } : {}) };
 }
 
 /** The document's own title, as a visitor reads it in the tab. */

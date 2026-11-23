@@ -118,6 +118,33 @@ describe("submission report read model", () => {
 		expect(details?.reports[1]?.routes).toEqual([]);
 	});
 
+	test("lists a case's own site reports, then the reports derived from them, then other cases' reports it joined; each names the cases it covers", async () => {
+		const owner = 351387190816673801n;
+		const { report } = await createWebsiteReport(owner);
+		const endpointUrl = "https://api.collector.com/submit";
+		await reportExfiltrationBackend({
+			submissionId: owner, sourceReportId: report.reportId, pageUrl: "https://shop.example.com/", observedAt: new Date("2026-10-28T00:00:00Z"), reporter: {},
+			backend: { kind: "domain", key: "domain:api.collector.com", endpointUrl, hostname: "api.collector.com", method: "POST", matchedCanaries: ["email"], request: { timestamp: "2026-10-28T00:00:00.000Z", method: "POST", url: endpointUrl, postData: "synthetic" } },
+		});
+		// A second case reaches the same shop, and a kit of its own.
+		const joiner = 351387190816673802n;
+		await SubmissionsEntity.create({ id: joiner, kind: "website", data: { kind: "website", website: { url: "https://lure.example.com/" } }, dedupeKey: "website-report-details-test:joiner", status: "reported" });
+		const own = await reportConfirmedWebsiteAbuse({ submissionId: joiner, urls: ["https://kit.example.com/login"], analysisText: "A credential kit.", reporter: {}, finding: { finding: "phishing", phishingBasis: "credential_theft" } });
+		const joined = await reportConfirmedWebsiteAbuse({ submissionId: joiner, urls: ["https://shop.example.com/"], analysisText: "The same shop.", reporter: {}, finding: { finding: "phishing", phishingBasis: "credential_theft" } });
+		expect(joined).toMatchObject({ reportId: report.reportId, created: false, joined: { submissionId: owner } });
+
+		const ownerReports = (await getSubmissionDetails(owner.toString()))!.reports;
+		expect(ownerReports.map(({ id, submissionId, primary, target, joinedCases }) => ({ id, submissionId, primary, target, joinedCases }))).toEqual([
+			{ id: report.reportId, submissionId: owner, primary: true, target: "shop.example.com", joinedCases: [joiner] },
+			{ id: expect.any(BigInt), submissionId: owner, primary: false, target: "api.collector.com", joinedCases: [] },
+		]);
+		const joinerReports = (await getSubmissionDetails(joiner.toString()))!.reports;
+		expect(joinerReports.map(({ id, submissionId, primary, target }) => ({ id, submissionId, primary, target }))).toEqual([
+			{ id: own.reportId, submissionId: joiner, primary: true, target: "kit.example.com" },
+			{ id: report.reportId, submissionId: owner, primary: true, target: "shop.example.com" },
+		]);
+	});
+
 	test("returns no report for a submission that was never confirmed", async () => {
 		const submissionId = 351387190816673790n;
 		await SubmissionsEntity.create({ id: submissionId, kind: "website", data: { kind: "website", website: { url: "https://benign.example.com/" } }, dedupeKey: "unreported" });

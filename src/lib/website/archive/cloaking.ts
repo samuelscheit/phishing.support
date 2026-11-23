@@ -1,7 +1,7 @@
 import { getDomain } from "tldts";
 
 import type { FabricEgress } from "../../browser/fabric";
-import type { WebsiteNavigationHop } from "../types";
+import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteNavigationHop } from "../types";
 import type { WebsiteArchiveResult } from "./types";
 
 /**
@@ -37,6 +37,28 @@ export function scriptDestinationSite(archive: WebsiteArchiveResult): string | u
 
 function isHttpRedirect(status: number | null): boolean {
 	return status !== null && status >= 300 && status < 400;
+}
+
+/** What a case says when its capture holds only a decoy: nothing is judged or reported from it. */
+export function cloakingSuspectedInfo(cloaking: WebsiteCloaking): string {
+	return `Cloaking suspected: ${cloaking.detail}. No verdict or report was made from the decoy; retry to visit the site again.`;
+}
+
+/**
+ * A page whose script sent the residential exit to another site, and a chain
+ * that then shows nothing reportable, is a cloaker that picks a harmless decoy
+ * for every visitor (docusign.alt3-doc3ea7-v2.sbs sends each one to a random
+ * news front page), not where it leads its real victims: the decoy becomes an
+ * unresolved cloaking, so a retry visits the site again.
+ */
+export function harmlessScriptedDestination(cloaking: WebsiteCloaking): WebsiteCloaking {
+	return { outcome: "unresolved", detail: `${cloaking.detail}, which shows nothing reportable` };
+}
+
+/** What the case says when every network was turned away by the flow's destination. */
+export function cloakedDestinationInfo(cloaked: WebsiteCloakedDestination): string {
+	const untried = cloaked.notTried.length ? ` ${cloaked.notTried.map(({ network, reason }) => `The ${network} could not be tried: ${reason}.`).join(" ")}` : "";
+	return `The site's flow leads to ${cloaked.host}, which answered every network we tried (${cloaked.answered.join(", ")}) with an empty response and sent the visit back; no report was created.${untried}`;
 }
 
 

@@ -120,7 +120,8 @@ export type AbuseMailClassification = (typeof abuseMailClassifications)[number];
 
 /**
  * The single reporting aggregate. Website and email submissions own their
- * report through `submissionId`; public API reports carry the submitter's
+ * reports through `submissionId` (a website case one per reported site of its
+ * chain); public API reports carry the submitter's
  * name/email instead. Providers always see the phishing.support service
  * identity, with any submitter named only inside the report text.
  */
@@ -159,6 +160,29 @@ export const abuseReports = sqliteTable(
 		// One referral report per campaign; its routes are the mails to every recipient.
 		uniqueIndex("abuse_reports_campaign_unique").on(table.campaignId),
 		index("abuse_reports_status_updated_idx").on(table.status, table.updatedAt),
+	]
+);
+
+/**
+ * A case that confirmed a site another case's open report already covers.
+ * Instead of a second report to the same providers, the existing report names
+ * the case (a `report.case_joined` event) and the case shows the report.
+ */
+export const abuseReportCases = sqliteTable(
+	"abuse_report_cases",
+	{
+		id: sqliteBigint("id").primaryKey(),
+		reportId: sqliteBigint("report_id")
+			.notNull()
+			.references(() => abuseReports.id, { onDelete: "cascade" }),
+		submissionId: sqliteBigint("submission_id")
+			.notNull()
+			.references(() => submissions.id, { onDelete: "cascade" }),
+		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
+	},
+	(table) => [
+		uniqueIndex("abuse_report_cases_report_submission_unique").on(table.reportId, table.submissionId),
+		index("abuse_report_cases_submission_idx").on(table.submissionId),
 	]
 );
 

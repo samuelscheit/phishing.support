@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 
 import { buildProviderReportNarrative } from "../../abuse/providers/kit/report_payload";
-import { reportableWebsiteHop, websiteSiteAssessments } from "../info/report_hops";
+import { reportableWebsiteHop } from "../info/report_hops";
+import { judgedChain } from "../test_helpers";
 import { buildWebsiteAnalysisInput } from "./narrative";
 import {
 	buildWebsiteClassificationInput,
@@ -113,7 +114,7 @@ function classify(page: ReturnType<typeof capturedPage>, response: Record<string
 }
 
 function reportablePage(page: ReturnType<typeof capturedPage>, classification: ReturnType<typeof classify>) {
-	return reportableWebsiteHop(page.archive.navigationHops, websiteSiteAssessments(page.archive.navigationHops, page.hop.index, classification), page.archive);
+	return reportableWebsiteHop(page.archive.navigationHops, judgedChain(page.archive.navigationHops, page.hop.index, classification), page.archive);
 }
 
 /** The German Apple-account lure captured for submission 369886451581587485: one button, no fields. */
@@ -204,7 +205,7 @@ test("a Vietnamese payment kit without a form is reportable with its cited field
 		collectionFields: tiktokCardFields,
 	});
 
-	const assessments = websiteSiteAssessments(tiktokCoinKitArchive.navigationHops, tiktokCoinKitHop.index, classification);
+	const assessments = judgedChain(tiktokCoinKitArchive.navigationHops, tiktokCoinKitHop.index, classification);
 	expect(reportableWebsiteHop(tiktokCoinKitArchive.navigationHops, assessments, tiktokCoinKitArchive)).toEqual(tiktokCoinKitHop);
 });
 
@@ -354,9 +355,9 @@ test("phishing claims without a harmful action or verbatim page evidence are not
 });
 
 test("redirect-only hops cannot inherit the captured destination's finding", () => {
-	expect(websiteSiteAssessments([shareGoogleHop, finalTrollHop], 1, { finding: "prank_or_troll" })).toEqual([
+	expect(judgedChain([shareGoogleHop, finalTrollHop], 1, { finding: "prank_or_troll" })).toEqual([
 		{ hopIndex: 0, finding: "insufficient_evidence" },
-		{ hopIndex: 1, finding: "prank_or_troll" },
+		{ hopIndex: 1, finding: "prank_or_troll", judgedHopIndex: 1 },
 	]);
 });
 
@@ -395,8 +396,9 @@ test("a captured credential-collection page remains eligible for an exact-site p
 		evidenceQuote: "Confirm your delivery address and pay a redelivery fee.",
 		collectionFields: [passwordField],
 	});
-	expect(websiteSiteAssessments([hop], 0, classification)).toEqual([{
+	expect(judgedChain([hop], 0, classification)).toEqual([{
 		hopIndex: 0,
+		judgedHopIndex: 0,
 		finding: "phishing",
 		phishingBasis: "credential_theft",
 		evidenceQuote: "Confirm your delivery address and pay a redelivery fee.",
@@ -406,7 +408,7 @@ test("a captured credential-collection page remains eligible for an exact-site p
 
 
 test("the report gate rejects troll pages and never lets destination content trigger a source-hop report", () => {
-	const trollAssessments = websiteSiteAssessments([shareGoogleHop, finalTrollHop], 1, { finding: "prank_or_troll" });
+	const trollAssessments = judgedChain([shareGoogleHop, finalTrollHop], 1, { finding: "prank_or_troll" });
 	expect(reportableWebsiteHop([shareGoogleHop, finalTrollHop], trollAssessments, redirectArchive)).toBeUndefined();
 
 	const capturedPhishing = {
@@ -415,8 +417,8 @@ test("the report gate rejects troll pages and never lets destination content tri
 		evidenceQuote: "This exact quote supports the captured site's harmful action.",
 	};
 	const capturedArchive = { ...redirectArchive, text: Buffer.from("This exact quote supports the captured site's harmful action.") };
-	expect(reportableWebsiteHop([shareGoogleHop, finalTrollHop], websiteSiteAssessments([shareGoogleHop, finalTrollHop], 1, capturedPhishing), capturedArchive)).toEqual(finalTrollHop);
-	expect(reportableWebsiteHop([shareGoogleHop, finalTrollHop], websiteSiteAssessments([shareGoogleHop, finalTrollHop], 1, capturedPhishing), redirectArchive)).toBeUndefined();
+	expect(reportableWebsiteHop([shareGoogleHop, finalTrollHop], judgedChain([shareGoogleHop, finalTrollHop], 1, capturedPhishing), capturedArchive)).toEqual(finalTrollHop);
+	expect(reportableWebsiteHop([shareGoogleHop, finalTrollHop], judgedChain([shareGoogleHop, finalTrollHop], 1, capturedPhishing), redirectArchive)).toBeUndefined();
 	// Even a malformed assessment cannot send the terminal page's evidence to the shortener.
 	expect(reportableWebsiteHop(
 		[shareGoogleHop, finalTrollHop],

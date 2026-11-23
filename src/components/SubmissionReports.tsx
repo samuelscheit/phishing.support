@@ -3,6 +3,7 @@
 import { useCopy } from "@/components/useCopy";
 import { Bell, Check, CircleSlash, Copy, Download, ExternalLink, Mail, MessageSquareReply, OctagonAlert, Reply, Send } from "lucide-react";
 
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { SubmissionReport, SubmissionReportArtifact, SubmissionReportMessage, SubmissionReportRoute } from "@/lib/submissions/details";
@@ -180,20 +181,40 @@ export function RouteCard({ reportId, route, artifacts }: { reportId: string; ro
 	);
 }
 
-function ReportGroup({ report, index }: { report: SubmissionReport; index: number }) {
+/** The report's heading: a case's own report of a site or of its email, or one its evidence led to. */
+function reportTitle(report: SubmissionReport): string {
+	if (!report.primary) return report.target ? `Linked report · ${report.target}` : "Linked report";
+	if (report.target === "phishing-email") return "Phishing-email report";
+	return report.target ? `Site report · ${report.target}` : "Site report";
+}
+
+function ReportGroup({ report, caseId }: { report: SubmissionReport; caseId?: string }) {
 	const reportId = String(report.id);
 	const artifacts = new Map(report.artifacts.map((artifact) => [String(artifact.id), artifact]));
 	const evidence = report.artifacts.filter((artifact) => artifact.kind === "user_evidence_original");
+	// Another case's open report of a site this case confirmed too: it names this case instead of a second report.
+	const owner = caseId !== undefined && report.submissionId !== null && String(report.submissionId) !== caseId ? String(report.submissionId) : undefined;
 	return (
 		<div className="space-y-5">
 			<Card>
 				<CardContent className="space-y-3 p-4">
 					<div className="flex flex-wrap items-center justify-between gap-2">
-						<CardTitle className="text-base">{index === 0 ? "Phishing-site report" : "Discovered backend report"}</CardTitle>
+						<CardTitle className="text-base">{reportTitle(report)}</CardTitle>
 						<Badge variant="outline" className={cn("capitalize", statusClass(report.status))}>{label(report.status)}</Badge>
 					</div>
 					<p className="text-sm text-muted-foreground">{reportStatusText[report.status] ?? `Report status: ${label(report.status)}.`}</p>
-					{index > 0 ? <p className="whitespace-pre-wrap text-sm">{report.description}</p> : null}
+					{owner ? (
+						<p className="text-sm">
+							This site was already being reported for <Link href={`/submissions/${owner}`} className="font-medium text-primary hover:underline">case {owner}</Link> when this case confirmed it; that report names this case too, and no second report was sent.
+						</p>
+					) : report.joinedCases.length ? (
+						<p className="text-sm">
+							Also covers {report.joinedCases.map((joined, index) => (
+								<span key={String(joined)}>{index > 0 ? ", " : ""}<Link href={`/submissions/${joined}`} className="font-medium text-primary hover:underline">case {String(joined)}</Link></span>
+							))}, which also confirmed this site while this report was open.
+						</p>
+					) : null}
+					{!report.primary ? <p className="whitespace-pre-wrap text-sm">{report.description}</p> : null}
 					<div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
 						<div>Accepted: {formatDate(report.createdAt)}</div>
 						<div>Last update: {formatDate(report.updatedAt)}</div>
@@ -206,12 +227,15 @@ function ReportGroup({ report, index }: { report: SubmissionReport; index: numbe
 	);
 }
 
-/** Reports tab: the primary phishing case followed by each independently routed backend case. */
-export function SubmissionReports({ reports }: { reports: SubmissionReport[] }) {
+/**
+ * Reports tab: the case's report of each confirmed site, each independently
+ * routed report its evidence led to, then the reports of other cases it joined.
+ */
+export function SubmissionReports({ reports, caseId }: { reports: SubmissionReport[]; caseId?: string }) {
 	if (reports.length === 0) return <div className="py-10 text-center text-muted-foreground">No reports yet.</div>;
 	return (
 		<div className="space-y-8">
-			{reports.map((report, index) => <ReportGroup key={String(report.id)} report={report} index={index} />)}
+			{reports.map((report) => <ReportGroup key={String(report.id)} report={report} caseId={caseId} />)}
 		</div>
 	);
 }

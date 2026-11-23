@@ -195,11 +195,12 @@ async function buildEmailPhishingRequest(params: ConfirmedEmailPhishing): Promis
 }
 
 /**
- * Accept a confirmed website into the reporting aggregate. The report is held
- * in `investigating` while its evidence is collected (command payloads, the
- * controlled form probe, linked payload-host reports); providers are contacted
- * only once that investigation releases it. A successful return means the
- * durable report and its investigation job exist.
+ * Accept one confirmed site of a case into the reporting aggregate. The report
+ * is held in `investigating` while its evidence is collected (command
+ * payloads, the controlled form probe, linked payload-host reports); providers
+ * are contacted only once that investigation releases it. A successful return
+ * means the durable report and its investigation job exist, or that another
+ * case's open report of the site now names this case (`joined`).
  */
 export async function reportConfirmedWebsiteAbuse(params: ConfirmedWebsiteAbuse): Promise<CreatedAbuseReport> {
 	const payload: InvestigationJobPayload = {
@@ -230,6 +231,7 @@ export async function reportConfirmedWebsiteAbuse(params: ConfirmedWebsiteAbuse)
 		request: await buildWebsiteAbuseRequest(params),
 		reporter: params.reporter,
 		submissionId: params.submissionId,
+		site: websiteSite(params.urls[0]!),
 		investigation: { payload },
 	});
 	if (created.created && params.visitCapture) {
@@ -244,7 +246,8 @@ export async function reportConfirmedWebsiteAbuse(params: ConfirmedWebsiteAbuse)
 		});
 	}
 	if (created.created) await setInvestigationStatus(params.submissionId, { status: "queued", updatedAt: new Date().toISOString() });
-	await enqueueRedirectorWatch(created.reportId, params.submissionId);
+	// A joined report gets this case's redirector watched too: another lure of the same kit.
+	await enqueueRedirectorWatch(created.reportId, params.submissionId, params.urls[0]!);
 	return created;
 }
 

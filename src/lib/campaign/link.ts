@@ -2,7 +2,7 @@ import { AbuseRepository } from "../abuse/repository";
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { buildDossier, type Dossier, type DossierDependencies } from "../referral/dossier";
-import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "../website/visit/capture_files";
+import { analyzedPage, latestArtifactNamed, websiteCaptureFileNames } from "../website/visit/capture_files";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website/types";
 import { campaignBrand, guideVisitor, sameBrand, type GuidanceDependencies } from "./guidance";
 import { extractIndicators, loadCapturedPageTexts, type IndicatorDependencies } from "./indicators";
@@ -31,7 +31,7 @@ async function saveAnalyzedPageThumbnail(submissionId: bigint): Promise<SitePrev
 	const submission = await SubmissionsEntity.get(submissionId);
 	if (submission?.data.kind !== "website") return undefined;
 	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
-	const screenshot = latestArtifactNamed(artifacts, websiteCaptureFileNames(analyzedCaptureStep(submission.data.website.navigationHops)).screenshot)
+	const screenshot = latestArtifactNamed(artifacts, websiteCaptureFileNames(analyzedPage(submission.data.website)?.step ?? 0).screenshot)
 		?? latestArtifactNamed(artifacts, websiteCaptureFileNames(0).screenshot);
 	if (!screenshot) return undefined;
 	const source = await ArtifactsEntity.get(BigInt(screenshot.id));

@@ -92,8 +92,6 @@ async function analyze(id: bigint, answers: { first: Flow; retries?: Partial<Rec
 		browserBackoffMs: [1],
 		archiveWebsite: async (options) => {
 			captures.push(options);
-			// A hand-off's own case parses the retained capture.
-			if (options.mhtmlSnapshot) return page(options.archivedUrl ?? options.url, LANDING_TEXT, [navigationHop(0, options.archivedUrl ?? options.url, { status: 200, contentCaptured: true })], "phishing");
 			if (!options.egress) return lure(options, "residential", answers.first);
 			const flow = answers.retries?.[options.egress];
 			if (!flow || flow === "unreachable") throw new WebsiteCaptureFailedError([new WebsiteUnreachableError(options.egress, "net::ERR_CONNECTION_CLOSED")]);
@@ -102,19 +100,27 @@ async function analyze(id: bigint, answers: { first: Flow; retries?: Partial<Rec
 		...extra,
 	});
 	const submission = await SubmissionsEntity.get(id);
-	return { captures: captures.filter((capture) => !capture.mhtmlSnapshot), submission, website: submission?.data.kind === "website" ? submission.data.website : undefined };
+	return { captures, submission, website: submission?.data.kind === "website" ? submission.data.website : undefined };
 }
 
 const cloaked: Flow = (egress) => ({ steps: afterGate("cloaked", egress) });
 const landing: Flow = (egress) => ({ steps: afterGate("landing", egress) });
 
 describe("a flow whose destination answers empty and sends the visit back", () => {
-	test("is walked again from the next network, and a destination that shows content there is handed off to its own case", async () => {
+	test("is walked again from the next network, and a destination that shows content there is judged in the same case", async () => {
 		const { captures, submission, website } = await analyze(382166397712601140n, { first: cloaked, retries: { phishing: "unreachable", reporting: landing } });
 		expect(captures.map(({ url, egress }) => ({ url, egress }))).toEqual([{ url: LURE, egress: undefined }, { url: LURE, egress: "phishing" }, { url: LURE, egress: "reporting" }]);
-		expect(submission?.status).toBe("redirected");
-		expect(website?.redirectSubmissionId).toBeDefined();
+		// The destination showed its page, judged as its own site's: nothing reportable, a verdict and no cloaking.
+		expect(submission?.status).toBe("invalid");
+		expect(submission?.info).toBe(`No reportable phishing or malware evidence was found at the captured destination ${LANDING}; no report was created.`);
 		expect(website?.cloakedDestination).toBeUndefined();
+		expect(website?.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([
+			{ hopIndex: 0, finding: "insufficient_evidence", judgedHopIndex: 3 },
+			{ hopIndex: 1, finding: "insufficient_evidence", judgedHopIndex: 4 },
+			{ hopIndex: 2, finding: "insufficient_evidence", judgedHopIndex: 3 },
+			{ hopIndex: 3, finding: "insufficient_evidence", judgedHopIndex: 3 },
+			{ hopIndex: 4, finding: "insufficient_evidence", judgedHopIndex: 4 },
+		]);
 		expect(website?.navigationHops?.map(({ index, url, status, redirectTo, revisit, visitorStep, contentCaptured }) => ({ index, url, status, redirectTo, revisit, moved: Boolean(visitorStep), contentCaptured }))).toEqual([
 			{ index: 0, url: LURE, status: 200, redirectTo: TDS, revisit: undefined, moved: true, contentCaptured: false },
 			{ index: 1, url: TDS, status: 204, redirectTo: LURE, revisit: undefined, moved: false, contentCaptured: false },
@@ -128,7 +134,8 @@ describe("a flow whose destination answers empty and sends the visit back", () =
 	test("goes on to the server IP when Tor is cloaked too, in the order residential, Tor, server IP", async () => {
 		const { captures, submission } = await analyze(382166397712601141n, { first: cloaked, retries: { phishing: cloaked, reporting: landing } });
 		expect(captures.map(({ egress }) => egress)).toEqual([undefined, "phishing", "reporting"]);
-		expect(submission?.status).toBe("redirected");
+		expect(submission?.status).toBe("invalid");
+		expect(submission?.data.kind === "website" ? submission.data.website.cloakedDestination : undefined).toBeUndefined();
 	});
 
 	test("that no network gets past finishes plainly, records which networks answered empty, and creates no report", async () => {
@@ -138,7 +145,6 @@ describe("a flow whose destination answers empty and sends the visit back", () =
 		expect(submission?.info).toBe("The site's flow leads to www.solidfairhubhost.com, which answered every network we tried (residential exit, Tor exit, server IP) with an empty response and sent the visit back; no report was created.");
 		expect(submission?.info).not.toContain("No reportable");
 		expect(website?.cloakedDestination).toEqual({ host: "www.solidfairhubhost.com", site: "solidfairhubhost.com", answered: ["residential exit", "Tor exit", "server IP"], notTried: [] });
-		expect(website?.redirectSubmissionId).toBeUndefined();
 	});
 
 	test("names a network that could not be reached instead of claiming it answered", async () => {

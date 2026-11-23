@@ -60,6 +60,12 @@ export type SubmissionReport = {
 	id: bigint;
 	/** The website or email case the report was made from; null for reports made through the API. */
 	submissionId: bigint | null;
+	/** The case's own report of a site (or of its email), rather than one derived from its evidence (a data drop, a payload host, a redirector). */
+	primary: boolean;
+	/** What the report is about: its first target. */
+	target: string | null;
+	/** Other cases that confirmed the same site while this report was open, and joined it instead of a report of their own. */
+	joinedCases: bigint[];
 	description: string;
 	allegationCategory?: string;
 	status: string;
@@ -115,13 +121,14 @@ function providerReportBody(params: {
 }
 
 async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionReport> {
-	const [targets, routes, runs, messages, artifacts, events] = await Promise.all([
+	const [targets, routes, runs, messages, artifacts, events, joinedCases] = await Promise.all([
 		AbuseRepository.listTargets(report.id),
 		AbuseRepository.listRoutes(report.id),
 		AbuseRepository.listProviderRunsForReport(report.id),
 		AbuseRepository.listMailForReport(report.id),
 		AbuseRepository.listArtifactMetadata(report.id),
 		AbuseRepository.listEvents(report.id),
+		AbuseRepository.listJoinedCases(report.id),
 	]);
 	const followUpsByRoute = new Map<bigint, DecisionFollowUpSummary[]>();
 	for (const event of events) {
@@ -158,6 +165,9 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 	return {
 		id: report.id,
 		submissionId: report.submissionId,
+		primary: !report.idempotencyKey,
+		target: targets[0]?.normalizedTarget ?? null,
+		joinedCases,
 		description: report.description,
 		allegationCategory: report.allegationCategory,
 		status: report.status,
@@ -211,8 +221,17 @@ export async function getReportsByIds(reportIds: readonly bigint[]): Promise<Sub
 	return Promise.all(reports.filter((report) => report !== undefined).map(hydrateSubmissionReport));
 }
 
-/** Every report owned by a submission, with its provider routes and correspondence. */
+/**
+ * Every report of a submission, with its provider routes and correspondence:
+ * its own reports (each confirmed site's first, then those derived from
+ * them), then the open reports of other cases it joined for a site they
+ * already report (`submissionId` names the owning case).
+ */
 export async function getReportsForSubmission(submissionId: bigint): Promise<SubmissionReport[]> {
-	const reports = await AbuseRepository.listReportsForSubmission(submissionId);
-	return Promise.all(reports.map(hydrateSubmissionReport));
+	const [owned, joined] = await Promise.all([
+		AbuseRepository.listReportsForSubmission(submissionId),
+		AbuseRepository.listJoinedReportsForSubmission(submissionId),
+	]);
+	const ordered = [...owned.filter((report) => !report.idempotencyKey), ...owned.filter((report) => report.idempotencyKey), ...joined];
+	return Promise.all(ordered.map(hydrateSubmissionReport));
 }

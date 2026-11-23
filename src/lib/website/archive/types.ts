@@ -4,6 +4,7 @@ import type { ExfiltrationCanaries } from "../../exfiltration/types";
 import type { VisitAgent } from "../../site_visit/agent";
 import type { SiteVisitLiveEvent, SiteVisitRecording } from "../../site_visit/visit";
 import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteProviderWarning } from "../types";
+import type { HopBody } from "../visit/tab_recording";
 
 export type WebsiteArchiveResult = {
 	/** The submitted URL is retained separately from the captured document URL. */
@@ -18,6 +19,8 @@ export type WebsiteArchiveResult = {
 	url: string;
 	hostname: string;
 	navigationHops: WebsiteNavigationHop[];
+	/** The raw bodies of the document answers among `navigationHops` (`bodyCaptured`), by hop index; live captures only. */
+	hopBodies?: HopBody[];
 	/** Timestamp embedded in the MHTML capture, or the capture time when it is not available. */
 	archivedAt: Date;
 	/** The network route the live capture used, for example "Tor exit"; absent for MHTML. */

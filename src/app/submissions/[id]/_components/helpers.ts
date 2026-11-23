@@ -1,6 +1,7 @@
 import type { Artifact } from "@/lib/db/schema";
 import type { SubmissionDetail } from "@/lib/submissions/details";
 import type { WebsitePhishingBasis } from "@/lib/website/types";
+import { websiteSite } from "@/lib/website/info/site";
 
 export type WebsiteData = Extract<SubmissionDetail["data"], { kind: "website" }>["website"];
 export type NavigationHop = NonNullable<WebsiteData["navigationHops"]>[number];
@@ -20,6 +21,34 @@ export function formatArtifactSize(value: number | bigint | null | undefined) {
 
 export function isWebsiteArchiveArtifact(artifact: Pick<Artifact, "kind">) {
 	return artifact.kind.startsWith("website_");
+}
+
+/** A run of consecutive hops of the chain on one site; a chain may pass the same site twice. */
+export type SiteRun = { site: string; hops: NavigationHop[] };
+
+/** The chain as the sites it passed, in order. */
+export function siteRuns(hops: readonly NavigationHop[]): SiteRun[] {
+	const runs: SiteRun[] = [];
+	for (const hop of hops) {
+		const site = websiteSite(hop.url);
+		const last = runs.at(-1);
+		if (last?.site === site) last.hops.push(hop);
+		else runs.push({ site, hops: [hop] });
+	}
+	return runs;
+}
+
+const isReportable = (assessment: SiteAssessment | undefined) => assessment?.finding === "phishing" || assessment?.finding === "malware";
+
+/** Each site of the chain confirmed as phishing or malware, once, in the order the chain reached it, with its verdict. */
+export function reportedSites(hops: readonly NavigationHop[], assessments: ReadonlyMap<number, SiteAssessment>): Array<{ site: string; assessment: SiteAssessment }> {
+	const sites = new Map<string, SiteAssessment>();
+	for (const hop of hops) {
+		const assessment = assessments.get(hop.index);
+		const site = websiteSite(hop.url);
+		if (isReportable(assessment) && !sites.has(site)) sites.set(site, assessment!);
+	}
+	return [...sites].map(([site, assessment]) => ({ site, assessment }));
 }
 
 /** The headline for the page a finding rests on, in the sidebar verdict. */

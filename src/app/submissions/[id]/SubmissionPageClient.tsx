@@ -17,7 +17,7 @@ import { selectDisplayAnalysisRuns } from "@/lib/analysis/run_view";
 import { isFlowStepHop } from "@/lib/website/types";
 import { SiteVisitBrowser, SiteVisitTimeline, useLiveVisit, type SiteVisitPage } from "@/components/SiteVisitPanel";
 import { websiteSiteName } from "@/lib/website/info/site";
-import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website/visit/capture_files";
+import { analyzedPage, latestArtifactNamed, websiteCaptureFileNames } from "@/lib/website/visit/capture_files";
 import { ArchivedFrame } from "./_components/ArchivedFrame";
 import { ArtifactsTab } from "./_components/ArtifactsTab";
 import { CampaignLink } from "./_components/CampaignLink";
@@ -25,8 +25,8 @@ import { EmailFacts } from "./_components/EmailFacts";
 import { InvestigationCard } from "./_components/InvestigationCard";
 import { NavigationTab } from "./_components/NavigationTab";
 import { RunsTab } from "./_components/RunsTab";
-import { FailedPanel, NotReportedPanel, RedirectedPanel, VerdictPanel } from "./_components/StatusPanels";
-import { verdictLabelOf } from "./_components/helpers";
+import { FailedPanel, NotReportedPanel, VerdictPanel } from "./_components/StatusPanels";
+import { reportedSites } from "./_components/helpers";
 import { useArchivedHtml } from "./_components/useArchivedHtml";
 import { useSubmissionDetail } from "./_components/useSubmissionDetail";
 import { hostOf } from "@/lib/network/url";
@@ -48,7 +48,6 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 	const isRunning = statusKey === "running";
 	const isInvalidWebsite = statusKey === "invalid" && submission?.kind === "website" && Boolean(submission.info);
 	const website = submission?.data.kind === "website" ? submission.data.website : undefined;
-	const redirectSubmissionId = website?.redirectSubmissionId;
 	const websiteCloaking = website?.cloaking;
 	const offeredDownload = website?.offeredDownload;
 	const websiteNavigation = website?.navigationHops ?? [];
@@ -60,18 +59,18 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 	const reportCount = reports.reduce((count, report) => count + Math.max(1, report.routes.length), 0);
 
 	const liveVisit = useLiveVisit(id, isRunning && submission?.kind === "website");
-	// The page the finding rests on: the one whose content was captured and analyzed.
-	const analyzedHop = websiteNavigation.find((hop) => hop.contentCaptured);
-	const analyzedAssessment = analyzedHop ? websiteAssessmentByHop.get(analyzedHop.index) : undefined;
+	// Each reported site of the chain, with the verdict every hop of it shares.
+	const confirmedSites = reportedSites(websiteNavigation, websiteAssessmentByHop);
 
 	const targetName =
 		submission?.data.kind === "website"
 			? websiteSiteName(submission.data.website?.url)
 			: (submission?.data.email?.subject as string | undefined) || "Untitled Submission";
 
-	// The analyzed page is the last one the visit reached; its archive is the MHTML of that step.
+	// The page the case's verdict rests on; its archive is the MHTML of its step.
 	const submissionArtifacts = submission?.artifacts ?? [];
-	const analyzedFiles = websiteCaptureFileNames(analyzedCaptureStep(websiteNavigation));
+	const analyzed = website ? analyzedPage(website) : undefined;
+	const analyzedFiles = websiteCaptureFileNames(analyzed?.step ?? 0);
 	const emailScreenshot = submission?.kind === "email" ? latestArtifactNamed(submissionArtifacts, "mail.png") : undefined;
 	const websiteMhtml = latestArtifactNamed(submissionArtifacts, analyzedFiles.mhtml);
 	const emailEml = submissionArtifacts.find(isEmlArtifact);
@@ -89,12 +88,8 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 		);
 	// Only the email image shown beside the facts is left out of the files; a website's screenshots are files.
 	const artifacts = submissionArtifacts.filter((x) => x !== emailScreenshot);
-	// Each page of the visit with its screenshot: the pages it moved on from, the analyzed one, then those after it.
-	const laterPages = website?.laterPages ?? [];
-	const visitPages: SiteVisitPage[] = [
-		...[...websiteNavigation.filter(isFlowStepHop), ...websiteNavigation.filter((hop) => hop.contentCaptured)].map((hop, step) => ({ url: hop.url, step })),
-		...laterPages,
-	].map(({ url, step }) => {
+	// Each page of the chain with its screenshot, in the order shown: the pages the visit moved on from, then the last one.
+	const visitPages: SiteVisitPage[] = [...websiteNavigation.filter(isFlowStepHop), ...websiteNavigation.filter((hop) => hop.contentCaptured)].map((hop, step) => ({ url: hop.url, step })).map(({ url, step }) => {
 		const names = websiteCaptureFileNames(step);
 		// The plain screenshot: the stamped copy's banner belongs to the evidence files, not the viewer.
 		const shot = latestArtifactNamed(submissionArtifacts, names.screenshot) ?? latestArtifactNamed(submissionArtifacts, names.stampedScreenshot);
@@ -151,7 +146,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 			<div className="grid items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
 				<div className="min-w-0 space-y-6">
 					{website ? (
-						<SiteVisitBrowser running={isRunning} pages={visitPages} live={liveVisit} fallbackUrl={website.url ?? ""} openAction={openSite} />
+						<SiteVisitBrowser running={isRunning} pages={visitPages} initialPage={analyzed?.step} live={liveVisit} fallbackUrl={website.url ?? ""} openAction={openSite} />
 					) : null}
 					{submission.data.kind === "email" && <EmailFacts email={submission.data.email} />}
 					<Tabs value={tab} onValueChange={setTab} className="w-full min-w-0">
@@ -169,7 +164,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 								<ArchivedFrame
 									title="Archived Website"
 									date={formatUtcDateTime(websiteMhtml.archivedAt ?? websiteMhtml.createdAt) ?? "unknown date"}
-									subtitle={`Captured page: ${website.archiveUrl ?? website.url}`}
+									subtitle={`Captured page: ${analyzed?.hop.url ?? website.url}`}
 									warning="DO NOT ENTER ANY SENSITIVE INFORMATION"
 									{...websiteArchive}
 								/>
@@ -192,11 +187,11 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 						) : null}
 						<TabsContent value="reports" className="space-y-4 mt-4">
 							{website?.investigation ? <InvestigationCard investigation={website.investigation} /> : null}
-							<SubmissionReports reports={reports} />
+							<SubmissionReports reports={reports} caseId={id} />
 						</TabsContent>
 						{website && websiteNavigation.length > 0 ? (
 							<TabsContent value="navigation" className="space-y-2 mt-4">
-								<NavigationTab hops={websiteNavigation} assessments={websiteAssessmentByHop} website={website} />
+								<NavigationTab hops={websiteNavigation} assessments={websiteAssessmentByHop} website={website} artifacts={submissionArtifacts} />
 							</TabsContent>
 						) : null}
 						<TabsContent value="runs" className="space-y-4 mt-4">
@@ -210,10 +205,9 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 
 				<aside className="min-w-0 space-y-4 lg:sticky lg:top-6">
 					{isReported ? (
-						<VerdictPanel verdictLabel={verdictLabelOf(analyzedAssessment)} assessment={analyzedAssessment} reportCount={reportCount} info={submission.info} onShowReports={() => setTab("reports")} />
+						<VerdictPanel sites={confirmedSites} submittedSite={targetName ?? null} reportCount={reportCount} joinedCases={reports.every((report) => report.submissionId !== null && String(report.submissionId) !== id) ? [...new Set(reports.map((report) => String(report.submissionId)))] : []} info={submission.info} onShowReports={() => setTab("reports")} />
 					) : null}
 					{isInvalidWebsite ? <NotReportedPanel info={submission.info} /> : null}
-					{statusKey === "redirected" ? <RedirectedPanel info={submission.info} redirectSubmissionId={redirectSubmissionId} /> : null}
 					{isFailed ? <FailedPanel info={submission.info} canRetry={canRetryAnalysis} retrying={retrying} retryError={retryError} retryHint={retryHint} onRetry={retryAnalysis} /> : null}
 					{website ? (
 						<SiteVisitTimeline running={isRunning} visit={website.visit} offeredDownload={offeredDownload} live={liveVisit} pageCount={visitPages.length} />

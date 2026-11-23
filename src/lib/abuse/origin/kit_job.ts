@@ -11,15 +11,6 @@ export type KitSiblingAnalysisDependencies = {
 
 /** Submission sources created by kit discovery itself; they never seed another round. */
 const SIBLING_SOURCE = /^(?:kit|origin)-sibling:/;
-/** A redirect hand-off opens the destination's own case; it inherits its parent's lineage. */
-const REDIRECT_SOURCE = /^redirect:(\d{1,20})$/;
-const MAX_REDIRECT_LINEAGE = 5;
-
-/** The case a redirect hand-off came from, when `source` names one. */
-export function redirectParentId(source: string | null | undefined): bigint | undefined {
-	const parent = REDIRECT_SOURCE.exec(source ?? "")?.[1];
-	return parent === undefined ? undefined : BigInt(parent);
-}
 /** Findings whose kit is worth finding elsewhere: a credential or payment kit, or a malware kit such as an exploit loader. */
 const SEED_FINDINGS = new Set(["phishing", "malware"]);
 
@@ -31,20 +22,8 @@ const SEED_FINDINGS = new Set(["phishing", "malware"]);
  */
 export async function isKitSiblingSeed(submissionId: bigint): Promise<boolean> {
 	const submission = await SubmissionsEntity.get(submissionId);
-	if (submission?.data.kind !== "website" || await discoveredBySiblingSearch(submission.source)) return false;
+	if (submission?.data.kind !== "website" || SIBLING_SOURCE.test(submission.source ?? "")) return false;
 	return (submission.data.website.siteAssessments ?? []).some(({ finding }) => SEED_FINDINGS.has(finding));
-}
-
-async function discoveredBySiblingSearch(source: string | null | undefined): Promise<boolean> {
-	let current = source ?? "";
-	for (let depth = 0; depth <= MAX_REDIRECT_LINEAGE; depth++) {
-		if (SIBLING_SOURCE.test(current)) return true;
-		const parent = redirectParentId(current);
-		if (parent === undefined) return false;
-		current = (await SubmissionsEntity.get(parent))?.source ?? "";
-	}
-	// An implausibly long redirect chain is not trusted as an original report.
-	return true;
 }
 
 /**

@@ -9,12 +9,12 @@ import { fetchThroughPublicRedirects, PublicRedirectError, type PublicRedirectDe
 import { createWebsiteSubmission } from "../../submissions/website";
 import { analyzeWebsite } from "../../website/analysis/ai";
 import { websiteSite } from "../../website/info/site";
-import type { WebsiteNavigationHop } from "../../website/types";
+import type { WebsiteNavigationHop, WebsiteSiteAssessment } from "../../website/types";
+import { analyzedPage, isPageHop } from "../../website/visit/capture_files";
 import { AbuseRepository } from "../repository";
 import type { AbuseJob } from "../schema";
 import { normalizePublicHttpUrl } from "../security/security";
 import { throwIfAborted } from "../worker/shared";
-import { redirectParentId } from "./kit_job";
 import { DAY_MS } from "../../util/date_time";
 
 /**
@@ -155,11 +155,11 @@ export type RedirectorWatchState = z.infer<typeof watchStateSchema>;
 const watchDedupeKey = (url: string) => `watch-redirector:${url}`;
 
 /**
- * The redirector a destination case was reached through: the last page of the
- * submitted chain that sent the visitor on by itself (an HTTP redirect, a
- * refresh, a script) and is not on the destination's site. A page the
- * capture had to act on (follow a link, fill a field) is a step of a flow,
- * not something that hands out the kit.
+ * The redirector a confirmed page was reached through in its case's chain: the
+ * hop just before the chain first arrives on the page's site, when that hop
+ * sent the visitor on by itself (an HTTP redirect, a refresh, a script). A
+ * page the visit had to act on (follow a link, fill a field) is a step of a
+ * flow, not something that hands out the kit.
  */
 export function redirectorHop(hops: readonly WebsiteNavigationHop[], destinationUrl: string): WebsiteNavigationHop | undefined {
 	const destination = websiteSite(destinationUrl);
@@ -169,34 +169,60 @@ export function redirectorHop(hops: readonly WebsiteNavigationHop[], destination
 	return hop;
 }
 
-/** A confirmed destination's redirector, with the chain it was recorded in. */
+/** A confirmed page's redirector, with the case whose chain recorded it. */
 export type RedirectorOf = {
 	url: string;
 	destinationUrl: string;
-	/** The submitted case whose capture went through the redirector to the destination. */
-	parent: { id: bigint; createdAt: Date; hops: WebsiteNavigationHop[] };
+	/** The case whose chain went through the redirector to the confirmed page. */
+	recorded: { caseId: bigint; createdAt: Date; hops: WebsiteNavigationHop[] };
+	/** The redirector's site is a reportable site of the same chain, reported in its own right. */
+	reportedInCase: boolean;
+	/** The verdict of the confirmed page's site, which every hop of that site shares. */
+	destinationAssessment?: WebsiteSiteAssessment;
 };
 
-/** The redirector a destination case was reached through, from the chain of the case that handed off to it. */
-export async function redirectorOf(submissionId: bigint): Promise<RedirectorOf | undefined> {
-	const destination = await SubmissionsEntity.get(submissionId);
-	const parentId = redirectParentId(destination?.source);
-	if (destination?.data.kind !== "website" || parentId === undefined) return undefined;
-	const parent = await SubmissionsEntity.get(parentId);
-	if (parent?.data.kind !== "website") return undefined;
-	const hops = parent.data.website.navigationHops ?? [];
-	const hop = redirectorHop(hops, destination.data.website.url);
+/** The redirector a case's confirmed page was reached through, from the case's own chain. */
+export async function redirectorOf(submissionId: bigint, pageUrl: string): Promise<RedirectorOf | undefined> {
+	const submission = await SubmissionsEntity.get(submissionId);
+	if (submission?.data.kind !== "website") return undefined;
+	const { navigationHops: hops = [], siteAssessments = [] } = submission.data.website;
+	const hop = redirectorHop(hops, pageUrl);
 	const url = hop ? normalizePublicHttpUrl(hop.url) : undefined;
-	return url ? { url, destinationUrl: destination.data.website.url, parent: { id: parent.id, createdAt: parent.createdAt, hops } } : undefined;
+	if (!hop || !url) return undefined;
+	const assessmentOf = (site: string) => siteAssessments.find((assessment) => hops.some((other) => other.index === assessment.hopIndex && websiteSite(other.url) === site));
+	const redirectorVerdict = assessmentOf(websiteSite(hop.url));
+	const destinationAssessment = assessmentOf(websiteSite(pageUrl));
+	return {
+		url,
+		destinationUrl: pageUrl,
+		recorded: { caseId: submission.id, createdAt: submission.createdAt, hops },
+		reportedInCase: Boolean(redirectorVerdict && isReportableAssessment(redirectorVerdict)),
+		...(destinationAssessment ? { destinationAssessment } : {}),
+	};
+}
+
+const isReportableAssessment = (assessment: WebsiteSiteAssessment) => assessment.finding === "phishing" || assessment.finding === "malware";
+
+/**
+ * Where a redirector's case led: its verdict page when that is on another
+ * site (the kit it found), else the first page shown on another site, else
+ * where the chain ended.
+ */
+export function chainDestination(website: { navigationHops?: WebsiteNavigationHop[]; analyzedHopIndex?: number }, redirectorUrl: string): string | undefined {
+	const site = websiteSite(redirectorUrl);
+	const away = (hop: WebsiteNavigationHop) => websiteSite(hop.url) !== site;
+	const hops = website.navigationHops ?? [];
+	const analyzed = analyzedPage(website)?.hop;
+	return (analyzed && away(analyzed) ? analyzed : hops.find((hop) => isPageHop(hop) && away(hop)) ?? hops.filter(away).at(-1))?.url;
 }
 
 /**
- * Start watching the redirector a confirmed destination was reached through.
+ * Start watching the redirector a confirmed page was reached through.
  * One watch runs per redirector URL; a report for a host the watch itself
  * found finds that watch still running and adds nothing.
  */
-export async function enqueueRedirectorWatch(reportId: bigint, submissionId: bigint, now = new Date()): Promise<void> {
-	const redirector = await redirectorOf(submissionId);
+export async function enqueueRedirectorWatch(reportId: bigint, submissionId: bigint, pageUrl: string, now = new Date()): Promise<void> {
+	const redirector = await redirectorOf(submissionId, pageUrl);
 	if (!redirector) return;
 	const { url } = redirector;
 	const state: RedirectorWatchState = { url, sites: [websiteSite(redirector.destinationUrl)], checks: 0, misses: 0, lastNewAt: now.toISOString() };
@@ -221,8 +247,8 @@ export type RedirectorWatchDependencies = {
 /**
  * Visit the redirector in the browser as a new case, dated by this check: the
  * site's earlier cases stay as they were. The full analysis runs, cloaking
- * routes and verification gates included; a capture that ends on another
- * site hands off to that site's own case, which is reported as usual.
+ * routes and verification gates included; the case follows the redirector's
+ * chain to wherever it leads and reports each reportable site of it.
  */
 async function visitRedirector(job: AbuseJob, state: RedirectorWatchState, dependencies: RedirectorWatchDependencies): Promise<RedirectorVisit> {
 	const report = await AbuseRepository.getReport(job.reportId!);
@@ -239,9 +265,7 @@ async function visitRedirector(job: AbuseJob, state: RedirectorWatchState, depen
 	// job finds its case already created and reads what it found.
 	await analysis;
 	const visited = await SubmissionsEntity.get(submissionId);
-	const website = visited?.data.kind === "website" ? visited.data.website : undefined;
-	const handedOff = website?.redirectSubmissionId ? await SubmissionsEntity.get(BigInt(website.redirectSubmissionId)) : undefined;
-	const destination = handedOff?.data.kind === "website" ? handedOff.data.website.url : undefined;
+	const destination = visited?.data.kind === "website" ? chainDestination(visited.data.website, state.url) : undefined;
 	return { submissionId, status: visited?.status ?? "missing", ...(destination ? { destination } : {}) };
 }
 

@@ -26,6 +26,8 @@ export type VisitorTab = {
 	 * on its own path, after its first script under load.
 	 */
 	beforeFirstPage: Promise<unknown>[];
+	/** Set by a setup that keeps the raw body of every page the tab's main frame is answered with. */
+	recordDocumentAnswer?: (answer: { url: string; status: number; receivedAt: string; body?: Buffer }) => void;
 	closed: boolean;
 };
 
@@ -44,7 +46,8 @@ const CLOSE_CONFIRM_MS = 500;
 
 type AttachedEvent = { sessionId: string; waitingForDebugger: boolean; targetInfo: { targetId: string; type: string; openerId?: string } };
 
-function targetIdOf(target: Target): string {
+/** A target's id, which is also the id of a page target's main frame. */
+export function targetIdOf(target: Target): string {
 	return (target as unknown as { _targetId: string })._targetId;
 }
 

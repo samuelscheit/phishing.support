@@ -9,9 +9,9 @@ import type { ArchiveWebsiteOptions, WebsiteArchiveDependencies, WebsiteArchiveR
 /**
  * Capture the page over the first route that reaches it, in the order of
  * WEBSITE_CAPTURE_EGRESS. A scripted jump to another site is recorded as
- * cloaking: from the residential exit it is where the page sends victims, whose
- * verdict settles the case; from Tor or the server IP it may be a decoy only
- * the residential exit could tell apart. With `keepSession`, the browser of the capture returned
+ * cloaking: from the residential exit it is where the page sends victims, and
+ * the case's verdict on that chain settles it; from Tor or the server IP it may
+ * be a decoy only the residential exit could tell apart. With `keepSession`, the browser of the capture returned
  * stays open as its `session`, and the caller closes it; every other capture's
  * browser is closed here.
  */

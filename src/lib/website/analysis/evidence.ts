@@ -40,6 +40,7 @@ export async function websiteEvidence(
 		capturedAt: archive.archivedAt,
 		...(archive.route ? { route: archive.route } : {}),
 		navigationHops: archive.navigationHops,
+		...(archive.hopBodies?.length ? { hopBodies: archive.hopBodies } : {}),
 		...(archive.screenshotPng ? { screenshotPng: archive.screenshotPng } : {}),
 		mhtml: archive.mhtml,
 	}, dependencies.timestampEvidence ? { timestamp: dependencies.timestampEvidence } : {});

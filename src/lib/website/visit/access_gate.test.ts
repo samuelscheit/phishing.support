@@ -1,13 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { SubmissionsEntity } from "../../db/entities/submissions";
-import { useTemporaryDatabase } from "../../db/test_helpers";
-import { accessGateOf, accessGateStatements, arrivalChain, bareVisitLeftSite, checkBareVisit } from "./access_gate";
+import { accessGateOf, accessGateStatements, bareVisitLeftSite, checkBareVisit } from "./access_gate";
 import { buildWebsiteReportEvidence } from "../analysis/classification";
 import type { WebsiteNavigationHop } from "../types";
 import { navigationHop } from "../test_helpers";
-
-useTemporaryDatabase();
 
 // Production case 381727464776274088: the link handed out is a workers.dev entry behind
 // Cloudflare Turnstile; it issues a JWT valid for 120 seconds, which sets lbbvw.com's
@@ -23,11 +19,6 @@ const ROOT_HOPS = [
 ];
 const CASE_HOPS = [navigationHop(0, TICKET, { status: 302, redirectTo: PAGE }), navigationHop(1, PAGE, { status: 200, contentCaptured: true })];
 
-async function redirectedCase(rootId: bigint, caseId: bigint, caseHops = CASE_HOPS) {
-	await SubmissionsEntity.create({ id: rootId, kind: "website", dedupeKey: `root-${rootId}`, status: "redirected", data: { kind: "website", website: { url: ENTRY, navigationHops: ROOT_HOPS, redirectSubmissionId: caseId.toString() } } });
-	await SubmissionsEntity.create({ id: caseId, kind: "website", source: `redirect:${rootId}`, dedupeKey: `case-${caseId}`, status: "reported", data: { kind: "website", website: { url: TICKET, archiveUrl: PAGE, navigationHops: caseHops } } });
-}
-
 /** lbbvw.com as observed: without a session, two redirects to href.li, which shows its own page. */
 const decoyingSite = (async (input: URL | RequestInfo) => {
 	const url = new URL(String(input instanceof Request ? input.url : input));
@@ -37,16 +28,6 @@ const decoyingSite = (async (input: URL | RequestInfo) => {
 }) as typeof fetch;
 
 describe("access gate of a reported page", () => {
-	test("a case handed off from an entry gets the entry's hops before its own; a direct case keeps its own", async () => {
-		await redirectedCase(1n, 2n);
-		expect((await arrivalChain(2n)).map(({ url }) => url)).toEqual([ENTRY, ENTRY, TICKET, PAGE]);
-		// The case's own visit went further than the entry's capture: its hops are kept.
-		await redirectedCase(3n, 4n, [...CASE_HOPS.slice(0, 1), navigationHop(1, PAGE, { status: 200, visitorStep: { submitted: [] } }), navigationHop(2, "https://lbbvw.com/verify", { status: 200, contentCaptured: true })]);
-		expect((await arrivalChain(4n)).map(({ url }) => url)).toEqual([ENTRY, ENTRY, TICKET, PAGE, "https://lbbvw.com/verify"]);
-		await SubmissionsEntity.create({ id: 5n, kind: "website", dedupeKey: "direct", data: { kind: "website", website: { url: PAGE, navigationHops: CASE_HOPS } } });
-		expect((await arrivalChain(5n)).map(({ url }) => url)).toEqual([TICKET, PAGE]);
-	});
-
 	test("reads the entry, its own page and the ticket's lifetime from the token's claims", () => {
 		expect(accessGateOf(ROOT_HOPS, PAGE)).toEqual({
 			entryUrl: ENTRY,

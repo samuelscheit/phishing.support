@@ -38,12 +38,11 @@ describe("submission page SEO", () => {
 	});
 
 	test("every status gets its own verdict and tone", () => {
-		expect(["invalid", "redirected", "failed", "running"].map((status) => {
+		expect(["invalid", "failed", "running"].map((status) => {
 			const { verdict, tone } = submissionSeo(website(status as Submission["status"]));
 			return `${status}: ${verdict} (${tone})`;
 		})).toEqual([
 			"invalid: No phishing found (safe)",
-			"redirected: Redirects to another site (neutral)",
 			"failed: Check inconclusive (neutral)",
 			"running: Check in progress (pending)",
 		]);

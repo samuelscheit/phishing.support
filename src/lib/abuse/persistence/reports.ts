@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 
 import { getDb, type Transaction } from "../../db";
 import { generateId } from "../../db/ids";
@@ -8,6 +8,7 @@ import {
 	abuseJobs,
 	abuseProviderRoutes,
 	abuseProviderRuns,
+	abuseReportCases,
 	abuseReports,
 	abuseTargets,
 	type AbuseProviderRoute,
@@ -18,6 +19,8 @@ import { AbuseInputError, createIdempotentTrackingToken, createTrackingToken, ha
 import { listArtifacts } from "./artifacts";
 import { insertArtifact, now, recordEvent } from "./shared";
 import { stableJson } from "../../util/hash";
+import { websiteSite } from "../../website/info/site";
+import { DAY_MS } from "../../util/date_time";
 
 function selectExistingIdempotentReport(tx: Transaction, idempotencyKey: string) {
 	return tx
@@ -31,13 +34,66 @@ export type CreatedAbuseReport = {
 	reportId: bigint;
 	trackingToken: string;
 	created: boolean;
+	/** Set when the site already had an open report of another case, which now names this case too. */
+	joined?: { submissionId: bigint };
 };
+
+/** Reports that ended without reaching any provider: a later case reports the site anew. */
+const UNSENT_REPORT_STATUSES = new Set<AbuseReportStatus>(["insufficient_evidence", "no_route", "failed", "canceled"]);
+/**
+ * How long a report stays the one report of its site for later cases. A host
+ * that ignored it this long, or a site that came back after its takedown, is
+ * reported again with the newer case's evidence.
+ */
+export const REPORT_JOIN_WINDOW_MS = 30 * DAY_MS;
+
+/** The site a report's target stands for: its first reported URL's, else its host. */
+function targetSite(target: { normalizedTarget: string; observedUrls: string[] }): string {
+	try {
+		return target.observedUrls[0] ? websiteSite(target.observedUrls[0]) : target.normalizedTarget;
+	} catch {
+		return target.normalizedTarget;
+	}
+}
+
+/**
+ * The case-owned report this one would duplicate: the case's own report of the
+ * same site (a replayed analysis), or another case's open report of it within
+ * the join window (another lure of the same kit). Without a site (an email),
+ * a case owns one report.
+ */
+function existingCaseReport(tx: Transaction, submissionId: bigint, request: ValidatedAbuseReportRequest, site: string | undefined, at: Date) {
+	if (site === undefined) {
+		const owned = tx.select({ id: abuseReports.id }).from(abuseReports).where(and(eq(abuseReports.submissionId, submissionId), isNull(abuseReports.idempotencyKey))).get();
+		return owned && { reportId: owned.id, ownerId: submissionId };
+	}
+	const host = request.targets[0]?.normalizedTarget;
+	if (!host) return undefined;
+	const candidates = tx
+		.select({ id: abuseReports.id, submissionId: abuseReports.submissionId, status: abuseReports.status, createdAt: abuseReports.createdAt, normalizedTarget: abuseTargets.normalizedTarget, observedUrls: abuseTargets.observedUrls })
+		.from(abuseReports)
+		.innerJoin(abuseTargets, eq(abuseTargets.reportId, abuseReports.id))
+		.where(and(eq(abuseTargets.normalizedTarget, host), isNull(abuseReports.idempotencyKey), isNotNull(abuseReports.submissionId)))
+		.orderBy(asc(abuseReports.createdAt))
+		.all()
+		.filter((candidate) => targetSite(candidate) === site);
+	const owned = candidates.find((candidate) => candidate.submissionId === submissionId);
+	if (owned) return { reportId: owned.id, ownerId: submissionId };
+	const open = candidates.find((candidate) => !UNSENT_REPORT_STATUSES.has(candidate.status) && at.getTime() - candidate.createdAt.getTime() < REPORT_JOIN_WINDOW_MS);
+	return open && { reportId: open.id, ownerId: open.submissionId! };
+}
 
 export async function createReport(params: {
 	request: ValidatedAbuseReportRequest;
 	reporter: ReporterMetadata;
 	/** The submission that owns this report, when it came from website/email analysis. */
 	submissionId?: bigint;
+	/**
+	 * The website site a case's report is about. A case reports each site
+	 * once, and a site another case's open report covers is not reported
+	 * again: that report is linked to this case instead.
+	 */
+	site?: string;
 	/**
 	 * Collect evidence before any provider is contacted: the report is held in
 	 * `investigating` with this job queued instead of `resolve_report`, and
@@ -61,10 +117,14 @@ export async function createReport(params: {
 	return db.transaction(
 		(tx) => {
 			if (params.submissionId !== undefined && !idempotencyKey) {
-				// The primary report remains idempotent by ownership. Derived backend
+				// A case's own reports stay idempotent by case and site. Derived backend
 				// reports carry explicit stable idempotency keys and share the submission.
-				const owned = tx.select({ id: abuseReports.id }).from(abuseReports).where(eq(abuseReports.submissionId, params.submissionId)).get();
-				if (owned) return { reportId: owned.id, trackingToken, created: false };
+				const existing = existingCaseReport(tx, params.submissionId, request, params.site, now());
+				if (existing?.ownerId === params.submissionId) return { reportId: existing.reportId, trackingToken, created: false };
+				if (existing) {
+					joinCase(tx, existing.reportId, params.submissionId, request);
+					return { reportId: existing.reportId, trackingToken, created: false, joined: { submissionId: existing.ownerId } };
+				}
 			}
 			if (idempotencyKey) {
 				const existing = selectExistingIdempotentReport(tx, idempotencyKey);
@@ -176,6 +236,21 @@ export async function createReport(params: {
 		);
 	}
 
+/** Link a case to another case's report of the same site, once, with an event naming it on the report. */
+function joinCase(tx: Transaction, reportId: bigint, submissionId: bigint, request: ValidatedAbuseReportRequest): void {
+	const linked = tx.insert(abuseReportCases)
+		.values({ id: generateId(), reportId, submissionId, createdAt: now() })
+		.onConflictDoNothing()
+		.returning({ id: abuseReportCases.id })
+		.get();
+	if (!linked) return;
+	recordEvent(tx, {
+		reportId,
+		eventType: "report.case_joined",
+		data: { submissionId: submissionId.toString(), urls: request.targets.flatMap((target) => target.observedUrls) },
+	});
+}
+
 /**
  * End a report's investigation: append the collected evidence to its
  * description and attachments, then queue provider resolution. Runs once;
@@ -250,6 +325,27 @@ export async function getReportForSubmission(submissionId: bigint): Promise<Abus
 export async function listReportsForSubmission(submissionId: bigint): Promise<AbuseReport[]> {
 	const db = await getDb();
 	return db.select().from(abuseReports).where(eq(abuseReports.submissionId, submissionId)).orderBy(asc(abuseReports.createdAt)).all();
+}
+
+/** Other cases' reports this case joined: the open report of a site it confirmed too. */
+export async function listJoinedReportsForSubmission(submissionId: bigint): Promise<AbuseReport[]> {
+	const db = await getDb();
+	return db.select({ report: abuseReports }).from(abuseReportCases)
+		.innerJoin(abuseReports, eq(abuseReports.id, abuseReportCases.reportId))
+		.where(eq(abuseReportCases.submissionId, submissionId))
+		.orderBy(asc(abuseReportCases.createdAt))
+		.all()
+		.map(({ report }) => report);
+}
+
+/** The cases that joined a report besides the one owning it, oldest first. */
+export async function listJoinedCases(reportId: bigint): Promise<bigint[]> {
+	const db = await getDb();
+	return db.select({ submissionId: abuseReportCases.submissionId }).from(abuseReportCases)
+		.where(eq(abuseReportCases.reportId, reportId))
+		.orderBy(asc(abuseReportCases.createdAt))
+		.all()
+		.map(({ submissionId }) => submissionId);
 }
 
 export async function getReportByTrackingToken(token: string): Promise<AbuseReport | undefined> {

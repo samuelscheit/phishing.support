@@ -16,6 +16,14 @@ export type WebsiteNavigationHop = {
 	visitorStep?: { submitted: CanaryField[] };
 	/** Set when the capture opened the page again; `redirectTo` is the page it was shown then. */
 	revisit?: WebsiteRevisit;
+	/**
+	 * Set on a document answer whose raw body, as the network delivered it, is
+	 * kept as `chain-hop-<index>.html`: also an interstitial that sent the
+	 * visitor on by script before anything was shown.
+	 */
+	bodyCaptured?: boolean;
+	/** When the answer arrived (ISO 8601), as the browser's network layer held it; a redirect's too. */
+	receivedAt?: string;
 	contentCaptured: boolean;
 };
 
@@ -180,9 +188,9 @@ export type WebsiteHiddenFrame = {
  * How a capture handled a page whose own script sends visitors to another site.
  * `scripted`: the residential exit was sent there, which the archive holds; it
  * is either where the page leads victims or a decoy for every visitor, and the
- * destination's verdict tells them apart. `unresolved`: the residential exit
- * was unavailable and Tor or the server IP was sent there, possibly a decoy for
- * scanners only.
+ * verdict on the chain tells them apart: nothing reportable fails the case as
+ * suspected cloaking. `unresolved`: the residential exit was unavailable and
+ * Tor or the server IP was sent there, possibly a decoy for scanners only.
  */
 export type WebsiteCloaking = { outcome: "scripted" | "unresolved"; detail: string };
 
@@ -333,8 +341,11 @@ export type WebsiteSiteClassification = {
 	rejectedClaim?: string;
 };
 
+/** The verdict of a hop's site: every hop of one site shares it, and a site that showed no page has insufficient evidence. */
 export type WebsiteSiteAssessment = WebsiteSiteClassification & {
 	hopIndex: number;
+	/** The page of the site whose classification is the site's verdict; absent for a site that showed no page. */
+	judgedHopIndex?: number;
 };
 
 /** The two findings that are reported to providers. */

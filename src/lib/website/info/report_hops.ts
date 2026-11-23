@@ -1,23 +1,21 @@
-import { isSameWebsite } from "./site";
+import { isSameWebsite, websiteSite } from "./site";
 import { offeredDownloadSource } from "../visit/offered_download";
 import { normalizedEvidence, QUOTE_GAP, verbatimEvidenceQuote, type WebsiteEvidenceArchive } from "../analysis/classification";
 import type { ReportableWebsiteFinding, WebsiteNavigationHop, WebsiteSiteAssessment, WebsiteSiteClassification } from "../types";
 
-export function websiteSiteAssessments(
-	hops: WebsiteNavigationHop[],
-	capturedHopIndex: number,
-	capturedClassification: WebsiteSiteClassification,
-): WebsiteSiteAssessment[] {
-	const capturedHop = hops.find((hop) => hop.index === capturedHopIndex && hop.contentCaptured);
-	return hops.map((hop) => ({
-		hopIndex: hop.index,
-		// A redirect within the captured site is part of it. A redirect response
-		// on another site has no captured page of its own and cannot inherit the
-		// destination's classification or trigger a report.
-		...(capturedHop && isSameWebsite(hop.url, capturedHop.url)
-			? capturedClassification
-			: { finding: "insufficient_evidence" as const }),
-	}));
+/** A site's verdict: the classification of the page it rests on. */
+export type SiteVerdict = { judgedHopIndex: number; classification: WebsiteSiteClassification };
+
+/**
+ * The verdict of every hop of a chain, by its site: a redirect or a page of a
+ * site shares that site's verdict. A site that only redirected showed no page
+ * of its own; it never inherits where it led and has insufficient evidence.
+ */
+export function chainSiteAssessments(hops: readonly WebsiteNavigationHop[], verdicts: ReadonlyMap<string, SiteVerdict>): WebsiteSiteAssessment[] {
+	return hops.map((hop) => {
+		const verdict = verdicts.get(websiteSite(hop.url));
+		return verdict ? { ...verdict.classification, hopIndex: hop.index, judgedHopIndex: verdict.judgedHopIndex } : { hopIndex: hop.index, finding: "insufficient_evidence" };
+	});
 }
 
 /**
@@ -25,19 +23,8 @@ export function websiteSiteAssessments(
  * single-URL providers receive the page itself, while URL lists also cover
  * the same-site link a visitor actually received.
  */
-export function websiteReportUrls(hops: WebsiteNavigationHop[], capturedHop: WebsiteNavigationHop): string[] {
+export function websiteReportUrls(hops: readonly WebsiteNavigationHop[], capturedHop: WebsiteNavigationHop): string[] {
 	return [...new Set([capturedHop.url, ...hops.filter((hop) => isSameWebsite(hop.url, capturedHop.url)).map((hop) => hop.url)])];
-}
-
-/**
- * The navigation as if the captured site had been submitted directly: the
- * trailing run of hops on that site, ending at the captured page.
- */
-export function capturedHostNavigation(hops: WebsiteNavigationHop[], capturedHop: WebsiteNavigationHop): WebsiteNavigationHop[] {
-	const end = hops.findIndex((hop) => hop.index === capturedHop.index);
-	let start = end;
-	while (start > 0 && isSameWebsite(hops[start - 1]!.url, capturedHop.url)) start--;
-	return hops.slice(start, end + 1).map((hop, index) => ({ ...hop, index }));
 }
 
 

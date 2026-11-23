@@ -1,4 +1,6 @@
-import type { WebsiteNavigationHop } from "./types";
+import type { WebsiteNavigationHop, WebsiteSiteClassification } from "./types";
+import { chainSiteAssessments } from "./info/report_hops";
+import { websiteSite } from "./info/site";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { websiteSubmissionDedupeKey } from "../submissions/website";
 
@@ -19,3 +21,7 @@ export async function waitForStatus(id: bigint, statuses: string[]) {
 
 /** A navigation hop of a captured visit: a 200 HTML page that was not captured, unless `extra` says otherwise. */
 export const navigationHop = (index: number, url: string, extra: Partial<WebsiteNavigationHop> = {}): WebsiteNavigationHop => ({ index, url, hostname: new URL(url).hostname, status: 200, contentType: "text/html", contentCaptured: false, ...extra });
+
+/** The chain's assessments when its page at `hopIndex` was judged `classification` and no other site showed a page. */
+export const judgedChain = (hops: readonly WebsiteNavigationHop[], hopIndex: number, classification: WebsiteSiteClassification) =>
+	chainSiteAssessments(hops, new Map([[websiteSite(hops.find((hop) => hop.index === hopIndex)!.url), { judgedHopIndex: hopIndex, classification }]]));

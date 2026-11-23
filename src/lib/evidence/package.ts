@@ -1,7 +1,8 @@
 
 import { serviceIdentity } from "../network/service_identity";
-import { websiteCaptureFileNames } from "../website/visit/capture_files";
+import { chainHopBodyFileName, websiteCaptureFileNames } from "../website/visit/capture_files";
 import type { WebsiteNavigationHop } from "../website/types";
+import type { HopBody } from "../website/visit/tab_recording";
 import { stampAddressBar } from "./address_bar";
 import { timestampEvidence, type EvidenceTimestamp } from "./timestamp";
 import { sha256Hex } from "../util/hash";
@@ -20,6 +21,8 @@ export type WebsiteCaptureFacts = {
 	capturedAt: Date;
 	route?: string;
 	navigationHops: WebsiteNavigationHop[];
+	/** The raw bodies of the document answers that led to the page, as the network delivered them. */
+	hopBodies?: readonly HopBody[];
 	screenshotPng?: Buffer;
 	mhtml: Buffer;
 };
@@ -77,6 +80,7 @@ export async function buildWebsiteEvidence(
 		...(facts.screenshotPng ? [{ name: names.screenshot, mimeType: "image/png", sha256: screenshotSha256!, size: facts.screenshotPng.byteLength }] : []),
 		...(stampedScreenshotPng ? [{ name: names.stampedScreenshot, mimeType: "image/png", sha256: sha256Hex(stampedScreenshotPng), size: stampedScreenshotPng.byteLength }] : []),
 		{ name: names.mhtml, mimeType: "text/mhtml", sha256: sha256Hex(facts.mhtml), size: facts.mhtml.byteLength },
+		...(facts.hopBodies ?? []).map(({ hopIndex, body }) => ({ name: chainHopBodyFileName(hopIndex), mimeType: "text/html", sha256: sha256Hex(body), size: body.byteLength })),
 	];
 	const manifest = Buffer.from(`${canonicalJson({
 		format: "phishing.support/evidence-manifest@1",
@@ -87,7 +91,7 @@ export async function buildWebsiteEvidence(
 			capturedUrl: facts.capturedUrl,
 			capturedAt: facts.capturedAt.toISOString(),
 			route: facts.route,
-			navigation: facts.navigationHops.map(({ index, url, status, redirectTo, visitorStep, revisit, contentCaptured }) => ({ index, url, status, redirectTo, visitorStep, revisit, contentCaptured })),
+			navigation: facts.navigationHops.map(({ index, url, status, redirectTo, visitorStep, revisit, bodyCaptured, receivedAt, contentCaptured }) => ({ index, url, status, redirectTo, visitorStep, revisit, bodyCaptured, receivedAt, contentCaptured })),
 		},
 		files,
 		hashAlgorithm: "SHA-256",

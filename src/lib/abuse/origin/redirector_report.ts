@@ -1,4 +1,3 @@
-import { SubmissionsEntity } from "../../db/entities/submissions";
 import type { ReporterMetadata } from "../../http/reporter_headers";
 import { hasPathTenants, websiteSite } from "../../website/info/site";
 import type { ReportableWebsiteFinding } from "../../website/types";
@@ -49,7 +48,7 @@ export function buildRedirectorRequest(params: {
 }): ValidatedAbuseReportRequest {
 	const { redirector, destination, check } = params;
 	const description = [
-		`This URL forwards visitors to a confirmed ${findingPhrase(destination.finding)} page: on ${redirector.parent.createdAt.toISOString()} it sent our capture to ${destination.url}, which we confirmed as ${findingPhrase(destination.finding)}.`,
+		`This URL forwards visitors to a confirmed ${findingPhrase(destination.finding)} page: on ${redirector.recorded.createdAt.toISOString()} it sent our capture to ${destination.url}, which we confirmed as ${findingPhrase(destination.finding)}.`,
 		...(destination.evidenceQuote ? [`That page shows: ${JSON.stringify(destination.evidenceQuote)}.`] : []),
 		checkStatement(check, destination.url),
 		"Disabling this URL stops the links already handed out for this campaign from reaching its current page and the ones it moves to next.",
@@ -69,9 +68,9 @@ export function buildRedirectorRequest(params: {
 			sourceReportId: params.sourceReportId.toString(),
 			redirectorUrl: redirector.url,
 			recorded: {
-				capturedAt: redirector.parent.createdAt.toISOString(),
-				caseId: redirector.parent.id.toString(),
-				chain: redirector.parent.hops.map(({ url, status, redirectTo }) => ({ url, status, ...(redirectTo ? { redirectTo } : {}) })),
+				capturedAt: redirector.recorded.createdAt.toISOString(),
+				caseId: redirector.recorded.caseId.toString(),
+				chain: redirector.recorded.hops.map(({ url, status, redirectTo }) => ({ url, status, ...(redirectTo ? { redirectTo } : {}) })),
 			},
 			destination,
 			check: {
@@ -99,17 +98,20 @@ export type RedirectorReportOutcome =
 	| { kind: "skipped"; url: string; reason: string };
 
 /**
- * Report the redirector a confirmed page was reached through, as a report of
- * its own linked to the page's case. A redirector that is a well-known
- * service (a mail provider's click tracker, a URL shortener, a site in the
- * Tranco top list) is left out: that is a service's own link, reported to
- * the service, not to its registrar. A redirector that no longer answers is
- * already gone.
+ * Report the redirector a confirmed page was reached through in its case's
+ * chain, as a report of its own linked to the case. A redirector that is a
+ * well-known service (a mail provider's click tracker, a URL shortener, a site
+ * in the Tranco top list) is left out: that is a service's own link, reported
+ * to the service, not to its registrar. So is one whose site the same chain
+ * reports in its own right, and one that no longer answers, which is already
+ * gone.
  */
 export async function reportRedirector(
 	params: {
 		reportId: bigint;
 		submissionId: bigint;
+		/** The confirmed page the report is about. */
+		pageUrl: string;
 		finding: ReportableWebsiteFinding;
 		reporter: ReporterMetadata;
 		pageScreenshot: () => Promise<PageScreenshot | undefined>;
@@ -117,8 +119,9 @@ export async function reportRedirector(
 	},
 	dependencies: RedirectorReportDependencies = {},
 ): Promise<RedirectorReportOutcome | undefined> {
-	const redirector = await redirectorOf(params.submissionId);
+	const redirector = await redirectorOf(params.submissionId, params.pageUrl);
 	if (!redirector) return undefined;
+	if (redirector.reportedInCase) return { kind: "skipped", url: redirector.url, reason: "its site is confirmed in the same chain and reported in its own right" };
 	const { hostname } = new URL(redirector.url);
 	if (hasPathTenants(hostname)) return { kind: "skipped", url: redirector.url, reason: "a shared link service, whose links are reported to the service itself" };
 	if (isPopularSite(hostname, await (dependencies.loadPopularDomains ?? loadPopularDomains)())) {
@@ -128,10 +131,7 @@ export async function reportRedirector(
 	const check = await (dependencies.checkRedirector ?? checkRedirector)(redirector.url, { signal: params.signal });
 	if (check.kind === "unreachable") return { kind: "skipped", url: redirector.url, reason: `it no longer answers (${check.reason})` };
 
-	const destination = await SubmissionsEntity.get(params.submissionId);
-	const assessment = destination?.data.kind === "website"
-		? destination.data.website.siteAssessments?.find(({ finding }) => finding === params.finding.finding)
-		: undefined;
+	const assessment = redirector.destinationAssessment;
 	const pageScreenshot = await params.pageScreenshot();
 	const request = buildRedirectorRequest({
 		submissionId: params.submissionId,

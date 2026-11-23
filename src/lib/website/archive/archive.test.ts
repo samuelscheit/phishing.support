@@ -86,6 +86,8 @@ test("archiveWebsite parses a retained MHTML snapshot locally without opening a 
 
 // The fake document draws no frames, hidden or not.
 const mainFrame = { childFrames: () => [] };
+/** The captured tab's target, whose id its main frame shares. */
+const TARGET_ID = "captured-tab";
 /** Live captures in tests wait only briefly for a page's own script navigation. */
 const fast = { scriptNavigationSettleMs: 20 } as const;
 
@@ -178,8 +180,15 @@ function archiveBrowserFixture(options: {
 	/** Screenshots served in order; the last repeats. Defaults to a painted page. */
 	/** What each screenshot answers: an image, an error it throws, or "hang" for one that never answers. */
 	screenshots?: Array<Buffer | Error | "hang">;
+	/**
+	 * Hold every document response in the Fetch domain, as Chromium does for the capture's own session,
+	 * answering each address named here with that raw body; one not named has an empty body.
+	 */
+	documentBodies?: Record<string, string>;
 } = {}) {
 	const eventNames: string[] = [];
+	/** Every CDP command of the tab's own sessions, in order. */
+	const cdpCommands: Array<{ method: string; params?: unknown }> = [];
 	const navigationCalls: Array<{ url: string; egress: FabricEgress; waitUntil?: string; timeout?: number; referer?: string }> = [];
 	const networkIdleWaits: Array<{ idleTime?: number; concurrency?: number; timeout?: number }> = [];
 	const leasedEgress: FabricEgress[] = [];
@@ -193,6 +202,18 @@ function archiveBrowserFixture(options: {
 		const responseListeners: Array<(response: HTTPResponse) => void> = [];
 		let currentUrl = options.pageUrl ?? "https://example.test/";
 		let body = "Captured page text";
+		// The Fetch domain of the tab: a session that enabled it holds every document response until it lets it go on.
+		const holding = new Set<(paused: unknown) => void>();
+		const held = new Map<string, { body: string; released: boolean }>();
+		const holdDocument = (response: HTTPResponse) => {
+			if (!options.documentBodies) return;
+			for (const document of [...response.request().redirectChain().map((request) => request.response()!), response]) {
+				const requestId = `request-${held.size + 1}`;
+				held.set(requestId, { body: options.documentBodies?.[document.url()] ?? "", released: false });
+				const headers = Object.entries(document.headers()).map(([name, value]) => ({ name, value }));
+				for (const listener of holding) listener({ requestId, frameId: TARGET_ID, request: { url: document.url() }, responseStatusCode: document.status(), responseHeaders: headers });
+			}
+		};
 		const context = {} as BrowserContext;
 		const page = {
 			browser: () => browser,
@@ -211,6 +232,7 @@ function archiveBrowserFixture(options: {
 			goto: async (url: string, navigation: { waitUntil?: string; timeout?: number; referer?: string }) => {
 				navigationCalls.push({ url, egress, ...navigation });
 				const deliver = (response: HTTPResponse) => {
+					holdDocument(response);
 					currentUrl = response.url();
 					for (const listener of responseListeners) listener(response);
 				};
@@ -235,8 +257,22 @@ function archiveBrowserFixture(options: {
 				return shot;
 			},
 			target: () => ({
-				createCDPSession: async () => ({
-					send: async (method: string) => {
+				_targetId: TARGET_ID,
+				createCDPSession: async () => {
+					let onPaused: ((paused: unknown) => void) | undefined;
+					return {
+					on: (event: string, listener: (paused: unknown) => void) => {
+						if (event !== "Fetch.requestPaused") throw new Error(`Unexpected CDP event ${event}`);
+						onPaused = listener;
+					},
+					off: () => { onPaused = undefined; },
+					send: async (method: string, params?: { requestId?: string }) => {
+						cdpCommands.push({ method, ...(params ? { params } : {}) });
+						if (method === "Emulation.setUserAgentOverride") return {};
+						if (method === "Fetch.enable") { if (onPaused) holding.add(onPaused); return {}; }
+						if (method === "Fetch.disable") { for (const listener of holding) if (listener === onPaused) holding.delete(listener); return {}; }
+						if (method === "Fetch.getResponseBody") return { body: Buffer.from(held.get(params!.requestId!)!.body).toString("base64"), base64Encoded: true };
+						if (method === "Fetch.continueRequest") { held.get(params!.requestId!)!.released = true; return {}; }
 						if (method !== "Page.captureSnapshot") throw new Error(`Unexpected CDP command ${method}`);
 						captureSnapshotCount++;
 						return {
@@ -255,7 +291,8 @@ function archiveBrowserFixture(options: {
 						};
 					},
 					detach: async () => undefined,
-				}),
+					};
+				},
 			}),
 			evaluate: async (callback: () => unknown) => {
 				const source = callback.toString();
@@ -279,6 +316,7 @@ function archiveBrowserFixture(options: {
 	return {
 		getBrowser,
 		eventNames,
+		cdpCommands,
 		navigationCalls,
 		networkIdleWaits,
 		leasedEgress,
@@ -608,6 +646,52 @@ describe("rendering", () => {
 		expect(events).toEqual(["script navigation", "render"]);
 		expect(archive.url).toBe("https://interstitial.example/login");
 		expect(archive.text.toString()).toContain("E-Mail-Adresse");
+	});
+
+	test("keeps the raw body of every page of the chain as the network answered it: the interstitial a script left at once too, not the redirects", async () => {
+		// The design's example chain: a tracker 302s to a prize page whose script moves on at once, through another tracker, to the destination.
+		const tracker = "https://wtrck.com/click?id=1";
+		const prize = "https://ultimateprizesearch.com/";
+		const destination = "https://zatos.com/";
+		const prizeBody = `<html><body><script>location.replace("https://miamitrk.com/c?d=zatos")</script>Searching for your prize…</body></html>`;
+		const destinationBody = "<html><body><h1>Zatos</h1></body></html>";
+		const fixture = archiveBrowserFixture({
+			pageUrl: tracker,
+			documentBodies: { [tracker]: "Found", [prize]: prizeBody, [destination]: destinationBody },
+			goto: async ({ replaceDocument }) => {
+				setTimeout(() => replaceDocument(responseForNavigation(destination, 200, {
+					contentType: "text/html",
+					redirects: [{ url: "https://miamitrk.com/c?d=zatos", status: 302, location: destination }],
+				})), 5);
+				return responseForNavigation(prize, 200, { contentType: "text/html", redirects: [{ url: tracker, status: 302, location: prize }] });
+			},
+		});
+
+		const archive = await archiveWebsite({ url: tracker, visitor: { override: { userAgent: "Mozilla/5.0 (Macintosh) Chrome/157", platform: "MacIntel" }, screen: "desktop" } }, { scriptNavigationSettleMs: 200, getBrowser: fixture.getBrowser });
+
+		expect(archive.navigationHops.map(({ index, url, status, redirectTo, contentCaptured, bodyCaptured }) => ({ index, url, status, redirectTo, contentCaptured, bodyCaptured }))).toEqual([
+			{ index: 0, url: tracker, status: 302, redirectTo: prize, contentCaptured: false, bodyCaptured: undefined },
+			// Its script, not its status, sent the visitor on: the hop names where to.
+			{ index: 1, url: prize, status: 200, redirectTo: "https://miamitrk.com/c?d=zatos", contentCaptured: false, bodyCaptured: true },
+			{ index: 2, url: "https://miamitrk.com/c?d=zatos", status: 302, redirectTo: destination, contentCaptured: false, bodyCaptured: undefined },
+			{ index: 3, url: destination, status: 200, redirectTo: undefined, contentCaptured: true, bodyCaptured: true },
+		]);
+		// Every answer is stamped with when the network layer held it, redirects included, in order.
+		const times = archive.navigationHops.map(({ receivedAt }) => Date.parse(receivedAt ?? ""));
+		expect(times.every(Number.isFinite)).toBe(true);
+		expect(times).toEqual([...times].sort((a, b) => a - b));
+		expect(archive.hopBodies?.map(({ hopIndex, body }) => ({ hopIndex, body: body.toString("utf8") }))).toEqual([
+			{ hopIndex: 1, body: prizeBody },
+			{ hopIndex: 3, body: destinationBody },
+		]);
+		// The holding session presents the visitor before it holds anything: Chromium takes a held navigation's platform from it.
+		const commands = fixture.cdpCommands.map(({ method }) => method).filter((method) => method.startsWith("Fetch.enable") || method === "Emulation.setUserAgentOverride");
+		expect(commands.slice(0, 2)).toEqual(["Emulation.setUserAgentOverride", "Fetch.enable"]);
+		expect(fixture.cdpCommands.find(({ method }) => method === "Emulation.setUserAgentOverride")?.params).toEqual({ userAgent: "Mozilla/5.0 (Macintosh) Chrome/157", platform: "MacIntel" });
+		// Only pages are read; every held response, redirects included, goes on, and the tab is let go at the end.
+		expect(fixture.cdpCommands.filter(({ method }) => method === "Fetch.getResponseBody")).toHaveLength(2);
+		expect(fixture.cdpCommands.filter(({ method }) => method === "Fetch.continueRequest")).toHaveLength(4);
+		expect(fixture.cdpCommands.filter(({ method }) => method === "Fetch.disable")).toHaveLength(1);
 	});
 });
 
@@ -1657,6 +1741,55 @@ document.getElementById("who").textContent = phone ? "Opened on an iPhone." : "T
 			expect(gooll.signals.stageUrls).toContain(`${origin}/pe/stage.js`);
 			expect(gooll.signals.dataUploads).toEqual([{ url: `${origin}/loot`, data: ["keychain"], observed: true }]);
 			expect(archive.screenshotPng?.byteLength).toBeGreaterThan(0);
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+});
+
+describe.skipIf(!chromiumAvailable)("the chain's raw answers, in a real browser", () => {
+	const launch = async () => puppeteer.launch({ executablePath: chromiumExecutable, headless: true, args: ["--no-first-run"] });
+
+	test("keeps the body of an interstitial whose script leaves at once, stamps every answer with its arrival, and keeps the page's own identity", async () => {
+		// A tracker redirect, a prize page that moves on from its <head> before it renders, and the destination.
+		const interstitial = `<!DOCTYPE html><html><head><script>location.replace("/go?next=final")</script></head><body>Searching for your prize…</body></html>`;
+		const destination = `<!DOCTYPE html><html><body><h1>Claim your reward</h1><p id="who"></p><script>document.getElementById("who").textContent = navigator.platform;</script></body></html>`;
+		const userAgents: string[] = [];
+		const server = Bun.serve({
+			port: 0,
+			fetch: (request) => {
+				const { pathname } = new URL(request.url);
+				userAgents.push(request.headers.get("user-agent") ?? "");
+				if (pathname === "/click") return new Response(null, { status: 302, headers: { location: "/prize" } });
+				if (pathname === "/prize") return new Response(interstitial, { headers: { "content-type": "text/html" } });
+				if (pathname === "/go") return new Response(null, { status: 302, headers: { location: "/final" } });
+				if (pathname === "/final") return new Response(destination, { headers: { "content-type": "text/html" } });
+				return new Response("missing", { status: 404 });
+			},
+		});
+		try {
+			const origin = `http://127.0.0.1:${server.port}`;
+			const visitor = { override: { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36", platform: "MacIntel" }, screen: "desktop" as const };
+			// The lure names its victim in the fragment, which the network never sees and the browser carries across the redirect.
+			const archive = await archiveWebsite({ url: `${origin}/click#victim@mail.com`, visitor }, { scriptNavigationSettleMs: 1_500, renderSettleMs: 1_000, getBrowser: launch });
+
+			expect(archive.navigationHops.map(({ url, status, redirectTo, bodyCaptured, contentCaptured }) => ({ url, status, redirectTo, bodyCaptured, contentCaptured }))).toEqual([
+				{ url: `${origin}/click#victim@mail.com`, status: 302, redirectTo: `${origin}/prize`, bodyCaptured: undefined, contentCaptured: false },
+				{ url: `${origin}/prize#victim@mail.com`, status: 200, redirectTo: `${origin}/go?next=final`, bodyCaptured: true, contentCaptured: false },
+				{ url: `${origin}/go?next=final`, status: 302, redirectTo: `${origin}/final`, bodyCaptured: undefined, contentCaptured: false },
+				{ url: `${origin}/final`, status: 200, redirectTo: undefined, bodyCaptured: true, contentCaptured: true },
+			]);
+			// The interstitial as the network delivered it: the page itself never kept it.
+			expect(archive.hopBodies?.map(({ hopIndex, body }) => ({ hopIndex, body: body.toString("utf8") }))).toEqual([
+				{ hopIndex: 1, body: interstitial },
+				{ hopIndex: 3, body: destination },
+			]);
+			const times = archive.navigationHops.map(({ receivedAt }) => Date.parse(receivedAt ?? ""));
+			expect(times.every(Number.isFinite)).toBe(true);
+			expect(times).toEqual([...times].sort((a, b) => a - b));
+			// Holding the answers changes nothing the site sees: every request and the page keep the visitor's identity.
+			expect(new Set(userAgents)).toEqual(new Set([visitor.override.userAgent]));
+			expect(archive.text.toString()).toContain("MacIntel");
 		} finally {
 			server.stop(true);
 		}

@@ -190,7 +190,7 @@ export async function runReportInvestigation(
 	// The link the campaign hands out, when the page was reached through one:
 	// it outlives this page and forwards to the next. Idempotent like the
 	// payload reports, so a retried job finds its report.
-	const redirector = await deps.reportRedirector({ reportId, submissionId, finding: payload.finding, reporter, pageScreenshot: lureScreenshot, signal });
+	const redirector = await deps.reportRedirector({ reportId, submissionId, pageUrl: payload.pageUrl, finding: payload.finding, reporter, pageScreenshot: lureScreenshot, signal });
 	if (redirector) {
 		await AbuseRepository.appendEvent({
 			reportId,

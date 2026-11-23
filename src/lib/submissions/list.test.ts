@@ -29,7 +29,7 @@ describe("submission list pages", () => {
 				{ id: "2", kind: "email", status: "reported", createdAt: "2026-10-02T00:00:00.000Z", title: "Your account is locked" },
 				{ id: "1", kind: "website", status: "reported", createdAt: "2026-10-01T00:00:00.000Z", title: "https://kit.example.com/login" },
 			],
-			counts: { running: 0, phishing: 3, not_phishing: 0, redirects: 0, failed: 0 },
+			counts: { running: 0, phishing: 3, not_phishing: 0, failed: 0 },
 		});
 		// The reporter's IP and headers, and the full analysis data, are not part of the public list.
 		expect(JSON.stringify(page)).not.toContain("203.0.113.9");
@@ -70,11 +70,11 @@ describe("submission list pages", () => {
 
 	test("filters by status chip across pages, and counts every submission under its chip", async () => {
 		const base = Date.parse("2026-10-30T00:00:00Z");
-		const statuses = ["running", "reported", "invalid", "invalid", "redirected", "failed", "reported", "invalid"] as const;
+		const statuses = ["running", "reported", "invalid", "invalid", "failed", "failed", "reported", "invalid"] as const;
 		for (const [index, status] of statuses.entries()) {
 			await create(BigInt(300 + index), new Date(base + index), { kind: "website", website: { url: `https://s${index}.example.com/` } }, status);
 		}
-		const counts = { running: 1, phishing: 2, not_phishing: 3, redirects: 1, failed: 1 };
+		const counts = { running: 1, phishing: 2, not_phishing: 3, failed: 2 };
 
 		// The default chips: what is being analyzed now and what was confirmed, newest first.
 		const first = await listSubmissionCards({ filters: ["running", "phishing"], limit: 2 });
@@ -86,7 +86,8 @@ describe("submission list pages", () => {
 		// Older pages carry no counts; the newest page's refresh keeps them current.
 		expect(second.counts).toBeUndefined();
 
-		expect((await listSubmissionCards({ filters: ["failed", "redirects"] })).submissions.map(({ id }) => id)).toEqual(["305", "304"]);
+		expect((await listSubmissionCards({ filters: ["failed"] })).submissions.map(({ id }) => id)).toEqual(["305", "304"]);
+		expect((await listSubmissionCards({ filters: ["failed", "not_phishing"] })).submissions.map(({ id }) => id)).toEqual(["307", "305", "304", "303", "302"]);
 		// No chip lists nothing, but still counts everything.
 		expect(await listSubmissionCards({ filters: [] })).toEqual({ submissions: [], counts });
 		// Without a filter, everything is listed.
@@ -103,7 +104,7 @@ describe("submission list pages", () => {
 		expect((await (await get("")).json()).submissions).toHaveLength(2);
 		const refused = await get("?status=running,reported");
 		expect(refused.status).toBe(400);
-		expect((await refused.json()).error).toBe('Unknown submission filter "reported"; use running, phishing, not_phishing, redirects, failed.');
+		expect((await refused.json()).error).toBe('Unknown submission filter "reported"; use running, phishing, not_phishing, failed.');
 
 		expect(parseSubmissionFilters(" running , running,failed,")).toEqual(["running", "failed"]);
 		expect(() => parseSubmissionFilters("__proto__")).toThrow(SubmissionFilterError);

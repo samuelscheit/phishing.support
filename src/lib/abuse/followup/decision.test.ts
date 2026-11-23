@@ -122,9 +122,9 @@ describe("provider decision follow-up agent", () => {
 		const ticket = "https://lbbvw.com/?dataXX0=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1cmwiOiJodHRwczovL2xiYnZ3LmNvbS8iLCJkb21haW4iOiJsYmJ2dy5jb20iLCJrZXkiOiJTUlZ3UWJuZjAzb2QiLCJxcmMiOm51bGwsImlhdCI6MTc5NTA3ODA2MCwiZXhwIjoxNzk1MDc4MTgwfQ.qAQe7AM6yZdPpNWwd5ao1NTlafcHGAFeYM_Ue6L02qA";
 		const page = "https://lbbvw.com/";
 		const hop = (index: number, url: string, status: number, redirectTo?: string) => ({ index, url, hostname: new URL(url).hostname, status, ...(redirectTo ? { redirectTo } : {}), contentCaptured: !redirectTo });
-		await SubmissionsEntity.create({ id: 900n, kind: "website", dedupeKey: "entry", status: "redirected", data: { kind: "website", website: { url: entry, redirectSubmissionId: "901", navigationHops: [{ ...hop(0, entry, 200, entry), visitorStep: { submitted: [] } }, hop(1, entry, 302, ticket), hop(2, ticket, 302, page), hop(3, page, 200)] } } });
-		// Reported before the gate was kept with the case: it is read from the arrival.
-		await SubmissionsEntity.create({ id: 901n, kind: "website", source: "redirect:900", dedupeKey: "lbbvw", status: "reported", data: { kind: "website", website: { url: ticket, archiveUrl: page, navigationHops: [hop(0, ticket, 302, page), hop(1, page, 200)] } } });
+		// The case holds the whole chain, from the entry to the reported page.
+		await SubmissionsEntity.create({ id: 901n, kind: "website", dedupeKey: "entry", status: "reported", data: { kind: "website", website: { url: entry, archiveUrl: page, analyzedHopIndex: 3, navigationHops: [{ ...hop(0, entry, 200, entry), visitorStep: { submitted: [] } }, hop(1, entry, 302, ticket), hop(2, ticket, 302, page), hop(3, page, 200)] } } });
+		// Reported before the gate was kept with the case: it is read from the chain.
 		const { route } = await deniedRoute("lbbvw.com", page, 901n);
 		const { model, inputs } = scripted([call("do_not_answer", { reason: "scripted" })]);
 
@@ -139,12 +139,19 @@ describe("provider decision follow-up agent", () => {
 		]);
 		expect(context.case.accessGate).toEqual({ entryUrl: entry, entryStep: true, ticket: { url: ticket, issuedAt: "2026-11-19T08:47:40.000Z", expiresAt: "2026-11-19T08:49:40.000Z", lifetimeSeconds: 120 } });
 
+		const providerFor = (state: string) => () => ({ decisionFollowUp: { addressee: "Cloudflare", contestedStates: [state], channel: { kind: "email", replyAddress: "abusereply@cloudflare.com", subject: (id: string) => `[${id}]` } } }) as never;
+		const gateSeen = async (state: string) => {
+			const again = scripted([call("do_not_answer", { reason: "scripted" })]);
+			await followUpProviderDecision({ routeId: route.id, state }, { model: again.model, tools, providerFor: providerFor(state) });
+			return JSON.parse(((again.inputs[0]![0] as { content: Array<{ text: string }> }).content[0]!).text).case.accessGate;
+		};
+		// The case keeps the gate of its first reported page; that of another site of the chain is not this report's.
+		await SubmissionsEntity.setWebsiteField(901n, "accessGate", { entryUrl: entry, bareVisit: { url: "https://other-kit.example/", reachedUrl: "https://example.com/", checkedAt: "2026-11-19T08:51:00.000Z" } });
+		expect(await gateSeen("denied once more")).toEqual(context.case.accessGate);
 		// A gate kept at report time, with its direct visit, is what the agent gets.
 		const kept = { entryUrl: entry, entryStep: true, bareVisit: { url: page, reachedUrl: "https://href.li/?https://example.com", checkedAt: "2026-11-19T08:51:00.000Z" } };
 		await SubmissionsEntity.setWebsiteField(901n, "accessGate", kept);
-		const again = scripted([call("do_not_answer", { reason: "scripted" })]);
-		await followUpProviderDecision({ routeId: route.id, state: "denied again" }, { model: again.model, tools, providerFor: () => ({ decisionFollowUp: { addressee: "Cloudflare", contestedStates: ["denied again"], channel: { kind: "email", replyAddress: "abusereply@cloudflare.com", subject: (id: string) => `[${id}]` } } }) as never });
-		expect(JSON.parse(((again.inputs[0]![0] as { content: Array<{ text: string }> }).content[0]!).text).case.accessGate).toEqual(kept);
+		expect(await gateSeen("denied again")).toEqual(kept);
 	});
 
 	test("investigates with its tools, then sends its own answer exactly as written, with the screenshot it chose", async () => {

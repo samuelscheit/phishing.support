@@ -8,7 +8,6 @@ const CHIPS: Record<SubmissionFilter, { label: string; on: string; dot: string }
 	running: { label: "Running", on: "border-blue-200 bg-blue-50 text-blue-700", dot: "bg-blue-500 motion-safe:animate-pulse" },
 	phishing: { label: "Phishing", on: "border-red-200 bg-red-50 text-red-700", dot: "bg-red-500" },
 	not_phishing: { label: "Not phishing", on: "border-emerald-200 bg-emerald-50 text-emerald-700", dot: "bg-emerald-500" },
-	redirects: { label: "Redirects", on: "border-amber-200 bg-amber-50 text-amber-800", dot: "bg-amber-500" },
 	failed: { label: "Failed", on: "border-zinc-300 bg-zinc-100 text-zinc-700", dot: "bg-zinc-500" },
 };
 

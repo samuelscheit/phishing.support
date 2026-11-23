@@ -14,7 +14,7 @@ export type SubmissionSeo = {
 	description: string;
 };
 
-const VERDICT_STATUSES = new Set<Submission["status"]>(["reported", "invalid", "redirected"]);
+const VERDICT_STATUSES = new Set<Submission["status"]>(["reported", "invalid"]);
 
 /** Search engines show about 160 characters of a description. */
 const DESCRIPTION_LENGTH = 160;
@@ -30,8 +30,6 @@ function websiteVerdict(submission: Submission): Pick<SubmissionSeo, "verdict" |
 		}
 		case "invalid":
 			return { verdict: "No phishing found", tone: "safe", phrase: "was checked: no phishing found" };
-		case "redirected":
-			return { verdict: "Redirects to another site", tone: "neutral", phrase: "redirects to another site, checked in its own case" };
 		case "failed":
 			return { verdict: "Check inconclusive", tone: "neutral", phrase: "could not be fully checked" };
 		default:

@@ -1,4 +1,3 @@
-import { SubmissionsEntity } from "../../db/entities/submissions";
 import { errorSummary } from "../../util/error_text";
 import { fetchThroughPublicRedirects } from "../../network/public_redirects";
 import { isSameWebsite, websiteSite } from "../info/site";
@@ -25,32 +24,9 @@ export type WebsiteAccessGate = {
 };
 
 /**
- * Every hop from the link first submitted to the captured page: a case handed
- * off from a redirecting site (`redirect:<id>`) starts where the earliest case
- * of its chain was submitted.
- */
-export async function arrivalChain(submissionId: bigint): Promise<WebsiteNavigationHop[]> {
-	const own = await SubmissionsEntity.get(submissionId);
-	const hops = own?.data.kind === "website" ? own.data.website.navigationHops ?? [] : [];
-	let source = own?.source;
-	let root: WebsiteNavigationHop[] | undefined;
-	// A chain is a handful of redirecting sites at most; the bound only stops a cycle.
-	for (let depth = 0; depth < 8 && source?.startsWith("redirect:"); depth++) {
-		const parent = await SubmissionsEntity.get(BigInt(source.slice("redirect:".length)));
-		if (parent?.data.kind !== "website") break;
-		root = parent.data.website.navigationHops ?? root;
-		source = parent.source;
-	}
-	const first = hops[0];
-	if (!root || !first) return hops;
-	const joined = root.findIndex((hop) => hop.url === first.url);
-	return [...(joined >= 0 ? root.slice(0, joined) : root.filter((hop) => !isSameWebsite(hop.url, first.url))), ...hops];
-}
-
-/**
- * The gate in front of the captured page, read from the arrival chain: the
- * hops on other sites before the reported one, and a first URL on it that
- * carries a token. A page reached directly has none.
+ * The gate in front of a reported page, read from its case's chain: the hops
+ * on other sites before the page's site, and a first URL on it that carries a
+ * token. A page reached directly has none.
  */
 export function accessGateOf(chain: readonly WebsiteNavigationHop[], capturedUrl: string): WebsiteAccessGate | undefined {
 	const arrival = chain.findIndex((hop) => isSameWebsite(hop.url, capturedUrl));

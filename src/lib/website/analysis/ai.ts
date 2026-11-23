@@ -6,21 +6,22 @@ import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { getInfo } from "../info/info";
 import { runStreamedAnalysisRun } from "../../analysis/run";
 import { reportConfirmedWebsiteAbuse } from "../../abuse/submission_reports";
+import type { CreatedAbuseReport } from "../../abuse/repository";
 import type { ReporterMetadata } from "../../http/reporter_headers";
 import { defaultReasoning, defaultResponseModel } from "../../openai/client";
 import { analyzedCaptureStep } from "../visit/capture_files";
 import { extractPasteCommands } from "../../malware/paste_commands";
-import { isSameWebsite, websiteSite } from "../info/site";
-import { accessGateOf, arrivalChain, checkBareVisit, type BareVisitDependencies } from "../visit/access_gate";
+import { websiteSite } from "../info/site";
+import { accessGateOf, checkBareVisit, type BareVisitDependencies } from "../visit/access_gate";
 import { abuseEmailCaseUrl } from "../../abuse/mail/draft";
 import { buildWebsiteAnalysisInput } from "./narrative";
 import { buildWebsiteReportEvidence, classifiedHiddenFrame } from "./classification";
-import type { WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop } from "../types";
+import type { ReportableWebsiteFinding, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop } from "../types";
 import { emitStep } from "../visit/progress";
 import { capturedArchiveHop, reportableFinding, reportableWebsiteHop, unreportedVerdict, websiteReportUrls } from "../info/report_hops";
 import { capturedPageScreenshots, capturedWebsiteData, websiteEvidence } from "./evidence";
-import { visitWebsite } from "../visit/visit";
-import { cloakedDestinationInfo, cloakingSuspectedInfo, handOffRedirectedCapture, settleCloakedRedirectsTo } from "../visit/cloaked_redirect";
+import { visitWebsite, type WebsiteChainSite } from "../visit/visit";
+import { cloakedDestinationInfo, cloakingSuspectedInfo, harmlessScriptedDestination } from "../archive/cloaking";
 import { BROWSER_BACKOFF_MS, failWebsiteAnalysis, recordWebsiteAnalysisFailure, withBrowserBackoff } from "./failure";
 import type { WebsiteAnalysisDependencies, WebsiteCapture } from "./analysis_types";
 
@@ -51,7 +52,6 @@ export type AnalyzeWebsiteOptions = {
 } & ReporterMetadata;
 
 export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencies: WebsiteAnalysisDependencies = {}): Promise<bigint> {
-	const analyze = (nextOptions: AnalyzeWebsiteOptions) => analyzeWebsite(nextOptions, dependencies);
 	const { url, submissionId, reporterIp, reporterCountry, reporterHeaders, reuseEvidenceArtifacts = false } = options;
 	// Every live capture keeps its browser open for the flow's next action on
 	// the page; each one is closed once the flow is done with it.
@@ -101,7 +101,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		};
 		if (archive.cloaking?.outcome === "unresolved") {
 			// The capture holds only the decoy every reachable route was shown. It
-			// is neither evidence against the submitted site nor a case of its own.
+			// is no evidence against any site of the chain.
 			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await websiteEvidence(submissionId, url, archive, dependencies) });
 			await SubmissionsEntity.update(submissionId, {
 				status: "failed",
@@ -111,12 +111,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			await emitStep(submissionId, "failed", 100);
 			return submissionId;
 		}
-		let capturedHop = archive.attributionError ? undefined : capturedArchiveHop(archive);
-		if (capturedHop && !isSameWebsite(capturedHop.url, url)) {
-			await handOffRedirectedCapture({ submissionId, url, whois, archive, capturedHop, reporter: { reporterIp, reporterCountry, reporterHeaders }, dependencies, analyze });
-			await emitStep(submissionId, "completed", 100);
-			return submissionId;
-		}
+		const capturedHop = archive.attributionError ? undefined : capturedArchiveHop(archive);
 
 		await emitStep(submissionId, "save_artifacts", 40);
 		// A retry that reuses the stored capture keeps its original evidence package.
@@ -134,31 +129,30 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
-				website: { url, whois, ...capturedWebsiteData(archive) },
+				website: { url, whois, ...capturedWebsiteData(archive), analyzedHopIndex: capturedHop.index },
 			},
 		});
 
 		const visited = await visitWebsite({ submissionId, url, whois, archive, dependencies, capture }).finally(closeSessions);
 		archive = visited.archive;
-		capturedHop = visited.capturedHop;
-		const { classification: capturedClassification, record: visit } = visited;
-		if (visited.handedOff) {
-			await handOffRedirectedCapture({ submissionId, url, whois, archive, capturedHop, via: "its own flow", reporter: { reporterIp, reporterCountry, reporterHeaders }, dependencies, analyze });
-			await emitStep(submissionId, "completed", 100);
-			return submissionId;
-		}
-
-		// Decided once, before the narrative: it explains this finding and never judges the site again.
+		const { chain, record: visit } = visited;
+		// Decided once, before the narrative: it explains these findings and never judges a site again.
 		const siteAssessments = visited.assessments;
-		const reportableSite = reportableWebsiteHop(archive.navigationHops, siteAssessments, archive);
-		const commands = extractPasteCommands(archive.text.toString("utf-8"));
-		const findingCapture = { commands, navigationHops: archive.navigationHops, hiddenFrames: archive.hiddenFrames, device: archive.device, providerWarning: archive.providerWarning, offeredDownload: archive.offeredDownload, dataDrops: visited.dataDrops };
-		const inconclusive = reportableSite ? undefined : visited.inconclusive
+		const confirmed = visited.reportable.flatMap((site) => {
+			const hop = reportableWebsiteHop(site.archive.navigationHops, siteAssessments, site.archive);
+			return hop ? [{ ...site, capturedHop: hop, capture: findingCapture(site) }] : [];
+		});
+		const headline = confirmed[0] ?? { archive, capturedHop: visited.capturedHop, classification: visited.classification };
+		// A scripted jump of the residential exit to a chain that shows nothing reportable led to a decoy.
+		// A destination that turned every network away is said as such, not as a decoy.
+		const decoy = !confirmed.length && !visited.inconclusive && !visited.cloakedDestination && archive.cloaking?.outcome === "scripted" ? harmlessScriptedDestination(archive.cloaking) : undefined;
+		const inconclusive = confirmed.length ? undefined : visited.inconclusive
 			&& `Inconclusive: the visit could not finish the site's flow: ${visited.inconclusive} The last page it reached, ${archive.url}, shows nothing reportable by itself; no verdict or report was made.`;
-		const caseFinding = reportableSite
-			? `${buildWebsiteReportEvidence(capturedClassification, findingCapture)}\nThe site is reported to the responsible providers.`
+		const caseFinding = confirmed.length
+			? `${confirmed.map((site) => buildWebsiteReportEvidence(site.classification, site.capture)).join("\n\n")}\n${confirmed.length === 1 ? "The site is reported to the responsible providers." : "Each of these sites is reported to its responsible providers."}`
+			: decoy ? cloakingSuspectedInfo(decoy)
 			: visited.cloakedDestination ? cloakedDestinationInfo(visited.cloakedDestination)
-			: inconclusive ?? unreportedVerdict(capturedClassification, archive.url);
+			: inconclusive ?? unreportedVerdict(visited.classification, archive.url);
 
 		await emitStep(submissionId, "analysis_run", 75);
 		await runStreamedAnalysisRun({
@@ -166,7 +160,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			analysisKind: "analysis",
 			options: {
 				model: defaultResponseModel,
-				input: buildWebsiteAnalysisInput(archive, { finding: caseFinding, whois, pages: visited.pages, visit, kitResources: archive.kitResources, capturedAt: archive.archivedAt }),
+				input: buildWebsiteAnalysisInput(headline.archive, { finding: caseFinding, whois, pages: visited.pages, visit, kitResources: headline.archive.kitResources, capturedAt: headline.archive.archivedAt }),
 				reasoning: defaultReasoning,
 				tools: [{ type: "web_search" }],
 				stream: true,
@@ -176,37 +170,50 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
-				website: { url, whois, ...capturedWebsiteData(archive), siteAssessments, visit, ...(visited.laterPages ? { laterPages: visited.laterPages } : {}), ...(visited.cloakedDestination ? { cloakedDestination: visited.cloakedDestination } : {}) },
+				website: {
+					url,
+					whois,
+					...capturedWebsiteData(headline.archive),
+					navigationHops: chain,
+					analyzedHopIndex: headline.capturedHop.index,
+					siteAssessments,
+					visit,
+					...(decoy ? { cloaking: decoy } : {}),
+					...(visited.cloakedDestination ? { cloakedDestination: visited.cloakedDestination } : {}),
+				},
 			},
 		});
 
-		if (reportableSite) {
-			const finding = reportableFinding(capturedClassification);
-			const label = finding.finding === "malware" ? "Malware distribution" : "Phishing";
+		if (confirmed.length) {
 			await emitStep(submissionId, "reporting", 90);
-			const reportUrls = websiteReportUrls(archive.navigationHops, reportableSite);
-			const accessGate = await reportAccessGate(submissionId, reportableSite.url, archive.userAgent, dependencies.bareVisit);
-			await reportConfirmedWebsiteAbuse({
-				submissionId,
-				urls: reportUrls,
-				analysisText: buildWebsiteReportEvidence(capturedClassification, { ...findingCapture, ...(visitor ? { reporterUserAgent: visitor.override.userAgent } : {}), accessGate, caseUrl: abuseEmailCaseUrl(submissionId) }),
-				...(archive.userAgent ? { userAgent: archive.userAgent } : {}),
-				screenshots: await capturedPageScreenshots(submissionId, analyzedCaptureStep(archive.navigationHops)),
-				reporter: { reporterIp, reporterCountry, reporterHeaders },
-				finding,
-				pasteCommands: commands,
-				...(finding.finding === "malware" && archive.offeredDownload ? { offeredDownload: archive.offeredDownload } : {}),
-				...(capturedClassification.impersonatedBrand ? { legalBrandUrl: capturedClassification.impersonatedBrand.officialUrl } : {}),
-				...(capturedClassification.hiddenFrame ? { hiddenFrame: classifiedHiddenFrame(capturedClassification, archive.hiddenFrames)! } : {}),
-				...(visited.backends.length ? { visitCapture: { canaries: visited.canaries, requests: visited.requests, backends: visited.backends } } : {}),
-			});
-
-			await SubmissionsEntity.update(submissionId, {
-				status: "reported",
-				info: reportUrls.length === 1
-					? `${label} confirmed at ${reportableSite.url}; its evidence is being collected before the report is sent.`
-					: `${label} confirmed at ${reportableSite.url}; evidence for it and the ${reportUrls.length - 1} URL${reportUrls.length === 2 ? "" : "s"} on ${websiteSite(reportableSite.url)} that lead${reportUrls.length === 2 ? "s" : ""} to it is being collected before the report is sent.`,
-			});
+			const outcomes: string[] = [];
+			// The visit's traffic goes with the first report this case files itself, whose investigation reports each data drop once;
+			// a site another case already reports keeps its report as it is.
+			let trafficFiled = !visited.backends.length;
+			for (const [position, site] of confirmed.entries()) {
+				const finding = reportableFinding(site.classification);
+				const reportUrls = websiteReportUrls(chain, site.capturedHop);
+				const accessGate = await reportAccessGate(chain, site.capturedHop.url, site.archive.userAgent, dependencies.bareVisit);
+				// Kept with the case for answers to providers: the gate of the page its verdict rests on.
+				if (accessGate && position === 0) await SubmissionsEntity.setWebsiteField(submissionId, "accessGate", accessGate);
+				const created = await reportConfirmedWebsiteAbuse({
+					submissionId,
+					urls: reportUrls,
+					analysisText: buildWebsiteReportEvidence(site.classification, { ...site.capture, ...(visitor ? { reporterUserAgent: visitor.override.userAgent } : {}), accessGate, caseUrl: abuseEmailCaseUrl(submissionId) }),
+					...(site.archive.userAgent ? { userAgent: site.archive.userAgent } : {}),
+					screenshots: await capturedPageScreenshots(submissionId, analyzedCaptureStep(site.archive.navigationHops)),
+					reporter: { reporterIp, reporterCountry, reporterHeaders },
+					finding,
+					pasteCommands: site.capture.commands,
+					...(finding.finding === "malware" && site.archive.offeredDownload ? { offeredDownload: site.archive.offeredDownload } : {}),
+					...(site.classification.impersonatedBrand ? { legalBrandUrl: site.classification.impersonatedBrand.officialUrl } : {}),
+					...(site.classification.hiddenFrame ? { hiddenFrame: classifiedHiddenFrame(site.classification, site.archive.hiddenFrames)! } : {}),
+					...(trafficFiled ? {} : { visitCapture: { canaries: visited.canaries, requests: visited.requests, backends: visited.backends } }),
+				});
+				trafficFiled ||= created.created;
+				outcomes.push(reportOutcome(finding, site.capturedHop.url, reportUrls, created));
+			}
+			await SubmissionsEntity.update(submissionId, { status: "reported", info: outcomes.join("\n") });
 		} else if (visited.inconclusive && inconclusive) {
 			// The visit did not finish, so the last page it reached is no verdict on the site.
 			await failWebsiteAnalysis(submissionId, {
@@ -214,6 +221,10 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 				data: { unfinishedFlow: visited.inconclusive },
 				retry: { attempts: priorAttempts, reason: visited.inconclusive, exhausted: (visits: number) => `The visit stopped there ${visits} times; retry to visit the site again.` },
 			});
+			await emitStep(submissionId, "failed", 100);
+			return submissionId;
+		} else if (decoy) {
+			await SubmissionsEntity.update(submissionId, { status: "failed", info: caseFinding });
 			await emitStep(submissionId, "failed", 100);
 			return submissionId;
 		} else {
@@ -227,24 +238,46 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await emitStep(submissionId, "failed", 100);
 	} finally {
 		await closeSessions();
-		await settleCloakedRedirectsTo(submissionId).catch((error: unknown) => console.error("Settling redirected cases failed:", error));
 	}
 
 	return submissionId;
 }
 
+/** What the report about one site's finding is built from: the page's own capture and what it sent off. */
+function findingCapture(site: WebsiteChainSite) {
+	const { archive } = site;
+	return {
+		commands: extractPasteCommands(archive.text.toString("utf-8")),
+		navigationHops: archive.navigationHops,
+		hiddenFrames: archive.hiddenFrames,
+		device: archive.device,
+		providerWarning: archive.providerWarning,
+		offeredDownload: archive.offeredDownload,
+		dataDrops: site.dataDrops,
+	};
+}
+
+/** What the case says about one confirmed site: its report collecting evidence, or the open report of another case it joined. */
+function reportOutcome(finding: ReportableWebsiteFinding, pageUrl: string, reportUrls: readonly string[], created: CreatedAbuseReport): string {
+	const label = finding.finding === "malware" ? "Malware distribution" : "Phishing";
+	const site = websiteSite(pageUrl);
+	if (created.joined) return `${label} confirmed at ${pageUrl}; ${site} is already being reported in case ${created.joined.submissionId.toString()}, whose report now names this case too.`;
+	const leading = reportUrls.length - 1;
+	return leading === 0
+		? `${label} confirmed at ${pageUrl}; its evidence is being collected before the report is sent.`
+		: `${label} confirmed at ${pageUrl}; evidence for it and the ${leading} URL${leading === 1 ? "" : "s"} on ${site} that lead${leading === 1 ? "s" : ""} to it is being collected before the report is sent.`;
+}
+
 /**
- * The gate in front of a page about to be reported, with what a visitor
- * without its session gets now, kept with the case for the report and for
- * answers to providers. A page reached directly is not requested again.
+ * The gate in front of a page about to be reported, read from the case's own
+ * chain, with what a visitor without its session gets now. A page reached
+ * directly is not requested again.
  */
-async function reportAccessGate(submissionId: bigint, capturedUrl: string, userAgent: string | undefined, dependencies?: BareVisitDependencies) {
-	const gate = accessGateOf(await arrivalChain(submissionId), capturedUrl);
+async function reportAccessGate(chain: readonly WebsiteNavigationHop[], capturedUrl: string, userAgent: string | undefined, dependencies?: BareVisitDependencies) {
+	const gate = accessGateOf(chain, capturedUrl);
 	if (!gate) return undefined;
 	const bareVisit = await checkBareVisit(capturedUrl, userAgent, dependencies);
-	const accessGate = bareVisit ? { ...gate, bareVisit } : gate;
-	await SubmissionsEntity.setWebsiteField(submissionId, "accessGate", accessGate);
-	return accessGate;
+	return bareVisit ? { ...gate, bareVisit } : gate;
 }
 
 /**

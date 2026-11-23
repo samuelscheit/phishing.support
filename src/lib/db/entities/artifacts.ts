@@ -3,7 +3,8 @@ import { getDb } from "../index";
 import { artifacts } from "../schema";
 import { generateId } from "../ids";
 import { websiteEvidenceFiles, type WebsiteEvidencePackage } from "../../evidence/package";
-import { websiteCaptureFileNames } from "../../website/visit/capture_files";
+import { chainHopBodyFileName, websiteCaptureFileNames } from "../../website/visit/capture_files";
+import type { HopBody } from "../../website/visit/tab_recording";
 import { sha256Hex } from "../../util/hash";
 
 export class ArtifactsEntity {
@@ -63,8 +64,9 @@ export class ArtifactsEntity {
 
     /**
      * Store a capture with its evidence package: the raw screenshot and MHTML
-     * exactly as captured, the screenshot with its address bar, the manifest
-     * naming every file by SHA-256, and the RFC 3161 token for that manifest.
+     * exactly as captured, the raw body of every document answer that led to
+     * the page, the screenshot with its address bar, the manifest naming every
+     * file by SHA-256, and the RFC 3161 token for that manifest.
      */
     static async saveWebsiteArtifacts({
         archive,
@@ -76,6 +78,7 @@ export class ArtifactsEntity {
             archivedAt: Date;
             screenshotPng?: Buffer;
             mhtml: Buffer;
+            hopBodies?: readonly HopBody[];
         };
         /** Names the files after the page of the case's flow it covers. */
         evidence: WebsiteEvidencePackage;
@@ -99,6 +102,16 @@ export class ArtifactsEntity {
                 buffer: archive.screenshotPng,
             })
             : undefined;
+        for (const { hopIndex, body } of archive.hopBodies ?? []) {
+            await this.saveBuffer({
+                submissionId,
+                name: chainHopBodyFileName(hopIndex),
+                kind: "website_hop_body",
+                mimeType: "text/html",
+                archivedAt: archive.archivedAt,
+                buffer: body,
+            });
+        }
         for (const file of websiteEvidenceFiles(evidence)) {
             await this.saveBuffer({
                 submissionId,

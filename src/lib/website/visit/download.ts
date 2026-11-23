@@ -2,6 +2,7 @@ import type { CDPSession, Page } from "rebrowser-puppeteer-core";
 
 import { sendBeforeRun } from "../../browser/cdp";
 import { sleep } from "../../util/sleep";
+import { readDocumentAnswer, type DocumentAnswer, type PausedDocument } from "./document_bodies";
 
 /**
  * Every file a visit downloads, taken without the browser ever saving or
@@ -21,7 +22,6 @@ export type DownloadedFile = { url: string; fileName: string; contentType?: stri
 export type FailedDownload = { url: string; reason: string };
 
 type Header = { name: string; value: string };
-type PausedResponse = { requestId: string; frameId?: string; request: { url: string }; responseStatusCode?: number; responseHeaders?: Header[] };
 
 function header(headers: readonly Header[] | undefined, name: string): string | undefined {
 	return headers?.find((candidate) => candidate.name.toLowerCase() === name)?.value;
@@ -41,7 +41,7 @@ export function downloadFileName(url: string, disposition: string | undefined, s
 }
 
 /** A response the browser saves rather than shows: an attachment, or a document that is not a page. */
-export function isDownloadResponse(paused: Pick<PausedResponse, "responseStatusCode" | "responseHeaders">): boolean {
+export function isDownloadResponse(paused: Pick<PausedDocument, "responseStatusCode" | "responseHeaders">): boolean {
 	if (/^\s*attachment/i.test(header(paused.responseHeaders, "content-disposition") ?? "")) return true;
 	const status = paused.responseStatusCode ?? 0;
 	if (status < 200 || status >= 300) return false;
@@ -74,6 +74,8 @@ export type DownloadTab = {
 	page?: Page;
 	/** Settings its first page must have applied before it is let through (a new tab's identity). */
 	beforeFirstPage?: readonly Promise<unknown>[];
+	/** Hears every answer its main frame gets, with the raw body of each page, read before the answer goes on. */
+	recordDocumentAnswer?: (answer: DocumentAnswer) => void;
 };
 
 /** How long a first page waits for its tab's settings; a tab whose browser never answers still loads. */
@@ -90,7 +92,8 @@ export type DownloadInterceptor<Tab extends DownloadTab> = {
 
 /**
  * Hold every document response of the visit's tabs at the network layer:
- * pages pass on, a download is read and aborted. Each tab's own CDP session
+ * pages pass on (their body read first for a tab that records it), a
+ * download is read and aborted. Each tab's own CDP session
  * is used, so the agent driving it sees the download fail rather than
  * complete. `taken` hears of each tab that delivered a file, and whether
  * the tab's main frame had shown a page of its own before.
@@ -109,13 +112,15 @@ export function interceptDownloads<Tab extends DownloadTab>(userAgent: string, t
 	const attach = async (tab: Tab) => {
 		const cdp = tab.session;
 		let showedPage = false;
-		cdp.on("Fetch.requestPaused", (paused: PausedResponse) => track((async () => {
+		cdp.on("Fetch.requestPaused", (paused: PausedDocument) => track((async () => {
 			if (!isDownloadResponse(paused) || full()) {
 				if (paused.frameId === tab.targetId && !showedPage) {
 					showedPage = true;
 					// The tab runs by now, so the settings it was given while held are answered.
 					await Promise.race([Promise.all(tab.beforeFirstPage ?? []), sleep(SETTINGS_WAIT_MS)]);
 				}
+				const answer = tab.recordDocumentAnswer ? await readDocumentAnswer(cdp, paused, tab.targetId) : undefined;
+				if (answer) tab.recordDocumentAnswer!(answer);
 				await cdp.send("Fetch.continueRequest", { requestId: paused.requestId }).catch(() => undefined);
 				return;
 			}
@@ -145,7 +150,7 @@ export function interceptDownloads<Tab extends DownloadTab>(userAgent: string, t
 		await cdp.send("Browser.setDownloadBehavior", { behavior: "deny", eventsEnabled: true }).catch(() => undefined);
 	};
 
-	const takeResponse = async (cdp: CDPSession, paused: PausedResponse) => {
+	const takeResponse = async (cdp: CDPSession, paused: PausedDocument) => {
 		try {
 			const length = Number(header(paused.responseHeaders, "content-length"));
 			if (length > MAX_DOWNLOAD_BYTES) {
