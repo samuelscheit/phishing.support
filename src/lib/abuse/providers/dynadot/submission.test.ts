@@ -8,7 +8,7 @@ import { DESCRIPTION as description, formAnswer as answer, pngArtifact as png, P
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError } from "../submission_contracts";
 import { DYNADOT_PROVIDER as PROVIDER } from "./definition";
 import { dynadotProvider } from "./index";
-import { storedDynadotSubmissionPayload } from "./payload";
+import { buildDynadotSubmissionPayload, storedDynadotSubmissionPayload } from "./payload";
 import { prepareDynadotExternalSubmission as rawPrepareDynadotExternalSubmission, dynadotDraft, submissionFields, submitDynadotSubmission, type DynadotDependencies, type DynadotPreflightState } from "./submission";
 
 const prepareDynadotExternalSubmission = verifiedPrepare(dynadotDraft, rawPrepareDynadotExternalSubmission);
@@ -202,6 +202,13 @@ describe("submitDynadotSubmission", () => {
 		expect((await submitDynadotSubmission(bare.context, bare.preflight)).confirmationId).toBe(bare.payload.report.trackingId);
 		const own = await prepared([], () => answer({ data: { validation_errors: [], case_id: "DYN-48213" } }));
 		expect(await submitDynadotSubmission(own.context, own.preflight)).toMatchObject({ confirmationId: "DYN-48213", confirmationText: `Dynadot accepted the report (reference ${own.payload.report.trackingId})` });
+	});
+
+	test("the domain field takes the registered domain Dynadot holds, the path field the reported host's URL", () => {
+		const payload = buildDynadotSubmissionPayload({ target: "wios.tron3.vip", observedUrls: ["https://wios.tron3.vip/login"], description, allegationCategory: "phishing", legalBrandUrl: null, trackingId: "PS-8fc84cc01019-R7" })!;
+		const fields = new Map(submissionFields(payload, { token: "t", files: [] }));
+		expect(fields.get("domains_2")).toBe("tron3.vip");
+		expect(fields.get("domain_path_2")).toBe("https://wios.tron3.vip/login");
 	});
 
 	test("a report without a screenshot sends no upload part", async () => {

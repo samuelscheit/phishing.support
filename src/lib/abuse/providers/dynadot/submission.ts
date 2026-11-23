@@ -42,7 +42,7 @@ export const dynadotDraft = createDraft({
 	read: storedDynadotSubmissionPayload,
 	input: (data, stored?: DynadotSubmissionPayload) => ({ ...reportInputOf(data), evidence: evidenceReferenceOf(DYNADOT_EVIDENCE_CONTRACT, data.evidenceArtifacts, stored) }),
 	build: buildDynadotSubmissionPayload,
-	targetOf: (payload) => payload.target.domain,
+	targetOf: (payload) => payload.target.host,
 });
 
 /** The inputs the phishing form must render for this submission to mean what the draft says. */
@@ -126,6 +126,6 @@ export async function submitDynadotSubmission(context: ProviderSubmissionContext
 		confirmationId: caseId ?? payload.report.trackingId,
 		confirmationText: `Dynadot accepted the report (reference ${payload.report.trackingId})`,
 		finalUrl: PROVIDER.formUrl,
-		submittedTargets: [payload.target.domain],
+		submittedTargets: [payload.target.host],
 	};
 }

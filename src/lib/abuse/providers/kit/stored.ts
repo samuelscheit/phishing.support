@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { normalizeDomain, normalizePublicHttpUrl } from "../../security/security";
+import { normalizeDomain, normalizePublicHttpUrl, registrableDomain } from "../../security/security";
 import { storedProviderEvidenceImageReference, type ProviderEvidenceImageContract, type ProviderEvidenceImageMimeType, type ProviderEvidenceImageReference } from "./evidence";
 import { isReportReference } from "./report_reference";
 
@@ -24,11 +24,32 @@ export function payloadEnvelope<const A extends string>(definition: { version: s
 }
 
 /**
+ * What a registrar's form reports: the reported host, which the report's URLs
+ * and text name, and the registered domain the registrar holds, which its
+ * domain field takes. Dynadot refused wios.tron3.vip as "domain not registered
+ * with Dynadot": it holds tron3.vip.
+ */
+export type RegistrarTarget = { host: string; domain: string };
+
+export function registrarTargetOf(target: string): RegistrarTarget | undefined {
+	const host = normalizeDomain(target);
+	const domain = host && registrableDomain(host);
+	return host && domain ? { host, domain } : undefined;
+}
+
+const domainField = z.string().refine((value) => normalizeDomain(value) === value);
+const registrarTargetShape = { host: domainField, domain: domainField };
+const isRegistrarTarget = (target: RegistrarTarget) => registrarTargetOf(target.host)?.domain === target.domain;
+
+/**
  * Field schemas that mirror the builders' own normalisation: a stored value is
  * valid exactly when a builder could have written it.
  */
 export const field = {
-	domain: z.string().refine((value) => normalizeDomain(value) === value),
+	domain: domainField,
+	registrarTarget: z.object(registrarTargetShape).refine(isRegistrarTarget),
+	/** A registrar target with the one reported URL its form takes beside it. */
+	registrarTargetWithUrl: z.object({ ...registrarTargetShape, observedUrl: z.string() }).refine(isRegistrarTarget),
 	reference: z.string().refine((value) => isReportReference(value)),
 	/** Non-empty text of at most `maximum` characters. */
 	text: (maximum: number) => z.string().min(1).max(maximum),

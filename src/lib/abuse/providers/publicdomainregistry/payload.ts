@@ -1,9 +1,8 @@
 import { z } from "zod";
 
-import { normalizeDomain } from "../../security/security";
 import type { ReportInput } from "../kit/draft";
 import { evidenceContract } from "../kit/evidence";
-import { field, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
+import { field, registrarTargetOf, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
 import { listedFreeText } from "../kit/text";
 import { isReportReference } from "../kit/report_reference";
 import { PUBLIC_DOMAIN_REGISTRY_PROVIDER as PROVIDER } from "./definition";
@@ -15,7 +14,7 @@ const envelope = payloadEnvelope(PROVIDER, "publicdomainregistry_report_v1");
 /** The durable, secret-free draft: the form values the submission sends, besides the page's own fields, its Turnstile token and the uploaded file's path. */
 const payloadSchema = z.object({
 	...envelope.shape,
-	target: z.object({ domain: field.domain }),
+	target: field.registrarTarget,
 	report: z.object({
 		/** The reference PDR's ticket mail quotes. */
 		trackingId: field.reference,
@@ -35,15 +34,16 @@ export type PublicDomainRegistryReportInput = ReportInput & { evidence?: PublicD
 export const { urls: publicDomainRegistryReportUrls, make: makePublicDomainRegistryComplaint } = listedFreeText("publicdomainregistry", PROVIDER, { limit: PROVIDER.complaintMaximumLength, urlMaximumLength: PROVIDER.urlMaximumLength });
 
 export function buildPublicDomainRegistrySubmissionPayload(input: PublicDomainRegistryReportInput): PublicDomainRegistrySubmissionPayload | undefined {
-	const domain = normalizeDomain(input.target);
-	if (!domain || !isReportReference(input.trackingId)) return undefined;
+	const target = registrarTargetOf(input.target);
+	if (!target || !isReportReference(input.trackingId)) return undefined;
+	const domain = target.host;
 	const urls = publicDomainRegistryReportUrls(domain, input.observedUrls);
 	if (urls.length === 0) return undefined;
 	const complaint = makePublicDomainRegistryComplaint({ ...input, target: domain }, urls);
 	if (!complaint) return undefined;
 	return {
 		...envelope.stamp,
-		target: { domain },
+		target,
 		report: { trackingId: input.trackingId, complaint },
 		evidence: input.evidence ?? null,
 	};

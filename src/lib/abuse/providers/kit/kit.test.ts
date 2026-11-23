@@ -9,9 +9,27 @@ import { ProviderSubmissionRejectedError, type ProviderSubmissionContext } from 
 import { definePinned } from "./pin";
 import { deadline } from "../../../util/async";
 import { parseJsonRecord } from "../../../util/values";
+import { field, registrarTargetOf } from "./stored";
 
 const HOST = "phish.example.com";
 const url = (path: string) => `https://${HOST}/${path}`;
+
+describe("registrarTargetOf", () => {
+	test("names the reported host and the registered domain the registrar holds", () => {
+		expect(registrarTargetOf("wios.tron3.vip")).toEqual({ host: "wios.tron3.vip", domain: "tron3.vip" });
+		expect(registrarTargetOf("Pay.BDPay.com.bd.")).toEqual({ host: "pay.bdpay.com.bd", domain: "bdpay.com.bd" });
+		expect(registrarTargetOf("example.com")).toEqual({ host: "example.com", domain: "example.com" });
+		expect(registrarTargetOf("203.0.113.7")).toBeUndefined();
+		expect(registrarTargetOf("com")).toBeUndefined();
+	});
+
+	test("a stored target is valid only when its domain is its host's registered domain", () => {
+		expect(field.registrarTarget.safeParse({ host: "wios.tron3.vip", domain: "tron3.vip" }).success).toBeTrue();
+		expect(field.registrarTarget.safeParse({ host: "wios.tron3.vip", domain: "wios.tron3.vip" }).success).toBeFalse();
+		expect(field.registrarTarget.safeParse({ host: "wios.tron3.vip", domain: "other.vip" }).success).toBeFalse();
+		expect(field.registrarTargetWithUrl.safeParse({ host: "a.example.com", domain: "example.com", observedUrl: "https://a.example.com/" }).success).toBeTrue();
+	});
+});
 
 describe("reportUrls", () => {
 	test("keeps the target's own URLs once each, in order, and drops what is not theirs", () => {

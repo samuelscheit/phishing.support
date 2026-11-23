@@ -43,7 +43,7 @@ export const newfoldDraft = createDraft({
 	read: storedNewfoldSubmissionPayload,
 	input: (data, stored?: NewfoldSubmissionPayload) => ({ ...reportInputOf(data), brand: newfoldBrandForRoute(data.route), evidence: evidenceReferenceOf(NEWFOLD_EVIDENCE_CONTRACT, data.evidenceArtifacts, stored) }),
 	build: buildNewfoldSubmissionPayload,
-	targetOf: (payload) => payload.target.domain,
+	targetOf: (payload) => payload.target.host,
 });
 
 /**
@@ -136,7 +136,7 @@ export async function submitNewfoldSubmission(context: ProviderSubmissionContext
 			confirmationId: payload.report.trackingId,
 			confirmationText: `Newfold accepted the report (redirected to ${answer.url}); it names no case ID, our reference is ${payload.report.trackingId}.`,
 			finalUrl: answer.url!,
-			submittedTargets: [payload.target.domain],
+			submittedTargets: [payload.target.host],
 		};
 	}
 	if (answer.status === 403 && /just a moment|attention required|cloudflare/i.test(answer.text)) {

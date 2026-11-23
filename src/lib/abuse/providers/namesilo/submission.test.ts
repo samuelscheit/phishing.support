@@ -62,8 +62,8 @@ describe("NameSilo phishing report submission", () => {
 		const durable = payload();
 		expect(storedNameSiloSubmissionPayload(durable)).toEqual(durable);
 		expect(durable.target).toEqual({
-			normalizedTarget: "login.phishing.example.com",
-			registrableDomain: "example.com",
+			host: "login.phishing.example.com",
+			domain: "example.com",
 			observedUrl: "https://login.phishing.example.com/collect",
 		});
 		expect(durable.report.explanation).toContain("NameSilo");
@@ -84,7 +84,7 @@ describe("NameSilo phishing report submission", () => {
 	test("rejects a brand URL on the reported target and altered evidence", () => {
 		const durable = payload();
 		expect(buildNameSiloSubmissionPayload({
-			target: durable.target.normalizedTarget,
+			target: durable.target.host,
 			observedUrl: durable.target.observedUrl,
 			description: durable.report.explanation,
 			realWebsite: "https://phishing.example.com/legitimate",

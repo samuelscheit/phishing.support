@@ -50,10 +50,20 @@ describe("comments", () => {
 		expect(reportReferencesIn(comments)).toEqual([REFERENCE]);
 		expect(payload).toMatchObject({
 			adapter: "dynadot_report_v1",
-			target: { domain: "login-example-phish.com" },
+			target: { host: "login-example-phish.com", domain: "login-example-phish.com" },
 			report: { trackingId: REFERENCE, domainPath: "https://login-example-phish.com/signin", officialWebsite: "https://www.examplebank.com/" },
 			evidence: null,
 		});
+	});
+
+	test("a subdomain's report names the registered domain Dynadot holds, and the host in its URLs and text", () => {
+		// wios.tron3.vip (2026-11-23): Dynadot refused the host as "domain not registered with Dynadot".
+		const payload = buildDynadotSubmissionPayload(input({ target: "wios.tron3.vip", observedUrls: ["https://wios.tron3.vip/login"], hostingLine: undefined }))!;
+		expect(payload.target).toEqual({ host: "wios.tron3.vip", domain: "tron3.vip" });
+		expect(payload.report.domainPath).toBe("https://wios.tron3.vip/login");
+		expect(payload.report.comments).toContain("for wios.tron3.vip.");
+		expect(storedDynadotSubmissionPayload(payload)).toEqual(payload);
+		expect(storedDynadotSubmissionPayload({ ...payload, target: { host: "wios.tron3.vip", domain: "wios.tron3.vip" } })).toBeUndefined();
 	});
 
 	test("never exceed the limit, whatever the parts are", () => {

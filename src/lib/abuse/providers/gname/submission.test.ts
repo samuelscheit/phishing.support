@@ -155,8 +155,11 @@ describe("GNAME abuse complaint form", () => {
 	});
 
 	test("the domain entry carries its URL base64-encoded after a bar, as the form joins it", () => {
-		expect(gnameDomainEntry({ domain: "92haoyun.icu", observedUrl: "https://92haoyun.icu/gooll/gooll.html?x=1&y=ü" }))
+		expect(gnameDomainEntry({ host: "92haoyun.icu", domain: "92haoyun.icu", observedUrl: "https://92haoyun.icu/gooll/gooll.html?x=1&y=ü" }))
 			.toBe(`92haoyun.icu|${Buffer.from("https://92haoyun.icu/gooll/gooll.html?x=1&y=ü", "utf8").toString("base64")}`);
+		// A subdomain's entry names the domain GNAME holds, and the host's URL.
+		expect(gnameDomainEntry({ host: "m.92haoyun.icu", domain: "92haoyun.icu", observedUrl: "https://m.92haoyun.icu/" }))
+			.toBe(`92haoyun.icu|${Buffer.from("https://m.92haoyun.icu/", "utf8").toString("base64")}`);
 	});
 
 	test("nothing is drafted without an observed URL, a screenshot under 2 MB, or the definition the route was pinned to", async () => {

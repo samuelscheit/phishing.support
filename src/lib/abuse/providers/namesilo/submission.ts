@@ -246,7 +246,7 @@ export const nameSiloDraft = createDraft({
 		: !input.realWebsite ? "namesilo_requires_a_verified_brand_website"
 		: undefined,
 	build: buildNameSiloSubmissionPayload,
-	targetOf: (payload) => payload.target.normalizedTarget,
+	targetOf: (payload) => payload.target.host,
 });
 
 /**
@@ -307,6 +307,6 @@ export async function submitNameSiloSubmission(
 	return {
 		confirmationText: "NameSilo accepted the phishing report.",
 		finalUrl: NAMESILO_PROVIDER.reportPageUrl,
-		submittedTargets: [payload.target.normalizedTarget],
+		submittedTargets: [payload.target.host],
 	};
 }

@@ -1,8 +1,7 @@
 import { z } from "zod";
 
-import { normalizeDomain } from "../../security/security";
 import { evidenceContract } from "../kit/evidence";
-import { field, payloadEnvelope, storedReader } from "../kit/stored";
+import { field, payloadEnvelope, registrarTargetOf, storedReader } from "../kit/stored";
 import { storedProviderEvidenceImageReference } from "../kit/evidence";
 import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../kit/report_payload";
 import { ERANET_PROVIDER } from "./definition";
@@ -14,11 +13,11 @@ const envelope = payloadEnvelope(ERANET_PROVIDER, "eranet_phishing_report_v1");
 /** The durable, secret-free draft: the form values the submission sends. */
 const payloadSchema = z.object({
 	...envelope.shape,
-	target: z.object({ domain: field.domain, observedUrl: z.string() }),
+	target: field.registrarTargetWithUrl,
 	/** The form's report-type checkboxes this service files under. */
 	report: z.object({ subTypes: z.array(z.enum(["phishing_site", "other"])), description: field.text(ERANET_PROVIDER.maximumDescriptionLength), website: z.string().min(1) }),
 	evidence: field.evidence(ERANET_EVIDENCE_CONTRACT),
-}).refine(({ target }) => normalizeObservedUrlForTarget(target.observedUrl, target.domain) === target.observedUrl);
+}).refine(({ target }) => normalizeObservedUrlForTarget(target.observedUrl, target.host) === target.observedUrl);
 
 export type EranetSubmissionPayload = z.infer<typeof payloadSchema>;
 export type EranetEvidenceReference = EranetSubmissionPayload["evidence"];
@@ -53,19 +52,19 @@ export function buildEranetSubmissionPayload(params: {
 	legalBrandUrl?: string;
 	evidence: EranetEvidenceReference | null;
 }): EranetSubmissionPayload | undefined {
-	const domain = normalizeDomain(params.target);
-	const observedUrl = domain ? normalizeObservedUrlForTarget(params.observedUrl, domain) : undefined;
+	const registrar = registrarTargetOf(params.target);
+	const observedUrl = registrar ? normalizeObservedUrlForTarget(params.observedUrl, registrar.host) : undefined;
 	const description = makeEranetDescription({
-		target: domain,
+		target: registrar?.host,
 		observedUrl,
 		description: params.description,
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 	});
-	if (!domain || !observedUrl || !description || !params.website || !params.evidence || !storedProviderEvidenceImageReference(params.evidence, ERANET_EVIDENCE_CONTRACT)) return undefined;
+	if (!registrar || !observedUrl || !description || !params.website || !params.evidence || !storedProviderEvidenceImageReference(params.evidence, ERANET_EVIDENCE_CONTRACT)) return undefined;
 	return {
 		...envelope.stamp,
-		target: { domain, observedUrl },
+		target: { ...registrar, observedUrl },
 		report: { subTypes: eranetSubTypes(params.allegationCategory), description, website: params.website },
 		evidence: params.evidence,
 	};

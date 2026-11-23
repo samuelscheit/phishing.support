@@ -45,7 +45,7 @@ export const publicDomainRegistryDraft = createDraft({
 	read: storedPublicDomainRegistrySubmissionPayload,
 	input: (data, stored?: PublicDomainRegistrySubmissionPayload) => ({ ...reportInputOf(data), evidence: evidenceReferenceOf(PUBLIC_DOMAIN_REGISTRY_EVIDENCE_CONTRACT, data.evidenceArtifacts, stored) }),
 	build: buildPublicDomainRegistrySubmissionPayload,
-	targetOf: (payload) => payload.target.domain,
+	targetOf: (payload) => payload.target.host,
 });
 
 /** The uploader's `{success, data: {path, file}}`: the path the feedback names the file by. */
@@ -139,7 +139,7 @@ export async function submitPublicDomainRegistrySubmission(context: ProviderSubm
 			confirmationId: payload.report.trackingId,
 			confirmationText: `PublicDomainRegistry accepted the report${message ? `: ${message}` : ""}`,
 			finalUrl: PROVIDER.formUrl,
-			submittedTargets: [payload.target.domain],
+			submittedTargets: [payload.target.host],
 		};
 	}
 	// Akismet judged our session, not the report: nothing was filed, and a person

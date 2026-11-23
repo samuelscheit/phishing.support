@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-import { normalizeDomain, normalizePublicHttpUrl } from "../../security/security";
+import { normalizePublicHttpUrl } from "../../security/security";
 import type { ReportInput } from "../kit/draft";
-import { field, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
+import { field, registrarTargetOf, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
 import { composeFreeText, reportUrls, type UrlRules } from "../kit/text";
 import { truncateAtWord } from "../../../util/text";
 import { extractedBrandName } from "../kit/report_payload";
@@ -16,7 +16,7 @@ const URL_RULES: UrlRules = { minimumLength: 4, maximumLength: 2048, maximum: PR
 /** The durable, secret-free draft: what either channel files, before the channel is chosen. */
 const payloadSchema = z.object({
 	...envelope.shape,
-	target: z.object({ domain: field.domain }),
+	target: field.registrarTarget,
 	report: z.object({
 		/** The reference leading `info`; GoDaddy's mail quotes it. */
 		trackingId: field.reference,
@@ -58,15 +58,16 @@ export const makeGoDaddyInfo = (input: GoDaddyReportInput, urls: readonly string
 });
 
 export function buildGoDaddySubmissionPayload(input: GoDaddyReportInput): GoDaddySubmissionPayload | undefined {
-	const domain = normalizeDomain(input.target);
-	if (!domain || !isReportReference(input.trackingId)) return undefined;
+	const target = registrarTargetOf(input.target);
+	if (!target || !isReportReference(input.trackingId)) return undefined;
+	const domain = target.host;
 	const urls = goDaddyReportUrls(domain, input.observedUrls);
 	if (urls.length === 0) return undefined;
 	const info = makeGoDaddyInfo({ ...input, target: domain }, urls);
 	if (!info) return undefined;
 	return {
 		...envelope.stamp,
-		target: { domain },
+		target,
 		report: {
 			trackingId: input.trackingId,
 			type: input.allegationCategory === "malware" ? "MALWARE" : "PHISHING",

@@ -99,7 +99,7 @@ export const eranetDraft = createDraft({
 	}),
 	admit: (_data, input) => !input.observedUrl ? "eranet_requires_an_observed_url" : !input.website ? "eranet_requires_a_reference_website" : !input.evidence ? "eranet_requires_a_screenshot" : undefined,
 	build: buildEranetSubmissionPayload,
-	targetOf: (payload) => payload.target.domain,
+	targetOf: (payload) => payload.target.host,
 });
 
 /**
@@ -179,6 +179,6 @@ export async function submitEranetSubmission(context: ProviderSubmissionContext,
 		...(typeof orderNo === "string" && orderNo ? { confirmationId: orderNo } : {}),
 		confirmationText: `Eranet accepted the report${typeof orderNo === "string" && orderNo ? ` (receipt ${orderNo})` : ""}.`,
 		finalUrl: ERANET_PROVIDER.reportPageUrl,
-		submittedTargets: [payload.target.domain],
+		submittedTargets: [payload.target.host],
 	};
 }
