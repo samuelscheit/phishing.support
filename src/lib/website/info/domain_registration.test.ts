@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { ResolverDependencies } from "../../abuse/resolver/types";
 import { testRdapLocator } from "../../network/rdap_test_helpers";
-import { domainRegistration, platformTenantSite } from "./domain_registration";
+import { domainRegistration } from "./domain_registration";
 
 const REGISTRAR_RDAP = "https://rdap.registrar.example/domain/";
 
@@ -126,14 +126,6 @@ describe("domain registration evidence for the website classifier", () => {
 		expect(await domainRegistration("d3ixcffzcz1zze.cloudfront.net", dependencies)).toEqual({ platformTenant: "d3ixcffzcz1zze.cloudfront.net" });
 		expect(await domainRegistration("sites.google.com", dependencies)).toEqual({ platformTenant: "sites.google.com" });
 		expect(requested).toEqual([]);
-	});
-
-	test("platform tenants are told from a brand's own hosts", () => {
-		expect(platformTenantSite("x.blogspot.com")).toBe("x.blogspot.com");
-		expect(platformTenantSite("KIT.web.app.")).toBe("kit.web.app");
-		expect(platformTenantSite("signin.amazonaws-us-gov.com")).toBeUndefined();
-		expect(platformTenantSite("forms.office.com")).toBeUndefined();
-		expect(platformTenantSite("www.youtube.com")).toBeUndefined();
 	});
 
 	test("an IP or an unregistered name has no registration", async () => {

@@ -1,9 +1,8 @@
-import { parse } from "tldts";
-
 import type { SiteCheckState } from "./schema";
 import { matchPageSignature, type SitePage } from "./signatures";
 import { suspensionNameserver } from "./suspension_nameservers";
 import { urlHostname } from "../network/url";
+import { siteOf } from "../network/registered_domain";
 
 /** What DNS said about the visited host. An IP literal host is `resolved` to itself. */
 export type DnsObservation =
@@ -36,16 +35,6 @@ const HOLD_STATUSES = new Set(["clienthold", "serverhold"]);
 
 function holdStatus(statuses: readonly string[]): string | undefined {
 	return statuses.find((status) => HOLD_STATUSES.has(status.toLowerCase().replace(/[\s_-]/g, "")));
-}
-
-/**
- * The site a host belongs to: its registrable domain, where a platform's
- * tenant (`kit.pages.dev`) counts as a site of its own. An IP is its own site.
- */
-export function siteOf(host: string): { site: string; platform?: string } {
-	const parsed = parse(host, { allowPrivateDomains: true });
-	if (parsed.isIp || !parsed.domain) return { site: host };
-	return parsed.isPrivate && parsed.publicSuffix ? { site: parsed.domain, platform: parsed.publicSuffix } : { site: parsed.domain };
 }
 
 /**

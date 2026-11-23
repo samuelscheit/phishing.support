@@ -5,13 +5,13 @@ import type { InferInsertModel } from "drizzle-orm";
 
 import { fetchRdapRecord } from "../abuse/resolver/http";
 import type { ResolverDependencies } from "../abuse/resolver/types";
-import { registrableDomain } from "../abuse/security/security";
+import { hostRegistration } from "../network/registered_domain";
 import { browserRequestHeaders } from "../network/service_identity";
 import { errorSummary } from "../util/error_text";
 import { asRecord } from "../util/values";
 import { readResponseBody, retryWithTimeout, withTimeout } from "../network/bounded_fetch";
 import { fetchThroughPublicRedirects, PublicRedirectError } from "../network/public_redirects";
-import { classifySite, siteOf, type DnsObservation, type HttpObservation } from "./classify";
+import { classifySite, type DnsObservation, type HttpObservation } from "./classify";
 import type { siteChecks } from "./schema";
 import { urlHostname } from "../network/url";
 import { type FetchLike } from "../http/fetch";
@@ -85,14 +85,14 @@ type RegistryObservation = { statuses: string[]; nameservers: string[] };
 const EMPTY_REGISTRY: RegistryObservation = { statuses: [], nameservers: [] };
 
 /**
- * The RDAP status values and delegated nameservers of the host's registrable domain. A platform
+ * The RDAP status values and delegated nameservers of the host's registered domain. A platform
  * tenant's domain is the platform's, and an IP has none. RDAP is evidence
  * beside the visit, so its failure leaves the list empty.
  */
 async function observeRegistry(host: string, rdap: ResolverDependencies): Promise<RegistryObservation> {
-	if (isIP(host) || siteOf(host).platform) return EMPTY_REGISTRY;
-	const domain = registrableDomain(host);
-	if (!domain) return EMPTY_REGISTRY;
+	const registration = hostRegistration(host);
+	if (!registration || "platformTenant" in registration) return EMPTY_REGISTRY;
+	const { domain } = registration;
 	try {
 		const record = await withTimeout(() => fetchRdapRecord("domain", domain, rdap), RDAP_TIMEOUT_MS, `RDAP lookup of ${domain}`);
 		const strings = (values: unknown): string[] => (Array.isArray(values) ? values.filter((value): value is string => typeof value === "string") : []);
