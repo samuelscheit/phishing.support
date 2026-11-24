@@ -531,6 +531,41 @@ export async function reconcileProviderRunRejection(params: {
  * rather than retrying the submission and risking a duplicate complaint.
  */
 
+/**
+ * Take back the pre-call marker of a run whose provider refused it, explicitly
+ * and without filing it, until a limit lifts (`ProviderSubmissionRetryLaterError`):
+ * the run is `starting` again, as one that never reached the provider, and the
+ * same run files it later. False when the run is not past its marker.
+ */
+export async function releaseProviderSubmission(runId: bigint, reason: string): Promise<boolean> {
+	const db = await getDb();
+	return db.transaction(
+		(tx) => {
+			const run = tx.select().from(abuseProviderRuns).where(eq(abuseProviderRuns.id, runId)).get();
+			if (!run || run.executionStatus !== "submission_started") return false;
+			const route = tx.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.id, run.routeId)).get();
+			if (!route || route.status !== "running") return false;
+			const released = tx
+				.update(abuseProviderRuns)
+				.set({ executionStatus: "starting", updatedAt: now() })
+				.where(and(eq(abuseProviderRuns.id, run.id), eq(abuseProviderRuns.executionStatus, "submission_started")))
+				.returning({ id: abuseProviderRuns.id })
+				.get();
+			if (!released) return false;
+			recordEvent(tx, {
+				reportId: run.reportId,
+				targetId: route.targetId,
+				routeId: route.id,
+				runId: run.id,
+				eventType: "provider_run.provider_submission_released",
+				data: { from: "submission_started", to: "starting", reason },
+			});
+			return true;
+		},
+		{ behavior: "immediate" },
+	);
+}
+
 export async function prepareProviderSubmission(runId: bigint): Promise<boolean> {
 	const db = await getDb();
 	return db.transaction(

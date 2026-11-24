@@ -8,6 +8,7 @@ import {
 	ProviderSubmissionDuplicateError,
 	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
+	ProviderSubmissionRetryLaterError,
 	type ProviderSubmissionContext,
 	type ProviderSubmissionPreflight,
 	type ProviderSubmissionPreparation,
@@ -326,6 +327,8 @@ async function executeOnce(params: Parameters<typeof executeProviderSubmission>[
 	} catch (error) {
 		await disposePreflight(preflight);
 		if (error instanceof ProviderSubmissionDuplicateError) return settleSuccess(route, run, params.provider, await duplicateReceipt(params.provider, error, run.id));
+		// Refused for now and not filed: the run is one that never reached the provider again, and its job waits.
+		if (error instanceof ProviderSubmissionRetryLaterError && await AbuseRepository.releaseProviderSubmission(run.id, boundedErrorText(error))) throw error;
 		const status = knownFailureStatus(error);
 		if (status) return settleKnownFailure({ routeId: route.id, runId: run.id, status, reason: boundedErrorText(error) });
 		await AbuseRepository.markUnknownExternalState({ routeId: route.id, runId: run.id, error: boundedErrorText(error), reason: "provider_submission_ambiguous" });

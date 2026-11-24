@@ -81,6 +81,19 @@ export class ProviderSubmissionRejectedError extends Error {
 }
 
 /**
+ * The provider refused the report for now and said so, explicitly, without
+ * filing it: a request or submission limit. The same run files it once the
+ * limit lifts (`retryAfterMs`, the provider's Retry-After when it names one);
+ * the wait spends none of the job's attempts and is bounded by the job's age.
+ */
+export class ProviderSubmissionRetryLaterError extends Error {
+	constructor(message: string, readonly retryAfterMs: number) {
+		super(message);
+		this.name = "ProviderSubmissionRetryLaterError";
+	}
+}
+
+/**
  * The provider refused the report as a duplicate of a recent one for the same
  * URLs ("You have already submitted this URL recently"): the URLs are reported,
  * usually by an earlier route of ours for the same site, so the route settles

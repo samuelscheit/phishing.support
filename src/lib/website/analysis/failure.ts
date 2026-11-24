@@ -32,7 +32,7 @@ const DEFAULT_AUTO_RETRY_DELAYS_MS: readonly number[] = Array.from({ length: MAX
 
 /**
  * Automatic re-queues for a browser-service outage: progressive backoff
- * spanning 24 hours (matching the abuse worker's `BROWSER_WAIT_LIMIT_MS`), so
+ * spanning 24 hours (matching the abuse worker's `JOB_WAIT_LIMIT_MS`), so
  * an hours-long Fabric outage recovers automatically without losing cases.
  */
 export const BROWSER_OUTAGE_RETRY_DELAYS_MS: readonly number[] = [

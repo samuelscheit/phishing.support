@@ -6,7 +6,7 @@ import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { contactRoute } from "../../resolver/routes";
 import { abuseTargets } from "../../schema";
 import { jsonResponse as json, readyDraft } from "../kit/testing";
-import { ProviderSubmissionRejectedError } from "../submission_contracts";
+import { ProviderSubmissionRejectedError, ProviderSubmissionRetryLaterError } from "../submission_contracts";
 import { awsProvider } from "./index";
 import { AWS_PROVIDER } from "./definition";
 import { providerResponseId } from "../kit/report_reference";
@@ -191,10 +191,24 @@ describe("submitAwsSubmission", () => {
 			expect(error, name).toBeInstanceOf(ProviderSubmissionRejectedError);
 			expect(error.message, name).toContain("API gateway denied the report before it was filed (HTTP 403)");
 		}
-		const limited = await submitAwsSubmission(context, { fetch: fakeFetch(new Response(AWS_REQUEST_LIMIT_BODY, { status: 429 })).fetch, now: () => NOW }).catch((caught) => caught);
-		expect(limited).toBeInstanceOf(ProviderSubmissionRejectedError);
-		expect(limited.message).toContain("request limit (HTTP 429)");
 		expect(isApiGatewayDenial(new Response(null, { status: 200, headers: { "x-amzn-errortype": "ForbiddenException" } }), API_GATEWAY_FORBIDDEN_BODY)).toBe(false);
+	});
+
+	test("AWS's limit files nothing: the report waits for it to lift, as long as AWS asks or an hour", async () => {
+		const { context } = await readyContext();
+		// "request limit" until 2026-11, "submission limit" since (signin.aws.login.kippertranslation.com, 2026-11-23).
+		const submissionLimit = '{"errorMessage":"You have reached your submission limit, please try again later"}';
+		const answers: Array<[string, Response, number]> = [
+			["request limit", new Response(AWS_REQUEST_LIMIT_BODY, { status: 429 }), 60 * 60_000],
+			["submission limit", new Response(submissionLimit, { status: 429 }), 60 * 60_000],
+			["with Retry-After", new Response(submissionLimit, { status: 429, headers: { "retry-after": "120" } }), 120_000],
+		];
+		for (const [name, answer, waitMs] of answers) {
+			const error = await submitAwsSubmission(context, { fetch: fakeFetch(answer).fetch, now: () => NOW }).catch((caught) => caught);
+			expect(error, name).toBeInstanceOf(ProviderSubmissionRetryLaterError);
+			expect(error.message, name).toContain("AWS refused the report at its limit (HTTP 429)");
+			expect(error.retryAfterMs, name).toBe(waitMs);
+		}
 	});
 
 	test("every other failure is ambiguous: a plain error, never a rejection", async () => {

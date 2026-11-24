@@ -1,6 +1,6 @@
 import { AbuseRepository } from "../repository";
 import { resolveAbuseTarget } from "../resolver";
-import { acquireFabricCdpSession, cancelFabricBrowserSession, isBrowserUnavailable } from "../../browser/fabric";
+import { acquireFabricCdpSession, cancelFabricBrowserSession } from "../../browser/fabric";
 import type { JobGiveUp } from "../persistence/provider_runs";
 import { browserTaskModel, type ChatModel } from "../../browser/task/agent";
 import type { FabricCdpSessionAcquirer } from "../../browser/task/fabric";
@@ -21,11 +21,9 @@ import { enqueueRulesSweep } from "../../campaign/sweep";
 import { ensureLivenessChecks } from "../../liveness/schedule";
 import { sleep } from "../../util/sleep";
 import { isExternalJob, JOB_HANDLERS, JOB_LANES, JOB_POLICY, jobTimeoutMs, laneFilter, type JobLane } from "./jobs";
-import { BROWSER_WAIT_LIMIT_MS, browserWaitDelayMs, MAX_RETRIES, retryDelayMs } from "./retry";
+import { JOB_WAIT_LIMIT_MS, jobWaitOf, MAX_RETRIES, retryDelayMs } from "./retry";
 
 const RETRY_EXHAUSTED: JobGiveUp = { routeStatus: "failed", reason: "retry_exhausted" };
-/** A missing browser is never the route's failure: a person decides once the wait is over. */
-const BROWSER_UNAVAILABLE: JobGiveUp = { routeStatus: "needs_human", reason: "browser_unavailable" };
 
 const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;
@@ -222,13 +220,14 @@ export class AbuseWorker {
 		const message = boundedErrorText(error);
 		if (job.unknownExternalState || (error as { unknownExternalState?: unknown })?.unknownExternalState === true) {
 			await AbuseRepository.markJobUnknownExternalState({ jobId: job.id, owner: this.owner, error: message });
-		} else if (isBrowserUnavailable(error)) {
-			// Nothing ran without a browser, so the wait spends none of the job's attempts; it is bounded by the job's age instead.
+		} else if (jobWaitOf(error, Date.now() - job.createdAt.getTime())) {
+			// The job did nothing and waits for what it needs, so the wait spends none of its attempts; it is bounded by the job's age instead.
 			const waitedMs = Date.now() - job.createdAt.getTime();
-			if (waitedMs >= BROWSER_WAIT_LIMIT_MS) {
-				await this.failRetryExhaustedJob(job, `${message} No browser for ${Math.round(waitedMs / 3_600_000)} h; a person must decide.`, BROWSER_UNAVAILABLE);
+			const wait = jobWaitOf(error, waitedMs)!;
+			if (waitedMs >= JOB_WAIT_LIMIT_MS) {
+				await this.failRetryExhaustedJob(job, `${message} ${wait.describe(Math.round(waitedMs / 3_600_000))}`, wait.giveUp);
 			} else {
-				await AbuseRepository.deferJob({ jobId: job.id, owner: this.owner, error: message, afterMs: browserWaitDelayMs(waitedMs) });
+				await AbuseRepository.deferJob({ jobId: job.id, owner: this.owner, error: message, afterMs: wait.afterMs });
 			}
 		} else if (isNonRetryableError(error) || job.retryCount >= MAX_RETRIES) {
 			// A typed verdict that repeating the same work cannot change fails now rather than spending the remaining retries.

@@ -1,14 +1,18 @@
+import { isBrowserUnavailable } from "../../browser/fabric";
 import { DAY_MS, MINUTE_MS } from "../../util/date_time";
+import type { JobGiveUp } from "../persistence/provider_runs";
+import { ProviderSubmissionRetryLaterError } from "../providers/submission_contracts";
 
 
 export const MAX_RETRIES = 8;
 
 /**
- * How long a job that finds no browser keeps waiting for one, counted from
- * the job's creation, before a person takes over. Such waits spend none of
- * the job's `MAX_RETRIES`: nothing ran, so nothing failed.
+ * How long a job keeps waiting for what it needs (a browser, a provider's
+ * limit to lift), counted from the job's creation, before a person takes
+ * over. Such waits spend none of the job's `MAX_RETRIES`: nothing was done,
+ * so nothing failed.
  */
-export const BROWSER_WAIT_LIMIT_MS = 24 * 60 * 60_000;
+export const JOB_WAIT_LIMIT_MS = 24 * 60 * 60_000;
 
 /** The wait before a job without a browser tries again: a minute at first, a quarter of the time waited so far later, at most 15 minutes. */
 export function browserWaitDelayMs(waitedMs: number): number {
@@ -17,6 +21,29 @@ export function browserWaitDelayMs(waitedMs: number): number {
 
 /** The longest any error may ask a job to wait before its next attempt. */
 const MAX_RETRY_AFTER_MS = 60 * 60_000;
+
+/** A job that waits for what it needs: when it tries again, and how it ends once `JOB_WAIT_LIMIT_MS` has passed. */
+export type JobWait = { afterMs: number; giveUp: JobGiveUp; describe: (waitedHours: number) => string };
+
+/** The wait an error asks for, when it says the job did nothing and needs something that is not there yet. */
+export function jobWaitOf(error: unknown, waitedMs: number): JobWait | undefined {
+	if (isBrowserUnavailable(error)) {
+		return {
+			afterMs: browserWaitDelayMs(waitedMs),
+			// A missing browser is never the route's failure: a person decides once the wait is over.
+			giveUp: { routeStatus: "needs_human", reason: "browser_unavailable" },
+			describe: (hours) => `No browser for ${hours} h; a person must decide.`,
+		};
+	}
+	if (error instanceof ProviderSubmissionRetryLaterError) {
+		return {
+			afterMs: Math.min(MAX_RETRY_AFTER_MS, Math.max(browserWaitDelayMs(waitedMs), error.retryAfterMs)),
+			giveUp: { routeStatus: "needs_human", reason: "provider_limit" },
+			describe: (hours) => `The provider kept refusing the report at its limit for ${hours} h; a person must decide.`,
+		};
+	}
+	return undefined;
+}
 
 /**
  * How long a failed job waits before its next attempt: exponential backoff,
