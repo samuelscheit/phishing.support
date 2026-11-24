@@ -403,7 +403,7 @@ describe("delivery-status notifications", () => {
 		expect((await AbuseRepository.listRoutes(sent.reportId)).map((route) => route.verifiedEmail)).toEqual([recipient]);
 		const [resend] = await sent.sends();
 		expect(resend).toMatchObject({ status: "queued", payload: { retryReason: "attachment_refused" } });
-		expect(readSendEmailPayload(resend!.payload)).toEqual({ attachedMessagesAsText: true });
+		expect(readSendEmailPayload(resend!.payload)).toEqual({ attachmentsAsText: true });
 
 		await sent.resendAnswered(attachmentRefusal);
 		expect((await inboundMail(sent.reportId)).map((message) => message.disposition)).toEqual(["attachment_refusal", "delivery_status_notification"]);

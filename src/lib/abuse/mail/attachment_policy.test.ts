@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { attachedMessagesAsText, isAttachmentRefusal, refusesAttachedMessages } from "./attachment_policy";
+import { attachmentsAsText, isAttachmentRefusal, refusesAttachedFiles } from "./attachment_policy";
 
 describe("isAttachmentRefusal", () => {
 	test("a server refusing the attachment, its extension or its file type", () => {
@@ -26,23 +26,27 @@ describe("isAttachmentRefusal", () => {
 
 describe("refusesAttachedMessages", () => {
 	test("names the listed domains and their subdomains only", () => {
-		expect(refusesAttachedMessages("abuse@hostzealot.com")).toBe(true);
-		expect(refusesAttachedMessages("noc@mail.hostzealot.com")).toBe(true);
-		expect(refusesAttachedMessages("abuse@hostzealot.com.example")).toBe(false);
-		expect(refusesAttachedMessages("abuse@nothostzealot.com")).toBe(false);
+		expect(refusesAttachedFiles("abuse@hostzealot.com")).toBe(true);
+		expect(refusesAttachedFiles("noc@mail.hostzealot.com")).toBe(true);
+		expect(refusesAttachedFiles("abuse@hostzealot.com.example")).toBe(false);
+		expect(refusesAttachedFiles("abuse@nothostzealot.com")).toBe(false);
 	});
 });
 
-describe("attachedMessagesAsText", () => {
-	test("turns attached messages into text files and leaves everything else", () => {
+describe("attachmentsAsText", () => {
+	test("turns attached messages and JSON files into text files and leaves everything else", () => {
 		const content = Buffer.from("Subject: lure\r\n\r\nbody");
-		expect(attachedMessagesAsText([
+		expect(attachmentsAsText([
 			{ filename: "phishing-email.eml", mimeType: "message/rfc822", content },
 			{ filename: "forwarded.EML", mimeType: "application/octet-stream", content },
+			{ filename: "xarf.json", mimeType: "application/json", content },
+			{ filename: "report.JSON", mimeType: "application/octet-stream", content },
 			{ filename: "website.png", mimeType: "image/png", content },
 		])).toEqual([
 			{ filename: "phishing-email.eml.txt", mimeType: "text/plain", content },
 			{ filename: "forwarded.EML.txt", mimeType: "text/plain", content },
+			{ filename: "xarf.json.txt", mimeType: "text/plain", content },
+			{ filename: "report.JSON.txt", mimeType: "text/plain", content },
 			{ filename: "website.png", mimeType: "image/png", content },
 		]);
 	});

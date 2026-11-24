@@ -105,8 +105,8 @@ async function settleDeliveryFailure(message: AbuseMailMessage, route: AbuseProv
 		return;
 	}
 	if (outcome === "permanent" && isAttachmentRefusal(text)) {
-		// The server refused the attached phishing mail, not the mailbox: the report goes
-		// once more with it attached as text. A second such refusal is the mailbox's.
+		// The server refused an attached file (the phishing mail, xarf.json), not the mailbox:
+		// the report goes once more with those attached as text. A second such refusal is the mailbox's.
 		const earlier = (await AbuseRepository.listMailForReport(route.reportId))
 			.some((other) => other.routeId === route.id && other.id !== message.id && other.disposition === "attachment_refusal");
 		if (!earlier) {

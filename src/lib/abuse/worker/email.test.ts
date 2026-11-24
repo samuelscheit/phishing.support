@@ -53,12 +53,13 @@ async function setupRoute(recipient = "abuse@provider.example") {
 	return { created, route };
 }
 
-describe("attached phishing mail", () => {
-	async function sentAttachments(recipient: string, options: { attachedMessagesAsText?: boolean } = {}) {
+describe("attached files", () => {
+	async function sentAttachments(recipient: string, options: { attachmentsAsText?: boolean } = {}) {
 		const { created, route } = await setupRoute(recipient);
 		await AbuseRepository.saveArtifact({ reportId: created.reportId, routeId: route.id, name: "phishing-email.eml", kind: "referral_attachment", mimeType: "message/rfc822", buffer: Buffer.from("Subject: lure\r\n\r\nhttps://login.example.com/collect") });
 		await AbuseRepository.saveArtifact({ reportId: created.reportId, routeId: route.id, name: "website.png", kind: "referral_attachment", mimeType: "image/png", buffer: Buffer.from("png") });
 		const sent: Array<{ filename: string; mimeType: string }> = [];
+		const xarf: unknown[] = [];
 		const names: string[][] = [];
 		await sendEmail(route.id, {
 			markUnknownExternal: async () => undefined,
@@ -68,24 +69,41 @@ describe("attached phishing mail", () => {
 			},
 			send: async (params) => {
 				sent.push(...(params.attachments ?? []).map(({ filename, mimeType }) => ({ filename, mimeType })));
+				const report = (params.attachments ?? []).find((file) => file.filename.startsWith("xarf.json"));
+				if (report) xarf.push(JSON.parse(report.content.toString("utf8")));
+				if (params.xarf) xarf.push(params.xarf);
 				return { messageId: 998n, status: "sent", rfcMessageId: "<attachments@phishing.support>" };
 			},
 		}, options);
-		return { sent: sent.sort((a, b) => a.filename.localeCompare(b.filename)), names: names.flat().sort() };
+		return { sent: sent.sort((a, b) => a.filename.localeCompare(b.filename)), names: names.flat().sort(), xarf };
 	}
 
-	test("goes as an attached message to an ordinary mailbox", async () => {
-		expect((await sentAttachments("abuse@provider.example")).sent).toEqual([{ filename: "phishing-email.eml", mimeType: "message/rfc822" }, { filename: "website.png", mimeType: "image/png" }]);
+	test("an ordinary mailbox gets the phishing mail, the screenshot and xarf.json, which refers to the files rather than holding them", async () => {
+		const { sent, names, xarf } = await sentAttachments("abuse@provider.example");
+		expect(sent).toEqual([{ filename: "phishing-email.eml", mimeType: "message/rfc822" }, { filename: "website.png", mimeType: "image/png" }, { filename: "xarf.json", mimeType: "application/json" }]);
+		// The draft lists the evidence, not the machine-readable report.
+		expect(names).toEqual(["phishing-email.eml", "website.png"]);
+		expect(xarf).toHaveLength(1);
+		expect(xarf[0]).toMatchObject({ category: "content", type: "phishing", url: "https://login.example.com/collect" });
+		expect(xarf[0]).not.toHaveProperty("evidence");
 	});
 
-	test("goes as text to a server known to refuse attached messages, and the draft names the text file", async () => {
+	test("goes as text to a server known to refuse attached files, and the draft names the text file", async () => {
 		const { sent, names } = await sentAttachments("abuse@hostzealot.com");
-		expect(sent).toEqual([{ filename: "phishing-email.eml.txt", mimeType: "text/plain" }, { filename: "website.png", mimeType: "image/png" }]);
+		expect(sent).toEqual([{ filename: "phishing-email.eml.txt", mimeType: "text/plain" }, { filename: "website.png", mimeType: "image/png" }, { filename: "xarf.json.txt", mimeType: "text/plain" }]);
 		expect(names).toEqual(["phishing-email.eml.txt", "website.png"]);
 	});
 
-	test("goes as text on the resend after a server refused it", async () => {
-		expect((await sentAttachments("abuse@provider.example", { attachedMessagesAsText: true })).sent[0]).toEqual({ filename: "phishing-email.eml.txt", mimeType: "text/plain" });
+	test("goes as text on the resend after a server refused an attachment", async () => {
+		const { sent } = await sentAttachments("abuse@provider.example", { attachmentsAsText: true });
+		expect(sent.map((file) => file.filename)).toEqual(["phishing-email.eml.txt", "website.png", "xarf.json.txt"]);
+	});
+
+	test("a mailbox that reads nothing but XARF gets the XARF-only mail with the files inside the report", async () => {
+		const { sent, xarf } = await sentAttachments("abuse@digitalocean.com");
+		expect(sent.map((file) => file.filename)).toEqual(["phishing-email.eml", "website.png"]);
+		expect(xarf).toHaveLength(1);
+		expect((xarf[0] as { evidence: Array<{ description: string }> }).evidence.map((item) => item.description).sort()).toEqual(["phishing-email.eml", "website.png"]);
 	});
 });
 
@@ -290,8 +308,12 @@ describe("email submission reporting", () => {
 				return { messageId: 1n, status: "sent", rfcMessageId: "<sent@phishing.support>" };
 			},
 		});
-		expect(sent?.attachments.map((attachment) => [attachment.filename, attachment.mimeType])).toEqual([["phishing-email.eml", "message/rfc822"]]);
+		expect(sent?.attachments.map((attachment) => [attachment.filename, attachment.mimeType])).toEqual([["phishing-email.eml", "message/rfc822"], ["xarf.json", "application/json"]]);
 		expect(sent?.attachments[0]?.content.toString()).toBe(eml);
+		// The sending address is reported for the mail it sent, never as a page it serves.
+		const xarf = JSON.parse(sent!.attachments[1]!.content.toString("utf8"));
+		expect(xarf).toMatchObject({ category: "messaging", type: "spam", protocol: "smtp", source_identifier: "199.102.178.225", source_port: 25, smtp_from: "notice@express.example.com", sender_name: "Wallet", subject: "Verify" });
+		expect(xarf).not.toHaveProperty("url");
 		expect(sent?.body).toContain("reporting a phishing email that was sent from 199.102.178.225 to Medallia, Inc.");
 		expect(sent?.body).toContain(`Case details: https://phishing.support/submissions/${submissionId.toString()}`);
 	});

@@ -2,19 +2,19 @@ import { registrableDomain } from "../security/security";
 import type { AbuseMailAttachment } from "./types";
 
 /**
- * Mail servers that refuse a report carrying the phishing mail as an attached
- * message (.eml, message/rfc822). They get it as plain text from the start.
- * Add a domain when its server refused such an attachment
- * (`isAttachmentRefusal`).
+ * Mail servers that refuse a report carrying files filters often block: the
+ * phishing mail as an attached message (.eml, message/rfc822) and xarf.json.
+ * They get them as plain text from the start. Add a domain when its server
+ * refused such an attachment (`isAttachmentRefusal`).
  */
-const REFUSE_ATTACHED_MESSAGES = new Set([
+const REFUSE_ATTACHED_FILES = new Set([
 	// 2026-11-19: "550 Attached file 'phishing-email.eml' has disallowed extension".
 	"hostzealot.com",
 ]);
 
-export function refusesAttachedMessages(recipient: string): boolean {
+export function refusesAttachedFiles(recipient: string): boolean {
 	const domain = registrableDomain(recipient.slice(recipient.lastIndexOf("@") + 1));
-	return domain !== undefined && REFUSE_ATTACHED_MESSAGES.has(domain);
+	return domain !== undefined && REFUSE_ATTACHED_FILES.has(domain);
 }
 
 /**
@@ -26,11 +26,14 @@ export function isAttachmentRefusal(diagnostic: string): boolean {
 		|| /\b(?:disallowed|prohibited|forbidden|blocked|banned)\b[^;\n]{0,40}?\b(?:attach(?:ed|ment)s?|file ?(?:name|type|extension)|extension)\b/i.test(diagnostic);
 }
 
-function isAttachedMessage(attachment: AbuseMailAttachment): boolean {
-	return attachment.mimeType.toLowerCase() === "message/rfc822" || attachment.filename.toLowerCase().endsWith(".eml");
+/** An attached message or a JSON file: what a server's filter refuses where it lets images through. */
+function isFilteredFile(attachment: AbuseMailAttachment): boolean {
+	const mimeType = attachment.mimeType.toLowerCase();
+	const filename = attachment.filename.toLowerCase();
+	return mimeType === "message/rfc822" || mimeType === "application/json" || filename.endsWith(".eml") || filename.endsWith(".json");
 }
 
-/** The attached phishing mail as plain text: the same bytes as `<name>.txt`, text/plain. */
-export function attachedMessagesAsText(attachments: AbuseMailAttachment[]): AbuseMailAttachment[] {
-	return attachments.map((attachment) => isAttachedMessage(attachment) ? { ...attachment, filename: `${attachment.filename}.txt`, mimeType: "text/plain" } : attachment);
+/** Attached messages and JSON files as plain text: the same bytes as `<name>.txt`, text/plain. */
+export function attachmentsAsText(attachments: AbuseMailAttachment[]): AbuseMailAttachment[] {
+	return attachments.map((attachment) => isFilteredFile(attachment) ? { ...attachment, filename: `${attachment.filename}.txt`, mimeType: "text/plain" } : attachment);
 }

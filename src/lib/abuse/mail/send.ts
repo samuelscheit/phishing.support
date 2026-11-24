@@ -5,7 +5,7 @@ import MailComposer from "nodemailer/lib/mail-composer";
 import { replyDomain, smtpReturnPath, smtpSender, smtpTransport } from "../../mail/config";
 import { AbuseRepository } from "../repository";
 import { attachmentFilename } from "./shared";
-import { XARF_CONTENT_TYPE, xarfMailParts } from "./xarf";
+import { XARF_CONTENT_TYPE, xarfAttachment, xarfMailParts } from "./xarf";
 import {
 	type AbuseMailAttachment,
 	type AbuseMailSendResult,
@@ -59,7 +59,7 @@ async function buildCanonicalAbuseMail(params: {
 	correlationKey?: string;
 	/** Reuse the route-owned reply address when retrying a known delivery failure. */
 	replyAddress?: string;
-	/** Send as an XARF report: the text, its feedback report and xarf.json, instead of the attachments. */
+	/** Send as an XARF-only report: the text, its feedback report and xarf.json, instead of the attachments. */
 	xarf?: Record<string, unknown>;
 }): Promise<CanonicalAbuseMail> {
 	const from = normalizedMailbox(params.from ?? smtpSender());
@@ -129,14 +129,12 @@ export async function sendAbuseEmailRoute(params: {
 	transport?: AbuseMailTransport;
 	correlationKey: string;
 	replyAddress?: string;
-	/** The XARF report this mail carries instead of its attachments, which ride inside it. */
+	/** The XARF-only report this mail is, instead of its attachments, which ride inside it. */
 	xarf?: Record<string, unknown>;
 }): Promise<AbuseMailSendResult> {
 	let mail: CanonicalAbuseMail;
 	let storedMessageId: bigint;
-	const sentAttachments = params.xarf
-		? [{ filename: "xarf.json", mimeType: "application/json", content: Buffer.from(JSON.stringify(params.xarf)) }]
-		: params.attachments ?? [];
+	const sentAttachments = params.xarf ? [xarfAttachment(params.xarf)] : params.attachments ?? [];
 	try {
 		mail = await buildCanonicalAbuseMail({
 			to: [params.recipient],

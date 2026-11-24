@@ -1,8 +1,8 @@
 import { abuseEmailCaseUrl, createAbuseEmailDraft, hostingAddress, readVerifiedEmailDraft, type AbuseEmailDraft, verifiedEmailProviderPayload } from "../mail/draft";
 import { isSafeEmailDeliveryFailure, ROUTE_MAIL_ATTACHMENT_KINDS } from "../mail/types";
-import { buildXarfReport } from "../mail/xarf";
+import { buildXarfReport, xarfAttachment, xarfMessageOf } from "../mail/xarf";
 import { getProviderSubmissionProviderForMailbox } from "../providers";
-import { attachedMessagesAsText, refusesAttachedMessages } from "../mail/attachment_policy";
+import { attachmentsAsText, refusesAttachedFiles } from "../mail/attachment_policy";
 import { sendAbuseEmailRoute } from "../mail/send";
 import { smtpRelay } from "../../mail/config";
 import { serviceIdentity } from "../../network/service_identity";
@@ -51,14 +51,14 @@ type EmailWorkerServices = Pick<WorkerServices, "markUnknownExternal"> & {
 
 /**
  * How a send job sends: `redraft` is the resend after our relay refused the
- * report (queueRelayResend), `attachedMessagesAsText` the resend after the
- * recipient's server refused the attached phishing mail (mail/attachment_policy.ts).
+ * report (queueRelayResend), `attachmentsAsText` the resend after the
+ * recipient's server refused an attached file (mail/attachment_policy.ts).
  */
-export type SendEmailOptions = { redraft?: boolean; attachedMessagesAsText?: boolean };
+export type SendEmailOptions = { redraft?: boolean; attachmentsAsText?: boolean };
 
 export function readSendEmailPayload(payload: Record<string, unknown> | null | undefined): SendEmailOptions {
 	if (payload?.retryReason === "relay_refused") return { redraft: true };
-	if (payload?.retryReason === "attachment_refused") return { attachedMessagesAsText: true };
+	if (payload?.retryReason === "attachment_refused") return { attachmentsAsText: true };
 	return {};
 }
 
@@ -90,7 +90,9 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 		.filter((artifact, index, all) => all.findIndex((candidate) => candidate.id === artifact.id) === index)
 		.slice(0, 15)
 		.map((artifact) => ({ filename: artifact.name, mimeType: artifact.mimeType, content: artifact.blob }));
-	const attachments = options.attachedMessagesAsText || refusesAttachedMessages(route.verifiedEmail) ? attachedMessagesAsText(evidence) : evidence;
+	const asText = options.attachmentsAsText || refusesAttachedFiles(route.verifiedEmail);
+	const asSent = (files: typeof evidence) => asText ? attachmentsAsText(files) : files;
+	const attachments = asSent(evidence);
 	let draft: AbuseEmailDraft | undefined;
 	let providerPayload: Record<string, unknown>;
 	// A resend after our relay refused the report is drafted anew: the provider never received the
@@ -128,22 +130,26 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 			email: draft,
 		});
 	}
-	// A mailbox whose provider names XARF as its mail format is run by tooling that reads nothing else.
+	// Every report with an XARF type carries it as xarf.json beside its files, for desks
+	// whose tooling reads XARF. A mailbox whose provider names XARF as its mail format is
+	// run by tooling that reads nothing else: its mail is the XARF report, files inside.
+	const xarfOnly = getProviderSubmissionProviderForMailbox(route.verifiedEmail)?.definition.emailFallback?.format === "xarf";
 	const sourceIp = hostingAddress(route, target);
-	const xarf = getProviderSubmissionProviderForMailbox(route.verifiedEmail)?.definition.emailFallback?.format === "xarf"
-		? buildXarfReport({
-			reportId: crypto.randomUUID(),
-			allegationCategory: report.allegationCategory,
-			observedAt: report.createdAt,
-			target: target.normalizedTarget,
-			observedUrls: target.observedUrls,
-			...(sourceIp ? { sourceIp } : {}),
-			legalBrandUrl: report.legalBrandUrl,
-			description: draft.subject,
-			...(caseUrl ? { caseUrl } : {}),
-			evidence,
-		})
-		: undefined;
+	const message = await xarfMessageOf(evidence);
+	const xarf = buildXarfReport({
+		reportId: crypto.randomUUID(),
+		allegationCategory: report.allegationCategory,
+		observedAt: report.createdAt,
+		target: target.normalizedTarget,
+		observedUrls: target.observedUrls,
+		...(sourceIp ? { sourceIp } : {}),
+		legalBrandUrl: report.legalBrandUrl,
+		description: draft.subject,
+		...(caseUrl ? { caseUrl } : {}),
+		...(message ? { message } : {}),
+		...(xarfOnly ? { evidence } : {}),
+	});
+	const sentAttachments = xarf && !xarfOnly ? [...attachments, ...asSent([xarfAttachment(xarf)])] : attachments;
 	const delivery = await AbuseRepository.beginEmailDelivery({
 		routeId: route.id,
 		correlationKey,
@@ -188,10 +194,10 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 			recipient: route.verifiedEmail,
 			subject: persistedDraft.subject,
 			body: persistedDraft.body,
-			attachments,
+			attachments: sentAttachments,
 			correlationKey,
 			replyAddress: retryReplyAddress,
-			...(xarf ? { xarf } : {}),
+			...(xarf && xarfOnly ? { xarf } : {}),
 		});
 	} catch (error) {
 		// MIME construction, local artifact persistence, and outbound-message
