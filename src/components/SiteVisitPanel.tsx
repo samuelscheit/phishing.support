@@ -6,6 +6,7 @@ import { CheckSquare, Download, Flag, Globe, Keyboard, ListChecks, MousePointerC
 import { cn } from "../lib/util/cn";
 import { canaryFieldList, type WebsiteOfferedDownload, type WebsiteVisitRecord } from "@/lib/website/types";
 import { Address } from "./Address";
+import { scrollToEnd } from "./scrollToEnd";
 import { hostOf } from "@/lib/network/url";
 import { OfferedFile } from "@/components/OfferedFile";
 
@@ -190,7 +191,7 @@ export function SiteVisitTimeline({ running, visit, offeredDownload, live: { ent
 }) {
 	const logRef = useRef<HTMLOListElement>(null);
 	useEffect(() => {
-		logRef.current?.lastElementChild?.scrollIntoView({ block: "nearest" });
+		scrollToEnd(logRef.current?.lastElementChild);
 	}, [entries.length]);
 	const thirdParty = useMemo(() => (visit?.dataSent ?? []).filter((sent) => !sent.sameSite), [visit]);
 	if (!running && !visit) return null;

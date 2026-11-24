@@ -8,6 +8,7 @@ import { extractOutputText } from "@/lib/analysis/stream_events";
 import { summarizeAnalysisEntries } from "@/lib/analysis/stream_view";
 import { AnalysisHeader, FinalAnswer, TimelineEntryView } from "./analysis/AnalysisPanels";
 import { isTerminal } from "./analysis/stream_state";
+import { scrollToEnd } from "./scrollToEnd";
 import { useAnalysisStream } from "./analysis/useAnalysisStream";
 
 type OutputContent = { type?: string; text?: string; refusal?: string };
@@ -35,7 +36,7 @@ export function AnalysisLogs({
 	const state = useAnalysisStream({ streamId, progressStreamId, progressOnly, outputText, status });
 
 	useEffect(() => {
-		bottomRef.current?.scrollIntoView({ block: "end" });
+		scrollToEnd(bottomRef.current);
 	}, [state.entries.length, state.outputText, state.step?.name, state.step?.progress]);
 
 	const finalText = outputText ?? (state.outputText || state.refusalText || null);
