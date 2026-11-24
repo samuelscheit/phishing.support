@@ -8,12 +8,16 @@ import { SubmissionsEntity } from "../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { scriptedVisitSession } from "../../site_visit/test_helpers";
 import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "../archive/types";
+import type { WebsiteNavigationHop } from "../types";
 import { websiteSite } from "../info/site";
 import { navigationHop, websiteSubmission } from "../test_helpers";
 import { routeNames } from "../visit/capture_files";
 import { analyzeWebsite } from "./ai";
 import { CLOUD_STORAGE_URLS, cloudStorageVisit, capturedPage, funnelDependencies, funnelHop, productionVisit, type ModelCall } from "./funnel_test_helpers";
-import { firstWalkBrowser, rotationBrowsers, routeDestination, sampleRotation, type RotationBrowser } from "./rotation";
+import { BrowserUnavailableError } from "../../browser/fabric";
+import { WebsiteCaptureFailedError, WebsiteUnreachableError } from "../archive/errors";
+import { firstWalkBrowser, knownRoute, rotationBrowsers, routePageSites, sampleRotation, type RotationBrowser } from "./rotation";
+import { PROD_ROTATION_LINK, PROD_ROUTE_1_HOPS, PROD_ROUTE_2_HOPS } from "./rotation_fixtures";
 
 useTemporaryDatabase();
 useTrackingTokenSecret();
@@ -250,14 +254,51 @@ describe("sampling a rotating link's routes", () => {
 	const offer = (site: string) => hops(LINK, PRODUCTION_URLS.voluumCampaign, `https://${site}/landing`);
 	const captureOf = (route: ReturnType<typeof hops>): WebsiteArchiveResult => ({ ...cloudStorageVisit(), navigationHops: route });
 
-	test("a route is named by the first site past the link's trackers and the site of its first page", () => {
-		expect(routeDestination(offer("smizeprize.com"), LINK)).toEqual({ via: "smizeprize.com", landing: "smizeprize.com" });
-		// The cloud-storage tracker's UUID click path is a tracking link too: the route is told apart by the scam it reached.
-		expect(routeDestination(cloudStorageVisit().navigationHops, LINK)).toEqual({ via: "cloudstore-nnn6.ric1.digitaloceanspaces.com", landing: "cloudstore-nnn6.ric1.digitaloceanspaces.com" });
-		// Only the hops up to the first page count; where a walk went from there is no other route.
-		expect(routeDestination([...productionVisit().navigationHops.slice(0, 4).map((hop, index) => (index === 3 ? { ...hop, contentCaptured: false, visitorStep: { submitted: [] } } : hop)), navigationHop(4, PRODUCTION_URLS.checkout, { contentCaptured: true })], LINK)).toEqual({ via: "ultimateprizesearch.com", landing: "ultimateprizesearch.com" });
-		// A link that answered nothing reached no page.
-		expect(routeDestination([navigationHop(0, LINK, { status: 302, redirectTo: "https://www.yahoo.com/" })], LINK)).toEqual({});
+	test("a route is the sites it showed pages on, in order, whatever redirected between them", () => {
+		expect(routePageSites(offer("smizeprize.com"))).toEqual(["smizeprize.com"]);
+		expect(routePageSites(cloudStorageVisit().navigationHops)).toEqual(["cloudstore-nnn6.ric1.digitaloceanspaces.com"]);
+		// A walk's lure and its merchant, each once however many steps were made there.
+		expect(routePageSites(PROD_ROUTE_1_HOPS)).toEqual(["smizeprize.com", "www.zatos.com"]);
+		// A link that answered nothing showed no page.
+		expect(routePageSites([navigationHop(0, LINK, { status: 302, redirectTo: "https://www.yahoo.com/" })])).toEqual([]);
+	});
+
+	/** A sampled visit as the capture hands it over before the walk: its hops up to the first page, that page captured. */
+	const capturedUpToFirstPage = (walk: WebsiteNavigationHop[]) => {
+		const firstPage = walk.findIndex((hop) => hop.visitorStep || hop.contentCaptured);
+		return walk.slice(0, firstPage + 1).map((hop, index, cut) => (index === cut.length - 1 ? { ...hop, visitorStep: undefined, contentCaptured: true, redirectTo: undefined } : hop));
+	};
+
+	test("production case 383429267624562688: a click with new tokens and one wtrck.com hop fewer is the same route", async () => {
+		// Both walks, complete, showed the same lure and merchant.
+		expect(routePageSites(PROD_ROUTE_2_HOPS)).toEqual(routePageSites(PROD_ROUTE_1_HOPS));
+		expect(knownRoute(PROD_ROUTE_2_HOPS, [PROD_ROUTE_1_HOPS])).toBe(0);
+		// The second, as sampling saw it before walking it, repeats the first walk; it is not walked.
+		const sampled = capturedUpToFirstPage(PROD_ROUTE_2_HOPS);
+		expect(sampled.map(({ hostname }) => hostname)).toEqual(["www.onlinesafetyall.com", "www.onlinesafetyall.com", "wtrck.com", "smizeprize.com"]);
+		expect(knownRoute(sampled, [PROD_ROUTE_1_HOPS])).toBe(0);
+		const walked: number[] = [];
+		const rotation = await sampleRotation({
+			routes: [PROD_ROUTE_1_HOPS],
+			first,
+			capture: async () => ({ ...cloudStorageVisit(PROD_ROTATION_LINK), navigationHops: capturedUpToFirstPage(PROD_ROUTE_2_HOPS) }),
+			walk: async (_archive, _browser, route) => {
+				walked.push(route);
+				return [];
+			},
+		});
+		expect(walked).toEqual([]);
+		expect(rotation.visits.map((visit) => ("repeatOf" in visit ? visit.repeatOf : visit))).toEqual([0, 0]);
+		expect(rotation.ended).toBe("2 visits in a row showed only routes seen before.");
+	});
+
+	test("another lure, or another site after the same lure, is a new route", () => {
+		const route = PROD_ROUTE_1_HOPS;
+		expect(knownRoute(offer("other-lure.com"), [route])).toBeUndefined();
+		// The same lure leading to another merchant, once walked.
+		expect(knownRoute([...capturedUpToFirstPage(route).map((hop) => ({ ...hop, contentCaptured: false, visitorStep: { submitted: [] } })), navigationHop(9, "https://other-merchant.com/checkout", { contentCaptured: true })], [route])).toBeUndefined();
+		// A route is found among several, not only the first.
+		expect(knownRoute(offer("smizeprize.com"), [cloudStorageVisit().navigationHops, route])).toBe(1);
 	});
 
 	test("routes are named by the first site after the link, and told apart by their first page when they share it", () => {
@@ -279,7 +320,6 @@ describe("sampling a rotating link's routes", () => {
 		const shown = [offer("smizeprize.com"), offer("cloud.example-scam.com"), offer("smizeprize.com")];
 		const walked: number[] = [];
 		const rotation = await sampleRotation({
-			url: LINK,
 			routes: [offer("smizeprize.com")],
 			first,
 			capture: async () => captureOf(shown.shift()!),
@@ -296,7 +336,6 @@ describe("sampling a rotating link's routes", () => {
 	test("the time budget is checked before every visit, never during one", async () => {
 		let clock = 0;
 		const rotation = await sampleRotation({
-			url: LINK,
 			routes: [offer("smizeprize.com")],
 			first,
 			budgetMs: 10_000,
@@ -315,7 +354,6 @@ describe("sampling a rotating link's routes", () => {
 		let captures = 0;
 		const routes = [offer("smizeprize.com")];
 		const rotation = await sampleRotation({
-			url: LINK,
 			routes,
 			first,
 			capture: async () => captureOf(offer(`offer-${++captures}.com`)),
@@ -328,11 +366,74 @@ describe("sampling a rotating link's routes", () => {
 		expect(rotation).toEqual({ visits: [{ startedAt: expect.any(String), visitor: { browser: "Chrome on macOS", network: "residential exit" }, error: "the classifier timed out" }], ended: "Walking a new route failed: the classifier timed out" });
 	});
 
+	test("a visit the browser service failed is kept as its error, and the next browser goes on", async () => {
+		const outcomes: Array<() => WebsiteArchiveResult> = [
+			() => { throw new Error("Attempted to use detached Frame 'F312968E370A7BA0C31894A079BFC237'."); },
+			() => captureOf(offer("new-offer.com")),
+			() => captureOf(offer("smizeprize.com")),
+		];
+		const walked: number[] = [];
+		const routes = [offer("smizeprize.com")];
+		const rotation = await sampleRotation({
+			routes,
+			first,
+			capture: async () => outcomes.shift()!(),
+			walk: async (archive, _browser, route) => {
+				walked.push(route);
+				return archive.navigationHops;
+			},
+		});
+		expect(rotation.visits.map((visit) => ({ browser: visit.visitor.browser, outcome: "route" in visit ? `new ${visit.route}` : "repeatOf" in visit ? `repeat ${visit.repeatOf}` : visit.error }))).toEqual([
+			{ browser: "Chrome on macOS", outcome: "Attempted to use detached Frame 'F312968E370A7BA0C31894A079BFC237'." },
+			{ browser: "Safari on iPhone", outcome: "new 1" },
+			{ browser: "Chrome on Windows", outcome: "repeat 0" },
+		]);
+		// The failed visit took no route number.
+		expect(walked).toEqual([1]);
+		expect(rotation.ended).toBe("All 3 visits were made.");
+	});
+
+	test("the browser service failing every visit still makes no more than three, within the time budget", async () => {
+		let clock = 0;
+		let captures = 0;
+		const failing = await sampleRotation({ routes: [offer("smizeprize.com")], first, capture: async () => { captures++; throw new Error("Protocol error (Page.navigate): Target closed"); }, walk: async () => [] });
+		expect(captures).toBe(3);
+		expect(failing.ended).toBe("All 3 visits were made.");
+		const slow = await sampleRotation({
+			routes: [offer("smizeprize.com")],
+			first,
+			budgetMs: 10_000,
+			now: () => clock,
+			capture: async () => {
+				clock += 6_000;
+				throw new Error("socket hang up");
+			},
+			walk: async () => [],
+		});
+		expect(slow.visits).toHaveLength(2);
+		expect(slow.ended).toBe("The time for sampling the link's other offers (0 min) was used up.");
+	});
+
+	test("a residential exit that is down ends the sampling: no browser leased, or the link not reached through it", async () => {
+		const down = [
+			new BrowserUnavailableError(new Error("Unexpected server response: 503")),
+			new WebsiteCaptureFailedError([new WebsiteUnreachableError("residential", "net::ERR_TUNNEL_CONNECTION_FAILED")]),
+			new WebsiteUnreachableError("residential", "net::ERR_PROXY_CONNECTION_FAILED"),
+		];
+		for (const error of down) {
+			let captures = 0;
+			const rotation = await sampleRotation({ routes: [offer("smizeprize.com")], first, capture: async () => { captures++; throw error; }, walk: async () => [] });
+			expect(captures).toBe(1);
+			expect(rotation.visits).toEqual([{ startedAt: expect.any(String), visitor: { browser: "Chrome on macOS", network: "residential exit" }, error: error.message }]);
+			expect(rotation.ended).toBe(`Opening the link again from the residential exit failed: ${error.message}`);
+		}
+	});
+
 	test("a repeat's browser is closed, a new route's is left to its walk", async () => {
 		const closed: string[] = [];
 		const capture = (site: string) => ({ ...captureOf(offer(site)), session: { visit: async () => { throw new Error("not walked"); }, close: async () => { closed.push(site); } } });
 		const sites = ["smizeprize.com", "new-offer.com", "smizeprize.com", "smizeprize.com"];
-		await sampleRotation({ url: LINK, routes: [offer("smizeprize.com")], first, capture: async () => capture(sites.shift()!), walk: async (archive) => archive.navigationHops });
+		await sampleRotation({ routes: [offer("smizeprize.com")], first, capture: async () => capture(sites.shift()!), walk: async (archive) => archive.navigationHops });
 		expect(closed).toEqual(["smizeprize.com", "smizeprize.com"]);
 	});
 });

@@ -132,14 +132,22 @@ offer.
    - No new visit starts once 30 minutes have passed since the first walk
      ended; a visit already started runs to its end.
    - Two visits in a row that show only known routes end the sampling.
-   - A failed capture (the residential exit is one connection) or a failed
-     walk also ends it. The first walk's findings are reported as they are.
-4. **What counts as a new route.** A visit is compared, before it is walked,
-   by its hops up to the first page:
-   - the first site after the link that is no tracker or wrapper;
-   - the site of that first page.
+   - A residential exit that is down (no browser leased, or the link not
+     reached through it) or a failed walk ends it. The first walk's
+     findings are reported as they are.
+   - A visit that the browser service failed (a dropped connection, a
+     detached frame: `isBrowserInfrastructureFailure`) is kept as its error,
+     and the next browser goes on, within the 3 visits and the time budget.
+4. **What counts as a new route.** A route is the sites it showed pages on,
+   in order (the lure's, then the merchant's), not the hops between them.
+   Trackers hand out new click ids on every click and add or skip a hop of
+   their own: in production case 383429267624562688 one walk took a
+   wtrck.com 307 to its own `/2` path and the next did not, and comparing
+   tracker hops took the identical chain for a new route. A sampled visit is
+   compared before it is walked, so it has shown its first page at most; it
+   repeats a route whose pages it showed so far, in the same order.
 
-   A new value of either is a new route. It is walked, captured, judged
+   A visit that shows a page no known route showed is a new route. It is walked, captured, judged
    site by site and as a funnel, and reported exactly like the first walk,
    through the same cross-case join. A repeat is kept in `website.rotation`
    with its hops as evidence of the rotation, and is not judged again.

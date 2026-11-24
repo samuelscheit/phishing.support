@@ -112,6 +112,8 @@ test("browser-service failures are told apart from a site that cannot be reached
 	const closedError = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: closed.getBrowser }).then(() => undefined, (error: unknown) => error);
 	expect(isBrowserInfrastructureFailure(closedError)).toBe(true);
 	expect(closed.leasedEgress).toEqual(["residential", "phishing"]);
+	// A frame the browser dropped under the capture (production case 383429267624562688's sampled visit).
+	expect(isBrowserInfrastructureFailure(new Error("Attempted to use detached Frame 'F312968E370A7BA0C31894A079BFC237'."))).toBe(true);
 
 	// A site that answers no route is final, even when a route's reason mentions a closed connection.
 	const blocked = archiveBrowserFixture({ goto: async () => { throw new Error("net::ERR_CONNECTION_CLOSED at https://example.test/"); } });

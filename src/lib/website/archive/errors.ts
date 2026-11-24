@@ -13,7 +13,7 @@ export class BrowserInfrastructureError extends Error {
 	}
 }
 
-const BROWSER_INFRASTRUCTURE_FAILURE = /Expected 101 status code|Unexpected server response: (?:502|503|504)|ECONNREFUSED|ECONNRESET|socket hang up|Target closed|Session closed|Connection closed|Protocol error|browser has disconnected|Navigating frame was detached|Execution context was destroyed|Browser Fabric (?:transport request failed|session ended)/i;
+const BROWSER_INFRASTRUCTURE_FAILURE = /Expected 101 status code|Unexpected server response: (?:502|503|504)|ECONNREFUSED|ECONNRESET|socket hang up|Target closed|Session closed|Connection closed|Protocol error|browser has disconnected|Navigating frame was detached|Attempted to use detached Frame|Execution context was destroyed|Browser Fabric (?:transport request failed|session ended)/i;
 
 /** Every route failed to reach the site; its reasons may quote a route's own browser trouble. */
 export class WebsiteCaptureFailedError extends Error {

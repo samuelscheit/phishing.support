@@ -1,8 +1,8 @@
-import { extractFunnel } from "../../abuse/funnel/extract";
-import type { FabricEgress } from "../../browser/fabric";
+import { isBrowserUnavailable, type FabricEgress } from "../../browser/fabric";
 import type { BrowserIdentity } from "../../browser/page";
 import { reporterBrowserIdentity } from "../../browser/reporter_identity";
 import { errorText } from "../../util/error_text";
+import { isBrowserInfrastructureFailure } from "../archive/errors";
 import { websiteSite } from "../info/site";
 import type { WebsiteDevice, WebsiteNavigationHop, WebsiteRotation, WebsiteRotationVisit, WebsiteRouteVisitor } from "../types";
 import { isPageHop } from "../visit/capture_files";
@@ -71,22 +71,34 @@ export function rotationBrowsers(first: RotationBrowser): RotationBrowser[] {
 }
 
 /**
- * Where a route leads once the link's own redirects are behind it: the first
- * site after the submitted one that is no tracking link or wrapper (`via`),
- * and the site of the first page it showed (`landing`). Two visits with the
- * same of both took the same route; a rotation shows another offer on
- * either. Only the hops up to the first page count: a sampled visit is
- * compared before it is walked any further.
+ * What tells a route apart: the sites it showed pages on, in order (the
+ * lure's, then the merchant's), each once however many steps the visit made
+ * there. The hops between them are not: trackers hand out new click ids and
+ * tokens on every click and add or skip a hop of their own (production case
+ * 383429267624562688: one walk took a wtrck.com 307 to its own /2 path, the
+ * next did not), so a route named by its redirects is new on every click.
  */
-export function routeDestination(hops: readonly WebsiteNavigationHop[], submittedUrl: string): { via?: string; landing?: string } {
-	const firstPage = hops.findIndex(isPageHop);
-	const reached = firstPage < 0 ? hops : hops.slice(0, firstPage + 1);
-	const page = firstPage < 0 ? undefined : reached.at(-1);
-	const { hopKinds } = extractFunnel({ hops: reached, pages: page ? [{ hopIndex: page.index, url: page.url, text: "", capturedAt: new Date(0) }] : [] });
-	const passedThrough = new Set(hopKinds.filter(({ kind }) => kind === "tracker" || kind === "redirector").map(({ hopIndex }) => hopIndex));
-	const submitted = siteOf(submittedUrl);
-	const via = reached.find((hop) => !passedThrough.has(hop.index) && siteOf(hop.url) !== submitted);
-	return { ...(via ? { via: siteOf(via.url) } : {}), ...(page ? { landing: siteOf(page.url) } : {}) };
+export function routePageSites(hops: readonly WebsiteNavigationHop[]): string[] {
+	const sites: string[] = [];
+	for (const hop of hops) {
+		const site = isPageHop(hop) ? siteOf(hop.url) : undefined;
+		if (site && site !== sites.at(-1)) sites.push(site);
+	}
+	return sites;
+}
+
+/**
+ * The known route a sampled visit only showed again, if any. The visit is
+ * compared before it is walked, so it has shown its first page at most; it
+ * repeats a route whose pages it showed so far, in the same order.
+ */
+export function knownRoute(visit: readonly WebsiteNavigationHop[], routes: ReadonlyArray<readonly WebsiteNavigationHop[]>): number | undefined {
+	const shown = routePageSites(visit);
+	const known = routes.findIndex((hops) => {
+		const sites = routePageSites(hops);
+		return shown.every((site, index) => sites[index] === site);
+	});
+	return known < 0 ? undefined : known;
 }
 
 function siteOf(url: string): string | undefined {
@@ -103,13 +115,15 @@ function siteOf(url: string): string | undefined {
  * route not seen yet in full, as the first walk was (`walk`). A visit that
  * only reached a known route is kept as its hops, the evidence that the link
  * rotates. Sampling stops early after two visits in a row showed nothing
- * new, once its time budget is used up, or when a visit fails: the
- * residential exit is a single connection a failure is not retried through.
+ * new, once its time budget is used up, or when the residential exit is
+ * down. A visit the browser service failed (a dropped connection, a detached
+ * frame) says nothing about the exit or the link: it is kept as its error,
+ * and the next browser goes on. A route whose walk failed ends the sampling,
+ * as its files may be partly stored under its number.
  * `routes` are the hops of every route so far, the first walk's first; each
  * walked route is added to it.
  */
 export async function sampleRotation(params: {
-	url: string;
 	routes: WebsiteNavigationHop[][];
 	first: RotationBrowser;
 	/** Open the link in the browser; the capture comes back with its session open. */
@@ -123,7 +137,6 @@ export async function sampleRotation(params: {
 	const startedAt = now();
 	const budgetMs = params.budgetMs ?? ROTATION_BUDGET_MS;
 	const visits: WebsiteRotationVisit[] = [];
-	const destinations = params.routes.map((hops) => routeDestination(hops, params.url));
 	let unchanged = 0;
 	const browsers = rotationBrowsers(params.first);
 	for (const browser of browsers) {
@@ -135,11 +148,12 @@ export async function sampleRotation(params: {
 			archive = await params.capture(browser);
 		} catch (error) {
 			visits.push({ startedAt: started, visitor, error: errorText(error) });
+			// A lease that failed, or a link the exit could not reach, is the exit; anything else not of the browser service is not known to pass.
+			if (!isBrowserUnavailable(error) && isBrowserInfrastructureFailure(error)) continue;
 			return { visits, ended: `Opening the link again from the residential exit failed: ${errorText(error)}` };
 		}
-		const destination = routeDestination(archive.navigationHops, params.url);
-		const known = destinations.findIndex((other) => other.via === destination.via && other.landing === destination.landing);
-		if (known >= 0) {
+		const known = knownRoute(archive.navigationHops, params.routes);
+		if (known !== undefined) {
 			// A browser that will not close is no reason to lose the routes already walked.
 			await archive.session?.close().catch(() => undefined);
 			visits.push({ startedAt: started, visitor, repeatOf: known, hops: archive.navigationHops });
@@ -151,7 +165,6 @@ export async function sampleRotation(params: {
 		try {
 			const hops = await params.walk(archive, browser, route);
 			params.routes.push(hops);
-			destinations.push(destination);
 		} catch (error) {
 			// A route whose walk broke off may have stored some of its files; no later route takes its number.
 			visits.push({ startedAt: started, visitor, error: errorText(error) });
