@@ -28,11 +28,11 @@ export function RouteSelector({ routes, selected, submittedSite, onSelect }: { r
 				<p className="text-xs text-muted-foreground">The submitted link sent its visits to different offers. Each route is one walk of it, with its own pages and verdicts.</p>
 			</div>
 			<Tabs value={String(selected)} onValueChange={(value) => onSelect(Number(value))}>
-				<TabsList aria-label="Routes" className="no-scrollbar h-auto max-w-full justify-start overflow-x-auto">
+				<TabsList aria-label="Routes" className="h-auto max-w-full flex-wrap justify-start">
 					{routes.map((route, index) => {
 						const via = names[index];
 						return (
-							<TabsTrigger key={index} value={String(index)} title={via ? `${routeLabel(index)} via ${via}` : routeLabel(index)} className="max-w-72 shrink-0 gap-1.5">
+							<TabsTrigger key={index} value={String(index)} title={via ? `${routeLabel(index)} via ${via}` : routeLabel(index)} className="max-w-full flex-none gap-1.5">
 								{routeHasFinding(route) ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" aria-hidden /> : null}
 								<span className="truncate">{routeLabel(index)}{via ? <span className="font-normal text-muted-foreground"> · via {via}</span> : null}</span>
 							</TabsTrigger>
@@ -42,7 +42,7 @@ export function RouteSelector({ routes, selected, submittedSite, onSelect }: { r
 			</Tabs>
 			<div className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
 				<p><span className="font-medium text-foreground">{routeLabel(selected)} of {routes.length}</span>{end ? <> ended at <span className="font-mono">{end}</span></> : null}</p>
-				{shown.visitor ? <p>Opened as {visitorLabel(shown.visitor)}</p> : null}
+				{shown.visitor ? <p>Visitor: {visitorLabel(shown.visitor)}</p> : null}
 			</div>
 		</section>
 	);
