@@ -10,6 +10,7 @@ import {
 import {
 	ProviderSubmissionNeedsHumanError,
 	ProviderSubmissionRejectedError,
+	ProviderSubmissionRetryLaterError,
 	type ProviderSubmissionProvider,
 	type ProviderSubmissionSuccess,
 } from "./submission_contracts";
@@ -282,6 +283,31 @@ describe("provider submission execution boundary", () => {
 		const [run] = await AbuseRepository.listProviderRunsForReport(route.reportId);
 		expect(run).toMatchObject({ executionStatus: "failed", failureReason: "Provider rejected the report as out of scope." });
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "provider_rejected" });
+	});
+
+	test("a provider's limit releases the marker: the same run files the report once the limit lifts", async () => {
+		let limited = true;
+		const submitted: bigint[] = [];
+		const provider = testProvider({
+			submit: async (context) => {
+				submitted.push(context.runId!);
+				if (limited) throw new ProviderSubmissionRetryLaterError("Provider limit reached; nothing filed.", 60_000);
+				return { submittedTargets: ["example.com"], confirmationId: "CASE-1" };
+			},
+		});
+		const { route } = await createProviderRoute(provider);
+
+		const error = await executeProviderSubmission({ routeId: route.id, provider }).catch((caught) => caught);
+		expect(error).toBeInstanceOf(ProviderSubmissionRetryLaterError);
+		const [run] = await AbuseRepository.listProviderRunsForReport(route.reportId);
+		expect(run).toMatchObject({ executionStatus: "starting" });
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "running" });
+
+		limited = false;
+		await expect(executeProviderSubmission({ routeId: route.id, provider })).resolves.toMatchObject({ outcome: "submitted" });
+		expect(submitted).toEqual([run!.id, run!.id]);
+		expect(await AbuseRepository.listProviderRunsForReport(route.reportId)).toHaveLength(1);
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "submitted" });
 	});
 
 	test("marks a post-marker error unknown rather than replaying the provider request", async () => {

@@ -2,7 +2,8 @@ import { emailOriginOf } from "../email_origin";
 import { createDraft, reportInputOf, type RouteData } from "../kit/draft";
 import { asRecord } from "../../../util/values";
 import { failUnlessFiled } from "../kit/http";
-import { ProviderSubmissionRejectedError } from "../submission_contracts";
+import { ProviderSubmissionRejectedError, ProviderSubmissionRetryLaterError } from "../submission_contracts";
+import { retryAfterMs } from "../../../network/bounded_fetch";
 import { snippet } from "../../../util/text";
 import type { ProviderSubmissionContext, ProviderSubmissionSuccess } from "../submission_contracts";
 import { providerResponseId } from "../kit/report_reference";
@@ -39,8 +40,14 @@ export const awsDraft = createDraft({
 	targetOf: (payload) => payload.target.normalizedTarget,
 });
 
-/** The handler's answer once this address reached its request limit; it files nothing. */
+/**
+ * The handler's answer once this address reached a limit; it files nothing.
+ * It named the "request limit" until 2026-11, the "submission limit" since.
+ */
 export const AWS_REQUEST_LIMIT_BODY = '{"errorMessage":"You have reached your request limit, please try again later"}';
+const AWS_LIMIT_BODY = /^\{"errorMessage":"You have reached your (?:request|submission) limit, please try again later"\}$/;
+/** How long a report waits for the limit to lift when AWS names no Retry-After. */
+const AWS_LIMIT_WAIT_MS = 60 * 60_000;
 
 /** API Gateway's own body for a request its authorizer, resource policy or WAF denied. */
 export const API_GATEWAY_FORBIDDEN_BODY = '{"message":"Forbidden"}';
@@ -80,7 +87,9 @@ export async function submitAwsSubmission(context: ProviderSubmissionContext, de
 	});
 	const text = await response.text();
 	if (isApiGatewayDenial(response, text)) throw apiGatewayDenial(snippet(text));
-	if (response.status === 429 && text.trim() === AWS_REQUEST_LIMIT_BODY) throw new ProviderSubmissionRejectedError(`AWS refused the report at its request limit (HTTP 429): ${snippet(text)}`);
+	if (response.status === 429 && AWS_LIMIT_BODY.test(text.trim())) {
+		throw new ProviderSubmissionRetryLaterError(`AWS refused the report at its limit (HTTP 429), to be filed later: ${snippet(text)}`, retryAfterMs(response.headers) ?? AWS_LIMIT_WAIT_MS);
+	}
 	failUnlessFiled("AWS", response, snippet(text), [400, 413, 422]);
 	let answer: unknown;
 	try {

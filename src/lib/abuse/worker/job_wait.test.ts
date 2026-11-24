@@ -6,11 +6,12 @@ import { useTemporaryDatabase } from "../../db/test_helpers";
 import { BrowserUnavailableError } from "../../browser/fabric";
 import { validateAbuseReportRequest } from "../contracts";
 import { BrowserFormError } from "../providers/kit/browser_form";
+import { ProviderSubmissionRetryLaterError } from "../providers/submission_contracts";
 import { ProviderLoginError } from "../providers/login_session/session";
 import { AbuseRepository } from "../repository";
 import { abuseEvents, abuseJobs, type AbuseJobType } from "../schema";
 import { AbuseWorker } from "./index";
-import { BROWSER_WAIT_LIMIT_MS, browserWaitDelayMs, MAX_RETRIES } from "./retry";
+import { JOB_WAIT_LIMIT_MS, browserWaitDelayMs, MAX_RETRIES } from "./retry";
 
 useTemporaryDatabase();
 
@@ -135,7 +136,7 @@ describe("a job that finds no browser", () => {
 
 	test("goes to a person after the wait limit: a submission's route is needs_human, never failed, and its run settles failed", async () => {
 		const { job, route, run, reportId } = await routeWithJob("submit_provider");
-		await setJob(job.id, { createdAt: new Date(Date.now() - BROWSER_WAIT_LIMIT_MS - 1_000) });
+		await setJob(job.id, { createdAt: new Date(Date.now() - JOB_WAIT_LIMIT_MS - 1_000) });
 		await failOnce(job.id, WRAPPED["browser form"]!);
 		const failed = await jobRow(job.id);
 		expect(failed).toMatchObject({ status: "failed", retryCount: 0 });
@@ -153,10 +154,30 @@ describe("a job that finds no browser", () => {
 		const { job, route } = await routeWithJob("poll_provider_correspondence", "submitted");
 		await failOnce(job.id, WRAPPED.login!);
 		expect(await jobRow(job.id)).toMatchObject({ status: "queued", retryCount: 0 });
-		await setJob(job.id, { createdAt: new Date(Date.now() - BROWSER_WAIT_LIMIT_MS) });
+		await setJob(job.id, { createdAt: new Date(Date.now() - JOB_WAIT_LIMIT_MS) });
 		await failOnce(job.id, WRAPPED.login!);
 		expect(await jobRow(job.id)).toMatchObject({ status: "failed" });
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "submitted" });
+	});
+
+	test("a provider's limit is waited out the same way, as long as the provider asks, at most an hour per wait", async () => {
+		const { job, route, run } = await routeWithJob("submit_provider");
+		const limit = (retryAfterMs: number) => () => new ProviderSubmissionRetryLaterError("AWS refused the report at its limit (HTTP 429), to be filed later", retryAfterMs);
+		for (const [asked, expected] of [[30 * 60_000, 30 * 60_000], [5 * HOUR, HOUR], [0, 60_000]] as const) {
+			const before = Date.now();
+			await failOnce(job.id, limit(asked));
+			const after = await jobRow(job.id);
+			expect(after).toMatchObject({ status: "queued", retryCount: 0 });
+			expect(after.nextAttemptAt.getTime() - before).toBeGreaterThanOrEqual(expected - 1_000);
+			expect(after.nextAttemptAt.getTime() - before).toBeLessThanOrEqual(expected + 1_000);
+		}
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "running" });
+		expect(await AbuseRepository.getProviderRun(run.id)).toMatchObject({ executionStatus: "starting" });
+
+		await setJob(job.id, { createdAt: new Date(Date.now() - JOB_WAIT_LIMIT_MS - 1_000) });
+		await failOnce(job.id, limit(60_000));
+		expect((await jobRow(job.id)).lastError).toContain("The provider kept refusing the report at its limit for 24 h; a person must decide.");
+		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "needs_human" });
 	});
 
 	test("any other error still spends attempts and fails the route once they are spent", async () => {

@@ -11,6 +11,17 @@ describe("siteOf", () => {
 		expect(siteOf("203.0.113.7")).toEqual({ site: "203.0.113.7" });
 		expect(siteOf("localhost")).toEqual({ site: "localhost" });
 	});
+
+	test("platforms the public suffix list leaves out still make their customers' hosts tenants", () => {
+		expect(siteOf("xfinityy111.weebly.com")).toEqual({ site: "xfinityy111.weebly.com", platform: "weebly.com" });
+		expect(siteOf("www.kit.Flazio.online")).toEqual({ site: "kit.flazio.online", platform: "flazio.online" });
+		expect(siteOf("u20055169.ct.sendgrid.net")).toEqual({ site: "u20055169.ct.sendgrid.net", platform: "ct.sendgrid.net" });
+		expect(siteOf("usc1.contabostorage.com")).toEqual({ site: "usc1.contabostorage.com", platform: "contabostorage.com" });
+		// The platform's own hosts are its own site, and a lookalike domain is no tenant.
+		expect(siteOf("weebly.com")).toEqual({ site: "weebly.com" });
+		expect(siteOf("www.sendgrid.net")).toEqual({ site: "sendgrid.net" });
+		expect(siteOf("login.notweebly.com")).toEqual({ site: "notweebly.com" });
+	});
 });
 
 describe("hostRegistration", () => {
@@ -27,6 +38,8 @@ describe("hostRegistration", () => {
 		expect(hostRegistration("deep.kit.github.io")).toEqual({ platformTenant: "kit.github.io" });
 		expect(hostRegistration("bucket.s3.amazonaws.com")).toEqual({ platformTenant: "bucket.s3.amazonaws.com" });
 		expect(hostRegistration("sites.google.com")).toEqual({ platformTenant: "sites.google.com" });
+		expect(hostRegistration("xfinityy111.weebly.com")).toEqual({ platformTenant: "xfinityy111.weebly.com" });
+		expect(hostRegistration("contoso.sharepoint.com")).toEqual({ platformTenant: "contoso.sharepoint.com" });
 		expect(hostRegistration("signin.amazonaws-us-gov.com")).toEqual({ domain: "amazonaws-us-gov.com" });
 		expect(hostRegistration("forms.office.com")).toEqual({ domain: "office.com" });
 		expect(hostRegistration("www.youtube.com")).toEqual({ domain: "youtube.com" });

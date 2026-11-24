@@ -50,7 +50,7 @@ export class RequestStatusError extends Error {
 }
 
 /** How long a refusing server asks to be left alone, in milliseconds, when it says so. */
-function retryAfterMs(headers: Headers): number | undefined {
+export function retryAfterMs(headers: Headers): number | undefined {
 	for (const name of ["retry-after", "x-rate-limit-reset-after"]) {
 		const value = headers.get(name)?.trim();
 		if (!value) continue;
