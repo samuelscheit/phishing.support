@@ -25,6 +25,15 @@ export const ROTATION_VISITS = 3;
 export const ROTATION_BUDGET_MS = 30 * 60_000;
 /** Sampled visits all come from the residential exit: a smart link's bot filter sends data-centre and Tor addresses to a harmless site. */
 export const ROTATION_EGRESS: FabricEgress = "residential";
+/**
+ * Cases the system opens by itself and re-runs on a schedule (a redirector
+ * watch's daily check, a kit's sibling host) walk their link once: sampling
+ * them would spend the residential exit, which a smart link's operator bans,
+ * on every automated run. Their retries too, since this reads the stored source.
+ */
+export function samplesRotation(source: string | null | undefined): boolean {
+	return !/^(redirector-watch|kit-sibling):/.test(source ?? "");
+}
 /** Two sampled visits in a row that only showed known routes: the link has no more offers this case would see. */
 const MAX_UNCHANGED_VISITS = 2;
 

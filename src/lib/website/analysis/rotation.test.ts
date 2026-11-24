@@ -132,6 +132,18 @@ describe("a link that rotates offers per click, sampled in one case", () => {
 		expect(website.routes?.[0]?.funnel).toBeUndefined();
 	});
 
+	test("cases the system opens itself (a redirector watch, a kit sibling) walk a rotating link once; a reporter's case samples it", async () => {
+		for (const [source, sampled] of [["redirector-watch:7", false], ["kit-sibling:1:2", false], [LINK, true], ["email:9", true]] as const) {
+			const calls: ModelCall[] = [];
+			const link = rotatingLink(() => productionVisit(), [() => cloudStorageVisit(), () => productionVisit(), () => productionVisit()]);
+			const id = await websiteSubmission(383412636961739000n + BigInt(source.length), LINK);
+			await SubmissionsEntity.update(id, { source });
+			await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.archiveWebsite, calls));
+			const { website } = await websiteOf(id);
+			expect({ source, sampled: link.sampleCalls().length > 0, routes: website.routes?.length }).toEqual({ source, sampled, routes: sampled ? 2 : 1 });
+		}
+	});
+
 	test("the residential exit failing ends the sampling at once, and the first walk's findings are reported as they are", async () => {
 		const calls: ModelCall[] = [];
 		const link = rotatingLink(() => productionVisit(), [new Error("Browser service unavailable: residential exit is offline")]);

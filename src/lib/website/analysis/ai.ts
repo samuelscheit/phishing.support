@@ -21,7 +21,7 @@ import { emitStep } from "../visit/progress";
 import { capturedArchiveHop, reportableFinding, reportableWebsiteHop, unreportedVerdict, websiteReportUrls } from "../info/report_hops";
 import { capturedPageScreenshots, capturedWebsiteData, websiteEvidence } from "./evidence";
 import { visitWebsite, type WebsiteChainSite, type WebsiteVisitResult } from "../visit/visit";
-import { firstWalkBrowser, ROTATION_EGRESS, sampleRotation, type RotationBrowser } from "./rotation";
+import { firstWalkBrowser, ROTATION_EGRESS, sampleRotation, samplesRotation, type RotationBrowser } from "./rotation";
 import type { FabricEgress } from "../../browser/fabric";
 import type { FunnelChain } from "../../abuse/funnel/chain";
 import type { DeceptiveFunnelFinding } from "../../abuse/funnel/classification";
@@ -169,7 +169,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		const walked = [await walkRoute(0, archive, firstBrowser, capture)];
 		archive = walked[0]!.visited.archive;
 		// A link whose first walk passed a tracking link may rotate: it is opened again, from the residential exit, as other browsers.
-		const rotation = walked[0]!.funnel ? await sampleRotation({
+		const rotation = walked[0]!.funnel && samplesRotation(prior?.source) ? await sampleRotation({
 			url,
 			routes: [walked[0]!.visited.chain],
 			first: firstBrowser,
