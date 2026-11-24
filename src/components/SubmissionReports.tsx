@@ -18,11 +18,11 @@ function formatDate(value: DateValue): string {
 	return formatUtcDateTime(value) ?? "Unknown time";
 }
 
-function label(value: string): string {
+export function label(value: string): string {
 	return value.replaceAll("_", " ");
 }
 
-function statusClass(status: string) {
+export function statusClass(status: string) {
 	if (["sent", "submitted", "acknowledged", "received"].includes(status)) return "border-emerald-200 bg-emerald-50 text-emerald-800";
 	if (["delivery_failed", "failed", "provider_rejected", "unknown_external_state", "needs_human", "insufficient_evidence", "no_route"].includes(status)) return "border-red-200 bg-red-50 text-red-800";
 	if (["pending", "queued", "running", "verified", "resolving", "investigating", "accepted", "verifying"].includes(status)) return "border-amber-200 bg-amber-50 text-amber-800";
@@ -183,6 +183,7 @@ export function RouteCard({ reportId, route, artifacts }: { reportId: string; ro
 
 /** The report's heading: a case's own report of a site or of its email, or one its evidence led to. */
 function reportTitle(report: SubmissionReport): string {
+	if (report.funnelParty) return `Deceptive funnel report · affiliate ${report.funnelParty.affiliateId ?? "credited by its network"} at ${report.funnelParty.site}`;
 	if (!report.primary) return report.target ? `Linked report · ${report.target}` : "Linked report";
 	if (report.target === "phishing-email") return "Phishing-email report";
 	return report.target ? `Site report · ${report.target}` : "Site report";
@@ -205,13 +206,13 @@ function ReportGroup({ report, caseId }: { report: SubmissionReport; caseId?: st
 					<p className="text-sm text-muted-foreground">{reportStatusText[report.status] ?? `Report status: ${label(report.status)}.`}</p>
 					{owner ? (
 						<p className="text-sm">
-							This site was already being reported for <Link href={`/submissions/${owner}`} className="font-medium text-primary hover:underline">case {owner}</Link> when this case confirmed it; that report names this case too, and no second report was sent.
+							{report.funnelParty ? "This affiliate" : "This site"} was already being reported for <Link href={`/submissions/${owner}`} className="font-medium text-primary hover:underline">case {owner}</Link> when this case {report.funnelParty ? "led to it" : "confirmed it"}; that report names this case too, and no second report was sent.
 						</p>
 					) : report.joinedCases.length ? (
 						<p className="text-sm">
 							Also covers {report.joinedCases.map((joined, index) => (
 								<span key={String(joined)}>{index > 0 ? ", " : ""}<Link href={`/submissions/${joined}`} className="font-medium text-primary hover:underline">case {String(joined)}</Link></span>
-							))}, which also confirmed this site while this report was open.
+							))}, which {report.funnelParty ? "led to the same affiliate" : "also confirmed this site"} while this report was open.
 						</p>
 					) : null}
 					{!report.primary ? <p className="whitespace-pre-wrap text-sm">{report.description}</p> : null}

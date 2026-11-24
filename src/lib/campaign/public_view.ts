@@ -8,6 +8,7 @@ import { CANARY_FIELD_LABEL, type CanaryField } from "../website/types";
 import { campaignBrand, sameBrand, type GuidancePurpose, type VisitorGuidance } from "./guidance";
 import { campaignVisitorKinds, type VisitorKind } from "./kinds";
 import { factsFromDossier } from "./link";
+import { memberKey, screenshotStep } from "./members";
 import { CampaignRepository } from "./repository";
 import { operatorServerRoles, type OperatorServerRole } from "./schema";
 import { fallbackDescription } from "./summary";
@@ -26,6 +27,8 @@ export type { VisitorKind } from "./kinds";
 export type PublicReportState = "accepted" | "awaiting" | "confirmed" | "rejected" | "bounced" | "failed" | "pending";
 
 export type PublicCampaignSite = {
+	/** Unique on the page: a case can be a member for two sites, and two cases for one site. */
+	key: string;
 	submissionId: string;
 	url: string;
 	host: string;
@@ -33,10 +36,10 @@ export type PublicCampaignSite = {
 	language?: string;
 	thumbnailUrl?: string;
 	screenshotUrl?: string;
-	/** The analyzed page's screenshot is one flat colour, useless as a picture. */
+	/** The judged page's screenshot is one flat colour, useless as a picture. */
 	blankCapture: boolean;
 	asks: string[];
-	/** Every page the visit captured, in the order shown: the landing page, the forms, the pages after them. */
+	/** Every page of the site the visit captured, in the order shown: the landing page, the forms, the pages after them. */
 	steps: Array<{ step: number; screenshotUrl: string; stampedUrl?: string }>;
 	/** Why the page was judged phishing: the page's own words and the fields it collects with. */
 	verdict?: { finding: string; basis?: string; quote?: string; impersonates?: string; fields: string[] };
@@ -231,19 +234,20 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 	if (!campaign) return undefined;
 	const dossier = await buildDossier(campaignId, dependencies);
 	if (!dossier.sites.length) return undefined;
-	const siteFacts = new Map((await CampaignRepository.listSiteFacts(dossier.sites.map((site) => BigInt(site.submissionId)))).map((facts) => [facts.submissionId.toString(), facts]));
+	const siteFacts = new Map((await CampaignRepository.listSiteFacts(dossier.sites.map((site) => ({ submissionId: BigInt(site.submissionId), reportId: BigInt(site.reportId) })))).map((facts) => [memberKey(facts), facts]));
 
 	const sites: PublicCampaignSite[] = dossier.sites.map((site) => {
-		const facts = siteFacts.get(site.submissionId);
+		const facts = siteFacts.get(site.key);
 		const evidence = latestEvidence(site);
-		const screenshot = evidence.find((file) => file.name === "website-stamped.png") ?? evidence.find((file) => file.name === "website.png");
-		const steps = evidence.flatMap((file) => {
-			const match = file.name.match(/^website(?:-step(\d+))?\.png$/);
-			if (!match) return [];
-			const step = match[1] ? Number(match[1]) : 1;
+		const pages = evidence.flatMap((file) => {
+			const step = screenshotStep(file.name);
+			if (step === undefined || !site.pageSteps.includes(step)) return [];
 			const stamped = evidence.find((other) => other.name === file.name.replace(/\.png$/, "-stamped.png"));
-			return [{ step, screenshotUrl: artifactUrl(file.artifactId), ...(stamped ? { stampedUrl: artifactUrl(stamped.artifactId) } : {}) }];
+			return [{ step, screenshot: file, stamped }];
 		}).sort((a, b) => a.step - b.step);
+		const judged = pages.find((page) => page.step === site.pageStep);
+		const screenshot = judged && (judged.stamped ?? judged.screenshot);
+		const steps = pages.map((page) => ({ step: page.step + 1, screenshotUrl: artifactUrl(page.screenshot.artifactId), ...(page.stamped ? { stampedUrl: artifactUrl(page.stamped.artifactId) } : {}) }));
 		const reports = site.reports.map((report) => ({
 			provider: report.provider,
 			channel: report.channel === "email" ? report.contact ?? "email" : report.channel === "form" ? "web form / API" : "none",
@@ -252,6 +256,7 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 			...(report.confirmationId ? { ticket: report.confirmationId } : {}),
 		}));
 		return {
+			key: site.key,
 			submissionId: site.submissionId,
 			url: site.url,
 			host: site.host,

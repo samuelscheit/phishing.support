@@ -1,4 +1,4 @@
-import { artifactResponse } from "@/lib/abuse/artifact_response";
+import { artifactResponse } from "@/lib/http/artifact_response";
 import { AbuseRepository } from "@/lib/abuse/repository";
 
 export const runtime = "nodejs";

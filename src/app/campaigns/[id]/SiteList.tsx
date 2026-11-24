@@ -45,7 +45,7 @@ export function SiteList({ campaign, locale, linkedHost, focus }: { campaign: Pu
 		if (!site) return;
 		// The page stays at its top, where the banner names the host; the row waits open in the list.
 		setExpanded(true);
-		setOpen(site.submissionId);
+		setOpen(site.key);
 	}, [campaign.sites, linkedHost]);
 	useEffect(() => {
 		if (!focus) return;
@@ -69,12 +69,12 @@ export function SiteList({ campaign, locale, linkedHost, focus }: { campaign: Pu
 	return (
 		<Collapsible rows={COLLAPSED_ROWS} peek={ROW_PEEK} count={sites.length} more={copy.showAll(sites.length)} less={copy.showFewer} expanded={expanded} onExpandedChange={setExpanded} listClassName="divide-y">
 			{sites.map((site) => {
-				const isOpen = open === site.submissionId;
+				const isOpen = open === site.key;
 				const isLinked = site.host === linkedHost;
 				const reportedTo = new Set(site.reports.filter((report) => DELIVERED.has(report.state)).map((report) => report.provider)).size;
 				return (
-					<li key={site.submissionId} id={`site-${site.submissionId}`} className={cn("scroll-mt-6", isOpen && "bg-muted/30", isLinked && "relative ring-2 ring-inset ring-red-600")}>
-						<button type="button" aria-expanded={isOpen} onClick={() => toggle(site.submissionId)} className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-muted/40 sm:gap-4 sm:px-4">
+					<li key={site.key} id={`site-${site.key}`} className={cn("scroll-mt-6", isOpen && "bg-muted/30", isLinked && "relative ring-2 ring-inset ring-red-600")}>
+						<button type="button" aria-expanded={isOpen} onClick={() => toggle(site.key)} className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-muted/40 sm:gap-4 sm:px-4">
 							<Thumb site={site} emptyLabel={copy.noPicture} className="w-20 shrink-0 sm:w-24" />
 							<span className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-6">
 								<span className="min-w-0 sm:w-72 sm:shrink-0">

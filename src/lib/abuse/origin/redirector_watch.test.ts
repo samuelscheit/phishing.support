@@ -240,7 +240,7 @@ async function confirmedDestination(options: { direct?: boolean } = {}) {
 		description: "Confirmed credential phishing.",
 		observedUrls: [{ target: domain, urls: [DESTINATION] }],
 	});
-	return AbuseRepository.createReport({ request, reporter: { reporterCountry: "CH" }, submissionId: CASE_ID, site: domain });
+	return AbuseRepository.createReport({ request, reporter: { reporterCountry: "CH" }, submissionId: CASE_ID, subject: { site: domain } });
 }
 
 const watchJobs = async () => (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "watch_redirector")).all();

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, eq, exists, inArray, isNotNull, isNull, like } from "drizzle-orm";
 
 import { getDb, type Transaction } from "../../db";
 import { generateId } from "../../db/ids";
@@ -19,6 +19,7 @@ import { AbuseInputError, createIdempotentTrackingToken, createTrackingToken, ha
 import { listArtifacts } from "./artifacts";
 import { insertArtifact, now, recordEvent } from "./shared";
 import { stableJson } from "../../util/hash";
+import { siteChecks, TAKEN_DOWN_STATES } from "../../liveness/schema";
 import { websiteSite } from "../../website/info/site";
 import { DAY_MS } from "../../util/date_time";
 
@@ -38,14 +39,32 @@ export type CreatedAbuseReport = {
 	joined?: { submissionId: bigint };
 };
 
-/** Reports that ended without reaching any provider: a later case reports the site anew. */
-const UNSENT_REPORT_STATUSES = new Set<AbuseReportStatus>(["insufficient_evidence", "no_route", "failed", "canceled"]);
+/**
+ * Reports a later case does not join: those that ended without reaching any
+ * provider, and those an operator must still decide on, which may never be
+ * sent. A later case reports their subject anew.
+ */
+const UNJOINABLE_REPORT_STATUSES = new Set<AbuseReportStatus>(["insufficient_evidence", "no_route", "failed", "canceled", "needs_human"]);
 /**
  * How long a report stays the one report of its site for later cases. A host
  * that ignored it this long, or a site that came back after its takedown, is
  * reported again with the newer case's evidence.
  */
 export const REPORT_JOIN_WINDOW_MS = 30 * DAY_MS;
+
+/**
+ * What a case's report is about, so that it is reported once across cases: a
+ * later case that finds the same subject joins the open report of the case
+ * that reported it first (`abuse_report_cases`) instead of a second report.
+ * A report that ended unsent, awaits an operator, is older than the window,
+ * or whose target our checks found taken down (the site is back), is
+ * reported anew.
+ */
+export type ReportSubject =
+	/** A website site: the case's primary report (no idempotency key) of the site's host; the window is REPORT_JOIN_WINDOW_MS. */
+	| { site: string }
+	/** A subject its reports name in their idempotency keys, `<key>:<submission id>`: a deceptive funnel's business and affiliate. */
+	| { key: string; windowMs: number };
 
 /** The site a report's target stands for: its first reported URL's, else its host. */
 function targetSite(target: { normalizedTarget: string; observedUrls: string[] }): string {
@@ -56,30 +75,48 @@ function targetSite(target: { normalizedTarget: string; observedUrls: string[] }
 	}
 }
 
+type SubjectReport = { id: bigint; submissionId: bigint | null; status: AbuseReportStatus; createdAt: Date; takenDown: boolean };
+
+/** The case reports of a subject, oldest first, each with whether a check of ours confirmed its target's takedown. */
+function subjectReports(tx: Transaction, request: ValidatedAbuseReportRequest, subject: ReportSubject): SubjectReport[] {
+	const takedown = tx.select({ id: siteChecks.id }).from(siteChecks)
+		.where(and(eq(siteChecks.reportId, abuseReports.id), inArray(siteChecks.state, [...TAKEN_DOWN_STATES])));
+	const columns = { id: abuseReports.id, submissionId: abuseReports.submissionId, status: abuseReports.status, createdAt: abuseReports.createdAt, takenDown: exists(takedown).mapWith(Boolean) };
+	if ("key" in subject) {
+		return tx.select(columns).from(abuseReports)
+			.where(and(like(abuseReports.idempotencyKey, `${subject.key}:%`), isNotNull(abuseReports.submissionId)))
+			.orderBy(asc(abuseReports.createdAt))
+			.all();
+	}
+	const host = request.targets[0]?.normalizedTarget;
+	if (!host) return [];
+	return tx
+		.select({ ...columns, normalizedTarget: abuseTargets.normalizedTarget, observedUrls: abuseTargets.observedUrls })
+		.from(abuseReports)
+		.innerJoin(abuseTargets, eq(abuseTargets.reportId, abuseReports.id))
+		// A website case's report names its site first and only; an email report names its sending IP second.
+		.where(and(eq(abuseTargets.normalizedTarget, host), eq(abuseTargets.ordinal, 0), isNull(abuseReports.idempotencyKey), isNotNull(abuseReports.submissionId)))
+		.orderBy(asc(abuseReports.createdAt))
+		.all()
+		.filter((candidate) => targetSite(candidate) === subject.site);
+}
+
 /**
- * The case-owned report this one would duplicate: the case's own report of the
- * same site (a replayed analysis), or another case's open report of it within
- * the join window (another lure of the same kit). Without a site (an email),
- * a case owns one report.
+ * The case report this one would duplicate: the case's own report of the
+ * subject (a replayed analysis), or another case's open report of it within
+ * the subject's window (another lure of the same kit, another link of the
+ * same affiliate). Without a subject (an email), a case owns one report.
  */
-function existingCaseReport(tx: Transaction, submissionId: bigint, request: ValidatedAbuseReportRequest, site: string | undefined, at: Date) {
-	if (site === undefined) {
+function existingCaseReport(tx: Transaction, submissionId: bigint, request: ValidatedAbuseReportRequest, subject: ReportSubject | undefined, at: Date) {
+	if (subject === undefined) {
 		const owned = tx.select({ id: abuseReports.id }).from(abuseReports).where(and(eq(abuseReports.submissionId, submissionId), isNull(abuseReports.idempotencyKey))).get();
 		return owned && { reportId: owned.id, ownerId: submissionId };
 	}
-	const host = request.targets[0]?.normalizedTarget;
-	if (!host) return undefined;
-	const candidates = tx
-		.select({ id: abuseReports.id, submissionId: abuseReports.submissionId, status: abuseReports.status, createdAt: abuseReports.createdAt, normalizedTarget: abuseTargets.normalizedTarget, observedUrls: abuseTargets.observedUrls })
-		.from(abuseReports)
-		.innerJoin(abuseTargets, eq(abuseTargets.reportId, abuseReports.id))
-		.where(and(eq(abuseTargets.normalizedTarget, host), isNull(abuseReports.idempotencyKey), isNotNull(abuseReports.submissionId)))
-		.orderBy(asc(abuseReports.createdAt))
-		.all()
-		.filter((candidate) => targetSite(candidate) === site);
+	const candidates = subjectReports(tx, request, subject);
 	const owned = candidates.find((candidate) => candidate.submissionId === submissionId);
 	if (owned) return { reportId: owned.id, ownerId: submissionId };
-	const open = candidates.find((candidate) => !UNSENT_REPORT_STATUSES.has(candidate.status) && at.getTime() - candidate.createdAt.getTime() < REPORT_JOIN_WINDOW_MS);
+	const windowMs = "key" in subject ? subject.windowMs : REPORT_JOIN_WINDOW_MS;
+	const open = candidates.find((candidate) => !UNJOINABLE_REPORT_STATUSES.has(candidate.status) && !candidate.takenDown && at.getTime() - candidate.createdAt.getTime() < windowMs);
 	return open && { reportId: open.id, ownerId: open.submissionId! };
 }
 
@@ -89,11 +126,11 @@ export async function createReport(params: {
 	/** The submission that owns this report, when it came from website/email analysis. */
 	submissionId?: bigint;
 	/**
-	 * The website site a case's report is about. A case reports each site
-	 * once, and a site another case's open report covers is not reported
-	 * again: that report is linked to this case instead.
+	 * What a case's report is about. A case reports each subject once, and a
+	 * subject another case's open report covers is not reported again: that
+	 * report is linked to this case instead.
 	 */
-	site?: string;
+	subject?: ReportSubject;
 	/**
 	 * Collect evidence before any provider is contacted: the report is held in
 	 * `investigating` with this job queued instead of `resolve_report`, and
@@ -116,10 +153,10 @@ export async function createReport(params: {
 
 	return db.transaction(
 		(tx) => {
-			if (params.submissionId !== undefined && !idempotencyKey) {
-				// A case's own reports stay idempotent by case and site. Derived backend
-				// reports carry explicit stable idempotency keys and share the submission.
-				const existing = existingCaseReport(tx, params.submissionId, request, params.site, now());
+			// A case's own reports stay idempotent by case and subject, also when a replayed analysis saw its chain
+			// anew (other times, other evidence). Derived reports without a subject carry stable idempotency keys.
+			if (params.submissionId !== undefined && (params.subject || !idempotencyKey)) {
+				const existing = existingCaseReport(tx, params.submissionId, request, params.subject, now());
 				if (existing?.ownerId === params.submissionId) return { reportId: existing.reportId, trackingToken, created: false };
 				if (existing) {
 					joinCase(tx, existing.reportId, params.submissionId, request);
@@ -236,7 +273,7 @@ export async function createReport(params: {
 		);
 	}
 
-/** Link a case to another case's report of the same site, once, with an event naming it on the report. */
+/** Link a case to another case's report of the same subject, once, with an event naming it on the report. */
 function joinCase(tx: Transaction, reportId: bigint, submissionId: bigint, request: ValidatedAbuseReportRequest): void {
 	const linked = tx.insert(abuseReportCases)
 		.values({ id: generateId(), reportId, submissionId, createdAt: now() })
@@ -316,7 +353,12 @@ async function getReportByTrackingTokenHash(trackingTokenHash: string): Promise<
 	return db.select().from(abuseReports).where(eq(abuseReports.trackingTokenHash, trackingTokenHash)).get();
 }
 
-/** The report owned by a website/email submission, if analysis confirmed it. */
+/**
+ * The first report a case owns: an email case's only one, a website case's
+ * first confirmed site's or funnel business's. A case may own several (one
+ * per site and business, and those derived from them): see
+ * listReportsForSubmission and, for those it joined, listJoinedReportsForSubmission.
+ */
 export async function getReportForSubmission(submissionId: bigint): Promise<AbuseReport | undefined> {
 	const db = await getDb();
 	return db.select().from(abuseReports).where(eq(abuseReports.submissionId, submissionId)).orderBy(asc(abuseReports.createdAt)).get();
@@ -327,7 +369,7 @@ export async function listReportsForSubmission(submissionId: bigint): Promise<Ab
 	return db.select().from(abuseReports).where(eq(abuseReports.submissionId, submissionId)).orderBy(asc(abuseReports.createdAt)).all();
 }
 
-/** Other cases' reports this case joined: the open report of a site it confirmed too. */
+/** Other cases' reports this case joined: the open report of a site it confirmed too, or of an affiliate its funnel led to. */
 export async function listJoinedReportsForSubmission(submissionId: bigint): Promise<AbuseReport[]> {
 	const db = await getDb();
 	return db.select({ report: abuseReports }).from(abuseReportCases)

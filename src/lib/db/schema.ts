@@ -5,7 +5,7 @@ import { ResponseInputItem, ResponseOutputItem } from "openai/resources/response
 import { MailData } from "../mail/ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
 import type { WebsiteAccessGate } from "../website/visit/access_gate";
-import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteSiteAssessment, WebsiteVisitRecord } from "../website/types";
+import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, WebsiteFunnel, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteSiteAssessment, WebsiteVisitRecord } from "../website/types";
 
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
@@ -41,6 +41,8 @@ export type WebsiteSubmissionData = {
 	analyzedHopIndex?: number;
 	/** One per hop: the verdict of the hop's site, which every hop of that site shares. */
 	siteAssessments?: WebsiteSiteAssessment[];
+	/** The whole chain judged as an affiliate funnel; set when it passed an affiliate tracking link. */
+	funnel?: WebsiteFunnel;
 	/** How the capture handled the submitted page's scripted jump to another site. */
 	cloaking?: WebsiteCloaking;
 	/** How visitors got into the reported page, when it is not shown to everyone who opens it; set when the report is filed. */

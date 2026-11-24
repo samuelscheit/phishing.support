@@ -1,18 +1,22 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
-import { getDb, type Transaction } from "../db";
+import { getDb, type DbExecutor, type Transaction } from "../db";
 import { generateId } from "../db/ids";
-import { submissions, type Submission } from "../db/schema";
+import { abuseReportCases, abuseReports, abuseTargets, submissions, type Submission } from "../db/schema";
 import { assignCampaigns } from "./cluster";
 import type { VisitorGuidance } from "./guidance";
 import type { ExtractedIndicator } from "./indicators";
+import { judgedSitePage, memberKey, reportSite, type CampaignMember, type CampaignSite } from "./members";
 import { campaignIndicators, campaignMembers, campaigns, campaignSiteFacts, kitHashChecks, kitHostChecks, type Campaign, type CampaignIndicator } from "./schema";
 
-export type CampaignMemberView = {
-	submissionId: bigint;
+export type CampaignMemberView = CampaignSite & {
 	joinedAt: Date;
+	/** The case's judged page of the site, else the site's first reported URL. */
 	url: string;
+	/** The capture step of the judged page, when the case captured one of the site. */
+	pageStep?: number;
 	status: Submission["status"];
+	/** When the case was opened: when the site was first seen by it. */
 	createdAt: Date;
 	indicators: CampaignIndicator[];
 };
@@ -27,8 +31,52 @@ export type CampaignSummary = {
 	sampleUrls: string[];
 };
 
-function websiteUrl(submission: Pick<Submission, "data">): string {
-	return submission.data.kind === "website" ? submission.data.website.url : "";
+const isMember = (member: CampaignMember) => and(eq(campaignMembers.submissionId, member.submissionId), eq(campaignMembers.reportId, member.reportId));
+
+/**
+ * The site reports of website cases, by case age, then report: each primary
+ * report (no idempotency key) a case filed itself, and each it joined
+ * because another case reported the site first. Derived reports (a data
+ * drop, a payload host) and a funnel's keyed reports are no site of the case.
+ */
+function siteReports(executor: DbExecutor, filter: { submissionId?: bigint; reportedOnly?: boolean }): CampaignMember[] {
+	const caseFilter = and(
+		eq(submissions.kind, "website"),
+		filter.reportedOnly ? eq(submissions.status, "reported") : undefined,
+		filter.submissionId === undefined ? undefined : eq(submissions.id, filter.submissionId),
+	);
+	const owned = executor
+		.select({ submissionId: submissions.id, reportId: abuseReports.id, openedAt: submissions.createdAt })
+		.from(abuseReports)
+		.innerJoin(submissions, eq(submissions.id, abuseReports.submissionId))
+		.where(and(isNull(abuseReports.idempotencyKey), caseFilter))
+		.all();
+	const joined = executor
+		.select({ submissionId: submissions.id, reportId: abuseReports.id, openedAt: submissions.createdAt })
+		.from(abuseReportCases)
+		.innerJoin(abuseReports, eq(abuseReports.id, abuseReportCases.reportId))
+		.innerJoin(submissions, eq(submissions.id, abuseReportCases.submissionId))
+		.where(and(isNull(abuseReports.idempotencyKey), caseFilter))
+		.all();
+	return [...owned, ...joined]
+		.sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime() || Number(a.submissionId - b.submissionId) || Number(a.reportId - b.reportId))
+		.map(({ submissionId, reportId }) => ({ submissionId, reportId }));
+}
+
+/** The site each report is about, with the first URL it reported. */
+function reportSites(executor: DbExecutor, reportIds: readonly bigint[]): Map<bigint, { site: string; url: string }> {
+	const sites = new Map<bigint, { site: string; url: string }>();
+	if (!reportIds.length) return sites;
+	const targets = executor
+		.select({ reportId: abuseTargets.reportId, normalizedTarget: abuseTargets.normalizedTarget, observedUrls: abuseTargets.observedUrls })
+		.from(abuseTargets)
+		.where(inArray(abuseTargets.reportId, [...new Set(reportIds)]))
+		.orderBy(asc(abuseTargets.ordinal))
+		.all();
+	for (const target of targets) {
+		if (!sites.has(target.reportId)) sites.set(target.reportId, { site: reportSite(target), url: target.observedUrls[0] ?? `https://${target.normalizedTarget}/` });
+	}
+	return sites;
 }
 
 /**
@@ -38,20 +86,22 @@ function websiteUrl(submission: Pick<Submission, "data">): string {
  */
 function recluster(tx: Transaction): void {
 	const links = tx
-		.select({ submissionId: campaignIndicators.submissionId, kind: campaignIndicators.kind, value: campaignIndicators.value })
+		.select({ submissionId: campaignIndicators.submissionId, reportId: campaignIndicators.reportId, kind: campaignIndicators.kind, value: campaignIndicators.value })
 		.from(campaignIndicators)
 		.where(eq(campaignIndicators.links, true))
 		.all();
 	const existingRows = tx.select().from(campaignMembers).all();
-	const existing = new Map(existingRows.map((row) => [row.submissionId, row.campaignId]));
-	// Every reported website is a confirmed site, and every site with indicators on record was one.
+	const existing = new Map(existingRows.map((row) => [memberKey(row), row.campaignId]));
+	// Every site a reported website case confirmed is a member, and every member with indicators on record was one.
 	const sites = [
-		...tx.select({ id: submissions.id }).from(submissions).where(and(eq(submissions.kind, "website"), eq(submissions.status, "reported"))).all().map((row) => row.id),
-		...tx.selectDistinct({ id: campaignIndicators.submissionId }).from(campaignIndicators).all().map((row) => row.id),
+		...siteReports(tx, { reportedOnly: true }),
+		...tx.selectDistinct({ submissionId: campaignIndicators.submissionId, reportId: campaignIndicators.reportId }).from(campaignIndicators).all(),
 	];
+	const members = new Map<string, CampaignMember>();
+	for (const member of [...existingRows, ...sites]) members.set(memberKey(member), { submissionId: member.submissionId, reportId: member.reportId });
 	const assignment = assignCampaigns({
-		links: links.map((link) => ({ submissionId: link.submissionId, key: `${link.kind}:${link.value}` })),
-		sites: [...new Set(sites)],
+		links: links.map((link) => ({ member: memberKey(link), key: `${link.kind}:${link.value}` })),
+		sites: [...new Set(sites.map(memberKey))],
 		existing,
 		newId: generateId,
 	});
@@ -60,20 +110,21 @@ function recluster(tx: Transaction): void {
 		tx.insert(campaigns).values({ id: campaignId, createdAt: timestamp, updatedAt: timestamp }).run();
 	}
 	const touched = new Set<bigint>();
-	for (const [submissionId, campaignId] of assignment.membership) {
-		const previous = existing.get(submissionId);
+	for (const [key, campaignId] of assignment.membership) {
+		const previous = existing.get(key);
 		if (previous === campaignId) continue;
+		const member = members.get(key)!;
 		touched.add(campaignId);
 		if (previous !== undefined) touched.add(previous);
 		if (previous === undefined) {
-			tx.insert(campaignMembers).values({ submissionId, campaignId, joinedAt: timestamp }).run();
+			tx.insert(campaignMembers).values({ ...member, campaignId, joinedAt: timestamp }).run();
 		} else {
-			tx.update(campaignMembers).set({ campaignId, joinedAt: timestamp }).where(eq(campaignMembers.submissionId, submissionId)).run();
+			tx.update(campaignMembers).set({ campaignId, joinedAt: timestamp }).where(isMember(member)).run();
 		}
 	}
-	for (const [submissionId, previous] of existing) {
-		if (assignment.membership.has(submissionId)) continue;
-		tx.delete(campaignMembers).where(eq(campaignMembers.submissionId, submissionId)).run();
+	for (const [key, previous] of existing) {
+		if (assignment.membership.has(key)) continue;
+		tx.delete(campaignMembers).where(isMember(members.get(key)!)).run();
 		touched.add(previous);
 	}
 	for (const [absorbed, into] of assignment.merged) {
@@ -110,21 +161,38 @@ export const CampaignRepository = {
 	},
 
 	/**
-	 * Replace what is on record for one submission with what it shows now and
+	 * Replace what is on record for one member with what it shows now and
 	 * regroup campaigns in the same transaction, so a reader never sees the
-	 * new indicators under the old grouping. Returns the submission's campaign.
+	 * new indicators under the old grouping. Returns the member's campaign.
 	 */
-	async recordIndicators(submissionId: bigint, indicators: readonly ExtractedIndicator[]): Promise<bigint | undefined> {
+	async recordIndicators(member: CampaignMember, indicators: readonly ExtractedIndicator[]): Promise<bigint | undefined> {
 		const db = await getDb();
 		return db.transaction((tx) => {
-			tx.delete(campaignIndicators).where(eq(campaignIndicators.submissionId, submissionId)).run();
+			tx.delete(campaignIndicators).where(and(eq(campaignIndicators.submissionId, member.submissionId), eq(campaignIndicators.reportId, member.reportId))).run();
 			const timestamp = new Date();
 			for (const indicator of indicators) {
-				tx.insert(campaignIndicators).values({ id: generateId(), submissionId, ...indicator, createdAt: timestamp }).run();
+				tx.insert(campaignIndicators).values({ id: generateId(), submissionId: member.submissionId, reportId: member.reportId, ...indicator, createdAt: timestamp }).run();
 			}
 			recluster(tx);
-			return tx.select().from(campaignMembers).where(eq(campaignMembers.submissionId, submissionId)).get()?.campaignId;
+			return tx.select().from(campaignMembers).where(isMember(member)).get()?.campaignId;
 		}, { behavior: "immediate" });
+	},
+
+	/** The sites a website case confirmed, as members: one per site report it filed or joined. */
+	async listCaseSites(submissionId: bigint): Promise<CampaignMember[]> {
+		return siteReports(await getDb(), { submissionId });
+	},
+
+	/** Every site every reported website case confirmed, oldest case first, for a sweep over every member. */
+	async listConfirmedSites(): Promise<CampaignMember[]> {
+		return siteReports(await getDb(), { reportedOnly: true });
+	},
+
+	/** The site a member is about; undefined when its report is no site report of its case (a data drop's, a funnel's). */
+	async siteOf(member: CampaignMember): Promise<string | undefined> {
+		const db = await getDb();
+		if (!siteReports(db, { submissionId: member.submissionId }).some((site) => site.reportId === member.reportId)) return undefined;
+		return reportSites(db, [member.reportId]).get(member.reportId)?.site;
 	},
 
 	async getCampaign(campaignId: bigint): Promise<Campaign | undefined> {
@@ -139,12 +207,23 @@ export const CampaignRepository = {
 		return current?.id;
 	},
 
-	async campaignForSubmission(submissionId: bigint): Promise<bigint | undefined> {
+	async campaignForMember(member: CampaignMember): Promise<bigint | undefined> {
 		const db = await getDb();
-		return db.select().from(campaignMembers).where(eq(campaignMembers.submissionId, submissionId)).get()?.campaignId;
+		return db.select().from(campaignMembers).where(isMember(member)).get()?.campaignId;
 	},
 
-	/** Every confirmed site of a campaign with what it showed, oldest first. */
+	/** The campaign of each site a case is a member for, its oldest report first; one campaign can appear twice. */
+	async listCaseMemberships(submissionId: bigint): Promise<Array<CampaignMember & { campaignId: bigint }>> {
+		const db = await getDb();
+		return db
+			.select({ submissionId: campaignMembers.submissionId, reportId: campaignMembers.reportId, campaignId: campaignMembers.campaignId })
+			.from(campaignMembers)
+			.where(eq(campaignMembers.submissionId, submissionId))
+			.orderBy(asc(campaignMembers.reportId))
+			.all();
+	},
+
+	/** Every member of a campaign with what it showed, oldest case first. */
 	async listMembers(campaignId: bigint): Promise<CampaignMemberView[]> {
 		const db = await getDb();
 		const rows = db
@@ -152,7 +231,7 @@ export const CampaignRepository = {
 			.from(campaignMembers)
 			.innerJoin(submissions, eq(submissions.id, campaignMembers.submissionId))
 			.where(eq(campaignMembers.campaignId, campaignId))
-			.orderBy(asc(submissions.createdAt), asc(submissions.id))
+			.orderBy(asc(submissions.createdAt), asc(submissions.id), asc(campaignMembers.reportId))
 			.all();
 		if (!rows.length) return [];
 		const indicators = db
@@ -161,14 +240,22 @@ export const CampaignRepository = {
 			.where(inArray(campaignIndicators.submissionId, rows.map((row) => row.member.submissionId)))
 			.orderBy(asc(campaignIndicators.kind), asc(campaignIndicators.value))
 			.all();
-		return rows.map(({ member, submission }) => ({
-			submissionId: member.submissionId,
-			joinedAt: member.joinedAt,
-			url: websiteUrl(submission),
-			status: submission.status,
-			createdAt: submission.createdAt,
-			indicators: indicators.filter((indicator) => indicator.submissionId === member.submissionId),
-		}));
+		const sites = reportSites(db, rows.map((row) => row.member.reportId));
+		return rows.map(({ member, submission }) => {
+			const reported = sites.get(member.reportId) ?? { site: "", url: "" };
+			const page = submission.data.kind === "website" ? judgedSitePage(submission.data.website, reported.site) : undefined;
+			return {
+				submissionId: member.submissionId,
+				reportId: member.reportId,
+				site: reported.site,
+				joinedAt: member.joinedAt,
+				url: page?.url ?? reported.url,
+				...(page ? { pageStep: page.step } : {}),
+				status: submission.status,
+				createdAt: submission.createdAt,
+				indicators: indicators.filter((indicator) => indicator.submissionId === member.submissionId && indicator.reportId === member.reportId),
+			};
+		});
 	},
 
 	/** Current campaigns, most recently grown first. */
@@ -177,7 +264,7 @@ export const CampaignRepository = {
 		const rows = db
 			.select({
 				campaign: campaigns,
-				memberCount: sql<number>`count(${campaignMembers.submissionId})`,
+				memberCount: sql<number>`count(*)`,
 				firstSeenAt: sql<number>`min(${submissions.createdAt})`,
 				lastSeenAt: sql<number>`max(${submissions.createdAt})`,
 			})
@@ -191,16 +278,10 @@ export const CampaignRepository = {
 			.all();
 		const summaries: CampaignSummary[] = [];
 		for (const row of rows) {
-			const members = db
-				.select({ data: submissions.data, indicator: campaignIndicators })
-				.from(campaignMembers)
-				.innerJoin(submissions, eq(submissions.id, campaignMembers.submissionId))
-				.leftJoin(campaignIndicators, and(eq(campaignIndicators.submissionId, campaignMembers.submissionId), eq(campaignIndicators.links, true)))
-				.where(eq(campaignMembers.campaignId, row.campaign.id))
-				.all();
+			const members = await this.listMembers(row.campaign.id);
 			const distinct = new Map<string, Set<string>>();
-			for (const { indicator } of members) {
-				if (!indicator) continue;
+			for (const indicator of members.flatMap((member) => member.indicators)) {
+				if (!indicator.links) continue;
 				distinct.set(indicator.kind, (distinct.get(indicator.kind) ?? new Set()).add(indicator.value));
 			}
 			summaries.push({
@@ -209,22 +290,25 @@ export const CampaignRepository = {
 				firstSeenAt: new Date(Number(row.firstSeenAt)),
 				lastSeenAt: new Date(Number(row.lastSeenAt)),
 				linkingIndicators: Object.fromEntries([...distinct].map(([kind, values]) => [kind, values.size])),
-				sampleUrls: [...new Set(members.map(({ data }) => websiteUrl({ data })))].slice(0, 3),
+				sampleUrls: [...new Set(members.map((member) => member.url))].slice(0, 3),
 			});
 		}
 		return summaries;
 	},
 
-	async saveSiteFacts(submissionId: bigint, facts: { language: string | null; thumbnailArtifactId: bigint | null; blankCapture: boolean }) {
+	async saveSiteFacts(member: CampaignMember, facts: { language: string | null; thumbnailArtifactId: bigint | null; blankCapture: boolean }) {
 		const db = await getDb();
-		const values = { submissionId, ...facts, updatedAt: new Date() };
-		await db.insert(campaignSiteFacts).values(values).onConflictDoUpdate({ target: campaignSiteFacts.submissionId, set: values });
+		const values = { submissionId: member.submissionId, reportId: member.reportId, ...facts, updatedAt: new Date() };
+		await db.insert(campaignSiteFacts).values(values).onConflictDoUpdate({ target: [campaignSiteFacts.submissionId, campaignSiteFacts.reportId], set: values });
 	},
 
-	async listSiteFacts(submissionIds: readonly bigint[]) {
-		if (!submissionIds.length) return [];
+	/** The stored facts of these members, in their order; a member never linked has none. */
+	async listSiteFacts(members: readonly CampaignMember[]) {
+		if (!members.length) return [];
 		const db = await getDb();
-		return db.select().from(campaignSiteFacts).where(inArray(campaignSiteFacts.submissionId, [...submissionIds])).all();
+		const rows = db.select().from(campaignSiteFacts).where(inArray(campaignSiteFacts.submissionId, members.map((member) => member.submissionId))).all();
+		const byMember = new Map(rows.map((row) => [memberKey(row), row]));
+		return members.flatMap((member) => byMember.get(memberKey(member)) ?? []);
 	},
 
 	async memberCount(campaignId: bigint): Promise<number> {
@@ -243,17 +327,5 @@ export const CampaignRepository = {
 	async saveVisitorGuidance(campaignId: bigint, guidance: VisitorGuidance) {
 		const db = await getDb();
 		await db.update(campaigns).set({ visitorGuidance: guidance }).where(eq(campaigns.id, campaignId));
-	},
-
-	/** Website submissions confirmed as phishing, oldest first, for a sweep over every site. */
-	async listReportedWebsiteSubmissionIds(): Promise<bigint[]> {
-		const db = await getDb();
-		return db
-			.select({ id: submissions.id })
-			.from(submissions)
-			.where(and(eq(submissions.kind, "website"), eq(submissions.status, "reported")))
-			.orderBy(asc(submissions.createdAt))
-			.all()
-			.map((row) => row.id);
 	},
 };

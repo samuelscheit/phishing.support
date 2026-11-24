@@ -1,4 +1,6 @@
 import { AbuseRepository } from "../abuse/repository";
+import type { AbuseReport } from "../abuse/schema";
+import { memberKey, screenshotStep, siteOf, sitePageSteps, type CampaignSite } from "../campaign/members";
 import { CampaignRepository, type CampaignMemberView } from "../campaign/repository";
 import type { CampaignIndicator } from "../campaign/schema";
 import { ArtifactsEntity } from "../db/entities/artifacts";
@@ -55,9 +57,19 @@ type DossierVerdict = {
 /** The visit through the site as the case recorded it at the time. */
 type DossierVisit = { outcome: string; failure?: string; actions: Array<{ kind: string; text: string }> };
 
+/** One member of the campaign: a site as one case confirmed it. */
 export type DossierSite = {
+	/** Unique within the dossier: one case can be a member for two sites, and two cases for one site. */
+	key: string;
 	submissionId: string;
+	/** The site's primary report, the case's own or the one it joined. */
+	reportId: string;
+	/** The case's judged page of the site. */
 	url: string;
+	/** The capture step of the judged page (`websiteCaptureFileNames`), when the case captured one. */
+	pageStep?: number;
+	/** The capture steps of every page of the site the case was shown, in chain order. */
+	pageSteps: number[];
 	host: string;
 	firstSeenAt: string;
 	registeredAt?: string;
@@ -70,6 +82,7 @@ export type DossierSite = {
 	/** What we told the providers about the site. */
 	reportText?: string;
 	impersonates: string[];
+	/** The site report's providers and those of the reports its investigation added (data drops, payload hosts). */
 	reports: DossierProviderReport[];
 	/** Every mail exchanged with providers about the site, oldest first; never the authorities'. */
 	correspondence: DossierMail[];
@@ -153,13 +166,15 @@ function dataDestinations(submission: Submission | undefined): DossierDataDestin
 	return [...unique.values()];
 }
 
-/** The reportable assessment of the case: the page its report is about. */
-function verdictOf(submission: Submission | undefined): DossierVerdict | undefined {
+/** The case's reportable assessment of the member's site: the page its report is about. A case without a recorded chain judged one site. */
+function verdictOf(submission: Submission | undefined, member: CampaignMemberView): DossierVerdict | undefined {
 	if (submission?.data.kind !== "website") return undefined;
 	const website = submission.data.website;
-	const assessment = website.siteAssessments?.find((candidate) => candidate.finding === "phishing" || candidate.finding === "malware");
+	const hops = website.navigationHops ?? [];
+	const assessment = website.siteAssessments?.find((candidate) => (candidate.finding === "phishing" || candidate.finding === "malware")
+		&& (!hops.length || siteOf(hops.find((hop) => hop.index === candidate.hopIndex)?.url) === member.site));
 	if (!assessment) return undefined;
-	const pageUrl = website.navigationHops?.find((hop) => hop.index === assessment.hopIndex)?.url ?? website.archiveUrl ?? website.url;
+	const pageUrl = member.url;
 	return {
 		finding: assessment.finding,
 		...(assessment.phishingBasis ? { basis: assessment.phishingBasis } : {}),
@@ -179,6 +194,36 @@ function visitOf(submission: Submission | undefined): DossierVisit | undefined {
 function registeredAt(submission: Submission | undefined): string | undefined {
 	if (submission?.data.kind !== "website") return undefined;
 	return submission.data.website.whois?.rdap?.events?.registration;
+}
+
+/** The site report a derived report came from, as its stored request names it. */
+async function derivedFrom(report: AbuseReport): Promise<string | undefined> {
+	const [request] = await AbuseRepository.listArtifacts(report.id, ["original_request"]);
+	if (!request) return undefined;
+	try {
+		const source = (JSON.parse(Buffer.from(request.blob).toString("utf8")) as { sourceReportId?: unknown }).sourceReportId;
+		return typeof source === "string" ? source : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The reports about a member's site: its site report, and the reports the
+ * case's investigation of that report added (`sourceReportId`). A derived
+ * report that names no source goes with the case's first own site report,
+ * whose investigation reports the visit's data drops.
+ */
+async function memberReports(member: CampaignSite, listReports: NonNullable<DossierDependencies["listReports"]>): Promise<AbuseReport[]> {
+	const own = await listReports(member.submissionId);
+	const site = own.find((report) => report.id === member.reportId) ?? await AbuseRepository.getReport(member.reportId);
+	const first = own.find((report) => !report.idempotencyKey)?.id.toString();
+	const derived: AbuseReport[] = [];
+	for (const report of own) {
+		if (!report.idempotencyKey) continue;
+		if (((await derivedFrom(report)) ?? first) === member.reportId.toString()) derived.push(report);
+	}
+	return [...(site ? [site] : []), ...derived];
 }
 
 /**
@@ -207,9 +252,9 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 		const correspondence: DossierMail[] = [];
 		const impersonates = new Set<string>();
 		let reportText: string | undefined;
-		for (const report of await listReports(member.submissionId)) {
+		for (const report of await memberReports(member, listReports)) {
 			if (report.legalBrandUrl) impersonates.add(hostOf(report.legalBrandUrl));
-			if (!report.idempotencyKey && report.description) reportText = report.description;
+			if (report.id === member.reportId && report.description) reportText = report.description;
 			const [routes, targets, runs, mails, artifacts] = await Promise.all([listRoutes(report.id), listTargets(report.id), listRuns(report.id), listMail(report.id), listReportArtifacts(report.id)]);
 			const providerRoutes = new Map(routes.filter((route) => !isAuthorityRoute(route)).map((route) => [route.id, route]));
 			for (const mail of mails) {
@@ -254,13 +299,21 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 				size: artifact.size ?? 0,
 				...(artifact.archivedAt ? { archivedAt: artifact.archivedAt.toISOString() } : {}),
 			}));
-		const verdict = verdictOf(submission);
+		const verdict = verdictOf(submission, member);
 		const visit = visitOf(submission);
 		const registered = registeredAt(submission);
 		const registrar = registrarName(submission);
+		// A case without a recorded chain showed its one site every page it captured.
+		const steps = (submission?.data.kind === "website" ? sitePageSteps(submission.data.website, member.site) : [])
+			?? evidence.flatMap((file) => screenshotStep(file.name) ?? []);
+		const pageSteps = [...new Set([...steps, ...(member.pageStep === undefined ? [] : [member.pageStep])])].sort((a, b) => a - b);
 		sites.push({
+			key: memberKey(member),
 			submissionId: member.submissionId.toString(),
+			reportId: member.reportId.toString(),
 			url: member.url,
+			...(member.pageStep === undefined ? {} : { pageStep: member.pageStep }),
+			pageSteps,
 			host: hostOf(member.url),
 			firstSeenAt: member.createdAt.toISOString(),
 			...(registered ? { registeredAt: registered } : {}),

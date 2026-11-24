@@ -22,6 +22,7 @@ import { isWebPage } from "../../network/web_page";
 import { lookupDomainRegistration } from "../info/domain_registration";
 import { buildWebsiteClassificationInput, validateWebsiteSiteClassification, websiteMobileHandoff, WEBSITE_CLASSIFICATION_FORMAT, type WebsiteEvidenceArchive } from "../analysis/classification";
 import { emitStep } from "./progress";
+import { analyzedCaptureStep } from "./capture_files";
 import { capturedArchiveHop, chainSiteAssessments, isReportable } from "../info/report_hops";
 import { saveVisitEvidence, websiteEvidence } from "../analysis/evidence";
 import { challengeInconclusive, CHALLENGE_RETRY_EGRESS, continuedRevisit } from "./revisit";
@@ -82,6 +83,19 @@ export type WebsiteChainSite = {
 	dataDrops: VisitDataSent[];
 };
 
+/** A page the visit showed, as the narrative and the funnel read it: the hop that served it, when, and the step its capture files are named after. */
+export type WebsiteShownPage = NarrativeVisitPage & { hopIndex: number; capturedAt: Date; step: number };
+
+/** A site's verdict: the page it rests on and what that page was found to be. */
+type SiteVerdict = { judgedHopIndex: number; classification: WebsiteSiteClassification };
+
+/**
+ * A visit opened again (as a phone, from another network): the earlier
+ * visit's hops, the page it opened again, and why, with the pages it showed
+ * and its sites' verdicts, which the case keeps for the hops they judged.
+ */
+type Revisit = { hops: WebsiteNavigationHop[]; from: WebsiteNavigationHop; revisit: WebsiteRevisit; pages: WebsiteShownPage[]; verdicts: ReadonlyMap<string, SiteVerdict> };
+
 /** What one visit of the chain found: every site's verdict, the page the case's verdict rests on, and the evidence around it. */
 export type WebsiteVisitResult = {
 	/** The page the case's verdict rests on: the first reportable page, else the last page shown. */
@@ -98,8 +112,8 @@ export type WebsiteVisitResult = {
 	requests: CapturedNetworkRequest[];
 	canaries: ExfiltrationCanaries;
 	record: WebsiteVisitRecord;
-	/** Every page the visit showed, in order, for the narrative. */
-	pages: NarrativeVisitPage[];
+	/** Every page the visit showed, in order, earlier visits of a revisit first. */
+	pages: WebsiteShownPage[];
 	/** Set when the visit could not finish and nothing it saw is reportable: no verdict, another visit may. */
 	inconclusive?: string;
 	/** Set when the flow's destination answered every network tried with nothing and sent the visit back. */
@@ -122,8 +136,8 @@ export async function visitWebsite(params: {
 	archive: WebsiteCapture;
 	dependencies: WebsiteAnalysisDependencies;
 	capture: (options: ArchiveWebsiteOptions) => Promise<WebsiteCapture>;
-	/** The revisit that led to this capture, when it is one: the earlier visit's hops, the page it opened again, and why. */
-	revisit?: { hops: WebsiteNavigationHop[]; from: WebsiteNavigationHop; revisit: WebsiteRevisit };
+	/** The revisit that led to this capture, when it is one. */
+	revisit?: Revisit;
 	/** A visit before this one was blocked by a challenge and opened again from another network; it is not repeated twice. */
 	challengeRetried?: boolean;
 	/** The network every later capture of the visit uses: the one a challenge let through. */
@@ -180,12 +194,18 @@ export async function visitWebsite(params: {
 		});
 	}
 
-	// The narrative reads every page shown.
-	const narrativePages: NarrativeVisitPage[] = archives.map((page) => ({
-		url: page.url,
-		...(pageTitle(page.html) ? { title: pageTitle(page.html) } : {}),
-		text: page.text.toString("utf-8"),
-	}));
+	// The narrative and the funnel read every page shown, the earlier visit's too.
+	const shownPages: WebsiteShownPage[] = [
+		...(params.revisit?.pages ?? []),
+		...archives.map((page) => ({
+			url: page.url,
+			...(pageTitle(page.html) ? { title: pageTitle(page.html) } : {}),
+			text: page.text.toString("utf-8"),
+			hopIndex: capturedArchiveHop(page).index,
+			capturedAt: page.archivedAt,
+			step: analyzedCaptureStep(page.navigationHops),
+		})),
+	];
 
 	// Judge the pages in the order they were shown, each site until one of its pages is reportable.
 	const verdicts = new Map<string, { position: number; capturedHop: WebsiteNavigationHop; classification: WebsiteSiteClassification }>();
@@ -205,7 +225,10 @@ export async function visitWebsite(params: {
 	}
 
 	const chain = archives.at(-1)!.navigationHops;
-	const assessments = chainSiteAssessments(chain, new Map([...verdicts].map(([site, { capturedHop, classification }]) => [site, { judgedHopIndex: capturedHop.index, classification }])));
+	// A site this visit did not reach again keeps the earlier visit's verdict.
+	const siteVerdicts = new Map<string, SiteVerdict>([...(params.revisit?.verdicts ?? []), ...[...verdicts].map(([site, { capturedHop, classification }]) => [site, { judgedHopIndex: capturedHop.index, classification }] as const)]);
+	const assessments = chainSiteAssessments(chain, siteVerdicts);
+	const again = (from: WebsiteNavigationHop, revisit: WebsiteRevisit): Revisit => ({ hops: chain, from, revisit, pages: shownPages, verdicts: siteVerdicts });
 	const reportable = [...verdicts.values()]
 		.filter(({ classification }) => isReportable(classification))
 		.sort((a, b) => a.position - b.position)
@@ -215,7 +238,7 @@ export async function visitWebsite(params: {
 			classification,
 			dataDrops: pages.flatMap((page) => (isSameWebsite(page.archive.url, capturedHop.url) ? page.dataSent.filter((sent) => !sent.sameSite) : [])),
 		}));
-	const judged = { ...base, chain, assessments, reportable, pages: narrativePages };
+	const judged = { ...base, chain, assessments, reportable, pages: shownPages };
 	if (reportable.length) {
 		const [headline] = reportable;
 		return { ...judged, archive: headline!.archive, capturedHop: headline!.capturedHop, classification: headline!.classification };
@@ -249,7 +272,7 @@ export async function visitWebsite(params: {
 				return undefined;
 			});
 			if (retried) {
-				return visitWebsite({ ...params, archive: retried, egress, cloaked: { answered, notTried, startedAt }, revisit: { hops: chain, from: reopened, revisit: { reason: "destination_cloaked", route: network, site: cloak.site } } });
+				return visitWebsite({ ...params, archive: retried, egress, cloaked: { answered, notTried, startedAt }, revisit: again(reopened, { reason: "destination_cloaked", route: network, site: cloak.site }) });
 			}
 		}
 		const cloakedRecord: WebsiteCloakedDestination = { host: cloak.host, site: cloak.site, answered: answered.map((egress) => FABRIC_EGRESS_LABEL[egress]), notTried };
@@ -259,7 +282,7 @@ export async function visitWebsite(params: {
 	if (asksForPhone && !first.device) {
 		await emitStep(submissionId, "revisit_as_phone", 72);
 		const phone = await capture({ url: first.url, device: "iphone", ...route });
-		return visitWebsite({ ...params, archive: phone, revisit: { hops: chain, from: capturedHop, revisit: { reason: "phone", device: "iphone" } } });
+		return visitWebsite({ ...params, archive: phone, revisit: again(capturedHop, { reason: "phone", device: "iphone" }) });
 	}
 	// A challenge that would not clear for this network may let the residential exit through.
 	// A capture that already came from there was decoyed or turned away everywhere else.
@@ -278,7 +301,7 @@ export async function visitWebsite(params: {
 		if (retried) {
 			// The page reopened is the one the visit started at, which the blocked page was reached from.
 			const reopened = { ...capturedHop, url: first.url };
-			return visitWebsite({ ...params, archive: retried, challengeRetried: true, egress: CHALLENGE_RETRY_EGRESS, revisit: { hops: chain, from: reopened, revisit: { reason: "challenge", route: FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS] } } });
+			return visitWebsite({ ...params, archive: retried, challengeRetried: true, egress: CHALLENGE_RETRY_EGRESS, revisit: again(reopened, { reason: "challenge", route: FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS] }) });
 		}
 	}
 	// A visit that did not get past the site's challenge saw nothing of the site behind it.

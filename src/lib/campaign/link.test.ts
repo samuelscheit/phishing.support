@@ -9,10 +9,12 @@ import type { ExfiltrationBackend } from "../exfiltration/types";
 import type { WebsiteKitResource, WebsiteSiteAssessment } from "../website/types";
 import type { GuidanceDependencies, GuidanceInput } from "./guidance";
 import { backendIndicatorValue, extractIndicators, lookupPublishedLibrary } from "./indicators";
-import { describeCampaignIfChanged, linkSubmissionToCampaign, type LinkDependencies } from "./link";
+import { describeCampaignIfChanged, linkSiteMember, type LinkDependencies } from "./link";
+import type { CampaignSite } from "./members";
 import type { DescribeDependencies } from "./summary";
 import { CampaignRepository } from "./repository";
 import { kitCapture } from "./test_mhtml";
+import { confirmedCase } from "./test_sites";
 
 useTemporaryDatabase();
 
@@ -64,7 +66,7 @@ function fixtures(sites: Record<string, { submission: Submission; backends?: Exf
 	const byId = new Map(Object.values(sites).map((site) => [site.submission.id, site]));
 	return {
 		loadSubmission: async (id) => byId.get(id)?.submission,
-		loadBackends: async (id) => (byId.get(id)?.backends ?? []).map((backend) => ({ backend, observedAt: backend.request.timestamp, reportId: "1" })),
+		loadBackends: async (member) => (byId.get(member.submissionId)?.backends ?? []).map((backend) => ({ backend, observedAt: backend.request.timestamp, reportId: "1" })),
 		loadPageTexts: async (id) => byId.get(id)?.text ? [{ name: "website.mhtml", text: byId.get(id)!.text! }] : [],
 		libraryFor: async (sha256) => sha256 === JQUERY ? "gh:jquery/jquery@3.7.1/dist/jquery.min.js" : undefined,
 		isPlatformHost: async () => false,
@@ -74,9 +76,21 @@ function fixtures(sites: Record<string, { submission: Submission; backends?: Exf
 	};
 }
 
+/** The member each stored case is for its one site. */
+const members = new Map<bigint, CampaignSite>();
+const memberOf = (id: bigint) => members.get(id)!;
+const campaignOfCase = (id: bigint) => CampaignRepository.campaignForMember(memberOf(id));
+const link = (id: bigint, dependencies: LinkDependencies) => linkSiteMember(memberOf(id), dependencies);
+
+/** A case not stored, for extraction alone: the member for its submitted site. */
+const unstored = (submission: Submission): CampaignSite => ({ submissionId: submission.id, reportId: 1n, site: new URL(submission.data.kind === "website" ? submission.data.website.url : "https://invalid/").hostname });
+
+/** Store each case with the report of its site, as the analysis files it. */
 async function store(...submissions: Submission[]) {
 	for (const submission of submissions) {
-		await SubmissionsEntity.create({ id: submission.id, kind: "website", data: submission.data, dedupeKey: submission.dedupeKey, status: "reported" });
+		if (submission.data.kind !== "website") continue;
+		const [member] = await confirmedCase(submission.id, submission.data.website);
+		members.set(submission.id, member!);
 	}
 }
 
@@ -88,7 +102,7 @@ describe("campaign indicators", () => {
 			resource("https://microsoftoutlook.builder-test.online/own.js", KIT),
 		]);
 		const checked: string[] = [];
-		const indicators = await extractIndicators(7n, {
+		const indicators = await extractIndicators(unstored(submission), {
 			...fixtures({ a: { submission } }),
 			isPlatformHost: async (host) => {
 				checked.push(host);
@@ -113,7 +127,7 @@ describe("campaign indicators", () => {
 			resource("https://phish-kit-test.com/style.css", STYLE, "text/css"),
 			resource("https://phish-kit-test.com/tiny.js", SMALL, "application/javascript", 300),
 		]);
-		const indicators = await extractIndicators(1n, fixtures({ a: { submission, backends: [botBackend("7001")], text: "Zahlung an DE89 3704 0044 0532 0130 00" } }));
+		const indicators = await extractIndicators(unstored(submission), fixtures({ a: { submission, backends: [botBackend("7001")], text: "Zahlung an DE89 3704 0044 0532 0130 00" } }));
 		expect(indicators.map(({ kind, value, links }) => ({ kind, value, links }))).toEqual([
 			{ kind: "operator_server", value: "telegram-bot:7001", links: true },
 			{ kind: "payment_receiver", value: "iban:DE89370400440532013000", links: true },
@@ -133,7 +147,7 @@ describe("campaign indicators", () => {
 			{ url: "https://unreachable-stage.example/x", error: "fetch failed" },
 			{ url: "https://raw.githubusercontent.com/someone/repo/main/stage.sh", sha256: "f".repeat(64), sizeBytes: 900 },
 		] }, offeredDownload: { pageUrl: "https://paneo.work/", url: "https://paneo.work/Paneo.dmg", fileName: "Paneo.dmg", contentType: "application/x-apple-diskimage", sizeBytes: 9_000, sha256: "d".repeat(64), userAgent: "test" } } } as Submission["data"];
-		const indicators = await extractIndicators(1n, { ...fixtures({ a: { submission: paneo } }), loadPopularDomains: async () => new Set(["githubusercontent.com"]) });
+		const indicators = await extractIndicators(unstored(paneo), { ...fixtures({ a: { submission: paneo } }), loadPopularDomains: async () => new Set(["githubusercontent.com"]) });
 		expect(indicators.filter((indicator) => indicator.kind === "operator_server").map(({ value, links, evidence }) => ({ value, links, via: (evidence.delivered as { via: string }).via }))).toEqual([
 			{ value: "host:keychainagent.pro", links: true, via: "pasted_command" },
 			{ value: "host:raw.githubusercontent.com", links: false, via: "pasted_command" },
@@ -142,7 +156,7 @@ describe("campaign indicators", () => {
 	});
 
 	test("an email submission or an unknown one shows nothing", async () => {
-		expect(await extractIndicators(99n, fixtures({}))).toEqual([]);
+		expect(await extractIndicators({ submissionId: 99n, reportId: 1n, site: "example.com" }, fixtures({}))).toEqual([]);
 	});
 
 	test("names a backend by the identity two sites would share", () => {
@@ -172,16 +186,16 @@ describe("campaign grouping on record", () => {
 		};
 		await store(...Object.values(sites).map((site) => site.submission));
 		const dependencies = fixtures(sites);
-		for (const id of [1n, 2n, 3n, 4n, 5n]) await linkSubmissionToCampaign(id, dependencies);
+		for (const id of [1n, 2n, 3n, 4n, 5n]) await link(id, dependencies);
 
-		const campaign = await CampaignRepository.campaignForSubmission(1n);
-		expect(await CampaignRepository.campaignForSubmission(2n)).toBe(campaign!);
-		expect(await CampaignRepository.campaignForSubmission(3n)).toBe(campaign!);
+		const campaign = await campaignOfCase(1n);
+		expect(await campaignOfCase(2n)).toBe(campaign!);
+		expect(await campaignOfCase(3n)).toBe(campaign!);
 		// d has its own kit file and e only a library, so neither links to the others: each is a campaign of one.
-		const solo = await CampaignRepository.campaignForSubmission(4n);
+		const solo = await campaignOfCase(4n);
 		expect(solo).toBeDefined();
 		expect(solo).not.toBe(campaign!);
-		const unlinked = await CampaignRepository.campaignForSubmission(5n);
+		const unlinked = await campaignOfCase(5n);
 		expect(unlinked).toBeDefined();
 		expect([campaign, solo]).not.toContain(unlinked);
 		expect((await CampaignRepository.listMembers(unlinked!)).map((member) => member.url)).toEqual(["https://e-kit-test.com/"]);
@@ -206,11 +220,11 @@ describe("campaign grouping on record", () => {
 			await ArtifactsEntity.saveBuffer({ submissionId: BigInt(index + 1), name: "website.mhtml", kind: "website_capture", mimeType: "multipart/related", buffer: mhtml });
 		}
 		const dependencies = fixtures(sites);
-		for (const id of [1n, 2n, 3n, 4n]) await linkSubmissionToCampaign(id, dependencies);
+		for (const id of [1n, 2n, 3n, 4n]) await link(id, dependencies);
 
-		const campaign = await CampaignRepository.campaignForSubmission(1n);
+		const campaign = await campaignOfCase(1n);
 		expect((await CampaignRepository.listMembers(campaign!)).map((member) => member.url)).toEqual(hosts.slice(0, 3).map((host) => `https://${host}/`));
-		expect(await CampaignRepository.campaignForSubmission(4n)).not.toBe(campaign!);
+		expect(await campaignOfCase(4n)).not.toBe(campaign!);
 		const [summary] = (await CampaignRepository.listCampaigns()).filter((entry) => entry.campaign.id === campaign);
 		expect(summary).toMatchObject({ memberCount: 3, linkingIndicators: { kit_fingerprint: 1 } });
 	});
@@ -224,10 +238,10 @@ describe("campaign grouping on record", () => {
 		const sites = { paneo: withPayload(1n, "paneo.work", "a"), macmorrow: withPayload(2n, "macmorrow.app", "b"), other: { submission: website(3n, "other-kit-test.com") } };
 		await store(...Object.values(sites).map((site) => site.submission));
 		const dependencies = fixtures(sites);
-		for (const id of [1n, 2n, 3n]) await linkSubmissionToCampaign(id, dependencies);
-		const campaign = await CampaignRepository.campaignForSubmission(1n);
-		expect(await CampaignRepository.campaignForSubmission(2n)).toBe(campaign!);
-		expect(await CampaignRepository.campaignForSubmission(3n)).not.toBe(campaign!);
+		for (const id of [1n, 2n, 3n]) await link(id, dependencies);
+		const campaign = await campaignOfCase(1n);
+		expect(await campaignOfCase(2n)).toBe(campaign!);
+		expect(await campaignOfCase(3n)).not.toBe(campaign!);
 	});
 
 	test("one server links its sites whatever it did for each: receiving one site's data, delivering another's malware; a public platform links nothing", async () => {
@@ -246,22 +260,22 @@ describe("campaign grouping on record", () => {
 		};
 		await store(...Object.values(sites).map((site) => site.submission));
 		const dependencies = { ...fixtures(sites), loadPopularDomains: async () => new Set(["google.com"]) };
-		for (const id of [1n, 2n, 3n, 4n]) await linkSubmissionToCampaign(id, dependencies);
+		for (const id of [1n, 2n, 3n, 4n]) await link(id, dependencies);
 
-		const campaign = await CampaignRepository.campaignForSubmission(1n);
-		expect(await CampaignRepository.campaignForSubmission(2n)).toBe(campaign!);
-		const [server] = (await extractIndicators(1n, dependencies)).filter((indicator) => indicator.kind === "operator_server");
+		const campaign = await campaignOfCase(1n);
+		expect(await campaignOfCase(2n)).toBe(campaign!);
+		const [server] = (await extractIndicators(memberOf(1n), dependencies)).filter((indicator) => indicator.kind === "operator_server");
 		expect(server).toMatchObject({ value: "host:vigilant009.example", links: true, evidence: { roles: ["receives_data"], endpointUrl: "https://vigilant009.example/e" } });
-		expect((await extractIndicators(2n, dependencies)).find((indicator) => indicator.kind === "operator_server")).toMatchObject({ value: "host:vigilant009.example", links: true, evidence: { roles: ["delivers_malware"], delivered: { url: "https://vigilant009.example/stage2", via: "pasted_command" } } });
-		expect((await extractIndicators(3n, dependencies)).find((indicator) => indicator.kind === "operator_server")).toMatchObject({ value: "host:script.google.com", links: false });
-		expect(await CampaignRepository.campaignForSubmission(3n)).not.toBe(await CampaignRepository.campaignForSubmission(4n));
+		expect((await extractIndicators(memberOf(2n), dependencies)).find((indicator) => indicator.kind === "operator_server")).toMatchObject({ value: "host:vigilant009.example", links: true, evidence: { roles: ["delivers_malware"], delivered: { url: "https://vigilant009.example/stage2", via: "pasted_command" } } });
+		expect((await extractIndicators(memberOf(3n), dependencies)).find((indicator) => indicator.kind === "operator_server")).toMatchObject({ value: "host:script.google.com", links: false });
+		expect(await campaignOfCase(3n)).not.toBe(await campaignOfCase(4n));
 	});
 
 	test("a site whose one server both receives its data and delivers its malware has one indicator naming both", async () => {
 		const submission = website(1n, "both-test.com");
 		submission.data = { kind: "website", website: { url: "https://both-test.com/", investigation: { status: "completed", updatedAt: "2026-11-19T14:13:04.934Z", payloads: [{ url: "https://kit-server.example/stage2", sha256: "c".repeat(64) }] } } } as Submission["data"];
 		const backend: ExfiltrationBackend = { ...botBackend("1"), kind: "domain", key: "domain:kit-server.example", telegram: undefined, hostname: "kit-server.example", endpointUrl: "https://kit-server.example/collect" };
-		const servers = (await extractIndicators(1n, fixtures({ a: { submission, backends: [backend] } }))).filter((indicator) => indicator.kind === "operator_server");
+		const servers = (await extractIndicators(unstored(submission), fixtures({ a: { submission, backends: [backend] } }))).filter((indicator) => indicator.kind === "operator_server");
 		expect(servers).toEqual([{ kind: "operator_server", value: "host:kit-server.example", links: true, evidence: expect.objectContaining({ roles: ["receives_data", "delivers_malware"], endpointUrl: "https://kit-server.example/collect", delivered: expect.objectContaining({ url: "https://kit-server.example/stage2" }) }) }]);
 	});
 
@@ -273,16 +287,16 @@ describe("campaign grouping on record", () => {
 		};
 		await store(...Object.values(sites).map((site) => site.submission));
 		const dependencies = fixtures(sites);
-		await linkSubmissionToCampaign(1n, dependencies);
-		await linkSubmissionToCampaign(2n, dependencies);
-		const first = await CampaignRepository.campaignForSubmission(1n);
-		const second = await CampaignRepository.campaignForSubmission(2n);
+		await link(1n, dependencies);
+		await link(2n, dependencies);
+		const first = await campaignOfCase(1n);
+		const second = await campaignOfCase(2n);
 		expect(first).not.toBe(second!);
 
-		await linkSubmissionToCampaign(3n, dependencies);
+		await link(3n, dependencies);
 		const survivor = first! < second! ? first! : second!;
 		const absorbed = first! < second! ? second! : first!;
-		for (const id of [1n, 2n, 3n]) expect(await CampaignRepository.campaignForSubmission(id)).toBe(survivor);
+		for (const id of [1n, 2n, 3n]) expect(await campaignOfCase(id)).toBe(survivor);
 		expect((await CampaignRepository.getCampaign(absorbed))?.mergedInto).toBe(survivor);
 		expect(await CampaignRepository.currentCampaignId(absorbed)).toBe(survivor);
 		expect((await CampaignRepository.listCampaigns()).map((entry) => entry.campaign.id)).toEqual([survivor]);
@@ -296,11 +310,11 @@ describe("campaign grouping on record", () => {
 		};
 		await store(...Object.values(sites).map((site) => site.submission));
 		const dependencies = fixtures(sites);
-		for (const id of [1n, 2n, 3n]) await linkSubmissionToCampaign(id, dependencies);
-		const before = await Promise.all([1n, 2n, 3n].map((id) => CampaignRepository.campaignForSubmission(id)));
+		for (const id of [1n, 2n, 3n]) await link(id, dependencies);
+		const before = await Promise.all([1n, 2n, 3n].map((id) => campaignOfCase(id)));
 
-		for (const id of [3n, 1n, 2n]) await linkSubmissionToCampaign(id, dependencies);
-		expect(await Promise.all([1n, 2n, 3n].map((id) => CampaignRepository.campaignForSubmission(id)))).toEqual(before);
+		for (const id of [3n, 1n, 2n]) await link(id, dependencies);
+		expect(await Promise.all([1n, 2n, 3n].map((id) => campaignOfCase(id)))).toEqual(before);
 	});
 
 	test("a linked site keeps its page language and preview; a campaign is described again only when its sites change", async () => {
@@ -316,17 +330,17 @@ describe("campaign grouping on record", () => {
 			facts.push({ siteCount: input.siteCount, languages: input.languages, links: input.links });
 			return { title: "Fake test notice campaign", summary: "Several look-alike test pages ask for passwords and send them to one bot, so one operator runs them." };
 		} };
-		await linkSubmissionToCampaign(1n, dependencies);
-		await linkSubmissionToCampaign(2n, dependencies);
-		const campaign = (await CampaignRepository.campaignForSubmission(1n))!;
-		expect(await CampaignRepository.listSiteFacts([1n, 2n])).toEqual([
+		await link(1n, dependencies);
+		await link(2n, dependencies);
+		const campaign = (await campaignOfCase(1n))!;
+		expect(await CampaignRepository.listSiteFacts([memberOf(1n), memberOf(2n)])).toEqual([
 			expect.objectContaining({ submissionId: 1n, language: "de", thumbnailArtifactId: 10n, blankCapture: false }),
 			expect.objectContaining({ submissionId: 2n, language: null, thumbnailArtifactId: 20n, blankCapture: true }),
 		]);
 
 		expect(await describeCampaignIfChanged(campaign, dependencies)).toBe(true);
 		expect(await describeCampaignIfChanged(campaign, dependencies)).toBe(false);
-		await linkSubmissionToCampaign(3n, dependencies);
+		await link(3n, dependencies);
 		expect(await describeCampaignIfChanged(campaign, dependencies)).toBe(true);
 		expect(facts).toEqual([
 			{ siteCount: 2, languages: ["de"], links: ["same_backend"] },
@@ -346,24 +360,24 @@ describe("campaign grouping on record", () => {
 		await capture(2n, await sharp(white).composite([{ input: card, left: 100, top: 100 }]).png().toBuffer());
 		// The real preview step, as production runs it.
 		const dependencies = { ...fixtures(sites), saveThumbnail: undefined };
-		await linkSubmissionToCampaign(1n, dependencies);
-		await linkSubmissionToCampaign(2n, dependencies);
-		const [blank, page] = await CampaignRepository.listSiteFacts([1n, 2n]);
+		await link(1n, dependencies);
+		await link(2n, dependencies);
+		const [blank, page] = await CampaignRepository.listSiteFacts([memberOf(1n), memberOf(2n)]);
 		expect(blank).toMatchObject({ blankCapture: true, thumbnailArtifactId: expect.any(BigInt) });
 		expect(page).toMatchObject({ blankCapture: false, thumbnailArtifactId: expect.any(BigInt) });
 		const previews = async (id: bigint) => (await ArtifactsEntity.listForSubmission(id)).filter((artifact) => artifact.name === "website-thumb.webp").length;
 		expect(await previews(1n)).toBe(1);
 
 		// A site linked before blank captures were recorded learns it on the next link, keeping its preview.
-		await CampaignRepository.saveSiteFacts(1n, { language: null, thumbnailArtifactId: blank!.thumbnailArtifactId, blankCapture: false });
-		await linkSubmissionToCampaign(1n, dependencies);
-		expect((await CampaignRepository.listSiteFacts([1n]))[0]).toMatchObject({ blankCapture: true, thumbnailArtifactId: blank!.thumbnailArtifactId });
+		await CampaignRepository.saveSiteFacts(memberOf(1n), { language: null, thumbnailArtifactId: blank!.thumbnailArtifactId, blankCapture: false });
+		await link(1n, dependencies);
+		expect((await CampaignRepository.listSiteFacts([memberOf(1n)]))[0]).toMatchObject({ blankCapture: true, thumbnailArtifactId: blank!.thumbnailArtifactId });
 		expect(await previews(1n)).toBe(1);
 
 		// A newer capture gets a new preview and its own reading.
 		await capture(1n, await sharp(white).composite([{ input: card, left: 0, top: 0 }]).png().toBuffer());
-		await linkSubmissionToCampaign(1n, dependencies);
-		const [recaptured] = await CampaignRepository.listSiteFacts([1n]);
+		await link(1n, dependencies);
+		const [recaptured] = await CampaignRepository.listSiteFacts([memberOf(1n)]);
 		expect(recaptured).toMatchObject({ blankCapture: false });
 		expect(recaptured!.thumbnailArtifactId).not.toBe(blank!.thumbnailArtifactId);
 		expect(await previews(1n)).toBe(2);
@@ -372,10 +386,10 @@ describe("campaign grouping on record", () => {
 	test("a site whose extraction fails keeps what is on record, and the failure surfaces", async () => {
 		const sites = { a: { submission: website(1n, "a-kit-test.com"), backends: [botBackend("7001")] } };
 		await store(sites.a.submission);
-		await linkSubmissionToCampaign(1n, fixtures(sites));
-		const campaign = await CampaignRepository.campaignForSubmission(1n);
-		await expect(linkSubmissionToCampaign(1n, { ...fixtures(sites), loadBackends: async () => { throw new Error("database busy"); } })).rejects.toThrow("database busy");
-		expect(await CampaignRepository.campaignForSubmission(1n)).toBe(campaign!);
+		await link(1n, fixtures(sites));
+		const campaign = await campaignOfCase(1n);
+		await expect(link(1n, { ...fixtures(sites), loadBackends: async () => { throw new Error("database busy"); } })).rejects.toThrow("database busy");
+		expect(await campaignOfCase(1n)).toBe(campaign!);
 	});
 });
 
@@ -407,8 +421,8 @@ describe("a campaign's visitor guidance", () => {
 	async function campaignOf(bot: string, ...submissions: Submission[]) {
 		await store(...submissions);
 		const sites = Object.fromEntries(submissions.map((submission) => [submission.dedupeKey, { submission, backends: [botBackend(bot)] }]));
-		for (const submission of submissions) await linkSubmissionToCampaign(submission.id, fixtures(sites));
-		return (await CampaignRepository.campaignForSubmission(submissions[0]!.id))!;
+		for (const submission of submissions) await link(submission.id, fixtures(sites));
+		return (await campaignOfCase(submissions[0]!.id))!;
 	}
 
 	test("is made with the description for the brand the sites impersonate, keeping only the brand's own pages, and not again while nothing changes", async () => {
@@ -474,18 +488,18 @@ describe("a campaign's visitor guidance", () => {
 		};
 		await store(...Object.values(sites).map((site) => site.submission));
 		const dependencies = fixtures(sites);
-		for (const id of [1n, 2n, 4n, 5n]) await linkSubmissionToCampaign(id, dependencies);
-		expect(await CampaignRepository.campaignForSubmission(1n)).toBe(await CampaignRepository.campaignForSubmission(2n));
+		for (const id of [1n, 2n, 4n, 5n]) await link(id, dependencies);
+		expect(await campaignOfCase(1n)).toBe(await campaignOfCase(2n));
 		// Neither host nor kit links the new site: only the command does.
-		await linkSubmissionToCampaign(3n, dependencies);
-		const [a, b, c, d, e] = await Promise.all([1n, 2n, 3n, 4n, 5n].map((id) => CampaignRepository.campaignForSubmission(id)));
+		await link(3n, dependencies);
+		const [a, b, c, d, e] = await Promise.all([1n, 2n, 3n, 4n, 5n].map((id) => campaignOfCase(id)));
 		expect(new Set([a, b, c]).size).toBe(1);
 		expect(c).toBeDefined();
 		expect(d).not.toBe(e);
 		expect(d).not.toBe(c);
 		const recorded = (await CampaignRepository.listMembers(c!)).find((member) => member.submissionId === 3n)!;
 		expect(recorded.indicators.find((indicator) => indicator.kind === "delivery_command")).toMatchObject({ links: true, evidence: { page: "website.mhtml", interpreters: ["curl", "osascript"] } });
-		const bareIndicator = (await extractIndicators(4n, dependencies)).find((indicator) => indicator.kind === "delivery_command");
+		const bareIndicator = (await extractIndicators(memberOf(4n), dependencies)).find((indicator) => indicator.kind === "delivery_command");
 		expect(bareIndicator).toMatchObject({ links: false });
 	});
 });

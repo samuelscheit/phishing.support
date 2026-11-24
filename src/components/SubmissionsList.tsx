@@ -77,7 +77,7 @@ function SubmissionCard({ submission, obscured = false }: { submission: Submissi
 			<Card className="hover:bg-accent transition-colors cursor-pointer h-full w-full">
 				<CardContent className="py-4 space-y-2 min-w-0">
 					<div className="flex justify-between items-start gap-2">
-						<SubmissionStatus status={submission.status} />
+						<SubmissionStatus status={submission.status} reportedAs={submission.reportedAs} />
 
 						<span className="text-xs text-muted-foreground whitespace-nowrap">
 							{formatDistanceToNow(new Date(submission.createdAt), { addSuffix: true })}

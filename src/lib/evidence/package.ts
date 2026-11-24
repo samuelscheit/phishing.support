@@ -80,7 +80,8 @@ export async function buildWebsiteEvidence(
 		...(facts.screenshotPng ? [{ name: names.screenshot, mimeType: "image/png", sha256: screenshotSha256!, size: facts.screenshotPng.byteLength }] : []),
 		...(stampedScreenshotPng ? [{ name: names.stampedScreenshot, mimeType: "image/png", sha256: sha256Hex(stampedScreenshotPng), size: stampedScreenshotPng.byteLength }] : []),
 		{ name: names.mhtml, mimeType: "text/mhtml", sha256: sha256Hex(facts.mhtml), size: facts.mhtml.byteLength },
-		...(facts.hopBodies ?? []).map(({ hopIndex, body }) => ({ name: chainHopBodyFileName(hopIndex), mimeType: "text/html", sha256: sha256Hex(body), size: body.byteLength })),
+		// Each body as the type its answer declared; it is stored and served as opaque bytes.
+		...(facts.hopBodies ?? []).map(({ hopIndex, body }) => ({ name: chainHopBodyFileName(hopIndex), mimeType: facts.navigationHops.find((hop) => hop.index === hopIndex)?.contentType ?? "application/octet-stream", sha256: sha256Hex(body), size: body.byteLength })),
 	];
 	const manifest = Buffer.from(`${canonicalJson({
 		format: "phishing.support/evidence-manifest@1",

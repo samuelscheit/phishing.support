@@ -24,6 +24,12 @@ async function isBlankScreenshot(png: Uint8Array): Promise<boolean> {
  * screenshot, and its MHTML and text remain the evidence.
  */
 const UNPICTURABLE_PAGE = /Cannot take screenshot with 0 (?:width|height)/i;
+/**
+ * A page too tall for one picture: Chromium refuses a full-page screenshot
+ * past its texture limit (a tarpit streaming visible filler, an endless feed).
+ * What the visitor sees of it, the viewport, is pictured instead.
+ */
+const PAGE_TOO_LARGE = /Page is too large/i;
 /** How long one screenshot may take before the page counts as one that cannot be pictured. */
 const SCREENSHOT_TIMEOUT_MS = 20_000;
 
@@ -37,8 +43,9 @@ class ScreenshotTimeoutError extends Error {}
  * paint and capture again; a page that is truly empty stays blank.
  */
 export async function capturePaintedScreenshot(page: Page, timeoutMs = SCREENSHOT_TIMEOUT_MS): Promise<Uint8Array | undefined> {
+	let fullPage = true;
 	const capture = async (): Promise<Uint8Array | undefined> => {
-		const shot = page.screenshot({ fullPage: true, captureBeyondViewport: true, type: "png" });
+		const shot = page.screenshot({ fullPage, captureBeyondViewport: fullPage, type: "png" });
 		try {
 			return await raceTimeout(shot, timeoutMs, () => new ScreenshotTimeoutError());
 		} catch (error) {
@@ -47,6 +54,11 @@ export async function capturePaintedScreenshot(page: Page, timeoutMs = SCREENSHO
 				void shot.catch(() => undefined);
 				console.warn(`Screenshot of ${page.url()} did not answer within ${timeoutMs / 1000}s; captured without one.`);
 				return undefined;
+			}
+			if (fullPage && PAGE_TOO_LARGE.test(errorText(error))) {
+				console.warn(`Screenshot of ${page.url()} refused (${errorText(error)}); its viewport is pictured instead.`);
+				fullPage = false;
+				return capture();
 			}
 			if (UNPICTURABLE_PAGE.test(errorText(error))) {
 				console.warn(`Screenshot of ${page.url()} refused (${errorText(error)}); captured without one.`);

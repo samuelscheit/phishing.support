@@ -31,7 +31,7 @@ export function Recognise({ brand, fakes, locale }: { brand: NonNullable<PublicC
 							<dd><Address url={real} /></dd>
 						</div>
 						{fakes.map((site) => (
-							<div key={site.submissionId} className="flex flex-col gap-0.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 sm:flex-row sm:items-baseline sm:gap-3">
+							<div key={site.key} className="flex flex-col gap-0.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 sm:flex-row sm:items-baseline sm:gap-3">
 								<dt className="text-red-800">{copy.fake}</dt>
 								<dd><Address url={site.url} /></dd>
 							</div>

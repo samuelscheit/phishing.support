@@ -91,6 +91,8 @@ export const abuseJobTypes = [
 	"poll_provider_correspondence",
 	"find_provider_receipt",
 	"investigate_report",
+	/** The redirector and data drops of a case whose site another case's open report covers, reported against that report. */
+	"investigate_joined_case",
 	"follow_up_provider_decision",
 	"report_origin_host",
 	"search_campaign_kits",

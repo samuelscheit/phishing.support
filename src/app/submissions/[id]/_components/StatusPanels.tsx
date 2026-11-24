@@ -4,6 +4,10 @@ import { describeDataEntryField } from "@/lib/website/types";
 import { verdictLabelOf, type SiteAssessment } from "./helpers";
 import { hostOf } from "@/lib/network/url";
 import { cn } from "@/lib/util/cn";
+import type { DeceptiveFunnelFinding } from "@/lib/abuse/funnel/classification";
+import type { SubmissionReport } from "@/lib/submissions/details";
+import type { WebsiteFunnel } from "@/lib/website/types";
+import { FunnelVerdict } from "./FunnelVerdict";
 
 const PANEL = "rounded-lg border bg-muted/30 p-4";
 
@@ -36,9 +40,13 @@ function SiteVerdict({ site, assessment, named }: { site: string; assessment: Si
 	);
 }
 
-/** The confirmed verdict of each reported site of the chain, with its evidence and the way to the reports tab. */
-export function VerdictPanel({ sites, submittedSite, reportCount, joinedCases, info, onShowReports }: {
+/** The confirmed verdict of each reported site of the chain and of the funnel it is, with their evidence and the way to the reports tab. */
+export function VerdictPanel({ sites, funnel, reports, caseId, submittedSite, reportCount, joinedCases, info, onShowReports }: {
 	sites: Array<{ site: string; assessment: SiteAssessment }>;
+	/** The chain as a deceptive affiliate funnel, when it was judged one. */
+	funnel?: WebsiteFunnel & { verdict: DeceptiveFunnelFinding };
+	reports: readonly SubmissionReport[];
+	caseId: string;
 	submittedSite: string | null;
 	reportCount: number;
 	/** The cases whose open reports cover this case's sites, when it filed none of its own. */
@@ -48,16 +56,23 @@ export function VerdictPanel({ sites, submittedSite, reportCount, joinedCases, i
 }) {
 	return (
 		<section className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
-			{sites.length ? sites.map(({ site, assessment }, index) => (
+			{sites.map(({ site, assessment }, index) => (
 				<div key={site} className={cn(index > 0 && "mt-4 border-t border-destructive/15 pt-4")}>
 					<SiteVerdict site={site} assessment={assessment} named={sites.length > 1 || site !== submittedSite} />
 				</div>
-			)) : (
+			))}
+			{funnel ? (
+				<div className={cn(sites.length > 0 && "mt-4 border-t border-destructive/15 pt-4")}>
+					<FunnelVerdict funnel={funnel} reports={reports} caseId={caseId} />
+				</div>
+			) : null}
+			{/* A reported case that recorded neither (an email, or a case from before its verdicts were kept per site). */}
+			{!sites.length && !funnel ? (
 				<div className="flex items-center gap-2 text-sm font-semibold text-destructive">
 					<ShieldAlert className="h-4 w-4" />
 					Phishing confirmed
 				</div>
-			)}
+			) : null}
 			{/* A confirmed site with no report: its case was confirmed from evidence collected elsewhere, after the site was gone; its info says why. */}
 			{reportCount ? (
 				<div className="mt-3 flex items-center justify-between gap-2 border-t border-destructive/15 pt-3 text-xs">

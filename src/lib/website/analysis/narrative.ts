@@ -4,7 +4,7 @@ import { extractPasteCommands } from "../../malware/paste_commands";
 import { capturedDeviceStatement, dataSentEvidence, hiddenFrameEvidence, MAX_HTML_EXCERPT_CHARACTERS, pageText, pasteCommandEvidence, WEBSITE_FINDING_CRITERIA, type WebsiteEvidenceArchive } from "./classification";
 import type { WhoISInfo } from "../info/info";
 import { offeredDownloadEvidence } from "../visit/offered_download";
-import { revisitWording, type WebsiteKitResource, type WebsiteVisitRecord, canaryFieldList } from "../types";
+import { revisitWording, type WebsiteKitResource, type WebsiteNavigationHop, type WebsiteVisitRecord, canaryFieldList } from "../types";
 import { DAY_MS } from "../../util/date_time";
 
 /**
@@ -32,6 +32,8 @@ export type WebsiteNarrativeContext = {
 	visit?: WebsiteVisitRecord;
 	kitResources?: WebsiteKitResource[];
 	capturedAt?: Date;
+	/** The case's whole chain, when it went on past the analyzed page (another site, a funnel's merchant). */
+	chain?: readonly WebsiteNavigationHop[];
 };
 
 const ANALYSIS_SECTIONS = `Write the analysis in Markdown with these sections, in this order, each short and factual:
@@ -118,6 +120,9 @@ export function visitNarrativeEvidence(context: WebsiteNarrativeContext): string
 /** The narrative request: the analyzed page in full, with everything the case knows around it. */
 export function buildWebsiteAnalysisInput(archive: WebsiteEvidenceArchive, context: WebsiteNarrativeContext) {
 	const commands = extractPasteCommands(archive.text.toString("utf-8"));
+	// The archive's hops end at its own page; the case's chain may go on past it.
+	const analyzedIndex = archive.navigationHops.find((hop) => hop.contentCaptured)?.index;
+	const hops = (context.chain ?? archive.navigationHops).map(({ index, url, status, redirectTo, visitorStep, revisit }) => ({ index, url, status, redirect_to: redirectTo, visitor_step: visitorStep ? (visitorStep.submitted.length ? `sent the synthetic ${canaryFieldList(visitorStep.submitted)}` : "moved on") : revisit ? `opened again ${revisitWording(revisit).opened}` : undefined, analyzed_page: index === analyzedIndex }));
 	return [
 		{
 			role: "system" as const,
@@ -134,7 +139,7 @@ ${context.finding}
 Submitted URL: ${archive.requestedUrl}
 ${infrastructureEvidence(context.whois, context.capturedAt)}
 Navigation hops, recorded individually: HTTP redirect responses, pages whose own script sent the visitor on (an HTTP 2xx status with redirect_to), pages the visit moved on from as a victim would (visitor_step), and pages opened again as a phone:
-${toon.encode(archive.navigationHops.map(({ index, url, status, redirectTo, visitorStep, revisit, contentCaptured }) => ({ index, url, status, redirect_to: redirectTo, visitor_step: visitorStep ? (visitorStep.submitted.length ? `sent the synthetic ${canaryFieldList(visitorStep.submitted)}` : "moved on") : revisit ? `opened again ${revisitWording(revisit).opened}` : undefined, analyzed_page: contentCaptured })))}
+${toon.encode(hops)}
 ${visitNarrativeEvidence(context)}
 The analyzed page is ${archive.url}:
 ${archive.verificationGate ? `It first showed only its own human-verification control (${JSON.stringify(archive.verificationGate.label)}), drawn by the page itself; the capture clicked it, as a visitor would.\n` : ""}${capturedDeviceStatement(archive)}<website_text>

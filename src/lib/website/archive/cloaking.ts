@@ -67,12 +67,13 @@ export function cloakedDestinationInfo(cloaked: WebsiteCloakedDestination): stri
  * with nothing (a 204, or a 2xx that moves on at once) and the visitor ended
  * up back on the submitted site, or on that empty answer. That is how a
  * traffic distribution system turns away a visitor it filters out. Ordinary
- * redirects, destinations that show a page, and requests inside a page (they
+ * redirects, destinations that show a page (also one the visitor acted on and
+ * left, back through the submitted tracker), and requests inside a page (they
  * are not navigation hops) are none of this.
  */
 export function cloakedDestination(hops: readonly WebsiteNavigationHop[], submittedUrl: string): { host: string; site: string } | undefined {
 	const submitted = siteOf(submittedUrl);
-	const empty = (hop: WebsiteNavigationHop) => !hop.contentCaptured && hop.status !== null && hop.status >= 200 && hop.status < 300 && (hop.status === 204 || hop.redirectTo !== undefined);
+	const empty = (hop: WebsiteNavigationHop) => !hop.contentCaptured && !hop.visitorStep && hop.status !== null && hop.status >= 200 && hop.status < 300 && (hop.status === 204 || hop.redirectTo !== undefined);
 	for (const [position, hop] of hops.entries()) {
 		if (siteOf(hop.url) === submitted || !empty(hop)) continue;
 		const cameFrom = hops[position - 1];

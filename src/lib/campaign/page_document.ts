@@ -5,6 +5,7 @@ import { registrableDomain } from "../abuse/security/security";
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import { latestArtifactNamed, websiteCaptureFileNames } from "../website/visit/capture_files";
 import { sha256Hex } from "../util/hash";
+import type { SitePage } from "./members";
 
 /** Below this a page body is too generic (an error, parking or loader page) to tie two sites together. */
 const MIN_BODY_BYTES = 2_048;
@@ -83,9 +84,9 @@ export function pageFingerprints(mhtml: Buffer, siteUrl: string): PageFingerprin
 	return fingerprints;
 }
 
-/** The fingerprints of the site's first capture, the page that was reported. */
-export async function loadPageFingerprints(submissionId: bigint, siteUrl: string): Promise<PageFingerprints> {
-	const meta = latestArtifactNamed(await ArtifactsEntity.listForSubmission(submissionId), websiteCaptureFileNames(0).mhtml);
+/** The fingerprints of a site's judged page, the page its report is about. */
+export async function loadPageFingerprints(submissionId: bigint, page: SitePage): Promise<PageFingerprints> {
+	const meta = latestArtifactNamed(await ArtifactsEntity.listForSubmission(submissionId), websiteCaptureFileNames(page.step).mhtml);
 	const artifact = meta ? await ArtifactsEntity.get(BigInt(meta.id)) : undefined;
-	return artifact ? pageFingerprints(Buffer.from(artifact.blob), siteUrl) : {};
+	return artifact ? pageFingerprints(Buffer.from(artifact.blob), page.url) : {};
 }

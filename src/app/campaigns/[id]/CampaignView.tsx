@@ -68,7 +68,7 @@ export function CampaignView({ campaign, locale }: { campaign: PublicCampaign; l
 						<p className="flex items-start gap-2 font-semibold"><AlertTriangle className="mt-0.5 size-4 shrink-0" />{copy.hostBanner(linked.host)}</p>
 						<div className="flex flex-wrap items-center gap-x-4 gap-y-2 pl-6 text-sm">
 							<button type="button" onClick={() => scrollToId("what-to-do")} className="inline-flex min-h-10 items-center gap-1 rounded-md bg-white px-3 font-semibold text-red-700 hover:bg-red-50">{copy.hostBannerSteps}<ArrowDown className="size-3.5" /></button>
-							<button type="button" onClick={() => scrollToId(`site-${linked.submissionId}`)} className="inline-flex min-h-10 items-center gap-1 underline underline-offset-2">{copy.hostBannerList}<ArrowDown className="size-3.5" /></button>
+							<button type="button" onClick={() => scrollToId(`site-${linked.key}`)} className="inline-flex min-h-10 items-center gap-1 underline underline-offset-2">{copy.hostBannerList}<ArrowDown className="size-3.5" /></button>
 						</div>
 					</div>
 				)}
@@ -90,7 +90,7 @@ export function CampaignView({ campaign, locale }: { campaign: PublicCampaign; l
 					<h2 className="text-xl font-semibold tracking-tight sm:text-2xl">{copy.sites(n)}</h2>
 					<p className="text-pretty text-muted-foreground">{copy.sitesSub}</p>
 				</div>
-				{n > 1 && <Timeline campaign={campaign} locale={locale} onOpen={(site) => setFocus({ id: site.submissionId, at: Date.now() })} />}
+				{n > 1 && <Timeline campaign={campaign} locale={locale} onOpen={(site) => setFocus({ id: site.key, at: Date.now() })} />}
 				<SiteList campaign={campaign} locale={locale} linkedHost={linked?.host} focus={focus} />
 			</section>
 

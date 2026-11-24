@@ -29,7 +29,6 @@ import { FailedPanel, NotReportedPanel, VerdictPanel } from "./_components/Statu
 import { reportedSites } from "./_components/helpers";
 import { useArchivedHtml } from "./_components/useArchivedHtml";
 import { useSubmissionDetail } from "./_components/useSubmissionDetail";
-import { hostOf } from "@/lib/network/url";
 
 function isEmlArtifact(a: SubmissionDetail["artifacts"][number]) {
 	const name = a.name?.toLowerCase();
@@ -61,6 +60,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 	const liveVisit = useLiveVisit(id, isRunning && submission?.kind === "website");
 	// Each reported site of the chain, with the verdict every hop of it shares.
 	const confirmedSites = reportedSites(websiteNavigation, websiteAssessmentByHop);
+	const deceptiveFunnel = website?.funnel?.verdict.finding === "deceptive_funnel" ? { ...website.funnel, verdict: website.funnel.verdict } : undefined;
 
 	const targetName =
 		submission?.data.kind === "website"
@@ -136,12 +136,12 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 						<Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
 							{formatUtcDateTime(submission.createdAt) ?? "Unknown time"}
 						</Badge>
-						<SubmissionStatus status={submission.status} />
+						<SubmissionStatus status={submission.status} reportedAs={deceptiveFunnel && !confirmedSites.length ? "deceptive_funnel" : undefined} />
 					</div>
 				</div>
 			</header>
 
-			{submission.campaign ? <CampaignLink campaign={submission.campaign} host={website ? hostOf(website.url) : undefined} locale={locale} /> : null}
+			{submission.campaigns.map((campaign) => <CampaignLink key={campaign.id} campaign={campaign} locale={locale} />)}
 
 			<div className="grid items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
 				<div className="min-w-0 space-y-6">
@@ -205,7 +205,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 
 				<aside className="min-w-0 space-y-4 lg:sticky lg:top-6">
 					{isReported ? (
-						<VerdictPanel sites={confirmedSites} submittedSite={targetName ?? null} reportCount={reportCount} joinedCases={reports.every((report) => report.submissionId !== null && String(report.submissionId) !== id) ? [...new Set(reports.map((report) => String(report.submissionId)))] : []} info={submission.info} onShowReports={() => setTab("reports")} />
+						<VerdictPanel sites={confirmedSites} funnel={deceptiveFunnel} reports={reports} caseId={id} submittedSite={targetName ?? null} reportCount={reportCount} joinedCases={reports.every((report) => report.submissionId !== null && String(report.submissionId) !== id) ? [...new Set(reports.map((report) => String(report.submissionId)))] : []} info={submission.info} onShowReports={() => setTab("reports")} />
 					) : null}
 					{isInvalidWebsite ? <NotReportedPanel info={submission.info} /> : null}
 					{isFailed ? <FailedPanel info={submission.info} canRetry={canRetryAnalysis} retrying={retrying} retryError={retryError} retryHint={retryHint} onRetry={retryAnalysis} /> : null}

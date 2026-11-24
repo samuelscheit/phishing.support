@@ -12,6 +12,8 @@ export type SubmissionCard = {
 	status: SubmissionStatus;
 	createdAt: string;
 	title: string;
+	/** What a reported case was reported for, when it is not a phishing or malware site: the deceptive funnel its chain is. */
+	reportedAs?: "deceptive_funnel";
 	/** The campaign the site belongs to; the list shows each campaign as one card. */
 	campaign?: { id: string; siteCount: number };
 };
@@ -69,6 +71,7 @@ export async function listSubmissionCards(params: { cursor?: string | null; limi
 			status: row.status,
 			createdAt: row.createdAt.toISOString(),
 			title: row.title ?? row.id.toString(),
+			...(row.funnelOnly ? { reportedAs: "deceptive_funnel" as const } : {}),
 			...(row.campaignId !== null ? { campaign: { id: row.campaignId.toString(), siteCount: Number(row.campaignSize) } } : {}),
 		})),
 		...(rows.length > limit && last ? { nextCursor: encodeCursor(last) } : {}),

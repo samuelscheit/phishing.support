@@ -6,6 +6,7 @@ import { decodeImageEvidence, normalizeAbuseTarget, normalizeObservedUrl, type D
 import { AbuseInputError, isPublicIp } from "./security/security";
 import { setInvestigationStatus } from "../investigation/status";
 import { enqueueRedirectorWatch } from "./origin/redirector_watch";
+import { queueCaseSiteLinks } from "../campaign/queue";
 import { websiteSite } from "../website/info/site";
 import type { ReportableWebsiteFinding, WebsiteHiddenFrame, WebsiteOfferedDownload } from "../website/types";
 import type { PasteCommand } from "../malware/paste_commands";
@@ -55,7 +56,8 @@ export type ConfirmedWebsiteAbuse = SubmissionReportBase & {
 	/**
 	 * The visit's network traffic, when it saw the synthetic values sent to
 	 * another site: kept with the report, and each data drop reported at its
-	 * own host by the investigation.
+	 * own host by the investigation; for a site another case's report covers,
+	 * by this case's job against that report.
 	 */
 	visitCapture?: { canaries: ExfiltrationCanaries; requests: CapturedNetworkRequest[]; backends: ExfiltrationBackend[] };
 	/** The impersonated brand's own official site; providers want the real brand linked. */
@@ -231,7 +233,7 @@ export async function reportConfirmedWebsiteAbuse(params: ConfirmedWebsiteAbuse)
 		request: await buildWebsiteAbuseRequest(params),
 		reporter: params.reporter,
 		submissionId: params.submissionId,
-		site: websiteSite(params.urls[0]!),
+		subject: { site: websiteSite(params.urls[0]!) },
 		investigation: { payload },
 	});
 	if (created.created && params.visitCapture) {
@@ -245,7 +247,19 @@ export async function reportConfirmedWebsiteAbuse(params: ConfirmedWebsiteAbuse)
 			metadata: { pageUrl: params.urls[0]!, requestCount: requests.length, backendCount: backends.length },
 		});
 	}
-	if (created.created) await setInvestigationStatus(params.submissionId, { status: "queued", updatedAt: new Date().toISOString() });
+	if (created.joined) {
+		// The joined report is not held for this case, but what only its visit saw is still reported against it:
+		// the redirector its page was reached through and the data drops its traffic shows.
+		await AbuseRepository.enqueueJobOnce({
+			jobType: "investigate_joined_case",
+			reportId: created.reportId,
+			payload,
+			dedupeKey: `investigate-joined:${params.submissionId.toString()}:${created.reportId.toString()}`,
+		});
+		// No report of its own resolves for it, so the joined site is linked into its campaign by this case's evidence now.
+		await queueCaseSiteLinks(params.submissionId);
+	}
+	if (created.created || created.joined) await setInvestigationStatus(params.submissionId, { status: "queued", updatedAt: new Date().toISOString() });
 	// A joined report gets this case's redirector watched too: another lure of the same kit.
 	await enqueueRedirectorWatch(created.reportId, params.submissionId, params.urls[0]!);
 	return created;

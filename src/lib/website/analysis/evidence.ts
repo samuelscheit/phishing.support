@@ -92,13 +92,18 @@ export async function saveVisitEvidence(params: {
  * its flow that led to it.
  */
 export async function capturedPageScreenshots(submissionId: bigint, analyzedStep: number): Promise<Array<{ filename: string; png: Buffer }>> {
+	return stepScreenshots(submissionId, [analyzedStep, ...Array.from({ length: analyzedStep }, (_, index) => index)]);
+}
+
+/** The stamped screenshot of each step, else its plain one; a step without one is left out. */
+export async function stepScreenshots(submissionId: bigint, steps: readonly number[]): Promise<Array<{ step: number; filename: string; png: Buffer }>> {
 	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
-	const screenshots: Array<{ filename: string; png: Buffer }> = [];
-	for (const step of [analyzedStep, ...Array.from({ length: analyzedStep }, (_, index) => index)]) {
+	const screenshots: Array<{ step: number; filename: string; png: Buffer }> = [];
+	for (const step of steps) {
 		const names = websiteCaptureFileNames(step);
 		const stored = latestArtifactNamed(artifacts, names.stampedScreenshot) ?? latestArtifactNamed(artifacts, names.screenshot);
 		const png = stored ? (await ArtifactsEntity.get(stored.id))?.blob : undefined;
-		if (png?.byteLength) screenshots.push({ filename: names.screenshot, png: Buffer.from(png) });
+		if (png?.byteLength) screenshots.push({ step, filename: names.screenshot, png: Buffer.from(png) });
 	}
 	return screenshots;
 }

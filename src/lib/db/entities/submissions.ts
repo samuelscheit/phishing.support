@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { getDb } from "../index";
-import { analysisRuns, campaignMembers, submissions, type SubmissionData, type SubmissionKind, type SubmissionStatus } from "../schema";
+import { analysisRuns, submissions, type SubmissionData, type SubmissionKind, type SubmissionStatus } from "../schema";
 import { generateId } from "../ids";
 import type { ReporterMetadata } from "../../http/reporter_headers";
 
@@ -130,6 +130,8 @@ export class SubmissionsEntity {
 	static async listCards(params: { limit: number; before?: { createdAt: Date; id: bigint }; statuses?: readonly SubmissionStatus[] }) {
 		const db = await getDb();
 		const { before, statuses } = params;
+		// A case is a member once per confirmed site; its card stands for the campaign of its first site.
+		const caseCampaign = sql`(select own.campaign_id from campaign_members as own where own.submission_id = ${submissions.id} order by own.report_id limit 1)`;
 		return db
 			.select({
 				id: submissions.id,
@@ -137,11 +139,12 @@ export class SubmissionsEntity {
 				status: submissions.status,
 				createdAt: submissions.createdAt,
 				title: sql<string | null>`coalesce(json_extract(${submissions.data}, '$.website.url'), nullif(json_extract(${submissions.data}, '$.email.subject'), ''), ${submissions.dedupeKey})`,
-				campaignId: campaignMembers.campaignId,
-				campaignSize: sql<number | null>`(select count(*) from campaign_members as peers where peers.campaign_id = ${campaignMembers.campaignId})`,
+				campaignId: sql<bigint | null>`${caseCampaign}`,
+				campaignSize: sql<number | null>`(select count(*) from campaign_members as peers where peers.campaign_id = ${caseCampaign})`,
+				// A case reported only for the deceptive funnel its chain is, with no phishing or malware site of its own.
+				funnelOnly: sql<number>`(json_extract(${submissions.data}, '$.website.funnel.verdict.finding') = 'deceptive_funnel' and not exists (select 1 from json_each(${submissions.data}, '$.website.siteAssessments') as assessed where json_extract(assessed.value, '$.finding') in ('phishing', 'malware')))`,
 			})
 			.from(submissions)
-			.leftJoin(campaignMembers, eq(campaignMembers.submissionId, submissions.id))
 			.where(and(
 				before
 					? or(lt(submissions.createdAt, before.createdAt), and(eq(submissions.createdAt, before.createdAt), lt(submissions.id, before.id)))
@@ -186,7 +189,7 @@ export class SubmissionsEntity {
 	 * Set one field of a website submission's data in place, so a slow job
 	 * never writes back what others changed meanwhile.
 	 */
-	static async setWebsiteField(id: bigint, field: "urlscanKit" | "accessGate", value: unknown) {
+	static async setWebsiteField(id: bigint, field: "urlscanKit" | "accessGate" | "funnel", value: unknown) {
 		const db = await getDb();
 		await db
 			.update(submissions)

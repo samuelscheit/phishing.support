@@ -2,73 +2,78 @@ import { AbuseRepository } from "../abuse/repository";
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { buildDossier, type Dossier, type DossierDependencies } from "../referral/dossier";
-import { analyzedPage, latestArtifactNamed, websiteCaptureFileNames } from "../website/visit/capture_files";
+import { latestArtifactNamed, websiteCaptureFileNames } from "../website/visit/capture_files";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website/types";
 import { campaignBrand, guideVisitor, sameBrand, type GuidanceDependencies } from "./guidance";
-import { extractIndicators, loadCapturedPageTexts, type IndicatorDependencies } from "./indicators";
+import { extractIndicators, sitePageTexts, type IndicatorDependencies } from "./indicators";
 import { detectLanguage } from "./language";
+import { judgedSitePage, type CampaignSite, type SitePage } from "./members";
 import { CampaignRepository } from "./repository";
 import { describeCampaign, type CampaignFacts, type DescribeDependencies } from "./summary";
 import { isBlankCapture, pageThumbnail } from "./thumbnail";
 
-const THUMBNAIL_NAME = "website-thumb.webp";
+/** The preview of one captured page, stored next to its screenshot: `website-thumb.webp`, `website-step2-thumb.webp`, … */
+export function thumbnailName(step: number): string {
+	return websiteCaptureFileNames(step).screenshot.replace(/\.png$/, "-thumb.webp");
+}
 
-/** The stored preview of a site's analyzed page, and whether that page's capture is one flat colour. */
+/** The stored preview of a site's judged page, and whether that page's capture is one flat colour. */
 type SitePreview = { artifactId: bigint; blank: boolean };
 
 export type LinkDependencies = IndicatorDependencies & {
-	/** Store the trimmed screenshot of the analyzed page; tests skip it. */
-	saveThumbnail?: (submissionId: bigint) => Promise<SitePreview | undefined>;
+	/** Store the trimmed screenshot of the site's judged page; tests skip it. */
+	saveThumbnail?: (submissionId: bigint, page: SitePage) => Promise<SitePreview | undefined>;
 };
 
 /**
- * The analyzed page's screenshot cut to its content, stored once next to
- * the capture; a newer capture of the same case gets a new preview. Whether
- * the capture is blank is read from the capture every time, so linking a
- * site again records it for a preview stored before.
+ * A judged page's screenshot cut to its content, stored once next to the
+ * capture; a newer capture of the same page gets a new preview. Whether the
+ * capture is blank is read from the capture every time, so linking a site
+ * again records it for a preview stored before.
  */
-async function saveAnalyzedPageThumbnail(submissionId: bigint): Promise<SitePreview | undefined> {
-	const submission = await SubmissionsEntity.get(submissionId);
-	if (submission?.data.kind !== "website") return undefined;
+async function saveJudgedPageThumbnail(submissionId: bigint, page: SitePage): Promise<SitePreview | undefined> {
 	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
-	const screenshot = latestArtifactNamed(artifacts, websiteCaptureFileNames(analyzedPage(submission.data.website)?.step ?? 0).screenshot)
-		?? latestArtifactNamed(artifacts, websiteCaptureFileNames(0).screenshot);
+	const screenshot = latestArtifactNamed(artifacts, websiteCaptureFileNames(page.step).screenshot);
 	if (!screenshot) return undefined;
 	const source = await ArtifactsEntity.get(BigInt(screenshot.id));
 	if (!source) return undefined;
 	const image = Buffer.from(source.blob);
 	const blank = await isBlankCapture(image);
-	const existing = latestArtifactNamed(artifacts, THUMBNAIL_NAME);
+	const name = thumbnailName(page.step);
+	const existing = latestArtifactNamed(artifacts, name);
 	if (existing && BigInt(existing.id) > BigInt(screenshot.id)) return { artifactId: BigInt(existing.id), blank };
-	const artifactId = await ArtifactsEntity.saveBuffer({ submissionId, name: THUMBNAIL_NAME, kind: "website_thumbnail", mimeType: "image/webp", buffer: await pageThumbnail(image) });
+	const artifactId = await ArtifactsEntity.saveBuffer({ submissionId, name, kind: "website_thumbnail", mimeType: "image/webp", buffer: await pageThumbnail(image) });
 	return { artifactId, blank };
 }
 
 /**
- * Record what one confirmed site shows about its operator, put it into its
- * campaign, and keep what the public page shows of it: the language its page
- * speaks and a preview cut to the page. Runs again whenever the case learns
- * more (a backend report after the investigation) and gives the same result
- * for the same evidence.
+ * Record what one confirmed site of a case shows about its operator, put
+ * the member into its campaign, and keep what the public page shows of it:
+ * the language the site's pages speak and a preview of its judged page.
+ * Runs again whenever the case learns more (a backend report after the
+ * investigation) and gives the same result for the same evidence.
  */
-export async function linkSubmissionToCampaign(submissionId: bigint, dependencies: LinkDependencies = {}): Promise<bigint | undefined> {
-	const pageTexts = await (dependencies.loadPageTexts ?? loadCapturedPageTexts)(submissionId);
-	const indicators = await extractIndicators(submissionId, { ...dependencies, loadPageTexts: async () => pageTexts });
-	const campaignId = await CampaignRepository.recordIndicators(submissionId, indicators);
+export async function linkSiteMember(member: CampaignSite, dependencies: LinkDependencies = {}): Promise<bigint | undefined> {
+	const submission = await (dependencies.loadSubmission ?? SubmissionsEntity.get)(member.submissionId);
+	const website = submission?.data.kind === "website" ? submission.data.website : undefined;
+	const pageTexts = website ? await sitePageTexts(member, website, dependencies) : [];
+	const indicators = await extractIndicators(member, { ...dependencies, loadPageTexts: async () => pageTexts });
+	const campaignId = await CampaignRepository.recordIndicators(member, indicators);
 	if (campaignId !== undefined) {
-		const analyzedText = pageTexts.map((page) => page.text).sort((a, b) => b.length - a.length)[0] ?? "";
-		const preview = await (dependencies.saveThumbnail ?? saveAnalyzedPageThumbnail)(submissionId).catch(() => undefined);
-		await CampaignRepository.saveSiteFacts(submissionId, { language: detectLanguage(analyzedText) ?? null, thumbnailArtifactId: preview?.artifactId ?? null, blankCapture: preview?.blank ?? false });
+		const siteText = pageTexts.map((page) => page.text).sort((a, b) => b.length - a.length)[0] ?? "";
+		const page = website && judgedSitePage(website, member.site);
+		const preview = page ? await (dependencies.saveThumbnail ?? saveJudgedPageThumbnail)(member.submissionId, page).catch(() => undefined) : undefined;
+		await CampaignRepository.saveSiteFacts(member, { language: detectLanguage(siteText) ?? null, thumbnailArtifactId: preview?.artifactId ?? null, blankCapture: preview?.blank ?? false });
 	}
 	return campaignId;
 }
 
-/** The analysis each site's report was filed with, newest sites first. */
-async function siteAnalyses(submissionIds: readonly string[]): Promise<string[]> {
+/** The analysis each member's site report was filed with, newest members first. */
+async function siteAnalyses(reportIds: readonly string[]): Promise<string[]> {
 	const analyses: string[] = [];
-	for (const id of [...submissionIds].reverse()) {
-		const primary = (await AbuseRepository.listReportsForSubmission(BigInt(id))).find((report) => !report.idempotencyKey);
-		if (primary?.description) analyses.push(primary.description);
+	for (const id of [...new Set(reportIds)].reverse()) {
+		const report = await AbuseRepository.getReport(BigInt(id));
+		if (report?.description) analyses.push(report.description);
 	}
 	return analyses;
 }
@@ -100,10 +105,10 @@ export function factsFromDossier(dossier: Dossier, languages: ReadonlyArray<stri
 
 /** The stored facts a campaign's public heading and visitor guidance are written from, with a few sites' analyses. */
 async function campaignFacts(dossier: Dossier): Promise<CampaignFacts> {
-	const facts = await CampaignRepository.listSiteFacts(dossier.sites.map((site) => BigInt(site.submissionId)));
+	const facts = await CampaignRepository.listSiteFacts(dossier.sites.map((site) => ({ submissionId: BigInt(site.submissionId), reportId: BigInt(site.reportId) })));
 	return {
 		...factsFromDossier(dossier, facts.map((fact) => fact.language)),
-		analyses: await siteAnalyses(dossier.sites.map((site) => site.submissionId)),
+		analyses: await siteAnalyses(dossier.sites.map((site) => site.reportId)),
 	};
 }
 

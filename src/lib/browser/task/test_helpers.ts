@@ -18,13 +18,19 @@ const chromiumExecutable = process.env.PHISHING_TEST_CHROMIUM
 	?? `${homedir()}/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 export const chromiumAvailable = await Bun.file(chromiumExecutable).exists();
 
-/** A headless Chromium with a throwaway profile; `hosts` maps `name:443` to local fixture ports. */
+/**
+ * A headless Chromium with a throwaway profile; `hosts` maps `name:443` to
+ * local fixture ports. The tests' loopback servers stand in for distinct
+ * public sites, and a page a capture answers from DevTools is public-like to
+ * Chromium (see `document_bodies`): Local Network Access would block the
+ * loopback frames and requests that a public page's public ones never meet.
+ */
 export async function launchTestChromium(hosts: Record<string, number> = {}): Promise<Browser> {
 	const rules = Object.entries(hosts).map(([host, port]) => `MAP ${host}:443 127.0.0.1:${port}`).join(",");
 	return puppeteer.launch({
 		executablePath: chromiumExecutable,
 		headless: true,
-		args: ["--no-first-run", ...(rules ? [`--host-resolver-rules=${rules}`, "--ignore-certificate-errors"] : [])],
+		args: ["--no-first-run", "--disable-features=LocalNetworkAccessChecks", ...(rules ? [`--host-resolver-rules=${rules}`, "--ignore-certificate-errors"] : [])],
 	});
 }
 

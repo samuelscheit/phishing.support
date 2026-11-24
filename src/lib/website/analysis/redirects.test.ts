@@ -20,8 +20,16 @@ import { getDb } from "../../db";
 import { abuseJobs, abuseReports } from "../../abuse/schema";
 import { REPORT_JOIN_WINDOW_MS } from "../../abuse/persistence/reports";
 import { eq } from "drizzle-orm";
+import { siteChecks, type SiteCheckState } from "../../liveness/schema";
+import { generateId } from "../../db/ids";
+import { reportConfirmedEmailPhishing } from "../../abuse/submission_reports";
+import { readInvestigationJobPayload } from "../../investigation/payload";
+import { runJoinedCaseInvestigation } from "../../investigation/run";
+import { AbuseWorker } from "../../abuse/worker";
+import { useTrackingTokenSecret } from "../../abuse/security/test_helpers";
 
 useTemporaryDatabase();
+useTrackingTokenSecret();
 
 const NETFLIX_TEXT = "Netflix\nSign In\nEmail or phone number\nPassword\nSign In";
 const NETFLIX_HTML = '<html><head><title>Netflix</title></head><body><h1>Sign In</h1><input type="text" id="iduserLoginId" aria-label="Email or phone number"><input type="password" id="idpassword" aria-label="Password"><button>Sign In</button></body></html>';
@@ -335,6 +343,79 @@ describe("one report per site across cases", () => {
 		expect(await AbuseRepository.listReportsForSubmission(first)).toHaveLength(1);
 	});
 
+	test("a case whose only site joined another case's report still reports its own data drops and redirector, against that report", async () => {
+		const first = await websiteSubmission(22n, lure(1));
+		await reachKit(first, lure(1));
+		const report = (await AbuseRepository.getReportForSubmission(first))!;
+
+		// The second lure's visit saw the kit send the made-up password to a Telegram bot.
+		const bot = "https://api.telegram.org/bot8123456789:AAH-kit-token/sendMessage";
+		const second = await websiteSubmission(23n, lure(2));
+		const archive = { ...archiveOf([hop(0, lure(2), 302, kitPage), hop(1, kitPage, 200)]), session: scriptedVisitSession({
+			requests: (canaries) => [{ timestamp: "2026-11-15T10:00:01.500Z", url: bot, method: "POST", postData: JSON.stringify({ chat_id: "-100777", text: `pass: ${canaries.password}` }) }],
+		}) };
+		await analyzeWebsite({ submissionId: second, url: lure(2) }, dependencies(archive));
+		expect((await AbuseRepository.listJoinedReportsForSubmission(second)).map(({ id }) => id)).toEqual([report.id]);
+
+		const jobs = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "investigate_joined_case")).all();
+		expect(jobs.map(({ reportId, dedupeKey }) => ({ reportId, dedupeKey }))).toEqual([{ reportId: report.id, dedupeKey: `investigate-joined:${second.toString()}:${report.id.toString()}` }]);
+		// The joined site is linked into its campaign by this case's own evidence, as a member through the joined report.
+		const links = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "link_campaign")).all();
+		expect(links.map(({ dedupeKey }) => dedupeKey)).toContain(`campaign-link:${second.toString()}:${report.id.toString()}`);
+		const payload = readInvestigationJobPayload(jobs[0]!.payload);
+		expect(payload).toMatchObject({ submissionId: second.toString(), pageUrl: kitPage, finding: { finding: "phishing" } });
+		expect(payload.dataDrops?.map(({ kind, key }) => ({ kind, key }))).toEqual([{ kind: "telegram_bot", key: "telegram-token:8123456789:AAH-kit-token" }]);
+		const website = (await SubmissionsEntity.get(second))!.data;
+		expect(website.kind === "website" && website.website.investigation?.status).toBe("queued");
+
+		// The worker runs it: the bot is reported by this case, linked to the joined report, and so is its redirector.
+		const redirectors: Array<{ reportId: bigint; submissionId: bigint; pageUrl: string }> = [];
+		const worker = new AbuseWorker({
+			owner: "joined-case-test",
+			investigateJoinedCase: (params) => runJoinedCaseInvestigation(params, {
+				enrich: async (backend) => backend,
+				reportRedirector: async ({ reportId, submissionId, pageUrl }) => {
+					redirectors.push({ reportId, submissionId, pageUrl });
+					return { kind: "skipped", url: lure(2), reason: "test" };
+				},
+			}),
+		});
+		expect(await worker.processOne({ jobTypes: ["investigate_joined_case"] })).toBeTrue();
+		expect(redirectors).toEqual([{ reportId: report.id, submissionId: second, pageUrl: kitPage }]);
+		const drops = await AbuseRepository.listReportsForSubmission(second);
+		expect(drops.map(({ idempotencyKey }) => idempotencyKey)).toEqual([expect.stringMatching(new RegExp(`^exfil:${second.toString()}:`))]);
+		expect((await AbuseRepository.listTargets(drops[0]!.id)).map(({ normalizedTarget }) => normalizedTarget)).toEqual(["telegram-bot:8123456789"]);
+		const [original] = await AbuseRepository.listArtifacts(drops[0]!.id, ["original_request"]);
+		expect(JSON.parse(Buffer.from(original!.blob).toString("utf8"))).toMatchObject({ kind: "exfiltration_backend", submissionId: second.toString(), sourceReportId: report.id.toString(), pageUrl: kitPage });
+		// This case's own page is the evidence, not the joined case's.
+		expect((await AbuseRepository.getReportInput(drops[0]!.id))!.evidenceArtifacts.map(({ name }) => name)).toContain("exfiltration-evidence.json");
+		const after = (await SubmissionsEntity.get(second))!.data;
+		expect(after.kind === "website" && after.website.investigation).toMatchObject({ status: "completed", backendCount: 1 });
+		expect((await AbuseRepository.listEvents(report.id)).filter(({ eventType }) => eventType === "redirector.skipped").map(({ data }) => data)).toEqual([{ submissionId: second.toString(), url: lure(2), reason: "test" }]);
+		// The owning report was never held or released again.
+		expect((await AbuseRepository.getReport(report.id))!.status).toBe(report.status);
+
+		// A replayed analysis queues nothing twice.
+		await analyzeWebsite({ submissionId: second, url: lure(2) }, dependencies(archive));
+		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "investigate_joined_case")).all()).toHaveLength(1);
+	});
+
+	test("a joined case's evidence job that keeps failing says so on the case, and leaves the joined report alone", async () => {
+		const first = await websiteSubmission(24n, lure(1));
+		await reachKit(first, lure(1));
+		const report = (await AbuseRepository.getReportForSubmission(first))!;
+		const second = await websiteSubmission(25n, lure(2));
+		await reachKit(second, lure(2));
+		const worker = new AbuseWorker({ owner: "joined-case-failure", investigateJoinedCase: async () => { throw new Error("lookup down"); } });
+		for (let attempt = 0; attempt < 20 && (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "investigate_joined_case")).get()?.status !== "failed"; attempt++) {
+			(await getDb()).update(abuseJobs).set({ nextAttemptAt: new Date(0) }).where(eq(abuseJobs.jobType, "investigate_joined_case")).run();
+			await worker.processOne({ jobTypes: ["investigate_joined_case"] });
+		}
+		const data = (await SubmissionsEntity.get(second))!.data;
+		expect(data.kind === "website" && data.website.investigation).toMatchObject({ status: "failed", lastError: expect.stringContaining("lookup down") });
+		expect((await AbuseRepository.getReport(report.id))!.status).toBe(report.status);
+	});
+
 	test("a site whose report never reached a provider, or was sent over a month ago, is reported anew", async () => {
 		const first = await websiteSubmission(30n, lure(1));
 		await reachKit(first, lure(1));
@@ -352,6 +433,49 @@ describe("one report per site across cases", () => {
 		await reachKit(third, lure(3));
 		expect((await AbuseRepository.getReportForSubmission(third))?.id).not.toBe(secondReport!.id);
 		expect(await AbuseRepository.listJoinedReportsForSubmission(third)).toEqual([]);
+	});
+
+	test("a report an operator must still decide on, or whose site our checks found taken down, is not joined", async () => {
+		const first = await websiteSubmission(33n, lure(1));
+		await reachKit(first, lure(1));
+		const report = (await AbuseRepository.getReportForSubmission(first))!;
+		const db = await getDb();
+
+		db.update(abuseReports).set({ status: "needs_human" }).where(eq(abuseReports.id, report.id)).run();
+		const second = await websiteSubmission(34n, lure(2));
+		await reachKit(second, lure(2));
+		const secondReport = (await AbuseRepository.getReportForSubmission(second))!;
+		expect(secondReport.id).not.toBe(report.id);
+		expect(await AbuseRepository.listJoinedReportsForSubmission(second)).toEqual([]);
+
+		// A page that answers 404 is no takedown (kits cloak that way): the report stays open and is joined…
+		const [target] = await AbuseRepository.listTargets(secondReport.id);
+		const check = (state: SiteCheckState) => db.insert(siteChecks).values({ id: generateId(), reportId: secondReport.id, targetId: target!.id, url: kitPage, state, checkedAt: new Date() }).run();
+		check("removed");
+		const third = await websiteSubmission(35n, lure(3));
+		await reachKit(third, lure(3));
+		expect((await AbuseRepository.listJoinedReportsForSubmission(third)).map(({ id }) => id)).toEqual([secondReport.id]);
+
+		// …a suspended domain is: the kit is back, and a later case reports it anew.
+		check("domain_suspended");
+		const fourth = await websiteSubmission(36n, lure(4));
+		await reachKit(fourth, lure(4));
+		expect(await AbuseRepository.listJoinedReportsForSubmission(fourth)).toEqual([]);
+		expect((await AbuseRepository.getReportForSubmission(fourth))?.id).not.toBe(secondReport.id);
+	});
+
+	test("an email report that names the site's address as its sending IP is not the site's report", async () => {
+		const ip = "93.184.216.34";
+		const email = await SubmissionsEntity.create({ kind: "email", data: { kind: "email" }, dedupeKey: "email-joined-ip" });
+		const emailReport = await reportConfirmedEmailPhishing({ submissionId: email, analysisText: "A Netflix phishing mail.", reporter: {}, redactedEml: "From: a@b.c\r\n\r\nNetflix", sendingIp: ip });
+		expect((await AbuseRepository.listTargets(emailReport.reportId)).map(({ normalizedTarget }) => normalizedTarget)).toContain(ip);
+
+		const page = `http://${ip}/login`;
+		const site = await websiteSubmission(37n, page);
+		await analyzeWebsite({ submissionId: site, url: page }, dependencies(archiveOf([hop(0, page, 200)])));
+		expect(await AbuseRepository.listJoinedReportsForSubmission(site)).toEqual([]);
+		const own = await AbuseRepository.getReportForSubmission(site);
+		expect(own && own.id !== emailReport.reportId).toBe(true);
 	});
 
 	test("another tenant of the same shared host is another site: its own report", async () => {

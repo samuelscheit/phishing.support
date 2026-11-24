@@ -161,7 +161,7 @@ function TechnicalRecord({ campaign }: { campaign: PublicCampaign }) {
 				<p className="text-sm text-muted-foreground">Each capture is an MHTML archive, a screenshot, the screenshot with address and time stamped in, a manifest of SHA-256 hashes, and an RFC 3161 timestamp token over that manifest from an independent authority.</p>
 				<div>
 					{campaign.sites.map((site) => (
-						<details key={site.submissionId} className="group/site border-b first:border-t">
+						<details key={site.key} className="group/site border-b first:border-t">
 							<summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-sm [&::-webkit-details-marker]:hidden">
 								<span className="min-w-0"><Host site={site} platform={campaign.platform} /></span>
 								<span className="flex shrink-0 items-center gap-1 text-muted-foreground">{plural(site.reports.length, "report", "reports")} · {plural(site.evidence.length, "file", "files")}<ChevronDown className="size-3.5 transition-transform group-open/site:rotate-180" /></span>

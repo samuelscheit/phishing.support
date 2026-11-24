@@ -64,5 +64,31 @@ affiliate 15065.
 - UI: one navigation timeline per case with every hop, its captures and
   the site's verdict; the redirected panel and "analyzed in its own case"
   links disappear.
-- Stored `redirected` cases are migrated to `invalid` with their info kept;
-  no compatibility code for the old shape.
+- Stored `redirected` cases take their final destination case's outcome
+  (following chains of hand-offs): a reported destination makes them
+  `reported`, joined to its reports (`abuse_report_cases`); otherwise its
+  status is copied. Their info names that case. No compatibility code for
+  the old shape.
+- Model cost grows with the chain: every page shown is classified until its
+  site is found reportable (a walk through a lure, a few interstitials and
+  a kit is about 13 classification calls), each revisit (as a phone, from
+  another network, after a cloaked destination) walks and classifies again,
+  and a chain that passed a tracking link to a merchant page adds one
+  funnel classification. Pages of a site already found reportable are not
+  classified again.
+- One cross-case link for every subject: a later case joins the open report
+  of a site (30 days) or of a funnel's business and affiliate (90 days)
+  through `abuse_report_cases`, unless that report ended unsent, awaits an
+  operator (`needs_human`), or its target's takedown was confirmed by our
+  site checks. A joining case still reports what only its visit saw (its
+  redirector and data drops) against the joined report.
+- Campaigns link sites, not cases: a member is a (case, site report) pair,
+  so a case that confirmed two sites can sit in two campaigns, and a case
+  that only joined another case's report is a member through that report,
+  linked by its own evidence.
+- Keeping every document body means holding every main-frame document in
+  the Fetch domain. Bodies are read as a stream within a byte cap and a
+  time bound, and the page is answered from DevTools with the bytes read:
+  a tarpit cannot hold the visit or its memory, but a fulfilled page has no
+  remote address (public-like to Chromium's Local Network Access), and a
+  page past the cap is shown cut off and kept without its body.

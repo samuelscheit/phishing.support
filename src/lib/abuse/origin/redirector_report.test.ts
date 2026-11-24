@@ -247,7 +247,7 @@ describe("reporting a confirmed page's redirector", () => {
 		const input = await AbuseRepository.getReportInput(redirector.id);
 		expect(input?.evidenceArtifacts.map(({ mimeType }) => mimeType).sort()).toEqual(["application/json", "image/png"]);
 		const events = (await AbuseRepository.listEvents(page.reportId)).filter(({ eventType }) => eventType.startsWith("redirector."));
-		expect(events.map(({ eventType, data }) => [eventType, data])).toEqual([["redirector.reported", { url: ROTATOR, reportId: redirector.id.toString(), created: true }]]);
+		expect(events.map(({ eventType, data }) => [eventType, data])).toEqual([["redirector.reported", { submissionId: expect.any(String), url: ROTATOR, reportId: redirector.id.toString(), created: true }]]);
 
 		// A retried investigation finds the same report.
 		await runReportInvestigation({ reportId: page.reportId, payload: readInvestigationJobPayload(job.payload), reporter: {} }, deps);

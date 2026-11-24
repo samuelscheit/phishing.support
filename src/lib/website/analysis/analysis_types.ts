@@ -7,6 +7,7 @@ import type { VisitAgent } from "../../site_visit/agent";
 import type { DomainRegistrationLookup } from "../info/domain_registration";
 import type { getInfo } from "../info/info";
 import type { VisitDataSent, WebsiteOfferedDownload } from "../types";
+import type { PopularDomains } from "../../abuse/origin/popular_domains";
 
 export type WebsiteCapture = Awaited<ReturnType<typeof archiveWebsite>> & { offeredDownload?: WebsiteOfferedDownload; dataSent?: VisitDataSent[] };
 
@@ -29,4 +30,6 @@ export type WebsiteAnalysisDependencies = {
 	bareVisit?: BareVisitDependencies;
 	/** Who holds the domain a page is on, for the classifier to tell a brand's own site from a lookalike. */
 	domainRegistration?: DomainRegistrationLookup;
+	/** The well-known sites (Tranco top list) a deceptive funnel's report treats with care. */
+	popularDomains?: () => Promise<PopularDomains>;
 };

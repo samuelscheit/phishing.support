@@ -102,12 +102,16 @@ export class ArtifactsEntity {
                 buffer: archive.screenshotPng,
             })
             : undefined;
+        // A chain body is the kit's own markup and script exactly as the network
+        // delivered it: stored as opaque bytes, so nothing ever serves it as a page
+        // of ours. The type it was served as stays on its navigation hop
+        // (`contentType` of the hop at `hopIndex`).
         for (const { hopIndex, body } of archive.hopBodies ?? []) {
             await this.saveBuffer({
                 submissionId,
                 name: chainHopBodyFileName(hopIndex),
                 kind: "website_hop_body",
-                mimeType: "text/html",
+                mimeType: "application/octet-stream",
                 archivedAt: archive.archivedAt,
                 buffer: body,
             });

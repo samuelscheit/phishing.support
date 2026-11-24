@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 
+import { linkJobKey } from "../../campaign/queue";
+import { confirmedCase } from "../../campaign/test_sites";
 import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { validateAbuseReportRequest } from "../contracts";
@@ -385,5 +387,32 @@ describe("a resolution whose lookups failed", () => {
 		await resolveReport(created.reportId, rateLimited, RESOLUTION_LOOKUP_RETRIES);
 		const routes = await AbuseRepository.listRoutes(created.reportId);
 		expect(routes.map((route) => route.providerDisplayName)).toEqual(["Netcraft"]);
+	});
+});
+
+describe("a resolved case report", () => {
+	const noRoutes = async () => ({ status: "resolved" as const, resolverSnapshot: { source: "campaign_link_test" }, routes: [] });
+	const linkJobs = async () => (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "link_campaign")).all();
+
+	test("links every site its case confirmed, each by its own report, and a case that joined it only through its own resolution", async () => {
+		const sites = ["https://lure-resolve-test.com/", "https://kit-resolve-test.com/login"];
+		const [lure, kit] = await confirmedCase(1n, { url: sites[0]! }, { sites });
+		const [joiner] = await confirmedCase(2n, { url: "https://other-resolve-test.com/" }, { sites: [sites[1]!] });
+		expect(joiner!.reportId).toBe(kit!.reportId);
+
+		await resolveReport(lure!.reportId, noRoutes);
+		expect((await linkJobs()).map((job) => [job.dedupeKey, job.reportId, job.payload])).toEqual([
+			[linkJobKey(lure!), lure!.reportId, { submissionId: "1" }],
+			[linkJobKey(kit!), kit!.reportId, { submissionId: "1" }],
+		]);
+		// The kit report's resolution queues nothing new while those links wait; the joined case is linked when it joins.
+		await resolveReport(kit!.reportId, noRoutes);
+		expect(await linkJobs()).toHaveLength(2);
+	});
+
+	test("a report no case filed (the public API's) links nothing", async () => {
+		const created = await createReport();
+		await resolveReport(created.reportId, noRoutes);
+		expect(await linkJobs()).toEqual([]);
 	});
 });

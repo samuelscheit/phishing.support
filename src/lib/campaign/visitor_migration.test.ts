@@ -1,35 +1,11 @@
-import { afterEach, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { expect, test } from "bun:test";
 
-const migrationFolder = join(process.cwd(), "drizzle");
-const journal = JSON.parse(readFileSync(join(migrationFolder, "meta", "_journal.json"), "utf-8")) as { entries: Array<{ tag: string }> };
+import { applyMigration, databaseBefore } from "../db/migration_test_helpers";
+
 const MIGRATION = "0020_campaign_visitor_guidance";
-const temporaryDirectories: string[] = [];
-
-afterEach(() => {
-	for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
-});
-
-/** Run one migration as Drizzle's migrator does: in a transaction, where its foreign_keys pragma does nothing. */
-function applyMigration(database: Database, tag: string) {
-	database.exec("BEGIN");
-	for (const statement of readFileSync(join(migrationFolder, `${tag}.sql`), "utf-8").split("--> statement-breakpoint")) {
-		if (statement.trim()) database.exec(statement);
-	}
-	database.exec("COMMIT");
-}
 
 test("0020 adds the visitor guidance and blank-capture columns and leaves every existing row as it was", () => {
-	const directory = mkdtempSync(join(tmpdir(), "phishing-reporter-visitor-migration-"));
-	temporaryDirectories.push(directory);
-	const database = new Database(join(directory, "campaign.sqlite"), { safeIntegers: true });
-	const index = journal.entries.findIndex((entry) => entry.tag === MIGRATION);
-	expect(index).toBeGreaterThan(0);
-	for (const entry of journal.entries.slice(0, index)) applyMigration(database, entry.tag);
-
+	const database = databaseBefore(MIGRATION);
 	database.exec(`
 		INSERT INTO submissions (id, kind, data, dedupe_key, status, created_at, updated_at) VALUES (1, 'website', '{"kind":"website","website":{"url":"https://samtjo.com/"}}', 'samtjo.com', 'reported', 10, 11);
 		INSERT INTO campaigns (id, title, summary, summary_site_count) VALUES (5, 'Fake notice', 'Summary', 1);

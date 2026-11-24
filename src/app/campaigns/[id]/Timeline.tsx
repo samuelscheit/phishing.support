@@ -85,7 +85,7 @@ export function Timeline({ campaign, locale, onOpen }: { campaign: PublicCampaig
 					return (
 						// Out of the tab order: the site list below is the keyboard path to the same sites.
 						<button
-							key={site.submissionId}
+							key={site.key}
 							type="button"
 							tabIndex={-1}
 							title={label}
@@ -103,7 +103,7 @@ export function Timeline({ campaign, locale, onOpen }: { campaign: PublicCampaig
 					const label = copy.more(spot.sites.length, formatDate(spot.sites[0]!.firstSeenAt, locale));
 					return (
 						<button
-							key={spot.sites[0]!.submissionId}
+							key={spot.sites[0]!.key}
 							type="button"
 							tabIndex={-1}
 							title={label}

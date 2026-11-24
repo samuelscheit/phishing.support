@@ -12,7 +12,7 @@ import { validateDeceptiveFunnelClassification, type DeceptiveFunnelFinding } fr
 import { createFunnelEmailDraft } from "./draft";
 import { extractFunnel } from "./extract";
 import { FUNNEL_EVIDENCE_NAME, readFunnelFacts } from "./facts";
-import { FUNNEL_CASE_LINKED_EVENT, planFunnelReports, reportDeceptiveFunnel, type FunnelReportInput } from "./report";
+import { planFunnelReports, reportDeceptiveFunnel, type FunnelReportInput } from "./report";
 import { chainOf, CHECKOUT_TEXT, LURE_TEXT, PRODUCTION_URLS, productionChain, rdapDomain, web, ZATOS_HOME } from "./test_fixtures";
 import { DAY_MS } from "../../util/date_time";
 import { eq } from "drizzle-orm";
@@ -88,10 +88,10 @@ describe("planFunnelReports", () => {
 			"affiliate:network:everflow:onlinesafetyall.com:6RNXHT",
 			"affiliate:network:cake:miamitrk.com:15065",
 		]);
-		for (const { request, dedupeKey } of planned) {
+		for (const { request, subject } of planned) {
 			expect(request).toMatchObject({ allegationCategory: "fraud", targets: [{ targetType: "service_account" }] });
-			expect(request.idempotencyKey).toBe(`${dedupeKey}:42`);
-			expect(dedupeKey).toMatch(/^funnel:[0-9a-f]{32}$/);
+			expect(request.idempotencyKey).toBe(`${subject.key}:42`);
+			expect(subject).toEqual({ key: expect.stringMatching(/^funnel:[0-9a-f]{32}$/), windowMs: FUNNEL_REPORT_WINDOW_DAYS * DAY_MS });
 			expect(request.evidence.map(({ filename, mimeType }) => [filename, mimeType])).toEqual([
 				[FUNNEL_EVIDENCE_NAME, "application/json"],
 				["lure-page-3.png", "image/png"],
@@ -315,21 +315,27 @@ describe("reportDeceptiveFunnel through the worker", () => {
 		expect(everflow.body).toContain("Affiliate IDs, as each business in the chain knows them:\n- 6RNXHT: affiliate 6RNXHT (in the link path) on onlinesafetyall.com (Everflow link format)\n");
 	});
 
-	test("another case with the same business and affiliate is linked to the open report instead of mailed again, until the window ends", async () => {
+	test("another case with the same business and affiliate joins the open report instead of mailing again, until the window ends", async () => {
 		const first = await newCase();
 		const firstReports = (await report(first)).map((outcome) => outcome.kind === "reported" && outcome.reportId);
 		const second = await newCase();
-		const linked = await report(second);
-		expect(linked.map((outcome) => [outcome.kind, outcome.kind === "linked" && outcome.reportId])).toEqual(firstReports.map((reportId) => ["linked", reportId]));
+		const joined = await report(second);
+		expect(joined.map((outcome) => [outcome.kind, outcome.kind === "joined" && outcome.reportId, outcome.kind === "joined" && outcome.caseId])).toEqual(firstReports.map((reportId) => ["joined", reportId, first]));
+		expect(joined.map((outcome) => outcome.kind !== "skipped" && outcome.affiliate)).toEqual(["15065", "6RNXHT", "15065"]);
+		// A replay joins nothing twice.
 		await report(second);
 		for (const reportId of firstReports) {
-			const events = (await AbuseRepository.listEvents(reportId as bigint)).filter(({ eventType }) => eventType === FUNNEL_CASE_LINKED_EVENT);
+			expect(await AbuseRepository.listJoinedCases(reportId as bigint)).toEqual([second]);
+			const events = (await AbuseRepository.listEvents(reportId as bigint)).filter(({ eventType }) => eventType === "report.case_joined");
 			expect(events.map(({ data }) => data.submissionId)).toEqual([second.toString()]);
 		}
 		expect(await AbuseRepository.listReportsForSubmission(second)).toEqual([]);
+		expect((await AbuseRepository.listJoinedReportsForSubmission(second)).map(({ id }) => id)).toEqual(firstReports as bigint[]);
 
-		const later = await newCase();
-		const afterWindow = await report(later, { now: () => new Date(Date.now() + (FUNNEL_REPORT_WINDOW_DAYS + 1) * DAY_MS) });
+		// Past the window, the affiliate is reported anew.
+		const db = await getDb();
+		for (const reportId of firstReports) await db.update(abuseReports).set({ createdAt: new Date(Date.now() - (FUNNEL_REPORT_WINDOW_DAYS + 1) * DAY_MS) }).where(eq(abuseReports.id, reportId as bigint));
+		const afterWindow = await report(await newCase());
 		expect(afterWindow.map(({ kind }) => kind)).toEqual(["reported", "reported", "reported"]);
 	});
 
@@ -339,15 +345,15 @@ describe("reportDeceptiveFunnel through the worker", () => {
 		const db = await getDb();
 		await db.update(abuseReports).set({ status: "no_route" }).where(eq(abuseReports.id, firstReports[0]!));
 		const next = await report(await newCase());
-		expect(next.map(({ kind }) => kind)).toEqual(["reported", "linked", "linked"]);
+		expect(next.map(({ kind }) => kind)).toEqual(["reported", "joined", "joined"]);
 		expect((next[0] as { reportId: bigint }).reportId).not.toBe(firstReports[0]);
 	});
 
-	test("two cases finishing at once create one report per business and affiliate, the other is linked", async () => {
+	test("two cases finishing at once create one report per business and affiliate, the other joins it", async () => {
 		const [a, b] = await Promise.all([newCase(), newCase()]);
 		const [first, second] = await Promise.all([report(a), report(b)]);
 		const kinds = [...first!, ...second!].map(({ kind }) => kind).sort();
-		expect(kinds).toEqual(["linked", "linked", "linked", "reported", "reported", "reported"]);
+		expect(kinds).toEqual(["joined", "joined", "joined", "reported", "reported", "reported"]);
 		const ids = new Set([...first!, ...second!].map((outcome) => (outcome as { reportId: bigint }).reportId));
 		expect(ids.size).toBe(3);
 	});

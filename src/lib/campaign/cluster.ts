@@ -1,14 +1,15 @@
 /**
- * Group submissions into campaigns: two submissions belong together when
- * they share any linking indicator, directly or through others. Campaign ids
- * are stable: a group keeps the oldest campaign id among its members, so a
- * case already reported under that id keeps it as the campaign grows.
+ * Group members (a case's confirmed site, by `memberKey`) into campaigns:
+ * two members belong together when they share any linking indicator,
+ * directly or through others. Campaign ids are stable: a group keeps the
+ * oldest campaign id among its members, so a case already reported under
+ * that id keeps it as the campaign grows.
  */
-export type ClusterLink = { submissionId: bigint; key: string };
+export type ClusterLink = { member: string; key: string };
 
 export type ClusterAssignment = {
-	/** Campaign id per submission. */
-	membership: Map<bigint, bigint>;
+	/** Campaign id per member. */
+	membership: Map<string, bigint>;
 	/** Campaigns that lost all their members to another one: old id → id that absorbed it. */
 	merged: Map<bigint, bigint>;
 	/** Campaign ids that `newId` created. */
@@ -16,9 +17,9 @@ export type ClusterAssignment = {
 };
 
 class DisjointSet {
-	private readonly parent = new Map<bigint, bigint>();
+	private readonly parent = new Map<string, string>();
 
-	find(value: bigint): bigint {
+	find(value: string): string {
 		let root = value;
 		while (this.parent.has(root) && this.parent.get(root) !== root) root = this.parent.get(root)!;
 		let current = value;
@@ -31,7 +32,7 @@ class DisjointSet {
 		return root;
 	}
 
-	union(a: bigint, b: bigint): void {
+	union(a: string, b: string): void {
 		const rootA = this.find(a);
 		const rootB = this.find(b);
 		if (rootA !== rootB) this.parent.set(rootA > rootB ? rootA : rootB, rootA < rootB ? rootA : rootB);
@@ -50,29 +51,29 @@ class DisjointSet {
 export function assignCampaigns(params: {
 	links: readonly ClusterLink[];
 	/** Every confirmed site, also those without a linking indicator. */
-	sites?: readonly bigint[];
-	existing: ReadonlyMap<bigint, bigint>;
+	sites?: readonly string[];
+	existing: ReadonlyMap<string, bigint>;
 	newId: () => bigint;
 }): ClusterAssignment {
 	const sets = new DisjointSet();
-	const firstByKey = new Map<string, bigint>();
-	const linked = new Set<bigint>(params.sites ?? []);
+	const firstByKey = new Map<string, string>();
+	const linked = new Set<string>(params.sites ?? []);
 	for (const site of linked) sets.find(site);
 	for (const link of params.links) {
-		linked.add(link.submissionId);
-		sets.find(link.submissionId);
+		linked.add(link.member);
+		sets.find(link.member);
 		const first = firstByKey.get(link.key);
-		if (first === undefined) firstByKey.set(link.key, link.submissionId);
-		else sets.union(first, link.submissionId);
+		if (first === undefined) firstByKey.set(link.key, link.member);
+		else sets.union(first, link.member);
 	}
 
-	const groups = new Map<bigint, bigint[]>();
-	for (const submissionId of [...linked].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
-		const root = sets.find(submissionId);
-		groups.set(root, [...(groups.get(root) ?? []), submissionId]);
+	const groups = new Map<string, string[]>();
+	for (const member of [...linked].sort()) {
+		const root = sets.find(member);
+		groups.set(root, [...(groups.get(root) ?? []), member]);
 	}
 
-	const membership = new Map<bigint, bigint>();
+	const membership = new Map<string, bigint>();
 	const merged = new Map<bigint, bigint>();
 	const created: bigint[] = [];
 	const used = new Set<bigint>();

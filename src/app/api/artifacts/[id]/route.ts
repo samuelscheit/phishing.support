@@ -1,28 +1,18 @@
-import { NextRequest } from "next/server";
 import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
+import { artifactResponse } from "@/lib/http/artifact_response";
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-	try {
-		const { id } = await params;
-		const artifactId = BigInt(id);
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-		const artifact = await ArtifactsEntity.get(artifactId);
-		if (!artifact || !artifact.blob) {
-			return new Response("Not found", { status: 404 });
-		}
-
-		const mimeType = artifact.mimeType || "application/octet-stream";
-		const name = artifact.name || "artifact";
-
-		// Serve the raw artifact bytes.
-		return new Response(artifact.blob as unknown as BodyInit, {
-			headers: {
-				"Content-Type": mimeType,
-				"Content-Disposition": `inline; filename="${name}"`,
-			},
-		});
-	} catch (err) {
-		console.error("Failed to get artifact:", err);
-		return new Response("Internal Server Error", { status: 500 });
-	}
+/**
+ * Serve one artifact of a case (captures, chain bodies, evidence files, the
+ * reported mail). Cases are public; a case can be deleted, so its files are
+ * not cached.
+ */
+export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+	const { id } = await params;
+	if (!/^\d{1,20}$/.test(id)) return new Response("Not found", { status: 404 });
+	const artifact = await ArtifactsEntity.get(BigInt(id));
+	if (!artifact) return new Response("Not found", { status: 404 });
+	return artifactResponse(artifact, { access: "private" });
 }

@@ -11,7 +11,7 @@ import type { WebsiteKitResource, WebsiteSiteAssessment } from "../website/types
 import { analyzeKitSibling } from "../abuse/origin/kit_job";
 import { websiteSubmissionDedupeKey } from "../submissions/website";
 import { armCampaignKitSearch, searchableKitFingerprints, searchCampaignKits } from "./kit_search";
-import { linkSubmissionToCampaign, type LinkDependencies } from "./link";
+import { linkSiteMember, type LinkDependencies } from "./link";
 import { CampaignRepository } from "./repository";
 
 useTemporaryDatabase();
@@ -48,7 +48,7 @@ async function site(id: bigint, host: string, kitResources: WebsiteKitResource[]
 	});
 	const request = await validateAbuseReportRequest({ targets: [host], allegationCategory: "phishing", description: "Confirmed credential phishing.", observedUrls: [{ target: host, urls: [`https://${host}/`] }] });
 	const report = await AbuseRepository.createReport({ request, reporter: { reporterCountry: "DE" }, submissionId: id });
-	const campaignId = (await linkSubmissionToCampaign(id, linking))!;
+	const campaignId = (await linkSiteMember({ submissionId: id, reportId: report.reportId, site: host }, linking))!;
 	return { reportId: report.reportId, campaignId };
 }
 
@@ -77,9 +77,9 @@ describe("a campaign's kit search", () => {
 	test("searches its sites' own code: an original report's file or one two sites share, never a file only a found sibling holds", async () => {
 		const original = await site(1n, "seed-kit-test.com", [script("seed-kit-test.com", KIT), script("seed-kit-test.com", SHARED, 30_000), { url: "https://seed-kit-test.com/s.css", mimeType: "text/css", size: 9_000, sha256: STYLE }]);
 		// Found by an earlier search: its own extra file is not searched, the file it shares with the seed is.
-		await site(2n, "found-sibling-test.com", [script("found-sibling-test.com", SHARED, 30_000), script("found-sibling-test.com", SIBLING_ONLY, 50_000)], `kit-sibling:1:${original.reportId}`);
+		const sibling = await site(2n, "found-sibling-test.com", [script("found-sibling-test.com", SHARED, 30_000), script("found-sibling-test.com", SIBLING_ONLY, 50_000)], `kit-sibling:1:${original.reportId}`);
 		const campaignId = (await CampaignRepository.currentCampaignId(original.campaignId))!;
-		expect(await CampaignRepository.campaignForSubmission(2n)).toBe(campaignId);
+		expect(sibling.campaignId).toBe(campaignId);
 		const searched = await searchableKitFingerprints(await CampaignRepository.listMembers(campaignId));
 		expect(searched.map(({ sha256, kind }) => ({ sha256, kind }))).toEqual([{ sha256: KIT, kind: "script" }, { sha256: SHARED, kind: "script" }]);
 	});

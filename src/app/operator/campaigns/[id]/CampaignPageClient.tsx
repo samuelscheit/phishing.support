@@ -298,7 +298,7 @@ export function CampaignPageClient({ overview }: { overview: CampaignOverview })
 				<Card>
 					<CardContent className="divide-y p-0">
 						{dossier.sites.map((site) => (
-							<div key={site.submissionId} className="space-y-1 px-4 py-3">
+							<div key={site.key} className="space-y-1 px-4 py-3">
 								<div className="flex flex-wrap items-baseline justify-between gap-2">
 									<a href={`/submissions/${site.submissionId}`} className="min-w-0 break-all font-mono text-sm text-primary hover:underline">{site.url}</a>
 									<span className="text-xs text-muted-foreground">{formatUtcDateTime(site.firstSeenAt)}</span>

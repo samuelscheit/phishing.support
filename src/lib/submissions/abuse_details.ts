@@ -5,6 +5,7 @@ import { buildProviderReportNarrative } from "@/lib/abuse/providers/kit/report_p
 import type { AbuseMailClassification, AbuseReport } from "@/lib/abuse/schema";
 import { describeDecisionFollowUp, type DecisionFollowUpSummary } from "@/lib/abuse/followup/describe";
 import { asRecord } from "../util/values";
+import { parseFunnelPartyTarget, type FunnelPartyTarget } from "@/lib/abuse/funnel/target";
 
 function nonEmptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value : undefined;
@@ -36,6 +37,8 @@ export type SubmissionReportRoute = {
 	provider: string;
 	routeType: string;
 	target: string;
+	/** The mailbox a mail route sends to, once resolved and verified. */
+	recipient: string | null;
 	status: string;
 	executionStatus: string | null;
 	/** Provider-specific text; absent for mail routes, whose text is in `messages`. */
@@ -64,8 +67,10 @@ export type SubmissionReport = {
 	primary: boolean;
 	/** What the report is about: its first target. */
 	target: string | null;
-	/** Other cases that confirmed the same site while this report was open, and joined it instead of a report of their own. */
+	/** Other cases that confirmed the same site, or led to the same affiliate, while this report was open, and joined it instead of a report of their own. */
 	joinedCases: bigint[];
+	/** For a deceptive funnel's report: the business it goes to and the affiliate it is about. */
+	funnelParty?: FunnelPartyTarget;
 	description: string;
 	allegationCategory?: string;
 	status: string;
@@ -162,12 +167,14 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 		messagesByRoute.set(message.routeId, list);
 	}
 
+	const funnelParty = report.idempotencyKey?.startsWith("funnel:") && targets[0] ? parseFunnelPartyTarget(targets[0].normalizedTarget) : undefined;
 	return {
 		id: report.id,
 		submissionId: report.submissionId,
 		primary: !report.idempotencyKey,
 		target: targets[0]?.normalizedTarget ?? null,
 		joinedCases,
+		...(funnelParty ? { funnelParty } : {}),
 		description: report.description,
 		allegationCategory: report.allegationCategory,
 		status: report.status,
@@ -194,6 +201,7 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 					id: route.id,
 					provider: route.providerDisplayName,
 					routeType: route.routeType,
+					recipient: route.verifiedEmail ?? null,
 					target: target?.normalizedTarget ?? "Unknown target",
 					status: route.status,
 					executionStatus: run?.executionStatus ?? null,

@@ -14,6 +14,9 @@ import { defangCommand } from "../malware/defang";
 import { isSameWebsite } from "../website/info/site";
 import type { InvestigationJobPayload } from "./payload";
 import { setInvestigationStatus } from "./status";
+import { SubmissionsEntity } from "../db/entities/submissions";
+import { isPageHop, pageCaptureStep } from "../website/visit/capture_files";
+import { stepScreenshots } from "../website/analysis/evidence";
 
 /** Payloads fetched per case: a command's few, plus an exploit loader's stages. */
 const MAX_PAYLOADS = 12;
@@ -187,39 +190,7 @@ export async function runReportInvestigation(
 		});
 	}
 
-	// The link the campaign hands out, when the page was reached through one:
-	// it outlives this page and forwards to the next. Idempotent like the
-	// payload reports, so a retried job finds its report.
-	const redirector = await deps.reportRedirector({ reportId, submissionId, pageUrl: payload.pageUrl, finding: payload.finding, reporter, pageScreenshot: lureScreenshot, signal });
-	if (redirector) {
-		await AbuseRepository.appendEvent({
-			reportId,
-			eventType: `redirector.${redirector.kind}`,
-			data: redirector.kind === "reported"
-				? { url: redirector.url, reportId: redirector.report.reportId.toString(), created: redirector.report.created }
-				: { url: redirector.url, reason: redirector.reason },
-		});
-	}
-
-	// Each place the visit saw the site send the synthetic values gets a report
-	// of its own: a Telegram bot, a Discord webhook, a collector host. Reports
-	// are idempotent, so a retried job finds the ones it made.
-	const reportedDrops: ExfiltrationBackend[] = [];
-	const backendScreenshot = payload.dataDrops?.length ? await lureScreenshot() : undefined;
-	for (const backend of payload.dataDrops ?? []) {
-		signal?.throwIfAborted();
-		const enriched = await deps.enrich(backend, signal).catch(() => backend);
-		reportedDrops.push(enriched);
-		await deps.reportBackend({
-			submissionId,
-			sourceReportId: reportId,
-			backend: enriched,
-			pageUrl: payload.pageUrl,
-			observedAt: new Date(enriched.request.timestamp),
-			...(backendScreenshot ? { pageScreenshot: backendScreenshot } : {}),
-			reporter,
-		});
-	}
+	const reportedDrops = await reportCaseLinks({ reportId, submissionId, payload, reporter, signal, pageScreenshot: lureScreenshot }, deps);
 
 	const findings = [...payloadFindings(payloads), ...dataDropFindings(reportedDrops)];
 	const evidence = payloads.flatMap(({ evidence: item }) => item ? [{
@@ -237,6 +208,79 @@ export async function runReportInvestigation(
 			: { url, ...(error ? { error } : {}) }),
 		updatedAt: deps.now().toISOString(),
 	});
+}
+
+/**
+ * What a case reports beside its site's report, linked to `reportId`: the
+ * redirector its page was reached through, which outlives the page and
+ * forwards to the next, and each place the visit saw the site send the
+ * synthetic values (a Telegram bot, a Discord webhook, a collector host).
+ * Every report is idempotent, so a retried job finds the ones it made.
+ * Returns the data drops reported, named from their own APIs.
+ */
+async function reportCaseLinks(
+	params: { reportId: bigint; submissionId: bigint; payload: InvestigationJobPayload; reporter: ReporterMetadata; signal?: AbortSignal; pageScreenshot: () => ReturnType<typeof lurePageScreenshot> },
+	deps: InvestigationDependencies,
+): Promise<ExfiltrationBackend[]> {
+	const { reportId, submissionId, payload, reporter, signal } = params;
+	const redirector = await deps.reportRedirector({ reportId, submissionId, pageUrl: payload.pageUrl, finding: payload.finding, reporter, pageScreenshot: params.pageScreenshot, signal });
+	if (redirector) {
+		await AbuseRepository.appendEvent({
+			reportId,
+			eventType: `redirector.${redirector.kind}`,
+			data: {
+				submissionId: submissionId.toString(),
+				...(redirector.kind === "reported"
+					? { url: redirector.url, reportId: redirector.report.reportId.toString(), created: redirector.report.created }
+					: { url: redirector.url, reason: redirector.reason }),
+			},
+		});
+	}
+	const reportedDrops: ExfiltrationBackend[] = [];
+	const backendScreenshot = payload.dataDrops?.length ? await params.pageScreenshot() : undefined;
+	for (const backend of payload.dataDrops ?? []) {
+		signal?.throwIfAborted();
+		const enriched = await deps.enrich(backend, signal).catch(() => backend);
+		reportedDrops.push(enriched);
+		await deps.reportBackend({
+			submissionId,
+			sourceReportId: reportId,
+			backend: enriched,
+			pageUrl: payload.pageUrl,
+			observedAt: new Date(enriched.request.timestamp),
+			...(backendScreenshot ? { pageScreenshot: backendScreenshot } : {}),
+			reporter,
+		});
+	}
+	return reportedDrops;
+}
+
+/**
+ * The evidence of a case whose site another case's open report already
+ * covers (`reportId`, joined, not this case's): the report is not held for
+ * it, but what only this case's visit saw is reported all the same, its
+ * redirector and its data drops, with this case's own page as evidence.
+ */
+export async function runJoinedCaseInvestigation(
+	params: { reportId: bigint; payload: InvestigationJobPayload; reporter: ReporterMetadata; signal?: AbortSignal },
+	dependencies: Partial<InvestigationDependencies> = {},
+): Promise<void> {
+	const deps = { ...defaultDependencies(), ...dependencies };
+	const submissionId = BigInt(params.payload.submissionId);
+	await setInvestigationStatus(submissionId, { status: "running", updatedAt: deps.now().toISOString() });
+	let screenshot: ReturnType<typeof casePageScreenshot> | undefined;
+	const reportedDrops = await reportCaseLinks({ ...params, submissionId, pageScreenshot: () => (screenshot ??= casePageScreenshot(submissionId, params.payload.pageUrl)) }, deps);
+	await setInvestigationStatus(submissionId, { status: "completed", backendCount: reportedDrops.length, updatedAt: deps.now().toISOString() });
+}
+
+/** The screenshot of a case's own captured page. */
+async function casePageScreenshot(submissionId: bigint, pageUrl: string): Promise<{ buffer: Buffer; mimeType: "image/png" } | undefined> {
+	const submission = await SubmissionsEntity.get(submissionId);
+	const hops = submission?.data.kind === "website" ? submission.data.website.navigationHops ?? [] : [];
+	const page = hops.find((hop) => hop.url === pageUrl && isPageHop(hop));
+	if (!page) return undefined;
+	const [shot] = await stepScreenshots(submissionId, [pageCaptureStep(hops, page)]);
+	return shot && { buffer: shot.png, mimeType: "image/png" };
 }
 
 /** The page report's screenshot, as captured evidence of the command a payload host serves. */

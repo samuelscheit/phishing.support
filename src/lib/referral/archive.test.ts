@@ -20,8 +20,12 @@ const dossier: Dossier = {
 	infrastructure: [{ role: "hosting", name: "Hostinger International Ltd.", country: "CY", resources: [], contacts: ["abuse@hostinger.com"], sites: ["https://dhl-a.com/"] }],
 	indicators: [{ kind: "operator_server", value: "telegram-bot:7001", links: true, evidence: { roles: ["receives_data"], backendKind: "telegram_bot", telegram: { token: "7001:AAE", chatId: "-1" } }, sites: ["https://dhl-a.com/"] }],
 	sites: [{
+		key: "11:21",
 		submissionId: "11",
+		reportId: "21",
 		url: "https://dhl-a.com/",
+		pageStep: 0,
+		pageSteps: [0],
 		host: "dhl-a.com",
 		firstSeenAt: "2026-11-10T08:00:00.000Z",
 		impersonates: ["www.dhl.de"],

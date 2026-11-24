@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { WhoISInfo } from "../info/info";
+import { navigationHop as hop } from "../test_helpers";
 import { buildWebsiteAnalysisInput, infrastructureEvidence, visitNarrativeEvidence } from "./narrative";
 
 /** What the case's lookups found for rbxcore.pro (submission 380115867024756863), trimmed. */
@@ -39,6 +40,16 @@ describe("the website case analysis", () => {
 		expect(system.content as string).toContain("never contradict, weaken, or replace it with a verdict of your own");
 		expect(system.content as string).toContain("you do not judge the site again");
 		expect(system.content as string).not.toContain("or neither, exactly as the definitions above decide");
+	});
+
+	test("lists the case's whole chain, past the analyzed page, marking that page", () => {
+		const kit = "https://kit-login.com/signin";
+		const page = { requestedUrl: "https://lure.com/", url: kit, hostname: "kit-login.com", navigationHops: [hop(0, "https://lure.com/", { status: 302, redirectTo: kit }), hop(1, kit, { contentCaptured: true })], html: Buffer.from("<html></html>"), text: Buffer.from("Sign in") };
+		const chain = [hop(0, "https://lure.com/", { status: 302, redirectTo: kit }), hop(1, kit, { redirectTo: "https://shop.com/", visitorStep: { submitted: [] } }), hop(2, "https://shop.com/", { contentCaptured: true })];
+		const text = ((buildWebsiteAnalysisInput(page, { finding: "Phishing.", chain })[1]!.content) as Array<{ text?: string }>)[0]!.text!;
+		expect(text).toContain("https://shop.com/");
+		expect(text).toMatch(/1,"?https:\/\/kit-login\.com\/signin"?,200,"?https:\/\/shop\.com\/"?,moved on,true/);
+		expect(text).toMatch(/2,"?https:\/\/shop\.com\/"?,200,null,null,false/);
 	});
 
 	test("compacts the registration and hosting facts, with the domain's age when it was captured", () => {

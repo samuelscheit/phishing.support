@@ -9,6 +9,7 @@ import { isUrlscanBusy, urlscanRetryAfterMs } from "../abuse/origin/urlscan";
 import { errorSummary } from "../util/error_text";
 import { searchKitHashes, type KitFingerprint, type KitFingerprintKind, type SiblingDiscoveryDependencies } from "../abuse/origin/siblings";
 import { websiteSubmissionDedupeKey } from "../submissions/website";
+import { memberKey } from "./members";
 import { CampaignRepository, type CampaignMemberView } from "./repository";
 import { DAY_MS } from "../util/date_time";
 
@@ -64,15 +65,15 @@ async function memberHosts(members: readonly CampaignMemberView[]): Promise<stri
  * retired (`retiredKitHashes`).
  */
 export async function searchableKitFingerprints(members: readonly CampaignMemberView[]): Promise<KitFingerprint[]> {
-	const holders = new Map<string, { fingerprint: KitFingerprint; sites: Set<bigint> }>();
+	const holders = new Map<string, { fingerprint: KitFingerprint; sites: Map<string, bigint> }>();
 	for (const member of members) {
 		for (const indicator of member.indicators) {
 			const evidence = indicator.evidence as { fileKind?: string; url?: string; size?: number; scope?: string };
 			if (indicator.kind !== "kit_fingerprint" || !(indicator.links || evidence.scope) || !SEARCHABLE_KINDS.has(evidence.fileKind as KitFingerprintKind) || !evidence.url) continue;
 			const key = `${indicator.value}@${evidence.scope ?? ""}`;
 			const fingerprint: KitFingerprint = { sha256: indicator.value, kind: evidence.fileKind as KitFingerprintKind, url: evidence.url, size: evidence.size ?? 0, ...(evidence.scope ? { scope: evidence.scope } : {}) };
-			const entry = holders.get(key) ?? { fingerprint, sites: new Set<bigint>() };
-			entry.sites.add(member.submissionId);
+			const entry = holders.get(key) ?? { fingerprint, sites: new Map<string, bigint>() };
+			entry.sites.set(memberKey(member), member.submissionId);
 			holders.set(key, entry);
 		}
 	}
@@ -80,9 +81,9 @@ export async function searchableKitFingerprints(members: readonly CampaignMember
 	const searchable: KitFingerprint[] = [];
 	for (const { fingerprint, sites } of holders.values()) {
 		let original = false;
-		for (const site of sites) {
-			if (!seeds.has(site)) seeds.set(site, await isKitSiblingSeed(site));
-			original ||= seeds.get(site)!;
+		for (const submissionId of sites.values()) {
+			if (!seeds.has(submissionId)) seeds.set(submissionId, await isKitSiblingSeed(submissionId));
+			original ||= seeds.get(submissionId)!;
 		}
 		if (original || sites.size >= 2) searchable.push(fingerprint);
 	}
@@ -93,17 +94,10 @@ export async function searchableKitFingerprints(members: readonly CampaignMember
 		.slice(0, MAX_HASHES_PER_SEARCH);
 }
 
-/** The report a campaign's search belongs to: its first original site's, else its first site's that has one. */
-async function campaignReport(members: readonly CampaignMemberView[]): Promise<{ reportId: bigint; submissionId: bigint } | undefined> {
-	let fallback: { reportId: bigint; submissionId: bigint } | undefined;
-	for (const member of members) {
-		const report = await AbuseRepository.getReportForSubmission(member.submissionId);
-		if (!report) continue;
-		const found = { reportId: report.id, submissionId: member.submissionId };
-		if (await isKitSiblingSeed(member.submissionId)) return found;
-		fallback ??= found;
-	}
-	return fallback;
+/** The report a campaign's search belongs to: its first original case's site report, else its first member's. */
+async function campaignReport(members: readonly CampaignMemberView[]): Promise<bigint | undefined> {
+	for (const member of members) if (await isKitSiblingSeed(member.submissionId)) return member.reportId;
+	return members[0]?.reportId;
 }
 
 /**
@@ -114,11 +108,11 @@ async function campaignReport(members: readonly CampaignMemberView[]): Promise<{
 export async function armCampaignKitSearch(campaignId: bigint, now = new Date()): Promise<boolean> {
 	const members = await CampaignRepository.listMembers(campaignId);
 	if (!(await searchableKitFingerprints(members)).length) return false;
-	const report = await campaignReport(members);
-	if (!report) return false;
+	const reportId = await campaignReport(members);
+	if (reportId === undefined) return false;
 	const newest = Math.max(...members.map(({ createdAt }) => createdAt.getTime()));
 	const state: CampaignKitSearchState = { campaignId: campaignId.toString(), checks: 0, lastNewAt: new Date(Math.min(newest, now.getTime())).toISOString() };
-	await AbuseRepository.enqueueJob({ jobType: "search_campaign_kits", reportId: report.reportId, payload: state, dedupeKey: searchDedupeKey(campaignId), nextAttemptAt: now });
+	await AbuseRepository.enqueueJob({ jobType: "search_campaign_kits", reportId, payload: state, dedupeKey: searchDedupeKey(campaignId), nextAttemptAt: now });
 	return true;
 }
 

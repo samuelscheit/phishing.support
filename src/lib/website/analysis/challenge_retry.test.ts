@@ -159,6 +159,19 @@ describe("a visit a CAPTCHA or browser check blocked", () => {
 		]);
 	});
 
+	test("keeps the verdict of another site only the blocked visit reached", async () => {
+		const gate = "https://gate.verifyhumanhost.com/document";
+		const { submission, website } = await analyze(381535952033550436n, { first: { egress: "phishing", shown: "sign-in", walk: { to: gate } }, retry: { residential: "sign-in" } });
+		expect(submission?.status).toBe("reported");
+		expect(website?.navigationHops?.map(({ url }) => url)).toEqual([PAGE, gate, PAGE]);
+		// The gate's page was judged in the blocked visit; the residential visit never reached it again.
+		expect(website?.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([
+			{ hopIndex: 0, finding: "phishing", judgedHopIndex: 2 },
+			{ hopIndex: 1, finding: "insufficient_evidence", judgedHopIndex: 1 },
+			{ hopIndex: 2, finding: "phishing", judgedHopIndex: 2 },
+		]);
+	});
+
 	test("a visit no challenge blocked is not repeated", async () => {
 		const { captures, submission } = await analyze(381535952033550433n, { first: { egress: "phishing", shown: "sign-in" } });
 		expect(captures).toHaveLength(1);

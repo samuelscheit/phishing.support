@@ -25,6 +25,15 @@ export type HopBody = { hopIndex: number; body: Buffer };
 /** The hops that led to a captured page, with the raw bodies of the document answers among them. */
 export type CapturedChain = { hops: WebsiteNavigationHop[]; bodies: HopBody[] };
 
+/** The most answers a tab keeps that no document claimed yet: a page reloading itself into errors or downloads records one each time. */
+export const MAX_UNCLAIMED_ANSWERS = 50;
+/**
+ * The most body bytes a tab keeps, of answers and documents together: a
+ * chain's pages fit many times over, a page reloading itself forever does
+ * not. Past it, a page's answer is kept without its body.
+ */
+export const MAX_TAB_BODY_BYTES = 25 * 1024 * 1024;
+
 const KIT_RESOURCE_TYPES = new Set(["script", "stylesheet"]);
 const MAX_KIT_RESOURCES = 40;
 const MAX_KIT_RESOURCE_BYTES = 2 * 1024 * 1024;
@@ -78,7 +87,12 @@ export type TabRecording = {
 	documents: NavigationDocument[];
 	/** Feed one response the tab received. */
 	observe(response: ObservedResponse): void;
-	/** Feed one answer the tab's main frame got, with its raw body when it is a page; it usually arrives before the response is observed. */
+	/**
+	 * Feed one answer the tab's main frame got, with its raw body when it is a
+	 * page; it usually arrives before the response is observed. Answers no
+	 * document can claim any more are let go, and what is kept is bounded
+	 * (`MAX_UNCLAIMED_ANSWERS`, `MAX_TAB_BODY_BYTES`).
+	 */
 	recordAnswer(answer: DocumentAnswer): void;
 	/** Give each hop of each document the answer recorded for it, also one that arrived after the document was observed. */
 	settleAnswers(): void;
@@ -87,8 +101,19 @@ export type TabRecording = {
 
 export function recordTab(): TabRecording {
 	const documents: NavigationDocument[] = [];
-	const answers: DocumentAnswer[] = [];
+	/** The documents with a hop still without its answer: the network layer records an answer once its body is read, which may be after the tab showed it. */
+	let waiting: NavigationDocument[] = [];
+	/** Answers no document claimed yet, oldest first. */
+	let answers: DocumentAnswer[] = [];
+	/** The bytes of every body kept: of answers not yet claimed, and of documents. */
+	let bodyBytes = 0;
+	let warnedFull = false;
 	const kit = recordKitResources();
+	const withoutBody = (answer: DocumentAnswer): DocumentAnswer => {
+		bodyBytes -= answer.body?.byteLength ?? 0;
+		const { body: _body, ...rest } = answer;
+		return rest;
+	};
 	/**
 	 * Give each hop of the document not yet matched the oldest unclaimed answer of its address and status: a page loaded twice
 	 * has two, in order. The network layer never sees a URL's fragment, which puppeteer's addresses keep (`#victim@mail.com`).
@@ -102,8 +127,40 @@ export function recordTab(): TabRecording {
 			const [answer] = answers.splice(index, 1);
 			hop.receivedAt = answer!.receivedAt;
 			// The document's own answer is its last hop; the redirects before it have no page.
-			if (position === document.hops.length - 1 && answer!.body) document.body ??= answer!.body;
+			if (position === document.hops.length - 1 && answer!.body && !document.body) document.body = answer!.body;
+			else withoutBody(answer!);
 		});
+	};
+	const unmatched = (document: NavigationDocument) => document.hops.some((hop) => !hop.receivedAt);
+	/** Give the documents still waiting the answers recorded since; one never answered (Fetch was not held) stops waiting among the oldest. */
+	const settle = () => {
+		if (answers.length > 0) for (const document of waiting) claimAnswers(document);
+		waiting = waiting.filter(unmatched).slice(-MAX_UNCLAIMED_ANSWERS);
+	};
+	/**
+	 * Let go of the answers that arrived before the newest document's first one, once the documents before it had theirs:
+	 * a navigation the tab abandoned, an error page, a download. No document still to come can claim them, and the oldest
+	 * unclaimed answer of an address would otherwise give its body to that address's next load.
+	 */
+	const dropStale = (newest: NavigationDocument) => {
+		const since = newest.hops.find((hop) => hop.receivedAt)?.receivedAt;
+		if (!since) return;
+		for (const answer of answers) if (answer.receivedAt < since) withoutBody(answer);
+		answers = answers.filter((answer) => answer.receivedAt >= since);
+	};
+	const keep = (answer: DocumentAnswer) => {
+		if (answer.body) {
+			const size = answer.body.byteLength;
+			// The oldest unclaimed answers are the least likely to be claimed: their bodies go first.
+			for (let index = 0; bodyBytes + size > MAX_TAB_BODY_BYTES && index < answers.length; index++) answers[index] = withoutBody(answers[index]!);
+			if (bodyBytes + size > MAX_TAB_BODY_BYTES) {
+				if (!warnedFull) console.warn(`A tab kept ${bodyBytes} bytes of page bodies; ${answer.url.slice(0, 200)} and later pages are kept without theirs.`);
+				warnedFull = true;
+				answer = { url: answer.url, status: answer.status, receivedAt: answer.receivedAt };
+			} else bodyBytes += size;
+		}
+		answers.push(answer);
+		if (answers.length > MAX_UNCLAIMED_ANSWERS) withoutBody(answers.shift()!);
 	};
 	return {
 		documents,
@@ -112,16 +169,16 @@ export function recordTab(): TabRecording {
 			// An HTTP error document (a bot check that reloads into the real page) is replaced, not passed through.
 			if (isDocumentAnswer(response) && response.status !== null && response.status >= 200 && response.status < 300) {
 				const document = navigationDocument(response);
+				// The documents before it take their answers first: the oldest unclaimed answer of an address is theirs.
+				settle();
 				claimAnswers(document);
 				documents.push(document);
+				if (unmatched(document)) waiting.push(document);
+				dropStale(document);
 			}
 		},
-		recordAnswer: (answer) => {
-			answers.push(answer);
-		},
-		settleAnswers: () => {
-			for (const document of documents) claimAnswers(document);
-		},
+		recordAnswer: keep,
+		settleAnswers: settle,
 		kitResources: kit.settled,
 	};
 }

@@ -4,7 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/util/cn";
 import { CheckCircle2, Loader2, ShieldAlert, XCircle } from "lucide-react";
 
-export function SubmissionStatus({ status, className }: { status?: string | null; className?: string }) {
+/** A case's status as a badge; a reported case says what it was reported for (`reportedAs`), phishing unless told otherwise. */
+export function SubmissionStatus({ status, reportedAs, className }: { status?: string | null; reportedAs?: "deceptive_funnel"; className?: string }) {
 	const raw = (status || "").trim();
 	const key = raw.toLowerCase();
 
@@ -14,7 +15,7 @@ export function SubmissionStatus({ status, className }: { status?: string | null
 	const isFailed = key === "failed";
 	const isCompleted = key === "completed";
 
-	const label = isReported ? "Phishing" : isInvalid ? "Not phishing" : raw || "Unknown";
+	const label = isReported ? (reportedAs === "deceptive_funnel" ? "Deceptive funnel" : "Phishing") : isInvalid ? "Not phishing" : raw || "Unknown";
 
 	if (isReported) {
 		return (

@@ -5,8 +5,11 @@ import type { Dossier } from "./dossier";
 import { OFFENCES } from "./offences";
 
 const site = (url: string, firstSeenAt: string) => ({
+	key: url,
 	submissionId: url,
+	reportId: url,
 	url,
+	pageSteps: [0],
 	host: new URL(url).hostname,
 	firstSeenAt,
 	impersonates: ["www.dhl.de"],

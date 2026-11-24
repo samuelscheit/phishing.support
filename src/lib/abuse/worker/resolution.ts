@@ -1,3 +1,4 @@
+import { queueCaseSiteLinks } from "../../campaign/queue";
 import { scheduleLivenessChecks } from "../../liveness/schedule";
 import { AbuseRepository } from "../repository";
 import type { AbuseTargetResolver } from "./shared";
@@ -49,11 +50,9 @@ export async function resolveReport(reportId: bigint, resolveTarget: AbuseTarget
 	for (const { target, resolved } of resolutions) await saveResolvedTarget(reportId, target.id, resolved);
 	await AbuseRepository.recomputeReportStatus(reportId);
 	// A confirmed site's report, or a backend report the investigation added to
-	// it, is what its campaign is built from: group the site again with what it now shows.
-	const submissionId = input.report.submissionId;
-	if (submissionId !== null) {
-		await AbuseRepository.enqueueJob({ jobType: "link_campaign", reportId, payload: { submissionId: submissionId.toString() }, dedupeKey: `campaign-link:${submissionId.toString()}` });
-	}
+	// it, is what campaigns are built from: group each site of the case again
+	// with what it now shows.
+	if (input.report.submissionId !== null) await queueCaseSiteLinks(input.report.submissionId);
 }
 
 /**

@@ -1,4 +1,6 @@
 import { andList } from "../util/text";
+import type { DeceptiveFunnelVerdict } from "../abuse/funnel/classification";
+import type { FunnelExtraction } from "../abuse/funnel/extract";
 
 export type WebsiteNavigationHop = {
 	index: number;
@@ -35,6 +37,18 @@ export type WebsiteRevisit =
 	| { reason: "challenge"; route: string }
 	/** The site the flow led to answered with nothing and sent the visit back, as a traffic filter does for a visitor it turns away: the whole flow is walked again from `route`. */
 	| { reason: "destination_cloaked"; route: string; site: string };
+
+/**
+ * The case's chain judged as one affiliate funnel: the tracking links,
+ * affiliate IDs and businesses it passed (`extraction`), whether its lure
+ * misrepresented the offer it led to (`verdict`), and the businesses a
+ * deceptive funnel's report skipped, with why.
+ */
+export type WebsiteFunnel = {
+	extraction: FunnelExtraction;
+	verdict: DeceptiveFunnelVerdict;
+	skipped?: Array<{ site: string; role: "merchant" | "network"; reason: string }>;
+};
 
 export type WebsiteCloakedDestination = {
 	host: string;

@@ -15,14 +15,23 @@ export type SubmissionDetail = Submission & {
 	/** Primary and discovered-backend reports, each with provider routes and replies. */
 	reports: SubmissionReport[];
 	artifacts: SubmissionArtifact[];
-	/** The campaign the site belongs to: its public page tells a visitor what to do and lists the group's other sites. */
-	campaign?: { id: string; siteCount: number };
+	/**
+	 * The campaigns the case's confirmed sites belong to, once each, with the
+	 * host of the case's first site in it: each public page tells a visitor
+	 * what to do and lists the group's other sites.
+	 */
+	campaigns: Array<{ id: string; siteCount: number; host: string }>;
 };
 
-async function campaignOf(submissionId: bigint): Promise<SubmissionDetail["campaign"]> {
-	const campaignId = await CampaignRepository.campaignForSubmission(submissionId);
-	if (campaignId === undefined) return undefined;
-	return { id: campaignId.toString(), siteCount: await CampaignRepository.memberCount(campaignId) };
+async function campaignsOf(submissionId: bigint): Promise<SubmissionDetail["campaigns"]> {
+	const campaigns = new Map<bigint, { id: string; siteCount: number; host: string }>();
+	for (const { campaignId, ...member } of await CampaignRepository.listCaseMemberships(submissionId)) {
+		if (campaigns.has(campaignId)) continue;
+		const site = await CampaignRepository.siteOf(member);
+		if (site === undefined) continue;
+		campaigns.set(campaignId, { id: campaignId.toString(), siteCount: await CampaignRepository.memberCount(campaignId), host: site.split("/")[0]! });
+	}
+	return [...campaigns.values()];
 }
 
 /** A case as its public page and API show it: data-drop credentials redacted, the stored case keeps them. */
@@ -37,11 +46,11 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 	const submission = await SubmissionsEntity.get(submissionId);
 	if (!submission) return undefined;
 
-	const [analysisRuns, reports, artifacts, campaign] = await Promise.all([
+	const [analysisRuns, reports, artifacts, campaigns] = await Promise.all([
 		AnalysisRunsEntity.listForSubmission(submissionId),
 		getReportsForSubmission(submissionId),
 		ArtifactsEntity.listForSubmission(submissionId),
-		campaignOf(submissionId),
+		campaignsOf(submissionId),
 	]);
-	return withoutBackendSecrets({ ...submission, analysisRuns, reports, artifacts, ...(campaign ? { campaign } : {}) });
+	return withoutBackendSecrets({ ...submission, analysisRuns, reports, artifacts, campaigns });
 }

@@ -1,6 +1,6 @@
 import { AbuseRepository } from "../repository";
 import type { resolveAbuseTarget } from "../resolver";
-import type { AbuseJob, AbuseJobType } from "../schema";
+import type { AbuseJob, AbuseJobType, AbuseReport } from "../schema";
 import { executeProviderSubmission, getProviderSubmissionProvider } from "../providers";
 import type { JobClaimFilter } from "../persistence/jobs";
 import { readSendEmailPayload, sendEmail } from "./email";
@@ -15,7 +15,7 @@ import { resolveReport } from "./resolution";
 import { idFrom, parseJobBigInt, type WorkerServices } from "./shared";
 import { boundedErrorText } from "../../util/error_text";
 import { readInvestigationJobPayload } from "../../investigation/payload";
-import { runReportInvestigation } from "../../investigation/run";
+import { runJoinedCaseInvestigation, runReportInvestigation } from "../../investigation/run";
 import { setInvestigationStatus } from "../../investigation/status";
 import { followUpProviderDecision, readDecisionFollowUpPayload } from "../followup/decision";
 import { describeCampaignIfChanged } from "../../campaign/link";
@@ -67,6 +67,8 @@ export const JOB_POLICY: Readonly<Record<AbuseJobType, JobPolicy>> = {
 	// An investigation's work: payload downloads with their awaited public analyses, data-drop lookups, and the linked reports.
 	// Evidence gathering must never keep a confirmed site from being reported.
 	investigate_report: { lane: "external", supplementary: true, minTimeoutMs: 15 * MINUTE },
+	// The redirector and data drops of a case whose site joined another case's report.
+	investigate_joined_case: { lane: "external", supplementary: true },
 	// The agent may recheck and walk the site several times; one walk alone may take 20 minutes.
 	follow_up_provider_decision: { lane: "external", supplementary: false, minTimeoutMs: 60 * MINUTE },
 	watch_redirector: { lane: "external", supplementary: true },
@@ -102,7 +104,17 @@ type JobContext = {
 	services: WorkerServices;
 	resolveTarget: typeof resolveAbuseTarget;
 	investigateReport: typeof runReportInvestigation;
+	investigateJoinedCase: typeof runJoinedCaseInvestigation;
 };
+
+/** The reporter metadata a report was accepted with, for the reports its investigation makes. */
+function reporterOf(report: AbuseReport) {
+	return {
+		reporterIp: report.requesterIp ?? undefined,
+		reporterCountry: report.requesterCountry ?? undefined,
+		reporterHeaders: report.requesterHeaders ?? undefined,
+	};
+}
 
 type JobHandler = (job: AbuseJob, context: JobContext) => Promise<unknown>;
 
@@ -112,20 +124,25 @@ async function runInvestigationJob(job: AbuseJob, { signal, investigateReport }:
 	if (!report?.submissionId) return;
 	const payload = readInvestigationJobPayload(job.payload);
 	try {
-		await investigateReport({
-			reportId,
-			payload,
-			reporter: {
-				reporterIp: report.requesterIp ?? undefined,
-				reporterCountry: report.requesterCountry ?? undefined,
-				reporterHeaders: report.requesterHeaders ?? undefined,
-			},
-			...(signal ? { signal } : {}),
-		});
+		await investigateReport({ reportId, payload, reporter: reporterOf(report), ...(signal ? { signal } : {}) });
 	} catch (error) {
 		// The worker decides finality: a retryable failure is queued again, and a
 		// terminal one releases the report on its single terminal path.
 		await setInvestigationStatus(report.submissionId, { status: "queued", lastError: boundedErrorText(error), updatedAt: new Date().toISOString() });
+		throw error;
+	}
+}
+
+/** A joining case's own evidence, reported against the report it joined; a failed attempt is retried. */
+async function runJoinedCaseJob(job: AbuseJob, { signal, investigateJoinedCase }: JobContext): Promise<void> {
+	const reportId = idFrom(job.reportId, "reportId");
+	const report = await AbuseRepository.getReport(reportId);
+	if (!report) return;
+	const payload = readInvestigationJobPayload(job.payload);
+	try {
+		await investigateJoinedCase({ reportId, payload, reporter: reporterOf(report), ...(signal ? { signal } : {}) });
+	} catch (error) {
+		await setInvestigationStatus(BigInt(payload.submissionId), { status: "queued", lastError: boundedErrorText(error), updatedAt: new Date().toISOString() });
 		throw error;
 	}
 }
@@ -168,6 +185,7 @@ export const JOB_HANDLERS: Readonly<Record<AbuseJobType, JobHandler>> = {
 	find_provider_receipt: (job, { signal }) => findProviderReceipt({ runId: idFrom(job.runId, "runId"), jobId: job.id, signal }),
 	monitor_provider_reply: (job) => monitorProviderReply(idFrom(job.routeId, "routeId")),
 	investigate_report: runInvestigationJob,
+	investigate_joined_case: runJoinedCaseJob,
 	follow_up_provider_decision: (job, { signal }) => followUpProviderDecision({ routeId: idFrom(job.routeId, "routeId"), ...readDecisionFollowUpPayload(job.payload) }, signal ? { signal } : {}),
 	report_origin_host: (job, { signal }) => reportOriginHostJob(job, idFrom(job.reportId, "reportId"), signal),
 	search_campaign_kits: (job, { signal }) => searchCampaignKits({ job, signal }),

@@ -1,6 +1,7 @@
 import { InferSelectModel, sql } from "drizzle-orm";
-import { index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, int, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+import { abuseReports } from "../abuse/schema";
 import { submissions } from "../db/schema";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "../db/sqlite_types";
 import type { VisitorGuidance } from "./guidance";
@@ -46,53 +47,68 @@ export const campaigns = sqliteTable(
 	(table) => [index("campaigns_merged_into_idx").on(table.mergedInto)],
 );
 
+/**
+ * A campaign's member is one confirmed site as one case saw it: the case and
+ * the site's primary report. A case whose chain confirmed two sites is two
+ * members, in two campaigns or twice in one; a case whose site another
+ * case already reports is a member through the report it joined
+ * (`abuse_report_cases`), with its own capture of the site as evidence.
+ */
+const memberColumns = {
+	submissionId: sqliteBigint("submission_id")
+		.notNull()
+		.references(() => submissions.id, { onDelete: "cascade" }),
+	/** The primary report of the site: the case's own, or the one it joined. It names the site (its target). */
+	reportId: sqliteBigint("report_id")
+		.notNull()
+		.references(() => abuseReports.id, { onDelete: "cascade" }),
+};
+
 export const campaignMembers = sqliteTable(
 	"campaign_members",
 	{
-		submissionId: sqliteBigint("submission_id")
-			.primaryKey()
-			.references(() => submissions.id, { onDelete: "cascade" }),
+		...memberColumns,
 		campaignId: sqliteBigint("campaign_id")
 			.notNull()
 			.references(() => campaigns.id, { onDelete: "cascade" }),
 		joinedAt: sqliteTimestamp("joined_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
-	(table) => [index("campaign_members_campaign_idx").on(table.campaignId, table.joinedAt)],
+	(table) => [
+		primaryKey({ columns: [table.submissionId, table.reportId] }),
+		index("campaign_members_campaign_idx").on(table.campaignId, table.joinedAt),
+	],
 );
 
 /**
- * What the public page shows of one site beyond its submission: the
- * language its captured page spoke and a screenshot cut to the page's
- * content. Kept apart from membership, which a regrouping rewrites.
+ * What the public page shows of one member beyond its case: the language
+ * the site's captured pages spoke and a screenshot of its judged page cut to
+ * the page's content. Kept apart from membership, which a regrouping rewrites.
  */
 export const campaignSiteFacts = sqliteTable(
 	"campaign_site_facts",
 	{
-		submissionId: sqliteBigint("submission_id")
-			.primaryKey()
-			.references(() => submissions.id, { onDelete: "cascade" }),
+		...memberColumns,
 		/** ISO 639-1 code of the captured page's language, when the text was long enough to tell. */
 		language: text("language"),
-		/** The trimmed screenshot artifact of the analyzed page. */
+		/** The trimmed screenshot artifact of the site's judged page. */
 		thumbnailArtifactId: sqliteBigint("thumbnail_artifact_id"),
-		/** The analyzed page's screenshot is one flat colour: nothing a visitor could recognize. */
+		/** The judged page's screenshot is one flat colour: nothing a visitor could recognize. */
 		blankCapture: int("blank_capture", { mode: "boolean" }).notNull().default(false),
 		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
+	(table) => [primaryKey({ columns: [table.submissionId, table.reportId] })],
 );
 
 export type CampaignIndicatorEvidence = Record<string, unknown>;
 
-/** One indicator one submission showed, with the evidence that proves it. */
+/** One indicator one member showed, with the evidence that proves it. */
 export const campaignIndicators = sqliteTable(
 	"campaign_indicators",
 	{
 		id: sqliteBigint("id").primaryKey(),
-		submissionId: sqliteBigint("submission_id")
-			.notNull()
-			.references(() => submissions.id, { onDelete: "cascade" }),
+		...memberColumns,
 		kind: text("kind", { enum: campaignIndicatorKinds }).notNull(),
-		/** The normalized identity two submissions must share to be linked, e.g. `telegram-bot:123`, `iban:DE89…`, a SHA-256. */
+		/** The normalized identity two members must share to be linked, e.g. `telegram-bot:123`, `iban:DE89…`, a SHA-256. */
 		value: text("value").notNull(),
 		/** Whether sharing this value puts two sites into one campaign. */
 		links: int("links", { mode: "boolean" }).notNull(),
@@ -100,7 +116,7 @@ export const campaignIndicators = sqliteTable(
 		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
-		uniqueIndex("campaign_indicators_submission_kind_value_unique").on(table.submissionId, table.kind, table.value),
+		uniqueIndex("campaign_indicators_member_kind_value_unique").on(table.submissionId, table.reportId, table.kind, table.value),
 		index("campaign_indicators_kind_value_idx").on(table.kind, table.value),
 	],
 );

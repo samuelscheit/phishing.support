@@ -6,13 +6,14 @@ import { DAY_MS } from "../util/date_time";
 import { isPopularSite, loadPopularDomains, type PopularDomains } from "../abuse/origin/popular_domains";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { ArtifactsEntity } from "../db/entities/artifacts";
-import type { Submission } from "../db/schema";
+import type { Submission, WebsiteSubmissionData } from "../db/schema";
 import { fetchJson } from "../network/bounded_fetch";
 import { mhtmlVisitorText } from "../website/archive/text";
 import { latestArtifactNamed, websiteCaptureFileNames } from "../website/visit/capture_files";
 import { hasPathTenants } from "../website/info/site";
 import type { ExfiltrationBackend } from "../exfiltration/types";
 import { deliveryCommandsOf } from "./delivery";
+import { headlineSite, judgedSitePage, sitePageSteps, siteOf, type CampaignMember, type CampaignSite, type SitePage } from "./members";
 import { loadPageFingerprints, type PageFingerprints } from "./page_document";
 import { paymentReceivers } from "./payment";
 import type { CampaignIndicatorEvidence, CampaignIndicatorKind, OperatorServerRole } from "./schema";
@@ -25,19 +26,22 @@ export type ExtractedIndicator = {
 	evidence: CampaignIndicatorEvidence;
 };
 
+/** The visitor-readable text of one captured page, named after its capture file (`websiteCaptureFileNames(step).mhtml`). */
+export type PageText = { name: string; text: string };
+
 export type IndicatorDependencies = {
 	loadSubmission?: (submissionId: bigint) => Promise<Submission | undefined>;
-	/** Backends the investigation reported for this submission. */
-	loadBackends?: (submissionId: bigint) => Promise<Array<{ backend: ExfiltrationBackend; observedAt: string; reportId: string }>>;
+	/** Backends the investigation of the member's report found and reported. */
+	loadBackends?: (member: CampaignMember) => Promise<Array<{ backend: ExfiltrationBackend; observedAt: string; reportId: string }>>;
 	/** The visitor-readable text of every captured page of the case. */
-	loadPageTexts?: (submissionId: bigint) => Promise<Array<{ name: string; text: string }>>;
+	loadPageTexts?: (submissionId: bigint) => Promise<PageText[]>;
 	/** The published library a kit file's bytes are, or undefined when none is. */
 	libraryFor?: (sha256: string) => Promise<string | undefined>;
 	/** Whether a host other than the site's that serves it kit files is a platform's asset host. */
 	isPlatformHost?: (host: string) => Promise<boolean>;
 	loadPopularDomains?: () => Promise<PopularDomains>;
-	/** The reported page's body and structure (page_document.ts). */
-	loadPageFingerprints?: (submissionId: bigint, siteUrl: string) => Promise<PageFingerprints>;
+	/** The judged page's body and structure (page_document.ts). */
+	loadPageFingerprints?: (submissionId: bigint, page: SitePage) => Promise<PageFingerprints>;
 };
 
 /** The identity two sites share when they use the same server of their operator: a Telegram bot, a Discord webhook, or a host. */
@@ -50,14 +54,19 @@ export function backendIndicatorValue(backend: ExfiltrationBackend): string | un
 	return backend.hostname ? `host:${backend.hostname.toLowerCase()}` : undefined;
 }
 
-async function loadReportedBackends(submissionId: bigint) {
+/**
+ * The data drops the case reported from the investigation of the member's
+ * report (`sourceReportId`). The visit's drops go with the first report the
+ * case filed itself, so a site whose report another case owns has none.
+ */
+async function loadReportedBackends(member: CampaignMember) {
 	const backends: Array<{ backend: ExfiltrationBackend; observedAt: string; reportId: string }> = [];
-	for (const report of await AbuseRepository.listReportsForSubmission(submissionId)) {
+	for (const report of await AbuseRepository.listReportsForSubmission(member.submissionId)) {
 		if (!report.idempotencyKey?.startsWith("exfil:")) continue;
 		const [request] = await AbuseRepository.listArtifacts(report.id, ["original_request"]);
 		if (!request) continue;
-		const original = JSON.parse(Buffer.from(request.blob).toString("utf8")) as { kind?: string; backend?: ExfiltrationBackend; observedAt?: string };
-		if (original.kind === "exfiltration_backend" && original.backend) {
+		const original = JSON.parse(Buffer.from(request.blob).toString("utf8")) as { kind?: string; sourceReportId?: string; backend?: ExfiltrationBackend; observedAt?: string };
+		if (original.kind === "exfiltration_backend" && original.backend && original.sourceReportId === member.reportId.toString()) {
 			backends.push({ backend: original.backend, observedAt: original.observedAt ?? report.createdAt.toISOString(), reportId: report.id.toString() });
 		}
 	}
@@ -67,7 +76,7 @@ async function loadReportedBackends(submissionId: bigint) {
 /** Each captured page of the case as a visitor reads it; a capture that cannot be read is skipped. */
 export async function loadCapturedPageTexts(submissionId: bigint) {
 	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
-	const texts: Array<{ name: string; text: string }> = [];
+	const texts: PageText[] = [];
 	for (let step = 0; step < 20; step += 1) {
 		const meta = latestArtifactNamed(artifacts, websiteCaptureFileNames(step).mhtml);
 		if (!meta) break;
@@ -80,6 +89,15 @@ export async function loadCapturedPageTexts(submissionId: bigint) {
 		}
 	}
 	return texts;
+}
+
+/** The pages of the case's capture that show the member's site: what the site itself told its visitors. */
+export async function sitePageTexts(member: CampaignSite, website: WebsiteSubmissionData, dependencies: Pick<IndicatorDependencies, "loadPageTexts"> = {}): Promise<PageText[]> {
+	const texts = await (dependencies.loadPageTexts ?? loadCapturedPageTexts)(member.submissionId);
+	const steps = sitePageSteps(website, member.site);
+	if (!steps) return texts;
+	const names = new Set(steps.map((step) => websiteCaptureFileNames(step).mhtml));
+	return texts.filter((page) => names.has(page.name));
 }
 
 const JSDELIVR_HASH_LOOKUP = "https://data.jsdelivr.com/v1/lookup/hash/";
@@ -123,7 +141,8 @@ async function cachedPlatformHost(host: string): Promise<boolean> {
 }
 
 /**
- * Everything one confirmed site shows about its operator. A server only the
+ * Everything one confirmed site shows about its operator, as one case saw
+ * it. A server only the
  * operator controls links sites, whatever it did for them (received the
  * entered data, delivered the malware): a Telegram bot, a Discord webhook,
  * or a host that is not a public platform anyone can put files or forms on.
@@ -134,11 +153,20 @@ async function cachedPlatformHost(host: string): Promise<boolean> {
  * on (a site builder's scripts are on every site built with it). A platform
  * file names the site's registrable domain as the scope its kit search keeps
  * to. The server address is recorded for the dossier but never links.
+ *
+ * A case's chain can confirm several sites, and each is linked by what it
+ * showed itself, so two sites of one chain are one operator's only when
+ * their evidence says so: the data drops its report's investigation found,
+ * the text of its own pages, its judged page's body, the file its page
+ * offered, and the server of the submitted address when that is the site.
+ * What the case recorded once for its headline page (kit files, hidden
+ * frames, fetched payloads) is the headline site's.
  */
-export async function extractIndicators(submissionId: bigint, dependencies: IndicatorDependencies = {}): Promise<ExtractedIndicator[]> {
-	const submission = await (dependencies.loadSubmission ?? SubmissionsEntity.get)(submissionId);
+export async function extractIndicators(member: CampaignSite, dependencies: IndicatorDependencies = {}): Promise<ExtractedIndicator[]> {
+	const submission = await (dependencies.loadSubmission ?? SubmissionsEntity.get)(member.submissionId);
 	if (submission?.data.kind !== "website") return [];
 	const website = submission.data.website;
+	const headline = headlineSite(website) === member.site;
 	const indicators = new Map<string, ExtractedIndicator>();
 	const add = (indicator: ExtractedIndicator) => {
 		const key = `${indicator.kind}:${indicator.value}`;
@@ -162,7 +190,7 @@ export async function extractIndicators(submissionId: bigint, dependencies: Indi
 		add({ kind: "operator_server", value, links: !shared, evidence: { roles: [role], ...evidence } });
 	};
 
-	for (const { backend, observedAt, reportId } of await (dependencies.loadBackends ?? loadReportedBackends)(submissionId)) {
+	for (const { backend, observedAt, reportId } of await (dependencies.loadBackends ?? loadReportedBackends)(member)) {
 		const value = backendIndicatorValue(backend);
 		if (!value) continue;
 		await operatorServer(value, "receives_data", {
@@ -179,9 +207,10 @@ export async function extractIndicators(submissionId: bigint, dependencies: Indi
 
 	// What a pasted command fetches (only payloads the investigation actually
 	// received) and the file a page offers.
+	const offered = website.offeredDownload && siteOf(website.offeredDownload.pageUrl) === member.site ? website.offeredDownload : undefined;
 	const deliveries = [
-		...(website.investigation?.payloads ?? []).filter((payload) => payload.sha256).map((payload) => ({ url: payload.url, sha256: payload.sha256, via: "pasted_command" })),
-		...(website.offeredDownload ? [{ url: website.offeredDownload.url, sha256: website.offeredDownload.sha256, via: "offered_download" }] : []),
+		...(headline ? website.investigation?.payloads ?? [] : []).filter((payload) => payload.sha256).map((payload) => ({ url: payload.url, sha256: payload.sha256, via: "pasted_command" })),
+		...(offered ? [{ url: offered.url, sha256: offered.sha256, via: "offered_download" }] : []),
 	];
 	for (const delivery of deliveries) {
 		let host: string;
@@ -193,7 +222,7 @@ export async function extractIndicators(submissionId: bigint, dependencies: Indi
 		await operatorServer(`host:${host}`, "delivers_malware", { delivered: delivery });
 	}
 
-	for (const page of await (dependencies.loadPageTexts ?? loadCapturedPageTexts)(submissionId)) {
+	for (const page of await sitePageTexts(member, website, dependencies)) {
 		for (const receiver of paymentReceivers(page.text)) {
 			add({ kind: "payment_receiver", value: `${receiver.kind}:${receiver.value}`, links: true, evidence: { receiverKind: receiver.kind, receiver: receiver.value, page: page.name } });
 		}
@@ -202,10 +231,10 @@ export async function extractIndicators(submissionId: bigint, dependencies: Indi
 		}
 	}
 
-	const fingerprints = kitFingerprints(website).filter((fingerprint) => fingerprint.kind !== "stylesheet");
+	const fingerprints = headline ? kitFingerprints(website).filter((fingerprint) => fingerprint.kind !== "stylesheet") : [];
 	if (fingerprints.length) {
 		const popular = await popularSites();
-		const siteHost = new URL(website.url).hostname;
+		const siteHost = new URL(website.archiveUrl ?? website.url).hostname;
 		for (const fingerprint of fingerprints) {
 			const servedFrom = new URL(fingerprint.url).hostname;
 			if (isPopularSite(servedFrom, popular)) continue;
@@ -227,11 +256,13 @@ export async function extractIndicators(submissionId: bigint, dependencies: Indi
 	}
 
 	// The page itself: a kit deployed under many domains serves the same body, or one template's structure, on each.
-	const page = await (dependencies.loadPageFingerprints ?? loadPageFingerprints)(submissionId, website.url);
-	if (page.body) add({ kind: "kit_fingerprint", value: page.body.sha256, links: true, evidence: { fileKind: "page_document", url: website.url, size: page.body.size } });
-	if (page.structure) add({ kind: "kit_fingerprint", value: page.structure.sha256, links: true, evidence: { fileKind: "page_structure", url: website.url, size: page.structure.size, tags: page.structure.tags } });
+	const judged = judgedSitePage(website, member.site);
+	const page = judged ? await (dependencies.loadPageFingerprints ?? loadPageFingerprints)(member.submissionId, judged) : {};
+	if (page.body) add({ kind: "kit_fingerprint", value: page.body.sha256, links: true, evidence: { fileKind: "page_document", url: judged!.url, size: page.body.size } });
+	if (page.structure) add({ kind: "kit_fingerprint", value: page.structure.sha256, links: true, evidence: { fileKind: "page_structure", url: judged!.url, size: page.structure.size, tags: page.structure.tags } });
 
-	for (const rdap of website.whois?.ip_rdaps ?? []) {
+	// The case looked up the submitted address's server: it is this site's only when the chain started on it.
+	for (const rdap of siteOf(website.url) === member.site ? website.whois?.ip_rdaps ?? [] : []) {
 		if (!rdap.ip) continue;
 		add({
 			kind: "origin_ip",

@@ -1,5 +1,4 @@
 import type { ReporterMetadata } from "../../http/reporter_headers";
-import { DAY_MS } from "../../util/date_time";
 import { hashStableJson, sha256Hex, stableJson } from "../../util/hash";
 import { normalizedEvidence, verbatimEvidenceQuote } from "../../website/analysis/classification";
 import { MAX_EVIDENCE_BYTES_PER_ITEM, normalizeObservedUrl, type DecodedEvidence, type ValidatedAbuseReportRequest } from "../contracts";
@@ -7,7 +6,8 @@ import { isPopularSite, loadPopularDomains, type PopularDomains } from "../origi
 import { AbuseRepository } from "../repository";
 import type { FunnelChain, FunnelPage } from "./chain";
 import { isSubstantialQuote, quoteLines, type DeceptiveFunnelFinding, type FunnelQuote } from "./classification";
-import { findOpenFunnelReport, FUNNEL_REPORT_WINDOW_DAYS, funnelDedupeKey, withFunnelReportLock } from "./dedupe";
+import type { ReportSubject } from "../persistence/reports";
+import { funnelReportSubject } from "./dedupe";
 import { DECEPTION_PHRASES } from "./deception";
 import type { FunnelExtraction, FunnelParty } from "./extract";
 import { FUNNEL_EVIDENCE_NAME, type FunnelFacts } from "./facts";
@@ -27,7 +27,7 @@ export type FunnelReportInput = {
 };
 
 /** One report the funnel warrants, before it is created. */
-type PlannedFunnelReport = { party: FunnelParty; dedupeKey: string; request: ValidatedAbuseReportRequest };
+type PlannedFunnelReport = { party: FunnelParty; subject: Extract<ReportSubject, { key: string }>; request: ValidatedAbuseReportRequest };
 
 export type FunnelReportPlan = { planned: PlannedFunnelReport[]; skipped: Array<{ site: string; role: FunnelParty["role"]; reason: string }> };
 
@@ -190,12 +190,12 @@ export function planFunnelReports(input: FunnelReportInput & { popularDomains: P
 			...(party.affiliateIds[0] ? { affiliateId: party.affiliateIds[0] } : {}),
 		});
 		const evidenceFile = Buffer.from(stableJson(facts(input, party, { lureQuotes, offerQuote }, shots)), "utf8");
-		const dedupeKey = funnelDedupeKey(party);
-		const idempotencyKey = `${dedupeKey}:${input.submissionId.toString()}`;
+		const subject = funnelReportSubject(party);
+		const idempotencyKey = `${subject.key}:${input.submissionId.toString()}`;
 		const reportDescription = description(party, input.verdict, input.extraction.merchant?.site);
 		plan.planned.push({
 			party,
-			dedupeKey,
+			subject,
 			request: {
 				originalRequest: { kind: "deceptive_funnel", submissionId: input.submissionId.toString(), target, recordedAt: input.chain.startedAt.toISOString() },
 				targets: [{ ordinal: 0, originalInput: target, originalInputs: [target], normalizedTarget: target, targetType: "service_account", observedUrls }],
@@ -214,46 +214,36 @@ export function planFunnelReports(input: FunnelReportInput & { popularDomains: P
 	return plan;
 }
 
+/** What became of one party of the funnel; `affiliate` is the ID it knows the affiliate by, or the one its network credits. */
 export type FunnelReportOutcome =
-	| { kind: "reported"; site: string; reportId: bigint; created: boolean }
-	/** Another case already reported this business and affiliate within the window; this case was linked to that report. */
-	| { kind: "linked"; site: string; reportId: bigint }
-	| { kind: "skipped"; site: string; reason: string };
+	| { kind: "reported"; site: string; role: FunnelParty["role"]; affiliate: string; reportId: bigint; created: boolean }
+	/** Another case already reported this business and affiliate within the window; this case joined that report. */
+	| { kind: "joined"; site: string; role: FunnelParty["role"]; affiliate: string; reportId: bigint; caseId: bigint }
+	| { kind: "skipped"; site: string; role: FunnelParty["role"]; reason: string };
 
 export type FunnelReportDependencies = {
 	loadPopularDomains?: () => Promise<PopularDomains>;
-	now?: () => Date;
 };
 
-export const FUNNEL_CASE_LINKED_EVENT = "funnel.case_linked";
-
-async function linkCase(reportId: bigint, submissionId: bigint, recordedAt: Date): Promise<void> {
-	const events = await AbuseRepository.listEvents(reportId);
-	if (events.some((event) => event.eventType === FUNNEL_CASE_LINKED_EVENT && event.data.submissionId === submissionId.toString())) return;
-	await AbuseRepository.appendEvent({ reportId, eventType: FUNNEL_CASE_LINKED_EVENT, data: { submissionId: submissionId.toString(), recordedAt: recordedAt.toISOString() } });
+/** The affiliate as the party's report names it. */
+export function partyAffiliate(party: Pick<FunnelParty, "affiliateIds" | "creditedBy">): string {
+	return party.affiliateIds[0] ?? `${party.creditedBy!.id} (credited by ${party.creditedBy!.site})`;
 }
 
 /**
- * Creates the funnel's reports, each linked to the case; the worker resolves
+ * Creates the funnel's reports, each owned by the case; the worker resolves
  * and mails them without an operator. A business and affiliate another case
  * reported within FUNNEL_REPORT_WINDOW_DAYS gets no second mail: this case
- * is recorded on that report (`funnel.case_linked`) instead.
+ * joins that report (`abuse_report_cases`), like a site another case reports.
  */
 export async function reportDeceptiveFunnel(input: FunnelReportInput & { reporter: ReporterMetadata }, dependencies: FunnelReportDependencies = {}): Promise<FunnelReportOutcome[]> {
 	const popularDomains = await (dependencies.loadPopularDomains ?? loadPopularDomains)();
 	const plan = planFunnelReports({ ...input, popularDomains });
-	const since = new Date((dependencies.now ?? (() => new Date()))().getTime() - FUNNEL_REPORT_WINDOW_DAYS * DAY_MS);
-	const outcomes: FunnelReportOutcome[] = plan.skipped.map(({ site, reason }) => ({ kind: "skipped", site, reason }));
-	for (const { party, dedupeKey, request } of plan.planned) {
-		outcomes.push(await withFunnelReportLock(dedupeKey, `submission:${input.submissionId.toString()}`, async (): Promise<FunnelReportOutcome> => {
-			const open = await findOpenFunnelReport(dedupeKey, request.idempotencyKey!, since);
-			if (open) {
-				await linkCase(open.id, input.submissionId, input.chain.startedAt);
-				return { kind: "linked", site: party.site, reportId: open.id };
-			}
-			const report = await AbuseRepository.createReport({ request, reporter: input.reporter, submissionId: input.submissionId });
-			return { kind: "reported", site: party.site, reportId: report.reportId, created: report.created };
-		}));
+	const outcomes: FunnelReportOutcome[] = plan.skipped.map(({ site, role, reason }) => ({ kind: "skipped", site, role, reason }));
+	for (const { party, subject, request } of plan.planned) {
+		const report = await AbuseRepository.createReport({ request, reporter: input.reporter, submissionId: input.submissionId, subject });
+		const of = { site: party.site, role: party.role, affiliate: partyAffiliate(party), reportId: report.reportId };
+		outcomes.push(report.joined ? { kind: "joined", ...of, caseId: report.joined.submissionId } : { kind: "reported", ...of, created: report.created });
 	}
 	return outcomes;
 }

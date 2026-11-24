@@ -539,7 +539,7 @@ describe("the raw answers of a chain across the pages of a visit", () => {
 		const read = async (name: string) => Buffer.from((await ArtifactsEntity.get(files.find((file) => file.name === name)!.id))!.blob);
 		for (const [index, url] of [[1, CONSENT], [2, GET_STARTED], [3, loading], [4, RECOVERY]] as const) {
 			const file = files.find(({ name }) => name === `chain-hop-${index}.html`);
-			expect(file).toMatchObject({ kind: "website_hop_body", mimeType: "text/html" });
+			expect(file).toMatchObject({ kind: "website_hop_body", mimeType: "application/octet-stream" });
 			expect((await read(`chain-hop-${index}.html`)).toString("utf8")).toBe(body(url).toString("utf8"));
 		}
 		// The tracker answered with a redirect: nothing to keep.
@@ -547,9 +547,10 @@ describe("the raw answers of a chain across the pages of a visit", () => {
 		const listed = async (manifest: string) => JSON.parse((await read(manifest)).toString("utf8")).files.filter(({ name }: { name: string }) => name.startsWith("chain-hop-"));
 		expect(await listed("evidence-manifest.json")).toEqual([{ name: "chain-hop-1.html", mimeType: "text/html", sha256: sha256Hex(body(CONSENT)), size: body(CONSENT).byteLength }]);
 		expect((await listed("evidence-step2-manifest.json")).map(({ name }: { name: string }) => name)).toEqual(["chain-hop-2.html"]);
-		expect((await listed("evidence-step3-manifest.json")).map(({ name, sha256 }: { name: string; sha256: string }) => ({ name, sha256 }))).toEqual([
-			{ name: "chain-hop-3.html", sha256: sha256Hex(body(loading)) },
-			{ name: "chain-hop-4.html", sha256: sha256Hex(body(RECOVERY)) },
+		// Each body is listed as the type its answer declared; one that declared none is opaque bytes.
+		expect((await listed("evidence-step3-manifest.json")).map(({ name, mimeType, sha256 }: { name: string; mimeType: string; sha256: string }) => ({ name, mimeType, sha256 }))).toEqual([
+			{ name: "chain-hop-3.html", mimeType: "application/octet-stream", sha256: sha256Hex(body(loading)) },
+			{ name: "chain-hop-4.html", mimeType: "text/html", sha256: sha256Hex(body(RECOVERY)) },
 		]);
 	});
 });

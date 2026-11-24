@@ -12,6 +12,7 @@ import { AbuseRepository } from "../abuse/repository";
 import { abuseJobs } from "../abuse/schema";
 import { sendEmail } from "../abuse/worker/email";
 import { classifyReply } from "../abuse/worker/mail";
+import type { CampaignMember } from "../campaign/members";
 import { CampaignRepository } from "../campaign/repository";
 import type { ExtractedIndicator } from "../campaign/indicators";
 import { ingestFetchedMail } from "../imap/ingest";
@@ -59,7 +60,11 @@ const telegram = (botId: string): ExtractedIndicator => ({
 });
 const kit = (sha: string): ExtractedIndicator => ({ kind: "kit_fingerprint", value: sha, links: true, evidence: { fileKind: "script", url: "https://kit.example/app.js", size: 18_000 } });
 
-/** A confirmed site whose takedown report was mailed to `abuseMailbox`. */
+/** The member each reported case is for its one site. */
+const members = new Map<bigint, CampaignMember>();
+const memberOf = (id: bigint) => members.get(id)!;
+
+/** A confirmed site with its takedown report, mailed to `abuseMailbox` when given. */
 async function reportedSite(id: bigint, host: string, abuseMailbox?: string) {
 	await SubmissionsEntity.create({
 		id,
@@ -68,7 +73,6 @@ async function reportedSite(id: bigint, host: string, abuseMailbox?: string) {
 		dedupeKey: `website-${host}`,
 		status: "reported",
 	});
-	if (!abuseMailbox) return;
 	const request = await validateAbuseReportRequest({
 		targets: [host],
 		allegationCategory: "phishing",
@@ -77,6 +81,8 @@ async function reportedSite(id: bigint, host: string, abuseMailbox?: string) {
 		legalBrandUrl: "https://www.dhl.de/",
 	});
 	const report = await AbuseRepository.createReport({ request, reporter: {}, submissionId: id });
+	members.set(id, { submissionId: id, reportId: report.reportId });
+	if (!abuseMailbox) return;
 	const [target] = await AbuseRepository.listTargets(report.reportId);
 	const route = await AbuseRepository.upsertResolvedRoute(target!.id, {
 		routeKey: `email:${abuseMailbox}`,
@@ -103,7 +109,7 @@ async function reportedSite(id: bigint, host: string, abuseMailbox?: string) {
 }
 
 async function campaignOf(submissionId: bigint): Promise<bigint> {
-	const campaignId = await CampaignRepository.campaignForSubmission(submissionId);
+	const campaignId = await CampaignRepository.campaignForMember(memberOf(submissionId));
 	if (campaignId === undefined) throw new Error("The site has no campaign.");
 	return campaignId;
 }
@@ -127,9 +133,9 @@ async function campaignWithThreeSites() {
 	await reportedSite(11n, "dhl-paket-zustellung.com", "abuse@hostinger.example");
 	await reportedSite(12n, "dhl-sendung-pruefen.net", "abuse@hostinger.example");
 	await reportedSite(13n, "paket-dhl-info.org");
-	await CampaignRepository.recordIndicators(11n, [telegram("7001")]);
-	await CampaignRepository.recordIndicators(12n, [telegram("7001"), kit("a".repeat(64))]);
-	await CampaignRepository.recordIndicators(13n, [kit("a".repeat(64))]);
+	await CampaignRepository.recordIndicators(memberOf(11n), [telegram("7001")]);
+	await CampaignRepository.recordIndicators(memberOf(12n), [telegram("7001"), kit("a".repeat(64))]);
+	await CampaignRepository.recordIndicators(memberOf(13n), [kit("a".repeat(64))]);
 	return campaignOf(11n);
 }
 
@@ -182,9 +188,9 @@ describe("criminal referral of a campaign", () => {
 		await reportedSite(15n, "dhl-iban-zahlung.com");
 		const iban: ExtractedIndicator = { kind: "payment_receiver", value: "iban:DE89370400440532013000", links: true, evidence: { receiverKind: "iban", receiver: "DE89370400440532013000" } };
 		const wallet: ExtractedIndicator = { kind: "payment_receiver", value: "tron:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", links: true, evidence: { receiverKind: "tron", receiver: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t" } };
-		await CampaignRepository.recordIndicators(15n, [telegram("7001"), iban, wallet]);
-		await CampaignRepository.recordIndicators(13n, [kit("a".repeat(64)), iban, wallet]);
-		await CampaignRepository.saveSiteFacts(11n, { language: "de", thumbnailArtifactId: 4242n, blankCapture: false });
+		await CampaignRepository.recordIndicators(memberOf(15n), [telegram("7001"), iban, wallet]);
+		await CampaignRepository.recordIndicators(memberOf(13n), [kit("a".repeat(64)), iban, wallet]);
+		await CampaignRepository.saveSiteFacts(memberOf(11n), { language: "de", thumbnailArtifactId: 4242n, blankCapture: false });
 		// The visit's pages, saved out of order: the landing page, then the form after it, with its stamped copy.
 		const shot = async (name: string, kind: string) => (await ArtifactsEntity.saveBuffer({ submissionId: 11n, name, kind, mimeType: "image/png", buffer: Buffer.from(name) })).toString();
 		const form = await shot("website-step2.png", "website_png");
@@ -228,9 +234,9 @@ describe("criminal referral of a campaign", () => {
 			const id = BigInt(21 + index);
 			await reportedSite(id, `${name}.onrender.com`);
 			await SubmissionsEntity.update(id, { createdAt: new Date(Date.parse("2026-11-15T00:30:00Z") + index * 10 * 60_000) });
-			await CampaignRepository.recordIndicators(id, [kit("b".repeat(64))]);
+			await CampaignRepository.recordIndicators(memberOf(id), [kit("b".repeat(64))]);
 		}
-		const campaign = (await getPublicCampaign((await CampaignRepository.campaignForSubmission(21n))!))!;
+		const campaign = (await getPublicCampaign((await CampaignRepository.campaignForMember(memberOf(21n)))!))!;
 		expect(campaign).toMatchObject({ platform: "onrender.com", domainCount: 1, durationMinutes: 30, typicalIntervalMinutes: 10 });
 		expect(campaign.reasons.find((reason) => reason.kind === "same_pattern")?.text).toBe("4 pages on onrender.com within 30 minutes, a new one about every 10 minutes.");
 		expect(campaign.reasons.find((reason) => reason.kind === "same_code")?.text).toContain("Every page runs the same program file, byte for byte.");
@@ -242,9 +248,9 @@ describe("criminal referral of a campaign", () => {
 		for (const [index, host] of ["napxu.saobangmedia.shop", "napxu.trungdungmedia.sbs", "shopxu.thuysimedia.online"].entries()) {
 			const id = BigInt(31 + index);
 			await reportedSite(id, host);
-			await CampaignRepository.recordIndicators(id, [page(host)]);
+			await CampaignRepository.recordIndicators(memberOf(id), [page(host)]);
 		}
-		const campaignId = (await CampaignRepository.campaignForSubmission(31n))!;
+		const campaignId = (await CampaignRepository.campaignForMember(memberOf(31n)))!;
 		const campaign = (await getPublicCampaign(campaignId))!;
 		expect(campaign.sites).toHaveLength(3);
 		expect(campaign.reasons.map((reason) => reason.kind)).toEqual(["same_page"]);
@@ -262,9 +268,9 @@ describe("criminal referral of a campaign", () => {
 		const server: ExtractedIndicator = { kind: "operator_server", value: "host:keychainagent.pro", links: true, evidence: { roles: ["delivers_malware"], delivered: { url: "https://keychainagent.pro/wksxgj/wZZLR9xY29o4", sha256: "e".repeat(64), via: "pasted_command" } } };
 		for (const [index, host] of ["paneo.work", "macmorrow.app"].entries()) {
 			await reportedSite(BigInt(51 + index), host);
-			await CampaignRepository.recordIndicators(BigInt(51 + index), [server]);
+			await CampaignRepository.recordIndicators(memberOf(BigInt(51 + index)), [server]);
 		}
-		const campaignId = (await CampaignRepository.campaignForSubmission(51n))!;
+		const campaignId = (await CampaignRepository.campaignForMember(memberOf(51n)))!;
 		expect((await getPublicCampaign(campaignId))!.reasons).toEqual([
 			{ kind: "same_backend", title: "Same server", text: "Every page uses a server only its operator controls: the malware visitors are made to run or download comes from the same server (keychainagent.pro)." },
 		]);
@@ -282,12 +288,12 @@ describe("criminal referral of a campaign", () => {
 		for (const [index, host] of hosts.entries()) {
 			const id = BigInt(41 + index);
 			await reportedSite(id, host);
-			await CampaignRepository.recordIndicators(id, [
+			await CampaignRepository.recordIndicators(memberOf(id), [
 				{ kind: "kit_fingerprint", value: template, links: true, evidence: { fileKind: "page_structure", url: `https://${host}/894655`, size: 7_355, tags: 66 } },
 				...(index < 2 ? [{ kind: "kit_fingerprint" as const, value: body, links: true, evidence: { fileKind: "page_document", url: `https://${host}/894655`, size: 7_355 } }] : []),
 			]);
 		}
-		const campaignId = (await CampaignRepository.campaignForSubmission(41n))!;
+		const campaignId = (await CampaignRepository.campaignForMember(memberOf(41n)))!;
 		const campaign = (await getPublicCampaign(campaignId))!;
 		expect(campaign.reasons.map((reason) => [reason.kind, reason.text])).toEqual([
 			["same_page", "2 of the 4 pages serve the same page body, byte for byte apart from its own address. A copied design would not match this exactly."],
@@ -302,7 +308,7 @@ describe("criminal referral of a campaign", () => {
 	test("the public list shows every phishing site as its campaign's card, a campaign of one included", async () => {
 		await campaignWithThreeSites();
 		await reportedSite(16n, "unrelated-solo.com");
-		await CampaignRepository.recordIndicators(16n, [telegram("9999")]);
+		await CampaignRepository.recordIndicators(memberOf(16n), [telegram("9999")]);
 		const page = await listSubmissionCards();
 		const campaignOf = (id: string) => page.submissions.find((card) => card.id === id)?.campaign;
 		expect(campaignOf("11")).toMatchObject({ siteCount: 3 });
@@ -375,7 +381,7 @@ describe("criminal referral of a campaign", () => {
 		await expect(prepareSupplement(campaignId, "by-zcb", dependencies)).rejects.toThrow("has received every site");
 
 		await reportedSite(14n, "dhl-zoll-gebuehr.com", "abuse@other-host.example");
-		await CampaignRepository.recordIndicators(14n, [telegram("7001")]);
+		await CampaignRepository.recordIndicators(memberOf(14n), [telegram("7001")]);
 		const supplement = await prepareSupplement(campaignId, "by-zcb", dependencies);
 		const draft = supplement.resolutionSnapshot.approvalDraft as { subject: string; body: string };
 		expect(draft.subject).toBe(`Nachtrag zu Az. 401 UJs 12345/26 – 1 weitere Website der Phishing-Kampagne [${abuseCaseTag(supplement.reportId)}]`);
@@ -403,7 +409,7 @@ describe("criminal referral of a campaign", () => {
 	test("preservation notices go to every provider mailbox once the case has a file number", async () => {
 		const campaignId = await campaignWithThreeSites();
 		await reportedSite(14n, "dhl-zoll-gebuehr.com", "abuse@other-host.example");
-		await CampaignRepository.recordIndicators(14n, [telegram("7001")]);
+		await CampaignRepository.recordIndicators(memberOf(14n), [telegram("7001")]);
 		await expect(preparePreservationNotices(campaignId, dependencies)).rejects.toThrow("file number");
 
 		const complaint = await prepareComplaint(campaignId, "by-zcb", dependencies);

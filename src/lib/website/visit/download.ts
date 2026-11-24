@@ -2,7 +2,8 @@ import type { CDPSession, Page } from "rebrowser-puppeteer-core";
 
 import { sendBeforeRun } from "../../browser/cdp";
 import { sleep } from "../../util/sleep";
-import { readDocumentAnswer, type DocumentAnswer, type PausedDocument } from "./document_bodies";
+import { passDocument, type DocumentAnswer, type PausedDocument } from "./document_bodies";
+import { takeHeldBody } from "./held_body";
 
 /**
  * Every file a visit downloads, taken without the browser ever saving or
@@ -14,6 +15,8 @@ import { readDocumentAnswer, type DocumentAnswer, type PausedDocument } from "./
 /** A file larger than this is not read; a kit's stealer is small, and an installer this big is reported by size only. */
 const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
 const MAX_DOWNLOADS = 5;
+/** How long a file may take to arrive; one still streaming after this is a tarpit, not a file to read. */
+const DOWNLOAD_TIMEOUT_MS = 120_000;
 
 /** The file, and the User-Agent of the visit that got it: a host may serve it only to that browser. */
 export type DownloadedFile = { url: string; fileName: string; contentType?: string; bytes: Buffer; userAgent: string; observedAt: Date };
@@ -119,9 +122,8 @@ export function interceptDownloads<Tab extends DownloadTab>(userAgent: string, t
 					// The tab runs by now, so the settings it was given while held are answered.
 					await Promise.race([Promise.all(tab.beforeFirstPage ?? []), sleep(SETTINGS_WAIT_MS)]);
 				}
-				const answer = tab.recordDocumentAnswer ? await readDocumentAnswer(cdp, paused, tab.targetId) : undefined;
-				if (answer) tab.recordDocumentAnswer!(answer);
-				await cdp.send("Fetch.continueRequest", { requestId: paused.requestId }).catch(() => undefined);
+				if (tab.recordDocumentAnswer) await passDocument(cdp, paused, tab.targetId, tab.recordDocumentAnswer);
+				else await cdp.send("Fetch.continueRequest", { requestId: paused.requestId }).catch(() => undefined);
 				return;
 			}
 			await takeResponse(cdp, paused);
@@ -156,13 +158,14 @@ export function interceptDownloads<Tab extends DownloadTab>(userAgent: string, t
 			if (length > MAX_DOWNLOAD_BYTES) {
 				failures.push({ url: paused.request.url, reason: `the file is ${length} bytes, more than the ${MAX_DOWNLOAD_BYTES} bytes a visit reads` });
 			} else {
-				const body = await cdp.send("Fetch.getResponseBody", { requestId: paused.requestId });
+				const body = await takeHeldBody(cdp, paused.requestId, { maxBytes: MAX_DOWNLOAD_BYTES, timeoutMs: DOWNLOAD_TIMEOUT_MS });
 				const contentType = header(paused.responseHeaders, "content-type");
-				files.push({
+				if (!body.complete) failures.push({ url: paused.request.url, reason: body.reason });
+				else files.push({
 					url: paused.request.url,
 					fileName: downloadFileName(paused.request.url, header(paused.responseHeaders, "content-disposition")),
 					...(contentType ? { contentType } : {}),
-					bytes: Buffer.from(body.body, body.base64Encoded ? "base64" : "utf8"),
+					bytes: body.bytes,
 					userAgent,
 					observedAt: new Date(),
 				});

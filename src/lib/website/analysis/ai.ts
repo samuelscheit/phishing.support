@@ -24,6 +24,7 @@ import { visitWebsite, type WebsiteChainSite } from "../visit/visit";
 import { cloakedDestinationInfo, cloakingSuspectedInfo, harmlessScriptedDestination } from "../archive/cloaking";
 import { BROWSER_BACKOFF_MS, failWebsiteAnalysis, recordWebsiteAnalysisFailure, withBrowserBackoff } from "./failure";
 import type { WebsiteAnalysisDependencies, WebsiteCapture } from "./analysis_types";
+import { deceptiveFunnelFinding, funnelOutcomeText, judgeCaseFunnel, reportCaseFunnel } from "./funnel";
 
 export type AnalyzeWebsiteOptions = {
 	mhtmlSnapshot?: Buffer;
@@ -143,16 +144,22 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			return hop ? [{ ...site, capturedHop: hop, capture: findingCapture(site) }] : [];
 		});
 		const headline = confirmed[0] ?? { archive, capturedHop: visited.capturedHop, classification: visited.classification };
+		// The whole chain judged as one affiliate funnel, beside each site's own verdict: a lure that is no
+		// phishing page may still mislead visitors through tracking links into a merchant's offer.
+		const { chain: funnelChain, funnel } = await judgeCaseFunnel({ submissionId, chain, pages: visited.pages }, dependencies);
+		const deceptive = funnel?.verdict.finding === "deceptive_funnel" ? { ...funnel, verdict: funnel.verdict } : undefined;
+		const found = confirmed.length > 0 || deceptive !== undefined;
 		// A scripted jump of the residential exit to a chain that shows nothing reportable led to a decoy.
 		// A destination that turned every network away is said as such, not as a decoy.
-		const decoy = !confirmed.length && !visited.inconclusive && !visited.cloakedDestination && archive.cloaking?.outcome === "scripted" ? harmlessScriptedDestination(archive.cloaking) : undefined;
-		const inconclusive = confirmed.length ? undefined : visited.inconclusive
+		const decoy = !found && !visited.inconclusive && !visited.cloakedDestination && archive.cloaking?.outcome === "scripted" ? harmlessScriptedDestination(archive.cloaking) : undefined;
+		const inconclusive = found ? undefined : visited.inconclusive
 			&& `Inconclusive: the visit could not finish the site's flow: ${visited.inconclusive} The last page it reached, ${archive.url}, shows nothing reportable by itself; no verdict or report was made.`;
-		const caseFinding = confirmed.length
+		const siteFinding = confirmed.length
 			? `${confirmed.map((site) => buildWebsiteReportEvidence(site.classification, site.capture)).join("\n\n")}\n${confirmed.length === 1 ? "The site is reported to the responsible providers." : "Each of these sites is reported to its responsible providers."}`
 			: decoy ? cloakingSuspectedInfo(decoy)
 			: visited.cloakedDestination ? cloakedDestinationInfo(visited.cloakedDestination)
 			: inconclusive ?? unreportedVerdict(visited.classification, archive.url);
+		const caseFinding = deceptive ? `${confirmed.length ? `${siteFinding}\n\n` : ""}${deceptiveFunnelFinding(deceptive.verdict)}` : siteFinding;
 
 		await emitStep(submissionId, "analysis_run", 75);
 		await runStreamedAnalysisRun({
@@ -160,7 +167,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			analysisKind: "analysis",
 			options: {
 				model: defaultResponseModel,
-				input: buildWebsiteAnalysisInput(headline.archive, { finding: caseFinding, whois, pages: visited.pages, visit, kitResources: headline.archive.kitResources, capturedAt: headline.archive.archivedAt }),
+				input: buildWebsiteAnalysisInput(headline.archive, { finding: caseFinding, whois, pages: visited.pages, visit, kitResources: headline.archive.kitResources, capturedAt: headline.archive.archivedAt, chain }),
 				reasoning: defaultReasoning,
 				tools: [{ type: "web_search" }],
 				stream: true,
@@ -177,6 +184,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 					navigationHops: chain,
 					analyzedHopIndex: headline.capturedHop.index,
 					siteAssessments,
+					...(funnel ? { funnel } : {}),
 					visit,
 					...(decoy ? { cloaking: decoy } : {}),
 					...(visited.cloakedDestination ? { cloakedDestination: visited.cloakedDestination } : {}),
@@ -184,11 +192,12 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			},
 		});
 
-		if (confirmed.length) {
+		const reporter = { reporterIp, reporterCountry, reporterHeaders };
+		const outcomes: string[] = [];
+		if (found) {
 			await emitStep(submissionId, "reporting", 90);
-			const outcomes: string[] = [];
-			// The visit's traffic goes with the first report this case files itself, whose investigation reports each data drop once;
-			// a site another case already reports keeps its report as it is.
+			// The visit's traffic goes with the first report of this case, whose investigation reports each data drop once;
+			// for a site another case already reports, this case's own job reports them against that report.
 			let trafficFiled = !visited.backends.length;
 			for (const [position, site] of confirmed.entries()) {
 				const finding = reportableFinding(site.classification);
@@ -202,7 +211,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 					analysisText: buildWebsiteReportEvidence(site.classification, { ...site.capture, ...(visitor ? { reporterUserAgent: visitor.override.userAgent } : {}), accessGate, caseUrl: abuseEmailCaseUrl(submissionId) }),
 					...(site.archive.userAgent ? { userAgent: site.archive.userAgent } : {}),
 					screenshots: await capturedPageScreenshots(submissionId, analyzedCaptureStep(site.archive.navigationHops)),
-					reporter: { reporterIp, reporterCountry, reporterHeaders },
+					reporter,
 					finding,
 					pasteCommands: site.capture.commands,
 					...(finding.finding === "malware" && site.archive.offeredDownload ? { offeredDownload: site.archive.offeredDownload } : {}),
@@ -210,8 +219,20 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 					...(site.classification.hiddenFrame ? { hiddenFrame: classifiedHiddenFrame(site.classification, site.archive.hiddenFrames)! } : {}),
 					...(trafficFiled ? {} : { visitCapture: { canaries: visited.canaries, requests: visited.requests, backends: visited.backends } }),
 				});
-				trafficFiled ||= created.created;
+				trafficFiled ||= created.created || created.joined !== undefined;
 				outcomes.push(reportOutcome(finding, site.capturedHop.url, reportUrls, created));
+			}
+			if (deceptive) {
+				const funnelOutcomes = await reportCaseFunnel({ submissionId, chain: funnelChain, funnel: deceptive, reporter }, dependencies);
+				outcomes.push(...funnelOutcomes.map(funnelOutcomeText));
+				const skipped = funnelOutcomes.flatMap((outcome) => outcome.kind === "skipped" ? [{ site: outcome.site, role: outcome.role, reason: outcome.reason }] : []);
+				if (skipped.length) await SubmissionsEntity.setWebsiteField(submissionId, "funnel", { ...deceptive, skipped });
+				// A funnel whose every business was left out is reported nowhere: the case says so instead.
+				if (!confirmed.length && skipped.length === funnelOutcomes.length) {
+					await SubmissionsEntity.update(submissionId, { status: "invalid", info: `${deceptiveFunnelFinding(deceptive.verdict)}\n${outcomes.join("\n")}\nNo report was created.` });
+					await emitStep(submissionId, "completed", 100);
+					return submissionId;
+				}
 			}
 			await SubmissionsEntity.update(submissionId, { status: "reported", info: outcomes.join("\n") });
 		} else if (visited.inconclusive && inconclusive) {

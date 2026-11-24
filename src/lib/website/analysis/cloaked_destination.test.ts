@@ -200,4 +200,20 @@ describe("cloakedDestination", () => {
 		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 204, redirectTo: "https://news.example.com/" })], LURE)).toBeUndefined();
 		expect(cloakedDestination([navigationHop(0, "https://short.example/x", { status: 302, redirectTo: TDS }), navigationHop(1, TDS, { status: 204, redirectTo: LURE })], LURE)).toBeUndefined();
 	});
+
+	test("ignores a page the visitor was shown and moved on from, back through the submitted tracker", () => {
+		// The affiliate's own Voluum link shows the lure, whose button goes back through the same tracker to the offer.
+		const tracker = "https://wtrck.com/4df5378b?s1=128";
+		const lure = "https://ultimateprizesearch.com/exit.html";
+		const click = "https://wtrck.com/click/1?cep=abc";
+		const hops = [
+			navigationHop(0, tracker, { status: 302, redirectTo: lure }),
+			navigationHop(1, lure, { status: 200, redirectTo: click, visitorStep: { submitted: [] } }),
+			navigationHop(2, click, { status: 302, redirectTo: "https://www.zatos.com/checkout" }),
+			navigationHop(3, "https://www.zatos.com/checkout", { status: 200, contentCaptured: true }),
+		];
+		expect(cloakedDestination(hops, tracker)).toBeUndefined();
+		// The same page answering by script alone, with nothing for the visitor to act on, still is an empty answer.
+		expect(cloakedDestination([hops[0]!, { ...hops[1]!, visitorStep: undefined }, hops[2]!], tracker)).toEqual({ host: "ultimateprizesearch.com", site: "ultimateprizesearch.com" });
+	});
 });

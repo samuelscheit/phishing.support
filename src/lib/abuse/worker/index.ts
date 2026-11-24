@@ -13,7 +13,9 @@ import { ensureOriginHostDisclosureJobs } from "../origin/disclosure";
 import { boundedErrorText } from "../../util/error_text";
 import { randomOwner, type WorkerServices } from "./shared";
 import type { JobClaimFilter } from "../persistence/jobs";
-import { releaseAfterFailedInvestigation, runReportInvestigation } from "../../investigation/run";
+import { releaseAfterFailedInvestigation, runJoinedCaseInvestigation, runReportInvestigation } from "../../investigation/run";
+import { readInvestigationJobPayload } from "../../investigation/payload";
+import { setInvestigationStatus } from "../../investigation/status";
 import { startSamplePurgeSchedule } from "../../exfiltration/downloads/sample_purge_job";
 import { enqueueRulesSweep } from "../../campaign/sweep";
 import { ensureLivenessChecks } from "../../liveness/schedule";
@@ -93,6 +95,8 @@ export type AbuseWorkerOptions = {
 	resolveTarget?: typeof resolveAbuseTarget;
 	/** Deterministic test hook for the pre-report evidence investigation. */
 	investigateReport?: typeof runReportInvestigation;
+	/** Deterministic test hook for the evidence of a case that joined another case's report. */
+	investigateJoinedCase?: typeof runJoinedCaseInvestigation;
 };
 
 /**
@@ -116,6 +120,7 @@ export class AbuseWorker {
 	private readonly activeControllers = new Set<AbortController>();
 	private readonly processJobOverride: AbuseWorkerOptions["processJob"];
 	private readonly investigateReport: typeof runReportInvestigation;
+	private readonly investigateJoinedCase: typeof runJoinedCaseInvestigation;
 
 	constructor(options: AbuseWorkerOptions = {}) {
 		this.owner = options.owner ?? randomOwner();
@@ -129,6 +134,7 @@ export class AbuseWorker {
 		this.processJobOverride = options.processJob;
 		this.resolveTarget = options.resolveTarget ?? resolveAbuseTarget;
 		this.investigateReport = options.investigateReport ?? runReportInvestigation;
+		this.investigateJoinedCase = options.investigateJoinedCase ?? runJoinedCaseInvestigation;
 		this.services = {
 			owner: this.owner,
 			// Resolved per task, so routes that never use a portal never need a model.
@@ -324,6 +330,10 @@ export class AbuseWorker {
 				const report = await AbuseRepository.getReport(job.reportId);
 				await releaseAfterFailedInvestigation(job.reportId, report?.submissionId ?? undefined, error);
 			}
+			// The joined report was never held for it; the case only says its own evidence was not reported.
+			if (job.jobType === "investigate_joined_case") {
+				await setInvestigationStatus(BigInt(readInvestigationJobPayload(job.payload).submissionId), { status: "failed", lastError: error, updatedAt: new Date().toISOString() });
+			}
 			return;
 		}
 		if (job.jobType === "submit_provider" && await AbuseRepository.failProviderSubmissionPreflight({
@@ -361,6 +371,7 @@ export class AbuseWorker {
 			services: this.servicesFor(signal),
 			resolveTarget: this.resolveTarget,
 			investigateReport: this.investigateReport,
+			investigateJoinedCase: this.investigateJoinedCase,
 		});
 	}
 

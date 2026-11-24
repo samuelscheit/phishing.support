@@ -9,6 +9,7 @@ import { AbuseRepository } from "../abuse/repository";
 import { abuseJobs } from "../abuse/schema";
 import type { WebsiteKitResource } from "../website/types";
 import type { LinkDependencies } from "./link";
+import { linkJob, linkJobKey } from "./queue";
 import { CampaignRepository } from "./repository";
 import { CAMPAIGN_RULES_VERSION, enqueueCampaignSweep, enqueueRulesSweep, linkSiteToCampaign } from "./sweep";
 
@@ -60,34 +61,34 @@ describe("the campaign sweep", () => {
 	});
 
 	test("a rules sweep drops the jobs an older rules sweep still has waiting, never the ones that ran or a site's own link", async () => {
-		await site(1n, "first-rules-test.com");
-		await site(2n, "second-rules-test.com");
+		const first = { submissionId: 1n, reportId: (await site(1n, "first-rules-test.com"))! };
+		const second = { submissionId: 2n, reportId: (await site(2n, "second-rules-test.com"))! };
 		const now = new Date("2026-11-20T00:00:00Z");
 		await enqueueCampaignSweep(`rules-v${CAMPAIGN_RULES_VERSION - 2}`, now);
 		await enqueueCampaignSweep(`rules-v${CAMPAIGN_RULES_VERSION - 1}`, now);
 		await enqueueCampaignSweep("manual-2026-11-19", now);
-		const reportId = (await AbuseRepository.getReportForSubmission(1n))!.id;
-		await AbuseRepository.enqueueJob({ jobType: "link_campaign", reportId, payload: { submissionId: "1" }, dedupeKey: "campaign-link:1" });
+		await AbuseRepository.enqueueJob(linkJob(first));
 		// One job of the oldest sweep already ran.
 		const db = await getDb();
-		const [ran] = (await jobs("link_campaign")).filter((job) => job.dedupeKey === `campaign-link:rules-v${CAMPAIGN_RULES_VERSION - 2}:1`);
+		const [ran] = (await jobs("link_campaign")).filter((job) => job.dedupeKey === linkJobKey(first, `rules-v${CAMPAIGN_RULES_VERSION - 2}`));
 		db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.id, ran!.id)).run();
 
 		expect(await enqueueRulesSweep()).toBe(2);
 		expect((await jobs("link_campaign")).map((job) => `${job.dedupeKey} ${job.status}`).sort()).toEqual([
-			"campaign-link:1 queued",
-			"campaign-link:manual-2026-11-19:1 queued",
-			"campaign-link:manual-2026-11-19:2 queued",
-			`campaign-link:rules-v${CAMPAIGN_RULES_VERSION - 2}:1 completed`,
-			`campaign-link:rules-v${CAMPAIGN_RULES_VERSION}:1 queued`,
-			`campaign-link:rules-v${CAMPAIGN_RULES_VERSION}:2 queued`,
-		]);
+			`${linkJobKey(first)} queued`,
+			`${linkJobKey(first, "manual-2026-11-19")} queued`,
+			`${linkJobKey(second, "manual-2026-11-19")} queued`,
+			`${linkJobKey(first, `rules-v${CAMPAIGN_RULES_VERSION - 2}`)} completed`,
+			`${linkJobKey(first, `rules-v${CAMPAIGN_RULES_VERSION}`)} queued`,
+			`${linkJobKey(second, `rules-v${CAMPAIGN_RULES_VERSION}`)} queued`,
+		].sort());
+		expect(linkJobKey(first)).toBe(`campaign-link:1:${first.reportId.toString()}`);
 	});
 
 	test("a site is linked, described and searched; urlscan failing is recorded and leaves it linked, urlscan busy puts the backfill off", async () => {
 		const reportId = (await site(11n, "kit-sweep-test.com", { kitResources: [{ url: "https://kit-sweep-test.com/app.js", mimeType: "application/javascript", size: 40_000, sha256: KIT }] }))!;
 		const campaignId = await linkSiteToCampaign({ submissionId: 11n, reportId }, { ...linking, fetch: async () => { throw new Error("no urlscan call expected"); } });
-		expect(campaignId).toBe((await CampaignRepository.campaignForSubmission(11n))!);
+		expect(campaignId).toBe((await CampaignRepository.campaignForMember({ submissionId: 11n, reportId }))!);
 		expect((await jobs("describe_campaign")).map(({ payload }) => payload)).toEqual([{ campaignId: campaignId!.toString() }]);
 		expect((await jobs("search_campaign_kits")).map(({ payload }) => payload?.campaignId)).toEqual([campaignId!.toString()]);
 
@@ -101,11 +102,11 @@ describe("the campaign sweep", () => {
 		const busyReport = (await site(13n, "busy-sweep-test.com"))!;
 		const busy = async () => new Response("slow down", { status: 429, headers: { "X-Rate-Limit-Reset-After": "7200" } });
 		const before = Date.now();
-		expect(await linkSiteToCampaign({ submissionId: 13n, reportId: busyReport }, { ...linking, apiKey: "test", fetch: busy })).toBe((await CampaignRepository.campaignForSubmission(13n))!);
+		expect(await linkSiteToCampaign({ submissionId: 13n, reportId: busyReport }, { ...linking, apiKey: "test", fetch: busy })).toBe((await CampaignRepository.campaignForMember({ submissionId: 13n, reportId: busyReport }))!);
 		const deferred = (await AbuseRepository.listEvents(busyReport)).find(({ eventType }) => eventType === "kit_backfill.checked")!.data;
 		expect(deferred).toMatchObject({ kind: "deferred" });
-		const retry = (await jobs("link_campaign")).find(({ dedupeKey }) => dedupeKey === "campaign-link:backfill:13")!;
-		expect(retry.payload).toEqual({ submissionId: "13" });
+		const retry = (await jobs("link_campaign")).find(({ dedupeKey }) => dedupeKey === linkJobKey({ submissionId: 13n, reportId: busyReport }, "backfill"))!;
+		expect(retry).toMatchObject({ payload: { submissionId: "13" }, reportId: busyReport });
 		expect(retry.nextAttemptAt.getTime() - before).toBeGreaterThanOrEqual(7_200_000);
 		// Nothing was concluded about urlscan's scans of the site.
 		const stored = (await SubmissionsEntity.get(13n))!.data;

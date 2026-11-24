@@ -33,6 +33,14 @@ export const siteCheckStates = [
 ] as const;
 export type SiteCheckState = (typeof siteCheckStates)[number];
 
+/**
+ * The states that say the site is gone at the registry or the host, which a
+ * cloaking kit cannot fake. `removed` and `parked` are left out: a payload
+ * host answers a browser's visit with a 404 while it serves its command-line
+ * downloaders.
+ */
+export const TAKEN_DOWN_STATES: readonly SiteCheckState[] = ["domain_suspended", "domain_gone", "host_suspended"];
+
 /** One liveness check of a reported site, kept forever as the takedown record of its target. */
 export const siteChecks = sqliteTable(
 	"site_checks",

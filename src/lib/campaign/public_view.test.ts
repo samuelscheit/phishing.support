@@ -1,30 +1,29 @@
 import { describe, expect, test } from "bun:test";
 
-import { SubmissionsEntity } from "../db/entities/submissions";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import type { DossierDependencies } from "../referral/dossier";
 import type { WebsiteSiteAssessment } from "../website/types";
 import type { ExtractedIndicator } from "./indicators";
 import { getPublicCampaign } from "./public_view";
+import type { CampaignSite } from "./members";
 import { CampaignRepository } from "./repository";
+import { confirmedCase } from "./test_sites";
 
 useTemporaryDatabase();
 
 const GOOGLE = { name: "Google", officialUrl: "https://www.google.com/" };
 const bot: ExtractedIndicator = { kind: "operator_server", value: "telegram-bot:7001", links: true, evidence: { roles: ["receives_data"], backendKind: "telegram_bot", matchedFields: ["email"] } };
 
+const members = new Map<bigint, CampaignSite>();
+const memberOf = (id: bigint) => members.get(id)!;
+
 /** A confirmed site whose analysis found the page impersonating `brand`, with the fields it labels. */
 async function site(id: bigint, host: string, assessment: Partial<WebsiteSiteAssessment> = {}, indicators: ExtractedIndicator[] = [bot]) {
-	await SubmissionsEntity.create({
-		id,
-		kind: "website",
-		data: { kind: "website", website: { url: `https://${host}/`, siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", ...assessment }] } },
-		dedupeKey: host,
-		status: "reported",
-	});
-	await CampaignRepository.recordIndicators(id, indicators);
-	await CampaignRepository.saveSiteFacts(id, { language: null, thumbnailArtifactId: null, blankCapture: false });
-	return (await CampaignRepository.campaignForSubmission(id))!;
+	const [member] = await confirmedCase(id, { url: `https://${host}/`, siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", ...assessment }] });
+	members.set(id, member!);
+	await CampaignRepository.recordIndicators(member!, indicators);
+	await CampaignRepository.saveSiteFacts(member!, { language: null, thumbnailArtifactId: null, blankCapture: false });
+	return (await CampaignRepository.campaignForMember(member!))!;
 }
 
 const field = (placeholder: string) => ({ ref: placeholder, control: "input[type=text]", placeholder });
@@ -33,7 +32,7 @@ describe("what the public page tells a campaign's visitors", () => {
 	test("without guidance: the brand with its domain and no links, and what the pages ask for in page order", async () => {
 		const campaign = await site(1n, "samtjo-test.com", { impersonatedBrand: GOOGLE, collectionFields: [field("Mật khẩu"), field("Email or phone")] });
 		await site(2n, "other-test.com", { impersonatedBrand: GOOGLE, collectionFields: [field("Enter code")] });
-		await CampaignRepository.saveSiteFacts(1n, { language: null, thumbnailArtifactId: 7n, blankCapture: true });
+		await CampaignRepository.saveSiteFacts(memberOf(1n), { language: null, thumbnailArtifactId: 7n, blankCapture: true });
 		const view = (await getPublicCampaign(campaign))!;
 		expect(view.visitor).toEqual({
 			brand: { name: "Google", officialUrl: "https://www.google.com/", domain: "google.com", links: {} },
@@ -75,10 +74,10 @@ describe("what the public page tells a campaign's visitors", () => {
 		const campaign = await site(1n, "a-test.com");
 		await site(2n, "b-test.com");
 		await site(3n, "c-test.com");
-		const statuses: Record<string, string[]> = { "1": ["acknowledged", "delivery_failed"], "2": ["awaiting_provider_reply"], "3": ["provider_rejected"] };
+		const statuses = new Map([[memberOf(1n).reportId, ["acknowledged", "delivery_failed"]], [memberOf(2n).reportId, ["awaiting_provider_reply"]], [memberOf(3n).reportId, ["provider_rejected"]]]);
 		const dependencies: DossierDependencies = {
-			listReports: (async (submissionId: bigint) => [{ id: submissionId, legalBrandUrl: null, idempotencyKey: null, description: null }]) as never,
-			listRoutes: (async (reportId: bigint) => statuses[reportId.toString()]!.map((status, index) => ({
+			listReports: (async (submissionId: bigint) => [{ id: memberOf(submissionId).reportId, legalBrandUrl: null, idempotencyKey: null, description: null }]) as never,
+			listRoutes: (async (reportId: bigint) => statuses.get(reportId)!.map((status, index) => ({
 				id: BigInt(index + 1), targetId: 1n, providerRegistryKey: `email:host${index}.example`, providerDisplayName: `Host ${index}`, routeType: "email", verifiedEmail: `abuse@host${index}.example`, status, resolverProvenance: {}, resolutionSnapshot: {},
 			}))) as never,
 			listTargets: (async () => []) as never,
