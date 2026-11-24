@@ -9,7 +9,7 @@ const site = (url: string, firstSeenAt: string) => ({
 	submissionId: url,
 	reportId: url,
 	url,
-	pageSteps: [0],
+	pages: [{ route: 0, step: 0 }],
 	host: new URL(url).hostname,
 	firstSeenAt,
 	impersonates: ["www.dhl.de"],

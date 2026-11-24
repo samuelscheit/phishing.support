@@ -97,6 +97,8 @@ async function analyze(id: bigint, answers: { first: Flow; retries?: Partial<Rec
 			if (!flow || flow === "unreachable") throw new WebsiteCaptureFailedError([new WebsiteUnreachableError(options.egress, "net::ERR_CONNECTION_CLOSED")]);
 			return lure(options, options.egress, flow);
 		},
+		// Rotation sampling is covered by rotation.test.ts.
+		rotationBudgetMs: 0,
 		...extra,
 	});
 	const submission = await SubmissionsEntity.get(id);
@@ -114,21 +116,22 @@ describe("a flow whose destination answers empty and sends the visit back", () =
 		expect(submission?.status).toBe("invalid");
 		expect(submission?.info).toBe(`No reportable phishing or malware evidence was found at the captured destination ${LANDING}; no report was created.`);
 		expect(website?.cloakedDestination).toBeUndefined();
-		expect(website?.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([
+		expect(website?.rotation?.ended).toBe("The time for sampling the link's other offers (0 min) was used up.");
+		expect(website?.routes![0]!.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([
 			{ hopIndex: 0, finding: "insufficient_evidence", judgedHopIndex: 3 },
 			{ hopIndex: 1, finding: "insufficient_evidence", judgedHopIndex: 4 },
 			{ hopIndex: 2, finding: "insufficient_evidence", judgedHopIndex: 3 },
 			{ hopIndex: 3, finding: "insufficient_evidence", judgedHopIndex: 3 },
 			{ hopIndex: 4, finding: "insufficient_evidence", judgedHopIndex: 4 },
 		]);
-		expect(website?.navigationHops?.map(({ index, url, status, redirectTo, revisit, visitorStep, contentCaptured }) => ({ index, url, status, redirectTo, revisit, moved: Boolean(visitorStep), contentCaptured }))).toEqual([
+		expect(website?.routes![0]!.hops?.map(({ index, url, status, redirectTo, revisit, visitorStep, contentCaptured }) => ({ index, url, status, redirectTo, revisit, moved: Boolean(visitorStep), contentCaptured }))).toEqual([
 			{ index: 0, url: LURE, status: 200, redirectTo: TDS, revisit: undefined, moved: true, contentCaptured: false },
 			{ index: 1, url: TDS, status: 204, redirectTo: LURE, revisit: undefined, moved: false, contentCaptured: false },
 			{ index: 2, url: LURE, status: 200, redirectTo: LURE, revisit: { reason: "destination_cloaked", route: "server IP", site: "solidfairhubhost.com" }, moved: false, contentCaptured: false },
 			{ index: 3, url: LURE, status: 200, redirectTo: LANDING, revisit: undefined, moved: true, contentCaptured: false },
 			{ index: 4, url: LANDING, status: 200, redirectTo: undefined, revisit: undefined, moved: false, contentCaptured: true },
 		]);
-		expect(website?.navigationHops?.at(-1)?.url).toBe(LANDING);
+		expect(website?.routes![0]!.hops?.at(-1)?.url).toBe(LANDING);
 	});
 
 	test("goes on to the server IP when Tor is cloaked too, in the order residential, Tor, server IP", async () => {

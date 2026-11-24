@@ -229,7 +229,7 @@ async function describePage(archive: WebsiteArchiveResult, kind: "recheck" | "vi
 	if (archive.screenshotPng) {
 		const stamped = await buildWebsiteEvidence({
 			caseId: context.submissionId?.toString() ?? "follow-up",
-			step: 0,
+			page: { route: 0, step: 0 },
 			submittedUrl: archive.requestedUrl,
 			capturedUrl: archive.url,
 			capturedAt: archive.archivedAt,

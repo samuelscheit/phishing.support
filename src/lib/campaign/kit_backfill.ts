@@ -71,7 +71,7 @@ export async function backfillKitResources(submissionId: bigint, dependencies: K
 
 	const save = (urlscanKit: NonNullable<WebsiteSubmissionData["urlscanKit"]>) => SubmissionsEntity.setWebsiteField(submissionId, "urlscanKit", urlscanKit);
 	// The page the case was judged on: an earlier step (a gate, a host's own interstitial) could match unrelated scans.
-	const analyzed = websiteCaptureFileNames(analyzedPage(website)?.step ?? 0).mhtml;
+	const analyzed = websiteCaptureFileNames(analyzedPage(website)?.page ?? { route: website.analyzedRoute ?? 0, step: 0 }).mhtml;
 	const ours = (await (dependencies.loadPageTexts ?? loadCapturedPageTexts)(submissionId)).find(({ name }) => name === analyzed)?.text;
 	const checkedAt = now.toISOString();
 	// Without our page's text no scan can be told to show it.

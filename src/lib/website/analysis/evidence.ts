@@ -3,7 +3,7 @@ import { buildWebsiteEvidence, type WebsiteEvidencePackage } from "../../evidenc
 import { buildVisitEvidence } from "../../evidence/visit";
 import { WEBSITE_DEVICE_LABEL, type WebsiteDevice } from "../types";
 import { ArtifactsEntity } from "../../db/entities/artifacts";
-import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames } from "../visit/capture_files";
+import { analyzedCaptureStep, latestArtifactNamed, websiteCaptureFileNames, type CapturePage } from "../visit/capture_files";
 import { discoverExfiltrationBackends } from "../../exfiltration/analysis";
 import type { ExfiltrationCanaries } from "../../exfiltration/types";
 import type { VisitPage } from "../../site_visit/evidence";
@@ -14,7 +14,6 @@ import type { WebsiteAnalysisDependencies, WebsiteCapture } from "./analysis_typ
 export function capturedWebsiteData(archive: WebsiteCapture) {
 	return {
 		archiveUrl: archive.url,
-		navigationHops: archive.navigationHops,
 		...(archive.cloaking ? { cloaking: archive.cloaking } : {}),
 		...(archive.verificationGate ? { verificationGate: archive.verificationGate } : {}),
 		...(archive.providerWarning ? { providerWarning: archive.providerWarning } : {}),
@@ -25,16 +24,17 @@ export function capturedWebsiteData(archive: WebsiteCapture) {
 	};
 }
 
-/** The evidence package for a capture: stamped screenshot, manifest, and its timestamp. */
+/** The evidence package for a capture on one route of the case: stamped screenshot, manifest, and its timestamp. */
 export async function websiteEvidence(
 	submissionId: bigint,
 	submittedUrl: string,
 	archive: WebsiteCapture,
 	dependencies: WebsiteAnalysisDependencies,
+	route: number,
 ): Promise<WebsiteEvidencePackage> {
 	return buildWebsiteEvidence({
 		caseId: submissionId.toString(),
-		step: analyzedCaptureStep(archive.navigationHops),
+		page: { route, step: analyzedCaptureStep(archive.navigationHops) },
 		submittedUrl,
 		capturedUrl: archive.url,
 		capturedAt: archive.archivedAt,
@@ -53,6 +53,8 @@ export async function websiteEvidence(
  */
 export async function saveVisitEvidence(params: {
 	submissionId: bigint;
+	/** The route of the case the visit walked; it names the files. */
+	route: number;
 	url: string;
 	device?: WebsiteDevice;
 	recording: SiteVisitRecording<WebsiteCapture>;
@@ -66,6 +68,7 @@ export async function saveVisitEvidence(params: {
 	const egressPolicy = fabricBrowserConfigFromEnvironment()?.egressPolicyRefs.phishing;
 	const evidence = await buildVisitEvidence({
 		caseId: params.submissionId.toString(),
+		route: params.route,
 		submittedUrl: params.url,
 		startedAt: recording.startedAt,
 		endedAt,
@@ -89,21 +92,21 @@ export async function saveVisitEvidence(params: {
 /**
  * The captured pages' screenshots for providers, stamped with their URL and
  * capture time where that worked: the analyzed page first, then the pages of
- * its flow that led to it.
+ * its route that led to it.
  */
-export async function capturedPageScreenshots(submissionId: bigint, analyzedStep: number): Promise<Array<{ filename: string; png: Buffer }>> {
-	return stepScreenshots(submissionId, [analyzedStep, ...Array.from({ length: analyzedStep }, (_, index) => index)]);
+export async function capturedPageScreenshots(submissionId: bigint, analyzed: CapturePage): Promise<Array<{ filename: string; png: Buffer }>> {
+	return pageScreenshots(submissionId, [analyzed, ...Array.from({ length: analyzed.step }, (_, step) => ({ route: analyzed.route, step }))]);
 }
 
-/** The stamped screenshot of each step, else its plain one; a step without one is left out. */
-export async function stepScreenshots(submissionId: bigint, steps: readonly number[]): Promise<Array<{ step: number; filename: string; png: Buffer }>> {
+/** The stamped screenshot of each page, else its plain one; a page without one is left out. */
+export async function pageScreenshots(submissionId: bigint, pages: readonly CapturePage[]): Promise<Array<{ page: CapturePage; filename: string; png: Buffer }>> {
 	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
-	const screenshots: Array<{ step: number; filename: string; png: Buffer }> = [];
-	for (const step of steps) {
-		const names = websiteCaptureFileNames(step);
+	const screenshots: Array<{ page: CapturePage; filename: string; png: Buffer }> = [];
+	for (const page of pages) {
+		const names = websiteCaptureFileNames(page);
 		const stored = latestArtifactNamed(artifacts, names.stampedScreenshot) ?? latestArtifactNamed(artifacts, names.screenshot);
 		const png = stored ? (await ArtifactsEntity.get(stored.id))?.blob : undefined;
-		if (png?.byteLength) screenshots.push({ step, filename: names.screenshot, png: Buffer.from(png) });
+		if (png?.byteLength) screenshots.push({ page, filename: names.screenshot, png: Buffer.from(png) });
 	}
 	return screenshots;
 }

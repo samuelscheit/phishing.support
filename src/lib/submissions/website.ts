@@ -137,7 +137,7 @@ export async function retryFailedWebsiteAnalysis(
 	const websiteData = submission.data.kind === "website" ? submission.data.website : undefined;
 	const analyzed = websiteData ? analyzedPage(websiteData) : undefined;
 	const artifactList = await ArtifactsEntity.listForSubmission(submissionId);
-	const names = websiteCaptureFileNames(analyzed?.step ?? 0);
+	const names = websiteCaptureFileNames(analyzed?.page ?? { route: 0, step: 0 });
 	const mhtmlArtifact = latestArtifactNamed(artifactList, names.mhtml);
 	const screenshotArtifact = latestArtifactNamed(artifactList, names.screenshot);
 
@@ -146,9 +146,12 @@ export async function retryFailedWebsiteAnalysis(
 	// A cloaked capture holds only the decoy, and an unfinished flow only the
 	// page before the step it could not take, often a one-time gate URL that no
 	// longer loads; a retry must visit the site again from the submitted URL.
+	// A page of a rotating link's later route is not where the link leads a
+	// first walk, which a retry starts again as.
 	const retainedArchiveHasTrustedProvenance = Boolean(
 		websiteData
 		&& analyzed
+		&& analyzed.page.route === 0
 		&& websiteData.cloaking?.outcome !== "unresolved"
 		&& !websiteData.unfinishedFlow,
 	);
@@ -169,7 +172,7 @@ export async function retryFailedWebsiteAnalysis(
 		url,
 		mhtmlSnapshot,
 		archivedUrl: analyzed?.hop.url,
-		navigationHops: analyzed ? navigationToPage(websiteData!.navigationHops!, analyzed.hop) : undefined,
+		navigationHops: analyzed ? navigationToPage(analyzed.hops, analyzed.hop) : undefined,
 		trustMhtmlDocumentLocation: Boolean(mhtmlSnapshot),
 		verificationGate: mhtmlSnapshot ? websiteData?.verificationGate : undefined,
 		kitResources: mhtmlSnapshot ? websiteData?.kitResources : undefined,

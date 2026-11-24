@@ -1,12 +1,14 @@
 import { AbuseRepository } from "../abuse/repository";
 import type { AbuseReport } from "../abuse/schema";
-import { memberKey, screenshotStep, siteOf, sitePageSteps, type CampaignSite } from "../campaign/members";
+import { comparePages, memberKey, screenshotPage, siteOf, sitePages, type CampaignSite } from "../campaign/members";
+import { reportedSiteRoute, websiteRoutes } from "../website/routes";
+import type { CapturePage } from "../website/visit/capture_files";
 import { CampaignRepository, type CampaignMemberView } from "../campaign/repository";
 import type { CampaignIndicator } from "../campaign/schema";
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import type { Submission } from "../db/schema";
-import { describeDataEntryField } from "../website/types";
+import { describeDataEntryField, type WebsiteRoute } from "../website/types";
 import { isAuthorityRoute, isPreservationRoute } from "./routes";
 import { indicatorInfrastructure, locateInfrastructure, mergeInfrastructure, routeInfrastructure, type InfrastructureClaim, type InfrastructureNode, type NetworkLookup } from "./infrastructure";
 import { hostOf } from "../network/url";
@@ -66,10 +68,10 @@ export type DossierSite = {
 	reportId: string;
 	/** The case's judged page of the site. */
 	url: string;
-	/** The capture step of the judged page (`websiteCaptureFileNames`), when the case captured one. */
-	pageStep?: number;
-	/** The capture steps of every page of the site the case was shown, in chain order. */
-	pageSteps: number[];
+	/** The captured judged page (`websiteCaptureFileNames`), when the case captured one. */
+	page?: CapturePage;
+	/** Every captured page of the site the case was shown, route by route in chain order. */
+	pages: CapturePage[];
 	host: string;
 	firstSeenAt: string;
 	registeredAt?: string;
@@ -154,10 +156,21 @@ function siteDns(submission: Submission | undefined): DossierSite["dns"] {
 	return { a: dns?.A ?? [], aaaa: dns?.AAAA ?? [], cname: dns?.CNAME ?? [], ns: dns?.NS ?? [] };
 }
 
-function dataDestinations(submission: Submission | undefined): DossierDataDestination[] {
-	const sent = submission?.data.kind === "website" ? submission.data.website.visit?.dataSent ?? [] : [];
+/**
+ * The route of the case that showed the member's site: the first route that
+ * found it reportable, else the case's analyzed route. Its walk is the one
+ * that sent the member's site the synthetic values.
+ */
+function memberRoute(submission: Submission | undefined, member: CampaignMemberView): WebsiteRoute | undefined {
+	if (submission?.data.kind !== "website") return undefined;
+	const website = submission.data.website;
+	const reported = reportedSiteRoute(website, member.site);
+	return websiteRoutes(website)[reported?.route ?? website.analyzedRoute ?? 0];
+}
+
+function dataDestinations(route: WebsiteRoute | undefined): DossierDataDestination[] {
 	const unique = new Map<string, DossierDataDestination>();
-	for (const request of sent) {
+	for (const request of route?.visit?.dataSent ?? []) {
 		const key = `${request.method} ${request.url}`;
 		const entry = unique.get(key) ?? { url: request.url, method: request.method, fields: [], sameSite: request.sameSite };
 		entry.fields = [...new Set([...entry.fields, ...request.fields])];
@@ -167,11 +180,9 @@ function dataDestinations(submission: Submission | undefined): DossierDataDestin
 }
 
 /** The case's reportable assessment of the member's site: the page its report is about. A case without a recorded chain judged one site. */
-function verdictOf(submission: Submission | undefined, member: CampaignMemberView): DossierVerdict | undefined {
-	if (submission?.data.kind !== "website") return undefined;
-	const website = submission.data.website;
-	const hops = website.navigationHops ?? [];
-	const assessment = website.siteAssessments?.find((candidate) => (candidate.finding === "phishing" || candidate.finding === "malware")
+function verdictOf(route: WebsiteRoute | undefined, member: CampaignMemberView): DossierVerdict | undefined {
+	const hops = route?.hops ?? [];
+	const assessment = route?.siteAssessments?.find((candidate) => (candidate.finding === "phishing" || candidate.finding === "malware")
 		&& (!hops.length || siteOf(hops.find((hop) => hop.index === candidate.hopIndex)?.url) === member.site));
 	if (!assessment) return undefined;
 	const pageUrl = member.url;
@@ -185,8 +196,8 @@ function verdictOf(submission: Submission | undefined, member: CampaignMemberVie
 	};
 }
 
-function visitOf(submission: Submission | undefined): DossierVisit | undefined {
-	const visit = submission?.data.kind === "website" ? submission.data.website.visit : undefined;
+function visitOf(route: WebsiteRoute | undefined): DossierVisit | undefined {
+	const visit = route?.visit;
 	if (!visit) return undefined;
 	return { outcome: visit.outcome, ...(visit.failure ? { failure: visit.failure } : {}), actions: visit.actions.map(({ kind, text }) => ({ kind, text })) };
 }
@@ -299,27 +310,30 @@ export async function buildDossier(campaignId: bigint, dependencies: DossierDepe
 				size: artifact.size ?? 0,
 				...(artifact.archivedAt ? { archivedAt: artifact.archivedAt.toISOString() } : {}),
 			}));
-		const verdict = verdictOf(submission, member);
-		const visit = visitOf(submission);
+		const route = memberRoute(submission, member);
+		const verdict = verdictOf(route, member);
+		const visit = visitOf(route);
 		const registered = registeredAt(submission);
 		const registrar = registrarName(submission);
 		// A case without a recorded chain showed its one site every page it captured.
-		const steps = (submission?.data.kind === "website" ? sitePageSteps(submission.data.website, member.site) : [])
-			?? evidence.flatMap((file) => screenshotStep(file.name) ?? []);
-		const pageSteps = [...new Set([...steps, ...(member.pageStep === undefined ? [] : [member.pageStep])])].sort((a, b) => a - b);
+		const shown = (submission?.data.kind === "website" ? sitePages(submission.data.website, member.site) : [])
+			?? evidence.flatMap((file) => screenshotPage(file.name) ?? []);
+		const pages = [...shown, ...(member.page ? [member.page] : [])]
+			.filter((page, index, all) => all.findIndex((other) => comparePages(other, page) === 0) === index)
+			.sort(comparePages);
 		sites.push({
 			key: memberKey(member),
 			submissionId: member.submissionId.toString(),
 			reportId: member.reportId.toString(),
 			url: member.url,
-			...(member.pageStep === undefined ? {} : { pageStep: member.pageStep }),
-			pageSteps,
+			...(member.page ? { page: member.page } : {}),
+			pages,
 			host: hostOf(member.url),
 			firstSeenAt: member.createdAt.toISOString(),
 			...(registered ? { registeredAt: registered } : {}),
 			...(registrar ? { registrar } : {}),
 			dns: siteDns(submission),
-			dataDestinations: dataDestinations(submission),
+			dataDestinations: dataDestinations(route),
 			...(verdict ? { verdict } : {}),
 			...(visit ? { visit } : {}),
 			...(reportText ? { reportText } : {}),

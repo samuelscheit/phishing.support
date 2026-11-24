@@ -123,7 +123,7 @@ describe("provider decision follow-up agent", () => {
 		const page = "https://lbbvw.com/";
 		const hop = (index: number, url: string, status: number, redirectTo?: string) => ({ index, url, hostname: new URL(url).hostname, status, ...(redirectTo ? { redirectTo } : {}), contentCaptured: !redirectTo });
 		// The case holds the whole chain, from the entry to the reported page.
-		await SubmissionsEntity.create({ id: 901n, kind: "website", dedupeKey: "entry", status: "reported", data: { kind: "website", website: { url: entry, archiveUrl: page, analyzedHopIndex: 3, navigationHops: [{ ...hop(0, entry, 200, entry), visitorStep: { submitted: [] } }, hop(1, entry, 302, ticket), hop(2, ticket, 302, page), hop(3, page, 200)] } } });
+		await SubmissionsEntity.create({ id: 901n, kind: "website", dedupeKey: "entry", status: "reported", data: { kind: "website", website: { url: entry, archiveUrl: page, routes: [{ analyzedHopIndex: 3, hops: [{ ...hop(0, entry, 200, entry), visitorStep: { submitted: [] } }, hop(1, entry, 302, ticket), hop(2, ticket, 302, page), hop(3, page, 200)] }] } } });
 		// Reported before the gate was kept with the case: it is read from the chain.
 		const { route } = await deniedRoute("lbbvw.com", page, 901n);
 		const { model, inputs } = scripted([call("do_not_answer", { reason: "scripted" })]);

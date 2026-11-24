@@ -6,6 +6,7 @@ import { canonicalJson } from "./package";
 import { timestampEvidence, type EvidenceTimestamp } from "./timestamp";
 import type { EvidenceFile } from "./package";
 import { sha256Hex } from "../util/hash";
+import { visitEvidenceFileNames } from "../website/visit/capture_files";
 
 /**
  * The record of one visit through a phishing site, kept so it can be used
@@ -21,15 +22,10 @@ import { sha256Hex } from "../util/hash";
  * the manifest. Any later change to a file breaks its hash; the token
  * proves the manifest existed at the authority's time.
  */
-const VISIT_EVIDENCE_FILES = {
-	record: "visit-record.json",
-	protocol: "visit-protocol.txt",
-	manifest: "visit-manifest.json",
-	timestamp: "visit-manifest.tsr",
-} as const;
-
 export type VisitEvidenceFacts = {
 	caseId: string;
+	/** The route of the case the visit walked; it names the files (`visitEvidenceFileNames`). */
+	route: number;
 	submittedUrl: string;
 	startedAt: Date;
 	endedAt: Date;
@@ -64,6 +60,7 @@ function time(value: string | Date): string {
 
 /** The chronology a reader follows: every page, action and value-carrying request in time order. */
 function protocol(facts: VisitEvidenceFacts, recordSha256: string): string {
+	const names = visitEvidenceFileNames(facts.route);
 	type Entry = { at: string; text: string };
 	const entries: Entry[] = [];
 	for (const page of facts.pages) entries.push({ at: page.shownFrom.toISOString(), text: `Page shown: ${page.url}` });
@@ -95,11 +92,11 @@ function protocol(facts: VisitEvidenceFacts, recordSha256: string): string {
 		"Chronology (UTC):",
 		...entries.map((entry) => `  ${time(entry.at)}  ${entry.text}`),
 		"",
-		`Requests that carried a synthetic value: ${sending.length}. Every other request the browser sent during the visit (${facts.requests.length - sending.length}) is listed with its body in ${VISIT_EVIDENCE_FILES.record}.`,
+		`Requests that carried a synthetic value: ${sending.length}. Every other request the browser sent during the visit (${facts.requests.length - sending.length}) is listed with its body in ${names.record}.`,
 		...(facts.backends.length ? ["", "Receivers outside the site:", ...facts.backends.map((backend) => `  ${backend.kind}: ${backend.key} via ${backend.method} ${backend.endpointUrl}`)] : []),
 		"",
-		`SHA-256 of ${VISIT_EVIDENCE_FILES.record}: ${recordSha256}`,
-		`${VISIT_EVIDENCE_FILES.manifest} names this file and the record by SHA-256; ${VISIT_EVIDENCE_FILES.timestamp} is an RFC 3161 token over the manifest, verifiable with: openssl ts -verify -data ${VISIT_EVIDENCE_FILES.manifest} -in ${VISIT_EVIDENCE_FILES.timestamp} -CAfile <authority chain>`,
+		`SHA-256 of ${names.record}: ${recordSha256}`,
+		`${names.manifest} names this file and the record by SHA-256; ${names.timestamp} is an RFC 3161 token over the manifest, verifiable with: openssl ts -verify -data ${names.manifest} -in ${names.timestamp} -CAfile <authority chain>`,
 		"",
 	].join("\n");
 }
@@ -109,6 +106,7 @@ function protocol(facts: VisitEvidenceFacts, recordSha256: string): string {
  * authority the files are still kept, without the token.
  */
 export async function buildVisitEvidence(facts: VisitEvidenceFacts, dependencies: { timestamp?: typeof timestampEvidence } = {}): Promise<VisitEvidence> {
+	const names = visitEvidenceFileNames(facts.route);
 	const record = Buffer.from(canonicalJson({
 		version: 1,
 		caseId: facts.caseId,
@@ -125,8 +123,8 @@ export async function buildVisitEvidence(facts: VisitEvidenceFacts, dependencies
 	const recordSha = sha256Hex(record);
 	const text = Buffer.from(protocol(facts, recordSha), "utf8");
 	const files: EvidenceFile[] = [
-		{ name: VISIT_EVIDENCE_FILES.record, mimeType: "application/json", bytes: record },
-		{ name: VISIT_EVIDENCE_FILES.protocol, mimeType: "text/plain", bytes: text },
+		{ name: names.record, mimeType: "application/json", bytes: record },
+		{ name: names.protocol, mimeType: "text/plain", bytes: text },
 	];
 	const manifest = Buffer.from(canonicalJson({
 		version: 1,
@@ -136,8 +134,8 @@ export async function buildVisitEvidence(facts: VisitEvidenceFacts, dependencies
 		visitEndedAt: facts.endedAt.toISOString(),
 		files: files.map((file) => ({ name: file.name, sha256: sha256Hex(file.bytes), size: file.bytes.byteLength })),
 	}), "utf8");
-	files.push({ name: VISIT_EVIDENCE_FILES.manifest, mimeType: "application/json", bytes: manifest });
+	files.push({ name: names.manifest, mimeType: "application/json", bytes: manifest });
 	const timestamp = await (dependencies.timestamp ?? timestampEvidence)(manifest);
-	if (timestamp) files.push({ name: VISIT_EVIDENCE_FILES.timestamp, mimeType: "application/timestamp-reply", bytes: timestamp.token });
+	if (timestamp) files.push({ name: names.timestamp, mimeType: "application/timestamp-reply", bytes: timestamp.token });
 	return { files, ...(timestamp ? { timestamp } : {}) };
 }

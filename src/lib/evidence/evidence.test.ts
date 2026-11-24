@@ -151,7 +151,7 @@ describe("website evidence package", () => {
 		const timestamped: Buffer[] = [];
 		const evidence = await buildWebsiteEvidence({
 			caseId: "374851334366564352",
-			step: 0,
+			page: { route: 0, step: 0 },
 			submittedUrl: "https://sites.google.com/view/revert-change",
 			capturedUrl: "https://sites.google.com/view/revert-change",
 			capturedAt: new Date("2026-10-31T09:55:03.412Z"),
@@ -192,7 +192,7 @@ describe("website evidence package", () => {
 	test("the manifest is canonical: the same capture always hashes the same", async () => {
 		const facts = {
 			caseId: "1",
-			step: 0,
+			page: { route: 0, step: 0 },
 			submittedUrl: "https://a.test/",
 			capturedUrl: "https://a.test/",
 			capturedAt: new Date("2026-01-01T00:00:00Z"),
@@ -212,7 +212,7 @@ describe("website evidence package", () => {
 		const mhtml = Buffer.from("From: <Saved by Blink>\r\n\r\n<html>form</html>");
 		const evidence = await buildWebsiteEvidence({
 			caseId: "375914181917937690",
-			step: 2,
+			page: { route: 0, step: 2 },
 			submittedUrl: "https://kit.example.com/",
 			capturedUrl: "https://kit.example.com/secure.html",
 			capturedAt: new Date("2026-11-03T07:48:00Z"),

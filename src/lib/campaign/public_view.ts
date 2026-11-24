@@ -8,7 +8,7 @@ import { CANARY_FIELD_LABEL, type CanaryField } from "../website/types";
 import { campaignBrand, sameBrand, type GuidancePurpose, type VisitorGuidance } from "./guidance";
 import { campaignVisitorKinds, type VisitorKind } from "./kinds";
 import { factsFromDossier } from "./link";
-import { memberKey, screenshotStep } from "./members";
+import { comparePages, memberKey, screenshotPage } from "./members";
 import { CampaignRepository } from "./repository";
 import { operatorServerRoles, type OperatorServerRole } from "./schema";
 import { fallbackDescription } from "./summary";
@@ -240,14 +240,15 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 		const facts = siteFacts.get(site.key);
 		const evidence = latestEvidence(site);
 		const pages = evidence.flatMap((file) => {
-			const step = screenshotStep(file.name);
-			if (step === undefined || !site.pageSteps.includes(step)) return [];
+			const page = screenshotPage(file.name);
+			if (!page || !site.pages.some((shown) => comparePages(shown, page) === 0)) return [];
 			const stamped = evidence.find((other) => other.name === file.name.replace(/\.png$/, "-stamped.png"));
-			return [{ step, screenshot: file, stamped }];
-		}).sort((a, b) => a.step - b.step);
-		const judged = pages.find((page) => page.step === site.pageStep);
+			return [{ page, screenshot: file, stamped }];
+		}).sort((a, b) => comparePages(a.page, b.page));
+		const judged = pages.find(({ page }) => site.page && comparePages(page, site.page) === 0);
 		const screenshot = judged && (judged.stamped ?? judged.screenshot);
-		const steps = pages.map((page) => ({ step: page.step + 1, screenshotUrl: artifactUrl(page.screenshot.artifactId), ...(page.stamped ? { stampedUrl: artifactUrl(page.stamped.artifactId) } : {}) }));
+		// Numbered by the order the site's pages were shown in, across the routes the case walked.
+		const steps = pages.map((page, index) => ({ step: index + 1, screenshotUrl: artifactUrl(page.screenshot.artifactId), ...(page.stamped ? { stampedUrl: artifactUrl(page.stamped.artifactId) } : {}) }));
 		const reports = site.reports.map((report) => ({
 			provider: report.provider,
 			channel: report.channel === "email" ? report.contact ?? "email" : report.channel === "form" ? "web form / API" : "none",

@@ -82,14 +82,14 @@ describe("retryFailedWebsiteAnalysis", () => {
 		const id = await SubmissionsEntity.create({
 			id: 40n,
 			kind: "website",
-			data: { kind: "website", website: { url, archiveUrl: decoyUrl, navigationHops, cloaking: { outcome: "unresolved", detail: "decoy only" } } },
+			data: { kind: "website", website: { url, archiveUrl: decoyUrl, routes: [{ hops: navigationHops }], cloaking: { outcome: "unresolved", detail: "decoy only" } } },
 			dedupeKey: "website-retry-cloaked",
 			status: "failed",
 		});
 		await ArtifactsEntity.saveWebsiteArtifacts({
 			submissionId: id,
 			archive: { archivedAt: new Date(), mhtml: Buffer.from("From: <Saved by Blink>\r\n\r\n<html></html>"), screenshotPng: Buffer.from("png") },
-			evidence: { step: 0, manifest: Buffer.from("{}") },
+			evidence: { page: { route: 0, step: 0 }, manifest: Buffer.from("{}") },
 		});
 		const started: Array<{ mhtmlSnapshot?: Buffer; reuseEvidenceArtifacts?: boolean }> = [];
 

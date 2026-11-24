@@ -15,8 +15,9 @@ import { isSameWebsite } from "../website/info/site";
 import type { InvestigationJobPayload } from "./payload";
 import { setInvestigationStatus } from "./status";
 import { SubmissionsEntity } from "../db/entities/submissions";
-import { isPageHop, pageCaptureStep } from "../website/visit/capture_files";
-import { stepScreenshots } from "../website/analysis/evidence";
+import { isPageHop, routePage } from "../website/visit/capture_files";
+import { websiteRoutes } from "../website/routes";
+import { pageScreenshots } from "../website/analysis/evidence";
 
 /** Payloads fetched per case: a command's few, plus an exploit loader's stages. */
 const MAX_PAYLOADS = 12;
@@ -273,13 +274,14 @@ export async function runJoinedCaseInvestigation(
 	await setInvestigationStatus(submissionId, { status: "completed", backendCount: reportedDrops.length, updatedAt: deps.now().toISOString() });
 }
 
-/** The screenshot of a case's own captured page. */
+/** The screenshot of a case's own captured page, on the first route that showed it. */
 async function casePageScreenshot(submissionId: bigint, pageUrl: string): Promise<{ buffer: Buffer; mimeType: "image/png" } | undefined> {
 	const submission = await SubmissionsEntity.get(submissionId);
-	const hops = submission?.data.kind === "website" ? submission.data.website.navigationHops ?? [] : [];
-	const page = hops.find((hop) => hop.url === pageUrl && isPageHop(hop));
-	if (!page) return undefined;
-	const [shot] = await stepScreenshots(submissionId, [pageCaptureStep(hops, page)]);
+	const routes = submission?.data.kind === "website" ? websiteRoutes(submission.data.website) : [];
+	const route = routes.findIndex((walked) => walked.hops.some((hop) => hop.url === pageUrl && isPageHop(hop)));
+	if (route < 0) return undefined;
+	const hops = routes[route]!.hops;
+	const [shot] = await pageScreenshots(submissionId, [routePage(route, hops, hops.find((hop) => hop.url === pageUrl && isPageHop(hop))!)]);
 	return shot && { buffer: shot.png, mimeType: "image/png" };
 }
 

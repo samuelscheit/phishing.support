@@ -19,7 +19,7 @@ const memberOf = (id: bigint) => members.get(id)!;
 
 /** A confirmed site whose analysis found the page impersonating `brand`, with the fields it labels. */
 async function site(id: bigint, host: string, assessment: Partial<WebsiteSiteAssessment> = {}, indicators: ExtractedIndicator[] = [bot]) {
-	const [member] = await confirmedCase(id, { url: `https://${host}/`, siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", ...assessment }] });
+	const [member] = await confirmedCase(id, { url: `https://${host}/`, routes: [{ hops: [], siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", ...assessment }] }] });
 	members.set(id, member!);
 	await CampaignRepository.recordIndicators(member!, indicators);
 	await CampaignRepository.saveSiteFacts(member!, { language: null, thumbnailArtifactId: null, blankCapture: false });

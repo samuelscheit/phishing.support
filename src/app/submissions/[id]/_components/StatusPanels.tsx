@@ -1,25 +1,44 @@
+import { Fragment, type ReactNode } from "react";
 import { ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { describeDataEntryField } from "@/lib/website/types";
-import { verdictLabelOf, type SiteAssessment } from "./helpers";
+import { routeLabel, verdictLabelOf, type ConfirmedSite, type DeceptiveRoute } from "./helpers";
 import { hostOf } from "@/lib/network/url";
 import { cn } from "@/lib/util/cn";
-import type { DeceptiveFunnelFinding } from "@/lib/abuse/funnel/classification";
 import type { SubmissionReport } from "@/lib/submissions/details";
-import type { WebsiteFunnel } from "@/lib/website/types";
 import { FunnelVerdict } from "./FunnelVerdict";
 
 const PANEL = "rounded-lg border bg-muted/30 p-4";
 
-/** One confirmed site's verdict with its evidence; the site is named when the chain has several or it is not the submitted one. */
-function SiteVerdict({ site, assessment, named }: { site: string; assessment: SiteAssessment; named: boolean }) {
+/** The routes a finding was made on, each a button that shows that route. */
+function RouteTags({ routes, onShowRoute }: { routes: readonly number[]; onShowRoute: (route: number) => void }): ReactNode {
+	return routes.map((route, index) => (
+		<Fragment key={route}>
+			{index > 0 ? ", " : null}
+			<button type="button" onClick={() => onShowRoute(route)} className="font-medium text-primary hover:underline">{routeLabel(route)}</button>
+		</Fragment>
+	));
+}
+
+/**
+ * One confirmed site's verdict with its evidence; the site is named when the
+ * case has several or it is not the submitted one, and the routes it showed on
+ * (`onShowRoute`) are named when the link rotated.
+ */
+function SiteVerdict({ confirmed: { site, assessment, routes }, named, onShowRoute }: { confirmed: ConfirmedSite; named: boolean; onShowRoute: ((route: number) => void) | undefined }) {
 	return (
 		<div>
 			<div className="flex items-center gap-2 text-sm font-semibold text-destructive">
 				<ShieldAlert className="h-4 w-4 shrink-0" />
 				{verdictLabelOf(assessment) ?? "Phishing confirmed"}
 			</div>
-			{named ? <div className="mt-1 font-mono text-xs">{site}</div> : null}
+			{named || onShowRoute ? (
+				<div className="mt-1 text-xs">
+					{onShowRoute ? <RouteTags routes={routes} onShowRoute={onShowRoute} /> : null}
+					{onShowRoute && named ? <span className="text-muted-foreground"> · </span> : null}
+					{named ? <span className="break-all font-mono">{site}</span> : null}
+				</div>
+			) : null}
 			{assessment.impersonatedBrand ? (
 				<p className="mt-2 text-sm">
 					Impersonates <span className="font-medium">{assessment.impersonatedBrand.name}</span>
@@ -40,11 +59,17 @@ function SiteVerdict({ site, assessment, named }: { site: string; assessment: Si
 	);
 }
 
-/** The confirmed verdict of each reported site of the chain and of the funnel it is, with their evidence and the way to the reports tab. */
-export function VerdictPanel({ sites, funnel, reports, caseId, submittedSite, reportCount, joinedCases, info, onShowReports }: {
-	sites: Array<{ site: string; assessment: SiteAssessment }>;
-	/** The chain as a deceptive affiliate funnel, when it was judged one. */
-	funnel?: WebsiteFunnel & { verdict: DeceptiveFunnelFinding };
+/**
+ * The confirmed verdicts of every route of the case: each reported site once,
+ * however many routes showed it, then each route judged a deceptive funnel,
+ * with their evidence and the way to the reports tab. With several routes each
+ * verdict names its routes, which show that route when clicked.
+ */
+export function VerdictPanel({ sites, funnels, routeCount, reports, caseId, submittedSite, reportCount, joinedCases, info, onShowReports, onShowRoute }: {
+	sites: readonly ConfirmedSite[];
+	/** The routes judged deceptive affiliate funnels. */
+	funnels: readonly DeceptiveRoute[];
+	routeCount: number;
 	reports: readonly SubmissionReport[];
 	caseId: string;
 	submittedSite: string | null;
@@ -53,21 +78,24 @@ export function VerdictPanel({ sites, funnel, reports, caseId, submittedSite, re
 	joinedCases: string[];
 	info: string | null | undefined;
 	onShowReports: () => void;
+	onShowRoute: (route: number) => void;
 }) {
+	// A single route needs no naming: every finding is on it.
+	const showRoute = routeCount > 1 ? onShowRoute : undefined;
 	return (
 		<section className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
-			{sites.map(({ site, assessment }, index) => (
-				<div key={site} className={cn(index > 0 && "mt-4 border-t border-destructive/15 pt-4")}>
-					<SiteVerdict site={site} assessment={assessment} named={sites.length > 1 || site !== submittedSite} />
+			{sites.map((confirmed, index) => (
+				<div key={confirmed.site} className={cn(index > 0 && "mt-4 border-t border-destructive/15 pt-4")}>
+					<SiteVerdict confirmed={confirmed} named={sites.length > 1 || confirmed.site !== submittedSite} onShowRoute={showRoute} />
 				</div>
 			))}
-			{funnel ? (
-				<div className={cn(sites.length > 0 && "mt-4 border-t border-destructive/15 pt-4")}>
-					<FunnelVerdict funnel={funnel} reports={reports} caseId={caseId} />
+			{funnels.map(({ route, funnel }, index) => (
+				<div key={route} className={cn((sites.length > 0 || index > 0) && "mt-4 border-t border-destructive/15 pt-4")}>
+					<FunnelVerdict funnel={funnel} reports={reports} caseId={caseId} context={showRoute ? <RouteTags routes={[route]} onShowRoute={showRoute} /> : undefined} />
 				</div>
-			) : null}
+			))}
 			{/* A reported case that recorded neither (an email, or a case from before its verdicts were kept per site). */}
-			{!sites.length && !funnel ? (
+			{!sites.length && !funnels.length ? (
 				<div className="flex items-center gap-2 text-sm font-semibold text-destructive">
 					<ShieldAlert className="h-4 w-4" />
 					Phishing confirmed

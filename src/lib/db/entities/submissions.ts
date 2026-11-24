@@ -141,8 +141,8 @@ export class SubmissionsEntity {
 				title: sql<string | null>`coalesce(json_extract(${submissions.data}, '$.website.url'), nullif(json_extract(${submissions.data}, '$.email.subject'), ''), ${submissions.dedupeKey})`,
 				campaignId: sql<bigint | null>`${caseCampaign}`,
 				campaignSize: sql<number | null>`(select count(*) from campaign_members as peers where peers.campaign_id = ${caseCampaign})`,
-				// A case reported only for the deceptive funnel its chain is, with no phishing or malware site of its own.
-				funnelOnly: sql<number>`(json_extract(${submissions.data}, '$.website.funnel.verdict.finding') = 'deceptive_funnel' and not exists (select 1 from json_each(${submissions.data}, '$.website.siteAssessments') as assessed where json_extract(assessed.value, '$.finding') in ('phishing', 'malware')))`,
+				// A case reported only for the deceptive funnel a route of it is, with no phishing or malware site on any route.
+				funnelOnly: sql<number>`(exists (select 1 from json_each(${submissions.data}, '$.website.routes') as walked where json_extract(walked.value, '$.funnel.verdict.finding') = 'deceptive_funnel') and not exists (select 1 from json_each(${submissions.data}, '$.website.routes') as walked, json_each(walked.value, '$.siteAssessments') as assessed where json_extract(assessed.value, '$.finding') in ('phishing', 'malware')))`,
 			})
 			.from(submissions)
 			.where(and(
@@ -189,7 +189,7 @@ export class SubmissionsEntity {
 	 * Set one field of a website submission's data in place, so a slow job
 	 * never writes back what others changed meanwhile.
 	 */
-	static async setWebsiteField(id: bigint, field: "urlscanKit" | "accessGate" | "funnel", value: unknown) {
+	static async setWebsiteField(id: bigint, field: "urlscanKit" | "accessGate" | `routes[${number}].funnel`, value: unknown) {
 		const db = await getDb();
 		await db
 			.update(submissions)

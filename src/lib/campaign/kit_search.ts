@@ -1,3 +1,4 @@
+import { websiteRoutes } from "../website/routes";
 import { z } from "zod";
 
 import { SubmissionsEntity } from "../db/entities/submissions";
@@ -48,9 +49,9 @@ async function memberHosts(members: readonly CampaignMemberView[]): Promise<stri
 		hosts.add(new URL(member.url).hostname);
 		const submission = await SubmissionsEntity.get(member.submissionId);
 		if (submission?.data.kind !== "website") continue;
-		const { archiveUrl, navigationHops } = submission.data.website;
+		const { archiveUrl } = submission.data.website;
 		if (archiveUrl) hosts.add(new URL(archiveUrl).hostname);
-		for (const hop of navigationHops ?? []) hosts.add(hop.hostname);
+		for (const hop of websiteRoutes(submission.data.website).flatMap((walked) => walked.hops)) hosts.add(hop.hostname);
 	}
 	return [...hosts];
 }

@@ -7,6 +7,7 @@ const values = { marker: "ps-7f3a", email: "ps-7f3a@mail.example", password: "Pw
 
 const facts: VisitEvidenceFacts = {
 	caseId: "380153057440174080",
+	route: 0,
 	submittedUrl: "https://policy-trust-assurance.onrender.com/help",
 	startedAt: new Date("2026-11-15T00:32:40.000Z"),
 	endedAt: new Date("2026-11-15T00:34:10.000Z"),

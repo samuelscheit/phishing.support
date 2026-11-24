@@ -22,7 +22,7 @@ import { isWebPage } from "../../network/web_page";
 import { lookupDomainRegistration } from "../info/domain_registration";
 import { buildWebsiteClassificationInput, validateWebsiteSiteClassification, websiteMobileHandoff, WEBSITE_CLASSIFICATION_FORMAT, type WebsiteEvidenceArchive } from "../analysis/classification";
 import { emitStep } from "./progress";
-import { analyzedCaptureStep } from "./capture_files";
+import { analyzedCaptureStep, type CapturePage } from "./capture_files";
 import { capturedArchiveHop, chainSiteAssessments, isReportable } from "../info/report_hops";
 import { saveVisitEvidence, websiteEvidence } from "../analysis/evidence";
 import { challengeInconclusive, CHALLENGE_RETRY_EGRESS, continuedRevisit } from "./revisit";
@@ -83,8 +83,8 @@ export type WebsiteChainSite = {
 	dataDrops: VisitDataSent[];
 };
 
-/** A page the visit showed, as the narrative and the funnel read it: the hop that served it, when, and the step its capture files are named after. */
-export type WebsiteShownPage = NarrativeVisitPage & { hopIndex: number; capturedAt: Date; step: number };
+/** A page the visit showed, as the narrative and the funnel read it: the hop that served it, when, and the page its capture files are named after. */
+export type WebsiteShownPage = NarrativeVisitPage & { hopIndex: number; capturedAt: Date; page: CapturePage };
 
 /** A site's verdict: the page it rests on and what that page was found to be. */
 type SiteVerdict = { judgedHopIndex: number; classification: WebsiteSiteClassification };
@@ -131,6 +131,14 @@ export type WebsiteVisitResult = {
  */
 export async function visitWebsite(params: {
 	submissionId: bigint;
+	/** The route of the case this walk is: its files are named after it. */
+	route: number;
+	/**
+	 * The networks a revisit of this walk may come from: a challenge's other
+	 * exit, a cloaked destination's other networks. Every network by default;
+	 * a sampled visit of a rotating link stays on the network it came from.
+	 */
+	networks?: readonly FabricEgress[];
 	url: string;
 	whois: Awaited<ReturnType<typeof getInfo>>;
 	archive: WebsiteCapture;
@@ -164,7 +172,7 @@ export async function visitWebsite(params: {
 	const pages = visitPages<WebsiteCapture>(first, recording, canaries);
 	const record = visitRecord(recording, pages);
 	// A visit that walked the live site is evidence of how the values were entered and where they went.
-	if (session) await saveVisitEvidence({ submissionId, url, device: first.device, recording, pages, canaries, dependencies });
+	if (session) await saveVisitEvidence({ submissionId, route: params.route, url, device: first.device, recording, pages, canaries, dependencies });
 	const backends = discoverExfiltrationBackends({ requests: recording.requests, canaries, pageUrl: url });
 	const base = { backends, requests: recording.requests, canaries, record };
 
@@ -203,7 +211,7 @@ export async function visitWebsite(params: {
 			text: page.text.toString("utf-8"),
 			hopIndex: capturedArchiveHop(page).index,
 			capturedAt: page.archivedAt,
-			step: analyzedCaptureStep(page.navigationHops),
+			page: { route: params.route, step: analyzedCaptureStep(page.navigationHops) },
 		})),
 	];
 
@@ -214,7 +222,7 @@ export async function visitWebsite(params: {
 		const capturedHop = capturedArchiveHop(archive);
 		// Every page but the captured one is a step of the case with its own evidence
 		// package; a revisit's first page is a step too.
-		if (position > 0 || params.revisit) await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await websiteEvidence(submissionId, url, archive, dependencies) });
+		if (position > 0 || params.revisit) await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await websiteEvidence(submissionId, url, archive, dependencies, params.route) });
 		const site = websiteSite(capturedHop.url);
 		const known = verdicts.get(site);
 		if (known && isReportable(known.classification)) continue;
@@ -257,7 +265,7 @@ export async function visitWebsite(params: {
 		const startedAt = params.cloaked?.startedAt ?? flowStartedAt;
 		const reopened = { ...capturedHop, url: first.url };
 		// Every network the capture would try, in its order.
-		for (const egress of WEBSITE_CAPTURE_EGRESS.filter((candidate) => !answered.includes(candidate) && !notTried.some(({ network }) => network === FABRIC_EGRESS_LABEL[candidate]))) {
+		for (const egress of (params.networks ?? WEBSITE_CAPTURE_EGRESS).filter((candidate) => !answered.includes(candidate) && !notTried.some(({ network }) => network === FABRIC_EGRESS_LABEL[candidate]))) {
 			const network = FABRIC_EGRESS_LABEL[egress];
 			if (Date.now() - startedAt >= (dependencies.cloakedFlowBudgetMs ?? VISIT_BUDGET_MS)) {
 				notTried.push({ network, reason: "the time budget for walking the flow again was used up" });
@@ -281,6 +289,8 @@ export async function visitWebsite(params: {
 	// A site that turns desktops away shows the phone something else.
 	if (asksForPhone && !first.device) {
 		await emitStep(submissionId, "revisit_as_phone", 72);
+		// One capture browser at a time: the residential exit is a single connection.
+		await session?.close();
 		const phone = await capture({ url: first.url, device: "iphone", ...route });
 		return visitWebsite({ ...params, archive: phone, revisit: again(capturedHop, { reason: "phone", device: "iphone" }) });
 	}
@@ -288,7 +298,7 @@ export async function visitWebsite(params: {
 	// A capture that already came from there was decoyed or turned away everywhere else.
 	const challenge = recording.agent.report?.blockedByChallenge;
 	let unreached: string | undefined;
-	if (challenge && !params.challengeRetried && walked.egress !== CHALLENGE_RETRY_EGRESS) {
+	if (challenge && !params.challengeRetried && walked.egress !== CHALLENGE_RETRY_EGRESS && (params.networks ?? WEBSITE_CAPTURE_EGRESS).includes(CHALLENGE_RETRY_EGRESS)) {
 		await emitStep(submissionId, "revisit_from_other_exit", 72);
 		// One capture browser at a time: the residential exit is a single connection.
 		await session?.close();

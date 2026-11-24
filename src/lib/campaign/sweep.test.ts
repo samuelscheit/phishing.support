@@ -30,7 +30,7 @@ async function site(id: bigint, host: string, options: { status?: "reported" | "
 	await SubmissionsEntity.create({
 		id,
 		kind: "website",
-		data: { kind: "website", website: { url: `https://${host}/`, siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in" }], ...(options.kitResources ? { kitResources: options.kitResources } : {}) } },
+		data: { kind: "website", website: { url: `https://${host}/`, routes: [{ hops: [], siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in" }] }], ...(options.kitResources ? { kitResources: options.kitResources } : {}) } },
 		dedupeKey: `website-${host}`,
 		status: options.status ?? "reported",
 	});

@@ -128,8 +128,8 @@ describe("a page whose harm is the file it offers", () => {
 			inspection: { format: "browser_extension", browserExtension: { name: "Game Copier", hostPermissions: ["<all_urls>"] } },
 		});
 		expect(data?.providerWarning).toEqual({ provider: "Cloudflare", warning: "Suspected Malware" });
-		expect(data?.visit).toMatchObject({ outcome: "completed", report: { stoppedReason: "Downloaded Game-Copier.zip." } });
-		expect(data?.siteAssessments?.[0]).toMatchObject({ finding: "malware", evidenceQuote: QUOTE, offeredDownload: { fileName: "Game-Copier.zip", sha256: data!.offeredDownload!.sha256 } });
+		expect(data?.routes![0]!.visit).toMatchObject({ outcome: "completed", report: { stoppedReason: "Downloaded Game-Copier.zip." } });
+		expect(data?.routes![0]!.siteAssessments?.[0]).toMatchObject({ finding: "malware", evidenceQuote: QUOTE, offeredDownload: { fileName: "Game-Copier.zip", sha256: data!.offeredDownload!.sha256 } });
 
 		const report = await AbuseRepository.getReportForSubmission(id);
 		expect(report!.description.split("\n")).toEqual(expect.arrayContaining([
@@ -151,7 +151,7 @@ describe("a page whose harm is the file it offers", () => {
 		await analyzeWebsite({ submissionId: id, url: URL_ }, dependencies);
 		const { stored, data } = await website(id);
 		expect(stored?.status).toBe("invalid");
-		expect(data?.siteAssessments?.[0]).toMatchObject({ finding: "insufficient_evidence", rejectedClaim: "its evidence quote does not appear verbatim in the captured page text" });
+		expect(data?.routes![0]!.siteAssessments?.[0]).toMatchObject({ finding: "insufficient_evidence", rejectedClaim: "its evidence quote does not appear verbatim in the captured page text" });
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
 	});
 
@@ -174,6 +174,6 @@ describe("a page whose harm is the file it offers", () => {
 		await analyzeWebsite({ submissionId: id, url: URL_ }, dependencies);
 		const { stored, data } = await website(id);
 		expect(stored?.status).toBe("reported");
-		expect(data?.visit).toMatchObject({ outcome: "timed_out", failure: "The visit's 8-minute budget ended the walk." });
+		expect(data?.routes![0]!.visit).toMatchObject({ outcome: "timed_out", failure: "The visit's 8-minute budget ended the walk." });
 	});
 });

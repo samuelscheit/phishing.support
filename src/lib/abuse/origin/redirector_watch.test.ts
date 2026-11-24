@@ -205,7 +205,7 @@ describe("which page of a chain is the redirector", () => {
 describe("where a redirector's case led", () => {
 	const away = "https://openanonymity.chat/x/";
 	test("is its verdict page when that is on another site", () => {
-		expect(chainDestination({ navigationHops: EMAIL_LINK_HOPS, analyzedHopIndex: 4 }, ROTATOR)).toBe("https://x-com.email/");
+		expect(chainDestination({ routes: [{ hops: EMAIL_LINK_HOPS, analyzedHopIndex: 4 }] }, ROTATOR)).toBe("https://x-com.email/");
 	});
 	test("else the first page shown on another site, else where the chain ended", () => {
 		const hops = [
@@ -214,9 +214,9 @@ describe("where a redirector's case led", () => {
 			navigationHop(2, "https://later-site.com/", { contentCaptured: true }),
 		];
 		// The verdict rests on the redirector's own page: the chain still went on.
-		expect(chainDestination({ navigationHops: hops, analyzedHopIndex: 0 }, away)).toBe("https://decoy-news.com/");
-		expect(chainDestination({ navigationHops: [navigationHop(0, away, { status: 302, redirectTo: "https://gone.com/" }), navigationHop(1, "https://gone.com/", { status: 204 })] }, away)).toBe("https://gone.com/");
-		expect(chainDestination({ navigationHops: [navigationHop(0, away, { contentCaptured: true })], analyzedHopIndex: 0 }, away)).toBeUndefined();
+		expect(chainDestination({ routes: [{ hops: hops, analyzedHopIndex: 0 }] }, away)).toBe("https://decoy-news.com/");
+		expect(chainDestination({ routes: [{ hops: [navigationHop(0, away, { status: 302, redirectTo: "https://gone.com/" }), navigationHop(1, "https://gone.com/", { status: 204 })] }] }, away)).toBe("https://gone.com/");
+		expect(chainDestination({ routes: [{ hops: [navigationHop(0, away, { contentCaptured: true })], analyzedHopIndex: 0 }] }, away)).toBeUndefined();
 	});
 });
 
@@ -229,7 +229,7 @@ async function confirmedDestination(options: { direct?: boolean } = {}) {
 	await SubmissionsEntity.create({
 		id: CASE_ID,
 		kind: "website",
-		data: { kind: "website", website: { url: hops[0]!.url, archiveUrl: DESTINATION, navigationHops: hops, analyzedHopIndex: hops.at(-1)!.index } },
+		data: { kind: "website", website: { url: hops[0]!.url, archiveUrl: DESTINATION, routes: [{ hops, analyzedHopIndex: hops.at(-1)!.index }] } },
 		dedupeKey: "website-case",
 		status: "reported",
 	});
@@ -284,7 +284,7 @@ function browser(outcome: { reaches?: string; status?: "failed" | "invalid" | "r
 		visits.push(options);
 		if (outcome.reaches) {
 			const navigationHops = [navigationHop(0, options.url, { redirectTo: outcome.reaches }), navigationHop(1, outcome.reaches, { contentCaptured: true })];
-			await SubmissionsEntity.update(options.submissionId, { status: outcome.status ?? "reported", data: { kind: "website", website: { url: options.url, archiveUrl: outcome.reaches, navigationHops, analyzedHopIndex: 1 } } });
+			await SubmissionsEntity.update(options.submissionId, { status: outcome.status ?? "reported", data: { kind: "website", website: { url: options.url, archiveUrl: outcome.reaches, routes: [{ hops: navigationHops, analyzedHopIndex: 1 }] } } });
 		} else {
 			await SubmissionsEntity.update(options.submissionId, { status: outcome.status ?? "invalid" });
 		}

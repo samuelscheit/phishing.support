@@ -26,6 +26,8 @@ export type WebsiteAnalysisDependencies = {
 	visitAgent?: VisitAgent;
 	/** How long after its first walk began a flow its destination cloaked may be walked again through another network. */
 	cloakedFlowBudgetMs?: number;
+	/** How long after the first walk a rotating link's other offers may still be sampled (`ROTATION_BUDGET_MS`). */
+	rotationBudgetMs?: number;
 	/** The request that checks what a gated page shows a visitor without its session. */
 	bareVisit?: BareVisitDependencies;
 	/** Who holds the domain a page is on, for the classifier to tell a brand's own site from a lookalike. */

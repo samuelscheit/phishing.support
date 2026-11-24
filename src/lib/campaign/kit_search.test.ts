@@ -41,7 +41,7 @@ async function site(id: bigint, host: string, kitResources: WebsiteKitResource[]
 	await SubmissionsEntity.create({
 		id,
 		kind: "website",
-		data: { kind: "website", website: { url: `https://${host}/`, kitResources, siteAssessments: PHISHING } },
+		data: { kind: "website", website: { url: `https://${host}/`, kitResources, routes: [{ hops: [], siteAssessments: PHISHING }] } },
 		dedupeKey: `website-${host}`,
 		status: "reported",
 		source,
@@ -127,7 +127,7 @@ describe("a campaign's kit search", () => {
 		const original = await site(41n, "quota-test.com", [script("quota-test.com", KIT)]);
 		// The member's submitted address led to another host, where its page was captured.
 		const stored = (await SubmissionsEntity.get(41n))!.data;
-		if (stored.kind === "website") await SubmissionsEntity.update(41n, { data: { kind: "website", website: { ...stored.website, archiveUrl: "https://landing-quota-test.com/login", navigationHops: [{ index: 0, url: "https://quota-test.com/", hostname: "quota-test.com", status: 302, redirectTo: "https://landing-quota-test.com/login", contentCaptured: false }, { index: 1, url: "https://landing-quota-test.com/login", hostname: "landing-quota-test.com", status: 200, contentCaptured: true }] } } });
+		if (stored.kind === "website") await SubmissionsEntity.update(41n, { data: { kind: "website", website: { ...stored.website, archiveUrl: "https://landing-quota-test.com/login", routes: [{ hops: [{ index: 0, url: "https://quota-test.com/", hostname: "quota-test.com", status: 302, redirectTo: "https://landing-quota-test.com/login", contentCaptured: false }, { index: 1, url: "https://landing-quota-test.com/login", hostname: "landing-quota-test.com", status: 200, contentCaptured: true }], analyzedHopIndex: 1, siteAssessments: PHISHING }] } } });
 		const now = new Date("2026-11-20T08:00:00Z");
 		await armCampaignKitSearch(original.campaignId, now);
 		const job = await queuedSearch();

@@ -1,6 +1,6 @@
 
 import { serviceIdentity } from "../network/service_identity";
-import { chainHopBodyFileName, websiteCaptureFileNames } from "../website/visit/capture_files";
+import { chainHopBodyFileName, websiteCaptureFileNames, type CapturePage } from "../website/visit/capture_files";
 import type { WebsiteNavigationHop } from "../website/types";
 import type { HopBody } from "../website/visit/tab_recording";
 import { stampAddressBar } from "./address_bar";
@@ -13,8 +13,8 @@ export type EvidenceFile = { name: string; mimeType: string; bytes: Buffer };
 /** What one live website capture saw, and how. */
 export type WebsiteCaptureFacts = {
 	caseId: string;
-	/** Which page of the case's flow this is: 0 for the first, then one per followed link. */
-	step: number;
+	/** Which page of the case this is: the route it was shown on, and its step there (0 for the first, then one per followed link). */
+	page: CapturePage;
 	submittedUrl: string;
 	/** The page whose content, screenshot and archive were captured. */
 	capturedUrl: string;
@@ -28,8 +28,8 @@ export type WebsiteCaptureFacts = {
 };
 
 export type WebsiteEvidencePackage = {
-	/** The page of the case's flow the package covers; it names the files. */
-	step: number;
+	/** The page of the case the package covers; it names the files. */
+	page: CapturePage;
 	/** The screenshot with the address bar drawn above it; the raw one stays unchanged. */
 	stampedScreenshotPng?: Buffer;
 	/** Canonical JSON naming every file by SHA-256; this is what the timestamp covers. */
@@ -75,13 +75,13 @@ export async function buildWebsiteEvidence(
 			return undefined;
 		})
 		: undefined;
-	const names = websiteCaptureFileNames(facts.step);
+	const names = websiteCaptureFileNames(facts.page);
 	const files: Array<{ name: string; mimeType: string; sha256: string; size: number }> = [
 		...(facts.screenshotPng ? [{ name: names.screenshot, mimeType: "image/png", sha256: screenshotSha256!, size: facts.screenshotPng.byteLength }] : []),
 		...(stampedScreenshotPng ? [{ name: names.stampedScreenshot, mimeType: "image/png", sha256: sha256Hex(stampedScreenshotPng), size: stampedScreenshotPng.byteLength }] : []),
 		{ name: names.mhtml, mimeType: "text/mhtml", sha256: sha256Hex(facts.mhtml), size: facts.mhtml.byteLength },
 		// Each body as the type its answer declared; it is stored and served as opaque bytes.
-		...(facts.hopBodies ?? []).map(({ hopIndex, body }) => ({ name: chainHopBodyFileName(hopIndex), mimeType: facts.navigationHops.find((hop) => hop.index === hopIndex)?.contentType ?? "application/octet-stream", sha256: sha256Hex(body), size: body.byteLength })),
+		...(facts.hopBodies ?? []).map(({ hopIndex, body }) => ({ name: chainHopBodyFileName(facts.page.route, hopIndex), mimeType: facts.navigationHops.find((hop) => hop.index === hopIndex)?.contentType ?? "application/octet-stream", sha256: sha256Hex(body), size: body.byteLength })),
 	];
 	const manifest = Buffer.from(`${canonicalJson({
 		format: "phishing.support/evidence-manifest@1",
@@ -98,12 +98,12 @@ export async function buildWebsiteEvidence(
 		hashAlgorithm: "SHA-256",
 	})}\n`, "utf8");
 	const timestamp = await (dependencies.timestamp ?? timestampEvidence)(manifest);
-	return { step: facts.step, ...(stampedScreenshotPng ? { stampedScreenshotPng } : {}), manifest, ...(timestamp ? { timestamp } : {}) };
+	return { page: facts.page, ...(stampedScreenshotPng ? { stampedScreenshotPng } : {}), manifest, ...(timestamp ? { timestamp } : {}) };
 }
 
 /** The files a package adds next to the raw screenshot and MHTML. */
 export function websiteEvidenceFiles(evidence: WebsiteEvidencePackage): EvidenceFile[] {
-	const names = websiteCaptureFileNames(evidence.step);
+	const names = websiteCaptureFileNames(evidence.page);
 	return [
 		...(evidence.stampedScreenshotPng ? [{ name: names.stampedScreenshot, mimeType: "image/png", bytes: evidence.stampedScreenshotPng }] : []),
 		{ name: names.manifest, mimeType: "application/json", bytes: evidence.manifest },

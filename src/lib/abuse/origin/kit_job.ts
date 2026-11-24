@@ -1,4 +1,5 @@
 import { SubmissionsEntity } from "../../db/entities/submissions";
+import { routeSiteAssessments } from "../../website/routes";
 import { createWebsiteSubmission, websiteSubmissionDedupeKey } from "../../submissions/website";
 import { analyzeWebsite } from "../../website/analysis/ai";
 import { normalizePublicHttpUrl } from "../security/security";
@@ -23,7 +24,7 @@ const SEED_FINDINGS = new Set(["phishing", "malware"]);
 export async function isKitSiblingSeed(submissionId: bigint): Promise<boolean> {
 	const submission = await SubmissionsEntity.get(submissionId);
 	if (submission?.data.kind !== "website" || SIBLING_SOURCE.test(submission.source ?? "")) return false;
-	return (submission.data.website.siteAssessments ?? []).some(({ finding }) => SEED_FINDINGS.has(finding));
+	return routeSiteAssessments(submission.data.website).some(({ finding }) => SEED_FINDINGS.has(finding));
 }
 
 /**

@@ -13,7 +13,8 @@ import { caseCaptureNames, type AttachableFile, type DecisionToolDependencies } 
 import { asRecord } from "../../util/values";
 import { accessGateOf } from "../../website/visit/access_gate";
 import { analyzedPage } from "../../website/visit/capture_files";
-import { isSameWebsite } from "../../website/info/site";
+import { isSameWebsite, websiteSite } from "../../website/info/site";
+import { reportedSiteRoute, websiteRoutes } from "../../website/routes";
 
 const MAX_MESSAGE_TEXT = 6_000;
 
@@ -85,9 +86,10 @@ export async function followUpProviderDecision(
 	const caseUrl = abuseEmailCaseUrl(input.report.submissionId);
 	const attachable = new Map<string, AttachableFile>(input.evidenceArtifacts.map((artifact) => [artifact.name, { filename: artifact.name, mimeType: artifact.mimeType, content: Buffer.from(artifact.blob) }]));
 	const visitor = reporterBrowserIdentity(input.report.requesterHeaders ?? undefined);
-	// The case's whole chain, from the link first submitted; the reported page is the first URL the report names.
-	const chain = website?.navigationHops ?? [];
+	// The reported page is the first URL the report names; its chain is the whole route that reached it, from the link first submitted.
 	const capturedUrl = website && (target.observedUrls[0] ?? analyzedPage(website)?.hop.url ?? website.url);
+	const caseRoute = website && websiteRoutes(website)[(capturedUrl ? reportedSiteRoute(website, websiteSite(capturedUrl))?.route : undefined) ?? website.analyzedRoute ?? 0];
+	const chain = caseRoute?.hops ?? [];
 	// The gate kept with the case, with its direct visit, is that of the page it was checked for; any other page's is read from the chain.
 	const keptGate = website?.accessGate?.bareVisit && website.accessGate.bareVisit.url === capturedUrl ? website.accessGate : undefined;
 
@@ -117,13 +119,13 @@ export async function followUpProviderDecision(
 				submittedUrl: website.url,
 				capturedUrl: capturedUrl ?? null,
 				// The findings of the reported site; other sites of the chain have reports of their own.
-				findings: (website.siteAssessments ?? []).filter((assessment) => (assessment.finding === "phishing" || assessment.finding === "malware")
+				findings: (caseRoute?.siteAssessments ?? []).filter((assessment) => (assessment.finding === "phishing" || assessment.finding === "malware")
 					&& capturedUrl !== undefined && chain.some((hop) => hop.index === assessment.hopIndex && isSameWebsite(hop.url, capturedUrl))),
 				cloaking: website.cloaking ?? null,
 				device: website.device ?? null,
 				navigation: chain.map(({ url, status, redirectTo, visitorStep }) => ({ url, status, redirectTo: redirectTo ?? null, ...(visitorStep ? { passedPageOfItsOwn: true } : {}) })),
 				accessGate: keptGate ?? (capturedUrl ? accessGateOf(chain, capturedUrl) : undefined) ?? null,
-				visit: website.visit?.report ?? null,
+				visit: caseRoute?.visit?.report ?? null,
 			} : {}),
 		},
 		correspondence: mail.filter((message) => message.routeId === route.id).map((message) => ({

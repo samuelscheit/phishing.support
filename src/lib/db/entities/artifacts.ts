@@ -83,7 +83,7 @@ export class ArtifactsEntity {
         /** Names the files after the page of the case's flow it covers. */
         evidence: WebsiteEvidencePackage;
     }) {
-        const names = websiteCaptureFileNames(evidence.step);
+        const names = websiteCaptureFileNames(evidence.page);
         const mhtmlId = await this.saveBuffer({
             submissionId,
             name: names.mhtml,
@@ -109,7 +109,7 @@ export class ArtifactsEntity {
         for (const { hopIndex, body } of archive.hopBodies ?? []) {
             await this.saveBuffer({
                 submissionId,
-                name: chainHopBodyFileName(hopIndex),
+                name: chainHopBodyFileName(evidence.page.route, hopIndex),
                 kind: "website_hop_body",
                 mimeType: "application/octet-stream",
                 archivedAt: archive.archivedAt,

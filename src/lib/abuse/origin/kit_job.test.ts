@@ -13,7 +13,7 @@ async function websiteCase(id: bigint, domain: string, options: { source?: strin
 	await SubmissionsEntity.create({
 		id,
 		kind: "website",
-		data: { kind: "website", website: { url: `https://${domain}/`, ...(options.siteAssessments ? { siteAssessments: options.siteAssessments } : {}) } },
+		data: { kind: "website", website: { url: `https://${domain}/`, ...(options.siteAssessments ? { routes: [{ hops: [], siteAssessments: options.siteAssessments }] } : {}) } },
 		dedupeKey: `website-${domain}`,
 		status: "reported",
 		source: options.source ?? `https://${domain}/`,

@@ -1,4 +1,5 @@
 import { SubmissionsEntity } from "../../db/entities/submissions";
+import { routeSiteAssessments } from "../../website/routes";
 import { describeDataEntryField, type WebsiteDataEntryField } from "../../website/types";
 import { AbuseRepository } from "../repository";
 import { kitCollectedData, type KitCollectedData, type OriginHostSnapshot } from "./snapshot";
@@ -37,9 +38,10 @@ function line(value: string, maximum: number): string {
 export async function capturedKitFacts(submissionId: bigint): Promise<OriginHostSnapshot["kit"]> {
 	const submission = await SubmissionsEntity.get(submissionId);
 	const website = submission?.data.kind === "website" ? submission.data.website : undefined;
-	const assessment = website?.siteAssessments?.find(({ finding }) => finding === "phishing" || finding === "malware");
+	const assessments = website ? routeSiteAssessments(website) : [];
+	const assessment = assessments.find(({ finding }) => finding === "phishing" || finding === "malware");
 	const collected = new Set(
-		(website?.siteAssessments ?? [])
+		assessments
 			.filter(({ finding }) => finding === "phishing")
 			.flatMap(({ collectionFields }) => collectionFields ?? [])
 			.map(fieldCategory)

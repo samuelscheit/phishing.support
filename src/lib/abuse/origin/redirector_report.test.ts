@@ -114,7 +114,7 @@ async function confirmedThrough(id: bigint, hops: WebsiteNavigationHop[], verdic
 	await SubmissionsEntity.create({
 		id,
 		kind: "website",
-		data: { kind: "website", website: { url: hops[0]!.url, archiveUrl: pageUrl, navigationHops: hops, analyzedHopIndex: hops.at(-1)!.index, siteAssessments: assessments } },
+		data: { kind: "website", website: { url: hops[0]!.url, archiveUrl: pageUrl, routes: [{ hops, analyzedHopIndex: hops.at(-1)!.index, siteAssessments: assessments }] } },
 		dedupeKey: `website-${id.toString()}`,
 		status: "reported",
 	});

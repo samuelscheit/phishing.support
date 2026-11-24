@@ -50,6 +50,54 @@ export type WebsiteFunnel = {
 	skipped?: Array<{ site: string; role: "merchant" | "network"; reason: string }>;
 };
 
+/**
+ * One walk of the submitted link and the chain it took: a link that rotates
+ * offers per click (an affiliate network's smart link) sends each visit down
+ * another route, each with its own sites, pages and verdicts. The case's first
+ * walk is route 0; a sampled visit that reached a destination no route showed
+ * yet is the next.
+ */
+export type WebsiteRoute = {
+	/**
+	 * The route's chain, response by response, across every site it passed:
+	 * redirects, pages that sent the visitor on by script, pages the visit moved
+	 * on from, and the last page shown (`contentCaptured`).
+	 */
+	hops: WebsiteNavigationHop[];
+	/** The hop of the page the route's verdict rests on: its first reportable page, else the last page shown. */
+	analyzedHopIndex?: number;
+	/** One per hop: the verdict of the hop's site, which every hop of that site shares. */
+	siteAssessments?: WebsiteSiteAssessment[];
+	/** The route judged as an affiliate funnel; set when it passed an affiliate tracking link. */
+	funnel?: WebsiteFunnel;
+	/** The walk through the route's sites: what the agent did and where the synthetic values went. */
+	visit?: WebsiteVisitRecord;
+	/** How the walk opened the link: the browser it presented and the network it came from. */
+	visitor?: WebsiteRouteVisitor;
+};
+
+/** The browser and network a walk of the submitted link presented. */
+export type WebsiteRouteVisitor = { browser: string; network?: string };
+
+/**
+ * The visits a case made to sample a rotating link's other offers, after its
+ * first walk passed a tracking link, and why it made no more.
+ */
+export type WebsiteRotation = {
+	visits: WebsiteRotationVisit[];
+	/** Why sampling stopped: the visits were used up, two in a row showed nothing new, its time ran out, or the network failed. */
+	ended: string;
+};
+
+/**
+ * One sampled visit: the route it showed for the first time (`route`), a route
+ * it showed again (`repeatOf`, with the hops that reached it), or its failure.
+ */
+export type WebsiteRotationVisit = {
+	startedAt: string;
+	visitor: WebsiteRouteVisitor;
+} & ({ route: number } | { repeatOf: number; hops: WebsiteNavigationHop[] } | { error: string });
+
 export type WebsiteCloakedDestination = {
 	host: string;
 	site: string;

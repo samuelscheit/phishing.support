@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { Route } from "lucide-react";
 
@@ -37,9 +38,10 @@ function PartyReport({ party, report, skipped, caseId }: { party: FunnelParty; r
 /**
  * The chain judged as a deceptive affiliate funnel: what its lure claimed,
  * what it led to, and each business that can terminate the affiliate, with
- * the ID it knows the affiliate by and what became of its report.
+ * the ID it knows the affiliate by and what became of its report. `context`
+ * names where the funnel was found (its route, when the link rotated).
  */
-export function FunnelVerdict({ funnel, reports, caseId }: { funnel: WebsiteFunnel & { verdict: DeceptiveFunnelFinding }; reports: readonly SubmissionReport[]; caseId: string }) {
+export function FunnelVerdict({ funnel, reports, caseId, context }: { funnel: WebsiteFunnel & { verdict: DeceptiveFunnelFinding }; reports: readonly SubmissionReport[]; caseId: string; context?: ReactNode }) {
 	const { verdict, extraction } = funnel;
 	const [quote] = verdict.lureQuotes;
 	return (
@@ -48,6 +50,7 @@ export function FunnelVerdict({ funnel, reports, caseId }: { funnel: WebsiteFunn
 				<Route className="h-4 w-4 shrink-0" />
 				Deceptive affiliate funnel
 			</div>
+			{context ? <div className="mt-1 text-xs">{context}</div> : null}
 			<p className="mt-1 text-xs text-muted-foreground">The lure is {DECEPTION_PHRASES[verdict.deceptionKind]}.</p>
 			<p className="mt-2 text-sm">{verdict.lureClaim}</p>
 			<p className="mt-1 text-sm"><span className="text-muted-foreground">In fact: </span>{verdict.reality}</p>

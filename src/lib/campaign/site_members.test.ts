@@ -16,7 +16,7 @@ import type { ExfiltrationBackend } from "../exfiltration/types";
 import type { WebsiteNavigationHop, WebsiteSiteAssessment } from "../website/types";
 import { extractIndicators, type IndicatorDependencies } from "./indicators";
 import { linkSiteMember, type LinkDependencies } from "./link";
-import { judgedSitePage, memberKey, sitePageSteps, type CampaignSite } from "./members";
+import { judgedSitePage, memberKey, sitePages, type CampaignSite } from "./members";
 import { getPublicCampaign } from "./public_view";
 import { linkJobKey, queueCaseSiteLinks } from "./queue";
 import { CampaignRepository } from "./repository";
@@ -51,9 +51,7 @@ function twoSiteChain(): WebsiteSubmissionData {
 	return {
 		url: LURE,
 		archiveUrl: LURE,
-		analyzedHopIndex: 0,
-		navigationHops: [hop(0, LURE, { visitorStep: { submitted: [] }, redirectTo: KIT_PAGE }), hop(1, KIT_PAGE, { contentCaptured: true })],
-		siteAssessments: assessments,
+		routes: [{ analyzedHopIndex: 0, hops: [hop(0, LURE, { visitorStep: { submitted: [] }, redirectTo: KIT_PAGE }), hop(1, KIT_PAGE, { contentCaptured: true })], siteAssessments: assessments }],
 		kitResources: [{ url: "https://lure-a-test.com/kit.js", mimeType: "application/javascript", size: 40_000, sha256: KIT }],
 		offeredDownload: { pageUrl: KIT_PAGE, url: "https://kit-b-test.com/Release.exe", fileName: "Release.exe", sizeBytes: 9_000, sha256: "d".repeat(64), userAgent: "test", inspection: {} as never },
 		whois: { ip_rdaps: [{ ip: "203.0.113.7", name: "EXAMPLE-NET", country: "NL", origin_asns: [], abuse: null }] } as never,
@@ -61,7 +59,7 @@ function twoSiteChain(): WebsiteSubmissionData {
 }
 
 /** A one-page case of one site whose page says `text`. */
-const onePage = (url: string): WebsiteSubmissionData => ({ url, siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "payment_fraud" }] });
+const onePage = (url: string): WebsiteSubmissionData => ({ url, routes: [{ hops: [], siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "payment_fraud" }] }] });
 
 /** What each case's captured pages read, by capture file. */
 const pageTexts: Record<string, Array<{ name: string; text: string }>> = {};
@@ -100,15 +98,15 @@ const linkJobs = async () => (await getDb()).select().from(abuseJobs).where(eq(a
 describe("a chain's sites as members", () => {
 	test("each site of a chain is judged by its own page: its step, its pages, its judged page", () => {
 		const chain = twoSiteChain();
-		expect(judgedSitePage(chain, "lure-a-test.com")).toEqual({ url: LURE, step: 0 });
-		expect(judgedSitePage(chain, "kit-b-test.com")).toEqual({ url: KIT_PAGE, step: 1 });
+		expect(judgedSitePage(chain, "lure-a-test.com")).toEqual({ url: LURE, route: 0, step: 0 });
+		expect(judgedSitePage(chain, "kit-b-test.com")).toEqual({ url: KIT_PAGE, route: 0, step: 1 });
 		expect(judgedSitePage(chain, "elsewhere-test.com")).toBeUndefined();
-		expect(sitePageSteps(chain, "lure-a-test.com")).toEqual([0]);
-		expect(sitePageSteps(chain, "kit-b-test.com")).toEqual([1]);
+		expect(sitePages(chain, "lure-a-test.com")).toEqual([{ route: 0, step: 0 }]);
+		expect(sitePages(chain, "kit-b-test.com")).toEqual([{ route: 0, step: 1 }]);
 		// A case without a recorded chain showed its one site every page.
-		expect(sitePageSteps(onePage("https://solo-test.com/"), "solo-test.com")).toBeUndefined();
-		expect(sitePageSteps(onePage("https://solo-test.com/"), "other-test.com")).toEqual([]);
-		expect(judgedSitePage(onePage("https://solo-test.com/x"), "solo-test.com")).toEqual({ url: "https://solo-test.com/x", step: 0 });
+		expect(sitePages(onePage("https://solo-test.com/"), "solo-test.com")).toBeUndefined();
+		expect(sitePages(onePage("https://solo-test.com/"), "other-test.com")).toEqual([]);
+		expect(judgedSitePage(onePage("https://solo-test.com/x"), "solo-test.com")).toEqual({ url: "https://solo-test.com/x", route: 0, step: 0 });
 	});
 
 	test("a case whose chain confirmed two sites is a member for each, in the campaign each site's own evidence puts it in", async () => {
@@ -128,8 +126,8 @@ describe("a chain's sites as members", () => {
 
 		const [lureView] = await CampaignRepository.listMembers(bankCampaign);
 		const [kitView] = await CampaignRepository.listMembers(walletCampaign);
-		expect(lureView).toMatchObject({ submissionId: 1n, reportId: lure.reportId, site: "lure-a-test.com", url: LURE, pageStep: 0 });
-		expect(kitView).toMatchObject({ submissionId: 1n, reportId: kit.reportId, site: "kit-b-test.com", url: KIT_PAGE, pageStep: 1 });
+		expect(lureView).toMatchObject({ submissionId: 1n, reportId: lure.reportId, site: "lure-a-test.com", url: LURE, page: { route: 0, step: 0 } });
+		expect(kitView).toMatchObject({ submissionId: 1n, reportId: kit.reportId, site: "kit-b-test.com", url: KIT_PAGE, page: { route: 0, step: 1 } });
 		// What the case recorded once for its headline page (kit files, the submitted address's server) is the lure's alone;
 		// the offered file is the kit page's.
 		const shown = (view: typeof lureView) => view!.indicators.map(({ kind, value }) => `${kind} ${value}`).sort();
@@ -204,8 +202,9 @@ describe("a chain's sites as members", () => {
 			steps: site.steps.map((step) => [step.step, files.get(step.screenshotUrl), files.get(step.stampedUrl!)]),
 			verdict: site.verdict && [site.verdict.basis, site.verdict.impersonates],
 		}))).toEqual([
+			// Pages are numbered by display order among the site's own pages: the kit site's only page is step 1 (its screenshot file is still website-step2.png).
 			{ key: memberKey(lure), host: "lure-a-test.com", screenshot: "website-stamped.png", steps: [[1, "website.png", "website-stamped.png"]], verdict: ["credential_theft", "Example Bank"] },
-			{ key: memberKey(kit), host: "kit-b-test.com", screenshot: "website-step2-stamped.png", steps: [[2, "website-step2.png", "website-step2-stamped.png"]], verdict: ["payment_fraud", undefined] },
+			{ key: memberKey(kit), host: "kit-b-test.com", screenshot: "website-step2-stamped.png", steps: [[1, "website-step2.png", "website-step2-stamped.png"]], verdict: ["payment_fraud", undefined] },
 		]);
 		expect(view.reasons.map((reason) => reason.kind)).toEqual(["same_backend"]);
 	});
@@ -221,9 +220,7 @@ describe("a case that joined another case's report", () => {
 		const chain: WebsiteSubmissionData = {
 			url: "https://short-z-test.link/x",
 			archiveUrl: KIT_PAGE,
-			analyzedHopIndex: 1,
-			navigationHops: [hop(0, "https://short-z-test.link/x", { status: 302, redirectTo: KIT_PAGE }), hop(1, KIT_PAGE, { contentCaptured: true })],
-			siteAssessments: [{ hopIndex: 0, finding: "insufficient_evidence" }, { hopIndex: 1, judgedHopIndex: 1, finding: "phishing", phishingBasis: "payment_fraud" }],
+			routes: [{ analyzedHopIndex: 1, hops: [hop(0, "https://short-z-test.link/x", { status: 302, redirectTo: KIT_PAGE }), hop(1, KIT_PAGE, { contentCaptured: true })], siteAssessments: [{ hopIndex: 0, finding: "insufficient_evidence" }, { hopIndex: 1, judgedHopIndex: 1, finding: "phishing", phishingBasis: "payment_fraud" }] }],
 			kitResources: [{ url: "https://kit-b-test.com/kit.js", mimeType: "application/javascript", size: 40_000, sha256: KIT }],
 			whois: { ip_rdaps: [{ ip: "198.51.100.9", name: "SHORTENER", country: "US", origin_asns: [], abuse: null }] } as never,
 		};
@@ -248,7 +245,7 @@ describe("a case that joined another case's report", () => {
 		// Its page asks for the wallet case 3's asks for, unlike the owner's: it is in case 3's campaign, through the owner's report.
 		expect(await campaignOf(joiner)).toBe((await campaignOf(wallet))!);
 		const [, joinerView] = await CampaignRepository.listMembers((await campaignOf(joiner))!);
-		expect(joinerView).toMatchObject({ submissionId: 2n, reportId: owner.reportId, site: "kit-b-test.com", url: KIT_PAGE, pageStep: 0 });
+		expect(joinerView).toMatchObject({ submissionId: 2n, reportId: owner.reportId, site: "kit-b-test.com", url: KIT_PAGE, page: { route: 0, step: 0 } });
 		// Its kit files are its headline page's, the kit page; the shortener's server is not the site's.
 		expect(joinerView!.indicators.map(({ kind, value }) => `${kind} ${value}`).sort()).toEqual([`kit_fingerprint ${KIT}`, `payment_receiver tron:${WALLET}`]);
 		// The kit file links the owner too: owner, joiner and case 3 are one campaign, the site in it twice.

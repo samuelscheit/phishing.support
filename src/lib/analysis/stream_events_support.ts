@@ -128,6 +128,7 @@ export function humanizeAnalysisStep(value: string): string {
 		revisit_as_phone: "Opening the page again as an iPhone, since it turns desktops away",
 		revisit_from_other_exit: "Opening the page again from another network, since a CAPTCHA or browser check blocked the visit",
 		revisit_cloaked_destination: "Walking the site again from another network, since the site its flow leads to answered with nothing",
+		sample_rotation: "Opening the link again as another visitor, since it passed a tracking link that may rotate offers",
 		structured_response: "Confirming the result",
 		resolution: "Finding the right contacts",
 		reporting: "Preparing reports",

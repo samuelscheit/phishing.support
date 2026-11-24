@@ -39,9 +39,9 @@ describe("submission list pages", () => {
 	test("a case reported only for the deceptive funnel its chain is says so; one with a phishing site of its own is phishing", async () => {
 		const funnel = { verdict: { finding: "deceptive_funnel" }, extraction: {} } as never;
 		const hop = { hopIndex: 0, judgedHopIndex: 0 };
-		await create(11n, new Date("2026-10-01T00:00:00Z"), { kind: "website", website: { url: "https://lure.com/", funnel, siteAssessments: [{ ...hop, finding: "insufficient_evidence" }] } });
-		await create(12n, new Date("2026-10-02T00:00:00Z"), { kind: "website", website: { url: "https://kit.com/", funnel, siteAssessments: [{ ...hop, finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in" }] } });
-		await create(13n, new Date("2026-10-03T00:00:00Z"), { kind: "website", website: { url: "https://shop.com/", funnel: { verdict: { finding: "not_deceptive" }, extraction: {} } as never } }, "invalid");
+		await create(11n, new Date("2026-10-01T00:00:00Z"), { kind: "website", website: { url: "https://lure.com/", routes: [{ hops: [], funnel, siteAssessments: [{ ...hop, finding: "insufficient_evidence" }] }] } });
+		await create(12n, new Date("2026-10-02T00:00:00Z"), { kind: "website", website: { url: "https://kit.com/", routes: [{ hops: [], funnel, siteAssessments: [{ ...hop, finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in" }] }] } });
+		await create(13n, new Date("2026-10-03T00:00:00Z"), { kind: "website", website: { url: "https://shop.com/", routes: [{ hops: [], funnel: { verdict: { finding: "not_deceptive" }, extraction: {} } as never }] } }, "invalid");
 		const page = await listSubmissionCards();
 		expect(page.submissions.map(({ id, reportedAs }) => ({ id, reportedAs }))).toEqual([{ id: "13", reportedAs: undefined }, { id: "12", reportedAs: undefined }, { id: "11", reportedAs: "deceptive_funnel" }]);
 	});

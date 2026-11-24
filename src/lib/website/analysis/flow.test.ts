@@ -224,24 +224,24 @@ describe("a visit through a multi-page kit", () => {
 		expect(submission?.info).toBe(`Phishing confirmed at ${RECOVERY}; evidence for it and the 2 URLs on ${new URL(SITE).hostname} that lead to it is being collected before the report is sent.`);
 		const website = websiteData(submission);
 		expect(website?.archiveUrl).toBe(RECOVERY);
-		expect(website?.navigationHops?.map(({ index, url, redirectTo, visitorStep, contentCaptured }) => ({ index, url, redirectTo, visitorStep, contentCaptured }))).toEqual([
+		expect(website?.routes![0]!.hops?.map(({ index, url, redirectTo, visitorStep, contentCaptured }) => ({ index, url, redirectTo, visitorStep, contentCaptured }))).toEqual([
 			{ index: 0, url: CONSENT, redirectTo: GET_STARTED, visitorStep: { submitted: [] }, contentCaptured: false },
 			{ index: 1, url: GET_STARTED, redirectTo: RECOVERY, visitorStep: { submitted: [] }, contentCaptured: false },
 			{ index: 2, url: RECOVERY, redirectTo: undefined, visitorStep: undefined, contentCaptured: true },
 		]);
 		// Every page of the kit's site shares the verdict of the page it rests on: the recovery form.
-		expect(website?.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([
+		expect(website?.routes![0]!.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([
 			{ hopIndex: 0, finding: "phishing", judgedHopIndex: 2 },
 			{ hopIndex: 1, finding: "phishing", judgedHopIndex: 2 },
 			{ hopIndex: 2, finding: "phishing", judgedHopIndex: 2 },
 		]);
-		expect(website?.analyzedHopIndex).toBe(2);
-		expect(website?.siteAssessments?.[2]).toMatchObject({
+		expect(website?.routes![0]!.analyzedHopIndex).toBe(2);
+		expect(website?.routes![0]!.siteAssessments?.[2]).toMatchObject({
 			phishingBasis: "credential_theft",
 			evidenceQuote: "Access your wallet with your Secret Recovery Phrase",
 			collectionFields: [{ ref: "f2", name: "word1" }, { ref: "f3", name: "word2" }],
 		});
-		expect(website?.visit).toMatchObject({ outcome: "completed" });
+		expect(website?.routes![0]!.visit).toMatchObject({ outcome: "completed" });
 		// The kit files of every page are kept for sibling discovery, once per hash.
 		expect(website?.kitResources?.map(({ sha256 }) => sha256)).toEqual(["a".repeat(64), "b".repeat(64)]);
 
@@ -308,20 +308,20 @@ describe("a visit through a multi-page kit", () => {
 		const submission = await SubmissionsEntity.get(id);
 		expect(submission?.status).toBe("reported");
 		const website = websiteData(submission);
-		expect(website?.navigationHops).toEqual([
+		expect(website?.routes![0]!.hops).toEqual([
 			{ index: 0, url: GATE, hostname: new URL(GATE).hostname, status: 200, contentType: "text/html", redirectTo: GATE, visitorStep: { submitted: ["email"] }, contentCaptured: false },
 			{ index: 1, url: GATE, hostname: new URL(GATE).hostname, status: 302, redirectTo: SIGN_IN, contentCaptured: false },
 			{ index: 2, url: SIGN_IN, hostname: new URL(GATE).hostname, status: 200, contentType: "text/html", contentCaptured: true },
 		]);
-		expect(website?.visit?.dataSent).toEqual([
+		expect(website?.routes![0]!.visit?.dataSent).toEqual([
 			{ url: GATE, method: "POST", fields: ["email"], sameSite: true },
 			{ url: bot, method: "POST", fields: ["password"], sameSite: false },
 		]);
 
 		// The sign-in page is classified knowing how it was reached and what it sent.
-		const input = buildWebsiteClassificationInput(website!.navigationHops![2]!, {
+		const input = buildWebsiteClassificationInput(website!.routes![0]!.hops[2]!, {
 			...liveCapture(SIGN_IN),
-			navigationHops: website!.navigationHops!,
+			navigationHops: website!.routes![0]!.hops,
 			dataSent: [{ url: bot, method: "POST", fields: ["password"], sameSite: false }],
 		});
 		const text = (input[1]!.content as Array<{ text?: string }>)[0]!.text!;
@@ -378,13 +378,13 @@ describe("a visit through a multi-page kit", () => {
 		expect(manifest.capture.capturedUrl).toBe(RECOVERY);
 		// The chain goes on to it, so the visit's page viewer shows it after the judged page; it shares its site's verdict.
 		const website = websiteData(await SubmissionsEntity.get(id))!;
-		expect(website.navigationHops?.map(({ index, url, contentCaptured }) => ({ index, url, contentCaptured }))).toEqual([
+		expect(website.routes![0]!.hops?.map(({ index, url, contentCaptured }) => ({ index, url, contentCaptured }))).toEqual([
 			{ index: 0, url: CONSENT, contentCaptured: false },
 			{ index: 1, url: GET_STARTED, contentCaptured: false },
 			{ index: 2, url: RECOVERY, contentCaptured: true },
 		]);
-		expect(website.analyzedHopIndex).toBe(1);
-		expect(website.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([0, 1, 2].map((hopIndex) => ({ hopIndex, finding: "phishing", judgedHopIndex: 1 })));
+		expect(website.routes![0]!.analyzedHopIndex).toBe(1);
+		expect(website.routes![0]!.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([0, 1, 2].map((hopIndex) => ({ hopIndex, finding: "phishing", judgedHopIndex: 1 })));
 	});
 
 	test("a visit that did not finish leaves a case with nothing reportable inconclusive, retried from the submitted URL; a later visit that finishes reports it", async () => {
@@ -494,18 +494,18 @@ describe("a visit through a multi-page kit", () => {
 		const submission = await SubmissionsEntity.get(id);
 		expect(submission?.status).toBe("reported");
 		expect(submission?.info).toBe(`Phishing confirmed at ${KIT}; its evidence is being collected before the report is sent.`);
-		expect(websiteData(submission)?.navigationHops?.map(({ url, status, visitorStep, contentCaptured }) => ({ url, status, moved: Boolean(visitorStep), contentCaptured }))).toEqual([
+		expect(websiteData(submission)?.routes![0]!.hops?.map(({ url, status, visitorStep, contentCaptured }) => ({ url, status, moved: Boolean(visitorStep), contentCaptured }))).toEqual([
 			{ url: SHORT, status: 302, moved: false, contentCaptured: false },
 			{ url: SESSION_GATE, status: 200, moved: true, contentCaptured: false },
 			{ url: KIT, status: 200, moved: false, contentCaptured: true },
 		]);
 		// The shortener's own gate page is judged for its site; the kit for its own.
-		expect(websiteData(submission)?.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([
+		expect(websiteData(submission)?.routes?.[0]?.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([
 			{ hopIndex: 0, finding: "insufficient_evidence", judgedHopIndex: 1 },
 			{ hopIndex: 1, finding: "insufficient_evidence", judgedHopIndex: 1 },
 			{ hopIndex: 2, finding: "phishing", judgedHopIndex: 2 },
 		]);
-		expect(websiteData(submission)?.analyzedHopIndex).toBe(2);
+		expect(websiteData(submission)?.routes?.[0]?.analyzedHopIndex).toBe(2);
 		// One case, one report, of the kit's host only.
 		expect((await SubmissionsEntity.listCards({ limit: 10 })).map((card) => card.id)).toEqual([id]);
 		const report = await AbuseRepository.getReportForSubmission(id);
@@ -528,7 +528,7 @@ describe("the raw answers of a chain across the pages of a visit", () => {
 		await analyzeWebsite({ submissionId: id, url: tracker }, dependencies({ captures: [], capture: () => visited({ ...first, requestedUrl: tracker }, { steps }).archive }));
 
 		const website = websiteData(await SubmissionsEntity.get(id))!;
-		expect(website.navigationHops?.map(({ index, url, bodyCaptured }) => ({ index, url, bodyCaptured }))).toEqual([
+		expect(website.routes![0]!.hops?.map(({ index, url, bodyCaptured }) => ({ index, url, bodyCaptured }))).toEqual([
 			{ index: 0, url: tracker, bodyCaptured: undefined },
 			{ index: 1, url: CONSENT, bodyCaptured: true },
 			{ index: 2, url: GET_STARTED, bodyCaptured: true },

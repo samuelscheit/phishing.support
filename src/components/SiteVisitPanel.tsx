@@ -180,14 +180,16 @@ function TimelineRow({ icon, tone = "muted", children }: { icon: React.ReactNode
 /**
  * What the visit did: the agent walking the site as a victim would, live while
  * the case runs and from its record afterwards, with where the synthetic data
- * went and what it downloaded.
+ * went and what it downloaded. `routeName` names the route the visit walked
+ * when the case's link rotated to several.
  */
-export function SiteVisitTimeline({ running, visit, offeredDownload, live: { entries }, pageCount }: {
+export function SiteVisitTimeline({ running, visit, offeredDownload, live: { entries }, pageCount, routeName }: {
 	running: boolean;
 	visit?: WebsiteVisitRecord;
 	offeredDownload?: WebsiteOfferedDownload;
 	live: LiveVisit;
 	pageCount: number;
+	routeName?: string;
 }) {
 	const logRef = useRef<HTMLOListElement>(null);
 	useEffect(() => {
@@ -206,7 +208,7 @@ export function SiteVisitTimeline({ running, visit, offeredDownload, live: { ent
 
 	return (
 		<section className="rounded-lg border bg-card p-4" aria-labelledby="site-visit-heading">
-			<h2 id="site-visit-heading" className="text-sm font-semibold">The visit</h2>
+			<h2 id="site-visit-heading" className="text-sm font-semibold">The visit{routeName ? <span className="font-normal text-muted-foreground"> · {routeName}</span> : null}</h2>
 			<p className="mt-0.5 text-xs text-muted-foreground">An agent walks the site as its victim would, entering only made-up data.</p>
 			<p className={cn("mt-2 text-xs", visit && visit.outcome !== "completed" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")}>
 				<span className="font-medium">{summary}</span>{note ? <> · {note}</> : null}

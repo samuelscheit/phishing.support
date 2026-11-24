@@ -1,11 +1,13 @@
 import type { Artifact } from "@/lib/db/schema";
+import type { DeceptiveFunnelFinding } from "@/lib/abuse/funnel/classification";
 import type { SubmissionDetail } from "@/lib/submissions/details";
-import type { WebsitePhishingBasis } from "@/lib/website/types";
+import type { WebsiteFunnel, WebsiteNavigationHop, WebsitePhishingBasis, WebsiteRoute, WebsiteRouteVisitor, WebsiteSiteAssessment } from "@/lib/website/types";
 import { websiteSite } from "@/lib/website/info/site";
+import { isPageHop } from "@/lib/website/visit/capture_files";
 
 export type WebsiteData = Extract<SubmissionDetail["data"], { kind: "website" }>["website"];
-export type NavigationHop = NonNullable<WebsiteData["navigationHops"]>[number];
-export type SiteAssessment = NonNullable<WebsiteData["siteAssessments"]>[number];
+export type NavigationHop = WebsiteNavigationHop;
+export type SiteAssessment = WebsiteSiteAssessment;
 
 const PHISHING_BASIS_LABELS: Record<WebsitePhishingBasis, string> = {
 	credential_theft: "credential theft",
@@ -40,15 +42,56 @@ export function siteRuns(hops: readonly NavigationHop[]): SiteRun[] {
 
 const isReportable = (assessment: SiteAssessment | undefined) => assessment?.finding === "phishing" || assessment?.finding === "malware";
 
-/** Each site of the chain confirmed as phishing or malware, once, in the order the chain reached it, with its verdict. */
-export function reportedSites(hops: readonly NavigationHop[], assessments: ReadonlyMap<number, SiteAssessment>): Array<{ site: string; assessment: SiteAssessment }> {
-	const sites = new Map<string, SiteAssessment>();
-	for (const hop of hops) {
-		const assessment = assessments.get(hop.index);
-		const site = websiteSite(hop.url);
-		if (isReportable(assessment) && !sites.has(site)) sites.set(site, assessment!);
-	}
-	return [...sites].map(([site, assessment]) => ({ site, assessment }));
+/** A route's site verdicts by the hop they were given for. */
+export function assessmentsByHop(route: WebsiteRoute): Map<number, SiteAssessment> {
+	return new Map((route.siteAssessments ?? []).map((assessment) => [assessment.hopIndex, assessment]));
+}
+
+/** A site confirmed as phishing or malware, with the verdict of the first route that confirmed it and every route that did. */
+export type ConfirmedSite = { site: string; assessment: SiteAssessment; routes: number[] };
+
+/**
+ * Each site confirmed as phishing or malware on any route, once, in the order
+ * the routes reached it: a rotating link can show the same site on several
+ * routes, and the site is one verdict and one report however often it showed.
+ */
+export function reportedSites(routes: readonly WebsiteRoute[]): ConfirmedSite[] {
+	const sites = new Map<string, ConfirmedSite>();
+	routes.forEach((route, index) => {
+		const assessments = assessmentsByHop(route);
+		for (const hop of route.hops) {
+			const assessment = assessments.get(hop.index);
+			if (!isReportable(assessment)) continue;
+			const site = websiteSite(hop.url);
+			const known = sites.get(site);
+			if (!known) sites.set(site, { site, assessment: assessment!, routes: [index] });
+			else if (!known.routes.includes(index)) known.routes.push(index);
+		}
+	});
+	return [...sites.values()];
+}
+
+/** A route judged a deceptive affiliate funnel, with its index. */
+export type DeceptiveRoute = { route: number; funnel: WebsiteFunnel & { verdict: DeceptiveFunnelFinding } };
+
+/** Every route judged a deceptive affiliate funnel: each rotation of a smart link is its own affiliate's offer. */
+export function deceptiveFunnels(routes: readonly WebsiteRoute[]): DeceptiveRoute[] {
+	return routes.flatMap(({ funnel }, route) => (funnel?.verdict.finding === "deceptive_funnel" ? [{ route, funnel: { ...funnel, verdict: funnel.verdict } }] : []));
+}
+
+/** Whether a route found anything reportable: a phishing or malware site, or a deceptive funnel. */
+export function routeHasFinding(route: WebsiteRoute): boolean {
+	return (route.siteAssessments ?? []).some(isReportable) || route.funnel?.verdict.finding === "deceptive_funnel";
+}
+
+/** A route's label, numbered from 1 as the capture files are. */
+export function routeLabel(route: number): string {
+	return `Route ${route + 1}`;
+}
+
+/** How a walk presented itself: its browser, and its network when it was recorded. */
+export function visitorLabel(visitor: WebsiteRouteVisitor): string {
+	return [visitor.browser, visitor.network].filter(Boolean).join(" · ");
 }
 
 /** The headline for the page a finding rests on, in the sidebar verdict. */

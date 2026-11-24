@@ -6,20 +6,20 @@ import type { ReporterMetadata } from "../../http/reporter_headers";
 import type { WebsiteFunnel, WebsiteNavigationHop } from "../types";
 import type { WebsiteShownPage } from "../visit/visit";
 import type { WebsiteAnalysisDependencies } from "./analysis_types";
-import { stepScreenshots } from "./evidence";
+import { pageScreenshots } from "./evidence";
 
 /**
- * The case's chain as the funnel reads it: every response with the time it
+ * A route's chain as the funnel reads it: every response with the time it
  * arrived, and every page the visit showed with its text and its stamped
  * screenshot. It starts when the first response arrived.
  */
 export async function caseFunnelChain(submissionId: bigint, chain: readonly WebsiteNavigationHop[], pages: readonly WebsiteShownPage[]): Promise<FunnelChain> {
-	const screenshots = new Map((await stepScreenshots(submissionId, pages.map(({ step }) => step))).map(({ step, png }) => [step, png]));
+	const screenshots = new Map((await pageScreenshots(submissionId, pages.map(({ page }) => page))).map(({ page, png }) => [page.step, png]));
 	const startedAt = chain.find((hop) => hop.receivedAt)?.receivedAt;
 	return {
 		hops: chain.map(({ index, url, hostname, status, redirectTo, receivedAt }) => ({ index, url, hostname, status, ...(redirectTo ? { redirectTo } : {}), ...(receivedAt ? { at: new Date(receivedAt) } : {}) })),
 		pages: pages.map((page) => {
-			const png = screenshots.get(page.step);
+			const png = screenshots.get(page.page.step);
 			return { hopIndex: page.hopIndex, url: page.url, ...(page.title ? { title: page.title } : {}), text: page.text, ...(png ? { screenshot: { buffer: png, mimeType: "image/png" as const } } : {}), capturedAt: page.capturedAt };
 		}),
 		startedAt: startedAt ? new Date(startedAt) : pages[0]?.capturedAt ?? new Date(),

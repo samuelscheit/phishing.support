@@ -16,7 +16,7 @@ describe("ArtifactsEntity.saveWebsiteArtifacts", () => {
 		await ArtifactsEntity.saveWebsiteArtifacts({
 			submissionId,
 			archive: { archivedAt: new Date("2026-01-02T03:04:05Z"), mhtml: Buffer.from("MIME-Version: 1.0"), screenshotPng: Buffer.from([0x89, 0x50]), hopBodies: [{ hopIndex: 1, body: kit }, { hopIndex: 3, body: binary }] },
-			evidence: { step: 0, manifest: Buffer.from("{}\n") },
+			evidence: { page: { route: 0, step: 0 }, manifest: Buffer.from("{}\n") },
 		});
 
 		const files = await ArtifactsEntity.listForSubmission(submissionId);

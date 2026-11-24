@@ -9,7 +9,8 @@ import { fetchThroughPublicRedirects, PublicRedirectError, type PublicRedirectDe
 import { createWebsiteSubmission } from "../../submissions/website";
 import { analyzeWebsite } from "../../website/analysis/ai";
 import { websiteSite } from "../../website/info/site";
-import type { WebsiteNavigationHop, WebsiteSiteAssessment } from "../../website/types";
+import type { WebsiteNavigationHop, WebsiteRoute, WebsiteSiteAssessment } from "../../website/types";
+import { reportedSiteRoute, websiteRoutes } from "../../website/routes";
 import { analyzedPage, isPageHop } from "../../website/visit/capture_files";
 import { AbuseRepository } from "../repository";
 import type { AbuseJob } from "../schema";
@@ -185,7 +186,11 @@ export type RedirectorOf = {
 export async function redirectorOf(submissionId: bigint, pageUrl: string): Promise<RedirectorOf | undefined> {
 	const submission = await SubmissionsEntity.get(submissionId);
 	if (submission?.data.kind !== "website") return undefined;
-	const { navigationHops: hops = [], siteAssessments = [] } = submission.data.website;
+	const website = submission.data.website;
+	// The route that reached the confirmed page: a rotating link's other routes passed other redirectors.
+	const routes = websiteRoutes(website);
+	const route = routes[reportedSiteRoute(website, websiteSite(pageUrl))?.route ?? routes.findIndex((walked) => walked.hops.some((hop) => hop.url === pageUrl))] ?? routes[website.analyzedRoute ?? 0];
+	const { hops = [], siteAssessments = [] } = route ?? {};
 	const hop = redirectorHop(hops, pageUrl);
 	const url = hop ? normalizePublicHttpUrl(hop.url) : undefined;
 	if (!hop || !url) return undefined;
@@ -205,13 +210,13 @@ const isReportableAssessment = (assessment: WebsiteSiteAssessment) => assessment
 
 /**
  * Where a redirector's case led: its verdict page when that is on another
- * site (the kit it found), else the first page shown on another site, else
- * where the chain ended.
+ * site (the kit it found), else the first page its analyzed route showed on
+ * another site, else where that route ended.
  */
-export function chainDestination(website: { navigationHops?: WebsiteNavigationHop[]; analyzedHopIndex?: number }, redirectorUrl: string): string | undefined {
+export function chainDestination(website: { routes?: WebsiteRoute[]; analyzedRoute?: number }, redirectorUrl: string): string | undefined {
 	const site = websiteSite(redirectorUrl);
 	const away = (hop: WebsiteNavigationHop) => websiteSite(hop.url) !== site;
-	const hops = website.navigationHops ?? [];
+	const hops = websiteRoutes(website)[website.analyzedRoute ?? 0]?.hops ?? [];
 	const analyzed = analyzedPage(website)?.hop;
 	return (analyzed && away(analyzed) ? analyzed : hops.find((hop) => isPageHop(hop) && away(hop)) ?? hops.filter(away).at(-1))?.url;
 }

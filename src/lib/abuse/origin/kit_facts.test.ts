@@ -37,10 +37,10 @@ describe("captured kit facts", () => {
 			kind: "website",
 			data: { kind: "website", website: {
 				url: "https://herstel.example.com/",
-				siteAssessments: [
+				routes: [{ hops: [], siteAssessments: [
 					{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in with your\nGoogle Account.", collectionFields: HERSTEL_FIELDS },
 					{ hopIndex: 1, finding: "benign", collectionFields: [{ ref: "f1", control: "input[type=text]", name: "card-number" }] },
-				],
+				] }],
 				investigation: { status: "completed", backendCount: 1, updatedAt: "2026-10-30T00:00:00.000Z" },
 			} },
 			dedupeKey: "website-herstel.example.com",

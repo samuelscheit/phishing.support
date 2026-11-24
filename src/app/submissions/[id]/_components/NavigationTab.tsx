@@ -3,16 +3,17 @@ import { ExternalLinkConfirm } from "@/components/ExternalLinkConfirm";
 import { OfferedFile } from "@/components/OfferedFile";
 import { Badge } from "@/components/ui/badge";
 import { CANARY_FIELD_LABEL, describeDataEntryField, revisitWording } from "@/lib/website/types";
-import { chainHopBodyFileName, isPageHop, latestArtifactNamed, pageCaptureStep, websiteCaptureFileNames } from "@/lib/website/visit/capture_files";
+import { chainHopBodyFileName, isPageHop, latestArtifactNamed, routePage, websiteCaptureFileNames } from "@/lib/website/visit/capture_files";
+import type { WebsiteRoute } from "@/lib/website/types";
 import type { SubmissionDetail } from "@/lib/submissions/details";
 import { cn } from "@/lib/util/cn";
-import { hopFindingLabel, siteRuns, type NavigationHop, type SiteAssessment, type SiteRun, type WebsiteData } from "./helpers";
+import { assessmentsByHop, hopFindingLabel, siteRuns, type NavigationHop, type SiteAssessment, type SiteRun, type WebsiteData } from "./helpers";
 
 type Artifacts = SubmissionDetail["artifacts"];
 
 /** How the hop answered: a redirect, a page that sent the visitor on by script, or a page that was shown. */
-function hopRole(hop: NavigationHop, analyzedHopIndex: number | undefined): string {
-	if (hop.index === analyzedHopIndex) return "Page captured, the case's headline page";
+function hopRole(hop: NavigationHop, headlineHopIndex: number | undefined): string {
+	if (hop.index === headlineHopIndex) return "Page captured, the case's headline page";
 	if (hop.contentCaptured) return "Last page shown, captured";
 	if (hop.visitorStep) return "Page captured, the visit moved on";
 	if (hop.revisit) return `Page captured, ${revisitWording(hop.revisit).cause}`;
@@ -20,11 +21,11 @@ function hopRole(hop: NavigationHop, analyzedHopIndex: number | undefined): stri
 	return hop.redirectTo ? "Sent the visitor on by script" : "Response only";
 }
 
-/** The evidence files of one hop: the raw response it was answered with, and the capture of the page it showed. */
-function HopFiles({ hop, hops, artifacts }: { hop: NavigationHop; hops: readonly NavigationHop[]; artifacts: Artifacts }) {
-	const page = isPageHop(hop) ? websiteCaptureFileNames(pageCaptureStep(hops, hop)) : undefined;
+/** The evidence files of one hop of route `route`: the raw response it was answered with, and the capture of the page it showed. */
+function HopFiles({ route, hop, hops, artifacts }: { route: number; hop: NavigationHop; hops: readonly NavigationHop[]; artifacts: Artifacts }) {
+	const page = isPageHop(hop) ? websiteCaptureFileNames(routePage(route, hops, hop)) : undefined;
 	const files = [
-		{ label: "Raw response", artifact: hop.bodyCaptured ? latestArtifactNamed(artifacts, chainHopBodyFileName(hop.index)) : undefined },
+		{ label: "Raw response", artifact: hop.bodyCaptured ? latestArtifactNamed(artifacts, chainHopBodyFileName(route, hop.index)) : undefined },
 		{ label: "Screenshot", artifact: page && (latestArtifactNamed(artifacts, page.stampedScreenshot) ?? latestArtifactNamed(artifacts, page.screenshot)) },
 		{ label: "Archive (MHTML)", artifact: page && latestArtifactNamed(artifacts, page.mhtml) },
 		{ label: "Evidence manifest", artifact: page && latestArtifactNamed(artifacts, page.manifest) },
@@ -39,9 +40,14 @@ function HopFiles({ hop, hops, artifacts }: { hop: NavigationHop; hops: readonly
 	);
 }
 
-function HopItem({ hop, hops, website, artifacts }: { hop: NavigationHop; hops: readonly NavigationHop[]; website: WebsiteData; artifacts: Artifacts }) {
-	const { verificationGate, providerWarning, offeredDownload, analyzedHopIndex } = website;
-	const analyzed = hop.index === analyzedHopIndex;
+/**
+ * One response of the route. `headlineHopIndex` is the case's headline page
+ * when this is its route: the gate, warning and download the case records
+ * belong to that page alone, not to the judged page of another route.
+ */
+function HopItem({ route, hop, hops, headlineHopIndex, website, artifacts }: { route: number; hop: NavigationHop; hops: readonly NavigationHop[]; headlineHopIndex: number | undefined; website: WebsiteData; artifacts: Artifacts }) {
+	const { verificationGate, providerWarning, offeredDownload } = website;
+	const analyzed = hop.index === headlineHopIndex;
 	return (
 		<li className="relative space-y-1 py-1.5 pl-4">
 			<span aria-hidden className={cn("absolute -left-[5px] top-3 h-2.5 w-2.5 rounded-full border bg-background", isPageHop(hop) && "border-foreground/60 bg-foreground/60")} />
@@ -51,7 +57,7 @@ function HopItem({ hop, hops, website, artifacts }: { hop: NavigationHop; hops: 
 					<div className="text-xs text-muted-foreground">
 						HTTP {hop.status ?? "unknown"}
 						{hop.receivedAt ? <> · <time dateTime={hop.receivedAt} className="tabular-nums">{hop.receivedAt.slice(11, 23)} UTC</time></> : null}
-						{" · "}{hopRole(hop, analyzedHopIndex)}
+						{" · "}{hopRole(hop, headlineHopIndex)}
 					</div>
 					{hop.visitorStep && hop.redirectTo ? (
 						<div className="text-xs text-muted-foreground">
@@ -77,7 +83,7 @@ function HopItem({ hop, hops, website, artifacts }: { hop: NavigationHop; hops: 
 							) : null}
 						</div>
 					) : null}
-					<HopFiles hop={hop} hops={hops} artifacts={artifacts} />
+					<HopFiles route={route} hop={hop} hops={hops} artifacts={artifacts} />
 				</div>
 				<ExternalLinkConfirm
 					href={hop.url}
@@ -112,17 +118,23 @@ function SiteVerdict({ run, assessment }: { run: SiteRun; assessment: SiteAssess
 	);
 }
 
-/** The case's whole chain, site by site: every response with its evidence files, and each site's verdict. */
-export function NavigationTab({ hops, assessments, website, artifacts }: { hops: NavigationHop[]; assessments: Map<number, SiteAssessment>; website: WebsiteData; artifacts: Artifacts }) {
+/**
+ * One route's whole chain, site by site: every response with its evidence
+ * files (named after the route), and each site's verdict. `headline` marks the
+ * route of the case's headline page.
+ */
+export function NavigationTab({ route, walked, headline, website, artifacts }: { route: number; walked: WebsiteRoute; headline: boolean; website: WebsiteData; artifacts: Artifacts }) {
+	const assessments = assessmentsByHop(walked);
+	const headlineHopIndex = headline ? walked.analyzedHopIndex : undefined;
 	return (
 		<>
 			<p className="text-xs text-muted-foreground">Every response of the visit, across every site it passed. Each site is judged on the pages it showed itself; a site that only redirected is never given the verdict of where it led.</p>
 			<ol className="space-y-3">
-				{siteRuns(hops).map((run) => (
+				{siteRuns(walked.hops).map((run) => (
 					<li key={`${run.hops[0]!.index}:${run.site}`} className="space-y-2 rounded border bg-background p-3">
 						<SiteVerdict run={run} assessment={assessments.get(run.hops[0]!.index)} />
 						<ol className="ml-1 border-l">
-							{run.hops.map((hop) => <HopItem key={`${hop.index}:${hop.url}`} hop={hop} hops={hops} website={website} artifacts={artifacts} />)}
+							{run.hops.map((hop) => <HopItem key={`${hop.index}:${hop.url}`} route={route} hop={hop} hops={walked.hops} headlineHopIndex={headlineHopIndex} website={website} artifacts={artifacts} />)}
 						</ol>
 					</li>
 				))}

@@ -1,3 +1,4 @@
+import type { CapturePage } from "../website/visit/capture_files";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { getDb, type DbExecutor, type Transaction } from "../db";
@@ -13,8 +14,8 @@ export type CampaignMemberView = CampaignSite & {
 	joinedAt: Date;
 	/** The case's judged page of the site, else the site's first reported URL. */
 	url: string;
-	/** The capture step of the judged page, when the case captured one of the site. */
-	pageStep?: number;
+	/** The captured judged page (route and step), when the case captured one of the site. */
+	page?: CapturePage;
 	status: Submission["status"];
 	/** When the case was opened: when the site was first seen by it. */
 	createdAt: Date;
@@ -250,7 +251,7 @@ export const CampaignRepository = {
 				site: reported.site,
 				joinedAt: member.joinedAt,
 				url: page?.url ?? reported.url,
-				...(page ? { pageStep: page.step } : {}),
+				...(page ? { page: { route: page.route, step: page.step } } : {}),
 				status: submission.status,
 				createdAt: submission.createdAt,
 				indicators: indicators.filter((indicator) => indicator.submissionId === member.submissionId && indicator.reportId === member.reportId),

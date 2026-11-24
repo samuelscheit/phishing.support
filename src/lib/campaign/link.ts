@@ -2,7 +2,7 @@ import { AbuseRepository } from "../abuse/repository";
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { buildDossier, type Dossier, type DossierDependencies } from "../referral/dossier";
-import { latestArtifactNamed, websiteCaptureFileNames } from "../website/visit/capture_files";
+import { latestArtifactNamed, websiteCaptureFileNames, type CapturePage } from "../website/visit/capture_files";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website/types";
 import { campaignBrand, guideVisitor, sameBrand, type GuidanceDependencies } from "./guidance";
 import { extractIndicators, sitePageTexts, type IndicatorDependencies } from "./indicators";
@@ -12,9 +12,9 @@ import { CampaignRepository } from "./repository";
 import { describeCampaign, type CampaignFacts, type DescribeDependencies } from "./summary";
 import { isBlankCapture, pageThumbnail } from "./thumbnail";
 
-/** The preview of one captured page, stored next to its screenshot: `website-thumb.webp`, `website-step2-thumb.webp`, … */
-export function thumbnailName(step: number): string {
-	return websiteCaptureFileNames(step).screenshot.replace(/\.png$/, "-thumb.webp");
+/** The preview of one captured page, stored next to its screenshot: `website-thumb.webp`, `website-step2-thumb.webp`, `route2-website-thumb.webp`, … */
+export function thumbnailName(page: CapturePage): string {
+	return websiteCaptureFileNames(page).screenshot.replace(/\.png$/, "-thumb.webp");
 }
 
 /** The stored preview of a site's judged page, and whether that page's capture is one flat colour. */
@@ -33,13 +33,13 @@ export type LinkDependencies = IndicatorDependencies & {
  */
 async function saveJudgedPageThumbnail(submissionId: bigint, page: SitePage): Promise<SitePreview | undefined> {
 	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
-	const screenshot = latestArtifactNamed(artifacts, websiteCaptureFileNames(page.step).screenshot);
+	const screenshot = latestArtifactNamed(artifacts, websiteCaptureFileNames(page).screenshot);
 	if (!screenshot) return undefined;
 	const source = await ArtifactsEntity.get(BigInt(screenshot.id));
 	if (!source) return undefined;
 	const image = Buffer.from(source.blob);
 	const blank = await isBlankCapture(image);
-	const name = thumbnailName(page.step);
+	const name = thumbnailName(page);
 	const existing = latestArtifactNamed(artifacts, name);
 	if (existing && BigInt(existing.id) > BigInt(screenshot.id)) return { artifactId: BigInt(existing.id), blank };
 	const artifactId = await ArtifactsEntity.saveBuffer({ submissionId, name, kind: "website_thumbnail", mimeType: "image/webp", buffer: await pageThumbnail(image) });

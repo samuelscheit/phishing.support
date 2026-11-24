@@ -46,7 +46,7 @@ function website(id: bigint, host: string, kitResources: WebsiteKitResource[] = 
 		id,
 		kind: "website",
 		source: null,
-		data: { kind: "website", website: { url: `https://${host}/`, kitResources, whois: { ip_rdaps: [{ ip: "203.0.113.7", name: "EXAMPLE-NET", country: "NL", origin_asns: [{ asn: 64500, source: "ripe-stat" }], abuse: null } as never] } } },
+		data: { kind: "website", website: { url: `https://${host}/`, kitResources, routes: [{ hops: [] }], whois: { ip_rdaps: [{ ip: "203.0.113.7", name: "EXAMPLE-NET", country: "NL", origin_asns: [{ asn: 64500, source: "ripe-stat" }], abuse: null } as never] } } },
 		dedupeKey: host,
 		status: "reported",
 		info: null,
@@ -398,7 +398,7 @@ describe("a campaign's visitor guidance", () => {
 	const assessed = (id: bigint, host: string, brand?: { name: string; officialUrl: string }): Submission => {
 		const submission = website(id, host);
 		const assessment: WebsiteSiteAssessment = { hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", collectionFields: [{ ref: "f1", control: "input[type=text]", placeholder: "Email or phone" }], ...(brand ? { impersonatedBrand: brand } : {}) };
-		if (submission.data.kind === "website") submission.data.website.siteAssessments = [assessment];
+		if (submission.data.kind === "website") submission.data.website.routes![0]!.siteAssessments = [assessment];
 		return submission;
 	};
 	const answer = {

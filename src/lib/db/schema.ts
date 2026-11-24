@@ -5,7 +5,7 @@ import { ResponseInputItem, ResponseOutputItem } from "openai/resources/response
 import { MailData } from "../mail/ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
 import type { WebsiteAccessGate } from "../website/visit/access_gate";
-import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, WebsiteFunnel, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteSiteAssessment, WebsiteVisitRecord } from "../website/types";
+import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteRotation, WebsiteRoute } from "../website/types";
 
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
@@ -29,20 +29,14 @@ export type EmailSubmissionData = MailData & {
 export type WebsiteSubmissionData = {
 	whois?: WhoISInfo;
 	url: string;
-	/** URL of the page the case's verdict rests on (`analyzedHopIndex`); it may be on another site than the submitted URL. */
+	/** URL of the page the case's verdict rests on (the analyzed page of route `analyzedRoute`); it may be on another site than the submitted URL. */
 	archiveUrl?: string;
-	/**
-	 * The whole chain of the case, response by response, across every site it
-	 * passed: redirects, pages that sent the visitor on by script, pages the
-	 * visit moved on from, and the last page shown (`contentCaptured`).
-	 */
-	navigationHops?: WebsiteNavigationHop[];
-	/** The hop of the page the case's verdict rests on: its first reportable page, else the last page shown. */
-	analyzedHopIndex?: number;
-	/** One per hop: the verdict of the hop's site, which every hop of that site shares. */
-	siteAssessments?: WebsiteSiteAssessment[];
-	/** The whole chain judged as an affiliate funnel; set when it passed an affiliate tracking link. */
-	funnel?: WebsiteFunnel;
+	/** Every route a walk of the submitted link took; the first walk's is route 0. */
+	routes?: WebsiteRoute[];
+	/** The route of the page the case's verdict rests on (`archiveUrl`): the first route with a reportable finding, else route 0. Absent means 0. */
+	analyzedRoute?: number;
+	/** The extra visits that sampled a rotating link's other routes; set when the first walk passed a tracking link. */
+	rotation?: WebsiteRotation;
 	/** How the capture handled the submitted page's scripted jump to another site. */
 	cloaking?: WebsiteCloaking;
 	/** How visitors got into the reported page, when it is not shown to everyone who opens it; set when the report is filed. */
@@ -69,8 +63,6 @@ export type WebsiteSubmissionData = {
 	providerWarning?: WebsiteProviderWarning;
 	/** The file the visit downloaded on the analyzed page, with its static inspection. */
 	offeredDownload?: WebsiteOfferedDownload;
-	/** The visit through the site: what the agent did and where the synthetic values went. */
-	visit?: WebsiteVisitRecord;
 	/** Set when a failure another visit can change ended the run; the analysis is re-queued automatically. */
 	autoRetry?: { attempts: number; nextAttemptAt: string; reason: string };
 	/** Why the capture could not finish the site's flow: the step it could not take. A retry visits the site again. */

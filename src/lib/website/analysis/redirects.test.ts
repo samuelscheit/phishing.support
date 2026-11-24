@@ -174,7 +174,7 @@ function websiteOf(submission: Awaited<ReturnType<typeof SubmissionsEntity.get>>
 
 /** Each hop's verdict, and the page it rests on. */
 function verdicts(submission: Awaited<ReturnType<typeof SubmissionsEntity.get>>) {
-	return websiteOf(submission)?.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }));
+	return websiteOf(submission)?.routes?.[0]?.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }));
 }
 
 describe("website redirects", () => {
@@ -220,8 +220,8 @@ describe("website redirects", () => {
 		expect(submission?.status).toBe("reported");
 		expect(submission?.info).toBe(`Phishing confirmed at ${kitPage}; evidence for it and the 1 URL on login-netflix.example.com that leads to it is being collected before the report is sent.`);
 		const website = websiteOf(submission);
-		expect(website?.navigationHops).toEqual(archive.navigationHops);
-		expect(website?.analyzedHopIndex).toBe(2);
+		expect(website?.routes![0]!.hops).toEqual(archive.navigationHops);
+		expect(website?.routes![0]!.analyzedHopIndex).toBe(2);
 		expect(website?.archiveUrl).toBe(kitPage);
 		expect(website?.kitResources).toEqual(kitResources);
 		// The shortener only redirected: it showed no page of its own and never inherits the kit's verdict.
@@ -651,7 +651,7 @@ describe("scripted jumps of the residential exit to another site", () => {
 		const detail = `${uniform(decoyUrl).detail}, which shows nothing reportable`;
 		expect(submission?.info).toBe(`Cloaking suspected: ${detail}. No verdict or report was made from the decoy; retry to visit the site again.`);
 		expect(websiteOf(submission)?.cloaking).toEqual({ outcome: "unresolved", detail });
-		expect(websiteOf(submission)?.navigationHops).toEqual(archive.navigationHops);
+		expect(websiteOf(submission)?.routes?.[0]?.hops).toEqual(archive.navigationHops);
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
 	});
 

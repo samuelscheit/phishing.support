@@ -111,7 +111,7 @@ describe("a visit a CAPTCHA or browser check blocked", () => {
 		const { captures, prompts, submission, website } = await analyze(381535952033550429n, { first: { egress: "phishing", shown: "challenge" }, retry: { residential: "sign-in" } });
 		expect(captures.map(({ url, egress }) => ({ url, egress }))).toEqual([{ url: PAGE, egress: undefined }, { url: PAGE, egress: "residential" }]);
 		expect(submission?.status).toBe("reported");
-		expect(website?.navigationHops?.map(({ index, url, redirectTo, revisit, contentCaptured }) => ({ index, url, redirectTo, revisit, contentCaptured }))).toEqual([
+		expect(website?.routes![0]!.hops?.map(({ index, url, redirectTo, revisit, contentCaptured }) => ({ index, url, redirectTo, revisit, contentCaptured }))).toEqual([
 			{ index: 0, url: PAGE, redirectTo: PAGE, revisit: { reason: "challenge", route: "residential exit" }, contentCaptured: false },
 			{ index: 1, url: PAGE, redirectTo: undefined, revisit: undefined, contentCaptured: true },
 		]);
@@ -152,7 +152,7 @@ describe("a visit a CAPTCHA or browser check blocked", () => {
 		const challengeUrl = `${PAGE}document`;
 		const { captures, website } = await analyze(381535952033550435n, { first: { egress: "phishing", shown: "sign-in", walk: { to: challengeUrl } }, retry: { residential: "sign-in" } });
 		expect(captures.map(({ url, egress }) => ({ url, egress }))).toEqual([{ url: PAGE, egress: undefined }, { url: PAGE, egress: "residential" }]);
-		expect(website?.navigationHops?.map(({ url, redirectTo, revisit }) => ({ url, redirectTo, revisit }))).toEqual([
+		expect(website?.routes![0]!.hops?.map(({ url, redirectTo, revisit }) => ({ url, redirectTo, revisit }))).toEqual([
 			{ url: PAGE, redirectTo: challengeUrl, revisit: undefined },
 			{ url: challengeUrl, redirectTo: PAGE, revisit: { reason: "challenge", route: "residential exit" } },
 			{ url: PAGE, redirectTo: undefined, revisit: undefined },
@@ -163,9 +163,9 @@ describe("a visit a CAPTCHA or browser check blocked", () => {
 		const gate = "https://gate.verifyhumanhost.com/document";
 		const { submission, website } = await analyze(381535952033550436n, { first: { egress: "phishing", shown: "sign-in", walk: { to: gate } }, retry: { residential: "sign-in" } });
 		expect(submission?.status).toBe("reported");
-		expect(website?.navigationHops?.map(({ url }) => url)).toEqual([PAGE, gate, PAGE]);
+		expect(website?.routes![0]!.hops?.map(({ url }) => url)).toEqual([PAGE, gate, PAGE]);
 		// The gate's page was judged in the blocked visit; the residential visit never reached it again.
-		expect(website?.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([
+		expect(website?.routes![0]!.siteAssessments?.map(({ hopIndex, finding, judgedHopIndex }) => ({ hopIndex, finding, judgedHopIndex }))).toEqual([
 			{ hopIndex: 0, finding: "phishing", judgedHopIndex: 2 },
 			{ hopIndex: 1, finding: "insufficient_evidence", judgedHopIndex: 1 },
 			{ hopIndex: 2, finding: "phishing", judgedHopIndex: 2 },

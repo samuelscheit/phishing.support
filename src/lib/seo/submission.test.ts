@@ -34,7 +34,7 @@ describe("submission page SEO", () => {
 	});
 
 	test("a malware finding is named as such", () => {
-		expect(submissionSeo(website("reported", { siteAssessments: [{ hopIndex: 0, finding: "malware" }] as never })).verdict).toBe("Confirmed malware site");
+		expect(submissionSeo(website("reported", { routes: [{ hops: [], siteAssessments: [{ hopIndex: 0, finding: "malware" }] as never }] })).verdict).toBe("Confirmed malware site");
 	});
 
 	test("every status gets its own verdict and tone", () => {

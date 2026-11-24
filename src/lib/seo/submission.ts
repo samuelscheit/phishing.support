@@ -1,6 +1,7 @@
 import type { Submission } from "@/lib/db/schema";
 import { truncateAtWord } from "@/lib/util/text";
 import { websiteSiteName } from "@/lib/website/info/site";
+import { routeSiteAssessments } from "@/lib/website/routes";
 import { utcDate } from "@/lib/util/date_time";
 
 /** What a submission's page tells search engines and share cards: who it is about and what was found. */
@@ -23,7 +24,7 @@ function websiteVerdict(submission: Submission): Pick<SubmissionSeo, "verdict" |
 	const website = submission.data.kind === "website" ? submission.data.website : undefined;
 	switch (submission.status) {
 		case "reported": {
-			const malware = website?.siteAssessments?.some((assessment) => assessment.finding === "malware");
+			const malware = website && routeSiteAssessments(website).some((assessment) => assessment.finding === "malware");
 			return malware
 				? { verdict: "Confirmed malware site", tone: "danger", phrase: "is a malware site, reported for takedown" }
 				: { verdict: "Confirmed phishing site", tone: "danger", phrase: "is a phishing site, reported for takedown" };

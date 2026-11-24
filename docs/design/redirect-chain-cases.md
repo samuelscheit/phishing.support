@@ -92,3 +92,71 @@ affiliate 15065.
   a tarpit cannot hold the visit or its memory, but a fulfilled page has no
   remote address (public-like to Chromium's Local Network Access), and a
   page past the cap is shown cut off and kept without its body.
+
+## Offer rotation
+
+An affiliate network's smart link sends each click to whichever offer it
+rotates to. Production case 383412636961738752 shows this. Its one walk of
+`onlinesafetyall.com/6RNXHT/2HSS8TK/` went through wtrck.com to a fake
+application on smizeprize.com and on to the zatos.com checkout. The
+reporter's own click of the same link went through safe.cloudforstorage.com
+to a "Your Cloud Storage has been Disabled" card form on DigitalOcean Spaces.
+A plain HTTP client is sent to yahoo.com, so only a browser walk sees either
+offer.
+
+1. **A case holds routes.** `website.routes[]` replaces the single chain.
+   Each route is one walk of the submitted link: its hops, its per-site
+   verdicts, its funnel verdict, its visit record and the browser and
+   network that made it.
+   - The first walk is route 0, and its capture files keep their names.
+     Route r > 0 prefixes its files with `route{r+1}-`, as in
+     `route2-website-step1.png`, `route2-chain-hop-3.html` and
+     `route2-evidence-manifest.json`.
+   - `website.analyzedRoute` names the case's headline route: the first
+     route with a reportable site, else the first deceptive route, else
+     route 0.
+   - Migration 0030 moves every stored chain into route 0. No artifact is
+     renamed.
+2. **Only a walk that passed a tracking link is sampled.** Tracker detection
+   is the funnel extraction's own. A link without a recognized tracker is
+   never opened again.
+3. **Sampling.**
+   - Up to 3 more visits, each a new click in a new browser context with a
+     different identity: Chrome on Windows, Chrome on macOS and Safari on
+     iPhone, minus the first walk's browser, then the first walk's browser
+     again.
+   - Every visit goes through the residential exit, because a smart link's
+     bot filter sends data-centre and Tor addresses to a harmless site. The
+     revisits inside a sampled walk (as a phone, after a challenge) stay on
+     it too.
+   - No new visit starts once 30 minutes have passed since the first walk
+     ended; a visit already started runs to its end.
+   - Two visits in a row that show only known routes end the sampling.
+   - A failed capture (the residential exit is one connection) or a failed
+     walk also ends it. The first walk's findings are reported as they are.
+4. **What counts as a new route.** A visit is compared, before it is walked,
+   by its hops up to the first page:
+   - the first site after the link that is no tracker or wrapper;
+   - the site of that first page.
+
+   A new value of either is a new route. It is walked, captured, judged
+   site by site and as a funnel, and reported exactly like the first walk,
+   through the same cross-case join. A repeat is kept in `website.rotation`
+   with its hops as evidence of the rotation, and is not judged again.
+5. **Per-route findings, one headline.** With more than one route, each
+   finding in the case info is prefixed with its route, as in "Route 2 of 2,
+   via safe.cloudforstorage.com: Phishing confirmed at …". The case status
+   covers every route. The case page has a route selector: the page browser,
+   the Navigation tab, the visit card and the archived page follow the
+   selected route, while the verdict panel lists every route's findings.
+
+Costs and limits:
+
+- A rotating link costs up to three more browser visits on the residential
+  exit, and one full walk and classification for every new route.
+- A route's data drops go with the first report that route creates or
+  joins. When a later route only reaches a site that an earlier route of
+  the same case already reported, that report is not created or joined
+  again, so the later route's data drops are not filed.
+- The macOS Chrome identity is a fixed recent release (141). It has to be
+  raised by hand as Chrome moves on.

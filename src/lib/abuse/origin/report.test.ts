@@ -80,7 +80,7 @@ describe("origin-host report workflow", () => {
 		await SubmissionsEntity.create({
 			id: submissionId,
 			kind: "website",
-			data: { kind: "website", website: { url: "https://login.example.com/", siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft" }] } },
+			data: { kind: "website", website: { url: "https://login.example.com/", routes: [{ hops: [], siteAssessments: [{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft" }] }] } },
 			dedupeKey: "website-login.example.com",
 			status: "reported",
 			source: "https://login.example.com/",

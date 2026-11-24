@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import sharp from "sharp";
 
-import type { AnalysisClient } from "../../analysis/run";
 import { AbuseRepository } from "../../abuse/repository";
 import { FUNNEL_EVIDENCE_NAME, readFunnelFacts } from "../../abuse/funnel/facts";
 import { CHECKOUT_TEXT, LURE_TEXT, PRODUCTION_URLS } from "../../abuse/funnel/test_fixtures";
@@ -15,130 +13,29 @@ import { scriptedVisitSession } from "../../site_visit/test_helpers";
 import { getReportsForSubmission } from "../../submissions/abuse_details";
 import type { WebsiteArchiveResult } from "../archive/types";
 import { websiteSubmission } from "../test_helpers";
-import type { WebsiteNavigationHop } from "../types";
 import { analyzeWebsite } from "./ai";
-import type { WebsiteAnalysisDependencies } from "./analysis_types";
+import { CHECKOUT_HTML, LURE_HTML, START, capturedPage, funnelDependencies, funnelHop, productionVisit, type ModelCall } from "./funnel_test_helpers";
 import { eq } from "drizzle-orm";
 
 useTemporaryDatabase();
 useTrackingTokenSecret();
 
-const PNG = await sharp({ create: { width: 32, height: 24, channels: 3, background: "#ffffff" } }).png().toBuffer();
-const START = Date.parse("2026-11-23T09:14:02.000Z");
-const NOTHING = { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false };
-const LURE_HTML = `<html><head><title>Your Financial Assist</title></head><body>${LURE_TEXT.split("\n").map((line) => `<p>${line}</p>`).join("")}</body></html>`;
-const CHECKOUT_HTML = `<html><head><title>Zatos Antivirus - Checkout</title></head><body>${CHECKOUT_TEXT.split("\n").map((line) => `<p>${line}</p>`).join("")}</body></html>`;
-
-type ModelCall = { kind: "site" | "funnel" | "narrative"; input: string };
-
-/**
- * The model of the production case: no page of the chain is phishing by
- * itself; the chain as a whole is a fake application for assistance that ends
- * in an antivirus subscription. A chain whose lure names what it promotes is
- * judged not deceptive.
- */
-function model(calls: ModelCall[], answers: { phishingLure?: boolean } = {}): AnalysisClient {
-	let call = 0;
-	return {
-		responses: {
-			create: async (options: { input: unknown; text?: { format?: { name?: string } } }) => {
-				const input = JSON.stringify(options.input);
-				const kind = options.text?.format?.name === "DeceptiveFunnelClassification" ? "funnel" : options.text ? "site" : "narrative";
-				calls.push({ kind, input });
-				// The pages as the input names them: the lure's and the merchant's.
-				const ref = (role: string) => input.match(new RegExp(`page_ref: (page-\\d+)\\\\nrole: ${role}`))?.[1] ?? "";
-				const site = answers.phishingLure && input.includes("Application status: Pre-approved")
-					? { ...NOTHING, finding: "phishing", phishingBasis: "payment_fraud", evidenceQuote: "Complete the final step to submit your application." }
-					: NOTHING;
-				const answer = kind === "narrative" ? "The chain leads through affiliate tracking links into a paid offer." : JSON.stringify(kind === "site" ? site
-					: input.includes("Your Financial Assist") ? {
-						finding: "deceptive_funnel",
-						deceptionKind: "fake_application",
-						lureClaim: "The visitor's application for financial assistance was pre-approved and needed one final step.",
-						reality: "A $19.98 per month antivirus subscription checkout.",
-						lureQuotes: [{ pageRef: ref("lure"), quote: "Your Financial Assist\nComplete the final step to submit your application." }],
-						offerQuote: { pageRef: ref("merchant"), quote: "$19.98/month" },
-					}
-					: { finding: "not_deceptive", deceptionKind: "none", lureClaim: "", reality: "", lureQuotes: [], offerQuote: { pageRef: "", quote: "" } });
-				call++;
-				return (async function* () {
-					yield { type: "response.completed", response: { id: `response-${call}`, status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: answer }] }], usage: { total_tokens: 10 } } };
-				})();
-			},
-		},
-	} as unknown as AnalysisClient;
-}
-
-/** One response of the chain, arriving 700 ms after the one before it, as the production visit timed them. */
-function hop(index: number, url: string, status: number, extra: Partial<WebsiteNavigationHop> = {}): WebsiteNavigationHop {
-	return { index, url, hostname: new URL(url).hostname, status, receivedAt: new Date(START + index * 700).toISOString(), contentCaptured: false, ...extra };
-}
-
-/** A page the capture showed, its hops numbered from 0 within the page, the last one's body kept. */
-function page(url: string, html: string, text: string, hops: WebsiteNavigationHop[], session?: WebsiteArchiveResult["session"]): WebsiteArchiveResult {
-	const last = hops.at(-1)!;
-	return {
-		requestedUrl: hops[0]!.url,
-		url,
-		hostname: new URL(url).hostname,
-		navigationHops: hops.map((each, index) => ({ ...each, index, ...(each === last ? { contentType: "text/html", contentCaptured: true, bodyCaptured: true } : {}) })),
-		hopBodies: [{ hopIndex: hops.length - 1, body: Buffer.from(html) }],
-		archivedAt: new Date(Date.parse(last.receivedAt!) + 300),
-		route: "residential exit",
-		screenshotPng: PNG,
-		mhtml: Buffer.from(`From: <Saved by Blink>\r\nSnapshot-Content-Location: ${url}\r\n\r\n${html}`, "utf8"),
-		html: Buffer.from(html),
-		text: Buffer.from(text),
-		...(session ? { session } : {}),
-	};
-}
-
-/**
- * The production chain of docs/design/redirect-chain-cases.md: the Everflow
- * link to the Voluum lure, whose CONTINUE the visit clicks, through the
- * base64 wrapper and CAKE's cookie check to the zatos.com checkout.
- */
-function productionVisit(link: string = PRODUCTION_URLS.everflowLink): WebsiteArchiveResult {
-	const u = PRODUCTION_URLS;
-	const checkout = page(u.checkout, CHECKOUT_HTML, CHECKOUT_TEXT, [
-		hop(4, u.voluumClick, 302, { redirectTo: u.wrapper }),
-		hop(5, u.wrapper, 302, { redirectTo: u.cakeLink }),
-		hop(6, u.cakeLink, 302, { redirectTo: u.cakeCookieCheck }),
-		hop(7, u.cakeCookieCheck, 302, { redirectTo: u.checkout }),
-		hop(8, u.checkout, 200),
-	]);
-	return page(u.lure, LURE_HTML, LURE_TEXT, [
-		hop(0, link, 302, { redirectTo: u.everflowRedirect }),
-		hop(1, u.everflowRedirect, 302, { redirectTo: u.voluumCampaign }),
-		hop(2, u.voluumCampaign, 302, { redirectTo: u.lure }),
-		hop(3, u.lure, 200),
-	], scriptedVisitSession({ steps: [checkout] }));
-}
-
 /** Another link of the same campaign, handed out as the affiliate's own Voluum link: the same lure and checkout, no Everflow. */
 function voluumVisit(): WebsiteArchiveResult {
 	const u = PRODUCTION_URLS;
-	const checkout = page(u.checkout, CHECKOUT_HTML, CHECKOUT_TEXT, [
-		hop(2, u.voluumClick, 302, { redirectTo: u.wrapper }),
-		hop(3, u.wrapper, 302, { redirectTo: u.cakeLink }),
-		hop(4, u.cakeLink, 302, { redirectTo: u.cakeCookieCheck }),
-		hop(5, u.cakeCookieCheck, 302, { redirectTo: u.checkout }),
-		hop(6, u.checkout, 200),
+	const checkout = capturedPage(u.checkout, CHECKOUT_HTML, CHECKOUT_TEXT, [
+		funnelHop(2, u.voluumClick, 302, { redirectTo: u.wrapper }),
+		funnelHop(3, u.wrapper, 302, { redirectTo: u.cakeLink }),
+		funnelHop(4, u.cakeLink, 302, { redirectTo: u.cakeCookieCheck }),
+		funnelHop(5, u.cakeCookieCheck, 302, { redirectTo: u.checkout }),
+		funnelHop(6, u.checkout, 200),
 	]);
-	return page(u.lure, LURE_HTML, LURE_TEXT, [hop(0, u.voluumCampaign, 302, { redirectTo: u.lure }), hop(1, u.lure, 200)], scriptedVisitSession({ steps: [checkout] }));
+	return capturedPage(u.lure, LURE_HTML, LURE_TEXT, [funnelHop(0, u.voluumCampaign, 302, { redirectTo: u.lure }), funnelHop(1, u.lure, 200)], scriptedVisitSession({ steps: [checkout] }));
 }
 
-function dependencies(capture: () => WebsiteArchiveResult, calls: ModelCall[], options: { phishingLure?: boolean; popular?: string[] } = {}): WebsiteAnalysisDependencies {
-	return {
-		getInfo: async () => ({ ip_rdaps: [] }),
-		analysisClient: model(calls, options),
-		domainRegistration: async () => undefined,
-		timestampEvidence: async () => undefined,
-		browserBackoffMs: [1],
-		downloadLookups: async () => [],
-		popularDomains: async () => new Set(options.popular ?? []),
-		archiveWebsite: async () => capture(),
-	};
+/** The production funnel's boundaries, every capture of the case returning `capture()`. */
+function dependencies(capture: () => WebsiteArchiveResult, calls: ModelCall[], options: { phishingLure?: boolean; popular?: string[] } = {}) {
+	return funnelDependencies(async () => capture(), calls, options);
 }
 
 const PARTIES = [
@@ -164,7 +61,7 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 		expect(submission.status).toBe("reported");
 		const website = submission.data.kind === "website" ? submission.data.website : undefined;
 		const u = PRODUCTION_URLS;
-		expect(website?.navigationHops?.map(({ index, url, status, redirectTo, receivedAt, bodyCaptured, contentCaptured }) => ({ index, url, status, redirectTo, receivedAt, bodyCaptured, contentCaptured }))).toEqual([
+		expect(website?.routes![0]!.hops?.map(({ index, url, status, redirectTo, receivedAt, bodyCaptured, contentCaptured }) => ({ index, url, status, redirectTo, receivedAt, bodyCaptured, contentCaptured }))).toEqual([
 			{ index: 0, url: link, status: 302, redirectTo: u.everflowRedirect, receivedAt: "2026-11-23T09:14:02.000Z", bodyCaptured: undefined, contentCaptured: false },
 			{ index: 1, url: u.everflowRedirect, status: 302, redirectTo: u.voluumCampaign, receivedAt: "2026-11-23T09:14:02.700Z", bodyCaptured: undefined, contentCaptured: false },
 			{ index: 2, url: u.voluumCampaign, status: 302, redirectTo: u.lure, receivedAt: "2026-11-23T09:14:03.400Z", bodyCaptured: undefined, contentCaptured: false },
@@ -189,9 +86,9 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 		expect(calls.at(-1)!.input).toContain("Deceptive affiliate funnel: the chain's lure is a fake application for money or benefits.");
 		expect(calls.at(-1)!.input).toContain(u.checkout);
 
-		expect(website?.funnel?.verdict).toMatchObject({ finding: "deceptive_funnel", deceptionKind: "fake_application", offerQuote: { hopIndex: 8, quote: "$19.98/month" } });
-		expect(website?.funnel?.extraction.merchant?.site).toBe("zatos.com");
-		expect(website?.funnel?.extraction.parties.map(({ role, site, affiliateIds }) => ({ role, site, affiliateIds }))).toEqual([
+		expect(website?.routes![0]!.funnel?.verdict).toMatchObject({ finding: "deceptive_funnel", deceptionKind: "fake_application", offerQuote: { hopIndex: 8, quote: "$19.98/month" } });
+		expect(website?.routes![0]!.funnel?.extraction.merchant?.site).toBe("zatos.com");
+		expect(website?.routes![0]!.funnel?.extraction.parties.map(({ role, site, affiliateIds }) => ({ role, site, affiliateIds }))).toEqual([
 			{ role: "merchant", site: "zatos.com", affiliateIds: ["15065"] },
 			{ role: "network", site: "onlinesafetyall.com", affiliateIds: ["6RNXHT"] },
 			{ role: "network", site: "miamitrk.com", affiliateIds: ["15065"] },
@@ -204,7 +101,7 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 		const zatos = await AbuseRepository.getReportInput(reports[0]!.id);
 		const facts = readFunnelFacts(zatos!.evidenceArtifacts.map(({ name, blob }) => ({ filename: name, content: Buffer.from(blob) })))!;
 		expect(facts.party).toMatchObject({ role: "merchant", site: "zatos.com", affiliateId: "15065" });
-		expect(facts.chain.map(({ index, at }) => [index, at])).toEqual(website!.navigationHops!.map(({ index, receivedAt }) => [index, receivedAt]));
+		expect(facts.chain.map(({ index, at }) => [index, at])).toEqual(website!.routes![0]!.hops!.map(({ index, receivedAt }) => [index, receivedAt]));
 		expect(facts.screenshots.map(({ filename }) => filename)).toEqual(["lure-page-3.png", "offer-page-8.png"]);
 		expect(zatos!.evidenceArtifacts.map(({ name }) => name)).toEqual([FUNNEL_EVIDENCE_NAME, "lure-page-3.png", "offer-page-8.png"]);
 		expect(submission.info).toBe([
@@ -225,7 +122,7 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 		const joined = (await SubmissionsEntity.get(secondId))!;
 		expect(joined.status).toBe("reported");
 		// Walked once: the lure the visitor clicked through, back via the tracker it was sent from, is no cloaked answer.
-		expect(joined.data.kind === "website" && joined.data.website.navigationHops?.map(({ url }) => url)).toEqual([u.voluumCampaign, u.lure, u.voluumClick, u.wrapper, u.cakeLink, u.cakeCookieCheck, u.checkout]);
+		expect(joined.data.kind === "website" && joined.data.website.routes![0]!.hops?.map(({ url }) => url)).toEqual([u.voluumCampaign, u.lure, u.voluumClick, u.wrapper, u.cakeLink, u.cakeCookieCheck, u.checkout]);
 		expect(joined.info).toBe([
 			`Deceptive affiliate funnel: affiliate 15065 at zatos.com (the merchant) is already being reported in case ${id.toString()}, whose report now names this case too.`,
 			`Deceptive affiliate funnel: affiliate 15065 at miamitrk.com (affiliate network) is already being reported in case ${id.toString()}, whose report now names this case too.`,
@@ -259,15 +156,15 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 			"Deceptive affiliate funnel: affiliate 15065 is being reported to miamitrk.com (affiliate network).",
 		]);
 		const website = submission.data.kind === "website" ? submission.data.website : undefined;
-		expect(website?.analyzedHopIndex).toBe(3);
-		expect(website?.funnel?.verdict.finding).toBe("deceptive_funnel");
+		expect(website?.routes![0]!.analyzedHopIndex).toBe(3);
+		expect(website?.routes![0]!.funnel?.verdict.finding).toBe("deceptive_funnel");
 	});
 
 	test("a deceptive funnel whose every business is left out is said, and nothing is reported", async () => {
 		// The affiliate's own tracker straight to a well-known merchant that no network credits: nobody to report it to.
 		const u = PRODUCTION_URLS;
-		const capture = () => page(u.lure, LURE_HTML, LURE_TEXT, [hop(0, u.voluumCampaign, 302, { redirectTo: u.lure }), hop(1, u.lure, 200)], scriptedVisitSession({
-			steps: [page(u.checkout, CHECKOUT_HTML, CHECKOUT_TEXT, [hop(2, u.voluumClick, 302, { redirectTo: u.checkout }), hop(3, u.checkout, 200)])],
+		const capture = () => capturedPage(u.lure, LURE_HTML, LURE_TEXT, [funnelHop(0, u.voluumCampaign, 302, { redirectTo: u.lure }), funnelHop(1, u.lure, 200)], scriptedVisitSession({
+			steps: [capturedPage(u.checkout, CHECKOUT_HTML, CHECKOUT_TEXT, [funnelHop(2, u.voluumClick, 302, { redirectTo: u.checkout }), funnelHop(3, u.checkout, 200)])],
 		}));
 		const id = await websiteSubmission(383000000000000006n, u.voluumCampaign);
 		await analyzeWebsite({ submissionId: id, url: u.voluumCampaign }, dependencies(capture, [], { popular: ["zatos.com"] }));
@@ -276,7 +173,7 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 		expect(submission.info).toContain("Deceptive affiliate funnel: the chain's lure is a fake application for money or benefits.");
 		expect(submission.info).toContain("Deceptive affiliate funnel: zatos.com (the merchant) is not reported, being a well-known site (Tranco top list) that no network passed its affiliate ID on to.");
 		expect(submission.info).toEndWith("No report was created.");
-		expect(submission.data.kind === "website" && submission.data.website.funnel?.skipped).toEqual([{ site: "zatos.com", role: "merchant", reason: "a well-known site (Tranco top list) that no network passed its affiliate ID on to" }]);
+		expect(submission.data.kind === "website" && submission.data.website.routes![0]!.funnel?.skipped).toEqual([{ site: "zatos.com", role: "merchant", reason: "a well-known site (Tranco top list) that no network passed its affiliate ID on to" }]);
 		expect(await AbuseRepository.listReportsForSubmission(id)).toEqual([]);
 	});
 
@@ -287,8 +184,8 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 		const storeText = "Zappos\nRunning Shoes\n$89.95\nAdd to Cart";
 		const blogText = "Zappos coupon: 20% off running shoes\nShop the sale at Zappos";
 		const storeHtml = `<html><head><title>Zappos</title></head><body><p>${storeText}</p></body></html>`;
-		const capture = () => page(blog, `<html><body><p>${blogText}</p></body></html>`, blogText, [hop(0, blog, 200)], scriptedVisitSession({
-			steps: [page(store, storeHtml, storeText, [hop(1, tune, 302, { redirectTo: store }), hop(2, store, 200)])],
+		const capture = () => capturedPage(blog, `<html><body><p>${blogText}</p></body></html>`, blogText, [funnelHop(0, blog, 200)], scriptedVisitSession({
+			steps: [capturedPage(store, storeHtml, storeText, [funnelHop(1, tune, 302, { redirectTo: store }), funnelHop(2, store, 200)])],
 		}));
 		const calls: ModelCall[] = [];
 		const id = await websiteSubmission(383000000000000003n, blog);
@@ -298,8 +195,8 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 		expect(submission.status).toBe("invalid");
 		expect(calls.map(({ kind }) => kind)).toEqual(["site", "site", "funnel", "narrative"]);
 		const website = submission.data.kind === "website" ? submission.data.website : undefined;
-		expect(website?.funnel?.verdict).toEqual({ finding: "not_deceptive" });
-		expect(website?.funnel?.extraction.merchant?.site).toBe("zappos.com");
+		expect(website?.routes![0]!.funnel?.verdict).toEqual({ finding: "not_deceptive" });
+		expect(website?.routes![0]!.funnel?.extraction.merchant?.site).toBe("zappos.com");
 		expect(await AbuseRepository.listReportsForSubmission(id)).toEqual([]);
 		expect(await AbuseRepository.listJoinedReportsForSubmission(id)).toEqual([]);
 	});
@@ -307,12 +204,12 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 	test("a chain through no tracking link is no funnel: the model is not asked and nothing is kept", async () => {
 		const blog = "https://www.dealsdiaryblog.com/plain";
 		const store = "https://www.zappos.com/sale";
-		const capture = () => page(blog, "<html><body>Sale</body></html>", "Sale", [hop(0, blog, 200)], scriptedVisitSession({ steps: [page(store, "<html><body>Zappos sale</body></html>", "Zappos sale", [hop(1, store, 200)])] }));
+		const capture = () => capturedPage(blog, "<html><body>Sale</body></html>", "Sale", [funnelHop(0, blog, 200)], scriptedVisitSession({ steps: [capturedPage(store, "<html><body>Zappos sale</body></html>", "Zappos sale", [funnelHop(1, store, 200)])] }));
 		const calls: ModelCall[] = [];
 		const id = await websiteSubmission(383000000000000004n, blog);
 		await analyzeWebsite({ submissionId: id, url: blog }, dependencies(capture, calls));
 		const submission = (await SubmissionsEntity.get(id))!;
 		expect(calls.map(({ kind }) => kind)).toEqual(["site", "site", "narrative"]);
-		expect(submission.data.kind === "website" && submission.data.website.funnel).toBeUndefined();
+		expect(submission.data.kind === "website" && submission.data.website.routes![0]!.funnel).toBeUndefined();
 	});
 });

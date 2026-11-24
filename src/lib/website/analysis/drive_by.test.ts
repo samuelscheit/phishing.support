@@ -134,11 +134,11 @@ describe("a mobile-only drive-by exploit kit (production case 377486973465530391
 		expect(submission?.status).toBe("reported");
 		expect(submission?.info).toBe(`Malware distribution confirmed at ${PAGE}; its evidence is being collected before the report is sent.`);
 		expect(website?.device).toBe("iphone");
-		expect(website?.navigationHops?.map(({ index, url, redirectTo, revisit, contentCaptured }) => ({ index, url, redirectTo, revisit, contentCaptured }))).toEqual([
+		expect(website?.routes![0]!.hops?.map(({ index, url, redirectTo, revisit, contentCaptured }) => ({ index, url, redirectTo, revisit, contentCaptured }))).toEqual([
 			{ index: 0, url: PAGE, redirectTo: PAGE, revisit: { reason: "phone", device: "iphone" }, contentCaptured: false },
 			{ index: 1, url: PAGE, redirectTo: undefined, revisit: undefined, contentCaptured: true },
 		]);
-		expect(website?.siteAssessments?.at(-1)).toMatchObject({ finding: "malware", hiddenFrame: { ref: "frame1", url: CORUNA_FRAME_URL } });
+		expect(website?.routes![0]!.siteAssessments?.at(-1)).toMatchObject({ finding: "malware", hiddenFrame: { ref: "frame1", url: CORUNA_FRAME_URL } });
 		expect(website?.hiddenFrames?.[0]?.userAgent).toBe(IPHONE_USER_AGENT);
 
 		// The classifier saw the frame's source and signals, and on the phone, which device it was.
@@ -196,7 +196,7 @@ describe("a mobile-only drive-by exploit kit (production case 377486973465530391
 		const { submission, website } = await analyze(377486973465530393n, { desktop: { ...NOTHING, mobileHandoff: true }, iphone: NOTHING });
 		expect(submission?.status).toBe("invalid");
 		expect(website?.device).toBe("iphone");
-		expect(website?.navigationHops?.[0]?.revisit).toEqual({ reason: "phone", device: "iphone" });
+		expect(website?.routes![0]!.hops?.[0]?.revisit).toEqual({ reason: "phone", device: "iphone" });
 	});
 
 	test("a page captured as a phone is never handed off again, and its links are opened as that phone", async () => {

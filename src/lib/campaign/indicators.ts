@@ -11,9 +11,10 @@ import { fetchJson } from "../network/bounded_fetch";
 import { mhtmlVisitorText } from "../website/archive/text";
 import { latestArtifactNamed, websiteCaptureFileNames } from "../website/visit/capture_files";
 import { hasPathTenants } from "../website/info/site";
+import { websiteRoutes } from "../website/routes";
 import type { ExfiltrationBackend } from "../exfiltration/types";
 import { deliveryCommandsOf } from "./delivery";
-import { headlineSite, judgedSitePage, sitePageSteps, siteOf, type CampaignMember, type CampaignSite, type SitePage } from "./members";
+import { headlineSite, judgedSitePage, sitePages, siteOf, type CampaignMember, type CampaignSite, type SitePage } from "./members";
 import { loadPageFingerprints, type PageFingerprints } from "./page_document";
 import { paymentReceivers } from "./payment";
 import type { CampaignIndicatorEvidence, CampaignIndicatorKind, OperatorServerRole } from "./schema";
@@ -73,19 +74,23 @@ async function loadReportedBackends(member: CampaignMember) {
 	return backends;
 }
 
-/** Each captured page of the case as a visitor reads it; a capture that cannot be read is skipped. */
+/** Each captured page of the case, route by route, as a visitor reads it; a capture that cannot be read is skipped. */
 export async function loadCapturedPageTexts(submissionId: bigint) {
-	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
+	const [artifacts, submission] = await Promise.all([ArtifactsEntity.listForSubmission(submissionId), SubmissionsEntity.get(submissionId)]);
 	const texts: PageText[] = [];
-	for (let step = 0; step < 20; step += 1) {
-		const meta = latestArtifactNamed(artifacts, websiteCaptureFileNames(step).mhtml);
-		if (!meta) break;
-		const artifact = await ArtifactsEntity.get(BigInt(meta.id));
-		if (!artifact) continue;
-		try {
-			texts.push({ name: meta.name ?? `step ${step}`, text: await mhtmlVisitorText(Buffer.from(artifact.blob)) });
-		} catch {
-			// A damaged archive has no readable text; the other pages still count.
+	// Only the case's routes: files of a walk that broke off, or of a route an earlier run reached, are no page of the case.
+	const routes = submission?.data.kind === "website" ? websiteRoutes(submission.data.website).length : 0;
+	for (let route = 0; route < Math.max(routes, 1); route += 1) {
+		for (let step = 0; step < 20; step += 1) {
+			const meta = latestArtifactNamed(artifacts, websiteCaptureFileNames({ route, step }).mhtml);
+			if (!meta) break;
+			const artifact = await ArtifactsEntity.get(BigInt(meta.id));
+			if (!artifact) continue;
+			try {
+				texts.push({ name: meta.name ?? `route ${route + 1} step ${step + 1}`, text: await mhtmlVisitorText(Buffer.from(artifact.blob)) });
+			} catch {
+				// A damaged archive has no readable text; the other pages still count.
+			}
 		}
 	}
 	return texts;
@@ -94,9 +99,9 @@ export async function loadCapturedPageTexts(submissionId: bigint) {
 /** The pages of the case's capture that show the member's site: what the site itself told its visitors. */
 export async function sitePageTexts(member: CampaignSite, website: WebsiteSubmissionData, dependencies: Pick<IndicatorDependencies, "loadPageTexts"> = {}): Promise<PageText[]> {
 	const texts = await (dependencies.loadPageTexts ?? loadCapturedPageTexts)(member.submissionId);
-	const steps = sitePageSteps(website, member.site);
-	if (!steps) return texts;
-	const names = new Set(steps.map((step) => websiteCaptureFileNames(step).mhtml));
+	const pages = sitePages(website, member.site);
+	if (!pages) return texts;
+	const names = new Set(pages.map((page) => websiteCaptureFileNames(page).mhtml));
 	return texts.filter((page) => names.has(page.name));
 }
 
