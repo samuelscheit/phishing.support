@@ -1,8 +1,7 @@
 import { z } from "zod";
 
-import { normalizeDomain } from "../../security/security";
 import { evidenceContract } from "../kit/evidence";
-import { field, payloadEnvelope, storedReader } from "../kit/stored";
+import { field, payloadEnvelope, registrarTargetOf, storedReader } from "../kit/stored";
 import { storedProviderEvidenceImageReference } from "../kit/evidence";
 import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../kit/report_payload";
 import { GNAME_PROVIDER, type GnameComplaintKind } from "./definition";
@@ -14,7 +13,7 @@ const envelope = payloadEnvelope(GNAME_PROVIDER, "gname_abuse_complaint_v1");
 /** The durable, secret-free draft: everything but the mailed code and the upload paths. */
 const payloadSchema = z.object({
 	...envelope.shape,
-	target: z.object({ domain: field.domain, observedUrl: z.string() }),
+	target: field.registrarTargetWithUrl,
 	report: z.object({
 		kind: z.enum(["phishing", "malware"]),
 		description: field.text(GNAME_PROVIDER.maximumDescriptionLength),
@@ -23,7 +22,7 @@ const payloadSchema = z.object({
 	}),
 	/** The form requires a screenshot. */
 	evidence: field.evidence(GNAME_EVIDENCE_CONTRACT),
-}).refine(({ target, report }) => normalizeObservedUrlForTarget(target.observedUrl, target.domain) === target.observedUrl
+}).refine(({ target, report }) => normalizeObservedUrlForTarget(target.observedUrl, target.host) === target.observedUrl
 	&& GNAME_PROVIDER.complaintTypes[report.kind].legalBrandUrl === (report.legalBrandUrl !== undefined));
 
 export type GnameSubmissionPayload = z.infer<typeof payloadSchema>;
@@ -55,21 +54,21 @@ export function buildGnameSubmissionPayload(params: {
 	legalBrandUrl: string;
 	evidence: GnameEvidenceReference | null;
 }): GnameSubmissionPayload | undefined {
-	const domain = normalizeDomain(params.target);
-	const observedUrl = domain ? normalizeObservedUrlForTarget(params.observedUrl, domain) : undefined;
+	const registrar = registrarTargetOf(params.target);
+	const observedUrl = registrar ? normalizeObservedUrlForTarget(params.observedUrl, registrar.host) : undefined;
 	const kind = gnameComplaintKind(params.allegationCategory);
 	const asksForBrand = GNAME_PROVIDER.complaintTypes[kind].legalBrandUrl;
 	const description = makeGnameDescription({
-		target: domain,
+		target: registrar?.host,
 		observedUrl,
 		description: params.description,
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 	});
-	if (!domain || !observedUrl || !description || (asksForBrand && !params.legalBrandUrl)
+	if (!registrar || !observedUrl || !description || (asksForBrand && !params.legalBrandUrl)
 		|| !params.evidence || !storedProviderEvidenceImageReference(params.evidence, GNAME_EVIDENCE_CONTRACT)) return undefined;
 	return {
 		...envelope.stamp,
-		target: { domain, observedUrl },
+		target: { ...registrar, observedUrl },
 		report: { kind, description, ...(asksForBrand ? { legalBrandUrl: params.legalBrandUrl } : {}) },
 		evidence: params.evidence,
 	};

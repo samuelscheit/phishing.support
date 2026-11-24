@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-import { normalizeDomain, normalizePublicHttpUrl } from "../../security/security";
+import { normalizePublicHttpUrl } from "../../security/security";
 import type { ReportInput } from "../kit/draft";
 import { evidenceContract } from "../kit/evidence";
-import { field, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
+import { field, registrarTargetOf, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
 import { listedFreeText } from "../kit/text";
 import { isReportReference } from "../kit/report_reference";
 import { DYNADOT_PROVIDER as PROVIDER } from "./definition";
@@ -15,7 +15,7 @@ const envelope = payloadEnvelope(PROVIDER, "dynadot_report_v1");
 /** The durable, secret-free draft: the form values the submission sends, besides its Turnstile token and the screenshot's bytes. */
 const payloadSchema = z.object({
 	...envelope.shape,
-	target: z.object({ domain: field.domain }),
+	target: field.registrarTarget,
 	report: z.object({
 		/** The reference at the top of the comment; Dynadot's mail, if any, may quote it. */
 		trackingId: field.reference,
@@ -42,15 +42,16 @@ export function dynadotOfficialWebsite(legalBrandUrl: string | null | undefined)
 }
 
 export function buildDynadotSubmissionPayload(input: DynadotReportInput): DynadotSubmissionPayload | undefined {
-	const domain = normalizeDomain(input.target);
-	if (!domain || !isReportReference(input.trackingId)) return undefined;
+	const target = registrarTargetOf(input.target);
+	if (!target || !isReportReference(input.trackingId)) return undefined;
+	const domain = target.host;
 	const urls = dynadotReportUrls(domain, input.observedUrls);
 	if (urls.length === 0) return undefined;
 	const comments = makeDynadotComments({ ...input, target: domain }, urls);
 	if (!comments) return undefined;
 	return {
 		...envelope.stamp,
-		target: { domain },
+		target,
 		report: { trackingId: input.trackingId, domainPath: urls[0]!, officialWebsite: dynadotOfficialWebsite(input.legalBrandUrl), comments },
 		evidence: input.evidence ?? null,
 	};

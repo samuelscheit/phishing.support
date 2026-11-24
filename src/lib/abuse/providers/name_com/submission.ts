@@ -47,7 +47,7 @@ export const nameComDraft = createDraft({
 	read: storedNameComSubmissionPayload,
 	input: (data: RouteData, stored?: NameComSubmissionPayload) => ({ ...reportInputOf(data), evidence: evidenceReferenceOf(NAME_COM_EVIDENCE_CONTRACT, data.evidenceArtifacts, stored) }),
 	build: buildNameComSubmissionPayload,
-	targetOf: (payload) => payload.target.domain,
+	targetOf: (payload) => payload.target.host,
 });
 
 /** The headers of Name.com's CSRF handshake: the token is the SHA-256 of `Start + Time + Start`. */
@@ -163,7 +163,7 @@ export async function submitNameComSubmission(context: ProviderSubmissionContext
 			confirmationId: id,
 			confirmationText: `Name.com accepted the report as case ${id} (our reference ${payload.report.trackingId})${message ? `: ${message}` : ""}`,
 			finalUrl: PROVIDER.formUrl,
-			submittedTargets: [payload.target.domain],
+			submittedTargets: [payload.target.host],
 		};
 	}
 	if (body?.success === false && message && (answer.status === 400 || answer.status === 422)) {

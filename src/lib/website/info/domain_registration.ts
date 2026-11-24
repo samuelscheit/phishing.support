@@ -1,11 +1,8 @@
-import { getDomain } from "tldts";
-
 import { fetchRdapRecord, safeJsonFetch } from "../../abuse/resolver/http";
 import { entityVcardText, extractRegistrarIdFromRdap, firstEntityWithRole, registrarRdapUrl } from "../../abuse/resolver/rdap";
 import type { JsonRecord, ResolverDependencies } from "../../abuse/resolver/types";
-import { registrableDomain } from "../../abuse/security/security";
 import { errorText } from "../../util/error_text";
-import { hasPathTenants } from "./site";
+import { hostRegistration } from "../../network/registered_domain";
 import { canonicalHost } from "../../network/url";
 import { utcDate } from "../../util/date_time";
 
@@ -47,19 +44,6 @@ export type DomainRegistration =
 
 export type DomainRegistrationLookup = (hostname: string) => Promise<DomainRegistration | undefined>;
 
-/**
- * A host that is a tenant of a platform is the tenant's site, never the
- * platform owner's: the public suffix list's private section names those
- * platforms (kit.firebaseapp.com, x.blogspot.com), and some hosts carry
- * tenants under a path (sites.google.com).
- */
-export function platformTenantSite(hostname: string): string | undefined {
-	const host = canonicalHost(hostname);
-	if (hasPathTenants(host)) return host;
-	const tenant = getDomain(host, { allowPrivateDomains: true });
-	return tenant && tenant !== registrableDomain(host) ? tenant : undefined;
-}
-
 function registrationDate(record: JsonRecord | undefined): string | undefined {
 	const events = Array.isArray(record?.events) ? record.events : [];
 	for (const event of events) {
@@ -90,10 +74,9 @@ function disclosedRegistrant(record: JsonRecord | undefined): string | undefined
  * registrant. Undefined for an IP or when no record exists.
  */
 export async function domainRegistration(hostname: string, dependencies: ResolverDependencies = {}): Promise<DomainRegistration | undefined> {
-	const tenant = platformTenantSite(hostname);
-	if (tenant) return { platformTenant: tenant };
-	const domain = registrableDomain(hostname);
-	if (!domain) return undefined;
+	const registration = hostRegistration(hostname);
+	if (!registration || "platformTenant" in registration) return registration;
+	const { domain } = registration;
 	const registry = await fetchRdapRecord("domain", domain, dependencies);
 	if (!registry) return undefined;
 	const registrarUrl = registrarRdapUrl(registry);

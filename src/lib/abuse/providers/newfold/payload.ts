@@ -1,10 +1,9 @@
 import { z } from "zod";
 
 import { asRecord } from "../../../util/values";
-import { normalizeDomain } from "../../security/security";
 import type { ReportInput } from "../kit/draft";
 import { evidenceContract } from "../kit/evidence";
-import { field, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
+import { field, registrarTargetOf, leadsWithReference, payloadEnvelope, storedReader } from "../kit/stored";
 import { listedFreeText } from "../kit/text";
 import { isReportReference } from "../kit/report_reference";
 import { NEWFOLD_PROVIDER as PROVIDER } from "./definition";
@@ -17,7 +16,7 @@ const knownBrand = (value: unknown): value is string => typeof value === "string
 /** The durable, secret-free draft: the form values the filing request sends besides the captcha token and the constant hidden fields. */
 const payloadSchema = z.object({
 	...envelope.shape,
-	target: z.object({ domain: field.domain }),
+	target: field.registrarTarget,
 	report: z.object({
 		/** The reference Newfold's case mail may quote; it leads the comments. */
 		trackingId: field.reference,
@@ -51,15 +50,16 @@ export function newfoldBrandForRoute(route: { verifiedEmail?: string | null; res
 export const { urls: newfoldReportUrls, make: makeNewfoldComments } = listedFreeText("newfold", PROVIDER, { limit: PROVIDER.commentsMaximumLength, urlMaximumLength: PROVIDER.urlMaximumLength });
 
 export function buildNewfoldSubmissionPayload(input: NewfoldReportInput): NewfoldSubmissionPayload | undefined {
-	const domain = normalizeDomain(input.target);
-	if (!domain || !isReportReference(input.trackingId) || !knownBrand(input.brand)) return undefined;
+	const target = registrarTargetOf(input.target);
+	if (!target || !isReportReference(input.trackingId) || !knownBrand(input.brand)) return undefined;
+	const domain = target.host;
 	const urls = newfoldReportUrls(domain, input.observedUrls);
 	if (urls.length === 0) return undefined;
 	const comments = makeNewfoldComments({ ...input, target: domain }, urls);
 	if (!comments) return undefined;
 	return {
 		...envelope.stamp,
-		target: { domain },
+		target,
 		report: { trackingId: input.trackingId, url: urls[0]!, brand: input.brand, comments },
 		evidence: input.evidence ?? null,
 	};

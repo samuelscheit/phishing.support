@@ -35,7 +35,7 @@ export const goDaddyDraft = createDraft({
 	read: storedGoDaddySubmissionPayload,
 	input: reportInputOf,
 	build: buildGoDaddySubmissionPayload,
-	targetOf: (payload) => payload.target.domain,
+	targetOf: (payload) => payload.target.host,
 });
 
 /**
@@ -88,7 +88,7 @@ export async function submitGoDaddySubmission(context: ProviderSubmissionContext
 			confirmationId: filed.ticketIds[0]!,
 			confirmationText: `GoDaddy's Abuse API created ${filed.ticketIds.length === 1 ? "ticket" : "tickets"} ${filed.ticketIds.join(", ")} for reference ${reference}${notes.length ? ` (${notes.join("; ")})` : ""}`,
 			finalUrl: `${PROVIDER.api.baseUrl}${PROVIDER.api.ticketsPath}/${filed.ticketIds[0]!}`,
-			submittedTargets: [payload.target.domain],
+			submittedTargets: [payload.target.host],
 		};
 	}
 	if (state?.channel !== "portal" || !state.session || typeof state.token !== "string" || !state.token || !Array.isArray(state.rendered)) {
@@ -105,6 +105,6 @@ export async function submitGoDaddySubmission(context: ProviderSubmissionContext
 		confirmationId: accepted.caseId ?? reference,
 		confirmationText: `${accepted.text}; reference ${reference}`,
 		finalUrl: PROVIDER.portal.formUrl,
-		submittedTargets: [payload.target.domain],
+		submittedTargets: [payload.target.host],
 	};
 }

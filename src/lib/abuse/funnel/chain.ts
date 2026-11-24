@@ -2,10 +2,14 @@ import type { WebsiteNavigationHop } from "../../website/types";
 import type { PageScreenshot } from "../linked_host_report";
 import { getPublicSuffix } from "tldts";
 
+import { hostRegistration } from "../../network/registered_domain";
 import { canonicalHost } from "../../network/url";
-import { platformTenantSite } from "../../website/info/domain_registration";
 import { hasPathTenants } from "../../website/info/site";
-import { registrableDomain } from "../security/security";
+
+function platformTenantOf(host: string): string | undefined {
+	const registration = hostRegistration(host);
+	return registration && "platformTenant" in registration ? registration.platformTenant : undefined;
+}
 
 /**
  * One navigation response of a case's chain, as the visit recorded it; `at`
@@ -38,12 +42,14 @@ export type FunnelChain = {
  */
 export function businessSite(hostname: string): string {
 	const host = canonicalHost(hostname);
-	return platformTenantSite(host) ?? registrableDomain(host) ?? host;
+	const registration = hostRegistration(host);
+	if (!registration) return host;
+	return "platformTenant" in registration ? registration.platformTenant : registration.domain;
 }
 
 /** The site is a platform's tenant: the platform's own records (its RDAP, its security.txt) are not the tenant's. */
 export function isPlatformTenant(site: string): boolean {
-	return platformTenantSite(site) === site && !hasPathTenants(site);
+	return platformTenantOf(site) === site && !hasPathTenants(site);
 }
 
 /**

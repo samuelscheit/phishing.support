@@ -170,7 +170,7 @@ export const gnameDraft = createDraft({
 	}),
 	admit: (_data, input) => !input.observedUrl ? "gname_requires_an_observed_url" : !input.legalBrandUrl ? "gname_requires_a_reference_website" : !input.evidence ? "gname_requires_a_screenshot" : undefined,
 	build: buildGnameSubmissionPayload,
-	targetOf: (payload) => payload.target.domain,
+	targetOf: (payload) => payload.target.host,
 });
 
 /**
@@ -228,6 +228,6 @@ export async function submitGnameSubmission(context: ProviderSubmissionContext, 
 		...(caseNumber ? { confirmationId: caseNumber } : {}),
 		confirmationText: `GNAME accepted the complaint${caseNumber ? ` (case ${caseNumber})` : ""}.`,
 		finalUrl: GNAME_PROVIDER.complaintTypes[payload.report.kind].pageUrl,
-		submittedTargets: [payload.target.domain],
+		submittedTargets: [payload.target.host],
 	};
 }

@@ -1,6 +1,5 @@
-import { getDomain } from "tldts";
-
 import type { FabricEgress } from "../../browser/fabric";
+import { siteOf } from "../../network/registered_domain";
 import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteNavigationHop } from "../types";
 import type { WebsiteArchiveResult } from "./types";
 
@@ -15,10 +14,8 @@ import type { WebsiteArchiveResult } from "./types";
  */
 export const WEBSITE_CAPTURE_EGRESS: readonly FabricEgress[] = ["residential", "phishing", "reporting"];
 
-/** Registrable domain (eTLD+1) of a URL, falling back to its hostname. */
-export function siteOf(url: string): string {
-	const { hostname } = new URL(url);
-	return getDomain(hostname) ?? hostname;
+function siteOfUrl(url: string): string {
+	return siteOf(new URL(url).hostname).site;
 }
 
 /**
@@ -31,8 +28,8 @@ export function scriptDestinationSite(archive: WebsiteArchiveResult): string | u
 	// instead of an HTTP redirect. Short links reach a cloaker through HTTP
 	// redirects of their own, which say nothing about where its script sends
 	// this visitor.
-	const scripted = archive.navigationHops.find((hop) => hop.redirectTo && !isHttpRedirect(hop.status) && siteOf(hop.redirectTo) !== siteOf(hop.url));
-	return scripted ? siteOf(archive.url) : undefined;
+	const scripted = archive.navigationHops.find((hop) => hop.redirectTo && !isHttpRedirect(hop.status) && siteOfUrl(hop.redirectTo) !== siteOfUrl(hop.url));
+	return scripted ? siteOfUrl(archive.url) : undefined;
 }
 
 function isHttpRedirect(status: number | null): boolean {
@@ -72,14 +69,14 @@ export function cloakedDestinationInfo(cloaked: WebsiteCloakedDestination): stri
  * are not navigation hops) are none of this.
  */
 export function cloakedDestination(hops: readonly WebsiteNavigationHop[], submittedUrl: string): { host: string; site: string } | undefined {
-	const submitted = siteOf(submittedUrl);
+	const submitted = siteOfUrl(submittedUrl);
 	const empty = (hop: WebsiteNavigationHop) => !hop.contentCaptured && !hop.visitorStep && hop.status !== null && hop.status >= 200 && hop.status < 300 && (hop.status === 204 || hop.redirectTo !== undefined);
 	for (const [position, hop] of hops.entries()) {
-		if (siteOf(hop.url) === submitted || !empty(hop)) continue;
+		if (siteOfUrl(hop.url) === submitted || !empty(hop)) continue;
 		const cameFrom = hops[position - 1];
-		if (!cameFrom || siteOf(cameFrom.url) !== submitted) continue;
+		if (!cameFrom || siteOfUrl(cameFrom.url) !== submitted) continue;
 		const back = hop.redirectTo ?? hops[position + 1]?.url;
-		if (back === undefined ? hop.status === 204 : siteOf(back) === submitted) return { host: hop.hostname, site: siteOf(hop.url) };
+		if (back === undefined ? hop.status === 204 : siteOfUrl(back) === submitted) return { host: hop.hostname, site: siteOfUrl(hop.url) };
 	}
 	return undefined;
 }

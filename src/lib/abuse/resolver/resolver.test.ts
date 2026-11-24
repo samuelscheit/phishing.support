@@ -76,6 +76,55 @@ describe("abuse resolver", () => {
 		expect(result.routes[0]?.resolverProvenance).toMatchObject({ email: "abuse@example-fixture.com" });
 	});
 
+	test("asks the registry for the registered domain of a host, which registries do not know by itself", async () => {
+		// trustwallet.com-info.vip (2026-11-23): .vip's RDAP answers 404 for the
+		// host, so its registrar West263 was never reported.
+		const queries: Array<[string, string]> = [];
+		const result = await resolveAbuseTarget(
+			{ normalizedTarget: "trustwallet.com-info.vip", targetType: "domain", observedUrls: [] },
+			resolverWith(
+				{
+					"https://rdap.test/domain/com-info.vip": {
+						port43: "whois.example.net",
+						entities: [{ handle: "1915", roles: ["registrar"], publicIds: [{ type: "IANA Registrar ID", identifier: "1915" }] }],
+					},
+				},
+				async (server, query) => {
+					queries.push([server, query]);
+					return "Registrar Abuse Contact Email: abuse@hkdns.hk\n";
+				},
+			),
+		);
+
+		expect(queries).toEqual([["whois.example.net", "com-info.vip"]]);
+		expect(result.status).toBe("resolved");
+		expect(result.routes).toHaveLength(1);
+		expect(result.routes[0]).toMatchObject({ routeType: "email", verifiedEmail: "abuse@hkdns.hk", providerDisplayName: "Abuse contact for com-info.vip" });
+		expect(result.resolverSnapshot).toMatchObject({ target: "trustwallet.com-info.vip", registeredDomain: "com-info.vip" });
+	});
+
+	test("never reports a platform tenant to the registrar of the platform's own domain", async () => {
+		const requested: string[] = [];
+		const dependencies = resolverWith(
+			{
+				"https://rdap.test/domain/github.io": { entities: [abuseEntity("abuse@markmonitor.example", "REGISTRAR-ABUSE")] },
+				"https://rdap.test/domain/amazonaws.com": { entities: [abuseEntity("abuse@markmonitor.example", "REGISTRAR-ABUSE")] },
+			},
+		);
+		const fetch = dependencies.fetch!;
+		dependencies.fetch = async (input, init) => {
+			requested.push(String(input));
+			return fetch(input, init);
+		};
+
+		for (const host of ["kit.github.io", "bucket.s3.amazonaws.com"]) {
+			const result = await resolveAbuseTarget({ normalizedTarget: host, targetType: "domain", observedUrls: [] }, dependencies);
+			expect(result).toMatchObject({ status: "no_route", disposition: "platform_tenant" });
+			expect(result.routes.map((route) => route.verifiedEmail)).not.toContain("abuse@markmonitor.example");
+		}
+		expect(requested.filter((url) => url.includes("/domain/"))).toEqual([]);
+	});
+
 	test("falls back to authoritative port-43 abuse-mailbox data when RDAP has no explicit abuse role", async () => {
 		const queries: Array<[string, string]> = [];
 		const result = await resolveAbuseTarget(
@@ -476,7 +525,7 @@ describe("abuse resolver", () => {
 				rdapLocator: testRdapLocator,
 				fetch: async (input) => {
 					const url = String(input);
-					if (url === `https://rdap.test/domain/${target}`) throw new Error("domain RDAP unavailable");
+					if (url === "https://rdap.test/domain/example.com") throw new Error("domain RDAP unavailable");
 					if (url === `https://rdap.test/ip/${infrastructureIp}`) return rdapResponse({ entities: [abuseEntity("abuse@cloudflare.com")] });
 					return new Response(null, { status: 404 });
 				},
@@ -508,8 +557,8 @@ describe("abuse resolver", () => {
 
 		expect(result.status).toBe("resolved");
 		expect(result.routes.map((route) => route.providerRegistryKey)).toEqual(["netcraft"]);
+		// A tenant of Render's platform: only its hosting is asked, never onrender.com's registrar.
 		expect(result.lookupFailures).toEqual([
-			"domain RDAP: Resolver request to rdap.test failed with HTTP 429.",
 			"IP RDAP for 216.24.57.16: Resolver request to rdap.test failed with HTTP 429.",
 			"IP RDAP for 216.24.57.18: Resolver request to rdap.test failed with HTTP 429.",
 		]);
@@ -572,7 +621,7 @@ describe("abuse resolver", () => {
 
 		expect(result).toMatchObject({ status: "no_route", disposition: "no_verified_abuse_contact" });
 		expect(result.routes).toEqual([expect.objectContaining({ routeType: "manual_unroutable" })]);
-		expect(requestedUrls).toEqual([`https://rdap.test/domain/${target}`]);
+		expect(requestedUrls).toEqual(["https://rdap.test/domain/example.com"]);
 	});
 
 });

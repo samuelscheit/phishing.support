@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-import { hostBelongsToTarget, normalizeDomain, normalizePublicHttpUrl, registrableDomain } from "../../security/security";
+import { hostBelongsToTarget, normalizePublicHttpUrl, registrableDomain } from "../../security/security";
 import { evidenceContract } from "../kit/evidence";
-import { field, payloadEnvelope, storedReader } from "../kit/stored";
+import { field, payloadEnvelope, registrarTargetOf, storedReader } from "../kit/stored";
 import { providerNarrative } from "../kit/text";
 import { storedProviderEvidenceImageReference } from "../kit/evidence";
 import { normalizeObservedUrlForTarget } from "../kit/report_payload";
@@ -25,12 +25,11 @@ function normalizedRealWebsite(value: unknown, target: string): string | undefin
 /** The durable, secret-free draft: the form values the submission sends. */
 const payloadSchema = z.object({
 	...envelope.shape,
-	target: z.object({ normalizedTarget: field.domain, registrableDomain: z.string(), observedUrl: z.string() }),
+	target: field.registrarTargetWithUrl,
 	report: z.object({ realWebsite: field.brandUrl, explanation: field.text(NAMESILO_PROVIDER.maximumReportLength) }),
 	evidence: field.evidence(NAMESILO_EVIDENCE_CONTRACT),
-}).refine(({ target, report }) => registrableDomain(target.normalizedTarget) === target.registrableDomain
-	&& normalizeObservedUrlForTarget(target.observedUrl, target.normalizedTarget) === target.observedUrl
-	&& normalizedRealWebsite(report.realWebsite, target.normalizedTarget) === report.realWebsite);
+}).refine(({ target, report }) => normalizeObservedUrlForTarget(target.observedUrl, target.host) === target.observedUrl
+	&& normalizedRealWebsite(report.realWebsite, target.host) === report.realWebsite);
 
 export type NameSiloSubmissionPayload = z.infer<typeof payloadSchema>;
 export type NameSiloEvidenceReference = NameSiloSubmissionPayload["evidence"];
@@ -61,9 +60,9 @@ export function buildNameSiloSubmissionPayload(params: {
 	realWebsite: string;
 	evidence: NameSiloEvidenceReference | null;
 }): NameSiloSubmissionPayload | undefined {
-	const target = normalizeDomain(params.target);
+	const registrar = registrarTargetOf(params.target);
+	const target = registrar?.host;
 	const observedUrl = target ? normalizeObservedUrlForTarget(params.observedUrl, target) : undefined;
-	const rootDomain = target ? registrableDomain(target) : undefined;
 	const realWebsite = target ? normalizedRealWebsite(params.realWebsite, target) : undefined;
 	const explanation = makeNameSiloExplanation({
 		...(target ? { target } : {}),
@@ -73,10 +72,10 @@ export function buildNameSiloSubmissionPayload(params: {
 		...(realWebsite ? { realWebsite } : {}),
 	});
 	const evidence = params.evidence && storedProviderEvidenceImageReference(params.evidence, NAMESILO_EVIDENCE_CONTRACT);
-	if (!target || !observedUrl || !rootDomain || !realWebsite || !explanation || !evidence) return undefined;
+	if (!registrar || !observedUrl || !realWebsite || !explanation || !evidence) return undefined;
 	return {
 		...envelope.stamp,
-		target: { normalizedTarget: target, registrableDomain: rootDomain, observedUrl },
+		target: { ...registrar, observedUrl },
 		report: { realWebsite, explanation },
 		evidence,
 	};
