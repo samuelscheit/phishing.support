@@ -1,6 +1,7 @@
 import { queueCaseSiteLinks } from "../../campaign/queue";
 import { scheduleLivenessChecks } from "../../liveness/schedule";
 import { AbuseRepository } from "../repository";
+import { queueRouteDelivery } from "./schedule";
 import type { AbuseTargetResolver } from "./shared";
 import type { ResolvedAbuseTarget } from "../resolver";
 
@@ -69,12 +70,6 @@ export async function saveResolvedTarget(reportId: bigint, targetId: bigint, res
 	});
 	if (resolved.status === "resolved") await scheduleLivenessChecks(targetId);
 	for (const routeInput of resolved.routes) {
-		const route = await AbuseRepository.upsertResolvedRoute(targetId, routeInput);
-		if (route.status !== "verified") continue;
-		if (route.routeType === "provider_submission") {
-			await AbuseRepository.enqueueJob({ jobType: "submit_provider", reportId, routeId: route.id, payload: {}, dedupeKey: `provider-submit:${route.id.toString()}` });
-		} else if (route.routeType === "email") {
-			await AbuseRepository.enqueueJob({ jobType: "send_email", reportId, routeId: route.id, payload: {}, dedupeKey: `email:${route.id.toString()}` });
-		}
+		await queueRouteDelivery(await AbuseRepository.upsertResolvedRoute(targetId, routeInput));
 	}
 }

@@ -1,5 +1,14 @@
 import { AbuseRepository } from "../repository";
+import type { AbuseProviderRoute } from "../schema";
 import { MINUTE_MS, HOUR_MS, DAY_MS } from "../../util/date_time";
+
+/** Queue the delivery of a verified route through its channel: its provider's submission, or its mail. One pending delivery per route. */
+export async function queueRouteDelivery(route: Pick<AbuseProviderRoute, "id" | "reportId" | "routeType" | "status">): Promise<void> {
+	if (route.status !== "verified" || route.routeType === "manual_unroutable") return;
+	await AbuseRepository.enqueueJob(route.routeType === "provider_submission"
+		? { jobType: "submit_provider", reportId: route.reportId, routeId: route.id, payload: {}, dedupeKey: `provider-submit:${route.id.toString()}` }
+		: { jobType: "send_email", reportId: route.reportId, routeId: route.id, payload: {}, dedupeKey: `email:${route.id.toString()}` });
+}
 
 /** How long, and how often, a submitted report's provider correspondence is read. */
 export const CORRESPONDENCE_POLL_WINDOW_MS = 30 * DAY_MS;

@@ -70,7 +70,9 @@ describe("the reports of case 384401854580134038 as the case page reads them", (
 	test("the takedown status: the strongest outcome first, counts by standing, targets and companies", async () => {
 		const reports = await trylevo();
 		const summary = takedownSummary(reports, String(CASE));
-		expect(summary.counts).toEqual({ action_taken: 1, received: 2, declined: 2, unconfirmed: 1, waiting: 1, not_sent: 0 });
+		expect(summary.counts).toEqual({ action_taken: 1, bypassed: 0, received: 2, declined: 2, unconfirmed: 1, waiting: 1, not_sent: 0 });
+		// No check has seen the site move: Cloudflare's restriction stands.
+		expect(summary.moved).toBeUndefined();
 		expect({ total: summary.total, targets: summary.targets, providers: summary.providers, coveredBy: summary.coveredBy, alsoCovers: summary.alsoCovers }).toEqual({ total: 7, targets: 2, providers: 5, coveredBy: [], alsoCovers: [] });
 		expect(summary.best?.route.organisation).toBe("Cloudflare");
 		expect(summary.best?.report.target).toBe("trylevo.app");
@@ -117,7 +119,7 @@ function message(fields: Partial<SubmissionReportMessage> & { at: string }): Sub
 	const { at, ...rest } = fields;
 	return {
 		id: BigInt(trylevoAt(at).getTime()), direction: "inbound", kind: "provider_api", status: "received", classification: null, fromAddress: null, toAddresses: [], subject: null,
-		text: null, providerState: null, decision: null, messageId: null, replyAddress: null, rawArtifactId: null, attachmentArtifactIds: [], decisionReply: false, occurredAt: trylevoAt(at),
+		text: null, providerState: null, decision: null, messageId: null, replyAddress: null, rawArtifactId: null, attachmentArtifactIds: [], decisionReply: false, moveNotice: false, occurredAt: trylevoAt(at),
 		...rest,
 	};
 }

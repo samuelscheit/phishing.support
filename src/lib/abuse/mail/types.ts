@@ -19,7 +19,7 @@ export const abuseReplyClassificationSchema = z
 export type AbuseReplyClassification = z.infer<typeof abuseReplyClassificationSchema>;
 
 /** Route-owned artifacts every mail of the route attaches beside the report's evidence. */
-export const ROUTE_MAIL_ATTACHMENT_KINDS = ["origin_host_evidence", "referral_attachment"];
+export const ROUTE_MAIL_ATTACHMENT_KINDS = ["origin_host_evidence", "host_move_evidence", "referral_attachment"];
 
 export type AbuseMailAttachment = {
 	filename: string;

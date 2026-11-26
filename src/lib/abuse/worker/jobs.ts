@@ -22,6 +22,7 @@ import { describeCampaignIfChanged } from "../../campaign/link";
 import { searchCampaignKits } from "../../campaign/kit_search";
 import { linkSiteToCampaign } from "../../campaign/sweep";
 import { runLivenessCheck } from "../../liveness/schedule";
+import { reportHostMove } from "../host_move/report";
 
 /**
  * Jobs are claimed by lane, so one kind of slow work never starves another:
@@ -72,6 +73,8 @@ export const JOB_POLICY: Readonly<Record<AbuseJobType, JobPolicy>> = {
 	// The agent may recheck and walk the site several times; one walk alone may take 20 minutes.
 	follow_up_provider_decision: { lane: "external", supplementary: false, minTimeoutMs: 60 * MINUTE },
 	watch_redirector: { lane: "external", supplementary: true },
+	// Resolves the new host's contact and mails or files with providers.
+	report_host_move: { lane: "external", supplementary: true },
 	// Writes a campaign's public title and summary with the model.
 	describe_campaign: { lane: "external", supplementary: true },
 	report_origin_host: { lane: "sweep", supplementary: true },
@@ -194,4 +197,5 @@ export const JOB_HANDLERS: Readonly<Record<AbuseJobType, JobHandler>> = {
 	link_campaign: (job) => linkSiteToCampaign({ submissionId: parseJobBigInt(job.payload?.submissionId, "payload.submissionId"), reportId: idFrom(job.reportId, "reportId") }),
 	describe_campaign: (job) => describeCampaignIfChanged(parseJobBigInt(job.payload?.campaignId, "payload.campaignId")),
 	check_site_liveness: (job, { signal }) => runLivenessCheck({ jobId: job.id, targetId: parseJobBigInt(job.payload?.targetId, "payload.targetId"), dependencies: signal ? { signal } : {} }),
+	report_host_move: (job) => reportHostMove({ reportId: idFrom(job.reportId, "reportId"), key: String(job.payload?.key ?? "") }),
 };

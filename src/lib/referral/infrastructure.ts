@@ -1,6 +1,7 @@
 import dns from "node:dns/promises";
 
 import { retryWithTimeout } from "../network/bounded_fetch";
+import { cdnOfAsn } from "../network/cdn";
 import { locatedCountry, originAsns, registeredCountry } from "../network/ripestat";
 import { registrableDomain } from "../abuse/security/security";
 import type { AbuseProviderRoute } from "../abuse/schema";
@@ -172,8 +173,6 @@ const PUBLIC_NETWORK_LOOKUP: NetworkLookup = {
 
 const IP = /^(?:\d{1,3}\.){3}\d{1,3}$|:/;
 const HOST = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
-/** CDNs whose address says nothing about the origin; the CDN holds the records about it. */
-const CDN_ASNS: ReadonlyMap<number, string> = new Map([[13335, "Cloudflare"]]);
 
 /** The node name a claim ends up under: the known record holder, else the claim's own name. */
 export function claimNodeName(claim: InfrastructureClaim): string {
@@ -241,7 +240,8 @@ async function locateOperatorHost(node: InfrastructureNode, hosts: readonly Infr
 	}
 	const ips = (await lookup.resolve(node.name)).slice(0, 4);
 	if (!ips.length) return node;
-	const cdn = (await lookup.asns(ips[0]!)).map((asn) => CDN_ASNS.get(asn)).find(Boolean);
+	// A CDN's address says nothing about the origin; the CDN holds the records about it.
+	const cdn = (await lookup.asns(ips[0]!)).map(cdnOfAsn).find(Boolean);
 	const resolved = { ...node, resources: [...new Set([...node.resources, ...ips])] };
 	if (!cdn) return locateNode(resolved, lookup);
 	const lead = providerLead(cdn);

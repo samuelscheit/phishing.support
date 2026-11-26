@@ -165,6 +165,7 @@ export async function checkSite(url: string, dependencies: SiteCheckDependencies
 	const http = dnsObservation.outcome === "nxdomain" ? undefined : await observeHttp(url, dependencies);
 	const { statuses, nameservers } = await registryObservation;
 	const verdict = classifySite({ url, dns: dnsObservation, domainStatuses: statuses, nameservers, ...(http ? { http } : {}) });
+	const server = http?.outcome === "response" ? http.page.headers.server?.trim().slice(0, 200) : undefined;
 	return {
 		url,
 		state: verdict.state,
@@ -172,6 +173,8 @@ export async function checkSite(url: string, dependencies: SiteCheckDependencies
 		httpStatus: http?.outcome === "response" ? http.page.status : null,
 		finalUrl: http?.urls.at(-1) ?? null,
 		resolvedAddresses: dnsObservation.outcome === "resolved" ? dnsObservation.addresses : [],
+		// The addresses' networks are attributed by the scheduled check (see host_move.ts), which knows the previous check's.
+		hosting: dnsObservation.outcome === "resolved" ? { addresses: dnsObservation.addresses.map((ip) => ({ ip })), ...(server ? { server } : {}) } : null,
 		domainStatuses: statuses,
 		checkedAt,
 	};

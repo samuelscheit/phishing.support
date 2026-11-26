@@ -4,7 +4,7 @@ import ipaddr from "ipaddr.js";
 import { z } from "zod";
 
 import { retryWithTimeout } from "../../network/bounded_fetch";
-import { ripeStatData } from "../../network/ripestat";
+import { asHolder, ripeStatData } from "../../network/ripestat";
 import { isPublicIp, normalizeDomain, registrableDomain } from "../security/security";
 import { normalizeMailbox } from "../mail/shared";
 import { throwIfAborted } from "../worker/shared";
@@ -23,7 +23,6 @@ const searchSchema = z.object({
 }).passthrough();
 const networkInfoSchema = z.object({ asns: z.array(z.union([z.string(), z.number()])) }).passthrough();
 const abuseContactsSchema = z.object({ abuse_contacts: z.array(z.string()) }).passthrough();
-const overviewSchema = z.object({ holder: z.string().nullable().optional() }).passthrough();
 const prefixesSchema = z.object({
 	prefixes: z.array(z.object({ prefix: z.string() }).passthrough()),
 }).passthrough();
@@ -154,14 +153,13 @@ export async function resolveOriginHostNetworks(
 			const contacts = abuseContactsSchema.safeParse(await ripeStatData("abuse-contact-finder", { resource: `AS${asn}` }, dependencies));
 			if (!contacts.success) throw new Error("RIPEstat abuse-contact response was malformed.");
 			if (!contacts.data.abuse_contacts.map(normalizeMailbox).includes(recipient)) return undefined;
-			const [overviewResult, prefixesResult] = await Promise.all([
-				ripeStatData("as-overview", { resource: `AS${asn}` }, dependencies),
+			const [holderName, prefixesResult] = await Promise.all([
+				asHolder(asn, dependencies),
 				ripeStatData("announced-prefixes", { resource: `AS${asn}` }, dependencies),
 			]);
-			const overview = overviewSchema.safeParse(overviewResult);
 			const prefixes = prefixesSchema.safeParse(prefixesResult);
-			if (!overview.success || !prefixes.success) throw new Error("RIPEstat ASN response was malformed.");
-			const holder = overview.data.holder?.replace(/\s+/g, " ").trim().slice(0, 200) || `AS${asn}`;
+			if (!prefixes.success) throw new Error("RIPEstat ASN response was malformed.");
+			const holder = holderName ?? `AS${asn}`;
 			return {
 				asn,
 				holder,

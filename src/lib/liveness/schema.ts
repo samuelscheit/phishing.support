@@ -3,6 +3,7 @@ import { index, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { abuseReports, abuseTargets } from "../abuse/schema";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "../db/sqlite_types";
+import type { SiteHosting } from "./hosting";
 
 /**
  * What one visit to a reported site found, and with it which layer of the
@@ -59,6 +60,8 @@ export const siteChecks = sqliteTable(
 		/** Where the visit ended after redirects. */
 		finalUrl: text("final_url"),
 		resolvedAddresses: text("resolved_addresses", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+		/** The networks of `resolvedAddresses` and the server that answered; null on checks made before it was recorded. */
+		hosting: text("hosting", { mode: "json" }).$type<SiteHosting>(),
 		/** The domain's RDAP status values (`client hold`, `server hold`, …). */
 		domainStatuses: text("domain_statuses", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
 		/** What decided the state, in plain words: the matched page signature or the network error. */

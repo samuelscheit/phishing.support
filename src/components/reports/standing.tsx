@@ -7,6 +7,7 @@ import { cn } from "@/lib/util/cn";
 /** Each standing's colours: the badge, the bar segment and the legend swatch. */
 export const BUCKET_STYLE: Record<RouteBucket, { pill: string; fill: string; legend: string }> = {
 	action_taken: { pill: "border-emerald-200 bg-emerald-50 text-emerald-700", fill: "bg-emerald-600", legend: "took action" },
+	bypassed: { pill: "border-orange-200 bg-orange-50 text-orange-700", fill: "bg-orange-400", legend: "acted, then bypassed" },
 	received: { pill: "border-sky-200 bg-sky-50 text-sky-700", fill: "bg-emerald-300", legend: "received, no decision yet" },
 	declined: { pill: "border-red-200 bg-red-50 text-red-700", fill: "bg-red-300", legend: "no threat found or declined" },
 	unconfirmed: { pill: "border-zinc-200 bg-zinc-50 text-zinc-600", fill: "bg-amber-300", legend: "not confirmed yet" },

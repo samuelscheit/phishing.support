@@ -7,6 +7,8 @@ import { AbuseRepository } from "../repository";
 import { fallbackContactsOf, routeContact, withRouteContact } from "../resolver/contact_chain";
 import { contactRoute } from "../resolver/routes";
 import { deliveryRetryDelayMs } from "./retry";
+import { queueRouteDelivery } from "./schedule";
+import { recheckAfterProviderAction } from "./provider_action";
 import type { JsonRecord } from "../../util/values";
 import { abuseCaseTag } from "../mail/correlation";
 import { deliveryReport } from "../mail/delivery_report";
@@ -20,6 +22,7 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 	if (!message) return;
 	const route = await AbuseRepository.getRoute(message.routeId);
 	if (!route) return;
+	await recheckAfterProviderAction(route, [message]);
 	if (message.kind === "notification") {
 		// A provider status update about a report it received is part of the
 		// case record; it never changes the route by itself. Its classification
@@ -232,13 +235,7 @@ export async function routeToNextContact(bouncedRouteId: bigint, contacts?: read
 	});
 	const route = await AbuseRepository.upsertResolvedRoute(bounced.targetId, routeInput);
 	if (route.status !== "verified") return route.id;
-	await AbuseRepository.enqueueJob({
-		jobType: route.routeType === "provider_submission" ? "submit_provider" : "send_email",
-		reportId: route.reportId,
-		routeId: route.id,
-		payload: {},
-		dedupeKey: route.routeType === "provider_submission" ? `provider-submit:${route.id.toString()}` : `email:${route.id.toString()}`,
-	});
+	await queueRouteDelivery(route);
 	await AbuseRepository.recomputeReportStatus(route.reportId);
 	return route.id;
 }

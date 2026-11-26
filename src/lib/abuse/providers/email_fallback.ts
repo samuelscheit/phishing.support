@@ -1,5 +1,6 @@
 import { ROUTE_MAIL_ATTACHMENT_KINDS } from "../mail/types";
 import { AbuseRepository } from "../repository";
+import { queueRouteDelivery } from "../worker/schedule";
 import type { ProviderSubmissionProvider } from "./submission_contracts";
 import { emailRoute } from "./submission_routes";
 
@@ -26,9 +27,7 @@ export async function fallBackToEmail(provider: ProviderSubmissionProvider, rout
 	for (const artifact of await AbuseRepository.listRouteArtifacts(route.id, ROUTE_MAIL_ATTACHMENT_KINDS)) {
 		await AbuseRepository.saveRouteArtifactOnce({ reportId: route.reportId, routeId: fallback.id, name: artifact.name, kind: artifact.kind, mimeType: artifact.mimeType, buffer: artifact.blob, metadata: artifact.metadata ?? {} });
 	}
-	if (fallback.status === "verified") {
-		await AbuseRepository.enqueueJob({ jobType: "send_email", reportId: route.reportId, routeId: fallback.id, payload: {}, dedupeKey: `email:${fallback.id.toString()}` });
-	}
+	await queueRouteDelivery(fallback);
 	await AbuseRepository.recomputeReportStatus(route.reportId);
 	return fallback.id;
 }

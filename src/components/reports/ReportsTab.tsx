@@ -36,11 +36,26 @@ function CaseLinks({ ids }: { ids: string[] }) {
 }
 
 /** The headline: the strongest outcome any provider reached, said plainly. */
-function Headline({ summary }: { summary: TakedownSummary }) {
+function Headline({ summary, reports }: { summary: TakedownSummary; reports: readonly SubmissionReport[] }) {
 	const best = summary.best;
 	if (!best) return null;
 	const { standing, route, report } = best;
 	const open = summary.counts.received + summary.counts.unconfirmed + summary.counts.waiting;
+	if (summary.moved) {
+		const { move, text } = summary.moved;
+		const bypassed = rankedRoutes(reports).find((entry) => entry.report === summary.moved!.report && entry.standing.bucket === "bypassed");
+		return (
+			<>
+				<h3 className="text-lg font-semibold tracking-tight [overflow-wrap:anywhere]">
+					<span className="text-orange-700">{text}</span> <span className="font-normal text-muted-foreground">· {targetName(summary.moved.report)}</span>
+				</h3>
+				<p className="text-sm text-muted-foreground">
+					{bypassed ? `${bypassed.route.organisation} had acted on it; the site left ${move.from.name} ${elapsed(summary.moved.report.createdAt, move.at)} after the report.` : `The site left ${move.from.name} ${elapsed(summary.moved.report.createdAt, move.at)} after the report.`}
+					{open ? ` ${plural(open, "report")} ${open === 1 ? "is" : "are"} still open.` : null}
+				</p>
+			</>
+		);
+	}
 	if (standing.bucket === "action_taken") {
 		return (
 			<>
@@ -54,7 +69,8 @@ function Headline({ summary }: { summary: TakedownSummary }) {
 			</>
 		);
 	}
-	const text = standing.bucket === "received" ? `Received by ${plural(summary.counts.received, "provider")}, no decision yet`
+	const text = standing.bucket === "bypassed" ? "A provider acted, and the site moved on"
+		: standing.bucket === "received" ? `Received by ${plural(summary.counts.received, "provider")}, no decision yet`
 		: standing.bucket === "declined" ? "No provider has acted yet"
 		: standing.bucket === "unconfirmed" || standing.bucket === "waiting" ? "Reports sent, waiting for answers"
 		: "No report has reached a provider";
@@ -102,7 +118,7 @@ function Summary({ reports, caseId, investigation }: { reports: readonly Submiss
 			<div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:justify-between sm:p-5">
 				<div className="min-w-0 flex-1 space-y-1">
 					<div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Takedown status</div>
-					<Headline summary={summary} />
+					<Headline summary={summary} reports={reports} />
 					<div className="flex h-2 gap-0.5 overflow-hidden rounded-full bg-muted" role="img" aria-label={present.map((bucket) => `${summary.counts[bucket]} ${BUCKET_STYLE[bucket].legend}`).join(", ")}>
 						{present.map((bucket) => <span key={bucket} className={BUCKET_STYLE[bucket].fill} style={{ flexGrow: summary.counts[bucket] }} />)}
 					</div>

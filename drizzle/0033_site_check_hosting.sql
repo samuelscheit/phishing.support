@@ -1,0 +1,1 @@
+ALTER TABLE `site_checks` ADD `hosting` text;

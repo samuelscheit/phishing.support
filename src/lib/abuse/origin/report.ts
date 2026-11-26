@@ -1,6 +1,3 @@
-import { simpleParser } from "mailparser";
-
-import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { queryRDAPDomain } from "../../website/info/info";
 import { createWebsiteSubmission, type WebsiteSubmissionOptions } from "../../submissions/website";
@@ -9,25 +6,25 @@ import { getProviderSubmissionProviderForMailbox, providerContactRoute } from ".
 import { AbuseRepository } from "../repository";
 import type { AbuseJob } from "../schema";
 import { parseJobBigInt, throwIfAborted } from "../worker/shared";
+import { queueRouteDelivery } from "../worker/schedule";
 import { parseCloudflareOriginDisclosure } from "./disclosure";
 import { capturedKitFacts } from "./kit_facts";
 import { isKitSiblingSeed } from "./kit_job";
 import { containingNetworkPrefix, resolveOriginHostNetworks } from "./network";
-import { discoverSiblingDomains, kitFingerprints, type SiblingDiscoveryResult } from "./siblings";
+import { discoverSiblingDomains, type SiblingDiscoveryResult } from "./siblings";
+import { originVerificationTargets } from "./verification_targets";
 import { MAX_HISTORICAL_RESOLUTIONS, originSweepProgressSchema, readOriginHostSnapshot, type HistoricalResolution, type OriginHostSnapshot, type OriginSweepProgress } from "./snapshot";
 import { findOriginServers, MAX_ORIGIN_RESULTS, originSweepAddresses, planOriginSweep, SWEEP_SLICE_ADDRESSES, type OriginSweepPlan, type OriginVerificationTarget } from "./sweep";
 import { passiveDnsHistory, passiveDnsSourceLabel, type PassiveDnsHistory } from "../../network/passive_dns";
+import { asHolderName } from "../../network/ripestat";
 import { errorSummary } from "../../util/error_text";
 import { scheduleLivenessChecks } from "../../liveness/schedule";
 import { snippet } from "../../util/text";
-import { sha256Hex } from "../../util/hash";
 
 const ORIGIN_ROUTE_PROVIDER_KEY = "origin-host-email";
 const ORIGIN_EVIDENCE_KIND = "origin_host_evidence";
 const ORIGIN_EVIDENCE_NAME = "origin-host-evidence.txt";
 const MAX_ERRORS = 100;
-/** Each target is one request per swept address, so a few exact files are enough. */
-const MAX_VERIFICATION_TARGETS = 5;
 
 export type OriginHostReportDependencies = {
 	resolveNetworks?: typeof resolveOriginHostNetworks;
@@ -100,14 +97,9 @@ async function dnsHistoryProgress(params: {
 	};
 }
 
-/** RIPEstat holders read "AS-NAME - Organization, CC"; the AS name is what a host calls itself. */
-function holderName(holder: string): string {
-	return holder.match(/^(\S+) - .+, [A-Z]{2}$/)?.[1] ?? holder;
-}
-
 function providerLabel(disclosed: string | undefined, networks: OriginSweepProgress["networks"], recipient: string): string {
 	if (disclosed?.trim()) return snippet(disclosed, 200);
-	const holders = [...new Set(networks.map(({ holder }) => holderName(holder)))];
+	const holders = [...new Set(networks.map(({ holder }) => asHolderName(holder)))];
 	return holders.join(" / ").slice(0, 200) || recipient.split("@")[1]!;
 }
 
@@ -128,46 +120,6 @@ async function submissionRegisteredAt(submissionId: bigint): Promise<string | un
 	const registration = submission?.data.kind === "website" ? submission.data.website.whois?.rdap?.events.registration : undefined;
 	const parsed = registration ? new Date(registration) : undefined;
 	return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : undefined;
-}
-
-async function originVerificationTargets(submissionId: bigint | null, domain: string): Promise<OriginVerificationTarget[]> {
-	if (!submissionId) return [];
-	const submission = await SubmissionsEntity.get(submissionId);
-	// Only the reported host's own files can be requested from its candidate origin.
-	const liveTargets = kitFingerprints(submission?.data.kind === "website" ? submission.data.website : {})
-		.map(({ url, sha256 }) => ({ url: new URL(url), sha256 }))
-		.filter(({ url }) => url.hostname === domain)
-		.slice(0, MAX_VERIFICATION_TARGETS)
-		.map(({ url, sha256 }) => ({ path: `${url.pathname}${url.search}`, sha256 }));
-	if (liveTargets.length) return liveTargets;
-
-	// Uploaded and inherited captures have no live response recorder. Chromium's
-	// MHTML still retains same-host stylesheets as decoded MIME parts, which are
-	// safe exact-byte verification targets (scripts are deliberately not guessed).
-	// Every page the capture reached on the site contributes its stylesheets.
-	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
-	const targets = new Map<string, OriginVerificationTarget>();
-	for (const reference of artifacts.filter(({ kind }) => kind === "website_mhtml")) {
-		const mhtml = await ArtifactsEntity.get(reference.id);
-		if (!mhtml?.blob) continue;
-		const parsed = await simpleParser(mhtml.blob);
-		for (const attachment of parsed.attachments) {
-			if (attachment.contentType !== "text/css" || attachment.content.byteLength < 1_024) continue;
-			const location = attachment.headers.get("content-location");
-			if (typeof location !== "string") continue;
-			let url: URL;
-			try {
-				url = new URL(location);
-			} catch {
-				continue;
-			}
-			if (url.hostname !== domain) continue;
-			const path = `${url.pathname}${url.search}`;
-			targets.set(path, { path, sha256: sha256Hex(attachment.content) });
-			if (targets.size >= MAX_VERIFICATION_TARGETS) return [...targets.values()];
-		}
-	}
-	return [...targets.values()];
 }
 
 function historicalSighting(resolution: HistoricalResolution): string {
@@ -252,10 +204,7 @@ async function ensureDelivery(reportId: bigint, routeId: bigint, snapshot: Origi
 		});
 	}
 	const route = await AbuseRepository.getRoute(routeId);
-	if (route?.status !== "verified") return;
-	await AbuseRepository.enqueueJob(route.routeType === "provider_submission"
-		? { jobType: "submit_provider", reportId, routeId, payload: {}, dedupeKey: `provider-submit:${routeId.toString()}` }
-		: { jobType: "send_email", reportId, routeId, payload: {}, dedupeKey: `email:${routeId.toString()}` });
+	if (route) await queueRouteDelivery(route);
 }
 
 /**

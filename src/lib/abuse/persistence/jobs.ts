@@ -48,6 +48,8 @@ export function insertQueuedJob(tx: DbExecutor, params: NewJob, eventData: Recor
 export async function enqueueJob(params: NewJob & {
 	/** The running job that queues its own successor; it does not count as a duplicate. */
 	successorOf?: bigint;
+	/** A queued duplicate due later than `nextAttemptAt` is brought forward to it, instead of left as it is. */
+	advance?: boolean;
 }): Promise<AbuseJob> {
 	const db = await getDb();
 	return db.transaction(
@@ -64,9 +66,13 @@ export async function enqueueJob(params: NewJob & {
 						),
 					)
 					.get();
+				if (existing && params.advance && params.nextAttemptAt && existing.status === "queued" && existing.nextAttemptAt > params.nextAttemptAt) {
+					tx.update(abuseJobs).set({ nextAttemptAt: params.nextAttemptAt, updatedAt: now() }).where(eq(abuseJobs.id, existing.id)).run();
+					return { ...existing, nextAttemptAt: params.nextAttemptAt };
+				}
 				if (existing) return existing;
 			}
-			const { successorOf: _successorOf, ...job } = params;
+			const { successorOf: _successorOf, advance: _advance, ...job } = params;
 			return insertQueuedJob(tx, job);
 		},
 		{ behavior: "immediate" }

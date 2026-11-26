@@ -21,6 +21,7 @@ function checks(...entries: Array<[number, SiteCheckState]>): SiteCheck[] {
 		httpStatus: null,
 		finalUrl: null,
 		resolvedAddresses: [],
+		hosting: null,
 		domainStatuses: [],
 		detail: null,
 		checkedAt: at(hours),

@@ -69,7 +69,7 @@ const KIT = `<html><head><title>Sign in</title></head><body><form><input type="p
 
 describe("checkSite", () => {
 	test("visits the site like a desktop browser and records what answered", async () => {
-		const { fetch, requests } = site({ [SITE]: { status: 200, body: KIT } });
+		const { fetch, requests } = site({ [SITE]: { status: 200, body: KIT, headers: { server: "nginx/1.30.0" } } });
 		const dns = resolver({ a: ["203.0.113.10", "203.0.113.11"], aaaa: ["2001:db8::10"] });
 		expect(await checkSite(SITE, dependencies({ fetch, dns }))).toEqual({
 			url: SITE,
@@ -78,6 +78,8 @@ describe("checkSite", () => {
 			httpStatus: 200,
 			finalUrl: SITE,
 			resolvedAddresses: ["203.0.113.10", "203.0.113.11", "2001:db8::10"],
+			// The networks are attributed by the scheduled check, which knows the previous check's.
+			hosting: { addresses: [{ ip: "203.0.113.10" }, { ip: "203.0.113.11" }, { ip: "2001:db8::10" }], server: "nginx/1.30.0" },
 			domainStatuses: ["client transfer prohibited"],
 			checkedAt: NOW,
 		});
@@ -91,7 +93,7 @@ describe("checkSite", () => {
 	test("NXDOMAIN ends the check without a visit", async () => {
 		const { fetch, requests } = site({});
 		const dns = resolver({ a: "ENOTFOUND", aaaa: "ENOTFOUND", cname: "ENOTFOUND" });
-		expect(await checkSite(SITE, dependencies({ fetch, dns }))).toMatchObject({ state: "domain_gone", detail: "login.kit-example.com no longer resolves (NXDOMAIN).", httpStatus: null, finalUrl: null, resolvedAddresses: [] });
+		expect(await checkSite(SITE, dependencies({ fetch, dns }))).toMatchObject({ state: "domain_gone", detail: "login.kit-example.com no longer resolves (NXDOMAIN).", httpStatus: null, finalUrl: null, resolvedAddresses: [], hosting: null });
 		expect(requests).toHaveLength(0);
 		// NXDOMAIN is an answer; it is not asked again.
 		expect(dns.calls.filter((call) => call.startsWith("A "))).toHaveLength(1);

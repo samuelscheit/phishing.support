@@ -22,6 +22,12 @@ export async function listSiteChecksForTargets(targetIds: readonly bigint[]): Pr
 		.all();
 }
 
+/** The checks of one report's targets, in the order they were made. */
+export async function listSiteChecksForReport(reportId: bigint): Promise<SiteCheck[]> {
+	const db = await getDb();
+	return db.select().from(siteChecks).where(eq(siteChecks.reportId, reportId)).orderBy(asc(siteChecks.checkedAt)).all();
+}
+
 export async function recordSiteCheck(target: { reportId: bigint; targetId: bigint }, result: SiteCheckResult): Promise<SiteCheck> {
 	const db = await getDb();
 	return db.insert(siteChecks).values({ ...result, id: generateId(), reportId: target.reportId, targetId: target.targetId }).returning().get();

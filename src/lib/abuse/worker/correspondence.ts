@@ -2,6 +2,7 @@ import { getProviderSubmissionProvider, listProviderSubmissionProviders } from "
 import { CORRESPONDENCE_POLL_WINDOW_MS, nextCorrespondencePollDelayMs, queueCorrespondencePoll } from "./schedule";
 import { AbuseRepository } from "../repository";
 import { enqueueOriginHostDisclosures } from "../origin/disclosure";
+import { recheckAfterProviderAction } from "./provider_action";
 
 /**
  * Read a submitted report's correspondence from its provider's API, record
@@ -46,6 +47,7 @@ export async function pollProviderCorrespondence(params: { routeId: bigint; jobI
 	const storedMessages = (await Promise.all(stored.map(({ id }) => AbuseRepository.getMailMessage(id))))
 		.filter((message) => message !== undefined);
 	await enqueueOriginHostDisclosures(route, storedMessages);
+	await recheckAfterProviderAction(route, storedMessages);
 	const state = correspondence.status?.state;
 	if (state && provider.decisionFollowUp?.contestedStates.includes(state)) {
 		// Once per route and decision, for the lifetime of the case.

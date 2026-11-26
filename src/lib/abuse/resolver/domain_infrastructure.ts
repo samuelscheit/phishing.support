@@ -101,7 +101,7 @@ async function lookupInfrastructureAddresses(domain: string, dependencies: Resol
  * prevents an IP-hosting contact from being mistaken for a domain registrar
  * contact after durable route persistence.
  */
-function attachInfrastructureRoute(params: {
+export function attachInfrastructureRoute(params: {
 	domain: string;
 	ip: string;
 	dnsSnapshot: JsonRecord;

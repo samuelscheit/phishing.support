@@ -2,19 +2,21 @@ import type { CleanMailText } from "@/lib/abuse/mail/clean_text";
 import type { ProviderDecision } from "@/lib/abuse/providers/submission_contracts";
 import type { AbuseMailClassification } from "@/lib/abuse/schema";
 import { leadSentence } from "@/lib/abuse/mail/clean_text";
+import { currentMove, hostMoveText, type HostMove } from "@/lib/liveness/moves";
 import type { ReportSubject, SubmissionReport, SubmissionReportMessage, SubmissionReportRoute } from "./abuse_details";
 
 /**
  * Where a report to one provider stands, from the reporter's side, strongest first:
  *
  * - `action_taken`: the provider acted on the site (restricted it, blocklisted it).
+ * - `bypassed`: it acted, and the site then left it and serves on elsewhere (trylevo.app left Cloudflare's block).
  * - `received`: it confirmed the report and has not decided yet.
  * - `declined`: its check found no threat, or it closed the report without acting.
  * - `unconfirmed`: our submission's answer was lost; whether the provider has the report is not known yet.
  * - `waiting`: sent and not answered yet, or still being sent.
  * - `not_sent`: it never reached the provider: refused, bounced, or stopped before sending.
  */
-export const routeBuckets = ["action_taken", "received", "declined", "unconfirmed", "waiting", "not_sent"] as const;
+export const routeBuckets = ["action_taken", "bypassed", "received", "declined", "unconfirmed", "waiting", "not_sent"] as const;
 export type RouteBucket = (typeof routeBuckets)[number];
 
 /** One step of Sent → Received → Decision. */
@@ -91,8 +93,27 @@ const NOT_SENT_LABEL: Record<string, string> = {
 	failed: "Could not be sent",
 };
 
-/** Where one route stands, its label, its key line and its Sent → Received → Decision steps. */
-export function routeStanding(route: SubmissionReportRoute): RouteStanding {
+/**
+ * The move a provider's action was bypassed by: the site left the CDN (or
+ * the host) that acted on it after it acted, and still serves elsewhere.
+ */
+function bypassingMove(route: SubmissionReportRoute, decided: Decided, move: HostMove | undefined): HostMove | undefined {
+	if (!move || decided.decision.outcome !== "action_taken" || decided.at.getTime() > new Date(move.at).getTime()) return undefined;
+	const left = route.role === "cdn" ? move.from.cdn : route.role === "host" ? move.from.name : undefined;
+	return left !== undefined && left.toLowerCase() === route.organisation.toLowerCase() ? move : undefined;
+}
+
+/** The report's site where it stands now, when it moved after the report and still serves what was reported. */
+export function reportMove(report: Pick<SubmissionReport, "hostMoves" | "latestCheck">): HostMove | undefined {
+	return currentMove(report.hostMoves, report.latestCheck);
+}
+
+/**
+ * Where one route stands, its label, its key line and its Sent → Received →
+ * Decision steps. `move` is where the report's site went after the report
+ * (`reportMove`): an action the site moved away from is bypassed.
+ */
+export function routeStanding(route: SubmissionReportRoute, move?: HostMove, allegation?: string): RouteStanding {
 	const sentAt = route.outcome.sentAt ? new Date(route.outcome.sentAt) : undefined;
 	if (route.status === "unknown_external_state") {
 		return {
@@ -119,6 +140,17 @@ export function routeStanding(route: SubmissionReportRoute): RouteStanding {
 	}
 
 	const decided = decisionOf(route.messages);
+	const bypassed = decided && bypassingMove(route, decided, move);
+	if (bypassed) {
+		return {
+			bucket: "bypassed",
+			label: "Block bypassed",
+			line: hostMoveText(bypassed, allegation),
+			quoted: false,
+			at: new Date(bypassed.at),
+			steps: { sent: "done", received: "done", decision: "negative" },
+		};
+	}
 	if (decided) {
 		const { decision, at } = decided;
 		const bucket: RouteBucket = decision.outcome === "action_taken" ? "action_taken" : decision.outcome === "received" ? "received" : "declined";
@@ -167,6 +199,10 @@ export function shortUtc(at: Date | string, reference?: Date | string): string {
  */
 export function nextStep(route: SubmissionReportRoute, standing: RouteStanding, reference?: Date | string): string | undefined {
 	if (standing.bucket === "action_taken" || standing.bucket === "not_sent") return undefined;
+	if (standing.bucket === "bypassed") {
+		const told = [...route.messages].sort(bySent).findLast((message) => message.moveNotice && message.status === "sent");
+		return told ? `We told ${route.organisation} at ${shortUtc(told.occurredAt, reference)} UTC that its block was bypassed.` : undefined;
+	}
 	const next = (kind: SubmissionReportRoute["nextWork"][number]["kind"]) => route.nextWork.find((work) => work.kind === kind);
 	const answered = route.decisionFollowUps.filter((followUp) => followUp.outcome === "replied").at(-1);
 	const parts: string[] = [];
@@ -204,7 +240,7 @@ export type TimelineEntry =
 
 /** Who answered: the provider by name; a bounce or our own relay is not the provider. */
 function messageTitle(route: SubmissionReportRoute, message: SubmissionReportMessage): string {
-	if (message.direction === "outbound") return message.decisionReply ? "We answered the decision" : "We wrote";
+	if (message.direction === "outbound") return message.decisionReply ? "We answered the decision" : message.moveNotice ? "We reported that the site moved" : "We wrote";
 	if (message.classification === "relay_refused") return "Our mail relay refused the report";
 	if (message.kind === "bounce" || message.classification === "bounce") return "Delivery failed";
 	return `${route.organisation} replied`;
@@ -218,7 +254,7 @@ function messageTitle(route: SubmissionReportRoute, message: SubmissionReportMes
  */
 export function routeTimeline(route: SubmissionReportRoute, siblings: readonly SubmissionReportRoute[]): TimelineEntry[] {
 	const messages = [...route.messages].sort(bySent);
-	const report = route.routeType === "email" ? messages.find((message) => message.direction === "outbound" && !message.decisionReply) : undefined;
+	const report = route.routeType === "email" ? messages.find((message) => message.direction === "outbound" && !message.decisionReply && !message.moveNotice) : undefined;
 	const reportedAt = report ? new Date(report.occurredAt) : route.outcome.sentAt ? new Date(route.outcome.sentAt) : new Date(route.createdAt);
 	const entries: TimelineEntry[] = [{
 		kind: "reported",
@@ -286,7 +322,10 @@ export type RouteEntry = { report: SubmissionReport; route: SubmissionReportRout
 
 /** Every route of every report with its standing, the strongest outcome first; ties by the earliest standing. */
 export function rankedRoutes(reports: readonly SubmissionReport[]): RouteEntry[] {
-	const entries = reports.flatMap((report) => report.routes.map((route) => ({ report, route, standing: routeStanding(route) })));
+	const entries = reports.flatMap((report) => {
+		const move = reportMove(report);
+		return report.routes.map((route) => ({ report, route, standing: routeStanding(route, move, report.allegationCategory) }));
+	});
 	return entries.sort((a, b) => routeBuckets.indexOf(a.standing.bucket) - routeBuckets.indexOf(b.standing.bucket)
 		|| (a.standing.at?.getTime() ?? Infinity) - (b.standing.at?.getTime() ?? Infinity));
 }
@@ -298,6 +337,12 @@ export type TakedownSummary = {
 	providers: number;
 	/** The strongest outcome of any route. */
 	best?: RouteEntry;
+	/**
+	 * Where a reported site moved after the report and still serves, when no
+	 * provider acted on it since: that, not an earlier action, is where the
+	 * takedown stands.
+	 */
+	moved?: { report: SubmissionReport; move: HostMove; text: string };
 	/** Reports of other cases this case's sites joined, and cases that joined this case's reports. */
 	coveredBy: string[];
 	alsoCovers: string[];
@@ -308,6 +353,11 @@ export function takedownSummary(reports: readonly SubmissionReport[], caseId?: s
 	const ranked = rankedRoutes(reports);
 	const counts = Object.fromEntries(routeBuckets.map((bucket) => [bucket, 0])) as Record<RouteBucket, number>;
 	for (const { standing } of ranked) counts[standing.bucket]++;
+	const moved = reports.flatMap((report) => {
+		const move = reportMove(report);
+		const actedSince = move && ranked.some((entry) => entry.report === report && entry.standing.bucket === "action_taken" && (entry.standing.at?.getTime() ?? 0) > new Date(move.at).getTime());
+		return move && !actedSince ? [{ report, move, text: hostMoveText(move, report.allegationCategory) }] : [];
+	})[0];
 	const coveredBy = [...new Set(reports.filter((report) => caseId !== undefined && report.submissionId !== null && String(report.submissionId) !== caseId).map((report) => String(report.submissionId)))];
 	const alsoCovers = [...new Set(reports.flatMap((report) => report.joinedCases.map(String)))].filter((id) => id !== caseId);
 	return {
@@ -316,6 +366,7 @@ export function takedownSummary(reports: readonly SubmissionReport[], caseId?: s
 		targets: new Set(reports.map((report) => report.target ?? String(report.id))).size,
 		providers: new Set(ranked.map(({ route }) => route.organisation)).size,
 		...(ranked[0] ? { best: ranked[0] } : {}),
+		...(moved ? { moved } : {}),
 		coveredBy,
 		alsoCovers,
 	};

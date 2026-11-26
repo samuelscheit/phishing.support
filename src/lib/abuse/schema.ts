@@ -102,6 +102,8 @@ export const abuseJobTypes = [
 	"describe_campaign",
 	/** Visit a reported site on its schedule after the report and record whether it is still up. */
 	"check_site_liveness",
+	/** Tell the new host, the CDN the site left and the registrar that a reported site moved and still serves what was reported. */
+	"report_host_move",
 ] as const;
 export type AbuseJobType = (typeof abuseJobTypes)[number];
 

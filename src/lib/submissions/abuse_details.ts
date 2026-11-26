@@ -6,7 +6,11 @@ import type { AbuseJobType, AbuseMailClassification, AbuseProviderRoute, AbuseRe
 import { describeDecisionFollowUp, type DecisionFollowUpSummary } from "@/lib/abuse/followup/describe";
 import { asRecord } from "../util/values";
 import { parseFunnelPartyTarget, type FunnelPartyTarget } from "@/lib/abuse/funnel/target";
-import { cleanMailText, type CleanMailText } from "@/lib/abuse/mail/clean_text";
+import type { CleanMailText } from "@/lib/abuse/mail/clean_text";
+import { readProviderMessage, type ReadMessage } from "@/lib/abuse/providers/message_decision";
+import { listSiteChecksForReport } from "@/lib/liveness/repository";
+import { hostMovesOf, type HostMove } from "@/lib/liveness/moves";
+import type { SiteCheckState } from "@/lib/liveness/schema";
 import type { ProviderDecision } from "@/lib/abuse/providers/submission_contracts";
 import { organisationOf, type Organisation } from "@/lib/provider_stats/organisation";
 import { roleOf, type ProviderRole } from "@/lib/provider_stats/role";
@@ -29,7 +33,7 @@ export type SubmissionReportMessage = {
 	/** The body as clean text, with our report as the provider quoted it back split off; null for a review-state record or an empty body. */
 	text: CleanMailText | null;
 	/** A review state the provider's API reported ("accepted", "denied" with its reason), recorded by our poll: no message of the provider's own. */
-	providerState: { state: string; detail: string | null } | null;
+	providerState: ReadMessage["providerState"];
 	/** What the provider decided, as this message or state says it, read by the provider's own rules. */
 	decision: ProviderDecision | null;
 	messageId: string | null;
@@ -38,6 +42,8 @@ export type SubmissionReportMessage = {
 	attachmentArtifactIds: string[];
 	/** An outbound answer to a provider's review decision, not the report itself. */
 	decisionReply: boolean;
+	/** An outbound message telling the provider that the reported site moved (abuse/host_move). */
+	moveNotice: boolean;
 	occurredAt: Date;
 };
 
@@ -145,6 +151,10 @@ export type SubmissionReport = {
 	updatedAt: Date;
 	routes: SubmissionReportRoute[];
 	artifacts: SubmissionReportArtifact[];
+	/** Where the reported site moved after the report, oldest first (liveness/host_move.ts). */
+	hostMoves: HostMove[];
+	/** The latest liveness check of the reported site, when there was one. */
+	latestCheck: { state: SiteCheckState; checkedAt: Date } | null;
 };
 
 /**
@@ -193,7 +203,7 @@ function providerReportBody(params: {
 }
 
 async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionReport> {
-	const [targets, routes, runs, messages, artifacts, events, joinedCases, queuedJobs] = await Promise.all([
+	const [targets, routes, runs, messages, artifacts, events, joinedCases, queuedJobs, checks] = await Promise.all([
 		AbuseRepository.listTargets(report.id),
 		AbuseRepository.listRoutes(report.id),
 		AbuseRepository.listProviderRunsForReport(report.id),
@@ -202,6 +212,7 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 		AbuseRepository.listEvents(report.id),
 		AbuseRepository.listJoinedCases(report.id),
 		AbuseRepository.listQueuedJobsForReport(report.id),
+		listSiteChecksForReport(report.id),
 	]);
 	const followUpsByRoute = new Map<bigint, DecisionFollowUpSummary[]>();
 	for (const event of events) {
@@ -222,14 +233,7 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 
 	/** A stored message as the case page shows it: its text cleaned, a review state told apart, and the decision it states. */
 	const messageView = (route: AbuseProviderRoute, message: (typeof messages)[number]): SubmissionReportMessage => {
-		const provider = getProviderSubmissionProvider(route.providerRegistryKey);
-		const providerState = message.correlationKey?.startsWith(`provider-api:${route.providerRegistryKey}:status:`)
-			? { state: (message.subject ?? "").replace(/^Report status:\s*/, ""), detail: message.textBody || null }
-			: null;
-		const text = !providerState && message.textBody?.trim() ? cleanMailText(message.textBody) : null;
-		const decision = message.direction !== "inbound" || !provider?.decisionOf ? undefined
-			: providerState ? provider.decisionOf({ state: providerState.state, ...(providerState.detail ? { detail: providerState.detail } : {}) })
-			: text ? provider.decisionOf({ text: text.main }) : undefined;
+		const { providerState, text, decision } = readProviderMessage(route, message);
 		return {
 			id: message.id,
 			direction: message.direction,
@@ -247,11 +251,14 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 			rawArtifactId: message.rawArtifactId,
 			attachmentArtifactIds: message.attachmentArtifactIds,
 			decisionReply: message.direction === "outbound" && Boolean(message.correlationKey?.startsWith("decision-follow-up:")),
+			moveNotice: message.direction === "outbound" && Boolean(message.correlationKey?.startsWith("host-move:")),
 			occurredAt: message.occurredAt,
 		};
 	};
 
 	const funnelParty = report.idempotencyKey?.startsWith("funnel:") && targets[0] ? parseFunnelPartyTarget(targets[0].normalizedTarget) : undefined;
+	const siteTarget = targets[0]?.id;
+	const latestCheck = checks.findLast((check) => check.targetId === siteTarget);
 	return {
 		id: report.id,
 		submissionId: report.submissionId,
@@ -325,6 +332,8 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 				};
 			}),
 		artifacts,
+		hostMoves: hostMovesOf(events).filter((move) => move.targetId === String(siteTarget)),
+		latestCheck: latestCheck ? { state: latestCheck.state, checkedAt: latestCheck.checkedAt } : null,
 	};
 }
 
