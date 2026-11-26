@@ -178,7 +178,7 @@ export function nextStep(route: SubmissionReportRoute, standing: RouteStanding, 
 	}
 	if (standing.bucket === "declined") {
 		const latest = decisionOf(route.messages)?.decision;
-		if (latest?.outcome === "no_threat") parts.push(`${route.organisation}'s automatic scan found no threat.`);
+		if (latest?.outcome === "no_threat" && !answered) parts.push(`Nothing more is planned: ${route.organisation}'s automatic scan found no threat.`);
 		if (answered) parts.push(`We answered with evidence at ${shortUtc(answered.occurredAt, reference)} UTC; awaiting ${route.organisation}'s review.`);
 	}
 	const answer = next("decision_answer");
@@ -187,7 +187,7 @@ export function nextStep(route: SubmissionReportRoute, standing: RouteStanding, 
 	if (sending && standing.bucket === "waiting") parts.push(`Sending at ${shortUtc(sending.at, reference)} UTC.`);
 	const check = next("status_check");
 	if (check) parts.push(`Next status check at ${shortUtc(check.at, reference)} UTC.`);
-	if (standing.bucket === "waiting" && route.routeType === "email" && !parts.length && standing.label === "Awaiting reply") parts.push(`No reply from ${route.organisation} yet.`);
+	if (standing.bucket === "waiting" && route.routeType === "email" && !parts.length && standing.label === "Awaiting reply") parts.push(`Nothing more is planned until ${route.organisation} replies; its reply is read automatically.`);
 	return parts.length ? parts.join(" ") : undefined;
 }
 

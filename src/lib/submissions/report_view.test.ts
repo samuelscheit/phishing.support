@@ -58,8 +58,8 @@ describe("the reports of case 384401854580134038 as the case page reads them", (
 		const next = (route: SubmissionReportRoute) => nextStep(route, routeStanding(route), site!.createdAt);
 		expect(next(by(payloadHost!.routes, "Cloudflare"))).toBe("Looking for the report in Cloudflare's list of received reports at 19:20 UTC.");
 		expect(next(by(payloadHost!.routes, "Eranet"))).toBe("Next status check at 20:05 UTC.");
-		expect(next(by(site!.routes, "Netcraft"))).toBe("Netcraft's automatic scan found no threat.");
-		expect(next(by(site!.routes, "Sollutium-NL"))).toBe("No reply from Sollutium-NL yet.");
+		expect(next(by(site!.routes, "Netcraft"))).toBe("Nothing more is planned: Netcraft's automatic scan found no threat.");
+		expect(next(by(site!.routes, "Sollutium-NL"))).toBe("Nothing more is planned until Sollutium-NL replies; its reply is read automatically.");
 		// A settled route has nothing next.
 		expect(next(by(site!.routes, "Cloudflare"))).toBeUndefined();
 	});
