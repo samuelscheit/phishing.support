@@ -8,10 +8,10 @@ import type { CDPSession, Page } from "rebrowser-puppeteer-core";
  * starts watching and then each new one, at most as often as it asked for.
  */
 
-/** One frame: a base64 JPEG and the page's CSS size it shows, which input coordinates are in. */
-export type LiveFrame = { jpeg: string; url: string; width: number; height: number };
+import type { ScreenQuality } from "./live_protocol";
 
-export type ScreenQuality = "low" | "high";
+/** One frame: a JPEG and the page's CSS size it shows, which input coordinates are in. */
+export type LiveFrame = { jpeg: Uint8Array; url: string; width: number; height: number };
 
 const QUALITY: Record<ScreenQuality, { fps: number; screencast: { quality: number; maxWidth: number; maxHeight: number; everyNthFrame: number } }> = {
 	low: { fps: 3, screencast: { quality: 55, maxWidth: 960, maxHeight: 720, everyNthFrame: 2 } },
@@ -26,6 +26,9 @@ function deliver(viewer: Viewer, frame: LiveFrame): void {
 	viewer.skipped = undefined;
 	viewer.show(frame);
 }
+/** A screencast sends frames only when the page paints: a still page gets one screenshot as its first frame after this long. */
+const FIRST_FRAME_MS = 250;
+
 type ScreenTab = { session: CDPSession; page: Page };
 type Running = { tab: ScreenTab; quality: ScreenQuality; stop: () => Promise<void> };
 type ScreencastFrame = { data: string; sessionId: number; metadata: { deviceWidth: number; deviceHeight: number } };
@@ -103,25 +106,32 @@ export class LiveScreen {
 		return this.#changes;
 	}
 
+	/** A frame for every viewer, each at its own rate: one it has to skip now reaches it later unless a newer one does. */
+	#show(shown: LiveFrame): void {
+		this.#latest = shown;
+		const now = Date.now();
+		for (const viewer of this.#viewers) {
+			const wait = viewer.lastAt + 1_000 / QUALITY[viewer.quality].fps - now;
+			if (wait <= 0) {
+				deliver(viewer, shown);
+				continue;
+			}
+			viewer.skipped = shown;
+			viewer.timer ??= setTimeout(() => {
+				viewer.timer = undefined;
+				if (viewer.skipped && this.#viewers.has(viewer)) deliver(viewer, viewer.skipped);
+			}, wait);
+		}
+	}
+
 	async #start(tab: ScreenTab, quality: ScreenQuality): Promise<Running> {
 		const { session, page } = tab;
+		let painted = false;
+		let stopped = false;
 		const onFrame = (frame: ScreencastFrame) => {
 			void session.send("Page.screencastFrameAck", { sessionId: frame.sessionId }).catch(() => undefined);
-			const shown: LiveFrame = { jpeg: frame.data, url: page.url(), width: Math.round(frame.metadata.deviceWidth), height: Math.round(frame.metadata.deviceHeight) };
-			this.#latest = shown;
-			const now = Date.now();
-			for (const viewer of this.#viewers) {
-				const wait = viewer.lastAt + 1_000 / QUALITY[viewer.quality].fps - now;
-				if (wait <= 0) {
-					deliver(viewer, shown);
-					continue;
-				}
-				viewer.skipped = shown;
-				viewer.timer ??= setTimeout(() => {
-					viewer.timer = undefined;
-					if (viewer.skipped && this.#viewers.has(viewer)) deliver(viewer, viewer.skipped);
-				}, wait);
-			}
+			painted = true;
+			this.#show({ jpeg: Buffer.from(frame.data, "base64"), url: page.url(), width: Math.round(frame.metadata.deviceWidth), height: Math.round(frame.metadata.deviceHeight) });
 		};
 		session.on("Page.screencastFrame", onFrame);
 		try {
@@ -130,13 +140,34 @@ export class LiveScreen {
 			session.off("Page.screencastFrame", onFrame);
 			throw error;
 		}
+		const firstFrame = setTimeout(() => {
+			void stillFrame(tab, quality).then((frame) => {
+				if (frame && !painted && !stopped) this.#show(frame);
+			}, () => undefined);
+		}, FIRST_FRAME_MS);
 		return {
 			tab,
 			quality,
 			stop: async () => {
+				stopped = true;
+				clearTimeout(firstFrame);
 				session.off("Page.screencastFrame", onFrame);
 				await session.send("Page.stopScreencast").catch(() => undefined);
 			},
 		};
 	}
+}
+
+/** The visible part of a still page, as the screencast would have sent it: the same JPEG quality, scaled into the same bounds. */
+async function stillFrame({ session, page }: ScreenTab, quality: ScreenQuality): Promise<LiveFrame | undefined> {
+	const { cssVisualViewport: view } = await session.send("Page.getLayoutMetrics");
+	if (!(view.clientWidth > 0) || !(view.clientHeight > 0)) return undefined;
+	const { maxWidth, maxHeight, quality: jpegQuality } = QUALITY[quality].screencast;
+	const scale = Math.min(1, maxWidth / view.clientWidth, maxHeight / view.clientHeight);
+	const { data } = await session.send("Page.captureScreenshot", {
+		format: "jpeg",
+		quality: jpegQuality,
+		clip: { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale },
+	});
+	return { jpeg: Buffer.from(data, "base64"), url: page.url(), width: Math.round(view.clientWidth), height: Math.round(view.clientHeight) };
 }

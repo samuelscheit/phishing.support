@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium as patchrightChromium, type Browser as PatchrightBrowser } from "patchright";
 import puppeteer, { type Browser } from "rebrowser-puppeteer-core";
 
+import { localChromium as chromiumExecutable } from "../local_chromium";
 import type { ChatModel, ChatRequest } from "./agent";
 import type { ChatResponse, ToolCall } from "browser-fabric/packages/task-agent/src/index";
 
@@ -14,8 +15,6 @@ import type { ChatResponse, ToolCall } from "browser-fabric/packages/task-agent/
  * the agent's turns by reading element refs from each observation.
  */
 
-const chromiumExecutable = process.env.PHISHING_TEST_CHROMIUM
-	?? `${homedir()}/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 export const chromiumAvailable = await Bun.file(chromiumExecutable).exists();
 
 /**

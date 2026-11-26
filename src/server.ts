@@ -1,4 +1,5 @@
 import next from "next";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createServer } from "node:http";
 
 import { SubmissionsEntity } from "./lib/db/entities/submissions";
@@ -12,6 +13,13 @@ const dev = process.env.NODE_ENV !== "production";
 const parsedPort = Number.parseInt(process.env.PORT ?? "", 10);
 const port = parsedPort > 0 ? parsedPort : 3000;
 const hostname = process.env.HOSTNAME ?? (dev ? "localhost" : "0.0.0.0");
+
+// next-ws upgrades WebSocket routes on this server. The `next` CLI sets AsyncLocalStorage up itself; a custom
+// server has to, before next-ws loads (it reads it on import, hence the import after).
+(globalThis as { AsyncLocalStorage?: typeof AsyncLocalStorage }).AsyncLocalStorage = AsyncLocalStorage;
+const server = createServer();
+const { setHttpServer } = await import("next-ws/server");
+setHttpServer(server);
 
 const app = next({ dev, hostname, port, customServer: true });
 const handler = app.getRequestHandler();
@@ -50,7 +58,7 @@ try {
 	console.error("Mailbox listener failed to start:", err);
 }
 
-const server = createServer((req, res) => {
+server.on("request", (req, res) => {
 	try {
 		handler(req, res);
 	} catch (err) {

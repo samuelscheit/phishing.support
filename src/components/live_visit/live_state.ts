@@ -18,6 +18,9 @@ export type LiveEntry =
 export type LiveTab = { targetId: string; url: string; title: string; active: boolean };
 
 export type LiveControl = {
+	/** The visit, and the state's place among its states: an older state (heard late on the other channel) never replaces a newer one. */
+	run: string;
+	seq: number;
 	mode: VisitMode;
 	controller?: string;
 	until?: string;
@@ -52,6 +55,8 @@ function controlOf(source: Record<string, unknown>): LiveControl | undefined {
 	});
 	const fakeValues = Object.fromEntries(Object.entries(record(source.fakeValues) ?? {}).filter(([, value]) => typeof value === "string" && value)) as LiveControl["fakeValues"];
 	return {
+		run: text(source, "run"),
+		seq: typeof source.seq === "number" && Number.isFinite(source.seq) ? source.seq : 0,
 		mode,
 		...(optionalText(source, "controller") ? { controller: text(source, "controller") } : {}),
 		...(optionalText(source, "until") ? { until: text(source, "until") } : {}),
@@ -83,7 +88,9 @@ export function reduceLiveEvent(state: LiveEvents, message: unknown): LiveEvents
 	if (source.type === "connected") return { ...EMPTY_LIVE_EVENTS, ...(state.control ? { control: state.control } : {}) };
 	if (source.type === "browser.control") {
 		const control = controlOf(source);
-		return control ? { ...state, control } : state;
+		const current = state.control;
+		const newer = control && (!current || current.run !== control.run || control.seq > current.seq);
+		return newer ? { ...state, control } : state;
 	}
 	if (source.type === "analysis.step") {
 		return source.step === "completed" || source.step === "failed" || source.progress === 100 ? { ...state, finished: true } : state;
@@ -106,33 +113,12 @@ export type DriverStatus =
 	| { kind: "other"; label: string }
 	| { kind: "ended" };
 
-/**
- * Who drives, for this viewer: `mine` holds when the viewer's take succeeded
- * and the stream names it (or does not name anyone else) as the controller.
- */
-export function driverStatus(control: LiveControl | undefined, viewer: { label?: string; driving: boolean }): DriverStatus {
+/** Who drives, for this viewer; `you`: the visit's socket says this viewer drives (or is about to). */
+export function driverStatus(control: LiveControl | undefined, you: boolean): DriverStatus {
 	if (!control || control.mode === "ended") return { kind: "ended" };
-	const mine = viewer.driving && (!control.controller || !viewer.label || control.controller === viewer.label);
-	if (control.mode === "pausing") return { kind: "pausing", mine, ...(control.controller ? { label: control.controller } : {}) };
-	if (control.mode === "human") return mine ? { kind: "you" } : { kind: "other", label: control.controller ?? "Someone" };
+	if (control.mode === "pausing") return { kind: "pausing", mine: you, ...(control.controller ? { label: control.controller } : {}) };
+	if (control.mode === "human") return you ? { kind: "you" } : { kind: "other", label: control.controller ?? "Someone" };
 	return control.agentRunning ? { kind: "agent" } : { kind: "finishing" };
-}
-
-/** What a viewer holds of the controls: the token its take returned, and whether the stream has named it the driver since. */
-export type DriverToken = { token?: string; confirmed: boolean };
-
-/**
- * The token after a control state arrives. A take's answer can beat the
- * stream's control event, so a token is only dropped once the stream named
- * this viewer the driver and later names someone else or nobody.
- */
-export function reconcileToken(held: DriverToken, control: LiveControl | undefined, label: string | undefined): DriverToken {
-	if (!held.token) return { confirmed: false };
-	if (!control || control.mode === "ended") return { confirmed: false };
-	const holding = control.mode === "pausing" || control.mode === "human";
-	const named = holding && (label === undefined ? Boolean(control.controller) : control.controller === label);
-	if (named) return held.confirmed ? held : { ...held, confirmed: true };
-	return held.confirmed ? { confirmed: false } : held;
 }
 
 /** The deadline a driver sees: when the turn ends without input, or at the latest, whichever comes first. */

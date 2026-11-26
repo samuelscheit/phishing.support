@@ -1,15 +1,25 @@
 "use client";
 
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 
+import { liveSocketPath, type ScreenQuality } from "@/lib/site_visit/live_protocol";
+import { LiveChannel } from "./live_channel";
 import { EMPTY_LIVE_EVENTS, isLive, reduceLiveEvent, type LiveEvents } from "./live_state";
 
 /** A frame of the live screen, ready to show: `width` × `height` is the page's CSS size, which input coordinates are in. */
 export type LiveFrame = { src: string; url: string; width: number; height: number };
-export type ScreenQuality = "low" | "high";
 
-/** How long a refused screen connection waits before it tries again while the visit is still live. */
-const SCREEN_RETRY_MS = 2_000;
+/** Where this browser tab keeps its viewer id: a reload keeps the controls, another tab is another viewer. */
+const VIEWER_KEY = "liveVisitViewer";
+
+/** This tab's viewer id: its key to the controls, never shown. */
+function viewerId(): string {
+	const stored = sessionStorage.getItem(VIEWER_KEY);
+	if (stored && /^[A-Za-z0-9-]{16,64}$/.test(stored)) return stored;
+	const created = crypto.randomUUID();
+	sessionStorage.setItem(VIEWER_KEY, created);
+	return created;
+}
 
 function parse(data: string): unknown {
 	try {
@@ -19,46 +29,62 @@ function parse(data: string): unknown {
 	}
 }
 
-/** The live screen while the visit is live: one connection, swapped when the quality changes. */
-function useLiveScreen(submissionId: string, live: boolean, quality: ScreenQuality) {
+/**
+ * The visit's socket while it is live: the screen as object URLs of its
+ * frames (the one before the shown one is let go), the control state, and
+ * whether this viewer drives.
+ */
+function useLiveChannel(submissionId: string, live: boolean, quality: ScreenQuality, dispatch: (message: unknown) => void) {
+	const [channel, setChannel] = useState<LiveChannel>();
+	const [connected, setConnected] = useState(false);
+	const [you, setYou] = useState(false);
 	const [frame, setFrame] = useState<LiveFrame | null>(null);
+	const qualityRef = useRef(quality);
+	qualityRef.current = quality;
+
 	useEffect(() => {
 		if (!live) return;
-		let source: EventSource | undefined;
-		let retry: ReturnType<typeof setTimeout> | undefined;
-		let stopped = false;
-		const open = () => {
-			source = new EventSource(`/api/live/${encodeURIComponent(submissionId)}/screen?quality=${quality}`);
-			source.onmessage = (event: MessageEvent<string>) => {
-				const parsed = parse(event.data) as Partial<{ jpeg: string; url: string; width: number; height: number }> | undefined;
-				if (!parsed || typeof parsed.jpeg !== "string" || !(Number(parsed.width) > 0) || !(Number(parsed.height) > 0)) return;
-				setFrame({ src: `data:image/jpeg;base64,${parsed.jpeg}`, url: typeof parsed.url === "string" ? parsed.url : "", width: Number(parsed.width), height: Number(parsed.height) });
-			};
-			source.addEventListener("end", () => {
-				stopped = true;
-				source?.close();
-			});
-			// A refused connection (404 while the visit is not live yet) is not retried by the browser itself.
-			source.onerror = () => {
-				if (stopped || source?.readyState !== EventSource.CLOSED) return;
-				retry = setTimeout(open, SCREEN_RETRY_MS);
-			};
-		};
-		open();
+		const urls: string[] = [];
+		const viewer = viewerId();
+		const opened = new LiveChannel({
+			url: (current) => liveSocketPath(submissionId, viewer, current),
+			quality: qualityRef.current,
+			handlers: {
+				onFrame: (meta, jpeg) => {
+					const src = URL.createObjectURL(new Blob([jpeg as Uint8Array<ArrayBuffer>], { type: "image/jpeg" }));
+					urls.push(src);
+					// The shown frame stays valid until the next one replaced it on screen.
+					while (urls.length > 2) URL.revokeObjectURL(urls.shift()!);
+					setFrame({ src, ...meta });
+				},
+				onControl: (control) => {
+					setYou(control.you);
+					dispatch(control);
+				},
+				onConnected: setConnected,
+				onEnd: () => setYou(false),
+			},
+		});
+		setChannel(opened);
 		return () => {
-			stopped = true;
-			clearTimeout(retry);
-			source?.close();
+			opened.close();
+			setChannel(undefined);
+			setConnected(false);
+			setYou(false);
+			// The last frame stays on screen after the visit; only the one before it is let go.
+			while (urls.length > 1) URL.revokeObjectURL(urls.shift()!);
 		};
-	}, [submissionId, live, quality]);
-	return frame;
+	}, [submissionId, live, dispatch]);
+
+	useEffect(() => channel?.setQuality(quality), [channel, quality]);
+	return { channel, connected, you, frame };
 }
 
 /**
- * A case's live visit while it runs: its log and control state from the
- * case's event stream, and its screen while people can watch it. The screen
- * is small until someone asks for the sharp one (`setQuality("high")`: full
- * screen or driving).
+ * A case's live visit while it runs: its log from the case's event stream,
+ * and while people can watch it, its socket: the screen, the control state
+ * and the controls. The screen is small until someone asks for the sharp
+ * one (`setQuality("high")`: full screen or driving).
  */
 export function useLiveVisit(submissionId: string, enabled: boolean) {
 	const [events, dispatch] = useReducer(reduceLiveEvent, EMPTY_LIVE_EVENTS);
@@ -70,8 +96,8 @@ export function useLiveVisit(submissionId: string, enabled: boolean) {
 		return () => source.close();
 	}, [submissionId, enabled]);
 	const live = enabled && isLive(events);
-	const frame = useLiveScreen(submissionId, live, quality);
-	return { submissionId, ...events, live, frame, setQuality } satisfies LiveVisit;
+	const { channel, connected, you, frame } = useLiveChannel(submissionId, live, quality, dispatch);
+	return { submissionId, ...events, live, frame, you, channel, connected, setQuality } satisfies LiveVisit;
 }
 
 /** A live visit as its views take it: what `useLiveVisit` returns, or a fixture. */
@@ -81,5 +107,10 @@ export type LiveVisit = LiveEvents & {
 	live: boolean;
 	/** The newest frame of the screen; kept after the visit ended. */
 	frame: LiveFrame | null;
+	/** This viewer drives the browser (or is about to). */
+	you: boolean;
+	/** The visit's socket while it is live. */
+	channel?: LiveChannel;
+	connected: boolean;
 	setQuality: (quality: ScreenQuality) => void;
 };

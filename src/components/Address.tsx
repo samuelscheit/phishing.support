@@ -9,12 +9,9 @@ import { cn } from "@/lib/util/cn";
  * only after a "/". `bare` shows the host alone.
  */
 export function Address({ url, className, bare = false }: { url: string; className?: string; bare?: boolean }) {
-	let parsed: URL;
-	try {
-		parsed = new URL(url);
-	} catch {
-		return <span className={cn("font-mono text-muted-foreground", className)}>{url || "about:blank"}</span>;
-	}
+	const parsed = URL.parse(url);
+	// No host to tell real from fake (about:, data:, blob:, or no address at all): the address as it is.
+	if (!parsed?.host) return <span className={cn("font-mono text-muted-foreground", className)}>{url || "about:blank"}</span>;
 	const domain = getDomain(parsed.hostname, { allowPrivateDomains: false }) ?? parsed.hostname;
 	const subdomain = parsed.host.slice(0, parsed.host.length - domain.length - (parsed.port ? parsed.port.length + 1 : 0));
 	const rest = `${parsed.pathname}${parsed.search}${parsed.hash}`;

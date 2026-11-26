@@ -58,11 +58,10 @@ describe.skipIf(!chromiumAvailable)("a person driving a live visit, in a real br
 		const canaries = createExfiltrationCanaries();
 		const live: SiteVisitLiveEvent[] = [];
 		const control: VisitControl = openVisitControl("e2e-takeover", (event) => live.push(event));
-		let token = "";
 		const model = new ScriptedModel([
 			// The person takes over while the agent is still thinking about the sign-in.
 			async (_page, request) => {
-				token = (control.take(VIEWER) as { token: string }).token;
+				expect(control.take(VIEWER)).toEqual({ ok: true });
 				// The model call was dropped the moment the person took over.
 				expect(request.signal?.aborted).toBe(true);
 				throw request.signal!.reason;
@@ -86,10 +85,10 @@ describe.skipIf(!chromiumAvailable)("a person driving a live visit, in a real br
 			expect(frame!.url).toBe(url);
 			expect(frame!.width).toBeGreaterThan(400);
 			expect(frame!.height).toBeGreaterThan(300);
-			expect(Buffer.from(frame!.jpeg, "base64").subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]));
+			expect(Buffer.from(frame!.jpeg).subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]));
 
-			expect(await control.input(VIEWER, token, [...click(40, 35), ...key("a"), ...key("l"), ...key("i"), ...key("x")])).toEqual({ ok: true });
-			expect(await control.input(VIEWER, token, [
+			expect(await control.input(VIEWER, [...click(40, 35), ...key("a"), ...key("l"), ...key("i"), ...key("x")])).toEqual({ ok: true });
+			expect(await control.input(VIEWER, [
 				{ type: "key", phase: "down", key: "Backspace", code: "Backspace", keyCode: 8, modifiers: 0 },
 				{ type: "text", text: "ce" },
 				...click(40, 85),
@@ -98,8 +97,8 @@ describe.skipIf(!chromiumAvailable)("a person driving a live visit, in a real br
 			])).toEqual({ ok: true });
 			await until(() => posts.length === 1, "the sign-in to be posted");
 			await sleep(4_500);
-			expect(await control.input(VIEWER, token, [{ type: "capture" }])).toEqual({ ok: true });
-			expect(await control.release(VIEWER, token, "signed in, the card step is next")).toEqual({ ok: true });
+			expect(await control.input(VIEWER, [{ type: "capture" }])).toEqual({ ok: true });
+			expect(await control.release(VIEWER, "signed in, the card step is next")).toEqual({ ok: true });
 			stopWatching();
 
 			const recording = await visiting;

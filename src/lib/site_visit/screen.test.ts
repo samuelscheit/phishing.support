@@ -5,6 +5,9 @@ import type { CDPSession, Page } from "rebrowser-puppeteer-core";
 import { LiveScreen, type LiveFrame } from "./screen";
 import { sleep } from "../util/sleep";
 
+/** The fake frames carry their name as their JPEG bytes. */
+const named = (frame: LiveFrame) => Buffer.from(frame.jpeg).toString();
+
 /** A tab whose screencast the test plays frame by frame. */
 function fakeTab(url = "https://kit.example/") {
 	const sent: Array<{ method: string; params?: Record<string, unknown> }> = [];
@@ -24,7 +27,7 @@ function fakeTab(url = "https://kit.example/") {
 			const starts = sent.filter((call) => call.method === "Page.startScreencast").length;
 			return starts > sent.filter((call) => call.method === "Page.stopScreencast").length;
 		},
-		frame: (data = "AAAA") => session.emit("Page.screencastFrame", { data, sessionId: ++frameId, metadata: { deviceWidth: 1920.4, deviceHeight: 963, offsetTop: 0, pageScaleFactor: 1 } }),
+		frame: (name = "AAAA") => session.emit("Page.screencastFrame", { data: Buffer.from(name).toString("base64"), sessionId: ++frameId, metadata: { deviceWidth: 1920.4, deviceHeight: 963, offsetTop: 0, pageScaleFactor: 1 } }),
 	};
 }
 
@@ -56,6 +59,36 @@ describe("the live screen of a visit", () => {
 		await settle();
 		expect(first.running()).toBe(false);
 		expect(first.started()).toHaveLength(4);
+	});
+
+	test("a still page (no paint, so no screencast frame) shows a screenshot as its first frame, as large and sharp as the screencast's", async () => {
+		const screen = new LiveScreen();
+		const still = fakeTab();
+		const send = still.tab.session.send.bind(still.tab.session);
+		(still.tab.session as unknown as { send: typeof send }).send = (async (method: string, params?: Record<string, unknown>) => {
+			await send(method as never, params as never);
+			if (method === "Page.getLayoutMetrics") return { cssVisualViewport: { pageX: 0, pageY: 640, clientWidth: 1280, clientHeight: 800 } };
+			if (method === "Page.captureScreenshot") return { data: Buffer.from("STILL").toString("base64") };
+			return {};
+		}) as typeof send;
+		await screen.show(still.tab);
+		const seen: LiveFrame[] = [];
+		screen.watch((frame) => seen.push(frame), "low");
+		await sleep(400);
+		expect(seen).toEqual([{ jpeg: Buffer.from("STILL"), url: "https://kit.example/", width: 1280, height: 800 }]);
+		expect(still.sent.find((call) => call.method === "Page.captureScreenshot")?.params).toEqual({ format: "jpeg", quality: 55, clip: { x: 0, y: 640, width: 1280, height: 800, scale: 0.75 } });
+
+		// A page that paints in time needs none.
+		const painting = fakeTab();
+		const other = new LiveScreen();
+		await other.show(painting.tab);
+		other.watch(() => undefined, "low");
+		await settle();
+		painting.frame("F0");
+		await sleep(400);
+		expect(painting.sent.some((call) => call.method === "Page.captureScreenshot")).toBe(false);
+		await screen.close();
+		await other.close();
 	});
 
 	test("a tab that refused its screencast once gets it again on the next poll", async () => {
@@ -100,19 +133,19 @@ describe("the live screen of a visit", () => {
 		await settle();
 		for (let index = 0; index < 5; index += 1) tab.frame(`F${index}`);
 		expect(tab.sent.filter((call) => call.method === "Page.screencastFrameAck")).toHaveLength(5);
-		expect(low.map((frame) => frame.jpeg)).toEqual(["F0"]);
-		expect(high.map((frame) => frame.jpeg)).toEqual(["F0"]);
-		expect(low[0]).toEqual({ jpeg: "F0", url: "https://kit.example/", width: 1920, height: 963 });
+		expect(low.map(named)).toEqual(["F0"]);
+		expect(high.map(named)).toEqual(["F0"]);
+		expect(low[0]).toEqual({ jpeg: Buffer.from("F0"), url: "https://kit.example/", width: 1920, height: 963 });
 		// The page stays still after F4: both still get it, each when its rate allows.
 		await sleep(90);
-		expect(high.map((frame) => frame.jpeg)).toEqual(["F0", "F4"]);
-		expect(low.map((frame) => frame.jpeg)).toEqual(["F0"]);
+		expect(high.map(named)).toEqual(["F0", "F4"]);
+		expect(low.map(named)).toEqual(["F0"]);
 		await sleep(300);
-		expect(low.map((frame) => frame.jpeg)).toEqual(["F0", "F4"]);
+		expect(low.map(named)).toEqual(["F0", "F4"]);
 
 		const late: LiveFrame[] = [];
 		screen.watch((frame) => late.push(frame), "low");
-		expect(late.map((frame) => frame.jpeg)).toEqual(["F4"]);
+		expect(late.map(named)).toEqual(["F4"]);
 	});
 
 	test("a viewer that stops watching gets no frame it skipped; a closed screen stops and says it ended", async () => {
@@ -126,7 +159,7 @@ describe("the live screen of a visit", () => {
 		tab.frame("F1");
 		stop();
 		await sleep(400);
-		expect(seen.map((frame) => frame.jpeg)).toEqual(["F0"]);
+		expect(seen.map(named)).toEqual(["F0"]);
 
 		screen.watch(() => undefined, "high");
 		await settle();

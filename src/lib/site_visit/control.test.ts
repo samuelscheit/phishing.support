@@ -82,13 +82,23 @@ async function agentPauses(control: VisitControl) {
 }
 
 describe("who drives a live visit", () => {
-	test("one person at a time: the first to take it drives; another is told who; the driver taking again keeps its token", () => {
+	test("one person at a time: the first to take it drives; another is told who; the driver taking again keeps its turn", () => {
 		const { control, events } = attached();
-		const taken = control.take(ALICE);
-		expect(taken).toEqual({ ok: true, token: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+		const heard: VisitControlEvent[] = [];
+		const unsubscribe = control.subscribe((state) => heard.push(state));
+		expect(control.take(ALICE)).toEqual({ ok: true });
 		expect(control.take(BOB)).toEqual({ ok: false, status: 409, error: `${viewerLabel(ALICE)} is driving the browser.` });
-		expect(control.take(ALICE)).toEqual(taken);
+		expect(control.take(ALICE)).toEqual({ ok: true });
+		expect(control.drives(ALICE)).toBe(true);
+		expect(control.drives(BOB)).toBe(false);
 		expect(control.mode).toBe("pausing");
+		// Subscribers hear what the case's stream hears, and `state` is the latest of it.
+		expect(heard).toEqual(events.slice(-heard.length));
+		expect(control.state).toEqual(events.at(-1)!);
+		const before = heard.length;
+		unsubscribe();
+		control.publishState();
+		expect(heard.length).toBe(before);
 		expect(events.at(-1)).toMatchObject({ type: "browser.control", mode: "pausing", controller: viewerLabel(ALICE), agentRunning: true });
 		// A viewer is named by a hash of its id, never by the id that holds the controls.
 		expect(JSON.stringify(events)).not.toContain(ALICE);
@@ -97,14 +107,14 @@ describe("who drives a live visit", () => {
 	test("taking over interrupts the agent's turn; at its checkpoint the agent waits until the person hands back, then reads their account", async () => {
 		const { control, actions, driving, canaries } = attached();
 		const turn = control.steering.turn();
-		const { token } = control.take(ALICE) as { token: string };
+		control.take(ALICE);
 		expect(turn.aborted).toBe(true);
 		const { notes } = await agentPauses(control);
 		expect(control.mode).toBe("human");
 		let resumed = false;
 		void notes.then(() => { resumed = true; });
 
-		await control.input(ALICE, token, [
+		await control.input(ALICE, [
 			{ type: "pointer", phase: "down", x: 40, y: 50, button: "left", clickCount: 1 },
 			{ type: "pointer", phase: "up", x: 41, y: 50, button: "left", clickCount: 1 },
 			{ type: "key", phase: "down", key: "a", code: "KeyA", keyCode: 65, modifiers: 0 },
@@ -116,7 +126,7 @@ describe("who drives a live visit", () => {
 			{ type: "key", phase: "down", key: "Enter", code: "Enter", keyCode: 13, modifiers: 0 },
 		]);
 		expect(resumed).toBe(false);
-		expect(await control.release(ALICE, token, "  signed in; the card page is next  ")).toEqual({ ok: true });
+		expect(await control.release(ALICE, "  signed in; the card page is next  ")).toEqual({ ok: true });
 		const delivered = await notes;
 		expect(resumed).toBe(true);
 		expect(control.mode).toBe("agent");
@@ -146,10 +156,10 @@ describe("who drives a live visit", () => {
 
 	test("the browser's own input events reach the tab: a click is a move, a press and a release; Enter carries its text", async () => {
 		const { control, session } = attached();
-		const { token } = control.take(ALICE) as { token: string };
+		control.take(ALICE);
 		await agentPauses(control);
 		session.sent.length = 0;
-		await control.input(ALICE, token, [
+		await control.input(ALICE, [
 			{ type: "pointer", phase: "down", x: 10, y: 20, button: "left", clickCount: 1 },
 			{ type: "pointer", phase: "up", x: 10, y: 20, button: "left", clickCount: 1 },
 			{ type: "key", phase: "down", key: "Enter", code: "Enter", keyCode: 13, modifiers: 0 },
@@ -167,9 +177,9 @@ describe("who drives a live visit", () => {
 
 	test("a press that moves is a drag; history, reload, tab switch and recording a page act on the visitor's tab and are recorded", async () => {
 		const { control, actions, session, other, recorded, events } = attached();
-		const { token } = control.take(ALICE) as { token: string };
+		control.take(ALICE);
 		await agentPauses(control);
-		await control.input(ALICE, token, [
+		await control.input(ALICE, [
 			{ type: "pointer", phase: "down", x: 10, y: 20, button: "left", clickCount: 1 },
 			{ type: "pointer", phase: "move", x: 60, y: 20, button: "left", clickCount: 1 },
 			{ type: "pointer", phase: "up", x: 200, y: 22, button: "left", clickCount: 1 },
@@ -195,7 +205,7 @@ describe("who drives a live visit", () => {
 			"Switched to the tab showing https://kit.example/popup",
 		]);
 		// The next input goes to the tab the person switched to.
-		await control.input(ALICE, token, [{ type: "text", text: "x" }]);
+		await control.input(ALICE, [{ type: "text", text: "x" }]);
 		expect(other.session.sent).toContainEqual({ method: "Input.insertText", params: { text: "x" } });
 		expect(events.at(-1)?.tabs).toEqual([
 			{ targetId: "T1", url: "https://kit.example/login", title: "Sign in", active: false },
@@ -207,28 +217,28 @@ describe("who drives a live visit", () => {
 		expect(events).toHaveLength(published);
 	});
 
-	test("inputs need the driver's token, wait for the agent to pause, and are limited per second", async () => {
+	test("inputs come only from the driver, wait for the agent to pause, and are limited per second", async () => {
 		const { control } = attached();
-		expect(await control.input(ALICE, "nope", [{ type: "reload" }])).toEqual({ ok: false, status: 403, error: "You are not driving the browser." });
-		const { token } = control.take(ALICE) as { token: string };
-		expect(await control.input(BOB, token, [{ type: "reload" }])).toMatchObject({ ok: false, status: 403 });
-		expect(await control.input(ALICE, token, [{ type: "reload" }])).toMatchObject({ ok: false, status: 409, error: expect.stringContaining("finishing its action") });
+		expect(await control.input(ALICE, [{ type: "reload" }])).toEqual({ ok: false, status: 403, error: "You are not driving the browser." });
+		control.take(ALICE);
+		expect(await control.input(BOB, [{ type: "reload" }])).toMatchObject({ ok: false, status: 403 });
+		expect(await control.input(ALICE, [{ type: "reload" }])).toMatchObject({ ok: false, status: 409, error: expect.stringContaining("finishing its action") });
 		await agentPauses(control);
 		const moves = Array.from({ length: 60 }, (_, index) => ({ type: "pointer" as const, phase: "move" as const, x: index, y: 1, button: "left" as const, clickCount: 1 }));
-		expect(await control.input(ALICE, token, moves)).toEqual({ ok: true });
-		expect(await control.input(ALICE, token, moves)).toEqual({ ok: true });
-		expect(await control.input(ALICE, token, moves.slice(0, 1))).toEqual({ ok: false, status: 429, error: "Too many inputs at once." });
-		expect(await control.release(BOB, token)).toMatchObject({ ok: false, status: 403 });
+		expect(await control.input(ALICE, moves)).toEqual({ ok: true });
+		expect(await control.input(ALICE, moves)).toEqual({ ok: true });
+		expect(await control.input(ALICE, moves.slice(0, 1))).toEqual({ ok: false, status: 429, error: "Too many inputs at once." });
+		expect(await control.release(BOB)).toMatchObject({ ok: false, status: 403 });
 	});
 
 	test("a turn ends after a minute without input, after ten minutes in any case, and people drive one visit thirty minutes at most", async () => {
 		const { control, clock, actions } = attached();
-		let { token } = control.take(ALICE) as { token: string };
+		control.take(ALICE);
 		const first = await agentPauses(control);
 		clock.now += TAKEOVER_IDLE_MS - 1;
 		await control.expireTurn();
 		expect(control.mode).toBe("human");
-		await control.input(ALICE, token, [{ type: "reload" }]);
+		await control.input(ALICE, [{ type: "reload" }]);
 		clock.now += TAKEOVER_IDLE_MS;
 		await control.expireTurn();
 		expect(control.mode).toBe("agent");
@@ -237,11 +247,11 @@ describe("who drives a live visit", () => {
 
 		// Busy turns end at ten minutes; the time adds up across turns.
 		for (let turn = 0; turn < 2; turn += 1) {
-			({ token } = control.take(BOB) as { token: string });
+			control.take(BOB);
 			await agentPauses(control);
 			for (let minute = 0; minute < 10; minute += 1) {
 				clock.now += 59_000;
-				await control.input(BOB, token, [{ type: "reload" }]);
+				await control.input(BOB, [{ type: "reload" }]);
 				await control.expireTurn();
 			}
 			clock.now += TAKEOVER_MAX_MS - 590_000;
@@ -250,12 +260,12 @@ describe("who drives a live visit", () => {
 		}
 		expect(actions.at(-1)?.text).toBe(`${viewerLabel(BOB)} handed the browser back (its time was up)`);
 		// 2 min + 10 + 10 so far: the last turn may only run for the 8 minutes left.
-		({ token } = control.take(ALICE) as { token: string });
+		control.take(ALICE);
 		await agentPauses(control);
 		const started = clock.now;
 		while (control.mode !== "agent") {
 			clock.now += 30_000;
-			await control.input(ALICE, token, [{ type: "reload" }]);
+			await control.input(ALICE, [{ type: "reload" }]);
 			await control.expireTurn();
 		}
 		// About 22 minutes were used: the turn ends once the rest is used up, at the first check after.
@@ -285,12 +295,12 @@ describe("who drives a live visit", () => {
 
 	test("when the agent ends while a person takes over, they drive on; nobody can take a visit that is finishing or over", async () => {
 		const { control, events } = attached();
-		const { token } = control.take(ALICE) as { token: string };
+		control.take(ALICE);
 		control.agentEnded();
 		expect(control.mode).toBe("human");
 		expect(control.holding).toBe(true);
-		expect(await control.input(ALICE, token, [{ type: "reload" }])).toEqual({ ok: true });
-		await control.release(ALICE, token);
+		expect(await control.input(ALICE, [{ type: "reload" }])).toEqual({ ok: true });
+		await control.release(ALICE);
 		expect(control.holding).toBe(false);
 		expect(control.take(BOB)).toEqual({ ok: false, status: 409, error: "The visit is finishing." });
 		await control.end();
@@ -317,17 +327,17 @@ describe("who drives a live visit", () => {
 
 	test("handing back lets queued inputs go unrun, waits for the one running, and lets go of a held button before the agent goes on", async () => {
 		const { control, session, actions } = attached();
-		const { token } = control.take(ALICE) as { token: string };
+		control.take(ALICE);
 		const { notes } = await agentPauses(control);
 		// A press, a drag move, then a hand-back before the rest of the batch: the button is let go.
-		await control.input(ALICE, token, [
+		await control.input(ALICE, [
 			{ type: "pointer", phase: "down", x: 10, y: 20, button: "left", clickCount: 1 },
 			{ type: "pointer", phase: "move", x: 30, y: 20, button: "left", clickCount: 1 },
 		]);
-		const running = control.input(ALICE, token, Array.from({ length: 40 }, () => ({ type: "text" as const, text: "z" })));
+		const running = control.input(ALICE, Array.from({ length: 40 }, () => ({ type: "text" as const, text: "z" })));
 		// Let the batch start before the hand-back cuts it short.
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		const handedBack = control.release(ALICE, token);
+		const handedBack = control.release(ALICE);
 		await running;
 		await handedBack;
 		await notes;
@@ -340,10 +350,10 @@ describe("who drives a live visit", () => {
 
 	test("a turn that starts while a person takes over is over at once; a takeover while one is handed back waits", async () => {
 		const { control } = attached();
-		const { token } = control.take(ALICE) as { token: string };
+		control.take(ALICE);
 		expect(control.steering.turn().aborted).toBe(true);
 		const { resumed } = await agentPauses(control);
-		const handing = control.release(ALICE, token);
+		const handing = control.release(ALICE);
 		expect(control.take(BOB)).toMatchObject({ ok: false, status: 409, error: expect.stringContaining("handed back") });
 		await handing;
 		await resumed;
@@ -369,10 +379,10 @@ describe("who drives a live visit", () => {
 	test("the agent goes on in the tab the person left it on; a turn counts at least fifteen seconds", async () => {
 		const { control, clock } = attached();
 		for (let turn = 0; turn < HUMAN_TOTAL_MS / MIN_TURN_CHARGE_MS; turn += 1) {
-			const { token } = control.take(ALICE) as { token: string };
+			control.take(ALICE);
 			const { resumed } = await agentPauses(control);
-			if (turn === 0) await control.input(ALICE, token, [{ type: "tab", targetId: "T2" }]);
-			await control.release(ALICE, token);
+			if (turn === 0) await control.input(ALICE, [{ type: "tab", targetId: "T2" }]);
+			await control.release(ALICE);
 			const result = await resumed;
 			expect(result.targetId).toBe(turn === 0 ? "T2" : "T2");
 			clock.now += 1_000;
@@ -383,10 +393,10 @@ describe("who drives a live visit", () => {
 
 	test("Ctrl or Cmd shortcuts other than editing never reach the page; Alt, Shift and the middle button are named; Backspace removes whole characters", async () => {
 		const { control, session, actions } = attached();
-		const { token } = control.take(ALICE) as { token: string };
+		control.take(ALICE);
 		await agentPauses(control);
 		session.sent.length = 0;
-		await control.input(ALICE, token, [
+		await control.input(ALICE, [
 			{ type: "key", phase: "down", key: "p", code: "KeyP", keyCode: 80, modifiers: 2 },
 			{ type: "key", phase: "down", key: "o", code: "KeyO", keyCode: 79, modifiers: 4 },
 			{ type: "key", phase: "down", key: "Z", code: "KeyZ", keyCode: 90, modifiers: 4 | 8 },
@@ -412,11 +422,11 @@ describe("who drives a live visit", () => {
 
 	test("the element under the pointer is found on a scrolled page, before the press changes it", async () => {
 		const { control, session } = attached();
-		const { token } = control.take(ALICE) as { token: string };
+		control.take(ALICE);
 		await agentPauses(control);
 		session.scrolled.y = 1_200;
 		session.sent.length = 0;
-		await control.input(ALICE, token, [{ type: "pointer", phase: "down", x: 40.4, y: 50.6, button: "left", clickCount: 1 }]);
+		await control.input(ALICE, [{ type: "pointer", phase: "down", x: 40.4, y: 50.6, button: "left", clickCount: 1 }]);
 		const methods = session.sent.map((call) => call.method);
 		expect(methods.indexOf("DOM.getNodeForLocation")).toBeLessThan(methods.indexOf("Input.dispatchMouseEvent"));
 		expect(session.sent).toContainEqual({ method: "DOM.getNodeForLocation", params: { x: 40, y: 1_251, includeUserAgentShadowDOM: false, ignorePointerEventsNone: false } });
@@ -424,11 +434,11 @@ describe("who drives a live visit", () => {
 
 	test("a very long typing run is split into records of 2,000 characters; asking to record an unchanged page says so", async () => {
 		const { control, actions, pageChanged } = attached();
-		const { token } = control.take(ALICE) as { token: string };
+		control.take(ALICE);
 		await agentPauses(control);
-		await control.input(ALICE, token, [{ type: "text", text: "a".repeat(1_500) }, { type: "text", text: "b".repeat(1_500) }]);
+		await control.input(ALICE, [{ type: "text", text: "a".repeat(1_500) }, { type: "text", text: "b".repeat(1_500) }]);
 		pageChanged.value = false;
-		await control.input(ALICE, token, [{ type: "capture" }]);
+		await control.input(ALICE, [{ type: "capture" }]);
 		const typed = actions.filter((action) => action.kind === "type");
 		expect(typed.map((action) => action.value)).toEqual(["a".repeat(1_500), "b".repeat(1_500)]);
 		expect(actions.at(-1)?.text).toBe("Asked to record https://kit.example/login; it is unchanged since the last recorded step (or the visit holds all the steps it may)");

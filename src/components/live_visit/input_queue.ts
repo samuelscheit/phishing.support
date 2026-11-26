@@ -1,33 +1,22 @@
 import type { LiveInput } from "@/lib/site_visit/live_input";
 
 /**
- * A driver's inputs on their way to the page: gathered for a moment, sent
- * in order with one request in flight, at most `MAX_BATCH` per request.
- * Pointer moves waiting together become their last one and wheel turns
- * their sum, so a fast hand never floods the visit. While the browser is
- * not the driver's yet (the agent finishes its action) inputs wait; a
- * request the visit refuses for that reason, or for too many inputs, is
- * sent again later. A lost turn (403) or a visit that is over (404) drops
- * everything waiting.
+ * A driver's inputs on their way to the page, over the visit's socket. A
+ * click, a key or text goes out at once (with whatever waits before it);
+ * pointer moves and wheel turns gather for one frame, moves becoming their
+ * last one and wheel turns their sum, so a fast hand never floods the visit.
+ * Inputs wait while the browser is not the driver's yet or the socket is
+ * down, and are dropped with `clear` once the turn is gone.
  */
 
-export type PostResult = { ok: true } | { ok: false; status: number; error: string };
-
-/** The request limit of the visit's input endpoint. */
+/** Inputs per message, as the visit takes them. */
 export const MAX_BATCH = 60;
+/** How long moves and wheel turns gather: one frame. */
+export const GATHER_MS = 16;
 
 export type InputQueueOptions = {
-	post: (inputs: LiveInput[]) => Promise<PostResult>;
-	/** The turn is gone (taken back or expired) or the visit ended. */
-	onLost: (error: string) => void;
-	/** A batch the visit refused for good, or a request that failed. */
-	onError: (error: string) => void;
-	/** How long inputs gather before they are sent. */
-	flushMs?: number;
-	/** How long a batch waits before it is sent again while the agent finishes its action. */
-	retryMs?: number;
-	/** How long a batch waits after the visit said too many inputs. */
-	rateLimitMs?: number;
+	/** Send a batch now; false when it could not be sent (it waits for the next chance). */
+	send: (inputs: LiveInput[]) => boolean;
 	schedule?: (run: () => void, ms: number) => () => void;
 };
 
@@ -43,17 +32,18 @@ function merged(last: LiveInput, next: LiveInput): LiveInput | undefined {
 	return undefined;
 }
 
+const gathers = (input: LiveInput) => (input.type === "pointer" && input.phase === "move") || input.type === "wheel";
+
 export class InputQueue {
-	readonly #options: Required<InputQueueOptions>;
+	readonly #send: InputQueueOptions["send"];
+	readonly #schedule: NonNullable<InputQueueOptions["schedule"]>;
 	#pending: LiveInput[] = [];
-	#inFlight = false;
 	#ready = false;
 	#cancel?: () => void;
-	/** Bumped by `clear`: answers to requests sent before are ignored. */
-	#generation = 0;
 
 	constructor(options: InputQueueOptions) {
-		this.#options = { flushMs: 30, retryMs: 400, rateLimitMs: 1_000, schedule: defaultSchedule, ...options };
+		this.#send = options.send;
+		this.#schedule = options.schedule ?? defaultSchedule;
 	}
 
 	get pending(): readonly LiveInput[] {
@@ -67,56 +57,34 @@ export class InputQueue {
 			if (combined) this.#pending[this.#pending.length - 1] = combined;
 			else this.#pending.push(input);
 		}
-		this.#later(this.#options.flushMs);
+		if (inputs.some((input) => !gathers(input))) this.flush();
+		else this.#cancel ??= this.#schedule(() => {
+			this.#cancel = undefined;
+			this.flush();
+		}, GATHER_MS);
 	}
 
-	/** Whether the browser is the driver's now: inputs are sent only then. */
+	/** Whether inputs can go now: the browser is the driver's and the socket is up. */
 	setReady(ready: boolean): void {
-		if (this.#ready === ready) return;
 		this.#ready = ready;
-		if (ready && this.#pending.length) this.#later(0);
+		if (ready) this.flush();
 	}
 
-	/** Drop everything waiting; a request in flight finishes unheard. */
-	clear(): void {
-		this.#generation += 1;
-		this.#pending = [];
-		this.#inFlight = false;
+	/** Send everything waiting, if it can go. */
+	flush(): void {
 		this.#cancel?.();
 		this.#cancel = undefined;
+		while (this.#ready && this.#pending.length) {
+			const batch = this.#pending.slice(0, MAX_BATCH);
+			if (!this.#send(batch)) return;
+			this.#pending.splice(0, batch.length);
+		}
 	}
 
-	#later(ms: number): void {
-		if (this.#cancel || this.#inFlight) return;
-		this.#cancel = this.#options.schedule(() => {
-			this.#cancel = undefined;
-			void this.#flush();
-		}, ms);
-	}
-
-	async #flush(): Promise<void> {
-		if (this.#inFlight || !this.#ready || !this.#pending.length) return;
-		const generation = this.#generation;
-		const batch = this.#pending.splice(0, MAX_BATCH);
-		this.#inFlight = true;
-		const result = await this.#options.post(batch).catch((error: unknown): PostResult => ({ ok: false, status: 0, error: error instanceof Error ? error.message : String(error) }));
-		if (generation !== this.#generation) return;
-		this.#inFlight = false;
-		if (result.ok) {
-			if (this.#pending.length) this.#later(this.#options.flushMs);
-			return;
-		}
-		if (result.status === 409 || result.status === 429) {
-			this.#pending.unshift(...batch);
-			this.#later(result.status === 409 ? this.#options.retryMs : this.#options.rateLimitMs);
-			return;
-		}
-		if (result.status === 403 || result.status === 404) {
-			this.clear();
-			this.#options.onLost(result.error);
-			return;
-		}
-		this.#options.onError(result.error);
-		if (this.#pending.length) this.#later(this.#options.flushMs);
+	/** Drop everything waiting. */
+	clear(): void {
+		this.#pending = [];
+		this.#cancel?.();
+		this.#cancel = undefined;
 	}
 }

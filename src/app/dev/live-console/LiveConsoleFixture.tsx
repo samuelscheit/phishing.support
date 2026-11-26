@@ -60,14 +60,14 @@ function controlFor(state: string): LiveControl {
 	const human = { controller: state === "other" ? "Viewer 7f3e" : ME, until: new Date(now + 9 * 60_000).toISOString(), idleUntil: new Date(now + 42_000).toISOString() };
 	switch (state) {
 		case "pausing":
-			return { mode: "pausing", controller: ME, tabs, fakeValues: FAKE_VALUES, agentRunning: true };
+			return { run: "fixture", seq: 1, mode: "pausing", controller: ME, tabs, fakeValues: FAKE_VALUES, agentRunning: true };
 		case "you":
 		case "other":
-			return { mode: "human", ...human, tabs, fakeValues: FAKE_VALUES, agentRunning: true };
+			return { run: "fixture", seq: 1, mode: "human", ...human, tabs, fakeValues: FAKE_VALUES, agentRunning: true };
 		case "ended":
-			return { mode: "ended", tabs: [], fakeValues: {}, agentRunning: false };
+			return { run: "fixture", seq: 1, mode: "ended", tabs: [], fakeValues: {}, agentRunning: false };
 		default:
-			return { mode: "agent", tabs: tabs.slice(0, 1), fakeValues: FAKE_VALUES, agentRunning: true };
+			return { run: "fixture", seq: 1, mode: "agent", tabs: tabs.slice(0, 1), fakeValues: FAKE_VALUES, agentRunning: true };
 	}
 }
 
@@ -86,10 +86,12 @@ export function LiveConsoleFixture({ state, frame, theme }: { state: string; fra
 		finished: false,
 		live: control.mode !== "ended",
 		frame: mockFrame(frame),
+		you: state === "you" || state === "pausing",
+		connected: true,
 		setQuality: () => undefined,
 	};
 	const driver: LiveDriver = {
-		status: driverStatus(control, { label: ME, driving: state === "you" || state === "pausing" }),
+		status: driverStatus(control, visit.you),
 		error: undefined,
 		dismissError: () => undefined,
 		take: async () => undefined,

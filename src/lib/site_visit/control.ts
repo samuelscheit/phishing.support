@@ -26,6 +26,9 @@ export type VisitMode = "agent" | "pausing" | "human" | "ended";
 /** A visit's control state, as every viewer sees it. */
 export type VisitControlEvent = {
 	type: "browser.control";
+	/** The visit this state is of, and its place among the visit's states: a viewer that hears a state twice (the case's stream and its socket) keeps the newest. */
+	run: string;
+	seq: number;
 	mode: VisitMode;
 	/** Who drives while a person does. */
 	controller?: string;
@@ -86,7 +89,7 @@ export type ControlledVisit = {
 	onDriving(driving: boolean): void;
 };
 
-type Controller = { viewer: string; label: string; token: string; since: number; lastInputAt: number; reportedIdleAt: number };
+type Controller = { viewer: string; label: string; since: number; lastInputAt: number; reportedIdleAt: number };
 /** Where a control tells viewers what changed. */
 type ControlPublish = (event: VisitControlEvent) => void;
 
@@ -102,6 +105,9 @@ function modifierPrefix(modifiers: number): string {
 export class VisitControl {
 	readonly screen = new LiveScreen();
 	readonly #publish: ControlPublish;
+	readonly #listeners = new Set<ControlPublish>();
+	readonly #run = randomUUID();
+	#seq = 0;
 	#mode: VisitMode = "agent";
 	#visit?: ControlledVisit;
 	#controller?: Controller;
@@ -224,10 +230,11 @@ export class VisitControl {
 		this.publishState();
 	}
 
-	take(viewer: string): ControlResult<{ token: string }> {
+	/** A viewer takes the browser over; its id (random, never shown) is its key to the controls while it drives. */
+	take(viewer: string): ControlResult {
 		if (!this.#visit || this.#mode === "ended") return { ok: false, status: 409, error: "The visit is not live." };
 		if (this.#controller) {
-			if (this.#controller.viewer === viewer) return { ok: true, token: this.#controller.token };
+			if (this.#controller.viewer === viewer) return { ok: true };
 			return { ok: false, status: 409, error: `${this.#controller.label} is driving the browser.` };
 		}
 		if (this.#handingBack) return { ok: false, status: 409, error: "The browser is being handed back to the agent; try again in a moment." };
@@ -235,7 +242,7 @@ export class VisitControl {
 		if (this.#humanMs >= HUMAN_TOTAL_MS) return { ok: false, status: 429, error: `People drove this visit for ${HUMAN_TOTAL_MS / 60_000} minutes already.` };
 		if (this.#humanActions >= MAX_HUMAN_ACTIONS) return { ok: false, status: 429, error: "People did as much in this visit as one visit records." };
 		const now = this.now();
-		this.#controller = { viewer, label: viewerLabel(viewer), token: randomUUID(), since: now, lastInputAt: now, reportedIdleAt: now };
+		this.#controller = { viewer, label: viewerLabel(viewer), since: now, lastInputAt: now, reportedIdleAt: now };
 		this.tookOver = true;
 		this.#turnActions = [];
 		this.#resumed = Promise.withResolvers<void>();
@@ -245,11 +252,16 @@ export class VisitControl {
 		this.screen.setDriving(true);
 		this.#record("takeover", `${this.#controller.label} took over the browser`);
 		this.publishState();
-		return { ok: true, token: this.#controller.token };
+		return { ok: true };
 	}
 
-	async release(viewer: string, token: string, note?: string): Promise<ControlResult> {
-		const controller = this.#authorized(viewer, token);
+	/** Whether this viewer drives the browser now (or is about to, while the agent finishes its action). */
+	drives(viewer: string): boolean {
+		return this.#controller?.viewer === viewer;
+	}
+
+	async release(viewer: string, note?: string): Promise<ControlResult> {
+		const controller = this.#authorized(viewer);
 		if (!controller) return { ok: false, status: 403, error: "You are not driving the browser." };
 		await this.#handBack(controller, "they handed it back", note?.trim().slice(0, MAX_MESSAGE));
 		return { ok: true };
@@ -274,8 +286,8 @@ export class VisitControl {
 	}
 
 	/** The driver's inputs, in order. */
-	input(viewer: string, token: string, inputs: readonly LiveInput[]): Promise<ControlResult> {
-		const controller = this.#authorized(viewer, token);
+	input(viewer: string, inputs: readonly LiveInput[]): Promise<ControlResult> {
+		const controller = this.#authorized(viewer);
 		if (!controller) return Promise.resolve({ ok: false, status: 403, error: "You are not driving the browser." });
 		if (this.#mode !== "human") return Promise.resolve({ ok: false, status: 409, error: "The agent is finishing its action; the browser is yours in a moment." });
 		const now = this.now();
@@ -299,13 +311,29 @@ export class VisitControl {
 		return run;
 	}
 
+	/** Hear every control state from now on, until the returned function is called. */
+	subscribe(listener: ControlPublish): () => void {
+		this.#listeners.add(listener);
+		return () => this.#listeners.delete(listener);
+	}
+
 	/** Tell every viewer the control state. */
 	publishState(): void {
+		this.#seq += 1;
+		const state = this.state;
+		this.#publish(state);
+		for (const listener of this.#listeners) listener(state);
+	}
+
+	/** The control state as viewers see it now. */
+	get state(): VisitControlEvent {
 		const visit = this.#visit;
 		const active = visit?.tabs.active();
 		const controller = this.#controller;
-		this.#publish({
+		return {
 			type: "browser.control",
+			run: this.#run,
+			seq: this.#seq,
 			mode: this.#mode,
 			...(controller ? {
 				controller: controller.label,
@@ -316,7 +344,7 @@ export class VisitControl {
 			tabs: visit ? (this.#tabs.length ? this.#tabs : (visit.tabs.tabs().filter((tab) => !tab.closed && tab.page).map((tab) => ({ targetId: tab.targetId, url: tab.page!.url(), title: "" })))).map((tab) => ({ ...tab, active: tab.targetId === active?.targetId })) : [],
 			fakeValues: visit?.values ?? {},
 			agentRunning: Boolean(visit) && !this.#agentEnded && this.#mode !== "ended",
-		});
+		};
 	}
 
 	/** A turn without input, or one that ran too long, ends on its own; checked every second. The idle clock starts once the agent let go. */
@@ -337,9 +365,8 @@ export class VisitControl {
 		return { session: visit.tabs.active().session, touch: visit.touch };
 	}
 
-	#authorized(viewer: string, token: string): Controller | undefined {
-		const controller = this.#controller;
-		return controller && controller.viewer === viewer && controller.token === token ? controller : undefined;
+	#authorized(viewer: string): Controller | undefined {
+		return this.drives(viewer) ? this.#controller : undefined;
 	}
 
 	#enterHuman(): void {

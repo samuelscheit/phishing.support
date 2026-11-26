@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { driverStatus, EMPTY_LIVE_EVENTS, fieldLabel, formatCountdown, isLive, MAX_LIVE_ENTRIES, reconcileToken, reduceLiveEvent, turnDeadline, type LiveControl, type LiveEvents } from "./live_state";
+import { driverStatus, EMPTY_LIVE_EVENTS, fieldLabel, formatCountdown, isLive, MAX_LIVE_ENTRIES, reduceLiveEvent, turnDeadline, type LiveControl, type LiveEvents } from "./live_state";
 
-const control = (overrides: Partial<LiveControl> = {}): LiveControl => ({ mode: "agent", tabs: [], fakeValues: {}, agentRunning: true, ...overrides });
+const control = (overrides: Partial<LiveControl> = {}): LiveControl => ({ run: "r1", seq: 1, mode: "agent", tabs: [], fakeValues: {}, agentRunning: true, ...overrides });
 const fold = (messages: unknown[], from: LiveEvents = EMPTY_LIVE_EVENTS) => messages.reduce<LiveEvents>(reduceLiveEvent, from);
 
 describe("reduceLiveEvent", () => {
@@ -30,14 +30,14 @@ describe("reduceLiveEvent", () => {
 	});
 
 	test("a new connection's replay starts over", () => {
-		const replayed = [{ type: "browser.action", kind: "click", text: "Clicked", actor: "agent" }, { type: "browser.control", mode: "agent", tabs: [], fakeValues: {}, agentRunning: true }];
+		const replayed = [{ type: "browser.action", kind: "click", text: "Clicked", actor: "agent" }, { type: "browser.control", run: "r1", seq: 1, mode: "agent", tabs: [], fakeValues: {}, agentRunning: true }];
 		const state = fold([{ type: "connected" }, ...replayed, { type: "connected" }, ...replayed]);
 		expect(state.entries).toHaveLength(1);
 		expect(state.control?.mode).toBe("agent");
 	});
 
 	test("a reconnect whose replay lacks the control state keeps the last one", () => {
-		const state = fold([{ type: "browser.control", mode: "human", controller: "Viewer ab12", tabs: [], fakeValues: {}, agentRunning: true }, { type: "connected" }, { type: "browser.action", kind: "click", text: "x", actor: "human" }]);
+		const state = fold([{ type: "browser.control", run: "r1", seq: 2, mode: "human", controller: "Viewer ab12", tabs: [], fakeValues: {}, agentRunning: true }, { type: "connected" }, { type: "browser.action", kind: "click", text: "x", actor: "human" }]);
 		expect(state.control?.mode).toBe("human");
 		expect(state.entries).toHaveLength(1);
 		expect(isLive(state)).toBe(true);
@@ -45,90 +45,58 @@ describe("reduceLiveEvent", () => {
 
 	test("the last control state is current, cleaned of anything malformed", () => {
 		const state = fold([
-			{ type: "browser.control", mode: "agent", tabs: [], fakeValues: {}, agentRunning: true },
+			{ type: "browser.control", run: "r1", seq: 3, mode: "agent", tabs: [], fakeValues: {}, agentRunning: true },
 			{
-				type: "browser.control", mode: "human", controller: "Viewer ab12", until: "2026-01-01T00:10:00.000Z", idleUntil: "2026-01-01T00:01:00.000Z",
+				type: "browser.control", run: "r1", seq: 4, mode: "human", controller: "Viewer ab12", until: "2026-01-01T00:10:00.000Z", idleUntil: "2026-01-01T00:01:00.000Z",
 				tabs: [{ targetId: "t1", url: "https://a.test/", title: "", active: true }, { url: "no id" }, "junk"],
 				fakeValues: { email: "x@y.test", password: 42, phone: "" },
 				agentRunning: true,
 			},
 		]);
 		expect(state.control).toEqual({
-			mode: "human", controller: "Viewer ab12", until: "2026-01-01T00:10:00.000Z", idleUntil: "2026-01-01T00:01:00.000Z",
+			run: "r1", seq: 4, mode: "human", controller: "Viewer ab12", until: "2026-01-01T00:10:00.000Z", idleUntil: "2026-01-01T00:01:00.000Z",
 			tabs: [{ targetId: "t1", url: "https://a.test/", title: "", active: true }],
 			fakeValues: { email: "x@y.test" },
 			agentRunning: true,
 		});
 	});
 
+	test("a state heard late on the other channel (stream or socket) never replaces a newer one; a new visit's states do", () => {
+		const state = (run: string, seq: number, mode: string) => ({ type: "browser.control", run, seq, mode, controller: "Viewer ab12", tabs: [], fakeValues: {}, agentRunning: true });
+		const socketFirst = fold([state("r1", 1, "agent"), state("r1", 2, "pausing"), state("r1", 3, "human"), state("r1", 2, "pausing"), state("r1", 3, "human")]);
+		expect(socketFirst.control).toMatchObject({ seq: 3, mode: "human" });
+		// The socket's state on connect repeats the newest; nothing changes.
+		expect(fold([state("r1", 3, "human")], socketFirst)).toBe(socketFirst);
+		// A visit run again for the case starts its own count.
+		expect(fold([state("r2", 1, "agent")], socketFirst).control).toMatchObject({ run: "r2", seq: 1, mode: "agent" });
+	});
+
 	test("ignores an unknown mode, unknown types and non-objects", () => {
-		const start = fold([{ type: "browser.control", mode: "agent", tabs: [], fakeValues: {}, agentRunning: true }]);
-		expect(fold([{ type: "browser.control", mode: "dancing" }, { type: "response.delta" }, null, "x", [1]], start)).toBe(start);
+		const start = fold([{ type: "browser.control", run: "r1", seq: 5, mode: "agent", tabs: [], fakeValues: {}, agentRunning: true }]);
+		expect(fold([{ type: "browser.control", run: "r1", seq: 6, mode: "dancing" }, { type: "response.delta" }, null, "x", [1]], start)).toBe(start);
 	});
 
 	test("a finished analysis ends the live visit whatever its last control state", () => {
-		const running = fold([{ type: "browser.control", mode: "human", tabs: [], fakeValues: {}, agentRunning: true }]);
+		const running = fold([{ type: "browser.control", run: "r1", seq: 7, mode: "human", tabs: [], fakeValues: {}, agentRunning: true }]);
 		expect(isLive(running)).toBe(true);
 		expect(isLive(fold([{ type: "analysis.step", step: "visiting", progress: 40 }], running))).toBe(true);
 		expect(isLive(fold([{ type: "analysis.step", step: "completed" }], running))).toBe(false);
 		expect(isLive(fold([{ type: "analysis.step", step: "x", progress: 100 }], running))).toBe(false);
-		expect(isLive(fold([{ type: "browser.control", mode: "ended", tabs: [], fakeValues: {}, agentRunning: false }], running))).toBe(false);
+		expect(isLive(fold([{ type: "browser.control", run: "r1", seq: 8, mode: "ended", tabs: [], fakeValues: {}, agentRunning: false }], running))).toBe(false);
 		expect(isLive(EMPTY_LIVE_EVENTS)).toBe(false);
 	});
 });
 
 describe("driverStatus", () => {
-	const me = { label: "Viewer ab12", driving: true };
-	const watcher = { label: "Viewer ab12", driving: false };
-
-	test("names who drives", () => {
-		expect(driverStatus(control(), watcher)).toEqual({ kind: "agent" });
-		expect(driverStatus(control({ agentRunning: false }), watcher)).toEqual({ kind: "finishing" });
-		expect(driverStatus(control({ mode: "ended" }), watcher)).toEqual({ kind: "ended" });
-		expect(driverStatus(undefined, watcher)).toEqual({ kind: "ended" });
-		expect(driverStatus(control({ mode: "human", controller: "Viewer ab12" }), me)).toEqual({ kind: "you" });
-		expect(driverStatus(control({ mode: "human", controller: "Viewer cd34" }), watcher)).toEqual({ kind: "other", label: "Viewer cd34" });
-		expect(driverStatus(control({ mode: "pausing", controller: "Viewer ab12" }), me)).toEqual({ kind: "pausing", mine: true, label: "Viewer ab12" });
-		expect(driverStatus(control({ mode: "pausing", controller: "Viewer cd34" }), watcher)).toEqual({ kind: "pausing", mine: false, label: "Viewer cd34" });
-	});
-
-	test("a stale token of this viewer does not make another driver's turn its own", () => {
-		expect(driverStatus(control({ mode: "human", controller: "Viewer cd34" }), me)).toEqual({ kind: "other", label: "Viewer cd34" });
-	});
-
-	test("without its own label (no Web Crypto), a viewer's token decides", () => {
-		expect(driverStatus(control({ mode: "human", controller: "Viewer cd34" }), { driving: true })).toEqual({ kind: "you" });
-	});
-});
-
-describe("reconcileToken", () => {
-	const label = "Viewer ab12";
-	const held = { token: "t", confirmed: false };
-
-	test("keeps a fresh token while the stream still shows the agent (the take's answer came first)", () => {
-		expect(reconcileToken(held, control(), label)).toBe(held);
-	});
-
-	test("confirms once the stream names this viewer, and keeps it", () => {
-		const confirmed = reconcileToken(held, control({ mode: "pausing", controller: label }), label);
-		expect(confirmed).toEqual({ token: "t", confirmed: true });
-		expect(reconcileToken(confirmed, control({ mode: "human", controller: label }), label)).toBe(confirmed);
-	});
-
-	test("drops a confirmed token once the turn ended or went to someone else", () => {
-		const confirmed = { token: "t", confirmed: true };
-		expect(reconcileToken(confirmed, control(), label)).toEqual({ confirmed: false });
-		expect(reconcileToken(confirmed, control({ mode: "human", controller: "Viewer cd34" }), label)).toEqual({ confirmed: false });
-	});
-
-	test("drops any token when the visit ended", () => {
-		expect(reconcileToken(held, control({ mode: "ended" }), label)).toEqual({ confirmed: false });
-		expect(reconcileToken(held, undefined, label)).toEqual({ confirmed: false });
-		expect(reconcileToken({ confirmed: true }, control(), label)).toEqual({ confirmed: false });
-	});
-
-	test("without a label any named driver confirms", () => {
-		expect(reconcileToken(held, control({ mode: "human", controller: "Viewer cd34" }), undefined)).toEqual({ token: "t", confirmed: true });
+	test("names who drives; the socket's `you` alone says whether it is this viewer", () => {
+		expect(driverStatus(control(), false)).toEqual({ kind: "agent" });
+		expect(driverStatus(control({ agentRunning: false }), false)).toEqual({ kind: "finishing" });
+		expect(driverStatus(control({ mode: "ended" }), true)).toEqual({ kind: "ended" });
+		expect(driverStatus(undefined, false)).toEqual({ kind: "ended" });
+		expect(driverStatus(control({ mode: "human", controller: "Viewer ab12" }), true)).toEqual({ kind: "you" });
+		expect(driverStatus(control({ mode: "human", controller: "Viewer cd34" }), false)).toEqual({ kind: "other", label: "Viewer cd34" });
+		expect(driverStatus(control({ mode: "pausing", controller: "Viewer ab12" }), true)).toEqual({ kind: "pausing", mine: true, label: "Viewer ab12" });
+		expect(driverStatus(control({ mode: "pausing", controller: "Viewer cd34" }), false)).toEqual({ kind: "pausing", mine: false, label: "Viewer cd34" });
 	});
 });
 
