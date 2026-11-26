@@ -56,7 +56,7 @@
 		"@xarf/xarf": "1.1.0",
 		"@zip.js/zip.js": "2.24.0",
 		"asn1js": "3.1.0",
-		"browser-fabric": "github:samuelscheit/browser#350d4ddaccc5fe0b1cb39762eae572640dd5f9c1",
+		"browser-fabric": "github:samuelscheit/browser#23dde5be470c396438422be7e7aef8f3da2fa0a4",
 		"class-variance-authority": "0.7.1",
 		"clsx": "2.1.1",
 		"date-fns": "4.4.0",
