@@ -8,7 +8,7 @@ import { ReporterMeta } from "@/components/ReporterMeta";
 import { SubmissionReports } from "@/components/SubmissionReports";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ExternalLink, Mail, Globe } from "lucide-react";
+import { ExternalLink, Mail, Globe, RotateCcw } from "lucide-react";
 import type { Locale } from "@/lib/i18n/locale";
 import Link from "next/link";
 import type { SubmissionDetail } from "@/lib/submissions/details";
@@ -27,8 +27,8 @@ import { NavigationTab } from "./_components/NavigationTab";
 import { RunsTab } from "./_components/RunsTab";
 import { RotationNote } from "./_components/RotationNote";
 import { RouteSelector } from "./_components/RouteSelector";
-import { FailedPanel, NotReportedPanel, VerdictPanel } from "./_components/StatusPanels";
-import { deceptiveFunnels, reportedSites, routeLabel } from "./_components/helpers";
+import { OutcomePanel, VerdictPanel } from "./_components/StatusPanels";
+import { canAnalyzeAgain, deceptiveFunnels, reportedSites, retryCountLabel, routeLabel } from "./_components/helpers";
 import { useArchivedHtml } from "./_components/useArchivedHtml";
 import { useSubmissionDetail } from "./_components/useSubmissionDetail";
 
@@ -60,7 +60,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 	const isFailed = statusKey === "failed";
 	const isReported = statusKey === "reported";
 	const isRunning = statusKey === "running";
-	const isInvalidWebsite = statusKey === "invalid" && submission?.kind === "website" && Boolean(submission.info);
+	const isInvalid = statusKey === "invalid";
 	const website = submission?.data.kind === "website" ? submission.data.website : undefined;
 	const websiteCloaking = website?.cloaking;
 	const routes = website?.routes ?? [];
@@ -104,16 +104,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 	const emailEml = submissionArtifacts.find(isEmlArtifact);
 	const websiteArchive = useArchivedHtml("website", submission?.kind === "website", websiteMhtml?.id);
 	const emailArchive = useArchivedHtml("email", submission?.kind === "email", emailEml?.id);
-	const canRetryAnalysis =
-		Boolean(
-			isFailed &&
-			submission &&
-			(submission.kind === "website"
-				? submission.analysisRuns.every((run) => run.status !== "running")
-				: submission.analysisRuns.every((run) => run.status === "failed")) &&
-			reportCount === 0 &&
-			(website ? Boolean(website.url) : Boolean(emailEml?.id)),
-		);
+	const canRetryAnalysis = Boolean(submission && canAnalyzeAgain(submission, reportCount, website ? Boolean(website.url) : Boolean(emailEml?.id)));
 	// Only the email image shown beside the facts is left out of the files; a website's screenshots are files.
 	const artifacts = submissionArtifacts.filter((x) => x !== emailScreenshot);
 	const visitPages = routePages(route, walked, submissionArtifacts);
@@ -132,11 +123,16 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 		/>
 	) : null;
 
+	// Mirrors what retryWebsiteAnalysis reuses: a judged capture is never judged again, a failed one is reused.
 	const retryHint = submission.kind === "website"
 		? websiteCloaking?.outcome === "unresolved"
 			? "Visits the site again, including from the residential exit; it will not create a duplicate report."
-			: "Reuses the captured website archive when available; it will not create a duplicate report."
-		: "Reuses the original email; it will not create a duplicate report.";
+			: isInvalid
+				? "Visits the site again; it will not create a duplicate report."
+				: "Reuses the captured website archive when available; it will not create a duplicate report."
+		: "Analyzes the original email again; it will not create a duplicate report.";
+	const analyzeAgain = { offered: canRetryAnalysis, running: retrying, error: retryError, hint: retryHint, onStart: retryAnalysis };
+	const retried = retryCountLabel(submission.retries.count);
 
 	return (
 		<div className="container mx-auto max-w-7xl py-8 px-4 space-y-6">
@@ -154,10 +150,16 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 						</h1>
 						<ReporterMeta reporterCountry={submission.reporterCountry} reporterHeaders={submission.reporterHeaders} />
 					</div>
-					<div className="flex shrink-0 items-center gap-2">
+					<div className="flex flex-wrap items-center gap-2">
 						<Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
 							{formatUtcDateTime(submission.createdAt) ?? "Unknown time"}
 						</Badge>
+						{retried ? (
+							<span className="flex items-center gap-1 whitespace-nowrap text-xs text-muted-foreground" title={`Last analyzed again ${formatUtcDateTime(submission.retries.lastAt) ?? ""}`}>
+								<RotateCcw className="h-3 w-3" />
+								{retried}
+							</span>
+						) : null}
 						<SubmissionStatus status={submission.status} reportedAs={funnels.length && !confirmedSites.length ? "deceptive_funnel" : undefined} />
 					</div>
 				</div>
@@ -232,8 +234,14 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 					{isReported ? (
 						<VerdictPanel sites={confirmedSites} funnels={funnels} routeCount={routes.length} onShowRoute={setChosenRoute} reports={reports} caseId={id} submittedSite={targetName ?? null} reportCount={reportCount} joinedCases={reports.every((report) => report.submissionId !== null && String(report.submissionId) !== id) ? [...new Set(reports.map((report) => String(report.submissionId)))] : []} info={submission.info} onShowReports={() => setTab("reports")} />
 					) : null}
-					{isInvalidWebsite ? <NotReportedPanel info={submission.info} /> : null}
-					{isFailed ? <FailedPanel info={submission.info} canRetry={canRetryAnalysis} retrying={retrying} retryError={retryError} retryHint={retryHint} onRetry={retryAnalysis} /> : null}
+					{isInvalid ? (
+						<OutcomePanel
+							title="Not reported"
+							info={submission.info || (submission.kind === "email" ? "The email was judged not to be phishing; no report was created." : "No reportable phishing or malware evidence was found; no report was created.")}
+							analyzeAgain={analyzeAgain}
+						/>
+					) : null}
+					{isFailed ? <OutcomePanel title="Failure reason" info={submission.info || "The analysis did not complete."} analyzeAgain={analyzeAgain} /> : null}
 					{website ? (
 						<SiteVisitTimeline running={isRunning} visit={walked?.visit} offeredDownload={offeredDownload} live={liveVisit} pageCount={visitPages.length} routeName={routes.length > 1 ? routeLabel(route) : undefined} />
 					) : null}

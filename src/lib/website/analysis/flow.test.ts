@@ -6,7 +6,8 @@ import { AbuseRepository } from "../../abuse/repository";
 import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../db/test_helpers";
-import { retryFailedWebsiteAnalysis, websiteSubmissionDedupeKey } from "../../submissions/website";
+import { retryWebsiteAnalysis, websiteSubmissionDedupeKey } from "../../submissions/website";
+import { SubmissionRetriesEntity } from "../../db/entities/submission_retries";
 import { capturedDocumentContent } from "../archive/text";
 import type { ArchiveWebsiteOptions, WebsiteArchiveResult, WebsitePageSession } from "../archive/types";
 import { analyzeWebsite } from "./ai";
@@ -407,7 +408,7 @@ describe("a visit through a multi-page kit", () => {
 
 		// The retry visits the submitted URL live; the stored page of an unfinished visit is not reused.
 		const retried: Array<Parameters<typeof analyzeWebsite>[0]> = [];
-		await retryFailedWebsiteAnalysis(id, async (options) => { retried.push(options); });
+		await retryWebsiteAnalysis(id, { startAnalysis: async (options) => { retried.push(options); } });
 		expect(retried).toEqual([expect.objectContaining({ url: CONSENT, mhtmlSnapshot: undefined, reuseEvidenceArtifacts: false })]);
 
 		await analyzeWebsite(retried[0]!, deps);
@@ -425,6 +426,18 @@ describe("a visit through a multi-page kit", () => {
 		expect(submission?.status).toBe("invalid");
 		expect(submission?.info).toBe(`No reportable phishing or malware evidence was found at the captured destination ${RECOVERY}; no report was created.`);
 		expect(websiteData(submission)?.autoRetry).toBeUndefined();
+
+		// Anyone may have it analyzed again; the retry keeps the verdict it replaces.
+		const started: Array<Parameters<typeof analyzeWebsite>[0]> = [];
+		await retryWebsiteAnalysis(id, { startAnalysis: async (options) => { started.push(options); } });
+		expect(started).toEqual([expect.objectContaining({ url: CONSENT, mhtmlSnapshot: undefined })]);
+		expect(await SubmissionRetriesEntity.listForSubmission(id)).toEqual([expect.objectContaining({
+			submissionId: id,
+			fromStatus: "invalid",
+			previousInfo: submission?.info,
+			previousFinding: "insufficient_evidence",
+			trigger: "manual",
+		})]);
 	});
 
 	test("every live capture of the case presents the reporter's own browser; a report without one keeps the default", async () => {
@@ -456,7 +469,7 @@ describe("a visit through a multi-page kit", () => {
 		await SubmissionsEntity.update(id, { status: "failed" });
 
 		const started: Array<Parameters<typeof analyzeWebsite>[0]> = [];
-		await retryFailedWebsiteAnalysis(id, async (options) => { started.push(options); });
+		await retryWebsiteAnalysis(id, { startAnalysis: async (options) => { started.push(options); } });
 		expect(started).toHaveLength(1);
 		expect(started[0]!.archivedUrl).toBe(RECOVERY);
 		expect(started[0]!.mhtmlSnapshot?.toString("utf8")).toContain(`Snapshot-Content-Location: ${RECOVERY}`);

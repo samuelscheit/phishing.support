@@ -282,7 +282,11 @@ async function notifyReporter(submissionId: bigint, to: string | undefined, { su
 	}
 }
 
-export async function analyzeMail(emlContent: string, stream_id: bigint, options: { reuseEvidenceArtifacts?: boolean } = {}) {
+export async function analyzeMail(emlContent: string, stream_id: bigint, options: {
+	reuseEvidenceArtifacts?: boolean;
+	/** A retry of a case judged not phishing: the reporter heard that verdict already, so only a changed one is sent. */
+	reporterToldNotPhishing?: boolean;
+} = {}) {
 	try {
 		const originalMail = await parseMail(emlContent);
 		const mail = cleanPrivateInformation(originalMail);
@@ -308,7 +312,7 @@ export async function analyzeMail(emlContent: string, stream_id: bigint, options
 		// A mail addressed to the service itself has no reporter mailbox to answer.
 		const reporterAddress = originalMail.to_object?.address;
 		const to = reporterAddress && !isServiceAddress(reporterAddress) ? reporterAddress : undefined;
-		await notifyReporter(stream_id, to, reporterNotification(phishing, mail, stream_id));
+		if (phishing || !options.reporterToldNotPhishing) await notifyReporter(stream_id, to, reporterNotification(phishing, mail, stream_id));
 
 		await emitStep(stream_id, "completed", 100);
 	} catch (error) {

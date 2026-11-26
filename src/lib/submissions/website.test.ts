@@ -7,11 +7,11 @@ import { useTemporaryDatabase } from "../db/test_helpers";
 import { reportConfirmedWebsiteAbuse } from "../abuse/submission_reports";
 import { getRetryableSubmission } from "./retry";
 import { retryInterruptedWebsiteAnalysis } from "../website/analysis/ai";
-import { createWebsiteSubmission, runDueWebsiteAutoRetries, SubmissionRetryError, retryFailedWebsiteAnalysis, websiteSubmissionUrl } from "./website";
+import { createWebsiteSubmission, runDueWebsiteAutoRetries, SubmissionRetryError, retryWebsiteAnalysis, websiteSubmissionUrl } from "./website";
 
 useTemporaryDatabase();
 
-describe("retryFailedWebsiteAnalysis", () => {
+describe("retryWebsiteAnalysis", () => {
 	test("rejects a non-website submission before scheduling work", async () => {
 		const id = await SubmissionsEntity.create({
 			id: 1n,
@@ -21,7 +21,7 @@ describe("retryFailedWebsiteAnalysis", () => {
 			status: "failed",
 		});
 
-		await expect(retryFailedWebsiteAnalysis(id)).rejects.toBeInstanceOf(SubmissionRetryError);
+		await expect(retryWebsiteAnalysis(id)).rejects.toBeInstanceOf(SubmissionRetryError);
 		expect((await SubmissionsEntity.get(id))?.status).toBe("failed");
 	});
 
@@ -34,7 +34,7 @@ describe("retryFailedWebsiteAnalysis", () => {
 			status: "failed",
 		});
 
-		await expect(retryFailedWebsiteAnalysis(id)).rejects.toThrow("original website URL is unavailable");
+		await expect(retryWebsiteAnalysis(id)).rejects.toThrow("original website URL is unavailable");
 		expect((await SubmissionsEntity.get(id))?.status).toBe("failed");
 	});
 
@@ -51,10 +51,12 @@ describe("retryFailedWebsiteAnalysis", () => {
 		const failedRun = await AnalysisRunsEntity.create(id, "analysis");
 		await AnalysisRunsEntity.fail(failedRun);
 
-		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({
+		await expect(getRetryableSubmission(id, "website")).resolves.toMatchObject({
 			submission: { id, status: "failed" },
 		});
-		await expect(getRetryableSubmission(id, "website")).rejects.toBeInstanceOf(SubmissionRetryError);
+		// A run still going is the case being analyzed: no second analysis beside it.
+		await AnalysisRunsEntity.create(id, "analysis");
+		await expect(getRetryableSubmission(id, "website")).rejects.toThrow("being analyzed or was already reported");
 	});
 
 	test("a website judged not reportable can be analyzed again; a running or reported one cannot", async () => {
@@ -66,12 +68,12 @@ describe("retryFailedWebsiteAnalysis", () => {
 			status: "invalid",
 		});
 		for (const _stage of ["analysis", "classification"]) await AnalysisRunsEntity.complete(await AnalysisRunsEntity.create(id, "analysis"));
-		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({ submission: { id, status: "invalid" } });
+		await expect(getRetryableSubmission(id, "website")).resolves.toMatchObject({ submission: { id, status: "invalid" } });
 
 		await SubmissionsEntity.update(id, { status: "running" });
-		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).rejects.toThrow("Only failed or unreported submissions can be retried.");
+		await expect(getRetryableSubmission(id, "website")).rejects.toThrow("Only failed or unreported submissions can be retried.");
 		await SubmissionsEntity.update(id, { status: "reported" });
-		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).rejects.toThrow("Only failed or unreported submissions can be retried.");
+		await expect(getRetryableSubmission(id, "website")).rejects.toThrow("Only failed or unreported submissions can be retried.");
 	});
 
 	test("a website that failed while handing its finding to reporting stays retryable until a report exists", async () => {
@@ -84,9 +86,9 @@ describe("retryFailedWebsiteAnalysis", () => {
 		});
 		for (const _stage of ["analysis", "classification"]) await AnalysisRunsEntity.complete(await AnalysisRunsEntity.create(id, "analysis"));
 
-		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({ submission: { id } });
+		await expect(getRetryableSubmission(id, "website")).resolves.toMatchObject({ submission: { id } });
 		await reportConfirmedWebsiteAbuse({ submissionId: id, urls: ["https://85.215.226.225/Netflix/Home/login.php"], analysisText: "Credential page.", reporter: {}, finding: { finding: "phishing", phishingBasis: "credential_theft" } });
-		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).rejects.toThrow("cannot be retried");
+		await expect(getRetryableSubmission(id, "website")).rejects.toThrow("cannot be retried");
 	});
 
 	test("a capture that showed only a cloaking decoy is fetched again instead of re-analyzing the retained decoy", async () => {
@@ -110,7 +112,7 @@ describe("retryFailedWebsiteAnalysis", () => {
 		});
 		const started: Array<{ mhtmlSnapshot?: Buffer; reuseEvidenceArtifacts?: boolean }> = [];
 
-		await retryFailedWebsiteAnalysis(id, async (options) => started.push(options));
+		await retryWebsiteAnalysis(id, { startAnalysis: async (options) => started.push(options) });
 
 		expect(started).toHaveLength(1);
 		expect(started[0]?.mhtmlSnapshot).toBeUndefined();
@@ -135,7 +137,7 @@ describe("retryFailedWebsiteAnalysis", () => {
 		});
 		const started: Array<{ url: string; mhtmlSnapshot?: Buffer; screenshotSnapshot?: Buffer; reuseEvidenceArtifacts?: boolean }> = [];
 
-		await retryFailedWebsiteAnalysis(id, async (options) => started.push(options));
+		await retryWebsiteAnalysis(id, { startAnalysis: async (options) => started.push(options) });
 
 		expect(started).toHaveLength(1);
 		expect(started[0]).toMatchObject({ url, reuseEvidenceArtifacts: false });
@@ -143,7 +145,7 @@ describe("retryFailedWebsiteAnalysis", () => {
 		expect(started[0]?.screenshotSnapshot).toBeUndefined();
 		expect((await SubmissionsEntity.get(id))?.status).toBe("running");
 		// The claim is taken once: a second request while it runs is refused.
-		await expect(retryFailedWebsiteAnalysis(id, async (options) => started.push(options))).rejects.toThrow("Only failed or unreported submissions can be retried.");
+		await expect(retryWebsiteAnalysis(id, { startAnalysis: async (options) => started.push(options) })).rejects.toThrow("Only failed or unreported submissions can be retried.");
 		expect(started).toHaveLength(1);
 	});
 
@@ -161,7 +163,7 @@ describe("retryFailedWebsiteAnalysis", () => {
 
 		const runs = await AnalysisRunsEntity.listForSubmission(id);
 		expect(runs).toMatchObject([{ id: runId, status: "failed" }]);
-		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({
+		await expect(getRetryableSubmission(id, "website")).resolves.toMatchObject({
 			submission: { id, status: "failed" },
 		});
 

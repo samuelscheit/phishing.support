@@ -5,7 +5,7 @@ import { ResponseInputItem, ResponseOutputItem } from "openai/resources/response
 import { MailData } from "../mail/ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
 import type { WebsiteAccessGate } from "../website/visit/access_gate";
-import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteRotation, WebsiteRoute } from "../website/types";
+import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteRotation, WebsiteRoute, WebsiteSiteFinding } from "../website/types";
 
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
@@ -115,6 +115,40 @@ export const submissions = sqliteTable(
 );
 
 export type Submission = InferSelectModel<typeof submissions>;
+
+/** Who started a retry: someone pressing "Analyze again", or the server re-queuing a case on its own. */
+export const submissionRetryTrigger = ["manual", "automatic"] as const;
+export type SubmissionRetryTrigger = (typeof submissionRetryTrigger)[number];
+
+/**
+ * Every time a failed or unreported case was analyzed again, with what it
+ * stood at before: its status, its info line and its finding (a website's
+ * verdict on its headline page; an email keeps none). Written in the same
+ * transaction that claims the case for the retry, so each started retry has
+ * exactly one row and a refused or lost claim has none.
+ */
+export const submissionRetries = sqliteTable(
+	"submission_retries",
+	{
+		id: sqliteBigint("id").primaryKey(),
+		submissionId: sqliteBigint("submission_id")
+			.notNull()
+			.references(() => submissions.id, { onDelete: "cascade" }),
+		fromStatus: text("from_status", { enum: submissionStatus }).notNull(),
+		previousInfo: text("previous_info"),
+		previousFinding: text("previous_finding").$type<WebsiteSiteFinding>(),
+		trigger: text("trigger", { enum: submissionRetryTrigger }).notNull(),
+		createdAt: sqliteTimestamp("created_at")
+			.notNull()
+			.default(sql`(unixepoch() * 1000)`),
+	},
+	(table) => [
+		index("submission_retries_submission_created_idx").on(table.submissionId, table.createdAt),
+		index("submission_retries_created_idx").on(table.createdAt),
+	]
+);
+
+export type SubmissionRetry = InferSelectModel<typeof submissionRetries>;
 
 /** Analyzer execution runs. */
 export const analysisRuns = sqliteTable(

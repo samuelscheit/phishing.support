@@ -5,7 +5,8 @@ import { analyzeWebsite, type AnalyzeWebsiteOptions } from "@/lib/website/analys
 import type { ReporterMetadata } from "@/lib/http/reporter_headers";
 import { websiteSite } from "@/lib/website/info/site";
 import { analyzedPage, latestArtifactNamed, navigationToPage, websiteCaptureFileNames } from "@/lib/website/visit/capture_files";
-import { getRetryableSubmission, SubmissionRetryError } from "./retry";
+import type { SubmissionRetryTrigger } from "@/lib/db/schema";
+import { claimRetry, getRetryableSubmission, SubmissionRetryError } from "./retry";
 
 export { SubmissionRetryError } from "./retry";
 
@@ -41,7 +42,7 @@ export async function runDueWebsiteAutoRetries(params: {
 	let started = 0;
 	for (const { id } of await SubmissionsEntity.listDueWebsiteAutoRetries(params.now ?? new Date())) {
 		try {
-			await retryFailedWebsiteAnalysis(id, params.startAnalysis);
+			await retryWebsiteAnalysis(id, { trigger: "automatic", startAnalysis: params.startAnalysis });
 			started++;
 		} catch (error) {
 			if (!(error instanceof SubmissionRetryError)) throw error;
@@ -127,11 +128,15 @@ export async function createWebsiteSubmission(
  * judged not reportable was fully judged on its capture; judging that capture
  * again gives the same verdict, so it visits the site again.
  */
-export async function retryFailedWebsiteAnalysis(
+export async function retryWebsiteAnalysis(
 	submissionId: bigint,
-	startAnalysis: (options: AnalyzeWebsiteOptions) => Promise<unknown> = analyzeWebsite,
+	{ trigger = "manual", startAnalysis = analyzeWebsite }: {
+		/** Someone asked for it, or the automatic retry of a browser-service failure or restart did. */
+		trigger?: SubmissionRetryTrigger;
+		startAnalysis?: (options: AnalyzeWebsiteOptions) => Promise<unknown>;
+	} = {},
 ): Promise<void> {
-	const { submission } = await getRetryableSubmission(submissionId, "website", { allowCompletedPriorRuns: true });
+	const { submission } = await getRetryableSubmission(submissionId, "website");
 	const url = submission.data.kind === "website" ? submission.data.website?.url : undefined;
 	if (!url) throw new SubmissionRetryError("The original website URL is unavailable.");
 
@@ -167,8 +172,7 @@ export async function retryFailedWebsiteAnalysis(
 		if (artifact?.blob?.byteLength) screenshotSnapshot = artifact.blob;
 	}
 
-	const claimed = await SubmissionsEntity.transitionStatus(submissionId, submission.status, "running");
-	if (!claimed) throw new SubmissionRetryError("This submission is already being retried.");
+	await claimRetry(submission, trigger);
 
 	void startAnalysis({
 		submissionId,

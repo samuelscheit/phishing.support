@@ -1,6 +1,7 @@
 import { CampaignRepository } from "@/lib/campaign/repository";
 import { AnalysisRunsEntity } from "@/lib/db/entities/analysis_runs";
 import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
+import { SubmissionRetriesEntity } from "@/lib/db/entities/submission_retries";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import type { AnalysisRun, Artifact, Submission } from "@/lib/db/schema";
 import { withoutBackendSecrets } from "@/lib/exfiltration/secrets";
@@ -23,6 +24,8 @@ export type SubmissionDetail = Omit<Submission, "reporterIp"> & {
 	 * what to do and lists the group's other sites.
 	 */
 	campaigns: Array<{ id: string; siteCount: number; host: string }>;
+	/** How often the case was analyzed again, by anyone or automatically, and when last. */
+	retries: { count: number; lastAt: Date | null };
 };
 
 async function campaignsOf(submissionId: bigint): Promise<SubmissionDetail["campaigns"]> {
@@ -53,11 +56,12 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 	if (!stored) return undefined;
 	const { reporterIp: _reporterIp, ...submission } = stored;
 
-	const [analysisRuns, reports, artifacts, campaigns] = await Promise.all([
+	const [analysisRuns, reports, artifacts, campaigns, retries] = await Promise.all([
 		AnalysisRunsEntity.listForSubmission(submissionId),
 		getReportsForSubmission(submissionId),
 		ArtifactsEntity.listForSubmission(submissionId),
 		campaignsOf(submissionId),
+		SubmissionRetriesEntity.summaryForSubmission(submissionId),
 	]);
 	return withoutBackendSecrets({
 		...submission,
@@ -66,5 +70,6 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 		reports,
 		artifacts,
 		campaigns,
+		retries,
 	});
 }

@@ -361,6 +361,15 @@ export type WebsiteKitResource = {
  */
 export type WebsiteSiteFinding = "phishing" | "malware" | "benign" | "prank_or_troll" | "insufficient_evidence";
 
+/** Each finding as a person reads it. */
+export const WEBSITE_FINDING_LABELS: Record<WebsiteSiteFinding, string> = {
+	phishing: "Phishing",
+	malware: "Malware distribution",
+	benign: "Not phishing or malware",
+	prank_or_troll: "Prank / troll — not phishing",
+	insufficient_evidence: "Insufficient evidence",
+};
+
 /** What a confirmed phishing page takes from its visitor. */
 export type WebsitePhishingBasis = "credential_theft" | "payment_fraud";
 

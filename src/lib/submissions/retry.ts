@@ -1,7 +1,9 @@
 import { AbuseRepository } from "@/lib/abuse/repository";
 import { AnalysisRunsEntity } from "@/lib/db/entities/analysis_runs";
+import { SubmissionRetriesEntity } from "@/lib/db/entities/submission_retries";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
-import type { SubmissionKind } from "@/lib/db/schema";
+import type { Submission, SubmissionKind, SubmissionRetryTrigger } from "@/lib/db/schema";
+import { formatUtcDateTime } from "@/lib/util/date_time";
 
 /** A user-facing validation error for a retry that cannot safely be queued. */
 export class SubmissionRetryError extends Error {
@@ -16,18 +18,17 @@ export class SubmissionRetryError extends Error {
  *
  * Retrying is limited to analyses that failed or found nothing reportable
  * (`invalid`) and have not crossed the reporting boundary: an invalid verdict
- * can be wrong (a capture that missed what the page hides), and nothing of it
- * reached a provider. Callers may allow completed stages to be superseded when
- * a later stage, including the report handoff itself, failed; active runs and
- * any report work are never replayed. The status transition is performed by each analyzer after
- * kind-specific source validation, so concurrent requests are serialized by the
- * database rather than by the HTTP process.
+ * can be wrong (a capture that missed what the page hides, case
+ * 384401854580134038), and nothing of it reached a provider. Completed
+ * analysis runs are superseded by the retry's own, of either kind: a case is
+ * judged not reportable after its runs completed, and a case can fail after
+ * them while handing its finding to reporting. Only a running run or an
+ * existing report makes a replay unsafe: the report may already have reached
+ * providers. The claim (`claimRetry`) follows each analyzer's kind-specific
+ * source validation, so concurrent requests are serialized by the database
+ * rather than by the HTTP process.
  */
-export async function getRetryableSubmission(
-	submissionId: bigint,
-	kind: SubmissionKind,
-	options: { allowCompletedPriorRuns?: boolean } = {},
-) {
+export async function getRetryableSubmission(submissionId: bigint, kind: SubmissionKind) {
 	const submission = await SubmissionsEntity.get(submissionId);
 	if (!submission || submission.kind !== kind) {
 		throw new SubmissionRetryError(`Only ${kind} submissions can be retried.`);
@@ -40,16 +41,35 @@ export async function getRetryableSubmission(
 		AnalysisRunsEntity.listForSubmission(submissionId),
 		AbuseRepository.getReportForSubmission(submissionId),
 	]);
-	// A website has two analysis runs (narrative, then classification) and can
-	// fail after both completed, while handing the finding to reporting. Only an
-	// existing report makes replay unsafe: it may already have reached providers.
-	if (
-		runs.some((run) => run.status === "running") ||
-		(!options.allowCompletedPriorRuns && runs.some((run) => run.status === "completed")) ||
-		report
-	) {
-		throw new SubmissionRetryError("This submission already completed analysis or reporting and cannot be retried.");
+	if (runs.some((run) => run.status === "running") || report) {
+		throw new SubmissionRetryError("This submission is being analyzed or was already reported and cannot be retried.");
 	}
 
 	return { submission, runs };
+}
+
+/**
+ * How long a case waits after a retry before anyone may start another by
+ * hand. The retry route takes no login, and every website retry visits the
+ * site again and every retry runs the models again: without a pause, one
+ * case could be re-run without end. Automatic retries keep their own backoff.
+ */
+export const MANUAL_RETRY_COOLDOWN_MS = 10 * 60_000;
+
+/**
+ * The one place a retry takes a case: it moves the case from the status it
+ * was validated at to running and records the retry, manual or automatic,
+ * with what the case stood at. A request that lost the race to another
+ * retry, or a manual one within the cooldown, is refused and records nothing.
+ */
+export async function claimRetry(submission: Pick<Submission, "id" | "status">, trigger: SubmissionRetryTrigger, now = new Date()): Promise<void> {
+	if (trigger === "manual") {
+		const { lastAt } = await SubmissionRetriesEntity.summaryForSubmission(submission.id);
+		const allowedAt = lastAt ? lastAt.getTime() + MANUAL_RETRY_COOLDOWN_MS : 0;
+		if (allowedAt > now.getTime()) {
+			throw new SubmissionRetryError(`This case was analyzed again moments ago; it can be analyzed again from ${formatUtcDateTime(new Date(allowedAt))}.`);
+		}
+	}
+	const claimed = await SubmissionRetriesEntity.claim({ submissionId: submission.id, from: submission.status, trigger });
+	if (!claimed) throw new SubmissionRetryError("This submission is already being retried.");
 }

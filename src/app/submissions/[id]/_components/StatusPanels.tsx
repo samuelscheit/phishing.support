@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { ShieldAlert } from "lucide-react";
+import { RotateCcw, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { describeDataEntryField } from "@/lib/website/types";
 import { routeLabel, verdictLabelOf, type ConfirmedSite, type DeceptiveRoute } from "./helpers";
@@ -114,29 +114,28 @@ export function VerdictPanel({ sites, funnels, routeCount, reports, caseId, subm
 	);
 }
 
-export function NotReportedPanel({ info }: { info: string | null | undefined }) {
-	return (
-		<div className={PANEL}>
-			<div className="text-xs font-semibold text-muted-foreground">Not reported</div>
-			<div className="mt-1 text-sm whitespace-pre-wrap">{info}</div>
-		</div>
-	);
-}
+/** The "Analyze again" action of a case: offered (`offered`) only while the case can take a retry. */
+export type AnalyzeAgain = { offered: boolean; running: boolean; error: string | null; hint: string; onStart: () => void };
 
-export function FailedPanel({ info, canRetry, retrying, retryError, retryHint, onRetry }: { info: string | null | undefined; canRetry: boolean; retrying: boolean; retryError: string | null; retryHint: string; onRetry: () => void }) {
+/**
+ * Why a case ended without a report, a verdict of nothing reportable or a
+ * failed analysis, with the way to have it analyzed again.
+ */
+export function OutcomePanel({ title, info, analyzeAgain }: { title: string; info: string; analyzeAgain: AnalyzeAgain }) {
 	return (
 		<div className={PANEL}>
-			<div className="text-xs font-semibold text-muted-foreground">Failure reason</div>
-			<div className="mt-1 text-sm whitespace-pre-wrap">{info || "The analysis did not complete."}</div>
-			{canRetry ? (
+			<div className="text-xs font-semibold text-muted-foreground">{title}</div>
+			<div className="mt-1 text-sm whitespace-pre-wrap">{info}</div>
+			{analyzeAgain.offered ? (
 				<div className="mt-3 flex flex-wrap items-center gap-3">
-					<Button type="button" variant="outline" size="sm" disabled={retrying} onClick={onRetry}>
-						{retrying ? "Retrying analysis…" : "Retry analysis"}
+					<Button type="button" variant="outline" size="sm" disabled={analyzeAgain.running} onClick={analyzeAgain.onStart}>
+						<RotateCcw className="h-3.5 w-3.5" />
+						{analyzeAgain.running ? "Starting analysis…" : "Analyze again"}
 					</Button>
-					<span className="text-xs text-muted-foreground">{retryHint}</span>
+					<span className="text-xs text-muted-foreground">{analyzeAgain.hint}</span>
 				</div>
 			) : null}
-			{retryError ? <div className="mt-2 text-sm text-destructive">{retryError}</div> : null}
+			{analyzeAgain.error ? <div className="mt-2 text-sm text-destructive">{analyzeAgain.error}</div> : null}
 		</div>
 	);
 }

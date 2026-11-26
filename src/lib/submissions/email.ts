@@ -1,11 +1,12 @@
 
 import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
+import { SubmissionRetriesEntity } from "@/lib/db/entities/submission_retries";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { generateId } from "@/lib/db/ids";
 import { analyzeMail } from "@/lib/mail/ai";
 import type { ReporterMetadata } from "@/lib/http/reporter_headers";
 
-import { getRetryableSubmission, SubmissionRetryError } from "./retry";
+import { claimRetry, getRetryableSubmission, SubmissionRetryError } from "./retry";
 import { sha256Hex } from "../util/hash";
 
 export { SubmissionRetryError } from "./retry";
@@ -41,12 +42,17 @@ export async function createEmailSubmissionFromEml(emlContent: string, options: 
 }
 
 /**
- * Re-run a failed analysis that has not crossed the reporting boundary. The
- * original MIME artifact and submission identity are retained; retrying never
- * creates a second submission or duplicates an already-created abuse report.
+ * Re-run a failed or unreported email analysis that has not crossed the
+ * reporting boundary. The original MIME artifact and submission identity are
+ * retained; retrying never creates a second submission or duplicates an
+ * already-created abuse report. A reporter already told their mail is not
+ * phishing hears again only when the retry finds that it is.
  */
-export async function retryFailedEmailAnalysis(submissionId: bigint): Promise<void> {
-	await getRetryableSubmission(submissionId, "email");
+export async function retryEmailAnalysis(
+	submissionId: bigint,
+	analyze: typeof analyzeMail = analyzeMail,
+): Promise<void> {
+	const { submission } = await getRetryableSubmission(submissionId, "email");
 	const artifactList = await ArtifactsEntity.listForSubmission(submissionId);
 
 	const original = artifactList.find(
@@ -56,10 +62,12 @@ export async function retryFailedEmailAnalysis(submissionId: bigint): Promise<vo
 	const artifact = await ArtifactsEntity.get(original.id);
 	if (!artifact?.blob) throw new SubmissionRetryError("The original email artifact is unavailable.");
 
-	const claimed = await SubmissionsEntity.transitionStatus(submissionId, "failed", "running");
-	if (!claimed) throw new SubmissionRetryError("This submission is already being retried.");
+	// The reporter heard "not phishing" whenever the case was judged so: now, or before a retry that later failed.
+	const reporterToldNotPhishing = submission.status === "invalid"
+		|| (await SubmissionRetriesEntity.listForSubmission(submissionId)).some((retry) => retry.fromStatus === "invalid");
+	await claimRetry(submission, "manual");
 
-	void analyzeMail(artifact.blob.toString("utf-8"), submissionId, { reuseEvidenceArtifacts: true }).catch(async (error) => {
+	void analyze(artifact.blob.toString("utf-8"), submissionId, { reuseEvidenceArtifacts: true, reporterToldNotPhishing }).catch(async (error) => {
 		console.error("Retried email analysis failed:", error);
 	});
 }

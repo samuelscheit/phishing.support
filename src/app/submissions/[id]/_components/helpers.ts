@@ -1,7 +1,7 @@
 import type { Artifact } from "@/lib/db/schema";
 import type { DeceptiveFunnelFinding } from "@/lib/abuse/funnel/classification";
 import type { SubmissionDetail } from "@/lib/submissions/details";
-import type { WebsiteFunnel, WebsiteNavigationHop, WebsitePhishingBasis, WebsiteRoute, WebsiteRouteVisitor, WebsiteSiteAssessment } from "@/lib/website/types";
+import { WEBSITE_FINDING_LABELS, type WebsiteFunnel, type WebsiteNavigationHop, type WebsitePhishingBasis, type WebsiteRoute, type WebsiteRouteVisitor, type WebsiteSiteAssessment } from "@/lib/website/types";
 import { websiteSite } from "@/lib/website/info/site";
 import { isPageHop } from "@/lib/website/visit/capture_files";
 
@@ -13,6 +13,27 @@ const PHISHING_BASIS_LABELS: Record<WebsitePhishingBasis, string> = {
 	credential_theft: "credential theft",
 	payment_fraud: "payment fraud",
 };
+
+/**
+ * Whether a case offers "Analyze again": its analysis failed, or it found
+ * nothing reportable, which can be wrong (case 384401854580134038 copied
+ * another command than it showed); no run is still going, nothing was
+ * reported, and the source to analyze is kept (`hasSource`: a website's URL,
+ * an email's original message). The server checks the same before it claims
+ * the case.
+ */
+export function canAnalyzeAgain(submission: Pick<SubmissionDetail, "status" | "analysisRuns">, reportCount: number, hasSource: boolean): boolean {
+	return (submission.status === "failed" || submission.status === "invalid")
+		&& submission.analysisRuns.every((run) => run.status !== "running")
+		&& reportCount === 0
+		&& hasSource;
+}
+
+/** The case's retry count beside its status; nothing for a case never analyzed again. */
+export function retryCountLabel(count: number): string | undefined {
+	if (count <= 0) return undefined;
+	return `Analyzed again ${count === 1 ? "once" : `${count} times`}`;
+}
 
 export function formatArtifactSize(value: number | bigint | null | undefined) {
 	if (value === null || value === undefined) return "Unknown size";
@@ -105,12 +126,10 @@ export function verdictLabelOf(assessment: SiteAssessment | undefined): string |
 
 /** The per-hop finding line of the navigation tab. */
 export function hopFindingLabel(assessment: SiteAssessment | undefined): string | undefined {
-	switch (assessment?.finding) {
-		case "prank_or_troll": return "Prank / troll — not phishing";
-		case "insufficient_evidence": return "Insufficient evidence";
-		case "phishing": return assessment.phishingBasis ? `Phishing — ${PHISHING_BASIS_LABELS[assessment.phishingBasis]}` : "Phishing";
-		case "malware": return assessment.hiddenFrame ? "Malware — drive-by exploit in a hidden frame" : assessment.offeredDownload ? "Malware — the file it offers" : assessment.clipboardWrite ? "Malware — the command its copy button hands out" : "Malware distribution";
-		case "benign": return "Not phishing or malware";
-		default: return undefined;
+	if (!assessment) return undefined;
+	switch (assessment.finding) {
+		case "phishing": return assessment.phishingBasis ? `Phishing — ${PHISHING_BASIS_LABELS[assessment.phishingBasis]}` : WEBSITE_FINDING_LABELS.phishing;
+		case "malware": return assessment.hiddenFrame ? "Malware — drive-by exploit in a hidden frame" : assessment.offeredDownload ? "Malware — the file it offers" : assessment.clipboardWrite ? "Malware — the command its copy button hands out" : WEBSITE_FINDING_LABELS.malware;
+		default: return WEBSITE_FINDING_LABELS[assessment.finding];
 	}
 }

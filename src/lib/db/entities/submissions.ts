@@ -70,17 +70,6 @@ export class SubmissionsEntity {
         return row!.id;
     }
 
-    /** Atomically claim a submission for a state transition. */
-    static async transitionStatus(id: bigint, from: SubmissionStatus, to: SubmissionStatus, info?: string): Promise<boolean> {
-        const db = await getDb();
-        const rows = await db
-            .update(submissions)
-            .set({ status: to, info, updatedAt: new Date() })
-            .where(and(eq(submissions.id, id), eq(submissions.status, from)))
-            .returning({ id: submissions.id });
-        return rows.length === 1;
-    }
-
     static async failAllRunning(params?: { info?: string }) {
         const db = await getDb();
         const info = params?.info ?? "Marked as failed (previous run did not complete).";
