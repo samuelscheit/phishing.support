@@ -13,7 +13,7 @@ import { describeCampaignIfChanged, linkSiteMember, type LinkDependencies } from
 import type { CampaignSite } from "./members";
 import type { DescribeDependencies } from "./summary";
 import { CampaignRepository } from "./repository";
-import { kitCapture } from "./test_mhtml";
+import { kitCapture } from "../website/test_mhtml";
 import { confirmedCase } from "./test_sites";
 
 useTemporaryDatabase();

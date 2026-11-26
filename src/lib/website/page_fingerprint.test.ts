@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { pageFingerprints } from "./page_document";
+import { pageFingerprints } from "./page_fingerprint";
 import { kitCapture as capture, templatePage } from "./test_mhtml";
 
 const body = (host: string, cid: string, options: Parameters<typeof capture>[2] = {}) => pageFingerprints(capture(host, cid, options), `https://${host}/`).body;

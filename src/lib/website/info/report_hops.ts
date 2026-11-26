@@ -64,4 +64,4 @@ export function capturedArchiveHop(archive: Pick<WebsiteEvidenceArchive, "url" |
 	return capturedHops[0]!;
 }
 
-export const isReportable = (classification: WebsiteSiteClassification) => classification.finding === "phishing" || classification.finding === "malware";
+export const isReportable = (classification: Pick<WebsiteSiteClassification, "finding">) => classification.finding === "phishing" || classification.finding === "malware";

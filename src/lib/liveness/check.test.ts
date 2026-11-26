@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { AbuseInputError } from "../abuse/security/security";
+import { htmlFingerprints } from "../website/page_fingerprint";
+import { templatePage } from "../website/test_mhtml";
 import { checkSite, type SiteCheckDependencies, type SiteDnsResolver } from "./check";
 
 const NOW = new Date("2026-11-19T10:00:00.000Z");
@@ -81,6 +83,8 @@ describe("checkSite", () => {
 			// The networks are attributed by the scheduled check, which knows the previous check's.
 			hosting: { addresses: [{ ip: "203.0.113.10" }, { ip: "203.0.113.11" }, { ip: "2001:db8::10" }], server: "nginx/1.30.0" },
 			domainStatuses: ["client transfer prohibited"],
+			// A one-form page is too generic to identify the kit by.
+			pageFingerprints: null,
 			checkedAt: NOW,
 		});
 		expect(requests).toHaveLength(1);
@@ -88,6 +92,24 @@ describe("checkSite", () => {
 		expect(requests[0]!.headers["user-agent"]).toMatch(/^Mozilla\/5\.0 \(Macintosh;.*Chrome\/\d+/);
 		expect(requests[0]!.headers.accept).toContain("text/html");
 		expect(requests[0]!.headers["accept-language"]).toContain("en-US");
+	});
+
+	test("an online page is fingerprinted as the server sent it, with the site's own address masked; a page that is not the site has none", async () => {
+		const page = (host: string) => `<html><head><title>Sign in</title></head><body>${templatePage(12, (card) => `Verify your account ${card} at ${host} `.repeat(4))}</body></html>`;
+		const { fetch } = site({
+			[SITE]: { status: 200, body: page("login.kit-example.com") },
+			"https://login.kit-copy.net/verify": { status: 200, body: page("login.kit-copy.net") },
+			"https://login.kit-gone.org/verify": { status: 404, body: page("login.kit-gone.org") },
+		});
+		const online = await checkSite(SITE, dependencies({ fetch }));
+		expect(online.pageFingerprints).toEqual(htmlFingerprints(page("login.kit-example.com"), SITE));
+		expect(online.pageFingerprints?.body?.sha256).toMatch(/^[a-f0-9]{64}$/);
+		expect(online.pageFingerprints?.structure?.tags).toBe(8 + 8 * 12);
+		// The same kit on another domain: the same page, because each copy's own address is masked.
+		const copy = (await checkSite("https://login.kit-copy.net/verify", dependencies({ fetch }))).pageFingerprints;
+		expect([copy?.body?.sha256, copy?.structure?.sha256]).toEqual([online.pageFingerprints!.body!.sha256, online.pageFingerprints!.structure!.sha256]);
+		// A removed page is not the site, whatever its markup.
+		expect((await checkSite("https://login.kit-gone.org/verify", dependencies({ fetch }))).pageFingerprints).toBeNull();
 	});
 
 	test("NXDOMAIN ends the check without a visit", async () => {

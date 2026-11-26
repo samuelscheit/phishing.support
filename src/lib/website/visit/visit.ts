@@ -38,7 +38,8 @@ function mergedKitResources(...captures: WebsiteCapture[]): WebsiteKitResource[]
 }
 
 
-async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigationHop, archive: WebsiteEvidenceArchive, dependencies: WebsiteAnalysisDependencies, analysisInstructions: string | undefined) {
+/** The classifier's verdict on one captured page; it reads the page and records its model run with the case, nothing else. */
+export async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigationHop, archive: WebsiteEvidenceArchive, dependencies: WebsiteAnalysisDependencies, analysisInstructions: string | undefined) {
 	// A script, stylesheet or data file shown as text is not a page anyone is lured by; its source names paths, not deceptions.
 	if (!isWebPage(hop.contentType)) {
 		return { classification: { finding: "insufficient_evidence", rejectedClaim: `the captured address serves a file (${hop.contentType}), not a web page a visitor is shown` } satisfies WebsiteSiteClassification, mobileHandoff: false };

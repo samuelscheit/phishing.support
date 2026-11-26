@@ -20,6 +20,7 @@ function checks(...entries: Array<[number, SiteCheckState]>): SiteCheck[] {
 		state,
 		httpStatus: null,
 		finalUrl: null,
+		pageFingerprints: null,
 		resolvedAddresses: [],
 		hosting: null,
 		domainStatuses: [],

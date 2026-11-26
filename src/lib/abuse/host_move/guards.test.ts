@@ -7,7 +7,7 @@ import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { getDb } from "@/lib/db";
 import { generateId } from "@/lib/db/ids";
 import { useTemporaryDatabase } from "@/lib/db/test_helpers";
-import { moveProofFiles } from "@/lib/liveness/host_move";
+import { kitProofFiles } from "@/lib/liveness/kit_files";
 import { networkLookup } from "@/lib/liveness/host_move.fixtures";
 import { attributeHosting, hostingChange } from "@/lib/liveness/hosting";
 import { HOST_MOVE_ACTION_EVENT, HOST_MOVED_EVENT, type HostMove } from "@/lib/liveness/moves";
@@ -128,8 +128,8 @@ describe("what proves the moved site is the reported one", () => {
 			{ url: "https://levo-kit.app/wp-includes/js/wp-embed.min.js", mimeType: "application/javascript", sha256: hashes.wp },
 		]) }, dedupeKey: "website-kit-proof", status: "reported" });
 		await CampaignRepository.saveKitHashCheck(hashes.published, "npm:some-bundle@1.0.0/dist/bundle.js");
-		expect(await moveProofFiles({ submissionId: id, host: "levo-kit.app", reportId: 1n })).toEqual([{ path: "/js/app.js?v=3", sha256: hashes.kit, kind: "script" }]);
-		expect(await moveProofFiles({ submissionId: null, host: "levo-kit.app", reportId: 1n })).toEqual([]);
+		expect(await kitProofFiles({ submissionId: id, host: "levo-kit.app", reportId: 1n })).toEqual([{ path: "/js/app.js?v=3", sha256: hashes.kit, kind: "script" }]);
+		expect(await kitProofFiles({ submissionId: null, host: "levo-kit.app", reportId: 1n })).toEqual([]);
 	});
 
 	test("a hash recorded for sites on more unrelated domains than one kit reaches is shared", async () => {

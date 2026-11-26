@@ -6,7 +6,8 @@ import { getProviderSubmissionProvider } from "../providers";
 import { AbuseRepository } from "../repository";
 import { runDecisionAgent, type DecisionAgentModel, type DecisionAgentOutcome, type DecisionAgentStep } from "./agent";
 import { messageByMail, messageThroughForm } from "./route_notice";
-import { checkReportedSites, reasonSaysContentGone, takedownConfirmed } from "./liveness";
+import { checkReportedSites, takedownConfirmed } from "./liveness";
+import { verifyReportedContent, type ContentVerification } from "../../liveness/content";
 import { caseCaptureNames, type AttachableFile, type DecisionToolDependencies } from "./tools";
 import { asRecord } from "../../util/values";
 import { accessGateOf } from "../../website/visit/access_gate";
@@ -62,10 +63,10 @@ export async function followUpProviderDecision(
 	if (mail.some((message) => message.direction === "outbound" && message.correlationKey === correlationKey)) return "skipped";
 	if ((await AbuseRepository.listEvents(route.reportId)).some((event) => event.routeId === route.id && event.eventType === "provider_decision.not_answered" && asRecord(event.data)?.state === params.state)) return "skipped";
 
-	// Our own look at the site, before anyone is contradicted: a provider that says the content is gone,
-	// about a site the registry or host took down, is right.
-	const liveness = await checkReportedSites(target, { ...dependencies.tools, ...(dependencies.signal ? { signal: dependencies.signal } : {}) });
-	if (reasonSaysContentGone(params.detail) && takedownConfirmed(liveness)) {
+	// Our own look at the site, before anyone is contradicted: a site the registry or host took down needs no answer.
+	const tools = { ...dependencies.tools, ...(dependencies.signal ? { signal: dependencies.signal } : {}) };
+	const liveness = await checkReportedSites(target, tools);
+	if (takedownConfirmed(liveness)) {
 		const reason = `The provider's decision is confirmed by our own check: ${liveness.map((check) => `${check.url} is ${check.state} (${check.detail})`).join("; ")}.`;
 		if (dependencies.dryRun) {
 			dependencies.dryRun({ outcome: { kind: "do_not_answer", reason }, steps: [], recipient: followUp.channel.kind === "email" ? followUp.channel.replyAddress : followUp.channel.name });
@@ -74,6 +75,7 @@ export async function followUpProviderDecision(
 		await AbuseRepository.appendEvent({ reportId: route.reportId, routeId: route.id, eventType: "provider_decision.not_answered", data: { state: params.state, detail: params.detail ?? null, reason, confirmedByLiveness: true, liveness } });
 		return "skipped";
 	}
+	const verification = await verifyContent(route, target, tools, dependencies.signal);
 
 	const { channel } = followUp;
 	const recipient = channel.kind === "email" ? channel.replyAddress : channel.name;
@@ -101,6 +103,8 @@ export async function followUpProviderDecision(
 		decision: { state: params.state, reason: params.detail ?? null },
 		// Our own check of the reported URLs just now. A suspended or undelegated domain is down whatever a stale resolver still says.
 		liveness: liveness.map(({ url, state, detail, domainStatuses, resolvedAddresses }) => ({ url, state, detail, registryStatuses: domainStatuses, resolvedAddresses })),
+		// Whether the reported URL serves now what the case recorded, compared by hash.
+		contentVerification: verificationContext(verification),
 		report: {
 			receipt: run.confirmationId,
 			filedAt: run.createdAt.toISOString(),
@@ -181,6 +185,31 @@ export async function followUpProviderDecision(
 		data: { state: params.state, detail: params.detail ?? null, confirmationId: run.confirmationId, to: recipient, summary: outcome.summary, messageId },
 	});
 	return "sent";
+}
+
+/** The reported URL's content compared with the case's: plain requests first, then a browser like the case's. The agent itself judges what changed. */
+async function verifyContent(route: { reportId: bigint; targetId: bigint }, target: { observedUrls: readonly string[]; normalizedTarget: string }, tools: NonNullable<DecisionFollowUpDependencies["tools"]>, signal: AbortSignal | undefined): Promise<ContentVerification> {
+	const url = target.observedUrls.find((candidate) => /^https?:\/\//i.test(candidate)) ?? `https://${target.normalizedTarget}/`;
+	return verifyReportedContent({ reportId: route.reportId, targetId: route.targetId, url }, { maxTier: "browser", ...(signal ? { signal } : {}) }, {
+		// The same requests as the liveness check of every reported URL.
+		site: {
+			...(tools.fetch ? { fetch: tools.fetch } : {}),
+			...(tools.assertPublicHost ? { assertPublicHost: tools.assertPublicHost } : {}),
+			...tools.liveness,
+		},
+		...(tools.capture ? { capture: tools.capture } : {}),
+	});
+}
+
+function verificationContext(verification: ContentVerification) {
+	const { url, verdict, tier } = verification;
+	return {
+		url,
+		verdict,
+		by: tier,
+		...(verification.verdict === "served" ? { matches: verification.matches } : {}),
+		...(verification.verdict === "unverified" ? { reason: verification.reason } : {}),
+	};
 }
 
 /** Read a queued follow-up's payload. */

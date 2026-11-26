@@ -3,6 +3,7 @@ import { index, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { abuseReports, abuseTargets } from "../abuse/schema";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "../db/sqlite_types";
+import type { PageFingerprints } from "../website/page_fingerprint";
 import type { SiteHosting } from "./hosting";
 
 /**
@@ -64,6 +65,8 @@ export const siteChecks = sqliteTable(
 		hosting: text("hosting", { mode: "json" }).$type<SiteHosting>(),
 		/** The domain's RDAP status values (`client hold`, `server hold`, …). */
 		domainStatuses: text("domain_statuses", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+		/** The fingerprints of the page an `online` visit got, as the server sent it; null when it got none worth one. */
+		pageFingerprints: text("page_fingerprints", { mode: "json" }).$type<PageFingerprints>(),
 		/** What decided the state, in plain words: the matched page signature or the network error. */
 		detail: text("detail"),
 		checkedAt: sqliteTimestamp("checked_at").notNull(),

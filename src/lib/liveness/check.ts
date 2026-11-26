@@ -15,6 +15,7 @@ import { classifySite, type DnsObservation, type HttpObservation } from "./class
 import type { siteChecks } from "./schema";
 import { urlHostname } from "../network/url";
 import { type FetchLike } from "../http/fetch";
+import { htmlFingerprints } from "../website/page_fingerprint";
 
 const DNS_TIMEOUT_MS = 5_000;
 const RDAP_TIMEOUT_MS = 30_000;
@@ -166,10 +167,12 @@ export async function checkSite(url: string, dependencies: SiteCheckDependencies
 	const { statuses, nameservers } = await registryObservation;
 	const verdict = classifySite({ url, dns: dnsObservation, domainStatuses: statuses, nameservers, ...(http ? { http } : {}) });
 	const server = http?.outcome === "response" ? http.page.headers.server?.trim().slice(0, 200) : undefined;
+	const page = verdict.state === "online" && http?.outcome === "response" && http.page.body !== undefined ? htmlFingerprints(http.page.body, http.page.url) : {};
 	return {
 		url,
 		state: verdict.state,
 		detail: verdict.detail,
+		pageFingerprints: page.body || page.structure ? page : null,
 		httpStatus: http?.outcome === "response" ? http.page.status : null,
 		finalUrl: http?.urls.at(-1) ?? null,
 		resolvedAddresses: dnsObservation.outcome === "resolved" ? dnsObservation.addresses : [],

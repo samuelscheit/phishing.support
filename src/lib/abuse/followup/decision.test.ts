@@ -305,11 +305,48 @@ describe("a decision that says the content is gone", () => {
 		expect(context.liveness).toEqual([{ url: PAYLOAD, state: "removed", detail: "HTTP 404.", registryStatuses: ["client transfer prohibited"], resolvedAddresses: ["203.0.113.10"] }]);
 	});
 
-	test("a denial that does not say the content is gone is not confirmed by a takedown, but the agent sees the suspension", async () => {
-		const { route } = await deniedRoute("nodeagent.pro", PAYLOAD);
-		const { model, inputs } = scripted([call("do_not_answer", { reason: "Suspended." })]);
-		await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "no_abuse_found" }, { model, tools: suspendedTools });
-		expect(JSON.parse(((inputs[0]![0] as { content: Array<{ text: string }> }).content[0]!).text).liveness).toMatchObject([{ state: "domain_suspended" }]);
+	test("whatever reason a denial gives, a site the registry took down needs no answer", async () => {
+		const { reportId, route } = await deniedRoute("nodeagent.pro", PAYLOAD);
+		const never = scripted();
+		expect(await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "no_abuse_found" }, { model: never.model, tools: suspendedTools })).toBe("skipped");
+		expect(never.inputs).toHaveLength(0);
+		expect((await AbuseRepository.listEvents(reportId)).find((item) => item.eventType === "provider_decision.not_answered")?.data).toMatchObject({ detail: "no_abuse_found", confirmedByLiveness: true });
+	});
+});
+
+describe("what the agent knows of the content before it investigates", () => {
+	const KIT_JS = `(()=>{document.querySelector(".install-modal").hidden=false;${"/*paneo*/".repeat(200)}})();`;
+	const kitTools = (served: boolean) => ({
+		...tools,
+		liveness: liveness({
+			fetch: async (input: URL | RequestInfo) => {
+				const url = input.toString();
+				if (url === "https://paneo.work/") return new Response(PAGE, { headers: { "content-type": "text/html" } });
+				if (url === "https://paneo.work/js/install.js" && served) return new Response(KIT_JS, { headers: { "content-type": "application/javascript" } });
+				return new Response("Not Found", { status: 404 });
+			},
+		}),
+	});
+
+	test("the kit's own script still served is proof the agent gets as a fact, found without a browser", async () => {
+		await SubmissionsEntity.create({ id: 902n, kind: "website", dedupeKey: "paneo-kit", status: "reported", data: { kind: "website", website: { url: "https://paneo.work/", kitResources: [{ url: "https://paneo.work/js/install.js", mimeType: "application/javascript", size: KIT_JS.length, sha256: sha256Hex(KIT_JS) }] } } });
+		const { reportId, route } = await deniedRoute("paneo.work", "https://paneo.work/", 902n);
+		let captures = 0;
+		const { model, inputs } = scripted([call("do_not_answer", { reason: "scripted" })]);
+		await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "no_abuse_found" }, { model, tools: { ...kitTools(true), capture: async ({ url }: { url: string }) => { captures += 1; return liveCapture(url); } } });
+		const context = JSON.parse(((inputs[0]![0] as { content: Array<{ text: string }> }).content[0]!).text);
+		expect(context.contentVerification).toEqual({ url: "https://paneo.work/", verdict: "served", by: "fetch", matches: [{ kind: "kit_file", url: "https://paneo.work/js/install.js", sha256: sha256Hex(KIT_JS) }] });
+		expect(captures).toBe(0);
+		expect((await AbuseRepository.listEvents(reportId)).filter((event) => event.eventType === "site.content_verified")).toHaveLength(1);
+	});
+
+	test("a page nothing matches is unverified after a browser look, and the agent investigates as before", async () => {
+		await SubmissionsEntity.create({ id: 903n, kind: "website", dedupeKey: "paneo-kit-gone", status: "reported", data: { kind: "website", website: { url: "https://paneo.work/", kitResources: [{ url: "https://paneo.work/js/install.js", mimeType: "application/javascript", size: KIT_JS.length, sha256: sha256Hex(KIT_JS) }] } } });
+		const { route } = await deniedRoute("paneo.work", "https://paneo.work/", 903n);
+		const { model, inputs } = scripted([call("do_not_answer", { reason: "scripted" })]);
+		await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "no_abuse_found" }, { model, tools: kitTools(false) });
+		const context = JSON.parse(((inputs[0]![0] as { content: Array<{ text: string }> }).content[0]!).text);
+		expect(context.contentVerification).toEqual({ url: "https://paneo.work/", verdict: "unverified", by: "browser", reason: "The browser got nothing the case recorded." });
 	});
 });
 
