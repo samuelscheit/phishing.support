@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckSquare, ClipboardCopy, Download, Flag, Globe, Keyboard, ListChecks, MousePointerClick, Send, ShieldAlert, Sparkles, Upload } from "lucide-react";
+import { ClipboardCopy, Maximize2, Send, ShieldAlert } from "lucide-react";
 
 import { cn } from "../lib/util/cn";
 import { canaryFieldList, type WebsiteOfferedDownload, type WebsiteVisitRecord } from "@/lib/website/types";
@@ -10,65 +10,29 @@ import { scrollToEnd } from "./scrollToEnd";
 import { hostOf } from "@/lib/network/url";
 import { OfferedFile } from "@/components/OfferedFile";
 import { isPasteCommand } from "@/lib/malware/paste_commands";
+import { LiveVisitConsole } from "./live_visit/LiveConsole";
+import type { LiveEntry } from "./live_visit/live_state";
+import type { LiveVisit } from "./live_visit/useLiveVisit";
+import { LiveEntryRow, TimelineRow } from "./live_visit/VisitLog";
 
 /** One page of the visit, with its screenshot and the screenshot cut to what the page drew, when the case kept them. */
 export type SiteVisitPage = { url: string; screenshotId?: string; previewId?: string };
 
-type LiveEntry =
-	| { kind: "step"; url: string; title: string }
-	| { kind: "action"; text: string; actionKind: string }
-	| { kind: "download"; fileName: string; url: string };
-
-const MAX_LIVE_ENTRIES = 200;
 /** Characters of a copied text the timeline shows; its tooltip holds the rest. */
 const MAX_SHOWN_COPY = 400;
-
-
-/** The live screen and log of a visit while it runs, from the case's event stream. */
-function useLiveVisit(submissionId: string, enabled: boolean) {
-	const [frame, setFrame] = useState<{ jpeg: string; url: string } | null>(null);
-	const [entries, setEntries] = useState<LiveEntry[]>([]);
-	useEffect(() => {
-		if (!enabled) return;
-		const source = new EventSource(`/api/stream/${encodeURIComponent(submissionId)}?browser=1`);
-		source.onmessage = (event: MessageEvent<string>) => {
-			let parsed: Record<string, unknown>;
-			try {
-				parsed = JSON.parse(event.data) as Record<string, unknown>;
-			} catch {
-				return;
-			}
-			const text = (key: string) => (typeof parsed[key] === "string" ? parsed[key] as string : "");
-			if (parsed.type === "browser.frame" && text("jpeg")) setFrame({ jpeg: text("jpeg"), url: text("url") });
-			const entry: LiveEntry | undefined = parsed.type === "browser.step"
-				? { kind: "step", url: text("url"), title: text("title") }
-				: parsed.type === "browser.action"
-					? { kind: "action", text: text("text"), actionKind: text("kind") }
-					: parsed.type === "browser.download"
-						? { kind: "download", fileName: text("fileName"), url: text("url") }
-						: undefined;
-			if (entry) setEntries((current) => [...current, entry].slice(-MAX_LIVE_ENTRIES));
-		};
-		return () => source.close();
-	}, [submissionId, enabled]);
-	return { frame, entries };
-}
-
-/** The live screen and log of a running visit, shared by its browser and its timeline. */
-export type LiveVisit = ReturnType<typeof useLiveVisit>;
-export { useLiveVisit };
 
 /**
  * The one browser of a case: the address bar of the page shown, with the
  * button that opens the submitted site, and below it the live screen while
- * the visit runs, or the page picked in the strip after: its preview (the
+ * the visit runs, which opens the live console (full screen, take over,
+ * message the agent), or the page picked in the strip after: its preview (the
  * screenshot cut to what the page drew), else its screenshot, linking to the
  * full screenshot. `viewport` frames have the desktop viewport's 2:1 shape; a
  * stored picture takes its own height, up to most of the window, and scrolls.
  * A picture narrower than the frame, a kit's card, keeps its own width and
  * sits centred on a muted ground instead of being blown up.
  */
-export function SiteVisitBrowser({ running, pages, initialPage, live: { frame }, fallbackUrl, openAction }: {
+export function SiteVisitBrowser({ running, pages, initialPage, live: liveVisit, fallbackUrl, openAction }: {
 	running: boolean;
 	pages: SiteVisitPage[];
 	/** The page shown until another is picked: the one the case's verdict rests on; the last page by default. */
@@ -80,10 +44,12 @@ export function SiteVisitBrowser({ running, pages, initialPage, live: { frame },
 	openAction?: React.ReactNode;
 }) {
 	const [selected, setSelected] = useState<number | null>(null);
+	const [consoleOpen, setConsoleOpen] = useState(false);
 	const shown = selected ?? (initialPage !== undefined && initialPage < pages.length ? initialPage : pages.length - 1);
 	const page = pages[shown];
 	const hosts = new Set(pages.map(({ url }) => hostOf(url)));
-	const live = running && Boolean(frame);
+	const { frame } = liveVisit;
+	const live = running && liveVisit.live && Boolean(frame);
 	const url = live ? frame!.url : page?.url ?? fallbackUrl;
 	const picture = page?.previewId ?? page?.screenshotId;
 	const fit = !live && picture ? "content" : "viewport";
@@ -112,8 +78,19 @@ export function SiteVisitBrowser({ running, pages, initialPage, live: { frame },
 			</div>
 			<div className={cn("relative w-full", fit === "viewport" ? "aspect-[2/1] bg-background" : "max-h-[70vh] overflow-y-auto bg-muted/50")}>
 				{live ? (
-					// eslint-disable-next-line @next/next/no-img-element
-					<img src={`data:image/jpeg;base64,${frame!.jpeg}`} alt="The visited site, live" className="absolute inset-0 h-full w-full object-contain object-top" />
+					<button
+						type="button"
+						onClick={() => setConsoleOpen(true)}
+						aria-label="Open the live view: watch in full screen, take over the browser or message the agent"
+						className="group absolute inset-0 block cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+					>
+						{/* eslint-disable-next-line @next/next/no-img-element */}
+						<img src={frame!.src} alt="The visited site, live" className="absolute inset-0 h-full w-full object-contain object-top" />
+						<span className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5 rounded-full bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-md ring-1 ring-border backdrop-blur transition-[background-color,scale] duration-150 group-hover:bg-background group-active:scale-[0.96] motion-reduce:transition-none">
+							<Maximize2 className="h-3.5 w-3.5" aria-hidden />
+							Open live view
+						</span>
+					</button>
 				) : picture ? (
 					<a href={`/api/artifacts/${page.screenshotId ?? picture}`} target="_blank" rel="noreferrer" className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" title="Open the full screenshot">
 						{/* eslint-disable-next-line @next/next/no-img-element */}
@@ -146,6 +123,7 @@ export function SiteVisitBrowser({ running, pages, initialPage, live: { frame },
 					))}
 				</ol>
 			) : null}
+			{consoleOpen && liveVisit.frame ? <LiveVisitConsole visit={liveVisit} onClose={() => setConsoleOpen(false)} /> : null}
 		</div>
 	);
 }
@@ -162,32 +140,11 @@ function pageLabel(url: string, withHost: boolean): string {
 	}
 }
 
-/** An icon for each kind of agent action; anything else is a click. */
-function actionIcon(kind: string): React.ReactNode {
-	const Icon = kind === "input_text" || kind === "keypress" ? Keyboard
-		: kind === "select_option" ? ListChecks
-			: kind === "checkbox" ? CheckSquare
-				: kind === "upload_file" ? Upload
-					: kind === "download_file" ? Download
-						: kind === "goto_url" ? Globe
-							: kind === "complete" || kind === "terminate" ? Flag
-								: MousePointerClick;
-	return <Icon className="h-3 w-3" />;
-}
-
-function TimelineRow({ icon, tone = "muted", children }: { icon: React.ReactNode; tone?: "muted" | "danger"; children: React.ReactNode }) {
-	return (
-		<li className="flex gap-2.5 py-1.5">
-			<span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full", tone === "danger" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>{icon}</span>
-			<div className="min-w-0 flex-1 text-xs leading-relaxed">{children}</div>
-		</li>
-	);
-}
-
 /**
  * What the visit did: the agent walking the site as a victim would, live while
  * the case runs and from its record afterwards, with where the synthetic data
- * went and what it downloaded. `routeName` names the route the visit walked
+ * went and what it downloaded. What a person did after taking the browser
+ * over is marked as theirs. `routeName` names the route the visit walked
  * when the case's link rotated to several.
  */
 export function SiteVisitTimeline({ running, visit, offeredDownload, live: { entries }, pageCount, routeName }: {
@@ -221,18 +178,8 @@ export function SiteVisitTimeline({ running, visit, offeredDownload, live: { ent
 				<span className="font-medium">{summary}</span>{note ? <> · {note}</> : null}
 			</p>
 			<ol ref={logRef} className="mt-2 max-h-[28rem] overflow-y-auto pr-1" aria-label="What the visit did" aria-live={running ? "polite" : undefined}>
-				{(running ? entries : (visit?.actions ?? []).map((action): LiveEntry => ({ kind: "action", text: action.text, actionKind: action.kind }))).map((entry, index) => (
-					entry.kind === "step" ? (
-						<TimelineRow key={index} icon={<Sparkles className="h-3 w-3" />}>
-							Reached <span className="font-mono">{hostOf(entry.url)}</span>{entry.title ? <span className="text-muted-foreground"> · {entry.title}</span> : null}
-						</TimelineRow>
-					) : entry.kind === "download" ? (
-						<TimelineRow key={index} icon={<Download className="h-3 w-3" />} tone="danger">
-							Downloaded <span className="font-mono">{entry.fileName}</span>
-						</TimelineRow>
-					) : (
-						<TimelineRow key={index} icon={actionIcon(entry.actionKind)}>{entry.text}</TimelineRow>
-					)
+				{(running ? entries : (visit?.actions ?? []).map((action): LiveEntry => ({ kind: "action", text: action.text, actionKind: action.kind, actor: action.actor }))).map((entry, index) => (
+					<LiveEntryRow key={index} entry={entry} />
 				))}
 				{!running && thirdParty.map((sent, index) => (
 					<TimelineRow key={`sent-${index}`} icon={<Send className="h-3 w-3" />} tone="danger">
