@@ -13,7 +13,7 @@ describe("the worker's lanes", () => {
 	test("a site just reported is linked into its campaign while a kit search and sibling analyses hold the discovery slot", async () => {
 		// Production: a site reported at 14:13 stayed a campaign of one for hours, its link job queued behind 170 browser analyses of kit siblings.
 		const request = await validateAbuseReportRequest({ targets: ["impresspaper.com"], allegationCategory: "phishing", description: "Confirmed credential phishing.", observedUrls: [{ target: "impresspaper.com", urls: ["https://impresspaper.com/invite.html"] }] });
-		await SubmissionsEntity.create({ id: 1n, kind: "website", data: { kind: "website" }, dedupeKey: "lanes-site" });
+		await SubmissionsEntity.create({ id: 1n, kind: "website", data: { kind: "website", website: { url: "https://impresspaper.com/invite.html" } }, dedupeKey: "lanes-site" });
 		const { reportId } = await AbuseRepository.createReport({ request, reporter: {}, submissionId: 1n });
 		const past = new Date(Date.now() - 60_000);
 		for (const [index, jobType] of (["search_campaign_kits", "analyze_kit_sibling", "analyze_kit_sibling"] as const).entries()) {
@@ -47,7 +47,7 @@ describe("the worker's lanes", () => {
 
 	test("a site check runs on time while provider work and discovery hold every other slot", async () => {
 		const request = await validateAbuseReportRequest({ targets: ["impresspaper.com"], allegationCategory: "phishing", description: "Confirmed credential phishing.", observedUrls: [{ target: "impresspaper.com", urls: ["https://impresspaper.com/invite.html"] }] });
-		await SubmissionsEntity.create({ id: 1n, kind: "website", data: { kind: "website" }, dedupeKey: "lanes-site" });
+		await SubmissionsEntity.create({ id: 1n, kind: "website", data: { kind: "website", website: { url: "https://impresspaper.com/invite.html" } }, dedupeKey: "lanes-site" });
 		const { reportId } = await AbuseRepository.createReport({ request, reporter: {}, submissionId: 1n });
 		const past = new Date(Date.now() - 60_000);
 		for (const [index, jobType] of (["submit_provider", "submit_provider", "search_campaign_kits", "report_origin_host", "link_campaign"] as const).entries()) {

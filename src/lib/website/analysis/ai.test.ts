@@ -10,6 +10,7 @@ import {
 	validateWebsiteSiteClassification,
 	websiteClassificationFingerprint,
 	WEBSITE_CLASSIFICATION_FORMAT,
+	type WebsiteEvidenceArchive,
 } from "./classification";
 import { capturedDocumentContent } from "../archive/text";
 import { extractPasteCommands } from "../../malware/paste_commands";
@@ -106,7 +107,8 @@ function validateTikTokKit(collectionFieldRefs: unknown, evidenceQuote = "Phươ
 
 function capturedPage(url: string, text: string, html: string) {
 	const hop: WebsiteNavigationHop = { index: 0, url, hostname: new URL(url).hostname, status: 200, contentType: "text/html", contentCaptured: true };
-	return { hop, archive: { requestedUrl: url, url, hostname: hop.hostname, navigationHops: [hop], text: Buffer.from(text, "utf-8"), html: Buffer.from(html, "utf-8") } };
+	const archive: WebsiteEvidenceArchive = { requestedUrl: url, url, hostname: hop.hostname, navigationHops: [hop], text: Buffer.from(text, "utf-8"), html: Buffer.from(html, "utf-8") };
+	return { hop, archive };
 }
 
 function classify(page: ReturnType<typeof capturedPage>, response: Record<string, unknown>) {
@@ -626,7 +628,7 @@ test("websiteClassificationFingerprint deduplicates unchanged text-bearing snaps
 	expect(fp({ ...base.archive, text: Buffer.from("TripScan | ТрипСкан\nНеправильная пара", "utf-8") })).not.toBe(fp(base.archive));
 	expect(fp({ ...base.archive, html: Buffer.from("<html><body><input name=\"otp\"></body></html>", "utf-8") })).not.toBe(fp(base.archive));
 	expect(fp({ ...base.archive, dataSent: [{ url: "https://api.telegram.org/bot1/sendMessage", method: "POST", fields: ["password"], sameSite: false }] })).not.toBe(fp(base.archive));
-	expect(fp({ ...base.archive, offeredDownload: { url: "https://trip81.co/app.dmg", fileName: "app.dmg", contentType: "application/octet-stream", size: 10, sha256: "a".repeat(64) } })).not.toBe(fp(base.archive));
+	expect(fp({ ...base.archive, offeredDownload: { pageUrl: base.hop.url, url: "https://trip81.co/app.dmg", fileName: "app.dmg", contentType: "application/octet-stream", sizeBytes: 10, sha256: "a".repeat(64), userAgent: "test", inspection: { format: "other", signals: {}, endpoints: [], excerpts: [] } } })).not.toBe(fp(base.archive));
 
 	// A textless page hashes its screenshot so visual-only changes (such as a canvas QR handoff) are still classified.
 	const blank = capturedPage("https://example.test/", "", "<html><body><canvas></canvas></body></html>");
