@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 
-import type { PublicCampaignSite } from "@/lib/campaign/public_view";
+import type { PublicCampaignSite, SiteTakedown } from "@/lib/campaign/public_view";
 import { formatDate, type Locale } from "@/lib/i18n/locale";
 import { cn } from "@/lib/util/cn";
 import { COPY } from "./copy";
-import { languageName, scrollToId, TakedownPill } from "./site_facts";
+import { languageName, scrollToId, takedownCounts, TakedownPill } from "./site_facts";
 import { Thumb } from "./SitePicture";
 
-type Filter = "all" | "online" | "down";
+type Filter = "all" | SiteTakedown;
 
 /** The host a pasted link names, however much of it was pasted. */
 export function pastedHost(input: string): string | undefined {
@@ -32,9 +32,9 @@ export function SiteTable({ sites, selected, onSelect, linkedHost, brandDomain, 
 	const copy = COPY[locale];
 	const [filter, setFilter] = useState<Filter>("all");
 	const [query, setQuery] = useState("");
-	const down = sites.filter((site) => site.takedown === "confirmed").length;
-	const filters: Array<[Filter, string]> = [["all", copy.filterAll(sites.length)], ["online", `${copy.notTakenDown} ${sites.length - down}`], ["down", `${copy.takenDown} ${down}`]];
-	const shown = sites.filter((site) => filter === "all" || (filter === "down") === (site.takedown === "confirmed"));
+	const counts = takedownCounts(sites);
+	const filters: Array<[Filter, string]> = [["all", copy.filterAll(sites.length)], ...counts.map(({ state, count }): [Filter, string] => [state, `${copy.takedownState[state]} ${count}`])];
+	const shown = sites.filter((site) => filter === "all" || site.takedown === filter);
 	const host = pastedHost(query);
 	const hit = host ? sites.find((site) => site.host === host) : undefined;
 	// A pasted link that is one of the sites shows it in the browser, without moving the page.
@@ -48,7 +48,7 @@ export function SiteTable({ sites, selected, onSelect, linkedHost, brandDomain, 
 	return (
 		<div className="space-y-3">
 			<div className="flex flex-wrap items-center justify-between gap-3">
-				{down > 0 && down < sites.length ? (
+				{counts.length > 1 ? (
 					<div className="inline-flex rounded-md bg-muted p-0.5 text-xs" role="group">
 						{filters.map(([key, label]) => (
 							<button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)} className={cn("rounded px-2.5 py-1", filter === key ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground")}>{label}</button>
@@ -72,7 +72,7 @@ export function SiteTable({ sites, selected, onSelect, linkedHost, brandDomain, 
 							<th className="px-3 py-2 font-medium">{copy.site}</th>
 							<th className="hidden w-32 px-3 py-2 font-medium sm:table-cell">{copy.language}</th>
 							<th className="hidden w-28 px-3 py-2 font-medium md:table-cell">{copy.firstSeen}</th>
-							<th className="w-44 px-3 py-2 font-medium">{copy.status}</th>
+							<th className="w-48 px-3 py-2 font-medium">{copy.status}</th>
 						</tr>
 					</thead>
 					<tbody className="divide-y">

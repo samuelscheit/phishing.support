@@ -20,7 +20,7 @@ import { formatDate, type Locale } from "@/lib/i18n/locale";
 import { cn } from "@/lib/util/cn";
 import { COPY } from "./copy";
 import { TakedownCard, VerdictCard } from "./Outcome";
-import { Reasons } from "./Reasons";
+import { CampaignReports } from "./CampaignReports";
 import { scrollToId } from "./site_facts";
 import { SiteBrowser } from "./SitePicture";
 import { SiteTable } from "./SiteTable";
@@ -68,6 +68,11 @@ export function CampaignView({ campaign, locale }: { campaign: PublicCampaign; l
 		setPicked(site);
 		scrollToId("site-browser");
 	};
+	const showReports = () => {
+		setTab("reports");
+		scrollToId("campaign-tabs");
+	};
+	const reportCount = sites.reduce((total, site) => total + site.reports.length, 0);
 
 	return (
 		<div className="space-y-6">
@@ -109,27 +114,20 @@ export function CampaignView({ campaign, locale }: { campaign: PublicCampaign; l
 			<div className="grid items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
 				<div className="min-w-0 space-y-6">
 					<SiteBrowser sites={sites} selected={shown} onSelect={setPicked} linkedHost={linked?.host} locale={locale} />
-					<Tabs value={tab} onValueChange={setTab} className="w-full min-w-0">
+					<Tabs id="campaign-tabs" value={tab} onValueChange={setTab} className="w-full min-w-0 scroll-mt-6">
 						<TabsList className="h-auto max-w-full flex-wrap justify-start">
 							<TabsTrigger value="sites">{copy.tabSites(n)}</TabsTrigger>
-							{n > 1 && <TabsTrigger value="timeline">{copy.tabTimeline}</TabsTrigger>}
-							{campaign.reasons.length > 0 && <TabsTrigger value="links">{copy.tabLinks}</TabsTrigger>}
+							<TabsTrigger value="reports">{copy.tabReports(reportCount)}</TabsTrigger>
 							<TabsTrigger value="technical">{copy.tabTechnical}</TabsTrigger>
 							<TabsTrigger value="evidence">{copy.tabEvidence}</TabsTrigger>
 						</TabsList>
-						<TabsContent value="sites" className="mt-4">
+						<TabsContent value="sites" className="mt-4 space-y-4">
+							{n > 1 && <Timeline campaign={campaign} locale={locale} onOpen={openSite} />}
 							<SiteTable sites={sites} selected={shown} onSelect={setPicked} linkedHost={linked?.host} brandDomain={brand?.domain} locale={locale} />
 						</TabsContent>
-						{n > 1 && (
-							<TabsContent value="timeline" className="mt-4">
-								<Timeline campaign={campaign} locale={locale} onOpen={openSite} />
-							</TabsContent>
-						)}
-						{campaign.reasons.length > 0 && (
-							<TabsContent value="links" className="mt-4">
-								<Reasons campaign={campaign} locale={locale} />
-							</TabsContent>
-						)}
+						<TabsContent value="reports" className="mt-4">
+							<CampaignReports sites={sites} highlight={shown.host} locale={locale} />
+						</TabsContent>
 						<TabsContent value="technical" className="mt-4">
 							<TechnicalRecord campaign={campaign} locale={locale} />
 						</TabsContent>
@@ -140,7 +138,7 @@ export function CampaignView({ campaign, locale }: { campaign: PublicCampaign; l
 				</div>
 				<aside className="order-first min-w-0 space-y-4 lg:order-none">
 					<VerdictCard campaign={campaign} finding={findingOf(campaign)} basis={basis} shown={shown} locale={locale} />
-					<TakedownCard sites={sites} locale={locale} />
+					<TakedownCard sites={sites} locale={locale} onShowReports={showReports} />
 					<WhatToDo visitor={campaign.visitor} basis={basis} locale={locale} />
 				</aside>
 			</div>

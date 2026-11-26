@@ -10,9 +10,11 @@ import { campaignVisitorKinds, type VisitorKind } from "./kinds";
 import { factsFromDossier } from "./link";
 import { comparePages, memberKey, screenshotPage } from "./members";
 import { CampaignRepository } from "./repository";
-import { operatorServerRoles, type OperatorServerRole } from "./schema";
+import { operatorServerRoles } from "./schema";
 import { fallbackDescription } from "./summary";
-import { minutesBetween } from "../util/date_time";
+import type { ProviderRole } from "../provider_stats/role";
+import { getReportsByIds, type SubmissionReport } from "../submissions/abuse_details";
+import { nextStep, rankedRoutes, type RouteBucket, type RouteStanding } from "../submissions/report_view";
 
 export type { GuidancePurpose } from "./guidance";
 export type { VisitorKind } from "./kinds";
@@ -24,7 +26,45 @@ export type { VisitorKind } from "./kinds";
  * the full technical record: everything the authorities get, including the
  * bot tokens and accounts the operators published on their own pages.
  */
-export type PublicReportState = "accepted" | "awaiting" | "confirmed" | "rejected" | "bounced" | "failed" | "pending";
+/**
+ * One provider's report about a site, as the case page's Reports tab reads
+ * it (`routeStanding`, `nextStep`): who, in which role, where it stands in
+ * plain words with the provider's key sentence, and what happens next. No
+ * correspondence leaves the server.
+ */
+export type PublicSiteReport = {
+	routeId: string;
+	organisation: string;
+	role: ProviderRole;
+	channel: string;
+	bucket: RouteBucket;
+	label: string;
+	line?: string;
+	quoted: boolean;
+	at?: string;
+	sentAt?: string;
+	steps: RouteStanding["steps"];
+	next?: string;
+	ticket?: string;
+};
+
+/**
+ * How far the takedown of a site got: a host, registrar, CDN or platform
+ * acted on it (`taken_down`); only a blocklist did, so browsers warn but the
+ * site is up (`blocklisted`); a report reached a provider (`reported`);
+ * every report failed to go out (`problem`); none was made (`none`).
+ */
+export type SiteTakedown = "taken_down" | "blocklisted" | "reported" | "problem" | "none";
+
+const REMOVING_ROLES: ReadonlySet<ProviderRole> = new Set(["registrar", "host", "cdn", "platform"]);
+
+export function siteTakedown(reports: readonly Pick<PublicSiteReport, "role" | "bucket">[]): SiteTakedown {
+	const acted = reports.filter((report) => report.bucket === "action_taken");
+	if (acted.some((report) => REMOVING_ROLES.has(report.role))) return "taken_down";
+	if (acted.length) return "blocklisted";
+	if (reports.some((report) => report.bucket !== "not_sent")) return "reported";
+	return reports.length ? "problem" : "none";
+}
 
 export type PublicCampaignSite = {
 	/** Unique on the page: a case can be a member for two sites, and two cases for one site. */
@@ -45,10 +85,10 @@ export type PublicCampaignSite = {
 	verdict?: { finding: string; basis?: string; quote?: string; impersonates?: string; fields: string[] };
 	/** Where the synthetic values our visit entered went. */
 	sent: Array<{ url: string; method: string; fields: string[]; sameSite: boolean }>;
-	reports: Array<{ provider: string; channel: string; state: PublicReportState; reportedAt?: string; ticket?: string }>;
+	/** The site report's provider routes, strongest standing first. */
+	reports: PublicSiteReport[];
 	evidence: Array<{ name: string; size: number; sha256: string; url: string }>;
-	/** The furthest any provider got: confirmed, reported, or not reported yet. */
-	takedown: "confirmed" | "reported" | "problem" | "none";
+	takedown: SiteTakedown;
 };
 
 export type PublicCampaignVisitor = {
@@ -69,25 +109,17 @@ export type PublicCampaignVisitor = {
 };
 
 /** `sites`: how many of the campaign's sites share what the reason names. */
-type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_delivery" | "same_payment_account" | "same_pattern"; title: string; text: string; sites: number };
-
 export type PublicCampaign = {
 	campaignId: string;
 	title: string;
 	summary: string;
 	firstSeenAt: string;
 	lastSeenAt: string;
-	durationMinutes: number;
-	/** The usual gap between two new sites, when there are at least three. */
-	typicalIntervalMinutes?: number;
 	/** The platform every site is a subdomain of, e.g. `onrender.com`. */
 	platform?: string;
 	domainCount: number;
-	reportedCount: number;
-	confirmedCount: number;
 	languages: string[];
 	sites: PublicCampaignSite[];
-	reasons: PublicCampaignReason[];
 	/** What a visitor who typed something into the pages should do. */
 	visitor: PublicCampaignVisitor;
 	technical: {
@@ -102,29 +134,34 @@ export type PublicCampaign = {
 	};
 };
 
-const STATE: Record<string, PublicReportState> = {
-	submitted: "accepted",
-	awaiting_provider_reply: "awaiting",
-	acknowledged: "confirmed",
-	provider_rejected: "rejected",
-	delivery_failed: "bounced",
-	failed: "failed",
-	unknown_external_state: "failed",
-};
-
 const artifactUrl = (id: string) => `/api/artifacts/${id}`;
 
-function median(values: number[]): number | undefined {
-	if (!values.length) return undefined;
-	const sorted = [...values].sort((a, b) => a - b);
-	return sorted[Math.floor(sorted.length / 2)];
+/** A site report's routes as the public page shows them, read the way the case page reads them. */
+function publicSiteReports(reports: readonly SubmissionReport[]): PublicSiteReport[] {
+	return rankedRoutes(reports).map(({ report, route, standing }) => {
+		const next = nextStep(route, standing, report.createdAt);
+		return {
+			routeId: route.id.toString(),
+			organisation: route.organisation,
+			role: route.role,
+			channel: route.channel,
+			bucket: standing.bucket,
+			label: standing.label,
+			...(standing.line ? { line: standing.line } : {}),
+			quoted: standing.quoted,
+			...(standing.at ? { at: standing.at.toISOString() } : {}),
+			...(route.outcome.sentAt ? { sentAt: new Date(route.outcome.sentAt).toISOString() } : {}),
+			steps: standing.steps,
+			...(next ? { next } : {}),
+			...(route.confirmationId ? { ticket: route.confirmationId } : {}),
+		};
+	});
 }
 
-function duration(value: number): string {
-	if (value < 120) return `${value} minutes`;
-	if (value < 72 * 60) return `${Math.round(value / 60)} hours`;
-	return `${Math.round(value / 1_440)} days`;
-}
+export type PublicCampaignDependencies = DossierDependencies & {
+	/** The site report of a member with its routes and correspondence; tests give their own. */
+	loadSiteReports?: (reportId: bigint) => Promise<SubmissionReport[]>;
+};
 
 /** The newest stored file of each name: a retried capture replaces the earlier one. */
 function latestEvidence(site: DossierSite) {
@@ -134,13 +171,6 @@ function latestEvidence(site: DossierSite) {
 		if (!existing || BigInt(file.artifactId) > BigInt(existing.artifactId)) byName.set(file.name, file);
 	}
 	return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function takedownOf(reports: PublicCampaignSite["reports"]): PublicCampaignSite["takedown"] {
-	if (reports.some((report) => report.state === "confirmed")) return "confirmed";
-	if (reports.some((report) => report.state === "accepted" || report.state === "awaiting")) return "reported";
-	if (reports.length) return "problem";
-	return "none";
 }
 
 function count<T>(items: readonly T[], key: (item: T) => string[]): Array<[string, number]> {
@@ -173,54 +203,6 @@ function backendDetails(evidence: Record<string, unknown>, value: string): { kin
 	return { kind: "server", label: "Server", details: details.filter((entry): entry is [string, string] => Boolean(entry[1])) };
 }
 
-/** Why the sites are one operator's, in plain words, from the indicators that hold. */
-function reasons(dossier: Dossier, stats: { platform?: string; durationMinutes: number; typicalIntervalMinutes?: number }): PublicCampaignReason[] {
-	const shared = dossier.indicators.filter((indicator) => indicator.links && indicator.sites.length > 1);
-	const all = dossier.sites.length;
-	const result: PublicCampaignReason[] = [];
-	const fingerprints = (fileKinds: readonly string[], include: boolean) => shared.filter((indicator) => indicator.kind === "kit_fingerprint" && fileKinds.includes(String(indicator.evidence.fileKind)) === include);
-	const reach = (indicators: typeof shared) => Math.max(0, ...indicators.map((indicator) => indicator.sites.length));
-	/** "Every page serves" or "3 of the 5 pages serve". */
-	const subject = (indicators: typeof shared, singular: string, plural: string) => reach(indicators) === all ? `Every page ${singular}` : `${reach(indicators)} of the ${all} pages ${plural}`;
-	const page = fingerprints(["page_document"], true);
-	if (page.length) {
-		result.push({ kind: "same_page", title: "Same page", sites: reach(page), text: `${subject(page, "serves", "serve")} the same page body, byte for byte apart from its own address. A copied design would not match this exactly.` });
-	}
-	// A template only adds to an identical body where it reaches pages whose words differ.
-	const structure = fingerprints(["page_structure"], true);
-	if (structure.length && reach(structure) > reach(page)) {
-		const widest = structure.reduce((best, indicator) => (indicator.sites.length > best.sites.length ? indicator : best));
-		result.push({ kind: "same_structure", title: "Same template", sites: reach(structure), text: `${subject(structure, "is", "are")} built from the same template: the same ${Number(widest.evidence.tags)} HTML elements in the same order; only the words differ.` });
-	}
-	const kit = fingerprints(["page_document", "page_structure"], false);
-	if (kit.length) {
-		result.push({ kind: "same_code", title: "Same code", sites: reach(kit), text: `${subject(kit, "runs", "run")} the same program ${kit.length === 1 ? "file" : `files (${kit.length})`}, byte for byte. A copied design would not match this exactly, and none of these files is a public library.` });
-	}
-	const servers = shared.filter((indicator) => indicator.kind === "operator_server");
-	if (servers.length) {
-		const doing = (role: OperatorServerRole) => servers.filter((indicator) => operatorServerRoles(indicator.evidence).includes(role));
-		const names = (indicators: typeof servers) => [...new Set(indicators.map((indicator) => backendDetails(indicator.evidence, indicator.value).label.toLowerCase()))].join(" and ");
-		const hosts = (indicators: typeof servers) => indicators.map((indicator) => indicator.value.replace(/^host:/, "")).join(", ");
-		const uses = [
-			doing("receives_data").length && `what visitors enter goes to the same ${names(doing("receives_data"))}`,
-			doing("delivers_malware").length && `the malware visitors are made to run or download comes from the same server (${hosts(doing("delivers_malware"))})`,
-		].filter(Boolean).join(", and ");
-		result.push({ kind: "same_backend", title: "Same server", sites: reach(servers), text: `${subject(servers, "uses", "use")} a server only its operator controls: ${uses}.` });
-	}
-	const deliveries = shared.filter((indicator) => indicator.kind === "delivery_command");
-	if (deliveries.length) {
-		result.push({ kind: "same_delivery", title: "Same command", sites: reach(deliveries), text: `${subject(deliveries, "makes", "make")} visitors paste the same command: the same steps, flags and interpreter, whichever server and decoy app name it names.` });
-	}
-	const payments = shared.filter((indicator) => indicator.kind === "payment_receiver");
-	if (payments.length) {
-		result.push({ kind: "same_payment_account", title: "Same payment account", sites: reach(payments), text: "The pages ask visitors to pay into the same account." });
-	}
-	if (all >= 3 && stats.typicalIntervalMinutes !== undefined && stats.durationMinutes <= 7 * 1_440) {
-		result.push({ kind: "same_pattern", title: "Same pattern", sites: all, text: `${all} pages${stats.platform ? ` on ${stats.platform}` : ""} within ${duration(stats.durationMinutes)}, a new one about every ${duration(stats.typicalIntervalMinutes)}.` });
-	}
-	return result;
-}
-
 /** The brand the sites impersonate with the stored guidance made for it, and what visitors may have typed. */
 function visitorOf(dossier: Dossier, stored: VisitorGuidance | null): PublicCampaignVisitor {
 	const brand = campaignBrand(dossier);
@@ -231,12 +213,15 @@ function visitorOf(dossier: Dossier, stored: VisitorGuidance | null): PublicCamp
 	};
 }
 
-export async function getPublicCampaign(campaignId: bigint, dependencies: DossierDependencies = {}): Promise<PublicCampaign | undefined> {
+export async function getPublicCampaign(campaignId: bigint, dependencies: PublicCampaignDependencies = {}): Promise<PublicCampaign | undefined> {
 	const campaign = await CampaignRepository.getCampaign(campaignId);
 	if (!campaign) return undefined;
 	const dossier = await buildDossier(campaignId, dependencies);
 	if (!dossier.sites.length) return undefined;
 	const siteFacts = new Map((await CampaignRepository.listSiteFacts(dossier.sites.map((site) => ({ submissionId: BigInt(site.submissionId), reportId: BigInt(site.reportId) })))).map((facts) => [memberKey(facts), facts]));
+
+	const loadSiteReports = dependencies.loadSiteReports ?? ((reportId: bigint) => getReportsByIds([reportId]));
+	const siteReports = new Map(await Promise.all(dossier.sites.map(async (site) => [site.key, publicSiteReports(await loadSiteReports(BigInt(site.reportId)))] as const)));
 
 	const sites: PublicCampaignSite[] = dossier.sites.map((site) => {
 		const facts = siteFacts.get(site.key);
@@ -251,13 +236,7 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 		const screenshot = judged && (judged.stamped ?? judged.screenshot);
 		// Numbered by the order the site's pages were shown in, across the routes the case walked.
 		const steps = pages.map((page, index) => ({ step: index + 1, screenshotUrl: artifactUrl(page.screenshot.artifactId), ...(page.stamped ? { stampedUrl: artifactUrl(page.stamped.artifactId) } : {}) }));
-		const reports = site.reports.map((report) => ({
-			provider: report.provider,
-			channel: report.channel === "email" ? report.contact ?? "email" : report.channel === "form" ? "web form / API" : "none",
-			state: STATE[report.status] ?? "pending",
-			...(report.reportedAt ? { reportedAt: report.reportedAt } : {}),
-			...(report.confirmationId ? { ticket: report.confirmationId } : {}),
-		}));
+		const reports = siteReports.get(site.key) ?? [];
 		return {
 			key: site.key,
 			submissionId: site.submissionId,
@@ -280,17 +259,12 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 			sent: site.dataDestinations.map((destination) => ({ ...destination, fields: destination.fields.map((field) => CANARY_FIELD_LABEL[field as CanaryField] ?? field) })),
 			reports,
 			evidence: evidence.map((file) => ({ name: file.name, size: file.size, sha256: file.sha256, url: artifactUrl(file.artifactId) })),
-			takedown: takedownOf(reports),
+			takedown: siteTakedown(reports),
 		};
 	});
 
-	const times = [...new Set(sites.map((site) => site.firstSeenAt))].sort();
-	const gaps = times.slice(1).map((time, index) => minutesBetween(times[index]!, time)).filter((gap) => gap > 0);
-	const durationMinutes = minutesBetween(dossier.firstSeenAt, dossier.lastSeenAt);
-	const typicalIntervalMinutes = sites.length >= 3 ? median(gaps) : undefined;
 	const domains = new Set(sites.map((site) => getDomain(site.host, { allowPrivateDomains: false }) ?? site.host));
 	const platform = domains.size === 1 && sites.every((site) => site.host !== [...domains][0]) ? [...domains][0] : undefined;
-	const stats = { platform, durationMinutes, ...(typicalIntervalMinutes !== undefined ? { typicalIntervalMinutes } : {}) };
 
 	const shared = dossier.indicators.filter((indicator) => indicator.links);
 	const destinations = new Map<string, PublicCampaign["technical"]["destinations"][number]>();
@@ -324,13 +298,10 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Dossie
 		...description,
 		firstSeenAt: dossier.firstSeenAt,
 		lastSeenAt: dossier.lastSeenAt,
-		...stats,
+		...(platform ? { platform } : {}),
 		domainCount: domains.size,
-		reportedCount: sites.filter((site) => site.takedown === "confirmed" || site.takedown === "reported").length,
-		confirmedCount: sites.filter((site) => site.takedown === "confirmed").length,
 		languages: [...new Set(sites.map((site) => site.language).filter((language): language is string => Boolean(language)))],
 		sites,
-		reasons: reasons(dossier, stats),
 		visitor: visitorOf(dossier, campaign.visitorGuidance),
 		technical: {
 			destinations: [...destinations.values()],

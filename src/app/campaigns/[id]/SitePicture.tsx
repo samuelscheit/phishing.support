@@ -8,7 +8,7 @@ import type { PublicCampaignSite } from "@/lib/campaign/public_view";
 import { formatDate, type Locale } from "@/lib/i18n/locale";
 import { cn } from "@/lib/util/cn";
 import { COPY } from "./copy";
-import { languageName, TakedownPill } from "./site_facts";
+import { languageName, TAKEDOWN_STYLE, TakedownPill } from "./site_facts";
 
 /** The picture of a site: its trimmed capture when there is one, else the full capture. */
 function pictureOf(site: PublicCampaignSite): string | undefined {
@@ -74,7 +74,7 @@ export function SiteBrowser({ sites, selected, onSelect, linkedHost, locale }: {
 						<li key={site.key} className="shrink-0">
 							<button type="button" onClick={() => onSelect(site)} title={site.host} aria-current={site === selected ? "true" : undefined} className={cn("relative block rounded-md transition-shadow", site === selected ? "ring-2 ring-foreground ring-offset-2 ring-offset-muted" : "hover:ring-1 hover:ring-foreground/30", site.host === linkedHost && site !== selected && "ring-2 ring-red-600")}>
 								<Thumb site={site} emptyLabel={copy.noPicture} className="h-20 w-[4.5rem]" />
-								<span className={cn("absolute bottom-1 right-1 size-2 rounded-full ring-2 ring-white", site.takedown === "confirmed" ? "bg-emerald-500" : "bg-red-500")} />
+								<span className={cn("absolute bottom-1 right-1 size-2 rounded-full ring-2 ring-white", TAKEDOWN_STYLE[site.takedown].dot)} />
 							</button>
 						</li>
 					))}

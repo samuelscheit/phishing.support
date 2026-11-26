@@ -1,9 +1,10 @@
 import { ShieldAlert } from "lucide-react";
 
 import { Address } from "@/components/Address";
-import type { PublicCampaign, PublicCampaignSite } from "@/lib/campaign/public_view";
+import type { PublicCampaign, PublicCampaignSite, SiteTakedown } from "@/lib/campaign/public_view";
 import type { Locale } from "@/lib/i18n/locale";
 import { COPY, type Basis } from "./copy";
+import { TAKEDOWN_STYLE, takedownCounts } from "./site_facts";
 import type { Finding } from "./visitor";
 
 const LABEL = "text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
@@ -51,29 +52,28 @@ export function VerdictCard({ campaign, finding, basis, shown, locale }: { campa
 	);
 }
 
-/** How far the takedown got: taken down, reported but online, not reported yet. */
-export function TakedownCard({ sites, locale }: { sites: PublicCampaignSite[]; locale: Locale }) {
+/** How far the takedown got, site by site: taken down, blocklisted but up, reported, not reported; and the way to every report. */
+export function TakedownCard({ sites, locale, onShowReports }: { sites: PublicCampaignSite[]; locale: Locale; onShowReports: () => void }) {
 	const copy = COPY[locale];
 	const n = sites.length;
-	const down = sites.filter((site) => site.takedown === "confirmed").length;
-	const none = sites.filter((site) => site.takedown === "none").length;
-	const parts = [
-		{ label: copy.takenDown, count: down, color: "bg-emerald-500" },
-		{ label: copy.notTakenDown, count: n - down - none, color: "bg-red-500" },
-		{ label: copy.notReported, count: none, color: "bg-muted-foreground/40" },
-	];
+	const parts = takedownCounts(sites);
+	const count = (state: SiteTakedown) => parts.find((part) => part.state === state)?.count ?? 0;
+	const reports = sites.reduce((total, site) => total + site.reports.length, 0);
 	return (
 		<section className="rounded-lg border bg-card p-4">
-			<p className="text-sm font-semibold">{copy.takedown}</p>
-			<p className="mt-0.5 text-xs text-muted-foreground">{copy.takedownSub(down, n, n - none)}</p>
-			<div className="mt-3 flex h-2.5 overflow-hidden rounded-full bg-muted" aria-hidden>
-				{parts.map((part) => <span key={part.label} className={part.color} style={{ width: `${(part.count / n) * 100}%` }} />)}
+			<div className="flex items-baseline justify-between gap-2">
+				<p className="text-sm font-semibold">{copy.takedown}</p>
+				{reports > 0 && <button type="button" onClick={onShowReports} className="text-xs font-medium text-primary hover:underline">{copy.reportsLink(reports)} →</button>}
+			</div>
+			<p className="mt-0.5 text-xs text-muted-foreground">{copy.takedownSub(count("taken_down"), n, n - count("none"))}</p>
+			<div className="mt-3 flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+				{parts.map((part) => <span key={part.state} className={TAKEDOWN_STYLE[part.state].dot} style={{ flexGrow: part.count }} />)}
 			</div>
 			<ul className="mt-2 grid grid-cols-3 gap-2 text-xs">
 				{parts.map((part) => (
-					<li key={part.label}>
+					<li key={part.state}>
 						<span className="block text-lg font-semibold leading-tight tabular-nums">{part.count}</span>
-						<span className="flex items-start gap-1 text-muted-foreground"><span className={`mt-1 size-2 shrink-0 rounded-full ${part.color}`} />{part.label}</span>
+						<span className="flex items-start gap-1 text-muted-foreground"><span className={`mt-1 size-2 shrink-0 rounded-full ${TAKEDOWN_STYLE[part.state].dot}`} />{copy.takedownState[part.state]}</span>
 					</li>
 				))}
 			</ul>

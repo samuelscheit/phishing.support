@@ -12,6 +12,7 @@ import type { PublicCampaign, PublicCampaignSite } from "@/lib/campaign/public_v
 import { formatDate, type Locale } from "@/lib/i18n/locale";
 import { cn } from "@/lib/util/cn";
 import { COPY } from "./copy";
+import { TAKEDOWN_STYLE, takedownCounts } from "./site_facts";
 import { DOT, LANE, placeDots } from "./timeline_layout";
 
 /** Quiet this long, the people behind a campaign no longer count as active. */
@@ -66,7 +67,7 @@ export function Timeline({ campaign, locale, onOpen }: { campaign: PublicCampaig
 	const last = Date.parse(campaign.lastSeenAt);
 	const end = Math.max(last, now ?? 0);
 	const { dots, more } = width && now ? placeDots(campaign.sites, width, start, end) : { dots: [], more: [] };
-	const down = campaign.sites.filter((site) => site.takedown === "confirmed").length;
+	const down = campaign.sites.filter((site) => site.takedown === "taken_down").length;
 	// Tall enough for the stacks drawn, plus a lane for "+N" when a spot overflows.
 	const reach = Math.max(0, ...dots.map((dot) => Math.abs(dot.offset))) + (more.length ? LANE : 0);
 	return (
@@ -74,15 +75,13 @@ export function Timeline({ campaign, locale, onOpen }: { campaign: PublicCampaig
 			<figcaption className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-sm">
 				<span><span className="block font-medium sm:inline">{copy.when}</span><span className="hidden text-muted-foreground sm:inline"> · </span><span className="whitespace-nowrap text-muted-foreground">{copy.down(down, campaign.sites.length)}</span></span>
 				<span className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-					<span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full border-2 border-emerald-600" />{copy.takenDown}</span>
-					<span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-red-600" />{copy.notTakenDown}</span>
+					{takedownCounts(campaign.sites).map(({ state }) => <span key={state} className="inline-flex items-center gap-1.5"><span className={cn("size-2.5 rounded-full", TAKEDOWN_STYLE[state].dot)} />{copy.takedownState[state]}</span>)}
 				</span>
 			</figcaption>
 			<div ref={track} className="relative" style={{ height: DOT + 2 * reach + 8 }}>
 				<div className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 bg-border" />
 				{dots.map(({ site, x, offset }) => {
-					const isDown = site.takedown === "confirmed";
-					const label = copy.dot(site.host, formatDate(site.firstSeenAt, locale), isDown);
+					const label = copy.dot(site.host, formatDate(site.firstSeenAt, locale), copy.takedownState[site.takedown]);
 					return (
 						// Out of the tab order: the site table is the keyboard path to the same sites.
 						<button
@@ -94,7 +93,8 @@ export function Timeline({ campaign, locale, onOpen }: { campaign: PublicCampaig
 							onClick={() => onOpen(site)}
 							className={cn(
 								"absolute -translate-x-1/2 -translate-y-1/2 rounded-full transition-transform before:absolute before:-inset-[5px] before:content-[''] hover:scale-125",
-								isDown ? "border-2 border-emerald-600 bg-card" : "border-[3px] border-card bg-red-600 shadow-[0_0_0_1px_#fca5a5]",
+								"border-[3px] border-card shadow-[0_0_0_1px_rgba(0,0,0,0.12)]",
+								TAKEDOWN_STYLE[site.takedown].dot,
 							)}
 							style={{ left: x, top: `calc(50% - ${offset}px)`, width: DOT, height: DOT }}
 						/>

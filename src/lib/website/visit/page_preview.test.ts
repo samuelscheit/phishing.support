@@ -69,4 +69,9 @@ describe("page preview", () => {
 		const kit = await sharp({ create: { width: 1917, height: 963, channels: 3, background: "#ffffff" } }).composite([{ input: card, left: 0, top: 0 }]).png().toBuffer();
 		expect(await sharp(await pagePreview(kit)).metadata()).toMatchObject({ width: 860, height: 700 });
 	});
+
+	test("scales a full-page capture taller than WebP allows down to fit, keeping its shape", async () => {
+		const tall = await sharp({ create: { width: 1000, height: 20_000, channels: 3, background: "#123456" } }).png().toBuffer();
+		expect(await sharp(await pagePreview(tall)).metadata()).toMatchObject({ width: 819, height: 16_383 });
+	});
 });

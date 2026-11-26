@@ -206,7 +206,6 @@ describe("a chain's sites as members", () => {
 			{ key: memberKey(lure), host: "lure-a-test.com", screenshot: "website-stamped.png", steps: [[1, "website.png", "website-stamped.png"]], verdict: ["credential_theft", "Example Bank"] },
 			{ key: memberKey(kit), host: "kit-b-test.com", screenshot: "website-step2-stamped.png", steps: [[1, "website-step2.png", "website-step2-stamped.png"]], verdict: ["payment_fraud", undefined] },
 		]);
-		expect(view.reasons.map((reason) => reason.kind)).toEqual(["same_backend"]);
 	});
 });
 

@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
 import { useTemporaryDatabase } from "../db/test_helpers";
-import type { DossierDependencies } from "../referral/dossier";
+import { SubmissionsEntity } from "../db/entities/submissions";
+import { getReportsForSubmission } from "../submissions/abuse_details";
+import { seedTrylevoReports } from "../submissions/trylevo_reports.fixtures";
 import type { WebsiteSiteAssessment } from "../website/types";
 import type { ExtractedIndicator } from "./indicators";
-import { getPublicCampaign } from "./public_view";
+import { getPublicCampaign, siteTakedown, type PublicSiteReport } from "./public_view";
 import type { CampaignSite } from "./members";
 import { CampaignRepository } from "./repository";
 import { confirmedCase } from "./test_sites";
@@ -12,6 +14,8 @@ import { confirmedCase } from "./test_sites";
 useTemporaryDatabase();
 
 const GOOGLE = { name: "Google", officialUrl: "https://www.google.com/" };
+/** The case whose real reports stand in for a campaign site's. */
+const TRYLEVO = 384401854580134038n;
 const bot: ExtractedIndicator = { kind: "operator_server", value: "telegram-bot:7001", links: true, evidence: { roles: ["receives_data"], backendKind: "telegram_bot", matchedFields: ["email"] } };
 
 const members = new Map<bigint, CampaignSite>();
@@ -66,27 +70,41 @@ describe("what the public page tells a campaign's visitors", () => {
 		await site(1n, "one-test.app", {}, [delivery("a".repeat(64), true), delivery("b".repeat(64), false)]);
 		const campaign = await site(2n, "two-test.app", {}, [delivery("a".repeat(64), true), delivery("b".repeat(64), false)]);
 		const view = (await getPublicCampaign(campaign))!;
-		expect(view.reasons.map((reason) => [reason.kind, reason.sites])).toEqual([["same_delivery", 2]]);
 		expect(view.technical.deliveries).toEqual([{ template: `echo "<url>" [then] echo '<base64>' [pipe] base64 -d [pipe] zsh\ncurl -sfL <url> [pipe] osascript -l JavaScript`, siteCount: 2 }]);
 	});
 
-	test("counts a site as confirmed and as reported exactly as its takedown says", async () => {
-		const campaign = await site(1n, "a-test.com");
-		await site(2n, "b-test.com");
-		await site(3n, "c-test.com");
-		const statuses = new Map([[memberOf(1n).reportId, ["acknowledged", "delivery_failed"]], [memberOf(2n).reportId, ["awaiting_provider_reply"]], [memberOf(3n).reportId, ["provider_rejected"]]]);
-		const dependencies: DossierDependencies = {
-			listReports: (async (submissionId: bigint) => [{ id: memberOf(submissionId).reportId, legalBrandUrl: null, idempotencyKey: null, description: null }]) as never,
-			listRoutes: (async (reportId: bigint) => statuses.get(reportId)!.map((status, index) => ({
-				id: BigInt(index + 1), targetId: 1n, providerRegistryKey: `email:host${index}.example`, providerDisplayName: `Host ${index}`, routeType: "email", verifiedEmail: `abuse@host${index}.example`, status, resolverProvenance: {}, resolutionSnapshot: {},
-			}))) as never,
-			listTargets: (async () => []) as never,
-			listRuns: (async () => []) as never,
-			listMail: (async () => []) as never,
-			listReportArtifacts: (async () => []) as never,
-		};
-		const view = (await getPublicCampaign(campaign, dependencies))!;
-		expect(view.sites.map((entry) => entry.takedown)).toEqual(["confirmed", "reported", "problem"]);
-		expect(view).toMatchObject({ confirmedCount: 1, reportedCount: 2 });
+	test("a site's reports read as the case page reads them, the strongest first, and its takedown follows from them", async () => {
+		const campaign = await site(1n, "trylevo-test.app");
+		await SubmissionsEntity.create({ id: TRYLEVO, kind: "website", data: { kind: "website", website: { url: "https://trylevo.app/" } }, dedupeKey: "website-trylevo.app", status: "reported" });
+		await seedTrylevoReports(TRYLEVO);
+		const loadSiteReports = async () => (await getReportsForSubmission(TRYLEVO)).filter((report) => report.subject === "site");
+		const [view] = (await getPublicCampaign(campaign, { loadSiteReports }))!.sites;
+		// Cloudflare, a CDN, restricted access: the site counts as taken down, not merely blocklisted.
+		expect(view!.takedown).toBe("taken_down");
+		expect(view!.reports.map((report) => [report.organisation, report.role, report.bucket])).toEqual([
+			["Cloudflare", "cdn", "action_taken"],
+			["NameSilo", "registrar", "received"],
+			["Netcraft", "blocklist", "declined"],
+			["Sollutium-NL", "host", "waiting"],
+		]);
+		expect(view!.reports[0]).toMatchObject({ label: "Access restricted", quoted: true, ticket: "983629f3ca31bae5" });
+		// What happens next is said for an open report only; no correspondence reaches the page.
+		expect(view!.reports[0]!.next).toBeUndefined();
+		expect(view!.reports[3]!.next).toBeDefined();
+		expect(JSON.stringify(view!.reports)).not.toContain("subject");
+	});
+});
+
+describe("how far a site's takedown got", () => {
+	const report = (role: PublicSiteReport["role"], bucket: PublicSiteReport["bucket"]) => ({ role, bucket });
+	test("a host, registrar, CDN or platform acting takes it down; a blocklist acting only blocklists it", () => {
+		for (const role of ["host", "registrar", "cdn", "platform"] as const) expect(siteTakedown([report("blocklist", "action_taken"), report(role, "action_taken")])).toBe("taken_down");
+		expect(siteTakedown([report("blocklist", "action_taken"), report("host", "waiting")])).toBe("blocklisted");
+	});
+
+	test("a report a provider has, whatever it decided, counts as reported; only reports that never went out are a problem", () => {
+		for (const bucket of ["received", "declined", "unconfirmed", "waiting"] as const) expect(siteTakedown([report("host", bucket), report("registrar", "not_sent")])).toBe("reported");
+		expect(siteTakedown([report("host", "not_sent"), report("registrar", "not_sent")])).toBe("problem");
+		expect(siteTakedown([])).toBe("none");
 	});
 });

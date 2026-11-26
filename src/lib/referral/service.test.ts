@@ -211,13 +211,10 @@ describe("criminal referral of a campaign", () => {
 			"https://paket-dhl-info.org/login",
 			"https://dhl-iban-zahlung.com/login",
 		]);
-		expect(campaign.sites[0]).toMatchObject({ language: "de", thumbnailUrl: "/api/artifacts/4242", takedown: "reported", reports: [{ provider: "Hostinger International Ltd.", channel: "abuse@hostinger.example", state: "awaiting" }] });
+		expect(campaign.sites[0]).toMatchObject({ language: "de", thumbnailUrl: "/api/artifacts/4242", takedown: "reported", reports: [{ bucket: "waiting", label: "Awaiting reply", channel: "email" }] });
 		expect(campaign.sites[2]).toMatchObject({ takedown: "none", reports: [] });
-		expect(campaign).toMatchObject({ reportedCount: 2, confirmedCount: 0, domainCount: 4 });
+		expect(campaign).toMatchObject({ domainCount: 4 });
 		expect(campaign.platform).toBeUndefined();
-		// Sites seen at the same moment show no rhythm, so no pattern is claimed.
-		expect(campaign.reasons.map((reason) => reason.kind)).toEqual(["same_code", "same_backend", "same_payment_account"]);
-		expect(campaign.typicalIntervalMinutes).toBeUndefined();
 
 		// The record: the bot with its token as the kit published it, the accounts in full, the kit file and the abuse contacts.
 		expect(campaign.technical.backends).toEqual([{ kind: "telegram_bot", label: "Telegram bot", siteCount: 3, details: [
@@ -229,17 +226,14 @@ describe("criminal referral of a campaign", () => {
 		expect(await getPublicCampaign(999n)).toBeUndefined();
 	});
 
-	test("sites on one platform appearing at a steady rhythm are named as a pattern", async () => {
-		for (const [index, name] of ["policy-a", "policy-b", "policy-c", "policy-d"].entries()) {
+	test("sites on one platform name it as theirs", async () => {
+		for (const [index, name] of ["policy-a", "policy-b", "policy-c"].entries()) {
 			const id = BigInt(21 + index);
 			await reportedSite(id, `${name}.onrender.com`);
-			await SubmissionsEntity.update(id, { createdAt: new Date(Date.parse("2026-11-15T00:30:00Z") + index * 10 * 60_000) });
 			await CampaignRepository.recordIndicators(memberOf(id), [kit("b".repeat(64))]);
 		}
 		const campaign = (await getPublicCampaign((await CampaignRepository.campaignForMember(memberOf(21n)))!))!;
-		expect(campaign).toMatchObject({ platform: "onrender.com", domainCount: 1, durationMinutes: 30, typicalIntervalMinutes: 10 });
-		expect(campaign.reasons.find((reason) => reason.kind === "same_pattern")?.text).toBe("4 pages on onrender.com within 30 minutes, a new one about every 10 minutes.");
-		expect(campaign.reasons.find((reason) => reason.kind === "same_code")?.text).toContain("Every page runs the same program file, byte for byte.");
+		expect(campaign).toMatchObject({ platform: "onrender.com", domainCount: 1 });
 	});
 
 	test("sites that serve one page body are named as the same page, and the record and referral texts say what was compared", async () => {
@@ -253,8 +247,6 @@ describe("criminal referral of a campaign", () => {
 		const campaignId = (await CampaignRepository.campaignForMember(memberOf(31n)))!;
 		const campaign = (await getPublicCampaign(campaignId))!;
 		expect(campaign.sites).toHaveLength(3);
-		expect(campaign.reasons.map((reason) => reason.kind)).toEqual(["same_page"]);
-		expect(campaign.reasons[0]!.text).toBe("Every page serves the same page body, byte for byte apart from its own address. A copied design would not match this exactly.");
 		expect(campaign.technical.kitFiles).toEqual([{ sha256: body, size: 27_657, path: "the page body (own address masked)", siteCount: 3 }]);
 
 		const indicator = (await buildDossier(campaignId)).indicators.find((entry) => entry.value === body)!;
@@ -271,9 +263,6 @@ describe("criminal referral of a campaign", () => {
 			await CampaignRepository.recordIndicators(memberOf(BigInt(51 + index)), [server]);
 		}
 		const campaignId = (await CampaignRepository.campaignForMember(memberOf(51n)))!;
-		expect((await getPublicCampaign(campaignId))!.reasons).toEqual([
-			{ kind: "same_backend", title: "Same server", sites: 2, text: "Every page uses a server only its operator controls: the malware visitors are made to run or download comes from the same server (keychainagent.pro)." },
-		]);
 		const dossier = await buildDossier(campaignId);
 		const indicator = dossier.indicators.find((entry) => entry.kind === "operator_server")!;
 		expect(describeIndicatorEnglish(indicator)).toBe(`Server keychainagent.pro delivers the malware visitors are made to run, e.g. https://keychainagent.pro/wksxgj/wZZLR9xY29o4 (SHA-256 ${"e".repeat(64)}) (2 sites).`);
@@ -281,7 +270,7 @@ describe("criminal referral of a campaign", () => {
 		expect(factsFromDossier(dossier, []).links).toEqual(["same_backend"]);
 	});
 
-	test("pages built from one template are named as such; an identical body among them is named too, and the template only where it reaches further", async () => {
+	test("pages built from one template are recorded as such, with an identical body among them", async () => {
 		const template = "d".repeat(64);
 		const body = "e".repeat(64);
 		const hosts = ["dua.windswise.com", "lima.eliteedgemodeling.com", "tujuh.vilapoucajapan.com", "sembilan.lgswm.com"];
@@ -295,10 +284,6 @@ describe("criminal referral of a campaign", () => {
 		}
 		const campaignId = (await CampaignRepository.campaignForMember(memberOf(41n)))!;
 		const campaign = (await getPublicCampaign(campaignId))!;
-		expect(campaign.reasons.map((reason) => [reason.kind, reason.text])).toEqual([
-			["same_page", "2 of the 4 pages serve the same page body, byte for byte apart from its own address. A copied design would not match this exactly."],
-			["same_structure", "Every page is built from the same template: the same 66 HTML elements in the same order; only the words differ."],
-		]);
 		expect(campaign.technical.kitFiles.find((file) => file.sha256 === template)).toEqual({ sha256: template, size: 7_355, path: "the page's template (its HTML elements in order)", siteCount: 4 });
 		const indicator = (await buildDossier(campaignId)).indicators.find((entry) => entry.value === template)!;
 		expect(describeIndicatorEnglish(indicator)).toStartWith(`Identical page template (the same 66 HTML elements in the same order, text and attributes left out; SHA-256 ${template}) (4 sites)`);

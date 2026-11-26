@@ -10,8 +10,7 @@
 import { useCopy } from "@/components/useCopy";
 import { ChevronDown, Copy, Download } from "lucide-react";
 
-import type { PublicCampaign, PublicCampaignSite, PublicReportState } from "@/lib/campaign/public_view";
-import { formatUtcDateTime } from "@/lib/util/date_time";
+import type { PublicCampaign, PublicCampaignSite } from "@/lib/campaign/public_view";
 import type { Locale } from "@/lib/i18n/locale";
 import { plural } from "@/lib/util/values";
 import { cn } from "@/lib/util/cn";
@@ -21,32 +20,6 @@ import { COPY } from "./copy";
 function EnglishOnly({ locale }: { locale: Locale }) {
 	const note = COPY[locale].technicalNote;
 	return note ? <p className="text-sm text-muted-foreground">{note}</p> : null;
-}
-
-const TONE = {
-	ok: "border-emerald-200 bg-emerald-50 text-emerald-800",
-	wait: "border-amber-200 bg-amber-50 text-amber-800",
-	bad: "border-red-200 bg-red-50 text-red-800",
-	muted: "border-slate-200 bg-slate-50 text-slate-600",
-} as const;
-
-const REPORT_STATE: Record<PublicReportState, { label: string; tone: keyof typeof TONE }> = {
-	confirmed: { label: "confirmed by the provider", tone: "ok" },
-	accepted: { label: "accepted", tone: "wait" },
-	awaiting: { label: "sent, no answer yet", tone: "wait" },
-	rejected: { label: "rejected", tone: "bad" },
-	bounced: { label: "bounced", tone: "bad" },
-	failed: { label: "failed", tone: "bad" },
-	pending: { label: "pending", tone: "muted" },
-};
-
-function Pill({ tone, children }: { tone: keyof typeof TONE; children: React.ReactNode }) {
-	return (
-		<span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium", TONE[tone])}>
-			<span className="size-1.5 rounded-full bg-current" />
-			{children}
-		</span>
-	);
 }
 
 function kb(bytes: number): string {
@@ -172,24 +145,16 @@ export function EvidenceRecord({ campaign, locale }: { campaign: PublicCampaign;
 			<EnglishOnly locale={locale} />
 			<a className="inline-flex items-center gap-2 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:bg-foreground/90" href={`/campaigns/${campaign.campaignId}/evidence.zip`}><Download className="size-4" />Download the whole evidence archive (ZIP)</a>
 			<div className="space-y-2">
-				<h3 className="font-semibold">Per site: reports and evidence files</h3>
+				<h3 className="font-semibold">Per site: evidence files</h3>
 				<p className="text-sm text-muted-foreground">Each capture is an MHTML archive, a screenshot, the screenshot with address and time stamped in, a manifest of SHA-256 hashes, and an RFC 3161 timestamp token over that manifest from an independent authority.</p>
 				<div>
 					{campaign.sites.map((site) => (
 						<details key={site.key} className="group/site border-b first:border-t">
 							<summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-sm [&::-webkit-details-marker]:hidden">
 								<span className="min-w-0"><Host site={site} platform={campaign.platform} /></span>
-								<span className="flex shrink-0 items-center gap-1 text-muted-foreground">{plural(site.reports.length, "report", "reports")} · {plural(site.evidence.length, "file", "files")}<ChevronDown className="size-3.5 transition-transform group-open/site:rotate-180" /></span>
+								<span className="flex shrink-0 items-center gap-1 text-muted-foreground">{plural(site.evidence.length, "file", "files")}<ChevronDown className="size-3.5 transition-transform group-open/site:rotate-180" /></span>
 							</summary>
-							<div className="space-y-3 border-t p-4">
-								{site.reports.length > 0 && (
-									<TableShell head={["Reported to", "State", "When", "Channel", "Ticket"]}>
-										{site.reports.map((report, index) => (
-											// A site can be reported twice through one channel (a retry), so the position keeps rows apart.
-											<tr key={`${index}:${report.provider}-${report.channel}`}><td>{report.provider}</td><td><Pill tone={REPORT_STATE[report.state].tone}>{REPORT_STATE[report.state].label}</Pill></td><td className="whitespace-nowrap">{report.reportedAt ? formatUtcDateTime(report.reportedAt) : "–"}</td><td className="whitespace-nowrap font-mono text-xs">{report.channel}</td><td className="break-all font-mono text-xs">{report.ticket ?? "–"}</td></tr>
-										))}
-									</TableShell>
-								)}
+							<div className="border-t p-4">
 								<TableShell head={["Evidence file", "Size", "SHA-256", ""]}>
 									{site.evidence.map((file) => (
 										<tr key={file.url}><td className="font-mono text-xs">{file.name}</td><td className="whitespace-nowrap">{kb(file.size)}</td><td><Hash value={file.sha256} /></td><td><a className="inline-flex items-center gap-1 text-xs text-primary hover:underline" href={file.url} download><Download className="size-3" />download</a></td></tr>
