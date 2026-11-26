@@ -21,36 +21,42 @@ function networkOf(network: HostMove["to"]): string {
 	return `AS${network.asn}${network.holder ? ` (${network.holder})` : ""}`;
 }
 
-/** What happened, in one sentence: where the site went, from where, and since when. */
+/**
+ * What happened, in one sentence: where the site is as of the check that
+ * found it there, and where it still was before. The move itself happened
+ * in between; only those two times are known.
+ */
 function moveSentence(move: HostMove, domain: string, audience: "host" | "other"): string {
-	const addresses = list(move.to.addresses);
-	const where = `${addresses}, in ${audience === "host" ? "your network " : ""}${networkOf(move.to)}`;
+	const where = `${list(move.to.addresses)}, in ${audience === "host" ? "your network " : ""}${networkOf(move.to)}`;
+	const before = `on ${utc(move.since)} it still resolved to ${list(move.from.addresses)}, in ${networkOf(move.from)}`;
 	switch (move.kind) {
 		case "left_cdn":
-			return `${domain} no longer runs behind ${move.from.cdn}'s proxy: since ${utc(move.at)}, it resolves directly to ${where}, and that server serves the reported site itself.`;
+			return `${domain} no longer runs behind ${move.from.cdn}'s proxy: as of ${utc(move.at)} it resolves directly to ${where}, and that server serves the reported site itself; ${before}.`;
 		case "new_cdn":
-			return `${domain} has moved behind ${move.to.cdn}: since ${utc(move.at)}, it resolves to ${where}, which serves the reported site.`;
+			return `${domain} has moved behind ${move.to.cdn}: as of ${utc(move.at)} it resolves to ${where}, which serves the reported site; ${before}.`;
 		case "new_network":
-			return `${domain} has moved from ${list(move.from.addresses)}, in ${networkOf(move.from)}, to ${where}, since ${utc(move.at)}, and the new server serves the reported site.`;
+			return `${domain} has moved: as of ${utc(move.at)} it resolves to ${where}, and that server serves the reported site; ${before}.`;
 	}
 }
 
-/** The facts the check recorded, each one a reader can repeat. */
+/** The facts the check recorded, each one a reader can repeat with the URLs as captured. */
 function moveFacts(move: HostMove, domain: string): string[] {
 	const [ip] = move.to.addresses;
 	const { certificate, server, kitFiles } = move.evidence;
-	const filePath = kitFiles[0] ? new URL(kitFiles[0].url).pathname : "/";
+	const file = kitFiles[0] ? new URL(kitFiles[0].url) : undefined;
+	const port = file?.port || (file?.protocol === "http:" ? "80" : "443");
+	const address = ip?.includes(":") ? `[${ip}]` : ip;
 	return [
-		`- DNS: ${domain} resolves to ${list(move.to.addresses)} (checked ${utc(move.at)}; before: ${list(move.from.addresses)}, ${networkOf(move.from)}).`,
+		`- DNS: ${domain} resolves to ${list(move.to.addresses)} (checked ${utc(move.at)}; on ${utc(move.since)}: ${list(move.from.addresses)}, ${networkOf(move.from)}).`,
 		...(certificate ? [`- TLS: ${ip}:443 presents a certificate for ${list(certificate.names.slice(0, 4))} issued by ${certificate.issuer}, valid ${certificate.notBefore.slice(0, 10)} to ${certificate.notAfter.slice(0, 10)}, SHA-256 fingerprint ${certificate.fingerprint256}.`] : []),
 		...(server ? [`- HTTP: the server answers as "${server}".`] : []),
 		`- Content: ${kitFiles.length === 1 ? "this file is" : "these files are"} byte-identical to what we captured when we reported the site:`,
-		...kitFiles.map((file) => `  ${file.url} (SHA-256 ${file.sha256})`),
-		...(ip && !move.to.cdn ? [
+		...kitFiles.map((kitFile) => `  ${kitFile.url} (SHA-256 ${kitFile.sha256})`),
+		...(ip && file && !move.to.cdn ? [
 			"",
 			"To check it yourself:",
-			`  openssl s_client -connect ${ip}:443 -servername ${domain}`,
-			`  curl -s --resolve ${domain}:443:${ip} https://${domain}${filePath} | sha256sum`,
+			...(file.protocol === "https:" ? [`  openssl s_client -connect ${address}:${port} -servername ${domain}`] : []),
+			`  curl -s --resolve '${file.hostname}:${port}:${address}' '${file.href}' | sha256sum`,
 		] : []),
 	];
 }
@@ -90,7 +96,7 @@ export function cdnBypassNotice(params: MoveNoticeParams & { confirmationId: str
 	return [
 		params.greeting,
 		"",
-		`Regarding report ${params.confirmationId} (${domain}): you acted on the reported ${siteKind(params.allegation)}, and its operator has since bypassed that by taking the site off your network. ${moveSentence(move, domain, "other")} Visitors reach it without your interstitial.`,
+		`Regarding report ${params.confirmationId} (${domain}): you acted on the reported ${siteKind(params.allegation)}, and the site has since been taken off your network. ${moveSentence(move, domain, "other")} Whatever you applied to it no longer stands between the site and its visitors.`,
 		"",
 		"What we found:",
 		...moveFacts(move, domain),

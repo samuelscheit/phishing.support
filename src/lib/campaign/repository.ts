@@ -136,7 +136,41 @@ function recluster(tx: Transaction): void {
 	}
 }
 
+/** Sites outside a report's own campaign that may share a kit file before it counts as everyone's, not the kit's. */
+const MAX_UNRELATED_KIT_FILE_SITES = 2;
+
 export const CampaignRepository = {
+	/**
+	 * Whether a file of a reported site is one many sites serve, so serving
+	 * it proves nothing about which site it is: a published library file
+	 * (jsDelivr), a file the campaign indicators already set aside as a
+	 * library or platform file, or one recorded for sites on more registrable
+	 * domains outside the report's campaign than one operator's kit reaches.
+	 */
+	async isSharedKitFile(sha256: string, reportId: bigint): Promise<boolean> {
+		const db = await getDb();
+		if (db.select().from(kitHashChecks).where(eq(kitHashChecks.sha256, sha256)).get()?.library) return true;
+		const recorded = db.select({ reportId: campaignIndicators.reportId, links: campaignIndicators.links })
+			.from(campaignIndicators)
+			.where(and(eq(campaignIndicators.kind, "kit_fingerprint"), eq(campaignIndicators.value, sha256)))
+			.all();
+		if (recorded.some(({ links }) => !links)) return true;
+		const own = new Set(db.select({ campaignId: campaignMembers.campaignId }).from(campaignMembers).where(eq(campaignMembers.reportId, reportId)).all().map(({ campaignId }) => campaignId));
+		const others = [...new Set(recorded.map((entry) => entry.reportId))].filter((other) => other !== reportId);
+		if (!others.length) return false;
+		const related = new Set(own.size
+			? db.select({ reportId: campaignMembers.reportId }).from(campaignMembers)
+				.where(and(inArray(campaignMembers.reportId, others), inArray(campaignMembers.campaignId, [...own])))
+				.all().map((entry) => entry.reportId)
+			: []);
+		const unrelated = others.filter((other) => !related.has(other));
+		if (!unrelated.length) return false;
+		const sites = new Set(db.select({ normalizedTarget: abuseTargets.normalizedTarget, observedUrls: abuseTargets.observedUrls }).from(abuseTargets)
+			.where(and(inArray(abuseTargets.reportId, unrelated), eq(abuseTargets.ordinal, 0)))
+			.all().map(reportSite));
+		return sites.size > MAX_UNRELATED_KIT_FILE_SITES;
+	},
+
 	async getKitHashCheck(sha256: string) {
 		const db = await getDb();
 		return db.select().from(kitHashChecks).where(eq(kitHashChecks.sha256, sha256)).get();

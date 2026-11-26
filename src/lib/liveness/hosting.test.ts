@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
-import { attributeAddresses, hostingChange, routedHosting, type SiteHosting } from "./hosting";
+import { attributeHosting, hostingChange, hostingKey, networkIdentities, routedHosting, type SiteHosting } from "./hosting";
 import { networkLookup, TRYLEVO_ROUTED_SNAPSHOT } from "./host_move.fixtures";
 
-const attributed = async (...ips: string[]): Promise<SiteHosting> => ({ addresses: await attributeAddresses(ips, undefined, networkLookup()) });
+const attributed = async (...ips: string[]): Promise<SiteHosting> => attributeHosting({ addresses: ips.map((ip) => ({ ip })) }, undefined, networkLookup());
 
 describe("attributing a check's addresses", () => {
 	test("each public address gets its network, and a CDN's network names the CDN", async () => {
-		expect(await attributeAddresses(["85.137.52.128", "188.114.96.3"], undefined, networkLookup())).toEqual([
+		expect((await attributed("85.137.52.128", "188.114.96.3")).addresses).toEqual([
 			{ ip: "85.137.52.128", asn: 43641, holder: "Sollutium-NL SOLLUTIUM EU Sp z.o.o.", prefix: "85.137.52.0/24" },
 			{ ip: "188.114.96.3", asn: 13335, holder: "CLOUDFLARENET - Cloudflare, Inc., US", prefix: "188.114.96.0/24", cdn: "Cloudflare" },
 		]);
@@ -16,11 +16,11 @@ describe("attributing a check's addresses", () => {
 	test("addresses the previous check attributed are not looked up again; private ones and failed lookups stay unattributed", async () => {
 		const asked: string[] = [];
 		const previous = { addresses: [{ ip: "85.137.52.128", asn: 43641, holder: "Sollutium-NL SOLLUTIUM EU Sp z.o.o." }] };
-		expect(await attributeAddresses(["85.137.52.128", "10.0.0.5", "203.0.113.10", "198.51.100.77", "5.161.1.1"], previous, async (ip) => {
+		expect((await attributeHosting({ addresses: ["85.137.52.128", "10.0.0.5", "203.0.113.10", "198.51.100.77", "5.161.1.1"].map((ip) => ({ ip })) }, previous, async (ip) => {
 			asked.push(ip);
 			if (ip === "5.161.1.1") throw new Error("RIPEstat timed out");
 			return {};
-		})).toEqual([
+		})).addresses).toEqual([
 			{ ip: "85.137.52.128", asn: 43641, holder: "Sollutium-NL SOLLUTIUM EU Sp z.o.o." },
 			{ ip: "10.0.0.5" },
 			{ ip: "203.0.113.10" },

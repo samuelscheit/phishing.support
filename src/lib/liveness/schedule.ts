@@ -2,7 +2,7 @@ import { AbuseRepository } from "../abuse/repository";
 import type { AbuseJob } from "../abuse/schema";
 import { DAY_MS, HOUR_MS } from "../util/date_time";
 import { checkSite, type SiteCheckDependencies } from "./check";
-import { attributeHosting, observeHostMove, type HostMoveDependencies } from "./host_move";
+import { attributeCheck, observeHostMove, type HostMoveDependencies } from "./host_move";
 import { listLivenessTargets, listSiteChecksForTargets, livenessJobKey, recordSiteCheck, type LivenessTarget } from "./repository";
 
 /**
@@ -88,7 +88,8 @@ export async function ensureLivenessChecks(): Promise<void> {
  * Check the target's site, attribute the addresses it resolved to their
  * networks, record whether it moved since the last check (or since it was
  * reported), record what the check found, and queue the next check on its
- * schedule: within the hour after a move.
+ * schedule: within the hour after a move, unless this check was itself the
+ * recheck of one (a site flapping between hosts gets no hourly chain).
  */
 export async function runLivenessCheck(params: { jobId: bigint; targetId: bigint; dependencies?: SiteCheckDependencies & HostMoveDependencies }): Promise<void> {
 	const [target] = await listLivenessTargets({ targetId: params.targetId });
@@ -96,12 +97,12 @@ export async function runLivenessCheck(params: { jobId: bigint; targetId: bigint
 	if (!target) return;
 	const dependencies = params.dependencies ?? {};
 	const checks = await listSiteChecksForTargets([target.targetId]);
-	const result = await attributeHosting(await checkSite(target.url, dependencies), checks.at(-1), dependencies);
-	const move = await observeHostMove({ target, result, checks, jobId: params.jobId }, dependencies);
+	const result = await attributeCheck(await checkSite(target.url, dependencies), checks.at(-1), dependencies);
+	const { move, recheck } = await observeHostMove({ target, result, checks, jobId: params.jobId }, dependencies);
 	await recordSiteCheck(target, result);
 	await queueLivenessCheck({ ...target, lastCheckedAt: result.checkedAt }, {
 		successorOf: params.jobId,
 		now: result.checkedAt,
-		...(move ? { by: new Date(result.checkedAt.getTime() + LIVENESS_RECHECK_AFTER_CHANGE_MS) } : {}),
+		...(move && !recheck ? { by: new Date(result.checkedAt.getTime() + LIVENESS_RECHECK_AFTER_CHANGE_MS) } : {}),
 	});
 }

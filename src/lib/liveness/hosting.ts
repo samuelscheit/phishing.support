@@ -1,7 +1,7 @@
 import { isIP } from "node:net";
 
 import { isPublicIp } from "../abuse/security/security";
-import { cdnOfAsn } from "../network/cdn";
+import { cdnOfServer, edgeOfAsn } from "../network/cdn";
 import { asHolder, asHolderName, ipNetwork } from "../network/ripestat";
 import { asRecord, text } from "../util/values";
 
@@ -13,7 +13,7 @@ export type HostingAddress = {
 	/** The AS holder as RIPEstat names it ("Sollutium-NL SOLLUTIUM EU Sp z.o.o."). */
 	holder?: string;
 	prefix?: string;
-	/** The CDN whose network it is: the site is proxied, its server is elsewhere. */
+	/** The CDN or cloud front end the site is served through, by its network or by the platform that answered: its server may be elsewhere. */
 	cdn?: string;
 };
 
@@ -59,24 +59,32 @@ const ripeStatNetwork: NetworkLookup = async (ip) => {
 };
 
 /**
- * The networks of the addresses a check resolved. An address the previous
- * check already attributed keeps that attribution without asking again; a
- * private address or a failed lookup stays unattributed.
+ * The networks of the addresses a check resolved, and the edge each is
+ * served through: the CDN its network is, or the platform the answer named
+ * (`Server: Vercel`). An address the previous check already attributed keeps
+ * its network without asking again; a private address or a failed lookup
+ * stays unattributed.
  */
-export async function attributeAddresses(addresses: readonly string[], previous: SiteHosting | null | undefined, lookup: NetworkLookup = ripeStatNetwork): Promise<HostingAddress[]> {
-	const known = new Map((previous?.addresses ?? []).filter((address) => address.asn !== undefined).map((address) => [address.ip, address]));
-	return Promise.all(addresses.map(async (ip): Promise<HostingAddress> => {
+export async function attributeHosting(hosting: SiteHosting, previous: SiteHosting | null | undefined, lookup: NetworkLookup = ripeStatNetwork): Promise<SiteHosting> {
+	const known = new Map((previous?.addresses ?? []).filter((address) => address.asn !== undefined).map(({ cdn: _cdn, ...address }) => [address.ip, address]));
+	const platform = cdnOfServer(hosting.server);
+	const addresses = await Promise.all(hosting.addresses.map(async ({ ip }): Promise<HostingAddress> => {
 		const cached = known.get(ip);
 		if (cached) return cached;
 		if (!isIP(ip) || !isPublicIp(ip)) return { ip };
 		try {
-			const network = await lookup(ip);
-			const cdn = cdnOfAsn(network.asn);
-			return { ip, ...network, ...(cdn ? { cdn } : {}) };
+			return { ip, ...await lookup(ip) };
 		} catch {
 			return { ip };
 		}
 	}));
+	return {
+		...hosting,
+		addresses: addresses.map((address) => {
+			const cdn = edgeOfAsn(address.asn) ?? (address.asn !== undefined ? platform : undefined);
+			return cdn ? { ...address, cdn } : address;
+		}),
+	};
 }
 
 /**
@@ -99,22 +107,43 @@ export function routedHosting(resolverSnapshot: Record<string, unknown> | null |
 		const asnRecord = Array.isArray(snapshot?.asnRdap) ? snapshot.asnRdap.map(asRecord).find((record) => Number(record?.asn) === asn) : undefined;
 		const holder = text(asRecord(asnRecord?.organization)?.organization) ?? text(asRecord(snapshot?.allocationOwner)?.name);
 		const prefix = text(bgp?.prefix);
-		const cdn = cdnOfAsn(asn);
+		const cdn = edgeOfAsn(asn);
 		return [{ ip, asn, ...(holder ? { holder } : {}), ...(prefix ? { prefix } : {}), ...(cdn ? { cdn } : {}) }];
 	});
 	return addresses.length ? { addresses } : undefined;
 }
 
-/** What one address is served by: its CDN, else its network; undefined when not known. */
-function identityOf(address: HostingAddress): string | undefined {
-	if (address.cdn) return `cdn:${address.cdn}`;
-	return address.asn === undefined ? undefined : `as:${address.asn}`;
+/**
+ * The organisation that holds an AS, normalised, so two networks of one
+ * company are one host: "CLOUDFLARENET - Cloudflare, Inc., US" and
+ * "Cloudflare, Inc." are both `cloudflareinc`.
+ */
+function holderOrganisation(holder: string | undefined): string | undefined {
+	if (!holder) return undefined;
+	const trimmed = holder.trim();
+	const name = asHolderName(trimmed);
+	const rest = name === trimmed ? trimmed : trimmed.slice(name.length).replace(/^\s*-\s*/, "");
+	const organisation = rest.replace(/,\s*[A-Z]{2}$/, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+	return organisation.length >= 3 ? organisation : undefined;
 }
 
-/** The identities of every address, or undefined when any address is unattributed: an unknown network decides nothing. */
-function identities(hosting: SiteHosting): Set<string> | undefined {
-	const all = hosting.addresses.map(identityOf);
-	return all.length && all.every((identity): identity is string => identity !== undefined) ? new Set(all) : undefined;
+/** What a network is known by: its CDN, else its AS, and the organisation holding it. Empty when nothing is known. */
+export function networkIdentities(network: Pick<HostingAddress, "cdn" | "asn" | "holder">): string[] {
+	const primary = network.cdn ? `cdn:${network.cdn}` : network.asn !== undefined ? `as:${network.asn}` : undefined;
+	if (!primary) return [];
+	const organisation = network.cdn ? undefined : holderOrganisation(network.holder);
+	return [primary, ...(organisation ? [`org:${organisation}`] : [])];
+}
+
+/** An address the site resolved to: one seen before is where the site was, whatever its network was known as then. */
+export function addressIdentity(ip: string): string {
+	return `ip:${ip.toLowerCase()}`;
+}
+
+/** Every identity of a hosting's networks, or undefined when any address is unattributed: an unknown network decides nothing. */
+export function hostingIdentities(hosting: SiteHosting): Set<string> | undefined {
+	const all = hosting.addresses.map(networkIdentities);
+	return all.length && all.every((identities) => identities.length > 0) ? new Set(all.flat()) : undefined;
 }
 
 /** The networks of a hosting, by the first address's: a site is served from one network at a time. */
@@ -132,22 +161,26 @@ export function hostingNetwork(hosting: SiteHosting): HostingNetwork {
 	};
 }
 
-/** The identity a hosting is known by, for telling one move from another. */
+/** The identity a hosting is known by (its CDNs and ASes), or undefined when any of its addresses is unattributed. */
 export function hostingKey(hosting: SiteHosting): string | undefined {
-	const set = identities(hosting);
-	return set && [...set].sort().join("+");
+	const identities = hostingIdentities(hosting);
+	return identities && [...identities].filter((identity) => !identity.startsWith("org:")).sort().join("+");
 }
 
 /**
- * Whether the site moved between two hostings: only when no network of the
- * new one served it before. New addresses in the same network (a CDN's other
- * edge, a host renumbering its server) are no move, and neither is a hosting
- * whose networks are not all known.
+ * Whether the site moved to `after`: only to networks none of which served
+ * it before (`before`, and every network in `seen`). New addresses in the
+ * same network (a CDN's other edge, a renumbered server), another AS of the
+ * same organisation, a return to a network or an address seen since the
+ * report, and a hosting whose networks are not all known are no move. So a site flapping
+ * between two hosts moves once, not on every check.
  */
-export function hostingChange(before: SiteHosting, after: SiteHosting): HostingChange | undefined {
-	const was = identities(before);
-	const now = identities(after);
-	if (!was || !now || [...now].some((identity) => was.has(identity))) return undefined;
+export function hostingChange(before: SiteHosting, after: SiteHosting, seen: Iterable<string> = []): HostingChange | undefined {
+	const was = hostingIdentities(before);
+	const now = hostingIdentities(after);
+	if (!was || !now) return undefined;
+	const known = new Set([...was, ...before.addresses.map(({ ip }) => addressIdentity(ip)), ...seen]);
+	if ([...now, ...after.addresses.map(({ ip }) => addressIdentity(ip))].some((identity) => known.has(identity))) return undefined;
 	const from = hostingNetwork(before);
 	const to = hostingNetwork(after);
 	const kind: HostMoveKind = to.cdn ? "new_cdn" : from.cdn ? "left_cdn" : "new_network";

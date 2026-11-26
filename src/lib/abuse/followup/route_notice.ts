@@ -20,8 +20,9 @@ export type RouteMessage = {
 };
 
 /** Mail the message; its outbound record, under its correlation key, keeps it from being sent twice. */
-export async function messageByMail(message: RouteMessage & { recipient: string }, send: typeof sendAbuseEmailRoute = sendAbuseEmailRoute): Promise<string | null> {
+export async function messageByMail(message: RouteMessage & { recipient: string; replyAddress?: string }, send: typeof sendAbuseEmailRoute = sendAbuseEmailRoute): Promise<string | null> {
 	const result = await send({
+		...(message.replyAddress ? { replyAddress: message.replyAddress } : {}),
 		routeId: message.route.id,
 		runId: message.runId,
 		reportId: message.route.reportId,
@@ -79,18 +80,22 @@ export async function messageThroughForm(message: RouteMessage & { channel: Extr
  * or a report not delivered yet.
  */
 type NoticeChannel =
-	| { kind: "email"; recipient: string; subject: string; runId: bigint; confirmationId: string }
+	| { kind: "email"; recipient: string; subject: string; runId: bigint; confirmationId: string; replyAddress?: string }
 	| { kind: "form"; channel: Extract<DecisionAnswerChannel, { kind: "form" }>; subject: string; runId: bigint; confirmationId: string };
 
 async function noticeChannelOf(route: AbuseProviderRoute, providerFor: typeof getProviderSubmissionProvider = getProviderSubmissionProvider): Promise<NoticeChannel | undefined> {
 	const run = await AbuseRepository.getLatestProviderRunForRoute(route.id);
 	if (!run) return undefined;
 	if (route.routeType === "email" && route.verifiedEmail) {
-		const report = (await AbuseRepository.listMailForReport(route.reportId))
-			.find((message) => message.routeId === route.id && message.direction === "outbound" && message.status === "sent" && message.correlationKey === `email-run:${route.id.toString()}`);
+		const messages = (await AbuseRepository.listMailForReport(route.reportId)).filter((message) => message.routeId === route.id);
+		const report = messages.find((message) => message.direction === "outbound" && message.status === "sent" && message.correlationKey === `email-run:${route.id.toString()}`);
 		if (!report?.subject) return undefined;
-		const subject = /^re:/i.test(report.subject) ? report.subject : `Re: ${report.subject}`;
-		return { kind: "email", recipient: route.verifiedEmail, subject, runId: run.id, confirmationId: report.messageId ?? run.correlationKey };
+		// The provider's own ticket subject ("[## 599572 ##] …") when it answered, so the mail joins its ticket; else our report's.
+		const answer = messages.findLast((message) => message.direction === "inbound" && message.subject && message.kind !== "bounce" && message.classification !== "bounce" && message.classification !== "relay_refused");
+		const thread = answer?.subject ?? report.subject;
+		const subject = /^re:/i.test(thread) ? thread : `Re: ${thread}`;
+		// Replies come back on the route's own reply address, like the provider's answer to the report did.
+		return { kind: "email", recipient: route.verifiedEmail, subject, runId: run.id, confirmationId: report.messageId ?? run.correlationKey, ...(report.replyAddress ? { replyAddress: report.replyAddress } : {}) };
 	}
 	const channel = route.routeType === "provider_submission" ? providerFor(route.providerRegistryKey)?.decisionFollowUp?.channel : undefined;
 	if (!channel || !run.confirmationId) return undefined;
@@ -103,8 +108,8 @@ export type NoticeOutcome = { status: "sent"; to: string; messageId: string | nu
 
 /**
  * Send news about the reported site on a route through its channel, once
- * per correlation key: a message already recorded under the key (sent,
- * failed, or in flight) is never sent again.
+ * per correlation key: a message recorded under the key as sent or in
+ * flight is never sent again; one that definitely failed may be sent again.
  */
 export async function sendRouteNotice(
 	route: AbuseProviderRoute,
@@ -112,10 +117,10 @@ export async function sendRouteNotice(
 	dependencies: { send?: typeof sendAbuseEmailRoute; providerFor?: typeof getProviderSubmissionProvider } = {},
 ): Promise<NoticeOutcome> {
 	const mail = await AbuseRepository.listMailForReport(route.reportId);
-	if (mail.some((message) => message.direction === "outbound" && message.correlationKey === notice.correlationKey)) return { status: "already_sent" };
+	if (mail.some((message) => message.direction === "outbound" && message.correlationKey === notice.correlationKey && message.status !== "failed")) return { status: "already_sent" };
 	const channel = await noticeChannelOf(route, dependencies.providerFor);
 	if (!channel) return { status: "no_channel" };
 	const message = { route, runId: channel.runId, confirmationId: channel.confirmationId, subject: channel.subject, ...notice };
-	if (channel.kind === "email") return { status: "sent", to: channel.recipient, messageId: await messageByMail({ ...message, recipient: channel.recipient }, dependencies.send) };
+	if (channel.kind === "email") return { status: "sent", to: channel.recipient, messageId: await messageByMail({ ...message, recipient: channel.recipient, ...(channel.replyAddress ? { replyAddress: channel.replyAddress } : {}) }, dependencies.send) };
 	return { status: "sent", to: channel.channel.name, messageId: await messageThroughForm({ ...message, channel: channel.channel }) };
 }

