@@ -83,7 +83,7 @@ function Popover({ label, icon, disabled, children, align = "start", panelClassN
 export function HandBack({ driver }: { driver: LiveDriver }) {
 	const [note, setNote] = useState("");
 	return (
-		<Popover label="Hand back" icon={<Undo2 />} disabled={driver.busy === "release"}>
+		<Popover label="Hand back" icon={<Undo2 />} disabled={driver.busy.release}>
 			{(close) => (
 				<form
 					className="space-y-2 p-1.5"
@@ -139,7 +139,7 @@ export function FakeValues({ values, onInsert, disabled }: { values: LiveControl
 /** Write to the agent: it reads the message at its next turn. */
 export function MessageAgent({ driver, className }: { driver: LiveDriver; className?: string }) {
 	const [text, setText] = useState("");
-	const sending = driver.busy === "message";
+	const sending = Boolean(driver.busy.message);
 	return (
 		<form
 			className={cn("flex min-w-0 items-center gap-1 focus-within:ring-1 focus-within:ring-ring", className)}
@@ -215,8 +215,8 @@ export function ControlDock({ driver, control, onKeyboard }: { driver: LiveDrive
 					</>
 				) : (
 					<>
-						<Button type="button" size="sm" className="h-9 shrink-0 active:scale-[0.96] transition-[background-color,scale] duration-150 motion-reduce:transition-none" disabled={!canTake || driver.busy === "take"} onClick={() => void driver.take()}>
-							{driver.busy === "take" ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <Hand />}
+						<Button type="button" size="sm" className="h-9 shrink-0 active:scale-[0.96] transition-[background-color,scale] duration-150 motion-reduce:transition-none" disabled={!canTake || driver.busy.take} onClick={() => void driver.take()}>
+							{driver.busy.take ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <Hand />}
 							Take over
 						</Button>
 						{takeHint ? <span className="px-2 text-xs text-muted-foreground">{takeHint}</span> : null}

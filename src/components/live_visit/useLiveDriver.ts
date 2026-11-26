@@ -27,6 +27,7 @@ async function viewerLabel(viewer: string): Promise<string | undefined> {
 }
 
 type CommandResult = PostResult & { token?: string };
+type Command = "take" | "release" | "message";
 
 async function sendCommand(submissionId: string, body: Record<string, unknown>): Promise<CommandResult> {
 	try {
@@ -42,8 +43,8 @@ async function sendCommand(submissionId: string, body: Record<string, unknown>):
 /** The controls this viewer has of a live visit, as its views take them: what `useLiveDriver` returns, or a fixture. */
 export type LiveDriver = {
 	status: DriverStatus;
-	/** The command running now, for its button's busy state. */
-	busy?: "take" | "release" | "message";
+	/** The commands running now, for their buttons' busy state. */
+	busy: Partial<Record<Command, boolean>>;
 	error?: string;
 	dismissError: () => void;
 	take: () => Promise<void>;
@@ -63,7 +64,15 @@ export function useLiveDriver({ submissionId, control }: Pick<LiveVisit, "submis
 	const [viewer, setViewer] = useState<string>();
 	const [label, setLabel] = useState<string>();
 	const [held, setHeld] = useState<DriverToken>({ confirmed: false });
-	const [busy, setBusy] = useState<LiveDriver["busy"]>();
+	const [busy, setBusy] = useState<LiveDriver["busy"]>({});
+	/** Whether the console that drives is still open: a take answered after it closed is handed straight back. */
+	const mounted = useRef(true);
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+		};
+	}, []);
 	const [error, setError] = useState<string>();
 	const tokenRef = useRef<string | undefined>(undefined);
 	useEffect(() => {
@@ -103,11 +112,11 @@ export function useLiveDriver({ submissionId, control }: Pick<LiveVisit, "submis
 		if (!held.token) queue.clear();
 	}, [queue, held.token]);
 
-	const run = useCallback(async (kind: NonNullable<LiveDriver["busy"]>, body: Record<string, unknown>): Promise<CommandResult> => {
-		setBusy(kind);
+	const run = useCallback(async (kind: Command, body: Record<string, unknown>): Promise<CommandResult> => {
+		setBusy((current) => ({ ...current, [kind]: true }));
 		setError(undefined);
 		const result = await sendCommand(submissionId, { ...body, viewer });
-		setBusy(undefined);
+		setBusy((current) => ({ ...current, [kind]: false }));
 		if (!result.ok) setError(result.error);
 		return result;
 	}, [submissionId, viewer]);
@@ -119,7 +128,9 @@ export function useLiveDriver({ submissionId, control }: Pick<LiveVisit, "submis
 		dismissError: () => setError(undefined),
 		take: async () => {
 			const result = await run("take", { action: "take" });
-			if (result.ok && result.token) setHeld({ token: result.token, confirmed: false });
+			if (!result.ok || !result.token) return;
+			if (mounted.current) setHeld({ token: result.token, confirmed: false });
+			else void sendCommand(submissionId, { action: "release", viewer, token: result.token });
 		},
 		release: async (note) => {
 			if (!held.token) return;

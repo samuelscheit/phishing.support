@@ -94,12 +94,15 @@ export function LiveConsoleFixture({ state, frame, theme }: { state: string; fra
 		dismissError: () => undefined,
 		take: async () => undefined,
 		release: async () => undefined,
+		busy: {},
 		message: async () => true,
 		send: (...inputs) => console.info("live inputs", inputs),
 	};
 	if (!mounted) return null;
 	return (
 		<main className="mx-auto max-w-3xl space-y-6 p-6">
+			{/* The dev tools' badge would cover the console's corner in screenshots. */}
+			<style>{"nextjs-portal{display:none}"}</style>
 			<SiteVisitBrowser running pages={[]} live={visit} fallbackUrl="https://secure-bank-verify.example.test/" />
 			<SiteVisitTimeline running={false} visit={{ outcome: "completed", actions: ENTRIES.flatMap((entry) => (entry.kind === "action" ? [{ kind: entry.actionKind, text: entry.text, actor: entry.actor }] : [])), accessSteps: [], dataSent: [], downloadFailures: [] }} live={visit} pageCount={2} />
 			{open ? <LiveConsole visit={visit} driver={driver} onClose={() => setOpen(false)} fullscreen={false} /> : null}

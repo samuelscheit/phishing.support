@@ -42,6 +42,8 @@ export function LiveScreen({ frame, driving, send, sinkRef, label, children }: {
 	const dotRef = useRef<HTMLSpanElement>(null);
 	const pressed = useRef<(typeof BUTTONS)[number] | null>(null);
 	const lastMove = useRef(0);
+	/** The newest throttled-away move, sent once the interval passed so the page ends where the pointer stopped. */
+	const trailingMove = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const lastDown = useRef<{ at: number; client: Point; count: number } | null>(null);
 	const touch = useRef<Touch | null>(null);
 	// The wheel listener is native (React's is passive): it reads the current props through a ref.
@@ -99,11 +101,17 @@ export function LiveScreen({ frame, driving, send, sinkRef, label, children }: {
 	}, [driving, sinkRef]);
 
 	useEffect(() => {
-		if (!driving) {
+		const stop = () => {
+			clearTimeout(trailingMove.current);
+			clearTimeout(touch.current?.timer);
 			pressed.current = null;
 			touch.current = null;
+		};
+		if (!driving) {
+			stop();
 			showDot(undefined);
 		}
+		return stop;
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [driving]);
 
@@ -168,11 +176,16 @@ export function LiveScreen({ frame, driving, send, sinkRef, label, children }: {
 			return;
 		}
 		showDot(client);
-		if (event.timeStamp - lastMove.current < MOVE_INTERVAL_MS) return;
 		const point = pagePoint(client, Boolean(pressed.current));
 		if (!point) return;
-		lastMove.current = event.timeStamp;
-		send({ type: "pointer", phase: "move", ...point, button: pressed.current ?? "left", clickCount: 1 });
+		const move = () => {
+			lastMove.current = performance.now();
+			send({ type: "pointer", phase: "move", ...point, button: pressed.current ?? "left", clickCount: 1 });
+		};
+		clearTimeout(trailingMove.current);
+		const wait = lastMove.current + MOVE_INTERVAL_MS - performance.now();
+		if (wait <= 0) move();
+		else trailingMove.current = setTimeout(move, wait);
 	};
 
 	const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -192,6 +205,7 @@ export function LiveScreen({ frame, driving, send, sinkRef, label, children }: {
 		}
 		const button = pressed.current;
 		if (!button) return;
+		clearTimeout(trailingMove.current);
 		pressed.current = null;
 		if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
 		const point = pagePoint(client, true);
@@ -203,8 +217,11 @@ export function LiveScreen({ frame, driving, send, sinkRef, label, children }: {
 		if (gesture?.id === event.pointerId) {
 			clearTimeout(gesture.timer);
 			touch.current = null;
-			if (gesture.mode === "drag" && driving) send({ type: "pointer", phase: "up", ...gesture.start, button: "left", clickCount: 1 });
+			if (gesture.mode === "drag" && driving) send({ type: "pointer", phase: "up", ...(pagePoint(gesture.last, true) ?? gesture.start), button: "left", clickCount: 1 });
+			return;
 		}
+		// A cancelled mouse or pen press still releases the page's button.
+		if (event.pointerType !== "touch") onPointerUp(event);
 	};
 
 	const ratio = frame ? frame.width / frame.height : 16 / 9;

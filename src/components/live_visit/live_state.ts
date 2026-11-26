@@ -79,7 +79,8 @@ function entryOf(source: Record<string, unknown>): LiveEntry | undefined {
 export function reduceLiveEvent(state: LiveEvents, message: unknown): LiveEvents {
 	const source = record(message);
 	if (!source) return state;
-	if (source.type === "connected") return EMPTY_LIVE_EVENTS;
+	// The replay may no longer reach back to the last control state: keep it until a newer one comes.
+	if (source.type === "connected") return { ...EMPTY_LIVE_EVENTS, ...(state.control ? { control: state.control } : {}) };
 	if (source.type === "browser.control") {
 		const control = controlOf(source);
 		return control ? { ...state, control } : state;

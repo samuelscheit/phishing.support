@@ -127,6 +127,21 @@ export function LiveConsole({ visit, driver, onClose, fullscreen = true }: {
 				if (event.key === "Escape" && !event.defaultPrevented) {
 					event.preventDefault();
 					close();
+					return;
+				}
+				// A modal: Tab cycles through the console's own controls (in the page's field it goes to the page).
+				if (event.key !== "Tab" || event.defaultPrevented) return;
+				const focusable = [...root.current!.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")].filter((element) => element !== sinkRef.current && element.offsetParent !== null);
+				const first = focusable[0];
+				const last = focusable.at(-1);
+				if (!first || !last) return;
+				const active = document.activeElement;
+				if (event.shiftKey && (active === first || !root.current!.contains(active))) {
+					event.preventDefault();
+					last.focus();
+				} else if (!event.shiftKey && (active === last || !root.current!.contains(active))) {
+					event.preventDefault();
+					first.focus();
 				}
 			}}
 		>

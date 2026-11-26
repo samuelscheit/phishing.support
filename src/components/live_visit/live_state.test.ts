@@ -36,6 +36,13 @@ describe("reduceLiveEvent", () => {
 		expect(state.control?.mode).toBe("agent");
 	});
 
+	test("a reconnect whose replay lacks the control state keeps the last one", () => {
+		const state = fold([{ type: "browser.control", mode: "human", controller: "Viewer ab12", tabs: [], fakeValues: {}, agentRunning: true }, { type: "connected" }, { type: "browser.action", kind: "click", text: "x", actor: "human" }]);
+		expect(state.control?.mode).toBe("human");
+		expect(state.entries).toHaveLength(1);
+		expect(isLive(state)).toBe(true);
+	});
+
 	test("the last control state is current, cleaned of anything malformed", () => {
 		const state = fold([
 			{ type: "browser.control", mode: "agent", tabs: [], fakeValues: {}, agentRunning: true },
