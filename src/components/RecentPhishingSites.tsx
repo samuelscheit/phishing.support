@@ -6,7 +6,7 @@ import { websiteSiteName } from "@/lib/website/info/site";
 
 /** The newest websites confirmed as phishing, each linking to its case: real examples of what to look for. */
 export async function RecentPhishingSites({ count = 12 }: { count?: number }) {
-	const { submissions } = await listSubmissionCards({ filters: ["phishing"], limit: count * 3 });
+	const { submissions } = await listSubmissionCards({ filters: ["reported"], limit: count * 3 });
 	const sites = submissions.filter((card) => card.kind === "website").slice(0, count);
 	if (!sites.length) return null;
 	return (

@@ -1,7 +1,10 @@
 import { SubmissionRetriesEntity } from "@/lib/db/entities/submission_retries";
 import type { SubmissionKind, SubmissionRetryTrigger, SubmissionStatus } from "@/lib/db/schema";
 import type { WebsiteSiteFinding } from "@/lib/website/types";
-import { caseFinding } from "./finding";
+import { caseFinding, caseReportedAs, type ReportedAs } from "./finding";
+
+/** A case's status, finding and info line at one moment; a reported case says what it was reported for. */
+export type CaseState = { status: SubmissionStatus; info: string | null; finding: WebsiteSiteFinding | null; reportedAs?: ReportedAs };
 
 /** One retry as the operator's "Retried cases" view lists it: what the case stood at before, and what it stands at now. */
 export type RetryHistoryEntry = {
@@ -12,8 +15,9 @@ export type RetryHistoryEntry = {
 	target: string;
 	trigger: SubmissionRetryTrigger;
 	retriedAt: Date;
-	before: { status: SubmissionStatus; info: string | null; finding: WebsiteSiteFinding | null };
-	now: { status: SubmissionStatus; info: string | null; finding: WebsiteSiteFinding | null };
+	/** Retries start from failed or invalid cases, which were reported for nothing. */
+	before: CaseState;
+	now: CaseState;
 	/** How often the case was analyzed again in all. */
 	caseRetryCount: number;
 };
@@ -25,6 +29,7 @@ export async function listRetryHistory(limit = 200): Promise<RetryHistoryEntry[]
 		const target = submission.data.kind === "website"
 			? submission.data.website.url
 			: submission.data.email?.subject || submission.source || "Email";
+		const reportedAs = submission.status === "reported" ? caseReportedAs(submission.data) : undefined;
 		return {
 			id: retry.id.toString(),
 			submissionId: retry.submissionId.toString(),
@@ -33,7 +38,7 @@ export async function listRetryHistory(limit = 200): Promise<RetryHistoryEntry[]
 			trigger: retry.trigger,
 			retriedAt: retry.createdAt,
 			before: { status: retry.fromStatus, info: retry.previousInfo, finding: retry.previousFinding },
-			now: { status: submission.status, info: submission.info, finding: caseFinding(submission.data) ?? null },
+			now: { status: submission.status, info: submission.info, finding: caseFinding(submission.data) ?? null, ...(reportedAs ? { reportedAs } : {}) },
 			caseRetryCount: retry.caseRetryCount,
 		};
 	});

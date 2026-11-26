@@ -6,8 +6,8 @@ import type { SubmissionStatus } from "@/lib/db/schema";
  */
 export const SUBMISSION_FILTERS = {
 	running: ["running"],
-	phishing: ["reported"],
-	not_phishing: ["invalid"],
+	reported: ["reported"],
+	no_threat: ["invalid"],
 	failed: ["failed"],
 } as const satisfies Record<string, readonly SubmissionStatus[]>;
 
@@ -16,7 +16,7 @@ export type SubmissionFilter = keyof typeof SUBMISSION_FILTERS;
 export const SUBMISSION_FILTER_NAMES = Object.keys(SUBMISSION_FILTERS) as SubmissionFilter[];
 
 /** What the list shows until the reader picks otherwise: what is being analyzed now, and what was confirmed. */
-export const DEFAULT_SUBMISSION_FILTERS: readonly SubmissionFilter[] = ["running", "phishing"];
+export const DEFAULT_SUBMISSION_FILTERS: readonly SubmissionFilter[] = ["running", "reported"];
 
 export function isSubmissionFilter(value: unknown): value is SubmissionFilter {
 	return typeof value === "string" && Object.hasOwn(SUBMISSION_FILTERS, value);

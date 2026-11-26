@@ -1,6 +1,7 @@
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import type { SubmissionKind, SubmissionStatus } from "@/lib/db/schema";
 import { SUBMISSION_FILTER_NAMES, SUBMISSION_FILTERS, submissionFilterOf, type SubmissionFilter } from "./filters";
+import { reportedAsOf, type ReportedAs } from "./finding";
 
 const SUBMISSION_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
@@ -12,8 +13,8 @@ export type SubmissionCard = {
 	status: SubmissionStatus;
 	createdAt: string;
 	title: string;
-	/** What a reported case was reported for, when it is not a phishing or malware site: the deceptive funnel its chain is. */
-	reportedAs?: "deceptive_funnel";
+	/** What a reported case was reported for; absent for every other status. */
+	reportedAs?: ReportedAs;
 	/** The campaign the site belongs to; the list shows each campaign as one card. */
 	campaign?: { id: string; siteCount: number };
 };
@@ -65,15 +66,20 @@ export async function listSubmissionCards(params: { cursor?: string | null; limi
 	const page = rows.slice(0, limit);
 	const last = page.at(-1);
 	return {
-		submissions: page.map((row) => ({
-			id: row.id.toString(),
-			kind: row.kind,
-			status: row.status,
-			createdAt: row.createdAt.toISOString(),
-			title: row.title ?? row.id.toString(),
-			...(row.funnelOnly ? { reportedAs: "deceptive_funnel" as const } : {}),
-			...(row.campaignId !== null ? { campaign: { id: row.campaignId.toString(), siteCount: Number(row.campaignSize) } } : {}),
-		})),
+		submissions: page.map((row) => {
+			const reportedAs = row.status === "reported"
+				? reportedAsOf(row.kind, { phishing: Boolean(row.phishingSite), malware: Boolean(row.malwareSite), deceptiveFunnel: Boolean(row.deceptiveFunnel) })
+				: undefined;
+			return {
+				id: row.id.toString(),
+				kind: row.kind,
+				status: row.status,
+				createdAt: row.createdAt.toISOString(),
+				title: row.title ?? row.id.toString(),
+				...(reportedAs ? { reportedAs } : {}),
+				...(row.campaignId !== null ? { campaign: { id: row.campaignId.toString(), siteCount: Number(row.campaignSize) } } : {}),
+			};
+		}),
 		...(rows.length > limit && last ? { nextCursor: encodeCursor(last) } : {}),
 		...(counts ? { counts } : {}),
 	};

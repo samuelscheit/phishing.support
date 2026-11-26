@@ -4,6 +4,11 @@ import { analysisRuns, submissions, type SubmissionData, type SubmissionKind, ty
 import { generateId } from "../ids";
 import type { ReporterMetadata } from "../../http/reporter_headers";
 
+/** Whether a site of any route of a website case was judged `finding`. */
+function siteFindingOnAnyRoute(finding: "phishing" | "malware") {
+	return sql<number>`exists (select 1 from json_each(${submissions.data}, '$.website.routes') as walked, json_each(walked.value, '$.siteAssessments') as assessed where json_extract(assessed.value, '$.finding') = ${finding})`;
+}
+
 export class SubmissionsEntity {
     static async create(params: {
         kind: SubmissionKind;
@@ -130,8 +135,10 @@ export class SubmissionsEntity {
 				title: sql<string | null>`coalesce(json_extract(${submissions.data}, '$.website.url'), nullif(json_extract(${submissions.data}, '$.email.subject'), ''), ${submissions.dedupeKey})`,
 				campaignId: sql<bigint | null>`${caseCampaign}`,
 				campaignSize: sql<number | null>`(select count(*) from campaign_members as peers where peers.campaign_id = ${caseCampaign})`,
-				// A case reported only for the deceptive funnel a route of it is, with no phishing or malware site on any route.
-				funnelOnly: sql<number>`(exists (select 1 from json_each(${submissions.data}, '$.website.routes') as walked where json_extract(walked.value, '$.funnel.verdict.finding') = 'deceptive_funnel') and not exists (select 1 from json_each(${submissions.data}, '$.website.routes') as walked, json_each(walked.value, '$.siteAssessments') as assessed where json_extract(assessed.value, '$.finding') in ('phishing', 'malware')))`,
+				// What the case found on any route: what a reported case was reported for.
+				phishingSite: siteFindingOnAnyRoute("phishing"),
+				malwareSite: siteFindingOnAnyRoute("malware"),
+				deceptiveFunnel: sql<number>`exists (select 1 from json_each(${submissions.data}, '$.website.routes') as walked where json_extract(walked.value, '$.funnel.verdict.finding') = 'deceptive_funnel')`,
 			})
 			.from(submissions)
 			.where(and(

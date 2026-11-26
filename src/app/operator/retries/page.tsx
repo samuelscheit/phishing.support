@@ -5,17 +5,17 @@ import { SubmissionStatus } from "@/components/SubmissionStatus";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { listRetryHistory, type RetryHistoryEntry } from "@/lib/submissions/retry_history";
+import { listRetryHistory, type CaseState as CaseStateData } from "@/lib/submissions/retry_history";
 import { formatUtcDateTime } from "@/lib/util/date_time";
 import { WEBSITE_FINDING_LABELS } from "@/lib/website/types";
 
 export const dynamic = "force-dynamic";
 
 /** A case's status, finding and info line at one moment: before a retry or now. */
-function CaseState({ state }: { state: RetryHistoryEntry["before"] }) {
+function CaseState({ state }: { state: CaseStateData }) {
 	return (
 		<div className="space-y-1">
-			<SubmissionStatus status={state.status} />
+			<SubmissionStatus status={state.status} reportedAs={state.reportedAs} />
 			{state.finding ? <p className="text-xs font-medium">{WEBSITE_FINDING_LABELS[state.finding]}</p> : null}
 			{state.info ? <p className="line-clamp-3 text-xs text-muted-foreground" title={state.info}>{state.info}</p> : null}
 		</div>
@@ -43,7 +43,8 @@ export default async function RetriedCasesPage() {
 							<Badge variant="outline">{retries.length - automatic} manual</Badge>
 							<Badge variant="outline">{automatic} automatic</Badge>
 						</div>
-						<Table>
+						{/* Five columns of status and info need the width; a phone scrolls the table instead of squeezing it. */}
+						<Table className="min-w-[64rem] table-fixed">
 							<TableHeader>
 								<TableRow>
 									<TableHead className="w-40">Retried</TableHead>
@@ -57,7 +58,7 @@ export default async function RetriedCasesPage() {
 								{retries.map((retry) => (
 									<TableRow key={retry.id} className="align-top">
 										<TableCell className="whitespace-nowrap align-top text-xs text-muted-foreground">{formatUtcDateTime(retry.retriedAt)}</TableCell>
-										<TableCell className="max-w-0 align-top">
+										<TableCell className="align-top">
 											<Link href={`/submissions/${retry.submissionId}`} className="flex items-center gap-1.5 font-medium text-primary hover:underline">
 												{retry.kind === "website" ? <Globe className="h-3.5 w-3.5 shrink-0" /> : <Mail className="h-3.5 w-3.5 shrink-0" />}
 												{retry.submissionId}

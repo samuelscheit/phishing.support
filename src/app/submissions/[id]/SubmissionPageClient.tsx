@@ -28,6 +28,7 @@ import { RunsTab } from "./_components/RunsTab";
 import { RotationNote } from "./_components/RotationNote";
 import { RouteSelector } from "./_components/RouteSelector";
 import { OutcomePanel, VerdictPanel } from "./_components/StatusPanels";
+import { caseReportedAs } from "@/lib/submissions/finding";
 import { canAnalyzeAgain, deceptiveFunnels, reportedSites, retryCountLabel, routeLabel } from "./_components/helpers";
 import { useArchivedHtml } from "./_components/useArchivedHtml";
 import { useSubmissionDetail } from "./_components/useSubmissionDetail";
@@ -133,6 +134,18 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 		: "Analyzes the original email again; it will not create a duplicate report.";
 	const analyzeAgain = { offered: canRetryAnalysis, running: retrying, error: retryError, hint: retryHint, onStart: retryAnalysis };
 	const retried = retryCountLabel(submission.retries.count);
+	// The case's outcome: its verdict, or why it was not reported with the way to analyze it again.
+	const outcome = isReported ? (
+		<VerdictPanel sites={confirmedSites} funnels={funnels} routeCount={routes.length} onShowRoute={setChosenRoute} reports={reports} caseId={id} submittedSite={targetName ?? null} reportCount={reportCount} joinedCases={reports.every((report) => report.submissionId !== null && String(report.submissionId) !== id) ? [...new Set(reports.map((report) => String(report.submissionId)))] : []} info={submission.info} onShowReports={() => setTab("reports")} />
+	) : isInvalid ? (
+		<OutcomePanel
+			title="Not reported"
+			info={submission.info || (submission.kind === "email" ? "The email was judged not to be phishing; no report was created." : "No reportable phishing or malware evidence was found; no report was created.")}
+			analyzeAgain={analyzeAgain}
+		/>
+	) : isFailed ? (
+		<OutcomePanel title="Failure reason" info={submission.info || "The analysis did not complete."} analyzeAgain={analyzeAgain} />
+	) : null;
 
 	return (
 		<div className="container mx-auto max-w-7xl py-8 px-4 space-y-6">
@@ -160,12 +173,15 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 								{retried}
 							</span>
 						) : null}
-						<SubmissionStatus status={submission.status} reportedAs={funnels.length && !confirmedSites.length ? "deceptive_funnel" : undefined} />
+						<SubmissionStatus status={submission.status} reportedAs={caseReportedAs(submission.data)} />
 					</div>
 				</div>
 			</header>
 
 			{submission.campaigns.map((campaign) => <CampaignLink key={campaign.id} campaign={campaign} locale={locale} />)}
+
+			{/* On a phone the side column follows the whole page: the outcome comes first instead, the side column keeps it on wide screens. */}
+			{outcome ? <div className="lg:hidden">{outcome}</div> : null}
 
 			<div className="grid items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
 				<div className="min-w-0 space-y-6">
@@ -176,7 +192,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 					) : null}
 					{submission.data.kind === "email" && <EmailFacts email={submission.data.email} />}
 					<Tabs value={tab} onValueChange={setTab} className="w-full min-w-0">
-						<TabsList className="overflow-x-auto max-w-full no-scrollbar">
+						<TabsList className="h-auto max-w-full flex-wrap justify-start">
 							{submission.kind === "email" ? <TabsTrigger value="email">Email</TabsTrigger> : null}
 							<TabsTrigger value="runs">Analysis</TabsTrigger>
 							{submission.kind === "website" && hasNavigation ? <TabsTrigger value="navigation">Navigation</TabsTrigger> : null}
@@ -230,18 +246,8 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 					</Tabs>
 				</div>
 
-				<aside className="min-w-0 space-y-4 lg:sticky lg:top-6">
-					{isReported ? (
-						<VerdictPanel sites={confirmedSites} funnels={funnels} routeCount={routes.length} onShowRoute={setChosenRoute} reports={reports} caseId={id} submittedSite={targetName ?? null} reportCount={reportCount} joinedCases={reports.every((report) => report.submissionId !== null && String(report.submissionId) !== id) ? [...new Set(reports.map((report) => String(report.submissionId)))] : []} info={submission.info} onShowReports={() => setTab("reports")} />
-					) : null}
-					{isInvalid ? (
-						<OutcomePanel
-							title="Not reported"
-							info={submission.info || (submission.kind === "email" ? "The email was judged not to be phishing; no report was created." : "No reportable phishing or malware evidence was found; no report was created.")}
-							analyzeAgain={analyzeAgain}
-						/>
-					) : null}
-					{isFailed ? <OutcomePanel title="Failure reason" info={submission.info || "The analysis did not complete."} analyzeAgain={analyzeAgain} /> : null}
+				<aside className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-6">
+					{outcome ? <div className="hidden lg:block">{outcome}</div> : null}
 					{website ? (
 						<SiteVisitTimeline running={isRunning} visit={walked?.visit} offeredDownload={offeredDownload} live={liveVisit} pageCount={visitPages.length} routeName={routes.length > 1 ? routeLabel(route) : undefined} />
 					) : null}

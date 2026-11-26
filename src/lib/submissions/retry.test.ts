@@ -293,13 +293,13 @@ describe("the operator's retried cases", () => {
 			{
 				id: expect.any(String), submissionId: "50", kind: "website", target: URL, trigger: "automatic", retriedAt: expect.any(String),
 				before: { status: "failed", info: "Browser service unavailable.", finding: "benign" },
-				now: { status: "reported", info: "Malware distribution confirmed at https://trylevo.app/.", finding: "malware" },
+				now: { status: "reported", info: "Malware distribution confirmed at https://trylevo.app/.", finding: "malware", reportedAs: "malware" },
 				caseRetryCount: 2,
 			},
 			{
 				id: expect.any(String), submissionId: "50", kind: "website", target: URL, trigger: "manual", retriedAt: expect.any(String),
 				before: { status: "invalid", info: INFO, finding: "benign" },
-				now: { status: "reported", info: "Malware distribution confirmed at https://trylevo.app/.", finding: "malware" },
+				now: { status: "reported", info: "Malware distribution confirmed at https://trylevo.app/.", finding: "malware", reportedAs: "malware" },
 				caseRetryCount: 2,
 			},
 		]);

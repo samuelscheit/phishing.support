@@ -3,9 +3,31 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/util/cn";
 import { CheckCircle2, Loader2, ShieldAlert, XCircle } from "lucide-react";
+import type { ReportedAs } from "@/lib/submissions/finding";
 
-/** A case's status as a badge; a reported case says what it was reported for (`reportedAs`), phishing unless told otherwise. */
-export function SubmissionStatus({ status, reportedAs, className }: { status?: string | null; reportedAs?: "deceptive_funnel"; className?: string }) {
+const REPORTED_AS_LABELS: Record<ReportedAs, string> = {
+	phishing: "Phishing",
+	malware: "Malware",
+	phishing_and_malware: "Phishing & malware",
+	deceptive_funnel: "Deceptive funnel",
+};
+
+/**
+ * The badge text of a status: a reported case by what it was reported for
+ * (`reportedAs`), "Reported" when that is unknown; a case that found nothing
+ * reportable "No threat found", since its verdict covers malware as well as
+ * phishing.
+ */
+export function submissionStatusLabel(status: string | null | undefined, reportedAs?: ReportedAs): string {
+	const raw = (status || "").trim();
+	const key = raw.toLowerCase();
+	if (key === "reported") return reportedAs ? REPORTED_AS_LABELS[reportedAs] : "Reported";
+	if (key === "invalid") return "No threat found";
+	return raw || "Unknown";
+}
+
+/** A case's status as a badge, labelled by `submissionStatusLabel`. */
+export function SubmissionStatus({ status, reportedAs, className }: { status?: string | null; reportedAs?: ReportedAs; className?: string }) {
 	const raw = (status || "").trim();
 	const key = raw.toLowerCase();
 
@@ -15,7 +37,7 @@ export function SubmissionStatus({ status, reportedAs, className }: { status?: s
 	const isFailed = key === "failed";
 	const isCompleted = key === "completed";
 
-	const label = isReported ? (reportedAs === "deceptive_funnel" ? "Deceptive funnel" : "Phishing") : isInvalid ? "Not phishing" : raw || "Unknown";
+	const label = submissionStatusLabel(status, reportedAs);
 
 	if (isReported) {
 		return (
