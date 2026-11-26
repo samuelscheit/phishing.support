@@ -120,10 +120,12 @@ export async function createWebsiteSubmission(
 }
 
 /**
- * Re-run a failed website analysis without creating a second submission. When
- * the first attempt captured an MHTML archive, it is supplied to the retry so
- * a transient model failure cannot cause the site to be fetched again after it
- * has changed or started redirecting scanners.
+ * Re-run a failed or unreported website analysis without creating a second
+ * submission. When a failed attempt captured an MHTML archive, it is supplied
+ * to the retry so a transient model failure cannot cause the site to be
+ * fetched again after it has changed or started redirecting scanners. A case
+ * judged not reportable was fully judged on its capture; judging that capture
+ * again gives the same verdict, so it visits the site again.
  */
 export async function retryFailedWebsiteAnalysis(
 	submissionId: bigint,
@@ -149,7 +151,8 @@ export async function retryFailedWebsiteAnalysis(
 	// A page of a rotating link's later route is not where the link leads a
 	// first walk, which a retry starts again as.
 	const retainedArchiveHasTrustedProvenance = Boolean(
-		websiteData
+		submission.status === "failed"
+		&& websiteData
 		&& analyzed
 		&& analyzed.page.route === 0
 		&& websiteData.cloaking?.outcome !== "unresolved"
@@ -164,7 +167,7 @@ export async function retryFailedWebsiteAnalysis(
 		if (artifact?.blob?.byteLength) screenshotSnapshot = artifact.blob;
 	}
 
-	const claimed = await SubmissionsEntity.transitionStatus(submissionId, "failed", "running");
+	const claimed = await SubmissionsEntity.transitionStatus(submissionId, submission.status, "running");
 	if (!claimed) throw new SubmissionRetryError("This submission is already being retried.");
 
 	void startAnalysis({

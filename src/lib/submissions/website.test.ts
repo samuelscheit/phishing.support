@@ -57,6 +57,23 @@ describe("retryFailedWebsiteAnalysis", () => {
 		await expect(getRetryableSubmission(id, "website")).rejects.toBeInstanceOf(SubmissionRetryError);
 	});
 
+	test("a website judged not reportable can be analyzed again; a running or reported one cannot", async () => {
+		const id = await SubmissionsEntity.create({
+			id: 31n,
+			kind: "website",
+			data: { kind: "website", website: { url: "https://trylevo.app/" } },
+			dedupeKey: "website-retry-invalid",
+			status: "invalid",
+		});
+		for (const _stage of ["analysis", "classification"]) await AnalysisRunsEntity.complete(await AnalysisRunsEntity.create(id, "analysis"));
+		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).resolves.toMatchObject({ submission: { id, status: "invalid" } });
+
+		await SubmissionsEntity.update(id, { status: "running" });
+		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).rejects.toThrow("Only failed or unreported submissions can be retried.");
+		await SubmissionsEntity.update(id, { status: "reported" });
+		await expect(getRetryableSubmission(id, "website", { allowCompletedPriorRuns: true })).rejects.toThrow("Only failed or unreported submissions can be retried.");
+	});
+
 	test("a website that failed while handing its finding to reporting stays retryable until a report exists", async () => {
 		const id = await SubmissionsEntity.create({
 			id: 30n,
@@ -98,6 +115,36 @@ describe("retryFailedWebsiteAnalysis", () => {
 		expect(started).toHaveLength(1);
 		expect(started[0]?.mhtmlSnapshot).toBeUndefined();
 		expect(started[0]?.reuseEvidenceArtifacts).toBe(false);
+	});
+
+	test("a case judged not reportable is visited again instead of re-judging its retained capture", async () => {
+		const url = "https://trylevo.app/";
+		const navigationHops = [{ index: 0, url, hostname: "trylevo.app", status: 200, contentCaptured: true }];
+		const id = await SubmissionsEntity.create({
+			id: 41n,
+			kind: "website",
+			data: { kind: "website", website: { url, archiveUrl: url, routes: [{ hops: navigationHops }] } },
+			dedupeKey: "website-retry-invalid-revisit",
+			status: "invalid",
+		});
+		for (const _stage of ["analysis", "classification"]) await AnalysisRunsEntity.complete(await AnalysisRunsEntity.create(id, "analysis"));
+		await ArtifactsEntity.saveWebsiteArtifacts({
+			submissionId: id,
+			archive: { archivedAt: new Date(), mhtml: Buffer.from("From: <Saved by Blink>\r\n\r\n<html></html>"), screenshotPng: Buffer.from("png") },
+			evidence: { page: { route: 0, step: 0 }, manifest: Buffer.from("{}") },
+		});
+		const started: Array<{ url: string; mhtmlSnapshot?: Buffer; screenshotSnapshot?: Buffer; reuseEvidenceArtifacts?: boolean }> = [];
+
+		await retryFailedWebsiteAnalysis(id, async (options) => started.push(options));
+
+		expect(started).toHaveLength(1);
+		expect(started[0]).toMatchObject({ url, reuseEvidenceArtifacts: false });
+		expect(started[0]?.mhtmlSnapshot).toBeUndefined();
+		expect(started[0]?.screenshotSnapshot).toBeUndefined();
+		expect((await SubmissionsEntity.get(id))?.status).toBe("running");
+		// The claim is taken once: a second request while it runs is refused.
+		await expect(retryFailedWebsiteAnalysis(id, async (options) => started.push(options))).rejects.toThrow("Only failed or unreported submissions can be retried.");
+		expect(started).toHaveLength(1);
 	});
 
 	test("marks interrupted running analysis runs as failed on startup so the submission remains retryable", async () => {

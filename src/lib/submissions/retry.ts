@@ -14,8 +14,10 @@ export class SubmissionRetryError extends Error {
 /**
  * Load and validate the common retry boundary for an analysis submission.
  *
- * Retrying is deliberately limited to failed analyses that have not crossed the
- * reporting boundary. Callers may allow completed stages to be superseded when
+ * Retrying is limited to analyses that failed or found nothing reportable
+ * (`invalid`) and have not crossed the reporting boundary: an invalid verdict
+ * can be wrong (a capture that missed what the page hides), and nothing of it
+ * reached a provider. Callers may allow completed stages to be superseded when
  * a later stage, including the report handoff itself, failed; active runs and
  * any report work are never replayed. The status transition is performed by each analyzer after
  * kind-specific source validation, so concurrent requests are serialized by the
@@ -30,8 +32,8 @@ export async function getRetryableSubmission(
 	if (!submission || submission.kind !== kind) {
 		throw new SubmissionRetryError(`Only ${kind} submissions can be retried.`);
 	}
-	if (submission.status !== "failed") {
-		throw new SubmissionRetryError("Only failed submissions can be retried.");
+	if (submission.status !== "failed" && submission.status !== "invalid") {
+		throw new SubmissionRetryError("Only failed or unreported submissions can be retried.");
 	}
 
 	const [runs, report] = await Promise.all([
