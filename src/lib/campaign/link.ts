@@ -2,7 +2,7 @@ import { AbuseRepository } from "../abuse/repository";
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { buildDossier, type Dossier, type DossierDependencies } from "../referral/dossier";
-import { latestArtifactNamed, websiteCaptureFileNames, type CapturePage } from "../website/visit/capture_files";
+import { isBlankCapture } from "../website/visit/page_preview";
 import { CANARY_FIELD_LABEL, type CanaryField } from "../website/types";
 import { campaignBrand, guideVisitor, sameBrand, type GuidanceDependencies } from "./guidance";
 import { extractIndicators, sitePageTexts, type IndicatorDependencies } from "./indicators";
@@ -10,12 +10,6 @@ import { detectLanguage } from "./language";
 import { judgedSitePage, type CampaignSite, type SitePage } from "./members";
 import { CampaignRepository } from "./repository";
 import { describeCampaign, type CampaignFacts, type DescribeDependencies } from "./summary";
-import { isBlankCapture, pageThumbnail } from "./thumbnail";
-
-/** The preview of one captured page, stored next to its screenshot: `website-thumb.webp`, `website-step2-thumb.webp`, `route2-website-thumb.webp`, … */
-export function thumbnailName(page: CapturePage): string {
-	return websiteCaptureFileNames(page).screenshot.replace(/\.png$/, "-thumb.webp");
-}
 
 /** The stored preview of a site's judged page, and whether that page's capture is one flat colour. */
 type SitePreview = { artifactId: bigint; blank: boolean };
@@ -26,24 +20,15 @@ export type LinkDependencies = IndicatorDependencies & {
 };
 
 /**
- * A judged page's screenshot cut to its content, stored once next to the
- * capture; a newer capture of the same page gets a new preview. Whether the
- * capture is blank is read from the capture every time, so linking a site
- * again records it for a preview stored before.
+ * A judged page's preview (made by the capture, or now for a page captured
+ * before captures made one). Whether the capture is blank is read from the
+ * screenshot every time, so linking a site again records it for a preview
+ * stored before.
  */
-async function saveJudgedPageThumbnail(submissionId: bigint, page: SitePage): Promise<SitePreview | undefined> {
-	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
-	const screenshot = latestArtifactNamed(artifacts, websiteCaptureFileNames(page).screenshot);
-	if (!screenshot) return undefined;
-	const source = await ArtifactsEntity.get(BigInt(screenshot.id));
-	if (!source) return undefined;
-	const image = Buffer.from(source.blob);
-	const blank = await isBlankCapture(image);
-	const name = thumbnailName(page);
-	const existing = latestArtifactNamed(artifacts, name);
-	if (existing && BigInt(existing.id) > BigInt(screenshot.id)) return { artifactId: BigInt(existing.id), blank };
-	const artifactId = await ArtifactsEntity.saveBuffer({ submissionId, name, kind: "website_thumbnail", mimeType: "image/webp", buffer: await pageThumbnail(image) });
-	return { artifactId, blank };
+async function judgedPagePreview(submissionId: bigint, page: SitePage): Promise<SitePreview | undefined> {
+	const preview = await ArtifactsEntity.ensurePagePreview(submissionId, page);
+	const screenshot = preview && await ArtifactsEntity.get(preview.screenshotId);
+	return screenshot ? { artifactId: preview.previewId, blank: await isBlankCapture(Buffer.from(screenshot.blob)) } : undefined;
 }
 
 /**
@@ -62,7 +47,7 @@ export async function linkSiteMember(member: CampaignSite, dependencies: LinkDep
 	if (campaignId !== undefined) {
 		const siteText = pageTexts.map((page) => page.text).sort((a, b) => b.length - a.length)[0] ?? "";
 		const page = website && judgedSitePage(website, member.site);
-		const preview = page ? await (dependencies.saveThumbnail ?? saveJudgedPageThumbnail)(member.submissionId, page).catch(() => undefined) : undefined;
+		const preview = page ? await (dependencies.saveThumbnail ?? judgedPagePreview)(member.submissionId, page).catch(() => undefined) : undefined;
 		await CampaignRepository.saveSiteFacts(member, { language: detectLanguage(siteText) ?? null, thumbnailArtifactId: preview?.artifactId ?? null, blankCapture: preview?.blank ?? false });
 	}
 	return campaignId;

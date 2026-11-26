@@ -3,7 +3,9 @@ import { getDb } from "../index";
 import { artifacts } from "../schema";
 import { generateId } from "../ids";
 import { websiteEvidenceFiles, type WebsiteEvidencePackage } from "../../evidence/package";
-import { chainHopBodyFileName, websiteCaptureFileNames } from "../../website/visit/capture_files";
+import { chainHopBodyFileName, latestArtifactNamed, websiteCaptureFileNames, type CapturePage } from "../../website/visit/capture_files";
+import { pagePreview } from "../../website/visit/page_preview";
+import { errorSummary } from "../../util/error_text";
 import type { HopBody } from "../../website/visit/tab_recording";
 import { sha256Hex } from "../../util/hash";
 
@@ -63,10 +65,39 @@ export class ArtifactsEntity {
     }
 
     /**
+     * The preview of a captured page (`websiteCaptureFileNames(page).preview`),
+     * stored next to its screenshot: the stored one while it is newer than the
+     * page's newest screenshot, else cut from that screenshot now (a retry
+     * capturing the page again gets a new one). Nothing when the page has no
+     * screenshot. `created` says whether this call stored it.
+     */
+    static async ensurePagePreview(submissionId: bigint, page: CapturePage): Promise<{ previewId: bigint; screenshotId: bigint; created: boolean } | undefined> {
+        const names = websiteCaptureFileNames(page);
+        const stored = await this.listForSubmission(submissionId);
+        const screenshot = latestArtifactNamed(stored, names.screenshot);
+        if (!screenshot) return undefined;
+        const existing = latestArtifactNamed(stored, names.preview);
+        if (existing && existing.id > screenshot.id) return { previewId: existing.id, screenshotId: screenshot.id, created: false };
+        const source = await this.get(screenshot.id);
+        if (!source) return undefined;
+        const previewId = await this.saveBuffer({
+            submissionId,
+            name: names.preview,
+            kind: "website_thumbnail",
+            mimeType: "image/webp",
+            archivedAt: source.archivedAt ?? undefined,
+            buffer: await pagePreview(Buffer.from(source.blob)),
+        });
+        return { previewId, screenshotId: screenshot.id, created: true };
+    }
+
+    /**
      * Store a capture with its evidence package: the raw screenshot and MHTML
      * exactly as captured, the raw body of every document answer that led to
      * the page, the screenshot with its address bar, the manifest naming every
-     * file by SHA-256, and the RFC 3161 token for that manifest.
+     * file by SHA-256, and the RFC 3161 token for that manifest. The page's
+     * preview is stored next to the screenshot; it only serves display, so a
+     * screenshot it cannot be cut from leaves the capture whole.
      */
     static async saveWebsiteArtifacts({
         archive,
@@ -102,6 +133,11 @@ export class ArtifactsEntity {
                 buffer: archive.screenshotPng,
             })
             : undefined;
+        if (screenshotId !== undefined) {
+            await this.ensurePagePreview(submissionId, evidence.page).catch((error: unknown) => {
+                console.warn(`The preview of case ${submissionId}'s ${names.screenshot} could not be made: ${errorSummary(error)}`);
+            });
+        }
         // A chain body is the kit's own markup and script exactly as the network
         // delivered it: stored as opaque bytes, so nothing ever serves it as a page
         // of ours. The type it was served as stays on its navigation hop

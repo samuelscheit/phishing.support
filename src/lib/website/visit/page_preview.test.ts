@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import sharp from "sharp";
 
-import { isBlankCapture, pageThumbnail } from "./thumbnail";
+import { isBlankCapture, pagePreview } from "./page_preview";
 
 /** A sign-in card as kits draw it: a heading, two fields and a button on white. */
 async function signInCapture(): Promise<Buffer> {
@@ -47,7 +47,7 @@ async function capture(): Promise<Buffer> {
 
 describe("page preview", () => {
 	test("cuts a capture to what the page drew, without the white viewport or the flat margin", async () => {
-		const preview = await pageThumbnail(await capture());
+		const preview = await pagePreview(await capture());
 		const meta = await sharp(preview).metadata();
 		expect(meta.format).toBe("webp");
 		// The card is 400 × 300; the margin and the white area are gone.
@@ -59,8 +59,14 @@ describe("page preview", () => {
 
 	test("keeps a capture whole when trimming would leave almost nothing, and never enlarges", async () => {
 		const flat = await sharp({ create: { width: 300, height: 200, channels: 3, background: "#ffffff" } }).png().toBuffer();
-		expect(await sharp(await pageThumbnail(flat)).metadata()).toMatchObject({ width: 300, height: 200 });
-		const wide = await sharp({ create: { width: 2000, height: 1000, channels: 3, background: "#123456" } }).png().toBuffer();
-		expect((await sharp(await pageThumbnail(wide)).metadata()).width).toBe(720);
+		expect(await sharp(await pagePreview(flat)).metadata()).toMatchObject({ width: 300, height: 200 });
+	});
+
+	test("keeps a full-width page sharp up to 1280 px, and a kit's card at its own size", async () => {
+		const wide = await sharp({ create: { width: 1917, height: 963, channels: 3, background: "#123456" } }).png().toBuffer();
+		expect(await sharp(await pagePreview(wide)).metadata()).toMatchObject({ width: 1280, height: 643 });
+		const card = await sharp({ create: { width: 860, height: 700, channels: 3, background: "#2563eb" } }).png().toBuffer();
+		const kit = await sharp({ create: { width: 1917, height: 963, channels: 3, background: "#ffffff" } }).composite([{ input: card, left: 0, top: 0 }]).png().toBuffer();
+		expect(await sharp(await pagePreview(kit)).metadata()).toMatchObject({ width: 860, height: 700 });
 	});
 });

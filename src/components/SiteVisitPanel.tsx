@@ -11,8 +11,8 @@ import { hostOf } from "@/lib/network/url";
 import { OfferedFile } from "@/components/OfferedFile";
 import { isPasteCommand } from "@/lib/malware/paste_commands";
 
-/** One page of the visit, with its screenshot when the case kept one. */
-export type SiteVisitPage = { url: string; screenshotId?: string };
+/** One page of the visit, with its screenshot and the screenshot cut to what the page drew, when the case kept them. */
+export type SiteVisitPage = { url: string; screenshotId?: string; previewId?: string };
 
 type LiveEntry =
 	| { kind: "step"; url: string; title: string }
@@ -61,9 +61,12 @@ export { useLiveVisit };
 /**
  * The one browser of a case: the address bar of the page shown, with the
  * button that opens the submitted site, and below it the live screen while
- * the visit runs, or the screenshot of the page picked in the strip after.
- * `viewport` frames have the desktop viewport's 2:1 shape; a stored
- * screenshot takes its own height, up to most of the window, and scrolls.
+ * the visit runs, or the page picked in the strip after: its preview (the
+ * screenshot cut to what the page drew), else its screenshot, linking to the
+ * full screenshot. `viewport` frames have the desktop viewport's 2:1 shape; a
+ * stored picture takes its own height, up to most of the window, and scrolls.
+ * A picture narrower than the frame, a kit's card, keeps its own width and
+ * sits centred on a muted ground instead of being blown up.
  */
 export function SiteVisitBrowser({ running, pages, initialPage, live: { frame }, fallbackUrl, openAction }: {
 	running: boolean;
@@ -82,7 +85,8 @@ export function SiteVisitBrowser({ running, pages, initialPage, live: { frame },
 	const hosts = new Set(pages.map(({ url }) => hostOf(url)));
 	const live = running && Boolean(frame);
 	const url = live ? frame!.url : page?.url ?? fallbackUrl;
-	const fit = !live && page?.screenshotId ? "content" : "viewport";
+	const picture = page?.previewId ?? page?.screenshotId;
+	const fit = !live && picture ? "content" : "viewport";
 
 	return (
 		<div className="overflow-hidden rounded-lg border bg-card shadow-sm">
@@ -106,14 +110,14 @@ export function SiteVisitBrowser({ running, pages, initialPage, live: { frame },
 				) : null}
 				{openAction}
 			</div>
-			<div className={cn("relative w-full bg-background", fit === "viewport" ? "aspect-[2/1]" : "max-h-[70vh] overflow-y-auto")}>
+			<div className={cn("relative w-full", fit === "viewport" ? "aspect-[2/1] bg-background" : "max-h-[70vh] overflow-y-auto bg-muted/50")}>
 				{live ? (
 					// eslint-disable-next-line @next/next/no-img-element
 					<img src={`data:image/jpeg;base64,${frame!.jpeg}`} alt="The visited site, live" className="absolute inset-0 h-full w-full object-contain object-top" />
-				) : page?.screenshotId ? (
-					<a href={`/api/artifacts/${page.screenshotId}`} target="_blank" rel="noreferrer" className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" title="Open the full screenshot">
+				) : picture ? (
+					<a href={`/api/artifacts/${page.screenshotId ?? picture}`} target="_blank" rel="noreferrer" className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" title="Open the full screenshot">
 						{/* eslint-disable-next-line @next/next/no-img-element */}
-						<img src={`/api/artifacts/${page.screenshotId}`} alt={`Page ${shown + 1} of the visit: ${page.url}`} className="block h-auto w-full" />
+						<img src={`/api/artifacts/${picture}`} alt={`Page ${shown + 1} of the visit: ${page.url}`} className="mx-auto block h-auto max-w-full" />
 					</a>
 				) : (
 					<div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">{running ? "Waiting for the browser…" : "No screenshot of this page."}</div>
@@ -131,9 +135,9 @@ export function SiteVisitBrowser({ running, pages, initialPage, live: { frame },
 								className={cn("w-28 overflow-hidden rounded-md border text-left transition-[border-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", index === shown ? "border-primary ring-1 ring-primary" : "hover:border-foreground/30")}
 							>
 								<div className="relative aspect-[2/1] bg-muted">
-									{candidate.screenshotId ? (
+									{candidate.previewId ?? candidate.screenshotId ? (
 										// eslint-disable-next-line @next/next/no-img-element
-										<img src={`/api/artifacts/${candidate.screenshotId}`} alt="" className="absolute inset-0 h-full w-full object-cover object-top" />
+										<img src={`/api/artifacts/${candidate.previewId ?? candidate.screenshotId}`} alt="" className="absolute inset-0 h-full w-full object-cover object-top" />
 									) : null}
 								</div>
 								<div className="truncate px-1.5 py-1 text-[10px] text-muted-foreground"><span className="font-medium text-foreground">{index + 1}</span> · {pageLabel(candidate.url, hosts.size > 1)}</div>

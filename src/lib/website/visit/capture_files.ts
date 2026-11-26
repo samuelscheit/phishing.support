@@ -31,9 +31,20 @@ export function websiteCaptureFileNames({ route, step }: CapturePage) {
 		mhtml: `${stem}.mhtml`,
 		screenshot: `${stem}.png`,
 		stampedScreenshot: `${stem}-stamped.png`,
+		/** The screenshot cut to what the page drew (`page_preview.ts`): what the case and campaign pages show. */
+		preview: `${stem}-thumb.webp`,
 		manifest: `${manifest}.json`,
 		timestamp: `${manifest}.tsr`,
 	};
+}
+
+/** The page a screenshot's name belongs to (`route2-website-step3.png`: route 1, step 2), the inverse of `websiteCaptureFileNames`. */
+export function screenshotCapturePage(name: string): CapturePage | undefined {
+	const match = /^(?:route([1-9]\d*)-)?website(?:-step([1-9]\d*))?\.png$/.exec(name);
+	if (!match) return undefined;
+	const page = { route: match[1] ? Number(match[1]) - 1 : 0, step: match[2] ? Number(match[2]) - 1 : 0 };
+	// `route1-` and `website-step1` are never written: the first route and page carry no number.
+	return websiteCaptureFileNames(page).screenshot === name ? page : undefined;
 }
 
 /** The raw body of one document answer of a route's chain, as the network delivered it (`bodyCaptured`). */

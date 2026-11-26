@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import sharp from "sharp";
 
 import { ArtifactsEntity } from "./artifacts";
 import { SubmissionsEntity } from "./submissions";
@@ -33,5 +34,28 @@ describe("ArtifactsEntity.saveWebsiteArtifacts", () => {
 		const body = async (name: string) => (await ArtifactsEntity.get(files.find((file) => file.name === name)!.id))!.blob;
 		expect(Buffer.from(await body("chain-hop-1.html"))).toEqual(kit);
 		expect(Buffer.from(await body("chain-hop-3.html"))).toEqual(binary);
+	});
+
+	test("stores the page's preview next to its screenshot; a screenshot no preview can be cut from leaves the capture whole", async () => {
+		await SubmissionsEntity.create({ id: 8n, kind: "website", data: { kind: "website", website: { url: "https://kit.example.com/" } }, dedupeKey: "artifacts-entity-preview", status: "running" });
+		const card = await sharp({ create: { width: 500, height: 400, channels: 3, background: "#1a73e8" } }).png().toBuffer();
+		const screenshotPng = await sharp({ create: { width: 1917, height: 963, channels: 3, background: "#ffffff" } }).composite([{ input: card, left: 0, top: 0 }]).png().toBuffer();
+		const capture = (screenshot: Buffer, step: number) => ArtifactsEntity.saveWebsiteArtifacts({
+			submissionId: 8n,
+			archive: { archivedAt: new Date("2026-01-02T03:04:05Z"), mhtml: Buffer.from("MIME-Version: 1.0"), screenshotPng: screenshot },
+			evidence: { page: { route: 1, step }, manifest: Buffer.from("{}\n") },
+		});
+		const { screenshotId } = await capture(screenshotPng, 1);
+		await capture(Buffer.from([0x89, 0x50]), 2);
+
+		const files = await ArtifactsEntity.listForSubmission(8n);
+		const preview = files.find((file) => file.name === "route2-website-step2-thumb.webp")!;
+		expect(preview).toMatchObject({ kind: "website_thumbnail", mimeType: "image/webp", archivedAt: new Date("2026-01-02T03:04:05Z") });
+		expect(preview.id > screenshotId!).toBe(true);
+		expect(await sharp(Buffer.from((await ArtifactsEntity.get(preview.id))!.blob)).metadata()).toMatchObject({ format: "webp", width: 500, height: 400 });
+		expect(files.map((file) => file.name)).toContain("route2-website-step3.png");
+		expect(files.map((file) => file.name)).not.toContain("route2-website-step3-thumb.webp");
+		expect(await ArtifactsEntity.ensurePagePreview(8n, { route: 1, step: 1 })).toEqual({ previewId: preview.id, screenshotId: screenshotId!, created: false });
+		expect(await ArtifactsEntity.ensurePagePreview(8n, { route: 0, step: 0 })).toBeUndefined();
 	});
 });

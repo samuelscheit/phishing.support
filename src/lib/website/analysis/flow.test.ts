@@ -258,11 +258,15 @@ describe("a visit through a multi-page kit", () => {
 			"visit-record.json",
 			"website-stamped.png",
 			"website-step2-stamped.png",
+			// Each page's preview, cut from its screenshot for display.
+			"website-step2-thumb.webp",
 			"website-step2.mhtml",
 			"website-step2.png",
 			"website-step3-stamped.png",
+			"website-step3-thumb.webp",
 			"website-step3.mhtml",
 			"website-step3.png",
+			"website-thumb.webp",
 			"website.mhtml",
 			"website.png",
 		]);

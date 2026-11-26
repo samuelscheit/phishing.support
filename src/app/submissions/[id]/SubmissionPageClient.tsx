@@ -40,14 +40,15 @@ function isEmlArtifact(a: SubmissionDetail["artifacts"][number]) {
 	return name?.endsWith(".eml") || name === "mail.eml" || mime === "message/rfc822" || kind === "eml";
 }
 
-/** Each page of route `route` with its screenshot, in the order shown: the pages the visit moved on from, then the last one. */
+/** Each page of route `route` with its screenshot and preview, in the order shown: the pages the visit moved on from, then the last one. */
 function routePages(route: number, walked: WebsiteRoute | undefined, artifacts: SubmissionDetail["artifacts"]): SiteVisitPage[] {
 	const hops = walked?.hops ?? [];
 	return [...hops.filter(isFlowStepHop), ...hops.filter((hop) => hop.contentCaptured)].map((hop, step) => {
 		const names = websiteCaptureFileNames({ route, step });
 		// The plain screenshot: the stamped copy's banner belongs to the evidence files, not the viewer.
 		const shot = latestArtifactNamed(artifacts, names.screenshot) ?? latestArtifactNamed(artifacts, names.stampedScreenshot);
-		return { url: hop.url, ...(shot ? { screenshotId: String(shot.id) } : {}) };
+		const preview = latestArtifactNamed(artifacts, names.preview);
+		return { url: hop.url, ...(shot ? { screenshotId: String(shot.id) } : {}), ...(preview ? { previewId: String(preview.id) } : {}) };
 	});
 }
 

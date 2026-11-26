@@ -232,7 +232,7 @@ describe("website redirects", () => {
 		]);
 		// One capture, kept with the case that made it; no other case is opened.
 		expect(archiveCalls).toHaveLength(1);
-		expect((await ArtifactsEntity.listForSubmission(id)).map((artifact) => artifact.name).sort()).toEqual(["evidence-manifest.json", "visit-manifest.json", "visit-protocol.txt", "visit-record.json", "website-stamped.png", "website.mhtml", "website.png"]);
+		expect((await ArtifactsEntity.listForSubmission(id)).map((artifact) => artifact.name).sort()).toEqual(["evidence-manifest.json", "visit-manifest.json", "visit-protocol.txt", "visit-record.json", "website-stamped.png", "website-thumb.webp", "website.mhtml", "website.png"]);
 		expect((await SubmissionsEntity.listCards({ limit: 10 })).map((card) => card.id)).toEqual([id]);
 
 		const reports = await AbuseRepository.listReportsForSubmission(id);
@@ -626,7 +626,7 @@ describe("cloaked websites", () => {
 		expect(modelCalls).toBe(0);
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
 		// The decoy is kept with its evidence package, so it is documented like any capture.
-		expect((await ArtifactsEntity.listForSubmission(id)).map((artifact) => artifact.kind).filter((kind) => kind !== "website_evidence").sort()).toEqual(["website_mhtml", "website_png"]);
+		expect((await ArtifactsEntity.listForSubmission(id)).map((artifact) => artifact.kind).filter((kind) => kind !== "website_evidence").sort()).toEqual(["website_mhtml", "website_png", "website_thumbnail"]);
 	});
 });
 
