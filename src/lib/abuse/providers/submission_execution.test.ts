@@ -356,7 +356,7 @@ describe("provider submission execution boundary", () => {
 		expect(first!.nextAttemptAt.getTime() - before).toBeLessThan(62_000);
 
 		// The first lookup, a minute after the submission. Not listed yet: the next one
-		// is queued for five minutes after the submission, and the route stays ambiguous.
+		// is queued for three minutes after the submission, and the route stays ambiguous.
 		const submittedAt = new Date(Date.now() - 61_000);
 		(await getDb()).update(abuseProviderRuns).set({ createdAt: submittedAt }).where(eq(abuseProviderRuns.id, run!.id)).run();
 		await findProviderReceipt({ runId: run!.id, jobId: first!.id, providerFor });
@@ -365,8 +365,8 @@ describe("provider submission execution boundary", () => {
 		(await getDb()).update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.id, first!.id)).run();
 		const successor = (await lookupJobs()).find((job) => job.status === "queued");
 		const untilNext = successor!.nextAttemptAt.getTime() - submittedAt.getTime();
-		expect(untilNext).toBeGreaterThan(5 * 60_000 - 2_000);
-		expect(untilNext).toBeLessThan(5 * 60_000 + 2_000);
+		expect(untilNext).toBeGreaterThan(3 * 60_000 - 2_000);
+		expect(untilNext).toBeLessThan(3 * 60_000 + 2_000);
 
 		// Listed now: the run settles with the provider's receipt and its correspondence is read.
 		stored = { confirmationId: "58dd5e517c5fc535", confirmationText: "found", finalUrl: "https://provider.example/reports", submittedTargets: ["example.com"] };

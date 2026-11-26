@@ -283,4 +283,32 @@ describe("Cloudflare provider preflight", () => {
 		// A malformed stored payload is never looked up.
 		expect(await findCloudflareSubmission({ routeId, payload: {}, sentAt }, { ...deps, fetch: async () => { throw new Error("must not read"); } })).toBeUndefined();
 	});
+	test("the lookup reads past the account's 50 newest reports, filters the domain itself, and stops at reports older than the POST", async () => {
+		// The listing ignores `search`: every page holds the account's reports of all domains, newest first.
+		const { payload, filed, routeId } = await ready();
+		const sentAt = new Date("2026-11-26T18:50:53.218Z");
+		const at = (minutes: number) => new Date(sentAt.getTime() + minutes * 60_000).toISOString();
+		const id = (n: number) => n.toString(16).padStart(16, "0");
+		const pages: Record<number, Array<{ id: string; cdate: string; domain: string }>> = {
+			// 50 newer reports of other domains fill the first page.
+			1: Array.from({ length: 50 }, (_, index) => ({ id: id(1000 + index), cdate: at(60 - index), domain: `other-${index}.example` })),
+			// Ours is on the second, with an older report of the same domain from before the POST.
+			2: [{ id: "8bb11a971b4aee08", cdate: at(0.3), domain: filed.target }, ...Array.from({ length: 48 }, (_, index) => ({ id: id(2000 + index), cdate: at(-0.1), domain: `more-${index}.example` })), { id: id(3000), cdate: at(-30), domain: filed.target }],
+			3: [{ id: id(4000), cdate: at(-60), domain: filed.target }],
+		};
+		const read: string[] = [];
+		const fetch = async (url: string) => {
+			read.push(url);
+			const page = Number(new URL(url).searchParams.get("page"));
+			if (url.includes("/submitted?")) return Response.json({ success: true, result: { reports: pages[page] ?? [] }, result_info: { page, per_page: 50, total_pages: 9 } });
+			return Response.json({ success: true, result: { id: url.split("/").at(-1), urls: [filed.report.urls], justification: filed.report.justification } });
+		};
+		expect(await findCloudflareSubmission({ routeId, payload, sentAt }, { environment, getSession: async () => session, fetch })).toMatchObject({ confirmationId: "8bb11a971b4aee08" });
+		const listings = read.filter((url) => url.includes("/submitted?"));
+		// Page 2 holds a report older than the POST: page 3 is never read.
+		expect(listings.map((url) => new URL(url).searchParams.get("page"))).toEqual(["1", "2"]);
+		expect(listings.every((url) => !url.includes("search="))).toBeTrue();
+		// Only the domain's report from after the POST is read in detail: the earlier one on the same domain is not ours.
+		expect(read.filter((url) => !url.includes("/submitted?"))).toEqual([`https://dash.cloudflare.com/api/v4/accounts/${ACCOUNT_ID}/abuse-reports/submitted/8bb11a971b4aee08`]);
+	});
 });

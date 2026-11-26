@@ -21,9 +21,13 @@ export function nextCorrespondencePollDelayMs(sinceSubmittedMs: number): number 
 /**
  * When a submission whose answer was lost is looked for at its provider,
  * measured from the submission. A provider can list a report minutes after
- * storing it; after the last lookup the route stays for a person.
+ * storing it: Cloudflare report 8bb11a971b4aee08 (hostsync.pro, stored at
+ * 18:51:08 behind an HTTP 504) was not in its submitted list at the lookups
+ * 1 and 5 minutes after the POST but was at the one after 30. The lookups at
+ * 3 and 15 minutes settle such a route, and start reading its
+ * correspondence, sooner. After the last lookup the route stays for a person.
  */
-const RECEIPT_LOOKUPS_MS = [MINUTE_MS, 5 * MINUTE_MS, 30 * MINUTE_MS, 2 * HOUR_MS, DAY_MS] as const;
+export const RECEIPT_LOOKUPS_MS = [MINUTE_MS, 3 * MINUTE_MS, 5 * MINUTE_MS, 15 * MINUTE_MS, 30 * MINUTE_MS, 2 * HOUR_MS, DAY_MS] as const;
 
 /** How long until the next receipt lookup, or undefined once the schedule is over. */
 export function nextReceiptLookupDelayMs(sinceSubmittedMs: number): number | undefined {

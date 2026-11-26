@@ -191,6 +191,36 @@ async function cloudflareDashboardRequest<T>(
 /** Cloudflare stores a report and can still answer its gateway with 5xx; this many seconds of clock skew are tolerated. */
 const RECEIPT_LOOKUP_SKEW_MS = 60_000;
 
+const SUBMITTED_PAGE_SIZE = 50;
+/** How many pages of the account's submitted reports one lookup reads at most. */
+const MAX_SUBMITTED_PAGES = 10;
+
+/**
+ * The account's submitted reports, newest first, page by page: every report
+ * the account filed, whatever the domain. The listing takes a `search`
+ * parameter but ignores it (checked 2026-11-26: `search=hostsync.pro` and
+ * `search=trylevo.app` both returned all 81 reports), so the domain is
+ * filtered here. Reading stops at the first report older than `since`, at the
+ * last page, or after MAX_SUBMITTED_PAGES; one page held only the account's 50
+ * newest reports, so a report with 50 newer ones of other domains was missed.
+ */
+async function listSubmittedReports(params: CloudflareRequestContext & { since?: Date }): Promise<Array<{ id: string; domain: string; created: number }>> {
+	const listed: Array<{ id: string; domain: string; created: number }> = [];
+	for (let page = 1; page <= MAX_SUBMITTED_PAGES; page++) {
+		const url = `${CLOUDFLARE_PROVIDER.apiBaseUrl}/accounts/${params.config.accountId}/abuse-reports/submitted?page=${page}&per_page=${SUBMITTED_PAGE_SIZE}`;
+		const result = await cloudflareDashboardRequest(params, { url, method: "GET" }, parseCloudflareRead);
+		const reports = (Array.isArray(result.reports) ? result.reports.map(asRecord) : [])
+			.map((report) => ({ id: text(report?.id), domain: text(report?.domain), created: Date.parse(text(report?.cdate) ?? "") }))
+			.filter((report): report is { id: string; domain: string; created: number } => !!report.id && SUBMITTED_REPORT_ID.test(report.id) && !!report.domain && Number.isFinite(report.created));
+		listed.push(...reports);
+		const totalPages = Number(asRecord(result.result_info)?.total_pages);
+		const oldest = Math.min(...reports.map((report) => report.created));
+		if (reports.length < SUBMITTED_PAGE_SIZE || (Number.isFinite(totalPages) && page >= totalPages)) break;
+		if (params.since && oldest < params.since.getTime() - RECEIPT_LOOKUP_SKEW_MS) break;
+	}
+	return listed;
+}
+
 /**
  * The account's submitted reports for a domain, newest first, whose URLs are
  * exactly `urls` (and justification, when given), created since `since` when
@@ -203,14 +233,8 @@ async function matchingSubmittedReports(params: CloudflareRequestContext & {
 	since?: Date;
 	limit: number;
 }): Promise<string[]> {
-	const url = `${CLOUDFLARE_PROVIDER.apiBaseUrl}/accounts/${params.config.accountId}/abuse-reports/submitted?search=${encodeURIComponent(params.target)}&per_page=50`;
-	const listed = await cloudflareDashboardRequest(params, { url, method: "GET" }, parseCloudflareRead);
-	const reports = Array.isArray(listed.reports) ? listed.reports.map(asRecord) : [];
-	const candidates = reports
-		.map((report) => ({ id: text(report?.id), domain: text(report?.domain), created: Date.parse(text(report?.cdate) ?? "") }))
-		.filter((report): report is { id: string; domain: string; created: number } => !!report.id && SUBMITTED_REPORT_ID.test(report.id)
-			&& report.domain === params.target && Number.isFinite(report.created)
-			&& (!params.since || report.created >= params.since.getTime() - RECEIPT_LOOKUP_SKEW_MS))
+	const candidates = (await listSubmittedReports(params))
+		.filter((report) => report.domain === params.target && (!params.since || report.created >= params.since.getTime() - RECEIPT_LOOKUP_SKEW_MS))
 		.sort((a, b) => b.created - a.created);
 	const matches: string[] = [];
 	for (const { id } of candidates) {
@@ -224,8 +248,8 @@ async function matchingSubmittedReports(params: CloudflareRequestContext & {
 
 /**
  * Find the report a POST created when its answer was lost. The account's
- * submitted reports are searched by domain, limited to those created since the
- * POST, and a report counts only when its URLs and justification are exactly
+ * submitted reports are read newest first, limited to the domain's created
+ * since the POST, and a report counts only when its URLs and justification are exactly
  * the ones sent. More than one match stays ambiguous.
  */
 export async function findSubmittedCloudflareReport(params: CloudflareRequestContext & {
