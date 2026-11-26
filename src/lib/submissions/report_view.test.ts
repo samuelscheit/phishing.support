@@ -60,6 +60,9 @@ describe("the reports of case 384401854580134038 as the case page reads them", (
 		expect(next(by(payloadHost!.routes, "Eranet"))).toBe("Next status check at 20:05 UTC.");
 		expect(next(by(site!.routes, "Netcraft"))).toBe("Nothing more is planned: Netcraft's automatic scan found no threat.");
 		expect(next(by(site!.routes, "Sollutium-NL"))).toBe("Nothing more is planned until Sollutium-NL replies; its reply is read automatically.");
+		// A status check still to come is the next step; "nothing more is planned" would contradict it.
+		const scanned = by(site!.routes, "Netcraft");
+		expect(next({ ...scanned, nextWork: [{ kind: "status_check", at: new Date("2026-11-26T20:25:00Z") }] })).toBe("Netcraft's automatic scan found no threat. Next status check at 20:25 UTC.");
 		// A settled route has nothing next.
 		expect(next(by(site!.routes, "Cloudflare"))).toBeUndefined();
 	});

@@ -170,6 +170,8 @@ export function nextStep(route: SubmissionReportRoute, standing: RouteStanding, 
 	const next = (kind: SubmissionReportRoute["nextWork"][number]["kind"]) => route.nextWork.find((work) => work.kind === kind);
 	const answered = route.decisionFollowUps.filter((followUp) => followUp.outcome === "replied").at(-1);
 	const parts: string[] = [];
+	// A known "no threat" verdict that nothing follows up: said once the schedule below is known.
+	let noThreat = false;
 	const lookup = next("receipt_lookup");
 	if (standing.bucket === "unconfirmed") {
 		parts.push(lookup
@@ -178,7 +180,7 @@ export function nextStep(route: SubmissionReportRoute, standing: RouteStanding, 
 	}
 	if (standing.bucket === "declined") {
 		const latest = decisionOf(route.messages)?.decision;
-		if (latest?.outcome === "no_threat" && !answered) parts.push(`Nothing more is planned: ${route.organisation}'s automatic scan found no threat.`);
+		noThreat = latest?.outcome === "no_threat" && !answered;
 		if (answered) parts.push(`We answered with evidence at ${shortUtc(answered.occurredAt, reference)} UTC; awaiting ${route.organisation}'s review.`);
 	}
 	const answer = next("decision_answer");
@@ -187,6 +189,7 @@ export function nextStep(route: SubmissionReportRoute, standing: RouteStanding, 
 	if (sending && standing.bucket === "waiting") parts.push(`Sending at ${shortUtc(sending.at, reference)} UTC.`);
 	const check = next("status_check");
 	if (check) parts.push(`Next status check at ${shortUtc(check.at, reference)} UTC.`);
+	if (noThreat) parts.unshift(parts.length ? `${route.organisation}'s automatic scan found no threat.` : `Nothing more is planned: ${route.organisation}'s automatic scan found no threat.`);
 	if (standing.bucket === "waiting" && route.routeType === "email" && !parts.length && standing.label === "Awaiting reply") parts.push(`Nothing more is planned until ${route.organisation} replies; its reply is read automatically.`);
 	return parts.length ? parts.join(" ") : undefined;
 }
