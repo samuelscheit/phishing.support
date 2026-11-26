@@ -16,7 +16,8 @@ import type { CampaignMember } from "../campaign/members";
 import { CampaignRepository } from "../campaign/repository";
 import type { ExtractedIndicator } from "../campaign/indicators";
 import { ingestFetchedMail } from "../imap/ingest";
-import { approveReferralMail, discardReferralMail, preparePreservationNotices, prepareComplaint, prepareSupplement, ReferralError, saveReferralDraft, setReferralCaseReference, type ReferralDependencies } from "./service";
+import { approveDraftedMail, discardDraftedMail, OperatorActionError, saveDraftedMail } from "../abuse/approval/drafted_mail";
+import { preparePreservationNotices, prepareComplaint, prepareSupplement, ReferralError, setReferralCaseReference, type ReferralDependencies } from "./service";
 import { getCampaignOverview } from "./overview";
 import { buildDossier } from "./dossier";
 import { factsFromDossier } from "../campaign/link";
@@ -306,8 +307,8 @@ describe("criminal referral of a campaign", () => {
 	test("refuses to approve a text the sender would refuse, and keeps the draft", async () => {
 		const campaignId = await campaignWithThreeSites();
 		const route = await prepareComplaint(campaignId, "by-zcb", dependencies);
-		await expect(approveReferralMail(route.id, { subject: "Strafanzeige", body: "Siehe http://127.0.0.1/admin" })).rejects.toThrow(ReferralError);
-		await expect(approveReferralMail(route.id, { subject: "Strafanzeige", body: "x".repeat(20_001) })).rejects.toThrow(ReferralError);
+		await expect(approveDraftedMail(route.id, { subject: "Strafanzeige", body: "Siehe http://127.0.0.1/admin" })).rejects.toThrow(OperatorActionError);
+		await expect(approveDraftedMail(route.id, { subject: "Strafanzeige", body: "x".repeat(20_001) })).rejects.toThrow(OperatorActionError);
 		expect((await AbuseRepository.getRoute(route.id))?.status).toBe("awaiting_approval");
 		expect(await sendJobs(route.id)).toEqual([]);
 	});
@@ -317,11 +318,11 @@ describe("criminal referral of a campaign", () => {
 		const route = await prepareComplaint(campaignId, "by-zcb", dependencies);
 		const draft = route.resolutionSnapshot.approvalDraft as { subject: string; body: string };
 		const edited = draft.body.replace("Sehr geehrte Damen und Herren,", "Sehr geehrte Damen und Herren,\n\nvorab telefonisch angekündigt.");
-		await saveReferralDraft(route.id, { subject: draft.subject, body: edited });
-		await approveReferralMail(route.id, { subject: draft.subject, body: edited });
+		await saveDraftedMail(route.id, { subject: draft.subject, body: edited });
+		await approveDraftedMail(route.id, { subject: draft.subject, body: edited });
 		expect((await AbuseRepository.getRoute(route.id))?.status).toBe("verified");
 		expect(await sendJobs(route.id)).toHaveLength(1);
-		await expect(approveReferralMail(route.id)).rejects.toThrow("not waiting for approval");
+		await expect(approveDraftedMail(route.id)).rejects.toThrow("not waiting for approval");
 
 		const raw = await deliver(route.id);
 		expect(raw).toContain("To: cybercrime@gensta-ba.bayern.de");
@@ -360,7 +361,7 @@ describe("criminal referral of a campaign", () => {
 	test("a supplement carries only the sites the authority has not received, under its file number", async () => {
 		const campaignId = await campaignWithThreeSites();
 		const complaint = await prepareComplaint(campaignId, "by-zcb", dependencies);
-		await approveReferralMail(complaint.id);
+		await approveDraftedMail(complaint.id);
 		await deliver(complaint.id);
 		await setReferralCaseReference(complaint.id, "401 UJs 12345/26");
 		await expect(prepareSupplement(campaignId, "by-zcb", dependencies)).rejects.toThrow("has received every site");
@@ -380,7 +381,7 @@ describe("criminal referral of a campaign", () => {
 		await expect(prepareSupplement(campaignId, "by-zcb", dependencies)).rejects.toThrow("still waits for approval");
 
 		// A discarded supplement leaves the site unreported, so it can be drafted again.
-		await discardReferralMail(supplement.id);
+		await discardDraftedMail(supplement.id);
 		expect((await AbuseRepository.getRoute(supplement.id))?.status).toBe("discarded");
 		const again = await prepareSupplement(campaignId, "by-zcb", dependencies);
 		expect(again.id).not.toBe(supplement.id);

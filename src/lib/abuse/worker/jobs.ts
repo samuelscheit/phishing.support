@@ -23,6 +23,7 @@ import { searchCampaignKits } from "../../campaign/kit_search";
 import { linkSiteToCampaign } from "../../campaign/sweep";
 import { runLivenessCheck } from "../../liveness/schedule";
 import { reportHostMove } from "../host_move/report";
+import { runEscalation } from "../escalation/run";
 
 /**
  * Jobs are claimed by lane, so one kind of slow work never starves another:
@@ -75,6 +76,8 @@ export const JOB_POLICY: Readonly<Record<AbuseJobType, JobPolicy>> = {
 	watch_redirector: { lane: "external", supplementary: true },
 	// Resolves the new host's contact and mails or files with providers.
 	report_host_move: { lane: "external", supplementary: true },
+	// Verifies the site (up to a browser capture and a classification), then mails providers or drafts mails.
+	escalate_target: { lane: "external", supplementary: true, minTimeoutMs: 30 * MINUTE },
 	// Writes a campaign's public title and summary with the model.
 	describe_campaign: { lane: "external", supplementary: true },
 	report_origin_host: { lane: "sweep", supplementary: true },
@@ -198,4 +201,5 @@ export const JOB_HANDLERS: Readonly<Record<AbuseJobType, JobHandler>> = {
 	describe_campaign: (job) => describeCampaignIfChanged(parseJobBigInt(job.payload?.campaignId, "payload.campaignId")),
 	check_site_liveness: (job, { signal }) => runLivenessCheck({ jobId: job.id, targetId: parseJobBigInt(job.payload?.targetId, "payload.targetId"), dependencies: signal ? { signal } : {} }),
 	report_host_move: (job) => reportHostMove({ reportId: idFrom(job.reportId, "reportId"), key: String(job.payload?.key ?? "") }),
+	escalate_target: (job, { signal }) => runEscalation({ targetId: parseJobBigInt(job.payload?.targetId, "payload.targetId"), jobId: job.id, ...(signal ? { signal } : {}) }),
 };

@@ -1,7 +1,7 @@
 import { isOperatorAuthorization, operatorChallenge } from "../http/operator_auth";
 import { errorText } from "../util/error_text";
 import { ComplainantNotConfiguredError } from "./complainant";
-import { ReferralError } from "./service";
+import { OperatorActionError } from "../abuse/approval/drafted_mail";
 
 export function parseId(value: string): bigint | undefined {
 	return /^\d{1,20}$/.test(value) ? BigInt(value) : undefined;
@@ -9,7 +9,7 @@ export function parseId(value: string): bigint | undefined {
 
 /**
  * Run an operator API handler: the login is checked again here (the proxy is
- * only the first gate), and a refused referral action becomes a 409 whose
+ * only the first gate), and a refused operator action becomes a 409 whose
  * message the page shows as it is.
  */
 export async function operatorHandler(request: Request, handler: () => Promise<Response>): Promise<Response> {
@@ -17,7 +17,7 @@ export async function operatorHandler(request: Request, handler: () => Promise<R
 	try {
 		return await handler();
 	} catch (error) {
-		if (error instanceof ReferralError || error instanceof ComplainantNotConfiguredError) {
+		if (error instanceof OperatorActionError || error instanceof ComplainantNotConfiguredError) {
 			return Response.json({ error: error.message }, { status: 409 });
 		}
 		console.error("Operator action failed:", error);

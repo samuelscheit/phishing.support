@@ -112,7 +112,7 @@ function DraftEditor({ mail, reportId }: { mail: ReferralMailView; reportId?: st
 	const [subject, setSubject] = useState(mail.subject ?? "");
 	const [body, setBody] = useState(mail.body ?? "");
 	const changed = subject !== mail.subject || body !== mail.body;
-	const url = `/api/operator/referral-mails/${mail.routeId}`;
+	const url = `/api/operator/drafted-mails/${mail.routeId}`;
 	return (
 		<div className="space-y-3">
 			<label className="block space-y-1">
@@ -171,7 +171,7 @@ function Attachments({ mail, reportId }: { mail: ReferralMailView; reportId?: st
 function CaseReferenceEditor({ mail }: { mail: ReferralMailView }) {
 	const { busy, error, run } = useAction();
 	const [value, setValue] = useState(mail.caseReference ?? "");
-	const url = `/api/operator/referral-mails/${mail.routeId}`;
+	const url = `/api/operator/drafted-mails/${mail.routeId}`;
 	return (
 		<div className="space-y-2">
 			<div className="flex flex-wrap items-center gap-2">

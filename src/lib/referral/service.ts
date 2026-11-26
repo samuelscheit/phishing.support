@@ -1,7 +1,5 @@
-import { serviceIdentity } from "../network/service_identity";
 import { abuseCaseTag } from "../abuse/mail/correlation";
-import { readVerifiedEmailDraft, verifiedEmailProviderPayload } from "../abuse/mail/draft";
-import { approvalDraftOf, type ApprovalDraft } from "../abuse/persistence/approvals";
+import { draftMailRoute, OperatorActionError } from "../abuse/approval/drafted_mail";
 import { AbuseRepository } from "../abuse/repository";
 import type { AbuseProviderRoute } from "../abuse/schema";
 import { CampaignRepository } from "../campaign/repository";
@@ -22,7 +20,7 @@ import {
 } from "./routes";
 import { hashStableJson } from "../util/hash";
 
-export class ReferralError extends Error {
+export class ReferralError extends OperatorActionError {
 	constructor(message: string) {
 		super(message);
 		this.name = "ReferralError";
@@ -37,12 +35,6 @@ export type ReferralDependencies = {
 /** Route statuses of a referral mail that reached, or is on its way to, its recipient. */
 const SENT_STATUSES = new Set(["verified", "queued", "running", "submitted", "awaiting_provider_reply", "acknowledged", "provider_rejected", "delivery_failed", "unknown_external_state"]);
 const LIVE_STATUSES = new Set([...SENT_STATUSES, "awaiting_approval"]);
-
-const URL_IN_TEXT = /https?:\/\/[^\s<>'"`]+/gi;
-
-function urlsIn(text: string): string[] {
-	return [...new Set((text.match(URL_IN_TEXT) ?? []).map((url) => url.replace(/[),.;!?]+$/, "")))];
-}
 
 /** The campaign's referral report and its one target, created on first use. */
 async function ensureReferralReport(campaignId: bigint): Promise<{ reportId: bigint; targetId: bigint }> {
@@ -115,18 +107,16 @@ async function draftRoute(params: {
 	submissionIds: string[];
 	provenance: Record<string, unknown>;
 	attachments: Array<{ name: string; mimeType: string; content: Buffer }>;
-	extra?: Record<string, unknown>;
 }): Promise<AbuseProviderRoute> {
-	const approvalDraft: ApprovalDraft = { ...params.draft, recipientLabel: params.recipientLabel, allowedUrls: urlsIn(params.draft.body) };
-	const route = await AbuseRepository.upsertResolvedRoute(params.targetId, {
+	const route = await draftMailRoute({
+		targetId: params.targetId,
 		routeKey: params.routeKey,
-		providerRegistryKey: params.registryKey,
-		providerDisplayName: params.recipientLabel,
-		routeType: "email",
-		verifiedEmail: params.recipient,
-		resolverProvenance: params.provenance,
-		resolutionSnapshot: { referralMailKind: params.kind, submissionIds: params.submissionIds, approvalDraft, ...params.extra },
-		status: "awaiting_approval",
+		registryKey: params.registryKey,
+		recipient: params.recipient,
+		recipientLabel: params.recipientLabel,
+		draft: params.draft,
+		provenance: params.provenance,
+		snapshot: { referralMailKind: params.kind, submissionIds: params.submissionIds },
 	});
 	for (const attachment of params.attachments) {
 		await AbuseRepository.saveRouteArtifactOnce({
@@ -139,7 +129,6 @@ async function draftRoute(params: {
 			buffer: attachment.content,
 		});
 	}
-	await AbuseRepository.recomputeReportStatus(params.reportId);
 	return route;
 }
 
@@ -278,59 +267,6 @@ export async function preparePreservationNotices(campaignId: bigint, dependencie
 	}
 	if (!drafted.length) throw new ReferralError("Every provider mailbox of this campaign already has a preservation notice, or none was reported by mail.");
 	return drafted;
-}
-
-function requireDraftedReferralRoute(route: AbuseProviderRoute | undefined): AbuseProviderRoute {
-	if (!route || !(isAuthorityRoute(route) || isPreservationRoute(route))) throw new ReferralError("This is not a referral mail.");
-	if (route.status !== "awaiting_approval") throw new ReferralError(`This mail is ${route.status}, not waiting for approval.`);
-	return route;
-}
-
-/**
- * The draft as it will be sent, checked by the same rules the sender applies
- * right before SMTP, so an approved mail is never refused at sending time.
- */
-async function sendableDraft(route: AbuseProviderRoute, edited?: { subject: string; body: string }): Promise<ApprovalDraft> {
-	const stored = approvalDraftOf(route);
-	if (!stored) throw new ReferralError("The mail has no draft.");
-	const draft: ApprovalDraft = edited
-		? { subject: edited.subject.trim(), body: edited.body.replace(/\r\n/g, "\n").trim(), recipientLabel: stored.recipientLabel, allowedUrls: urlsIn(edited.body) }
-		: stored;
-	const input = await AbuseRepository.getReportInput(route.reportId);
-	const target = input?.targets.find((candidate) => candidate.id === route.targetId);
-	if (!input || !target) throw new ReferralError("The referral report no longer exists.");
-	const checked = readVerifiedEmailDraft(verifiedEmailProviderPayload({
-		target: target.normalizedTarget,
-		observedUrls: target.observedUrls,
-		recipient: route.verifiedEmail!,
-		email: { subject: draft.subject, body: draft.body, recipientLabel: draft.recipientLabel },
-	}), {
-		recipient: route.verifiedEmail!,
-		description: input.report.description,
-		target: target.normalizedTarget,
-		observedUrls: target.observedUrls,
-		allowedUrls: [serviceIdentity.url, ...draft.allowedUrls],
-	});
-	if (!checked) throw new ReferralError("The mail cannot be sent as written: the subject must be at most 400 and the body at most 20,000 characters, without control characters, and every link must be a public http(s) URL.");
-	return draft;
-}
-
-export async function saveReferralDraft(routeId: bigint, edited: { subject: string; body: string }): Promise<void> {
-	const route = requireDraftedReferralRoute(await AbuseRepository.getRoute(routeId));
-	if (!await AbuseRepository.saveApprovalDraft(route.id, await sendableDraft(route, edited))) throw new ReferralError("The mail changed meanwhile; reload it.");
-}
-
-/** Approve a drafted mail, optionally as edited; it is sent exactly as approved. */
-export async function approveReferralMail(routeId: bigint, edited?: { subject: string; body: string }): Promise<void> {
-	const route = requireDraftedReferralRoute(await AbuseRepository.getRoute(routeId));
-	if (!await AbuseRepository.approveDraftedRoute(route.id, await sendableDraft(route, edited))) throw new ReferralError("The mail changed meanwhile; reload it.");
-}
-
-export async function discardReferralMail(routeId: bigint): Promise<void> {
-	const route = requireDraftedReferralRoute(await AbuseRepository.getRoute(routeId));
-	if (!await AbuseRepository.transitionRouteStatus({ routeId: route.id, from: "awaiting_approval", to: "discarded", data: { reason: "operator_discarded" } })) {
-		throw new ReferralError("The mail changed meanwhile; reload it.");
-	}
 }
 
 /** Set an authority's file number by hand, e.g. from a letter that came by post. */

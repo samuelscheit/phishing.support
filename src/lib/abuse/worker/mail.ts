@@ -208,32 +208,49 @@ async function settleBounce(messageId: bigint, route: { id: bigint }, options: {
  * name them.
  */
 export async function routeToNextContact(bouncedRouteId: bigint, contacts?: readonly JsonRecord[]): Promise<bigint | undefined> {
-	const bounced = await AbuseRepository.getRoute(bouncedRouteId);
-	if (!bounced || bounced.routeType !== "email") return undefined;
-	const existing = new Set((await AbuseRepository.listRoutes(bounced.reportId))
-		.filter((route) => route.targetId === bounced.targetId)
+	return routeToContact(bouncedRouteId, {
+		...(contacts ? { contacts } : {}),
+		why: (bounced) => {
+			const earlier = routeContact(bounced.resolverProvenance).bouncedEmails;
+			const bouncedEmails = [...new Set([...(Array.isArray(earlier) ? earlier.filter((email) => typeof email === "string") : []), ...(bounced.verifiedEmail ? [bounced.verifiedEmail] : [])])];
+			return { reason: "fallback_after_permanent_bounce", bouncedRouteId: bounced.id.toString(), bouncedEmails };
+		},
+	});
+}
+
+type FallbackContact = ReturnType<typeof fallbackContactsOf>[number];
+
+/**
+ * Report the target to a contact of `from`'s chain that no route of the
+ * target reaches yet: the first one, or the first `choose` accepts. The rest
+ * stay the new route's own fallbacks, and `why` records on its contact why
+ * the report moved on (a bounce, an escalation). Returns the new route.
+ */
+export async function routeToContact(fromRouteId: bigint, options: {
+	contacts?: readonly JsonRecord[];
+	choose?: (contact: FallbackContact) => boolean;
+	why: (from: AbuseProviderRoute) => JsonRecord;
+}): Promise<bigint | undefined> {
+	const from = await AbuseRepository.getRoute(fromRouteId);
+	if (!from || from.routeType !== "email") return undefined;
+	const existing = new Set((await AbuseRepository.listRoutes(from.reportId))
+		.filter((route) => route.targetId === from.targetId)
 		.map((route) => route.verifiedEmail?.toLowerCase())
 		.filter(Boolean));
-	const remaining = fallbackContactsOf({ fallbackContacts: contacts ?? bounced.resolverProvenance.fallbackContacts })
+	const remaining = fallbackContactsOf({ fallbackContacts: options.contacts ?? from.resolverProvenance.fallbackContacts })
 		.filter((contact, index, all) => !existing.has(contact.email.toLowerCase()) && all.findIndex((other) => other.email.toLowerCase() === contact.email.toLowerCase()) === index);
-	const [next, ...rest] = remaining;
+	const next = remaining.find(options.choose ?? (() => true));
 	if (!next) return undefined;
-	const earlier = routeContact(bounced.resolverProvenance).bouncedEmails;
-	const bouncedEmails = [...new Set([...(Array.isArray(earlier) ? earlier.filter((email) => typeof email === "string") : []), ...(bounced.verifiedEmail ? [bounced.verifiedEmail] : [])])];
-	const target = await AbuseRepository.getTarget(bounced.targetId);
+	const target = await AbuseRepository.getTarget(from.targetId);
 	const routeInput = contactRoute({
 		email: next.email,
 		providerName: (typeof next.organization === "string" ? next.organization : undefined)
 			?? (typeof next.entityName === "string" ? next.entityName : undefined)
 			?? `Abuse contact for ${target?.normalizedTarget ?? "the target"}`,
-		provenance: withRouteContact(
-			bounced.resolverProvenance,
-			{ ...next, reason: "fallback_after_permanent_bounce", bouncedRouteId: bounced.id.toString(), bouncedEmails },
-			rest,
-		),
-		snapshot: bounced.resolutionSnapshot,
+		provenance: withRouteContact(from.resolverProvenance, { ...next, ...options.why(from) }, remaining.filter((contact) => contact !== next)),
+		snapshot: from.resolutionSnapshot,
 	});
-	const route = await AbuseRepository.upsertResolvedRoute(bounced.targetId, routeInput);
+	const route = await AbuseRepository.upsertResolvedRoute(from.targetId, routeInput);
 	if (route.status !== "verified") return route.id;
 	await queueRouteDelivery(route);
 	await AbuseRepository.recomputeReportStatus(route.reportId);

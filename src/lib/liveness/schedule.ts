@@ -4,6 +4,8 @@ import { DAY_MS, HOUR_MS } from "../util/date_time";
 import { checkSite, type SiteCheckDependencies } from "./check";
 import { attributeCheck, observeHostMove, type HostMoveDependencies } from "./host_move";
 import { listLivenessTargets, listSiteChecksForTargets, livenessJobKey, recordSiteCheck, type LivenessTarget } from "./repository";
+import { scheduleEscalation } from "../abuse/escalation/run";
+import { TAKEN_DOWN_STATES } from "./schema";
 
 /**
  * When a reported site is checked, after its report. Dense at first, when
@@ -89,7 +91,9 @@ export async function ensureLivenessChecks(): Promise<void> {
  * networks, record whether it moved since the last check (or since it was
  * reported), record what the check found, and queue the next check on its
  * schedule: within the hour after a move, unless this check was itself the
- * recheck of one (a site flapping between hosts gets no hourly chain).
+ * recheck of one (a site flapping between hosts gets no hourly chain). A
+ * site still up is put on its escalation ladder (abuse/escalation), which
+ * acts only once the site is confirmed to serve what was reported.
  */
 export async function runLivenessCheck(params: { jobId: bigint; targetId: bigint; dependencies?: SiteCheckDependencies & HostMoveDependencies }): Promise<void> {
 	const [target] = await listLivenessTargets({ targetId: params.targetId });
@@ -105,4 +109,5 @@ export async function runLivenessCheck(params: { jobId: bigint; targetId: bigint
 		now: result.checkedAt,
 		...(move && !recheck ? { by: new Date(result.checkedAt.getTime() + LIVENESS_RECHECK_AFTER_CHANGE_MS) } : {}),
 	});
+	if (!TAKEN_DOWN_STATES.includes(result.state)) await scheduleEscalation(target, result.checkedAt);
 }

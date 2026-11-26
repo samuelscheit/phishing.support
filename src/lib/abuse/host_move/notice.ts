@@ -2,7 +2,7 @@ import { serviceIdentity } from "../../network/service_identity";
 import { networkLabel, type HostMove } from "../../liveness/moves";
 
 /** "26 Nov 2026 21:30 UTC". */
-function utc(at: string): string {
+export function utc(at: string): string {
 	const date = new Date(at);
 	return `${new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(date)} ${date.toISOString().slice(11, 16)} UTC`;
 }
@@ -61,7 +61,7 @@ function moveFacts(move: HostMove, domain: string): string[] {
 	];
 }
 
-const SIGNATURE = ["Thank you,", serviceIdentity.name, serviceIdentity.mailbox, serviceIdentity.url];
+export const SIGNATURE = ["Thank you,", serviceIdentity.name, serviceIdentity.mailbox, serviceIdentity.url];
 
 export type MoveNoticeParams = {
 	move: HostMove;

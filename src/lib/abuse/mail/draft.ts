@@ -397,6 +397,20 @@ function upstreamTransitLine(route: DraftInput["route"]): string | undefined {
 }
 
 /**
+ * Why a report escalated past a provider that did not act reaches this
+ * contact: whom we reported to, when, and that the site still serves it.
+ */
+function escalationLine(route: DraftInput["route"]): string | undefined {
+	const escalation = asRecord(routeContact(route.resolverProvenance).escalation);
+	const provider = valueAt(escalation, ["fromProvider"]);
+	const reportedAt = valueAt(escalation, ["reportedAt"]);
+	const verifiedAt = valueAt(escalation, ["verifiedAt"]);
+	if (!escalation || !provider || !reportedAt || !verifiedAt) return undefined;
+	const mailbox = valueAt(escalation, ["fromEmail"]);
+	return `Escalation: we reported this to ${provider}${mailbox ? ` (${mailbox})` : ""} on ${utcDate(new Date(reportedAt))}. It has not acted, and our check on ${utcDate(new Date(verifiedAt))} found the site still serving what we reported.`;
+}
+
+/**
  * The address the reported site is served from, when we know it: the target
  * itself, the origin server a sweep or the DNS history proved, or the address
  * the domain resolved to when the resolver reached the hoster through it.
@@ -524,7 +538,7 @@ export async function createAbuseEmailDraft(input: DraftInput, dependencies: Abu
 			allegationCategory: category,
 			target: input.target.normalizedTarget,
 			hostingAddress: hostingAddressLine(input.route),
-			upstreamTransit: upstreamTransitLine(input.route),
+			upstreamTransit: [escalationLine(input.route), upstreamTransitLine(input.route)].filter(Boolean).join(" ") || undefined,
 			observedUrls,
 			legalBrandUrl,
 			caseUrl,
