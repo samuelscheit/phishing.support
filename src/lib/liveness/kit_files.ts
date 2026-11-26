@@ -33,12 +33,9 @@ export type IsSharedKitFile = (sha256: string, reportId: bigint) => Promise<bool
  * (`isSharedKitFile`).
  */
 export async function distinctiveKitFiles(capture: KitCapture, reportId: bigint, isShared: IsSharedKitFile = CampaignRepository.isSharedKitFile): Promise<KitFingerprint[]> {
-	const files: KitFingerprint[] = [];
-	for (const fingerprint of kitFingerprints(capture)) {
-		if (fingerprint.kind === "stylesheet" || LIBRARY_PATH.test(new URL(fingerprint.url).pathname)) continue;
-		if (!(await isShared(fingerprint.sha256, reportId))) files.push(fingerprint);
-	}
-	return files;
+	const candidates = kitFingerprints(capture).filter((fingerprint) => fingerprint.kind !== "stylesheet" && !LIBRARY_PATH.test(new URL(fingerprint.url).pathname));
+	const shared = await Promise.all(candidates.map((fingerprint) => isShared(fingerprint.sha256, reportId)));
+	return candidates.filter((_, index) => !shared[index]);
 }
 
 /** The kit files of `host`, as paths to request from wherever it is hosted now. */

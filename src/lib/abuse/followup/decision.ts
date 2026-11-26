@@ -8,6 +8,7 @@ import { runDecisionAgent, type DecisionAgentModel, type DecisionAgentOutcome, t
 import { messageByMail, messageThroughForm } from "./route_notice";
 import { checkReportedSites, takedownConfirmed } from "./liveness";
 import { verifyReportedContent, type ContentVerification } from "../../liveness/content";
+import type { SiteCheckResult } from "../../liveness/check";
 import { caseCaptureNames, type AttachableFile, type DecisionToolDependencies } from "./tools";
 import { asRecord } from "../../util/values";
 import { accessGateOf } from "../../website/visit/access_gate";
@@ -75,7 +76,7 @@ export async function followUpProviderDecision(
 		await AbuseRepository.appendEvent({ reportId: route.reportId, routeId: route.id, eventType: "provider_decision.not_answered", data: { state: params.state, detail: params.detail ?? null, reason, confirmedByLiveness: true, liveness } });
 		return "skipped";
 	}
-	const verification = await verifyContent(route, target, tools, dependencies.signal);
+	const verification = await verifyContent(route, target, liveness, tools, dependencies.signal);
 
 	const { channel } = followUp;
 	const recipient = channel.kind === "email" ? channel.replyAddress : channel.name;
@@ -188,9 +189,17 @@ export async function followUpProviderDecision(
 }
 
 /** The reported URL's content compared with the case's: plain requests first, then a browser like the case's. The agent itself judges what changed. */
-async function verifyContent(route: { reportId: bigint; targetId: bigint }, target: { observedUrls: readonly string[]; normalizedTarget: string }, tools: NonNullable<DecisionFollowUpDependencies["tools"]>, signal: AbortSignal | undefined): Promise<ContentVerification> {
+async function verifyContent(
+	route: { reportId: bigint; targetId: bigint },
+	target: { observedUrls: readonly string[]; normalizedTarget: string },
+	liveness: readonly SiteCheckResult[],
+	tools: NonNullable<DecisionFollowUpDependencies["tools"]>,
+	signal: AbortSignal | undefined,
+): Promise<ContentVerification> {
 	const url = target.observedUrls.find((candidate) => /^https?:\/\//i.test(candidate)) ?? `https://${target.normalizedTarget}/`;
+	const check = liveness.find((result) => result.url === url);
 	return verifyReportedContent({ reportId: route.reportId, targetId: route.targetId, url }, { maxTier: "browser", ...(signal ? { signal } : {}) }, {
+		...(check ? { check } : {}),
 		// The same requests as the liveness check of every reported URL.
 		site: {
 			...(tools.fetch ? { fetch: tools.fetch } : {}),

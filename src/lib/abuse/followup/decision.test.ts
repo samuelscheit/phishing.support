@@ -319,24 +319,23 @@ describe("what the agent knows of the content before it investigates", () => {
 	const kitTools = (served: boolean) => ({
 		...tools,
 		liveness: liveness({
-			fetch: async (input: URL | RequestInfo) => {
+			fetch: (async (input: URL | RequestInfo) => {
 				const url = input.toString();
 				if (url === "https://paneo.work/") return new Response(PAGE, { headers: { "content-type": "text/html" } });
 				if (url === "https://paneo.work/js/install.js" && served) return new Response(KIT_JS, { headers: { "content-type": "application/javascript" } });
 				return new Response("Not Found", { status: 404 });
-			},
+			}) as typeof fetch,
 		}),
 	});
 
-	test("the kit's own script still served is proof the agent gets as a fact, found without a browser", async () => {
-		await SubmissionsEntity.create({ id: 902n, kind: "website", dedupeKey: "paneo-kit", status: "reported", data: { kind: "website", website: { url: "https://paneo.work/", kitResources: [{ url: "https://paneo.work/js/install.js", mimeType: "application/javascript", size: KIT_JS.length, sha256: sha256Hex(KIT_JS) }] } } });
+	test("a page that still loads the kit's own script is proof the agent gets as a fact", async () => {
+		const kit = { url: "https://paneo.work/js/install.js", mimeType: "application/javascript", size: KIT_JS.length, sha256: sha256Hex(KIT_JS) };
+		await SubmissionsEntity.create({ id: 902n, kind: "website", dedupeKey: "paneo-kit", status: "reported", data: { kind: "website", website: { url: "https://paneo.work/", kitResources: [kit] } } });
 		const { reportId, route } = await deniedRoute("paneo.work", "https://paneo.work/", 902n);
-		let captures = 0;
 		const { model, inputs } = scripted([call("do_not_answer", { reason: "scripted" })]);
-		await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "no_abuse_found" }, { model, tools: { ...kitTools(true), capture: async ({ url }: { url: string }) => { captures += 1; return liveCapture(url); } } });
+		await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "no_abuse_found" }, { model, tools: { ...kitTools(true), capture: async ({ url }: { url: string }) => ({ ...liveCapture(url), kitResources: [kit] }) } });
 		const context = JSON.parse(((inputs[0]![0] as { content: Array<{ text: string }> }).content[0]!).text);
-		expect(context.contentVerification).toEqual({ url: "https://paneo.work/", verdict: "served", by: "fetch", matches: [{ kind: "kit_file", url: "https://paneo.work/js/install.js", sha256: sha256Hex(KIT_JS) }] });
-		expect(captures).toBe(0);
+		expect(context.contentVerification).toEqual({ url: "https://paneo.work/", verdict: "served", by: "browser", matches: [{ kind: "kit_file", url: kit.url, sha256: kit.sha256 }] });
 		expect((await AbuseRepository.listEvents(reportId)).filter((event) => event.eventType === "site.content_verified")).toHaveLength(1);
 	});
 

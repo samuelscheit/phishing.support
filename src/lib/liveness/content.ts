@@ -28,6 +28,8 @@ import { TAKEN_DOWN_STATES, type SiteCheckState } from "./schema";
 export const CONTENT_VERIFIED_EVENT = "site.content_verified";
 
 const PAYLOAD_TIMEOUT_MS = 20_000;
+/** Pages browsers confirmed are kept this many at most, newest first: a kit rotates through few versions. */
+const MAX_LEARNED_PAGES = 10;
 /** A payload larger than this is not the file the case downloaded and hashed. */
 const MAX_PAYLOAD_BYTES = 64 * 1024 * 1024;
 
@@ -82,6 +84,8 @@ export type ContentReference = {
 
 export type ContentVerificationDependencies = {
 	site?: SiteCheckDependencies;
+	/** The plain check of the URL when the caller made it just now; it is not made again. */
+	check?: SiteCheckResult;
 	/** The browser capture; production's is the case's archive. */
 	capture?: typeof archiveWebsite;
 	/** The page classifier; production's is the case's own. */
@@ -94,9 +98,34 @@ export type ContentTarget = { reportId: bigint; targetId: bigint; url: string };
 
 const verifiedEvents = (events: readonly AbuseEvent[], targetId: bigint) => events.filter((event) => event.eventType === CONTENT_VERIFIED_EVENT && event.targetId === targetId);
 
-/** The verifications recorded for the target, oldest first. */
+/** The verifications recorded for the target, oldest first; a record of another shape is skipped. */
 export function contentVerificationsOf(events: readonly AbuseEvent[], targetId: bigint): ContentVerification[] {
-	return verifiedEvents(events, targetId).map((event) => event.data as ContentVerification);
+	return verifiedEvents(events, targetId).flatMap((event) => {
+		const data = asRecord(event.data);
+		if (typeof data?.verdict !== "string" || typeof data.tier !== "string") return [];
+		const observed = asRecord(data.observed);
+		return [{ ...data, ...(observed ? { observed: observed as PageFingerprints } : { observed: undefined }) } as ContentVerification];
+	});
+}
+
+/**
+ * The raw pages browsers confirmed as the reported site's (it showed the
+ * case's page or loaded the kit's own files), newest first. A page the
+ * classifier judged is never one: it may be another kit, or a mistake.
+ */
+function learnedPages(events: readonly AbuseEvent[], targetId: bigint): PageFingerprints[] {
+	const seen = new Set<string>();
+	return contentVerificationsOf(events, targetId)
+		.filter((verification) => verification.verdict === "served" && verification.tier === "browser" && verification.observed)
+		.map((verification) => verification.observed!)
+		.reverse()
+		.filter((page) => {
+			const key = `${page.body?.sha256 ?? ""}:${page.structure?.sha256 ?? ""}`;
+			if (seen.has(key)) return false;
+			seen.add(key);
+			return true;
+		})
+		.slice(0, MAX_LEARNED_PAGES);
 }
 
 async function readArtifact(artifacts: ReadonlyArray<{ id: bigint | string; name: string | null }>, name: string): Promise<Buffer | undefined> {
@@ -105,13 +134,18 @@ async function readArtifact(artifacts: ReadonlyArray<{ id: bigint | string; name
 	return artifact ? Buffer.from(artifact.blob) : undefined;
 }
 
-/** The case's captures of the reported site's own pages, on every route the case walked. */
+/**
+ * The case's captures of the pages it judged phishing or malware on the
+ * reported site, on every route it walked. A decoy, error or parking page
+ * the case also passed on that site is no evidence of the abuse.
+ */
 async function capturedPages(submissionId: bigint, website: WebsiteSubmissionData, url: string): Promise<Pick<ContentReference, "served" | "rendered">> {
 	const artifacts = await ArtifactsEntity.listForSubmission(submissionId);
 	const served: PageFingerprints[] = [];
 	const rendered: PageFingerprints[] = [];
-	for (const [route, { hops }] of websiteRoutes(website).entries()) {
-		for (const hop of hops.filter((candidate) => isSameWebsite(candidate.url, url))) {
+	for (const [route, { hops, siteAssessments = [] }] of websiteRoutes(website).entries()) {
+		const judged = new Set(siteAssessments.filter(isReportable).map((assessment) => assessment.judgedHopIndex ?? assessment.hopIndex));
+		for (const hop of hops.filter((candidate) => judged.has(candidate.index) && isSameWebsite(candidate.url, url))) {
 			const body = hop.bodyCaptured ? await readArtifact(artifacts, chainHopBodyFileName(route, hop.index)) : undefined;
 			if (body) served.push(htmlFingerprints(body.toString("utf8"), hop.url));
 			const mhtml = isPageHop(hop) ? await readArtifact(artifacts, websiteCaptureFileNames(routePage(route, hops, hop)).mhtml) : undefined;
@@ -128,7 +162,7 @@ async function reportedPayloads(reportId: bigint): Promise<ContentReference["pay
 	try {
 		const original = asRecord(JSON.parse(Buffer.from(request.blob).toString("utf8")));
 		const payload = asRecord(original?.payload);
-		return original?.kind === "malware_payload_host" && typeof payload?.url === "string" && typeof payload.sha256 === "string" ? [{ url: payload.url, sha256: payload.sha256 }] : [];
+		return original?.kind === "malware_payload_host" && typeof payload?.url === "string" && typeof payload.sha256 === "string" ? [{ url: payload.url, sha256: payload.sha256.toLowerCase() }] : [];
 	} catch {
 		return [];
 	}
@@ -139,9 +173,8 @@ const hasFingerprint = (fingerprints: PageFingerprints) => Boolean(fingerprints.
 /** What the case recorded of the target's site, with the pages earlier verifications confirmed. */
 export async function loadContentReference(target: ContentTarget, website: WebsiteSubmissionData | undefined, submissionId: bigint | null, events: readonly AbuseEvent[], isShared?: IsSharedKitFile): Promise<ContentReference> {
 	const pages = website && submissionId !== null ? await capturedPages(submissionId, website, target.url) : { served: [], rendered: [] };
-	const confirmed = contentVerificationsOf(events, target.targetId).filter((verification) => stillAbusive(verification) && verification.observed).map((verification) => verification.observed!);
 	return {
-		served: [...pages.served, ...confirmed].filter(hasFingerprint),
+		served: [...pages.served, ...learnedPages(events, target.targetId)].filter(hasFingerprint),
 		rendered: pages.rendered.filter(hasFingerprint),
 		kitFiles: website ? await distinctiveKitFiles(website, target.reportId, isShared) : [],
 		payloads: await reportedPayloads(target.reportId),
@@ -173,7 +206,8 @@ async function payloadHash(url: string, userAgent: string | undefined, dependenc
 			maxRedirects: 5,
 			timeoutMs: PAYLOAD_TIMEOUT_MS,
 		});
-		if (response.status !== 200) {
+		const length = Number(response.headers.get("content-length") ?? 0);
+		if (response.status !== 200 || length > MAX_PAYLOAD_BYTES) {
 			await response.body?.cancel().catch(() => undefined);
 			return undefined;
 		}
@@ -184,25 +218,30 @@ async function payloadHash(url: string, userAgent: string | undefined, dependenc
 	}
 }
 
-/** What plain requests find: the page as the check got it, the kit's own files on the site's host, and the payload as a downloader gets it. */
+/**
+ * What plain requests find: the reported payload as a downloader gets it,
+ * and the page as the check got it. The kit's own files on the host are
+ * added as evidence once the page matched; alone they prove nothing, since
+ * a file may outlive the page that loaded it.
+ */
 async function fetchMatches(target: ContentTarget, check: SiteCheckResult, reference: ContentReference, userAgent: string | undefined, dependencies: SiteCheckDependencies): Promise<ContentMatch[]> {
 	const matches: ContentMatch[] = [];
 	for (const payload of reference.payloads) {
 		if ((await payloadHash(payload.url, userAgent, dependencies)) === payload.sha256) matches.push({ kind: "payload", sha256: payload.sha256, url: payload.url });
 	}
-	// A page only counts while the site answers with it; its files alone may outlive a removed page.
 	if (check.state !== "online") return matches;
-	matches.push(...pageMatches(check.pageFingerprints, reference.served, check.finalUrl ?? target.url));
+	const pages = pageMatches(check.pageFingerprints, reference.served, check.finalUrl ?? target.url);
+	if (!pages.length) return matches;
 	const files = proofFilesOn(reference.kitFiles, new URL(target.url).hostname);
-	for (const file of await servedKitFiles(target.url, files, dependencies)) matches.push({ kind: "kit_file", ...file });
-	return matches;
+	const served = await servedKitFiles(target.url, files, dependencies);
+	return [...matches, ...pages, ...served.map((file) => ({ kind: "kit_file" as const, ...file }))];
 }
 
-/** The raw document the capture ended on, as the server sent it. */
+/** The raw document of the page the capture ended on, as the server sent it. */
 function capturedDocument(archive: WebsiteArchiveResult): PageFingerprints | undefined {
-	const hop = archive.navigationHops.findLast((candidate) => candidate.contentCaptured && candidate.url === archive.url);
+	const hop = archive.navigationHops.findLast((candidate) => candidate.contentCaptured);
 	const body = hop && archive.hopBodies?.find((candidate) => candidate.hopIndex === hop.index)?.body;
-	const fingerprints = body ? htmlFingerprints(body.toString("utf8"), archive.url) : undefined;
+	const fingerprints = body ? htmlFingerprints(body.toString("utf8"), hop.url) : undefined;
 	return fingerprints && hasFingerprint(fingerprints) ? fingerprints : undefined;
 }
 
@@ -251,7 +290,7 @@ export async function verifyReportedContent(
 	const [report, events] = await Promise.all([AbuseRepository.getReport(target.reportId), AbuseRepository.listEvents(target.reportId)]);
 	const submission = report?.submissionId ? await SubmissionsEntity.get(report.submissionId) : undefined;
 	const website = submission?.data.kind === "website" ? submission.data.website : undefined;
-	const check = await checkSite(target.url, site);
+	const check = dependencies.check ?? await checkSite(target.url, site);
 	const base = { url: target.url, checkedAt: check.checkedAt.toISOString(), state: check.state, detail: check.detail ?? null };
 	const record = async (verdict: ContentVerdict, observed?: PageFingerprints): Promise<ContentVerification> => {
 		const verification: ContentVerification = { ...base, ...verdict, ...(observed ? { observed } : {}) };
@@ -264,11 +303,17 @@ export async function verifyReportedContent(
 	const fetched = await fetchMatches(target, check, reference, report?.reportedUserAgent ?? undefined, site);
 	if (fetched.length) return record({ verdict: "served", tier: "fetch", matches: fetched });
 	if (maxTier === "fetch") return record({ verdict: "unverified", tier: "fetch", reason: "Plain requests got nothing the case recorded." });
+	const recorded = reference.served.length + reference.rendered.length + reference.kitFiles.length;
+	if (!recorded && maxTier === "browser") return record({ verdict: "unverified", tier: "fetch", reason: "The case recorded no page or kit file to compare with." });
 
 	let archive: WebsiteArchiveResult;
 	try {
 		const visitor = reporterBrowserIdentity(report?.requesterHeaders ?? undefined);
-		archive = await (dependencies.capture ?? archiveWebsite)({ url: target.url, ...(visitor ? { visitor } : {}), ...(website?.device ? { device: website.device } : {}) });
+		archive = await (dependencies.capture ?? archiveWebsite)({
+			url: target.url,
+			...(visitor ? { visitor } : {}),
+			...(website?.device ? { device: website.device } : {}),
+		});
 	} catch (error) {
 		if (options.signal?.aborted) throw options.signal.reason;
 		if (error instanceof WebsiteCaptureFailedError) return record({ verdict: "unverified", tier: "browser", reason: `The browser could not capture the page: ${error.message}` });

