@@ -190,7 +190,7 @@ describe("email worker draft boundary", () => {
 						messageId: "<first@phishing.support>",
 						replyAddress: "abuse-retry@phishing.support",
 						correlationKey: params.correlationKey,
-						rawArtifactId: 1n,
+						rawArtifactId: await AbuseRepository.saveArtifact({ reportId: params.reportId, routeId: params.routeId, runId: params.runId, name: "outbound.eml", kind: "outbound_mail_mime", mimeType: "message/rfc822", buffer: Buffer.from("raw") }),
 						attachmentArtifactIds: [],
 					});
 					await AbuseRepository.settleOutboundMail({ messageId, status: "failed", error: "recipient rejected" });
@@ -234,7 +234,7 @@ describe("email worker draft boundary", () => {
 				const messageId = await AbuseRepository.createOutboundMail({
 					reportId: params.reportId, routeId: params.routeId, runId: params.runId, fromAddress: "support@phishing.support", toAddresses: [params.recipient],
 					subject: params.subject, textBody: params.body, messageId: "<refused@phishing.support>", replyAddress: "abuse-relay@phishing.support",
-					correlationKey: params.correlationKey, rawArtifactId: 1n, attachmentArtifactIds: [],
+					correlationKey: params.correlationKey, rawArtifactId: await AbuseRepository.saveArtifact({ reportId: params.reportId, routeId: params.routeId, runId: params.runId, name: "outbound.eml", kind: "outbound_mail_mime", mimeType: "message/rfc822", buffer: Buffer.from("raw") }), attachmentArtifactIds: [],
 				});
 				await AbuseRepository.settleOutboundMail({ messageId, status: "failed", error: "550 5.7.1 [CS101] Message rejected due to local policy" });
 				return { messageId, status: "failed" as const, error: "550 5.7.1 [CS101] Message rejected due to local policy", rfcMessageId: "<refused@phishing.support>" };

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { SubmissionsEntity } from "../../db/entities/submissions";
@@ -415,7 +415,7 @@ describe("a daily redirector check", () => {
 		const { analyzeWebsite, visits } = browser({ reaches: "https://assistdeparments-x.com/" });
 		const check = checkFinds({ kind: "destination", url: "https://assistdeparments-x.com/", urls: [] });
 		await watchRedirector({ job }, { checkRedirector: check, analyzeWebsite, now: () => CHECKED_AT });
-		await (await getDb()).delete(abuseJobs).where(and(eq(abuseJobs.jobType, "watch_redirector"), eq(abuseJobs.status, "queued"))).run();
+		await (await getDb()).delete(abuseJobs).where(and(eq(abuseJobs.jobType, "watch_redirector"), eq(abuseJobs.status, "queued"), ne(abuseJobs.id, job.id))).run();
 		await watchRedirector({ job: { ...job, status: "running" } }, { checkRedirector: check, analyzeWebsite, now: () => CHECKED_AT });
 		expect(visits).toHaveLength(1);
 		expect(await lastEvent(report.reportId)).toMatchObject({ visit: { status: "reported", destination: "https://assistdeparments-x.com/" } });

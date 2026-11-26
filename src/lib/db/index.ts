@@ -54,6 +54,11 @@ async function initializeDatabase() {
 	await migrate(db, {
 		migrationsFolder: join(process.cwd(), "drizzle"),
 	});
+	// Enforce every REFERENCES and its ON DELETE from here on. Only after the
+	// migrations: they rebuild tables by DROP and RENAME, which with foreign
+	// keys on would cascade-delete the children (the pragma is a no-op inside
+	// the migrator's transaction, so a migration cannot switch it off itself).
+	client.exec("PRAGMA foreign_keys = ON");
 
 	return db;
 }

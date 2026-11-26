@@ -225,6 +225,13 @@
       "when": 1795719342448,
       "tag": "0031_submission_retries",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1795720403604,
+      "tag": "0032_enforce_foreign_keys",
+      "breakpoints": true
     }
   ]
 }

@@ -203,14 +203,8 @@ describe("recording retries at the claim", () => {
 		expect(await SubmissionRetriesEntity.summaryForSubmission(id)).toEqual({ count: 2, lastAt: retries[0]!.createdAt });
 		expect(await SubmissionRetriesEntity.summaryForSubmission(23n)).toEqual({ count: 0, lastAt: null });
 
-		// The foreign key cascades (where SQLite enforces it, as a connection with foreign_keys on does).
 		const db = await getDb();
-		db.run("PRAGMA foreign_keys = ON");
-		try {
-			await db.delete(submissions).where(eq(submissions.id, id));
-		} finally {
-			db.run("PRAGMA foreign_keys = OFF");
-		}
+		await db.delete(submissions).where(eq(submissions.id, id));
 		expect(await SubmissionRetriesEntity.listForSubmission(id)).toEqual([]);
 	});
 });
