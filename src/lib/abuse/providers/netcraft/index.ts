@@ -2,7 +2,7 @@ import { defineProvider } from "../kit/provider";
 import { NETCRAFT_PROVIDER } from "./definition";
 import { netcraftDraft, submitNetcraftSubmission } from "./submission";
 import { makeNetcraftReason, storedNetcraftSubmissionPayload } from "./payload";
-import { NETCRAFT_INBOUND_MAIL } from "./inbound";
+import { NETCRAFT_INBOUND_MAIL, netcraftDecision } from "./inbound";
 import { fetchNetcraftCorrespondence, NETCRAFT_REVIEW_VERDICTS } from "./correspondence";
 
 /** Supplemental Netcraft route for every report with one or more observed URLs. */
@@ -21,4 +21,6 @@ export const netcraftProvider = defineProvider({
 	reportedUrls: (payload) => storedNetcraftSubmissionPayload(payload)?.target.observedUrls ?? [],
 	fetchCorrespondence: fetchNetcraftCorrespondence,
 	reviewVerdicts: NETCRAFT_REVIEW_VERDICTS,
+	decisionOf: netcraftDecision,
+	channel: "reporting API",
 });

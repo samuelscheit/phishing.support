@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound, permanentRedirect } from "next/navigation";
 import { cache } from "react";
 
-import { SubmissionReports } from "@/components/SubmissionReports";
+import { SubmissionReports } from "@/components/reports/ReportsTab";
 import { PageShell } from "@/components/provider_stats/PageShell";
 import { getReportsByIds } from "@/lib/submissions/abuse_details";
 

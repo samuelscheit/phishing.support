@@ -2,15 +2,14 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { Route } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { label, statusClass } from "@/components/SubmissionReports";
+import { StandingPill } from "@/components/reports/standing";
+import { reportStanding } from "@/lib/submissions/report_view";
 import type { DeceptiveFunnelFinding } from "@/lib/abuse/funnel/classification";
 import { DECEPTION_PHRASES } from "@/lib/abuse/funnel/deception";
 import type { FunnelParty } from "@/lib/abuse/funnel/extract";
 import { platformLabel } from "@/lib/abuse/funnel/platforms";
 import type { SubmissionReport } from "@/lib/submissions/details";
 import type { WebsiteFunnel } from "@/lib/website/types";
-import { cn } from "@/lib/util/cn";
 
 /** How the business knows the affiliate: its own ID, or the one the network that delivered the visitor credits. */
 function affiliateOf(party: FunnelParty): string {
@@ -24,9 +23,10 @@ function PartyReport({ party, report, skipped, caseId }: { party: FunnelParty; r
 	if (!report) return <p className="text-xs text-muted-foreground">No report.</p>;
 	const owner = report.submissionId !== null && String(report.submissionId) !== caseId ? String(report.submissionId) : undefined;
 	const recipients = [...new Set(report.routes.flatMap((route) => (route.recipient ? [route.recipient] : [])))];
+	const standing = reportStanding(report);
 	return (
 		<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-			<Badge variant="outline" className={cn("capitalize", statusClass(report.status))}>{label(report.status)}</Badge>
+			{standing ? <StandingPill bucket={standing.bucket}>{standing.label}</StandingPill> : null}
 			<span className="text-muted-foreground">
 				{recipients.length ? `to ${recipients.join(", ")}` : `${party.site}'s contact is being looked up`}
 				{owner ? <> · reported by <Link href={`/submissions/${owner}`} className="font-medium text-primary hover:underline">case {owner}</Link></> : null}

@@ -1,7 +1,7 @@
 import { defineProvider } from "../kit/provider";
 import { NETCRAFT_MAIL_PROVIDER } from "./definition";
 import { netcraftMailDraft, prepareNetcraftMailExternalSubmission, submitNetcraftMailSubmission } from "./submission";
-import { NETCRAFT_INBOUND_MAIL } from "../netcraft/inbound";
+import { NETCRAFT_INBOUND_MAIL, netcraftDecision } from "../netcraft/inbound";
 import { fetchNetcraftCorrespondence, NETCRAFT_REVIEW_VERDICTS } from "../netcraft/correspondence";
 
 /** Supplemental Netcraft route that files the reported phishing message itself. */
@@ -13,4 +13,6 @@ export const netcraftMailProvider = defineProvider({
 	external: { prepare: prepareNetcraftMailExternalSubmission, submit: submitNetcraftMailSubmission },
 	fetchCorrespondence: fetchNetcraftCorrespondence,
 	reviewVerdicts: NETCRAFT_REVIEW_VERDICTS,
+	decisionOf: netcraftDecision,
+	channel: "mail-report API",
 });

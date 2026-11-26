@@ -27,6 +27,17 @@ export function truncateAtWord(value: string, maximum: number, { ellipsis = fals
 	return `${(space > maximum * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.–—-]+$/, "")}…`;
 }
 
+/**
+ * The sentence of `text` that `pattern` matches in, whitespace squashed, or
+ * undefined when it matches nowhere. Sentences end at ".", "!" or "?"
+ * followed by a space, so "trylevo[.]app." stays one sentence, and at a blank
+ * line, so a greeting ("Hello,") is not part of the next one; a sentence
+ * wrapped over lines stays whole.
+ */
+export function sentenceContaining(text: string, pattern: RegExp): string | undefined {
+	return text.split(/\n\s*\n/).flatMap((paragraph) => squash(paragraph).split(/(?<=[.!?])\s+/)).find((sentence) => pattern.test(sentence));
+}
+
 /** "a", "a and b", "a, b and c". */
 export function andList(values: readonly string[]): string {
 	return values.length <= 1 ? values.join("") : `${values.slice(0, -1).join(", ")} and ${values.at(-1)}`;

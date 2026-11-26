@@ -2,6 +2,7 @@ import { extractTurnstileSitekeys } from "../../followup/account_identifiers";
 import { defineProvider } from "../kit/provider";
 
 import { CLOUDFLARE_PROVIDER } from "./definition";
+import { cloudflareDecision } from "./decision";
 import { buildCloudflareReportPreview } from "./report";
 import { cloudflareDraft, fetchCloudflareCorrespondence, findCloudflareSubmission, prepareCloudflareExternalSubmission, storedCloudflareSubmissionPayload, submitCloudflareSubmission } from "./submission";
 
@@ -35,4 +36,6 @@ export const cloudflareProvider = defineProvider({
 	inbound: { senderDomains: ["cloudflare.com"], confirmationIds: null },
 	fetchCorrespondence: fetchCloudflareCorrespondence,
 	reviewVerdicts: { accepted: "acknowledged", denied: "rejected" },
+	decisionOf: cloudflareDecision,
+	channel: "dashboard API",
 });

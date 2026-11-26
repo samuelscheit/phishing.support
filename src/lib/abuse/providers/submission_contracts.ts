@@ -190,6 +190,28 @@ export type ProviderInboundMail = {
 	verdictOf?(text: string): AbuseMailClassification | undefined;
 };
 
+/**
+ * What a provider decided about a report, as one of its messages or review
+ * states says it, for the case page:
+ *
+ * - `action_taken`: it acted on the site: restricted access, blocked or suspended it.
+ * - `no_threat`: its own check of the site found nothing.
+ * - `declined`: it closed the report without acting.
+ * - `received`: it took the report on without deciding yet.
+ */
+export type ProviderDecision = {
+	outcome: "action_taken" | "no_threat" | "declined" | "received";
+	/** Plain words for the case page: "Access restricted", "No threat found". */
+	label: string;
+	/** The provider's own sentence that says it, when a message says it. */
+	sentence?: string;
+	/** The verbatim part of `sentence` that says it, when the sentence is long, for a one-line place. */
+	excerpt?: string;
+};
+
+/** Where a provider decision is read from: a message's text, or a review state with its detail. */
+export type ProviderDecisionSource = { text?: string; state?: string; detail?: string };
+
 /** A composed answer to a provider's review decision, with its evidence files. */
 export type DecisionAnswer = {
 	confirmationId: string;
@@ -295,4 +317,12 @@ export type ProviderSubmissionProvider = ProviderSubmissionFiling & {
 	 * entry (`processing`, `submitted`) is no decision yet.
 	 */
 	readonly reviewVerdicts?: Readonly<Record<string, AbuseMailClassification>>;
+	/**
+	 * The decision a message or review state of this provider states, in
+	 * plain words with the provider's own sentence; undefined when it states
+	 * none. Read without a model, so the case page can show it as it renders.
+	 */
+	decisionOf?(source: ProviderDecisionSource): ProviderDecision | undefined;
+	/** How the report is filed, as the case page names it: "API", "web form". */
+	readonly channel?: string;
 };

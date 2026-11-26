@@ -5,11 +5,10 @@ import { getDb } from "../db";
 import { isDown, takedownOf } from "../liveness/layer";
 import { listSiteChecks } from "../liveness/repository";
 import type { SiteCheck } from "../liveness/schema";
-import { asRecord } from "../util/values";
 import type { ProviderRouteRecord } from "./aggregate";
 import { organisationOf } from "./organisation";
 import { roleOf } from "./role";
-import { routeOutcomeOf, type RouteMessageFact } from "./route_outcome";
+import { routeEventFacts, routeOutcomeOf, type RouteMessageFact } from "./route_outcome";
 
 /** Stats are recomputed at most this often; a new reply shows up on the public pages within minutes. */
 const CACHE_MS = 5 * 60_000;
@@ -71,14 +70,8 @@ export async function loadProviderRouteRecords(): Promise<ProviderRouteRecord[]>
 			routeType: route.routeType,
 			status: route.status,
 			createdAt: route.createdAt,
-			statusChanges: routeEvents
-				.filter((event) => event.eventType === "route.status_changed")
-				.flatMap((event) => {
-					const to = asRecord(event.data)?.to;
-					return typeof to === "string" ? [{ to, at: event.createdAt }] : [];
-				}),
+			...routeEventFacts(routeEvents),
 			messages: (messages.get(route.id) ?? []) as RouteMessageFact[],
-			unansweredDecisions: routeEvents.filter((event) => event.eventType === "provider_decision.not_answered").length,
 		});
 		const takedown = routeTakedown(checks.get(route.targetId), outcome.sentAt ?? report.createdAt);
 		return {

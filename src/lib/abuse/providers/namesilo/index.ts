@@ -18,4 +18,5 @@ export const nameSiloProvider = defineProvider({
 		prepare: prepareNameSiloExternalSubmission,
 		submit: submitNameSiloSubmission,
 	},
+	channel: "web form",
 });

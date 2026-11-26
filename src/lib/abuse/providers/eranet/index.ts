@@ -23,6 +23,10 @@ export const eranetProvider = defineProvider({
 	fetchCorrespondence: fetchEranetCorrespondence,
 	// "Submitted" and "material auditing" are its queue; "processing" means it confirmed the abuse.
 	reviewVerdicts: { "supplement required": "needs_more_information", processing: "acknowledged", "process completed": "acknowledged" },
+	decisionOf: ({ state }) => state === "processing" ? { outcome: "received", label: "Abuse confirmed, in progress" }
+		: state === "submitted" || state === "material auditing" ? { outcome: "received", label: "Under review" }
+		: undefined,
+	channel: "web form",
 	// "Supplement required": Eranet could not confirm the abuse from the report and waits on more material.
 	decisionFollowUp: {
 		contestedStates: ["supplement required"],

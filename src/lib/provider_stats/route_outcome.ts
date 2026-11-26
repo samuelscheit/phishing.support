@@ -1,4 +1,5 @@
 import type { AbuseMailClassification, AbuseRouteStatus, AbuseRouteType } from "../abuse/schema";
+import { asRecord } from "../util/values";
 
 /**
  * How a provider answered one report, as far as the record shows:
@@ -59,6 +60,19 @@ export type RouteOutcome = {
 	inbound: number;
 	outbound: number;
 };
+
+/** The facts a route's events give its outcome: its status changes and the decisions left unanswered. */
+export function routeEventFacts(events: ReadonlyArray<{ eventType: string; data: unknown; createdAt: Date }>): Pick<RouteFacts, "statusChanges" | "unansweredDecisions"> {
+	return {
+		statusChanges: events
+			.filter((event) => event.eventType === "route.status_changed")
+			.flatMap((event) => {
+				const to = asRecord(event.data)?.to;
+				return typeof to === "string" ? [{ to, at: event.createdAt }] : [];
+			}),
+		unansweredDecisions: events.filter((event) => event.eventType === "provider_decision.not_answered").length,
+	};
+}
 
 /** Where each route status leaves a route that shows no sign of having reached the provider. Exhaustive, so a new status must be placed. */
 const UNDELIVERED_AS: Record<AbuseRouteStatus, "not_delivered" | "pending" | "delivered"> = {

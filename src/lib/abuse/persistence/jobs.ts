@@ -102,6 +102,17 @@ export async function hasJob(dedupeKey: string): Promise<boolean> {
 	return Boolean(db.select({ id: abuseJobs.id }).from(abuseJobs).where(eq(abuseJobs.dedupeKey, dedupeKey)).get());
 }
 
+/** The report's jobs still waiting to run, soonest first: what the case page says happens next. */
+export async function listQueuedJobsForReport(reportId: bigint): Promise<Array<Pick<AbuseJob, "jobType" | "routeId" | "nextAttemptAt">>> {
+	const db = await getDb();
+	return db
+		.select({ jobType: abuseJobs.jobType, routeId: abuseJobs.routeId, nextAttemptAt: abuseJobs.nextAttemptAt })
+		.from(abuseJobs)
+		.where(and(eq(abuseJobs.reportId, reportId), eq(abuseJobs.status, "queued")))
+		.orderBy(asc(abuseJobs.nextAttemptAt))
+		.all();
+}
+
 /**
  * Enqueue a lifecycle job exactly once, including across completed and failed
  * executions. This is for immutable source events such as a provider message;

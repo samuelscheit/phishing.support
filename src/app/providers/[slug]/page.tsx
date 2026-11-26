@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 
-import { RouteCard } from "@/components/SubmissionReports";
+import { RouteTimeline } from "@/components/reports/RouteTimeline";
 import { Funnel, OutcomeBar, OutcomeLegend, StripPlot } from "@/components/provider_stats/charts";
 import { formatMinutes, formatPercent, ROLE_LABEL, ROLE_MEASURE, SITE_STATE_LABEL, VERDICT_BADGE, VERDICT_LABEL } from "@/components/provider_stats/labels";
 import { Figure, PageShell, Pagination } from "@/components/provider_stats/PageShell";
@@ -76,7 +76,6 @@ function RouteEntry({ detail }: { detail: ProviderRouteDetail }) {
 	const { record, report, route } = detail;
 	const takedown = routeTakedownOf(record);
 	const state = record.takedown?.state;
-	const artifacts = new Map(report.artifacts.map((artifact) => [String(artifact.id), artifact]));
 	return (
 		<li className="rounded-xl border">
 			<details className="group">
@@ -93,7 +92,7 @@ function RouteEntry({ detail }: { detail: ProviderRouteDetail }) {
 				</summary>
 				<div className="space-y-3 border-t p-4">
 					<Link href={caseHref(detail)} className="text-sm text-primary hover:underline">Open the whole case →</Link>
-					<RouteCard reportId={String(report.id)} route={route} artifacts={artifacts} />
+					<RouteTimeline route={route} report={report} />
 				</div>
 			</details>
 		</li>

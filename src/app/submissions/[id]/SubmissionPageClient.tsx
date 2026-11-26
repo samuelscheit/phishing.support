@@ -5,7 +5,7 @@ import { SubmissionStatus } from "@/components/SubmissionStatus";
 import { ExternalLinkConfirm } from "@/components/ExternalLinkConfirm";
 import { WhoisTab } from "@/components/WhoisTab";
 import { ReporterMeta } from "@/components/ReporterMeta";
-import { SubmissionReports } from "@/components/SubmissionReports";
+import { SubmissionReports } from "@/components/reports/ReportsTab";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExternalLink, Mail, Globe, RotateCcw } from "lucide-react";
@@ -22,7 +22,6 @@ import { ArchivedFrame } from "./_components/ArchivedFrame";
 import { ArtifactsTab } from "./_components/ArtifactsTab";
 import { CampaignLink } from "./_components/CampaignLink";
 import { EmailFacts } from "./_components/EmailFacts";
-import { InvestigationCard } from "./_components/InvestigationCard";
 import { NavigationTab } from "./_components/NavigationTab";
 import { RunsTab } from "./_components/RunsTab";
 import { RotationNote } from "./_components/RotationNote";
@@ -229,8 +228,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 							</TabsContent>
 						) : null}
 						<TabsContent value="reports" className="space-y-4 mt-4">
-							{website?.investigation ? <InvestigationCard investigation={website.investigation} /> : null}
-							<SubmissionReports reports={reports} caseId={id} />
+							<SubmissionReports reports={reports} caseId={id} {...(website?.investigation ? { investigation: website.investigation } : {})} />
 						</TabsContent>
 						{website && hasNavigation ? (
 							<TabsContent value="navigation" className="space-y-2 mt-4">
