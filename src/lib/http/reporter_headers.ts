@@ -87,6 +87,21 @@ function firstReporterHeader(headers: ReporterHeaders, names: readonly string[])
 	return undefined;
 }
 
+/**
+ * The reporter headers a public page may show: the user agent and device
+ * model only. Every other header can identify the visitor (cf-connecting-ip,
+ * x-forwarded-for, cookies), so it never leaves the server.
+ */
+export function publicReporterHeaders(headers: ReporterHeaders): Record<string, string> | null {
+	const visible = Object.fromEntries(
+		[...userAgentHeaderNames, ...modelHeaderNames].flatMap((name) => {
+			const value = getReporterHeader(headers, name);
+			return value ? [[name, value]] : [];
+		}),
+	);
+	return Object.keys(visible).length > 0 ? visible : null;
+}
+
 /** Extract the raw user-agent header from persisted reporter headers. */
 export function getReporterUserAgent(headers: ReporterHeaders): string | undefined {
 	return firstReporterHeader(headers, userAgentHeaderNames);

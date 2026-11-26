@@ -4,13 +4,15 @@ import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import type { AnalysisRun, Artifact, Submission } from "@/lib/db/schema";
 import { withoutBackendSecrets } from "@/lib/exfiltration/secrets";
+import { publicReporterHeaders } from "@/lib/http/reporter_headers";
 import { getReportsForSubmission, type SubmissionReport } from "./abuse_details";
 
 export type { SubmissionReport, SubmissionReportArtifact, SubmissionReportMessage, SubmissionReportRoute } from "./abuse_details";
 
 type SubmissionArtifact = Omit<Artifact, "blob" | "submissionId">;
 
-export type SubmissionDetail = Submission & {
+/** The visitor's IP is never public; their headers are cut to the device ones. */
+export type SubmissionDetail = Omit<Submission, "reporterIp"> & {
 	analysisRuns: AnalysisRun[];
 	/** Primary and discovered-backend reports, each with provider routes and replies. */
 	reports: SubmissionReport[];
@@ -34,7 +36,11 @@ async function campaignsOf(submissionId: bigint): Promise<SubmissionDetail["camp
 	return [...campaigns.values()];
 }
 
-/** A case as its public page and API show it: data-drop credentials redacted, the stored case keeps them. */
+/**
+ * A case as its public page and API show it: data-drop credentials redacted,
+ * the reporter's IP dropped and their headers cut to the device ones. The
+ * stored case keeps them all.
+ */
 export async function getSubmissionDetails(id: string): Promise<SubmissionDetail | undefined> {
 	let submissionId: bigint;
 	try {
@@ -43,8 +49,9 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 		return undefined;
 	}
 
-	const submission = await SubmissionsEntity.get(submissionId);
-	if (!submission) return undefined;
+	const stored = await SubmissionsEntity.get(submissionId);
+	if (!stored) return undefined;
+	const { reporterIp: _reporterIp, ...submission } = stored;
 
 	const [analysisRuns, reports, artifacts, campaigns] = await Promise.all([
 		AnalysisRunsEntity.listForSubmission(submissionId),
@@ -52,5 +59,12 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 		ArtifactsEntity.listForSubmission(submissionId),
 		campaignsOf(submissionId),
 	]);
-	return withoutBackendSecrets({ ...submission, analysisRuns, reports, artifacts, campaigns });
+	return withoutBackendSecrets({
+		...submission,
+		reporterHeaders: publicReporterHeaders(submission.reporterHeaders),
+		analysisRuns,
+		reports,
+		artifacts,
+		campaigns,
+	});
 }
