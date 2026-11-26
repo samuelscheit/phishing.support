@@ -7,6 +7,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import type { PublicCampaign, PublicCampaignSite } from "@/lib/campaign/public_view";
 import { formatDate, type Locale } from "@/lib/i18n/locale";
 import { cn } from "@/lib/util/cn";
@@ -30,22 +31,22 @@ function useNow(): number | undefined {
 	return now;
 }
 
-export function ActiveLine({ campaign, locale }: { campaign: PublicCampaign; locale: Locale }) {
+/** Whether the people behind the campaign are still at work, as a badge: when their newest site was found. */
+export function ActiveBadge({ campaign, locale }: { campaign: PublicCampaign; locale: Locale }) {
 	const copy = COPY[locale];
 	const now = useNow();
-	const n = campaign.sites.length;
-	if (now === undefined) return <p className="min-h-10 sm:min-h-5" />;
+	if (now === undefined) return null;
 	const quietDays = calendarDays(Date.parse(campaign.lastSeenAt), now);
-	if (quietDays >= ACTIVE_DAYS) return <p className="text-sm text-muted-foreground">{copy.quiet(formatDate(campaign.lastSeenAt, locale), n)}</p>;
+	if (quietDays >= ACTIVE_DAYS) return <Badge variant="outline" className="font-normal text-muted-foreground">{copy.quietBadge(formatDate(campaign.lastSeenAt, locale))}</Badge>;
 	const ago = quietDays <= 0 ? copy.today : quietDays === 1 ? copy.yesterday : copy.daysAgo(quietDays);
 	return (
-		<p className="flex items-start gap-2 text-sm font-medium text-red-700">
-			<span className="relative mt-1.5 flex size-2 shrink-0">
+		<Badge variant="outline" className="gap-1.5 border-red-200 bg-red-50 text-red-700">
+			<span className="relative flex size-2 shrink-0">
 				<span className="absolute inline-flex size-full animate-ping rounded-full bg-red-500 opacity-60 motion-reduce:hidden" />
 				<span className="relative inline-flex size-2 rounded-full bg-red-600" />
 			</span>
-			{copy.active(ago, n)}
-		</p>
+			{copy.activeBadge(ago)}
+		</Badge>
 	);
 }
 
@@ -69,7 +70,7 @@ export function Timeline({ campaign, locale, onOpen }: { campaign: PublicCampaig
 	// Tall enough for the stacks drawn, plus a lane for "+N" when a spot overflows.
 	const reach = Math.max(0, ...dots.map((dot) => Math.abs(dot.offset))) + (more.length ? LANE : 0);
 	return (
-		<figure className="space-y-3 rounded-xl border bg-card px-5 pb-3 pt-4">
+		<figure className="space-y-3 rounded-lg border bg-card px-5 pb-3 pt-4">
 			<figcaption className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-sm">
 				<span><span className="block font-medium sm:inline">{copy.when}</span><span className="hidden text-muted-foreground sm:inline"> · </span><span className="whitespace-nowrap text-muted-foreground">{copy.down(down, campaign.sites.length)}</span></span>
 				<span className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
@@ -83,7 +84,7 @@ export function Timeline({ campaign, locale, onOpen }: { campaign: PublicCampaig
 					const isDown = site.takedown === "confirmed";
 					const label = copy.dot(site.host, formatDate(site.firstSeenAt, locale), isDown);
 					return (
-						// Out of the tab order: the site list below is the keyboard path to the same sites.
+						// Out of the tab order: the site table is the keyboard path to the same sites.
 						<button
 							key={site.key}
 							type="button"

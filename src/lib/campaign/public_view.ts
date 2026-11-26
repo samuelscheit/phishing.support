@@ -68,7 +68,8 @@ export type PublicCampaignVisitor = {
 	kinds: VisitorKind[];
 };
 
-type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_delivery" | "same_payment_account" | "same_pattern"; title: string; text: string };
+/** `sites`: how many of the campaign's sites share what the reason names. */
+type PublicCampaignReason = { kind: "same_code" | "same_page" | "same_structure" | "same_backend" | "same_delivery" | "same_payment_account" | "same_pattern"; title: string; text: string; sites: number };
 
 export type PublicCampaign = {
 	campaignId: string;
@@ -183,17 +184,17 @@ function reasons(dossier: Dossier, stats: { platform?: string; durationMinutes: 
 	const subject = (indicators: typeof shared, singular: string, plural: string) => reach(indicators) === all ? `Every page ${singular}` : `${reach(indicators)} of the ${all} pages ${plural}`;
 	const page = fingerprints(["page_document"], true);
 	if (page.length) {
-		result.push({ kind: "same_page", title: "Same page", text: `${subject(page, "serves", "serve")} the same page body, byte for byte apart from its own address. A copied design would not match this exactly.` });
+		result.push({ kind: "same_page", title: "Same page", sites: reach(page), text: `${subject(page, "serves", "serve")} the same page body, byte for byte apart from its own address. A copied design would not match this exactly.` });
 	}
 	// A template only adds to an identical body where it reaches pages whose words differ.
 	const structure = fingerprints(["page_structure"], true);
 	if (structure.length && reach(structure) > reach(page)) {
 		const widest = structure.reduce((best, indicator) => (indicator.sites.length > best.sites.length ? indicator : best));
-		result.push({ kind: "same_structure", title: "Same template", text: `${subject(structure, "is", "are")} built from the same template: the same ${Number(widest.evidence.tags)} HTML elements in the same order; only the words differ.` });
+		result.push({ kind: "same_structure", title: "Same template", sites: reach(structure), text: `${subject(structure, "is", "are")} built from the same template: the same ${Number(widest.evidence.tags)} HTML elements in the same order; only the words differ.` });
 	}
 	const kit = fingerprints(["page_document", "page_structure"], false);
 	if (kit.length) {
-		result.push({ kind: "same_code", title: "Same code", text: `${subject(kit, "runs", "run")} the same program ${kit.length === 1 ? "file" : `files (${kit.length})`}, byte for byte. A copied design would not match this exactly, and none of these files is a public library.` });
+		result.push({ kind: "same_code", title: "Same code", sites: reach(kit), text: `${subject(kit, "runs", "run")} the same program ${kit.length === 1 ? "file" : `files (${kit.length})`}, byte for byte. A copied design would not match this exactly, and none of these files is a public library.` });
 	}
 	const servers = shared.filter((indicator) => indicator.kind === "operator_server");
 	if (servers.length) {
@@ -204,17 +205,18 @@ function reasons(dossier: Dossier, stats: { platform?: string; durationMinutes: 
 			doing("receives_data").length && `what visitors enter goes to the same ${names(doing("receives_data"))}`,
 			doing("delivers_malware").length && `the malware visitors are made to run or download comes from the same server (${hosts(doing("delivers_malware"))})`,
 		].filter(Boolean).join(", and ");
-		result.push({ kind: "same_backend", title: "Same server", text: `${subject(servers, "uses", "use")} a server only its operator controls: ${uses}.` });
+		result.push({ kind: "same_backend", title: "Same server", sites: reach(servers), text: `${subject(servers, "uses", "use")} a server only its operator controls: ${uses}.` });
 	}
 	const deliveries = shared.filter((indicator) => indicator.kind === "delivery_command");
 	if (deliveries.length) {
-		result.push({ kind: "same_delivery", title: "Same command", text: `${subject(deliveries, "makes", "make")} visitors paste the same command: the same steps, flags and interpreter, whichever server and decoy app name it names.` });
+		result.push({ kind: "same_delivery", title: "Same command", sites: reach(deliveries), text: `${subject(deliveries, "makes", "make")} visitors paste the same command: the same steps, flags and interpreter, whichever server and decoy app name it names.` });
 	}
-	if (shared.some((indicator) => indicator.kind === "payment_receiver")) {
-		result.push({ kind: "same_payment_account", title: "Same payment account", text: "The pages ask visitors to pay into the same account." });
+	const payments = shared.filter((indicator) => indicator.kind === "payment_receiver");
+	if (payments.length) {
+		result.push({ kind: "same_payment_account", title: "Same payment account", sites: reach(payments), text: "The pages ask visitors to pay into the same account." });
 	}
 	if (all >= 3 && stats.typicalIntervalMinutes !== undefined && stats.durationMinutes <= 7 * 1_440) {
-		result.push({ kind: "same_pattern", title: "Same pattern", text: `${all} pages${stats.platform ? ` on ${stats.platform}` : ""} within ${duration(stats.durationMinutes)}, a new one about every ${duration(stats.typicalIntervalMinutes)}.` });
+		result.push({ kind: "same_pattern", title: "Same pattern", sites: all, text: `${all} pages${stats.platform ? ` on ${stats.platform}` : ""} within ${duration(stats.durationMinutes)}, a new one about every ${duration(stats.typicalIntervalMinutes)}.` });
 	}
 	return result;
 }

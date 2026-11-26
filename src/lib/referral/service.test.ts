@@ -272,7 +272,7 @@ describe("criminal referral of a campaign", () => {
 		}
 		const campaignId = (await CampaignRepository.campaignForMember(memberOf(51n)))!;
 		expect((await getPublicCampaign(campaignId))!.reasons).toEqual([
-			{ kind: "same_backend", title: "Same server", text: "Every page uses a server only its operator controls: the malware visitors are made to run or download comes from the same server (keychainagent.pro)." },
+			{ kind: "same_backend", title: "Same server", sites: 2, text: "Every page uses a server only its operator controls: the malware visitors are made to run or download comes from the same server (keychainagent.pro)." },
 		]);
 		const dossier = await buildDossier(campaignId);
 		const indicator = dossier.indicators.find((entry) => entry.kind === "operator_server")!;

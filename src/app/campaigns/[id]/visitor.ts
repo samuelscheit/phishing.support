@@ -1,6 +1,21 @@
 /** Choices the campaign page makes from its data, shared by the server page and the client view. */
 import type { PublicCampaign, PublicCampaignSite } from "@/lib/campaign/public_view";
+import type { ReportedAs } from "@/lib/submissions/finding";
 import type { Basis } from "./copy";
+
+export type Finding = "phishing" | "malware";
+
+/** What the sites were reported for: phishing, malware, or both when some are each. */
+export function campaignReportedAs(campaign: PublicCampaign): ReportedAs {
+	const findings = new Set(campaign.sites.map((site) => (site.verdict?.finding === "malware" ? "malware" : "phishing")));
+	return findings.size > 1 ? "phishing_and_malware" : findings.has("malware") ? "malware" : "phishing";
+}
+
+/** What most of the sites are: the verdict's headline. */
+export function findingOf(campaign: PublicCampaign): Finding {
+	const malware = campaign.sites.filter((site) => site.verdict?.finding === "malware").length;
+	return malware * 2 > campaign.sites.length ? "malware" : "phishing";
+}
 
 /** What most of the sites are after, by their verdicts. */
 export function basisOf(campaign: PublicCampaign): Basis {

@@ -66,7 +66,7 @@ describe("what the public page tells a campaign's visitors", () => {
 		await site(1n, "one-test.app", {}, [delivery("a".repeat(64), true), delivery("b".repeat(64), false)]);
 		const campaign = await site(2n, "two-test.app", {}, [delivery("a".repeat(64), true), delivery("b".repeat(64), false)]);
 		const view = (await getPublicCampaign(campaign))!;
-		expect(view.reasons.map((reason) => reason.kind)).toEqual(["same_delivery"]);
+		expect(view.reasons.map((reason) => [reason.kind, reason.sites])).toEqual([["same_delivery", 2]]);
 		expect(view.technical.deliveries).toEqual([{ template: `echo "<url>" [then] echo '<base64>' [pipe] base64 -d [pipe] zsh\ncurl -sfL <url> [pipe] osascript -l JavaScript`, siteCount: 2 }]);
 	});
 

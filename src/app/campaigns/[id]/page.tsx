@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 import { cache } from "react";
-import Link from "next/link";
 import { notFound, permanentRedirect } from "next/navigation";
 
-import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { SiteFooter } from "@/components/SiteLayout";
 import { CampaignRepository } from "@/lib/campaign/repository";
 import { getPublicCampaign, type PublicCampaign } from "@/lib/campaign/public_view";
@@ -68,11 +66,7 @@ export default async function CampaignPage({ params, searchParams }: Props) {
 	const locale = await requestLocale(lang);
 	return (
 		<>
-			<main lang={locale} className="container mx-auto max-w-5xl space-y-6 px-4 py-10">
-				<div className="flex items-center justify-between gap-4">
-					<Link href="/" className="min-w-0 text-sm text-muted-foreground hover:text-foreground">← {COPY[locale].back}</Link>
-					<LanguageSwitch locale={locale} />
-				</div>
+			<main lang={locale} className="container mx-auto max-w-7xl px-4 py-8">
 				<CampaignView campaign={campaign} locale={locale} />
 			</main>
 			<SiteFooter />

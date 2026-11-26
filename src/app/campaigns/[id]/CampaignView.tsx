@@ -1,27 +1,33 @@
 "use client";
 
 /**
- * The public page of one campaign, written for a visitor who found one of its
- * sites: the verdict first, then what they may have given away and what to
- * do, how to recognise the sites, every site with its takedown state, and the
- * full technical record collapsed at the foot for investigators. A `#host`
- * link names the visitor's site at the top and opens it in the list.
+ * The public page of one campaign, laid out as a case page: the header with
+ * the verdict badge, the warning a visitor must see, then the sites in a
+ * browser frame with the record in tabs, beside the verdict, the takedown
+ * and what to do. On a phone the side column comes first. A `#host` link
+ * names the visitor's site in the warning and opens it in the browser.
  */
 import { useEffect, useState } from "react";
-import { AlertTriangle, ArrowDown } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ArrowDown, Layers } from "lucide-react";
 
+import { LanguageSwitch } from "@/components/LanguageSwitch";
+import { SubmissionStatus } from "@/components/SubmissionStatus";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { PublicCampaign, PublicCampaignSite } from "@/lib/campaign/public_view";
-import type { Locale } from "@/lib/i18n/locale";
+import { formatDate, type Locale } from "@/lib/i18n/locale";
+import { cn } from "@/lib/util/cn";
 import { COPY } from "./copy";
-import { Recognise } from "./Recognise";
-import { SiteList, scrollToId } from "./SiteList";
-import { InvestigatorSection } from "./TechnicalRecord";
-import { ActiveLine, Timeline } from "./Timeline";
-import { basisOf, representativeSite } from "./visitor";
+import { TakedownCard, VerdictCard } from "./Outcome";
+import { Reasons } from "./Reasons";
+import { scrollToId } from "./site_facts";
+import { SiteBrowser } from "./SitePicture";
+import { SiteTable } from "./SiteTable";
+import { EvidenceRecord, TechnicalRecord } from "./TechnicalRecord";
+import { ActiveBadge, Timeline } from "./Timeline";
+import { basisOf, campaignReportedAs, findingOf, representativeSite } from "./visitor";
 import { WhatToDo } from "./WhatToDo";
-
-/** Fake addresses shown under "How to recognise them": enough to learn from, never a wall. */
-const MAX_FAKES = 4;
 
 /** The visitor's site from a `#host` link; read after mount, since the server never sees the hash. */
 function useLinkedSite(sites: PublicCampaignSite[]): PublicCampaignSite | undefined {
@@ -47,54 +53,97 @@ function useLinkedSite(sites: PublicCampaignSite[]): PublicCampaignSite | undefi
 export function CampaignView({ campaign, locale }: { campaign: PublicCampaign; locale: Locale }) {
 	const copy = COPY[locale];
 	const { brand } = campaign.visitor;
-	const n = campaign.sites.length;
-	const linked = useLinkedSite(campaign.sites);
-	const [focus, setFocus] = useState<{ id: string; at: number }>();
-	const representative = representativeSite(campaign);
-	const linkedShows = linked && !linked.blankCapture && (linked.thumbnailUrl || linked.screenshotUrl);
-	const shown = linkedShows ? linked : representative;
-	const caption = shown ? (linked && !linkedShows ? copy.shotCaptionMissing(linked.host, shown.host) : copy.shotCaption(shown.host)) : "";
-	// The fake addresses to learn from: the visitor's own, the one in the picture, and a few that carry the brand's name and so look trustworthy.
-	const letters = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
-	const carriesBrand = (site: PublicCampaignSite) => Boolean(brand && letters(brand.name).length > 2 && letters(site.host).includes(letters(brand.name)));
-	const fakes = [...new Set([linked, shown, ...campaign.sites.filter(carriesBrand)].filter((site): site is PublicCampaignSite => Boolean(site)))].slice(0, MAX_FAKES);
+	// Newest first: the sites a visitor most likely came from.
+	const [sites] = useState(() => [...campaign.sites].sort((a, b) => b.firstSeenAt.localeCompare(a.firstSeenAt)));
+	const n = sites.length;
+	const linked = useLinkedSite(sites);
+	const [picked, setPicked] = useState<PublicCampaignSite>();
+	const [tab, setTab] = useState("sites");
+	useEffect(() => setPicked(linked), [linked]);
+	const shown = picked ?? linked ?? representativeSite(campaign) ?? sites[0]!;
 	const basis = basisOf(campaign);
+	const headline = copy.headline(brand?.name, basis, campaign.title);
+	const languages = new Set(sites.map((site) => site.language).filter(Boolean)).size;
+	const openSite = (site: PublicCampaignSite) => {
+		setPicked(site);
+		scrollToId("site-browser");
+	};
 
 	return (
-		<div className="space-y-14">
-			<header className="space-y-4">
-				{linked && (
-					<div className="mb-8 space-y-2 rounded-lg bg-red-600 px-4 py-3 text-white">
-						<p className="flex items-start gap-2 font-semibold"><AlertTriangle className="mt-0.5 size-4 shrink-0" />{copy.hostBanner(linked.host)}</p>
-						<div className="flex flex-wrap items-center gap-x-4 gap-y-2 pl-6 text-sm">
-							<button type="button" onClick={() => scrollToId("what-to-do")} className="inline-flex min-h-10 items-center gap-1 rounded-md bg-white px-3 font-semibold text-red-700 hover:bg-red-50">{copy.hostBannerSteps}<ArrowDown className="size-3.5" /></button>
-							<button type="button" onClick={() => scrollToId(`site-${linked.key}`)} className="inline-flex min-h-10 items-center gap-1 underline underline-offset-2">{copy.hostBannerList}<ArrowDown className="size-3.5" /></button>
-						</div>
-					</div>
-				)}
-				<h1 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">{copy.headline(brand?.name, basis, campaign.title)}</h1>
-				<div className="max-w-3xl space-y-1 text-lg">
-					<p className="font-semibold">{copy.verdict(n)}</p>
-					<p className="text-pretty text-muted-foreground">{copy.lede(n, brand?.name, basis)}</p>
+		<div className="space-y-6">
+			<header className="space-y-3">
+				<div className="flex items-center justify-between gap-4">
+					<nav className="flex min-w-0 items-center gap-2 text-sm" aria-label="Breadcrumb">
+						<Link href="/" className="shrink-0 text-muted-foreground hover:underline">{copy.back}</Link>
+						<span className="text-muted-foreground">/</span>
+						<span className="truncate font-medium">{headline}</span>
+					</nav>
+					<LanguageSwitch locale={locale} />
 				</div>
-				<ActiveLine campaign={campaign} locale={locale} />
-				<p className="text-sm text-muted-foreground">{copy.trust(brand?.name)}</p>
+				<div className="flex flex-wrap items-start justify-between gap-3">
+					<div className="min-w-0 space-y-1">
+						<h1 className="flex items-center gap-2 text-balance text-xl font-semibold leading-tight tracking-tight sm:text-2xl">
+							<Layers className="size-6 shrink-0 text-muted-foreground" />
+							<span className="min-w-0">{headline}</span>
+						</h1>
+						<p className="text-sm text-muted-foreground">{copy.facts(n, campaign.platform, languages)}</p>
+					</div>
+					<div className="flex flex-wrap items-center gap-2">
+						<Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">{formatDate(campaign.firstSeenAt, locale)}{campaign.firstSeenAt.slice(0, 10) !== campaign.lastSeenAt.slice(0, 10) ? ` – ${formatDate(campaign.lastSeenAt, locale)}` : ""}</Badge>
+						<ActiveBadge campaign={campaign} locale={locale} />
+						<SubmissionStatus status="reported" reportedAs={campaignReportedAs(campaign)} />
+					</div>
+				</div>
 			</header>
 
-			<WhatToDo visitor={campaign.visitor} basis={basis} locale={locale} shown={shown} caption={caption} />
-
-			{brand && <Recognise brand={brand} fakes={fakes} locale={locale} />}
-
-			<section className="space-y-4">
-				<div className="max-w-3xl space-y-1">
-					<h2 className="text-xl font-semibold tracking-tight sm:text-2xl">{copy.sites(n)}</h2>
-					<p className="text-pretty text-muted-foreground">{copy.sitesSub}</p>
+			<section className={cn("flex flex-wrap items-center justify-between gap-3 rounded-lg px-4 py-3", linked ? "bg-red-600 text-white" : "border border-destructive/30 bg-destructive/5")}>
+				<div className="min-w-0">
+					<p className="flex items-start gap-2 font-semibold">{linked && <AlertTriangle className="mt-1 size-4 shrink-0" />}{linked ? copy.hostBanner(linked.host) : copy.verdict(n)}</p>
+					<p className={cn("text-xs", linked ? "text-white/85" : "text-muted-foreground")}>{copy.trust(brand?.name)}</p>
 				</div>
-				{n > 1 && <Timeline campaign={campaign} locale={locale} onOpen={(site) => setFocus({ id: site.key, at: Date.now() })} />}
-				<SiteList campaign={campaign} locale={locale} linkedHost={linked?.host} focus={focus} />
+				<button type="button" onClick={() => scrollToId("what-to-do")} className={cn("inline-flex min-h-10 shrink-0 items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium shadow-sm transition-colors", linked ? "border-white bg-white text-red-700 hover:bg-red-50" : "bg-background hover:bg-accent")}>
+					{copy.whatToDoButton}<ArrowDown className="size-4" />
+				</button>
 			</section>
 
-			<InvestigatorSection campaign={campaign} locale={locale} />
+			<div className="grid items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+				<div className="min-w-0 space-y-6">
+					<SiteBrowser sites={sites} selected={shown} onSelect={setPicked} linkedHost={linked?.host} locale={locale} />
+					<Tabs value={tab} onValueChange={setTab} className="w-full min-w-0">
+						<TabsList className="h-auto max-w-full flex-wrap justify-start">
+							<TabsTrigger value="sites">{copy.tabSites(n)}</TabsTrigger>
+							{n > 1 && <TabsTrigger value="timeline">{copy.tabTimeline}</TabsTrigger>}
+							{campaign.reasons.length > 0 && <TabsTrigger value="links">{copy.tabLinks}</TabsTrigger>}
+							<TabsTrigger value="technical">{copy.tabTechnical}</TabsTrigger>
+							<TabsTrigger value="evidence">{copy.tabEvidence}</TabsTrigger>
+						</TabsList>
+						<TabsContent value="sites" className="mt-4">
+							<SiteTable sites={sites} selected={shown} onSelect={setPicked} linkedHost={linked?.host} brandDomain={brand?.domain} locale={locale} />
+						</TabsContent>
+						{n > 1 && (
+							<TabsContent value="timeline" className="mt-4">
+								<Timeline campaign={campaign} locale={locale} onOpen={openSite} />
+							</TabsContent>
+						)}
+						{campaign.reasons.length > 0 && (
+							<TabsContent value="links" className="mt-4">
+								<Reasons campaign={campaign} locale={locale} />
+							</TabsContent>
+						)}
+						<TabsContent value="technical" className="mt-4">
+							<TechnicalRecord campaign={campaign} locale={locale} />
+						</TabsContent>
+						<TabsContent value="evidence" className="mt-4">
+							<EvidenceRecord campaign={campaign} locale={locale} />
+						</TabsContent>
+					</Tabs>
+				</div>
+				<aside className="order-first min-w-0 space-y-4 lg:order-none">
+					<VerdictCard campaign={campaign} finding={findingOf(campaign)} basis={basis} shown={shown} locale={locale} />
+					<TakedownCard sites={sites} locale={locale} />
+					<WhatToDo visitor={campaign.visitor} basis={basis} locale={locale} />
+				</aside>
+			</div>
 		</div>
 	);
 }

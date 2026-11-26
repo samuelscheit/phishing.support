@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * The campaign's full technical record for investigators, providers and
- * researchers, collapsed at the foot of the visitor page: where entered data
- * goes, the operator's receivers and payment accounts, shared kit files,
- * infrastructure and abuse contacts, and per site every report and every
- * timestamped evidence file. Every value can be checked against the files.
+ * The campaign's technical record for investigators, providers and
+ * researchers, in English: where entered data goes, the operator's receivers
+ * and payment accounts, shared kit files, infrastructure and abuse contacts
+ * (the Technical tab), and per site every report and every timestamped
+ * evidence file (the Evidence tab). Every value can be checked against the files.
  */
 import { useCopy } from "@/components/useCopy";
 import { ChevronDown, Copy, Download } from "lucide-react";
@@ -16,6 +16,12 @@ import type { Locale } from "@/lib/i18n/locale";
 import { plural } from "@/lib/util/values";
 import { cn } from "@/lib/util/cn";
 import { COPY } from "./copy";
+
+/** Said once above the English record on a page in another language. */
+function EnglishOnly({ locale }: { locale: Locale }) {
+	const note = COPY[locale].technicalNote;
+	return note ? <p className="text-sm text-muted-foreground">{note}</p> : null;
+}
 
 const TONE = {
 	ok: "border-emerald-200 bg-emerald-50 text-emerald-800",
@@ -86,10 +92,11 @@ function TableShell({ head, children }: { head: string[]; children: React.ReactN
 	);
 }
 
-function TechnicalRecord({ campaign }: { campaign: PublicCampaign }) {
+export function TechnicalRecord({ campaign, locale }: { campaign: PublicCampaign; locale: Locale }) {
 	const { technical } = campaign;
 	return (
-		<div className="space-y-6">
+		<div lang="en" className="space-y-6">
+			<EnglishOnly locale={locale} />
 			<div className="space-y-2">
 				<h3 className="font-semibold">Where the entered data goes</h3>
 				<p className="text-sm text-muted-foreground">Observed when our browser filled the sites&apos; forms with synthetic values. Each site&apos;s visit record (<span className="font-mono text-xs">visit-record.json</span>, timestamped) documents every value entered and every request that carried one.</p>
@@ -155,7 +162,15 @@ function TechnicalRecord({ campaign }: { campaign: PublicCampaign }) {
 					)}
 				</div>
 			)}
+		</div>
+	);
+}
 
+export function EvidenceRecord({ campaign, locale }: { campaign: PublicCampaign; locale: Locale }) {
+	return (
+		<div lang="en" className="space-y-4">
+			<EnglishOnly locale={locale} />
+			<a className="inline-flex items-center gap-2 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:bg-foreground/90" href={`/campaigns/${campaign.campaignId}/evidence.zip`}><Download className="size-4" />Download the whole evidence archive (ZIP)</a>
 			<div className="space-y-2">
 				<h3 className="font-semibold">Per site: reports and evidence files</h3>
 				<p className="text-sm text-muted-foreground">Each capture is an MHTML archive, a screenshot, the screenshot with address and time stamped in, a manifest of SHA-256 hashes, and an RFC 3161 timestamp token over that manifest from an independent authority.</p>
@@ -184,28 +199,7 @@ function TechnicalRecord({ campaign }: { campaign: PublicCampaign }) {
 						</details>
 					))}
 				</div>
-				<a className="inline-flex items-center gap-1.5 pt-2 text-sm text-primary hover:underline" href={`/campaigns/${campaign.campaignId}/evidence.zip`}><Download className="size-4" />Download the whole evidence archive (ZIP)</a>
 			</div>
 		</div>
-	);
-}
-
-/** The collapsed section that holds the record, with why the sites are one group's. */
-export function InvestigatorSection({ campaign, locale }: { campaign: PublicCampaign; locale: Locale }) {
-	const copy = COPY[locale];
-	return (
-		<details className="group/record rounded-xl border bg-card">
-			<summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
-				<span>
-					<span className="block font-semibold">{copy.investigators}</span>
-					<span className="block text-sm text-muted-foreground">{copy.investigatorsSub}</span>
-				</span>
-				<ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open/record:rotate-180" />
-			</summary>
-			<div className="space-y-6 border-t p-5">
-				{campaign.reasons.map((reason) => <p key={reason.kind} className="text-sm text-muted-foreground"><span className="font-medium text-foreground">{copy.oneGroup}: </span>{reason.text}</p>)}
-				<TechnicalRecord campaign={campaign} />
-			</div>
-		</details>
 	);
 }
