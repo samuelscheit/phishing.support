@@ -32,7 +32,7 @@ const dossier: Dossier = {
 		dns: { a: ["203.0.113.7"], aaaa: [], cname: [], ns: [] },
 		dataDestinations: [{ url: "https://dhl-a.com/api/send", method: "POST", fields: ["email", "password"], sameSite: true }],
 		verdict: { finding: "phishing", basis: "credential_theft", quote: "Bitte bestätigen Sie Ihr Paket", impersonates: { name: "DHL", officialUrl: "https://www.dhl.de/" }, fields: ["E-Mail", "Passwort"], pageUrl: "https://dhl-a.com/" },
-		visit: { outcome: "completed", actions: [{ kind: "input_text", text: "Typed into \"E-Mail\"" }, { kind: "click", text: "Clicked \"Weiter\"" }] },
+		visit: { outcome: "completed", actions: [{ kind: "input_text", text: "Typed into \"E-Mail\"" }, { kind: "click", text: "Clicked \"Weiter\"" }], accessSteps: [] },
 		reportText: "The page impersonates DHL and asks for a password.",
 		reports: [{ provider: "Hostinger International Ltd.", target: "dhl-a.com", channel: "email", contact: "abuse@hostinger.com", status: "acknowledged", reportedAt: "2026-11-10T09:00:00.000Z" }],
 		correspondence: [],
@@ -103,6 +103,32 @@ describe("dossier archive", () => {
 			"Hostinger International Ltd. <abuse@hostinger.com>: reported 2026-11-10 09:00 UTC, confirmed by the provider",
 		]) expect(analysis).toContain(expected);
 		expect(files.get("sites.csv")!.toString().split("\r\n")[0]).toBe("No,URL,Host,First seen (UTC),Registered,Registrar,Finding,Quote,Data sent,Takedown reports,Linking indicators,Evidence files (SHA-256),Case");
+	});
+
+	test("a site's analysis marks what a person who took over the browser did and lists the steps that reach the content", () => {
+		const at = "2026-11-10T08:00:00.000Z";
+		const site = { ...dossier.sites[0]!, visit: {
+			outcome: "completed",
+			actions: [{ kind: "type", text: "typed into e1", actor: "agent" as const }, { kind: "type", text: "Typed into input[name=code]", actor: "human" as const }],
+			accessSteps: [
+				{ actor: "agent" as const, pageUrl: "https://dhl-a.com/login", action: "type" as const, field: "E-Mail", value: "jane@mail.example", at },
+				{ actor: "human" as const, pageUrl: "https://dhl-a.com/code", action: "type" as const, field: "code", value: "123456", at },
+			],
+		} };
+		const analysis = siteAnalysisText(site);
+		expect(analysis).toContain("a person who took over the browser for a while may have typed other values");
+		expect(analysis).toContain("  1. type: typed into e1\n  2. person type: Typed into input[name=code]");
+		expect(analysis).toContain([
+			"  How to reach the content (values were made up by us, or typed by a person who took over our browser):",
+			"  1. Open https://dhl-a.com/login",
+			"  2. In \"E-Mail\" enter \"jane@mail.example\"",
+			"  3. Continue on https://dhl-a.com/code",
+			"  4. In \"code\" enter \"123456\" [by a person]",
+		].join("\n"));
+		// Only our agent: only synthetic values, and no steps when it did nothing in a page.
+		const own = siteAnalysisText(dossier.sites[0]!);
+		expect(own).toContain("entering only synthetic values generated for that visit; they belong to no person.");
+		expect(own).not.toContain("How to reach");
 	});
 
 	test("keeps every capture of a site captured again: the newest under its name, earlier ones with their id", async () => {

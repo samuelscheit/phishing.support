@@ -1,4 +1,4 @@
-import { agentGaveUp, browserTaskModel, runTask, type ChatModel, type StepLog } from "../browser/task/agent";
+import { agentGaveUp, browserTaskModel, runTask, type ChatModel, type StepLog, type TaskSteering } from "../browser/task/agent";
 import { redactedErrorText } from "../util/error_text";
 import type { ExfiltrationCanaries } from "../exfiltration/types";
 import type { SiteVisitTask } from "./visit_task";
@@ -6,12 +6,17 @@ import { DAY_MS } from "../util/date_time";
 import { squash } from "../util/text";
 
 /**
- * One thing the agent did or concluded, as the live log and the visit record
- * show it. `selector` is the agent's ref of the element it acted on, `value`
- * what it typed or chose (synthetic values only), `typedAs` the
- * `{{secret:NAME}}` placeholder it typed a secret as, `at` when its step acted.
+ * One thing the agent or a person who took the browser over did or
+ * concluded, as the live log and the visit record show it. `actor` says
+ * which; `selector` is the element acted on as a reader names it (the
+ * agent's: its role and accessible name, `textbox "Email"`; a person's: the
+ * element's description), `value` what was typed or chosen (the agent
+ * enters synthetic values only; a person may type anything), `typedAs` the
+ * `{{secret:NAME}}` placeholder (or made-up field) a value was entered as,
+ * `page` the URL of the page the agent acted on, `failed` an agent action
+ * the page refused (it changed nothing), `at` when it happened.
  */
-export type VisitAgentAction = { id: string; kind: string; text: string; selector?: string; value?: string; typedAs?: string; at?: string };
+export type VisitAgentAction = { id: string; kind: string; text: string; actor: "agent" | "human"; selector?: string; value?: string; typedAs?: string; page?: string; failed?: true; at?: string };
 
 const SECRET_PLACEHOLDER = /^\{\{secret:(\w+)\}\}$/;
 
@@ -40,6 +45,8 @@ type VisitAgentRun = {
 	targetId: string;
 	/** Ends the walk (the visit's budget, or a cancelled job). */
 	signal: AbortSignal;
+	/** Pauses the walk while a person drives, and gives it their notes. */
+	steering?: TaskSteering;
 	onAction(action: VisitAgentAction): void;
 };
 
@@ -68,19 +75,23 @@ function actionValue(args: Record<string, unknown>): string | undefined {
 
 /**
  * The step as the live log and the evidence read it: what the model
- * concluded, then each action's outcome with the element and value it acted
+ * concluded, then each action's outcome with the element (as the agent's
+ * observation named it, else its ref), the page and the value it acted
  * with. `at` is when the step's actions ended (the agent reports a step once
  * it acted).
  */
 export function stepActions(step: StepLog, at: string): VisitAgentAction[] {
 	const actions: VisitAgentAction[] = [];
 	const thought = squash(step.thought);
-	if (thought) actions.push({ id: `${step.step}`, kind: "thought", text: thought.slice(0, MAX_ACTION_TEXT), at });
+	if (thought) actions.push({ id: `${step.step}`, kind: "thought", text: thought.slice(0, MAX_ACTION_TEXT), actor: "agent", at });
 	step.actions.forEach((action, index) => {
 		const outcome = action.output.split("\n")[0]!.trim();
-		const selector = typeof action.args.ref === "string" && action.args.ref ? action.args.ref : undefined;
+		const selector = action.target ?? (typeof action.args.ref === "string" && action.args.ref ? action.args.ref : undefined);
 		const value = actionValue(action.args);
-		actions.push({ id: `${step.step}.${index + 1}`, kind: action.tool, text: (outcome || action.tool).slice(0, MAX_ACTION_TEXT), ...(selector ? { selector } : {}), ...(value ? { value } : {}), at });
+		actions.push({
+			id: `${step.step}.${index + 1}`, kind: action.tool, text: (outcome || action.tool).slice(0, MAX_ACTION_TEXT), actor: "agent",
+			...(selector ? { selector } : {}), ...(value ? { value } : {}), ...(step.url ? { page: step.url } : {}), ...(action.ok ? {} : { failed: true as const }), at,
+		});
 	});
 	return actions;
 }
@@ -107,6 +118,7 @@ export function taskAgentVisit(model: () => ChatModel = () => browserTaskModel()
 				// The visit's own budget ends the walk through `signal`.
 				timeoutMs: DAY_MS,
 				signal: run.signal,
+				...(run.steering ? { steering: run.steering } : {}),
 				model: model(),
 				onStep: (step) => { for (const action of stepActions(step, new Date().toISOString())) run.onAction(action); },
 			});

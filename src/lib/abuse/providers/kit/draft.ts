@@ -5,6 +5,8 @@ import { reportReference } from "./report_reference";
 import type { ProviderSubmissionContext, ProviderSubmissionDefinition, ProviderSubmissionPreparation } from "../submission_contracts";
 import { routeIsOurs } from "./pin";
 import { stableJson } from "../../../util/hash";
+import type { WebsiteAccessStep } from "../../../website/types";
+import { reportAccess, type ReportAccess } from "./report_payload";
 
 export type RouteData = Awaited<ReturnType<typeof routeContext>>;
 /** What `verify` proved: the stored draft, and the live route and report it still matches. */
@@ -25,9 +27,17 @@ export type ReportInput = {
 	caseUrl?: string;
 	/** `hostingAddressLine` of the route, when the target resolved to a hoster's address. */
 	hostingLine?: string;
+	/** What the case's walk did in the site's pages to reach the content: the steps a reviewer repeats. */
+	accessSteps?: readonly WebsiteAccessStep[];
 };
 
-export function reportInputOf({ route, report, target }: RouteData): ReportInput {
+/** The report's access steps and case page, for a draft whose input is its own. */
+export function reportAccessOf({ report, accessSteps }: Pick<RouteData, "report" | "accessSteps">): ReportAccess {
+	const caseUrl = abuseEmailCaseUrl(report.submissionId);
+	return reportAccess({ ...(accessSteps ? { accessSteps } : {}), ...(caseUrl ? { caseUrl } : {}) });
+}
+
+export function reportInputOf({ route, report, target, accessSteps }: RouteData): ReportInput {
 	const hostingLine = hostingAddressLine(route);
 	const caseUrl = abuseEmailCaseUrl(report.submissionId);
 	return {
@@ -39,6 +49,7 @@ export function reportInputOf({ route, report, target }: RouteData): ReportInput
 		trackingId: reportReference(report.id, route.id),
 		...(caseUrl ? { caseUrl } : {}),
 		...(hostingLine ? { hostingLine } : {}),
+		...(accessSteps ? { accessSteps } : {}),
 	};
 }
 

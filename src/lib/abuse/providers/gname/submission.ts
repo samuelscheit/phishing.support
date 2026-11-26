@@ -4,7 +4,7 @@ import { getBrowser } from "../../../browser";
 import { waitForCaptchaOutcome } from "../../../browser/captcha_state";
 import { asRecord, parseJsonRecord } from "../../../util/values";
 import { abuseEmailCaseUrl } from "../../mail/draft";
-import { createDraft, type VerifiedOf, type RouteDeps } from "../kit/draft";
+import { createDraft, reportAccessOf, type VerifiedOf, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { preparedState, withPreflight } from "../kit/session";
 import { snippet } from "../../../util/text";
@@ -159,10 +159,11 @@ export const gnameDraft = createDraft({
 	targetTypes: ["domain"],
 	targetReason: "gname_requires_a_domain_target",
 	read: storedGnameSubmissionPayload,
-	input: ({ report, target, evidenceArtifacts }, stored: GnameSubmissionPayload | undefined) => ({
+	input: ({ report, target, evidenceArtifacts, accessSteps }, stored: GnameSubmissionPayload | undefined) => ({
 		target: target.normalizedTarget,
 		observedUrl: stored?.target.observedUrl ?? target.observedUrls[0] ?? "",
 		description: report.description,
+		...reportAccessOf({ report, accessSteps }),
 		allegationCategory: report.allegationCategory,
 		// The imitated brand's site, or for a page that imitates none the case page holding the evidence.
 		legalBrandUrl: report.legalBrandUrl ?? abuseEmailCaseUrl(report.submissionId) ?? "",

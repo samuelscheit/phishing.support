@@ -1,5 +1,6 @@
 import type { AccountIdentifierExtractor } from "../followup/account_identifiers";
 import type { AbuseMailClassification, AbuseTargetType } from "../schema";
+import type { ReportAccess } from "./kit/report_payload";
 
 /**
  * Immutable provider metadata that generic direct-submission infrastructure
@@ -58,7 +59,7 @@ export type ProviderReportPreviewContext = {
 	description: string;
 	allegationCategory?: string;
 	legalBrandUrl?: string | null;
-};
+} & ReportAccess;
 
 /**
  * Ephemeral state prepared immediately before the durable provider-call

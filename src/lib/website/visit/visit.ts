@@ -15,8 +15,10 @@ import { createExfiltrationCanaries } from "../../exfiltration/canaries";
 import { discoverExfiltrationBackends } from "../../exfiltration/analysis";
 import type { CapturedNetworkRequest, ExfiltrationBackend, ExfiltrationCanaries } from "../../exfiltration/types";
 import { taskAgentVisit } from "../../site_visit/agent";
+import { visitAccessSteps } from "../../site_visit/access_steps";
 import { visitNavigation, visitPages, type VisitPage } from "../../site_visit/evidence";
-import type { SiteVisitRecording } from "../../site_visit/visit";
+import type { SiteVisitLiveEvent, SiteVisitRecording } from "../../site_visit/visit";
+import { closeVisitControl, openVisitControl } from "../../site_visit/control";
 import type { NarrativeVisitPage } from "../analysis/narrative";
 import { isWebPage } from "../../network/web_page";
 import { lookupDomainRegistration } from "../info/domain_registration";
@@ -66,15 +68,16 @@ async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigation
 	};
 }
 
-/** The visit as the case keeps it: what the agent did, every request that carried synthetic values, and what its pages copied. */
-function visitRecord(recording: SiteVisitRecording<unknown>, pages: ReadonlyArray<VisitPage<unknown>>): WebsiteVisitRecord {
+/** The visit as the case keeps it: what the agent and a person who took over did, the steps that reach its pages, every request that carried synthetic values, and what its pages copied. */
+function visitRecord(recording: SiteVisitRecording<unknown>, pages: ReadonlyArray<VisitPage<{ url: string }>>): WebsiteVisitRecord {
 	const { agent } = recording;
 	const clipboardWrites = pages.flatMap((page) => page.clipboardWrites);
 	return {
 		outcome: agent.outcome,
 		...(agent.failure ? { failure: agent.failure } : {}),
 		...(agent.report ? { report: agent.report } : {}),
-		actions: agent.actions.slice(0, MAX_RECORDED_ACTIONS).map(({ kind, text }) => ({ kind, text })),
+		actions: agent.actions.slice(0, MAX_RECORDED_ACTIONS).map(({ kind, text, actor }) => ({ kind, text, actor })),
+		accessSteps: visitAccessSteps(agent.actions, pages.map((page) => ({ url: page.archive.url, shownFrom: page.shownFrom }))).slice(0, MAX_RECORDED_ACCESS_STEPS),
 		dataSent: pages.flatMap((page) => page.dataSent).slice(0, MAX_RECORDED_DATA_SENT),
 		downloadFailures: recording.downloadFailures,
 		...(clipboardWrites.length ? { clipboardWrites } : {}),
@@ -82,6 +85,7 @@ function visitRecord(recording: SiteVisitRecording<unknown>, pages: ReadonlyArra
 }
 
 const MAX_RECORDED_ACTIONS = 80;
+const MAX_RECORDED_ACCESS_STEPS = 200;
 const MAX_RECORDED_DATA_SENT = 40;
 
 /** A site of the chain whose page was found reportable: that page, its hop and its verdict. */
@@ -177,8 +181,11 @@ export async function visitWebsite(params: {
 	const canaries = createExfiltrationCanaries();
 	const agent = dependencies.visitAgent ?? taskAgentVisit();
 	const empty: SiteVisitRecording<WebsiteCapture> = { startedAt: new Date(), steps: [], requests: [], downloads: [], downloadFailures: [], clipboardWrites: [], agent: { outcome: "failed", failure: "The page could not be loaded live for the visit.", actions: [] } };
+	const live = (event: SiteVisitLiveEvent) => { void publishEvent(`run:${submissionId}`, event); };
+	// Anyone watching the case's live visit may drive it for a while.
+	const control = session ? openVisitControl(String(submissionId), live) : undefined;
 	const recording = session
-		? await session.visit({ canaries, agent, ...(params.instructions?.browser ? { instructions: params.instructions.browser } : {}), live: (event) => { void publishEvent(`run:${submissionId}`, event); } }) as SiteVisitRecording<WebsiteCapture>
+		? await session.visit({ canaries, agent, ...(params.instructions?.browser ? { instructions: params.instructions.browser } : {}), live, control }).finally(() => closeVisitControl(control!)) as SiteVisitRecording<WebsiteCapture>
 		: empty;
 
 	const pages = visitPages<WebsiteCapture>(first, recording, canaries);

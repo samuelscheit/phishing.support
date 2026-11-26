@@ -2,7 +2,7 @@ import {
 	GENERIC_PROVIDER_FORM_ADAPTER,
 	genericProviderFormAdapterHasValidHash,
 } from "../providers/generic_form";
-import { buildProviderReportNarrative } from "../providers/kit/report_payload";
+import { buildProviderReportNarrative, reportAccess, type ReportAccess } from "../providers/kit/report_payload";
 import { evidenceContract, storedProviderEvidenceImageReference, type ProviderEvidenceImageReference } from "../providers/kit/evidence";
 import type { BrowserTask } from "../../browser/task/agent";
 import type { ProviderFormFacts } from "./form_facts";
@@ -58,7 +58,7 @@ export function buildGenericProviderFormTask(params: {
 	/** The report's screenshots, selected under GENERIC_PROVIDER_FORM_EVIDENCE_CONTRACT. */
 	evidence: readonly GenericProviderFormEvidence[];
 	maxSteps?: number;
-}): BrowserTask {
+} & ReportAccess): BrowserTask {
 	const definition = GENERIC_PROVIDER_FORM_ADAPTER;
 	if (!genericProviderFormAdapterHasValidHash(definition)) throw new Error("Generic provider-form definition hash is invalid.");
 	const allowedDomains = normalizeAllowedDomains(params.allowedDomains);
@@ -76,6 +76,7 @@ export function buildGenericProviderFormTask(params: {
 		description: params.description,
 		allegationCategory: params.allegationCategory,
 		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
+		...reportAccess(params),
 		maximumLength: definition.maxDescriptionLength,
 	});
 	if (!providerDescription) throw new Error("Generic provider-form description is invalid or exceeds the adapter limit.");

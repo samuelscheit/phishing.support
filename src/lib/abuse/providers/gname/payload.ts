@@ -3,7 +3,7 @@ import { z } from "zod";
 import { evidenceContract } from "../kit/evidence";
 import { field, payloadEnvelope, registrarTargetOf, storedReader } from "../kit/stored";
 import { storedProviderEvidenceImageReference } from "../kit/evidence";
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../kit/report_payload";
+import { buildProviderReportNarrative, normalizeObservedUrlForTarget, reportAccess, type ReportAccess } from "../kit/report_payload";
 import { GNAME_PROVIDER, type GnameComplaintKind } from "./definition";
 
 export const GNAME_EVIDENCE_CONTRACT = evidenceContract("gname_report", GNAME_PROVIDER.evidence);
@@ -33,12 +33,13 @@ export function gnameComplaintKind(allegationCategory: string | undefined): Gnam
 }
 
 /** The complaint's `sm`. */
-export function makeGnameDescription(params: { target?: string; observedUrl?: string; description: string; allegationCategory?: string; legalBrandUrl?: string }): string | undefined {
+export function makeGnameDescription(params: { target?: string; observedUrl?: string; description: string; allegationCategory?: string; legalBrandUrl?: string } & ReportAccess): string | undefined {
 	return buildProviderReportNarrative({
 		provider: "gname",
 		target: params.target,
 		observedUrls: params.observedUrl ? [params.observedUrl] : [],
 		description: params.description,
+		...reportAccess(params),
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 		maximumLength: GNAME_PROVIDER.maximumDescriptionLength,
@@ -53,7 +54,7 @@ export function buildGnameSubmissionPayload(params: {
 	allegationCategory?: string;
 	legalBrandUrl: string;
 	evidence: GnameEvidenceReference | null;
-}): GnameSubmissionPayload | undefined {
+} & ReportAccess): GnameSubmissionPayload | undefined {
 	const registrar = registrarTargetOf(params.target);
 	const observedUrl = registrar ? normalizeObservedUrlForTarget(params.observedUrl, registrar.host) : undefined;
 	const kind = gnameComplaintKind(params.allegationCategory);
@@ -62,6 +63,7 @@ export function buildGnameSubmissionPayload(params: {
 		target: registrar?.host,
 		observedUrl,
 		description: params.description,
+		...reportAccess(params),
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 	});
 	if (!registrar || !observedUrl || !description || (asksForBrand && !params.legalBrandUrl)

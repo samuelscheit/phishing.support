@@ -1,7 +1,10 @@
 import { AbuseRepository } from "@/lib/abuse/repository";
 import { safePublicError } from "@/lib/abuse/security/security";
 import { getProviderSubmissionProvider } from "@/lib/abuse/providers/submission_registry_default";
-import { buildProviderReportNarrative } from "@/lib/abuse/providers/kit/report_payload";
+import { buildProviderReportNarrative, reportAccess, type ReportAccess } from "@/lib/abuse/providers/kit/report_payload";
+import { websiteAccessSteps } from "@/lib/abuse/access_steps";
+import { abuseEmailCaseUrl } from "@/lib/abuse/mail/draft";
+import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import type { AbuseJobType, AbuseMailClassification, AbuseProviderRoute, AbuseReport } from "@/lib/abuse/schema";
 import { describeDecisionFollowUp, type DecisionFollowUpSummary } from "@/lib/abuse/followup/describe";
 import { asRecord } from "../util/values";
@@ -170,7 +173,7 @@ function providerReportBody(params: {
 	description: string;
 	allegationCategory?: string;
 	legalBrandUrl?: string | null;
-}): { body: string; bodySource: "prepared" | "preview" | "historical" } {
+} & ReportAccess): { body: string; bodySource: "prepared" | "preview" | "historical" } {
 	const payload = asRecord(params.providerPayload);
 	// A prepared provider text or a migrated record's own text is shown verbatim.
 	if (payload?.adapter === "historical_report") {
@@ -187,6 +190,7 @@ function providerReportBody(params: {
 		description: params.description,
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		legalBrandUrl: params.legalBrandUrl,
+		...reportAccess(params),
 	}) ?? buildProviderReportNarrative({
 		provider: "generic",
 		target: params.target,
@@ -194,6 +198,7 @@ function providerReportBody(params: {
 		description: params.description,
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
+		...reportAccess(params),
 		maximumLength: 1_000,
 	});
 	return {
@@ -214,6 +219,10 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 		AbuseRepository.listQueuedJobsForReport(report.id),
 		listSiteChecksForReport(report.id),
 	]);
+	// A provider's draft preview tells the reviewer how the case's walk reached the content.
+	const submission = report.submissionId !== null && routes.some((route) => route.routeType === "provider_submission") ? await SubmissionsEntity.get(report.submissionId) : undefined;
+	const website = submission?.data.kind === "website" ? submission.data.website : undefined;
+	const caseUrl = abuseEmailCaseUrl(report.submissionId);
 	const followUpsByRoute = new Map<bigint, DecisionFollowUpSummary[]>();
 	for (const event of events) {
 		const summary = event.routeId ? describeDecisionFollowUp(event) : undefined;
@@ -298,6 +307,7 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 						description: report.description,
 						allegationCategory: report.allegationCategory,
 						legalBrandUrl: report.legalBrandUrl,
+						...reportAccess({ ...(website ? { accessSteps: websiteAccessSteps(website, target?.observedUrls ?? []) } : {}), ...(caseUrl ? { caseUrl } : {}) }),
 					})
 					: undefined;
 				return {

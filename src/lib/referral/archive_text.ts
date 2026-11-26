@@ -7,6 +7,7 @@ import type { Dossier, DossierIndicator, DossierMail, DossierSite } from "./doss
 import { defangCommand } from "../malware/defang";
 import { plural, record, text } from "../util/values";
 import { utc } from "./format";
+import { accessStepsText } from "../website/visit/access_steps_text";
 import { infrastructureLines } from "./infrastructure";
 
 /**
@@ -81,6 +82,9 @@ export function describeIndicatorEnglish(indicator: DossierIndicator): string {
 	return `Server IP ${indicator.value}${text(evidence.network) ? `, network ${evidence.network}` : ""}${asns ? `, ${asns}` : ""}${text(evidence.country) ? `, country ${evidence.country}` : ""} ${reach}.`;
 }
 
+/** The access steps of one site in the archive: all of them, unless a walk ran very long. */
+const MAX_ACCESS_STEPS_TEXT = 20_000;
+
 const STATE: Readonly<Record<string, string>> = {
 	submitted: "accepted",
 	acknowledged: "confirmed by the provider",
@@ -123,7 +127,9 @@ export function siteAnalysisText(site: DossierSite): string {
 	}
 	if (site.reportText) lines.push("", "What we reported to the providers", ...site.reportText.split(/\r?\n/).map((line) => `  ${line}`));
 	lines.push("", "What our visit entered and where it went");
-	lines.push("  Our browser walked the site as a victim would, entering only synthetic values generated for that visit; they belong to no person.");
+	lines.push(site.visit?.actions.some((action) => action.actor === "human")
+		? "  Our browser walked the site as a victim would, entering synthetic values generated for that visit; a person who took over the browser for a while may have typed other values, marked in the steps below."
+		: "  Our browser walked the site as a victim would, entering only synthetic values generated for that visit; they belong to no person.");
 	if (site.dataDestinations.length) {
 		for (const destination of site.dataDestinations) {
 			lines.push(`  ${destination.method} ${destination.url} received the synthetic ${destination.fields.map(fieldLabel).join(", ")}${destination.sameSite ? " (the site's own server)" : " (a server outside the site)"}.`);
@@ -133,7 +139,9 @@ export function siteAnalysisText(site: DossierSite): string {
 	}
 	if (site.visit) {
 		lines.push("", `Visit steps (${site.visit.outcome}${site.visit.failure ? `: ${site.visit.failure}` : ""})`);
-		for (const [index, action] of site.visit.actions.entries()) lines.push(`  ${index + 1}. ${action.kind}: ${action.text}`);
+		for (const [index, action] of site.visit.actions.entries()) lines.push(`  ${index + 1}. ${action.actor === "human" ? "person " : ""}${action.kind}: ${action.text}`);
+		const access = accessStepsText(site.visit.accessSteps, { maxLength: MAX_ACCESS_STEPS_TEXT });
+		if (access) lines.push("", ...access.split("\n").map((line) => `  ${line}`));
 	}
 	lines.push("", hasVisitRecord
 		? "The full visit record (visit-record.json: every value typed and every request with its body and the server's answer; visit-protocol.txt: the same as a dated chronology) is in this folder, covered by visit-manifest.json and its RFC 3161 timestamp."

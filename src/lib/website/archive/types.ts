@@ -3,6 +3,7 @@ import type { BrowserIdentity, getBrowser } from "../../browser";
 import type { ExfiltrationCanaries } from "../../exfiltration/types";
 import type { VisitAgent } from "../../site_visit/agent";
 import type { SiteVisitLiveEvent, SiteVisitRecording } from "../../site_visit/visit";
+import type { VisitControl } from "../../site_visit/control";
 import type { WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteProviderWarning } from "../types";
 import type { HopBody } from "../visit/tab_recording";
 
@@ -73,6 +74,8 @@ export type WebsiteVisitParams = {
 	/** Extra instructions for the visiting agent, on top of the walk itself. */
 	instructions?: string;
 	live?: (event: SiteVisitLiveEvent) => void;
+	/** Lets people watching the visit drive it. */
+	control?: VisitControl;
 	signal?: AbortSignal;
 };
 

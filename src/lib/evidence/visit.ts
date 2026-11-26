@@ -71,7 +71,7 @@ function protocol(facts: VisitEvidenceFacts, recordSha256: string): string {
 	for (const action of facts.actions) {
 		if (!action.at) continue;
 		const value = action.value ? ` value ${JSON.stringify(action.value)}${action.typedAs ? ` (typed as ${action.typedAs})` : ""}` : "";
-		entries.push({ at: action.at, text: `Agent ${action.kind}: ${action.text}${value}${action.selector ? ` [element ${action.selector}]` : ""}` });
+		entries.push({ at: action.at, text: `${action.actor === "human" ? "Person (took over the browser)" : "Agent"} ${action.kind}: ${action.text}${value}${action.selector ? ` [element ${action.selector}]` : ""}` });
 	}
 	const sending = facts.requests.filter((request) => carried(request, facts.syntheticValues).length);
 	for (const request of sending) {

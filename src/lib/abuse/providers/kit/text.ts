@@ -46,7 +46,7 @@ export function reportUrls(host: string, observedUrls: readonly string[], rules:
 /** The `Reported URLs` block of a free-text field. */
 const urlBlock = (urls: readonly string[]) => `Reported URLs:\n${urls.map((url) => `- ${url}`).join("\n")}`;
 
-export type NarrativeInput = Pick<ReportInput, "target" | "description" | "allegationCategory" | "legalBrandUrl"> & {
+export type NarrativeInput = Pick<ReportInput, "target" | "description" | "allegationCategory" | "legalBrandUrl" | "accessSteps" | "caseUrl"> & {
 	observedUrls: readonly string[];
 	/** What the evidence is: a captured page (default) or an email. */
 	source?: "page" | "email";
@@ -63,6 +63,8 @@ export function providerNarrative(provider: ProviderReportProfile, input: Narrat
 		...(input.allegationCategory ? { allegationCategory: input.allegationCategory } : {}),
 		...(legalBrandUrl ? { legalBrandUrl } : {}),
 		...(input.source ? { source: input.source } : {}),
+		...(input.accessSteps ? { accessSteps: input.accessSteps } : {}),
+		...(input.caseUrl ? { caseUrl: input.caseUrl } : {}),
 		maximumLength,
 	});
 }

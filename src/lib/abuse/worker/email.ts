@@ -11,6 +11,7 @@ import { AbuseRepository } from "../repository";
 import { boundedErrorText } from "../../util/error_text";
 import { RetryableDeliveryError, routeContext, UnknownExternalStateError, type WorkerServices } from "./shared";
 import { DAY_MS } from "../../util/date_time";
+import { accessStepUrls } from "../../website/visit/access_steps_text";
 import { isDown } from "../../liveness/layer";
 import { listSiteChecksForTargets } from "../../liveness/repository";
 import type { AbuseProviderRoute } from "../schema";
@@ -63,7 +64,7 @@ export function readSendEmailPayload(payload: Record<string, unknown> | null | u
 }
 
 export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, options: SendEmailOptions = {}): Promise<void> {
-	const { route, report, target, evidenceArtifacts } = await routeContext(routeId);
+	const { route, report, target, evidenceArtifacts, accessSteps } = await routeContext(routeId);
 	if (route.routeType !== "email" || !route.verifiedEmail) return;
 	if (route.status === "running") {
 		// A stale/replayed job can observe the route after the durable email run
@@ -83,6 +84,8 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 		...target.observedUrls,
 		...(report.legalBrandUrl ? [report.legalBrandUrl] : []),
 		...(caseUrl ? [caseUrl] : []),
+		// The pages the access steps are done on, and the addresses they open.
+		...accessStepUrls(accessSteps),
 		...(approvalDraftOf(route)?.allowedUrls ?? []),
 	];
 	const routeArtifacts = await AbuseRepository.listRouteArtifacts(route.id, ROUTE_MAIL_ATTACHMENT_KINDS);
@@ -122,6 +125,7 @@ export async function sendEmail(routeId: bigint, worker: EmailWorkerServices, op
 			attachmentNames: attachments.map((attachment) => attachment.filename),
 			attachmentMimeTypes: attachments.map((attachment) => attachment.mimeType),
 			evidence: attachments,
+			...(accessSteps ? { accessSteps } : {}),
 		});
 		providerPayload = verifiedEmailProviderPayload({
 			target: target.normalizedTarget,

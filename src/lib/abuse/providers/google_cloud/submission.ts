@@ -2,9 +2,8 @@ import type { HTTPResponse, Page } from "rebrowser-puppeteer-core";
 
 import { getBrowser, getBrowserPage } from "../../../browser";
 import { CaptchaError, waitForCaptchaToken } from "../../../browser/captcha_state";
-import { abuseEmailCaseUrl } from "../../mail/draft";
 import { raceAbort, throwIfOperationCanceled } from "../../worker/cancellation";
-import { createDraft, type RouteData, type VerifiedOf } from "../kit/draft";
+import { createDraft, reportAccessOf, type RouteData, type VerifiedOf } from "../kit/draft";
 import { preparedState, withPreflight } from "../kit/session";
 import { snippet } from "../../../util/text";
 import { emailOriginOf } from "../email_origin";
@@ -61,14 +60,13 @@ async function openReportingPage(): Promise<GoogleCloudFormSession> {
 async function reportInput(data: RouteData): Promise<GoogleCloudReportInput & { target: string }> {
 	const { report, target, evidenceArtifacts } = data;
 	const emailOrigin = target.observedUrls.length === 0 ? await emailOriginOf({ target, evidenceArtifacts }) : undefined;
-	const caseUrl = abuseEmailCaseUrl(report.submissionId);
 	return {
 		target: target.normalizedTarget,
 		observedUrls: target.observedUrls,
 		description: report.description,
 		allegationCategory: report.allegationCategory,
 		capturedAt: report.createdAt,
-		...(caseUrl ? { caseUrl } : {}),
+		...reportAccessOf(data),
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
 		...(emailOrigin ? { emailOrigin } : {}),
 	};

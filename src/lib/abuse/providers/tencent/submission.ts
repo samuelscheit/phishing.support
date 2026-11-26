@@ -1,5 +1,5 @@
 import { withPreflight, preparedState } from "../kit/session";
-import { createDraft, type RouteDeps, type VerifiedOf } from "../kit/draft";
+import { createDraft, reportAccessOf, type RouteDeps, type VerifiedOf } from "../kit/draft";
 import { evidenceFileOf, evidenceReferenceOf, type EvidenceDependencies } from "../kit/evidence";
 import { snippet } from "../../../util/text";
 import { ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionPreflight, type ProviderSubmissionSuccess } from "../submission_contracts";
@@ -119,13 +119,14 @@ export const tencentDraft = createDraft({
 	targetReason: "tencent_requires_a_domain_target",
 	read: storedTencentSubmissionPayload,
 	// What the stored draft holds (its URL, its screenshot) is not reselected.
-	input: ({ report, target, evidenceArtifacts }, stored: TencentSubmissionPayload | undefined) => {
+	input: ({ report, target, evidenceArtifacts, accessSteps }, stored: TencentSubmissionPayload | undefined) => {
 		const observedUrl = stored?.target.observedUrl ?? target.observedUrls[0];
 		const screenshot = evidenceReferenceOf(TENCENT_EVIDENCE_CONTRACT, evidenceArtifacts, stored && { evidence: stored.screenshot });
 		return {
 			target: target.normalizedTarget,
 			observedUrl: observedUrl ?? "",
 			description: report.description,
+			...reportAccessOf({ report, accessSteps }),
 			allegationCategory: report.allegationCategory,
 			...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
 			screenshot,

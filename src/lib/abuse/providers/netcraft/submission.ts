@@ -1,4 +1,4 @@
-import { createDraft } from "../kit/draft";
+import { createDraft, reportAccessOf } from "../kit/draft";
 import { ProviderSubmissionDuplicateError, ProviderSubmissionRejectedError, type ProviderSubmissionContext, type ProviderSubmissionSuccess } from "../submission_contracts";
 import { isNetcraftDuplicateAnswer, NetcraftDuplicateSubmissionError, NetcraftSubmissionRejectedError, netcraftSubmissionUrl, parseNetcraftSubmissionResponse as parseNetcraftApiSubmissionResponse } from "./api";
 import { serviceIdentity, serviceUserAgent } from "../../../network/service_identity";
@@ -67,10 +67,11 @@ export const netcraftDraft = createDraft({
 	targetTypes: ["domain", "ip", "service_account", "campaign"],
 	targetReason: "netcraft_requires_a_web_target",
 	read: storedNetcraftSubmissionPayload,
-	input: ({ report, target }, stored: NetcraftSubmissionPayload | undefined) => ({
+	input: ({ report, target, accessSteps }, stored: NetcraftSubmissionPayload | undefined) => ({
 		target: target.normalizedTarget,
 		observedUrls: target.observedUrls,
 		description: report.description,
+		...reportAccessOf({ report, accessSteps }),
 		allegationCategory: report.allegationCategory,
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),
 		// The reporter was pinned before the marker: a changed configuration must not turn a prepared report into a different submission.

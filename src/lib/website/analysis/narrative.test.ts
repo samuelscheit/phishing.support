@@ -71,7 +71,8 @@ describe("the website case analysis", () => {
 			visit: {
 				outcome: "completed",
 				report: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "The sign-in page showed an error." },
-				actions: [{ kind: "input_text", text: "Enter the synthetic email" }],
+				actions: [{ kind: "input_text", text: "Enter the synthetic email", actor: "agent" }],
+				accessSteps: [],
 				dataSent: [{ url: "https://api.telegram.org/bot1:x/sendMessage", method: "POST", fields: ["email", "password"], sameSite: false }],
 				downloadFailures: [],
 			},
@@ -83,6 +84,6 @@ describe("the website case analysis", () => {
 		expect(evidence).toContain("Hosts the site's scripts and stylesheets were loaded from: cdn.kit-assets.example.");
 		// Other pages are shortened; the analyzed page is given in full elsewhere.
 		expect(evidence.length).toBeLessThan(5_000);
-		expect(visitNarrativeEvidence({ finding: "Phishing.", visit: { outcome: "completed", actions: [], dataSent: [], downloadFailures: [] } })).toContain("No request during the visit carried the synthetic values off the page.");
+		expect(visitNarrativeEvidence({ finding: "Phishing.", visit: { outcome: "completed", actions: [], accessSteps: [], dataSent: [], downloadFailures: [] } })).toContain("No request during the visit carried the synthetic values off the page.");
 	});
 });

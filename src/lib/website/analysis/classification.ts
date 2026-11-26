@@ -11,6 +11,7 @@ import { normalizePublicHttpUrl } from "../../abuse/security/security";
 import { isSameWebsite } from "../info/site";
 import type { DomainRegistration } from "../info/domain_registration";
 import { accessGateStatements, type WebsiteAccessGate } from "../visit/access_gate";
+import { accessStepsText, hasAccessSteps } from "../visit/access_steps_text";
 import { offeredDownloadEvidence, offeredDownloadSource, offeredDownloadStatements, quotedDownloadFile, OFFERED_DOWNLOAD_INSTRUCTIONS } from "../visit/offered_download";
 import {
 	canaryFieldList,
@@ -19,6 +20,7 @@ import {
 	WEBSITE_DEVICE_LABEL,
 	revisitWording,
 	type VisitDataSent,
+	type WebsiteAccessStep,
 	type WebsiteDataEntryField,
 	type WebsiteDevice,
 	type WebsiteHiddenFrame,
@@ -359,6 +361,8 @@ export function buildWebsiteReportEvidence(
 		accessGate?: WebsiteAccessGate;
 		/** Our public case page, where the capture's screenshots are. */
 		caseUrl?: string;
+		/** What the visit did in the site's pages to get to the page: the steps a reviewer repeats. */
+		accessSteps?: readonly WebsiteAccessStep[];
 	} = {},
 ): string {
 	const { finding, phishingBasis, evidenceQuote, collectionFields } = classification;
@@ -381,12 +385,14 @@ export function buildWebsiteReportEvidence(
 			: undefined,
 		// Before the rest: a reviewer who opens the reported URL directly sees only the decoy, and providers cut long reports.
 		...(capturedUrl ? accessGateStatements(capture.accessGate, capturedUrl, capture.caseUrl) : []),
+		// The steps themselves, where the visit had to sign in or click through: they say more than the pages it passed.
+		hasAccessSteps(capture.accessSteps) ? accessStepsText(capture.accessSteps, { maxLength: MAX_ACCESS_STEPS_LENGTH, ...(capture.caseUrl ? { caseUrl: capture.caseUrl } : {}) }) : undefined,
 		capture.providerWarning ? `${capture.providerWarning.provider} already shows its "${capture.providerWarning.warning}" warning before the site.` : undefined,
 		capture.device && capture.device !== "desktop" ? `The page turns desktop visitors away to a phone; it was captured as ${WEBSITE_DEVICE_LABEL[capture.device]}.` : undefined,
 		capture.reporterUserAgent && (!capture.device || capture.device === "desktop")
 			? `It was captured with the browser of the person who reported it, User-Agent "${capture.reporterUserAgent}"; such pages show their content only to the platforms they target, so open it with that User-Agent to see what we saw.`
 			: undefined,
-		steps.length
+		steps.length && !hasAccessSteps(capture.accessSteps)
 			? `Visitors reach the page through the site's own earlier pages: ${steps.map((hop) => (hop.revisit
 				? `opening ${hop.url} again ${revisitWording(hop.revisit).opened}, since ${revisitWording(hop.revisit).cause}`
 				: hop.visitorStep?.submitted.length
@@ -413,6 +419,9 @@ export function buildWebsiteReportEvidence(
 		] : []),
 	].filter((line): line is string => Boolean(line)).join("\n");
 }
+
+/** Room for the access steps in the report's description, which reaches providers whole (up to 30,000 characters) or summarized. */
+const MAX_ACCESS_STEPS_LENGTH = 6_000;
 
 const WEBSITE_PHISHING_BASES = ["credential_theft", "payment_fraud"] as const satisfies readonly WebsitePhishingBasis[];
 const MAX_EVIDENCE_QUOTE_LENGTH = 500;

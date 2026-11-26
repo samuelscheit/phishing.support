@@ -3,7 +3,7 @@ import { z } from "zod";
 import { evidenceContract } from "../kit/evidence";
 import { field, payloadEnvelope, registrarTargetOf, storedReader } from "../kit/stored";
 import { storedProviderEvidenceImageReference } from "../kit/evidence";
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../kit/report_payload";
+import { buildProviderReportNarrative, normalizeObservedUrlForTarget, reportAccess, type ReportAccess } from "../kit/report_payload";
 import { ERANET_PROVIDER } from "./definition";
 
 export const ERANET_EVIDENCE_CONTRACT = evidenceContract("eranet_report", ERANET_PROVIDER.evidence);
@@ -26,12 +26,13 @@ export function eranetSubTypes(allegationCategory: string | undefined): EranetSu
 	return allegationCategory === "malware" ? ["other"] : ["phishing_site"];
 }
 
-export function makeEranetDescription(params: { target?: string; observedUrl?: string; description: string; allegationCategory?: string; legalBrandUrl?: string }): string | undefined {
+export function makeEranetDescription(params: { target?: string; observedUrl?: string; description: string; allegationCategory?: string; legalBrandUrl?: string } & ReportAccess): string | undefined {
 	return buildProviderReportNarrative({
 		provider: "eranet",
 		target: params.target,
 		observedUrls: params.observedUrl ? [params.observedUrl] : [],
 		description: params.description,
+		...reportAccess(params),
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 		maximumLength: ERANET_PROVIDER.maximumDescriptionLength,
@@ -51,13 +52,14 @@ export function buildEranetSubmissionPayload(params: {
 	website: string;
 	legalBrandUrl?: string;
 	evidence: EranetEvidenceReference | null;
-}): EranetSubmissionPayload | undefined {
+} & ReportAccess): EranetSubmissionPayload | undefined {
 	const registrar = registrarTargetOf(params.target);
 	const observedUrl = registrar ? normalizeObservedUrlForTarget(params.observedUrl, registrar.host) : undefined;
 	const description = makeEranetDescription({
 		target: registrar?.host,
 		observedUrl,
 		description: params.description,
+		...reportAccess(params),
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 	});

@@ -4,7 +4,7 @@ import { normalizeMailbox } from "../../mail/shared";
 import { normalizePublicHost } from "../../security/security";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
 import { providerNarrative } from "../kit/text";
-import { normalizeObservedUrlForTarget } from "../kit/report_payload";
+import { normalizeObservedUrlForTarget, reportAccess, type ReportAccess } from "../kit/report_payload";
 import { NETCRAFT_PROVIDER } from "./definition";
 
 const envelope = payloadEnvelope(NETCRAFT_PROVIDER, "netcraft_report_urls_v3");
@@ -46,7 +46,7 @@ export function makeNetcraftReason(params: {
 	description: string;
 	allegationCategory?: string;
 	legalBrandUrl?: string;
-}): string | undefined {
+} & ReportAccess): string | undefined {
 	return providerNarrative("netcraft", { ...params, target: params.target ?? "", observedUrls: params.observedUrls ?? [] }, NETCRAFT_PROVIDER.maximumReasonLength);
 }
 
@@ -58,7 +58,7 @@ export function buildNetcraftSubmissionPayload(params: {
 	allegationCategory?: string;
 	legalBrandUrl?: string;
 	reporterEmail: string;
-}): NetcraftSubmissionPayload | undefined {
+} & ReportAccess): NetcraftSubmissionPayload | undefined {
 	const normalizedTarget = normalizePublicHost(params.target);
 	const observedUrls = normalizedTarget ? normalizeObservedUrls(params.observedUrls, normalizedTarget) : undefined;
 	const reporterEmail = normalizeMailbox(params.reporterEmail);
@@ -68,6 +68,7 @@ export function buildNetcraftSubmissionPayload(params: {
 		description: params.description,
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl === undefined ? {} : { legalBrandUrl: params.legalBrandUrl }),
+		...reportAccess(params),
 	});
 	if (!normalizedTarget || !observedUrls || !reporterEmail || !reason) return undefined;
 	return { ...envelope.stamp, target: { normalizedTarget, observedUrls }, report: { reporterEmail, reason } };

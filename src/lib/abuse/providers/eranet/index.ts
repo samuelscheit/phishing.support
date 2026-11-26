@@ -3,6 +3,7 @@ import { fetchEranetCorrespondence } from "./correspondence";
 import { submitEranetSupplement } from "./supplement";
 import { ERANET_PROVIDER } from "./definition";
 import { makeEranetDescription } from "./payload";
+import { reportAccess } from "../kit/report_payload";
 import { eranetDraft, prepareEranetExternalSubmission, submitEranetSubmission } from "./submission";
 
 /** Eranet (IANA 1868) takes abuse reports through its own form, gated by a mailed code. */
@@ -13,6 +14,7 @@ export const eranetProvider = defineProvider({
 		target: context.target,
 		observedUrl: context.observedUrls[0],
 		description: context.description,
+		...reportAccess(context),
 		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),

@@ -4,7 +4,7 @@ import { asRecord, parseJsonRecord } from "../../../util/values";
 import type { ProviderFormFacts } from "../../portal/form_facts";
 import { deriveProviderFormFacts } from "../../portal/form_facts";
 import { captchaTokenFromPage } from "../kit/captcha";
-import { createDraft, type RouteDeps, type VerifiedOf } from "../kit/draft";
+import { createDraft, reportAccessOf, type RouteDeps, type VerifiedOf } from "../kit/draft";
 import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { snippet } from "../../../util/text";
 import { providerEvidenceImageBytesMatch } from "../kit/evidence";
@@ -234,12 +234,12 @@ export const nameSiloDraft = createDraft({
 	targetReason: "namesilo_requires_a_domain_target",
 	read: storedNameSiloSubmissionPayload,
 	// What the stored draft holds (its URL, its brand site, its screenshot) is not reselected.
-	input: async ({ report, target, evidenceArtifacts }, stored: NameSiloSubmissionPayload | undefined, dependencies: NameSiloPreparationDependencies) => {
+	input: async ({ report, target, evidenceArtifacts, accessSteps }, stored: NameSiloSubmissionPayload | undefined, dependencies: NameSiloPreparationDependencies) => {
 		const observedUrl = stored?.target.observedUrl ?? target.observedUrls[0];
 		const evidence = evidenceReferenceOf(NAMESILO_EVIDENCE_CONTRACT, evidenceArtifacts, stored);
 		// Nothing is derived until the draft has its URL and screenshot.
 		const realWebsite = stored ? stored.report.realWebsite : observedUrl && evidence ? await nameSiloRealWebsite(report, target.normalizedTarget, dependencies) : undefined;
-		return { target: target.normalizedTarget, observedUrl: observedUrl ?? "", description: report.description, allegationCategory: report.allegationCategory, realWebsite: realWebsite ?? "", evidence };
+		return { target: target.normalizedTarget, observedUrl: observedUrl ?? "", description: report.description, allegationCategory: report.allegationCategory, realWebsite: realWebsite ?? "", evidence, ...reportAccessOf({ report, accessSteps }) };
 	},
 	admit: ({ target }, input) => !input.observedUrl ? "namesilo_requires_an_observed_url"
 		: !input.evidence ? "namesilo_requires_a_valid_supported_evidence_image"

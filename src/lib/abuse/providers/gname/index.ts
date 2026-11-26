@@ -1,6 +1,7 @@
 import { defineProvider } from "../kit/provider";
 import { GNAME_PROVIDER } from "./definition";
 import { makeGnameDescription } from "./payload";
+import { reportAccess } from "../kit/report_payload";
 import { gnameDraft, prepareGnameExternalSubmission, submitGnameSubmission } from "./submission";
 
 /** GNAME (IANA 1923 and its sibling accreditations) takes abuse complaints through its own form, gated by a slider and a mailed code. */
@@ -11,6 +12,7 @@ export const gnameProvider = defineProvider({
 		target: context.target,
 		observedUrl: context.observedUrls[0],
 		description: context.description,
+		...reportAccess(context),
 		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 	}),
 	// The code lives in the preflight's browser session.

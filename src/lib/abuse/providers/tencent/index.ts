@@ -1,6 +1,7 @@
 import { defineProvider } from "../kit/provider";
 import { TENCENT_PROVIDER } from "./definition";
 import { makeTencentExplanation } from "./payload";
+import { reportAccess } from "../kit/report_payload";
 import { prepareTencentExternalSubmission, tencentDraft, submitTencentSubmission } from "./submission";
 
 /** Tencent owns its DNS-abuse mailbox selection, evidence rules, and browser form. */
@@ -11,6 +12,7 @@ export const tencentProvider = defineProvider({
 		target: context.target,
 		observedUrl: context.observedUrls[0],
 		description: context.description,
+		...reportAccess(context),
 		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),

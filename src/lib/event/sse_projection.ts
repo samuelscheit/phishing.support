@@ -11,8 +11,6 @@ import { asRecord, type JsonRecord, finiteNumber } from "../util/values";
 const MAX_TEXT = 8_000;
 const MAX_OUTPUT_TEXT = 160_000;
 const MAX_LIST = 24;
-/** A live screencast frame, base64 JPEG; a frame past this is dropped rather than cut. */
-const MAX_BROWSER_FRAME = 600_000;
 
 function asString(value: unknown, max = MAX_TEXT): string | undefined {
 	if (typeof value === "bigint") return value.toString();
@@ -112,11 +110,20 @@ export function projectSseEvent(value: unknown, depth = 0): JsonRecord {
 		setIfDefined(projected, key, finiteNumber(source[key]));
 	}
 
-	// The visit's live view: the tab's screen, each recorded page, the agent's actions, and downloads.
+	// The visit's live log: each recorded page, every action and who did it, downloads, and who drives.
 	if (type.startsWith("browser.")) {
-		if (typeof source.jpeg === "string" && source.jpeg.length <= MAX_BROWSER_FRAME && /^[A-Za-z0-9+/=]+$/.test(source.jpeg)) projected.jpeg = source.jpeg;
-		for (const key of ["url", "title", "kind", "text", "fileName"]) setIfDefined(projected, key, asString(source[key], 1_000));
+		for (const key of ["url", "title", "kind", "text", "fileName", "actor", "mode", "controller", "until", "idleUntil"]) setIfDefined(projected, key, asString(source[key], 1_000));
 		setIfDefined(projected, "index", finiteNumber(source.index));
+		if (typeof source.agentRunning === "boolean") projected.agentRunning = source.agentRunning;
+		if (Array.isArray(source.tabs)) {
+			projected.tabs = source.tabs.slice(0, MAX_LIST).flatMap((value) => {
+				const tab = asRecord(value);
+				const targetId = asString(tab?.targetId, 64);
+				return tab && targetId ? [{ targetId, url: asString(tab.url, 1_000) ?? "", title: asString(tab.title, 200) ?? "", active: tab.active === true }] : [];
+			});
+		}
+		const fakeValues = asRecord(source.fakeValues);
+		if (fakeValues) projected.fakeValues = Object.fromEntries(Object.entries(fakeValues).slice(0, MAX_LIST).flatMap(([field, value]) => (typeof value === "string" ? [[field.slice(0, 40), value.slice(0, 200)]] : [])));
 	}
 
 	if (type.startsWith("response.")) {

@@ -2,6 +2,7 @@
 import { resolveVerifiedProviderLink } from "../mail/reply";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { serviceIdentity } from "../../network/service_identity";
+import { reportAccessOf } from "../providers/kit/draft";
 import { deriveProviderFormFacts } from "../portal/form_facts";
 import { validateGenericProviderFormOutput } from "../portal/output_validation";
 import { buildGenericProviderFormPayload, GENERIC_PROVIDER_FORM_EVIDENCE_CONTRACT, storedGenericProviderFormEvidence } from "../portal/form_task";
@@ -109,7 +110,8 @@ export async function genericPortalCorrelationKey(route: { id: bigint; reportId:
 }
 
 export async function runGenericProviderPortal(routeId: bigint, payload: Record<string, unknown>, worker: WorkerServices): Promise<void> {
-	const { route, report, target, evidenceArtifacts } = await routeContext(routeId);
+	const routeData = await routeContext(routeId);
+	const { route, report, target, evidenceArtifacts } = routeData;
 	// A public link can start this adapter only from the explicit
 	// not-monitored escalation transition. A `running` route is a replay of
 	// the exact immutable payload already persisted by that transition.
@@ -147,6 +149,7 @@ export async function runGenericProviderPortal(routeId: bigint, payload: Record<
 			reporter: { name: serviceIdentity.name, organization: serviceIdentity.name, website: serviceIdentity.url, email: serviceIdentity.mailbox },
 			observedAt: report.createdAt,
 			analysisFacts,
+			...reportAccessOf(routeData),
 			evidence: selectProviderEvidenceImageArtifacts(evidenceArtifacts, GENERIC_PROVIDER_FORM_EVIDENCE_CONTRACT, GENERIC_PROVIDER_FORM_ADAPTER.evidence.maximumFiles),
 		});
 	} else {

@@ -8,6 +8,16 @@ import { chromiumAvailable, launchTestChromium, refIn, ScriptedModel, StalledMod
 import { stepActions, taskAgentVisit, type VisitAgent } from "./agent";
 import { VISIT_MAX_STEPS } from "./visit_task";
 import type { SiteVisitLiveEvent } from "./visit";
+import { closeVisitControl, openVisitControl } from "./control";
+import type { LiveFrame } from "./screen";
+
+/** A control for a visit whose screen the test watches, and the events it published. */
+function watchedVisit(key: string, live: SiteVisitLiveEvent[]) {
+	const control = openVisitControl(key, (event) => live.push(event));
+	const frames: LiveFrame[] = [];
+	control.screen.watch((frame) => frames.push(frame), "low");
+	return { control, frames };
+}
 import { visitPages } from "./evidence";
 
 const fast = { scriptNavigationSettleMs: 20, renderSettleMs: 800, visitPollMs: 150, visitStepQuietMs: 400 } as const;
@@ -271,9 +281,10 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 		const canaries = createExfiltrationCanaries();
 		const model = new ScriptedModel(kitWalk(canaries));
 		const live: SiteVisitLiveEvent[] = [];
+		const { control, frames } = watchedVisit("visit-kit", live);
 		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
 		try {
-			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event) });
+			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event), control });
 			expect(recording.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "Downloaded the verifier." } });
 			// The agent reports only what the recording cannot know; what it submitted and downloaded is counted from the recording.
 			expect(recording.agent.report).toEqual({ asksForPhone: false, blockedByChallenge: false, stoppedReason: "Downloaded the verifier." });
@@ -299,7 +310,9 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			// The file from the dialog was taken, never saved.
 			expect(recording.downloads).toEqual([expect.objectContaining({ url: `${url}Verifier.zip`, fileName: "Verifier.zip", bytes: ZIP, userAgent: expect.stringContaining("Windows NT 10.0") })]);
 
-			expect(live.some((event) => event.type === "browser.frame" && event.jpeg.length > 100)).toBeTrue();
+			// The screen went to its viewer, never into the event log.
+			expect(frames.some((frame) => frame.jpeg.length > 100)).toBeTrue();
+			expect(JSON.stringify(live)).not.toContain("jpeg");
 			expect(live.filter((event) => event.type === "browser.step").map((event) => (event as { url: string }).url)).toContain(`${url}verify`);
 			expect(live).toContainEqual({ type: "browser.download", fileName: "Verifier.zip", url: `${url}Verifier.zip` });
 			// The request that carried a value keeps the page it came from and the server's answer.
@@ -307,7 +320,7 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			expect(submitted).toMatchObject({ documentUrl: expect.stringContaining(url), requestHeaders: { "content-type": "application/x-www-form-urlencoded" }, response: { status: 302, receivedAt: expect.any(String) } });
 
 			// The live log reads the agent's thoughts and what each action did.
-			expect(live).toContainEqual({ type: "browser.action", kind: "thought", text: "The kit asks to log in; I enter the synthetic values." });
+			expect(live).toContainEqual({ type: "browser.action", kind: "thought", text: "The kit asks to log in; I enter the synthetic values.", actor: "agent" });
 			expect(recording.agent.actions.map((action) => action.kind)).toEqual(["thought", "type", "type", "click", "thought", "click", "click", "done"]);
 			expect(recording.agent.actions.find((action) => action.kind === "click")?.text).toStartWith("clicked e");
 
@@ -316,14 +329,16 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			expect(model.seen()).toContain("{{secret:password}}");
 			// The evidence and the live log say what was entered where and when: the element's ref, the
 			// synthetic value the browser typed (a secret with the placeholder the agent typed it as), and the time its step acted.
-			const typedPassword = { id: "1.2", kind: "type", text: `typed into e2; its value is now ${JSON.stringify(canaries.password)}`, selector: "e2", value: canaries.password, typedAs: "{{secret:password}}", at: expect.any(String) };
-			expect(recording.agent.actions).toContainEqual(typedPassword);
-			expect(live).toContainEqual({ type: "browser.action", kind: "type", text: typedPassword.text });
-			expect(recording.agent.actions).toContainEqual(expect.objectContaining({ id: "1.1", kind: "type", selector: "e1", value: canaries.email }));
+			const typedPassword = { id: "1.2", kind: "type", text: `typed into e2; its value is now ${JSON.stringify(canaries.password)}`, actor: "agent" as const, value: canaries.password, typedAs: "{{secret:password}}", at: expect.any(String) };
+			expect(recording.agent.actions).toContainEqual(expect.objectContaining(typedPassword));
+			expect(live).toContainEqual({ type: "browser.action", kind: "type", text: typedPassword.text, actor: "agent" });
+			// The element as the agent's observation named it, and the page the agent acted on.
+			expect(recording.agent.actions).toContainEqual(expect.objectContaining({ id: "1.1", kind: "type", selector: "textbox \"Username\"", value: canaries.email, page: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/$/) }));
 			const times = recording.agent.actions.map((action) => action.at!);
 			expect(times.every((at) => !Number.isNaN(Date.parse(at)))).toBe(true);
 			expect(times).toEqual([...times].sort());
 		} finally {
+			await closeVisitControl(control);
 			await archive.session?.close();
 			server.stop(true);
 		}
@@ -367,9 +382,10 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			},
 		]);
 		const live: SiteVisitLiveEvent[] = [];
+		const { control, frames } = watchedVisit("visit-tabs", live);
 		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
 		try {
-			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event) });
+			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event), control });
 			expect(recording.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "Signed in and downloaded the invoice." } });
 			const steps = recording.steps.map(({ step }) => step);
 			expect(steps.map((step) => step.url)).toEqual([`${url}document`, `${url}signin`, `${url}collect`, `${url}document`]);
@@ -400,9 +416,10 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			// The new tab is the visit's Windows desktop from its first request and its first script, never Linux Chromium.
 			expect(seenAs).toEqual([expect.stringMatching(/^header: Mozilla\/5\.0 \(Windows NT 10\.0; Win64; x64\)/), "script: Win32 1920x1080"]);
 			// The live view shows the tab the agent is on.
-			expect(live.some((event) => event.type === "browser.frame" && event.url === `${url}signin`)).toBeTrue();
+			expect(frames.some((frame) => frame.url === `${url}signin`)).toBeTrue();
 			expect(live).toContainEqual({ type: "browser.download", fileName: "Invoice-4711.zip", url: `${url}Invoice-4711.zip` });
 		} finally {
+			await closeVisitControl(control);
 			await archive.session?.close();
 			server.stop(true);
 		}
@@ -596,21 +613,22 @@ describe("the agent's steps in the live log", () => {
 			step: 3, url: "https://kit.example/", title: "Kit", durationMs: 1, usage,
 			thought: "  Submit\nthe   form. ",
 			actions: [
-				{ tool: "type", args: { ref: "e1", text: "{{secret:password}}" }, ok: true, output: "typed into e1; its value is now \"(password entered)\"" },
+				{ tool: "type", args: { ref: "e1", text: "{{secret:password}}" }, ok: true, output: "typed into e1; its value is now \"(password entered)\"", target: "textbox \"Password\"" },
 				{ tool: "click", args: { ref: "e2" }, ok: true, output: "clicked e2; the page navigated\nmore" },
 				{ tool: "wait", args: {}, ok: true, output: "" },
 				{ tool: "select", args: { ref: "e3", values: ["Deutschland", "DE"] }, ok: true, output: "selected \"Deutschland\" in e3" },
 				{ tool: "select", args: { ref: "e4", value: "+49" }, ok: true, output: "selected \"+49\" in e4" },
 			],
 		}, at)).toEqual([
-			{ id: "3", kind: "thought", text: "Submit the form.", at },
-			{ id: "3.1", kind: "type", text: "typed into e1; its value is now \"(password entered)\"", selector: "e1", value: "{{secret:password}}", at },
-			{ id: "3.2", kind: "click", text: "clicked e2; the page navigated", selector: "e2", at },
-			{ id: "3.3", kind: "wait", text: "wait", at },
-			{ id: "3.4", kind: "select", text: "selected \"Deutschland\" in e3", selector: "e3", value: "Deutschland, DE", at },
-			{ id: "3.5", kind: "select", text: "selected \"+49\" in e4", selector: "e4", value: "+49", at },
+			{ id: "3", kind: "thought", text: "Submit the form.", actor: "agent", at },
+			// The element as the observation named it; its ref when the log has no name for it.
+			{ id: "3.1", kind: "type", text: "typed into e1; its value is now \"(password entered)\"", actor: "agent", selector: "textbox \"Password\"", value: "{{secret:password}}", page: "https://kit.example/", at },
+			{ id: "3.2", kind: "click", text: "clicked e2; the page navigated", actor: "agent", selector: "e2", page: "https://kit.example/", at },
+			{ id: "3.3", kind: "wait", text: "wait", actor: "agent", page: "https://kit.example/", at },
+			{ id: "3.4", kind: "select", text: "selected \"Deutschland\" in e3", actor: "agent", selector: "e3", value: "Deutschland, DE", page: "https://kit.example/", at },
+			{ id: "3.5", kind: "select", text: "selected \"+49\" in e4", actor: "agent", selector: "e4", value: "+49", page: "https://kit.example/", at },
 		]);
 		expect(stepActions({ step: 1, url: "", title: "", durationMs: 0, usage, thought: "", actions: [{ tool: "click", args: { text: "y".repeat(3_000) }, ok: false, output: "x".repeat(500) }] }, at))
-			.toEqual([{ id: "1.1", kind: "click", text: "x".repeat(300), value: "y".repeat(2_000), at }]);
+			.toEqual([{ id: "1.1", kind: "click", text: "x".repeat(300), actor: "agent", value: "y".repeat(2_000), failed: true, at }]);
 	});
 });

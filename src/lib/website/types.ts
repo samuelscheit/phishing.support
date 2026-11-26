@@ -152,12 +152,36 @@ export type WebsiteVisitRecord = {
 	outcome: "completed" | "failed" | "timed_out";
 	failure?: string;
 	report?: { asksForPhone: boolean; blockedByChallenge: boolean; stoppedReason: string };
-	actions: Array<{ kind: string; text: string }>;
+	actions: Array<{ kind: string; text: string; actor: WebsiteAccessStep["actor"] }>;
+	/** What was done in the pages, in order: the steps a provider's reviewer repeats to get where the visit got. */
+	accessSteps: WebsiteAccessStep[];
 	dataSent: VisitDataSent[];
 	downloadFailures: Array<{ url: string; reason: string }>;
 	/** What the site's pages put on the clipboard, from its capture on: what a visitor pastes. Absent when nothing was copied. */
 	clipboardWrites?: ClipboardWrite[];
 };
+
+/**
+ * One thing the visit did in a page that a person repeats to get as far:
+ * typed or chose a value, clicked, pressed a key, or moved between pages.
+ * `actor` is our agent or a person who took over the visit's browser;
+ * `pageUrl` the page it was done on; `field` the element as a reader names
+ * it (its label, else its role or description); `value` what was typed or
+ * chosen, the key pressed or the address opened; `synthetic` which made-up
+ * value it was (`password`, `email`), when it was one we generated; `at`
+ * when it was done.
+ */
+export type WebsiteAccessStep = {
+	actor: "agent" | "human";
+	pageUrl: string;
+	action: WebsiteAccessAction;
+	field?: string;
+	value?: string;
+	synthetic?: string;
+	at: string;
+};
+
+export type WebsiteAccessAction = "type" | "select" | "click" | "press" | "drag" | "upload" | "open" | "back" | "forward" | "reload" | "tab";
 
 /** Whether the visit moved on from this hop to a later page: the agent went on, or the page was opened again. */
 export function isFlowStepHop(hop: WebsiteNavigationHop): boolean {

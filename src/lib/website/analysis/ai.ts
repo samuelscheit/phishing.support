@@ -340,7 +340,7 @@ async function reportRoute(walked: WalkedRoute, context: { submissionId: bigint;
 		const created = await reportConfirmedWebsiteAbuse({
 			submissionId,
 			urls: reportUrls,
-			analysisText: buildWebsiteReportEvidence(site.classification, { ...site.capture, ...(reporterBrowser ? { reporterUserAgent: reporterBrowser.override.userAgent } : {}), accessGate, caseUrl: abuseEmailCaseUrl(submissionId) }),
+			analysisText: buildWebsiteReportEvidence(site.classification, { ...site.capture, ...(reporterBrowser ? { reporterUserAgent: reporterBrowser.override.userAgent } : {}), accessGate, caseUrl: abuseEmailCaseUrl(submissionId), accessSteps: visited.record.accessSteps }),
 			...(site.archive.userAgent ? { userAgent: site.archive.userAgent } : {}),
 			screenshots: await capturedPageScreenshots(submissionId, { route, step: analyzedCaptureStep(site.archive.navigationHops) }),
 			reporter,

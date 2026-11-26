@@ -210,7 +210,7 @@ describe("provider decision follow-up agent", () => {
 							steps: [liveCapture("https://paneo.work/install")],
 							requests: (canaries) => [{ timestamp: "", url: bot, method: "POST", postData: JSON.stringify({ text: `mail: ${canaries.email}` }) }],
 							downloads: [{ url: "https://paneo.work/Paneo.dmg", fileName: "Paneo.dmg", contentType: "application/x-apple-diskimage", bytes: Buffer.from("dmg"), userAgent: "curl/8.7.1" }],
-							agent: { actions: [{ id: "a1", kind: "click", text: "Clicked \"Download for macOS\"" }] },
+							agent: { actions: [{ id: "a1", kind: "click", text: "Clicked \"Download for macOS\"", actor: "agent" }] },
 						}, visits),
 						close: async () => { closed++; },
 					},

@@ -37,6 +37,33 @@ export type VisitAgentReport = {
 	stoppedReason: string;
 };
 
+/** The fields a visit fills with made-up values, in the order a person picks them. */
+export const SYNTHETIC_FIELDS = ["email", "username", "password", "phone", "cardNumber", "cardExpiry", "cardCvc", "oneTimeCode", "name", "address", "city", "postalCode", "country", "dateOfBirth", "companyOrPageName"] as const;
+export type SyntheticField = typeof SYNTHETIC_FIELDS[number];
+/** The credential-shaped values: the agent types them as `{{secret:NAME}}` placeholders. */
+const SECRET_FIELDS = ["password", "cardNumber", "oneTimeCode"] as const satisfies readonly SyntheticField[];
+
+/** The made-up value a visit enters for each field: the generated canaries, and fixed values for the rest. */
+export function syntheticVisitValues(canaries: ExfiltrationCanaries): Record<SyntheticField, string> {
+	return {
+		email: canaries.email,
+		username: canaries.email.split("@")[0]!,
+		password: canaries.password,
+		phone: canaries.phone,
+		cardNumber: canaries.cardNumber,
+		cardExpiry: "12/30",
+		cardCvc: "123",
+		oneTimeCode: canaries.oneTimeCode,
+		name: `Phishing Support ${canaries.marker}`,
+		address: "123 Test Avenue",
+		city: "Testville",
+		postalCode: "10001",
+		country: "United States",
+		dateOfBirth: "1990-04-17",
+		companyOrPageName: "Testville Studio",
+	};
+}
+
 /**
  * The visit: go through a reported site the way its victim would, entering
  * only synthetic values, so the recording shows every page it asks for data
@@ -56,24 +83,9 @@ export function buildSiteVisitTask(
 	// A kit that smuggles its page in as a blob (`blob:https://site/<uuid>`) is still on the site's own web origin.
 	const origin = url.protocol === "blob:" ? new URL(url.pathname) : url;
 	if (!["http:", "https:"].includes(origin.protocol) || origin.username || origin.password || url.username || url.password) throw new Error("A site visit needs a credential-free HTTP URL.");
-	const secrets = { password: canaries.password, cardNumber: canaries.cardNumber, oneTimeCode: canaries.oneTimeCode };
-	const syntheticValues = {
-		email: canaries.email,
-		username: canaries.email.split("@")[0],
-		password: "{{secret:password}}",
-		phone: canaries.phone,
-		cardNumber: "{{secret:cardNumber}}",
-		cardExpiry: "12/30",
-		cardCvc: "123",
-		oneTimeCode: "{{secret:oneTimeCode}}",
-		name: `Phishing Support ${canaries.marker}`,
-		address: "123 Test Avenue",
-		city: "Testville",
-		postalCode: "10001",
-		country: "United States",
-		dateOfBirth: "1990-04-17",
-		companyOrPageName: "Testville Studio",
-	};
+	const values = syntheticVisitValues(canaries);
+	const secrets = Object.fromEntries(SECRET_FIELDS.map((field) => [field, values[field]]));
+	const syntheticValues = { ...values, ...Object.fromEntries(SECRET_FIELDS.map((field) => [field, `{{secret:${field}}}`])) };
 	return {
 		goal: [
 			`This is a controlled defensive investigation of a website someone reported as phishing or malware. The browser is already on its page (${url.toString()}). Go through the site the way a person it targets would, so that every step it shows is recorded.`,

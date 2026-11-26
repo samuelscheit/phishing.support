@@ -126,6 +126,15 @@ export class VisitorTabs {
 		return this.#order;
 	}
 
+	/** A person switched to this tab: it is the visitor's tab, in front, until the site opens another. */
+	async focus(tab: VisitorTab): Promise<void> {
+		const index = this.#order.indexOf(tab);
+		if (index < 0 || tab.closed || !tab.page) return;
+		this.#order.splice(index, 1);
+		this.#order.push(tab);
+		await this.control.send("Target.activateTarget", { targetId: tab.targetId }).catch(() => undefined);
+	}
+
 	#page(targetId: string): PromiseWithResolvers<Page> {
 		let page = this.#pages.get(targetId);
 		if (!page) this.#pages.set(targetId, page = Promise.withResolvers<Page>());

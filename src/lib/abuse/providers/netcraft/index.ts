@@ -2,6 +2,7 @@ import { defineProvider } from "../kit/provider";
 import { NETCRAFT_PROVIDER } from "./definition";
 import { netcraftDraft, submitNetcraftSubmission } from "./submission";
 import { makeNetcraftReason, storedNetcraftSubmissionPayload } from "./payload";
+import { reportAccess } from "../kit/report_payload";
 import { NETCRAFT_INBOUND_MAIL, netcraftDecision } from "./inbound";
 import { fetchNetcraftCorrespondence, NETCRAFT_REVIEW_VERDICTS } from "./correspondence";
 
@@ -13,6 +14,7 @@ export const netcraftProvider = defineProvider({
 		target: context.target,
 		observedUrls: context.observedUrls,
 		description: context.description,
+		...reportAccess(context),
 		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		...(context.legalBrandUrl ? { legalBrandUrl: context.legalBrandUrl } : {}),
 	}),

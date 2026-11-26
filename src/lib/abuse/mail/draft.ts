@@ -19,6 +19,8 @@ import { approvalDraftOf } from "../persistence/approvals";
 import { asRecord } from "../../util/values";
 import { routeContact } from "../resolver/contact_chain";
 import { utcDate } from "../../util/date_time";
+import { accessStepsText, withoutAccessSteps } from "../../website/visit/access_steps_text";
+import type { WebsiteAccessStep } from "../../website/types";
 
 const MAX_DESCRIPTION_INPUT = 12_000;
 const MAX_SUMMARY_LENGTH = 1_200;
@@ -87,6 +89,8 @@ type DraftInput = {
 	attachmentMimeTypes?: string[];
 	/** The files the mail carries; a report drafted from its evidence (a deceptive funnel's facts) reads them. */
 	evidence?: readonly AbuseMailAttachment[];
+	/** What the case's walk did in the site's pages to reach the content: the steps the recipient repeats. */
+	accessSteps?: readonly WebsiteAccessStep[];
 };
 
 function cleanText(value: unknown, maximum: number): string | undefined {
@@ -425,6 +429,7 @@ function bodyFor(params: {
 	recipientLabel: string;
 	summary: string;
 	attachmentNames: string[];
+	accessSteps?: readonly WebsiteAccessStep[];
 }): string {
 	const observedUrls = params.observedUrls.length
 		? params.observedUrls.map((url) => `- ${url}`).join("\n")
@@ -437,7 +442,7 @@ function bodyFor(params: {
 	const brandReference = params.legalBrandUrl ? `Impersonated/legitimate brand reference: ${params.legalBrandUrl}` : undefined;
 	const caseReference = params.caseUrl ? `Case details: ${params.caseUrl}` : undefined;
 	const detailLines = [`Target: ${params.target}`, params.hostingAddress, "Observed URLs:", observedUrls, brandReference, caseReference, params.reporterAttribution].filter((line): line is string => Boolean(line)).join("\n");
-	const body = [
+	const body = (access: string) => [
 		recipientGreeting(params.recipientLabel),
 		"",
 		params.sentPhishingEmail
@@ -446,6 +451,8 @@ function bodyFor(params: {
 		...(params.upstreamTransit ? ["", params.upstreamTransit] : []),
 		"",
 		detailLines,
+		// Our own text, never the model's: the summary may not quote the description, and the steps must reach the reviewer as recorded.
+		...(access ? ["", access] : []),
 		"",
 		"Evidence summary:",
 		params.summary,
@@ -460,8 +467,12 @@ function bodyFor(params: {
 		"Regards,",
 		"The phishing.support team",
 	].join("\n");
-	return body.slice(0, MAX_BODY_LENGTH).trim();
+	const room = Math.min(MAX_ACCESS_STEPS_IN_BODY, MAX_BODY_LENGTH - body("").length - 2);
+	return body(accessStepsText(params.accessSteps, { maxLength: room, ...(params.caseUrl ? { caseUrl: params.caseUrl } : {}) })).slice(0, MAX_BODY_LENGTH).trim();
 }
+
+/** The access steps' share of the body: enough for a sign-in and a few pages, the rest stays on the case page. */
+const MAX_ACCESS_STEPS_IN_BODY = 2_500;
 
 /**
  * Draft the provider-facing email, rather than using the user/analyst report
@@ -485,7 +496,8 @@ export async function createAbuseEmailDraft(input: DraftInput, dependencies: Abu
 	const category = ALLEGATION_CATEGORIES.has(input.report.allegationCategory) ? input.report.allegationCategory : "abuse";
 	const summaryInput: AbuseEmailSummaryInput = {
 		allegationCategory: category,
-		description: input.report.description,
+		// The body states the steps itself.
+		description: withoutAccessSteps(input.report.description),
 		legalBrandUrl,
 		target: input.target.normalizedTarget,
 		observedUrls,
@@ -521,6 +533,7 @@ export async function createAbuseEmailDraft(input: DraftInput, dependencies: Abu
 			recipientLabel,
 			summary: safeSummary,
 			attachmentNames,
+			...(input.accessSteps ? { accessSteps: input.accessSteps } : {}),
 		}),
 		recipientLabel,
 	};
@@ -565,7 +578,8 @@ export function readVerifiedEmailDraft(payload: unknown, params: {
 		body: z.string().trim().min(1).max(MAX_STORED_BODY_LENGTH),
 		recipientLabel: z.string().trim().min(1).max(160),
 	}).strict().safeParse(record.email);
-	if (!parsed.success || hasSubstantialCopiedPassage(params.description, parsed.data.body)) return undefined;
+	// The body states the access steps as the description does; any other passage of the description is a copy.
+	if (!parsed.success || hasSubstantialCopiedPassage(withoutAccessSteps(params.description), parsed.data.body)) return undefined;
 	if ([parsed.data.subject, parsed.data.body, parsed.data.recipientLabel].some((value) => /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value))) return undefined;
 	if (params.allowedUrls && containsUnapprovedUrl(parsed.data.body, params.allowedUrls, { allowTruncated: true })) return undefined;
 	return parsed.data;

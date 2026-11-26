@@ -1,6 +1,7 @@
 import { defineProvider } from "../kit/provider";
 import { NAMESILO_PROVIDER } from "./definition";
 import { makeNameSiloExplanation } from "./payload";
+import { reportAccess } from "../kit/report_payload";
 import { prepareNameSiloExternalSubmission, nameSiloDraft, submitNameSiloSubmission } from "./submission";
 
 /** NameSilo owns its exact mailboxes, form contract, CSRF state, and upload. */
@@ -11,6 +12,7 @@ export const nameSiloProvider = defineProvider({
 		target: context.target,
 		observedUrl: context.observedUrls[0],
 		description: context.description,
+		...reportAccess(context),
 		...(context.allegationCategory ? { allegationCategory: context.allegationCategory } : {}),
 		...(context.legalBrandUrl ? { realWebsite: context.legalBrandUrl } : {}),
 	}),

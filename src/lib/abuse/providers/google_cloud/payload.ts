@@ -5,7 +5,7 @@ import { domainMatchesOrIsSubdomain, normalizePublicHost } from "../../security/
 import { utcStamp, type EmailOrigin } from "../email_origin";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
 import { truncateAtWord } from "../../../util/text";
-import { buildProviderReportNarrative, normalizeObservedUrlForTarget } from "../kit/report_payload";
+import { buildProviderReportNarrative, normalizeObservedUrlForTarget, reportAccess, type ReportAccess } from "../kit/report_payload";
 import { GOOGLE_CLOUD_PROVIDER, GOOGLE_CLOUD_SERVICES, type GoogleCloudService } from "./definition";
 
 const envelope = payloadEnvelope(GOOGLE_CLOUD_PROVIDER, "google_cloud_abuse_report_v1");
@@ -72,11 +72,10 @@ export type GoogleCloudReportInput = {
 	description: string;
 	allegationCategory?: string;
 	capturedAt: Date;
-	caseUrl?: string;
 	legalBrandUrl?: string;
 	/** The email the target sent, when the target is an email's sending IP rather than a web host. */
 	emailOrigin?: EmailOrigin;
-};
+} & ReportAccess;
 
 /** Narrative room the email-origin details keep free after the IP, the time and as many links as fit. */
 const EMAIL_NARRATIVE_RESERVE = 250;
@@ -91,6 +90,7 @@ function narrativeFor(params: GoogleCloudReportInput, room: number, source: "pag
 		description: params.description,
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
+		...reportAccess(params),
 		source,
 		maximumLength: room,
 	});

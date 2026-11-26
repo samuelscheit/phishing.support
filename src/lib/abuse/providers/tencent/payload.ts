@@ -4,7 +4,7 @@ import { normalizeDomain, registrableDomain } from "../../security/security";
 import { evidenceContract } from "../kit/evidence";
 import { field, payloadEnvelope, storedReader } from "../kit/stored";
 import { storedProviderEvidenceImageReference } from "../kit/evidence";
-import { buildProviderReportNarrative } from "../kit/report_payload";
+import { buildProviderReportNarrative, reportAccess, type ReportAccess } from "../kit/report_payload";
 import { TENCENT_PROVIDER } from "./definition";
 
 const maximumExplanationLength = 400;
@@ -73,12 +73,13 @@ export function makeTencentExplanation(params: {
 	description: string;
 	allegationCategory?: string;
 	legalBrandUrl?: string;
-}): string | undefined {
+} & ReportAccess): string | undefined {
 	return buildProviderReportNarrative({
 		provider: "tencent",
 		target: params.target,
 		observedUrls: params.observedUrl ? [params.observedUrl] : [],
 		description: params.description,
+		...reportAccess(params),
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
 		maximumLength: maximumExplanationLength,
@@ -93,13 +94,14 @@ export function buildTencentSubmissionPayload(params: {
 	allegationCategory?: string;
 	legalBrandUrl?: string;
 	screenshot: TencentScreenshotReference | null;
-}): TencentSubmissionPayload | undefined {
+} & ReportAccess): TencentSubmissionPayload | undefined {
 	const normalizedTarget = normalizeDomain(params.target);
 	const observed = normalizedTarget ? observedUrlForTarget(params.observedUrl, normalizedTarget) : undefined;
 	const explanation = makeTencentExplanation({
 		target: normalizedTarget,
 		observedUrl: observed?.observedUrl,
 		description: params.description,
+		...reportAccess(params),
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(params.legalBrandUrl !== undefined ? { legalBrandUrl: params.legalBrandUrl } : {}),
 	});

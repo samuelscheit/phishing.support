@@ -1,7 +1,8 @@
 import { CLOUDFLARE_PROVIDER } from "./definition";
 import { serviceIdentity } from "../../../network/service_identity";
 import { normalizePublicHttpUrl } from "../../security/security";
-import { allegationLabel, boundedEvidence, normalizeObservedUrlForTarget } from "../kit/report_payload";
+import { allegationLabel, boundedEvidence, normalizeObservedUrlForTarget, reportAccess, type ReportAccess } from "../kit/report_payload";
+import { accessStepsText } from "../../../website/visit/access_steps_text";
 import type { ProviderReportPreviewContext } from "../submission_contracts";
 
 export type CloudflareReportInput = {
@@ -15,7 +16,7 @@ export type CloudflareReportInput = {
 	legalBrandUrl?: string;
 	/** The User-Agent Cloudflare's reviewer must send to see the content. */
 	reportedUserAgent?: string;
-};
+} & ReportAccess;
 
 export type CloudflareReportPayload = {
 	name: string;
@@ -31,9 +32,10 @@ export type CloudflareReportPayload = {
 /**
  * One builder serves both the reviewed preview and the form payload, so the
  * operator approves exactly what Cloudflare receives. The target, observed URL
- * and legal brand URL are never truncated; only the evidence body is bounded.
+ * and legal brand URL are never truncated; the steps that reach the content
+ * get up to half the room, the evidence body what is left.
  */
-function buildCloudflareJustification(input: { target: string; observedUrl: string; legalBrandUrl?: string; description: string; allegationCategory?: string }): string | undefined {
+function buildCloudflareJustification(input: { target: string; observedUrl: string; legalBrandUrl?: string; description: string; allegationCategory?: string } & ReportAccess): string | undefined {
 	const allegation = allegationLabel(input.allegationCategory);
 	const evidenceLabel = `Why this is ${allegation}:`;
 	const prefix = [
@@ -41,8 +43,10 @@ function buildCloudflareJustification(input: { target: string; observedUrl: stri
 		`${allegation === "phishing" ? "Phishing" : "Malware distribution"} URL: ${input.observedUrl}`,
 		input.legalBrandUrl ? `Impersonated brand's real site: ${input.legalBrandUrl}` : undefined,
 	].filter((line): line is string => Boolean(line)).join("\n");
-	const evidence = boundedEvidence(input.description, CLOUDFLARE_PROVIDER.maximumJustificationLength - prefix.length - evidenceLabel.length - 3);
-	return evidence ? `${prefix}\n\n${evidenceLabel}\n${evidence}` : undefined;
+	const room = CLOUDFLARE_PROVIDER.maximumJustificationLength - prefix.length - evidenceLabel.length - 3;
+	const access = accessStepsText(input.accessSteps, { maxLength: Math.floor(room / 2), ...(input.caseUrl ? { caseUrl: input.caseUrl } : {}) });
+	const evidence = boundedEvidence(input.description, access ? room - access.length - 2 : room);
+	return evidence ? `${prefix}\n\n${access ? `${access}\n\n` : ""}${evidenceLabel}\n${evidence}` : undefined;
 }
 
 /** Render the exact justification the Cloudflare form will receive. */
@@ -51,7 +55,7 @@ export function buildCloudflareReportPreview(input: ProviderReportPreviewContext
 	if (!observedUrl) return undefined;
 	const legalBrandUrl = input.legalBrandUrl ? normalizePublicHttpUrl(input.legalBrandUrl, { domainOnly: true }) : undefined;
 	if (input.legalBrandUrl && !legalBrandUrl) return undefined;
-	return buildCloudflareJustification({ target: input.target, observedUrl, ...(legalBrandUrl ? { legalBrandUrl } : {}), description: input.description, ...(input.allegationCategory ? { allegationCategory: input.allegationCategory } : {}) });
+	return buildCloudflareJustification({ target: input.target, observedUrl, ...(legalBrandUrl ? { legalBrandUrl } : {}), description: input.description, ...(input.allegationCategory ? { allegationCategory: input.allegationCategory } : {}), ...reportAccess(input) });
 }
 
 /** Create Cloudflare's reviewed form payload from the abuse report. */
@@ -60,7 +64,7 @@ export function buildCloudflareReportPayload(input: CloudflareReportInput): Clou
 	if (!observedUrl) throw new Error("Cloudflare abuse reporting requires a valid observed URL for the target.");
 	const legalBrandUrl = input.legalBrandUrl === undefined ? undefined : normalizePublicHttpUrl(input.legalBrandUrl, { domainOnly: true });
 	if (input.legalBrandUrl !== undefined && !legalBrandUrl) throw new Error("Cloudflare abuse reporting requires a valid legal brand URL.");
-	const justification = buildCloudflareJustification({ target: input.target, observedUrl, ...(legalBrandUrl ? { legalBrandUrl } : {}), description: input.description, ...(input.allegationCategory ? { allegationCategory: input.allegationCategory } : {}) });
+	const justification = buildCloudflareJustification({ target: input.target, observedUrl, ...(legalBrandUrl ? { legalBrandUrl } : {}), description: input.description, ...(input.allegationCategory ? { allegationCategory: input.allegationCategory } : {}), ...reportAccess(input) });
 	if (!justification) throw new Error("Cloudflare abuse reporting requires a non-empty report description.");
 
 	return {

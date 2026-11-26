@@ -224,6 +224,7 @@ export async function openLiveCapture(options: ArchiveWebsiteOptions, egress: Fa
 				agentAddress: agentAddressOf(browser) ?? browser.wsEndpoint(),
 				userAgent,
 				url: page.url(),
+				touch: identity.screen !== "desktop",
 				...params,
 				tabSetup: recordOpenedTab,
 				clipboard,

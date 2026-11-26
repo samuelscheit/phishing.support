@@ -1,6 +1,6 @@
 import { getBrowser } from "../../../browser";
 import { abuseEmailCaseUrl } from "../../mail/draft";
-import { createDraft, type VerifiedOf, type RouteDeps } from "../kit/draft";
+import { createDraft, reportAccessOf, type VerifiedOf, type RouteDeps } from "../kit/draft";
 import { evidenceReferenceOf, evidenceFileOf, type EvidenceDependencies } from "../kit/evidence";
 import { snippet } from "../../../util/text";
 import { preparedState, withPreflight } from "../kit/session";
@@ -88,10 +88,11 @@ export const eranetDraft = createDraft({
 	targetTypes: ["domain"],
 	targetReason: "eranet_requires_a_domain_target",
 	read: storedEranetSubmissionPayload,
-	input: ({ report, target, evidenceArtifacts }, stored: EranetSubmissionPayload | undefined) => ({
+	input: ({ report, target, evidenceArtifacts, accessSteps }, stored: EranetSubmissionPayload | undefined) => ({
 		target: target.normalizedTarget,
 		observedUrl: stored?.target.observedUrl ?? target.observedUrls[0] ?? "",
 		description: report.description,
+		...reportAccessOf({ report, accessSteps }),
 		allegationCategory: report.allegationCategory,
 		website: report.legalBrandUrl ?? abuseEmailCaseUrl(report.submissionId) ?? "",
 		...(report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {}),

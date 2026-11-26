@@ -26,8 +26,14 @@ const globalEmitter = globalThis as typeof globalThis & {
 
 const emitter = globalEmitter[emitterKey] ?? new EventEmitter();
 globalEmitter[emitterKey] = emitter;
-/** Insertion order is publication order: a topic that publishes again moves to the back. */
-const eventHistory = new Map<string, { events: unknown[]; expiresAt?: number }>();
+/**
+ * Insertion order is publication order: a topic that publishes again moves to the back.
+ * Kept on globalThis like the emitter: Next bundles the analysis and the stream handlers apart,
+ * and a late viewer must replay what the analysis published (a live visit's control state).
+ */
+const historyKey = "__event_transport_history";
+const globalHistory = globalThis as typeof globalThis & { [historyKey]?: Map<string, { events: unknown[]; expiresAt?: number }> };
+const eventHistory = globalHistory[historyKey] ??= new Map<string, { events: unknown[]; expiresAt?: number }>();
 
 /** The event that ends a topic's stream: a finished run or a progress step that completed or failed. */
 function endsTopic(data: unknown): boolean {

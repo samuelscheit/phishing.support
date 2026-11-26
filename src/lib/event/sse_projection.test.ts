@@ -77,4 +77,30 @@ describe("SSE event projection", () => {
 		expect(projected).toMatchObject({ item: { action: { query_count: 1 } } });
 		expect(JSON.stringify(projected)).not.toContain("official site");
 	});
+
+	test("a live visit's control state and actions reach viewers with who drives; frames, secrets and other fields do not", () => {
+		expect(projectSseEvent({
+			type: "browser.control",
+			mode: "human",
+			controller: "Viewer ab12",
+			until: "2026-11-27T10:10:00.000Z",
+			idleUntil: "2026-11-27T10:01:00.000Z",
+			tabs: [{ targetId: "T1", url: "https://kit.example/", title: "Sign in", active: true, session: { secret: 1 } }, { url: "no id" }, "junk"],
+			fakeValues: { email: "probe@x.invalid", password: "A9!x", nested: { no: 1 } },
+			agentRunning: true,
+			token: "never-sent",
+			jpeg: "AAAA",
+		})).toEqual({
+			type: "browser.control",
+			mode: "human",
+			controller: "Viewer ab12",
+			until: "2026-11-27T10:10:00.000Z",
+			idleUntil: "2026-11-27T10:01:00.000Z",
+			tabs: [{ targetId: "T1", url: "https://kit.example/", title: "Sign in", active: true }],
+			fakeValues: { email: "probe@x.invalid", password: "A9!x" },
+			agentRunning: true,
+		});
+		expect(projectSseEvent({ type: "browser.action", kind: "click", text: "Clicked \"Sign in\"", actor: "human", selector: "button" })).toEqual({ type: "browser.action", kind: "click", text: "Clicked \"Sign in\"", actor: "human" });
+		expect(projectSseEvent({ type: "browser.frame", jpeg: "AAAA", url: "https://kit.example/" })).toEqual({ type: "browser.frame", url: "https://kit.example/" });
+	});
 });

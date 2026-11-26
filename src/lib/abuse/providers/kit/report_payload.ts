@@ -1,6 +1,8 @@
 import { hostBelongsToTarget, normalizePublicHttpUrl } from "../../security/security";
 import { squash, truncateAtWord } from "../../../util/text";
 import { PRESERVATION_REQUEST_SHORT } from "../../preservation";
+import { accessStepsNotice, accessStepsText, hasAccessSteps, withoutAccessSteps } from "../../../website/visit/access_steps_text";
+import type { WebsiteAccessStep } from "../../../website/types";
 
 export function compactProviderText(value: string): string {
 	return squash(value.normalize("NFKC").replace(/[\u0000-\u001F\u007F]/g, " "));
@@ -53,7 +55,8 @@ function evidenceSentences(description: string): string[] {
 export function boundedEvidence(description: string, maximum: number): string | undefined {
 	if (maximum <= 0) return undefined;
 	let result = "";
-	for (const sentence of evidenceSentences(description)) {
+	// The access steps are a block of their own wherever a report carries them, never sentences of its evidence.
+	for (const sentence of evidenceSentences(withoutAccessSteps(description))) {
 		const remaining = maximum - result.length - (result ? 1 : 0);
 		if (remaining <= 0) break;
 		if (sentence.length <= remaining) {
@@ -112,7 +115,19 @@ type ProviderReportNarrativeInput = {
 	/** What the evidence is: a captured page (default) or an email. */
 	source?: "page" | "email";
 	maximumLength: number;
-};
+} & ReportAccess;
+
+/**
+ * What a report tells a reviewer about reaching the content: the steps our
+ * visit took in the site's pages (signing in, clicking through), and our
+ * case page, which lists them all when a field has no room for them.
+ */
+export type ReportAccess = { accessSteps?: readonly WebsiteAccessStep[]; caseUrl?: string };
+
+/** Only the access fields `source` sets, to spread into a narrative's input. */
+export function reportAccess(source: ReportAccess): ReportAccess {
+	return { ...(source.accessSteps ? { accessSteps: source.accessSteps } : {}), ...(source.caseUrl ? { caseUrl: source.caseUrl } : {}) };
+}
 
 type EvidenceIndicator = {
 	label: string;
@@ -325,35 +340,62 @@ function profileCopy(provider: ProviderReportProfile, target: string, observedUr
 }
 
 /** Fit the narrative, then add the preservation ask when the field has room for it. */
-function fitNarrative(parts: readonly string[], maximumLength: number): string {
+/**
+ * A narrative's sentences: what is reported, the URL context, the facts,
+ * the steps that reach the content behind the site's login or gate, the
+ * brand reference and the requested action.
+ */
+type NarrativeParts = {
+	lead: string;
+	urlContext: string;
+	facts: string;
+	access?: { steps: readonly WebsiteAccessStep[]; caseUrl?: string };
+	reference: string;
+	action: string;
+};
+
+/** Fields up to this size get the one-sentence notice that points to the case page, not the steps. */
+const ACCESS_STEPS_MINIMUM_FIELD = 1_000;
+
+function fitNarrative(parts: NarrativeParts, maximumLength: number): string {
 	const narrative = fitNarrativeParts(parts, maximumLength);
 	const withPreservation = `${narrative} ${PRESERVATION_REQUEST_SHORT}`;
 	return withPreservation.length <= maximumLength ? withPreservation : narrative;
 }
 
-function fitNarrativeParts(parts: readonly string[], maximumLength: number): string {
-	const full = parts.filter(Boolean).join(" ").trim();
-	if (full.length <= maximumLength) return full;
+/** The access part within `room`: the steps themselves when the field is large enough, else the notice, else nothing. */
+function accessPart(parts: NarrativeParts, maximumLength: number, room: number): string {
+	if (!parts.access || room <= 0) return "";
+	const { steps, caseUrl } = parts.access;
+	const full = maximumLength > ACCESS_STEPS_MINIMUM_FIELD ? accessStepsText(steps, { maxLength: room, inline: true, ...(caseUrl ? { caseUrl } : {}) }) : "";
+	if (full) return full;
+	const notice = accessStepsNotice(steps, caseUrl);
+	return notice.length <= room ? notice : "";
+}
+
+function fitNarrativeParts(parts: NarrativeParts, maximumLength: number): string {
+	const join = (sentences: readonly string[]) => sentences.filter(Boolean).join(" ").trim();
+	const others = [parts.lead, parts.urlContext, parts.facts, parts.reference, parts.action];
+	const access = accessPart(parts, maximumLength, maximumLength - join(others).length - 1);
+	const full = join([parts.lead, parts.urlContext, parts.facts, access, parts.reference, parts.action]);
+	if (full.length <= maximumLength && (!parts.access || access)) return full;
 
 	// Keep complete sentences only. Truncating the middle of an allegation can
 	// turn "Impersonated brand:" into an unsupported dangling assertion or
 	// leave a provider form with a grammatically broken reason. Prefer the
 	// provider identity, evidence, and requested action; add URL/reference
 	// context only when the whole sentence still fits.
-	const lead = parts[0] ?? "Suspected phishing activity is being reported.";
-	const urlContext = parts[1] ?? "";
-	const facts = parts[2] ?? "";
-	const reference = parts[3] ?? "";
-	const action = parts.at(-1) ?? "Please investigate the reported activity.";
+	const { lead, urlContext, facts, reference, action } = parts;
 	const selected = [lead];
-	if ([lead, action].filter(Boolean).join(" ").length > maximumLength) {
-		return truncateAtWord([lead, action].filter(Boolean).join(" "), maximumLength);
-	}
-	for (const candidate of [facts, urlContext, reference]) {
-		if (!candidate) continue;
-		if ([...selected, candidate, action].filter(Boolean).join(" ").length <= maximumLength) selected.push(candidate);
-	}
-	return [...selected, action].filter(Boolean).join(" ");
+	if (join([lead, action]).length > maximumLength) return truncateAtWord(join([lead, action]), maximumLength);
+	const add = (candidate: string) => {
+		if (candidate && join([...selected, candidate, action]).length <= maximumLength) selected.push(candidate);
+	};
+	add(facts);
+	add(urlContext);
+	add(accessPart(parts, maximumLength, maximumLength - join([...selected, action]).length - 1));
+	add(reference);
+	return join([...selected, action]);
 }
 
 /**
@@ -363,13 +405,15 @@ function fitNarrativeParts(parts: readonly string[], maximumLength: number): str
  */
 export function buildProviderReportNarrative(params: ProviderReportNarrativeInput): string | undefined {
 	if (!Number.isSafeInteger(params.maximumLength) || params.maximumLength < 1) return undefined;
-	const description = compactProviderText(params.description);
+	// The access steps are their own part, never evidence a brand or an indicator is read from.
+	const evidence = withoutAccessSteps(params.description);
+	const description = compactProviderText(evidence);
 	if (!description) return undefined;
 	// Preserve line boundaries while extracting a short brand label. Running
 	// the regexes over the compacted analysis would merge Markdown list items
 	// (for example `Brand: TikTok` followed by the next bullet) and turn the
 	// following heading into part of the alleged brand name.
-	const extractionDescription = params.description
+	const extractionDescription = evidence
 		.normalize("NFKC")
 		// Keep LF/CR boundaries because the extractor uses them to terminate a
 		// Markdown field; remove the remaining control characters only.
@@ -384,12 +428,13 @@ export function buildProviderReportNarrative(params: ProviderReportNarrativeInpu
 	const target = safeNarrativeTarget(params.target, params.maximumLength <= 500 ? 240 : 255);
 	const source = params.source ?? "page";
 	const copy = profileCopy(provider, target, params.observedUrls?.length ?? 0, allegationLabel(params.allegationCategory), source);
+	const access = hasAccessSteps(params.accessSteps) ? { access: { steps: params.accessSteps, ...(params.caseUrl ? { caseUrl: params.caseUrl } : {}) } } : {};
 	if (params.allegationCategory === "malware") {
 		// A malware report's proof is its facts (the command, payload host, hash,
 		// and verdict), not phishing keywords; it names no impersonated brand.
 		const room = params.maximumLength - copy.lead.length - copy.action.length - 2;
 		const facts = boundedEvidence(params.description, room) ?? "";
-		return fitNarrative([copy.lead, copy.urlContext, facts, "", copy.action], params.maximumLength);
+		return fitNarrative({ lead: copy.lead, urlContext: copy.urlContext, facts, ...access, reference: "", action: copy.action }, params.maximumLength);
 	}
 	const brand = extractedBrandName(extractionDescription);
 	// Small provider fields should never end halfway through an allegation.
@@ -403,5 +448,5 @@ export function buildProviderReportNarrative(params: ProviderReportNarrativeInpu
 	const referenceLabel = compactProviderText(params.legalBrandLabel ?? "Impersonated brand") || "Impersonated brand";
 	const reference = legalBrandUrl ? `${referenceLabel}: ${conciseProviderUrl(legalBrandUrl)}.` : "";
 
-	return fitNarrative([copy.lead, copy.urlContext, facts, reference, copy.action], params.maximumLength);
+	return fitNarrative({ lead: copy.lead, urlContext: copy.urlContext, facts, ...access, reference, action: copy.action }, params.maximumLength);
 }

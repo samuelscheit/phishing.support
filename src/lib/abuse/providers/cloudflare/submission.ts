@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { createDraft, type RouteDeps } from "../kit/draft";
+import { createDraft, reportAccessOf, type RouteDeps } from "../kit/draft";
 import { preparedState } from "../kit/session";
 import { payloadEnvelope, storedReader } from "../kit/stored";
 import {
@@ -50,7 +50,7 @@ export const cloudflareDraft = createDraft({
 	targetTypes: ["domain"],
 	targetReason: "cloudflare_phishing_report_requires_domain_target",
 	read: storedCloudflareSubmissionPayload,
-	input: ({ report, target }, stored: CloudflareSubmissionPayload | undefined, dependencies: CloudflareSubmissionDependencies) => {
+	input: ({ report, target, accessSteps }, stored: CloudflareSubmissionPayload | undefined, dependencies: CloudflareSubmissionDependencies) => {
 		if (report.allegationCategory !== "phishing" && report.allegationCategory !== "malware") {
 			throw new ProviderSubmissionRejectedError("Cloudflare's \"Phishing & Malware\" report can only receive phishing or malware allegations.");
 		}
@@ -65,6 +65,7 @@ export const cloudflareDraft = createDraft({
 			allegationCategory: report.allegationCategory,
 			legalBrandUrl: report.legalBrandUrl ?? undefined,
 			reportedUserAgent: report.reportedUserAgent ?? undefined,
+			...reportAccessOf({ report, accessSteps }),
 		};
 	},
 	admit: (_data, input) => input.observedUrl ? undefined : "cloudflare_phishing_report_requires_observed_url",

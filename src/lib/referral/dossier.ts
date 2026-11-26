@@ -8,6 +8,7 @@ import type { CampaignIndicator } from "../campaign/schema";
 import { ArtifactsEntity } from "../db/entities/artifacts";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import type { Submission } from "../db/schema";
+import type { WebsiteAccessStep } from "../website/types";
 import { describeDataEntryField, type WebsiteRoute } from "../website/types";
 import { isAuthorityRoute, isPreservationRoute } from "./routes";
 import { indicatorInfrastructure, locateInfrastructure, mergeInfrastructure, routeInfrastructure, type InfrastructureClaim, type InfrastructureNode, type NetworkLookup } from "./infrastructure";
@@ -57,7 +58,8 @@ type DossierVerdict = {
 };
 
 /** The visit through the site as the case recorded it at the time. */
-type DossierVisit = { outcome: string; failure?: string; actions: Array<{ kind: string; text: string }> };
+/** The walk of a site: how it ended, what was done (by our agent, or a person who took over its browser) and the steps that reach the content. */
+type DossierVisit = { outcome: string; failure?: string; actions: Array<{ kind: string; text: string; actor?: WebsiteAccessStep["actor"] }>; accessSteps: WebsiteAccessStep[] };
 
 /** One member of the campaign: a site as one case confirmed it. */
 export type DossierSite = {
@@ -199,7 +201,13 @@ function verdictOf(route: WebsiteRoute | undefined, member: CampaignMemberView):
 function visitOf(route: WebsiteRoute | undefined): DossierVisit | undefined {
 	const visit = route?.visit;
 	if (!visit) return undefined;
-	return { outcome: visit.outcome, ...(visit.failure ? { failure: visit.failure } : {}), actions: visit.actions.map(({ kind, text }) => ({ kind, text })) };
+	return {
+		outcome: visit.outcome,
+		...(visit.failure ? { failure: visit.failure } : {}),
+		actions: visit.actions.map(({ kind, text, actor }) => ({ kind, text, ...(actor ? { actor } : {}) })),
+		// Visits recorded before the steps were kept have none.
+		accessSteps: visit.accessSteps ?? [],
+	};
 }
 
 function registeredAt(submission: Submission | undefined): string | undefined {

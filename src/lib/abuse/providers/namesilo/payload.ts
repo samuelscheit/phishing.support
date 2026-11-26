@@ -5,7 +5,7 @@ import { evidenceContract } from "../kit/evidence";
 import { field, payloadEnvelope, registrarTargetOf, storedReader } from "../kit/stored";
 import { providerNarrative } from "../kit/text";
 import { storedProviderEvidenceImageReference } from "../kit/evidence";
-import { normalizeObservedUrlForTarget } from "../kit/report_payload";
+import { normalizeObservedUrlForTarget, reportAccess, type ReportAccess } from "../kit/report_payload";
 import { NAMESILO_PROVIDER } from "./definition";
 
 export const NAMESILO_EVIDENCE_CONTRACT = evidenceContract("namesilo_report", NAMESILO_PROVIDER.evidence);
@@ -41,11 +41,12 @@ export function makeNameSiloExplanation(params: {
 	description: string;
 	allegationCategory?: string;
 	realWebsite?: string;
-}): string | undefined {
+} & ReportAccess): string | undefined {
 	return providerNarrative("namesilo", {
 		target: params.target ?? "",
 		observedUrls: params.observedUrl ? [params.observedUrl] : [],
 		description: params.description,
+		...reportAccess(params),
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		legalBrandUrl: params.realWebsite ?? null,
 	}, NAMESILO_PROVIDER.maximumReportLength);
@@ -59,7 +60,7 @@ export function buildNameSiloSubmissionPayload(params: {
 	allegationCategory?: string;
 	realWebsite: string;
 	evidence: NameSiloEvidenceReference | null;
-}): NameSiloSubmissionPayload | undefined {
+} & ReportAccess): NameSiloSubmissionPayload | undefined {
 	const registrar = registrarTargetOf(params.target);
 	const target = registrar?.host;
 	const observedUrl = target ? normalizeObservedUrlForTarget(params.observedUrl, target) : undefined;
@@ -70,6 +71,7 @@ export function buildNameSiloSubmissionPayload(params: {
 		description: params.description,
 		...(params.allegationCategory ? { allegationCategory: params.allegationCategory } : {}),
 		...(realWebsite ? { realWebsite } : {}),
+		...reportAccess(params),
 	});
 	const evidence = params.evidence && storedProviderEvidenceImageReference(params.evidence, NAMESILO_EVIDENCE_CONTRACT);
 	if (!registrar || !observedUrl || !realWebsite || !explanation || !evidence) return undefined;

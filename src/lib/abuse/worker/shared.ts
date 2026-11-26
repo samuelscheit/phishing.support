@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import { AbuseRepository } from "../repository";
+import { reportAccessSteps } from "../access_steps";
 import type { resolveAbuseTarget } from "../resolver";
 import type { BrowserTask, ChatModel } from "../../browser/task/agent";
 import type { FabricCdpSessionAcquirer } from "../../browser/task/fabric";
@@ -99,5 +100,7 @@ export async function routeContext(routeId: bigint) {
 	if (!input) throw new Error("Abuse report no longer exists.");
 	const target = input.targets.find((item) => item.id === route.targetId);
 	if (!target) throw new Error("Abuse route target no longer exists.");
-	return { route, ...input, target };
+	// The steps a reviewer repeats to get past the site's login or gate, from the case's walk.
+	const accessSteps = await reportAccessSteps(input.report.submissionId, target.observedUrls);
+	return { route, ...input, target, ...(accessSteps.length ? { accessSteps } : {}) };
 }
