@@ -5,6 +5,7 @@ import { ResponseInputItem, ResponseOutputItem } from "openai/resources/response
 import { MailData } from "../mail/ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
 import type { WebsiteAccessGate } from "../website/visit/access_gate";
+import type { ReporterInstructions } from "../submissions/instructions";
 import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteRotation, WebsiteRoute, WebsiteSiteFinding } from "../website/types";
 
 export const submissionKind = ["email", "website"] as const;
@@ -29,6 +30,8 @@ export type EmailSubmissionData = MailData & {
 export type WebsiteSubmissionData = {
 	whois?: WhoISInfo;
 	url: string;
+	/** What the reporter asked the visit to do and the analysis to know; shown on the case page. */
+	instructions?: ReporterInstructions;
 	/** URL of the page the case's verdict rests on (the analyzed page of route `analyzedRoute`); it may be on another site than the submitted URL. */
 	archiveUrl?: string;
 	/** Every route a walk of the submitted link took; the first walk's is route 0. */

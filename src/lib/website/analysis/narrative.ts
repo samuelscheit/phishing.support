@@ -4,6 +4,7 @@ import { extractPasteCommands } from "../../malware/paste_commands";
 import { capturedDeviceStatement, clipboardEvidence, copiedTexts, dataSentEvidence, hiddenFrameEvidence, MAX_HTML_EXCERPT_CHARACTERS, pageText, pasteCommandEvidence, WEBSITE_FINDING_CRITERIA, type WebsiteEvidenceArchive } from "./classification";
 import type { WhoISInfo } from "../info/info";
 import { offeredDownloadEvidence } from "../visit/offered_download";
+import { reporterNote } from "./reporter_note";
 import { revisitWording, type WebsiteKitResource, type WebsiteNavigationHop, type WebsiteVisitRecord, canaryFieldList } from "../types";
 import { DAY_MS } from "../../util/date_time";
 
@@ -26,6 +27,8 @@ export type NarrativeVisitPage = { url: string; title?: string; text: string };
 export type WebsiteNarrativeContext = {
 	/** The case's decided finding in plain sentences, as the case states it everywhere else. */
 	finding: string;
+	/** What the reporter asked the analysis to look at or know: their claim, not evidence. */
+	analysisInstructions?: string;
 	whois?: WhoISInfo;
 	/** Every page of the visit, in the order shown. */
 	pages?: NarrativeVisitPage[];
@@ -152,7 +155,7 @@ ${pageText(archive)}
 <website_html>
 ${archive.html.toString("utf-8").slice(0, MAX_HTML_EXCERPT_CHARACTERS)}
 </website_html>
-${pasteCommandEvidence(commands)}${clipboardEvidence(copiedTexts(archive.clipboardWrites, text))}${hiddenFrameEvidence(archive.hiddenFrames)}${dataSentEvidence(archive.dataSent)}${offeredDownloadEvidence(archive.offeredDownload)}`,
+${pasteCommandEvidence(commands)}${clipboardEvidence(copiedTexts(archive.clipboardWrites, text))}${hiddenFrameEvidence(archive.hiddenFrames)}${dataSentEvidence(archive.dataSent)}${offeredDownloadEvidence(archive.offeredDownload)}${reporterNote(context.analysisInstructions)}`,
 				},
 				...(archive.screenshotPng
 					? [{

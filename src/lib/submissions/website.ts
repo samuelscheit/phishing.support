@@ -7,11 +7,12 @@ import { websiteSite } from "@/lib/website/info/site";
 import { analyzedPage, latestArtifactNamed, navigationToPage, websiteCaptureFileNames } from "@/lib/website/visit/capture_files";
 import type { SubmissionRetryTrigger } from "@/lib/db/schema";
 import { claimRetry, getRetryableSubmission, SubmissionRetryError } from "./retry";
+import type { ReporterInstructions } from "./instructions";
 
 export { SubmissionRetryError } from "./retry";
 
 export type WebsiteSubmissionOptions = ReporterMetadata
-	& Pick<AnalyzeWebsiteOptions, "url" | "mhtmlSnapshot" | "archivedUrl" | "navigationHops" | "screenshotSnapshot" | "captureRoute" | "verificationGate" | "kitResources" | "hiddenFrames" | "device">
+	& Pick<AnalyzeWebsiteOptions, "url" | "instructions" | "mhtmlSnapshot" | "archivedUrl" | "navigationHops" | "screenshotSnapshot" | "captureRoute" | "verificationGate" | "kitResources" | "hiddenFrames" | "device">
 	& {
 		source?: string;
 		/**
@@ -100,7 +101,7 @@ export async function createWebsiteSubmission(
 
 	const existingId = await SubmissionsEntity.create({
 		kind: "website",
-		data: { kind: "website", website: { url } },
+		data: { kind: "website", website: { url, ...(options.instructions ? { instructions: options.instructions } : {}) } },
 		dedupeKey: websiteSubmissionDedupeKey(url, rereport ? `rereport-${streamId.toString()}` : visit),
 		// The worker starts immediately after insertion. Mark it running at the
 		// durable boundary so a process restart cannot leave a submission looking
@@ -130,9 +131,14 @@ export async function createWebsiteSubmission(
  */
 export async function retryWebsiteAnalysis(
 	submissionId: bigint,
-	{ trigger = "manual", startAnalysis = analyzeWebsite }: {
+	{ trigger = "manual", startAnalysis = analyzeWebsite, ...replacement }: {
 		/** Someone asked for it, or the automatic retry of a browser-service failure or restart did. */
 		trigger?: SubmissionRetryTrigger;
+		/**
+		 * The reporter's instructions this retry replaces the stored ones with,
+		 * `undefined` to clear them; without the key the stored ones are kept.
+		 */
+		instructions?: ReporterInstructions;
 		startAnalysis?: (options: AnalyzeWebsiteOptions) => Promise<unknown>;
 	} = {},
 ): Promise<void> {
@@ -173,10 +179,15 @@ export async function retryWebsiteAnalysis(
 	}
 
 	await claimRetry(submission, trigger);
+	const instructions = "instructions" in replacement ? replacement.instructions : websiteData?.instructions;
+	if ("instructions" in replacement && websiteData) {
+		await SubmissionsEntity.update(submissionId, { data: { kind: "website", website: { ...websiteData, instructions } } });
+	}
 
 	void startAnalysis({
 		submissionId,
 		url,
+		...(instructions ? { instructions } : {}),
 		mhtmlSnapshot,
 		archivedUrl: analyzed?.hop.url,
 		navigationHops: analyzed ? navigationToPage(analyzed.hops, analyzed.hop) : undefined,

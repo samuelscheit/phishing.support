@@ -27,6 +27,7 @@ import { capturedArchiveHop, chainSiteAssessments, isReportable } from "../info/
 import { saveVisitEvidence, websiteEvidence } from "../analysis/evidence";
 import { challengeInconclusive, CHALLENGE_RETRY_EGRESS, continuedRevisit } from "./revisit";
 import type { WebsiteAnalysisDependencies, WebsiteCapture } from "../analysis/analysis_types";
+import type { ReporterInstructions } from "../../submissions/instructions";
 
 /** Every page's kit files, once per hash. */
 function mergedKitResources(...captures: WebsiteCapture[]): WebsiteKitResource[] {
@@ -35,7 +36,7 @@ function mergedKitResources(...captures: WebsiteCapture[]): WebsiteKitResource[]
 }
 
 
-async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigationHop, archive: WebsiteEvidenceArchive, dependencies: WebsiteAnalysisDependencies) {
+async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigationHop, archive: WebsiteEvidenceArchive, dependencies: WebsiteAnalysisDependencies, analysisInstructions: string | undefined) {
 	// A script, stylesheet or data file shown as text is not a page anyone is lured by; its source names paths, not deceptions.
 	if (!isWebPage(hop.contentType)) {
 		return { classification: { finding: "insufficient_evidence", rejectedClaim: `the captured address serves a file (${hop.contentType}), not a web page a visitor is shown` } satisfies WebsiteSiteClassification, mobileHandoff: false };
@@ -45,7 +46,7 @@ async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigation
 		analysisKind: "classification",
 		options: {
 			model: defaultResponseModel,
-			input: buildWebsiteClassificationInput(hop, archive, await (dependencies.domainRegistration ?? lookupDomainRegistration)(new URL(hop.url).hostname)),
+			input: buildWebsiteClassificationInput(hop, archive, await (dependencies.domainRegistration ?? lookupDomainRegistration)(new URL(hop.url).hostname), analysisInstructions),
 			// The classifier checks a brand's official domains when the page's domain is not the one it knows.
 			tools: [{ type: "web_search" }],
 			text: { format: WEBSITE_CLASSIFICATION_FORMAT, verbosity: "low" },
@@ -149,6 +150,8 @@ export async function visitWebsite(params: {
 	 */
 	networks?: readonly FabricEgress[];
 	url: string;
+	/** The reporter's instructions: the browser's for every visit of the walk, revisits too, the analysis's for each classification. */
+	instructions?: ReporterInstructions;
 	whois: Awaited<ReturnType<typeof getInfo>>;
 	archive: WebsiteCapture;
 	dependencies: WebsiteAnalysisDependencies;
@@ -175,7 +178,7 @@ export async function visitWebsite(params: {
 	const agent = dependencies.visitAgent ?? taskAgentVisit();
 	const empty: SiteVisitRecording<WebsiteCapture> = { startedAt: new Date(), steps: [], requests: [], downloads: [], downloadFailures: [], clipboardWrites: [], agent: { outcome: "failed", failure: "The page could not be loaded live for the visit.", actions: [] } };
 	const recording = session
-		? await session.visit({ canaries, agent, live: (event) => { void publishEvent(`run:${submissionId}`, event); } }) as SiteVisitRecording<WebsiteCapture>
+		? await session.visit({ canaries, agent, ...(params.instructions?.browser ? { instructions: params.instructions.browser } : {}), live: (event) => { void publishEvent(`run:${submissionId}`, event); } }) as SiteVisitRecording<WebsiteCapture>
 		: empty;
 
 	const pages = visitPages<WebsiteCapture>(first, recording, canaries);
@@ -245,7 +248,7 @@ export async function visitWebsite(params: {
 			continue;
 		}
 		await emitStep(submissionId, "classification", Math.min(70, 50 + position * 4));
-		const classified = await classifyCapturedPage(submissionId, capturedHop, archive, dependencies);
+		const classified = await classifyCapturedPage(submissionId, capturedHop, archive, dependencies, params.instructions?.analysis);
 		seenSnapshots.set(snapshotKey, classified);
 		asksForPhone ||= classified.mobileHandoff;
 		verdicts.set(site, { position, capturedHop, classification: classified.classification });

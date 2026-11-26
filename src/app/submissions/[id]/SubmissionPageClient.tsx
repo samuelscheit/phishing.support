@@ -26,7 +26,7 @@ import { NavigationTab } from "./_components/NavigationTab";
 import { RunsTab } from "./_components/RunsTab";
 import { RotationNote } from "./_components/RotationNote";
 import { RouteSelector } from "./_components/RouteSelector";
-import { OutcomePanel, VerdictPanel } from "./_components/StatusPanels";
+import { OutcomePanel, ReporterInstructionsPanel, VerdictPanel } from "./_components/StatusPanels";
 import { caseReportedAs } from "@/lib/submissions/finding";
 import { canAnalyzeAgain, deceptiveFunnels, reportedSites, retryCountLabel, routeLabel } from "./_components/helpers";
 import { useArchivedHtml } from "./_components/useArchivedHtml";
@@ -132,7 +132,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 				? "Visits the site again; it will not create a duplicate report."
 				: "Reuses the captured website archive when available; it will not create a duplicate report."
 		: "Analyzes the original email again; it will not create a duplicate report.";
-	const analyzeAgain = { offered: canRetryAnalysis, running: retrying, error: retryError, hint: retryHint, onStart: retryAnalysis };
+	const analyzeAgain = { offered: canRetryAnalysis, running: retrying, error: retryError, hint: retryHint, ...(website ? { instructions: website.instructions ?? {} } : {}), onStart: retryAnalysis };
 	const retried = retryCountLabel(submission.retries.count);
 	// The case's outcome: its verdict, or why it was not reported with the way to analyze it again.
 	const outcome = isReported ? (
@@ -247,6 +247,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 
 				<aside className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-6">
 					{outcome ? <div className="hidden lg:block">{outcome}</div> : null}
+					{website?.instructions ? <ReporterInstructionsPanel instructions={website.instructions} /> : null}
 					{website ? (
 						<SiteVisitTimeline running={isRunning} visit={walked?.visit} offeredDownload={offeredDownload} live={liveVisit} pageCount={visitPages.length} routeName={routes.length > 1 ? routeLabel(route) : undefined} />
 					) : null}

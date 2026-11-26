@@ -1,5 +1,7 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { RotateCcw, ShieldAlert } from "lucide-react";
+import { instructionsDraft, ReporterInstructionsFields, ReporterInstructionsView } from "@/components/ReporterInstructionsFields";
+import type { ReporterInstructions } from "@/lib/submissions/instructions";
 import { Button } from "@/components/ui/button";
 import { describeDataEntryField } from "@/lib/website/types";
 import { routeLabel, verdictLabelOf, type ConfirmedSite, type DeceptiveRoute } from "./helpers";
@@ -114,8 +116,43 @@ export function VerdictPanel({ sites, funnels, routeCount, reports, caseId, subm
 	);
 }
 
-/** The "Analyze again" action of a case: offered (`offered`) only while the case can take a retry. */
-export type AnalyzeAgain = { offered: boolean; running: boolean; error: string | null; hint: string; onStart: () => void };
+/**
+ * The "Analyze again" action of a case: offered (`offered`) only while the case can take a retry.
+ * A website case's (`instructions` set) lets the reporter's instructions be edited for the new run.
+ */
+export type AnalyzeAgain = { offered: boolean; running: boolean; error: string | null; hint: string; instructions?: ReporterInstructions; onStart: (instructions?: ReturnType<typeof instructionsDraft>) => void };
+
+/** The reporter's instructions of a website case, as submitted. */
+export function ReporterInstructionsPanel({ instructions }: { instructions: ReporterInstructions }) {
+	return (
+		<div className={PANEL}>
+			<div className="mb-2 text-xs font-semibold text-muted-foreground">Reporter&apos;s instructions</div>
+			<ReporterInstructionsView instructions={instructions} />
+		</div>
+	);
+}
+
+function AnalyzeAgainAction({ analyzeAgain }: { analyzeAgain: AnalyzeAgain }) {
+	const [editing, setEditing] = useState(false);
+	const [draft, setDraft] = useState(() => instructionsDraft(analyzeAgain.instructions));
+	return (
+		<div className="mt-3 space-y-3">
+			{editing ? <ReporterInstructionsFields value={draft} onChange={setDraft} disabled={analyzeAgain.running} /> : null}
+			<div className="flex flex-wrap items-center gap-3">
+				<Button type="button" variant="outline" size="sm" disabled={analyzeAgain.running} onClick={() => analyzeAgain.onStart(editing ? draft : undefined)}>
+					<RotateCcw className="h-3.5 w-3.5" />
+					{analyzeAgain.running ? "Starting analysis…" : "Analyze again"}
+				</Button>
+				{analyzeAgain.instructions && !editing ? (
+					<Button type="button" variant="ghost" size="sm" disabled={analyzeAgain.running} onClick={() => setEditing(true)}>
+						Edit instructions
+					</Button>
+				) : null}
+				<span className="text-xs text-muted-foreground">{analyzeAgain.hint}</span>
+			</div>
+		</div>
+	);
+}
 
 /**
  * Why a case ended without a report, a verdict of nothing reportable or a
@@ -126,15 +163,7 @@ export function OutcomePanel({ title, info, analyzeAgain }: { title: string; inf
 		<div className={PANEL}>
 			<div className="text-xs font-semibold text-muted-foreground">{title}</div>
 			<div className="mt-1 text-sm whitespace-pre-wrap">{info}</div>
-			{analyzeAgain.offered ? (
-				<div className="mt-3 flex flex-wrap items-center gap-3">
-					<Button type="button" variant="outline" size="sm" disabled={analyzeAgain.running} onClick={analyzeAgain.onStart}>
-						<RotateCcw className="h-3.5 w-3.5" />
-						{analyzeAgain.running ? "Starting analysis…" : "Analyze again"}
-					</Button>
-					<span className="text-xs text-muted-foreground">{analyzeAgain.hint}</span>
-				</div>
-			) : null}
+			{analyzeAgain.offered ? <AnalyzeAgainAction analyzeAgain={analyzeAgain} /> : null}
 			{analyzeAgain.error ? <div className="mt-2 text-sm text-destructive">{analyzeAgain.error}</div> : null}
 		</div>
 	);

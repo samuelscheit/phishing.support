@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { SubmissionDetail } from "@/lib/submissions/details";
 import { postJson } from "@/lib/http/client";
+import type { ReporterInstructionsDraft } from "@/components/ReporterInstructionsFields";
 
 /** The submission, refreshed every three seconds, with the retry action. */
 export function useSubmissionDetail(id: string, initial: SubmissionDetail | null | undefined) {
@@ -27,11 +28,12 @@ export function useSubmissionDetail(id: string, initial: SubmissionDetail | null
 		return () => clearInterval(interval);
 	}, [id]);
 
-	const retryAnalysis = async () => {
+	/** Analyze the case again; with `instructions` the reporter's stored ones are replaced, without them kept. */
+	const retryAnalysis = async (instructions?: ReporterInstructionsDraft) => {
 		setRetrying(true);
 		setRetryError(null);
 		try {
-			const queued = await postJson(`/api/submissions/${id}/retry`, undefined, "Retry failed");
+			const queued = await postJson(`/api/submissions/${id}/retry`, instructions ? { instructions } : undefined, "Retry failed");
 			if (!queued.ok) throw new Error(queued.error);
 			const refreshed = await fetch(`/api/submissions/${id}`);
 			if (refreshed.ok) setSubmission(await refreshed.json());

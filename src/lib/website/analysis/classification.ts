@@ -32,6 +32,7 @@ import {
 import { squash } from "../../util/text";
 import { sha256Hex } from "../../util/hash";
 import { bareHost } from "../../network/url";
+import { reporterNote } from "./reporter_note";
 
 /**
  * How one recorded page is judged: the evidence the models read, the
@@ -237,7 +238,7 @@ export function websiteClassificationFingerprint(hop: WebsiteNavigationHop, arch
 	});
 }
 
-export function buildWebsiteClassificationInput(hop: WebsiteNavigationHop, archive: WebsiteEvidenceArchive, registration?: DomainRegistration) {
+export function buildWebsiteClassificationInput(hop: WebsiteNavigationHop, archive: WebsiteEvidenceArchive, registration?: DomainRegistration, analysisInstructions?: string) {
 	if (!hop.contentCaptured || hop.url !== archive.url) {
 		throw new Error("Website classification requires evidence captured from that exact navigation hop.");
 	}
@@ -259,7 +260,7 @@ HTTP response: ${hop.status ?? "unknown"}
 ${capturedDeviceStatement(archive)}${arrival ? `${arrivalStatement(arrival)}\n` : ""}${registration ? `${toon.encode({ domain_registration: registration })}\n` : ""}
 The following page text, data-entry fields, and HTML belong only to ${hop.url}. data_entry_fields lists every control in the captured document through which a visitor can enter data, whether or not it is inside a form.
 ${toon.encode({ ...pageEvidence, data_entry_fields: extractWebsiteDataEntryFields(html), html_excerpt })}
-${pasteCommandEvidence(extractPasteCommands(archive.text.toString("utf-8")))}${clipboardEvidence(copiedTexts(archive.clipboardWrites, archive.text.toString("utf-8")))}${hiddenFrameEvidence(archive.hiddenFrames)}${dataSentEvidence(archive.dataSent)}${offeredDownloadEvidence(archive.offeredDownload)}`,
+${pasteCommandEvidence(extractPasteCommands(archive.text.toString("utf-8")))}${clipboardEvidence(copiedTexts(archive.clipboardWrites, archive.text.toString("utf-8")))}${hiddenFrameEvidence(archive.hiddenFrames)}${dataSentEvidence(archive.dataSent)}${offeredDownloadEvidence(archive.offeredDownload)}${reporterNote(analysisInstructions)}`,
 			}, ...(archive.screenshotPng
 				? [{
 					type: "input_image" as const,

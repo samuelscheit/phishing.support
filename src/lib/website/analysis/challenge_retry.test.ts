@@ -8,7 +8,8 @@ import { scriptedVisitSession } from "../../site_visit/test_helpers";
 import { websiteSubmissionDedupeKey } from "../../submissions/website";
 import { analyzeWebsite } from "./ai";
 import { BrowserInfrastructureError, WebsiteCaptureFailedError, WebsiteUnreachableError } from "../archive/errors";
-import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "../archive/types";
+import type { ArchiveWebsiteOptions, WebsiteArchiveResult, WebsiteVisitParams } from "../archive/types";
+import type { ReporterInstructions } from "../../submissions/instructions";
 
 useTemporaryDatabase();
 
@@ -26,7 +27,7 @@ const NOTE_TEXT = "EG-Trading Oy\nSinulla on uusi asiakirja odottamassa tarkaste
 type Shown = "challenge" | "sign-in" | "note";
 
 /** The page a capture shows; a visit that walks from the note to its challenge page shows that page as its step. */
-function captured(options: ArchiveWebsiteOptions, shown: Shown, egress: FabricEgress, walk?: { to: string }): WebsiteArchiveResult {
+function captured(options: ArchiveWebsiteOptions, shown: Shown, egress: FabricEgress, walk?: { to: string }, visits: WebsiteVisitParams[] = []): WebsiteArchiveResult {
 	const route = FABRIC_EGRESS_LABEL[egress];
 	const page = (url: string, pageShown: Shown, report: { blocked: boolean } | undefined): WebsiteArchiveResult => {
 		const text = pageShown === "challenge" ? CHALLENGE_TEXT : pageShown === "note" ? NOTE_TEXT : SIGN_IN_TEXT;
@@ -51,7 +52,7 @@ function captured(options: ArchiveWebsiteOptions, shown: Shown, egress: FabricEg
 				session: scriptedVisitSession({
 					...(walk ? { steps: [page(walk.to, "challenge", undefined)] } : {}),
 					agent: { report: { asksForPhone: false, blockedByChallenge: report.blocked, stoppedReason: report.blocked ? "Cloudflare Turnstile remained after waiting." : "The sign-in asks for an account." } },
-				}),
+				}, visits),
 			} : {}),
 		};
 	};
@@ -62,13 +63,14 @@ const NOTHING = { finding: "insufficient_evidence", phishingBasis: "none", evide
 const SIGN_IN_PHISHING = { ...NOTHING, finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in to view the shared document", impersonatedBrand: "Microsoft", brandOfficialUrl: "https://www.microsoft.com" };
 
 /** Classifies the sign-in as phishing and the challenge as showing nothing. */
-function model(prompts: string[]): AnalysisClient {
+function model(prompts: string[], inputs: Array<Array<{ role: string; content: unknown }>> = []): AnalysisClient {
 	let call = 0;
 	return {
 		responses: {
-			create: async (options: { input: Array<{ content: unknown }>; text?: unknown }) => {
+			create: async (options: { input: Array<{ role: string; content: unknown }>; text?: unknown }) => {
 				const prompt = JSON.stringify(options.input);
 				prompts.push(prompt);
+				inputs.push(options.input);
 				const answer = prompt.includes("Sign in to view the shared document") ? SIGN_IN_PHISHING : NOTHING;
 				const text = options.text ? JSON.stringify(answer) : "The page imitates a Microsoft sign-in.";
 				call++;
@@ -83,28 +85,63 @@ function model(prompts: string[]): AnalysisClient {
 type Retry = Shown | "browser outage";
 
 /** Each route shows what `routes` says; a route it does not name cannot reach the page. */
-async function analyze(id: bigint, routes: { first: { egress: FabricEgress; shown: Shown; walk?: { to: string } }; retry?: Partial<Record<FabricEgress, Retry>> }) {
+async function analyze(id: bigint, routes: { first: { egress: FabricEgress; shown: Shown; walk?: { to: string } }; retry?: Partial<Record<FabricEgress, Retry>> }, instructions?: ReporterInstructions) {
 	const captures: ArchiveWebsiteOptions[] = [];
 	const prompts: string[] = [];
+	const inputs: Array<Array<{ role: string; content: unknown }>> = [];
+	const visits: WebsiteVisitParams[] = [];
 	await SubmissionsEntity.create({ id, kind: "website", data: { kind: "website", website: { url: PAGE } }, dedupeKey: websiteSubmissionDedupeKey(`${PAGE}#${id}`), status: "running", source: PAGE });
-	await analyzeWebsite({ submissionId: id, url: PAGE }, {
+	await analyzeWebsite({ submissionId: id, url: PAGE, ...(instructions ? { instructions } : {}) }, {
 		getInfo: async () => ({ ip_rdaps: [] }),
-		analysisClient: model(prompts),
+		analysisClient: model(prompts, inputs),
 		domainRegistration: async () => undefined,
 		timestampEvidence: async () => undefined,
 		browserBackoffMs: [1],
 		archiveWebsite: async (options) => {
 			captures.push(options);
-			if (!options.egress) return captured(options, routes.first.shown, routes.first.egress, routes.first.walk);
+			if (!options.egress) return captured(options, routes.first.shown, routes.first.egress, routes.first.walk, visits);
 			const shown = routes.retry?.[options.egress];
 			if (shown === "browser outage") throw new BrowserInfrastructureError("Browser service unavailable: the residential exit is offline");
 			if (!shown) throw new WebsiteCaptureFailedError([new WebsiteUnreachableError(options.egress, "net::ERR_CONNECTION_CLOSED")]);
-			return captured(options, shown, options.egress);
+			return captured(options, shown, options.egress, undefined, visits);
 		},
 	});
 	const submission = await SubmissionsEntity.get(id);
-	return { captures, prompts, submission, website: submission?.data.kind === "website" ? submission.data.website : undefined };
+	return { captures, prompts, inputs, visits, submission, website: submission?.data.kind === "website" ? submission.data.website : undefined };
 }
+
+describe("the reporter's instructions", () => {
+	const instructions = { browser: "Click 'Download PDF', then enter an email.", analysis: "The page impersonates Microsoft OneDrive." };
+	const text = (content: unknown) => typeof content === "string" ? content : JSON.stringify(content);
+
+	test("reach the visit of every network and every prompt's user message, and stay in the case record", async () => {
+		const { visits, inputs, submission, website } = await analyze(381535952033550500n, { first: { egress: "phishing", shown: "challenge" }, retry: { residential: "sign-in" } }, instructions);
+		expect(submission?.status).toBe("reported");
+		// The blocked visit and its revisit from the residential exit.
+		expect(visits.map((visit) => visit.instructions)).toEqual([instructions.browser, instructions.browser]);
+		const classifications = inputs.filter((input) => text(input[0]!.content).startsWith("Classify only the captured page"));
+		const narratives = inputs.filter((input) => text(input[0]!.content).startsWith("You are an expert phishing and malware analyst"));
+		expect(classifications.length).toBeGreaterThanOrEqual(2);
+		expect(narratives).toHaveLength(1);
+		for (const input of [...classifications, ...narratives]) {
+			const [system, user] = input;
+			expect(system!.role).toBe("system");
+			expect(text(system!.content)).not.toContain(instructions.analysis);
+			expect(text(user!.content)).toContain(`<reporter_note>\\nThe person who reported this site adds the following.`);
+			expect(text(user!.content)).toContain(instructions.analysis);
+		}
+		expect(inputs.flat().some((message) => text(message.content).includes(instructions.browser))).toBeFalse();
+		expect(website?.instructions).toEqual(instructions);
+	});
+
+	test("a case without them sends no instructions to the visit and no note to the analysis", async () => {
+		const { visits, prompts, website } = await analyze(381535952033550501n, { first: { egress: "phishing", shown: "sign-in" } });
+		expect(visits).toHaveLength(1);
+		expect("instructions" in visits[0]!).toBeFalse();
+		expect(prompts.some((prompt) => prompt.includes("reporter_note"))).toBeFalse();
+		expect(website && "instructions" in website).toBeFalse();
+	});
+});
 
 describe("a visit a CAPTCHA or browser check blocked", () => {
 	test("is opened again from the residential exit, whose visit is judged and reported, with the blocked visit as its first hop", async () => {

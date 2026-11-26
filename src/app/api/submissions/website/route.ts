@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getReporterMetadata } from "@/lib/http/reporter_metadata";
 import { createWebsiteSubmission } from "@/lib/submissions/website";
+import { parseReporterInstructions } from "@/lib/submissions/instructions";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
 	try {
-		const { url, mhtml_base64, rereport } = (await req.json()) as { url?: string; mhtml_base64?: string; rereport?: boolean };
+		const { url, mhtml_base64, rereport, instructions: rawInstructions } = (await req.json()) as { url?: string; mhtml_base64?: string; rereport?: boolean; instructions?: unknown };
 
 		if (!url) {
 			return NextResponse.json({ error: "URL is required" }, { status: 400 });
 		}
+		const parsed = parseReporterInstructions(rawInstructions);
+		if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+		const { instructions } = parsed;
 
 		let mhtmlSnapshot: Buffer | undefined;
 		if (mhtml_base64) {
@@ -30,7 +34,7 @@ export async function POST(req: NextRequest) {
 		}
 
 		const reporter = await getReporterMetadata(req);
-		const stream_id = await createWebsiteSubmission({ url, mhtmlSnapshot, rereport: rereport === true, ...reporter });
+		const stream_id = await createWebsiteSubmission({ url, ...(instructions ? { instructions } : {}), mhtmlSnapshot, rereport: rereport === true, ...reporter });
 
 		return NextResponse.json({ stream_id });
 	} catch (err) {

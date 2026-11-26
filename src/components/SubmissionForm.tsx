@@ -8,8 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
-import { Link, Mail, Upload, Loader2 } from "lucide-react";
+import { ChevronDown, Link, Mail, Upload, Loader2 } from "lucide-react";
 import { postJson } from "@/lib/http/client";
+import { cn } from "@/lib/util/cn";
+import { instructionsDraft, ReporterInstructionsFields } from "@/components/ReporterInstructionsFields";
 
 /** The report form; `defaultTab` opens it on the email or the website tab. */
 export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" | "url" }) {
@@ -18,6 +20,9 @@ export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" 
 	const [file, setFile] = useState<File | null>(null);
 	const [showWebsiteSnapshotInput, setShowWebsiteSnapshotInput] = useState(false);
 	const [websiteSnapshotFile, setWebsiteSnapshotFile] = useState<File | null>(null);
+	const [showInstructions, setShowInstructions] = useState(false);
+	const [instructions, setInstructions] = useState(instructionsDraft);
+	const [urlError, setUrlError] = useState<string | null>(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const email = "report@phishing.support";
 	const websiteSnapshotInputRef = useRef<HTMLInputElement | null>(null);
@@ -62,6 +67,7 @@ export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" 
 		if (!url) return;
 
 		setIsSubmitting(true);
+		setUrlError(null);
 		try {
 			let mhtml_base64: string | undefined;
 			if (showWebsiteSnapshotInput && websiteSnapshotFile) {
@@ -74,11 +80,12 @@ export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" 
 
 			// The snapshot field is the reporter's expert mode: there a site that
 			// already has a case is analyzed and reported again in a new one.
-			const result = await postJson<{ stream_id?: string }>("/api/submissions/website", { url, mhtml_base64, rereport: showWebsiteSnapshotInput });
+			const result = await postJson<{ stream_id?: string }>("/api/submissions/website", { url, mhtml_base64, rereport: showWebsiteSnapshotInput, instructions });
 			if (!result.ok) throw new Error(result.error);
 			if (result.data.stream_id) router.push(`/submissions/${result.data.stream_id}`);
 		} catch (err) {
 			console.error(err);
+			setUrlError(err instanceof Error ? err.message : "The website could not be submitted.");
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -158,10 +165,30 @@ export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" 
 									)}
 								</div>
 							) : undefined}
+							<div className="rounded-md border">
+								<button
+									type="button"
+									className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium"
+									aria-expanded={showInstructions}
+									aria-controls="website-instructions"
+									onClick={() => setShowInstructions((v) => !v)}
+								>
+									<span>
+										Instructions <span className="font-normal text-muted-foreground">(optional)</span>
+									</span>
+									<ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", showInstructions && "rotate-180")} />
+								</button>
+								{showInstructions ? (
+									<div id="website-instructions" className="border-t px-3 pb-3 pt-3">
+										<ReporterInstructionsFields value={instructions} onChange={setInstructions} disabled={isSubmitting} />
+									</div>
+								) : null}
+							</div>
 							<Button type="submit" className="w-full" disabled={isSubmitting}>
 								{isSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
 								{showWebsiteSnapshotInput ? "Report Website (again)" : "Report Website"}
 							</Button>
+							{urlError ? <p className="text-sm text-destructive">{urlError}</p> : null}
 						</form>
 					</TabsContent>
 					<TabsContent value="email">

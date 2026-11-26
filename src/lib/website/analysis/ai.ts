@@ -28,6 +28,7 @@ import type { DeceptiveFunnelFinding } from "../../abuse/funnel/classification";
 import { cloakedDestinationInfo, cloakingSuspectedInfo, harmlessScriptedDestination } from "../archive/cloaking";
 import { BROWSER_BACKOFF_MS, failWebsiteAnalysis, recordWebsiteAnalysisFailure, withBrowserBackoff } from "./failure";
 import type { WebsiteAnalysisDependencies, WebsiteCapture } from "./analysis_types";
+import type { ReporterInstructions } from "../../submissions/instructions";
 import { deceptiveFunnelFinding, funnelOutcomeText, judgeCaseFunnel, reportCaseFunnel } from "./funnel";
 
 export type AnalyzeWebsiteOptions = {
@@ -53,11 +54,15 @@ export type AnalyzeWebsiteOptions = {
 	/** Reuse the existing website archive artifacts instead of writing duplicates. */
 	reuseEvidenceArtifacts?: boolean;
 	url: string;
+	/** The reporter's instructions for the visit and the analysis. */
+	instructions?: ReporterInstructions;
 	submissionId: bigint;
 } & ReporterMetadata;
 
 export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencies: WebsiteAnalysisDependencies = {}): Promise<bigint> {
-	const { url, submissionId, reporterIp, reporterCountry, reporterHeaders, reuseEvidenceArtifacts = false } = options;
+	const { url, instructions, submissionId, reporterIp, reporterCountry, reporterHeaders, reuseEvidenceArtifacts = false } = options;
+	// What the reporter submitted, kept by every write of the case's data.
+	const submitted = { url, ...(instructions ? { instructions } : {}) };
 	// Every live capture keeps its browser open for the flow's next action on
 	// the page; each one is closed once the flow is done with it.
 	const sessions: WebsitePageSession[] = [];
@@ -97,7 +102,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await SubmissionsEntity.update(submissionId, {
 			status: "running",
 			info: undefined,
-			data: { kind: "website", website: { url, whois } },
+			data: { kind: "website", website: { ...submitted, whois } },
 		});
 
 		await emitStep(submissionId, "archive_website", 10);
@@ -124,7 +129,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			await SubmissionsEntity.update(submissionId, {
 				status: "failed",
 				info: cloakingSuspectedInfo(archive.cloaking),
-				data: { kind: "website", website: { url, whois, archiveUrl: archive.url, routes: [{ hops: archive.navigationHops }], cloaking: archive.cloaking } },
+				data: { kind: "website", website: { ...submitted, whois, archiveUrl: archive.url, routes: [{ hops: archive.navigationHops }], cloaking: archive.cloaking } },
 			});
 			await emitStep(submissionId, "failed", 100);
 			return submissionId;
@@ -147,13 +152,13 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
-				website: { url, whois, ...capturedWebsiteData(archive), routes: [{ hops: archive.navigationHops, analyzedHopIndex: capturedHop.index }] },
+				website: { ...submitted, whois, ...capturedWebsiteData(archive), routes: [{ hops: archive.navigationHops, analyzedHopIndex: capturedHop.index }] },
 			},
 		});
 
 		// Every walk of the link, the first one's as route 0: a link that rotates offers per click takes each walk down another.
 		const walkRoute = async (route: number, first: WebsiteCapture, browser: RotationBrowser, walkCapture: typeof capture, networks?: readonly FabricEgress[]): Promise<WalkedRoute> => {
-			const visited = await visitWebsite({ submissionId, route, url, whois, archive: first, dependencies, capture: walkCapture, ...(networks ? { networks, egress: networks[0] } : {}) }).finally(closeSessions);
+			const visited = await visitWebsite({ submissionId, route, url, ...(instructions ? { instructions } : {}), whois, archive: first, dependencies, capture: walkCapture, ...(networks ? { networks, egress: networks[0] } : {}) }).finally(closeSessions);
 			const confirmed = visited.reportable.flatMap((site) => {
 				const hop = reportableWebsiteHop(site.archive.navigationHops, visited.assessments, site.archive);
 				return hop ? [{ ...site, capturedHop: hop, capture: findingCapture(site) }] : [];
@@ -221,7 +226,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			analysisKind: "analysis",
 			options: {
 				model: defaultResponseModel,
-				input: buildWebsiteAnalysisInput(headline.archive, { finding: caseFinding, whois, pages: headlineRoute.visited.pages, visit: headlineRoute.visited.record, kitResources: headline.archive.kitResources, capturedAt: headline.archive.archivedAt, chain: headlineRoute.visited.chain }),
+				input: buildWebsiteAnalysisInput(headline.archive, { finding: caseFinding, analysisInstructions: instructions?.analysis, whois, pages: headlineRoute.visited.pages, visit: headlineRoute.visited.record, kitResources: headline.archive.kitResources, capturedAt: headline.archive.archivedAt, chain: headlineRoute.visited.chain }),
 				reasoning: defaultReasoning,
 				tools: [{ type: "web_search" }],
 				stream: true,
@@ -232,7 +237,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			data: {
 				kind: "website",
 				website: {
-					url,
+					...submitted,
 					whois,
 					...capturedWebsiteData(headline.archive),
 					routes: walked.map((route): WebsiteRoute => ({
