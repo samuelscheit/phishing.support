@@ -20,7 +20,7 @@ import type { SiteVisitRecording } from "../../site_visit/visit";
 import type { NarrativeVisitPage } from "../analysis/narrative";
 import { isWebPage } from "../../network/web_page";
 import { lookupDomainRegistration } from "../info/domain_registration";
-import { buildWebsiteClassificationInput, validateWebsiteSiteClassification, websiteMobileHandoff, WEBSITE_CLASSIFICATION_FORMAT, type WebsiteEvidenceArchive } from "../analysis/classification";
+import { buildWebsiteClassificationInput, validateWebsiteSiteClassification, websiteClassificationFingerprint, websiteMobileHandoff, WEBSITE_CLASSIFICATION_FORMAT, type WebsiteEvidenceArchive } from "../analysis/classification";
 import { emitStep } from "./progress";
 import { analyzedCaptureStep, type CapturePage } from "./capture_files";
 import { capturedArchiveHop, chainSiteAssessments, isReportable } from "../info/report_hops";
@@ -217,6 +217,7 @@ export async function visitWebsite(params: {
 
 	// Judge the pages in the order they were shown, each site until one of its pages is reportable.
 	const verdicts = new Map<string, { position: number; capturedHop: WebsiteNavigationHop; classification: WebsiteSiteClassification }>();
+	const seenSnapshots = new Map<string, { classification: WebsiteSiteClassification; mobileHandoff: boolean }>();
 	let asksForPhone = recording.agent.report?.asksForPhone === true;
 	for (const [position, archive] of archives.entries()) {
 		const capturedHop = capturedArchiveHop(archive);
@@ -226,8 +227,16 @@ export async function visitWebsite(params: {
 		const site = websiteSite(capturedHop.url);
 		const known = verdicts.get(site);
 		if (known && isReportable(known.classification)) continue;
+		const snapshotKey = `${site}\n${websiteClassificationFingerprint(capturedHop, archive)}`;
+		const cached = seenSnapshots.get(snapshotKey);
+		if (cached) {
+			asksForPhone ||= cached.mobileHandoff;
+			verdicts.set(site, { position, capturedHop, classification: cached.classification });
+			continue;
+		}
 		await emitStep(submissionId, "classification", Math.min(70, 50 + position * 4));
 		const classified = await classifyCapturedPage(submissionId, capturedHop, archive, dependencies);
+		seenSnapshots.set(snapshotKey, classified);
 		asksForPhone ||= classified.mobileHandoff;
 		verdicts.set(site, { position, capturedHop, classification: classified.classification });
 	}

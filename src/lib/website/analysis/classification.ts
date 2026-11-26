@@ -29,6 +29,7 @@ import {
 	type WebsiteSiteFinding,
 } from "../types";
 import { squash } from "../../util/text";
+import { sha256Hex } from "../../util/hash";
 import { bareHost } from "../../network/url";
 
 /**
@@ -140,16 +141,45 @@ export function dataSentEvidence(dataSent: readonly VisitDataSent[] | undefined)
  * by it and the narrative explains the page by it, so the two never disagree
  * on what counts.
  */
-export const WEBSITE_FINDING_CRITERIA = "A page is phishing when it impersonates a trusted organization, brand, or service (including the visitor's own email provider or employer) to make the visitor hand over credentials (including a crypto wallet's secret recovery phrase, seed phrase, or private key), identity details, payment information, or money. A lure page that only leads to that step counts, for example an account-suspension or verification notice whose button continues to a sign-in, verification, or payment page. A page distributes malware when it gets the visitor to download, install, or run a file, app, or command that would harm them: a fake update, a fake document viewer, a fake verification that asks to paste a command, or an app site whose download or install step runs code other than the advertised app. The brand on a malware page may be invented; the finding rests on what the download or command does. A file that reads the visitor's browser cookies, saved passwords, session tokens, or wallets and sends them to a server is malware whatever it claims to be, for example a game-copying browser extension the visitor is told to load unpacked. A command whose decoded layers fetch code from another host and pipe it into an interpreter (sh, zsh, osascript, PowerShell, mshta) while showing the visitor something else is malware. An ordinary installer for the product the page itself offers, from that product's own site or a package manager, is not malware. Game cheats, mods, and cheat-script executors, and the in-game scripts they load, break a game's rules but are not malware by themselves: such a page distributes malware only when the captured page shows that what it delivers harms the visitor's device or accounts. A page also distributes malware when a frame listed in hidden_frames attacks the visitor's device without any action from them (a drive-by exploit): its code picks what to load by the visitor's operating system or browser version, loads code and runs it, or reads data from the device (keychain, wallet files, messages, photos) and sends it to a server. The page the visitor sees is then only a decoy, often a fake human verification. Analytics, advertising, consent, chat, payment, and captcha-provider frames are not malware. A prank, troll page, insult, profanity, joke, novelty page, or redirect by itself is neither and must not be reported. Claims that a site collects browser/IP/device information are not, by themselves, phishing. An unusual domain or hosting provider alone is not evidence; judge what the captured page shows.";
+export const WEBSITE_FINDING_CRITERIA = "A page is phishing when it impersonates a trusted organization, brand, or service (including the visitor's own email provider or employer) to make the visitor hand over credentials (including a crypto wallet's secret recovery phrase, seed phrase, or private key), identity details, payment information, or money. A lure page that only leads to that step counts, for example an account-suspension or verification notice whose button continues to a sign-in, verification, or payment page. A self-branded site with its own native login or registration forms—even on rotating or unfamiliar mirror domains, or for an illicit or darknet service—is not phishing unless it actually impersonates a separate, real, active organization, brand, or service to steal that organization's credentials or money. A page distributes malware when it gets the visitor to download, install, or run a file, app, or command that would harm them: a fake update, a fake document viewer, a fake verification that asks to paste a command, or an app site whose download or install step runs code other than the advertised app. The brand on a malware page may be invented; the finding rests on what the download or command does. A file that reads the visitor's browser cookies, saved passwords, session tokens, or wallets and sends them to a server is malware whatever it claims to be, for example a game-copying browser extension the visitor is told to load unpacked. A command whose decoded layers fetch code from another host and pipe it into an interpreter (sh, zsh, osascript, PowerShell, mshta) while showing the visitor something else is malware. An ordinary installer for the product the page itself offers, from that product's own site or a package manager, is not malware. Game cheats, mods, and cheat-script executors, and the in-game scripts they load, break a game's rules but are not malware by themselves: such a page distributes malware only when the captured page shows that what it delivers harms the visitor's device or accounts. A page also distributes malware when a frame listed in hidden_frames attacks the visitor's device without any action from them (a drive-by exploit): its code picks what to load by the visitor's operating system or browser version, loads code and runs it, or reads data from the device (keychain, wallet files, messages, photos) and sends it to a server. The page the visitor sees is then only a decoy, often a fake human verification. Analytics, advertising, consent, chat, payment, and captcha-provider frames are not malware. A prank, troll page, insult, profanity, joke, novelty page, or redirect by itself is neither and must not be reported. Claims that a site collects browser/IP/device information are not, by themselves, phishing. An unusual domain or hosting provider alone is not evidence; judge what the captured page shows.";
 
 /**
  * A brand's own site is not phishing, also on a domain other than its best
  * known one (signin.amazonaws-us-gov.com, AWS GovCloud's own sign-in, was
- * reported as an AWS lookalike on 2026-11-19). The classifier gets who holds
- * the domain and searches the brand's own documentation; a page someone else
- * built on the brand's platform stays what it shows.
+ * reported as an AWS lookalike on 2026-11-19). Nor is a self-branded site
+ * with native accounts (even on rotating mirror domains or an illicit/darknet
+ * service) impersonating an unrelated or defunct company that happens to share
+ * its name (trip80.at, a Russian TripScan darknet-marketplace mirror, was
+ * reported as impersonating defunct travel site tripscan.com on 2026-11-25).
+ * The classifier gets who holds the domain and searches the brand's own
+ * documentation; a page someone else built on the brand's platform stays what
+ * it shows.
  */
-const BRAND_OWN_SITE_INSTRUCTIONS = "A brand's own page is not phishing: its real sign-in, console, account, or support page, also on a domain other than the brand's best-known one (a regional, government-cloud, or acquired domain). domain_registration, when given, is who holds the page's domain from its registry records: a brand-protection registrar (MarkMonitor, CSC, Com Laude) manages domains only for verified companies, and a registrant or nameservers of the brand's own company tie the domain to it; a platform_tenant is one customer's site on someone's platform, and that platform's registration says nothing about who made the page. Before you classify a page that shows a brand's sign-in or account flow as phishing on a domain that is not the brand's main one, search the web for the brand's official domains and its documentation of this host: when the brand itself uses this domain and the page is the brand's own service, the finding is benign. A form, survey, file share, document, site, or storage bucket that someone else made on a brand's platform, or a page on a platform_tenant, is judged by what it shows like any other page, even when the platform belongs to the brand it imitates.";
+const BRAND_OWN_SITE_INSTRUCTIONS = "A brand's own page is not phishing: its real sign-in, console, account, or support page, also on a domain other than the brand's best-known one (a regional, government-cloud, or acquired domain, or one of its own mirror domains). Do not treat a mere name collision with an unrelated business or a defunct or parked domain as brand impersonation: brandOfficialUrl must be the active official website of the same service and industry that the page is pretending to be, never a parked or defunct domain or an unrelated company that happens to share the name. domain_registration, when given, is who holds the page's domain from its registry records: a brand-protection registrar (MarkMonitor, CSC, Com Laude) manages domains only for verified companies, and a registrant or nameservers of the brand's own company tie the domain to it; a platform_tenant is one customer's site on someone's platform, and that platform's registration says nothing about who made the page. Before you classify a page that shows a brand's sign-in or account flow as phishing on a domain that is not the brand's main one, search the web for the brand's official domains and its documentation of this host: when the brand itself uses this domain (including as one of its own mirror domains) and the page is the brand's own service, the finding is benign. A form, survey, file share, document, site, or storage bucket that someone else made on a brand's platform, or a page on a platform_tenant, is judged by what it shows like any other page, even when the platform belongs to the brand it imitates.";
+
+/**
+ * Deterministic fingerprint of the evidence a classification call judges for
+ * one captured page. Two visit steps of the same site with the same
+ * fingerprint carry identical evidence, so re-classifying the second step only
+ * wastes model calls and invites flip-flops. A textless page includes its
+ * screenshot hash so visual-only changes (such as a canvas QR handoff) are
+ * still judged.
+ */
+export function websiteClassificationFingerprint(hop: WebsiteNavigationHop, archive: WebsiteEvidenceArchive): string {
+	const text = normalizedEvidence(pageText(archive));
+	return JSON.stringify({
+		url: hop.url,
+		contentType: hop.contentType ?? "",
+		text,
+		fields: extractWebsiteDataEntryFields(archive.html.toString("utf-8")),
+		dataSent: archive.dataSent ?? [],
+		download: archive.offeredDownload?.sha256 ?? "",
+		frames: (archive.hiddenFrames ?? []).map((frame) => frame.sha256),
+		device: archive.device ?? "",
+		providerWarning: archive.providerWarning?.warning ?? "",
+		...(text ? {} : { screenshot: archive.screenshotPng ? sha256Hex(archive.screenshotPng) : "" }),
+	});
+}
 
 export function buildWebsiteClassificationInput(hop: WebsiteNavigationHop, archive: WebsiteEvidenceArchive, registration?: DomainRegistration) {
 	if (!hop.contentCaptured || hop.url !== archive.url) {

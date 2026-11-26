@@ -553,4 +553,24 @@ describe("the raw answers of a chain across the pages of a visit", () => {
 			{ name: "chain-hop-4.html", mimeType: "text/html", sha256: sha256Hex(body(RECOVERY)) },
 		]);
 	});
+
+	test("unchanged snapshots of the same page during a visit are classified once, while new page states are still classified", async () => {
+		const calls: Array<{ kind: "classification" | "analysis"; url: string }> = [];
+		const id = await websiteSubmission(375914181917937701n, CONSENT);
+		const samePage = liveCapture(CONSENT);
+		const changedPage = liveCapture(GET_STARTED);
+		const answers: ClassifierAnswers = {
+			[CONSENT]: { finding: "benign", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false },
+			[GET_STARTED]: { finding: "benign", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false },
+		};
+
+		await analyzeWebsite({ submissionId: id, url: CONSENT }, dependencies({
+			answers,
+			captures: [],
+			modelCalls: calls,
+			capture: () => visited(samePage, { steps: [liveCapture(CONSENT), liveCapture(CONSENT), changedPage, liveCapture(GET_STARTED)] }).archive,
+		}));
+
+		expect(calls.filter((call) => call.kind === "classification").map((call) => call.url)).toEqual([CONSENT, GET_STARTED]);
+	});
 });

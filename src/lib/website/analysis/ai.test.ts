@@ -8,6 +8,7 @@ import {
 	buildWebsiteClassificationInput,
 	buildWebsiteReportEvidence,
 	validateWebsiteSiteClassification,
+	websiteClassificationFingerprint,
 	WEBSITE_CLASSIFICATION_FORMAT,
 } from "./classification";
 import { capturedDocumentContent } from "../archive/text";
@@ -605,4 +606,33 @@ test("a phishing finding names the brand it imitates and that brand's own site, 
 		"Microsoft's official website is https://www.microsoft.com/; the reported site is not part of it.",
 	]);
 	expect(WEBSITE_CLASSIFICATION_FORMAT.schema).toMatchObject({ required: expect.arrayContaining(["impersonatedBrand", "brandOfficialUrl"]) });
+});
+
+test("classification rules exclude self-branded mirror sites and unrelated or defunct domain name collisions", () => {
+	const page = capturedPage("https://trip80.at/auth-in", "TripScan | ТрипСкан\nВойти", "<html><body><input name=\"username\"><input type=\"password\"></body></html>");
+	const [system] = buildWebsiteClassificationInput(page.hop, page.archive);
+	expect(system.content).toContain("self-branded site with its own native login or registration forms");
+	expect(system.content).toContain("rotating or unfamiliar mirror domains");
+	expect(system.content).toContain("mere name collision with an unrelated business or a defunct or parked domain");
+	expect(system.content).toContain("active official website of the same service and industry");
+});
+
+test("websiteClassificationFingerprint deduplicates unchanged text-bearing snapshots while staying sensitive to new evidence", () => {
+	const base = capturedPage("https://trip81.co/auth-in", "TripScan | ТрипСкан\nВойти", "<html><body><input name=\"username\"><input type=\"password\"></body></html>");
+	const fp = (archive: typeof base.archive) => websiteClassificationFingerprint(base.hop, archive);
+
+	// Different screenshots of the same text-bearing page (e.g. typing into an input) share one fingerprint.
+	expect(fp({ ...base.archive, screenshotPng: Buffer.from("shot-1") }))
+		.toBe(fp({ ...base.archive, screenshotPng: Buffer.from("shot-2") }));
+
+	// Any change in text, fields, dataSent, offeredDownload, or hiddenFrames produces a new fingerprint.
+	expect(fp({ ...base.archive, text: Buffer.from("TripScan | ТрипСкан\nНеправильная пара", "utf-8") })).not.toBe(fp(base.archive));
+	expect(fp({ ...base.archive, html: Buffer.from("<html><body><input name=\"otp\"></body></html>", "utf-8") })).not.toBe(fp(base.archive));
+	expect(fp({ ...base.archive, dataSent: [{ url: "https://api.telegram.org/bot1/sendMessage", method: "POST", fields: ["password"], sameSite: false }] })).not.toBe(fp(base.archive));
+	expect(fp({ ...base.archive, offeredDownload: { url: "https://trip81.co/app.dmg", fileName: "app.dmg", contentType: "application/octet-stream", size: 10, sha256: "a".repeat(64) } })).not.toBe(fp(base.archive));
+
+	// A textless page hashes its screenshot so visual-only changes (such as a canvas QR handoff) are still classified.
+	const blank = capturedPage("https://example.test/", "", "<html><body><canvas></canvas></body></html>");
+	expect(websiteClassificationFingerprint(blank.hop, { ...blank.archive, screenshotPng: Buffer.from("qr-1") }))
+		.not.toBe(websiteClassificationFingerprint(blank.hop, { ...blank.archive, screenshotPng: Buffer.from("qr-2") }));
 });
