@@ -245,3 +245,4 @@ export type MailIngest = InferSelectModel<typeof mailIngest>;
 export * from "../abuse/schema";
 export * from "../campaign/schema";
 export * from "../liveness/schema";
+export * from "../favicon/schema";

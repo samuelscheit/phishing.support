@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 
+import { ProviderAvatar } from "@/components/reports/ProviderAvatar";
 import { RouteTimeline } from "@/components/reports/RouteTimeline";
 import { Funnel, OutcomeBar, OutcomeLegend, StripPlot } from "@/components/provider_stats/charts";
 import { formatMinutes, formatPercent, ROLE_LABEL, ROLE_MEASURE, SITE_STATE_LABEL, VERDICT_BADGE, VERDICT_LABEL } from "@/components/provider_stats/labels";
@@ -112,7 +113,10 @@ export default async function ProviderPage({ params, searchParams }: Props) {
 		<PageShell current={undefined}>
 			<header className="space-y-3">
 				<Link href="/providers" className="text-sm text-muted-foreground hover:text-foreground">← All providers</Link>
-				<h1 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">{detail.organisation.name}</h1>
+				<h1 className="flex items-center gap-3 text-balance text-3xl font-bold tracking-tight sm:text-4xl">
+					<ProviderAvatar name={detail.organisation.name} icon={detail.icon} size="large" />
+					<span className="min-w-0 [overflow-wrap:anywhere]">{detail.organisation.name}</span>
+				</h1>
 				<p className="text-lg text-muted-foreground">
 					{total} {total === 1 ? "report" : "reports"} as {detail.stats.map((stats) => ROLE_LABEL[stats.role]).join(" and ")}.{" "}
 					<Link href={`/reports?provider=${detail.organisation.slug}`} className="text-primary hover:underline">Browse them with the other providers of each case</Link>.

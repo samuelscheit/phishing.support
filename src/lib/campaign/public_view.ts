@@ -36,6 +36,8 @@ export type { VisitorKind } from "./kinds";
 export type PublicSiteReport = {
 	routeId: string;
 	organisation: string;
+	/** Our copy of the company's website icon, or none yet. */
+	icon: string | null;
 	role: ProviderRole;
 	channel: string;
 	bucket: RouteBucket;
@@ -167,6 +169,7 @@ function publicSiteReports(reports: readonly SubmissionReport[]): PublicSiteRepo
 		return {
 			routeId: route.id.toString(),
 			organisation: route.organisation,
+			icon: route.icon,
 			role: route.role,
 			channel: route.channel,
 			bucket: standing.bucket,

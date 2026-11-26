@@ -106,7 +106,7 @@ describe("the reports of case 384401854580134038 as the case page reads them", (
 /** A route as the read model gives it, from the fields a test sets. */
 function route(fields: Partial<SubmissionReportRoute> & { messages?: SubmissionReportMessage[] }): SubmissionReportRoute {
 	return {
-		id: 1n, provider: "Cloudflare Abuse", organisation: "Cloudflare", role: "cdn", channel: "dashboard API", namedBy: null, nextWork: [],
+		id: 1n, provider: "Cloudflare Abuse", organisation: "Cloudflare", icon: null, role: "cdn", channel: "dashboard API", namedBy: null, nextWork: [],
 		outcome: { verdict: "acknowledged", sentAt: trylevoAt("18:51:08"), followUps: 0, unansweredDecisions: 0, overturnedByFollowUp: false, inbound: 0, outbound: 0 },
 		routeType: "provider_submission", target: "hostsync.pro", recipient: null, status: "submitted", executionStatus: "completed", body: null, bodySource: null,
 		observedUrls: [], submittedTargets: [], confirmationId: "8bb11a971b4aee08", confirmationText: null, finalUrl: null, error: null, messages: [], decisionFollowUps: [],

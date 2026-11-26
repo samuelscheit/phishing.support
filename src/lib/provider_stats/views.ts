@@ -1,3 +1,4 @@
+import { FaviconStore } from "../favicon/store";
 import { getReportsByIds } from "../submissions/abuse_details";
 import type { SubmissionReport, SubmissionReportRoute } from "../submissions/abuse_details";
 import { providerStatsOf, statsOf, type ProviderRouteRecord, type ProviderStats } from "./aggregate";
@@ -104,14 +105,24 @@ export function pageOf(value: string | string[] | undefined): number {
 	return Math.max(1, page);
 }
 
-export async function getProviderOverview(): Promise<ProviderOverview> {
-	return overviewOf(await providerDataset());
+/** Our copy of each organisation's website icon, by organisation slug; one not fetched yet has none. */
+async function organisationIcons(organisations: readonly Organisation[]): Promise<Record<string, string>> {
+	const icons = await FaviconStore.iconsFor(organisations.flatMap((organisation) => organisation.site ?? []));
+	return Object.fromEntries(organisations.flatMap((organisation) => {
+		const icon = organisation.site && icons.get(organisation.site);
+		return icon ? [[organisation.slug, icon]] : [];
+	}));
+}
+
+export async function getProviderOverview(): Promise<ProviderOverview & { icons: Record<string, string> }> {
+	const overview = overviewOf(await providerDataset());
+	return { ...overview, icons: await organisationIcons(overview.roles.flatMap(({ providers }) => providers.map((stats) => stats.organisation))) };
 }
 
 export type ProviderRouteDetail = { record: ProviderRouteRecord; report: SubmissionReport; route: SubmissionReportRoute };
 
 /** A provider's statistics and one page of its routes with their full correspondence. */
-export async function getProviderPage(slug: string, page: number): Promise<(ProviderDetail & { page: number; pageCount: number; routes: ProviderRouteDetail[] }) | undefined> {
+export async function getProviderPage(slug: string, page: number): Promise<(ProviderDetail & { icon: string | null; page: number; pageCount: number; routes: ProviderRouteDetail[] }) | undefined> {
 	const detail = providerDetailOf(await providerDataset(), slug);
 	if (!detail) return undefined;
 	const pageCount = Math.max(1, Math.ceil(detail.records.length / PAGE_SIZE));
@@ -123,7 +134,8 @@ export async function getProviderPage(slug: string, page: number): Promise<(Prov
 		const route = report?.routes.find((candidate) => candidate.id === record.routeId);
 		return report && route ? [{ record, report, route }] : [];
 	});
-	return { ...detail, page: current, pageCount, routes };
+	const icon = (await organisationIcons([detail.organisation]))[detail.organisation.slug] ?? null;
+	return { ...detail, icon, page: current, pageCount, routes };
 }
 
 export async function getReportFeed(filter: ReportFilter, page: number) {

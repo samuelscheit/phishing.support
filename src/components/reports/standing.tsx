@@ -62,12 +62,3 @@ export function Steps({ steps }: { steps: { sent: StepState; received: StepState
 	);
 }
 
-const AVATAR_COLOURS = ["bg-orange-500", "bg-blue-700", "bg-slate-800", "bg-cyan-700", "bg-slate-500", "bg-violet-600", "bg-emerald-700", "bg-rose-600"];
-
-/** A company's initials on a colour of its own, the same on every page. */
-export function ProviderAvatar({ name }: { name: string }) {
-	const words = name.replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter(Boolean);
-	const initials = (words.length > 1 ? words[0]![0]! + words[1]![0]! : (words[0] ?? "?").slice(0, 2)).toUpperCase();
-	const hash = [...name].reduce((sum, character) => (sum * 31 + character.charCodeAt(0)) >>> 0, 7);
-	return <span className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-lg text-xs font-bold text-white", AVATAR_COLOURS[hash % AVATAR_COLOURS.length])} aria-hidden>{initials}</span>;
-}

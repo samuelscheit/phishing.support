@@ -17,6 +17,7 @@ import { releaseAfterFailedInvestigation, runJoinedCaseInvestigation, runReportI
 import { readInvestigationJobPayload } from "../../investigation/payload";
 import { setInvestigationStatus } from "../../investigation/status";
 import { startSamplePurgeSchedule } from "../../exfiltration/downloads/sample_purge_job";
+import { startFaviconRefresh } from "../../favicon/refresh";
 import { enqueueRulesSweep } from "../../campaign/sweep";
 import { ensureLivenessChecks } from "../../liveness/schedule";
 import { sleep } from "../../util/sleep";
@@ -383,14 +384,19 @@ export class AbuseWorker {
 }
 
 let singletonWorker: AbuseWorker | undefined;
+let stopFaviconRefresh: (() => void) | undefined;
 
+/** The service's worker, and with it the background refresh of provider icons the report pages show. */
 export async function startAbuseWorker(): Promise<AbuseWorker> {
 	singletonWorker ??= new AbuseWorker();
 	await singletonWorker.start();
+	stopFaviconRefresh ??= startFaviconRefresh();
 	return singletonWorker;
 }
 
 export async function stopAbuseWorker(): Promise<void> {
+	stopFaviconRefresh?.();
+	stopFaviconRefresh = undefined;
 	await singletonWorker?.stop();
 	singletonWorker = undefined;
 }

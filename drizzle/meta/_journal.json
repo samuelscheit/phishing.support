@@ -239,6 +239,13 @@
       "when": 1795727197704,
       "tag": "0033_site_check_hosting",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1795731809958,
+      "tag": "0034_provider_favicons",
+      "breakpoints": true
     }
   ]
 }

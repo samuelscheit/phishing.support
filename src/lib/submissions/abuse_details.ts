@@ -16,6 +16,7 @@ import { hostMovesOf, type HostMove } from "@/lib/liveness/moves";
 import type { SiteCheckState } from "@/lib/liveness/schema";
 import type { ProviderDecision } from "@/lib/abuse/providers/submission_contracts";
 import { organisationOf, type Organisation } from "@/lib/provider_stats/organisation";
+import { FaviconStore } from "@/lib/favicon/store";
 import { roleOf, type ProviderRole } from "@/lib/provider_stats/role";
 import { routeEventFacts, routeOutcomeOf, type RouteOutcome } from "@/lib/provider_stats/route_outcome";
 
@@ -68,6 +69,8 @@ export type SubmissionReportRoute = {
 	provider: string;
 	/** The company the route reaches, named as people know it ("Cloudflare", "Sollutium-NL"). */
 	organisation: string;
+	/** Our copy of the company's website icon, once fetched; the pages show its initials until then. */
+	icon: string | null;
 	/** The part the company plays for the target: registrar, host, CDN, blocklist. */
 	role: ProviderRole;
 	/** How the report was filed: "email", or the provider's own channel ("dashboard API", "web form"). */
@@ -239,6 +242,7 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 		const organisation = organisationOf(route);
 		return [route.id, { organisation, name: organisationName(route, organisation) }];
 	}));
+	const icons = await FaviconStore.iconsFor([...organisations.values()].flatMap(({ organisation }) => organisation.site ?? []));
 
 	/** A stored message as the case page shows it: its text cleaned, a review state told apart, and the decision it states. */
 	const messageView = (route: AbuseProviderRoute, message: (typeof messages)[number]): SubmissionReportMessage => {
@@ -314,6 +318,7 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 					id: route.id,
 					provider: route.providerDisplayName,
 					organisation: name,
+					icon: (organisation.site && icons.get(organisation.site)) ?? null,
 					role: roleOf(route, target?.targetType ?? "domain", organisation),
 					channel: route.routeType === "email" ? "email" : getProviderSubmissionProvider(route.providerRegistryKey)?.channel ?? "online form",
 					outcome,

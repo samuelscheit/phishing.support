@@ -11,7 +11,8 @@
 import { ChevronRight } from "lucide-react";
 
 import { ROLE_LABEL } from "@/components/provider_stats/labels";
-import { BUCKET_STYLE, ProviderAvatar, StandingPill, Steps } from "@/components/reports/standing";
+import { ProviderAvatar } from "@/components/reports/ProviderAvatar";
+import { BUCKET_STYLE, StandingPill, Steps } from "@/components/reports/standing";
 import type { PublicCampaignSite, PublicSiteReport } from "@/lib/campaign/public_view";
 import type { Locale } from "@/lib/i18n/locale";
 import { routeBuckets, shortUtc, type RouteBucket } from "@/lib/submissions/report_view";
@@ -19,7 +20,7 @@ import { cn } from "@/lib/util/cn";
 import { COPY } from "./copy";
 
 type SiteReport = { site: PublicCampaignSite; report: PublicSiteReport };
-type ProviderGroup = { organisation: string; role: PublicSiteReport["role"]; channel: string; entries: SiteReport[] };
+type ProviderGroup = { organisation: string; icon: string | null; role: PublicSiteReport["role"]; channel: string; entries: SiteReport[] };
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
@@ -28,7 +29,7 @@ export function providerGroups(sites: readonly PublicCampaignSite[]): ProviderGr
 	const groups = new Map<string, ProviderGroup>();
 	for (const site of sites) for (const report of site.reports) {
 		const key = `${report.organisation}\u0000${report.role}`;
-		const group = groups.get(key) ?? { organisation: report.organisation, role: report.role, channel: report.channel, entries: [] };
+		const group = groups.get(key) ?? { organisation: report.organisation, icon: report.icon, role: report.role, channel: report.channel, entries: [] };
 		group.entries.push({ site, report });
 		groups.set(key, group);
 	}
@@ -58,7 +59,7 @@ function ProviderRow({ group, highlight }: { group: ProviderGroup; highlight?: s
 		<details className="group border-t first:border-t-0">
 			<summary className="flex cursor-pointer list-none flex-col gap-3 px-4 py-3 hover:bg-muted/30 sm:flex-row sm:items-start [&::-webkit-details-marker]:hidden">
 				<div className="flex min-w-0 items-center gap-2.5 sm:w-52 sm:shrink-0">
-					<ProviderAvatar name={group.organisation} />
+					<ProviderAvatar name={group.organisation} icon={group.icon} />
 					<div className="min-w-0">
 						<div className="truncate text-sm font-medium">{group.organisation}</div>
 						<div className="text-xs text-muted-foreground">{ROLE_LABEL[group.role].charAt(0).toUpperCase() + ROLE_LABEL[group.role].slice(1)} · {group.channel}</div>

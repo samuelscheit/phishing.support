@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { listProviderSubmissionProviders } from "../abuse/providers/submission_registry_default";
 import { organisationOf, slugify } from "./organisation";
 import { roleOf } from "./role";
 
@@ -8,7 +9,7 @@ const integration = (providerRegistryKey: string, providerDisplayName = "Provide
 
 describe("organisationOf", () => {
 	test("groups every channel of one company: direct integration, older record and abuse mailbox", () => {
-		expect(organisationOf(integration("cloudflare", "Cloudflare Abuse"))).toEqual({ slug: "cloudflare", name: "Cloudflare", role: "cdn" });
+		expect(organisationOf(integration("cloudflare", "Cloudflare Abuse"))).toEqual({ slug: "cloudflare", name: "Cloudflare", role: "cdn", site: "cloudflare.com" });
 		expect(organisationOf(integration("cloudflare_abuse"))).toMatchObject({ slug: "cloudflare" });
 		expect(organisationOf(mail("registrar-abuse@cloudflare.com", "Cloudflare, Inc."))).toMatchObject({ slug: "cloudflare" });
 		expect(organisationOf(integration("netcraft_mail"))).toMatchObject({ slug: "netcraft", role: "blocklist" });
@@ -31,8 +32,8 @@ describe("organisationOf", () => {
 	});
 
 	test("an unknown company is named after its mailbox domain, never after a generic RDAP role name", () => {
-		expect(organisationOf(mail("abuse@packethub.tech", "Abuse-C Role"))).toEqual({ slug: "packethub-tech", name: "packethub.tech" });
-		expect(organisationOf(mail("abuse@corelux.com.tr"))).toEqual({ slug: "corelux-com-tr", name: "corelux.com.tr" });
+		expect(organisationOf(mail("abuse@packethub.tech", "Abuse-C Role"))).toEqual({ slug: "packethub-tech", name: "packethub.tech", site: "packethub.tech" });
+		expect(organisationOf(mail("abuse@corelux.com.tr"))).toEqual({ slug: "corelux-com-tr", name: "corelux.com.tr", site: "corelux.com.tr" });
 	});
 
 	test("a free-mail address is its own organisation, not the mail service's company", () => {
@@ -41,7 +42,7 @@ describe("organisationOf", () => {
 	});
 
 	test("an origin-host mail route without a domain in its key is grouped by its mailbox", () => {
-		expect(organisationOf({ providerRegistryKey: "origin-host-email", providerDisplayName: "Informaten (origin host of herstel-google.com)", verifiedEmail: "abuse@informaten.com" })).toEqual({ slug: "informaten-com", name: "informaten.com" });
+		expect(organisationOf({ providerRegistryKey: "origin-host-email", providerDisplayName: "Informaten (origin host of herstel-google.com)", verifiedEmail: "abuse@informaten.com" })).toEqual({ slug: "informaten-com", name: "informaten.com", site: "informaten.com" });
 	});
 
 	test("each authority is its own organisation under its own name", () => {
@@ -50,6 +51,39 @@ describe("organisationOf", () => {
 
 	test("an integration without a known company keeps its key", () => {
 		expect(organisationOf(integration("some_new_provider", "Some New Provider"))).toEqual({ slug: "some-new-provider", name: "Some New Provider" });
+	});
+
+	test("the website whose icon a company shows: a provider integration's company's own site", () => {
+		expect(organisationOf(integration("cloudflare")).site).toBe("cloudflare.com");
+		expect(organisationOf(integration("netcraft")).site).toBe("netcraft.com");
+		expect(organisationOf(integration("netcraft_mail")).site).toBe("netcraft.com");
+		expect(organisationOf(integration("namesilo")).site).toBe("namesilo.com");
+		expect(organisationOf(integration("eranet")).site).toBe("eranet.com");
+		// A company whose first mailbox domain is not its website names the website.
+		expect(organisationOf(integration("aws_trust_safety"))).toMatchObject({ slug: "amazon", site: "aws.com" });
+		expect(organisationOf(integration("tencent"))).toMatchObject({ slug: "tencent-cloud", site: "tencentcloud.com" });
+		expect(organisationOf(integration("google_safe_browsing")).site).toBe("google.com");
+		expect(organisationOf(mail("abuse@ovh.net")).site).toBe("ovhcloud.com");
+		expect(organisationOf(mail("abuse@registrar.eu")).site).toBe("openprovider.com");
+	});
+
+	test("every provider integration in the registry belongs to a known company with a website", () => {
+		const keys = listProviderSubmissionProviders().map(({ definition }) => definition.key);
+		expect(keys.length).toBeGreaterThan(15);
+		for (const key of keys) expect({ key, site: organisationOf(integration(key)).site }).toEqual({ key, site: expect.stringMatching(/^[a-z0-9-]+\.[a-z]+$/) });
+	});
+
+	test("an abuse mailbox's company website is the mailbox's registrable domain", () => {
+		expect(organisationOf(mail("abuse-ams@v-sys.org", "Sollutium-NL - SOLLUTIUM EU Sp z.o.o., PL"))).toEqual({ slug: "v-sys-org", name: "v-sys.org", site: "v-sys.org" });
+		expect(organisationOf(mail("abuse@mail.noc.hoster.co.uk")).site).toBe("hoster.co.uk");
+		expect(organisationOf(mail("abuse@bluehost.com")).site).toBe("newfold.com");
+	});
+
+	test("no website for a free-mail address, an authority, an integration of no known company or a mailbox on no registrable domain", () => {
+		expect(organisationOf(mail("olatunji8221@gmail.com")).site).toBeUndefined();
+		expect(organisationOf({ providerRegistryKey: "authority:by-zcb", providerDisplayName: "Zentralstelle Cybercrime Bayern", verifiedEmail: "zcb@polizei.bayern.de" }).site).toBeUndefined();
+		expect(organisationOf(integration("some_new_provider")).site).toBeUndefined();
+		expect(organisationOf(mail("abuse@localhost")).site).toBeUndefined();
 	});
 
 	test("slugify keeps only lower-case words joined by single hyphens", () => {

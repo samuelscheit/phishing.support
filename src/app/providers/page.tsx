@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { OutcomeBar } from "@/components/provider_stats/charts";
+import { ProviderAvatar } from "@/components/reports/ProviderAvatar";
 import { formatMinutes, formatPercent, ROLE_MEASURE, ROLE_TITLE, VERDICT_FILL, VERDICT_LABEL } from "@/components/provider_stats/labels";
 import { Figure, PageShell } from "@/components/provider_stats/PageShell";
 import { LOW_DATA_THRESHOLD, percent, type ProviderStats } from "@/lib/provider_stats/aggregate";
@@ -38,7 +39,7 @@ function Rate({ part, whole, title }: { part: number; whole: number; title?: str
 	return <span title={title ?? `${part} of ${whole}`} className={cn("tabular-nums", share === undefined && "text-muted-foreground")}>{formatPercent(share)}</span>;
 }
 
-function ProviderTable({ providers }: { providers: readonly ProviderStats[] }) {
+function ProviderTable({ providers, icons }: { providers: readonly ProviderStats[]; icons: Record<string, string> }) {
 	return (
 		<div className="overflow-x-auto rounded-xl border">
 			<table className="w-full min-w-[60rem] text-sm">
@@ -59,8 +60,13 @@ function ProviderTable({ providers }: { providers: readonly ProviderStats[] }) {
 					{providers.map((stats) => (
 						<tr key={stats.organisation.slug} className="hover:bg-muted/30">
 							<td className="px-4 py-2.5 [overflow-wrap:anywhere]">
-								<Link href={`/providers/${stats.organisation.slug}`} className="font-medium text-foreground hover:underline">{stats.organisation.name}</Link>
-								{stats.notDelivered ? <span className="ml-2 whitespace-nowrap text-xs text-muted-foreground" title="Reports never filed: our delivery failed or the provider's form refused the submission. They count neither for nor against the provider.">+{stats.notDelivered} not filed</span> : null}
+								<div className="flex items-center gap-2.5">
+									<ProviderAvatar name={stats.organisation.name} icon={icons[stats.organisation.slug] ?? null} />
+									<div className="min-w-0">
+										<Link href={`/providers/${stats.organisation.slug}`} className="font-medium text-foreground hover:underline">{stats.organisation.name}</Link>
+										{stats.notDelivered ? <span className="ml-2 whitespace-nowrap text-xs text-muted-foreground" title="Reports never filed: our delivery failed or the provider's form refused the submission. They count neither for nor against the provider.">+{stats.notDelivered} not filed</span> : null}
+									</div>
+								</div>
 							</td>
 							<td className="px-3 py-2.5 text-right tabular-nums">{stats.delivered}</td>
 							<td className="px-3 py-2.5"><OutcomeBar stats={stats} /></td>
@@ -78,7 +84,7 @@ function ProviderTable({ providers }: { providers: readonly ProviderStats[] }) {
 	);
 }
 
-function RoleSection({ entry, sort }: { entry: RoleOverview; sort: Sort }) {
+function RoleSection({ entry, sort, icons }: { entry: RoleOverview; sort: Sort; icons: Record<string, string> }) {
 	const { total } = entry;
 	const providers = ranked(entry.providers, sort);
 	const main = providers.filter((stats) => stats.delivered >= LOW_DATA_THRESHOLD);
@@ -92,13 +98,13 @@ function RoleSection({ entry, sort }: { entry: RoleOverview; sort: Sort }) {
 					{total.delivered} reports · <Rate part={total.verdicts.acknowledged} whole={total.delivered} /> acknowledged · <Rate part={total.takenDown} whole={total.checked} /> taken down · median reply {formatMinutes(total.replyMinutes.median)}
 				</p>
 			</div>
-			{main.length ? <ProviderTable providers={main} /> : null}
+			{main.length ? <ProviderTable providers={main} icons={icons} /> : null}
 			{few.length ? (
 				<details className="group rounded-xl border border-dashed" open={!main.length}>
 					<summary className="cursor-pointer list-none px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
 						<span aria-hidden className="group-open:hidden">▸</span><span aria-hidden className="hidden group-open:inline">▾</span> {few.length} {few.length === 1 ? "provider" : "providers"} with fewer than {LOW_DATA_THRESHOLD} reports: too few for their rates to say much
 					</summary>
-					<div className="p-2 pt-0"><ProviderTable providers={few} /></div>
+					<div className="p-2 pt-0"><ProviderTable providers={few} icons={icons} /></div>
 				</details>
 			) : null}
 		</section>
@@ -137,7 +143,7 @@ export default async function ProvidersPage({ searchParams }: { searchParams: Pr
 				</ul>
 			</header>
 
-			{overview.roles.map((entry) => <RoleSection key={entry.role} entry={entry} sort={sort} />)}
+			{overview.roles.map((entry) => <RoleSection key={entry.role} entry={entry} sort={sort} icons={overview.icons} />)}
 
 			<Methodology />
 		</PageShell>

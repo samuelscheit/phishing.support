@@ -10,7 +10,8 @@ import type { SubmissionReport } from "@/lib/submissions/abuse_details";
 import { nextStep, rankedRoutes, routeBuckets, shortUtc, subjectLabel, takedownSummary, type RouteEntry, type TakedownSummary } from "@/lib/submissions/report_view";
 import { cn } from "@/lib/util/cn";
 import { RouteTimeline } from "./RouteTimeline";
-import { BUCKET_STYLE, ProviderAvatar, StandingPill, Steps } from "./standing";
+import { ProviderAvatar } from "./ProviderAvatar";
+import { BUCKET_STYLE, StandingPill, Steps } from "./standing";
 
 type Investigation = NonNullable<WebsiteSubmissionData["investigation"]>;
 
@@ -152,7 +153,7 @@ function RouteRow({ entry }: { entry: RouteEntry }) {
 		<details id={`route-${route.id}`} className="group scroll-mt-24 border-t first:border-t-0 target:bg-amber-50/40">
 			<summary className="grid cursor-pointer list-none grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2.5 px-4 py-3 hover:bg-muted/30 [&::-webkit-details-marker]:hidden @2xl:grid-cols-[minmax(0,13rem)_7.5rem_minmax(0,1fr)_auto]">
 				<div className="flex min-w-0 items-center gap-2.5">
-					<ProviderAvatar name={route.organisation} />
+					<ProviderAvatar name={route.organisation} icon={route.icon} />
 					<div className="min-w-0">
 						<div className="truncate text-sm font-medium">{route.organisation}</div>
 						<div className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
