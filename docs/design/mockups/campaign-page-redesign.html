@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup – campaign page in the case page's layout</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+	[hidden] { display: none !important; }
+	body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+	.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+	.no-scrollbar::-webkit-scrollbar { display: none; }
+	.thumb-on { outline: 2px solid #0a0a0a; outline-offset: 2px; }
+</style>
+</head>
+<body class="bg-white text-neutral-950 antialiased">
+<div class="mx-auto max-w-7xl space-y-6 px-4 py-8">
+
+	<!-- Header: the case page's breadcrumb, title row and badges -->
+	<header class="space-y-3">
+		<div class="flex items-center justify-between gap-4">
+			<nav class="flex min-w-0 items-center gap-2 text-sm" aria-label="Breadcrumb">
+				<a href="#" class="hidden text-neutral-500 hover:underline sm:inline">Phishing Support</a>
+				<span class="hidden text-neutral-400 sm:inline">/</span>
+				<span class="text-neutral-500">Campaigns</span>
+				<span class="text-neutral-400">/</span>
+				<span class="truncate font-medium" id="crumb"></span>
+			</nav>
+			<div class="inline-flex shrink-0 rounded-md bg-neutral-100 p-0.5 text-xs">
+				<button class="rounded bg-white px-2 py-1 font-medium shadow-sm">English</button>
+				<button class="px-2 py-1 text-neutral-500">Deutsch</button>
+			</div>
+		</div>
+		<div class="flex flex-wrap items-start justify-between gap-3">
+			<div class="min-w-0 space-y-1">
+				<h1 class="flex items-center gap-2 text-xl font-semibold leading-tight tracking-tight sm:text-2xl">
+					<svg class="size-6 shrink-0 text-neutral-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+					<span>Fake Meta sign-in pages</span>
+				</h1>
+				<p class="text-sm text-neutral-500" id="facts"></p>
+			</div>
+			<div class="flex flex-wrap items-center gap-2">
+				<span class="rounded-full border px-2 py-0.5 text-[10px] text-neutral-500" id="range"></span>
+				<span class="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700"><span class="relative flex size-2"><span class="absolute inline-flex size-full animate-ping rounded-full bg-red-400 opacity-75"></span><span class="relative inline-flex size-2 rounded-full bg-red-600"></span></span><span id="active"></span></span>
+				<span class="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">
+					<svg class="size-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4M12 16h.01"/></svg>Phishing</span>
+			</div>
+		</div>
+	</header>
+
+	<!-- The case page's campaign strip, turned into the one warning a visitor must see -->
+	<section class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-600/30 bg-red-600/5 px-4 py-3">
+		<div class="min-w-0">
+			<p class="text-sm font-semibold" id="warning"></p>
+			<p class="text-xs text-neutral-500">Phishing Support is an independent service that gets fake sites taken down. We are not Meta.</p>
+		</div>
+		<a href="#todo" class="inline-flex shrink-0 items-center gap-2 rounded-xl border bg-white px-4 py-2.5 text-sm font-medium shadow-sm hover:bg-neutral-50">Typed something in? What to do
+			<svg class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></a>
+	</section>
+
+	<div class="grid items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+
+		<!-- Left: the sites themselves, then the record in tabs -->
+		<div class="min-w-0 space-y-6">
+			<div class="overflow-hidden rounded-xl border shadow-sm">
+				<div class="flex items-center gap-2 border-b bg-neutral-50 px-3 py-2">
+					<span class="flex gap-1"><i class="size-2.5 rounded-full bg-neutral-300"></i><i class="size-2.5 rounded-full bg-neutral-300"></i><i class="size-2.5 rounded-full bg-neutral-300"></i></span>
+					<button id="prev" class="rounded p-1 text-neutral-500 hover:bg-neutral-200" aria-label="Previous site"><svg class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+					<button id="next" class="rounded p-1 text-neutral-500 hover:bg-neutral-200" aria-label="Next site"><svg class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+					<div class="mono min-w-0 flex-1 truncate rounded-md border bg-white px-2.5 py-1 text-xs text-neutral-500" id="urlbar"></div>
+					<span class="shrink-0 text-xs tabular-nums text-neutral-500" id="pos"></span>
+				</div>
+				<div class="relative flex h-[420px] items-start justify-center overflow-hidden bg-neutral-100">
+					<img id="shot" class="h-full w-auto border-x bg-white object-contain object-top shadow-sm" alt="">
+					<span class="absolute left-3 top-3 rounded-md bg-neutral-950/80 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">Fake · do not enter anything</span>
+				</div>
+				<div class="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs">
+					<span class="text-neutral-500" id="shotmeta"></span>
+					<span class="flex items-center gap-3"><span id="shotstate"></span><a href="#" class="font-medium text-blue-600 hover:underline" id="shotcase">Open case →</a></span>
+				</div>
+				<div class="no-scrollbar flex gap-2 overflow-x-auto border-t bg-neutral-50 p-2.5" id="strip"></div>
+			</div>
+
+			<div>
+				<div class="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg bg-neutral-100 p-1 text-sm" role="tablist" id="tabs"></div>
+				<div class="mt-4" id="panels">
+
+					<section data-tab="sites" class="space-y-3">
+						<div class="flex flex-wrap items-center justify-between gap-3">
+							<div class="inline-flex rounded-md bg-neutral-100 p-0.5 text-xs" id="filters"></div>
+							<label class="relative min-w-64 flex-1 sm:max-w-sm">
+								<svg class="absolute left-2.5 top-2.5 size-4 text-neutral-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+								<input id="search" class="w-full rounded-md border py-2 pl-8 pr-3 text-sm outline-none focus:ring-2 focus:ring-neutral-300" placeholder="Paste your link: is it one of them?">
+							</label>
+						</div>
+						<p id="searchresult" class="hidden rounded-md px-3 py-2 text-sm"></p>
+						<div class="overflow-hidden rounded-lg border">
+							<table class="w-full table-fixed text-sm">
+								<thead class="bg-neutral-50 text-left text-xs text-neutral-500">
+									<tr><th class="px-3 py-2 font-medium">Site</th><th class="hidden w-28 px-3 py-2 font-medium sm:table-cell">Language</th><th class="hidden w-24 px-3 py-2 font-medium md:table-cell">First seen</th><th class="hidden w-20 px-3 py-2 font-medium md:table-cell">Reports</th><th class="w-32 px-3 py-2 font-medium">Status</th></tr>
+								</thead>
+								<tbody id="rows" class="divide-y"></tbody>
+							</table>
+						</div>
+					</section>
+
+					<section data-tab="timeline" class="rounded-lg border p-4">
+						<div class="flex flex-wrap items-center justify-between gap-2 text-sm">
+							<p><span class="font-semibold">When they appeared</span> <span class="text-neutral-500" id="tlsub"></span></p>
+							<p class="flex gap-3 text-xs text-neutral-500"><span class="flex items-center gap-1"><i class="size-2.5 rounded-sm bg-red-500"></i>Still online</span><span class="flex items-center gap-1"><i class="size-2.5 rounded-sm bg-emerald-500"></i>Taken down</span></p>
+						</div>
+						<div class="mt-4 flex h-56 items-end gap-1.5" id="bars"></div>
+						<div class="mt-1 flex gap-1.5 text-[10px] text-neutral-500" id="days"></div>
+					</section>
+
+					<section data-tab="why" class="space-y-3">
+						<p class="text-sm text-neutral-500">Why we think one person or group runs all these sites.</p>
+						<div class="grid gap-3 sm:grid-cols-2" id="reasons"></div>
+					</section>
+
+					<section data-tab="reports" class="space-y-3">
+						<p class="text-sm text-neutral-500">Every report we sent, per provider. A site counts as taken down once one provider confirms it.</p>
+						<div class="overflow-hidden rounded-lg border">
+							<table class="w-full text-sm">
+								<thead class="bg-neutral-50 text-left text-xs text-neutral-500"><tr><th class="px-3 py-2 font-medium">Provider</th><th class="px-3 py-2 font-medium">Sites</th><th class="px-3 py-2 font-medium">Outcome</th></tr></thead>
+								<tbody id="providers" class="divide-y"></tbody>
+							</table>
+						</div>
+					</section>
+
+					<section data-tab="technical" class="space-y-4" id="technical"></section>
+
+					<section data-tab="evidence" class="space-y-3">
+						<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
+							<div>
+								<p class="text-sm font-semibold">Evidence of every visit</p>
+								<p class="text-xs text-neutral-500" id="evsub"></p>
+							</div>
+							<a href="#" class="inline-flex items-center gap-2 rounded-md bg-neutral-950 px-3 py-2 text-sm font-medium text-white">Download evidence.zip</a>
+						</div>
+						<p class="text-xs text-neutral-500">Each site's files (screenshots, archived page, timestamped manifest) are also in its own case under “Open case”.</p>
+					</section>
+				</div>
+			</div>
+		</div>
+
+		<!-- Right: verdict, takedown, what to do: the case page's side column -->
+		<!-- On a phone the verdict and what to do come first, as the case page puts its outcome first. -->
+		<aside class="order-first min-w-0 space-y-4 lg:order-none lg:sticky lg:top-6">
+			<section class="rounded-lg border border-red-600/30 bg-red-600/5 p-4">
+				<div class="flex items-center gap-2 text-sm font-semibold text-red-700">
+					<svg class="size-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4M12 16h.01"/></svg>
+					Phishing: credential theft
+				</div>
+				<p class="mt-2 text-sm">Impersonates <span class="font-medium">Meta</span><span class="text-neutral-500"> · official site www.meta.com</span></p>
+				<p class="mt-1 text-sm text-neutral-600" id="summary"></p>
+				<div class="mt-3 text-[11px] font-medium uppercase tracking-wide text-neutral-500">How to tell them apart</div>
+				<div class="mt-1 space-y-1 text-xs">
+					<div class="mono flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5"><span class="w-9 font-sans font-semibold text-emerald-700">Real</span><span>https://www.<b>meta.com</b>/</span></div>
+					<div class="mono flex min-w-0 items-center gap-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5"><span class="w-9 shrink-0 font-sans font-semibold text-red-700">Fake</span><span class="break-all" id="fakeurl"></span></div>
+				</div>
+				<div class="mt-3 text-[11px] font-medium uppercase tracking-wide text-neutral-500">Asks for</div>
+				<div class="mt-1 flex flex-wrap gap-1.5 text-xs" id="asks"></div>
+				<div class="mt-3 text-[11px] font-medium uppercase tracking-wide text-neutral-500">Evidence <span class="normal-case tracking-normal" id="quotefrom"></span></div>
+				<blockquote class="mt-1 border-l-2 pl-2 text-xs text-neutral-500" id="quote"></blockquote>
+			</section>
+
+			<section class="rounded-lg border p-4">
+				<div class="flex items-baseline justify-between gap-2">
+					<p class="text-sm font-semibold">Takedown</p>
+					<button data-goto="reports" class="text-xs font-medium text-blue-600 hover:underline" id="reportlink"></button>
+				</div>
+				<p class="mt-0.5 text-xs text-neutral-500" id="tdsub"></p>
+				<div class="mt-3 flex h-2.5 overflow-hidden rounded-full bg-neutral-100" id="tdbar"></div>
+				<div class="mt-2 grid grid-cols-3 gap-2 text-xs" id="tdlegend"></div>
+			</section>
+
+			<section class="rounded-lg border p-4" id="todo">
+				<p class="text-sm font-semibold">What did you type in?</p>
+				<p class="text-xs text-neutral-500">Pick the furthest you got.</p>
+				<div class="mt-3 grid grid-cols-2 gap-1.5 text-xs" id="kinds"></div>
+				<div class="mt-3 space-y-2 text-sm" id="steps"></div>
+			</section>
+		</aside>
+	</div>
+</div>
+
+<script>
+const DATA = {"campaignId":"381039186385310339","title":"Fake Meta page-access restriction notice","summary":"These pages pose as Meta and tell visitors that access to their page is limited, targeting page owners in several languages. They ask for an email address, password, and one-time code; 29 sites appeared in under five days. Matching page content and underlying site code show they are operated by the same person or group.","firstSeenAt":"2026-11-15T00:32:31.000Z","lastSeenAt":"2026-11-19T22:21:00.000Z","platform":"onrender.com","languages":["nl","da","en","de","sv","fr"],"reasons":[{"kind":"same_page","title":"Same page","text":"6 of the 29 pages serve the same page body, byte for byte apart from its own address. A copied design would not match this exactly."},{"kind":"same_structure","title":"Same template","text":"24 of the 29 pages are built from the same template: the same 45 HTML elements in the same order; only the words differ."},{"kind":"same_code","title":"Same code","text":"28 of the 29 pages run the same program files (13), byte for byte. A copied design would not match this exactly, and none of these files is a public library."},{"kind":"same_pattern","title":"Same pattern","text":"29 pages on onrender.com within 5 days, a new one about every 9 minutes."}],"visitor":{"brand":{"name":"Meta","officialUrl":"https://www.meta.com/","domain":"meta.com","links":{}},"kinds":["email","password","code"]},"technical":{"destinations":[{"endpoint":"https://<site>/api/send","method":"POST","fields":["email address","password","one-time code"],"sameSite":true,"siteCount":14}],"backends":[],"payments":[],"deliveries":[],"kitFiles":[{"sha256":"31361df9a11d077d8cd06f852af0509d115ad1a4f5565b3643d81d93f8b02a3c","size":215029,"path":"/_next/static/chunks/42c2f976f917735c.js","siteCount":28},{"sha256":"84be583babcfe89d0a80ab1ea31be71a3794146080a686f3e79a16e9eacfa76b","size":85397,"path":"/_next/static/chunks/9a92860c2f6451e1.js","siteCount":28},{"sha256":"0f7589ffdd71756fd372243ec807749d9cb52f6315b6962d6492c7b1abd52f3f","size":50740,"path":"/_next/static/chunks/664b1e113cca09c3.js","siteCount":28},{"sha256":"2697b51ba1e021e49a3678dfcd47ecf6534da683086db9f2ee519db6f892f1be","size":39955,"path":"/_next/static/chunks/d05bbab223271673.js","siteCount":28},{"sha256":"f4b27b738bd8241a177acc69beadbb4a191eba57e0c3ac4f7be577ed05aba73a","size":27846,"path":"/_next/static/chunks/0328fab0897e0e2d.js","siteCount":28},{"sha256":"7ea008b3817d1bc23b6af9cfed93c2792eef7b860c7bc2b465f53d671e170389","size":13422,"path":"/_next/static/chunks/84409e1e650578e1.js","siteCount":28},{"sha256":"00538e4f3951a3744300781d419d9d5c2bc7c90d615ae968cb9fc1c26019f93a","size":9945,"path":"/_next/static/chunks/turbopack-80da49f704d6686a.js","siteCount":28},{"sha256":"052b4920626f683adb2501061f44436eb9bcd0c7aa97b7e4104de4b6a98c78a6","size":9118,"path":"/_next/static/chunks/effc31f2c2f4cb47.js","siteCount":28}],"dns":[{"record":"CNAME","value":"gcp-us-west1-1.origin.onrender.com","siteCount":29},{"record":"A","value":"216.24.57.16","siteCount":29},{"record":"A","value":"216.24.57.18","siteCount":29}],"abuseContacts":["abuse@cloudflare.com","abuse@render.com"],"kitCount":8},"kitTotal":31,"sites":[{"host":"policy-trust-assurance.onrender.com","url":"https://policy-trust-assurance.onrender.com/help","firstSeenAt":"2026-11-15T00:32:31.000Z","language":"nl","thumb":"/api/artifacts/381066624091820681","shot":"/api/artifacts/380254044276396034","steps":["/api/artifacts/380254044272201729"],"asks":["email address","password"],"quote":"We begeleiden u gedetailleerd door het proces en helpen u volledig te activeren om uw pagina te ontgrendelen.","sent":["https://policy-trust-assurance.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-15T00:42:35.274Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-15T00:42:32.561Z","ticket":"8RHJ4bAdlwYjwf1HCIJIFbefunon1Npy"}],"takedown":"reported","evidence":5},{"host":"platformcomplianceoffice.onrender.com","url":"https://platformcomplianceoffice.onrender.com/help","firstSeenAt":"2026-11-15T00:50:29.000Z","language":"da","thumb":"/api/artifacts/381066626407076500","shot":"/api/artifacts/380159657978630179","steps":["/api/artifacts/380159657978630178"],"asks":[],"quote":"Vi vil guide dig gennem processen i detaljer og hjælpe dig med at aktivere fuldt ud for at låse din side op.","sent":[],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-15T01:39:02.597Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-15T01:38:55.014Z","ticket":"ZbSUxQhP0ThrY4f3hb91uLlqk4dnfTTJ"}],"takedown":"reported","evidence":5},{"host":"policy-standards-advisory.onrender.com","url":"https://policy-standards-advisory.onrender.com/help","firstSeenAt":"2026-11-15T00:50:29.000Z","language":"en","thumb":"/api/artifacts/381066628202238623","shot":"/api/artifacts/380157923763949590","steps":["/api/artifacts/380157923759755285"],"asks":[],"quote":"Your page's accessibility is limited, so we ask that higher security requirements be applied to that account.","sent":[],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-15T01:39:02.639Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-15T01:39:05.408Z","ticket":"MGjEGku5mC4MoTmNpzD2dlAR3Wz5csWB"}],"takedown":"reported","evidence":5},{"host":"policy-trust-principles.onrender.com","url":"https://policy-trust-principles.onrender.com/help","firstSeenAt":"2026-11-15T01:00:29.000Z","language":"da","thumb":"/api/artifacts/381066630366499498","shot":"/api/artifacts/380160489293877303","steps":["/api/artifacts/380160489289682998"],"asks":[],"quote":"Vi vil guide dig gennem processen i detaljer og hjælpe dig med at aktivere fuldt ud for at låse din side op.","sent":[],"reports":[{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-15T01:39:05.458Z","ticket":"yz6WcFscWP1fgjY88W0S9AL5IAbPmI6w"},{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-15T10:14:59.067Z","ticket":null}],"takedown":"reported","evidence":5},{"host":"communityintegrityreview.onrender.com","url":"https://communityintegrityreview.onrender.com/help","firstSeenAt":"2026-11-15T01:00:29.000Z","language":"de","thumb":"/api/artifacts/381066631951946421","shot":"/api/artifacts/380162517244055630","steps":["/api/artifacts/380162517239861325"],"asks":[],"quote":"Wir führen Sie ausführlich durch den Prozess und helfen Ihnen bei der vollständigen Aktivierung, um Ihre Seite freizuschalten.","sent":[],"reports":[{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-15T01:39:05.490Z","ticket":"P0nd2ab5LFrvxXncJn3aa9mG1wPvTcjG"},{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-15T10:15:20.196Z","ticket":null}],"takedown":"reported","evidence":5},{"host":"policy-transparency-advisory.onrender.com","url":"https://policy-transparency-advisory.onrender.com/help","firstSeenAt":"2026-11-15T01:10:29.000Z","language":"de","thumb":"/api/artifacts/381066633977795264","shot":"/api/artifacts/380163122104635590","steps":["/api/artifacts/380163122062692549"],"asks":[],"quote":"Wir führen Sie ausführlich durch den Prozess und helfen Ihnen bei der vollständigen Aktivierung, um Ihre Seite freizuschalten.","sent":[],"reports":[{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-15T01:39:05.534Z","ticket":"nn39PtGRefk7VtxGUGlAuxBTxq8JtyCl"},{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-15T10:15:28.583Z","ticket":null}],"takedown":"reported","evidence":5},{"host":"policy-compliance-principles.onrender.com","url":"https://policy-compliance-principles.onrender.com/help","firstSeenAt":"2026-11-15T01:10:29.000Z","language":"sv","thumb":"/api/artifacts/381066635902980811","shot":"/api/artifacts/380164774668800224","steps":["/api/artifacts/380164774643634399"],"asks":[],"quote":"Din sidas tillgänglighet är begränsad, så vi ber att högre säkerhetskrav tillämpas på det kontot.","sent":[],"reports":[{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-15T01:39:05.547Z","ticket":"8G43Q104Is4slrlKAucKSTg6UfQQexUN"},{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"bounced","reportedAt":"2026-11-15T10:15:36.690Z","ticket":null},{"provider":"Cloudflare Abuse","channel":"web form / API","state":"accepted","reportedAt":"2026-11-22T15:42:03.606Z","ticket":"f26ab13f353a9ffd"}],"takedown":"reported","evidence":5},{"host":"standardsverificationcenter.onrender.com","url":"https://standardsverificationcenter.onrender.com/help","firstSeenAt":"2026-11-15T01:20:29.000Z","language":"sv","thumb":"/api/artifacts/381066637442290390","shot":"/api/artifacts/380165811806933252","steps":["/api/artifacts/380165811798544643"],"asks":[],"quote":"Vi skapade det här säkerhetsprogrammet för att låsa upp dina sidor.","sent":[],"reports":[{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-15T01:39:05.616Z","ticket":"XZ0tmFdlU52WvDYabYB5DMvbimffKTv2"},{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-15T10:16:03.489Z","ticket":null}],"takedown":"reported","evidence":5},{"host":"policy-integrity-insights.onrender.com","url":"https://policy-integrity-insights.onrender.com/help","firstSeenAt":"2026-11-15T01:20:29.000Z","language":"sv","thumb":"/api/artifacts/381066639841432289","shot":"/api/artifacts/380165612917231867","steps":["/api/artifacts/380165612913037562"],"asks":[],"quote":"Vi guidar dig genom processen i detalj och hjälper dig att fullt ut aktivera för att låsa upp din sida.","sent":[],"reports":[{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-15T01:39:05.608Z","ticket":"xwgvGieAq90e5hkq48Qtm3rCqMdwo3UM"},{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-15T10:15:54.526Z","ticket":null}],"takedown":"reported","evidence":5},{"host":"policy-transparency-advisory.onrender.com","url":"https://policy-transparency-advisory.onrender.com/help","firstSeenAt":"2026-11-17T15:14:09.000Z","language":"nl","thumb":"/api/artifacts/381101368577889324","shot":"/api/artifacts/381099822179946499","steps":["/api/artifacts/381099822175752194"],"asks":["email address","password","one-time code"],"quote":"We begeleiden u gedetailleerd door het proces en helpen u volledig te activeren om uw pagina te ontgrendelen.","sent":["https://policy-transparency-advisory.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T15:20:51.859Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T15:20:54.100Z","ticket":"Et346L6KH6JXT0bmKE5By866HaKbboNn"}],"takedown":"reported","evidence":69},{"host":"contentpolicyoffice.onrender.com","url":"https://contentpolicyoffice.onrender.com/help","firstSeenAt":"2026-11-17T15:22:49.000Z","language":"en","thumb":"/api/artifacts/381109332772655144","shot":"/api/artifacts/381102040408921248","steps":["/api/artifacts/381102040404726943"],"asks":["email address","password","one-time code"],"quote":"We will guide you through the process in detail and help you fully activate to unlock your Page.","sent":["https://contentpolicyoffice.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T16:56:48.451Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T16:56:56.489Z","ticket":"3OUj3kkB7coBV7LX9Ay6BzSmjbASmF4v"}],"takedown":"reported","evidence":59},{"host":"compliancegovernanceoffice.onrender.com","url":"https://compliancegovernanceoffice.onrender.com/help","firstSeenAt":"2026-11-17T15:26:01.000Z","language":"en","thumb":"/api/artifacts/381112463011091234","shot":"/api/artifacts/381102807823946932","steps":["/api/artifacts/381102807811364019"],"asks":["email address","password","one-time code"],"quote":"We will guide you through the process in detail and help you fully activate to unlock your Page.","sent":["https://compliancegovernanceoffice.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"confirmed","reportedAt":"2026-11-17T16:57:07.141Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T16:57:06.383Z","ticket":"Eh1v034S46WOHjt3uVMi67e3Zgk8XTmi"}],"takedown":"confirmed","evidence":69},{"host":"policy-integrity-solutions.onrender.com","url":"https://policy-integrity-solutions.onrender.com/help","firstSeenAt":"2026-11-17T15:32:55.000Z","language":"sv","thumb":"/api/artifacts/381112478110585647","shot":"/api/artifacts/381104712998457354","steps":["/api/artifacts/381104712994263049"],"asks":["email address","password","one-time code"],"quote":"Din sidas tillgänglighet är begränsad, så vi ber att högre säkerhetskrav tillämpas på det kontot.","sent":["https://policy-integrity-solutions.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:10:49.166Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:10:52.859Z","ticket":"Nb3IS1YyeCyVlxkKObC4muDrwTh34LCO"}],"takedown":"reported","evidence":69},{"host":"policy-compliance-directory.onrender.com","url":"https://policy-compliance-directory.onrender.com/help","firstSeenAt":"2026-11-17T15:32:55.000Z","language":"sv","thumb":"/api/artifacts/381112492891312956","shot":"/api/artifacts/381104815268171796","steps":["/api/artifacts/381104815268171795"],"asks":["email address","password","one-time code"],"quote":"Vi guidar dig genom processen i detalj och hjälper dig att fullt ut aktivera för att låsa upp din sida.","sent":["https://policy-compliance-directory.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:10:59.869Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:11:03.150Z","ticket":"sRfQRgB80Mjd76f0Oi1uuiRKZkNVDVkc"}],"takedown":"reported","evidence":69},{"host":"policycomplianceinsight.onrender.com","url":"https://policycomplianceinsight.onrender.com/help","firstSeenAt":"2026-11-17T15:40:27.000Z","language":"sv","thumb":"/api/artifacts/381112520284312393","shot":"/api/artifacts/381106433015419074","steps":["/api/artifacts/381106432885395649"],"asks":["email address","password","one-time code"],"quote":"Din sidas tillgänglighet är begränsad, så vi ber att högre säkerhetskrav tillämpas på det kontot.","sent":["https://policycomplianceinsight.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:11:11.744Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:11:14.680Z","ticket":"Pj6Pcea3ukF3D6j4y9WoAGqrUagirsui"}],"takedown":"reported","evidence":69},{"host":"policycomplianceexperts.onrender.com","url":"https://policycomplianceexperts.onrender.com/help","firstSeenAt":"2026-11-17T15:40:36.000Z","language":"sv","thumb":"/api/artifacts/381112537640342358","shot":"/api/artifacts/381106475944120519","steps":["/api/artifacts/381106475939926214"],"asks":["email address","password","one-time code"],"quote":"Din sidas tillgänglighet är begränsad, så vi ber att högre säkerhetskrav tillämpas på det kontot.","sent":["https://policycomplianceexperts.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:11:20.677Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:11:23.589Z","ticket":"VGUUqjvhhs616fbb02dZ22LWED6aHDjL"}],"takedown":"reported","evidence":69},{"host":"policy-standards-library.onrender.com","url":"https://policy-standards-library.onrender.com/help","firstSeenAt":"2026-11-17T15:46:57.000Z","language":"nl","thumb":"/api/artifacts/381129216546050720","shot":"/api/artifacts/381108078952583542","steps":["/api/artifacts/381108078952583541"],"asks":[],"quote":"Welkom bij Meta Protect.","sent":[],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:11:50.532Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:11:53.531Z","ticket":"5X19REmKu6Xd3CAPDnXBDcL3zZgF6Ekg"}],"takedown":"reported","evidence":9},{"host":"standardsverificationcenter-b2u7.onrender.com","url":"https://standardsverificationcenter-b2u7.onrender.com/help","firstSeenAt":"2026-11-17T15:48:53.000Z","language":"nl","thumb":"/api/artifacts/381129041958146559","shot":"/api/artifacts/381108860762460182","steps":["/api/artifacts/381108860758265877"],"asks":[],"quote":"De toegankelijkheid van uw pagina is beperkt, dus we vragen dat er hogere beveiligingseisen worden toegepast op dat account.","sent":[],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:11:40.922Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:11:43.656Z","ticket":"32Nh36zMQL2cgaVDnldr0DdxYtQoacVy"}],"takedown":"reported","evidence":9},{"host":"policyreviewauthority.onrender.com","url":"https://policyreviewauthority.onrender.com/help/community-standards","firstSeenAt":"2026-11-17T15:51:44.000Z","language":"nl","thumb":"/api/artifacts/383437494760248788","shot":"/api/artifacts/381132115346986326","steps":["/api/artifacts/381109275155501087","/api/artifacts/381132115342792021"],"asks":["email address","password","one-time code"],"quote":"Je account en pagina zijn beperkt of uitgeschakeld","sent":["https://policyreviewauthority.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:24:25.734Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:24:19.191Z","ticket":"ed2HS3pfiozZB4OKdvloTuoG3nEEWNNd"}],"takedown":"reported","evidence":69},{"host":"policy-integrity-resources.onrender.com","url":"https://policy-integrity-resources.onrender.com/help","firstSeenAt":"2026-11-17T15:52:18.000Z","language":"en","thumb":"/api/artifacts/381132094014756172","shot":"/api/artifacts/381109792862638133","steps":["/api/artifacts/381109792812306484"],"asks":["email address","password","one-time code"],"quote":"We will guide you through the process in detail and help you fully activate to unlock your Page.","sent":["https://policy-integrity-resources.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:22:58.402Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:22:52.089Z","ticket":"D6anEmRm4nk8zeHdbuPeBI1OZPc3n582"}],"takedown":"reported","evidence":69},{"host":"policy-compliance-standards-hjyq.onrender.com","url":"https://policy-compliance-standards-hjyq.onrender.com/help","firstSeenAt":"2026-11-17T15:52:18.000Z","language":"en","thumb":"/api/artifacts/381129231620379342","shot":"/api/artifacts/381109754577031216","steps":["/api/artifacts/381109754564448303"],"asks":["email address","password","one-time code"],"quote":"Your page's accessibility is limited, so we ask that higher security requirements be applied to that account.","sent":["https://policy-compliance-standards-hjyq.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"bounced","reportedAt":"2026-11-17T17:12:10.267Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:12:13.575Z","ticket":"yEBXd6pEYFRm5r8IkaqfmOdqBCqPCsU8"},{"provider":"Cloudflare Abuse","channel":"web form / API","state":"accepted","reportedAt":"2026-11-22T15:42:03.757Z","ticket":"b914af1e511700c6"}],"takedown":"reported","evidence":69},{"host":"policygovernanceportal.onrender.com","url":"https://policygovernanceportal.onrender.com/help","firstSeenAt":"2026-11-17T15:57:10.000Z","language":"en","thumb":"/api/artifacts/381132859835946653","shot":"/api/artifacts/381111020304732189","steps":["/api/artifacts/381111020304732188"],"asks":["email address","password","one-time code"],"quote":"We will guide you through the process in detail and help you fully activate to unlock your Page.","sent":["https://policygovernanceportal.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:26:00.664Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:25:54.677Z","ticket":"vVggCxbXlpfUSIZvZTwuivBqrKEwh9QS"}],"takedown":"reported","evidence":69},{"host":"policy-transparency-guidelines.onrender.com","url":"https://policy-transparency-guidelines.onrender.com/help","firstSeenAt":"2026-11-17T15:57:10.000Z","language":"en","thumb":"/api/artifacts/381129039437369825","shot":"/api/artifacts/381110961722888216","steps":["/api/artifacts/381110961643196439"],"asks":[],"quote":"We will guide you through the process in detail and help you fully activate to unlock your Page.","sent":[],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:11:30.731Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:11:33.916Z","ticket":"ShuYnt1KCo1tkabUjU09fjiQZK1v8wGy"}],"takedown":"reported","evidence":14},{"host":"policyintegritycenter.onrender.com","url":"https://policyintegritycenter.onrender.com/help","firstSeenAt":"2026-11-17T16:57:06.000Z","language":"en","thumb":"/api/artifacts/381129705635451842","shot":"/api/artifacts/381128059077530007","steps":["/api/artifacts/381128059052364182"],"asks":["email address","password","one-time code"],"quote":"We will guide you through the process in detail and help you fully activate to unlock your Page.","sent":["https://policyintegritycenter.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:13:29.269Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:13:31.958Z","ticket":"wylt1U31TB2d1CUfusCbTKInreEOhuNi"}],"takedown":"reported","evidence":59},{"host":"policy-compliance-review-qz2i.onrender.com","url":"https://policy-compliance-review-qz2i.onrender.com/help","firstSeenAt":"2026-11-17T16:57:09.000Z","language":"nl","thumb":"/api/artifacts/381133239059748603","shot":"/api/artifacts/381131514655544532","steps":["/api/artifacts/381131514638767315"],"asks":["email address","password","one-time code"],"quote":"We begeleiden u gedetailleerd door het proces en helpen u volledig te activeren om uw pagina te ontgrendelen.","sent":["https://policy-compliance-review-qz2i.onrender.com/api/send"],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:27:32.025Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:27:24.946Z","ticket":"RgmDfikmUlkKLDOGrrMyvW5UzIykgRcT"}],"takedown":"reported","evidence":69},{"host":"policy-accountability-framework.onrender.com","url":"https://policy-accountability-framework.onrender.com/help","firstSeenAt":"2026-11-17T17:06:30.000Z","language":"en","thumb":"/api/artifacts/381129231729431248","shot":"/api/artifacts/381128526994084262","steps":["/api/artifacts/381128526994084261"],"asks":[],"quote":"We will guide you through the process in detail and help you fully activate to unlock your Page.","sent":[],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-17T17:11:59.749Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-17T17:12:02.167Z","ticket":"h1BcHmqIUPbQTy6noFRAjNh1yNy2d4Qx"}],"takedown":"reported","evidence":9},{"host":"compliance-regulation-office.onrender.com","url":"https://compliance-regulation-office.onrender.com/help","firstSeenAt":"2026-11-19T22:03:43.000Z","language":"en","thumb":"/api/artifacts/381929540055734862","shot":"/api/artifacts/381927694104795431","steps":["/api/artifacts/381927694100601126"],"asks":[],"quote":"Your page's accessibility is limited, so we ask that higher security requirements be applied to that account.","sent":[],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-19T22:11:38.998Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-19T22:11:33.000Z","ticket":"jnngvSwFZJGAxNMhwHflZf2Op4ndgslZ"}],"takedown":"reported","evidence":69},{"host":"platformstandardscheck.onrender.com","url":"https://platformstandardscheck.onrender.com/help","firstSeenAt":"2026-11-19T22:11:30.000Z","language":"fr","thumb":"/api/artifacts/381931508497128485","shot":"/api/artifacts/381929755437439603","steps":["/api/artifacts/381929755433245298"],"asks":[],"quote":"L'accessibilité de votre page est limitée, nous demandons donc que des exigences de sécurité plus élevées soient appliquées à ce compte.","sent":[],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-19T22:19:30.789Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-19T22:19:24.985Z","ticket":"Tf8CYbotV4nsf5TlAnBTgYez25oR4ncL"}],"takedown":"reported","evidence":69},{"host":"platformpolicyinsights.onrender.com","url":"https://platformpolicyinsights.onrender.com/help","firstSeenAt":"2026-11-19T22:21:00.000Z","language":"de","thumb":"/api/artifacts/381932735402351868","shot":"/api/artifacts/381932232685657232","steps":["/api/artifacts/381932232685657231"],"asks":[],"quote":"Da die Zugänglichkeit Ihrer Seite eingeschränkt ist, bitten wir Sie, für dieses Konto höhere Sicherheitsanforderungen anzuwenden.","sent":[],"reports":[{"provider":"Render Abuse Contact","channel":"abuse@render.com","state":"awaiting","reportedAt":"2026-11-19T22:24:25.538Z","ticket":null},{"provider":"Netcraft","channel":"web form / API","state":"accepted","reportedAt":"2026-11-19T22:24:20.016Z","ticket":"MfgbPKaipXa6fazX6S0PMxYggWGXotIe"}],"takedown":"reported","evidence":12}]};
+const BASE = "https://phishing.support";
+const sites = [...DATA.sites].sort((a, b) => a.firstSeenAt.localeCompare(b.firstSeenAt));
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const day = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+const LANG = { nl: "🇳🇱 Dutch", da: "🇩🇰 Danish", en: "🇬🇧 English", de: "🇩🇪 German", sv: "🇸🇪 Swedish", fr: "🇫🇷 French" };
+const STATE = {
+	confirmed: ["Taken down", "Taken down", "border-emerald-200 bg-emerald-50 text-emerald-700"],
+	reported: ["Reported, still online", "Still online", "border-red-200 bg-red-50 text-red-700"],
+	problem: ["Report problem", "Report problem", "border-amber-200 bg-amber-50 text-amber-700"],
+	none: ["Not reported yet", "Not reported", "border-neutral-200 bg-neutral-50 text-neutral-600"],
+};
+const pill = (t, short) => `<span class="inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATE[t][2]}"><i class="size-1.5 rounded-full bg-current"></i>${STATE[t][short ? 1 : 0]}</span>`;
+// The registrable part of the host in bold, as the case page's URL bar does.
+const hostHtml = (url) => { const u = new URL(url); const parts = u.hostname.split("."); const reg = parts.slice(-2).join("."); return `${u.protocol}//${esc(parts.slice(0, -2).join("."))}.<b class="text-neutral-900">${esc(reg)}</b>${esc(u.pathname)}`; };
+
+const n = sites.length, down = sites.filter((s) => s.takedown === "confirmed").length;
+const reportTotal = sites.reduce((c, s) => c + s.reports.length, 0);
+const ago = Math.round((Date.now() - new Date(DATA.lastSeenAt)) / 864e5);
+$("crumb").textContent = DATA.title;
+$("facts").textContent = `${n} sites · all on ${DATA.platform} · ${DATA.languages.length} languages · found by Phishing Support`;
+$("range").textContent = `${day(DATA.firstSeenAt)} – ${day(DATA.lastSeenAt)} 2026`;
+$("active").textContent = `Active · newest site ${ago} days ago`;
+$("warning").textContent = `These ${n} sites are fake. Do not enter anything there.`;
+$("summary").textContent = `${n} copies of Meta's sign-in page that tell page owners their page is restricted, in ${DATA.languages.length} languages.`;
+$("asks").innerHTML = ["Email address", "Password", "One-time code"].map((a) => `<span class="rounded-md border bg-white px-2 py-0.5">${a}</span>`).join("");
+$("reportlink").textContent = `${reportTotal} reports →`;
+$("tdsub").textContent = `${down} of ${n} taken down · every site reported`;
+const counts = { confirmed: down, reported: sites.filter((s) => s.takedown === "reported").length, none: sites.filter((s) => s.takedown === "none" || s.takedown === "problem").length };
+$("tdbar").innerHTML = `<i style="width:${(counts.confirmed / n) * 100}%" class="bg-emerald-500"></i><i style="width:${(counts.reported / n) * 100}%" class="bg-red-500"></i><i style="width:${(counts.none / n) * 100}%" class="bg-neutral-300"></i>`;
+$("tdlegend").innerHTML = [["Taken down", counts.confirmed, "bg-emerald-500"], ["Still online", counts.reported, "bg-red-500"], ["Not reported", counts.none, "bg-neutral-300"]]
+	.map(([l, c, b]) => `<div><p class="text-lg font-semibold tabular-nums leading-tight">${c}</p><p class="flex items-center gap-1 text-neutral-500"><i class="size-2 rounded-full ${b}"></i>${l}</p></div>`).join("");
+
+// The browser frame: one selected site, stepped with the arrows, the strip or the table.
+let current = 0;
+function select(i) {
+	current = (i + n) % n;
+	const s = sites[current];
+	$("urlbar").innerHTML = hostHtml(s.url);
+	$("pos").textContent = `Site ${current + 1} of ${n}`;
+	$("shot").src = BASE + (s.thumb || s.shot);
+	$("shotmeta").textContent = `${LANG[s.language] || s.language} · first seen ${day(s.firstSeenAt)} · ${s.steps.length} page${s.steps.length === 1 ? "" : "s"} captured`;
+	$("shotstate").innerHTML = pill(s.takedown);
+	$("fakeurl").innerHTML = hostHtml(s.url);
+	$("quote").textContent = `“${s.quote}”`;
+	$("quotefrom").textContent = `· from site ${current + 1}, in ${LANG[s.language]?.split(" ")[1] || "its language"}`;
+	document.querySelectorAll("[data-site]").forEach((el) => el.classList.toggle(el.tagName === "TR" ? "bg-neutral-50" : "thumb-on", Number(el.dataset.site) === current));
+	document.querySelector(`#strip [data-site="${current}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+}
+$("prev").onclick = () => select(current - 1);
+$("next").onclick = () => select(current + 1);
+$("strip").innerHTML = sites.map((s, i) => `<button data-site="${i}" class="relative h-20 w-[72px] shrink-0 overflow-hidden rounded-md border bg-white" title="${esc(s.host)}"><img src="${BASE + s.thumb}" class="size-full object-cover object-top" alt=""><i class="absolute bottom-1 right-1 size-2 rounded-full ring-2 ring-white ${s.takedown === "confirmed" ? "bg-emerald-500" : "bg-red-500"}"></i></button>`).join("");
+
+// Sites tab: filter, search, rows.
+let filter = "all";
+const FILTERS = [["all", `All ${n}`], ["reported", `Still online ${counts.reported}`], ["confirmed", `Taken down ${down}`]];
+function renderRows() {
+	$("filters").innerHTML = FILTERS.map(([k, l]) => `<button data-filter="${k}" class="rounded px-2.5 py-1 ${k === filter ? "bg-white font-medium shadow-sm" : "text-neutral-500"}">${l}</button>`).join("");
+	$("rows").innerHTML = sites.map((s, i) => [s, i]).filter(([s]) => filter === "all" || s.takedown === filter).map(([s, i]) => `
+		<tr data-site="${i}" class="cursor-pointer hover:bg-neutral-50">
+			<td class="px-3 py-2"><div class="flex min-w-0 items-center gap-3"><img src="${BASE + s.thumb}" class="h-10 w-9 shrink-0 rounded border object-cover object-top" alt=""><div class="min-w-0"><p class="mono truncate text-xs font-medium">${esc(s.host)}</p><p class="text-xs text-neutral-500">${s.steps.length} page${s.steps.length === 1 ? "" : "s"} · ${s.evidence} files</p></div></div></td>
+			<td class="hidden whitespace-nowrap px-3 py-2 text-xs sm:table-cell">${LANG[s.language] || ""}</td>
+			<td class="hidden whitespace-nowrap px-3 py-2 text-xs tabular-nums text-neutral-500 md:table-cell">${day(s.firstSeenAt)}</td>
+			<td class="hidden px-3 py-2 text-xs text-neutral-500 md:table-cell">${s.reports.length}</td>
+			<td class="px-3 py-2">${pill(s.takedown, true)}</td>
+		</tr>`).join("");
+	document.querySelectorAll("#rows [data-site]").forEach((el) => (el.onclick = () => { select(Number(el.dataset.site)); window.scrollTo({ top: 0, behavior: "smooth" }); }));
+	document.querySelectorAll("[data-filter]").forEach((el) => (el.onclick = () => { filter = el.dataset.filter; renderRows(); select(current); }));
+}
+$("search").oninput = (e) => {
+	const q = e.target.value.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0];
+	const box = $("searchresult");
+	if (!q) return box.classList.add("hidden");
+	const hit = sites.findIndex((s) => s.host === q);
+	box.className = `rounded-md px-3 py-2 text-sm ${hit >= 0 ? "bg-red-600 text-white" : "border bg-neutral-50"}`;
+	box.innerHTML = hit >= 0 ? `<b>${esc(q)}</b> is one of these fake sites. Do not enter anything there; if you already did, see <a href="#todo" class="underline">what to do</a>.` : "Not one of these sites. That alone does not make it safe: if unsure, open meta.com yourself.";
+	if (hit >= 0) select(hit);
+};
+
+// Timeline tab: one column per day, one block per site.
+const first = new Date(DATA.firstSeenAt.slice(0, 10)), today = new Date();
+const dayList = []; for (let d = new Date(first); d <= today; d.setDate(d.getDate() + 1)) dayList.push(new Date(d));
+$("tlsub").textContent = `· ${n} sites in ${Math.ceil((new Date(DATA.lastSeenAt) - new Date(DATA.firstSeenAt)) / 864e5)} days, about one every 9 minutes`;
+$("bars").innerHTML = dayList.map((d) => {
+	const key = d.toISOString().slice(0, 10);
+	const on = sites.map((s, i) => [s, i]).filter(([s]) => s.firstSeenAt.slice(0, 10) === key);
+	return `<div class="flex flex-1 flex-col-reverse gap-0.5">${on.map(([s, i]) => `<button data-site="${i}" title="${esc(s.host)}" class="h-2.5 w-full rounded-sm ${s.takedown === "confirmed" ? "bg-emerald-500" : "bg-red-500"} hover:opacity-70"></button>`).join("")}${on.length ? `<span class="mb-1 text-center text-[10px] font-medium tabular-nums">${on.length}</span>` : ""}</div>`;
+}).join("");
+$("days").innerHTML = dayList.map((d) => `<span class="flex-1 text-center">${d.getDate()}</span>`).join("");
+document.querySelectorAll("#bars [data-site]").forEach((el) => (el.onclick = () => select(Number(el.dataset.site))));
+
+// Why one group: each reason with how many of the sites share it.
+$("reasons").innerHTML = DATA.reasons.map((r) => {
+	const m = r.text.match(/^(\d+) (?:of the (\d+) )?pages/);
+	const k = m ? Number(m[1]) : n, of = m && m[2] ? Number(m[2]) : n;
+	return `<div class="rounded-lg border p-4"><div class="flex items-baseline justify-between gap-2"><p class="text-sm font-semibold">${esc(r.title)}</p><p class="text-xs tabular-nums text-neutral-500">${k} of ${of}</p></div><div class="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-100"><i class="block h-full bg-neutral-800" style="width:${(k / of) * 100}%"></i></div><p class="mt-2 text-xs text-neutral-600">${esc(r.text)}</p></div>`;
+}).join("");
+
+// Reports tab: per provider, how its reports ended.
+const byProvider = {};
+for (const s of sites) for (const r of s.reports) { const p = (byProvider[r.provider] ||= { channel: r.channel, n: 0, states: {} }); p.n++; p.states[r.state] = (p.states[r.state] || 0) + 1; }
+const RSTATE = { confirmed: "text-emerald-700", accepted: "text-neutral-700", awaiting: "text-neutral-500", bounced: "text-amber-700", rejected: "text-red-700", failed: "text-red-700", pending: "text-neutral-500" };
+$("providers").innerHTML = Object.entries(byProvider).sort((a, b) => b[1].n - a[1].n).map(([name, p]) => `
+	<tr><td class="px-3 py-2"><p class="font-medium">${esc(name)}</p><p class="text-xs text-neutral-500">${esc(p.channel)}</p></td><td class="px-3 py-2 tabular-nums">${p.n}</td>
+	<td class="px-3 py-2 text-xs">${Object.entries(p.states).map(([st, c]) => `<span class="mr-3 ${RSTATE[st] || ""}"><b class="tabular-nums">${c}</b> ${st}</span>`).join("")}</td></tr>`).join("");
+
+// Technical tab: everything the old collapsed section held, as plain tables.
+const t = DATA.technical;
+const table = (title, sub, head, rows) => `<div><p class="text-sm font-semibold">${title}</p><p class="mb-2 text-xs text-neutral-500">${sub}</p><div class="overflow-x-auto rounded-lg border"><table class="w-full text-xs"><thead class="bg-neutral-50 text-left text-neutral-500"><tr>${head.map((h) => `<th class="px-3 py-2 font-medium">${h}</th>`).join("")}</tr></thead><tbody class="divide-y">${rows.map((r) => `<tr>${r.map((c) => `<td class="px-3 py-2 align-top">${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div></div>`;
+$("technical").innerHTML = [
+	table("Where typed data goes", "Our visit entered made-up data; this is where the pages sent it.", ["Endpoint", "Fields", "Sites"], t.destinations.map((d) => [`<span class="mono">${esc(d.method)} ${esc(d.endpoint)}</span>`, d.fields.join(", "), d.siteCount])),
+	table("DNS", `Shared by the sites · abuse contacts ${t.abuseContacts.join(", ")}`, ["Record", "Value", "Sites"], t.dns.map((d) => [d.record, `<span class="mono">${esc(d.value)}</span>`, d.siteCount])),
+	table(`Kit files (${DATA.kitTotal})`, "Program files the sites share, byte for byte.", ["Path", "SHA-256", "Size", "Sites"], t.kitFiles.map((f) => [`<span class="mono">${esc(f.path)}</span>`, `<span class="mono text-neutral-500">${f.sha256.slice(0, 16)}…</span>`, `${Math.round(f.size / 1024)} KB`, f.siteCount])) + `<button class="mt-2 text-xs font-medium text-blue-600 hover:underline">Show all ${DATA.kitTotal} files</button>`,
+].join("");
+$("evsub").textContent = `${n} sites · ${sites.reduce((c, s) => c + s.evidence, 0)} files · SHA-256 manifest with RFC 3161 timestamps`;
+
+// Tabs, as on the case page.
+const TABS = [["sites", `Sites (${n})`], ["timeline", "Timeline"], ["why", "Why one group"], ["reports", `Reports (${reportTotal})`], ["technical", "Technical"], ["evidence", "Evidence"]];
+function tab(k) {
+	$("tabs").innerHTML = TABS.map(([key, l]) => `<button role="tab" data-t="${key}" class="rounded-md px-3 py-1 ${key === k ? "bg-white font-medium shadow-sm" : "text-neutral-500 hover:text-neutral-900"}">${l}</button>`).join("");
+	document.querySelectorAll("[data-tab]").forEach((el) => (el.hidden = el.dataset.tab !== k));
+	document.querySelectorAll("[data-t]").forEach((el) => (el.onclick = () => tab(el.dataset.t)));
+}
+document.querySelectorAll("[data-goto]").forEach((el) => (el.onclick = () => tab(el.dataset.goto)));
+
+// What to do: one choice, its steps.
+const KINDS = [
+	["nothing", "Nothing, only opened it", ["Nothing has happened. Close the tab, you are done."]],
+	["email", "My email or phone", ["The criminals now know your email address or number is real.", "<b>Never sign in through a link in an email or text.</b> Type meta.com into the address bar yourself.", "Expect fake emails and texts that look like they come from Meta."]],
+	["password", "My password", ["<b>Change your Meta password now</b> at meta.com, typed in yourself.", "Change it on every other site where you used the same password.", "Turn on 2-step verification with an app or a passkey."]],
+	["code", "A login code", ["The criminals may already be in your account. <b>Open Meta's Accounts Center and log out of all devices.</b>", "Change your password and check the account's email and phone.", "If you can no longer log in, use meta.com/help to recover the account."]],
+];
+let kind = "email";
+function renderKind() {
+	$("kinds").innerHTML = KINDS.map(([k, l]) => `<button data-k="${k}" class="rounded-md border px-2.5 py-2 text-left ${k === kind ? "border-neutral-900 bg-neutral-900 text-white" : "hover:bg-neutral-50"}">${l}</button>`).join("");
+	$("steps").innerHTML = KINDS.find(([k]) => k === kind)[2].map((s, i) => `<div class="flex gap-2"><span class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-[11px] font-semibold">${i + 1}</span><p>${s}</p></div>`).join("");
+	document.querySelectorAll("[data-k]").forEach((el) => (el.onclick = () => { kind = el.dataset.k; renderKind(); }));
+}
+
+renderRows(); tab("sites"); renderKind(); select(0);
+</script>
+</body>
+</html>
