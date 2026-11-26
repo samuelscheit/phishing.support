@@ -50,7 +50,8 @@ function Headline({ summary, reports }: { summary: TakedownSummary; reports: rea
 					<span className="text-orange-700">{text}</span> <span className="font-normal text-muted-foreground">· {targetName(summary.moved.report)}</span>
 				</h3>
 				<p className="text-sm text-muted-foreground">
-					{bypassed ? `${bypassed.route.organisation} had acted on it; the site left ${move.from.name} ${elapsed(summary.moved.report.createdAt, move.at)} after the report.` : `The site left ${move.from.name} ${elapsed(summary.moved.report.createdAt, move.at)} after the report.`}
+					{bypassed ? `${bypassed.route.organisation} had acted on it. ` : null}
+					{`${capitalised(elapsed(summary.moved.report.createdAt, move.at))} after the report, a check found the site had left ${move.from.name}.`}
 					{open ? ` ${plural(open, "report")} ${open === 1 ? "is" : "are"} still open.` : null}
 				</p>
 			</>

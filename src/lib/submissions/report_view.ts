@@ -199,10 +199,9 @@ export function shortUtc(at: Date | string, reference?: Date | string): string {
  */
 export function nextStep(route: SubmissionReportRoute, standing: RouteStanding, reference?: Date | string): string | undefined {
 	if (standing.bucket === "action_taken" || standing.bucket === "not_sent") return undefined;
-	if (standing.bucket === "bypassed") {
-		const told = [...route.messages].sort(bySent).findLast((message) => message.moveNotice && message.status === "sent");
-		return told ? `We told ${route.organisation} at ${shortUtc(told.occurredAt, reference)} UTC that its block was bypassed.` : undefined;
-	}
+	const told = [...route.messages].sort(bySent).findLast((message) => message.moveNotice && message.status === "sent");
+	if (standing.bucket === "bypassed") return told ? `We told ${route.organisation} at ${shortUtc(told.occurredAt, reference)} UTC that its block was bypassed.` : undefined;
+	if (told) return `We told ${route.organisation} at ${shortUtc(told.occurredAt, reference)} UTC that the site moved${standing.bucket === "waiting" && route.routeType === "email" ? "; its reply is read automatically" : ""}.`;
 	const next = (kind: SubmissionReportRoute["nextWork"][number]["kind"]) => route.nextWork.find((work) => work.kind === kind);
 	const answered = route.decisionFollowUps.filter((followUp) => followUp.outcome === "replied").at(-1);
 	const parts: string[] = [];

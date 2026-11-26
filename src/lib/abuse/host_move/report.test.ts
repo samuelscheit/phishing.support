@@ -200,6 +200,8 @@ describe("trylevo.app leaves Cloudflare after Cloudflare restricted it (case 384
 		const entry = rankedRoutes([siteReport!]).find(({ route }) => route.organisation === "Cloudflare")!;
 		expect(entry.standing).toMatchObject({ bucket: "bypassed", label: "Block bypassed", line: "Moved to Sollutium-NL (AS43641) at 26 Nov 21:30 UTC — still serving malware", at: trylevoAt("21:30:05") });
 		expect(nextStep(entry.route, entry.standing, siteReport!.createdAt)).toMatch(/^We told Cloudflare at .+ UTC that its block was bypassed\.$/);
+		const hostEntry = rankedRoutes([siteReport!]).find(({ route }) => route.organisation === "Sollutium-NL")!;
+		expect(nextStep(hostEntry.route, hostEntry.standing, siteReport!.createdAt)).toMatch(/^We told Sollutium-NL at .+ UTC that the site moved; its reply is read automatically\.$/);
 		const notice = entry.route.messages.find((message) => message.moveNotice)!;
 		expect(notice).toMatchObject({ direction: "outbound", moveNotice: true, decisionReply: false });
 	});
