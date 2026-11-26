@@ -39,7 +39,13 @@ describe("the site visit task", () => {
 		expect(goal).toContain("do not count a click that only opened such a step");
 		expect(goal).toContain("open the dialog first with the page's own button that leads to it");
 		expect(goal).toContain("Never open, run, install, execute, extract");
-		expect(goal).toContain("If it asks you to copy or paste a command, do not run it");
+	});
+
+	test("presses a command's own Copy button once, so the recording sees what the page copies, and never pastes or runs it", () => {
+		expect(goal).toContain("press the page's own Copy button (or the control that copies the command) once, after opening the dialog or step that holds it");
+		expect(goal).toContain("which may differ from the command shown");
+		expect(goal).toContain("Never paste it anywhere, never press the key combinations the page asks for, never open a terminal or the Run dialog, and never run it.");
+		expect(goal).not.toContain("just leave it shown");
 	});
 
 	test("leaves CAPTCHAs to the browser's solver (the task agent's base prompt says how) and only bounds the waiting and the text attempts", () => {

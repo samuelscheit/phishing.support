@@ -1,4 +1,5 @@
 
+import type { ClipboardWrite } from "../browser/clipboard";
 import { matchedCanaries } from "../exfiltration/analysis";
 import type { CapturedNetworkRequest, ExfiltrationBackend, ExfiltrationCanaries } from "../exfiltration/types";
 import type { VisitAgentAction } from "../site_visit/agent";
@@ -12,8 +13,9 @@ import { visitEvidenceFileNames } from "../website/visit/capture_files";
  * The record of one visit through a phishing site, kept so it can be used
  * in a criminal case: which synthetic values were generated, how each was
  * entered (what the agent typed into which field, and when), which pages
- * were shown, and every request that left the browser carrying one of the
- * values, with its full body, the page that sent it and the server's answer.
+ * were shown, every request that left the browser carrying one of the
+ * values, with its full body, the page that sent it and the server's answer,
+ * and every text the site's pages put on the clipboard.
  *
  * Three files and a timestamp token: `visit-record.json` (complete,
  * machine-readable), `visit-protocol.txt` (the same as a dated chronology
@@ -35,6 +37,8 @@ export type VisitEvidenceFacts = {
 	pages: ReadonlyArray<{ url: string; shownFrom: Date; shownUntil?: Date }>;
 	requests: readonly CapturedNetworkRequest[];
 	backends: readonly ExfiltrationBackend[];
+	/** What the site's pages put on the clipboard, since the capture first loaded it. */
+	clipboardWrites: readonly ClipboardWrite[];
 };
 
 export type VisitEvidence = { files: EvidenceFile[]; timestamp?: EvidenceTimestamp };
@@ -77,6 +81,7 @@ function protocol(facts: VisitEvidenceFacts, recordSha256: string): string {
 			: " No answer recorded.";
 		entries.push({ at: request.timestamp, text: `Request ${request.method} ${request.url} carried the synthetic ${fields}${request.documentUrl ? `, sent from ${request.documentUrl}` : ""}.${answer}` });
 	}
+	for (const write of facts.clipboardWrites) entries.push({ at: write.at, text: `Page ${write.documentUrl} put on the clipboard (${write.via}): ${JSON.stringify(write.text)}` });
 	entries.sort((a, b) => a.at.localeCompare(b.at));
 	const values = (Object.keys(FIELD_NAMES) as Array<keyof ExfiltrationCanaries>).map((field) => `  ${FIELD_NAMES[field]}: ${facts.syntheticValues[field]}`);
 	return [
@@ -119,6 +124,7 @@ export async function buildVisitEvidence(facts: VisitEvidenceFacts, dependencies
 		pages: facts.pages.map((page) => ({ url: page.url, shownFrom: page.shownFrom.toISOString(), ...(page.shownUntil ? { shownUntil: page.shownUntil.toISOString() } : {}) })),
 		requests: facts.requests.map((request) => ({ ...request, carries: carried(request, facts.syntheticValues) })),
 		backends: facts.backends,
+		clipboardWrites: facts.clipboardWrites,
 	}), "utf8");
 	const recordSha = sha256Hex(record);
 	const text = Buffer.from(protocol(facts, recordSha), "utf8");

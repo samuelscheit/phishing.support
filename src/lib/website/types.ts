@@ -1,4 +1,5 @@
 import { andList } from "../util/text";
+import type { ClipboardWrite } from "../browser/clipboard";
 import type { DeceptiveFunnelVerdict } from "../abuse/funnel/classification";
 import type { FunnelExtraction } from "../abuse/funnel/extract";
 
@@ -154,6 +155,8 @@ export type WebsiteVisitRecord = {
 	actions: Array<{ kind: string; text: string }>;
 	dataSent: VisitDataSent[];
 	downloadFailures: Array<{ url: string; reason: string }>;
+	/** What the site's pages put on the clipboard, from its capture on: what a visitor pastes. Absent when nothing was copied. */
+	clipboardWrites?: ClipboardWrite[];
 };
 
 /** Whether the visit moved on from this hop to a later page: the agent went on, or the page was opened again. */
@@ -399,6 +402,12 @@ export type WebsiteSiteClassification = {
 	 * the code of that file, instead of the page text.
 	 */
 	offeredDownload?: { fileName: string; sha256: string };
+	/**
+	 * Set for malware proven by what the page put on the visitor's clipboard
+	 * (a Copy button handing out a command other than the one shown): the
+	 * quote comes from that text or what it decodes to, instead of the page text.
+	 */
+	clipboardWrite?: { documentUrl: string; sha256: string };
 	/** Why the classifier's phishing or malware claim was not corroborated by the captured page. */
 	rejectedClaim?: string;
 };

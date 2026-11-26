@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckSquare, Download, Flag, Globe, Keyboard, ListChecks, MousePointerClick, Send, ShieldAlert, Sparkles, Upload } from "lucide-react";
+import { CheckSquare, ClipboardCopy, Download, Flag, Globe, Keyboard, ListChecks, MousePointerClick, Send, ShieldAlert, Sparkles, Upload } from "lucide-react";
 
 import { cn } from "../lib/util/cn";
 import { canaryFieldList, type WebsiteOfferedDownload, type WebsiteVisitRecord } from "@/lib/website/types";
@@ -9,6 +9,7 @@ import { Address } from "./Address";
 import { scrollToEnd } from "./scrollToEnd";
 import { hostOf } from "@/lib/network/url";
 import { OfferedFile } from "@/components/OfferedFile";
+import { isPasteCommand } from "@/lib/malware/paste_commands";
 
 /** One page of the visit, with its screenshot when the case kept one. */
 export type SiteVisitPage = { url: string; screenshotId?: string };
@@ -19,6 +20,8 @@ type LiveEntry =
 	| { kind: "download"; fileName: string; url: string };
 
 const MAX_LIVE_ENTRIES = 200;
+/** Characters of a copied text the timeline shows; its tooltip holds the rest. */
+const MAX_SHOWN_COPY = 400;
 
 
 /** The live screen and log of a visit while it runs, from the case's event stream. */
@@ -230,6 +233,11 @@ export function SiteVisitTimeline({ running, visit, offeredDownload, live: { ent
 				{!running && thirdParty.map((sent, index) => (
 					<TimelineRow key={`sent-${index}`} icon={<Send className="h-3 w-3" />} tone="danger">
 						Sent the made-up {canaryFieldList(sent.fields)} to <span className="font-mono">{sent.url.slice(0, 160)}</span>
+					</TimelineRow>
+				))}
+				{!running && (visit?.clipboardWrites ?? []).map((write, index) => (
+					<TimelineRow key={`copied-${index}`} icon={<ClipboardCopy className="h-3 w-3" />} tone={isPasteCommand(write.text) ? "danger" : "muted"}>
+						The page put on the clipboard <span className="break-all font-mono" title={write.text}>{write.text.length > MAX_SHOWN_COPY ? `${write.text.slice(0, MAX_SHOWN_COPY)}…` : write.text}</span>
 					</TimelineRow>
 				))}
 				{!running && offeredDownload ? (

@@ -2,6 +2,7 @@ import { type HTTPResponse, type Page } from "rebrowser-puppeteer-core";
 
 import { getBrowser, getBrowserPage } from "../../browser";
 import { agentAddressOf } from "../../browser/browser";
+import { ClipboardRecorder } from "../../browser/clipboard";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "../../browser/fabric";
 import { presentIdentityToNewTab, presentIdentityToPage } from "../../browser/page";
 import { observedPuppeteerResponse, observeSessionResponses } from "../../browser/tab_traffic";
@@ -89,12 +90,22 @@ export async function openLiveCapture(options: ArchiveWebsiteOptions, egress: Fa
 		const captured: CaptureTab = { recording: recordTab(), frameTraffic: recordFrameTraffic(page), loadedUrl: url, stepFrom: 0 };
 		// Every answer of the captured tab with when it arrived, and the body of every page, interstitials that navigate on at once included,
 		// for the whole capture and the visit after it. Without it the capture still holds the pages shown.
-		stopAnswers = await page.target().createCDPSession()
-			.then((session) => interceptDocumentAnswers(session, targetIdOf(page.target()), captured.recording.recordAnswer, identity.override))
+		// The session presents the tab's identity: a session attached later without it resets navigator.platform,
+		// so everything else the capture records on the tab shares it.
+		const recordingSession = await page.target().createCDPSession().catch((error: unknown) => {
+			console.warn(`The captured tab of ${url} cannot be recorded: ${errorText(error)}`);
+			return undefined;
+		});
+		stopAnswers = recordingSession && await interceptDocumentAnswers(recordingSession, targetIdOf(page.target()), captured.recording.recordAnswer, identity.override)
 			.catch((error: unknown) => {
 				console.warn(`The document answers of ${url} cannot be recorded: ${errorText(error)}`);
 				return undefined;
 			});
+		// What the site puts on the clipboard from its first page on: a fake verification the capture clicks may copy its command.
+		const clipboard = new ClipboardRecorder();
+		if (recordingSession) {
+			await clipboard.attach(recordingSession).catch((error: unknown) => console.warn(`The clipboard writes of ${url} cannot be recorded: ${errorText(error)}`));
+		}
 		// The last final (non-redirect) main-frame document response, so a
 		// document that replaces an error interstitial is seen with its status.
 		let latestDocumentResponse = null as HTTPResponse | null;
@@ -215,6 +226,7 @@ export async function openLiveCapture(options: ArchiveWebsiteOptions, egress: Fa
 				url: page.url(),
 				...params,
 				tabSetup: recordOpenedTab,
+				clipboard,
 				snapshot: (tab: VisitorTab) => {
 					const recorded = opened.get(tab.targetId) ?? captured;
 					const { documents } = recorded.recording;

@@ -1,6 +1,5 @@
 import { isSameWebsite, websiteSite } from "./site";
-import { offeredDownloadSource } from "../visit/offered_download";
-import { normalizedEvidence, QUOTE_GAP, verbatimEvidenceQuote, type WebsiteEvidenceArchive } from "../analysis/classification";
+import { classifiedEvidenceSource, normalizedEvidence, QUOTE_GAP, verbatimEvidenceQuote, type WebsiteEvidenceArchive } from "../analysis/classification";
 import type { ReportableWebsiteFinding, WebsiteNavigationHop, WebsiteSiteAssessment, WebsiteSiteClassification } from "../types";
 
 /** A site's verdict: the classification of the page it rests on. */
@@ -45,18 +44,13 @@ export function reportableFinding(classification: WebsiteSiteClassification): Re
 export function reportableWebsiteHop(
 	hops: WebsiteNavigationHop[],
 	assessments: WebsiteSiteAssessment[],
-	archive: Pick<WebsiteEvidenceArchive, "url" | "text" | "hiddenFrames" | "offeredDownload">,
+	archive: Pick<WebsiteEvidenceArchive, "url" | "text" | "hiddenFrames" | "offeredDownload" | "clipboardWrites">,
 ): WebsiteNavigationHop | undefined {
 	const capturedHop = hops.find((hop) => hop.contentCaptured && hop.url === archive.url);
 	if (!capturedHop) return undefined;
 	const assessment = assessments.find((candidate) => candidate.hopIndex === capturedHop.index);
 	if ((assessment?.finding !== "phishing" && assessment?.finding !== "malware") || !assessment.evidenceQuote) return undefined;
-	const download = assessment.offeredDownload && archive.offeredDownload?.sha256 === assessment.offeredDownload.sha256 ? archive.offeredDownload : undefined;
-	const source = assessment.hiddenFrame
-		? archive.hiddenFrames?.find((frame) => frame.ref === assessment.hiddenFrame!.ref && frame.url === assessment.hiddenFrame!.url)?.source
-		: assessment.offeredDownload
-			? download && offeredDownloadSource(download)
-			: archive.text.toString("utf-8");
+	const source = classifiedEvidenceSource(assessment, archive);
 	if (source === undefined) return undefined;
 	const stored = assessment.evidenceQuote.split(QUOTE_GAP).join("\n");
 	return typeof verbatimEvidenceQuote(stored, normalizedEvidence(source)) === "string"

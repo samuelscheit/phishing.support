@@ -7,9 +7,10 @@ import type { VisitAgent } from "../../site_visit/agent";
 import type { DomainRegistrationLookup } from "../info/domain_registration";
 import type { getInfo } from "../info/info";
 import type { VisitDataSent, WebsiteOfferedDownload } from "../types";
+import type { ClipboardWrite } from "../../browser/clipboard";
 import type { PopularDomains } from "../../abuse/origin/popular_domains";
 
-export type WebsiteCapture = Awaited<ReturnType<typeof archiveWebsite>> & { offeredDownload?: WebsiteOfferedDownload; dataSent?: VisitDataSent[] };
+export type WebsiteCapture = Awaited<ReturnType<typeof archiveWebsite>> & { offeredDownload?: WebsiteOfferedDownload; dataSent?: VisitDataSent[]; clipboardWrites?: ClipboardWrite[] };
 
 /** Network boundaries of one website analysis; tests replace them. */
 export type WebsiteAnalysisDependencies = {

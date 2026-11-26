@@ -1,7 +1,7 @@
 import * as toon from "@toon-format/toon";
 
 import { extractPasteCommands } from "../../malware/paste_commands";
-import { capturedDeviceStatement, dataSentEvidence, hiddenFrameEvidence, MAX_HTML_EXCERPT_CHARACTERS, pageText, pasteCommandEvidence, WEBSITE_FINDING_CRITERIA, type WebsiteEvidenceArchive } from "./classification";
+import { capturedDeviceStatement, clipboardEvidence, copiedTexts, dataSentEvidence, hiddenFrameEvidence, MAX_HTML_EXCERPT_CHARACTERS, pageText, pasteCommandEvidence, WEBSITE_FINDING_CRITERIA, type WebsiteEvidenceArchive } from "./classification";
 import type { WhoISInfo } from "../info/info";
 import { offeredDownloadEvidence } from "../visit/offered_download";
 import { revisitWording, type WebsiteKitResource, type WebsiteNavigationHop, type WebsiteVisitRecord, canaryFieldList } from "../types";
@@ -40,7 +40,7 @@ const ANALYSIS_SECTIONS = `Write the analysis in Markdown with these sections, i
 1. **Verdict**: the case's finding given in <case_finding>, in one or two sentences, with the evidence that supports it. State it as decided; never contradict, weaken, or replace it with a verdict of your own.
 2. **Brand impersonation**: the brand or service the site imitates, as the case's finding names it, if any; its official domain (verify it with web search) against the site's domain; logos, wording, and layout that copy it; lookalike or typo tricks in the domain.
 3. **Domain and hosting**: from the registration and hosting facts given: how old the domain is when captured, its registrar, nameservers, the networks and countries its addresses belong to, and any warning a provider already shows. Use web search for the domain's or its hosting's reputation only when it adds a fact.
-4. **The visit, step by step**: each page in the order the visit saw it: what it showed and asked for, what the visit entered (only synthetic values), and where the site went next. Name the step that asks for credentials, payment, or a download.
+4. **The visit, step by step**: each page in the order the visit saw it: what it showed and asked for, what the visit entered (only synthetic values), what it put on the clipboard, and where the site went next. Name the step that asks for credentials, payment, a download, or a pasted command; when a copy control copies something other than what the page shows, say what it shows and what it copies.
 5. **Where the data went**: every endpoint the synthetic values were sent to (a Telegram bot, a Discord webhook, a collector host, the site itself), as observed in the network traffic. Say plainly when nothing was sent off.
 6. **The offered file**: when the visit downloaded one: what it is, what its code does (reads cookies, credentials, tokens; where it sends them; what it runs), and any scanner verdict. Omit the section when there is none.
 7. **Evasion and kit techniques**: cloaking, provider warnings, human-verification gates, blocking of developer tools or copying, frames no visitor sees, scripts loaded from other hosts.
@@ -106,6 +106,9 @@ export function visitNarrativeEvidence(context: WebsiteNarrativeContext): string
 			? `Every request through which the site sent the synthetic values, observed in the browser's network traffic:\n${toon.encode({ data_sent_during_visit: visit.dataSent.map((sent) => ({ url: sent.url.slice(0, 300), method: sent.method, values: canaryFieldList(sent.fields), to_the_site_itself: sent.sameSite })) })}`
 			: "No request during the visit carried the synthetic values off the page.");
 	}
+	if (visit?.clipboardWrites?.length) {
+		parts.push(`Everything the site's pages put on the clipboard during the visit, in order, recorded in the browser (texts shortened; the analyzed page's are decoded below):\n${toon.encode({ clipboard_writes_during_visit: visit.clipboardWrites.map((write) => ({ copied_by: write.documentUrl.slice(0, 300), via: write.via, text: write.text.slice(0, MAX_VISITED_PAGE_TEXT) })) })}`);
+	}
 	const hosts = [...new Set((kitResources ?? []).map((resource) => {
 		try {
 			return new URL(resource.url).host;
@@ -119,7 +122,8 @@ export function visitNarrativeEvidence(context: WebsiteNarrativeContext): string
 
 /** The narrative request: the analyzed page in full, with everything the case knows around it. */
 export function buildWebsiteAnalysisInput(archive: WebsiteEvidenceArchive, context: WebsiteNarrativeContext) {
-	const commands = extractPasteCommands(archive.text.toString("utf-8"));
+	const text = archive.text.toString("utf-8");
+	const commands = extractPasteCommands(text);
 	// The archive's hops end at its own page; the case's chain may go on past it.
 	const analyzedIndex = archive.navigationHops.find((hop) => hop.contentCaptured)?.index;
 	const hops = (context.chain ?? archive.navigationHops).map(({ index, url, status, redirectTo, visitorStep, revisit }) => ({ index, url, status, redirect_to: redirectTo, visitor_step: visitorStep ? (visitorStep.submitted.length ? `sent the synthetic ${canaryFieldList(visitorStep.submitted)}` : "moved on") : revisit ? `opened again ${revisitWording(revisit).opened}` : undefined, analyzed_page: index === analyzedIndex }));
@@ -148,7 +152,7 @@ ${pageText(archive)}
 <website_html>
 ${archive.html.toString("utf-8").slice(0, MAX_HTML_EXCERPT_CHARACTERS)}
 </website_html>
-${pasteCommandEvidence(commands)}${hiddenFrameEvidence(archive.hiddenFrames)}${dataSentEvidence(archive.dataSent)}${offeredDownloadEvidence(archive.offeredDownload)}`,
+${pasteCommandEvidence(commands)}${clipboardEvidence(copiedTexts(archive.clipboardWrites, text))}${hiddenFrameEvidence(archive.hiddenFrames)}${dataSentEvidence(archive.dataSent)}${offeredDownloadEvidence(archive.offeredDownload)}`,
 				},
 				...(archive.screenshotPng
 					? [{

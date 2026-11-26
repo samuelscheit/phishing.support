@@ -15,7 +15,7 @@ import { websiteSite } from "../info/site";
 import { accessGateOf, checkBareVisit, type BareVisitDependencies } from "../visit/access_gate";
 import { abuseEmailCaseUrl } from "../../abuse/mail/draft";
 import { buildWebsiteAnalysisInput } from "./narrative";
-import { buildWebsiteReportEvidence, classifiedHiddenFrame } from "./classification";
+import { buildWebsiteReportEvidence, classifiedHiddenFrame, copiedTexts, hiddenCopiedCommands } from "./classification";
 import type { ReportableWebsiteFinding, WebsiteDevice, WebsiteFunnel, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteRoute, WebsiteRouteVisitor } from "../types";
 import { emitStep } from "../visit/progress";
 import { capturedArchiveHop, reportableFinding, reportableWebsiteHop, unreportedVerdict, websiteReportUrls } from "../info/report_hops";
@@ -340,7 +340,8 @@ async function reportRoute(walked: WalkedRoute, context: { submissionId: bigint;
 			screenshots: await capturedPageScreenshots(submissionId, { route, step: analyzedCaptureStep(site.archive.navigationHops) }),
 			reporter,
 			finding,
-			pasteCommands: site.capture.commands,
+			// A command the page's copy control hands out unseen fetches its payload like a shown one.
+			pasteCommands: [...site.capture.commands, ...hiddenCopiedCommands(site.capture.copied)],
 			...(finding.finding === "malware" && site.archive.offeredDownload ? { offeredDownload: site.archive.offeredDownload } : {}),
 			...(site.classification.impersonatedBrand ? { legalBrandUrl: site.classification.impersonatedBrand.officialUrl } : {}),
 			...(site.classification.hiddenFrame ? { hiddenFrame: classifiedHiddenFrame(site.classification, site.archive.hiddenFrames)! } : {}),
@@ -360,11 +361,13 @@ async function reportRoute(walked: WalkedRoute, context: { submissionId: bigint;
 	return { outcomes, filed };
 }
 
-/** What the report about one site's finding is built from: the page's own capture and what it sent off. */
+/** What the report about one site's finding is built from: the page's own capture and what it sent off and copied. */
 function findingCapture(site: WebsiteChainSite) {
 	const { archive } = site;
+	const text = archive.text.toString("utf-8");
 	return {
-		commands: extractPasteCommands(archive.text.toString("utf-8")),
+		commands: extractPasteCommands(text),
+		copied: copiedTexts(archive.clipboardWrites, text),
 		navigationHops: archive.navigationHops,
 		hiddenFrames: archive.hiddenFrames,
 		device: archive.device,

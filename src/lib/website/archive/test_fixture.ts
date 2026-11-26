@@ -9,6 +9,10 @@ import type { FabricEgress } from "../../browser/fabric";
  * what the capture asked of it. Shared by the archive's test files.
  */
 
+/** What the clipboard recorder asks of the captured tab's session. */
+const CLIPBOARD_EVENTS = new Set(["Runtime.bindingCalled", "Page.frameNavigated", "Target.attachedToTarget"]);
+const CLIPBOARD_COMMANDS = new Set(["Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Target.setAutoAttach"]);
+
 // The fake document draws no frames, hidden or not.
 export const mainFrame = { childFrames: () => [] };
 /** The captured tab's target, whose id its main frame shares. */
@@ -193,13 +197,15 @@ export function archiveBrowserFixture(options: {
 					let onPaused: ((paused: unknown) => void) | undefined;
 					return {
 					on: (event: string, listener: (paused: unknown) => void) => {
+						// The clipboard recorder listens on the same session; the fake page never copies.
+						if (CLIPBOARD_EVENTS.has(event)) return;
 						if (event !== "Fetch.requestPaused") throw new Error(`Unexpected CDP event ${event}`);
 						onPaused = listener;
 					},
 					off: () => { onPaused = undefined; },
 					send: async (method: string, params?: { requestId?: string }) => {
 						cdpCommands.push({ method, ...(params ? { params } : {}) });
-						if (method === "Emulation.setUserAgentOverride") return {};
+						if (method === "Emulation.setUserAgentOverride" || CLIPBOARD_COMMANDS.has(method)) return {};
 						if (method === "Fetch.enable") { if (onPaused) holding.add(onPaused); return {}; }
 						if (method === "Fetch.disable") { for (const listener of holding) if (listener === onPaused) holding.delete(listener); return {}; }
 						if (method.startsWith("Fetch.") || method.startsWith("IO.")) return emulateFetch(method, params as FetchParams);

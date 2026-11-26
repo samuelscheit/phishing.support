@@ -83,6 +83,7 @@ export async function saveVisitEvidence(params: {
 		pages: params.pages.map((page) => ({ url: page.archive.url, shownFrom: page.shownFrom, ...(page.shownUntil ? { shownUntil: page.shownUntil } : {}) })),
 		requests: recording.requests,
 		backends: discoverExfiltrationBackends({ requests: recording.requests, canaries: params.canaries, pageUrl: params.url }),
+		clipboardWrites: recording.clipboardWrites,
 	}, params.dependencies.timestampEvidence ? { timestamp: params.dependencies.timestampEvidence } : {});
 	for (const file of evidence.files) {
 		await ArtifactsEntity.saveBuffer({ submissionId: params.submissionId, name: file.name, kind: "website_evidence", mimeType: file.mimeType, archivedAt: endedAt, buffer: file.bytes });

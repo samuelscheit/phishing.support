@@ -24,13 +24,15 @@ export const chromiumAvailable = await Bun.file(chromiumExecutable).exists();
  * public sites, and a page a capture answers from DevTools is public-like to
  * Chromium (see `document_bodies`): Local Network Access would block the
  * loopback frames and requests that a public page's public ones never meet.
+ * `args` adds switches, such as `--site-per-process` for a cross-site frame
+ * in its own process, as Chrome isolates it and the headless shell does not.
  */
-export async function launchTestChromium(hosts: Record<string, number> = {}): Promise<Browser> {
+export async function launchTestChromium(hosts: Record<string, number> = {}, args: readonly string[] = []): Promise<Browser> {
 	const rules = Object.entries(hosts).map(([host, port]) => `MAP ${host}:443 127.0.0.1:${port}`).join(",");
 	return puppeteer.launch({
 		executablePath: chromiumExecutable,
 		headless: true,
-		args: ["--no-first-run", "--disable-features=LocalNetworkAccessChecks", ...(rules ? [`--host-resolver-rules=${rules}`, "--ignore-certificate-errors"] : [])],
+		args: ["--no-first-run", "--disable-features=LocalNetworkAccessChecks", ...(rules ? [`--host-resolver-rules=${rules}`, "--ignore-certificate-errors"] : []), ...args],
 	});
 }
 

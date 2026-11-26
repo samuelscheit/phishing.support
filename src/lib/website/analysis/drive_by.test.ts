@@ -209,7 +209,8 @@ describe("a mobile-only drive-by exploit kit (production case 377486973465530391
 describe("drive-by classification", () => {
 	const hop: WebsiteNavigationHop = { index: 0, url: PAGE, hostname: "92haoyun.icu", status: 200, contentCaptured: true };
 	const archive = capture({ url: PAGE, device: "iphone" });
-	const validate = (answer: Answer) => validateWebsiteSiteClassification(answer, archive.text.toString("utf8"), archive.html.toString("utf8"), archive.hiddenFrames);
+	const page = { text: archive.text.toString("utf8"), html: archive.html.toString("utf8") };
+	const validate = (answer: Answer) => validateWebsiteSiteClassification(answer, { ...page, hiddenFrames: archive.hiddenFrames });
 
 	test("a drive-by quote must be verbatim code of the frame it cites; layout and case of the ref do not matter", () => {
 		expect(validate(DRIVE_BY)).toEqual({
@@ -225,7 +226,7 @@ describe("drive-by classification", () => {
 		expect(validate({ ...DRIVE_BY, evidenceQuote: "Security verification in progress" }).finding).toBe("insufficient_evidence");
 		expect(validate({ ...DRIVE_BY, hiddenFrameRef: "frame9" })).toEqual({ finding: "insufficient_evidence", rejectedClaim: 'it cited a hidden frame the capture did not record ("frame9")' });
 		expect(validate({ ...DRIVE_BY, finding: "phishing", phishingBasis: "credential_theft" })).toEqual({ finding: "insufficient_evidence", rejectedClaim: "it cited a hidden frame for a finding other than malware" });
-		expect(validateWebsiteSiteClassification(DRIVE_BY, archive.text.toString("utf8"), archive.html.toString("utf8"))).toEqual({ finding: "insufficient_evidence", rejectedClaim: 'it cited a hidden frame the capture did not record (" Frame1 ")' });
+		expect(validateWebsiteSiteClassification(DRIVE_BY, page)).toEqual({ finding: "insufficient_evidence", rejectedClaim: 'it cited a hidden frame the capture did not record (" Frame1 ")' });
 		// A finding without a frame ref is still judged on the page text.
 		expect(validate({ ...NOTHING, finding: "malware", evidenceQuote: LOADER_QUOTE }).finding).toBe("insufficient_evidence");
 	});

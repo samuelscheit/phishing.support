@@ -1,5 +1,6 @@
 import type { Browser, CDPSession, Page } from "rebrowser-puppeteer-core";
 
+import type { ClipboardRecorder, ClipboardWrite } from "../browser/clipboard";
 import { VisitorTabs, type TabSetup, type VisitorTab } from "../browser/visitor_tabs";
 import { errorText } from "../util/error_text";
 import { ExfiltrationNetworkRecorder } from "../exfiltration/recorder";
@@ -14,7 +15,8 @@ import { sleep } from "../util/sleep";
  * capture has loaded the page, then an agent walks the site in that same
  * browser and tab, entering only synthetic values, while the visit records
  * what the evidence needs: each page it reaches, every request (where the
- * synthetic values go), and every file it downloads. The agent follows the
+ * synthetic values go), every file it downloads, and everything its pages
+ * put on the clipboard. The agent follows the
  * site into every tab it opens, and so does the recording. The agent only
  * moves; what it reports about itself is never evidence.
  */
@@ -52,6 +54,8 @@ export type SiteVisitRecording<Step> = {
 	requests: CapturedNetworkRequest[];
 	downloads: DownloadedFile[];
 	downloadFailures: FailedDownload[];
+	/** What the pages put on the clipboard, since the capture first loaded the site. */
+	clipboardWrites: ClipboardWrite[];
 	agent: SiteVisitAgentOutcome;
 };
 
@@ -68,6 +72,8 @@ export type SiteVisitParams<Step> = {
 	instructions?: string;
 	/** Prepares each tab the site opens before it runs, on top of the visit's own recording. */
 	tabSetup?: TabSetup;
+	/** Records the captured tab's clipboard writes since its capture began; the visit adds each tab the site opens. */
+	clipboard: ClipboardRecorder;
 	/** Record the tab's page as it stands as the visit's next step. */
 	snapshot: (tab: VisitorTab) => Promise<Step>;
 	live?: (event: SiteVisitLiveEvent) => void;
@@ -149,6 +155,8 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 			// Every file any tab downloads.
 			(tab) => downloads.attach(tab),
 			...(params.tabSetup ? [params.tabSetup] : []),
+			// What every tab the site opens puts on the clipboard; it is held until then.
+			(tab) => (tab.opener ? params.clipboard.attach(tab.session, { held: true }) : undefined),
 		]);
 		const visitorTabs = tabs;
 		screencast = followingScreencast(visitorTabs, live);
@@ -234,6 +242,7 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 			requests: await network.stop(),
 			downloads: downloads.files(),
 			downloadFailures: downloads.failures(),
+			clipboardWrites: params.clipboard.writes(),
 			agent: agentOutcome,
 		};
 	} finally {

@@ -53,14 +53,22 @@ async function classifyCapturedPage(submissionId: bigint, hop: WebsiteNavigation
 		},
 	}, { client: dependencies.analysisClient });
 	return {
-		classification: validateWebsiteSiteClassification(result.output_parsed, archive.text.toString("utf-8"), archive.html.toString("utf-8"), archive.hiddenFrames, archive.offeredDownload, hop.url),
+		classification: validateWebsiteSiteClassification(result.output_parsed, {
+			text: archive.text.toString("utf-8"),
+			html: archive.html.toString("utf-8"),
+			url: hop.url,
+			...(archive.hiddenFrames ? { hiddenFrames: archive.hiddenFrames } : {}),
+			...(archive.offeredDownload ? { offeredDownload: archive.offeredDownload } : {}),
+			...(archive.clipboardWrites ? { clipboardWrites: archive.clipboardWrites } : {}),
+		}),
 		mobileHandoff: websiteMobileHandoff(result.output_parsed),
 	};
 }
 
-/** The visit as the case keeps it: what the agent did and every request that carried synthetic values. */
+/** The visit as the case keeps it: what the agent did, every request that carried synthetic values, and what its pages copied. */
 function visitRecord(recording: SiteVisitRecording<unknown>, pages: ReadonlyArray<VisitPage<unknown>>): WebsiteVisitRecord {
 	const { agent } = recording;
+	const clipboardWrites = pages.flatMap((page) => page.clipboardWrites);
 	return {
 		outcome: agent.outcome,
 		...(agent.failure ? { failure: agent.failure } : {}),
@@ -68,6 +76,7 @@ function visitRecord(recording: SiteVisitRecording<unknown>, pages: ReadonlyArra
 		actions: agent.actions.slice(0, MAX_RECORDED_ACTIONS).map(({ kind, text }) => ({ kind, text })),
 		dataSent: pages.flatMap((page) => page.dataSent).slice(0, MAX_RECORDED_DATA_SENT),
 		downloadFailures: recording.downloadFailures,
+		...(clipboardWrites.length ? { clipboardWrites } : {}),
 	};
 }
 
@@ -164,7 +173,7 @@ export async function visitWebsite(params: {
 	const { session } = walked;
 	const canaries = createExfiltrationCanaries();
 	const agent = dependencies.visitAgent ?? taskAgentVisit();
-	const empty: SiteVisitRecording<WebsiteCapture> = { startedAt: new Date(), steps: [], requests: [], downloads: [], downloadFailures: [], agent: { outcome: "failed", failure: "The page could not be loaded live for the visit.", actions: [] } };
+	const empty: SiteVisitRecording<WebsiteCapture> = { startedAt: new Date(), steps: [], requests: [], downloads: [], downloadFailures: [], clipboardWrites: [], agent: { outcome: "failed", failure: "The page could not be loaded live for the visit.", actions: [] } };
 	const recording = session
 		? await session.visit({ canaries, agent, live: (event) => { void publishEvent(`run:${submissionId}`, event); } }) as SiteVisitRecording<WebsiteCapture>
 		: empty;
@@ -199,6 +208,7 @@ export async function visitWebsite(params: {
 			...(first.device ? { device: first.device } : {}),
 			...(offeredDownload ? { offeredDownload } : {}),
 			...(page.dataSent.length ? { dataSent: page.dataSent } : {}),
+			...(page.clipboardWrites.length ? { clipboardWrites: page.clipboardWrites } : {}),
 		});
 	}
 

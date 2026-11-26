@@ -98,7 +98,7 @@ export function visitorLabel(visitor: WebsiteRouteVisitor): string {
 export function verdictLabelOf(assessment: SiteAssessment | undefined): string | undefined {
 	if (assessment?.finding === "phishing") return assessment.phishingBasis ? `Phishing: ${PHISHING_BASIS_LABELS[assessment.phishingBasis]}` : "Phishing";
 	if (assessment?.finding === "malware") {
-		return assessment.hiddenFrame ? "Malware: drive-by exploit in a hidden frame" : assessment.offeredDownload ? "Malware: the file it offers" : "Malware distribution";
+		return assessment.hiddenFrame ? "Malware: drive-by exploit in a hidden frame" : assessment.offeredDownload ? "Malware: the file it offers" : assessment.clipboardWrite ? "Malware: the command its copy button hands out" : "Malware distribution";
 	}
 	return undefined;
 }
@@ -109,7 +109,7 @@ export function hopFindingLabel(assessment: SiteAssessment | undefined): string 
 		case "prank_or_troll": return "Prank / troll — not phishing";
 		case "insufficient_evidence": return "Insufficient evidence";
 		case "phishing": return assessment.phishingBasis ? `Phishing — ${PHISHING_BASIS_LABELS[assessment.phishingBasis]}` : "Phishing";
-		case "malware": return assessment.hiddenFrame ? "Malware — drive-by exploit in a hidden frame" : assessment.offeredDownload ? "Malware — the file it offers" : "Malware distribution";
+		case "malware": return assessment.hiddenFrame ? "Malware — drive-by exploit in a hidden frame" : assessment.offeredDownload ? "Malware — the file it offers" : assessment.clipboardWrite ? "Malware — the command its copy button hands out" : "Malware distribution";
 		case "benign": return "Not phishing or malware";
 		default: return undefined;
 	}

