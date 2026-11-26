@@ -8,7 +8,7 @@ import type { PublicCampaignSite } from "@/lib/campaign/public_view";
 import { formatDate, type Locale } from "@/lib/i18n/locale";
 import { cn } from "@/lib/util/cn";
 import { COPY } from "./copy";
-import { languageName, TAKEDOWN_STYLE, TakedownPill } from "./site_facts";
+import { languageName, MovedNote, TAKEDOWN_STYLE, TakedownPill } from "./site_facts";
 
 /** The picture of a site: its trimmed capture when there is one, else the full capture. */
 function pictureOf(site: PublicCampaignSite): string | undefined {
@@ -67,6 +67,7 @@ export function SiteBrowser({ sites, selected, onSelect, linkedHost, locale }: {
 					<TakedownPill site={selected} locale={locale} />
 					<a href={`/submissions/${selected.submissionId}`} className="inline-flex items-center gap-1 font-medium text-primary hover:underline">{copy.openCase}<ArrowRight className="size-3.5" /></a>
 				</span>
+				<MovedNote site={selected} locale={locale} className="basis-full" />
 			</div>
 			{sites.length > 1 && (
 				<ol ref={strip} className="relative flex gap-2 overflow-x-auto border-t bg-muted/40 p-2.5" aria-label={copy.tabSites(sites.length)}>

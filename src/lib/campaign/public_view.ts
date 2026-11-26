@@ -14,7 +14,8 @@ import { operatorServerRoles } from "./schema";
 import { fallbackDescription } from "./summary";
 import type { ProviderRole } from "../provider_stats/role";
 import { getReportsByIds, type SubmissionReport } from "../submissions/abuse_details";
-import { nextStep, rankedRoutes, type RouteBucket, type RouteStanding } from "../submissions/report_view";
+import { nextStep, rankedRoutes, takedownSummary, type RouteBucket, type RouteStanding } from "../submissions/report_view";
+import type { HostMove } from "../liveness/moves";
 
 export type { GuidancePurpose } from "./guidance";
 export type { VisitorKind } from "./kinds";
@@ -89,7 +90,30 @@ export type PublicCampaignSite = {
 	reports: PublicSiteReport[];
 	evidence: Array<{ name: string; size: number; sha256: string; url: string }>;
 	takedown: SiteTakedown;
+	/**
+	 * Where the site moved after it was reported, while it still serves what
+	 * was reported there and no provider acted since: said with `hostMoveText`,
+	 * as the case page says it. Its takedown is then only `reported`: the
+	 * action it moved away from shows as bypassed.
+	 */
+	moved?: PublicSiteMove;
 };
+
+export type PublicSiteMove = Pick<HostMove, "at" | "kind" | "content"> & { to: Pick<HostMove["to"], "name" | "asn" | "cdn">; allegation: string };
+
+/** The site's move as the case page's takedown status reads it (`takedownSummary`), with only what the page shows. */
+function publicSiteMove(reports: readonly SubmissionReport[]): PublicSiteMove | undefined {
+	const moved = takedownSummary(reports).moved;
+	if (!moved) return undefined;
+	const { move, report } = moved;
+	return {
+		at: move.at,
+		kind: move.kind,
+		content: move.content,
+		to: { name: move.to.name, ...(move.to.asn !== undefined ? { asn: move.to.asn } : {}), ...(move.to.cdn ? { cdn: move.to.cdn } : {}) },
+		allegation: report.allegationCategory ?? "phishing",
+	};
+}
 
 export type PublicCampaignVisitor = {
 	/** The impersonated brand, when the analyses name one. */
@@ -221,7 +245,7 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Public
 	const siteFacts = new Map((await CampaignRepository.listSiteFacts(dossier.sites.map((site) => ({ submissionId: BigInt(site.submissionId), reportId: BigInt(site.reportId) })))).map((facts) => [memberKey(facts), facts]));
 
 	const loadSiteReports = dependencies.loadSiteReports ?? ((reportId: bigint) => getReportsByIds([reportId]));
-	const siteReports = new Map(await Promise.all(dossier.sites.map(async (site) => [site.key, publicSiteReports(await loadSiteReports(BigInt(site.reportId)))] as const)));
+	const siteReports = new Map(await Promise.all(dossier.sites.map(async (site) => [site.key, await loadSiteReports(BigInt(site.reportId))] as const)));
 
 	const sites: PublicCampaignSite[] = dossier.sites.map((site) => {
 		const facts = siteFacts.get(site.key);
@@ -236,7 +260,9 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Public
 		const screenshot = judged && (judged.stamped ?? judged.screenshot);
 		// Numbered by the order the site's pages were shown in, across the routes the case walked.
 		const steps = pages.map((page, index) => ({ step: index + 1, screenshotUrl: artifactUrl(page.screenshot.artifactId), ...(page.stamped ? { stampedUrl: artifactUrl(page.stamped.artifactId) } : {}) }));
-		const reports = siteReports.get(site.key) ?? [];
+		const loaded = siteReports.get(site.key) ?? [];
+		const reports = publicSiteReports(loaded);
+		const moved = publicSiteMove(loaded);
 		return {
 			key: site.key,
 			submissionId: site.submissionId,
@@ -260,6 +286,7 @@ export async function getPublicCampaign(campaignId: bigint, dependencies: Public
 			reports,
 			evidence: evidence.map((file) => ({ name: file.name, size: file.size, sha256: file.sha256, url: artifactUrl(file.artifactId) })),
 			takedown: siteTakedown(reports),
+			...(moved ? { moved } : {}),
 		};
 	});
 

@@ -94,7 +94,7 @@ function utcTime(at: string, locale: Locale): string {
  * campaign page alike: "Moved to Sollutium-NL (AS43641) at 26 Nov 21:30 UTC —
  * still serving malware".
  */
-export function hostMoveText(move: Pick<HostMove, "to" | "at" | "content" | "kind">, allegation: string | undefined, locale: Locale = "en"): string {
+export function hostMoveText(move: Pick<HostMove, "at" | "content"> & { to: Pick<HostMove["to"], "name" | "asn" | "cdn"> }, allegation: string | undefined, locale: Locale = "en"): string {
 	const where = networkLabel(move.to);
 	const when = utcTime(move.at, locale);
 	if (locale === "de") {

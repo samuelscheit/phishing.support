@@ -3,7 +3,10 @@ import { describe, expect, test } from "bun:test";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { getReportsForSubmission } from "../submissions/abuse_details";
-import { seedTrylevoReports } from "../submissions/trylevo_reports.fixtures";
+import { seedTrylevoReports, trylevoAt } from "../submissions/trylevo_reports.fixtures";
+import { AbuseRepository } from "../abuse/repository";
+import { HOST_MOVED_EVENT, hostMoveText, type HostMove } from "../liveness/moves";
+import { recordSiteCheck } from "../liveness/repository";
 import type { WebsiteSiteAssessment } from "../website/types";
 import type { ExtractedIndicator } from "./indicators";
 import { getPublicCampaign, siteTakedown, type PublicSiteReport } from "./public_view";
@@ -92,6 +95,43 @@ describe("what the public page tells a campaign's visitors", () => {
 		expect(view!.reports[0]!.next).toBeUndefined();
 		expect(view!.reports[3]!.next).toBeDefined();
 		expect(JSON.stringify(view!.reports)).not.toContain("subject");
+		expect(view!.moved).toBeUndefined();
+	});
+
+	test("a site that left the CDN that acted on it and still serves: moved, in the case page's words, and only reported again", async () => {
+		const campaign = await site(1n, "trylevo-test.app");
+		await SubmissionsEntity.create({ id: TRYLEVO, kind: "website", data: { kind: "website", website: { url: "https://trylevo.app/" } }, dedupeKey: "website-trylevo.app", status: "reported" });
+		const { site: owner } = await seedTrylevoReports(TRYLEVO);
+		// What the liveness check recorded when trylevo.app left Cloudflare (liveness/host_move.ts).
+		const move: HostMove = {
+			key: `${owner.targetId}:routed:cdn:Cloudflare->as:43641`,
+			targetId: owner.targetId.toString(),
+			at: "2026-11-26T21:30:05.000Z",
+			since: "2026-11-26T18:50:04.000Z",
+			kind: "left_cdn",
+			from: { name: "Cloudflare", cdn: "Cloudflare", asn: 13335, holder: "Cloudflare, Inc.", addresses: ["188.114.96.2", "188.114.97.2"] },
+			to: { name: "Sollutium-NL", asn: 43641, holder: "Sollutium-NL SOLLUTIUM EU Sp z.o.o.", addresses: ["85.137.52.128"] },
+			content: "served",
+			evidence: { url: "https://trylevo.app/", state: "online", httpStatus: 200, server: "nginx/1.30.0", kitFiles: [{ url: "https://trylevo.app/js/demo.js", sha256: "d76e0b31a267064a315158b8e2937ed6de2871f842edb45b60b9107f411a0a8e" }] },
+		};
+		await AbuseRepository.appendEvent({ reportId: owner.reportId, targetId: owner.targetId, eventType: HOST_MOVED_EVENT, data: move });
+		const loadSiteReports = async () => (await getReportsForSubmission(TRYLEVO)).filter((report) => report.subject === "site");
+
+		const [view] = (await getPublicCampaign(campaign, { loadSiteReports }))!.sites;
+		expect(view!.moved).toEqual({ at: "2026-11-26T21:30:05.000Z", kind: "left_cdn", content: "served", to: { name: "Sollutium-NL", asn: 43641 }, allegation: "malware" });
+		expect(hostMoveText(view!.moved!, view!.moved!.allegation)).toBe("Moved to Sollutium-NL (AS43641) at 26 Nov 21:30 UTC — still serving malware");
+		expect(hostMoveText(view!.moved!, view!.moved!.allegation, "de")).toBe("Umgezogen zu Sollutium-NL (AS43641) am 26. Nov. 21:30 UTC – verbreitet weiter Schadsoftware");
+		// Cloudflare's restriction no longer stands for the site: bypassed, and the site is only reported.
+		expect(view!.reports[0]).toMatchObject({ organisation: "Cloudflare", bucket: "bypassed", label: "Block bypassed" });
+		expect(view!.takedown).toBe("reported");
+		// No evidence of the check leaves the server.
+		expect(JSON.stringify(view!.moved)).not.toContain("85.137.52.128");
+
+		// A later check found the new host took it down: the move is settled.
+		await recordSiteCheck(owner, { url: "https://trylevo.app/", state: "host_suspended", resolvedAddresses: ["85.137.52.128"], domainStatuses: [], checkedAt: trylevoAt("23:30:00") });
+		const [after] = (await getPublicCampaign(campaign, { loadSiteReports }))!.sites;
+		expect(after!.moved).toBeUndefined();
+		expect(after!.takedown).toBe("taken_down");
 	});
 });
 

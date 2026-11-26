@@ -7,7 +7,7 @@ import type { PublicCampaignSite, SiteTakedown } from "@/lib/campaign/public_vie
 import { formatDate, type Locale } from "@/lib/i18n/locale";
 import { cn } from "@/lib/util/cn";
 import { COPY } from "./copy";
-import { languageName, scrollToId, takedownCounts, TakedownPill } from "./site_facts";
+import { languageName, MovedNote, scrollToId, takedownCounts, TakedownPill } from "./site_facts";
 import { Thumb } from "./SitePicture";
 
 type Filter = "all" | SiteTakedown;
@@ -93,7 +93,7 @@ export function SiteTable({ sites, selected, onSelect, linkedHost, brandDomain, 
 								</td>
 								<td className="hidden truncate px-3 py-2 text-xs sm:table-cell">{languageName(site.language, locale) ?? "–"}</td>
 								<td className="hidden whitespace-nowrap px-3 py-2 text-xs tabular-nums text-muted-foreground md:table-cell">{formatDate(site.firstSeenAt, locale)}</td>
-								<td className="px-3 py-2"><TakedownPill site={site} locale={locale} /></td>
+								<td className="px-3 py-2"><TakedownPill site={site} locale={locale} /><MovedNote site={site} locale={locale} className="mt-1 font-normal" /></td>
 							</tr>
 						))}
 					</tbody>
