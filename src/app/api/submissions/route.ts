@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseSubmissionFilters, SubmissionFilterError } from "@/lib/submissions/filters";
-import { listSubmissionCards, SubmissionCursorError } from "@/lib/submissions/list";
+import { listSubmissionItems, SubmissionCursorError } from "@/lib/submissions/list";
 
 /** `?status=running,phishing` keeps those status chips; without it every submission is listed. */
 export async function GET(req: NextRequest) {
@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
 		const { searchParams } = req.nextUrl;
 		const limit = searchParams.has("limit") ? Number(searchParams.get("limit")) : undefined;
 		const status = searchParams.get("status");
-		return NextResponse.json(await listSubmissionCards({
+		return NextResponse.json(await listSubmissionItems({
 			cursor: searchParams.get("cursor"),
 			limit: Number.isFinite(limit) ? limit : undefined,
 			...(status === null ? {} : { filters: parseSubmissionFilters(status) }),

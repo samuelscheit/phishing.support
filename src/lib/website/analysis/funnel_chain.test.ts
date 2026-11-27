@@ -55,7 +55,7 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 		await analyzeWebsite({ submissionId: id, url: link }, dependencies(() => productionVisit(link), calls));
 
 		// One case: the chain never became a second case.
-		expect((await SubmissionsEntity.listCards({ limit: 10 })).map((card) => card.id)).toEqual([id]);
+		expect((await SubmissionsEntity.listSitemapEntries(10)).map((entry) => entry.id)).toEqual([id]);
 		const submission = (await SubmissionsEntity.get(id))!;
 		expect(submission.status).toBe("reported");
 		const website = submission.data.kind === "website" ? submission.data.website : undefined;

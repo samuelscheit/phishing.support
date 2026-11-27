@@ -252,7 +252,7 @@ describe("website redirects", () => {
 		// One capture, kept with the case that made it; no other case is opened.
 		expect(archiveCalls).toHaveLength(1);
 		expect((await ArtifactsEntity.listForSubmission(id)).map((artifact) => artifact.name).sort()).toEqual(["evidence-manifest.json", "visit-manifest.json", "visit-protocol.txt", "visit-record.json", "website-stamped.png", "website-thumb.webp", "website.mhtml", "website.png"]);
-		expect((await SubmissionsEntity.listCards({ limit: 10 })).map((card) => card.id)).toEqual([id]);
+		expect((await SubmissionsEntity.listSitemapEntries(10)).map((entry) => entry.id)).toEqual([id]);
 
 		const reports = await AbuseRepository.listReportsForSubmission(id);
 		expect(reports).toHaveLength(1);
@@ -628,7 +628,7 @@ describe("cloaked websites", () => {
 			{ hopIndex: 0, finding: "insufficient_evidence", judgedHopIndex: undefined },
 			{ hopIndex: 1, finding: "benign", judgedHopIndex: 1 },
 		]);
-		expect((await SubmissionsEntity.listCards({ limit: 10 })).map((card) => card.id)).toEqual([id]);
+		expect((await SubmissionsEntity.listSitemapEntries(10)).map((entry) => entry.id)).toEqual([id]);
 		expect(await AbuseRepository.getReportForSubmission(id)).toBeUndefined();
 	});
 

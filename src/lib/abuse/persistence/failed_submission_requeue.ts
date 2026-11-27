@@ -1,6 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 
 import { getDb } from "../../db";
+import { readBlob } from "../../db/blobs";
 import { abuseArtifacts, abuseEvents, abuseProviderRoutes, abuseProviderRuns, abuseReports } from "../schema";
 import { insertQueuedJob } from "./jobs";
 import { recomputeReportStatusInTransaction } from "./report_status";
@@ -142,9 +143,10 @@ export async function requeueBrandRefusedLinkedRoutes(): Promise<bigint[]> {
 					.orderBy(desc(abuseArtifacts.createdAt), desc(abuseArtifacts.id))
 					.limit(1)
 					.get();
+				const request = original ? readBlob(original.sha256).toString("utf8") : undefined;
 				let sourceId: bigint | undefined;
 				try {
-					const sourceReportId = original ? (JSON.parse(Buffer.from(original.blob).toString("utf8")) as { sourceReportId?: unknown }).sourceReportId : undefined;
+					const sourceReportId = request ? (JSON.parse(request) as { sourceReportId?: unknown }).sourceReportId : undefined;
 					if (typeof sourceReportId === "string" && /^\d+$/.test(sourceReportId)) sourceId = BigInt(sourceReportId);
 				} catch {
 					continue;

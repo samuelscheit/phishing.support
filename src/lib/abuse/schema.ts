@@ -1,5 +1,5 @@
 import { InferSelectModel, sql } from "drizzle-orm";
-import { blob, index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "../db/sqlite_types";
 import { submissions } from "../db/schema";
 import { campaigns } from "../campaign/schema";
@@ -303,10 +303,10 @@ export const abuseArtifacts = sqliteTable(
 		sha256: text("sha256").notNull(),
 		size: sqliteInteger("size").notNull(),
 		metadata: text("metadata", { mode: "json" }).$type<Record<string, unknown>>(),
-		blob: blob("blob").notNull().$type<Buffer>(),
 		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
+		// The bytes live in the blob store (`db/blobs.ts`) under `sha256`.
 		// A hash identifies bytes, not an artifact occurrence. The same bytes can
 		// legitimately be an original upload, a provider derivative, a MIME part,
 		// or evidence for distinct routes. Keep every immutable occurrence and use
@@ -451,7 +451,9 @@ export type AbuseReport = InferSelectModel<typeof abuseReports>;
 export type AbuseTarget = InferSelectModel<typeof abuseTargets>;
 export type AbuseProviderRoute = InferSelectModel<typeof abuseProviderRoutes>;
 export type AbuseProviderRun = InferSelectModel<typeof abuseProviderRuns>;
-export type AbuseArtifact = InferSelectModel<typeof abuseArtifacts>;
+export type AbuseArtifactRecord = InferSelectModel<typeof abuseArtifacts>;
+/** A stored artifact with its bytes, read from the blob store. */
+export type AbuseArtifact = AbuseArtifactRecord & { blob: Buffer };
 export type AbuseMailMessage = InferSelectModel<typeof abuseMailMessages>;
 export type Job = InferSelectModel<typeof jobs>;
 export type AbuseEvent = InferSelectModel<typeof abuseEvents>;

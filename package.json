@@ -11,7 +11,7 @@
 		"typecheck": "tsc --project tsconfig.json",
 		"typecheck:test": "tsc --project tsconfig.test.json",
 		"migrations:generate": "drizzle-kit generate",
-		"migrations:apply": "drizzle-kit migrate",
+		"migrations:apply": "bun -e 'import { getDb } from \"./src/lib/db\"; await getDb();'",
 		"migrations:push": "drizzle-kit push"
 	},
 	"devDependencies": {

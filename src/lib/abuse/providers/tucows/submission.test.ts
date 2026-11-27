@@ -3,10 +3,10 @@ import { browserUserAgent } from "../../../network/service_identity";
 import { eq } from "drizzle-orm";
 
 import { getDb } from "../../../db";
-import { useTemporaryDatabase } from "../../../db/test_helpers";
+import { tamperBlob, useTemporaryDatabase } from "../../../db/test_helpers";
 import { routeFixture, verifiedPrepare } from "../kit/testing";
 import { AbuseRepository } from "../../repository";
-import { abuseArtifacts, abuseTargets } from "../../schema";
+import { abuseTargets } from "../../schema";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError, type ProviderSubmissionProvider } from "../submission_contracts";
 import { executeProviderSubmission } from "../submission_execution";
 import { TUCOWS_PROVIDER } from "./definition";
@@ -187,7 +187,7 @@ describe("the draft verified before the preflight", () => {
 		await expect(tucowsDraft.verify({ routeId: route.id, payload: { ...payload, report: { ...payload.report, description: `${payload.report.description} edited` } } as never })).rejects.toThrow("no longer matches the report");
 		await expect(tucowsDraft.verify({ routeId: route.id, payload: { ...payload, target: { normalizedTarget: "other.example.com" } } as never })).rejects.toThrow("no longer matches its route");
 		await expect(tucowsDraft.verify({ routeId: route.id, payload: { ...payload, report: { ...payload.report, reference: "PS-000000000000-R1" } } as never })).rejects.toThrow("no longer matches the report");
-		(await getDb()).update(abuseArtifacts).set({ blob: Buffer.concat([PNG, Buffer.from("x")]) }).where(eq(abuseArtifacts.reportId, created.reportId)).run();
+		for (const { sha256 } of await AbuseRepository.listArtifactMetadata(created.reportId)) tamperBlob(sha256, Buffer.concat([PNG, Buffer.from("x")]));
 		await expect(prepareTucowsExternalSubmission(context, deps(wizard()))).rejects.toThrow("no longer matches its immutable reference");
 		(await getDb()).update(abuseTargets).set({ observedUrls: [`https://${TARGET}/changed`] }).where(eq(abuseTargets.id, targetId)).run();
 		await expect(tucowsDraft.verify(context)).rejects.toThrow("no longer matches the report");

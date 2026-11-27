@@ -14,7 +14,7 @@ import { analyzeWebsite } from "./ai";
 import type { WebsiteAnalysisDependencies } from "./analysis_types";
 import { buildWebsiteClassificationInput } from "./classification";
 import { getDb } from "../../db";
-import { jobs, abuseArtifacts } from "../../abuse/schema";
+import { jobs } from "../../abuse/schema";
 import { readInvestigationJobPayload } from "../../investigation/payload";
 import { scriptedSiteVisit, type ScriptedPage, type ScriptedVisit } from "../../site_visit/test_helpers";
 import { reporterBrowserIdentity } from "../../browser/reporter_identity";
@@ -341,7 +341,7 @@ describe("a visit through a multi-page kit", () => {
 		// The data drop is reported at its own host by the investigation, from the visit's own recording.
 		const job = (await getDb()).select().from(jobs).where(eq(jobs.reportId, report!.id)).get()!;
 		expect(readInvestigationJobPayload(job.payload).dataDrops).toEqual([expect.objectContaining({ kind: "telegram_bot", key: "telegram-token:8123456789:AAH-kit-token", matchedCanaries: ["marker", "password"] })]);
-		const capture = (await getDb()).select().from(abuseArtifacts).where(eq(abuseArtifacts.reportId, report!.id)).all().find((artifact) => artifact.name === "exfiltration-network-capture.json");
+		const capture = (await AbuseRepository.listArtifacts(report!.id)).find((artifact) => artifact.name === "exfiltration-network-capture.json");
 		expect(JSON.parse(Buffer.from(capture!.blob).toString("utf8"))).toMatchObject({ version: 2, pageUrl: SIGN_IN, backends: [expect.objectContaining({ kind: "telegram_bot" })] });
 
 		// The visit is kept as evidence that holds up on its own: which values were made up,
@@ -524,7 +524,7 @@ describe("a visit through a multi-page kit", () => {
 		]);
 		expect(websiteData(submission)?.routes?.[0]?.analyzedHopIndex).toBe(2);
 		// One case, one report, of the kit's host only.
-		expect((await SubmissionsEntity.listCards({ limit: 10 })).map((card) => card.id)).toEqual([id]);
+		expect((await SubmissionsEntity.listSitemapEntries(10)).map((entry) => entry.id)).toEqual([id]);
 		const report = await AbuseRepository.getReportForSubmission(id);
 		expect(report?.description).toContain('"Sign in"');
 		expect((await AbuseRepository.listTargets(report!.id)).map(({ normalizedTarget, observedUrls }) => ({ normalizedTarget, observedUrls }))).toEqual([{ normalizedTarget: "en-web09.pw", observedUrls: [KIT] }]);

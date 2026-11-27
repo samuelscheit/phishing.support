@@ -10,8 +10,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_SUBMISSION_FILTERS, isSubmissionFilter, type SubmissionFilter } from "@/lib/submissions/filters";
-import type { SubmissionCard as SubmissionCardData, SubmissionCardPage } from "@/lib/submissions/list";
-import { groupCards, type SubmissionListItem } from "@/lib/submissions/campaign_groups";
+import type { SubmissionCard as SubmissionCardData, SubmissionListItem, SubmissionListPage } from "@/lib/submissions/list";
 import { hostOf } from "@/lib/network/url";
 
 const PREVIEW_ROWS = 3;
@@ -89,7 +88,7 @@ function ListTileFrame({ href, label, obscured, badge, meta, createdAt, title, n
 			<Card className="hover:bg-accent transition-colors cursor-pointer h-full w-full">
 				<CardContent className="py-4 space-y-2 min-w-0">
 					<div className="flex justify-between items-start gap-2">
-						<span className="flex items-center gap-2">
+						<span className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
 							{badge}
 							{meta ? <span className="text-xs leading-none text-muted-foreground">{meta}</span> : null}
 						</span>
@@ -119,15 +118,12 @@ function SubmissionCard({ submission, obscured = false }: { submission: Submissi
 
 type ListItem = SubmissionListItem;
 
-/** "1 visiting · 4 queued": how the loaded cases of a group stand. */
-function pendingSummary(statuses: readonly string[]): string {
-	const queued = statuses.filter((status) => status === "queued").length;
-	const running = statuses.filter((status) => status === "running").length;
+/** "1 visiting · 4 queued": how the listed cases of a group stand. */
+function pendingSummary(running: number, queued: number): string {
 	return [running ? `${running} visiting` : "", queued ? `${queued} queued` : ""].filter(Boolean).join(" · ");
 }
 
 function CampaignCard({ item, obscured = false }: { item: Extract<ListItem, { type: "campaign" }>; obscured?: boolean }) {
-	const hosts = [...new Set(item.titles.map(hostOf))];
 	const size = item.domain ? (item.hostCount > 1 ? `${item.hostCount} hosts` : "") : item.siteCount > 1 ? `${item.siteCount} sites` : "";
 	return (
 		<ListTileFrame
@@ -136,7 +132,8 @@ function CampaignCard({ item, obscured = false }: { item: Extract<ListItem, { ty
 			badge={<SubmissionStatus status="reported" />}
 			meta={size}
 			createdAt={item.newest.createdAt}
-			title={item.domain ?? hosts[0]!}
+			// Without a shared domain every case of the tile is a member, so the newest names the campaign.
+			title={item.domain ?? hostOf(item.newest.title)}
 			note={item.pending ? `${item.pending} more in progress` : undefined}
 		/>
 	);
@@ -144,19 +141,16 @@ function CampaignCard({ item, obscured = false }: { item: Extract<ListItem, { ty
 
 /** The hosts of one domain in no campaign yet: one tile, opening the newest. */
 function SiteGroupCard({ item, obscured = false }: { item: Extract<ListItem, { type: "siteGroup" }>; obscured?: boolean }) {
-	const status = item.statuses.includes("running") ? "running" : item.statuses.includes("queued") ? "queued" : item.newest.status;
-	const pending = pendingSummary(item.statuses);
-	const newest = hostOf(item.newest.title);
+	const status = item.runningCount ? "running" : item.queuedCount ? "queued" : item.newest.status;
 	return (
 		<ListTileFrame
 			href={`/submissions/${item.newest.id}`}
-			label={`${item.siteGroup}, ${item.size} hosts; opens the newest, ${newest}`}
+			label={`${item.siteGroup}, ${item.size} hosts`}
 			obscured={obscured}
 			badge={<SubmissionStatus status={status} />}
-			meta={[`${item.size} hosts`, pending].filter(Boolean).join(" · ")}
+			meta={[`${item.size} hosts`, pendingSummary(item.runningCount, item.queuedCount)].filter(Boolean).join(" · ")}
 			createdAt={item.newest.createdAt}
 			title={item.siteGroup}
-			note={`Newest: ${newest}`}
 		/>
 	);
 }
@@ -167,7 +161,7 @@ function ListTile({ item, obscured }: { item: ListItem; obscured?: boolean }) {
 	return <SubmissionCard submission={item.submission} obscured={obscured} />;
 }
 
-async function fetchPage(filters: readonly SubmissionFilter[], cursor?: string): Promise<SubmissionCardPage> {
+async function fetchPage(filters: readonly SubmissionFilter[], cursor?: string): Promise<SubmissionListPage> {
 	const query = new URLSearchParams({ status: filters.join(",") });
 	if (cursor) query.set("cursor", cursor);
 	const res = await fetch(`/api/submissions?${query}`);
@@ -175,10 +169,16 @@ async function fetchPage(filters: readonly SubmissionFilter[], cursor?: string):
 	return res.json();
 }
 
-/** Newest page first, then older pages; a card refreshed on the newest page replaces its older copy. */
-function mergePages(newest: SubmissionCardData[], older: SubmissionCardData[]): SubmissionCardData[] {
-	const seen = new Set(newest.map(({ id }) => id));
-	return [...newest, ...older.filter(({ id }) => !seen.has(id))];
+/** Newest page first, then older pages; every tile appears once, at its newest occurrence. */
+function mergePages(newest: ListItem[], older: ListItem[]): ListItem[] {
+	const seen = new Set<string>();
+	const merged: ListItem[] = [];
+	for (const item of [...newest, ...older]) {
+		if (seen.has(item.key)) continue;
+		seen.add(item.key);
+		merged.push(item);
+	}
+	return merged;
 }
 
 /**
@@ -190,23 +190,22 @@ function mergePages(newest: SubmissionCardData[], older: SubmissionCardData[]): 
 export function SubmissionsList() {
 	// `null` until the stored choice is read, so the default never flashes in before it.
 	const [filters, setFilters] = useState<SubmissionFilter[] | null>(null);
-	const [counts, setCounts] = useState<SubmissionCardPage["counts"]>();
+	const [counts, setCounts] = useState<SubmissionListPage["counts"]>();
 	// Set while the cards on screen still belong to the previous choice of chips.
 	const [switching, setSwitching] = useState(false);
 	const filtersRef = useRef(filters);
-	const [newest, setNewest] = useState<SubmissionCardData[]>([]);
-	const [older, setOlder] = useState<SubmissionCardData[]>([]);
+	const [newest, setNewest] = useState<ListItem[]>([]);
+	const [older, setOlder] = useState<ListItem[]>([]);
 	// `undefined` until the first page arrives; `null` once every page is loaded.
 	const [nextCursor, setNextCursor] = useState<string | null | undefined>(undefined);
 	const [loadingOlder, setLoadingOlder] = useState(false);
 	const [loading, setLoading] = useState(true);
 	const [expanded, setExpanded] = useState(false);
 	const sentinel = useRef<HTMLDivElement>(null);
-	const submissions = mergePages(newest, older);
-	const items = groupCards(submissions);
+	const items = mergePages(newest, older);
 	const columnCount = useGridColumnCount();
 	const previewSubmissionCount = columnCount * PREVIEW_ROWS;
-	const hasMoreSubmissions = items.length > previewSubmissionCount;
+	const hasMoreSubmissions = items.length > previewSubmissionCount || Boolean(nextCursor);
 	const isCollapsed = hasMoreSubmissions && !expanded;
 	const visibleItems = isCollapsed ? items.slice(0, previewSubmissionCount) : items;
 	const obscuredItems = isCollapsed ? items.slice(previewSubmissionCount) : [];
@@ -228,7 +227,7 @@ export function SubmissionsList() {
 			try {
 				const page = await fetchPage(filters);
 				if (cancelled) return;
-				setNewest(page.submissions);
+				setNewest(page.items);
 				setCounts(page.counts);
 				// Only the first load of a choice of chips decides where its older pages
 				// start; refreshes must not reset paging.
@@ -245,11 +244,17 @@ export function SubmissionsList() {
 			}
 		};
 
-		refreshNewest();
-		const interval = setInterval(refreshNewest, 5000);
+		// A hidden tab is not refreshed; it catches up the moment it is shown again.
+		const refreshVisible = () => {
+			if (document.visibilityState === "visible") void refreshNewest();
+		};
+		void refreshNewest();
+		const interval = setInterval(refreshVisible, 5000);
+		document.addEventListener("visibilitychange", refreshVisible);
 		return () => {
 			cancelled = true;
 			clearInterval(interval);
+			document.removeEventListener("visibilitychange", refreshVisible);
 		};
 	}, [filters]);
 
@@ -260,7 +265,7 @@ export function SubmissionsList() {
 			const page = await fetchPage(filters, nextCursor);
 			// A page of the previous choice of chips arriving after a change is dropped.
 			if (filtersRef.current !== filters) return;
-			setOlder((current) => [...current, ...page.submissions]);
+			setOlder((current) => [...current, ...page.items]);
 			setNextCursor(page.nextCursor ?? null);
 		} catch (err) {
 			console.error("Failed to fetch older submissions:", err);
@@ -288,7 +293,7 @@ export function SubmissionsList() {
 		</div>
 	);
 
-	if (!filters || (loading && submissions.length === 0)) {
+	if (!filters || (loading && items.length === 0)) {
 		return (
 			<div className="space-y-4">
 				{header}
@@ -297,7 +302,7 @@ export function SubmissionsList() {
 		);
 	}
 
-	if (submissions.length === 0) {
+	if (items.length === 0) {
 		return (
 			<div className="space-y-4">
 				{header}

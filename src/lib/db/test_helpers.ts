@@ -1,9 +1,15 @@
 import { afterAll, beforeEach } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import { blobFilePath } from "./blobs";
 import { resetDatabaseForTesting } from "./index";
+
+/** Replace the stored bytes of blob `sha256` on disk, as corruption or tampering would; every artifact naming it reads them. */
+export function tamperBlob(sha256: string, bytes: Buffer): void {
+	writeFileSync(blobFilePath(sha256), bytes);
+}
 
 /**
  * Gives a test file a private, fully migrated SQLite database. This is kept

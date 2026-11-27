@@ -24,8 +24,7 @@ import { factsFromDossier } from "../campaign/link";
 import { describeIndicatorEnglish } from "./archive_text";
 import { describeIndicator } from "./render";
 import { getPublicCampaign } from "../campaign/public_view";
-import { listSubmissionCards } from "../submissions/list";
-import { groupCards } from "../submissions/campaign_groups";
+import { listSubmissionItems } from "../submissions/list";
 
 useTemporaryDatabase();
 
@@ -295,13 +294,8 @@ describe("criminal referral of a campaign", () => {
 		await campaignWithThreeSites();
 		await reportedSite(16n, "unrelated-solo.com");
 		await CampaignRepository.recordIndicators(memberOf(16n), [telegram("9999")]);
-		const page = await listSubmissionCards();
-		const campaignOf = (id: string) => page.submissions.find((card) => card.id === id)?.campaign;
-		expect(campaignOf("11")).toMatchObject({ siteCount: 3 });
-		expect(campaignOf("13")).toEqual(campaignOf("11"));
-		expect(campaignOf("16")).toMatchObject({ siteCount: 1 });
-		const items = groupCards(page.submissions);
-		expect(items.map((item) => item.type === "campaign" ? `campaign:${item.siteCount}:${item.titles.length}` : item.type === "submission" ? item.submission.id : item.siteGroup)).toEqual(["campaign:1:1", "campaign:3:3"]);
+		const { items } = await listSubmissionItems();
+		expect(items.map((item) => item.type === "campaign" ? `campaign:${item.siteCount}:${item.hostCount}:${item.newest.id}` : item.key)).toEqual(["campaign:1:1:16", "campaign:3:3:13"]);
 	});
 
 	test("refuses to approve a text the sender would refuse, and keeps the draft", async () => {

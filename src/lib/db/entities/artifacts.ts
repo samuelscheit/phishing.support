@@ -1,13 +1,13 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "../index";
-import { artifacts } from "../schema";
+import { readBlob, writeBlob } from "../blobs";
+import { artifacts, type Artifact } from "../schema";
 import { generateId } from "../ids";
 import { websiteEvidenceFiles, type WebsiteEvidencePackage } from "../../evidence/package";
 import { chainHopBodyFileName, latestArtifactNamed, websiteCaptureFileNames, type CapturePage } from "../../website/visit/capture_files";
 import { pagePreview } from "../../website/visit/page_preview";
 import { errorSummary } from "../../util/error_text";
 import type { HopBody } from "../../website/visit/tab_recording";
-import { sha256Hex } from "../../util/hash";
 
 export class ArtifactsEntity {
     static async saveBuffer(params: {
@@ -20,6 +20,8 @@ export class ArtifactsEntity {
     }) {
         const db = await getDb();
         const id = generateId();
+        // The bytes are stored before the row that names them.
+        const { sha256, size } = writeBlob(params.buffer);
 		const [row] = await db
 			.insert(artifacts)
             .values([
@@ -30,9 +32,8 @@ export class ArtifactsEntity {
                     kind: params.kind,
                     archivedAt: params.archivedAt,
                     mimeType: params.mimeType,
-                    sha256: sha256Hex(params.buffer),
-                    size: params.buffer.byteLength,
-                    blob: params.buffer,
+                    sha256,
+                    size,
                     createdAt: new Date(),
                 },
             ])
@@ -58,10 +59,11 @@ export class ArtifactsEntity {
             .where(eq(artifacts.submissionId, submissionId));
     }
 
-    static async get(id: bigint) {
+    /** The artifact with its bytes. */
+    static async get(id: bigint): Promise<Artifact | undefined> {
         const db = await getDb();
         const [row] = await db.select().from(artifacts).where(eq(artifacts.id, id));
-        return row;
+        return row ? { ...row, blob: readBlob(row.sha256) } : undefined;
     }
 
     /**

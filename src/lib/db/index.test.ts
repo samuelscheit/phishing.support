@@ -6,12 +6,17 @@ import { useTemporaryDatabase } from "./test_helpers";
 
 useTemporaryDatabase();
 
-test("SQLite uses WAL and a busy timeout for concurrent server and worker access", async () => {
+test("SQLite uses WAL and a busy timeout for concurrent server and worker access, and keeps reads in memory", async () => {
 	const db = await getDb();
 	const client = (db as unknown as { $client: Database }).$client;
 
 	expect(client.query("PRAGMA journal_mode").get() as { journal_mode: string }).toEqual({ journal_mode: "wal" });
 	expect(client.query("PRAGMA busy_timeout").get() as { timeout: bigint }).toEqual({ timeout: 10_000n });
+	// NORMAL is 1, MEMORY is 2; a negative cache size is in KiB.
+	expect(client.query("PRAGMA synchronous").get()).toEqual({ synchronous: 1n });
+	expect(client.query("PRAGMA cache_size").get()).toEqual({ cache_size: -64_000n });
+	expect(client.query("PRAGMA temp_store").get()).toEqual({ temp_store: 2n });
+	expect(client.query("PRAGMA mmap_size").get()).toEqual({ mmap_size: 268_435_456n });
 });
 
 test("the connection enforces foreign keys: no orphan is written and a delete cascades or clears", async () => {

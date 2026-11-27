@@ -3,7 +3,8 @@ import { and, eq } from "drizzle-orm";
 import type { DbExecutor } from "../../db";
 import { generateId } from "../../db/ids";
 import { abuseArtifacts, abuseEvents, abuseProviderRoutes, abuseProviderRuns, type AbuseProviderRoute, type AbuseProviderRun, type AbuseRunStatus } from "../schema";
-import { hashStableJson, sha256Hex } from "../../util/hash";
+import { writeBlob } from "../../db/blobs";
+import { hashStableJson } from "../../util/hash";
 
 export function now(): Date {
 	return new Date();
@@ -21,8 +22,10 @@ export type ArtifactValuesParams = {
 	metadata?: Record<string, unknown>;
 };
 
-function artifactValues(params: ArtifactValuesParams) {
-	return {
+/** Store the bytes first (`writeBlob`), then the row naming them. */
+export function insertArtifact(tx: DbExecutor, params: ArtifactValuesParams): bigint {
+	const { sha256, size } = writeBlob(params.buffer);
+	const values = {
 		id: generateId(),
 		reportId: params.reportId,
 		targetId: params.targetId,
@@ -31,16 +34,11 @@ function artifactValues(params: ArtifactValuesParams) {
 		name: params.name,
 		kind: params.kind,
 		mimeType: params.mimeType,
-		sha256: sha256Hex(params.buffer),
-		size: params.buffer.byteLength,
+		sha256,
+		size,
 		metadata: params.metadata,
-		blob: params.buffer,
 		createdAt: now(),
 	};
-}
-
-export function insertArtifact(tx: DbExecutor, params: ArtifactValuesParams): bigint {
-	const values = artifactValues(params);
 	tx.insert(abuseArtifacts).values(values).run();
 	return values.id;
 }

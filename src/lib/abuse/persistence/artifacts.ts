@@ -1,9 +1,15 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "../../db";
-import { abuseArtifacts, type AbuseArtifact } from "../schema";
+import { readBlob } from "../../db/blobs";
+import { abuseArtifacts, type AbuseArtifact, type AbuseArtifactRecord } from "../schema";
 import { insertArtifact, type ArtifactValuesParams } from "./shared";
 import { sha256Hex } from "../../util/hash";
+
+/** The artifact with its bytes from the blob store. */
+function withBlob(row: AbuseArtifactRecord): AbuseArtifact {
+	return { ...row, blob: readBlob(row.sha256) };
+}
 
 export async function saveArtifact(params: ArtifactValuesParams): Promise<bigint> {
 	const db = await getDb();
@@ -35,7 +41,7 @@ export async function saveRouteArtifactOnce(params: ArtifactValuesParams & { rou
 export async function listArtifacts(reportId: bigint, kinds?: string[]): Promise<AbuseArtifact[]> {
 	const db = await getDb();
 	const where = kinds?.length ? and(eq(abuseArtifacts.reportId, reportId), inArray(abuseArtifacts.kind, kinds)) : eq(abuseArtifacts.reportId, reportId);
-	return db.select().from(abuseArtifacts).where(where).orderBy(asc(abuseArtifacts.createdAt), asc(abuseArtifacts.id)).all();
+	return db.select().from(abuseArtifacts).where(where).orderBy(asc(abuseArtifacts.createdAt), asc(abuseArtifacts.id)).all().map(withBlob);
 }
 
 export async function listRouteArtifacts(routeId: bigint, kinds?: string[]): Promise<AbuseArtifact[]> {
@@ -43,7 +49,7 @@ export async function listRouteArtifacts(routeId: bigint, kinds?: string[]): Pro
 	const where = kinds?.length
 		? and(eq(abuseArtifacts.routeId, routeId), inArray(abuseArtifacts.kind, kinds))
 		: eq(abuseArtifacts.routeId, routeId);
-	return db.select().from(abuseArtifacts).where(where).orderBy(asc(abuseArtifacts.createdAt), asc(abuseArtifacts.id)).all();
+	return db.select().from(abuseArtifacts).where(where).orderBy(asc(abuseArtifacts.createdAt), asc(abuseArtifacts.id)).all().map(withBlob);
 }
 
 /** Artifact listing for read models; never loads the stored bytes. */
@@ -59,5 +65,6 @@ export async function listArtifactMetadata(reportId: bigint) {
 
 export async function getArtifact(reportId: bigint, artifactId: bigint): Promise<AbuseArtifact | undefined> {
 	const db = await getDb();
-	return db.select().from(abuseArtifacts).where(and(eq(abuseArtifacts.reportId, reportId), eq(abuseArtifacts.id, artifactId))).get();
+	const row = db.select().from(abuseArtifacts).where(and(eq(abuseArtifacts.reportId, reportId), eq(abuseArtifacts.id, artifactId))).get();
+	return row ? withBlob(row) : undefined;
 }

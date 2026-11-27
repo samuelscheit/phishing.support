@@ -16,6 +16,7 @@ import { abuseArtifacts, jobs, abuseMailMessages, abuseProviderRoutes, abuseProv
 import { getProviderSubmissionProvider } from "../providers";
 import { recheckAfterProviderAction } from "../worker/provider_action";
 import { sha256Hex } from "@/lib/util/hash";
+import { writeBlob } from "@/lib/db/blobs";
 import { reportHostMove } from "./report";
 import { CASE, check, DEMO_JS, events, jobsOfType, LETS_ENCRYPT, nextCheckAt, recordingSend, reportedAt, resolving, routeOf, site, trylevo } from "./report.fixtures";
 
@@ -121,7 +122,8 @@ describe("trylevo.app leaves Cloudflare after Cloudflare restricted it (case 384
 		const { reportId, targetId } = await trylevo();
 		await check(targetId, site(["85.137.52.128"], trylevoAt("21:30:05")));
 		const down = site(["85.137.52.128"], trylevoAt("22:30:05"));
-		await check(targetId, { ...down, fetch: async () => new Response("<html><title>Suspended</title>This account has been suspended.</html>", { status: 451, headers: { "content-type": "text/html" } }) });
+		// The host's suspension page decides by what it says; its 451 alone would decide nothing.
+		await check(targetId, { ...down, fetch: async () => new Response("<html><title>Account Suspended</title>This Account has been suspended. Contact your hosting provider for more information.</html>", { status: 451, headers: { "content-type": "text/html" } }) });
 		const [siteReport] = await getReportsForSubmission(CASE);
 		expect(siteReport!.latestCheck?.state).toBe("host_suspended");
 		expect(takedownSummary([siteReport!]).moved).toBeUndefined();
@@ -208,7 +210,7 @@ describe("other moves", () => {
 		db.insert(abuseProviderRoutes).values({ id: routeId, reportId, targetId, routeKey: "provider_submission:eranet:registrar", providerRegistryKey: "eranet", providerDisplayName: "Eranet Fraud & Phishing Report", routeType: "provider_submission", resolverProvenance: { source: "domain_rdap" }, resolutionSnapshot: {}, status: "submitted" }).run();
 		db.insert(abuseProviderRuns).values({ id: 384500000000000002n, reportId, routeId, providerPayload: { adapter: "eranet" }, payloadHash: "x", correlationKey: "run:eranet", executionStatus: "completed", confirmationId: "e8a998e9-ed1c-449c-a426-de1c6c183154" }).run();
 		const screenshot = Buffer.from("\x89PNG lure page");
-		db.insert(abuseArtifacts).values({ id: 384500000000000003n, reportId, name: "website.png", kind: "user_evidence_original", mimeType: "image/png", sha256: sha256Hex(screenshot), size: screenshot.length, blob: screenshot }).run();
+		db.insert(abuseArtifacts).values({ id: 384500000000000003n, reportId, name: "website.png", kind: "user_evidence_original", mimeType: "image/png", ...writeBlob(screenshot) }).run();
 
 		await check(targetId, site(["85.137.52.128"], new Date("2026-11-27T08:00:00Z"), { domain }));
 		const filed: Array<{ confirmationId: string; body: string; attachments: string[] }> = [];

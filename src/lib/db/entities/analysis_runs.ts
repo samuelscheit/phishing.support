@@ -4,10 +4,28 @@ import { analysisRuns, type AnalysisRunKind } from "../schema";
 import type { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
 import { generateId } from "../ids";
 
-/** A model input item without the screenshots it carried. */
-function withoutInputImages(item: ResponseInputItem): ResponseInputItem {
-    if (!("content" in item) || !Array.isArray(item.content)) return item;
-    return { ...item, content: (item.content as Array<{ type?: string }>).filter((part) => part.type !== "input_image") } as ResponseInputItem;
+const DATA_IMAGE = /^data:(image\/[\w.+-]+)[;,]/i;
+
+function isInputImage(value: unknown): boolean {
+    return typeof value === "object" && value !== null && (value as { type?: unknown }).type === "input_image";
+}
+
+/**
+ * A model input without the screenshots it carried: every `input_image` part,
+ * at any depth, is dropped and an image inlined as a `data:image/…` URL
+ * anywhere else is replaced by a note of its type. The screenshots are stored
+ * as artifacts already; kept in the run, each would be megabytes of base64.
+ */
+export function stripInputImages<T>(input: T): T {
+    if (typeof input === "string") {
+        const image = DATA_IMAGE.exec(input);
+        return (image ? `[${image[1]} omitted]` : input) as T;
+    }
+    if (Array.isArray(input)) return input.filter((item) => !isInputImage(item)).map(stripInputImages) as T;
+    if (typeof input === "object" && input !== null) {
+        return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, stripInputImages(value)])) as T;
+    }
+    return input;
 }
 
 export class AnalysisRunsEntity {
@@ -20,7 +38,7 @@ export class AnalysisRunsEntity {
                 submissionId,
                 status: "running" as const,
                 analysisKind,
-                input: input,
+                input: stripInputImages(input),
                 createdAt: new Date(),
             },
         ]);
@@ -30,7 +48,7 @@ export class AnalysisRunsEntity {
 
     static async update(id: bigint, values: Partial<typeof analysisRuns.$inferInsert>) {
         const db = await getDb();
-        await db.update(analysisRuns).set(values).where(eq(analysisRuns.id, id));
+        await db.update(analysisRuns).set(values.input ? { ...values, input: stripInputImages(values.input) } : values).where(eq(analysisRuns.id, id));
     }
 
     static async listForSubmission(submissionId: bigint) {
@@ -41,8 +59,8 @@ export class AnalysisRunsEntity {
             .orderBy(analysisRuns.createdAt)
             .where(eq(analysisRuns.submissionId, submissionId));
 
-        // Screenshots sent to the model are stored as artifacts already; the run list is shown without them.
-        return result.map((run) => ({ ...run, input: run.input?.map(withoutInputImages) ?? run.input }));
+        // A run stored before its input was stripped on write is shown stripped too.
+        return result.map((run) => ({ ...run, input: stripInputImages(run.input) }));
     }
 
     static async complete(runId: bigint, output?: Array<ResponseOutputItem>, tokensUsed?: number) {

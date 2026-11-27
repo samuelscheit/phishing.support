@@ -7,6 +7,7 @@ import { abuseArtifacts, abuseEvents, jobs, abuseMailMessages, abuseProviderRout
 import { getDb } from "@/lib/db";
 import { generateId } from "@/lib/db/ids";
 import { sha256Hex } from "@/lib/util/hash";
+import { writeBlob } from "@/lib/db/blobs";
 
 /** 2026-11-26 at `time` ("18:51:08") UTC, the day of case 384401854580134038. */
 export const trylevoAt = (time: string) => new Date(`2026-11-26T${time}.000Z`);
@@ -21,8 +22,8 @@ async function report(params: { submissionId: bigint; target: string; url: strin
 	// The queued resolution of a report made through the API is not part of this case.
 	db.delete(jobs).where(eq(jobs.reportId, created.reportId)).run();
 	for (const name of params.evidence) {
-		const blob = Buffer.from(name);
-		db.insert(abuseArtifacts).values({ id: generateId(), reportId: created.reportId, name, kind: "user_evidence_original", mimeType: name.endsWith(".png") ? "image/png" : "application/json", sha256: sha256Hex(blob), size: blob.length, blob, createdAt: trylevoAt(params.createdAt) }).run();
+		const { sha256, size } = writeBlob(Buffer.from(name));
+		db.insert(abuseArtifacts).values({ id: generateId(), reportId: created.reportId, name, kind: "user_evidence_original", mimeType: name.endsWith(".png") ? "image/png" : "application/json", sha256, size, createdAt: trylevoAt(params.createdAt) }).run();
 	}
 	const [target] = await AbuseRepository.listTargets(created.reportId);
 	return { reportId: created.reportId, targetId: target!.id };

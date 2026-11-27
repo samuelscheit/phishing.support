@@ -5,6 +5,8 @@ import type { SQLiteTransaction } from "drizzle-orm/sqlite-core";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
+import { extractInlineBlobsBeforeMigration, resetBlobStoreForTesting } from "./blobs";
+import { databaseFileName, isDiskDatabase } from "./file";
 /**
  * This application has several independently bundled server entry points
  * (the custom server, Next route handlers, and background listeners). Each
@@ -13,36 +15,36 @@ import { Database } from "bun:sqlite";
  * queries begin.
  */
 const SQLITE_BUSY_TIMEOUT_MS = 10_000;
+/** Page cache per connection, in KiB (SQLite reads a negative `cache_size` as KiB): 64 MB. */
+const SQLITE_CACHE_KIB = 64_000;
+/** How much of a database file a connection maps into memory instead of reading it: 256 MB. */
+const SQLITE_MMAP_BYTES = 256 * 1024 * 1024;
 
-function configureSqlite(client: Database) {
+function configureSqlite(client: Database, fileName: string) {
 	// WAL prevents readers from blocking the abuse worker while a submission
 	// page is being rendered. `busy_timeout` lets short write races resolve
-	// instead of immediately dropping durable jobs with SQLITE_BUSY.
+	// instead of immediately dropping durable jobs with SQLITE_BUSY. The cache,
+	// memory-held temp tables and the memory map keep list and page reads off
+	// the disk.
 	client.exec(`
 		PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};
 		PRAGMA journal_mode = WAL;
 		PRAGMA synchronous = NORMAL;
+		PRAGMA cache_size = -${SQLITE_CACHE_KIB};
+		PRAGMA temp_store = MEMORY;
 	`);
-}
-
-function databaseFileName() {
-	const fileName = process.env.DB_FILE_NAME;
-	if (!fileName) throw new Error("DB_FILE_NAME must be configured before the database is used.");
-	return fileName;
-}
-
-function ensureDatabaseDirectory(fileName: string) {
-	if (fileName === ":memory:" || fileName.startsWith("file:")) return;
-	mkdirSync(dirname(fileName), { recursive: true });
+	if (isDiskDatabase(fileName)) client.exec(`PRAGMA mmap_size = ${SQLITE_MMAP_BYTES};`);
 }
 
 async function initializeDatabase() {
 	const fileName = databaseFileName();
-	ensureDatabaseDirectory(fileName);
+	if (isDiskDatabase(fileName)) mkdirSync(dirname(fileName), { recursive: true });
 	const client = new Database(fileName, {
 		safeIntegers: true,
 	});
-	configureSqlite(client);
+	configureSqlite(client, fileName);
+	// Migration 0038 drops the inline blob columns: their bytes go to the blob store first.
+	extractInlineBlobsBeforeMigration(client, fileName);
 
 	const db = drizzle(
 		client,
@@ -84,6 +86,7 @@ export function getDb() {
 export async function resetDatabaseForTesting(): Promise<void> {
 	const activeDatabase = databasePromise;
 	databasePromise = undefined;
+	resetBlobStoreForTesting();
 	if (!activeDatabase) return;
 
 	try {

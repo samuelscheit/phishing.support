@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 
 import { getDb } from "../../../db";
-import { useTemporaryDatabase } from "../../../db/test_helpers";
+import { tamperBlob, useTemporaryDatabase } from "../../../db/test_helpers";
 import { validateAbuseReportRequest } from "../../contracts";
 import { AbuseRepository } from "../../repository";
 import { contactRoute } from "../../resolver/routes";
-import { abuseArtifacts, abuseProviderRoutes, abuseTargets } from "../../schema";
+import { abuseProviderRoutes, abuseTargets } from "../../schema";
 import { executeProviderSubmission } from "../submission_execution";
 import { ProviderSubmissionNeedsHumanError, ProviderSubmissionRejectedError, type ProviderSubmissionProvider } from "../submission_contracts";
 import { AlibabaConsoleError } from "./api";
@@ -246,7 +246,7 @@ describe("preflight: area check and evidence upload", () => {
 	test("a screenshot whose stored bytes changed is refused before upload", async () => {
 		const { context, created } = await readyContext();
 		const tampered = Buffer.concat([PNG, Buffer.from("!")]);
-		(await getDb()).update(abuseArtifacts).set({ blob: tampered }).where(eq(abuseArtifacts.reportId, created.reportId)).run();
+		for (const { sha256 } of await AbuseRepository.listArtifactMetadata(created.reportId)) tamperBlob(sha256, tampered);
 		const console = consoleAnswers();
 		await expect(prepareAlibabaCloudExternalSubmission(context, dependencies(console as never))).rejects.toThrow("no longer matches its immutable reference");
 		expect(console.requests).toHaveLength(0);

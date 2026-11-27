@@ -3,7 +3,7 @@ import type { Browser } from "rebrowser-puppeteer-core";
 
 import { eq } from "drizzle-orm";
 import { getDb } from "../../db";
-import { useTemporaryDatabase } from "../../db/test_helpers";
+import { tamperBlob, useTemporaryDatabase } from "../../db/test_helpers";
 import { abuseArtifacts } from "../schema";
 import { browserTaskModel, type ChatModel } from "../../browser/task/agent";
 import { chromiumAvailable, html, launchTestChromium, refIn, requestTexts, ScriptedModel, selfSignedCertificate, StalledModel, type ScriptedTurn } from "../../browser/task/test_helpers";
@@ -277,7 +277,7 @@ describe.skipIf(!chromiumAvailable)("the generic provider-form flow (real Chromi
 		const db = await getDb();
 		const tampered = Buffer.from(SCREENSHOT);
 		tampered[100] = 9;
-		db.update(abuseArtifacts).set({ blob: tampered }).where(eq(abuseArtifacts.id, BigInt(evidence[0]!.artifactId))).run();
+		tamperBlob(db.select().from(abuseArtifacts).where(eq(abuseArtifacts.id, BigInt(evidence[0]!.artifactId))).get()!.sha256, tampered);
 		const model = new ScriptedModel([]);
 		const { worker, lease } = services(model);
 		await expect(runGenericProviderPortal(route.id, {}, worker)).rejects.toThrow("no longer matches its immutable reference");

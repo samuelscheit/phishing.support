@@ -1,11 +1,12 @@
 import { InferSelectModel, sql } from "drizzle-orm";
-import { blob, index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, int, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { WhoISInfo } from "../website/info/info";
 import { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses.mjs";
 import { MailData } from "../mail/ai";
 import { sqliteBigint, sqliteInteger, sqliteTimestamp } from "./sqlite_types";
 import type { WebsiteAccessGate } from "../website/visit/access_gate";
 import type { ReporterInstructions } from "../submissions/instructions";
+import type { ReportedAs } from "../submissions/finding";
 import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, WebsiteHiddenFrame, WebsiteKitResource, WebsiteOfferedDownload, WebsiteProviderWarning, WebsiteRotation, WebsiteRoute, WebsiteSiteFinding } from "../website/types";
 
 export const submissionKind = ["email", "website"] as const;
@@ -127,6 +128,10 @@ export const submissions = sqliteTable(
 		 * one at a time and collected once one of them is reported.
 		 */
 		siteGroup: text("site_group"),
+		/** What the public list names the case by: its URL or the email's subject, else its dedupe key (`submissionTitle`). */
+		title: text("title"),
+		/** What the case's findings would report it for (`caseReportedAs`), kept with its data so the list never reads the data. */
+		reportedAs: text("reported_as").$type<ReportedAs>(),
 		createdAt: sqliteTimestamp("created_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
@@ -140,6 +145,11 @@ export const submissions = sqliteTable(
 		index("submissions_status_received_at_idx").on(table.status),
 		index("submissions_source_idx").on(table.source),
 		index("submissions_site_group_status_idx").on(table.siteGroup, table.status),
+		// Everything a list tile reads, so a list page never touches the rows (and their `data`).
+		index("submissions_list_covering_idx").on(table.createdAt, table.id, table.status, table.kind, table.siteGroup, table.title, table.reportedAs),
+		index("submissions_status_created_id_idx").on(table.status, table.createdAt, table.id),
+		// A case's site group by its id without reading its row: campaign tiles look up their members' groups.
+		index("submissions_id_site_group_idx").on(table.id, table.siteGroup),
 	]
 );
 
@@ -197,7 +207,9 @@ export const analysisRuns = sqliteTable(
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
 	},
-	(table) => []
+	(table) => [
+		index("analysis_runs_submission_created_idx").on(table.submissionId, table.createdAt),
+	]
 );
 
 export type AnalysisRun = InferSelectModel<typeof analysisRuns>;
@@ -217,16 +229,18 @@ export const artifacts = sqliteTable(
 		/** When the captured website archive itself was made, if known. */
 		archivedAt: sqliteTimestamp("archived_at"),
 		mimeType: text("mime_type"),
-		sha256: text("sha256"),
-		size: sqliteInteger("size"),
-		blob: blob("blob").notNull().$type<Buffer>(),
+		/** Names the bytes in the blob store (`db/blobs.ts`). */
+		sha256: text("sha256").notNull(),
+		size: sqliteInteger("size").notNull(),
 	},
 	(table) => [
 		index("artifacts_submission_kind_created_idx").on(table.submissionId, table.kind, table.createdAt),
 	]
 );
 
-export type Artifact = InferSelectModel<typeof artifacts>;
+export type ArtifactRecord = InferSelectModel<typeof artifacts>;
+/** A stored artifact with its bytes, read from the blob store. */
+export type Artifact = ArtifactRecord & { blob: Buffer };
 
 export const mailIngestRoute = ["reply", "intake", "ignored", "failed"] as const;
 export type MailIngestRoute = (typeof mailIngestRoute)[number];

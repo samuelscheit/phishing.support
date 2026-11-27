@@ -47,6 +47,8 @@ function website(id: bigint, host: string, kitResources: WebsiteKitResource[] = 
 		kind: "website",
 		source: null,
 		siteGroup: null,
+		title: `https://${host}/`,
+		reportedAs: null,
 		data: { kind: "website", website: { url: `https://${host}/`, kitResources, routes: [{ hops: [] }], whois: { ip_rdaps: [{ ip: "203.0.113.7", name: "EXAMPLE-NET", country: "NL", origin_asns: [{ asn: 64500, source: "ripe-stat" }], abuse: null } as never] } } },
 		dedupeKey: host,
 		status: "reported",
