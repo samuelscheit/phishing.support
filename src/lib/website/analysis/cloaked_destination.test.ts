@@ -192,12 +192,12 @@ describe("cloakedDestination", () => {
 	test("recognizes the production hops", () => {
 		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 204, redirectTo: LURE }), navigationHop(2, LURE, { status: 200, contentCaptured: true })], LURE)).toEqual({ host: "www.solidfairhubhost.com", site: "solidfairhubhost.com" });
 	});
-	test("recognizes a 2xx that moves on at once, and an empty answer the flow ends on", () => {
-		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 200, redirectTo: LURE })], LURE)?.site).toBe("solidfairhubhost.com");
+	test("recognizes a page of any status that moves on at once, and an empty answer the flow ends on", () => {
+		for (const status of [200, 403, 404, 500]) expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status, redirectTo: LURE })], LURE)?.site).toBe("solidfairhubhost.com");
 		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 204 })], LURE)?.site).toBe("solidfairhubhost.com");
 	});
 	test("ignores a destination that shows a page, a redirect chain, an empty answer that moves on elsewhere, and a 204 not reached from the submitted site", () => {
-		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 200, contentCaptured: true })], LURE)).toBeUndefined();
+		for (const status of [200, 404, 500]) expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status, contentCaptured: true })], LURE)).toBeUndefined();
 		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 302, redirectTo: LURE })], LURE)).toBeUndefined();
 		expect(cloakedDestination([lureHop, navigationHop(1, TDS, { status: 204, redirectTo: "https://news.example.com/" })], LURE)).toBeUndefined();
 		expect(cloakedDestination([navigationHop(0, "https://short.example/x", { status: 302, redirectTo: TDS }), navigationHop(1, TDS, { status: 204, redirectTo: LURE })], LURE)).toBeUndefined();

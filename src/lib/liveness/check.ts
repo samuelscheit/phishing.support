@@ -21,7 +21,7 @@ const DNS_TIMEOUT_MS = 5_000;
 const RDAP_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 8;
-/** Takedown and parking pages are small; a page beyond this is the site itself and is judged by its status. */
+/** Takedown and parking pages are small; a page beyond this is the site itself, which is online. */
 const MAX_BODY_BYTES = 512 * 1024;
 
 export type SiteDnsResolver = {
@@ -167,7 +167,8 @@ export async function checkSite(url: string, dependencies: SiteCheckDependencies
 	const { statuses, nameservers } = await registryObservation;
 	const verdict = classifySite({ url, dns: dnsObservation, domainStatuses: statuses, nameservers, ...(http ? { http } : {}) });
 	const server = http?.outcome === "response" ? http.page.headers.server?.trim().slice(0, 200) : undefined;
-	const page = verdict.state === "online" && http?.outcome === "response" && http.page.body !== undefined ? htmlFingerprints(http.page.body, http.page.url) : {};
+	// Whatever state its content gave it: verification compares the page itself with what the case recorded.
+	const page = http?.outcome === "response" && http.page.body !== undefined ? htmlFingerprints(http.page.body, http.page.url) : {};
 	return {
 		url,
 		state: verdict.state,

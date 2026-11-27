@@ -55,7 +55,11 @@ export async function kitProofFiles(params: { submissionId: bigint | null; host:
 	return proofFilesOn(await distinctiveKitFiles(submission.data.website, params.reportId, isShared), params.host);
 }
 
-/** The proof files the site's current hosting serves byte for byte, requested as the capture's browser did. */
+/**
+ * The proof files the site's current hosting serves byte for byte, requested
+ * as the capture's browser did. The hash proves the file under any status but
+ * a redirect's.
+ */
 export async function servedKitFiles(url: string, files: readonly KitProofFile[], dependencies: SiteCheckDependencies): Promise<Array<{ url: string; sha256: string }>> {
 	const origin = new URL(url).origin;
 	const served: Array<{ url: string; sha256: string }> = [];
@@ -71,7 +75,7 @@ export async function servedKitFiles(url: string, files: readonly KitProofFile[]
 				maxRedirects: 0,
 				timeoutMs: FILE_TIMEOUT_MS,
 			});
-			if (response.status !== 200) {
+			if (response.status >= 300 && response.status < 400) {
 				await response.body?.cancel().catch(() => undefined);
 				continue;
 			}

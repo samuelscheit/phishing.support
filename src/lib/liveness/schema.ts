@@ -10,12 +10,16 @@ import type { SiteHosting } from "./hosting";
  * What one visit to a reported site found, and with it which layer of the
  * site's infrastructure acted on it (see `siteCheckLayer`):
  *
- * - `online`: the site answered with content.
+ * - `online`: the site's own host answered, whatever the HTTP status, with a
+ *   page of its own (kits serve live pages with 403, 404 or 500).
  * - `redirected`: the site sent the visit to another registrable domain. A kit
  *   cloaking a non-victim and a site that moved look alike, so it is not down.
- * - `unreachable`: no answer (timeout, refused connection, TLS failure, 5xx).
+ * - `unreachable`: no HTTP answer (timeout, refused connection, TLS failure),
+ *   or only a bare gateway or server error page (or an empty 5xx).
  *   Servers fail for many reasons; only repeated it counts as down.
- * - `removed`: the server answers, but the page is gone (404, 410).
+ * - `removed`: the host deleted the site: its CNAME target or platform tenant
+ *   is gone (NXDOMAIN), a platform's or bare server's not-found page answers
+ *   (by its content, never its status), or an empty 404, 410 or 451.
  * - `host_suspended`: the hosting provider's suspension page.
  * - `cdn_blocked`: the CDN's phishing interstitial in front of the site.
  * - `parked`: a parking or for-sale page replaced the site.
@@ -37,9 +41,9 @@ export type SiteCheckState = (typeof siteCheckStates)[number];
 
 /**
  * The states that say the site is gone at the registry or the host, which a
- * cloaking kit cannot fake. `removed` and `parked` are left out: a payload
- * host answers a browser's visit with a 404 while it serves its command-line
- * downloaders.
+ * cloaking kit cannot fake: none follows from an HTTP status. `removed` and
+ * `parked` are left out: a payload host shows a browser's visit a not-found
+ * or parking page while it serves its command-line downloaders.
  */
 export const TAKEN_DOWN_STATES: readonly SiteCheckState[] = ["domain_suspended", "domain_gone", "host_suspended"];
 
@@ -65,7 +69,7 @@ export const siteChecks = sqliteTable(
 		hosting: text("hosting", { mode: "json" }).$type<SiteHosting>(),
 		/** The domain's RDAP status values (`client hold`, `server hold`, …). */
 		domainStatuses: text("domain_statuses", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
-		/** The fingerprints of the page an `online` visit got, as the server sent it; null when it got none worth one. */
+		/** The fingerprints of the page the visit got, whatever its state, as the server sent it; null when it got none worth one. */
 		pageFingerprints: text("page_fingerprints", { mode: "json" }).$type<PageFingerprints>(),
 		/** What decided the state, in plain words: the matched page signature or the network error. */
 		detail: text("detail"),

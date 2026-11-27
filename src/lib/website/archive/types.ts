@@ -123,8 +123,8 @@ export type SiteVisitDependencies = {
 	getBrowser?: typeof getBrowser;
 	/** Whether a host every route failed to tunnel to is gone from DNS. */
 	confirmHostNxdomain?: typeof confirmHostNxdomain;
-	/** Test seam for the bounded wait on a self-replacing HTTP error document. */
-	errorDocumentSettleMs?: number;
+	/** Test seam for the bounded wait on an interstitial (a bot check, a dismissed provider warning) to be replaced by the site. */
+	interstitialSettleMs?: number;
 	/** Test seam for the bounded wait on the document's own rendering requests (network idle). */
 	renderSettleMs?: number;
 	/** Test seam for how long one screenshot may take before the page is captured without one. */

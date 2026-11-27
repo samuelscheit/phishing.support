@@ -1,6 +1,7 @@
 import type { SiteCheckState } from "./schema";
 import { matchPageSignature, type SitePage } from "./signatures";
 import { suspensionNameserver } from "./suspension_nameservers";
+import { classifyBareErrorPage } from "../network/error_page";
 import { urlHostname } from "../network/url";
 import { siteOf } from "../network/registered_domain";
 
@@ -39,8 +40,13 @@ function holdStatus(statuses: readonly string[]): string | undefined {
 
 /**
  * Decide what one visit found. The evidence closest to the name decides
- * first: a name that is gone, then a registry hold, then the page that
- * answered, and the HTTP status last.
+ * first: a registry hold, then a name that is gone, then whether anything
+ * answered, then what the page that answered is (a provider's takedown,
+ * parking or not-found page, by its content), where it ended, and whether it
+ * is a bare error page. The HTTP status alone decides only for an empty
+ * body: kits answer 403, 404, 451 or 500 with their live page, and a site
+ * could forge a takedown by its status. No status or bare error page ever
+ * yields a state of `TAKEN_DOWN_STATES`.
  */
 export function classifySite(observation: SiteObservation): SiteVerdict {
 	const host = urlHostname(new URL(observation.url));
@@ -70,10 +76,16 @@ export function classifySite(observation: SiteObservation): SiteVerdict {
 	const finalHost = urlHostname(new URL(page.url));
 	if (siteOf(finalHost).site !== siteOf(host).site) return { state: "redirected", detail: `Redirected to ${finalHost} (HTTP ${page.status}).` };
 
-	if (page.status === 404 || page.status === 410) return { state: "removed", detail: `HTTP ${page.status}.` };
-	// Unavailable For Legal Reasons: the host blocked the page on a complaint.
-	if (page.status === 451) return { state: "host_suspended", detail: "HTTP 451." };
-	if (page.status >= 500) return { state: "unreachable", detail: `HTTP ${page.status}.` };
-	// Any other answer is the site: a login wall, a bot check, or a kit cloaking itself with a 403.
-	return { state: "online", detail: `HTTP ${page.status}.` };
+	const detail = `HTTP ${page.status}.`;
+	if (page.body !== undefined && !page.body.trim()) {
+		// Nothing to judge but the status: an empty answer is a host's, never a kit's page.
+		if (page.status === 404 || page.status === 410 || page.status === 451) return { state: "removed", detail };
+		if (page.status >= 500) return { state: "unreachable", detail };
+	}
+	// A bare server's not-found or gateway error page, by what it says: a shared host that deleted the site, or an origin that is down.
+	const bare = page.body === undefined ? undefined : classifyBareErrorPage({ html: page.body, headers: page.headers });
+	if (bare === "not_found") return { state: "removed", detail };
+	if (bare === "server_error") return { state: "unreachable", detail };
+	// Any other answer is the site, whatever its status: a login wall, a WAF or bot check, or a kit under a 403, 404 or 500.
+	return { state: "online", detail };
 }

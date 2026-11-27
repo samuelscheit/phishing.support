@@ -85,12 +85,14 @@ async function setReportedAt(reportId: bigint, createdAt: Date) {
 }
 
 /** A site that answers every visit with `status`; DNS resolves and RDAP knows no server. */
-function siteAnswering(status: number, now: () => Date): SiteCheckDependencies {
+const PARKED = "<html><body><p>login.kit-example.com is parked free of charge with Dynadot.</p></body></html>";
+
+function siteAnswering(status: number, now: () => Date, body = "<html><title>Sign in</title></html>"): SiteCheckDependencies {
 	return {
 		dns: { resolve4: async () => ["203.0.113.10"], resolve6: async () => [], resolveCname: async () => [] },
 		rdap: { rdapLocator: async () => undefined },
 		assertPublicHost: async () => undefined,
-		fetch: async () => new Response(status === 404 ? "Not Found" : "<html><title>Sign in</title></html>", { status, headers: { "content-type": "text/html" } }),
+		fetch: async () => new Response(body, { status, headers: { "content-type": "text/html" } }),
 		now,
 	};
 }
@@ -162,14 +164,16 @@ describe("running the checks", () => {
 			queuedOffsets.push(job!.nextAttemptAt.getTime() - createdAt.getTime());
 			// The check runs a little after it is due.
 			clock = new Date(job!.nextAttemptAt.getTime() + 30_000);
-			await runLivenessCheck({ jobId: job!.id, targetId, dependencies: siteAnswering(round < 3 ? 200 : 404, () => clock) });
+			// The kit's page under a 500 is still the site; a parking page (under any status) is not.
+			await runLivenessCheck({ jobId: job!.id, targetId, dependencies: round < 2 ? siteAnswering(200, () => clock) : round < 3 ? siteAnswering(500, () => clock) : siteAnswering(404, () => clock, PARKED) });
 			await complete(job!);
 		}
 		expect(queuedOffsets).toEqual([...LIVENESS_CHECK_OFFSETS_MS]);
 		expect((await livenessJobs(targetId)).filter((job) => job.status === "queued")).toEqual([]);
 		const checks = await listSiteChecksForTargets([targetId]);
-		expect(checks.map((check) => check.state)).toEqual(["online", "online", "online", "removed", "removed", "removed", "removed"]);
-		expect(checks[3]).toMatchObject({ reportId, targetId, url: "https://login.kit-example.com/verify", httpStatus: 404, detail: "HTTP 404.", resolvedAddresses: ["203.0.113.10"] });
+		expect(checks.map((check) => check.state)).toEqual(["online", "online", "online", "parked", "parked", "parked", "parked"]);
+		expect(checks[2]).toMatchObject({ httpStatus: 500, detail: "HTTP 500." });
+		expect(checks[3]).toMatchObject({ reportId, targetId, url: "https://login.kit-example.com/verify", httpStatus: 404, detail: expect.stringContaining("(HTTP 404)."), resolvedAddresses: ["203.0.113.10"] });
 
 		// The schedule is done: nothing is queued again on startup.
 		await ensureLivenessChecks();

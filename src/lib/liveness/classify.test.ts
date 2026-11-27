@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { classifySite, type DnsObservation, type SiteObservation } from "./classify";
+import { TAKEN_DOWN_STATES } from "./schema";
 import { PAGE_SIGNATURES } from "./signatures";
 
 const SITE = "https://secure-login.kit-example.com/account/verify";
@@ -379,23 +380,69 @@ describe("redirects", () => {
 	});
 });
 
-describe("HTTP status", () => {
-	test("gone pages are removed", () => {
-		expect(classify({ status: 404, body: "<html><body>Not Found</body></html>" })).toEqual({ state: "removed", detail: "HTTP 404." });
-		expect(classify({ status: 410 })).toEqual({ state: "removed", detail: "HTTP 410." });
+describe("HTTP status decides nothing", () => {
+	// Kits serve live pages under any status (survey.centripe.com hydrated a SharePoint lure under HTTP 500),
+	// and a site that could forge a takedown by its status would make itself count as gone.
+	const STATUSES = [200, 201, 204, 401, 403, 404, 410, 429, 451, 500, 502, 503, 504, 521, 522, 530];
+
+	test("a page of the site is online under any status, its status only recorded", () => {
+		// survey.centripe.com's lure, as the server sent it under HTTP 500.
+		const lure = `<html id="__next_error__"><head><title>Midsona Finland Oy</title></head><body><script src="/_next/static/chunks/main.js"></script></body></html>`;
+		for (const status of STATUSES) {
+			expect(classify({ status, body: KIT_PAGE })).toEqual({ state: "online", detail: `HTTP ${status}.` });
+			expect(classify({ status, body: lure })).toEqual({ state: "online", detail: `HTTP ${status}.` });
+			// A body not read (binary, or past the bound) is not judged by its status either.
+			expect(classify({ status })).toEqual({ state: "online", detail: `HTTP ${status}.` });
+		}
 	});
 
-	test("451 is the host blocking the page", () => {
-		expect(classify({ status: 451, body: "Unavailable For Legal Reasons" })).toEqual({ state: "host_suspended", detail: "HTTP 451." });
+	test("a server's bare not-found page is the site removed, whatever its status, never a takedown", () => {
+		const pages = [
+			"<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>",
+			"<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\"><html><head><title>404 Not Found</title></head><body><h1>Not Found</h1><p>The requested URL was not found on this server.</p><hr><address>Apache/2.4.41 (Ubuntu) Server at kit-example.com Port 443</address></body></html>",
+			"<html><head><title>410 Gone</title></head><body><h1>410 Gone</h1></body></html>",
+			"<html><head><title>451 Unavailable For Legal Reasons</title></head><body><h1>Unavailable For Legal Reasons</h1></body></html>",
+		];
+		for (const body of pages) {
+			for (const status of [200, 404, 410, 451]) {
+				const verdict = classify({ status, body });
+				expect(verdict).toEqual({ state: "removed", detail: `HTTP ${status}.` });
+				expect(TAKEN_DOWN_STATES).not.toContain(verdict.state);
+			}
+		}
 	});
 
-	test("server errors are unreachable", () => {
-		for (const status of [500, 502, 503, 504, 521, 522, 530]) expect(classify({ status, body: "<html>error</html>" })).toEqual({ state: "unreachable", detail: `HTTP ${status}.` });
+	test("a bare gateway or server error page is unreachable, whatever its status", () => {
+		for (const body of ["<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center></body></html>", "<h1>503 Service Unavailable</h1>", "<html><title>kit-example.com | 521: Web server is down</title><body>Error code 521</body></html>", "<h1>Internal Server Error</h1>"]) {
+			for (const status of [200, 500, 502, 503, 521]) expect(classify({ status, body })).toEqual({ state: "unreachable", detail: `HTTP ${status}.` });
+		}
 	});
 
-	test("any other answer is the site", () => {
-		for (const status of [200, 201, 204, 401, 403, 429]) expect(classify({ status, body: KIT_PAGE }).state).toBe("online");
-		expect(classify({ status: 200 })).toEqual({ state: "online", detail: "HTTP 200." });
+	test("an empty answer is judged by its status alone: 404, 410 and 451 removed, 5xx unreachable, any other online", () => {
+		for (const status of [404, 410, 451]) expect(classify({ status, body: "" })).toEqual({ state: "removed", detail: `HTTP ${status}.` });
+		for (const status of [500, 502, 503, 530]) expect(classify({ status, body: "  \n" })).toEqual({ state: "unreachable", detail: `HTTP ${status}.` });
+		for (const status of [200, 204, 403]) expect(classify({ status, body: "" }).state).toBe("online");
+	});
+
+	test("a page that only looks like an error, with a form or real text, is the site: a kit spoofing its status", () => {
+		const spoof = `<html><head><title>404 Not Found</title></head><body><h1>Not Found</h1><form action="/next.php"><input type="password" name="pass"></form></body></html>`;
+		const long = `<html><head><title>500 Internal Server Error</title></head><body><p>${"Sign in to continue to your mailbox. ".repeat(20)}</p></body></html>`;
+		for (const status of [404, 451, 500]) {
+			expect(classify({ status, body: spoof }).state).toBe("online");
+			expect(classify({ status, body: long }).state).toBe("online");
+		}
+	});
+
+	test("a WAF's block page is the site still there, behind its WAF", () => {
+		expect(classify({ status: 403, body: "<html><head><title>403 Forbidden</title></head><body><h1>403 Forbidden</h1></body></html>" }).state).toBe("online");
+		expect(classify({ status: 451, body: "<h1>Access Denied</h1>" }).state).toBe("online");
+	});
+
+	test("a page signature decides under any status, and a cross-site end is a redirect under any status", () => {
+		for (const status of [200, 403, 404, 500]) {
+			expect(classify({ status, body: "<html><body><p>kit-example.com is parked free of charge with Dynadot.</p></body></html>" }).state).toBe("parked");
+			expect(classify({ status, urls: [SITE, "https://elsewhere.example/"], body: KIT_PAGE }).state).toBe("redirected");
+		}
 	});
 });
 

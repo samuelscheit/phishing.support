@@ -25,7 +25,7 @@ export type HopBody = { hopIndex: number; body: Buffer };
 /** The hops that led to a captured page, with the raw bodies of the document answers among them. */
 export type CapturedChain = { hops: WebsiteNavigationHop[]; bodies: HopBody[] };
 
-/** The most answers a tab keeps that no document claimed yet: a page reloading itself into errors or downloads records one each time. */
+/** The most answers a tab keeps that no document claimed yet: a page reloading itself into downloads or aborted loads records one each time. */
 export const MAX_UNCLAIMED_ANSWERS = 50;
 /**
  * The most body bytes a tab keeps, of answers and documents together: a
@@ -64,6 +64,7 @@ function recordKitResources(): { observe: (response: ObservedResponse) => void; 
 	const pending: Array<Promise<WebsiteKitResource | undefined>> = [];
 	return {
 		observe: (response) => {
+			// A browser runs no script or stylesheet it was answered with an error, and a partial (206) answer is not the file.
 			if (pending.length >= MAX_KIT_RESOURCES || !KIT_RESOURCE_TYPES.has(response.resourceType) || response.status !== 200) return;
 			pending.push((async () => {
 				const body = await response.body();
@@ -83,8 +84,14 @@ function recordKitResources(): { observe: (response: ObservedResponse) => void; 
 }
 
 export type TabRecording = {
-	/** Every successful main-frame document the tab passed through, in order. */
+	/** Every main-frame document the tab passed through, in order, whatever its HTTP status. */
 	documents: NavigationDocument[];
+	/**
+	 * Forget the documents before the last one at `url`: interstitials (a bot
+	 * check, a provider's warning) the page behind them replaced. They stood
+	 * before the site; the visitor's chain starts with what replaced them.
+	 */
+	discardBefore(url: string): void;
 	/** Feed one response the tab received. */
 	observe(response: ObservedResponse): void;
 	/**
@@ -164,10 +171,18 @@ export function recordTab(): TabRecording {
 	};
 	return {
 		documents,
+		discardBefore: (url) => {
+			// The replacement's address may carry a fragment (`#victim@mail.com`) its document's does not, or the other way round.
+			const from = documents.findLastIndex((document) => withoutFragment(document.url) === withoutFragment(url));
+			if (from <= 0) return;
+			const discarded = documents.splice(0, from);
+			for (const document of discarded) bodyBytes -= document.body?.byteLength ?? 0;
+			waiting = waiting.filter((document) => !discarded.includes(document));
+		},
 		observe: (response) => {
 			kit.observe(response);
-			// An HTTP error document (a bot check that reloads into the real page) is replaced, not passed through.
-			if (isDocumentAnswer(response) && response.status !== null && response.status >= 200 && response.status < 300) {
+			// Every page the tab shows, whatever its status: a kit's page may answer 403, 404 or 500.
+			if (isDocumentAnswer(response)) {
 				const document = navigationDocument(response);
 				// The documents before it take their answers first: the oldest unclaimed answer of an address is theirs.
 				settle();

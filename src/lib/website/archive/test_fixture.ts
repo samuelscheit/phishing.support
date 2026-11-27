@@ -2,7 +2,10 @@ import { type Browser, type BrowserContext, type HTTPRequest, type HTTPResponse 
 import sharp from "sharp";
 
 import type { FabricEgress } from "../../browser/fabric";
+import { visibleText } from "../../network/error_page";
 import { sleep } from "../../util/sleep";
+import { providerWarningProbe } from "../analysis/provider_warning";
+import { pageStateProbe, type PageState } from "./interstitial";
 import type { SiteVisitDependencies, SiteVisitOptions, WebsiteArchiveResult } from "./types";
 import { visitSite } from "./visit_site";
 
@@ -36,7 +39,7 @@ function browserSession() {
 export function responseForNavigation(
 	url: string,
 	status: number,
-	options: { location?: string; contentType?: string; redirects?: Array<{ url: string; status: number; location?: string }> } = {},
+	options: { location?: string; contentType?: string; headers?: Record<string, string>; redirects?: Array<{ url: string; status: number; location?: string }> } = {},
 ): HTTPResponse {
 	const response = (hopUrl: string, hopStatus: number, headers: Record<string, string>, redirects: HTTPRequest[]): HTTPResponse => {
 		let hopResponse: HTTPResponse;
@@ -72,6 +75,7 @@ export function responseForNavigation(
 		priorRequests.push(redirectRequest);
 	}
 	return response(url, status, {
+		...options.headers,
 		...(options.location ? { location: options.location } : {}),
 		...(options.contentType ? { "content-type": options.contentType } : {}),
 	}, priorRequests) as HTTPResponse;
@@ -135,7 +139,22 @@ export function archiveBrowserFixture(options: {
 	 * read as a stream in small pieces, and the emulated domain fails a command Chromium would not honour.
 	 */
 	documentBodies?: Record<string, string>;
+	/** The document's title, by the address the tab shows; "Captured title" by default, as the captured MHTML's. */
+	title?: string | ((url: string) => string);
+	/** The browser's captcha solver state on the document (`data-captcha-state`), by the address the tab shows. */
+	captchaState?: (url: string) => string | null;
+	/**
+	 * What else the document shows, by the address the tab shows: the challenge vendors it carries, whether it
+	 * has fields. Its text and markup are its `documentBodies` entry, else the rendered page text.
+	 */
+	pageState?: (url: string) => Partial<PageState>;
 } = {}) {
+	const titleOf = (url: string) => (typeof options.title === "function" ? options.title(url) : options.title ?? "Captured title");
+	const pageStateOf = (url: string, body: string): PageState => {
+		const raw = options.documentBodies?.[url];
+		const html = raw ?? `<html><head><title>${titleOf(url)}</title></head><body>${body}</body></html>`;
+		return { captchaState: options.captchaState?.(url) ?? null, title: titleOf(url), text: raw === undefined ? body : visibleText(raw), html, fields: false, vendors: [], bypass: false, ...options.pageState?.(url) };
+	};
 	const eventNames: string[] = [];
 	/** Every CDP command of the tab's own sessions, in order. */
 	const cdpCommands: Array<{ method: string; params?: unknown }> = [];
@@ -251,7 +270,7 @@ export function archiveBrowserFixture(options: {
 								"Content-Type: text/html",
 								`Content-Location: ${currentUrl}`,
 								"",
-								`<html><head><title>Captured title</title></head><body>${body}</body></html>`,
+								`<html><head><title>${titleOf(currentUrl)}</title></head><body>${body}</body></html>`,
 								"--archive-test--",
 							].join("\r\n"),
 						};
@@ -261,6 +280,9 @@ export function archiveBrowserFixture(options: {
 				},
 			}),
 			evaluate: async (callback: () => unknown) => {
+				if (callback === (pageStateProbe as unknown)) return pageStateOf(currentUrl, body);
+				// The fake document stands under no provider's warning.
+				if (callback === (providerWarningProbe as unknown)) return undefined;
 				const source = callback.toString();
 				if (source.includes("readyState")) return "interactive";
 				// The blank-screenshot retry asks whether the page shows text, then waits for a frame.
@@ -268,7 +290,7 @@ export function archiveBrowserFixture(options: {
 				if (source.includes("requestAnimationFrame")) return undefined;
 				throw new Error("Unexpected page evaluation");
 			},
-			title: async () => "Just a moment...",
+			title: async () => titleOf(currentUrl),
 			url: () => currentUrl,
 		};
 		const browser = {

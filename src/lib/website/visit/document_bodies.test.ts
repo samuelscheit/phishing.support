@@ -51,10 +51,25 @@ describe("letting a held document go on", () => {
 		expect(passed.answers).toEqual([]);
 	});
 
-	test("records a redirect, an error, a download and a page declared over the cap without reading them, and lets them go on", async () => {
+	test("reads the page of any status with a body, and answers it with that status: a kit's page may answer 403, 404 or 500", async () => {
+		for (const status of [403, 404, 410, 451, 500, 503]) {
+			const page = `<html><body>Sign in (${status})</body></html>`;
+			const passed = await pass(paused(status), [Buffer.from(page)]);
+
+			expect(passed.methods).toEqual(["Fetch.takeResponseBodyAsStream", "IO.read", "IO.close", "record", "Fetch.fulfillRequest"]);
+			expect(passed.answers).toEqual([{ url: "https://kit.example/page", status, receivedAt: expect.any(String), body: Buffer.from(page) }]);
+			expect(passed.commands.at(-1)!.params).toMatchObject({ responseCode: status });
+			expect(passed.fulfilledBody).toEqual(Buffer.from(page));
+		}
+	});
+
+	test("records a redirect, an answer without a body, a download and a page declared over the cap without reading them, and lets them go on", async () => {
 		for (const response of [
 			paused(302, { Location: "https://kit.example/next" }),
-			paused(404),
+			paused(304),
+			paused(204),
+			paused(205),
+			paused(101),
 			paused(200, { "Content-Type": "text/html", "Content-Disposition": "attachment; filename=\"fix.hta\"" }),
 			paused(200, { "Content-Type": "application/zip" }),
 			paused(200, { "Content-Type": "text/html", "Content-Length": "101" }),
@@ -162,6 +177,7 @@ describe.skipIf(!chromiumAvailable)("holding a tab's documents, in a real browse
 					return new Response(gzipSync(page), { headers });
 				}
 				if (pathname === "/latin1") return new Response(latin1, { headers: { "content-type": "text/html; charset=iso-8859-1" } });
+				if (pathname === "/error") return new Response("<html><body><h1>Uusi asiakirja on jaettu sinulle</h1></body></html>", { status: 500, headers: { "content-type": "text/html; charset=utf-8" } });
 				if (pathname === "/exact") return streamed("exact", ["<html>", "a".repeat(CAP - 6)], "close");
 				if (pathname === "/over") return streamed("over", ["<html>", "a".repeat(CAP - 5)], "close");
 				// More than one piece of a read, then nothing: the piece still filling is held back by the browser.
@@ -209,6 +225,14 @@ describe.skipIf(!chromiumAvailable)("holding a tab's documents, in a real browse
 		expect(held.status).toBe(200);
 		expect(held.headers["content-type"]).toBe("text/html; charset=utf-8");
 		expect(held.answers).toEqual([{ url: `http://127.0.0.1:${server.port}/page`, status: 200, receivedAt: expect.any(String), body: Buffer.from(page) }]);
+	}, 30_000);
+
+	test("a page served with HTTP 500 is kept, and shown with its status", async () => {
+		const held = await visit("/error");
+
+		expect(held.status).toBe(500);
+		expect(held.shown).toContain("Uusi asiakirja on jaettu sinulle");
+		expect(held.answers).toEqual([{ url: `http://127.0.0.1:${server.port}/error`, status: 500, receivedAt: expect.any(String), body: Buffer.from("<html><body><h1>Uusi asiakirja on jaettu sinulle</h1></body></html>") }]);
 	}, 30_000);
 
 	test("a page that is not UTF-8 is kept byte for byte", async () => {

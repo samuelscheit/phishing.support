@@ -7,10 +7,10 @@ import { MAX_TAB_BODY_BYTES, MAX_UNCLAIMED_ANSWERS, recordTab } from "./tab_reco
 const MB = 1024 * 1024;
 
 /** A main-frame document the tab showed, after `redirects`. */
-function shown(url: string, redirects: Array<{ url: string; status: number }> = []): ObservedResponse {
+function shown(url: string, redirects: Array<{ url: string; status: number }> = [], status = 200): ObservedResponse {
 	return {
 		url,
-		status: 200,
+		status,
 		headers: { "content-type": "text/html" },
 		resourceType: "document",
 		mainFrameNavigation: true,
@@ -51,6 +51,45 @@ describe("recording a tab's answers", () => {
 		expect(recording.documents.map(({ hops }) => hops[0]!.receivedAt)).toEqual(Array.from({ length: fits + 15 }, (_, load) => answer("", load).receivedAt));
 		expect(recording.documents.slice(0, fits).every(({ body }, load) => body?.equals(Buffer.alloc(MB, load % 256)))).toBe(true);
 		expect(recording.documents.slice(fits).some(({ body }) => body)).toBe(false);
+	});
+
+	test("a page of any status is a document of the tab, with its redirects and its body", () => {
+		const recording = recordTab();
+		for (const [position, status] of [500, 404, 403, 451].entries()) {
+			const url = `https://kit.example/page-${status}`;
+			recording.recordAnswer(answer("https://t.example/click", position * 10, undefined, 302));
+			recording.recordAnswer(answer(url, position * 10 + 1, `lure ${status}`, status));
+			recording.observe(shown(url, [{ url: "https://t.example/click", status: 302 }], status));
+			expect(recording.documents[position]!.hops.map((hop) => hop.status)).toEqual([302, status]);
+			expect(bodyOf(recording, position)).toBe(`lure ${status}`);
+		}
+	});
+
+	test("the interstitials before a document that replaced them are forgotten, and nothing else", () => {
+		const recording = recordTab();
+		recording.recordAnswer(answer("https://kit.example/", 0, "Just a moment...", 403));
+		recording.observe(shown("https://kit.example/", [], 403));
+		recording.recordAnswer(answer("https://kit.example/", 1, "Just a moment...", 503));
+		recording.observe(shown("https://kit.example/", [], 503));
+		recording.recordAnswer(answer("https://kit.example/", 2, "real", 500));
+		recording.observe(shown("https://kit.example/", [], 500));
+
+		recording.discardBefore("https://kit.example/");
+
+		expect(recording.documents.map((document) => document.hops.map((hop) => hop.status))).toEqual([[500]]);
+		expect(bodyOf(recording, 0)).toBe("real");
+		// The visitor's fragment on either address changes nothing: the network never sees it.
+		recording.recordAnswer(answer("https://kit.example/next", 3, "next", 403));
+		recording.observe(shown("https://kit.example/next", [], 403));
+		recording.recordAnswer(answer("https://kit.example/next", 4, "real next", 200));
+		recording.observe(shown("https://kit.example/next#victim@mail.com", [], 200));
+		recording.discardBefore("https://kit.example/next#victim@mail.com");
+		expect(recording.documents.map((document) => document.url)).toEqual(["https://kit.example/next#victim@mail.com"]);
+		expect(bodyOf(recording, 0)).toBe("real next");
+		// An address no document has, or the first document's own, changes nothing.
+		recording.discardBefore("https://elsewhere.example/");
+		recording.discardBefore("https://kit.example/next");
+		expect(recording.documents).toHaveLength(1);
 	});
 
 	test("a page reloading itself into errors keeps no more than the bound of answers, the oldest let go", () => {

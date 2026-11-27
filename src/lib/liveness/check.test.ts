@@ -99,7 +99,9 @@ describe("checkSite", () => {
 		const { fetch } = site({
 			[SITE]: { status: 200, body: page("login.kit-example.com") },
 			"https://login.kit-copy.net/verify": { status: 200, body: page("login.kit-copy.net") },
-			"https://login.kit-gone.org/verify": { status: 404, body: page("login.kit-gone.org") },
+			"https://login.kit-error.org/verify": { status: 500, body: page("login.kit-error.org") },
+			"https://login.kit-gone.org/verify": { status: 404, body: "<html><body><p>kit-gone.org is parked free of charge with Dynadot.</p></body></html>" },
+			"https://login.kit-removed.org/verify": { status: 200, body: "<html><head><title>404 Not Found</title></head><body><h1>Not Found</h1></body></html>" },
 		});
 		const online = await checkSite(SITE, dependencies({ fetch }));
 		expect(online.pageFingerprints).toEqual(htmlFingerprints(page("login.kit-example.com"), SITE));
@@ -108,8 +110,18 @@ describe("checkSite", () => {
 		// The same kit on another domain: the same page, because each copy's own address is masked.
 		const copy = (await checkSite("https://login.kit-copy.net/verify", dependencies({ fetch }))).pageFingerprints;
 		expect([copy?.body?.sha256, copy?.structure?.sha256]).toEqual([online.pageFingerprints!.body!.sha256, online.pageFingerprints!.structure!.sha256]);
-		// A removed page is not the site, whatever its markup.
-		expect((await checkSite("https://login.kit-gone.org/verify", dependencies({ fetch }))).pageFingerprints).toBeNull();
+		// The kit's page served under HTTP 500 is the site all the same: online, and the same page.
+		const error = await checkSite("https://login.kit-error.org/verify", dependencies({ fetch }));
+		expect(error).toMatchObject({ state: "online", httpStatus: 500, detail: "HTTP 500." });
+		expect(error.pageFingerprints?.body?.sha256).toBe(online.pageFingerprints!.body!.sha256);
+		// A page a signature names (parking) is not the site, yet is fingerprinted as it is: verification compares it all the same.
+		const parkedBody = "<html><body><p>kit-gone.org is parked free of charge with Dynadot.</p></body></html>";
+		const parked = await checkSite("https://login.kit-gone.org/verify", dependencies({ fetch }));
+		expect(parked.state).toBe("parked");
+		const expected = htmlFingerprints(parkedBody, "https://login.kit-gone.org/verify");
+		expect(parked.pageFingerprints).toEqual(expected.body || expected.structure ? expected : null);
+		// A host's bare not-found page is the site removed, even served as 200.
+		expect(await checkSite("https://login.kit-removed.org/verify", dependencies({ fetch }))).toMatchObject({ state: "removed", httpStatus: 200, detail: "HTTP 200." });
 	});
 
 	test("NXDOMAIN ends the check without a visit", async () => {
@@ -236,7 +248,7 @@ describe("checkSite", () => {
 		const dns = resolver({ a: ["203.0.113.99"] });
 		const registry = rdap(["client hold"]);
 		const { fetch } = site({ [url]: { status: 404, body: "Not Found" } });
-		expect(await checkSite(url, dependencies({ fetch, dns, rdap: registry.dependencies }))).toMatchObject({ state: "removed", resolvedAddresses: ["198.51.100.20"], domainStatuses: [] });
+		expect(await checkSite(url, dependencies({ fetch, dns, rdap: registry.dependencies }))).toMatchObject({ state: "removed", httpStatus: 404, resolvedAddresses: ["198.51.100.20"], domainStatuses: [] });
 		expect(dns.calls).toEqual([]);
 		expect(registry.asked).toEqual([]);
 	});
@@ -249,7 +261,7 @@ describe("checkSite", () => {
 		expect(registry.asked).toEqual([]);
 	});
 
-	test("a body beyond the bound or not text is judged by its status alone", async () => {
+	test("a body beyond the bound or not text is the site", async () => {
 		const huge = `<html><body><h1>This domain is for sale!</h1>${"x".repeat(600 * 1024)}</body></html>`;
 		expect(await checkSite(SITE, dependencies({ fetch: site({ [SITE]: { status: 200, body: huge } }).fetch }))).toMatchObject({ state: "online", detail: "HTTP 200." });
 		const binary = site({ [SITE]: { status: 200, body: "This domain is for sale!", headers: { "content-type": "application/zip" } } });

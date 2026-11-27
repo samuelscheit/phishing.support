@@ -228,15 +228,31 @@ describe("verifying that the reported content is still served", () => {
 		const { used, dependencies: browser } = stages();
 		const served = await verifyReportedContent(target, {}, { site: site({ [payloadUrl]: onlyCurl }).dependencies, ...browser });
 		expect(served).toMatchObject({ verdict: "served", tier: "fetch", matches: [{ kind: "payload", url: payloadUrl, sha256: sha256Hex(bytes) }] });
-		// The browser's request gets a 404, so the plain check says removed: the payload is served all the same.
+		// The browser's request gets a bare not-found page, so the plain check says removed (never a takedown): the payload is served all the same.
 		expect(served.state).toBe("removed");
 		expect(used.captures).toBe(0);
 
 		const swapped = await verifyReportedContent(target, { maxTier: "fetch" }, { site: site({ [payloadUrl]: { body: Buffer.from("echo other build"), type: "application/octet-stream" } }).dependencies, ...browser });
 		expect(swapped).toMatchObject({ verdict: "unverified", tier: "fetch" });
-		// A partial or oversized answer is not the file.
-		const partial = await verifyReportedContent(target, { maxTier: "fetch" }, { site: site({ [payloadUrl]: { status: 206, body: bytes, type: "application/octet-stream" } }).dependencies, ...browser });
+		// A partial answer is not the file: its bytes do not hash to it.
+		const partial = await verifyReportedContent(target, { maxTier: "fetch" }, { site: site({ [payloadUrl]: { status: 206, body: bytes.subarray(0, 100), type: "application/octet-stream" } }).dependencies, ...browser });
 		expect(partial.verdict).toBe("unverified");
+		// The hash proves the file under any status a payload host hides it behind.
+		for (const status of [403, 404, 410, 451, 500, 503]) {
+			const hidden = await verifyReportedContent(target, { maxTier: "fetch" }, { site: site({ [payloadUrl]: { status, body: bytes, type: "application/octet-stream" } }).dependencies, ...browser });
+			expect(hidden).toMatchObject({ verdict: "served", tier: "fetch", state: "online", matches: [{ kind: "payload", sha256: sha256Hex(bytes) }] });
+		}
+	});
+
+	test("a kit page and its script served under HTTP error statuses are the site serving them, never a takedown", async () => {
+		const kit = resource("/assets/kit.js", KIT_JS);
+		const { target } = await reported({ rawPage: kitPage(HOST), kitResources: [kit] });
+		const { used, dependencies: browser } = stages();
+		for (const status of [404, 410, 451, 500, 502, 503]) {
+			const verification = await verifyReportedContent(target, { maxTier: "fetch" }, { site: site({ [URL_]: { status, body: kitPage(HOST, `s${status}`) }, [kit.url]: { status, body: KIT_JS, type: "application/javascript" } }).dependencies, ...browser });
+			expect(verification).toMatchObject({ verdict: "served", tier: "fetch", state: "online", detail: `HTTP ${status}.`, matches: [{ kind: "page_structure" }, { kind: "kit_file", sha256: kit.sha256, url: kit.url }] });
+		}
+		expect(used.captures).toBe(0);
 	});
 
 	test("a cloaked site is confirmed by the browser, and the page it got is learned: the next plain request that gets it needs no browser", async () => {

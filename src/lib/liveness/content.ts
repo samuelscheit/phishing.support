@@ -202,7 +202,11 @@ function pageMatches(observed: PageFingerprints | null | undefined, references: 
 	return [...matches.values()];
 }
 
-/** The hash of what a downloader gets at the payload's address now, or undefined when it gets nothing. */
+/**
+ * The hash of what a downloader gets at the payload's address now, or
+ * undefined when it gets nothing. Any status with a body counts: the hash
+ * proves the file, and payload hosts serve it under 403 or 404 too.
+ */
 async function payloadHash(url: string, userAgent: string | undefined, dependencies: SiteCheckDependencies): Promise<string | undefined> {
 	try {
 		const { response } = await fetchThroughPublicRedirects(url, {
@@ -215,7 +219,7 @@ async function payloadHash(url: string, userAgent: string | undefined, dependenc
 			timeoutMs: PAYLOAD_TIMEOUT_MS,
 		});
 		const length = Number(response.headers.get("content-length") ?? 0);
-		if (response.status !== 200 || length > MAX_PAYLOAD_BYTES) {
+		if ((response.status >= 300 && response.status < 400) || length > MAX_PAYLOAD_BYTES) {
 			await response.body?.cancel().catch(() => undefined);
 			return undefined;
 		}
@@ -237,7 +241,6 @@ async function fetchMatches(target: ContentTarget, check: SiteCheckResult, refer
 	for (const payload of reference.payloads) {
 		if ((await payloadHash(payload.url, userAgent, dependencies)) === payload.sha256) matches.push({ kind: "payload", sha256: payload.sha256, url: payload.url });
 	}
-	if (check.state !== "online") return matches;
 	const pages = pageMatches(check.pageFingerprints, reference.served, check.finalUrl ?? target.url);
 	if (!pages.length) return matches;
 	const files = proofFilesOn(reference.kitFiles, new URL(target.url).hostname);

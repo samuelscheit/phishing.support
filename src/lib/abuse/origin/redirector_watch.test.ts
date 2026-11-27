@@ -3,6 +3,7 @@ import { websiteReportSubject } from "@/lib/abuse/persistence/reports";
 import { and, eq, ne } from "drizzle-orm";
 
 import { getDb } from "../../db";
+import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { submissions } from "../../db/schema";
 import { useTemporaryDatabase } from "../../db/test_helpers";
@@ -133,11 +134,40 @@ describe("the cheap check of a redirector", () => {
 		expect(internal.requested).toEqual([ROTATOR]);
 	});
 
-	test("reports a redirector that does not answer, answers with an error, or does not resolve", async () => {
+	test("follows a redirect under any HTTP status; without one, a bare error page is unreachable and any other page stays", async () => {
+		const redirect500 = web({
+			[ROTATOR]: { status: 500, body: ROTATOR_PAGE },
+			"https://assistdeparments-x.com//": { status: 200, body: "<title>Kit</title>" },
+		});
+		expect(await checkRedirector(ROTATOR, redirect500.dependencies)).toEqual({
+			kind: "destination",
+			url: "https://assistdeparments-x.com//",
+			urls: [ROTATOR, "https://assistdeparments-x.com//"],
+			page: { url: ROTATOR, status: 500, html: ROTATOR_PAGE },
+		});
+		const refresh = `<html><head><meta http-equiv="refresh" content="0;url=https://kit.example/"></head><body></body></html>`;
+		for (const status of [404, 500]) {
+			expect(await checkRedirector(ROTATOR, web({ [ROTATOR]: { status, body: refresh }, "https://kit.example/": { body: "kit" } }).dependencies)).toMatchObject({ kind: "destination", url: "https://kit.example/" });
+		}
+		// A dead redirector's server page, whatever status it answers with (a soft 200 too), and an empty error answer.
+		for (const [status, body] of [[404, "Not Found"], [404, "<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>"], [200, "<h1>Not Found</h1><p>The requested URL was not found on this server.</p>"], [502, "<html><title>502 Bad Gateway</title><body>502 Bad Gateway</body></html>"], [403, "<h1>403 Forbidden</h1>"], [404, ""], [503, " "]] as const) {
+			expect(await checkRedirector(ROTATOR, web({ [ROTATOR]: { status, body } }).dependencies)).toEqual({ kind: "unreachable", reason: `HTTP ${status} at ${ROTATOR}`, urls: [ROTATOR] });
+		}
+		// An obfuscated cloaker under a 500 is a page of its own: the browser visits it.
+		const cloaker = `<html><head><title>Loading</title></head><body><script>eval(atob("bG9jYXRpb24uaHJlZj0naHR0cHM6Ly9raXQuZXhhbXBsZS8nOw=="))</script></body></html>`;
+		expect(await checkRedirector(ROTATOR, web({ [ROTATOR]: { status: 500, body: cloaker } }).dependencies)).toEqual({ kind: "stays", urls: [ROTATOR], page: { url: ROTATOR, status: 500, html: cloaker } });
+		// A plain-text or JSON server error is one too; other plain text is no redirect a client can follow.
+		for (const [status, body, contentType] of [[404, "404 page not found", "text/plain; charset=utf-8"], [502, "502 Bad Gateway", "text/plain"], [404, "{\"message\":\"Not Found\"}", "application/json"], [500, "", "text/plain"]] as const) {
+			expect(await checkRedirector(ROTATOR, web({ [ROTATOR]: { status, body, contentType } }).dependencies)).toEqual({ kind: "unreachable", reason: `HTTP ${status} at ${ROTATOR}`, urls: [ROTATOR] });
+		}
+		expect(await checkRedirector(ROTATOR, web({ [ROTATOR]: { status: 200, body: "ok", contentType: "text/plain" } }).dependencies)).toEqual({ kind: "stays", urls: [ROTATOR] });
+		// An empty 200 is no error answer.
+		expect(await checkRedirector(ROTATOR, web({ [ROTATOR]: { status: 200, body: "" } }).dependencies)).toEqual({ kind: "stays", urls: [ROTATOR], page: { url: ROTATOR, status: 200, html: "" } });
+	});
+
+	test("reports a redirector that does not answer or does not resolve", async () => {
 		const refused = web({});
 		expect(await checkRedirector(ROTATOR, refused.dependencies)).toEqual({ kind: "unreachable", reason: expect.stringContaining("refused the connection"), urls: [ROTATOR] });
-		expect(await checkRedirector(ROTATOR, web({ [ROTATOR]: { status: 404, body: "Not Found" } }).dependencies))
-			.toEqual({ kind: "unreachable", reason: `HTTP 404 at ${ROTATOR}`, urls: [ROTATOR] });
 		const nxdomain = web({}, { "openanonymity.chat": "queryA ENOTFOUND openanonymity.chat" });
 		expect(await checkRedirector(ROTATOR, nxdomain.dependencies)).toMatchObject({ kind: "unreachable", reason: expect.stringContaining("ENOTFOUND") });
 		expect(nxdomain.requested).toEqual([]);
@@ -166,9 +196,10 @@ describe("the cheap check of a redirector", () => {
 		const check = await checkRedirector(ROTATOR, web({ [ROTATOR]: { body: padded }, "https://kit.example/": { body: "kit" } }).dependencies);
 		expect(check).toMatchObject({ kind: "destination", url: "https://kit.example/" });
 		expect(check.page?.html).toBe(padded.slice(0, 64 * 1024));
-		// An HTTP redirect has no page; neither has an error answer.
+		// An HTTP redirect has no page, nor has a bare error page; a page of any status is kept.
 		expect((await checkRedirector(ROTATOR, web({ [ROTATOR]: { status: 302, location: "https://kit.example/" }, "https://kit.example/": { body: "kit" } }).dependencies)).page).toBeUndefined();
 		expect((await checkRedirector(ROTATOR, web({ [ROTATOR]: { status: 404, body: "gone" } }).dependencies)).page).toBeUndefined();
+		expect((await checkRedirector(ROTATOR, web({ [ROTATOR]: { status: 404, body: "<p>Lädt…</p>" } }).dependencies)).page).toEqual({ url: ROTATOR, status: 404, html: "<p>Lädt…</p>" });
 	});
 
 	test("stops following a chain of refresh pages after a bounded number", async () => {
@@ -281,11 +312,16 @@ const VISIT_DESTINATION = "https://new-kit.example/";
  * chain reached a page on another site and reported it, it failed to reach the
  * redirector, or it analyzed the redirector's own page.
  */
-function browser(outcome: { reaches?: string; status?: "failed" | "invalid" | "reported" }) {
+/** The browser visit's outcome: where it reached, or the redirector's own page it stayed on (`stays`, its raw body), and the case's status. */
+function browser(outcome: { reaches?: string; stays?: { status: number; body: string }; status?: "failed" | "invalid" | "reported" }) {
 	const visits: AnalyzeWebsiteOptions[] = [];
 	const analyzeWebsite = async (options: AnalyzeWebsiteOptions) => {
 		visits.push(options);
-		if (outcome.reaches) {
+		if (outcome.stays) {
+			const hops = [navigationHop(0, options.url, { status: outcome.stays.status, contentCaptured: true, bodyCaptured: true })];
+			await ArtifactsEntity.saveBuffer({ submissionId: options.submissionId, name: "chain-hop-0.html", kind: "website_hop_body", buffer: Buffer.from(outcome.stays.body) });
+			await SubmissionsEntity.update(options.submissionId, { status: outcome.status ?? "invalid", data: { kind: "website", website: { url: options.url, archiveUrl: options.url, routes: [{ hops, analyzedHopIndex: 0 }] } } });
+		} else if (outcome.reaches) {
 			const navigationHops = [navigationHop(0, options.url, { redirectTo: outcome.reaches }), navigationHop(1, outcome.reaches, { contentCaptured: true })];
 			await SubmissionsEntity.update(options.submissionId, { status: outcome.status ?? "reported", data: { kind: "website", website: { url: options.url, archiveUrl: outcome.reaches, routes: [{ hops: navigationHops, analyzedHopIndex: 1 }] } } });
 		} else {
@@ -418,6 +454,25 @@ describe("a daily redirector check", () => {
 		const { analyzeWebsite } = browser({ status: "invalid" });
 		await watch({ job }, { checkRedirector: checkFinds({ kind: "unreachable", reason: "HTTP 403", urls: [] }), analyzeWebsite, now: () => CHECKED_AT });
 		expect(await successor(job)).toMatchObject({ payload: { misses: 0, sites: ["x-com.email"] } });
+	});
+
+	test("counts a day on which the browser only got the redirector's bare not-found page", async () => {
+		const unreachable = checkFinds({ kind: "unreachable", reason: "HTTP 404", urls: [] });
+		const dead = await confirmedDestination();
+		const deadJob = await watchJob(dead.reportId, { misses: 1 });
+		const nginx = "<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>";
+		await watch({ job: deadJob }, { checkRedirector: unreachable, ...browser({ stays: { status: 404, body: nginx } }), now: () => CHECKED_AT });
+		expect(await successor(deadJob)).toMatchObject({ payload: { misses: 2 } });
+		expect(await lastEvent(dead.reportId)).toMatchObject({ visit: { bareError: "not_found" } });
+	});
+
+	test("does not count a day on which the browser got the redirector's own page, under any status", async () => {
+		const unreachable = checkFinds({ kind: "unreachable", reason: "HTTP 404", urls: [] });
+		const alive = await confirmedDestination();
+		const aliveJob = await watchJob(alive.reportId, { misses: 1 });
+		const cloaker = "<html><head><title>Loading</title></head><body><script>eval(atob('bG9jYXRpb24uaHJlZj0nLyc='))</script>Loading…</body></html>";
+		await watch({ job: aliveJob }, { checkRedirector: unreachable, ...browser({ stays: { status: 404, body: cloaker } }), now: () => CHECKED_AT });
+		expect(await successor(aliveJob)).toMatchObject({ payload: { misses: 0 } });
 	});
 
 	test("ends a watch whose redirector led nowhere new for thirty days", async () => {

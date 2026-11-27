@@ -122,64 +122,6 @@ test("browser-service failures are told apart from a site that cannot be reached
 	expect(blocked.leasedEgress).toEqual(["residential", "phishing", "reporting"]);
 });
 
-test("an HTTP error from the residential exit and Tor is retried from the server's direct exit", async () => {
-	const url = "https://xfinityy111.weebly.com/";
-	const fixture = archiveBrowserFixture({
-		pageUrl: url,
-		goto: async ({ egress }) => responseForNavigation(url, egress === "reporting" ? 200 : 403, { contentType: "text/html" }),
-	});
-
-	const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser, errorDocumentSettleMs: 20 });
-
-	expect(fixture.leasedEgress).toEqual(["residential", "phishing", "reporting"]);
-	expect(fixture.closeCount).toBe(3);
-	expect(fixture.captureSnapshotCount).toBe(1);
-	expect(archive.url).toBe(url);
-	expect(archive.navigationHops).toEqual([
-		{ index: 0, url, hostname: "xfinityy111.weebly.com", status: 200, contentType: "text/html", contentCaptured: true },
-	]);
-});
-
-test("a bot-check interstitial that reloads into the real page is captured with the real page's response", async () => {
-	const url = "https://www8-receitafazendagerador.com/Aplicacao/Mei/pgmei.app";
-	const realUrl = `${url}/`;
-	const fixture = archiveBrowserFixture({
-		pageUrl: url,
-		goto: async ({ replaceDocument }) => {
-			setTimeout(() => replaceDocument(responseForNavigation(realUrl, 200, {
-				contentType: "text/html; charset=UTF-8",
-				redirects: [{ url, status: 301, location: realUrl }],
-			})), 30);
-			return responseForNavigation(url, 403, { contentType: "text/html" });
-		},
-	});
-
-	const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser, errorDocumentSettleMs: 2_000 });
-
-	expect(fixture.leasedEgress).toEqual(["residential"]);
-	expect(fixture.captureSnapshotCount).toBe(1);
-	expect(archive.url).toBe(realUrl);
-	expect(archive.navigationHops).toEqual([
-		{ index: 0, url, hostname: "www8-receitafazendagerador.com", status: 301, redirectTo: realUrl, contentType: "text/html", contentCaptured: false },
-		{ index: 1, url: realUrl, hostname: "www8-receitafazendagerador.com", status: 200, contentType: "text/html; charset=UTF-8", contentCaptured: true },
-	]);
-});
-
-test("an HTTP error on every egress fails with each route's status and page title", async () => {
-	const url = "https://blocked.example/";
-	const fixture = archiveBrowserFixture({
-		pageUrl: url,
-		goto: async ({ egress }) => responseForNavigation(url, egress === "residential" ? 403 : 503, { contentType: "text/html" }),
-	});
-
-	await expect(firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser, errorDocumentSettleMs: 20 })).rejects.toThrow(
-		'Failed to load page: HTTP 403 ("Just a moment...") via residential exit; HTTP 503 ("Just a moment...") via Tor exit; HTTP 503 ("Just a moment...") via server IP',
-	);
-	expect(fixture.leasedEgress).toEqual(["residential", "phishing", "reporting"]);
-	expect(fixture.captureSnapshotCount).toBe(0);
-	expect(fixture.closeCount).toBe(3);
-});
-
 describe("a host no exit can reach", () => {
 	const url = "https://login.gone-kit.example/verify";
 	const tunnelFailing = () => archiveBrowserFixture({ goto: async () => { throw new Error(`net::ERR_TUNNEL_CONNECTION_FAILED at ${url}`); } });

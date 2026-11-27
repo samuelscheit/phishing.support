@@ -2,16 +2,18 @@ import { parse } from "node-html-parser";
 import { z } from "zod";
 
 import { browserRequestHeaders } from "../../network/service_identity";
+import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { errorSummary } from "../../util/error_text";
 import { readResponseBody } from "../../network/bounded_fetch";
+import { classifyBareErrorPage } from "../../network/error_page";
 import { fetchThroughPublicRedirects, PublicRedirectError, type PublicRedirectDependencies } from "../../network/public_redirects";
 import { createWebsiteSubmission, websiteSubmissionDedupeKey } from "../../submissions/website";
 import { fairKeyOfCaseId, isVisitPending, WebsiteVisitPendingError } from "../../website/visit_queue/queue";
 import { websiteSite } from "../../website/info/site";
 import type { WebsiteNavigationHop, WebsiteRoute, WebsiteSiteAssessment } from "../../website/types";
 import { reportedSiteRoute, websiteRoutes } from "../../website/routes";
-import { analyzedPage, isPageHop } from "../../website/visit/capture_files";
+import { analyzedPage, chainHopBodyFileName, isPageHop, latestArtifactNamed } from "../../website/visit/capture_files";
 import { AbuseRepository } from "../repository";
 import type { Job } from "../schema";
 import { normalizePublicHttpUrl } from "../security/security";
@@ -56,7 +58,7 @@ export type RedirectorCheck = (
 	| { kind: "destination"; url: string; urls: string[] }
 	/** The redirector answered with a page of its own that sends the visitor nowhere a plain client can follow. */
 	| { kind: "stays"; urls: string[] }
-	/** The redirector did not answer, or answered with an error, and sent the visitor nowhere. */
+	/** The redirector did not answer, and sent the visitor nowhere. */
 	| { kind: "unreachable"; reason: string; urls: string[] }
 ) & { page?: RedirectorPage };
 
@@ -122,17 +124,27 @@ export async function checkRedirector(url: string, dependencies: RedirectorCheck
 			failure = errorSummary(error);
 			break;
 		}
-		if (!response.ok) {
-			await response.body?.cancel().catch(() => undefined);
-			failure = `HTTP ${response.status} at ${urls.at(-1)}`;
-			break;
-		}
-		const isHtml = /\bhtml\b/i.test(response.headers.get("content-type") ?? "text/html");
-		const body = isHtml ? await readResponseBody(response, MAX_PAGE_BYTES).catch(() => undefined) : undefined;
-		if (!isHtml) await response.body?.cancel().catch(() => undefined);
-		const html = body?.toString("utf8");
-		if (html !== undefined && websiteSite(urls.at(-1)!) === site) page = { url: urls.at(-1)!, status: response.status, html: html.slice(0, MAX_EVIDENCE_PAGE_CHARACTERS) };
+		const type = response.headers.get("content-type") ?? "text/html";
+		const isHtml = /\bhtml\b/i.test(type);
+		// A plain-text or JSON answer is read only to tell a server's bare error ("404 page not found") from something else.
+		const isText = !isHtml && /^\s*(?:text\/|application\/(?:[\w.+-]+\+)?json)/i.test(type);
+		const body = isHtml || isText ? await readResponseBody(response, MAX_PAGE_BYTES).catch(() => undefined) : undefined;
+		if (!body) await response.body?.cancel().catch(() => undefined);
+		const html = isHtml ? body?.toString("utf8") : undefined;
+		// Its redirect is followed under any status; without one, a bare error answer (or an empty or unreadable error answer) is no redirector at work.
 		const next = html ? documentRedirect(html, urls.at(-1)!) : undefined;
+		if (!next && (isHtml || isText)) {
+			const read = body?.toString("utf8") ?? "";
+			const headers = Object.fromEntries([...response.headers.entries()].map(([name, value]) => [name.toLowerCase(), value]));
+			const bare = read.trim()
+				? classifyBareErrorPage(isHtml ? { html: read, headers } : { title: "", text: read, headers }) !== undefined
+				: !response.ok;
+			if (bare) {
+				failure = `HTTP ${response.status} at ${urls.at(-1)}`;
+				break;
+			}
+		}
+		if (html !== undefined && websiteSite(urls.at(-1)!) === site) page = { url: urls.at(-1)!, status: response.status, html: html.slice(0, MAX_EVIDENCE_PAGE_CHARACTERS) };
 		if (!next || urls.includes(next)) break;
 		current = next;
 	}
@@ -241,7 +253,8 @@ export async function enqueueRedirectorWatch(reportId: bigint, submissionId: big
 }
 
 /** What a browser visit of the redirector found, read back from the case it opened. */
-type RedirectorVisit = { submissionId: bigint; status: string; destination?: string };
+/** What a browser visit of the redirector found; `bareError` when it ended on the redirector's own bare not-found or server error page. */
+type RedirectorVisit = { submissionId: bigint; status: string; destination?: string; bareError?: "not_found" | "server_error" };
 
 export type RedirectorWatchDependencies = {
 	checkRedirector?: (url: string, dependencies: RedirectorCheckDependencies) => Promise<RedirectorCheck>;
@@ -259,8 +272,26 @@ const redirectorVisitKey = (job: Job, state: RedirectorWatchState) => websiteSub
 async function readRedirectorVisit(submissionId: bigint, state: RedirectorWatchState): Promise<RedirectorVisit> {
 	const visited = await SubmissionsEntity.get(submissionId);
 	if (isVisitPending(visited?.status)) throw new WebsiteVisitPendingError(submissionId);
-	const destination = visited?.data.kind === "website" ? chainDestination(visited.data.website, state.url) : undefined;
-	return { submissionId, status: visited?.status ?? "missing", ...(destination ? { destination } : {}) };
+	const website = visited?.data.kind === "website" ? visited.data.website : undefined;
+	const destination = website ? chainDestination(website, state.url) : undefined;
+	const bareError = website && !destination ? await capturedBareError(submissionId, website, state.url) : undefined;
+	return { submissionId, status: visited?.status ?? "missing", ...(destination ? { destination } : {}), ...(bareError ? { bareError } : {}) };
+}
+
+/**
+ * Whether the page the browser ended on at the redirector's own site is a
+ * server's bare not-found or error page, by its raw body: a dead redirector,
+ * not one answering.
+ */
+async function capturedBareError(submissionId: bigint, website: { routes?: WebsiteRoute[]; analyzedRoute?: number }, redirectorUrl: string): Promise<RedirectorVisit["bareError"]> {
+	const route = website.analyzedRoute ?? 0;
+	const page = websiteRoutes(website)[route]?.hops.findLast((hop) => hop.contentCaptured && hop.bodyCaptured && websiteSite(hop.url) === websiteSite(redirectorUrl));
+	if (!page) return undefined;
+	const meta = latestArtifactNamed(await ArtifactsEntity.listForSubmission(submissionId), chainHopBodyFileName(route, page.index));
+	const artifact = meta ? await ArtifactsEntity.get(BigInt(meta.id)) : undefined;
+	if (!artifact) return undefined;
+	const bare = classifyBareErrorPage({ html: Buffer.from(artifact.blob).toString("utf8") });
+	return bare === "not_found" || bare === "server_error" ? bare : undefined;
 }
 
 /**
@@ -317,8 +348,8 @@ export async function watchRedirector(
 
 	const reached = [checkedSite, visit?.destination ? websiteSite(visit.destination) : undefined].filter((site): site is string => Boolean(site));
 	const found = [...new Set(reached.filter((site) => !state.sites.includes(site)))];
-	// The browser reaching the redirector at all (its own page, a decoy) is an answer.
-	const answered = check.kind !== "unreachable" || (visit !== undefined && visit.status !== "failed");
+	// The browser reaching the redirector at all (its own page, a decoy) is an answer; its server's bare not-found or error page is none.
+	const answered = check.kind !== "unreachable" || (visit !== undefined && visit.status !== "failed" && !visit.bareError);
 	const next: RedirectorWatchState = {
 		url: state.url,
 		sites: [...state.sites, ...found],
@@ -339,7 +370,7 @@ export async function watchRedirector(
 		data: {
 			url: state.url,
 			check: check.kind === "destination" ? { kind: check.kind, url: check.url } : check.kind === "unreachable" ? { kind: check.kind, reason: check.reason } : { kind: check.kind },
-			...(visit ? { visit: { submissionId: visit.submissionId.toString(), status: visit.status, ...(visit.destination ? { destination: visit.destination } : {}) } } : {}),
+			...(visit ? { visit: { submissionId: visit.submissionId.toString(), status: visit.status, ...(visit.destination ? { destination: visit.destination } : {}), ...(visit.bareError ? { bareError: visit.bareError } : {}) } } : {}),
 			newSites: found,
 			checks,
 			...(ended ? { ended } : {}),

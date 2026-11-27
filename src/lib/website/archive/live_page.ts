@@ -8,7 +8,6 @@ import { presentIdentityToNewTab, presentIdentityToPage } from "../../browser/pa
 import { observedPuppeteerResponse, observeSessionResponses } from "../../browser/tab_traffic";
 import { targetIdOf, type TabSetup, type VisitorTab } from "../../browser/visitor_tabs";
 import { errorText } from "../../util/error_text";
-import { squash } from "../../util/text";
 import { startSiteRecording, type SiteRecording, type SiteVisitRecording } from "../../site_visit/visit";
 import type { VisitControl } from "../../site_visit/control";
 import { hiddenFrames, recordFrameTraffic, type FrameTrafficRecorder } from "../visit/hidden_frames";
@@ -19,7 +18,8 @@ import type { WebsiteProviderWarning } from "../types";
 import { BrowserInfrastructureError, isBrowserInfrastructureFailure, WebsiteUnreachableError } from "./errors";
 import { getMhtmlArchiveLocation, parseMhtmlSnapshot } from "./mhtml";
 import { capturePaintedScreenshot } from "./screenshot";
-import { WEBSITE_ERROR_DOCUMENT_SETTLE_MS, WEBSITE_RENDER_SETTLE_MS, followScriptedDocument, settleErrorDocument, settleRendering } from "./settle";
+import { WEBSITE_INTERSTITIAL_SETTLE_MS, settleInterstitial, turnedAway } from "./interstitial";
+import { WEBSITE_RENDER_SETTLE_MS, followScriptedDocument, settleRendering } from "./settle";
 import type { SiteVisitDependencies, SiteVisitOptions, SiteWalk, WebsiteArchiveResult } from "./types";
 import { passVerificationGate } from "./verification";
 
@@ -143,7 +143,7 @@ export async function openLivePage(options: SiteVisitOptions, egress: FabricEgre
 		await control?.watchTab({ session: tabs.first.session, page }, `Loading page via ${route}…`);
 
 		// The last final (non-redirect) main-frame document response, so a
-		// document that replaces an error interstitial is seen with its status.
+		// document that replaces an interstitial is seen.
 		let latestDocumentResponse = null as HTTPResponse | null;
 		page.on("response", (response) => {
 			const observed = observedPuppeteerResponse(page, response);
@@ -154,6 +154,10 @@ export async function openLivePage(options: SiteVisitOptions, egress: FabricEgre
 		// Navigation completes once the document exists; a stalled image or
 		// third-party resource must not hold the entire visit open. Fabric owns
 		// browser egress, so this navigation needs no app-level interception layer.
+		// Whatever HTTP status the site answered with, its page is what a
+		// visitor sees (kits serve their pages with 403, 404 or 500 too): the
+		// route fails only when the navigation got no page, or the page it got
+		// turned this network away (see `turnedAway`).
 		let navigationResponse = await page.goto(url, { waitUntil: "domcontentloaded", timeout: WEBSITE_NAVIGATION_TIMEOUT_MS }).catch((error: unknown) => {
 			signal?.throwIfAborted();
 			// A browser that died under the navigation says nothing about the site.
@@ -165,17 +169,21 @@ export async function openLivePage(options: SiteVisitOptions, egress: FabricEgre
 		// navigation resolve with that blob: document; the site's own response is
 		// the document the visitor loaded.
 		if (navigationResponse && !isNetworkDocument(navigationResponse.url())) navigationResponse = latestDocumentResponse;
-		let providerWarning: WebsiteProviderWarning | undefined;
-		if (navigationResponse && !navigationResponse.ok()) {
-			providerWarning = await passProviderWarning(page);
-			await control?.follow();
-			const settled = await settleErrorDocument(page, () => latestDocumentResponse, dependencies.errorDocumentSettleMs ?? WEBSITE_ERROR_DOCUMENT_SETTLE_MS);
-			if (!settled) {
-				const title = squash(await page.title().catch(() => ""));
-				const status = latestDocumentResponse?.status() ?? navigationResponse.status();
-				throw new WebsiteUnreachableError(egress, `HTTP ${status}${title ? ` ("${title}")` : ""}`);
+		// A provider's warning or a bot check may stand before the site: the
+		// page that replaces it is the site.
+		const providerWarning: WebsiteProviderWarning | undefined = await passProviderWarning(page);
+		signal?.throwIfAborted();
+		if (navigationResponse) {
+			const replaced = await settleInterstitial(page, () => latestDocumentResponse, navigationResponse, {
+				dismissed: providerWarning !== undefined,
+				settleMs: dependencies.interstitialSettleMs ?? WEBSITE_INTERSTITIAL_SETTLE_MS,
+				...(signal ? { signal } : {}),
+			});
+			if (replaced) {
+				visitorTab.recording.discardBefore(replaced.url());
+				navigationResponse = replaced;
 			}
-			navigationResponse = settled;
+			if (replaced || providerWarning) await control?.follow();
 		}
 		signal?.throwIfAborted();
 
@@ -191,9 +199,10 @@ export async function openLivePage(options: SiteVisitOptions, egress: FabricEgre
 		const scripted = await followScriptedDocument(page, latestDocumentResponse, navigationResponse, renderSettleMs);
 		signal?.throwIfAborted();
 		await control?.follow();
-		// A navigation the page started that ended in an HTTP error or a network
-		// failure leaves Chromium's own error document (chrome-error://) in the
-		// main frame. That is not a site: the destination was unreachable.
+		// A navigation that ended in a network failure, or in an HTTP answer
+		// without a page to show, leaves Chromium's own error document
+		// (chrome-error://) in the main frame. That is not a site: the
+		// destination was unreachable.
 		const loadedUrl = visitorTab.loadedUrl = (scripted ?? navigationResponse)?.url() ?? url;
 		if (!documentAddress(page.url(), loadedUrl)) {
 			const failure = latestDocumentResponse !== navigationResponse ? latestDocumentResponse : null;
@@ -201,6 +210,12 @@ export async function openLivePage(options: SiteVisitOptions, egress: FabricEgre
 				? `the page sent the visitor to ${failure.request().redirectChain()[0]?.url() ?? failure.url()}, which ended in HTTP ${failure.status()} at ${failure.url()}`
 				: "the page's own navigation failed before reaching a site");
 		}
+		// A bot check that never passed, a WAF's block page or a bare gateway
+		// error is this network turned away, not the site: the next route may
+		// get the site.
+		const turned = await turnedAway(page, scripted ?? navigationResponse);
+		signal?.throwIfAborted();
+		if (turned) throw new WebsiteUnreachableError(egress, turned);
 		const verificationGate = await passVerificationGate(page, renderSettleMs);
 		if (verificationGate) await control?.follow();
 		signal?.throwIfAborted();

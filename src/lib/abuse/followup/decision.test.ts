@@ -296,7 +296,7 @@ describe("a decision that says the content is gone", () => {
 		const { model, inputs } = scripted([call("answer", { text: "Hello Cloudflare,\n\nThe payload is still served to curl.", attachments: [], summary: "Still served." })]);
 		expect(await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "content_removed" }, { model, tools: served, send })).toBe("sent");
 		expect(sent).toHaveLength(1);
-		// The agent got our own check: the browser's 404 is not a takedown, the delegation is normal.
+		// The agent got our own check: the browser's bare not-found page is no takedown, the delegation is normal.
 		const context = JSON.parse(((inputs[0]![0] as { content: Array<{ text: string }> }).content[0]!).text);
 		expect(context.liveness).toEqual([{ url: PAYLOAD, state: "removed", detail: "HTTP 404.", registryStatuses: ["client transfer prohibited"], resolvedAddresses: ["203.0.113.10"] }]);
 	});

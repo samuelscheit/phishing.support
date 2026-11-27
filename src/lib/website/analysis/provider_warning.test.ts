@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { WebsiteCaptureFailedError } from "../archive/errors";
 import { firstPage } from "../archive/test_fixture";
 import { chromiumAvailable, launchTestChromium } from "../../browser/task/test_helpers";
 
@@ -32,23 +33,29 @@ describe.skipIf(!chromiumAvailable)("a provider's warning page before the site, 
 <div class="cf-turnstile"><input type="hidden" name="cf-turnstile-response" value=""></div></form>
 <script>setTimeout(() => { document.querySelector("[name=cf-turnstile-response]").value = "0.token"; document.getElementById("bypass-button").disabled = false; }, 300);</script>`, { status: 403 }, "Suspected Malware | Cloudflare");
 
-	test("is dismissed as a visitor would, the site behind it captured, and the warning recorded", async () => {
-		const { server, hits, origin } = serve({
-			"/game-copier/": (request) => (request.headers.get("cookie")?.includes("cf_bypass=1")
-				? html("<h1>Game to Studio. One export.</h1>")
-				: warning("/game-copier/")),
-			"/cdn-cgi/phish-bypass": (request) => new Response(null, { status: 302, headers: { location: new URL(request.url).searchParams.get("original_path")!, "set-cookie": "cf_bypass=1; path=/" } }),
-		});
-		try {
-			const archive = await firstPage({ url: `${origin}/game-copier/` }, { ...fast, getBrowser: () => launchTestChromium(), errorDocumentSettleMs: 5_000 });
-			expect(archive.providerWarning).toEqual({ provider: "Cloudflare", warning: "Suspected Malware" });
-			expect(archive.text.toString()).toContain("Game to Studio. One export.");
-			expect(archive.navigationHops.at(-1)).toMatchObject({ url: `${origin}/game-copier/`, status: 200, contentCaptured: true });
-			expect(hits).toContain("/cdn-cgi/phish-bypass");
-		} finally {
-			server.stop(true);
-		}
-	}, 60_000);
+	for (const [warningStatus, siteStatus] of [[403, 200], [200, 500]] as const) {
+		test(`answering ${warningStatus}, is dismissed as a visitor would, the site behind it captured under HTTP ${siteStatus}, and the warning recorded`, async () => {
+			const { server, hits, origin } = serve({
+				"/game-copier/": (request) => (request.headers.get("cookie")?.includes("cf_bypass=1")
+					? html("<h1>Game to Studio. One export.</h1>", { status: siteStatus })
+					: new Response(warning("/game-copier/").body, { status: warningStatus, headers: { "content-type": "text/html; charset=utf-8" } })),
+				"/cdn-cgi/phish-bypass": (request) => new Response(null, { status: 302, headers: { location: new URL(request.url).searchParams.get("original_path")!, "set-cookie": "cf_bypass=1; path=/" } }),
+			});
+			try {
+				const archive = await firstPage({ url: `${origin}/game-copier/` }, { ...fast, getBrowser: () => launchTestChromium(), interstitialSettleMs: 5_000 });
+				expect(archive.providerWarning).toEqual({ provider: "Cloudflare", warning: "Suspected Malware" });
+				expect(archive.text.toString()).toContain("Game to Studio. One export.");
+				// The dismissed warning is no hop of the visitor's chain: it starts with the bypass that replaced it.
+				expect(archive.navigationHops.map(({ url, status, contentCaptured }) => ({ url: url.replace(/\?.*/, ""), status, contentCaptured }))).toEqual([
+					{ url: `${origin}/cdn-cgi/phish-bypass`, status: 302, contentCaptured: false },
+					{ url: `${origin}/game-copier/`, status: siteStatus, contentCaptured: true },
+				]);
+				expect(hits).toContain("/cdn-cgi/phish-bypass");
+			} finally {
+				server.stop(true);
+			}
+		}, 60_000);
+	}
 
 	test("a Turnstile the browser's solver takes long over is waited for until the button it unlocks can be pressed", async () => {
 		// Well past the 5 s the capture once gave a locked button.
@@ -65,7 +72,7 @@ setTimeout(() => { document.getElementById("bypass-button").disabled = false; do
 			"/cdn-cgi/phish-bypass": (request) => new Response(null, { status: 302, headers: { location: new URL(request.url).searchParams.get("original_path")!, "set-cookie": "cf_bypass=1; path=/" } }),
 		});
 		try {
-			const archive = await firstPage({ url: `${origin}/login/` }, { ...fast, getBrowser: () => launchTestChromium(), errorDocumentSettleMs: 5_000 });
+			const archive = await firstPage({ url: `${origin}/login/` }, { ...fast, getBrowser: () => launchTestChromium(), interstitialSettleMs: 5_000 });
 			expect(archive.providerWarning).toEqual({ provider: "Cloudflare", warning: "Suspected Phishing" });
 			expect(archive.text.toString()).toContain("Sign in");
 			expect(hits).toContain("/cdn-cgi/phish-bypass");
@@ -74,10 +81,71 @@ setTimeout(() => { document.getElementById("bypass-button").disabled = false; do
 		}
 	}, 60_000);
 
-	test("an ordinary error page is no warning to dismiss", async () => {
+	test("an ordinary page answering 403 is no warning to dismiss: it is captured as the site, without waiting", async () => {
 		const { server, origin } = serve({ "/": () => html("<h1>Forbidden</h1><form action=/search><button>Search</button></form>", { status: 403 }) });
 		try {
-			await expect(firstPage({ url: `${origin}/` }, { ...fast, getBrowser: () => launchTestChromium(), errorDocumentSettleMs: 500 })).rejects.toThrow("HTTP 403");
+			const started = Date.now();
+			const archive = await firstPage({ url: `${origin}/` }, { ...fast, getBrowser: () => launchTestChromium(), interstitialSettleMs: 20_000 });
+			expect(Date.now() - started).toBeLessThan(15_000);
+			expect(archive.providerWarning).toBeUndefined();
+			expect(archive.text.toString()).toContain("Forbidden");
+			expect(archive.navigationHops).toEqual([expect.objectContaining({ url: `${origin}/`, status: 403, bodyCaptured: true, contentCaptured: true })]);
+			expect(archive.hopBodies?.[0]?.body.toString()).toContain("<h1>Forbidden</h1>");
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+
+	test("a Cloudflare challenge, known by its inline options and not its title, is waited for until it reloads into the site", async () => {
+		const challenge = html(`<h1>Проверка браузера</h1><script>window._cf_chl_opt = { cType: "managed" };
+setTimeout(() => { document.cookie = "cf_clearance=1; path=/"; location.reload(); }, 600);</script>`, { status: 403 }, "Один момент…");
+		const { server, hits, origin } = serve({ "/": (request) => (request.headers.get("cookie")?.includes("cf_clearance=1") ? html("<h1>Sign in</h1><input type=password>", { status: 500 }) : challenge) });
+		try {
+			const archive = await firstPage({ url: `${origin}/` }, { ...fast, getBrowser: () => launchTestChromium(), interstitialSettleMs: 20_000 });
+			expect(archive.text.toString()).toContain("Sign in");
+			expect(archive.navigationHops).toEqual([expect.objectContaining({ url: `${origin}/`, status: 500, contentCaptured: true, bodyCaptured: true })]);
+			expect(hits.filter((path) => path === "/")).toHaveLength(2);
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+
+	test("a kit's page embedding Cloudflare's real Turnstile widget is the site: no wait, no other route", async () => {
+		const kit = html(`<h1>Verify to continue</h1><div class="cf-turnstile" data-sitekey="0x4AAAAAAA"></div>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script><a href="/next">Continue</a>`, {}, "Just a moment...");
+		const { server, hits, origin } = serve({ "/": () => kit });
+		try {
+			const started = Date.now();
+			const archive = await firstPage({ url: `${origin}/` }, { ...fast, getBrowser: () => launchTestChromium(), interstitialSettleMs: 20_000 });
+			expect(Date.now() - started).toBeLessThan(15_000);
+			expect(archive.text.toString()).toContain("Verify to continue");
+			expect(hits.filter((path) => path === "/")).toHaveLength(1);
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+
+	test("DDoS-Guard's browser check, known by its own elements, is waited for until it reloads into the site", async () => {
+		const check = html(`<div id="ddg-l10n-title">Проверка браузера перед переходом на сайт</div><img src="/.well-known/ddos-guard/check?context=free_splash" alt="">
+<script>setTimeout(() => { document.cookie = "__ddg2=1; path=/"; location.reload(); }, 600);</script>`, { status: 403, headers: { server: "ddos-guard" } }, "DDoS-Guard");
+		const { server, hits, origin } = serve({ "/": (request) => (request.headers.get("cookie")?.includes("__ddg2=1") ? html("<h1>Sign in</h1><input type=password>", { headers: { server: "ddos-guard" } }) : check) });
+		try {
+			const archive = await firstPage({ url: `${origin}/` }, { ...fast, getBrowser: () => launchTestChromium(), interstitialSettleMs: 20_000 });
+			expect(archive.text.toString()).toContain("Sign in");
+			expect(archive.navigationHops).toEqual([expect.objectContaining({ url: `${origin}/`, status: 200, contentCaptured: true })]);
+			expect(hits.filter((path) => path === "/")).toHaveLength(2);
+		} finally {
+			server.stop(true);
+		}
+	}, 60_000);
+
+	test("a bare 403 Forbidden page is the network turned away: every route is tried, then the capture fails", async () => {
+		const { server, hits, origin } = serve({ "/": () => html("<h1>403 Forbidden</h1><hr>nginx", { status: 403 }, "403 Forbidden") });
+		try {
+			const failure = await firstPage({ url: `${origin}/` }, { ...fast, getBrowser: () => launchTestChromium(), interstitialSettleMs: 20_000 }).catch((error: unknown) => error);
+			expect(failure).toBeInstanceOf(WebsiteCaptureFailedError);
+			expect((failure as Error).message).toContain('HTTP 403 ("403 Forbidden"), a page blocking this network via residential exit');
+			expect(hits.filter((path) => path === "/")).toHaveLength(3);
 		} finally {
 			server.stop(true);
 		}

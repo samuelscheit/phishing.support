@@ -34,12 +34,18 @@ export const DOCUMENT_BODY_LIMITS: BodyLimits = { maxBytes: 5 * 1024 * 1024, tim
 /** Headers that describe the body as it came over the wire, not the decoded and whole body the page is answered with. */
 const WIRE_HEADERS = new Set(["content-length", "content-encoding", "transfer-encoding"]);
 
+/** Whether an answer of this status carries a page: neither informational, a redirect, nor one without a body (204, 205). */
+function carriesPage(status: number): boolean {
+	return status >= 200 && status !== 204 && status !== 205 && (status < 300 || status >= 400);
+}
+
 /**
  * Let a held document response go on, and first record the answer of the
  * tab's main frame: when it arrived, with its body when it is a page the tab
- * shows (a 2xx answer that is not a download). Another frame's documents, a
- * redirect, an error, a download, and a page that declares itself larger than
- * the cap go on untouched, unread.
+ * shows (any answer with a body that is no redirect and no download: a kit's
+ * page may answer 403, 404 or 500). Another frame's documents, a redirect, an
+ * answer without a body, a download, and a page that declares itself larger
+ * than the cap go on untouched, unread.
  *
  * A page's body is taken from the browser, so the page is answered with the
  * bytes read, with the status and headers it came with (cookies were stored
@@ -72,7 +78,7 @@ export async function passDocument(session: CDPSession, paused: PausedDocument, 
 	const status = paused.responseStatusCode ?? 0;
 	const answer: DocumentAnswer = { url: paused.request.url, status, receivedAt: new Date().toISOString() };
 	const declared = Number(paused.responseHeaders?.find((header) => header.name.toLowerCase() === "content-length")?.value);
-	if (status < 200 || status >= 300 || isDownloadResponse(paused) || declared > limits.maxBytes) {
+	if (!carriesPage(status) || isDownloadResponse(paused) || declared > limits.maxBytes) {
 		record(answer);
 		await goOn();
 		return;
