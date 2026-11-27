@@ -21,7 +21,7 @@ const ROLE_NOUN: Record<ProviderRole, string> = {
 /** A folded block of text: what we sent, a provider's full email, our report as it quoted it. */
 function Fold({ label, children }: { label: string; children: ReactNode }) {
 	return (
-		<details className="group/fold">
+		<details className="group/fold min-w-0 max-w-full open:basis-full">
 			<summary className="cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
 				<span className="inline-block transition-transform group-open/fold:rotate-90" aria-hidden>▸</span> {label}
 			</summary>
