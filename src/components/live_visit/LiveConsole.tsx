@@ -47,13 +47,14 @@ function useFullscreen(ref: React.RefObject<HTMLElement | null>, enabled: boolea
 	}, [ref, enabled]);
 }
 
-/** A note over the screen: who has the browser, or why there is nothing to drive. */
-function ScreenNote({ children, busy }: { children: React.ReactNode; busy?: boolean }) {
+/** A note over the screen: who has the browser, what the visit does, or why there is nothing to drive. */
+export function ScreenNote({ children, busy, title }: { children: React.ReactNode; busy?: boolean; title?: string }) {
+	const tooltip = title ?? (typeof children === "string" ? children : undefined);
 	return (
-		<div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
-			<p className="flex items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs font-medium shadow-md ring-1 ring-border backdrop-blur">
-				{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
-				{children}
+		<div role="status" className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
+			<p title={tooltip} className="flex max-w-full items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs font-medium shadow-md ring-1 ring-border backdrop-blur">
+				{busy ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
+				<span className="min-w-0 truncate">{children}</span>
 			</p>
 		</div>
 	);
@@ -184,11 +185,12 @@ export function LiveConsole({ visit, driver, onClose, fullscreen = true }: {
 					<div className="min-h-0 flex-1">
 						<LiveScreen frame={frame} driving={driving} send={driver.send} sinkRef={sinkRef} label={`The visited site, live: ${url}`}>
 							{ended ? <div className="absolute inset-0 bg-background/40 backdrop-grayscale" aria-hidden /> : null}
-							{!frame ? <ScreenNote busy={!ended}>{ended ? "The visit ended." : "Connecting to the browser…"}</ScreenNote>
+							{!frame ? <ScreenNote busy={!ended}>{ended ? "The visit ended." : control?.status ?? "Connecting to the browser…"}</ScreenNote>
 								: ended ? <ScreenNote>The visit ended. Everything it did is in the case record.</ScreenNote>
-									: status.kind === "pausing" ? <ScreenNote busy>{status.mine ? "The agent finishes its action; the browser is yours in a moment." : `${status.label ?? "Someone"} is taking over…`}</ScreenNote>
-										: status.kind === "other" ? <ScreenNote>{status.label} is driving the browser.</ScreenNote>
-											: null}
+									: status.kind === "loading" ? <ScreenNote busy>{status.status ?? "Loading the site…"}</ScreenNote>
+										: status.kind === "pausing" ? <ScreenNote busy>{status.mine ? "The agent finishes its action; the browser is yours in a moment." : `${status.label ?? "Someone"} is taking over…`}</ScreenNote>
+											: status.kind === "other" ? <ScreenNote>{status.label} is driving the browser.</ScreenNote>
+												: null}
 						</LiveScreen>
 					</div>
 					{ended ? (

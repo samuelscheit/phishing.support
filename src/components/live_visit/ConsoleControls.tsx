@@ -189,7 +189,8 @@ export function ControlDock({ driver, control, onKeyboard }: { driver: LiveDrive
 	const mine = status.kind === "you" || (status.kind === "pausing" && status.mine);
 	const ready = status.kind === "you";
 	const canTake = status.kind === "agent";
-	const takeHint = status.kind === "other" ? `${status.label} is driving; you can take over once they hand back.`
+	const takeHint = status.kind === "loading" ? "Take over unlocks once the site finishes loading."
+		: status.kind === "other" ? `${status.label} is driving; you can take over once they hand back.`
 		: status.kind === "pausing" ? "Someone is taking over."
 			: status.kind === "finishing" ? "The agent is finishing the visit."
 				: status.kind === "ended" ? "The visit ended." : undefined;

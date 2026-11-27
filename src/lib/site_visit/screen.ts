@@ -29,7 +29,8 @@ function deliver(viewer: Viewer, frame: LiveFrame): void {
 /** A screencast sends frames only when the page paints: a still page gets one screenshot as its first frame after this long. */
 const FIRST_FRAME_MS = 250;
 
-type ScreenTab = { session: CDPSession; page: Page };
+/** A browser tab the screen can show: its CDP session and its page. */
+export type ScreenTab = { session: CDPSession; page: Page };
 type Running = { tab: ScreenTab; quality: ScreenQuality; stop: () => Promise<void> };
 type ScreencastFrame = { data: string; sessionId: number; metadata: { deviceWidth: number; deviceHeight: number } };
 
@@ -64,6 +65,18 @@ export class LiveScreen {
 	show(tab: ScreenTab): Promise<void> {
 		if (this.#tab?.session === tab.session && (this.#running || !this.#viewers.size)) return this.#changes;
 		this.#tab = tab;
+		return this.#reconcile();
+	}
+
+	/**
+	 * Show nothing until the next `show`: the tab's browser closed (an exit
+	 * that failed) and the next one has not opened yet. The screencast stops,
+	 * viewers stay, and one who starts watching meanwhile gets no stale frame.
+	 */
+	clear(): Promise<void> {
+		this.#tab = undefined;
+		this.#latest = undefined;
+		for (const viewer of this.#viewers) viewer.skipped = undefined;
 		return this.#reconcile();
 	}
 
@@ -130,6 +143,8 @@ export class LiveScreen {
 		let stopped = false;
 		const onFrame = (frame: ScreencastFrame) => {
 			void session.send("Page.screencastFrameAck", { sessionId: frame.sessionId }).catch(() => undefined);
+			// A tab the screen left (its screencast stops in a moment) shows nothing any more.
+			if (this.#tab?.session !== session) return;
 			painted = true;
 			this.#show({ jpeg: Buffer.from(frame.data, "base64"), url: page.url(), width: Math.round(frame.metadata.deviceWidth), height: Math.round(frame.metadata.deviceHeight) });
 		};
@@ -142,7 +157,7 @@ export class LiveScreen {
 		}
 		const firstFrame = setTimeout(() => {
 			void stillFrame(tab, quality).then((frame) => {
-				if (frame && !painted && !stopped) this.#show(frame);
+				if (frame && !painted && !stopped && this.#tab?.session === session) this.#show(frame);
 			}, () => undefined);
 		}, FIRST_FRAME_MS);
 		return {

@@ -23,6 +23,8 @@ export type LiveControl = {
 	run: string;
 	seq: number;
 	mode: VisitMode;
+	/** What happens now, e.g. which exit the site loads through. */
+	status?: string;
 	controller?: string;
 	until?: string;
 	idleUntil?: string;
@@ -41,10 +43,12 @@ export type LiveEvents = {
 
 export const EMPTY_LIVE_EVENTS: LiveEvents = { entries: [], finished: false };
 export const MAX_LIVE_ENTRIES = 200;
-const MODES: readonly VisitMode[] = ["agent", "pausing", "human", "ended"];
+const MODES: readonly VisitMode[] = ["loading", "agent", "pausing", "human", "ended"];
 
 const text = (source: Record<string, unknown>, key: string): string => (typeof source[key] === "string" ? source[key] as string : "");
 const optionalText = (source: Record<string, unknown>, key: string): string | undefined => text(source, key) || undefined;
+
+const OPTIONAL_TEXT = ["status", "controller", "until", "idleUntil"] as const satisfies ReadonlyArray<keyof LiveControl>;
 
 function controlOf(source: Record<string, unknown>): LiveControl | undefined {
 	const mode = MODES.find((candidate) => candidate === source.mode);
@@ -58,9 +62,10 @@ function controlOf(source: Record<string, unknown>): LiveControl | undefined {
 		run: text(source, "run"),
 		seq: typeof source.seq === "number" && Number.isFinite(source.seq) ? source.seq : 0,
 		mode,
-		...(optionalText(source, "controller") ? { controller: text(source, "controller") } : {}),
-		...(optionalText(source, "until") ? { until: text(source, "until") } : {}),
-		...(optionalText(source, "idleUntil") ? { idleUntil: text(source, "idleUntil") } : {}),
+		...Object.fromEntries((OPTIONAL_TEXT as readonly string[]).flatMap((key) => {
+			const value = optionalText(source, key);
+			return value ? [[key, value]] : [];
+		})),
 		tabs,
 		fakeValues,
 		agentRunning: source.agentRunning === true,
@@ -99,13 +104,14 @@ export function reduceLiveEvent(state: LiveEvents, message: unknown): LiveEvents
 	return entry ? { ...state, entries: [...state.entries, entry].slice(-MAX_LIVE_ENTRIES) } : state;
 }
 
-/** Whether people can watch and drive the visit now. */
+/** Whether people can watch the visit now (and drive it, once its agent walks). */
 export function isLive(events: LiveEvents): boolean {
 	return !events.finished && Boolean(events.control) && events.control!.mode !== "ended";
 }
 
 /** Who drives, as the console names it. */
 export type DriverStatus =
+	| { kind: "loading"; status?: string }
 	| { kind: "agent" }
 	| { kind: "finishing" }
 	| { kind: "pausing"; mine: boolean; label?: string }
@@ -116,6 +122,7 @@ export type DriverStatus =
 /** Who drives, for this viewer; `you`: the visit's socket says this viewer drives (or is about to). */
 export function driverStatus(control: LiveControl | undefined, you: boolean): DriverStatus {
 	if (!control || control.mode === "ended") return { kind: "ended" };
+	if (control.mode === "loading") return { kind: "loading", ...(control.status ? { status: control.status } : {}) };
 	if (control.mode === "pausing") return { kind: "pausing", mine: you, ...(control.controller ? { label: control.controller } : {}) };
 	if (control.mode === "human") return you ? { kind: "you" } : { kind: "other", label: control.controller ?? "Someone" };
 	return control.agentRunning ? { kind: "agent" } : { kind: "finishing" };

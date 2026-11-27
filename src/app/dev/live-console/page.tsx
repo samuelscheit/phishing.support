@@ -8,7 +8,7 @@ export const metadata = { robots: { index: false } };
 /**
  * The live console in each state, without a live visit: for screenshots
  * while working on it. Development only; production answers 404.
- * `?state=agent|pausing|you|other|ended|inline&frame=desktop|phone&theme=light|dark`;
+ * `?state=loading|agent|pausing|you|other|ended|inline&frame=desktop|phone&theme=light|dark`;
  * `?state=live&id=…` shows a real live visit that `POST visit` opened.
  */
 export default async function Page({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {

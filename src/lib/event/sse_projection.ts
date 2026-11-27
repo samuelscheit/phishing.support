@@ -112,7 +112,7 @@ export function projectSseEvent(value: unknown, depth = 0): JsonRecord {
 
 	// The visit's live log: each recorded page, every action and who did it, downloads, and who drives.
 	if (type.startsWith("browser.")) {
-		for (const key of ["url", "title", "kind", "text", "fileName", "actor", "mode", "controller", "until", "idleUntil", "run"]) setIfDefined(projected, key, asString(source[key], 1_000));
+		for (const key of ["url", "title", "kind", "text", "fileName", "actor", "mode", "status", "controller", "until", "idleUntil", "run"]) setIfDefined(projected, key, asString(source[key], 1_000));
 		setIfDefined(projected, "index", finiteNumber(source.index));
 		setIfDefined(projected, "seq", finiteNumber(source.seq));
 		if (typeof source.agentRunning === "boolean") projected.agentRunning = source.agentRunning;

@@ -100,6 +100,9 @@ describe("SSE event projection", () => {
 			fakeValues: { email: "probe@x.invalid", password: "A9!x" },
 			agentRunning: true,
 		});
+		// While the site loads, viewers read what happens.
+		expect(projectSseEvent({ type: "browser.control", run: "r1", seq: 2, mode: "loading", status: "Residential exit failed (timeout), trying Tor exit…", tabs: [], fakeValues: {}, agentRunning: false }))
+			.toEqual({ type: "browser.control", run: "r1", seq: 2, mode: "loading", status: "Residential exit failed (timeout), trying Tor exit…", tabs: [], fakeValues: {}, agentRunning: false });
 		expect(projectSseEvent({ type: "browser.action", kind: "click", text: "Clicked \"Sign in\"", actor: "human", selector: "button" })).toEqual({ type: "browser.action", kind: "click", text: "Clicked \"Sign in\"", actor: "human" });
 		expect(projectSseEvent({ type: "browser.frame", jpeg: "AAAA", url: "https://kit.example/" })).toEqual({ type: "browser.frame", url: "https://kit.example/" });
 	});

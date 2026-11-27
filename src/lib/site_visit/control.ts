@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { Page } from "rebrowser-puppeteer-core";
 
 import type { TaskSteering } from "../browser/task/agent";
 import type { VisitorTab, VisitorTabs } from "../browser/visitor_tabs";
 import { errorText } from "../util/error_text";
 import type { VisitAgentAction } from "./agent";
 import { ALT, CTRL, describeElementAt, describeFocusedElement, dispatchPageInput, keyAllowed, META, releasePointer, SHIFT, type InputTab, type LiveInput, type PointerState } from "./live_input";
-import { LiveScreen } from "./screen";
+import { LiveScreen, type ScreenTab } from "./screen";
 import type { SyntheticField } from "./visit_task";
 
 /**
@@ -18,10 +19,18 @@ import type { SyntheticField } from "./visit_task";
  * agent's actions, marked as a person's, and the visit's recording (pages,
  * traffic, downloads, clipboard) runs on unchanged, since it never depended
  * on who drives.
+ *
+ * A visit can be live before its agent starts: while the site loads (a
+ * browser starts on an exit, an exit fails and the next is tried) people
+ * watch the loading tab and read what happens, and the agent's visit takes
+ * over the same control, its viewers and their sockets once it starts.
  */
 
-/** `pausing`: a person took over and the agent is finishing its current action; `ended`: the visit is over. */
-export type VisitMode = "agent" | "pausing" | "human" | "ended";
+/** `loading`: the site loads and people only watch; `pausing`: a person took over and the agent is finishing its current action; `ended`: the visit is over. */
+export type VisitMode = "loading" | "agent" | "pausing" | "human" | "ended";
+
+/** How a control starts: `loading` while the site loads before the agent starts (watch only), `agent` once it walks. */
+export type VisitControlOptions = { mode?: "loading" | "agent"; status?: string };
 
 /** A visit's control state, as every viewer sees it. */
 export type VisitControlEvent = {
@@ -30,6 +39,8 @@ export type VisitControlEvent = {
 	run: string;
 	seq: number;
 	mode: VisitMode;
+	/** What happens now, e.g. which exit the site loads through; absent when there is nothing to say. */
+	status?: string;
 	/** Who drives while a person does. */
 	controller?: string;
 	/** When the person's turn ends at the latest, and when it ends without input. */
@@ -98,6 +109,11 @@ export function viewerLabel(viewer: string): string {
 	return `Viewer ${createHash("sha256").update(viewer).digest("hex").slice(0, 4)}`;
 }
 
+/** A tab as viewers see it. */
+async function describeTab(targetId: string, page: Pick<Page, "url" | "title">, active: boolean): Promise<VisitControlEvent["tabs"][number]> {
+	return { targetId, url: page.url(), title: (await page.title().catch(() => "")).slice(0, 200), active };
+}
+
 function modifierPrefix(modifiers: number): string {
 	return `${modifiers & CTRL ? "Ctrl+" : ""}${modifiers & META ? "Cmd+" : ""}${modifiers & ALT ? "Alt+" : ""}${modifiers & SHIFT ? "Shift+" : ""}`;
 }
@@ -108,7 +124,10 @@ export class VisitControl {
 	readonly #listeners = new Set<ControlPublish>();
 	readonly #run = randomUUID();
 	#seq = 0;
-	#mode: VisitMode = "agent";
+	#mode: VisitMode;
+	#status?: string;
+	/** The tab shown while the site loads, before the agent's visit is attached. */
+	#loading?: ScreenTab;
 	#visit?: ControlledVisit;
 	#controller?: Controller;
 	/** A turn being handed back: nobody takes over until the agent has its account. */
@@ -166,8 +185,12 @@ export class VisitControl {
 		},
 	};
 
-	constructor(readonly key: string, publish: ControlPublish, private readonly now: () => number = Date.now) {
+	constructor(readonly key: string, publish: ControlPublish, options: VisitControlOptions = {}, private readonly now: () => number = Date.now) {
 		this.#publish = publish;
+		this.#mode = options.mode ?? "agent";
+		this.#status = options.status;
+		// A loading visit is live from its start: viewers hear of it before any browser opened.
+		if (this.#mode === "loading") this.publishState();
 	}
 
 	get mode(): VisitMode {
@@ -182,8 +205,37 @@ export class VisitControl {
 	/** Whether a person took the browser over during this visit. */
 	tookOver = false;
 
-	/** The visit is under way: people may watch and drive it from now on. */
+	/** Say what happens now (or nothing, with `undefined`). */
+	setStatus(status: string | undefined): void {
+		if (this.#mode === "ended" || status === this.#status) return;
+		this.#status = status;
+		this.publishState();
+	}
+
+	/**
+	 * While the site loads: show this tab (a new exit's browser), or nothing
+	 * while one exit's browser closed and the next has not opened, and say
+	 * what happens. Viewers stay connected throughout; `attach` hands over to
+	 * the agent's visit. Does nothing once the visit is no longer loading.
+	 */
+	async watchTab(tab: ScreenTab | undefined, status?: string): Promise<void> {
+		if (this.#mode !== "loading") return;
+		this.#loading = tab;
+		if (status !== undefined) this.#status = status;
+		this.#tabs = tab ? [{ targetId: tab.session.id(), url: tab.page.url(), title: "", active: true }] : [];
+		this.publishState();
+		await (tab ? this.screen.show(tab) : this.screen.clear());
+	}
+
+	/** The visit is under way: people may watch and drive it from now on. A loading visit's viewers watch on. */
 	attach(visit: ControlledVisit): void {
+		if (this.#mode === "ended") return;
+		if (this.#mode === "loading") {
+			this.#mode = "agent";
+			this.#status = undefined;
+			this.#loading = undefined;
+			this.#tabs = [];
+		}
 		this.#visit = visit;
 		this.#watchdog = setInterval(() => void this.expireTurn(), 1_000);
 		void this.screen.show(this.#screenTab(visit.tabs.active()) ?? { session: visit.tabs.first.session, page: visit.tabs.first.page! });
@@ -201,6 +253,8 @@ export class VisitControl {
 	end(): Promise<void> {
 		if (this.#mode === "ended") return this.#ending ?? Promise.resolve();
 		this.#mode = "ended";
+		this.#status = undefined;
+		this.#loading = undefined;
 		clearInterval(this.#watchdog);
 		this.#ending = (async () => {
 			if (this.#controller) await this.#handBack(this.#controller, "the visit ended");
@@ -212,19 +266,22 @@ export class VisitControl {
 		return this.#ending;
 	}
 
-	/** The screen follows the visitor's tab, and viewers hear of tabs that opened, closed or moved on. Called on every poll of the visit. */
+	/** The screen follows the visitor's tab, and viewers hear of tabs that opened, closed or moved on (or of the loading tab's page). Called on every poll of the visit. */
 	async follow(): Promise<void> {
 		const visit = this.#visit;
-		if (!visit) return;
-		const tab = this.#screenTab(visit.tabs.active());
-		if (tab) await this.screen.show(tab);
-		const active = visit.tabs.active();
-		const tabs = await Promise.all(visit.tabs.tabs().filter((candidate) => !candidate.closed && candidate.page).map(async (candidate) => ({
-			targetId: candidate.targetId,
-			url: candidate.page!.url(),
-			title: (await candidate.page!.title().catch(() => "")).slice(0, 200),
-			active: candidate === active,
-		})));
+		const loading = this.#loading;
+		if (this.#mode === "ended") return;
+		let tabs: VisitControlEvent["tabs"];
+		if (visit) {
+			const tab = this.#screenTab(visit.tabs.active());
+			if (tab) await this.screen.show(tab);
+			const active = visit.tabs.active();
+			tabs = await Promise.all(visit.tabs.tabs().filter((candidate) => !candidate.closed && candidate.page).map((candidate) => describeTab(candidate.targetId, candidate.page!, candidate === active)));
+		} else if (loading) {
+			tabs = [await describeTab(loading.session.id(), loading.page, true)];
+		} else return;
+		// The visit moved on meanwhile (another exit's tab, the agent's visit, its end): this read is stale.
+		if (this.mode === "ended" || this.#visit !== visit || this.#loading !== loading) return;
 		if (JSON.stringify(tabs) === JSON.stringify(this.#tabs)) return;
 		this.#tabs = tabs;
 		this.publishState();
@@ -232,6 +289,7 @@ export class VisitControl {
 
 	/** A viewer takes the browser over; its id (random, never shown) is its key to the controls while it drives. */
 	take(viewer: string): ControlResult {
+		if (this.#mode === "loading") return { ok: false, status: 409, error: "The site is still loading; take over unlocks once the agent starts." };
 		if (!this.#visit || this.#mode === "ended") return { ok: false, status: 409, error: "The visit is not live." };
 		if (this.#controller) {
 			if (this.#controller.viewer === viewer) return { ok: true };
@@ -271,6 +329,7 @@ export class VisitControl {
 	message(viewer: string, text: string): ControlResult {
 		const message = text.trim().slice(0, MAX_MESSAGE);
 		if (!message) return { ok: false, status: 400, error: "The message is empty." };
+		if (this.#mode === "loading") return { ok: false, status: 409, error: "The agent has not started walking the site yet." };
 		if (!this.#visit || this.#agentEnded || this.#mode === "ended") return { ok: false, status: 409, error: "The agent is no longer walking the site." };
 		const now = this.now();
 		while (this.#messageTimes.length && now - this.#messageTimes[0]! >= 60_000) this.#messageTimes.shift();
@@ -335,13 +394,14 @@ export class VisitControl {
 			run: this.#run,
 			seq: this.#seq,
 			mode: this.#mode,
+			...(this.#status ? { status: this.#status } : {}),
 			...(controller ? {
 				controller: controller.label,
 				until: new Date(controller.since + Math.min(TAKEOVER_MAX_MS, HUMAN_TOTAL_MS - this.#humanMs)).toISOString(),
 				idleUntil: new Date(controller.lastInputAt + TAKEOVER_IDLE_MS).toISOString(),
 			} : {}),
 			// The tabs as `follow` read them, with the visitor's tab as it is now.
-			tabs: visit ? (this.#tabs.length ? this.#tabs : (visit.tabs.tabs().filter((tab) => !tab.closed && tab.page).map((tab) => ({ targetId: tab.targetId, url: tab.page!.url(), title: "" })))).map((tab) => ({ ...tab, active: tab.targetId === active?.targetId })) : [],
+			tabs: this.#viewTabs(visit, active),
 			fakeValues: visit?.values ?? {},
 			agentRunning: Boolean(visit) && !this.#agentEnded && this.#mode !== "ended",
 		};
@@ -357,7 +417,15 @@ export class VisitControl {
 		return Promise.resolve();
 	}
 
-	#screenTab(tab: VisitorTab) {
+	#viewTabs(visit: ControlledVisit | undefined, active: VisitorTab | undefined): VisitControlEvent["tabs"] {
+		if (!visit) return this.#loading ? this.#tabs : [];
+		const tabs = this.#tabs.length
+			? this.#tabs
+			: visit.tabs.tabs().filter((tab) => !tab.closed && tab.page).map((tab) => ({ targetId: tab.targetId, url: tab.page!.url(), title: "" }));
+		return tabs.map((tab) => ({ ...tab, active: tab.targetId === active?.targetId }));
+	}
+
+	#screenTab(tab: VisitorTab): ScreenTab | undefined {
 		return tab.page ? { session: tab.session, page: tab.page } : undefined;
 	}
 
@@ -410,12 +478,14 @@ export class VisitControl {
 				"Continue the visit from the page as it is now.",
 			].filter(Boolean).join(" "));
 			if (active) this.#leftOn = active.targetId;
-			if (this.#mode !== "ended") this.#mode = "agent";
+			const ending = this.#mode === "ended";
+			if (!ending) this.#mode = "agent";
 			this.#resumed?.resolve();
 			this.#resumed = undefined;
 			visit?.onDriving(false);
 			this.screen.setDriving(false);
-			this.publishState();
+			// A visit that ends tells viewers once, as `end` finishes.
+			if (!ending) this.publishState();
 		})().finally(() => {
 			if (this.#handingBack === handing) this.#handingBack = undefined;
 		});
@@ -570,11 +640,14 @@ const REGISTRY_KEY = Symbol.for("phishing_reporter.visitControls");
 const registry: Map<string, VisitControl> = ((globalThis as Record<symbol, unknown>)[REGISTRY_KEY] ??= new Map()) as Map<string, VisitControl>;
 
 /** A control for a case's visit, which people can reach while it lives; a case runs one visit at a time. */
-export function openVisitControl(key: string, publish: ControlPublish): VisitControl {
+export function openVisitControl(key: string, publish: ControlPublish, options?: VisitControlOptions): VisitControl {
 	const previous = registry.get(key);
-	if (previous) void previous.end();
-	const control = new VisitControl(key, publish);
+	const control = new VisitControl(key, publish, options);
 	registry.set(key, control);
+	// The previous visit's end reaches viewers after this visit's first state, which viewers would take for the newest: say it again after.
+	if (previous) void previous.end().then(() => {
+		if (control.mode !== "ended" && control.state.seq > 0) control.publishState();
+	}).catch(() => undefined);
 	return control;
 }
 

@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import type { VisitorTabs } from "../browser/visitor_tabs";
 import type { VisitAgentAction } from "./agent";
 import { closeVisitControl, HUMAN_TOTAL_MS, MIN_TURN_CHARGE_MS, openVisitControl, TAKEOVER_IDLE_MS, TAKEOVER_MAX_MS, VisitControl, visitControlOf, viewerLabel, type VisitControlEvent } from "./control";
+import type { LiveFrame, ScreenTab } from "./screen";
 import { syntheticVisitValues } from "./visit_task";
 import { createExfiltrationCanaries } from "../exfiltration/canaries";
 
@@ -11,12 +12,13 @@ const ALICE = "alice-0000000000000000";
 const BOB = "bob-00000000000000000000";
 
 /** A CDP session that answers every command and remembers it; `scrolled` is how far its page is scrolled. */
-function fakeSession() {
+function fakeSession(id = "S0") {
 	const sent: Array<{ method: string; params: unknown }> = [];
 	const scrolled = { y: 0 };
 	const session = Object.assign(new EventEmitter(), {
 		sent,
 		scrolled,
+		id: () => id,
 		send: async (method: string, params?: unknown) => {
 			sent.push({ method, params });
 			// Typing takes the browser a moment, as it does over a real connection.
@@ -54,7 +56,7 @@ function attached() {
 		tabs: () => [tab, other],
 		focus: async (target: typeof tab) => { active = target; },
 	} as unknown as VisitorTabs;
-	const control = new VisitControl("case-1", (event) => events.push(event), () => clock.now);
+	const control = new VisitControl("case-1", (event) => events.push(event), {}, () => clock.now);
 	let recordedSteps = 0;
 	/** Whether the next "record this page" finds a new page. */
 	const pageChanged = { value: true };
@@ -456,6 +458,14 @@ describe("who drives a live visit", () => {
 		expect(notes[0]).toContain("note 1");
 	});
 
+	test("a control starts as the agent's by default and says nothing until its visit is attached", () => {
+		const events: VisitControlEvent[] = [];
+		const control = new VisitControl("case-default", (event) => events.push(event));
+		expect(control.mode).toBe("agent");
+		expect(events).toEqual([]);
+		expect(control.state).not.toHaveProperty("status");
+	});
+
 	test("the registry holds one control per case, reachable by every handler, until its visit ends", async () => {
 		const first = openVisitControl("case-registry", () => undefined);
 		expect(visitControlOf("case-registry")).toBe(first);
@@ -466,5 +476,197 @@ describe("who drives a live visit", () => {
 		expect(visitControlOf("case-registry")).toBe(second);
 		await closeVisitControl(second);
 		expect(visitControlOf("case-registry")).toBeUndefined();
+	});
+});
+
+/** A browser tab of one exit while the site loads: the test plays its screencast and reads what it was sent. */
+function loadingTab(id: string, url: string, title: () => Promise<string> = async () => "Kit") {
+	const session = fakeSession(id);
+	const page = { url: () => url, title };
+	let frameId = 0;
+	return {
+		tab: { session, page } as unknown as ScreenTab,
+		session,
+		page,
+		frame: (name: string) => session.emit("Page.screencastFrame", { data: Buffer.from(name).toString("base64"), sessionId: ++frameId, metadata: { deviceWidth: 1280, deviceHeight: 800 } }),
+		starts: () => session.sent.filter((call) => call.method === "Page.startScreencast").length,
+		stops: () => session.sent.filter((call) => call.method === "Page.stopScreencast").length,
+	};
+}
+
+/** The agent's visit, started in `tab`: the tab the site loaded in. */
+function visitIn(tab: ReturnType<typeof loadingTab>) {
+	const visitorTab = { targetId: "T1", session: tab.session, page: tab.page, closed: false };
+	return {
+		tabs: { first: visitorTab, active: () => visitorTab, tabs: () => [visitorTab] } as unknown as VisitorTabs,
+		touch: false,
+		values: syntheticVisitValues(createExfiltrationCanaries()),
+		recordStep: async () => true,
+		onAction: () => undefined,
+		onDriving: () => undefined,
+	};
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
+const named = (frame: LiveFrame) => Buffer.from(frame.jpeg).toString();
+
+describe("a visit live while its site loads", () => {
+	function loading(status?: string) {
+		const events: VisitControlEvent[] = [];
+		const control = new VisitControl("case-loading", (event) => events.push(event), { mode: "loading", ...(status ? { status } : {}) });
+		return { control, events };
+	}
+
+	test("viewers watch from second 0: through each exit's browser, the gap between them, and into the agent's visit, on one control and one screen", async () => {
+		const { control, events } = loading("Starting browser via residential exit…");
+		// Live before any browser opened: viewers hear of it at once, with what happens.
+		expect(events).toEqual([{ type: "browser.control", run: expect.any(String), seq: 1, mode: "loading", status: "Starting browser via residential exit…", tabs: [], fakeValues: {}, agentRunning: false }]);
+		const seen: LiveFrame[] = [];
+		control.screen.watch((frame) => seen.push(frame), "high");
+
+		const residential = loadingTab("S1", "https://kit.example/");
+		await control.watchTab(residential.tab, "Loading page via residential exit…");
+		expect(events.at(-1)).toMatchObject({ mode: "loading", status: "Loading page via residential exit…", tabs: [{ targetId: "S1", url: "https://kit.example/", title: "", active: true }], agentRunning: false });
+		expect(residential.starts()).toBe(1);
+		residential.frame("R0");
+		expect(seen.map(named)).toEqual(["R0"]);
+		// A poll reads the loading tab's title.
+		await control.follow();
+		expect(events.at(-1)?.tabs).toEqual([{ targetId: "S1", url: "https://kit.example/", title: "Kit", active: true }]);
+		const polled = events.length;
+		await control.follow();
+		expect(events).toHaveLength(polled);
+
+		// The exit failed and its browser closed: the screencast stops, the viewer stays, the status says why.
+		await control.watchTab(undefined, "Residential exit failed (timeout), trying Tor exit…");
+		expect(residential.stops()).toBe(1);
+		expect(control.screen.viewers).toBe(1);
+		expect(events.at(-1)).toMatchObject({ mode: "loading", status: "Residential exit failed (timeout), trying Tor exit…", tabs: [] });
+		// Nothing to poll between exits.
+		await control.follow();
+		expect(events.at(-1)?.tabs).toEqual([]);
+
+		const tor = loadingTab("S2", "https://kit.example/");
+		await control.watchTab(tor.tab, "Loading page via Tor exit…");
+		expect(tor.starts()).toBe(1);
+		tor.frame("T0");
+		// The viewer gets it once its rate (15 frames a second) allows.
+		await new Promise((resolve) => setTimeout(resolve, 80));
+		expect(seen.map(named).at(-1)).toBe("T0");
+		expect(events.at(-1)).toMatchObject({ status: "Loading page via Tor exit…", tabs: [{ targetId: "S2", active: true }] });
+
+		// Watch only while loading.
+		expect(control.take(ALICE)).toEqual({ ok: false, status: 409, error: "The site is still loading; take over unlocks once the agent starts." });
+		expect(control.message(ALICE, "hi")).toEqual({ ok: false, status: 409, error: "The agent has not started walking the site yet." });
+		expect(control.message(ALICE, "  ")).toMatchObject({ ok: false, status: 400 });
+		expect(control.holding).toBe(false);
+
+		// The agent starts in the tab the site loaded in: same run, same viewer, the screencast runs on.
+		control.attach(visitIn(tor));
+		expect(control.mode).toBe("agent");
+		const started = events.at(-1)!;
+		expect(started).toMatchObject({ mode: "agent", agentRunning: true, tabs: [{ targetId: "T1", url: "https://kit.example/", active: true }] });
+		expect(started).not.toHaveProperty("status");
+		expect(Object.keys(started.fakeValues).length).toBeGreaterThan(0);
+		await settle();
+		expect(tor.starts()).toBe(1);
+		expect(tor.stops()).toBe(0);
+		expect(control.screen.viewers).toBe(1);
+		// Loading is over: the agent's visit owns the screen and its tabs.
+		await control.watchTab(residential.tab, "late");
+		expect(residential.starts()).toBe(1);
+		expect(control.state).not.toHaveProperty("status");
+		expect(control.take(ALICE)).toEqual({ ok: true });
+		expect(control.mode).toBe("pausing");
+
+		await control.end();
+		await control.end();
+		expect(events.filter((event) => event.mode === "ended")).toHaveLength(1);
+		expect(new Set(events.map((event) => event.run)).size).toBe(1);
+		expect(events.map((event) => event.seq)).toEqual(events.map((_, index) => index + 1));
+		expect(events.map((event) => event.mode).filter((mode, index, modes) => mode !== modes[index - 1])).toEqual(["loading", "agent", "pausing", "ended"]);
+	});
+
+	test("a visit that ends while loading ends once, without status, and nothing loads or attaches after", async () => {
+		const { control, events } = loading();
+		expect(events.at(-1)).not.toHaveProperty("status");
+		control.screen.watch(() => undefined, "low");
+		const tab = loadingTab("S1", "https://kit.example/");
+		await control.watchTab(tab.tab, "Loading page via residential exit…");
+		let ended = false;
+		void control.screen.ended.then(() => { ended = true; });
+
+		await Promise.all([control.end(), control.end()]);
+		expect(control.mode).toBe("ended");
+		const last = events.at(-1)!;
+		expect(last).toMatchObject({ mode: "ended", tabs: [], agentRunning: false });
+		expect(last).not.toHaveProperty("status");
+		expect(events.filter((event) => event.mode === "ended")).toHaveLength(1);
+		expect(ended).toBe(true);
+		expect(tab.stops()).toBe(1);
+
+		const published = events.length;
+		const next = loadingTab("S2", "https://kit.example/");
+		await control.watchTab(next.tab, "too late");
+		control.setStatus("too late");
+		control.attach(visitIn(next));
+		await control.follow();
+		await settle();
+		expect(control.mode).toBe("ended");
+		expect(next.starts()).toBe(0);
+		expect(events).toHaveLength(published);
+		expect(control.take(ALICE)).toMatchObject({ ok: false, status: 409, error: "The visit is not live." });
+	});
+
+	test("the status changes on its own, only when it changes, and can be set or cleared once the agent walks", () => {
+		const { control, events } = loading("Starting browser via residential exit…");
+		control.setStatus("Starting browser via residential exit…");
+		expect(events).toHaveLength(1);
+		control.setStatus("Loading page via residential exit…");
+		expect(events.at(-1)).toMatchObject({ seq: 2, mode: "loading", status: "Loading page via residential exit…" });
+		// A tab shown without a new status keeps the last one.
+		void control.watchTab(undefined);
+		expect(events.at(-1)).toMatchObject({ seq: 3, status: "Loading page via residential exit…" });
+		control.setStatus(undefined);
+		expect(events.at(-1)).not.toHaveProperty("status");
+
+		control.attach(visitIn(loadingTab("S1", "https://kit.example/")));
+		control.setStatus("Recording the page…");
+		expect(events.at(-1)).toMatchObject({ mode: "agent", status: "Recording the page…" });
+		control.setStatus(undefined);
+		expect(events.at(-1)).not.toHaveProperty("status");
+		void control.end();
+	});
+
+	test("a poll that read the loading tab after the visit moved on (another exit, the agent's visit) tells viewers nothing stale", async () => {
+		const { control, events } = loading();
+		const slow = loadingTab("S1", "https://kit.example/", () => new Promise((resolve) => setTimeout(() => resolve("Stale"), 5)));
+		await control.watchTab(slow.tab);
+		const toNextExit = control.follow();
+		await control.watchTab(undefined, "Trying Tor exit…");
+		await toNextExit;
+		expect(events.at(-1)).toMatchObject({ status: "Trying Tor exit…", tabs: [] });
+
+		const next = loadingTab("S2", "https://kit.example/", () => new Promise((resolve) => setTimeout(() => resolve("Stale"), 5)));
+		await control.watchTab(next.tab);
+		const toAgent = control.follow();
+		control.attach(visitIn(next));
+		await toAgent;
+		expect(events.at(-1)).toMatchObject({ mode: "agent", tabs: [{ targetId: "T1", title: "" }] });
+		expect(JSON.stringify(events)).not.toContain("Stale");
+		await control.end();
+	});
+
+	test("a case's visit opened again while its last one ends is heard after that one's end", async () => {
+		const events: VisitControlEvent[] = [];
+		const first = openVisitControl("case-reopen", (event) => events.push(event), { mode: "loading", status: "first" });
+		const second = openVisitControl("case-reopen", (event) => events.push(event), { mode: "loading", status: "second" });
+		expect(first.mode).toBe("ended");
+		await first.end();
+		await Promise.resolve();
+		expect(events.map((event) => [event.run === first.state.run ? "first" : "second", event.mode])).toEqual([["first", "loading"], ["second", "loading"], ["first", "ended"], ["second", "loading"]]);
+		expect(events.at(-1)).toMatchObject({ status: "second", seq: 2 });
+		await closeVisitControl(second);
+		expect(visitControlOf("case-reopen")).toBeUndefined();
 	});
 });

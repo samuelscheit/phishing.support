@@ -30,6 +30,8 @@ const BADGE_TONE = {
 /** What a badge says about who drives. */
 export function driverText(status: DriverStatus): { text: string; tone: keyof typeof BADGE_TONE } {
 	switch (status.kind) {
+		case "loading":
+			return { text: status.status || "Loading site…", tone: "agent" };
 		case "agent":
 			return { text: "Agent driving", tone: "agent" };
 		case "finishing":
@@ -47,11 +49,13 @@ export function driverText(status: DriverStatus): { text: string; tone: keyof ty
 
 export function DriverBadge({ status }: { status: DriverStatus }) {
 	const { text, tone } = driverText(status);
-	const Icon = status.kind === "pausing" ? Loader2 : status.kind === "you" || status.kind === "other" ? UserRound : Bot;
+	const busy = status.kind === "pausing" || status.kind === "loading";
+	const Icon = busy ? Loader2 : status.kind === "you" || status.kind === "other" ? UserRound : Bot;
 	return (
-		<span role="status" className={cn("flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium", BADGE_TONE[tone])}>
-			<Icon className={cn("h-3.5 w-3.5", status.kind === "pausing" && "animate-spin motion-reduce:animate-none")} aria-hidden />
-			{text}
+		// A loading status names the exit and why one failed: it may be long, and gives way to the address.
+		<span role="status" title={text} className={cn("flex min-w-0 max-w-[min(26rem,100%)] items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium", status.kind !== "loading" && "shrink-0", BADGE_TONE[tone])}>
+			<Icon className={cn("h-3.5 w-3.5 shrink-0", busy && "animate-spin motion-reduce:animate-none")} aria-hidden />
+			<span className="truncate">{text}</span>
 		</span>
 	);
 }

@@ -71,6 +71,25 @@ describe("reduceLiveEvent", () => {
 		expect(fold([state("r2", 1, "agent")], socketFirst).control).toMatchObject({ run: "r2", seq: 1, mode: "agent" });
 	});
 
+	test("a loading visit is live from its first state, with what happens; its states carry on into the agent's visit", () => {
+		const state = (seq: number, mode: string, extra: Record<string, unknown> = {}) => ({ type: "browser.control", run: "r1", seq, mode, tabs: [], fakeValues: {}, agentRunning: mode !== "loading", ...extra });
+		const loading = fold([{ type: "connected" }, state(1, "loading", { status: "Starting browser via residential exit…" })]);
+		expect(isLive(loading)).toBe(true);
+		expect(loading.control).toEqual({ run: "r1", seq: 1, mode: "loading", status: "Starting browser via residential exit…", tabs: [], fakeValues: {}, agentRunning: false });
+		const switched = fold([state(2, "loading", { status: "Residential exit failed (timeout), trying Tor exit…" })], loading);
+		expect(switched.control?.status).toBe("Residential exit failed (timeout), trying Tor exit…");
+		// A status that is not text, or empty, is none.
+		expect(fold([state(3, "loading", { status: 42 })], switched).control).not.toHaveProperty("status");
+		expect(fold([state(3, "loading", { status: "" })], switched).control).not.toHaveProperty("status");
+		const walking = fold([state(4, "agent")], switched);
+		expect(walking.control).toMatchObject({ mode: "agent", agentRunning: true });
+		expect(walking.control).not.toHaveProperty("status");
+		expect(isLive(walking)).toBe(true);
+		// A late copy of a loading state (the other channel) never takes the agent's visit back.
+		expect(fold([state(2, "loading", { status: "late" })], walking)).toBe(walking);
+		expect(isLive(fold([state(5, "ended")], walking))).toBe(false);
+	});
+
 	test("ignores an unknown mode, unknown types and non-objects", () => {
 		const start = fold([{ type: "browser.control", run: "r1", seq: 5, mode: "agent", tabs: [], fakeValues: {}, agentRunning: true }]);
 		expect(fold([{ type: "browser.control", run: "r1", seq: 6, mode: "dancing" }, { type: "response.delta" }, null, "x", [1]], start)).toBe(start);
@@ -89,6 +108,8 @@ describe("reduceLiveEvent", () => {
 
 describe("driverStatus", () => {
 	test("names who drives; the socket's `you` alone says whether it is this viewer", () => {
+		expect(driverStatus(control({ mode: "loading", agentRunning: false, status: "Loading page via Tor exit…" }), false)).toEqual({ kind: "loading", status: "Loading page via Tor exit…" });
+		expect(driverStatus(control({ mode: "loading", agentRunning: false }), true)).toEqual({ kind: "loading" });
 		expect(driverStatus(control(), false)).toEqual({ kind: "agent" });
 		expect(driverStatus(control({ agentRunning: false }), false)).toEqual({ kind: "finishing" });
 		expect(driverStatus(control({ mode: "ended" }), true)).toEqual({ kind: "ended" });

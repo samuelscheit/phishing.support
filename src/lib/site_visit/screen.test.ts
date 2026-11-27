@@ -122,6 +122,65 @@ describe("the live screen of a visit", () => {
 		expect(second.running()).toBe(true);
 	});
 
+	test("cleared between two browsers (an exit failed, the next starts): the screencast stops, viewers stay, nothing stale is shown, the next tab streams at once", async () => {
+		const screen = new LiveScreen();
+		const failed = fakeTab();
+		const next = fakeTab("https://kit.example/next");
+		const seen: LiveFrame[] = [];
+		screen.watch((frame) => seen.push(frame), "low");
+		await screen.show(failed.tab);
+		failed.frame("F0");
+		// Skipped for the viewer's rate: it must not arrive once the tab is gone.
+		failed.frame("F1");
+		const clearing = screen.clear();
+		// A frame the tab sends before its screencast stopped is acknowledged and dropped.
+		failed.frame("F2");
+		await clearing;
+		expect(failed.running()).toBe(false);
+		expect(screen.viewers).toBe(1);
+		failed.frame("F3");
+		expect(failed.sent.filter((call) => call.method === "Page.screencastFrameAck")).toHaveLength(3);
+		await sleep(400);
+		expect(seen.map(named)).toEqual(["F0"]);
+		// A viewer who starts watching between browsers gets no stale frame; clearing again changes nothing.
+		const late: LiveFrame[] = [];
+		screen.watch((frame) => late.push(frame), "low");
+		await screen.clear();
+		expect(late).toEqual([]);
+		expect(failed.started()).toHaveLength(1);
+
+		await screen.show(next.tab);
+		expect(next.running()).toBe(true);
+		next.frame("N0");
+		expect(late.map(named)).toEqual(["N0"]);
+		expect(late[0]?.url).toBe("https://kit.example/next");
+		await screen.close();
+		expect(next.running()).toBe(false);
+	});
+
+	test("a still tab's first-frame screenshot that comes after the screen was cleared is dropped", async () => {
+		const screen = new LiveScreen();
+		const still = fakeTab();
+		const send = still.tab.session.send.bind(still.tab.session);
+		(still.tab.session as unknown as { send: typeof send }).send = (async (method: string, params?: Record<string, unknown>) => {
+			await send(method as never, params as never);
+			if (method === "Page.getLayoutMetrics") {
+				// The screen is cleared while the screenshot is taken.
+				void screen.clear();
+				return { cssVisualViewport: { pageX: 0, pageY: 0, clientWidth: 800, clientHeight: 600 } };
+			}
+			if (method === "Page.captureScreenshot") return { data: Buffer.from("STILL").toString("base64") };
+			return {};
+		}) as typeof send;
+		const seen: LiveFrame[] = [];
+		screen.watch((frame) => seen.push(frame), "low");
+		await screen.show(still.tab);
+		await sleep(400);
+		expect(still.sent.some((call) => call.method === "Page.captureScreenshot")).toBe(true);
+		expect(seen).toEqual([]);
+		await screen.close();
+	});
+
 	test("every frame is acknowledged; each viewer gets frames at its own rate, the newest one it skipped once the page stays still, and the newest at once when it starts watching", async () => {
 		const screen = new LiveScreen();
 		const tab = fakeTab();

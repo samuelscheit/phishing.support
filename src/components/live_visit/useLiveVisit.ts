@@ -34,13 +34,17 @@ function parse(data: string): unknown {
  * frames (the one before the shown one is let go), the control state, and
  * whether this viewer drives.
  */
-function useLiveChannel(submissionId: string, live: boolean, quality: ScreenQuality, dispatch: (message: unknown) => void) {
+function useLiveChannel(submissionId: string, live: boolean, clearFrame: boolean, quality: ScreenQuality, dispatch: (message: unknown) => void) {
 	const [channel, setChannel] = useState<LiveChannel>();
 	const [connected, setConnected] = useState(false);
 	const [you, setYou] = useState(false);
 	const [frame, setFrame] = useState<LiveFrame | null>(null);
 	const qualityRef = useRef(quality);
 	qualityRef.current = quality;
+
+	useEffect(() => {
+		if (clearFrame) setFrame(null);
+	}, [clearFrame]);
 
 	useEffect(() => {
 		if (!live) return;
@@ -59,6 +63,7 @@ function useLiveChannel(submissionId: string, live: boolean, quality: ScreenQual
 				},
 				onControl: (control) => {
 					setYou(control.you);
+					if (control.mode === "loading" && control.tabs.length === 0) setFrame(null);
 					dispatch(control);
 				},
 				onConnected: setConnected,
@@ -77,7 +82,7 @@ function useLiveChannel(submissionId: string, live: boolean, quality: ScreenQual
 	}, [submissionId, live, dispatch]);
 
 	useEffect(() => channel?.setQuality(quality), [channel, quality]);
-	return { channel, connected, you, frame };
+	return { channel, connected, you, frame: clearFrame ? null : frame };
 }
 
 /**
@@ -96,7 +101,9 @@ export function useLiveVisit(submissionId: string, enabled: boolean) {
 		return () => source.close();
 	}, [submissionId, enabled]);
 	const live = enabled && isLive(events);
-	const { channel, connected, you, frame } = useLiveChannel(submissionId, live, quality, dispatch);
+	// When the server clears the loading tab between exits, drop the failed exit's stale frame at once.
+	const clearFrame = events.control?.mode === "loading" && events.control.tabs.length === 0;
+	const { channel, connected, you, frame } = useLiveChannel(submissionId, live, clearFrame, quality, dispatch);
 	return { submissionId, ...events, live, frame, you, channel, connected, setQuality } satisfies LiveVisit;
 }
 

@@ -59,6 +59,8 @@ function controlFor(state: string): LiveControl {
 	];
 	const human = { controller: state === "other" ? "Viewer 7f3e" : ME, until: new Date(now + 9 * 60_000).toISOString(), idleUntil: new Date(now + 42_000).toISOString() };
 	switch (state) {
+		case "loading":
+			return { run: "fixture", seq: 1, mode: "loading", status: "Residential exit failed (timeout), loading via Tor exit…", tabs: tabs.slice(0, 1), fakeValues: {}, agentRunning: false };
 		case "pausing":
 			return { run: "fixture", seq: 1, mode: "pausing", controller: ME, tabs, fakeValues: FAKE_VALUES, agentRunning: true };
 		case "you":
