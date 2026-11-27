@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { operatorHandler, parseId } from "@/lib/referral/http";
+import { operatorHandler, parseId } from "@/lib/http/operator_handler";
 import { approveDraftedMail, discardDraftedMail, saveDraftedMail } from "@/lib/abuse/approval/drafted_mail";
 import { setReferralCaseReference } from "@/lib/referral/service";
 

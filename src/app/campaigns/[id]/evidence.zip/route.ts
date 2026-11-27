@@ -1,7 +1,7 @@
 import { CampaignRepository } from "@/lib/campaign/repository";
 import { dossierArchive } from "@/lib/referral/archive";
 import { buildReferralDossier } from "@/lib/referral/dossier";
-import { zipResponse } from "@/lib/referral/http";
+import { zipResponse } from "@/lib/http/operator_handler";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

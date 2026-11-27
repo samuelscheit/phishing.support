@@ -1,29 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Check, Download, FileText, Gavel, Inbox, Mail, Send, ShieldCheck, Trash2 } from "lucide-react";
+import { Download, FileText, Gavel, Inbox, Mail, ShieldCheck } from "lucide-react";
 
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-	AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { formatUtcDateTime } from "@/lib/util/date_time";
 import type { CampaignOverview, ReferralMailView } from "@/lib/referral/overview";
 import { cn } from "@/lib/util/cn";
-import { postJson } from "@/lib/http/client";
+import { DraftEditor, ErrorLine, useOperatorAction } from "../../DraftedMail";
 
 const KIND_LABEL: Record<string, string> = {
 	complaint: "Criminal complaint",
@@ -58,29 +45,8 @@ function statusClass(status: string): string {
 	return "border-slate-200 bg-slate-50 text-slate-700";
 }
 
-function useAction() {
-	const router = useRouter();
-	const [busy, setBusy] = useState(false);
-	const [error, setError] = useState<string>();
-	const run = async (url: string, body: unknown) => {
-		setBusy(true);
-		setError(undefined);
-		const result = await postJson(url, body);
-		const failure = result.ok ? undefined : result.error;
-		setBusy(false);
-		if (failure) setError(failure);
-		else router.refresh();
-		return !failure;
-	};
-	return { busy, error, run };
-}
-
-function ErrorLine({ error }: { error?: string }) {
-	return error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null;
-}
-
 function AuthorityCard({ authority, campaignId }: { authority: CampaignOverview["authorities"][number]; campaignId: string }) {
-	const { busy, error, run } = useAction();
+	const { busy, error, run } = useOperatorAction();
 	const action = authority.hasComplaint ? "supplement" : "complaint";
 	const disabled = busy || authority.hasDraftAwaitingApproval || (authority.hasComplaint && authority.unreportedSiteCount === 0);
 	return (
@@ -107,53 +73,6 @@ function AuthorityCard({ authority, campaignId }: { authority: CampaignOverview[
 	);
 }
 
-function DraftEditor({ mail, reportId }: { mail: ReferralMailView; reportId?: string }) {
-	const { busy, error, run } = useAction();
-	const [subject, setSubject] = useState(mail.subject ?? "");
-	const [body, setBody] = useState(mail.body ?? "");
-	const changed = subject !== mail.subject || body !== mail.body;
-	const url = `/api/operator/drafted-mails/${mail.routeId}`;
-	return (
-		<div className="space-y-3">
-			<label className="block space-y-1">
-				<span className="text-xs font-medium text-muted-foreground">Subject</span>
-				<Input value={subject} onChange={(event) => setSubject(event.target.value)} maxLength={400} />
-			</label>
-			<label className="block space-y-1">
-				<span className="text-xs font-medium text-muted-foreground">Text</span>
-				<Textarea value={body} onChange={(event) => setBody(event.target.value)} rows={22} className="font-mono text-xs leading-relaxed" />
-			</label>
-			<Attachments mail={mail} reportId={reportId} />
-			<div className="flex flex-wrap items-center gap-2">
-				<AlertDialog>
-					<AlertDialogTrigger asChild>
-						<Button size="sm" disabled={busy}><Send />Approve and send</Button>
-					</AlertDialogTrigger>
-					<AlertDialogContent>
-						<AlertDialogHeader>
-							<AlertDialogTitle>Send this mail?</AlertDialogTitle>
-							<AlertDialogDescription>
-								It goes to {mail.recipientLabel} ({mail.recipient}) exactly as written, signed with your name. A sent mail cannot be recalled.
-							</AlertDialogDescription>
-						</AlertDialogHeader>
-						<AlertDialogFooter>
-							<AlertDialogCancel>Cancel</AlertDialogCancel>
-							<AlertDialogAction onClick={() => run(url, { action: "approve", subject, body })}>Send</AlertDialogAction>
-						</AlertDialogFooter>
-					</AlertDialogContent>
-				</AlertDialog>
-				<Button size="sm" variant="outline" disabled={busy || !changed} onClick={() => run(url, { action: "save", subject, body })}>
-					<Check />Save draft
-				</Button>
-				<Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" disabled={busy} onClick={() => run(url, { action: "discard" })}>
-					<Trash2 />Discard
-				</Button>
-			</div>
-			<ErrorLine error={error} />
-		</div>
-	);
-}
-
 function Attachments({ mail, reportId }: { mail: ReferralMailView; reportId?: string }) {
 	if (!mail.attachments.length || !reportId) return null;
 	return (
@@ -169,7 +88,7 @@ function Attachments({ mail, reportId }: { mail: ReferralMailView; reportId?: st
 }
 
 function CaseReferenceEditor({ mail }: { mail: ReferralMailView }) {
-	const { busy, error, run } = useAction();
+	const { busy, error, run } = useOperatorAction();
 	const [value, setValue] = useState(mail.caseReference ?? "");
 	const url = `/api/operator/drafted-mails/${mail.routeId}`;
 	return (
@@ -210,7 +129,7 @@ function MailCard({ mail, reportId }: { mail: ReferralMailView; reportId?: strin
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="space-y-4">
-				{awaiting ? <DraftEditor mail={mail} reportId={reportId} /> : (
+				{awaiting ? <DraftEditor mail={mail}><Attachments mail={mail} reportId={reportId} /></DraftEditor> : (
 					<>
 						{mail.body && (
 							<details className="rounded-md border bg-muted/30">
@@ -239,7 +158,7 @@ function MailCard({ mail, reportId }: { mail: ReferralMailView; reportId?: strin
 
 export function CampaignPageClient({ overview }: { overview: CampaignOverview }) {
 	const { dossier } = overview;
-	const preservation = useAction();
+	const preservation = useOperatorAction();
 	const linking = overview.indicators.filter((indicator) => indicator.links);
 	const servers = overview.indicators.filter((indicator) => indicator.kind === "origin_ip");
 	return (

@@ -23,8 +23,8 @@ import {
 	settleCorrelatedEmailBounce,
 	settleEmailDelivery,
 } from "./persistence/email_delivery";
-import { appendEvent, listEvents } from "./persistence/events";
-import { approveDraftedRoute, getCampaignReport, saveApprovalDraft, setCaseReference } from "./persistence/approvals";
+import { appendEvent, getEvent, listEvents, listEventsOfType } from "./persistence/events";
+import { approveDraftedRoute, getCampaignReport, listRoutesAwaitingApproval, saveApprovalDraft, setCaseReference } from "./persistence/approvals";
 import {
 	claimNextJob,
 	completeJob,
@@ -200,11 +200,14 @@ export const AbuseRepository = {
 	getInboundMailByMessageId,
 	setMailClassification,
 	listEvents,
+	listEventsOfType,
+	getEvent,
 	appendEvent,
 	recomputeReportStatus,
 	getPublicStatus,
 	saveApprovalDraft,
 	approveDraftedRoute,
+	listRoutesAwaitingApproval,
 	setCaseReference,
 	getCampaignReport,
 };

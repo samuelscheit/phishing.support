@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { operatorHandler, parseId } from "@/lib/referral/http";
+import { operatorHandler, parseId } from "@/lib/http/operator_handler";
 import { prepareComplaint, preparePreservationNotices, prepareSupplement } from "@/lib/referral/service";
 
 export const runtime = "nodejs";

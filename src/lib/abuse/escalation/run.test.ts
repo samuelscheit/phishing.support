@@ -2,21 +2,16 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 
 import { getDb } from "../../db";
-import { ArtifactsEntity } from "../../db/entities/artifacts";
-import { SubmissionsEntity } from "../../db/entities/submissions";
 import { generateId } from "../../db/ids";
 import { useTemporaryDatabase } from "../../db/test_helpers";
-import { recordSiteCheck } from "../../liveness/repository";
-import { DAY_MS } from "../../util/date_time";
-import { templatePage } from "../../website/test_mhtml";
 import { approveDraftedMail } from "../approval/drafted_mail";
-import { validateAbuseReportRequest } from "../contracts";
 import { approvalDraftOf } from "../persistence/approvals";
 import { AbuseRepository } from "../repository";
 import { routeContact } from "../resolver/contact_chain";
-import { abuseEvents, abuseJobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, type AbuseProviderRoute } from "../schema";
+import { abuseEvents, abuseJobs, abuseMailMessages, type AbuseProviderRoute } from "../schema";
 import type { sendAbuseEmailRoute } from "../mail/send";
-import { ESCALATION_EVENT, ESCALATION_HELD_EVENT, escalationJobKey, runEscalation, type EscalationDependencies } from "./run";
+import { ESCALATION_EVENT, ESCALATION_HELD_EVENT, escalationJobKey, type EscalationDependencies } from "./run";
+import { day, DOMAIN, relay, reported, SENT, site, URL_, work } from "./run.fixtures";
 
 useTemporaryDatabase();
 
@@ -27,93 +22,9 @@ afterAll(() => {
 	else process.env.ABUSE_TRACKING_TOKEN_SECRET = originalSecret;
 });
 
-const DOMAIN = "paypal-verify-account.com";
-const URL_ = `https://${DOMAIN}/signin`;
-const SENT = new Date("2026-11-20T10:00:00Z");
-const day = (days: number) => new Date(SENT.getTime() + days * DAY_MS);
-const KIT = (token: string) => `<html><body><input type="hidden" name="t" value="${token}">${templatePage(10, (card) => `Confirm your PayPal account ${card} `.repeat(4))}</body></html>`;
-
-/** The site as checks see it: up and serving the kit, or gone. */
-function site(state: "kit" | "gone" | "decoy"): NonNullable<EscalationDependencies["verify"]>["site"] {
-	return {
-		dns: {
-			resolve4: async () => {
-				if (state === "gone") throw Object.assign(new Error("ENOTFOUND"), { code: "ENOTFOUND" });
-				return ["203.0.113.10"];
-			},
-			resolve6: async () => { throw Object.assign(new Error("ENODATA"), { code: state === "gone" ? "ENOTFOUND" : "ENODATA" }); },
-			resolveCname: async () => { throw Object.assign(new Error("ENOTFOUND"), { code: "ENOTFOUND" }); },
-		},
-		rdap: { rdapLocator: async () => undefined },
-		assertPublicHost: async () => undefined,
-		now: () => new Date(),
-		fetch: async () => new Response(state === "decoy" ? `<html><body>${templatePage(4, () => "bakery", () => "b")}</body></html>` : KIT("now"), { headers: { "content-type": "text/html" } }),
-	};
-}
-
-/** A mail relay that records every message as the real one does. */
-function relay() {
-	const sent: Array<Parameters<typeof sendAbuseEmailRoute>[0]> = [];
-	const send = (async (params) => {
-		sent.push(params);
-		const messageId = await AbuseRepository.createOutboundMail({
-			reportId: params.reportId, routeId: params.routeId, runId: params.runId, fromAddress: "support@phishing.support", toAddresses: [params.recipient], subject: params.subject, textBody: params.body,
-			messageId: `<esc-${sent.length}@phishing.support>`, replyAddress: `abuse-esc${sent.length}@reply.phishing.support`, correlationKey: params.correlationKey, rawArtifactId: null as never, attachmentArtifactIds: [],
-		});
-		await AbuseRepository.settleOutboundMail({ messageId, status: "sent" });
-		return { messageId, status: "sent", rfcMessageId: `<esc-${sent.length}@phishing.support>` };
-	}) as typeof sendAbuseEmailRoute;
-	return { sent, send };
-}
-
-/**
- * A phishing site impersonating PayPal, reported on SENT to its host by mail
- * (with the host's parent network and upstream transit provider as fallback
- * contacts) and to its registrar through the registrar's form. Neither acted.
- */
-async function reported() {
-	const db = await getDb();
-	const submissionId = generateId();
-	const hops = [{ index: 0, url: URL_, hostname: DOMAIN, status: 200, contentCaptured: true, bodyCaptured: true }];
-	await SubmissionsEntity.create({ id: submissionId, kind: "website", dedupeKey: `esc-${submissionId}`, status: "reported", data: { kind: "website", website: { url: URL_, routes: [{ hops, siteAssessments: [{ finding: "phishing", phishingBasis: "credential_form", hopIndex: 0, judgedHopIndex: 0 }] as never }] } } });
-	await ArtifactsEntity.saveBuffer({ submissionId, name: "chain-hop-0.html", kind: "website_hop_body", buffer: Buffer.from(KIT("at-report")) });
-	const request = await validateAbuseReportRequest({ targets: [DOMAIN], allegationCategory: "phishing", description: "PayPal credential phishing.", legalBrandUrl: "https://www.paypal.com/", observedUrls: [{ target: DOMAIN, urls: [URL_] }] });
-	const { reportId } = await AbuseRepository.createReport({ request, submissionId, reporter: {} });
-	db.delete(abuseJobs).where(eq(abuseJobs.reportId, reportId)).run();
-	const [target] = await AbuseRepository.listTargets(reportId);
-	await AbuseRepository.setTargetResolution({ targetId: target!.id, status: "resolved", resolverSnapshot: {} });
-	const route = (params: { key: string; name: string; type: "email" | "provider_submission"; email?: string; provenance: Record<string, unknown> }) => {
-		const id = generateId();
-		db.insert(abuseProviderRoutes).values({ id, reportId, targetId: target!.id, routeKey: `${params.key}:${id}`, providerRegistryKey: params.key, providerDisplayName: params.name, routeType: params.type, verifiedEmail: params.email ?? null, resolverProvenance: params.provenance, resolutionSnapshot: {}, status: params.type === "email" ? "awaiting_provider_reply" : "submitted", createdAt: SENT, updatedAt: SENT }).run();
-		db.insert(abuseProviderRuns).values({ id: generateId(), reportId, routeId: id, providerPayload: {}, payloadHash: String(id), correlationKey: `run:${id}`, attemptCount: 1, executionStatus: params.type === "email" ? "delivered" : "completed", confirmationId: params.type === "email" ? null : "NS-4471", createdAt: SENT, updatedAt: SENT }).run();
-		db.insert(abuseEvents).values({ id: generateId(), reportId, routeId: id, eventType: "route.status_changed", data: { to: params.type === "email" ? "awaiting_provider_reply" : "submitted" }, createdAt: SENT }).run();
-		return id;
-	};
-	const host = route({
-		key: "email", name: "Example Hosting B.V.", type: "email", email: "abuse@hosting.example",
-		provenance: { source: "ip_rdap", email: "abuse@hosting.example", fallbackContacts: [
-			{ email: "noc@transit.example", source: "upstream_asn_rdap", organization: "Transit Carrier", transit: { upstreamAsn: 174, customerAsn: 64500, customerOrganization: "Example Hosting B.V." } },
-			{ email: "abuse@parent-net.example", source: "ip_rdap", organization: "Parent Net" },
-		] },
-	});
-	db.insert(abuseMailMessages).values({ id: generateId(), reportId, routeId: host, direction: "outbound", kind: "report", status: "sent", fromAddress: "support@phishing.support", toAddresses: ["abuse@hosting.example"], subject: `[Phishing Support] Abuse report for ${DOMAIN}`, textBody: "report", replyAddress: "abuse-r1@reply.phishing.support", messageId: "<report-1@phishing.support>", correlationKey: `email-run:${host}`, occurredAt: SENT }).run();
-	const registrar = route({ key: "namesilo", name: "NameSilo Phishing Report", type: "provider_submission", provenance: { source: "registrar_rdap" } });
-	await recordSiteCheck({ reportId, targetId: target!.id }, { url: URL_, state: "online", detail: "HTTP 200.", httpStatus: 200, finalUrl: URL_, resolvedAddresses: ["203.0.113.10"], hosting: { addresses: [{ ip: "203.0.113.10", asn: 64500, holder: "EXAMPLE-HOSTING" }] }, domainStatuses: [], pageFingerprints: null, checkedAt: day(1) });
-	return { reportId, targetId: target!.id, host, registrar };
-}
-
 const steps = async (reportId: bigint) => (await AbuseRepository.listEvents(reportId)).filter((event) => event.eventType === ESCALATION_EVENT).map((event) => `${(event.data as { step: string }).step}${event.routeId ? `@${event.routeId}` : ""}:${(event.data as { action: string }).action}`);
 const queued = async (targetId: bigint) => (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.dedupeKey, escalationJobKey(targetId))).all().filter((job) => job.status === "queued").map((job) => job.nextAttemptAt);
 const routes = async (reportId: bigint): Promise<AbuseProviderRoute[]> => AbuseRepository.listRoutes(reportId);
-
-/** Run the target's escalation as the worker does: its queued job, if any, runs and is completed. */
-async function work(targetId: bigint, dependencies: EscalationDependencies): Promise<void> {
-	const db = await getDb();
-	const job = db.select().from(abuseJobs).where(eq(abuseJobs.dedupeKey, escalationJobKey(targetId))).all().find((candidate) => candidate.status === "queued");
-	if (job) db.update(abuseJobs).set({ status: "running" }).where(eq(abuseJobs.id, job.id)).run();
-	await runEscalation({ targetId, ...(job ? { jobId: job.id } : {}) }, dependencies);
-	if (job) db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.id, job.id)).run();
-}
 
 describe("escalating a report nobody acts on", () => {
 	test("climbs the whole ladder while the site serves the reported page, each step once", async () => {
@@ -172,8 +83,9 @@ describe("escalating a report nobody acts on", () => {
 		expect(dsa.subject).toContain("Article 16 Regulation (EU) 2022/2065");
 		expect(dsa.body).toContain("2. Exact location (Art. 16(2)(b)): https://paypal-verify-account.com/signin, served from 203.0.113.10 (AS64500 EXAMPLE-HOSTING)");
 		const cert = approvalDraftOf(drafts.find((route) => route.providerRegistryKey === "escalation:cert")!)!;
-		expect(cert.body).toContain("- Example Hosting B.V. (host, abuse@hosting.example): reported 20 Nov 2026 10:00 UTC; no action so far.");
-		expect(cert.body).toContain("- NameSilo (registrar): reported 20 Nov 2026 10:00 UTC, reference NS-4471; no action so far.");
+		expect(cert.body).toContain("served from a network registered in NL");
+		expect(cert.body).toContain("- Example Hosting B.V. (host, abuse@hosting.example): reported 20 Nov 2026 10:00 UTC; we have received no confirmation of action.");
+		expect(cert.body).toContain("- NameSilo (registrar): reported 20 Nov 2026 10:00 UTC, reference NS-4471; we have received no confirmation of action.");
 		expect((oversight.data as { manual: Array<{ text: string }> }).manual[0]!.text).toContain("RAA §3.18.1");
 		// Nothing goes out before the operator approves it.
 		expect(sent).toHaveLength(1);
@@ -188,6 +100,20 @@ describe("escalating a report nobody acts on", () => {
 		// A retried job takes no step twice and sends nothing again.
 		await work(targetId, dependencies(day(7)));
 		expect(sent).toHaveLength(1);
+
+		// The operator sees the drafts still waiting and the steps only a person can take, and settles each once.
+		const { listDraftedMails } = await import("../approval/drafted_mail");
+		expect((await listDraftedMails()).filter((mail) => mail.target === DOMAIN).map((mail) => `${mail.kind} ${mail.recipient}`).sort()).toEqual(["brand phishing@paypal.com", "dsa_notice abuse@hosting.example"]);
+		const { openEscalationSteps, resolveEscalationStep } = await import("./manual");
+		const open = (await openEscalationSteps()).filter((step) => step.reportId === reportId.toString());
+		expect(open.map((step) => step.kind)).toEqual(["icann_complaint", "decision"]);
+		expect(open[0]).toMatchObject({ registrar: "NameSilo", target: DOMAIN, formUrl: "https://www.icann.org/compliance/complaint", caseHref: expect.stringMatching(/^\/submissions\/\d+$/) });
+		await resolveEscalationStep(BigInt(open[0]!.eventId), "filed");
+		await expect(resolveEscalationStep(BigInt(open[0]!.eventId), "dismissed")).rejects.toThrow("settled already");
+		expect((await openEscalationSteps()).filter((step) => step.reportId === reportId.toString()).map((step) => step.kind)).toEqual(["decision"]);
+		// Only an escalation step can be settled this way.
+		const followUp = (await AbuseRepository.listEvents(reportId)).find((event) => event.eventType === ESCALATION_EVENT && (event.data as { step: string }).step === "follow_up")!;
+		await expect(resolveEscalationStep(followUp.id, "filed")).rejects.toThrow("not an escalation step waiting for you");
 	});
 
 	test("a site taken down holds the ladder; a page that cannot be confirmed is looked at again a day later", async () => {
@@ -197,8 +123,9 @@ describe("escalating a report nobody acts on", () => {
 		expect(await steps(reportId)).toEqual([]);
 		expect(sent).toEqual([]);
 		const held = (await AbuseRepository.listEvents(reportId)).filter((event) => event.eventType === ESCALATION_HELD_EVENT);
-		expect(held.map((event) => event.data)).toEqual([{ verdict: "gone", tier: "check", checkedAt: expect.any(String), due: ["follow_up", "follow_up"] }]);
-		expect(await queued(targetId)).toEqual([]);
+		expect(held.map((event) => event.data)).toEqual([{ at: day(2).toISOString(), verdict: "gone", tier: "check", checkedAt: expect.any(String), due: ["follow_up", "follow_up"] }]);
+		// Looked at again a day later, while the month lasts.
+		expect(await queued(targetId)).toEqual([day(3)]);
 
 		// A browser service failure is not the site's: the job fails and the worker retries it.
 		await expect(work(targetId, { verify: { site: site("decoy"), isShared: async () => false, capture: async () => { throw new Error("Browser Fabric session ended"); } }, send, now: () => day(2) })).rejects.toThrow("Browser Fabric session ended");
@@ -208,6 +135,81 @@ describe("escalating a report nobody acts on", () => {
 		await work(targetId, { verify: { site: site("decoy"), isShared: async () => false, capture: failing }, send, now: () => day(2) });
 		expect(await queued(targetId)).toEqual([day(3)]);
 		expect(sent).toEqual([]);
+	});
+
+	test("liveness checks do not pull a held ladder forward: a week after a harmless page, a day after an unconfirmed one", async () => {
+		const { reportId, targetId } = await reported();
+		const { scheduleEscalation } = await import("./run");
+		await work(targetId, { verify: { site: site("decoy"), isShared: async () => false, capture: async ({ url }) => ({ requestedUrl: url, url, hostname: DOMAIN, navigationHops: [{ index: 0, url, hostname: DOMAIN, status: 200, contentCaptured: true }], archivedAt: day(2), mhtml: Buffer.from(""), html: Buffer.from("<p>bakery</p>"), text: Buffer.from("bakery") }), classify: async () => ({ finding: "insufficient_evidence", reason: "a bakery" }) }, now: () => day(2) });
+		expect((await AbuseRepository.listEvents(reportId)).filter((event) => event.eventType === ESCALATION_HELD_EVENT).map((event) => (event.data as { verdict: string }).verdict)).toEqual(["not_malicious"]);
+		// Every later liveness check asks again: the ladder stays held for the week.
+		for (const at of [day(2.5), day(3), day(6)]) await scheduleEscalation({ reportId, targetId }, at);
+		expect(await queued(targetId)).toEqual([day(9)]);
+	});
+
+	test("a site that moved is not escalated to the hosting it left; the registrar still is", async () => {
+		const { reportId, targetId, host, registrar } = await reported();
+		await AbuseRepository.appendEvent({ reportId, targetId, eventType: "site.host_moved", data: {
+			key: `${targetId}->AS64999`, targetId: targetId.toString(), at: day(1).toISOString(), since: SENT.toISOString(), kind: "new_network",
+			from: { name: "EXAMPLE-HOSTING", asn: 64500, addresses: ["203.0.113.10"] }, to: { name: "OTHER-NET", asn: 64999, addresses: ["198.51.100.7"] },
+			content: "served", evidence: { url: URL_, state: "online", httpStatus: 200, kitFiles: [] },
+		} });
+		const { sent, send } = relay();
+		const dependencies = (at: Date): EscalationDependencies => ({ verify: { site: site("kit"), isShared: async () => false }, send, providerFor: () => undefined, countryOf: async () => "NL", now: () => at });
+		await work(targetId, dependencies(day(2)));
+		expect(await steps(reportId)).toEqual([`follow_up@${host}:site_moved`, `follow_up@${registrar}:no_channel`]);
+		expect(sent).toEqual([]);
+		for (const at of [day(4), day(5), day(7)]) await work(targetId, dependencies(at));
+		// No DSA notice to the old host, and it is not named as the host that failed to act.
+		const drafts = (await routes(reportId)).filter((route) => route.status === "awaiting_approval");
+		expect(drafts.map((route) => route.providerRegistryKey).sort()).toEqual(["escalation:brand", "escalation:cert"]);
+		expect(approvalDraftOf(drafts[0]!)!.body).not.toContain("Example Hosting");
+		expect((await routes(reportId)).some((route) => route.verifiedEmail === "abuse@parent-net.example")).toBe(false);
+	});
+
+	test("a report that bounced was never received: that route does not climb", async () => {
+		const { reportId, targetId, host, registrar } = await reported();
+		(await getDb()).insert(abuseMailMessages).values({ id: generateId(), reportId, routeId: host, direction: "inbound", kind: "bounce", status: "received", fromAddress: "MAILER-DAEMON@hosting.example", toAddresses: [], subject: "Undeliverable", textBody: "550 5.1.1 mailbox unavailable", occurredAt: day(0.1) }).run();
+		const { sent, send } = relay();
+		await work(targetId, { verify: { site: site("kit"), isShared: async () => false }, send, providerFor: () => undefined, now: () => day(2) });
+		expect(await steps(reportId)).toEqual([`follow_up@${registrar}:no_channel`]);
+		expect(sent).toEqual([]);
+	});
+
+	test("a follow-up that may have gone out is taken, never sent again", async () => {
+		const { reportId, targetId, host, registrar } = await reported();
+		const unknown = (async () => ({ messageId: 0n, status: "unknown_external_state", error: "SMTP connection dropped after DATA" })) as unknown as typeof sendAbuseEmailRoute;
+		await work(targetId, { verify: { site: site("kit"), isShared: async () => false }, send: unknown, providerFor: () => undefined, now: () => day(2) });
+		expect(await steps(reportId)).toEqual([`follow_up@${host}:unknown`, `follow_up@${registrar}:no_channel`]);
+		const { sent, send } = relay();
+		await work(targetId, { verify: { site: site("kit"), isShared: async () => false }, send, providerFor: () => undefined, now: () => day(2) });
+		expect(sent).toEqual([]);
+	});
+
+	test("a step that fails leaves the other providers' steps taken, and only it is retried", async () => {
+		const { reportId, targetId, host, registrar } = await reported();
+		const refusing = (async () => { throw new Error("SMTP relay unreachable"); }) as unknown as typeof sendAbuseEmailRoute;
+		await expect(work(targetId, { verify: { site: site("kit"), isShared: async () => false }, send: refusing, providerFor: () => undefined, now: () => day(2) })).rejects.toThrow("SMTP relay unreachable");
+		expect(await steps(reportId)).toEqual([`follow_up@${registrar}:no_channel`]);
+		const { sent, send } = relay();
+		await work(targetId, { verify: { site: site("kit"), isShared: async () => false }, send, providerFor: () => undefined, now: () => day(2) });
+		expect(await steps(reportId)).toEqual([`follow_up@${registrar}:no_channel`, `follow_up@${host}:followed_up`]);
+		expect(sent).toHaveLength(1);
+	});
+
+	test("a step that created its contact but was not recorded does not report a further contact when it runs again", async () => {
+		const { reportId, targetId, host } = await reported();
+		const { send } = relay();
+		const dependencies = (at: Date): EscalationDependencies => ({ verify: { site: site("kit"), isShared: async () => false }, send, providerFor: () => undefined, now: () => at });
+		await work(targetId, dependencies(day(2)));
+		await work(targetId, dependencies(day(4)));
+		const recorded = (await AbuseRepository.listEvents(reportId)).find((event) => event.routeId === host && (event.data as { step: string }).step === "next_contact")!;
+		// As if the worker died right after creating the route.
+		(await getDb()).delete(abuseEvents).where(eq(abuseEvents.id, recorded.id)).run();
+		await work(targetId, dependencies(day(4)));
+		const created = (await routes(reportId)).filter((route) => routeContact(route.resolverProvenance).escalation);
+		expect(created.map((route) => route.verifiedEmail)).toEqual(["abuse@parent-net.example"]);
+		expect((await steps(reportId)).filter((step) => step.startsWith(`next_contact@${host}`))).toEqual([`next_contact@${host}:reported`]);
 	});
 
 	test("a provider that acted leaves the ladder: only the others climb", async () => {

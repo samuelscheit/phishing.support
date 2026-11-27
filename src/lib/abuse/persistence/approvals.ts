@@ -29,6 +29,12 @@ export function approvalDraftOf(route: Pick<AbuseProviderRoute, "resolutionSnaps
 	};
 }
 
+/** Every route that waits for the operator's approval, oldest first. */
+export async function listRoutesAwaitingApproval(): Promise<AbuseProviderRoute[]> {
+	const db = await getDb();
+	return db.select().from(abuseProviderRoutes).where(eq(abuseProviderRoutes.status, "awaiting_approval")).orderBy(asc(abuseProviderRoutes.createdAt)).all();
+}
+
 /** Replace the draft of a mail that still waits for approval; a sent or discarded mail never changes. */
 export async function saveApprovalDraft(routeId: bigint, draft: ApprovalDraft): Promise<boolean> {
 	const db = await getDb();

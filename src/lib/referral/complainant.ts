@@ -3,6 +3,8 @@
  * An authority gives a file number and answers only a named complainant, so
  * every referral is signed by this person; nothing is sent without it.
  */
+import { OperatorActionError } from "../abuse/approval/drafted_mail";
+
 export type Complainant = {
 	name: string;
 	/** Postal address lines, as written under the signature. */
@@ -10,7 +12,7 @@ export type Complainant = {
 	phone?: string;
 };
 
-export class ComplainantNotConfiguredError extends Error {
+export class ComplainantNotConfiguredError extends OperatorActionError {
 	constructor() {
 		super("REFERRAL_COMPLAINANT_NAME and REFERRAL_COMPLAINANT_ADDRESS must be set before a criminal referral can be drafted.");
 		this.name = "ComplainantNotConfiguredError";

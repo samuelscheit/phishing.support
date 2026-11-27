@@ -37,9 +37,12 @@ export const NATIONAL_CERTS: Readonly<Record<string, Recipient>> = {
 	VN: { name: "VNCERT/CC", email: "ir@vncert.vn", source: "https://www.apcert.org/about/structure/members.html" },
 };
 
-/** Phishing mailboxes brands publish on their own pages, by the brand's registrable domain. */
+/**
+ * Phishing mailboxes brands publish on their own pages for fake sites too,
+ * by the brand's registrable domain. A mailbox only for spoofed email
+ * (Amazon's stop-spoofing@) is not one.
+ */
 export const BRAND_PHISHING_MAILBOXES: Readonly<Record<string, Recipient>> = {
-	"amazon.com": { name: "Amazon", email: "stop-spoofing@amazon.com", source: "https://aws.amazon.com/security/report-suspicious-emails/" },
 	"apple.com": { name: "Apple", email: "reportphishing@apple.com", source: "https://support.apple.com/en-us/102568" },
 	"dhl.com": { name: "DHL", email: "phishing@dhl.com", source: "https://www.dhl.com/global-en/home/footer/fraud-awareness.html" },
 	"netflix.com": { name: "Netflix", email: "phishing@netflix.com", source: "https://help.netflix.com/en/node/65674" },

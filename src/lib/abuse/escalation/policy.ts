@@ -35,14 +35,14 @@ const ROUTE_STEPS: ReadonlySet<EscalationStepName> = new Set(["follow_up", "next
 /** The roles that can take the site down; blocklists, platforms and authorities are not escalated. */
 const ESCALATED_ROLES: ReadonlySet<ProviderRole> = new Set(["host", "registrar", "cdn"]);
 
-/** After this long since the first report, a site whose content could not be confirmed is no longer escalated. */
+/** After this long since the first report, nothing is escalated any more: a step held back that long is stale. */
 export const ESCALATION_WINDOW_MS = 30 * DAY_MS;
 
 /** What the ladder reads of one route of the reported site. */
 export type EscalationRoute = {
 	routeId: bigint;
 	role: ProviderRole;
-	/** When its report reached the provider; undefined while it has not. */
+	/** When its report reached the provider; undefined while it has not, or when it bounced or was never filed. */
 	sentAt?: Date;
 	/** The provider's latest decision on it. */
 	decision?: "action_taken" | "no_threat" | "declined" | "received";
@@ -92,8 +92,10 @@ export function pendingEscalationSteps(routes: readonly EscalationRoute[], taken
 	return steps.filter((step) => !taken.has(stepKey(step))).sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime() || a.level - b.level);
 }
 
-/** The steps due at `now`, and when the next one falls due. */
+/** The steps due at `now`, and when the next one falls due; none once the window since the first report closed. */
 export function escalationPlan(routes: readonly EscalationRoute[], taken: TakenSteps, now: Date): { due: EscalationStep[]; nextAt?: Date } {
+	const sent = routes.filter(climbs).map((route) => route.sentAt.getTime());
+	if (!sent.length || now.getTime() > Math.min(...sent) + ESCALATION_WINDOW_MS) return { due: [] };
 	const pending = pendingEscalationSteps(routes, taken);
 	const due = pending.filter((step) => step.dueAt.getTime() <= now.getTime());
 	const later = pending.find((step) => step.dueAt.getTime() > now.getTime());

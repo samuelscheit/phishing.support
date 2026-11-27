@@ -1,0 +1,22 @@
+import { Card, CardContent } from "@/components/ui/card";
+import { listDraftedMails } from "@/lib/abuse/approval/drafted_mail";
+import { openEscalationSteps } from "@/lib/abuse/escalation/manual";
+import { ApprovalsClient } from "./ApprovalsClient";
+
+export const dynamic = "force-dynamic";
+
+/** Everything that waits on the operator: drafted mails nothing sends on its own, and escalation steps only a person can take. */
+export default async function ApprovalsPage() {
+	const [mails, steps] = await Promise.all([listDraftedMails(), openEscalationSteps()]);
+	return (
+		<div className="space-y-6">
+			<div className="space-y-1">
+				<h1 className="text-2xl font-semibold tracking-tight">Approvals</h1>
+				<p className="text-sm text-muted-foreground">Mails to authorities and oversight bodies wait here until you approve them, and steps only you can take wait until you settle them.</p>
+			</div>
+			{mails.length === 0 && steps.length === 0
+				? <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">Nothing waits for you.</CardContent></Card>
+				: <ApprovalsClient mails={mails} steps={steps} />}
+		</div>
+	);
+}

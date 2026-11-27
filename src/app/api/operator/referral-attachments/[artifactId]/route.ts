@@ -1,6 +1,6 @@
 import { artifactResponse } from "@/lib/http/artifact_response";
 import { AbuseRepository } from "@/lib/abuse/repository";
-import { operatorHandler, parseId } from "@/lib/referral/http";
+import { operatorHandler, parseId } from "@/lib/http/operator_handler";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

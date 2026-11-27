@@ -33,10 +33,15 @@ describe("the escalation ladder", () => {
 		expect(later.nextAt).toEqual(at(5));
 	});
 
+	test("nothing is escalated once a month passed since the first report, however long a step was held back", () => {
+		expect(names(escalationPlan([route(1, "host")], new Set(), at(30)).due)).toEqual(["follow_up@1", "next_contact@1", "upstream@1", "oversight", "exhausted"]);
+		expect(escalationPlan([route(1, "host")], new Set(), at(30, 1))).toEqual({ due: [] });
+	});
+
 	test("a step taken is never due again, and the plan ends with the ladder", () => {
 		const steps = pendingEscalationSteps([route(1, "host")], new Set());
 		const taken = new Set(steps.map(stepKey));
-		expect(escalationPlan([route(1, "host")], taken, at(30))).toEqual({ due: [] });
+		expect(escalationPlan([route(1, "host")], taken, at(29))).toEqual({ due: [] });
 		expect(names(escalationPlan([route(1, "host")], new Set([stepKey({ level: 1, routeId: 1n })]), at(2)).due)).toEqual([]);
 	});
 

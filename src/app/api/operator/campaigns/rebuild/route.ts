@@ -1,5 +1,5 @@
 import { enqueueCampaignSweep } from "@/lib/campaign/sweep";
-import { operatorHandler } from "@/lib/referral/http";
+import { operatorHandler } from "@/lib/http/operator_handler";
 import { utcDate } from "@/lib/util/date_time";
 
 export const runtime = "nodejs";

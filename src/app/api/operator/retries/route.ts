@@ -1,4 +1,4 @@
-import { operatorHandler } from "@/lib/referral/http";
+import { operatorHandler } from "@/lib/http/operator_handler";
 import { listRetryHistory } from "@/lib/submissions/retry_history";
 
 export const runtime = "nodejs";

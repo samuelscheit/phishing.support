@@ -18,8 +18,9 @@ export default async function OperatorLayout({ children }: { children: React.Rea
 	return (
 		<div className="min-h-screen bg-muted/30">
 			<header className="border-b bg-background">
-				<nav className="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3 text-sm">
+				<nav className="mx-auto flex max-w-6xl items-center gap-4 overflow-x-auto whitespace-nowrap px-4 py-3 text-sm sm:gap-6">
 					<Link href="/" className="font-semibold">Phishing Support</Link>
+					<Link href="/operator/approvals" className="text-muted-foreground hover:text-foreground">Approvals</Link>
 					<Link href="/operator/campaigns" className="text-muted-foreground hover:text-foreground">Campaigns</Link>
 					<Link href="/operator/retries" className="text-muted-foreground hover:text-foreground">Retried cases</Link>
 				</nav>

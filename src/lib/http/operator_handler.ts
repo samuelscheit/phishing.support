@@ -1,7 +1,6 @@
-import { isOperatorAuthorization, operatorChallenge } from "../http/operator_auth";
-import { errorText } from "../util/error_text";
-import { ComplainantNotConfiguredError } from "./complainant";
 import { OperatorActionError } from "../abuse/approval/drafted_mail";
+import { errorText } from "../util/error_text";
+import { isOperatorAuthorization, operatorChallenge } from "./operator_auth";
 
 export function parseId(value: string): bigint | undefined {
 	return /^\d{1,20}$/.test(value) ? BigInt(value) : undefined;
@@ -17,7 +16,7 @@ export async function operatorHandler(request: Request, handler: () => Promise<R
 	try {
 		return await handler();
 	} catch (error) {
-		if (error instanceof OperatorActionError || error instanceof ComplainantNotConfiguredError) {
+		if (error instanceof OperatorActionError) {
 			return Response.json({ error: error.message }, { status: 409 });
 		}
 		console.error("Operator action failed:", error);

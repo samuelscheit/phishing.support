@@ -53,9 +53,45 @@ export async function draftMailRoute(params: {
 	return route;
 }
 
-/** A drafted mail still waiting for approval. */
-export function isDraftedMail(route: AbuseProviderRoute): boolean {
-	return route.status === "awaiting_approval" && approvalDraftOf(route) !== undefined;
+/** A drafted mail waiting for approval, as the approvals page shows it. */
+export type DraftedMailView = {
+	routeId: string;
+	/** What the mail is: an escalation's (`cert`, `dsa_notice`, `brand`) or a referral's (`complaint`, `supplement`, `preservation_notice`). */
+	kind: string;
+	recipient: string;
+	recipientLabel: string;
+	subject: string;
+	body: string;
+	target: string;
+	createdAt: string;
+	/** Where the mail's context is: the case of an escalation, the campaign of a referral (with its attachments). */
+	contextHref?: string;
+};
+
+/** Every drafted mail waiting for the operator, oldest first. */
+export async function listDraftedMails(): Promise<DraftedMailView[]> {
+	const views: DraftedMailView[] = [];
+	for (const route of await AbuseRepository.listRoutesAwaitingApproval()) {
+		const draft = approvalDraftOf(route);
+		if (!draft || !route.verifiedEmail) continue;
+		const [report, target] = await Promise.all([AbuseRepository.getReport(route.reportId), AbuseRepository.getTarget(route.targetId)]);
+		if (!report || report.status === "canceled") continue;
+		const snapshot = route.resolutionSnapshot ?? {};
+		const kind = typeof snapshot.escalationKind === "string" ? snapshot.escalationKind : typeof snapshot.referralMailKind === "string" ? snapshot.referralMailKind : "mail";
+		const contextHref = report.campaignId ? `/operator/campaigns/${report.campaignId.toString()}` : report.submissionId ? `/submissions/${report.submissionId.toString()}` : undefined;
+		views.push({
+			routeId: route.id.toString(),
+			kind,
+			recipient: route.verifiedEmail,
+			recipientLabel: draft.recipientLabel,
+			subject: draft.subject,
+			body: draft.body,
+			target: target?.normalizedTarget ?? "",
+			createdAt: route.createdAt.toISOString(),
+			...(contextHref ? { contextHref } : {}),
+		});
+	}
+	return views;
 }
 
 async function requireDraftedMail(routeId: bigint): Promise<AbuseProviderRoute> {

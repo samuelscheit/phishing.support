@@ -14,7 +14,8 @@ import { abuseCaseTag } from "../mail/correlation";
 import { deliveryReport } from "../mail/delivery_report";
 import { caseReferenceCandidates } from "../../referral/case_reference";
 import { queueRelayResend } from "./email";
-import { isAuthorityRoute, isPreservationRoute } from "../../referral/routes";
+import { isAuthorityRoute } from "../../referral/routes";
+import { approvalDraftOf } from "../persistence/approvals";
 import type { AbuseMailMessage, AbuseProviderRoute } from "../schema";
 
 export async function classifyReply(messageId: bigint): Promise<void> {
@@ -35,8 +36,9 @@ export async function classifyReply(messageId: bigint): Promise<void> {
 		await settleDeliveryFailure(message, route);
 		return;
 	}
-	if (isAuthorityRoute(route) || isPreservationRoute(route)) {
-		await classifyReferralReply(message, route);
+	// A mail the operator approved (a referral, a preservation notice, an escalation to an oversight body) is answered to the operator.
+	if (approvalDraftOf(route)) {
+		await classifyApprovedMailReply(message, route);
 		return;
 	}
 	const result = await classifyProviderReply({ text: message.textBody ?? "", from: message.fromAddress ?? undefined });
@@ -144,13 +146,14 @@ async function settleDeliveryFailure(message: AbuseMailMessage, route: AbuseProv
 }
 
 /**
- * A reply to a criminal referral or a preservation notice is read by the
+ * A reply to a mail the operator approved (a criminal referral, a
+ * preservation notice, an escalation to an oversight body) is read by the
  * operator, never acted on by a provider workflow: it is classified for the
  * record and closes the wait. An authority's reply that names exactly one
  * file number of its own sets the route's case reference; several are kept
  * as candidates for the operator to choose from.
  */
-async function classifyReferralReply(message: AbuseMailMessage, route: AbuseProviderRoute): Promise<void> {
+async function classifyApprovedMailReply(message: AbuseMailMessage, route: AbuseProviderRoute): Promise<void> {
 	const text = message.textBody ?? "";
 	const result = await classifyProviderReply({ text, from: message.fromAddress ?? undefined });
 	await AbuseRepository.setMailClassification(message.id, result.classification, result.rationale);
@@ -211,9 +214,11 @@ export async function routeToNextContact(bouncedRouteId: bigint, contacts?: read
 	return routeToContact(bouncedRouteId, {
 		...(contacts ? { contacts } : {}),
 		why: (bounced) => {
-			const earlier = routeContact(bounced.resolverProvenance).bouncedEmails;
+			const contact = routeContact(bounced.resolverProvenance);
+			const earlier = contact.bouncedEmails;
 			const bouncedEmails = [...new Set([...(Array.isArray(earlier) ? earlier.filter((email) => typeof email === "string") : []), ...(bounced.verifiedEmail ? [bounced.verifiedEmail] : [])])];
-			return { reason: "fallback_after_permanent_bounce", bouncedRouteId: bounced.id.toString(), bouncedEmails };
+			// A contact an escalation reached stays one when its mailbox bounces, so it does not climb on its own.
+			return { reason: "fallback_after_permanent_bounce", bouncedRouteId: bounced.id.toString(), bouncedEmails, ...(contact.escalation ? { escalation: contact.escalation } : {}) };
 		},
 	});
 }

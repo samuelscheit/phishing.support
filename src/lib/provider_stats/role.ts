@@ -11,7 +11,8 @@ import type { Organisation } from "./organisation";
  * - `blocklist`: warns browsers and mail filters (Netcraft, Safe Browsing); it removes nothing itself.
  * - `email`: the mail service a phishing message was sent through.
  * - `platform`: a service whose account the scam uses (a chat bot, a webhook).
- * - `authority`: police and prosecutors receiving a criminal complaint.
+ * - `authority`: police and prosecutors receiving a criminal complaint, and
+ *   the oversight an escalation reaches (CERTs, brands, DSA notices).
  * - `other`: a contact whose part is unknown.
  */
 export const providerRoles = ["registrar", "host", "cdn", "blocklist", "email", "platform", "authority", "other"] as const;
@@ -36,6 +37,8 @@ const ROLE_BY_SOURCE: Readonly<Record<string, ProviderRole>> = {
 	funnel_holder_whois: "platform",
 	funnel_platform_vendor: "platform",
 	authority_registry: "authority",
+	// A CERT, a brand or a host notified under the DSA by an escalation the operator approved: oversight, not a provider's own report.
+	escalation_oversight: "authority",
 	campaign_takedown_reports: "authority",
 };
 
