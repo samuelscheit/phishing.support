@@ -1,4 +1,5 @@
-import type { archiveWebsite } from "../archive";
+import type { visitSite } from "../archive/visit_site";
+import type { WebsiteArchiveResult } from "../archive/types";
 import type { BareVisitDependencies } from "../visit/access_gate";
 import type { AnalysisClient } from "../../analysis/run";
 import type { timestampEvidence } from "../../evidence/timestamp";
@@ -10,16 +11,17 @@ import type { VisitDataSent, WebsiteOfferedDownload } from "../types";
 import type { ClipboardWrite } from "../../browser/clipboard";
 import type { PopularDomains } from "../../abuse/origin/popular_domains";
 
-export type WebsiteCapture = Awaited<ReturnType<typeof archiveWebsite>> & { offeredDownload?: WebsiteOfferedDownload; dataSent?: VisitDataSent[]; clipboardWrites?: ClipboardWrite[] };
+export type WebsiteCapture = WebsiteArchiveResult & { offeredDownload?: WebsiteOfferedDownload; dataSent?: VisitDataSent[]; clipboardWrites?: ClipboardWrite[] };
 
 /** Network boundaries of one website analysis; tests replace them. */
 export type WebsiteAnalysisDependencies = {
 	/** The visit job's: aborted, the visit ends at its next step and leaves the case to the job's recovery. */
 	signal?: AbortSignal;
 	getInfo?: typeof getInfo;
-	archiveWebsite?: typeof archiveWebsite;
+	/** The browser visit of the site: loads it, captures its first page and walks on. */
+	visitSite?: typeof visitSite;
 	analysisClient?: AnalysisClient;
-	/** Waits between capture attempts after a browser-service failure. */
+	/** Waits between attempts to load the site after a browser-service failure. */
 	browserBackoffMs?: readonly number[];
 	/** The RFC 3161 authority call that timestamps the evidence manifest. */
 	timestampEvidence?: typeof timestampEvidence;

@@ -1,16 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
 import { createExfiltrationCanaries } from "../exfiltration/canaries";
-import { archiveWebsite } from "../website/archive";
+import { visitSite } from "../website/archive/visit_site";
 import { chromiumAvailable, html, launchTestChromium, ScriptedModel } from "../browser/task/test_helpers";
 import { taskAgentVisit } from "./agent";
 import { closeVisitControl, openVisitControl, viewerLabel, type VisitControl, type VisitControlEvent } from "./control";
 import { describeElementAt, describeFocusedElement } from "./live_input";
 import type { LiveFrame } from "./screen";
 import type { SiteVisitLiveEvent } from "./visit";
+import type { FabricEgress } from "../browser/fabric";
 import { sleep } from "../util/sleep";
 
-const fast = { scriptNavigationSettleMs: 20, renderSettleMs: 800, visitPollMs: 150, visitStepQuietMs: 400 } as const;
+const fast = { renderSettleMs: 800, visitPollMs: 150, visitStepQuietMs: 400 } as const;
 const VIEWER = "viewer-e2e-0000000000";
 
 /** A kit whose sign-in sits at fixed places on the page, so a test can click it like a person would. */
@@ -72,9 +73,8 @@ describe.skipIf(!chromiumAvailable)("a person driving a live visit, in a real br
 			},
 		]);
 		// A budget shorter than the person's turn: it does not run while they drive.
-		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, visitBudgetMs: 4_000, getBrowser: () => launchTestChromium() });
 		try {
-			const visiting = archive.session!.visit({ canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event), control });
+			const visiting = visitSite({ url, control, walk: () => ({ canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event) }) }, { ...fast, visitBudgetMs: 4_000, getBrowser: () => launchTestChromium() });
 			await until(() => control.mode === "human", "the agent to pause");
 
 			// The sharp screen shows the page at its CSS size, which input coordinates are in.
@@ -101,7 +101,7 @@ describe.skipIf(!chromiumAvailable)("a person driving a live visit, in a real br
 			expect(await control.release(VIEWER, "signed in, the card step is next")).toEqual({ ok: true });
 			stopWatching();
 
-			const recording = await visiting;
+			const { recording } = await visiting as { recording: NonNullable<Awaited<typeof visiting>["recording"]> };
 			// The budget would have ended the visit during the person's turn; it did not run then.
 			expect(recording.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "A person signed in; the kit asks for a card." } });
 
@@ -143,7 +143,6 @@ describe.skipIf(!chromiumAvailable)("a person driving a live visit, in a real br
 			expect(JSON.stringify(live)).not.toContain("jpeg");
 		} finally {
 			await closeVisitControl(control);
-			await archive.session?.close();
 			server.stop(true);
 		}
 	}, 60_000);
@@ -170,4 +169,48 @@ describe.skipIf(!chromiumAvailable)("a person driving a live visit, in a real br
 			await browser.close();
 		}
 	}, 30_000);
+});
+
+describe.skipIf(!chromiumAvailable)("a visit watched from second 0, in a real browser", () => {
+	test("one control shows the site loading, says which exit failed and which is next, shows the loaded tab, and walks on as the agent's", async () => {
+		const { server, url } = serveSignIn();
+		const live: SiteVisitLiveEvent[] = [];
+		const control = openVisitControl("e2e-loading", (event) => live.push(event), { mode: "loading", status: "Starting the visit…" });
+		let loadingFrames = 0;
+		const stopWatching = control.screen.watch(() => { if (control.mode === "loading") loadingFrames++; }, "low");
+		const leased: Array<FabricEgress | undefined> = [];
+		const getBrowser = async (egress?: FabricEgress) => {
+			leased.push(egress);
+			if (egress === "residential") throw new Error("the residential exit is offline");
+			return launchTestChromium();
+		};
+		const model = new ScriptedModel([() => ({ calls: [{ name: "done", arguments: { result: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Looked at the sign-in." }, summary: "Done." } }] })]);
+		try {
+			const { initial, recording } = await visitSite({ url, control, walk: () => ({ canaries: createExfiltrationCanaries(), agent: taskAgentVisit(() => model) }) }, { ...fast, getBrowser });
+			stopWatching();
+			const states = live.filter((event): event is VisitControlEvent => event.type === "browser.control");
+			const changed = <T>(values: T[]) => values.filter((value, index) => value !== values[index - 1]);
+			expect(changed(states.map((state) => state.mode))).toEqual(["loading", "agent", "ended"]);
+			// While loading: each exit's lease, the failed one with its reason and the next, then the page loading in the watched tab.
+			const loading = states.filter((state) => state.mode === "loading");
+			expect(changed(loading.map((state) => state.status))).toEqual([
+				"Starting the visit…",
+				"Starting browser via residential exit…",
+				"Residential exit failed (Browser service unavailable: the residential exit is offline), trying Tor exit…",
+				"Starting browser via Tor exit…",
+				"Loading page via Tor exit…",
+			]);
+			expect(loading.at(-1)!.tabs.map((tab) => tab.url)).toEqual([url]);
+			// The screen streamed the load before the agent started, and the agent took the same control and tab over.
+			expect(loadingFrames).toBeGreaterThan(0);
+			expect(states.find((state) => state.mode === "agent")).toMatchObject({ tabs: [{ url, active: true }] });
+			expect(states.find((state) => state.mode === "agent")!.status).toBeUndefined();
+			expect(leased).toEqual(["residential", "phishing"]);
+			expect(initial.route).toBe("Tor exit");
+			expect(recording?.agent.outcome).toBe("completed");
+		} finally {
+			await closeVisitControl(control);
+			server.stop(true);
+		}
+	}, 60_000);
 });

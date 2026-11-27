@@ -4,11 +4,11 @@ import type { AnalysisClient } from "../../analysis/run";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "../../browser/fabric";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../db/test_helpers";
-import { scriptedVisitSession } from "../../site_visit/test_helpers";
+import { scriptedSiteVisit, type ScriptedPage } from "../../site_visit/test_helpers";
 import { websiteSubmissionDedupeKey } from "../../submissions/website";
 import { analyzeWebsite } from "./ai";
 import { BrowserInfrastructureError, WebsiteCaptureFailedError, WebsiteUnreachableError } from "../archive/errors";
-import type { ArchiveWebsiteOptions, WebsiteArchiveResult, WebsiteVisitParams } from "../archive/types";
+import type { SiteVisitOptions, SiteWalk } from "../archive/types";
 import type { ReporterInstructions } from "../../submissions/instructions";
 
 useTemporaryDatabase();
@@ -27,9 +27,9 @@ const NOTE_TEXT = "EG-Trading Oy\nSinulla on uusi asiakirja odottamassa tarkaste
 type Shown = "challenge" | "sign-in" | "note";
 
 /** The page a capture shows; a visit that walks from the note to its challenge page shows that page as its step. */
-function captured(options: ArchiveWebsiteOptions, shown: Shown, egress: FabricEgress, walk?: { to: string }, visits: WebsiteVisitParams[] = []): WebsiteArchiveResult {
+function captured(options: SiteVisitOptions, shown: Shown, egress: FabricEgress, walk?: { to: string }): ScriptedPage {
 	const route = FABRIC_EGRESS_LABEL[egress];
-	const page = (url: string, pageShown: Shown, report: { blocked: boolean } | undefined): WebsiteArchiveResult => {
+	const page = (url: string, pageShown: Shown, report: { blocked: boolean } | undefined): ScriptedPage => {
 		const text = pageShown === "challenge" ? CHALLENGE_TEXT : pageShown === "note" ? NOTE_TEXT : SIGN_IN_TEXT;
 		const html = pageShown === "challenge"
 			? `<html><body><p>${CHALLENGE_TEXT}</p><div class="cf-turnstile"></div></body></html>`
@@ -49,10 +49,10 @@ function captured(options: ArchiveWebsiteOptions, shown: Shown, egress: FabricEg
 			html: Buffer.from(html, "utf8"),
 			text: Buffer.from(text, "utf8"),
 			...(report ? {
-				session: scriptedVisitSession({
+				walk: {
 					...(walk ? { steps: [page(walk.to, "challenge", undefined)] } : {}),
 					agent: { report: { asksForPhone: false, blockedByChallenge: report.blocked, stoppedReason: report.blocked ? "Cloudflare Turnstile remained after waiting." : "The sign-in asks for an account." } },
-				}, visits),
+				},
 			} : {}),
 		};
 	};
@@ -86,10 +86,10 @@ type Retry = Shown | "browser outage";
 
 /** Each route shows what `routes` says; a route it does not name cannot reach the page. */
 async function analyze(id: bigint, routes: { first: { egress: FabricEgress; shown: Shown; walk?: { to: string } }; retry?: Partial<Record<FabricEgress, Retry>> }, instructions?: ReporterInstructions) {
-	const captures: ArchiveWebsiteOptions[] = [];
+	const captures: SiteVisitOptions[] = [];
 	const prompts: string[] = [];
 	const inputs: Array<Array<{ role: string; content: unknown }>> = [];
-	const visits: WebsiteVisitParams[] = [];
+	const walks: SiteWalk[] = [];
 	await SubmissionsEntity.create({ id, kind: "website", data: { kind: "website", website: { url: PAGE } }, dedupeKey: websiteSubmissionDedupeKey(`${PAGE}#${id}`), status: "running", source: PAGE });
 	await analyzeWebsite({ submissionId: id, url: PAGE, ...(instructions ? { instructions } : {}) }, {
 		getInfo: async () => ({ ip_rdaps: [] }),
@@ -97,17 +97,16 @@ async function analyze(id: bigint, routes: { first: { egress: FabricEgress; show
 		domainRegistration: async () => undefined,
 		timestampEvidence: async () => undefined,
 		browserBackoffMs: [1],
-		archiveWebsite: async (options) => {
-			captures.push(options);
-			if (!options.egress) return captured(options, routes.first.shown, routes.first.egress, routes.first.walk, visits);
+		visitSite: scriptedSiteVisit((options) => {
+			if (!options.egress) return captured(options, routes.first.shown, routes.first.egress, routes.first.walk);
 			const shown = routes.retry?.[options.egress];
 			if (shown === "browser outage") throw new BrowserInfrastructureError("Browser service unavailable: the residential exit is offline");
 			if (!shown) throw new WebsiteCaptureFailedError([new WebsiteUnreachableError(options.egress, "net::ERR_CONNECTION_CLOSED")]);
-			return captured(options, shown, options.egress, undefined, visits);
-		},
+			return captured(options, shown, options.egress, undefined);
+		}, { calls: captures, walks }),
 	});
 	const submission = await SubmissionsEntity.get(id);
-	return { captures, prompts, inputs, visits, submission, website: submission?.data.kind === "website" ? submission.data.website : undefined };
+	return { captures, prompts, inputs, walks, submission, website: submission?.data.kind === "website" ? submission.data.website : undefined };
 }
 
 describe("the reporter's instructions", () => {
@@ -115,10 +114,10 @@ describe("the reporter's instructions", () => {
 	const text = (content: unknown) => typeof content === "string" ? content : JSON.stringify(content);
 
 	test("reach the visit of every network and every prompt's user message, and stay in the case record", async () => {
-		const { visits, inputs, submission, website } = await analyze(381535952033550500n, { first: { egress: "phishing", shown: "challenge" }, retry: { residential: "sign-in" } }, instructions);
+		const { walks, inputs, submission, website } = await analyze(381535952033550500n, { first: { egress: "phishing", shown: "challenge" }, retry: { residential: "sign-in" } }, instructions);
 		expect(submission?.status).toBe("reported");
 		// The blocked visit and its revisit from the residential exit.
-		expect(visits.map((visit) => visit.instructions)).toEqual([instructions.browser, instructions.browser]);
+		expect(walks.map((walk) => walk.instructions)).toEqual([instructions.browser, instructions.browser]);
 		const classifications = inputs.filter((input) => text(input[0]!.content).startsWith("Classify only the captured page"));
 		const narratives = inputs.filter((input) => text(input[0]!.content).startsWith("You are an expert phishing and malware analyst"));
 		expect(classifications.length).toBeGreaterThanOrEqual(2);
@@ -135,9 +134,9 @@ describe("the reporter's instructions", () => {
 	});
 
 	test("a case without them sends no instructions to the visit and no note to the analysis", async () => {
-		const { visits, prompts, website } = await analyze(381535952033550501n, { first: { egress: "phishing", shown: "sign-in" } });
-		expect(visits).toHaveLength(1);
-		expect("instructions" in visits[0]!).toBeFalse();
+		const { walks, prompts, website } = await analyze(381535952033550501n, { first: { egress: "phishing", shown: "sign-in" } });
+		expect(walks).toHaveLength(1);
+		expect("instructions" in walks[0]!).toBeFalse();
 		expect(prompts.some((prompt) => prompt.includes("reporter_note"))).toBeFalse();
 		expect(website && "instructions" in website).toBeFalse();
 	});
@@ -172,8 +171,8 @@ describe("a visit a CAPTCHA or browser check blocked", () => {
 
 	test("whose other network's browser is out of service keeps the blocked visit's result rather than failing the case", async () => {
 		const { captures, submission } = await analyze(381535952033550434n, { first: { egress: "phishing", shown: "challenge" }, retry: { residential: "browser outage" } });
-		// The capture's own backoff retried the outage before the visit gave up on the other network.
-		expect(captures.map(({ egress }) => egress)).toEqual([undefined, "residential", "residential"]);
+		// The scripted visit has no backoff of its own: the outage is met once.
+		expect(captures.map(({ egress }) => egress)).toEqual([undefined, "residential"]);
 		expect(submission?.status).toBe("failed");
 		expect(submission?.info).toContain("and the residential exit could not open the page again (Browser service unavailable: the residential exit is offline)");
 	});

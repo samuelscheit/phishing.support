@@ -1,4 +1,4 @@
-import type { Browser, Page } from "rebrowser-puppeteer-core";
+import type { Browser, Page, Protocol } from "rebrowser-puppeteer-core";
 
 import type { ClipboardRecorder, ClipboardWrite } from "../browser/clipboard";
 import { VisitorTabs, type TabSetup, type VisitorTab } from "../browser/visitor_tabs";
@@ -14,13 +14,15 @@ import type { VisitControl, VisitControlEvent } from "./control";
 
 /**
  * One visit of a reported site, the way its victim goes through it: the
- * capture has loaded the page, then an agent walks the site in that same
- * browser and tab, entering only synthetic values, while the visit records
- * what the evidence needs: each page it reaches, every request (where the
+ * recording starts on the visitor's tab before the site loads, the page is
+ * loaded and captured, then an agent may walk the site in that same browser
+ * and tab, entering only synthetic values, while the recording keeps what
+ * the evidence needs: each page it reaches, every request (where the
  * synthetic values go), every file it downloads, and everything its pages
- * put on the clipboard. The agent follows the
- * site into every tab it opens, and so does the recording. The agent only
- * moves; what it reports about itself is never evidence.
+ * put on the clipboard, from the first request of the first load on. The
+ * agent follows the site into every tab it opens, and so does the
+ * recording. The agent only moves; what it reports about itself is never
+ * evidence.
  */
 
 /** Pages recorded per visit beyond the first; a site that changes forever cannot hold it open. */
@@ -54,33 +56,42 @@ type SiteVisitAgentOutcome = {
 };
 
 export type SiteVisitRecording<Step> = {
-	/** When the agent began; the captured page was shown from then until the first step. */
+	/** When the agent began; the captured page was shown from its load until the first step. */
 	startedAt: Date;
 	/** Each page the visit reached after the captured one, in order. */
 	steps: Array<{ step: Step; observedAt: Date }>;
 	requests: CapturedNetworkRequest[];
 	downloads: DownloadedFile[];
 	downloadFailures: FailedDownload[];
-	/** What the pages put on the clipboard, since the capture first loaded the site. */
+	/** What the pages put on the clipboard, since the site first loaded. */
 	clipboardWrites: ClipboardWrite[];
 	agent: SiteVisitAgentOutcome;
 };
 
-export type SiteVisitParams<Step> = {
+export type SiteRecordingParams = {
 	browser: Browser;
+	/** The visitor's tab, before it loads the site. */
 	page: Page;
+	/**
+	 * The identity the tab presents. Chromium resets a document's
+	 * navigator.platform when a session without it attaches, so every
+	 * session the recording holds on the tab presents it too.
+	 */
+	userAgentOverride: Protocol.Emulation.SetUserAgentOverrideRequest;
+	/** Prepares each tab the site opens before it runs, on top of the recording's own. */
+	tabSetup?: TabSetup;
+	/** Records the visitor's tab's clipboard writes; the recording adds each tab the site opens. */
+	clipboard: ClipboardRecorder;
+};
+
+export type SiteWalkParams<Step> = {
 	/** Where the agent attaches to the same browser. */
 	agentAddress: string;
-	userAgent: string;
 	url: string;
 	canaries: ExfiltrationCanaries;
 	agent: VisitAgent;
 	/** Extra instructions for the visiting agent, on top of the walk itself. */
 	instructions?: string;
-	/** Prepares each tab the site opens before it runs, on top of the visit's own recording. */
-	tabSetup?: TabSetup;
-	/** Records the captured tab's clipboard writes since its capture began; the visit adds each tab the site opens. */
-	clipboard: ClipboardRecorder;
 	/** Record the tab's page as it stands as the visit's next step. */
 	snapshot: (tab: VisitorTab) => Promise<Step>;
 	live?: (event: SiteVisitLiveEvent) => void;
@@ -101,13 +112,72 @@ async function pageState(page: Page): Promise<{ url: string; text: string; title
 		.catch(() => undefined);
 }
 
+/** A visit's recording, running from before the site loads: the visitor's tabs, and the walk it may take. */
+export type SiteRecording = {
+	/** The visitor's tabs; the first is the tab the site loads in. */
+	tabs: VisitorTabs;
+	/** Walk the site with the agent from the tab's page; once per recording. */
+	walk<Step>(params: SiteWalkParams<Step>): Promise<SiteVisitRecording<Step>>;
+	/** Stop recording; every tab keeps running. Idempotent. */
+	stop(): Promise<void>;
+};
+
+/**
+ * Start recording a visit on the visitor's tab before it loads the site:
+ * every request of every tab (where the synthetic values go), every file
+ * any tab downloads (a drive-by download of the first load included), and
+ * what each tab the site opens puts on the clipboard.
+ */
+export async function startSiteRecording(params: SiteRecordingParams): Promise<SiteRecording> {
+	const { browser, page, clipboard } = params;
+	const network = new ExfiltrationNetworkRecorder();
+	let tabs: VisitorTabs | undefined;
+	// A tab the site opened only to deliver a file is closed once it did, as Chrome closes it.
+	const downloads: DownloadInterceptor<VisitorTab> = interceptDownloads<VisitorTab>(params.userAgentOverride.userAgent, (tab, showedPage) => {
+		if (tab.opener && !showedPage) void tabs?.close(tab);
+	});
+	let stopping: Promise<void> | undefined;
+	const stop = () => stopping ??= (async () => {
+		await network.stop().catch(() => undefined);
+		for (const tab of tabs?.tabs() ?? []) await tab.session.send("Fetch.disable").catch(() => undefined);
+		await tabs?.stop();
+	})();
+	try {
+		await network.start(browser, { userAgentOverride: params.userAgentOverride });
+		tabs = await VisitorTabs.start(browser, page, [
+			// The visitor's tab's own session keeps its identity; a tab the site opens is given it by `tabSetup`.
+			(tab) => (tab.opener ? undefined : tab.session.send("Emulation.setUserAgentOverride", params.userAgentOverride)),
+			// Every file any tab downloads.
+			(tab) => downloads.attach(tab),
+			...(params.tabSetup ? [params.tabSetup] : []),
+			// What every tab the site opens puts on the clipboard; it is held until then.
+			(tab) => (tab.opener ? clipboard.attach(tab.session, { held: true }) : undefined),
+		]);
+	} catch (error) {
+		await stop();
+		throw error;
+	}
+	const visitorTabs = tabs;
+	let walked = false;
+	return {
+		tabs: visitorTabs,
+		walk: async <Step>(walk: SiteWalkParams<Step>) => {
+			if (walked) throw new Error("The visit was walked already.");
+			if (stopping) throw new Error("The visit's recording has stopped.");
+			walked = true;
+			return walkSite({ ...walk, page, tabs: visitorTabs, network, downloads, clipboard });
+		},
+		stop,
+	};
+}
+
 /**
  * Walk the site with the agent and record it. The visit never throws for
  * what the agent does: a failed or late agent ends the walk, and what was
  * recorded up to then is returned with the outcome. A broken browser throws.
  */
-export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise<SiteVisitRecording<Step>> {
-	const { browser, page, agent, control, live = () => undefined } = params;
+async function walkSite<Step>(params: SiteWalkParams<Step> & { page: Page; tabs: VisitorTabs; network: ExfiltrationNetworkRecorder; downloads: DownloadInterceptor<VisitorTab>; clipboard: ClipboardRecorder }): Promise<SiteVisitRecording<Step>> {
+	const { page, agent, control, network, downloads, tabs: visitorTabs, live = () => undefined } = params;
 	const pollMs = params.pollMs ?? POLL_MS;
 	const quietMs = params.stepQuietMs ?? STEP_QUIET_MS;
 	// The visit's clock stops while a person drives; their own turns are limited by the control.
@@ -116,26 +186,10 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 	const stopped = params.signal ? AbortSignal.any([budget, params.signal]) : budget;
 
 	const startedAt = new Date();
-	const network = new ExfiltrationNetworkRecorder();
-	await network.start(browser);
-	let tabs: VisitorTabs | undefined;
 	const steps: SiteVisitRecording<Step>["steps"] = [];
 	const actions: VisitAgentAction[] = [];
 	const agentOutcome: SiteVisitAgentOutcome = { outcome: "failed", actions };
-	// A tab the site opened only to deliver a file is closed once it did, as Chrome closes it.
-	const downloads: DownloadInterceptor<VisitorTab> = interceptDownloads<VisitorTab>(params.userAgent, (tab, showedPage) => {
-		if (tab.opener && !showedPage) void tabs?.close(tab);
-	});
 	try {
-		tabs = await VisitorTabs.start(browser, page, [
-			// Every file any tab downloads.
-			(tab) => downloads.attach(tab),
-			...(params.tabSetup ? [params.tabSetup] : []),
-			// What every tab the site opens puts on the clipboard; it is held until then.
-			(tab) => (tab.opener ? params.clipboard.attach(tab.session, { held: true }) : undefined),
-		]);
-		const visitorTabs = tabs;
-
 		let recorded = await pageState(page);
 		let pending: { url: string; text: string; since: number } | undefined;
 		let announcedDownloads = 0;
@@ -228,14 +282,14 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 		await control?.end();
 		// The page the walk ended on is a step of its own, whatever the quiet period,
 		// also when the walk ended right after opening a tab puppeteer has no page for yet.
-		await tabs.settled(FINAL_TAB_WAIT_MS);
+		await visitorTabs.settled(FINAL_TAB_WAIT_MS);
 		await recordStep(true);
 		await downloads.settled();
 		announceDownloads();
 		return {
 			startedAt,
 			steps,
-			requests: await network.stop(),
+			requests: network.snapshot(),
 			downloads: downloads.files(),
 			downloadFailures: downloads.failures(),
 			clipboardWrites: params.clipboard.writes(),
@@ -244,8 +298,5 @@ export async function runSiteVisit<Step>(params: SiteVisitParams<Step>): Promise
 	} finally {
 		clock.clear();
 		await control?.end();
-		await network.stop().catch(() => undefined);
-		for (const tab of tabs?.tabs() ?? []) await tab.session.send("Fetch.disable").catch(() => undefined);
-		await tabs?.stop();
 	}
 }

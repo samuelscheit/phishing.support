@@ -84,9 +84,9 @@ export async function failWebsiteAnalysis(submissionId: bigint, failure: {
 }
 
 /** A failed run: retried automatically when the browser service (not the site) failed. */
-export async function recordWebsiteAnalysisFailure(submissionId: bigint, error: unknown, attempts: number): Promise<void> {
+export async function recordWebsiteAnalysisFailure(submissionId: bigint, error: unknown, attempts: number, data?: Partial<WebsiteSubmissionData>): Promise<void> {
 	const reason = errorText(error);
 	await failWebsiteAnalysis(submissionId, isBrowserInfrastructureFailure(error)
-		? { info: `The browser service failed (${reason}).`, retry: { attempts, reason, delaysMs: BROWSER_OUTAGE_RETRY_DELAYS_MS, exhausted: (visits) => `It failed ${visits} times in a row; retry once it has recovered.` } }
-		: { info: reason });
+		? { info: `The browser service failed (${reason}).`, ...(data ? { data } : {}), retry: { attempts, reason, delaysMs: BROWSER_OUTAGE_RETRY_DELAYS_MS, exhausted: (visits) => `It failed ${visits} times in a row; retry once it has recovered.` } }
+		: { info: reason, ...(data ? { data } : {}) });
 }

@@ -1,4 +1,4 @@
-import type { Browser, CDPSession } from "rebrowser-puppeteer-core";
+import type { Browser, CDPSession, Protocol } from "rebrowser-puppeteer-core";
 
 import { sendBeforeRun } from "../browser/cdp";
 import type { CapturedNetworkRequest } from "./types";
@@ -16,6 +16,8 @@ function bounded(value: unknown): string | undefined {
 
 /** CDP target types that own a network stack the kit can send from. */
 const NETWORK_TARGET_TYPES = new Set(["page", "iframe", "worker", "service_worker", "shared_worker"]);
+/** Target types whose documents read navigator.platform from every session attached to them. */
+const DOCUMENT_TARGET_TYPES = new Set(["page", "iframe"]);
 /**
  * Request headers that show how data was sent; cookies and credentials are
  * never kept. Only the Network domain is used: enabling Runtime on a page
@@ -32,6 +34,7 @@ export class ExfiltrationNetworkRecorder {
 	private readonly attachedTargets = new Set<string>();
 	private capturedBytes = 0;
 	private stopped = false;
+	private userAgentOverride?: Protocol.Emulation.SetUserAgentOverrideRequest;
 
 	/**
 	 * Auto-attaches to every target of the browser, and recursively to each
@@ -39,7 +42,15 @@ export class ExfiltrationNetworkRecorder {
 	 * until its Network domain is enabled, so even a first script that posts
 	 * immediately is recorded.
 	 */
-	async start(browser: Browser): Promise<void> {
+	async start(browser: Browser, options: {
+		/**
+		 * The identity the visit presents. Chromium resets a document's
+		 * navigator.platform when a session without it attaches, so every
+		 * session this recorder holds on a page or frame presents it too.
+		 */
+		userAgentOverride?: Protocol.Emulation.SetUserAgentOverrideRequest;
+	} = {}): Promise<void> {
+		this.userAgentOverride = options.userAgentOverride;
 		const root = await browser.target().createCDPSession();
 		this.sessions.add(root);
 		this.followChildren(root);
@@ -67,6 +78,7 @@ export class ExfiltrationNetworkRecorder {
 		this.record(session);
 		this.followChildren(session);
 		// Commands a held target answers only once it runs are not awaited; they take effect in order, before it runs.
+		if (this.userAgentOverride && DOCUMENT_TARGET_TYPES.has(targetInfo.type)) void sendBeforeRun(session, "Emulation.setUserAgentOverride", this.userAgentOverride);
 		void sendBeforeRun(session, "Network.enable", { maxPostDataSize: MAX_VALUE_BYTES });
 		void sendBeforeRun(session, "Target.setAutoAttach", AUTO_ATTACH);
 		release();

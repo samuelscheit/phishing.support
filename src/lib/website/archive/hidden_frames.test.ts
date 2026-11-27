@@ -3,8 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { IPHONE_USER_AGENT } from "../../browser/page";
 import { chromiumAvailable, launchTestChromium } from "../../browser/task/test_helpers";
 import { sha256Hex } from "../../util/hash";
-import { archiveWebsite } from "./";
-import { fast } from "./test_fixture";
+import { fast, firstPage } from "./test_fixture";
 
 describe.skipIf(!chromiumAvailable)("hidden frames and the phone identity, in a real browser", () => {
 	/**
@@ -66,7 +65,7 @@ document.getElementById("who").textContent = phone ? "Opened on an iPhone." : "T
 		const server = serveExploitKit(hits);
 		try {
 			const origin = `http://127.0.0.1:${server.port}`;
-			const archive = await archiveWebsite({ url: `${origin}/` }, { ...fast, renderSettleMs: 5_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url: `${origin}/` }, { ...fast, renderSettleMs: 5_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.device).toBeUndefined();
 			expect(archive.text.toString()).toContain("This site isn't available on desktop.");
@@ -101,7 +100,7 @@ document.getElementById("who").textContent = phone ? "Opened on an iPhone." : "T
 		const server = serveExploitKit(hits);
 		try {
 			const origin = `http://127.0.0.1:${server.port}`;
-			const archive = await archiveWebsite({ url: `${origin}/`, device: "iphone" }, { ...fast, renderSettleMs: 5_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url: `${origin}/`, device: "iphone" }, { ...fast, renderSettleMs: 5_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.device).toBe("iphone");
 			expect(archive.text.toString()).toContain("Opened on an iPhone.");

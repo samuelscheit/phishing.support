@@ -2,8 +2,7 @@ import sharp from "sharp";
 
 import type { AnalysisClient } from "../../analysis/run";
 import { CHECKOUT_TEXT, LURE_TEXT, PRODUCTION_URLS } from "../../abuse/funnel/test_fixtures";
-import { scriptedVisitSession } from "../../site_visit/test_helpers";
-import type { WebsiteArchiveResult } from "../archive/types";
+import { scriptedSiteVisit, type ScriptedPage, type ScriptedVisit } from "../../site_visit/test_helpers";
 import type { WebsiteNavigationHop } from "../types";
 import type { WebsiteAnalysisDependencies } from "./analysis_types";
 
@@ -80,8 +79,8 @@ export function funnelHop(index: number, url: string, status: number, extra: Par
 	return { index, url, hostname: new URL(url).hostname, status, receivedAt: new Date(START + index * 700).toISOString(), contentCaptured: false, ...extra };
 }
 
-/** A page the capture showed, its hops numbered from 0 within the page, the last one's body kept. */
-export function capturedPage(url: string, html: string, text: string, hops: WebsiteNavigationHop[], session?: WebsiteArchiveResult["session"]): WebsiteArchiveResult {
+/** A page the visit showed, its hops numbered from 0 within the page, the last one's body kept; a first page plays `walk` when walked on. */
+export function capturedPage(url: string, html: string, text: string, hops: WebsiteNavigationHop[], walk?: ScriptedVisit): ScriptedPage {
 	const last = hops.at(-1)!;
 	return {
 		requestedUrl: hops[0]!.url,
@@ -95,7 +94,7 @@ export function capturedPage(url: string, html: string, text: string, hops: Webs
 		mhtml: Buffer.from(`From: <Saved by Blink>\r\nSnapshot-Content-Location: ${url}\r\n\r\n${html}`, "utf8"),
 		html: Buffer.from(html),
 		text: Buffer.from(text),
-		...(session ? { session } : {}),
+		...(walk ? { walk } : {}),
 	};
 }
 
@@ -104,7 +103,7 @@ export function capturedPage(url: string, html: string, text: string, hops: Webs
  * link to the Voluum lure, whose CONTINUE the visit clicks, through the
  * base64 wrapper and CAKE's cookie check to the zatos.com checkout.
  */
-export function productionVisit(link: string = PRODUCTION_URLS.everflowLink): WebsiteArchiveResult {
+export function productionVisit(link: string = PRODUCTION_URLS.everflowLink): ScriptedPage {
 	const u = PRODUCTION_URLS;
 	const checkout = capturedPage(u.checkout, CHECKOUT_HTML, CHECKOUT_TEXT, [
 		funnelHop(4, u.voluumClick, 302, { redirectTo: u.wrapper }),
@@ -118,21 +117,21 @@ export function productionVisit(link: string = PRODUCTION_URLS.everflowLink): We
 		funnelHop(1, u.everflowRedirect, 302, { redirectTo: u.voluumCampaign }),
 		funnelHop(2, u.voluumCampaign, 302, { redirectTo: u.lure }),
 		funnelHop(3, u.lure, 200),
-	], scriptedVisitSession({ steps: [checkout] }));
+	], { steps: [checkout] });
 }
 
 /** The same link rotated to the cloud-storage renewal: Everflow, the unknown tracker, the scam page, which the walk leaves alone. */
-export function cloudStorageVisit(link: string = PRODUCTION_URLS.everflowLink): WebsiteArchiveResult {
+export function cloudStorageVisit(link: string = PRODUCTION_URLS.everflowLink): ScriptedPage {
 	const c = CLOUD_STORAGE_URLS;
 	return capturedPage(c.scam, CLOUD_STORAGE_HTML, CLOUD_STORAGE_TEXT, [
 		funnelHop(0, link, 302, { redirectTo: c.tracker }),
 		funnelHop(1, c.tracker, 302, { redirectTo: c.scam }),
 		funnelHop(2, c.scam, 200),
-	], scriptedVisitSession());
+	], {});
 }
 
-/** The network boundaries of an analysis of the funnel: the capture given, the funnel's model, nothing else reached. */
-export function funnelDependencies(capture: WebsiteAnalysisDependencies["archiveWebsite"], calls: ModelCall[], options: { phishingLure?: boolean; popular?: string[] } = {}): WebsiteAnalysisDependencies {
+/** The network boundaries of an analysis of the funnel: the first page each visit loads (`load`), the funnel's model, nothing else reached. */
+export function funnelDependencies(load: Parameters<typeof scriptedSiteVisit>[0], calls: ModelCall[], options: { phishingLure?: boolean; popular?: string[] } = {}): WebsiteAnalysisDependencies {
 	return {
 		getInfo: async () => ({ ip_rdaps: [] }),
 		analysisClient: funnelModel(calls, options),
@@ -141,6 +140,6 @@ export function funnelDependencies(capture: WebsiteAnalysisDependencies["archive
 		browserBackoffMs: [1],
 		downloadLookups: async () => [],
 		popularDomains: async () => new Set(options.popular ?? []),
-		archiveWebsite: capture,
+		visitSite: scriptedSiteVisit(load),
 	};
 }

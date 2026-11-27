@@ -11,6 +11,7 @@ import { routeContact } from "../resolver/contact_chain";
 import { abuseEvents, jobs, abuseMailMessages, type AbuseProviderRoute } from "../schema";
 import type { sendAbuseEmailRoute } from "../mail/send";
 import { ESCALATION_EVENT, ESCALATION_HELD_EVENT, escalationJobKey, type EscalationDependencies } from "./run";
+import { scriptedSiteVisit } from "../../site_visit/test_helpers";
 import { day, DOMAIN, relay, reported, SENT, site, URL_, work } from "./run.fixtures";
 
 useTemporaryDatabase();
@@ -132,11 +133,11 @@ describe("escalating a report nobody acts on", () => {
 		expect(await queued(targetId)).toEqual([day(3)]);
 
 		// A browser service failure is not the site's: the job fails and the worker retries it.
-		await expect(work(targetId, { verify: { site: site("decoy"), isShared: async () => false, capture: async () => { throw new Error("Browser Fabric session ended"); } }, send, now: () => day(2) })).rejects.toThrow("Browser Fabric session ended");
+		await expect(work(targetId, { verify: { site: site("decoy"), isShared: async () => false, visitSite: scriptedSiteVisit(async () => { throw new Error("Browser Fabric session ended"); }) }, send, now: () => day(2) })).rejects.toThrow("Browser Fabric session ended");
 		// A decoy for every request and every network failing in the browser: unverified, tried again tomorrow.
 		const { WebsiteCaptureFailedError, WebsiteUnreachableError } = await import("../../website/archive/errors");
 		const failing = async () => { throw new WebsiteCaptureFailedError([new WebsiteUnreachableError("residential", "net::ERR_TIMED_OUT")]); };
-		await work(targetId, { verify: { site: site("decoy"), isShared: async () => false, capture: failing }, send, now: () => day(2) });
+		await work(targetId, { verify: { site: site("decoy"), isShared: async () => false, visitSite: scriptedSiteVisit(failing) }, send, now: () => day(2) });
 		expect(await queued(targetId)).toEqual([day(3)]);
 		expect(sent).toEqual([]);
 	});
@@ -144,7 +145,7 @@ describe("escalating a report nobody acts on", () => {
 	test("liveness checks do not pull a held ladder forward: a week after a harmless page, a day after an unconfirmed one", async () => {
 		const { reportId, targetId } = await reported();
 		const { scheduleEscalation } = await import("./run");
-		await work(targetId, { verify: { site: site("decoy"), isShared: async () => false, capture: async ({ url }) => ({ requestedUrl: url, url, hostname: DOMAIN, navigationHops: [{ index: 0, url, hostname: DOMAIN, status: 200, contentCaptured: true }], archivedAt: day(2), mhtml: Buffer.from(""), html: Buffer.from("<p>bakery</p>"), text: Buffer.from("bakery") }), classify: async () => ({ finding: "insufficient_evidence", reason: "a bakery" }) }, now: () => day(2) });
+		await work(targetId, { verify: { site: site("decoy"), isShared: async () => false, visitSite: scriptedSiteVisit(async ({ url }) => ({ requestedUrl: url, url, hostname: DOMAIN, navigationHops: [{ index: 0, url, hostname: DOMAIN, status: 200, contentCaptured: true }], archivedAt: day(2), mhtml: Buffer.from(""), html: Buffer.from("<p>bakery</p>"), text: Buffer.from("bakery") })), classify: async () => ({ finding: "insufficient_evidence", reason: "a bakery" }) }, now: () => day(2) });
 		expect((await AbuseRepository.listEvents(reportId)).filter((event) => event.eventType === ESCALATION_HELD_EVENT).map((event) => (event.data as { verdict: string }).verdict)).toEqual(["not_malicious"]);
 		// Every later liveness check asks again: the ladder stays held for the week.
 		for (const at of [day(2.5), day(3), day(6)]) await scheduleEscalation({ reportId, targetId }, at);

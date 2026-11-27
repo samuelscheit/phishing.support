@@ -10,8 +10,10 @@ import type { WebsiteSubmissionData } from "../db/schema";
 import { readResponseBody } from "../network/bounded_fetch";
 import { fetchThroughPublicRedirects } from "../network/public_redirects";
 import { asRecord } from "../util/values";
-import { archiveWebsite } from "../website/archive";
-import { WebsiteCaptureFailedError } from "../website/archive/errors";
+import { createExfiltrationCanaries } from "../exfiltration/canaries";
+import { taskAgentVisit, type VisitAgent } from "../site_visit/agent";
+import { visitSite } from "../website/archive/visit_site";
+import { WebsiteCaptureFailedError, WebsiteHostOfflineError } from "../website/archive/errors";
 import type { WebsiteArchiveResult } from "../website/archive/types";
 import type { WebsiteSiteClassification } from "../website/types";
 import { capturedArchiveHop, isReportable } from "../website/info/report_hops";
@@ -40,18 +42,22 @@ export type ContentMatch = { kind: "kit_file" | "page_body" | "page_structure" |
  * Whether the reported site still serves what was reported, and the
  * cheapest way that was known:
  *
- * - `gone`: the registry or host took the site down (`TAKEN_DOWN_STATES`).
+ * - `gone`: the registry or host took the site down (`TAKEN_DOWN_STATES`,
+ *   `check`), or its host name is gone from DNS (`browser`: every route
+ *   failed to reach it and public DNS confirmed NXDOMAIN).
  * - `served`: the site serves files or a page the case recorded, byte for
  *   byte or by template; `fetch` found it with plain requests, `browser`
- *   needed a browser like the case's (cloaking, script-built pages).
+ *   needed a browser like the case's (cloaking, script-built pages, a page
+ *   the visiting agent reached).
  * - `changed_malicious`: the page changed, and the case's classifier still
- *   finds it phishing or malware.
- * - `not_malicious`: the page changed, and the classifier finds nothing.
- * - `unverified`: nothing could be compared: the capture failed or the site
+ *   finds it (or a page the visiting agent reached from it) phishing or malware.
+ * - `not_malicious`: the page changed, and the classifier finds nothing on it
+ *   or on any page the visiting agent reached from it.
+ * - `unverified`: nothing could be compared: the visit failed or the site
  *   showed every route a decoy.
  */
 type ContentVerdict =
-	| { verdict: "gone"; tier: "check" }
+	| { verdict: "gone"; tier: "check" | "browser" }
 	| { verdict: "served"; tier: "fetch" | "browser"; matches: ContentMatch[] }
 	| { verdict: "changed_malicious"; tier: "analysis"; finding: string }
 	| { verdict: "not_malicious"; tier: "analysis"; reason: string }
@@ -86,10 +92,12 @@ export type ContentVerificationDependencies = {
 	site?: SiteCheckDependencies;
 	/** The plain check of the URL when the caller made it just now; it is not made again. */
 	check?: SiteCheckResult;
-	/** The browser capture; production's is the case's archive. */
-	capture?: typeof archiveWebsite;
+	/** The browser visit; production's is the case's own. */
+	visitSite?: typeof visitSite;
+	/** The agent that walks on from a changed page the classifier found nothing on; the browser task agent in production. */
+	visitAgent?: VisitAgent;
 	/** The page classifier; production's is the case's own. */
-	classify?: (params: { submissionId: bigint; archive: WebsiteArchiveResult }) => Promise<Pick<WebsiteSiteClassification, "finding"> & { reason?: string }>;
+	classify?: (params: { submissionId: bigint; archive: WebsiteArchiveResult }) => Promise<Judgment>;
 	isShared?: IsSharedKitFile;
 };
 
@@ -270,11 +278,16 @@ async function defaultClassify({ submissionId, archive }: { submissionId: bigint
  * 2. Plain requests: the page the check got, the kit's own files on the
  *    site's host and the reported payload, compared by hash with what the
  *    case recorded. A match needs no browser.
- * 3. A browser capture as the case made it (its browser, device and
- *    networks), compared the same way, rendered page included.
- * 4. When nothing matches, the case's classifier judges the captured page
- *    (`maxTier: "analysis"` only). It only reads: nothing is reported, and
- *    the case's own analysis stays as it is.
+ * 3. A browser visit as the case made it (its browser, device and
+ *    networks), its first page compared the same way, rendered page
+ *    included. A host every route failed to reach that public DNS no longer
+ *    knows is gone.
+ * 4. When nothing matches, the case's classifier judges that first page
+ *    (`maxTier: "analysis"` only). When it finds nothing, the visiting agent
+ *    walks on from it in the same browser, as the case's visit did (a kit
+ *    may hide its form behind a button or dialog now), and each page it
+ *    reaches is compared, then judged, until one decides. It only reads:
+ *    nothing is reported, and the case's own analysis stays as it is.
  *
  * Each verification is recorded as a `site.content_verified` event of the
  * target. A page a browser confirmed is kept with it, so the next plain
@@ -311,28 +324,81 @@ export async function verifyReportedContent(
 	const recorded = reference.served.length + reference.rendered.length + reference.kitFiles.length;
 	if (!recorded && maxTier === "browser") return record({ verdict: "unverified", tier: "fetch", reason: "The case recorded no page or kit file to compare with." });
 
-	let archive: WebsiteArchiveResult;
+	const classify = dependencies.classify ?? defaultClassify;
+	/** A page the browser showed that the case recorded (its page, its kit's files): the site serves it still. */
+	const matchPage = (archive: WebsiteArchiveResult): Decided | undefined => {
+		const observed = capturedDocument(archive);
+		const matches = browserMatches(archive, reference, observed);
+		return matches.length ? { verdict: { verdict: "served", tier: "browser", matches }, observed } : undefined;
+	};
+	/** The classifier's verdict on a page the browser showed: reportable decides, anything else is its judgment. */
+	const classifyPage = async (archive: WebsiteArchiveResult, submissionId: bigint): Promise<Decided | { judged: Judgment }> => {
+		const judged = await classify({ submissionId, archive });
+		return isReportable(judged) ? { verdict: { verdict: "changed_malicious", tier: "analysis", finding: judged.finding }, observed: capturedDocument(archive) } : { judged };
+	};
+	/** The verdict the first page decided, and the classifier's judgment of it when the walk goes on from it. */
+	let decided: Decided | undefined;
+	let firstJudged: Judgment | undefined;
+	let visit;
 	try {
 		const visitor = reporterBrowserIdentity(report?.requesterHeaders ?? undefined);
-		archive = await (dependencies.capture ?? archiveWebsite)({
+		visit = await (dependencies.visitSite ?? visitSite)({
 			url: target.url,
 			...(visitor ? { visitor } : {}),
 			...(website?.device ? { device: website.device } : {}),
+			...(options.signal ? { signal: options.signal } : {}),
+			// Deterministic first: a page the case recorded, or no case to judge with, ends the visit without any model.
+			walk: async (initial) => {
+				if (initial.cloaking?.outcome === "unresolved") {
+					decided = { verdict: { verdict: "unverified", tier: "browser", reason: "The site showed every network a decoy." } };
+					return undefined;
+				}
+				decided = matchPage(initial);
+				if (decided) return undefined;
+				if (maxTier === "browser") {
+					decided = { verdict: { verdict: "unverified", tier: "browser", reason: "The browser got nothing the case recorded." } };
+					return undefined;
+				}
+				if (!report?.submissionId) {
+					decided = { verdict: { verdict: "unverified", tier: "analysis", reason: "The report has no case whose classifier could judge the page." } };
+					return undefined;
+				}
+				const first = await classifyPage(initial, report.submissionId);
+				if ("verdict" in first) {
+					decided = first;
+					return undefined;
+				}
+				// The page alone shows nothing reportable: the kit may hide its form behind a step, which the agent takes.
+				firstJudged = first.judged;
+				return { canaries: createExfiltrationCanaries(), agent: dependencies.visitAgent ?? taskAgentVisit() };
+			},
 		});
 	} catch (error) {
 		if (options.signal?.aborted) throw options.signal.reason;
-		if (error instanceof WebsiteCaptureFailedError) return record({ verdict: "unverified", tier: "browser", reason: `The browser could not capture the page: ${error.message}` });
+		if (error instanceof WebsiteHostOfflineError) return record({ verdict: "gone", tier: "browser" });
+		if (error instanceof WebsiteCaptureFailedError) return record({ verdict: "unverified", tier: "browser", reason: `The browser could not load the page: ${error.message}` });
 		throw error;
 	}
-	if (archive.cloaking?.outcome === "unresolved") return record({ verdict: "unverified", tier: "browser", reason: "The site showed every network a decoy." });
-	const observed = capturedDocument(archive);
-	const captured = browserMatches(archive, reference, observed);
-	if (captured.length) return record({ verdict: "served", tier: "browser", matches: captured }, observed);
-	if (maxTier === "browser") return record({ verdict: "unverified", tier: "browser", reason: "The browser got nothing the case recorded." });
-
-	if (!report?.submissionId) return record({ verdict: "unverified", tier: "analysis", reason: "The report has no case whose classifier could judge the page." });
-	const judged = await (dependencies.classify ?? defaultClassify)({ submissionId: report.submissionId, archive });
-	return isReportable(judged)
-		? record({ verdict: "changed_malicious", tier: "analysis", finding: judged.finding }, observed)
-		: record({ verdict: "not_malicious", tier: "analysis", reason: judged.reason ?? `The page is classified ${judged.finding.replaceAll("_", " ")}.` });
+	if (decided) return record(decided.verdict, decided.observed);
+	// Only a first page the classifier judged harmless is walked on from; each page the walk reached decides in turn, cheapest first.
+	const judged = firstJudged!;
+	const steps = visit.recording?.steps ?? [];
+	for (const { step } of steps) {
+		const page = matchPage(step) ?? await classifyPage(step, report!.submissionId!);
+		if ("verdict" in page) return record(page.verdict, page.observed);
+	}
+	const agent = visit.recording?.agent;
+	if (agent && (agent.outcome !== "completed" || agent.report?.blockedByChallenge)) {
+		const blocked = agent.report?.blockedByChallenge
+			? `a CAPTCHA or browser check blocked the visit (${agent.report.stoppedReason})`
+			: agent.failure ?? "the visiting agent did not finish the site's flow";
+		return record({ verdict: "unverified", tier: "analysis", reason: `The first page showed nothing reportable, and ${blocked}.` });
+	}
+	const reason = judged.reason ?? `The page is classified ${judged.finding.replaceAll("_", " ")}.`;
+	return record({ verdict: "not_malicious", tier: "analysis", reason: steps.length ? `${reason} Nothing reportable on the ${steps.length} page${steps.length === 1 ? "" : "s"} the visiting agent reached from it either.` : reason });
 }
+
+/** A verdict reached in the browser, with the raw page it rests on when that page is the site's. */
+type Decided = { verdict: ContentVerdict; observed?: PageFingerprints };
+/** The classifier's verdict on a page, as verification reads it. */
+type Judgment = Pick<WebsiteSiteClassification, "finding"> & { reason?: string };

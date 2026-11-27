@@ -2,13 +2,14 @@ import { describe, expect, test } from "bun:test";
 
 import { createExfiltrationCanaries } from "../exfiltration/canaries";
 import type { ExfiltrationCanaries } from "../exfiltration/types";
-import { archiveWebsite } from "../website/archive";
+import { visitSite } from "../website/archive/visit_site";
+import type { SiteVisitDependencies, SiteWalk } from "../website/archive/types";
 import type { ChatModel, ChatRequest } from "../browser/task/agent";
 import { chromiumAvailable, launchTestChromium, refIn, ScriptedModel, StalledModel, type ScriptedTurn } from "../browser/task/test_helpers";
 import { stepActions, taskAgentVisit, type VisitAgent } from "./agent";
 import { VISIT_MAX_STEPS } from "./visit_task";
 import type { SiteVisitLiveEvent } from "./visit";
-import { closeVisitControl, openVisitControl } from "./control";
+import { closeVisitControl, openVisitControl, type VisitControl } from "./control";
 import type { LiveFrame } from "./screen";
 
 /** A control for a visit whose screen the test watches, and the events it published. */
@@ -20,7 +21,16 @@ function watchedVisit(key: string, live: SiteVisitLiveEvent[]) {
 }
 import { visitPages } from "./evidence";
 
-const fast = { scriptNavigationSettleMs: 20, renderSettleMs: 800, visitPollMs: 150, visitStepQuietMs: 400 } as const;
+/** One visit of the site in a real browser: the first page, and the recording of the walk (which always happens here). */
+async function walkSite(url: string, walk: SiteWalk, options: { control?: VisitControl; dependencies?: SiteVisitDependencies } = {}) {
+	const { initial, recording } = await visitSite(
+		{ url, ...(options.control ? { control: options.control } : {}), walk: () => walk },
+		{ ...fast, getBrowser: () => launchTestChromium(), ...options.dependencies },
+	);
+	return { initial, recording: recording! };
+}
+
+const fast = { renderSettleMs: 800, visitPollMs: 150, visitStepQuietMs: 400 } as const;
 
 const ZIP = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from("the kit's extension")]);
 const html = (body: string, title = "Roblox") => new Response(`<!DOCTYPE html><html><head><title>${title}</title></head><body>${body}</body></html>`, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -253,16 +263,15 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			() => ({ calls: [{ name: "wait", arguments: { seconds: 1 } }] }),
 			() => ({ calls: [{ name: "done", arguments: { result: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Copied the install command." }, summary: "Done." } }] }),
 		]);
-		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
 		try {
+			const { initial: archive, recording } = await walkSite(url, { canaries, agent: taskAgentVisit(() => model) });
 			expect(archive.verificationGate).toEqual({ label: "I'm not a robot" });
-			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model) });
 			expect(recording.agent).toMatchObject({ outcome: "completed" });
 			expect(recording.clipboardWrites).toEqual([
 				{ text: GATE_COMMAND, documentUrl: url, via: "writeText", at: expect.any(String) },
 				{ text: TRYLEVO_PAYLOAD, documentUrl: url, via: "writeText", at: expect.any(String) },
 			]);
-			// The gate's write came before the visit began; the Copy button's while the dialog was shown.
+			// The gate's write came before the walk began (the recording now also covers the initial load, so it holds it); the Copy button's while the dialog was shown.
 			expect(Date.parse(recording.clipboardWrites[0]!.at)).toBeLessThan(recording.startedAt.getTime());
 			const pages = visitPages(archive, recording, canaries);
 			expect(pages[0]!.clipboardWrites.map((write) => write.text)).toEqual([GATE_COMMAND]);
@@ -271,7 +280,6 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			expect(dialog.archive.text.toString()).not.toContain("Copied!");
 			expect(pages.flatMap((page) => page.clipboardWrites)).toHaveLength(2);
 		} finally {
-			await archive.session?.close();
 			server.stop(true);
 		}
 	}, 60_000);
@@ -282,9 +290,8 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 		const model = new ScriptedModel(kitWalk(canaries));
 		const live: SiteVisitLiveEvent[] = [];
 		const { control, frames } = watchedVisit("visit-kit", live);
-		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
 		try {
-			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event), control });
+			const { recording } = await walkSite(url, { canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event) }, { control });
 			expect(recording.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "Downloaded the verifier." } });
 			// The agent reports only what the recording cannot know; what it submitted and downloaded is counted from the recording.
 			expect(recording.agent.report).toEqual({ asksForPhone: false, blockedByChallenge: false, stoppedReason: "Downloaded the verifier." });
@@ -339,7 +346,6 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			expect(times).toEqual([...times].sort());
 		} finally {
 			await closeVisitControl(control);
-			await archive.session?.close();
 			server.stop(true);
 		}
 	}, 60_000);
@@ -383,9 +389,8 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 		]);
 		const live: SiteVisitLiveEvent[] = [];
 		const { control, frames } = watchedVisit("visit-tabs", live);
-		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
 		try {
-			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event), control });
+			const { recording } = await walkSite(url, { canaries, agent: taskAgentVisit(() => model), live: (event) => live.push(event) }, { control });
 			expect(recording.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "Signed in and downloaded the invoice." } });
 			const steps = recording.steps.map(({ step }) => step);
 			expect(steps.map((step) => step.url)).toEqual([`${url}document`, `${url}signin`, `${url}collect`, `${url}document`]);
@@ -420,7 +425,6 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			expect(live).toContainEqual({ type: "browser.download", fileName: "Invoice-4711.zip", url: `${url}Invoice-4711.zip` });
 		} finally {
 			await closeVisitControl(control);
-			await archive.session?.close();
 			server.stop(true);
 		}
 	}, 90_000);
@@ -432,14 +436,12 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			// Done the moment the tab is shown: no quiet period passes on it before the walk ends.
 			() => ({ calls: [{ name: "done", arguments: { result: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Opened the document." }, summary: "Done." } }] }),
 		]);
-		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
 		try {
-			const recording = await archive.session!.visit({ canaries: createExfiltrationCanaries(), agent: taskAgentVisit(() => model) });
+			const { recording } = await walkSite(url, { canaries: createExfiltrationCanaries(), agent: taskAgentVisit(() => model) });
 			expect(recording.agent).toMatchObject({ outcome: "completed" });
 			expect(recording.steps.map(({ step }) => step.url)).toEqual([`${url}document`]);
 			expect(recording.steps[0]!.step.text.toString()).toContain("Invoice 4711");
 		} finally {
-			await archive.session?.close();
 			server.stop(true);
 		}
 	}, 60_000);
@@ -447,42 +449,33 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 	test("a model that fails ends the walk as failed, with the reason redacted; a walk past the budget is timed out", async () => {
 		const { server, url } = serveKit();
 		const canaries = createExfiltrationCanaries();
-		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
 		try {
-			const failed = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new FailingModel()) });
+			const { recording: failed } = await walkSite(url, { canaries, agent: taskAgentVisit(() => new FailingModel()) });
 			expect(failed.agent.outcome).toBe("failed");
 			expect(failed.agent.failure).toStartWith("failed: Error: model answered HTTP 401: invalid api_key=[redacted]");
 			expect(failed.steps).toEqual([]);
-		} finally {
-			await archive.session?.close();
-		}
-		const second = await archiveWebsite({ url, keepSession: true }, { ...fast, visitBudgetMs: 2_500, getBrowser: () => launchTestChromium() });
-		try {
 			const started = Date.now();
-			const timedOut = await second.session!.visit({ canaries, agent: taskAgentVisit(() => new StalledModel()) });
+			const { recording: timedOut } = await walkSite(url, { canaries, agent: taskAgentVisit(() => new StalledModel()) }, { dependencies: { visitBudgetMs: 2_500 } });
 			expect(timedOut.agent).toMatchObject({ outcome: "timed_out", failure: "The visit's 0-minute budget ended the walk." });
 			expect(Date.now() - started).toBeLessThan(10_000);
 		} finally {
-			await second.session?.close();
 			server.stop(true);
 		}
 	}, 60_000);
 
-	// Three walks on one capture session: the agent continues in the captured tab and never closes it.
+	// A visit is walked once: each of the three walks is a visit of its own.
 	test("an agent that stops the walk itself, or asks for something it cannot give, has finished the visit with its reason", async () => {
 		const { server, url } = serveKit();
 		const canaries = createExfiltrationCanaries();
-		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
 		try {
-			const gaveUp = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new ScriptedModel([() => ({ calls: [{ name: "fail", arguments: { reason: "The form rejected the password three times." } }] })])) });
+			const { recording: gaveUp } = await walkSite(url, { canaries, agent: taskAgentVisit(() => new ScriptedModel([() => ({ calls: [{ name: "fail", arguments: { reason: "The form rejected the password three times." } }] })])) });
 			expect(gaveUp.agent).toMatchObject({ outcome: "completed", report: { asksForPhone: false, stoppedReason: "The form rejected the password three times." } });
-			const asks = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new ScriptedModel([() => ({ calls: [{ name: "needs_input", arguments: { question: "The site wants a code sent to a real phone." } }] })])) });
+			const { recording: asks } = await walkSite(url, { canaries, agent: taskAgentVisit(() => new ScriptedModel([() => ({ calls: [{ name: "needs_input", arguments: { question: "The site wants a code sent to a real phone." } }] })])) });
 			expect(asks.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "The site wants a code sent to a real phone." } });
 			const scroll: ScriptedTurn = () => ({ calls: [{ name: "scroll", arguments: { direction: "down" } }] });
-			const looping = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => new ScriptedModel(Array.from({ length: VISIT_MAX_STEPS }, () => scroll))) });
+			const { recording: looping } = await walkSite(url, { canaries, agent: taskAgentVisit(() => new ScriptedModel(Array.from({ length: VISIT_MAX_STEPS }, () => scroll))) });
 			expect(looping.agent).toMatchObject({ outcome: "failed", failure: `step_limit: Stopped after ${VISIT_MAX_STEPS} steps without finishing.` });
 		} finally {
-			await archive.session?.close();
 			server.stop(true);
 		}
 	}, 60_000);
@@ -525,9 +518,8 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 				return { calls: [{ name: "done", arguments: { result: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Signed in after the CAPTCHA." }, summary: "Done." } }] };
 			},
 		]);
-		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
 		try {
-			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model) });
+			const { recording } = await walkSite(url, { canaries, agent: taskAgentVisit(() => model) });
 			expect(recording.agent).toMatchObject({ outcome: "completed", report: { blockedByChallenge: false, stoppedReason: "Signed in after the CAPTCHA." } });
 			// A page's own text CAPTCHA is the agent's to answer, never handed back.
 			expect(model.seen()).toContain("A text or arithmetic CAPTCHA the page draws itself gets up to 3 attempts");
@@ -539,7 +531,6 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			expect(recording.requests.find((request) => request.method === "POST" && request.url === `${url}collect`)).toBeDefined();
 			expect(model.seen()).not.toContain(canaries.password);
 		} finally {
-			await archive.session?.close();
 			server.stop(true);
 		}
 	}, 60_000);
@@ -559,15 +550,13 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			},
 			() => ({ calls: [{ name: "done", arguments: { result: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "The kit rejected the email." }, summary: "Done." } }] }),
 		]);
-		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
 		try {
-			const recording = await archive.session!.visit({ canaries, agent: taskAgentVisit(() => model) });
+			const { recording } = await walkSite(url, { canaries, agent: taskAgentVisit(() => model) });
 			expect(recording.agent).toMatchObject({ outcome: "completed", report: { stoppedReason: "The kit rejected the email." } });
 			expect(model.seen()).toContain("The browser is already on its page (blob:http://127.0.0.1:");
 			expect(posts.map((body) => new URLSearchParams(body).get("email"))).toEqual([canaries.email]);
 			expect(recording.requests.filter((request) => request.method === "POST").map((request) => request.url)).toEqual([url.replace("wp-blog.html", "collect")]);
 		} finally {
-			await archive.session?.close();
 			server.stop(true);
 		}
 	}, 60_000);
@@ -576,29 +565,32 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 		const { server, url } = serveKit();
 		const canaries = createExfiltrationCanaries();
 		const agent: VisitAgent = async () => { throw new Error("no CDP connection is free"); };
-		const archive = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
 		try {
-			expect((await archive.session!.visit({ canaries, agent })).agent).toMatchObject({ outcome: "failed", failure: "no CDP connection is free" });
+			expect((await walkSite(url, { canaries, agent })).recording.agent).toMatchObject({ outcome: "failed", failure: "no CDP connection is free" });
 		} finally {
-			await archive.session?.close();
 			server.stop(true);
 		}
 	}, 60_000);
 });
 
 describe.skipIf(!chromiumAvailable)("the capture's browser around a visit, in a real browser", () => {
-	test("a capture made without keepSession closes its browser; a closed session cannot be visited", async () => {
+	test("a visit closes its browser whether it walks or not, and when its walk throws", async () => {
 		const { server, url } = serveKit();
 		try {
 			const browsers: Array<{ connected: boolean }> = [];
-			const plain = await archiveWebsite({ url }, { ...fast, getBrowser: async () => { const browser = await launchTestChromium(); browsers.push(browser); return browser; } });
-			expect(plain.session).toBeUndefined();
+			const dependencies = { ...fast, getBrowser: async () => { const browser = await launchTestChromium(); browsers.push(browser); return browser; } };
+			const canaries = createExfiltrationCanaries();
+
+			const plain = await visitSite({ url }, dependencies);
+			expect(plain.recording).toBeUndefined();
 			expect(browsers.map((browser) => browser.connected)).toEqual([false]);
 
-			const kept = await archiveWebsite({ url, keepSession: true }, { ...fast, getBrowser: () => launchTestChromium() });
-			await kept.session!.close();
-			await kept.session!.close();
-			await expect(kept.session!.visit({ canaries: createExfiltrationCanaries(), agent: taskAgentVisit(() => new ScriptedModel([])) })).rejects.toThrow("The capture's browser is already closed.");
+			const walked = await visitSite({ url, walk: () => ({ canaries, agent: taskAgentVisit(() => new ScriptedModel([() => ({ calls: [{ name: "done", arguments: { result: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Looked." }, summary: "Done." } }] })])) }) }, dependencies);
+			expect(walked.recording?.agent).toMatchObject({ outcome: "completed" });
+			expect(browsers.map((browser) => browser.connected)).toEqual([false, false]);
+
+			await expect(visitSite({ url, walk: () => { throw new Error("the walk could not be planned"); } }, dependencies)).rejects.toThrow("the walk could not be planned");
+			expect(browsers.map((browser) => browser.connected)).toEqual([false, false, false]);
 		} finally {
 			server.stop(true);
 		}

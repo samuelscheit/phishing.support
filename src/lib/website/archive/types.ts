@@ -1,6 +1,7 @@
 import type { FabricEgress } from "../../browser/fabric";
 import type { BrowserIdentity, getBrowser } from "../../browser";
 import type { ExfiltrationCanaries } from "../../exfiltration/types";
+import type { confirmHostNxdomain } from "../../network/dead_dns";
 import type { VisitAgent } from "../../site_visit/agent";
 import type { SiteVisitLiveEvent, SiteVisitRecording } from "../../site_visit/visit";
 import type { VisitControl } from "../../site_visit/control";
@@ -48,44 +49,14 @@ export type WebsiteArchiveResult = {
 	documentHtml?: string;
 	/** Non-empty when an uploaded snapshot claims a different host than the submitted target. */
 	attributionError?: string;
-	/** The open browser of a live capture made with `keepSession`. */
-	session?: WebsitePageSession;
 };
 
-/**
- * A live capture's browser, kept open on the captured page: the flow acts on
- * that page as a visitor would (same cookies, same session, same variant of
- * a kit that changes per visit) and captures what it then shows.
- */
-export type WebsitePageSession = {
-	/**
-	 * Walk the site from the captured page with the visiting agent, recording
-	 * each page it reaches (its hops start where the step before ended), the
-	 * network traffic, and every download.
-	 */
-	visit(params: WebsiteVisitParams): Promise<SiteVisitRecording<WebsiteArchiveResult>>;
-	/** Release the browser; later calls do nothing. */
-	close(): Promise<void>;
-};
-
-export type WebsiteVisitParams = {
-	canaries: ExfiltrationCanaries;
-	agent: VisitAgent;
-	/** Extra instructions for the visiting agent, on top of the walk itself. */
-	instructions?: string;
-	live?: (event: SiteVisitLiveEvent) => void;
-	/** Lets people watching the visit drive it. */
-	control?: VisitControl;
-	signal?: AbortSignal;
-};
-
-export type ArchiveWebsiteOptions = {
-	/** Raw MHTML (decoded bytes). It is parsed locally; Fabric browsers never receive an app-local file:// URL. */
-	mhtmlSnapshot?: Buffer;
+/** A stored MHTML snapshot to read as a capture, with what is known of the page it holds. */
+export type MhtmlSnapshotOptions = {
+	/** Raw MHTML (decoded bytes), parsed locally: no browser ever loads it. */
+	mhtmlSnapshot: Buffer;
 	/** Original user-submitted URL. */
 	url: string;
-	/** The page whose link a live capture follows; the browser sends it as the Referer, as a visitor's would. */
-	referrer?: string;
 	/** Original location represented by the retained MHTML document, when known. */
 	archivedUrl?: string;
 	/** Exact response hops associated with the retained MHTML document, when known. */
@@ -98,29 +69,63 @@ export type ArchiveWebsiteOptions = {
 	kitResources?: WebsiteKitResource[];
 	/** Hidden frames the original live capture of the retained MHTML recorded. */
 	hiddenFrames?: WebsiteHiddenFrame[];
-	/** The browser a live capture presents, and the retained MHTML was captured with. */
+	/** The browser the retained MHTML was captured with. */
 	device?: WebsiteDevice;
-	/** The reporter's own browser, which a desktop capture presents instead of Google Chrome on Windows. */
+};
+
+/** How a site visit walks on from its first page: the visiting agent, in the same browser and tab. */
+export type SiteWalk = {
+	canaries: ExfiltrationCanaries;
+	agent: VisitAgent;
+	/** Extra instructions for the visiting agent, on top of the walk itself. */
+	instructions?: string;
+	live?: (event: SiteVisitLiveEvent) => void;
+};
+
+export type SiteVisitOptions = {
+	url: string;
+	/** The browser the visit presents; a phone ignores `visitor`. */
+	device?: WebsiteDevice;
+	/** The reporter's own browser, which a desktop visit presents instead of Google Chrome on Windows. */
 	visitor?: BrowserIdentity;
 	/**
-	 * Keep the live capture's browser open as the result's `session`, so the
-	 * caller can act on the captured page in the same visit; the caller closes it.
-	 */
-	keepSession?: boolean;
-	/**
-	 * Capture over this route only, without the fallbacks across routes: the
+	 * Visit over this route only, without the fallbacks across routes: the
 	 * visit a CAPTCHA or browser check blocked is repeated from another network.
 	 */
 	egress?: FabricEgress;
+	/**
+	 * The live view of the visit, opened by the caller in `loading` mode: its
+	 * viewers watch every route's browser load the site, then the walk.
+	 * The caller closes it.
+	 */
+	control?: VisitControl;
+	/** Cancels the visit at its next step: no further browser, wait or walk. */
+	signal?: AbortSignal;
+	/** Waits between attempts to load the site after a browser-service failure (`withBrowserBackoff`); none by default. */
+	backoffMs?: readonly number[];
+	/**
+	 * Decide from the first page (step 0) whether the visiting agent walks
+	 * on, in the same browser: a walk, or nothing to stop there (no agent,
+	 * no model cost). Called for every first page, a decoy too, but a decoy
+	 * (`cloaking.outcome === "unresolved"`) is never walked: the agent would
+	 * only walk the decoy.
+	 */
+	walk?: (initial: WebsiteArchiveResult) => Promise<SiteWalk | undefined> | SiteWalk | undefined;
 };
 
-export type WebsiteArchiveDependencies = {
+/** A site visit: its first page, and the walk from it when there was one. */
+export type SiteVisit = {
+	initial: WebsiteArchiveResult;
+	recording?: SiteVisitRecording<WebsiteArchiveResult>;
+};
+
+export type SiteVisitDependencies = {
 	getBrowser?: typeof getBrowser;
+	/** Whether a host every route failed to tunnel to is gone from DNS. */
+	confirmHostNxdomain?: typeof confirmHostNxdomain;
 	/** Test seam for the bounded wait on a self-replacing HTTP error document. */
 	errorDocumentSettleMs?: number;
-	/** Test seam for the bounded wait on a page's own script navigation. */
-	scriptNavigationSettleMs?: number;
-	/** Test seam for the bounded wait on the captured document's own rendering requests. */
+	/** Test seam for the bounded wait on the document's own rendering requests (network idle). */
 	renderSettleMs?: number;
 	/** Test seam for how long one screenshot may take before the page is captured without one. */
 	screenshotTimeoutMs?: number;

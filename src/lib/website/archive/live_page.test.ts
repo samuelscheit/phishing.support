@@ -1,8 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { sha256Hex } from "../../util/hash";
-import { archiveWebsite } from "./";
-import { archiveBrowserFixture, BLANK_PNG, fast, PAINTED_PNG, responseForNavigation, subresource } from "./test_fixture";
+import { archiveBrowserFixture, BLANK_PNG, fast, PAINTED_PNG, responseForNavigation, subresource, firstPage } from "./test_fixture";
 
 test("a live capture records the hashes of every host's scripts and stylesheets as received", async () => {
 	const url = "https://kit.example.com/signin";
@@ -23,30 +22,11 @@ test("a live capture records the hashes of every host's scripts and stylesheets 
 			return responseForNavigation(url, 200, { contentType: "text/html" });
 		},
 	});
-	const archive = await archiveWebsite({ url }, { getBrowser: fixture.getBrowser, ...fast });
+	const archive = await firstPage({ url }, { getBrowser: fixture.getBrowser, ...fast });
 	expect(archive.kitResources).toEqual([
 		{ url: "https://kit.example.com/index.js?v=2", mimeType: "application/javascript", size: Buffer.byteLength(script), sha256: sha256Hex(script) },
 		{ url: "https://kit.example.com/res/style.css", mimeType: "text/css", size: Buffer.byteLength(style), sha256: sha256Hex(style) },
 		{ url: "https://backend.example.net/gmail/js/start.js", mimeType: "application/javascript", size: 5, sha256: sha256Hex("start") },
-	]);
-});
-
-test("a followed link is opened with the page that showed it as the Referer, on every route", async () => {
-	const url = "https://kit.example.com/secure.html";
-	const referrer = "https://kit.example.com/Access.html";
-	const fixture = archiveBrowserFixture({
-		goto: async ({ url: requested, egress }) => {
-			if (egress !== "reporting") throw new Error(`net::ERR_CONNECTION_CLOSED at ${requested}`);
-			return responseForNavigation(requested, 200, { contentType: "text/html" });
-		},
-	});
-	const archive = await archiveWebsite({ url, referrer }, { getBrowser: fixture.getBrowser, ...fast });
-
-	expect(archive.url).toBe(url);
-	expect(fixture.navigationCalls.map(({ egress, referer }) => ({ egress, referer }))).toEqual([
-		{ egress: "residential", referer: referrer },
-		{ egress: "phishing", referer: referrer },
-		{ egress: "reporting", referer: referrer },
 	]);
 });
 
@@ -66,7 +46,7 @@ test("website capture records every redirect response separately from the final 
 			],
 		}),
 	});
-	const archive = await archiveWebsite(
+	const archive = await firstPage(
 		{ url: requestedUrl },
 		{ ...fast, getBrowser: fixture.getBrowser },
 	);
@@ -93,7 +73,7 @@ test("website capture records every redirect response separately from the final 
 test("a blank screenshot of a page that shows text is taken again once the page has painted", async () => {
 	const fixture = archiveBrowserFixture({ screenshots: [BLANK_PNG, BLANK_PNG, PAINTED_PNG] });
 
-	const archive = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: fixture.getBrowser });
+	const archive = await firstPage({ url: "https://example.test/" }, { ...fast, getBrowser: fixture.getBrowser });
 
 	expect(fixture.screenshotCount).toBe(3);
 	expect(archive.screenshotPng?.equals(PAINTED_PNG)).toBeTrue();
@@ -104,35 +84,35 @@ test("a page that cannot be pictured is captured without a screenshot, not faile
 	// Production case 380167497774534682: a redirect script whose target answered 204 left a
 	// document whose screenshots Chromium refused ("0 width") or never answered.
 	const refused = archiveBrowserFixture({ screenshots: [new Error("Protocol error (Page.captureScreenshot): Cannot take screenshot with 0 width.")] });
-	const refusedArchive = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: refused.getBrowser });
+	const refusedArchive = await firstPage({ url: "https://example.test/" }, { ...fast, getBrowser: refused.getBrowser });
 	expect(refusedArchive.screenshotPng).toBeUndefined();
 	expect(refusedArchive.mhtml.toString()).toContain("Captured page text");
 
 	const hung = archiveBrowserFixture({ screenshots: ["hang"] });
 	const started = Date.now();
-	const hungArchive = await archiveWebsite({ url: "https://example.test/" }, { ...fast, screenshotTimeoutMs: 50, getBrowser: hung.getBrowser });
+	const hungArchive = await firstPage({ url: "https://example.test/" }, { ...fast, screenshotTimeoutMs: 50, getBrowser: hung.getBrowser });
 	expect(hungArchive.screenshotPng).toBeUndefined();
 	expect(hungArchive.text.toString()).toContain("Captured page text");
 	expect(Date.now() - started).toBeLessThan(5_000);
 
 	// A page too tall for one picture (a tarpit streaming visible filler) is pictured as far as the visitor sees it.
 	const tall = archiveBrowserFixture({ screenshots: [new Error("Protocol error (Page.captureScreenshot): Page is too large."), PAINTED_PNG] });
-	const tallArchive = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: tall.getBrowser });
+	const tallArchive = await firstPage({ url: "https://example.test/" }, { ...fast, getBrowser: tall.getBrowser });
 	expect(tallArchive.screenshotPng?.equals(PAINTED_PNG)).toBeTrue();
 	expect(tall.screenshotFullPage).toEqual([true, false]);
 	// The viewport refused too is a browser failure like any other.
 	const tallBroken = archiveBrowserFixture({ screenshots: [new Error("Page is too large."), new Error("Page is too large.")] });
-	await expect(archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: tallBroken.getBrowser })).rejects.toThrow("Page is too large");
+	await expect(firstPage({ url: "https://example.test/" }, { ...fast, getBrowser: tallBroken.getBrowser })).rejects.toThrow("Page is too large");
 
 	// Any other screenshot failure is still the browser's, and fails the capture.
 	const closed = archiveBrowserFixture({ screenshots: [new Error("Protocol error (Page.captureScreenshot): Target closed")] });
-	await expect(archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: closed.getBrowser })).rejects.toThrow("Target closed");
+	await expect(firstPage({ url: "https://example.test/" }, { ...fast, getBrowser: closed.getBrowser })).rejects.toThrow("Target closed");
 });
 
 test("a page that stays blank is captured blank after a bounded number of attempts", async () => {
 	const fixture = archiveBrowserFixture({ screenshots: [BLANK_PNG] });
 
-	const archive = await archiveWebsite({ url: "https://example.test/" }, { ...fast, getBrowser: fixture.getBrowser });
+	const archive = await firstPage({ url: "https://example.test/" }, { ...fast, getBrowser: fixture.getBrowser });
 
 	expect(fixture.screenshotCount).toBe(4);
 	expect(archive.screenshotPng?.equals(BLANK_PNG)).toBeTrue();

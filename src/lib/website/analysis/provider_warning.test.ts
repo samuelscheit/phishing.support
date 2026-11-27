@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { archiveWebsite } from "../archive";
+import { firstPage } from "../archive/test_fixture";
 import { chromiumAvailable, launchTestChromium } from "../../browser/task/test_helpers";
 
-const fast = { scriptNavigationSettleMs: 20, renderSettleMs: 1_000 } as const;
+const fast = { renderSettleMs: 1_000 } as const;
 
 const html = (body: string, init: ResponseInit = {}, title = "RBXCore — Game Copier") => new Response(`<!DOCTYPE html><html><head><title>${title}</title></head><body>${body}</body></html>`, { ...init, headers: { "content-type": "text/html; charset=utf-8", ...init.headers } });
 
@@ -40,7 +40,7 @@ describe.skipIf(!chromiumAvailable)("a provider's warning page before the site, 
 			"/cdn-cgi/phish-bypass": (request) => new Response(null, { status: 302, headers: { location: new URL(request.url).searchParams.get("original_path")!, "set-cookie": "cf_bypass=1; path=/" } }),
 		});
 		try {
-			const archive = await archiveWebsite({ url: `${origin}/game-copier/` }, { ...fast, getBrowser: () => launchTestChromium(), errorDocumentSettleMs: 5_000 });
+			const archive = await firstPage({ url: `${origin}/game-copier/` }, { ...fast, getBrowser: () => launchTestChromium(), errorDocumentSettleMs: 5_000 });
 			expect(archive.providerWarning).toEqual({ provider: "Cloudflare", warning: "Suspected Malware" });
 			expect(archive.text.toString()).toContain("Game to Studio. One export.");
 			expect(archive.navigationHops.at(-1)).toMatchObject({ url: `${origin}/game-copier/`, status: 200, contentCaptured: true });
@@ -65,7 +65,7 @@ setTimeout(() => { document.getElementById("bypass-button").disabled = false; do
 			"/cdn-cgi/phish-bypass": (request) => new Response(null, { status: 302, headers: { location: new URL(request.url).searchParams.get("original_path")!, "set-cookie": "cf_bypass=1; path=/" } }),
 		});
 		try {
-			const archive = await archiveWebsite({ url: `${origin}/login/` }, { ...fast, getBrowser: () => launchTestChromium(), errorDocumentSettleMs: 5_000 });
+			const archive = await firstPage({ url: `${origin}/login/` }, { ...fast, getBrowser: () => launchTestChromium(), errorDocumentSettleMs: 5_000 });
 			expect(archive.providerWarning).toEqual({ provider: "Cloudflare", warning: "Suspected Phishing" });
 			expect(archive.text.toString()).toContain("Sign in");
 			expect(hits).toContain("/cdn-cgi/phish-bypass");
@@ -77,7 +77,7 @@ setTimeout(() => { document.getElementById("bypass-button").disabled = false; do
 	test("an ordinary error page is no warning to dismiss", async () => {
 		const { server, origin } = serve({ "/": () => html("<h1>Forbidden</h1><form action=/search><button>Search</button></form>", { status: 403 }) });
 		try {
-			await expect(archiveWebsite({ url: `${origin}/` }, { ...fast, getBrowser: () => launchTestChromium(), errorDocumentSettleMs: 500 })).rejects.toThrow("HTTP 403");
+			await expect(firstPage({ url: `${origin}/` }, { ...fast, getBrowser: () => launchTestChromium(), errorDocumentSettleMs: 500 })).rejects.toThrow("HTTP 403");
 		} finally {
 			server.stop(true);
 		}

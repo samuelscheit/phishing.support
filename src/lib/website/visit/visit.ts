@@ -1,11 +1,11 @@
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "../../browser/fabric";
-import type { ArchiveWebsiteOptions } from "../archive/types";
+import type { SiteVisitOptions } from "../archive/types";
+import { visitSite } from "../archive/visit_site";
 import { errorText } from "../../util/error_text";
-import type { WebsiteCloakedDestination, WebsiteRevisit, VisitDataSent, WebsiteKitResource, WebsiteNavigationHop, WebsiteSiteAssessment, WebsiteSiteClassification, WebsiteVisitRecord } from "../types";
+import type { WebsiteCloakedDestination, WebsiteDevice, WebsiteRevisit, VisitDataSent, WebsiteKitResource, WebsiteNavigationHop, WebsiteSiteAssessment, WebsiteSiteClassification, WebsiteVisitRecord } from "../types";
 import { cloakedDestination, WEBSITE_CAPTURE_EGRESS } from "../archive/cloaking";
 import { VISIT_BUDGET_MS } from "../../site_visit/visit_task";
 import { ArtifactsEntity } from "../../db/entities/artifacts";
-import type { getInfo } from "../info/info";
 import { runStreamedAnalysisRun } from "../../analysis/run";
 import { publishEvent } from "../../event/event_transport";
 import { defaultResponseModel } from "../../openai/client";
@@ -18,7 +18,7 @@ import { taskAgentVisit } from "../../site_visit/agent";
 import { visitAccessSteps } from "../../site_visit/access_steps";
 import { visitNavigation, visitPages, type VisitPage } from "../../site_visit/evidence";
 import type { SiteVisitLiveEvent, SiteVisitRecording } from "../../site_visit/visit";
-import { closeVisitControl, openVisitControl } from "../../site_visit/control";
+import { closeVisitControl, openVisitControl, type VisitControl } from "../../site_visit/control";
 import type { NarrativeVisitPage } from "../analysis/narrative";
 import { isWebPage } from "../../network/web_page";
 import { lookupDomainRegistration } from "../info/domain_registration";
@@ -135,16 +135,10 @@ export type WebsiteVisitResult = {
 	cloakedDestination?: WebsiteCloakedDestination;
 };
 
-/**
- * Walk the chain with the visiting agent from the captured page, as its
- * victim would, across every site it leads to, then judge what the visit
- * recorded: each page in the order it was shown, with the synthetic values it
- * sent off and the file it made the visitor download. Each site's verdict is
- * its first reportable page, else its last page shown; a site already found
- * reportable is not judged again. A site that turns desktops away is visited
- * again as a phone.
- */
-export async function visitWebsite(params: {
+/** What each live visit of a walk presents and where it comes from, given what the walk asks for: a phone, a network. */
+export type WalkBrowser = (wanted: { device?: WebsiteDevice; egress?: FabricEgress }) => Pick<SiteVisitOptions, "visitor" | "device" | "egress" | "backoffMs">;
+
+type WalkParams = {
 	submissionId: bigint;
 	/** The route of the case this walk is: its files are named after it. */
 	route: number;
@@ -154,45 +148,109 @@ export async function visitWebsite(params: {
 	 * a sampled visit of a rotating link stays on the network it came from.
 	 */
 	networks?: readonly FabricEgress[];
+	/** The submitted URL. */
 	url: string;
 	/** The reporter's instructions: the browser's for every visit of the walk, revisits too, the analysis's for each classification. */
 	instructions?: ReporterInstructions;
-	whois: Awaited<ReturnType<typeof getInfo>>;
-	archive: WebsiteCapture;
+	browser: WalkBrowser;
 	dependencies: WebsiteAnalysisDependencies;
-	capture: (options: ArchiveWebsiteOptions) => Promise<WebsiteCapture>;
-	/** The revisit that led to this capture, when it is one. */
+	/**
+	 * The walk's first page when the case holds it already (an MHTML the
+	 * reporter uploaded, a stored capture a retry analyzes): the walk loads
+	 * its address live and walks on from there, and this page is its step 0.
+	 */
+	stored?: WebsiteCapture;
+	/**
+	 * The walk's first page (step 0), stored or live: keep it with the case
+	 * and say whether the walk goes on in the same browser. A live decoy is
+	 * never walked, whatever it says.
+	 */
+	onInitialPage?: (first: WebsiteCapture) => Promise<boolean>;
+	/** The live view of the walk's first visit, opened in `loading` mode by the caller; each revisit opens its own. */
+	control?: VisitControl;
+	/** The address the walk loads; the stored page's, else the submitted URL. */
+	start?: string;
+	/** The device the walk presents: a phone after a site turned desktops away. */
+	device?: WebsiteDevice;
+	/** The revisit that led to this walk, when it is one. */
 	revisit?: Revisit;
 	/** A visit before this one was blocked by a challenge and opened again from another network; it is not repeated twice. */
 	challengeRetried?: boolean;
-	/** The network every later capture of the visit uses: the one a challenge let through. */
+	/** The network every later visit of the walk uses: the one a challenge let through. */
 	egress?: FabricEgress;
 	/** The walks of this flow so far when its destination cloaked them: the networks that were turned away, those that could not be tried, and when the first walk began. */
 	cloaked?: { answered: FabricEgress[]; notTried: Array<{ network: string; reason: string }>; startedAt: number };
-}): Promise<WebsiteVisitResult> {
-	const { submissionId, url, whois, dependencies, capture } = params;
-	const first = params.archive;
-	const device = first.device ? { device: first.device } : {};
-	const route = params.egress ? { egress: params.egress } : {};
-	await emitStep(submissionId, "site_visit", 45);
-	const flowStartedAt = Date.now();
-	// A page from a stored capture is loaded live first: the visit walks the live site.
-	const walked = first.session ? first : await capture({ url: first.url, ...device, ...route });
-	const { session } = walked;
-	const canaries = createExfiltrationCanaries();
-	const agent = dependencies.visitAgent ?? taskAgentVisit();
-	const empty: SiteVisitRecording<WebsiteCapture> = { startedAt: new Date(), steps: [], requests: [], downloads: [], downloadFailures: [], clipboardWrites: [], agent: { outcome: "failed", failure: "The page could not be loaded live for the visit.", actions: [] } };
-	const live = (event: SiteVisitLiveEvent) => { void publishEvent(`run:${submissionId}`, event); };
-	// Anyone watching the case's live visit may drive it for a while.
-	const control = session ? openVisitControl(String(submissionId), live) : undefined;
-	const recording = session
-		? await session.visit({ canaries, agent, ...(params.instructions?.browser ? { instructions: params.instructions.browser } : {}), live, control }).finally(() => closeVisitControl(control!)) as SiteVisitRecording<WebsiteCapture>
-		: empty;
+};
+
+/** One live visit of a walk: its first page (step 0), the network it came from, and its recording, absent when a decoy was not walked. */
+type LiveWalk = { first: WebsiteCapture; egress?: FabricEgress; canaries: ExfiltrationCanaries; recording?: SiteVisitRecording<WebsiteCapture>; startedAt: number };
+
+/** The live view of a case's visit: viewers watch it from before its browser starts, and may drive it once its agent walks. */
+export function openLiveView(submissionId: bigint): VisitControl {
+	return openVisitControl(String(submissionId), liveEvents(submissionId), { mode: "loading", status: "Starting the visit…" });
+}
+
+const liveEvents = (submissionId: bigint) => (event: SiteVisitLiveEvent) => { void publishEvent(`run:${submissionId}`, event); };
+
+/**
+ * Walk the chain with the visiting agent from the site's first page, as its
+ * victim would, across every site it leads to, in the one browser that
+ * loaded it, then judge what the visit recorded: each page in the order it
+ * was shown, with the synthetic values it sent off and the file it made the
+ * visitor download. Each site's verdict is its first reportable page, else
+ * its last page shown; a site already found reportable is not judged again.
+ * A site that turns desktops away is visited again as a phone. Returns
+ * nothing when `onInitialPage` stopped the walk at its first page.
+ */
+export async function visitWebsite(params: WalkParams): Promise<WebsiteVisitResult | undefined> {
+	const walk = await walkLive(params);
+	return walk && judgeWalk(params, walk);
+}
+
+/**
+ * Open the walk's address live and walk on from its first page, in the same
+ * browser, unless `onInitialPage` stops it there (undefined). The live view
+ * runs from before the browser starts until the walk ended.
+ */
+async function walkLive(params: WalkParams): Promise<LiveWalk | undefined> {
+	const { submissionId, dependencies, stored, onInitialPage } = params;
+	const startedAt = Date.now();
+	const control = params.control ?? openLiveView(submissionId);
+	try {
+		if (stored && onInitialPage && !await onInitialPage(stored)) return undefined;
+		const canaries = createExfiltrationCanaries();
+		let stopped = false;
+		const visit = await (dependencies.visitSite ?? visitSite)({
+			url: params.start ?? stored?.url ?? params.url,
+			...params.browser({ device: params.device ?? stored?.device, egress: params.egress }),
+			control,
+			...(dependencies.signal ? { signal: dependencies.signal } : {}),
+			walk: async (initial) => {
+				if (!stored && onInitialPage && !await onInitialPage(initial)) {
+					stopped = true;
+					return undefined;
+				}
+				await emitStep(submissionId, "site_visit", 45);
+				return { canaries, agent: dependencies.visitAgent ?? taskAgentVisit(), ...(params.instructions?.browser ? { instructions: params.instructions.browser } : {}), live: liveEvents(submissionId) };
+			},
+		});
+		if (stopped) return undefined;
+		return { first: stored ?? visit.initial, egress: visit.initial.egress, canaries, startedAt, ...(visit.recording ? { recording: visit.recording } : {}) };
+	} finally {
+		await closeVisitControl(control);
+	}
+}
+
+/** Judge what one live walk recorded, and walk again (as a phone, from another network) when the site asks for it. */
+async function judgeWalk(params: WalkParams, walk: LiveWalk): Promise<WebsiteVisitResult> {
+	const { submissionId, url, dependencies } = params;
+	const { first, canaries } = walk;
+	const recording = walk.recording ?? notWalked;
 
 	const pages = visitPages<WebsiteCapture>(first, recording, canaries);
 	const record = visitRecord(recording, pages);
 	// A visit that walked the live site is evidence of how the values were entered and where they went.
-	if (session) await saveVisitEvidence({ submissionId, route: params.route, url, device: first.device, recording, pages, canaries, dependencies });
+	if (walk.recording) await saveVisitEvidence({ submissionId, route: params.route, url, device: first.device, recording, pages, canaries, dependencies });
 	const backends = discoverExfiltrationBackends({ requests: recording.requests, canaries, pageUrl: url });
 	const base = { backends, requests: recording.requests, canaries, record };
 
@@ -288,13 +346,15 @@ export async function visitWebsite(params: {
 	const { classification } = verdicts.get(websiteSite(capturedHop.url))!;
 	// A destination that answered empty and sent the visit back turned this network away:
 	// the whole flow is walked again through the others, the gate passed again in each.
+	// Every walk again starts where this one did, as this one's browser and device, its first page and live view its own.
+	const walkAgain = (next: Partial<WalkParams>): WalkParams => ({ ...params, stored: undefined, onInitialPage: undefined, control: undefined, start: first.url, device: first.device, ...next });
 	const cloak = cloakedDestination(visitNavigation(pages), url);
 	if (cloak) {
-		const answered = [...(params.cloaked?.answered ?? []), walked.egress ?? params.egress ?? WEBSITE_CAPTURE_EGRESS[0]!];
+		const answered = [...(params.cloaked?.answered ?? []), walk.egress ?? params.egress ?? WEBSITE_CAPTURE_EGRESS[0]!];
 		const notTried = [...(params.cloaked?.notTried ?? [])];
-		const startedAt = params.cloaked?.startedAt ?? flowStartedAt;
+		const startedAt = params.cloaked?.startedAt ?? walk.startedAt;
 		const reopened = { ...capturedHop, url: first.url };
-		// Every network the capture would try, in its order.
+		// Every network the visit would try, in its order.
 		for (const egress of (params.networks ?? WEBSITE_CAPTURE_EGRESS).filter((candidate) => !answered.includes(candidate) && !notTried.some(({ network }) => network === FABRIC_EGRESS_LABEL[candidate]))) {
 			const network = FABRIC_EGRESS_LABEL[egress];
 			if (Date.now() - startedAt >= (dependencies.cloakedFlowBudgetMs ?? VISIT_BUDGET_MS)) {
@@ -302,16 +362,14 @@ export async function visitWebsite(params: {
 				continue;
 			}
 			await emitStep(submissionId, "revisit_cloaked_destination", 72);
-			// One capture browser at a time: the residential exit is a single connection.
-			await session?.close();
-			const retried = await capture({ url: first.url, ...device, egress }).catch((error: unknown) => {
+			const next = walkAgain({ egress, cloaked: { answered, notTried, startedAt }, revisit: again(reopened, { reason: "destination_cloaked", route: network, site: cloak.site }) });
+			const retried = await walkLive(next).catch((error: unknown) => {
+				dependencies.signal?.throwIfAborted();
 				console.warn(`Walking ${first.url} again from the ${network} failed: ${errorText(error)}`);
 				notTried.push({ network, reason: errorText(error) });
 				return undefined;
 			});
-			if (retried) {
-				return visitWebsite({ ...params, archive: retried, egress, cloaked: { answered, notTried, startedAt }, revisit: again(reopened, { reason: "destination_cloaked", route: network, site: cloak.site }) });
-			}
+			if (retried) return judgeWalk(next, retried);
 		}
 		const cloakedRecord: WebsiteCloakedDestination = { host: cloak.host, site: cloak.site, answered: answered.map((egress) => FABRIC_EGRESS_LABEL[egress]), notTried };
 		return { ...judged, archive, capturedHop, classification, cloakedDestination: cloakedRecord };
@@ -319,30 +377,26 @@ export async function visitWebsite(params: {
 	// A site that turns desktops away shows the phone something else.
 	if (asksForPhone && !first.device) {
 		await emitStep(submissionId, "revisit_as_phone", 72);
-		// One capture browser at a time: the residential exit is a single connection.
-		await session?.close();
-		const phone = await capture({ url: first.url, device: "iphone", ...route });
-		return visitWebsite({ ...params, archive: phone, revisit: again(capturedHop, { reason: "phone", device: "iphone" }) });
+		const next = walkAgain({ device: "iphone", revisit: again(capturedHop, { reason: "phone", device: "iphone" }) });
+		return judgeWalk(next, (await walkLive(next))!);
 	}
 	// A challenge that would not clear for this network may let the residential exit through.
-	// A capture that already came from there was decoyed or turned away everywhere else.
+	// A visit that already came from there was decoyed or turned away everywhere else.
 	const challenge = recording.agent.report?.blockedByChallenge;
 	let unreached: string | undefined;
-	if (challenge && !params.challengeRetried && walked.egress !== CHALLENGE_RETRY_EGRESS && (params.networks ?? WEBSITE_CAPTURE_EGRESS).includes(CHALLENGE_RETRY_EGRESS)) {
+	if (challenge && !params.challengeRetried && walk.egress !== CHALLENGE_RETRY_EGRESS && (params.networks ?? WEBSITE_CAPTURE_EGRESS).includes(CHALLENGE_RETRY_EGRESS)) {
 		await emitStep(submissionId, "revisit_from_other_exit", 72);
-		// One capture browser at a time: the residential exit is a single connection.
-		await session?.close();
-		const retried = await capture({ url: first.url, ...device, egress: CHALLENGE_RETRY_EGRESS }).catch((error: unknown) => {
+		// The page reopened is the one the visit started at, which the blocked page was reached from.
+		const reopened = { ...capturedHop, url: first.url };
+		const next = walkAgain({ challengeRetried: true, egress: CHALLENGE_RETRY_EGRESS, revisit: again(reopened, { reason: "challenge", route: FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS] }) });
+		const retried = await walkLive(next).catch((error: unknown) => {
+			dependencies.signal?.throwIfAborted();
 			// The other network failing, whatever the reason, leaves the blocked visit's result.
 			console.warn(`Revisiting ${first.url} from the ${FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS]} failed: ${errorText(error)}`);
 			unreached = errorText(error);
 			return undefined;
 		});
-		if (retried) {
-			// The page reopened is the one the visit started at, which the blocked page was reached from.
-			const reopened = { ...capturedHop, url: first.url };
-			return visitWebsite({ ...params, archive: retried, challengeRetried: true, egress: CHALLENGE_RETRY_EGRESS, revisit: again(reopened, { reason: "challenge", route: FABRIC_EGRESS_LABEL[CHALLENGE_RETRY_EGRESS] }) });
-		}
+		if (retried) return judgeWalk(next, retried);
 	}
 	// A visit that did not get past the site's challenge saw nothing of the site behind it.
 	const inconclusive = recording.agent.outcome !== "completed" ? recording.agent.failure ?? "The visiting agent did not finish the site's flow."
@@ -350,6 +404,17 @@ export async function visitWebsite(params: {
 		: undefined;
 	return { ...judged, archive, capturedHop, classification, ...(inconclusive ? { inconclusive } : {}) };
 }
+
+/** The recording of a visit whose live page was not walked: every network tried was shown a decoy. */
+const notWalked: SiteVisitRecording<WebsiteCapture> = {
+	startedAt: new Date(0),
+	steps: [],
+	requests: [],
+	downloads: [],
+	downloadFailures: [],
+	clipboardWrites: [],
+	agent: { outcome: "failed", failure: "Every network the visit tried was shown a decoy; the visiting agent did not walk it.", actions: [] },
+};
 
 /** The document's own title, as a visitor reads it in the tab. */
 function pageTitle(html: Buffer): string | undefined {

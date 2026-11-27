@@ -18,8 +18,8 @@ import { analyzeWebsite } from "./ai";
 import { reportableWebsiteHop } from "../info/report_hops";
 import { judgedChain } from "../test_helpers";
 import { buildWebsiteClassificationInput, buildWebsiteReportEvidence, validateWebsiteSiteClassification, websiteMobileHandoff } from "./classification";
-import { scriptedVisitSession } from "../../site_visit/test_helpers";
-import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "../archive/types";
+import { scriptedSiteVisit, type ScriptedPage } from "../../site_visit/test_helpers";
+import type { SiteVisitOptions } from "../archive/types";
 import type { WebsiteFrameRequest, WebsiteFrameResource, WebsiteHiddenFrame, WebsiteNavigationHop } from "../types";
 
 useTemporaryDatabase();
@@ -58,7 +58,7 @@ function loaderFrame(device: "desktop" | "iphone"): WebsiteHiddenFrame {
 	};
 }
 
-function capture(options: ArchiveWebsiteOptions): WebsiteArchiveResult {
+function capture(options: SiteVisitOptions): ScriptedPage {
 	const device = options.device === "iphone" ? "iphone" : "desktop";
 	const text = device === "iphone" ? CORUNA_LURE_TEXT.split("\n").slice(0, 4).join("\n") : CORUNA_LURE_TEXT;
 	return {
@@ -75,7 +75,7 @@ function capture(options: ArchiveWebsiteOptions): WebsiteArchiveResult {
 		hiddenFrames: [loaderFrame(device)],
 		...(device === "iphone" ? { device } : {}),
 		// The visit finds nothing beyond the captured page.
-		session: scriptedVisitSession(),
+		walk: {},
 	};
 }
 
@@ -104,7 +104,7 @@ function model(answers: { desktop: Answer; iphone: Answer }, prompts: string[] =
 	} as unknown as AnalysisClient;
 }
 
-async function analyze(id: bigint, answers: { desktop: Answer; iphone: Answer }, captures: ArchiveWebsiteOptions[] = [], prompts: string[] = []) {
+async function analyze(id: bigint, answers: { desktop: Answer; iphone: Answer }, captures: SiteVisitOptions[] = [], prompts: string[] = []) {
 	await SubmissionsEntity.create({ id, kind: "website", data: { kind: "website", website: { url: PAGE } }, dedupeKey: websiteSubmissionDedupeKey(`${PAGE}#${id}`), status: "running", source: PAGE });
 	await analyzeWebsite({ submissionId: id, url: PAGE }, {
 		getInfo: async () => ({ ip_rdaps: [] }),
@@ -112,10 +112,7 @@ async function analyze(id: bigint, answers: { desktop: Answer; iphone: Answer },
 		domainRegistration: async () => undefined,
 		timestampEvidence: async () => undefined,
 		browserBackoffMs: [1],
-		archiveWebsite: async (options) => {
-			captures.push(options);
-			return capture(options);
-		},
+		visitSite: scriptedSiteVisit(capture, { calls: captures }),
 	});
 	const submission = await SubmissionsEntity.get(id);
 	return { submission, website: submission?.data.kind === "website" ? submission.data.website : undefined };
@@ -125,7 +122,7 @@ const DRIVE_BY: Answer = { ...NOTHING, finding: "malware", evidenceQuote: LOADER
 
 describe("a mobile-only drive-by exploit kit (production case 377486973465530391)", () => {
 	test("the desktop decoy's phone hand-off is followed as an iPhone before its Verify button, and the loader in its hidden frame is reported as malware", async () => {
-		const captures: ArchiveWebsiteOptions[] = [];
+		const captures: SiteVisitOptions[] = [];
 		const prompts: string[] = [];
 		// The decoy also names its Verify button; the phone comes first.
 		const { submission, website } = await analyze(377486973465530391n, { desktop: { ...NOTHING, mobileHandoff: true }, iphone: DRIVE_BY }, captures, prompts);
@@ -182,7 +179,7 @@ describe("a mobile-only drive-by exploit kit (production case 377486973465530391
 	});
 
 	test("a desktop page that already shows a drive-by finding and does not hand off is reported as captured, without a phone visit", async () => {
-		const captures: ArchiveWebsiteOptions[] = [];
+		const captures: SiteVisitOptions[] = [];
 		const { submission, website } = await analyze(377486973465530392n, { desktop: DRIVE_BY, iphone: NOTHING }, captures);
 		expect(captures).toHaveLength(1);
 		expect(submission?.status).toBe("reported");
@@ -200,7 +197,7 @@ describe("a mobile-only drive-by exploit kit (production case 377486973465530391
 	});
 
 	test("a page captured as a phone is never handed off again, and its links are opened as that phone", async () => {
-		const captures: ArchiveWebsiteOptions[] = [];
+		const captures: SiteVisitOptions[] = [];
 		await analyze(377486973465530394n, { desktop: { ...NOTHING, mobileHandoff: true }, iphone: { ...NOTHING, mobileHandoff: true } }, captures);
 		expect(captures.map(({ device }) => device)).toEqual([undefined, "iphone"]);
 	});

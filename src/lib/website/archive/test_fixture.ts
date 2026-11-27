@@ -2,6 +2,9 @@ import { type Browser, type BrowserContext, type HTTPRequest, type HTTPResponse 
 import sharp from "sharp";
 
 import type { FabricEgress } from "../../browser/fabric";
+import { sleep } from "../../util/sleep";
+import type { SiteVisitDependencies, SiteVisitOptions, WebsiteArchiveResult } from "./types";
+import { visitSite } from "./visit_site";
 
 /**
  * A fake browser for live-capture tests: it answers navigations with scripted
@@ -9,16 +12,26 @@ import type { FabricEgress } from "../../browser/fabric";
  * what the capture asked of it. Shared by the archive's test files.
  */
 
-/** What the clipboard recorder asks of the captured tab's session. */
-const CLIPBOARD_EVENTS = new Set(["Runtime.bindingCalled", "Page.frameNavigated", "Target.attachedToTarget"]);
-const CLIPBOARD_COMMANDS = new Set(["Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Target.setAutoAttach"]);
+/** What the clipboard recorder and the download interceptor ask of the captured tab's sessions. */
+const TAB_EVENTS = new Set(["Runtime.bindingCalled", "Page.frameNavigated", "Target.attachedToTarget", "Page.downloadWillBegin"]);
+const TAB_COMMANDS = new Set(["Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Target.setAutoAttach", "Runtime.runIfWaitingForDebugger"]);
 
 // The fake document draws no frames, hidden or not.
 export const mainFrame = { childFrames: () => [] };
 /** The captured tab's target, whose id its main frame shares. */
 export const TARGET_ID = "captured-tab";
-/** Live captures in tests wait only briefly for a page's own script navigation. */
-export const fast = { scriptNavigationSettleMs: 20 } as const;
+/** Live visits in tests wait only briefly for the rendering of what they capture. */
+export const fast = { renderSettleMs: 50 } as const;
+
+/** A visit that stops at its first page: what the site shows on load, captured. */
+export async function firstPage(options: SiteVisitOptions, dependencies?: SiteVisitDependencies): Promise<WebsiteArchiveResult> {
+	return (await visitSite(options, dependencies)).initial;
+}
+
+/** The browser's own session, as the visit's recording uses it to follow targets: it knows no other target than the captured tab. */
+function browserSession() {
+	return { on: () => undefined, off: () => undefined, send: async () => ({}), detach: async () => undefined, connection: () => undefined };
+}
 
 export function responseForNavigation(
 	url: string,
@@ -101,6 +114,13 @@ export const PAINTED_PNG = await sharp({ create: { width: 64, height: 48, channe
 	.png().toBuffer();
 export const BLANK_PNG = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#ffffff" } }).png().toBuffer();
 
+/** One session's emulated Fetch domain: the responses it holds, by request id, and the streams of the bodies it took, by handle. */
+type FetchInterceptor = {
+	listener?: (paused: unknown) => void;
+	held: Map<string, { body: Buffer; taken?: string; released?: "continued" | "fulfilled" | "failed" }>;
+	streams: Map<string, { requestId: string; position: number; closed: boolean }>;
+};
+
 export function archiveBrowserFixture(options: {
 	goto?: (navigation: FixtureNavigation) => Promise<HTTPResponse | null>;
 	/** How the page's network goes idle; may render the document's body meanwhile. */
@@ -128,24 +148,25 @@ export function archiveBrowserFixture(options: {
 	const screenshotFullPage: boolean[] = [];
 	let closeCount = 0;
 	let captureSnapshotCount = 0;
-	/** Every response the emulated Fetch domain held, by request id; and the streams of the bodies taken, by handle. */
-	const held = new Map<string, { body: Buffer; taken?: string; released?: "continued" | "fulfilled" | "failed" }>();
-	const streams = new Map<string, { requestId: string; position: number; closed: boolean }>();
+	/** The emulated Fetch domain of each session that enabled it, in that order: each holds every document response on its own, as Chromium's interceptors do. */
+	const interceptors: FetchInterceptor[] = [];
 
 	const getBrowser = async (egress: FabricEgress = "phishing") => {
 		leasedEgress.push(egress);
 		const responseListeners: Array<(response: HTTPResponse) => void> = [];
 		let currentUrl = options.pageUrl ?? "https://example.test/";
 		let body = "Captured page text";
-		// The Fetch domain of the tab: a session that enabled it holds every document response until it lets it go on.
-		const holding = new Set<(paused: unknown) => void>();
+		// The Fetch domain of the tab: each session that enabled it holds every document response until it lets it go on.
+		const holding = new Set<FetchInterceptor>();
 		const holdDocument = (response: HTTPResponse) => {
 			if (!options.documentBodies) return;
 			for (const document of [...response.request().redirectChain().map((request) => request.response()!), response]) {
-				const requestId = `request-${held.size + 1}`;
-				held.set(requestId, { body: Buffer.from(options.documentBodies?.[document.url()] ?? "") });
 				const headers = Object.entries(document.headers()).map(([name, value]) => ({ name, value }));
-				for (const listener of holding) listener({ requestId, frameId: TARGET_ID, request: { url: document.url() }, responseStatusCode: document.status(), responseHeaders: headers });
+				for (const interceptor of holding) {
+					const requestId = `request-${interceptor.held.size + 1}`;
+					interceptor.held.set(requestId, { body: Buffer.from(options.documentBodies?.[document.url()] ?? "") });
+					interceptor.listener?.({ requestId, frameId: TARGET_ID, request: { url: document.url() }, responseStatusCode: document.status(), responseHeaders: headers });
+				}
 			}
 		};
 		const context = {} as BrowserContext;
@@ -179,9 +200,12 @@ export function archiveBrowserFixture(options: {
 				if (response) deliver(response);
 				return response;
 			},
+			// Like Chromium's: the page's own requests finish first, then the network stays quiet for the idle time,
+			// in which the page's timers run (a cloaker's scripted navigation among them).
 			waitForNetworkIdle: async (wait: { idleTime?: number; concurrency?: number; timeout?: number }) => {
 				networkIdleWaits.push(wait);
 				await options.networkIdle?.({ timeout: wait.timeout, render: (html) => { body = html; } });
+				await sleep(wait.idleTime ?? 0);
 			},
 			screenshot: async (screenshotOptions?: { fullPage?: boolean }) => {
 				screenshotFullPage.push(screenshotOptions?.fullPage === true);
@@ -194,21 +218,27 @@ export function archiveBrowserFixture(options: {
 			target: () => ({
 				_targetId: TARGET_ID,
 				createCDPSession: async () => {
-					let onPaused: ((paused: unknown) => void) | undefined;
+					const interceptor: FetchInterceptor = { held: new Map(), streams: new Map() };
 					return {
+					id: () => `session-${TARGET_ID}`,
 					on: (event: string, listener: (paused: unknown) => void) => {
-						// The clipboard recorder listens on the same session; the fake page never copies.
-						if (CLIPBOARD_EVENTS.has(event)) return;
+						// The clipboard recorder and the download interceptor listen on the tab's sessions; the fake page never copies or downloads.
+						if (TAB_EVENTS.has(event)) return;
 						if (event !== "Fetch.requestPaused") throw new Error(`Unexpected CDP event ${event}`);
-						onPaused = listener;
+						interceptor.listener = listener;
 					},
-					off: () => { onPaused = undefined; },
+					off: () => { interceptor.listener = undefined; },
 					send: async (method: string, params?: { requestId?: string }) => {
 						cdpCommands.push({ method, ...(params ? { params } : {}) });
-						if (method === "Emulation.setUserAgentOverride" || CLIPBOARD_COMMANDS.has(method)) return {};
-						if (method === "Fetch.enable") { if (onPaused) holding.add(onPaused); return {}; }
-						if (method === "Fetch.disable") { for (const listener of holding) if (listener === onPaused) holding.delete(listener); return {}; }
-						if (method.startsWith("Fetch.") || method.startsWith("IO.")) return emulateFetch(method, params as FetchParams);
+						if (method === "Emulation.setUserAgentOverride" || TAB_COMMANDS.has(method)) return {};
+						if (method === "Browser.setDownloadBehavior") return {};
+						if (method === "Fetch.enable") {
+							if (!interceptors.includes(interceptor)) interceptors.push(interceptor);
+							holding.add(interceptor);
+							return {};
+						}
+						if (method === "Fetch.disable") { holding.delete(interceptor); return {}; }
+						if (method.startsWith("Fetch.") || method.startsWith("IO.")) return emulateFetch(interceptor, method, params as FetchParams);
 						if (method !== "Page.captureSnapshot") throw new Error(`Unexpected CDP command ${method}`);
 						captureSnapshotCount++;
 						return {
@@ -243,6 +273,10 @@ export function archiveBrowserFixture(options: {
 		};
 		const browser = {
 			defaultBrowserContext: () => ({ ...context, pages: async () => [], newPage: async () => page }),
+			target: () => ({ createCDPSession: async () => browserSession() }),
+			on: () => undefined,
+			off: () => undefined,
+			wsEndpoint: () => "ws://fake-browser",
 			version: async () => "Chrome/156.0.8078.73",
 			close: async () => { closeCount++; },
 		} as unknown as Browser;
@@ -250,8 +284,8 @@ export function archiveBrowserFixture(options: {
 	};
 
 	type FetchParams = { requestId?: string; handle?: string; size?: number };
-	/** The Fetch and IO commands on held responses, as Chromium answers them. */
-	const emulateFetch = (method: string, params: FetchParams) => {
+	/** The Fetch and IO commands on one session's held responses, as Chromium answers them. */
+	const emulateFetch = ({ held, streams }: FetchInterceptor, method: string, params: FetchParams) => {
 		const response = params.requestId ? held.get(params.requestId) : undefined;
 		const stream = params.handle ? streams.get(params.handle) : undefined;
 		if (method === "Fetch.takeResponseBodyAsStream") {
@@ -289,9 +323,12 @@ export function archiveBrowserFixture(options: {
 		getBrowser,
 		eventNames,
 		cdpCommands,
-		/** How each held response went on, in the order they were held, and whether any taken body's stream was left open. */
-		heldResponses: () => [...held.values()].map(({ released }) => released),
-		get openStreams() { return [...streams.values()].filter(({ closed }) => !closed).length; },
+		/**
+		 * How each response the first interceptor (the visit's document answers) held went on, in the order it held
+		 * them, and whether any session left a taken body's stream open.
+		 */
+		heldResponses: () => [...(interceptors[0]?.held.values() ?? [])].map(({ released }) => released),
+		get openStreams() { return interceptors.flatMap(({ streams }) => [...streams.values()]).filter(({ closed }) => !closed).length; },
 		navigationCalls,
 		networkIdleWaits,
 		leasedEgress,

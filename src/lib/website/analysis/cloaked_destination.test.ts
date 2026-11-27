@@ -4,13 +4,13 @@ import type { AnalysisClient } from "../../analysis/run";
 import { FABRIC_EGRESS_LABEL, type FabricEgress } from "../../browser/fabric";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../db/test_helpers";
-import { scriptedVisitSession } from "../../site_visit/test_helpers";
+import { scriptedSiteVisit, type ScriptedPage, type ScriptedVisit } from "../../site_visit/test_helpers";
 import { websiteSubmissionDedupeKey } from "../../submissions/website";
 import { analyzeWebsite } from "./ai";
 import type { WebsiteAnalysisDependencies } from "./analysis_types";
 import { WebsiteCaptureFailedError, WebsiteUnreachableError } from "../archive/errors";
 import { cloakedDestination } from "../archive/cloaking";
-import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "../archive/types";
+import type { SiteVisitOptions, WebsiteArchiveResult } from "../archive/types";
 import type { CapturedNetworkRequest } from "../../exfiltration/types";
 import type { WebsiteNavigationHop } from "../types";
 import { navigationHop } from "../test_helpers";
@@ -32,7 +32,7 @@ const LANDING_TEXT = "Sign in to your account\nEmail\nPassword";
 type Answer = "cloaked" | "landing" | "unreachable";
 
 
-function page(url: string, text: string, navigationHops: WebsiteNavigationHop[], egress: FabricEgress, session?: WebsiteArchiveResult["session"]): WebsiteArchiveResult {
+function page(url: string, text: string, navigationHops: WebsiteNavigationHop[], egress: FabricEgress, walk?: ScriptedVisit): ScriptedPage {
 	const html = `<html><body><p>${text}</p></body></html>`;
 	return {
 		requestedUrl: LURE,
@@ -45,7 +45,7 @@ function page(url: string, text: string, navigationHops: WebsiteNavigationHop[],
 		mhtml: Buffer.from(`From: <Saved by Blink>\r\nSnapshot-Content-Location: ${url}\r\n\r\n${html}`, "utf8"),
 		html: Buffer.from(html, "utf8"),
 		text: Buffer.from(text, "utf8"),
-		...(session ? { session } : {}),
+		...(walk ? { walk } : {}),
 	};
 }
 
@@ -58,9 +58,9 @@ const afterGate = (answer: "cloaked" | "landing", egress: FabricEgress): Website
 		: page(LANDING, LANDING_TEXT, [navigationHop(0, LANDING, { status: 200, contentCaptured: true })], egress),
 ];
 
-function lure(options: ArchiveWebsiteOptions, egress: FabricEgress, flow: Flow): WebsiteArchiveResult {
+function lure(options: SiteVisitOptions, egress: FabricEgress, flow: Flow): ScriptedPage {
 	const { steps, requests } = flow(egress);
-	return page(options.url, LURE_TEXT, [navigationHop(0, options.url, { status: 200, contentCaptured: true })], egress, scriptedVisitSession({ steps, ...(requests ? { requests: () => requests } : {}) }));
+	return page(options.url, LURE_TEXT, [navigationHop(0, options.url, { status: 200, contentCaptured: true })], egress, { steps, ...(requests ? { requests: () => requests } : {}) });
 }
 
 const NOTHING = { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false };
@@ -82,7 +82,7 @@ function model(): AnalysisClient {
 
 /** `first` is what the plain capture (residential exit first) walks; `retries` what each other network's walk finds. */
 async function analyze(id: bigint, answers: { first: Flow; retries?: Partial<Record<FabricEgress, Flow | "unreachable">> }, extra: Partial<WebsiteAnalysisDependencies> = {}) {
-	const captures: ArchiveWebsiteOptions[] = [];
+	const captures: SiteVisitOptions[] = [];
 	await SubmissionsEntity.create({ id, kind: "website", data: { kind: "website", website: { url: LURE } }, dedupeKey: websiteSubmissionDedupeKey(`${LURE}#${id}`), status: "running", source: LURE });
 	await analyzeWebsite({ submissionId: id, url: LURE }, {
 		getInfo: async () => ({ ip_rdaps: [] }),
@@ -90,13 +90,12 @@ async function analyze(id: bigint, answers: { first: Flow; retries?: Partial<Rec
 		domainRegistration: async () => undefined,
 		timestampEvidence: async () => undefined,
 		browserBackoffMs: [1],
-		archiveWebsite: async (options) => {
-			captures.push(options);
+		visitSite: scriptedSiteVisit((options) => {
 			if (!options.egress) return lure(options, "residential", answers.first);
 			const flow = answers.retries?.[options.egress];
 			if (!flow || flow === "unreachable") throw new WebsiteCaptureFailedError([new WebsiteUnreachableError(options.egress, "net::ERR_CONNECTION_CLOSED")]);
 			return lure(options, options.egress, flow);
-		},
+		}, { calls: captures }),
 		// Rotation sampling is covered by rotation.test.ts.
 		rotationBudgetMs: 0,
 		...extra,

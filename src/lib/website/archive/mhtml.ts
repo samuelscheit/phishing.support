@@ -2,7 +2,7 @@ import { convert } from "mhtml-to-html";
 
 import { isSameWebsite, websiteSite } from "../info/site";
 import { capturedDocumentContent } from "./text";
-import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "./types";
+import type { MhtmlSnapshotOptions, WebsiteArchiveResult } from "./types";
 
 /** Read a top-level MHTML header; MIME-part headers must never override capture metadata. */
 function getMhtmlHeader(snapshot: Buffer, name: string): string | undefined {
@@ -37,8 +37,8 @@ export function getMhtmlArchiveLocation(snapshot: Buffer): string | undefined {
 	}
 }
 
-/** The result of a capture that is read from an MHTML snapshot instead of loaded in a browser. */
-export async function archiveMhtmlSnapshot(options: ArchiveWebsiteOptions & { mhtmlSnapshot: Buffer }): Promise<WebsiteArchiveResult> {
+/** A capture read from an MHTML snapshot, without any browser: a reporter's upload, a stored capture, a live capture's own snapshot. */
+export async function parseMhtmlSnapshot(options: MhtmlSnapshotOptions): Promise<WebsiteArchiveResult> {
 	const declaredDocumentUrl = getMhtmlArchiveLocation(options.mhtmlSnapshot);
 	const requestedUrl = new URL(options.url);
 	const attributionError = !options.archivedUrl && !options.trustMhtmlDocumentLocation && declaredDocumentUrl && !isSameWebsite(declaredDocumentUrl, requestedUrl)

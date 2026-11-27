@@ -25,6 +25,7 @@ import { raceTimeout } from "../../util/async";
 import { OutageBackoff, OUTAGE_BACKOFF_MS } from "./outage";
 import { isExternalJob, JOB_HANDLERS, JOB_LANES, JOB_POLICY, jobTimeoutMs, laneFilter, type JobLane } from "./jobs";
 import { JOB_WAIT_LIMIT_MS, jobWaitOf, MAX_RETRIES, retryDelayMs } from "./retry";
+import { SubmissionsEntity } from "../../db/entities/submissions";
 import { ensureWebsiteVisitJobs } from "../../website/visit_queue/run";
 import { backfillSiteGroups } from "../../website/visit_queue/site_group";
 
@@ -395,6 +396,15 @@ export class AbuseWorker {
 			// The joined report was never held for it; the case only says its own evidence was not reported.
 			if (job.jobType === "investigate_joined_case") {
 				await setInvestigationStatus(BigInt(readInvestigationJobPayload(job.payload).submissionId), { status: "failed", lastError: error, updatedAt: new Date().toISOString() });
+			}
+			// A website visit that waited out the full outage limit must not remain stranded in `queued` with no job.
+			if (job.jobType === "visit_website") {
+				const rawId = job.payload?.submissionId;
+				if (typeof rawId === "string" && /^\d+$/.test(rawId)) {
+					const submissionId = BigInt(rawId);
+					const submission = await SubmissionsEntity.get(submissionId);
+					if (submission?.status === "queued") await SubmissionsEntity.update(submissionId, { status: "failed", info: error });
+				}
 			}
 			return;
 		}

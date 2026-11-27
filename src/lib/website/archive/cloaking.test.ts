@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { FabricEgress } from "../../browser/fabric";
-import { archiveWebsite } from "./";
-import { archiveBrowserFixture, responseForNavigation } from "./test_fixture";
+import { archiveBrowserFixture, fast, firstPage, responseForNavigation } from "./test_fixture";
 
 describe("cloaking", () => {
 	const url = "https://lookup-lgr.to/en/verification";
@@ -30,12 +29,11 @@ describe("cloaking", () => {
 			},
 		});
 	}
-	const settle = { scriptNavigationSettleMs: 500 } as const;
 
 	test("follows the interstitial's script navigation and records it as its own hop", async () => {
 		const fixture = cloakerFixture(() => `${url}/done`);
 
-		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser });
 
 		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.url).toBe(`${url}/done`);
@@ -49,7 +47,7 @@ describe("cloaking", () => {
 	test("a scripted jump of the residential exit to another site is returned as scripted cloaking, and no other route is tried", async () => {
 		const fixture = cloakerFixture((egress) => (egress === "residential" ? kitUrl : decoyUrl));
 
-		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser });
 
 		// The residential exit sees what a victim sees; Tor and the server IP are never leased.
 		expect(fixture.leasedEgress).toEqual(["residential"]);
@@ -67,7 +65,7 @@ describe("cloaking", () => {
 
 	test("a capture over one route uses only that route: where it is sent is the page, with no cloaking check", async () => {
 		const fixture = cloakerFixture(() => kitUrl);
-		const archive = await archiveWebsite({ url, egress: "residential" }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url, egress: "residential" }, { ...fast, getBrowser: fixture.getBrowser });
 		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive).toMatchObject({ url: kitUrl, route: "residential exit", egress: "residential" });
 		expect(archive.cloaking).toBeUndefined();
@@ -76,7 +74,7 @@ describe("cloaking", () => {
 	test("a scripted jump to a decoy site is captured and leaves the verdict to the destination", async () => {
 		const fixture = cloakerFixture(() => decoyUrl);
 
-		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser });
 
 		// apple-condition.com (submission 376291398434951215): its cloakit check
 		// sent the residential exit to Wikipedia.
@@ -97,7 +95,7 @@ describe("cloaking", () => {
 		const rotation: Partial<Record<FabricEgress, string>> = { residential: "https://www.bbc.com/" };
 		const fixture = cloakerFixture((egress) => rotation[egress], { jumpBeforeLoad: true });
 
-		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser });
 
 		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.url).toBe("https://www.bbc.com/");
@@ -114,7 +112,7 @@ describe("cloaking", () => {
 	test("a jump before load to a decoy site is scripted cloaking of the residential exit", async () => {
 		const fixture = cloakerFixture(() => decoyUrl, { jumpBeforeLoad: true });
 
-		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser });
 
 		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.url).toBe(decoyUrl);
@@ -128,7 +126,7 @@ describe("cloaking", () => {
 	test("a jump before load that stays on the submitted site is recorded as a hop and never counts as cloaking", async () => {
 		const fixture = cloakerFixture(() => `${url}/step-2`, { jumpBeforeLoad: true });
 
-		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser });
 
 		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.cloaking).toBeUndefined();
@@ -142,7 +140,7 @@ describe("cloaking", () => {
 	test("a scripted jump that stays on the submitted site never counts as cloaking", async () => {
 		const fixture = cloakerFixture(() => `${url}/step-2`);
 
-		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser });
 
 		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.cloaking).toBeUndefined();
@@ -151,7 +149,7 @@ describe("cloaking", () => {
 	test("a scripted jump over Tor after the residential exit failed is unresolved cloaking, and the server IP is not tried", async () => {
 		const fixture = cloakerFixture(() => decoyUrl, { residentialOnline: false });
 
-		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser });
 
 		expect(fixture.leasedEgress).toEqual(["residential", "phishing"]);
 		expect(archive.url).toBe(decoyUrl);
@@ -182,7 +180,7 @@ describe("cloaking", () => {
 			},
 		});
 
-		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser });
 
 		expect(fixture.leasedEgress).toEqual(["residential", "phishing"]);
 		expect(archive.url).toBe(decoyUrl);
@@ -203,7 +201,7 @@ describe("cloaking", () => {
 			},
 		});
 
-		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser });
 
 		expect(fixture.leasedEgress).toEqual(["residential", "phishing", "reporting"]);
 		expect(archive.url).toBe(decoyUrl);
@@ -233,7 +231,7 @@ describe("cloaking", () => {
 			},
 		});
 
-		const archive = await archiveWebsite({ url: shortUrl }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url: shortUrl }, { ...fast, getBrowser: fixture.getBrowser });
 
 		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.url).toBe(ozonUrl);
@@ -249,7 +247,7 @@ describe("cloaking", () => {
 			goto: async () => responseForNavigation(kitUrl, 200, { contentType: "text/html", redirects: [{ url, status: 302, location: kitUrl }] }),
 		});
 
-		const archive = await archiveWebsite({ url }, { ...settle, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser });
 
 		expect(fixture.leasedEgress).toEqual(["residential"]);
 		expect(archive.cloaking).toBeUndefined();

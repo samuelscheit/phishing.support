@@ -7,10 +7,10 @@ import { SubmissionsEntity } from "../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { websiteSubmissionDedupeKey } from "../../submissions/website";
 import { capturedDocumentContent } from "../archive/text";
-import type { WebsiteArchiveResult, WebsitePageSession, WebsiteVisitParams } from "../archive/types";
+import type { SiteVisitOptions } from "../archive/types";
 import { analyzeWebsite } from "../analysis/ai";
 import type { WebsiteAnalysisDependencies } from "../analysis/analysis_types";
-import { scriptedVisitSession, type ScriptedVisit } from "../../site_visit/test_helpers";
+import { scriptedSiteVisit, type ScriptedPage, type ScriptedVisit } from "../../site_visit/test_helpers";
 
 useTemporaryDatabase();
 
@@ -39,7 +39,7 @@ const EXTENSION = await (async () => {
 	return Buffer.from(await writer.close());
 })();
 
-function capture(session: WebsitePageSession): WebsiteArchiveResult {
+function capture(walk: ScriptedVisit): ScriptedPage {
 	const { html, text } = capturedDocumentContent(PAGE);
 	return {
 		requestedUrl: URL_,
@@ -52,7 +52,7 @@ function capture(session: WebsitePageSession): WebsiteArchiveResult {
 		html: Buffer.from(html),
 		text: Buffer.from(text),
 		providerWarning: { provider: "Cloudflare", warning: "Suspected Malware" },
-		session,
+		walk,
 	};
 }
 
@@ -80,15 +80,15 @@ const DOWNLOAD = { url: "https://rbxcore.pro/Game-Copier.zip", fileName: "Game-C
 
 function scenario(params: { classification: Answer; visit?: ScriptedVisit }) {
 	const prompts: Array<{ kind: string; prompt: string }> = [];
-	const visits: WebsiteVisitParams[] = [];
-	const session = scriptedVisitSession(params.visit ?? { downloads: [DOWNLOAD], agent: { report: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Downloaded Game-Copier.zip." } } }, visits);
+	const visits: SiteVisitOptions[] = [];
+	const walk = params.visit ?? { downloads: [DOWNLOAD], agent: { report: { asksForPhone: false, blockedByChallenge: false, stoppedReason: "Downloaded Game-Copier.zip." } } };
 	const dependencies: WebsiteAnalysisDependencies = {
 		getInfo: async () => ({ ip_rdaps: [] }),
 		analysisClient: model(params.classification, prompts),
 		domainRegistration: async () => undefined,
 		timestampEvidence: async () => undefined,
 		browserBackoffMs: [1],
-		archiveWebsite: async () => capture(session),
+		visitSite: scriptedSiteVisit(() => capture(walk), { calls: visits }),
 		downloadLookups: async () => [{ provider: "virustotal", state: "not_found" }],
 	};
 	return { prompts, visits, dependencies };

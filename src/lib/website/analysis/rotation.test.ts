@@ -6,13 +6,14 @@ import { useTrackingTokenSecret } from "../../abuse/security/test_helpers";
 import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../db/test_helpers";
-import { scriptedVisitSession } from "../../site_visit/test_helpers";
-import type { ArchiveWebsiteOptions, WebsiteArchiveResult } from "../archive/types";
+import type { ScriptedPage } from "../../site_visit/test_helpers";
+import type { SiteVisitOptions } from "../archive/types";
 import type { WebsiteNavigationHop } from "../types";
 import { websiteSite } from "../info/site";
 import { navigationHop, websiteSubmission } from "../test_helpers";
 import { routeNames } from "../visit/capture_files";
 import { analyzeWebsite } from "./ai";
+import type { WebsiteCapture } from "./analysis_types";
 import { CLOUD_STORAGE_URLS, cloudStorageVisit, capturedPage, funnelDependencies, funnelHop, productionVisit, type ModelCall } from "./funnel_test_helpers";
 import { BrowserUnavailableError } from "../../browser/fabric";
 import { WebsiteCaptureFailedError, WebsiteUnreachableError } from "../archive/errors";
@@ -29,10 +30,10 @@ const LINK = PRODUCTION_URLS.everflowLink;
  * visit (the ones from the residential exit) the next of `samples`, or its
  * error. Every call's options are kept.
  */
-function rotatingLink(first: () => WebsiteArchiveResult, samples: Array<(() => WebsiteArchiveResult) | Error>) {
-	const calls: ArchiveWebsiteOptions[] = [];
+function rotatingLink(first: () => ScriptedPage, samples: Array<(() => ScriptedPage) | Error>) {
+	const calls: SiteVisitOptions[] = [];
 	let sampled = 0;
-	const archiveWebsite = async (options: ArchiveWebsiteOptions): Promise<WebsiteArchiveResult> => {
+	const load = (options: SiteVisitOptions): ScriptedPage => {
 		calls.push(options);
 		if (options.egress !== "residential") return first();
 		const next = samples[sampled++];
@@ -40,7 +41,7 @@ function rotatingLink(first: () => WebsiteArchiveResult, samples: Array<(() => W
 		if (next instanceof Error) throw next;
 		return next();
 	};
-	return { archiveWebsite, calls, sampleCalls: () => calls.filter((options) => options.egress === "residential") };
+	return { load, calls, sampleCalls: () => calls.filter((options) => options.egress === "residential") };
 }
 
 async function websiteOf(id: bigint) {
@@ -59,15 +60,15 @@ describe("a link that rotates offers per click, sampled in one case", () => {
 		const calls: ModelCall[] = [];
 		const link = rotatingLink(() => productionVisit(), [() => cloudStorageVisit(), () => productionVisit(), () => cloudStorageVisit()]);
 		const id = await websiteSubmission(383412636961738752n, LINK);
-		await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.archiveWebsite, calls));
+		await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.load, calls));
 
 		const { submission, website } = await websiteOf(id);
 		expect(submission.status).toBe("reported");
 		// Each sampled visit from the residential exit, in a browser the first walk (Chrome on Windows) was not, then that one.
-		expect(link.sampleCalls().map((options) => ({ egress: options.egress, ua: options.visitor?.override.userAgent.match(/Macintosh|iPhone|Windows/)?.[0], device: options.device, keepSession: options.keepSession }))).toEqual([
-			{ egress: "residential", ua: "Macintosh", device: undefined, keepSession: true },
-			{ egress: "residential", ua: undefined, device: "iphone", keepSession: true },
-			{ egress: "residential", ua: undefined, device: undefined, keepSession: true },
+		expect(link.sampleCalls().map((options) => ({ egress: options.egress, ua: options.visitor?.override.userAgent.match(/Macintosh|iPhone|Windows/)?.[0], device: options.device }))).toEqual([
+			{ egress: "residential", ua: "Macintosh", device: undefined },
+			{ egress: "residential", ua: undefined, device: "iphone" },
+			{ egress: "residential", ua: undefined, device: undefined },
 		]);
 
 		// Two routes: the funnel the first walk took, and the cloud-storage renewal the first sampled visit reached.
@@ -125,9 +126,9 @@ describe("a link that rotates offers per click, sampled in one case", () => {
 	test("a link that passed no tracking link is not opened again", async () => {
 		const calls: ModelCall[] = [];
 		const kit = "https://kit-login.com/signin";
-		const link = rotatingLink(() => capturedPage(kit, "<p>Sign in</p>", "Sign in", [funnelHop(0, "https://lure-page.com/a", 302, { redirectTo: kit }), funnelHop(1, kit, 200)], scriptedVisitSession()), [() => cloudStorageVisit()]);
+		const link = rotatingLink(() => capturedPage(kit, "<p>Sign in</p>", "Sign in", [funnelHop(0, "https://lure-page.com/a", 302, { redirectTo: kit }), funnelHop(1, kit, 200)], {}), [() => cloudStorageVisit()]);
 		const id = await websiteSubmission(383412636961738753n, "https://lure-page.com/a");
-		await analyzeWebsite({ submissionId: id, url: "https://lure-page.com/a" }, funnelDependencies(link.archiveWebsite, calls));
+		await analyzeWebsite({ submissionId: id, url: "https://lure-page.com/a" }, funnelDependencies(link.load, calls));
 
 		const { website } = await websiteOf(id);
 		expect(link.sampleCalls()).toEqual([]);
@@ -142,7 +143,7 @@ describe("a link that rotates offers per click, sampled in one case", () => {
 			const link = rotatingLink(() => productionVisit(), [() => cloudStorageVisit(), () => productionVisit(), () => productionVisit()]);
 			const id = await websiteSubmission(383412636961739000n + BigInt(source.length), LINK);
 			await SubmissionsEntity.update(id, { source });
-			await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.archiveWebsite, calls));
+			await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.load, calls));
 			const { website } = await websiteOf(id);
 			expect({ source, sampled: link.sampleCalls().length > 0, routes: website.routes?.length }).toEqual({ source, sampled, routes: sampled ? 2 : 1 });
 		}
@@ -152,7 +153,7 @@ describe("a link that rotates offers per click, sampled in one case", () => {
 		const calls: ModelCall[] = [];
 		const link = rotatingLink(() => productionVisit(), [new Error("Browser service unavailable: residential exit is offline")]);
 		const id = await websiteSubmission(383412636961738754n, LINK);
-		await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.archiveWebsite, calls));
+		await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.load, calls));
 
 		const { submission, website } = await websiteOf(id);
 		expect(submission.status).toBe("reported");
@@ -173,7 +174,7 @@ describe("a link that rotates offers per click, sampled in one case", () => {
 		const calls: ModelCall[] = [];
 		const link = rotatingLink(() => productionVisit(), [() => cloudStorageVisit()]);
 		const id = await websiteSubmission(383412636961738755n, LINK);
-		await analyzeWebsite({ submissionId: id, url: LINK }, { ...funnelDependencies(link.archiveWebsite, calls), rotationBudgetMs: 0 });
+		await analyzeWebsite({ submissionId: id, url: LINK }, { ...funnelDependencies(link.load, calls), rotationBudgetMs: 0 });
 
 		const { website } = await websiteOf(id);
 		expect(link.sampleCalls()).toEqual([]);
@@ -186,13 +187,13 @@ describe("a link that rotates offers per click, sampled in one case", () => {
 		// The offer shows desktops only a hand-off to a phone, which is nothing by itself.
 		const handoff = "https://mobile-only-offer.com/start";
 		const desktop = () => {
-			const visit = capturedPage(handoff, "<p>Continue on your phone</p>", "Continue on your phone", [funnelHop(0, LINK, 302, { redirectTo: CLOUD_STORAGE_URLS.tracker }), funnelHop(1, CLOUD_STORAGE_URLS.tracker, 302, { redirectTo: handoff }), funnelHop(2, handoff, 200)]);
-			const session = scriptedVisitSession({ agent: { outcome: "completed", actions: [], report: { asksForPhone: true, blockedByChallenge: false, stoppedReason: "The page asks to continue on a phone." } } });
-			return { ...visit, session: { ...session, close: async () => { events.push("desktop closed"); } } };
+			const walk = { agent: { outcome: "completed" as const, actions: [], report: { asksForPhone: true, blockedByChallenge: false, stoppedReason: "The page asks to continue on a phone." } } };
+			const visit = capturedPage(handoff, "<p>Continue on your phone</p>", "Continue on your phone", [funnelHop(0, LINK, 302, { redirectTo: CLOUD_STORAGE_URLS.tracker }), funnelHop(1, CLOUD_STORAGE_URLS.tracker, 302, { redirectTo: handoff }), funnelHop(2, handoff, 200)], walk);
+			return { ...visit, onClose: () => { events.push("desktop closed"); } };
 		};
 		const link = rotatingLink(() => productionVisit(), [desktop, () => { events.push("phone opened"); return cloudStorageVisit(); }, () => productionVisit(), () => productionVisit()]);
 		const id = await websiteSubmission(383412636961738757n, LINK);
-		await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.archiveWebsite, calls));
+		await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.load, calls));
 
 		const { website } = await websiteOf(id);
 		expect(events.slice(0, 2)).toEqual(["desktop closed", "phone opened"]);
@@ -204,9 +205,9 @@ describe("a link that rotates offers per click, sampled in one case", () => {
 
 	test("a sampled route whose walk breaks off ends the sampling; the routes walked before it are reported", async () => {
 		const calls: ModelCall[] = [];
-		const link = rotatingLink(() => productionVisit(), [() => ({ ...cloudStorageVisit(), session: { visit: async () => { throw new Error("the visit agent crashed"); }, close: async () => undefined } })]);
+		const link = rotatingLink(() => productionVisit(), [() => ({ ...cloudStorageVisit(), walk: { error: new Error("the visit agent crashed") } })]);
 		const id = await websiteSubmission(383412636961738758n, LINK);
-		await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.archiveWebsite, calls));
+		await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.load, calls));
 
 		const { submission, website } = await websiteOf(id);
 		expect(submission.status).toBe("reported");
@@ -220,7 +221,7 @@ describe("a link that rotates offers per click, sampled in one case", () => {
 		const calls: ModelCall[] = [];
 		const link = rotatingLink(() => productionVisit(), [() => cloudStorageVisit(), () => productionVisit(), () => productionVisit()]);
 		const id = await websiteSubmission(383412636961738759n, LINK);
-		await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.archiveWebsite, calls, { phishingLure: true }));
+		await analyzeWebsite({ submissionId: id, url: LINK }, funnelDependencies(link.load, calls, { phishingLure: true }));
 
 		const { submission, website } = await websiteOf(id);
 		expect(submission.status).toBe("reported");
@@ -236,7 +237,7 @@ describe("a link that rotates offers per click, sampled in one case", () => {
 		const link = rotatingLink(() => productionVisit(), [() => productionVisit(), () => productionVisit()]);
 		const id = await websiteSubmission(383412636961738756n, LINK);
 		const reporterHeaders = { "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15" };
-		await analyzeWebsite({ submissionId: id, url: LINK, reporterHeaders }, funnelDependencies(link.archiveWebsite, calls));
+		await analyzeWebsite({ submissionId: id, url: LINK, reporterHeaders }, funnelDependencies(link.load, calls));
 
 		const { website } = await websiteOf(id);
 		expect(website.routes?.[0]?.visitor?.browser).toBe("The reporter's browser");
@@ -252,7 +253,14 @@ describe("sampling a rotating link's routes", () => {
 	const first = firstWalkBrowser(undefined);
 	const hops = (...urls: string[]) => urls.map((url, index) => navigationHop(index, url, index === urls.length - 1 ? { status: 200, contentCaptured: true } : { status: 302, redirectTo: urls[index + 1] }));
 	const offer = (site: string) => hops(LINK, PRODUCTION_URLS.voluumCampaign, `https://${site}/landing`);
-	const captureOf = (route: ReturnType<typeof hops>): WebsiteArchiveResult => ({ ...cloudStorageVisit(), navigationHops: route });
+	const captureOf = (route: ReturnType<typeof hops>): WebsiteCapture => ({ ...cloudStorageVisit(), navigationHops: route });
+	type Visit = Parameters<typeof sampleRotation>[0]["visit"];
+	/** A sampled visit: the link opens on the first page `open` returns; a repeat is not walked, a new route is walked by `walk` in the same browser. */
+	const visiting = (open: (browser: RotationBrowser) => WebsiteCapture | Promise<WebsiteCapture>, walk: (first: WebsiteCapture, route: number) => WebsiteNavigationHop[] | Promise<WebsiteNavigationHop[]> = (page) => page.navigationHops): Visit =>
+		async (browser, route, isNew) => {
+			const page = await open(browser);
+			return isNew(page) ? walk(page, route) : undefined;
+		};
 
 	test("a route is the sites it showed pages on, in order, whatever redirected between them", () => {
 		expect(routePageSites(offer("smizeprize.com"))).toEqual(["smizeprize.com"]);
@@ -281,11 +289,10 @@ describe("sampling a rotating link's routes", () => {
 		const rotation = await sampleRotation({
 			routes: [PROD_ROUTE_1_HOPS],
 			first,
-			capture: async () => ({ ...cloudStorageVisit(PROD_ROTATION_LINK), navigationHops: capturedUpToFirstPage(PROD_ROUTE_2_HOPS) }),
-			walk: async (_archive, _browser, route) => {
+			visit: visiting(() => ({ ...cloudStorageVisit(PROD_ROTATION_LINK), navigationHops: capturedUpToFirstPage(PROD_ROUTE_2_HOPS) }), (_page, route) => {
 				walked.push(route);
 				return [];
-			},
+			}),
 		});
 		expect(walked).toEqual([]);
 		expect(rotation.visits.map((visit) => ("repeatOf" in visit ? visit.repeatOf : visit))).toEqual([0, 0]);
@@ -322,11 +329,10 @@ describe("sampling a rotating link's routes", () => {
 		const rotation = await sampleRotation({
 			routes: [offer("smizeprize.com")],
 			first,
-			capture: async () => captureOf(shown.shift()!),
-			walk: async (archive, _browser, route) => {
+			visit: visiting(() => captureOf(shown.shift()!), (page, route) => {
 				walked.push(route);
-				return archive.navigationHops;
-			},
+				return page.navigationHops;
+			}),
 		});
 		expect(rotation.visits.map((visit) => ("route" in visit ? `new ${visit.route}` : "repeatOf" in visit ? `repeat ${visit.repeatOf}` : "error"))).toEqual(["repeat 0", "new 1", "repeat 0"]);
 		expect(walked).toEqual([1]);
@@ -340,11 +346,10 @@ describe("sampling a rotating link's routes", () => {
 			first,
 			budgetMs: 10_000,
 			now: () => clock,
-			capture: async () => {
+			visit: visiting(() => {
 				clock += 6_000;
 				return captureOf(offer(`offer-${clock}.com`));
-			},
-			walk: async (archive) => archive.navigationHops,
+			}),
 		});
 		expect(rotation.visits.map((visit) => ("route" in visit ? visit.route : undefined))).toEqual([1, 2]);
 		expect(rotation.ended).toBe("The time for sampling the link's other offers (0 min) was used up.");
@@ -356,10 +361,9 @@ describe("sampling a rotating link's routes", () => {
 		const rotation = await sampleRotation({
 			routes,
 			first,
-			capture: async () => captureOf(offer(`offer-${++captures}.com`)),
-			walk: async () => {
+			visit: visiting(() => captureOf(offer(`offer-${++captures}.com`)), () => {
 				throw new Error("the classifier timed out");
-			},
+			}),
 		});
 		expect(captures).toBe(1);
 		expect(routes).toHaveLength(1);
@@ -367,7 +371,7 @@ describe("sampling a rotating link's routes", () => {
 	});
 
 	test("a visit the browser service failed is kept as its error, and the next browser goes on", async () => {
-		const outcomes: Array<() => WebsiteArchiveResult> = [
+		const outcomes: Array<() => WebsiteCapture> = [
 			() => { throw new Error("Attempted to use detached Frame 'F312968E370A7BA0C31894A079BFC237'."); },
 			() => captureOf(offer("new-offer.com")),
 			() => captureOf(offer("smizeprize.com")),
@@ -377,11 +381,10 @@ describe("sampling a rotating link's routes", () => {
 		const rotation = await sampleRotation({
 			routes,
 			first,
-			capture: async () => outcomes.shift()!(),
-			walk: async (archive, _browser, route) => {
+			visit: visiting(() => outcomes.shift()!(), (page, route) => {
 				walked.push(route);
-				return archive.navigationHops;
-			},
+				return page.navigationHops;
+			}),
 		});
 		expect(rotation.visits.map((visit) => ({ browser: visit.visitor.browser, outcome: "route" in visit ? `new ${visit.route}` : "repeatOf" in visit ? `repeat ${visit.repeatOf}` : visit.error }))).toEqual([
 			{ browser: "Chrome on macOS", outcome: "Attempted to use detached Frame 'F312968E370A7BA0C31894A079BFC237'." },
@@ -396,7 +399,7 @@ describe("sampling a rotating link's routes", () => {
 	test("the browser service failing every visit still makes no more than three, within the time budget", async () => {
 		let clock = 0;
 		let captures = 0;
-		const failing = await sampleRotation({ routes: [offer("smizeprize.com")], first, capture: async () => { captures++; throw new Error("Protocol error (Page.navigate): Target closed"); }, walk: async () => [] });
+		const failing = await sampleRotation({ routes: [offer("smizeprize.com")], first, visit: visiting(() => { captures++; throw new Error("Protocol error (Page.navigate): Target closed"); }) });
 		expect(captures).toBe(3);
 		expect(failing.ended).toBe("All 3 visits were made.");
 		const slow = await sampleRotation({
@@ -404,11 +407,10 @@ describe("sampling a rotating link's routes", () => {
 			first,
 			budgetMs: 10_000,
 			now: () => clock,
-			capture: async () => {
+			visit: visiting(() => {
 				clock += 6_000;
 				throw new Error("socket hang up");
-			},
-			walk: async () => [],
+			}),
 		});
 		expect(slow.visits).toHaveLength(2);
 		expect(slow.ended).toBe("The time for sampling the link's other offers (0 min) was used up.");
@@ -422,18 +424,31 @@ describe("sampling a rotating link's routes", () => {
 		];
 		for (const error of down) {
 			let captures = 0;
-			const rotation = await sampleRotation({ routes: [offer("smizeprize.com")], first, capture: async () => { captures++; throw error; }, walk: async () => [] });
+			const rotation = await sampleRotation({ routes: [offer("smizeprize.com")], first, visit: visiting(() => { captures++; throw error; }) });
 			expect(captures).toBe(1);
 			expect(rotation.visits).toEqual([{ startedAt: expect.any(String), visitor: { browser: "Chrome on macOS", network: "residential exit" }, error: error.message }]);
 			expect(rotation.ended).toBe(`Opening the link again from the residential exit failed: ${error.message}`);
 		}
 	});
 
-	test("a repeat's browser is closed, a new route's is left to its walk", async () => {
-		const closed: string[] = [];
-		const capture = (site: string) => ({ ...captureOf(offer(site)), session: { visit: async () => { throw new Error("not walked"); }, close: async () => { closed.push(site); } } });
+	test("a repeat is not walked, a new route is walked in the same browser", async () => {
+		const opened: string[] = [];
+		const walked: string[] = [];
 		const sites = ["smizeprize.com", "new-offer.com", "smizeprize.com", "smizeprize.com"];
-		await sampleRotation({ routes: [offer("smizeprize.com")], first, capture: async () => capture(sites.shift()!), walk: async (archive) => archive.navigationHops });
-		expect(closed).toEqual(["smizeprize.com", "smizeprize.com"]);
+		const rotation = await sampleRotation({
+			routes: [offer("smizeprize.com")],
+			first,
+			visit: visiting(() => {
+				const site = sites.shift()!;
+				opened.push(site);
+				return captureOf(offer(site));
+			}, (page) => {
+				// The walk runs inside the visit that opened the link: no other link was opened since.
+				walked.push(opened.at(-1)!);
+				return page.navigationHops;
+			}),
+		});
+		expect(walked).toEqual(["new-offer.com"]);
+		expect(rotation.visits.map((visit) => ("route" in visit ? `new ${visit.route}` : "repeatOf" in visit ? `repeat ${visit.repeatOf}` : "error"))).toEqual(["repeat 0", "new 1", "repeat 0"]);
 	});
 });

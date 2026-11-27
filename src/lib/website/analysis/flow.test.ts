@@ -9,14 +9,14 @@ import { useTemporaryDatabase } from "../../db/test_helpers";
 import { retryWebsiteAnalysis, websiteSubmissionDedupeKey } from "../../submissions/website";
 import { SubmissionRetriesEntity } from "../../db/entities/submission_retries";
 import { capturedDocumentContent } from "../archive/text";
-import type { ArchiveWebsiteOptions, WebsiteArchiveResult, WebsitePageSession } from "../archive/types";
+import type { SiteVisitOptions, WebsiteArchiveResult } from "../archive/types";
 import { analyzeWebsite } from "./ai";
 import type { WebsiteAnalysisDependencies } from "./analysis_types";
 import { buildWebsiteClassificationInput } from "./classification";
 import { getDb } from "../../db";
 import { jobs, abuseArtifacts } from "../../abuse/schema";
 import { readInvestigationJobPayload } from "../../investigation/payload";
-import { scriptedVisitSession, type ScriptedVisit } from "../../site_visit/test_helpers";
+import { scriptedSiteVisit, type ScriptedPage, type ScriptedVisit } from "../../site_visit/test_helpers";
 import { reporterBrowserIdentity } from "../../browser/reporter_identity";
 import type { WebsiteNavigationHop } from "../types";
 import { eq } from "drizzle-orm";
@@ -126,20 +126,19 @@ function kitModel(answers: ClassifierAnswers, calls: Array<{ kind: "classificati
 	} as unknown as AnalysisClient;
 }
 
-/** The visit's session for the page: it plays `visit`, and records whether it was closed. */
+/** The visit's first page: it plays `visit` when walked, and records whether its browser was closed. */
 function visited(page: WebsiteArchiveResult, visit: ScriptedVisit = {}) {
 	const state = { closed: 0 };
-	const scripted = scriptedVisitSession(visit);
-	const session: WebsitePageSession = { visit: scripted.visit, close: async () => { state.closed++; } };
-	return { archive: { ...page, session }, state };
+	const archive: ScriptedPage = { ...page, walk: visit, onClose: () => { state.closed++; } };
+	return { archive, state };
 }
 
 function dependencies(params: {
 	answers?: ClassifierAnswers;
-	captures: ArchiveWebsiteOptions[];
+	captures: SiteVisitOptions[];
 	modelCalls?: Array<{ kind: "classification" | "analysis"; url: string }>;
-	/** The capture of each requested page, with the visit it plays. */
-	capture?: (options: ArchiveWebsiteOptions) => WebsiteArchiveResult;
+	/** The first page of each visit, with the walk it plays. */
+	capture?: (options: SiteVisitOptions) => ScriptedPage;
 }): WebsiteAnalysisDependencies {
 	return {
 		getInfo: async () => ({ ip_rdaps: [] }),
@@ -148,10 +147,7 @@ function dependencies(params: {
 		timestampEvidence: async () => undefined,
 		browserBackoffMs: [1],
 		downloadLookups: async () => [],
-		archiveWebsite: async (options) => {
-			params.captures.push(options);
-			return params.capture ? params.capture(options) : visited(liveCapture(options.url)).archive;
-		},
+		visitSite: scriptedSiteVisit(async (options) => (params.capture ? params.capture(options) : visited(liveCapture(options.url)).archive), { calls: params.captures }),
 	};
 }
 
@@ -200,7 +196,7 @@ const METAMASK_VISIT: ScriptedVisit = { steps: [liveCapture(GET_STARTED), liveCa
 
 describe("a visit through a multi-page kit", () => {
 	test("the MetaMask kit is walked from its consent page to the recovery-phrase form and reported with every page", async () => {
-		const captures: ArchiveWebsiteOptions[] = [];
+		const captures: SiteVisitOptions[] = [];
 		const modelCalls: Array<{ kind: "classification" | "analysis"; url: string }> = [];
 		const id = await websiteSubmission(375914181917937690n, CONSENT);
 		const reporterUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36";
@@ -455,16 +451,16 @@ describe("a visit through a multi-page kit", () => {
 			"sec-ch-ua": "\"Not-A.Brand\";v=\"99\", \"Google Chrome\";v=\"157\", \"Chromium\";v=\"157\"",
 			"sec-ch-ua-platform": "\"macOS\"",
 		};
-		const captures: ArchiveWebsiteOptions[] = [];
-		// A capture without a session: the visit loads the page live once more.
+		const captures: SiteVisitOptions[] = [];
+		// One live visit loads the page and walks on in the same browser (no separate capture first).
 		await analyzeWebsite({ submissionId: await websiteSubmission(380697679325302795n, CONSENT), url: CONSENT, reporterHeaders }, dependencies({ captures, capture: (options) => liveCapture(options.url) }));
-		expect(captures.length).toBe(2);
-		expect(captures.map(({ visitor }) => visitor)).toEqual([reporterBrowserIdentity(reporterHeaders), reporterBrowserIdentity(reporterHeaders)]);
+		expect(captures.length).toBe(1);
+		expect(captures.map(({ visitor }) => visitor)).toEqual([reporterBrowserIdentity(reporterHeaders)]);
 		expect(captures[0]!.visitor?.override.platform).toBe("MacIntel");
 
-		const anonymous: ArchiveWebsiteOptions[] = [];
+		const anonymous: SiteVisitOptions[] = [];
 		await analyzeWebsite({ submissionId: await websiteSubmission(380697679325302796n, CONSENT), url: CONSENT }, dependencies({ captures: anonymous, capture: (options) => liveCapture(options.url) }));
-		expect(anonymous.length).toBe(2);
+		expect(anonymous.length).toBe(1);
 		expect(anonymous.every((options) => !("visitor" in options))).toBe(true);
 	});
 
@@ -499,7 +495,7 @@ describe("a visit through a multi-page kit", () => {
 			[SESSION_GATE]: { finding: "insufficient_evidence", phishingBasis: "none", evidenceQuote: "", collectionFieldRefs: [], hiddenFrameRef: "", mobileHandoff: false },
 			[KIT]: { finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in", collectionFieldRefs: ["f1", "f2"], hiddenFrameRef: "", mobileHandoff: false },
 		};
-		const captures: ArchiveWebsiteOptions[] = [];
+		const captures: SiteVisitOptions[] = [];
 		const visit = visited({ ...liveCapture(SESSION_GATE, hopsTo(SESSION_GATE, { url: SHORT, status: 302 })), requestedUrl: SHORT, ...RESIDENTIAL }, {
 			steps: [{ ...liveCapture(KIT, hopsTo(KIT)), requestedUrl: SHORT, ...RESIDENTIAL }],
 		});

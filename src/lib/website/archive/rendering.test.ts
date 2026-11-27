@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { TimeoutError } from "rebrowser-puppeteer-core";
 
-import { archiveWebsite } from "./";
-import { archiveBrowserFixture, fast, responseForNavigation } from "./test_fixture";
+import { archiveBrowserFixture, fast, responseForNavigation, firstPage } from "./test_fixture";
 
 describe("rendering", () => {
 	// A Flazio site builder page: the document is a shell, and the login form
@@ -19,7 +18,10 @@ describe("rendering", () => {
 			},
 		});
 
-		const archive = await archiveWebsite({ url }, { ...fast, getBrowser: fixture.getBrowser });
+		// The production bounds: a second of quiet, ten at most; a page that goes quiet at once costs that second only.
+		const started = performance.now();
+		const archive = await firstPage({ url }, { getBrowser: fixture.getBrowser });
+		expect(performance.now() - started).toBeLessThan(1_500);
 
 		expect(archive.text.toString()).toContain("Melden Sie sich bei Ihrem Microsoft-Konto an");
 		expect(archive.text.toString()).toContain("E-Mail-Adresse");
@@ -37,7 +39,7 @@ describe("rendering", () => {
 			},
 		});
 
-		const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 20, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url }, { ...fast, renderSettleMs: 20, getBrowser: fixture.getBrowser });
 
 		expect(archive.text.toString()).toContain("E-Mail-Adresse");
 		expect(fixture.networkIdleWaits).toEqual([{ idleTime: 20, concurrency: 2, timeout: 20 }]);
@@ -51,7 +53,7 @@ describe("rendering", () => {
 			networkIdle: async () => { throw new Error("Protocol error: Target closed"); },
 		});
 
-		await expect(archiveWebsite({ url }, { ...fast, getBrowser: fixture.getBrowser })).rejects.toThrow("Target closed");
+		await expect(firstPage({ url }, { ...fast, getBrowser: fixture.getBrowser })).rejects.toThrow("Target closed");
 		// The residential exit's failure of any kind falls through; Tor's browser failure is thrown.
 		expect(fixture.leasedEgress).toEqual(["residential", "phishing"]);
 		expect(fixture.screenshotCount).toBe(0);
@@ -76,9 +78,13 @@ describe("rendering", () => {
 			},
 		});
 
-		const archive = await archiveWebsite({ url: interstitial }, { scriptNavigationSettleMs: 1_100, getBrowser: fixture.getBrowser });
+		// The production bounds: one quiet second on each document, with no blind wait for a script that may navigate.
+		const started = performance.now();
+		const archive = await firstPage({ url: interstitial }, { getBrowser: fixture.getBrowser });
+		expect(performance.now() - started).toBeLessThan(2_500);
 
-		expect(events).toEqual(["script navigation", "render"]);
+		// The interstitial rendered, its script navigated while the network was quiet, and the destination rendered in turn.
+		expect(events).toEqual(["render", "script navigation", "render"]);
 		expect(archive.url).toBe("https://interstitial.example/login");
 		expect(archive.text.toString()).toContain("E-Mail-Adresse");
 	});
@@ -102,7 +108,7 @@ describe("rendering", () => {
 			},
 		});
 
-		const archive = await archiveWebsite({ url: tracker, visitor: { override: { userAgent: "Mozilla/5.0 (Macintosh) Chrome/157", platform: "MacIntel" }, screen: "desktop" } }, { scriptNavigationSettleMs: 200, getBrowser: fixture.getBrowser });
+		const archive = await firstPage({ url: tracker, visitor: { override: { userAgent: "Mozilla/5.0 (Macintosh) Chrome/157", platform: "MacIntel" }, screen: "desktop" } }, { getBrowser: fixture.getBrowser });
 
 		expect(archive.navigationHops.map(({ index, url, status, redirectTo, contentCaptured, bodyCaptured }) => ({ index, url, status, redirectTo, contentCaptured, bodyCaptured }))).toEqual([
 			{ index: 0, url: tracker, status: 302, redirectTo: prize, contentCaptured: false, bodyCaptured: undefined },
@@ -133,6 +139,7 @@ describe("rendering", () => {
 			{ responseCode: 200, responseHeaders: [{ name: "content-type", value: "text/html" }], body: prizeBody },
 			{ responseCode: 200, responseHeaders: [{ name: "content-type", value: "text/html" }], body: destinationBody },
 		]);
-		expect(fixture.cdpCommands.filter(({ method }) => method === "Fetch.disable")).toHaveLength(1);
+		// The document answers and the visit's download interception each let the tab's documents go once.
+		expect(fixture.cdpCommands.filter(({ method }) => method === "Fetch.disable")).toHaveLength(2);
 	});
 });

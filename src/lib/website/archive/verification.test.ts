@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { chromiumAvailable, launchTestChromium } from "../../browser/task/test_helpers";
-import { archiveWebsite } from "./";
-import { fast } from "./test_fixture";
+import { fast, firstPage } from "./test_fixture";
 
 describe.skipIf(!chromiumAvailable)("verification gates, in a real browser", () => {
 	const filler = "Family photos stay in the local archive until the next backup.";
@@ -42,7 +41,7 @@ document.getElementById("box").addEventListener("click", async () => {
 </script></body></html>`, hits);
 		try {
 			const url = `http://127.0.0.1:${server.port}/c2222120`;
-			const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 5_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url }, { ...fast, renderSettleMs: 5_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.verificationGate).toEqual({ label: "I'm not a robot" });
 			const text = archive.text.toString();
@@ -66,7 +65,7 @@ document.getElementById("box").addEventListener("click", async () => {
 <dialog id="installDialog"><div id="macInstall" hidden><strong>Open Terminal</strong><code id="installCommand">Installation command is being prepared.</code></div></dialog>
 <script>setTimeout(() => { document.getElementById("installCommand").textContent = ${JSON.stringify(command)}; }, 100);</script></body></html>`, hits);
 		try {
-			const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
 			expect(archive.documentHtml).toContain(command);
 			expect(archive.documentHtml).toContain("Open Terminal");
 			expect(archive.text.toString()).not.toContain("base64");
@@ -86,7 +85,7 @@ setTimeout(async () => {
 </script></body></html>`, hits);
 		try {
 			const url = `http://127.0.0.1:${server.port}/c2222120`;
-			const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 2_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url }, { ...fast, renderSettleMs: 2_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.url).toBe(url);
 			expect(archive.navigationHops).toEqual([expect.objectContaining({ url, status: 200, contentCaptured: true })]);
@@ -106,7 +105,7 @@ location.replace(URL.createObjectURL(new Blob(["<!DOCTYPE html><html><body>${app
 </script></head><body></body></html>`, hits);
 		try {
 			const url = `http://127.0.0.1:${server.port}/c2222120`;
-			const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 2_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url }, { ...fast, renderSettleMs: 2_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.url).toBe(url);
 			expect(archive.hostname).toBe("127.0.0.1");
@@ -129,7 +128,7 @@ location.replace(URL.createObjectURL(new Blob(["<!DOCTYPE html><html><body>${app
 		try {
 			const url = `http://127.0.0.1:${server.port}/c2222120`;
 			const loginUrl = `http://127.0.0.1:${server.port}/login-form`;
-			const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 3_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url }, { ...fast, renderSettleMs: 3_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.verificationGate).toEqual({ label: "Confirm you are human" });
 			expect(archive.url).toBe(loginUrl);
@@ -188,7 +187,7 @@ box.addEventListener("click", () => {
 			try {
 				const url = `http://127.0.0.1:${server.port}/`;
 				const loginUrl = `http://127.0.0.1:${server.port}/i/flow/login`;
-				const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 4_000, getBrowser: () => launchTestChromium() });
+				const archive = await firstPage({ url }, { ...fast, renderSettleMs: 4_000, getBrowser: () => launchTestChromium() });
 
 				expect(archive.verificationGate).toEqual({ label: "Verify you are human" });
 				expect(archive.url).toBe(loginUrl);
@@ -213,7 +212,7 @@ document.getElementById("turnstile").addEventListener("click", async () => {
 	document.querySelector(".main-content").innerHTML = html;
 });`), hits);
 			try {
-				const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 4_000, getBrowser: () => launchTestChromium() });
+				const archive = await firstPage({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 4_000, getBrowser: () => launchTestChromium() });
 
 				expect(archive.verificationGate).toEqual({ label: "Verify you are human" });
 				expect(archive.text.toString()).toContain("Phone, email, or username");
@@ -227,7 +226,7 @@ document.getElementById("turnstile").addEventListener("click", async () => {
 			const hits: string[] = [];
 			const server = serveChallenge(fakeChallenge(`<p><a href="/i/flow/login">Verify you are human</a></p>`, ""), hits);
 			try {
-				const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
+				const archive = await firstPage({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
 
 				expect(archive.verificationGate).toBeUndefined();
 				expect(hits).toEqual(["/"]);
@@ -241,7 +240,7 @@ document.getElementById("turnstile").addEventListener("click", async () => {
 			const server = serveChallenge(fakeChallenge(`${turnstile("first")}${turnstile("second", "I'm not a robot")}`, `
 for (const id of ["first", "second"]) document.getElementById(id).addEventListener("click", () => { location.href = "/i/flow/login"; });`), hits);
 			try {
-				const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
+				const archive = await firstPage({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
 
 				expect(archive.verificationGate).toBeUndefined();
 				expect(hits).toEqual(["/"]);
@@ -255,7 +254,7 @@ for (const id of ["first", "second"]) document.getElementById(id).addEventListen
 			const server = serveChallenge(fakeChallenge(turnstile("turnstile", "Continue to x.com"), `
 document.getElementById("turnstile").addEventListener("click", () => { location.href = "/i/flow/login"; });`), hits);
 			try {
-				const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
+				const archive = await firstPage({ url: `http://127.0.0.1:${server.port}/` }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
 
 				expect(archive.verificationGate).toBeUndefined();
 				expect(hits).toEqual(["/"]);
@@ -275,7 +274,7 @@ document.getElementById("turnstile").addEventListener("click", () => { location.
 		const cloaker = serveKit(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${decoyUrl}"><title>Redirecting...</title><script>window.location.replace("${decoyUrl}");</script></head><body></body></html>`, hits);
 		try {
 			const url = `http://localhost:${cloaker.port}/word/verify.workspace.php`;
-			const archive = await archiveWebsite({ url }, { ...fast, renderSettleMs: 2_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url }, { ...fast, renderSettleMs: 2_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.url).toBe(decoyUrl);
 			expect(archive.navigationHops).toEqual([
@@ -299,7 +298,7 @@ document.getElementById("turnstile").addEventListener("click", () => { location.
 		const server = serveKit(`<!DOCTYPE html><html><body>${appleForm}
 <label><input type="checkbox" id="robot" onclick="fetch('/verify', { method: 'POST' })"> I'm not a robot</label></body></html>`, hits);
 		try {
-			const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/login` }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url: `http://127.0.0.1:${server.port}/login` }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.verificationGate).toBeUndefined();
 			expect(archive.text.toString()).toContain("Sign in with Apple Account");
@@ -354,7 +353,7 @@ document.getElementById("checkbox").addEventListener("click", async () => {
 });
 </script></body></html>`, hits);
 		try {
-			const archive = await archiveWebsite({ url: served.url }, { ...fast, renderSettleMs: 5_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url: served.url }, { ...fast, renderSettleMs: 5_000, getBrowser: () => launchTestChromium() });
 
 			// The empty role=checkbox control takes its caption from the span drawn beside it.
 			expect(archive.verificationGate).toEqual({ label: "I'm not a robot" });
@@ -388,7 +387,7 @@ fetch("/session").then(() => { document.getElementById("app").innerHTML = ${JSON
 <script>document.getElementById("checkbox").addEventListener("click", () => { setTimeout(() => { location.href = "http://127.0.0.1:${kitSite.port}/?k=token"; }, 300); });</script>
 </body></html>`, hits);
 		try {
-			const archive = await archiveWebsite({ url: served.url }, { ...fast, renderSettleMs: 5_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url: served.url }, { ...fast, renderSettleMs: 5_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.verificationGate).toEqual({ label: "I'm not a robot" });
 			expect(hits).toContain("kit-site/session");
@@ -409,7 +408,7 @@ fetch("/session").then(() => { document.getElementById("app").innerHTML = ${JSON
 		const served = serveFramedKit(`<!DOCTYPE html><html><body>${appleForm}
 <label><input type="checkbox" onclick="fetch('/verify', { method: 'POST' })"> I'm not a robot</label></body></html>`, hits);
 		try {
-			const archive = await archiveWebsite({ url: served.url }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url: served.url }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.verificationGate).toBeUndefined();
 			expect(hits).toEqual(["kit/userCodeAppPanel", "kit/userCodeAppPanel"]);
@@ -427,7 +426,7 @@ fetch("/session").then(() => { document.getElementById("app").innerHTML = ${JSON
 <iframe src="https://www.google.com/recaptcha/api2/anchor?k=test" style="width:304px;height:78px"></iframe></body></html>`, hits);
 		const providerFrames: string[] = [];
 		try {
-			const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/wait` }, {
+			const archive = await firstPage({ url: `http://127.0.0.1:${server.port}/wait` }, {
 				...fast,
 				renderSettleMs: 1_000,
 				getBrowser: async () => {
@@ -464,7 +463,7 @@ fetch("/session").then(() => { document.getElementById("app").innerHTML = ${JSON
 <button onclick="fetch('/verify', { method: 'POST' })">I'm not a robot</button>
 <button onclick="fetch('/verify', { method: 'POST' })">Verify you are human</button></body></html>`, hits);
 		try {
-			const archive = await archiveWebsite({ url: `http://127.0.0.1:${server.port}/two` }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url: `http://127.0.0.1:${server.port}/two` }, { ...fast, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.verificationGate).toBeUndefined();
 			expect(hits).toEqual(["/two"]);

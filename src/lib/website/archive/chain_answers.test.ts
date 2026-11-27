@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { gzipSync } from "node:zlib";
 
 import { chromiumAvailable, launchTestChromium } from "../../browser/task/test_helpers";
-import { archiveWebsite } from "./";
+import { firstPage } from "./test_fixture";
 
 describe.skipIf(!chromiumAvailable)("the chain's raw answers, in a real browser", () => {
 	test("keeps the body of an interstitial whose script leaves at once, stamps every answer with its arrival, and keeps the page's own identity", async () => {
@@ -26,7 +26,7 @@ describe.skipIf(!chromiumAvailable)("the chain's raw answers, in a real browser"
 			const origin = `http://127.0.0.1:${server.port}`;
 			const visitor = { override: { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36", platform: "MacIntel" }, screen: "desktop" as const };
 			// The lure names its victim in the fragment, which the network never sees and the browser carries across the redirect.
-			const archive = await archiveWebsite({ url: `${origin}/click#victim@mail.com`, visitor }, { scriptNavigationSettleMs: 1_500, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url: `${origin}/click#victim@mail.com`, visitor }, { renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.navigationHops.map(({ url, status, redirectTo, bodyCaptured, contentCaptured }) => ({ url, status, redirectTo, bodyCaptured, contentCaptured }))).toEqual([
 				{ url: `${origin}/click#victim@mail.com`, status: 302, redirectTo: `${origin}/prize`, bodyCaptured: undefined, contentCaptured: false },
@@ -65,7 +65,7 @@ describe.skipIf(!chromiumAvailable)("the chain's raw answers, in a real browser"
 		});
 		try {
 			const origin = `http://127.0.0.1:${server.port}`;
-			const archive = await archiveWebsite({ url: `${origin}/click` }, { scriptNavigationSettleMs: 1_500, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url: `${origin}/click` }, { renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
 
 			expect(archive.navigationHops.map(({ url, status, bodyCaptured }) => ({ url, status, bodyCaptured }))).toEqual([
 				{ url: `${origin}/click`, status: 302, bodyCaptured: undefined },
@@ -104,7 +104,7 @@ describe.skipIf(!chromiumAvailable)("the chain's raw answers, in a real browser"
 		try {
 			const origin = `http://127.0.0.1:${server.port}`;
 			const started = Date.now();
-			const archive = await archiveWebsite({ url: `${origin}/lure` }, { scriptNavigationSettleMs: 500, renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
+			const archive = await firstPage({ url: `${origin}/lure` }, { renderSettleMs: 1_000, getBrowser: () => launchTestChromium() });
 
 			// Far within the body's own time bound: the cap ends the read, not the clock.
 			expect(Date.now() - started).toBeLessThan(15_000);

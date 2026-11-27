@@ -1,6 +1,7 @@
 import { isBrowserUnavailable, type FabricEgress } from "../../browser/fabric";
 import type { BrowserIdentity } from "../../browser/page";
 import { reporterBrowserIdentity } from "../../browser/reporter_identity";
+import { isAbortError } from "../../util/abort";
 import { errorText } from "../../util/error_text";
 import { isBrowserInfrastructureFailure } from "../archive/errors";
 import { websiteSite } from "../info/site";
@@ -112,25 +113,30 @@ function siteOf(url: string): string | undefined {
 /**
  * Open the submitted link again up to `ROTATION_VISITS` times, each from the
  * residential exit in another browser with a fresh profile, and walk every
- * route not seen yet in full, as the first walk was (`walk`). A visit that
- * only reached a known route is kept as its hops, the evidence that the link
- * rotates. Sampling stops early after two visits in a row showed nothing
- * new, once its time budget is used up, or when the residential exit is
- * down. A visit the browser service failed (a dropped connection, a detached
- * frame) says nothing about the exit or the link: it is kept as its error,
- * and the next browser goes on. A route whose walk failed ends the sampling,
- * as its files may be partly stored under its number.
- * `routes` are the hops of every route so far, the first walk's first; each
- * walked route is added to it.
+ * route not seen yet in full, as the first walk was, in the browser that
+ * opened it (`visit`). A visit whose first page only showed a known route
+ * is not walked (no agent, no model cost): it is kept as its hops, the
+ * evidence that the link rotates. Sampling stops early after two visits in
+ * a row showed nothing new, once its time budget is used up, or when the
+ * residential exit is down. A visit the browser service failed (a dropped
+ * connection, a detached frame) says nothing about the exit or the link: it
+ * is kept as its error, and the next browser goes on. A route whose walk
+ * failed ends the sampling, as its files may be partly stored under its
+ * number. `routes` are the hops of every route so far, the first walk's
+ * first; each walked route is added to it.
  */
 export async function sampleRotation(params: {
 	routes: WebsiteNavigationHop[][];
 	first: RotationBrowser;
-	/** Open the link in the browser; the capture comes back with its session open. */
-	capture: (browser: RotationBrowser) => Promise<WebsiteCapture>;
-	/** Walk a new route from its capture, as its route number; returns its whole chain. The walk closes the capture's session. */
-	walk: (archive: WebsiteCapture, browser: RotationBrowser, route: number) => Promise<WebsiteNavigationHop[]>;
+	/**
+	 * Open the link in the browser and, when `isNew` says its first page
+	 * shows a route not seen yet, walk it as route `route` in the same
+	 * browser; returns the walk's whole chain, or nothing when it stopped at
+	 * the first page.
+	 */
+	visit: (browser: RotationBrowser, route: number, isNew: (first: WebsiteCapture) => boolean) => Promise<WebsiteNavigationHop[] | undefined>;
 	budgetMs?: number;
+	signal?: AbortSignal;
 	now?: () => number;
 }): Promise<WebsiteRotation> {
 	const now = params.now ?? Date.now;
@@ -140,36 +146,41 @@ export async function sampleRotation(params: {
 	let unchanged = 0;
 	const browsers = rotationBrowsers(params.first);
 	for (const browser of browsers) {
+		params.signal?.throwIfAborted();
 		if (now() - startedAt >= budgetMs) return { visits, ended: `The time for sampling the link's other offers (${Math.round(budgetMs / 60_000)} min) was used up.` };
 		const visitor: WebsiteRouteVisitor = { browser: browser.label, network: "residential exit" };
 		const started = new Date(now()).toISOString();
-		let archive: WebsiteCapture;
+		const route = params.routes.length;
+		/** The first page's hops, once the link opened, and the known route they repeat. */
+		let opened: { hops: WebsiteNavigationHop[]; known?: number } | undefined;
+		let hops: WebsiteNavigationHop[] | undefined;
 		try {
-			archive = await params.capture(browser);
+			hops = await params.visit(browser, route, (first) => {
+				const known = knownRoute(first.navigationHops, params.routes);
+				opened = { hops: first.navigationHops, ...(known !== undefined ? { known } : {}) };
+				return known === undefined;
+			});
 		} catch (error) {
+			if (params.signal?.aborted) throw params.signal.reason;
+			if (isAbortError(error)) throw error;
 			visits.push({ startedAt: started, visitor, error: errorText(error) });
+			// A route whose walk broke off may have stored some of its files; no later route takes its number.
+			if (opened) return { visits, ended: `Walking a new route failed: ${errorText(error)}` };
 			// A lease that failed, or a link the exit could not reach, is the exit; anything else not of the browser service is not known to pass.
 			if (!isBrowserUnavailable(error) && isBrowserInfrastructureFailure(error)) continue;
 			return { visits, ended: `Opening the link again from the residential exit failed: ${errorText(error)}` };
 		}
-		const known = knownRoute(archive.navigationHops, params.routes);
-		if (known !== undefined) {
-			// A browser that will not close is no reason to lose the routes already walked.
-			await archive.session?.close().catch(() => undefined);
-			visits.push({ startedAt: started, visitor, repeatOf: known, hops: archive.navigationHops });
+		if (opened?.known !== undefined) {
+			visits.push({ startedAt: started, visitor, repeatOf: opened.known, hops: opened.hops });
 			if (++unchanged >= MAX_UNCHANGED_VISITS) return { visits, ended: `${MAX_UNCHANGED_VISITS} visits in a row showed only routes seen before.` };
 			continue;
 		}
-		unchanged = 0;
-		const route = params.routes.length;
-		try {
-			const hops = await params.walk(archive, browser, route);
-			params.routes.push(hops);
-		} catch (error) {
-			// A route whose walk broke off may have stored some of its files; no later route takes its number.
-			visits.push({ startedAt: started, visitor, error: errorText(error) });
-			return { visits, ended: `Walking a new route failed: ${errorText(error)}` };
+		if (!hops) {
+			visits.push({ startedAt: started, visitor, error: "The new route's first page was not walked." });
+			return { visits, ended: "Walking a new route failed: its first page was not walked." };
 		}
+		unchanged = 0;
+		params.routes.push(hops);
 		visits.push({ startedAt: started, visitor, route });
 	}
 	return { visits, ended: `All ${browsers.length} visits were made.` };

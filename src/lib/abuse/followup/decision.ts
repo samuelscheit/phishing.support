@@ -206,7 +206,7 @@ async function verifyContent(
 			...(tools.assertPublicHost ? { assertPublicHost: tools.assertPublicHost } : {}),
 			...tools.liveness,
 		},
-		...(tools.capture ? { capture: tools.capture } : {}),
+		...(tools.visitSite ? { visitSite: tools.visitSite } : {}),
 	});
 }
 

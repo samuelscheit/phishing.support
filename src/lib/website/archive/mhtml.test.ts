@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { WebsiteNavigationHop } from "../types";
-import { archiveWebsite } from "./";
+import { parseMhtmlSnapshot } from "./mhtml";
 import { getMhtmlArchiveDate, getMhtmlArchiveLocation } from "./mhtml";
 
 function mhtml(preamble: string, body = "content") {
@@ -55,7 +55,7 @@ describe("getMhtmlArchiveDate", () => {
 	});
 });
 
-test("archiveWebsite parses a retained MHTML snapshot locally without opening a browser", async () => {
+test("parseMhtmlSnapshot parses a retained MHTML snapshot locally without opening a browser", async () => {
 	const snapshot = Buffer.from([
 		"From: <Saved by Blink>",
 		"Content-Type: multipart/related; boundary=\"fabric-test\"",
@@ -68,7 +68,7 @@ test("archiveWebsite parses a retained MHTML snapshot locally without opening a 
 		"--fabric-test--",
 	].join("\r\n"), "utf8");
 
-	const archive = await archiveWebsite({ url: "https://example.test/", mhtmlSnapshot: snapshot });
+	const archive = await parseMhtmlSnapshot({ url: "https://example.test/", mhtmlSnapshot: snapshot });
 	expect(archive.html.toString()).toContain("Captured");
 	expect(archive.text.toString()).toContain("Captured evidence");
 	expect(archive.html.toString()).not.toContain("not-run");
@@ -94,7 +94,7 @@ test("retrying retained MHTML preserves the submitted URL and exact captured-hop
 		"--fabric-test--",
 	].join("\r\n"), "utf8");
 
-	const archive = await archiveWebsite({ url: requestedUrl, archivedUrl: finalUrl, navigationHops, mhtmlSnapshot: snapshot });
+	const archive = await parseMhtmlSnapshot({ url: requestedUrl, archivedUrl: finalUrl, navigationHops, mhtmlSnapshot: snapshot });
 
 	expect(archive.requestedUrl).toBe(requestedUrl);
 	expect(archive.url).toBe(finalUrl);
@@ -120,7 +120,7 @@ test("legacy retained MHTML recovers its captured URL instead of assigning final
 		"--fabric-test--",
 	].join("\r\n"), "utf8");
 
-	const archive = await archiveWebsite({ url: requestedUrl, mhtmlSnapshot: snapshot, trustMhtmlDocumentLocation: true });
+	const archive = await parseMhtmlSnapshot({ url: requestedUrl, mhtmlSnapshot: snapshot, trustMhtmlDocumentLocation: true });
 
 	expect(archive.requestedUrl).toBe(requestedUrl);
 	expect(archive.url).toBe(finalUrl);
@@ -147,7 +147,7 @@ test("untrusted submitted MHTML cannot choose the URL associated with captured p
 		"--fabric-test--",
 	].join("\r\n"), "utf8");
 
-	const archive = await archiveWebsite({ url: "https://submitter.example/", mhtmlSnapshot: snapshot });
+	const archive = await parseMhtmlSnapshot({ url: "https://submitter.example/", mhtmlSnapshot: snapshot });
 
 	expect(archive.url).toBe("https://submitter.example/");
 	expect(archive.navigationHops).toEqual([{

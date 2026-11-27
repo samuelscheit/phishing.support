@@ -9,9 +9,8 @@ import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { useTrackingTokenSecret } from "../../abuse/security/test_helpers";
-import { scriptedVisitSession } from "../../site_visit/test_helpers";
+import type { ScriptedPage } from "../../site_visit/test_helpers";
 import { getReportsForSubmission } from "../../submissions/abuse_details";
-import type { WebsiteArchiveResult } from "../archive/types";
 import { websiteSubmission } from "../test_helpers";
 import { analyzeWebsite } from "./ai";
 import { CHECKOUT_HTML, LURE_HTML, START, capturedPage, funnelDependencies, funnelHop, productionVisit, type ModelCall } from "./funnel_test_helpers";
@@ -21,7 +20,7 @@ useTemporaryDatabase();
 useTrackingTokenSecret();
 
 /** Another link of the same campaign, handed out as the affiliate's own Voluum link: the same lure and checkout, no Everflow. */
-function voluumVisit(): WebsiteArchiveResult {
+function voluumVisit(): ScriptedPage {
 	const u = PRODUCTION_URLS;
 	const checkout = capturedPage(u.checkout, CHECKOUT_HTML, CHECKOUT_TEXT, [
 		funnelHop(2, u.voluumClick, 302, { redirectTo: u.wrapper }),
@@ -30,11 +29,11 @@ function voluumVisit(): WebsiteArchiveResult {
 		funnelHop(5, u.cakeCookieCheck, 302, { redirectTo: u.checkout }),
 		funnelHop(6, u.checkout, 200),
 	]);
-	return capturedPage(u.lure, LURE_HTML, LURE_TEXT, [funnelHop(0, u.voluumCampaign, 302, { redirectTo: u.lure }), funnelHop(1, u.lure, 200)], scriptedVisitSession({ steps: [checkout] }));
+	return capturedPage(u.lure, LURE_HTML, LURE_TEXT, [funnelHop(0, u.voluumCampaign, 302, { redirectTo: u.lure }), funnelHop(1, u.lure, 200)], { steps: [checkout] });
 }
 
 /** The production funnel's boundaries, every capture of the case returning `capture()`. */
-function dependencies(capture: () => WebsiteArchiveResult, calls: ModelCall[], options: { phishingLure?: boolean; popular?: string[] } = {}) {
+function dependencies(capture: () => ScriptedPage, calls: ModelCall[], options: { phishingLure?: boolean; popular?: string[] } = {}) {
 	return funnelDependencies(async () => capture(), calls, options);
 }
 
@@ -163,9 +162,9 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 	test("a deceptive funnel whose every business is left out is said, and nothing is reported", async () => {
 		// The affiliate's own tracker straight to a well-known merchant that no network credits: nobody to report it to.
 		const u = PRODUCTION_URLS;
-		const capture = () => capturedPage(u.lure, LURE_HTML, LURE_TEXT, [funnelHop(0, u.voluumCampaign, 302, { redirectTo: u.lure }), funnelHop(1, u.lure, 200)], scriptedVisitSession({
+		const capture = () => capturedPage(u.lure, LURE_HTML, LURE_TEXT, [funnelHop(0, u.voluumCampaign, 302, { redirectTo: u.lure }), funnelHop(1, u.lure, 200)], {
 			steps: [capturedPage(u.checkout, CHECKOUT_HTML, CHECKOUT_TEXT, [funnelHop(2, u.voluumClick, 302, { redirectTo: u.checkout }), funnelHop(3, u.checkout, 200)])],
-		}));
+		});
 		const id = await websiteSubmission(383000000000000006n, u.voluumCampaign);
 		await analyzeWebsite({ submissionId: id, url: u.voluumCampaign }, dependencies(capture, [], { popular: ["zatos.com"] }));
 		const submission = (await SubmissionsEntity.get(id))!;
@@ -184,9 +183,9 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 		const storeText = "Zappos\nRunning Shoes\n$89.95\nAdd to Cart";
 		const blogText = "Zappos coupon: 20% off running shoes\nShop the sale at Zappos";
 		const storeHtml = `<html><head><title>Zappos</title></head><body><p>${storeText}</p></body></html>`;
-		const capture = () => capturedPage(blog, `<html><body><p>${blogText}</p></body></html>`, blogText, [funnelHop(0, blog, 200)], scriptedVisitSession({
+		const capture = () => capturedPage(blog, `<html><body><p>${blogText}</p></body></html>`, blogText, [funnelHop(0, blog, 200)], {
 			steps: [capturedPage(store, storeHtml, storeText, [funnelHop(1, tune, 302, { redirectTo: store }), funnelHop(2, store, 200)])],
-		}));
+		});
 		const calls: ModelCall[] = [];
 		const id = await websiteSubmission(383000000000000003n, blog);
 		await analyzeWebsite({ submissionId: id, url: blog }, dependencies(capture, calls));
@@ -204,7 +203,7 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 	test("a chain through no tracking link is no funnel: the model is not asked and nothing is kept", async () => {
 		const blog = "https://www.dealsdiaryblog.com/plain";
 		const store = "https://www.zappos.com/sale";
-		const capture = () => capturedPage(blog, "<html><body>Sale</body></html>", "Sale", [funnelHop(0, blog, 200)], scriptedVisitSession({ steps: [capturedPage(store, "<html><body>Zappos sale</body></html>", "Zappos sale", [funnelHop(1, store, 200)])] }));
+		const capture = () => capturedPage(blog, "<html><body>Sale</body></html>", "Sale", [funnelHop(0, blog, 200)], { steps: [capturedPage(store, "<html><body>Zappos sale</body></html>", "Zappos sale", [funnelHop(1, store, 200)])] });
 		const calls: ModelCall[] = [];
 		const id = await websiteSubmission(383000000000000004n, blog);
 		await analyzeWebsite({ submissionId: id, url: blog }, dependencies(capture, calls));

@@ -1,6 +1,10 @@
 import { reporterBrowserIdentity } from "../../browser/reporter_identity";
-import { archiveWebsite } from "../archive";
-import type { ArchiveWebsiteOptions, WebsitePageSession, WebsiteVerificationGate } from "../archive/types";
+import { isBrowserUnavailable } from "../../browser/fabric";
+import { parseMhtmlSnapshot } from "../archive/mhtml";
+import type { WebsiteVerificationGate } from "../archive/types";
+import { closeVisitControl, type VisitControl } from "../../site_visit/control";
+import { started } from "../../util/async";
+import { errorText } from "../../util/error_text";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { getInfo } from "../info/info";
@@ -21,13 +25,12 @@ import { emitStep } from "../visit/progress";
 import { collectSiblingsOf } from "../visit_queue/collect";
 import { capturedArchiveHop, reportableFinding, reportableWebsiteHop, unreportedVerdict, websiteReportUrls } from "../info/report_hops";
 import { capturedPageScreenshots, capturedWebsiteData, websiteEvidence } from "./evidence";
-import { visitWebsite, type WebsiteChainSite, type WebsiteVisitResult } from "../visit/visit";
+import { openLiveView, visitWebsite, type WebsiteChainSite, type WebsiteVisitResult } from "../visit/visit";
 import { firstWalkBrowser, ROTATION_EGRESS, sampleRotation, samplesRotation, type RotationBrowser } from "./rotation";
-import type { FabricEgress } from "../../browser/fabric";
 import type { FunnelChain } from "../../abuse/funnel/chain";
 import type { DeceptiveFunnelFinding } from "../../abuse/funnel/classification";
 import { cloakedDestinationInfo, cloakingSuspectedInfo, harmlessScriptedDestination } from "../archive/cloaking";
-import { BROWSER_BACKOFF_MS, failWebsiteAnalysis, recordWebsiteAnalysisFailure, withBrowserBackoff } from "./failure";
+import { BROWSER_BACKOFF_MS, failWebsiteAnalysis, recordWebsiteAnalysisFailure } from "./failure";
 import type { WebsiteAnalysisDependencies, WebsiteCapture } from "./analysis_types";
 import type { ReporterInstructions } from "../../submissions/instructions";
 import { deceptiveFunnelFinding, funnelOutcomeText, judgeCaseFunnel, reportCaseFunnel } from "./funnel";
@@ -42,8 +45,6 @@ export type AnalyzeWebsiteOptions = {
 	trustMhtmlDocumentLocation?: boolean;
 	/** Existing evidence screenshot used when a retry parses MHTML locally. */
 	screenshotSnapshot?: Buffer;
-	/** The network route the original live capture of retained MHTML used. */
-	captureRoute?: string;
 	/** The verification gate retained MHTML was captured behind. */
 	verificationGate?: WebsiteVerificationGate;
 	/** Same-host scripts and stylesheets the original live capture of retained MHTML received. */
@@ -64,9 +65,6 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 	const { url, instructions, submissionId, reporterIp, reporterCountry, reporterHeaders, reuseEvidenceArtifacts = false } = options;
 	// What the reporter submitted, kept by every write of the case's data.
 	const submitted = { url, ...(instructions ? { instructions } : {}) };
-	// Every live capture keeps its browser open for the flow's next action on
-	// the page; each one is closed once the flow is done with it.
-	const sessions: WebsitePageSession[] = [];
 	// Automatic retries already spent on this case; the run's own data writes drop the record.
 	let priorAttempts = 0;
 	// Every step first checks that the visit's job still wants it: a stopped job ends the visit at its next step.
@@ -74,97 +72,71 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		dependencies.signal?.throwIfAborted();
 		return emitStep(submissionId, name, progress);
 	};
-	const closeSessions = () => Promise.all(sessions.splice(0).map((session) => session.close().catch((error: unknown) => console.warn("Closing a capture browser failed:", error))));
-	// Every live capture of the case, the visit's included, presents the reporter's own browser.
+	// Every live visit of the case's first walk, revisits included, presents the reporter's own browser.
 	const visitor = reporterBrowserIdentity(reporterHeaders);
-	const capture = async (captureOptions: ArchiveWebsiteOptions) => {
-		const captured = await withBrowserBackoff(() => (dependencies.archiveWebsite ?? archiveWebsite)({ ...captureOptions, ...(visitor ? { visitor } : {}), keepSession: true }), dependencies.browserBackoffMs ?? BROWSER_BACKOFF_MS);
-		if (captured.session) sessions.push(captured.session);
-		return captured;
-	};
-	// A sampled visit of a rotating link: every capture of its walk presents its browser, from the residential exit, in a
-	// browser of its own (each Fabric lease is a fresh profile). A failure is not waited out: it ends the sampling.
-	const sampleCapture = (browser: RotationBrowser) => async (captureOptions: ArchiveWebsiteOptions): Promise<WebsiteCapture> => {
-		const captured = await (dependencies.archiveWebsite ?? archiveWebsite)({
-			...captureOptions,
-			...(browser.visitor ? { visitor: browser.visitor } : {}),
-			...(browser.device && !captureOptions.device ? { device: browser.device } : {}),
-			egress: ROTATION_EGRESS,
-			keepSession: true,
-		});
-		if (captured.session) sessions.push(captured.session);
-		return captured;
-	};
+	const backoffMs = dependencies.browserBackoffMs ?? BROWSER_BACKOFF_MS;
+	// The case's live view, from before its first browser starts until its first walk ended.
+	let control: VisitControl | undefined;
+	let whois: (() => Promise<Awaited<ReturnType<typeof getInfo>>>) | undefined;
 	try {
 		const prior = await SubmissionsEntity.get(submissionId);
 		priorAttempts = (prior?.data.kind === "website" && prior.data.website.autoRetry?.attempts) || 0;
 		// Claim the submission before any network work: while the row still says
 		// `new`, a restart during the first lookup would leave it looking queued
 		// forever with no retry path.
-		await SubmissionsEntity.update(submissionId, { status: "running", info: "Collecting bounded WHOIS, RDAP, and regional DNS evidence." });
-		await step("whois_lookup", 5);
-		const whois = await (dependencies.getInfo ?? getInfo)(url);
+		await SubmissionsEntity.update(submissionId, { status: "running", info: "Visiting the site; collecting bounded WHOIS, RDAP, and regional DNS evidence meanwhile." });
+		// The lookups run beside the visit; the first record of the case's page waits for them.
+		const startedWhois = started((dependencies.getInfo ?? getInfo)(url));
+		whois = startedWhois;
+		control = openLiveView(submissionId);
+		await step("archive_website", 5);
+		// A page the case holds already (the reporter's MHTML, a retry's stored capture) is read without a browser.
+		const stored = options.mhtmlSnapshot?.byteLength ? await storedCapture({ ...options, mhtmlSnapshot: options.mhtmlSnapshot }) : undefined;
 
-		await SubmissionsEntity.update(submissionId, {
-			status: "running",
-			info: undefined,
-			data: { kind: "website", website: { ...submitted, whois } },
-		});
-
-		await step("archive_website", 10);
-		const captured = await capture({
-			url,
-			mhtmlSnapshot: options.mhtmlSnapshot,
-			archivedUrl: options.archivedUrl,
-			navigationHops: options.navigationHops,
-			trustMhtmlDocumentLocation: options.trustMhtmlDocumentLocation,
-			verificationGate: options.verificationGate,
-			kitResources: options.kitResources,
-			hiddenFrames: options.hiddenFrames,
-			device: options.device,
-		});
-		let archive: WebsiteCapture = {
-			...captured,
-			...(!captured.screenshotPng && options.screenshotSnapshot ? { screenshotPng: options.screenshotSnapshot } : {}),
-			...(!captured.route && options.captureRoute ? { route: options.captureRoute } : {}),
+		/** Keep the first page of the case's first walk, and say whether the walk goes on: a decoy and a snapshot of another site end the case here. */
+		const recordFirstPage = async (archive: WebsiteCapture): Promise<boolean> => {
+			if (archive.cloaking?.outcome === "unresolved") {
+				// The visit holds only the decoy every reachable route was shown. It
+				// is no evidence against any site of the chain.
+				await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await websiteEvidence(submissionId, url, archive, dependencies, 0) });
+				await SubmissionsEntity.update(submissionId, {
+					status: "failed",
+					info: cloakingSuspectedInfo(archive.cloaking),
+					data: { kind: "website", website: { ...submitted, whois: await startedWhois(), archiveUrl: archive.url, routes: [{ hops: archive.navigationHops }], cloaking: archive.cloaking } },
+				});
+				await step("failed", 100);
+				return false;
+			}
+			await step("save_artifacts", 40);
+			// A retry that reuses the stored capture keeps its original evidence package.
+			if (!(archive === stored && reuseEvidenceArtifacts)) {
+				await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await websiteEvidence(submissionId, url, archive, dependencies, 0) });
+			}
+			const capturedHop = archive.attributionError ? undefined : capturedArchiveHop(archive);
+			if (!capturedHop) {
+				await SubmissionsEntity.update(submissionId, {
+					status: "invalid",
+					info: `${archive.attributionError} No report was created; resubmit the exact site whose page should be analyzed.`,
+					data: { kind: "website", website: { ...submitted, whois: await startedWhois() } },
+				});
+				await step("completed", 100);
+				return false;
+			}
+			await SubmissionsEntity.update(submissionId, {
+				status: "running",
+				info: undefined,
+				data: {
+					kind: "website",
+					website: { ...submitted, whois: await startedWhois(), ...capturedWebsiteData(archive), routes: [{ hops: archive.navigationHops, analyzedHopIndex: capturedHop.index }] },
+				},
+			});
+			return true;
 		};
-		if (archive.cloaking?.outcome === "unresolved") {
-			// The capture holds only the decoy every reachable route was shown. It
-			// is no evidence against any site of the chain.
-			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await websiteEvidence(submissionId, url, archive, dependencies, 0) });
-			await SubmissionsEntity.update(submissionId, {
-				status: "failed",
-				info: cloakingSuspectedInfo(archive.cloaking),
-				data: { kind: "website", website: { ...submitted, whois, archiveUrl: archive.url, routes: [{ hops: archive.navigationHops }], cloaking: archive.cloaking } },
-			});
-			await step("failed", 100);
-			return submissionId;
-		}
-		const capturedHop = archive.attributionError ? undefined : capturedArchiveHop(archive);
-
-		await step("save_artifacts", 40);
-		// A retry that reuses the stored capture keeps its original evidence package.
-		if (!reuseEvidenceArtifacts) {
-			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await websiteEvidence(submissionId, url, archive, dependencies, 0) });
-		}
-		if (!capturedHop) {
-			await SubmissionsEntity.update(submissionId, {
-				status: "invalid",
-				info: `${archive.attributionError} No report was created; resubmit the exact site whose page should be analyzed.`,
-			});
-			await step("completed", 100);
-			return submissionId;
-		}
-		await SubmissionsEntity.update(submissionId, {
-			data: {
-				kind: "website",
-				website: { ...submitted, whois, ...capturedWebsiteData(archive), routes: [{ hops: archive.navigationHops, analyzedHopIndex: capturedHop.index }] },
-			},
-		});
 
 		// Every walk of the link, the first one's as route 0: a link that rotates offers per click takes each walk down another.
-		const walkRoute = async (route: number, first: WebsiteCapture, browser: RotationBrowser, walkCapture: typeof capture, networks?: readonly FabricEgress[]): Promise<WalkedRoute> => {
-			const visited = await visitWebsite({ submissionId, route, url, ...(instructions ? { instructions } : {}), whois, archive: first, dependencies, capture: walkCapture, ...(networks ? { networks, egress: networks[0] } : {}) }).finally(closeSessions);
+		const walkRoute = async (route: number, browser: RotationBrowser, walk: Pick<Parameters<typeof visitWebsite>[0], "browser" | "networks" | "egress" | "stored" | "onInitialPage" | "control">): Promise<WalkedRoute | undefined> => {
+			const visited = await visitWebsite({ submissionId, route, url, ...(instructions ? { instructions } : {}), dependencies, ...walk });
+			if (!visited) return undefined;
 			const confirmed = visited.reportable.flatMap((site) => {
 				const hop = reportableWebsiteHop(site.archive.navigationHops, visited.assessments, site.archive);
 				return hop ? [{ ...site, capturedHop: hop, capture: findingCapture(site) }] : [];
@@ -173,41 +145,56 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			// phishing page may still mislead visitors through tracking links into a merchant's offer.
 			const { chain: funnelChain, funnel } = await judgeCaseFunnel({ submissionId, chain: visited.chain, pages: visited.pages }, dependencies);
 			const deceptive = funnel?.verdict.finding === "deceptive_funnel" ? { ...funnel, verdict: funnel.verdict } : undefined;
-			const network = visited.archive.route ?? first.route;
+			const network = visited.archive.route;
 			return { route, visitor: { browser: browser.label, ...(network ? { network } : {}) }, visited, confirmed, funnelChain, funnel, deceptive };
 		};
 		const firstBrowser = firstWalkBrowser(visitor);
-		const walked = [await walkRoute(0, archive, firstBrowser, capture)];
-		archive = walked[0]!.visited.archive;
+		const firstRoute = await walkRoute(0, firstBrowser, {
+			browser: (wanted) => ({ ...wanted, ...(visitor ? { visitor } : {}), backoffMs }),
+			...(stored ? { stored } : {}),
+			onInitialPage: recordFirstPage,
+			control,
+		});
+		// The first page ended the case: a decoy, or a snapshot of another site.
+		if (!firstRoute) return submissionId;
+		const walked = [firstRoute];
+		const visited = firstRoute.visited;
+		const { archive } = visited;
 		// A link whose first walk passed a tracking link may rotate: it is opened again, from the residential exit, as other browsers.
-		const rotation = walked[0]!.funnel && samplesRotation(prior?.source) ? await sampleRotation({
-			routes: [walked[0]!.visited.chain],
+		const rotation = firstRoute.funnel && samplesRotation(prior?.source) ? await sampleRotation({
+			routes: [visited.chain],
 			first: firstBrowser,
-			capture: async (browser) => {
+			visit: async (browser, route, isNew) => {
 				await step("sample_rotation", 72);
-				return sampleCapture(browser)({ url });
-			},
-			walk: async (first, browser, route) => {
-				try {
-					await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive: first, evidence: await websiteEvidence(submissionId, url, first, dependencies, route) });
-				} catch (error) {
-					// The residential exit is one connection: its browser is not held through the reporting that follows.
-					await first.session?.close().catch(() => undefined);
-					throw error;
-				}
-				const sampled = await walkRoute(route, first, browser, sampleCapture(browser), [ROTATION_EGRESS]);
+				const sampled = await walkRoute(route, browser, {
+					// Every visit of a sampled walk presents its browser, from the residential exit, in a browser of its own
+					// (each Fabric lease is a fresh profile). A failure is not waited out: it ends the sampling.
+					browser: (wanted) => {
+						const device = wanted.device ?? browser.device;
+						return { ...(browser.visitor ? { visitor: browser.visitor } : {}), ...(device ? { device } : {}), egress: ROTATION_EGRESS };
+					},
+					networks: [ROTATION_EGRESS],
+					egress: ROTATION_EGRESS,
+					// A visit that only shows a known route ends at its first page; a new one is walked in the same browser.
+					onInitialPage: async (first) => {
+						if (!isNew(first)) return false;
+						await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive: first, evidence: await websiteEvidence(submissionId, url, first, dependencies, route) });
+						return true;
+					},
+				});
+				if (!sampled) return undefined;
 				walked.push(sampled);
 				return sampled.visited.chain;
 			},
 			...(dependencies.rotationBudgetMs !== undefined ? { budgetMs: dependencies.rotationBudgetMs } : {}),
+			...(dependencies.signal ? { signal: dependencies.signal } : {}),
 		}) : undefined;
 
-		const [firstRoute] = walked;
-		const visited = firstRoute!.visited;
 		const found = walked.some((route) => route.confirmed.length > 0 || route.deceptive !== undefined);
 		// The case's headline: the first route with a reportable site, else the first that is a deceptive funnel, else the first walk.
 		const headlineRoute = walked.find((route) => route.confirmed.length) ?? walked.find((route) => route.deceptive) ?? firstRoute!;
 		const headline = headlineRoute.confirmed[0] ?? { archive: headlineRoute.visited.archive, capturedHop: headlineRoute.visited.capturedHop, classification: headlineRoute.visited.classification };
+		const whoisInfo = await startedWhois();
 		// A scripted jump of the residential exit to a chain that shows nothing reportable led to a decoy.
 		// A destination that turned every network away is said as such, not as a decoy.
 		const decoy = !found && !visited.inconclusive && !visited.cloakedDestination && archive.cloaking?.outcome === "scripted" ? harmlessScriptedDestination(archive.cloaking) : undefined;
@@ -215,7 +202,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			&& `Inconclusive: the visit could not finish the site's flow: ${visited.inconclusive} The last page it reached, ${archive.url}, shows nothing reportable by itself; no verdict or report was made.`;
 		// Each route found something of its own; with several, each finding names its route.
 		const names = routeNames(walked.map((route) => route.visited.chain), websiteSite(url));
-		const routeName = (route: WalkedRoute) => walked.length > 1 ? `Route ${route.route + 1} of ${walked.length}${names[route.route] ? `, via ${names[route.route]}` : ""}: ` : "";
+		const routeName = (route: WalkedRoute) => (walked.length > 1 ? `Route ${route.route + 1} of ${walked.length}${names[route.route] ? `, via ${names[route.route]}` : ""}: ` : "");
 		const routeFinding = (route: WalkedRoute) => [
 			...(route.confirmed.length ? [`${route.confirmed.map((site) => buildWebsiteReportEvidence(site.classification, site.capture)).join("\n\n")}\n${route.confirmed.length === 1 ? "The site is reported to the responsible providers." : "Each of these sites is reported to its responsible providers."}`] : []),
 			...(route.deceptive ? [deceptiveFunnelFinding(route.deceptive.verdict)] : []),
@@ -232,7 +219,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 				kind: "website",
 				website: {
 					...submitted,
-					whois,
+					whois: whoisInfo,
 					...capturedWebsiteData(headline.archive),
 					routes: walked.map((route): WebsiteRoute => ({
 						hops: route.visited.chain,
@@ -256,7 +243,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			analysisKind: "analysis",
 			options: {
 				model: defaultResponseModel,
-				input: buildWebsiteAnalysisInput(headline.archive, { finding: caseFinding, analysisInstructions: instructions?.analysis, whois, pages: headlineRoute.visited.pages, visit: headlineRoute.visited.record, kitResources: headline.archive.kitResources, capturedAt: headline.archive.archivedAt, chain: headlineRoute.visited.chain }),
+				input: buildWebsiteAnalysisInput(headline.archive, { finding: caseFinding, analysisInstructions: instructions?.analysis, whois: whoisInfo, pages: headlineRoute.visited.pages, visit: headlineRoute.visited.record, kitResources: headline.archive.kitResources, capturedAt: headline.archive.archivedAt, chain: headlineRoute.visited.chain }),
 				reasoning: defaultReasoning,
 				tools: [{ type: "web_search" }],
 				stream: true,
@@ -304,14 +291,40 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		// A visit its job stopped (the worker shutting down, the job's deadline)
 		// is not the site's failure: the job's recovery decides what happens.
 		if (dependencies.signal?.aborted) throw error;
+		// No browser could be had (Browser Fabric down, every lease busy): nothing
+		// is known of the site. The case waits queued, its retries unspent, and the
+		// error reaches the worker, which pauses the visit lane and defers the job.
+		if (isBrowserUnavailable(error)) {
+			console.warn(`Website analysis ${submissionId.toString()} waits for a browser: ${errorText(error)}`);
+			await SubmissionsEntity.update(submissionId, { status: "queued", info: "Waiting for the browser service." });
+			throw error;
+		}
 		console.error("Website analysis failed:", error);
-		await recordWebsiteAnalysisFailure(submissionId, error, priorAttempts);
+		// Keep WHOIS/RDAP evidence even when the visit fails (offline NXDOMAIN hosts especially need registrar info).
+		const whoisInfo = await whois?.().catch(() => undefined);
+		await recordWebsiteAnalysisFailure(submissionId, error, priorAttempts, whoisInfo ? { whois: whoisInfo } : undefined);
 		await emitStep(submissionId, "failed", 100);
 	} finally {
-		await closeSessions();
+		if (control) await closeVisitControl(control);
 	}
 
 	return submissionId;
+}
+
+/** The case's first page from the snapshot it holds, with what the snapshot's original capture recorded beside it. */
+async function storedCapture(options: AnalyzeWebsiteOptions & { mhtmlSnapshot: Buffer }): Promise<WebsiteCapture> {
+	const parsed = await parseMhtmlSnapshot({
+		url: options.url,
+		mhtmlSnapshot: options.mhtmlSnapshot,
+		...(options.archivedUrl ? { archivedUrl: options.archivedUrl } : {}),
+		...(options.navigationHops ? { navigationHops: options.navigationHops } : {}),
+		...(options.trustMhtmlDocumentLocation ? { trustMhtmlDocumentLocation: true } : {}),
+		...(options.verificationGate ? { verificationGate: options.verificationGate } : {}),
+		...(options.kitResources ? { kitResources: options.kitResources } : {}),
+		...(options.hiddenFrames ? { hiddenFrames: options.hiddenFrames } : {}),
+		...(options.device ? { device: options.device } : {}),
+	});
+	return options.screenshotSnapshot ? { ...parsed, screenshotPng: options.screenshotSnapshot } : parsed;
 }
 
 /** One walk of the case's link, judged: its sites, the ones found reportable, and the route as a funnel. */

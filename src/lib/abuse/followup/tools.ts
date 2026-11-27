@@ -9,9 +9,10 @@ import { fetchThroughPublicRedirects } from "../../network/public_redirects";
 import { createExfiltrationCanaries } from "../../exfiltration/canaries";
 import { taskAgentVisit, type VisitAgent } from "../../site_visit/agent";
 import { visitPages } from "../../site_visit/evidence";
-import { archiveWebsite } from "../../website/archive";
-import { WebsiteCaptureFailedError } from "../../website/archive/errors";
-import type { WebsiteArchiveResult } from "../../website/archive/types";
+import { parseMhtmlSnapshot } from "../../website/archive/mhtml";
+import { visitSite } from "../../website/archive/visit_site";
+import { WebsiteCaptureFailedError, WebsiteHostOfflineError } from "../../website/archive/errors";
+import type { SiteVisit, SiteVisitOptions, WebsiteArchiveResult } from "../../website/archive/types";
 import type { WebsiteDevice } from "../../website/types";
 import type { SiteCheckDependencies } from "../../liveness/check";
 import type { AccountIdentifierExtractor } from "./account_identifiers";
@@ -33,7 +34,8 @@ export type DecisionToolContext = {
 };
 
 export type DecisionToolDependencies = {
-	capture?: typeof archiveWebsite;
+	/** The browser visit both browser tools make; the case's own in production. */
+	visitSite?: typeof visitSite;
 	fetch?: typeof fetch;
 	/** The check that a requested host resolves only to public addresses. */
 	assertPublicHost?: (hostname: string) => Promise<void>;
@@ -143,7 +145,7 @@ export async function caseCaptureNames(submissionId: bigint | undefined): Promis
 export async function runDecisionTool(name: string, args: Record<string, unknown>, context: DecisionToolContext, dependencies: DecisionToolDependencies = {}): Promise<unknown> {
 	try {
 		if (name === "recheck_page") return await recheckPage(String(args.url), args.device === "iphone" ? "iphone" : "case", context, dependencies);
-		if (name === "visit_site") return await visitSite(String(args.url), args.device === "iphone" ? "iphone" : "case", String(args.instructions ?? ""), context, dependencies);
+		if (name === "visit_site") return await walkSite(String(args.url), args.device === "iphone" ? "iphone" : "case", String(args.instructions ?? ""), context, dependencies);
 		if (name === "fetch_url") return await fetchUrl(String(args.url), String(args.userAgent), dependencies);
 		if (name === "read_case_capture") return await readCaseCapture(String(args.name), context);
 		return { error: `There is no tool named ${name}.` };
@@ -152,64 +154,60 @@ export async function runDecisionTool(name: string, args: Record<string, unknown
 	}
 }
 
-async function recheckPage(url: string, device: "case" | "iphone", context: DecisionToolContext, dependencies: DecisionToolDependencies) {
-	let archive;
+/** Visit the URL in the case's browser; a site no route reaches is a failure the agent reads. */
+async function visit(url: string, device: "case" | "iphone", context: DecisionToolContext, dependencies: DecisionToolDependencies, walk?: SiteVisitOptions["walk"]): Promise<SiteVisit | { reached: false; failure: string }> {
 	try {
-		archive = await (dependencies.capture ?? archiveWebsite)({ url, ...captureIdentity(device, context) });
+		return await (dependencies.visitSite ?? visitSite)({ url, ...captureIdentity(device, context), ...(dependencies.signal ? { signal: dependencies.signal } : {}), ...(walk ? { walk } : {}) });
 	} catch (error) {
-		if (error instanceof WebsiteCaptureFailedError) return { reached: false, failure: error.message };
+		if (error instanceof WebsiteCaptureFailedError || error instanceof WebsiteHostOfflineError) return { reached: false, failure: error.message };
 		throw error;
 	}
-	return { reached: true, ...await describePage(archive, "recheck", context, dependencies) };
+}
+
+/** Load the page and describe its first page; nothing is walked. */
+async function recheckPage(url: string, device: "case" | "iphone", context: DecisionToolContext, dependencies: DecisionToolDependencies) {
+	const visited = await visit(url, device, context, dependencies);
+	if ("reached" in visited) return visited;
+	return { reached: true, ...await describePage(visited.initial, "recheck", context, dependencies) };
 }
 
 /**
- * Walk the site with the visiting agent from a live capture held open, as
- * the case's own visit did, and describe every page it reached with what each
- * sent off and made the visitor download.
+ * Walk the site with the visiting agent from its first page, in the browser
+ * that loaded it, as the case's own visit did, and describe every page it
+ * reached with what each sent off and made the visitor download.
  */
-async function visitSite(url: string, device: "case" | "iphone", instructions: string, context: DecisionToolContext, dependencies: DecisionToolDependencies) {
-	let first;
-	try {
-		first = await (dependencies.capture ?? archiveWebsite)({ url, ...captureIdentity(device, context), keepSession: true });
-	} catch (error) {
-		if (error instanceof WebsiteCaptureFailedError) return { reached: false, failure: error.message };
-		throw error;
-	}
-	const { session } = first;
-	if (!session) return { reached: true, error: "The page could not be held open for a visit." };
-	try {
-		const canaries = createExfiltrationCanaries();
-		const recording = await session.visit({
-			canaries,
-			agent: dependencies.visitAgent ?? taskAgentVisit(),
-			...(instructions.trim() ? { instructions } : {}),
-			...(dependencies.signal ? { signal: dependencies.signal } : {}),
+async function walkSite(url: string, device: "case" | "iphone", instructions: string, context: DecisionToolContext, dependencies: DecisionToolDependencies) {
+	const canaries = createExfiltrationCanaries();
+	const visited = await visit(url, device, context, dependencies, () => ({
+		canaries,
+		agent: dependencies.visitAgent ?? taskAgentVisit(),
+		...(instructions.trim() ? { instructions } : {}),
+	}));
+	if ("reached" in visited) return visited;
+	const { initial, recording } = visited;
+	// A decoy every network was shown is described, not walked.
+	if (!recording) return { reached: true, walked: false, ...await describePage(initial, "visit", context, dependencies) };
+	const pages = [];
+	for (const page of visitPages(initial, recording, canaries)) {
+		pages.push({
+			...await describePage(page.archive, "visit", context, dependencies),
+			sentMadeUpData: page.dataSent.map(({ url: sentTo, method, fields, sameSite }) => ({ url: sentTo, method, fields, sameSite })),
+			copiedToClipboard: page.clipboardWrites.map(({ text, documentUrl, via }) => ({ text, copiedBy: documentUrl, via })),
+			downloads: page.downloads.map((file) => ({ url: file.url, fileName: file.fileName, contentType: file.contentType ?? null, bytes: file.bytes.byteLength, sha256: sha256Hex(file.bytes) })),
 		});
-		const pages = [];
-		for (const page of visitPages(first, recording, canaries)) {
-			pages.push({
-				...await describePage(page.archive, "visit", context, dependencies),
-				sentMadeUpData: page.dataSent.map(({ url: sentTo, method, fields, sameSite }) => ({ url: sentTo, method, fields, sameSite })),
-				copiedToClipboard: page.clipboardWrites.map(({ text, documentUrl, via }) => ({ text, copiedBy: documentUrl, via })),
-				downloads: page.downloads.map((file) => ({ url: file.url, fileName: file.fileName, contentType: file.contentType ?? null, bytes: file.bytes.byteLength, sha256: sha256Hex(file.bytes) })),
-			});
-		}
-		return {
-			reached: true,
-			agent: {
-				outcome: recording.agent.outcome,
-				report: recording.agent.report ?? null,
-				failure: recording.agent.failure ?? null,
-				actions: recording.agent.actions.map((action) => action.text),
-			},
-			madeUpValues: { email: canaries.email, password: canaries.password, phone: canaries.phone, cardNumber: canaries.cardNumber },
-			pages,
-			downloadFailures: recording.downloadFailures,
-		};
-	} finally {
-		await session.close();
 	}
+	return {
+		reached: true,
+		agent: {
+			outcome: recording.agent.outcome,
+			report: recording.agent.report ?? null,
+			failure: recording.agent.failure ?? null,
+			actions: recording.agent.actions.map((action) => action.text),
+		},
+		madeUpValues: { email: canaries.email, password: canaries.password, phone: canaries.phone, cardNumber: canaries.cardNumber },
+		pages,
+		downloadFailures: recording.downloadFailures,
+	};
 }
 
 function captureIdentity(device: "case" | "iphone", context: DecisionToolContext) {
@@ -298,7 +296,7 @@ async function readCaseCapture(name: string, context: DecisionToolContext) {
 	const artifact = (await ArtifactsEntity.listForSubmission(context.submissionId)).find((item) => item.name === name);
 	const blob = artifact ? (await ArtifactsEntity.get(artifact.id))?.blob : undefined;
 	if (!artifact || !blob) return { error: `The case has no capture named ${name}.` };
-	const captured = await archiveWebsite({ url: "https://capture.invalid/", mhtmlSnapshot: Buffer.from(blob), trustMhtmlDocumentLocation: true });
+	const captured = await parseMhtmlSnapshot({ url: "https://capture.invalid/", mhtmlSnapshot: Buffer.from(blob), trustMhtmlDocumentLocation: true });
 	return {
 		name,
 		url: captured.url,

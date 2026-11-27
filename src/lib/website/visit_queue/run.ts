@@ -3,6 +3,7 @@ import type { Job } from "@/lib/abuse/schema";
 import { getDb } from "@/lib/db";
 import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
+import { SubmissionRetriesEntity } from "@/lib/db/entities/submission_retries";
 import type { Submission, SubmissionStatus, WebsiteSubmissionData } from "@/lib/db/schema";
 import { claimRetry, getRetryableSubmission, SubmissionRetryError } from "@/lib/submissions/retry";
 import { analyzeWebsite, type AnalyzeWebsiteOptions } from "../analysis/ai";
@@ -131,20 +132,26 @@ export async function runWebsiteVisit(job: Pick<Job, "payload">, dependencies: W
 		await failInterruptedVisit(submission);
 		return;
 	}
-	if (trigger !== "manual" && !revisit && (submission.status === "queued" || submission.status === "failed")) {
+	// An automatic retry finds its case queued when no browser was free (its claim stands, the case waits for it) or when a
+	// retry by hand claimed the case meanwhile (that retry's own job runs it): the case's newest claim tells which.
+	const deferredRetry = trigger === "automatic" && submission.status === "queued"
+		&& (await SubmissionRetriesEntity.listForSubmission(submission.id))[0]?.trigger === "automatic";
+	if (trigger !== "manual" && !revisit && !deferredRetry && (submission.status === "queued" || submission.status === "failed")) {
 		if (trigger === "automatic" && submission.status !== "failed") return;
 		if (await applySiblingDecision(submission, await decideSiblingVisit(submission))) return;
 	}
 	let options: AnalyzeWebsiteOptions;
 	if (trigger === "automatic") {
-		if (submission.status !== "failed") return;
-		try {
-			await getRetryableSubmission(submission.id, "website");
-			await claimRetry(submission, "automatic");
-		} catch (error) {
-			if (!(error instanceof SubmissionRetryError)) throw error;
-			await dropAutomaticRetry(submission, error);
-			return;
+		if (submission.status !== "failed" && !deferredRetry) return;
+		if (!deferredRetry) {
+			try {
+				await getRetryableSubmission(submission.id, "website");
+				await claimRetry(submission, "automatic");
+			} catch (error) {
+				if (!(error instanceof SubmissionRetryError)) throw error;
+				await dropAutomaticRetry(submission, error);
+				return;
+			}
 		}
 		options = await retryAnalysisOptions(submission, "failed");
 	} else {

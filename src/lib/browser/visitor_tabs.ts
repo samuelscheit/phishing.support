@@ -155,11 +155,11 @@ export class VisitorTabs {
 		const { targetInfo, sessionId } = event;
 		const session = this.control.connection()?.session(sessionId);
 		const opener = targetInfo.openerId ? this.#tabs.get(targetInfo.openerId) : undefined;
-		if (!session) return;
-		if (!opener || this.#tabs.has(targetInfo.targetId) || this.#stopped) {
-			// Not a tab of the visit (or the captured tab, which has its own session): let it run untouched.
-			if (event.waitingForDebugger) await session.send("Runtime.runIfWaitingForDebugger").catch(() => undefined);
-			await session.detach().catch(() => undefined);
+		if (!session || !opener || this.#tabs.has(targetInfo.targetId) || this.#stopped) {
+			// Not a tab of the visit (or the visitor's tab, which has its own session): let it run untouched. A session
+			// left attached would reset its navigator.platform, so it is detached also when puppeteer made no object for it.
+			if (event.waitingForDebugger) await session?.send("Runtime.runIfWaitingForDebugger").catch(() => undefined);
+			await this.control.send("Target.detachFromTarget", { sessionId }).catch(() => undefined);
 			return;
 		}
 		const page = this.#page(targetInfo.targetId);

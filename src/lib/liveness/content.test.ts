@@ -7,8 +7,9 @@ import { SubmissionsEntity } from "../db/entities/submissions";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { generateId } from "../db/ids";
 import { sha256Hex } from "../util/hash";
-import { WebsiteCaptureFailedError, WebsiteUnreachableError } from "../website/archive/errors";
-import type { WebsiteArchiveResult } from "../website/archive/types";
+import { WebsiteCaptureFailedError, WebsiteHostOfflineError, WebsiteUnreachableError } from "../website/archive/errors";
+import type { SiteWalk, WebsiteArchiveResult } from "../website/archive/types";
+import { scriptedSiteVisit, type ScriptedPage } from "../site_visit/test_helpers";
 import { kitCapture, templatePage } from "../website/test_mhtml";
 import type { WebsiteKitResource } from "../website/types";
 import { CONTENT_VERIFIED_EVENT, contentVerificationsOf, stillAbusive, verifyReportedContent, type ContentVerificationDependencies } from "./content";
@@ -106,20 +107,33 @@ async function reported(options: { rawPage?: string; renderedPage?: string; deco
 	return { submissionId, target: { reportId: report.reportId, targetId: target!.id, url: options.payload?.url ?? URL_ } };
 }
 
-/** Browser and classifier stand-ins that record whether they were needed. */
-function stages(capturePage?: (url: string) => WebsiteArchiveResult | Error, verdict = "phishing") {
-	const used = { captures: 0, classifications: 0 };
-	const dependencies: Pick<ContentVerificationDependencies, "capture" | "classify" | "isShared"> = {
-		capture: async ({ url }) => {
+/**
+ * Browser and classifier stand-ins that record whether they were needed: the
+ * first page each visit loads (with the walk it plays when walked on), and
+ * the classifier's finding, the same for every page or by the page's address.
+ */
+function stages(capturePage?: (url: string) => ScriptedPage | Error, verdict: string | ((url: string) => string) = "phishing") {
+	const used = { captures: 0, classifications: 0, walks: 0 };
+	const walks: SiteWalk[] = [];
+	const visit = scriptedSiteVisit(({ url }) => {
+		if (!capturePage) throw new Error("The browser was not expected.");
+		const result = capturePage(url);
+		if (result instanceof Error) throw result;
+		return result;
+	}, { walks });
+	const dependencies: Pick<ContentVerificationDependencies, "visitSite" | "classify" | "isShared"> = {
+		visitSite: async (options) => {
 			used.captures += 1;
-			if (!capturePage) throw new Error("The browser was not expected.");
-			const result = capturePage(url);
-			if (result instanceof Error) throw result;
-			return result;
+			try {
+				return await visit(options);
+			} finally {
+				used.walks = walks.length;
+			}
 		},
-		classify: async () => {
+		classify: async ({ archive }) => {
 			used.classifications += 1;
-			return { finding: verdict as "phishing", ...(verdict === "phishing" ? {} : { reason: "a bakery menu, nothing asked of visitors" }) };
+			const finding = typeof verdict === "function" ? verdict(archive.url) : verdict;
+			return { finding: finding as "phishing", ...(finding === "phishing" ? {} : { reason: "a bakery menu, nothing asked of visitors" }) };
 		},
 		isShared: async () => false,
 	};
@@ -135,7 +149,7 @@ describe("verifying that the reported content is still served", () => {
 		expect(verification).toMatchObject({ verdict: "gone", tier: "check", state: "domain_gone", url: URL_ });
 		expect(stillAbusive(verification)).toBe(false);
 		expect(requested).toEqual([]);
-		expect(used).toEqual({ captures: 0, classifications: 0 });
+		expect(used).toEqual({ captures: 0, classifications: 0, walks: 0 });
 	});
 
 	test("a plain request that gets the case's page by its template is the site serving it, with no browser; a fresh token changes nothing", async () => {
@@ -235,7 +249,8 @@ describe("verifying that the reported content is still served", () => {
 		expect(first).toMatchObject({ verdict: "served", tier: "browser" });
 		expect(first.verdict === "served" && first.matches.map((match) => match.kind).sort()).toEqual(["page_body", "page_structure"]);
 		expect(first.observed?.structure?.sha256).toMatch(/^[a-f0-9]{64}$/);
-		expect(used).toEqual({ captures: 1, classifications: 0 });
+		// Deterministic first: the recorded page decides, with no model and no walk.
+		expect(used).toEqual({ captures: 1, classifications: 0, walks: 0 });
 
 		// The decoy is never learned: the next plain request still gets it and still needs the browser.
 		await verifyReportedContent(target, {}, { site: cloaked.dependencies, ...browser });
@@ -266,20 +281,71 @@ describe("verifying that the reported content is still served", () => {
 		const changed = await verifyReportedContent(target, {}, { site: decoy.dependencies, ...phishing.dependencies });
 		expect(changed).toMatchObject({ verdict: "changed_malicious", tier: "analysis", finding: "phishing" });
 		expect(stillAbusive(changed)).toBe(true);
-		expect(phishing.used).toEqual({ captures: 1, classifications: 1 });
+		// The first page is reportable by itself: the agent does not walk on.
+		expect(phishing.used).toEqual({ captures: 1, classifications: 1, walks: 0 });
 		// A page the classifier judged is never learned as the reported one: it may be another kit, or a mistake.
 		const again = await verifyReportedContent(target, {}, { site: site({ [URL_]: { body: changedRaw } }).dependencies, ...phishing.dependencies });
 		expect(again).toMatchObject({ verdict: "changed_malicious", tier: "analysis" });
-		expect(phishing.used).toEqual({ captures: 2, classifications: 2 });
+		expect(phishing.used).toEqual({ captures: 2, classifications: 2, walks: 0 });
 
 		const benign = stages((url) => capture(url, DECOY), "insufficient_evidence");
 		const clean = await verifyReportedContent(target, {}, { site: decoy.dependencies, ...benign.dependencies });
 		expect(clean).toMatchObject({ verdict: "not_malicious", tier: "analysis", reason: "a bakery menu, nothing asked of visitors" });
 		expect(stillAbusive(clean)).toBe(false);
-		// Without the classifier the change stays unverified.
+		// The harmless page was walked on from; the walk reached nothing more.
+		expect(benign.used).toEqual({ captures: 1, classifications: 1, walks: 1 });
+		// Without the classifier the change stays unverified, and nothing is walked.
 		const bounded = await verifyReportedContent(target, { maxTier: "browser" }, { site: decoy.dependencies, ...benign.dependencies });
 		expect(bounded).toMatchObject({ verdict: "unverified", tier: "browser" });
-		expect(benign.used.classifications).toBe(1);
+		expect(benign.used).toEqual({ captures: 2, classifications: 1, walks: 1 });
+	});
+
+	test("a harmless first page is walked on in the same browser: a step the case recorded is served with no model, a reportable step is changed, nothing found says how far the agent got", async () => {
+		const { target } = await reported({ rawPage: kitPage(HOST) });
+		const decoy = site({ [URL_]: { body: DECOY } });
+		const landing = (steps: WebsiteArchiveResult[]): ScriptedPage => ({ ...capture(URL_, DECOY), walk: { steps } });
+
+		// The kit's page behind the landing's "Continue": the recorded page decides, no step is classified.
+		const behind = stages(() => landing([capture(`https://${HOST}/step`, kitPage(HOST, "s2"))]), (url) => url === URL_ ? "insufficient_evidence" : "phishing");
+		const served = await verifyReportedContent(target, {}, { site: decoy.dependencies, ...behind.dependencies });
+		expect(served).toMatchObject({ verdict: "served", tier: "browser" });
+		expect(behind.used).toEqual({ captures: 1, classifications: 1, walks: 1 });
+
+		// A new kit behind the landing: the first step matches nothing, the second is reportable and ends the checks.
+		const wallet = `<html><body>${templatePage(12, (card) => `Restore your wallet ${card} `.repeat(3), () => "seed")}</body></html>`;
+		const steps = [capture(`https://${HOST}/about`, DECOY), capture(`https://${HOST}/restore`, wallet), capture(`https://${HOST}/never`, wallet)];
+		const changed = stages(() => landing(steps), (url) => url.endsWith("/restore") ? "phishing" : "insufficient_evidence");
+		const verdict = await verifyReportedContent(target, {}, { site: decoy.dependencies, ...changed.dependencies });
+		expect(verdict).toMatchObject({ verdict: "changed_malicious", tier: "analysis", finding: "phishing" });
+		expect(changed.used).toEqual({ captures: 1, classifications: 3, walks: 1 });
+
+		const nothing = stages(() => landing(steps.slice(0, 1)), "insufficient_evidence");
+		expect(await verifyReportedContent(target, {}, { site: decoy.dependencies, ...nothing.dependencies })).toMatchObject({
+			verdict: "not_malicious",
+			tier: "analysis",
+			reason: "a bakery menu, nothing asked of visitors Nothing reportable on the 1 page the visiting agent reached from it either.",
+		});
+		expect(nothing.used).toEqual({ captures: 1, classifications: 2, walks: 1 });
+
+		// A walk blocked by a challenge or failing before finding anything reportable stays unverified, never not_malicious.
+		const blocked = stages(() => ({
+			...capture(URL_, DECOY),
+			walk: { steps: [], agent: { outcome: "completed", report: { asksForPhone: false, blockedByChallenge: true, stoppedReason: "Turnstile stayed unsolved" }, actions: [] } },
+		}), "insufficient_evidence");
+		expect(await verifyReportedContent(target, {}, { site: decoy.dependencies, ...blocked.dependencies })).toMatchObject({
+			verdict: "unverified",
+			tier: "analysis",
+		});
+	});
+
+	test("a host the browser finds gone on every network, with its name confirmed missing, is gone", async () => {
+		const { target } = await reported({ rawPage: kitPage(HOST) });
+		const offline = new WebsiteHostOfflineError(HOST, { cause: new WebsiteCaptureFailedError([new WebsiteUnreachableError("residential", "net::ERR_TUNNEL_CONNECTION_FAILED")]) });
+		const { used, dependencies: browser } = stages(() => offline);
+		const verification = await verifyReportedContent(target, {}, { site: site({ [URL_]: { body: DECOY } }).dependencies, ...browser });
+		expect(verification).toMatchObject({ verdict: "gone", tier: "browser" });
+		expect(stillAbusive(verification)).toBe(false);
+		expect(used.classifications).toBe(0);
 	});
 
 	test("a site that shows every network a decoy is unverified and never classified", async () => {
@@ -287,7 +353,7 @@ describe("verifying that the reported content is still served", () => {
 		const { used, dependencies: browser } = stages((url) => capture(url, DECOY, { cloaked: true }));
 		const verification = await verifyReportedContent(target, {}, { site: site({ [URL_]: { body: DECOY } }).dependencies, ...browser });
 		expect(verification).toMatchObject({ verdict: "unverified", tier: "browser", reason: "The site showed every network a decoy." });
-		expect(used.classifications).toBe(0);
+		expect(used).toMatchObject({ classifications: 0, walks: 0 });
 	});
 
 	test("a report without a case has nothing to classify the page with", async () => {
@@ -295,6 +361,6 @@ describe("verifying that the reported content is still served", () => {
 		const { used, dependencies: browser } = stages((url) => capture(url, DECOY));
 		const verification = await verifyReportedContent(target, {}, { site: site({ [URL_]: { body: DECOY } }).dependencies, ...browser });
 		expect(verification).toMatchObject({ verdict: "unverified", tier: "analysis" });
-		expect(used).toEqual({ captures: 1, classifications: 0 });
+		expect(used).toEqual({ captures: 1, classifications: 0, walks: 0 });
 	});
 });

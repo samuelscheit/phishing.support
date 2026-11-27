@@ -10,6 +10,8 @@ import { laneFilter } from "@/lib/abuse/worker/jobs";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { useTemporaryDatabase } from "@/lib/db/test_helpers";
 import { createWebsiteSubmission } from "@/lib/submissions/website";
+import { claimRetry } from "@/lib/submissions/retry";
+import { SubmissionRetriesEntity } from "@/lib/db/entities/submission_retries";
 import { enqueueWebsiteVisit, fairKeyOf } from "./queue";
 import { ensureWebsiteVisitJobs, runWebsiteVisit } from "./run";
 import { queuedVisits, runQueuedVisits } from "./test_helpers";
@@ -114,6 +116,19 @@ describe("runWebsiteVisit", () => {
 		await website(9n, "queued");
 		await runWebsiteVisit({ payload: { submissionId: "9", trigger: "automatic" } }, { analyzeWebsite: analyze });
 		expect((await SubmissionsEntity.get(9n))?.status).toBe("queued");
+	});
+
+	test("an automatic retry that found no browser goes on as that retry once one is free; one retried by hand meanwhile is left to that retry", async () => {
+		const visited: bigint[] = [];
+		const analyze = async ({ submissionId }: { submissionId: bigint }) => { visited.push(submissionId); };
+		for (const [id, by] of [[11n, "automatic"], [12n, "manual"]] as const) {
+			await website(id, "failed", { autoRetry: { attempts: 1, nextAttemptAt: new Date().toISOString(), reason: "unreachable" } });
+			await claimRetry({ id, status: "failed" }, by, { to: "queued" });
+			await runWebsiteVisit({ payload: { submissionId: id.toString(), trigger: "automatic" } }, { analyzeWebsite: analyze });
+		}
+		expect(visited).toEqual([11n]);
+		// The deferred retry claimed nothing again.
+		expect((await SubmissionRetriesEntity.listForSubmission(11n)).map((retry) => retry.trigger)).toEqual(["automatic"]);
 	});
 
 	test("a malformed job fails loudly instead of visiting anything", async () => {

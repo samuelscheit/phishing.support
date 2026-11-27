@@ -10,11 +10,13 @@ import { useTemporaryDatabase } from "../../db/test_helpers";
 import { createWebsiteSubmission, websiteSubmissionDedupeKey } from "../../submissions/website";
 import { ensureWebsiteVisitJobs } from "../visit_queue/run";
 import { queuedVisits, runQueuedVisits } from "../visit_queue/test_helpers";
-import type { WebsiteArchiveResult } from "../archive/types";
-import { scriptedVisitSession } from "../../site_visit/test_helpers";
+import type { SiteVisitOptions } from "../archive/types";
+import { WebsiteCaptureFailedError, WebsiteHostOfflineError, WebsiteUnreachableError } from "../archive/errors";
+import { BrowserUnavailableError } from "../../browser/fabric";
+import { scriptedSiteVisit, type ScriptedPage, type ScriptedVisit } from "../../site_visit/test_helpers";
 import { analyzeWebsite } from "./ai";
 import type { WebsiteAnalysisDependencies } from "./analysis_types";
-import { BROWSER_OUTAGE_RETRY_DELAYS_MS } from "./failure";
+import { BROWSER_OUTAGE_RETRY_DELAYS_MS, withBrowserBackoff } from "./failure";
 import { chainSiteAssessments, websiteReportUrls } from "../info/report_hops";
 import type { WebsiteNavigationHop } from "../types";
 import { waitForStatus, websiteSubmission } from "../test_helpers";
@@ -44,7 +46,8 @@ function hop(index: number, url: string, status: number | null, redirectTo?: str
 	return { index, url, hostname: new URL(url).hostname, status, ...(redirectTo ? { redirectTo } : {}), contentCaptured: !redirectTo };
 }
 
-function archiveOf(hops: WebsiteNavigationHop[]): WebsiteArchiveResult {
+/** The first page of a visit through `hops`; its walk finds nothing beyond it unless `walk` says so. */
+function archiveOf(hops: WebsiteNavigationHop[], walk: ScriptedVisit = {}): ScriptedPage {
 	const captured = hops.at(-1)!;
 	return {
 		requestedUrl: hops[0]!.url,
@@ -56,8 +59,7 @@ function archiveOf(hops: WebsiteNavigationHop[]): WebsiteArchiveResult {
 		mhtml: MHTML,
 		html: Buffer.from(NETFLIX_HTML, "utf8"),
 		text: Buffer.from(NETFLIX_TEXT, "utf8"),
-		// The visit finds nothing beyond the captured page.
-		session: scriptedVisitSession(),
+		walk,
 	};
 }
 
@@ -94,9 +96,7 @@ function scriptedModel(outputs: string[]): AnalysisClient {
 	} as unknown as AnalysisClient;
 }
 
-type ArchiveCall = Parameters<NonNullable<WebsiteAnalysisDependencies["archiveWebsite"]>>[0];
-
-function dependencies(archive: WebsiteArchiveResult, archiveCalls: ArchiveCall[] = []): WebsiteAnalysisDependencies {
+function dependencies(archive: ScriptedPage, archiveCalls: SiteVisitOptions[] = []): WebsiteAnalysisDependencies {
 	return {
 		getInfo: async () => ({ ip_rdaps: [] }),
 		analysisClient: phishingModel(),
@@ -105,14 +105,7 @@ function dependencies(archive: WebsiteArchiveResult, archiveCalls: ArchiveCall[]
 		timestampEvidence: async () => undefined,
 		// A gated page's direct visit answers with the page itself.
 		bareVisit: { fetch: (async () => new Response("ok")) as unknown as typeof fetch, assertPublicHost: async () => {} },
-		// A handed-over capture is parsed from its MHTML; the fake returns the
-		// same evidence with the provenance it was given.
-		archiveWebsite: async (options) => {
-			archiveCalls.push(options);
-			if (!options.mhtmlSnapshot) return archive;
-			const navigationHops = options.navigationHops!;
-			return { ...archive, requestedUrl: options.url, url: options.archivedUrl!, hostname: new URL(options.archivedUrl!).hostname, navigationHops, screenshotPng: undefined, kitResources: options.kitResources };
-		},
+		visitSite: scriptedSiteVisit(async () => archive, { calls: archiveCalls }),
 	};
 }
 
@@ -237,7 +230,7 @@ describe("website redirects", () => {
 			hop(1, kitStart, 302, kitPage),
 			hop(2, kitPage, 200),
 		]), kitResources };
-		const archiveCalls: ArchiveCall[] = [];
+		const archiveCalls: SiteVisitOptions[] = [];
 		const id = await websiteSubmission(1n, shortUrl);
 
 		await analyzeWebsite({ submissionId: id, url: shortUrl }, dependencies(archive, archiveCalls));
@@ -378,9 +371,9 @@ describe("one report per site across cases", () => {
 		// The second lure's visit saw the kit send the made-up password to a Telegram bot.
 		const bot = "https://api.telegram.org/bot8123456789:AAH-kit-token/sendMessage";
 		const second = await websiteSubmission(23n, lure(2));
-		const archive = { ...archiveOf([hop(0, lure(2), 302, kitPage), hop(1, kitPage, 200)]), session: scriptedVisitSession({
+		const archive = archiveOf([hop(0, lure(2), 302, kitPage), hop(1, kitPage, 200)], {
 			requests: (canaries) => [{ timestamp: "2026-11-15T10:00:01.500Z", url: bot, method: "POST", postData: JSON.stringify({ chat_id: "-100777", text: `pass: ${canaries.password}` }) }],
-		}) };
+		});
 		await analyzeWebsite({ submissionId: second, url: lure(2) }, dependencies(archive));
 		expect((await AbuseRepository.listJoinedReportsForSubmission(second)).map(({ id }) => id)).toEqual([report.id]);
 
@@ -736,6 +729,12 @@ describe("scripted jumps of the residential exit to another site", () => {
 	});
 });
 
+/** `visitSite` retries a browser-service failure after each of the options' `backoffMs`; this is that, around a scripted load. */
+function backedOffVisit(load: Parameters<typeof scriptedSiteVisit>[0]): ReturnType<typeof scriptedSiteVisit> {
+	const visit = scriptedSiteVisit(load);
+	return (options) => withBrowserBackoff(() => visit(options), options.backoffMs ?? []);
+}
+
 describe("browser-service failures", () => {
 	const url = "https://app.karntappkrakurl.es/naivator/captcha/sign-in.php";
 	// What puppeteer under Bun rejects with when the relay is full: an ErrorEvent, not an Error.
@@ -749,12 +748,12 @@ describe("browser-service failures", () => {
 		await analyzeWebsite({ submissionId: id, url }, {
 			...dependencies(archive),
 			browserBackoffMs: [1, 1, 1],
-			archiveWebsite: async () => {
+			visitSite: backedOffVisit(async () => {
 				attempts++;
 				if (attempts === 1) throw relayFull();
 				if (attempts === 2) throw new Error("Protocol error (Target.getBrowserContexts): Target closed");
 				return archive;
-			},
+			}),
 		});
 
 		expect(attempts).toBe(3);
@@ -765,7 +764,7 @@ describe("browser-service failures", () => {
 		expect(BROWSER_OUTAGE_RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0)).toBe(24 * 60 * 60_000);
 		const totalRetries = BROWSER_OUTAGE_RETRY_DELAYS_MS.length;
 		const id = await websiteSubmission(374703356112802864n, url);
-		const failing = { ...dependencies(archiveOf([hop(0, url, 200)])), browserBackoffMs: [1], archiveWebsite: async () => { throw relayFull(); } };
+		const failing = { ...dependencies(archiveOf([hop(0, url, 200)])), browserBackoffMs: [1], visitSite: scriptedSiteVisit(async () => { throw relayFull(); }) };
 		const run = () => analyzeWebsite({ submissionId: id, url }, failing);
 		const autoRetryOf = async () => {
 			const submission = (await SubmissionsEntity.get(id))!;
@@ -840,15 +839,108 @@ describe("browser-service failures", () => {
 		await analyzeWebsite({ submissionId: id, url }, {
 			...dependencies(archiveOf([hop(0, url, 200)])),
 			browserBackoffMs: [1, 1, 1],
-			archiveWebsite: async () => {
+			visitSite: backedOffVisit(async () => {
 				attempts++;
 				throw new Error('Failed to load page: HTTP 403 ("Attention Required! | Cloudflare") via residential exit; HTTP 403 via Tor exit; HTTP 403 via server IP');
-			},
+			}),
 		});
 		const submission = (await SubmissionsEntity.get(id))!;
 		expect(attempts).toBe(1);
 		expect(submission.status).toBe("failed");
 		expect(submission.info).toBe('Failed to load page: HTTP 403 ("Attention Required! | Cloudflare") via residential exit; HTTP 403 via Tor exit; HTTP 403 via server IP');
 		expect(submission.data.kind === "website" ? submission.data.website.autoRetry : "not website").toBeUndefined();
+	});
+});
+
+describe("the visit and the WHOIS lookup run side by side", () => {
+	const url = "https://secure.whois-race-kit.com/login";
+
+	/** Every promise rejection nobody handled while `run` ran, and a moment after. */
+	async function unhandledDuring(run: () => Promise<unknown>) {
+		const unhandled: unknown[] = [];
+		const listener = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", listener);
+		try {
+			await run().catch(() => undefined);
+			await Bun.sleep(20);
+		} finally {
+			process.off("unhandledRejection", listener);
+		}
+		return unhandled;
+	}
+
+	test("the browser starts before WHOIS answers, and the case stores WHOIS once it does", async () => {
+		const id = await websiteSubmission(384000000000000001n, url);
+		const order: string[] = [];
+		await analyzeWebsite({ submissionId: id, url }, {
+			...dependencies(archiveOf([hop(0, url, 200)])),
+			getInfo: async () => {
+				order.push("whois asked");
+				await Bun.sleep(30);
+				order.push("whois answered");
+				return { ip_rdaps: [], domain: { registrar: "Slow Registrar" } } as never;
+			},
+			visitSite: scriptedSiteVisit(() => {
+				order.push("browser");
+				return archiveOf([hop(0, url, 200)]);
+			}),
+		});
+		expect(order).toEqual(["whois asked", "browser", "whois answered"]);
+		const submission = (await SubmissionsEntity.get(id))!;
+		expect(submission.status).toBe("reported");
+		expect(submission.data.kind === "website" && submission.data.website.whois).toMatchObject({ domain: { registrar: "Slow Registrar" } });
+	});
+
+	test("a failed lookup never goes unhandled: not when the visit fails first, nor when the case is cancelled", async () => {
+		const failedLookup = async () => { await Bun.sleep(5); throw new Error("WHOIS server refused"); };
+		const unreachable = await websiteSubmission(384000000000000002n, url);
+		expect(await unhandledDuring(() => analyzeWebsite({ submissionId: unreachable, url }, {
+			...dependencies(archiveOf([hop(0, url, 200)])),
+			getInfo: failedLookup,
+			visitSite: scriptedSiteVisit(() => { throw new WebsiteCaptureFailedError([new WebsiteUnreachableError("residential", "net::ERR_TIMED_OUT")]); }),
+		}))).toEqual([]);
+		expect((await SubmissionsEntity.get(unreachable))?.status).toBe("failed");
+
+		const controller = new AbortController();
+		const cancelled = await websiteSubmission(384000000000000003n, url);
+		let error: unknown;
+		expect(await unhandledDuring(() => analyzeWebsite({ submissionId: cancelled, url }, {
+			...dependencies(archiveOf([hop(0, url, 200)])),
+			signal: controller.signal,
+			getInfo: failedLookup,
+			visitSite: scriptedSiteVisit(() => {
+				controller.abort(new Error("cancelled by the reporter"));
+				throw controller.signal.reason;
+			}),
+		}).catch((thrown) => { error = thrown; throw thrown; }))).toEqual([]);
+		expect(error).toMatchObject({ message: "cancelled by the reporter" });
+	});
+
+	test("no browser at all leaves the case queued with its retries unspent, for the queue to run again", async () => {
+		const id = await websiteSubmission(384000000000000004n, url);
+		let whoisAsked = 0;
+		await expect(analyzeWebsite({ submissionId: id, url }, {
+			...dependencies(archiveOf([hop(0, url, 200)])),
+			getInfo: async () => { whoisAsked++; throw new Error("not needed: the case waits"); },
+			visitSite: scriptedSiteVisit(() => { throw new BrowserUnavailableError(new Error("every Fabric slot is leased")); }),
+		})).rejects.toBeInstanceOf(BrowserUnavailableError);
+		const submission = (await SubmissionsEntity.get(id))!;
+		expect(submission).toMatchObject({ status: "queued", info: "Waiting for the browser service." });
+		expect(submission.data.kind === "website" && submission.data.website.autoRetry).toBeFalsy();
+		expect(whoisAsked).toBe(1);
+	});
+
+	test("keeps parallel WHOIS evidence when the visit fails on an offline (NXDOMAIN) host, with no retries", async () => {
+		const id = await websiteSubmission(384000000000000005n, url);
+		await analyzeWebsite({ submissionId: id, url }, {
+			...dependencies(archiveOf([hop(0, url, 200)])),
+			getInfo: async () => ({ ip_rdaps: [], domain: { registrar: "Offline Host Registrar" } }) as never,
+			visitSite: scriptedSiteVisit(() => { throw new WebsiteHostOfflineError("parallel.example"); }),
+		});
+		const submission = (await SubmissionsEntity.get(id))!;
+		expect(submission.status).toBe("failed");
+		expect(submission.info).toContain("parallel.example no longer resolves in DNS (offline)");
+		expect(submission.data.kind === "website" && submission.data.website.whois).toMatchObject({ domain: { registrar: "Offline Host Registrar" } });
+		expect(submission.data.kind === "website" && submission.data.website.autoRetry).toBeFalsy();
 	});
 });

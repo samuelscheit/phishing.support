@@ -8,8 +8,8 @@ import { ProviderSubmissionRejectedError, type DecisionAnswer, type ProviderSubm
 import { AbuseRepository } from "../repository";
 import { UnknownExternalStateError } from "../worker/shared";
 import { capturedDocumentContent } from "../../website/archive/text";
-import type { WebsiteArchiveResult, WebsiteVisitParams } from "../../website/archive/types";
-import { scriptedVisitSession } from "../../site_visit/test_helpers";
+import type { SiteWalk, WebsiteArchiveResult } from "../../website/archive/types";
+import { scriptedSiteVisit } from "../../site_visit/test_helpers";
 import type { SiteCheckDependencies } from "../../liveness/check";
 import type { DecisionAgentModel } from "./agent";
 import { followUpProviderDecision } from "./decision";
@@ -112,7 +112,7 @@ function liveness(overrides: { nameservers?: string[]; dns?: "resolves" | "servf
 		...(fetch ? { fetch } : {}),
 	};
 }
-const tools = { capture: async ({ url }: { url: string }) => liveCapture(url), fetch: payloadHost, assertPublicHost: async () => {}, timestamp: async () => undefined, liveness: liveness() };
+const tools = { visitSite: scriptedSiteVisit(async ({ url }) => liveCapture(url)), fetch: payloadHost, assertPublicHost: async () => {}, timestamp: async () => undefined, liveness: liveness() };
 
 describe("provider decision follow-up agent", () => {
 	test("a page behind an entry's one-time link reaches the agent with the entry, the token's lifetime and the whole arrival", async () => {
@@ -197,25 +197,21 @@ describe("provider decision follow-up agent", () => {
 	test("walks the site with the visiting agent and its instructions, and reads every page, data drop and download", async () => {
 		const { route } = await deniedRoute("paneo.work", "https://paneo.work/");
 		const { sent, send } = recordingSend();
-		const visits: WebsiteVisitParams[] = [];
+		const visits: SiteWalk[] = [];
 		let closed = 0;
 		const bot = "https://api.telegram.org/bot8123456789:AAH-kit-token/sendMessage";
 		const visitTools = {
 			...tools,
-			capture: async (options: { url: string; keepSession?: boolean }) => ({
-				...liveCapture(options.url),
-				...(options.keepSession ? {
-					session: {
-						...scriptedVisitSession({
-							steps: [liveCapture("https://paneo.work/install")],
-							requests: (canaries) => [{ timestamp: "", url: bot, method: "POST", postData: JSON.stringify({ text: `mail: ${canaries.email}` }) }],
-							downloads: [{ url: "https://paneo.work/Paneo.dmg", fileName: "Paneo.dmg", contentType: "application/x-apple-diskimage", bytes: Buffer.from("dmg"), userAgent: "curl/8.7.1" }],
-							agent: { actions: [{ id: "a1", kind: "click", text: "Clicked \"Download for macOS\"", actor: "agent" }] },
-						}, visits),
-						close: async () => { closed++; },
-					},
-				} : {}),
-			}),
+			visitSite: scriptedSiteVisit(async ({ url }) => ({
+				...liveCapture(url),
+				onClose: () => { closed++; },
+				walk: {
+					steps: [liveCapture("https://paneo.work/install")],
+					requests: (canaries) => [{ timestamp: "", url: bot, method: "POST", postData: JSON.stringify({ text: `mail: ${canaries.email}` }) }],
+					downloads: [{ url: "https://paneo.work/Paneo.dmg", fileName: "Paneo.dmg", contentType: "application/x-apple-diskimage", bytes: Buffer.from("dmg"), userAgent: "curl/8.7.1" }],
+					agent: { actions: [{ id: "a1", kind: "click", text: "Clicked \"Download for macOS\"", actor: "agent" }] },
+				},
+			}), { walks: visits }),
 		};
 		const instructions = "Open the Download for macOS dialog and click the button inside it.";
 		const { model, inputs } = scripted(
@@ -333,7 +329,7 @@ describe("what the agent knows of the content before it investigates", () => {
 		await SubmissionsEntity.create({ id: 902n, kind: "website", dedupeKey: "paneo-kit", status: "reported", data: { kind: "website", website: { url: "https://paneo.work/", kitResources: [kit] } } });
 		const { reportId, route } = await deniedRoute("paneo.work", "https://paneo.work/", 902n);
 		const { model, inputs } = scripted([call("do_not_answer", { reason: "scripted" })]);
-		await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "no_abuse_found" }, { model, tools: { ...kitTools(true), capture: async ({ url }: { url: string }) => ({ ...liveCapture(url), kitResources: [kit] }) } });
+		await followUpProviderDecision({ routeId: route.id, state: "denied", detail: "no_abuse_found" }, { model, tools: { ...kitTools(true), visitSite: scriptedSiteVisit(async ({ url }) => ({ ...liveCapture(url), kitResources: [kit] })) } });
 		const context = JSON.parse(((inputs[0]![0] as { content: Array<{ text: string }> }).content[0]!).text);
 		expect(context.contentVerification).toEqual({ url: "https://paneo.work/", verdict: "served", by: "browser", matches: [{ kind: "kit_file", url: kit.url, sha256: kit.sha256 }] });
 		expect((await AbuseRepository.listEvents(reportId)).filter((event) => event.eventType === "site.content_verified")).toHaveLength(1);
