@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 
 import { getDb } from "../../db";
-import { abuseEvents, abuseProviderRoutes, abuseProviderRuns } from "../schema";
+import { abuseArtifacts, abuseEvents, abuseProviderRoutes, abuseProviderRuns, abuseReports } from "../schema";
 import { insertQueuedJob } from "./jobs";
 import { recomputeReportStatusInTransaction } from "./report_status";
 import { now, recordEvent } from "./shared";
@@ -97,4 +97,84 @@ export async function requeueFailedPreMarkerSubmissions(selection: FailedSubmiss
  */
 export function requeueGoDaddyRecaptchaPreflights(): Promise<bigint[]> {
 	return requeueFailedPreMarkerSubmissions({ providerRegistryKey: "godaddy", failure: "grecaptcha did not load", reason: "page_world_recaptcha" });
+}
+
+/** Route refusals a missing brand caused, by the `reason` `settleKnownFailure` recorded. */
+const BRAND_REASONS = [
+	"tucows_requires_a_brand_domain",
+	"namesilo_requires_a_verified_brand_website",
+	"eranet_requires_a_reference_website",
+	"gname_requires_a_reference_website",
+];
+
+/**
+ * The 2026-11-26 repair: linked reports (exfiltration backends, payload hosts)
+ * were stored without `legalBrandUrl`, so providers that need a brand refused
+ * them without a run (`insufficient_evidence`). Run once after the deploy where
+ * linked reports inherit their page's brand, then delete. In one transaction
+ * each such route whose report has no brand and whose source report (named by
+ * its `original_request` artifact) has one inherits it, goes back to the status
+ * it was refused from, and gets a `submit_provider` job. Routes with any run
+ * are skipped: they were prepared or sent. Idempotent. Returns the requeued route IDs.
+ *
+ *     docker exec <phishingsupport-frontend> bun -e 'const m = await import("/app/src/lib/abuse/persistence/failed_submission_requeue.ts"); console.log(await m.requeueBrandRefusedLinkedRoutes())'
+ */
+export async function requeueBrandRefusedLinkedRoutes(): Promise<bigint[]> {
+	const db = await getDb();
+	return db.transaction(
+		(tx) => {
+			const requeued: bigint[] = [];
+			const routes = tx.select().from(abuseProviderRoutes)
+				.where(and(eq(abuseProviderRoutes.status, "insufficient_evidence"), eq(abuseProviderRoutes.routeType, "provider_submission")))
+				.all();
+			for (const route of routes) {
+				const refusal = tx.select().from(abuseEvents)
+					.where(and(eq(abuseEvents.routeId, route.id), eq(abuseEvents.eventType, "route.status_changed")))
+					.orderBy(desc(abuseEvents.createdAt), desc(abuseEvents.id))
+					.all()
+					.find((event) => event.data.to === "insufficient_evidence");
+				if (typeof refusal?.data.reason !== "string" || !BRAND_REASONS.includes(refusal.data.reason)) continue;
+				if (tx.select({ id: abuseProviderRuns.id }).from(abuseProviderRuns).where(eq(abuseProviderRuns.routeId, route.id)).get()) continue;
+				const report = tx.select().from(abuseReports).where(eq(abuseReports.id, route.reportId)).get();
+				if (!report || report.legalBrandUrl !== null) continue;
+				const original = tx.select().from(abuseArtifacts)
+					.where(and(eq(abuseArtifacts.reportId, route.reportId), eq(abuseArtifacts.kind, "original_request")))
+					.orderBy(desc(abuseArtifacts.createdAt), desc(abuseArtifacts.id))
+					.limit(1)
+					.get();
+				let sourceId: bigint | undefined;
+				try {
+					const sourceReportId = original ? (JSON.parse(Buffer.from(original.blob).toString("utf8")) as { sourceReportId?: unknown }).sourceReportId : undefined;
+					if (typeof sourceReportId === "string" && /^\d+$/.test(sourceReportId)) sourceId = BigInt(sourceReportId);
+				} catch {
+					continue;
+				}
+				if (sourceId === undefined) continue;
+				const legalBrandUrl = tx.select({ url: abuseReports.legalBrandUrl }).from(abuseReports).where(eq(abuseReports.id, sourceId)).get()?.url;
+				if (!legalBrandUrl) continue;
+
+				const timestamp = now();
+				const to = refusal.data.from === "verified" ? "verified" : "queued";
+				tx.update(abuseReports).set({ legalBrandUrl, updatedAt: timestamp }).where(eq(abuseReports.id, report.id)).run();
+				recordEvent(tx, {
+					reportId: report.id,
+					eventType: "report.legal_brand_inherited",
+					data: { sourceReportId: sourceId.toString(), legalBrandUrl },
+				});
+				tx.update(abuseProviderRoutes).set({ status: to, updatedAt: timestamp }).where(eq(abuseProviderRoutes.id, route.id)).run();
+				recordEvent(tx, {
+					reportId: route.reportId,
+					targetId: route.targetId,
+					routeId: route.id,
+					eventType: "route.status_changed",
+					data: { from: "insufficient_evidence", to, reason: "linked_brand_inherited" },
+				});
+				insertQueuedJob(tx, { jobType: "submit_provider", reportId: route.reportId, routeId: route.id, payload: {}, dedupeKey: `provider-submit:${route.id.toString()}` });
+				recomputeReportStatusInTransaction(tx, route.reportId, { reason: "linked_brand_inherited", routeId: route.id.toString() });
+				requeued.push(route.id);
+			}
+			return requeued;
+		},
+		{ behavior: "immediate" },
+	);
 }

@@ -232,6 +232,7 @@ export function nextStep(route: SubmissionReportRoute, standing: RouteStanding, 
 /** One entry of a route's timeline, oldest first. */
 export type TimelineEntry =
 	| { kind: "reported"; at: Date; title: string; receipt: string | null; sent: string | null; confirmation: string | null; recipient: string | null }
+	| { kind: "not_sent"; at: Date; title: string; draft: string | null }
 	| { kind: "states"; states: Array<{ state: string; detail: string | null; at: Date }> }
 	| { kind: "message"; at: Date; inbound: boolean; title: string; subject: string | null; sentence?: string; highlight: boolean; text: CleanMailText | null; rawArtifactId: bigint | null; failed: boolean; decision: ProviderDecision["outcome"] | null }
 	| { kind: "not_answered"; at: Date; decision: string; explanation: string }
@@ -255,7 +256,13 @@ export function routeTimeline(route: SubmissionReportRoute, siblings: readonly S
 	const messages = [...route.messages].sort(bySent);
 	const report = route.routeType === "email" ? messages.find((message) => message.direction === "outbound" && !message.decisionReply && !message.moveNotice) : undefined;
 	const reportedAt = report ? new Date(report.occurredAt) : route.outcome.sentAt ? new Date(route.outcome.sentAt) : new Date(route.createdAt);
-	const entries: TimelineEntry[] = [{
+	// A route stopped before anything left shows the draft it would have sent, never as sent.
+	const entries: TimelineEntry[] = [route.outcome.verdict === "not_delivered" && !report ? {
+		kind: "not_sent",
+		at: new Date(route.updatedAt),
+		title: route.routeType === "email" ? `Not emailed to ${route.recipient ?? route.organisation}` : `Not sent through ${route.organisation}'s ${route.channel}`,
+		draft: route.body,
+	} : {
 		kind: "reported",
 		at: reportedAt,
 		title: route.routeType === "email" ? `We emailed ${route.recipient ?? route.organisation}` : `We reported through ${route.organisation}'s ${route.channel}`,

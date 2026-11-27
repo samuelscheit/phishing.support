@@ -68,6 +68,14 @@ function Entry({ entry, route, reportId, artifacts, reference }: { entry: Timeli
 					</div>
 				</>
 			);
+		case "not_sent":
+			return (
+				<>
+					<Node tone="bad" />
+					<Head at={entry.at} reference={reference}><span className="font-medium">{entry.title}</span></Head>
+					{entry.draft ? <div className="mt-1"><Fold label="What we would have sent">{entry.draft}</Fold></div> : null}
+				</>
+			);
 		case "states":
 			return (
 				<>

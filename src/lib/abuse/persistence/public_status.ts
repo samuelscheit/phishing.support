@@ -18,7 +18,7 @@ export async function getPublicStatus(token: string) {
 	const routesByTarget = new Map<bigint, Array<Record<string, unknown>>>();
 	for (const route of routes) {
 		const run = latestRunByRoute.get(route.id);
-		const error = safePublicError(route.status, run?.failureReason);
+		const error = safePublicError(route.status, run?.failureReason, { key: route.providerRegistryKey, name: route.providerDisplayName });
 		const item = {
 			provider: route.providerDisplayName,
 			routeType: route.routeType === "manual_unroutable" ? "manual/unroutable" : route.routeType,

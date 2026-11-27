@@ -34,7 +34,14 @@ export type LinkedHostReport = {
 	evidenceName: string;
 	userAgent?: string;
 	pageScreenshot?: PageScreenshot;
-};
+} & LinkedBrand;
+
+/**
+ * The brand the case's confirmed page impersonates, from its own report: a
+ * host the page depends on serves the same lure, and brand-gated forms
+ * (Tucows, NameSilo, Eranet, Gname) refuse a report that names none.
+ */
+export type LinkedBrand = Pick<ValidatedAbuseReportRequest, "legalBrandUrl">;
 
 /**
  * A report against a host the confirmed page depends on but does not live
@@ -53,6 +60,7 @@ export function linkedHostRequest(params: LinkedHostReport): ValidatedAbuseRepor
 		targets: [{ ordinal: 0, originalInput: target.normalizedTarget, originalInputs: [target.normalizedTarget], ...target, observedUrls: [observedUrl] }],
 		allegationCategory: params.allegationCategory,
 		description: params.description,
+		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 		...(params.userAgent ? { reportedUserAgent: params.userAgent } : {}),
 		observedUrls: [{ target: target.normalizedTarget, urls: [observedUrl] }],
 		evidence: [

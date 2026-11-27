@@ -168,6 +168,14 @@ export type SubmissionReport = {
  * Historical runs that predate provider-specific drafts show a reference
  * preview instead of the analysis excerpt they were filed with.
  */
+/** Why the route reached its current status: the reason its latest change to that status recorded. */
+function statusReason(events: ReadonlyArray<{ eventType: string; data: unknown; createdAt: Date }>, status: string): string | undefined {
+	const changes = events.filter((event) => event.eventType === "route.status_changed" && asRecord(event.data)?.to === status);
+	const latest = changes.reduce<(typeof changes)[number] | undefined>((last, event) => !last || event.createdAt >= last.createdAt ? event : last, undefined);
+	const reason = asRecord(latest?.data)?.reason;
+	return typeof reason === "string" && reason ? reason : undefined;
+}
+
 function providerReportBody(params: {
 	providerRegistryKey: string;
 	providerPayload: unknown;
@@ -339,7 +347,7 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 					confirmationId: run?.confirmationId ?? null,
 					confirmationText: run?.confirmationText ?? null,
 					finalUrl: run?.finalUrl ?? null,
-					error: safePublicError(route.status, run?.failureReason ?? target?.disposition) ?? null,
+					error: safePublicError(route.status, statusReason(eventsByRoute.get(route.id) ?? [], route.status) ?? run?.failureReason ?? target?.disposition, { key: route.providerRegistryKey, name }) ?? null,
 					messages: routeMessages,
 					decisionFollowUps: followUpsByRoute.get(route.id) ?? [],
 					createdAt: run?.createdAt ?? route.createdAt,

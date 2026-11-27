@@ -1,3 +1,4 @@
+import type { LinkedBrand } from "../abuse/linked_host_report";
 import { reportRedirector } from "../abuse/origin/redirector_report";
 import { AbuseRepository } from "../abuse/repository";
 import { errorText } from "../util/error_text";
@@ -158,6 +159,8 @@ export async function runReportInvestigation(
 	const submissionId = BigInt(payload.submissionId);
 	const report = await AbuseRepository.getReport(reportId);
 	if (report?.status !== "investigating") return;
+	// Every report this case links to its page names the brand the page impersonates.
+	const brand = report.legalBrandUrl ? { legalBrandUrl: report.legalBrandUrl } : {};
 	await setInvestigationStatus(submissionId, { status: "running", updatedAt: deps.now().toISOString() });
 
 	const payloads = await investigatePayloads(payloadSources(payload), deps, signal);
@@ -176,6 +179,7 @@ export async function runReportInvestigation(
 			delivery,
 			payload: evidence!,
 			...(pageScreenshot ? { pageScreenshot } : {}),
+			...brand,
 			reporter,
 		});
 	}
@@ -187,11 +191,12 @@ export async function runReportInvestigation(
 			frameUrl: payload.exploitLoader!.frameUrl,
 			upload,
 			...(pageScreenshot ? { pageScreenshot } : {}),
+			...brand,
 			reporter,
 		});
 	}
 
-	const reportedDrops = await reportCaseLinks({ reportId, submissionId, payload, reporter, signal, pageScreenshot: lureScreenshot }, deps);
+	const reportedDrops = await reportCaseLinks({ reportId, submissionId, payload, reporter, signal, pageScreenshot: lureScreenshot, ...brand }, deps);
 
 	const findings = [...payloadFindings(payloads), ...dataDropFindings(reportedDrops)];
 	const evidence = payloads.flatMap(({ evidence: item }) => item ? [{
@@ -220,11 +225,12 @@ export async function runReportInvestigation(
  * Returns the data drops reported, named from their own APIs.
  */
 async function reportCaseLinks(
-	params: { reportId: bigint; submissionId: bigint; payload: InvestigationJobPayload; reporter: ReporterMetadata; signal?: AbortSignal; pageScreenshot: () => ReturnType<typeof lurePageScreenshot> },
+	params: { reportId: bigint; submissionId: bigint; payload: InvestigationJobPayload; reporter: ReporterMetadata; signal?: AbortSignal; pageScreenshot: () => ReturnType<typeof lurePageScreenshot> } & LinkedBrand,
 	deps: InvestigationDependencies,
 ): Promise<ExfiltrationBackend[]> {
 	const { reportId, submissionId, payload, reporter, signal } = params;
-	const redirector = await deps.reportRedirector({ reportId, submissionId, pageUrl: payload.pageUrl, finding: payload.finding, reporter, pageScreenshot: params.pageScreenshot, signal });
+	const brand = params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {};
+	const redirector = await deps.reportRedirector({ reportId, submissionId, pageUrl: payload.pageUrl, finding: payload.finding, reporter, pageScreenshot: params.pageScreenshot, signal, ...brand });
 	if (redirector) {
 		await AbuseRepository.appendEvent({
 			reportId,
@@ -250,6 +256,7 @@ async function reportCaseLinks(
 			pageUrl: payload.pageUrl,
 			observedAt: new Date(enriched.request.timestamp),
 			...(backendScreenshot ? { pageScreenshot: backendScreenshot } : {}),
+			...brand,
 			reporter,
 		});
 	}

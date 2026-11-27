@@ -165,7 +165,7 @@ describe("pre-report investigation", () => {
 		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { investigation: { status: "completed", payloads: [{ url: PAYLOAD_URL, error: "The payload host answered HTTP 404." }] } } });
 	});
 
-	test("the visit's data drops are reported at their own hosts and named in the page's report", async () => {
+	test("the visit's data drops are reported at their own hosts, naming the page's brand, and named in the page's report", async () => {
 		const submissionId = 505n;
 		await SubmissionsEntity.create({ id: submissionId, kind: "website", data: { kind: "website", website: { url: "https://phish.example.com/" } }, dedupeKey: `investigation:${submissionId}` });
 		const drop: ExfiltrationBackend = { kind: "domain", key: "domain:collector.example.net", endpointUrl: "https://collector.example.net/x", hostname: "collector.example.net", method: "POST", matchedCanaries: ["email"], request: { timestamp: "2026-11-15T10:00:01.000Z", method: "POST", url: "https://collector.example.net/x", postData: "email=probe" } };
@@ -175,17 +175,18 @@ describe("pre-report investigation", () => {
 			analysisText: "The page collects account credentials.",
 			reporter: {},
 			finding: { finding: "phishing", phishingBasis: "credential_theft" },
+			legalBrandUrl: "https://accounts.google.com/",
 			screenshots: [{ filename: "website.png", png: SCREENSHOT }],
 			visitCapture: { canaries: { marker: "m", email: "probe", password: "p", phone: "1", cardNumber: "4", oneTimeCode: "1" }, requests: [drop.request], backends: [drop] },
 		});
-		const reported: Array<{ backend: ExfiltrationBackend; observedAt: Date; screenshot?: Buffer }> = [];
+		const reported: Array<{ backend: ExfiltrationBackend; observedAt: Date; screenshot?: Buffer; legalBrandUrl?: string }> = [];
 		const { deps } = offline({
 			enrich: async (backend) => ({ ...backend, method: "POST" }),
-			reportBackend: async (params) => { reported.push({ backend: params.backend, observedAt: params.observedAt, ...(params.pageScreenshot ? { screenshot: params.pageScreenshot.buffer } : {}) }); return { reportId: 9_999n, created: true } as never; },
+			reportBackend: async (params) => { reported.push({ backend: params.backend, observedAt: params.observedAt, ...(params.pageScreenshot ? { screenshot: params.pageScreenshot.buffer } : {}), ...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}) }); return { reportId: 9_999n, created: true } as never; },
 		});
 		await workerWith(deps, "investigation-drops").processOne({ jobTypes: ["investigate_report"] });
-		// The backend's report carries the page's own screenshot: forms such as Squarespace's require one.
-		expect(reported).toEqual([{ backend: expect.objectContaining({ key: "domain:collector.example.net" }), observedAt: new Date("2026-11-15T10:00:01.000Z"), screenshot: expect.any(Buffer) }]);
+		// The backend's report carries the page's own screenshot (Squarespace's form requires one) and its brand (Tucows' does).
+		expect(reported).toEqual([{ backend: expect.objectContaining({ key: "domain:collector.example.net" }), observedAt: new Date("2026-11-15T10:00:01.000Z"), screenshot: expect.any(Buffer), legalBrandUrl: "https://accounts.google.com/" }]);
 		expect(reported[0]!.screenshot!.equals(SCREENSHOT)).toBeTrue();
 		const released = await AbuseRepository.getReport(report.reportId);
 		expect(released?.status).toBe("accepted");

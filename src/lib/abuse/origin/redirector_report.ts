@@ -2,7 +2,7 @@ import type { ReporterMetadata } from "../../http/reporter_headers";
 import { hasPathTenants, websiteSite } from "../../website/info/site";
 import type { ReportableWebsiteFinding } from "../../website/types";
 import type { ValidatedAbuseReportRequest } from "../contracts";
-import { linkedHostRequest, type PageScreenshot } from "../linked_host_report";
+import { linkedHostRequest, type LinkedBrand, type PageScreenshot } from "../linked_host_report";
 import { AbuseRepository, type CreatedAbuseReport } from "../repository";
 import { isPopularSite, loadPopularDomains, type PopularDomains } from "./popular_domains";
 import { checkRedirector, redirectorOf, type RedirectorCheck, type RedirectorCheckDependencies, type RedirectorOf } from "./redirector_watch";
@@ -45,7 +45,7 @@ export function buildRedirectorRequest(params: {
 	destination: RedirectorDestination;
 	check: RedirectorCheck & { checkedAt: string };
 	pageScreenshot?: PageScreenshot;
-}): ValidatedAbuseReportRequest {
+} & LinkedBrand): ValidatedAbuseReportRequest {
 	const { redirector, destination, check } = params;
 	const description = [
 		`This URL forwards visitors to a confirmed ${findingPhrase(destination.finding)} page: on ${redirector.recorded.createdAt.toISOString()} it sent our capture to ${destination.url}, which we confirmed as ${findingPhrase(destination.finding)}.`,
@@ -84,6 +84,7 @@ export function buildRedirectorRequest(params: {
 		},
 		evidenceName: "redirector-evidence.json",
 		...(params.pageScreenshot ? { pageScreenshot: params.pageScreenshot } : {}),
+		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 	});
 }
 
@@ -116,7 +117,7 @@ export async function reportRedirector(
 		reporter: ReporterMetadata;
 		pageScreenshot: () => Promise<PageScreenshot | undefined>;
 		signal?: AbortSignal;
-	},
+	} & LinkedBrand,
 	dependencies: RedirectorReportDependencies = {},
 ): Promise<RedirectorReportOutcome | undefined> {
 	const redirector = await redirectorOf(params.submissionId, params.pageUrl);
@@ -140,6 +141,7 @@ export async function reportRedirector(
 		destination: { url: redirector.destinationUrl, finding: params.finding, ...(assessment?.evidenceQuote ? { evidenceQuote: assessment.evidenceQuote } : {}) },
 		check: { ...check, checkedAt },
 		...(pageScreenshot ? { pageScreenshot } : {}),
+		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 	});
 	const report = await AbuseRepository.createReport({ request, reporter: params.reporter, submissionId: params.submissionId });
 	return { kind: "reported", url: redirector.url, report };
