@@ -7,6 +7,7 @@ import { localChromium } from "@/lib/browser/local_chromium";
 import { publishEvent } from "@/lib/event/event_transport";
 import { createExfiltrationCanaries } from "@/lib/exfiltration/canaries";
 import { closeVisitControl, openVisitControl, type VisitControl } from "@/lib/site_visit/control";
+import { sleep } from "@/lib/util/sleep";
 import { syntheticVisitValues } from "@/lib/site_visit/visit_task";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +57,7 @@ export async function POST() {
 	void (async () => {
 		while (!stop.signal.aborted) {
 			await control.steering.checkpoint(stop.signal).catch(() => undefined);
-			await new Promise((resolve) => setTimeout(resolve, 300));
+			await sleep(300);
 		}
 	})();
 	visits.set(id, { browser, page, control, stop });

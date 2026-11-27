@@ -2,8 +2,7 @@ import { extractFavicon, revalidateFavicon, type FaviconDependencies, type Fetch
 import { FaviconStore, onNewFaviconDomains } from "./store";
 import type { Favicon } from "./schema";
 
-const HOUR_MS = 60 * 60_000;
-const DAY_MS = 24 * HOUR_MS;
+import { DAY_MS } from "../util/date_time";
 /** A stored icon's source is asked again this rarely: an icon changes with a rebrand, not more often. */
 export const REVALIDATE_AFTER_MS = 30 * DAY_MS;
 /** A site that answered without a usable icon is asked again after this long. */

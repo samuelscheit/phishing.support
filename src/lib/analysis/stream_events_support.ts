@@ -1,4 +1,5 @@
 /** Shared, browser-safe helpers for the analysis event reducer. */
+import { asRecord } from "../util/values";
 
 import { countSearchQueries } from "./stream_query_count";
 import { responseContentParts } from "../openai/response";
@@ -78,9 +79,6 @@ const TOOL_ITEM_TYPES = new Set([
 	"tool_search_output",
 ]);
 
-export function record(value: unknown): Record<string, unknown> | null {
-	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
 
 export function stringValue(value: unknown): string | null {
 	if (typeof value === "bigint") return value.toString();
@@ -191,15 +189,15 @@ export function noticeEntry(
 	return { kind: "notice", id, title, status, ...(detail ? { detail } : {}) };
 }
 
-export function outputItem(event: AnalysisStreamEvent): Record<string, unknown> | null {
-	return record(event.item);
+export function outputItem(event: AnalysisStreamEvent): Record<string, unknown> | undefined {
+	return asRecord(event.item);
 }
 
-export function itemIdOf(item: Record<string, unknown> | null): string | null {
+export function itemIdOf(item: Record<string, unknown> | undefined): string | null {
 	return item ? stringValue(item.id) : null;
 }
 
-export function itemTypeOf(item: Record<string, unknown> | null): string | null {
+export function itemTypeOf(item: Record<string, unknown> | undefined): string | null {
 	return item ? stringValue(item.type) : null;
 }
 
@@ -216,9 +214,9 @@ export function toolEventParts(eventType: string): { toolType: string; phase: st
 	return { toolType, phase: match[2]! };
 }
 
-export function toolDetails(item: Record<string, unknown> | null): { queryCount: number } {
+export function toolDetails(item: Record<string, unknown> | undefined): { queryCount: number } {
 	if (!item) return { queryCount: 0 };
-	const action = record(item.action);
+	const action = asRecord(item.action);
 	let queryCount = Math.max(
 		countSearchQueries(action?.queries),
 		countSearchQueries(action?.query),
@@ -235,7 +233,7 @@ export function toolDetails(item: Record<string, unknown> | null): { queryCount:
 
 export function toolEntryFromItem(
 	id: string,
-	item: Record<string, unknown> | null,
+	item: Record<string, unknown> | undefined,
 	phaseOverride?: string,
 ): Extract<AnalysisTimelineEntry, { kind: "tool" }> {
 	const toolType = itemTypeOf(item) ?? "tool_call";
@@ -260,12 +258,12 @@ export function reasoningEntryId(event: AnalysisStreamEvent): string {
 	return `reasoning:${itemId}:${summaryIndex}`;
 }
 
-export function reasoningTextFromItem(item: Record<string, unknown> | null): Array<{ text: string; summaryIndex: number }> {
+export function reasoningTextFromItem(item: Record<string, unknown> | undefined): Array<{ text: string; summaryIndex: number }> {
 	const summary = item?.summary;
 	if (!Array.isArray(summary)) return [];
 	const result: Array<{ text: string; summaryIndex: number }> = [];
 	for (let index = 0; index < summary.length; index += 1) {
-		const part = record(summary[index]);
+		const part = asRecord(summary[index]);
 		const text = boundedText(part?.text, MAX_REASONING_TEXT);
 		if (text) result.push({ text, summaryIndex: index });
 	}
@@ -281,29 +279,29 @@ function joinedContent(output: unknown, type: "output_text" | "refusal", field: 
 }
 
 export function responseOutputText(value: unknown): string {
-	const response = record(value);
+	const response = asRecord(value);
 	const output = response?.output;
 	if (!Array.isArray(output)) return boundedText(response?.output_text, MAX_OUTPUT_TEXT) ?? "";
 	return joinedContent(output, "output_text", "text");
 }
 
 export function refusalTextFromResponse(value: unknown): string {
-	return joinedContent(record(value)?.output, "refusal", "refusal");
+	return joinedContent(asRecord(value)?.output, "refusal", "refusal");
 }
 
 export function outputTextFromContentPart(event: AnalysisStreamEvent): string {
-	const part = record(event.part);
+	const part = asRecord(event.part);
 	return part?.type === "output_text" ? (boundedText(part.text, MAX_OUTPUT_TEXT) ?? "") : "";
 }
 
 export function refusalFromContentPart(event: AnalysisStreamEvent): string {
-	const part = record(event.part);
+	const part = asRecord(event.part);
 	return part?.type === "refusal" ? (boundedText(part.refusal, MAX_OUTPUT_TEXT) ?? "") : "";
 }
 
 function eventScope(event: AnalysisStreamEvent): string {
-	const responseId = stringValue(record(event.response)?.id);
-	const itemId = stringValue(event.item_id) ?? itemIdOf(record(event.item));
+	const responseId = stringValue(asRecord(event.response)?.id);
+	const itemId = stringValue(event.item_id) ?? itemIdOf(asRecord(event.item));
 	const runId = stringValue(event.runId);
 	return responseId ?? itemId ?? runId ?? "";
 }

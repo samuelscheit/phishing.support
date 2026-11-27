@@ -1,3 +1,4 @@
+import { asRecord } from "@/lib/util/values";
 import type { VisitMode } from "@/lib/site_visit/control";
 import type { SyntheticField } from "@/lib/site_visit/visit_task";
 
@@ -42,7 +43,6 @@ export const EMPTY_LIVE_EVENTS: LiveEvents = { entries: [], finished: false };
 export const MAX_LIVE_ENTRIES = 200;
 const MODES: readonly VisitMode[] = ["agent", "pausing", "human", "ended"];
 
-const record = (value: unknown): Record<string, unknown> | undefined => (value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined);
 const text = (source: Record<string, unknown>, key: string): string => (typeof source[key] === "string" ? source[key] as string : "");
 const optionalText = (source: Record<string, unknown>, key: string): string | undefined => text(source, key) || undefined;
 
@@ -50,10 +50,10 @@ function controlOf(source: Record<string, unknown>): LiveControl | undefined {
 	const mode = MODES.find((candidate) => candidate === source.mode);
 	if (!mode) return undefined;
 	const tabs = (Array.isArray(source.tabs) ? source.tabs : []).flatMap((value): LiveTab[] => {
-		const tab = record(value);
+		const tab = asRecord(value);
 		return tab && text(tab, "targetId") ? [{ targetId: text(tab, "targetId"), url: text(tab, "url"), title: text(tab, "title"), active: tab.active === true }] : [];
 	});
-	const fakeValues = Object.fromEntries(Object.entries(record(source.fakeValues) ?? {}).filter(([, value]) => typeof value === "string" && value)) as LiveControl["fakeValues"];
+	const fakeValues = Object.fromEntries(Object.entries(asRecord(source.fakeValues) ?? {}).filter(([, value]) => typeof value === "string" && value)) as LiveControl["fakeValues"];
 	return {
 		run: text(source, "run"),
 		seq: typeof source.seq === "number" && Number.isFinite(source.seq) ? source.seq : 0,
@@ -82,7 +82,7 @@ function entryOf(source: Record<string, unknown>): LiveEntry | undefined {
 
 /** The state after one message of the stream (its parsed JSON); anything unknown leaves it as it is. */
 export function reduceLiveEvent(state: LiveEvents, message: unknown): LiveEvents {
-	const source = record(message);
+	const source = asRecord(message);
 	if (!source) return state;
 	// The replay may no longer reach back to the last control state: keep it until a newer one comes.
 	if (source.type === "connected") return { ...EMPTY_LIVE_EVENTS, ...(state.control ? { control: state.control } : {}) };

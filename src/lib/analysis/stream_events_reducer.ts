@@ -2,6 +2,7 @@
 
 import { responseMessageContents } from "../openai/response";
 import type { AnalysisEntryStatus, AnalysisStreamEvent, AnalysisStreamState } from "./stream_events_support";
+import { asRecord } from "../util/values";
 import {
 	MAX_OUTPUT_TEXT,
 	MAX_REASONING_TEXT,
@@ -19,7 +20,6 @@ import {
 	outputTextFromContentPart,
 	reasoningEntryId,
 	reasoningTextFromItem,
-	record,
 	refusalFromContentPart,
 	refusalTextFromResponse,
 	responseOutputText,
@@ -65,9 +65,9 @@ function updateTool(
 	event: AnalysisStreamEvent,
 	toolType: string,
 	phase: string,
-	item?: Record<string, unknown> | null,
+	item?: Record<string, unknown> | undefined,
 ): AnalysisStreamState {
-	const itemId = stringValue(event.item_id) ?? itemIdOf(item ?? null);
+	const itemId = stringValue(event.item_id) ?? itemIdOf(item);
 	const outputIndex = numberValue(event.output_index) ?? numberValue(item?.output_index);
 	const id = toolEntryId(toolType, itemId, outputIndex);
 	return {
@@ -75,10 +75,10 @@ function updateTool(
 		entries: upsertEntry(
 			state.entries,
 			id,
-			() => toolEntryFromItem(id, { ...(item ?? {}), type: itemTypeOf(item ?? null) ?? toolType }, phase),
+			() => toolEntryFromItem(id, { ...(item ?? {}), type: itemTypeOf(item) ?? toolType }, phase),
 			(entry) => {
 				if (entry.kind !== "tool") return entry;
-				const details = toolDetails(item ?? null);
+				const details = toolDetails(item);
 				return {
 					...entry,
 					phase: phaseLabel(phase),
@@ -253,9 +253,9 @@ function applyProtocolEvent(state: AnalysisStreamState, event: AnalysisStreamEve
 	if (eventType === "response.reasoning_text.done")
 		return updateReasoning(state, event, eventType, boundedText(event.text, MAX_REASONING_TEXT) ?? "", "complete");
 	if (eventType === "response.reasoning_summary_part.added")
-		return updateReasoning(state, event, eventType, boundedText(record(event.part)?.text, MAX_REASONING_TEXT) ?? "", "active");
+		return updateReasoning(state, event, eventType, boundedText(asRecord(event.part)?.text, MAX_REASONING_TEXT) ?? "", "active");
 	if (eventType === "response.reasoning_summary_part.done")
-		return updateReasoning(state, event, eventType, boundedText(record(event.part)?.text, MAX_REASONING_TEXT) ?? "", "complete");
+		return updateReasoning(state, event, eventType, boundedText(asRecord(event.part)?.text, MAX_REASONING_TEXT) ?? "", "complete");
 	return state;
 }
 
@@ -283,7 +283,7 @@ export function createInitialAnalysisStreamState(status?: string, progressExpect
 }
 
 export function applyAnalysisStreamEvent(state: AnalysisStreamState, event: unknown): AnalysisStreamState {
-	const normalized = record(event);
+	const normalized = asRecord(event);
 	if (!normalized) return state;
 	const eventType = eventTypeOf(normalized);
 	if (!eventType) return state;

@@ -1,5 +1,6 @@
 "use client";
 
+import { DAY_MS } from "@/lib/util/date_time";
 /**
  * Whether the people behind a campaign are still at work, and when its sites
  * appeared: one dot per site on a time line up to today, a hollow green ring
@@ -17,7 +18,7 @@ import { DOT, LANE, placeDots } from "./timeline_layout";
 
 /** Quiet this long, the people behind a campaign no longer count as active. */
 const ACTIVE_DAYS = 14;
-const DAY_MS = 86_400_000;
+
 
 /** Whole calendar days between two instants in the viewer's own time zone. */
 function calendarDays(from: number, to: number): number {
