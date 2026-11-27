@@ -33,6 +33,18 @@ describe("exfiltration backend reports", () => {
 		expect(request.evidence.map((item) => item.filename)).toEqual(["exfiltration-evidence.json"]);
 	});
 
+	test("names the brand the confirmed page impersonates, without changing the report's identity", () => {
+		// Production case 383953602365887986: the collector of a Google sign-in lure; Tucows' form refuses a report without the brand.
+		const endpointUrl = "https://gentle.nealandcompany.net/e";
+		const backend: ExfiltrationBackend = { kind: "domain", key: "domain:gentle.nealandcompany.net", endpointUrl, hostname: "gentle.nealandcompany.net", method: "POST", matchedCanaries: ["email"], request: { timestamp: "2026-11-25T12:15:03.336Z", method: "POST", url: endpointUrl } };
+		const base = { submissionId: 1n, sourceReportId: 2n, backend, pageUrl: "https://auth.ispydecor.com/", observedAt: new Date("2026-11-25T12:15:03.336Z") };
+		const branded = buildExfiltrationBackendRequest({ ...base, legalBrandUrl: "https://accounts.google.com/" });
+		expect(branded.legalBrandUrl).toBe("https://accounts.google.com/");
+		const unbranded = buildExfiltrationBackendRequest(base);
+		expect("legalBrandUrl" in unbranded).toBeFalse();
+		expect(branded.requestPayloadHash).toBe(unbranded.requestPayloadHash);
+	});
+
 	test("carries the confirmed page's screenshot as image evidence, without changing the report's identity", () => {
 		const endpointUrl = "https://zealousvoice.com/Mortage/Ins";
 		const backend: ExfiltrationBackend = { kind: "domain", key: "domain:zealousvoice.com", endpointUrl, hostname: "zealousvoice.com", method: "POST", matchedCanaries: ["email"], request: { timestamp: "now", method: "POST", url: endpointUrl } };

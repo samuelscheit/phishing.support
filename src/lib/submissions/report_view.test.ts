@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
+import { abuseEvents, abuseProviderRoutes } from "@/lib/abuse/schema";
+import { AbuseRepository } from "@/lib/abuse/repository";
+import { getDb } from "@/lib/db";
+import { generateId } from "@/lib/db/ids";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { useTemporaryDatabase } from "@/lib/db/test_helpers";
 import type { SubmissionReportMessage, SubmissionReportRoute } from "./abuse_details";
@@ -101,6 +105,29 @@ describe("the reports of case 384401854580134038 as the case page reads them", (
 		expect(host[0]).toMatchObject({ kind: "reported", title: "We emailed abuse-ams@v-sys.org" });
 		expect(host[0]?.kind === "reported" && host[0].sent).toStartWith("[Phishing Support] [PS-b7e34e00101c] Malware abuse");
 	});
+
+	test("a form that refused the report before sending says what it requires, and never that we reported", async () => {
+		// Production case 383953602365887986, 12:16: Tucows' form refused the collector report, which named no brand.
+		const [, payloadHost] = await trylevo();
+		const db = await getDb();
+		const [target] = await AbuseRepository.listTargets(payloadHost!.id);
+		const id = generateId();
+		db.insert(abuseProviderRoutes).values({
+			id, reportId: payloadHost!.id, targetId: target!.id, routeKey: `tucows:${id}`, providerRegistryKey: "tucows", providerDisplayName: "Tucows Abuse Form",
+			routeType: "provider_submission", resolverProvenance: { source: "domain_rdap" }, resolutionSnapshot: {}, status: "insufficient_evidence", createdAt: trylevoAt("18:50:09"), updatedAt: trylevoAt("18:50:11"),
+		}).run();
+		for (const [to, at, reason] of [["queued", "18:50:09", "route_resolved"], ["insufficient_evidence", "18:50:11", "tucows_requires_a_brand_domain"]] as const) {
+			db.insert(abuseEvents).values({ id: generateId(), reportId: payloadHost!.id, routeId: id, eventType: "route.status_changed", data: { to, reason }, createdAt: trylevoAt(at) }).run();
+		}
+		const refused = (await getReportsForSubmission(CASE))[1]!.routes.find((item) => item.id === id)!;
+		// The organisation's name leads: "Tucows" in production, its route's display name here without the site's record.
+		const reason = `${refused.organisation} requires a brand domain.`;
+		expect(refused.error).toBe(reason);
+		expect(routeStanding(refused)).toMatchObject({ bucket: "not_sent", label: "Not enough evidence for this form", line: reason, steps: { sent: "negative" } });
+		const timeline = routeTimeline(refused, [refused]);
+		expect(timeline).toEqual([{ kind: "not_sent", at: trylevoAt("18:50:11"), title: `Not sent through ${refused.organisation}'s ${refused.channel}`, draft: refused.body }]);
+		expect(refused.body).toBeTruthy();
+	});
 });
 
 /** A route as the read model gives it, from the fields a test sets. */
@@ -142,6 +169,26 @@ describe("routeStanding and the timeline from a route's own record", () => {
 		expect(nextStep(denied, standing, trylevoAt("18:50:04"))).toBe("We answered with evidence at 19:22 UTC; awaiting Cloudflare's review. Next status check at 20:20 UTC.");
 		const answer = routeTimeline(denied, [denied]).at(-1);
 		expect(answer).toMatchObject({ kind: "message", inbound: false, title: "We answered the decision", sentence: "The reported path still returns the identical payload with curl/8.7.1." });
+	});
+
+	test("a route that never left shows its draft as not sent; a bounced email still shows what we sent", () => {
+		const notSent = { verdict: "not_delivered", followUps: 0, unansweredDecisions: 0, overturnedByFollowUp: false, inbound: 0, outbound: 0 } as const;
+		const parked = route({ status: "needs_human", outcome: notSent, confirmationId: null, body: "Draft text" });
+		expect(routeTimeline(parked, [parked])).toEqual([{ kind: "not_sent", at: trylevoAt("19:20:56"), title: "Not sent through Cloudflare's dashboard API", draft: "Draft text" }]);
+		const unrouted = route({ routeType: "email", status: "delivery_failed", outcome: notSent, recipient: "abuse@host.example", confirmationId: null, body: null });
+		expect(routeTimeline(unrouted, [unrouted])[0]).toMatchObject({ kind: "not_sent", title: "Not emailed to abuse@host.example", draft: null });
+
+		const bounced = route({
+			routeType: "email", status: "delivery_failed", recipient: "abuse@host.example", confirmationId: null,
+			outcome: { ...notSent, verdict: "bounced", sentAt: trylevoAt("19:00:00") },
+			messages: [
+				message({ at: "19:00:00", direction: "outbound", kind: "report", status: "sent", subject: "Abuse report", text: { main: "Body", quoted: null } as never }),
+				message({ at: "19:01:00", kind: "bounce", classification: "bounce", subject: "Undeliverable" }),
+			],
+		});
+		const timeline = routeTimeline(bounced, [bounced]);
+		expect(timeline[0]).toMatchObject({ kind: "reported", title: "We emailed abuse@host.example", sent: "Abuse report\n\nBody" });
+		expect(timeline[1]).toMatchObject({ kind: "message", title: "Delivery failed", failed: true });
 	});
 
 	test("consecutive review states are one line; a state between messages starts a new one", () => {

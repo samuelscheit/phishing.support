@@ -5,8 +5,8 @@ import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { routeFixture } from "../providers/kit/testing";
 import { AbuseRepository } from "../repository";
-import { abuseEvents, abuseJobs, abuseProviderRuns } from "../schema";
-import { requeueFailedPreMarkerSubmissions, requeueGoDaddyRecaptchaPreflights } from "./failed_submission_requeue";
+import { abuseEvents, abuseJobs, abuseProviderRoutes, abuseProviderRuns, abuseReports } from "../schema";
+import { requeueBrandRefusedLinkedRoutes, requeueFailedPreMarkerSubmissions, requeueGoDaddyRecaptchaPreflights } from "./failed_submission_requeue";
 
 useTemporaryDatabase();
 
@@ -119,5 +119,90 @@ describe("requeueFailedPreMarkerSubmissions", () => {
 		expect(await requeueFailedPreMarkerSubmissions({ ...selection, failure: "challenge was not passed" })).toEqual([fixture.route.id]);
 		// Now queued, it is no longer a candidate for any selection.
 		expect(await requeueFailedPreMarkerSubmissions({ ...selection, failure: "challenge was not passed" })).toEqual([]);
+	});
+});
+
+describe("requeueBrandRefusedLinkedRoutes", () => {
+	const BRAND = "https://accounts.google.com/";
+
+	/** A linked report whose Tucows route was refused without a run, as `settleKnownFailure` leaves it. */
+	async function refusedLinked(options: { parentBrand?: string | null; reason?: string; from?: "queued" | "verified" } = {}) {
+		sequence += 1;
+		const parent = await routeFixture({ ...PROVIDERS.tucows, target: `parent-${sequence}.example.com`, legalBrandUrl: options.parentBrand === undefined ? BRAND : options.parentBrand });
+		const child = await routeFixture({ ...PROVIDERS.tucows, target: `linked-${sequence}.example.com`, legalBrandUrl: null });
+		await AbuseRepository.saveArtifact({
+			reportId: child.created.reportId,
+			name: "original-request.json",
+			kind: "original_request",
+			mimeType: "application/json",
+			buffer: Buffer.from(JSON.stringify({ kind: "exfiltration_backend", sourceReportId: parent.created.reportId.toString() })),
+		});
+		const from = options.from ?? "verified";
+		const reason = options.reason ?? "tucows_requires_a_brand_domain";
+		const db = await getDb();
+		db.update(abuseProviderRoutes).set({ status: "insufficient_evidence" }).where(eq(abuseProviderRoutes.id, child.route.id)).run();
+		db.insert(abuseEvents).values({
+			id: BigInt(Date.now()) * 1000n + BigInt(sequence),
+			reportId: child.created.reportId,
+			routeId: child.route.id,
+			eventType: "route.status_changed",
+			data: { from, to: "insufficient_evidence", reason },
+		}).run();
+		return { parent, child, from };
+	}
+
+	const brandOf = async (reportId: bigint) => (await getDb()).select().from(abuseReports).where(eq(abuseReports.id, reportId)).get()?.legalBrandUrl;
+
+	async function expectUntouched(child: { created: { reportId: bigint }; route: { id: bigint } }) {
+		expect(await requeueBrandRefusedLinkedRoutes()).toEqual([]);
+		expect(await AbuseRepository.getRoute(child.route.id)).toMatchObject({ status: "insufficient_evidence" });
+		expect(await brandOf(child.created.reportId)).toBeNull();
+		expect(await queuedJobs(child.route.id)).toHaveLength(0);
+	}
+
+	test("a refused linked route inherits its source's brand and goes back to the status it was refused from, once", async () => {
+		const { child, from } = await refusedLinked();
+		expect(await requeueBrandRefusedLinkedRoutes()).toEqual([child.route.id]);
+		expect(await brandOf(child.created.reportId)).toBe(BRAND);
+		expect(await AbuseRepository.getRoute(child.route.id)).toMatchObject({ status: from });
+		const queued = await queuedJobs(child.route.id);
+		expect(queued).toHaveLength(1);
+		expect(queued[0]).toMatchObject({ jobType: "submit_provider", dedupeKey: `provider-submit:${child.route.id.toString()}` });
+		const db = await getDb();
+		const events = db.select().from(abuseEvents).where(eq(abuseEvents.reportId, child.created.reportId)).all();
+		expect(events.find((event) => event.eventType === "report.legal_brand_inherited")?.data).toMatchObject({ legalBrandUrl: BRAND });
+		expect(events.filter((event) => event.eventType === "route.status_changed").at(-1)?.data).toEqual({ from: "insufficient_evidence", to: from, reason: "linked_brand_inherited" });
+
+		expect(await requeueBrandRefusedLinkedRoutes()).toEqual([]);
+		expect(await queuedJobs(child.route.id)).toHaveLength(1);
+	});
+
+	test("a route refused from queued goes back to queued", async () => {
+		const { child } = await refusedLinked({ from: "queued" });
+		expect(await requeueBrandRefusedLinkedRoutes()).toEqual([child.route.id]);
+		expect(await AbuseRepository.getRoute(child.route.id)).toMatchObject({ status: "queued" });
+	});
+
+	test("skips a route that has a run", async () => {
+		const { child } = await refusedLinked();
+		const db = await getDb();
+		db.insert(abuseProviderRuns).values({
+			id: BigInt(Date.now()) * 1000n + 11n,
+			reportId: child.created.reportId,
+			routeId: child.route.id,
+			providerPayload: { draft: true },
+			payloadHash: "h",
+			correlationKey: `run:${child.route.id.toString()}`,
+			executionStatus: "failed",
+		}).run();
+		await expectUntouched(child);
+	});
+
+	test("skips a route whose source has no brand", async () => {
+		await expectUntouched((await refusedLinked({ parentBrand: null })).child);
+	});
+
+	test("skips a refusal that is not about the brand", async () => {
+		await expectUntouched((await refusedLinked({ reason: "tucows_requires_a_screenshot" })).child);
 	});
 });

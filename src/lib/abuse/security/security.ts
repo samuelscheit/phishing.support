@@ -184,13 +184,33 @@ export async function assertPublicDnsHost(hostname: string, lookup: typeof dns.l
 	}
 }
 
-export function safePublicError(status: string, detail?: string | null): string | undefined {
+const ACRONYMS: Record<string, string> = { url: "URL", png: "PNG", dsa: "DSA", mib: "MiB", id: "ID" };
+
+/**
+ * A provider's refusal code as a sentence: `tucows_requires_a_brand_domain`
+ * from the route of provider `tucows`, named Tucows, reads "Tucows requires a
+ * brand domain." Text that is not a code is shown as it is.
+ */
+export function refusalSentence(code: string, provider?: { key: string | null; name: string }): string {
+	if (!/^[a-z0-9_]+$/.test(code)) return snippet(code, 500);
+	const own = provider?.key && code.startsWith(`${provider.key}_`);
+	const words = (own ? code.slice(provider.key!.length + 1) : code).split("_").map((word) => ACRONYMS[word] ?? word);
+	const sentence = own ? `${provider.name} ${words.join(" ")}` : words.join(" ");
+	return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
+}
+
+/**
+ * A route's failure as the case page and status API show it. A refusal before
+ * sending is our own fixed code and says what the provider's form requires; a
+ * parked or failed route's detail is free provider or error text and stays internal.
+ */
+export function safePublicError(status: string, detail?: string | null, provider?: { key: string | null; name: string }): string | undefined {
 	if (!detail) return undefined;
 	// Every needs_human route settles before anything reaches the provider:
 	// a provider's form or definition changed, its login or payload needs a
 	// look. The detail stays internal; the public text says what is certain.
 	if (status === "needs_human") return "The automatic submission stopped before anything was sent to this provider; it needs a person to finish it.";
-	if (status === "insufficient_evidence") return "The stored evidence did not satisfy this provider's verification requirements.";
+	if (status === "insufficient_evidence") return refusalSentence(detail, provider);
 	if (status === "no_route") return "No verified abuse-reporting route was available for this target.";
 	if (status === "delivery_failed") return "The provider report could not be delivered.";
 	if (status === "failed" || status === "unknown_external_state") return "The provider route did not complete safely.";

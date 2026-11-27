@@ -1,7 +1,7 @@
 import type { ReporterMetadata } from "../http/reporter_headers";
 import { AbuseRepository, type CreatedAbuseReport } from "../abuse/repository";
 import { normalizeAbuseTarget, normalizeObservedUrl, type NormalizedAbuseTarget, type ValidatedAbuseReportRequest } from "../abuse/contracts";
-import { pageScreenshotEvidence, type PageScreenshot } from "../abuse/linked_host_report";
+import { pageScreenshotEvidence, type LinkedBrand, type PageScreenshot } from "../abuse/linked_host_report";
 import type { ExfiltrationBackend } from "./types";
 import { hashStableJson, sha256Hex, stableJson } from "../util/hash";
 
@@ -55,7 +55,7 @@ export function buildExfiltrationBackendRequest(params: {
 	observedAt: Date;
 	/** The confirmed page's screenshot: provider forms often require one, and it shows what fed this backend. */
 	pageScreenshot?: PageScreenshot;
-}): ValidatedAbuseReportRequest {
+} & LinkedBrand): ValidatedAbuseReportRequest {
 	const target = backendTarget(params.backend);
 	const reportDescription = description(params);
 	const originalRequest = {
@@ -73,6 +73,7 @@ export function buildExfiltrationBackendRequest(params: {
 		targets: [target],
 		allegationCategory: "phishing",
 		description: reportDescription,
+		...(params.legalBrandUrl ? { legalBrandUrl: params.legalBrandUrl } : {}),
 		observedUrls: [{ target: target.normalizedTarget, urls: target.observedUrls }],
 		evidence: [
 			{ filename: "exfiltration-evidence.json", mimeType: "application/json", buffer: evidence, sha256: sha256Hex(evidence) },
@@ -91,7 +92,7 @@ export async function reportExfiltrationBackend(params: {
 	observedAt: Date;
 	pageScreenshot?: PageScreenshot;
 	reporter: ReporterMetadata;
-}): Promise<CreatedAbuseReport> {
+} & LinkedBrand): Promise<CreatedAbuseReport> {
 	return AbuseRepository.createReport({
 		request: buildExfiltrationBackendRequest(params),
 		reporter: params.reporter,
