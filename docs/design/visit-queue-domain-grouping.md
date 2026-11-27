@@ -300,3 +300,14 @@ Registrar draft lists the collected host URLs; the hosting draft does not; the s
 6. **Fair key for derived work:** count kit, origin and redirector siblings against the original reporter's IP (default) or give the system its own `source:` share?
 7. **Naming:** `abuse_jobs` now also runs non-abuse visits. Rename to `jobs` now (a large mechanical diff) or later?
 8. **One-off:** collect the 9 already-invalid hosts too (default yes, they keep their artifacts), or leave them as "No threat found"?
+
+## As implemented (differences from the design above)
+
+- **Commits:** 1a and 1b shipped as one commit (the `jobs` rename and the visit lane touch the same files); then 1c, 2a, 2b, 2c.
+- **Inconclusive hosts** are status `invalid` with `collected.reason = "siblings_inconclusive"`, not `collected`: `collected` always means "named by its domain's report". A report of the group later collects them.
+- **Reported siblings keep their own reports.** Hosts reported before site groups existed (the 6 slon10.to cases) stay `reported` with their own reports; they join one campaign through the `registered_domain` indicator (CAMPAIGN_RULES_VERSION 9 relinks every site once on start). New ones join the first open report of the domain (decision 5).
+- **Registrar host list** goes into the drafted abuse mail of registrar routes (`isRegistrarRoute`: provenance `registrar_rdap`, `domain_rdap`, `domain_whois`). Registrar web forms (`provider_submission` payloads) and the ICANN complaint text do not list the other hosts yet.
+- **Divergence probe** compares one plain fetch of the collected host with the report's recorded content (`verifyReportedContent` fetch tier, `record: false`); it re-visits only when the reported host itself still matches a plain fetch, otherwise a plain fetch cannot tell and the host stays collected.
+- **Queue position** follows the fair-share turn order; jobs blocked behind their site group's running visit show "Waiting", and a queued job whose group has another queued host ahead of it counts that host as ahead.
+- **Homepage**: a campaign whose members share one site group is titled by it with its host count; a domain's queued or running hosts join that tile; a group's cases in no campaign are one tile linking the newest case.
+- **One-off:** `docker exec -w /app <container> bun scripts/collect_site_group.ts slon10.to --include-settled` (`--dry-run` first). Running hosts are not touched: after the deploy's restart they are failed into their automatic retry and collected when it comes due.

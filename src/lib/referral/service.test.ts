@@ -25,7 +25,7 @@ import { describeIndicatorEnglish } from "./archive_text";
 import { describeIndicator } from "./render";
 import { getPublicCampaign } from "../campaign/public_view";
 import { listSubmissionCards } from "../submissions/list";
-import { groupByCampaign } from "../submissions/campaign_groups";
+import { groupCards } from "../submissions/campaign_groups";
 
 useTemporaryDatabase();
 
@@ -300,8 +300,8 @@ describe("criminal referral of a campaign", () => {
 		expect(campaignOf("11")).toMatchObject({ siteCount: 3 });
 		expect(campaignOf("13")).toEqual(campaignOf("11"));
 		expect(campaignOf("16")).toMatchObject({ siteCount: 1 });
-		const items = groupByCampaign(page.submissions);
-		expect(items.map((item) => item.type === "campaign" ? `campaign:${item.siteCount}:${item.titles.length}` : item.submission.id)).toEqual(["campaign:1:1", "campaign:3:3"]);
+		const items = groupCards(page.submissions);
+		expect(items.map((item) => item.type === "campaign" ? `campaign:${item.siteCount}:${item.titles.length}` : item.type === "submission" ? item.submission.id : item.siteGroup)).toEqual(["campaign:1:1", "campaign:3:3"]);
 	});
 
 	test("refuses to approve a text the sender would refuse, and keeps the draft", async () => {

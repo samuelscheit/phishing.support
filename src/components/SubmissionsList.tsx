@@ -11,7 +11,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_SUBMISSION_FILTERS, isSubmissionFilter, type SubmissionFilter } from "@/lib/submissions/filters";
 import type { SubmissionCard as SubmissionCardData, SubmissionCardPage } from "@/lib/submissions/list";
-import { groupByCampaign, type SubmissionListItem } from "@/lib/submissions/campaign_groups";
+import { groupCards, type SubmissionListItem } from "@/lib/submissions/campaign_groups";
 import { hostOf } from "@/lib/network/url";
 
 const PREVIEW_ROWS = 3;
@@ -63,41 +63,22 @@ function useGridColumnCount() {
 	return columnCount;
 }
 
-function SubmissionCard({ submission, obscured = false }: { submission: SubmissionCardData; obscured?: boolean }) {
+/** The frame every tile of the list shares: one link, its status line, its title and an optional note. */
+function ListTileFrame({ href, label, obscured, badge, meta, createdAt, title, note }: {
+	href: string;
+	/** The link's accessible name, when the title alone does not say where it leads. */
+	label?: string;
+	obscured: boolean;
+	badge: React.ReactNode;
+	meta?: string;
+	createdAt: string;
+	title: string;
+	note?: string;
+}) {
 	return (
 		<Link
-			href={`/submissions/${submission.id}`}
-			aria-hidden={obscured || undefined}
-			tabIndex={obscured ? -1 : undefined}
-			className={cn(
-				"block h-full min-w-0 transition-[filter,opacity] duration-500 ease-out",
-				obscured && "pointer-events-none select-none opacity-35 blur-sm"
-			)}
-		>
-			<Card className="hover:bg-accent transition-colors cursor-pointer h-full w-full">
-				<CardContent className="py-4 space-y-2 min-w-0">
-					<div className="flex justify-between items-start gap-2">
-						<SubmissionStatus status={submission.status} reportedAs={submission.reportedAs} />
-
-						<span className="text-xs text-muted-foreground whitespace-nowrap">
-							{formatDistanceToNow(new Date(submission.createdAt), { addSuffix: true })}
-						</span>
-					</div>
-					<CardTitle className="text-lg truncate min-w-0">{submission.title}</CardTitle>
-				</CardContent>
-			</Card>
-		</Link>
-	);
-}
-
-type ListItem = SubmissionListItem;
-
-
-function CampaignCard({ item, obscured = false }: { item: Extract<ListItem, { type: "campaign" }>; obscured?: boolean }) {
-	const hosts = [...new Set(item.titles.map(hostOf))];
-	return (
-		<Link
-			href={`/campaigns/${item.campaignId}`}
+			href={href}
+			aria-label={label}
 			aria-hidden={obscured || undefined}
 			tabIndex={obscured ? -1 : undefined}
 			className={cn(
@@ -109,24 +90,81 @@ function CampaignCard({ item, obscured = false }: { item: Extract<ListItem, { ty
 				<CardContent className="py-4 space-y-2 min-w-0">
 					<div className="flex justify-between items-start gap-2">
 						<span className="flex items-center gap-2">
-							<SubmissionStatus status="reported" />
-							{item.siteCount > 1 && <span className="text-xs text-muted-foreground">{item.siteCount} sites</span>}
+							{badge}
+							{meta ? <span className="text-xs leading-none text-muted-foreground">{meta}</span> : null}
 						</span>
 						<span className="text-xs text-muted-foreground whitespace-nowrap">
-							{formatDistanceToNow(new Date(item.newest.createdAt), { addSuffix: true })}
+							{formatDistanceToNow(new Date(createdAt), { addSuffix: true })}
 						</span>
 					</div>
-					<CardTitle className="text-lg truncate min-w-0">{hosts[0]}</CardTitle>
+					<CardTitle className="text-lg truncate min-w-0">{title}</CardTitle>
+					{note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
 				</CardContent>
 			</Card>
 		</Link>
 	);
 }
 
+function SubmissionCard({ submission, obscured = false }: { submission: SubmissionCardData; obscured?: boolean }) {
+	return (
+		<ListTileFrame
+			href={`/submissions/${submission.id}`}
+			obscured={obscured}
+			badge={<SubmissionStatus status={submission.status} reportedAs={submission.reportedAs} />}
+			createdAt={submission.createdAt}
+			title={submission.title}
+		/>
+	);
+}
+
+type ListItem = SubmissionListItem;
+
+/** "1 visiting · 4 queued": how the loaded cases of a group stand. */
+function pendingSummary(statuses: readonly string[]): string {
+	const queued = statuses.filter((status) => status === "queued").length;
+	const running = statuses.filter((status) => status === "running").length;
+	return [running ? `${running} visiting` : "", queued ? `${queued} queued` : ""].filter(Boolean).join(" · ");
+}
+
+function CampaignCard({ item, obscured = false }: { item: Extract<ListItem, { type: "campaign" }>; obscured?: boolean }) {
+	const hosts = [...new Set(item.titles.map(hostOf))];
+	const size = item.domain ? (item.hostCount > 1 ? `${item.hostCount} hosts` : "") : item.siteCount > 1 ? `${item.siteCount} sites` : "";
+	return (
+		<ListTileFrame
+			href={`/campaigns/${item.campaignId}`}
+			obscured={obscured}
+			badge={<SubmissionStatus status="reported" />}
+			meta={size}
+			createdAt={item.newest.createdAt}
+			title={item.domain ?? hosts[0]!}
+			note={item.pending ? `${item.pending} more in progress` : undefined}
+		/>
+	);
+}
+
+/** The hosts of one domain in no campaign yet: one tile, opening the newest. */
+function SiteGroupCard({ item, obscured = false }: { item: Extract<ListItem, { type: "siteGroup" }>; obscured?: boolean }) {
+	const status = item.statuses.includes("running") ? "running" : item.statuses.includes("queued") ? "queued" : item.newest.status;
+	const pending = pendingSummary(item.statuses);
+	const newest = hostOf(item.newest.title);
+	return (
+		<ListTileFrame
+			href={`/submissions/${item.newest.id}`}
+			label={`${item.siteGroup}, ${item.size} hosts; opens the newest, ${newest}`}
+			obscured={obscured}
+			badge={<SubmissionStatus status={status} />}
+			meta={[`${item.size} hosts`, pending].filter(Boolean).join(" · ")}
+			createdAt={item.newest.createdAt}
+			title={item.siteGroup}
+			note={`Newest: ${newest}`}
+		/>
+	);
+}
+
 function ListTile({ item, obscured }: { item: ListItem; obscured?: boolean }) {
-	return item.type === "campaign"
-		? <CampaignCard item={item} obscured={obscured} />
-		: <SubmissionCard submission={item.submission} obscured={obscured} />;
+	if (item.type === "campaign") return <CampaignCard item={item} obscured={obscured} />;
+	if (item.type === "siteGroup") return <SiteGroupCard item={item} obscured={obscured} />;
+	return <SubmissionCard submission={item.submission} obscured={obscured} />;
 }
 
 async function fetchPage(filters: readonly SubmissionFilter[], cursor?: string): Promise<SubmissionCardPage> {
@@ -165,7 +203,7 @@ export function SubmissionsList() {
 	const [expanded, setExpanded] = useState(false);
 	const sentinel = useRef<HTMLDivElement>(null);
 	const submissions = mergePages(newest, older);
-	const items = groupByCampaign(submissions);
+	const items = groupCards(submissions);
 	const columnCount = useGridColumnCount();
 	const previewSubmissionCount = columnCount * PREVIEW_ROWS;
 	const hasMoreSubmissions = items.length > previewSubmissionCount;

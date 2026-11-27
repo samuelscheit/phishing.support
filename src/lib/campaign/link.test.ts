@@ -95,6 +95,28 @@ async function store(...submissions: Submission[]) {
 	}
 }
 
+describe("the registered domain", () => {
+	test("links the hosts of one registrable domain into one campaign; a platform's tenants and a popular domain's hosts stay apart", async () => {
+		const sites = [
+			website(31n, "a.slon10-test.com"), website(32n, "b.c.slon10-test.com"),
+			website(33n, "one.pages.dev"), website(34n, "two.pages.dev"),
+			website(35n, "x.dhl.de"), website(36n, "y.dhl.de"),
+		];
+		await store(...sites);
+		const dependencies = fixtures(Object.fromEntries(sites.map((submission) => [submission.id.toString(), { submission }])));
+		for (const submission of sites) await link(submission.id, dependencies);
+		const campaign = async (id: bigint) => (await campaignOfCase(id))!;
+		expect(await campaign(31n)).toBe(await campaign(32n));
+		expect(await campaign(33n)).not.toBe(await campaign(34n));
+		expect(await campaign(35n)).not.toBe(await campaign(36n));
+		expect(await campaign(31n)).not.toBe(await campaign(33n));
+		const kinds = async (id: bigint) => (await extractIndicators(memberOf(id), dependencies)).filter(({ kind }) => kind === "registered_domain").map(({ value, links }) => ({ value, links }));
+		expect(await kinds(32n)).toEqual([{ value: "slon10-test.com", links: true }]);
+		expect(await kinds(33n)).toEqual([]);
+		expect(await kinds(35n)).toEqual([]);
+	});
+});
+
 describe("campaign indicators", () => {
 	test("a site builder's files link nothing and keep the site's search to its own registrable domain; the site's own and a backend's files link (production case 374590782784409610)", async () => {
 		const submission = website(7n, "microsoftoutlook.builder-test.online", [
@@ -134,6 +156,7 @@ describe("campaign indicators", () => {
 			{ kind: "payment_receiver", value: "iban:DE89370400440532013000", links: true },
 			{ kind: "kit_fingerprint", value: KIT, links: true },
 			{ kind: "kit_fingerprint", value: JQUERY, links: false },
+			{ kind: "registered_domain", value: "phish-kit-test.com", links: true },
 			{ kind: "origin_ip", value: "203.0.113.7", links: false },
 		]);
 		expect(indicators.find((indicator) => indicator.value === JQUERY)?.evidence.library).toBe("gh:jquery/jquery@3.7.1/dist/jquery.min.js");

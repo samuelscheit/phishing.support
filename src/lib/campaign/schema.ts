@@ -14,8 +14,9 @@ import type { VisitorGuidance } from "./guidance";
  * - `delivery_command`: the SHA-256 of the template of the command a page makes visitors paste (`evidence.template`): every layer, decoded, with URLs, encoded blobs and printed decoy text blanked out, so a rotated payload host or app name leaves it unchanged. Only a command with an encoded layer, a decoy or several statements links sites; a bare one-liner is shared by unrelated actors.
  * - `kit_fingerprint`: the SHA-256 of a script or hidden-frame document of the kit itself, not of a public library, or of the reported page's body or tag structure (`fileKind` `page_document`, `page_structure`).
  * - `origin_ip`: the server behind the site; it describes the infrastructure but never links sites, because shared hosting puts unrelated operators on one address.
+ * - `registered_domain`: the registrable domain the site's host is of (`siteGroupOf`): one registration, one operator, so every host of slon10.to is one campaign. A platform tenant or an address has none, and a popular domain's hosts link nothing.
  */
-export const campaignIndicatorKinds = ["operator_server", "payment_receiver", "delivery_command", "kit_fingerprint", "origin_ip"] as const;
+export const campaignIndicatorKinds = ["operator_server", "payment_receiver", "delivery_command", "kit_fingerprint", "origin_ip", "registered_domain"] as const;
 export type CampaignIndicatorKind = (typeof campaignIndicatorKinds)[number];
 
 /** What an operator server did for a site: receive what visitors entered, or deliver the malware they were made to run or download. */

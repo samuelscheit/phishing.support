@@ -140,6 +140,13 @@ export class SubmissionsEntity {
 				title: sql<string | null>`coalesce(json_extract(${submissions.data}, '$.website.url'), nullif(json_extract(${submissions.data}, '$.email.subject'), ''), ${submissions.dedupeKey})`,
 				campaignId: sql<bigint | null>`${caseCampaign}`,
 				campaignSize: sql<number | null>`(select count(*) from campaign_members as peers where peers.campaign_id = ${caseCampaign})`,
+				// The member cases (one per host) and their site groups: one shared group names the tile.
+				campaignHosts: sql<number | null>`(select count(distinct peers.submission_id) from campaign_members as peers where peers.campaign_id = ${caseCampaign})`,
+				campaignGroups: sql<number | null>`(select count(distinct member.site_group) from campaign_members as peers join submissions as member on member.id = peers.submission_id where peers.campaign_id = ${caseCampaign})`,
+				campaignGroup: sql<string | null>`(select min(member.site_group) from campaign_members as peers join submissions as member on member.id = peers.submission_id where peers.campaign_id = ${caseCampaign})`,
+				siteGroup: submissions.siteGroup,
+				// Qualified by hand: a bare column would name the subquery's own `peers.site_group`.
+				siteGroupSize: sql<number | null>`(select count(*) from submissions as peers where peers.site_group = "submissions"."site_group")`,
 				// What the case found on any route: what a reported case was reported for.
 				phishingSite: siteFindingOnAnyRoute("phishing"),
 				malwareSite: siteFindingOnAnyRoute("malware"),

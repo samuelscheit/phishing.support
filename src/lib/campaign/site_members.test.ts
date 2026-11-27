@@ -131,8 +131,8 @@ describe("a chain's sites as members", () => {
 		// What the case recorded once for its headline page (kit files, the submitted address's server) is the lure's alone;
 		// the offered file is the kit page's.
 		const shown = (view: typeof lureView) => view!.indicators.map(({ kind, value }) => `${kind} ${value}`).sort();
-		expect(shown(lureView)).toEqual([`kit_fingerprint ${KIT}`, "origin_ip 203.0.113.7", "payment_receiver iban:DE89370400440532013000"]);
-		expect(shown(kitView)).toEqual(["operator_server host:kit-b-test.com", `payment_receiver tron:${WALLET}`]);
+		expect(shown(lureView)).toEqual([`kit_fingerprint ${KIT}`, "origin_ip 203.0.113.7", "payment_receiver iban:DE89370400440532013000", "registered_domain lure-a-test.com"]);
+		expect(shown(kitView)).toEqual(["operator_server host:kit-b-test.com", `payment_receiver tron:${WALLET}`, "registered_domain kit-b-test.com"]);
 	});
 
 	test("a case showing both sites' evidence makes the chain's two members one campaign, the case in it twice", async () => {
@@ -246,7 +246,7 @@ describe("a case that joined another case's report", () => {
 		const [, joinerView] = await CampaignRepository.listMembers((await campaignOf(joiner))!);
 		expect(joinerView).toMatchObject({ submissionId: 2n, reportId: owner.reportId, site: "kit-b-test.com", url: KIT_PAGE, page: { route: 0, step: 0 } });
 		// Its kit files are its headline page's, the kit page; the shortener's server is not the site's.
-		expect(joinerView!.indicators.map(({ kind, value }) => `${kind} ${value}`).sort()).toEqual([`kit_fingerprint ${KIT}`, `payment_receiver tron:${WALLET}`]);
+		expect(joinerView!.indicators.map(({ kind, value }) => `${kind} ${value}`).sort()).toEqual([`kit_fingerprint ${KIT}`, `payment_receiver tron:${WALLET}`, "registered_domain kit-b-test.com"]);
 		// The kit file links the owner too: owner, joiner and case 3 are one campaign, the site in it twice.
 		expect(await campaignOf(owner)).toBe((await campaignOf(joiner))!);
 	});

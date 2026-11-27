@@ -11,6 +11,7 @@ import { fetchJson } from "../network/bounded_fetch";
 import { mhtmlVisitorText } from "../website/archive/text";
 import { latestArtifactNamed, websiteCaptureFileNames } from "../website/visit/capture_files";
 import { hasPathTenants } from "../website/info/site";
+import { siteGroupOf } from "../network/registered_domain";
 import { websiteRoutes } from "../website/routes";
 import type { ExfiltrationBackend } from "../exfiltration/types";
 import { deliveryCommandsOf } from "./delivery";
@@ -20,6 +21,15 @@ import type { PageFingerprints } from "../website/page_fingerprint";
 import { paymentReceivers } from "./payment";
 import type { CampaignIndicatorEvidence, CampaignIndicatorKind, OperatorServerRole } from "./schema";
 import { type FetchLike } from "../http/fetch";
+
+/** The site group of a member's site (`websiteSite`: a host, or a host with its tenant path). */
+function siteGroupOfSite(site: string) {
+	try {
+		return siteGroupOf(`https://${site}`);
+	} catch {
+		return undefined;
+	}
+}
 
 export type ExtractedIndicator = {
 	kind: CampaignIndicatorKind;
@@ -266,6 +276,11 @@ export async function extractIndicators(member: CampaignSite, dependencies: Indi
 	const page = judged ? await (dependencies.loadPageFingerprints ?? loadPageFingerprints)(member.submissionId, judged) : {};
 	if (page.body) add({ kind: "kit_fingerprint", value: page.body.sha256, links: true, evidence: { fileKind: "page_document", url: judged!.url, size: page.body.size } });
 	if (page.structure) add({ kind: "kit_fingerprint", value: page.structure.sha256, links: true, evidence: { fileKind: "page_structure", url: judged!.url, size: page.structure.size, tags: page.structure.tags } });
+
+	// One registration answers for every host of a registrable domain: its hosts are one operator's (a platform's
+	// tenant or an address is a group of its own and never this; a popular domain's hosts are not one operator's).
+	const domain = siteGroupOfSite(member.site)?.domain;
+	if (domain && !isPopularSite(domain, await popularSites())) add({ kind: "registered_domain", value: domain, links: true, evidence: {} });
 
 	// The case looked up the submitted address's server: it is this site's only when the chain started on it.
 	for (const rdap of siteOf(website.url) === member.site ? website.whois?.ip_rdaps ?? [] : []) {

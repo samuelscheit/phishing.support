@@ -45,9 +45,10 @@ export function SubmissionStatus({ status, reportedAs, queue, className }: { sta
 
 	if (key === "collected") {
 		return (
-			<Badge variant="outline" className={cn("gap-1 border-red-200 bg-red-50 text-red-700", className)} title="Not visited: added to the report of its domain">
-				<Link2 className="h-3.5 w-3.5" />
+			<Badge variant="outline" className={cn("gap-1 border-violet-200 bg-violet-50 text-violet-700", className)}>
+				<Link2 className="h-3.5 w-3.5" aria-hidden />
 				{submissionStatusLabel(status)}
+				<span className="sr-only">: not visited, added to the report of its domain</span>
 			</Badge>
 		);
 	}

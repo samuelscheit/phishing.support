@@ -15,8 +15,14 @@ export type SubmissionCard = {
 	title: string;
 	/** What a reported case was reported for; absent for every other status. */
 	reportedAs?: ReportedAs;
-	/** The campaign the site belongs to; the list shows each campaign as one card. */
-	campaign?: { id: string; siteCount: number };
+	/**
+	 * The campaign the site belongs to; the list shows each campaign as one
+	 * card. `hostCount` is how many cases its members are; `domain` the site
+	 * group they all share, when they do (`slon10.to · 87 hosts`).
+	 */
+	campaign?: { id: string; siteCount: number; hostCount: number; domain?: string };
+	/** A website case's site group with how many cases it has: the list groups a group's cases in no campaign. */
+	siteGroup?: { key: string; size: number };
 };
 
 export type SubmissionCardPage = {
@@ -77,7 +83,15 @@ export async function listSubmissionCards(params: { cursor?: string | null; limi
 				createdAt: row.createdAt.toISOString(),
 				title: row.title ?? row.id.toString(),
 				...(reportedAs ? { reportedAs } : {}),
-				...(row.campaignId !== null ? { campaign: { id: row.campaignId.toString(), siteCount: Number(row.campaignSize) } } : {}),
+				...(row.campaignId !== null ? {
+					campaign: {
+						id: row.campaignId.toString(),
+						siteCount: Number(row.campaignSize),
+						hostCount: Number(row.campaignHosts),
+						...(Number(row.campaignGroups) === 1 && row.campaignGroup ? { domain: row.campaignGroup } : {}),
+					},
+				} : {}),
+				...(row.siteGroup ? { siteGroup: { key: row.siteGroup, size: Number(row.siteGroupSize) } } : {}),
 			};
 		}),
 		...(rows.length > limit && last ? { nextCursor: encodeCursor(last) } : {}),

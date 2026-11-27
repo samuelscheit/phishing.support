@@ -5,8 +5,12 @@ import { formatUtcDateTime } from "@/lib/util/date_time";
 import { Clock } from "lucide-react";
 import Link from "next/link";
 
+function UnvisitedNote({ text }: { text: string }) {
+	return <div className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">{text}</div>;
+}
+
 /** A case waiting for its visit: where it stands, so the reader knows it is not stuck. */
-function QueuedVisit({ queue }: { queue: SubmissionDetail["visitQueue"] }) {
+export function QueuedVisit({ queue }: { queue: SubmissionDetail["visitQueue"] }) {
 	const detail = queue?.kind === "queued"
 		? queue.position === 1 ? "It is next in line for a browser." : `${queue.position - 1} ${queue.position === 2 ? "visit is" : "visits are"} ahead of it; every reporter's sites take turns.`
 		: queue?.kind === "scheduled"
@@ -43,6 +47,7 @@ export function RunsTab({ submission, runs, isRunning }: { submission: Submissio
 		));
 	}
 	if (isRunning) return <AnalysisLogs streamId={submission.id} status={submission.status} progressOnly />;
-	if (submission.status === "queued") return <QueuedVisit queue={submission.visitQueue} />;
+	if (submission.status === "queued") return <UnvisitedNote text="No analysis yet: the site waits for its visit." />;
+	if (submission.status === "collected") return <UnvisitedNote text="No analysis: the site was not visited, because its domain is already reported." />;
 	return <div className="text-center py-10 text-muted-foreground">No analysis runs yet.</div>;
 }

@@ -13,7 +13,7 @@ import { CampaignRepository } from "./repository";
  * Bump when what a site's indicators are, or where they come from, changes:
  * on the next start every confirmed site is linked again, once.
  */
-export const CAMPAIGN_RULES_VERSION = 8;
+export const CAMPAIGN_RULES_VERSION = 9;
 /** Sites of a sweep are linked this far apart: each may ask urlscan for its kit files. */
 const SWEEP_SPACING_MS = 20_000;
 /** Sites of one campaign arrive in bursts: it is described once the burst settles. */
