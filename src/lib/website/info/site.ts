@@ -15,7 +15,7 @@ type PathTenantRule = {
 const SHORT_LINK: PathTenantRule = { segments: 1 };
 
 const PATH_TENANT_HOSTS: Record<string, PathTenantRule> = {
-	// `/view/<site>`, `/<workspace-domain>/<site>`, legacy `/site/<site>`.
+	// `/view/<site>`, `/<workspace-domain>/<site>`, `/site/<site>`.
 	"sites.google.com": { segments: 2, caseInsensitive: true },
 	// `/forms/d/<id>`, `/document/d/<id>`, and published `/forms/d/e/<id>`.
 	"docs.google.com": { segments: (path) => (path[1] === "d" ? (path[2] === "e" ? 4 : 3) : 1) },
