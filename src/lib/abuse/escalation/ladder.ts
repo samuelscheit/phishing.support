@@ -4,8 +4,8 @@ import { decisionOf } from "../../submissions/report_view";
 import { DAY_MS } from "../../util/date_time";
 import { asRecord } from "../../util/values";
 import { routeContact } from "../resolver/contact_chain";
-import type { AbuseEvent, AbuseProviderRoute } from "../schema";
-import { pendingEscalationSteps, stepKey, type EscalationLadder, type EscalationRoute, type EscalationStep } from "./policy";
+import type { AbuseEvent, AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
+import { stepKey, type EscalationLadder, type EscalationRoute } from "./policy";
 
 /** The one job per target that takes its ladder's steps. */
 export const escalationJobKey = (targetId: bigint) => `escalation:${targetId.toString()}`;
@@ -34,12 +34,17 @@ export type LadderRouteState<R extends LadderRouteRecord = LadderRouteRecord, V 
 export type TargetLadder<R extends LadderRouteRecord = LadderRouteRecord, V extends LadderView = SubmissionReportRoute> = {
 	states: LadderRouteState<R, V>[];
 	ladder: EscalationLadder;
-	/** Until when a check that found the site not (confirmably) serving holds the ladder. */
-	heldUntil?: Date;
 };
 
-/** A step still to take, with when the ladder takes it: when it is due, or when a hold ends. */
-export type ScheduledStep = EscalationStep & { key: string; at: Date; heldUntil?: Date };
+/** Whether the escalation job acts on the target at all: a report not canceled, about a site it can check. */
+export function escalates(report: Pick<AbuseReport, "status">, target: Pick<AbuseTarget, "observedUrls">): boolean {
+	return report.status !== "canceled" && target.observedUrls[0] !== undefined;
+}
+
+/** The step keys of the target that are taken (the operator's skips among them), read fresh before each step is taken. */
+export function takenSteps(events: readonly LadderEvent[], targetId: bigint): Set<string> {
+	return new Set(events.filter((event) => event.targetId === targetId && event.eventType === ESCALATION_EVENT).flatMap((event) => eventStepKey(event) ?? []));
+}
 
 /** The skip the operator recorded, as a step taken. */
 export const isSkipped = (event: Pick<AbuseEvent, "data">): boolean => asRecord(event.data)?.skipped === true;
@@ -104,17 +109,8 @@ export function targetLadder<R extends LadderRouteRecord, V extends LadderView>(
 	const held = heldUntil(events, targetId);
 	return {
 		states,
-		ladder: { routes: states.map((state) => state.ladder), taken: new Set(keyed(ESCALATION_EVENT).map(({ key }) => key)), advanced },
-		...(held ? { heldUntil: held } : {}),
+		ladder: { routes: states.map((state) => state.ladder), taken: takenSteps(events, targetId), advanced, ...(held ? { heldUntil: held } : {}) },
 	};
-}
-
-/** The steps still to take at `now`, soonest first, each with when the ladder takes it. */
-export function scheduledSteps(target: Pick<TargetLadder, "ladder" | "heldUntil">, now: Date): ScheduledStep[] {
-	return pendingEscalationSteps(target.ladder, now).map((step) => {
-		const held = target.heldUntil && target.heldUntil > step.dueAt ? target.heldUntil : undefined;
-		return { ...step, key: stepKey(step), at: held ?? step.dueAt, ...(held ? { heldUntil: held } : {}) };
-	}).sort((a, b) => a.at.getTime() - b.at.getTime() || a.level - b.level);
 }
 
 /** When the first of the target's reports reached a provider: what the escalation texts date the report by. */

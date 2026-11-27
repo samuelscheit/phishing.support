@@ -101,3 +101,23 @@ describe("the escalation ladder", () => {
 		expect(pending([route(1, "blocklist"), route(2, "platform"), route(3, "authority"), route(4, "other"), route(5, "host", { sentAt: undefined })])).toEqual([]);
 	});
 });
+
+describe("a hold on the ladder", () => {
+	test("every step waits for it; it dates when they are taken, not when they are due", () => {
+		const plan = escalationPlan({ ...ladder([route(1, "host")]), heldUntil: at(3) }, at(2, 1));
+		expect(plan).toEqual({ due: [], nextAt: at(3) });
+		const [followUp] = pendingEscalationSteps({ ...ladder([route(1, "host")]), heldUntil: at(3) }, at(2, 1));
+		expect(followUp).toMatchObject({ step: "follow_up", dueAt: at(2), at: at(3), heldUntil: at(3) });
+		// A step due after the hold ends is not held.
+		expect(pendingEscalationSteps({ ...ladder([route(1, "host")]), heldUntil: at(3) }, at(2, 1)).find((step) => step.step === "next_contact")).toMatchObject({ at: at(4), dueAt: at(4) });
+		expect(pendingEscalationSteps({ ...ladder([route(1, "host")]), heldUntil: at(3) }, at(2, 1)).find((step) => step.step === "next_contact")!.heldUntil).toBeUndefined();
+	});
+
+	test("a step the hold would push past the month is never planned", () => {
+		const held = { ...ladder([route(1, "host")], { taken: ["route:1:1", "route:1:2", "route:1:3", "site:4"] }), heldUntil: at(31) };
+		expect(pendingEscalationSteps(held, at(25))).toEqual([]);
+		expect(escalationPlan(held, at(25))).toEqual({ due: [] });
+		// Ending right as the month closes, it still is.
+		expect(names(pendingEscalationSteps({ ...held, heldUntil: at(30) }, at(25)))).toEqual(["exhausted"]);
+	});
+});

@@ -2,14 +2,16 @@ import { afterAll, afterEach, beforeAll, describe, expect, setSystemTime, test }
 import { eq } from "drizzle-orm";
 
 import { getDb } from "../../db";
+import { generateId } from "../../db/ids";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { getReportsByIds } from "../../submissions/abuse_details";
 import { nextStep, plannedStepText, routeStanding, routeTimeline, untilText } from "../../submissions/report_view";
 import { AbuseRepository } from "../repository";
-import { jobs } from "../schema";
-import { ESCALATION_ADVANCED_EVENT, ESCALATION_EVENT, escalationJobKey } from "./ladder";
+import { abuseEvents, abuseProviderRoutes, abuseProviderRuns, abuseReports, abuseTargets, jobs } from "../schema";
+import { ESCALATION_ADVANCED_EVENT, ESCALATION_EVENT, ESCALATION_HELD_EVENT, escalationJobKey } from "./ladder";
+import { pendingEscalationSteps } from "./policy";
 import { openEscalationSteps, sendEscalationStepNow, skipEscalationStep, upcomingEscalationSteps } from "./manual";
-import { scheduleEscalation, type EscalationDependencies } from "./run";
+import { escalationState, scheduleEscalation, type EscalationDependencies } from "./run";
 import { day, DOMAIN, relay, reported, SENT, site, URL_, work } from "./run.fixtures";
 
 useTemporaryDatabase();
@@ -157,7 +159,7 @@ describe("the operator's upcoming escalation steps", () => {
 		const { reportId, targetId, host } = await onLadder();
 		await sendEscalationStepNow(targetId, `route:${host}:2`, day(1));
 		expect((await AbuseRepository.listEvents(reportId)).filter((event) => event.eventType === ESCALATION_ADVANCED_EVENT).map((event) => event.data)).toEqual([{ level: 2, step: "next_contact", at: day(1).toISOString() }]);
-		await expect(sendEscalationStepNow(targetId, `route:${host}:2`, day(1))).rejects.toThrow("already queued to go out now");
+		await expect(sendEscalationStepNow(targetId, `route:${host}:2`, day(1))).rejects.toThrow("is due and goes out with the next run");
 		expect(await queued(targetId)).toEqual([day(1)]);
 		expect((await view(reportId, day(1))).routes.find((route) => route.id === host)!.escalation[0]).toMatchObject({ step: "next_contact", at: day(1), advanced: true, due: true });
 
@@ -191,6 +193,108 @@ describe("the operator's upcoming escalation steps", () => {
 		const { targetId } = await onLadder();
 		await expect(sendEscalationStepNow(999n, "site:4", day(1))).rejects.toThrow("not on an escalation ladder");
 		await expect(skipEscalationStep(targetId, "route:1:1", day(1))).rejects.toThrow("no longer planned");
+	});
+
+	test("while the job runs the operator is asked to wait, and a step skipped meanwhile is not taken by it", async () => {
+		const { reportId, targetId, host, registrar } = await onLadder();
+		const { sent, send } = relay();
+		const checked = site("kit");
+		let refusal: string | undefined;
+		const fetch = async (...args: Parameters<NonNullable<typeof checked>["fetch"]>) => {
+			// The job read its plan before this check, which can take minutes.
+			refusal ??= await skipEscalationStep(targetId, `route:${host}:1`, day(2)).then(() => "accepted", (error: Error) => error.message);
+			// A skip that slipped in right as the job started.
+			if (!(await AbuseRepository.listEvents(reportId)).some((event) => event.eventType === ESCALATION_EVENT)) {
+				await AbuseRepository.appendEvent({ reportId, targetId, routeId: host, eventType: ESCALATION_EVENT, data: { level: 1, step: "follow_up", action: "skipped", skipped: true } });
+			}
+			return checked!.fetch(...args);
+		};
+		await work(targetId, { ...kit(day(2), send), verify: { site: { ...checked, fetch, now: () => day(2) }, isShared: async () => false } });
+		expect(refusal).toBe("This site's escalation is running right now; try again in a few minutes.");
+		expect(sent).toEqual([]);
+		expect(await taken(reportId)).toEqual([`follow_up@${host}:skipped`, `follow_up@${registrar}:no_channel`]);
+		// One escalation of a site at a time, also its successor.
+		expect((await getDb()).select().from(jobs).where(eq(jobs.dedupeKey, escalationJobKey(targetId))).all().map((job) => job.serialKey)).toEqual([escalationJobKey(targetId), escalationJobKey(targetId)]);
+	});
+
+	test("Send now is refused exactly when the step shows as due; one held past its time is brought back and then due", async () => {
+		const { reportId, targetId, host } = await onLadder();
+		const late = new Date(day(2).getTime() + 3_600_000);
+		const followUp = async (now: Date) => (await view(reportId, now)).routes.find((route) => route.id === host)!.escalation[0]!;
+		expect(await followUp(late)).toMatchObject({ due: true, advanced: false });
+		await expect(sendEscalationStepNow(targetId, `route:${host}:1`, late)).rejects.toThrow("is due and goes out with the next run");
+		expect((await AbuseRepository.listEvents(reportId)).some((event) => event.eventType === ESCALATION_ADVANCED_EVENT)).toBe(false);
+
+		const { send } = relay();
+		await work(targetId, { verify: { site: site("gone"), isShared: async () => false }, send, now: () => day(2) });
+		expect(await followUp(late)).toMatchObject({ due: false, heldUntil: day(3), at: day(3) });
+		await sendEscalationStepNow(targetId, `route:${host}:1`, late);
+		// Its time had come: the hold is lifted, nothing is brought forward, and it is due as the operator now sees.
+		expect(await followUp(late)).toMatchObject({ due: true, advanced: false, at: day(2) });
+		expect(await queued(targetId)).toEqual([late]);
+		await expect(sendEscalationStepNow(targetId, `route:${host}:1`, late)).rejects.toThrow("is due and goes out with the next run");
+	});
+
+	test("a hold that would end after the month is over plans nothing and leaves no job", async () => {
+		const { reportId, targetId } = await onLadder();
+		await AbuseRepository.appendEvent({ reportId, targetId, eventType: ESCALATION_HELD_EVENT, data: { at: day(25).toISOString(), verdict: "not_malicious" } });
+		expect(pendingEscalationSteps((await escalationState(reportId, targetId)).ladder, day(25))).toEqual([]);
+		await scheduleEscalation({ reportId, targetId }, day(25));
+		expect(await queued(targetId)).toEqual([]);
+		// Within the month the hold dates the steps due before it ends; a step due after it keeps its time.
+		await AbuseRepository.appendEvent({ reportId, targetId, eventType: ESCALATION_HELD_EVENT, data: { at: day(10).toISOString(), verdict: "unverified" } });
+		await scheduleEscalation({ reportId, targetId }, day(10));
+		expect(await queued(targetId)).toEqual([day(11)]);
+		expect(new Set(pendingEscalationSteps((await escalationState(reportId, targetId)).ladder, day(10)).map((step) => step.at.toISOString()))).toEqual(new Set([day(11).toISOString(), day(14).toISOString()]));
+	});
+
+	test("a canceled report, a target without a URL, or one whose job is not queued has no plan, and the operator cannot act on it", async () => {
+		const db = await getDb();
+		const canceled = await onLadder();
+		db.update(abuseReports).set({ status: "canceled" }).where(eq(abuseReports.id, canceled.reportId)).run();
+		expect((await view(canceled.reportId, day(1))).routes.flatMap((route) => route.escalation)).toEqual([]);
+		await expect(skipEscalationStep(canceled.targetId, `route:${canceled.host}:1`, day(1))).rejects.toThrow("not on an escalation ladder");
+		await scheduleEscalation(canceled, day(1));
+		expect(await queued(canceled.targetId)).toEqual([]);
+
+		const urlless = await onLadder();
+		db.update(abuseTargets).set({ observedUrls: [] }).where(eq(abuseTargets.id, urlless.targetId)).run();
+		await expect(sendEscalationStepNow(urlless.targetId, "site:4", day(1))).rejects.toThrow("not on an escalation ladder");
+		await scheduleEscalation(urlless, day(1));
+		expect(await queued(urlless.targetId)).toEqual([]);
+
+		// Never put on the ladder (its site was down): no job is made for it by skipping.
+		const down = await reported();
+		await expect(skipEscalationStep(down.targetId, `route:${down.host}:1`, day(1))).rejects.toThrow("not on an escalation ladder");
+		expect(await queued(down.targetId)).toEqual([]);
+	});
+
+	test("skipping the last step leaves no job waiting", async () => {
+		const { reportId, targetId } = await onLadder();
+		for (const step of pendingEscalationSteps((await escalationState(reportId, targetId)).ladder, day(1))) await skipEscalationStep(targetId, step.key, day(1));
+		expect(await queued(targetId)).toEqual([]);
+		expect((await upcomingEscalationSteps(day(1))).filter((step) => step.targetId === targetId.toString())).toEqual([]);
+	});
+
+	test("a report of two sites lists the next site step of each, under its own site", async () => {
+		const { reportId, targetId } = await onLadder();
+		const db = await getDb();
+		const second = generateId();
+		db.insert(abuseTargets).values({ id: second, reportId, ordinal: 1, originalInput: "paypal-login-check.com", originalInputs: ["paypal-login-check.com"], normalizedTarget: "paypal-login-check.com", targetType: "domain", observedUrls: ["https://paypal-login-check.com/"], resolutionStatus: "resolved" }).run();
+		const route = generateId();
+		const sentAt = day(1);
+		db.insert(abuseProviderRoutes).values({ id: route, reportId, targetId: second, routeKey: `namesilo:${route}`, providerRegistryKey: "namesilo", providerDisplayName: "NameSilo Phishing Report", routeType: "provider_submission", verifiedEmail: null, resolverProvenance: { source: "registrar_rdap" }, resolutionSnapshot: {}, status: "submitted", createdAt: sentAt, updatedAt: sentAt }).run();
+		db.insert(abuseProviderRuns).values({ id: generateId(), reportId, routeId: route, providerPayload: {}, payloadHash: String(route), correlationKey: `run:${route}`, attemptCount: 1, executionStatus: "completed", confirmationId: "NS-5000", createdAt: sentAt, updatedAt: sentAt }).run();
+		db.insert(abuseEvents).values({ id: generateId(), reportId, routeId: route, eventType: "route.status_changed", data: { to: "submitted" }, createdAt: sentAt }).run();
+		await scheduleEscalation({ reportId, targetId: second }, day(1));
+
+		const sites = (await upcomingEscalationSteps(day(1))).filter((step) => !step.provider && [targetId.toString(), second.toString()].includes(step.targetId));
+		expect(sites.map((step) => `${step.step} ${step.target} ${step.targetId} ${step.at}`)).toEqual([
+			`oversight ${DOMAIN} ${targetId} ${day(7).toISOString()}`,
+			`oversight paypal-login-check.com ${second} ${day(8).toISOString()}`,
+		]);
+		// The case view keeps them apart and in time order.
+		expect((await view(reportId, day(1))).siteEscalation.map((step) => `${step.step} ${step.target}`)).toEqual([`oversight ${DOMAIN}`, "oversight paypal-login-check.com", `exhausted ${DOMAIN}`, "exhausted paypal-login-check.com"]);
 	});
 });
 

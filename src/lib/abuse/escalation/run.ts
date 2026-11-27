@@ -13,7 +13,7 @@ import { routeContact } from "../resolver/contact_chain";
 import type { AbuseProviderRoute, AbuseTarget } from "../schema";
 import { routeToContact } from "../worker/mail";
 import { UnknownExternalStateError } from "../worker/shared";
-import { contactForStep, ESCALATION_EVENT, ESCALATION_HELD_EVENT, escalationJobKey, firstSentAt, targetLadder, type LadderRouteState } from "./ladder";
+import { contactForStep, ESCALATION_EVENT, ESCALATION_HELD_EVENT, escalates, escalationJobKey, firstSentAt, takenSteps, targetLadder, type LadderRouteState } from "./ladder";
 import { brandDraft, certDraft, dsaNoticeDraft, followUpNotice, hostingOf, icannComplaintText, plannedFacts, type Draft, type EscalationFacts, type UnactedProvider } from "./notice";
 import { escalationPlan, ESCALATED_ROLES, type EscalationStep } from "./policy";
 import { brandRecipient, DSA_COUNTRIES, ICANN_COMPLAINT, isGenericTld, NATIONAL_CERTS } from "./recipients";
@@ -36,17 +36,22 @@ export async function escalationState(reportId: bigint, targetId: bigint) {
 }
 
 /**
- * Queue the target's escalation job for when its next step falls due (now
- * when one already is), or nothing once the ladder is done; a hold delays
- * it. One job per target; a later call moves it earlier, never later. A
- * running escalation job passes itself as `successorOf` to queue the next.
+ * Queue the target's escalation job for when its next step is taken (now
+ * when one already is; a hold delays it), or drop the job still waiting once
+ * the ladder has nothing left, or the job would not act on the target
+ * (`escalates`). One job per target; a later call moves it earlier, never
+ * later. A running escalation job passes itself as `successorOf` to queue
+ * the next.
  */
 export async function scheduleEscalation(target: { reportId: bigint; targetId: bigint }, now = new Date(), successorOf?: bigint): Promise<void> {
-	const { ladder, heldUntil } = await escalationState(target.reportId, target.targetId);
-	const plan = escalationPlan(ladder, now);
-	const due = plan.due.length ? now : plan.nextAt;
-	if (!due) return;
-	await queueEscalation(target, heldUntil && heldUntil > due ? heldUntil : due, successorOf);
+	const [report, record] = await Promise.all([AbuseRepository.getReport(target.reportId), AbuseRepository.getTarget(target.targetId)]);
+	const plan = report && record && escalates(report, record) ? escalationPlan((await escalationState(target.reportId, target.targetId)).ladder, now) : { due: [] };
+	const at = plan.due.length ? now : plan.nextAt;
+	if (!at) {
+		await AbuseRepository.discardQueuedJob(escalationJobKey(target.targetId));
+		return;
+	}
+	await queueEscalation(target, at, successorOf);
 }
 
 const queueEscalation = (target: { reportId: bigint; targetId: bigint }, at: Date, successorOf: bigint | undefined) => AbuseRepository.enqueueJob({
@@ -54,6 +59,8 @@ const queueEscalation = (target: { reportId: bigint; targetId: bigint }, at: Dat
 	reportId: target.reportId,
 	payload: { targetId: target.targetId.toString() },
 	dedupeKey: escalationJobKey(target.targetId),
+	// One escalation of a site at a time, also a successor queued for now while its predecessor finishes.
+	serialKey: escalationJobKey(target.targetId),
 	nextAttemptAt: at,
 	advance: true,
 	...(successorOf === undefined ? {} : { successorOf }),
@@ -188,8 +195,8 @@ export async function runEscalation(params: { targetId: bigint; jobId?: bigint; 
 	const now = (dependencies.now ?? (() => new Date()))();
 	const target = await AbuseRepository.getTarget(params.targetId);
 	const report = target ? await AbuseRepository.getReport(target.reportId) : undefined;
-	const url = target?.observedUrls[0];
-	if (!target || !report || report.status === "canceled" || !url) return;
+	if (!target || !report || !escalates(report, target)) return;
+	const url = target.observedUrls[0]!;
 	const { states, ladder } = await escalationState(report.id, target.id);
 	const plan = escalationPlan(ladder, now);
 	const owner = { reportId: report.id, targetId: target.id };
@@ -216,6 +223,8 @@ export async function runEscalation(params: { targetId: bigint; jobId?: bigint; 
 	// Each step stands alone: one provider's failure neither blocks nor repeats another's.
 	let failure: unknown;
 	for (const step of plan.due) {
+		// The check above can take minutes: a step the operator skipped meanwhile is not taken.
+		if (takenSteps(await AbuseRepository.listEvents(report.id), target.id).has(step.key)) continue;
 		let outcome: Record<string, unknown>;
 		try {
 			outcome = await takeStep(step, { target, states, facts, ...(hosting ? { hosting } : {}), dependencies });

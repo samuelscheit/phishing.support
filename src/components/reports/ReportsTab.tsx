@@ -7,7 +7,7 @@ import { ROLE_LABEL } from "@/components/provider_stats/labels";
 import { Card } from "@/components/ui/card";
 import type { WebsiteSubmissionData } from "@/lib/db/schema";
 import type { SubmissionReport } from "@/lib/submissions/abuse_details";
-import { nextStep, plannedStepText, rankedRoutes, routeBuckets, shortUtc, subjectLabel, takedownSummary, type RouteEntry, type TakedownSummary } from "@/lib/submissions/report_view";
+import { nextPerTarget, nextStep, plannedStepText, rankedRoutes, routeBuckets, shortUtc, subjectLabel, takedownSummary, type RouteEntry, type TakedownSummary } from "@/lib/submissions/report_view";
 import { cn } from "@/lib/util/cn";
 import { PlannedChip, PlannedStep } from "./planned";
 import { RouteTimeline } from "./RouteTimeline";
@@ -203,7 +203,8 @@ function TargetGroup({ reports, caseId }: { reports: SubmissionReport[]; caseId?
 	const entries = withNextHops(rankedRoutes(reports));
 	const owners = [...new Set(reports.filter((report) => caseId !== undefined && report.submissionId !== null && String(report.submissionId) !== caseId).map((report) => String(report.submissionId)))];
 	const url = first!.subject === "payload_host" ? first!.routes[0]?.observedUrls[0] : undefined;
-	const site = reports.flatMap((report) => report.siteEscalation.slice(0, 1).map((step) => ({ step, report }))).sort((a, b) => new Date(a.step.at).getTime() - new Date(b.step.at).getTime())[0];
+	// The next step of each site the group's reports escalate.
+	const siteSteps = nextPerTarget(reports.flatMap((report) => report.siteEscalation.map((step) => ({ ...step, report }))));
 	return (
 		<section className="space-y-2">
 			<div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-0.5">
@@ -219,11 +220,11 @@ function TargetGroup({ reports, caseId }: { reports: SubmissionReport[]; caseId?
 			</div>
 			<Card className="@container overflow-hidden">
 				{entries.length ? entries.map((entry) => <RouteRow key={String(entry.route.id)} entry={entry} />) : <p className="px-4 py-3 text-sm text-muted-foreground">No provider has been contacted yet.</p>}
-				{site ? (
-					<div className="border-t px-4 py-3">
-						<PlannedStep step={site.step} text={plannedStepText(site.step, undefined, site.report.createdAt)} now={site.report.viewedAt} reference={site.report.createdAt} />
+				{siteSteps.map(({ report, ...step }) => (
+					<div key={`${step.targetId}:${step.key}`} className="border-t px-4 py-3">
+						<PlannedStep step={step} text={plannedStepText(step, undefined, report.createdAt)} now={report.viewedAt} reference={report.createdAt} />
 					</div>
-				) : null}
+				))}
 			</Card>
 		</section>
 	);

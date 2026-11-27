@@ -133,13 +133,18 @@ describe("escalating a report nobody acts on", () => {
 		// Looked at again a day later, while the month lasts.
 		expect(await queued(targetId)).toEqual([day(3)]);
 
+		// A job that runs during the hold neither checks nor takes anything: the hold is part of the plan.
+		await work(targetId, { verify: { site: site("kit"), isShared: async () => false }, send, providerFor: () => undefined, now: () => day(2.5) });
+		expect(await steps(reportId)).toEqual([]);
+		expect(await queued(targetId)).toEqual([day(3)]);
+
 		// A browser service failure is not the site's: the job fails and the worker retries it.
-		await expect(work(targetId, { verify: { site: site("decoy"), isShared: async () => false, visitSite: scriptedSiteVisit(async () => { throw new Error("Browser Fabric session ended"); }) }, send, now: () => day(2) })).rejects.toThrow("Browser Fabric session ended");
+		await expect(work(targetId, { verify: { site: site("decoy"), isShared: async () => false, visitSite: scriptedSiteVisit(async () => { throw new Error("Browser Fabric session ended"); }) }, send, now: () => day(3) })).rejects.toThrow("Browser Fabric session ended");
 		// A decoy for every request and every network failing in the browser: unverified, tried again tomorrow.
 		const { WebsiteCaptureFailedError, WebsiteUnreachableError } = await import("../../website/archive/errors");
 		const failing = async () => { throw new WebsiteCaptureFailedError([new WebsiteUnreachableError("residential", "net::ERR_TIMED_OUT")]); };
-		await work(targetId, { verify: { site: site("decoy"), isShared: async () => false, visitSite: scriptedSiteVisit(failing) }, send, now: () => day(2) });
-		expect(await queued(targetId)).toEqual([day(3)]);
+		await work(targetId, { verify: { site: site("decoy"), isShared: async () => false, visitSite: scriptedSiteVisit(failing) }, send, now: () => day(3) });
+		expect(await queued(targetId)).toEqual([day(4)]);
 		expect(sent).toEqual([]);
 	});
 

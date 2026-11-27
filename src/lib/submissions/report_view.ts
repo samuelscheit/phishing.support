@@ -194,12 +194,19 @@ export function shortUtc(at: Date | string, reference?: Date | string): string {
 
 const MINUTE = 60_000;
 
-/** How far `at` is from `now`: "in 40m", "in 5h", "in 2d"; "3h overdue" once it passed. */
+/** How far `at` is from `now`: "in 40m", "in 5h", "in 2d"; "due now" when it came within the minute, "3h overdue" later. */
 export function untilText(at: Date | string, now: Date | string): string {
-	const minutes = Math.round((new Date(at).getTime() - new Date(now).getTime()) / MINUTE);
-	const span = Math.abs(minutes);
+	const diff = new Date(at).getTime() - new Date(now).getTime();
+	if (diff <= 0 && diff > -MINUTE) return "due now";
+	const span = Math.round(Math.abs(diff) / MINUTE);
 	const text = span < 60 ? `${Math.max(1, span)}m` : span < 48 * 60 ? `${Math.round(span / 60)}h` : `${Math.round(span / (24 * 60))}d`;
-	return minutes >= 0 ? `in ${text}` : `${text} overdue`;
+	return diff > 0 ? `in ${text}` : `${text} overdue`;
+}
+
+/** The soonest of each target's planned steps, soonest first: the next step of every site. */
+export function nextPerTarget<T extends Pick<PlannedEscalationStep, "targetId" | "at">>(steps: readonly T[]): T[] {
+	const sorted = [...steps].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+	return sorted.filter((step, index) => sorted.findIndex((other) => String(other.targetId) === String(step.targetId)) === index);
 }
 
 const PLANNED_NAME: Record<EscalationStepName, { label: string; heading: string }> = {

@@ -1,6 +1,6 @@
-import { contactForStep, escalationJobKey, firstSentAt, scheduledSteps, targetLadder, type LadderRouteState, type ScheduledStep } from "@/lib/abuse/escalation/ladder";
+import { contactForStep, escalates, escalationJobKey, firstSentAt, targetLadder, type LadderRouteState } from "@/lib/abuse/escalation/ladder";
 import { followUpNotice, plannedFacts, type PlannedFacts } from "@/lib/abuse/escalation/notice";
-import type { EscalationStepName } from "@/lib/abuse/escalation/policy";
+import { pendingEscalationSteps, type EscalationStep, type EscalationStepName } from "@/lib/abuse/escalation/policy";
 import { noticeRecipient } from "@/lib/abuse/followup/route_notice";
 import { abuseEmailCaseUrl } from "@/lib/abuse/mail/draft";
 import { getProviderSubmissionProvider } from "@/lib/abuse/providers/submission_registry_default";
@@ -18,6 +18,8 @@ export type PlannedEscalationStep = {
 	/** The step's key on its target's ladder (`route:<id>:<level>`, `site:<level>`). */
 	key: string;
 	targetId: bigint;
+	/** The target's name: the site the step escalates. */
+	target: string;
 	step: EscalationStepName;
 	routeId?: bigint;
 	/** When the ladder takes it: when it falls due, or when a hold ends. */
@@ -43,7 +45,7 @@ type State = LadderRouteState<AbuseProviderRoute, RouteView>;
  * route without a further contact), which the ladder records as taken
  * without doing anything.
  */
-function reach(step: ScheduledStep, state: State, reached: ReadonlyArray<string | null>, facts: PlannedFacts | undefined): Pick<PlannedEscalationStep, "to" | "draft"> | undefined {
+function reach(step: EscalationStep, state: State, reached: ReadonlyArray<string | null>, facts: PlannedFacts | undefined): Pick<PlannedEscalationStep, "to" | "draft"> | undefined {
 	const { route, view } = state;
 	if (step.step === "follow_up") {
 		const address = noticeRecipient(route, view.confirmationId);
@@ -64,11 +66,12 @@ function reach(step: ScheduledStep, state: State, reached: ReadonlyArray<string 
 /**
  * The escalation steps still to come for the report's targets at `now`,
  * soonest first, read from the same ladder the escalation job takes them
- * from. Only a target whose escalation job is queued has any: the job is
- * what takes them, and liveness queues it only while the site is up.
+ * from. Only a target the job acts on (`escalates`) and whose job is queued
+ * has any: the job is what takes them, and liveness queues it only while the
+ * site is up.
  */
 export function plannedEscalation(params: {
-	report: Pick<AbuseReport, "submissionId" | "allegationCategory" | "legalBrandUrl">;
+	report: Pick<AbuseReport, "status" | "submissionId" | "allegationCategory" | "legalBrandUrl">;
 	targets: readonly Pick<AbuseTarget, "id" | "normalizedTarget" | "observedUrls">[];
 	routes: readonly AbuseProviderRoute[];
 	views: readonly RouteView[];
@@ -81,20 +84,21 @@ export function plannedEscalation(params: {
 	const caseUrl = abuseEmailCaseUrl(report.submissionId);
 	return params.targets.flatMap((target) => {
 		const url = target.observedUrls[0];
-		if (!url || !params.queuedJobs.some((job) => job.dedupeKey === escalationJobKey(target.id))) return [];
+		if (!url || !escalates(report, target) || !params.queuedJobs.some((job) => job.dedupeKey === escalationJobKey(target.id))) return [];
 		const ladder = targetLadder(target.id, params.routes, params.views, params.events);
 		const reportedAt = firstSentAt(ladder.states);
 		const facts = reportedAt
 			? plannedFacts({ domain: target.normalizedTarget, url, allegation: report.allegationCategory, reportedAt, ...(caseUrl ? { caseUrl } : {}), hosting: params.checks.findLast((check) => check.targetId === target.id)?.hosting, brandUrl: report.legalBrandUrl })
 			: undefined;
 		const reached = params.routes.filter((route) => route.targetId === target.id).map((route) => route.verifiedEmail);
-		return scheduledSteps(ladder, now).flatMap((step): PlannedEscalationStep[] => {
+		return pendingEscalationSteps(ladder.ladder, now).flatMap((step): PlannedEscalationStep[] => {
 			const state = step.routeId === undefined ? undefined : ladder.states.find((candidate) => candidate.route.id === step.routeId);
 			const known = state ? reach(step, state, reached, facts) : {};
 			if (!known) return [];
 			return [{
 				key: step.key,
 				targetId: target.id,
+				target: target.normalizedTarget,
 				step: step.step,
 				...(step.routeId === undefined ? {} : { routeId: step.routeId }),
 				at: step.at,
@@ -104,5 +108,5 @@ export function plannedEscalation(params: {
 				...known,
 			}];
 		});
-	});
+	}).sort((a, b) => a.at.getTime() - b.at.getTime());
 }

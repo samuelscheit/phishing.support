@@ -20,7 +20,9 @@ import { DAY_MS } from "../../util/date_time";
  *    operator decides (a criminal referral of the campaign).
  *
  * The operator can bring a step forward (`advanced`: due from then on) or
- * skip it (recorded as taken, so the ladder moves on without it).
+ * skip it (recorded as taken, so the ladder moves on without it). A check
+ * that found the site not (confirmably) serving holds the whole ladder
+ * (`heldUntil`).
  */
 const ESCALATION_LADDER = [
 	{ level: 1, step: "follow_up", afterMs: 2 * DAY_MS },
@@ -60,6 +62,8 @@ export type EscalationRoute = {
 };
 
 export type EscalationStep = {
+	/** Its identity on the site's ladder (`stepKey`). */
+	key: string;
 	level: number;
 	step: EscalationStepName;
 	routeId?: bigint;
@@ -67,6 +71,10 @@ export type EscalationStep = {
 	dueAt: Date;
 	/** The operator brought it forward to `dueAt`. */
 	advanced: boolean;
+	/** When it is taken: when due, or when the hold the ladder is under ends. */
+	at: Date;
+	/** The hold that keeps it from being taken when due. */
+	heldUntil?: Date;
 };
 
 /** A site's routes as the ladder reads them and what was done on the ladder so far. */
@@ -76,6 +84,8 @@ export type EscalationLadder = {
 	taken: ReadonlySet<string>;
 	/** The steps the operator brought forward, by `stepKey`, with when. */
 	advanced: ReadonlyMap<string, Date>;
+	/** Until when a check that found the site not (confirmably) serving holds every step. */
+	heldUntil?: Date;
 };
 
 /** A step's identity on its site's ladder: `route:<id>:<level>` or `site:<level>`. */
@@ -95,13 +105,14 @@ function routeTakes(route: EscalationRoute, step: EscalationStepName): boolean {
 }
 
 /**
- * Every step of the ladder still to take at `now`, soonest first: route
- * steps counted from the route's own report, site steps from the first
- * report of a route still on the ladder, each due earlier when the operator
- * brought it forward. A site none of whose routes is on the ladder (every
- * provider acted, or none was reached) has none, and neither has one whose
- * month since the first report is over; a step the ladder would only reach
- * after that month is never taken.
+ * Every step of the ladder still to take at `now`, soonest by when it is
+ * taken: route steps counted from the route's own report, site steps from
+ * the first report of a route still on the ladder, each due earlier when the
+ * operator brought it forward and taken no earlier than a hold ends. A site
+ * none of whose routes is on the ladder (every provider acted, or none was
+ * reached) has none, and neither has one whose month since the first report
+ * is over; a step the ladder would only take after that month (by its time
+ * or a hold) is never taken.
  */
 export function pendingEscalationSteps(ladder: EscalationLadder, now: Date): EscalationStep[] {
 	const climbing = ladder.routes.filter(climbs);
@@ -110,24 +121,28 @@ export function pendingEscalationSteps(ladder: EscalationLadder, now: Date): Esc
 	const closes = first + ESCALATION_WINDOW_MS;
 	if (now.getTime() > closes) return [];
 	const steps: EscalationStep[] = [];
-	const add = (level: number, step: EscalationStepName, at: number, routeId?: bigint) => {
+	const add = (level: number, step: EscalationStepName, by: number, routeId?: bigint) => {
 		const key = stepKey({ level, routeId });
+		if (ladder.taken.has(key)) return;
 		const advanced = ladder.advanced.get(key);
-		if (ladder.taken.has(key) || (at > closes && !advanced)) return;
-		const early = advanced !== undefined && advanced.getTime() < at;
-		steps.push({ level, step, ...(routeId === undefined ? {} : { routeId }), dueAt: new Date(early ? advanced.getTime() : at), advanced: early });
+		const early = advanced !== undefined && advanced.getTime() < by;
+		const dueAt = early ? advanced.getTime() : by;
+		const held = ladder.heldUntil && ladder.heldUntil.getTime() > dueAt ? ladder.heldUntil : undefined;
+		const at = held?.getTime() ?? dueAt;
+		if (at > closes) return;
+		steps.push({ key, level, step, ...(routeId === undefined ? {} : { routeId }), dueAt: new Date(dueAt), advanced: early, at: new Date(at), ...(held ? { heldUntil: held } : {}) });
 	};
 	for (const { level, step, afterMs } of ESCALATION_LADDER) {
 		if (!ROUTE_STEPS.has(step)) add(level, step, first + afterMs);
 		else for (const route of climbing) if (routeTakes(route, step)) add(level, step, route.sentAt.getTime() + afterMs, route.routeId);
 	}
-	return steps.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime() || a.level - b.level);
+	return steps.sort((a, b) => a.at.getTime() - b.at.getTime() || a.level - b.level);
 }
 
-/** The steps due at `now`, and when the next one falls due. */
+/** The steps to take at `now` (due and not held), and when the next one is taken. */
 export function escalationPlan(ladder: EscalationLadder, now: Date): { due: EscalationStep[]; nextAt?: Date } {
 	const pending = pendingEscalationSteps(ladder, now);
-	const due = pending.filter((step) => step.dueAt.getTime() <= now.getTime());
-	const later = pending.find((step) => step.dueAt.getTime() > now.getTime());
-	return { due, ...(later ? { nextAt: later.dueAt } : {}) };
+	const due = pending.filter((step) => step.at.getTime() <= now.getTime());
+	const later = pending.find((step) => step.at.getTime() > now.getTime());
+	return { due, ...(later ? { nextAt: later.at } : {}) };
 }

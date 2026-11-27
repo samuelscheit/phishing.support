@@ -53,8 +53,8 @@ function StepRow({ step, now }: { step: UpcomingEscalationStep; now: string }) {
 					{step.due ? "due" : untilText(step.at, now)}{step.advanced ? " · brought forward" : ""}
 				</span>
 				<span className="flex gap-2">
-					{/* Brought forward and not held since: the job takes it now already. */}
-					<Button size="sm" variant="outline" disabled={busy || (step.advanced && !step.heldUntil)} onClick={() => run(url, { step: step.key, action: "send_now" })}><Send />Send now</Button>
+					{/* Due: it goes out with the escalation's next run already, as the backend says when asked. */}
+					<Button size="sm" variant="outline" disabled={busy || step.due} onClick={() => run(url, { step: step.key, action: "send_now" })}><Send />Send now</Button>
 					<Button size="sm" variant="ghost" disabled={busy} onClick={() => run(url, { step: step.key, action: "skip" })}><SkipForward />Skip</Button>
 				</span>
 			</div>

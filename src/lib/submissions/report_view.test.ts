@@ -236,8 +236,10 @@ describe("routeStanding and the timeline from a route's own record", () => {
 	test("how far a planned step is: minutes, hours, days ahead; overdue once past", () => {
 		const now = trylevoAt("12:00:00");
 		const after = (minutes: number) => new Date(now.getTime() + minutes * 60_000);
-		expect([0, 0.2, 40, 59, 60, 90, 47 * 60, 48 * 60, 2.4 * 1440, -30, -3 * 60, -3 * 1440].map((minutes) => untilText(after(minutes), now))).toEqual([
-			"in 1m", "in 1m", "in 40m", "in 59m", "in 1h", "in 2h", "in 47h", "in 2d", "in 2d", "30m overdue", "3h overdue", "3d overdue",
+		expect([0.2, 40, 59, 60, 90, 47 * 60, 48 * 60, 2.4 * 1440].map((minutes) => untilText(after(minutes), now))).toEqual(["in 1m", "in 40m", "in 59m", "in 1h", "in 2h", "in 47h", "in 2d", "in 2d"]);
+		// Due within the last minute is due now, never "in 1m" while the chip says due; past that it is overdue.
+		expect([0, -0.1, -0.49, -0.99, -1, -1.6, -30, -3 * 60, -3 * 1440].map((minutes) => untilText(after(minutes), now))).toEqual([
+			"due now", "due now", "due now", "due now", "1m overdue", "2m overdue", "30m overdue", "3h overdue", "3d overdue",
 		]);
 		expect(untilText(after(90).toISOString(), now.toISOString())).toBe("in 2h");
 	});
