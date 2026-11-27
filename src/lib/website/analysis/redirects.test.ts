@@ -169,6 +169,30 @@ describe("a submitted address that serves a file, not a page", () => {
 	});
 });
 
+describe("the case page while the written analysis runs", () => {
+	test("the walked routes are stored before the analysis is asked for, so the visit's pages show meanwhile", async () => {
+		// Production case 384583190792114178: the visit ended at 06:03:32, but its steps were stored only after the
+		// streamed analysis finished at 06:06:19; the case page showed only the first capture all that time.
+		const url = "https://willow.slon7.at/entry/login";
+		const id = await websiteSubmission(384583190792114178n, url);
+		const recording = phishingModel();
+		const storedDuringAnalysis: unknown[] = [];
+		const analysisClient = {
+			responses: {
+				create: async (options: { text?: { format?: unknown } }) => {
+					if (!options.text?.format) storedDuringAnalysis.push(websiteOf(await SubmissionsEntity.get(id))?.routes?.map((route) => ({ hops: route.hops.map((hop) => hop.url), visited: route.visit !== undefined })));
+					return recording.responses.create(options as never);
+				},
+			},
+		} as unknown as AnalysisClient;
+
+		await analyzeWebsite({ submissionId: id, url }, { ...dependencies(archiveOf([hop(0, url, 200)])), analysisClient });
+
+		expect(storedDuringAnalysis).toEqual([[{ hops: [url], visited: true }]]);
+		expect((await SubmissionsEntity.get(id))?.status).toBe("reported");
+	});
+});
+
 /** The case's website data. */
 function websiteOf(submission: Awaited<ReturnType<typeof SubmissionsEntity.get>>) {
 	return submission?.data.kind === "website" ? submission.data.website : undefined;

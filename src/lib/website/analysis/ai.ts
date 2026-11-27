@@ -226,19 +226,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			: visited.cloakedDestination ? cloakedDestinationInfo(visited.cloakedDestination)
 			: inconclusive ?? unreportedVerdict(visited.classification, archive.url);
 
-		await step("analysis_run", 75);
-		await runStreamedAnalysisRun({
-			submissionId,
-			analysisKind: "analysis",
-			options: {
-				model: defaultResponseModel,
-				input: buildWebsiteAnalysisInput(headline.archive, { finding: caseFinding, analysisInstructions: instructions?.analysis, whois, pages: headlineRoute.visited.pages, visit: headlineRoute.visited.record, kitResources: headline.archive.kitResources, capturedAt: headline.archive.archivedAt, chain: headlineRoute.visited.chain }),
-				reasoning: defaultReasoning,
-				tools: [{ type: "web_search" }],
-				stream: true,
-			},
-		}, { client: dependencies.analysisClient });
-
+		// The walked routes are stored before the written analysis, which takes minutes: the case page shows the visit's pages meanwhile.
 		await SubmissionsEntity.update(submissionId, {
 			data: {
 				kind: "website",
@@ -261,6 +249,19 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 				},
 			},
 		});
+
+		await step("analysis_run", 75);
+		await runStreamedAnalysisRun({
+			submissionId,
+			analysisKind: "analysis",
+			options: {
+				model: defaultResponseModel,
+				input: buildWebsiteAnalysisInput(headline.archive, { finding: caseFinding, analysisInstructions: instructions?.analysis, whois, pages: headlineRoute.visited.pages, visit: headlineRoute.visited.record, kitResources: headline.archive.kitResources, capturedAt: headline.archive.archivedAt, chain: headlineRoute.visited.chain }),
+				reasoning: defaultReasoning,
+				tools: [{ type: "web_search" }],
+				stream: true,
+			},
+		}, { client: dependencies.analysisClient });
 
 		const reporter = { reporterIp, reporterCountry, reporterHeaders };
 		if (found) {
