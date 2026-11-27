@@ -10,14 +10,16 @@ const control = (overrides: Partial<LiveControl> = {}): LiveControl => ({ run: "
 const driver = (status: DriverStatus): LiveDriver => ({ status, busy: {}, dismissError: () => undefined, take: async () => undefined, release: async () => undefined, message: async () => true, send: () => undefined });
 
 describe("the console while the site loads", () => {
-	test("the badge says what happens, with a spinner; without a status, that the site loads", () => {
-		expect(driverText({ kind: "loading", status: "Loading page via Tor exit…" })).toEqual({ text: "Loading page via Tor exit…", tone: "agent" });
+	test("the badge stays concise with a spinner and puts detailed exit status in its tooltip", () => {
+		expect(driverText({ kind: "loading", status: "Loading page via Tor exit…" })).toEqual({ text: "Loading site…", tone: "agent" });
 		expect(driverText({ kind: "loading" })).toEqual({ text: "Loading site…", tone: "agent" });
 		const badge = renderToStaticMarkup(<DriverBadge status={{ kind: "loading", status: "Residential exit failed (timeout), trying Tor exit…" }} />);
 		expect(badge).toContain("animate-spin");
+		expect(badge).toContain("Loading site…");
 		expect(badge).toContain('title="Residential exit failed (timeout), trying Tor exit…"');
-		expect(badge).toContain("truncate");
-		// Who drives is never cut short.
+		expect(badge).toContain("shrink-0");
+		expect(badge).toContain('role="status"');
+		expect(renderToStaticMarkup(<DriverBadge status={{ kind: "loading" }} live={false} />)).not.toContain('role="status"');
 		expect(renderToStaticMarkup(<DriverBadge status={{ kind: "agent" }} />)).toContain("shrink-0");
 		expect(renderToStaticMarkup(<DriverBadge status={{ kind: "agent" }} />)).not.toContain("animate-spin");
 	});

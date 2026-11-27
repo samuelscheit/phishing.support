@@ -81,9 +81,10 @@ export function LiveConsoleFixture({ state, frame, theme }: { state: string; fra
 		setMounted(true);
 	}, [theme]);
 	const control = controlFor(state);
+	const loading = state === "loading";
 	const visit: LiveVisit = {
 		submissionId: "fixture",
-		entries: ENTRIES,
+		entries: loading ? [] : ENTRIES,
 		control,
 		finished: false,
 		live: control.mode !== "ended",
@@ -107,8 +108,8 @@ export function LiveConsoleFixture({ state, frame, theme }: { state: string; fra
 		<main className="mx-auto max-w-3xl space-y-6 p-6">
 			{/* The dev tools' badge would cover the console's corner in screenshots. */}
 			<style>{"nextjs-portal{display:none}"}</style>
-			<SiteVisitBrowser running pages={[]} live={visit} fallbackUrl="https://secure-bank-verify.example.test/" />
-			<SiteVisitTimeline running={false} visit={{ outcome: "completed", actions: ENTRIES.flatMap((entry) => (entry.kind === "action" ? [{ kind: entry.actionKind, text: entry.text, actor: entry.actor }] : [])), accessSteps: [], dataSent: [], downloadFailures: [] }} live={visit} pageCount={2} />
+			<SiteVisitBrowser running={control.mode !== "ended"} pages={[]} live={visit} fallbackUrl="https://secure-bank-verify.example.test/" />
+			<SiteVisitTimeline running={loading} visit={loading ? undefined : { outcome: "completed", actions: ENTRIES.flatMap((entry) => (entry.kind === "action" ? [{ kind: entry.actionKind, text: entry.text, actor: entry.actor }] : [])), accessSteps: [], dataSent: [], downloadFailures: [] }} live={visit} pageCount={loading ? 0 : 2} />
 			{open ? <LiveConsole visit={visit} driver={driver} onClose={() => setOpen(false)} fullscreen={false} /> : null}
 		</main>
 	);

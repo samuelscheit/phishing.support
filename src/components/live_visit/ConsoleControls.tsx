@@ -216,11 +216,11 @@ export function ControlDock({ driver, control, onKeyboard }: { driver: LiveDrive
 					</>
 				) : (
 					<>
-						<Button type="button" size="sm" className="h-9 shrink-0 active:scale-[0.96] transition-[background-color,scale] duration-150 motion-reduce:transition-none" disabled={!canTake || driver.busy.take} onClick={() => void driver.take()}>
+						<Button type="button" variant={canTake ? "default" : "secondary"} size="sm" className="h-9 shrink-0 active:scale-[0.96] transition-[background-color,scale] duration-150 motion-reduce:transition-none" disabled={!canTake || driver.busy.take} onClick={() => void driver.take()}>
 							{driver.busy.take ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <Hand />}
 							Take over
 						</Button>
-						{takeHint ? <span className="px-2 text-xs text-muted-foreground">{takeHint}</span> : null}
+						{takeHint ? <span className="px-2.5 py-1 text-center text-xs text-muted-foreground">{takeHint}</span> : null}
 					</>
 				)}
 			</div>

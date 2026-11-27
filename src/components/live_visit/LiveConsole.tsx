@@ -48,13 +48,12 @@ function useFullscreen(ref: React.RefObject<HTMLElement | null>, enabled: boolea
 }
 
 /** A note over the screen: who has the browser, what the visit does, or why there is nothing to drive. */
-export function ScreenNote({ children, busy, title }: { children: React.ReactNode; busy?: boolean; title?: string }) {
-	const tooltip = title ?? (typeof children === "string" ? children : undefined);
+export function ScreenNote({ children, busy }: { children: React.ReactNode; busy?: boolean }) {
 	return (
 		<div role="status" className="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-3">
-			<p title={tooltip} className="flex max-w-full items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs font-medium shadow-md ring-1 ring-border backdrop-blur">
+			<p className="flex max-w-[min(36rem,100%)] items-center gap-2 rounded-2xl bg-background/90 px-3 py-1.5 text-xs font-medium shadow-md ring-1 ring-border backdrop-blur">
 				{busy ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
-				<span className="min-w-0 truncate">{children}</span>
+				<span className="min-w-0 break-words">{children}</span>
 			</p>
 		</div>
 	);
@@ -116,6 +115,7 @@ export function LiveConsole({ visit, driver, onClose, fullscreen = true }: {
 
 	const url = frame?.url || control?.tabs.find((tab) => tab.active)?.url || "";
 	const tabs = control?.tabs ?? [];
+	const hasScreenNote = !frame || ended || (status.kind === "loading" && Boolean(status.status)) || status.kind === "pausing" || status.kind === "other";
 
 	const view = (
 		<div
@@ -155,7 +155,7 @@ export function LiveConsole({ visit, driver, onClose, fullscreen = true }: {
 					{/* One line: Chrome breaks at an address's <wbr> even where wrapping is off. */}
 					<span className="min-w-0 truncate [&_wbr]:hidden">{url ? <Address url={url} /> : "…"}</span>
 				</div>
-				<DriverBadge status={status} />
+				<DriverBadge status={status} live={!hasScreenNote} />
 				<TurnCountdown control={control} />
 				<span className="flex-1 sm:hidden" aria-hidden />
 				<Button type="button" variant="ghost" size="icon" onClick={() => setDrawer(!drawer)} aria-pressed={drawer} aria-label={drawer ? "Hide the timeline" : "Show the timeline"} title={drawer ? "Hide the timeline" : "Show the timeline"} className="shrink-0">
@@ -185,10 +185,10 @@ export function LiveConsole({ visit, driver, onClose, fullscreen = true }: {
 					<div className="min-h-0 flex-1">
 						<LiveScreen frame={frame} driving={driving} send={driver.send} sinkRef={sinkRef} label={`The visited site, live: ${url}`}>
 							{ended ? <div className="absolute inset-0 bg-background/40 backdrop-grayscale" aria-hidden /> : null}
-							{!frame ? <ScreenNote busy={!ended}>{ended ? "The visit ended." : control?.status ?? "Connecting to the browser…"}</ScreenNote>
+							{!frame ? <ScreenNote busy={!ended && status.kind !== "loading" && status.kind !== "pausing"}>{ended ? "The visit ended." : control?.status ?? "Connecting to the browser…"}</ScreenNote>
 								: ended ? <ScreenNote>The visit ended. Everything it did is in the case record.</ScreenNote>
-									: status.kind === "loading" ? <ScreenNote busy>{status.status ?? "Loading the site…"}</ScreenNote>
-										: status.kind === "pausing" ? <ScreenNote busy>{status.mine ? "The agent finishes its action; the browser is yours in a moment." : `${status.label ?? "Someone"} is taking over…`}</ScreenNote>
+									: status.kind === "loading" && status.status ? <ScreenNote>{status.status}</ScreenNote>
+										: status.kind === "pausing" ? <ScreenNote>{status.mine ? "The agent finishes its action; the browser is yours in a moment." : `${status.label ?? "Someone"} is taking over…`}</ScreenNote>
 											: status.kind === "other" ? <ScreenNote>{status.label} is driving the browser.</ScreenNote>
 												: null}
 						</LiveScreen>

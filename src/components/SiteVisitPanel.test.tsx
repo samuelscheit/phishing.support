@@ -41,8 +41,8 @@ describe("the case's browser while the site loads", () => {
 		expect(loading).toContain('src="blob:frame"');
 		expect(loading).toContain("Open live view");
 		expect(loading).toContain("Loading page via Tor exit…");
-		expect(loading).toContain('role="status"');
-		expect(loading).toContain("truncate");
+		expect(loading).toMatch(/role="status"[^>]*><p[^>]*>.*<span class="min-w-0 break-words">Loading page via Tor exit…<\/span><\/p><\/div>/);
+		expect(loading).not.toContain("line-clamp-");
 		expect(loading).toContain("Open the live view to watch the site load in full screen");
 		expect(browser(liveVisit({}, FRAME))).toContain("Loading the site…");
 
