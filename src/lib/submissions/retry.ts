@@ -33,7 +33,8 @@ export async function getRetryableSubmission(submissionId: bigint, kind: Submiss
 	if (!submission || submission.kind !== kind) {
 		throw new SubmissionRetryError(`Only ${kind} submissions can be retried.`);
 	}
-	if (submission.status !== "failed" && submission.status !== "invalid") {
+	// A collected host may be visited on its own after all.
+	if (submission.status !== "failed" && submission.status !== "invalid" && !(kind === "website" && submission.status === "collected")) {
 		throw new SubmissionRetryError("Only failed or unreported submissions can be retried.");
 	}
 

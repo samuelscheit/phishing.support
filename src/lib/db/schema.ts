@@ -11,8 +11,12 @@ import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, Website
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
 
-/** `queued`: a website case waiting in the visit queue for its turn (website/visit_queue). */
-export const submissionStatus = ["queued", "running", "failed", "reported", "invalid"] as const;
+/**
+ * `queued`: a website case waiting in the visit queue for its turn;
+ * `collected`: a host of a site group already reported, named by that report
+ * without a visit of its own (website/visit_queue).
+ */
+export const submissionStatus = ["queued", "running", "failed", "reported", "invalid", "collected"] as const;
 export type SubmissionStatus = (typeof submissionStatus)[number];
 
 export const analysisRunStatus = ["running", "completed", "failed"] as const;
@@ -27,6 +31,18 @@ export type EmailSubmissionData = MailData & {
 	/** The website case each linked page was handed to; several links may share one case. */
 	linkedWebsites?: Array<{ url: string; submissionId: string }>;
 };
+
+/**
+ * Why a website case was not visited: its site group (`siteGroupOf`) is
+ * reported already, so the case only joined that report (`sibling_reported`,
+ * status `collected`), or enough of the group's other hosts were visited and
+ * showed nothing (`siblings_inconclusive`, status `invalid`). `probe` is the
+ * plain fetch that checked a collected host still serves what the report's
+ * host served.
+ */
+export type WebsiteCollection =
+	| { reason: "sibling_reported"; siteGroup: string; reportId: string; intoSubmissionId: string; at: string; probe?: { verdict: "same" | "gone" | "unknown"; at: string } }
+	| { reason: "siblings_inconclusive"; siteGroup: string; tried: number; at: string };
 
 export type WebsiteSubmissionData = {
 	whois?: WhoISInfo;
@@ -69,6 +85,8 @@ export type WebsiteSubmissionData = {
 	offeredDownload?: WebsiteOfferedDownload;
 	/** Set when a failure another visit can change ended the run; the analysis is re-queued automatically. */
 	autoRetry?: { attempts: number; nextAttemptAt: string; reason: string };
+	/** Set when the case was not visited because of its site group's other hosts (website/visit_queue/collect.ts). */
+	collected?: WebsiteCollection;
 	/** Why the capture could not finish the site's flow: the step it could not take. A retry visits the site again. */
 	unfinishedFlow?: string;
 	/** Set when the site's flow led to a site that answered every network tried with an empty response and sent the visit back: no verdict, no report. */

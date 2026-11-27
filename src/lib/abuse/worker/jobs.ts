@@ -25,6 +25,7 @@ import { runLivenessCheck } from "../../liveness/schedule";
 import { reportHostMove } from "../host_move/report";
 import { runEscalation } from "../escalation/run";
 import { runWebsiteVisit } from "../../website/visit_queue/run";
+import { probeCollectedHost } from "../../website/visit_queue/collect";
 
 /**
  * Jobs are claimed by lane, so one kind of slow work never starves another:
@@ -91,6 +92,8 @@ export const JOB_POLICY: Readonly<Record<JobType, JobPolicy>> = {
 	check_site_liveness: { lane: "liveness", supplementary: true },
 	// A whole website analysis: walks, cloaking routes, rotation sampling and the models. Its own budgets end it well before.
 	visit_website: { lane: "visit", supplementary: true, minTimeoutMs: 3 * 60 * MINUTE },
+	// Two plain fetches at most, like a site check.
+	probe_collected_host: { lane: "liveness", supplementary: true },
 };
 
 /**
@@ -213,4 +216,5 @@ export const JOB_HANDLERS: Readonly<Record<JobType, JobHandler>> = {
 	report_host_move: (job) => reportHostMove({ reportId: idFrom(job.reportId, "reportId"), key: String(job.payload?.key ?? "") }),
 	escalate_target: (job, { signal }) => runEscalation({ targetId: parseJobBigInt(job.payload?.targetId, "payload.targetId"), jobId: job.id, ...(signal ? { signal } : {}) }),
 	visit_website: (job, { signal }) => runWebsiteVisit(job, signal ? { signal } : {}),
+	probe_collected_host: (job, { signal }) => probeCollectedHost(parseJobBigInt(job.payload?.submissionId, "payload.submissionId"), {}, signal),
 };

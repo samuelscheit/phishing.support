@@ -7,7 +7,8 @@ import type { SubmissionStatus } from "@/lib/db/schema";
 export const SUBMISSION_FILTERS = {
 	/** Waiting in the visit queue or being analyzed now. */
 	running: ["queued", "running"],
-	reported: ["reported"],
+	/** Reported, or a host collected into its domain's report. */
+	reported: ["reported", "collected"],
 	no_threat: ["invalid"],
 	failed: ["failed"],
 } as const satisfies Record<string, readonly SubmissionStatus[]>;

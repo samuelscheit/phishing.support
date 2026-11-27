@@ -23,6 +23,8 @@ const PHISHING_BASIS_LABELS: Record<WebsitePhishingBasis, string> = {
  * the case.
  */
 export function canAnalyzeAgain(submission: Pick<SubmissionDetail, "status" | "analysisRuns">, reportCount: number, hasSource: boolean): boolean {
+	// A collected host shows its domain's report, which is not its own: it may be visited on its own.
+	if (submission.status === "collected") return hasSource;
 	return (submission.status === "failed" || submission.status === "invalid")
 		&& submission.analysisRuns.every((run) => run.status !== "running")
 		&& reportCount === 0

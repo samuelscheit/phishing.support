@@ -1,4 +1,5 @@
 import { validateAbuseReportRequest } from "../abuse/contracts";
+import { websiteReportSubject } from "@/lib/abuse/persistence/reports";
 import { AbuseRepository } from "../abuse/repository";
 import { SubmissionsEntity } from "../db/entities/submissions";
 import type { SubmissionStatus, WebsiteSubmissionData } from "../db/schema";
@@ -13,7 +14,7 @@ import type { CampaignSite } from "./members";
 export async function reportCaseSite(submissionId: bigint, url: string): Promise<CampaignSite> {
 	const host = new URL(url).hostname;
 	const request = await validateAbuseReportRequest({ targets: [host], allegationCategory: "phishing", description: `Confirmed credential phishing on ${url}.`, observedUrls: [{ target: host, urls: [url] }] });
-	const created = await AbuseRepository.createReport({ request, reporter: {}, submissionId, subject: { site: websiteSite(url) } });
+	const created = await AbuseRepository.createReport({ request, reporter: {}, submissionId, subject: websiteReportSubject(url) });
 	return { submissionId, reportId: created.reportId, site: websiteSite(url) };
 }
 

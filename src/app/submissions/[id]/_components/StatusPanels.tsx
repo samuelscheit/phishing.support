@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Fragment, useState, type ReactNode } from "react";
 import { RotateCcw, ShieldAlert } from "lucide-react";
 import { instructionsDraft, ReporterInstructionsFields, ReporterInstructionsView } from "@/components/ReporterInstructionsFields";
@@ -120,7 +121,7 @@ export function VerdictPanel({ sites, funnels, routeCount, reports, caseId, subm
  * The "Analyze again" action of a case: offered (`offered`) only while the case can take a retry.
  * A website case's (`instructions` set) lets the reporter's instructions be edited for the new run.
  */
-export type AnalyzeAgain = { offered: boolean; running: boolean; error: string | null; hint: string; instructions?: ReporterInstructions; onStart: (instructions?: ReturnType<typeof instructionsDraft>) => void };
+export type AnalyzeAgain = { offered: boolean; running: boolean; error: string | null; hint: string; label?: string; instructions?: ReporterInstructions; onStart: (instructions?: ReturnType<typeof instructionsDraft>) => void };
 
 /** The reporter's instructions of a website case, as submitted. */
 export function ReporterInstructionsPanel({ instructions }: { instructions: ReporterInstructions }) {
@@ -141,7 +142,7 @@ function AnalyzeAgainAction({ analyzeAgain }: { analyzeAgain: AnalyzeAgain }) {
 			<div className="flex flex-wrap items-center gap-3">
 				<Button type="button" variant="outline" size="sm" disabled={analyzeAgain.running} onClick={() => analyzeAgain.onStart(editing ? draft : undefined)}>
 					<RotateCcw className="h-3.5 w-3.5" />
-					{analyzeAgain.running ? "Starting analysis…" : "Analyze again"}
+					{analyzeAgain.running ? "Starting analysis…" : analyzeAgain.label ?? "Analyze again"}
 				</Button>
 				{analyzeAgain.instructions && !editing ? (
 					<Button type="button" variant="ghost" size="sm" disabled={analyzeAgain.running} onClick={() => setEditing(true)}>
@@ -158,11 +159,12 @@ function AnalyzeAgainAction({ analyzeAgain }: { analyzeAgain: AnalyzeAgain }) {
  * Why a case ended without a report, a verdict of nothing reportable or a
  * failed analysis, with the way to have it analyzed again.
  */
-export function OutcomePanel({ title, info, analyzeAgain }: { title: string; info: string; analyzeAgain: AnalyzeAgain }) {
+export function OutcomePanel({ title, info, related, analyzeAgain }: { title: string; info: string; related?: { href: string; label: string }; analyzeAgain: AnalyzeAgain }) {
 	return (
 		<div className={PANEL}>
 			<div className="text-xs font-semibold text-muted-foreground">{title}</div>
 			<div className="mt-1 text-sm whitespace-pre-wrap">{info}</div>
+			{related ? <Link href={related.href} className="mt-2 inline-block text-sm font-medium text-primary hover:underline">{related.label}</Link> : null}
 			{analyzeAgain.offered ? <AnalyzeAgainAction analyzeAgain={analyzeAgain} /> : null}
 			{analyzeAgain.error ? <div className="mt-2 text-sm text-destructive">{analyzeAgain.error}</div> : null}
 		</div>

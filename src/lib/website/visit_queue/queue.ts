@@ -27,6 +27,11 @@ export type WebsiteVisitPayload = {
 	 * already holds is reused only for a failed case (see `retryAnalysisOptions`).
 	 */
 	fromStatus?: SubmissionStatus;
+	/**
+	 * Visit even when the case's site group says otherwise (website/visit_queue/collect.ts):
+	 * a collected host whose plain fetch showed other content than its report's.
+	 */
+	revisit?: true;
 };
 
 /** The dedupe key of a case's visit: one waiting visit per case. */
@@ -94,6 +99,7 @@ export async function enqueueWebsiteVisit(params: {
 	submission: Pick<Submission, "id" | "reporterIp" | "source" | "siteGroup">;
 	trigger: VisitTrigger;
 	fromStatus?: SubmissionStatus;
+	revisit?: boolean;
 	/** Not before then (an automatic retry's backoff). */
 	notBefore?: Date;
 	/** The share it counts against; by default the case's own (`fairKeyOfCase`). */
@@ -104,6 +110,7 @@ export async function enqueueWebsiteVisit(params: {
 		submissionId: submission.id.toString(),
 		trigger: params.trigger,
 		...(params.fromStatus ? { fromStatus: params.fromStatus } : {}),
+		...(params.revisit ? { revisit: true as const } : {}),
 	};
 	return replaceQueuedJob({
 		jobType: WEBSITE_VISIT_JOB,

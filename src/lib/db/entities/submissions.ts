@@ -171,6 +171,15 @@ export class SubmissionsEntity {
         return row;
     }
 
+	/** The website cases of a site group, oldest first. */
+	static async listSiteGroupCases(siteGroup: string) {
+		const db = await getDb();
+		return db.select().from(submissions)
+			.where(and(eq(submissions.kind, "website"), eq(submissions.siteGroup, siteGroup)))
+			.orderBy(submissions.createdAt)
+			.all();
+	}
+
 	/** Website cases that wait for a visit: queued or running, or failed with an automatic retry scheduled. */
 	static async listAwaitingWebsiteVisits() {
 		const db = await getDb();

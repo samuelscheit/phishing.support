@@ -32,10 +32,10 @@ const MAX_SHOWN_COPY = 400;
  * A picture narrower than the frame, a kit's card, keeps its own width and
  * sits centred on a muted ground instead of being blown up.
  */
-export function SiteVisitBrowser({ running, queued = false, pages, initialPage, live: liveVisit, fallbackUrl, openAction }: {
+export function SiteVisitBrowser({ running, unvisited, pages, initialPage, live: liveVisit, fallbackUrl, openAction }: {
 	running: boolean;
-	/** The case waits in the visit queue: no browser has opened the site yet. */
-	queued?: boolean;
+	/** Why no browser opened the site (it waits in the visit queue, its domain is reported); shown where its page would be. */
+	unvisited?: string;
 	pages: SiteVisitPage[];
 	/** The page shown until another is picked: the one the case's verdict rests on; the last page by default. */
 	initialPage?: number;
@@ -99,7 +99,7 @@ export function SiteVisitBrowser({ running, queued = false, pages, initialPage, 
 						<img src={`/api/artifacts/${picture}`} alt={`Page ${shown + 1} of the visit: ${page.url}`} className="mx-auto block h-auto max-w-full" />
 					</a>
 				) : (
-					<div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">{running ? "Waiting for the browser…" : queued ? "Not visited yet: the site waits for its turn." : "No screenshot of this page."}</div>
+					<div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">{running ? "Waiting for the browser…" : unvisited ?? "No screenshot of this page."}</div>
 				)}
 			</div>
 			{!live && pages.length > 1 ? (

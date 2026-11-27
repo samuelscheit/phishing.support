@@ -108,6 +108,8 @@ export const jobTypes = [
 	"escalate_target",
 	/** Visit a submitted website and analyze it (website/visit_queue): every website analysis runs as one. */
 	"visit_website",
+	/** One plain fetch of a host collected into its site group's report: does it serve what the report's host served? */
+	"probe_collected_host",
 ] as const;
 export type JobType = (typeof jobTypes)[number];
 

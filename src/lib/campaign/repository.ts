@@ -43,7 +43,8 @@ const isMember = (member: CampaignMember) => and(eq(campaignMembers.submissionId
 function siteReports(executor: DbExecutor, filter: { submissionId?: bigint; reportedOnly?: boolean }): CampaignMember[] {
 	const caseFilter = and(
 		eq(submissions.kind, "website"),
-		filter.reportedOnly ? eq(submissions.status, "reported") : undefined,
+		// A collected host stands in its site group's report like a case that joined it.
+		filter.reportedOnly ? inArray(submissions.status, ["reported", "collected"]) : undefined,
 		filter.submissionId === undefined ? undefined : eq(submissions.id, filter.submissionId),
 	);
 	const owned = executor
@@ -344,6 +345,11 @@ export const CampaignRepository = {
 		const rows = db.select().from(campaignSiteFacts).where(inArray(campaignSiteFacts.submissionId, members.map((member) => member.submissionId))).all();
 		const byMember = new Map(rows.map((row) => [memberKey(row), row]));
 		return members.flatMap((member) => byMember.get(memberKey(member)) ?? []);
+	},
+
+	/** Drop a member whose case no longer stands in the report (a collected host visited on its own after all). */
+	async removeMember(member: CampaignMember): Promise<void> {
+		(await getDb()).delete(campaignMembers).where(isMember(member)).run();
 	},
 
 	async memberCount(campaignId: bigint): Promise<number> {

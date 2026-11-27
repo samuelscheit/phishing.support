@@ -282,7 +282,12 @@ async function defaultClassify({ submissionId, archive }: { submissionId: bigint
  */
 export async function verifyReportedContent(
 	target: ContentTarget,
-	options: { maxTier?: "fetch" | "browser" | "analysis"; signal?: AbortSignal } = {},
+	options: {
+		maxTier?: "fetch" | "browser" | "analysis";
+		signal?: AbortSignal;
+		/** Record the verdict on the report (default). A check of another host against the report's content records nothing there. */
+		record?: boolean;
+	} = {},
 	dependencies: ContentVerificationDependencies = {},
 ): Promise<ContentVerification> {
 	const maxTier = options.maxTier ?? "analysis";
@@ -294,7 +299,7 @@ export async function verifyReportedContent(
 	const base = { url: target.url, checkedAt: check.checkedAt.toISOString(), state: check.state, detail: check.detail ?? null };
 	const record = async (verdict: ContentVerdict, observed?: PageFingerprints): Promise<ContentVerification> => {
 		const verification: ContentVerification = { ...base, ...verdict, ...(observed ? { observed } : {}) };
-		await AbuseRepository.appendEvent({ reportId: target.reportId, targetId: target.targetId, eventType: CONTENT_VERIFIED_EVENT, data: verification });
+		if (options.record !== false) await AbuseRepository.appendEvent({ reportId: target.reportId, targetId: target.targetId, eventType: CONTENT_VERIFIED_EVENT, data: verification });
 		return verification;
 	};
 	if (TAKEN_DOWN_STATES.includes(check.state)) return record({ verdict: "gone", tier: "check" });

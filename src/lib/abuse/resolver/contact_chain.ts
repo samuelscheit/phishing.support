@@ -27,6 +27,14 @@ export function contactChainProvenance([primary, ...fallbacks]: readonly [AbuseM
 	return { ...primary, ...(fallbacks.length ? { fallbackContacts: fallbacks.map(contactProvenance) } : {}) };
 }
 
+/** Where a domain's registrar is told: its registration's abuse contacts and the registrars' own forms. */
+const REGISTRAR_SOURCES = new Set(["registrar_rdap", "domain_rdap", "domain_whois"]);
+
+/** Whether a route reports to the registrar of its target's domain (not to a host, CDN or network). */
+export function isRegistrarRoute(route: { resolverProvenance: unknown }): boolean {
+	return REGISTRAR_SOURCES.has(String(asRecord(route.resolverProvenance)?.source));
+}
+
 /** The contact a route reports to, as its provenance records it. */
 export function routeContact(provenance: unknown): JsonRecord {
 	const record = asRecord(provenance) ?? {};

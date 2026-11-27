@@ -3,7 +3,8 @@ import { abuseCaseTag } from "./correlation";
 
 import { optionalOpenAIClient } from "../../openai/client";
 import { optionalResponseText } from "../../openai/response";
-import { normalizePublicHttpUrl } from "../security/security";
+import { normalizePublicHttpUrl, registrableDomain } from "../security/security";
+import { listGroupHostUrls } from "../persistence/reports";
 import { serviceIdentity } from "../../network/service_identity";
 import { defaultResponseModel } from "../../openai/client";
 import type { AbuseProviderRoute, AbuseReport, AbuseTarget } from "../schema";
@@ -17,7 +18,7 @@ import { refangText } from "../../malware/defang";
 import { PRESERVATION_REQUEST } from "../preservation";
 import { approvalDraftOf } from "../persistence/approvals";
 import { asRecord } from "../../util/values";
-import { routeContact } from "../resolver/contact_chain";
+import { isRegistrarRoute, routeContact } from "../resolver/contact_chain";
 import { utcDate } from "../../util/date_time";
 import { accessStepsText, withoutAccessSteps } from "../../website/visit/access_steps_text";
 import type { WebsiteAccessStep } from "../../website/types";
@@ -78,6 +79,8 @@ type AbuseEmailSummaryInput = {
 export type AbuseEmailDraftDependencies = {
 	/** Injectable only for deterministic tests. Production uses a strict Responses call. */
 	generateSummary?: (input: AbuseEmailSummaryInput) => Promise<string | undefined>;
+	/** The other hosts of the report's domain its cases were opened for (`listGroupHostUrls`). */
+	groupHostUrls?: (reportId: bigint) => Promise<string[]>;
 };
 
 type DraftInput = {
@@ -435,6 +438,8 @@ function bodyFor(params: {
 	hostingAddress?: string;
 	upstreamTransit?: string;
 	observedUrls: string[];
+	/** For the registrar: the other hosts of the target's domain reporters sent us, with the domain they share. */
+	groupHosts?: { domain: string; urls: string[] };
 	legalBrandUrl?: string | null;
 	caseUrl?: string;
 	reporterAttribution?: string;
@@ -455,7 +460,10 @@ function bodyFor(params: {
 		: "No file attachment was available for this report; the target and any observed URL are included above.";
 	const brandReference = params.legalBrandUrl ? `Impersonated/legitimate brand reference: ${params.legalBrandUrl}` : undefined;
 	const caseReference = params.caseUrl ? `Case details: ${params.caseUrl}` : undefined;
-	const detailLines = [`Target: ${params.target}`, params.hostingAddress, "Observed URLs:", observedUrls, brandReference, caseReference, params.reporterAttribution].filter((line): line is string => Boolean(line)).join("\n");
+	const groupHosts = params.groupHosts?.urls.length
+		? `Other hosts of ${params.groupHosts.domain} reported to us (the same domain, so the same registration):\n${params.groupHosts.urls.map((url) => `- ${url}`).join("\n")}`
+		: undefined;
+	const detailLines = [`Target: ${params.target}`, params.hostingAddress, "Observed URLs:", observedUrls, groupHosts, brandReference, caseReference, params.reporterAttribution].filter((line): line is string => Boolean(line)).join("\n");
 	const body = (access: string) => [
 		recipientGreeting(params.recipientLabel),
 		"",
@@ -518,12 +526,14 @@ export async function createAbuseEmailDraft(input: DraftInput, dependencies: Abu
 		recipientLabel,
 	};
 	const generated = await (dependencies.generateSummary ?? generateEmailSummaryWithAI)(summaryInput);
+	const groupHosts = await registrarGroupHosts(input, dependencies);
 	// A model may obfuscate the hosts it names (`evil[.]example`); spam filters
 	// score that and undo it before their blocklist lookup (see malware/defang.ts).
 	// Undone here, a restored URL is then held to the approved list like any other.
 	const summary = plainSummary(refangText(generated ?? ""));
 	const allowedSummaryUrls = [
 		...observedUrls,
+		...(groupHosts?.urls ?? []),
 		...(legalBrandUrl ? [legalBrandUrl] : []),
 	];
 	const safeSummary = summary
@@ -540,6 +550,7 @@ export async function createAbuseEmailDraft(input: DraftInput, dependencies: Abu
 			hostingAddress: hostingAddressLine(input.route),
 			upstreamTransit: [escalationLine(input.route), upstreamTransitLine(input.route)].filter(Boolean).join(" ") || undefined,
 			observedUrls,
+			...(groupHosts ? { groupHosts } : {}),
 			legalBrandUrl,
 			caseUrl,
 			reporterAttribution: reporterAttribution(input.report),
@@ -551,6 +562,20 @@ export async function createAbuseEmailDraft(input: DraftInput, dependencies: Abu
 		}),
 		recipientLabel,
 	};
+}
+
+/**
+ * The other hosts of the target's registrable domain a registrar is told of:
+ * one takedown of the domain ends them all, and its registrar gets one report
+ * for the domain (website/visit_queue/collect.ts). Hosts, CDNs and networks
+ * answer for their own addresses only and are not told.
+ */
+async function registrarGroupHosts(input: DraftInput, dependencies: AbuseEmailDraftDependencies): Promise<{ domain: string; urls: string[] } | undefined> {
+	if (!isRegistrarRoute(input.route)) return undefined;
+	const domain = registrableDomain(input.target.normalizedTarget);
+	if (!domain) return undefined;
+	const urls = normalizedBodyUrls(await (dependencies.groupHostUrls ?? listGroupHostUrls)(input.report.id));
+	return urls.length ? { domain, urls } : undefined;
 }
 
 export function verifiedEmailProviderPayload(params: {

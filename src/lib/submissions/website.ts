@@ -7,6 +7,7 @@ import { websiteSite } from "@/lib/website/info/site";
 import type { SubmissionStatus } from "@/lib/db/schema";
 import { enqueueWebsiteVisit, REPORTER_MHTML_NAME } from "@/lib/website/visit_queue/queue";
 import { caseSiteGroup } from "@/lib/website/visit_queue/site_group";
+import { applySiblingDecision, decideSiblingVisit, isWebsiteCase, releaseCollection } from "@/lib/website/visit_queue/collect";
 import { claimRetry, getRetryableSubmission, SubmissionRetryError } from "./retry";
 import type { ReporterInstructions } from "./instructions";
 
@@ -88,13 +89,19 @@ export async function createWebsiteSubmission(options: WebsiteSubmissionOptions)
 	if (mhtmlSnapshot?.byteLength) {
 		await ArtifactsEntity.saveBuffer({ submissionId: id, kind: "mhtml", name: REPORTER_MHTML_NAME, mimeType: "multipart/related", buffer: mhtmlSnapshot });
 	}
+	// A host of a domain already reported is collected into that report, never queued.
+	const created = await SubmissionsEntity.get(id);
+	if (isWebsiteCase(created) && await applySiblingDecision(created, await decideSiblingVisit(created))) {
+		return { id, status: (await SubmissionsEntity.get(id))?.status ?? "collected" };
+	}
 	await enqueueWebsiteVisit({ submission: { id, reporterIp: reporterIp ?? null, source: caseSource, siteGroup }, trigger: "initial", fairKey });
 	return { id, status: "queued" };
 }
 
 /**
- * Retry a failed or unreported website case by hand: claimed at once (the
- * cooldown and the race are decided here), visited when the queue gets to it.
+ * Retry a failed or unreported website case by hand, or visit a collected
+ * host after all: claimed at once (the cooldown and the race are decided
+ * here), visited when the queue gets to it, whatever its site group says.
  */
 export async function retryWebsiteAnalysis(
 	submissionId: bigint,
@@ -111,9 +118,11 @@ export async function retryWebsiteAnalysis(
 	if (!websiteData?.url) throw new SubmissionRetryError("The original website URL is unavailable.");
 
 	await claimRetry(submission, "manual", { to: "queued" });
-	if ("instructions" in replacement) {
-		const { instructions } = replacement;
-		await SubmissionsEntity.update(submissionId, { data: { kind: "website", website: { ...websiteData, instructions } } });
+	// A collected host leaves its group's report: what its own visit finds is reported on its own.
+	const website = isWebsiteCase(submission) && websiteData.collected ? await releaseCollection(submission) : websiteData;
+	if ("instructions" in replacement || website !== websiteData) {
+		const instructions = "instructions" in replacement ? replacement.instructions : website.instructions;
+		await SubmissionsEntity.update(submissionId, { data: { kind: "website", website: { ...website, instructions } } });
 	}
 	await enqueueWebsiteVisit({ submission, trigger: "manual", fromStatus: submission.status });
 }

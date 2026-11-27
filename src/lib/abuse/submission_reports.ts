@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { websiteReportSubject } from "@/lib/abuse/persistence/reports";
 
 import type { ReporterMetadata } from "../http/reporter_headers";
 import { AbuseRepository, type CreatedAbuseReport } from "./repository";
@@ -233,7 +234,7 @@ export async function reportConfirmedWebsiteAbuse(params: ConfirmedWebsiteAbuse)
 		request: await buildWebsiteAbuseRequest(params),
 		reporter: params.reporter,
 		submissionId: params.submissionId,
-		subject: { site: websiteSite(params.urls[0]!) },
+		subject: websiteReportSubject(params.urls[0]!),
 		investigation: { payload },
 	});
 	if (created.created && params.visitCapture) {

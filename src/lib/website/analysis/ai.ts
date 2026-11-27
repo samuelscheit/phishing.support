@@ -18,6 +18,7 @@ import { buildWebsiteAnalysisInput } from "./narrative";
 import { buildWebsiteReportEvidence, classifiedHiddenFrame, copiedTexts, hiddenCopiedCommands } from "./classification";
 import type { ReportableWebsiteFinding, WebsiteDevice, WebsiteFunnel, WebsiteHiddenFrame, WebsiteKitResource, WebsiteNavigationHop, WebsiteRoute, WebsiteRouteVisitor } from "../types";
 import { emitStep } from "../visit/progress";
+import { collectSiblingsOf } from "../visit_queue/collect";
 import { capturedArchiveHop, reportableFinding, reportableWebsiteHop, unreportedVerdict, websiteReportUrls } from "../info/report_hops";
 import { capturedPageScreenshots, capturedWebsiteData, websiteEvidence } from "./evidence";
 import { visitWebsite, type WebsiteChainSite, type WebsiteVisitResult } from "../visit/visit";
@@ -278,6 +279,8 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 				return submissionId;
 			}
 			await SubmissionsEntity.update(submissionId, { status: "reported", info: outcomes.join("\n") });
+			// The other hosts of its domain still waiting for a visit join the report instead.
+			await collectSiblingsOf(submissionId);
 		} else if (visited.inconclusive && inconclusive) {
 			// The visit did not finish, so the last page it reached is no verdict on the site.
 			await failWebsiteAnalysis(submissionId, {

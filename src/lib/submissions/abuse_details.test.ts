@@ -74,10 +74,10 @@ describe("submission report read model", () => {
 	test("holds every confirmed site's report for its investigation, malware included", async () => {
 		const credential = await createWebsiteReport(351387190816673788n);
 		const malwareSubmissionId = 351387190816673789n;
-		await SubmissionsEntity.create({ id: malwareSubmissionId, kind: "website", data: { kind: "website", website: { url: "https://malware.example.com/" } }, dedupeKey: "malware-only" });
+		await SubmissionsEntity.create({ id: malwareSubmissionId, kind: "website", data: { kind: "website", website: { url: "https://malware.example.org/" } }, dedupeKey: "malware-only" });
 		await reportConfirmedWebsiteAbuse({
 			submissionId: malwareSubmissionId,
-			urls: ["https://malware.example.com/"],
+			urls: ["https://malware.example.org/"],
 			analysisText: "The page pushes a malicious executable.",
 			reporter: {},
 			finding: { finding: "malware" },
@@ -129,7 +129,7 @@ describe("submission report read model", () => {
 		// A second case reaches the same shop, and a kit of its own.
 		const joiner = 351387190816673802n;
 		await SubmissionsEntity.create({ id: joiner, kind: "website", data: { kind: "website", website: { url: "https://lure.example.com/" } }, dedupeKey: "website-report-details-test:joiner", status: "reported" });
-		const own = await reportConfirmedWebsiteAbuse({ submissionId: joiner, urls: ["https://kit.example.com/login"], analysisText: "A credential kit.", reporter: {}, finding: { finding: "phishing", phishingBasis: "credential_theft" } });
+		const own = await reportConfirmedWebsiteAbuse({ submissionId: joiner, urls: ["https://kit.example.net/login"], analysisText: "A credential kit.", reporter: {}, finding: { finding: "phishing", phishingBasis: "credential_theft" } });
 		const joined = await reportConfirmedWebsiteAbuse({ submissionId: joiner, urls: ["https://shop.example.com/"], analysisText: "The same shop.", reporter: {}, finding: { finding: "phishing", phishingBasis: "credential_theft" } });
 		expect(joined).toMatchObject({ reportId: report.reportId, created: false, joined: { submissionId: owner } });
 
@@ -140,7 +140,7 @@ describe("submission report read model", () => {
 		]);
 		const joinerReports = (await getSubmissionDetails(joiner.toString()))!.reports;
 		expect(joinerReports.map(({ id, submissionId, primary, target }) => ({ id, submissionId, primary, target }))).toEqual([
-			{ id: own.reportId, submissionId: joiner, primary: true, target: "kit.example.com" },
+			{ id: own.reportId, submissionId: joiner, primary: true, target: "kit.example.net" },
 			{ id: report.reportId, submissionId: owner, primary: true, target: "shop.example.com" },
 		]);
 	});

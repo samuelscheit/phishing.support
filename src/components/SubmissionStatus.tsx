@@ -2,7 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/util/cn";
-import { CheckCircle2, Clock, Loader2, ShieldAlert, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Link2, Loader2, ShieldAlert, XCircle } from "lucide-react";
 import type { ReportedAs } from "@/lib/submissions/finding";
 import type { VisitQueueState } from "@/lib/website/visit_queue/position";
 
@@ -24,6 +24,7 @@ export function submissionStatusLabel(status: string | null | undefined, reporte
 	const key = raw.toLowerCase();
 	if (key === "reported") return reportedAs ? REPORTED_AS_LABELS[reportedAs] : "Reported";
 	if (key === "invalid") return "No threat found";
+	if (key === "collected") return "Collected";
 	if (key === "queued") return queue?.kind === "queued" ? `Queued · #${queue.position}` : queue?.kind === "waiting" ? "Waiting" : "Queued";
 	return raw || "Unknown";
 }
@@ -38,6 +39,15 @@ export function SubmissionStatus({ status, reportedAs, queue, className }: { sta
 			<Badge variant="outline" className={cn("gap-1 border-slate-200 bg-slate-50 text-slate-700", className)}>
 				<Clock className="h-3.5 w-3.5" />
 				{submissionStatusLabel(status, reportedAs, queue)}
+			</Badge>
+		);
+	}
+
+	if (key === "collected") {
+		return (
+			<Badge variant="outline" className={cn("gap-1 border-red-200 bg-red-50 text-red-700", className)} title="Not visited: added to the report of its domain">
+				<Link2 className="h-3.5 w-3.5" />
+				{submissionStatusLabel(status)}
 			</Badge>
 		);
 	}

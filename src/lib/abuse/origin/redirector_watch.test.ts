@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { websiteReportSubject } from "@/lib/abuse/persistence/reports";
 import { and, eq, ne } from "drizzle-orm";
 
 import { getDb } from "../../db";
@@ -242,7 +243,7 @@ async function confirmedDestination(options: { direct?: boolean } = {}) {
 		description: "Confirmed credential phishing.",
 		observedUrls: [{ target: domain, urls: [DESTINATION] }],
 	});
-	return AbuseRepository.createReport({ request, reporter: { reporterCountry: "CH" }, submissionId: CASE_ID, subject: { site: domain } });
+	return AbuseRepository.createReport({ request, reporter: { reporterCountry: "CH" }, submissionId: CASE_ID, subject: websiteReportSubject(`https://${domain}/`) });
 }
 
 const watchJobs = async () => (await getDb()).select().from(jobs).where(eq(jobs.jobType, "watch_redirector")).all();

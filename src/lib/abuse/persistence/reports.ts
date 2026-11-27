@@ -1,6 +1,8 @@
-import { and, asc, eq, exists, inArray, isNotNull, isNull, like } from "drizzle-orm";
+import { and, asc, eq, exists, inArray, isNotNull, isNull, like, or } from "drizzle-orm";
 
-import { getDb, type Transaction } from "../../db";
+import { getDb, type DbExecutor, type Transaction } from "../../db";
+import { submissions } from "../../db/schema";
+import { siteGroupOf } from "../../network/registered_domain";
 import { generateId } from "../../db/ids";
 import type { ReporterMetadata } from "../../http/reporter_headers";
 import type { ValidatedAbuseReportRequest } from "../contracts";
@@ -62,10 +64,20 @@ export const REPORT_JOIN_WINDOW_MS = 30 * DAY_MS;
  * reported anew.
  */
 export type ReportSubject =
-	/** A website site: the case's primary report (no idempotency key) of the site's host; the window is REPORT_JOIN_WINDOW_MS. */
-	| { site: string }
+	/**
+	 * A website site: the case's primary report (no idempotency key) of the
+	 * site's host; the window is REPORT_JOIN_WINDOW_MS. Another case joins an
+	 * open report of any site of the same site group (`siteGroupOf`): one
+	 * registrable domain is reported to its registrar once.
+	 */
+	| { site: string; group: string }
 	/** A subject its reports name in their idempotency keys, `<key>:<submission id>`: a deceptive funnel's business and affiliate. */
 	| { key: string; windowMs: number };
+
+/** A website report's subject: the site its first URL names, and that site's group. */
+export function websiteReportSubject(url: string): ReportSubject {
+	return { site: websiteSite(url), group: siteGroupOf(url).key };
+}
 
 /** The site a report's target stands for: its first reported URL's, else its host. */
 function targetSite(target: { normalizedTarget: string; observedUrls: string[] }): string {
@@ -76,30 +88,73 @@ function targetSite(target: { normalizedTarget: string; observedUrls: string[] }
 	}
 }
 
-type SubjectReport = { id: bigint; submissionId: bigint | null; status: AbuseReportStatus; createdAt: Date; takenDown: boolean };
+type SubjectReport = { id: bigint; submissionId: bigint | null; status: AbuseReportStatus; createdAt: Date; takenDown: boolean; site?: string };
 
-/** The case reports of a subject, oldest first, each with whether a check of ours confirmed its target's takedown. */
-function subjectReports(tx: Transaction, request: ValidatedAbuseReportRequest, subject: ReportSubject): SubjectReport[] {
+const reportColumns = (tx: DbExecutor) => {
 	const takedown = tx.select({ id: siteChecks.id }).from(siteChecks)
 		.where(and(eq(siteChecks.reportId, abuseReports.id), inArray(siteChecks.state, [...TAKEN_DOWN_STATES])));
-	const columns = { id: abuseReports.id, submissionId: abuseReports.submissionId, status: abuseReports.status, createdAt: abuseReports.createdAt, takenDown: exists(takedown).mapWith(Boolean) };
+	return { id: abuseReports.id, submissionId: abuseReports.submissionId, status: abuseReports.status, createdAt: abuseReports.createdAt, takenDown: exists(takedown).mapWith(Boolean) };
+};
+
+/** The site group a report's target stands for. */
+function targetGroup(target: { normalizedTarget: string; observedUrls: string[] }): string {
+	try {
+		return siteGroupOf(target.observedUrls[0] ?? `https://${target.normalizedTarget}/`).key;
+	} catch {
+		return target.normalizedTarget;
+	}
+}
+
+/**
+ * The website case reports of a site group, oldest first: the primary reports
+ * (no idempotency key) whose site, named first, lies in the group, each with
+ * its site and whether a check of ours confirmed its takedown.
+ */
+function siteGroupReports(tx: DbExecutor, group: string): SubjectReport[] {
+	const host = group.split("/")[0]!;
+	return tx
+		.select({ ...reportColumns(tx), normalizedTarget: abuseTargets.normalizedTarget, observedUrls: abuseTargets.observedUrls })
+		.from(abuseReports)
+		.innerJoin(abuseTargets, eq(abuseTargets.reportId, abuseReports.id))
+		// A website case's report names its site first and only; an email report names its sending IP second.
+		.where(and(
+			or(eq(abuseTargets.normalizedTarget, host), like(abuseTargets.normalizedTarget, `%.${host}`)),
+			eq(abuseTargets.ordinal, 0),
+			isNull(abuseReports.idempotencyKey),
+			isNotNull(abuseReports.submissionId),
+		))
+		.orderBy(asc(abuseReports.createdAt))
+		.all()
+		.filter((candidate) => targetGroup(candidate) === group)
+		.map((candidate) => ({ ...candidate, site: targetSite(candidate) }));
+}
+
+/** The case reports of a subject, oldest first, each with whether a check of ours confirmed its target's takedown. */
+function subjectReports(tx: Transaction, subject: ReportSubject): SubjectReport[] {
 	if ("key" in subject) {
-		return tx.select(columns).from(abuseReports)
+		return tx.select(reportColumns(tx)).from(abuseReports)
 			.where(and(like(abuseReports.idempotencyKey, `${subject.key}:%`), isNotNull(abuseReports.submissionId)))
 			.orderBy(asc(abuseReports.createdAt))
 			.all();
 	}
-	const host = request.targets[0]?.normalizedTarget;
-	if (!host) return [];
-	return tx
-		.select({ ...columns, normalizedTarget: abuseTargets.normalizedTarget, observedUrls: abuseTargets.observedUrls })
-		.from(abuseReports)
-		.innerJoin(abuseTargets, eq(abuseTargets.reportId, abuseReports.id))
-		// A website case's report names its site first and only; an email report names its sending IP second.
-		.where(and(eq(abuseTargets.normalizedTarget, host), eq(abuseTargets.ordinal, 0), isNull(abuseReports.idempotencyKey), isNotNull(abuseReports.submissionId)))
-		.orderBy(asc(abuseReports.createdAt))
-		.all()
-		.filter((candidate) => targetSite(candidate) === subject.site);
+	return siteGroupReports(tx, subject.group);
+}
+
+/** Whether a later case may join a report: open, not ended unsent, younger than the window. */
+function joinable(candidate: SubjectReport, at: Date, windowMs: number): boolean {
+	return !UNJOINABLE_REPORT_STATUSES.has(candidate.status) && !candidate.takenDown && at.getTime() - candidate.createdAt.getTime() < windowMs;
+}
+
+/**
+ * The report that stands for a site group, which a host of the group is
+ * collected into instead of visited: the oldest open one a later case may
+ * join, else the newest one our checks found taken down (the registrar or
+ * host acted on the group already). Undefined when the group has none.
+ */
+export async function siteGroupReport(group: string, at = new Date()): Promise<{ reportId: bigint; submissionId: bigint; takenDown: boolean } | undefined> {
+	const candidates = siteGroupReports(await getDb(), group);
+	const chosen = candidates.find((candidate) => joinable(candidate, at, REPORT_JOIN_WINDOW_MS)) ?? candidates.findLast((candidate) => candidate.takenDown);
+	return chosen && { reportId: chosen.id, submissionId: chosen.submissionId!, takenDown: chosen.takenDown };
 }
 
 /**
@@ -113,11 +168,12 @@ function existingCaseReport(tx: Transaction, submissionId: bigint, request: Vali
 		const owned = tx.select({ id: abuseReports.id }).from(abuseReports).where(and(eq(abuseReports.submissionId, submissionId), isNull(abuseReports.idempotencyKey))).get();
 		return owned && { reportId: owned.id, ownerId: submissionId };
 	}
-	const candidates = subjectReports(tx, request, subject);
-	const owned = candidates.find((candidate) => candidate.submissionId === submissionId);
+	const candidates = subjectReports(tx, subject);
+	// The case's own report of this very site; another site of its group it reported itself is a report of its own.
+	const owned = candidates.find((candidate) => candidate.submissionId === submissionId && ("key" in subject || candidate.site === subject.site));
 	if (owned) return { reportId: owned.id, ownerId: submissionId };
 	const windowMs = "key" in subject ? subject.windowMs : REPORT_JOIN_WINDOW_MS;
-	const open = candidates.find((candidate) => !UNJOINABLE_REPORT_STATUSES.has(candidate.status) && !candidate.takenDown && at.getTime() - candidate.createdAt.getTime() < windowMs);
+	const open = candidates.find((candidate) => candidate.submissionId !== submissionId && joinable(candidate, at, windowMs));
 	return open && { reportId: open.id, ownerId: open.submissionId! };
 }
 
@@ -160,7 +216,7 @@ export async function createReport(params: {
 				const existing = existingCaseReport(tx, params.submissionId, request, params.subject, now());
 				if (existing?.ownerId === params.submissionId) return { reportId: existing.reportId, trackingToken, created: false };
 				if (existing) {
-					joinCase(tx, existing.reportId, params.submissionId, request);
+					joinCase(tx, existing.reportId, params.submissionId, request.targets.flatMap((target) => target.observedUrls));
 					return { reportId: existing.reportId, trackingToken, created: false, joined: { submissionId: existing.ownerId } };
 				}
 			}
@@ -260,18 +316,66 @@ export async function createReport(params: {
 	}
 
 /** Link a case to another case's report of the same subject, once, with an event naming it on the report. */
-function joinCase(tx: Transaction, reportId: bigint, submissionId: bigint, request: ValidatedAbuseReportRequest): void {
+function joinCase(tx: DbExecutor, reportId: bigint, submissionId: bigint, urls: readonly string[], data: Record<string, unknown> = {}): boolean {
 	const linked = tx.insert(abuseReportCases)
 		.values({ id: generateId(), reportId, submissionId, createdAt: now() })
 		.onConflictDoNothing()
 		.returning({ id: abuseReportCases.id })
 		.get();
-	if (!linked) return;
-	recordEvent(tx, {
-		reportId,
-		eventType: "report.case_joined",
-		data: { submissionId: submissionId.toString(), urls: request.targets.flatMap((target) => target.observedUrls) },
-	});
+	if (!linked) return false;
+	recordEvent(tx, { reportId, eventType: "report.case_joined", data: { submissionId: submissionId.toString(), urls: [...urls], ...data } });
+	return true;
+}
+
+/**
+ * Name a case a report covers without the case having been visited: a host
+ * collected into its site group's report (website/visit_queue/collect.ts).
+ */
+export async function collectCaseIntoReport(reportId: bigint, submissionId: bigint, url: string): Promise<boolean> {
+	const db = await getDb();
+	return db.transaction((tx) => joinCase(tx, reportId, submissionId, [url], { collected: true }), { behavior: "immediate" });
+}
+
+/** Undo a collection: the case is visited on its own after all, so the report no longer names it. */
+export async function releaseCollectedCase(reportId: bigint, submissionId: bigint): Promise<void> {
+	const db = await getDb();
+	db.transaction((tx) => {
+		const left = tx.delete(abuseReportCases)
+			.where(and(eq(abuseReportCases.reportId, reportId), eq(abuseReportCases.submissionId, submissionId)))
+			.returning({ id: abuseReportCases.id })
+			.get();
+		if (left) recordEvent(tx, { reportId, eventType: "report.case_released", data: { submissionId: submissionId.toString() } });
+	}, { behavior: "immediate" });
+}
+
+/**
+ * The addresses of the other hosts of a report's site group that cases this
+ * report names (collected or joined) were opened for, first seen first: what
+ * the registrar is told besides the reported host.
+ */
+export async function listGroupHostUrls(reportId: bigint): Promise<string[]> {
+	const db = await getDb();
+	const target = db.select({ normalizedTarget: abuseTargets.normalizedTarget }).from(abuseTargets)
+		.where(and(eq(abuseTargets.reportId, reportId), eq(abuseTargets.ordinal, 0))).get();
+	if (!target) return [];
+	const rows = db.select({ data: submissions.data }).from(abuseReportCases)
+		.innerJoin(submissions, eq(submissions.id, abuseReportCases.submissionId))
+		.where(eq(abuseReportCases.reportId, reportId))
+		.orderBy(asc(abuseReportCases.createdAt))
+		.all();
+	const urls = new Map<string, string>();
+	for (const { data } of rows) {
+		const url = data.kind === "website" ? data.website.url : undefined;
+		if (!url) continue;
+		let host: string;
+		try {
+			host = new URL(url).hostname;
+		} catch {
+			continue;
+		}
+		if (host !== target.normalizedTarget && !urls.has(host)) urls.set(host, url);
+	}
+	return [...urls.values()];
 }
 
 /**

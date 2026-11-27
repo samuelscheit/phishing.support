@@ -146,6 +146,13 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 		/>
 	) : isFailed ? (
 		<OutcomePanel title="Failure reason" info={submission.info || "The analysis did not complete."} analyzeAgain={analyzeAgain} />
+	) : statusKey === "collected" && website?.collected?.reason === "sibling_reported" ? (
+		<OutcomePanel
+			title="Added to its domain's report"
+			info={submission.info || "Not visited: its domain is already reported."}
+			related={{ href: `/submissions/${website.collected.intoSubmissionId}`, label: `Open the case that reported ${website.collected.siteGroup}` }}
+			analyzeAgain={{ ...analyzeAgain, label: "Visit this host", hint: "Visits this host on its own; the domain's report no longer names it." }}
+		/>
 	) : null;
 
 	return (
@@ -189,7 +196,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 					{routes.length > 1 ? <RouteSelector routes={routes} selected={route} submittedSite={targetName} onSelect={setChosenRoute} /> : null}
 					{website ? (
 						// Keyed by route: a newly picked route opens on its own judged page, not the index picked on another.
-						<SiteVisitBrowser key={route} running={isRunning} queued={statusKey === "queued"} pages={visitPages} initialPage={routeAnalyzed?.page.step} live={liveVisit} fallbackUrl={website.url ?? ""} openAction={openSite} />
+						<SiteVisitBrowser key={route} running={isRunning} unvisited={statusKey === "queued" ? "Not visited yet: the site waits for its turn." : statusKey === "collected" ? "Not visited: its domain is already reported." : undefined} pages={visitPages} initialPage={routeAnalyzed?.page.step} live={liveVisit} fallbackUrl={website.url ?? ""} openAction={openSite} />
 					) : null}
 					{submission.data.kind === "email" && <EmailFacts email={submission.data.email} />}
 					<Tabs value={tab} onValueChange={setTab} className="w-full min-w-0">

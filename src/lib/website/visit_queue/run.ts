@@ -8,19 +8,14 @@ import { claimRetry, getRetryableSubmission, SubmissionRetryError } from "@/lib/
 import { analyzeWebsite, type AnalyzeWebsiteOptions } from "../analysis/ai";
 import { failWebsiteAnalysis } from "../analysis/failure";
 import { analyzedPage, latestArtifactNamed, navigationToPage, websiteCaptureFileNames } from "../visit/capture_files";
+import { applySiblingDecision, decideSiblingVisit, isWebsiteCase, type WebsiteCase } from "./collect";
 import { enqueueWebsiteVisit, REPORTER_MHTML_NAME, visitJobKey, type VisitTrigger, type WebsiteVisitPayload } from "./queue";
 
-type WebsiteCase = Submission & { data: { kind: "website"; website: WebsiteSubmissionData } };
-
-function isWebsiteCase(submission: Submission | undefined): submission is WebsiteCase {
-	return submission?.kind === "website" && submission.data.kind === "website";
-}
-
-function readPayload(payload: Job["payload"]): { submissionId: bigint; trigger: VisitTrigger; fromStatus?: SubmissionStatus } {
-	const { submissionId, trigger, fromStatus } = (payload ?? {}) as Partial<WebsiteVisitPayload>;
+function readPayload(payload: Job["payload"]): { submissionId: bigint; trigger: VisitTrigger; fromStatus?: SubmissionStatus; revisit: boolean } {
+	const { submissionId, trigger, fromStatus, revisit } = (payload ?? {}) as Partial<WebsiteVisitPayload>;
 	if (typeof submissionId !== "string" || !/^\d+$/.test(submissionId)) throw new Error("A website visit job names no case.");
 	if (trigger !== "initial" && trigger !== "manual" && trigger !== "automatic") throw new Error(`A website visit job has an unknown trigger: ${String(trigger)}.`);
-	return { submissionId: BigInt(submissionId), trigger, ...(fromStatus ? { fromStatus } : {}) };
+	return { submissionId: BigInt(submissionId), trigger, ...(fromStatus ? { fromStatus } : {}), revisit: revisit === true };
 }
 
 const reporterOf = (submission: Submission) => ({
@@ -123,15 +118,22 @@ export type WebsiteVisitDependencies = {
 /**
  * Run one queued visit. A job that finds its case where its trigger no
  * longer applies (reported, retried by hand, deleted) does nothing; one that
- * finds its case still running was cut off by the process dying in it.
+ * finds its case still running was cut off by the process dying in it. A
+ * host whose site group was reported meanwhile, or whose group's other hosts
+ * showed nothing often enough, is not visited (`decideSiblingVisit`); a
+ * retry asked for by hand always visits.
  */
 export async function runWebsiteVisit(job: Pick<Job, "payload">, dependencies: WebsiteVisitDependencies = {}): Promise<void> {
-	const { submissionId, trigger, fromStatus } = readPayload(job.payload);
+	const { submissionId, trigger, fromStatus, revisit } = readPayload(job.payload);
 	const submission = await SubmissionsEntity.get(submissionId);
 	if (!isWebsiteCase(submission)) return;
 	if (submission.status === "running") {
 		await failInterruptedVisit(submission);
 		return;
+	}
+	if (trigger !== "manual" && !revisit && (submission.status === "queued" || submission.status === "failed")) {
+		if (trigger === "automatic" && submission.status !== "failed") return;
+		if (await applySiblingDecision(submission, await decideSiblingVisit(submission))) return;
 	}
 	let options: AnalyzeWebsiteOptions;
 	if (trigger === "automatic") {
