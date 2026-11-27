@@ -57,20 +57,15 @@ export function getMailWebsiteUrls(mail: Pick<MailData, "html" | "text">): strin
 }
 
 export async function getMailImage(result: MailData) {
+	if (!result.html) throw new Error("No HTML content found");
 	const browser = await getBrowser();
 
 	try {
-		if (!result.html) throw new Error("No HTML content found");
-
 		const page = await browser.newPage();
-		await page.setViewport({ width: 1080, height: 720 });
-
-		await page.setContent(result.html, {
-			waitUntil: "domcontentloaded",
-		});
-
+		// Scripts in a reported mail must never run, so they are off before the content is set.
 		await page.setJavaScriptEnabled(false);
-
+		await page.setViewport({ width: 1080, height: 720 });
+		await page.setContent(result.html, { waitUntil: "domcontentloaded" });
 		await page.waitForNetworkIdle();
 
 		const screenshot = await page.screenshot({
@@ -79,9 +74,6 @@ export async function getMailImage(result: MailData) {
 			type: "png",
 		});
 		return Buffer.from(screenshot);
-	} catch (error) {
-		console.error("Error processing HTML content:", error);
-		throw error;
 	} finally {
 		await browser.close();
 	}

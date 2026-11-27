@@ -8,16 +8,14 @@ import type { RDAPAbuseContact, RDAPEntity } from "../website/info/info";
 export function recursiveAbuseContact(entity: RDAPEntity, info = ""): RDAPAbuseContact | null {
 	if (!entity) return null;
 
+	const remarks = [info, entity.remarks].filter(Boolean).join("\n");
 	if (entity.roles?.includes("abuse")) {
-		return {
-			...(entity.vcard ?? {}),
-			remarks: (info + "\n" + entity.remarks).trim(),
-		};
+		return { ...(entity.vcard ?? {}), remarks };
 	}
 
 	if (entity.entities) {
 		for (const child of entity.entities) {
-			const result = recursiveAbuseContact(child, (info + "\n" + entity.remarks).trim());
+			const result = recursiveAbuseContact(child, remarks);
 			if (result) return result;
 		}
 	}
