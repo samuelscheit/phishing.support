@@ -179,14 +179,25 @@ export async function hasJob(dedupeKey: string): Promise<boolean> {
 }
 
 /** The report's jobs still waiting to run, soonest first: what the case page says happens next. */
-export async function listQueuedJobsForReport(reportId: bigint): Promise<Array<Pick<Job, "jobType" | "routeId" | "nextAttemptAt">>> {
+export async function listQueuedJobsForReport(reportId: bigint): Promise<Array<Pick<Job, "jobType" | "routeId" | "dedupeKey" | "nextAttemptAt">>> {
 	const db = await getDb();
 	return db
-		.select({ jobType: jobs.jobType, routeId: jobs.routeId, nextAttemptAt: jobs.nextAttemptAt })
+		.select({ jobType: jobs.jobType, routeId: jobs.routeId, dedupeKey: jobs.dedupeKey, nextAttemptAt: jobs.nextAttemptAt })
 		.from(jobs)
 		.where(and(eq(jobs.reportId, reportId), eq(jobs.status, "queued")))
 		.orderBy(asc(jobs.nextAttemptAt))
 		.all();
+}
+
+/** The reports a job of this type waits to run for, each once. */
+export async function listReportsWithQueuedJob(jobType: JobType): Promise<bigint[]> {
+	const db = await getDb();
+	return db
+		.selectDistinct({ reportId: jobs.reportId })
+		.from(jobs)
+		.where(and(eq(jobs.jobType, jobType), eq(jobs.status, "queued")))
+		.all()
+		.flatMap(({ reportId }) => (reportId === null ? [] : [reportId]));
 }
 
 /**

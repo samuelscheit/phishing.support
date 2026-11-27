@@ -19,6 +19,7 @@ import { organisationOf, type Organisation } from "@/lib/provider_stats/organisa
 import { FaviconStore } from "@/lib/favicon/store";
 import { roleOf, type ProviderRole } from "@/lib/provider_stats/role";
 import { routeEventFacts, routeOutcomeOf, type RouteOutcome } from "@/lib/provider_stats/route_outcome";
+import { plannedEscalation, type PlannedEscalationStep } from "./planned_escalation";
 
 function nonEmptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value : undefined;
@@ -99,6 +100,8 @@ export type SubmissionReportRoute = {
 	messages: SubmissionReportMessage[];
 	/** How each review decision the provider sent was answered, or why it was not. */
 	decisionFollowUps: DecisionFollowUpSummary[];
+	/** The escalation steps still to come on this route if the provider does not act, soonest first. */
+	escalation: PlannedEscalationStep[];
 	createdAt: Date;
 	updatedAt: Date;
 };
@@ -161,6 +164,10 @@ export type SubmissionReport = {
 	hostMoves: HostMove[];
 	/** The latest liveness check of the reported site, when there was one. */
 	latestCheck: { state: SiteCheckState; checkedAt: Date } | null;
+	/** The escalation steps still to come for the whole site (oversight bodies, the operator's decision), soonest first. */
+	siteEscalation: PlannedEscalationStep[];
+	/** When this view was read: what "due" and "in 2 days" are counted from. */
+	viewedAt: Date;
 };
 
 /**
@@ -218,7 +225,7 @@ function providerReportBody(params: {
 	};
 }
 
-async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionReport> {
+async function hydrateSubmissionReport(report: AbuseReport, now: Date): Promise<SubmissionReport> {
 	const [targets, routes, runs, messages, artifacts, events, joinedCases, queuedJobs, checks] = await Promise.all([
 		AbuseRepository.listTargets(report.id),
 		AbuseRepository.listRoutes(report.id),
@@ -280,6 +287,68 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 	const funnelParty = report.idempotencyKey?.startsWith("funnel:") && targets[0] ? parseFunnelPartyTarget(targets[0].normalizedTarget) : undefined;
 	const siteTarget = targets[0]?.id;
 	const latestCheck = checks.findLast((check) => check.targetId === siteTarget);
+	const views = routes
+		.filter((route) => route.routeType !== "manual_unroutable" || routes.length === 1)
+		.map((route) => {
+			const target = targetsById.get(route.targetId);
+			const run = latestRunByRoute.get(route.id);
+			const stored = messagesByRoute.get(route.id) ?? [];
+			const routeMessages = stored.map((message) => messageView(route, message));
+			const { organisation, name } = organisations.get(route.id)!;
+			const sourceMessage = asRecord(route.resolverProvenance)?.sourceMessageId;
+			const namedByRoute = typeof sourceMessage === "string" ? routeOfMessage.get(sourceMessage) : undefined;
+			const outcome = routeOutcomeOf({
+				routeType: route.routeType,
+				status: route.status,
+				createdAt: route.createdAt,
+				...routeEventFacts(eventsByRoute.get(route.id) ?? []),
+				messages: stored,
+			});
+			const draft = route.routeType === "provider_submission"
+				? providerReportBody({
+					providerRegistryKey: route.providerRegistryKey,
+					providerPayload: run?.providerPayload,
+					target: target?.normalizedTarget ?? "Unknown target",
+					observedUrls: target?.observedUrls ?? [],
+					description: report.description,
+					allegationCategory: report.allegationCategory,
+					legalBrandUrl: report.legalBrandUrl,
+					...reportAccess({ ...(website ? { accessSteps: websiteAccessSteps(website, target?.observedUrls ?? []) } : {}), ...(caseUrl ? { caseUrl } : {}) }),
+				})
+				: undefined;
+			return {
+				id: route.id,
+				provider: route.providerDisplayName,
+				organisation: name,
+				icon: (organisation.site && icons.get(organisation.site)) ?? null,
+				role: roleOf(route, target?.targetType ?? "domain", organisation),
+				channel: route.routeType === "email" ? "email" : getProviderSubmissionProvider(route.providerRegistryKey)?.channel ?? "online form",
+				outcome,
+				namedBy: namedByRoute !== undefined && namedByRoute !== route.id ? { routeId: namedByRoute, organisation: organisations.get(namedByRoute)?.name ?? "another provider" } : null,
+				nextWork: queuedJobs.flatMap((job) => {
+					const kind = NEXT_WORK[job.jobType];
+					return job.routeId === route.id && kind ? [{ kind, at: job.nextAttemptAt }] : [];
+				}),
+				routeType: route.routeType,
+				recipient: route.verifiedEmail ?? null,
+				target: target?.normalizedTarget ?? "Unknown target",
+				status: route.status,
+				executionStatus: run?.executionStatus ?? null,
+				body: draft?.body ?? null,
+				bodySource: draft?.bodySource ?? null,
+				observedUrls: target?.observedUrls ?? [],
+				submittedTargets: run?.submittedTargets ?? [],
+				confirmationId: run?.confirmationId ?? null,
+				confirmationText: run?.confirmationText ?? null,
+				finalUrl: run?.finalUrl ?? null,
+				error: safePublicError(route.status, statusReason(eventsByRoute.get(route.id) ?? [], route.status) ?? run?.failureReason ?? target?.disposition, { key: route.providerRegistryKey, name }) ?? null,
+				messages: routeMessages,
+				decisionFollowUps: followUpsByRoute.get(route.id) ?? [],
+				createdAt: run?.createdAt ?? route.createdAt,
+				updatedAt: run?.updatedAt ?? route.updatedAt,
+			};
+		});
+	const planned = plannedEscalation({ report, targets, routes, views, events, checks, queuedJobs, now });
 	return {
 		id: report.id,
 		submissionId: report.submissionId,
@@ -293,77 +362,19 @@ async function hydrateSubmissionReport(report: AbuseReport): Promise<SubmissionR
 		status: report.status,
 		createdAt: report.createdAt,
 		updatedAt: report.updatedAt,
-		routes: routes
-			.filter((route) => route.routeType !== "manual_unroutable" || routes.length === 1)
-			.map((route) => {
-				const target = targetsById.get(route.targetId);
-				const run = latestRunByRoute.get(route.id);
-				const stored = messagesByRoute.get(route.id) ?? [];
-				const routeMessages = stored.map((message) => messageView(route, message));
-				const { organisation, name } = organisations.get(route.id)!;
-				const sourceMessage = asRecord(route.resolverProvenance)?.sourceMessageId;
-				const namedByRoute = typeof sourceMessage === "string" ? routeOfMessage.get(sourceMessage) : undefined;
-				const outcome = routeOutcomeOf({
-					routeType: route.routeType,
-					status: route.status,
-					createdAt: route.createdAt,
-					...routeEventFacts(eventsByRoute.get(route.id) ?? []),
-					messages: stored,
-				});
-				const draft = route.routeType === "provider_submission"
-					? providerReportBody({
-						providerRegistryKey: route.providerRegistryKey,
-						providerPayload: run?.providerPayload,
-						target: target?.normalizedTarget ?? "Unknown target",
-						observedUrls: target?.observedUrls ?? [],
-						description: report.description,
-						allegationCategory: report.allegationCategory,
-						legalBrandUrl: report.legalBrandUrl,
-						...reportAccess({ ...(website ? { accessSteps: websiteAccessSteps(website, target?.observedUrls ?? []) } : {}), ...(caseUrl ? { caseUrl } : {}) }),
-					})
-					: undefined;
-				return {
-					id: route.id,
-					provider: route.providerDisplayName,
-					organisation: name,
-					icon: (organisation.site && icons.get(organisation.site)) ?? null,
-					role: roleOf(route, target?.targetType ?? "domain", organisation),
-					channel: route.routeType === "email" ? "email" : getProviderSubmissionProvider(route.providerRegistryKey)?.channel ?? "online form",
-					outcome,
-					namedBy: namedByRoute !== undefined && namedByRoute !== route.id ? { routeId: namedByRoute, organisation: organisations.get(namedByRoute)?.name ?? "another provider" } : null,
-					nextWork: queuedJobs.flatMap((job) => {
-						const kind = NEXT_WORK[job.jobType];
-						return job.routeId === route.id && kind ? [{ kind, at: job.nextAttemptAt }] : [];
-					}),
-					routeType: route.routeType,
-					recipient: route.verifiedEmail ?? null,
-					target: target?.normalizedTarget ?? "Unknown target",
-					status: route.status,
-					executionStatus: run?.executionStatus ?? null,
-					body: draft?.body ?? null,
-					bodySource: draft?.bodySource ?? null,
-					observedUrls: target?.observedUrls ?? [],
-					submittedTargets: run?.submittedTargets ?? [],
-					confirmationId: run?.confirmationId ?? null,
-					confirmationText: run?.confirmationText ?? null,
-					finalUrl: run?.finalUrl ?? null,
-					error: safePublicError(route.status, statusReason(eventsByRoute.get(route.id) ?? [], route.status) ?? run?.failureReason ?? target?.disposition, { key: route.providerRegistryKey, name }) ?? null,
-					messages: routeMessages,
-					decisionFollowUps: followUpsByRoute.get(route.id) ?? [],
-					createdAt: run?.createdAt ?? route.createdAt,
-					updatedAt: run?.updatedAt ?? route.updatedAt,
-				};
-			}),
+		routes: views.map((view) => ({ ...view, escalation: planned.filter((step) => step.routeId === view.id) })),
 		artifacts,
 		hostMoves: hostMovesOf(events).filter((move) => move.targetId === String(siteTarget)),
 		latestCheck: latestCheck ? { state: latestCheck.state, checkedAt: latestCheck.checkedAt } : null,
+		siteEscalation: planned.filter((step) => step.routeId === undefined),
+		viewedAt: now,
 	};
 }
 
-/** The given reports with their provider routes and correspondence, in the order asked for; unknown ids are left out. */
-export async function getReportsByIds(reportIds: readonly bigint[]): Promise<SubmissionReport[]> {
+/** The given reports with their provider routes and correspondence, in the order asked for; unknown ids are left out. Planned steps are told as of `now`. */
+export async function getReportsByIds(reportIds: readonly bigint[], now = new Date()): Promise<SubmissionReport[]> {
 	const reports = await Promise.all(reportIds.map((id) => AbuseRepository.getReport(id)));
-	return Promise.all(reports.filter((report) => report !== undefined).map(hydrateSubmissionReport));
+	return Promise.all(reports.filter((report) => report !== undefined).map((report) => hydrateSubmissionReport(report, now)));
 }
 
 /**
@@ -372,11 +383,11 @@ export async function getReportsByIds(reportIds: readonly bigint[]): Promise<Sub
  * them), then the open reports of other cases it joined for a site they
  * already report (`submissionId` names the owning case).
  */
-export async function getReportsForSubmission(submissionId: bigint): Promise<SubmissionReport[]> {
+export async function getReportsForSubmission(submissionId: bigint, now = new Date()): Promise<SubmissionReport[]> {
 	const [owned, joined] = await Promise.all([
 		AbuseRepository.listReportsForSubmission(submissionId),
 		AbuseRepository.listJoinedReportsForSubmission(submissionId),
 	]);
 	const ordered = [...owned.filter((report) => !report.idempotencyKey), ...owned.filter((report) => report.idempotencyKey), ...joined];
-	return Promise.all(ordered.map(hydrateSubmissionReport));
+	return Promise.all(ordered.map((report) => hydrateSubmissionReport(report, now)));
 }

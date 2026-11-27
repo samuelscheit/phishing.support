@@ -83,6 +83,18 @@ type NoticeChannel =
 	| { kind: "email"; recipient: string; subject: string; runId: bigint; confirmationId: string; replyAddress?: string }
 	| { kind: "form"; channel: Extract<DecisionAnswerChannel, { kind: "form" }>; subject: string; runId: bigint; confirmationId: string };
 
+/** The provider's own channel for more evidence on a report filed through it, when it defines one. */
+export function providerNoticeChannel(route: Pick<AbuseProviderRoute, "routeType" | "providerRegistryKey">, providerFor: typeof getProviderSubmissionProvider = getProviderSubmissionProvider): DecisionAnswerChannel | undefined {
+	return route.routeType === "provider_submission" ? providerFor(route.providerRegistryKey)?.decisionFollowUp?.channel : undefined;
+}
+
+/** Where a route's notice goes, as far as its record tells before sending: the mailbox of a mail report, or the provider's follow-up channel for a report it took with a receipt. */
+export function noticeRecipient(route: Pick<AbuseProviderRoute, "routeType" | "providerRegistryKey" | "verifiedEmail">, confirmationId: string | null, providerFor?: typeof getProviderSubmissionProvider): string | undefined {
+	if (route.routeType === "email") return route.verifiedEmail ?? undefined;
+	const channel = providerNoticeChannel(route, providerFor);
+	return channel && confirmationId ? (channel.kind === "email" ? channel.replyAddress : channel.name) : undefined;
+}
+
 async function noticeChannelOf(route: AbuseProviderRoute, providerFor: typeof getProviderSubmissionProvider = getProviderSubmissionProvider): Promise<NoticeChannel | undefined> {
 	const run = await AbuseRepository.getLatestProviderRunForRoute(route.id);
 	if (!run) return undefined;
@@ -97,7 +109,7 @@ async function noticeChannelOf(route: AbuseProviderRoute, providerFor: typeof ge
 		// Replies come back on the route's own reply address, like the provider's answer to the report did.
 		return { kind: "email", recipient: route.verifiedEmail, subject, runId: run.id, confirmationId: report.messageId ?? run.correlationKey, ...(report.replyAddress ? { replyAddress: report.replyAddress } : {}) };
 	}
-	const channel = route.routeType === "provider_submission" ? providerFor(route.providerRegistryKey)?.decisionFollowUp?.channel : undefined;
+	const channel = providerNoticeChannel(route, providerFor);
 	if (!channel || !run.confirmationId) return undefined;
 	return channel.kind === "email"
 		? { kind: "email", recipient: channel.replyAddress, subject: channel.subject(run.confirmationId), runId: run.id, confirmationId: run.confirmationId }

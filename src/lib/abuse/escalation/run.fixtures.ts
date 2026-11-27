@@ -11,7 +11,8 @@ import { validateAbuseReportRequest } from "../contracts";
 import type { sendAbuseEmailRoute } from "../mail/send";
 import { AbuseRepository } from "../repository";
 import { abuseEvents, jobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns } from "../schema";
-import { escalationJobKey, runEscalation, type EscalationDependencies } from "./run";
+import { escalationJobKey } from "./ladder";
+import { runEscalation, type EscalationDependencies } from "./run";
 
 /** Helpers of the escalation tests: a reported PayPal phishing site nobody acts on, the site as checks see it, a recording mail relay, and the worker. */
 export const DOMAIN = "paypal-verify-account.com";

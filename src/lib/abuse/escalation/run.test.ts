@@ -10,7 +10,8 @@ import { AbuseRepository } from "../repository";
 import { routeContact } from "../resolver/contact_chain";
 import { abuseEvents, jobs, abuseMailMessages, type AbuseProviderRoute } from "../schema";
 import type { sendAbuseEmailRoute } from "../mail/send";
-import { ESCALATION_EVENT, ESCALATION_HELD_EVENT, escalationJobKey, type EscalationDependencies } from "./run";
+import { ESCALATION_EVENT, ESCALATION_HELD_EVENT, escalationJobKey } from "./ladder";
+import type { EscalationDependencies } from "./run";
 import { scriptedSiteVisit } from "../../site_visit/test_helpers";
 import { day, DOMAIN, relay, reported, SENT, site, URL_, work } from "./run.fixtures";
 
@@ -153,7 +154,7 @@ describe("escalating a report nobody acts on", () => {
 	});
 
 	test("a site that moved is not escalated to the hosting it left; the registrar still is", async () => {
-		const { reportId, targetId, host, registrar } = await reported();
+		const { reportId, targetId, registrar } = await reported();
 		await AbuseRepository.appendEvent({ reportId, targetId, eventType: "site.host_moved", data: {
 			key: `${targetId}->AS64999`, targetId: targetId.toString(), at: day(1).toISOString(), since: SENT.toISOString(), kind: "new_network",
 			from: { name: "EXAMPLE-HOSTING", asn: 64500, addresses: ["203.0.113.10"] }, to: { name: "OTHER-NET", asn: 64999, addresses: ["198.51.100.7"] },
@@ -162,7 +163,8 @@ describe("escalating a report nobody acts on", () => {
 		const { sent, send } = relay();
 		const dependencies = (at: Date): EscalationDependencies => ({ verify: { site: site("kit"), isShared: async () => false }, send, providerFor: () => undefined, countryOf: async () => "NL", now: () => at });
 		await work(targetId, dependencies(day(2)));
-		expect(await steps(reportId)).toEqual([`follow_up@${host}:site_moved`, `follow_up@${registrar}:no_channel`]);
+		// The hosting the site left has no step of its own, not even one recorded as doing nothing.
+		expect(await steps(reportId)).toEqual([`follow_up@${registrar}:no_channel`]);
 		expect(sent).toEqual([]);
 		for (const at of [day(4), day(5), day(7)]) await work(targetId, dependencies(at));
 		// No DSA notice to the old host, and it is not named as the host that failed to act.

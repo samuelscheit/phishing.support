@@ -5,6 +5,7 @@ import type { ProviderRole } from "@/lib/provider_stats/role";
 import type { SubmissionReport, SubmissionReportRoute } from "@/lib/submissions/abuse_details";
 import { routeTimeline, shortUtc, type TimelineEntry } from "@/lib/submissions/report_view";
 import { cn } from "@/lib/util/cn";
+import { PlannedNode, PlannedStep } from "./planned";
 
 /** A role as the noun a sentence names a company by: "the hosting provider Cloudflare named". */
 const ROLE_NOUN: Record<ProviderRole, string> = {
@@ -19,7 +20,7 @@ const ROLE_NOUN: Record<ProviderRole, string> = {
 };
 
 /** A folded block of text: what we sent, a provider's full email, our report as it quoted it. */
-function Fold({ label, children }: { label: string; children: ReactNode }) {
+export function Fold({ label, children }: { label: string; children: ReactNode }) {
 	return (
 		<details className="group/fold min-w-0 max-w-full open:basis-full">
 			<summary className="cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
@@ -52,8 +53,17 @@ function Head({ children, at, reference }: { children: ReactNode; at?: Date; ref
 	);
 }
 
-function Entry({ entry, route, reportId, artifacts, reference }: { entry: TimelineEntry; route: SubmissionReportRoute; reportId: string; artifacts: SubmissionReport["artifacts"]; reference: Date | string }) {
+function Entry({ entry, route, reportId, artifacts, reference, now }: { entry: TimelineEntry; route: SubmissionReportRoute; reportId: string; artifacts: SubmissionReport["artifacts"]; reference: Date | string; now: Date | string }) {
 	switch (entry.kind) {
+		case "planned":
+			return (
+				<>
+					<PlannedNode />
+					<PlannedStep step={entry.step} text={entry.text} now={now} reference={reference}>
+						{entry.step.draft ? <Fold label="What we will send">{entry.step.draft}</Fold> : null}
+					</PlannedStep>
+				</>
+			);
 		case "reported":
 			return (
 				<>
@@ -142,17 +152,20 @@ function Entry({ entry, route, reportId, artifacts, reference }: { entry: Timeli
 /**
  * One route's history, oldest first: what we sent, the provider's status
  * changes on one line, its messages by their key sentence with the full text
- * folded, and the reports its answer led to.
+ * folded, the reports its answer led to, and, dashed after the history,
+ * the next escalation step planned.
  */
 export function RouteTimeline({ route, report }: { route: SubmissionReportRoute; report: SubmissionReport }) {
 	const reference = report.createdAt;
+	const entries = routeTimeline(route, report.routes);
+	const planned = entries.at(-1)?.kind === "planned" ? entries.at(-1) : undefined;
+	const entry = (item: TimelineEntry) => <Entry entry={item} route={route} reportId={String(report.id)} artifacts={report.artifacts} reference={reference} now={report.viewedAt} />;
 	return (
-		<ol className="relative space-y-4 before:absolute before:bottom-2 before:left-[6px] before:top-2 before:w-px before:bg-border">
-			{routeTimeline(route, report.routes).map((entry, index) => (
-				<li key={index} className="relative min-w-0 pl-6">
-					<Entry entry={entry} route={route} reportId={String(report.id)} artifacts={report.artifacts} reference={reference} />
-				</li>
-			))}
-		</ol>
+		<div className="min-w-0">
+			<ol className="relative space-y-4 before:absolute before:bottom-2 before:left-[6px] before:top-2 before:w-px before:bg-border">
+				{(planned ? entries.slice(0, -1) : entries).map((item, index) => <li key={index} className="relative min-w-0 pl-6">{entry(item)}</li>)}
+			</ol>
+			{planned ? <div className="relative mt-4 min-w-0 pl-6">{entry(planned)}</div> : null}
+		</div>
 	);
 }

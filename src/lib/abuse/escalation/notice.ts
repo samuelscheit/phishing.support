@@ -1,7 +1,9 @@
 import type { ContentMatch, ContentVerification } from "../../liveness/content";
+import type { SiteHosting } from "../../liveness/hosting";
 import { serviceIdentity } from "../../network/service_identity";
 import { SIGNATURE, utc } from "../host_move/notice";
-import type { Recipient } from "./recipients";
+import { recipientGreeting } from "../mail/shared";
+import { brandRecipient, type Recipient } from "./recipients";
 
 /** What the escalation texts say about the reported site and our report of it. */
 export type EscalationFacts = {
@@ -16,6 +18,32 @@ export type EscalationFacts = {
 	hosting?: string;
 	brand?: string;
 };
+
+/** The facts before the check right before sending: what a planned message says. */
+export type PlannedFacts = Omit<EscalationFacts, "verification"> & { verification?: ContentVerification };
+
+/** The site's hosting address and network as a check found it, unless a CDN fronts it, with the network's AS when no CDN does. */
+export function hostingOf(hosting: SiteHosting | null | undefined): { text: string; asn?: number } | undefined {
+	const address = hosting?.addresses.find((candidate) => !candidate.cdn) ?? hosting?.addresses[0];
+	if (!address) return undefined;
+	const network = address.asn !== undefined ? ` (AS${address.asn}${address.holder ? ` ${address.holder}` : ""})` : "";
+	return { text: `${address.ip}${network}${address.cdn ? `, behind ${address.cdn}` : ""}`, ...(address.asn !== undefined && !address.cdn ? { asn: address.asn } : {}) };
+}
+
+/** What every escalation text says about the site and our report of it, before the check that confirms it is still served. */
+export function plannedFacts(params: { domain: string; url: string; allegation: string; reportedAt: Date; caseUrl?: string; hosting?: SiteHosting | null; brandUrl?: string | null }): PlannedFacts {
+	const hosting = hostingOf(params.hosting);
+	const brand = brandRecipient(params.brandUrl);
+	return {
+		domain: params.domain,
+		url: params.url,
+		allegation: params.allegation,
+		reportedAt: params.reportedAt,
+		...(params.caseUrl ? { caseUrl: params.caseUrl } : {}),
+		...(hosting ? { hosting: hosting.text } : {}),
+		...(brand ? { brand: brand.name } : {}),
+	};
+}
 
 /** The provider an oversight body is told did not act; `answer` when it answered that it would not. */
 export type UnactedProvider = { role: string; name: string; email?: string; reportedAt: Date; reference?: string; answer?: "declined" | "no_threat" };
@@ -39,8 +67,9 @@ function siteKind(allegation: string): string {
 	return allegation === "malware" ? "malware distribution site" : allegation === "phishing" ? "phishing page" : "reported site";
 }
 
-/** What our check found, in lines a reader can repeat. */
-function verificationLines(verification: ContentVerification): string[] {
+/** What our check found, in lines a reader can repeat; before it ran, where they will be. */
+function verificationLines(verification: ContentVerification | undefined): string[] {
+	if (!verification) return ["[Our check of the site right before sending: what it still serves, with the SHA-256 of the page or files as we captured them when we reported it.]"];
 	const how = verification.tier === "fetch" ? "a plain request" : verification.tier === "browser" ? "a browser like the visitors'" : "a browser like the visitors' and our page analysis";
 	const head = `Checked ${utc(verification.checkedAt)} with ${how}:`;
 	if (verification.verdict === "served") {
@@ -50,7 +79,7 @@ function verificationLines(verification: ContentVerification): string[] {
 	return [head, `- ${verification.url}: ${verification.detail ?? verification.state}`];
 }
 
-function caseLines(facts: EscalationFacts): string[] {
+function caseLines(facts: PlannedFacts): string[] {
 	return [
 		`Reported URL: ${facts.url}`,
 		...(facts.hosting ? [`Hosting: ${facts.hosting}`] : []),
@@ -59,11 +88,15 @@ function caseLines(facts: EscalationFacts): string[] {
 	];
 }
 
-/** To a provider that has not acted on our report: the same ticket, with proof the site still serves it. */
-export function followUpNotice(params: { greeting: string; facts: EscalationFacts; reference?: string }): string {
+/**
+ * To a provider that has not acted on our report: the same ticket, with
+ * proof the site still serves it. Greets the provider's trust and safety
+ * team when it names one for follow-ups (`addressee`), else its abuse team.
+ */
+export function followUpNotice(params: { organisation: string; addressee?: string; facts: PlannedFacts; reference?: string }): string {
 	const { facts } = params;
 	return [
-		params.greeting,
+		params.addressee ? `Hello ${params.addressee} Trust & Safety,` : recipientGreeting(params.organisation),
 		"",
 		`On ${utc(facts.reportedAt.toISOString())} we reported the ${siteKind(facts.allegation)} at ${facts.url}${params.reference ? ` (your reference ${params.reference})` : ""}. We have not seen any action on it, and it is still online and still serving what we reported.`,
 		"",

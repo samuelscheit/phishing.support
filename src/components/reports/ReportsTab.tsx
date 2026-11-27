@@ -7,8 +7,9 @@ import { ROLE_LABEL } from "@/components/provider_stats/labels";
 import { Card } from "@/components/ui/card";
 import type { WebsiteSubmissionData } from "@/lib/db/schema";
 import type { SubmissionReport } from "@/lib/submissions/abuse_details";
-import { nextStep, rankedRoutes, routeBuckets, shortUtc, subjectLabel, takedownSummary, type RouteEntry, type TakedownSummary } from "@/lib/submissions/report_view";
+import { nextStep, plannedStepText, rankedRoutes, routeBuckets, shortUtc, subjectLabel, takedownSummary, type RouteEntry, type TakedownSummary } from "@/lib/submissions/report_view";
 import { cn } from "@/lib/util/cn";
+import { PlannedChip, PlannedStep } from "./planned";
 import { RouteTimeline } from "./RouteTimeline";
 import { ProviderAvatar } from "./ProviderAvatar";
 import { BUCKET_STYLE, StandingPill, Steps } from "./standing";
@@ -169,7 +170,10 @@ function RouteRow({ entry }: { entry: RouteEntry }) {
 					<Steps steps={standing.steps} />
 				</div>
 				<div className="col-span-2 min-w-0 space-y-0.5 @2xl:col-span-1 @2xl:col-start-3 @2xl:row-start-1">
-					<StandingPill bucket={standing.bucket}>{standing.label}</StandingPill>
+					<div className="flex flex-wrap items-center gap-1.5">
+						<StandingPill bucket={standing.bucket}>{standing.label}</StandingPill>
+						{route.escalation[0] ? <PlannedChip step={route.escalation[0]} now={report.viewedAt} /> : null}
+					</div>
 					{standing.line ? <p className="line-clamp-2 text-xs text-muted-foreground [overflow-wrap:anywhere]" title={standing.line}>{standing.quoted ? `“${standing.line}”` : standing.line}</p> : null}
 				</div>
 				{next ? <p className="col-span-2 text-xs text-muted-foreground @2xl:col-span-3 @2xl:col-start-2"><span className="font-medium text-foreground">Next:</span> {next}</p> : null}
@@ -199,6 +203,7 @@ function TargetGroup({ reports, caseId }: { reports: SubmissionReport[]; caseId?
 	const entries = withNextHops(rankedRoutes(reports));
 	const owners = [...new Set(reports.filter((report) => caseId !== undefined && report.submissionId !== null && String(report.submissionId) !== caseId).map((report) => String(report.submissionId)))];
 	const url = first!.subject === "payload_host" ? first!.routes[0]?.observedUrls[0] : undefined;
+	const site = reports.flatMap((report) => report.siteEscalation.slice(0, 1).map((step) => ({ step, report }))).sort((a, b) => new Date(a.step.at).getTime() - new Date(b.step.at).getTime())[0];
 	return (
 		<section className="space-y-2">
 			<div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-0.5">
@@ -214,6 +219,11 @@ function TargetGroup({ reports, caseId }: { reports: SubmissionReport[]; caseId?
 			</div>
 			<Card className="@container overflow-hidden">
 				{entries.length ? entries.map((entry) => <RouteRow key={String(entry.route.id)} entry={entry} />) : <p className="px-4 py-3 text-sm text-muted-foreground">No provider has been contacted yet.</p>}
+				{site ? (
+					<div className="border-t px-4 py-3">
+						<PlannedStep step={site.step} text={plannedStepText(site.step, undefined, site.report.createdAt)} now={site.report.viewedAt} reference={site.report.createdAt} />
+					</div>
+				) : null}
 			</Card>
 		</section>
 	);

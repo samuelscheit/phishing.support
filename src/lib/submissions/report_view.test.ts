@@ -8,7 +8,9 @@ import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { useTemporaryDatabase } from "@/lib/db/test_helpers";
 import type { SubmissionReportMessage, SubmissionReportRoute } from "./abuse_details";
 import { getReportsForSubmission } from "./abuse_details";
-import { decisionOf, nextStep, rankedRoutes, routeStanding, routeTimeline, shortUtc, subjectLabel, takedownSummary } from "./report_view";
+import { decisionOf, nextStep, plannedStepText, rankedRoutes, routeStanding, routeTimeline, shortUtc, subjectLabel, takedownSummary, untilText } from "./report_view";
+import type { PlannedEscalationStep } from "./planned_escalation";
+import { scheduleEscalation } from "@/lib/abuse/escalation/run";
 import { seedTrylevoReports, trylevoAt } from "./trylevo_reports.fixtures";
 
 useTemporaryDatabase();
@@ -69,6 +71,20 @@ describe("the reports of case 384401854580134038 as the case page reads them", (
 		expect(next({ ...scanned, nextWork: [{ kind: "status_check", at: new Date("2026-11-26T20:25:00Z") }] })).toBe("Netcraft's automatic scan found no threat. Next status check at 20:25 UTC.");
 		// A settled route has nothing next.
 		expect(next(by(site!.routes, "Cloudflare"))).toBeUndefined();
+	});
+
+	test("once liveness put the site on its escalation ladder, the host that has not answered is followed up two days after its report", async () => {
+		const [site] = await trylevo();
+		const target = (await AbuseRepository.listTargets(site!.id))[0]!;
+		const now = trylevoAt("21:00:00");
+		await scheduleEscalation({ reportId: site!.id, targetId: target.id }, now);
+		const [later] = await getReportsForSubmission(CASE, now);
+		const host = by(later!.routes, "Sollutium-NL");
+		expect(nextStep(host, routeStanding(host), later!.createdAt)).toBe("Follow-up to Sollutium-NL at 28 Nov 19:05 UTC if it hasn't acted.");
+		expect(host.escalation[0]).toMatchObject({ step: "follow_up", at: new Date(trylevoAt("19:05:18").getTime() + 2 * 86_400_000), to: { name: "Sollutium-NL", address: "abuse-ams@v-sys.org" } });
+		expect(routeTimeline(host, later!.routes).at(-1)).toMatchObject({ kind: "planned", text: { heading: "Follow-up planned", condition: "if Sollutium-NL hasn't acted" } });
+		// Cloudflare acted: no step of its own.
+		expect(by(later!.routes, "Cloudflare").escalation).toEqual([]);
 	});
 
 	test("the takedown status: the strongest outcome first, counts by standing, targets and companies", async () => {
@@ -136,7 +152,7 @@ function route(fields: Partial<SubmissionReportRoute> & { messages?: SubmissionR
 		id: 1n, provider: "Cloudflare Abuse", organisation: "Cloudflare", icon: null, role: "cdn", channel: "dashboard API", namedBy: null, nextWork: [],
 		outcome: { verdict: "acknowledged", sentAt: trylevoAt("18:51:08"), followUps: 0, unansweredDecisions: 0, overturnedByFollowUp: false, inbound: 0, outbound: 0 },
 		routeType: "provider_submission", target: "hostsync.pro", recipient: null, status: "submitted", executionStatus: "completed", body: null, bodySource: null,
-		observedUrls: [], submittedTargets: [], confirmationId: "8bb11a971b4aee08", confirmationText: null, finalUrl: null, error: null, messages: [], decisionFollowUps: [],
+		observedUrls: [], submittedTargets: [], confirmationId: "8bb11a971b4aee08", confirmationText: null, finalUrl: null, error: null, messages: [], decisionFollowUps: [], escalation: [],
 		createdAt: trylevoAt("18:50:53"), updatedAt: trylevoAt("19:20:56"),
 		...fields,
 	};
@@ -217,9 +233,38 @@ describe("routeStanding and the timeline from a route's own record", () => {
 		expect(nextStep(sending, routeStanding(sending), trylevoAt("18:50:00"))).toBe("Sending at 18:55 UTC.");
 	});
 
+	test("how far a planned step is: minutes, hours, days ahead; overdue once past", () => {
+		const now = trylevoAt("12:00:00");
+		const after = (minutes: number) => new Date(now.getTime() + minutes * 60_000);
+		expect([0, 0.2, 40, 59, 60, 90, 47 * 60, 48 * 60, 2.4 * 1440, -30, -3 * 60, -3 * 1440].map((minutes) => untilText(after(minutes), now))).toEqual([
+			"in 1m", "in 1m", "in 40m", "in 59m", "in 1h", "in 2h", "in 47h", "in 2d", "in 2d", "30m overdue", "3h overdue", "3d overdue",
+		]);
+		expect(untilText(after(90).toISOString(), now.toISOString())).toBe("in 2h");
+	});
+
 	test("a lost answer with its lookups over is left for a person, and dates of another day name the day", () => {
 		const lost = route({ status: "unknown_external_state" });
 		expect(nextStep(lost, routeStanding(lost))).toBe("No further automatic check; the report is looked into by hand.");
 		expect(shortUtc(new Date("2026-11-27T19:21:00Z"), trylevoAt("18:50:00"))).toBe("27 Nov 19:21");
+	});
+});
+
+describe("a planned step in words", () => {
+	const step = (fields: Partial<PlannedEscalationStep>): PlannedEscalationStep => ({ key: "route:1:1", targetId: 1n, step: "follow_up", routeId: 1n, at: trylevoAt("19:00:00"), advanced: false, due: false, ...fields });
+
+	test("each step says whom it reaches and on what condition; a provider's form is written through, a mailbox at", () => {
+		expect(plannedStepText(step({ to: { name: "Eranet", address: "Eranet's supplement form" } }), "Eranet").sentence).toBe("We'll write to Eranet again through Eranet's supplement form, on its own report, with proof that the site still serves the reported content.");
+		expect(plannedStepText(step({ to: { name: "Cloudflare", address: "abusereply@cloudflare.com" } }), "Cloudflare").sentence).toBe("We'll write to Cloudflare again at abusereply@cloudflare.com, on its own report, with proof that the site still serves the reported content.");
+		expect(plannedStepText(step({ step: "next_contact", key: "route:1:2", to: { name: "Parent Net", address: "abuse@parent.example" } }), "Host")).toMatchObject({ label: "Escalate", heading: "Escalation planned", condition: "if Host hasn't acted", sentence: "We'll report the site to Parent Net (abuse@parent.example), the next abuse contact Host publishes for its network." });
+		expect(plannedStepText(step({ step: "upstream", key: "route:1:3", to: { name: "Transit", address: "noc@transit.example" } }), "Host").sentence).toBe("We'll report the site to Transit (noc@transit.example), the upstream transit provider of Host's network, naming Host as its customer.");
+		expect(plannedStepText(step({ step: "exhausted", key: "site:5", routeId: undefined }))).toMatchObject({ label: "Review", condition: "if the site is still up" });
+	});
+
+	test("a hold and the operator bringing it forward are noted before the condition every step has", () => {
+		expect(plannedStepText(step({ heldUntil: trylevoAt("20:00:00"), advanced: true }), "Host", trylevoAt("18:00:00")).notes).toEqual([
+			"On hold until 20:00 UTC: our last check did not find the reported content.",
+			"Brought forward by our team.",
+			"It happens only if a check right before then finds the site still serving the reported content.",
+		]);
 	});
 });

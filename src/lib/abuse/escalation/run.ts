@@ -1,38 +1,22 @@
 import { verifyReportedContent, stillAbusive, type ContentVerification, type ContentVerificationDependencies } from "../../liveness/content";
-import { hostMovesOf } from "../../liveness/moves";
 import { listSiteChecksForTargets } from "../../liveness/repository";
 import { registeredCountry } from "../../network/ripestat";
-import { getReportsByIds, type SubmissionReportRoute } from "../../submissions/abuse_details";
-import { decisionOf } from "../../submissions/report_view";
-import { DAY_MS } from "../../util/date_time";
+import { getReportsByIds } from "../../submissions/abuse_details";
 import { asRecord } from "../../util/values";
 import { draftMailRoute } from "../approval/drafted_mail";
 import { sendRouteNotice } from "../followup/route_notice";
 import { abuseEmailCaseUrl } from "../mail/draft";
-import { recipientGreeting } from "../mail/shared";
 import type { sendAbuseEmailRoute } from "../mail/send";
 import { getProviderSubmissionProvider } from "../providers";
 import { AbuseRepository } from "../repository";
 import { routeContact } from "../resolver/contact_chain";
-import type { AbuseEvent, AbuseProviderRoute, AbuseTarget } from "../schema";
+import type { AbuseProviderRoute, AbuseTarget } from "../schema";
 import { routeToContact } from "../worker/mail";
 import { UnknownExternalStateError } from "../worker/shared";
-import { brandDraft, certDraft, dsaNoticeDraft, followUpNotice, icannComplaintText, type Draft, type EscalationFacts, type UnactedProvider } from "./notice";
-import { escalationPlan, stepKey, type EscalationRoute, type EscalationStep } from "./policy";
+import { contactForStep, ESCALATION_EVENT, ESCALATION_HELD_EVENT, escalationJobKey, firstSentAt, targetLadder, type LadderRouteState } from "./ladder";
+import { brandDraft, certDraft, dsaNoticeDraft, followUpNotice, hostingOf, icannComplaintText, plannedFacts, type Draft, type EscalationFacts, type UnactedProvider } from "./notice";
+import { escalationPlan, ESCALATED_ROLES, type EscalationStep } from "./policy";
 import { brandRecipient, DSA_COUNTRIES, ICANN_COMPLAINT, isGenericTld, NATIONAL_CERTS } from "./recipients";
-
-/** One step of the ladder taken for a route or the site, with what it did. */
-export const ESCALATION_EVENT = "route.escalated";
-/** The ladder waited: the site no longer serves the reported content, or that could not be confirmed. */
-export const ESCALATION_HELD_EVENT = "escalation.held";
-/** A site whose content could not be confirmed is looked at again this much later. */
-const UNVERIFIED_RETRY_MS = DAY_MS;
-/** A site whose page changed into something the classifier finds harmless is looked at again this much later. */
-const NOT_MALICIOUS_RETRY_MS = 7 * DAY_MS;
-/** Answers that say the report never reached anyone: such a route has nothing to escalate from. */
-const UNDELIVERED = new Set(["bounced", "not_delivered", "pending"]);
-
-export const escalationJobKey = (targetId: bigint) => `escalation:${targetId.toString()}`;
 
 export type EscalationDependencies = {
 	verify?: ContentVerificationDependencies;
@@ -43,63 +27,26 @@ export type EscalationDependencies = {
 	now?: () => Date;
 };
 
-type RouteState = { route: AbuseProviderRoute; view: SubmissionReportRoute; ladder: EscalationRoute };
+type RouteState = LadderRouteState<AbuseProviderRoute>;
 
-/** The target's routes as the ladder reads them, and the steps already taken. */
-async function escalationState(reportId: bigint, targetId: bigint) {
+/** The target's ladder as its records stand, read the way the case page reads it. */
+export async function escalationState(reportId: bigint, targetId: bigint) {
 	const [routes, [view], events] = await Promise.all([AbuseRepository.listRoutes(reportId), getReportsByIds([reportId]), AbuseRepository.listEvents(reportId)]);
-	const views = new Map((view?.routes ?? []).map((route) => [route.id, route]));
-	const states: RouteState[] = routes.filter((route) => route.targetId === targetId && views.has(route.id)).map((route) => {
-		const routeView = views.get(route.id)!;
-		const decision = decisionOf(routeView.messages)?.decision.outcome;
-		return {
-			route,
-			view: routeView,
-			ladder: {
-				routeId: route.id,
-				role: routeView.role,
-				...(routeView.outcome.sentAt && !UNDELIVERED.has(routeView.outcome.verdict) ? { sentAt: routeView.outcome.sentAt } : {}),
-				...(decision ? { decision } : {}),
-				escalated: asRecord(routeContact(route.resolverProvenance).escalation) !== undefined,
-			},
-		};
-	});
-	const taken = new Set(events.filter((event) => event.eventType === ESCALATION_EVENT && event.targetId === targetId).flatMap((event) => {
-		const level = Number(asRecord(event.data)?.level);
-		return Number.isInteger(level) ? [stepKey({ level, ...(event.routeId === null ? {} : { routeId: event.routeId }) })] : [];
-	}));
-	// The site left the hosting it was reported on: the host-move report tells the new host, and the old one is not escalated to.
-	const moved = hostMovesOf(events).some((move) => move.targetId === targetId.toString());
-	return { states, taken, events, moved };
-}
-
-/**
- * When the ladder may look at the site again after it held: a day after
- * content that could not be confirmed, a week after a page the classifier
- * found harmless. A site taken down is not checked by liveness for
- * escalation at all until it is back up.
- */
-function heldUntil(events: readonly AbuseEvent[], targetId: bigint): Date | undefined {
-	const held = events.findLast((event) => event.eventType === ESCALATION_HELD_EVENT && event.targetId === targetId);
-	if (!held) return undefined;
-	const data = asRecord(held.data);
-	const at = typeof data?.at === "string" ? new Date(data.at) : held.createdAt;
-	return new Date(at.getTime() + (data?.verdict === "not_malicious" ? NOT_MALICIOUS_RETRY_MS : UNVERIFIED_RETRY_MS));
+	return targetLadder(targetId, routes, view?.routes ?? [], events);
 }
 
 /**
  * Queue the target's escalation job for when its next step falls due (now
- * when one already is), or nothing once the ladder is done. One job per
- * target; a later call moves it earlier, never later. A running escalation
- * job passes itself as `successorOf` to queue the next.
+ * when one already is), or nothing once the ladder is done; a hold delays
+ * it. One job per target; a later call moves it earlier, never later. A
+ * running escalation job passes itself as `successorOf` to queue the next.
  */
 export async function scheduleEscalation(target: { reportId: bigint; targetId: bigint }, now = new Date(), successorOf?: bigint): Promise<void> {
-	const { states, taken, events } = await escalationState(target.reportId, target.targetId);
-	const plan = escalationPlan(states.map((state) => state.ladder), taken, now);
+	const { ladder, heldUntil } = await escalationState(target.reportId, target.targetId);
+	const plan = escalationPlan(ladder, now);
 	const due = plan.due.length ? now : plan.nextAt;
 	if (!due) return;
-	const held = heldUntil(events, target.targetId);
-	await queueEscalation(target, held && held > due ? held : due, successorOf);
+	await queueEscalation(target, heldUntil && heldUntil > due ? heldUntil : due, successorOf);
 }
 
 const queueEscalation = (target: { reportId: bigint; targetId: bigint }, at: Date, successorOf: bigint | undefined) => AbuseRepository.enqueueJob({
@@ -111,20 +58,6 @@ const queueEscalation = (target: { reportId: bigint; targetId: bigint }, at: Dat
 	advance: true,
 	...(successorOf === undefined ? {} : { successorOf }),
 });
-
-function firstSentAt(states: readonly RouteState[]): Date | undefined {
-	const sent = states.flatMap((state) => (state.ladder.sentAt ? [state.ladder.sentAt.getTime()] : []));
-	return sent.length ? new Date(Math.min(...sent)) : undefined;
-}
-
-/** The site's hosting address and network from its latest check, unless a CDN fronts it. */
-async function hostingOf(targetId: bigint): Promise<{ text: string; asn?: number } | undefined> {
-	const latest = (await listSiteChecksForTargets([targetId])).at(-1);
-	const address = latest?.hosting?.addresses.find((candidate) => !candidate.cdn) ?? latest?.hosting?.addresses[0];
-	if (!address) return undefined;
-	const network = address.asn !== undefined ? ` (AS${address.asn}${address.holder ? ` ${address.holder}` : ""})` : "";
-	return { text: `${address.ip}${network}${address.cdn ? `, behind ${address.cdn}` : ""}`, ...(address.asn !== undefined && !address.cdn ? { asn: address.asn } : {}) };
-}
 
 function unacted(state: RouteState): UnactedProvider {
 	return {
@@ -138,11 +71,8 @@ function unacted(state: RouteState): UnactedProvider {
 }
 
 /** The routes an escalation still speaks of: takedown providers reached that did not act, not the hosting the site has left. */
-function climbing(context: Pick<StepContext, "states" | "moved">): RouteState[] {
-	return context.states.filter((state) => ["host", "registrar", "cdn"].includes(state.ladder.role)
-		&& state.ladder.sentAt
-		&& state.ladder.decision !== "action_taken"
-		&& !(context.moved && state.ladder.role !== "registrar"));
+function climbing(context: Pick<StepContext, "states">): RouteState[] {
+	return context.states.filter(({ ladder }) => ESCALATED_ROLES.has(ladder.role) && ladder.sentAt && ladder.decision !== "action_taken" && !ladder.left);
 }
 
 /** The route a ladder step already created from `from`, when a crash kept the step from being recorded. */
@@ -156,7 +86,6 @@ function createdBy(from: bigint, level: number, routes: readonly AbuseProviderRo
 type StepContext = {
 	target: AbuseTarget;
 	states: RouteState[];
-	moved: boolean;
 	facts: EscalationFacts;
 	hosting?: { text: string; asn?: number };
 	dependencies: EscalationDependencies;
@@ -165,12 +94,11 @@ type StepContext = {
 /** The ladder's own steps; each returns what it did, which its event records. */
 async function takeStep(step: EscalationStep, context: StepContext): Promise<Record<string, unknown>> {
 	const state = step.routeId === undefined ? undefined : context.states.find((candidate) => candidate.route.id === step.routeId);
-	if (state && context.moved && state.ladder.role !== "registrar") return { action: "site_moved" };
 	switch (step.step) {
 		case "follow_up": {
 			const { route, view } = state!;
 			const addressee = (context.dependencies.providerFor ?? getProviderSubmissionProvider)(route.providerRegistryKey)?.decisionFollowUp?.addressee;
-			const body = followUpNotice({ greeting: addressee ? `Hello ${addressee} Trust & Safety,` : recipientGreeting(view.organisation), facts: context.facts, ...(view.confirmationId ? { reference: view.confirmationId } : {}) });
+			const body = followUpNotice({ organisation: view.organisation, ...(addressee ? { addressee } : {}), facts: context.facts, ...(view.confirmationId ? { reference: view.confirmationId } : {}) });
 			const outcome = await sendRouteNotice(route, { body, attachments: [], correlationKey: `escalation:${route.id.toString()}:${step.level}` }, {
 				...(context.dependencies.send ? { send: context.dependencies.send } : {}),
 				...(context.dependencies.providerFor ? { providerFor: context.dependencies.providerFor } : {}),
@@ -180,11 +108,10 @@ async function takeStep(step: EscalationStep, context: StepContext): Promise<Rec
 		case "next_contact":
 		case "upstream": {
 			const { route } = state!;
-			const upstream = step.step === "upstream";
 			const earlier = createdBy(route.id, step.level, await AbuseRepository.listRoutes(route.reportId));
 			if (earlier) return { action: "reported", routeId: earlier.id.toString(), to: earlier.verifiedEmail };
 			const created = await routeToContact(route.id, {
-				choose: (contact) => Boolean(contact.transit) === upstream,
+				choose: contactForStep(step.step),
 				why: (from) => ({
 					reason: "escalation_no_action",
 					escalation: {
@@ -263,8 +190,8 @@ export async function runEscalation(params: { targetId: bigint; jobId?: bigint; 
 	const report = target ? await AbuseRepository.getReport(target.reportId) : undefined;
 	const url = target?.observedUrls[0];
 	if (!target || !report || report.status === "canceled" || !url) return;
-	const { states, taken, moved } = await escalationState(report.id, target.id);
-	const plan = escalationPlan(states.map((state) => state.ladder), taken, now);
+	const { states, ladder } = await escalationState(report.id, target.id);
+	const plan = escalationPlan(ladder, now);
 	const owner = { reportId: report.id, targetId: target.id };
 	if (!plan.due.length) {
 		await scheduleEscalation(owner, now, params.jobId);
@@ -279,25 +206,19 @@ export async function runEscalation(params: { targetId: bigint; jobId?: bigint; 
 		return;
 	}
 
-	const hosting = await hostingOf(target.id);
-	const brand = brandRecipient(report.legalBrandUrl);
+	const check = (await listSiteChecksForTargets([target.id])).at(-1);
+	const hosting = hostingOf(check?.hosting);
 	const caseUrl = abuseEmailCaseUrl(report.submissionId);
 	const facts: EscalationFacts = {
-		domain: target.normalizedTarget,
-		url,
-		allegation: report.allegationCategory,
-		reportedAt: firstSentAt(states) ?? report.createdAt,
+		...plannedFacts({ domain: target.normalizedTarget, url, allegation: report.allegationCategory, reportedAt: firstSentAt(states) ?? report.createdAt, ...(caseUrl ? { caseUrl } : {}), hosting: check?.hosting, brandUrl: report.legalBrandUrl }),
 		verification,
-		...(caseUrl ? { caseUrl } : {}),
-		...(hosting ? { hosting: hosting.text } : {}),
-		...(brand ? { brand: brand.name } : {}),
 	};
 	// Each step stands alone: one provider's failure neither blocks nor repeats another's.
 	let failure: unknown;
 	for (const step of plan.due) {
 		let outcome: Record<string, unknown>;
 		try {
-			outcome = await takeStep(step, { target, states, moved, facts, ...(hosting ? { hosting } : {}), dependencies });
+			outcome = await takeStep(step, { target, states, facts, ...(hosting ? { hosting } : {}), dependencies });
 		} catch (error) {
 			// A message that may have gone out is never sent again: the step counts as taken.
 			if (!(error instanceof UnknownExternalStateError)) {

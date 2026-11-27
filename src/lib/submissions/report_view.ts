@@ -2,8 +2,10 @@ import type { CleanMailText } from "@/lib/abuse/mail/clean_text";
 import type { ProviderDecision } from "@/lib/abuse/providers/submission_contracts";
 import type { AbuseMailClassification } from "@/lib/abuse/schema";
 import { leadSentence } from "@/lib/abuse/mail/clean_text";
+import type { EscalationStepName } from "@/lib/abuse/escalation/policy";
 import { currentMove, hostMoveText, type HostMove } from "@/lib/liveness/moves";
 import type { ReportSubject, SubmissionReport, SubmissionReportMessage, SubmissionReportRoute } from "./abuse_details";
+import type { PlannedEscalationStep } from "./planned_escalation";
 
 /**
  * Where a report to one provider stands, from the reporter's side, strongest first:
@@ -190,12 +192,67 @@ export function shortUtc(at: Date | string, reference?: Date | string): string {
 	return `${date.getUTCDate()} ${date.toLocaleString("en-US", { month: "short", timeZone: "UTC" })} ${time}`;
 }
 
+const MINUTE = 60_000;
+
+/** How far `at` is from `now`: "in 40m", "in 5h", "in 2d"; "3h overdue" once it passed. */
+export function untilText(at: Date | string, now: Date | string): string {
+	const minutes = Math.round((new Date(at).getTime() - new Date(now).getTime()) / MINUTE);
+	const span = Math.abs(minutes);
+	const text = span < 60 ? `${Math.max(1, span)}m` : span < 48 * 60 ? `${Math.round(span / 60)}h` : `${Math.round(span / (24 * 60))}d`;
+	return minutes >= 0 ? `in ${text}` : `${text} overdue`;
+}
+
+const PLANNED_NAME: Record<EscalationStepName, { label: string; heading: string }> = {
+	follow_up: { label: "Follow-up", heading: "Follow-up planned" },
+	next_contact: { label: "Escalate", heading: "Escalation planned" },
+	upstream: { label: "Escalate", heading: "Escalation planned" },
+	oversight: { label: "Oversight", heading: "Escalation to oversight bodies planned" },
+	exhausted: { label: "Review", heading: "Review by our team planned" },
+};
+
+/** A planned escalation step in words: a short `label` for a chip, its heading and condition, what it will do, and notes on its timing. */
+export type PlannedStepText = { label: string; heading: string; condition: string; sentence: string; notes: string[] };
+
+/**
+ * What a planned step will do and on what condition, for a route's provider
+ * (`organisation`) or, for a step of the whole site, without one. Every step
+ * runs only if the check right before it finds the site still serving the
+ * reported content.
+ */
+export function plannedStepText(step: PlannedEscalationStep, organisation?: string, reference?: Date | string): PlannedStepText {
+	const provider = organisation ?? "the provider";
+	const to = step.to ? `${step.to.name}${step.to.address !== step.to.name ? ` (${step.to.address})` : ""}` : undefined;
+	// A mailbox is written to; a provider's own follow-up channel ("Eranet's supplement form") is written through.
+	const via = step.to && step.to.address !== provider ? `${step.to.address.includes("@") ? " at" : " through"} ${step.to.address}` : "";
+	const sentence = {
+		follow_up: `We'll write to ${provider} again${via}, on its own report, with proof that the site still serves the reported content.`,
+		next_contact: `We'll report the site to ${to ?? "the next abuse contact"}, the next abuse contact ${provider} publishes for its network.`,
+		upstream: `We'll report the site to ${to ?? "the upstream provider"}, the upstream transit provider of ${provider}'s network, naming ${provider} as its customer.`,
+		oversight: "We'll draft reports to the bodies above the providers (the national CERT of the hosting country, the impersonated brand, a notice under the EU's Digital Services Act to an EU host) and prepare a complaint to ICANN about a gTLD registrar; our team reviews each before it goes out.",
+		exhausted: "Nothing automatic is left after this: our team decides what to do next, such as a criminal referral.",
+	}[step.step];
+	const condition = step.step === "oversight" ? "if no provider has acted" : step.step === "exhausted" ? "if the site is still up" : `if ${provider} hasn't acted`;
+	const notes = [
+		...(step.heldUntil ? [`On hold until ${shortUtc(step.heldUntil, reference)} UTC: our last check did not find the reported content.`] : []),
+		...(step.advanced ? ["Brought forward by our team."] : []),
+		"It happens only if a check right before then finds the site still serving the reported content.",
+	];
+	return { ...PLANNED_NAME[step.step], condition, sentence, notes };
+}
+
+/** The route's planned step as part of the "Next:" line. */
+function plannedLine(step: PlannedEscalationStep, route: SubmissionReportRoute, reference?: Date | string): string {
+	const followUp = step.step === "follow_up";
+	const what = followUp ? `Follow-up to ${route.organisation}` : `Escalation to ${step.to?.name ?? "the next contact"}`;
+	return step.due ? `${what} is due.` : `${what} at ${shortUtc(step.at, reference)} UTC if ${followUp ? "it" : route.organisation} hasn't acted.`;
+}
+
 /**
  * What happens next on a route that is not settled, from what is queued: the
  * next look for a lost report's receipt, our answer to a decision, the next
- * read of the provider's status; and what is known about a "no threat"
- * verdict. Undefined for a settled route: an action, or a report that never
- * went out.
+ * read of the provider's status, the next step of its escalation; and what
+ * is known about a "no threat" verdict. Undefined for a settled route: an
+ * action, or a report that never went out.
  */
 export function nextStep(route: SubmissionReportRoute, standing: RouteStanding, reference?: Date | string): string | undefined {
 	if (standing.bucket === "action_taken" || standing.bucket === "not_sent") return undefined;
@@ -224,6 +281,8 @@ export function nextStep(route: SubmissionReportRoute, standing: RouteStanding, 
 	if (sending && standing.bucket === "waiting") parts.push(`Sending at ${shortUtc(sending.at, reference)} UTC.`);
 	const check = next("status_check");
 	if (check) parts.push(`Next status check at ${shortUtc(check.at, reference)} UTC.`);
+	const planned = route.escalation[0];
+	if (planned) parts.push(plannedLine(planned, route, reference));
 	if (noThreat) parts.unshift(parts.length ? `${route.organisation}'s automatic scan found no threat.` : `Nothing more is planned: ${route.organisation}'s automatic scan found no threat.`);
 	if (standing.bucket === "waiting" && route.routeType === "email" && !parts.length && standing.label === "Awaiting reply") parts.push(`Nothing more is planned until ${route.organisation} replies; its reply is read automatically.`);
 	return parts.length ? parts.join(" ") : undefined;
@@ -236,7 +295,8 @@ export type TimelineEntry =
 	| { kind: "states"; states: Array<{ state: string; detail: string | null; at: Date }> }
 	| { kind: "message"; at: Date; inbound: boolean; title: string; subject: string | null; sentence?: string; highlight: boolean; text: CleanMailText | null; rawArtifactId: bigint | null; failed: boolean; decision: ProviderDecision["outcome"] | null }
 	| { kind: "not_answered"; at: Date; decision: string; explanation: string }
-	| { kind: "next_hop"; at: Date; routeId: bigint; organisation: string; role: SubmissionReportRoute["role"] };
+	| { kind: "next_hop"; at: Date; routeId: bigint; organisation: string; role: SubmissionReportRoute["role"] }
+	| { kind: "planned"; at: Date; step: PlannedEscalationStep; text: PlannedStepText };
 
 /** Who answered: the provider by name; a bounce or our own relay is not the provider. */
 function messageTitle(route: SubmissionReportRoute, message: SubmissionReportMessage): string {
@@ -250,7 +310,8 @@ function messageTitle(route: SubmissionReportRoute, message: SubmissionReportMes
  * A route's history as one timeline: what we sent, consecutive review-state
  * records merged into one line ("submitted 18:51 → accepted 19:05"), each
  * message by its key sentence (a decision highlighted), decisions we chose not
- * to answer, and the reports this route's answer led to ("next hop").
+ * to answer, the reports this route's answer led to ("next hop"), and last
+ * the route's next planned escalation step.
  */
 export function routeTimeline(route: SubmissionReportRoute, siblings: readonly SubmissionReportRoute[]): TimelineEntry[] {
 	const messages = [...route.messages].sort(bySent);
@@ -307,7 +368,12 @@ export function routeTimeline(route: SubmissionReportRoute, siblings: readonly S
 		entries.push({ kind: "next_hop", at: new Date(at), routeId: hop.id, organisation: hop.organisation, role: hop.role });
 	}
 	const time = (entry: TimelineEntry) => (entry.kind === "states" ? entry.states[0]!.at : entry.at).getTime();
-	return [entries[0]!, ...entries.slice(1).sort((a, b) => time(a) - time(b))];
+	const planned = route.escalation[0];
+	return [
+		entries[0]!,
+		...entries.slice(1).sort((a, b) => time(a) - time(b)),
+		...(planned ? [{ kind: "planned", at: new Date(planned.at), step: planned, text: plannedStepText(planned, route.organisation, reportedAt) } as const] : []),
+	];
 }
 
 /** How the case page names what a report is about. */

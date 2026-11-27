@@ -49,6 +49,17 @@ export function withRouteContact(provenance: JsonRecord, contact: JsonRecord, fa
 	return { ...found, ipRouteProvenance: contact, ...fallbacks };
 }
 
+/**
+ * The contacts a route can still move on to, in order: its fallbacks
+ * (`contacts` instead, when given) without the mailboxes `reached` already
+ * has a route to, each mailbox once.
+ */
+export function remainingContacts(provenance: JsonRecord, reached: ReadonlyArray<string | null>, contacts?: readonly JsonRecord[]): Array<JsonRecord & { email: string; source: string }> {
+	const existing = new Set(reached.flatMap((email) => (email ? [email.toLowerCase()] : [])));
+	return fallbackContactsOf({ fallbackContacts: contacts ?? provenance.fallbackContacts })
+		.filter((contact, index, all) => !existing.has(contact.email.toLowerCase()) && all.findIndex((other) => other.email.toLowerCase() === contact.email.toLowerCase()) === index);
+}
+
 /** The contacts to try after the route's own, in order. */
 export function fallbackContactsOf(provenance: JsonRecord): Array<JsonRecord & { email: string; source: string }> {
 	const list = Array.isArray(provenance.fallbackContacts) ? provenance.fallbackContacts : [];

@@ -4,7 +4,7 @@ import { isAttachmentRefusal } from "../mail/attachment_policy";
 import { getProviderSubmissionProvider, getProviderSubmissionProviderForMailbox } from "../providers";
 import { verifiedDomainsForEmailRoute } from "../providers/email";
 import { AbuseRepository } from "../repository";
-import { fallbackContactsOf, routeContact, withRouteContact } from "../resolver/contact_chain";
+import { remainingContacts, routeContact, withRouteContact, type fallbackContactsOf } from "../resolver/contact_chain";
 import { contactRoute } from "../resolver/routes";
 import { deliveryRetryDelayMs } from "./retry";
 import { queueRouteDelivery } from "./schedule";
@@ -238,12 +238,8 @@ export async function routeToContact(fromRouteId: bigint, options: {
 }): Promise<bigint | undefined> {
 	const from = await AbuseRepository.getRoute(fromRouteId);
 	if (!from || from.routeType !== "email") return undefined;
-	const existing = new Set((await AbuseRepository.listRoutes(from.reportId))
-		.filter((route) => route.targetId === from.targetId)
-		.map((route) => route.verifiedEmail?.toLowerCase())
-		.filter(Boolean));
-	const remaining = fallbackContactsOf({ fallbackContacts: options.contacts ?? from.resolverProvenance.fallbackContacts })
-		.filter((contact, index, all) => !existing.has(contact.email.toLowerCase()) && all.findIndex((other) => other.email.toLowerCase() === contact.email.toLowerCase()) === index);
+	const reached = (await AbuseRepository.listRoutes(from.reportId)).filter((route) => route.targetId === from.targetId).map((route) => route.verifiedEmail);
+	const remaining = remainingContacts(from.resolverProvenance, reached, options.contacts);
 	const next = remaining.find(options.choose ?? (() => true));
 	if (!next) return undefined;
 	const target = await AbuseRepository.getTarget(from.targetId);

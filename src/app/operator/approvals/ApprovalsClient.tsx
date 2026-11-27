@@ -9,9 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import type { DraftedMailView } from "@/lib/abuse/approval/drafted_mail";
-import type { OpenEscalationStep } from "@/lib/abuse/escalation/manual";
+import type { OpenEscalationStep, UpcomingEscalationStep } from "@/lib/abuse/escalation/manual";
 import { formatUtcDateTime } from "@/lib/util/date_time";
 import { DraftEditor, ErrorLine, useOperatorAction } from "../DraftedMail";
+import { UpcomingSteps } from "./UpcomingSteps";
 
 const KIND_LABEL: Record<string, string> = {
 	cert: "National CERT",
@@ -124,7 +125,7 @@ function DecisionCard({ step }: { step: OpenEscalationStep }) {
 	);
 }
 
-export function ApprovalsClient({ mails, steps }: { mails: DraftedMailView[]; steps: OpenEscalationStep[] }) {
+export function ApprovalsClient({ mails, steps, upcoming, now }: { mails: DraftedMailView[]; steps: OpenEscalationStep[]; upcoming: UpcomingEscalationStep[]; now: string }) {
 	return (
 		<div className="space-y-8">
 			{mails.length > 0 && (
@@ -139,6 +140,7 @@ export function ApprovalsClient({ mails, steps }: { mails: DraftedMailView[]; st
 					{steps.map((step) => (step.kind === "icann_complaint" ? <IcannCard key={step.eventId} step={step} /> : <DecisionCard key={step.eventId} step={step} />))}
 				</section>
 			)}
+			{upcoming.length > 0 && <UpcomingSteps steps={upcoming} now={now} />}
 		</div>
 	);
 }
