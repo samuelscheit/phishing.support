@@ -174,7 +174,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 								{retried}
 							</span>
 						) : null}
-						<SubmissionStatus status={submission.status} reportedAs={caseReportedAs(submission.data)} />
+						<SubmissionStatus status={submission.status} reportedAs={caseReportedAs(submission.data)} queue={submission.visitQueue} />
 					</div>
 				</div>
 			</header>
@@ -189,7 +189,7 @@ export function SubmissionPageClient({ id, initialSubmission, locale }: { id: st
 					{routes.length > 1 ? <RouteSelector routes={routes} selected={route} submittedSite={targetName} onSelect={setChosenRoute} /> : null}
 					{website ? (
 						// Keyed by route: a newly picked route opens on its own judged page, not the index picked on another.
-						<SiteVisitBrowser key={route} running={isRunning} pages={visitPages} initialPage={routeAnalyzed?.page.step} live={liveVisit} fallbackUrl={website.url ?? ""} openAction={openSite} />
+						<SiteVisitBrowser key={route} running={isRunning} queued={statusKey === "queued"} pages={visitPages} initialPage={routeAnalyzed?.page.step} live={liveVisit} fallbackUrl={website.url ?? ""} openAction={openSite} />
 					) : null}
 					{submission.data.kind === "email" && <EmailFacts email={submission.data.email} />}
 					<Tabs value={tab} onValueChange={setTab} className="w-full min-w-0">

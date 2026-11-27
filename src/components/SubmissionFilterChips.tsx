@@ -5,7 +5,7 @@ import { DEFAULT_SUBMISSION_FILTERS, SUBMISSION_FILTER_NAMES, type SubmissionFil
 
 /** Each chip in the colors of the status badge its submissions show. */
 const CHIPS: Record<SubmissionFilter, { label: string; on: string; dot: string }> = {
-	running: { label: "Running", on: "border-blue-200 bg-blue-50 text-blue-700", dot: "bg-blue-500 motion-safe:animate-pulse" },
+	running: { label: "In progress", on: "border-blue-200 bg-blue-50 text-blue-700", dot: "bg-blue-500 motion-safe:animate-pulse" },
 	reported: { label: "Reported", on: "border-red-200 bg-red-50 text-red-700", dot: "bg-red-500" },
 	no_threat: { label: "No threat found", on: "border-emerald-200 bg-emerald-50 text-emerald-700", dot: "bg-emerald-500" },
 	failed: { label: "Failed", on: "border-zinc-300 bg-zinc-100 text-zinc-700", dot: "bg-zinc-500" },

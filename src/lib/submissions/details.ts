@@ -7,6 +7,7 @@ import type { AnalysisRun, Artifact, Submission } from "@/lib/db/schema";
 import { withoutBackendSecrets } from "@/lib/exfiltration/secrets";
 import { publicReporterHeaders } from "@/lib/http/reporter_headers";
 import { getReportsForSubmission, type SubmissionReport } from "./abuse_details";
+import { websiteVisitQueueState, type VisitQueueState } from "@/lib/website/visit_queue/position";
 
 export type { SubmissionReport, SubmissionReportArtifact, SubmissionReportMessage, SubmissionReportRoute } from "./abuse_details";
 
@@ -26,6 +27,8 @@ export type SubmissionDetail = Omit<Submission, "reporterIp"> & {
 	campaigns: Array<{ id: string; siteCount: number; host: string }>;
 	/** How often the case was analyzed again, by anyone or automatically, and when last. */
 	retries: { count: number; lastAt: Date | null };
+	/** Where a queued case's visit stands in the visit queue. */
+	visitQueue?: VisitQueueState;
 };
 
 async function campaignsOf(submissionId: bigint): Promise<SubmissionDetail["campaigns"]> {
@@ -56,12 +59,13 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 	if (!stored) return undefined;
 	const { reporterIp: _reporterIp, ...submission } = stored;
 
-	const [analysisRuns, reports, artifacts, campaigns, retries] = await Promise.all([
+	const [analysisRuns, reports, artifacts, campaigns, retries, visitQueue] = await Promise.all([
 		AnalysisRunsEntity.listForSubmission(submissionId),
 		getReportsForSubmission(submissionId),
 		ArtifactsEntity.listForSubmission(submissionId),
 		campaignsOf(submissionId),
 		SubmissionRetriesEntity.summaryForSubmission(submissionId),
+		submission.status === "queued" ? websiteVisitQueueState(submissionId) : undefined,
 	]);
 	return withoutBackendSecrets({
 		...submission,
@@ -71,5 +75,6 @@ export async function getSubmissionDetails(id: string): Promise<SubmissionDetail
 		artifacts,
 		campaigns,
 		retries,
+		...(visitQueue ? { visitQueue } : {}),
 	});
 }

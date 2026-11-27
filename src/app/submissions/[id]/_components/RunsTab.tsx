@@ -1,6 +1,30 @@
 import { AnalysisLogs } from "@/components/AnalysisLogs";
 import type { SubmissionDetail } from "@/lib/submissions/details";
 import { cn } from "@/lib/util/cn";
+import { formatUtcDateTime } from "@/lib/util/date_time";
+import { Clock } from "lucide-react";
+import Link from "next/link";
+
+/** A case waiting for its visit: where it stands, so the reader knows it is not stuck. */
+function QueuedVisit({ queue }: { queue: SubmissionDetail["visitQueue"] }) {
+	const detail = queue?.kind === "queued"
+		? queue.position === 1 ? "It is next in line for a browser." : `${queue.position - 1} ${queue.position === 2 ? "visit is" : "visits are"} ahead of it; every reporter's sites take turns.`
+		: queue?.kind === "scheduled"
+			? `It is due at ${formatUtcDateTime(queue.notBefore) ?? queue.notBefore}.`
+			: undefined;
+	return (
+		<div className="flex items-start gap-3 rounded-lg border border-dashed px-4 py-6 text-sm text-muted-foreground">
+			<Clock className="mt-0.5 h-4 w-4 shrink-0" />
+			<p>
+				The site is queued for its visit.{" "}
+				{queue?.kind === "waiting" ? (
+					<>It waits for the visit of <Link className="underline underline-offset-2" href={`/submissions/${queue.forSubmissionId}`}>a site of the same domain</Link> to finish first.</>
+				) : detail}{" "}
+				This page updates by itself.
+			</p>
+		</div>
+	);
+}
 
 export function RunsTab({ submission, runs, isRunning }: { submission: SubmissionDetail; runs: SubmissionDetail["analysisRuns"]; isRunning: boolean }) {
 	if (runs.length > 0) {
@@ -19,5 +43,6 @@ export function RunsTab({ submission, runs, isRunning }: { submission: Submissio
 		));
 	}
 	if (isRunning) return <AnalysisLogs streamId={submission.id} status={submission.status} progressOnly />;
+	if (submission.status === "queued") return <QueuedVisit queue={submission.visitQueue} />;
 	return <div className="text-center py-10 text-muted-foreground">No analysis runs yet.</div>;
 }
