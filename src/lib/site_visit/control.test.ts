@@ -361,6 +361,9 @@ describe("who drives a live visit", () => {
 		await resumed;
 		expect(control.steering.turn().aborted).toBe(false);
 		expect(control.take(BOB)).toMatchObject({ ok: true });
+		// Ending the visit leaves steering.turn() un-aborted so an agent winding down never spins on turn().aborted.
+		await control.end();
+		expect(control.steering.turn().aborted).toBe(false);
 	});
 
 	test("the idle clock starts once the agent let go, not while it finished its action", async () => {

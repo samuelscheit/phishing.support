@@ -180,7 +180,7 @@ export class VisitControl {
 		// A turn that starts while a person takes over is over before it began.
 		turn: () => {
 			this.#turn = new AbortController();
-			if (this.#mode !== "agent") this.#turn.abort();
+			if (this.holding) this.#turn.abort();
 			return this.#turn.signal;
 		},
 	};

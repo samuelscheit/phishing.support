@@ -23,13 +23,14 @@ async function isBlankScreenshot(png: Uint8Array): Promise<boolean> {
  * That is the page, not a broken browser: it is captured without a
  * screenshot, and its MHTML and text remain the evidence.
  */
-const UNPICTURABLE_PAGE = /Cannot take screenshot with 0 (?:width|height)/i;
+const UNPICTURABLE_PAGE = /Cannot take screenshot with 0 (?:width|height)|Unable to capture screenshot/i;
 /**
  * A page too tall for one picture: Chromium refuses a full-page screenshot
- * past its texture limit (a tarpit streaming visible filler, an endless feed).
+ * past its texture limit (a tarpit streaming visible filler, an endless feed),
+ * or cannot composite a full-page capture ("Unable to capture screenshot").
  * What the visitor sees of it, the viewport, is pictured instead.
  */
-const PAGE_TOO_LARGE = /Page is too large/i;
+const PAGE_TOO_LARGE = /Page is too large|Unable to capture screenshot/i;
 /** How long one screenshot may take before the page counts as one that cannot be pictured. */
 const SCREENSHOT_TIMEOUT_MS = 20_000;
 

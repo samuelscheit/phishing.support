@@ -8,7 +8,8 @@ import type { ChatModel, ChatRequest } from "../browser/task/agent";
 import { chromiumAvailable, launchTestChromium, refIn, ScriptedModel, StalledModel, type ScriptedTurn } from "../browser/task/test_helpers";
 import { stepActions, taskAgentVisit, type VisitAgent } from "./agent";
 import { VISIT_MAX_STEPS } from "./visit_task";
-import type { SiteVisitLiveEvent } from "./visit";
+import { ClipboardRecorder } from "../browser/clipboard";
+import { startSiteRecording, type SiteVisitLiveEvent } from "./visit";
 import { closeVisitControl, openVisitControl, type VisitControl } from "./control";
 import type { LiveFrame } from "./screen";
 
@@ -571,6 +572,71 @@ describe.skipIf(!chromiumAvailable)("a site visit, in a real browser, walked by 
 			server.stop(true);
 		}
 	}, 60_000);
+
+	test("a snapshot error mid-walk aborts the running agent before ending control, so runTask never spins", async () => {
+		const { server, url } = serveKit();
+		const canaries = createExfiltrationCanaries();
+		const control = openVisitControl("visit-snapshot-throw", () => undefined, { mode: "loading" });
+		let agentSignal: AbortSignal | undefined;
+		let iterations = 0;
+		const agent: VisitAgent = async (run) => {
+			agentSignal = run.signal;
+			// Navigate the tab so the poll detects a page change and calls snapshot(), which throws.
+			await fetch(`${url}collect`, { method: "POST", body: "a=1" }).catch(() => undefined);
+			// Simulate runTask's steering loop: checkpoint -> turn -> wait on signal/turn.
+			while (!run.signal.aborted) {
+				iterations += 1;
+				if (iterations > 50) throw new Error("infinite steering loop");
+				await run.steering?.checkpoint(run.signal);
+				const turn = run.steering?.turn();
+				if (turn?.aborted && !run.signal.aborted) continue;
+				await new Promise<void>((resolve) => {
+					const onAbort = () => resolve();
+					run.signal.addEventListener("abort", onAbort, { once: true });
+					setTimeout(resolve, 100);
+				});
+			}
+			return { state: "failed", reason: "Aborted." };
+		};
+		let browser;
+		try {
+			browser = await launchTestChromium();
+			const page = await browser.newPage();
+			const recording = await startSiteRecording({
+				browser,
+				page,
+				userAgentOverride: { userAgent: "test" },
+				clipboard: new ClipboardRecorder(),
+			});
+			await page.goto(url, { waitUntil: "domcontentloaded" });
+			let snapshotCalls = 0;
+			const walkPromise = recording.walk({
+				agentAddress: browser.wsEndpoint(),
+				url,
+				canaries,
+				agent,
+				control,
+				pollMs: 50,
+				stepQuietMs: 50,
+				snapshot: async () => {
+					snapshotCalls += 1;
+					throw new Error("Protocol error (Page.captureScreenshot): Unable to capture screenshot");
+				},
+			});
+			// Change page DOM text so recordStep triggers snapshot() while agent is still alive.
+			await page.evaluate(() => { document.body.innerText = "changed step"; });
+			await expect(walkPromise).rejects.toThrow("Unable to capture screenshot");
+			expect(snapshotCalls).toBe(1);
+			expect(agentSignal?.aborted).toBe(true);
+			expect(control.mode).toBe("ended");
+			expect(iterations).toBeLessThan(50);
+			await recording.stop();
+		} finally {
+			await closeVisitControl(control);
+			await browser?.close();
+			server.stop(true);
+		}
+	}, 30_000);
 });
 
 describe.skipIf(!chromiumAvailable)("the capture's browser around a visit, in a real browser", () => {

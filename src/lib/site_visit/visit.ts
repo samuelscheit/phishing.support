@@ -183,12 +183,14 @@ async function walkSite<Step>(params: SiteWalkParams<Step> & { page: Page; tabs:
 	// The visit's clock stops while a person drives; their own turns are limited by the control.
 	const clock = pausableTimeout(params.budgetMs ?? VISIT_BUDGET_MS);
 	const budget = clock.signal;
-	const stopped = params.signal ? AbortSignal.any([budget, params.signal]) : budget;
+	const walkAbort = new AbortController();
+	const stopped = AbortSignal.any([budget, walkAbort.signal, ...(params.signal ? [params.signal] : [])]);
 
 	const startedAt = new Date();
 	const steps: SiteVisitRecording<Step>["steps"] = [];
 	const actions: VisitAgentAction[] = [];
 	const agentOutcome: SiteVisitAgentOutcome = { outcome: "failed", actions };
+	let walk: Promise<VisitAgentState> | undefined;
 	try {
 		let recorded = await pageState(page);
 		let pending: { url: string; text: string; since: number } | undefined;
@@ -236,7 +238,6 @@ async function walkSite<Step>(params: SiteWalkParams<Step> & { page: Page; tabs:
 			announcedDownloads = downloads.files().length;
 		};
 
-		let walk: Promise<VisitAgentState> | undefined;
 		try {
 			const task = buildSiteVisitTask(params.url, params.canaries, undefined, params.instructions);
 			walk = agent({
@@ -296,7 +297,11 @@ async function walkSite<Step>(params: SiteWalkParams<Step> & { page: Page; tabs:
 			agent: agentOutcome,
 		};
 	} finally {
+		// Any throw out of the walk (such as a broken snapshot) must stop the background agent
+		// before the control ends and before the budget timer is cleared.
+		walkAbort.abort();
 		clock.clear();
 		await control?.end();
+		if (walk) await Promise.race([walk.catch(() => undefined), sleep(5_000)]);
 	}
 }
