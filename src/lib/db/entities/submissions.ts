@@ -18,6 +18,7 @@ export class SubmissionsEntity {
         status?: SubmissionStatus;
         info?: string;
         id?: bigint;
+        siteGroup?: string | null;
     } & ReporterMetadata) {
         const db = await getDb();
         const id = params.id ?? generateId();
@@ -68,6 +69,7 @@ export class SubmissionsEntity {
                     reporterIp: params.reporterIp,
                     reporterCountry: params.reporterCountry,
                     reporterHeaders: params.reporterHeaders,
+                    siteGroup: params.siteGroup,
                     updatedAt: new Date(),
                 },
             ])

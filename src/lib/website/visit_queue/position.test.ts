@@ -40,7 +40,7 @@ describe("fairSharePosition", () => {
 describe("websiteVisitQueueState", () => {
 	test("reports the place in line, the due time of a scheduled retry, and nothing once the visit started", async () => {
 		const flood = [];
-		for (let index = 0; index < 3; index++) flood.push(await createWebsiteSubmission({ url: `https://h${index}.flood.example/`, reporterIp: "5.189.203.86" }));
+		for (let index = 0; index < 3; index++) flood.push(await createWebsiteSubmission({ url: `https://flood-${index}.example/`, reporterIp: "5.189.203.86" }));
 		const other = await createWebsiteSubmission({ url: "https://other.example/", reporterIp: "192.0.2.1" });
 		expect(await websiteVisitQueueState(other.id)).toEqual({ kind: "queued", position: 2 });
 		expect(await websiteVisitQueueState(flood[2]!.id)).toEqual({ kind: "queued", position: 4 });
@@ -54,10 +54,9 @@ describe("websiteVisitQueueState", () => {
 		expect(await websiteVisitQueueState(404n)).toBeUndefined();
 	});
 
-	test("a job whose serial key another case's visit holds says which case it waits for", async () => {
+	test("a host whose site group is being visited says which case it waits for", async () => {
 		const first = await createWebsiteSubmission({ url: "https://a.slon10.to/" });
 		const second = await createWebsiteSubmission({ url: "https://b.slon10.to/" });
-		(await getDb()).update(jobs).set({ serialKey: "site:slon10.to" }).run();
 		await claimNextJob("worker", 60_000, { jobTypes: ["visit_website"] });
 		expect(await websiteVisitQueueState(second.id)).toEqual({ kind: "waiting", forSubmissionId: first.id.toString() });
 	});

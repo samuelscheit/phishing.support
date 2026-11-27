@@ -103,6 +103,12 @@ export const submissions = sqliteTable(
 		reporterIp: text("reporter_ip"),
 		reporterCountry: text("reporter_country"),
 		reporterHeaders: text("reporter_headers", { mode: "json" }).$type<Record<string, string>>(),
+		/**
+		 * A website case's site group (`siteGroupOf`): its registrable domain, or a
+		 * platform tenant or address of its own. Siblings of one group are visited
+		 * one at a time and collected once one of them is reported.
+		 */
+		siteGroup: text("site_group"),
 		createdAt: sqliteTimestamp("created_at")
 			.notNull()
 			.default(sql`(unixepoch() * 1000)`),
@@ -115,6 +121,7 @@ export const submissions = sqliteTable(
 		index("submissions_kind_received_at_idx").on(table.kind),
 		index("submissions_status_received_at_idx").on(table.status),
 		index("submissions_source_idx").on(table.source),
+		index("submissions_site_group_status_idx").on(table.siteGroup, table.status),
 	]
 );
 

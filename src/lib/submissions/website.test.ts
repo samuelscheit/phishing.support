@@ -267,7 +267,8 @@ describe("createWebsiteSubmission", () => {
 		expect(created.status).toBe("queued");
 		expect((await SubmissionsEntity.get(created.id))?.status).toBe("queued");
 		const [job] = await queuedVisits();
-		expect(job).toMatchObject({ jobType: "visit_website", fairKey: "ip:5.189.203.86", serialKey: `visit:${created.id}`, reportId: null, payload: { submissionId: created.id.toString(), trigger: "initial" } });
+		expect(job).toMatchObject({ jobType: "visit_website", fairKey: "ip:5.189.203.86", serialKey: "site:kit.example", reportId: null, payload: { submissionId: created.id.toString(), trigger: "initial" } });
+		expect((await SubmissionsEntity.get(created.id))?.siteGroup).toBe("kit.example");
 
 		expect(await runQueuedVisits(async (options) => started.push(options))).toEqual([created.id]);
 		expect(started).toEqual([expect.objectContaining({ submissionId: created.id, url: "https://kit.example/login", reporterIp: "5.189.203.86", instructions: { text: "Use the code 1234." } })]);

@@ -51,9 +51,13 @@ export function isVisitPending(status: SubmissionStatus | undefined): boolean {
 	return status === "queued" || status === "running";
 }
 
-/** At most one visit of a case runs at a time. */
-export function visitSerialKey(submissionId: bigint): string {
-	return `visit:${submissionId.toString()}`;
+/**
+ * One visit of a site group runs at a time: the hosts of one registrable
+ * domain are visited one after another, never side by side (a case without a
+ * group, one at a time by itself).
+ */
+export function visitSerialKey(submission: Pick<Submission, "id" | "siteGroup">): string {
+	return submission.siteGroup ? `site:${submission.siteGroup}` : `visit:${submission.id.toString()}`;
 }
 
 /**
@@ -87,7 +91,7 @@ export async function fairKeyOfCaseId(submissionId: bigint | null | undefined): 
  * retry takes the place of a scheduled automatic one, at once.
  */
 export async function enqueueWebsiteVisit(params: {
-	submission: Pick<Submission, "id" | "reporterIp" | "source">;
+	submission: Pick<Submission, "id" | "reporterIp" | "source" | "siteGroup">;
 	trigger: VisitTrigger;
 	fromStatus?: SubmissionStatus;
 	/** Not before then (an automatic retry's backoff). */
@@ -106,7 +110,7 @@ export async function enqueueWebsiteVisit(params: {
 		dedupeKey: visitJobKey(submission.id),
 		payload,
 		fairKey: params.fairKey ?? await fairKeyOfCase(submission),
-		serialKey: visitSerialKey(submission.id),
+		serialKey: visitSerialKey(submission),
 		nextAttemptAt: params.notBefore,
 	});
 }

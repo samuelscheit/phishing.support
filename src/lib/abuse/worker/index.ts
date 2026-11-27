@@ -24,6 +24,7 @@ import { sleep } from "../../util/sleep";
 import { isExternalJob, JOB_HANDLERS, JOB_LANES, JOB_POLICY, jobTimeoutMs, laneFilter, type JobLane } from "./jobs";
 import { JOB_WAIT_LIMIT_MS, jobWaitOf, MAX_RETRIES, retryDelayMs } from "./retry";
 import { ensureWebsiteVisitJobs } from "../../website/visit_queue/run";
+import { backfillSiteGroups } from "../../website/visit_queue/site_group";
 
 const RETRY_EXHAUSTED: JobGiveUp = { routeStatus: "failed", reason: "retry_exhausted" };
 
@@ -169,6 +170,7 @@ export class AbuseWorker {
 		await ensureLivenessChecks();
 		await ensureRelayRefusalResends();
 		// Website cases waiting for a visit get their job: the queue resumes after a restart.
+		await backfillSiteGroups();
 		await ensureWebsiteVisitJobs();
 		// Every confirmed site is linked again once whenever the campaign rules change.
 		await enqueueRulesSweep();

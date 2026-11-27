@@ -6,6 +6,7 @@ import type { ReporterMetadata } from "@/lib/http/reporter_headers";
 import { websiteSite } from "@/lib/website/info/site";
 import type { SubmissionStatus } from "@/lib/db/schema";
 import { enqueueWebsiteVisit, REPORTER_MHTML_NAME } from "@/lib/website/visit_queue/queue";
+import { caseSiteGroup } from "@/lib/website/visit_queue/site_group";
 import { claimRetry, getRetryableSubmission, SubmissionRetryError } from "./retry";
 import type { ReporterInstructions } from "./instructions";
 
@@ -65,6 +66,7 @@ export async function createWebsiteSubmission(options: WebsiteSubmissionOptions)
 	const url = websiteSubmissionUrl(options.url);
 	const { source, visit, rereport, fairKey, mhtmlSnapshot, instructions, reporterIp, reporterCountry, reporterHeaders } = options;
 	const caseSource = source || options.url;
+	const siteGroup = caseSiteGroup(url) ?? null;
 
 	const existingId = await SubmissionsEntity.create({
 		kind: "website",
@@ -75,6 +77,7 @@ export async function createWebsiteSubmission(options: WebsiteSubmissionOptions)
 		reporterIp,
 		reporterCountry,
 		reporterHeaders,
+		siteGroup,
 		id,
 	});
 	if (existingId !== id) {
@@ -85,7 +88,7 @@ export async function createWebsiteSubmission(options: WebsiteSubmissionOptions)
 	if (mhtmlSnapshot?.byteLength) {
 		await ArtifactsEntity.saveBuffer({ submissionId: id, kind: "mhtml", name: REPORTER_MHTML_NAME, mimeType: "multipart/related", buffer: mhtmlSnapshot });
 	}
-	await enqueueWebsiteVisit({ submission: { id, reporterIp: reporterIp ?? null, source: caseSource }, trigger: "initial", fairKey });
+	await enqueueWebsiteVisit({ submission: { id, reporterIp: reporterIp ?? null, source: caseSource, siteGroup }, trigger: "initial", fairKey });
 	return { id, status: "queued" };
 }
 

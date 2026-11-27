@@ -1,7 +1,7 @@
 import { parse } from "tldts";
 
 import { registrableDomain } from "../abuse/security/security";
-import { hasPathTenants } from "../website/info/site";
+import { hasPathTenants, websiteSite } from "../website/info/site";
 import { canonicalHost } from "./url";
 
 /**
@@ -65,4 +65,22 @@ export function hostRegistration(hostname: string): HostRegistration | undefined
 	if (!domain) return undefined;
 	const { site, platform } = siteOf(host);
 	return platform ? { platformTenant: site } : { domain };
+}
+
+/**
+ * The group of sites one registration answers for, which one takedown at the
+ * registrar ends: a host's registrable domain (every subdomain of slon10.to
+ * is slon10.to's). A platform's tenant (kit.pages.dev, a sites.google.com
+ * site, kit.weebly.com) is a group of its own, its own subdomains with it,
+ * and so is an IP or a name under no public suffix. `domain` is set only for
+ * a registrable domain.
+ */
+export type SiteGroup = { key: string; domain?: string };
+
+export function siteGroupOf(url: string | URL): SiteGroup {
+	const parsed = typeof url === "string" ? new URL(url) : url;
+	const registration = hostRegistration(parsed.hostname);
+	if (!registration) return { key: websiteSite(parsed) };
+	if ("domain" in registration) return { key: registration.domain, domain: registration.domain };
+	return { key: hasPathTenants(canonicalHost(parsed.hostname)) ? websiteSite(parsed) : registration.platformTenant };
 }

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { claimNextJob } from "@/lib/abuse/persistence/jobs";
+import { and, eq } from "drizzle-orm";
+
+import { claimNextJob, completeJob } from "@/lib/abuse/persistence/jobs";
+import { jobs } from "@/lib/abuse/schema";
+import { getDb } from "@/lib/db";
+import { backfillSiteGroups } from "./site_group";
 import { laneFilter } from "@/lib/abuse/worker/jobs";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { useTemporaryDatabase } from "@/lib/db/test_helpers";
@@ -25,12 +30,42 @@ describe("the visit lane", () => {
 		const lane = laneFilter("visit", 4);
 		expect(lane).toEqual({ jobTypes: ["visit_website"], fairShare: { perKeyLimit: 3 } });
 		expect(laneFilter("visit", 1).fairShare).toEqual({ perKeyLimit: 1 });
-		for (let index = 0; index < 100; index++) await createWebsiteSubmission({ url: `https://h${index}.slon10.to/`, reporterIp: "5.189.203.86" });
+		for (let index = 0; index < 100; index++) await createWebsiteSubmission({ url: `https://kit-${index}.example/`, reporterIp: "5.189.203.86" });
 		const flood = await Promise.all([1, 2, 3, 4].map(() => claimNextJob("worker", 60_000, lane)));
 		expect(flood.map((job) => job?.fairKey)).toEqual(["ip:5.189.203.86", "ip:5.189.203.86", "ip:5.189.203.86", undefined]);
 		// Another reporter's URL, submitted after the 100, takes the free slot at once.
 		const other = await createWebsiteSubmission({ url: "https://other.example/", reporterIp: "192.0.2.1" });
 		expect((await claimNextJob("worker", 60_000, lane))?.payload).toEqual({ submissionId: other.id.toString(), trigger: "initial" });
+	});
+});
+
+describe("the visits of one site group", () => {
+	test("run one after another, never side by side, while other groups go on", async () => {
+		const lane = laneFilter("visit", 4);
+		const hosts = [];
+		for (const host of ["a.slon10.to", "b.slon10.to", "c.b.slon10.to"]) hosts.push(await createWebsiteSubmission({ url: `https://${host}/`, reporterIp: "5.189.203.86" }));
+		const tenantA = await createWebsiteSubmission({ url: "https://one.pages.dev/", reporterIp: "5.189.203.86" });
+		const tenantB = await createWebsiteSubmission({ url: "https://two.pages.dev/", reporterIp: "192.0.2.1" });
+		const claimed = async () => String((await claimNextJob("worker", 60_000, lane))?.payload?.submissionId ?? "none");
+		expect([await claimed(), await claimed(), await claimed(), await claimed()]).toEqual([hosts[0]!.id.toString(), tenantB.id.toString(), tenantA.id.toString(), "none"]);
+		expect((await queuedVisits()).map((job) => job.serialKey)).toEqual(["site:slon10.to", "site:slon10.to"]);
+		// The group's visit ends; the next host of the group is visited.
+		const [running] = (await getDb()).select().from(jobs).where(and(eq(jobs.status, "running"), eq(jobs.serialKey, "site:slon10.to"))).all();
+		await completeJob(running!.id, "worker");
+		expect(await claimed()).toBe(hosts[1]!.id.toString());
+		expect(await claimed()).toBe("none");
+	});
+});
+
+describe("backfillSiteGroups", () => {
+	test("gives older website cases their group once, and leaves emails and unparsable URLs alone", async () => {
+		await website(1n, "reported");
+		await SubmissionsEntity.create({ id: 2n, kind: "website", data: { kind: "website", website: { url: "https://x.y.slon10.to/a" } }, dedupeKey: "website-x.y.slon10.to", status: "failed" });
+		await SubmissionsEntity.create({ id: 3n, kind: "website", data: { kind: "website", website: { url: "" } }, dedupeKey: "website-broken", status: "failed" });
+		await SubmissionsEntity.create({ id: 4n, kind: "email", data: { kind: "email" }, dedupeKey: "email-4", status: "reported" });
+		expect(await backfillSiteGroups()).toBe(2);
+		expect(await backfillSiteGroups()).toBe(0);
+		expect(await Promise.all([1n, 2n, 3n, 4n].map(async (id) => (await SubmissionsEntity.get(id))?.siteGroup))).toEqual(["case-1.example", "slon10.to", null, null]);
 	});
 });
 
