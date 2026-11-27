@@ -5,7 +5,7 @@ import { instructionsDraft, ReporterInstructionsFields, ReporterInstructionsView
 import type { ReporterInstructions } from "@/lib/submissions/instructions";
 import { Button } from "@/components/ui/button";
 import { describeDataEntryField } from "@/lib/website/types";
-import { routeLabel, verdictLabelOf, type ConfirmedSite, type DeceptiveRoute } from "./helpers";
+import { findingLabel, routeLabel, type ConfirmedSite, type DeceptiveRoute } from "./helpers";
 import { hostOf } from "@/lib/network/url";
 import { cn } from "@/lib/util/cn";
 import type { SubmissionReport } from "@/lib/submissions/details";
@@ -33,7 +33,7 @@ function SiteVerdict({ confirmed: { site, assessment, routes }, named, onShowRou
 		<div>
 			<div className="flex items-center gap-2 text-sm font-semibold text-destructive">
 				<ShieldAlert className="h-4 w-4 shrink-0" />
-				{verdictLabelOf(assessment) ?? "Phishing confirmed"}
+				{(assessment ? findingLabel(assessment) : "Phishing confirmed")}
 			</div>
 			{named || onShowRoute ? (
 				<div className="mt-1 text-xs">

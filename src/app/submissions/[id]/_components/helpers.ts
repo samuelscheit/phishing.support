@@ -117,17 +117,8 @@ export function visitorLabel(visitor: WebsiteRouteVisitor): string {
 	return [visitor.browser, visitor.network].filter(Boolean).join(" · ");
 }
 
-/** The headline for the page a finding rests on, in the sidebar verdict. */
-export function verdictLabelOf(assessment: SiteAssessment | undefined): string | undefined {
-	if (assessment?.finding === "phishing") return assessment.phishingBasis ? `Phishing: ${PHISHING_BASIS_LABELS[assessment.phishingBasis]}` : "Phishing";
-	if (assessment?.finding === "malware") {
-		return assessment.hiddenFrame ? "Malware: drive-by exploit in a hidden frame" : assessment.offeredDownload ? "Malware: the file it offers" : assessment.clipboardWrite ? "Malware: the command its copy button hands out" : "Malware distribution";
-	}
-	return undefined;
-}
-
-/** The per-hop finding line of the navigation tab. */
-export function hopFindingLabel(assessment: SiteAssessment | undefined): string | undefined {
+/** What a page's assessment found, in one line: the verdict headline and each hop of the navigation tab. */
+export function findingLabel(assessment: SiteAssessment | undefined): string | undefined {
 	if (!assessment) return undefined;
 	switch (assessment.finding) {
 		case "phishing": return assessment.phishingBasis ? `Phishing — ${PHISHING_BASIS_LABELS[assessment.phishingBasis]}` : WEBSITE_FINDING_LABELS.phishing;

@@ -33,7 +33,7 @@ export function SubmissionForm({ defaultTab = "email" }: { defaultTab?: "email" 
 
 			const el = document.activeElement as HTMLElement | null;
 			const tag = el?.tagName?.toLowerCase();
-			const isTypingTarget = tag === "input" || tag === "textarea" || (el as any)?.isContentEditable;
+			const isTypingTarget = tag === "input" || tag === "textarea" || el?.isContentEditable;
 			if (isTypingTarget) return;
 
 			setShowWebsiteSnapshotInput((v) => !v);

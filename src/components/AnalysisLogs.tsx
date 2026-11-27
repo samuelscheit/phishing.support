@@ -27,12 +27,12 @@ export function AnalysisLogs({
 	progressStreamId?: string | bigint;
 	/** Render only high-level steps for the short period before a run is created. */
 	progressOnly?: boolean;
-	output?: Array<OutputItem>;
+	output?: Array<OutputItem> | null;
 	status?: string;
 	className?: string;
 }) {
 	const bottomRef = useRef<HTMLDivElement>(null);
-	const outputText = useMemo(() => extractOutputText(output), [output]);
+	const outputText = useMemo(() => extractOutputText(output ?? undefined), [output]);
 	const state = useAnalysisStream({ streamId, progressStreamId, progressOnly, outputText, status });
 
 	useEffect(() => {

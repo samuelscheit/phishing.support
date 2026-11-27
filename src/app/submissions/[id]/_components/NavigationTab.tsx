@@ -7,7 +7,7 @@ import { chainHopBodyFileName, isPageHop, latestArtifactNamed, routePage, websit
 import type { WebsiteRoute } from "@/lib/website/types";
 import type { SubmissionDetail } from "@/lib/submissions/details";
 import { cn } from "@/lib/util/cn";
-import { assessmentsByHop, hopFindingLabel, siteRuns, type NavigationHop, type SiteAssessment, type SiteRun, type WebsiteData } from "./helpers";
+import { assessmentsByHop, findingLabel, siteRuns, type NavigationHop, type SiteAssessment, type SiteRun, type WebsiteData } from "./helpers";
 
 type Artifacts = SubmissionDetail["artifacts"];
 
@@ -99,7 +99,7 @@ function HopItem({ route, hop, hops, headlineHopIndex, website, artifacts }: { r
 function SiteVerdict({ run, assessment }: { run: SiteRun; assessment: SiteAssessment | undefined }) {
 	const finding = assessment?.finding;
 	const reportable = finding === "phishing" || finding === "malware";
-	const label = hopFindingLabel(assessment);
+	const label = findingLabel(assessment);
 	const judgedHere = assessment?.judgedHopIndex !== undefined && run.hops.some((hop) => hop.index === assessment.judgedHopIndex);
 	// A site that showed no page of its own; a case judged before verdicts named their page still shows its pages.
 	const passedThrough = !run.hops.some(isPageHop);
